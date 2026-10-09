@@ -15,6 +15,14 @@ test('manifest links match generated script and metadata version',()=>{
  const info=JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'),'utf8'));
  assert.equal(info.sourceSha256,crypto.createHash('sha256').update(code).digest('hex'));
 });
+test('collection contains an independent versioned Souju widget and script',()=>{
+ const fwd=JSON.parse(fs.readFileSync(path.join(release.directory,'yqk.fwd'),'utf8'));
+ assert.equal(fwd.widgets.length,2);const widget=fwd.widgets[1];assert.equal(widget.id,'joeshu.souju');
+ assert.equal(widget.url,'https://widgets.test.org/souju-'+widget.version+'.js');
+ assert.equal(fs.readFileSync(path.join(release.directory,'souju-'+widget.version+'.js'),'utf8'),fs.readFileSync(path.join(__dirname,'souju.js'),'utf8'));
+ const headers=JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers;
+ assert(headers.some(h=>h.source==='/souju-'+widget.version+'.js'));
+});
 test('subdirectory URL is preserved without duplicated slash',()=>{
  const r=build('https://widgets.test.org/Resource/Yqk/',path.join(root,'sub'));
  assert.equal(r.subscriptionUrl,'https://widgets.test.org/Resource/Yqk/yqk.fwd');

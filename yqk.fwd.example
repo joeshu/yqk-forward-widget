@@ -1,6 +1,6 @@
 {
-  "title": "joeshu 一起看",
-  "description": "分类筛选、专题片单、搜索与可用画质优先",
+  "title": "joeshu 影视组件合集",
+  "description": "一起看 + 搜剧AI：推荐、分类、搜索、分集与访客播放",
   "widgets": [
     {
       "id": "joeshu.yqk",
@@ -10,6 +10,15 @@
       "version": "0.6.0",
       "author": "joeshu",
       "url": "https://example.invalid/yqk.js"
+    },
+    {
+      "id": "joeshu.souju",
+      "title": "搜剧AI",
+      "description": "首页推荐、分类片库、片名搜索、分集与访客直连播放",
+      "requiredVersion": "0.0.1",
+      "version": "0.1.0",
+      "author": "joeshu",
+      "url": "https://example.invalid/souju.js"
     }
   ]
 }

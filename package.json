@@ -1,11 +1,12 @@
 {
   "name": "joeshu-yqk-widget-tests",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "scripts": {
-    "test": "node test.cjs && node test-deploy.cjs",
+    "test": "node test.cjs && node test-souju.cjs && node test-deploy.cjs",
     "test:live": "node live-test.cjs",
-    "build:publish": "node deploy.cjs"
+    "build:publish": "node deploy.cjs",
+    "test:souju:live": "node live-souju.cjs"
   },
   "devDependencies": {
     "@rexnow/libs": "3.1.3",

@@ -16,23 +16,32 @@ function build(base,output,options={}) {
  const name='yqk-'+meta.version+'.js',scriptUrl=baseUrl+'/'+name;
  const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'yqk.fwd.example'),'utf8'));
  Object.assign(manifest.widgets[0],{id:meta.id,title:meta.title,author:meta.author,version:meta.version,requiredVersion:meta.requiredVersion,url:scriptUrl});
- manifest.description='一起看搜索、分类、首页、详情与访客播放';
+ manifest.title='joeshu 影视组件合集';
+ manifest.description='一起看 + 搜剧AI：推荐、分类、搜索、分集与访客播放';
+ const extraCode=fs.readFileSync(path.join(__dirname,'souju.js'),'utf8');
+ const extraContext=vm.createContext({});new vm.Script(extraCode).runInContext(extraContext,{timeout:1000});
+ const extraMeta=extraContext.WidgetMetadata;
+ if(!extraMeta || !/^\d+\.\d+\.\d+$/.test(extraMeta.version)) throw new Error('搜剧AI版本格式错误');
+ const extraName='souju-'+extraMeta.version+'.js';
+ manifest.widgets=[manifest.widgets[0],{id:extraMeta.id,title:extraMeta.title,description:extraMeta.description,author:extraMeta.author,version:extraMeta.version,requiredVersion:extraMeta.requiredVersion,url:baseUrl+'/'+extraName}];
  const common=[{key:'Access-Control-Allow-Origin',value:'*'},{key:'X-Content-Type-Options',value:'nosniff'},{key:'Cache-Control',value:'public, max-age=60, must-revalidate'}];
  const headers=[{source:'/'+key('yqk.fwd'),headers:[...common,{key:'Content-Type',value:'application/json; charset=utf-8'}]},
- {source:'/'+key(name),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]}];
+ {source:'/'+key(name),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]},
+ {source:'/'+key(extraName),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]}];
  const files={
   [key(name)]:code,
+  [key(extraName)]:extraCode,
   [key('yqk.fwd')]:JSON.stringify(manifest,null,2)+'\n',
   'vercel.json':JSON.stringify({$schema:'https://openapi.vercel.sh/vercel.json',framework:null,outputDirectory:'.',headers},null,2)+'\n',
   '_headers':headers.map(h=>h.source+'\n'+h.headers.map(x=>'  '+x.key+': '+x.value).join('\n')).join('\n\n')+'\n',
-  [key('release.json')]:JSON.stringify({version:meta.version,scriptUrl,subscriptionUrl:baseUrl+'/yqk.fwd',sourceSha256:crypto.createHash('sha256').update(code).digest('hex')},null,2)+'\n'
+  [key('release.json')]:JSON.stringify({version:meta.version,scriptUrl,subscriptionUrl:baseUrl+'/yqk.fwd',widgets:manifest.widgets.map(w=>({id:w.id,version:w.version,url:w.url})),sourceSha256:crypto.createHash('sha256').update(code).digest('hex')},null,2)+'\n'
  };
  if(options.pages) {
   delete files['vercel.json'];delete files['_headers'];files['.nojekyll']='';
   // Pages replaces the whole artifact. Keep published scripts accessible to
   // clients that have not refreshed their subscription yet.
   for(const archived of fs.readdirSync(__dirname)) {
-   if(/^yqk-\d+\.\d+\.\d+\.js$/.test(archived) && archived!==name) {
+   if(/^(?:yqk|souju)-\d+\.\d+\.\d+\.js$/.test(archived) && archived!==name && archived!==extraName) {
     files[archived]=fs.readFileSync(path.join(__dirname,archived),'utf8');
    }
   }
