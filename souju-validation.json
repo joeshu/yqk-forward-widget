@@ -1,0 +1,99 @@
+{
+  "time": "2026-10-09T23:37:46.629Z",
+  "version": "0.1.0",
+  "sourceSha256": "bec5b7b46deffea7db4b22f9cb07b065f14044ad412bc82799212081f2369ec9",
+  "checks": [
+    {
+      "name": "official metadata schema",
+      "status": "PASS",
+      "result": true
+    },
+    {
+      "name": "empty search is idle",
+      "status": "PASS",
+      "result": true
+    },
+    {
+      "name": "anonymous session and home recommendations",
+      "status": "PASS",
+      "result": {
+        "count": 30
+      }
+    },
+    {
+      "name": "six named categories and numbered pagination",
+      "status": "PASS",
+      "result": [
+        {
+          "kind": "movie",
+          "count": 20
+        },
+        {
+          "kind": "series",
+          "count": 20
+        },
+        {
+          "kind": "anime",
+          "count": 20
+        },
+        {
+          "kind": "variety",
+          "count": 20
+        },
+        {
+          "kind": "short_drama",
+          "count": 20
+        },
+        {
+          "kind": "documentary",
+          "count": 20
+        }
+      ]
+    },
+    {
+      "name": "actual title search uses q and catalog_search",
+      "status": "PASS",
+      "result": {
+        "count": 11,
+        "titles": [
+          "流浪地球2",
+          "流浪地球",
+          "流浪地球(特别版)"
+        ]
+      }
+    },
+    {
+      "name": "movie and series details with coherent episodes",
+      "status": "PASS",
+      "result": {
+        "movieEpisodes": 1,
+        "seriesTitle": "兰香如故",
+        "seriesEpisodes": 47
+      }
+    },
+    {
+      "name": "fresh playback resolution returns only visitor direct media",
+      "status": "PASS",
+      "result": {
+        "directLineCount": 24,
+        "names": [
+          "魔都资源",
+          "索尼资源",
+          "西瓜资源 · 普通话",
+          "无水印资源",
+          "极速资源"
+        ]
+      }
+    },
+    {
+      "name": "sample HLS manifest is readable",
+      "status": "PASS",
+      "result": {
+        "name": "魔都资源",
+        "status": 200,
+        "attempted": 1
+      }
+    }
+  ],
+  "limitations": "Native iPhone import/playback not tested; samples do not establish all titles or all lines as playable. Parser/quota lines are not invoked."
+}

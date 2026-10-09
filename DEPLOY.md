@@ -1,3 +1,10 @@
+## 多组件合集更新（0.7.0）
+
+`yqk.fwd` 现在包含「一起看」与「搜剧AI」两个独立组件，沿用原订阅 URL。
+发布工具从 `yqk.js` 和 `souju.js` 各自读取 metadata，生成对应版本的 JS 和合集订阅；Pages 发布会保留两类历史版本脚本。
+新增版本时保留已有 `yqk-*.js` / `souju-*.js`，更新对应源文件与版本化副本。GitHub Raw 使用仓库内 `yqk.fwd`；Pages 使用 workflow 生成的订阅，两者应包含相同组件 ID 和版本。
+搜剧AI测试入口为 `npm run test:souju:live`，发布前检查 `souju-validation.json` 的结果与源文件 SHA-256；本地 `npm test` 同时覆盖原组件、新组件和部署生成。
+
 # 部署一起看 ForwardWidget 0.6.0
 
 ## 当前仓库的直接订阅

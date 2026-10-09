@@ -1,3 +1,33 @@
+# joeshu 影视组件合集 0.7.0
+
+同一个 `yqk.fwd` 订阅包含「一起看 0.6.0」和「搜剧AI 0.1.0」，参考 SFW 的多组件订阅结构：
+https://he2o.vercel.app/Resource/RexWidgets/sfw.fwd
+
+## 搜剧AI（新增）
+
+目标站点：https://ai.baipiaozhe.com
+
+- 首页推荐、电影/电视剧/动漫/综艺/短剧/纪录片分类与分页、片名搜索。
+- 原始海报、年份、类型与更新状态；电视剧按真实分集显示，超过 100 集通过「后续分集」继续浏览；其他季独立显示。
+- 使用原站匿名访客会话和公开前端请求签名；会话在客户端存储中保存，失效只刷新一次。没有账号登录或账号凭据。
+- 空搜索不请求网站；请求限流、签名失效或会话获取失败明确报错。
+- 播放时核验影片与分集身份，并重新获取原站返回的访客直连线路。解析票据、账号等级受限线路不纳入本版；不调用可能消耗站点额度的解析接口。
+- 脚本需要客户端 HTTP 接口返回完整 `Set-Cookie` 响应头。最低实际兼容版本和 iPhone 原生导入/播放仍需手机验证；客户端只保留空的 Cookie 清理头时，无法建立访客会话。
+- 真实接口与媒体清单样本验证见 `souju-validation.json`；这些证据不保证全部影片、线路或视频分片可播放，也不包含原站 AI 聊天功能。
+
+保持现有订阅地址，在客户端主动刷新后启用「搜剧AI」：
+
+https://joeshu.github.io/yqk-forward-widget/yqk.fwd
+
+GitHub Raw 备用：
+
+https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
+
+开发回归：`npm test`；搜剧AI真实接口验证：`npm run test:souju:live`。
+搜剧AI运行时独立于 Node/Python；`live-souju.cjs` 和 `http-bridge.py` 仅用于开发验证。公开发布仅包含订阅和版本化组件 JS。
+
+---
+
 # 一起看 ForwardWidget 0.6.0
 
 参考：https://github.com/InchStudio/ForwardWidgets

@@ -30,6 +30,14 @@ with response:
     if content.startswith(b"\x1f\x8b"):
         content = gzip.decompress(content)
     result_headers = dict(response.headers)
+    # A session response may clear old cookie scopes before setting the new
+    # cookie. A plain dict keeps an empty deletion header and loses the session.
+    cookies = response.headers.get_all("set-cookie", [])
+    if cookies:
+        for name in list(result_headers):
+            if name.lower() == "set-cookie":
+                del result_headers[name]
+        result_headers["set-cookie"] = ", ".join(cookies)
     for key in list(result_headers):
         if key.lower() in ("content-encoding", "content-length"):
             del result_headers[key]
