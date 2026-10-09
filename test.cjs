@@ -21,7 +21,23 @@ const good=data=>({statusCode:200,data:{result:true,data}});
   const text=Object.keys(body).sort().filter(k=>body[k]!=='').map(k=>k+'='+body[k]+'&').join('')+'appKey='+ctx.YQK.appKey;
   assert.equal(sign,crypto.createHash('md5').update(text).digest('hex'));
  });
- await test('blank search rejected before network',async()=>assert.rejects(()=>ctx.search({keyword:'  '}),/关键词/));
+ await test('landing-page search with unset or invisible input is idle without HTTP or storage',async()=>{
+  calls.length=0;let gets=0;
+  ctx.Widget.http.get=async()=>{gets++;throw new Error('empty search must not request network');};
+  for(const params of [undefined,null,{}, {keyword:''},{keyword:'  \t\n'},{keyword:'\u200b\ufeff'}, {keyword:'',page:2}]) {
+   assert.equal((await ctx.search(params)).length,0);
+  }
+  assert.equal(gets,0);assert.equal(calls.length,0);assert.equal(store.size,0);
+ });
+ await test('empty search does not prevent entering a keyword or change its pagination',async()=>{
+  calls.length=0;
+  handler=(_,body)=>good({items:[item],hasNext:body.nextVal==='',nextVal:body.nextVal===''?'next-search':''});
+  assert.equal((await ctx.search({keyword:''})).length,0);
+  assert.equal((await ctx.search({keyword:'测试电影',page:1})).length,1);
+  assert.equal((await ctx.search({keyword:'  ',page:2})).length,0);
+  assert.equal((await ctx.search({keyword:'测试电影',page:2})).length,1);
+  assert.deepEqual(calls.map(c=>c.body.nextVal),['','next-search']);
+ });
  await test('normalization preserves stable url identity and removes HTML',()=>{
   const x=ctx.normalize(item);assert.equal(x.id,x.link);assert.equal(x.type,'url');assert.equal(x.description,'介绍');
  });

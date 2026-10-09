@@ -1,4 +1,4 @@
-# 一起看 ForwardWidget 0.5.0
+# 一起看 ForwardWidget 0.5.1
 
 参考：https://github.com/InchStudio/ForwardWidgets
 目标网站：https://m.yqk3hxe.com
@@ -12,11 +12,13 @@
 
 https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
 
-订阅引用仓库内固定版本的 `yqk-0.5.0.js`，无需启用 Pages 或运行服务器。初次导入后搜索“流浪地球”测试。电脑端下载验证不能替代手机端导入与播放验证。
+订阅引用仓库内固定版本的 `yqk-0.5.1.js`，无需启用 Pages 或运行服务器。初次导入后搜索“流浪地球”测试。电脑端下载验证不能替代手机端导入与播放验证。
 
 后续发版应保留旧版本 JS，新增对应版本文件，再更新 yqk.fwd。GitHub Pages 是可选部署，开启方法见 DEPLOY.md。
 
 ## 当前验证结果
+
+0.5.1 最新复测：56 项本地回归通过。生产接口的空搜索、有效搜索、首页、热搜、分类分页、电影/电视剧详情、动漫/综艺列表均通过；电影自动切换到 HN 后 HLS HTTP 200。电视剧样本“庆余年第二季”的首集本次四条自动替代线路均失败，因此完整生产测试未通过，仍需在详情手动选择其他线路。记录见 validation-0.5.1.json。下文 validation.json、hot-validation.json、media-validation.json 是 0.5.0 的历史证据，不代表本轮电视剧播放成功。
 
 已用真实生产 API 验证修复后的 JavaScript，并用 @rexnow/libs 3.1.3 官方适配器和 Zod 数据模型检查输出。具体结果见 validation.json。
 搜索、首页精选、热搜榜、电影分类两页、电视剧/动漫/综艺分类、电影与电视剧详情已成功。
@@ -66,11 +68,18 @@ https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
 - 默认线路失败时最多尝试四条同片同集线路；电影仅匹配单集“正片/HD”等正片标签，电视剧按实际分集名匹配（支持第01集/第1集）。不按分集列表位置猜测集数，不跨影片切换；播放资源标明实际使用的线路。
 - 限流立即中止清晰度和线路重试；MP4、无 .m3u8 后缀的地址不做媒体下载探测，HLS 分片也不会被运行时预下载。
 
+### 0.5.1 手机首页兼容修复
+
+- 根据真实手机截图修复搜索栏目未填写关键词时的“模块执行错误”：空输入正常返回空列表，不发出请求；进入搜索栏目填写片名即可搜索。
+- 未输入、纯空白及不可见字符均按空输入处理，空调用不会重置已有搜索的分页；真实网络及数据错误仍照常报错。
+- Pages 更新自动保留仓库中的旧版本脚本，尚未刷新订阅的客户端仍可下载旧版。0.5.0 文件保持不变。
+- 已上线 Pages 订阅：https://joeshu.github.io/yqk-forward-widget/yqk.fwd 。客户端主动更新订阅后，确认版本为 0.5.1 再重新进入组件。
+
 ## 文件与导入
 
 - yqk.js：独立组件脚本，手机端不需要安装 npm/Python。
 - yqk.fwd.example：订阅模板，仍需替换脚本托管地址。它是模板，不是已发布的订阅。
-- test.cjs：46 项模拟回归；test-deploy.cjs：8 项发布工具回归（含本地 HTTP、GitHub Pages 项目路径及自定义域名验证）。
+- test.cjs：47 项模拟回归；test-deploy.cjs：9 项发布工具回归（含本地 HTTP、GitHub Pages 项目路径、旧版脚本保留及自定义域名验证）。
 - deploy.cjs / DEPLOY.md：发布目录生成工具与 GitHub Pages、Vercel、Cloudflare Pages、自有服务器部署说明。
 - .github/workflows/pages.yml：main 提交后先测试，再自动发布 GitHub Pages；须先在仓库设置选择 GitHub Actions 作为 Pages 来源。
 - live-test.cjs / http-bridge.py：真实接口验证工具；Python 只用于开发测试环境的网络传输，运行时脚本不依赖它。

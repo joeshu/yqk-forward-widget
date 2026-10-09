@@ -29,6 +29,13 @@ function build(base,output,options={}) {
  };
  if(options.pages) {
   delete files['vercel.json'];delete files['_headers'];files['.nojekyll']='';
+  // Pages replaces the whole artifact. Keep published scripts accessible to
+  // clients that have not refreshed their subscription yet.
+  for(const archived of fs.readdirSync(__dirname)) {
+   if(/^yqk-\d+\.\d+\.\d+\.js$/.test(archived) && archived!==name) {
+    files[archived]=fs.readFileSync(path.join(__dirname,archived),'utf8');
+   }
+  }
  }
  const target=path.resolve(output);
  // Reject an occupied directory: never overwrite someone's server config/files.

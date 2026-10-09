@@ -39,6 +39,11 @@ test('Pages custom domain root uses its real domain rather than a fixed GitHub u
  const r=build('https://widgets.test.org',path.join(root,'pages-custom'),{pages:true});
  assert.equal(r.subscriptionUrl,'https://widgets.test.org/yqk.fwd');assert(fs.existsSync(path.join(r.directory,'yqk.fwd')));
 });
+test('Pages update retains the previously published script byte for byte',()=>{
+ const r=build('https://joeshu.github.io/yqk-forward-widget',path.join(root,'pages-history'),{pages:true});
+ assert.equal(fs.readFileSync(path.join(r.directory,'yqk-0.5.0.js'),'utf8'),fs.readFileSync(path.join(__dirname,'yqk-0.5.0.js'),'utf8'));
+ assert.equal(fs.readFileSync(path.join(r.directory,'yqk-'+r.version+'.js'),'utf8'),fs.readFileSync(path.join(__dirname,'yqk.js'),'utf8'));
+});
 test('occupied output rejected without modifying existing files',()=>{
  const before=fs.readFileSync(path.join(release.directory,'yqk.fwd'),'utf8');
  assert.throws(()=>build('https://other.test.org',release.directory),/不是空目录/);

@@ -109,6 +109,11 @@ function request(url,options={}) {
   fs.writeFileSync(__dirname+'/validation.json',JSON.stringify(previous,null,2)+'\n');return;
  }
  let searchItems,filmDetail,series;
+ await check('landing-page search without keyword',async()=>{
+  assert.equal(videos(await ctx.search({})).length,0);
+  assert.equal(videos(await ctx.search({keyword:'\u200b  '})).length,0);
+  return {count:0,behavior:'idle, no keyword required on landing page'};
+ });
  await check('real search',async()=>{searchItems=videos(await ctx.search({keyword:'流浪地球',page:1}));assert(searchItems.some(x=>x.title==='流浪地球2'));return {count:searchItems.length,titles:searchItems.map(x=>x.title)};});
  await check('real home',async()=>{const r=videos(await ctx.loadHome());assert(r.length>0);return {count:r.length};});
  await check('real hot search',async()=>{const r=videos(await ctx.loadHotSearch({channelId:0}));assert(r.length>0);return {count:r.length};});

@@ -1,0 +1,92 @@
+{
+  "time": "2026-10-09T16:31:00.853283+00:00",
+  "version": "0.5.1",
+  "sourceSha256": "b125449a6ac80cd32b6d540378acf6f99c1636de0d46fc9a676cc2c116242f66",
+  "status": "partial_failure",
+  "checks": [
+    {
+      "name": "official metadata schema",
+      "status": "passed",
+      "result": true
+    },
+    {
+      "name": "landing-page search without keyword",
+      "status": "passed",
+      "result": {
+        "count": 0
+      }
+    },
+    {
+      "name": "real search",
+      "status": "passed",
+      "result": {
+        "count": 10
+      }
+    },
+    {
+      "name": "real home",
+      "status": "passed",
+      "result": {
+        "count": 162
+      }
+    },
+    {
+      "name": "real hot search",
+      "status": "passed",
+      "result": {
+        "count": 10
+      }
+    },
+    {
+      "name": "real category array cursor and page two",
+      "status": "passed",
+      "result": {
+        "pageOne": 15,
+        "pageTwo": 15
+      }
+    },
+    {
+      "name": "real film detail",
+      "status": "passed",
+      "result": {
+        "title": "流浪地球2",
+        "episodeItems": 1,
+        "sources": 17
+      }
+    },
+    {
+      "name": "real TV category and detail",
+      "status": "passed",
+      "result": {
+        "title": "庆余年第二季",
+        "episodeItems": 36,
+        "sources": 17
+      }
+    },
+    {
+      "name": "real anime and variety categories",
+      "status": "passed",
+      "result": {
+        "anime": 15,
+        "variety": 15
+      }
+    },
+    {
+      "name": "real film stream and HLS playlist",
+      "status": "passed",
+      "result": {
+        "resources": 1,
+        "quality": "HN · 流畅",
+        "hlsStatus": 200
+      }
+    },
+    {
+      "name": "real TV stream and HLS playlist",
+      "status": "failed",
+      "reason": "Four matching same-title/same-episode sources were attempted without a usable guest stream."
+    }
+  ],
+  "mockTests": 47,
+  "deploymentTests": 9,
+  "note": "Reconstructed from captured npm run test:live output: process exited 1 at TV playback, so later checks were not run. No signed URLs or credentials recorded. Native iOS validation of this release is pending."
+}
