@@ -1,0 +1,40 @@
+{
+  "time": "2026-10-09T15:46:26.592Z",
+  "version": "0.5.0",
+  "phase": "Captured before automatic HLS source fallback was added in this optimization round.",
+  "results": [
+    {
+      "source": "WJ（当前）",
+      "status": 403,
+      "hls": false,
+      "phoneStatus": 403,
+      "phoneHls": false
+    },
+    {
+      "source": "BF",
+      "status": 404,
+      "hls": false,
+      "phoneStatus": 404,
+      "phoneHls": false
+    },
+    {
+      "source": "SN",
+      "status": 502,
+      "hls": false,
+      "phoneStatus": 502,
+      "phoneHls": false
+    },
+    {
+      "source": "HN",
+      "status": 200,
+      "hls": true
+    },
+    {
+      "source": "FF",
+      "status": 403,
+      "hls": false,
+      "phoneStatus": 403,
+      "phoneHls": false
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "time": "2026-10-09T15:56:09.625Z",
+  "version": "0.5.0",
+  "checks": [
+    {
+      "name": "official metadata schema",
+      "result": true
+    },
+    {
+      "name": "real movie fallback and media segment",
+      "result": {
+        "quality": "HN · 流畅",
+        "segmentStatus": 200,
+        "segmentBytes": 654624,
+        "keyStatus": 200,
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 804
+          },
+          {
+            "codec_name": "aac"
+          }
+        ],
+        "decodeLimitSeconds": 2,
+        "ffmpegExitCode": 0
+      }
+    }
+  ],
+  "sourceSha256": "fdced1c58fea4d37c5e347db6a551dd1c9ea1c67aecdf5f424fd058b07dd4861"
+}

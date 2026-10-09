@@ -1,0 +1,155 @@
+{
+  "time": "2026-10-09T15:48:20.477Z",
+  "version": "0.5.0",
+  "checks": [
+    {
+      "name": "official metadata schema",
+      "result": true
+    },
+    {
+      "name": "real search",
+      "result": {
+        "count": 10,
+        "titles": [
+          "流浪地球2",
+          "流浪地球",
+          "流浪地球3",
+          "流浪地球飞跃2020特别版",
+          "流浪地球【影视解说】",
+          "流浪地球2：再次冒险",
+          "流浪地球之大夏战狼",
+          "流浪地球3 预告片",
+          "流浪地球2【影视解说】",
+          "地球即将灭亡，美国飞船在太空流浪，中国飞船率先发现新的"
+        ]
+      }
+    },
+    {
+      "name": "real home",
+      "result": {
+        "count": 162
+      }
+    },
+    {
+      "name": "real hot search",
+      "result": {
+        "count": 10
+      }
+    },
+    {
+      "name": "real category array cursor and page two",
+      "result": {
+        "pageOne": 15,
+        "pageTwo": 15,
+        "firstTitles": [
+          "哪吒之魔童闹海-7月31日-HD高清",
+          "仙逆剧场版神临之战"
+        ]
+      }
+    },
+    {
+      "name": "real film detail",
+      "result": {
+        "title": "流浪地球2",
+        "episodeItems": 1,
+        "sources": 17
+      }
+    },
+    {
+      "name": "real TV category and detail",
+      "result": {
+        "title": "庆余年第二季",
+        "episodeItems": 36,
+        "sources": 17
+      }
+    },
+    {
+      "name": "real anime and variety categories",
+      "result": [
+        {
+          "id": "8",
+          "count": 15
+        },
+        {
+          "id": "10",
+          "count": 15
+        }
+      ]
+    },
+    {
+      "name": "real film stream and HLS playlist",
+      "result": {
+        "resources": 1,
+        "quality": "HN · 流畅",
+        "hlsStatus": 200
+      }
+    },
+    {
+      "name": "real TV stream and HLS playlist",
+      "result": {
+        "resources": 1,
+        "quality": "标清",
+        "hlsStatus": 200
+      }
+    },
+    {
+      "name": "real hot category choices",
+      "result": [
+        {
+          "channelId": "0",
+          "count": 10
+        },
+        {
+          "channelId": "2",
+          "count": 10
+        },
+        {
+          "channelId": "3",
+          "count": 10
+        },
+        {
+          "channelId": "8",
+          "count": 10
+        },
+        {
+          "channelId": "10",
+          "count": 10
+        }
+      ]
+    },
+    {
+      "name": "real movie fallback and media segment",
+      "result": {
+        "quality": "HN · 流畅",
+        "segmentStatus": 200,
+        "segmentBytes": 654624,
+        "keyStatus": 200,
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 804
+          },
+          {
+            "codec_name": "aac"
+          }
+        ],
+        "decodeLimitSeconds": 2,
+        "ffmpegExitCode": 0
+      }
+    }
+  ],
+  "sourceSha256": "fdced1c58fea4d37c5e347db6a551dd1c9ea1c67aecdf5f424fd058b07dd4861",
+  "note": "Final JS: full production API/schema checks, five named hot categories, movie/TV HLS 200, automatic matching-source movie fallback, actual movie media/key HTTP 200 and local H.264/AAC decoding verified. Native iOS UI not tested; public deployment not performed.",
+  "mockRegressionPassed": 46,
+  "deploymentTestsPassed": 8,
+  "validationCompletedAt": "2026-10-09T15:59:40.590242+00:00",
+  "pagesPackagingValidation": {
+    "time": "2026-10-09T16:06:34.111287+00:00",
+    "repositoryPrefixTest": true,
+    "customDomainTest": true,
+    "workflowYamlChecked": true,
+    "remoteWorkflowRun": false,
+    "livePagesUrlVerified": false
+  }
+}

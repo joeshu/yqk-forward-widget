@@ -1,0 +1,36 @@
+{
+  "time": "2026-10-09T15:48:21.154Z",
+  "version": "0.5.0",
+  "checks": [
+    {
+      "name": "official metadata schema",
+      "result": true
+    },
+    {
+      "name": "real hot category choices",
+      "result": [
+        {
+          "channelId": "0",
+          "count": 10
+        },
+        {
+          "channelId": "2",
+          "count": 10
+        },
+        {
+          "channelId": "3",
+          "count": 10
+        },
+        {
+          "channelId": "8",
+          "count": 10
+        },
+        {
+          "channelId": "10",
+          "count": 10
+        }
+      ]
+    }
+  ],
+  "sourceSha256": "fdced1c58fea4d37c5e347db6a551dd1c9ea1c67aecdf5f424fd058b07dd4861"
+}

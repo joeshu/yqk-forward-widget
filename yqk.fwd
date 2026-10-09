@@ -1,0 +1,15 @@
+{
+  "title": "joeshu 一起看",
+  "description": "搜索、分类、首页、详情与访客播放",
+  "widgets": [
+    {
+      "id": "joeshu.yqk",
+      "title": "一起看",
+      "description": "真实接口与视频链路已验证",
+      "requiredVersion": "0.0.1",
+      "version": "0.5.0",
+      "author": "joeshu",
+      "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk-0.5.0.js"
+    }
+  ]
+}
