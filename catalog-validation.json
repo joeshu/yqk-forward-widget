@@ -1,0 +1,83 @@
+{
+  "time": "2026-10-09T16:44:57.244Z",
+  "version": "0.6.0",
+  "checks": [
+    {
+      "name": "official metadata schema",
+      "result": true
+    },
+    {
+      "name": "selected homepage and topic pages",
+      "result": {
+        "daily": 6,
+        "topicPageOne": 18,
+        "topicPageTwo": 18
+      }
+    },
+    {
+      "name": "real named category filters",
+      "result": [
+        {
+          "parent": 2,
+          "child": 9,
+          "count": 15
+        },
+        {
+          "parent": 3,
+          "child": 38,
+          "count": 15
+        },
+        {
+          "parent": 8,
+          "child": 46,
+          "count": 15
+        },
+        {
+          "parent": 10,
+          "child": 31,
+          "count": 15
+        },
+        {
+          "shortTopic": 20,
+          "count": 18
+        }
+      ]
+    },
+    {
+      "name": "Netflix collections and Korean channel",
+      "result": [
+        {
+          "channelId": 65,
+          "collection": "latest",
+          "count": 9
+        },
+        {
+          "channelId": 65,
+          "collection": "top100",
+          "count": 18
+        },
+        {
+          "channelId": 56,
+          "collection": "latest",
+          "count": 18
+        }
+      ]
+    },
+    {
+      "name": "real guest quality availability",
+      "result": {
+        "source": "HN",
+        "choices": [
+          {
+            "label": "流畅",
+            "canPlay": true,
+            "default": true
+          }
+        ],
+        "note": "Source labels are not measured pixel dimensions."
+      }
+    }
+  ],
+  "sourceSha256": "b04d009266959c6e78fc0bc9410c3aad9f8e1332ff088846ba0530d4020b242e",
+  "note": "New category, topic and collection paths verified against production and official schemas; native iOS layout and measured video resolution not tested in this run."
+}

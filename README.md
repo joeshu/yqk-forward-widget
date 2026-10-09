@@ -1,4 +1,4 @@
-# 一起看 ForwardWidget 0.5.1
+# 一起看 ForwardWidget 0.6.0
 
 参考：https://github.com/InchStudio/ForwardWidgets
 目标网站：https://m.yqk3hxe.com
@@ -12,11 +12,13 @@
 
 https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
 
-订阅引用仓库内固定版本的 `yqk-0.5.1.js`，无需启用 Pages 或运行服务器。初次导入后搜索“流浪地球”测试。电脑端下载验证不能替代手机端导入与播放验证。
+订阅引用仓库内固定版本的 `yqk-0.6.0.js`，无需启用 Pages 或运行服务器。初次导入后搜索“流浪地球”测试。电脑端下载验证不能替代手机端导入与播放验证。
 
 后续发版应保留旧版本 JS，新增对应版本文件，再更新 yqk.fwd。GitHub Pages 是可选部署，开启方法见 DEPLOY.md。
 
 ## 当前验证结果
+
+0.6.0：63 项本地回归通过。新专题分页、四类子分类、短剧专题、Netflix 最新月/TOP100 与韩剧新剧片单均通过真实接口和官方数据模型验证，详情见 catalog-validation.json。本轮电影 HN 线路只开放一个名为“流畅”的访客选项；没有获得额外的超清权限，也没有复测所有播放线路或测量本轮视频尺寸。
 
 0.5.1 最新复测：56 项本地回归通过。生产接口的空搜索、有效搜索、首页、热搜、分类分页、电影/电视剧详情、动漫/综艺列表均通过；电影自动切换到 HN 后 HLS HTTP 200。电视剧样本“庆余年第二季”的首集本次四条自动替代线路均失败，因此完整生产测试未通过，仍需在详情手动选择其他线路。记录见 validation-0.5.1.json。下文 validation.json、hot-validation.json、media-validation.json 是 0.5.0 的历史证据，不代表本轮电视剧播放成功。
 
@@ -77,9 +79,21 @@ https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
 
 ## 文件与导入
 
+### 0.6.0 分类、专题与画质选择
+
+- 浏览顺序调整为每日推荐、热搜、电影、电视剧、动漫、综艺、短剧、Netflix、韩剧、专题、旧版分类入口及搜索。保留原有模块 ID 和搜索接口。
+- 电影提供 18 个子类，电视剧 8 个，动漫 5 个，综艺 4 个；对应分类栏目使用中文菜单，不需要填写编号。
+- 首页提供 27 个原站专题选择，默认每日推荐，避免 162 个影片混成一条列表。专题栏目按真实 pageIndex/pageSize 接口分页，每页 18 项。
+- Netflix 最新月份从频道实时目录发现，另提供 TOP100；韩剧提供新剧、热播、悬疑、经典等 8 个片单。短剧分类 API 本轮返回空，改用有内容的“下饭短剧”专题。
+- 影片卡片设置原始竖版海报字段，并补充年份、类型、更新状态与观看人数；不修改图片地址，不把低分辨率图片放大后声称高清。卡片尺寸、字体、网格和主题由客户端控制，脚本无法复制网站 CSS。
+- 默认按照站点的清晰度名称优先尝试最高允许画质，仍提供“站点默认”选项。受限清晰度不请求；高画质失败后保留可用的其他清晰度。分辨率编号不作为像素尺寸，显示名称也不等于测量的实际尺寸。
+- 当前是公开 H5 访客接口，无法解锁原站 App 或账号专属的超清、4K。真实画质以源视频为准。
+- 本轮新接口与清晰度开放情况记录见 catalog-validation.json；历史播放证据与 0.5.1 电视剧线路失败记录仍保留。
+- 主动刷新订阅确认版本 0.6.0；若客户端保留旧栏目配置，请重新添加这份组件以显示新增栏目。
+
 - yqk.js：独立组件脚本，手机端不需要安装 npm/Python。
 - yqk.fwd.example：订阅模板，仍需替换脚本托管地址。它是模板，不是已发布的订阅。
-- test.cjs：47 项模拟回归；test-deploy.cjs：9 项发布工具回归（含本地 HTTP、GitHub Pages 项目路径、旧版脚本保留及自定义域名验证）。
+- test.cjs：54 项模拟回归；test-deploy.cjs：9 项发布工具回归（含本地 HTTP、GitHub Pages 项目路径、旧版脚本保留及自定义域名验证）。
 - deploy.cjs / DEPLOY.md：发布目录生成工具与 GitHub Pages、Vercel、Cloudflare Pages、自有服务器部署说明。
 - .github/workflows/pages.yml：main 提交后先测试，再自动发布 GitHub Pages；须先在仓库设置选择 GitHub Actions 作为 Pages 来源。
 - live-test.cjs / http-bridge.py：真实接口验证工具；Python 只用于开发测试环境的网络传输，运行时脚本不依赖它。
@@ -103,6 +117,7 @@ https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
     npm test
     npm run test:live
 
+单独复测新分类、专题分页、Netflix/韩剧和访客画质：`CATALOG_ONLY=1 node live-test.cjs`。
 单独复测五个热搜选项：`HOT_ONLY=1 node live-test.cjs`。
 单独复测电影自动切换、首个 HLS 分片及两秒本地解码：`MEDIA_ONLY=1 node live-test.cjs`（额外需要 ffprobe/ffmpeg）。
 这两个命令分别写入 hot-validation.json 和 media-validation.json；开发传输工具保留二进制原始字节，并限制单次响应为 16 MiB，手机运行脚本不依赖此工具。
@@ -118,4 +133,4 @@ https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
 - 分集名称缺失或无法匹配时不会盲目按顺序切换其他线路，请手动选择。明确不同的电视剧集数，即使每条线路只有一集，也不会互相替代。
 - 播放根详情链接默认选第一条线路的第一分集；播放指定集数应从分集列表进入。
 - API 目前不需要账号登录；本版未实现登录。某些资源或更高清晰度若需账号权限，按站点提示处理。
-- 首页按原专题顺序展开为去重片单，未保留专题分组 UI。
+- 首页可按专题选择；选择“全部首页精选”时仍展开为去重片单。

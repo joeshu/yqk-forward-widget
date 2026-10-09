@@ -1,4 +1,4 @@
-# 部署一起看 ForwardWidget 0.5.1
+# 部署一起看 ForwardWidget 0.6.0
 
 ## 当前仓库的直接订阅
 
@@ -6,7 +6,7 @@
 
 https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
 
-它引用同仓库的 yqk-0.5.1.js。发布新版时先上传新的版本化脚本，再更新根目录订阅；保留旧版本文件。以下 Pages 流程是可选项，只有工作流部署成功后 Pages 地址才可用。
+它引用同仓库的 yqk-0.6.0.js。发布新版时先上传新的版本化脚本，再更新根目录订阅；保留旧版本文件。以下 Pages 流程是可选项，只有工作流部署成功后 Pages 地址才可用。
 
 ## 先理解部署内容
 
@@ -24,14 +24,14 @@ node deploy.cjs https://你的项目.vercel.app publish
 ```
 
 请把示例域名替换成你已确定的服务域名。工具不会创建服务或占用这个域名。
-输出目录须不存在或为空；工具不会覆盖已有发布目录。更新时可以改用 `publish-0.5.1` 等新目录。
+输出目录须不存在或为空；工具不会覆盖已有发布目录。更新时可以改用 `publish-0.6.0` 等新目录。
 
 工具自动生成：
 
 | 文件 | 用途 |
 | --- | --- |
 | yqk.fwd | 应用内添加的订阅，JS 地址与版本自动同步 |
-| yqk-0.5.1.js | 版本化脚本，降低新旧缓存混用风险 |
+| yqk-0.6.0.js | 版本化脚本，降低新旧缓存混用风险 |
 | vercel.json | Vercel 静态托管与响应头配置 |
 | _headers | Cloudflare Pages 的响应头配置 |
 | release.json | 发布版本及 JS SHA-256，用于人工核对 |
@@ -62,7 +62,7 @@ GitHub 存放源码，GitHub Pages 提供 HTTPS 静态直链。公开仓库在 G
 
 ```text
 https://joeshu.github.io/yqk-forward-widget/yqk.fwd
-https://joeshu.github.io/yqk-forward-widget/yqk-0.5.1.js
+https://joeshu.github.io/yqk-forward-widget/yqk-0.6.0.js
 ```
 
 上面是预期地址，未部署前不是可用链接。如果账号、仓库名或自定义域名不同，以 Pages 显示的实际地址为准。
@@ -130,7 +130,7 @@ location = /yqk.fwd {
     try_files $uri =404;
 }
 
-location = /yqk-0.5.1.js {
+location = /yqk-0.6.0.js {
     types { }
     default_type application/javascript;
     charset utf-8;
@@ -148,7 +148,7 @@ location = /yqk-0.5.1.js {
 
 ```bash
 curl -f -i https://你的域名/yqk.fwd
-curl -f -i https://你的域名/yqk-0.5.1.js
+curl -f -i https://你的域名/yqk-0.6.0.js
 ```
 
 验收要点：
@@ -156,7 +156,7 @@ curl -f -i https://你的域名/yqk-0.5.1.js
 - 两个地址实际 HTTP 200，无登录、验证码、反爬或跳转到网页的页面。
 - `.fwd` 内容是 JSON，widgets[0].url 指向可以下载的原始 JS。
 - 可配置响应头的平台上 `.fwd` Content-Type 使用 application/json，JS 使用 application/javascript。GitHub Pages MIME 类型由平台决定，以真实文件内容和客户端导入结果验收。
-- JS 中 `WidgetMetadata.version` 和订阅版本均为 0.5.1。
+- JS 中 `WidgetMetadata.version` 和订阅版本均为 0.6.0。
 - 可通过 release.json 中的 SHA-256 核对 JS 字节；UTF-8 文件不要被服务器转换或压缩混淆后手工改写。
 - 确认手机网络也能访问，不仅是电脑或服务器可访问。
 

@@ -1,7 +1,7 @@
 {
   "name": "joeshu-yqk-widget-tests",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.6.0",
   "scripts": {
     "test": "node test.cjs && node test-deploy.cjs",
     "test:live": "node live-test.cjs",

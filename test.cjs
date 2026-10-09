@@ -91,6 +91,30 @@ const good=data=>({statusCode:200,data:{result:true,data}});
  await test('home deduplicates actual vodTopicList/vodList structure',async()=>{
   handler=()=>good({vodTopicList:[{vodList:[item]},{vodList:[item]}]});assert.equal((await ctx.loadHome()).length,1);
  });
+ await test('home topic selection preserves grouping instead of mixing unrelated lists',async()=>{
+  handler=()=>good({vodTopicList:[{vodTopicId:93,vodList:[item,item]},{vodTopicId:77,vodList:[{...item,vodId:13,vodName:'另一专题'}]}]});
+  const r=await ctx.loadHome({topicId:'93'});assert.equal(r.length,1);assert.equal(r[0].title,'测试电影');
+  assert.equal((await ctx.loadHome({topicId:'all'})).length,2);
+ });
+ await test('category modules expose parent-specific names and pass child ID through pagination',async()=>{
+  const movie=ctx.WidgetMetadata.modules.find(m=>m.id==='channel2'),tv=ctx.WidgetMetadata.modules.find(m=>m.id==='channel3');
+  assert.equal(movie.params[1].enumOptions.length,19);assert.equal(tv.params[1].enumOptions.length,9);
+  calls.length=0;handler=(_,b)=>{assert.equal(b.parentChannelId,2);assert.equal(b.childChannelId,9);return good({items:[item],hasNext:false});};
+  assert.equal((await ctx.loadCategory({parentChannelId:'2',childChannelId:'9'})).length,1);
+ });
+ await test('poster and card details retain source URL, year and update status',()=>{
+  const r=ctx.normalize({...item,flags:'2026 / 国产剧 / 大陆',remark:'更4集',watchingCountDesc:'4万人次在看',score:'0.0'});
+  assert.equal(r.posterPath,item.coverImg);assert.equal(r.releaseDate,'2026');assert(r.description.includes('更4集'));assert.equal(r.rating,'');
+ });
+ await test('topics use the observed numbered-page API without replaying cursor pages',async()=>{
+  calls.length=0;handler=(url,b)=>{assert(url.endsWith('/vodTopic/getVodList'));assert.equal(b.pageSize,18);return good({items:[item],totalPages:3});};
+  await ctx.loadTopic({topicId:'77',page:2});await ctx.loadTopic({topicId:'93',page:1});
+  assert.deepEqual(calls.map(c=>[c.body.vodTopicId,c.body.pageIndex]),[[77,2],[93,1]]);
+ });
+ await test('Netflix latest month is discovered from live catalogue instead of a stale month ID',async()=>{
+  handler=(url,b)=>url.endsWith('/topicListView')?good({topicList:[{vodTopicId:5,topicName:'NetflixTOP100'},{vodTopicId:118,topicName:'新月份'}]}):(()=>{assert.equal(b.vodTopicId,118);return good({items:[item]});})();
+  assert.equal((await ctx.loadCollection({channelId:'65',collection:'latest'})).length,1);
+ });
  await test('alternate player sources stay separate from coherent episodes',async()=>{
   handler=()=>good({...item,playerList:[
    {playerName:'线路A',epList:[{epId:31,epName:'第1集'},{epId:32,epName:'第2集'}]},
@@ -224,6 +248,22 @@ const good=data=>({statusCode:200,data:{result:true,data}});
    {canPlay:true,vodResolution:2,showName:'备用'}]):good({playUrl:'https://media.example.org/'+calls[calls.length-1].body.vodResolution+'.m3u8'});
   const resources=await ctx.loadResource({link:'https://m.yqk3hxe.com/play/12?epId=31'});
   assert.equal(resources.length,2);assert.equal(resources[0].name,'默认');assert.equal(calls.filter(c=>c.url.endsWith('/playUrl')).length,2);
+ });
+ await test('highest allowed quality is preferred while restricted qualities stay unrequested',async()=>{
+  calls.length=0;handler=(url,b)=>url.endsWith('/epDetail')?good([
+   {canPlay:true,vodResolution:99,showName:'流畅',defaultSelect:true},
+   {canPlay:false,vodResolution:5,showName:'4K'},
+   {canPlay:true,vodResolution:2,showName:'1080P'},
+   {canPlay:true,vodResolution:1,showName:'720P'}
+  ]):good({playUrl:'https://media.example.org/'+b.vodResolution+'.m3u8'});
+  const r=await ctx.resourcesForEpisode(31,{playerName:'A'},false);
+  assert.deepEqual(Array.from(r,x=>x.name),['1080P','720P','流畅']);
+  assert.deepEqual(calls.filter(c=>c.url.endsWith('/playUrl')).map(c=>c.body.vodResolution),[2,1,99]);
+  calls.length=0;const d=await ctx.resourcesForEpisode(31,{playerName:'A'},false,'default');assert.equal(d[0].name,'流畅');
+ });
+ await test('failed highest quality retains the lower working option',async()=>{
+  handler=(url,b)=>url.endsWith('/epDetail')?good([{canPlay:true,vodResolution:1,showName:'1080P'},{canPlay:true,vodResolution:2,showName:'720P'}]):b.vodResolution===1?({statusCode:503,data:'bad'}):good({playUrl:'https://media.example.org/working.m3u8'});
+  const r=await ctx.resourcesForEpisode(31,{playerName:'A'},false);assert.equal(r.length,1);assert.equal(r[0].name,'720P');
  });
  await test('bad HLS movie sources automatically reach fourth matching feature source',async()=>{
   calls.length=0;ctx.Widget.http.get=async url=>url.includes('/js/baseUrlList.js')?({data:'var baseApiList = ["https://api.example.org"];'}):({statusCode:url.includes('/61.')?200:403,data:url.includes('/61.')?'#EXTM3U':'forbidden'});

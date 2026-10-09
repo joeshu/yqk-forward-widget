@@ -34,6 +34,39 @@ function request(url,options={}) {
  async function check(name,fn){const result=await fn();report.checks.push({name,result});console.log('PASS '+name+' '+JSON.stringify(result));}
  function videos(items){for(const item of items) schemas.videoItemSchema.parse(item);return items;}
  await check('official metadata schema',()=>{schemas.widgetMetadataSchema.parse(ctx.WidgetMetadata);return true;});
+ if(process.env.CATALOG_ONLY==='1') {
+  await check('selected homepage and topic pages',async()=>{
+   const home=videos(await ctx.loadHome({topicId:'93'}));assert(home.length>0);
+   const first=videos(await ctx.loadTopic({topicId:'77',page:1})),second=videos(await ctx.loadTopic({topicId:'77',page:2}));
+   assert(first.length>0&&second.length>0);assert.notEqual(first[0].id,second[0].id);
+   return {daily:home.length,topicPageOne:first.length,topicPageTwo:second.length};
+  });
+  await check('real named category filters',async()=>{
+   const result=[];
+   for(const [parent,child] of [[2,9],[3,38],[8,46],[10,31]]) {
+    const items=videos(await ctx.loadCategory({parentChannelId:parent,childChannelId:child}));
+    assert(items.length>0);result.push({parent,child,count:items.length});
+   }
+   const shorts=videos(await ctx.loadTopic({topicId:20}));assert(shorts.length>0);result.push({shortTopic:20,count:shorts.length});
+   return result;
+  });
+  await check('Netflix collections and Korean channel',async()=>{
+   const results=[];
+   for(const [channelId,collection] of [[65,'latest'],[65,'top100'],[56,'latest']]) {
+    const items=videos(await ctx.loadCollection({channelId,collection}));assert(items.length>0);results.push({channelId,collection,count:items.length});
+   }
+   return results;
+  });
+  await check('real guest quality availability',async()=>{
+   const detail=await ctx.api('/v2/api/vodInfo/index',{vodId:118292});
+   const player=detail.playerList.find(p=>p.playerName==='HN')||detail.playerList[0];
+   const choices=await ctx.api('/v2/api/vodInfo/epDetail',{vodEpId:player.epList[0].epId});
+   return {source:player.playerName,choices:choices.filter(Boolean).map(c=>({label:c.showName,canPlay:c.canPlay===true,default:c.defaultSelect===true})),note:'Source labels are not measured pixel dimensions.'};
+  });
+  report.sourceSha256=require('node:crypto').createHash('sha256').update(fs.readFileSync(__dirname+'/yqk.js')).digest('hex');
+  report.note='New category, topic and collection paths verified against production and official schemas; native iOS layout and measured video resolution not tested in this run.';
+  fs.writeFileSync(__dirname+'/catalog-validation.json',JSON.stringify(report,null,2)+'\n');return;
+ }
  if(process.env.MEDIA_ONLY==='1') {
   await check('real movie fallback and media segment',async()=>{
    const resources=await ctx.loadResource({link:'https://m.yqk3hxe.com/play/118292'});resources.forEach(x=>schemas.streamSourceItemSchema.parse(x));
