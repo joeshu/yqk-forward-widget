@@ -1,0 +1,36 @@
+{
+  "time": "2026-10-10T00:49:07.015Z",
+  "version": "0.3.0",
+  "sourceSha256": "1f28f31d2195a5c7f1fd394eeac7e2d76bde39895ee6c7d93a140c09f137112c",
+  "checks": [
+    {
+      "name": "official metadata schema and AI controls",
+      "result": true
+    },
+    {
+      "name": "real recommended AI line resolves to checked media",
+      "result": {
+        "title": "流浪地球2",
+        "name": "AI · 1080P-官方Z",
+        "description": "原站解析返回的播放地址；本次原站消耗 72000 词元",
+        "lines": 1,
+        "hlsVerified": false,
+        "media": {
+          "status": 200,
+          "contentType": "image/jpeg",
+          "rangeStatus": 206,
+          "sampleBytes": 65536,
+          "container": "MP4 ftyp"
+        }
+      }
+    },
+    {
+      "name": "194-episode fix retained",
+      "result": {
+        "episodes": 194,
+        "last": "第194集"
+      }
+    }
+  ],
+  "limitations": "AI parser uses normal anonymous visitor API and site quota. One source resolved per request. HLS manifests checked when returned; MP4 checked using HEAD and a 64 KiB ranged container-header sample. Full media decoding and native iOS selector not tested. No credentials/tickets/playback URLs stored."
+}
