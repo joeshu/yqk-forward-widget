@@ -14,11 +14,11 @@
     {
       "id": "joeshu.souju",
       "title": "搜剧AI",
-      "description": "首页推荐、分类片库、片名搜索、分集与访客直连播放",
+      "description": "最新更新、当年新片、分类筛选、热播和自动检查直连线路",
       "requiredVersion": "0.0.1",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": "joeshu",
-      "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/souju-0.1.0.js"
+      "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/souju-0.2.0.js"
     }
   ]
 }
