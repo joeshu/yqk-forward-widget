@@ -1,9 +1,9 @@
 {
   "name": "joeshu-yqk-widget-tests",
   "private": true,
-  "version": "0.16.0",
+  "version": "0.17.0",
   "scripts": {
-    "test": "node test.cjs && node test-yqk-upgrade.cjs && node test-yqk-quality.cjs && node test-souju.cjs && node test-souju-episodes.cjs && node test-souju-ai.cjs && node test-souju-quota.cjs && node test-souju-upgrade.cjs && node test-widget-status.cjs && node test-kanju.cjs && node test-zip0.cjs && node test-4kvm.cjs && node test-auete.cjs && node test-deploy.cjs",
+    "test": "node test.cjs && node test-yqk-upgrade.cjs && node test-yqk-quality.cjs && node test-souju.cjs && node test-souju-episodes.cjs && node test-souju-ai.cjs && node test-souju-quota.cjs && node test-souju-upgrade.cjs && node test-widget-status.cjs && node test-kanju.cjs && node test-zip0.cjs && node test-4kvm.cjs && node test-auete.cjs && node test-new-sources.cjs && node test-deploy.cjs",
     "test:live": "node live-test.cjs",
     "build:publish": "node deploy.cjs",
     "test:souju:live": "node live-souju.cjs",
@@ -14,7 +14,8 @@
     "test:zip0:live": "node live-zip0.cjs",
     "test:4kvm:live": "node live-4kvm.cjs",
     "build:4kvm": "node build-4kvm.cjs",
-    "test:auete:live": "node live-auete.cjs"
+    "test:auete:live": "node live-auete.cjs",
+    "test:new-sources:live": "node live-new-sources.cjs"
   },
   "devDependencies": {
     "@rexnow/libs": "3.1.3",

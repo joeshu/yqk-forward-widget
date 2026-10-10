@@ -1,0 +1,59 @@
+{
+  "time": "2026-10-10T16:40:09.250Z",
+  "version": "0.1.0",
+  "checks": [
+    {
+      "name": "real homepage",
+      "count": 35
+    },
+    {
+      "name": "real category",
+      "category": "1",
+      "count": 48,
+      "first": "狮子游戏"
+    },
+    {
+      "name": "real category",
+      "category": "2",
+      "count": 48,
+      "first": "雷霆令"
+    },
+    {
+      "name": "real category",
+      "category": "3",
+      "count": 48,
+      "first": "我独自生活"
+    },
+    {
+      "name": "real category",
+      "category": "4",
+      "count": 48,
+      "first": "辛普森一家第三十八季"
+    },
+    {
+      "name": "real category page 2",
+      "count": 48
+    },
+    {
+      "name": "real search",
+      "count": 11,
+      "first": "凡人修仙传年番4"
+    },
+    {
+      "name": "real complete detail",
+      "title": "御赐小仵作",
+      "episodes": 36
+    },
+    {
+      "name": "real HLS main and child",
+      "count": 1,
+      "names": [
+        "线路 1 · 第01集 · 清单 1080×608 · 固定"
+      ]
+    }
+  ],
+  "limitations": [
+    "No media segments decoded",
+    "No iPhone import/playback test"
+  ]
+}

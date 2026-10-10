@@ -1,0 +1,35 @@
+{
+  "time": "2026-10-10T16:43:40.157Z",
+  "version": "0.1.0",
+  "checks": [
+    {
+      "name": "real catalogue and year/season filter",
+      "count": 30,
+      "first": "至高之力",
+      "rows": 1932
+    },
+    {
+      "name": "real recent updates",
+      "count": 10
+    },
+    {
+      "name": "real search",
+      "count": 14
+    },
+    {
+      "name": "real complete archive",
+      "title": "轉生後的大聖女，極力隱瞞聖女的身分",
+      "count": 3
+    },
+    {
+      "name": "real issued API plus scoped cookies plus MP4 HEAD",
+      "count": 1,
+      "passed": true
+    }
+  ],
+  "limitations": [
+    "Media HEAD only; no MP4 bytes downloaded or decoded",
+    "No iPhone import/playback test",
+    "Cookies/temporary source URLs not recorded"
+  ]
+}

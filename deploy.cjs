@@ -17,7 +17,7 @@ function build(base,output,options={}) {
  const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'yqk.fwd.example'),'utf8'));
  Object.assign(manifest.widgets[0],{id:meta.id,title:meta.title,author:meta.author,version:meta.version,requiredVersion:meta.requiredVersion,url:scriptUrl});
  manifest.title='joeshu 影视组件合集';
- manifest.description='一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视：推荐、分类、搜索、完整分集与访客播放';
+ manifest.description='一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视 + 小宝影院 + Anime1动漫：推荐、分类、搜索、完整分集与访客播放';
  const extraCode=fs.readFileSync(path.join(__dirname,'souju.js'),'utf8');
  const extraContext=vm.createContext({});new vm.Script(extraCode).runInContext(extraContext,{timeout:1000});
  const extraMeta=extraContext.WidgetMetadata;
@@ -44,6 +44,11 @@ function build(base,output,options={}) {
  if(!auMeta||!/^\d+\.\d+\.\d+$/.test(auMeta.version))throw new Error('Auete影视版本格式错误');
  const auName='auete-'+auMeta.version+'.js';
  manifest.widgets.push({id:auMeta.id,title:auMeta.title,description:auMeta.description,author:auMeta.author,version:auMeta.version,requiredVersion:auMeta.requiredVersion,url:baseUrl+'/'+auName});
+ const newWidgets=['xiaobao','anime1'].map(prefix=>{
+  const code=fs.readFileSync(path.join(__dirname,prefix+'.js'),'utf8'),context=vm.createContext({});new vm.Script(code).runInContext(context,{timeout:1000});const meta=context.WidgetMetadata;
+  if(!meta||!/^\d+\.\d+\.\d+$/.test(meta.version))throw new Error(prefix+'版本格式错误');
+  const name=prefix+'-'+meta.version+'.js';manifest.widgets.push({id:meta.id,title:meta.title,description:meta.description,author:meta.author,version:meta.version,requiredVersion:meta.requiredVersion,url:baseUrl+'/'+name});return {name,code};
+ });
  const common=[{key:'Access-Control-Allow-Origin',value:'*'},{key:'X-Content-Type-Options',value:'nosniff'},{key:'Cache-Control',value:'public, max-age=60, must-revalidate'}];
  const headers=[{source:'/'+key('yqk.fwd'),headers:[...common,{key:'Content-Type',value:'application/json; charset=utf-8'}]},
  {source:'/'+key(name),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]},
@@ -52,6 +57,7 @@ function build(base,output,options={}) {
  {source:'/'+key(vm4Name),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]},
  {source:'/'+key(kanjuName),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]}];
  headers.push({source:'/'+key(auName),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]});
+ newWidgets.forEach(w=>headers.push({source:'/'+key(w.name),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]}));
  const files={
   [key(auName)]:auCode,
   [key(name)]:code,
@@ -64,12 +70,13 @@ function build(base,output,options={}) {
   '_headers':headers.map(h=>h.source+'\n'+h.headers.map(x=>'  '+x.key+': '+x.value).join('\n')).join('\n\n')+'\n',
   [key('release.json')]:JSON.stringify({version:meta.version,scriptUrl,subscriptionUrl:baseUrl+'/yqk.fwd',widgets:manifest.widgets.map(w=>({id:w.id,version:w.version,url:w.url})),sourceSha256:crypto.createHash('sha256').update(code).digest('hex')},null,2)+'\n'
  };
+ newWidgets.forEach(w=>files[key(w.name)]=w.code);
  if(options.pages) {
   delete files['vercel.json'];delete files['_headers'];files['.nojekyll']='';
   // Pages replaces the whole artifact. Keep published scripts accessible to
   // clients that have not refreshed their subscription yet.
   for(const archived of fs.readdirSync(__dirname)) {
-   if(/^(?:yqk|souju|kanju|zip0|4kvm|auete)-\d+\.\d+\.\d+\.js$/.test(archived) && archived!==name && archived!==extraName && archived!==kanjuName && archived!==zipName && archived!==vm4Name && archived!==auName) {
+   if(/^(?:yqk|souju|kanju|zip0|4kvm|auete|xiaobao|anime1)-\d+\.\d+\.\d+\.js$/.test(archived) && archived!==name && archived!==extraName && archived!==kanjuName && archived!==zipName && archived!==vm4Name && archived!==auName && !newWidgets.some(w=>w.name===archived)) {
     files[archived]=fs.readFileSync(path.join(__dirname,archived),'utf8');
    }
   }
