@@ -5,20 +5,20 @@
     {
       "id": "joeshu.yqk",
       "title": "一起看",
-      "description": "最新片单、多条件筛选、同片同集线路回退与HLS清单检查",
+      "description": "最新片单、多条件筛选、线路检查预算与失败冷却",
       "requiredVersion": "0.0.1",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "author": "joeshu",
-      "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk-0.7.0.js"
+      "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk-0.8.0.js"
     },
     {
       "id": "joeshu.souju",
       "title": "搜剧AI",
-      "description": "最新片单、完整分集、AI每日额度保护与额度不足直连回退",
+      "description": "AI额度状态、分集完整性核对、最新片单与直连回退",
       "requiredVersion": "0.0.1",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "author": "joeshu",
-      "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/souju-0.5.0.js"
+      "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/souju-0.6.0.js"
     }
   ]
 }
