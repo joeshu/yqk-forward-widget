@@ -4,7 +4,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'yqk-deploy-test-'));let passed=
 function test(name,fn){fn();passed++;console.log('PASS '+name);}
 test('repository subscription versions and immutable script snapshots match current source',()=>{
  const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'yqk.fwd'),'utf8'));
- for(const [source,id,prefix] of [['yqk.js','joeshu.yqk','yqk-'],['souju.js','joeshu.souju','souju-'],['kanju.js','joeshu.kanju','kanju-'],['zip0.js','joeshu.zip0','zip0-'],['4kvm.js','joeshu.4kvm','4kvm-'],['auete.js','joeshu.auete','auete-'],['xiaobao.js','joeshu.xiaobao','xiaobao-'],['anime1.js','joeshu.anime1','anime1-']]){
+ for(const [source,id,prefix] of [['yqk.js','joeshu.yqk','yqk-'],['souju.js','joeshu.souju','souju-'],['kanju.js','joeshu.kanju','kanju-'],['zip0.js','joeshu.zip0','zip0-'],['4kvm.js','joeshu.4kvm','4kvm-'],['auete.js','joeshu.auete','auete-'],['anime1.js','joeshu.anime1','anime1-']]){
   const code=fs.readFileSync(path.join(__dirname,source),'utf8'),context=vm.createContext({});
   vm.runInContext(code,context);const meta=context.WidgetMetadata,widget=manifest.widgets.find(x=>x.id===id);
   assert(widget);assert.equal(widget.version,meta.version);
@@ -27,7 +27,7 @@ test('manifest links match generated script and metadata version',()=>{
 });
 test('collection contains an independent versioned Souju widget and script',()=>{
  const fwd=JSON.parse(fs.readFileSync(path.join(release.directory,'yqk.fwd'),'utf8'));
- assert.equal(fwd.widgets.length,8);const widget=fwd.widgets[1];assert.equal(widget.id,'joeshu.souju');
+ assert.equal(fwd.widgets.length,7);const widget=fwd.widgets[1];assert.equal(widget.id,'joeshu.souju');
  assert.equal(widget.url,'https://widgets.test.org/souju-'+widget.version+'.js');
  assert.equal(fs.readFileSync(path.join(release.directory,'souju-'+widget.version+'.js'),'utf8'),fs.readFileSync(path.join(__dirname,'souju.js'),'utf8'));
  const headers=JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers;
@@ -60,9 +60,10 @@ test('sixth Auete widget has matching script, headers and release metadata',()=>
  assert(JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers.some(x=>x.source==='/auete-'+w.version+'.js'));
  assert(JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'),'utf8')).widgets.some(x=>x.id===w.id&&x.version===w.version));
 });
-test('XiaoBao and Anime1 independently publish scripts, headers and release entries',()=>{
+test('Anime1 publishes independently and removed XiaoBao stays out of subscription',()=>{
  const fwd=JSON.parse(fs.readFileSync(path.join(release.directory,'yqk.fwd'),'utf8'));
- for(const prefix of ['xiaobao','anime1']){const w=fwd.widgets.find(x=>x.id==='joeshu.'+prefix);assert(w);const name=prefix+'-'+w.version+'.js';assert.equal(fs.readFileSync(path.join(release.directory,name),'utf8'),fs.readFileSync(path.join(__dirname,prefix+'.js'),'utf8'));assert(JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers.some(x=>x.source==='/'+name));assert(JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'),'utf8')).widgets.some(x=>x.id===w.id&&x.version===w.version));}
+ assert(!fwd.widgets.some(x=>x.id==='joeshu.xiaobao'));
+ for(const prefix of ['anime1']){const w=fwd.widgets.find(x=>x.id==='joeshu.'+prefix);assert(w);const name=prefix+'-'+w.version+'.js';assert.equal(fs.readFileSync(path.join(release.directory,name),'utf8'),fs.readFileSync(path.join(__dirname,prefix+'.js'),'utf8'));assert(JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers.some(x=>x.source==='/'+name));assert(JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'),'utf8')).widgets.some(x=>x.id===w.id&&x.version===w.version));}
 });
 test('subdirectory URL is preserved without duplicated slash',()=>{
  const r=build('https://widgets.test.org/Resource/Yqk/',path.join(root,'sub'));

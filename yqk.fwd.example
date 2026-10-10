@@ -1,6 +1,6 @@
 {
   "title": "joeshu 影视组件合集",
-  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视 + 小宝影院 + Anime1动漫：推荐、分类、搜索、完整分集与访客播放",
+  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视 + Anime1动漫：推荐、分类、搜索、完整分集与访客播放",
   "widgets": [
     {
       "id": "joeshu.yqk",
@@ -55,15 +55,6 @@
       "version": "0.1.0",
       "requiredVersion": "0.0.1",
       "url": "https://joeshu.github.io/yqk-forward-widget/auete-0.1.0.js"
-    },
-    {
-      "id": "joeshu.xiaobao",
-      "title": "小宝影院",
-      "description": "小宝/小新同站独立模块：四类片库、搜索、完整分集与同集线路检查。",
-      "author": "joeshu",
-      "version": "0.1.1",
-      "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/xiaobao-0.1.1.js"
     },
     {
       "id": "joeshu.anime1",
