@@ -1,0 +1,54 @@
+{
+  "time": "2026-10-10T00:29:48.430Z",
+  "version": "0.2.1",
+  "sourceSha256": "7c13c6e19f9a2ec5d230931ad306dcd74791564593b4d6c022d939e9e31a2440",
+  "checks": [
+    {
+      "name": "official metadata schema",
+      "result": true
+    },
+    {
+      "name": "complete actual 194 episodes in one list",
+      "result": {
+        "title": "凡人修仙传",
+        "available": 194,
+        "first": "第1集",
+        "boundary": "第101集",
+        "last": "第194集",
+        "seasonChoices": 0
+      }
+    },
+    {
+      "name": "actual playback episode 101",
+      "result": {
+        "episode": "第101集",
+        "lines": 2,
+        "names": [
+          "新浪资源",
+          "红牛资源"
+        ],
+        "hlsVerified": true
+      }
+    },
+    {
+      "name": "actual playback episode 194",
+      "result": {
+        "episode": "第194集",
+        "lines": 3,
+        "names": [
+          "新浪资源",
+          "红牛资源",
+          "西瓜资源"
+        ],
+        "hlsVerified": true
+      }
+    },
+    {
+      "name": "old offset=100 link now shows all 194",
+      "result": {
+        "episodes": 194
+      }
+    }
+  ],
+  "limitations": "Official schemas and production episode/resolve/HLS checks; native iOS layout and complete media decoding not tested. No cookies, tokens or playback URLs stored."
+}
