@@ -3,11 +3,12 @@
   "private": true,
   "version": "0.9.0",
   "scripts": {
-    "test": "node test.cjs && node test-yqk-upgrade.cjs && node test-souju.cjs && node test-souju-upgrade.cjs && node test-deploy.cjs",
+    "test": "node test.cjs && node test-yqk-upgrade.cjs && node test-souju.cjs && node test-souju-episodes.cjs && node test-souju-upgrade.cjs && node test-deploy.cjs",
     "test:live": "node live-test.cjs",
     "build:publish": "node deploy.cjs",
     "test:souju:live": "node live-souju.cjs",
-    "test:yqk:live": "node live-yqk-upgrade.cjs"
+    "test:yqk:live": "node live-yqk-upgrade.cjs",
+    "test:souju:episodes:live": "node live-souju-episodes.cjs"
   },
   "devDependencies": {
     "@rexnow/libs": "3.1.3",
