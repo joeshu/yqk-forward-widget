@@ -14,9 +14,9 @@
     {
       "id": "joeshu.souju",
       "title": "搜剧AI",
-      "description": "最新片单、完整分集、直连与AI官方线路",
+      "description": "最新片单、完整分集、AI官方线路与每日词元额度保护",
       "requiredVersion": "0.0.1",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "author": "joeshu",
       "url": "https://example.invalid/souju.js"
     }
