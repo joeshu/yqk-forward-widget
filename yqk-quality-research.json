@@ -1,0 +1,51 @@
+{
+  "time": "2026-10-10T05:55:41.829724+00:00",
+  "version": "0.9.0",
+  "sourceSha256": "21668d8a94f8b606af83cab8d808211319c7eef457079bd612357b72810c9bcd",
+  "publicFrontend": {
+    "url": "https://m.yqk3hxe.com/_nuxt/_play_.d854e942.js",
+    "sha256": "ef216a11b50e70987a43b5f20f45f50d8336b6006a2494b3eb61c21070ab286c",
+    "observations": [
+      "getEpDetail returns canPlay, defaultSelect, showName and vodResolution",
+      "getPlayUrl accepts vodResolution and epId",
+      "Frontend contains app-channel quality UI and download/login prompts; packaging of the iOS binary was not examined"
+    ]
+  },
+  "guestSample": {
+    "vodId": 118292,
+    "source": "HN",
+    "choices": [
+      {
+        "label": "流畅",
+        "canPlay": true,
+        "default": true
+      }
+    ],
+    "note": "Source labels are not measured pixel dimensions."
+  },
+  "failedMediaAttempts": [
+    {
+      "preference": "highest",
+      "budgetSeconds": 15,
+      "result": "budget exhausted before a playable source was returned"
+    },
+    {
+      "preference": "fixed",
+      "budgetSeconds": 30,
+      "result": "budget exhausted after two source attempts"
+    },
+    {
+      "preference": "fixed",
+      "source": "HN explicit selection",
+      "budgetSeconds": 30,
+      "result": "transport failure; no new media decode evidence obtained"
+    }
+  ],
+  "limitations": [
+    "Guest availability varies by title and source",
+    "Playlist RESOLUTION is declared metadata, not decoded measurement",
+    "Fixed mode only changes variant selection; it cannot create higher quality or grant account permissions",
+    "Native iOS player behavior and packaging not tested"
+  ],
+  "localRegressionTests": 178
+}

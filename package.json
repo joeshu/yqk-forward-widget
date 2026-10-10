@@ -1,9 +1,9 @@
 {
   "name": "joeshu-yqk-widget-tests",
   "private": true,
-  "version": "0.11.0",
+  "version": "0.12.0",
   "scripts": {
-    "test": "node test.cjs && node test-yqk-upgrade.cjs && node test-souju.cjs && node test-souju-episodes.cjs && node test-souju-ai.cjs && node test-souju-quota.cjs && node test-souju-upgrade.cjs && node test-widget-status.cjs && node test-kanju.cjs && node test-deploy.cjs",
+    "test": "node test.cjs && node test-yqk-upgrade.cjs && node test-yqk-quality.cjs && node test-souju.cjs && node test-souju-episodes.cjs && node test-souju-ai.cjs && node test-souju-quota.cjs && node test-souju-upgrade.cjs && node test-widget-status.cjs && node test-kanju.cjs && node test-deploy.cjs",
     "test:live": "node live-test.cjs",
     "build:publish": "node deploy.cjs",
     "test:souju:live": "node live-souju.cjs",

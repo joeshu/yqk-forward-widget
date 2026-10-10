@@ -69,7 +69,9 @@ function request(url,options={}) {
  }
  if(process.env.MEDIA_ONLY==='1') {
   await check('real movie fallback and media segment',async()=>{
-   const resources=await ctx.loadResource({link:'https://m.yqk3hxe.com/play/118292'});resources.forEach(x=>schemas.streamSourceItemSchema.parse(x));
+   let link='https://m.yqk3hxe.com/play/118292';
+   if(process.env.QUALITY_FIXED==='1'){const detail=await ctx.loadDetail(link),hn=detail.childItems.find(x=>/HN/.test(x.title));assert(hn,'HN sample source absent');link=hn.link;}
+   const resources=await ctx.loadResource({link,qualityPreference:process.env.QUALITY_FIXED==='1'?'fixed':'highest',checkBudget:'30'});resources.forEach(x=>schemas.streamSourceItemSchema.parse(x));
    const source=resources[0];let url=source.url,playlist;
    for(let depth=0;depth<3;depth++) {
     const response=await Widget.http.get(url,{headers:source.customHeaders});assert.equal(response.statusCode,200);playlist=String(response.data);assert(playlist.startsWith('#EXTM3U'));
@@ -79,7 +81,7 @@ function request(url,options={}) {
    const segment=playlist.split(/\r?\n/).map(x=>x.trim()).find(x=>x && !x.startsWith('#'));assert(segment);
    const response=await Widget.http.get(new URL(segment,url).href,{headers:source.customHeaders,base64Data:true});assert.equal(response.statusCode,200);
    const bytes=Buffer.from(response.data,'base64');assert(bytes.length>512);assert(!/^\s*</.test(bytes.subarray(0,32).toString()));
-   const result={quality:source.name,segmentStatus:response.statusCode,segmentBytes:bytes.length};
+   const result={preference:process.env.QUALITY_FIXED==='1'?'fixed':'highest',source:source.description,quality:source.name,segmentStatus:response.statusCode,segmentBytes:bytes.length};
    const keyLine=playlist.split(/\r?\n/).find(x=>x.startsWith('#EXT-X-KEY:') && !x.includes('METHOD=NONE'));
    let keyBytes,keyTag;
    if(keyLine) {
@@ -108,7 +110,7 @@ function request(url,options={}) {
    return result;
   });
   report.sourceSha256=require('node:crypto').createHash('sha256').update(fs.readFileSync(__dirname+'/yqk.js')).digest('hex');
-  fs.writeFileSync(__dirname+'/media-validation.json',JSON.stringify(report,null,2)+'\n');return;
+  fs.writeFileSync(__dirname+(process.env.QUALITY_FIXED==='1'?'/yqk-quality-validation.json':'/media-validation.json'),JSON.stringify(report,null,2)+'\n');return;
  }
  if(process.env.HOT_ONLY==='1') {
   await check('real hot category choices',async()=>Promise.all(['0','2','3','8','10'].map(async channelId=>{
