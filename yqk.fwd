@@ -43,9 +43,9 @@
       "title": "4K影视",
       "description": "独立片库、搜索、完整分集与游客可用画质；4K会员资源以原站权限为准。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/4kvm-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/4kvm-0.1.1.js"
     }
   ]
 }

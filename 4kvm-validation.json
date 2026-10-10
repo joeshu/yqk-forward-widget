@@ -1,6 +1,6 @@
 {
-  "time": "2026-10-10T12:45:49.475Z",
-  "version": "0.1.0",
+  "time": "2026-10-10T13:12:42.197Z",
+  "version": "0.1.1",
   "checks": [
     {
       "name": "official metadata",
@@ -65,13 +65,28 @@
       "count": 1
     },
     {
-      "name": "search page 2 after two results",
+      "name": "single-page search does not duplicate results",
       "count": 0
     },
     {
       "name": "alternate published entry search",
       "site": "https://www.4kvms.com",
       "count": 2
+    },
+    {
+      "name": "real combined taxonomy and recent updates",
+      "category": "3",
+      "area": "中国",
+      "genre": "动画",
+      "year": "2020",
+      "count": 2,
+      "first": "凡人修仙传",
+      "ids": {
+        "area": "7",
+        "genre": "11",
+        "year": "6"
+      },
+      "withRating": 2
     }
   ],
   "playback": [
