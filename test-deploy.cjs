@@ -50,6 +50,7 @@ test('Pages custom domain root uses its real domain rather than a fixed GitHub u
 test('Pages update retains the previously published script byte for byte',()=>{
  const r=build('https://joeshu.github.io/yqk-forward-widget',path.join(root,'pages-history'),{pages:true});
  assert.equal(fs.readFileSync(path.join(r.directory,'yqk-0.5.0.js'),'utf8'),fs.readFileSync(path.join(__dirname,'yqk-0.5.0.js'),'utf8'));
+ assert.equal(fs.readFileSync(path.join(r.directory,'souju-0.1.0.js'),'utf8'),fs.readFileSync(path.join(__dirname,'souju-0.1.0.js'),'utf8'));
  assert.equal(fs.readFileSync(path.join(r.directory,'yqk-'+r.version+'.js'),'utf8'),fs.readFileSync(path.join(__dirname,'yqk.js'),'utf8'));
 });
 test('occupied output rejected without modifying existing files',()=>{

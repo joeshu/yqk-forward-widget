@@ -1,7 +1,7 @@
 {
-  "time": "2026-10-09T23:37:46.629Z",
-  "version": "0.1.0",
-  "sourceSha256": "bec5b7b46deffea7db4b22f9cb07b065f14044ad412bc82799212081f2369ec9",
+  "time": "2026-10-09T23:59:27.051Z",
+  "version": "0.2.0",
+  "sourceSha256": "edc615184bc0335d335ffeeceb54dd9e5fa4ef0d6dda778be5bc53a62f2268df",
   "checks": [
     {
       "name": "official metadata schema",
@@ -17,7 +17,7 @@
       "name": "anonymous session and home recommendations",
       "status": "PASS",
       "result": {
-        "count": 30
+        "count": 74
       }
     },
     {
@@ -51,6 +51,63 @@
       ]
     },
     {
+      "name": "combined genre/region/year filters",
+      "status": "PASS",
+      "result": [
+        {
+          "kind": "movie",
+          "genre": "科幻",
+          "area": "",
+          "year": "",
+          "count": 17
+        },
+        {
+          "kind": "series",
+          "genre": "",
+          "area": "韩国",
+          "year": "current",
+          "count": 20
+        },
+        {
+          "kind": "documentary",
+          "genre": "自然",
+          "area": "",
+          "year": "",
+          "count": 14
+        }
+      ]
+    },
+    {
+      "name": "latest updates and dynamic current-year releases",
+      "status": "PASS",
+      "result": {
+        "updates": 20,
+        "currentYear": 2026,
+        "newMovies": 20
+      }
+    },
+    {
+      "name": "named recommendation topics and weekly trending",
+      "status": "PASS",
+      "result": {
+        "topics": [
+          {
+            "topic": "tv_domestic",
+            "count": 20
+          },
+          {
+            "topic": "tv_american",
+            "count": 20
+          },
+          {
+            "topic": "movie_hot",
+            "count": 20
+          }
+        ],
+        "weeklyCount": 20
+      }
+    },
+    {
       "name": "actual title search uses q and catalog_search",
       "status": "PASS",
       "result": {
@@ -72,16 +129,34 @@
       }
     },
     {
-      "name": "fresh playback resolution returns only visitor direct media",
+      "name": "manual playback returns all visitor direct media",
       "status": "PASS",
       "result": {
         "directLineCount": 24,
         "names": [
-          "魔都资源",
-          "索尼资源",
-          "西瓜资源 · 普通话",
+          "1080zyk · 普通话",
+          "新浪资源",
           "无水印资源",
-          "极速资源"
+          "豪华资源",
+          "西瓜资源 · 普通话"
+        ]
+      }
+    },
+    {
+      "name": "automatic movie and series line selection checks HLS",
+      "status": "PASS",
+      "result": {
+        "movieVerifiedLines": 3,
+        "seriesVerifiedLines": 3,
+        "movieNames": [
+          "豪华资源",
+          "新浪资源",
+          "魔都资源"
+        ],
+        "seriesNames": [
+          "新浪资源",
+          "红牛资源",
+          "魔都资源"
         ]
       }
     },
@@ -89,11 +164,11 @@
       "name": "sample HLS manifest is readable",
       "status": "PASS",
       "result": {
-        "name": "魔都资源",
+        "name": "新浪资源",
         "status": 200,
-        "attempted": 1
+        "attempted": 2
       }
     }
   ],
-  "limitations": "Native iPhone import/playback not tested; samples do not establish all titles or all lines as playable. Parser/quota lines are not invoked."
+  "limitations": "Native iPhone import/playback not tested; samples do not establish all titles or all lines as playable. Parser/quota lines are not invoked. Latest resource timestamps indicate catalogue updates, not release dates; each page is ordered by its returned timestamps."
 }
