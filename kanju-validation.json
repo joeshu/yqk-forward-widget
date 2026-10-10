@@ -1,0 +1,131 @@
+{
+  "time": "2026-10-10T05:41:00.381Z",
+  "version": "0.1.0",
+  "site": "https://kanju3.com",
+  "sourceSha256": "c84e781c9f3c63a117a49f267c6fe885a417067f5bf69e35772f7e425adbfc35",
+  "checks": [
+    {
+      "name": "official Rex metadata schema",
+      "passed": true,
+      "result": true
+    },
+    {
+      "name": "real guest quota and Beijing reset",
+      "passed": true,
+      "result": {
+        "limit": 900000,
+        "remaining": 900000,
+        "usageDate": "2026-10-10",
+        "resetBeijing": "2026-10-11T00:00:00"
+      }
+    },
+    {
+      "name": "home public preview",
+      "passed": true,
+      "result": {
+        "cards": 30
+      }
+    },
+    {
+      "name": "category movie",
+      "passed": true,
+      "result": {
+        "cards": 20
+      }
+    },
+    {
+      "name": "category series",
+      "passed": true,
+      "result": {
+        "cards": 20
+      }
+    },
+    {
+      "name": "category anime",
+      "passed": true,
+      "result": {
+        "cards": 20
+      }
+    },
+    {
+      "name": "category variety",
+      "passed": true,
+      "result": {
+        "cards": 20
+      }
+    },
+    {
+      "name": "category short_drama",
+      "passed": true,
+      "result": {
+        "cards": 20
+      }
+    },
+    {
+      "name": "category documentary",
+      "passed": true,
+      "result": {
+        "cards": 20
+      }
+    },
+    {
+      "name": "latest, combined filters and trending",
+      "passed": true,
+      "result": {
+        "latest": 20,
+        "filtered": 20,
+        "trending": 20
+      }
+    },
+    {
+      "name": "complete current available season including after episode 100",
+      "passed": true,
+      "result": {
+        "title": "凡人修仙传",
+        "available": 195,
+        "boundary": "第101集",
+        "last": "第195集"
+      }
+    },
+    {
+      "name": "direct HLS sample 第101集",
+      "passed": true,
+      "result": {
+        "lines": 2,
+        "names": [
+          "红牛资源",
+          "魔都资源"
+        ]
+      }
+    },
+    {
+      "name": "direct HLS sample 第195集",
+      "passed": true,
+      "result": {
+        "lines": 3,
+        "names": [
+          "新浪资源",
+          "红牛资源",
+          "西瓜资源"
+        ]
+      }
+    },
+    {
+      "name": "real quota status schema",
+      "passed": true,
+      "result": {
+        "title": "AI额度状态 · 可预留",
+        "hasServerQuota": true
+      }
+    },
+    {
+      "name": "no AI tokens spent by this validation",
+      "passed": true,
+      "result": {
+        "usedBefore": 0,
+        "usedAfter": 0
+      }
+    }
+  ],
+  "limitations": "Read-only real API and HLS manifest samples; no AI resolve-line call, video segment download, complete media decoding or native iOS layout test. No visitor IDs, cookies, tickets or playback URLs in this report."
+}

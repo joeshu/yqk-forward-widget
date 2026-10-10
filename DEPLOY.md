@@ -1,8 +1,8 @@
 ## 多组件合集更新（0.8.0）
 
-`yqk.fwd` 现在包含「一起看」与「搜剧AI」两个独立组件，沿用原订阅 URL。
-发布工具从 `yqk.js` 和 `souju.js` 各自读取 metadata，生成对应版本的 JS 和合集订阅；Pages 发布会保留两类历史版本脚本。
-新增版本时保留已有 `yqk-*.js` / `souju-*.js`，更新对应源文件与版本化副本。GitHub Raw 使用仓库内 `yqk.fwd`；Pages 使用 workflow 生成的订阅，两者应包含相同组件 ID 和版本。
+`yqk.fwd` 现在包含「一起看」「搜剧AI」「看剧AI」三个独立组件，沿用原订阅 URL。
+发布工具从 `yqk.js`、`souju.js` 和 `kanju.js` 各自读取 metadata，生成对应版本的 JS 和合集订阅；Pages 发布会保留三类历史版本脚本。
+新增版本时保留已有 `yqk-*.js` / `souju-*.js` / `kanju-*.js`，更新对应源文件与版本化副本。GitHub Raw 使用仓库内 `yqk.fwd`；Pages 使用 workflow 生成的订阅，两者应包含相同组件 ID 和版本。
 搜剧AI测试入口为 `npm run test:souju:live`，发布前检查 `souju-validation.json` 的结果与源文件 SHA-256；本地 `npm test` 同时覆盖原组件、新组件和部署生成。
 
 # 部署一起看 ForwardWidget 0.6.0
@@ -195,3 +195,5 @@ curl -f -i https://你的域名/yqk-0.6.0.js
 - https://developers.cloudflare.com/pages/configuration/headers/
 
 Raw 订阅由仓库公开文件提供；Pages 是否上线，以 Actions 部署结果和实际地址的 HTTP 响应为准。
+
+看剧AI验证入口：`npm run test:kanju:live`。它只检查真实浏览、分集、额度及HLS清单，不调用消耗词元的AI解析；报告为 `kanju-validation.json`，须核对版本与源文件SHA-256。本地 `npm test` 包含看剧AI与三组件部署回归。

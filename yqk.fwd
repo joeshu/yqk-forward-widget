@@ -1,6 +1,6 @@
 {
   "title": "joeshu 影视组件合集",
-  "description": "一起看 + 搜剧AI：推荐、分类、搜索、分集与访客播放",
+  "description": "一起看 + 搜剧AI + 看剧AI：推荐、分类、搜索、完整分集与访客播放",
   "widgets": [
     {
       "id": "joeshu.yqk",
@@ -19,6 +19,15 @@
       "version": "0.6.0",
       "author": "joeshu",
       "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/souju-0.6.0.js"
+    },
+    {
+      "id": "joeshu.kanju",
+      "title": "看剧AI",
+      "description": "完整分集、六类筛选、直连与AI官方线路、原站真实额度查询",
+      "requiredVersion": "0.0.1",
+      "version": "0.1.0",
+      "author": "joeshu",
+      "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/kanju-0.1.0.js"
     }
   ]
 }

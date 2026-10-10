@@ -17,20 +17,27 @@ function build(base,output,options={}) {
  const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'yqk.fwd.example'),'utf8'));
  Object.assign(manifest.widgets[0],{id:meta.id,title:meta.title,author:meta.author,version:meta.version,requiredVersion:meta.requiredVersion,url:scriptUrl});
  manifest.title='joeshu 影视组件合集';
- manifest.description='一起看 + 搜剧AI：推荐、分类、搜索、分集与访客播放';
+ manifest.description='一起看 + 搜剧AI + 看剧AI：推荐、分类、搜索、完整分集与访客播放';
  const extraCode=fs.readFileSync(path.join(__dirname,'souju.js'),'utf8');
  const extraContext=vm.createContext({});new vm.Script(extraCode).runInContext(extraContext,{timeout:1000});
  const extraMeta=extraContext.WidgetMetadata;
  if(!extraMeta || !/^\d+\.\d+\.\d+$/.test(extraMeta.version)) throw new Error('搜剧AI版本格式错误');
  const extraName='souju-'+extraMeta.version+'.js';
  manifest.widgets=[manifest.widgets[0],{id:extraMeta.id,title:extraMeta.title,description:extraMeta.description,author:extraMeta.author,version:extraMeta.version,requiredVersion:extraMeta.requiredVersion,url:baseUrl+'/'+extraName}];
+ const kanjuCode=fs.readFileSync(path.join(__dirname,'kanju.js'),'utf8'),kanjuContext=vm.createContext({});new vm.Script(kanjuCode).runInContext(kanjuContext,{timeout:1000});
+ const kanjuMeta=kanjuContext.WidgetMetadata;
+ if(!kanjuMeta||!/^\d+\.\d+\.\d+$/.test(kanjuMeta.version))throw new Error('看剧AI版本格式错误');
+ const kanjuName='kanju-'+kanjuMeta.version+'.js';
+ manifest.widgets.push({id:kanjuMeta.id,title:kanjuMeta.title,description:kanjuMeta.description,author:kanjuMeta.author,version:kanjuMeta.version,requiredVersion:kanjuMeta.requiredVersion,url:baseUrl+'/'+kanjuName});
  const common=[{key:'Access-Control-Allow-Origin',value:'*'},{key:'X-Content-Type-Options',value:'nosniff'},{key:'Cache-Control',value:'public, max-age=60, must-revalidate'}];
  const headers=[{source:'/'+key('yqk.fwd'),headers:[...common,{key:'Content-Type',value:'application/json; charset=utf-8'}]},
  {source:'/'+key(name),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]},
- {source:'/'+key(extraName),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]}];
+ {source:'/'+key(extraName),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]},
+ {source:'/'+key(kanjuName),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]}];
  const files={
   [key(name)]:code,
   [key(extraName)]:extraCode,
+  [key(kanjuName)]:kanjuCode,
   [key('yqk.fwd')]:JSON.stringify(manifest,null,2)+'\n',
   'vercel.json':JSON.stringify({$schema:'https://openapi.vercel.sh/vercel.json',framework:null,outputDirectory:'.',headers},null,2)+'\n',
   '_headers':headers.map(h=>h.source+'\n'+h.headers.map(x=>'  '+x.key+': '+x.value).join('\n')).join('\n\n')+'\n',
@@ -41,7 +48,7 @@ function build(base,output,options={}) {
   // Pages replaces the whole artifact. Keep published scripts accessible to
   // clients that have not refreshed their subscription yet.
   for(const archived of fs.readdirSync(__dirname)) {
-   if(/^(?:yqk|souju)-\d+\.\d+\.\d+\.js$/.test(archived) && archived!==name && archived!==extraName) {
+   if(/^(?:yqk|souju|kanju)-\d+\.\d+\.\d+\.js$/.test(archived) && archived!==name && archived!==extraName && archived!==kanjuName) {
     files[archived]=fs.readFileSync(path.join(__dirname,archived),'utf8');
    }
   }

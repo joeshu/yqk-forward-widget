@@ -4,7 +4,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'yqk-deploy-test-'));let passed=
 function test(name,fn){fn();passed++;console.log('PASS '+name);}
 test('repository subscription versions and immutable script snapshots match current source',()=>{
  const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'yqk.fwd'),'utf8'));
- for(const [source,id,prefix] of [['yqk.js','joeshu.yqk','yqk-'],['souju.js','joeshu.souju','souju-']]){
+ for(const [source,id,prefix] of [['yqk.js','joeshu.yqk','yqk-'],['souju.js','joeshu.souju','souju-'],['kanju.js','joeshu.kanju','kanju-']]){
   const code=fs.readFileSync(path.join(__dirname,source),'utf8'),context=vm.createContext({});
   vm.runInContext(code,context);const meta=context.WidgetMetadata,widget=manifest.widgets.find(x=>x.id===id);
   assert(widget);assert.equal(widget.version,meta.version);
@@ -27,11 +27,18 @@ test('manifest links match generated script and metadata version',()=>{
 });
 test('collection contains an independent versioned Souju widget and script',()=>{
  const fwd=JSON.parse(fs.readFileSync(path.join(release.directory,'yqk.fwd'),'utf8'));
- assert.equal(fwd.widgets.length,2);const widget=fwd.widgets[1];assert.equal(widget.id,'joeshu.souju');
+ assert.equal(fwd.widgets.length,3);const widget=fwd.widgets[1];assert.equal(widget.id,'joeshu.souju');
  assert.equal(widget.url,'https://widgets.test.org/souju-'+widget.version+'.js');
  assert.equal(fs.readFileSync(path.join(release.directory,'souju-'+widget.version+'.js'),'utf8'),fs.readFileSync(path.join(__dirname,'souju.js'),'utf8'));
  const headers=JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers;
  assert(headers.some(h=>h.source==='/souju-'+widget.version+'.js'));
+});
+test('third Kanju widget has matching script, version, headers and release entry',()=>{
+ const fwd=JSON.parse(fs.readFileSync(path.join(release.directory,'yqk.fwd'),'utf8')),widget=fwd.widgets.find(x=>x.id==='joeshu.kanju');
+ assert(widget);assert.equal(widget.title,'看剧AI');assert.equal(widget.url,'https://widgets.test.org/kanju-'+widget.version+'.js');
+ assert.equal(fs.readFileSync(path.join(release.directory,'kanju-'+widget.version+'.js'),'utf8'),fs.readFileSync(path.join(__dirname,'kanju.js'),'utf8'));
+ assert(JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers.some(x=>x.source==='/kanju-'+widget.version+'.js'));
+ assert(JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'),'utf8')).widgets.some(x=>x.id===widget.id&&x.version===widget.version));
 });
 test('subdirectory URL is preserved without duplicated slash',()=>{
  const r=build('https://widgets.test.org/Resource/Yqk/',path.join(root,'sub'));
