@@ -1,0 +1,24 @@
+{
+  "site": "https://zip0.com",
+  "observedAt": "2026-10-10",
+  "publicSearchDocs": "https://zip0.com/.well-known/openapi.json",
+  "frontend": {
+    "entry": "https://zip0.com/assets/index-eX1vHeDn.js",
+    "player": "https://zip0.com/assets/VideoPlayer-DMla1Lfj.js",
+    "playerSha256": "c3b61620fd9ce6316fc157b3d41ff8857f81c11e05ef3fcc0b1696432bd66cae"
+  },
+  "observations": [
+    "Public search returns source-specific watch URLs and pagination; no poster field",
+    "Category pages render initialResponse.items with posters and source IDs",
+    "Watch SSR contains full detail.episodes and episodeCount",
+    "VideoPlayer directly uses detail.episodes[index].url with HLS.js or native HLS; no extra proxy found in this player",
+    "The episode query is the one-based array ordinal; original episode name is preserved separately"
+  ],
+  "localRegressionTests": 198,
+  "limitations": [
+    "Site serialization may change; data is parsed with a bounded literal grammar, never executed",
+    "Guest public data only; no login, AI parsing or quota rotation",
+    "Runtime only probes HLS playlists; MP4 returned without media download",
+    "Native iOS layout and full video decoding not tested"
+  ]
+}

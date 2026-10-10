@@ -1,16 +1,17 @@
 {
   "name": "joeshu-yqk-widget-tests",
   "private": true,
-  "version": "0.12.0",
+  "version": "0.13.0",
   "scripts": {
-    "test": "node test.cjs && node test-yqk-upgrade.cjs && node test-yqk-quality.cjs && node test-souju.cjs && node test-souju-episodes.cjs && node test-souju-ai.cjs && node test-souju-quota.cjs && node test-souju-upgrade.cjs && node test-widget-status.cjs && node test-kanju.cjs && node test-deploy.cjs",
+    "test": "node test.cjs && node test-yqk-upgrade.cjs && node test-yqk-quality.cjs && node test-souju.cjs && node test-souju-episodes.cjs && node test-souju-ai.cjs && node test-souju-quota.cjs && node test-souju-upgrade.cjs && node test-widget-status.cjs && node test-kanju.cjs && node test-zip0.cjs && node test-deploy.cjs",
     "test:live": "node live-test.cjs",
     "build:publish": "node deploy.cjs",
     "test:souju:live": "node live-souju.cjs",
     "test:yqk:live": "node live-yqk-upgrade.cjs",
     "test:souju:episodes:live": "node live-souju-episodes.cjs",
     "test:souju:ai:live": "node live-souju-ai.cjs",
-    "test:kanju:live": "node live-kanju.cjs"
+    "test:kanju:live": "node live-kanju.cjs",
+    "test:zip0:live": "node live-zip0.cjs"
   },
   "devDependencies": {
     "@rexnow/libs": "3.1.3",

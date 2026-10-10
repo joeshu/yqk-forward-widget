@@ -1,0 +1,96 @@
+{
+  "time": "2026-10-10T06:07:44.647Z",
+  "version": "0.1.0",
+  "checks": [
+    {
+      "name": "official metadata schema",
+      "result": true
+    },
+    {
+      "name": "real category 0",
+      "result": {
+        "category": "movie",
+        "page": 1,
+        "count": 74,
+        "first": "捉妖天师"
+      }
+    },
+    {
+      "name": "real category 1",
+      "result": {
+        "category": "movie",
+        "page": 2,
+        "count": 120,
+        "first": "潜伏6"
+      }
+    },
+    {
+      "name": "real category 2",
+      "result": {
+        "category": "tv",
+        "page": 1,
+        "count": 68,
+        "first": "寄生之心"
+      }
+    },
+    {
+      "name": "real public search and official card schema",
+      "result": {
+        "count": 20,
+        "animeSources": 6
+      }
+    },
+    {
+      "name": "real complete anime detail, episode 101 and last episode",
+      "result": {
+        "title": "凡人修仙传",
+        "source": "dyttzy",
+        "episodeCount": 195,
+        "episode101": "第101集",
+        "last": "第195集"
+      }
+    }
+  ],
+  "playback": [
+    {
+      "episode": "第101集",
+      "passed": false,
+      "error": "ZIP0所选来源播放清单不可用，请在搜索结果选择其他来源",
+      "source": "dyttzy"
+    },
+    {
+      "episode": "第195集",
+      "passed": false,
+      "error": "ZIP0所选来源播放清单不可用，请在搜索结果选择其他来源",
+      "source": "dyttzy"
+    },
+    {
+      "episode": "第101集",
+      "source": "ffzy",
+      "passed": false,
+      "error": "ZIP0所选来源播放清单不可用，请在搜索结果选择其他来源"
+    },
+    {
+      "episode": "第195集",
+      "source": "ffzy",
+      "passed": false,
+      "error": "ZIP0所选来源播放清单不可用，请在搜索结果选择其他来源"
+    },
+    {
+      "episode": "第101集",
+      "source": "ikun",
+      "passed": true,
+      "hlsStatus": 200,
+      "resourceName": "线路 9 · 第101集 · 清单 1920×1080 · 固定"
+    },
+    {
+      "episode": "第195集",
+      "source": "ikun",
+      "passed": true,
+      "hlsStatus": 200,
+      "resourceName": "线路 9 · 第195集 · 清单 1920×1080 · 固定"
+    }
+  ],
+  "sourceSha256": "1884a2e7341b53a5c97ac3dce27a8775603c14566163bfa2aceffce11b13af28",
+  "note": "Real public website/API requests and official Rex schemas; per-source HLS availability is reported separately. No media segments or keys downloaded; no full decode or native iOS UI test. Only public discovery and guest playback, no login or AI consumption."
+}
