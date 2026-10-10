@@ -1,0 +1,83 @@
+{
+  "time": "2026-10-10T16:16:03.768Z",
+  "version": "0.1.0",
+  "checks": [
+    {
+      "name": "official metadata",
+      "passed": true
+    },
+    {
+      "name": "real category",
+      "category": "Movie",
+      "count": 20,
+      "first": "野孩子2008"
+    },
+    {
+      "name": "real category",
+      "category": "Tv",
+      "count": 20,
+      "first": "降魔警探第三季"
+    },
+    {
+      "name": "real category",
+      "category": "Dm",
+      "count": 20,
+      "first": "独角兽学院：秘密揭开第二章"
+    },
+    {
+      "name": "real category",
+      "category": "Zy",
+      "count": 20,
+      "first": "心动的信号第九季"
+    },
+    {
+      "name": "real category",
+      "category": "qita",
+      "count": 20,
+      "first": "逃学威龙3之龙过鸡年"
+    },
+    {
+      "name": "real movie page 2",
+      "count": 20,
+      "first": "大学炸弹客"
+    },
+    {
+      "name": "real homepage",
+      "count": 40
+    },
+    {
+      "name": "real latest/hot",
+      "list": "new",
+      "count": 28
+    },
+    {
+      "name": "real latest/hot",
+      "list": "hot",
+      "count": 50
+    },
+    {
+      "name": "real search CAPTCHA explicitly reported",
+      "passed": true
+    },
+    {
+      "name": "real complete detail",
+      "title": "雷霆令",
+      "count": 26,
+      "alternatives": 2
+    },
+    {
+      "name": "real same-episode HLS",
+      "passed": true,
+      "count": 2,
+      "names": [
+        "『雷霆令』云播X线 · 第01集 · 清单 1920×1080 · 固定",
+        "『雷霆令』云播G线 · 第01集 · 清单 1920×1080 · 固定"
+      ]
+    }
+  ],
+  "limitations": [
+    "No media segment download/decoding check",
+    "No iPhone import or playback test",
+    "Search may require original-site CAPTCHA; no automatic solving or browser-session sharing"
+  ]
+}

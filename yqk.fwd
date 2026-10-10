@@ -1,6 +1,6 @@
 {
   "title": "joeshu 影视组件合集",
-  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视：推荐、分类、搜索、完整分集与访客播放",
+  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视：推荐、分类、搜索、完整分集与访客播放",
   "widgets": [
     {
       "id": "joeshu.yqk",
@@ -46,6 +46,15 @@
       "version": "0.1.1",
       "requiredVersion": "0.0.1",
       "url": "https://joeshu.github.io/yqk-forward-widget/4kvm-0.1.1.js"
+    },
+    {
+      "id": "joeshu.auete",
+      "title": "Auete影视",
+      "description": "独立分类、近期更新、完整分集与多线路；搜索遇到原站验证码时明确提示。",
+      "author": "joeshu",
+      "version": "0.1.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://joeshu.github.io/yqk-forward-widget/auete-0.1.0.js"
     }
   ]
 }

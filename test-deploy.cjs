@@ -4,7 +4,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'yqk-deploy-test-'));let passed=
 function test(name,fn){fn();passed++;console.log('PASS '+name);}
 test('repository subscription versions and immutable script snapshots match current source',()=>{
  const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'yqk.fwd'),'utf8'));
- for(const [source,id,prefix] of [['yqk.js','joeshu.yqk','yqk-'],['souju.js','joeshu.souju','souju-'],['kanju.js','joeshu.kanju','kanju-'],['zip0.js','joeshu.zip0','zip0-'],['4kvm.js','joeshu.4kvm','4kvm-']]){
+ for(const [source,id,prefix] of [['yqk.js','joeshu.yqk','yqk-'],['souju.js','joeshu.souju','souju-'],['kanju.js','joeshu.kanju','kanju-'],['zip0.js','joeshu.zip0','zip0-'],['4kvm.js','joeshu.4kvm','4kvm-'],['auete.js','joeshu.auete','auete-']]){
   const code=fs.readFileSync(path.join(__dirname,source),'utf8'),context=vm.createContext({});
   vm.runInContext(code,context);const meta=context.WidgetMetadata,widget=manifest.widgets.find(x=>x.id===id);
   assert(widget);assert.equal(widget.version,meta.version);
@@ -27,7 +27,7 @@ test('manifest links match generated script and metadata version',()=>{
 });
 test('collection contains an independent versioned Souju widget and script',()=>{
  const fwd=JSON.parse(fs.readFileSync(path.join(release.directory,'yqk.fwd'),'utf8'));
- assert.equal(fwd.widgets.length,5);const widget=fwd.widgets[1];assert.equal(widget.id,'joeshu.souju');
+ assert.equal(fwd.widgets.length,6);const widget=fwd.widgets[1];assert.equal(widget.id,'joeshu.souju');
  assert.equal(widget.url,'https://widgets.test.org/souju-'+widget.version+'.js');
  assert.equal(fs.readFileSync(path.join(release.directory,'souju-'+widget.version+'.js'),'utf8'),fs.readFileSync(path.join(__dirname,'souju.js'),'utf8'));
  const headers=JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers;
@@ -53,6 +53,12 @@ test('fifth 4K影视 widget includes its standalone guest player, headers and re
  assert.equal(fs.readFileSync(path.join(release.directory,'4kvm-'+widget.version+'.js'),'utf8'),fs.readFileSync(path.join(__dirname,'4kvm.js'),'utf8'));
  assert(JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers.some(x=>x.source==='/4kvm-'+widget.version+'.js'));
  assert(JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'),'utf8')).widgets.some(x=>x.id===widget.id&&x.version===widget.version));
+});
+test('sixth Auete widget has matching script, headers and release metadata',()=>{
+ const fwd=JSON.parse(fs.readFileSync(path.join(release.directory,'yqk.fwd'),'utf8')),w=fwd.widgets.find(x=>x.id==='joeshu.auete');
+ assert(w);assert.equal(w.title,'Auete影视');assert.equal(fs.readFileSync(path.join(release.directory,'auete-'+w.version+'.js'),'utf8'),fs.readFileSync(path.join(__dirname,'auete.js'),'utf8'));
+ assert(JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers.some(x=>x.source==='/auete-'+w.version+'.js'));
+ assert(JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'),'utf8')).widgets.some(x=>x.id===w.id&&x.version===w.version));
 });
 test('subdirectory URL is preserved without duplicated slash',()=>{
  const r=build('https://widgets.test.org/Resource/Yqk/',path.join(root,'sub'));
