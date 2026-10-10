@@ -1,0 +1,13 @@
+// Bounded HLS inspection; keep external audio and subtitle groups intact.
+function vm4Relative(base,ref){if(/^https?:\/\//i.test(ref))return vm4Url(ref);if(/^\/\//.test(ref))return vm4Url(base.split(':')[0]+':'+ref);if(/^[a-z][a-z\d+.-]*:/i.test(ref)||/[\s\\]/.test(ref))throw new Error('播放清单地址无效');var m=base.match(/^(https?:\/\/[^/]+)(\/[^?#]*)?/i);if(!m)throw new Error('播放清单地址无效');if(ref.charAt(0)==='?')return m[1]+(m[2]||'/')+ref;var path=ref.charAt(0)==='/'?ref:(m[2]||'/').replace(/[^/]*$/,'')+ref,parts=[];path.split('/').forEach(function(p){if(p==='..')parts.pop();else if(p!=='.')parts.push(p);});return vm4Url(m[1]+parts.join('/'));}
+async function vm4Hls(url,headers,preference){var seen=Object.create(null),reads=0;
+ async function read(u,depth,keep){if(depth>=3||++reads>5||seen[u])throw new Error('播放清单检查达到上限');seen[u]=true;var r=await Widget.http.get(u,{headers:headers}),s=Number(r.statusCode||r.status);if(s===429){var e=new Error('播放线路请求过于频繁，请稍后重试');e.code='RATE_LIMIT';throw e;}var text=r.data;if(s!==200||typeof text!=='string'||text.length>1024*1024||!/^\s*#EXTM3U/.test(text))throw new Error('4K影视所选画质清单不可用，请稍后重试');var lines=text.split(/\r?\n/).map(function(l){return l.trim();});if(!/#EXT-X-STREAM-INF:/.test(text)){if(!/#EXTINF:/.test(text)||!lines.some(function(l){return l&&l[0]!=='#';}))throw new Error('播放清单为空');return {url:u};}
+ var external=/(?:[:,])(?:AUDIO|SUBTITLES|VIDEO|CLOSED-CAPTIONS)=(?!NONE(?:,|\r?\n|$))/.test(text),variants=[];
+ for(var i=0;i<lines.length;i++)if(/^#EXT-X-STREAM-INF:/.test(lines[i])){var res=lines[i].match(/RESOLUTION=(\d+)x(\d+)/),bw=lines[i].match(/(?:[:,])BANDWIDTH=(\d+)/);for(var j=i+1;j<lines.length;j++){if(/^#EXT-X-STREAM-INF:/.test(lines[j]))break;if(lines[j]&&lines[j][0]!=='#'){variants.push({url:vm4Relative(u,lines[j]),width:res?Number(res[1]):0,height:res?Number(res[2]):0,bw:bw?Number(bw[1]):0});break;}}}
+ variants.sort(function(a,b){return b.width*b.height-a.width*a.height||b.bw-a.bw;});var last;
+ for(var v=0;v<Math.min(variants.length,2);v++)try{var chosen=variants[v],child=await read(chosen.url,depth+1,keep||external),fixed=preference==='fixed'&&!keep&&!external&&!child.retained;
+ if(v===0&&child.url===chosen.url){return {url:fixed?child.url:u,width:chosen.width,height:chosen.height,fixed:fixed,retained:external||keep||child.retained};}
+ if(keep||external)throw new Error('备用清单有独立音轨或字幕，请选择其他来源');return {url:child.url,width:chosen.width,height:chosen.height,fixed:fixed,retained:child.retained};}catch(e){if(e.code==='RATE_LIMIT')throw e;last=e;}
+ throw last||new Error('播放子清单不可用');
+ }return read(url,0,false);
+}

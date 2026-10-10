@@ -1,6 +1,6 @@
 {
   "title": "joeshu 影视组件合集",
-  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视：推荐、分类、搜索、完整分集与访客播放",
+  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视：推荐、分类、搜索、完整分集与访客播放",
   "widgets": [
     {
       "id": "joeshu.yqk",
@@ -37,6 +37,15 @@
       "version": "0.1.0",
       "author": "joeshu",
       "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/zip0-0.1.0.js"
+    },
+    {
+      "id": "joeshu.4kvm",
+      "title": "4K影视",
+      "description": "独立片库、搜索、完整分集与游客可用画质；4K会员资源以原站权限为准。",
+      "author": "joeshu",
+      "version": "0.1.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://joeshu.github.io/yqk-forward-widget/4kvm-0.1.0.js"
     }
   ]
 }

@@ -1,0 +1,124 @@
+{
+  "checkedAt": "2026-10-10T12:38:57.296808+00:00",
+  "site": "https://www.4kvms.org",
+  "publicationPage": "https://4kvm.site",
+  "status": "research-proof-passed-and-widget-implemented",
+  "sourceArtifacts": {
+    "wasm": {
+      "sha256": "d5d51939038a02b535ada73157fe845a46c7fc8e0d1aca7fc8b652f01a3fc10c",
+      "bytes": 57856
+    },
+    "glueJs": {
+      "sha256": "426511b770543ff1cb4f893284b361ec4cfff27f887cecf61bcbbe4f4f9ebac5",
+      "bytes": 10965
+    }
+  },
+  "guestFlow": {
+    "page": "/play/{actual-page-key}",
+    "fields": [
+      "nb-st",
+      "nb-plt initialized by original page Date.now()",
+      "page userlink",
+      "actual episode dataid",
+      "actual episode page key"
+    ],
+    "endpoint": "/video/play",
+    "membership": "Only server-unlocked guest qualities were requested"
+  },
+  "nativeCompatibilityProof": {
+    "engine": "Node vm sandbox, not iOS JavaScriptCore",
+    "WebAssemblyDisabled": true,
+    "globalBrowserObjectsDisabled": true,
+    "TextEncoderAndDecoderDisabled": true,
+    "asciiCodecUsed": true,
+    "wasmToJsTool": "binaryen 132.0.0",
+    "loweringPasses": [
+      "llvm-nontrapping-fptoint-lowering",
+      "llvm-memory-copy-fill-lowering"
+    ],
+    "originalWasmComparisons": 12,
+    "allEqual": true,
+    "translatedBundleBytes": 273885
+  },
+  "episodeCompleteness": {
+    "line": 1,
+    "actualLinks": 195,
+    "contains101": true,
+    "contains195": true
+  },
+  "liveSamples": [
+    {
+      "episode": 1,
+      "apiStatus": 200,
+      "apiCode": 200,
+      "qualities": [
+        {
+          "title": "4K",
+          "locked": true,
+          "isvip": true
+        },
+        {
+          "title": "1080p",
+          "locked": false,
+          "isvip": false
+        }
+      ],
+      "hlsStatus": 200,
+      "hlsValid": true,
+      "segments": 209,
+      "qualityLabel": "1080p"
+    },
+    {
+      "episode": 101,
+      "apiStatus": 200,
+      "apiCode": 200,
+      "qualities": [
+        {
+          "title": "4K",
+          "locked": true,
+          "isvip": true
+        },
+        {
+          "title": "1080p",
+          "locked": false,
+          "isvip": false
+        }
+      ],
+      "hlsStatus": 200,
+      "hlsValid": true,
+      "segments": 196,
+      "qualityLabel": "1080p"
+    },
+    {
+      "episode": 195,
+      "apiStatus": 200,
+      "apiCode": 200,
+      "qualities": [
+        {
+          "title": "4K",
+          "locked": true,
+          "isvip": true
+        },
+        {
+          "title": "1080p",
+          "locked": false,
+          "isvip": false
+        }
+      ],
+      "hlsStatus": 200,
+      "hlsValid": true,
+      "segments": 115,
+      "qualityLabel": "1080p"
+    }
+  ],
+  "limitations": [
+    "No iOS app import or playback test",
+    "No video segments, media decoding or displayed resolution measured",
+    "Website module changes require revalidation"
+  ],
+  "integration": {
+    "script": "4kvm.js",
+    "version": "0.1.0",
+    "validation": "4kvm-validation.json"
+  }
+}

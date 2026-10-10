@@ -1,0 +1,101 @@
+{
+  "time": "2026-10-10T12:45:49.475Z",
+  "version": "0.1.0",
+  "checks": [
+    {
+      "name": "official metadata",
+      "passed": true
+    },
+    {
+      "name": "real catalog",
+      "category": "1",
+      "page": 1,
+      "count": 30,
+      "first": "月球陨落",
+      "firstLink": "https://www.4kvms.org/play/cgzofqp06"
+    },
+    {
+      "name": "real catalog",
+      "category": "1",
+      "page": 2,
+      "count": 30,
+      "first": "浪客剑心：传说的完结篇",
+      "firstLink": "https://www.4kvms.org/play/ch4maifby"
+    },
+    {
+      "name": "real catalog",
+      "category": "2",
+      "page": 1,
+      "count": 30,
+      "first": "无可替代",
+      "firstLink": "https://www.4kvms.org/play/ch4mi04d4"
+    },
+    {
+      "name": "real catalog",
+      "category": "3",
+      "page": 1,
+      "count": 30,
+      "first": "择日飞升",
+      "firstLink": "https://www.4kvms.org/play/ch4mo8v83"
+    },
+    {
+      "name": "real catalog",
+      "category": "4",
+      "page": 1,
+      "count": 0,
+      "first": null,
+      "firstLink": null
+    },
+    {
+      "name": "real homepage",
+      "count": 74
+    },
+    {
+      "name": "real search",
+      "count": 2
+    },
+    {
+      "name": "complete detail",
+      "count": 195,
+      "title": "凡人修仙传"
+    },
+    {
+      "name": "real movie detail",
+      "title": "月球陨落",
+      "count": 1
+    },
+    {
+      "name": "search page 2 after two results",
+      "count": 0
+    },
+    {
+      "name": "alternate published entry search",
+      "site": "https://www.4kvms.com",
+      "count": 2
+    }
+  ],
+  "playback": [
+    {
+      "episode": 1,
+      "passed": true,
+      "sourceCount": 1,
+      "name": "alists · 1080p · 第1集"
+    },
+    {
+      "episode": 101,
+      "passed": true,
+      "sourceCount": 1,
+      "name": "alists · 1080p · 第101集"
+    },
+    {
+      "episode": 195,
+      "passed": true,
+      "sourceCount": 1,
+      "name": "alists · 1080p · 第195集"
+    }
+  ],
+  "limitations": [
+    "No media segments or decoding checked",
+    "No iPhone import/playback test"
+  ]
+}
