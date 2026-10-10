@@ -2,13 +2,13 @@ const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/
 const store=new Map(), calls=[];
 let handler;
 const ctx=vm.createContext({console, Widget:{storage:{get:async k=>store.get(k),set:async(k,v)=>{assert.equal(typeof v,'string');store.set(k,v);}},http:{
- get:async url=>({statusCode:200,data:url.includes('/js/baseUrlList.js')?'var baseApiList = ["https://api.example.org"];':'#EXTM3U\n#EXT-X-VERSION:3'}),
+ get:async url=>({statusCode:200,data:url.includes('/js/baseUrlList.js')?'var baseApiList = ["https://api.example.org"];':'#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:6,\nsegment.ts'}),
  post:async(url,body)=>{calls.push({url,body});return handler(url,body);}
 }}});
 vm.runInContext(fs.readFileSync(__dirname+'/yqk.js','utf8'),ctx);
 let passed=0;
-async function test(name,fn){store.clear();ctx.yqkMemory={};ctx.yqkMemoryOrder=[];ctx.yqkInFlight={};ctx.yqkQueues={};ctx.YQK.detailTTL=60000;
- ctx.Widget.http.get=async url=>({statusCode:200,data:url.includes('/js/baseUrlList.js')?'var baseApiList = ["https://api.example.org"];':'#EXTM3U\n#EXT-X-VERSION:3'});
+async function test(name,fn){store.clear();ctx.yqkMemory={};ctx.yqkMemoryOrder=[];ctx.yqkInFlight={};ctx.yqkQueues={};ctx.yqkLineHints={};ctx.YQK.detailTTL=60000;
+ ctx.Widget.http.get=async url=>({statusCode:200,data:url.includes('/js/baseUrlList.js')?'var baseApiList = ["https://api.example.org"];':'#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:6,\nsegment.ts'});
  await fn();passed++;console.log('PASS '+name);}
 const item={vodId:12,vodName:'测试电影',coverImg:'https://images.example.org/a.jpg',intro:'<p>介绍</p>'};
 const good=data=>({statusCode:200,data:{result:true,data}});
@@ -266,14 +266,14 @@ const good=data=>({statusCode:200,data:{result:true,data}});
   const r=await ctx.resourcesForEpisode(31,{playerName:'A'},false);assert.equal(r.length,1);assert.equal(r[0].name,'720P');
  });
  await test('bad HLS movie sources automatically reach fourth matching feature source',async()=>{
-  calls.length=0;ctx.Widget.http.get=async url=>url.includes('/js/baseUrlList.js')?({data:'var baseApiList = ["https://api.example.org"];'}):({statusCode:url.includes('/61.')?200:403,data:url.includes('/61.')?'#EXTM3U':'forbidden'});
+  calls.length=0;ctx.Widget.http.get=async url=>url.includes('/js/baseUrlList.js')?({data:'var baseApiList = ["https://api.example.org"];'}):({statusCode:url.includes('/61.')?200:403,data:url.includes('/61.')?'#EXTM3U\n#EXTINF:6,\nsegment.ts':'forbidden'});
   handler=(url,b)=>url.endsWith('/index')?good({...item,playerList:[31,41,51,61].map((id,i)=>({playerName:'线路'+i,epList:[{epId:id,epName:i===0?'HD中字':'正片'}]}))}):url.endsWith('/epDetail')?good([{canPlay:true,vodResolution:1,showName:'标清'}]):good({playUrl:'https://media.example.org/'+b.epId+'.m3u8'});
   const r=await ctx.loadResource({link:'https://m.yqk3hxe.com/play/12?epId=31'});
   assert.equal(r[0].name,'线路3 · 标清');assert.equal(r[0].description,'线路3');
   assert.deepEqual(calls.filter(c=>c.url.endsWith('/playUrl')).map(c=>c.body.epId),[31,41,51,61]);
  });
  await test('TV fallback matches actual episode label including leading zeros',async()=>{
-  calls.length=0;ctx.Widget.http.get=async url=>url.includes('/js/baseUrlList.js')?({data:'var baseApiList = ["https://api.example.org"];'}):({statusCode:url.includes('/41.')?200:403,data:'#EXTM3U'});
+  calls.length=0;ctx.Widget.http.get=async url=>url.includes('/js/baseUrlList.js')?({data:'var baseApiList = ["https://api.example.org"];'}):({statusCode:url.includes('/41.')?200:403,data:'#EXTM3U\n#EXTINF:6,\nsegment.ts'});
   handler=(url,b)=>url.endsWith('/index')?good({...item,playerList:[
    {playerName:'A',epList:[{epId:31,epName:'第01集'},{epId:32,epName:'第02集'}]},
    {playerName:'B',epList:[{epId:41,epName:'第1集'},{epId:42,epName:'第2集'}]}
@@ -290,7 +290,7 @@ const good=data=>({statusCode:200,data:{result:true,data}});
  await test('HTML masquerading as a playlist rejected with a four-source attempt cap',async()=>{
   calls.length=0;ctx.Widget.http.get=async url=>url.includes('/js/baseUrlList.js')?({data:'var baseApiList = ["https://api.example.org"];'}):({statusCode:200,data:'<html>login</html>'});
   handler=(url,b)=>url.endsWith('/index')?good({...item,playerList:[31,41,51,61,71].map(epId=>({epList:[{epId,epName:'HD'}]}))}):url.endsWith('/epDetail')?good([{canPlay:true,vodResolution:1}]):good({playUrl:'https://media.example.org/'+b.epId+'.m3u8'});
-  await assert.rejects(()=>ctx.loadResource({link:'https://m.yqk3hxe.com/play/12?epId=31'}),/尝试 4 条/);
+  await assert.rejects(()=>ctx.loadResource({link:'https://m.yqk3hxe.com/play/12?epId=31',sourceLimit:4}),/尝试 4 条/);
   assert.equal(calls.filter(c=>c.url.endsWith('/playUrl')).length,4);
  });
  await test('HLS rate limiting stops quality and source fallback immediately',async()=>{

@@ -5,9 +5,9 @@
     {
       "id": "joeshu.yqk",
       "title": "一起看",
-      "description": "真实接口与视频链路已验证",
+      "description": "最新片单、多条件筛选、同片同集线路回退与HLS清单检查",
       "requiredVersion": "0.0.1",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "author": "joeshu",
       "url": "https://example.invalid/yqk.js"
     },
