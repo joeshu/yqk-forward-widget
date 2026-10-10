@@ -1,0 +1,124 @@
+{
+  "time": "2026-10-10T00:15:14.756Z",
+  "version": "0.7.0",
+  "checks": [
+    {
+      "name": "official metadata schema",
+      "result": true
+    },
+    {
+      "name": "real combined filters 2",
+      "result": {
+        "channelId": 2,
+        "genre": "科幻",
+        "area": "美国",
+        "count": 15,
+        "sample": "更好的自己",
+        "flags": "2026 / 科幻片 / 美国"
+      }
+    },
+    {
+      "name": "real combined filters 3",
+      "result": {
+        "channelId": 3,
+        "genre": "剧情",
+        "area": "大陆",
+        "count": 15,
+        "sample": "悬案2026",
+        "flags": "2026 / 国产剧 / 大陆"
+      }
+    },
+    {
+      "name": "real combined filters 8",
+      "result": {
+        "channelId": 8,
+        "genre": "动画",
+        "area": "日本",
+        "count": 15,
+        "sample": "某暗部的少女共栖",
+        "flags": "2026 / 日韩动漫 / 日本"
+      }
+    },
+    {
+      "name": "real combined filters 10",
+      "result": {
+        "channelId": 10,
+        "genre": "真人秀",
+        "area": "大陆",
+        "count": 15,
+        "sample": "现在就出发第四季",
+        "flags": "2026 / 大陆综艺 / 大陆"
+      }
+    },
+    {
+      "name": "real latest pages with array cursor",
+      "result": {
+        "pageOne": 15,
+        "pageTwo": 15,
+        "titles": [
+          "悬案2026",
+          "野狗骨头",
+          "灿如繁星"
+        ]
+      }
+    },
+    {
+      "name": "real current-year latest movies",
+      "result": {
+        "count": 15,
+        "years": [
+          "2026"
+        ]
+      }
+    },
+    {
+      "name": "real latest special channel 50",
+      "result": {
+        "channelId": 50,
+        "count": 15
+      }
+    },
+    {
+      "name": "real latest special channel 65",
+      "result": {
+        "channelId": 65,
+        "count": 15
+      }
+    },
+    {
+      "name": "real latest special channel 56",
+      "result": {
+        "channelId": 56,
+        "count": 15
+      }
+    },
+    {
+      "name": "real Netflix current collection",
+      "result": {
+        "count": 9,
+        "sample": "闹鬼酒店第二季",
+        "flags": "2026 / 奈飞Netflix / 美国"
+      }
+    },
+    {
+      "name": "real playback 流浪地球2",
+      "result": {
+        "title": "流浪地球2",
+        "status": "playlists verified",
+        "resources": 1,
+        "source": "HN"
+      }
+    },
+    {
+      "name": "real playback 庆余年第二季",
+      "result": {
+        "title": "庆余年第二季",
+        "status": "playlists verified",
+        "resources": 1,
+        "source": "一起看APP"
+      }
+    }
+  ],
+  "sourceSha256": "76772bff47e59344cadbc99b37c06cf34044b09dc6fcff6c5b73b4e40ac82f33",
+  "note": "Production filter/latest paths and playback samples checked via official adaptor/schema. Unavailable upstream playback is reported, not counted as successful playback. No native iOS test or full media decode in this run."
+}
