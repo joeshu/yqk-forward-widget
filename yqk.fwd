@@ -14,11 +14,11 @@
     {
       "id": "joeshu.souju",
       "title": "搜剧AI",
-      "description": "最新片单、完整分集、AI官方线路与每日词元额度保护",
+      "description": "最新片单、完整分集、AI每日额度保护与额度不足直连回退",
       "requiredVersion": "0.0.1",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "author": "joeshu",
-      "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/souju-0.4.0.js"
+      "url": "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/souju-0.5.0.js"
     }
   ]
 }
