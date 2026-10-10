@@ -301,7 +301,7 @@ https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
 
 验证命令：`node test-auete.cjs`、`node live-auete.cjs`。真实验证记录见 `auete-validation.json`；只核验播放清单，未下载/解码媒体分片，未在iPhone上实测导入与播放。不宣称原站标签代表已测得的1080p/4K画质。
 
-### 小宝影院与Anime1动漫（各自独立，0.1.0）
+### 小宝影院与Anime1动漫（各自独立，0.1.1）
 
 - **小宝影院**：小宝/小新旧入口均转向 <https://xiaoheimi.cc/>，因此合并为一个模块。支持首页近期条目、电影/电视剧/动漫/综艺片库、原站真实分类分页、搜索和完整分集。播放只读取公开播放器JSON中的M3U8/MP4地址，核对影片ID与线路/分集；付费或试看资源不作为免费直连。最多检查3条同一影片、同一分集编号及标题的线路，共享6次HLS请求预算，保留外部音轨与字幕。原站将部分动漫拆为年番或季，保留真实条目，不伪造为一部总集数。
 - **Anime1动漫**：<https://anime1.me/> 的 `animelist.json` 提供动画目录，支持年份/季节筛选、每页30条和近期更新；原站WordPress搜索以繁体片名为主。全集遍历真实归档分页（最多200页/10000条，超限明确报错而非返回截断结果）。每次播放重新读取所选分集参数，调用原站公开播放API；临时Cookie只发往符合原站Cookie域名、路径及有效期的媒体地址，不持久保存。媒体仅接受原站子域名的HTTPS MP4，使用HEAD核对状态与类型，不在检查时下载视频。App需支持 `Widget.http.request` 和播放自定义Cookie请求头。
@@ -309,3 +309,5 @@ https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
 验证：`node test-new-sources.cjs`、`node live-new-sources.cjs`；真实结果见 `xiaobao-validation.json`、`anime1-validation.json`。回归包含超过100集、跨页全集、错误影片ID、重复/缺失分集、Cookie域名隔离与HTTP错误。尚未在iPhone实测导入、播放、快进及Cookie过期后的播放恢复。
 
 后续候选：华视影院已按原站游客播放器流程等待广告时长、调用 resolveUrl，并验证返回的 HLS 清单可读；仍需实现并验证 App 内的等待和会话保持。动漫MIKU的公开分集及播放器脚本可读，但抽查返回 Tuzimi 片源标识，其解析流程仍未解决。这两站尚未加入订阅。
+
+0.1.1 优化：Anime1 动画目录新增片名筛选，可组合年份、季节与多个关键词，筛选后再分页，直接进入整部动画；原站繁体目录不自动转换简体。全集遇到缺少播放参数的分集会报错，避免默默漏集。Cookie 按 host-only、路径边界、Max-Age 优先级与后续删除处理；媒体逐条检查，保留已验证可用的资源，429 立即停止。小宝详情在并发读取不同线路时使用独立对象，播放来源显示原站线路名称，MP4 新增 HEAD 状态及媒体类型检查。两站保留旧版本快照。

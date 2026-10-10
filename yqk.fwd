@@ -61,18 +61,18 @@
       "title": "小宝影院",
       "description": "小宝/小新同站独立模块：四类片库、搜索、完整分集与同集线路检查。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/xiaobao-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/xiaobao-0.1.1.js"
     },
     {
       "id": "joeshu.anime1",
       "title": "Anime1动漫",
       "description": "动画目录、年份季节筛选、近期更新、全集分页与原站临时Cookie播放。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/anime1-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/anime1-0.1.1.js"
     }
   ]
 }
