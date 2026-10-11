@@ -1,6 +1,6 @@
-## 聚爷爷独立组件发布（0.1.0）
+## 聚爷爷独立组件发布（0.1.1）
 
-当前合集共9个组件。`juyeye.js` 与 `juyeye-0.1.0.js` 必须逐字一致，根订阅、示例订阅及发布工具均登记 `joeshu.juyeye`。Pages、Vercel和Cloudflare构建均包含独立脚本、订阅项和版本信息；发布保留历史快照。运行 `node test-juyeye.cjs`、`npm test`，在线限制见 `juyeye-validation.json`。本模块自行移除指定平台404跳转，无需Quantumult X；服务端安全验证和原站网页解析线路仍可能阻挡播放。
+当前合集共9个组件。`juyeye.js` 与 `juyeye-0.1.1.js` 必须逐字一致，根订阅、示例订阅及发布工具均登记 `joeshu.juyeye`。Pages、Vercel和Cloudflare构建均包含独立脚本、订阅项和版本信息；发布保留历史快照。运行 `node test-juyeye.cjs`、`npm test`，在线限制见 `juyeye-validation.json`。本模块自行移除指定平台404跳转，无需Quantumult X；0.1.1 增加本机验证会话导入、状态及清除，仅对固定HTML原站发送会话，不传给媒体/CDN。服务端安全验证和原站网页解析线路仍可能阻挡播放。
 
 ## 多组件合集更新（0.8.0，历史记录）
 

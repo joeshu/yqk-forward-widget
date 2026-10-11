@@ -1,12 +1,12 @@
 {
-  "time": "2026-10-11T07:01:02.542Z",
-  "version": "0.1.0",
-  "sourceSha256": "77f89162245340cc84bf810364893cab019ec12db196db76888f32f18f2e9a19",
+  "time": "2026-10-11T07:11:11.286Z",
+  "version": "0.1.1",
+  "sourceSha256": "f930e82e4ba6fb0558e40e5c1d3c55434a1928a77528495117ddbd4aea355a43",
   "checks": [
     {
       "name": "home",
       "status": "BLOCKED",
-      "error": "聚爷爷原站要求安全验证，取消平台跳转不能解决验证码；App请求不一定共享浏览器会话"
+      "error": "需要原站验证会话，请到「验证会话设置」导入已验证会话"
     },
     {
       "name": "latest",
