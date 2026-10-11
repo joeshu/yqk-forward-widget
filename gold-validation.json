@@ -1,7 +1,7 @@
 {
-  "time": "2026-10-11T09:11:23.070Z",
-  "version": "0.1.1",
-  "sourceSha256": "d09ad61de1991dbf9b28d1f4d95d3b7040f72c67dce5fdcf235af3d16a8f8e75",
+  "time": "2026-10-11T09:23:26.532Z",
+  "version": "0.1.2",
+  "sourceSha256": "d68c99bb69d0ae0524550575e17ece4141e652b7a981fddc14f448ce44c3c97f",
   "checks": [
     {
       "name": "home",
@@ -42,6 +42,10 @@
       "names": [
         "标清 · 第1集"
       ]
+    },
+    {
+      "name": "out-of-range search returns empty",
+      "passed": true
     }
   ],
   "limitations": [

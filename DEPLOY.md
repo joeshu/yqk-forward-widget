@@ -1,4 +1,4 @@
-## 金牌影院与追影猫独立组件发布（0.1.1）
+## 金牌影院与追影猫独立组件发布（0.1.2）
 
 先运行 `node build-page-widgets.cjs`、`npm test`，在线抽样运行 `node live-page-widgets.cjs`。独立脚本及快照均进入Pages/Vercel/Cloudflare订阅和发布清单；两个新增入口为 `joeshu.gold`、`joeshu.zhuiyingmiao`。仅提交适配器、构建源码和脱敏检查摘要，不提交原站完整JS、媒体地址或会话抓包。
 

@@ -1,7 +1,7 @@
 {
-  "time": "2026-10-11T09:10:50.167Z",
-  "version": "0.1.1",
-  "sourceSha256": "e6fddb8788775f9d0165949a708c04221238de8d7fa0a9ee3b2fbcbfe732172f",
+  "time": "2026-10-11T09:23:11.945Z",
+  "version": "0.1.2",
+  "sourceSha256": "507494697dbed257aea51c6108e5394be382c5be70903eeaafbfff4369df3e45",
   "checks": [
     {
       "name": "home",
@@ -40,7 +40,15 @@
       "passed": true,
       "count": 1,
       "names": [
-        "标清 · 第1集"
+        "金牌影院 · 标清 · 第1集"
+      ]
+    },
+    {
+      "name": "real selected source and fallback",
+      "passed": true,
+      "selectedFailed": true,
+      "returnedSourceNames": [
+        "金牌影院 · 标清 · 第1集"
       ]
     }
   ],
