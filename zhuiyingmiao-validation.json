@@ -1,7 +1,7 @@
 {
-  "time": "2026-10-11T09:04:10.347Z",
-  "version": "0.1.0",
-  "sourceSha256": "139540d63d8915131119f1231d10db2b7eae0e0f41e5ab78aa72d51f3958a232",
+  "time": "2026-10-11T09:10:50.167Z",
+  "version": "0.1.1",
+  "sourceSha256": "e6fddb8788775f9d0165949a708c04221238de8d7fa0a9ee3b2fbcbfe732172f",
   "checks": [
     {
       "name": "home",
@@ -24,10 +24,16 @@
       "count": 3
     },
     {
+      "name": "search page 2",
+      "passed": true,
+      "count": 16
+    },
+    {
       "name": "complete detail",
       "passed": true,
       "title": "泪之女王",
-      "count": 16
+      "count": 16,
+      "firstEpisodeSourceChoices": 5
     },
     {
       "name": "guest media playlist",

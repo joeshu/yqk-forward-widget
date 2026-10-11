@@ -88,18 +88,18 @@
       "title": "金牌影院",
       "description": "独立游客片库、搜索、近期更新、完整分集与可用画质；登录专属画质按原站权限过滤。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/gold-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/gold-0.1.1.js"
     },
     {
       "id": "joeshu.zhuiyingmiao",
       "title": "追影猫影视",
       "description": "独立聚合片库、近期更新与搜索；原生播放适配金牌游客及麦田直连，其他外站解析以原站为准。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/zhuiyingmiao-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/zhuiyingmiao-0.1.1.js"
     }
   ]
 }
