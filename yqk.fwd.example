@@ -1,6 +1,6 @@
 {
   "title": "joeshu 影视组件合集",
-  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视 + Anime1动漫 + Eboyang影视 + 聚爷爷影视：推荐、分类、搜索、完整分集与访客播放",
+  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视 + Anime1动漫 + Eboyang影视 + 聚爷爷影视：推荐、分类、搜索、完整分集与访客播放；新增金牌影院与追影猫独立模块",
   "widgets": [
     {
       "id": "joeshu.yqk",
@@ -82,6 +82,24 @@
       "version": "0.1.1",
       "requiredVersion": "0.0.1",
       "url": "https://joeshu.github.io/yqk-forward-widget/juyeye-0.1.1.js"
+    },
+    {
+      "id": "joeshu.gold",
+      "title": "金牌影院",
+      "description": "独立游客片库、搜索、近期更新、完整分集与可用画质；登录专属画质按原站权限过滤。",
+      "author": "joeshu",
+      "version": "0.1.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://joeshu.github.io/yqk-forward-widget/gold-0.1.0.js"
+    },
+    {
+      "id": "joeshu.zhuiyingmiao",
+      "title": "追影猫影视",
+      "description": "独立聚合片库、近期更新与搜索；原生播放适配金牌游客及麦田直连，其他外站解析以原站为准。",
+      "author": "joeshu",
+      "version": "0.1.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://joeshu.github.io/yqk-forward-widget/zhuiyingmiao-0.1.0.js"
     }
   ]
 }

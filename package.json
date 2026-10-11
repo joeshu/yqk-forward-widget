@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.18.1",
   "scripts": {
-    "test": "node test.cjs && node test-yqk-upgrade.cjs && node test-yqk-quality.cjs && node test-souju.cjs && node test-souju-episodes.cjs && node test-souju-ai.cjs && node test-souju-quota.cjs && node test-souju-upgrade.cjs && node test-widget-status.cjs && node test-kanju.cjs && node test-zip0.cjs && node test-4kvm.cjs && node test-auete.cjs && node test-new-sources.cjs && node test-eboyang.cjs && node test-juyeye.cjs && node test-deploy.cjs",
+    "test": "node test.cjs && node test-yqk-upgrade.cjs && node test-yqk-quality.cjs && node test-souju.cjs && node test-souju-episodes.cjs && node test-souju-ai.cjs && node test-souju-quota.cjs && node test-souju-upgrade.cjs && node test-widget-status.cjs && node test-kanju.cjs && node test-zip0.cjs && node test-4kvm.cjs && node test-auete.cjs && node test-new-sources.cjs && node test-eboyang.cjs && node test-juyeye.cjs && node test-page-widgets.cjs && node test-deploy.cjs",
     "test:live": "node live-test.cjs",
     "build:publish": "node deploy.cjs",
     "test:souju:live": "node live-souju.cjs",
@@ -17,7 +17,9 @@
     "test:auete:live": "node live-auete.cjs",
     "test:new-sources:live": "node live-new-sources.cjs",
     "test:eboyang:live": "node live-eboyang.cjs",
-    "test:juyeye:live": "node live-juyeye.cjs"
+    "test:juyeye:live": "node live-juyeye.cjs",
+    "build:page-widgets": "node build-page-widgets.cjs",
+    "test:page-widgets:live": "node live-page-widgets.cjs"
   },
   "devDependencies": {
     "@rexnow/libs": "3.1.3",

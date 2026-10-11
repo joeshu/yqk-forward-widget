@@ -1,0 +1,46 @@
+{
+  "time": "2026-10-11T09:03:32.143Z",
+  "version": "0.1.0",
+  "sourceSha256": "b40bab74b0d98fcdf9eea3d55122695bf44190ba3c9b128ac7ada7ae1b6365d5",
+  "checks": [
+    {
+      "name": "home",
+      "passed": true,
+      "count": 73
+    },
+    {
+      "name": "latest",
+      "passed": true,
+      "count": 60
+    },
+    {
+      "name": "category",
+      "passed": true,
+      "count": 20
+    },
+    {
+      "name": "search",
+      "passed": true,
+      "count": 20
+    },
+    {
+      "name": "complete detail",
+      "passed": true,
+      "title": "百日谎言",
+      "count": 1
+    },
+    {
+      "name": "guest media playlist",
+      "passed": true,
+      "count": 1,
+      "names": [
+        "标清 · 第1集"
+      ]
+    }
+  ],
+  "limitations": [
+    "No iPhone native TLS/import/playback test",
+    "HLS playlist checked; media segments not decoded",
+    "Login qualities excluded; guest 480P currently available"
+  ]
+}

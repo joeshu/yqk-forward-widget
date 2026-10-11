@@ -1,0 +1,46 @@
+{
+  "time": "2026-10-11T09:04:10.347Z",
+  "version": "0.1.0",
+  "sourceSha256": "139540d63d8915131119f1231d10db2b7eae0e0f41e5ab78aa72d51f3958a232",
+  "checks": [
+    {
+      "name": "home",
+      "passed": true,
+      "count": 83
+    },
+    {
+      "name": "latest",
+      "passed": true,
+      "count": 61
+    },
+    {
+      "name": "category",
+      "passed": true,
+      "count": 16
+    },
+    {
+      "name": "search",
+      "passed": true,
+      "count": 3
+    },
+    {
+      "name": "complete detail",
+      "passed": true,
+      "title": "泪之女王",
+      "count": 16
+    },
+    {
+      "name": "guest media playlist",
+      "passed": true,
+      "count": 1,
+      "names": [
+        "标清 · 第1集"
+      ]
+    }
+  ],
+  "limitations": [
+    "No iPhone native TLS/import/playback test",
+    "HLS playlist checked; media segments not decoded",
+    "Only adapted sources support native playback; other external sources may need dedicated webpage parsers"
+  ]
+}
