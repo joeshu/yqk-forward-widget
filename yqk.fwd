@@ -1,6 +1,6 @@
 {
   "title": "joeshu 影视组件合集",
-  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视 + Anime1动漫：推荐、分类、搜索、完整分集与访客播放",
+  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视 + Anime1动漫 + Eboyang影视：推荐、分类、搜索、完整分集与访客播放",
   "widgets": [
     {
       "id": "joeshu.yqk",
@@ -64,6 +64,15 @@
       "version": "0.1.1",
       "requiredVersion": "0.0.1",
       "url": "https://joeshu.github.io/yqk-forward-widget/anime1-0.1.1.js"
+    },
+    {
+      "id": "joeshu.eboyang",
+      "title": "Eboyang影视",
+      "description": "独立首页、近期更新、五类片库与完整分集；搜索、分页及播放受原站可用性影响。",
+      "author": "joeshu",
+      "version": "0.1.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://joeshu.github.io/yqk-forward-widget/eboyang-0.1.0.js"
     }
   ]
 }

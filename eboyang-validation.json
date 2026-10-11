@@ -1,0 +1,44 @@
+{
+  "time": "2026-10-11T01:21:02.783Z",
+  "version": "0.1.0",
+  "checks": [
+    {
+      "name": "real home",
+      "count": 71
+    },
+    {
+      "name": "real recent updates",
+      "count": 6
+    },
+    {
+      "name": "real TV category",
+      "count": 30
+    },
+    {
+      "name": "real category page 2",
+      "passed": false,
+      "error": "Eboyang暂不可用（HTTP 502）"
+    },
+    {
+      "name": "real search",
+      "passed": false,
+      "error": "Eboyang暂不可用（HTTP 502）"
+    },
+    {
+      "name": "real complete detail",
+      "title": "雷霆令",
+      "count": 34,
+      "lines": 7
+    },
+    {
+      "name": "real HLS checks",
+      "passed": false,
+      "error": "Eboyang线路检查失败（秒播资源：Eboyang影视所选画质清单不可用，请稍后重试；非凡资源：Eboyang暂不可用（HTTP 502）；量子资源：Eboyang暂不可用（HTTP 502）），可选择分集的其他线路重试"
+    }
+  ],
+  "limitations": [
+    "No iPhone native TLS/import/playback test",
+    "No media segments decoded",
+    "Search and category page 2 may return upstream HTTP errors"
+  ]
+}
