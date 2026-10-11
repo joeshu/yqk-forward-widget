@@ -15,9 +15,9 @@ function build(base,output,options={}) {
  if(!meta || !/^\d+\.\d+\.\d+$/.test(meta.version)) throw new Error('脚本版本格式错误');
  const name='yqk-'+meta.version+'.js',scriptUrl=baseUrl+'/'+name;
  const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'yqk.fwd.example'),'utf8'));
- Object.assign(manifest.widgets[0],{id:meta.id,title:meta.title,author:meta.author,version:meta.version,requiredVersion:meta.requiredVersion,url:scriptUrl});
+ Object.assign(manifest.widgets[0],{id:meta.id,title:meta.title,author:meta.author,version:meta.version,description:meta.description,requiredVersion:meta.requiredVersion,url:scriptUrl});
  manifest.title='joeshu 影视组件合集';
- manifest.description='一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视 + Anime1动漫 + Eboyang影视 + 聚爷爷影视 + 金牌影院 + 追影猫影视：推荐、分类、搜索、完整分集与访客播放';
+ manifest.description='11个独立影视模块 · 近期更新/分类/搜索/完整分集 · 统一状态说明与线路检查';
  const extraCode=fs.readFileSync(path.join(__dirname,'souju.js'),'utf8');
  const extraContext=vm.createContext({});new vm.Script(extraCode).runInContext(extraContext,{timeout:1000});
  const extraMeta=extraContext.WidgetMetadata;
@@ -59,6 +59,7 @@ function build(base,output,options={}) {
  headers.push({source:'/'+key(auName),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]});
  newWidgets.forEach(w=>headers.push({source:'/'+key(w.name),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]}));
  const files={
+  [key('collection-poster.png')]:fs.readFileSync(path.join(__dirname,'collection-poster.png')),
   [key(auName)]:auCode,
   [key(name)]:code,
   [key(extraName)]:extraCode,

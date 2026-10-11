@@ -1,105 +1,105 @@
 {
   "title": "joeshu 影视组件合集",
-  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视 + Anime1动漫 + Eboyang影视 + 聚爷爷影视：推荐、分类、搜索、完整分集与访客播放；新增金牌影院与追影猫独立模块",
+  "description": "11个独立影视模块 · 近期更新/分类/搜索/完整分集 · 统一状态说明与线路检查",
   "widgets": [
     {
       "id": "joeshu.yqk",
       "title": "一起看",
-      "description": "固定高画质、自适应画质、清单分辨率与线路检查",
+      "description": "电影/剧集/动漫/综艺 · 资源更新与筛选 · 自动换线",
       "requiredVersion": "0.0.1",
-      "version": "0.9.0",
+      "version": "0.9.1",
       "author": "joeshu",
-      "url": "https://example.invalid/yqk-0.9.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/yqk-0.9.1.js"
     },
     {
       "id": "joeshu.souju",
       "title": "搜剧AI",
-      "description": "AI额度状态、分集完整性核对、最新片单与直连回退",
+      "description": "六类片库 · 完整分集 · 直连与AI（受原站额度限制）",
       "requiredVersion": "0.0.1",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "author": "joeshu",
-      "url": "https://example.invalid/souju-0.6.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/souju-0.6.1.js"
     },
     {
       "id": "joeshu.kanju",
       "title": "看剧AI",
-      "description": "完整分集、六类筛选、直连与AI官方线路、原站真实额度查询",
+      "description": "六类片库 · 完整分集 · 直连与AI（受原站额度限制）",
       "requiredVersion": "0.0.1",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": "joeshu",
-      "url": "https://example.invalid/kanju-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/kanju-0.1.1.js"
     },
     {
       "id": "joeshu.zip0",
       "title": "ZIP0影视",
-      "description": "多来源搜索、六类片库、近期更新与完整分集",
+      "description": "多来源片库 · 近期更新 · 完整分集",
       "requiredVersion": "0.0.1",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": "joeshu",
-      "url": "https://example.invalid/zip0-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/zip0-0.1.1.js"
     },
     {
       "id": "joeshu.4kvm",
       "title": "4K影视",
-      "description": "独立片库、搜索、完整分集与游客可用画质；4K会员资源以原站权限为准。",
+      "description": "分类与搜索 · 游客可用画质 · 会员画质按原站权限",
       "author": "joeshu",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/4kvm-0.1.1.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/4kvm-0.1.2.js"
     },
     {
       "id": "joeshu.auete",
       "title": "Auete影视",
-      "description": "独立分类、近期更新、完整分集与多线路；搜索遇到原站验证码时明确提示。",
+      "description": "分类与更新 · 多线路 · 搜索可能需要原站验证",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/auete-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/auete-0.1.1.js"
     },
     {
       "id": "joeshu.anime1",
       "title": "Anime1动漫",
-      "description": "动画目录、年份季节筛选、近期更新、全集分页与原站临时Cookie播放。",
+      "description": "动画目录 · 年份/季节/片名筛选 · 近期更新",
       "author": "joeshu",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/anime1-0.1.1.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/anime1-0.1.2.js"
     },
     {
       "id": "joeshu.eboyang",
       "title": "Eboyang影视",
-      "description": "独立首页、近期更新、五类片库与完整分集；搜索、分页及播放受原站可用性影响。",
+      "description": "分类与更新 · 完整分集 · 部分搜索/线路需原站解析",
       "author": "joeshu",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/eboyang-0.1.1.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/eboyang-0.1.2.js"
     },
     {
       "id": "joeshu.juyeye",
       "title": "聚爷爷影视",
-      "description": "独立首页、四类片库、搜索和完整分集；模块内取消电脑404跳转，直连播放以原站可用性为准。",
+      "description": "分类与分集 · 需原站验证会话 · 已适配直连线路",
       "author": "joeshu",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/juyeye-0.1.1.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/juyeye-0.1.2.js"
     },
     {
       "id": "joeshu.gold",
       "title": "金牌影院",
-      "description": "独立游客片库、搜索、近期更新、完整分集与可用画质；登录专属画质按原站权限过滤。",
+      "description": "分类与搜索 · 完整分集 · 游客画质按原站权限",
       "author": "joeshu",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/gold-0.1.2.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/gold-0.1.3.js"
     },
     {
       "id": "joeshu.zhuiyingmiao",
       "title": "追影猫影视",
-      "description": "独立聚合片库、近期更新与搜索；原生播放适配金牌游客及麦田直连，其他外站解析以原站为准。",
+      "description": "聚合片库 · 多来源分集 · 同集失败换源",
       "author": "joeshu",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/zhuiyingmiao-0.1.2.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/zhuiyingmiao-0.1.3.js"
     }
   ]
 }

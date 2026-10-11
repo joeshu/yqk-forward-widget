@@ -1,3 +1,7 @@
+## 合集统一发布
+
+11个模块及缺图PNG由同一Pages地址发布，固定版本快照和历史版本继续保留。`node collection-build.cjs --check` 核对公共体验代码，`npm test` 检查模型、解析、分集、权限、请求生命周期和发布内容。PNG同样进入Pages/Vercel/Cloudflare产物。片单在线记录见 `collection-validation.json`；聚爷爷需要本机正常验证会话，本轮不发送私人会话凭据。
+
 ## 金牌影院与追影猫独立组件发布（0.1.2）
 
 先运行 `node build-page-widgets.cjs`、`npm test`，在线抽样运行 `node live-page-widgets.cjs`。独立脚本及快照均进入Pages/Vercel/Cloudflare订阅和发布清单；两个新增入口为 `joeshu.gold`、`joeshu.zhuiyingmiao`。仅提交适配器、构建源码和脱敏检查摘要，不提交原站完整JS、媒体地址或会话抓包。

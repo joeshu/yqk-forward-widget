@@ -12,6 +12,7 @@ test('repository subscription versions and immutable script snapshots match curr
   assert.equal(fs.readFileSync(path.join(__dirname,filename),'utf8'),code);
  }
 });
+test('all repository script URLs use the same Pages publication host',()=>{const m=JSON.parse(fs.readFileSync('yqk.fwd'));assert.equal(m.widgets.length,11);for(const w of m.widgets)assert(w.url.startsWith('https://joeshu.github.io/yqk-forward-widget/'));});
 test('reject HTTP, reserved placeholders, credentials, fragments and query strings',()=>{
  for(const url of ['http://widgets.test.org','https://example.invalid','https://example.com','https://u:p@widgets.test.org','https://widgets.test.org/?x=1','https://widgets.test.org/#x']) assert.throws(()=>build(url,path.join(root,'invalid')));
  assert(!fs.existsSync(path.join(root,'invalid')));
@@ -65,6 +66,7 @@ test('Anime1, Eboyang and Juyeye publish independently while XiaoBao stays remov
  assert(!fwd.widgets.some(x=>x.id==='joeshu.xiaobao'));
  for(const prefix of ['anime1','eboyang','juyeye','gold','zhuiyingmiao']){const w=fwd.widgets.find(x=>x.id==='joeshu.'+prefix);assert(w);const name=prefix+'-'+w.version+'.js';assert.equal(fs.readFileSync(path.join(release.directory,name),'utf8'),fs.readFileSync(path.join(__dirname,prefix+'.js'),'utf8'));assert(JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers.some(x=>x.source==='/'+name));assert(JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'),'utf8')).widgets.some(x=>x.id===w.id&&x.version===w.version));}
 });
+test('truthful missing-poster artwork is copied byte-for-byte for all hosts',()=>{assert.equal(Buffer.compare(fs.readFileSync(path.join(release.directory,'collection-poster.png')),fs.readFileSync('collection-poster.png')),0);assert(fs.readFileSync(path.join(release.directory,'collection-poster.png')).subarray(1,4).toString()==='PNG');});
 test('subdirectory URL is preserved without duplicated slash',()=>{
  const r=build('https://widgets.test.org/Resource/Yqk/',path.join(root,'sub'));
  assert.equal(r.subscriptionUrl,'https://widgets.test.org/Resource/Yqk/yqk.fwd');

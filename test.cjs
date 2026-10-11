@@ -7,7 +7,7 @@ const ctx=vm.createContext({console, Widget:{storage:{get:async k=>store.get(k),
 }}});
 vm.runInContext(fs.readFileSync(__dirname+'/yqk.js','utf8'),ctx);
 let passed=0;
-async function test(name,fn){store.clear();ctx.yqkMemory={};ctx.yqkMemoryOrder=[];ctx.yqkInFlight={};ctx.yqkQueues={};ctx.yqkLineHints={};ctx.YQK.detailTTL=60000;
+async function test(name,fn){store.clear();ctx.CollectionCooldownUntil=0;ctx.yqkMemory={};ctx.yqkMemoryOrder=[];ctx.yqkInFlight={};ctx.yqkQueues={};ctx.yqkLineHints={};ctx.YQK.detailTTL=60000;
  ctx.Widget.http.get=async url=>({statusCode:200,data:url.includes('/js/baseUrlList.js')?'var baseApiList = ["https://api.example.org"];':'#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:6,\nsegment.ts'});
  await fn();passed++;console.log('PASS '+name);}
 const item={vodId:12,vodName:'测试电影',coverImg:'https://images.example.org/a.jpg',intro:'<p>介绍</p>'};
@@ -83,7 +83,7 @@ const good=data=>({statusCode:200,data:{result:true,data}});
   await assert.rejects(()=>ctx.search({keyword:'重复游标',page:2}),/未推进/);
  });
  await test('failover reaches fourth origin, unlike the initial broken version',async()=>{
-  store.clear();ctx.yqkMemory={};
+  store.clear();ctx.CollectionCooldownUntil=0;ctx.yqkMemory={};
   await ctx.setStored('bases',{time:Date.now(),urls:['https://bad1.example.org','https://bad2.example.org','https://bad3.example.org','https://good4.example.org']});
   calls.length=0;handler=(url)=>url.startsWith('https://good4')?good({items:[item],hasNext:false,nextVal:''}):({statusCode:405,data:'unavailable'});
   assert.equal((await ctx.search({keyword:'故障转移'})).length,1);assert.equal(calls.length,4);

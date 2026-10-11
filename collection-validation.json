@@ -1,0 +1,180 @@
+{
+  "time": "2026-10-11T09:38:02.633Z",
+  "checks": [
+    {
+      "id": "joeshu.yqk",
+      "title": "一起看",
+      "version": "0.9.1",
+      "sourceSha256": "025581f474571a6fa1f2f501b8c036ea235630df9cc7dfda59fe0e924441c1bb",
+      "entry": "latest",
+      "passed": true,
+      "count": 15,
+      "missingArt": 0,
+      "samples": [
+        "完美世界剧场版九劫焚天",
+        "贝比毙咚"
+      ],
+      "syntheticArt": 0,
+      "elapsedMs": 16943
+    },
+    {
+      "id": "joeshu.souju",
+      "title": "搜剧AI",
+      "version": "0.6.1",
+      "sourceSha256": "acc81dac622a92d883ab137fc2e1a82eb08583bb19df2bfaa057ebab9c26f3ba",
+      "entry": "latest",
+      "passed": true,
+      "count": 20,
+      "missingArt": 0,
+      "samples": [
+        "九陇城寨之杀破狼",
+        "偏心终会付出代价"
+      ],
+      "syntheticArt": 0,
+      "elapsedMs": 12279
+    },
+    {
+      "id": "joeshu.kanju",
+      "title": "看剧AI",
+      "version": "0.1.1",
+      "sourceSha256": "82ae0709c69ce9112388a64083bfd9845c56e5a805970e86f0149f3827973897",
+      "entry": "latest",
+      "passed": true,
+      "count": 20,
+      "missingArt": 0,
+      "samples": [
+        "九陇城寨之杀破狼",
+        "偏心终会付出代价"
+      ],
+      "syntheticArt": 0,
+      "elapsedMs": 13128
+    },
+    {
+      "id": "joeshu.zip0",
+      "title": "ZIP0影视",
+      "version": "0.1.1",
+      "sourceSha256": "723f25de6e45a28910c8c7059b6a3bd069538063d83c1909417847c6129fa5c9",
+      "entry": "latest",
+      "passed": true,
+      "count": 80,
+      "missingArt": 0,
+      "samples": [
+        "初雪",
+        "情归俯首"
+      ],
+      "syntheticArt": 0,
+      "elapsedMs": 7004
+    },
+    {
+      "id": "joeshu.4kvm",
+      "title": "4K影视",
+      "version": "0.1.2",
+      "sourceSha256": "3ae80d49f6408b9a8b472daf66fd6dfe668321f384fd600b189a9829f5af4619",
+      "entry": "latest",
+      "passed": true,
+      "count": 30,
+      "missingArt": 0,
+      "samples": [
+        "釜山行",
+        "光阴之外"
+      ],
+      "syntheticArt": 0,
+      "elapsedMs": 5383
+    },
+    {
+      "id": "joeshu.auete",
+      "title": "Auete影视",
+      "version": "0.1.1",
+      "sourceSha256": "71b4f469fecdd546127132c20b229ca16f9ea0952f0b7df4cb39fe3a7252eae1",
+      "entry": "latest",
+      "passed": true,
+      "count": 28,
+      "missingArt": 0,
+      "samples": [
+        "第三者2026",
+        "朱丽叶与朱丽叶"
+      ],
+      "syntheticArt": 0,
+      "elapsedMs": 8096
+    },
+    {
+      "id": "joeshu.anime1",
+      "title": "Anime1动漫",
+      "version": "0.1.2",
+      "sourceSha256": "44b8572db1682e65216d395ec813c32672e3f0c04e6e871c8c0422c40fa86a3f",
+      "entry": "latest",
+      "passed": true,
+      "count": 10,
+      "missingArt": 0,
+      "samples": [
+        "夜櫻家大作戰 第二季 [40]",
+        "朱色假面 [01]"
+      ],
+      "syntheticArt": 10,
+      "elapsedMs": 3732
+    },
+    {
+      "id": "joeshu.eboyang",
+      "title": "Eboyang影视",
+      "version": "0.1.2",
+      "sourceSha256": "b95d042c32a06c6c6aaaed1f17f6d82da14abf56cf65684e7860983de05cede1",
+      "entry": "latest",
+      "passed": true,
+      "count": 6,
+      "missingArt": 0,
+      "samples": [
+        "武神主宰",
+        "雷霆令"
+      ],
+      "syntheticArt": 0,
+      "elapsedMs": 3727
+    },
+    {
+      "id": "joeshu.juyeye",
+      "title": "聚爷爷影视",
+      "version": "0.1.2",
+      "sourceSha256": "f714b639844ff264e250b4fc0abf3aaa21ec46a712b74b8eb6878e48915df272",
+      "entry": "latest",
+      "passed": false,
+      "code": "SESSION_REQUIRED",
+      "error": "聚爷爷影视：需要原站验证会话，请到「验证会话设置」导入已验证会话",
+      "elapsedMs": 11411
+    },
+    {
+      "id": "joeshu.gold",
+      "title": "金牌影院",
+      "version": "0.1.3",
+      "sourceSha256": "d715f18880c54262431ff5fb67c54ceab033ea853aede73706a09a08a07b49cf",
+      "entry": "latest",
+      "passed": true,
+      "count": 60,
+      "missingArt": 0,
+      "samples": [
+        "美人余",
+        "伟大的长征"
+      ],
+      "syntheticArt": 0,
+      "elapsedMs": 6570
+    },
+    {
+      "id": "joeshu.zhuiyingmiao",
+      "title": "追影猫影视",
+      "version": "0.1.3",
+      "sourceSha256": "0ceead9a690013cdd95b22209265ad73da0175461789ee3faaa05ec5ea3846f8",
+      "entry": "latest",
+      "passed": true,
+      "count": 61,
+      "missingArt": 0,
+      "samples": [
+        "东京复仇者 三天战争篇",
+        "请吃红小豆吧！第五季"
+      ],
+      "syntheticArt": 0,
+      "elapsedMs": 5002
+    }
+  ],
+  "limits": [
+    "Independent fresh in-memory storage for each module; no imported validation credentials",
+    "List pages only; no AI parsing, media segments, or native iOS testing"
+  ]
+}
