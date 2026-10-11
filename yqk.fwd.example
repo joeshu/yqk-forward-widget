@@ -70,9 +70,9 @@
       "title": "Eboyang影视",
       "description": "独立首页、近期更新、五类片库与完整分集；搜索、分页及播放受原站可用性影响。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/eboyang-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/eboyang-0.1.1.js"
     }
   ]
 }

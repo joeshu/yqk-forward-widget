@@ -17,7 +17,7 @@ function request(url,options={}) {
 }
 (async()=>{
  const {WidgetAdaptor}=await import(pathToFileURL(path.join(dependencyRoot,'@rexnow/libs/dist/widget-adaptor.js')));globalThis.fetch=request;const c=vm.createContext({Widget:WidgetAdaptor});vm.runInContext(fs.readFileSync('eboyang.js','utf8'),c);
- const report={time:new Date().toISOString(),version:c.WidgetMetadata.version,checks:[],limitations:['No iPhone native TLS/import/playback test','No media segments decoded','Search and category page 2 may return upstream HTTP errors']};
+ const report={time:new Date().toISOString(),version:c.WidgetMetadata.version,checks:[],limitations:['No iPhone native TLS/import/playback test','No media segments decoded','Original full-site search may require CAPTCHA; browser validation is not shared with App']};
  const home=await c.loadHome();assert(home.length>0);report.checks.push({name:'real home',count:home.length});console.log('PASS real home');
  const latest=await c.loadLatest();assert(latest.length>0);report.checks.push({name:'real recent updates',count:latest.length});console.log('PASS real latest');
  const cat=await c.loadCatalog({category:'2'});assert(cat.length>0);report.checks.push({name:'real TV category',count:cat.length});console.log('PASS real category');
