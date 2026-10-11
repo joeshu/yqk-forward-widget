@@ -1,4 +1,8 @@
-## 多组件合集更新（0.8.0）
+## 聚爷爷独立组件发布（0.1.0）
+
+当前合集共9个组件。`juyeye.js` 与 `juyeye-0.1.0.js` 必须逐字一致，根订阅、示例订阅及发布工具均登记 `joeshu.juyeye`。Pages、Vercel和Cloudflare构建均包含独立脚本、订阅项和版本信息；发布保留历史快照。运行 `node test-juyeye.cjs`、`npm test`，在线限制见 `juyeye-validation.json`。本模块自行移除指定平台404跳转，无需Quantumult X；服务端安全验证和原站网页解析线路仍可能阻挡播放。
+
+## 多组件合集更新（0.8.0，历史记录）
 
 `yqk.fwd` 现在包含「一起看」「搜剧AI」「看剧AI」三个独立组件，沿用原订阅 URL。
 发布工具从 `yqk.js`、`souju.js` 和 `kanju.js` 各自读取 metadata，生成对应版本的 JS 和合集订阅；Pages 发布会保留三类历史版本脚本。

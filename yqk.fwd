@@ -1,6 +1,6 @@
 {
   "title": "joeshu 影视组件合集",
-  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视 + Anime1动漫 + Eboyang影视：推荐、分类、搜索、完整分集与访客播放",
+  "description": "一起看 + 搜剧AI + 看剧AI + ZIP0影视 + 4K影视 + Auete影视 + Anime1动漫 + Eboyang影视 + 聚爷爷影视：推荐、分类、搜索、完整分集与访客播放",
   "widgets": [
     {
       "id": "joeshu.yqk",
@@ -73,6 +73,15 @@
       "version": "0.1.1",
       "requiredVersion": "0.0.1",
       "url": "https://joeshu.github.io/yqk-forward-widget/eboyang-0.1.1.js"
+    },
+    {
+      "id": "joeshu.juyeye",
+      "title": "聚爷爷影视",
+      "description": "独立首页、四类片库、搜索和完整分集；模块内取消电脑404跳转，直连播放以原站可用性为准。",
+      "author": "joeshu",
+      "version": "0.1.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://joeshu.github.io/yqk-forward-widget/juyeye-0.1.0.js"
     }
   ]
 }

@@ -1,0 +1,42 @@
+{
+  "time": "2026-10-11T07:01:02.542Z",
+  "version": "0.1.0",
+  "sourceSha256": "77f89162245340cc84bf810364893cab019ec12db196db76888f32f18f2e9a19",
+  "checks": [
+    {
+      "name": "home",
+      "status": "BLOCKED",
+      "error": "聚爷爷原站要求安全验证，取消平台跳转不能解决验证码；App请求不一定共享浏览器会话"
+    },
+    {
+      "name": "latest",
+      "status": "NOT_RUN",
+      "reason": "Original website requires CAPTCHA"
+    },
+    {
+      "name": "catalog",
+      "status": "NOT_RUN",
+      "reason": "Original website requires CAPTCHA"
+    },
+    {
+      "name": "search",
+      "status": "NOT_RUN",
+      "reason": "Original website requires CAPTCHA"
+    },
+    {
+      "name": "detail",
+      "status": "NOT_RUN",
+      "reason": "Original website requires CAPTCHA"
+    },
+    {
+      "name": "resource",
+      "status": "NOT_RUN",
+      "reason": "Original website requires CAPTCHA"
+    }
+  ],
+  "limitations": [
+    "No iPhone import, TLS, playback, seeking or media decoding verification",
+    "Server CAPTCHA cannot be solved by removing the client platform redirect",
+    "Website parser-only lines unsupported; direct media must pass inspection"
+  ]
+}
