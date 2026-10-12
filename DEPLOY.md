@@ -1,14 +1,10 @@
 ## 合集统一发布
 
-11个模块及缺图PNG由同一Pages地址发布，固定版本快照和历史版本继续保留。`node collection-build.cjs --check` 核对公共体验代码，`npm test` 检查模型、解析、分集、权限、请求生命周期和发布内容。PNG同样进入Pages/Vercel/Cloudflare产物。片单在线记录见 `collection-validation.json`；聚爷爷需要本机正常验证会话，本轮不发送私人会话凭据。
+10个模块及缺图PNG由同一Pages地址发布，固定版本快照和历史版本继续保留。`node collection-build.cjs --check` 核对公共体验代码，`npm test` 检查模型、解析、分集、权限、请求生命周期和发布内容。PNG同样进入Pages/Vercel/Cloudflare产物。片单在线记录见 `collection-validation.json`。
 
 ## 金牌影院与追影猫独立组件发布（0.1.2）
 
 先运行 `node build-page-widgets.cjs`、`npm test`，在线抽样运行 `node live-page-widgets.cjs`。独立脚本及快照均进入Pages/Vercel/Cloudflare订阅和发布清单；两个新增入口为 `joeshu.gold`、`joeshu.zhuiyingmiao`。仅提交适配器、构建源码和脱敏检查摘要，不提交原站完整JS、媒体地址或会话抓包。
-
-## 聚爷爷独立组件发布（0.1.1）
-
-当前合集共11个组件。`juyeye.js` 与 `juyeye-0.1.1.js` 必须逐字一致，根订阅、示例订阅及发布工具均登记 `joeshu.juyeye`。Pages、Vercel和Cloudflare构建均包含独立脚本、订阅项和版本信息；发布保留历史快照。运行 `node test-juyeye.cjs`、`npm test`，在线限制见 `juyeye-validation.json`。本模块自行移除指定平台404跳转，无需Quantumult X；0.1.1 增加本机验证会话导入、状态及清除，仅对固定HTML原站发送会话，不传给媒体/CDN。服务端安全验证和原站网页解析线路仍可能阻挡播放。
 
 ## 多组件合集更新（0.8.0，历史记录）
 

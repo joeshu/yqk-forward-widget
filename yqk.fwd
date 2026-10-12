@@ -1,6 +1,6 @@
 {
   "title": "joeshu 影视组件合集",
-  "description": "11个独立影视模块 · 近期更新/分类/搜索/完整分集 · 统一状态说明与线路检查",
+  "description": "10个独立影视模块 · 近期更新/分类/搜索/完整分集 · 统一状态说明与线路检查",
   "widgets": [
     {
       "id": "joeshu.yqk",
@@ -73,15 +73,6 @@
       "version": "0.1.2",
       "requiredVersion": "0.0.1",
       "url": "https://joeshu.github.io/yqk-forward-widget/eboyang-0.1.2.js"
-    },
-    {
-      "id": "joeshu.juyeye",
-      "title": "聚爷爷影视",
-      "description": "分类与分集 · 需原站验证会话 · 已适配直连线路",
-      "author": "joeshu",
-      "version": "0.1.2",
-      "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/juyeye-0.1.2.js"
     },
     {
       "id": "joeshu.gold",
