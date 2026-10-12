@@ -1,0 +1,123 @@
+{
+  "time": "2026-10-12T11:50:40.525Z",
+  "version": "0.1.0",
+  "sourceSha256": "e7b11962818cf62d092f306dc0544243e7bc2bd34c55d128ea0aa1601842f059",
+  "checks": [
+    {
+      "name": "home",
+      "passed": true,
+      "count": 73,
+      "samples": [
+        "功夫女足",
+        "吉伊卡哇人鱼之岛的秘密"
+      ]
+    },
+    {
+      "name": "latest",
+      "passed": true,
+      "count": 24,
+      "samples": [
+        "飞女刑事3少女忍法帖传奇",
+        "综艺新时代"
+      ]
+    },
+    {
+      "name": "latest page 2",
+      "passed": true,
+      "count": 24,
+      "samples": [
+        "我们与恶的距离2",
+        "今日说法"
+      ]
+    },
+    {
+      "name": "movie catalog page 2",
+      "passed": true,
+      "count": 18,
+      "samples": [
+        "四渡",
+        "生化危机"
+      ]
+    },
+    {
+      "name": "animation catalog",
+      "passed": true,
+      "count": 18,
+      "samples": [
+        "仙逆",
+        "凡人修仙传"
+      ]
+    },
+    {
+      "name": "search",
+      "passed": true,
+      "count": 18,
+      "samples": [
+        "凡人修仙传",
+        "凡人修仙传"
+      ]
+    },
+    {
+      "name": "search page 2",
+      "passed": true,
+      "count": 18,
+      "samples": [
+        "凡人修仙之一亩灵田修长生第二季",
+        "凡人修仙之一亩灵田修长生"
+      ]
+    },
+    {
+      "name": "original IP homepage",
+      "passed": true,
+      "count": 76,
+      "samples": [
+        "功夫女足",
+        "吉伊卡哇人鱼之岛的秘密"
+      ]
+    },
+    {
+      "name": "full 195 detail and retained 4K",
+      "passed": true,
+      "title": "凡人修仙传",
+      "count": 195,
+      "firstEpisodeSources": 25
+    },
+    {
+      "name": "exact original player source handed to device",
+      "passed": true,
+      "names": [
+        "FF线路 · 第01集 · 原站直连（待设备验证）"
+      ],
+      "mediaVerified": false
+    },
+    {
+      "name": "checked HLS on this network",
+      "passed": true
+    },
+    {
+      "name": "category 2 page 2",
+      "passed": true,
+      "count": 18,
+      "checkedAt": "2026-10-12T11:56:47.672Z"
+    },
+    {
+      "name": "category 4 page 2",
+      "passed": true,
+      "count": 18,
+      "checkedAt": "2026-10-12T11:56:47.770Z"
+    },
+    {
+      "name": "category 6 page 2",
+      "passed": true,
+      "count": 18,
+      "checkedAt": "2026-10-12T11:56:47.891Z"
+    }
+  ],
+  "limitations": [
+    "No native iPhone TLS/import/playback test",
+    "Device mode returns original media candidate, not proven playback",
+    "No third-party TVBox webpage parser; blank source fails explicitly",
+    "Keep original 4K label, not a claim of measured 4K",
+    "Follow actual next links, at most 20 pages per request"
+  ]
+}

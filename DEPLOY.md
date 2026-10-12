@@ -1,6 +1,6 @@
 ## 合集统一发布
 
-11个模块及缺图PNG由同一Pages地址发布，固定版本快照和历史版本继续保留。`node collection-build.cjs --check` 核对公共体验代码，`npm test` 检查模型、解析、分集、权限、请求生命周期和发布内容。PNG同样进入Pages/Vercel/Cloudflare产物。片单在线记录见 `collection-validation.json`。
+12个模块及缺图PNG由同一Pages地址发布，固定版本快照和历史版本继续保留。`node collection-build.cjs --check` 核对公共体验代码，`npm test` 检查模型、解析、分集、权限、请求生命周期和发布内容。PNG同样进入Pages/Vercel/Cloudflare产物。片单在线记录见 `collection-validation.json`。
 
 ## 金牌影院与追影猫独立组件发布（0.1.2）
 
@@ -207,3 +207,5 @@ Raw 订阅由仓库公开文件提供；Pages 是否上线，以 Actions 部署�
 看剧AI验证入口：`npm run test:kanju:live`。它只检查真实浏览、分集、额度及HLS清单，不调用消耗词元的AI解析；报告为 `kanju-validation.json`，须核对版本与源文件SHA-256。本地 `npm test` 包含看剧AI与三组件部署回归。
 
 果果短剧以 `ggduanju-0.1.0.js` 独立发布，根订阅、示例订阅及部署器统一登记，聚爷爷保持从订阅移除。构建前运行 `node build-ggduanju.cjs --check`；发布仍保留旧版脚本。
+
+可可影视以 `kkys-0.1.0.js` 独立发布；发布前运行 `node build-kkys.cjs --check`、`node test-kkys.cjs` 及完整回归。设备直播的原站地址不标成媒体验证通过，线上限制见 `kkys-validation.json`。

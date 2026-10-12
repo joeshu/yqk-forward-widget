@@ -1,6 +1,6 @@
 {
   "title": "joeshu 影视组件合集",
-  "description": "11个独立影视模块 · 近期更新/分类/搜索/完整分集 · 统一状态说明与线路检查",
+  "description": "12个独立影视模块 · 近期更新/分类/搜索/完整分集 · 统一状态说明与线路检查",
   "widgets": [
     {
       "id": "joeshu.yqk",
@@ -100,6 +100,15 @@
       "requiredVersion": "0.0.1",
       "description": "短剧/电影/电视剧/动漫 · 搜索与完整分集 · 游客直连检查",
       "url": "https://joeshu.github.io/yqk-forward-widget/ggduanju-0.1.0.js"
+    },
+    {
+      "id": "joeshu.kkys",
+      "title": "可可影视",
+      "author": "joeshu",
+      "version": "0.1.0",
+      "requiredVersion": "0.0.1",
+      "description": "五类片库 · 搜索与真实分页 · 完整分集与全部线路",
+      "url": "https://joeshu.github.io/yqk-forward-widget/kkys-0.1.0.js"
     }
   ]
 }

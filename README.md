@@ -1,6 +1,6 @@
 # joeshu 影视组件合集
 
-当前订阅包含11个独立模块，全部通过同一个Pages地址发布。聚爷爷影视已从订阅移除。版本见 [yqk.fwd](./yqk.fwd)，本轮逐项梳理见 [COLLECTION_REVIEW.md](./COLLECTION_REVIEW.md)。旧版验证记录和固定脚本继续保留，本轮片单检查以 `collection-validation.json` 为准。
+当前订阅包含12个独立模块，全部通过同一个Pages地址发布。聚爷爷影视已从订阅移除。版本见 [yqk.fwd](./yqk.fwd)，本轮逐项梳理见 [COLLECTION_REVIEW.md](./COLLECTION_REVIEW.md)。旧版验证记录和固定脚本继续保留，本轮片单检查以 `collection-validation.json` 为准。
 https://he2o.vercel.app/Resource/RexWidgets/sfw.fwd
 
 ## 合集展示与稳定性统一
@@ -361,3 +361,15 @@ https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
 原站分页会限制可浏览页数，以真实 pagecount 为准，越界返回空列表，返回错页明确报错。首页可能有旧片推荐；近期更新表示原站资源更新，不代表新上映。详情简介使用原站文本，原站可能填入无关内容。iPhone实机导入及播放仍待用户验证。
 
 构建 `node build-ggduanju.cjs`；离线回归 `node test-ggduanju.cjs`；线上检查 `node live-ggduanju.cjs`，证据为 `ggduanju-validation.json`。随脚本嵌入 Crypto-JS 4.2.0 的 AES 所需文件，MIT 许可见 `vendor/crypto-js/LICENSE`，仅静态库运算、不执行远端脚本。
+
+## 可可影视 0.1.0
+
+由用户提供的「可可影视_t4 (1).py」重写为独立JavaScript模块，订阅现共12个模块。支持原附件IP入口及已验证的HTTPS域名入口，五类片库、原站首页、近期更新、搜索、真实下一页与全部线路分集。分类使用频道页给出的完整片库入口，修复原Python向频道推荐页追加page可能重复首屏的问题；每次最多跟随20页，越界明示、末页返回空，不伪造总页数。搜索使用原站公开表单参数和实际分页链接，不导入登录Cookie。
+
+播放只读取所选影片/分集页面里的 playSource，明确核对活动分集；不从注释、演示视频或其他URL中猜资源，不执行远端JavaScript。保留4K线路及每集换线入口；4K标签不代表已测4K分辨率，空地址表示原站当前未提供网页直连。默认检查HLS/MP4清单，最多尝试三个同片同集候选、共享六次HLS读取。电影单资源的备用版本按原站标题展示，可能是不同画质或字幕版本；剧集按真实集名及位置匹配。
+
+「原站直连交给设备（待验证）」只返回播放器明确提供的M3U8/MP4地址和必要请求头，不做当前网络上的清单探测；资源名称始终标明待设备验证。它不保证能播放，不等于绕过原站权限，也不把HTML当作媒体。此模式适用于模块探测网络与设备播放器行为不同的情况，固定画质只在检查模式中生效。
+
+Python的parse=1可以让TVBox交给网页解析器；本订阅的Rex流资源只支持app/system原生播放，未接入TVBox网页解析器。原站APP专用、空地址、验证码、TLS、403/404都会如实提示。移植后不再关闭HTTPS证书验证，不加入原脚本的QQ群/TG推广或伪造演员、导演信息。
+
+构建 `node build-kkys.cjs`；回归 `node test-kkys.cjs`；实时检查 `node live-kkys.cjs`；记录 `kkys-validation.json`。iPhone实机导入和完整播放未在开发环境验收。
