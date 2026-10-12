@@ -1,0 +1,81 @@
+{
+  "time": "2026-10-12T10:26:48.033Z",
+  "version": "0.1.0",
+  "sourceSha256": "452a25330e6f6a270810325f3fb51c9eb61a46240fddd440df1681a8ebe98436",
+  "checks": [
+    {
+      "name": "home",
+      "passed": true,
+      "count": 42,
+      "samples": [
+        "X档案之黑就是黑",
+        "过江龙独闯虎穴"
+      ]
+    },
+    {
+      "name": "short latest",
+      "passed": true,
+      "count": 40,
+      "samples": [
+        "失忆后发现死对头是我老公",
+        "催婚,看我先发制人"
+      ]
+    },
+    {
+      "name": "catalog page 2",
+      "passed": true,
+      "count": 40,
+      "samples": [
+        "玫瑰轻颤时",
+        "阮小姐,进城复个婚"
+      ]
+    },
+    {
+      "name": "movie category",
+      "passed": true,
+      "count": 40,
+      "samples": [
+        "神探之痕迹‎",
+        "什么意思夫妇"
+      ]
+    },
+    {
+      "name": "search",
+      "passed": true,
+      "count": 10,
+      "samples": [
+        "我与冰山总裁心声互通",
+        "重逢那晚,我甩总裁二百五"
+      ]
+    },
+    {
+      "name": "search page 2",
+      "passed": true,
+      "count": 10,
+      "samples": [
+        "总裁变猫后同居他超粘人",
+        "后妈上岗,总裁和萌娃都宠我"
+      ]
+    },
+    {
+      "name": "complete merged short detail",
+      "passed": true,
+      "count": 1,
+      "title": "我与冰山总裁心声互通",
+      "lines": 2
+    },
+    {
+      "name": "same-episode fallback and highest playlist",
+      "passed": true,
+      "names": [
+        "魔都线路 · 全集 · 清单 1080×1920 · 固定"
+      ]
+    }
+  ],
+  "limitations": [
+    "No native iPhone import/TLS/playback test",
+    "Playlist inspected only; no full segment playback",
+    "Merged 全集 resource is one episode rather than invented episode splitting",
+    "Original API pagecount may cap catalog/search; follow returned pagecount"
+  ]
+}

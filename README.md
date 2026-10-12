@@ -1,6 +1,6 @@
 # joeshu 影视组件合集
 
-当前订阅包含10个独立模块，全部通过同一个Pages地址发布。聚爷爷影视已从订阅移除。版本见 [yqk.fwd](./yqk.fwd)，本轮逐项梳理见 [COLLECTION_REVIEW.md](./COLLECTION_REVIEW.md)。旧版验证记录和固定脚本继续保留，本轮片单检查以 `collection-validation.json` 为准。
+当前订阅包含11个独立模块，全部通过同一个Pages地址发布。聚爷爷影视已从订阅移除。版本见 [yqk.fwd](./yqk.fwd)，本轮逐项梳理见 [COLLECTION_REVIEW.md](./COLLECTION_REVIEW.md)。旧版验证记录和固定脚本继续保留，本轮片单检查以 `collection-validation.json` 为准。
 https://he2o.vercel.app/Resource/RexWidgets/sfw.fwd
 
 ## 合集展示与稳定性统一
@@ -351,3 +351,13 @@ https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
 0.1.1 实测修复：改用完整移动端 User-Agent 与 Accept 请求头，分类第二页真实返回30条；搜索返回原站验证码页，优先识别验证码后再检查HTML结构，不自动解验证码。分类增加“当前页片名筛选”，范围仅限所选分类当前页，不冒充全站搜索。各已知直连线路按原站公开播放器流程签发地址，核对媒体路径一致，使用播放器 Referer；HTML与媒体分别使用适当的 Accept。最长线路保持全集完整，集数相同时优先红牛/最大/无尽，明确所选线路始终作为播放检查的第一条。分集标题标准化仅适用于明确数字集号，允许同集在其他线路的列表位置不同，预告、不同集号与国语/中字等条目不会混为同集。HLS错误保留HTTP状态。
 
 最新验证见 `eboyang-validation.json`：首页、近期更新、电视剧分类、分类第二页、34集详情及原生HLS资源检查通过；搜索仍需验证码，不能保证所有影片/线路可用。检查不下载或解码视频分片，尚未在iPhone实测TLS、播放与快进。
+
+## 果果短剧（ggduanju）0.1.0
+
+用户指定入口 https://app.ggduanju.com/#/ 已独立加入订阅，聚爷爷仍保持移除。四类片库（短剧、电影、电视剧、动漫）、原站首页、近期更新、热门排序、搜索、实际分页与完整分集；采用网页公开的游客接口和 AES-CBC 数据协议，无需导入登录凭据。
+
+分集以原站实际资源为准，合并「全集」不拆成虚构的多集；线路按原站排序。返回前检查 HLS/MP4，遇原站权限提示不请求受限媒体。失败最多尝试三个同片同集候选，共用六次清单读取；429立即停止。原站广告解析网页不作为原生媒体返回。竖屏短剧显示实际清单尺寸，支持固定高画质并保留独立音轨/字幕。
+
+原站分页会限制可浏览页数，以真实 pagecount 为准，越界返回空列表，返回错页明确报错。首页可能有旧片推荐；近期更新表示原站资源更新，不代表新上映。详情简介使用原站文本，原站可能填入无关内容。iPhone实机导入及播放仍待用户验证。
+
+构建 `node build-ggduanju.cjs`；离线回归 `node test-ggduanju.cjs`；线上检查 `node live-ggduanju.cjs`，证据为 `ggduanju-validation.json`。随脚本嵌入 Crypto-JS 4.2.0 的 AES 所需文件，MIT 许可见 `vendor/crypto-js/LICENSE`，仅静态库运算、不执行远端脚本。

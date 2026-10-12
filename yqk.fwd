@@ -1,6 +1,6 @@
 {
   "title": "joeshu 影视组件合集",
-  "description": "10个独立影视模块 · 近期更新/分类/搜索/完整分集 · 统一状态说明与线路检查",
+  "description": "11个独立影视模块 · 近期更新/分类/搜索/完整分集 · 统一状态说明与线路检查",
   "widgets": [
     {
       "id": "joeshu.yqk",
@@ -91,6 +91,15 @@
       "version": "0.1.3",
       "requiredVersion": "0.0.1",
       "url": "https://joeshu.github.io/yqk-forward-widget/zhuiyingmiao-0.1.3.js"
+    },
+    {
+      "id": "joeshu.ggduanju",
+      "title": "果果短剧",
+      "author": "joeshu",
+      "version": "0.1.0",
+      "requiredVersion": "0.0.1",
+      "description": "短剧/电影/电视剧/动漫 · 搜索与完整分集 · 游客直连检查",
+      "url": "https://joeshu.github.io/yqk-forward-widget/ggduanju-0.1.0.js"
     }
   ]
 }
