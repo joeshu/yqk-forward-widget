@@ -401,3 +401,12 @@ Node.js18+运行包，不依赖WASM/JIT。默认严格HTTPS校验；开发/桌�
 奇妙短剧、独播库的抽样入口、详情、搜索、HLS清单与首尾集媒体分片实际证据见 `catpaw/native-validation.json`。星芽和次元城通过离线全流程和195集结构检查，在线调用和手机实播待你验收。纳入/暂缓原因见 `catpaw/reference-review.json`。参考包已清点出54个显式命名项，另有动态生成和账号配置项；清单与追加筛选记录见 `catpaw/reference-catalogue.json`。不接入网盘/云盘源；也不绕过私人登录、广告奖励、安全验证或TLS约束。出处不可用、加密格式未适配且没有透明公开API流程的源暂不纳入。
 
 真实新增源检查：`node catpaw/live-native.cjs`。脚本只报告验证结果，不会自动添加或删除订阅源。
+
+
+### CatPaw 0.6.0：miraPlay 手机验收版
+
+保留12个快照源及8个原生独立源，新增61个参考适配源，共81个入口。参考包中的非网盘影视、动漫、漫剧、少儿、直播、体育、听书及音乐接口进入本地运行包；17个动态注册源也已纳入。没有在客户端执行完整远程参考包。排除网盘、网盘搜索、纯配置项、需要自备账号配置的Emby以及没有片单配置的直播DIY。
+
+采用原参考源的 home/category/detail/play/search 返回和代理流程，补齐 homeVideo 兼容入口；原12个快照源的首屏最多等待下一页检查0.5秒。新增61源仅通过基础注册、接口和离线回归，不标为已实播；由用户在 miraPlay 1.13 集中验收。参考包里的共享Cookie及固定账号字段不带入；原站登录、验证或权限要求继续生效。
+
+订阅地址不变： https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5 。来源及保留声明见 catpaw/reference/NOTICE.txt；完整新增名单见 catpaw/reference/metadata.json。

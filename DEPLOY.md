@@ -215,3 +215,12 @@ Raw 订阅由仓库公开文件提供；Pages 是否上线，以 Actions 部署�
 部署前先运行 `npm --prefix catpaw ci --ignore-scripts`、`npm --prefix catpaw run build` 和 `npm --prefix catpaw test`。Pages工作流会自动完成构建。`catpaw/dist` 为构建产物，不提交源库；部署器将运行包、配置、MD5、来源版本和许可声明复制到公开的catpaw目录。使用 `catpaw/index.js.md5` 作为猫爪Node.js订阅入口，原yqk.fwd仍独立发布。
 
 CatPaw 0.5.0包含12个快照源和8个原生独立源（奇妙短剧、独播库影视、星芽短剧、次元城动漫、好看短剧、伊影影视、爱看影视、微观短剧），共20个；Forward/Rex的12个原模块保持原版本。`catpaw/native/`进入本机运行包，原参考整包不提交、不作为运行依赖。`catpaw/native-validation.json`中的完整在线目录、详情、搜索与媒体分片证据覆盖奇妙短剧和独播库；星芽和次元城通过离线全流程与完整分集检查，手机端需实测原站接口和播放。
+
+
+### CatPaw 0.6.0：miraPlay 手机验收版
+
+保留12个快照源及8个原生独立源，新增61个参考适配源，共81个入口。参考包中的非网盘影视、动漫、漫剧、少儿、直播、体育、听书及音乐接口进入本地运行包；17个动态注册源也已纳入。没有在客户端执行完整远程参考包。排除网盘、网盘搜索、纯配置项、需要自备账号配置的Emby以及没有片单配置的直播DIY。
+
+采用原参考源的 home/category/detail/play/search 返回和代理流程，补齐 homeVideo 兼容入口；原12个快照源的首屏最多等待下一页检查0.5秒。新增61源仅通过基础注册、接口和离线回归，不标为已实播；由用户在 miraPlay 1.13 集中验收。参考包里的共享Cookie及固定账号字段不带入；原站登录、验证或权限要求继续生效。
+
+订阅地址不变： https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5 。来源及保留声明见 catpaw/reference/NOTICE.txt；完整新增名单见 catpaw/reference/metadata.json。

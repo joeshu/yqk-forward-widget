@@ -25,7 +25,7 @@ export function createAdapter(source,storage,config={},request,controllers=new S
   async function listing(m,params,play,n){const pageParam=m.params?.find(p=>p.type==='page');if(!pageParam&&n>1)return {page:n,pagecount:n,list:[]};const current={...params,...(pageParam?{[pageParam.name]:String(n)}:{})},items=await invoke(m,current),list=items.map(v=>card(v,play));let pagecount=n,msg='';
     // Advertise another page only after reading real, distinct results. This is
     // a confirmed lower bound, not an invented total from the original array.
-    if(pageParam&&items.length)try{const next=await invoke(m,{...current,[pageParam.name]:String(n+1)});if(next.length&&signature(next)!==signature(items))pagecount=n+1;else if(next.length)msg='原站下一页重复，已停止继续翻页';}catch(e){msg='下一页未确认：'+errorMessage(e);}
+    if(pageParam&&items.length)try{let timer;const next=await Promise.race([invoke(m,{...current,[pageParam.name]:String(n+1)}),new Promise(resolve=>{timer=setTimeout(()=>resolve(null),500);})]).finally(()=>clearTimeout(timer));if(next===null)msg='当前页已加载；下一页仍在检查，稍后刷新可确认翻页';else if(next.length&&signature(next)!==signature(items))pagecount=n+1;else if(next.length)msg='原站下一页重复，已停止继续翻页';}catch(e){msg='下一页未确认：'+errorMessage(e);}
     return {page:n,pagecount,list,...(msg?{msg}:{})};
   }
   function vod(v,id,play){const result={...card(v,play),vod_id:id,type_name:text(v.genreTitle),vod_year:text(v.releaseDate).slice(0,4),vod_content:text(v.description),vod_play_from:'',vod_play_url:''},groups=new Map();const add=(name,title,link)=>{if(!groups.has(name))groups.set(name,[]);groups.get(name).push(label(title)+'$'+encode(source.key,link,tokenPlay(play)));};

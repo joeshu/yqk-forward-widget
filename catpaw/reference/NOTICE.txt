@@ -1,0 +1,80 @@
+Reference: https://9280.kstore.vip/cat/index.js.md5
+Reference bundle MD5: 0e89531f459dc4bb6f6abbbbf7392493
+Reference bundle SHA256: 3503f06c49a6aa3963545bc12b77efeffd786e0ad807af39c529eaf91eddb135
+Selected non-cloud source factories and necessary helpers have been adapted.
+The original server, cloud registry, credential configuration and account management were not copied.
+Changes: native interface integration, local isolated storage, strict TLS, transport injection and removal of shared account values.
+The following notices are preserved from the reference bundle; no new license is asserted for the original source adapters.
+
+/*! Bundled license information:
+
+forwarded/index.js:
+  (*!
+   * forwarded
+   * Copyright(c) 2014-2017 Douglas Christopher Wilson
+   * MIT Licensed
+   *)
+
+proxy-addr/index.js:
+  (*!
+   * proxy-addr
+   * Copyright(c) 2014-2016 Douglas Christopher Wilson
+   * MIT Licensed
+   *)
+
+toad-cache/dist/toad-cache.cjs:
+  (**
+   * toad-cache
+   *
+   * @copyright 2026 Igor Savin <kibertoad@gmail.com>
+   * @license MIT
+   * @version 3.7.3
+   *)
+
+cookie/index.js:
+  (*!
+   * cookie
+   * Copyright(c) 2012-2014 Roman Shtylman
+   * Copyright(c) 2015 Douglas Christopher Wilson
+   * MIT Licensed
+   *)
+
+light-my-request/lib/form-data.js:
+formdata-polyfill/esm.min.js:
+  (*! formdata-polyfill. MIT License. Jimmy Wärting <https://jimmy.warting.se/opensource> *)
+
+mime-db/index.js:
+  (*!
+   * mime-db
+   * Copyright(c) 2014 Jonathan Ong
+   * Copyright(c) 2015-2022 Douglas Christopher Wilson
+   * MIT Licensed
+   *)
+
+mime-types/index.js:
+  (*!
+   * mime-types
+   * Copyright(c) 2014 Jonathan Ong
+   * Copyright(c) 2015 Douglas Christopher Wilson
+   * MIT Licensed
+   *)
+
+web-streams-polyfill/dist/ponyfill.es2018.js:
+  (**
+   * @license
+   * web-streams-polyfill v3.3.3
+   * Copyright 2024 Mattias Buelens, Diwank Singh Tomer and other contributors.
+   * This code is released under the MIT license.
+   * SPDX-License-Identifier: MIT
+   *)
+
+fetch-blob/index.js:
+  (*! fetch-blob. MIT License. Jimmy Wärting <https://jimmy.warting.se/opensource> *)
+
+node-domexception/index.js:
+  (*! node-domexception. MIT License. Jimmy Wärting <https://jimmy.warting.se/opensource> *)
+
+pako/dist/pako.esm.mjs:
+  (*! pako 2.2.0 https://github.com/nodeca/pako @license (MIT AND Zlib) *)
+*/
+

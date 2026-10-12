@@ -1,11 +1,11 @@
 {
   "reference": "https://9280.kstore.vip/cat/index.js.md5",
-  "checkedOn": "2026-10-12",
+  "checkedOn": "2026-10-13",
   "referenceMd5": "0e89531f459dc4bb6f6abbbbf7392493",
   "referenceSha256": "3503f06c49a6aa3963545bc12b77efeffd786e0ad807af39c529eaf91eddb135",
   "referenceBytes": 6479654,
-  "method": "Static interface analysis; audited small source fragments in a restricted probe; independent native adapters. Entire remote bundle is not imported or executed. Live-verified sources are labeled separately from offline adapter candidates included for phone-side testing.",
-  "scope": "The full bundle was inventoried: 54 explicitly named metadata entries plus dynamically generated/config-dependent sources. Eight non-cloud public-content sources now have native CatPaw adapters: Qimiao, Duboku, Xingya, Ciyuancheng, Baidu Haokan short drama, Yiyingshi, Ikanbot and Weiguan. Qimiao and Duboku have live media evidence; the other five are included for device-side acceptance based on their documented public interfaces and local adapter fixtures where available.",
+  "method": "Selected source-factory dependency extraction and native protocol integration. No whole reference server, cloud registry or imported shared accounts. Device-first acceptance; live media checks are not an admission prerequisite.",
+  "scope": "81 registered sources: 12 widget snapshots, 8 independent native sources and 61 selected non-cloud reference adapters, including 17 dynamically registered public-content entries.",
   "candidates": [
     {
       "key": "duanjuqimiao",
@@ -120,5 +120,319 @@
       "decision": "excluded-access-gate",
       "reason": "Reference playback flow obtains a token through an ad-reward endpoint; do not automate or bypass that access gate."
     }
+  ],
+  "release": "0.6.0",
+  "deviceTestBatch": [
+    {
+      "key": "douban",
+      "name": "豆瓣|首页",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "hanxiaoquan",
+      "name": "韩剧|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "guazi",
+      "name": "瓜子|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "wexYueYue",
+      "name": "悦悦|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "wencai",
+      "name": "文采|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "rebo",
+      "name": "热播|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "bobo",
+      "name": "波波|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "wexfengye4k",
+      "name": "枫叶|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "huya",
+      "name": "虎牙|直播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "bililive",
+      "name": "哔哩|直播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "douyu",
+      "name": "斗鱼|直播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "manjuhongguo",
+      "name": "漫剧|小红",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "manjuhuolong",
+      "name": "漫剧|小龙",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "manjuqimao",
+      "name": "漫剧|小猫",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "manjuxifan",
+      "name": "漫剧|小喜",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "hema",
+      "name": "短漫|小马",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "animehuazi",
+      "name": "花子|动漫",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "animemodu",
+      "name": "魔都|动漫",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "animexifan",
+      "name": "稀饭|动漫",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "bookaishijie",
+      "name": "世界|听书",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "bookaiyueting",
+      "name": "悦听|听书",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "bookhema",
+      "name": "小马|听书",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "bookhongguo",
+      "name": "小红|听书",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "childrenaitutu",
+      "name": "兔兔|少儿",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "childrenaibaobao",
+      "name": "宝宝|少儿",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "childrenaibeiwa",
+      "name": "贝瓦|少儿",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "musicaiqingting",
+      "name": "蜻蜓|电台",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "musicailunhui",
+      "name": "轮回|舞曲",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "musicaikuwo",
+      "name": "酷听|音乐",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "musicaikuwoa",
+      "name": "小酷|音乐",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "musicaikg",
+      "name": "小狗|音乐",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "musicaiqq",
+      "name": "小秋|音乐",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "musicaiwy",
+      "name": "小易|音乐",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "musicai163",
+      "name": "易听|音乐",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "sportaiguazi",
+      "name": "瓜子|体育",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "sportaikafei",
+      "name": "咖啡|体育",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "sportaifeiqiu",
+      "name": "飞球|体育",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "sportaikanqiutong",
+      "name": "球通|体育",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "sportaikanqiu",
+      "name": "看球|体育",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "sportaiwwe",
+      "name": "WWE|体育",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "biliys",
+      "name": "哔哩|影视",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "wexaitiantang",
+      "name": "天堂|采集",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "musicailiyuan",
+      "name": "梨园|戏曲",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "musicaitangdou",
+      "name": "糖豆|舞蹈",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "appv7dashixiong",
+      "name": "师兄|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "appv7fenzhu",
+      "name": "粉猪|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "appv7xianyu",
+      "name": "咸鱼|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "appv7zhuijudaren",
+      "name": "追剧|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "appv7xiaoyouzi",
+      "name": "柚子|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "appv7xiaoningmeng",
+      "name": "柠檬|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "appv7mengtaiqi",
+      "name": "太奇|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "appv7linglingqi",
+      "name": "零七|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "appv7xiaoshizi",
+      "name": "柿子|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "appv7xiaohuangren",
+      "name": "黄人|秒播",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "bilibili",
+      "name": "哔哩|合集",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "bilixiqu",
+      "name": "哔哩|戏曲",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "biliych",
+      "name": "哔哩|歌曲",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "少儿教育",
+      "name": "少儿|教育",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "小学课堂",
+      "name": "小学|课堂",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "初中课堂",
+      "name": "初中|课堂",
+      "decision": "included-pending-device-test"
+    },
+    {
+      "key": "高中教育",
+      "name": "高中|课堂",
+      "decision": "included-pending-device-test"
+    }
+  ],
+  "excludedFamilies": [
+    "cloud-drive sources and cloud-drive search",
+    "configuration-only and date/push entries",
+    "Emby accounts requiring user configuration",
+    "Live DIY with no configured playlist"
   ]
 }

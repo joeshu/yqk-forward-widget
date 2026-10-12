@@ -1,0 +1,307 @@
+[
+  {
+    "factory": "uo0",
+    "key": "douban",
+    "name": "豆瓣|首页"
+  },
+  {
+    "factory": "kf0",
+    "key": "hanxiaoquan",
+    "name": "韩剧|秒播"
+  },
+  {
+    "factory": "Bf0",
+    "key": "guazi",
+    "name": "瓜子|秒播"
+  },
+  {
+    "factory": "Qf0",
+    "key": "wexYueYue",
+    "name": "悦悦|秒播"
+  },
+  {
+    "factory": "ed0",
+    "key": "wencai",
+    "name": "文采|秒播"
+  },
+  {
+    "factory": "_d0",
+    "key": "rebo",
+    "name": "热播|秒播"
+  },
+  {
+    "factory": "Id0",
+    "key": "bobo",
+    "name": "波波|秒播"
+  },
+  {
+    "factory": "Wd0",
+    "key": "wexfengye4k",
+    "name": "枫叶|秒播"
+  },
+  {
+    "factory": "Gd0",
+    "key": "huya",
+    "name": "虎牙|直播"
+  },
+  {
+    "factory": "e20",
+    "key": "bililive",
+    "name": "哔哩|直播"
+  },
+  {
+    "factory": "a20",
+    "key": "douyu",
+    "name": "斗鱼|直播"
+  },
+  {
+    "factory": "B20",
+    "key": "manjuhongguo",
+    "name": "漫剧|小红"
+  },
+  {
+    "factory": "L20",
+    "key": "manjuhuolong",
+    "name": "漫剧|小龙"
+  },
+  {
+    "factory": "M20",
+    "key": "manjuqimao",
+    "name": "漫剧|小猫"
+  },
+  {
+    "factory": "U20",
+    "key": "manjuxifan",
+    "name": "漫剧|小喜"
+  },
+  {
+    "factory": "H20",
+    "key": "hema",
+    "name": "短漫|小马"
+  },
+  {
+    "factory": "k60",
+    "key": "animehuazi",
+    "name": "花子|动漫"
+  },
+  {
+    "factory": "R60",
+    "key": "animemodu",
+    "name": "魔都|动漫"
+  },
+  {
+    "factory": "B1e",
+    "key": "animexifan",
+    "name": "稀饭|动漫"
+  },
+  {
+    "factory": "V60",
+    "key": "bookaishijie",
+    "name": "世界|听书"
+  },
+  {
+    "factory": "e10",
+    "key": "bookaiyueting",
+    "name": "悦听|听书"
+  },
+  {
+    "factory": "n10",
+    "key": "bookhema",
+    "name": "小马|听书"
+  },
+  {
+    "factory": "s10",
+    "key": "bookhongguo",
+    "name": "小红|听书"
+  },
+  {
+    "factory": "p10",
+    "key": "childrenaitutu",
+    "name": "兔兔|少儿"
+  },
+  {
+    "factory": "m10",
+    "key": "childrenaibaobao",
+    "name": "宝宝|少儿"
+  },
+  {
+    "factory": "h10",
+    "key": "childrenaibeiwa",
+    "name": "贝瓦|少儿"
+  },
+  {
+    "factory": "A10",
+    "key": "musicaiqingting",
+    "name": "蜻蜓|电台"
+  },
+  {
+    "factory": "w10",
+    "key": "musicailunhui",
+    "name": "轮回|舞曲"
+  },
+  {
+    "factory": "R10",
+    "key": "musicaikuwo",
+    "name": "酷听|音乐"
+  },
+  {
+    "factory": "O10",
+    "key": "musicaikuwoa",
+    "name": "小酷|音乐"
+  },
+  {
+    "factory": "M10",
+    "key": "musicaikg",
+    "name": "小狗|音乐"
+  },
+  {
+    "factory": "Y10",
+    "key": "musicaiqq",
+    "name": "小秋|音乐"
+  },
+  {
+    "factory": "ap0",
+    "key": "musicaiwy",
+    "name": "小易|音乐"
+  },
+  {
+    "factory": "fp0",
+    "key": "musicai163",
+    "name": "易听|音乐"
+  },
+  {
+    "factory": "hp0",
+    "key": "sportaiguazi",
+    "name": "瓜子|体育"
+  },
+  {
+    "factory": "yp0",
+    "key": "sportaikafei",
+    "name": "咖啡|体育"
+  },
+  {
+    "factory": "_p0",
+    "key": "sportaifeiqiu",
+    "name": "飞球|体育"
+  },
+  {
+    "factory": "Ip0",
+    "key": "sportaikanqiutong",
+    "name": "球通|体育"
+  },
+  {
+    "factory": "Dp0",
+    "key": "sportaikanqiu",
+    "name": "看球|体育"
+  },
+  {
+    "factory": "Mp0",
+    "key": "sportaiwwe",
+    "name": "WWE|体育"
+  },
+  {
+    "factory": "om0",
+    "key": "biliys",
+    "name": "哔哩|影视"
+  },
+  {
+    "factory": "Cm0",
+    "key": "wexaitiantang",
+    "name": "天堂|采集"
+  },
+  {
+    "factory": "g10",
+    "key": "musicailiyuan",
+    "name": "梨园|戏曲"
+  },
+  {
+    "factory": "v10",
+    "key": "musicaitangdou",
+    "name": "糖豆|舞蹈"
+  },
+  {
+    "key": "appv7dashixiong",
+    "name": "师兄|秒播",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "appv7fenzhu",
+    "name": "粉猪|秒播",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "appv7xianyu",
+    "name": "咸鱼|秒播",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "appv7zhuijudaren",
+    "name": "追剧|秒播",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "appv7xiaoyouzi",
+    "name": "柚子|秒播",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "appv7xiaoningmeng",
+    "name": "柠檬|秒播",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "appv7mengtaiqi",
+    "name": "太奇|秒播",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "appv7linglingqi",
+    "name": "零七|秒播",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "appv7xiaoshizi",
+    "name": "柿子|秒播",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "appv7xiaohuangren",
+    "name": "黄人|秒播",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "bilibili",
+    "name": "哔哩|合集",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "bilixiqu",
+    "name": "哔哩|戏曲",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "biliych",
+    "name": "哔哩|歌曲",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "少儿教育",
+    "name": "少儿|教育",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "小学课堂",
+    "name": "小学|课堂",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "初中课堂",
+    "name": "初中|课堂",
+    "factory": "dynamic-public-source"
+  },
+  {
+    "key": "高中教育",
+    "name": "高中|课堂",
+    "factory": "dynamic-public-source"
+  }
+]
