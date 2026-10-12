@@ -3,3 +3,5 @@ publish/
 publish-*/
 __pycache__/
 *.pyc
+catpaw/dist/
+joeshu-catpaw-storage.json*

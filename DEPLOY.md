@@ -209,3 +209,7 @@ Raw 订阅由仓库公开文件提供；Pages 是否上线，以 Actions 部署�
 果果短剧以 `ggduanju-0.1.0.js` 独立发布，根订阅、示例订阅及部署器统一登记，聚爷爷保持从订阅移除。构建前运行 `node build-ggduanju.cjs --check`；发布仍保留旧版脚本。
 
 可可影视以 `kkys-0.1.0.js` 独立发布；发布前运行 `node build-kkys.cjs --check`、`node test-kkys.cjs` 及完整回归。设备直播的原站地址不标成媒体验证通过，线上限制见 `kkys-validation.json`。
+
+## CatPawOpen发布
+
+部署前先运行 `npm --prefix catpaw ci --ignore-scripts`、`npm --prefix catpaw run build` 和 `npm --prefix catpaw test`。Pages工作流会自动完成构建。`catpaw/dist` 为构建产物，不提交源库；部署器将运行包、配置、MD5、来源版本和许可声明复制到公开的catpaw目录。使用 `catpaw/index.js.md5` 作为猫爪Node.js订阅入口，原yqk.fwd仍独立发布。

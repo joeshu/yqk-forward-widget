@@ -373,3 +373,21 @@ https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/yqk.fwd
 Python的parse=1可以让TVBox交给网页解析器；本订阅的Rex流资源只支持app/system原生播放，未接入TVBox网页解析器。原站APP专用、空地址、验证码、TLS、403/404都会如实提示。移植后不再关闭HTTPS证书验证，不加入原脚本的QQ群/TG推广或伪造演员、导演信息。
 
 构建 `node build-kkys.cjs`；回归 `node test-kkys.cjs`；实时检查 `node live-kkys.cjs`；记录 `kkys-validation.json`。iPhone实机导入和完整播放未在开发环境验收。
+
+## CatPawOpen 独立订阅
+
+原 Forward/Rex 订阅继续使用 yqk.fwd。支持 CatPawOpen **Node.js** 的播放器使用：
+
+https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5
+
+运行包复用当前12个已发布模块，提供start/stop与config/init/home/homeVod/category/detail/play/search接口，原始Widget接口通过本机网络、HTML和存储适配，不依赖外部服务器部署。入口MD5用于更新校验，同行的index.config.js.md5和index.config.js用于默认设置；无需把原来的.fwd导入猫爪。
+
+枚举筛选和播放模式在分类筛选栏中展示，原站URL与播放选项通过无分隔符冲突的源内标识传递；195集和全部分集来源保留。搜索使用各模块原生接口。输入型高级筛选暂使用模块默认值；可以正常使用片名搜索。推荐列表可通过homeVod访问，home默认提供分类，不在导入时同时请求12个网站。
+
+Rex片单只有数组、没有总页数；适配层会读取下一页并确认结果不同后才公布下一页，pagecount表示当前已确认能翻到的页码，不冒充全站总数。预读结果缓存30秒、下次翻页复用；原站重复页或下一页失败会停止继续翻页并说明。
+
+原站游客会话、AI额度和本机诊断按源隔离并保存到App私有目录，重载不自动轮换游客；未放入私人Cookie。播放头按资源保留；同次播放只返回首个播放头兼容组，头不同的资源不会错误合并为一个多画质响应。原模块提供的分集备用线路仍可独立选择。AI仍受原站额度与权限限制；可可设备模式仍标明待设备验证。
+
+Node.js18+运行包，不依赖WASM/JIT。默认严格HTTPS校验；开发/桌面环境的HTTP/HTTPS代理按标准CONNECT连接，设备正常环境使用直接HTTPS。保持原站检查和限流错误。没有猫爪/JSTV实机导入或完整播放验收记录；协议与本机运行包测试不是实机保证。
+
+构建：npm --prefix catpaw ci --ignore-scripts；npm --prefix catpaw run build；npm --prefix catpaw test。真实运行包HTTP检查：node catpaw/live.cjs。官方接口参考：https://github.com/CatPawApp/CatPawOpen/tree/main/nodejs ，协议补充参考（非官方）：https://github.com/git8477/CatPawOpen 。

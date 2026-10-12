@@ -49,6 +49,8 @@ function build(base,output,options={}) {
   if(!meta||!/^\d+\.\d+\.\d+$/.test(meta.version))throw new Error(prefix+'版本格式错误');
   const name=prefix+'-'+meta.version+'.js';manifest.widgets.push({id:meta.id,title:meta.title,description:meta.description,author:meta.author,version:meta.version,requiredVersion:meta.requiredVersion,url:baseUrl+'/'+name});return {name,code};
  });
+ const catpawNames=['index.js','index.js.md5','index.config.js','index.config.js.md5','index.js.LEGAL.txt','WIDGET_LICENSES.txt','info.json'];
+ const catpawFiles=Object.fromEntries(catpawNames.map(name=>{const file=path.join(__dirname,'catpaw','dist',name);if(!fs.existsSync(file))throw new Error('请先运行 npm --prefix catpaw ci --ignore-scripts 和 npm --prefix catpaw run build');return [key('catpaw/'+name),fs.readFileSync(file)];}));
  const common=[{key:'Access-Control-Allow-Origin',value:'*'},{key:'X-Content-Type-Options',value:'nosniff'},{key:'Cache-Control',value:'public, max-age=60, must-revalidate'}];
  const headers=[{source:'/'+key('yqk.fwd'),headers:[...common,{key:'Content-Type',value:'application/json; charset=utf-8'}]},
  {source:'/'+key(name),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]},
@@ -58,7 +60,8 @@ function build(base,output,options={}) {
  {source:'/'+key(kanjuName),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]}];
  headers.push({source:'/'+key(auName),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]});
  newWidgets.forEach(w=>headers.push({source:'/'+key(w.name),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]}));
- const files={
+ catpawNames.forEach(name=>headers.push({source:'/'+key('catpaw/'+name),headers:[...common,{key:'Content-Type',value:name.endsWith('.js')?'application/javascript; charset=utf-8':name.endsWith('.json')?'application/json; charset=utf-8':'text/plain; charset=utf-8'}]}));
+ const files={...catpawFiles,
   [key('collection-poster.png')]:fs.readFileSync(path.join(__dirname,'collection-poster.png')),
   [key(auName)]:auCode,
   [key(name)]:code,
@@ -69,7 +72,7 @@ function build(base,output,options={}) {
   [key('yqk.fwd')]:JSON.stringify(manifest,null,2)+'\n',
   'vercel.json':JSON.stringify({$schema:'https://openapi.vercel.sh/vercel.json',framework:null,outputDirectory:'.',headers},null,2)+'\n',
   '_headers':headers.map(h=>h.source+'\n'+h.headers.map(x=>'  '+x.key+': '+x.value).join('\n')).join('\n\n')+'\n',
-  [key('release.json')]:JSON.stringify({version:meta.version,scriptUrl,subscriptionUrl:baseUrl+'/yqk.fwd',widgets:manifest.widgets.map(w=>({id:w.id,version:w.version,url:w.url})),sourceSha256:crypto.createHash('sha256').update(code).digest('hex')},null,2)+'\n'
+  [key('release.json')]:JSON.stringify({version:meta.version,scriptUrl,subscriptionUrl:baseUrl+'/yqk.fwd',catpawSubscriptionUrl:baseUrl+'/catpaw/index.js.md5',widgets:manifest.widgets.map(w=>({id:w.id,version:w.version,url:w.url})),sourceSha256:crypto.createHash('sha256').update(code).digest('hex')},null,2)+'\n'
  };
  newWidgets.forEach(w=>files[key(w.name)]=w.code);
  if(options.pages) {

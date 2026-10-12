@@ -1,0 +1,126 @@
+{
+  "time": "2026-10-12T14:17:49.112Z",
+  "bundleSha256": "754676bbbb365f4c7764609941c764de49f33f9b9e6860205af7e9b219650a4e",
+  "checks": [
+    {
+      "source": "看剧AI",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 20,
+      "confirmedPagecount": 2
+    },
+    {
+      "source": "搜剧AI",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 20,
+      "confirmedPagecount": 2
+    },
+    {
+      "source": "一起看",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 15,
+      "confirmedPagecount": 2
+    },
+    {
+      "source": "ZIP0影视",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 76,
+      "confirmedPagecount": 2
+    },
+    {
+      "source": "4K影视",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 30,
+      "confirmedPagecount": 2
+    },
+    {
+      "source": "Auete影视",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 28,
+      "confirmedPagecount": 1
+    },
+    {
+      "source": "Anime1动漫",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 10,
+      "confirmedPagecount": 1
+    },
+    {
+      "source": "Eboyang影视",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 6,
+      "confirmedPagecount": 1
+    },
+    {
+      "source": "追影猫影视",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 69,
+      "confirmedPagecount": 1
+    },
+    {
+      "source": "金牌影院",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 60,
+      "confirmedPagecount": 2
+    },
+    {
+      "source": "果果短剧",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 40,
+      "confirmedPagecount": 2
+    },
+    {
+      "source": "可可影视",
+      "category": "latest",
+      "status": 200,
+      "passed": true,
+      "count": 24,
+      "confirmedPagecount": 2
+    },
+    {
+      "source": "joeshu_kkys",
+      "passed": true,
+      "kind": "complete CatPaw detail and play response",
+      "episodes": 195,
+      "lines": 27,
+      "parse": 0,
+      "mediaVerified": false
+    },
+    {
+      "source": "joeshu_ggduanju",
+      "passed": true,
+      "kind": "complete CatPaw detail and play response",
+      "episodes": 1,
+      "lines": 3,
+      "parse": 0,
+      "mediaVerified": true
+    }
+  ],
+  "limitations": [
+    "No actual CatPaw/JSTV phone import or video playback test",
+    "Fresh source-isolated anonymous storage; no imported personal credentials",
+    "Only confirmed next page is advertised, not a guessed total"
+  ],
+  "sourceCount": 12
+}
