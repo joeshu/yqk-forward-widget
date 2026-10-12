@@ -14,7 +14,11 @@
     "duanjuqimiao",
     "wexDuBoKu",
     "duanjuxingya",
-    "animeciyuancheng"
+    "animeciyuancheng",
+    "baiduduanju",
+    "yiyingshi",
+    "ikanbot",
+    "duanjuweiguan"
   ],
   "priorFullChecks": [
     "wencai",
@@ -265,8 +269,9 @@
   "limitations": [
     "54 explicit metadata entries understate the dynamically generated registry.",
     "Qimiao and Duboku have current complete category, detail, search, HLS and segment evidence in catpaw/native-validation.json.",
-    "Xingya and Ciyuancheng have offline end-to-end adapter fixtures and full 195-episode coverage; current live upstream and phone playback remain pending.",
     "Cloud-drive sources are excluded by user request.",
-    "Network availability varies by source region and time."
+    "Network availability varies by source region and time.",
+    "Baidu Haokan and Yiyingshi have independent CatPaw adapters and are included for phone-side source acceptance.",
+    "Six of the eight native adapters have offline fixtures or source-level interface mapping and are included for phone-side acceptance; only Qimiao and Duboku currently have live upstream media evidence."
   ]
 }

@@ -5,7 +5,7 @@
   "referenceSha256": "3503f06c49a6aa3963545bc12b77efeffd786e0ad807af39c529eaf91eddb135",
   "referenceBytes": 6479654,
   "method": "Static interface analysis; audited small source fragments in a restricted probe; independent native adapters. Entire remote bundle is not imported or executed. Live-verified sources are labeled separately from offline adapter candidates included for phone-side testing.",
-  "scope": "The full bundle was inventoried: 54 explicitly named metadata entries plus dynamically generated/config-dependent sources. Eight candidates received source-level endpoint checks in the prior pass. Four sources are now in the subscription: Qimiao and Duboku have complete live category/detail/search/HLS/media-segment evidence; Xingya and Ciyuancheng have independent adapters with offline end-to-end fixtures and 195-episode coverage, pending phone-side upstream validation.",
+  "scope": "The full bundle was inventoried: 54 explicitly named metadata entries plus dynamically generated/config-dependent sources. Eight non-cloud public-content sources now have native CatPaw adapters: Qimiao, Duboku, Xingya, Ciyuancheng, Baidu Haokan short drama, Yiyingshi, Ikanbot and Weiguan. Qimiao and Duboku have live media evidence; the other five are included for device-side acceptance based on their documented public interfaces and local adapter fixtures where available.",
   "candidates": [
     {
       "key": "duanjuqimiao",
@@ -68,6 +68,34 @@
       "decision": "included-pending-device-test",
       "evidence": "native/ciyuancheng.js and offline fixture in test-native.cjs",
       "reason": "Reference exposes separate public HTTPS zone, video, sections and play-url APIs without requiring optional private auth; offline fixtures cover filters, 195 episodes and direct playback. Current sandbox could not complete live upstream validation."
+    },
+    {
+      "key": "baiduduanju",
+      "name": "好看短剧",
+      "decision": "included-pending-device-test",
+      "evidence": "native/baidu-duanju.js and 194-episode fixture in test-native.cjs",
+      "reason": "Uses the public catalog/detail/playlet APIs; reference fixed visitor cookie is omitted. Included for phone-side acceptance."
+    },
+    {
+      "key": "yiyingshi",
+      "name": "伊影影视",
+      "decision": "included-pending-device-test",
+      "evidence": "native/yiyingshi.js",
+      "reason": "Uses public app API and dynamically acquired guest token; included for phone-side acceptance."
+    },
+    {
+      "key": "ikanbot",
+      "name": "爱看采集",
+      "decision": "included-pending-device-test",
+      "evidence": "native/ikanbot.js and HTML/API fixtures in test-native.cjs",
+      "reason": "Uses public web catalog, search and result API; included for phone-side acceptance."
+    },
+    {
+      "key": "duanjuweiguan",
+      "name": "微观短剧",
+      "decision": "included-pending-device-test",
+      "evidence": "native/weiguan.js and guest-session offline fixture in test-native.cjs",
+      "reason": "Public short-drama guest session and direct playback URL flow are independently implemented for phone-side acceptance."
     }
   ],
   "excludedCapabilities": [
@@ -77,8 +105,8 @@
     "Ad-reward, login, anti-bot, or TLS-validation gates are not bypassed"
   ],
   "limitations": [
-    "Sampled tests do not guarantee every title, future uptime or other network regions",
-    "Qimiao and Duboku have live upstream media evidence; Xingya and Ciyuancheng remain pending phone-side API/playback validation"
+    "Only Qimiao and Duboku currently have live upstream media evidence. The other six newly integrated sources are supplied for user phone-side acceptance.",
+    "Source availability, security checks and playback behavior can change upstream and vary by network region."
   ],
   "inventoryFile": "reference-catalogue.json",
   "currentFollowUp": [
@@ -91,11 +119,6 @@
       "key": "hanxiaoquan",
       "decision": "excluded-access-gate",
       "reason": "Reference playback flow obtains a token through an ad-reward endpoint; do not automate or bypass that access gate."
-    },
-    {
-      "key": "wexfengye4k",
-      "decision": "not-admitted",
-      "reason": "Earlier source endpoint check returned HTTP 502."
     }
   ]
 }
