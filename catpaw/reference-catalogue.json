@@ -13,7 +13,8 @@
   "alreadyAdmitted": [
     "duanjuqimiao",
     "wexDuBoKu",
-    "duanjuxingya"
+    "duanjuxingya",
+    "animeciyuancheng"
   ],
   "priorFullChecks": [
     "wencai",
@@ -264,7 +265,7 @@
   "limitations": [
     "54 explicit metadata entries understate the dynamically generated registry.",
     "Qimiao and Duboku have current complete category, detail, search, HLS and segment evidence in catpaw/native-validation.json.",
-    "Xingya has offline end-to-end adapter fixtures and full 195-episode coverage; current live upstream and phone playback remain pending.",
+    "Xingya and Ciyuancheng have offline end-to-end adapter fixtures and full 195-episode coverage; current live upstream and phone playback remain pending.",
     "Cloud-drive sources are excluded by user request.",
     "Network availability varies by source region and time."
   ]

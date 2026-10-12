@@ -214,4 +214,4 @@ Raw 订阅由仓库公开文件提供；Pages 是否上线，以 Actions 部署�
 
 部署前先运行 `npm --prefix catpaw ci --ignore-scripts`、`npm --prefix catpaw run build` 和 `npm --prefix catpaw test`。Pages工作流会自动完成构建。`catpaw/dist` 为构建产物，不提交源库；部署器将运行包、配置、MD5、来源版本和许可声明复制到公开的catpaw目录。使用 `catpaw/index.js.md5` 作为猫爪Node.js订阅入口，原yqk.fwd仍独立发布。
 
-CatPaw 0.3.0包含12个快照源和3个原生独立源（奇妙短剧、独播库影视、星芽短剧），共15个；Forward/Rex的12个原模块保持原版本。`catpaw/native/`进入本机运行包，原参考整包不提交、不作为运行依赖。`catpaw/native-validation.json`中的完整在线目录、详情、搜索与媒体分片证据覆盖奇妙短剧和独播库；星芽已通过离线全流程与195集检查，手机端需实测原站会话和播放。
+CatPaw 0.4.0包含12个快照源和4个原生独立源（奇妙短剧、独播库影视、星芽短剧、次元城动漫），共16个；Forward/Rex的12个原模块保持原版本。`catpaw/native/`进入本机运行包，原参考整包不提交、不作为运行依赖。`catpaw/native-validation.json`中的完整在线目录、详情、搜索与媒体分片证据覆盖奇妙短剧和独播库；星芽和次元城通过离线全流程与完整分集检查，手机端需实测原站接口和播放。
