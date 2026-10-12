@@ -392,12 +392,12 @@ Node.js18+运行包，不依赖WASM/JIT。默认严格HTTPS校验；开发/桌�
 
 构建：npm --prefix catpaw ci --ignore-scripts；npm --prefix catpaw run build；npm --prefix catpaw test。真实运行包HTTP检查：node catpaw/live.cjs。官方接口参考：https://github.com/CatPawApp/CatPawOpen/tree/main/nodejs ，协议补充参考（非官方）：https://github.com/git8477/CatPawOpen 。
 
-### CatPaw 0.2.0：参考订阅新增源
+### CatPaw 0.3.0：参考订阅新增源
 
-参考 https://9280.kstore.vip/cat/index.js.md5 的公开接口，独立实现奇妙短剧和独播库影视；CatPaw订阅共14个源，入口保持不变。原Forward/Rex合集仍为12个模块，本次新增仅在CatPaw版本生效。没有整包复制或在客户端加载远程订阅代码。
+参考 https://9280.kstore.vip/cat/index.js.md5 的公开接口，独立实现奇妙短剧、独播库影视和星芽短剧；CatPaw订阅共15个源，入口保持不变。原Forward/Rex合集仍为12个模块，本次新增仅在CatPaw版本生效。没有整包复制或在客户端加载远程订阅代码。
 
-奇妙短剧读取动态发布页和原站完整分类/分集，本机设备标识持久化且不会每日轮换；独播库提供地区、动态年份、语言和原站排序。两者保留媒体请求头、源内分集标识、30秒有界缓存与经实际下一页确认的分页。搜索不虚构总页数。独播库搜索原接口只提供一页结果。
+奇妙短剧读取动态发布页和原站完整分类/分集，本机设备标识持久化且不会每日轮换；独播库提供地区、动态年份、语言和原站排序。星芽短剧使用公开游客会话流程，提供原站分类、榜单、筛选、搜索和详情的实际分集，并返回原站HTTPS播放地址。三者的标识和存储相互隔离，列表分页仅公布经实际下一页确认的范围；搜索不虚构总页数。独播库和星芽搜索原接口只提供一页结果。
 
-抽样入口、详情、搜索、HLS清单与首尾集媒体分片的实际证据见 `catpaw/native-validation.json`；纳入/暂缓原因见 `catpaw/reference-review.json`。本轮仅核验8个候选源，不代表参考订阅所有源均已检查。403、未适配的加密响应、需要私人账号/网盘凭据及CENC代理的源暂不纳入。来源地域和未来可用性可能变化，手机实机导入仍待验收。
+奇妙短剧、独播库的抽样入口、详情、搜索、HLS清单与首尾集媒体分片实际证据见 `catpaw/native-validation.json`。星芽仅完成离线全流程及195集结构检查，在线调用和手机实播待你验收。纳入/暂缓原因见 `catpaw/reference-review.json`。参考包已清点出54个显式命名项，另有动态生成和账号配置项；清单与追加筛选记录见 `catpaw/reference-catalogue.json`。不接入网盘/云盘源；也不绕过私人登录、广告奖励、安全验证或TLS约束。出处不可用、加密格式未适配且没有透明公开API流程的源暂不纳入。
 
 真实新增源检查：`node catpaw/live-native.cjs`。脚本只报告验证结果，不会自动添加或删除订阅源。

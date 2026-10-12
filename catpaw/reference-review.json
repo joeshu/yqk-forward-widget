@@ -4,8 +4,8 @@
   "referenceMd5": "0e89531f459dc4bb6f6abbbbf7392493",
   "referenceSha256": "3503f06c49a6aa3963545bc12b77efeffd786e0ad807af39c529eaf91eddb135",
   "referenceBytes": 6479654,
-  "method": "Static interface analysis; audited small source fragments in a restricted probe; independent native adapters. Entire remote bundle is not imported or executed. Admission requires category, full detail, search, HLS and media segment checks.",
-  "scope": "This round verifies these eight candidate sources, not every source in the reference bundle.",
+  "method": "Static interface analysis; audited small source fragments in a restricted probe; independent native adapters. Entire remote bundle is not imported or executed. Live-verified sources are labeled separately from offline adapter candidates included for phone-side testing.",
+  "scope": "The full bundle was inventoried: 54 explicitly named metadata entries plus dynamically generated/config-dependent sources. Eight candidates received source-level endpoint checks in the prior pass. Three sources are now in the subscription: Qimiao and Duboku have complete live category/detail/search/HLS/media-segment evidence; Xingya has an independent adapter with offline end-to-end fixtures and 195-episode coverage, pending phone-side upstream validation.",
   "candidates": [
     {
       "key": "duanjuqimiao",
@@ -54,15 +54,41 @@
       "name": "小喜漫剧",
       "decision": "not-admitted",
       "reason": "Encrypted v2 response not yet adapted"
+    },
+    {
+      "key": "duanjuxingya",
+      "name": "星芽短剧",
+      "decision": "included-pending-device-test",
+      "evidence": "native/xingya.js and offline fixture in test-native.cjs",
+      "reason": "Public guest-session flow, category/ranking/search/detail and direct HTTPS episode URLs are implemented. Current sandbox could not complete live upstream validation; user requested phone-side playback testing."
     }
   ],
   "excludedCapabilities": [
-    "Personal-account cloud disk, Emby and cookie-dependent sources remain unconfigured",
+    "Personal-account cloud disk, Emby and cookie-dependent sources remain excluded/unconfigured",
     "Hongguo CENC decryption/proxy is not included",
-    "Control/settings/update-label entries are not content sources"
+    "Control/settings/update-label entries are not content sources",
+    "Ad-reward, login, anti-bot, or TLS-validation gates are not bypassed"
   ],
   "limitations": [
     "Sampled tests do not guarantee every title, future uptime or other network regions",
     "Phone app import and playback remains untested"
+  ],
+  "inventoryFile": "reference-catalogue.json",
+  "currentFollowUp": [
+    {
+      "key": "pianku",
+      "decision": "excluded-cloud-drive",
+      "reason": "User explicitly requested excluding cloud-drive sources."
+    },
+    {
+      "key": "hanxiaoquan",
+      "decision": "excluded-access-gate",
+      "reason": "Reference playback flow obtains a token through an ad-reward endpoint; do not automate or bypass that access gate."
+    },
+    {
+      "key": "wexfengye4k",
+      "decision": "not-admitted",
+      "reason": "Earlier source endpoint check returned HTTP 502."
+    }
   ]
 }

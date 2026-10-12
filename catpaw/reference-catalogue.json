@@ -1,0 +1,271 @@
+{
+  "reference": "https://9280.kstore.vip/cat/index.js.md5",
+  "checkedOn": "2026-10-12",
+  "referenceSha256": "3503f06c49a6aa3963545bc12b77efeffd786e0ad807af39c529eaf91eddb135",
+  "explicitMetadataCount": 54,
+  "inventoryMeaning": "Explicitly named source metadata in the bundle; not the total runtime registry. Fm0 also spreads generated factories and account-dependent entries.",
+  "dynamicRegistrations": [
+    "yc0: Huajuan and other generated video sources",
+    "pd0: app-configured short-video sources",
+    "um0: Bilibili/education playlists",
+    "Gp0: configured Emby accounts"
+  ],
+  "alreadyAdmitted": [
+    "duanjuqimiao",
+    "wexDuBoKu",
+    "duanjuxingya"
+  ],
+  "priorFullChecks": [
+    "wencai",
+    "animemodu",
+    "wexaitiantang",
+    "manjuhuolong",
+    "manjuqimao",
+    "manjuxifan"
+  ],
+  "currentFollowUp": [
+    {
+      "key": "pianku",
+      "observation": "Cloud-drive-oriented source.",
+      "decision": "excluded-cloud-drive",
+      "reason": "User explicitly requested excluding cloud-drive sources."
+    },
+    {
+      "key": "hanxiaoquan",
+      "observation": "Reference playback flow uses an ad-reward token endpoint.",
+      "decision": "excluded-access-gate",
+      "reason": "Do not automate or bypass the ad-reward access gate."
+    },
+    {
+      "key": "wexfengye4k",
+      "observation": "Earlier direct endpoint check returned HTTP 502.",
+      "decision": "not-admitted",
+      "reason": "No working source response established."
+    }
+  ],
+  "explicitEntries": [
+    {
+      "key": "push",
+      "name": "推送"
+    },
+    {
+      "key": "douban",
+      "name": "豆瓣|首页"
+    },
+    {
+      "key": "baseset",
+      "name": "配置|中心"
+    },
+    {
+      "key": "wogg",
+      "name": "玩偶|4K"
+    },
+    {
+      "key": "guanying",
+      "name": "观影|4K"
+    },
+    {
+      "key": "qwmkv",
+      "name": "七味|4K"
+    },
+    {
+      "key": "zhinan4k",
+      "name": "原盘|4K"
+    },
+    {
+      "key": "jutou",
+      "name": "剧透|4K"
+    },
+    {
+      "key": "pan123ziyuan",
+      "name": "盘迷|4K"
+    },
+    {
+      "key": "yidong4k",
+      "name": "移动|4K"
+    },
+    {
+      "key": "libvio",
+      "name": "立播|4K"
+    },
+    {
+      "key": "pianku",
+      "name": "片库|4K"
+    },
+    {
+      "key": "woniu4k",
+      "name": "蜗牛|4K"
+    },
+    {
+      "key": "mypan",
+      "name": "我的|网盘"
+    },
+    {
+      "key": "fake115share",
+      "name": "115|分享"
+    },
+    {
+      "key": "hanxiaoquan",
+      "name": "韩剧|秒播"
+    },
+    {
+      "key": "guazi",
+      "name": "瓜子|秒播"
+    },
+    {
+      "key": "wexDuBoKu",
+      "name": "独播|秒播"
+    },
+    {
+      "key": "wexYueYue",
+      "name": "悦悦|秒播"
+    },
+    {
+      "key": "wencai",
+      "name": "文采|秒播"
+    },
+    {
+      "key": "yiyingshi",
+      "name": "伊影|秒播"
+    },
+    {
+      "key": "rebo",
+      "name": "热播|秒播"
+    },
+    {
+      "key": "bobo",
+      "name": "波波|秒播"
+    },
+    {
+      "key": "ikanbot",
+      "name": "爱看|采集"
+    },
+    {
+      "key": "wexfengye4k",
+      "name": "枫叶|秒播"
+    },
+    {
+      "key": "huya",
+      "name": "虎牙|直播"
+    },
+    {
+      "key": "bililive",
+      "name": "哔哩|直播"
+    },
+    {
+      "key": "douyu",
+      "name": "斗鱼|直播"
+    },
+    {
+      "key": "livetovod",
+      "name": "点播|直播"
+    },
+    {
+      "key": "hema",
+      "name": "短漫|小马"
+    },
+    {
+      "key": "duanjuxingya",
+      "name": "短剧|星芽"
+    },
+    {
+      "key": "baiduduanju",
+      "name": "短剧|好看"
+    },
+    {
+      "key": "duanjuqimiao",
+      "name": "短剧|小猫"
+    },
+    {
+      "key": "duanjuweiguan",
+      "name": "短剧|小薇"
+    },
+    {
+      "key": "animehuazi",
+      "name": "花子|动漫"
+    },
+    {
+      "key": "animemodu",
+      "name": "魔都|动漫"
+    },
+    {
+      "key": "animeciyuancheng",
+      "name": "次元|动漫"
+    },
+    {
+      "key": "bookaishijie",
+      "name": "世界|听书"
+    },
+    {
+      "key": "bookaiyueting",
+      "name": "悦听|听书"
+    },
+    {
+      "key": "musicaiqingting",
+      "name": "蜻蜓|电台"
+    },
+    {
+      "key": "musicailunhui",
+      "name": "轮回|舞曲"
+    },
+    {
+      "key": "sportaiguazi",
+      "name": "瓜子|体育"
+    },
+    {
+      "key": "sportaikafei",
+      "name": "咖啡|体育"
+    },
+    {
+      "key": "sportaifeiqiu",
+      "name": "飞球|体育"
+    },
+    {
+      "key": "sportaikanqiutong",
+      "name": "球通|体育"
+    },
+    {
+      "key": "sportaikanqiu",
+      "name": "看球|体育"
+    },
+    {
+      "key": "sportaiwwe",
+      "name": "WWE|体育"
+    },
+    {
+      "key": "biliys",
+      "name": "哔哩|影视"
+    },
+    {
+      "key": "soaiqupanshe",
+      "name": "搜索|百度"
+    },
+    {
+      "key": "soaihaiyin",
+      "name": "搜索|盘搜"
+    },
+    {
+      "key": "soaipansoo",
+      "name": "搜索|九七"
+    },
+    {
+      "key": "sokaka",
+      "name": "搜索|珈珈"
+    },
+    {
+      "key": "wexaitiantang",
+      "name": "天堂|采集"
+    },
+    {
+      "key": "gengxin",
+      "name": "日期:20261010"
+    }
+  ],
+  "limitations": [
+    "54 explicit metadata entries understate the dynamically generated registry.",
+    "Qimiao and Duboku have current complete category, detail, search, HLS and segment evidence in catpaw/native-validation.json.",
+    "Xingya has offline end-to-end adapter fixtures and full 195-episode coverage; current live upstream and phone playback remain pending.",
+    "Cloud-drive sources are excluded by user request.",
+    "Network availability varies by source region and time."
+  ]
+}
