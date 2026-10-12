@@ -380,7 +380,7 @@ Python的parse=1可以让TVBox交给网页解析器；本订阅的Rex流资源�
 
 https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5
 
-运行包复用当前12个已发布模块，提供start/stop与config/init/home/homeVod/category/detail/play/search接口，原始Widget接口通过本机网络、HTML和存储适配，不依赖外部服务器部署。入口MD5用于更新校验，同行的index.config.js.md5和index.config.js用于默认设置；无需把原来的.fwd导入猫爪。
+运行包包含当前12个已发布模块及2个经抽样媒体验证的独立源（奇妙短剧、独播库影视），提供start/stop与config/init/home/homeVod/category/detail/play/search接口，原始Widget接口通过本机网络、HTML和存储适配，不依赖外部服务器部署。入口MD5用于更新校验，同行的index.config.js.md5和index.config.js用于默认设置；无需把原来的.fwd导入猫爪。
 
 枚举筛选和播放模式在分类筛选栏中展示，原站URL与播放选项通过无分隔符冲突的源内标识传递；195集和全部分集来源保留。搜索使用各模块原生接口。输入型高级筛选暂使用模块默认值；可以正常使用片名搜索。推荐列表可通过homeVod访问，home默认提供分类，不在导入时同时请求12个网站。
 
@@ -391,3 +391,13 @@ Rex片单只有数组、没有总页数；适配层会读取下一页并确认�
 Node.js18+运行包，不依赖WASM/JIT。默认严格HTTPS校验；开发/桌面环境的HTTP/HTTPS代理按标准CONNECT连接，设备正常环境使用直接HTTPS。保持原站检查和限流错误。没有猫爪/JSTV实机导入或完整播放验收记录；协议与本机运行包测试不是实机保证。
 
 构建：npm --prefix catpaw ci --ignore-scripts；npm --prefix catpaw run build；npm --prefix catpaw test。真实运行包HTTP检查：node catpaw/live.cjs。官方接口参考：https://github.com/CatPawApp/CatPawOpen/tree/main/nodejs ，协议补充参考（非官方）：https://github.com/git8477/CatPawOpen 。
+
+### CatPaw 0.2.0：参考订阅新增源
+
+参考 https://9280.kstore.vip/cat/index.js.md5 的公开接口，独立实现奇妙短剧和独播库影视；CatPaw订阅共14个源，入口保持不变。原Forward/Rex合集仍为12个模块，本次新增仅在CatPaw版本生效。没有整包复制或在客户端加载远程订阅代码。
+
+奇妙短剧读取动态发布页和原站完整分类/分集，本机设备标识持久化且不会每日轮换；独播库提供地区、动态年份、语言和原站排序。两者保留媒体请求头、源内分集标识、30秒有界缓存与经实际下一页确认的分页。搜索不虚构总页数。独播库搜索原接口只提供一页结果。
+
+抽样入口、详情、搜索、HLS清单与首尾集媒体分片的实际证据见 `catpaw/native-validation.json`；纳入/暂缓原因见 `catpaw/reference-review.json`。本轮仅核验8个候选源，不代表参考订阅所有源均已检查。403、未适配的加密响应、需要私人账号/网盘凭据及CENC代理的源暂不纳入。来源地域和未来可用性可能变化，手机实机导入仍待验收。
+
+真实新增源检查：`node catpaw/live-native.cjs`。脚本只报告验证结果，不会自动添加或删除订阅源。

@@ -1,0 +1,87 @@
+{
+  "checkedAt": "2026-10-12T15:07:23.434Z",
+  "bundleSha256": "5996e725aef04714f3f5a075fa870e6ecfd48dada9d95df5fc9498dec89378c1",
+  "checks": [
+    {
+      "source": "独播库影视",
+      "key": "nodejs_joeshu_duboku",
+      "passed": true,
+      "samples": [
+        {
+          "title": "全城追缉",
+          "episodes": 1,
+          "first": {
+            "playlist": true,
+            "segment": true,
+            "segmentStatus": 206,
+            "encrypted": false
+          }
+        },
+        {
+          "title": "功夫女足",
+          "episodes": 1,
+          "first": {
+            "playlist": true,
+            "segment": true,
+            "segmentStatus": 206,
+            "encrypted": false
+          }
+        }
+      ],
+      "classes": 9,
+      "cards": 48,
+      "pagecount": 2,
+      "secondPageCards": 48,
+      "searchCards": 1
+    },
+    {
+      "source": "奇妙短剧",
+      "key": "nodejs_joeshu_qimiao",
+      "passed": true,
+      "samples": [
+        {
+          "title": "晚月落云舟",
+          "episodes": 64,
+          "first": {
+            "playlist": true,
+            "segment": true,
+            "segmentStatus": 206,
+            "encrypted": true
+          },
+          "last": {
+            "playlist": true,
+            "segment": true,
+            "segmentStatus": 206,
+            "encrypted": true
+          }
+        },
+        {
+          "title": "逐风月寻他",
+          "episodes": 71,
+          "first": {
+            "playlist": true,
+            "segment": true,
+            "segmentStatus": 206,
+            "encrypted": true
+          },
+          "last": {
+            "playlist": true,
+            "segment": true,
+            "segmentStatus": 206,
+            "encrypted": true
+          }
+        }
+      ],
+      "classes": 151,
+      "cards": 22,
+      "pagecount": 2,
+      "secondPageCards": 17,
+      "searchCards": 10
+    }
+  ],
+  "limitations": [
+    "Current network and samples only; not a guarantee for all titles or regions",
+    "No CatPaw/JSTV phone playback test",
+    "No reference bundle execution or imported user credentials"
+  ]
+}

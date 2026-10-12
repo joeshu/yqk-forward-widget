@@ -1,13 +1,15 @@
 import fastify from 'fastify';
 import {createServer} from 'node:http';
 import path from 'node:path';
-import sources from 'widget-sources';
+import widgetSources from 'widget-sources';
+import {nativeSources,createNativeAdapter} from './native/index.js';
+const sources=[...widgetSources,...nativeSources];
 import {PersistentStorage,errorMessage} from './runtime.js';
 import {createAdapter} from './adapter.js';
 
 export function createService({storage,config={},request,serverFactory}={}){
   const controllers=new Set(),server=fastify({logger:false,forceCloseConnections:true,bodyLimit:256*1024,serverFactory:serverFactory||((handle)=>createServer(handle))}),adapters=new Map();
-  function adapter(source){if(!adapters.has(source.key))adapters.set(source.key,createAdapter(source,storage,config,request,controllers));return adapters.get(source.key);}
+  function adapter(source){if(!adapters.has(source.key))adapters.set(source.key,source.kind?createNativeAdapter(source,storage,request,controllers):createAdapter(source,storage,config,request,controllers));return adapters.get(source.key);}
   server.setErrorHandler((e,_req,reply)=>reply.code(e.statusCode===400?400:502).send({err:errorMessage(e),code:e.code||'SOURCE_ERROR'}));
   server.get('/check',async()=>({run:true}));
   server.get('/config',async()=>({video:{sites:sources.map(s=>({key:'nodejs_'+s.key,name:s.title,type:3,api:'/spider/'+s.key+'/3'}))},read:{sites:[]},comic:{sites:[]},music:{sites:[]},pan:{sites:[]},color:[]}));

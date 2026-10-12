@@ -1,0 +1,68 @@
+{
+  "reference": "https://9280.kstore.vip/cat/index.js.md5",
+  "checkedOn": "2026-10-12",
+  "referenceMd5": "0e89531f459dc4bb6f6abbbbf7392493",
+  "referenceSha256": "3503f06c49a6aa3963545bc12b77efeffd786e0ad807af39c529eaf91eddb135",
+  "referenceBytes": 6479654,
+  "method": "Static interface analysis; audited small source fragments in a restricted probe; independent native adapters. Entire remote bundle is not imported or executed. Admission requires category, full detail, search, HLS and media segment checks.",
+  "scope": "This round verifies these eight candidate sources, not every source in the reference bundle.",
+  "candidates": [
+    {
+      "key": "duanjuqimiao",
+      "name": "奇妙短剧",
+      "decision": "admitted",
+      "evidence": "native-validation.json"
+    },
+    {
+      "key": "wexDuBoKu",
+      "name": "独播库影视",
+      "decision": "admitted",
+      "evidence": "native-validation.json"
+    },
+    {
+      "key": "wencai",
+      "name": "文采",
+      "decision": "not-admitted",
+      "reason": "Current-network source API returned HTTP 403"
+    },
+    {
+      "key": "animemodu",
+      "name": "魔都动漫",
+      "decision": "not-admitted",
+      "reason": "Current-network HTTPS catalogue API returned HTTP 403"
+    },
+    {
+      "key": "wexaitiantang",
+      "name": "天堂采集",
+      "decision": "not-admitted",
+      "reason": "Current-network HTTPS catalogue API returned HTTP 403; original source uses HTTP and was not admitted under HTTPS policy"
+    },
+    {
+      "key": "manjuhuolong",
+      "name": "小龙漫剧",
+      "decision": "not-admitted",
+      "reason": "Encrypted v2 response not yet adapted; this is adapter coverage, not proof that the upstream source is down"
+    },
+    {
+      "key": "manjuqimao",
+      "name": "小猫漫剧",
+      "decision": "not-admitted",
+      "reason": "Encrypted v2 response not yet adapted"
+    },
+    {
+      "key": "manjuxifan",
+      "name": "小喜漫剧",
+      "decision": "not-admitted",
+      "reason": "Encrypted v2 response not yet adapted"
+    }
+  ],
+  "excludedCapabilities": [
+    "Personal-account cloud disk, Emby and cookie-dependent sources remain unconfigured",
+    "Hongguo CENC decryption/proxy is not included",
+    "Control/settings/update-label entries are not content sources"
+  ],
+  "limitations": [
+    "Sampled tests do not guarantee every title, future uptime or other network regions",
+    "Phone app import and playback remains untested"
+  ]
+}
