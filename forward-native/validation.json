@@ -1,0 +1,240 @@
+{
+  "checkedAt": "2026-10-13T12:35:48.141Z",
+  "mode": "sampled-forward-browser",
+  "phonePlayback": "NOT_RUN",
+  "checks": [
+    {
+      "source": "duboku",
+      "version": "0.1.0",
+      "scriptSha256": "a6f5dc6460f1c79af404c38cfda4f337e192fcd846c64985bc295741ec7df262",
+      "checks": {
+        "home": {
+          "status": "PASS",
+          "cards": 81
+        },
+        "category": {
+          "status": "PASS",
+          "cards": 48,
+          "categories": 9
+        },
+        "detail": {
+          "status": "PASS",
+          "title": "兰香如故",
+          "episodes": 47,
+          "lines": 1
+        },
+        "search": {
+          "status": "PASS",
+          "cards": 1
+        },
+        "firstEpisode": {
+          "status": "PASS",
+          "media": "HLS",
+          "segmentStatus": 206,
+          "encrypted": false
+        },
+        "lastEpisode": {
+          "status": "PASS",
+          "media": "HLS",
+          "segmentStatus": 206,
+          "encrypted": false
+        }
+      },
+      "phonePlayback": "NOT_RUN",
+      "publishedScriptSha256": "a6f5dc6460f1c79af404c38cfda4f337e192fcd846c64985bc295741ec7df262",
+      "binding": "CURRENT"
+    },
+    {
+      "source": "qimiao",
+      "version": "0.1.0",
+      "scriptSha256": "979a4eb1fca43967472fd2f110c8de171aefa23864ee11d27bb2f76e1f470203",
+      "checks": {
+        "home": {
+          "status": "PASS",
+          "cards": 66
+        },
+        "category": {
+          "status": "PASS",
+          "cards": 66,
+          "categories": 151
+        },
+        "detail": {
+          "status": "PASS",
+          "title": "抚远不远",
+          "episodes": 33,
+          "lines": 1
+        },
+        "search": {
+          "status": "PASS",
+          "cards": 5
+        },
+        "firstEpisode": {
+          "status": "PASS",
+          "media": "HLS",
+          "segmentStatus": 206,
+          "encrypted": true
+        },
+        "lastEpisode": {
+          "status": "PASS",
+          "media": "HLS",
+          "segmentStatus": 206,
+          "encrypted": true
+        }
+      },
+      "phonePlayback": "NOT_RUN",
+      "publishedScriptSha256": "979a4eb1fca43967472fd2f110c8de171aefa23864ee11d27bb2f76e1f470203",
+      "binding": "CURRENT"
+    },
+    {
+      "source": "ciyuancheng",
+      "version": "0.1.0",
+      "scriptSha256": "9879ab4602eba6fb2de1127e7b81854922170c2d904d0a0abd63524a9c961cc8",
+      "checks": {
+        "home": {
+          "status": "PASS",
+          "cards": 20
+        },
+        "category": {
+          "status": "FAIL",
+          "error": "次元城原站请求失败：HTTP 502"
+        },
+        "detail": {
+          "status": "PASS",
+          "title": "飙马野郎 JOJO的奇妙冒险 第二&第三赛段",
+          "episodes": 3,
+          "lines": 1
+        },
+        "search": {
+          "status": "PASS",
+          "cards": 1
+        },
+        "firstEpisode": {
+          "status": "FAIL",
+          "error": "同集播放线路检查失败（CYC_Main：次元城原站请求失败：HTTP 401）"
+        },
+        "lastEpisode": {
+          "status": "FAIL",
+          "error": "同集播放线路检查失败（CYC_Main：次元城原站请求失败：HTTP 401）"
+        }
+      },
+      "phonePlayback": "NOT_RUN",
+      "publishedScriptSha256": "9879ab4602eba6fb2de1127e7b81854922170c2d904d0a0abd63524a9c961cc8",
+      "binding": "CURRENT"
+    },
+    {
+      "source": "ikanbot",
+      "version": "0.1.0",
+      "scriptSha256": "ce5c976d25d5fb293aab7a7402ee9ffb215cb2744a42e70bd03587b2e3bb6dc7",
+      "checks": {
+        "home": {
+          "status": "PASS",
+          "cards": 24
+        },
+        "category": {
+          "status": "PASS",
+          "cards": 24,
+          "categories": 2
+        },
+        "detail": {
+          "status": "PASS",
+          "title": "潜伏6",
+          "episodes": 2,
+          "lines": 8
+        },
+        "search": {
+          "status": "PASS",
+          "cards": 10
+        },
+        "firstEpisode": {
+          "status": "FAIL",
+          "error": "同集播放线路检查失败（sdm3u8：原站媒体清单暂不可用（HTTP 403）；kcm3u8：原站媒体清单暂不可用（HTTP 403）；dbm3u8：原站线路返回了非HLS媒体清单）"
+        },
+        "lastEpisode": {
+          "status": "FAIL",
+          "error": "同集播放线路检查失败（sdm3u8：原站媒体清单暂不可用（HTTP 403）；kcm3u8：原站媒体清单暂不可用（HTTP 403）；dbm3u8：原站线路返回了非HLS媒体清单）"
+        }
+      },
+      "phonePlayback": "NOT_RUN",
+      "publishedScriptSha256": "ce5c976d25d5fb293aab7a7402ee9ffb215cb2744a42e70bd03587b2e3bb6dc7",
+      "binding": "CURRENT"
+    },
+    {
+      "source": "modu",
+      "version": "0.1.0",
+      "scriptSha256": "88d11a46e8e591bee7bd8a12ba6b7e01060d1ea55a1b007e81469a95ab2a4edc",
+      "checks": {
+        "home": {
+          "status": "PASS",
+          "cards": 20
+        },
+        "category": {
+          "status": "PASS",
+          "cards": 20,
+          "categories": 5
+        },
+        "detail": {
+          "status": "PASS",
+          "title": "致亲爱的千夏小姐",
+          "episodes": 6,
+          "lines": 1
+        },
+        "search": {
+          "status": "PASS",
+          "cards": 1
+        },
+        "firstEpisode": {
+          "status": "PASS",
+          "media": "HLS",
+          "segmentStatus": 206,
+          "encrypted": true
+        },
+        "lastEpisode": {
+          "status": "PASS",
+          "media": "HLS",
+          "segmentStatus": 206,
+          "encrypted": true
+        }
+      },
+      "phonePlayback": "NOT_RUN",
+      "publishedScriptSha256": "88d11a46e8e591bee7bd8a12ba6b7e01060d1ea55a1b007e81469a95ab2a4edc",
+      "binding": "CURRENT"
+    },
+    {
+      "source": "tiantang",
+      "version": "0.1.0",
+      "scriptSha256": "c58e50379ce0f935a5d2b2b39ad91cacfccf104471a2e430f835c8a341a08881",
+      "checks": {
+        "home": {
+          "status": "PASS",
+          "cards": 20
+        },
+        "category": {
+          "status": "PASS",
+          "cards": 20,
+          "categories": 28
+        },
+        "detail": {
+          "status": "PASS",
+          "title": "爱·回家之三代同糖粤语",
+          "episodes": 46,
+          "lines": 1
+        },
+        "search": {
+          "status": "PASS",
+          "cards": 1
+        },
+        "firstEpisode": {
+          "status": "FAIL",
+          "error": "同集播放线路检查失败（dyttm3u8：原站媒体清单暂不可用（HTTP 403））"
+        },
+        "lastEpisode": {
+          "status": "FAIL",
+          "error": "同集播放线路检查失败（dyttm3u8：原站媒体清单暂不可用（HTTP 403））"
+        }
+      },
+      "phonePlayback": "NOT_RUN",
+      "publishedScriptSha256": "c58e50379ce0f935a5d2b2b39ad91cacfccf104471a2e430f835c8a341a08881",
+      "binding": "CURRENT"
+    }
+  ]
+}

@@ -12,7 +12,7 @@ test('repository subscription versions and immutable script snapshots match curr
   assert.equal(fs.readFileSync(path.join(__dirname,filename),'utf8'),code);
  }
 });
-test('all repository script URLs use the same Pages publication host',()=>{const m=JSON.parse(fs.readFileSync('yqk.fwd'));assert.equal(m.widgets.length,12);for(const w of m.widgets)assert(w.url.startsWith('https://joeshu.github.io/yqk-forward-widget/'));});
+test('all repository script URLs use the same Pages publication host',()=>{const m=JSON.parse(fs.readFileSync('yqk.fwd'));assert.equal(m.widgets.length,18);for(const w of m.widgets)assert(w.url.startsWith('https://joeshu.github.io/yqk-forward-widget/'));});
 test('reject HTTP, reserved placeholders, credentials, fragments and query strings',()=>{
  for(const url of ['http://widgets.test.org','https://example.invalid','https://example.com','https://u:p@widgets.test.org','https://widgets.test.org/?x=1','https://widgets.test.org/#x']) assert.throws(()=>build(url,path.join(root,'invalid')));
  assert(!fs.existsSync(path.join(root,'invalid')));
@@ -28,7 +28,7 @@ test('manifest links match generated script and metadata version',()=>{
 });
 test('collection contains an independent versioned Souju widget and script',()=>{
  const fwd=JSON.parse(fs.readFileSync(path.join(release.directory,'yqk.fwd'),'utf8'));
- assert.equal(fwd.widgets.length,12);const widget=fwd.widgets[1];assert.equal(widget.id,'joeshu.souju');
+ assert.equal(fwd.widgets.length,18);const widget=fwd.widgets[1];assert.equal(widget.id,'joeshu.souju');
  assert.equal(widget.url,'https://widgets.test.org/souju-'+widget.version+'.js');
  assert.equal(fs.readFileSync(path.join(release.directory,'souju-'+widget.version+'.js'),'utf8'),fs.readFileSync(path.join(__dirname,'souju.js'),'utf8'));
  const headers=JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers;
@@ -65,7 +65,7 @@ test('active new widgets publish independently while removed widgets stay absent
  const fwd=JSON.parse(fs.readFileSync(path.join(release.directory,'yqk.fwd'),'utf8'));
  assert(!fwd.widgets.some(x=>x.id==='joeshu.xiaobao'||x.id==='joeshu.juyeye'));
  assert(!JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'))).widgets.some(x=>x.id==='joeshu.juyeye'));
- for(const prefix of ['anime1','eboyang','gold','zhuiyingmiao','ggduanju','kkys']){const w=fwd.widgets.find(x=>x.id==='joeshu.'+prefix);assert(w);const name=prefix+'-'+w.version+'.js';assert.equal(fs.readFileSync(path.join(release.directory,name),'utf8'),fs.readFileSync(path.join(__dirname,prefix+'.js'),'utf8'));assert(JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers.some(x=>x.source==='/'+name));assert(JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'),'utf8')).widgets.some(x=>x.id===w.id&&x.version===w.version));}
+ for(const prefix of ['anime1','eboyang','gold','zhuiyingmiao','ggduanju','kkys','duboku','qimiao','ciyuancheng','ikanbot','modu','tiantang']){const w=fwd.widgets.find(x=>x.id==='joeshu.'+prefix);assert(w);const name=prefix+'-'+w.version+'.js';assert.equal(fs.readFileSync(path.join(release.directory,name),'utf8'),fs.readFileSync(path.join(__dirname,prefix+'.js'),'utf8'));assert(JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8')).headers.some(x=>x.source==='/'+name));assert(JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'),'utf8')).widgets.some(x=>x.id===w.id&&x.version===w.version));}
 });
 test('CatPaw launcher, bundle and config are deployed with matching MD5',()=>{for(const name of ['index.js','index.config.js']){const b=fs.readFileSync(path.join(release.directory,'catpaw',name));assert.equal(fs.readFileSync(path.join(release.directory,'catpaw',name+'.md5'),'utf8'),crypto.createHash('md5').update(b).digest('hex'));}assert.equal(JSON.parse(fs.readFileSync(path.join(release.directory,'catpaw/info.json'))).sources.length,81);assert.equal(JSON.parse(fs.readFileSync(path.join(release.directory,'release.json'))).catpawSubscriptionUrl,'https://widgets.test.org/catpaw/index.js.md5');});
 test('CatPaw URLs and raw MIME types retain the deployment subdirectory',()=>{const r=build('https://widgets.test.org/Resource/Cat/',path.join(root,'catpaw-sub'));const h=JSON.parse(fs.readFileSync(path.join(r.directory,'vercel.json'))).headers;assert(h.some(x=>x.source==='/Resource/Cat/catpaw/index.js.md5'&&x.headers.some(v=>v.key==='Content-Type'&&v.value.startsWith('text/plain'))));assert(h.some(x=>x.source==='/Resource/Cat/catpaw/index.js'&&x.headers.some(v=>v.key==='Content-Type'&&v.value.startsWith('application/javascript'))));});

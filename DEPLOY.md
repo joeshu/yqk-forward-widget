@@ -1,6 +1,6 @@
 ## 合集统一发布
 
-12个模块及缺图PNG由同一Pages地址发布，固定版本快照和历史版本继续保留。`node collection-build.cjs --check` 核对公共体验代码，`npm test` 检查模型、解析、分集、权限、请求生命周期和发布内容。PNG同样进入Pages/Vercel/Cloudflare产物。片单在线记录见 `collection-validation.json`。
+18个模块及缺图PNG由同一Pages地址发布，固定版本快照和历史版本继续保留。`node collection-build.cjs --check` 核对公共体验代码，`npm test` 检查模型、解析、分集、权限、请求生命周期和发布内容。PNG同样进入Pages/Vercel/Cloudflare产物。片单在线记录见 `collection-validation.json`。
 
 ## 金牌影院与追影猫独立组件发布（0.1.2）
 
@@ -227,3 +227,7 @@ CatPaw 0.5.0包含12个快照源和8个原生独立源（奇妙短剧、独播�
 
 
 CatPaw 0.7.0新增 source-layout.json 发布文件；info.json包含build身份、81/53/28数量与健康报告绑定状态。当前旧健康报告标为HISTORICAL，不能当成新版可播证据。逐源策略见catpaw/SOURCE-LAYOUT.md，复现诊断及只读检查方式见catpaw/HEALTH-CHECK.md。
+
+### 六源 Forward 移植
+
+在原12模块外新增独播库、奇妙、次元城、爱看、魔都、天堂的独立0.1.0固定脚本。运行 `npm run build:forward-native`，提交生成脚本、快照和 `yqk.fwd`。Pages 的 `deploy.cjs` 同时发布18个入口及历史版本。CatPaw 本轮仍保留原来的81个实现/53个启用入口，六个 Forward 新模块不重复注册到 CatPaw。

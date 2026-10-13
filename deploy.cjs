@@ -17,7 +17,7 @@ function build(base,output,options={}) {
  const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'yqk.fwd.example'),'utf8'));
  Object.assign(manifest.widgets[0],{id:meta.id,title:meta.title,author:meta.author,version:meta.version,description:meta.description,requiredVersion:meta.requiredVersion,url:scriptUrl});
  manifest.title='joeshu 影视组件合集';
- manifest.description='12个独立影视模块 · 近期更新/分类/搜索/完整分集 · 统一状态说明与线路检查';
+ manifest.description='18个独立影视模块 · 近期更新/分类/搜索/完整分集 · 统一状态说明与线路检查';
  const extraCode=fs.readFileSync(path.join(__dirname,'souju.js'),'utf8');
  const extraContext=vm.createContext({});new vm.Script(extraCode).runInContext(extraContext,{timeout:1000});
  const extraMeta=extraContext.WidgetMetadata;
@@ -44,7 +44,7 @@ function build(base,output,options={}) {
  if(!auMeta||!/^\d+\.\d+\.\d+$/.test(auMeta.version))throw new Error('Auete影视版本格式错误');
  const auName='auete-'+auMeta.version+'.js';
  manifest.widgets.push({id:auMeta.id,title:auMeta.title,description:auMeta.description,author:auMeta.author,version:auMeta.version,requiredVersion:auMeta.requiredVersion,url:baseUrl+'/'+auName});
- const newWidgets=['anime1','eboyang','gold','zhuiyingmiao','ggduanju','kkys'].map(prefix=>{
+ const newWidgets=['anime1','eboyang','gold','zhuiyingmiao','ggduanju','kkys','duboku','qimiao','ciyuancheng','ikanbot','modu','tiantang'].map(prefix=>{
   const code=fs.readFileSync(path.join(__dirname,prefix+'.js'),'utf8'),context=vm.createContext({});new vm.Script(code).runInContext(context,{timeout:1000});const meta=context.WidgetMetadata;
   if(!meta||!/^\d+\.\d+\.\d+$/.test(meta.version))throw new Error(prefix+'版本格式错误');
   const name=prefix+'-'+meta.version+'.js';manifest.widgets.push({id:meta.id,title:meta.title,description:meta.description,author:meta.author,version:meta.version,requiredVersion:meta.requiredVersion,url:baseUrl+'/'+name});return {name,code};
@@ -80,7 +80,7 @@ function build(base,output,options={}) {
   // Pages replaces the whole artifact. Keep published scripts accessible to
   // clients that have not refreshed their subscription yet.
   for(const archived of fs.readdirSync(__dirname)) {
-   if(/^(?:yqk|souju|kanju|zip0|4kvm|auete|xiaobao|anime1|eboyang|juyeye|gold|zhuiyingmiao|ggduanju|kkys)-\d+\.\d+\.\d+\.js$/.test(archived) && archived!==name && archived!==extraName && archived!==kanjuName && archived!==zipName && archived!==vm4Name && archived!==auName && !newWidgets.some(w=>w.name===archived)) {
+   if(/^(?:yqk|souju|kanju|zip0|4kvm|auete|xiaobao|anime1|eboyang|juyeye|gold|zhuiyingmiao|ggduanju|kkys|duboku|qimiao|ciyuancheng|ikanbot|modu|tiantang)-\d+\.\d+\.\d+\.js$/.test(archived) && archived!==name && archived!==extraName && archived!==kanjuName && archived!==zipName && archived!==vm4Name && archived!==auName && !newWidgets.some(w=>w.name===archived)) {
     files[archived]=fs.readFileSync(path.join(__dirname,archived),'utf8');
    }
   }
