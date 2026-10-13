@@ -97,22 +97,30 @@
   {
     "factory": "V60",
     "key": "bookaishijie",
-    "name": "世界|听书"
+    "name": "世界|听书",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；听书/有声书源，内容以音频收听为主；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "e10",
     "key": "bookaiyueting",
-    "name": "悦听|听书"
+    "name": "悦听|听书",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；听书/有声书源，内容以音频收听为主；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "n10",
     "key": "bookhema",
-    "name": "小马|听书"
+    "name": "小马|听书",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；听书/有声书源，内容以音频收听为主；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "s10",
     "key": "bookhongguo",
-    "name": "小红|听书"
+    "name": "小红|听书",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；听书/有声书源，内容以音频收听为主；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "p10",
@@ -132,42 +140,58 @@
   {
     "factory": "A10",
     "key": "musicaiqingting",
-    "name": "蜻蜓|电台"
+    "name": "蜻蜓|电台",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；蜻蜓FM广播频道，播放接口直接返回MP3直播流，属于纯音频电台；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "w10",
     "key": "musicailunhui",
-    "name": "轮回|舞曲"
+    "name": "轮回|舞曲",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；舞曲音乐源，提供音乐音频播放；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "R10",
     "key": "musicaikuwo",
-    "name": "酷听|音乐"
+    "name": "酷听|音乐",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；酷听音乐源，提供歌曲音频播放；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "O10",
     "key": "musicaikuwoa",
-    "name": "小酷|音乐"
+    "name": "小酷|音乐",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；小酷音乐源，提供歌曲音频播放；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "M10",
     "key": "musicaikg",
-    "name": "小狗|音乐"
+    "name": "小狗|音乐",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；小狗音乐源，提供歌曲音频播放；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "Y10",
     "key": "musicaiqq",
-    "name": "小秋|音乐"
+    "name": "小秋|音乐",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；小秋音乐源，提供歌曲音频播放；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "ap0",
     "key": "musicaiwy",
-    "name": "小易|音乐"
+    "name": "小易|音乐",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；小易音乐源，提供歌曲音频播放；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "fp0",
     "key": "musicai163",
-    "name": "易听|音乐"
+    "name": "易听|音乐",
+    "enabled": false,
+    "disabledReason": "2026-10-13 用户要求停用音乐/听书/小说及以音频收听为主的电台源；易听音乐源，提供歌曲音频播放；实现保留，可删除 enabled=false 与 disabledReason 字段后恢复。"
   },
   {
     "factory": "hp0",
