@@ -7,7 +7,7 @@
   {
     "factory": "kf0",
     "key": "hanxiaoquan",
-    "name": "韩剧|秒播"
+    "name": "韩剧|秒播（网络受限待验证）"
   },
   {
     "factory": "Bf0",
@@ -32,7 +32,9 @@
   {
     "factory": "Id0",
     "key": "bobo",
-    "name": "波波|秒播"
+    "name": "波波|秒播",
+    "enabled": false,
+    "disabledReason": "2026-10-13 实际生产 bundle home/homeVod 均触发参考源 HTML parser NO_QUIRKS 异常，属于当前 bundle 解析兼容问题而非手机可验证结果；先隐藏，保留实现；修复解析器回归后可恢复。"
   },
   {
     "factory": "Wd0",
@@ -77,7 +79,9 @@
   {
     "factory": "H20",
     "key": "hema",
-    "name": "短漫|小马"
+    "name": "短漫|小马",
+    "enabled": false,
+    "disabledReason": "2026-10-13 实际生产 bundle home 暴露 6 个分类，但 homeVod(category drama_all) 返回 HTTP 404；目录请求不可用，先隐藏，保留实现；确认上游 API 路径恢复后可恢复。"
   },
   {
     "factory": "k60",
