@@ -1,2 +1,3 @@
+function assertBuildIntegrity(info,bundleSha256){if(!info?.build?.sourceFingerprint||info.bundleSha256!==bundleSha256)throw new Error('运行包与构建摘要不一致，请先重新构建再检查');}
 function reportStatus(report,build){if(!report)return {status:'NOT_RUN',reason:'尚无与当前构建绑定的只读健康报告'};if(report.mode!=='catalogue-read-only')return {status:'HISTORICAL',reason:'旧报告未执行当前只读边界'};if(report.bundleSha256!==build.bundleSha256||report.sourceFingerprint!==build.sourceFingerprint||report.sourceCount!==build.enabledCount)return {status:'HISTORICAL',reason:'报告的包、源码指纹或展示源数量与当前构建不一致'};const keys=report.checks?.map(x=>x.key).sort();if(!keys||JSON.stringify(keys)!==JSON.stringify(build.enabledKeys?.slice().sort()))return {status:'HISTORICAL',reason:'报告来源集合与当前展示集合不一致'};return {status:'CURRENT',checkedAt:report.checkedAt,summary:report.summary};}
-module.exports={reportStatus};
+module.exports={reportStatus,assertBuildIntegrity};
