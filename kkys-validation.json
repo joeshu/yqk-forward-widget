@@ -1,12 +1,12 @@
 {
-  "time": "2026-10-13T03:15:49.788Z",
+  "time": "2026-10-13T03:56:04.987Z",
   "version": "0.1.1",
-  "sourceSha256": "4de8a2c67836f941baf39957a9652b18c870354ddad937447a787ff78e7b3996",
+  "sourceSha256": "256f8c4130403f5c034ea5435300724ae48dae78313948f1346fb16b40a5d790",
   "checks": [
     {
       "name": "home",
       "passed": true,
-      "count": 79,
+      "count": 78,
       "samples": [
         "功夫女足",
         "吉伊卡哇人鱼之岛的秘密"
@@ -17,8 +17,8 @@
       "passed": true,
       "count": 24,
       "samples": [
-        "大林2018",
-        "咖宝车神之星卫战队上"
+        "恶毒胖雌逆袭修罗场",
+        "大侦探第七季"
       ]
     },
     {
@@ -26,8 +26,8 @@
       "passed": true,
       "count": 24,
       "samples": [
-        "禅王渡尘",
-        "掌门低调点第一季·动态漫画"
+        "万界独尊",
+        "三色幻想戒指的女王"
       ]
     },
     {
@@ -96,7 +96,7 @@
     {
       "name": "original IP homepage",
       "passed": true,
-      "count": 79,
+      "count": 78,
       "samples": [
         "功夫女足",
         "吉伊卡哇人鱼之岛的秘密"
@@ -110,9 +110,16 @@
       "firstEpisodeSources": 25
     },
     {
-      "name": "detail and original source",
-      "passed": false,
-      "error": "可可影视：可可线路检查失败（FF线路：原站未返回HTML页面；超清2：原站未返回HTML页面；4K：原站未返回HTML页面）。原站直连受当前网络影响，可选“交给设备”验证；网页解析线路不能直接当作媒体。"
+      "name": "current first-episode player URL extracted from live detail",
+      "passed": true,
+      "names": [
+        "FF线路 · 第01集 · 原站直连（待设备验证）"
+      ],
+      "mediaVerified": false
+    },
+    {
+      "name": "checked HLS on this network",
+      "passed": true
     }
   ],
   "limitations": [
