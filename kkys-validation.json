@@ -1,12 +1,12 @@
 {
-  "time": "2026-10-12T11:50:40.525Z",
-  "version": "0.1.0",
-  "sourceSha256": "e7b11962818cf62d092f306dc0544243e7bc2bd34c55d128ea0aa1601842f059",
+  "time": "2026-10-13T03:15:49.788Z",
+  "version": "0.1.1",
+  "sourceSha256": "4de8a2c67836f941baf39957a9652b18c870354ddad937447a787ff78e7b3996",
   "checks": [
     {
       "name": "home",
       "passed": true,
-      "count": 73,
+      "count": 79,
       "samples": [
         "功夫女足",
         "吉伊卡哇人鱼之岛的秘密"
@@ -17,8 +17,8 @@
       "passed": true,
       "count": 24,
       "samples": [
-        "飞女刑事3少女忍法帖传奇",
-        "综艺新时代"
+        "大林2018",
+        "咖宝车神之星卫战队上"
       ]
     },
     {
@@ -26,8 +26,8 @@
       "passed": true,
       "count": 24,
       "samples": [
-        "我们与恶的距离2",
-        "今日说法"
+        "禅王渡尘",
+        "掌门低调点第一季·动态漫画"
       ]
     },
     {
@@ -35,8 +35,8 @@
       "passed": true,
       "count": 18,
       "samples": [
-        "四渡",
-        "生化危机"
+        "新生化危机",
+        "肉体之门"
       ]
     },
     {
@@ -46,6 +46,33 @@
       "samples": [
         "仙逆",
         "凡人修仙传"
+      ]
+    },
+    {
+      "name": "series category page 2",
+      "passed": true,
+      "count": 18,
+      "samples": [
+        "九门",
+        "小巷人家"
+      ]
+    },
+    {
+      "name": "variety category page 2",
+      "passed": true,
+      "count": 18,
+      "samples": [
+        "密室大逃脱第八季大神版",
+        "有你的恋歌第三季"
+      ]
+    },
+    {
+      "name": "short category page 2",
+      "passed": true,
+      "count": 18,
+      "samples": [
+        "我合成了全世界第一季",
+        "药香满院种田采药赚万金"
       ]
     },
     {
@@ -69,7 +96,7 @@
     {
       "name": "original IP homepage",
       "passed": true,
-      "count": 76,
+      "count": 79,
       "samples": [
         "功夫女足",
         "吉伊卡哇人鱼之岛的秘密"
@@ -83,34 +110,9 @@
       "firstEpisodeSources": 25
     },
     {
-      "name": "exact original player source handed to device",
-      "passed": true,
-      "names": [
-        "FF线路 · 第01集 · 原站直连（待设备验证）"
-      ],
-      "mediaVerified": false
-    },
-    {
-      "name": "checked HLS on this network",
-      "passed": true
-    },
-    {
-      "name": "category 2 page 2",
-      "passed": true,
-      "count": 18,
-      "checkedAt": "2026-10-12T11:56:47.672Z"
-    },
-    {
-      "name": "category 4 page 2",
-      "passed": true,
-      "count": 18,
-      "checkedAt": "2026-10-12T11:56:47.770Z"
-    },
-    {
-      "name": "category 6 page 2",
-      "passed": true,
-      "count": 18,
-      "checkedAt": "2026-10-12T11:56:47.891Z"
+      "name": "detail and original source",
+      "passed": false,
+      "error": "可可影视：可可线路检查失败（FF线路：原站未返回HTML页面；超清2：原站未返回HTML页面；4K：原站未返回HTML页面）。原站直连受当前网络影响，可选“交给设备”验证；网页解析线路不能直接当作媒体。"
     }
   ],
   "limitations": [

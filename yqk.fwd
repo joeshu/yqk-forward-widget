@@ -105,10 +105,10 @@
       "id": "joeshu.kkys",
       "title": "可可影视",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
       "description": "五类片库 · 搜索与真实分页 · 完整分集与全部线路",
-      "url": "https://joeshu.github.io/yqk-forward-widget/kkys-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/kkys-0.1.1.js"
     }
   ]
 }
