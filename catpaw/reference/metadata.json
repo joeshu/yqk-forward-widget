@@ -222,52 +222,72 @@
   {
     "key": "appv7dashixiong",
     "name": "师兄|秒播",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-10-13 read-only AppV7 config lookup returned HTTP 404 for this key; restore after a valid public config is available"
   },
   {
     "key": "appv7fenzhu",
     "name": "粉猪|秒播",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-10-13 read-only AppV7 config lookup returned HTTP 404 for this key; restore after a valid public config is available"
   },
   {
     "key": "appv7xianyu",
     "name": "咸鱼|秒播",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-10-13 read-only AppV7 config lookup returned HTTP 404 for this key; restore after a valid public config is available"
   },
   {
     "key": "appv7zhuijudaren",
     "name": "追剧|秒播",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-10-13 read-only AppV7 config lookup returned HTTP 404 for this key; restore after a valid public config is available"
   },
   {
     "key": "appv7xiaoyouzi",
     "name": "柚子|秒播",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-10-13 read-only AppV7 config lookup returned HTTP 404 for this key; restore after a valid public config is available"
   },
   {
     "key": "appv7xiaoningmeng",
     "name": "柠檬|秒播",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-10-13 read-only AppV7 config lookup returned HTTP 404 for this key; restore after a valid public config is available"
   },
   {
     "key": "appv7mengtaiqi",
     "name": "太奇|秒播",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-10-13 read-only AppV7 config lookup returned HTTP 404 for this key; restore after a valid public config is available"
   },
   {
     "key": "appv7linglingqi",
     "name": "零七|秒播",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-10-13 read-only AppV7 config lookup returned HTTP 404 for this key; restore after a valid public config is available"
   },
   {
     "key": "appv7xiaoshizi",
     "name": "柿子|秒播",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-10-13 read-only AppV7 config lookup returned HTTP 404 for this key; restore after a valid public config is available"
   },
   {
     "key": "appv7xiaohuangren",
     "name": "黄人|秒播",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-10-13 read-only AppV7 config lookup returned HTTP 404 for this key; restore after a valid public config is available"
   },
   {
     "key": "bilibili",

@@ -1,126 +1,1720 @@
 {
-  "time": "2026-10-12T14:17:49.112Z",
-  "bundleSha256": "754676bbbb365f4c7764609941c764de49f33f9b9e6860205af7e9b219650a4e",
+  "checkedAt": "2026-10-13T00:29:14.282Z",
+  "bundleSha256": "16a7e334db5cfe18520398d7355f943d8b541cbf3d98857d90db0c434a3d1268",
   "checks": [
     {
-      "source": "看剧AI",
+      "source": "一起看",
+      "key": "nodejs_joeshu_yqk",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 13
+        }
+      },
+      "passed": false,
       "category": "latest",
-      "status": 200,
-      "passed": true,
-      "count": 20,
-      "confirmedPagecount": 2
+      "error": "category HTTP 502: 一起看暂时无法连接（已尝试 11 个接口）：网络请求失败。请检查手机网络后重试，仍失败可稍后更新组件。"
     },
     {
       "source": "搜剧AI",
+      "key": "nodejs_joeshu_souju",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 13
+        }
+      },
+      "passed": false,
       "category": "latest",
-      "status": 200,
-      "passed": true,
-      "count": 20,
-      "confirmedPagecount": 2
+      "error": "category HTTP 502: 搜剧AI：unable to verify the first certificate"
     },
     {
-      "source": "一起看",
+      "source": "看剧AI",
+      "key": "nodejs_joeshu_kanju",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 13
+        }
+      },
+      "passed": false,
       "category": "latest",
-      "status": 200,
-      "passed": true,
-      "count": 15,
-      "confirmedPagecount": 2
+      "error": "category HTTP 502: 看剧AI：unable to verify the first certificate"
     },
     {
       "source": "ZIP0影视",
-      "category": "latest",
-      "status": 200,
+      "key": "nodejs_joeshu_zip0",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        },
+        "category": {
+          "passed": true,
+          "cards": 76,
+          "pagecount": 1
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 1
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 7
+        }
+      },
       "passed": true,
-      "count": 76,
-      "confirmedPagecount": 2
+      "category": "latest",
+      "sampleTitle": "魔法情缘"
     },
     {
       "source": "4K影视",
+      "key": "nodejs_joeshu_4kvm",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        }
+      },
+      "passed": false,
       "category": "latest",
-      "status": 200,
-      "passed": true,
-      "count": 30,
-      "confirmedPagecount": 2
+      "error": "category HTTP 502: 4K影视：unable to verify the first certificate"
     },
     {
       "source": "Auete影视",
+      "key": "nodejs_joeshu_auete",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        }
+      },
+      "passed": false,
       "category": "latest",
-      "status": 200,
-      "passed": true,
-      "count": 28,
-      "confirmedPagecount": 1
+      "error": "category HTTP 502: Auete影视：unable to verify the first certificate"
     },
     {
       "source": "Anime1动漫",
+      "key": "nodejs_joeshu_anime1",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 3
+        }
+      },
+      "passed": false,
       "category": "latest",
-      "status": 200,
-      "passed": true,
-      "count": 10,
-      "confirmedPagecount": 1
+      "error": "category HTTP 502: Anime1动漫：unable to verify the first certificate"
     },
     {
       "source": "Eboyang影视",
+      "key": "nodejs_joeshu_eboyang",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        }
+      },
+      "passed": false,
       "category": "latest",
-      "status": 200,
-      "passed": true,
-      "count": 6,
-      "confirmedPagecount": 1
-    },
-    {
-      "source": "追影猫影视",
-      "category": "latest",
-      "status": 200,
-      "passed": true,
-      "count": 69,
-      "confirmedPagecount": 1
+      "error": "category HTTP 502: Eboyang影视：unable to verify the first certificate"
     },
     {
       "source": "金牌影院",
-      "category": "latest",
-      "status": 200,
+      "key": "nodejs_joeshu_gold",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        },
+        "category": {
+          "passed": true,
+          "cards": 60,
+          "pagecount": 1
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 4
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 20
+        }
+      },
       "passed": true,
-      "count": 60,
-      "confirmedPagecount": 2
+      "category": "latest",
+      "sampleTitle": "玉簟秋"
+    },
+    {
+      "source": "追影猫影视",
+      "key": "nodejs_joeshu_zhuiyingmiao",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        }
+      },
+      "passed": false,
+      "category": "latest",
+      "error": "category HTTP 502: 追影猫影视：unable to verify the first certificate"
     },
     {
       "source": "果果短剧",
-      "category": "latest",
-      "status": 200,
+      "key": "nodejs_joeshu_ggduanju",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        },
+        "category": {
+          "passed": true,
+          "cards": 40,
+          "pagecount": 1
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 4
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 1
+        }
+      },
       "passed": true,
-      "count": 40,
-      "confirmedPagecount": 2
+      "category": "latest",
+      "sampleTitle": "何总心腹,却只想被辞退跑路"
     },
     {
       "source": "可可影视",
+      "key": "nodejs_joeshu_kkys",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        }
+      },
+      "passed": false,
       "category": "latest",
-      "status": 200,
-      "passed": true,
-      "count": 24,
-      "confirmedPagecount": 2
+      "error": "category HTTP 502: 可可影视：unable to verify the first certificate"
     },
     {
-      "source": "joeshu_kkys",
+      "source": "奇妙短剧",
+      "key": "nodejs_joeshu_qimiao",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 151
+        },
+        "category": {
+          "passed": true,
+          "cards": 64,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 33
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 5
+        }
+      },
       "passed": true,
-      "kind": "complete CatPaw detail and play response",
-      "episodes": 195,
-      "lines": 27,
-      "parse": 0,
-      "mediaVerified": false
+      "category": "0",
+      "sampleTitle": "抚远不远"
     },
     {
-      "source": "joeshu_ggduanju",
+      "source": "独播库影视",
+      "key": "nodejs_joeshu_duboku",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 9
+        },
+        "category": {
+          "passed": true,
+          "cards": 48,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 1
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 1
+        }
+      },
       "passed": true,
-      "kind": "complete CatPaw detail and play response",
-      "episodes": 1,
-      "lines": 3,
-      "parse": 0,
-      "mediaVerified": true
+      "category": "1",
+      "sampleTitle": "全城追缉"
+    },
+    {
+      "source": "星芽短剧",
+      "key": "nodejs_joeshu_xingya",
+      "enabled": true,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: 星芽原站请求失败：HTTP 500"
+    },
+    {
+      "source": "次元城动漫",
+      "key": "nodejs_joeshu_ciyuancheng",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 2
+        },
+        "category": {
+          "passed": true,
+          "cards": 20,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 2
+        },
+        "play": {
+          "passed": false,
+          "error": "play HTTP 502: 次元城原站请求失败：HTTP 401"
+        },
+        "search": {
+          "passed": true,
+          "results": 1
+        }
+      },
+      "passed": true,
+      "category": "1",
+      "sampleTitle": "魔法少女育成计划 restart"
+    },
+    {
+      "source": "好看短剧",
+      "key": "nodejs_joeshu_baidu_duanju",
+      "enabled": true,
+      "checks": {},
+      "passed": false,
+      "error": "home returned no categories"
+    },
+    {
+      "source": "伊影影视",
+      "key": "nodejs_joeshu_yiyingshi",
+      "enabled": true,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: certificate has expired"
+    },
+    {
+      "source": "爱看影视",
+      "key": "nodejs_joeshu_ikanbot",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 2
+        },
+        "category": {
+          "passed": true,
+          "cards": 24,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 38
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 10
+        }
+      },
+      "passed": true,
+      "category": "movie",
+      "sampleTitle": "潜伏6"
+    },
+    {
+      "source": "微观短剧",
+      "key": "nodejs_joeshu_weiguan",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 16
+        }
+      },
+      "passed": false,
+      "category": "全部",
+      "error": "category HTTP 502: 微观短剧游客会话初始化失败"
+    },
+    {
+      "source": "豆瓣|首页",
+      "key": "nodejs_douban",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 7
+        },
+        "category": {
+          "passed": true,
+          "cards": 20,
+          "pagecount": 16
+        },
+        "detail": {
+          "passed": false,
+          "error": "detail returned no item"
+        },
+        "search": {
+          "passed": false,
+          "results": 0,
+          "error": "search list malformed"
+        }
+      },
+      "passed": true,
+      "category": "hot_gaia",
+      "sampleTitle": "潜伏6"
+    },
+    {
+      "source": "韩剧|秒播",
+      "key": "nodejs_hanxiaoquan",
+      "enabled": true,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: unable to verify the first certificate"
+    },
+    {
+      "source": "瓜子|秒播",
+      "key": "nodejs_guazi",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 10
+        },
+        "category": {
+          "passed": true,
+          "cards": 30,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 1
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 18
+        }
+      },
+      "passed": true,
+      "category": "1",
+      "sampleTitle": "青铜护卫队"
+    },
+    {
+      "source": "悦悦|秒播",
+      "key": "nodejs_wexYueYue",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 5
+        },
+        "category": {
+          "passed": true,
+          "cards": 20,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 47
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 21
+        }
+      },
+      "passed": true,
+      "category": "2",
+      "sampleTitle": "兰香如故"
+    },
+    {
+      "source": "文采|秒播",
+      "key": "nodejs_wencai",
+      "enabled": true,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: 文采请求失败 403"
+    },
+    {
+      "source": "热播|秒播",
+      "key": "nodejs_rebo",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 10
+        },
+        "category": {
+          "passed": true,
+          "cards": 12,
+          "pagecount": 9999
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 145
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 1
+        }
+      },
+      "passed": true,
+      "category": "10",
+      "sampleTitle": "主角"
+    },
+    {
+      "source": "波波|秒播",
+      "key": "nodejs_bobo",
+      "enabled": true,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: Cannot read properties of undefined (reading 'NO_QUIRKS')"
+    },
+    {
+      "source": "枫叶|秒播",
+      "key": "nodejs_wexfengye4k",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 9
+        },
+        "category": {
+          "passed": true,
+          "cards": 10,
+          "pagecount": 2103
+        },
+        "detail": {
+          "passed": false,
+          "error": "detail HTTP 502: Cannot read properties of undefined (reading 'NO_QUIRKS')"
+        },
+        "search": {
+          "passed": true,
+          "results": 1
+        }
+      },
+      "passed": true,
+      "category": "1",
+      "sampleTitle": "什么意思夫妇"
+    },
+    {
+      "source": "虎牙|直播",
+      "key": "nodejs_huya",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        },
+        "category": {
+          "passed": true,
+          "cards": 120,
+          "pagecount": 9007199254740991
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 12
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": false,
+          "error": "search HTTP 502: Cannot read properties of undefined (reading 'NO_QUIRKS')"
+        }
+      },
+      "passed": true,
+      "category": "1",
+      "sampleTitle": "地狱欢乐MVP挑战！抽卡逗比欢乐多"
+    },
+    {
+      "source": "哔哩|直播",
+      "key": "nodejs_bililive",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 13
+        },
+        "category": {
+          "passed": true,
+          "cards": 40,
+          "pagecount": 9007199254740991
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 4
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 1
+        }
+      },
+      "passed": true,
+      "category": "2",
+      "sampleTitle": "你好 小花来拆塔了QAQ"
+    },
+    {
+      "source": "斗鱼|直播",
+      "key": "nodejs_douyu",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        },
+        "category": {
+          "passed": true,
+          "cards": 59,
+          "pagecount": 9007199254740991
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 1
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 1
+        }
+      },
+      "passed": true,
+      "category": "4",
+      "sampleTitle": "神的微调好了生物钟爆了"
+    },
+    {
+      "source": "漫剧|小红",
+      "key": "nodejs_manjuhongguo",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 27
+        },
+        "category": {
+          "passed": true,
+          "cards": 23,
+          "pagecount": 1
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 0
+        },
+        "play": {
+          "passed": null,
+          "reason": "detail did not expose a playable episode"
+        },
+        "search": {
+          "passed": true,
+          "results": 10
+        }
+      },
+      "passed": true,
+      "category": "rank_home",
+      "sampleTitle": "全部-推荐榜"
+    },
+    {
+      "source": "漫剧|小龙",
+      "key": "nodejs_manjuhuolong",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        },
+        "category": {
+          "passed": true,
+          "cards": 15,
+          "pagecount": 2147483647
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 332
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 9
+        }
+      },
+      "passed": true,
+      "category": "manju",
+      "sampleTitle": "重生渔家有明珠"
+    },
+    {
+      "source": "漫剧|小猫",
+      "key": "nodejs_manjuqimao",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 1
+        },
+        "category": {
+          "passed": true,
+          "cards": 19,
+          "pagecount": 2147483647
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 62
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 10
+        }
+      },
+      "passed": true,
+      "category": "0",
+      "sampleTitle": "域境降临"
+    },
+    {
+      "source": "漫剧|小喜",
+      "key": "nodejs_manjuxifan",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 6
+        },
+        "category": {
+          "passed": true,
+          "cards": 14,
+          "pagecount": 2147483647
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 34
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": false,
+          "error": "search HTTP 502: Request failed with status code 502"
+        }
+      },
+      "passed": true,
+      "category": "all",
+      "sampleTitle": "恰逢其时遇见你"
+    },
+    {
+      "source": "短漫|小马",
+      "key": "nodejs_hema",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 6
+        }
+      },
+      "passed": false,
+      "category": "drama_all",
+      "error": "category HTTP 502: Request failed with status code 404"
+    },
+    {
+      "source": "花子|动漫",
+      "key": "nodejs_animehuazi",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 5
+        }
+      },
+      "passed": false,
+      "category": "20",
+      "error": "category HTTP 502: Request failed with status code 404"
+    },
+    {
+      "source": "魔都|动漫",
+      "key": "nodejs_animemodu",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 5
+        },
+        "category": {
+          "passed": true,
+          "cards": 20,
+          "pagecount": 131
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 245
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 7
+        }
+      },
+      "passed": true,
+      "category": "1",
+      "sampleTitle": "吞噬星空"
+    },
+    {
+      "source": "稀饭|动漫",
+      "key": "nodejs_animexifan",
+      "enabled": true,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: Request failed with status code 404"
+    },
+    {
+      "source": "世界|听书",
+      "key": "nodejs_bookaishijie",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 11
+        },
+        "category": {
+          "passed": true,
+          "cards": 10,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 2114
+        },
+        "play": {
+          "passed": false,
+          "error": "play HTTP 502: Request failed with status code 404"
+        },
+        "search": {
+          "passed": true,
+          "results": 1
+        }
+      },
+      "passed": true,
+      "category": "6",
+      "sampleTitle": "凡人修仙传-光合积木"
+    },
+    {
+      "source": "悦听|听书",
+      "key": "nodejs_bookaiyueting",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 2
+        },
+        "category": {
+          "passed": true,
+          "cards": 20,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 5329
+        },
+        "play": {
+          "passed": false,
+          "error": "play HTTP 502: 悦听密文长度不足"
+        },
+        "search": {
+          "passed": false,
+          "error": "search HTTP 502: 悦听密文长度不足"
+        }
+      },
+      "passed": true,
+      "category": "2",
+      "sampleTitle": "剑来"
+    },
+    {
+      "source": "小马|听书",
+      "key": "nodejs_bookhema",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 9
+        }
+      },
+      "passed": false,
+      "category": "-1",
+      "error": "category HTTP 502: timeout of 25000ms exceeded"
+    },
+    {
+      "source": "小红|听书",
+      "key": "nodejs_bookhongguo",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 1
+        },
+        "category": {
+          "passed": true,
+          "cards": 30,
+          "pagecount": 2147483647
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 1807
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": false,
+          "error": "search HTTP 502: Request failed with status code 502"
+        }
+      },
+      "passed": true,
+      "category": "audio_all",
+      "sampleTitle": "《我叫景云辉》"
+    },
+    {
+      "source": "兔兔|少儿",
+      "key": "nodejs_childrenaitutu",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 6
+        }
+      },
+      "passed": false,
+      "category": "1",
+      "error": "category HTTP 502: Request failed with status code 404"
+    },
+    {
+      "source": "宝宝|少儿",
+      "key": "nodejs_childrenaibaobao",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 7
+        }
+      },
+      "passed": false,
+      "category": "1",
+      "error": "category HTTP 502: Request failed with status code 404"
+    },
+    {
+      "source": "贝瓦|少儿",
+      "key": "nodejs_childrenaibeiwa",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 18
+        }
+      },
+      "passed": false,
+      "category": "1",
+      "error": "category HTTP 502: Request failed with status code 404"
+    },
+    {
+      "source": "蜻蜓|电台",
+      "key": "nodejs_musicaiqingting",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 44
+        },
+        "category": {
+          "passed": true,
+          "cards": 12,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 1
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 15
+        }
+      },
+      "passed": true,
+      "category": "217",
+      "sampleTitle": "广东珠江经济电台"
+    },
+    {
+      "source": "轮回|舞曲",
+      "key": "nodejs_musicailunhui",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 7
+        }
+      },
+      "passed": false,
+      "category": "1",
+      "error": "category HTTP 502: Client network socket disconnected before secure TLS connection was established"
+    },
+    {
+      "source": "酷听|音乐",
+      "key": "nodejs_musicaikuwo",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        }
+      },
+      "passed": false,
+      "category": "singerlist",
+      "error": "category HTTP 502: Request failed with status code 403"
+    },
+    {
+      "source": "小酷|音乐",
+      "key": "nodejs_musicaikuwoa",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 10
+        },
+        "category": {
+          "passed": true,
+          "cards": 30,
+          "pagecount": 9007199254740991
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 300
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 30
+        }
+      },
+      "passed": true,
+      "category": "1",
+      "sampleTitle": "周杰伦"
+    },
+    {
+      "source": "小狗|音乐",
+      "key": "nodejs_musicaikg",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 2
+        }
+      },
+      "passed": false,
+      "category": "sheet",
+      "error": "category returned no cards"
+    },
+    {
+      "source": "小秋|音乐",
+      "key": "nodejs_musicaiqq",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 2
+        }
+      },
+      "passed": false,
+      "category": "sheet",
+      "error": "category returned no cards"
+    },
+    {
+      "source": "小易|音乐",
+      "key": "nodejs_musicaiwy",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 2
+        }
+      },
+      "passed": false,
+      "category": "sheet",
+      "error": "category returned no cards"
+    },
+    {
+      "source": "易听|音乐",
+      "key": "nodejs_musicai163",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        }
+      },
+      "passed": false,
+      "category": "singerlist",
+      "error": "category HTTP 502: Request failed with status code 403"
+    },
+    {
+      "source": "瓜子|体育",
+      "key": "nodejs_sportaiguazi",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        },
+        "category": {
+          "passed": true,
+          "cards": 20,
+          "pagecount": 1
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 3
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": false,
+          "error": "search HTTP 200; invalid JSON"
+        }
+      },
+      "passed": true,
+      "category": "hot",
+      "sampleTitle": "老鹰 vs 雷霆"
+    },
+    {
+      "source": "咖啡|体育",
+      "key": "nodejs_sportaikafei",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        },
+        "category": {
+          "passed": true,
+          "cards": 30,
+          "pagecount": 9
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 2
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": false,
+          "error": "search HTTP 200; invalid JSON"
+        }
+      },
+      "passed": true,
+      "category": "all",
+      "sampleTitle": "全男孩竞技 vs 戈多伊克鲁斯"
+    },
+    {
+      "source": "飞球|体育",
+      "key": "nodejs_sportaifeiqiu",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        },
+        "category": {
+          "passed": true,
+          "cards": 197,
+          "pagecount": 1
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 1
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": false,
+          "error": "search HTTP 200; invalid JSON"
+        }
+      },
+      "passed": true,
+      "category": "1",
+      "sampleTitle": "克里丘马 vs 米内罗美洲"
+    },
+    {
+      "source": "球通|体育",
+      "key": "nodejs_sportaikanqiutong",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 3
+        },
+        "category": {
+          "passed": true,
+          "cards": 30,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 2
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": false,
+          "error": "search HTTP 200; invalid JSON"
+        }
+      },
+      "passed": true,
+      "category": "-1",
+      "sampleTitle": "雷霆 vs 老鹰"
+    },
+    {
+      "source": "看球|体育",
+      "key": "nodejs_sportaikanqiu",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 4
+        }
+      },
+      "passed": false,
+      "category": "",
+      "error": "category HTTP 502: Cannot read properties of undefined (reading 'NO_QUIRKS')"
+    },
+    {
+      "source": "WWE|体育",
+      "key": "nodejs_sportaiwwe",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 6
+        }
+      },
+      "passed": false,
+      "category": "3857770410167123977",
+      "error": "category HTTP 502: unable to verify the first certificate"
+    },
+    {
+      "source": "哔哩|影视",
+      "key": "nodejs_biliys",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 6
+        },
+        "category": {
+          "passed": true,
+          "cards": 20,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 8
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 13
+        }
+      },
+      "passed": true,
+      "category": "{\"cate\":\"番剧\",\"id\":\"1\"}",
+      "sampleTitle": "鬼灭之刃 柱训练篇"
+    },
+    {
+      "source": "天堂|采集",
+      "key": "nodejs_wexaitiantang",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 28
+        },
+        "category": {
+          "passed": true,
+          "cards": 20,
+          "pagecount": 236
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 1
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 1
+        }
+      },
+      "passed": true,
+      "category": "6",
+      "sampleTitle": "巨蟒博尤纳"
+    },
+    {
+      "source": "梨园|戏曲",
+      "key": "nodejs_musicailiyuan",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 2
+        }
+      },
+      "passed": false,
+      "category": "1",
+      "error": "category HTTP 502: Request failed with status code 404"
+    },
+    {
+      "source": "糖豆|舞蹈",
+      "key": "nodejs_musicaitangdou",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 6
+        }
+      },
+      "passed": false,
+      "category": "1471610743",
+      "error": "category HTTP 502: Request failed with status code 404"
+    },
+    {
+      "source": "师兄|秒播",
+      "key": "nodejs_appv7dashixiong",
+      "enabled": false,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: AppV7 config not found: AppV7Dsx, config request failed: 404"
+    },
+    {
+      "source": "粉猪|秒播",
+      "key": "nodejs_appv7fenzhu",
+      "enabled": false,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: AppV7 config not found: AppV7Fz, config request failed: 404"
+    },
+    {
+      "source": "咸鱼|秒播",
+      "key": "nodejs_appv7xianyu",
+      "enabled": false,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: AppV7 config not found: AppV7Xy, config request failed: 404"
+    },
+    {
+      "source": "追剧|秒播",
+      "key": "nodejs_appv7zhuijudaren",
+      "enabled": false,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: AppV7 config not found: AppV7Zjdr, config request failed: 404"
+    },
+    {
+      "source": "柚子|秒播",
+      "key": "nodejs_appv7xiaoyouzi",
+      "enabled": false,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: AppV7 config not found: AppV7Xyz, config request failed: 404"
+    },
+    {
+      "source": "柠檬|秒播",
+      "key": "nodejs_appv7xiaoningmeng",
+      "enabled": false,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: AppV7 config not found: AppV7Xnm, config request failed: 404"
+    },
+    {
+      "source": "太奇|秒播",
+      "key": "nodejs_appv7mengtaiqi",
+      "enabled": false,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: AppV7 config not found: AppV7Mtq, config request failed: 404"
+    },
+    {
+      "source": "零七|秒播",
+      "key": "nodejs_appv7linglingqi",
+      "enabled": false,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: AppV7 config not found: AppV7Llq, config request failed: 404"
+    },
+    {
+      "source": "柿子|秒播",
+      "key": "nodejs_appv7xiaoshizi",
+      "enabled": false,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: AppV7 config not found: AppV7Xsz, config request failed: 404"
+    },
+    {
+      "source": "黄人|秒播",
+      "key": "nodejs_appv7xiaohuangren",
+      "enabled": false,
+      "checks": {},
+      "passed": false,
+      "error": "home HTTP 502: AppV7 config not found: AppV7Xhr, config request failed: 404"
+    },
+    {
+      "source": "哔哩|合集",
+      "key": "nodejs_bilibili",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 40
+        },
+        "category": {
+          "passed": true,
+          "cards": 42,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 5
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 42
+        }
+      },
+      "passed": true,
+      "category": "一口气沙雕动漫",
+      "sampleTitle": "【完结短片】室友喜欢在阳台上洗澡，结果被人偷拍发到网上！（每日一口气看完电子杂菜沙雕都市动漫）"
+    },
+    {
+      "source": "哔哩|戏曲",
+      "key": "nodejs_bilixiqu",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 55
+        },
+        "category": {
+          "passed": true,
+          "cards": 42,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 28
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 42
+        }
+      },
+      "passed": true,
+      "category": "吕剧",
+      "sampleTitle": "地方戏曲《山东吕剧》合集"
+    },
+    {
+      "source": "哔哩|歌曲",
+      "key": "nodejs_biliych",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 8
+        },
+        "category": {
+          "passed": true,
+          "cards": 42,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 8
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 42
+        }
+      },
+      "passed": true,
+      "category": "演唱会超清",
+      "sampleTitle": "周柏豪「The Blooming Chapter 绽放之章」粉丝见面演唱会--广州站4K杜比超清直拍全程"
+    },
+    {
+      "source": "少儿|教育",
+      "key": "nodejs_少儿教育",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 14
+        },
+        "category": {
+          "passed": true,
+          "cards": 42,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 9
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 42
+        }
+      },
+      "passed": true,
+      "category": "儿童早教",
+      "sampleTitle": "尼欧欧100集儿童益智早教儿歌动画片"
+    },
+    {
+      "source": "小学|课堂",
+      "key": "nodejs_小学课堂",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 18
+        },
+        "category": {
+          "passed": true,
+          "cards": 42,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 100
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 42
+        }
+      },
+      "passed": true,
+      "category": "1年级语文",
+      "sampleTitle": "【98集全】2026新版 小学语文 一年级上册 统编版 部编版 人教版 空中云课堂 含课件教案 学习任务单 课后练习 1年级语文 1年级语文下册"
+    },
+    {
+      "source": "初中|课堂",
+      "key": "nodejs_初中课堂",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 24
+        },
+        "category": {
+          "passed": true,
+          "cards": 42,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 23
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 42
+        }
+      },
+      "passed": true,
+      "category": "7年级语文",
+      "sampleTitle": "【全166集】【语文七年级·上册】2026暑假提前学 B站最全的初一上册人教版语文课本同步精讲课程 人教部编版初中语文考点解析+课文精读，轻松掌握课本知识要点！"
+    },
+    {
+      "source": "高中|课堂",
+      "key": "nodejs_高中教育",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 29
+        },
+        "category": {
+          "passed": true,
+          "cards": 42,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 54
+        },
+        "play": {
+          "passed": true,
+          "urlReturned": true,
+          "mediaFetched": false
+        },
+        "search": {
+          "passed": true,
+          "results": 42
+        }
+      },
+      "passed": true,
+      "category": "高一语文",
+      "sampleTitle": "【高中语文必修一全集】高一【高中语文】必修上册：2026最新版 初升高语文同步课程，高一语文课本同步精讲，通俗易懂，建议收藏！（附送资料）"
     }
   ],
   "limitations": [
-    "No actual CatPaw/JSTV phone import or video playback test",
-    "Fresh source-isolated anonymous storage; no imported personal credentials",
-    "Only confirmed next page is advertised, not a guessed total"
+    "Anonymous read-only requests from this network at check time only",
+    "Detail/play checks are sampled; returned playback URL is not media-decoded",
+    "No CatPaw/JSTV client import, login, CAPTCHA, paid content, or device playback test"
   ],
-  "sourceCount": 12
+  "sourceCount": 81,
+  "summary": {
+    "passed": 38,
+    "failed": 43,
+    "unaccounted": 0
+  }
 }
