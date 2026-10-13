@@ -1716,5 +1716,7 @@
     "passed": 38,
     "failed": 43,
     "unaccounted": 0
-  }
+  },
+  "evidenceStatus": "HISTORICAL",
+  "evidenceNote": "This report belongs to the older 81-source bundle identified by bundleSha256. It does not describe the current 53 visible sources or the 0.7.0 read-only boundary. The builder explicitly rejects it as current evidence."
 }

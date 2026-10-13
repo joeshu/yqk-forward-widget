@@ -224,3 +224,6 @@ CatPaw 0.5.0包含12个快照源和8个原生独立源（奇妙短剧、独播�
 采用原参考源的 home/category/detail/play/search 返回和代理流程，补齐 homeVideo 兼容入口；原12个快照源的首屏最多等待下一页检查0.5秒。新增61源仅通过基础注册、接口和离线回归，不标为已实播；由用户在 miraPlay 1.13 集中验收。参考包里的共享Cookie及固定账号字段不带入；原站登录、验证或权限要求继续生效。
 
 订阅地址不变： https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5 。来源及保留声明见 catpaw/reference/NOTICE.txt；完整新增名单见 catpaw/reference/metadata.json。
+
+
+CatPaw 0.7.0新增 source-layout.json 发布文件；info.json包含build身份、81/53/28数量与健康报告绑定状态。当前旧健康报告标为HISTORICAL，不能当成新版可播证据。逐源策略见catpaw/SOURCE-LAYOUT.md，复现诊断及只读检查方式见catpaw/HEALTH-CHECK.md。

@@ -1,4 +1,5 @@
 import vm from 'node:vm';
+import {checkRequestBoundary,attachOperationAbort} from './operation.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import https from 'node:https';
@@ -8,13 +9,13 @@ import {getProxyForUrl} from 'proxy-from-env';
 import {load} from 'cheerio';
 
 export class PersistentStorage {
-  constructor(file){this.file=file;this.data=Object.create(null);this.queue=Promise.resolve();}
+  constructor(file){this.file=file;this.data=Object.create(null);this.queue=Promise.resolve();this.lastSaveError=null;}
   async init(){try{this.data=JSON.parse(await fs.readFile(this.file,'utf8'));if(!this.data||typeof this.data!=='object'||Array.isArray(this.data))throw Error('storage format');}catch(e){if(e.code!=='ENOENT')throw Error('猫爪本机存储读取失败；未重置游客身份');}return this;}
   get(key){const v=this.data[key];return v===undefined?undefined:JSON.parse(JSON.stringify(v));}
   async set(key,value){this.data[key]=JSON.parse(JSON.stringify(value));await this.save();}
   async remove(key){delete this.data[key];await this.save();}
-  save(){this.queue=this.queue.then(async()=>{await fs.mkdir(path.dirname(this.file),{recursive:true});const text=JSON.stringify(this.data),tmp=this.file+'.tmp';await fs.writeFile(tmp,text,{mode:0o600});await fs.rename(tmp,this.file);});return this.queue;}
-  flush(){return this.queue;}
+  save(){const text=JSON.stringify(this.data);const write=this.queue.then(async()=>{await fs.mkdir(path.dirname(this.file),{recursive:true});const tmp=this.file+'.tmp';await fs.writeFile(tmp,text,{mode:0o600});await fs.rename(tmp,this.file);});this.queue=write.then(()=>{this.lastSaveError=null;},error=>{this.lastSaveError=error;});return write;}
+  async flush(){await this.queue;if(this.lastSaveError)throw this.lastSaveError;}
 }
 export function errorMessage(error){return String(error?.message||error).replace(/https?:\/\/\S+/g,'[资源地址]').replace(/(?:cookie|authorization|token)\s*[:=]\s*\S+/gi,'[会话字段]').slice(0,500);}
 export const TLS_EXCEPTION_HOSTS=Object.freeze(['yz250907.hzkeka49.com','ai.baipiaozhe.com','www.4kvms.org']);
@@ -25,9 +26,9 @@ export function makeWidget(key,storage,request=axios.request,controllers=new Set
   async function send(url,method,data,options={}){
     let current=new URL(url),currentMethod=method,currentData=data,headers={...(options.headers||{})},redirects=0;
     while(true){if(current.protocol!=='https:'||current.username||current.password)throw Error('模块请求必须使用有效HTTPS地址');
-      const controller=new AbortController();controllers.add(controller);let r;
+      checkRequestBoundary(current.href,currentMethod,currentData);const controller=new AbortController(),detach=attachOperationAbort(controller);controllers.add(controller);let r;
       try{r=await request({url:current.href,method:currentMethod,data:currentData,headers,timeout:25000,maxRedirects:0,maxContentLength:16*1024*1024,maxBodyLength:8*1024*1024,validateStatus:()=>true,proxy:false,httpAgent:selectAgent(current.href),httpsAgent:selectAgent(current.href),signal:controller.signal,responseType:options.responseType||undefined});}
-      finally{controllers.delete(controller);}
+      finally{detach();controllers.delete(controller);}
       const responseHeaders=r.headers?.toJSON?r.headers.toJSON():r.headers||{},location=responseHeaders.location||responseHeaders.Location;
       if(options.allow_redirects===false||![301,302,303,307,308].includes(r.status)||!location)return {status:r.status,statusCode:r.status,headers:responseHeaders,data:r.data};
       if(redirects++>=5)throw Error('模块请求重定向次数过多');const next=new URL(location,current);if(next.protocol!=='https:'||next.username||next.password)throw Error('模块请求拒绝非HTTPS重定向');

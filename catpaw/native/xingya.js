@@ -24,7 +24,7 @@ export function createXingya(source,storage,request,controllers){
  return {
   async init(){await classes();return {};},
   async home(){return classes();},
-  async homeVod(){const h=await classes();return {list:(await listing(1,{id:h.class[0].type_id,filter:{}}))};},
+  async homeVod(){const h=await classes();return {list:(await listing(1,{id:h.class[0].type_id,filter:{}})).list};},
   async category(body={}){const n=page(body.page),h=await classes(),id=String(body.id||'');if(!h.class.some(x=>x.type_id===id))throw bad('分类不属于此源');const values=checkedFilters(body.filters||body.extend||{},h.filters[id]||[]);return listing(n,{id,filter:values});},
   async search(body={}){const q=keyword(body);if(!q)return {page:1,pagecount:1,list:[]};const t=await auth(),r=await post(`${API}/v3/search`,{text:q},t),rows=listOf(r?.data?.theater?.search_data);return {page:1,pagecount:1,list:cards(rows)};},
   async detail(body={}){const t=await auth(),out=[];for(const id of ids(body)){const raw=decode(source.key,'vod',id);if(!/^\d+$/.test(raw))throw bad('星芽影片标识无效');const r=await get(`${API}/v2/theater_parent/detail?theater_parent_id=${encodeURIComponent(raw)}`,t),data=r?.data||{},eps=listOf(data.theaters).filter(x=>x?.son_video_url).map((x,i)=>({name:String(x.num||i+1),id:media(x.son_video_url)}));out.push(detail(source,id,{name:data.title,pic:data.cover_url,content:data.introduction,remarks:`${eps.length}集`},[{name:'星芽原站',episodes:eps}]));}return {list:out};},

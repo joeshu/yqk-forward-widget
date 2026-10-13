@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 catpaw/dist/
 joeshu-catpaw-storage.json*
+
+catpaw/reports/runtime/

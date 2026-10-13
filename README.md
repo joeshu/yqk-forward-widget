@@ -410,3 +410,12 @@ Node.js18+运行包，不依赖WASM/JIT。默认严格HTTPS校验；开发/桌�
 采用原参考源的 home/category/detail/play/search 返回和代理流程，补齐 homeVideo 兼容入口；原12个快照源的首屏最多等待下一页检查0.5秒。新增61源仅通过基础注册、接口和离线回归，不标为已实播；由用户在 miraPlay 1.13 集中验收。参考包里的共享Cookie及固定账号字段不带入；原站登录、验证或权限要求继续生效。
 
 订阅地址不变： https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5 。来源及保留声明见 catpaw/reference/NOTICE.txt；完整新增名单见 catpaw/reference/metadata.json。
+
+
+### CatPaw 0.7.0：保存、检查、诊断与逐源展示
+
+保留81个实现，默认展示53个，沿用已有停用记录。保存队列在单次写盘失败后可继续保存，flush仍报告未恢复的失败；只读健康检查跳过初始化及播放，并拦截注册、登录、奖励等业务请求，超时取消在途请求。报告按提交、源码指纹、包哈希及展示集合绑定，旧 validation.json 标为历史证据。
+
+miraPlay 诊断以筛选行直接显示最近错误，不再生成可被影片资料匹配的诊断卡片。快照源把播放选项放到独立播放设置页，浏览分类只保留浏览筛选；首页没有推荐数据时读取首个真实内容分类。次元城、星芽的首页 list 类型修复。逐源展示清单见 catpaw/SOURCE-LAYOUT.md，构建策略清单随订阅发布为 catpaw/source-layout.json。
+
+手机操作：刷新 CatPaw 订阅并重新进入来源；复现问题后重新进入来源 → 诊断状态。播放设置按源保存并用于后续打开的影片。分类顺序、短徽标及海报/横图比例由源协议提供，miraPlay的实际渲染仍以手机验收为准。

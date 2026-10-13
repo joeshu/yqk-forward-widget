@@ -10,7 +10,7 @@ const site={key:'fixture',name:'Fixture',api:'/spider/fixture/3'};
  });
  await test('detail and play errors do not abort other checks',async()=>{
   const server={inject:async({url})=>({statusCode:200,json:()=>url.endsWith('/home')?{class:[{type_id:'1'}]}:url.endsWith('/category')?{list:[{vod_id:'id1',vod_name:'sample'}],pagecount:1}:url.endsWith('/detail')?{list:[{vod_play_url:'line$ep1'}]}:url.endsWith('/search')?{list:[{vod_id:'id1'}]}:{url:'https://media.test/a.m3u8'}})};
-  const r=await runSourceHealthCheck(server,site);assert.equal(r.passed,true);assert.equal(r.checks.detail.passed,true);assert.equal(r.checks.play.passed,true);assert.equal(r.checks.search.passed,true);
+  const r=await runSourceHealthCheck(server,site);assert.equal(r.passed,true);assert.equal(r.checks.detail.passed,true);assert.equal(r.checks.play.passed,null);assert.equal(r.checks.play.status,'NOT_RUN');assert.equal(r.checks.search.passed,true);
  });
  await test('HTTP errors and malformed JSON are represented, not thrown',async()=>{
   for(const reply of [{statusCode:503,json:()=>({})},{statusCode:200,json:()=>{throw Error('bad json')}}]){

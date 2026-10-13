@@ -49,7 +49,7 @@ function build(base,output,options={}) {
   if(!meta||!/^\d+\.\d+\.\d+$/.test(meta.version))throw new Error(prefix+'版本格式错误');
   const name=prefix+'-'+meta.version+'.js';manifest.widgets.push({id:meta.id,title:meta.title,description:meta.description,author:meta.author,version:meta.version,requiredVersion:meta.requiredVersion,url:baseUrl+'/'+name});return {name,code};
  });
- const catpawNames=['index.js','index.js.md5','index.config.js','index.config.js.md5','index.js.LEGAL.txt','WIDGET_LICENSES.txt','info.json'];
+ const catpawNames=['index.js','index.js.md5','index.config.js','index.config.js.md5','index.js.LEGAL.txt','WIDGET_LICENSES.txt','info.json','source-layout.json'];
  const catpawFiles=Object.fromEntries(catpawNames.map(name=>{const file=path.join(__dirname,'catpaw','dist',name);if(!fs.existsSync(file))throw new Error('请先运行 npm --prefix catpaw ci --ignore-scripts 和 npm --prefix catpaw run build');return [key('catpaw/'+name),fs.readFileSync(file)];}));
  const common=[{key:'Access-Control-Allow-Origin',value:'*'},{key:'X-Content-Type-Options',value:'nosniff'},{key:'Cache-Control',value:'public, max-age=60, must-revalidate'}];
  const headers=[{source:'/'+key('yqk.fwd'),headers:[...common,{key:'Content-Type',value:'application/json; charset=utf-8'}]},
