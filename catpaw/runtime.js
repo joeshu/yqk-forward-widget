@@ -1,6 +1,7 @@
 import vm from 'node:vm';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import https from 'node:https';
 import axios from 'axios';
 import {HttpsProxyAgent} from 'https-proxy-agent';
 import {getProxyForUrl} from 'proxy-from-env';
@@ -16,14 +17,24 @@ export class PersistentStorage {
   flush(){return this.queue;}
 }
 export function errorMessage(error){return String(error?.message||error).replace(/https?:\/\/\S+/g,'[资源地址]').replace(/(?:cookie|authorization|token)\s*[:=]\s*\S+/gi,'[会话字段]').slice(0,500);}
+export const TLS_EXCEPTION_HOSTS=Object.freeze(['yz250907.hzkeka49.com','ai.baipiaozhe.com','www.4kvms.org']);
+export function isTlsExceptionHost(hostname){return TLS_EXCEPTION_HOSTS.includes(String(hostname).toLowerCase().replace(/\.$/,''));}
 export function makeWidget(key,storage,request=axios.request,controllers=new Set()){
   const agents=new Map();controllers.agents=controllers.agents||new Set();
-  function selectAgent(url){const proxy=getProxyForUrl(url);if(!proxy)return undefined;if(!/^https?:\/\//i.test(proxy))throw Error('当前Node环境只支持HTTP/HTTPS代理');if(!agents.has(proxy)){const agent=new HttpsProxyAgent(proxy);agents.set(proxy,agent);controllers.agents.add(agent);}return agents.get(proxy);}
+  function selectAgent(url){const u=new URL(url),proxy=getProxyForUrl(url),strict=process.env.CATPAW_STRICT_TLS==='1'||!isTlsExceptionHost(u.hostname),cacheKey=(proxy||'direct')+'|'+strict;if(proxy&&!/^https?:\/\//i.test(proxy))throw Error('当前Node环境只支持HTTP/HTTPS代理');if(!agents.has(cacheKey)){const agent=proxy?new HttpsProxyAgent(proxy,{rejectUnauthorized:strict}):new https.Agent({rejectUnauthorized:strict});agent.options.rejectUnauthorized=strict;if(proxy&&new URL(proxy).protocol==='https:')agent.connectOpts.rejectUnauthorized=true;agents.set(cacheKey,agent);controllers.agents.add(agent);}return agents.get(cacheKey);}
   async function send(url,method,data,options={}){
-    const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password)throw Error('模块请求必须使用有效HTTPS地址');
-    const agent=selectAgent(url),controller=new AbortController();controllers.add(controller);
-    try{const r=await request({url,method,data,headers:options.headers||{},timeout:25000,maxRedirects:options.allow_redirects===false?0:5,maxContentLength:16*1024*1024,maxBodyLength:8*1024*1024,validateStatus:()=>true,proxy:false,httpAgent:agent,httpsAgent:agent,signal:controller.signal,responseType:options.responseType||undefined});return {status:r.status,statusCode:r.status,headers:r.headers?.toJSON?r.headers.toJSON():r.headers||{},data:r.data};}
-    finally{controllers.delete(controller);}
+    let current=new URL(url),currentMethod=method,currentData=data,headers={...(options.headers||{})},redirects=0;
+    while(true){if(current.protocol!=='https:'||current.username||current.password)throw Error('模块请求必须使用有效HTTPS地址');
+      const controller=new AbortController();controllers.add(controller);let r;
+      try{r=await request({url:current.href,method:currentMethod,data:currentData,headers,timeout:25000,maxRedirects:0,maxContentLength:16*1024*1024,maxBodyLength:8*1024*1024,validateStatus:()=>true,proxy:false,httpAgent:selectAgent(current.href),httpsAgent:selectAgent(current.href),signal:controller.signal,responseType:options.responseType||undefined});}
+      finally{controllers.delete(controller);}
+      const responseHeaders=r.headers?.toJSON?r.headers.toJSON():r.headers||{},location=responseHeaders.location||responseHeaders.Location;
+      if(options.allow_redirects===false||![301,302,303,307,308].includes(r.status)||!location)return {status:r.status,statusCode:r.status,headers:responseHeaders,data:r.data};
+      if(redirects++>=5)throw Error('模块请求重定向次数过多');const next=new URL(location,current);if(next.protocol!=='https:'||next.username||next.password)throw Error('模块请求拒绝非HTTPS重定向');
+      if(next.origin!==current.origin)for(const name of Object.keys(headers))if(/^(authorization|cookie|proxy-authorization)$/i.test(name))delete headers[name];
+      if((r.status===303&&currentMethod!=='HEAD')||((r.status===301||r.status===302)&&currentMethod==='POST')){currentMethod='GET';currentData=undefined;for(const name of Object.keys(headers))if(/^(content-|transfer-encoding$)/i.test(name))delete headers[name];}
+      current=next;
+    }
   }
   return {html:{load:async s=>load(s)},storage:{get:k=>storage.get(key+'/'+k),set:(k,v)=>storage.set(key+'/'+k,v),remove:k=>storage.remove(key+'/'+k)},http:{get:(u,o)=>send(u,'GET',undefined,o),post:(u,d,o)=>send(u,'POST',d,o),request:o=>send(o.url,o.method||'GET',o.body??o.data,o)}};
 }
