@@ -1,0 +1,1157 @@
+{
+  "checkedAt": "2026-10-14T04:13:41.652Z",
+  "network": "blocked",
+  "phonePlayback": "NOT_RUN",
+  "checks": [
+    {
+      "key": "import_niuer_livetovod",
+      "provider": "niuer",
+      "upstreamKey": "livetovod",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_douer_tgfilebot",
+      "provider": "douer",
+      "upstreamKey": "tgfilebot",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_douer_douban",
+      "provider": "douer",
+      "upstreamKey": "douban",
+      "routes": 7,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/test"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_douer_doubi",
+      "provider": "douer",
+      "upstreamKey": "doubi",
+      "routes": 9,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/proxy/dash/:token/:quality/manifest.mpd"
+        },
+        {
+          "method": "HEAD",
+          "url": "/proxy/dash/:token/:quality/:track.m4s"
+        },
+        {
+          "method": "GET",
+          "url": "/proxy/dash/:token/:quality/:track.m4s"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_douer_xingya",
+      "provider": "douer",
+      "upstreamKey": "xingya",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_douer_live2vod",
+      "provider": "douer",
+      "upstreamKey": "live2vod",
+      "routes": 7,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/test"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_douer_jianpian",
+      "provider": "douer",
+      "upstreamKey": "jianpian",
+      "routes": 7,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/test"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_douer_guazi",
+      "provider": "douer",
+      "upstreamKey": "guazi",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_douer_dbku",
+      "provider": "douer",
+      "upstreamKey": "dbku",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_douer_hanxiaoquan",
+      "provider": "douer",
+      "upstreamKey": "hanxiaoquan",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_douer_girigiri",
+      "provider": "douer",
+      "upstreamKey": "girigiri",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_douer_kafei",
+      "provider": "douer",
+      "upstreamKey": "kafei",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_yswag_douban",
+      "provider": "yswag",
+      "upstreamKey": "douban",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_yswag_livesource",
+      "provider": "yswag",
+      "upstreamKey": "liveSource",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_yswag_hanjutv",
+      "provider": "yswag",
+      "upstreamKey": "hanjutv",
+      "routes": 7,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/proxy/m3u8"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_yswag_hongguo",
+      "provider": "yswag",
+      "upstreamKey": "hongguo",
+      "routes": 7,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/video/:token"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_yswag_shutiao",
+      "provider": "yswag",
+      "upstreamKey": "shutiao",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_yswag_gugu",
+      "provider": "yswag",
+      "upstreamKey": "gugu",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_yswag_dmghg",
+      "provider": "yswag",
+      "upstreamKey": "dmghg",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_yswag_youtube",
+      "provider": "yswag",
+      "upstreamKey": "youtube",
+      "routes": 27,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/hls/st-:sid.m3u8"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/st-:sid/v.m3u8"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/st-:sid/v2.m3u8"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/st-:sid/a.m3u8"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/st-:sid/init-:itag.m4s"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/st-:sid/seg-:itag-:n.m4s"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/:sid/sub-:lang.m3u8"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/:sid/sub-:lang.vtt"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/:sid.m3u8"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/:sid/v.m3u8"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/:sid/v-:itag.m3u8"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/:sid/sv-:itag.m3u8"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/:sid/a.m3u8"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/:sid/a-:itag.m3u8"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/:sid/init-:itag.m4s"
+        },
+        {
+          "method": "GET",
+          "url": "/hls/:sid/seg-:itag-:n.m4s"
+        },
+        {
+          "method": "GET",
+          "url": "/hlsq"
+        },
+        {
+          "method": "GET",
+          "url": "/oauth/start"
+        },
+        {
+          "method": "GET",
+          "url": "/oauth/poll"
+        },
+        {
+          "method": "GET",
+          "url": "/oauth/status"
+        },
+        {
+          "method": "GET",
+          "url": "/oauth/logout"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_yswag_cilixiong",
+      "provider": "yswag",
+      "upstreamKey": "cilixiong",
+      "routes": 13,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/stream"
+        },
+        {
+          "method": "HEAD",
+          "url": "/stream"
+        },
+        {
+          "method": "GET",
+          "url": "/subtitle"
+        },
+        {
+          "method": "HEAD",
+          "url": "/subtitle"
+        },
+        {
+          "method": "GET",
+          "url": "/cloud"
+        },
+        {
+          "method": "HEAD",
+          "url": "/cloud"
+        },
+        {
+          "method": "GET",
+          "url": "/stat"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_yswag_jinpai",
+      "provider": "yswag",
+      "upstreamKey": "jinpai",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_yswag_juzhi",
+      "provider": "yswag",
+      "upstreamKey": "juzhi",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_lmentor_hongguo",
+      "provider": "lmentor",
+      "upstreamKey": "hongguo",
+      "routes": 7,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/proxy/play/:token"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_lmentor_douban",
+      "provider": "lmentor",
+      "upstreamKey": "douban",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_lmentor_bili_all",
+      "provider": "lmentor",
+      "upstreamKey": "bili_all",
+      "routes": 17,
+      "aux": [
+        {
+          "method": "POST",
+          "url": "/set-cookie"
+        },
+        {
+          "method": "POST",
+          "url": "/clear-cookie"
+        },
+        {
+          "method": "GET",
+          "url": "/cookie-status"
+        },
+        {
+          "method": "POST",
+          "url": "/qr-login/session"
+        },
+        {
+          "method": "POST",
+          "url": "/qr-login/status"
+        },
+        {
+          "method": "POST",
+          "url": "/validate-cookie"
+        },
+        {
+          "method": "GET",
+          "url": "/user-info"
+        },
+        {
+          "method": "GET",
+          "url": "/proxy"
+        },
+        {
+          "method": "POST",
+          "url": "/proxy"
+        },
+        {
+          "method": "GET",
+          "url": "/proxy/media/:token/:track"
+        },
+        {
+          "method": "OPTIONS",
+          "url": "*"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_lmentor_bili_official",
+      "provider": "lmentor",
+      "upstreamKey": "bili_official",
+      "routes": 9,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/proxy"
+        },
+        {
+          "method": "POST",
+          "url": "/proxy"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_lmentor_88kanqiu",
+      "provider": "lmentor",
+      "upstreamKey": "88kanqiu",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_lmentor_live",
+      "provider": "lmentor",
+      "upstreamKey": "live",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_lmentor_jinpai",
+      "provider": "lmentor",
+      "upstreamKey": "jinpai",
+      "routes": 7,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/proxy/image"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_lmentor_jp",
+      "provider": "lmentor",
+      "upstreamKey": "jp",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_lmentor_guazi",
+      "provider": "lmentor",
+      "upstreamKey": "guazi",
+      "routes": 8,
+      "aux": [
+        {
+          "method": "GET",
+          "url": "/clear-cache"
+        },
+        {
+          "method": "GET",
+          "url": "/cache-stats"
+        }
+      ],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_douban",
+      "provider": "xiaosa",
+      "upstreamKey": "douban",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_hanxiaoquan",
+      "provider": "xiaosa",
+      "upstreamKey": "hanxiaoquan",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_guazi",
+      "provider": "xiaosa",
+      "upstreamKey": "guazi",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_wexduboku",
+      "provider": "xiaosa",
+      "upstreamKey": "wexDuBoKu",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_wexyueyue",
+      "provider": "xiaosa",
+      "upstreamKey": "wexYueYue",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_wencai",
+      "provider": "xiaosa",
+      "upstreamKey": "wencai",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_yiyingshi",
+      "provider": "xiaosa",
+      "upstreamKey": "yiyingshi",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_rebo",
+      "provider": "xiaosa",
+      "upstreamKey": "rebo",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_bobo",
+      "provider": "xiaosa",
+      "upstreamKey": "bobo",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_ikanbot",
+      "provider": "xiaosa",
+      "upstreamKey": "ikanbot",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_wexfengye4k",
+      "provider": "xiaosa",
+      "upstreamKey": "wexfengye4k",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_huya",
+      "provider": "xiaosa",
+      "upstreamKey": "huya",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_bililive",
+      "provider": "xiaosa",
+      "upstreamKey": "bililive",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_douyu",
+      "provider": "xiaosa",
+      "upstreamKey": "douyu",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_livetovod",
+      "provider": "xiaosa",
+      "upstreamKey": "livetovod",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_hema",
+      "provider": "xiaosa",
+      "upstreamKey": "hema",
+      "routes": 8,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_duanjuxingya",
+      "provider": "xiaosa",
+      "upstreamKey": "duanjuxingya",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_baiduduanju",
+      "provider": "xiaosa",
+      "upstreamKey": "baiduduanju",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_duanjuqimiao",
+      "provider": "xiaosa",
+      "upstreamKey": "duanjuqimiao",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_duanjuweiguan",
+      "provider": "xiaosa",
+      "upstreamKey": "duanjuweiguan",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_animehuazi",
+      "provider": "xiaosa",
+      "upstreamKey": "animehuazi",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_animemodu",
+      "provider": "xiaosa",
+      "upstreamKey": "animemodu",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_animeciyuancheng",
+      "provider": "xiaosa",
+      "upstreamKey": "animeciyuancheng",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_bookaishijie",
+      "provider": "xiaosa",
+      "upstreamKey": "bookaishijie",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_bookaiyueting",
+      "provider": "xiaosa",
+      "upstreamKey": "bookaiyueting",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_musicaiqingting",
+      "provider": "xiaosa",
+      "upstreamKey": "musicaiqingting",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_musicailunhui",
+      "provider": "xiaosa",
+      "upstreamKey": "musicailunhui",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_sportaiguazi",
+      "provider": "xiaosa",
+      "upstreamKey": "sportaiguazi",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_sportaikafei",
+      "provider": "xiaosa",
+      "upstreamKey": "sportaikafei",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_sportaifeiqiu",
+      "provider": "xiaosa",
+      "upstreamKey": "sportaifeiqiu",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_sportaikanqiutong",
+      "provider": "xiaosa",
+      "upstreamKey": "sportaikanqiutong",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_sportaikanqiu",
+      "provider": "xiaosa",
+      "upstreamKey": "sportaikanqiu",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_sportaiwwe",
+      "provider": "xiaosa",
+      "upstreamKey": "sportaiwwe",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_biliys",
+      "provider": "xiaosa",
+      "upstreamKey": "biliys",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_wexaitiantang",
+      "provider": "xiaosa",
+      "upstreamKey": "wexaitiantang",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_manjuhongguo",
+      "provider": "xiaosa",
+      "upstreamKey": "manjuhongguo",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_manjuhuolong",
+      "provider": "xiaosa",
+      "upstreamKey": "manjuhuolong",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_manjuqimao",
+      "provider": "xiaosa",
+      "upstreamKey": "manjuqimao",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_manjuxifan",
+      "provider": "xiaosa",
+      "upstreamKey": "manjuxifan",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_animexifan",
+      "provider": "xiaosa",
+      "upstreamKey": "animexifan",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_bookhema",
+      "provider": "xiaosa",
+      "upstreamKey": "bookhema",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_bookhongguo",
+      "provider": "xiaosa",
+      "upstreamKey": "bookhongguo",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_childrenaitutu",
+      "provider": "xiaosa",
+      "upstreamKey": "childrenaitutu",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_childrenaibaobao",
+      "provider": "xiaosa",
+      "upstreamKey": "childrenaibaobao",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_childrenaibeiwa",
+      "provider": "xiaosa",
+      "upstreamKey": "childrenaibeiwa",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_musicaikuwo",
+      "provider": "xiaosa",
+      "upstreamKey": "musicaikuwo",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_musicaikuwoa",
+      "provider": "xiaosa",
+      "upstreamKey": "musicaikuwoa",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_musicaikg",
+      "provider": "xiaosa",
+      "upstreamKey": "musicaikg",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_musicaiqq",
+      "provider": "xiaosa",
+      "upstreamKey": "musicaiqq",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_musicaiwy",
+      "provider": "xiaosa",
+      "upstreamKey": "musicaiwy",
+      "routes": 7,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_musicai163",
+      "provider": "xiaosa",
+      "upstreamKey": "musicai163",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_musicailiyuan",
+      "provider": "xiaosa",
+      "upstreamKey": "musicailiyuan",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_musicaitangdou",
+      "provider": "xiaosa",
+      "upstreamKey": "musicaitangdou",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_appv7dashixiong",
+      "provider": "xiaosa",
+      "upstreamKey": "appv7dashixiong",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_appv7fenzhu",
+      "provider": "xiaosa",
+      "upstreamKey": "appv7fenzhu",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_appv7xianyu",
+      "provider": "xiaosa",
+      "upstreamKey": "appv7xianyu",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_appv7zhuijudaren",
+      "provider": "xiaosa",
+      "upstreamKey": "appv7zhuijudaren",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_appv7xiaoyouzi",
+      "provider": "xiaosa",
+      "upstreamKey": "appv7xiaoyouzi",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_appv7xiaoningmeng",
+      "provider": "xiaosa",
+      "upstreamKey": "appv7xiaoningmeng",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_appv7mengtaiqi",
+      "provider": "xiaosa",
+      "upstreamKey": "appv7mengtaiqi",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_appv7linglingqi",
+      "provider": "xiaosa",
+      "upstreamKey": "appv7linglingqi",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_appv7xiaoshizi",
+      "provider": "xiaosa",
+      "upstreamKey": "appv7xiaoshizi",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_appv7xiaohuangren",
+      "provider": "xiaosa",
+      "upstreamKey": "appv7xiaohuangren",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_bilibili",
+      "provider": "xiaosa",
+      "upstreamKey": "bilibili",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_bilixiqu",
+      "provider": "xiaosa",
+      "upstreamKey": "bilixiqu",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_biliych",
+      "provider": "xiaosa",
+      "upstreamKey": "biliych",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_s8ccde1352d",
+      "provider": "xiaosa",
+      "upstreamKey": "少儿教育",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_sfc444049dd",
+      "provider": "xiaosa",
+      "upstreamKey": "小学课堂",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_s0ab5dc6a9d",
+      "provider": "xiaosa",
+      "upstreamKey": "初中课堂",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    },
+    {
+      "key": "import_xiaosa_se6e5b37486",
+      "provider": "xiaosa",
+      "upstreamKey": "高中教育",
+      "routes": 6,
+      "aux": [],
+      "missing": [],
+      "status": "PASS"
+    }
+  ],
+  "componentDigests": {
+    "niuer": "e8de438950941782644e01ab06ee46bbb47c58e9e546e49dbad756b457c78c8d",
+    "douer": "7468d2af6e1dc88564832335434aabb0c89b9837d4976a2fe25844de3f8c77ee",
+    "yswag": "bb614d572a488b6c1f51d306b3894d9d5440c1a8ceb5bff5cd17cf0e5e0ad136",
+    "lmentor": "255ebb0e5beca9b29a102a737721f62760b87f4680f14a28e1137ea4361e7ae6",
+    "xiaosa": "5e1bc069ab4b042e40ca38dd831d6ad19a01bbf016a9db71b6fd70225fe18f5f"
+  }
+}

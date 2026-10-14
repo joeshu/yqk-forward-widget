@@ -1,0 +1,108 @@
+{
+  "checkedAt": "2026-10-14T04:17:55.119Z",
+  "mode": "sampled-catalogue-read-only",
+  "build": {
+    "version": "0.8.0",
+    "gitCommit": "e3b7c345711c0bd4d124c36641e469f527996504",
+    "gitDirty": true,
+    "sourceFingerprint": "8d2b661efb5170a217d82648e3903a2c3afc85b26522687378d38e4e6612e960"
+  },
+  "bundleSha256": "09a72dbdc1bf318f3749d26f4363174cd914c56e4447c38d4b32ba9e0a7f3ef1",
+  "fullCatalogueChecked": false,
+  "playback": "NOT_RUN",
+  "checks": [
+    {
+      "key": "import_douer_hanxiaoquan",
+      "provider": "douer",
+      "upstreamKey": "hanxiaoquan",
+      "status": "PASS",
+      "categories": 5,
+      "error": null
+    },
+    {
+      "key": "import_douer_guazi",
+      "provider": "douer",
+      "upstreamKey": "guazi",
+      "status": "PASS",
+      "categories": 5,
+      "error": null
+    },
+    {
+      "key": "import_yswag_jinpai",
+      "provider": "yswag",
+      "upstreamKey": "jinpai",
+      "status": "PASS",
+      "categories": 4,
+      "error": null
+    },
+    {
+      "key": "import_douer_girigiri",
+      "provider": "douer",
+      "upstreamKey": "girigiri",
+      "status": "FAIL",
+      "error": "sample timeout"
+    },
+    {
+      "key": "import_yswag_juzhi",
+      "provider": "yswag",
+      "upstreamKey": "juzhi",
+      "status": "FAIL",
+      "error": "sample timeout"
+    },
+    {
+      "key": "import_lmentor_88kanqiu",
+      "provider": "lmentor",
+      "upstreamKey": "88kanqiu",
+      "status": "FAIL",
+      "categories": 0,
+      "error": "process.memoryUsage is not a function"
+    },
+    {
+      "key": "import_xiaosa_animemodu",
+      "provider": "xiaosa",
+      "upstreamKey": "animemodu",
+      "status": "PASS",
+      "categories": 5,
+      "error": null
+    },
+    {
+      "key": "import_yswag_dmghg",
+      "provider": "yswag",
+      "upstreamKey": "dmghg",
+      "status": "FAIL",
+      "error": "sample timeout"
+    },
+    {
+      "key": "import_xiaosa_childrenaitutu",
+      "provider": "xiaosa",
+      "upstreamKey": "childrenaitutu",
+      "status": "PASS",
+      "categories": 6,
+      "error": null
+    },
+    {
+      "key": "import_niuer_livetovod",
+      "provider": "niuer",
+      "upstreamKey": "livetovod",
+      "status": "PASS",
+      "categories": 1,
+      "error": null
+    },
+    {
+      "key": "import_lmentor_jinpai",
+      "provider": "lmentor",
+      "upstreamKey": "jinpai",
+      "status": "FAIL",
+      "error": "sample timeout"
+    },
+    {
+      "key": "import_xiaosa_manjuqimao",
+      "provider": "xiaosa",
+      "upstreamKey": "manjuqimao",
+      "status": "FAIL",
+      "error": "sample timeout"
+    }
+  ],
+  "binding": "HISTORICAL",
+  "note": "分类抽查后修复了源运行环境兼容性；保留实际被测构建散列，不将旧抽查标为当前全源健康。"
+}

@@ -1,0 +1,6 @@
+Provider: Y佬
+Source: https://raw.githubusercontent.com/Yswag/xptv-extensions/refs/heads/jstv/index.js.md5
+Original SHA-256: 64248f06288b5ee1fa2680b4ac7fb0830251c8e8f25951f24b021ce281a9902f
+Selected content-source dependency closure; no original server or administrative routes.
+
+No bundled license trailer supplied; see upstream repository.

@@ -431,3 +431,11 @@ Node.js18+运行包，不依赖WASM/JIT。默认严格HTTPS校验；开发/桌�
 miraPlay 诊断以筛选行直接显示最近错误，不再生成可被影片资料匹配的诊断卡片。快照源把播放选项放到独立播放设置页，浏览分类只保留浏览筛选；首页没有推荐数据时读取首个真实内容分类。次元城、星芽的首页 list 类型修复。逐源展示清单见 catpaw/SOURCE-LAYOUT.md，构建策略清单随订阅发布为 catpaw/source-layout.json。
 
 手机操作：刷新 CatPaw 订阅并重新进入来源；复现问题后重新进入来源 → 诊断状态。播放设置按源保存并用于后续打开的影片。分类顺序、短徽标及海报/横图比例由源协议提供，miraPlay的实际渲染仍以手机验收为准。
+
+## CatPaw 0.8.0：五份参考源合并
+
+牛二、豆儿、Y佬、L佬、潇洒的预设非网盘内容源已梳理；保留原81个实现，新增102个不同供应方实现，登记183个、默认启用155个，原28个关闭项仍保留。下载地址不变：
+
+https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5
+
+新增源保留原首页/分类/搜索/详情/播放及辅助代理，供应方资料隔离，加载不启动原后台或额外端口。账号默认值和共享Cookie不带入；登录、桥接、自备播放列表等原条件仍需满足。全部新增实现已通过离线注册检查，不代表全源当前可播；由手机验收。详见 [接入说明](catpaw/imported/README.md)、[逐源对照](catpaw/imported/inventory.json)、[来源与校验](catpaw/imported/provenance.json)。公开对照：`catpaw/import-report.json`。

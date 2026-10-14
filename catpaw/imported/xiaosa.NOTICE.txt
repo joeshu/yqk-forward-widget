@@ -1,0 +1,6 @@
+Provider: 潇洒
+Source: https://hw.361123.xyz/m/index.js.md5
+Original SHA-256: c50b6bb091a21019b73534962a71a2cffd2d264012228f655cc64486c0d26f11
+Selected content-source dependency closure; no original server or administrative routes.
+
+No bundled license trailer supplied; see upstream repository.

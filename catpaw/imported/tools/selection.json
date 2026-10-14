@@ -1,0 +1,401 @@
+{
+  "sources": {
+    "niuer": [
+      "livetovod"
+    ],
+    "douer": [
+      "tgfilebot",
+      "douban",
+      "doubi",
+      "xingya",
+      "live2vod",
+      "jianpian",
+      "guazi",
+      "dbku",
+      "hanxiaoquan",
+      "girigiri",
+      "kafei"
+    ],
+    "yswag": [
+      "douban",
+      "liveSource",
+      "hanjutv",
+      "hongguo",
+      "shutiao",
+      "gugu",
+      "dmghg",
+      "youtube",
+      "cilixiong",
+      "__unknown1",
+      "__unknown2"
+    ],
+    "lmentor": [
+      "hongguo",
+      "douban",
+      "bili_all",
+      "bili_official",
+      "88kanqiu",
+      "live",
+      "jinpai",
+      "jp",
+      "guazi"
+    ],
+    "xiaosa": [
+      "douban",
+      "hanxiaoquan",
+      "guazi",
+      "wexDuBoKu",
+      "wexYueYue",
+      "wencai",
+      "yiyingshi",
+      "rebo",
+      "bobo",
+      "ikanbot",
+      "wexfengye4k",
+      "huya",
+      "bililive",
+      "douyu",
+      "livetovod",
+      "hema",
+      "duanjuxingya",
+      "baiduduanju",
+      "duanjuqimiao",
+      "duanjuweiguan",
+      "animehuazi",
+      "animemodu",
+      "animeciyuancheng",
+      "bookaishijie",
+      "bookaiyueting",
+      "musicaiqingting",
+      "musicailunhui",
+      "sportaiguazi",
+      "sportaikafei",
+      "sportaifeiqiu",
+      "sportaikanqiutong",
+      "sportaikanqiu",
+      "sportaiwwe",
+      "biliys",
+      "wexaitiantang",
+      "manjuhongguo",
+      "manjuhuolong",
+      "manjuqimao",
+      "manjuxifan",
+      "animexifan",
+      "bookhema",
+      "bookhongguo",
+      "childrenaitutu",
+      "childrenaibaobao",
+      "childrenaibeiwa",
+      "musicaikuwo",
+      "musicaikuwoa",
+      "musicaikg",
+      "musicaiqq",
+      "musicaiwy",
+      "musicai163",
+      "musicailiyuan",
+      "musicaitangdou",
+      "appv7dashixiong",
+      "appv7fenzhu",
+      "appv7xianyu",
+      "appv7zhuijudaren",
+      "appv7xiaoyouzi",
+      "appv7xiaoningmeng",
+      "appv7mengtaiqi",
+      "appv7linglingqi",
+      "appv7xiaoshizi",
+      "appv7xiaohuangren",
+      "bilibili",
+      "bilixiqu",
+      "biliych",
+      "少儿教育",
+      "小学课堂",
+      "初中课堂",
+      "高中教育"
+    ]
+  },
+  "extra": {
+    "yswag": [
+      {
+        "key": "__unknown1",
+        "name": "待解析",
+        "expression": "(Yve(),Kve)",
+        "dependencies": [
+          "Yve",
+          "Kve"
+        ]
+      },
+      {
+        "key": "__unknown2",
+        "name": "待解析",
+        "expression": "(b_e(),g_e)",
+        "dependencies": [
+          "b_e",
+          "g_e"
+        ]
+      }
+    ],
+    "xiaosa": [
+      {
+        "key": "manjuhongguo",
+        "name": "漫剧|小红",
+        "expression": "B20(env)",
+        "function": "B20"
+      },
+      {
+        "key": "manjuhuolong",
+        "name": "漫剧|小龙",
+        "expression": "L20(env)",
+        "function": "L20"
+      },
+      {
+        "key": "manjuqimao",
+        "name": "漫剧|小猫",
+        "expression": "M20(env)",
+        "function": "M20"
+      },
+      {
+        "key": "manjuxifan",
+        "name": "漫剧|小喜",
+        "expression": "U20(env)",
+        "function": "U20"
+      },
+      {
+        "key": "animexifan",
+        "name": "稀饭|动漫",
+        "expression": "B1e(env)",
+        "function": "B1e"
+      },
+      {
+        "key": "bookhema",
+        "name": "小马|听书",
+        "expression": "n10(env)",
+        "function": "n10"
+      },
+      {
+        "key": "bookhongguo",
+        "name": "小红|听书",
+        "expression": "s10(env)",
+        "function": "s10"
+      },
+      {
+        "key": "childrenaitutu",
+        "name": "兔兔|少儿",
+        "expression": "p10(env)",
+        "function": "p10"
+      },
+      {
+        "key": "childrenaibaobao",
+        "name": "宝宝|少儿",
+        "expression": "m10(env)",
+        "function": "m10"
+      },
+      {
+        "key": "childrenaibeiwa",
+        "name": "贝瓦|少儿",
+        "expression": "h10(env)",
+        "function": "h10"
+      },
+      {
+        "key": "musicaikuwo",
+        "name": "酷听|音乐",
+        "expression": "R10(env)",
+        "function": "R10"
+      },
+      {
+        "key": "musicaikuwoa",
+        "name": "小酷|音乐",
+        "expression": "O10(env)",
+        "function": "O10"
+      },
+      {
+        "key": "musicaikg",
+        "name": "小狗|音乐",
+        "expression": "M10(env)",
+        "function": "M10"
+      },
+      {
+        "key": "musicaiqq",
+        "name": "小秋|音乐",
+        "expression": "Y10(env)",
+        "function": "Y10"
+      },
+      {
+        "key": "musicaiwy",
+        "name": "小易|音乐",
+        "expression": "ap0(env)",
+        "function": "ap0"
+      },
+      {
+        "key": "musicai163",
+        "name": "易听|音乐",
+        "expression": "fp0(env)",
+        "function": "fp0"
+      },
+      {
+        "key": "musicailiyuan",
+        "name": "梨园|戏曲",
+        "expression": "g10(env)",
+        "function": "g10"
+      },
+      {
+        "key": "musicaitangdou",
+        "name": "糖豆|舞蹈",
+        "expression": "v10(env)",
+        "function": "v10"
+      },
+      {
+        "key": "appv7dashixiong",
+        "name": "师兄|秒播",
+        "expression": "sGt(env,oGt.find(e=>e.key===\"appv7dashixiong\"))",
+        "dependencies": [
+          "sGt",
+          "oGt"
+        ]
+      },
+      {
+        "key": "appv7fenzhu",
+        "name": "粉猪|秒播",
+        "expression": "sGt(env,oGt.find(e=>e.key===\"appv7fenzhu\"))",
+        "dependencies": [
+          "sGt",
+          "oGt"
+        ]
+      },
+      {
+        "key": "appv7xianyu",
+        "name": "咸鱼|秒播",
+        "expression": "sGt(env,oGt.find(e=>e.key===\"appv7xianyu\"))",
+        "dependencies": [
+          "sGt",
+          "oGt"
+        ]
+      },
+      {
+        "key": "appv7zhuijudaren",
+        "name": "追剧|秒播",
+        "expression": "sGt(env,oGt.find(e=>e.key===\"appv7zhuijudaren\"))",
+        "dependencies": [
+          "sGt",
+          "oGt"
+        ]
+      },
+      {
+        "key": "appv7xiaoyouzi",
+        "name": "柚子|秒播",
+        "expression": "sGt(env,oGt.find(e=>e.key===\"appv7xiaoyouzi\"))",
+        "dependencies": [
+          "sGt",
+          "oGt"
+        ]
+      },
+      {
+        "key": "appv7xiaoningmeng",
+        "name": "柠檬|秒播",
+        "expression": "sGt(env,oGt.find(e=>e.key===\"appv7xiaoningmeng\"))",
+        "dependencies": [
+          "sGt",
+          "oGt"
+        ]
+      },
+      {
+        "key": "appv7mengtaiqi",
+        "name": "太奇|秒播",
+        "expression": "sGt(env,oGt.find(e=>e.key===\"appv7mengtaiqi\"))",
+        "dependencies": [
+          "sGt",
+          "oGt"
+        ]
+      },
+      {
+        "key": "appv7linglingqi",
+        "name": "零七|秒播",
+        "expression": "sGt(env,oGt.find(e=>e.key===\"appv7linglingqi\"))",
+        "dependencies": [
+          "sGt",
+          "oGt"
+        ]
+      },
+      {
+        "key": "appv7xiaoshizi",
+        "name": "柿子|秒播",
+        "expression": "sGt(env,oGt.find(e=>e.key===\"appv7xiaoshizi\"))",
+        "dependencies": [
+          "sGt",
+          "oGt"
+        ]
+      },
+      {
+        "key": "appv7xiaohuangren",
+        "name": "黄人|秒播",
+        "expression": "sGt(env,oGt.find(e=>e.key===\"appv7xiaohuangren\"))",
+        "dependencies": [
+          "sGt",
+          "oGt"
+        ]
+      },
+      {
+        "key": "bilibili",
+        "name": "哔哩|合集",
+        "expression": "$er(env,Yer.find(e=>e.key===\"bilibili\"))",
+        "dependencies": [
+          "$er",
+          "Yer"
+        ]
+      },
+      {
+        "key": "bilixiqu",
+        "name": "哔哩|戏曲",
+        "expression": "$er(env,Yer.find(e=>e.key===\"bilixiqu\"))",
+        "dependencies": [
+          "$er",
+          "Yer"
+        ]
+      },
+      {
+        "key": "biliych",
+        "name": "哔哩|歌曲",
+        "expression": "$er(env,Yer.find(e=>e.key===\"biliych\"))",
+        "dependencies": [
+          "$er",
+          "Yer"
+        ]
+      },
+      {
+        "key": "少儿教育",
+        "name": "少儿|教育",
+        "expression": "$er(env,Yer.find(e=>e.key===\"少儿教育\"))",
+        "dependencies": [
+          "$er",
+          "Yer"
+        ]
+      },
+      {
+        "key": "小学课堂",
+        "name": "小学|课堂",
+        "expression": "$er(env,Yer.find(e=>e.key===\"小学课堂\"))",
+        "dependencies": [
+          "$er",
+          "Yer"
+        ]
+      },
+      {
+        "key": "初中课堂",
+        "name": "初中|课堂",
+        "expression": "$er(env,Yer.find(e=>e.key===\"初中课堂\"))",
+        "dependencies": [
+          "$er",
+          "Yer"
+        ]
+      },
+      {
+        "key": "高中教育",
+        "name": "高中|课堂",
+        "expression": "$er(env,Yer.find(e=>e.key===\"高中教育\"))",
+        "dependencies": [
+          "$er",
+          "Yer"
+        ]
+      }
+    ]
+  }
+}

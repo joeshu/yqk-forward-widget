@@ -1,0 +1,70 @@
+{
+  "capturedAt": "2026-10-14T04:15:32.998Z",
+  "providers": [
+    {
+      "provider": "niuer",
+      "label": "牛二",
+      "url": "https://9280.kstore.vip/cat/index.js.md5",
+      "downloadRequiresAuthentication": false,
+      "originalMD5": "0e89531f459dc4bb6f6abbbbf7392493",
+      "originalSha256": "3503f06c49a6aa3963545bc12b77efeffd786e0ad807af39c529eaf91eddb135",
+      "componentSha256": "e8de438950941782644e01ab06ee46bbb47c58e9e546e49dbad756b457c78c8d",
+      "compressedSha256": "4c94e906b1ae57836c63e409dbe88ede83218ac1e3d199af001a3217cf0798f3",
+      "sources": 1,
+      "clearedCredentialDefaults": 0,
+      "phonePlayback": "NOT_RUN"
+    },
+    {
+      "provider": "douer",
+      "label": "豆儿",
+      "url": "https://catpaw.douer.me/index.js.md5",
+      "downloadRequiresAuthentication": true,
+      "originalMD5": "9ca4cd465b5d6a0cff6d2df7a9ddb9d1",
+      "originalSha256": "31fb36caa9045f425da1f167c534970797d19e9734d0f4770085089c95ad6003",
+      "componentSha256": "7468d2af6e1dc88564832335434aabb0c89b9837d4976a2fe25844de3f8c77ee",
+      "compressedSha256": "2d331bcfe88e9bf1a4819afae34fb17edc9e1509cc9ebf7bec447fc789cd0f41",
+      "sources": 11,
+      "clearedCredentialDefaults": 0,
+      "phonePlayback": "NOT_RUN"
+    },
+    {
+      "provider": "yswag",
+      "label": "Y佬",
+      "url": "https://raw.githubusercontent.com/Yswag/xptv-extensions/refs/heads/jstv/index.js.md5",
+      "downloadRequiresAuthentication": false,
+      "originalMD5": "ef917f1dd3bea0190c2078c5b6b17885",
+      "originalSha256": "64248f06288b5ee1fa2680b4ac7fb0830251c8e8f25951f24b021ce281a9902f",
+      "componentSha256": "bb614d572a488b6c1f51d306b3894d9d5440c1a8ceb5bff5cd17cf0e5e0ad136",
+      "compressedSha256": "f13e4b385df2cff255de4d81ddb71929584b6f8e9f8ec9bffee060a5d9b3a09b",
+      "sources": 11,
+      "clearedCredentialDefaults": 3,
+      "phonePlayback": "NOT_RUN"
+    },
+    {
+      "provider": "lmentor",
+      "label": "L佬",
+      "url": "https://raw.githubusercontent.com/Darklessing/catvod/refs/heads/main/lmentor/index.js.md5",
+      "downloadRequiresAuthentication": false,
+      "originalMD5": "f320a9caef3193001857cae042c32024",
+      "originalSha256": "842d0097f99c574f352e2c1e67818e9f4ae4f558597b8ee5057fbda12a46afcb",
+      "componentSha256": "255ebb0e5beca9b29a102a737721f62760b87f4680f14a28e1137ea4361e7ae6",
+      "compressedSha256": "ec5c432adff9fefc05eaafd206f1a286ae451c30f95543515c73b858df63dfbe",
+      "sources": 9,
+      "clearedCredentialDefaults": 1,
+      "phonePlayback": "NOT_RUN"
+    },
+    {
+      "provider": "xiaosa",
+      "label": "潇洒",
+      "url": "https://hw.361123.xyz/m/index.js.md5",
+      "downloadRequiresAuthentication": false,
+      "originalMD5": "63abde01abb831471bb967bf9996c3a0",
+      "originalSha256": "c50b6bb091a21019b73534962a71a2cffd2d264012228f655cc64486c0d26f11",
+      "componentSha256": "5e1bc069ab4b042e40ca38dd831d6ad19a01bbf016a9db71b6fd70225fe18f5f",
+      "compressedSha256": "35695934cab19f3b9ead9529c985c964f4a1236d17f6ff2f0ebb473a0d312da4",
+      "sources": 70,
+      "clearedCredentialDefaults": 7,
+      "phonePlayback": "NOT_RUN"
+    }
+  ]
+}

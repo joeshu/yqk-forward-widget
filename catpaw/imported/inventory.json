@@ -1,0 +1,2198 @@
+{
+  "version": "0.8.0",
+  "policy": "排除网盘及配置/管理项；保留已有停用状态；新实现待手机验收",
+  "summary": {
+    "previousRegistered": 81,
+    "added": 102,
+    "registered": 183,
+    "enabled": 155,
+    "previousDisabled": 28
+  },
+  "phonePlayback": "NOT_RUN",
+  "sources": [
+    {
+      "provider": "niuer",
+      "upstreamKey": "push",
+      "name": "推送",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "douban",
+      "name": "豆瓣|首页",
+      "status": "EXISTING",
+      "target": "douban",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "baseset",
+      "name": "配置|中心",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "wogg",
+      "name": "玩偶|4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "huajuan",
+      "name": "花卷|4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "guanying",
+      "name": "观影|4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "qwmkv",
+      "name": "七味|4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "zhinan4k",
+      "name": "原盘|4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "jutou",
+      "name": "剧透|4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "pan123ziyuan",
+      "name": "盘迷|4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "yidong4k",
+      "name": "移动|4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "libvio",
+      "name": "立播|4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "pianku",
+      "name": "片库|4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "woniu4k",
+      "name": "蜗牛|4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "mypan",
+      "name": "我的|网盘",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "fake115share",
+      "name": "115|分享",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "hanxiaoquan",
+      "name": "韩剧|秒播",
+      "status": "EXISTING",
+      "target": "hanxiaoquan",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "guazi",
+      "name": "瓜子|秒播",
+      "status": "EXISTING",
+      "target": "guazi",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "wexDuBoKu",
+      "name": "独播|秒播",
+      "status": "EXISTING",
+      "target": "joeshu_duboku",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "wexYueYue",
+      "name": "悦悦|秒播",
+      "status": "EXISTING",
+      "target": "wexYueYue",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "wencai",
+      "name": "文采|秒播",
+      "status": "EXISTING",
+      "target": "wencai",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "yiyingshi",
+      "name": "伊影|秒播",
+      "status": "EXISTING",
+      "target": "joeshu_yiyingshi",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "rebo",
+      "name": "热播|秒播",
+      "status": "EXISTING",
+      "target": "rebo",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "bobo",
+      "name": "波波|秒播",
+      "status": "EXISTING",
+      "target": "bobo",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "ikanbot",
+      "name": "爱看|采集",
+      "status": "EXISTING",
+      "target": "joeshu_ikanbot",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "wexfengye4k",
+      "name": "枫叶|秒播",
+      "status": "EXISTING",
+      "target": "wexfengye4k",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "huya",
+      "name": "虎牙|直播",
+      "status": "EXISTING",
+      "target": "huya",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "bililive",
+      "name": "哔哩|直播",
+      "status": "EXISTING",
+      "target": "bililive",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "douyu",
+      "name": "斗鱼|直播",
+      "status": "EXISTING",
+      "target": "douyu",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "livetovod",
+      "name": "点播|直播",
+      "status": "ADDED",
+      "target": "import_niuer_livetovod",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "hema",
+      "name": "短漫|小马",
+      "status": "EXISTING",
+      "target": "hema",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "duanjuxingya",
+      "name": "短剧|星芽",
+      "status": "EXISTING",
+      "target": "joeshu_xingya",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "baiduduanju",
+      "name": "短剧|好看",
+      "status": "EXISTING",
+      "target": "joeshu_baidu_duanju",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "duanjuqimiao",
+      "name": "短剧|小猫",
+      "status": "EXISTING",
+      "target": "joeshu_qimiao",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "duanjuweiguan",
+      "name": "短剧|小薇",
+      "status": "EXISTING",
+      "target": "joeshu_weiguan",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "animehuazi",
+      "name": "花子|动漫",
+      "status": "EXISTING",
+      "target": "animehuazi",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "animemodu",
+      "name": "魔都|动漫",
+      "status": "EXISTING",
+      "target": "animemodu",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "animeciyuancheng",
+      "name": "次元|动漫",
+      "status": "EXISTING",
+      "target": "joeshu_ciyuancheng",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "bookaishijie",
+      "name": "世界|听书",
+      "status": "EXISTING",
+      "target": "bookaishijie",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "bookaiyueting",
+      "name": "悦听|听书",
+      "status": "EXISTING",
+      "target": "bookaiyueting",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "musicaiqingting",
+      "name": "蜻蜓|电台",
+      "status": "EXISTING",
+      "target": "musicaiqingting",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "musicailunhui",
+      "name": "轮回|舞曲",
+      "status": "EXISTING",
+      "target": "musicailunhui",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "sportaiguazi",
+      "name": "瓜子|体育",
+      "status": "EXISTING",
+      "target": "sportaiguazi",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "sportaikafei",
+      "name": "咖啡|体育",
+      "status": "EXISTING",
+      "target": "sportaikafei",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "sportaifeiqiu",
+      "name": "飞球|体育",
+      "status": "EXISTING",
+      "target": "sportaifeiqiu",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "sportaikanqiutong",
+      "name": "球通|体育",
+      "status": "EXISTING",
+      "target": "sportaikanqiutong",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "sportaikanqiu",
+      "name": "看球|体育",
+      "status": "EXISTING",
+      "target": "sportaikanqiu",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "sportaiwwe",
+      "name": "WWE|体育",
+      "status": "EXISTING",
+      "target": "sportaiwwe",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "biliys",
+      "name": "哔哩|影视",
+      "status": "EXISTING",
+      "target": "biliys",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "soaiqupanshe",
+      "name": "搜索|百度",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "soaihaiyin",
+      "name": "搜索|盘搜",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "soaipansoo",
+      "name": "搜索|九七",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "sokaka",
+      "name": "搜索|珈珈",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "wexaitiantang",
+      "name": "天堂|采集",
+      "status": "EXISTING",
+      "target": "wexaitiantang",
+      "reason": "已有独立适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "gengxin",
+      "name": "日期:20261010",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "duoduo",
+      "name": "「盘」多多",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "baseset",
+      "name": "「设」配置",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "muou",
+      "name": "「盘」木偶",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "huajuan",
+      "name": "「盘」花卷",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "labi",
+      "name": "「盘」蜡笔",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "shandian",
+      "name": "「盘」闪电",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "ouge",
+      "name": "「盘」欧歌",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "myquark",
+      "name": "「盘」夸克",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "mycloud",
+      "name": "「盘」我的",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "myali",
+      "name": "「盘」阿里",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "mytianyi",
+      "name": "「盘」天翼",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "mybaidu",
+      "name": "「盘」百度",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "my115",
+      "name": "「盘」115",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "my123",
+      "name": "「盘」123",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "123ypzysq",
+      "name": "「盘」123社区",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "guanying",
+      "name": "「盘」观影",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "cloudseekr",
+      "name": "「盘」CLOUDSEEK",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "myguangyapan",
+      "name": "「盘」光鸭",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "huban",
+      "name": "「盘」虎斑",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "xiaoban",
+      "name": "「盘」小斑",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "woniu",
+      "name": "「盘」蜗牛",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "wanou",
+      "name": "「盘」玩偶",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "tgchannel",
+      "name": "「盘」TG搜",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "tgsou",
+      "name": "「盘」TG搜²",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "tgfilebot",
+      "name": "「直」TGFileBot",
+      "status": "ADDED",
+      "target": "import_douer_tgfilebot",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "douban",
+      "name": "「荐」豆瓣",
+      "status": "ADDED",
+      "target": "import_douer_douban",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "doubi",
+      "name": "「直」豆哔",
+      "status": "ADDED",
+      "target": "import_douer_doubi",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "push",
+      "name": "推送",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "pansou",
+      "name": "「盘」PanSou",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "pinglian",
+      "name": "「盘」盘链",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "shuangxing",
+      "name": "「盘」双星",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "rrdyw",
+      "name": "「盘」人人",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "pomo",
+      "name": "「盘」Pomo",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "xingya",
+      "name": "「直」星芽",
+      "status": "ADDED",
+      "target": "import_douer_xingya",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "live2vod",
+      "name": "「直」直播",
+      "status": "ADDED",
+      "target": "import_douer_live2vod",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "jianpian",
+      "name": "「直」荐片",
+      "status": "ADDED",
+      "target": "import_douer_jianpian",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "guazi",
+      "name": "「直」瓜子",
+      "status": "ADDED",
+      "target": "import_douer_guazi",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "dbku",
+      "name": "「直」独播库",
+      "status": "ADDED",
+      "target": "import_douer_dbku",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "hanxiaoquan",
+      "name": "「直」韩小圈",
+      "status": "ADDED",
+      "target": "import_douer_hanxiaoquan",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "girigiri",
+      "name": "「直」爱动漫",
+      "status": "ADDED",
+      "target": "import_douer_girigiri",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "4kzn",
+      "name": "「盘」指南",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "kafei",
+      "name": "「直」咖啡",
+      "status": "ADDED",
+      "target": "import_douer_kafei",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "emby",
+      "name": "Emby",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "alist-video",
+      "name": "Alist",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "douer",
+      "upstreamKey": "fenxiang",
+      "name": "「盘」分享",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "douban",
+      "name": "豆瓣|首页",
+      "status": "ADDED",
+      "target": "import_yswag_douban",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "qrcode",
+      "name": "配置页面",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "liveSource",
+      "name": "📺 直播源",
+      "status": "ADDED",
+      "target": "import_yswag_livesource",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "hanjutv",
+      "name": "韩剧TV",
+      "status": "ADDED",
+      "target": "import_yswag_hanjutv",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "hongguo",
+      "name": "红果短剧",
+      "status": "ADDED",
+      "target": "import_yswag_hongguo",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "shutiao",
+      "name": "薯条",
+      "status": "ADDED",
+      "target": "import_yswag_shutiao",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "gugu",
+      "name": "咕咕剧场",
+      "status": "ADDED",
+      "target": "import_yswag_gugu",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "dmghg",
+      "name": "动漫共和国",
+      "status": "ADDED",
+      "target": "import_yswag_dmghg",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "youtube",
+      "name": "YouTube",
+      "status": "ADDED",
+      "target": "import_yswag_youtube",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "cilixiong",
+      "name": "🧲磁力熊",
+      "status": "ADDED",
+      "target": "import_yswag_cilixiong",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "webdav",
+      "name": "WebDAV",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "xstree_schedule",
+      "name": "🏠 追更",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "panlian",
+      "name": "☁️ 盘链",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "jying",
+      "name": "☁️ 聚影",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "libvio",
+      "name": "☁️ 立播",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "pan1",
+      "name": "☁️ 123社区",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "guangyaqsxy",
+      "name": "☁️ 光鸭臻影社",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "123qsxy",
+      "name": "☁️ 123臻藏阁",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "sharemount",
+      "name": "📦 网盘",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "hongguo",
+      "name": "🎬 红果",
+      "status": "ADDED",
+      "target": "import_lmentor_hongguo",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "alist_tvbox",
+      "name": "🎬 AT",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "douban",
+      "name": "🏠 豆瓣",
+      "status": "ADDED",
+      "target": "import_lmentor_douban",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "zhuijurili",
+      "name": "🏠 日历",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "zhuiju",
+      "name": "🏠 追剧",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "pansou",
+      "name": "🔍 盘搜",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "tgsou",
+      "name": "🔍 TG搜",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "bili_all",
+      "name": "🎬 哔哩",
+      "status": "ADDED",
+      "target": "import_lmentor_bili_all",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "bili_official",
+      "name": "🎬 bili官",
+      "status": "ADDED",
+      "target": "import_lmentor_bili_official",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "wouniu",
+      "name": "☁️ 蜗牛",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "filejin",
+      "name": "☁️ 观影",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "qwnull",
+      "name": "☁️ 七味",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "tgchannel",
+      "name": "☁️ 频道",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "4kzn",
+      "name": "☁️ 4K指南",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "seedhub",
+      "name": "☁️ SeedHub",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "sm3",
+      "name": "☁️ 久久短剧",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "mycloud",
+      "name": "⭐️ 我的",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "88kanqiu",
+      "name": "🏀 看球",
+      "status": "ADDED",
+      "target": "import_lmentor_88kanqiu",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "live",
+      "name": "📺 直播",
+      "status": "ADDED",
+      "target": "import_lmentor_live",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "jinpai",
+      "name": "🎬 金牌",
+      "status": "ADDED",
+      "target": "import_lmentor_jinpai",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "jp",
+      "name": "🎬 荐片",
+      "status": "ADDED",
+      "target": "import_lmentor_jp",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "guazi",
+      "name": "🎬 瓜子",
+      "status": "ADDED",
+      "target": "import_lmentor_guazi",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "dudb",
+      "name": "📁 本地DB",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "js",
+      "name": "📦 本地JS",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "baseset",
+      "name": "⚙️ 配置",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "push",
+      "name": "⚙️ 推送",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "lmentor",
+      "upstreamKey": "20260923",
+      "name": "20260923",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "push",
+      "name": "推送",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "douban",
+      "name": "豆瓣|首页",
+      "status": "ADDED",
+      "target": "import_xiaosa_douban",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "baseset",
+      "name": "⚙配置·中枢",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "wogg",
+      "name": "🧸玩偶·4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "huajuan",
+      "name": "🌸花卷·4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "guanying",
+      "name": "🎬观影·4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "qwmkv",
+      "name": "🌶七味·4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "zhinan4k",
+      "name": "🧩原盘·4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "jutou",
+      "name": "🤫剧透·4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "pan123ziyuan",
+      "name": "🧲盘迷·4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "yidong4k",
+      "name": "🚀逸动·4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "libvio",
+      "name": "📡立播·4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "pianku",
+      "name": "🗄盘库·4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "woniu4k",
+      "name": "🐌蜗牛·4K",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "mypan",
+      "name": "☁网盘·我的",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "fake115share",
+      "name": "🗂115·云享",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "hanxiaoquan",
+      "name": "韩剧|秒播",
+      "status": "ADDED",
+      "target": "import_xiaosa_hanxiaoquan",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "guazi",
+      "name": "瓜子|秒播",
+      "status": "ADDED",
+      "target": "import_xiaosa_guazi",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "wexDuBoKu",
+      "name": "独播|秒播",
+      "status": "ADDED",
+      "target": "import_xiaosa_wexduboku",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "wexYueYue",
+      "name": "悦悦|秒播",
+      "status": "ADDED",
+      "target": "import_xiaosa_wexyueyue",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "wencai",
+      "name": "文采|秒播",
+      "status": "ADDED",
+      "target": "import_xiaosa_wencai",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "yiyingshi",
+      "name": "伊影|秒播",
+      "status": "ADDED",
+      "target": "import_xiaosa_yiyingshi",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "rebo",
+      "name": "热播|秒播",
+      "status": "ADDED",
+      "target": "import_xiaosa_rebo",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "bobo",
+      "name": "波波|秒播",
+      "status": "ADDED",
+      "target": "import_xiaosa_bobo",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "ikanbot",
+      "name": "爱看|采集",
+      "status": "ADDED",
+      "target": "import_xiaosa_ikanbot",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "wexfengye4k",
+      "name": "枫叶|秒播",
+      "status": "ADDED",
+      "target": "import_xiaosa_wexfengye4k",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "huya",
+      "name": "虎牙|直播",
+      "status": "ADDED",
+      "target": "import_xiaosa_huya",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "bililive",
+      "name": "哔哩|直播",
+      "status": "ADDED",
+      "target": "import_xiaosa_bililive",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "douyu",
+      "name": "斗鱼|直播",
+      "status": "ADDED",
+      "target": "import_xiaosa_douyu",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "livetovod",
+      "name": "点播|直播",
+      "status": "ADDED",
+      "target": "import_xiaosa_livetovod",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "hema",
+      "name": "短漫|小马",
+      "status": "ADDED",
+      "target": "import_xiaosa_hema",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "duanjuxingya",
+      "name": "短剧|星芽",
+      "status": "ADDED",
+      "target": "import_xiaosa_duanjuxingya",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "baiduduanju",
+      "name": "短剧|好看",
+      "status": "ADDED",
+      "target": "import_xiaosa_baiduduanju",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "duanjuqimiao",
+      "name": "短剧|小猫",
+      "status": "ADDED",
+      "target": "import_xiaosa_duanjuqimiao",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "duanjuweiguan",
+      "name": "短剧|小薇",
+      "status": "ADDED",
+      "target": "import_xiaosa_duanjuweiguan",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "animehuazi",
+      "name": "花子|动漫",
+      "status": "ADDED",
+      "target": "import_xiaosa_animehuazi",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "animemodu",
+      "name": "魔都|动漫",
+      "status": "ADDED",
+      "target": "import_xiaosa_animemodu",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "animeciyuancheng",
+      "name": "次元|动漫",
+      "status": "ADDED",
+      "target": "import_xiaosa_animeciyuancheng",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "bookaishijie",
+      "name": "世界|听书",
+      "status": "ADDED",
+      "target": "import_xiaosa_bookaishijie",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "bookaiyueting",
+      "name": "悦听|听书",
+      "status": "ADDED",
+      "target": "import_xiaosa_bookaiyueting",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "musicaiqingting",
+      "name": "蜻蜓|电台",
+      "status": "ADDED",
+      "target": "import_xiaosa_musicaiqingting",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "musicailunhui",
+      "name": "轮回|舞曲",
+      "status": "ADDED",
+      "target": "import_xiaosa_musicailunhui",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "sportaiguazi",
+      "name": "瓜子|体育",
+      "status": "ADDED",
+      "target": "import_xiaosa_sportaiguazi",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "sportaikafei",
+      "name": "咖啡|体育",
+      "status": "ADDED",
+      "target": "import_xiaosa_sportaikafei",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "sportaifeiqiu",
+      "name": "飞球|体育",
+      "status": "ADDED",
+      "target": "import_xiaosa_sportaifeiqiu",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "sportaikanqiutong",
+      "name": "球通|体育",
+      "status": "ADDED",
+      "target": "import_xiaosa_sportaikanqiutong",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "sportaikanqiu",
+      "name": "看球|体育",
+      "status": "ADDED",
+      "target": "import_xiaosa_sportaikanqiu",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "sportaiwwe",
+      "name": "WWE|体育",
+      "status": "ADDED",
+      "target": "import_xiaosa_sportaiwwe",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "biliys",
+      "name": "哔哩|影视",
+      "status": "ADDED",
+      "target": "import_xiaosa_biliys",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "soaiqupanshe",
+      "name": "搜索|百度",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "soaihaiyin",
+      "name": "搜索|盘搜",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "soaipansoo",
+      "name": "搜索|九七",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "sokaka",
+      "name": "搜索|珈珈",
+      "status": "EXCLUDED_CLOUD_OR_ACCOUNT",
+      "target": null,
+      "reason": "网盘/盘搜/磁力转网盘，或需自备 Emby、Alist、WebDAV 服务配置"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "wexaitiantang",
+      "name": "天堂|采集",
+      "status": "ADDED",
+      "target": "import_xiaosa_wexaitiantang",
+      "reason": "保留原源实现与来源标识"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "gengxin",
+      "name": "日期:20261010",
+      "status": "EXCLUDED_UTILITY",
+      "target": null,
+      "reason": "配置、推送、日期、追更或本地插件管理；不是独立内容源"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "jinpai",
+      "name": "Y佬 · 金牌影视",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_yswag_jinpai",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "yswag",
+      "upstreamKey": "juzhi",
+      "name": "Y佬 · 橘汁",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_yswag_juzhi",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "manjuhongguo",
+      "name": "潇洒 · 漫剧|小红",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_manjuhongguo",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "manjuhuolong",
+      "name": "潇洒 · 漫剧|小龙",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_manjuhuolong",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "manjuqimao",
+      "name": "潇洒 · 漫剧|小猫",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_manjuqimao",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "manjuxifan",
+      "name": "潇洒 · 漫剧|小喜",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_manjuxifan",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "animexifan",
+      "name": "潇洒 · 稀饭|动漫",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_animexifan",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "bookhema",
+      "name": "潇洒 · 小马|听书",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_bookhema",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "bookhongguo",
+      "name": "潇洒 · 小红|听书",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_bookhongguo",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "childrenaitutu",
+      "name": "潇洒 · 兔兔|少儿",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_childrenaitutu",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "childrenaibaobao",
+      "name": "潇洒 · 宝宝|少儿",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_childrenaibaobao",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "childrenaibeiwa",
+      "name": "潇洒 · 贝瓦|少儿",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_childrenaibeiwa",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "musicaikuwo",
+      "name": "潇洒 · 酷听|音乐",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_musicaikuwo",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "musicaikuwoa",
+      "name": "潇洒 · 小酷|音乐",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_musicaikuwoa",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "musicaikg",
+      "name": "潇洒 · 小狗|音乐",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_musicaikg",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "musicaiqq",
+      "name": "潇洒 · 小秋|音乐",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_musicaiqq",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "musicaiwy",
+      "name": "潇洒 · 小易|音乐",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_musicaiwy",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "musicai163",
+      "name": "潇洒 · 易听|音乐",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_musicai163",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "musicailiyuan",
+      "name": "潇洒 · 梨园|戏曲",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_musicailiyuan",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "musicaitangdou",
+      "name": "潇洒 · 糖豆|舞蹈",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_musicaitangdou",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "appv7dashixiong",
+      "name": "潇洒 · 师兄|秒播",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_appv7dashixiong",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "appv7fenzhu",
+      "name": "潇洒 · 粉猪|秒播",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_appv7fenzhu",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "appv7xianyu",
+      "name": "潇洒 · 咸鱼|秒播",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_appv7xianyu",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "appv7zhuijudaren",
+      "name": "潇洒 · 追剧|秒播",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_appv7zhuijudaren",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "appv7xiaoyouzi",
+      "name": "潇洒 · 柚子|秒播",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_appv7xiaoyouzi",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "appv7xiaoningmeng",
+      "name": "潇洒 · 柠檬|秒播",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_appv7xiaoningmeng",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "appv7mengtaiqi",
+      "name": "潇洒 · 太奇|秒播",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_appv7mengtaiqi",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "appv7linglingqi",
+      "name": "潇洒 · 零七|秒播",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_appv7linglingqi",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "appv7xiaoshizi",
+      "name": "潇洒 · 柿子|秒播",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_appv7xiaoshizi",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "appv7xiaohuangren",
+      "name": "潇洒 · 黄人|秒播",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_appv7xiaohuangren",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "bilibili",
+      "name": "潇洒 · 哔哩|合集",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_bilibili",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "bilixiqu",
+      "name": "潇洒 · 哔哩|戏曲",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_bilixiqu",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "biliych",
+      "name": "潇洒 · 哔哩|歌曲",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_biliych",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "少儿教育",
+      "name": "潇洒 · 少儿|教育",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_s8ccde1352d",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "小学课堂",
+      "name": "潇洒 · 小学|课堂",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_sfc444049dd",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "初中课堂",
+      "name": "潇洒 · 初中|课堂",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_s0ab5dc6a9d",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "xiaosa",
+      "upstreamKey": "高中教育",
+      "name": "潇洒 · 高中|课堂",
+      "status": "ADDED_DYNAMIC_OR_DECODED",
+      "target": "import_xiaosa_se6e5b37486",
+      "reason": "动态或混淆注册源；原始处理器已接入"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "manjuhongguo",
+      "name": "漫剧|小红",
+      "status": "EXISTING_DYNAMIC",
+      "target": "manjuhongguo",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "manjuhuolong",
+      "name": "漫剧|小龙",
+      "status": "EXISTING_DYNAMIC",
+      "target": "manjuhuolong",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "manjuqimao",
+      "name": "漫剧|小猫",
+      "status": "EXISTING_DYNAMIC",
+      "target": "manjuqimao",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "manjuxifan",
+      "name": "漫剧|小喜",
+      "status": "EXISTING_DYNAMIC",
+      "target": "manjuxifan",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "animexifan",
+      "name": "稀饭|动漫",
+      "status": "EXISTING_DYNAMIC",
+      "target": "animexifan",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "bookhema",
+      "name": "小马|听书",
+      "status": "EXISTING_DYNAMIC",
+      "target": "bookhema",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "bookhongguo",
+      "name": "小红|听书",
+      "status": "EXISTING_DYNAMIC",
+      "target": "bookhongguo",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "childrenaitutu",
+      "name": "兔兔|少儿",
+      "status": "EXISTING_DYNAMIC",
+      "target": "childrenaitutu",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "childrenaibaobao",
+      "name": "宝宝|少儿",
+      "status": "EXISTING_DYNAMIC",
+      "target": "childrenaibaobao",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "childrenaibeiwa",
+      "name": "贝瓦|少儿",
+      "status": "EXISTING_DYNAMIC",
+      "target": "childrenaibeiwa",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "musicaikuwo",
+      "name": "酷听|音乐",
+      "status": "EXISTING_DYNAMIC",
+      "target": "musicaikuwo",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "musicaikuwoa",
+      "name": "小酷|音乐",
+      "status": "EXISTING_DYNAMIC",
+      "target": "musicaikuwoa",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "musicaikg",
+      "name": "小狗|音乐",
+      "status": "EXISTING_DYNAMIC",
+      "target": "musicaikg",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "musicaiqq",
+      "name": "小秋|音乐",
+      "status": "EXISTING_DYNAMIC",
+      "target": "musicaiqq",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "musicaiwy",
+      "name": "小易|音乐",
+      "status": "EXISTING_DYNAMIC",
+      "target": "musicaiwy",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "musicai163",
+      "name": "易听|音乐",
+      "status": "EXISTING_DYNAMIC",
+      "target": "musicai163",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "musicailiyuan",
+      "name": "梨园|戏曲",
+      "status": "EXISTING_DYNAMIC",
+      "target": "musicailiyuan",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "musicaitangdou",
+      "name": "糖豆|舞蹈",
+      "status": "EXISTING_DYNAMIC",
+      "target": "musicaitangdou",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "appv7dashixiong",
+      "name": "师兄|秒播",
+      "status": "EXISTING_DYNAMIC",
+      "target": "appv7dashixiong",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "appv7fenzhu",
+      "name": "粉猪|秒播",
+      "status": "EXISTING_DYNAMIC",
+      "target": "appv7fenzhu",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "appv7xianyu",
+      "name": "咸鱼|秒播",
+      "status": "EXISTING_DYNAMIC",
+      "target": "appv7xianyu",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "appv7zhuijudaren",
+      "name": "追剧|秒播",
+      "status": "EXISTING_DYNAMIC",
+      "target": "appv7zhuijudaren",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "appv7xiaoyouzi",
+      "name": "柚子|秒播",
+      "status": "EXISTING_DYNAMIC",
+      "target": "appv7xiaoyouzi",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "appv7xiaoningmeng",
+      "name": "柠檬|秒播",
+      "status": "EXISTING_DYNAMIC",
+      "target": "appv7xiaoningmeng",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "appv7mengtaiqi",
+      "name": "太奇|秒播",
+      "status": "EXISTING_DYNAMIC",
+      "target": "appv7mengtaiqi",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "appv7linglingqi",
+      "name": "零七|秒播",
+      "status": "EXISTING_DYNAMIC",
+      "target": "appv7linglingqi",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "appv7xiaoshizi",
+      "name": "柿子|秒播",
+      "status": "EXISTING_DYNAMIC",
+      "target": "appv7xiaoshizi",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "appv7xiaohuangren",
+      "name": "黄人|秒播",
+      "status": "EXISTING_DYNAMIC",
+      "target": "appv7xiaohuangren",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "bilibili",
+      "name": "哔哩|合集",
+      "status": "EXISTING_DYNAMIC",
+      "target": "bilibili",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "bilixiqu",
+      "name": "哔哩|戏曲",
+      "status": "EXISTING_DYNAMIC",
+      "target": "bilixiqu",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "biliych",
+      "name": "哔哩|歌曲",
+      "status": "EXISTING_DYNAMIC",
+      "target": "biliych",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "少儿教育",
+      "name": "少儿|教育",
+      "status": "EXISTING_DYNAMIC",
+      "target": "少儿教育",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "小学课堂",
+      "name": "小学|课堂",
+      "status": "EXISTING_DYNAMIC",
+      "target": "小学课堂",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "初中课堂",
+      "name": "初中|课堂",
+      "status": "EXISTING_DYNAMIC",
+      "target": "初中课堂",
+      "reason": "已有动态源适配；不重复登记"
+    },
+    {
+      "provider": "niuer",
+      "upstreamKey": "高中教育",
+      "name": "高中|课堂",
+      "status": "EXISTING_DYNAMIC",
+      "target": "高中教育",
+      "reason": "已有动态源适配；不重复登记"
+    }
+  ]
+}

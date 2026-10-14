@@ -231,3 +231,7 @@ CatPaw 0.7.0新增 source-layout.json 发布文件；info.json包含build身份�
 ### 六源 Forward 移植
 
 在原12模块外新增独播库、奇妙、次元城、爱看、魔都、天堂的独立0.1.0固定脚本。运行 `npm run build:forward-native`，提交生成脚本、快照和 `yqk.fwd`。Pages 的 `deploy.cjs` 同时发布18个入口及历史版本。CatPaw 本轮仍保留原来的81个实现/53个启用入口，六个 Forward 新模块不重复注册到 CatPaw。
+
+### CatPaw 0.8.0 五包内容源
+
+构建器包含`catpaw/imported/`压缩组件、元数据及散列，发布新增`catpaw/import-report.json`。五份原包不会整包执行或启动第二个服务；新增102个处理器并保持全部辅助代理。构建后检查`info.json`的183/155/28统计。默认JS配置可通过`importedSources`传入供应方自己的参数。历史抽查不视为当前全源在线证明。
