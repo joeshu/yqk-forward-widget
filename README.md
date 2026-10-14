@@ -439,3 +439,7 @@ miraPlay 诊断以筛选行直接显示最近错误，不再生成可被影片�
 https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5
 
 新增源保留原首页/分类/搜索/详情/播放及辅助代理，供应方资料隔离，加载不启动原后台或额外端口。账号默认值和共享Cookie不带入；登录、桥接、自备播放列表等原条件仍需满足。全部新增实现已通过离线注册检查，不代表全源当前可播；由手机验收。详见 [接入说明](catpaw/imported/README.md)、[逐源对照](catpaw/imported/inventory.json)、[来源与校验](catpaw/imported/provenance.json)。公开对照：`catpaw/import-report.json`。
+
+### CatPaw 0.8.1
+
+按用户要求移除70个名称以「潇洒」开头的源。现登记113个，启用85个，原28个停用项保留；订阅地址不变。

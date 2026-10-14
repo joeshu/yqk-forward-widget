@@ -1,12 +1,13 @@
 {
-  "version": "0.8.0",
-  "policy": "排除网盘及配置/管理项；保留已有停用状态；新实现待手机验收",
+  "version": "0.8.1",
+  "policy": "排除网盘及配置/管理项；保留已有停用状态；新实现待手机验收；按用户要求移除所有潇洒源",
   "summary": {
     "previousRegistered": 81,
-    "added": 102,
-    "registered": 183,
-    "enabled": 155,
-    "previousDisabled": 28
+    "added": 32,
+    "registered": 113,
+    "enabled": 85,
+    "previousDisabled": 28,
+    "removedByRequest": 70
   },
   "phonePlayback": "NOT_RUN",
   "sources": [
@@ -1190,9 +1191,9 @@
       "provider": "xiaosa",
       "upstreamKey": "douban",
       "name": "豆瓣|首页",
-      "status": "ADDED",
-      "target": "import_xiaosa_douban",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
@@ -1310,265 +1311,265 @@
       "provider": "xiaosa",
       "upstreamKey": "hanxiaoquan",
       "name": "韩剧|秒播",
-      "status": "ADDED",
-      "target": "import_xiaosa_hanxiaoquan",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "guazi",
       "name": "瓜子|秒播",
-      "status": "ADDED",
-      "target": "import_xiaosa_guazi",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "wexDuBoKu",
       "name": "独播|秒播",
-      "status": "ADDED",
-      "target": "import_xiaosa_wexduboku",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "wexYueYue",
       "name": "悦悦|秒播",
-      "status": "ADDED",
-      "target": "import_xiaosa_wexyueyue",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "wencai",
       "name": "文采|秒播",
-      "status": "ADDED",
-      "target": "import_xiaosa_wencai",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "yiyingshi",
       "name": "伊影|秒播",
-      "status": "ADDED",
-      "target": "import_xiaosa_yiyingshi",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "rebo",
       "name": "热播|秒播",
-      "status": "ADDED",
-      "target": "import_xiaosa_rebo",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "bobo",
       "name": "波波|秒播",
-      "status": "ADDED",
-      "target": "import_xiaosa_bobo",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "ikanbot",
       "name": "爱看|采集",
-      "status": "ADDED",
-      "target": "import_xiaosa_ikanbot",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "wexfengye4k",
       "name": "枫叶|秒播",
-      "status": "ADDED",
-      "target": "import_xiaosa_wexfengye4k",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "huya",
       "name": "虎牙|直播",
-      "status": "ADDED",
-      "target": "import_xiaosa_huya",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "bililive",
       "name": "哔哩|直播",
-      "status": "ADDED",
-      "target": "import_xiaosa_bililive",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "douyu",
       "name": "斗鱼|直播",
-      "status": "ADDED",
-      "target": "import_xiaosa_douyu",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "livetovod",
       "name": "点播|直播",
-      "status": "ADDED",
-      "target": "import_xiaosa_livetovod",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "hema",
       "name": "短漫|小马",
-      "status": "ADDED",
-      "target": "import_xiaosa_hema",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "duanjuxingya",
       "name": "短剧|星芽",
-      "status": "ADDED",
-      "target": "import_xiaosa_duanjuxingya",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "baiduduanju",
       "name": "短剧|好看",
-      "status": "ADDED",
-      "target": "import_xiaosa_baiduduanju",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "duanjuqimiao",
       "name": "短剧|小猫",
-      "status": "ADDED",
-      "target": "import_xiaosa_duanjuqimiao",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "duanjuweiguan",
       "name": "短剧|小薇",
-      "status": "ADDED",
-      "target": "import_xiaosa_duanjuweiguan",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "animehuazi",
       "name": "花子|动漫",
-      "status": "ADDED",
-      "target": "import_xiaosa_animehuazi",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "animemodu",
       "name": "魔都|动漫",
-      "status": "ADDED",
-      "target": "import_xiaosa_animemodu",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "animeciyuancheng",
       "name": "次元|动漫",
-      "status": "ADDED",
-      "target": "import_xiaosa_animeciyuancheng",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "bookaishijie",
       "name": "世界|听书",
-      "status": "ADDED",
-      "target": "import_xiaosa_bookaishijie",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "bookaiyueting",
       "name": "悦听|听书",
-      "status": "ADDED",
-      "target": "import_xiaosa_bookaiyueting",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "musicaiqingting",
       "name": "蜻蜓|电台",
-      "status": "ADDED",
-      "target": "import_xiaosa_musicaiqingting",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "musicailunhui",
       "name": "轮回|舞曲",
-      "status": "ADDED",
-      "target": "import_xiaosa_musicailunhui",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "sportaiguazi",
       "name": "瓜子|体育",
-      "status": "ADDED",
-      "target": "import_xiaosa_sportaiguazi",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "sportaikafei",
       "name": "咖啡|体育",
-      "status": "ADDED",
-      "target": "import_xiaosa_sportaikafei",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "sportaifeiqiu",
       "name": "飞球|体育",
-      "status": "ADDED",
-      "target": "import_xiaosa_sportaifeiqiu",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "sportaikanqiutong",
       "name": "球通|体育",
-      "status": "ADDED",
-      "target": "import_xiaosa_sportaikanqiutong",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "sportaikanqiu",
       "name": "看球|体育",
-      "status": "ADDED",
-      "target": "import_xiaosa_sportaikanqiu",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "sportaiwwe",
       "name": "WWE|体育",
-      "status": "ADDED",
-      "target": "import_xiaosa_sportaiwwe",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
       "upstreamKey": "biliys",
       "name": "哔哩|影视",
-      "status": "ADDED",
-      "target": "import_xiaosa_biliys",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",
@@ -1606,9 +1607,9 @@
       "provider": "xiaosa",
       "upstreamKey": "wexaitiantang",
       "name": "天堂|采集",
-      "status": "ADDED",
-      "target": "import_xiaosa_wexaitiantang",
-      "reason": "保留原源实现与来源标识"
+      "status": "REMOVED_BY_REQUEST",
+      "target": null,
+      "reason": "用户要求移除所有潇洒开头的源"
     },
     {
       "provider": "xiaosa",

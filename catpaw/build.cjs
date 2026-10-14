@@ -1,6 +1,6 @@
 const {execFileSync}=require('node:child_process'),{reportStatus}=require('./report-utils.cjs');
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),vm=require('node:vm'),esbuild=require('esbuild');
-const root=path.resolve(__dirname,'..'),manifest=JSON.parse(fs.readFileSync(path.join(root,'yqk.fwd'))),version='0.8.0';
+const root=path.resolve(__dirname,'..'),manifest=JSON.parse(fs.readFileSync(path.join(root,'yqk.fwd'))),version='0.8.1';
 (async()=>{const {nativeSources}=await import('./native/index.js'),{referenceSources}=await import('./reference/adapter.js');const importedMetadata=JSON.parse(fs.readFileSync(path.join(__dirname,'imported/metadata.json'))),packFiles=fs.readdirSync(path.join(__dirname,'imported/packs')).filter(n=>n.endsWith('.gz.b64')),importedPacks=Object.fromEntries(packFiles.map(n=>[n.split('.')[0],fs.readFileSync(path.join(__dirname,'imported/packs',n),'utf8').trim()]));
  // These Forward ports already have independent native/reference CatPaw adapters.
  // Validate the target before skipping a snapshot so a typo cannot hide a source.
