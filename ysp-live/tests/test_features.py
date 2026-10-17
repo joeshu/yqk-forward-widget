@@ -17,7 +17,7 @@ from unittest import mock
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_feature_application', ROOT / 'ysp-live-v9.5.7.py')
+spec = importlib.util.spec_from_file_location('ysp_feature_application', ROOT / 'ysp-live-v9.5.8.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)
@@ -210,15 +210,15 @@ class EPGTests(unittest.TestCase):
         cache.request_refresh()
         self.assertEqual(cache.retry_at, retry)
 
-    def test_disk_failure_keeps_valid_memory_cache_without_fetching_next_provider(self):
+    def test_disk_failure_keeps_valid_memory_cache_after_multi_source_refresh(self):
         fetch = mock.Mock(return_value=xmltv()[0])
         cache = self.cache(urls=['first', 'second'], path='/unused/epg.json', fetcher=fetch)
         with mock.patch.object(live, 'atomic_json_write', side_effect=OSError('disk full')):
             cache.request_refresh()
             self.wait(cache)
-        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(fetch.call_count, 2)
         self.assertEqual(len(cache.read('cctv1')), 1)
-        self.assertIn('persistence', cache.stats()['error'])
+        self.assertIn('persistence', cache.stats()['warning'])
 
     def test_source_fallback_and_close_block_new_downloads(self):
         calls = []
@@ -367,6 +367,35 @@ class FeatureHTTPTests(unittest.TestCase):
             self.assertEqual(head.call_args.kwargs['method'], 'GET')
             remote.close.assert_called_once()
             self.assertIsNone(self.ch._publication)
+
+    def test_playlist_errors_are_exposed_with_their_layer_and_redacted_details(self):
+        def load():
+            raise live.ProxyError(502, 'bad upstream https://media.cctv.cn/a?token=secret')
+        with mock.patch.object(live, 'source_loaders', return_value={'device': live.playback_stage('playlist')(load)}):
+            self.assertEqual(self.request('/cctv1.m3u8')[0], 503)
+        status, _, body = self.request('/api/channels')
+        issue = json.loads(body)['channels'][0]['last_issue']
+        self.assertEqual((status, issue['stage'], issue['label']), (200, 'playlist', '播放列表失败'))
+        self.assertNotIn('secret', issue['message'])
+
+    def test_resource_failures_are_exposed_as_segment_errors(self):
+        token = live.register_resource('https://media.cctv.cn/a.ts', channel='cctv1')
+        with mock.patch.object(live.media_proxy, 'serve', side_effect=live.ProxyError(403, 'target rejected')):
+            self.assertEqual(self.request('/proxy?resource=' + token)[0], 403)
+        self.assertEqual(self.ch.issues[-1]['stage'], 'segment')
+        self.assertEqual(self.ch.issues[-1]['status'], 403)
+
+    def test_epg_missing_channel_is_distinguished_from_download_failure(self):
+        cache = live.EPGCache(urls=['https://example.test/epg'])
+        self.addCleanup(cache.close)
+        cache.programmes, cache.updated = cache.parse(xmltv()[0]), time.time()
+        self.stack.enter_context(mock.patch.object(live, 'epg_manager', cache))
+        status, _, body = self.request('/api/epg?channel=cctv2')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['coverage']['state'], 'missing')
+        cache.programmes, cache.error, cache.retry_at = (), 'download failed', time.time() + 60
+        _, _, body = self.request('/api/epg?channel=cctv2')
+        self.assertEqual(json.loads(body)['coverage']['state'], 'unavailable')
 
     def test_cold_epg_clients_receive_xml_on_first_get_and_share_download(self):
         entered, release = threading.Event(), threading.Event()

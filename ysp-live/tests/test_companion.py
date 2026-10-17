@@ -49,8 +49,8 @@ class CompanionProcessSmokeTests(unittest.TestCase):
             # An inherited access token should not affect an unauthenticated liveness check.
             with logfile.open("w", encoding="utf-8") as output:
                 process = subprocess.Popen(
-                    [sys.executable, str(ROOT / "ysp-live-v9.5.7.py"), str(python_port),
-                     "--bind", "127.0.0.1", "--no-4k", "--cache-mb", "0",
+                    [sys.executable, str(ROOT / "ysp-live-v9.5.8.py"), str(python_port),
+                     "--bind", "127.0.0.1", "--no-4k", "--no-epg", "--cache-mb", "0",
                      "--engine-port", str(node_port), "--data-dir", temp],
                     cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT,
                     start_new_session=True,
