@@ -1,0 +1,385 @@
+{
+  "environment": {
+    "python": "3.12.14",
+    "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+    "cpu_count": 3
+  },
+  "baseline_ref": "b6bd093",
+  "import_mode": "compile-source-for-both",
+  "scope": "15-segment repeated live-window analysis/publication, then loopback playlist HTTP; median of 3 rounds",
+  "limits": [
+    "No real channel, device registration, CDN, telemetry or EPG requests.",
+    "No claim about first video frame, decoding, public network throughput or video quality.",
+    "Background media probes are not started: this isolates the cached playlist path.",
+    "Peak RSS is for the entire isolated worker including source compilation and its local HTTP clients.",
+    "Both versions are compiled from source; candidate bytecode cache reuse is bypassed."
+  ],
+  "before": {
+    "version": "9.5.3-local",
+    "source_sha256": "fc7f5f3fa1bbe231c2fef52e73c1eb4cea334aca9565c4d8970077afbbdd27a9",
+    "micro_iterations_per_round": 3000,
+    "repeats": 3,
+    "http_requests_per_client": 150,
+    "micro_rounds": [
+      {
+        "wall_ms_per_1000": 6.494063332259732,
+        "cpu_ms_per_1000": 6.494078000000005
+      },
+      {
+        "wall_ms_per_1000": 6.283288666357596,
+        "cpu_ms_per_1000": 6.283969000000001
+      },
+      {
+        "wall_ms_per_1000": 6.362332333083032,
+        "cpu_ms_per_1000": 6.363069666666665
+      }
+    ],
+    "micro_median": {
+      "wall_ms_per_1000": 6.362332333083032,
+      "cpu_ms_per_1000": 6.363069666666665
+    },
+    "http": [
+      {
+        "clients": 1,
+        "rounds": [
+          {
+            "requests": 150,
+            "successes": 150,
+            "errors": 0,
+            "requests_per_second": 1804.6627721474674,
+            "p50_ms": 0.4452880020835437,
+            "p95_ms": 0.6914020013937261,
+            "p99_ms": 2.493322997906944,
+            "max_ms": 3.4175189975940157,
+            "cpu_ms_per_1000": 491.52839333333344
+          },
+          {
+            "requests": 150,
+            "successes": 150,
+            "errors": 0,
+            "requests_per_second": 2050.5244017377036,
+            "p50_ms": 0.4581969988066703,
+            "p95_ms": 0.681115998304449,
+            "p99_ms": 0.8116890021483414,
+            "max_ms": 1.135317001171643,
+            "cpu_ms_per_1000": 467.8654400000001
+          },
+          {
+            "requests": 150,
+            "successes": 150,
+            "errors": 0,
+            "requests_per_second": 1923.9202167614283,
+            "p50_ms": 0.505907999468036,
+            "p95_ms": 0.6763999990653247,
+            "p99_ms": 0.8074279976426624,
+            "max_ms": 0.9946589998435229,
+            "cpu_ms_per_1000": 519.9911733333333
+          }
+        ],
+        "median": {
+          "requests_per_second": 1923.9202167614283,
+          "p50_ms": 0.4581969988066703,
+          "p95_ms": 0.681115998304449,
+          "p99_ms": 0.8116890021483414,
+          "max_ms": 1.135317001171643,
+          "cpu_ms_per_1000": 491.52839333333344
+        },
+        "total_requests": 450,
+        "total_successes": 450,
+        "total_errors": 0
+      },
+      {
+        "clients": 8,
+        "rounds": [
+          {
+            "requests": 1200,
+            "successes": 1200,
+            "errors": 0,
+            "requests_per_second": 1730.1831985899785,
+            "p50_ms": 4.498466001678025,
+            "p95_ms": 6.257783999899402,
+            "p99_ms": 7.842464998248033,
+            "max_ms": 10.692947002098663,
+            "cpu_ms_per_1000": 697.7316291666666
+          },
+          {
+            "requests": 1200,
+            "successes": 1200,
+            "errors": 0,
+            "requests_per_second": 1740.2841145212408,
+            "p50_ms": 4.430934997799341,
+            "p95_ms": 6.194420999236172,
+            "p99_ms": 7.386252000287641,
+            "max_ms": 9.036930001457222,
+            "cpu_ms_per_1000": 710.37612
+          },
+          {
+            "requests": 1200,
+            "successes": 1200,
+            "errors": 0,
+            "requests_per_second": 1774.4330975794367,
+            "p50_ms": 4.384556999866618,
+            "p95_ms": 5.891443997825263,
+            "p99_ms": 6.876858999021351,
+            "max_ms": 8.244758999353508,
+            "cpu_ms_per_1000": 694.0774949999999
+          }
+        ],
+        "median": {
+          "requests_per_second": 1740.2841145212408,
+          "p50_ms": 4.430934997799341,
+          "p95_ms": 6.194420999236172,
+          "p99_ms": 7.386252000287641,
+          "max_ms": 9.036930001457222,
+          "cpu_ms_per_1000": 697.7316291666666
+        },
+        "total_requests": 3600,
+        "total_successes": 3600,
+        "total_errors": 0
+      },
+      {
+        "clients": 20,
+        "rounds": [
+          {
+            "requests": 3000,
+            "successes": 3000,
+            "errors": 0,
+            "requests_per_second": 1845.2442951482865,
+            "p50_ms": 10.729620000347495,
+            "p95_ms": 12.596217999089276,
+            "p99_ms": 13.750322999840137,
+            "max_ms": 15.695655998570146,
+            "cpu_ms_per_1000": 664.4256606666667
+          },
+          {
+            "requests": 3000,
+            "successes": 3000,
+            "errors": 0,
+            "requests_per_second": 1650.646425080089,
+            "p50_ms": 11.635468003078131,
+            "p95_ms": 15.213744998618495,
+            "p99_ms": 21.131912002601894,
+            "max_ms": 29.37540600032662,
+            "cpu_ms_per_1000": 738.7252630000002
+          },
+          {
+            "requests": 3000,
+            "successes": 3000,
+            "errors": 0,
+            "requests_per_second": 1690.6588820000593,
+            "p50_ms": 11.509121999552008,
+            "p95_ms": 14.309863003290957,
+            "p99_ms": 20.648384001106024,
+            "max_ms": 24.768634997599293,
+            "cpu_ms_per_1000": 726.5640640000004
+          }
+        ],
+        "median": {
+          "requests_per_second": 1690.6588820000593,
+          "p50_ms": 11.509121999552008,
+          "p95_ms": 14.309863003290957,
+          "p99_ms": 20.648384001106024,
+          "max_ms": 24.768634997599293,
+          "cpu_ms_per_1000": 726.5640640000004
+        },
+        "total_requests": 9000,
+        "total_successes": 9000,
+        "total_errors": 0
+      }
+    ],
+    "peak_rss_kib": 44836,
+    "analysis": {
+      "entries": 1,
+      "charged_bytes": 26216,
+      "budget_bytes": 8388608,
+      "hits": 66158,
+      "misses": 1,
+      "parses": 1
+    },
+    "upstream_requests": 0
+  },
+  "after": {
+    "version": "9.5.4-local",
+    "source_sha256": "1097173f774446f5be4d64df1874a5b6cc23b9b4179e6ddea004d0334bd23a74",
+    "micro_iterations_per_round": 3000,
+    "repeats": 3,
+    "http_requests_per_client": 150,
+    "micro_rounds": [
+      {
+        "wall_ms_per_1000": 7.325391332415165,
+        "cpu_ms_per_1000": 7.325770666666666
+      },
+      {
+        "wall_ms_per_1000": 7.374243666466403,
+        "cpu_ms_per_1000": 7.374549666666666
+      },
+      {
+        "wall_ms_per_1000": 7.401563667372102,
+        "cpu_ms_per_1000": 7.4025580000000035
+      }
+    ],
+    "micro_median": {
+      "wall_ms_per_1000": 7.374243666466403,
+      "cpu_ms_per_1000": 7.374549666666666
+    },
+    "http": [
+      {
+        "clients": 1,
+        "rounds": [
+          {
+            "requests": 150,
+            "successes": 150,
+            "errors": 0,
+            "requests_per_second": 1928.8995288418332,
+            "p50_ms": 0.47983900003600866,
+            "p95_ms": 0.6715320014336612,
+            "p99_ms": 1.2117100013711024,
+            "max_ms": 2.1281629997247364,
+            "cpu_ms_per_1000": 474.8419533333333
+          },
+          {
+            "requests": 150,
+            "successes": 150,
+            "errors": 0,
+            "requests_per_second": 1885.3463803144687,
+            "p50_ms": 0.5157519990461878,
+            "p95_ms": 0.6829890007793438,
+            "p99_ms": 0.8414330004598014,
+            "max_ms": 1.392846999806352,
+            "cpu_ms_per_1000": 513.5979333333333
+          },
+          {
+            "requests": 150,
+            "successes": 150,
+            "errors": 0,
+            "requests_per_second": 1761.2364537417532,
+            "p50_ms": 0.49908700020750985,
+            "p95_ms": 0.8739709992369171,
+            "p99_ms": 1.3958820018160623,
+            "max_ms": 2.187541002058424,
+            "cpu_ms_per_1000": 538.8918466666667
+          }
+        ],
+        "median": {
+          "requests_per_second": 1885.3463803144687,
+          "p50_ms": 0.49908700020750985,
+          "p95_ms": 0.6829890007793438,
+          "p99_ms": 1.2117100013711024,
+          "max_ms": 2.1281629997247364,
+          "cpu_ms_per_1000": 513.5979333333333
+        },
+        "total_requests": 450,
+        "total_successes": 450,
+        "total_errors": 0
+      },
+      {
+        "clients": 8,
+        "rounds": [
+          {
+            "requests": 1200,
+            "successes": 1200,
+            "errors": 0,
+            "requests_per_second": 1727.7998837332461,
+            "p50_ms": 4.493487998843193,
+            "p95_ms": 6.155402999866055,
+            "p99_ms": 7.826571996702114,
+            "max_ms": 9.198558000207413,
+            "cpu_ms_per_1000": 712.7901066666667
+          },
+          {
+            "requests": 1200,
+            "successes": 1200,
+            "errors": 0,
+            "requests_per_second": 1747.997977855714,
+            "p50_ms": 4.331699001340894,
+            "p95_ms": 6.458279996877536,
+            "p99_ms": 8.459427001071163,
+            "max_ms": 15.741363997221924,
+            "cpu_ms_per_1000": 698.7101925
+          },
+          {
+            "requests": 1200,
+            "successes": 1200,
+            "errors": 0,
+            "requests_per_second": 1624.572055235719,
+            "p50_ms": 4.478716000448912,
+            "p95_ms": 7.651423002243973,
+            "p99_ms": 14.509555003314745,
+            "max_ms": 17.009438000968657,
+            "cpu_ms_per_1000": 730.3208908333332
+          }
+        ],
+        "median": {
+          "requests_per_second": 1727.7998837332461,
+          "p50_ms": 4.478716000448912,
+          "p95_ms": 6.458279996877536,
+          "p99_ms": 8.459427001071163,
+          "max_ms": 15.741363997221924,
+          "cpu_ms_per_1000": 712.7901066666667
+        },
+        "total_requests": 3600,
+        "total_successes": 3600,
+        "total_errors": 0
+      },
+      {
+        "clients": 20,
+        "rounds": [
+          {
+            "requests": 3000,
+            "successes": 3000,
+            "errors": 0,
+            "requests_per_second": 1708.5354118518715,
+            "p50_ms": 11.560216997168027,
+            "p95_ms": 14.121891003014753,
+            "p99_ms": 15.323686002375325,
+            "max_ms": 18.33317299679038,
+            "cpu_ms_per_1000": 718.2995913333333
+          },
+          {
+            "requests": 3000,
+            "successes": 3000,
+            "errors": 0,
+            "requests_per_second": 1711.1955015300211,
+            "p50_ms": 11.581047998333815,
+            "p95_ms": 13.338484000996687,
+            "p99_ms": 14.396718001080444,
+            "max_ms": 16.792676997283706,
+            "cpu_ms_per_1000": 714.7691203333334
+          },
+          {
+            "requests": 3000,
+            "successes": 3000,
+            "errors": 0,
+            "requests_per_second": 1726.3528705402252,
+            "p50_ms": 11.374492998584174,
+            "p95_ms": 13.356570998439565,
+            "p99_ms": 18.831990000762744,
+            "max_ms": 27.086793998023495,
+            "cpu_ms_per_1000": 705.2967869999997
+          }
+        ],
+        "median": {
+          "requests_per_second": 1711.1955015300211,
+          "p50_ms": 11.560216997168027,
+          "p95_ms": 13.356570998439565,
+          "p99_ms": 15.323686002375325,
+          "max_ms": 18.33317299679038,
+          "cpu_ms_per_1000": 714.7691203333334
+        },
+        "total_requests": 9000,
+        "total_successes": 9000,
+        "total_errors": 0
+      }
+    ],
+    "peak_rss_kib": 45372,
+    "analysis": {
+      "entries": 1,
+      "charged_bytes": 26216,
+      "budget_bytes": 8388608,
+      "hits": 79208,
+      "misses": 1,
+      "parses": 1
+    },
+    "upstream_requests": 0
+  }
+}

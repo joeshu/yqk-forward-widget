@@ -31,7 +31,9 @@
 在仓库根目录执行：
 
 ```sh
-python3 ysp-live/tests/benchmark_playlists.py --baseline-ref 6182a5d --output ysp-live/benchmark-9.5.3.json
+python3 ysp-live/tests/benchmark_playlists.py --baseline-ref 6182a5d --output ysp-live/benchmark-9.5.3.json --requests-per-client 30
 ```
 
 原始数据包含每轮结果、环境与源文件哈希，见 [benchmark-9.5.3.json](benchmark-9.5.3.json)。Linux环境使用resource记录RSS；其他硬件、Python版本、TCP配置和频道窗口长度可能产生不同结果。
+
+历史方法说明：本页原始结果使用自动导入缓存，峰值RSS不宜直接比较。9.5.4的脚本统一强制从源码编译，并增加请求样本；新报告见 [BENCHMARK-9.5.4.md](BENCHMARK-9.5.4.md)。复现本页短突发工作量时指定 --requests-per-client 30。

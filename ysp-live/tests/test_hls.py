@@ -49,12 +49,8 @@ class HlsTests(unittest.TestCase):
         self.assertIsNone(select_variant(master.replace('BANDWIDTH=1000000', 'AUDIO="audio",BANDWIDTH=1000000')))
 
     def test_fetch_uses_effective_redirect_url(self):
-        class Response:
-            def __enter__(self): return self
-            def __exit__(self, *args): pass
-            def geturl(self): return 'https://redirect.example/final/list.m3u8'
-            def read(self): return b'#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:6,\none.ts\n'
-        with mock.patch.object(live.urllib.request, 'urlopen', return_value=Response()):
+        body = b'#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:6,\none.ts\n'
+        with mock.patch.object(live, 'fetch_bytes', return_value=(200, {}, body, 'https://redirect.example/final/list.m3u8')):
             result = live.fetch_abs_playlist('https://original.example/old/list.m3u8')
         self.assertIn('https://redirect.example/final/one.ts', result)
         self.assertIn('URI="https://redirect.example/final/key"', result)

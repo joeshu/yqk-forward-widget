@@ -735,6 +735,8 @@ class PlaylistAnalysis:
     target: float
     variants: tuple
     profile: StreamProfile = StreamProfile()
+    body_digest: bytes = b''
+    validation_error: str = ''
 
 
 class PlaylistAnalysisCache:
@@ -756,7 +758,10 @@ class PlaylistAnalysisCache:
             if item:
                 self.charged_bytes -= self.entries.pop(text)[2]
             self.misses += 1
-            if len(text) > 2 * 2**20 or len(text.encode('utf-8')) > 2 * 2**20 or text.count('\n') > 8192:
+            if len(text) > 2 * 2**20 or text.count('\n') > 8192:
+                raise UnsafePlaylist('playlist analysis budget exceeded')
+            encoded = text.encode('utf-8')
+            if len(encoded) > 2 * 2**20:
                 raise UnsafePlaylist('playlist analysis budget exceeded')
             media = _parse_media_uncached(text)
             self.parses += 1
@@ -766,9 +771,18 @@ class PlaylistAnalysisCache:
                 last = media.segments[-1]
                 signature = hashlib.sha256(repr((last.source_sequence, last.identity)).encode()).hexdigest()
             profile = max((v.profile for v in variants), key=lambda p: (p.height, p.width, p.bandwidth), default=StreamProfile())
-            analysis = PlaylistAnalysis(media, signature, target, variants, profile)
+            header = text.lstrip('\ufeff \t\r\n')
+            line_end = header.find('\n')
+            header = header[:line_end] if line_end >= 0 else header
+            valid_header = header.strip() == '#EXTM3U'
+            has_media = bool(variants or (media and media.segments))
+            has_parts = bool(media and media.unsafe and any(
+                line.strip().startswith('#EXT-X-PART:') and attributes(line.strip()).get('URI')
+                for line in text.splitlines()))
+            validation_error = 'source did not return an HLS document' if not valid_header else ('source playlist contains no playable media' if not has_media and not has_parts else '')
+            analysis = PlaylistAnalysis(media, signature, target, variants, profile, hashlib.sha256(encoded).digest(), validation_error)
             # Includes copies of tag/URI strings, segment containers, identities and dict overhead.
-            charge = 8192 + len(text.encode('utf-8')) * 8 + (len(media.segments) * 768 if media else len(variants) * 768)
+            charge = 8192 + len(encoded) * 8 + (len(media.segments) * 768 if media else len(variants) * 768)
             while self.entries and (len(self.entries) >= self.max_entries or self.charged_bytes + charge > self.max_bytes):
                 self.charged_bytes -= self.entries.popitem(last=False)[1][2]
             if charge <= self.max_bytes and self.max_entries > 0:
@@ -840,9 +854,9 @@ _TLS_CONTEXT = ssl.create_default_context()
 
 
 class ProxyError(Exception):
-    def __init__(self, status, message):
+    def __init__(self, status, message, category=''):
         super().__init__(message)
-        self.status = status
+        self.status, self.category = status, category
 
 
 @dataclasses.dataclass(frozen=True)
@@ -896,8 +910,13 @@ class URLPolicy:
         self.allow_private = allow_private  # Test injection only; no CLI switch enables this.
         self.engine_port = engine_port
 
-    def resolve(self, target, _depth=0):
+    def resolve_for_request(self, target, deadline):
+        return self.resolve(target, deadline=deadline)
+
+    def resolve(self, target, _depth=0, deadline=None):
         try:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ProxyError(504, 'media request deadline exceeded before DNS')
             if len(target) > 16384 or _depth > 2:
                 raise ValueError('URL too long or nested')
             parsed = urllib.parse.urlsplit(target)
@@ -910,24 +929,27 @@ class URLPolicy:
                       and port == self.engine_port and parsed.path == '/segment')
             if engine:
                 inner = urllib.parse.parse_qs(parsed.query).get('url', [''])[0]
-                self.resolve(inner, _depth + 1)
+                self.resolve(inner, _depth + 1, deadline=deadline)
                 return parsed, ['127.0.0.1']
             allowed = any(host == suffix.lstrip('.') or host.endswith('.' + suffix.lstrip('.'))
                           for suffix in self.allowed_suffixes)
             if not allowed or (not self.allow_private and port not in (80, 443)):
-                raise ProxyError(403, 'media target is not allowed')
-            addresses = bounded_dns_addresses(host, port)
+                raise ProxyError(403, 'media target is not allowed', category='target_policy')
+            dns_timeout = min(3.0, deadline - time.monotonic()) if deadline is not None else 3.0
+            if dns_timeout <= 0:
+                raise ProxyError(504, 'media request deadline exceeded before DNS')
+            addresses = bounded_dns_addresses(host, port, timeout=dns_timeout)
             if not addresses:
                 raise ValueError('empty DNS response')
             if not self.allow_private and any(not ipaddress.ip_address(addr).is_global for addr in addresses):
-                raise ProxyError(403, 'non-public media target')
+                raise ProxyError(403, 'non-public media target', category='target_policy')
             return parsed, addresses
         except ProxyError:
             raise
         except DNSLookupError as exc:
             raise ProxyError(exc.status, str(exc)) from exc
         except (ValueError, OSError) as exc:
-            raise ProxyError(403, 'invalid or unresolved media target') from exc
+            raise ProxyError(403, 'invalid or unresolved media target', category='target_policy') from exc
 
 
 class _PinnedHTTP(http.client.HTTPConnection):
@@ -999,7 +1021,8 @@ def open_remote(target, headers=None, method='GET', policy=None, timeout=15, dea
     current, request_headers = target, dict(headers or {})
     request_headers.update({'Accept-Encoding': 'identity', 'Connection': 'close'})
     for _ in range(5):
-        parsed, addresses = policy.resolve(current)
+        timed_resolver = getattr(policy, 'resolve_for_request', None)
+        parsed, addresses = timed_resolver(current, deadline) if timed_resolver else policy.resolve(current)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise ProxyError(504, 'media request deadline exceeded')
@@ -1065,8 +1088,8 @@ def open_remote(target, headers=None, method='GET', policy=None, timeout=15, dea
     raise ProxyError(502, 'too many media redirects')
 
 
-def fetch_bytes(target, headers=None, method='GET', policy=None, timeout=15, max_bytes=2 * 1024 * 1024):
-    deadline = time.monotonic() + timeout
+def fetch_bytes(target, headers=None, method='GET', policy=None, timeout=15, max_bytes=2 * 1024 * 1024, deadline=None):
+    deadline = min(deadline, time.monotonic() + timeout) if deadline is not None else time.monotonic() + timeout
     remote = open_remote(target, headers, method, policy, timeout, deadline)
     try:
         chunks, total = [], 0
@@ -1612,7 +1635,7 @@ import urllib .parse
 import urllib .request 
 import uuid 
 from collections import deque 
-__version__ = '9.5.3-local'
+__version__ = '9.5.4-local'
 AUTHOR_COMMUNITY ='https://t.me/garysclub'
 AUTHOR_CHANNEL ='https://t.me/garysclubchannel'
 AUTHOR_NOTICE =f'''📢 首发地址
@@ -4070,22 +4093,41 @@ def bk_playurls (channel_id ,live_pid ,defn ='fhd'):
         raise RuntimeError ('no playurl')
     urls .sort (key =lambda u :(0 if 'bklive-'in u else 1 ,u ))
     return urls 
-def fetch_abs_playlist (url ,depth =0 ,quality ='fhd'):
-    req =urllib .request .Request (url ,headers ={'User-Agent':'qqlive','Referer':'https://live.cctv.cn/','Accept':'application/vnd.apple.mpegurl,application/json,*/*'})
-    with urllib .request .urlopen (req ,timeout =10 )as r :
-        text =r .read ().decode ('utf-8','replace')
-        final =r .geturl ()
-    if '#EXTM3U' not in text:
-        raise RuntimeError('upstream did not return an HLS playlist')
+def fetch_abs_playlist(url, depth=0, quality='fhd', *, policy=None, _deadline=None, _profile_out=None):
+    deadline = _deadline if _deadline is not None else time.monotonic() + 10
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ProxyError(504, 'playlist chain deadline exceeded')
+    policy = policy or URLPolicy(engine_port=engine_port)
+    headers = {'User-Agent': 'qqlive', 'Referer': 'https://live.cctv.cn/',
+               'Accept': 'application/vnd.apple.mpegurl,application/json,*/*'}
+    status, _, data, final = fetch_bytes(url, headers, policy=policy, timeout=remaining,
+                                        deadline=deadline, max_bytes=2 * 1024 * 1024)
+    if status != 200:
+        raise ProxyError(status, 'playlist HTTP ' + str(status), category='upstream_status')
+    text = data.decode('utf-8-sig', 'strict')
+    analysis = validate_source_playlist(text)
     variant = select_variant(text, quality)
     if variant:
         if depth >= 4:
-            raise RuntimeError('too many nested HLS master playlists')
-        selected = next(v for v in analyze_playlist(text).variants if v.uri == variant)
-        result = fetch_abs_playlist(urllib.parse.urljoin(final, variant), depth + 1, quality)
-        remember_playlist_profile(result, selected.profile)
+            raise UnsafePlaylist('too many nested HLS master playlists')
+        selected = next(v for v in analysis.variants if v.uri == variant)
+        child_metadata = {}
+        result = fetch_abs_playlist(urllib.parse.urljoin(final, variant), depth + 1, quality,
+                                    policy=policy, _deadline=deadline, _profile_out=child_metadata)
+        child_profile = child_metadata.get('profile', StreamProfile())
+        effective = StreamProfile(child_profile.width or selected.profile.width,
+            child_profile.height or selected.profile.height, child_profile.bandwidth or selected.profile.bandwidth,
+            child_profile.codecs or selected.profile.codecs, child_profile.audio_group or selected.profile.audio_group)
+        remember_playlist_profile(result, effective)
+        if _profile_out is not None:
+            _profile_out['profile'] = effective
         return result
-    return rewrite_playlist_urls(filter_master_quality(text, quality), final)
+    filtered = filter_master_quality(text, quality)
+    current_variants = analyze_playlist(filtered).variants
+    if current_variants and _profile_out is not None:
+        _profile_out['profile'] = max(current_variants, key=lambda v: (v.profile.height, v.profile.width, v.profile.bandwidth)).profile
+    return rewrite_playlist_urls(filtered, final)
 DEFAULT_CHANNELS =[
 ('cctv1','CCTV-1 综合','2024078201','600001859','fhd'),
 ('cctv2','CCTV-2 财经','2024075401','600001800','fhd'),
@@ -4774,6 +4816,13 @@ def publish_channel_playlist(ch, playlist, source, head_only=False):
         if head_only:
             return state['snapshot'] if state else playlist
         media = parse_media(playlist)
+        fingerprint, target = None, 6.0
+        if state and state['source'] == source and media and media.segments:
+            last_sequence = state['mapping'].get(media.segments[-1].identity)
+            if last_sequence is not None and last_sequence < state.get('published_edge', last_sequence):
+                with ch.lock:
+                    _record_media_progress(ch, state['signature'], state['target'], source='published-' + source)
+                return state['snapshot']
         if media is not None and media.segments and (source in ('device', 'engine') or source.startswith('backup:')):
             fingerprint, target = media_signature(playlist)
             with ch.lock:
@@ -4830,21 +4879,34 @@ def publish_channel_playlist(ch, playlist, source, head_only=False):
                 media = dataclasses.replace(media, segments=media.segments[first:])
                 identities = identities[first:]
         mapping = state['mapping']
+        render_segments = media.segments
+        if not changed and mapping:
+            overlap = next((i for i, identity in enumerate(identities) if identity in mapping), 0)
+            if overlap:
+                identities, render_segments = identities[overlap:], render_segments[overlap:]
         for identity in identities:
             if identity not in mapping:
                 mapping[identity] = state['next']
                 state['next'] += 1
         sequences = [mapping[identity] for identity in identities]
+        floor = state.get('published_start', sequences[0])
+        trim = next((i for i, sequence in enumerate(sequences) if sequence >= floor), len(sequences))
+        if trim == len(sequences):
+            return state['snapshot']
+        if trim:
+            sequences, render_segments = sequences[trim:], render_segments[trim:]
         boundary = state['boundary']
         if boundary is not None and boundary < sequences[0]:
             state['disc'] += 1
             state['boundary'] = boundary = None
         try:
-            result = render_media(media, sequences=sequences, boundary=boundary, discontinuity_base=state['disc'] + max(0, media.discontinuity_sequence - state['source_disc']))
+            result = render_media(media, segments=render_segments, sequences=sequences, boundary=boundary, discontinuity_base=state['disc'] + max(0, media.discontinuity_sequence - state['source_disc']))
         except UnsafePlaylist:
             result = playlist
             ch.source_restart_required = True
         state['snapshot'], state['input_body'] = result, playlist
+        state['signature'], state['target'] = fingerprint, target
+        state['published_start'], state['published_edge'] = sequences[0], sequences[-1]
         state['end_disc'] = state['disc'] + max(0, media.discontinuity_sequence - state['source_disc']) + result.splitlines().count('#EXT-X-DISCONTINUITY')
         state['edge_pdt'] = pdt_seconds(media.segments[-1].pdt)
         # A bounded index retains several complete windows of overlap.
@@ -4956,6 +5018,17 @@ def redact_diagnostic(value, secrets_to_hide=()):
     return text[:2000]
 
 
+def validate_source_playlist(text, analysis=None):
+    analysis = analysis or analyze_playlist(text)
+    if analysis.validation_error:
+        raise UnsafePlaylist(analysis.validation_error)
+    return analysis
+
+
+class SourceAttemptSuperseded(RuntimeError):
+    """An in-flight attempt no longer belongs to the accepted source state."""
+
+
 class SourceSelector:
     """Retain a working high-quality source; latency alone never causes a downgrade."""
     priority = ('device', 'backup', 'engine')
@@ -4972,19 +5045,36 @@ class SourceSelector:
             latency_ms=None, last_ok=0.0, error='', signature=None, progress_at=0.0,
             recovery_samples=0, probe_at=0.0, probing=False, resolution=None,
             profile=StreamProfile(), profile_at=0.0, generation=0, validation_epoch=0,
+            source_context='', discarded_attempts=0,
             content_probe_at=0.0, content_probing=False, content_result=None, content_verified_at=0.0))
 
     def _profile(self, source):
         state = self._state(source)
-        return state['profile'] if self.clock() - state['profile_at'] <= 60 else StreamProfile()
+        return state['profile']
+
+    def _profile_fresh(self, source):
+        state = self._state(source)
+        return bool(state['profile'].height and self.clock() - state['profile_at'] <= 60)
+
+    def attempt_token(self, source):
+        with self.lock:
+            return self._state(source)['validation_epoch']
+
+    @staticmethod
+    def _clear_content(state):
+        state['content_result'], state['content_verified_at'], state['content_probe_at'] = None, 0.0, 0.0
+        state.pop('content_signature', None)
+        state.pop('content_progress_at', None)
 
     def _better(self, candidate, current):
         a, b = self._profile(candidate), self._profile(current)
         if self.policy != 'stable' and a.height and b.height:
             if (a.height, a.width) != (b.height, b.width):
-                return ((a.height, a.width) > (b.height, b.width)) if self.policy == 'quality' else ((a.height, a.width) < (b.height, b.width))
+                preferred = (a.height, a.width) > (b.height, b.width) if self.policy == 'quality' else (a.height, a.width) < (b.height, b.width)
+                return preferred and self._profile_fresh(candidate)
             if a.codecs and a.codecs == b.codecs and a.bandwidth and b.bandwidth and a.bandwidth != b.bandwidth:
-                return a.bandwidth > b.bandwidth if self.policy == 'quality' else a.bandwidth < b.bandwidth
+                preferred = a.bandwidth > b.bandwidth if self.policy == 'quality' else a.bandwidth < b.bandwidth
+                return preferred and self._profile_fresh(candidate)
         # Without comparable manifest evidence, retain the known service priority.
         return self.priority.index(candidate) < self.priority.index(current)
 
@@ -5008,25 +5098,42 @@ class SourceSelector:
                 order = promoted + [current] + [s for s in order if s != current and s not in promoted]
             return order
 
-    def success(self, source, playlist, elapsed, probe=False):
-        analysis = analyze_playlist(playlist)
+    def success(self, source, playlist, elapsed, probe=False, expected_epoch=None, context=None):
+        analysis = validate_source_playlist(playlist)
         signature, target, profile = analysis.signature, analysis.target, analysis.profile
         generation = 0
-        if analysis.media and analysis.media.segments:
-            uri = analysis.media.segments[-1].uri
-            query = urllib.parse.parse_qs(urllib.parse.urlsplit(uri).query)
-            if urllib.parse.urlsplit(uri).path in ('/proxy', '/proxy.ts', '/engine_proxy') and query.get('resource'):
-                try:
-                    generation = resolve_resource(query['resource'][0]).generation
-                except ProxyError:
-                    pass
+        uri = analysis.media.segments[-1].uri if analysis.media and analysis.media.segments else (analysis.variants[0].uri if analysis.variants else '')
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(uri).query)
+        if urllib.parse.urlsplit(uri).path in ('/proxy', '/proxy.ts', '/engine_proxy') and query.get('resource'):
+            try:
+                generation = resolve_resource(query['resource'][0]).generation
+            except ProxyError:
+                pass
         now = self.clock()
         with self.lock:
             state = self._state(source)
-            if generation != state['generation']:
-                state['generation'], state['validation_epoch'] = generation, state['validation_epoch'] + 1
-                state['content_result'], state['content_probe_at'], state['recovery_samples'] = None, 0.0, 0
-                state['profile'], state['profile_at'] = StreamProfile(), 0.0
+            source_context = context if context is not None else (state['source_context'] or source)
+            same_source = generation == state['generation'] and source_context == state['source_context']
+            compatible_profile = not profile.height or not state['profile'].height or profile == state['profile']
+            if expected_epoch is not None and expected_epoch != state['validation_epoch'] and (state['failures'] or not same_source or not compatible_profile):
+                state['discarded_attempts'] += 1
+                raise SourceAttemptSuperseded('source state changed while the playlist was loading')
+            if generation and state['generation'] > generation:
+                state['discarded_attempts'] += 1
+                raise SourceAttemptSuperseded('older source generation completed after a newer generation')
+            if not same_source:
+                state['generation'], state['source_context'] = generation, source_context
+                state['validation_epoch'] += 1
+                self._clear_content(state)
+                state['recovery_samples'], state['signature'], state['progress_at'] = 0, None, 0.0
+                state['profile'], state['profile_at'], state['resolution'] = StreamProfile(), 0.0, None
+            if profile.height and state['profile'].height and profile != state['profile']:
+                state['validation_epoch'] += 1
+                self._clear_content(state)
+                state['recovery_samples'] = 0
+            if state.get('latest_digest') != analysis.body_digest:
+                state['latest_media'] = {segment.identity: segment.uri for segment in analysis.media.segments[-32:]} if analysis.media else {}
+                state['latest_digest'] = analysis.body_digest
             if signature is not None:
                 if signature != state['signature']:
                     state['progress_at'] = now
@@ -5040,7 +5147,7 @@ class SourceSelector:
             state['successes'] += 1
             if state['failures']:
                 state['validation_epoch'] += 1
-                state['content_result'], state['content_probe_at'] = None, 0.0
+                self._clear_content(state)
             state['failures'], state['retry_at'], state['error'] = 0, 0.0, ''
             state['last_ok'] = time.time()
             value = max(0, elapsed * 1000)
@@ -5048,14 +5155,20 @@ class SourceSelector:
             if profile.height or profile.bandwidth or profile.codecs:
                 state['profile'], state['profile_at'] = profile, now
                 state['resolution'] = profile.resolution
+            return state['validation_epoch']
 
-    def failure(self, source, error):
+    def failure(self, source, error, expected_epoch=None):
         with self.lock:
             state = self._state(source)
+            if expected_epoch is not None and expected_epoch != state['validation_epoch']:
+                state['discarded_attempts'] += 1
+                return False
             state['failures'] += 1
+            self._clear_content(state)
             state['recovery_samples'], state['validation_epoch'] = 0, state['validation_epoch'] + 1
             state['retry_at'] = self.clock() + min(120, 5 * 2 ** min(state['failures'] - 1, 5))
             state['error'] = redact_diagnostic(error)
+            return True
 
     def commit(self, source):
         with self.lock:
@@ -5091,6 +5204,9 @@ class SourceSelector:
                         'last_success': s['last_ok'] or None, 'error': s['error'],
                         'recovery_samples': s['recovery_samples'], 'probing': s['probing'],
                         'playlist_resolution': self._profile(name).resolution,
+                        'profile_fresh': self._profile_fresh(name),
+                        'profile_age_seconds': round(max(0, now - s['profile_at'])) if self._profile(name).height else None,
+                        'context': s['source_context'] or None, 'discarded_attempts': s['discarded_attempts'],
                         'declared_codecs': self._profile(name).codecs or None,
                         'declared_bandwidth': self._profile(name).bandwidth or None,
                         'segment_content': s['content_result'], 'content_probing': s['content_probing']}
@@ -5225,9 +5341,9 @@ def probe_playlist_content(playlist, origin='', policy=None, proxy=None, max_byt
         if remaining <= 0:
             raise ProxyError(504, 'content probe deadline exceeded')
         status, _, body, effective = fetch_bytes(resource.url, content_request_headers(resource.headers), policy=policy,
-                                                timeout=remaining, max_bytes=256 * 1024)
+                                                timeout=remaining, max_bytes=256 * 1024, deadline=deadline)
         if status != 200:
-            raise ProxyError(status, 'probe media playlist HTTP ' + str(status))
+            raise ProxyError(status, 'probe media playlist HTTP ' + str(status), category='upstream_status')
         text, base, headers = body.decode('utf-8', 'strict'), effective, resource.headers
         analysis = analyze_playlist(text)
     if analysis.media is None or not analysis.media.segments:
@@ -5270,7 +5386,7 @@ def probe_playlist_content(playlist, origin='', policy=None, proxy=None, max_byt
                 remote = open_remote(resource.url, request_headers, method='GET', policy=policy,
                                      timeout=remaining, deadline=deadline)
             if remote.status not in (200, 206):
-                raise ProxyError(remote.status, 'segment content HTTP ' + str(remote.status))
+                raise ProxyError(remote.status, 'segment content HTTP ' + str(remote.status), category='upstream_status')
             if remote.headers.get('content-encoding', 'identity').lower() not in ('', 'identity'):
                 return {'ok': None, 'kind': 'unexpected_content_encoding', 'sampled_bytes': 0, 'decode_verified': False}
             if remote.status == 206:
@@ -5313,94 +5429,123 @@ def probe_playlist_content(playlist, origin='', policy=None, proxy=None, max_byt
 
 
 class MediaProbeManager:
-    """One pending content check per source; two workers, eight queued tasks, 30s cadence."""
+    """Bounded content work with epoch-safe commit and cancellation cleanup."""
     def __init__(self, interval=30, proxy=None):
         self.interval, self.proxy = max(10, interval), proxy
         self.pool = ThreadPoolExecutor(max_workers=2, max_queue=8, thread_name_prefix='media-probe')
         self.lock = threading.Lock()
-        self.closed = False
+        self.closed, self.pending = False, {}
         self.scheduled = self.completed = self.failed = self.cached = self.dropped = self.sampled_bytes = 0
+        self.cancelled = self.ignored = self.inconclusive = 0
 
     def stats(self):
         with self.lock:
             return {'enabled': not self.closed, 'scheduled': self.scheduled, 'completed': self.completed,
                     'failed': self.failed, 'cached': self.cached, 'dropped': self.dropped,
-                    'sampled_bytes': self.sampled_bytes, 'interval_seconds': self.interval,
-                    'max_sample_bytes': 65536}
+                    'cancelled': self.cancelled, 'ignored': self.ignored, 'inconclusive': self.inconclusive,
+                    'pending': len(self.pending), 'sampled_bytes': self.sampled_bytes,
+                    'interval_seconds': self.interval, 'max_sample_bytes': 65536}
 
     def schedule(self, selector, source, playlist, origin):
-        with self.lock:
-            if self.closed:
-                return
+        token = object()
         with selector.lock:
             state = selector._state(source)
             now = selector.clock()
             if state['content_probing'] or now < state['content_probe_at']:
                 return
+            with self.lock:
+                if self.closed:
+                    return
+                self.pending[token] = None
+                self.scheduled += 1
             epoch = state['validation_epoch']
-            state['content_probing'], state['content_probe_at'] = True, now + self.interval
+            state['content_probing'], state['content_probe_at'], state['content_job_token'] = True, now + self.interval, token
+
+        def cleanup(future=None):
+            with selector.lock:
+                state = selector._state(source)
+                if state.get('content_job_token') is token:
+                    state['content_probing'] = False
+                    state.pop('content_job_token', None)
+            with self.lock:
+                self.pending.pop(token, None)
+                if future is not None and future.cancelled():
+                    self.cancelled += 1
+
+        analysis = analyze_playlist(playlist)
+        sampled = None
+        if analysis.media and analysis.media.segments:
+            segment = analysis.media.segments[-2] if len(analysis.media.segments) >= 3 else analysis.media.segments[-1]
+            sampled = segment.identity, segment.uri
+
         def run():
-            hard_error = None
+            with self.lock:
+                if self.closed:
+                    self.completed += 1
+                    self.ignored += 1
+                    return
+            hard_error, feedback = None, None
             try:
                 result = probe_playlist_content(playlist, origin,
                     policy=self.proxy.policy if self.proxy else None, proxy=self.proxy)
                 if result['ok'] is False:
                     hard_error = 'segment content: ' + result['kind']
             except Exception as exc:
-                # Deadline, admission and DNS failures do not prove the highest-quality stream is broken.
-                status = getattr(exc, 'status', None)
+                status, category = getattr(exc, 'status', None), getattr(exc, 'category', '')
                 dns_failure = isinstance(getattr(exc, '__cause__', None), DNSLookupError)
-                hard_error = str(exc) if status in (401, 403, 404, 410, 502) and not dns_failure else None
+                definite = status in (401, 403, 404, 410, 502) and not dns_failure and category != 'target_policy'
+                hard_error = str(exc) if definite else None
                 result = {'ok': False if hard_error else None, 'kind': 'probe_failed' if hard_error else 'probe_inconclusive',
                           'error': redact_diagnostic(type(exc).__name__ + ': ' + str(exc)),
-                          'sampled_bytes': 0, 'decode_verified': False, 'status': status}
+                          'sampled_bytes': 0, 'decode_verified': False, 'status': status, 'category': category}
             result['checked_at'] = time.time()
-            with self.lock:
-                if self.closed:
-                    return
-                self.completed += 1
-                self.failed += bool(hard_error)
-                self.cached += bool(result.get('from_cache'))
-                self.sampled_bytes += result.get('sampled_bytes', 0)
+            # No socket operations happen under either lock. Closing and publishing a
+            # result use the same ordering, so close cannot be followed by a stale commit.
             with selector.lock:
                 state = selector._state(source)
-                if state['validation_epoch'] != epoch:
-                    return  # A new source generation or foreground failure superseded this check.
-                if result.get('declared_profile'):
-                    profile = StreamProfile(**result['declared_profile'])
-                    if profile.height or profile.bandwidth or profile.codecs:
-                        state['profile'], state['profile_at'] = profile, selector.clock()
-                if result.get('master') and result['ok'] is True and result.get('media_signature'):
-                    signature = result['media_signature']
-                    if signature != state.get('content_signature'):
-                        state['recovery_samples'] += 1
-                        state['content_signature'], state['content_progress_at'] = signature, selector.clock()
-                    elif selector.clock() - state.get('content_progress_at', selector.clock()) > max(30, result['target_duration'] * 3):
-                        hard_error = 'master media stopped advancing'
-                        result['ok'], result['kind'] = False, 'media_frozen'
-                if hard_error:
-                    if source == 'device' and result.get('status') in (401, 403, 404) and resolver and getattr(selector, 'channel', None):
-                        resolver.record_segment_failure(selector.channel, state['generation'], result['status'])
-                    selector.failure(source, hard_error)
-                state['content_result'] = result
-                if result['ok'] is True:
-                    state['content_verified_at'] = selector.clock()
-            return
-        def guarded_run():
-            try:
-                run()
-            finally:
-                with selector.lock:
-                    selector._state(source)['content_probing'] = False
+                with self.lock:
+                    self.completed += 1
+                    self.cached += bool(result.get('from_cache'))
+                    self.sampled_bytes += result.get('sampled_bytes', 0)
+                    superseded_segment = hard_error and sampled is not None and 'latest_media' in state and state['latest_media'].get(sampled[0]) != sampled[1]
+                    if self.closed or state['validation_epoch'] != epoch or superseded_segment:
+                        self.ignored += 1
+                        return
+                    if result.get('declared_profile'):
+                        profile = StreamProfile(**result['declared_profile'])
+                        if profile.height or profile.bandwidth or profile.codecs:
+                            state['profile'], state['profile_at'] = profile, selector.clock()
+                    if result.get('master') and result['ok'] is True and result.get('media_signature'):
+                        signature = result['media_signature']
+                        if signature != state.get('content_signature'):
+                            state['recovery_samples'] += 1
+                            state['content_signature'], state['content_progress_at'] = signature, selector.clock()
+                        elif selector.clock() - state.get('content_progress_at', selector.clock()) > max(30, result['target_duration'] * 3):
+                            hard_error = 'master media stopped advancing'
+                            result['ok'], result['kind'] = False, 'media_frozen'
+                    if hard_error:
+                        if source == 'device' and result.get('category') == 'upstream_status' and result.get('status') in (401, 403, 404) and getattr(selector, 'channel', None):
+                            feedback = selector.channel, state['generation'], result['status']
+                        selector.failure(source, hard_error)
+                    state['content_result'] = result
+                    if result['ok'] is True:
+                        state['content_verified_at'] = selector.clock()
+                    self.failed += bool(hard_error)
+                    self.inconclusive += result['ok'] is None
+            if feedback and resolver and not shutdown_event.is_set():
+                resolver.record_segment_failure(*feedback)
+
         try:
-            self.pool.submit(guarded_run)
+            future = self.pool.submit(run)
             with self.lock:
-                self.scheduled += 1
+                if token in self.pending:
+                    self.pending[token] = future
+            future.add_done_callback(cleanup)
         except RuntimeError:
-            with selector.lock:
-                selector._state(source)['content_probing'] = False
+            cleanup()
             with self.lock:
                 self.dropped += 1
+                self.scheduled -= 1
 
     def close(self):
         with self.lock:
@@ -5414,26 +5559,30 @@ def schedule_source_probe(selector, loaders, origin=''):
     source = selector.reserve_probe(loaders)
     if source is None:
         return
-    def probe():
-        started = time.monotonic()
-        try:
-            loader = loaders[source]
-            playlist, _, _ = getattr(loader, 'probe', loader)()
-            if not playlist or '#EXTM3U' not in playlist:
-                raise RuntimeError('empty source playlist')
-            selector.success(source, playlist, time.monotonic() - started, probe=True)
-            if media_probe_manager:
-                media_probe_manager.schedule(selector, source, playlist, origin)
-        except Exception as exc:
-            selector.failure(source, type(exc).__name__ + ': ' + str(exc))
-        finally:
-            with selector.lock:
-                selector._state(source)['probing'] = False
-    try:
-        feature_pool.submit(probe)
-    except RuntimeError:
+    epoch = selector.attempt_token(source)
+    def cleanup(_=None):
         with selector.lock:
             selector._state(source)['probing'] = False
+    def probe():
+        started, accepted_epoch = time.monotonic(), epoch
+        try:
+            loader = loaders[source]
+            playlist, label, _ = getattr(loader, 'probe', loader)()
+            if not playlist:
+                raise RuntimeError('empty source playlist')
+            accepted_epoch = selector.success(source, playlist, time.monotonic() - started,
+                probe=True, expected_epoch=epoch, context=label)
+            if media_probe_manager:
+                media_probe_manager.schedule(selector, source, playlist, origin)
+        except SourceAttemptSuperseded:
+            pass
+        except Exception as exc:
+            selector.failure(source, type(exc).__name__ + ': ' + str(exc), expected_epoch=accepted_epoch)
+    try:
+        future = feature_pool.submit(probe)
+        future.add_done_callback(cleanup)
+    except RuntimeError:
+        cleanup()
 
 
 def channel_status():
@@ -5461,15 +5610,16 @@ def channel_status():
                     row['state'] = 'ready' if now - row['last_progress'] < 60 else 'stale'
                 elif row['last_success']:
                     row['state'] = 'playlist_only'
-                if hasattr(ch, 'selector'):
-                    row['selection'] = ch.selector.snapshot()
-                    selected = row['selection']['selected']
-                    selected_state = row['selection']['sources'].get(selected, {})
-                    row['last_success'] = selected_state.get('last_success') or row['last_success']
-                    if row['state'] == 'unobserved' and row['last_success']:
-                        row['state'] = 'playlist_only'
-                    if selected_state.get('failures'):
-                        row['state'] = 'degraded'
+                selector = getattr(ch, 'selector', None)
+            if selector is not None:
+                row['selection'] = selector.snapshot()
+                selected = row['selection']['selected']
+                selected_state = row['selection']['sources'].get(selected, {})
+                row['last_success'] = selected_state.get('last_success') or row['last_success']
+                if row['state'] == 'unobserved' and row['last_success']:
+                    row['state'] = 'playlist_only'
+                if selected_state.get('failures'):
+                    row['state'] = 'degraded'
         result.append(row)
     return result
 
@@ -5781,7 +5931,7 @@ function cell(tr,value){const td=document.createElement('td');td.textContent=val
 function action(td,label,callback){const b=document.createElement('button');b.textContent=label;b.onclick=callback;td.append(b)}
 function anchor(td,label,url){const a=document.createElement('a');a.textContent=label;a.href=url;td.append(a)}
 function ago(t){return t?Math.max(0,Math.round(Date.now()/1000-t))+' 秒前':'未观测'}
-async function refresh(){if(refreshing)return;refreshing=true;try{const data=await api('/api/channels');$('notice').textContent='';$('summary').textContent=`${data.channels.length} 个频道 · ${{quality:'画质优先',stable:'稳定优先',bandwidth:'节省流量'}[data.playback_policy]||'画质优先'} · 正常推进 ${data.channels.filter(c=>c.state==='ready').length} 个 · EPG ${data.epg.enabled?(data.epg.loading?'更新中':data.epg.programmes+' 个节目'):'未启用'}`;$('subscribe').href=link('/all.m3u');const filter=$('search').value.toLowerCase(),old=$('channel').value;$('channels').replaceChildren();$('channel').replaceChildren();for(const ch of data.channels){if(ch.catchup_supported){const o=document.createElement('option');o.value=ch.slug;o.textContent=ch.name;$('channel').append(o)}if(!(ch.name+' '+ch.slug).toLowerCase().includes(filter))continue;const tr=document.createElement('tr');cell(tr,ch.name);cell(tr,states[ch.state]||ch.state).className=ch.state;cell(tr,ch.source||'未选择');const s=ch.selection.sources[ch.selection.selected]||{};cell(tr,(s.playlist_resolution||'未观测')+' / '+(s.latency_ms==null?'—':s.latency_ms+' ms'));const check=s.segment_content;cell(tr,s.content_probing?'检测中':!check?'未检测':check.ok===true?'内容前缀可用':check.ok===false?'内容异常':'未确认');cell(tr,ago(ch.last_progress));const td=cell(tr,'');action(td,'节目',()=>showEPG(ch.slug,ch.name));action(td,'诊断',()=>diagnose(ch.slug));anchor(td,'直播',link('/'+ch.slug+'.m3u8'));$('channels').append(tr)}if(old)$('channel').value=old;if(selected)await showEPG(selected)}catch(e){$('notice').textContent=e.message}finally{refreshing=false}}
+async function refresh(){if(refreshing)return;refreshing=true;try{const data=await api('/api/channels');$('notice').textContent='';$('summary').textContent=`${data.channels.length} 个频道 · ${{quality:'画质优先',stable:'稳定优先',bandwidth:'节省流量'}[data.playback_policy]||'画质优先'} · 正常推进 ${data.channels.filter(c=>c.state==='ready').length} 个 · EPG ${data.epg.enabled?(data.epg.loading?'更新中':data.epg.programmes+' 个节目'):'未启用'}`;$('subscribe').href=link('/all.m3u');const filter=$('search').value.toLowerCase(),old=$('channel').value;$('channels').replaceChildren();$('channel').replaceChildren();for(const ch of data.channels){if(ch.catchup_supported){const o=document.createElement('option');o.value=ch.slug;o.textContent=ch.name;$('channel').append(o)}if(!(ch.name+' '+ch.slug).toLowerCase().includes(filter))continue;const tr=document.createElement('tr');cell(tr,ch.name);cell(tr,states[ch.state]||ch.state).className=ch.state;cell(tr,ch.source||'未选择');const s=ch.selection.sources[ch.selection.selected]||{};cell(tr,(s.playlist_resolution?(s.playlist_resolution+(s.profile_fresh===false?'（旧声明）':'')):'未观测')+' / '+(s.latency_ms==null?'—':s.latency_ms+' ms'));const check=s.segment_content;cell(tr,s.content_probing?'检测中':!check?'未检测':check.ok===true?'内容前缀可用':check.ok===false?'内容异常':'未确认');cell(tr,ago(ch.last_progress));const td=cell(tr,'');action(td,'节目',()=>showEPG(ch.slug,ch.name));action(td,'诊断',()=>diagnose(ch.slug));anchor(td,'直播',link('/'+ch.slug+'.m3u8'));$('channels').append(tr)}if(old)$('channel').value=old;if(selected)await showEPG(selected)}catch(e){$('notice').textContent=e.message}finally{refreshing=false}}
 async function showEPG(slug,name){selected=slug;if(name)$('epgtitle').textContent=name+' · 节目单与回看';try{const data=await api('/api/epg?channel='+encodeURIComponent(slug));$('epgstate').textContent=!data.enabled?'EPG 未启用':data.loading?'节目单正在后台更新，请稍后刷新':data.error?'更新失败，保留旧缓存：'+data.error:data.programmes.length?'显示缓存节目；回看范围是本地校验上限，不代表上游保证。':'暂无匹配节目';if(data.current)$('epgstate').textContent+=' · 正在播：'+data.current.title;if(data.next)$('epgstate').textContent+=' · 接下来：'+data.next.title;$('programmes').replaceChildren();for(const p of data.programmes){const tr=document.createElement('tr');cell(tr,new Date(p.start*1000).toLocaleString()+' — '+new Date(p.stop*1000).toLocaleTimeString());cell(tr,p.title);const td=cell(tr,'');if(p.catchup_url)anchor(td,'从头回看',p.catchup_url);$('programmes').append(tr)}}catch(e){$('epgstate').textContent=e.message}}
 async function diagnose(slug){clearTimeout(pollTimer);try{const d=await api('/api/diagnose?channel='+encodeURIComponent(slug));$('diagnosis').textContent=JSON.stringify(d,null,2);if(d.running)pollTimer=setTimeout(()=>diagnose(slug),1500)}catch(e){$('diagnosis').textContent=e.message}}
 $('connect').onclick=()=>{token=$('token').value.trim();try{sessionStorage.setItem('ysp-token',token)}catch(e){}refresh()};$('search').oninput=refresh;
@@ -5861,20 +6011,57 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(500, 'internal server error\n', head_only=head_only)
 
-    def _playlist(self, ch, playlist, source, head_only, extra=None):
+    def _prepare_playlist(self, ch, playlist, source, head_only, extra=None):
         try:
             with ch.publication_lock:
                 if head_only and ch._publication:
                     source = ch._publication['source']
+                validate_source_playlist(playlist)
                 playlist = publish_channel_playlist(ch, playlist, source, head_only=head_only)
+                if not head_only and ch._publication:
+                    ch._publication['prepared_at'] = time.monotonic()
+                headers = dict(extra or {})
+                headers['X-Source'] = source
+                headers['X-Source-Epoch'] = str(ch.source_epoch)
+                if ch.source_restart_required:
+                    headers['X-Stream-Restart'] = 'required'
+                return playlist, headers
         except (FrozenPlaylistError, UnsafePlaylist) as exc:
             log(f'[{ch.slug}] 媒体停滞/格式受限: {type(exc).__name__}', min_interval=10)
-            return False
-        headers = dict(extra or {})
-        headers['X-Source'] = source
-        headers['X-Source-Epoch'] = str(ch.source_epoch)
-        if ch.source_restart_required:
-            headers['X-Stream-Restart'] = 'required'
+            return None
+
+    def _playlist(self, ch, playlist, source, head_only, extra=None,
+                  selector=None, source_key=None, expected_epoch=None):
+        guard = selector.lock if selector is not None and not head_only else contextlib.nullcontext()
+        with guard:
+            if selector is not None and not head_only:
+                state = selector._state(source_key)
+                if state['validation_epoch'] != expected_epoch or state['failures']:
+                    state['discarded_attempts'] += 1
+                    raise SourceAttemptSuperseded('source failed before playlist publication')
+            prepared = self._prepare_playlist(ch, playlist, source, head_only, extra)
+            if prepared is None:
+                return False
+            if selector is not None and not head_only:
+                selector.commit(source_key)
+        # A slow socket must never hold the channel's selection/publication locks.
+        playlist, headers = prepared
+        self._send(200, playlist, 'application/vnd.apple.mpegurl', head_only, headers)
+        return True
+
+    def _current_playlist(self, ch, selector, head_only=False):
+        with selector.lock:
+            selected = selector.selected
+            if not selected or selector._state(selected)['failures']:
+                return False
+            with ch.publication_lock:
+                state = ch._publication
+                if not state or state['source'].split(':', 1)[0] != selected or time.monotonic() - state.get('prepared_at', 0) > 15:
+                    return False
+                playlist = state['snapshot']
+                headers = {'X-Source': state['source'], 'X-Source-Epoch': str(ch.source_epoch), 'X-SWR': 'CURRENT'}
+                if ch.source_restart_required:
+                    headers['X-Stream-Restart'] = 'required'
         self._send(200, playlist, 'application/vnd.apple.mpegurl', head_only, headers)
         return True
 
@@ -6072,22 +6259,29 @@ class Handler(BaseHTTPRequestHandler):
             schedule_source_probe(selector, loaders, origin)
         for source in selector.order(loaders):
             started = time.monotonic()
+            attempt_epoch = selector.attempt_token(source)
+            accepted_epoch = attempt_epoch
             try:
                 playlist, published_source, extra = loaders[source]()
                 if not playlist or '#EXTM3U' not in playlist:
                     raise RuntimeError('empty source playlist')
                 if not head_only:
-                    selector.success(source, playlist, time.monotonic() - started)
-                if self._playlist(ch, playlist, published_source, head_only, extra):
+                    accepted_epoch = selector.success(source, playlist, time.monotonic() - started,
+                        expected_epoch=attempt_epoch, context=published_source)
+                if self._playlist(ch, playlist, published_source, head_only, extra,
+                                  selector, source, accepted_epoch):
                     if not head_only:
-                        selector.commit(source)
                         if media_probe_manager:
                             media_probe_manager.schedule(selector, source, playlist, origin)
                     return
                 raise FrozenPlaylistError('published source is stale or unsupported')
+            except SourceAttemptSuperseded:
+                if self._current_playlist(ch, selector, head_only):
+                    return
+                continue
             except Exception as exc:
                 if not head_only:
-                    selector.failure(source, type(exc).__name__ + ': ' + str(exc))
+                    selector.failure(source, type(exc).__name__ + ': ' + str(exc), expected_epoch=accepted_epoch)
                 log(f'[{canonical}] {source}源降级: {type(exc).__name__}', min_interval=10)
         self._send(503, f'频道 {ch.name} 暂无数据，请稍后重试\n', head_only=head_only,
                    extra_headers={'Retry-After': '2'})
