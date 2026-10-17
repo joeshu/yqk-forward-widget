@@ -11,7 +11,7 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from ysp_hls import parse_media, render_media, rewrite_uris, select_variant, UnsafePlaylist
-SPEC = importlib.util.spec_from_file_location('ysp_live_hls_tests', ROOT / 'ysp-live-v9.5.5.py')
+SPEC = importlib.util.spec_from_file_location('ysp_live_hls_tests', ROOT / 'ysp-live-v9.5.6.py')
 live = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = live
 SPEC.loader.exec_module(live)
@@ -50,7 +50,7 @@ class HlsTests(unittest.TestCase):
 
     def test_fetch_uses_effective_redirect_url(self):
         body = b'#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:6,\none.ts\n'
-        with mock.patch.object(live, 'fetch_bytes', return_value=(200, {}, body, 'https://redirect.example/final/list.m3u8')):
+        with mock.patch.object(live, 'fetch_playlist_urllib', return_value=(200, {}, body, 'https://redirect.example/final/list.m3u8')):
             result = live.fetch_abs_playlist('https://original.example/old/list.m3u8')
         self.assertIn('https://redirect.example/final/one.ts', result)
         self.assertIn('URI="https://redirect.example/final/key"', result)

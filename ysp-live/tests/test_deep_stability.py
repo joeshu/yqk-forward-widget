@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_deep_stability', ROOT / 'ysp-live-v9.5.5.py')
+spec = importlib.util.spec_from_file_location('ysp_deep_stability', ROOT / 'ysp-live-v9.5.6.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)
@@ -453,7 +453,7 @@ class NetworkBudgetTests(unittest.TestCase):
             if clock[0] > kwargs['deadline']:
                 raise live.ProxyError(504, 'deadline')
             return 200, {}, master, url
-        with mock.patch.object(live.time, 'monotonic', side_effect=lambda: clock[0]), mock.patch.object(live, 'fetch_bytes', side_effect=fetch):
+        with mock.patch.object(live.time, 'monotonic', side_effect=lambda: clock[0]), mock.patch.object(live, 'fetch_playlist_urllib', side_effect=fetch):
             with self.assertRaises(live.ProxyError) as error:
                 live.fetch_abs_playlist('https://media.cctv.cn/list.m3u8', quality='best')
         self.assertEqual(error.exception.status, 504)
@@ -463,7 +463,7 @@ class NetworkBudgetTests(unittest.TestCase):
     def test_more_specific_nested_master_metadata_takes_precedence(self):
         top = b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=20000000,RESOLUTION=3840x2160\nchild.m3u8\n'
         child = b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\nmedia.m3u8\n'
-        with mock.patch.object(live, 'fetch_bytes', side_effect=[
+        with mock.patch.object(live, 'fetch_playlist_urllib', side_effect=[
                 (200, {}, top, 'https://media.cctv.cn/top.m3u8'),
                 (200, {}, child, 'https://media.cctv.cn/child.m3u8'),
                 (200, {}, media().encode(), 'https://media.cctv.cn/media.m3u8')]):
@@ -474,11 +474,44 @@ class NetworkBudgetTests(unittest.TestCase):
         body = media(uri='https://media.cctv.cn/profile-isolation.ts').encode()
         for height in (2160, 1080):
             parent = f'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=10000000,RESOLUTION=3840x{height}\nmedia.m3u8\n'.encode()
-            with mock.patch.object(live, 'fetch_bytes', side_effect=[
+            with mock.patch.object(live, 'fetch_playlist_urllib', side_effect=[
                     (200, {}, parent, 'https://media.cctv.cn/root.m3u8'),
                     (200, {}, body, 'https://media.cctv.cn/media.m3u8')]):
                 result = live.fetch_abs_playlist('https://media.cctv.cn/root.m3u8', quality='best')
             self.assertEqual(live.analyze_playlist(result).profile.height, height)
+
+    def test_urllib_path_accepts_nonpublic_dns_without_custom_policy_and_uses_redirect_base(self):
+        body = b'#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:6,\nseg.ts\n'
+        class Origin(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                if self.path == '/start.m3u8':
+                    self.send_response(302)
+                    self.send_header('Location', '/final/list.m3u8')
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Origin)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        base = f'http://127.0.0.1:{server.server_port}'
+        try:
+            with mock.patch.dict(os.environ, {'NO_PROXY': '127.0.0.1', 'no_proxy': '127.0.0.1'}), \
+                 mock.patch.object(live.URLPolicy, 'resolve', side_effect=AssertionError('unexpected address policy')) as policy, \
+                 mock.patch.object(live, 'bounded_dns_addresses', side_effect=AssertionError('unexpected custom DNS')) as dns:
+                result = live.fetch_abs_playlist(base + '/start.m3u8', quality='best')
+                self.assertIn(base + '/final/seg.ts', result)
+                self.assertIn('URI="' + base + '/final/key.bin"', result)
+                policy.assert_not_called()
+                dns.assert_not_called()
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(2)
 
     def test_real_socket_oversized_playlist_is_rejected(self):
         payload = b'#EXTM3U\n' + b'#padding\n' * 240000
@@ -498,10 +531,9 @@ class NetworkBudgetTests(unittest.TestCase):
         thread.start()
         try:
             url = f'http://127.0.0.1:{server.server_port}/large.m3u8'
-            policy = live.URLPolicy(('127.0.0.1',), allow_private=True)
             with mock.patch.dict(os.environ, {'NO_PROXY': '127.0.0.1', 'no_proxy': '127.0.0.1'}):
                 with self.assertRaises(live.ProxyError) as error:
-                    live.fetch_abs_playlist(url, policy=policy)
+                    live.fetch_abs_playlist(url)
             self.assertEqual(error.exception.status, 502)
         finally:
             server.shutdown()

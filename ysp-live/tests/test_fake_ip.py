@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_fake_ip_tests', ROOT / 'ysp-live-v9.5.5.py')
+spec = importlib.util.spec_from_file_location('ysp_fake_ip_tests', ROOT / 'ysp-live-v9.5.6.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)
@@ -86,13 +86,14 @@ class FakeIPTests(unittest.TestCase):
                  mock.patch.object(live, 'bounded_dns_addresses', return_value=['198.18.0.7']), \
                  mock.patch.object(live.urllib.request, 'getproxies', return_value={}), \
                  mock.patch.object(live.socket, 'create_connection', side_effect=route):
-                text = live.fetch_abs_playlist('http://media.cctv.cn/live.m3u8', quality='best')
+                _, _, data, _ = live.fetch_bytes('http://media.cctv.cn/live.m3u8')
+                text = live.rewrite_playlist_urls(data.decode(), 'http://media.cctv.cn/live.m3u8')
                 uri = live.parse_media(text).segments[0].uri
                 self.assertEqual(uri, 'http://media.cctv.cn/seg.ts')
                 status, _, body, _ = live.fetch_bytes(uri)
                 self.assertEqual((status, body), (200, payload))
                 with self.assertRaises(live.ProxyError):
-                    live.fetch_abs_playlist('http://media.cctv.cn/redirect.m3u8')
+                    live.fetch_bytes('http://media.cctv.cn/redirect.m3u8')
                 self.assertEqual(len(destinations), 3)
         finally:
             upstream.shutdown()
