@@ -1,29 +1,29 @@
-ysp-live 9.5.9-local 本地优化版
+ysp-live 9.5.10-local 本地优化版
 
-这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.9.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
+这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.10.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
 
 1. 启动与升级
 
 需要 Python 3.10+；伴生引擎需要 Node.js 20+（建议22/24）。没有 pip 或 npm 第三方依赖。本次实际验证环境是 Linux、Python 3.12、Node.js 24。
 
 ```sh
-python ysp-live-v9.5.9.py 8767 --data-dir ./data
+python ysp-live-v9.5.10.py 18767 --data-dir ./data
 ```
 
 启动后在播放器订阅：
 
 ```text
-http://服务器IP:8767/all.m3u
+http://服务器IP:18767/all.m3u
 ```
 
-浏览器打开 `http://服务器IP:8767/status` 可查看频道状态、节目单、回看入口并运行诊断。状态只反映已观测结果，打开状态页不会自动逐个播放频道。
+浏览器打开 `http://服务器IP:18767/status` 可查看频道状态、节目单、回看入口并运行诊断。状态只反映已观测结果，打开状态页不会自动逐个播放频道。
 
 Python 会自动启动同目录的 Node 引擎，后者只监听127.0.0.1:8787。退出Python会一同停止由它启动的引擎；已存在的外部引擎只在身份检查通过后使用，不负责终止。
 
 仅使用1080p备用路径、不启动设备注册与Node：
 
 ```sh
-python ysp-live-v9.5.9.py 8767 --data-dir ./data --no-4k --no-engine
+python ysp-live-v9.5.10.py 18767 --data-dir ./data --no-4k --no-engine
 ```
 
 9.5.9 针对六个方面修复与优化：
@@ -53,7 +53,7 @@ python ysp-live-v9.5.9.py 8767 --data-dir ./data --no-4k --no-engine
 
 设备源与媒体代理沿用原有目标检查；如需让这些路径支持可信代理的 `198.18.0.0/15` Fake-IP，可继续使用 `--allow-fake-ip` 或环境变量 `YSP_ALLOW_FAKE_IP=1`。这项可选设置不是备用播放列表下载的前提。
 
-旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.9.py`，停止旧进程再启动新进程。
+旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.10.py`，停止旧进程再启动新进程。
 
 升级时先停止旧程序，备份原文件及数据目录，将原 device-state-rs.json、proxy-cache-state-rs.json 放入新的 --data-dir。不要同时运行新旧进程使用同一数据目录。旧文件格式继续兼容；运行中的会话会重新建立。
 
@@ -145,7 +145,7 @@ python ysp-live-v9.5.9.py 8767 --data-dir ./data --no-4k --no-engine
 低内存部署示例（临时目录可放实际可用的磁盘）：
 
 ```sh
-python ysp-live-v9.5.9.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
+python ysp-live-v9.5.10.py 18767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
 ```
 
 临时目录若在tmpfs，文件也会消耗系统内存；--cache-mb限制的是程序的完成缓存，不能代表整个进程或整台机器的总内存。使用磁盘目录会产生持续分片写入，应按设备存储选择 --temp-dir。
@@ -179,7 +179,7 @@ python ysp-live-v9.5.9.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 
 EPG配置示例：
 
 ```sh
-python ysp-live-v9.5.9.py 8767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
+python ysp-live-v9.5.10.py 18767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
 ```
 
 也可用 `YSP_EPG_URL` 配置逗号分隔的源。显式 `--epg-url` 覆盖环境变量；`--no-epg` 禁用。EPG启动时预加载，独立调度按配置间隔刷新；获取订阅和节目接口也可触发到期刷新，状态和健康检查不触发下载。多个源按频道和北京时间日期补齐，低优先级来源不覆盖已有日期并避免跨日重叠。EPG通过urllib使用系统DNS/代理和重定向处理，不额外检查DNS结果是否为公网。首次XML GET最多等待8秒，已有缓存立即返回；HEAD不触发下载。压缩下载最多8MiB，展开XML最多32MiB，拒绝DTD/实体声明；保留匹配本地频道、过去7天至未来2天内的节目。无时区的XMLTV时间按UTC解释；手动回看使用浏览器本地时区转换的Unix秒。

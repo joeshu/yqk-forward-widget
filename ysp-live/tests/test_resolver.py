@@ -15,7 +15,7 @@ from unittest import mock
 
 ROOT =Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-spec =importlib.util.spec_from_file_location('ysp_live_resolver_tests', ROOT /'ysp-live-v9.5.9.py')
+spec =importlib.util.spec_from_file_location('ysp_live_resolver_tests', ROOT /'ysp-live-v9.5.10.py')
 live =importlib.util.module_from_spec(spec)
 sys.modules[spec.name] =live
 spec.loader.exec_module(live)
