@@ -1,4 +1,4 @@
-ysp-live 9.5.1-local 本地优化版
+ysp-live 9.5.2-local 本地优化版
 
 这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
 
@@ -16,6 +16,8 @@ python ysp-live.py 8767 --data-dir ./data
 http://服务器IP:8767/all.m3u
 ```
 
+浏览器打开 `http://服务器IP:8767/status` 可查看频道状态、节目单、回看入口并运行诊断。状态只反映已观测结果，打开状态页不会自动逐个播放频道。
+
 Python 会自动启动同目录的 Node 引擎，后者只监听127.0.0.1:8787。退出Python会一同停止由它启动的引擎；已存在的外部引擎只在身份检查通过后使用，不负责终止。
 
 仅使用1080p备用路径、不启动设备注册与Node：
@@ -27,6 +29,17 @@ python ysp-live.py 8767 --data-dir ./data --no-4k --no-engine
 升级时先停止旧程序，备份原文件及数据目录，将原 device-state-rs.json、proxy-cache-state-rs.json 放入新的 --data-dir。不要同时运行新旧进程使用同一数据目录。旧文件格式继续兼容；运行中的会话会重新建立。
 
 2. 本版主要变化
+
+9.5.2 新增：
+
+- `/status` 是内嵌页面，不需要外部网页文件或前端依赖。显示频道来源、列表声明分辨率、请求耗时、媒体推进、节目单和主动诊断。
+- 按频道保持当前可用来源。失败按5、10、20…秒退避，最多120秒；回切前至少保持当前来源30秒，并要求更优先来源两次不同分片的成功观测。恢复探测由有界后台池执行，每个来源最短间隔30秒；仅成功获取主列表不会认定媒体恢复。
+- 选源仍按设备源、Python备用源、Node引擎的优先级工作，不凭一次请求耗时就降低画质。Python备用源内部保留JCE/BK恢复机制；分片令牌变化不会被当作媒体推进。
+- 新增可配置XMLTV/XMLTV.gz接入、本地内存与磁盘缓存、上次有效缓存回退。EPG按需后台更新，失败重试间隔60秒，未加载时XML接口返回503和Retry-After。默认源沿用原订阅中的两个EPG服务，不保证第三方服务可用。
+- 订阅的url-tvg指向本地 `/epg.xml`，EPG频道ID与订阅统一。支持ETag条件请求。状态页展示正在播、接下来和节目回看链接，也可手动输入时间生成回看入口。
+- `/api/diagnostics` 下载脱敏报告；`/api/diagnose?channel=cctv1` 显式触发分层检查。主动诊断有并发、队列和30秒重复请求限制，不发布或切换播放时间线。HEAD仅验证响应元数据，不验证视频解码。
+
+此前已实现：
 
 - 同一分片一个上游下载、多个独立读取者，首个观众断开不会取消其他人的下载。
 - 进行中内容使用临时文件与独立读游标，完成缓存由不可变分块构成，避免原先bytearray转bytes整片复制。慢读者持有的已淘汰缓存仍计入RAM预算。
@@ -67,6 +80,9 @@ python ysp-live.py 8767 --data-dir ./data --no-4k --no-engine
 | --public-base-url | 空 | 反代公开origin，例如https://tv.example.com；不支持路径前缀 |
 | --trust-proxy | 关闭 | 只在可信反代环境启用，允许X-Forwarded-Proto |
 | --access-token | 环境变量或空 | 可选访问令牌，推荐用YSP_ACCESS_TOKEN传入 |
+| --epg-url | 原订阅中的两个EPG源 | XMLTV或XMLTV.gz公网地址，重复指定可配置最多3个，依次回退 |
+| --epg-refresh | 3600 | EPG按需刷新间隔秒，最小60 |
+| --no-epg | 关闭 | 禁用EPG下载与本地XMLTV服务 |
 
 低内存部署示例（临时目录可放实际可用的磁盘）：
 
@@ -78,13 +94,19 @@ python ysp-live.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --downl
 
 4. 访问令牌、反向代理与诊断
 
-可设置YSP_ACCESS_TOKEN，播放器订阅地址使用 /all.m3u?access_token=你的令牌。订阅内频道地址会携带访问令牌，媒体资源使用短期独立令牌；HTTP客户端也可使用Authorization: Bearer。/livez不要求令牌，其余管理/频道接口要求令牌。短期资源令牌重启后失效，重新取得播放列表即可。
+可设置YSP_ACCESS_TOKEN，播放器订阅地址使用 /all.m3u?access_token=你的令牌。订阅内频道地址会携带访问令牌，媒体资源使用短期独立令牌；HTTP客户端也可使用Authorization: Bearer。/livez和/status页面外壳不要求令牌；状态数据、诊断、节目单和频道接口要求令牌。可在状态页输入令牌，页面使用Bearer请求API；订阅和回看链接携带query令牌。短期资源令牌重启后失效，重新取得播放列表即可。
 
 公开地址推荐固定 --public-base-url https://tv.example.com。只有可信反代才设置 --trust-proxy；默认不会信任任意客户端传入的X-Forwarded-Proto。自带白名单只允许既有CCTV及常见CDN域名与公网地址；如果上游以后换到新的CDN域名，应审查后同时更新Python与Node白名单，不能关闭私网校验。
 
 - /livez：进程存活，正常200。
 - /health 与 /readyz：当前设备协议或已观测频道是否就绪；冷启动未拉取媒体时可能503。不是所有64个频道逐一可用的保证。
-- /diag：只读诊断，含频道进展和共享下载指标；配置访问令牌后受保护。
+- /status：频道状态、节目单、手动回看、主动诊断和报告下载。
+- /api/channels：被动读取频道状态和选源观测，不主动拉流。
+- /diag、/api/diagnostics：只读脱敏诊断；配置访问令牌后受保护。
+- /api/diagnose?channel=cctv1：显式触发播放列表、DNS策略与分片HEAD检查；重复请求加入同一任务。
+- /api/epg?channel=cctv1：节目列表、正在播与接下来；GET按需触发后台更新。
+- /epg.xml：本地XMLTV，EPG源不可用时优先保留旧缓存，并通过X-EPG-Stale标明过期。
+- /api/catchup?channel=cctv1&start=...&end=...：校验时间并生成回看链接，不会提前承诺上游可播。
 - /all.m3u、/<频道>.m3u8：保留原订阅与频道入口。
 - /proxy、/proxy.ts、/engine_proxy：只接受程序生成的短期资源令牌，不再接受任意目标URL。
 
@@ -95,6 +117,16 @@ python ysp-live.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --downl
 回看支持start/end（Unix秒、毫秒或带时区ISO）及原playseek格式。无时区的日期按中国标准时间解释。显式无效、未来或倒序范围返回400，不支持频道返回422，上游失败返回502。请求窗口最多7天、单次最多24小时是本地校验上限，实际可用范围取决于上游。只有显式加fallback=live才在回看失败时继续直播。
 
 --quality控制Python备用源；--device-rate控制设备协议；Node目前保留各频道原始请求档位。频道名和档位标签不等同于实测分辨率/码率，实际画质及codec需要真实播放器确认。复杂LL-HLS或无法安全重新编号的加密格式保留原列表，可能需要播放器重开。
+
+EPG配置示例：
+
+```sh
+python ysp-live.py 8767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
+```
+
+也可用 `YSP_EPG_URL` 配置逗号分隔的源。显式 `--epg-url` 覆盖环境变量；`--no-epg` 禁用。EPG只在节目接口被请求时刷新，状态和健康检查不触发下载。公网目标、重定向和响应大小有检查；默认不访问私网EPG。压缩下载最多8MiB，展开XML最多32MiB，拒绝DTD/实体声明；保留匹配本地频道、过去7天至未来2天内的节目。无时区的XMLTV时间按UTC解释；手动回看使用浏览器本地时区转换的Unix秒。
+
+EPG缓存写在 `--data-dir/epg-cache.json`。磁盘写入失败时仍保留内存中的有效节目单。节目单仅用于展示和生成链接，不增加上游回看时长；回看频道支持是本地能力表，`verified=false` 表示尚未实际请求上游验证。
 
 6. Node可选配置
 
@@ -109,6 +141,6 @@ python -m unittest discover -s tests -p "test_*.py" -v
 node --test tests/test_engine.js
 ```
 
-测试包括真实本地HTTP/HTTPS socket、8客户端共享下载、首字节流式发送、客户端断开、HEAD/Range、截断、重定向、目标限制、预算、关闭异常、冻结、HLS加密/时移时间线、原子落盘与Python/Node进程启停。TLS测试需要openssl；测试上游均为内存替身或本地服务，不会调用真实注册/播放/遥测接口。具体结果见同目录测试日志及RELEASE.json。
+测试包括真实本地HTTP/HTTPS socket、8客户端共享下载、首字节流式发送、客户端断开、HEAD/Range、截断、重定向、目标限制、预算、关闭异常、冻结、HLS加密/时移时间线、原子落盘与Python/Node进程启停。TLS测试需要openssl；测试上游均为内存替身或本地服务，不会调用真实注册/播放/遥测接口。新增回归覆盖选源冷却/回切、防抖探测、代理令牌轮换、诊断脱敏与合并、XMLTV时区/压缩/大小限制、EPG缓存和令牌保护。
 
 仍需在你的部署设备和播放器上验证真实频道、码率、首帧、切源和长时间运行。本次没有对真实直播源作性能或可用性承诺。

@@ -463,8 +463,18 @@ def pdt_seconds(value):
     except (TypeError, ValueError, OverflowError):
         return None
 
-def stable_uri(uri):
+def stable_uri(uri, _depth=0):
     p = urllib.parse.urlsplit(uri)
+    # Opaque gateway tokens can rotate while the underlying segment stays unchanged.
+    if _depth < 2:
+        query_parts = urllib.parse.parse_qs(p.query)
+        if p.path in ('/proxy', '/proxy.ts', '/engine_proxy') and query_parts.get('resource'):
+            try:
+                return stable_uri(resolve_resource(query_parts['resource'][0]).url, _depth + 1)
+            except (ProxyError, NameError):
+                pass
+        if p.path == '/segment' and p.hostname in ('127.0.0.1', 'localhost') and query_parts.get('url'):
+            return stable_uri(query_parts['url'][0], _depth + 1)
     # Preserve query parameters that may identify the media itself.
     query = urllib.parse.urlencode([(k, v) for k, v in urllib.parse.parse_qsl(p.query, keep_blank_values=True) if k.lower() not in _VOLATILE])
     return urllib.parse.urlunsplit((p.scheme, p.netloc, p.path, query, ''))
@@ -1443,7 +1453,7 @@ import urllib .parse
 import urllib .request 
 import uuid 
 from collections import deque 
-__version__ = '9.5.1-local'
+__version__ = '9.5.2-local'
 AUTHOR_COMMUNITY ='https://t.me/garysclub'
 AUTHOR_CHANNEL ='https://t.me/garysclubchannel'
 AUTHOR_NOTICE =f'''📢 首发地址
@@ -4765,6 +4775,548 @@ def fetch_upstream_engine_playlist(canonical: str, host: str, proto: str = 'http
         except Exception:
             continue
     return None
+# Operational features remain in this file so deployment needs only ysp-live.py.
+import html
+import io
+import xml.etree.ElementTree as ET
+
+
+def redact_diagnostic(value, secrets_to_hide=()):
+    text = str(value)
+    for secret in secrets_to_hide:
+        if secret:
+            text = text.replace(secret, '[hidden]')
+    # Strip URLs completely: signed values and device IDs can also live in paths.
+    text = re.sub(r'https?://[^\s<>\"\']+', '[url hidden]', text, flags=re.I)
+    text = re.sub(r'(?i)\b(bearer)\s+\S+', r'\1 [hidden]', text)
+    text = re.sub(r'''(?ix)(["']?\b(?:access_token|token|resource|authorization|cookie|uid|guid|android_id|androidid|device_id|deviceid|appid|apprandomstr|appsign|signature)["']?\s*[:=]\s*) (?:"[^"\n]*"|'[^'\n]*'|[^\s,;}]+)''', r'\1[hidden]', text)
+    return text[:2000]
+
+
+class SourceSelector:
+    """Sticky per-channel routing with bounded recovery probes and circuit backoff."""
+    priority = ('device', 'backup', 'engine')
+
+    def __init__(self, hold=30.0, clock=time.monotonic):
+        self.lock = threading.RLock()
+        self.clock, self.hold = clock, hold
+        self.selected, self.since = '', 0.0
+        self.states = {}
+
+    def _state(self, source):
+        return self.states.setdefault(source, dict(failures=0, successes=0, retry_at=0.0,
+            latency_ms=None, last_ok=0.0, error='', signature=None, progress_at=0.0,
+            recovery_samples=0, probe_at=0.0, probing=False, resolution=None))
+
+    def order(self, available):
+        with self.lock:
+            now = self.clock()
+            order = [s for s in self.priority if s in available and self._state(s)['retry_at'] <= now]
+            current = self.selected
+            if current in order:
+                promoted = [s for s in order if self.priority.index(s) < self.priority.index(current)
+                            and self._state(s)['recovery_samples'] >= 2 and now - self.since >= self.hold]
+                order = promoted + [current] + [s for s in order if s != current and s not in promoted]
+            return order
+
+    def success(self, source, playlist, elapsed, probe=False):
+        signature, target = media_signature(playlist)
+        now = self.clock()
+        resolution = re.findall(r'RESOLUTION=(\d+x\d+)', playlist)
+        with self.lock:
+            state = self._state(source)
+            if signature is not None:
+                if signature != state['signature']:
+                    state['progress_at'] = now
+                    state['recovery_samples'] += 1
+                elif now - state['progress_at'] > max(3 * target, 30):
+                    raise FrozenPlaylistError('source probe: media stopped advancing')
+            else:
+                # A master playlist does not prove that its media is advancing.
+                state['recovery_samples'] = 0
+            state['signature'] = signature
+            state['successes'] += 1
+            state['failures'], state['retry_at'], state['error'] = 0, 0.0, ''
+            state['last_ok'] = time.time()
+            value = max(0, elapsed * 1000)
+            state['latency_ms'] = value if state['latency_ms'] is None else .7 * state['latency_ms'] + .3 * value
+            if resolution:
+                state['resolution'] = max(resolution, key=lambda s: math.prod(map(int, s.split('x'))))
+
+    def failure(self, source, error):
+        with self.lock:
+            state = self._state(source)
+            state['failures'] += 1
+            state['recovery_samples'] = 0
+            state['retry_at'] = self.clock() + min(120, 5 * 2 ** min(state['failures'] - 1, 5))
+            state['error'] = redact_diagnostic(error)
+
+    def commit(self, source):
+        with self.lock:
+            if source != self.selected:
+                self.selected, self.since = source, self.clock()
+                for name, state in self.states.items():
+                    if name != source:
+                        state['recovery_samples'] = 0
+
+    def reserve_probe(self, available):
+        with self.lock:
+            now = self.clock()
+            if not self.selected or now - self.since < self.hold:
+                return None
+            for source in self.priority[:self.priority.index(self.selected)]:
+                if source not in available:
+                    continue
+                state = self._state(source)
+                if not state['probing'] and now >= max(state['probe_at'], state['retry_at']):
+                    state['probing'], state['probe_at'] = True, now + 30
+                    return source
+            return None
+
+    def snapshot(self):
+        with self.lock:
+            now = self.clock()
+            return {'selected': self.selected or None,
+                    'stable_seconds': round(max(0, now - self.since)) if self.selected else 0,
+                    'sources': {name: {'failures': s['failures'], 'successes': s['successes'],
+                        'retry_in': round(max(0, s['retry_at'] - now), 1),
+                        'latency_ms': round(s['latency_ms'], 1) if s['latency_ms'] is not None else None,
+                        'last_success': s['last_ok'] or None, 'error': s['error'],
+                        'recovery_samples': s['recovery_samples'], 'probing': s['probing'],
+                        'playlist_resolution': s['resolution']}
+                        for name, s in self.states.items()}}
+
+
+feature_pool = ThreadPoolExecutor(max_workers=2, max_queue=8, thread_name_prefix='source-probe')
+diagnostic_pool = ThreadPoolExecutor(max_workers=1, max_queue=4, thread_name_prefix='diagnose')
+diagnostic_lock = threading.Lock()
+diagnostic_jobs = {}
+epg_manager = None
+
+
+def channel_selector(ch):
+    with ch.lock:
+        if not hasattr(ch, 'selector'):
+            ch.selector = SourceSelector()
+        return ch.selector
+
+
+def source_loaders(ch, origin, head_only=False):
+    parsed = urllib.parse.urlsplit(origin)
+    loaders = {}
+    if ch.slug in active_backend_channels and resolver_ready() and resolver:
+        def device():
+            if resolver.is_channel_in_cooldown(ch.slug):
+                raise RuntimeError('device source is cooling down')
+            method = getattr(resolver, 'fetch_channel_playlist_bounded', resolver.fetch_channel_playlist)
+            return method(ch.slug, parsed.netloc, parsed.scheme), 'device', {}
+        loaders['device'] = device
+
+    def backup():
+        now = time.time()
+        with ch.lock:
+            cached, age = ch.last_built_playlist, now - ch.last_built_time
+            source = getattr(ch, 'last_built_source', 'backup:' + ch.mode)
+        if cached and age < 15 and '#EXTM3U' in cached:
+            if age > 6 and not head_only:
+                trigger_background_refresh(ch)
+            return cached, source, {'X-SWR': 'HIT'}
+        if not head_only:
+            ensure_channel(ch)
+        playlist = build_playlist(ch, holdback=True)
+        return playlist, getattr(ch, 'last_built_source', 'backup:' + ch.mode), {}
+    loaders['backup'] = backup
+    if engine_enabled:
+        loaders['engine'] = lambda: (fetch_upstream_engine_playlist(ch.slug, parsed.netloc, parsed.scheme), 'engine', {})
+    return loaders
+
+
+def schedule_source_probe(selector, loaders):
+    if shutdown_event.is_set():
+        return
+    source = selector.reserve_probe(loaders)
+    if source is None:
+        return
+    def probe():
+        started = time.monotonic()
+        try:
+            playlist, _, _ = loaders[source]()
+            if not playlist or '#EXTM3U' not in playlist:
+                raise RuntimeError('empty source playlist')
+            selector.success(source, playlist, time.monotonic() - started, probe=True)
+        except Exception as exc:
+            selector.failure(source, type(exc).__name__ + ': ' + str(exc))
+        finally:
+            with selector.lock:
+                selector._state(source)['probing'] = False
+    try:
+        feature_pool.submit(probe)
+    except RuntimeError:
+        with selector.lock:
+            selector._state(source)['probing'] = False
+
+
+def channel_status():
+    now = time.time()
+    result = []
+    for meta in global_channel_dir.unique_channels():
+        ch = CHANNEL_MAP.get(meta['slug'])
+        row = {'slug': meta['slug'], 'name': meta['name'], 'group': meta['group'],
+               'catchup_supported': meta['slug'] in TIMESHIFT_SUPPORTED,
+               'catchup_limit_days': 7, 'catchup_verified': False,
+               'source': None, 'state': 'unobserved', 'last_success': None,
+               'last_progress': None, 'error': '', 'selection': {'sources': {}}}
+        if ch:
+            with ch.lock:
+                publication = ch._publication
+                row.update(source=publication['source'] if publication else None,
+                    last_success=ch.last_fetch_success_at or None,
+                    last_progress=ch.last_media_advance_at or None,
+                    error=redact_diagnostic(ch.last_error), source_epoch=ch.source_epoch,
+                    restart_required=ch.source_restart_required)
+                published_progress = ch._media_progress.get('published-' + publication['source']) if publication else None
+                if publication:
+                    row['last_progress'] = published_progress[1] if published_progress else None
+                if row['last_progress']:
+                    row['state'] = 'ready' if now - row['last_progress'] < 60 else 'stale'
+                elif row['last_success']:
+                    row['state'] = 'playlist_only'
+                if hasattr(ch, 'selector'):
+                    row['selection'] = ch.selector.snapshot()
+                    selected = row['selection']['selected']
+                    selected_state = row['selection']['sources'].get(selected, {})
+                    row['last_success'] = selected_state.get('last_success') or row['last_success']
+                    if row['state'] == 'unobserved' and row['last_success']:
+                        row['state'] = 'playlist_only'
+                    if selected_state.get('failures'):
+                        row['state'] = 'degraded'
+        result.append(row)
+    return result
+
+
+def diagnostics_snapshot(secret=''):
+    with _log_lock:
+        logs = [redact_diagnostic(re.sub(r'\033\[[0-9;]*m', '', line), (secret,))
+                for line in list(global_log_ring)[-30:]]
+    data = {'version': __version__, 'uptime_seconds': int(time.time() - server_start_time),
+            'device_ready': resolver_ready(), 'media': media_proxy.stats(),
+            'channels': channel_status(), 'epg': epg_manager.stats() if epg_manager else {'enabled': False},
+            'logs': logs}
+    # Also scrub errors nested in per-channel/source snapshots.
+    return json.loads(redact_json(data, secret))
+
+
+def redact_json(value, secret=''):
+    def scrub(item):
+        if isinstance(item, dict):
+            return {k: scrub(v) for k, v in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [scrub(v) for v in item]
+        return redact_diagnostic(item, (secret,)) if isinstance(item, str) else item
+    return json.dumps(scrub(value), ensure_ascii=False)
+
+
+def start_channel_diagnostic(ch, origin):
+    """Explicit user-triggered probe; reports each layer without publishing a timeline."""
+    now = time.monotonic()
+    with diagnostic_lock:
+        existing = diagnostic_jobs.get(ch.slug)
+        if existing and (existing['running'] or now - existing['_created'] < 30):
+            return {k: list(v) if k == 'steps' else v for k, v in existing.items() if not k.startswith('_')}
+        job = {'channel': ch.slug, 'running': True, 'started': time.time(), 'steps': [], '_created': now}
+        diagnostic_jobs[ch.slug] = job
+    def append_step(**step):
+        with diagnostic_lock:
+            job['steps'].append(step)
+    def run():
+        try:
+            for source, load in source_loaders(ch, origin).items():
+                if shutdown_event.is_set():
+                    break
+                started = time.monotonic()
+                try:
+                    playlist, _, _ = load()
+                    if not playlist or '#EXTM3U' not in playlist:
+                        raise RuntimeError('no HLS playlist')
+                    media = parse_media(playlist)
+                    append_step(source=source, layer='playlist', ok=True,
+                                elapsed_ms=round((time.monotonic() - started) * 1000),
+                                segments=len(media.segments) if media else 0)
+                    if not media or not media.segments:
+                        append_step(source=source, layer='segment', ok=None, message='master playlist: media not verified')
+                        continue
+                    target = media.segments[-1].uri
+                    query = urllib.parse.parse_qs(urllib.parse.urlsplit(target).query)
+                    resource = resolve_resource(query['resource'][0]) if 'resource' in query else Resource(target, {})
+                    # Reuse the same target policy as real playback, including private-address rejection.
+                    media_proxy.policy.resolve(resource.url)
+                    append_step(source=source, layer='dns_policy', ok=True)
+                    remote = None
+                    try:
+                        remote = open_remote(resource.url, headers=resource.headers, method='HEAD',
+                                             policy=media_proxy.policy, timeout=3)
+                        append_step(source=source, layer='segment_head', ok=True if remote.status < 400 else None if remote.status == 405 else False,
+                                    status=remote.status, message='HEAD metadata only; media decoding is not verified')
+                    finally:
+                        _safe_close(remote)
+                except Exception as exc:
+                    append_step(source=source, layer='probe', ok=False,
+                                error=redact_diagnostic(type(exc).__name__ + ': ' + str(exc)))
+        finally:
+            with diagnostic_lock:
+                job['running'], job['finished'] = False, time.time()
+    try:
+        diagnostic_pool.submit(run)
+    except RuntimeError:
+        with diagnostic_lock:
+            job['running'] = False
+            job['steps'].append({'layer': 'queue', 'ok': False, 'error': 'diagnostic queue is full'})
+    with diagnostic_lock:
+        return {k: list(v) if k == 'steps' else v for k, v in job.items() if not k.startswith('_')}
+
+
+def epg_timestamp(value):
+    match = re.fullmatch(r'(\d{14})(?:\s*([+-]\d{4}|Z))?', value.strip())
+    if not match:
+        raise ValueError('invalid XMLTV time')
+    zone = match[2] or '+0000'
+    if zone == 'Z':
+        zone = '+0000'
+    return int(datetime.datetime.strptime(match[1] + ' ' + zone, '%Y%m%d%H%M%S %z').timestamp())
+
+
+class EPGCache:
+    max_download, max_xml, max_items = 8 * 2**20, 32 * 2**20, 60000
+
+    def __init__(self, urls=(), path='', ttl=3600, fetcher=None):
+        self.urls, self.path, self.ttl = tuple(urls), path, ttl
+        self.fetcher = fetcher or self._fetch
+        self.lock = threading.RLock()
+        self.programmes, self.updated, self.error = (), 0.0, ''
+        self._xml_bytes = None
+        self.loading, self.retry_at, self.closed = False, 0.0, False
+        self.pool = ThreadPoolExecutor(max_workers=1, max_queue=1, thread_name_prefix='epg-refresh')
+        if self.path and self.urls:
+            try:
+                if os.path.getsize(self.path) <= self.max_xml:
+                    with open(self.path, encoding='utf-8') as stream:
+                        cached = json.load(stream)
+                    programmes = self._validate(cached['programmes'])
+                    updated = float(cached['updated'])
+                    if math.isfinite(updated) and 0 < updated <= time.time():
+                        self.programmes, self.updated = programmes, updated
+            except (OSError, ValueError, TypeError, KeyError, OverflowError, RecursionError):
+                pass
+
+    def _validate(self, programmes):
+        if not isinstance(programmes, list) or len(programmes) > self.max_items:
+            raise ValueError('EPG programme limit exceeded')
+        known = {m['slug'] for m in global_channel_dir.unique_channels()}
+        now = time.time()
+        result = []
+        for item in programmes:
+            if not isinstance(item, dict):
+                raise ValueError('invalid cached programme')
+            start, stop = int(item['start']), int(item['stop'])
+            if item['channel'] in known and now - 7 * 86400 <= start <= now + 2 * 86400 and start < stop <= start + 86400:
+                result.append({'channel': item['channel'], 'start': start, 'stop': stop,
+                               'title': str(item['title'])[:512], 'description': str(item.get('description', ''))[:2048]})
+        return tuple(sorted(result, key=lambda p: (p['channel'], p['start'])))
+
+    def _fetch(self, url):
+        parsed = urllib.parse.urlsplit(url)
+        policy = URLPolicy(allowed_suffixes=(parsed.hostname,))
+        status, _, body, _ = fetch_bytes(url, policy=policy, timeout=10, max_bytes=self.max_download)
+        if status != 200:
+            raise ValueError('EPG HTTP ' + str(status))
+        return body
+
+    def parse(self, body):
+        if len(body) > self.max_download:
+            raise ValueError('EPG download too large')
+        if body.startswith(b'\x1f\x8b'):
+            with gzip.GzipFile(fileobj=io.BytesIO(body)) as stream:
+                body = stream.read(self.max_xml + 1)
+        if len(body) > self.max_xml:
+            raise ValueError('EPG XML too large')
+        if b'<!DOCTYPE' in body.upper() or b'<!ENTITY' in body.upper():
+            raise ValueError('EPG DTD/entities are not supported')
+        # XMLTV is UTF-8; rejecting NUL also prevents UTF-16 from bypassing the declaration check.
+        if b'\x00' in body:
+            raise ValueError('EPG must use UTF-8 XML')
+        aliases = {}
+        for meta in global_channel_dir.unique_channels():
+            for alias in (meta['slug'], meta['name'], meta['tvg_id']):
+                aliases[re.sub(r'[\s_-]', '', alias).casefold()] = meta['slug']
+        def match(value):
+            return aliases.get(re.sub(r'[\s_-]', '', value).casefold())
+        ids, programmes = {}, []
+        count, text_bytes = 0, 0
+        root = None
+        for event, element in ET.iterparse(io.BytesIO(body), events=('start', 'end')):
+            if root is None:
+                root = element
+                if element.tag != 'tv':
+                    raise ValueError('not an XMLTV document')
+            if event != 'end':
+                continue
+            count += 1
+            if count > 500000:
+                raise ValueError('EPG element limit exceeded')
+            if element.tag == 'channel':
+                identifier = element.get('id', '')
+                slug = match(identifier)
+                for display in element.findall('display-name'):
+                    slug = slug or match(display.text or '')
+                if slug:
+                    ids[identifier] = slug
+                element.clear()
+                root.clear()
+            elif element.tag == 'programme':
+                slug = ids.get(element.get('channel', '')) or match(element.get('channel', ''))
+                if slug:
+                    try:
+                        start = epg_timestamp(element.get('start', ''))
+                        stop = epg_timestamp(element.get('stop', ''))
+                        now = time.time()
+                        if now - 7 * 86400 <= start <= now + 2 * 86400 and start < stop <= start + 86400:
+                            title = (element.findtext('title') or '未命名节目')[:512]
+                            description = (element.findtext('desc') or '')[:2048]
+                            text_bytes += len((title + description).encode('utf-8'))
+                            if len(programmes) >= self.max_items or text_bytes > 12 * 2**20:
+                                raise OverflowError('EPG programme/text budget exceeded')
+                            programmes.append(dict(channel=slug, start=start, stop=stop, title=title, description=description))
+                    except ValueError:
+                        pass
+                element.clear()
+                root.clear()
+        if not programmes:
+            raise ValueError('EPG contains no matching programmes in the supported time window')
+        unique = {(p['channel'], p['start'], p['stop']): p for p in programmes}
+        return tuple(sorted(unique.values(), key=lambda p: (p['channel'], p['start'])))
+
+    def request_refresh(self):
+        with self.lock:
+            now = time.time()
+            if self.closed or not self.urls or self.loading or now < self.retry_at or (self.updated and now - self.updated < self.ttl):
+                return
+            self.loading = True
+        def refresh():
+            try:
+                last_error = ''
+                for url in self.urls:
+                    try:
+                        programmes = self.parse(self.fetcher(url))
+                        updated = time.time()
+                        with self.lock:
+                            if self.closed:
+                                return
+                            self.programmes, self.updated, self.error = programmes, updated, ''
+                            self._xml_bytes = None
+                        if self.path:
+                            try:
+                                atomic_json_write(self.path, {'updated': updated, 'programmes': programmes})
+                            except Exception as exc:
+                                with self.lock:
+                                    self.error = 'EPG cache persistence: ' + redact_diagnostic(type(exc).__name__ + ': ' + str(exc))
+                        return
+                    except Exception as exc:
+                        last_error = redact_diagnostic(type(exc).__name__ + ': ' + str(exc))
+                with self.lock:
+                    self.error, self.retry_at = last_error, time.time() + 60
+            finally:
+                with self.lock:
+                    self.loading = False
+        try:
+            self.pool.submit(refresh)
+        except RuntimeError:
+            with self.lock:
+                self.loading = False
+                self.retry_at, self.error = time.time() + 60, 'EPG worker unavailable'
+
+    def stats(self):
+        with self.lock:
+            return {'enabled': bool(self.urls), 'loading': self.loading, 'updated': self.updated or None,
+                    'stale': bool(self.updated and time.time() - self.updated >= self.ttl),
+                    'programmes': len(self.programmes), 'error': self.error}
+
+    def read(self, slug):
+        with self.lock:
+            now = time.time()
+            return [dict(p) for p in self.programmes if p['channel'] == slug and p['stop'] >= now - 7 * 86400][-500:]
+
+    def xml(self):
+        with self.lock:
+            if self._xml_bytes is not None:
+                return self._xml_bytes
+            programmes, updated = self.programmes, self.updated
+        root = ET.Element('tv', {'generator-info-name': 'ysp-live'})
+        metas = {m['slug']: m for m in global_channel_dir.unique_channels()}
+        for slug in sorted({p['channel'] for p in programmes}):
+            channel = ET.SubElement(root, 'channel', {'id': metas[slug]['tvg_id']})
+            ET.SubElement(channel, 'display-name').text = metas[slug]['name']
+        for item in programmes:
+            if item['channel'] not in metas:
+                continue
+            attrs = {'channel': metas[item['channel']]['tvg_id']}
+            for name, key in (('start', 'start'), ('stop', 'stop')):
+                attrs[name] = datetime.datetime.fromtimestamp(item[key], datetime.timezone.utc).strftime('%Y%m%d%H%M%S +0000')
+            programme = ET.SubElement(root, 'programme', attrs)
+            ET.SubElement(programme, 'title').text = item['title']
+            if item['description']:
+                ET.SubElement(programme, 'desc').text = item['description']
+        body = ET.tostring(root, encoding='utf-8', xml_declaration=True)
+        with self.lock:
+            if self.updated == updated:
+                self._xml_bytes = body
+        return body
+
+    def close(self):
+        with self.lock:
+            self.closed = True
+        self.pool.shutdown(wait=False, cancel_futures=True)
+
+
+def catchup_link(slug, start, stop, origin, token=''):
+    if slug not in TIMESHIFT_SUPPORTED:
+        return None
+    now = int(time.time())
+    stop = min(stop, now)
+    if not now - 7 * 86400 <= start < stop or stop - start > 86400:
+        return None
+    params = {'start': str(start), 'end': str(stop)}
+    if token:
+        params['access_token'] = token
+    return origin + '/' + slug + '.m3u8?' + urllib.parse.urlencode(params)
+
+
+STATUS_PAGE = r'''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YSP 频道状态</title>
+<style nonce="__NONCE__">body{font:15px system-ui,sans-serif;background:#f4f6fa;color:#17233a;max-width:1200px;margin:24px auto;padding:0 16px}h1{font-size:25px}section{background:white;padding:18px;margin:16px 0;border-radius:12px}input,select,button,a.action{font:inherit;padding:7px;margin:4px;border:1px solid #b9c7df;border-radius:6px}button,a{cursor:pointer;color:#2154ad}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:10px;border-bottom:1px solid #edf0f5}.scroll{overflow:auto}small,.muted{color:#596a83}#notice{white-space:pre-wrap}pre{white-space:pre-wrap;overflow-wrap:anywhere}.ready{color:#16733e}.stale,.degraded{color:#ac4b13}#token{max-width:190px}a{overflow-wrap:anywhere}</style>
+<h1>YSP 频道状态</h1><p class="muted">状态来自播放观测；分辨率仅显示主列表声明，不代表实际解码画质。回看入口是否可播需由上游确认。</p>
+<section><input id="token" type="password" autocomplete="off" placeholder="访问令牌（如已启用）"><button id="connect">连接 / 刷新</button><button id="export">下载脱敏诊断</button><a id="subscribe">频道订阅</a><p id="summary">正在读取状态…</p><div id="notice" role="status"></div></section>
+<section><input id="search" placeholder="搜索频道"><div class="scroll"><table><thead><tr><th>频道</th><th>状态</th><th>当前来源</th><th>列表声明 / 请求耗时</th><th>最近推进</th><th>操作</th></tr></thead><tbody id="channels"></tbody></table></div></section>
+<section><h2 id="epgtitle">节目单与回看</h2><p id="epgstate">选择一个频道查看节目。</p><div class="scroll"><table><tbody id="programmes"></tbody></table></div><p>手动回看（按浏览器本地时区）：</p><select id="channel"></select><input id="start" type="datetime-local"><input id="end" type="datetime-local"><button id="catchup">生成回看链接</button><div id="catchuplink"></div></section>
+<section><h2>主动诊断</h2><p class="muted">点击频道的“诊断”会请求播放源和分片 HEAD 元数据，不验证实际解码。</p><pre id="diagnosis">尚未执行。</pre></section>
+<script nonce="__NONCE__">'use strict';
+const $=id=>document.getElementById(id),q=new URLSearchParams(location.search);let stored='';try{stored=sessionStorage.getItem('ysp-token')||''}catch(e){}let token=q.get('access_token')||stored,selected='',pollTimer=null,refreshing=false;
+$('token').value=token;if(q.has('access_token'))history.replaceState(null,'',location.pathname);
+const states={ready:'正常推进',stale:'已过期 / 停滞',unobserved:'未观测',playlist_only:'仅确认列表',degraded:'正在降级'};
+function link(path){const u=new URL(path,location.origin);if(token)u.searchParams.set('access_token',token);return u.href}
+async function api(path){const r=await fetch(path,{headers:token?{Authorization:'Bearer '+token}:{},cache:'no-store'});if(!r.ok)throw Error(r.status===401?'需要有效访问令牌':await r.text());return r.json()}
+function cell(tr,value){const td=document.createElement('td');td.textContent=value;tr.append(td);return td}
+function action(td,label,callback){const b=document.createElement('button');b.textContent=label;b.onclick=callback;td.append(b)}
+function anchor(td,label,url){const a=document.createElement('a');a.textContent=label;a.href=url;td.append(a)}
+function ago(t){return t?Math.max(0,Math.round(Date.now()/1000-t))+' 秒前':'未观测'}
+async function refresh(){if(refreshing)return;refreshing=true;try{const data=await api('/api/channels');$('notice').textContent='';$('summary').textContent=`${data.channels.length} 个频道 · 正常推进 ${data.channels.filter(c=>c.state==='ready').length} 个 · EPG ${data.epg.enabled?(data.epg.loading?'更新中':data.epg.programmes+' 个节目'):'未启用'}`;$('subscribe').href=link('/all.m3u');const filter=$('search').value.toLowerCase(),old=$('channel').value;$('channels').replaceChildren();$('channel').replaceChildren();for(const ch of data.channels){if(ch.catchup_supported){const o=document.createElement('option');o.value=ch.slug;o.textContent=ch.name;$('channel').append(o)}if(!(ch.name+' '+ch.slug).toLowerCase().includes(filter))continue;const tr=document.createElement('tr');cell(tr,ch.name);cell(tr,states[ch.state]||ch.state).className=ch.state;cell(tr,ch.source||'未选择');const s=ch.selection.sources[ch.selection.selected]||{};cell(tr,(s.playlist_resolution||'未观测')+' / '+(s.latency_ms==null?'—':s.latency_ms+' ms'));cell(tr,ago(ch.last_progress));const td=cell(tr,'');action(td,'节目',()=>showEPG(ch.slug,ch.name));action(td,'诊断',()=>diagnose(ch.slug));anchor(td,'直播',link('/'+ch.slug+'.m3u8'));$('channels').append(tr)}if(old)$('channel').value=old;if(selected)await showEPG(selected)}catch(e){$('notice').textContent=e.message}finally{refreshing=false}}
+async function showEPG(slug,name){selected=slug;if(name)$('epgtitle').textContent=name+' · 节目单与回看';try{const data=await api('/api/epg?channel='+encodeURIComponent(slug));$('epgstate').textContent=!data.enabled?'EPG 未启用':data.loading?'节目单正在后台更新，请稍后刷新':data.error?'更新失败，保留旧缓存：'+data.error:data.programmes.length?'显示缓存节目；回看范围是本地校验上限，不代表上游保证。':'暂无匹配节目';if(data.current)$('epgstate').textContent+=' · 正在播：'+data.current.title;if(data.next)$('epgstate').textContent+=' · 接下来：'+data.next.title;$('programmes').replaceChildren();for(const p of data.programmes){const tr=document.createElement('tr');cell(tr,new Date(p.start*1000).toLocaleString()+' — '+new Date(p.stop*1000).toLocaleTimeString());cell(tr,p.title);const td=cell(tr,'');if(p.catchup_url)anchor(td,'从头回看',p.catchup_url);$('programmes').append(tr)}}catch(e){$('epgstate').textContent=e.message}}
+async function diagnose(slug){clearTimeout(pollTimer);try{const d=await api('/api/diagnose?channel='+encodeURIComponent(slug));$('diagnosis').textContent=JSON.stringify(d,null,2);if(d.running)pollTimer=setTimeout(()=>diagnose(slug),1500)}catch(e){$('diagnosis').textContent=e.message}}
+$('connect').onclick=()=>{token=$('token').value.trim();try{sessionStorage.setItem('ysp-token',token)}catch(e){}refresh()};$('search').oninput=refresh;
+$('export').onclick=async()=>{try{const data=await api('/api/diagnostics'),blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='ysp-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(e){$('notice').textContent=e.message}};
+$('catchup').onclick=async()=>{try{const start=Date.parse($('start').value),end=Date.parse($('end').value);if(!Number.isFinite(start)||!Number.isFinite(end))throw Error('请选择开始和结束时间');const d=await api('/api/catchup?channel='+encodeURIComponent($('channel').value)+'&start='+Math.floor(start/1000)+'&end='+Math.floor(end/1000));$('catchuplink').replaceChildren();anchor($('catchuplink'),'打开回看',d.url)}catch(e){$('catchuplink').textContent=e.message}};
+refresh();setInterval(()=>{if(!document.hidden)refresh()},15000);
+</script></html>'''
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'ysp-live/9.5.1-local'
 
@@ -4780,9 +5332,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.send_response(code)
             self.send_header('Content-Type', ctype)
-            self.send_header('Content-Length', str(len(data)))
+            if code not in (204, 304):
+                self.send_header('Content-Length', str(len(data)))
             self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Cache-Control', 'no-cache, no-store, max-age=0')
+            if 'Cache-Control' not in (extra_headers or {}):
+                self.send_header('Cache-Control', 'no-cache, no-store, max-age=0')
             for key, value in (extra_headers or {}).items():
                 self.send_header(key, value)
             self.end_headers()
@@ -4835,7 +5389,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _playlist(self, ch, playlist, source, head_only, extra=None):
         try:
-            playlist = publish_channel_playlist(ch, playlist, source, head_only=head_only)
+            with ch.publication_lock:
+                if head_only and ch._publication:
+                    source = ch._publication['source']
+                playlist = publish_channel_playlist(ch, playlist, source, head_only=head_only)
         except (FrozenPlaylistError, UnsafePlaylist) as exc:
             log(f'[{ch.slug}] 媒体停滞/格式受限: {type(exc).__name__}', min_interval=10)
             return False
@@ -4854,7 +5411,7 @@ class Handler(BaseHTTPRequestHandler):
         # A resource capability grants access only to a previously registered URL.
         resource_route = path in ('/proxy', '/proxy.ts', '/engine_proxy')
         access_token = getattr(self.server, 'access_token', '')
-        if access_token and not resource_route and path != '/livez':
+        if access_token and not resource_route and path not in ('/livez', '/status'):
             provided = qs.get('access_token', [''])[0]
             authorization = self.headers.get('Authorization', '')
             if authorization.startswith('Bearer '):
@@ -4870,7 +5427,81 @@ class Handler(BaseHTTPRequestHandler):
             resource = resolve_resource(token)
             status = media_proxy.serve(self, resource.url, resource.headers, head_only=head_only)
             if status in (401, 403, 404) and resource.channel and resolver:
-                resolver.record_segment_failure(resource.channel, resource.generation, status)
+                invalidated = resolver.record_segment_failure(resource.channel, resource.generation, status)
+                ch = CHANNEL_MAP.get(resource.channel)
+                if invalidated and ch and hasattr(ch, 'selector'):
+                    ch.selector.failure('device', 'segment HTTP ' + str(status))
+            return
+        if path == '/status':
+            nonce = secrets.token_urlsafe(18)
+            self._send(200, STATUS_PAGE.replace('__NONCE__', nonce), 'text/html; charset=utf-8', head_only,
+                {'Content-Security-Policy': "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'nonce-" + nonce + "'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+                 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff'})
+            return
+        if path == '/api/channels':
+            data = {'channels': channel_status(), 'epg': epg_manager.stats() if epg_manager else {'enabled': False}}
+            self._send(200, redact_json(data, access_token), 'application/json; charset=utf-8', head_only)
+            return
+        if path == '/api/diagnostics':
+            self._send(200, json.dumps(diagnostics_snapshot(access_token), ensure_ascii=False, indent=2),
+                       'application/json; charset=utf-8', head_only)
+            return
+        if path in ('/api/diagnose', '/api/catchup', '/api/epg'):
+            slug = qs.get('channel', [''])[0]
+            meta = global_channel_dir.get_meta(slug)
+            if not meta:
+                self._send(404, 'unknown channel\n', head_only=head_only)
+                return
+            slug = meta['slug']
+            if path == '/api/diagnose':
+                if head_only:
+                    self._send(405, 'use GET to request an active diagnostic\n', head_only=True)
+                    return
+                data = start_channel_diagnostic(get_channel_instance(slug), self._origin())
+                self._send(200, redact_json(data, access_token), 'application/json; charset=utf-8')
+                return
+            if path == '/api/catchup':
+                if slug not in TIMESHIFT_SUPPORTED:
+                    self._send(422, '此频道不支持回看\n', head_only=head_only)
+                    return
+                times = parse_catchup_query(parts.query)
+                if not times:
+                    raise ValueError('回看需要开始和结束时间')
+                url = catchup_link(slug, times[0], times[1], self._origin(), access_token)
+                if not url:
+                    raise ValueError('invalid catchup range')
+                self._send(200, json.dumps({'url': url, 'verified': False, 'limit_days': 7}, ensure_ascii=False),
+                           'application/json; charset=utf-8', head_only)
+                return
+            if epg_manager and not head_only:
+                epg_manager.request_refresh()
+            data = epg_manager.stats() if epg_manager else {'enabled': False}
+            programmes = epg_manager.read(slug) if epg_manager else []
+            now = int(time.time())
+            for programme in programmes:
+                programme['catchup_url'] = catchup_link(slug, programme['start'], programme['stop'], self._origin(), access_token)
+            current = next((p for p in programmes if p['start'] <= now < p['stop']), None)
+            upcoming = next((p for p in programmes if p['start'] > now), None)
+            data.update(channel=slug, programmes=programmes, current=current, next=upcoming)
+            self._send(200, json.dumps(data, ensure_ascii=False), 'application/json; charset=utf-8', head_only)
+            return
+        if path == '/epg.xml':
+            if not epg_manager or not epg_manager.urls:
+                self._send(404, 'EPG disabled\n', head_only=head_only)
+                return
+            if not head_only:
+                epg_manager.request_refresh()
+            state = epg_manager.stats()
+            if not state['programmes']:
+                self._send(503, 'EPG warming or unavailable; retry later\n', head_only=head_only,
+                           extra_headers={'Retry-After': '10'})
+                return
+            etag = '"epg-' + str(state['updated']) + '"'
+            if self.headers.get('If-None-Match') == etag:
+                self._send(304, b'', head_only=True, extra_headers={'ETag': etag})
+                return
+            self._send(200, epg_manager.xml(), 'application/xml; charset=utf-8', head_only,
+                       {'ETag': etag, 'X-EPG-Stale': str(state['stale']).lower(), 'Cache-Control': 'private, max-age=60'})
             return
         if path == '/livez':
             self._send(200, json.dumps({'ok': True, 'version': __version__}),
@@ -4900,7 +5531,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ('/', '/index.html'):
             origin = self._origin()
             self._send(200, f'ysp-live {__version__}\n全频道订阅: {origin}/all.m3u\n'
-                       f'存活检查: {origin}/livez\n播放就绪: {origin}/readyz\n诊断: {origin}/diag\n'
+                       f'频道状态: {origin}/status\n存活检查: {origin}/livez\n播放就绪: {origin}/readyz\n诊断: {origin}/diag\n'
                        + AUTHOR_NOTICE + '\n', head_only=head_only)
             return
         if path == '/favicon.ico':
@@ -4910,8 +5541,10 @@ class Handler(BaseHTTPRequestHandler):
             origin = self._origin()
             target_group = qs.get('group', [''])[0]
             only_4k = qs.get('k4', ['0'])[0].lower() in ('1', 'true', 'yes')
-            lines = ['#EXTM3U url-tvg="https://epg.zsdc.eu.org/t.xml.gz,https://epg.pw/xmltv/epg_CN.xml.gz"']
+            lines = ['#EXTM3U']
             suffix = '?access_token=' + urllib.parse.quote(access_token, safe='') if access_token else ''
+            if epg_manager and epg_manager.urls:
+                lines[0] += ' url-tvg="' + origin + '/epg.xml' + suffix + '"'
             for meta in global_channel_dir.unique_channels():
                 slug = meta['slug']
                 if target_group and target_group not in meta['group']:
@@ -4926,18 +5559,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, '\n'.join(lines) + '\n', 'application/vnd.apple.mpegurl', head_only)
             return
         if path == '/diag':
-            now = time.time()
-            info = [f'ysp-live {__version__}', f'uptime={int(now-server_start_time)}s',
-                    f'device_ready={resolver_ready()}', 'media=' + json.dumps(media_proxy.stats(), ensure_ascii=False)]
-            for meta in global_channel_dir.unique_channels():
-                ch = CHANNEL_MAP.get(meta['slug'])
-                if ch:
-                    with ch.lock:
-                        info.append(f'{ch.slug}: source={ch.mode} last_ok={ch.last_ok:.0f} '
-                                    f'last_progress={getattr(ch,"last_media_advance_at",0):.0f} error={ch.last_error}')
-            with _log_lock:
-                info.extend(re.sub(r'\033\[[0-9;]*m', '', line) for line in list(global_log_ring)[-30:])
-            self._send(200, '\n'.join(info) + '\n', head_only=head_only)
+            self._send(200, json.dumps(diagnostics_snapshot(access_token), ensure_ascii=False, indent=2) + '\n',
+                       'text/plain; charset=utf-8', head_only)
             return
         match = re.fullmatch(r'/([\w-]+)\.m3u8', path)
         if not match:
@@ -4968,40 +5591,28 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 log(f'[{canonical}] 回看失败，按请求回落直播: {type(exc).__name__}', min_interval=10)
         origin = self._origin()
-        parsed_origin = urllib.parse.urlsplit(origin)
-        if canonical in active_backend_channels and resolver_ready() and resolver:
-            if not resolver.is_channel_in_cooldown(canonical):
-                try:
-                    method = getattr(resolver, 'fetch_channel_playlist_bounded', resolver.fetch_channel_playlist)
-                    playlist = method(canonical, parsed_origin.netloc, parsed_origin.scheme)
-                    if playlist and '#EXTM3U' in playlist:
-                        if self._playlist(ch, playlist, 'device', head_only):
-                            return
-                except Exception as exc:
-                    # Resolver owns failure counting and generation-safe invalidation.
-                    log(f'[{canonical}] 设备源降级: {type(exc).__name__}', min_interval=10)
-        now = time.time()
+        selector = channel_selector(ch)
+        loaders = source_loaders(ch, origin, head_only)
         if not head_only:
-            ch.last_access = now
-        with ch.lock:
-            cached = ch.last_built_playlist
-            age = now - ch.last_built_time
-        if cached and age < 15 and '#EXTM3U' in cached:
-            sent = self._playlist(ch, cached, getattr(ch, 'last_built_source', 'backup'), head_only, {'X-SWR': 'HIT'})
-            if age > 6 and not head_only:
-                trigger_background_refresh(ch)
-            if sent:
-                return
-        if not head_only:
-            ensure_channel(ch)
-        playlist = build_playlist(ch, holdback=True)
-        if playlist and '#EXTM3U' in playlist:
-            if self._playlist(ch, playlist, getattr(ch, 'last_built_source', 'backup'), head_only):
-                return
-        playlist = fetch_upstream_engine_playlist(canonical, parsed_origin.netloc, parsed_origin.scheme)
-        if playlist and '#EXTM3U' in playlist:
-            if self._playlist(ch, playlist, 'engine', head_only):
-                return
+            ch.last_access = time.time()
+            schedule_source_probe(selector, loaders)
+        for source in selector.order(loaders):
+            started = time.monotonic()
+            try:
+                playlist, published_source, extra = loaders[source]()
+                if not playlist or '#EXTM3U' not in playlist:
+                    raise RuntimeError('empty source playlist')
+                if not head_only:
+                    selector.success(source, playlist, time.monotonic() - started)
+                if self._playlist(ch, playlist, published_source, head_only, extra):
+                    if not head_only:
+                        selector.commit(source)
+                    return
+                raise FrozenPlaylistError('published source is stale or unsupported')
+            except Exception as exc:
+                if not head_only:
+                    selector.failure(source, type(exc).__name__ + ': ' + str(exc))
+                log(f'[{canonical}] {source}源降级: {type(exc).__name__}', min_interval=10)
         self._send(503, f'频道 {ch.name} 暂无数据，请稍后重试\n', head_only=head_only,
                    extra_headers={'Retry-After': '2'})
 def init_resolver ():
@@ -5142,8 +5753,8 @@ def _handle_sigterm(signum, frame):
         threading.Thread(target=active_server.shutdown, daemon=True).start()
 def main():
     global resolver, server_port, engine_port, media_proxy, active_server, engine_enabled
-    global global_ts_cache, active_backend_channels
-    ap = argparse.ArgumentParser(description='央视频直播代理 v9.5.1-local（本地优化版）')
+    global global_ts_cache, active_backend_channels, epg_manager
+    ap = argparse.ArgumentParser(description=f'央视频直播代理 v{__version__}（本地优化版）')
     ap.add_argument('port', nargs='?', type=int, default=8767)
     ap.add_argument('--bind', default='0.0.0.0')
     ap.add_argument('--data-dir', default=os.environ.get('YSP_DATA_DIR', ''))
@@ -5167,6 +5778,9 @@ def main():
     ap.add_argument('--no-engine', action='store_true')
     ap.add_argument('--quality', choices=('auto', 'fhd', 'shd'), default=None, help='备用源质量：auto保留多码率，fhd约1080p，shd约720p')
     ap.add_argument('--device-rate', choices=('auto', '36p', '10p'), default='auto')
+    ap.add_argument('--epg-url', action='append', default=None, help='XMLTV或XMLTV.gz地址，可重复配置最多3个，按顺序回退')
+    ap.add_argument('--epg-refresh', type=float, default=3600, help='EPG缓存刷新间隔秒，最少60')
+    ap.add_argument('--no-epg', action='store_true', help='禁用EPG下载和本地节目单接口')
     args = ap.parse_args()
     if threading.current_thread() is threading.main_thread():
         signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -5184,6 +5798,15 @@ def main():
         parsed = urllib.parse.urlsplit(args.public_base_url)
         if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment:
             ap.error('public-base-url必须是无路径、凭据或query的HTTP(S)地址')
+    if not math.isfinite(args.epg_refresh) or args.epg_refresh < 60:
+        ap.error('epg-refresh必须是至少60的有限秒数')
+    epg_urls = args.epg_url if args.epg_url is not None else [u.strip() for u in os.environ.get('YSP_EPG_URL', 'https://epg.zsdc.eu.org/t.xml.gz,https://epg.pw/xmltv/epg_CN.xml.gz').split(',') if u.strip()]
+    if len(epg_urls) > 3:
+        ap.error('EPG源最多3个')
+    for url in epg_urls:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+            ap.error('epg-url必须是无凭据的HTTP(S) XMLTV地址')
     here = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.abspath(args.data_dir or here)
     os.makedirs(data_dir, exist_ok=True)
@@ -5215,6 +5838,7 @@ def main():
         device_json=os.path.join(data_dir, 'device-state-rs.json'),
         links_per_device=args.links_per_device, zap_debounce=args.zap_debounce,
         foreground_wait=args.foreground_wait, device_rate=args.device_rate)
+    epg_manager = EPGCache(() if args.no_epg else epg_urls, os.path.join(data_dir, 'epg-cache.json'), args.epg_refresh)
     resolver = Resolver(engine_args)
     try:
         active_server = BoundedHTTPServer((args.bind, args.port), Handler,
@@ -5237,6 +5861,10 @@ def main():
     finally:
         shutdown_event.set()
         resolver.close()
+        if epg_manager:
+            epg_manager.close()
+        feature_pool.shutdown(wait=False, cancel_futures=True)
+        diagnostic_pool.shutdown(wait=False, cancel_futures=True)
         media_proxy.close()
         if active_server:
             active_server.server_close()
