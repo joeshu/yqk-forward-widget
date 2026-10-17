@@ -72,6 +72,7 @@ class LocalOrigin:
         self.started = threading.Event()
         self.release = threading.Event()
         self.redirect_target = None
+        self.pause_broken = False
 
     def handler(self):
         origin = self
@@ -147,6 +148,8 @@ class LocalOrigin:
                         self.wfile.flush()
                         origin.started.set()
                         if path == "/broken.ts":
+                            if origin.pause_broken:
+                                origin.release.wait(8)
                             self.close_connection = True
                             return
                         if not origin.release.wait(8):
@@ -269,6 +272,7 @@ class ApplicationIntegrationTests(unittest.TestCase):
         self.assertEqual(self.proxy.stats()["count"], 0)
 
     def test_truncated_origin_aborts_without_a_second_http_status_or_cache_entry(self):
+        self.origin.pause_broken = True
         path = self.resource("/broken.ts")
         with socket.create_connection(("127.0.0.1", self.gateway.server_port), timeout=5) as connection:
             connection.sendall(f"GET {path} HTTP/1.0\r\nHost: localhost\r\n\r\n".encode())
@@ -278,6 +282,8 @@ class ApplicationIntegrationTests(unittest.TestCase):
                 if not chunk:
                     break
                 response.extend(chunk)
+                if len(bytes(response).partition(b"\r\n\r\n")[2]) >= self.origin.first_chunk:
+                    self.origin.release.set()
         header, _, body = bytes(response).partition(b"\r\n\r\n")
         self.assertTrue(header.startswith(b"HTTP/1.0 200"), header[:120])
         self.assertEqual(body, self.origin.payload[:self.origin.first_chunk])

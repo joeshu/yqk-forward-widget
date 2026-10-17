@@ -301,13 +301,14 @@ class FeatureHTTPTests(unittest.TestCase):
         self.assertEqual(self.request(f'/api/catchup?channel=cctv1&start={stop}&end={start}', headers=auth)[0], 400)
         self.assertEqual(self.request(f'/api/catchup?channel=cctv17&start={start}&end={stop}', headers=auth)[0], 422)
 
-    def test_active_diagnostic_is_coalesced_and_checks_playlist_dns_and_head(self):
+    def test_active_diagnostic_is_coalesced_and_checks_playlist_dns_and_content(self):
         entered, release = threading.Event(), threading.Event()
         def load():
             entered.set()
             release.wait(2)
             return playlist(), 'backup:jce', {}
-        remote = mock.Mock(status=200)
+        remote = mock.Mock(status=200, headers={})
+        remote.read.side_effect = [b'G' + b'\0' * 187 + b'G' + b'\0' * 187 + b'G' + b'\0' * 187, b'']
         self.stack.enter_context(mock.patch.object(live, 'diagnostic_jobs', {}))
         self.addCleanup(release.set)
         with mock.patch.object(live, 'source_loaders', return_value={'backup': load}), \
@@ -326,9 +327,9 @@ class FeatureHTTPTests(unittest.TestCase):
                 if time.monotonic() > deadline:
                     self.fail('diagnostic did not finish')
                 time.sleep(.01)
-            self.assertEqual([step['layer'] for step in result['steps']], ['playlist', 'dns_policy', 'segment_head'])
+            self.assertEqual([step['layer'] for step in result['steps']], ['playlist', 'dns_policy', 'segment_content'])
             head.assert_called_once()
-            self.assertEqual(head.call_args.kwargs['method'], 'HEAD')
+            self.assertEqual(head.call_args.kwargs['method'], 'GET')
             remote.close.assert_called_once()
             self.assertIsNone(self.ch._publication)
 

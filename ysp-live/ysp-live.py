@@ -384,6 +384,7 @@ def atomic_json_write(path, payload):
 
 import dataclasses
 import datetime
+import functools
 import hashlib
 import math
 import re
@@ -416,41 +417,69 @@ def rewrite_uris(text, base_url, mapper=None):
     return '\n'.join(out) + ('\n' if text.endswith(('\n', '\r')) else '')
 
 def select_variant(text, quality='fhd'):
-    """Choose a muxed rendition; keep masters with separate audio/video groups intact."""
-    lines = text.splitlines()
-    variants = []
-    for i, line in enumerate(lines):
-        if line.strip().startswith('#EXT-X-STREAM-INF:'):
-            attrs = attributes(line.strip())
-            if attrs.get('AUDIO') or attrs.get('VIDEO') or attrs.get('SUBTITLES'):
-                return None
-            for uri in lines[i + 1:]:
-                if uri.strip() and not uri.lstrip().startswith('#'):
-                    resolution = attrs.get('RESOLUTION', '0x0').lower().split('x')
-                    try:
-                        height = int(resolution[-1])
-                        bandwidth = int(attrs.get('AVERAGE-BANDWIDTH', attrs.get('BANDWIDTH', 0)))
-                    except ValueError:
-                        height, bandwidth = 0, 0
-                    variants.append((height, bandwidth, uri.strip()))
-                    break
-    if not variants:
+    """Highest available rendition for best; preserve independent media groups."""
+    variants = analyze_playlist(text).variants
+    if not variants or any(v.external_groups for v in variants):
         return None
-    quality = (quality or 'fhd').lower()
-    cap = {'sd': 576, 'hd': 720, 'shd': 720, 'fhd': 1080, 'uhd': 2160, '4k': 2160, '8k': 4320, 'stable': 720}.get(quality)
+    quality = (quality or 'best').lower()
     if quality == 'auto':
         return None
+    if quality == 'best':
+        return max(variants, key=lambda v: (v.profile.height, v.profile.width, v.profile.bandwidth)).uri
+    cap = {'sd': 576, 'hd': 720, 'shd': 720, 'fhd': 1080, 'uhd': 2160, '4k': 2160, '8k': 4320, 'stable': 720}.get(quality)
     if cap:
-        within = [v for v in variants if v[0] and v[0] <= cap]
+        within = [v for v in variants if 0 < v.profile.height <= cap]
         if within:
-            return max(within) [2]
-        measured = [v for v in variants if v[0]]
+            return max(within, key=lambda v: (v.profile.height, v.profile.bandwidth)).uri
+        measured = [v for v in variants if v.profile.height]
         if measured:
-            return min(measured)[2]
-    # Missing resolution: use bandwidth only as a bounded approximation.
+            return min(measured, key=lambda v: (v.profile.height, v.profile.bandwidth)).uri
     budget = {'shd': 3_000_000, 'hd': 3_000_000, 'stable': 3_000_000, 'sd': 1_500_000}.get(quality, 8_000_000)
-    within = [v for v in variants if v[1] <= budget]
-    return (max(within) if within else min(variants))[2]
+    within = [v for v in variants if v.profile.bandwidth <= budget]
+    return (max(within, key=lambda v: v.profile.bandwidth) if within else min(variants, key=lambda v: v.profile.bandwidth)).uri
+
+
+def filter_master_quality(text, quality='best'):
+    """Keep one video rendition and all media groups; do not orphan independent audio."""
+    if not text:
+        return text
+    analysis = analyze_playlist(text)
+    if not analysis.variants or quality == 'auto':
+        return text
+    variants = analysis.variants
+    if quality == 'best':
+        selected = max(variants, key=lambda v: (v.profile.height, v.profile.width, v.profile.bandwidth))
+    else:
+        cap = {'fhd': 1080, 'shd': 720, 'hd': 720, 'sd': 576}.get(quality)
+        measured = [v for v in variants if v.profile.height]
+        within = [v for v in measured if cap and v.profile.height <= cap]
+        if within:
+            selected = max(within, key=lambda v: (v.profile.height, v.profile.bandwidth))
+        elif measured and cap:
+            selected = min(measured, key=lambda v: (v.profile.height, v.profile.bandwidth))
+        else:
+            budget = 3_000_000 if quality in ('shd', 'hd', 'sd') else 8_000_000
+            within = [v for v in variants if v.profile.bandwidth <= budget]
+            selected = max(within, key=lambda v: v.profile.bandwidth) if within else min(variants, key=lambda v: v.profile.bandwidth)
+    wanted, index, pending, out = variants.index(selected), -1, [], []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith('#EXT-X-STREAM-INF:'):
+            index += 1
+            pending = [raw]
+        elif pending:
+            pending.append(raw)
+            if line and not line.startswith('#'):
+                if index == wanted:
+                    out.extend(pending)
+                pending = []
+        else:
+            out.append(raw)
+    result = '\n'.join(out) + '\n'
+    if result != text:
+        remember_playlist_profile(result, selected.profile)
+    return result
+
 
 def pdt_seconds(value):
     if not value:
@@ -479,7 +508,7 @@ def stable_uri(uri, _depth=0):
     query = urllib.parse.urlencode([(k, v) for k, v in urllib.parse.parse_qsl(p.query, keep_blank_values=True) if k.lower() not in _VOLATILE])
     return urllib.parse.urlunsplit((p.scheme, p.netloc, p.path, query, ''))
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Segment:
     source_sequence: int
     duration: float
@@ -491,14 +520,14 @@ class Segment:
     byte_range: str | None
     discontinuity: int = 0
 
-    @property
+    @functools.cached_property
     def identity(self):
         stamp = pdt_seconds(self.pdt)
         if stamp is not None:
             return ('pdt', round(stamp, 6), self.byte_range)
         return ('uri', stable_uri(self.uri), self.byte_range)
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class MediaPlaylist:
     headers: list[str]
     segments: list[Segment]
@@ -510,7 +539,7 @@ class MediaPlaylist:
     original_text: str = ''
 
 
-def parse_media(text):
+def _parse_media_uncached(text):
     if '#EXT-X-STREAM-INF:' in text or '#EXT-X-I-FRAME-STREAM-INF:' in text:
         return None
     headers, pending, segments, trailing = [], [], [], []
@@ -583,12 +612,12 @@ def parse_media(text):
                 range_end, range_uri = None, None
             if not pdt and inherited_pdt is not None:
                 pdt = datetime.datetime.fromtimestamp(inherited_pdt, datetime.timezone.utc).isoformat()
-            segments.append(Segment(sequence + len(segments), duration, pdt, s, pending, key, init_map, actual_range, pending.count('#EXT-X-DISCONTINUITY')))
+            segments.append(Segment(sequence + len(segments), duration, pdt, s, tuple(pending), key, init_map, actual_range, pending.count('#EXT-X-DISCONTINUITY')))
             if inherited_pdt is not None:
                 inherited_pdt += duration
             pending, pdt, byte_range = [], '', None
     trailing = pending + trailing
-    return MediaPlaylist(headers, segments, trailing, sequence, discontinuity_sequence, target, unsafe, text)
+    return MediaPlaylist(tuple(headers), tuple(segments), tuple(trailing), sequence, discontinuity_sequence, target, unsafe, text)
 
 
 def render_media(media, segments=None, sequences=None, *, live=False, boundary=None, discontinuity_base=None):
@@ -657,14 +686,127 @@ def render_media(media, segments=None, sequences=None, *, live=False, boundary=N
     return '\n'.join(out) + '\n'
 
 
+import collections
+
+
+@dataclasses.dataclass(frozen=True)
+class StreamProfile:
+    width: int = 0
+    height: int = 0
+    bandwidth: int = 0
+    codecs: str = ''
+    audio_group: str = ''
+
+    @property
+    def resolution(self):
+        return f'{self.width}x{self.height}' if self.width and self.height else None
+
+
+@dataclasses.dataclass(frozen=True)
+class Variant:
+    uri: str
+    profile: StreamProfile
+    external_groups: bool = False
+
+
+def _manifest_variants(text):
+    pending, variants = None, []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith('#EXT-X-STREAM-INF:'):
+            pending = attributes(line)
+        elif line and not line.startswith('#') and pending is not None:
+            resolution = re.fullmatch(r'(\d+)x(\d+)', pending.get('RESOLUTION', '').lower())
+            try:
+                width, height = map(int, resolution.groups()) if resolution else (0, 0)
+                bandwidth = max(0, int(pending.get('AVERAGE-BANDWIDTH', pending.get('BANDWIDTH', 0))))
+            except (ValueError, OverflowError):
+                width, height, bandwidth = 0, 0, 0
+            profile = StreamProfile(width, height, bandwidth, pending.get('CODECS', ''), pending.get('AUDIO', ''))
+            variants.append(Variant(line, profile, any(pending.get(k) for k in ('AUDIO', 'VIDEO', 'SUBTITLES'))))
+            pending = None
+    return tuple(variants)
+
+
+@dataclasses.dataclass(frozen=True)
+class PlaylistAnalysis:
+    media: MediaPlaylist | None
+    signature: str | None
+    target: float
+    variants: tuple
+    profile: StreamProfile = StreamProfile()
+
+
+class PlaylistAnalysisCache:
+    """Immutable parse results; one parse per shared body, conservative byte charges."""
+    def __init__(self, max_entries=128, max_bytes=8 * 2**20, ttl=15, clock=time.monotonic):
+        self.lock = threading.RLock()
+        self.entries = collections.OrderedDict()
+        self.max_entries, self.max_bytes, self.ttl, self.clock = max_entries, max_bytes, ttl, clock
+        self.charged_bytes = self.hits = self.misses = self.parses = 0
+
+    def get(self, text):
+        with self.lock:
+            now = self.clock()
+            item = self.entries.get(text)
+            if item and item[1] > now:
+                self.entries.move_to_end(text)
+                self.hits += 1
+                return item[0]
+            if item:
+                self.charged_bytes -= self.entries.pop(text)[2]
+            self.misses += 1
+            if len(text) > 2 * 2**20 or len(text.encode('utf-8')) > 2 * 2**20 or text.count('\n') > 8192:
+                raise UnsafePlaylist('playlist analysis budget exceeded')
+            media = _parse_media_uncached(text)
+            self.parses += 1
+            variants = _manifest_variants(text) if media is None else ()
+            signature, target = None, media.target if media else 6.0
+            if media and media.segments:
+                last = media.segments[-1]
+                signature = hashlib.sha256(repr((last.source_sequence, last.identity)).encode()).hexdigest()
+            profile = max((v.profile for v in variants), key=lambda p: (p.height, p.width, p.bandwidth), default=StreamProfile())
+            analysis = PlaylistAnalysis(media, signature, target, variants, profile)
+            # Includes copies of tag/URI strings, segment containers, identities and dict overhead.
+            charge = 8192 + len(text.encode('utf-8')) * 8 + (len(media.segments) * 768 if media else len(variants) * 768)
+            while self.entries and (len(self.entries) >= self.max_entries or self.charged_bytes + charge > self.max_bytes):
+                self.charged_bytes -= self.entries.popitem(last=False)[1][2]
+            if charge <= self.max_bytes and self.max_entries > 0:
+                self.entries[text] = (analysis, now + self.ttl, charge)
+                self.charged_bytes += charge
+            return analysis
+
+    def remember_profile(self, text, profile):
+        self.get(text)
+        with self.lock:
+            item = self.entries.get(text)
+            if item:
+                self.entries[text] = (dataclasses.replace(item[0], profile=profile), item[1], item[2])
+
+    def stats(self):
+        with self.lock:
+            return {'entries': len(self.entries), 'charged_bytes': self.charged_bytes,
+                    'budget_bytes': self.max_bytes, 'hits': self.hits, 'misses': self.misses, 'parses': self.parses}
+
+
+playlist_analysis_cache = PlaylistAnalysisCache()
+
+
+def analyze_playlist(text):
+    return playlist_analysis_cache.get(text)
+
+
+def parse_media(text):
+    return analyze_playlist(text).media
+
+
+def remember_playlist_profile(text, profile):
+    playlist_analysis_cache.remember_profile(text, profile)
+
+
 def media_signature(text):
-    media = parse_media(text)
-    if media is None or not media.segments:
-        return None, 6.0
-    # A changed token alone is not a new frame. Include sequence and complete stable identity.
-    last = media.segments[-1]
-    payload = repr((last.source_sequence, last.identity)).encode()
-    return hashlib.sha256(payload).hexdigest(), media.target
+    analysis = analyze_playlist(text)
+    return analysis.signature, analysis.target
 
 import base64
 import collections
@@ -1046,6 +1188,22 @@ class SharedMediaProxy:
     def _key(url, headers):
         return (url, tuple(sorted((k.lower(), str(v)) for k, v in headers.items())))
 
+    def cached_prefix(self, url, headers, offset=0, length=65536):
+        """Copy only a small prefix while the immutable completed entry is protected."""
+        with self.lock:
+            entry = self.cache.get(self._key(url, headers))
+            if not entry or entry.expires <= time.monotonic() or offset >= entry.size:
+                return None
+            end, position, chunks = min(entry.size, offset + min(length, 65536)), 0, []
+            for chunk in entry.chunks:
+                next_position = position + len(chunk)
+                if next_position > offset and position < end:
+                    chunks.append(chunk[max(0, offset - position):min(len(chunk), end - position)])
+                position = next_position
+                if position >= end:
+                    break
+            return b''.join(chunks)
+
     def stats(self):
         with self.lock:
             return {'count': len(self.cache), 'size_mb': round(self.cache_bytes / 2**20, 2),
@@ -1379,6 +1537,7 @@ class BoundedHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
     def __init__(self, address, handler, max_connections=64, client_timeout=20):
+        self.request_queue_size = max(16, min(256, int(max_connections)))
         self.admission = threading.BoundedSemaphore(max_connections)
         self.client_timeout = client_timeout
         self.active = 0
@@ -1453,7 +1612,7 @@ import urllib .parse
 import urllib .request 
 import uuid 
 from collections import deque 
-__version__ = '9.5.2-local'
+__version__ = '9.5.3-local'
 AUTHOR_COMMUNITY ='https://t.me/garysclub'
 AUTHOR_CHANNEL ='https://t.me/garysclubchannel'
 AUTHOR_NOTICE =f'''📢 首发地址
@@ -3071,24 +3230,23 @@ class Resolver :
             raise YsptpError ('live/v1/01 missing videos')
         requested =getattr(self.args, 'device_rate', 'auto')
         preferred ='36p' if requested =='auto' else requested
-        available =set()
-        selected =None 
-        fallback =None 
-        for item in videos :
-            if not isinstance (item ,dict ):
-                continue 
-            url =item .get ('url')
-            if not isinstance (url ,str )or not url :
-                continue 
-            available.add(str(item.get('rate', '')))
-            if fallback is None :
-                fallback =item 
-            if item .get ('rate')==preferred:
-                selected =item 
-                break 
-        if requested !='auto' and selected is None:
+        candidates = [item for item in videos if isinstance(item, dict) and isinstance(item.get('url'), str) and item['url']]
+        available = {str(item.get('rate', '')) for item in candidates}
+        selected = next((item for item in candidates if item.get('rate') == preferred), None)
+        if requested != 'auto' and selected is None:
             raise YsptpError(f'live/v1/01 requested rate {requested} unavailable (available: {", ".join(sorted(available))}); fallback required')
-        video =selected if selected is not None else fallback 
+        def declared_size(item):
+            try:
+                resolution = re.fullmatch(r'(\d+)[xX](\d+)', str(item.get('resolution', '')))
+                width = int(item.get('width') or (resolution[1] if resolution else 0))
+                height = int(item.get('height') or (resolution[2] if resolution else 0))
+                return max(0, height), max(0, width)
+            except (ValueError, TypeError, OverflowError):
+                return 0, 0
+        if requested == 'auto' and candidates and all(declared_size(item)[0] for item in candidates):
+            # Use actual API declarations when all offered candidates are comparable.
+            selected = max(candidates, key=declared_size)
+        video = selected or next((item for item in candidates if item.get('rate') == '10p'), None) or (candidates[0] if candidates else None)
         if video is None :
             raise YsptpError ('live/v1/01 no usable URL')
         raw_url =video .get ('url','')
@@ -3800,7 +3958,7 @@ def _unwrap (data ):
 class DeadHostError (RuntimeError ):
     pass 
 def jce_timeshift_url (pid ,sid ,start ,end ,stream ='fhd'):
-    if stream == 'auto':
+    if stream in ('auto', 'best'):
         stream = 'fhd'  # Automatic selection is a playlist policy, not an API stream ID.
     w =W ()
     w .string (pid ,0 )
@@ -3889,7 +4047,7 @@ def _ckey (channel_id ):
     return {'cKey':'--01'+b64 ,'guid':guid ,'ts':ts ,'flowId':'%s_%d'%(uuid .uuid4 ().hex .upper (),_CK_PLATFORM )}
 _BK_H264 =base64 .b64encode (b'H(30:1080,60:1080|30:1080,60:1080)').decode ()
 def bk_playurls (channel_id ,live_pid ,defn ='fhd'):
-    if defn == 'auto':
+    if defn in ('auto', 'best'):
         defn = 'fhd'
     t =_ckey (channel_id )
     q =urllib .parse .urlencode ({'atime':'120','livepid':live_pid ,'cnlid':channel_id ,'appVer':_CK_APPVER ,'app_version':'300090','caplv':'1','cmd':'2','defn':defn ,'device':'iPhone','encryptVer':'4.2','getpreviewinfo':'0','hevclv':'0','lang':'zh-Hans_CN','livequeue':'0','logintype':'1','nettype':'1','newnettype':'1','newplatform':str (_CK_PLATFORM ),'platform':str (_CK_PLATFORM ),'sdtfrom':'v3021','spacode':'23','spaudio':'1','spdemuxer':'6','spdrm':'2','spdynamicrange':'1','spflv':'1','spflvaudio':'1','sphdrfps':'60','sphttps':'1','spvcode':_BK_H264 ,'spvideo':'4','stream':'1','system':'1','sysver':'ios18.2.1','uhd_flag':'0','cKey':t ['cKey'],'guid':t ['guid'],'fntick':str (t ['ts']),'flowid':t ['flowId'],'playbacktime':'0'})
@@ -3923,8 +4081,11 @@ def fetch_abs_playlist (url ,depth =0 ,quality ='fhd'):
     if variant:
         if depth >= 4:
             raise RuntimeError('too many nested HLS master playlists')
-        return fetch_abs_playlist(urllib.parse.urljoin(final, variant), depth + 1, quality)
-    return rewrite_playlist_urls(text, final)
+        selected = next(v for v in analyze_playlist(text).variants if v.uri == variant)
+        result = fetch_abs_playlist(urllib.parse.urljoin(final, variant), depth + 1, quality)
+        remember_playlist_profile(result, selected.profile)
+        return result
+    return rewrite_playlist_urls(filter_master_quality(text, quality), final)
 DEFAULT_CHANNELS =[
 ('cctv1','CCTV-1 综合','2024078201','600001859','fhd'),
 ('cctv2','CCTV-2 财经','2024075401','600001800','fhd'),
@@ -4361,7 +4522,7 @@ def jce_fetch(ch):
 
 
 def defn_label(defn):
-    return {'fhd': '1080p', 'shd': '720p', 'stable': '720p', 'auto': '自适应'}.get((defn or '').lower(), defn or '1080p')
+    return {'best': '最高可用档位', 'fhd': '1080p', 'shd': '720p', 'stable': '720p', 'auto': '自适应'}.get((defn or '').lower(), defn or '1080p')
 
 
 def _record_media_progress(ch, fingerprint, target=6.0, source='jce'):
@@ -4617,11 +4778,13 @@ def publish_channel_playlist(ch, playlist, source, head_only=False):
             fingerprint, target = media_signature(playlist)
             with ch.lock:
                 _record_media_progress(ch, fingerprint, target, source='published-' + source)
+        if state and state['source'] == source and state.get('input_body') == playlist:
+            return state['snapshot']
         if media is None or media.unsafe or not media.segments:
             changed = state is not None and state['source'] != source
             ch.source_restart_required = bool(changed or (media is not None and media.unsafe))
             ch.source_epoch += int(changed)
-            ch._publication = {'source': source, 'snapshot': playlist, 'mapping': {}, 'next': state['next'] if state else 0, 'boundary': None, 'disc': 0, 'source_disc': 0}
+            ch._publication = {'source': source, 'snapshot': playlist, 'mapping': {}, 'next': state['next'] if state else 0, 'boundary': None, 'disc': 0, 'source_disc': 0, 'input_body': playlist}
             return playlist
         identities = [segment.identity for segment in media.segments]
         if len(set(identities)) != len(identities):
@@ -4681,7 +4844,7 @@ def publish_channel_playlist(ch, playlist, source, head_only=False):
         except UnsafePlaylist:
             result = playlist
             ch.source_restart_required = True
-        state['snapshot'] = result
+        state['snapshot'], state['input_body'] = result, playlist
         state['end_disc'] = state['disc'] + max(0, media.discontinuity_sequence - state['source_disc']) + result.splitlines().count('#EXT-X-DISCONTINUITY')
         state['edge_pdt'] = pdt_seconds(media.segments[-1].pdt)
         # A bounded index retains several complete windows of overlap.
@@ -4794,19 +4957,43 @@ def redact_diagnostic(value, secrets_to_hide=()):
 
 
 class SourceSelector:
-    """Sticky per-channel routing with bounded recovery probes and circuit backoff."""
+    """Retain a working high-quality source; latency alone never causes a downgrade."""
     priority = ('device', 'backup', 'engine')
 
-    def __init__(self, hold=30.0, clock=time.monotonic):
+    def __init__(self, hold=30.0, clock=time.monotonic, policy='quality', validate_recovery=False):
         self.lock = threading.RLock()
         self.clock, self.hold = clock, hold
+        self.policy, self.validate_recovery = policy, validate_recovery
         self.selected, self.since = '', 0.0
         self.states = {}
 
     def _state(self, source):
         return self.states.setdefault(source, dict(failures=0, successes=0, retry_at=0.0,
             latency_ms=None, last_ok=0.0, error='', signature=None, progress_at=0.0,
-            recovery_samples=0, probe_at=0.0, probing=False, resolution=None))
+            recovery_samples=0, probe_at=0.0, probing=False, resolution=None,
+            profile=StreamProfile(), profile_at=0.0, generation=0, validation_epoch=0,
+            content_probe_at=0.0, content_probing=False, content_result=None, content_verified_at=0.0))
+
+    def _profile(self, source):
+        state = self._state(source)
+        return state['profile'] if self.clock() - state['profile_at'] <= 60 else StreamProfile()
+
+    def _better(self, candidate, current):
+        a, b = self._profile(candidate), self._profile(current)
+        if self.policy != 'stable' and a.height and b.height:
+            if (a.height, a.width) != (b.height, b.width):
+                return ((a.height, a.width) > (b.height, b.width)) if self.policy == 'quality' else ((a.height, a.width) < (b.height, b.width))
+            if a.codecs and a.codecs == b.codecs and a.bandwidth and b.bandwidth and a.bandwidth != b.bandwidth:
+                return a.bandwidth > b.bandwidth if self.policy == 'quality' else a.bandwidth < b.bandwidth
+        # Without comparable manifest evidence, retain the known service priority.
+        return self.priority.index(candidate) < self.priority.index(current)
+
+    def _recovered(self, source):
+        state = self._state(source)
+        if state['recovery_samples'] < 2:
+            return False
+        return not self.validate_recovery or (state['content_result'] and state['content_result'].get('ok') is True
+                                             and self.clock() - state['content_verified_at'] <= 60)
 
     def order(self, available):
         with self.lock:
@@ -4814,17 +5001,32 @@ class SourceSelector:
             order = [s for s in self.priority if s in available and self._state(s)['retry_at'] <= now]
             current = self.selected
             if current in order:
-                promoted = [s for s in order if self.priority.index(s) < self.priority.index(current)
-                            and self._state(s)['recovery_samples'] >= 2 and now - self.since >= self.hold]
+                promoted = [s for s in order if s != current and self._better(s, current)
+                            and self._recovered(s) and now - self.since >= self.hold]
+                if len(promoted) > 1 and self._better(promoted[1], promoted[0]):
+                    promoted.reverse()
                 order = promoted + [current] + [s for s in order if s != current and s not in promoted]
             return order
 
     def success(self, source, playlist, elapsed, probe=False):
-        signature, target = media_signature(playlist)
+        analysis = analyze_playlist(playlist)
+        signature, target, profile = analysis.signature, analysis.target, analysis.profile
+        generation = 0
+        if analysis.media and analysis.media.segments:
+            uri = analysis.media.segments[-1].uri
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(uri).query)
+            if urllib.parse.urlsplit(uri).path in ('/proxy', '/proxy.ts', '/engine_proxy') and query.get('resource'):
+                try:
+                    generation = resolve_resource(query['resource'][0]).generation
+                except ProxyError:
+                    pass
         now = self.clock()
-        resolution = re.findall(r'RESOLUTION=(\d+x\d+)', playlist)
         with self.lock:
             state = self._state(source)
+            if generation != state['generation']:
+                state['generation'], state['validation_epoch'] = generation, state['validation_epoch'] + 1
+                state['content_result'], state['content_probe_at'], state['recovery_samples'] = None, 0.0, 0
+                state['profile'], state['profile_at'] = StreamProfile(), 0.0
             if signature is not None:
                 if signature != state['signature']:
                     state['progress_at'] = now
@@ -4832,22 +5034,26 @@ class SourceSelector:
                 elif now - state['progress_at'] > max(3 * target, 30):
                     raise FrozenPlaylistError('source probe: media stopped advancing')
             else:
-                # A master playlist does not prove that its media is advancing.
-                state['recovery_samples'] = 0
+                if not state.get('content_signature'):
+                    state['recovery_samples'] = 0
             state['signature'] = signature
             state['successes'] += 1
+            if state['failures']:
+                state['validation_epoch'] += 1
+                state['content_result'], state['content_probe_at'] = None, 0.0
             state['failures'], state['retry_at'], state['error'] = 0, 0.0, ''
             state['last_ok'] = time.time()
             value = max(0, elapsed * 1000)
             state['latency_ms'] = value if state['latency_ms'] is None else .7 * state['latency_ms'] + .3 * value
-            if resolution:
-                state['resolution'] = max(resolution, key=lambda s: math.prod(map(int, s.split('x'))))
+            if profile.height or profile.bandwidth or profile.codecs:
+                state['profile'], state['profile_at'] = profile, now
+                state['resolution'] = profile.resolution
 
     def failure(self, source, error):
         with self.lock:
             state = self._state(source)
             state['failures'] += 1
-            state['recovery_samples'] = 0
+            state['recovery_samples'], state['validation_epoch'] = 0, state['validation_epoch'] + 1
             state['retry_at'] = self.clock() + min(120, 5 * 2 ** min(state['failures'] - 1, 5))
             state['error'] = redact_diagnostic(error)
 
@@ -4864,9 +5070,10 @@ class SourceSelector:
             now = self.clock()
             if not self.selected or now - self.since < self.hold:
                 return None
-            for source in self.priority[:self.priority.index(self.selected)]:
-                if source not in available:
-                    continue
+            candidates = [s for s in self.priority if s in available and s != self.selected
+                          and (self.policy != 'stable' or self._better(s, self.selected))]
+            candidates.sort(key=lambda source: (self._state(source)['probe_at'], self.priority.index(source)))
+            for source in candidates:
                 state = self._state(source)
                 if not state['probing'] and now >= max(state['probe_at'], state['retry_at']):
                     state['probing'], state['probe_at'] = True, now + 30
@@ -4876,14 +5083,17 @@ class SourceSelector:
     def snapshot(self):
         with self.lock:
             now = self.clock()
-            return {'selected': self.selected or None,
+            return {'selected': self.selected or None, 'policy': self.policy,
                     'stable_seconds': round(max(0, now - self.since)) if self.selected else 0,
                     'sources': {name: {'failures': s['failures'], 'successes': s['successes'],
                         'retry_in': round(max(0, s['retry_at'] - now), 1),
                         'latency_ms': round(s['latency_ms'], 1) if s['latency_ms'] is not None else None,
                         'last_success': s['last_ok'] or None, 'error': s['error'],
                         'recovery_samples': s['recovery_samples'], 'probing': s['probing'],
-                        'playlist_resolution': s['resolution']}
+                        'playlist_resolution': self._profile(name).resolution,
+                        'declared_codecs': self._profile(name).codecs or None,
+                        'declared_bandwidth': self._profile(name).bandwidth or None,
+                        'segment_content': s['content_result'], 'content_probing': s['content_probing']}
                         for name, s in self.states.items()}}
 
 
@@ -4892,12 +5102,15 @@ diagnostic_pool = ThreadPoolExecutor(max_workers=1, max_queue=4, thread_name_pre
 diagnostic_lock = threading.Lock()
 diagnostic_jobs = {}
 epg_manager = None
+media_probe_manager = None
+playback_policy = 'quality'
 
 
 def channel_selector(ch):
     with ch.lock:
         if not hasattr(ch, 'selector'):
-            ch.selector = SourceSelector()
+            ch.selector = SourceSelector(policy=playback_policy, validate_recovery=media_probe_manager is not None)
+            ch.selector.channel = ch.slug
         return ch.selector
 
 
@@ -4912,26 +5125,290 @@ def source_loaders(ch, origin, head_only=False):
             return method(ch.slug, parsed.netloc, parsed.scheme), 'device', {}
         loaders['device'] = device
 
-    def backup():
+    def load_backup(probe=False):
         now = time.time()
         with ch.lock:
             cached, age = ch.last_built_playlist, now - ch.last_built_time
             source = getattr(ch, 'last_built_source', 'backup:' + ch.mode)
         if cached and age < 15 and '#EXTM3U' in cached:
-            if age > 6 and not head_only:
+            if age > 6 and not head_only and not probe:
                 trigger_background_refresh(ch)
             return cached, source, {'X-SWR': 'HIT'}
         if not head_only:
-            ensure_channel(ch)
+            if probe:
+                coalesce_refresh(ch.slug, lambda: _refresh_and_build(ch), timeout=5.0)
+            else:
+                ensure_channel(ch)
         playlist = build_playlist(ch, holdback=True)
         return playlist, getattr(ch, 'last_built_source', 'backup:' + ch.mode), {}
+    def backup():
+        return load_backup()
+    backup.probe = lambda: load_backup(True)
     loaders['backup'] = backup
     if engine_enabled:
         loaders['engine'] = lambda: (fetch_upstream_engine_playlist(ch.slug, parsed.netloc, parsed.scheme), 'engine', {})
+    def quality_loader(load):
+        def wrapped():
+            playlist, label, extra = load()
+            return filter_master_quality(playlist, ch.defn) if playlist else playlist, label, extra
+        return wrapped
+    for name, load in list(loaders.items()):
+        wrapped = quality_loader(load)
+        wrapped.probe = quality_loader(getattr(load, 'probe', load))
+        loaders[name] = wrapped
     return loaders
 
 
-def schedule_source_probe(selector, loaders):
+def playback_resource(uri, base='', headers=None):
+    """Resolve gateway capabilities locally; never request our own public HTTP endpoint."""
+    absolute = urllib.parse.urljoin(base, uri)
+    parsed = urllib.parse.urlsplit(absolute)
+    query = urllib.parse.parse_qs(parsed.query)
+    if parsed.path in ('/proxy', '/proxy.ts', '/engine_proxy') and query.get('resource'):
+        return resolve_resource(query['resource'][0])
+    safe_headers = dict(headers or {})
+    if base and urllib.parse.urlsplit(base).netloc != parsed.netloc:
+        safe_headers = {k: v for k, v in safe_headers.items() if k.lower() not in SENSITIVE}
+    return Resource(absolute, safe_headers)
+
+
+def content_request_headers(headers):
+    result = dict(headers)
+    existing = {key.lower() for key in result}
+    if 'user-agent' not in existing:
+        result['User-Agent'] = 'qqlive'
+    if 'referer' not in existing:
+        result['Referer'] = 'https://live.cctv.cn/'
+    return result
+
+
+def classify_media_prefix(body, encrypted=False):
+    prefix = body.lstrip(b'\xef\xbb\xbf \r\n\t')
+    if not body:
+        return False, 'empty'
+    lower = prefix[:128].lower()
+    if lower.startswith((b'<!doctype html', b'<html', b'<head', b'<body', b'<?xml', b'<error')):
+        return False, 'error_document'
+    if lower.startswith((b'{', b'[')) and re.search(rb'"(?:error|message|code|status)"\s*:', lower):
+        return False, 'error_json'
+    if encrypted:
+        return True, 'encrypted_nonempty'
+    for offset in range(min(188, max(0, len(body) - 376))):
+        if body[offset] == body[offset + 188] == body[offset + 376] == 0x47:
+            return True, 'mpegts_prefix'
+    if len(body) >= 8 and body[4:8] in (b'ftyp', b'styp', b'moof', b'mdat', b'sidx', b'free'):
+        size = int.from_bytes(body[:4], 'big')
+        if size == 0 or size == 1 or size >= 8:
+            return True, 'isobmff_prefix'
+    if body.startswith(b'ID3') or (len(body) > 2 and body[0] == 255 and body[1] & 0xF6 == 0xF0):
+        return True, 'audio_prefix'
+    return None, 'opaque_unverified'
+
+
+def probe_playlist_content(playlist, origin='', policy=None, proxy=None, max_bytes=65536, timeout=3):
+    """Read a bounded prefix, not a full segment or decoded frame. No unbounded GET fallback."""
+    max_bytes = max(564, min(65536, int(max_bytes)))
+    policy = policy or URLPolicy(engine_port=engine_port)
+    started, deadline = time.monotonic(), time.monotonic() + timeout
+    text, base, headers = playlist, origin, {}
+    analysis = analyze_playlist(text)
+    sampled_profile = analysis.profile
+    for _ in range(3):
+        if analysis.media is not None:
+            break
+        if not analysis.variants:
+            return {'ok': None, 'kind': 'master_unverified', 'sampled_bytes': 0, 'decode_verified': False}
+        variant = max(analysis.variants, key=lambda v: (v.profile.height, v.profile.width, v.profile.bandwidth))
+        sampled_profile = variant.profile
+        resource = playback_resource(variant.uri, base, headers)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProxyError(504, 'content probe deadline exceeded')
+        status, _, body, effective = fetch_bytes(resource.url, content_request_headers(resource.headers), policy=policy,
+                                                timeout=remaining, max_bytes=256 * 1024)
+        if status != 200:
+            raise ProxyError(status, 'probe media playlist HTTP ' + str(status))
+        text, base, headers = body.decode('utf-8', 'strict'), effective, resource.headers
+        analysis = analyze_playlist(text)
+    if analysis.media is None or not analysis.media.segments:
+        return {'ok': None, 'kind': 'no_media_segment', 'sampled_bytes': 0, 'decode_verified': False}
+    segment = analysis.media.segments[-2] if len(analysis.media.segments) >= 3 else analysis.media.segments[-1]
+    resource = playback_resource(segment.uri, base, headers)
+    offset, length = 0, max_bytes
+    if segment.byte_range:
+        match = re.fullmatch(r'(\d+)@(\d+)', segment.byte_range)
+        if not match:
+            return {'ok': None, 'kind': 'unknown_byte_range', 'sampled_bytes': 0, 'decode_verified': False}
+        length, offset = min(max_bytes, int(match[1])), int(match[2])
+        if length <= 0:
+            raise ProxyError(502, 'invalid segment byte range')
+    encrypted = bool(segment.key and attributes(segment.key).get('METHOD', 'NONE') != 'NONE')
+    cached = proxy.cached_prefix(resource.url, resource.headers, offset, length) if proxy else None
+    remote = None
+    from_cache = cached is not None
+    try:
+        if cached is not None:
+            body = cached
+            if segment.byte_range and len(body) < length:
+                raise ProxyError(502, 'truncated cached byte range')
+        else:
+            request_headers = content_request_headers(resource.headers)
+            request_headers['Range'] = f'bytes={offset}-{offset + length - 1}'
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ProxyError(504, 'content probe deadline exceeded')
+            remote = open_remote(resource.url, request_headers, method='GET', policy=policy,
+                                 timeout=remaining, deadline=deadline)
+            if remote.status in (403, 405, 416) and not offset:
+                # Some live CDNs reject Range but serve ordinary GET. The read cap remains unchanged.
+                _safe_close(remote)
+                remote = None
+                request_headers.pop('Range', None)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ProxyError(504, 'content probe deadline exceeded')
+                remote = open_remote(resource.url, request_headers, method='GET', policy=policy,
+                                     timeout=remaining, deadline=deadline)
+            if remote.status not in (200, 206):
+                raise ProxyError(remote.status, 'segment content HTTP ' + str(remote.status))
+            if remote.headers.get('content-encoding', 'identity').lower() not in ('', 'identity'):
+                return {'ok': None, 'kind': 'unexpected_content_encoding', 'sampled_bytes': 0, 'decode_verified': False}
+            if remote.status == 206:
+                content_range = re.fullmatch(r'bytes (\d+)-(\d+)/(\d+|\*)', remote.headers.get('content-range', ''))
+                if not content_range or int(content_range[1]) != offset or not offset <= int(content_range[2]) <= offset + length - 1:
+                    raise ProxyError(502, 'invalid probe content range')
+            elif offset:
+                return {'ok': None, 'kind': 'byte_range_ignored', 'sampled_bytes': 0, 'decode_verified': False}
+            chunks, total, eof = [], 0, False
+            while total < length:
+                if time.monotonic() >= deadline:
+                    raise ProxyError(504, 'content probe deadline exceeded')
+                chunk = remote.read(length - total)
+                if not chunk:
+                    eof = True
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+            body = b''.join(chunks)
+            expected = remote.headers.get('content-length')
+            if expected is not None:
+                try:
+                    expected = int(expected)
+                except ValueError:
+                    raise ProxyError(502, 'invalid probe content length')
+                if remote.status == 206 and expected != int(content_range[2]) - offset + 1:
+                    raise ProxyError(502, 'inconsistent probe byte range length')
+                if expected < 0 or total > expected or (eof and total != expected):
+                    raise ProxyError(502, 'truncated probe response')
+            if remote.status == 206 and len(body) < min(length, int(content_range[2]) - offset + 1):
+                raise ProxyError(502, 'truncated probe byte range')
+        ok, kind = classify_media_prefix(body, encrypted)
+        return {'ok': ok, 'kind': kind, 'sampled_bytes': len(body), 'from_cache': from_cache,
+                'elapsed_ms': round((time.monotonic() - started) * 1000), 'decode_verified': False,
+                'media_signature': analysis.signature, 'target_duration': analysis.target,
+                'master': analyze_playlist(playlist).media is None,
+                'declared_profile': dataclasses.asdict(sampled_profile)}
+    finally:
+        _safe_close(remote)
+
+
+class MediaProbeManager:
+    """One pending content check per source; two workers, eight queued tasks, 30s cadence."""
+    def __init__(self, interval=30, proxy=None):
+        self.interval, self.proxy = max(10, interval), proxy
+        self.pool = ThreadPoolExecutor(max_workers=2, max_queue=8, thread_name_prefix='media-probe')
+        self.lock = threading.Lock()
+        self.closed = False
+        self.scheduled = self.completed = self.failed = self.cached = self.dropped = self.sampled_bytes = 0
+
+    def stats(self):
+        with self.lock:
+            return {'enabled': not self.closed, 'scheduled': self.scheduled, 'completed': self.completed,
+                    'failed': self.failed, 'cached': self.cached, 'dropped': self.dropped,
+                    'sampled_bytes': self.sampled_bytes, 'interval_seconds': self.interval,
+                    'max_sample_bytes': 65536}
+
+    def schedule(self, selector, source, playlist, origin):
+        with self.lock:
+            if self.closed:
+                return
+        with selector.lock:
+            state = selector._state(source)
+            now = selector.clock()
+            if state['content_probing'] or now < state['content_probe_at']:
+                return
+            epoch = state['validation_epoch']
+            state['content_probing'], state['content_probe_at'] = True, now + self.interval
+        def run():
+            hard_error = None
+            try:
+                result = probe_playlist_content(playlist, origin,
+                    policy=self.proxy.policy if self.proxy else None, proxy=self.proxy)
+                if result['ok'] is False:
+                    hard_error = 'segment content: ' + result['kind']
+            except Exception as exc:
+                # Deadline, admission and DNS failures do not prove the highest-quality stream is broken.
+                status = getattr(exc, 'status', None)
+                dns_failure = isinstance(getattr(exc, '__cause__', None), DNSLookupError)
+                hard_error = str(exc) if status in (401, 403, 404, 410, 502) and not dns_failure else None
+                result = {'ok': False if hard_error else None, 'kind': 'probe_failed' if hard_error else 'probe_inconclusive',
+                          'error': redact_diagnostic(type(exc).__name__ + ': ' + str(exc)),
+                          'sampled_bytes': 0, 'decode_verified': False, 'status': status}
+            result['checked_at'] = time.time()
+            with self.lock:
+                if self.closed:
+                    return
+                self.completed += 1
+                self.failed += bool(hard_error)
+                self.cached += bool(result.get('from_cache'))
+                self.sampled_bytes += result.get('sampled_bytes', 0)
+            with selector.lock:
+                state = selector._state(source)
+                if state['validation_epoch'] != epoch:
+                    return  # A new source generation or foreground failure superseded this check.
+                if result.get('declared_profile'):
+                    profile = StreamProfile(**result['declared_profile'])
+                    if profile.height or profile.bandwidth or profile.codecs:
+                        state['profile'], state['profile_at'] = profile, selector.clock()
+                if result.get('master') and result['ok'] is True and result.get('media_signature'):
+                    signature = result['media_signature']
+                    if signature != state.get('content_signature'):
+                        state['recovery_samples'] += 1
+                        state['content_signature'], state['content_progress_at'] = signature, selector.clock()
+                    elif selector.clock() - state.get('content_progress_at', selector.clock()) > max(30, result['target_duration'] * 3):
+                        hard_error = 'master media stopped advancing'
+                        result['ok'], result['kind'] = False, 'media_frozen'
+                if hard_error:
+                    if source == 'device' and result.get('status') in (401, 403, 404) and resolver and getattr(selector, 'channel', None):
+                        resolver.record_segment_failure(selector.channel, state['generation'], result['status'])
+                    selector.failure(source, hard_error)
+                state['content_result'] = result
+                if result['ok'] is True:
+                    state['content_verified_at'] = selector.clock()
+            return
+        def guarded_run():
+            try:
+                run()
+            finally:
+                with selector.lock:
+                    selector._state(source)['content_probing'] = False
+        try:
+            self.pool.submit(guarded_run)
+            with self.lock:
+                self.scheduled += 1
+        except RuntimeError:
+            with selector.lock:
+                selector._state(source)['content_probing'] = False
+            with self.lock:
+                self.dropped += 1
+
+    def close(self):
+        with self.lock:
+            self.closed = True
+        self.pool.shutdown(wait=False, cancel_futures=True)
+
+
+def schedule_source_probe(selector, loaders, origin=''):
     if shutdown_event.is_set():
         return
     source = selector.reserve_probe(loaders)
@@ -4940,10 +5417,13 @@ def schedule_source_probe(selector, loaders):
     def probe():
         started = time.monotonic()
         try:
-            playlist, _, _ = loaders[source]()
+            loader = loaders[source]
+            playlist, _, _ = getattr(loader, 'probe', loader)()
             if not playlist or '#EXTM3U' not in playlist:
                 raise RuntimeError('empty source playlist')
             selector.success(source, playlist, time.monotonic() - started, probe=True)
+            if media_probe_manager:
+                media_probe_manager.schedule(selector, source, playlist, origin)
         except Exception as exc:
             selector.failure(source, type(exc).__name__ + ': ' + str(exc))
         finally:
@@ -5000,7 +5480,8 @@ def diagnostics_snapshot(secret=''):
                 for line in list(global_log_ring)[-30:]]
     data = {'version': __version__, 'uptime_seconds': int(time.time() - server_start_time),
             'device_ready': resolver_ready(), 'media': media_proxy.stats(),
-            'channels': channel_status(), 'epg': epg_manager.stats() if epg_manager else {'enabled': False},
+            'channels': channel_status(), 'analysis_cache': playlist_analysis_cache.stats(), 'playback_policy': playback_policy,
+            'media_probe': media_probe_manager.stats() if media_probe_manager else {'enabled': False}, 'epg': epg_manager.stats() if epg_manager else {'enabled': False},
             'logs': logs}
     # Also scrub errors nested in per-channel/source snapshots.
     return json.loads(redact_json(data, secret))
@@ -5035,7 +5516,7 @@ def start_channel_diagnostic(ch, origin):
                     break
                 started = time.monotonic()
                 try:
-                    playlist, _, _ = load()
+                    playlist, _, _ = getattr(load, 'probe', load)()
                     if not playlist or '#EXTM3U' not in playlist:
                         raise RuntimeError('no HLS playlist')
                     media = parse_media(playlist)
@@ -5043,22 +5524,15 @@ def start_channel_diagnostic(ch, origin):
                                 elapsed_ms=round((time.monotonic() - started) * 1000),
                                 segments=len(media.segments) if media else 0)
                     if not media or not media.segments:
-                        append_step(source=source, layer='segment', ok=None, message='master playlist: media not verified')
+                        result = probe_playlist_content(playlist, origin, policy=media_proxy.policy, proxy=media_proxy)
+                        append_step(source=source, layer='segment_content', **result)
                         continue
                     target = media.segments[-1].uri
-                    query = urllib.parse.parse_qs(urllib.parse.urlsplit(target).query)
-                    resource = resolve_resource(query['resource'][0]) if 'resource' in query else Resource(target, {})
-                    # Reuse the same target policy as real playback, including private-address rejection.
+                    resource = playback_resource(target, origin)
                     media_proxy.policy.resolve(resource.url)
                     append_step(source=source, layer='dns_policy', ok=True)
-                    remote = None
-                    try:
-                        remote = open_remote(resource.url, headers=resource.headers, method='HEAD',
-                                             policy=media_proxy.policy, timeout=3)
-                        append_step(source=source, layer='segment_head', ok=True if remote.status < 400 else None if remote.status == 405 else False,
-                                    status=remote.status, message='HEAD metadata only; media decoding is not verified')
-                    finally:
-                        _safe_close(remote)
+                    result = probe_playlist_content(playlist, origin, policy=media_proxy.policy, proxy=media_proxy)
+                    append_step(source=source, layer='segment_content', **result)
                 except Exception as exc:
                     append_step(source=source, layer='probe', ok=False,
                                 error=redact_diagnostic(type(exc).__name__ + ': ' + str(exc)))
@@ -5294,9 +5768,9 @@ STATUS_PAGE = r'''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta 
 <style nonce="__NONCE__">body{font:15px system-ui,sans-serif;background:#f4f6fa;color:#17233a;max-width:1200px;margin:24px auto;padding:0 16px}h1{font-size:25px}section{background:white;padding:18px;margin:16px 0;border-radius:12px}input,select,button,a.action{font:inherit;padding:7px;margin:4px;border:1px solid #b9c7df;border-radius:6px}button,a{cursor:pointer;color:#2154ad}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:10px;border-bottom:1px solid #edf0f5}.scroll{overflow:auto}small,.muted{color:#596a83}#notice{white-space:pre-wrap}pre{white-space:pre-wrap;overflow-wrap:anywhere}.ready{color:#16733e}.stale,.degraded{color:#ac4b13}#token{max-width:190px}a{overflow-wrap:anywhere}</style>
 <h1>YSP 频道状态</h1><p class="muted">状态来自播放观测；分辨率仅显示主列表声明，不代表实际解码画质。回看入口是否可播需由上游确认。</p>
 <section><input id="token" type="password" autocomplete="off" placeholder="访问令牌（如已启用）"><button id="connect">连接 / 刷新</button><button id="export">下载脱敏诊断</button><a id="subscribe">频道订阅</a><p id="summary">正在读取状态…</p><div id="notice" role="status"></div></section>
-<section><input id="search" placeholder="搜索频道"><div class="scroll"><table><thead><tr><th>频道</th><th>状态</th><th>当前来源</th><th>列表声明 / 请求耗时</th><th>最近推进</th><th>操作</th></tr></thead><tbody id="channels"></tbody></table></div></section>
+<section><input id="search" placeholder="搜索频道"><div class="scroll"><table><thead><tr><th>频道</th><th>状态</th><th>当前来源</th><th>列表声明 / 请求耗时</th><th>内容检测</th><th>最近推进</th><th>操作</th></tr></thead><tbody id="channels"></tbody></table></div></section>
 <section><h2 id="epgtitle">节目单与回看</h2><p id="epgstate">选择一个频道查看节目。</p><div class="scroll"><table><tbody id="programmes"></tbody></table></div><p>手动回看（按浏览器本地时区）：</p><select id="channel"></select><input id="start" type="datetime-local"><input id="end" type="datetime-local"><button id="catchup">生成回看链接</button><div id="catchuplink"></div></section>
-<section><h2>主动诊断</h2><p class="muted">点击频道的“诊断”会请求播放源和分片 HEAD 元数据，不验证实际解码。</p><pre id="diagnosis">尚未执行。</pre></section>
+<section><h2>主动诊断</h2><p class="muted">点击频道的“诊断”会请求播放源并限量读取分片内容（最多64 KiB），不验证实际解码。</p><pre id="diagnosis">尚未执行。</pre></section>
 <script nonce="__NONCE__">'use strict';
 const $=id=>document.getElementById(id),q=new URLSearchParams(location.search);let stored='';try{stored=sessionStorage.getItem('ysp-token')||''}catch(e){}let token=q.get('access_token')||stored,selected='',pollTimer=null,refreshing=false;
 $('token').value=token;if(q.has('access_token'))history.replaceState(null,'',location.pathname);
@@ -5307,7 +5781,7 @@ function cell(tr,value){const td=document.createElement('td');td.textContent=val
 function action(td,label,callback){const b=document.createElement('button');b.textContent=label;b.onclick=callback;td.append(b)}
 function anchor(td,label,url){const a=document.createElement('a');a.textContent=label;a.href=url;td.append(a)}
 function ago(t){return t?Math.max(0,Math.round(Date.now()/1000-t))+' 秒前':'未观测'}
-async function refresh(){if(refreshing)return;refreshing=true;try{const data=await api('/api/channels');$('notice').textContent='';$('summary').textContent=`${data.channels.length} 个频道 · 正常推进 ${data.channels.filter(c=>c.state==='ready').length} 个 · EPG ${data.epg.enabled?(data.epg.loading?'更新中':data.epg.programmes+' 个节目'):'未启用'}`;$('subscribe').href=link('/all.m3u');const filter=$('search').value.toLowerCase(),old=$('channel').value;$('channels').replaceChildren();$('channel').replaceChildren();for(const ch of data.channels){if(ch.catchup_supported){const o=document.createElement('option');o.value=ch.slug;o.textContent=ch.name;$('channel').append(o)}if(!(ch.name+' '+ch.slug).toLowerCase().includes(filter))continue;const tr=document.createElement('tr');cell(tr,ch.name);cell(tr,states[ch.state]||ch.state).className=ch.state;cell(tr,ch.source||'未选择');const s=ch.selection.sources[ch.selection.selected]||{};cell(tr,(s.playlist_resolution||'未观测')+' / '+(s.latency_ms==null?'—':s.latency_ms+' ms'));cell(tr,ago(ch.last_progress));const td=cell(tr,'');action(td,'节目',()=>showEPG(ch.slug,ch.name));action(td,'诊断',()=>diagnose(ch.slug));anchor(td,'直播',link('/'+ch.slug+'.m3u8'));$('channels').append(tr)}if(old)$('channel').value=old;if(selected)await showEPG(selected)}catch(e){$('notice').textContent=e.message}finally{refreshing=false}}
+async function refresh(){if(refreshing)return;refreshing=true;try{const data=await api('/api/channels');$('notice').textContent='';$('summary').textContent=`${data.channels.length} 个频道 · ${{quality:'画质优先',stable:'稳定优先',bandwidth:'节省流量'}[data.playback_policy]||'画质优先'} · 正常推进 ${data.channels.filter(c=>c.state==='ready').length} 个 · EPG ${data.epg.enabled?(data.epg.loading?'更新中':data.epg.programmes+' 个节目'):'未启用'}`;$('subscribe').href=link('/all.m3u');const filter=$('search').value.toLowerCase(),old=$('channel').value;$('channels').replaceChildren();$('channel').replaceChildren();for(const ch of data.channels){if(ch.catchup_supported){const o=document.createElement('option');o.value=ch.slug;o.textContent=ch.name;$('channel').append(o)}if(!(ch.name+' '+ch.slug).toLowerCase().includes(filter))continue;const tr=document.createElement('tr');cell(tr,ch.name);cell(tr,states[ch.state]||ch.state).className=ch.state;cell(tr,ch.source||'未选择');const s=ch.selection.sources[ch.selection.selected]||{};cell(tr,(s.playlist_resolution||'未观测')+' / '+(s.latency_ms==null?'—':s.latency_ms+' ms'));const check=s.segment_content;cell(tr,s.content_probing?'检测中':!check?'未检测':check.ok===true?'内容前缀可用':check.ok===false?'内容异常':'未确认');cell(tr,ago(ch.last_progress));const td=cell(tr,'');action(td,'节目',()=>showEPG(ch.slug,ch.name));action(td,'诊断',()=>diagnose(ch.slug));anchor(td,'直播',link('/'+ch.slug+'.m3u8'));$('channels').append(tr)}if(old)$('channel').value=old;if(selected)await showEPG(selected)}catch(e){$('notice').textContent=e.message}finally{refreshing=false}}
 async function showEPG(slug,name){selected=slug;if(name)$('epgtitle').textContent=name+' · 节目单与回看';try{const data=await api('/api/epg?channel='+encodeURIComponent(slug));$('epgstate').textContent=!data.enabled?'EPG 未启用':data.loading?'节目单正在后台更新，请稍后刷新':data.error?'更新失败，保留旧缓存：'+data.error:data.programmes.length?'显示缓存节目；回看范围是本地校验上限，不代表上游保证。':'暂无匹配节目';if(data.current)$('epgstate').textContent+=' · 正在播：'+data.current.title;if(data.next)$('epgstate').textContent+=' · 接下来：'+data.next.title;$('programmes').replaceChildren();for(const p of data.programmes){const tr=document.createElement('tr');cell(tr,new Date(p.start*1000).toLocaleString()+' — '+new Date(p.stop*1000).toLocaleTimeString());cell(tr,p.title);const td=cell(tr,'');if(p.catchup_url)anchor(td,'从头回看',p.catchup_url);$('programmes').append(tr)}}catch(e){$('epgstate').textContent=e.message}}
 async function diagnose(slug){clearTimeout(pollTimer);try{const d=await api('/api/diagnose?channel='+encodeURIComponent(slug));$('diagnosis').textContent=JSON.stringify(d,null,2);if(d.running)pollTimer=setTimeout(()=>diagnose(slug),1500)}catch(e){$('diagnosis').textContent=e.message}}
 $('connect').onclick=()=>{token=$('token').value.trim();try{sessionStorage.setItem('ysp-token',token)}catch(e){}refresh()};$('search').oninput=refresh;
@@ -5318,7 +5792,7 @@ refresh();setInterval(()=>{if(!document.hidden)refresh()},15000);
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = 'ysp-live/9.5.1-local'
+    server_version = 'ysp-live/' + __version__
 
     def send_response(self, code, message=None):
         self._response_started = True
@@ -5439,7 +5913,7 @@ class Handler(BaseHTTPRequestHandler):
                  'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff'})
             return
         if path == '/api/channels':
-            data = {'channels': channel_status(), 'epg': epg_manager.stats() if epg_manager else {'enabled': False}}
+            data = {'channels': channel_status(), 'playback_policy': playback_policy, 'epg': epg_manager.stats() if epg_manager else {'enabled': False}}
             self._send(200, redact_json(data, access_token), 'application/json; charset=utf-8', head_only)
             return
         if path == '/api/diagnostics':
@@ -5595,7 +6069,7 @@ class Handler(BaseHTTPRequestHandler):
         loaders = source_loaders(ch, origin, head_only)
         if not head_only:
             ch.last_access = time.time()
-            schedule_source_probe(selector, loaders)
+            schedule_source_probe(selector, loaders, origin)
         for source in selector.order(loaders):
             started = time.monotonic()
             try:
@@ -5607,6 +6081,8 @@ class Handler(BaseHTTPRequestHandler):
                 if self._playlist(ch, playlist, published_source, head_only, extra):
                     if not head_only:
                         selector.commit(source)
+                        if media_probe_manager:
+                            media_probe_manager.schedule(selector, source, playlist, origin)
                     return
                 raise FrozenPlaylistError('published source is stale or unsupported')
             except Exception as exc:
@@ -5753,7 +6229,7 @@ def _handle_sigterm(signum, frame):
         threading.Thread(target=active_server.shutdown, daemon=True).start()
 def main():
     global resolver, server_port, engine_port, media_proxy, active_server, engine_enabled
-    global global_ts_cache, active_backend_channels, epg_manager
+    global global_ts_cache, active_backend_channels, epg_manager, media_probe_manager, playback_policy
     ap = argparse.ArgumentParser(description=f'央视频直播代理 v{__version__}（本地优化版）')
     ap.add_argument('port', nargs='?', type=int, default=8767)
     ap.add_argument('--bind', default='0.0.0.0')
@@ -5776,11 +6252,13 @@ def main():
     ap.add_argument('--engine-port', type=int, default=8787)
     ap.add_argument('--timeout', type=float, default=10.0)
     ap.add_argument('--no-engine', action='store_true')
-    ap.add_argument('--quality', choices=('auto', 'fhd', 'shd'), default=None, help='备用源质量：auto保留多码率，fhd约1080p，shd约720p')
+    ap.add_argument('--quality', choices=('best', 'auto', 'fhd', 'shd'), default=None, help='best选择最高可用视频档位，auto交给播放器，fhd约1080p，shd约720p')
     ap.add_argument('--device-rate', choices=('auto', '36p', '10p'), default='auto')
     ap.add_argument('--epg-url', action='append', default=None, help='XMLTV或XMLTV.gz地址，可重复配置最多3个，按顺序回退')
     ap.add_argument('--epg-refresh', type=float, default=3600, help='EPG缓存刷新间隔秒，最少60')
     ap.add_argument('--no-epg', action='store_true', help='禁用EPG下载和本地节目单接口')
+    ap.add_argument('--playback-policy', choices=('quality', 'stable', 'bandwidth'), default='quality', help='默认画质优先；stable固定来源优先级；bandwidth偏好低流量')
+    ap.add_argument('--media-probe', choices=('background', 'off'), default='background', help='后台限量检测实际分片内容；每来源最短30秒一次')
     args = ap.parse_args()
     if threading.current_thread() is threading.main_thread():
         signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -5822,9 +6300,13 @@ def main():
         temp_dir=args.temp_dir or None)
     # Compatibility diagnostics now point to the cache actually used by media requests.
     global_ts_cache = media_proxy
-    if args.quality:
-        for ch in CHANNEL_MAP.values():
-            ch.defn = args.quality
+    playback_policy = args.playback_policy
+    selected_quality = args.quality or {'quality': 'best', 'stable': 'fhd', 'bandwidth': 'shd'}[playback_policy]
+    for ch in CHANNEL_MAP.values():
+        ch.defn = selected_quality
+    if args.playback_policy == 'bandwidth' and args.device_rate == 'auto':
+        args.device_rate = '10p'
+    media_probe_manager = MediaProbeManager(proxy=media_proxy) if args.media_probe == 'background' else None
     only_4k = args.only_4k or os.environ.get('YSP_ONLY_4K_DEVICE', '').lower() in ('1', 'true', 'yes')
     active_backend_channels = set() if args.no_4k else set(TRUE_4K_CHANNELS if only_4k else BACKEND_CHANNELS)
     engine_args = argparse.Namespace(host=args.bind, port=args.port, timeout=args.timeout,
@@ -5854,6 +6336,7 @@ def main():
             threading.Thread(target=init_resolver, daemon=True, name='engine-init').start()
         log(f'ysp-live {__version__} 本地优化版启动，频道={len(CHANNEL_MAP)}，端口={args.port}')
         log(f'订阅: http://localhost:{args.port}/all.m3u；存活:/livez；播放就绪:/readyz')
+        log(f'选源策略={playback_policy}，列表画质={selected_quality}，分片检测={args.media_probe}')
         log(f'分片RAM缓存={args.cache_mb}MiB，在途临时文件预算={args.inflight_mb}MiB，下载并发={args.download_workers}')
         active_server.serve_forever(poll_interval=0.2)
     except KeyboardInterrupt:
@@ -5863,6 +6346,8 @@ def main():
         resolver.close()
         if epg_manager:
             epg_manager.close()
+        if media_probe_manager:
+            media_probe_manager.close()
         feature_pool.shutdown(wait=False, cancel_futures=True)
         diagnostic_pool.shutdown(wait=False, cancel_futures=True)
         media_proxy.close()

@@ -312,6 +312,18 @@ class ResolverTests(unittest.TestCase):
             with self.assertRaisesRegex(live.YsptpError, 'requested rate 10p unavailable'):
                 self.resolver.live_v1_01_flow(session, 'test')
 
+    def test_auto_rate_uses_highest_actual_declaration_when_all_sizes_are_available(self):
+        self.resolver.args.device_rate = 'auto'
+        session = SimpleNamespace(screen_param='3840-2160', cast_model='tv',
+                                  client=mock.Mock(), identity=SimpleNamespace(headers={}))
+        videos = [
+            {'url': 'https://media.cctv.cn/small.m3u8', 'rate': '36p', 'width': 1920, 'height': 1080},
+            {'url': 'https://media.cctv.cn/large.m3u8', 'rate': 'other', 'resolution': '3840x2160'},
+        ]
+        with mock.patch.object(live, 'response_json', return_value=(200, '', {'data': {'videos': videos}})):
+            result = self.resolver.live_v1_01_flow(session, 'test')
+        self.assertEqual(result.live_url, 'https://media.cctv.cn/large.m3u8')
+
 
 if __name__ =='__main__':
     unittest.main()
