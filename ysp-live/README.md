@@ -1,13 +1,13 @@
-ysp-live 9.5.6-local 本地优化版
+ysp-live 9.5.7-local 本地优化版
 
-这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.6.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
+这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.7.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
 
 1. 启动与升级
 
 需要 Python 3.10+；伴生引擎需要 Node.js 20+（建议22/24）。没有 pip 或 npm 第三方依赖。本次实际验证环境是 Linux、Python 3.12、Node.js 24。
 
 ```sh
-python ysp-live-v9.5.6.py 8767 --data-dir ./data
+python ysp-live-v9.5.7.py 8767 --data-dir ./data
 ```
 
 启动后在播放器订阅：
@@ -23,14 +23,16 @@ Python 会自动启动同目录的 Node 引擎，后者只监听127.0.0.1:8787�
 仅使用1080p备用路径、不启动设备注册与Node：
 
 ```sh
-python ysp-live-v9.5.6.py 8767 --data-dir ./data --no-4k --no-engine
+python ysp-live-v9.5.7.py 8767 --data-dir ./data --no-4k --no-engine
 ```
+
+9.5.7 修复 EPG 首次加载：启动及获取订阅时在后台预加载节目单；`/epg.xml` 首次 GET 最多等待 8 秒，下载完成即可在同一请求返回 XML。已有缓存立即返回，所有上游都失败或超时仍返回 503，不返回空节目单伪装成功。EPG 下载也使用 urllib，不额外检查 DNS 是否为公网，保留 gzip、下载/解压上限及 XML 解析限制。更新后请在播放器中重新加载 EPG。
 
 9.5.6 将 **Python 备用源与回看播放列表下载恢复为 9.5.3 的 `urllib.request.urlopen()` 路径**：使用系统 DNS/代理和 urllib 重定向处理，不额外检查 DNS 结果是否为公网。使用这条备用路径不再需要 `--allow-fake-ip`。保留每级 2MiB 读取上限、主/子列表共用下载预算和最高画质选择。
 
 设备源与媒体代理沿用原有目标检查；如需让这些路径支持可信代理的 `198.18.0.0/15` Fake-IP，可继续使用 `--allow-fake-ip` 或环境变量 `YSP_ALLOW_FAKE_IP=1`。这项可选设置不是备用播放列表下载的前提。
 
-旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.6.py`，停止旧进程再启动新进程。
+旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.7.py`，停止旧进程再启动新进程。
 
 升级时先停止旧程序，备份原文件及数据目录，将原 device-state-rs.json、proxy-cache-state-rs.json 放入新的 --data-dir。不要同时运行新旧进程使用同一数据目录。旧文件格式继续兼容；运行中的会话会重新建立。
 
@@ -66,7 +68,7 @@ python ysp-live-v9.5.6.py 8767 --data-dir ./data --no-4k --no-engine
 - `/status` 是内嵌页面，不需要外部网页文件或前端依赖。显示频道来源、列表声明分辨率、请求耗时、媒体推进、节目单和主动诊断。
 - 按频道保持当前可用来源。失败按5、10、20…秒退避，最多120秒；回切前至少保持当前来源30秒，并要求更优先来源两次不同分片的成功观测。恢复探测由有界后台池执行，每个来源最短间隔30秒；仅成功获取主列表不会认定媒体恢复。
 - 选源仍按设备源、Python备用源、Node引擎的优先级工作，不凭一次请求耗时就降低画质。Python备用源内部保留JCE/BK恢复机制；分片令牌变化不会被当作媒体推进。
-- 新增可配置XMLTV/XMLTV.gz接入、本地内存与磁盘缓存、上次有效缓存回退。EPG按需后台更新，失败重试间隔60秒，未加载时XML接口返回503和Retry-After。默认源沿用原订阅中的两个EPG服务，不保证第三方服务可用。
+- 新增可配置XMLTV/XMLTV.gz接入、本地内存与磁盘缓存、上次有效缓存回退。EPG启动时预加载，过期后按需后台更新，失败重试间隔60秒；首次XML请求限时等待，仍不可用时返回503和Retry-After。默认源沿用原订阅中的两个EPG服务，不保证第三方服务可用。
 - 订阅的url-tvg指向本地 `/epg.xml`，EPG频道ID与订阅统一。支持ETag条件请求。状态页展示正在播、接下来和节目回看链接，也可手动输入时间生成回看入口。
 - `/api/diagnostics` 下载脱敏报告；`/api/diagnose?channel=cctv1` 显式触发分层检查。主动诊断有并发、队列和30秒重复请求限制，不发布或切换播放时间线。9.5.3已从HEAD元数据检查升级为限量分片GET，仍不验证解码。
 
@@ -122,7 +124,7 @@ python ysp-live-v9.5.6.py 8767 --data-dir ./data --no-4k --no-engine
 低内存部署示例（临时目录可放实际可用的磁盘）：
 
 ```sh
-python ysp-live-v9.5.6.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
+python ysp-live-v9.5.7.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
 ```
 
 临时目录若在tmpfs，文件也会消耗系统内存；--cache-mb限制的是程序的完成缓存，不能代表整个进程或整台机器的总内存。使用磁盘目录会产生持续分片写入，应按设备存储选择 --temp-dir。
@@ -156,10 +158,10 @@ python ysp-live-v9.5.6.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 
 EPG配置示例：
 
 ```sh
-python ysp-live-v9.5.6.py 8767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
+python ysp-live-v9.5.7.py 8767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
 ```
 
-也可用 `YSP_EPG_URL` 配置逗号分隔的源。显式 `--epg-url` 覆盖环境变量；`--no-epg` 禁用。EPG只在节目接口被请求时刷新，状态和健康检查不触发下载。公网目标、重定向和响应大小有检查；默认不访问私网EPG。压缩下载最多8MiB，展开XML最多32MiB，拒绝DTD/实体声明；保留匹配本地频道、过去7天至未来2天内的节目。无时区的XMLTV时间按UTC解释；手动回看使用浏览器本地时区转换的Unix秒。
+也可用 `YSP_EPG_URL` 配置逗号分隔的源。显式 `--epg-url` 覆盖环境变量；`--no-epg` 禁用。EPG启动及获取订阅时预加载，过期后在节目接口请求时后台刷新；状态和健康检查不触发下载。EPG通过urllib使用系统DNS/代理和重定向处理，不额外检查DNS结果是否为公网。首次XML GET最多等待8秒，已有缓存立即返回；HEAD不触发下载。压缩下载最多8MiB，展开XML最多32MiB，拒绝DTD/实体声明；保留匹配本地频道、过去7天至未来2天内的节目。无时区的XMLTV时间按UTC解释；手动回看使用浏览器本地时区转换的Unix秒。
 
 EPG缓存写在 `--data-dir/epg-cache.json`。磁盘写入失败时仍保留内存中的有效节目单。节目单仅用于展示和生成链接，不增加上游回看时长；回看频道支持是本地能力表，`verified=false` 表示尚未实际请求上游验证。
 

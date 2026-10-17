@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import gzip
 import http.client
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import json
 from pathlib import Path
@@ -16,7 +17,7 @@ from unittest import mock
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_feature_application', ROOT / 'ysp-live-v9.5.6.py')
+spec = importlib.util.spec_from_file_location('ysp_feature_application', ROOT / 'ysp-live-v9.5.7.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)
@@ -123,6 +124,40 @@ class EPGTests(unittest.TestCase):
         self.assertEqual(tree.find('programme/title').text, '新闻 & <节目>')
         self.assertIs(cache.xml(), encoded)
         self.assertEqual(tree.find('programme').get('channel'), live.TVG_IDS['cctv1'])
+
+    def test_real_gzip_epg_redirect_uses_urllib_without_custom_dns_policy(self):
+        payload = gzip.compress(xmltv()[0])
+        agents = []
+        class Origin(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                agents.append(self.headers.get('User-Agent'))
+                if self.path == '/epg':
+                    self.send_response(302)
+                    self.send_header('Location', '/feed.xml.gz')
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Origin)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        cache = self.cache(urls=[f'http://127.0.0.1:{server.server_port}/epg'])
+        try:
+            with mock.patch.dict(live.os.environ, {'NO_PROXY': '127.0.0.1', 'no_proxy': '127.0.0.1'}), \
+                 mock.patch.object(live.URLPolicy, 'resolve', side_effect=AssertionError('unexpected DNS policy')):
+                cache.request_refresh()
+                self.wait(cache)
+            self.assertEqual(len(cache.read('cctv1')), 1)
+            self.assertEqual(agents, ['ysp-live/EPG', 'ysp-live/EPG'])
+            self.assertEqual(ET.fromstring(cache.xml()).find('programme').get('channel'), 'CCTV1')
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(2)
 
     def test_rejects_entities_utf16_and_unmatched_feeds(self):
         cache = self.cache()
@@ -333,13 +368,81 @@ class FeatureHTTPTests(unittest.TestCase):
             remote.close.assert_called_once()
             self.assertIsNone(self.ch._publication)
 
-    def test_cold_epg_responds_without_waiting_for_download(self):
+    def test_cold_epg_clients_receive_xml_on_first_get_and_share_download(self):
+        entered, release = threading.Event(), threading.Event()
+        calls = []
+        def fetch(url):
+            calls.append(url)
+            entered.set()
+            release.wait(2)
+            return xmltv()[0]
+        cache = live.EPGCache(urls=['https://example.test/epg'], fetcher=fetch, initial_wait=2)
+        self.addCleanup(cache.close)
+        self.addCleanup(release.set)
+        self.stack.enter_context(mock.patch.object(live, 'epg_manager', cache))
+        with concurrent.futures.ThreadPoolExecutor(3) as pool:
+            futures = [pool.submit(self.request, '/epg.xml') for _ in range(3)]
+            self.assertTrue(entered.wait(1))
+            self.assertEqual(self.request('/livez')[0], 200)
+            release.set()
+            for future in futures:
+                status, _, body = future.result(3)
+                self.assertEqual(status, 200)
+                tree = ET.fromstring(body)
+                self.assertEqual(tree.find('programme').get('channel'), 'CCTV1')
+                self.assertEqual(tree.find('channel').get('id'), 'CCTV1')
+        self.assertEqual(len(calls), 1)
+
+    def test_epg_head_does_not_download_or_wait(self):
+        fetch = mock.Mock(return_value=xmltv()[0])
+        cache = live.EPGCache(urls=['https://example.test/epg'], fetcher=fetch)
+        self.addCleanup(cache.close)
+        self.stack.enter_context(mock.patch.object(live, 'epg_manager', cache))
+        status, _, body = self.request('/epg.xml', method='HEAD')
+        self.assertEqual((status, body), (503, b''))
+        fetch.assert_not_called()
+
+    def test_stale_epg_is_served_while_refresh_is_blocked(self):
         entered, release = threading.Event(), threading.Event()
         def fetch(url):
             entered.set()
             release.wait(2)
             return xmltv()[0]
         cache = live.EPGCache(urls=['https://example.test/epg'], fetcher=fetch)
+        cache.programmes, cache.updated = cache.parse(xmltv()[0]), time.time() - 7200
+        self.addCleanup(cache.close)
+        self.addCleanup(release.set)
+        self.stack.enter_context(mock.patch.object(live, 'epg_manager', cache))
+        started = time.monotonic()
+        status, headers, body = self.request('/epg.xml')
+        self.assertEqual(status, 200)
+        self.assertEqual(headers['X-EPG-Stale'], 'true')
+        self.assertIsNotNone(ET.fromstring(body).find('programme'))
+        self.assertLess(time.monotonic() - started, 1)
+        self.assertTrue(entered.wait(1))
+        release.set()
+
+    def test_subscription_starts_epg_loading_in_background(self):
+        entered, release = threading.Event(), threading.Event()
+        def fetch(url):
+            entered.set()
+            release.wait(2)
+            return xmltv()[0]
+        cache = live.EPGCache(urls=['https://example.test/epg'], fetcher=fetch)
+        self.addCleanup(cache.close)
+        self.addCleanup(release.set)
+        self.stack.enter_context(mock.patch.object(live, 'epg_manager', cache))
+        self.assertEqual(self.request('/all.m3u')[0], 200)
+        self.assertTrue(entered.wait(1))
+        release.set()
+
+    def test_cold_epg_wait_is_bounded_and_liveness_remains_available(self):
+        entered, release = threading.Event(), threading.Event()
+        def fetch(url):
+            entered.set()
+            release.wait(2)
+            return xmltv()[0]
+        cache = live.EPGCache(urls=['https://example.test/epg'], fetcher=fetch, initial_wait=.05)
         self.addCleanup(cache.close)
         self.addCleanup(release.set)
         self.stack.enter_context(mock.patch.object(live, 'epg_manager', cache))

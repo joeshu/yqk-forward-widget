@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_deep_stability', ROOT / 'ysp-live-v9.5.6.py')
+spec = importlib.util.spec_from_file_location('ysp_deep_stability', ROOT / 'ysp-live-v9.5.7.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)
@@ -453,7 +453,7 @@ class NetworkBudgetTests(unittest.TestCase):
             if clock[0] > kwargs['deadline']:
                 raise live.ProxyError(504, 'deadline')
             return 200, {}, master, url
-        with mock.patch.object(live.time, 'monotonic', side_effect=lambda: clock[0]), mock.patch.object(live, 'fetch_playlist_urllib', side_effect=fetch):
+        with mock.patch.object(live.time, 'monotonic', side_effect=lambda: clock[0]), mock.patch.object(live, 'fetch_urllib_bytes', side_effect=fetch):
             with self.assertRaises(live.ProxyError) as error:
                 live.fetch_abs_playlist('https://media.cctv.cn/list.m3u8', quality='best')
         self.assertEqual(error.exception.status, 504)
@@ -463,7 +463,7 @@ class NetworkBudgetTests(unittest.TestCase):
     def test_more_specific_nested_master_metadata_takes_precedence(self):
         top = b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=20000000,RESOLUTION=3840x2160\nchild.m3u8\n'
         child = b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\nmedia.m3u8\n'
-        with mock.patch.object(live, 'fetch_playlist_urllib', side_effect=[
+        with mock.patch.object(live, 'fetch_urllib_bytes', side_effect=[
                 (200, {}, top, 'https://media.cctv.cn/top.m3u8'),
                 (200, {}, child, 'https://media.cctv.cn/child.m3u8'),
                 (200, {}, media().encode(), 'https://media.cctv.cn/media.m3u8')]):
@@ -474,7 +474,7 @@ class NetworkBudgetTests(unittest.TestCase):
         body = media(uri='https://media.cctv.cn/profile-isolation.ts').encode()
         for height in (2160, 1080):
             parent = f'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=10000000,RESOLUTION=3840x{height}\nmedia.m3u8\n'.encode()
-            with mock.patch.object(live, 'fetch_playlist_urllib', side_effect=[
+            with mock.patch.object(live, 'fetch_urllib_bytes', side_effect=[
                     (200, {}, parent, 'https://media.cctv.cn/root.m3u8'),
                     (200, {}, body, 'https://media.cctv.cn/media.m3u8')]):
                 result = live.fetch_abs_playlist('https://media.cctv.cn/root.m3u8', quality='best')
