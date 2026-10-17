@@ -5000,7 +5000,7 @@ def fetch_upstream_engine_playlist(canonical: str, host: str, proto: str = 'http
         except Exception:
             continue
     return None
-# Operational features remain in this file so deployment needs only ysp-live.py.
+# Operational features remain in this file so deployment needs only ysp-live-v9.5.4.py.
 import html
 import io
 import xml.etree.ElementTree as ET
