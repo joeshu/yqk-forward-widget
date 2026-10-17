@@ -1,13 +1,13 @@
-ysp-live 9.5.4-local 本地优化版
+ysp-live 9.5.5-local 本地优化版
 
-这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.4.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
+这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.5.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
 
 1. 启动与升级
 
 需要 Python 3.10+；伴生引擎需要 Node.js 20+（建议22/24）。没有 pip 或 npm 第三方依赖。本次实际验证环境是 Linux、Python 3.12、Node.js 24。
 
 ```sh
-python ysp-live-v9.5.4.py 8767 --data-dir ./data
+python ysp-live-v9.5.5.py 8767 --data-dir ./data
 ```
 
 启动后在播放器订阅：
@@ -23,8 +23,18 @@ Python 会自动启动同目录的 Node 引擎，后者只监听127.0.0.1:8787�
 仅使用1080p备用路径、不启动设备注册与Node：
 
 ```sh
-python ysp-live-v9.5.4.py 8767 --data-dir ./data --no-4k --no-engine
+python ysp-live-v9.5.5.py 8767 --data-dir ./data --no-4k --no-engine
 ```
+
+如果日志反复出现 `non-public media target`，并使用 Clash/Mihomo/OpenClash/Surge 的 Fake-IP DNS，可在可信的 Fake-IP/TUN 环境启动：
+
+```sh
+python ysp-live-v9.5.5.py 8767 --data-dir ./data --allow-fake-ip
+```
+
+服务管理器不能修改命令时，也可设置环境变量 `YSP_ALLOW_FAKE_IP=1` 后重启。本选项只额外接受 `198.18.0.0/15`，仍校验 CDN 域名、端口、重定向和嵌套引擎目标；不开放普通局域网、回环或链路本地地址。Fake-IP 所在设备必须有能接管这些地址的代理/TUN。选项默认关闭，不改变画质选择；单文件运行无需 Node。其他非公网地址应检查 DNS/代理配置。
+
+9.5.4 文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.5.py`，停止旧进程再启动新进程。
 
 升级时先停止旧程序，备份原文件及数据目录，将原 device-state-rs.json、proxy-cache-state-rs.json 放入新的 --data-dir。不要同时运行新旧进程使用同一数据目录。旧文件格式继续兼容；运行中的会话会重新建立。
 
@@ -116,7 +126,7 @@ python ysp-live-v9.5.4.py 8767 --data-dir ./data --no-4k --no-engine
 低内存部署示例（临时目录可放实际可用的磁盘）：
 
 ```sh
-python ysp-live-v9.5.4.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
+python ysp-live-v9.5.5.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
 ```
 
 临时目录若在tmpfs，文件也会消耗系统内存；--cache-mb限制的是程序的完成缓存，不能代表整个进程或整台机器的总内存。使用磁盘目录会产生持续分片写入，应按设备存储选择 --temp-dir。
@@ -150,7 +160,7 @@ python ysp-live-v9.5.4.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 
 EPG配置示例：
 
 ```sh
-python ysp-live-v9.5.4.py 8767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
+python ysp-live-v9.5.5.py 8767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
 ```
 
 也可用 `YSP_EPG_URL` 配置逗号分隔的源。显式 `--epg-url` 覆盖环境变量；`--no-epg` 禁用。EPG只在节目接口被请求时刷新，状态和健康检查不触发下载。公网目标、重定向和响应大小有检查；默认不访问私网EPG。压缩下载最多8MiB，展开XML最多32MiB，拒绝DTD/实体声明；保留匹配本地频道、过去7天至未来2天内的节目。无时区的XMLTV时间按UTC解释；手动回看使用浏览器本地时区转换的Unix秒。

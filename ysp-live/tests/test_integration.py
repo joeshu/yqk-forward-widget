@@ -35,7 +35,7 @@ import ysp_runtime as runtime
 
 def load_application():
     name = "ysp_integration_application"
-    spec = importlib.util.spec_from_file_location(name, ROOT / "ysp-live-v9.5.4.py")
+    spec = importlib.util.spec_from_file_location(name, ROOT / "ysp-live-v9.5.5.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     # Loading a library for tests must not replace the runner's signal handler.
@@ -561,11 +561,11 @@ class StandaloneProcessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             env = dict(os.environ, PYTHONUNBUFFERED="1", NO_PROXY="127.0.0.1,localhost",
                        no_proxy="127.0.0.1,localhost")
-            standalone = Path(temp) / "ysp-live-v9.5.4.py"
-            shutil.copyfile(ROOT / "ysp-live-v9.5.4.py", standalone)
+            standalone = Path(temp) / "ysp-live-v9.5.5.py"
+            shutil.copyfile(ROOT / "ysp-live-v9.5.5.py", standalone)
             process = subprocess.Popen(
                 [sys.executable, str(standalone), str(port), "--bind", "127.0.0.1",
-                 "--no-engine", "--no-4k", "--cache-mb", "0", "--data-dir", temp],
+                 "--no-engine", "--no-4k", "--allow-fake-ip", "--cache-mb", "0", "--data-dir", temp],
                 cwd=temp, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             try:
                 deadline = time.monotonic() + 8
@@ -589,6 +589,11 @@ class StandaloneProcessTests(unittest.TestCase):
                     response = connection.getresponse()
                     self.assertEqual(response.status, 200)
                     self.assertTrue(response.read().startswith(b"#EXTM3U"))
+                with contextlib.closing(http.client.HTTPConnection("127.0.0.1", port, timeout=2)) as connection:
+                    connection.request("GET", "/api/diagnostics")
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 200)
+                    self.assertTrue(json.loads(response.read())["allow_fake_ip"])
                 process.terminate()
                 output, _ = process.communicate(timeout=5)
                 self.assertEqual(process.returncode, 0, output)
