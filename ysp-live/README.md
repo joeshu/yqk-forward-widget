@@ -1,13 +1,13 @@
-ysp-live 9.5.8-local 本地优化版
+ysp-live 9.5.9-local 本地优化版
 
-这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.8.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
+这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.9.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
 
 1. 启动与升级
 
 需要 Python 3.10+；伴生引擎需要 Node.js 20+（建议22/24）。没有 pip 或 npm 第三方依赖。本次实际验证环境是 Linux、Python 3.12、Node.js 24。
 
 ```sh
-python ysp-live-v9.5.8.py 8767 --data-dir ./data
+python ysp-live-v9.5.9.py 8767 --data-dir ./data
 ```
 
 启动后在播放器订阅：
@@ -23,8 +23,21 @@ Python 会自动启动同目录的 Node 引擎，后者只监听127.0.0.1:8787�
 仅使用1080p备用路径、不启动设备注册与Node：
 
 ```sh
-python ysp-live-v9.5.8.py 8767 --data-dir ./data --no-4k --no-engine
+python ysp-live-v9.5.9.py 8767 --data-dir ./data --no-4k --no-engine
 ```
+
+9.5.9 针对六个方面修复与优化：
+
+| 方面 | 具体变化 |
+| --- | --- |
+| 状态持久化与 400 自愈 | 换身份前原子清空磁盘旧源缓存，保存换新时间、当日尝试次数和代际；新身份保存失败不再假报成功；成功写入后清理历史持久化错误，单条坏缓存不拖累其他频道。 |
+| 换台防抖与请求减负 | 按频道记录单调时钟与持续请求；单次点击后离开的频道不做高码率预取；旧任务不能清掉新任务，预取复用已就绪源。直接 4K 频道仍不防抖。 |
+| 普通频道冷启动与时间线 | 空缓存时 JCE 首次失败即尝试 BK；已有可用窗口仍保留短暂重试。无 PDT 的旧前缀及冷启动丢弃分片不会重新追加成新内容。 |
+| HLS 与重定向 | 支持有界 gzip/BOM 解码、正确的最终重定向基址、内联 data 密钥；压缩播放列表代理后更新响应头。无效媒体元数据拒绝重建，复杂 MAP 语义保留透传。 |
+| RAM 缓存与并发 | 缓存命中更新 LRU；临时分片转 RAM 在锁外复制，复制前预留预算，复制失败和关闭均释放预留；慢读者占用继续计入预算。 |
+| 反代、时移与输入限制 | 直接 TLS 自动识别 https；仅在 --trust-proxy 下使用 Forwarded/X-Forwarded-Host/Proto；校验主机、端口和重复 Host，限制请求及参数数量，回看结束时间不超过当前时刻。 |
+
+反代建议显式配置 `--public-base-url https://tv.example.com`。使用 `--trust-proxy` 时，反代必须覆盖客户端传来的转发头，并限制用户直连后端。没有信任反代时不采用这些头。Python 备用/回看与 EPG 继续使用 urllib，不恢复额外的 DNS 公网检查；默认画质策略不变。400 换新失败时保留可用回退通道，不会宣称高码率已恢复。
 
 9.5.8 增加以下三项：
 
@@ -40,7 +53,7 @@ python ysp-live-v9.5.8.py 8767 --data-dir ./data --no-4k --no-engine
 
 设备源与媒体代理沿用原有目标检查；如需让这些路径支持可信代理的 `198.18.0.0/15` Fake-IP，可继续使用 `--allow-fake-ip` 或环境变量 `YSP_ALLOW_FAKE_IP=1`。这项可选设置不是备用播放列表下载的前提。
 
-旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.8.py`，停止旧进程再启动新进程。
+旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.9.py`，停止旧进程再启动新进程。
 
 升级时先停止旧程序，备份原文件及数据目录，将原 device-state-rs.json、proxy-cache-state-rs.json 放入新的 --data-dir。不要同时运行新旧进程使用同一数据目录。旧文件格式继续兼容；运行中的会话会重新建立。
 
@@ -123,7 +136,7 @@ python ysp-live-v9.5.8.py 8767 --data-dir ./data --no-4k --no-engine
 | --bind | 0.0.0.0 | Python监听地址 |
 | --engine-port | 8787 | 伴生引擎端口 |
 | --public-base-url | 空 | 反代公开origin，例如https://tv.example.com；不支持路径前缀 |
-| --trust-proxy | 关闭 | 只在可信反代环境启用，允许X-Forwarded-Proto |
+| --trust-proxy | 关闭 | 只在可信反代环境启用，允许Forwarded与X-Forwarded-Host/Proto |
 | --access-token | 环境变量或空 | 可选访问令牌，推荐用YSP_ACCESS_TOKEN传入 |
 | --epg-url | 原订阅中的两个EPG源 | XMLTV或XMLTV.gz公网地址，重复指定可配置最多3个，依次回退 |
 | --epg-refresh | 3600 | EPG自动刷新间隔秒，最小60 |
@@ -132,7 +145,7 @@ python ysp-live-v9.5.8.py 8767 --data-dir ./data --no-4k --no-engine
 低内存部署示例（临时目录可放实际可用的磁盘）：
 
 ```sh
-python ysp-live-v9.5.8.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
+python ysp-live-v9.5.9.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
 ```
 
 临时目录若在tmpfs，文件也会消耗系统内存；--cache-mb限制的是程序的完成缓存，不能代表整个进程或整台机器的总内存。使用磁盘目录会产生持续分片写入，应按设备存储选择 --temp-dir。
@@ -141,7 +154,7 @@ python ysp-live-v9.5.8.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 
 
 可设置YSP_ACCESS_TOKEN，播放器订阅地址使用 /all.m3u?access_token=你的令牌。订阅内频道地址会携带访问令牌，媒体资源使用短期独立令牌；HTTP客户端也可使用Authorization: Bearer。/livez和/status页面外壳不要求令牌；状态数据、诊断、节目单和频道接口要求令牌。可在状态页输入令牌，页面使用Bearer请求API；订阅和回看链接携带query令牌。短期资源令牌重启后失效，重新取得播放列表即可。
 
-公开地址推荐固定 --public-base-url https://tv.example.com。只有可信反代才设置 --trust-proxy；默认不会信任任意客户端传入的X-Forwarded-Proto。自带白名单只允许既有CCTV及常见CDN域名与公网地址；如果上游以后换到新的CDN域名，应审查后同时更新Python与Node白名单，不能关闭私网校验。
+公开地址推荐固定 --public-base-url https://tv.example.com。只有可信反代才设置 --trust-proxy；默认不会信任任意客户端传入的Forwarded或X-Forwarded-*。自带白名单只允许既有CCTV及常见CDN域名与公网地址；如果上游以后换到新的CDN域名，应审查后同时更新Python与Node白名单，不能关闭私网校验。
 
 - /livez：进程存活，正常200。
 - /health 与 /readyz：当前设备协议或已观测频道是否就绪；冷启动未拉取媒体时可能503。不是所有64个频道逐一可用的保证。
@@ -166,7 +179,7 @@ python ysp-live-v9.5.8.py 8767 --data-dir ./data --cache-mb 32 --inflight-mb 64 
 EPG配置示例：
 
 ```sh
-python ysp-live-v9.5.8.py 8767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
+python ysp-live-v9.5.9.py 8767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
 ```
 
 也可用 `YSP_EPG_URL` 配置逗号分隔的源。显式 `--epg-url` 覆盖环境变量；`--no-epg` 禁用。EPG启动时预加载，独立调度按配置间隔刷新；获取订阅和节目接口也可触发到期刷新，状态和健康检查不触发下载。多个源按频道和北京时间日期补齐，低优先级来源不覆盖已有日期并避免跨日重叠。EPG通过urllib使用系统DNS/代理和重定向处理，不额外检查DNS结果是否为公网。首次XML GET最多等待8秒，已有缓存立即返回；HEAD不触发下载。压缩下载最多8MiB，展开XML最多32MiB，拒绝DTD/实体声明；保留匹配本地频道、过去7天至未来2天内的节目。无时区的XMLTV时间按UTC解释；手动回看使用浏览器本地时区转换的Unix秒。

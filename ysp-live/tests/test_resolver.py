@@ -15,7 +15,7 @@ from unittest import mock
 
 ROOT =Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-spec =importlib.util.spec_from_file_location('ysp_live_resolver_tests', ROOT /'ysp-live-v9.5.8.py')
+spec =importlib.util.spec_from_file_location('ysp_live_resolver_tests', ROOT /'ysp-live-v9.5.9.py')
 live =importlib.util.module_from_spec(spec)
 sys.modules[spec.name] =live
 spec.loader.exec_module(live)
@@ -246,7 +246,7 @@ class ResolverTests(unittest.TestCase):
 
     def test_foreground_wait_is_bounded_and_work_is_shared(self):
         entered, release =threading.Event(), threading.Event()
-        def slow(*args):
+        def slow(*args, **kwargs):
             entered.set()
             release.wait(2.0)
             return '#EXTM3U\n'

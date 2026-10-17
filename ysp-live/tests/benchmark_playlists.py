@@ -144,7 +144,7 @@ def main():
         else:
             baseline.write_bytes(subprocess.check_output(['git', 'show', args.baseline_ref + ':ysp-live/ysp-live.py'], cwd=ROOT.parent))
         results = {}
-        for name, path in [('before', baseline), ('after', ROOT / 'ysp-live-v9.5.8.py')]:
+        for name, path in [('before', baseline), ('after', ROOT / 'ysp-live-v9.5.9.py')]:
             output = subprocess.check_output([sys.executable, __file__, '--worker', str(path), '--requests-per-client', str(args.requests_per_client)], text=True, cwd=ROOT)
             results[name] = json.loads(output)
         report = {'environment': {'python': platform.python_version(), 'platform': platform.platform(),
