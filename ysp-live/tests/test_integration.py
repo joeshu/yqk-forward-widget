@@ -164,7 +164,9 @@ class LocalOrigin:
 class ApplicationIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        global runtime
         cls.app = load_application()
+        runtime = cls.app
 
     def setUp(self):
         self.cleanup_stack = contextlib.ExitStack()
@@ -553,10 +555,12 @@ class StandaloneProcessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             env = dict(os.environ, PYTHONUNBUFFERED="1", NO_PROXY="127.0.0.1,localhost",
                        no_proxy="127.0.0.1,localhost")
+            standalone = Path(temp) / "ysp-live.py"
+            shutil.copyfile(ROOT / "ysp-live.py", standalone)
             process = subprocess.Popen(
-                [sys.executable, str(ROOT / "ysp-live.py"), str(port), "--bind", "127.0.0.1",
+                [sys.executable, str(standalone), str(port), "--bind", "127.0.0.1",
                  "--no-engine", "--no-4k", "--cache-mb", "0", "--data-dir", temp],
-                cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                cwd=temp, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             try:
                 deadline = time.monotonic() + 8
                 while True:

@@ -15,6 +15,8 @@ SPEC = importlib.util.spec_from_file_location('ysp_live_hls_tests', ROOT / 'ysp-
 live = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = live
 SPEC.loader.exec_module(live)
+parse_media, render_media, rewrite_uris, select_variant, UnsafePlaylist = (
+    live.parse_media, live.render_media, live.rewrite_uris, live.select_variant, live.UnsafePlaylist)
 
 
 def playlist(start=0, count=3, *, sequence=None, origin='https://cdn.example/', pdt=True, key=''):

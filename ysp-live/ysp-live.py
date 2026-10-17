@@ -1,4 +1,1415 @@
 from __future__ import annotations 
+
+# Inlined support modules: this script runs without sibling Python files.
+
+from collections import OrderedDict
+from concurrent.futures import Future, TimeoutError as FutureTimeoutError
+import ipaddress
+import math
+import queue
+import socket
+import threading
+import time
+
+
+class DNSLookupError(Exception):
+    def __init__(self, message, status=502):
+        super().__init__(message)
+        self.status =status
+
+
+class DNSResolver:
+    def __init__(self, max_workers=4, max_queue=16, max_records=512,
+                 success_ttl=60.0, failure_ttl=2.0, lookup=None, clock=None):
+        self.max_workers =max(1, min(4, int(max_workers)))
+        self.max_queue =max(1, min(16, int(max_queue)))
+        self.max_records =max(1, min(512, int(max_records)))
+        self.success_ttl =max(0.0, min(60.0, float(success_ttl)))
+        self.failure_ttl =max(0.0, min(2.0, float(failure_ttl)))
+        self._lookup =lookup or socket.getaddrinfo
+        self._clock =clock or time.monotonic
+        self._lock =threading.Lock()
+        self._queue =queue.Queue(maxsize=self.max_queue)
+        self._stop =threading.Event()
+        self._workers =[]
+        self._inflight ={}
+        self._cache =OrderedDict()
+        self._active =0
+        self._counts ={
+            'submitted': 0, 'shared': 0, 'cache_hits': 0, 'timeouts': 0,
+            'rejected': 0, 'completed': 0, 'failed': 0,
+        }
+
+    def resolve(self, host, port, timeout=3.0):
+        timeout =float(timeout)
+        if not math.isfinite(timeout) or timeout <0:
+            raise ValueError('DNS timeout must be finite and nonnegative')
+        deadline =self._clock() +timeout
+        if not isinstance(host, str) or not host or '\x00' in host:
+            raise DNSLookupError('invalid DNS hostname')
+        # URL parsers normally remove IPv6 brackets. Accept them here as well.
+        literal =host[1:-1] if host.startswith('[') and host.endswith(']') else host
+        try:
+            return [str(ipaddress.ip_address(literal))]
+        except ValueError:
+            pass
+        try:
+            normalized =host.rstrip('.').encode('idna').decode('ascii').lower()
+            port =int(port)
+            if not normalized or len(normalized) >253 or not 1 <=port <=65535:
+                raise ValueError('invalid DNS query')
+        except (UnicodeError, TypeError, ValueError) as error:
+            raise DNSLookupError('invalid DNS query') from error
+        key =(normalized, port)
+        with self._lock:
+            if self._stop.is_set():
+                raise DNSLookupError('DNS resolver is closed', status=503)
+            now =self._clock()
+            cached =self._cache.get(key)
+            if cached is not None:
+                expires, addresses, error =cached
+                if now <expires:
+                    self._cache.move_to_end(key)
+                    self._counts['cache_hits'] +=1
+                    if error is not None:
+                        raise DNSLookupError(str(error), status=error.status)
+                    return list(addresses)
+                self._cache.pop(key, None)
+            future =self._inflight.get(key)
+            if future is not None:
+                self._counts['shared'] +=1
+            else:
+                future =Future()
+                self._inflight[key] =future
+                # Workers are daemon threads and created only for outstanding
+                # demand. They may remain stuck in libc without blocking exit.
+                try:
+                    self._start_workers_locked()
+                    self._queue.put_nowait((key, future))
+                except queue.Full:
+                    self._inflight.pop(key, None)
+                    future.cancel()
+                    self._counts['rejected'] +=1
+                    raise DNSLookupError('DNS lookup capacity exhausted', status=503)
+                except Exception as error:
+                    self._inflight.pop(key, None)
+                    future.cancel()
+                    self._counts['rejected'] +=1
+                    raise DNSLookupError('cannot start DNS worker', status=503) from error
+                self._counts['submitted'] +=1
+        try:
+            return list(future.result(timeout=max(0.0, deadline -self._clock())))
+        except FutureTimeoutError as error:
+            with self._lock:
+                self._counts['timeouts'] +=1
+            raise DNSLookupError('DNS lookup timed out', status=504) from error
+        except DNSLookupError as error:
+            # Do not reuse traceback-bearing exception instances between callers.
+            raise DNSLookupError(str(error), status=error.status) from error
+
+    def _start_workers_locked(self):
+        desired =min(self.max_workers, len(self._inflight))
+        while len(self._workers) <desired:
+            worker =threading.Thread(target=self._worker, daemon=True,
+                                    name=f'ysp-dns-{id(self):x}-{len(self._workers) +1}')
+            worker.start()
+            self._workers.append(worker)
+
+    def _worker(self):
+        while not self._stop.is_set():
+            try:
+                key, future =self._queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            with self._lock:
+                skip =self._stop.is_set() or future.done()
+                if not skip:
+                    self._active +=1
+            if skip:
+                self._queue.task_done()
+                continue
+            addresses, failure =None, None
+            try:
+                records =self._lookup(key[0], key[1], type=socket.SOCK_STREAM)
+                addresses =tuple(dict.fromkeys(str(ipaddress.ip_address(record[4][0])) for record in records))
+                if not addresses:
+                    raise DNSLookupError('DNS response contained no addresses')
+            except Exception as error:
+                failure =error if isinstance(error, DNSLookupError) else DNSLookupError('DNS lookup failed')
+            finally:
+                with self._lock:
+                    self._active -=1
+                    if self._inflight.get(key) is future:
+                        self._inflight.pop(key, None)
+                    if not self._stop.is_set():
+                        ttl =self.failure_ttl if failure is not None else self.success_ttl
+                        if ttl >0.0:
+                            self._cache[key] =(self._clock() +ttl, addresses, failure)
+                            self._cache.move_to_end(key)
+                            self._trim_cache_locked()
+                        self._counts['completed'] +=1
+                        if failure is not None:
+                            self._counts['failed'] +=1
+                    if not future.done():
+                        if failure is not None:
+                            future.set_exception(failure)
+                        else:
+                            future.set_result(addresses)
+                self._queue.task_done()
+
+    def _trim_cache_locked(self):
+        now =self._clock()
+        for key, cached in list(self._cache.items()):
+            if cached[0] <=now:
+                self._cache.pop(key, None)
+        while len(self._cache) >self.max_records:
+            self._cache.popitem(last=False)
+
+    def clear_cache(self):
+        with self._lock:
+            self._cache.clear()
+
+    def stats(self):
+        with self._lock:
+            return dict(self._counts, active=self._active,
+                        queued=self._queue.qsize(), inflight=len(self._inflight),
+                        cached=len(self._cache), workers=len(self._workers),
+                        closed=self._stop.is_set())
+
+    def close(self):
+        """Wake callers immediately; blocked libc calls stay on daemon threads."""
+        with self._lock:
+            self._stop.set()
+            self._cache.clear()
+            for future in self._inflight.values():
+                if not future.done():
+                    future.set_exception(DNSLookupError('DNS resolver is closed', status=503))
+            self._inflight.clear()
+            while True:
+                try:
+                    self._queue.get_nowait()
+                    self._queue.task_done()
+                except queue.Empty:
+                    break
+
+
+_default_resolver =None
+_default_lock =threading.Lock()
+
+
+def bounded_dns_addresses(host, port, timeout=3.0):
+    global _default_resolver
+    with _default_lock:
+        if _default_resolver is None:
+            _default_resolver =DNSResolver()
+        resolver =_default_resolver
+    return resolver.resolve(host, port, timeout=timeout)
+
+from concurrent.futures import Future
+from collections import deque
+from contextlib import contextmanager
+from dataclasses import dataclass
+import json
+import os
+import tempfile
+import threading
+import time
+
+
+class ThreadPoolExecutor:
+    """Bounded daemon pool implementing the service's Executor API.
+
+    A system network call cannot be killed safely. Daemon workers deliberately
+    avoid the standard thread pool's interpreter-exit join, while Future states
+    and cancellation retain the usual running/pending distinction.
+    """
+    def __init__(self, max_workers=None, thread_name_prefix='', *, max_queue=128):
+        if max_workers is None:
+            max_workers =min(32, (os.cpu_count() or 1) +4)
+        if not isinstance(max_workers, int) or max_workers <=0:
+            raise ValueError('max_workers must be a positive integer')
+        self._max_workers =max_workers
+        self._max_queue =max(1, min(128, int(max_queue)))
+        self._prefix =thread_name_prefix or 'ysp-worker'
+        self._condition =threading.Condition()
+        self._tasks =deque()
+        self._threads =[]
+        self._active =0
+        self._shutdown =False
+
+    def submit(self, fn, /, *args, **kwargs):
+        with self._condition:
+            if self._shutdown:
+                raise RuntimeError('cannot schedule new futures after shutdown')
+            if len(self._tasks) >=self._max_queue:
+                raise RuntimeError('worker queue capacity exhausted')
+            future =Future()
+            task =(future, fn, args, kwargs)
+            self._tasks.append(task)
+            desired =min(self._max_workers, self._active +len(self._tasks))
+            try:
+                while len(self._threads) <desired:
+                    worker =threading.Thread(target=self._worker, daemon=True,
+                                            name=f'{self._prefix}_{len(self._threads)}')
+                    worker.start()
+                    self._threads.append(worker)
+            except Exception as error:
+                # Workers cannot take this task while we hold the condition.
+                # Keep previously started workers and their accepted tasks.
+                self._tasks.remove(task)
+                future.cancel()
+                self._condition.notify_all()
+                raise RuntimeError('cannot start worker thread') from error
+            self._condition.notify()
+            return future
+
+    def _worker(self):
+        while True:
+            with self._condition:
+                while not self._tasks:
+                    if self._shutdown:
+                        return
+                    self._condition.wait()
+                future, fn, args, kwargs =self._tasks.popleft()
+                self._active +=1
+            try:
+                if future.set_running_or_notify_cancel():
+                    try:
+                        result =fn(*args, **kwargs)
+                    except BaseException as error:
+                        future.set_exception(error)
+                    else:
+                        future.set_result(result)
+            finally:
+                with self._condition:
+                    self._active -=1
+                    self._condition.notify_all()
+
+    def shutdown(self, wait=True, *, cancel_futures=False):
+        cancelled =[]
+        with self._condition:
+            self._shutdown =True
+            if cancel_futures:
+                while self._tasks:
+                    cancelled.append(self._tasks.popleft()[0])
+            workers =list(self._threads)
+            self._condition.notify_all()
+        # Future callbacks may acquire application locks or call back into this
+        # executor, so run them after releasing the queue condition.
+        for future in cancelled:
+            future.cancel()
+        if wait:
+            for worker in workers:
+                if worker is not threading.current_thread():
+                    worker.join()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.shutdown(wait=True)
+        return False
+
+
+@dataclass
+class RawPlaylist:
+    source_key: tuple
+    body: str
+    content_type: str
+    cached_at: float
+    expires_at: float
+    stale_until: float
+
+
+_path_locks = {}
+_path_locks_lock = threading.Lock()
+_persistence_errors = {}
+
+
+@contextmanager
+def persistence_lock(path):
+    path = os.path.abspath(path)
+    with _path_locks_lock:
+        lock = _path_locks.setdefault(path, threading.RLock())
+    with lock:
+        yield
+
+
+def persistence_error(path, error):
+    with _path_locks_lock:
+        _persistence_errors[os.path.abspath(path)] = {
+            "error": str(error), "at": time.time()
+        }
+
+
+def persistence_status():
+    with _path_locks_lock:
+        return {path: dict(value) for path, value in _persistence_errors.items()}
+
+
+def atomic_json_write(path, payload):
+    """Serialize concurrent writers, use a unique inode, and atomically publish."""
+    path = os.path.abspath(path)
+    with persistence_lock(path):
+        parent = os.path.dirname(path)
+        os.makedirs(parent, exist_ok=True)
+        temporary = None
+        try:
+            descriptor, temporary = tempfile.mkstemp(
+                prefix="." + os.path.basename(path) + ".", suffix=".tmp", dir=parent
+            )
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream, indent=2, ensure_ascii=False, sort_keys=True)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            temporary = None
+            # Directory fsync is supported on POSIX, but not all deployment OSes.
+            if hasattr(os, "O_DIRECTORY"):
+                directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+        except Exception as error:
+            persistence_error(path, error)
+            raise
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)
+                except FileNotFoundError:
+                    pass
+
+import dataclasses
+import datetime
+import hashlib
+import math
+import re
+import urllib.parse
+
+_URI = re.compile(r'(?P<name>\b(?:URI|SERVER-URI))=(?:"(?P<quoted>[^"]*)"|(?P<plain>[^\s,]+))')
+_ATTR = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
+_VOLATILE = {'sig', 'signature', 'sign', 'token', 'auth', 'auth_key', 'expires', 'expire', 'wssecret', 'wstime', 'txsecret', 'txtime', 'upt', 'vkey'}
+_GLOBAL = ('#EXTM3U', '#EXT-X-VERSION:', '#EXT-X-TARGETDURATION:', '#EXT-X-MEDIA-SEQUENCE:', '#EXT-X-DISCONTINUITY-SEQUENCE:', '#EXT-X-PLAYLIST-TYPE:', '#EXT-X-INDEPENDENT-SEGMENTS', '#EXT-X-START:', '#EXT-X-SERVER-CONTROL:', '#EXT-X-DEFINE:')
+
+class UnsafePlaylist(ValueError):
+    pass
+
+def attributes(line):
+    return {k: v.strip('"') for k, v in _ATTR.findall(line.partition(':')[2])}
+
+def rewrite_uris(text, base_url, mapper=None):
+    """Resolve every URI against its effective response URL, including tag attributes."""
+    def absolute(value):
+        resolved = urllib.parse.urljoin(base_url, value)
+        return mapper(resolved) if mapper and urllib.parse.urlsplit(resolved).scheme in ('http', 'https') else resolved
+    out = []
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith('#'):
+            line = _URI.sub(lambda m: m.group('name') + '="' + absolute(m.group('quoted') if m.group('quoted') is not None else m.group('plain')) + '"', line)
+        elif s:
+            line = absolute(s)
+        out.append(line)
+    return '\n'.join(out) + ('\n' if text.endswith(('\n', '\r')) else '')
+
+def select_variant(text, quality='fhd'):
+    """Choose a muxed rendition; keep masters with separate audio/video groups intact."""
+    lines = text.splitlines()
+    variants = []
+    for i, line in enumerate(lines):
+        if line.strip().startswith('#EXT-X-STREAM-INF:'):
+            attrs = attributes(line.strip())
+            if attrs.get('AUDIO') or attrs.get('VIDEO') or attrs.get('SUBTITLES'):
+                return None
+            for uri in lines[i + 1:]:
+                if uri.strip() and not uri.lstrip().startswith('#'):
+                    resolution = attrs.get('RESOLUTION', '0x0').lower().split('x')
+                    try:
+                        height = int(resolution[-1])
+                        bandwidth = int(attrs.get('AVERAGE-BANDWIDTH', attrs.get('BANDWIDTH', 0)))
+                    except ValueError:
+                        height, bandwidth = 0, 0
+                    variants.append((height, bandwidth, uri.strip()))
+                    break
+    if not variants:
+        return None
+    quality = (quality or 'fhd').lower()
+    cap = {'sd': 576, 'hd': 720, 'shd': 720, 'fhd': 1080, 'uhd': 2160, '4k': 2160, '8k': 4320, 'stable': 720}.get(quality)
+    if quality == 'auto':
+        return None
+    if cap:
+        within = [v for v in variants if v[0] and v[0] <= cap]
+        if within:
+            return max(within) [2]
+        measured = [v for v in variants if v[0]]
+        if measured:
+            return min(measured)[2]
+    # Missing resolution: use bandwidth only as a bounded approximation.
+    budget = {'shd': 3_000_000, 'hd': 3_000_000, 'stable': 3_000_000, 'sd': 1_500_000}.get(quality, 8_000_000)
+    within = [v for v in variants if v[1] <= budget]
+    return (max(within) if within else min(variants))[2]
+
+def pdt_seconds(value):
+    if not value:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(value[:-1] + '+00:00' if value.upper().endswith('Z') else value)
+        if dt.tzinfo is None:
+            return None  # HLS PDT requires an explicit zone.
+        return dt.timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+def stable_uri(uri):
+    p = urllib.parse.urlsplit(uri)
+    # Preserve query parameters that may identify the media itself.
+    query = urllib.parse.urlencode([(k, v) for k, v in urllib.parse.parse_qsl(p.query, keep_blank_values=True) if k.lower() not in _VOLATILE])
+    return urllib.parse.urlunsplit((p.scheme, p.netloc, p.path, query, ''))
+
+@dataclasses.dataclass
+class Segment:
+    source_sequence: int
+    duration: float
+    pdt: str
+    uri: str
+    tags: list[str]
+    key: str | None
+    init_map: str | None
+    byte_range: str | None
+    discontinuity: int = 0
+
+    @property
+    def identity(self):
+        stamp = pdt_seconds(self.pdt)
+        if stamp is not None:
+            return ('pdt', round(stamp, 6), self.byte_range)
+        return ('uri', stable_uri(self.uri), self.byte_range)
+
+@dataclasses.dataclass
+class MediaPlaylist:
+    headers: list[str]
+    segments: list[Segment]
+    trailing: list[str]
+    sequence: int = 0
+    discontinuity_sequence: int = 0
+    target: float = 6.0
+    unsafe: bool = False
+    original_text: str = ''
+
+
+def parse_media(text):
+    if '#EXT-X-STREAM-INF:' in text or '#EXT-X-I-FRAME-STREAM-INF:' in text:
+        return None
+    headers, pending, segments, trailing = [], [], [], []
+    sequence, discontinuity_sequence, duration, target = 0, 0, 6.0, 6.0
+    key = init_map = byte_range = None
+    pdt = ''
+    inherited_pdt = None
+    range_end, range_uri = None, None
+    unsafe = False
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith(('#EXT-X-PART:', '#EXT-X-PRELOAD-HINT:', '#EXT-X-SKIP:', '#EXT-X-RENDITION-REPORT:')):
+            unsafe = True
+        if s.startswith('#EXT-X-MEDIA-SEQUENCE:'):
+            sequence = int(s.partition(':')[2])
+            if sequence < 0 or sequence >= 2 ** 128:
+                raise UnsafePlaylist('invalid media sequence')
+            headers.append(s)
+        elif s.startswith('#EXT-X-DISCONTINUITY-SEQUENCE:'):
+            discontinuity_sequence = int(s.partition(':')[2])
+            headers.append(s)
+        elif s.startswith('#EXT-X-TARGETDURATION:'):
+            target = float(s.partition(':')[2])
+            if not math.isfinite(target) or target <= 0:
+                raise UnsafePlaylist('invalid target duration')
+            headers.append(s)
+        elif s.startswith('#EXTINF:'):
+            duration = float(s.partition(':')[2].split(',')[0])
+            if not math.isfinite(duration) or duration <= 0:
+                raise UnsafePlaylist('invalid segment duration')
+            pending.append(s)
+        elif s.startswith('#EXT-X-PROGRAM-DATE-TIME:'):
+            pdt = s.partition(':')[2]
+            inherited_pdt = pdt_seconds(pdt)
+            pending.append(s)
+        elif s.startswith('#EXT-X-KEY:'):
+            key = s
+            pending.append(s)
+        elif s.startswith('#EXT-X-MAP:'):
+            init_map = s
+            pending.append(s)
+        elif s.startswith('#EXT-X-BYTERANGE:'):
+            byte_range = s.partition(':')[2]
+            pending.append(s)
+        elif s.startswith('#EXT-X-ENDLIST'):
+            trailing.append(s)
+        elif any(s.startswith(prefix) for prefix in _GLOBAL):
+            headers.append(s)
+        elif s.startswith('#'):
+            pending.append(s)
+        else:
+            if not any(t.startswith('#EXTINF:') for t in pending):
+                unsafe = True
+            actual_range = byte_range
+            if byte_range:
+                match = re.fullmatch(r'(\d+)(?:@(\d+))?', byte_range)
+                if not match:
+                    unsafe = True
+                else:
+                    length = int(match.group(1))
+                    offset = int(match.group(2)) if match.group(2) is not None else range_end
+                    if offset is None or (match.group(2) is None and range_uri != s):
+                        unsafe = True
+                    else:
+                        actual_range = f'{length}@{offset}'
+                        range_end, range_uri = offset + length, s
+            else:
+                range_end, range_uri = None, None
+            if not pdt and inherited_pdt is not None:
+                pdt = datetime.datetime.fromtimestamp(inherited_pdt, datetime.timezone.utc).isoformat()
+            segments.append(Segment(sequence + len(segments), duration, pdt, s, pending, key, init_map, actual_range, pending.count('#EXT-X-DISCONTINUITY')))
+            if inherited_pdt is not None:
+                inherited_pdt += duration
+            pending, pdt, byte_range = [], '', None
+    trailing = pending + trailing
+    return MediaPlaylist(headers, segments, trailing, sequence, discontinuity_sequence, target, unsafe, text)
+
+
+def render_media(media, segments=None, sequences=None, *, live=False, boundary=None, discontinuity_base=None):
+    """Render complete segment state; make AES-128 implicit IV explicit before renumbering."""
+    if media.unsafe:
+        raise UnsafePlaylist('playlist requires passthrough (LL-HLS or incomplete segment metadata)')
+    segments = list(media.segments if segments is None else segments)
+    if not segments:
+        raise UnsafePlaylist('empty media playlist')
+    sequences = list(range(segments[0].source_sequence, segments[0].source_sequence + len(segments))) if sequences is None else list(sequences)
+    if len(sequences) != len(segments) or any(b != a + 1 for a, b in zip(sequences, sequences[1:])):
+        raise UnsafePlaylist('non-contiguous output sequence')
+    out = []
+    for line in media.headers:
+        if line.startswith(('#EXT-X-MEDIA-SEQUENCE:', '#EXT-X-DISCONTINUITY-SEQUENCE:')):
+            continue
+        if live and line.startswith(('#EXT-X-PLAYLIST-TYPE:', '#EXT-X-START:')):
+            continue
+        if line.startswith('#EXT-X-TARGETDURATION:'):
+            line = '#EXT-X-TARGETDURATION:' + str(math.ceil(max(media.target, max(s.duration for s in segments))))
+        out.append(line)
+    if '#EXTM3U' not in out:
+        out.insert(0, '#EXTM3U')
+    if not any(s.startswith('#EXT-X-TARGETDURATION:') for s in out):
+        out.append('#EXT-X-TARGETDURATION:' + str(math.ceil(max(s.duration for s in segments))))
+    out.append('#EXT-X-MEDIA-SEQUENCE:' + str(sequences[0]))
+    disc_base = media.discontinuity_sequence if discontinuity_base is None else discontinuity_base
+    first_index = next((i for i, s in enumerate(media.segments) if s.identity == segments[0].identity), 0)
+    omitted = sum(s.discontinuity for s in media.segments[:first_index])
+    out.append('#EXT-X-DISCONTINUITY-SEQUENCE:' + str(disc_base + omitted))
+    previous_key = previous_map = None
+    for segment, output_seq in zip(segments, sequences):
+        key = segment.key
+        if key:
+            attr = attributes(key)
+            method = attr.get('METHOD')
+            if method not in ('NONE', 'AES-128') and output_seq != segment.source_sequence:
+                raise UnsafePlaylist('cannot renumber this encryption method')
+            if method == 'AES-128' and 'IV' not in attr:
+                if attr.get('KEYFORMAT', 'identity') != 'identity' or segment.init_map:
+                    raise UnsafePlaylist('cannot infer initialization-map encryption IV')
+                key += ',IV=0x' + format(segment.source_sequence, '032x')
+        if boundary is not None and output_seq == boundary and '#EXT-X-DISCONTINUITY' not in segment.tags:
+            out.append('#EXT-X-DISCONTINUITY')
+        if key != previous_key:
+            if key:
+                out.append(key)
+            elif previous_key:
+                out.append('#EXT-X-KEY:METHOD=NONE')
+            previous_key = key
+        if segment.init_map != previous_map:
+            if segment.init_map:
+                out.append(segment.init_map)
+            previous_map = segment.init_map
+        if segment.pdt and not any(tag.startswith('#EXT-X-PROGRAM-DATE-TIME:') for tag in segment.tags):
+            out.append('#EXT-X-PROGRAM-DATE-TIME:' + segment.pdt)
+        for tag in segment.tags:
+            if tag.startswith(('#EXT-X-KEY:', '#EXT-X-MAP:', '#EXT-X-BYTERANGE:')):
+                continue
+            out.append(tag)
+        if segment.byte_range:
+            # Explicit offsets make a trimmed first segment independently interpretable.
+            out.append('#EXT-X-BYTERANGE:' + segment.byte_range)
+        out.append(segment.uri)
+    out.extend(t for t in media.trailing if not live or t != '#EXT-X-ENDLIST')
+    return '\n'.join(out) + '\n'
+
+
+def media_signature(text):
+    media = parse_media(text)
+    if media is None or not media.segments:
+        return None, 6.0
+    # A changed token alone is not a new frame. Include sequence and complete stable identity.
+    last = media.segments[-1]
+    payload = repr((last.source_sequence, last.identity)).encode()
+    return hashlib.sha256(payload).hexdigest(), media.target
+
+import base64
+import collections
+import dataclasses
+import hashlib
+import http.client
+import ipaddress
+import json
+import os
+import re
+import secrets
+import socket
+import ssl
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from http.server import ThreadingHTTPServer
+
+DEFAULT_SUFFIXES = ('.cctv.cn', '.cctv.com', '.cctvpic.com', '.citvc.com',
+    '.yangshipin.cn', '.cntv.cn', '.cntv.com', '.myqcloud.com', '.qqlive.com',
+    '.gtimg.cn', '.smtcdns.net', '.smtcdns.com', '.tcdnlive.com', '.alicdn.com',
+    '.alikunlun.com', '.wscdns.com', '.chinanetcenter.com', '.bdydns.com',
+    '.ksyungslb.com', '.ks-cdn.com')
+PASS_HEADERS = {'content-type', 'content-length', 'content-range', 'accept-ranges',
+    'etag', 'last-modified', 'content-encoding'}
+SENSITIVE = {'authorization', 'cookie', 'uid', 'appid', 'apprandomstr', 'appsign'}
+_TLS_CONTEXT = ssl.create_default_context()
+
+
+class ProxyError(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+
+
+@dataclasses.dataclass(frozen=True)
+class Resource:
+    url: str
+    headers: dict
+    channel: str = ''
+    generation: int = 0
+
+
+class ResourceRegistry:
+    def __init__(self, limit=16384, ttl=600):
+        self.limit, self.ttl = limit, ttl
+        self.lock = threading.Lock()
+        self.entries = collections.OrderedDict()
+        self.secret = secrets.token_bytes(32)
+
+    def register(self, url, headers=None, channel='', generation=0):
+        headers = dict(headers or {})
+        signature = json.dumps([url, sorted(headers.items()), channel, generation], separators=(',', ':'))
+        # Opaque capabilities are generated by the server, never accepted as arbitrary URLs.
+        digest = hashlib.blake2s(signature.encode(), key=self.secret, digest_size=24).digest()
+        token = base64.urlsafe_b64encode(digest).decode().rstrip('=')
+        now = time.monotonic()
+        with self.lock:
+            self.entries[token] = (Resource(url, headers, channel, generation), now + self.ttl)
+            self.entries.move_to_end(token)
+            while self.entries and (len(self.entries) > self.limit or next(iter(self.entries.values()))[1] <= now):
+                self.entries.popitem(last=False)
+        return token
+
+    def resolve(self, token):
+        if not token or len(token) > 128:
+            raise ProxyError(403, 'invalid media resource')
+        with self.lock:
+            item = self.entries.get(token)
+            if not item or item[1] <= time.monotonic():
+                self.entries.pop(token, None)
+                raise ProxyError(403, 'media resource expired; reload the playlist')
+            return item[0]
+
+
+_registry = ResourceRegistry()
+register_resource = _registry.register
+resolve_resource = _registry.resolve
+
+
+class URLPolicy:
+    def __init__(self, allowed_suffixes=None, allow_private=False, engine_port=8787):
+        self.allowed_suffixes = tuple(DEFAULT_SUFFIXES if allowed_suffixes is None else allowed_suffixes)
+        self.allow_private = allow_private  # Test injection only; no CLI switch enables this.
+        self.engine_port = engine_port
+
+    def resolve(self, target, _depth=0):
+        try:
+            if len(target) > 16384 or _depth > 2:
+                raise ValueError('URL too long or nested')
+            parsed = urllib.parse.urlsplit(target)
+            host = (parsed.hostname or '').rstrip('.').lower()
+            port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+            if parsed.scheme not in ('http', 'https') or not host or parsed.username or parsed.password:
+                raise ValueError('unsupported target')
+            # Only this narrowly scoped local route is a legitimate companion-engine target.
+            engine = (parsed.scheme == 'http' and host in ('127.0.0.1', 'localhost')
+                      and port == self.engine_port and parsed.path == '/segment')
+            if engine:
+                inner = urllib.parse.parse_qs(parsed.query).get('url', [''])[0]
+                self.resolve(inner, _depth + 1)
+                return parsed, ['127.0.0.1']
+            allowed = any(host == suffix.lstrip('.') or host.endswith('.' + suffix.lstrip('.'))
+                          for suffix in self.allowed_suffixes)
+            if not allowed or (not self.allow_private and port not in (80, 443)):
+                raise ProxyError(403, 'media target is not allowed')
+            addresses = bounded_dns_addresses(host, port)
+            if not addresses:
+                raise ValueError('empty DNS response')
+            if not self.allow_private and any(not ipaddress.ip_address(addr).is_global for addr in addresses):
+                raise ProxyError(403, 'non-public media target')
+            return parsed, addresses
+        except ProxyError:
+            raise
+        except DNSLookupError as exc:
+            raise ProxyError(exc.status, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise ProxyError(403, 'invalid or unresolved media target') from exc
+
+
+class _PinnedHTTP(http.client.HTTPConnection):
+    def __init__(self, host, port, address, timeout):
+        super().__init__(host, port, timeout=timeout)
+        self.address = address
+
+    def connect(self):
+        self.sock = socket.create_connection((self.address, self.port), self.timeout)
+
+
+class _PinnedHTTPS(_PinnedHTTP):
+    def connect(self):
+        super().connect()
+        try:
+            self.sock = _TLS_CONTEXT.wrap_socket(self.sock, server_hostname=self.host)
+        except BaseException:
+            self.sock.close()
+            raise
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+class RemoteResponse:
+    def __init__(self, response, connection, effective_url):
+        self.response, self.connection, self.effective_url = response, connection, effective_url
+        self.status = response.status if hasattr(response, 'status') else response.code
+        self.headers = {k.lower(): v for k, v in response.headers.items()}
+        self.content_lengths = [v for k, v in response.headers.items() if k.lower() == 'content-length']
+        self.deadline = None
+
+    def read(self, size):
+        if self.deadline is not None:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise ProxyError(504, 'upstream response deadline exceeded')
+            sock = getattr(self.connection, 'sock', None)
+            if sock is None:
+                raw = getattr(getattr(self.response, 'fp', None), 'raw', None)
+                sock = getattr(raw, '_sock', None)
+            if sock is not None:
+                sock.settimeout(min(15, remaining))
+        reader = getattr(self.response, 'read1', self.response.read)
+        return reader(size)
+
+    def close(self):
+        try:
+            self.response.close()
+        finally:
+            if self.connection is not None:
+                self.connection.close()
+
+
+def _safe_close(remote):
+    if remote is not None:
+        try:
+            remote.close()
+        except Exception:
+            pass  # A close failure must never skip transfer notification or budget release.
+
+
+def open_remote(target, headers=None, method='GET', policy=None, timeout=15, deadline=None):
+    """Validate every hop. Direct connections pin DNS; configured proxies retain policy ownership."""
+    policy = policy or URLPolicy()
+    deadline = deadline or time.monotonic() + timeout
+    current, request_headers = target, dict(headers or {})
+    request_headers.update({'Accept-Encoding': 'identity', 'Connection': 'close'})
+    for _ in range(5):
+        parsed, addresses = policy.resolve(current)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProxyError(504, 'media request deadline exceeded')
+        request_timeout = min(timeout, remaining)
+        host, port = parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80)
+        connection = None
+        # Respect the configured proxy path instead of globally replacing urllib's opener.
+        proxies = urllib.request.getproxies()
+        use_proxy = proxies.get(parsed.scheme) and not urllib.request.proxy_bypass(host)
+        try:
+            if use_proxy:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies), _NoRedirect(),
+                                                     urllib.request.HTTPSHandler(context=_TLS_CONTEXT))
+                req = urllib.request.Request(current, headers=request_headers, method=method)
+                try:
+                    response = opener.open(req, timeout=request_timeout)
+                except urllib.error.HTTPError as exc:
+                    response = exc
+            else:
+                cls = _PinnedHTTPS if parsed.scheme == 'https' else _PinnedHTTP
+                request_path = urllib.parse.urlunsplit(('', '', parsed.path or '/', parsed.query, ''))
+                failure = None
+                for address in addresses:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    connection = cls(host, port, address, min(request_timeout, remaining))
+                    try:
+                        connection.request(method, request_path, headers=request_headers)
+                        response = connection.getresponse()
+                        break
+                    except (OSError, http.client.HTTPException) as exc:
+                        failure = exc
+                        connection.close()
+                else:
+                    raise failure or OSError('no reachable media address')
+                if time.monotonic() >= deadline:
+                    raise ProxyError(504, 'media request deadline exceeded')
+            result = RemoteResponse(response, connection, current)
+            result.deadline = deadline
+        except ProxyError:
+            _safe_close(connection)
+            raise
+        except (OSError, http.client.HTTPException, urllib.error.URLError) as exc:
+            _safe_close(connection)
+            raise ProxyError(502, 'upstream media connection failed') from exc
+        invalid_length = (len(result.content_lengths) > 1 or
+                          any(not re.fullmatch(r'[0-9]+', value.strip()) for value in result.content_lengths))
+        if invalid_length or (result.headers.get('transfer-encoding') and result.headers.get('content-length')):
+            _safe_close(result)
+            raise ProxyError(502, 'ambiguous upstream response framing')
+        if result.status in (301, 302, 303, 307, 308) and result.headers.get('location'):
+            next_url = urllib.parse.urljoin(current, result.headers['location'])
+            _safe_close(result)
+            next_parts = urllib.parse.urlsplit(next_url)
+            if parsed.scheme == 'https' and next_parts.scheme != 'https':
+                raise ProxyError(502, 'HTTPS media redirect downgrade rejected')
+            if (next_parts.scheme, next_parts.hostname, next_parts.port) != (parsed.scheme, parsed.hostname, parsed.port):
+                request_headers = {k: v for k, v in request_headers.items() if k.lower() not in SENSITIVE}
+            current = next_url
+            continue
+        return result
+    raise ProxyError(502, 'too many media redirects')
+
+
+def fetch_bytes(target, headers=None, method='GET', policy=None, timeout=15, max_bytes=2 * 1024 * 1024):
+    deadline = time.monotonic() + timeout
+    remote = open_remote(target, headers, method, policy, timeout, deadline)
+    try:
+        chunks, total = [], 0
+        while method != 'HEAD':
+            if time.monotonic() >= deadline:
+                raise ProxyError(504, 'upstream response deadline exceeded')
+            chunk = remote.read(min(65536, max_bytes - total + 1))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > max_bytes:
+                raise ProxyError(502, 'upstream response too large')
+        declared = remote.headers.get('content-length')
+        if method != 'HEAD' and declared is not None:
+            try:
+                if int(declared) != total:
+                    raise ProxyError(502, 'incomplete upstream response')
+            except ValueError:
+                raise ProxyError(502, 'invalid upstream content length')
+        return remote.status, remote.headers, b''.join(chunks), remote.effective_url
+    finally:
+        _safe_close(remote)
+
+
+def render_media_playlist(text, effective_url, headers=None):
+    def convert(value):
+        absolute = urllib.parse.urljoin(effective_url, value)
+        token = register_resource(absolute, headers)
+        return '/proxy?resource=' + token
+    out = []
+    for index, line in enumerate(text.splitlines()):
+        if index >= 8192:
+            raise ProxyError(502, 'playlist has too many entries')
+        stripped = line.strip()
+        if stripped and not stripped.startswith('#'):
+            out.append(convert(stripped))
+        else:
+            out.append(re.sub(r'URI="([^"]+)"', lambda match: 'URI="' + convert(match.group(1)) + '"', line))
+    return '\n'.join(out) + '\n'
+
+
+@dataclasses.dataclass
+class _Transfer:
+    url: str
+    request_headers: dict
+    condition: threading.Condition = dataclasses.field(default_factory=threading.Condition)
+    file: object = dataclasses.field(default_factory=tempfile.TemporaryFile)
+    status: int = 0
+    headers: dict = dataclasses.field(default_factory=dict)
+    size: int = 0
+    reserved: int = 0
+    subscribers: int = 0
+    done: bool = False
+    error: ProxyError | None = None
+    closed: bool = False
+    io_lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
+
+
+def _read_at(task, count, offset):
+    if hasattr(os, 'pread'):
+        return os.pread(task.file.fileno(), count, offset)
+    with task.io_lock:
+        task.file.seek(offset)
+        return task.file.read(count)
+
+
+def _write_at(task, data, offset):
+    with task.io_lock:
+        task.file.seek(offset)
+        task.file.write(data)
+        task.file.flush()
+
+
+@dataclasses.dataclass
+class _CacheEntry:
+    chunks: tuple
+    headers: dict
+    size: int
+    expires: float
+    readers: int = 0
+    retired: bool = False
+
+
+def _client_write(handler, data, deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ProxyError(504, 'client transfer deadline exceeded')
+    connection = getattr(handler, 'connection', None)
+    if connection is not None:
+        current = connection.gettimeout()
+        connection.settimeout(min(current or remaining, remaining))
+    handler.wfile.write(data)
+
+
+class SharedMediaProxy:
+    """One producer, independent file cursors; RAM cache holds immutable chunks only.
+
+    In-flight files are temporary, capped globally, and removed after the final reader.
+    A disconnected/slow viewer never owns the producer's network socket.
+    """
+    def __init__(self, policy=None, max_cache_bytes=200 * 1024 * 1024,
+                 max_inflight_bytes=256 * 1024 * 1024, max_downloads=8, timeout=30,
+                 max_resource_bytes=64 * 1024 * 1024, temp_dir=None):
+        self.policy = policy or URLPolicy()
+        self.max_cache_bytes = max(0, int(max_cache_bytes))
+        self.max_inflight_bytes = max(65536, int(max_inflight_bytes))
+        self.max_resource_bytes = min(max_resource_bytes, self.max_inflight_bytes)
+        self.timeout = max(1.0, timeout)
+        self.temp_dir = temp_dir
+        self.lock = threading.RLock()
+        self.slots = threading.BoundedSemaphore(max(1, max_downloads))
+        self.tasks, self.cache = {}, collections.OrderedDict()
+        self.cache_bytes = self.inflight_bytes = 0
+        self.hits = self.misses = self.coalesced = self.downloads = self.errors = 0
+        self.stop = threading.Event()
+
+    @staticmethod
+    def _key(url, headers):
+        return (url, tuple(sorted((k.lower(), str(v)) for k, v in headers.items())))
+
+    def stats(self):
+        with self.lock:
+            return {'count': len(self.cache), 'size_mb': round(self.cache_bytes / 2**20, 2),
+                    'hits': self.hits, 'misses': self.misses, 'coalesced': self.coalesced,
+                    'downloads': self.downloads, 'errors': self.errors,
+                    'inflight_count': len(self.tasks), 'inflight_mb': round(self.inflight_bytes / 2**20, 2),
+                    'hit_rate': f'{100 * self.hits / max(1, self.hits + self.misses):.1f}%'}
+
+    def _reserve(self, task, amount):
+        with self.lock:
+            if self.inflight_bytes + amount > self.max_inflight_bytes:
+                raise ProxyError(503, 'media transfer budget exhausted')
+            self.inflight_bytes += amount
+            task.reserved += amount
+
+    def _cleanup(self, key, task):
+        with self.lock:
+            if task.done and not task.subscribers and not task.closed:
+                task.closed = True
+                if self.tasks.get(key) is task:
+                    self.tasks.pop(key, None)
+                self.inflight_bytes -= task.reserved
+                try:
+                    task.file.close()
+                except OSError:
+                    pass
+
+    def _store_cache(self, key, task):
+        if not self.max_cache_bytes or task.status != 200 or not task.size or task.size > self.max_cache_bytes:
+            return
+        if 'mpegurl' in task.headers.get('content-type', '').lower() or '.m3u8' in urllib.parse.urlsplit(task.url).path:
+            return
+        with self.lock:
+            if self.stop.is_set():
+                return
+            now = time.monotonic()
+            for oldkey, item in list(self.cache.items()):
+                if item.expires <= now:
+                    self._retire_cache(item)
+                    self.cache.pop(oldkey, None)
+            while self.cache and self.cache_bytes + task.size > self.max_cache_bytes:
+                _, item = self.cache.popitem(last=False)
+                self._retire_cache(item)
+            if self.cache_bytes + task.size > self.max_cache_bytes:
+                return  # Evicted entries pinned by readers still count against the budget.
+            # Evict before allocating. Immutable chunks avoid a second complete bytes copy.
+            chunks = tuple(_read_at(task, min(65536, task.size - offset), offset)
+                           for offset in range(0, task.size, 65536))
+            previous = self.cache.pop(key, None)
+            if previous:
+                self._retire_cache(previous)
+            self.cache[key] = _CacheEntry(chunks, dict(task.headers), task.size, now + 180)
+            self.cache_bytes += task.size
+
+    def _retire_cache(self, entry):
+        entry.retired = True
+        if not entry.readers:
+            self.cache_bytes -= entry.size
+
+    def _release_cache(self, entry):
+        with self.lock:
+            entry.readers -= 1
+            if entry.retired and not entry.readers:
+                self.cache_bytes -= entry.size
+
+    def _produce(self, key, task):
+        remote = None
+        try:
+            deadline = time.monotonic() + self.timeout
+            remote = open_remote(task.url, task.request_headers, policy=self.policy,
+                                 timeout=min(15, self.timeout), deadline=deadline)
+            headers = {k: v for k, v in remote.headers.items() if k in PASS_HEADERS}
+            expected = None
+            if headers.get('content-length'):
+                try:
+                    expected = int(headers['content-length'])
+                    if expected < 0 or expected > self.max_resource_bytes:
+                        raise ProxyError(502, 'upstream resource too large')
+                except ValueError:
+                    raise ProxyError(502, 'invalid upstream content length')
+            playlist = ('mpegurl' in headers.get('content-type', '').lower()
+                        or urllib.parse.urlsplit(remote.effective_url).path.lower().endswith('.m3u8'))
+            if playlist and remote.status == 200:
+                if headers.get('content-encoding') not in (None, 'identity'):
+                    raise ProxyError(502, 'unexpected compressed playlist')
+                data, total = [], 0
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise ProxyError(504, 'media request deadline exceeded')
+                    chunk = remote.read(65536)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > 2 * 1024 * 1024:
+                        raise ProxyError(502, 'playlist too large')
+                    data.append(chunk)
+                text = b''.join(data).decode('utf-8', 'strict')
+                if not text.lstrip().startswith('#EXTM3U'):
+                    raise ProxyError(502, 'invalid upstream playlist')
+                body = render_media_playlist(text, remote.effective_url, task.request_headers).encode()
+                if len(body) > 2 * 1024 * 1024:
+                    raise ProxyError(502, 'rendered playlist too large')
+                self._reserve(task, len(body))
+                _write_at(task, body, 0)
+                headers['content-length'] = str(len(body))
+                headers['content-type'] = 'application/vnd.apple.mpegurl'
+                with task.condition:
+                    task.status, task.headers, task.size = remote.status, headers, len(body)
+                    task.condition.notify_all()
+            else:
+                if expected:
+                    self._reserve(task, expected)
+                with task.condition:
+                    task.status, task.headers = remote.status, headers
+                    task.condition.notify_all()
+                first = True
+                while True:
+                    if self.stop.is_set() or time.monotonic() >= deadline:
+                        raise ProxyError(504, 'media request deadline exceeded')
+                    chunk = remote.read(65536)
+                    if not chunk:
+                        break
+                    if first and remote.status == 200 and chunk.lstrip()[:16].lower().startswith((b'<!doctype html', b'<html')):
+                        raise ProxyError(502, 'upstream returned an error page')
+                    first = False
+                    if task.size + len(chunk) > self.max_resource_bytes:
+                        raise ProxyError(502, 'upstream resource too large')
+                    additional = task.size + len(chunk) - task.reserved
+                    if additional > 0:
+                        self._reserve(task, additional)
+                    _write_at(task, chunk, task.size)
+                    with task.condition:
+                        task.size += len(chunk)
+                        task.condition.notify_all()
+                if expected is not None and task.size != expected:
+                    raise ProxyError(502, 'incomplete upstream resource')
+                self._store_cache(key, task)
+        except ProxyError as exc:
+            with task.condition:
+                task.error = exc
+        except Exception:
+            with task.condition:
+                task.error = ProxyError(502, 'upstream media transfer failed')
+        finally:
+            _safe_close(remote)
+            with task.condition:
+                task.done = True
+                task.condition.notify_all()
+            with self.lock:
+                self.errors += bool(task.error)
+            self.slots.release()
+            self._cleanup(key, task)
+
+    @staticmethod
+    def _headers(handler, status, headers, cache_status):
+        handler.send_response(status)
+        for key, value in headers.items():
+            if key.lower() in PASS_HEADERS:
+                handler.send_header(key, value)
+        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Cache-Control', 'private, max-age=60' if status == 200 else 'no-store')
+        handler.send_header('X-Cache', cache_status)
+        handler.end_headers()
+
+    def _serve_direct(self, handler, url, headers, head_only):
+        if not self.slots.acquire(blocking=False):
+            raise ProxyError(503, 'media download capacity reached')
+        remote, started, reserved = None, False, True
+        try:
+            deadline = time.monotonic() + self.timeout
+            remote = open_remote(url, headers, 'HEAD' if head_only else 'GET', self.policy,
+                                 min(15, self.timeout), deadline)
+            response_headers = {k: v for k, v in remote.headers.items() if k in PASS_HEADERS}
+            status = remote.status
+            if head_only:
+                _safe_close(remote)
+                remote = None
+                self.slots.release()
+                reserved = False
+                self._headers(handler, status, response_headers, 'BYPASS')
+                started = True
+                return status
+            self._headers(handler, remote.status, response_headers, 'BYPASS')
+            started = True
+            size = 0
+            if not head_only:
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise ProxyError(504, 'media request deadline exceeded')
+                    chunk = remote.read(65536)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > self.max_resource_bytes:
+                        raise ProxyError(502, 'upstream resource too large')
+                    _client_write(handler, chunk, deadline)
+            return remote.status
+        except Exception:
+            if started:
+                handler.close_connection = True
+            else:
+                raise
+            return None
+        finally:
+            _safe_close(remote)
+            if reserved:
+                self.slots.release()
+
+    def serve(self, handler, url, headers=None, head_only=False):
+        client_deadline = time.monotonic() + self.timeout + 1
+        if self.stop.is_set():
+            raise ProxyError(503, 'media service is shutting down')
+        headers = dict(headers or {})
+        # Check before cache access as well as every connection and redirect.
+        self.policy.resolve(url)
+        range_header = handler.headers.get('Range')
+        if range_header:
+            if len(range_header) > 256 or not re.fullmatch(r'bytes=(?:\d+-\d*|-\d+)', range_header):
+                raise ProxyError(416, 'unsupported byte range')
+            headers['Range'] = range_header
+            if handler.headers.get('If-Range'):
+                headers['If-Range'] = handler.headers['If-Range'][:512]
+        key = self._key(url, headers)
+        with self.lock:
+            cached = self.cache.get(key)
+            if cached and cached.expires <= time.monotonic():
+                self.cache.pop(key)
+                self._retire_cache(cached)
+                cached = None
+            if cached:
+                self.hits += 1
+                cached.readers += 1
+        if cached:
+            try:
+                self._headers(handler, 200, cached.headers, 'HIT-RAM')
+                if not head_only:
+                    for chunk in cached.chunks:
+                        _client_write(handler, chunk, client_deadline)
+            except (OSError, TimeoutError, ProxyError):
+                handler.close_connection = True
+            finally:
+                self._release_cache(cached)
+            return 200
+        if head_only or range_header:
+            return self._serve_direct(handler, url, headers, head_only)
+        with self.lock:
+            self.misses += 1
+            task = self.tasks.get(key)
+            if task and task.done and task.error:
+                # Do not retain failed transfers as a negative cache.
+                task = None
+            if task:
+                task.subscribers += 1
+                self.coalesced += 1
+            else:
+                if not self.slots.acquire(blocking=False):
+                    raise ProxyError(503, 'media download capacity reached')
+                task = None
+                try:
+                    task = _Transfer(url, headers, file=tempfile.TemporaryFile(dir=self.temp_dir), subscribers=1)
+                    self.tasks[key] = task
+                    threading.Thread(target=self._produce, args=(key, task), daemon=True,
+                                     name='media-download').start()
+                    self.downloads += 1
+                except Exception as exc:
+                    if task is not None:
+                        self.tasks.pop(key, None)
+                        try:
+                            task.file.close()
+                        except OSError:
+                            pass
+                    self.slots.release()
+                    raise ProxyError(503, 'media download could not start') from exc
+        started = False
+        deadline = client_deadline
+        try:
+            with task.condition:
+                while not task.status and not task.done:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ProxyError(504, 'media response timed out')
+                    task.condition.wait(min(remaining, 1))
+                if task.error:
+                    raise task.error
+                status, response_headers = task.status, dict(task.headers)
+            self._headers(handler, status, response_headers, 'SHARED' if task.subscribers > 1 else 'MISS-UPSTREAM')
+            started = True
+            offset = 0
+            while True:
+                with task.condition:
+                    while offset >= task.size and not task.done:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise ProxyError(504, 'media transfer timed out')
+                        task.condition.wait(min(remaining, 1))
+                    available = task.size - offset
+                    done, error = task.done, task.error
+                if available:
+                    chunk = _read_at(task, min(65536, available), offset)
+                    if not chunk:
+                        raise ProxyError(502, 'media buffer unavailable')
+                    _client_write(handler, chunk, deadline)
+                    offset += len(chunk)
+                elif done:
+                    if error:
+                        raise error
+                    break
+            return status
+        except Exception:
+            if started:
+                handler.close_connection = True
+            else:
+                raise
+            return None
+        finally:
+            with self.lock:
+                task.subscribers -= 1
+            self._cleanup(key, task)
+
+    def close(self):
+        self.stop.set()
+        with self.lock:
+            for entry in self.cache.values():
+                self._retire_cache(entry)
+            self.cache.clear()
+        # Active readers have their own bounded socket deadline; producers observe stop.
+
+
+class BoundedHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, address, handler, max_connections=64, client_timeout=20):
+        self.admission = threading.BoundedSemaphore(max_connections)
+        self.client_timeout = client_timeout
+        self.active = 0
+        self.rejected = 0
+        self.count_lock = threading.Lock()
+        super().__init__(address, handler)
+
+    def get_request(self):
+        request, address = super().get_request()
+        request.settimeout(self.client_timeout)
+        return request, address
+
+    def process_request(self, request, client_address):
+        if not self.admission.acquire(blocking=False):
+            with self.count_lock:
+                self.rejected += 1
+            try:
+                request.sendall(b'HTTP/1.0 503 Service Unavailable\r\nContent-Length: 0\r\nRetry-After: 1\r\nConnection: close\r\n\r\n')
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        with self.count_lock:
+            self.active += 1
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            with self.count_lock:
+                self.active -= 1
+            self.admission.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self.count_lock:
+                self.active -= 1
+            self.admission.release()
+
+# YSP gateway implementation
 import argparse 
 import atexit 
 import base64 
@@ -31,12 +1442,7 @@ import urllib .error
 import urllib .parse 
 import urllib .request 
 import uuid 
-from ysp_runtime import (URLPolicy, ProxyError, SharedMediaProxy, BoundedHTTPServer,
-                         register_resource, resolve_resource, fetch_bytes, render_media_playlist)
 from collections import deque 
-from ysp_hls import (MediaPlaylist, UnsafePlaylist, media_signature, parse_media,
-                     pdt_seconds, render_media, rewrite_uris, select_variant,
-                     stable_uri)
 __version__ = '9.5.1-local'
 AUTHOR_COMMUNITY ='https://t.me/garysclub'
 AUTHOR_CHANNEL ='https://t.me/garysclubchannel'
@@ -487,14 +1893,12 @@ def load_device_state (path :str ):
     except FileNotFoundError :
         return (default_device_state (),False )
     except OSError as error :
-        from ysp_resolver_support import persistence_error
         persistence_error(path, error)
         log(f'[持久化] 无法读取设备文件 {path}: {error}', min_interval=30.0)
         return (default_device_state (),False )
     try :
         data =json .loads (text )
     except ValueError as error :
-        from ysp_resolver_support import persistence_error
         persistence_error(path, error)
         log(f'[持久化] 设备文件格式损坏 {path}: {error}', min_interval=30.0)
         return (default_device_state (),False )
@@ -512,7 +1916,6 @@ def load_device_state (path :str ):
         state .cast_model =state .profile .model 
     return (state ,True )
 def save_device_state (path :str ,state :DeviceState )->None :
-    from ysp_resolver_support import atomic_json_write, persistence_lock
     with persistence_lock(path):
         payload =dataclasses.asdict(state)
         try:
@@ -903,7 +2306,6 @@ class Resolver :
         self .state .cache =load_cache (args .meta_json )
         self.state.generation =max((entry.generation for entry in self.state.cache.values()), default=0)
         self.state.session_generation =max((entry.session_generation for entry in self.state.cache.values()), default=0)
-        from ysp_resolver_support import ThreadPoolExecutor
         self.stop_event =threading.Event()
         self._threads =[]
         self._channel_flights ={}
@@ -1156,7 +2558,6 @@ class Resolver :
     def get_slot_for_channel (self ,channel :str )->int :
         return 0 
     def ensure_slot_session(self, slot):
-        from ysp_resolver_support import Future
         # Acquire the protocol lock before joining a slot flight. Callers may
         # already hold this RLock, so a leader waiting for it cannot deadlock us.
         with self.control_lock:
@@ -1279,7 +2680,6 @@ class Resolver :
         log(f'[{channel}] 分片授权/地址失效，暂时回退并在冷却后重建源', min_interval=15.0)
         return True
     def ensure_channel(self, channel, force=False, expected_generation=None):
-        from ysp_resolver_support import Future
         if self.stop_event.is_set():
             raise YsptpError('resolver is shutting down')
         schedule =False
@@ -1790,7 +3190,6 @@ class Resolver :
         finally:
             self.control_lock.release()
     def proxy_playlist_ts_urls(self, playlist, proxy_origin, proxy_prefix=None, entry=None):
-        from ysp_runtime import register_resource
         origin =(proxy_prefix or proxy_origin).rstrip('/')
         headers =cctv_playback_headers_for_entry(entry) if entry is not None else None
         channel =entry.channel if entry is not None else ''
@@ -1819,7 +3218,6 @@ class Resolver :
         target =float(duration.group(1)) if duration else 6.0
         return min(20.0, max(3.0, target *3.0))
     def _run_playlist_fetch(self, entry, source_key, flight):
-        from ysp_resolver_support import RawPlaylist
         try:
             if self.stop_event.is_set():
                 raise YsptpError('resolver is shutting down')
@@ -1909,7 +3307,6 @@ class Resolver :
         uid =current_cctv_android_id (self )
         return default_cctv_playback_headers (uid )
     def fetch_playlist(self, entry, proxy_origin, proxy_prefix=None):
-        from ysp_resolver_support import Future
         key =self._playlist_source_key(entry)
         now =time.monotonic()
         with self.state_lock:
@@ -2050,7 +3447,6 @@ class Resolver :
         with hq .cond :
             http_queue ={'workers':max (1 ,int (self .args .http_workers )),'limit':int (self .args .http_queue_limit ),'queued_depth':len (hq .queued ),'active_workers':hq .active_workers ,'enqueued_total':hq .enqueued_total ,'rejected_total':hq .rejected_total ,'completed_total':hq .completed_total ,'panicked_total':hq .panicked_total ,'last_enqueued_age_seconds':rust_round ((now -hq .last_enqueued_at )*1000.0 )/1000.0 if hq .last_enqueued_at >0.0 else None ,'last_completed_age_seconds':rust_round ((now -hq .last_completed_at )*1000.0 )/1000.0 if hq .last_completed_at >0.0 else None ,'last_rejected_age_seconds':rust_round ((now -hq .last_rejected_at )*1000.0 )/1000.0 if hq .last_rejected_at >0.0 else None }
         result ={'channels':[c for c ,_ in channels ()],'cache_ttl_seconds':float (self .args .cache_ttl ),'stale_while_refresh_ttl_seconds':float (self .args .stale_while_refresh_ttl ),'refresh_error_cooldown_seconds':float (self .args .refresh_error_cooldown ),'playlist_cache_ttl_seconds':float (self .args .playlist_cache_ttl ),'background_refresh_queue_limit':int (self .args .background_refresh_queue_limit ),'http_workers':max (1 ,int (self .args .http_workers )),'http_queue_limit':int (self .args .http_queue_limit ),'identity_reset_error_threshold':int (self .args .identity_reset_error_threshold ),'identity_reset_cooldown_seconds':float (self .args .identity_reset_cooldown ),'refresh_interval_seconds':float (self .args .refresh_interval ),'control_step_jitter_min_ms':int (self .args .control_step_jitter_min_ms ),'control_step_jitter_max_ms':int (self .args .control_step_jitter_max_ms ),'heartbeat_interval_seconds':float (self .args .heartbeat_interval ),'heartbeat_ttl_guard_seconds':float (self .args .heartbeat_ttl_guard ),'session_ttl_seconds':float (self .args .session_ttl ),'meta_json':self .args .meta_json ,'device_json':self .args .device_json ,'device_state':device_state ,'refreshing_channel':state_snapshot ['refreshing_channel'],'background_refreshing':list (state_snapshot ['background_refreshing'].keys ()),'background_refresh_queue':refresh_queue ,'http_queue':http_queue ,'generation':state_snapshot ['generation'],'app_session':app_session ,'last_business_end_at':state_snapshot ['last_business_end_at'],'last_error':state_snapshot ['last_error'],'identity_reset_error_count':state_snapshot ['identity_reset_error_count'],'identity_reset_count':state_snapshot ['identity_reset_count'],'last_identity_reset_at':state_snapshot ['last_identity_reset_at'],'last_identity_reset_reason':state_snapshot ['last_identity_reset_reason'],'ad_display':state_snapshot ['ad_display'],'device_profile_pool_size':len (DEVICE_PROFILE_POOL ),'cache':cache ,'playlist_cache':playlist_cache }
-        from ysp_resolver_support import persistence_status
         with self.state_lock:
             result['resolver_runtime'] ={
                 'channel_inflight': len(self._channel_flights),
@@ -2071,7 +3467,6 @@ class Resolver :
             }
         return result
     def write_meta(self):
-        from ysp_resolver_support import atomic_json_write
         # Take the snapshot after acquiring this lock, so a delayed old writer
         # cannot replace a newer snapshot from the same process.
         with self._meta_lock:
@@ -3745,10 +5140,6 @@ def _handle_sigterm(signum, frame):
     shutdown_event.set()
     if active_server is not None:
         threading.Thread(target=active_server.shutdown, daemon=True).start()
-try :
-    signal .signal (signal .SIGTERM ,_handle_sigterm )
-except Exception :
-    pass 
 def main():
     global resolver, server_port, engine_port, media_proxy, active_server, engine_enabled
     global global_ts_cache, active_backend_channels
@@ -3777,6 +5168,8 @@ def main():
     ap.add_argument('--quality', choices=('auto', 'fhd', 'shd'), default=None, help='备用源质量：auto保留多码率，fhd约1080p，shd约720p')
     ap.add_argument('--device-rate', choices=('auto', '36p', '10p'), default='auto')
     args = ap.parse_args()
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _handle_sigterm)
     if not (1 <= args.port <= 65535 and 1 <= args.engine_port <= 65535) or args.port == args.engine_port:
         ap.error('端口必须在1–65535之间且服务端口与引擎端口不同')
     if args.cache_mb < 0 or args.inflight_mb < 1 or args.max_connections < 1 or args.download_workers < 1 or args.links_per_device < 0:

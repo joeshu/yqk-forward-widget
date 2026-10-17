@@ -158,7 +158,7 @@ class ResolverTests(unittest.TestCase):
         self.assertIn('http://first.example/proxy?resource=', first)
         self.assertNotIn('first.example', second)
         self.assertIn('http://second.example/proxy?resource=', second)
-        from ysp_runtime import resolve_resource
+        resolve_resource = live.resolve_resource
         import re
         tokens =re.findall(r'resource=([A-Za-z0-9_-]+)', first)
         self.assertEqual(len(tokens), 3)
