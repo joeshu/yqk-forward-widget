@@ -106,6 +106,24 @@ test('occupied output rejected without modifying existing files',()=>{
  assert.throws(()=>build('https://other.test.org',release.directory),/不是空目录/);
  assert.equal(fs.readFileSync(path.join(release.directory,'yqk.fwd'),'utf8'),before);
 });
+test('publishing rejects corrupted CatPaw bytes before creating any output',()=>{
+ for(const name of ['index.js','index.config.js','index.js.md5','info.json']){
+  const file=path.join(__dirname,'catpaw/dist',name),original=fs.readFileSync(file),output=path.join(root,'corrupt-'+name);
+  try{
+   if(name==='info.json'){const info=JSON.parse(original);info.bundleSha256='wrong';fs.writeFileSync(file,JSON.stringify(info));}
+   else fs.appendFileSync(file,'corrupt');
+   assert.throws(()=>build('https://widgets.test.org',output),/MD5|SHA-256/);assert(!fs.existsSync(output));
+  }finally{fs.writeFileSync(file,original);}
+ }
+});
+test('publishing rejects a bundle built from stale source or mismatched Forward snapshots',()=>{
+ const widget=JSON.parse(fs.readFileSync('yqk.fwd')).widgets.find(w=>w.id==='joeshu.qimiao');
+ for(const name of ['catpaw/cache.js',new URL(widget.url).pathname.split('/').pop()]){
+  const file=path.join(__dirname,name),original=fs.readFileSync(file),output=path.join(root,'stale-'+path.basename(name));
+  try{fs.appendFileSync(file,'\n// changed after build\n');assert.throws(()=>build('https://widgets.test.org',output),/源码已变化|快照与源码不一致/);assert(!fs.existsSync(output));}
+  finally{fs.writeFileSync(file,original);}
+ }
+});
 (async()=>{
  const http=require('node:http');
  const config=JSON.parse(fs.readFileSync(path.join(release.directory,'vercel.json'),'utf8'));

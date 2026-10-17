@@ -1,0 +1,116 @@
+{
+  "checkedAt": "2026-10-17T17:31:48.113Z",
+  "mode": "catalogue-read-only",
+  "scope": "three optimized native adapters only",
+  "build": {
+    "version": "0.8.2",
+    "gitCommit": "bdb60e65dcde56020ec6ff4b9bb45a485a830e10",
+    "gitDirty": true,
+    "sourceFingerprint": "4643dced92bac2317812fbd42672347e9ef982618addd4981bd87e849891bd91"
+  },
+  "bundleSha256": "81796f8106f0db1c447985907af37991bc5c17e13c789ae564034f74e81ead91",
+  "checks": [
+    {
+      "source": "奇妙短剧",
+      "key": "nodejs_joeshu_qimiao",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 149
+        },
+        "category": {
+          "passed": true,
+          "cards": 69,
+          "pagecount": 1
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 33
+        },
+        "play": {
+          "passed": null,
+          "status": "NOT_RUN",
+          "reason": "只读健康检查不执行播放、奖励或媒体请求",
+          "episodeAvailable": true
+        },
+        "search": {
+          "passed": true,
+          "results": 5
+        }
+      },
+      "passed": true,
+      "category": "0",
+      "sampleTitle": "抚远不远",
+      "status": "PASS"
+    },
+    {
+      "source": "独播库影视",
+      "key": "nodejs_joeshu_duboku",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 9
+        },
+        "category": {
+          "passed": true,
+          "cards": 48,
+          "pagecount": 2
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 1
+        },
+        "play": {
+          "passed": null,
+          "status": "NOT_RUN",
+          "reason": "只读健康检查不执行播放、奖励或媒体请求",
+          "episodeAvailable": true
+        },
+        "search": {
+          "passed": true,
+          "results": 1
+        }
+      },
+      "passed": true,
+      "category": "1",
+      "sampleTitle": "全城追缉",
+      "status": "PASS"
+    },
+    {
+      "source": "次元城动漫",
+      "key": "nodejs_joeshu_ciyuancheng",
+      "enabled": true,
+      "checks": {
+        "home": {
+          "passed": true,
+          "categories": 2
+        },
+        "category": {
+          "passed": true,
+          "cards": 20,
+          "pagecount": 1
+        },
+        "detail": {
+          "passed": true,
+          "episodes": 2
+        },
+        "play": {
+          "passed": null,
+          "status": "NOT_RUN",
+          "reason": "只读健康检查不执行播放、奖励或媒体请求",
+          "episodeAvailable": true
+        },
+        "search": {
+          "passed": true,
+          "results": 1
+        }
+      },
+      "passed": true,
+      "category": "1",
+      "sampleTitle": "恐怖收集者",
+      "status": "PASS"
+    }
+  ]
+}

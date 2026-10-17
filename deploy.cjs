@@ -51,6 +51,15 @@ function build(base,output,options={}) {
  });
  const catpawNames=['index.js','index.js.md5','index.config.js','index.config.js.md5','index.js.LEGAL.txt','WIDGET_LICENSES.txt','info.json','source-layout.json','import-report.json'];
  const catpawFiles=Object.fromEntries(catpawNames.map(name=>{const file=path.join(__dirname,'catpaw','dist',name);if(!fs.existsSync(file))throw new Error('请先运行 npm --prefix catpaw ci --ignore-scripts 和 npm --prefix catpaw run build');return [key('catpaw/'+name),fs.readFileSync(file)];}));
+ // Validate the exact bytes being copied before creating the output directory.
+ const artifact=name=>catpawFiles[key('catpaw/'+name)],hash=(algorithm,data)=>crypto.createHash(algorithm).update(data).digest('hex');
+ for(const name of ['index.js','index.config.js'])if(artifact(name+'.md5').toString().trim()!==hash('md5',artifact(name)))throw new Error('CatPaw '+name+' MD5不一致，请重新构建');
+ const catpawInfo=JSON.parse(artifact('info.json'));
+ if(catpawInfo.bundleSha256!==hash('sha256',artifact('index.js')))throw new Error('CatPaw运行包SHA-256不一致，请重新构建');
+ const snapshots=catpawInfo.sources.filter(s=>s.origin==='widget-snapshot');
+ for(const s of snapshots){const w=manifest.widgets.find(w=>w.id.replace(/\./g,'_')===s.key);if(!w||w.version!==s.version||hash('sha256',fs.readFileSync(path.join(__dirname,new URL(w.url).pathname.split('/').pop())))!==s.sourceSha256)throw new Error('CatPaw快照与Forward订阅不一致，请重新构建');}
+ if(require('./catpaw/build-inputs.cjs').sourceFingerprint(snapshots.map(s=>s.sourceSha256))!==catpawInfo.build?.sourceFingerprint)throw new Error('CatPaw源码已变化，请重新构建后发布');
+ for(const w of manifest.widgets){const filename=new URL(w.url).pathname.split('/').pop(),prefix=filename.replace(/-\d+\.\d+\.\d+\.js$/,'.js');if(!fs.readFileSync(path.join(__dirname,filename)).equals(fs.readFileSync(path.join(__dirname,prefix))))throw new Error('Forward固定版本快照与源码不一致：'+filename);}
  const common=[{key:'Access-Control-Allow-Origin',value:'*'},{key:'X-Content-Type-Options',value:'nosniff'},{key:'Cache-Control',value:'public, max-age=60, must-revalidate'}];
  const headers=[{source:'/'+key('yqk.fwd'),headers:[...common,{key:'Content-Type',value:'application/json; charset=utf-8'}]},
  {source:'/'+key(name),headers:[...common,{key:'Content-Type',value:'application/javascript; charset=utf-8'}]},

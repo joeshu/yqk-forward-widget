@@ -1,4 +1,5 @@
 import {makeContext,errorMessage} from './runtime.js';
+import {createAsyncCache,nextPage} from './cache.js';
 
 function bad(message){const e=new Error(message);e.statusCode=400;return e;}
 function text(value){return String(value??'').replace(/[\x00-\x1f]/g,' ').trim();}
@@ -10,23 +11,22 @@ function checked(params,values){if(!values||typeof values!=='object'||Array.isAr
 function filter(params,prefix=''){return options(params).map(p=>({key:prefix+p.name,name:(prefix?'播放：':'')+p.title,init:String(p.value??p.enumOptions[0].value),value:p.enumOptions.map(v=>({n:v.title,v:String(v.value)}))}));}
 function encode(key,url,play){return 'cp1.'+Buffer.from(JSON.stringify({k:key,u:url,p:play})).toString('base64url');}
 function decode(key,id,stream){if(typeof id!=='string'||id.length>24000||!/^cp1\.[A-Za-z0-9_-]+$/.test(id))throw bad('请从此猫爪源选择影片或分集');let data;try{data=JSON.parse(Buffer.from(id.slice(4),'base64url').toString());}catch(e){throw bad('影片标识无效');}if(!data||data.k!==key||typeof data.u!=='string'||data.u.length>12000||Object.keys(data).some(k=>!['k','u','p'].includes(k)))throw bad('影片与所选源不匹配');return {link:data.u,play:checked(stream.params,data.p||{})};}
-function signature(items){return items.map(v=>v.link||v.id).join('\n');}
 
 export function createAdapter(source,storage,config={},request,controllers=new Set()){
   const c=makeContext(source,storage,request,controllers),meta=c.WidgetMetadata,stream=meta.modules.find(m=>m.type==='stream');
   if(!stream||typeof c.loadDetail!=='function')throw Error('原模块缺少播放或详情接口');
   const classes=meta.modules.filter(m=>m.type!=='stream'&&!['search','configureSession','loadHotSearch','collectionStatus','loadAiQuotaStatus'].includes(m.functionName)&&m.id!=='searchList');
-  const cache=new Map();let savedPlay={},playLoaded=false;
+  const cached=createAsyncCache();let savedPlay={},playLoaded=false;
   async function loadPlay(){if(playLoaded)return;const raw=await c.Widget.storage.get("catpaw.play-options.v1");try{savedPlay=checked(stream.params,typeof raw==='string'?JSON.parse(raw):raw||{});}catch{savedPlay={};}playLoaded=true;}
   const playDefaults=()=>({...defaults(stream.params),...checked(stream.params,config.streamOptions?.[source.prefix]||{}),...savedPlay});
   function tokenPlay(play){return Object.fromEntries(options(stream.params).map(p=>[p.name,String(play[p.name]??p.value??p.enumOptions[0].value)]));}
   function card(v,play){const link=v.link||v.id;if(typeof link!=='string'||!link)throw Error('原模块影片地址缺失');return {vod_id:encode(source.key,link,tokenPlay(play)),vod_name:text(v.title),vod_pic:v.coverUrl||v.posterPath||'',vod_remarks:text(v.description||v.genreTitle||'')};}
   function merged(m,values={}){const listValues={},playValues={};for(const [k,v] of Object.entries(values)){if(k.startsWith('play.'))playValues[k.slice(5)]=v;else listValues[k]=v;}const params={...defaults(m.params),...checked(m.params,config.listOptions?.[source.prefix]?.[m.id]||{}),...checked(m.params,listValues)},play={...playDefaults(),...checked(stream.params,playValues)};return {params,play};}
-  async function invoke(m,params){const key=m.functionName+'|'+JSON.stringify(params),old=cache.get(key);if(old&&Date.now()-old.at<30000)return old.promise;const promise=Promise.resolve().then(()=>c[m.functionName](params)).then(items=>{if(!Array.isArray(items))throw Error('原模块未返回片单');return items;});cache.set(key,{at:Date.now(),promise});promise.catch(()=>cache.delete(key));while(cache.size>64)cache.delete(cache.keys().next().value);return promise;}
+  function invoke(m,params){return cached(m.functionName+'|'+JSON.stringify(params),async()=>{const items=await c[m.functionName](params);if(!Array.isArray(items))throw Error('原模块未返回片单');return items;});}
   async function listing(m,params,play,n){const pageParam=m.params?.find(p=>p.type==='page');if(!pageParam&&n>1)return {page:n,pagecount:n,list:[]};const current={...params,...(pageParam?{[pageParam.name]:String(n)}:{})},items=await invoke(m,current),list=items.map(v=>card(v,play));let pagecount=n,msg='';
     // Advertise another page only after reading real, distinct results. This is
     // a confirmed lower bound, not an invented total from the original array.
-    if(pageParam&&items.length)try{let timer;const next=await Promise.race([invoke(m,{...current,[pageParam.name]:String(n+1)}),new Promise(resolve=>{timer=setTimeout(()=>resolve(null),500);})]).finally(()=>clearTimeout(timer));if(next===null)msg='当前页已加载；下一页仍在检查，稍后刷新可确认翻页';else if(next.length&&signature(next)!==signature(items))pagecount=n+1;else if(next.length)msg='原站下一页重复，已停止继续翻页';}catch(e){msg='下一页未确认：'+errorMessage(e);}
+    if(pageParam&&items.length&&n<2000){const next=await nextPage(items,()=>invoke(m,{...current,[pageParam.name]:String(n+1)}));if(next.more)pagecount=n+1;msg=next.error?'下一页未确认：'+errorMessage(next.error):next.msg||'';}
     return {page:n,pagecount,list,...(msg?{msg}:{})};
   }
   function vod(v,id,play){const result={...card(v,play),vod_id:id,type_name:text(v.genreTitle),vod_year:text(v.releaseDate).slice(0,4),vod_content:text(v.description),vod_play_from:'',vod_play_url:''},groups=new Map();const add=(name,title,link)=>{if(!groups.has(name))groups.set(name,[]);groups.get(name).push(label(title)+'$'+encode(source.key,link,tokenPlay(play)));};

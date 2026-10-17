@@ -115,54 +115,54 @@
       "title": "独播库影视",
       "description": "独立分类、筛选、搜索、完整分集和原站直连；实际播放受设备网络与原站影响。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/duboku-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/duboku-0.1.1.js"
     },
     {
       "id": "joeshu.qimiao",
       "title": "奇妙短剧",
       "description": "独立分类、筛选、搜索、完整分集和原站直连；实际播放受设备网络与原站影响。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/qimiao-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/qimiao-0.1.1.js"
     },
     {
       "id": "joeshu.ciyuancheng",
       "title": "次元城动漫",
       "description": "独立分类、筛选、搜索、完整分集和原站直连；实际播放受设备网络与原站影响。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/ciyuancheng-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/ciyuancheng-0.1.1.js"
     },
     {
       "id": "joeshu.ikanbot",
       "title": "爱看影视",
       "description": "独立分类、筛选、搜索、完整分集和原站直连；实际播放受设备网络与原站影响。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/ikanbot-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/ikanbot-0.1.1.js"
     },
     {
       "id": "joeshu.modu",
       "title": "魔都动漫",
       "description": "独立分类、筛选、搜索、完整分集和原站直连；实际播放受设备网络与原站影响。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/modu-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/modu-0.1.1.js"
     },
     {
       "id": "joeshu.tiantang",
       "title": "天堂采集",
       "description": "独立分类、筛选、搜索、完整分集和原站直连；实际播放受设备网络与原站影响。",
       "author": "joeshu",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/tiantang-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/tiantang-0.1.1.js"
     }
   ]
 }
