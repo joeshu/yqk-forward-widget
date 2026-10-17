@@ -1,4 +1,5 @@
 import {makeWidget} from '../runtime.js';
+import {createAsyncCache,nextPage} from '../cache.js';
 export const UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 export function bad(message){return Object.assign(new Error(message),{statusCode:400});}
 export function page(value){const n=Number(value??1);if(!Number.isSafeInteger(n)||n<0||n>2000)throw bad('页码无效');return n||1;}
@@ -10,6 +11,14 @@ export function card(source,item){if(!item.id||!text(item.name))return null;retu
 export function detail(source,id,data,lines){const seen=new Set(),groups=[];for(const line of lines){const items=[];for(const ep of line.episodes){if(!ep.id)continue;const key=String(ep.id);if(seen.has(line.name+'|'+key))continue;seen.add(line.name+'|'+key);items.push(text(ep.name).replace(/[$#]/g,' · ')+'$'+encode(source.key,'episode',key));}if(items.length)groups.push({name:text(line.name).replace(/[$#]/g,' · '),items});}if(!groups.length)throw Error('原站未提供可播放分集');if(seen.size>10000)throw Error('分集数量异常');return {...card(source,{id:decode(source.key,'vod',id),name:data.name,pic:data.pic,remarks:data.remarks}),vod_id:id,vod_content:text(data.content),vod_year:text(data.year),vod_actor:text(data.actor),vod_director:text(data.director),vod_play_from:groups.map(x=>x.name).join('$$$'),vod_play_url:groups.map(x=>x.items.join('#')).join('$$$')};}
 export function checkedFilters(values,definitions){if(!values||typeof values!=='object'||Array.isArray(values))throw bad('筛选参数无效');const out={};for(const [k,v]of Object.entries(values)){const f=definitions.find(x=>x.key===k);if(!f||!f.value.some(x=>String(x.v)===String(v)))throw bad('筛选值无效');out[k]=String(v);}return out;}
 export function client(source,storage,request,controllers){const w=makeWidget(source.key,storage,request,controllers);return {storage:w.storage,http:w.http,async json(url,headers){const r=await w.http.get(url,{headers});if(r.status<200||r.status>=300)throw Error('原站请求失败：HTTP '+r.status);let data=r.data;if(typeof data==='string')try{data=JSON.parse(data);}catch{throw Error('原站未返回有效JSON');}if(!data||typeof data!=='object')throw Error('原站响应无效');return data;}};}
-export function cachedListing(fetch){const cache=new Map();async function read(n,options){const key=JSON.stringify([n,options]);let e=cache.get(key);if(!e||Date.now()-e.at>30000){e={at:Date.now(),promise:fetch(n,options)};cache.set(key,e);e.promise.catch(()=>cache.delete(key));while(cache.size>64)cache.delete(cache.keys().next().value);}return e.promise;}return async(n,options)=>{const list=await read(n,options);let pagecount=n,msg='';if(list.length&&n<2000)try{const next=await read(n+1,options);if(next.length&&next.map(x=>x.vod_id).join('|')!==list.map(x=>x.vod_id).join('|'))pagecount=n+1;else if(next.length)msg='原站下一页重复，已停止继续翻页';}catch{msg='下一页暂未确认';}return {page:n,pagecount,list,...(msg?{msg}:{})};};}
+export function cachedListing(fetch,{probeNext=true,timeoutMs=500}={}) {
+  const cached=createAsyncCache(),read=(n,options)=>cached(JSON.stringify([n,options]),()=>fetch(n,options));
+  return async(n,options)=>{
+    const list=await read(n,options);
+    if(!Array.isArray(list))throw Error('原站未返回片单');
+    const next=probeNext&&list.length&&n<2000?await nextPage(list,()=>read(n+1,options),{timeoutMs}):{more:false};
+    return {page:n,pagecount:next.more?n+1:n,list,...(next.msg?{msg:next.msg}:{})};
+  };
+}
 export function ids(body){const list=Array.isArray(body.id)?body.id:[body.id];if(!list.length||list.length>5)throw bad('详情每次需为1–5个影片');return list;}
 export function keyword(body){const q=text(body.wd??body.key);if(q.length>60)throw bad('关键词最多60字');return q;}

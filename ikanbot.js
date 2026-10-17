@@ -75,6 +75,47 @@ CpnSearchParams.prototype.toString=function(){return this.values.map(function(x)
 function CpnURL(value,base){value=String(value);if(base&&!/^https?:\/\//i.test(value))value=pmRelative(base,value);var m=value.match(/^(https?:)\/\/([^/?#]+)([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/i);if(!m||/[\s\\\x00-\x1f]/.test(value))throw Error('地址格式无效');this.protocol=m[1].toLowerCase();var authority=m[2],a=authority.split('@');this.username=a.length>1?a[0].split(':')[0]:'';this.password=a.length>1?a[0].split(':').slice(1).join(':'):'';this.hostname=a[a.length-1].split(':')[0].toLowerCase();this.pathname=m[3]||'/';this.origin=this.protocol+'//'+authority;this.searchParams=new CpnSearchParams(m[4]||'');this.hash=m[5]?'#'+m[5]:'';}
 Object.defineProperty(CpnURL.prototype,'href',{get:function(){var q=this.searchParams.toString();return this.origin+this.pathname+(q?'?'+q:'')+this.hash;}});
 
+// Shared with the standalone Forward builds; keep this module free of Node APIs.
+function createAsyncCache({ttlMs=30000,maxEntries=64}={}) {
+  const entries=new Map();
+  return function read(key,fetch) {
+    const old=entries.get(key),now=Date.now();
+    if(old&&(!old.settled||(now>=old.at&&now-old.at<ttlMs)))return old.promise;
+    if(old)entries.delete(key);
+    if(entries.size>=maxEntries) {
+      for(const [key,entry] of entries)if(entry.settled){entries.delete(key);break;}
+    }
+    const entry={settled:false,at:0};
+    entry.promise=Promise.resolve().then(fetch).then(value=>{
+      entry.settled=true;entry.at=Date.now();return value;
+    },error=>{
+      if(entries.get(key)===entry)entries.delete(key);
+      throw error;
+    });
+    // Never evict an in-flight entry just to cache a different request.
+    if(entries.size<maxEntries)entries.set(key,entry);
+    return entry.promise;
+  };
+}
+
+function pageSignature(items) {
+  return JSON.stringify([...new Set(items.map(v=>String(v.vod_id||v.link||v.id||'')))].sort());
+}
+
+async function nextPage(list,load,{timeoutMs=500}={}) {
+  let timer;
+  try {
+    const next=await Promise.race([Promise.resolve().then(load),new Promise(resolve=>{
+      timer=setTimeout(()=>resolve(null),timeoutMs);
+    })]);
+    if(next===null)return {more:false,msg:'当前页已加载；下一页仍在检查，稍后刷新可确认翻页'};
+    if(next.length&&pageSignature(next)!==pageSignature(list))return {more:true};
+    return {more:false,...(next.length?{msg:'原站下一页重复，已停止继续翻页'}:{})};
+  } catch(error) {
+    return {more:false,msg:'下一页暂未确认',error};
+  } finally {clearTimeout(timer);}
+}
+
 const UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 function bad(message){return Object.assign(new Error(message),{statusCode:400});}
 function page(value){const n=Number(value??1);if(!Number.isSafeInteger(n)||n<0||n>2000)throw bad('页码无效');return n||1;}
@@ -86,7 +127,15 @@ function card(source,item){if(!item.id||!text(item.name))return null;return {vod
 function detail(source,id,data,lines){const seen=new Set(),groups=[];for(const line of lines){const items=[];for(const ep of line.episodes){if(!ep.id)continue;const key=String(ep.id);if(seen.has(line.name+'|'+key))continue;seen.add(line.name+'|'+key);items.push(text(ep.name).replace(/[$#]/g,' · ')+'$'+encode(source.key,'episode',key));}if(items.length)groups.push({name:text(line.name).replace(/[$#]/g,' · '),items});}if(!groups.length)throw Error('原站未提供可播放分集');if(seen.size>10000)throw Error('分集数量异常');return {...card(source,{id:decode(source.key,'vod',id),name:data.name,pic:data.pic,remarks:data.remarks}),vod_id:id,vod_content:text(data.content),vod_year:text(data.year),vod_actor:text(data.actor),vod_director:text(data.director),vod_play_from:groups.map(x=>x.name).join('$$$'),vod_play_url:groups.map(x=>x.items.join('#')).join('$$$')};}
 function checkedFilters(values,definitions){if(!values||typeof values!=='object'||Array.isArray(values))throw bad('筛选参数无效');const out={};for(const [k,v]of Object.entries(values)){const f=definitions.find(x=>x.key===k);if(!f||!f.value.some(x=>String(x.v)===String(v)))throw bad('筛选值无效');out[k]=String(v);}return out;}
 function client(source,storage,request,controllers){const w=makeWidget(source.key,storage,request,controllers);return {storage:w.storage,http:w.http,async json(url,headers){const r=await w.http.get(url,{headers});if(r.status<200||r.status>=300)throw Error('原站请求失败：HTTP '+r.status);let data=r.data;if(typeof data==='string')try{data=JSON.parse(data);}catch{throw Error('原站未返回有效JSON');}if(!data||typeof data!=='object')throw Error('原站响应无效');return data;}};}
-function cachedListing(fetch){const cache=new Map();async function read(n,options){const key=JSON.stringify([n,options]);let e=cache.get(key);if(!e||Date.now()-e.at>30000){e={at:Date.now(),promise:fetch(n,options)};cache.set(key,e);e.promise.catch(()=>cache.delete(key));while(cache.size>64)cache.delete(cache.keys().next().value);}return e.promise;}return async(n,options)=>{const list=await read(n,options);let pagecount=n,msg='';if(list.length&&n<2000)try{const next=await read(n+1,options);if(next.length&&next.map(x=>x.vod_id).join('|')!==list.map(x=>x.vod_id).join('|'))pagecount=n+1;else if(next.length)msg='原站下一页重复，已停止继续翻页';}catch{msg='下一页暂未确认';}return {page:n,pagecount,list,...(msg?{msg}:{})};};}
+function cachedListing(fetch,{probeNext=true,timeoutMs=500}={}) {
+  const cached=createAsyncCache(),read=(n,options)=>cached(JSON.stringify([n,options]),()=>fetch(n,options));
+  return async(n,options)=>{
+    const list=await read(n,options);
+    if(!Array.isArray(list))throw Error('原站未返回片单');
+    const next=probeNext&&list.length&&n<2000?await nextPage(list,()=>read(n+1,options),{timeoutMs}):{more:false};
+    return {page:n,pagecount:next.more?n+1:n,list,...(next.msg?{msg:next.msg}:{})};
+  };
+}
 function ids(body){const list=Array.isArray(body.id)?body.id:[body.id];if(!list.length||list.length>5)throw bad('详情每次需为1–5个影片');return list;}
 function keyword(body){const q=text(body.wd??body.key);if(q.length>60)throw bad('关键词最多60字');return q;}
 
@@ -105,12 +154,12 @@ function createIkanbot(source,storage,request,controllers){
 }
 
 return createIkanbot;})();
-var CPN_CONFIG={"kind":"ikanbot","key":"joeshu_ikanbot","title":"爱看影视","site":"https://ikanbot.eu.org","catalogue":{"class":[{"type_id":"movie","type_name":"电影"},{"type_id":"tv","type_name":"剧集"}],"filters":{"movie":[{"key":"class","name":"类型","value":[{"n":"热门","v":"热门"},{"n":"最新","v":"最新"},{"n":"经典","v":"经典"},{"n":"豆瓣高分","v":"豆瓣高分"},{"n":"冷门佳片","v":"冷门佳片"},{"n":"华语","v":"华语"},{"n":"欧美","v":"欧美"},{"n":"韩国","v":"韩国"},{"n":"日本","v":"日本"},{"n":"动作","v":"动作"},{"n":"喜剧","v":"喜剧"},{"n":"爱情","v":"爱情"},{"n":"科幻","v":"科幻"},{"n":"悬疑","v":"悬疑"},{"n":"恐怖","v":"恐怖"},{"n":"动画","v":"动画"},{"n":"豆瓣top250","v":"豆瓣top250"}]}],"tv":[{"key":"class","name":"类型","value":[{"n":"热门","v":"热门"},{"n":"美剧","v":"美剧"},{"n":"英剧","v":"英剧"},{"n":"韩剧","v":"韩剧"},{"n":"日剧","v":"日剧"},{"n":"国产剧","v":"国产剧"},{"n":"港剧","v":"港剧"},{"n":"日本动画","v":"日本动画"},{"n":"综艺","v":"综艺"},{"n":"纪录片","v":"纪录片"}]}]}}};
-var cpnSource=CPN_CONFIG,cpnAdapter=CPN_FACTORY(cpnSource),cpnCache=new Map(),cpnMediaTypes=new Map();
+var CPN_CONFIG={"kind":"ikanbot","key":"joeshu_ikanbot","title":"爱看影视","site":"https://ikanbot.eu.org","catalogue":{"class":[{"type_id":"movie","type_name":"电影"},{"type_id":"tv","type_name":"剧集"}],"filters":{"movie":[{"key":"class","name":"类型","value":[{"n":"热门","v":"热门"},{"n":"最新","v":"最新"},{"n":"经典","v":"经典"},{"n":"豆瓣高分","v":"豆瓣高分"},{"n":"冷门佳片","v":"冷门佳片"},{"n":"华语","v":"华语"},{"n":"欧美","v":"欧美"},{"n":"韩国","v":"韩国"},{"n":"日本","v":"日本"},{"n":"动作","v":"动作"},{"n":"喜剧","v":"喜剧"},{"n":"爱情","v":"爱情"},{"n":"科幻","v":"科幻"},{"n":"悬疑","v":"悬疑"},{"n":"恐怖","v":"恐怖"},{"n":"动画","v":"动画"},{"n":"豆瓣top250","v":"豆瓣top250"}]}],"tv":[{"key":"class","name":"类型","value":[{"n":"热门","v":"热门"},{"n":"美剧","v":"美剧"},{"n":"英剧","v":"英剧"},{"n":"韩剧","v":"韩剧"},{"n":"日剧","v":"日剧"},{"n":"国产剧","v":"国产剧"},{"n":"港剧","v":"港剧"},{"n":"日本动画","v":"日本动画"},{"n":"综艺","v":"综艺"},{"n":"纪录片","v":"纪录片"}]}]}},"listingOptions":{"probeNext":false}};
+var cpnSource=CPN_CONFIG,cpnAdapter=CPN_FACTORY(cpnSource),cpnCache=createAsyncCache({maxEntries:24}),cpnMediaTypes=new Map();
 function cpnParam(key,title,values){return {name:key,title:title,type:'enumeration',value:values[0].value,enumOptions:values};}
 var cpnPage={name:'page',title:'页码',type:'page',value:'1'};
 var cpnCatalog=cpnSource.catalogue;
-var WidgetMetadata={id:'joeshu.'+cpnSource.kind,title:cpnSource.title,author:'joeshu',site:cpnSource.site,version:'0.1.0',requiredVersion:'0.0.1',description:'独立分类、筛选、搜索、完整分集和原站直连；实际播放受设备网络与原站影响。',detailCacheDuration:0,modules:[{id:'home',title:'首页推荐',functionName:'loadHome',cacheDuration:60,params:[]}],search:{title:'搜索影片',functionName:'search',params:[{name:'keyword',title:'片名',type:'input'},cpnPage]}};
+var WidgetMetadata={id:'joeshu.'+cpnSource.kind,title:cpnSource.title,author:'joeshu',site:cpnSource.site,version:'0.1.1',requiredVersion:'0.0.1',description:'独立分类、筛选、搜索、完整分集和原站直连；实际播放受设备网络与原站影响。',detailCacheDuration:0,modules:[{id:'home',title:'首页推荐',functionName:'loadHome',cacheDuration:60,params:[]}],search:{title:'搜索影片',functionName:'search',params:[{name:'keyword',title:'片名',type:'input'},cpnPage]}};
 var cpnCategoryParam=cpnParam("category","分类",cpnCatalog.class.map(function(c){return {title:c.type_name,value:String(c.type_id)};}));
 WidgetMetadata.modules.push({id:"catalog",title:"分类片库",functionName:"loadCatalog",cacheDuration:30,params:[cpnCategoryParam,cpnPage]});
 (["qimiao","tiantang"].indexOf(cpnSource.kind)>=0?[]:cpnCatalog.class).forEach(function(c){var filters=(cpnCatalog.filters||{})[c.type_id]||[],params=[{name:'category',title:'分类',type:'constant',value:String(c.type_id)}];filters.forEach(function(f){var vals=f.value.map(function(v){return {title:v.n,value:String(v.v)};});if(!vals.some(function(v){return v.value==='';}))vals.unshift({title:'全部',value:''});params.push(cpnParam(f.key,f.name,vals));});params.push(cpnPage);WidgetMetadata.modules.push({id:'category_'+c.type_id,title:c.type_name,functionName:'loadCatalog',cacheDuration:30,params:params});});
@@ -121,7 +170,7 @@ function cpnCards(list){var seen=new Set();return (list||[]).filter(function(x){
 async function loadHome(){var r=await cpnAdapter.homeVod();if(!r.list||!r.list.length)throw Error('原站首页暂无内容');return cpnCards(r.list);}
 async function loadCatalog(p){p=p||{};var h=await cpnAdapter.home(),id=String(p.category||cpnCatalog.class[0].type_id);if(p.genreId)id=String(p.genreId);if(!h.class.some(function(c){return String(c.type_id)===id;}))throw Error('原站分类已变化，请更新订阅');var definitions=(h.filters||{})[id]||[],filters={};definitions.forEach(function(f){if(p[f.key]!=null&&p[f.key]!=='')filters[f.key]=String(p[f.key]);});var r=await cpnAdapter.category({id:id,page:page(p.page),filters:filters,extend:filters});(r.list||[]).forEach(function(v){var cls=h.class.find(function(c){return String(c.type_id)===id;});cpnMediaTypes.set(v.vod_id,/电影/.test(cls.type_name)?'movie':'tv');});return cpnCards(r.list);}
 async function search(p){p=p||{};var q=text(p.keyword);if(!q)return [];if(q.length>60)throw Error('关键词最多60字');return cpnCards((await cpnAdapter.search({wd:q,page:page(p.page)})).list);}
-async function cpnDetail(id){var cached=cpnCache.get(id);if(cached&&Date.now()-cached.at<30000)return cached.value;var r=await cpnAdapter.detail({id:id}),v=r.list&&r.list[0];if(!v||v.vod_id!==id)throw Error('原站详情与影片不匹配');var names=String(v.vod_play_from||'').split('$$$'),groups=String(v.vod_play_url||'').split('$$$');if(names.length!==groups.length)throw Error('线路与分集不匹配');var lines=groups.map(function(g,i){return {name:names[i],episodes:g.split('#').map(function(row,j){var n=row.indexOf('$');if(n<1)throw Error('分集格式不完整');var eid=row.slice(n+1);decode(cpnSource.key,'episode',eid);return {title:row.slice(0,n),id:eid,index:j+1};})};});var value={vod:v,lines:lines};cpnCache.set(id,{at:Date.now(),value:value});while(cpnCache.size>24)cpnCache.delete(cpnCache.keys().next().value);return value;}
+function cpnDetail(id){return cpnCache(id,async function(){var r=await cpnAdapter.detail({id:id}),v=r.list&&r.list[0];if(!v||v.vod_id!==id)throw Error('原站详情与影片不匹配');var names=String(v.vod_play_from||'').split('$$$'),groups=String(v.vod_play_url||'').split('$$$');if(names.length!==groups.length)throw Error('线路与分集不匹配');var lines=groups.map(function(g,i){return {name:names[i],episodes:g.split('#').map(function(row,j){var n=row.indexOf('$');if(n<1)throw Error('分集格式不完整');var eid=row.slice(n+1);decode(cpnSource.key,'episode',eid);return {title:row.slice(0,n),id:eid,index:j+1};})};});var value={vod:v,lines:lines};return value;});}
 async function loadDetail(link){var isEpisode=String(link).indexOf('/episode?id=')>=0,owner=isEpisode?String(link).split('&vod=')[1]:null;if(isEpisode&&!owner)throw Error('分集缺少影片标识');var id=isEpisode?decodeURIComponent(owner):cpnParse(link,'vod');decode(cpnSource.key,'vod',id);var d=await cpnDetail(id),v=d.vod,item=cpnCards([v])[0];item.description=v.vod_content||'';item.releaseDate=v.vod_year||'';var selected=isEpisode?cpnParse(link,'episode'):null,line=selected?d.lines.find(function(l){return l.episodes.some(function(e){return e.id===selected;});}):d.lines.slice().sort(function(a,b){return b.episodes.length-a.episodes.length;})[0];if(!line)throw Error('分集与影片不匹配');if(line.episodes.length===1&&/正片|电影|完整版/.test(line.episodes[0].title))item.mediaType='movie';item.episodeItems=line.episodes.map(function(ep){var u=cpnLink('episode',ep.id,id);return {id:u,type:'url',link:u,title:ep.title,coverUrl:item.coverUrl,childItems:d.lines.map(function(other){var match=other.episodes.find(function(e){return pmEpisodeKey(e)===pmEpisodeKey(ep);});if(!match)return null;var a=cpnLink('episode',match.id,id);return {id:a,type:'url',link:a,title:other.name+' · '+match.title};}).filter(Boolean)};});return item;}
 async function loadResource(p){
  p=typeof p==='string'?{link:p}:p||{};var id=cpnParse(p.link,'episode'),q=p.qualityPreference||'highest';if(q!=='highest'&&q!=='fixed')throw Error('画质模式无效');
