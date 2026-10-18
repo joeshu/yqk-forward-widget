@@ -23,7 +23,7 @@ class DeviceDemand9517Tests(unittest.TestCase):
     def setUp(self):
         self.module_name = 'ysp_device_demand_9517_' + uuid.uuid4().hex
         spec = importlib.util.spec_from_file_location(
-            self.module_name, ROOT / 'ysp-live-v9.5.18.py')
+            self.module_name, ROOT / 'ysp-live-v9.5.19.py')
         self.live = importlib.util.module_from_spec(spec)
         sys.modules[self.module_name] = self.live
         spec.loader.exec_module(self.live)

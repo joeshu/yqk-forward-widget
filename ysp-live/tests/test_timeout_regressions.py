@@ -23,7 +23,7 @@ def load(version):
     return module
 
 
-live = load('9.5.18')
+live = load('9.5.19')
 old = load('9.5.3')
 broken = load('9.5.10')
 MEDIA = '#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:6,\nhttps://media.cctv.cn/1.ts\n'
@@ -43,7 +43,7 @@ class TimeoutRegressionTests(unittest.TestCase):
                 self.assertEqual(jce.call_count, 2)
         self.assertTrue(outcomes['9.5.3-local'])
         self.assertFalse(outcomes['9.5.10-local'])
-        self.assertTrue(outcomes['9.5.18-local'])
+        self.assertTrue(outcomes['9.5.19-local'])
 
     def test_failed_current_backup_retries_primary_without_waiting_for_probe_interval(self):
         ch = live.Channel('test', 'Test', 'sid', 'pid', 'best')

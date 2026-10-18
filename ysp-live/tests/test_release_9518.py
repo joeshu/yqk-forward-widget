@@ -21,7 +21,7 @@ from test_release_959 import args
 
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_release_9518', ROOT / 'ysp-live-v9.5.18.py')
+spec = importlib.util.spec_from_file_location('ysp_release_9518', ROOT / 'ysp-live-v9.5.19.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)

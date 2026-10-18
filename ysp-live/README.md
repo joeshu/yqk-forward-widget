@@ -1,13 +1,13 @@
-ysp-live 9.5.18-local 本地优化版
+ysp-live 9.5.19-local 本地优化版
 
-这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.18.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
+这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.19.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
 
 1. 启动与升级
 
 需要 Python 3.10+；伴生引擎需要 Node.js 20+（建议22/24）。没有 pip 或 npm 第三方依赖。本次实际验证环境是 Linux、Python 3.12、Node.js 24。
 
 ```sh
-python ysp-live-v9.5.18.py 18767 --data-dir ./data
+python ysp-live-v9.5.19.py 18767 --data-dir ./data
 ```
 
 启动后在播放器订阅：
@@ -23,8 +23,17 @@ Python 会自动启动同目录的 Node 引擎，后者只监听127.0.0.1:8787�
 仅使用1080p备用路径、不启动设备注册与Node：
 
 ```sh
-python ysp-live-v9.5.18.py 18767 --data-dir ./data --no-4k --no-engine
+python ysp-live-v9.5.19.py 18767 --data-dir ./data --no-4k --no-engine
 ```
+
+9.5.19 针对风云剧场、第一剧场、怀旧剧场的间歇不稳定：
+
+- 已复现 9.5.18 的高档位重试阻断：有健康 shd 地址时，定时 fhd 请求先超时，导致连健康列表也没尝试。本版先刷新可用线路，仅对近期有人观看且已有可用档位的三个剧场，在后台有界探测更高档位；仍共用 8 路总容量、6 路后台容量与原来的 API 限流，不扫描其他频道。
+- 新地址取得后先验证列表，再替换当前来源。启用默认媒体探测时，后台升级还要通过最多 64KiB、3 秒的分片内容检查；`--media-probe off` 时仅检查列表。高档位需要登录则五分钟后再试，临时探测故障一分钟后再试，当前已验证线路继续使用，不因此进入频道授权冷却。已知更低的分辨率声明不替换当前画面；迟到的旧刷新不能撤回已确认升级。
+- BK 线路记住近期成功的 URI/节点，失败节点短暂降低优先级；同一刷新不重复下载完全相同的失败地址。放弃的 HTTP 错误响应及时关闭。三个剧场的地址仍能正常取得媒体时，单纯超过原 300 秒缓存时间不会强制丢弃；实际失败再换地址。闲置回台先续取已验证档位，更高档位随后验证；原版档位被拒绝时仍可尝试更高档。
+- 后台是否需要刷新改为依据实际成功取源时间，播放旧缓存不再被当作刚从上游刷新成功。保持最高可用画质、urllib 系统 DNS/代理、单文件和端口 18767，旧版保留。
+- 完整 342 项本地回归通过，新增 22 项剧场对照、真实 HTTP、并发容量、升级验证与取消检查。
+- 当前云环境三个频道均观察到列表推进并取得 1280×720 H.264/25fps 分片，25 帧解码通过。第一剧场初次分片出现过 HTTP 403，重新取地址后两条 CDN 均成功；这不能当作用户网络长时间播放已稳定的证明。详情见 [剧场复核报告](THEATRE-CHECK-9.5.19.md)。
 
 9.5.18 改进设备恢复、心跳隔离和状态保存：
 
@@ -121,7 +130,7 @@ python ysp-live-v9.5.18.py 18767 --data-dir ./data --no-4k --no-engine
 
 当前默认 compatible 模式由系统 DNS/代理处理 Fake-IP，不需要额外开启 `--allow-fake-ip`；只有选择 validated 媒体模式时，该开关或环境变量 `YSP_ALLOW_FAKE_IP=1` 才用于允许可信代理的 `198.18.0.0/15` 地址。备用播放列表和 EPG 仍独立使用 urllib。
 
-旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.18.py`，停止旧进程再启动新进程。
+旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.19.py`，停止旧进程再启动新进程。
 
 升级时先停止旧程序，备份原文件及数据目录，将原 device-state-rs.json、proxy-cache-state-rs.json 放入新的 --data-dir。不要同时运行新旧进程使用同一数据目录。旧文件格式继续兼容；运行中的会话会重新建立。
 
@@ -214,7 +223,7 @@ python ysp-live-v9.5.18.py 18767 --data-dir ./data --no-4k --no-engine
 低内存部署示例（临时目录可放实际可用的磁盘）：
 
 ```sh
-python ysp-live-v9.5.18.py 18767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
+python ysp-live-v9.5.19.py 18767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
 ```
 
 临时目录若在tmpfs，文件也会消耗系统内存；--cache-mb限制的是程序的完成缓存，不能代表整个进程或整台机器的总内存。使用磁盘目录会产生持续分片写入，应按设备存储选择 --temp-dir。
@@ -248,7 +257,7 @@ python ysp-live-v9.5.18.py 18767 --data-dir ./data --cache-mb 32 --inflight-mb 6
 EPG配置示例：
 
 ```sh
-python ysp-live-v9.5.18.py 18767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
+python ysp-live-v9.5.19.py 18767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
 ```
 
 也可用 `YSP_EPG_URL` 配置逗号分隔的源。显式 `--epg-url` 覆盖环境变量；`--no-epg` 禁用。EPG启动时预加载，独立调度按配置间隔刷新；获取订阅和节目接口也可触发到期刷新，状态和健康检查不触发下载。多个源按频道和北京时间日期补齐，低优先级来源不覆盖已有日期并避免跨日重叠。EPG通过urllib使用系统DNS/代理和重定向处理，不额外检查DNS结果是否为公网。首次XML GET最多等待8秒，已有缓存立即返回；HEAD不触发下载。压缩下载最多8MiB，展开XML最多32MiB，拒绝DTD/实体声明；保留匹配本地频道、过去7天至未来2天内的节目。无时区的XMLTV时间按UTC解释；手动回看使用浏览器本地时区转换的Unix秒。
