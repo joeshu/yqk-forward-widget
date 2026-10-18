@@ -14,7 +14,7 @@ from unittest import mock
 from test_release_959 import args, entry, server
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_switch_queue_9515', ROOT / 'ysp-live-v9.5.15.py')
+spec = importlib.util.spec_from_file_location('ysp_switch_queue_9515', ROOT / 'ysp-live-v9.5.16.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)
@@ -111,9 +111,6 @@ class PreparationTests(unittest.TestCase):
         backup = mock.Mock(return_value=(media(), 'backup:bk', {}))
         backup.prepare = mock.Mock(side_effect=prepare)
         def device():
-            if slug not in live.TRUE_4K_CHANNELS and not cached and not prepare_error and not ongoing:
-                if not prepared.wait(.5):
-                    raise AssertionError('backup not started before device wait')
             return media(), 'device', {}
         backend = mock.Mock()
         backend.has_cached_channel_playlist.return_value = cached
@@ -128,8 +125,8 @@ class PreparationTests(unittest.TestCase):
         backup.assert_not_called()
         return backup.prepare
 
-    def test_preparation_overlaps_device_wait_but_does_not_select_backup(self):
-        self.run_loaders().assert_called_once()
+    def test_successful_device_does_not_speculatively_fetch_backup(self):
+        self.run_loaders().assert_not_called()
 
     def test_cached_device_and_true_4k_do_not_trigger_backup_preparation(self):
         self.run_loaders(cached=True).assert_not_called()
@@ -138,8 +135,8 @@ class PreparationTests(unittest.TestCase):
     def test_ongoing_device_viewing_does_not_keep_prefetching_backup(self):
         self.run_loaders(ongoing=True).assert_not_called()
 
-    def test_optional_preparation_error_does_not_break_preferred_source(self):
-        self.run_loaders(prepare_error=True).assert_called_once()
+    def test_unused_preparation_hook_is_not_invoked(self):
+        self.run_loaders(prepare_error=True).assert_not_called()
 
 
 if __name__ == '__main__':
