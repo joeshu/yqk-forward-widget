@@ -21,7 +21,7 @@ import unittest
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_release_959', ROOT / 'ysp-live-v9.5.11.py')
+spec = importlib.util.spec_from_file_location('ysp_release_959', ROOT / 'ysp-live-v9.5.12.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)
@@ -67,6 +67,55 @@ class StateAndDebounceTests(unittest.TestCase):
         self.args = args(self.directory.name)
         self.resolver = live.Resolver(self.args)
         self.addCleanup(self.resolver.close)
+
+    def test_prefetch_rechecks_interest_after_waiting_for_protocol_lock(self):
+        r = self.resolver
+        queued, release = threading.Event(), threading.Event()
+        class Gate:
+            def __enter__(self):
+                queued.set()
+                if not release.wait(3):
+                    raise AssertionError('test did not release protocol queue')
+            def __exit__(self, *args):
+                pass
+        r.control_lock = Gate()
+        r.state.zap_generations['cctv1'] = 1
+        r.state.zap_pending_channels.add('cctv1')
+        r._zap_interest['cctv1'] = {'since': time.monotonic() - 10,
+                                  'last': time.monotonic(), 'samples': 2}
+        with mock.patch.object(r, 'refresh_channel_controlled') as upstream, \
+             mock.patch.object(r, 'rotate_device_on_400') as rotate, \
+             mock.patch.object(r, 'write_meta') as persist:
+            worker = threading.Thread(target=r._zap_resolve_worker, args=('cctv1', 1, 0))
+            worker.start()
+            try:
+                self.assertTrue(queued.wait(2))
+                with r.state_lock:
+                    r._zap_interest['cctv1']['last'] -= 60
+            finally:
+                release.set()
+                worker.join(3)
+            self.assertFalse(worker.is_alive())
+            upstream.assert_not_called()
+            rotate.assert_not_called()
+            persist.assert_not_called()
+        self.assertFalse(r.state.channel_failures)
+        self.assertFalse(r._channel_flights)
+        self.assertNotIn('cctv1', r.state.zap_pending_channels)
+        self.assertEqual(r._stats['zap_skipped_inactive'], 1)
+
+    def test_active_prefetch_and_explicit_foreground_keep_high_quality_resolution(self):
+        r = self.resolver
+        r.state.zap_generations['cctv1'] = 1
+        r._zap_interest['cctv1'] = {'since': time.monotonic() - 10,
+                                  'last': time.monotonic(), 'samples': 2}
+        with mock.patch.object(r, 'refresh_channel_controlled', return_value=entry()) as upstream, \
+             mock.patch.object(r, 'write_meta'):
+            r._zap_resolve_worker('cctv1', 1, 0)
+            upstream.assert_called_once_with('cctv1')
+            r._zap_interest.clear()
+            r.ensure_channel('cctv1')
+            self.assertEqual(upstream.call_count, 2)
 
     def test_400_rotation_purges_disk_cache_and_preserves_restart_budget(self):
         r = self.resolver
@@ -145,7 +194,7 @@ class StateAndDebounceTests(unittest.TestCase):
         r.state.zap_generations['cctv1'] = 1
         r.ensure_channel = mock.Mock()
         r._zap_resolve_worker('cctv1', 1, 0)
-        r.ensure_channel.assert_called_once_with('cctv1')
+        r.ensure_channel.assert_called_once_with('cctv1', interest_generation=1)
 
     def test_old_debounce_worker_cannot_clear_new_pending_task(self):
         r = self.resolver

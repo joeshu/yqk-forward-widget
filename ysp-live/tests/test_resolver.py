@@ -15,7 +15,7 @@ from unittest import mock
 
 ROOT =Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-spec =importlib.util.spec_from_file_location('ysp_live_resolver_tests', ROOT /'ysp-live-v9.5.11.py')
+spec =importlib.util.spec_from_file_location('ysp_live_resolver_tests', ROOT /'ysp-live-v9.5.12.py')
 live =importlib.util.module_from_spec(spec)
 sys.modules[spec.name] =live
 spec.loader.exec_module(live)
@@ -243,6 +243,14 @@ class ResolverTests(unittest.TestCase):
         self.resolver.send_heartbeat()
         self.assertFalse(live.resolver_ready())
         self.assertEqual(session.last_heartbeat_error, 'heartbeat timeout')
+
+    def test_internal_loader_does_not_count_as_another_viewer_request(self):
+        with mock.patch.object(self.resolver, 'note_channel_interest') as interest, \
+             mock.patch.object(self.resolver, 'fetch_channel_playlist', return_value='#EXTM3U\n'):
+            result = self.resolver.fetch_channel_playlist_bounded(
+                'cctv1', 'local', _record_interest=False)
+            self.assertEqual(result, '#EXTM3U\n')
+            interest.assert_not_called()
 
     def test_foreground_wait_is_bounded_and_work_is_shared(self):
         entered, release =threading.Event(), threading.Event()

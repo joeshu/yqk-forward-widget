@@ -17,7 +17,7 @@ from unittest import mock
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_feature_application', ROOT / 'ysp-live-v9.5.11.py')
+spec = importlib.util.spec_from_file_location('ysp_feature_application', ROOT / 'ysp-live-v9.5.12.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)
@@ -300,6 +300,35 @@ class FeatureHTTPTests(unittest.TestCase):
             self.assertEqual(snapshot['selected'], 'backup')
             self.assertEqual(self.request('/cctv1.m3u8', method='HEAD')[0], 200)
             self.assertEqual(live.channel_selector(self.ch).snapshot(), snapshot)
+
+    def test_cold_head_does_not_load_or_register_playback_interest(self):
+        resolver = mock.Mock()
+        with mock.patch.object(live, 'resolver', resolver), \
+             mock.patch.object(live, 'source_loaders') as loaders:
+            for _ in range(3):
+                status, headers, body = self.request('/cctv1.m3u8', method='HEAD')
+                self.assertEqual((status, body), (200, b''))
+                self.assertEqual(headers['X-Playback-State'], 'unobserved')
+                self.assertNotIn('Content-Length', headers)
+            loaders.assert_not_called()
+            resolver.note_channel_interest.assert_not_called()
+        self.assertIsNone(self.ch._publication)
+        self.assertEqual(self.ch.last_access, 0)
+        self.assertEqual(self.request('/unknown-channel.m3u8', method='HEAD')[0], 404)
+        self.server.access_token = 'secret'
+        self.assertEqual(self.request('/cctv1.m3u8', method='HEAD')[0], 401)
+
+    def test_catchup_head_validates_without_upstream_io(self):
+        start, stop = int(time.time()) - 1800, int(time.time()) - 900
+        with mock.patch.object(live, 'jce_timeshift_url') as source, \
+             mock.patch.object(live, 'fetch_abs_playlist') as fetch:
+            status, headers, body = self.request(
+                f'/cctv1.m3u8?start={start}&end={stop}', method='HEAD')
+            self.assertEqual((status, body), (200, b''))
+            self.assertEqual(headers['X-Playback-State'], 'unobserved')
+            self.assertEqual(self.request('/cctv1.m3u8?start=invalid', method='HEAD')[0], 400)
+            source.assert_not_called()
+            fetch.assert_not_called()
 
     def test_head_source_header_matches_existing_publication(self):
         live.publish_channel_playlist(self.ch, playlist(), 'device')
