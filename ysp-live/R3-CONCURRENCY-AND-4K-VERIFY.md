@@ -15,4 +15,4 @@
 - 设备接口：R3 初始化流程成功；同一会话下 CCTV1 与 CCTV4K 的 live 接口本次均返回 HTTP 400，未取得媒体流，无法验证编码分辨率。
 - CCTV4K 的 `uhd` 备用流此前实测为 1920×1080，不能认定为真 4K。
 
-完整源码、测试和报告见同目录的 `ysp-live-v9.5-optimized-r3.zip`。
+完整源码、并发测试、差异补丁和本报告见同目录的 `ysp-live-v9.5-r3-concurrency-candidate.tar.gz`。
