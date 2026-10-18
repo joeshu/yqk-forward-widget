@@ -18,7 +18,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
-    'ysp_switch_freshness_9515', ROOT / 'ysp-live-v9.5.16.py')
+    'ysp_switch_freshness_9515', ROOT / 'ysp-live-v9.5.17.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)

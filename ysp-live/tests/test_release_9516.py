@@ -25,7 +25,7 @@ def playlist(origin, sequence=1):
 
 
 class LocalPlayback:
-    def __init__(self, version='9.5.16', device_channels=(), slow_channels=()):
+    def __init__(self, version='9.5.17', device_channels=(), slow_channels=()):
         name = 'ysp_real_loop_' + uuid.uuid4().hex
         spec = importlib.util.spec_from_file_location(name, ROOT / ('ysp-live-v' + version + '.py'))
         self.live = importlib.util.module_from_spec(spec)
