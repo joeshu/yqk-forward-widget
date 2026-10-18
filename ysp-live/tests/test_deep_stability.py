@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_deep_stability', ROOT / 'ysp-live-v9.5.10.py')
+spec = importlib.util.spec_from_file_location('ysp_deep_stability', ROOT / 'ysp-live-v9.5.11.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)
@@ -444,7 +444,7 @@ class NetworkBudgetTests(unittest.TestCase):
             self.assertEqual(error.exception.status, 504)
             dns.assert_not_called()
 
-    def test_nested_master_chain_shares_one_total_deadline(self):
+    def test_explicit_nested_master_deadline_is_honoured(self):
         clock, calls = [100.0], []
         master = b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=10\nnext.m3u8\n'
         def fetch(url, headers, **kwargs):
@@ -455,7 +455,7 @@ class NetworkBudgetTests(unittest.TestCase):
             return 200, {}, master, url
         with mock.patch.object(live.time, 'monotonic', side_effect=lambda: clock[0]), mock.patch.object(live, 'fetch_urllib_bytes', side_effect=fetch):
             with self.assertRaises(live.ProxyError) as error:
-                live.fetch_abs_playlist('https://media.cctv.cn/list.m3u8', quality='best')
+                live.fetch_abs_playlist('https://media.cctv.cn/list.m3u8', quality='best', _deadline=110)
         self.assertEqual(error.exception.status, 504)
         self.assertEqual([row['timeout'] for row in calls], [10, 6, 2])
         self.assertEqual({row['deadline'] for row in calls}, {110})
