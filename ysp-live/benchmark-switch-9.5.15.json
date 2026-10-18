@@ -1,0 +1,217 @@
+{
+  "device_debounced_cold_backup_50ms": {
+    "original": {
+      "status": 200,
+      "elapsed_ms": 51.8,
+      "playlist": true,
+      "upstream_segment": 2,
+      "device_enter_ms": 0.9,
+      "device_debounced": true,
+      "backup_enter_ms": 1.1,
+      "backup_fetches": 1,
+      "foreground_timeouts": 0
+    },
+    "v9.5.14": {
+      "status": 200,
+      "elapsed_ms": 53.0,
+      "playlist": true,
+      "upstream_segment": 2,
+      "device_enter_ms": 1.0,
+      "device_debounced": true,
+      "backup_enter_ms": 1.8,
+      "backup_fetches": 1,
+      "foreground_timeouts": 0
+    },
+    "v9.5.15": {
+      "status": 200,
+      "elapsed_ms": 52.2,
+      "playlist": true,
+      "upstream_segment": 2,
+      "backup_enter_ms": 1.1,
+      "backup_fetches": 1,
+      "foreground_timeouts": 0
+    }
+  },
+  "device_debounced_warm_backup": {
+    "original": {
+      "status": 200,
+      "elapsed_ms": 0.9,
+      "playlist": true,
+      "upstream_segment": 1,
+      "device_enter_ms": 0.6,
+      "device_debounced": true,
+      "foreground_timeouts": 0
+    },
+    "v9.5.14": {
+      "status": 200,
+      "elapsed_ms": 1.4,
+      "playlist": true,
+      "upstream_segment": 1,
+      "device_enter_ms": 0.8,
+      "device_debounced": true,
+      "foreground_timeouts": 0
+    },
+    "v9.5.15": {
+      "status": 200,
+      "elapsed_ms": 1.1,
+      "playlist": true,
+      "upstream_segment": 1,
+      "foreground_timeouts": 0
+    }
+  },
+  "device_slow_3s_cold_backup_300ms": {
+    "original": {
+      "status": 200,
+      "elapsed_ms": 3301.9,
+      "playlist": true,
+      "upstream_segment": 2,
+      "device_enter_ms": 0.6,
+      "backup_enter_ms": 3001.1,
+      "backup_fetches": 1,
+      "foreground_timeouts": 0
+    },
+    "v9.5.14": {
+      "status": 200,
+      "elapsed_ms": 2302.6,
+      "playlist": true,
+      "upstream_segment": 2,
+      "device_enter_ms": 1.2,
+      "backup_enter_ms": 2001.6,
+      "backup_fetches": 1,
+      "foreground_timeouts": 1
+    },
+    "v9.5.15": {
+      "status": 200,
+      "elapsed_ms": 2001.8,
+      "playlist": true,
+      "upstream_segment": 2,
+      "backup_enter_ms": 0.7,
+      "backup_fetches": 1,
+      "device_enter_ms": 0.8,
+      "foreground_timeouts": 1
+    }
+  },
+  "device_debounced_pool_busy_cold_backup_300ms": {
+    "original": {
+      "status": 200,
+      "elapsed_ms": 301.4,
+      "playlist": true,
+      "upstream_segment": 2,
+      "device_enter_ms": 0.5,
+      "device_debounced": true,
+      "backup_enter_ms": 0.7,
+      "backup_fetches": 1,
+      "foreground_timeouts": 0
+    },
+    "v9.5.14": {
+      "status": 200,
+      "elapsed_ms": 2302.3,
+      "playlist": true,
+      "upstream_segment": 2,
+      "backup_enter_ms": 2001.5,
+      "backup_fetches": 1,
+      "foreground_timeouts": 1
+    },
+    "v9.5.15": {
+      "status": 200,
+      "elapsed_ms": 301.9,
+      "playlist": true,
+      "upstream_segment": 2,
+      "backup_enter_ms": 1.0,
+      "backup_fetches": 1,
+      "foreground_timeouts": 0
+    }
+  },
+  "device_debounced_pool_busy_warm_backup": {
+    "original": {
+      "status": 200,
+      "elapsed_ms": 1.2,
+      "playlist": true,
+      "upstream_segment": 1,
+      "device_enter_ms": 0.6,
+      "device_debounced": true,
+      "foreground_timeouts": 0
+    },
+    "v9.5.14": {
+      "status": 200,
+      "elapsed_ms": 2001.8,
+      "playlist": true,
+      "upstream_segment": 1,
+      "foreground_timeouts": 1
+    },
+    "v9.5.15": {
+      "status": 200,
+      "elapsed_ms": 1.4,
+      "playlist": true,
+      "upstream_segment": 1,
+      "foreground_timeouts": 0
+    }
+  },
+  "device_slow_pool_busy_cold_backup_300ms": {
+    "original": {
+      "status": 200,
+      "elapsed_ms": 3301.7,
+      "playlist": true,
+      "upstream_segment": 2,
+      "device_enter_ms": 0.5,
+      "backup_enter_ms": 3000.8,
+      "backup_fetches": 1,
+      "foreground_timeouts": 0
+    },
+    "v9.5.14": {
+      "status": 200,
+      "elapsed_ms": 2302.0,
+      "playlist": true,
+      "upstream_segment": 2,
+      "backup_enter_ms": 2001.0,
+      "backup_fetches": 1,
+      "foreground_timeouts": 1
+    },
+    "v9.5.15": {
+      "status": 200,
+      "elapsed_ms": 2001.9,
+      "playlist": true,
+      "upstream_segment": 2,
+      "backup_enter_ms": 0.9,
+      "backup_fetches": 1,
+      "foreground_timeouts": 1
+    }
+  },
+  "expired_backup_180s_backup_only_300ms": {
+    "original": {
+      "status": 200,
+      "elapsed_ms": 301.9,
+      "playlist": true,
+      "upstream_segment": 2,
+      "backup_enter_ms": 1.2,
+      "backup_fetches": 1,
+      "foreground_timeouts": 0
+    },
+    "v9.5.14": {
+      "status": 200,
+      "elapsed_ms": 1.1,
+      "playlist": true,
+      "upstream_segment": 1,
+      "foreground_timeouts": 0
+    },
+    "v9.5.15": {
+      "status": 200,
+      "elapsed_ms": 301.7,
+      "playlist": true,
+      "upstream_segment": 2,
+      "backup_enter_ms": 0.8,
+      "backup_fetches": 1,
+      "foreground_timeouts": 0
+    }
+  },
+  "_meta": {
+    "python": "3.12.14",
+    "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+    "measurement": "offline HTTP playlist response; one sample per scenario; not video first frame",
+    "source_sha256": {
+      "original": "caf2a2221c6fc25e6f854e3c5a312b4c385a44b0b37698249c8bcf20794aacbb",
+      "v9.5.14": "36db89ac5d9e2a60c177039acf331ec30c853e0b9cd7798a4bcb96b27df5ed9e",
+      "v9.5.15": "818d6b4805f698be55114ff65c4db4dfd70e09de1b4c922b6122027ce69f5c5f"
+    }
+  }
+}

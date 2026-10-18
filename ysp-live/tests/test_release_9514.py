@@ -20,7 +20,7 @@ def load(version):
     spec.loader.exec_module(module)
     return module
 
-live = load('9.5.14')
+live = load('9.5.15')
 broken = load('9.5.13')
 
 

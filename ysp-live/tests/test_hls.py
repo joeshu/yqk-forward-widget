@@ -11,7 +11,7 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from ysp_hls import parse_media, render_media, rewrite_uris, select_variant, UnsafePlaylist
-SPEC = importlib.util.spec_from_file_location('ysp_live_hls_tests', ROOT / 'ysp-live-v9.5.14.py')
+SPEC = importlib.util.spec_from_file_location('ysp_live_hls_tests', ROOT / 'ysp-live-v9.5.15.py')
 live = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = live
 SPEC.loader.exec_module(live)
