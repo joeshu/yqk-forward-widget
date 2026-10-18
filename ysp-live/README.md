@@ -1,13 +1,13 @@
-ysp-live 9.5.17-local 本地优化版
+ysp-live 9.5.18-local 本地优化版
 
-这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.17.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
+这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.18.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
 
 1. 启动与升级
 
 需要 Python 3.10+；伴生引擎需要 Node.js 20+（建议22/24）。没有 pip 或 npm 第三方依赖。本次实际验证环境是 Linux、Python 3.12、Node.js 24。
 
 ```sh
-python ysp-live-v9.5.17.py 18767 --data-dir ./data
+python ysp-live-v9.5.18.py 18767 --data-dir ./data
 ```
 
 启动后在播放器订阅：
@@ -23,8 +23,18 @@ Python 会自动启动同目录的 Node 引擎，后者只监听127.0.0.1:8787�
 仅使用1080p备用路径、不启动设备注册与Node：
 
 ```sh
-python ysp-live-v9.5.17.py 18767 --data-dir ./data --no-4k --no-engine
+python ysp-live-v9.5.18.py 18767 --data-dir ./data --no-4k --no-engine
 ```
+
+9.5.18 改进设备恢复、心跳隔离和状态保存：
+
+- **缩小换身份条件**：错误保留接口阶段、HTTP 状态、业务码与恢复范围；初始化和取源不再仅凭 `HTTP 400` 字样换设备。只在身份接口的结构化错误消息明确表示设备身份失效时允许有界恢复；未知业务码、网络超时、单频道权限错误不会据此清空共享身份。原有 `2/601/694/695` 注册业务转换继续兼容。
+- **心跳未确认时保留可用源**：心跳超时或协议锁繁忙时，`device_ready` 仍反映会话尚未确认，但仍可在已有地址的有效期内继续读取该源。此请求不发起注册或强制重取；过期、来源冷却、缺少必要签名、已拒绝会话代际及 401/403/404 明确失效均停止复用。后续后台恢复保持原有机制。
+- **普通状态后台合并落盘**：250 毫秒窗口合并重复元数据保存，在协议锁外执行原子写入和 fsync；写入期间的新保存请求不会丢失。失败保留待写状态并退避重试，关闭时有限等待最后一次保存。强制终止进程可能丢失最近尚未提交的普通状态；设备身份与换新前清缓存仍立即可靠保存。
+- 待写任务执行时在持久化锁内取最新快照，防止换身份后被迟到快照恢复旧地址。明确拒绝的会话代际也保存到恢复状态，重启后不会重新启用该代际的缓存源。
+- `/api/diagnostics` 增加 `device_session_health`（会话状态、TTL 与已有源数量）及 `metadata_writer`（待写状态、完成数、最近写入耗时）。心跳待确认与实际列表可用性分别展示，不报告虚假的会话恢复。
+- 保留最高可用画质、三个剧场档位回退、urllib/Fake-IP 兼容、单文件和默认端口 18767，旧版本原样保留。本次只实施建议中的前三项，没有增加整批频道预热或新的登录凭证。
+- 完整 320 项本地回归通过，含新增 28 项恢复、已有源播放与持久化测试。模拟慢磁盘时下一频道仍能完成取源；50 次普通保存请求在关闭刷盘测试中合并为 1 次实际写入。结果不代表真实网络的首帧或持续播放实测。
 
 9.5.17 增加播放优先与过时任务退出：
 
@@ -111,7 +121,7 @@ python ysp-live-v9.5.17.py 18767 --data-dir ./data --no-4k --no-engine
 
 当前默认 compatible 模式由系统 DNS/代理处理 Fake-IP，不需要额外开启 `--allow-fake-ip`；只有选择 validated 媒体模式时，该开关或环境变量 `YSP_ALLOW_FAKE_IP=1` 才用于允许可信代理的 `198.18.0.0/15` 地址。备用播放列表和 EPG 仍独立使用 urllib。
 
-旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.17.py`，停止旧进程再启动新进程。
+旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.18.py`，停止旧进程再启动新进程。
 
 升级时先停止旧程序，备份原文件及数据目录，将原 device-state-rs.json、proxy-cache-state-rs.json 放入新的 --data-dir。不要同时运行新旧进程使用同一数据目录。旧文件格式继续兼容；运行中的会话会重新建立。
 
@@ -204,7 +214,7 @@ python ysp-live-v9.5.17.py 18767 --data-dir ./data --no-4k --no-engine
 低内存部署示例（临时目录可放实际可用的磁盘）：
 
 ```sh
-python ysp-live-v9.5.17.py 18767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
+python ysp-live-v9.5.18.py 18767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
 ```
 
 临时目录若在tmpfs，文件也会消耗系统内存；--cache-mb限制的是程序的完成缓存，不能代表整个进程或整台机器的总内存。使用磁盘目录会产生持续分片写入，应按设备存储选择 --temp-dir。
@@ -238,7 +248,7 @@ python ysp-live-v9.5.17.py 18767 --data-dir ./data --cache-mb 32 --inflight-mb 6
 EPG配置示例：
 
 ```sh
-python ysp-live-v9.5.17.py 18767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
+python ysp-live-v9.5.18.py 18767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
 ```
 
 也可用 `YSP_EPG_URL` 配置逗号分隔的源。显式 `--epg-url` 覆盖环境变量；`--no-epg` 禁用。EPG启动时预加载，独立调度按配置间隔刷新；获取订阅和节目接口也可触发到期刷新，状态和健康检查不触发下载。多个源按频道和北京时间日期补齐，低优先级来源不覆盖已有日期并避免跨日重叠。EPG通过urllib使用系统DNS/代理和重定向处理，不额外检查DNS结果是否为公网。首次XML GET最多等待8秒，已有缓存立即返回；HEAD不触发下载。压缩下载最多8MiB，展开XML最多32MiB，拒绝DTD/实体声明；保留匹配本地频道、过去7天至未来2天内的节目。无时区的XMLTV时间按UTC解释；手动回看使用浏览器本地时区转换的Unix秒。

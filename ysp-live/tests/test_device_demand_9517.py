@@ -23,7 +23,7 @@ class DeviceDemand9517Tests(unittest.TestCase):
     def setUp(self):
         self.module_name = 'ysp_device_demand_9517_' + uuid.uuid4().hex
         spec = importlib.util.spec_from_file_location(
-            self.module_name, ROOT / 'ysp-live-v9.5.17.py')
+            self.module_name, ROOT / 'ysp-live-v9.5.18.py')
         self.live = importlib.util.module_from_spec(spec)
         sys.modules[self.module_name] = self.live
         spec.loader.exec_module(self.live)
@@ -185,6 +185,17 @@ class DeviceDemand9517Tests(unittest.TestCase):
         self.assert_no_source_failure()
 
     def check_foreground_follower(self, follower_host):
+        follower_release = threading.Event()
+        self.releases.append(follower_release)
+        if follower_host != 'local':
+            # Keep this viewer waiting until the older flight has finished.
+            # Otherwise it may finish first and remove the only demand that
+            # this test is supposed to exercise (there are no recorded GETs).
+            def follower_playlist(entry, origin):
+                if origin == 'http://' + follower_host and not follower_release.wait(2):
+                    raise AssertionError('test did not release follower playlist')
+                return self.body, 'application/vnd.apple.mpegurl', None
+            self.r.fetch_playlist.side_effect = follower_playlist
         with self.saturated_foreground_pool() as release:
             self.assertIsNone(self.r.fetch_channel_playlist_bounded(
                 'cctv1', 'local', timeout=0, _record_interest=False))
@@ -194,6 +205,7 @@ class DeviceDemand9517Tests(unittest.TestCase):
             self.wait_for(lambda: self.waiters() == 1, 'foreground follower did not join device waiters')
             release.set()
             self.assertEqual(queued.result(2), self.body)
+            follower_release.set()
             self.assertTrue(done.wait(2))
             self.assertEqual((values, errors), ([self.body], []))
         self.wait_for(lambda: self.waiters() == 0, 'foreground waiter count leaked')

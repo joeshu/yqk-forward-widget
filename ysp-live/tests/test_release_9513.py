@@ -17,7 +17,7 @@ from unittest import mock
 from test_release_959 import args, entry, server
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_release_9513', ROOT / 'ysp-live-v9.5.17.py')
+spec = importlib.util.spec_from_file_location('ysp_release_9513', ROOT / 'ysp-live-v9.5.18.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)
@@ -123,9 +123,9 @@ class DeviceIsolationTests(unittest.TestCase):
             self.assertFalse(live.is_session_invalidating_error(message))
             self.assertFalse(live.is_identity_recoverable_error(message))
 
-    def test_device_registration_400_keeps_bounded_global_recovery(self):
+    def test_explicit_device_rejection_keeps_bounded_global_recovery(self):
         with mock.patch.object(self.r, 'rotate_device_on_400', return_value=True) as rotate, \
-             mock.patch.object(self.r, 'refresh_channel_controlled', side_effect=[live.YsptpError('cloud_register HTTP 400'), entry()]) as fetch:
+             mock.patch.object(self.r, 'refresh_channel_controlled', side_effect=[live.protocol_response_error('cloud_register', 400, {'result': 99, 'message': 'Invalid device'}), entry()]) as fetch:
             self.assertIsNotNone(self.r.ensure_channel('cctv1'))
             rotate.assert_called_once()
             self.assertEqual(fetch.call_count, 2)
