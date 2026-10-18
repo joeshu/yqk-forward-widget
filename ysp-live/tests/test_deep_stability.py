@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('ysp_deep_stability', ROOT / 'ysp-live-v9.5.12.py')
+spec = importlib.util.spec_from_file_location('ysp_deep_stability', ROOT / 'ysp-live-v9.5.13.py')
 live = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = live
 spec.loader.exec_module(live)

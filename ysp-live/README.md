@@ -1,13 +1,13 @@
-ysp-live 9.5.12-local 本地优化版
+ysp-live 9.5.13-local 本地优化版
 
-这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.12.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
+这是基于用户提供的 ysp-live v9.5 与 ysp-engine.js 制作的修改版，保留原作者声明；不是原作者的正式发行。Python 入口已整合为单文件，下载 `ysp-live-v9.5.13.py` 即可运行，无需同目录的 `ysp_*.py` 模块。Node 伴生引擎仍为可选增强。
 
 1. 启动与升级
 
 需要 Python 3.10+；伴生引擎需要 Node.js 20+（建议22/24）。没有 pip 或 npm 第三方依赖。本次实际验证环境是 Linux、Python 3.12、Node.js 24。
 
 ```sh
-python ysp-live-v9.5.12.py 18767 --data-dir ./data
+python ysp-live-v9.5.13.py 18767 --data-dir ./data
 ```
 
 启动后在播放器订阅：
@@ -23,8 +23,20 @@ Python 会自动启动同目录的 Node 引擎，后者只监听127.0.0.1:8787�
 仅使用1080p备用路径、不启动设备注册与Node：
 
 ```sh
-python ysp-live-v9.5.12.py 18767 --data-dir ./data --no-4k --no-engine
+python ysp-live-v9.5.13.py 18767 --data-dir ./data --no-4k --no-engine
 ```
+
+9.5.13 对齐原版兼容性并修复三个剧场频道：
+
+- JCE 列表恢复原版逐请求 20 秒，BK 保持逐请求 10 秒；嵌套子列表继承各自路径的超时。前台等待和后台下载分别管理。
+- 新增 `--network-mode compatible|validated`，默认 compatible。设备列表、代理分片经 urllib 使用系统 DNS/代理，不额外判断 DNS 是否为公网；每次重定向仍校验域名、端口和 HTTPS 降级，继续使用登记资源令牌。validated 保留固定 DNS 与公网地址检查，Fake-IP 场景可配合 `--allow-fake-ip`。
+- 单频道 live/v1/01、live/v1/02、VDN 的 400/401/403/404 只计频道故障，不再清除其他频道会话或触发全局身份重置；明确设备注册/会话级失败保留有界恢复。
+- 未注册成功的设备身份在重试时复用；云注册失败共用 60 秒结果，新增脱敏阶段、HTTP 状态、业务码与耗时，不记录原始响应和设备标识。
+- 画质优先下首次由备用升设备源，最早 6 秒后探测、6 秒后再次取样；仍需两次媒体推进及启用时的分片内容证据。失败过的来源和后续回切维持 30 秒保护，不能承诺固定时间升码率。
+- 风云剧场、第一剧场、怀旧剧场先请求 fhd；只有该档返回上游登录错误时才尝试原版 shd，记住可用档位并五分钟后重试更高档。请求超时不会触发这次画质回退；普通频道不采用该特殊规则。
+- 所有已尝试档位均要求登录时，单频道五分钟退避，状态页显示“上游需要登录”，GET 返回真实 503、Retry-After 和 X-Upstream-Auth，不伪装可播。
+
+三个剧场在 2026-10-18 的当前执行环境均完成列表、分片下载及 25 帧解码，实测 1280×720、H.264、25fps；fhd 档返回 iretcode=25。结果与边界见 [剧场实测报告](THEATRE-CHECK-9.5.13.md)。仍须在用户设备验证持续播放。
 
 9.5.12 针对批量测台和后台预取进一步修复：
 
@@ -65,9 +77,9 @@ python ysp-live-v9.5.12.py 18767 --data-dir ./data --no-4k --no-engine
 
 9.5.6 将 **Python 备用源与回看播放列表下载恢复为 9.5.3 的 `urllib.request.urlopen()` 路径**：使用系统 DNS/代理和 urllib 重定向处理，不额外检查 DNS 结果是否为公网。使用这条备用路径不再需要 `--allow-fake-ip`。保留每级 2MiB 读取上限、主/子列表共用下载预算和最高画质选择。
 
-设备源与媒体代理沿用原有目标检查；如需让这些路径支持可信代理的 `198.18.0.0/15` Fake-IP，可继续使用 `--allow-fake-ip` 或环境变量 `YSP_ALLOW_FAKE_IP=1`。这项可选设置不是备用播放列表下载的前提。
+当前默认 compatible 模式由系统 DNS/代理处理 Fake-IP，不需要额外开启 `--allow-fake-ip`；只有选择 validated 媒体模式时，该开关或环境变量 `YSP_ALLOW_FAKE_IP=1` 才用于允许可信代理的 `198.18.0.0/15` 地址。备用播放列表和 EPG 仍独立使用 urllib。
 
-旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.12.py`，停止旧进程再启动新进程。
+旧版文件保留供版本对照；本次请下载并启动 `ysp-live-v9.5.13.py`，停止旧进程再启动新进程。
 
 升级时先停止旧程序，备份原文件及数据目录，将原 device-state-rs.json、proxy-cache-state-rs.json 放入新的 --data-dir。不要同时运行新旧进程使用同一数据目录。旧文件格式继续兼容；运行中的会话会重新建立。
 
@@ -83,7 +95,7 @@ python ysp-live-v9.5.12.py 18767 --data-dir ./data --no-4k --no-engine
 - 空列表、仅包含预加载提示的列表以及伪装含有#EXTM3U的错误页不再记作成功；包含实际PART URI的LL-HLS仍可保留上游语义。
 - 排队检测与恢复任务取消时也会清理“检测中”标志；关闭后的结果不再提交。增加pending/cancelled/ignored/inconclusive计数，冻结主列表的故障也计入失败统计。
 - 区分本地目标策略拒绝与真实CDN鉴权失败。无法按本地策略探测的目标记为未确认，不据此触发设备源失效反馈；只有确认的当前代际上游401/403/404才反馈设备解析器。
-- 备用/回看列表统一用有界HTTP读取，每级最多2MiB、主列表链共用10秒预算，目标DNS等待也使用剩余时间。沿用既有公网CDN允许列表；上游启用新的CDN域名时需更新允许列表，不自动允许私网。
+- 当前备用/回看列表每级最多 2MiB，JCE 每请求 20 秒、BK 每请求 10 秒；显式内部 deadline 才限制整链总预算。设备媒体默认通过 urllib 兼容系统 DNS/代理；validated 模式另行检查解析地址。
 - 画质声明只沿当前主/子列表下载链传播，不把上一条链缓存的父级声明当作本次子列表证据；更具体的声明优先。
 - 新增可复现的并发、取消、代际、空流、下载上限等回归，以及相对9.5.3的本地对比，见 [BENCHMARK-9.5.4.md](BENCHMARK-9.5.4.md)。本轮主要提高正确性与恢复可靠性，不声称所有性能指标均改善。
 
@@ -101,7 +113,7 @@ python ysp-live-v9.5.12.py 18767 --data-dir ./data --no-4k --no-engine
 9.5.2 新增：
 
 - `/status` 是内嵌页面，不需要外部网页文件或前端依赖。显示频道来源、列表声明分辨率、请求耗时、媒体推进、节目单和主动诊断。
-- 按频道保持当前可用来源。失败按5、10、20…秒退避，最多120秒；回切前至少保持当前来源30秒，并要求更优先来源两次不同分片的成功观测。恢复探测由有界后台池执行，每个来源最短间隔30秒；仅成功获取主列表不会认定媒体恢复。
+- 按频道保持当前可用来源。真实故障按 5、10、20…秒退避，最多 120 秒；通常回切保持 30 秒并要求两次媒体推进。9.5.13 对未失败设备源的首次升级使用 6 秒探测间隔，已失败来源仍保持 30 秒。仅成功获取主列表不会认定媒体恢复。
 - 选源仍按设备源、Python备用源、Node引擎的优先级工作，不凭一次请求耗时就降低画质。Python备用源内部保留JCE/BK恢复机制；分片令牌变化不会被当作媒体推进。
 - 新增可配置XMLTV/XMLTV.gz接入、本地内存与磁盘缓存、上次有效缓存回退。EPG启动时预加载并按时后台刷新，失败重试间隔60秒；首次XML请求限时等待，仍不可用时返回503和Retry-After。默认源沿用原订阅中的两个EPG服务，不保证第三方服务可用。
 - 订阅的url-tvg指向本地 `/epg.xml`，EPG频道ID与订阅统一。支持ETag条件请求。状态页展示正在播、接下来和节目回看链接，也可手动输入时间生成回看入口。
@@ -117,7 +129,7 @@ python ysp-live-v9.5.12.py 18767 --data-dir ./data --no-4k --no-engine
 - JCE保留单调媒体序号，改写标签URI，保留KEY/MAP/BYTERANGE/PDT，AES-128隐式IV在重新编号前显式化。修复重签地址、时区比较和重定向基址。
 - 切源边界保留在输出窗口里，HEAD只读；不能可靠对齐的格式通过 X-Stream-Restart: required 标明可能需要播放器重开，不承诺所有编码/格式无缝切换。
 - 回看参数严格校验，错误或源失败不会静默播放当前直播；显式 fallback=live 可允许直播降级。
-- 分片使用服务器登记的短期资源令牌，任意Base64 URL不再能充当代理授权。每次连接/重定向检查目标、DNS地址和端口，拒绝非预期私网及HTTPS降级。
+- 分片使用服务器登记的短期资源令牌，任意 Base64 URL 不再能充当代理授权。每次连接/重定向检查域名、端口及 HTTPS 降级；当前仅 validated 媒体模式额外检查 DNS 地址。
 - Node侧增加连接池、并发与队列限制、短列表缓存/播放地址缓存分离、同频道请求合并、失败退避、流式HEAD/Range、冻结识别和优雅退出。
 - 原子持久化、受限DNS缓存与daemon工作池避免损坏状态或阻塞退出。
 
@@ -136,6 +148,7 @@ python ysp-live-v9.5.12.py 18767 --data-dir ./data --no-4k --no-engine
 | --max-connections | 64 | Python客户端连接上限，超出快速503 |
 | --client-timeout | 20 | 客户端请求头/写入空闲秒数 |
 | --media-timeout | 30 | 单次媒体转发总期限秒数 |
+| --network-mode | compatible | urllib 与系统 DNS/代理；validated 启用固定 DNS 与公网地址检查 |
 | --foreground-wait | 2 | 前台等待设备播放列表的秒数 |
 | --timeout | 10 | 设备协议单次HTTP超时 |
 | --quality | 由播放策略决定，默认best | best/auto/fhd/shd；best最高可用视频档位，auto交给播放器 |
@@ -159,7 +172,7 @@ python ysp-live-v9.5.12.py 18767 --data-dir ./data --no-4k --no-engine
 低内存部署示例（临时目录可放实际可用的磁盘）：
 
 ```sh
-python ysp-live-v9.5.12.py 18767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
+python ysp-live-v9.5.13.py 18767 --data-dir ./data --cache-mb 32 --inflight-mb 64 --download-workers 2 --max-connections 16
 ```
 
 临时目录若在tmpfs，文件也会消耗系统内存；--cache-mb限制的是程序的完成缓存，不能代表整个进程或整台机器的总内存。使用磁盘目录会产生持续分片写入，应按设备存储选择 --temp-dir。
@@ -168,7 +181,7 @@ python ysp-live-v9.5.12.py 18767 --data-dir ./data --cache-mb 32 --inflight-mb 6
 
 可设置YSP_ACCESS_TOKEN，播放器订阅地址使用 /all.m3u?access_token=你的令牌。订阅内频道地址会携带访问令牌，媒体资源使用短期独立令牌；HTTP客户端也可使用Authorization: Bearer。/livez和/status页面外壳不要求令牌；状态数据、诊断、节目单和频道接口要求令牌。可在状态页输入令牌，页面使用Bearer请求API；订阅和回看链接携带query令牌。短期资源令牌重启后失效，重新取得播放列表即可。
 
-公开地址推荐固定 --public-base-url https://tv.example.com。只有可信反代才设置 --trust-proxy；默认不会信任任意客户端传入的Forwarded或X-Forwarded-*。自带白名单只允许既有CCTV及常见CDN域名与公网地址；如果上游以后换到新的CDN域名，应审查后同时更新Python与Node白名单，不能关闭私网校验。
+公开地址推荐固定 --public-base-url https://tv.example.com。只有可信反代才设置 --trust-proxy；默认不会信任任意客户端传入的Forwarded或X-Forwarded-*。Python 自带白名单限制既有 CCTV 及常见 CDN 域名与端口；compatible 模式由系统 DNS/代理负责地址路由，validated 模式额外限制公网地址。Node 的网络策略独立；新 CDN 域名仍需分别维护允许列表。
 
 - /livez：进程存活，正常200。
 - /health 与 /readyz：当前设备协议或已观测频道是否就绪；冷启动未拉取媒体时可能503。不是所有64个频道逐一可用的保证。
@@ -193,7 +206,7 @@ python ysp-live-v9.5.12.py 18767 --data-dir ./data --cache-mb 32 --inflight-mb 6
 EPG配置示例：
 
 ```sh
-python ysp-live-v9.5.12.py 18767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
+python ysp-live-v9.5.13.py 18767 --data-dir ./data --epg-url https://example.com/epg.xml.gz --epg-refresh 3600
 ```
 
 也可用 `YSP_EPG_URL` 配置逗号分隔的源。显式 `--epg-url` 覆盖环境变量；`--no-epg` 禁用。EPG启动时预加载，独立调度按配置间隔刷新；获取订阅和节目接口也可触发到期刷新，状态和健康检查不触发下载。多个源按频道和北京时间日期补齐，低优先级来源不覆盖已有日期并避免跨日重叠。EPG通过urllib使用系统DNS/代理和重定向处理，不额外检查DNS结果是否为公网。首次XML GET最多等待8秒，已有缓存立即返回；HEAD不触发下载。压缩下载最多8MiB，展开XML最多32MiB，拒绝DTD/实体声明；保留匹配本地频道、过去7天至未来2天内的节目。无时区的XMLTV时间按UTC解释；手动回看使用浏览器本地时区转换的Unix秒。
@@ -204,7 +217,7 @@ EPG缓存写在 `--data-dir/epg-cache.json`。磁盘写入失败时仍保留内�
 
 单独运行：node ysp-engine.js 8787。YSP_ENGINE_HOST默认127.0.0.1。其余环境变量均以YSP_ENGINE_开头：MAX_REQUESTS(64)、MAX_CONNECTIONS(128)、MAX_UPSTREAM(24)、MAX_QUEUE(64)、TIMEOUT_MS(10000)、RESOLVE_TIMEOUT_MS(25000)、SEGMENT_TIMEOUT_MS(30000)、MAX_PLAYLIST_BYTES(2097152)、MAX_SEGMENT_BYTES(36700160)、STALL_MS(45000)、SHUTDOWN_MS(5000)。Python启动子进程时会显式设定本机监听、端口和2秒退出期限。
 
-Python的urllib及媒体代理保留HTTP_PROXY/HTTPS_PROXY/NO_PROXY环境配置；直连媒体连接使用经过校验的DNS地址与正确TLS主机名。Node媒体传输使用内置直连连接池，不把HTTP_PROXY自动解释为代理连接。
+Python 的 urllib 及媒体代理保留 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 配置。默认 compatible 由 urllib 使用系统 DNS/代理；validated 直连固定经过校验的 DNS 地址。两者均校验 TLS 主机名。Node 媒体使用独立直连连接池，不自动解释 HTTP_PROXY。
 
 7. 本地验证
 
