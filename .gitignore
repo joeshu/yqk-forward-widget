@@ -3,6 +3,8 @@ publish/
 publish-*/
 __pycache__/
 *.pyc
+/migu.m3u8.lock
+/migu-check.json
 catpaw/dist/
 joeshu-catpaw-storage.json*
 

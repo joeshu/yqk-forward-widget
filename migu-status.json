@@ -1,0 +1,17 @@
+{
+  "channels": 120,
+  "etag": "\"6ad5f41d-19587\"",
+  "groups": 11,
+  "last_modified": "Mon, 19 Oct 2026 10:42:37 GMT",
+  "max_snapshot_age_hours": 12,
+  "output_sha256": "237f71bd64b0eba1ecf8cf9584d081d4a82a00abd2580271aed4a7a6e204a53d",
+  "playback_verified": false,
+  "published_at_utc": "2026-10-19T12:32:29+00:00",
+  "schema_version": 1,
+  "signature_newest_utc": "2026-10-19T10:42:37+00:00",
+  "signature_oldest_utc": "2026-10-19T10:41:25+00:00",
+  "source_sha256": "8e12504fa58893dea2626a1f850660deddcd090c342b5edf6326d8f20c17803f",
+  "source_transport": "http",
+  "source_transport_authenticated": false,
+  "validation": "catalogue_structure_and_freshness_only"
+}

@@ -1,0 +1,73 @@
+{
+  "catalogue_sha256": "237f71bd64b0eba1ecf8cf9584d081d4a82a00abd2580271aed4a7a6e204a53d",
+  "checked_at_utc": "2026-10-19T12:40:28+00:00",
+  "media_manifests_accessible": 5,
+  "probe_sha256": "ecb7d11c4ca2d7da178da2817e8694e183b6cabc069000885fe8d05ba48a457b",
+  "results": [
+    {
+      "channel": "CCTV1综合",
+      "entry_manifest_accessible": true,
+      "group": "央视",
+      "manifests_and_segment_urls_https": false,
+      "media_manifest_accessible": true,
+      "requests": 2,
+      "seconds": 3.671,
+      "segment_count": 4,
+      "stage": "media_manifest",
+      "video_decoded": false
+    },
+    {
+      "channel": "赛事最经典",
+      "entry_manifest_accessible": true,
+      "group": "体育",
+      "manifests_and_segment_urls_https": false,
+      "media_manifest_accessible": true,
+      "requests": 2,
+      "seconds": 5.694,
+      "segment_count": 10,
+      "stage": "media_manifest",
+      "video_decoded": false
+    },
+    {
+      "channel": "东方卫视",
+      "entry_manifest_accessible": true,
+      "group": "卫视",
+      "manifests_and_segment_urls_https": false,
+      "media_manifest_accessible": true,
+      "requests": 2,
+      "seconds": 3.795,
+      "segment_count": 10,
+      "stage": "media_manifest",
+      "video_decoded": false
+    },
+    {
+      "channel": "上视新闻综合",
+      "entry_manifest_accessible": true,
+      "group": "地方",
+      "manifests_and_segment_urls_https": false,
+      "media_manifest_accessible": true,
+      "requests": 2,
+      "seconds": 6.207,
+      "segment_count": 10,
+      "stage": "media_manifest",
+      "video_decoded": false
+    },
+    {
+      "channel": "建党105周年巡礼",
+      "entry_manifest_accessible": true,
+      "group": "影视",
+      "manifests_and_segment_urls_https": false,
+      "media_manifest_accessible": true,
+      "requests": 2,
+      "seconds": 3.289,
+      "segment_count": 4,
+      "stage": "media_manifest",
+      "video_decoded": false
+    }
+  ],
+  "sample_size": 5,
+  "scope": "Current execution network only; failures do not determine playback in another region/device.",
+  "updater_sha256": "fe4b44f19ced347d550061208f94e2243058ce99d016af4dd1e4d26e690279b2",
+  "video_decoded": false,
+  "video_segments_downloaded": false
+}
