@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+from collections import OrderedDict
 import concurrent.futures
 import importlib.util
 import json
@@ -105,6 +106,66 @@ def valid_playlist(folder: Path) -> str | None:
         return None
 
 
+class SegmentCache:
+    """Byte-bounded LRU; a lock shares one disk read between concurrent viewers."""
+    def __init__(self, limit=16 * 1024 * 1024, ttl=20, clock=time.monotonic):
+        self.limit, self.ttl, self.clock = limit, ttl, clock
+        self.lock = threading.Lock()
+        self.items = OrderedDict()
+        self.size = self.hits = self.misses = 0
+
+    def get(self, key, load):
+        with self.lock:
+            now = self.clock()
+            for old, (data, expiry) in list(self.items.items()):
+                if expiry <= now:
+                    self.size -= len(data)
+                    del self.items[old]
+            if key in self.items:
+                self.hits += 1
+                self.items.move_to_end(key)
+                return self.items[key][0]
+            self.misses += 1
+            data = load()
+            if self.limit and len(data) <= self.limit:
+                while self.items and self.size + len(data) > self.limit:
+                    _, (old, _) = self.items.popitem(last=False)
+                    self.size -= len(old)
+                self.items[key] = (data, now + self.ttl)
+                self.size += len(data)
+            return data
+
+    def clear(self):
+        with self.lock:
+            self.items.clear()
+            self.size = 0
+
+    def stats(self):
+        with self.lock:
+            return {"bytes": self.size, "limit_bytes": self.limit, "entries": len(self.items),
+                    "hits": self.hits, "misses": self.misses}
+
+
+class MediaProgress:
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.updated = clock()
+        self.identity = None
+
+    def observe(self, body):
+        if body:
+            seq = re.search(r"^#EXT-X-MEDIA-SEQUENCE:(\d+)", body, re.M)
+            identity = (seq[1] if seq else None,
+                        tuple(line for line in body.splitlines() if line and not line.startswith("#")))
+            if identity != self.identity:
+                self.identity, self.updated = identity, self.clock()
+                return True
+        return False
+
+    def age(self):
+        return max(0, self.clock() - self.updated)
+
+
 class Channel:
     def __init__(self, app: "App", name: str):
         self.app, self.name = app, name
@@ -118,6 +179,10 @@ class Channel:
         self.stop = threading.Event()
         self.chunks = 0
         self.waiters = 0
+        self.media_cache = SegmentCache(getattr(app.args, "cache_mb", 16) * 1024 * 1024)
+        self.progress = None
+        self.started_at = 0.0
+        self.timings = {}
         self.tracks: list[str] = []
 
     def request(self, start: bool = True) -> None:
@@ -130,6 +195,10 @@ class Channel:
             if self.state == "error" and time.monotonic() - self.failed_at < 30:
                 return
             self.stop = threading.Event()
+            self.started_at = time.monotonic()
+            self.timings = {}
+            self.progress = None
+            self.media_cache.clear()
             self.generation = uuid.uuid4().hex
             self.folder = self.app.folder / self.name / self.generation
             self.folder.mkdir(parents=True, mode=0o700)
@@ -140,8 +209,15 @@ class Channel:
         with self.lock:
             return {"channel": self.name, "state": self.state, "error": self.error,
                     "chunks": self.chunks, "tracks": list(self.tracks),
+                    "stage_seconds": dict(self.timings), "segment_cache": self.media_cache.stats(),
+                    "progress_age_seconds": round(self.progress.age(), 2) if self.progress else None,
                     "media_ready": self.state == "ready" and self.folder is not None
                     and valid_playlist(self.folder) is not None}
+
+    def stage(self, name):
+        with self.lock:
+            self.state = name
+            self.timings.setdefault(name, round(time.monotonic() - self.started_at, 3))
 
     async def run(self) -> None:
         context = process = writer = None
@@ -179,7 +255,7 @@ class Channel:
                                        wait_until="domcontentloaded", timeout=30000)
             if response is None or response.status != 200:
                 raise RuntimeError("official-page-failed")
-            self.state = "waiting-video"
+            self.stage("waiting-video")
             await page.wait_for_function("document.querySelector('video')?.readyState>=3 && "
                                          "document.querySelector('video').videoWidth>0", timeout=45000)
             stderr = open(folder / "encoder.log", "wb")
@@ -204,17 +280,17 @@ class Channel:
             writer = threading.Thread(target=feed, daemon=True, name="cctv-encoder-feed")
             writer.start()
             self.tracks = await page.evaluate(RECORDER)
-            self.state = "buffering"
-            started = time.monotonic()
-            last_media = started
+            self.stage("buffering")
+            self.progress = MediaProgress()
             while not self.stop.is_set():
                 if failure.is_set() or process.poll() is not None:
                     raise RuntimeError("encoder-failed")
-                if valid_playlist(folder) is not None:
-                    self.state = "ready"
-                    last_media = time.monotonic()
-                elif time.monotonic() - last_media > 35:
+                body = valid_playlist(folder)
+                self.progress.observe(body)
+                if self.progress.age() > 35:
                     raise RuntimeError("media-stalled")
+                if body is not None:
+                    self.stage("ready")
                 if self.waiters == 0 and time.monotonic() - self.last_request > self.app.args.idle_timeout:
                     self.state = "idle"
                     break
@@ -252,7 +328,8 @@ class Channel:
                     await context.close()
                 except Exception:
                     pass
-            # Generation URLs stop resolving immediately when their worker ends.
+            # Clear generation-scoped RAM too, including errors and idle shutdown.
+            self.media_cache.clear()
             shutil.rmtree(folder, ignore_errors=True)
 
 
@@ -334,12 +411,12 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, _format, *_args):
         pass
 
-    def send(self, status, body=b"", content_type="text/plain; charset=utf-8", cache=False):
+    def send(self, status, body=b"", content_type="text/plain; charset=utf-8", cache=False, content_length=None):
         if isinstance(body, str):
             body = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(len(body) if content_length is None else content_length))
         self.send_header("Cache-Control", "max-age=10" if cache else "no-store")
         if status == 503:
             self.send_header("Retry-After", "3")
@@ -365,6 +442,8 @@ class Handler(BaseHTTPRequestHandler):
                 base = public_base(self.headers.get("Host", ""), self.app.args.public_base_url)
             except ValueError:
                 return self.send(400, "invalid-host")
+            if self.command == "GET" and getattr(self.app.args, "warmup_on_subscribe", False):
+                channel.request()
             return self.send(200, '#EXTM3U\n#EXTINF:-1 tvg-id="CCTV2" group-title="央视网页·实验",'
                              + CHANNELS["cctv2"] + '\n' + base + '/cctv2.m3u8\n',
                              "audio/x-mpegurl; charset=utf-8")
@@ -382,9 +461,16 @@ class Handler(BaseHTTPRequestHandler):
             with channel.lock:
                 if (match[1] != channel.generation or channel.state != "ready" or channel.folder is None):
                     return self.send(410, "expired-media")
-                try:
-                    body = (channel.folder / match[2]).read_bytes()
-                except OSError:
+                media_path = channel.folder / match[2]
+            try:
+                if self.command == "HEAD":
+                    size = media_path.stat().st_size
+                    return self.send(200, content_type="video/mp2t", cache=True, content_length=size)
+                body = channel.media_cache.get((match[1], match[2]), media_path.read_bytes)
+            except OSError:
+                return self.send(410, "expired-media")
+            with channel.lock:
+                if match[1] != channel.generation or channel.state != "ready":
                     return self.send(410, "expired-media")
             if self.command != "HEAD":
                 channel.request(start=False)
@@ -423,6 +509,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="CCTV-2 官方网页采集转码订阅实验版（需要电脑/服务器）")
     parser.add_argument("port", nargs="?", type=int, default=18768)
     parser.add_argument("--bind", default="127.0.0.1")
+    parser.add_argument("--warmup-on-subscribe", action="store_true", help="GET订阅时后台预热唯一频道；默认按需启动")
+    parser.add_argument("--cache-mb", type=int, default=16, help="分片内存缓存MiB，0关闭；默认16，最大256")
     parser.add_argument("--browser", default=shutil.which("chromium") or shutil.which("google-chrome"))
     parser.add_argument("--ffmpeg", default=shutil.which("ffmpeg") or "ffmpeg")
     parser.add_argument("--data-dir", help="临时媒体目录的父目录，退出时删除本次生成内容")
@@ -434,6 +522,8 @@ def main(argv=None):
         parser.error("invalid port or timeout")
     if not 5 <= args.startup_timeout <= 120 or not 30 <= args.idle_timeout <= 3600:
         parser.error("startup timeout must be 5–120; idle timeout must be 30–3600")
+    if not 0 <= args.cache_mb <= 256:
+        parser.error("cache-mb must be 0–256")
     if args.public_base_url:
         try:
             public_base("", args.public_base_url)

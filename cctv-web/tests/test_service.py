@@ -48,6 +48,47 @@ class PlaylistTests(unittest.TestCase):
                 service.public_base("", base)
 
 
+class OptimizationTests(unittest.TestCase):
+    def test_lru_limit_hit_and_expiry(self):
+        now = [0]
+        cache = service.SegmentCache(limit=6, ttl=10, clock=lambda: now[0])
+        reads = []
+        def load(key):
+            reads.append(key)
+            return b'123'
+        cache.get('a', lambda: load('a'))
+        cache.get('b', lambda: load('b'))
+        cache.get('a', lambda: load('a'))
+        cache.get('c', lambda: load('c'))
+        self.assertEqual(list(cache.items), ['a', 'c'])
+        self.assertEqual(cache.stats()['bytes'], 6)
+        self.assertEqual(reads, ['a', 'b', 'c'])
+        now[0] = 11
+        cache.get('a', lambda: load('a'))
+        self.assertEqual(reads, ['a', 'b', 'c', 'a'])
+        cache.clear()
+        self.assertEqual(cache.stats()['bytes'], 0)
+
+    def test_zero_and_oversized_entries_are_not_cached(self):
+        for limit in (0, 2):
+            cache = service.SegmentCache(limit=limit)
+            for _ in range(2):
+                self.assertEqual(cache.get('x', lambda: b'123'), b'123')
+            self.assertEqual(cache.stats()['entries'], 0)
+            self.assertEqual(cache.stats()['misses'], 2)
+
+    def test_frozen_playlist_does_not_renew_progress(self):
+        now = [0]
+        progress = service.MediaProgress(clock=lambda: now[0])
+        body = '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2,\nsegment_000000000.ts\n'
+        self.assertTrue(progress.observe(body))
+        now[0] = 36
+        self.assertFalse(progress.observe(body))
+        self.assertEqual(progress.age(), 36)
+        self.assertTrue(progress.observe(body.replace('000000000.ts', '000000001.ts')))
+        self.assertEqual(progress.age(), 0)
+
+
 class HttpTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -128,6 +169,22 @@ class HttpTests(unittest.TestCase):
         self.assertFalse(json.loads(body)["media_ready"])
         self.assertNotIn(b"http", body)
         self.assertEqual(self.requests, [])
+
+    def test_optional_subscription_warmup_and_head(self):
+        self.args.warmup_on_subscribe = True
+        self.assertEqual(self.get('/all.m3u', method='HEAD')[0], 200)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.get('/all.m3u')[0], 200)
+        self.assertEqual(self.requests, [True])
+
+    def test_shared_segment_cache_and_head_length(self):
+        self.ready()
+        path = '/media/cctv2/' + 'a' * 32 + '/segment_000000001.ts'
+        self.assertEqual(self.get(path, method='HEAD')[2]['Content-Length'], '8')
+        self.assertEqual(self.app.channel.media_cache.stats()['misses'], 0)
+        self.assertEqual(self.get(path)[1], self.get(path)[1])
+        stats = self.app.channel.media_cache.stats()
+        self.assertEqual((stats['hits'], stats['misses']), (1, 1))
 
     def test_unknown_paths_and_methods(self):
         self.assertEqual(self.get("/other.m3u8")[0], 404)
