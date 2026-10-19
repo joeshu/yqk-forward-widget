@@ -1,5 +1,7 @@
 # joeshu 影视组件合集
 
+新增 [CCTV 网页来源 Python 实验版](./cctv-web/README.md)：使用 CCTV-2 官方手机网页本身，电脑/服务器运行 `python cctv-web.py 18768`，订阅 `http://127.0.0.1:18768/all.m3u`。需要 Playwright、Chromium、FFmpeg，采用网页采集转码；仅 CCTV-2，720p 输出与 10 秒连续解码已实测，首次准备约 22–23 秒。它与下方央视频取源服务相互独立。
+
 Python 央视订阅可使用仓库现有的 [ysp-live 单文件版](./ysp-live/README.md)：`python ysp-live-v9.5.19.py 18767 --bind 127.0.0.1 --no-4k --no-engine`，播放器订阅 `http://127.0.0.1:18767/all.m3u`。本轮 CCTV-2 分片实测为 1080p，严格解码通过；64 条配置未逐台验证，详见 [CCTV-2 实测与下载入口](./ysp-live/CCTV2-CHECK-2026-10-19.md)。
 
 2026-10-19：新增独立的 [wxty PHP 频道网关](./wxty/README.md)，只启动 `wxty.php` 即可在默认端口 52451 提供 `/all.m3u` 八频道订阅，修复 URL/HLS、缓存并发和有界回退，保留 CDN 直连及可配置的回看转直播兼容路径。需 PHP 运行环境，GitHub Pages 不执行 PHP；现有 Forward 订阅不变。
