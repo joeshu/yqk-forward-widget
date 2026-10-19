@@ -140,6 +140,56 @@ try {
     test('nonstandard request port rejected', static function ($dir) {
         $g = gateway($dir, normalHandler()); raises(static fn() => $g->validateUrl('https://cdn.example:8443/a'), 'blocked-port');
     });
+    test('default mode reaches API and official CDN behind Fake-IP DNS', static function ($dir) {
+        $requests = 0; $lookups = 0;
+        $g = new WxtyGateway(['cache_dir' => $dir], static function ($url, $headers, $target) use (&$requests) {
+            $requests++; same($target['ips'], []); same($target['dns_mode'], 'system');
+            if (parse_url($url, PHP_URL_HOST) === 'kapi.kankanews.com') return apiResponse(['live_address' => 'https://volc-stream.kksmg.com/live/index.m3u8']);
+            return response(media());
+        }, static function ($host) use (&$lookups) { $lookups++; return ['198.18.0.42']; }, static fn($value) => $value);
+        $r = $g->resolve(5); same($r['cache'], 'MISS'); same($requests, 2); same($lookups, 0);
+    });
+    test('official HTTPS uses system resolution without PHP DNS support', static function ($dir) {
+        $g = new WxtyGateway(['cache_dir' => $dir], null, static function ($host) { throw new RuntimeException('PHP DNS must not be called'); });
+        same($g->validateUrl('https://kapi.kankanews.com/content', true)['dns_mode'], 'system');
+        same($g->validateUrl('https://ali-stream.kksmg.com/live.m3u8')['dns_mode'], 'system');
+    });
+    test('validated mode still rejects Fake-IP API without scanning all programs', static function ($dir) {
+        $lookups = 0; $requests = 0;
+        $g = new WxtyGateway(['cache_dir' => $dir, 'network_mode' => 'validated'],
+            static function ($url) use (&$requests) { $requests++; return apiResponse([]); },
+            static function ($host) use (&$lookups) { $lookups++; return ['198.18.0.42']; });
+        raises(static fn() => $g->resolve(5), 'blocked-address'); same($lookups, 1); same($requests, 0);
+        raises(static fn() => $g->resolve(5), 'blocked-address'); same($lookups, 1);
+    });
+    test('validated mode preserves public DNS pinning for official hosts', static function ($dir) {
+        $g = gateway($dir, normalHandler(), ['network_mode' => 'validated']);
+        $target = $g->validateUrl('https://kapi.kankanews.com/content', true);
+        same($target['ips'], ['8.8.8.8']); same($target['dns_mode'], 'validated');
+    });
+    foreach (['https://evil-kksmg.com/a', 'https://kksmg.com.evil.example/a', 'http://volc-stream.kksmg.com/a',
+        'https://127.0.0.1/a', 'https://[::1]/a', 'https://192.168.1.1/a'] as $url) {
+        test('compatibility does not relax untrusted target ' . $url, static function ($dir) use ($url) {
+            $g = new WxtyGateway(['cache_dir' => $dir], null, static fn($host) => ['198.18.0.42']);
+            raises(static fn() => $g->validateUrl($url), 'blocked-address');
+        });
+    }
+    test('compatible mode still applies media allowlist before system DNS', static function ($dir) {
+        $g = gateway($dir, normalHandler(), ['media_hosts' => ['other.example']]);
+        raises(static fn() => $g->validateUrl('https://volc-stream.kksmg.com/a'), 'blocked-media-host');
+    });
+    test('official redirect to private address remains blocked in compatible mode', static function ($dir) {
+        $requested = [];
+        $g = new WxtyGateway(['cache_dir' => $dir, 'scan_days' => 1], static function ($url) use (&$requested) {
+            $requested[] = parse_url($url, PHP_URL_HOST);
+            if (parse_url($url, PHP_URL_PATH) === '/content/pc/tv/channel/detail') return apiResponse(['live_address' => 'https://volc-stream.kksmg.com/index.m3u8']);
+            if (parse_url($url, PHP_URL_HOST) === 'volc-stream.kksmg.com') return response('', 302, ['location' => 'https://127.0.0.1/secret']);
+            return apiResponse(['programs' => []]);
+        }, static fn($host) => ['198.18.0.42'], static fn($value) => $value);
+        raises(static fn() => $g->resolve(5), 'blocked-address'); same(in_array('127.0.0.1', $requested, true), false);
+    });
+    test('invalid network mode rejected', static fn($dir) => raises(static fn() => new WxtyGateway([
+        'cache_dir' => $dir, 'network_mode' => 'disabled']), 'invalid-network-mode'));
     test('numeric-only hexadecimal expiry', static fn() => same(WxtyGateway::urlExpiry('https://cdn.example/a?txTime=70000000'), 1879048192));
     test('earliest CDN and token expiry', static function () {
         $payload = rtrim(strtr(base64_encode('{"exp":1800000000}'), '+/', '-_'), '=');

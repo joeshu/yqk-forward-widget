@@ -57,6 +57,7 @@ http://127.0.0.1:52451/all.m3u
 - 原版用供体节目的回看地址删除时间参数后尝试直播。为保持现有频道兼容性，默认保留这一转换，仅对 `shift_address` 使用，其他查询字节不变。转换结果必须成功读取有效 HLS 才会缓存；诊断中标记为 `shift-converted`。这不证明内容一定为实时直播，也不能保证签名规则变化后仍有效。设置 `KK_SHIFT_TO_LIVE=0` 可停用这一转换。
 - 失败默认返回 HTTP 503、稳定原因代码及 `Retry-After`，不会默认跳到无关节目。确需占位视频时可配置 `KK_FALLBACK_URL`，普通播放失败后返回 302；诊断请求仍返回真实错误。
 - `HEAD` 只返回未观测状态，不请求上游、不建缓存，不代表频道已验证可播。
+- 默认兼容移动端的系统 DNS 和代理/Fake-IP 环境。已知官方 HTTPS API 及 `kksmg.com` 媒体域名交给 cURL 使用系统网络解析，不再将合成 DNS 地址当作真实源站 IP 固定或拦截；TLS 证书与主机名验证保持开启。无需增加启动文件或修改订阅地址。
 
 **环境变量**
 
@@ -71,8 +72,9 @@ http://127.0.0.1:52451/all.m3u
 | `KK_MAX_REQUESTS` | 一次解析最多 16 次 HTTP 请求，范围 1–40，包含重定向和子列表验证 |
 | `KK_MAX_CANDIDATES` | 最多尝试 8 个不同地址，范围 1–20 |
 | `KK_SCAN_DAYS` | 最近 7 天，范围 1–7 |
+| `KK_NETWORK_MODE` | 默认 `compatible`：已知官方 HTTPS 域名使用系统 DNS/代理；设为 `validated` 时所有目标都执行公网 IP 检查及直连 DNS 固定 |
 | `KK_SHIFT_TO_LIVE` | `1`；设为 `0` 后不尝试转换回看地址 |
-| `KK_MEDIA_HOSTS` | 未设置时允许上游返回的公网 HTTP/HTTPS 目标；可用逗号配置域名白名单。`cdn.example` 只匹配自身，`.cdn.example` 匹配自身和子域名 |
+| `KK_MEDIA_HOSTS` | 可用逗号配置媒体域名白名单，在网络兼容判断前生效。`cdn.example` 只匹配自身，`.cdn.example` 匹配自身和子域名 |
 | `KK_CA_BUNDLE` | 可选的可信 CA 文件；TLS 验证始终启用 |
 | `KK_PROXY_PREFIX` | 可选受信代理前缀，保留原版 HTTPS URL 前缀转换方式；必须由管理员配置 |
 | `KK_ACCESS_TOKEN` | 可选的普通播放 Bearer 令牌；未设置时普通播放公开 |
@@ -80,7 +82,11 @@ http://127.0.0.1:52451/all.m3u
 | `KK_ADMIN_TOKEN` | 管理员 Bearer 令牌；未设置时禁止 `info` 和强制刷新 |
 | `KK_FALLBACK_URL` | 默认空；可选的 HTTP/HTTPS 占位播放地址 |
 
-白名单只限制网关实际请求的媒体目标，不会将所有客户端直连资源变成代理。请求仅允许 HTTP/HTTPS 的 80/443 端口；拒绝用户信息、控制字符、私网/保留 IP、混合公网私网 DNS 结果，以及 HTTPS 向 HTTP 的重定向。每次重定向重新检查，最多三跳。直连使用 cURL `RESOLVE` 固定已验证的 DNS 地址。
+白名单只限制网关实际请求的媒体目标，不会将所有客户端直连资源变成代理。请求仅允许 HTTP/HTTPS 的 80/443 端口，拒绝用户信息、控制字符和 HTTPS 向 HTTP 的重定向。每次重定向重新检查，最多三跳。
+
+默认 `compatible` 模式仅对 `https://kapi.kankanews.com:443` 和 HTTPS 443 端口的 `kksmg.com` / 子域名采用系统 DNS/代理路由，不设置 `CURLOPT_RESOLVE`，以适配移动端的合成 DNS 地址。域名须精确匹配或满足子域名边界；相似域名、HTTP 地址和 IP 字面量不能使用此兼容路径。其他媒体目标仍检查全部 DNS 结果并拒绝私网/保留地址；`validated` 模式对已知官方域名也执行同一检查。严格检查的直连目标会通过 cURL `RESOLVE` 固定验证过的地址。
+
+若旧版日志中所有频道的 API 都报 `blocked-address`，随后报 `address-unavailable`，说明公网 IP 检查在网络请求前拦截了设备解析结果。更新本文件并重启，默认兼容模式即可避免这一拦截。严格模式下确实无法连接时，会直接保留 `blocked-address` / `dns-failed`，不再重复扫描七天节目单后将其隐藏为无地址。
 
 如果配置 `KK_PROXY_PREFIX` 或系统 HTTP/HTTPS 代理，实际连接和远端解析由受信代理执行；cURL 的直连 DNS 固定不能替代理实施访问控制，代理侧也需要相同的目标限制。私有 CA 使用 `KK_CA_BUNDLE` 配置，不能通过关闭证书验证解决。系统 DNS 查询仍受操作系统解析超时影响，应同步检查主机 DNS 配置。
 
@@ -114,4 +120,4 @@ php -l wxty.php
 php tests/run.php
 ```
 
-回归不调用真实上游，覆盖 RFC URI 解析、特殊网段和域名限制、重定向、HLS 音轨及分片标签、RSA 残块、签名兼容、到期解析、坏候选回退、冷却、鉴权、HEAD、真实多进程刷新，以及真实本地 HTTP 服务上的订阅和路由。单文件验证只将 `wxty.php` 复制到空目录，分别检查默认端口直接启动、自定义端口和以本文件作为请求路由三种方式，保证不依赖仓库的其他 PHP 文件。GitHub Actions 对 PHP 8.2/8.3/8.4 执行同一套测试。实际网络抽样的范围见 [VALIDATION.md](VALIDATION.md)。
+回归不调用真实上游，覆盖 RFC URI 解析、特殊网段和域名限制、重定向、HLS 音轨及分片标签、RSA 残块、签名兼容、到期解析、坏候选回退、冷却、鉴权、HEAD、真实多进程刷新，以及真实本地 HTTP 服务上的订阅和路由。新增 Fake-IP 模拟验证官方 API 与媒体请求，确认不调用 PHP DNS、不固定合成 IP；同时覆盖严格模式、相似域名、私网重定向和媒体白名单限制。单文件验证只将 `wxty.php` 复制到空目录，分别检查默认端口直接启动、自定义端口和以本文件作为请求路由三种方式，保证不依赖仓库的其他 PHP 文件。GitHub Actions 对 PHP 8.2/8.3/8.4 执行同一套测试。实际网络抽样的范围见 [VALIDATION.md](VALIDATION.md)。

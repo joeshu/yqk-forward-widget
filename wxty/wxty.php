@@ -40,11 +40,15 @@ final class WxtyGateway
             'proxy_prefix' => $env('KK_PROXY_PREFIX', ''),
             'ca_bundle' => $env('KK_CA_BUNDLE', ''),
             'media_hosts' => array_filter(array_map('trim', explode(',', $env('KK_MEDIA_HOSTS', '')))),
+            'network_mode' => $env('KK_NETWORK_MODE', 'compatible'),
             'shift_to_live' => $env('KK_SHIFT_TO_LIVE', '1') === '1',
             'timeout' => 20, 'http_timeout' => 6, 'max_requests' => 16, 'max_candidates' => 8,
             'scan_days' => 7, 'url_ttl' => 600, 'min_left' => 90,
             'max_bytes' => 2 * 1024 * 1024, 'max_cache_files' => 256,
         ], $config);
+        if (!in_array($this->config['network_mode'], ['compatible', 'validated'], true)) {
+            throw new WxtyError('invalid-network-mode');
+        }
         foreach (['timeout' => [5, 60], 'http_timeout' => [1, 15], 'max_requests' => [1, 40],
             'max_candidates' => [1, 20], 'scan_days' => [1, 7]] as $key => [$min, $max]) {
             $value = $env('KK_' . strtoupper($key), (string) $this->config[$key]);
@@ -203,11 +207,18 @@ final class WxtyGateway
             }
             if (!$allowed) throw new WxtyError('blocked-media-host');
         }
+        // Official HTTPS endpoints need the platform's DNS/proxy route on mobile
+        // runtimes. Synthetic DNS answers must not be pinned as real origin IPs.
+        $official = $host === 'kapi.kankanews.com' || $host === 'kksmg.com' || str_ends_with($host, '.kksmg.com');
+        if ($this->config['network_mode'] === 'compatible' && $official
+            && strtolower($p['scheme']) === 'https' && $port === 443) {
+            return ['host' => $host, 'port' => $port, 'ips' => [], 'dns_mode' => 'system'];
+        }
         if (!isset($this->dns[$host])) {
             if (filter_var($host, FILTER_VALIDATE_IP)) $ips = [$host];
             elseif ($this->resolver) $ips = ($this->resolver)($host);
             else {
-                $records = @dns_get_record($host, DNS_A | DNS_AAAA) ?: [];
+                $records = function_exists('dns_get_record') ? (@dns_get_record($host, DNS_A | DNS_AAAA) ?: []) : [];
                 $ips = [];
                 foreach ($records as $record) {
                     if (isset($record['ip'])) $ips[] = $record['ip'];
@@ -218,7 +229,7 @@ final class WxtyGateway
             foreach ($ips as $ip) if (!is_string($ip) || !self::isPublicIp($ip)) throw new WxtyError('blocked-address');
             $this->dns[$host] = array_values(array_unique($ips));
         }
-        return ['host' => $host, 'port' => $port, 'ips' => $this->dns[$host]];
+        return ['host' => $host, 'port' => $port, 'ips' => $this->dns[$host], 'dns_mode' => 'validated'];
     }
 
     private function curlGet(string $url, array $headers, array $target, float $timeout): array
@@ -247,7 +258,7 @@ final class WxtyGateway
                 return strlen($line);
             },
         ];
-        if ($requestUrl === $url && !filter_var($target['host'], FILTER_VALIDATE_IP)) {
+        if ($requestUrl === $url && $target['ips'] && !filter_var($target['host'], FILTER_VALIDATE_IP)) {
             $ips = array_map(static fn($ip) => strpos($ip, ':') === false ? $ip : '[' . $ip . ']', $target['ips']);
             $host = strpos($target['host'], ':') === false ? $target['host'] : '[' . $target['host'] . ']';
             $options[CURLOPT_RESOLVE] = [$host . ':' . $target['port'] . ':' . implode(',', $ips)];
@@ -314,7 +325,8 @@ final class WxtyGateway
             if ($ttl > 0) $this->writeCache($cacheKey, $data, time() + $ttl);
             return $data;
         } catch (WxtyError $error) {
-            if (self::terminal($error) || in_array($error->reason, ['http-401', 'http-403'], true)) throw $error;
+            if (self::terminal($error) || in_array($error->reason, ['http-401', 'http-403', 'blocked-address',
+                'dns-failed', 'invalid-url', 'blocked-api-host', 'blocked-port'], true)) throw $error;
             error_log('[wxty] api ' . $path . ' ' . $error->reason); return null;
         }
     }
