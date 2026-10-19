@@ -1,5 +1,7 @@
 # joeshu 影视组件合集
 
+Python 央视订阅可使用仓库现有的 [ysp-live 单文件版](./ysp-live/README.md)：`python ysp-live-v9.5.19.py 18767 --bind 127.0.0.1 --no-4k --no-engine`，播放器订阅 `http://127.0.0.1:18767/all.m3u`。本轮 CCTV-2 分片实测为 1080p，严格解码通过；64 条配置未逐台验证，详见 [CCTV-2 实测与下载入口](./ysp-live/CCTV2-CHECK-2026-10-19.md)。
+
 2026-10-19：新增独立的 [wxty PHP 频道网关](./wxty/README.md)，只启动 `wxty.php` 即可在默认端口 52451 提供 `/all.m3u` 八频道订阅，修复 URL/HLS、缓存并发和有界回退，保留 CDN 直连及可配置的回看转直播兼容路径。需 PHP 运行环境，GitHub Pages 不执行 PHP；现有 Forward 订阅不变。
 
 这 8 个频道都来自「看看新闻」——上海广播电视台（SMG）旗下的平台，官网：[https://www.kankanews.com/](https://www.kankanews.com/)。包括东方卫视、上海新闻综合、上海都市、第一财经、哈哈炫动、五星体育、魔都眼、新纪实。
