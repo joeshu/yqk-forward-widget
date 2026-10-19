@@ -64,6 +64,21 @@ function endpoint(array $query, array $server = [], array $env = []): array
     if (!is_array($result)) throw new RuntimeException('Endpoint failed: ' . $err);
     return $result;
 }
+function routerRequest(string $address, string $path, string $method = 'GET'): array
+{
+    $socket = stream_socket_client('tcp://' . $address, $errno, $error, 3);
+    if (!$socket) throw new RuntimeException('HTTP connection failed');
+    stream_set_timeout($socket, 3);
+    fwrite($socket, $method . ' ' . $path . " HTTP/1.1\r\nHost: " . $address . "\r\nConnection: close\r\n\r\n");
+    $response = stream_get_contents($socket); fclose($socket);
+    [$head, $body] = explode("\r\n\r\n", $response, 2);
+    preg_match('/^HTTP\/1\.[01] ([0-9]{3})/', $head, $match);
+    $headers = [];
+    foreach (explode("\r\n", $head) as $line) {
+        if (strpos($line, ':') !== false) { [$key, $value] = explode(':', $line, 2); $headers[strtolower($key)] = trim($value); }
+    }
+    return ['status' => (int) $match[1], 'body' => $body, 'headers' => $headers];
+}
 if (($argv[1] ?? '') === '--worker') {
     $gateway = gateway($argv[2], normalHandler($argv[2] . '/calls.log'));
     $result = $gateway->resolve(10, ($argv[3] ?? '') === 'force');
@@ -313,6 +328,79 @@ try {
     test('admin token can authenticate protected HEAD', static fn() => same(endpoint(['info' => '1'],
         ['REQUEST_METHOD' => 'HEAD', 'HTTP_AUTHORIZATION' => 'Bearer admin-token'],
         ['KK_ACCESS_TOKEN' => 'access-token', 'KK_ADMIN_TOKEN' => 'admin-token'])['status'], 200));
+    test('subscription includes all eight local channel URLs without fetching upstream', static function ($dir) {
+        $result = endpoint(['list' => '1'], ['HTTP_HOST' => '127.0.0.1:52451', 'SCRIPT_NAME' => '/wxty.php'], ['KK_CACHE_DIR' => $dir]);
+        same($result['status'], 200); same(str_starts_with($result['body'], "#EXTM3U\n"), true);
+        same(substr_count($result['body'], '#EXTINF:'), 8);
+        foreach (WxtyGateway::CHANNELS as $id => $channel) {
+            same(str_contains($result['body'], 'http://127.0.0.1:52451/wxty.php?id=' . $id . "\n"), true);
+            same(str_contains($result['body'], WxtyGateway::NAMES[$id]), true);
+        }
+        same(is_dir($dir), false);
+    });
+    test('subscription supports HTTPS IPv6 and installation subdirectory', static function () {
+        $r = endpoint(['list' => '1'], ['HTTP_HOST' => '[::1]:52451', 'HTTPS' => 'on', 'SCRIPT_NAME' => '/gateway/wxty.php']);
+        same($r['status'], 200); same(str_contains($r['body'], 'https://[::1]:52451/gateway/wxty.php?id=wxty'), true);
+    });
+    test('explicit subscription public base overrides proxy headers', static function () {
+        $r = endpoint(['list' => '1'], ['HTTP_HOST' => '127.0.0.1:52451', 'SCRIPT_NAME' => '/wxty.php'],
+            ['KK_PUBLIC_BASE_URL' => 'https://tv.example/gateway/']);
+        same($r['status'], 200); same(str_contains($r['body'], 'https://tv.example/gateway/wxty.php?id=wxty'), true);
+        same(str_contains($r['body'], '127.0.0.1'), false);
+    });
+    test('subscription ignores untrusted forwarded host and scheme', static function () {
+        $r = endpoint(['list' => '1'], ['HTTP_HOST' => '127.0.0.1:52451', 'SCRIPT_NAME' => '/wxty.php',
+            'HTTP_X_FORWARDED_HOST' => 'evil.example', 'HTTP_X_FORWARDED_PROTO' => 'https']);
+        same($r['status'], 200); same(str_contains($r['body'], 'http://127.0.0.1:52451/wxty.php'), true);
+        same(str_contains($r['body'], 'evil.example'), false);
+    });
+    test('subscription rejects injected host', static fn() => same(endpoint(['list' => '1'],
+        ['HTTP_HOST' => "127.0.0.1:52451\r\n#EXTINF:evil", 'SCRIPT_NAME' => '/wxty.php'])['status'], 400));
+    test('subscription rejects invalid configured base', static fn() => same(endpoint(['list' => '1'],
+        ['HTTP_HOST' => '127.0.0.1:52451'], ['KK_PUBLIC_BASE_URL' => 'https://tv.example/?token=x'])['status'], 500));
+    test('subscription rejects array list input', static fn() => same(endpoint(['list' => ['1']])['status'], 400));
+    test('subscription HEAD has no body or cache side effects', static function ($dir) {
+        same(endpoint(['list' => '1'], ['REQUEST_METHOD' => 'HEAD', 'HTTP_HOST' => '127.0.0.1:52451'],
+            ['KK_CACHE_DIR' => $dir]), ['status' => 200, 'body' => '']);
+        same(is_dir($dir), false);
+    });
+    test('subscription follows access authentication without exposing tokens', static function () {
+        $server = ['HTTP_HOST' => '127.0.0.1:52451']; $env = ['KK_ACCESS_TOKEN' => 'private-playback-token'];
+        same(endpoint(['list' => '1'], $server, $env)['status'], 401);
+        $server['HTTP_AUTHORIZATION'] = 'Bearer private-playback-token';
+        $r = endpoint(['list' => '1'], $server, $env); same($r['status'], 200);
+        same(str_contains($r['body'], 'private-playback-token'), false);
+    });
+    test('real HTTP router serves all.m3u and every listed channel path', static function ($dir) {
+        mkdir($dir, 0700, true);
+        $socket = stream_socket_server('tcp://127.0.0.1:0', $errno, $error);
+        $address = stream_socket_get_name($socket, false); fclose($socket);
+        $proc = proc_open([PHP_BINARY, '-S', $address, '-t', dirname(__DIR__), dirname(__DIR__) . '/router.php'],
+            [0 => ['pipe', 'r'], 1 => ['file', $dir . '/http.log', 'a'], 2 => ['file', $dir . '/http.log', 'a']], $pipes);
+        fclose($pipes[0]);
+        try {
+            $ready = false;
+            for ($i = 0; $i < 100; $i++) {
+                $probe = @stream_socket_client('tcp://' . $address, $errno, $error, 0.05);
+                if ($probe) { fclose($probe); $ready = true; break; }
+                usleep(20000);
+            }
+            same($ready, true);
+            $r = routerRequest($address, '/all.m3u'); same($r['status'], 200);
+            same($r['headers']['content-type'], 'audio/x-mpegurl; charset=utf-8');
+            same($r['headers']['content-disposition'], 'inline; filename="all.m3u"');
+            same(substr_count($r['body'], '#EXTINF:'), 8);
+            foreach (WxtyGateway::CHANNELS as $id => $channel) {
+                same(str_contains($r['body'], 'http://' . $address . '/wxty.php?id=' . $id . "\n"), true);
+                same(routerRequest($address, '/wxty.php?id=' . $id, 'HEAD')['status'], 200);
+            }
+            same(routerRequest($address, '/')['body'], $r['body']);
+            same(routerRequest($address, '/wxty.php?list=1')['body'], $r['body']);
+            same(routerRequest($address, '/all.m3u', 'HEAD')['body'], '');
+            same(routerRequest($address, '/missing')['status'], 404);
+            same(routerRequest($address, '/all.m3u', 'POST')['status'], 405);
+        } finally { proc_terminate($proc); proc_close($proc); }
+    });
     foreach ([false, true] as $force) test('real process single refresh ' . ($force ? 'forced' : 'cold'), static function ($dir) use ($force) {
         mkdir($dir, 0700, true); $workers = [];
         for ($i = 0; $i < 4; $i++) {

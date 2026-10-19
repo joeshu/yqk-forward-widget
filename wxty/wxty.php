@@ -15,6 +15,8 @@ final class WxtyGateway
 {
     public const CHANNELS = ['dfws' => 1, 'shxwzh' => 2, 'shds' => 4, 'dycj' => 5,
         'hhxd' => 9, 'wxty' => 10, 'mdy' => 11, 'jsrw' => 12];
+    public const NAMES = ['dfws' => '东方卫视', 'shxwzh' => '上海新闻综合', 'shds' => '上海都市',
+        'dycj' => '第一财经', 'hhxd' => '哈哈炫动', 'wxty' => '五星体育', 'mdy' => '东方影视', 'jsrw' => '纪实人文'];
     private const API = 'https://kapi.kankanews.com';
     private const SECRET = '28c8edde3d61a0411511d3b1866f0636';
     private const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/116.0.0.0 Safari/537.36';
@@ -599,6 +601,37 @@ final class WxtyGateway
     }
 }
 
+function wxtySubscription(): string
+{
+    $configured = getenv('KK_PUBLIC_BASE_URL') ?: '';
+    if ($configured !== '') $base = rtrim($configured, '/');
+    else {
+        $https = strtolower((string) ($_SERVER['HTTPS'] ?? ''));
+        $scheme = ($https !== '' && $https !== 'off' && $https !== '0') ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'] ?? '';
+        if (!preg_match('/^(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9][A-Za-z0-9.-]*)(?::[0-9]{1,5})?$/D', $host)) {
+            throw new WxtyError('invalid-request-origin');
+        }
+        $directory = dirname($_SERVER['SCRIPT_NAME'] ?? '/wxty.php');
+        if ($directory === '.' || $directory === '/') $directory = '';
+        $base = $scheme . '://' . $host . $directory;
+    }
+    $parts = parse_url($base);
+    if (!$parts || !in_array($parts['scheme'] ?? '', ['http', 'https'], true) || empty($parts['host'])
+        || isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])
+        || preg_match('/[\x00-\x20\x7f\\\\]/', $base) || (($parts['port'] ?? 80) < 1)
+        || !filter_var($base, FILTER_VALIDATE_URL)) {
+        throw new WxtyError($configured === '' ? 'invalid-request-origin' : 'invalid-public-base');
+    }
+    $lines = ['#EXTM3U'];
+    foreach (WxtyGateway::CHANNELS as $id => $channel) {
+        $name = WxtyGateway::NAMES[$id];
+        $lines[] = '#EXTINF:-1 tvg-id="' . $id . '" tvg-name="' . $name . '" group-title="看看新闻",' . $name;
+        $lines[] = $base . '/wxty.php?id=' . $id;
+    }
+    return implode("\n", $lines) . "\n";
+}
+
 function wxtyMain(): void
 {
     header('Cache-Control: no-cache, no-store, must-revalidate');
@@ -616,6 +649,18 @@ function wxtyMain(): void
     $force = isset($_GET['refresh']) && $_GET['refresh'] !== '0';
     $info = isset($_GET['info']);
     if (($force || $info) && !$isAdmin) { http_response_code(403); echo '需要管理员 Bearer 令牌'; return; }
+    if (isset($_GET['list'])) {
+        if ($_GET['list'] !== '1') { http_response_code(400); echo '无效订阅参数'; return; }
+        try { $subscription = wxtySubscription(); }
+        catch (WxtyError $error) {
+            http_response_code($error->reason === 'invalid-public-base' ? 500 : 400);
+            header('Content-Type: text/plain; charset=utf-8'); echo $error->reason; return;
+        }
+        header('Content-Type: audio/x-mpegurl; charset=utf-8');
+        header('Content-Disposition: inline; filename="all.m3u"');
+        if ($method !== 'HEAD') echo $subscription;
+        return;
+    }
     header('Content-Type: ' . ($info ? 'application/json; charset=utf-8' : 'application/vnd.apple.mpegurl'));
     if ($method === 'HEAD') { header('X-Playback-State: unobserved'); return; }
     try {

@@ -1,6 +1,6 @@
 # joeshu 影视组件合集
 
-2026-10-19：新增独立的 [wxty PHP 频道网关](./wxty/README.md)，修复 URL/HLS、缓存并发和有界回退，保留 CDN 直连及可配置的回看转直播兼容路径。需部署到 PHP 主机，GitHub Pages 不执行 PHP；现有 Forward 订阅不变。
+2026-10-19：新增独立的 [wxty PHP 频道网关](./wxty/README.md)，提供 `/all.m3u` 八频道订阅，修复 URL/HLS、缓存并发和有界回退，保留 CDN 直连及可配置的回看转直播兼容路径。需部署到 PHP 主机，GitHub Pages 不执行 PHP；现有 Forward 订阅不变。
 
 2026-10-17：完成CatPaw 0.8.2与六个Forward移植组件0.1.1的分页、并发缓存及发布完整性优化。研究结论、460项回归与三个源的线上只读抽样见 [OPTIMIZATION_REVIEW.md](./OPTIMIZATION_REVIEW.md)。
 

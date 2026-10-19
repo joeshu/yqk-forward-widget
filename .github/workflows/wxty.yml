@@ -24,4 +24,5 @@ jobs:
           extensions: curl, openssl
           coverage: none
       - run: php -l wxty/wxty.php
+      - run: php -l wxty/router.php
       - run: php wxty/tests/run.php

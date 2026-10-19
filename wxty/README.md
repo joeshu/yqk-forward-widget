@@ -6,16 +6,28 @@
 
 **运行**
 
-部署单个 `wxty.php` 即可，不依赖 Composer。要求 PHP 8.2 或更新版本，启用 cURL、OpenSSL 和 JSON；缓存目录必须可写，并放在 Web 根目录外。生产环境使用 Nginx/Apache + PHP-FPM，配置合适的上游超时及访问限流。PHP-FPM 默认可能清理环境变量，需要显式传入下面使用的配置。
+单频道及查询形式的订阅仅需 `wxty.php`，不依赖 Composer。使用 PHP 内置服务的 `/all.m3u` 路径时，还需同目录下的 `router.php`。要求 PHP 8.2 或更新版本，启用 cURL、OpenSSL 和 JSON；缓存目录必须可写，并放在 Web 根目录外。生产环境使用 Nginx/Apache + PHP-FPM，配置合适的上游超时及访问限流。PHP-FPM 默认可能清理环境变量，需要显式传入下面使用的配置。
 
 本地验证：
 
 ```bash
 cd wxty
-php -S 127.0.0.1:8080
+php -S 127.0.0.1:52451 router.php
 ```
 
-播放地址示例：`http://127.0.0.1:8080/wxty.php?id=wxty`。
+在 IPTV 播放器中添加以下订阅地址，就能导入本脚本支持的全部 8 个频道：
+
+```text
+http://127.0.0.1:52451/all.m3u
+```
+
+根路径 `/` 也返回同一份订阅。订阅仅列出频道，不会预先请求八个频道的上游；选台播放时才解析相应频道。条目包含频道名和分组，播放链接自动使用本次请求的主机、端口及安装路径，不写死 `127.0.0.1`。
+
+已有服务需要使用带 `router.php` 的命令重启；仅运行 `php -S 127.0.0.1:52451` 不会自动处理 `/all.m3u`。不配置路由时，也可直接订阅 `http://127.0.0.1:52451/wxty.php?list=1`。Nginx/Apache 应将 `/all.m3u` 内部转发到 `/wxty.php?list=1`，并保留原有 PHP 执行配置。
+
+单台播放地址仍是 `http://127.0.0.1:52451/wxty.php?id=wxty`。这里的“全部频道”仅指下表 8 个频道，不包含仓库中其他项目的频道。
+
+手机或电视访问时，服务改为监听 `0.0.0.0:52451`，订阅地址中的 `127.0.0.1` 改为服务器的局域网 IP。反向代理无法直接推导公网前缀时，设置 `KK_PUBLIC_BASE_URL`，例如 `https://tv.example/wxty`；不自动信任客户端提供的 `X-Forwarded-Host/Proto`。
 
 | id | 频道 ID |
 | --- | --- |
@@ -53,6 +65,7 @@ php -S 127.0.0.1:8080
 | `KK_CA_BUNDLE` | 可选的可信 CA 文件；TLS 验证始终启用 |
 | `KK_PROXY_PREFIX` | 可选受信代理前缀，保留原版 HTTPS URL 前缀转换方式；必须由管理员配置 |
 | `KK_ACCESS_TOKEN` | 可选的普通播放 Bearer 令牌；未设置时普通播放公开 |
+| `KK_PUBLIC_BASE_URL` | 可选订阅播放链接前缀，如 `http://192.168.1.10:52451`；默认使用请求的协议、Host 和脚本目录，不包含 `wxty.php` 文件名 |
 | `KK_ADMIN_TOKEN` | 管理员 Bearer 令牌；未设置时禁止 `info` 和强制刷新 |
 | `KK_FALLBACK_URL` | 默认空；可选的 HTTP/HTTPS 占位播放地址 |
 
@@ -64,12 +77,14 @@ php -S 127.0.0.1:8080
 
 ```bash
 curl -H 'Authorization: Bearer YOUR_ADMIN_TOKEN' \
-  'http://127.0.0.1:8080/wxty.php?id=wxty&info=1'
+  'http://127.0.0.1:52451/wxty.php?id=wxty&info=1'
 curl -H 'Authorization: Bearer YOUR_ADMIN_TOKEN' \
-  'http://127.0.0.1:8080/wxty.php?id=wxty&refresh=1'
+  'http://127.0.0.1:52451/wxty.php?id=wxty&refresh=1'
 ```
 
 诊断保留候选来源、节目、缓存命中、实际请求次数及有效期，不返回签名 URL。错误日志同样不记录签名 URL、令牌或上游正文。
+
+订阅沿用普通播放的访问控制。设置 `KK_ACCESS_TOKEN` 时，播放器必须在获取订阅和后续频道请求时都发送 Bearer 请求头；生成的播放链接不会包含或泄露令牌。
 
 **缓存和回退**
 
@@ -85,7 +100,8 @@ RSA 使用 OpenSSL，按公钥实际位数分块，要求每个密文块都成�
 
 ```bash
 php -l wxty.php
+php -l router.php
 php tests/run.php
 ```
 
-回归不调用真实上游，覆盖 RFC URI 解析、特殊网段和域名限制、重定向、HLS 音轨及分片标签、RSA 残块、签名兼容、到期解析、坏候选回退、冷却、鉴权、HEAD 和真实多进程刷新。GitHub Actions 对 PHP 8.2/8.3/8.4 执行同一套测试。实际网络抽样的范围见 [VALIDATION.md](VALIDATION.md)。
+回归不调用真实上游，覆盖 RFC URI 解析、特殊网段和域名限制、重定向、HLS 音轨及分片标签、RSA 残块、签名兼容、到期解析、坏候选回退、冷却、鉴权、HEAD、真实多进程刷新，以及真实本地 HTTP 服务上的订阅和路由。GitHub Actions 对 PHP 8.2/8.3/8.4 执行同一套测试。实际网络抽样的范围见 [VALIDATION.md](VALIDATION.md)。
