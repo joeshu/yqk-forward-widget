@@ -2,6 +2,8 @@
 
 基于 [原作者频道](https://t.me/iptvorganization) 提供的 wxty.php 整理。保留原有 API 签名与频道映射，修复 URL/HLS、缓存并发、网络安全和故障回退问题。
 
+这 8 个频道都来自「看看新闻」——上海广播电视台（SMG）旗下的平台，官网：[https://www.kankanews.com/](https://www.kankanews.com/)。包括东方卫视、上海新闻综合、上海都市、第一财经、哈哈炫动、五星体育、东方影视、纪实人文。
+
 这是独立的服务端 PHP 文件，需要部署到 PHP 主机。GitHub Pages 只提供静态文件，不能执行此网关；仓库的 Forward 订阅与 Pages 发布逻辑不变。
 
 **运行**
