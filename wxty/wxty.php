@@ -16,7 +16,7 @@ final class WxtyGateway
     public const CHANNELS = ['dfws' => 1, 'shxwzh' => 2, 'shds' => 4, 'dycj' => 5,
         'hhxd' => 9, 'wxty' => 10, 'mdy' => 11, 'jsrw' => 12];
     public const NAMES = ['dfws' => '东方卫视', 'shxwzh' => '上海新闻综合', 'shds' => '上海都市',
-        'dycj' => '第一财经', 'hhxd' => '哈哈炫动', 'wxty' => '五星体育', 'mdy' => '东方影视', 'jsrw' => '纪实人文'];
+        'dycj' => '第一财经', 'hhxd' => '哈哈炫动', 'wxty' => '五星体育', 'mdy' => '魔都眼', 'jsrw' => '新纪实'];
     private const API = 'https://kapi.kankanews.com';
     private const SECRET = '28c8edde3d61a0411511d3b1866f0636';
     private const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/116.0.0.0 Safari/537.36';
@@ -364,21 +364,24 @@ final class WxtyGateway
         $this->deadline = microtime(true) + $this->config['timeout'];
         $this->requests = 0;
         $date = (new DateTimeImmutable('now', new DateTimeZone('Asia/Shanghai')))->format('Y-m-d');
-        $key = 'epg:' . $date;
+        $key = 'epg-v2:' . $date;
         if (($hit = $this->readCache($key)) !== null) return $hit;
         $lock = $this->lock('epg');
         try {
             if (($hit = $this->readCache($key)) !== null) return $hit;
-            $schedule = []; $missing = []; $stale = [];
+            $schedule = []; $missing = []; $stale = []; $empty = [];
             foreach (self::CHANNELS as $id => $channel) {
                 $channelKey = 'epg-channel:' . $date . ':' . $channel;
                 $previous = $this->readCache($channelKey);
                 try {
                     $response = $this->api('/content/pc/tv/programs', ['channel_id' => $channel, 'date' => $date]);
-                    $items = $response['result']['programs'] ?? null;
+                    // Official unscheduled channels return list:[] instead of programs.
+                    $items = $response['result']['programs'] ??
+                        ((($response['result']['list'] ?? null) === []) ? [] : null);
                     if (!is_array($items)) throw new WxtyError('epg-unavailable');
                     $items = array_values(array_filter($items, 'is_array'));
                     $schedule[$id] = $items;
+                    if ($items === []) $empty[] = $id;
                     $this->writeCache($channelKey, ['items' => $items], time() + 86400);
                 } catch (WxtyError $error) {
                     if ($previous !== null) { $schedule[$id] = $previous['items']; $stale[] = $id; }
@@ -387,7 +390,7 @@ final class WxtyGateway
                 }
             }
             if (count($missing) === count(self::CHANNELS)) throw new WxtyError('epg-unavailable');
-            $result = ['xml' => self::xmltv($schedule), 'missing' => $missing, 'stale' => $stale];
+            $result = ['xml' => self::xmltv($schedule), 'missing' => $missing, 'stale' => $stale, 'empty' => $empty];
             $midnight = (new DateTimeImmutable($date, new DateTimeZone('Asia/Shanghai')))->modify('+1 day')->getTimestamp();
             $this->writeCache($key, $result, min($midnight, time() + (($missing || $stale) ? 30 : 900)));
             return $result;
@@ -792,6 +795,7 @@ function wxtyMain(): void
             $result = (new WxtyGateway())->epg();
             header('X-EPG-Missing: ' . implode(',', $result['missing']));
             header('X-EPG-Stale: ' . implode(',', $result['stale']));
+            header('X-EPG-Empty: ' . implode(',', $result['empty']));
             echo $result['xml'];
         } catch (Throwable $error) {
             http_response_code(503); header('Retry-After: 30');

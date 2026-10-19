@@ -497,6 +497,26 @@ try {
         same($calls, 8); same($a, $b); same($a['missing'], []);
         same(substr_count($a['xml'], '<programme '), 8);
     });
+    test('official channel 11 and 12 names match API catalog', static function () {
+        same(WxtyGateway::NAMES['mdy'], '魔都眼'); same(WxtyGateway::NAMES['jsrw'], '新纪实');
+        same(WxtyGateway::CHANNELS['mdy'], 11); same(WxtyGateway::CHANNELS['jsrw'], 12);
+    });
+    test('official empty list is an unscheduled channel, not a transport failure', static function ($dir) {
+        $calls = 0;
+        $g = gateway($dir, static function ($url) use (&$calls) {
+            $calls++; parse_str(parse_url($url, PHP_URL_QUERY), $q);
+            if (in_array($q['channel_id'], ['11', '12'], true)) return apiResponse(['list' => []]);
+            return apiResponse(['programs' => [['name' => '节目', 'start_time' => 1792339200, 'end_time' => 1792342800]]]);
+        });
+        $result = $g->epg(); same($result['empty'], ['mdy', 'jsrw']); same($result['missing'], []);
+        same(substr_count($result['xml'], '<programme '), 6);
+        same($g->epg(), $result); same($calls, 8);
+        same(str_contains($result['xml'], '东方影视'), false);
+    });
+    test('unrecognized nonempty list is not silently treated as an empty schedule', static function ($dir) {
+        $g = gateway($dir, static fn() => apiResponse(['list' => [['unknown' => 'data']]]));
+        raises(static fn() => $g->epg(), 'epg-unavailable');
+    });
     test('EPG partial failure preserves other channels and reports missing', static function ($dir) {
         $g = gateway($dir, static function ($url) {
             parse_str(parse_url($url, PHP_URL_QUERY), $query);
@@ -514,7 +534,7 @@ try {
         });
         $first = $g->epg();
         $date = (new DateTimeImmutable('now', new DateTimeZone('Asia/Shanghai')))->format('Y-m-d');
-        expireCache($dir, 'epg:' . $date); $fail = true;
+        expireCache($dir, 'epg-v2:' . $date); $fail = true;
         $second = $g->epg();
         same($first['xml'], $second['xml']); same($second['missing'], []);
         same(count($second['stale']), 8);

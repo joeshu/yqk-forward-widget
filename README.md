@@ -2,7 +2,7 @@
 
 2026-10-19：新增独立的 [wxty PHP 频道网关](./wxty/README.md)，只启动 `wxty.php` 即可在默认端口 52451 提供 `/all.m3u` 八频道订阅，修复 URL/HLS、缓存并发和有界回退，保留 CDN 直连及可配置的回看转直播兼容路径。需 PHP 运行环境，GitHub Pages 不执行 PHP；现有 Forward 订阅不变。
 
-这 8 个频道都来自「看看新闻」——上海广播电视台（SMG）旗下的平台，官网：[https://www.kankanews.com/](https://www.kankanews.com/)。包括东方卫视、上海新闻综合、上海都市、第一财经、哈哈炫动、五星体育、东方影视、纪实人文。
+这 8 个频道都来自「看看新闻」——上海广播电视台（SMG）旗下的平台，官网：[https://www.kankanews.com/](https://www.kankanews.com/)。包括东方卫视、上海新闻综合、上海都市、第一财经、哈哈炫动、五星体育、魔都眼、新纪实。
 
 支持看看新闻当天 XMLTV 节目单：`/all.m3u` 自动关联 EPG，也可在播放器中手动填写 `http://127.0.0.1:52451/epg.xml`。更新同一个 `wxty.php` 后重启并刷新订阅即可，详见 [节目单说明](./wxty/README.md)。
 
