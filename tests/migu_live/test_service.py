@@ -13,7 +13,14 @@ from unittest.mock import Mock, patch
 from urllib.parse import urlsplit
 
 import update_migu as m
-from migu import service as s
+import importlib.util
+import sys
+_spec = importlib.util.spec_from_file_location('migu_historical_service', Path('migu/migu-live-v0.2.1.py'))
+s = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = s
+_spec.loader.exec_module(s)
+s.m = m  # Test historical service behavior against the separately maintained updater.
+from migu import service as current
 
 TOKEN = 't' * 43
 
@@ -140,14 +147,14 @@ class StoreTests(unittest.TestCase):
 class ManifestTests(unittest.TestCase):
     def test_final_response_base_audio_and_variant_signatures_are_preserved(self):
         raw = b'#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",URI="audio.m3u8?sig=a%2Bb"\n#EXT-X-STREAM-INF:BANDWIDTH=800000,AUDIO="a"\nvideo.m3u8?sig=z%3D\n'
-        result = s.rewrite_manifest(raw, 'http://hlszymgsplive.miguvideo.com:8080/cdn/master.m3u8?old=do-not-copy')
+        result = current.rewrite_manifest(raw, 'http://hlszymgsplive.miguvideo.com:8080/cdn/master.m3u8?old=do-not-copy')
         self.assertIn(b'URI="http://hlszymgsplive.miguvideo.com:8080/cdn/audio.m3u8?sig=a%2Bb"', result)
         self.assertIn(b'http://hlszymgsplive.miguvideo.com:8080/cdn/video.m3u8?sig=z%3D', result)
         self.assertNotIn(b'do-not-copy', result)
 
     def test_encryption_map_range_and_media_timeline_are_not_repacked(self):
         raw = b'#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:42\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin",IV=0x0001\n#EXT-X-MAP:URI="init.mp4",BYTERANGE="100@0"\n#EXT-X-DISCONTINUITY\n#EXTINF:6,\n#EXT-X-BYTERANGE:100@20\nsegment.ts\n'
-        result = s.rewrite_manifest(raw, 'https://hlszymgsplive.miguvideo.com/a/media.m3u8')
+        result = current.rewrite_manifest(raw, 'https://hlszymgsplive.miguvideo.com/a/media.m3u8')
         for marker in (b'METHOD=AES-128', b'IV=0x0001', b'#EXT-X-MEDIA-SEQUENCE:42', b'BYTERANGE="100@0"', b'#EXT-X-BYTERANGE:100@20', b'#EXT-X-DISCONTINUITY'):
             self.assertIn(marker, result)
         self.assertIn(b'URI="https://hlszymgsplive.miguvideo.com/a/key.bin"', result)
@@ -155,11 +162,11 @@ class ManifestTests(unittest.TestCase):
     def test_unsafe_key_uri_and_html_are_rejected(self):
         raw = b'#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-KEY:METHOD=AES-128,URI="http://127.0.0.1/private"\n#EXTINF:6,\nsegment.ts\n'
         for body in (raw, b'<html>error</html>'):
-            with self.assertRaises(m.UpdateError):
-                s.rewrite_manifest(body, 'http://hlszymgsplive.miguvideo.com/a/media.m3u8')
+            with self.assertRaises(current.m.UpdateError):
+                current.rewrite_manifest(body, 'http://hlszymgsplive.miguvideo.com/a/media.m3u8')
 
     def test_single_flight_and_completed_fetch_is_released_after_waiter_timeout(self):
-        cache = s.ManifestCache()
+        cache = current.ManifestCache()
         self.addCleanup(cache.close)
         entered, release = threading.Event(), threading.Event()
         def fetch(url):
@@ -167,7 +174,7 @@ class ManifestTests(unittest.TestCase):
             release.wait(2)
             return b'manifest'
         with patch.object(cache, '_fetch', side_effect=fetch):
-            with self.assertRaises(s.ServiceError):
+            with self.assertRaises(current.ServiceError):
                 cache.get('http://gslbmgsplive.miguvideo.com/a/index.m3u8', wait=0.001)
             self.assertTrue(entered.wait(1))
             with cache.lock:
@@ -186,16 +193,16 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(cache.fetches, 1)
 
     def test_failure_has_short_cooldown_and_no_secret_in_error(self):
-        cache = s.ManifestCache()
+        cache = current.ManifestCache()
         self.addCleanup(cache.close)
-        with patch.object(cache, '_fetch', side_effect=m.FetchError('HTTP_403')) as fetch:
+        with patch.object(cache, '_fetch', side_effect=current.m.FetchError('HTTP_403')) as fetch:
             for _ in range(2):
-                with self.assertRaisesRegex(s.ServiceError, 'HTTP_403'):
+                with self.assertRaisesRegex(current.ServiceError, 'HTTP_403'):
                     cache.get('http://gslbmgsplive.miguvideo.com/a/index.m3u8?secret=private')
             self.assertEqual(fetch.call_count, 1)
 
     def test_pending_capacity_is_bounded_and_recovers_after_timeouts(self):
-        cache = s.ManifestCache()
+        cache = current.ManifestCache()
         self.addCleanup(cache.close)
         release = threading.Event()
         def fetch(url):
@@ -203,9 +210,9 @@ class ManifestTests(unittest.TestCase):
             return b'manifest'
         with patch.object(cache, '_fetch', side_effect=fetch):
             for i in range(8):
-                with self.assertRaises(s.ServiceError):
+                with self.assertRaises(current.ServiceError):
                     cache.get(f'http://gslbmgsplive.miguvideo.com/{i}/index.m3u8',wait=0.001)
-            with self.assertRaisesRegex(s.ServiceError, 'MANIFEST_CAPACITY'):
+            with self.assertRaisesRegex(current.ServiceError, 'MANIFEST_CAPACITY'):
                 cache.get('http://gslbmgsplive.miguvideo.com/overflow/index.m3u8',wait=0.001)
             with cache.lock:
                 pending = list(cache.flights.values())
@@ -220,7 +227,7 @@ class ManifestTests(unittest.TestCase):
             self.assertFalse(cache.flights)
 
     def test_completed_cache_obeys_the_byte_budget(self):
-        cache = s.ManifestCache()
+        cache = current.ManifestCache()
         self.addCleanup(cache.close)
         with patch.object(cache, '_fetch', return_value=b'x'*(512*1024)):
             for i in range(20):
@@ -340,14 +347,14 @@ class TokenTests(unittest.TestCase):
     def test_generated_token_is_private_and_stable_between_restarts(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
-            first = s.load_access_token(path)
-            self.assertEqual(first, s.load_access_token(path))
+            first = current.load_access_token(path)
+            self.assertEqual(first, current.load_access_token(path))
             if os.name != 'nt':
                 self.assertEqual((path/'access.token').stat().st_mode & 0o777, 0o600)
 
     def test_explicit_environment_token_is_never_written_to_disk(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'MIGU_TEST_ACCESS_TOKEN':TOKEN}):
-            self.assertEqual(s.load_access_token(Path(directory), 'MIGU_TEST_ACCESS_TOKEN'), TOKEN)
+            self.assertEqual(current.load_access_token(Path(directory), 'MIGU_TEST_ACCESS_TOKEN'), TOKEN)
             self.assertEqual(list(Path(directory).iterdir()), [])
 
 

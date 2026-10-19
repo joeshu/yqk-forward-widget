@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
-import update_migu as m
+from migu import core as m
 from migu import native as n, service as s
 
 
@@ -99,7 +99,7 @@ class NativeTests(unittest.TestCase):
         service = s.Service(store, '', 'http://127.0.0.1:18768', require_token=False)
         self.addCleanup(service.manifests.close)
         data = service.catalogue(snap)
-        self.assertTrue(data.startswith(b'#EXTM3U\n'))
+        self.assertTrue(data.startswith(b'#EXTM3U '))
         self.assertIn(b'/live/p608807420.m3u8', data)
         self.assertNotIn(b'52top', data)
         self.assertNotIn(b'puData', data)
@@ -136,9 +136,9 @@ class StartupTests(unittest.TestCase):
     def test_default_native_does_not_touch_disk_or_lock_and_tolerates_signal_failure(self):
         server = Mock()
         server.serve_forever.side_effect = KeyboardInterrupt
-        with patch.object(s.Path, 'mkdir', side_effect=PermissionError('readonly')) as mkdir, patch.object(m, 'output_lock', side_effect=OSError('no flock')) as lock, patch.object(s, 'BoundedServer', return_value=server), patch.object(s.signal, 'signal', side_effect=ValueError('embedded runtime')):
+        with patch.object(s.Path, 'mkdir', side_effect=PermissionError('readonly')) as mkdir, patch.object(s, 'BoundedServer', return_value=server), patch.object(s.signal, 'signal', side_effect=ValueError('embedded runtime')):
             self.assertEqual(s.main([]), 0)
-        mkdir.assert_not_called(); lock.assert_not_called()
+        mkdir.assert_not_called()
         server.server_close.assert_called_once()
 
     def test_port_and_directory_errors_identify_stage_without_exposing_sensitive_context(self):
@@ -150,7 +150,7 @@ class StartupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             file = Path(directory)/'not-directory'; file.write_text('x')
             with redirect_stderr(io.StringIO()) as output:
-                self.assertEqual(s.main(['--input', str(file), '--data-dir', str(file)]), 1)
+                self.assertEqual(s.main(['--require-token', '--data-dir', str(file)]), 1)
             self.assertIn('[data-directory]', output.getvalue())
 
     def test_explicit_symlink_directory_is_rejected(self):

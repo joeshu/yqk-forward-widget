@@ -4,7 +4,7 @@ Channel metadata is from Migu's public tv-data API (2026-10-19).
 Protocol field names were checked against develop202/migu_video; no remote code runs.
 """
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 import hashlib
 import json
@@ -14,7 +14,8 @@ import time
 from types import MappingProxyType
 from urllib.parse import parse_qs, urlsplit
 
-import update_migu as m
+from migu import core as m
+from migu.workers import BoundedExecutor
 
 BUILTIN_CHANNELS = (
     ('608807420', 'CCTV1综合', '央视'),
@@ -203,12 +204,12 @@ class NativeStore:
 
     def __init__(self, resolver=native_play_url, clock=time.monotonic):
         self.resolver, self.clock = resolver, clock
-        self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="migu-api")
+        self.pool = BoundedExecutor(max_workers=4, thread_name_prefix="migu-api")
         self.lock = threading.RLock()
         self.flights, self.entries = {}, OrderedDict()
         self.closed, self.last_error, self.fetches = False, None, 0
         channels = {"p" + pid: m.Channel(name, name, name, group, "", "", m.utcnow()) for pid, name, group in BUILTIN_CHANNELS}
-        self.snapshot = NativeSnapshot(m.Playlist(tuple(channels.values()), False), MappingProxyType(channels))
+        self.snapshot = NativeSnapshot(None, MappingProxyType(channels))
 
     def get(self, wait=0):
         with self.lock:
@@ -222,7 +223,7 @@ class NativeStore:
         except Exception as failure:
             url, error = "", str(failure) if isinstance(failure, m.UpdateError) else "MIGU_API_ERROR"
         with self.lock:
-            if self.flights.get(key) is not future:
+            if self.closed or self.flights.get(key) is not future:
                 return
             del self.flights[key]
             self.last_error = error

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a readable, deterministic single-file Migu service; no embedded eval/archive."""
+"""Build the readable native-only single-file release and its stable root alias."""
 import argparse
 import ast
 import hashlib
@@ -7,20 +7,17 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-INPUTS = ('update_migu.py', 'migu/probe.py', 'migu/native.py', 'migu/service.py')
-VERSION = '0.2.1'
+INPUTS = ('migu/core.py', 'migu/workers.py', 'migu/native.py', 'migu/epg.py', 'migu/service.py')
+VERSION = '0.3.0'
 
 
-def strip_module(text, service=False):
+def strip_module(text):
     tree = ast.parse(text)
     remove = set()
     for index, node in enumerate(tree.body):
         discard = index == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
-        discard |= isinstance(node, ast.ImportFrom) and node.module == '__future__'
+        discard |= isinstance(node, ast.ImportFrom) and (node.module == '__future__' or node.module == 'migu' or (node.module or '').startswith('migu.'))
         discard |= isinstance(node, ast.If) and ast.unparse(node.test) in ("__name__ == '__main__'", '__name__ == "__main__"')
-        if service:
-            discard |= isinstance(node, ast.Import) and any(alias.name == 'update_migu' for alias in node.names)
-            discard |= isinstance(node, ast.ImportFrom) and node.module in {'migu.probe', 'migu.native'}
         if discard:
             remove.update(range(node.lineno, node.end_lineno + 1))
     return '\n'.join(line for number, line in enumerate(text.splitlines(), 1) if number not in remove).strip() + '\n'
@@ -28,30 +25,29 @@ def strip_module(text, service=False):
 
 def build():
     sources = {name: (ROOT/name).read_text(encoding='utf-8') for name in INPUTS}
-    upstream_names = {node.name for node in ast.parse(sources['update_migu.py']).body if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
-    service_names = {node.name for node in ast.parse(sources['migu/service.py']).body if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
-    if (upstream_names & service_names) - {'main'}:
-        raise ValueError('Service shadows shared catalogue definitions')
-    tree = ast.parse(sources['migu/probe.py'])
-    helper = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'hls_references')
-    helper_source = ast.get_source_segment(sources['migu/probe.py'], helper)
-    text = (
-        '#!/usr/bin/env python3\n'
-        '"""Migu dynamic service 0.2.1. Generated from the project sources; Python 3.10+."""\n'
-        'from __future__ import annotations\n\n'
-        '# Shared catalogue validation and bounded transport: update_migu.py\n'
-        + strip_module(sources['update_migu.py'])
-        + '\n# Capture shared functions before defining the service CLI.\n'
-        + 'from types import SimpleNamespace as _SharedNamespace\n'
-        + 'm = _SharedNamespace(**{key: value for key, value in globals().copy().items() if not key.startswith("__")})\n\n'
-        + '# Shared HLS validation: migu/probe.py\n' + helper_source + '\n\n'
-        + '# Built-in channel metadata and official API: migu/native.py\n' + strip_module(sources['migu/native.py'], service=True) + '\n'
-        + '# Service implementation: migu/service.py\n' + strip_module(sources['migu/service.py'], service=True)
-        + '\nif __name__ == "__main__":\n    raise SystemExit(main())\n'
-    )
+    names = set()
+    for source in sources.values():
+        current = {node.name for node in ast.parse(source).body if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
+        if names & current:
+            raise ValueError('Duplicate definitions in standalone modules')
+        names |= current
+    text = ('#!/usr/bin/env python3\n'
+            f'"""Migu dynamic service {VERSION}. Standalone Python 3.10+, standard library only."""\n'
+            'from __future__ import annotations\n\n'
+            '# Bounded transport and HLS validation: migu/core.py\n'
+            + strip_module(sources['migu/core.py'])
+            + '\nfrom types import SimpleNamespace as _SharedNamespace\n'
+            + 'm = _SharedNamespace(**{key: value for key, value in globals().copy().items() if not key.startswith("__")})\n\n')
+    for path in INPUTS[1:]:
+        text += f'\n# {path}\n' + strip_module(sources[path])
+    text += '\nif __name__ == "__main__":\n    raise SystemExit(main())\n'
     ast.parse(text)
     data = text.encode('utf-8')
-    manifest = {'version': VERSION, 'artifact': f'migu-live-v{VERSION}.py', 'sha256': hashlib.sha256(data).hexdigest(), 'standalone_alias': 'migu-live.py',
+    for unwanted in (b'52top', b'fcntl', b'CatalogueStore', b'import update_migu', b'ThreadPoolExecutor'):
+        if unwanted in data:
+            raise ValueError('Legacy dependency in native release')
+    manifest = {'version': VERSION, 'artifact': f'migu-live-v{VERSION}.py',
+                'sha256': hashlib.sha256(data).hexdigest(), 'standalone_alias': 'migu-live.py',
                 'inputs': {name: hashlib.sha256(sources[name].encode()).hexdigest() for name in INPUTS}}
     return data, (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2)+'\n').encode()
 

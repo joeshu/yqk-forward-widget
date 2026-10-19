@@ -1,47 +1,29 @@
 #!/usr/bin/env python3
-"""Migu dynamic service 0.2.1. Generated from the project sources; Python 3.10+."""
+"""Migu dynamic service 0.3.0. Standalone Python 3.10+, standard library only."""
 from __future__ import annotations
 
-# Shared catalogue validation and bounded transport: update_migu.py
-#!/usr/bin/env python3
-
-import argparse
-from contextlib import contextmanager
+# Bounded transport and HLS validation: migu/core.py
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
 from http.client import HTTPException
 import json
-import os
-from pathlib import Path
 import re
 import socket
 import ssl
-import stat
-import sys
-import tempfile
 import time
 import unicodedata
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, unquote, urljoin, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-DEFAULT_SOURCE = "http://www.52top.com.cn:678/downloads/migu.txt"
 MAX_BYTES = 8 * 1024 * 1024
 MAX_LINE = 16 * 1024
 CHINA = timezone(timedelta(hours=8))
-EPG_URLS = (
-    "https://develop202.github.io/migu_video/playback.xml",
-    "https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/playback.xml",
-)
-CATCHUP_SOURCE = "&playbackbegin=${(b)yyyyMMddHHmmss}&playbackend=${(e)yyyyMMddHHmmss}"
-EPG_ID_ALIASES = {"上视新闻综合": "上海新闻综合"}
-SOURCE_HOSTS = {"www.52top.com.cn", "52top.com.cn", "raw.githubusercontent.com", "develop202.github.io"}
-ATTR = re.compile(r'([a-z][a-z0-9-]*)="([^"\r\n]*)"')
-CHANNEL_ATTRS = {"tvg-id", "tvg-name", "tvg-logo", "group-title", "svg-id", "svg-name"}
 RETRY_STATUS = {408, 429, 500, 502, 503, 504}
 NON_ASCII_PRINTABLE = re.compile(r'[^\x20-\x7e]')
+
 
 
 class UpdateError(ValueError):
@@ -85,10 +67,8 @@ def validate_url(url, role):
     host = (parts.hostname or "").lower()
     if parts.scheme not in {"http", "https"} or not host or parts.username is not None or parts.password is not None or parts.fragment:
         raise UpdateError("URL_SCHEME_OR_AUTHORITY")
-    if role == "source":
-        allowed = host in SOURCE_HOSTS and port in {None, 443}
-        if parts.scheme == "http":
-            allowed = url == DEFAULT_SOURCE  # Explicit exception for the known legacy source.
+    if role == "epg":
+        allowed = parts.scheme == "https" and host == "program-sc.miguvideo.com" and port in {None, 443} and re.fullmatch(r"/live/v2/tv-programs-data/[0-9]{6,20}/[0-9]{8}", parts.path) is not None and not parts.query
     elif role == "api":
         allowed = parts.scheme == "https" and host == "play.miguvideo.com" and port in {None, 443} and parts.path == "/playurl/v1/play/playurl"
     elif role in {"stream", "media"}:
@@ -106,24 +86,6 @@ def validate_url(url, role):
     return parts
 
 
-def parse_attributes(value, channel=False):
-    attrs, rest = {}, value.strip()
-    while rest and not (channel and rest.startswith(",")):
-        match = ATTR.match(rest)
-        if match is None or match[1] in attrs:
-            raise UpdateError("METADATA_INVALID_OR_DUPLICATE")
-        attrs[match[1]] = match[2]
-        rest = rest[match.end():]
-        if rest and not rest[0].isspace() and not (channel and rest[0] == ","):
-            raise UpdateError("METADATA_SEPARATOR")
-        rest = rest.lstrip()
-    if channel:
-        if not rest.startswith(",") or not rest[1:].strip():
-            raise UpdateError("CHANNEL_NAME_MISSING")
-        return attrs, rest[1:].strip()
-    return attrs
-
-
 @dataclass(frozen=True)
 class Channel:
     id: str
@@ -133,125 +95,6 @@ class Channel:
     logo: str
     url: str
     signed_at: datetime
-
-
-@dataclass(frozen=True)
-class Playlist:
-    channels: tuple[Channel, ...]
-    catchup: bool
-    duplicates_removed: int = 0
-
-    def render(self):
-        header = '#EXTM3U x-tvg-url="' + ",".join(EPG_URLS) + '"'
-        if self.catchup:
-            header += ' catchup="append" catchup-source="' + CATCHUP_SOURCE + '"'
-        lines = [header]
-        for channel in self.channels:
-            attrs = (("tvg-id", channel.id), ("tvg-name", channel.name), ("tvg-logo", channel.logo), ("group-title", channel.group))
-            lines.append("#EXTINF:-1 " + " ".join(f'{key}="{value}"' for key, value in attrs if value) + "," + channel.display)
-            lines.append(channel.url)  # Never decode, reorder, strip or re-sign playback URLs.
-        return ("\n".join(lines) + "\n").encode("utf-8")
-
-
-def parse_playlist(raw):
-    if len(raw) > MAX_BYTES:
-        raise UpdateError("PLAYLIST_TOO_LARGE")
-    try:
-        text = raw.decode("utf-8-sig").replace("\r\n", "\n")
-    except UnicodeError:
-        raise UpdateError("PLAYLIST_NOT_UTF8") from None
-    if not clean_text(text.replace("\n", "")):
-        raise UpdateError("PLAYLIST_CONTROL_CHARACTER")
-    lines = text.split("\n")
-    if any(len(line) > MAX_LINE for line in lines):
-        raise UpdateError("PLAYLIST_LINE_TOO_LONG")
-    if not lines or not (lines[0] == "#EXTM3U" or lines[0].startswith("#EXTM3U ")):
-        raise UpdateError("PLAYLIST_HEADER_INVALID")
-    header = parse_attributes(lines[0][7:])
-    if set(header) - {"x-tvg-url", "tvg-url", "url-tvg", "catchup", "catchup-source"}:
-        raise UpdateError("HEADER_ATTRIBUTE_NOT_ALLOWED")
-    catchup = "catchup" in header or "catchup-source" in header
-    if catchup and (header.get("catchup") != "append" or header.get("catchup-source") != CATCHUP_SOURCE):
-        raise UpdateError("CATCHUP_TEMPLATE_NOT_ALLOWED")
-    channels, seen, duplicates = [], set(), 0
-    pending = None
-    for line in lines[1:]:
-        if not line:
-            continue
-        if line.startswith("#EXTINF:"):
-            if pending is not None or not line.startswith("#EXTINF:-1 "):
-                raise UpdateError("CHANNEL_METADATA_INVALID")
-            attrs, display = parse_attributes(line[len("#EXTINF:-1"):], channel=True)
-            if set(attrs) - CHANNEL_ATTRS:
-                raise UpdateError("CHANNEL_ATTRIBUTE_NOT_ALLOWED")
-            for suffix in ("id", "name"):
-                standard, legacy = "tvg-" + suffix, "svg-" + suffix
-                if standard in attrs and legacy in attrs and attrs[standard] != attrs[legacy]:
-                    raise UpdateError("CHANNEL_ATTRIBUTE_CONFLICT")
-                attrs.setdefault(standard, attrs.get(legacy, display))
-            attrs["tvg-id"] = EPG_ID_ALIASES.get(attrs["tvg-id"], attrs["tvg-id"])
-            if any(not attrs[key] or len(attrs[key]) > 256 for key in ("tvg-id", "tvg-name")) or len(display) > 256 or '"' in display:
-                raise UpdateError("CHANNEL_NAME_INVALID")
-            if attrs.get("tvg-logo"):
-                validate_url(attrs["tvg-logo"], "logo")
-            pending = (attrs, display)
-        elif line.startswith("#"):
-            raise UpdateError("PLAYLIST_DIRECTIVE_NOT_ALLOWED")
-        else:
-            if pending is None:
-                raise UpdateError("URL_WITHOUT_CHANNEL")
-            parts = validate_url(line, "stream")
-            try:
-                params = parse_qs(parts.query, keep_blank_values=True, max_num_fields=100)
-            except ValueError:
-                raise UpdateError("URL_TOO_MANY_PARAMETERS") from None
-            timestamps = params.get("timestamp", [])
-            if len(timestamps) != 1 or re.fullmatch(r"\d{14}", timestamps[0]) is None:
-                raise UpdateError("SIGNATURE_TIMESTAMP_MISSING")
-            try:
-                signed_at = datetime.strptime(timestamps[0], "%Y%m%d%H%M%S").replace(tzinfo=CHINA)
-            except ValueError:
-                raise UpdateError("SIGNATURE_TIMESTAMP_INVALID") from None
-            attrs, display = pending
-            channel = Channel(attrs["tvg-id"], attrs["tvg-name"], display, attrs.get("group-title", ""), attrs.get("tvg-logo", ""), line, signed_at)
-            if channel in seen:
-                duplicates += 1
-            else:
-                seen.add(channel)
-                channels.append(channel)
-            if len(channels) > 2000:
-                raise UpdateError("TOO_MANY_CHANNELS")
-            pending = None
-    if pending is not None or not channels:
-        raise UpdateError("PLAYLIST_EMPTY_OR_TRUNCATED")
-    return Playlist(tuple(channels), catchup, duplicates)
-
-
-def normalize(raw):
-    playlist = parse_playlist(raw)
-    return playlist.render(), len(playlist.channels)
-
-
-def validate_candidate(candidate, previous=None, *, now=None, min_channels=100, min_retention=0.9, max_age_hours=12):
-    now = now or utcnow()
-    if len(candidate.channels) < min_channels:
-        raise UpdateError("TOO_FEW_CHANNELS")
-    # Publication policy, not an inferred token expiry time.
-    for channel in candidate.channels:
-        if channel.signed_at > now + timedelta(minutes=15):
-            raise UpdateError("SIGNATURE_FROM_FUTURE")
-        if channel.signed_at < now - timedelta(hours=max_age_hours):
-            raise UpdateError("SOURCE_SNAPSHOT_TOO_OLD")
-    if previous is not None:
-        previous_ids = {channel.id for channel in previous.channels}
-        candidate_ids = {channel.id for channel in candidate.channels}
-        if len(candidate_ids & previous_ids) < len(previous_ids) * min_retention:
-            raise UpdateError("CHANNEL_RETENTION_TOO_LOW")
-        last_times = {}
-        for channel in previous.channels:
-            last_times[channel.id] = max(last_times.get(channel.id, channel.signed_at), channel.signed_at)
-        if any(channel.id in last_times and channel.signed_at < last_times[channel.id] for channel in candidate.channels):
-            raise UpdateError("SOURCE_SIGNATURE_ROLLBACK")
 
 
 class RestrictedRedirect(HTTPRedirectHandler):
@@ -322,7 +165,7 @@ class HttpClient:
         self.last_url = url
         deadline = time.monotonic() + self.budget
         self.redirector.deadline = deadline
-        request_headers = {"User-Agent": "MiguPlaylistUpdater/2.0", "Accept-Encoding": "identity"}
+        request_headers = {"User-Agent": "MiguLive/0.3", "Accept-Encoding": "identity"}
         request_headers.update(headers or {})
         for attempt in range(self.attempts):
             try:
@@ -379,212 +222,136 @@ class HttpClient:
         raise FetchError("FETCH_FAILED")
 
 
-def atomic_write(output, data):
-    output = Path(output)
-    if output.is_symlink():
-        raise UpdateError("OUTPUT_SYMLINK_NOT_ALLOWED")
-    if output.exists() and output.read_bytes() == data:
-        return False
-    output.parent.mkdir(parents=True, exist_ok=True)
-    mode = stat.S_IMODE(output.stat().st_mode) if output.exists() else 0o644
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=output.parent, delete=False) as handle:
-            temporary = Path(handle.name)
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-            os.chmod(temporary, mode)
-        os.replace(temporary, output)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-    return True
-
-
 def json_bytes(value):
     return (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
-
-def read_json(path):
-    try:
-        if path.stat().st_size > 65536:
-            return {}
-        value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-@contextmanager
-def output_lock(output):
-    output.parent.mkdir(parents=True, exist_ok=True)
-    lock = output.with_name(output.name + ".lock")
-    if lock.is_symlink():
-        raise UpdateError("LOCK_SYMLINK_NOT_ALLOWED")
-    with lock.open("a+b") as handle:
-        try:
-            if os.name == "nt":
-                import msvcrt
-                handle.write(b"0")
-                handle.flush()
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            raise UpdateError("UPDATE_ALREADY_RUNNING") from None
-        try:
-            yield
-        finally:
-            if os.name == "nt":
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            # Closing releases flock; never unlink the inode while another writer waits.
-
-
-def safe_validator(value):
-    return isinstance(value, str) and 0 < len(value) < 512 and clean_text(value) and value.isascii()
-
-
-def refresh(args):
-    output = args.output
-    status_path = args.status or output.with_name(output.stem + "-status.json")
-    with output_lock(output):
-        previous_raw = output.read_bytes() if output.exists() else None
-        previous = parse_playlist(previous_raw) if previous_raw is not None else None
-        status = read_json(status_path)
-        source_hash = digest(args.source.encode())
-        headers = {}
-        if previous_raw is not None and status.get("output_sha256") == digest(previous_raw) and status.get("source_sha256") == source_hash:
-            for key, name in (("etag", "If-None-Match"), ("last_modified", "If-Modified-Since")):
-                if safe_validator(status.get(key)):
-                    headers[name] = status[key]
-        if args.input:
-            with args.input.open("rb") as handle:
-                raw = handle.read(MAX_BYTES + 1)
-            response_headers = {}
-        else:
-            raw, response_headers = HttpClient().get(args.source, headers=headers)
-            if raw is None:
-                if previous is None or not headers:
-                    raise UpdateError("UNEXPECTED_NOT_MODIFIED")
-                validate_candidate(previous, min_channels=args.min_channels, max_age_hours=args.max_age_hours)
-                print("未变化：304；已重新检查本地列表结构和签名时间。")
-                return False
-        candidate = parse_playlist(raw)
-        validate_candidate(candidate, previous, min_channels=args.min_channels, min_retention=0 if args.allow_channel_drop else 0.9, max_age_hours=args.max_age_hours)
-        data = candidate.render()
-        changed = atomic_write(output, data)
-        metadata = {
-            "schema_version": 1,
-            "output_sha256": digest(data),
-            "source_sha256": source_hash,
-            "channels": len(candidate.channels),
-            "groups": len({channel.group for channel in candidate.channels}),
-            "signature_oldest_utc": iso(min(channel.signed_at for channel in candidate.channels)),
-            "signature_newest_utc": iso(max(channel.signed_at for channel in candidate.channels)),
-            "max_snapshot_age_hours": args.max_age_hours,
-            "source_transport": "local" if args.input else urlsplit(args.source).scheme,
-            "source_transport_authenticated": not args.input and urlsplit(args.source).scheme == "https",
-            "validation": "catalogue_structure_and_freshness_only",
-            "playback_verified": False,
-        }
-        for key, header in (("etag", "etag"), ("last_modified", "last-modified")):
-            value = next((v for k, v in response_headers.items() if k.lower() == header), None)
-            if safe_validator(value):
-                metadata[key] = value
-        # No timestamp-only commits. This is a publication record, not a health heartbeat.
-        metadata["published_at_utc"] = iso(utcnow()) if changed or status.get("output_sha256") != digest(data) else status.get("published_at_utc", iso(utcnow()))
-        atomic_write(status_path, json_bytes(metadata))
-        print(f"{'已更新' if changed else '未变化'}：{len(candidate.channels)} 个频道；结构与签名时间检查通过，实际播放未验证。")
-        return changed
-
-
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument("--source", default=DEFAULT_SOURCE)
-    source.add_argument("--input", type=Path)
-    parser.add_argument("--output", type=Path, default=Path("migu.m3u8"))
-    parser.add_argument("--status", type=Path)
-    parser.add_argument("--min-channels", type=int, default=100)
-    parser.add_argument("--max-age-hours", type=float, default=12)
-    parser.add_argument("--allow-channel-drop", action="store_true", help="Explicitly allow removal/replacement of more than 10%% of channel IDs")
-    args = parser.parse_args(argv)
-    if args.min_channels < 1 or not 0 < args.max_age_hours <= 168:
-        parser.error("min-channels must be positive; max-age-hours must be in (0, 168]")
-    targets = [args.output, args.status or args.output.with_name(args.output.stem + "-status.json"), args.output.with_name(args.output.name + ".lock")]
-    if len({path.resolve() for path in targets}) != len(targets) or (args.input and args.input.resolve() in {p.resolve() for p in targets[1:]}):
-        parser.error("output, status and lock paths must be distinct")
-    try:
-        refresh(args)
-    except UpdateError as error:
-        print(f"更新失败：{error}；未用不合格的来源数据覆盖列表。", file=sys.stderr)
-        return 1
-    except (OSError, ValueError):
-        print("更新失败：LOCAL_IO_OR_DATA_ERROR；请检查本地文件和权限。", file=sys.stderr)
-        return 1
-    return 0
-
-# Capture shared functions before defining the service CLI.
-from types import SimpleNamespace as _SharedNamespace
-m = _SharedNamespace(**{key: value for key, value in globals().copy().items() if not key.startswith("__")})
-
-# Shared HLS validation: migu/probe.py
 def hls_references(raw, base):
     try:
         text = raw.decode("utf-8-sig").replace("\r\n", "\n")
     except UnicodeError:
-        raise m.UpdateError("HLS_NOT_UTF8") from None
-    if not m.clean_text(text.replace("\n", "")):
-        raise m.UpdateError("HLS_CONTROL_CHARACTER")
+        raise UpdateError("HLS_NOT_UTF8") from None
+    if not clean_text(text.replace("\n", "")):
+        raise UpdateError("HLS_CONTROL_CHARACTER")
     lines = [line.strip() for line in text.split("\n") if line.strip()]
-    if not lines or lines[0] != "#EXTM3U" or any(len(line) > m.MAX_LINE for line in lines):
-        raise m.UpdateError("HLS_HEADER_INVALID")
+    if not lines or lines[0] != "#EXTM3U" or any(len(line) > MAX_LINE for line in lines):
+        raise UpdateError("HLS_HEADER_INVALID")
     master = any(line.startswith("#EXT-X-STREAM-INF:") for line in lines)
     media = any(line.startswith("#EXTINF:") for line in lines)
     if master and media:
-        raise m.UpdateError("HLS_MIXED_PLAYLIST")
+        raise UpdateError("HLS_MIXED_PLAYLIST")
     references = []
     if master:
         for index, line in enumerate(lines):
             if line.startswith("#EXT-X-STREAM-INF:"):
                 if index + 1 >= len(lines) or lines[index + 1].startswith("#"):
-                    raise m.UpdateError("HLS_VARIANT_MISSING")
+                    raise UpdateError("HLS_VARIANT_MISSING")
                 references.append(urljoin(base, lines[index + 1]))
     elif media:
         if not any(re.fullmatch(r"#EXT-X-TARGETDURATION:[1-9]\d*", line) for line in lines):
-            raise m.UpdateError("HLS_TARGET_DURATION_MISSING")
+            raise UpdateError("HLS_TARGET_DURATION_MISSING")
         pending = False
         for line in lines:
             if line.startswith("#EXTINF:"):
                 if pending:
-                    raise m.UpdateError("HLS_SEGMENT_MISSING")
+                    raise UpdateError("HLS_SEGMENT_MISSING")
                 try:
                     duration = float(line[len("#EXTINF:"):].split(",", 1)[0])
                 except ValueError:
-                    raise m.UpdateError("HLS_DURATION_INVALID") from None
+                    raise UpdateError("HLS_DURATION_INVALID") from None
                 if not 0 < duration < float("inf"):
-                    raise m.UpdateError("HLS_DURATION_INVALID")
+                    raise UpdateError("HLS_DURATION_INVALID")
                 pending = True
             elif not line.startswith("#"):
                 if not pending:
-                    raise m.UpdateError("HLS_SEGMENT_WITHOUT_DURATION")
+                    raise UpdateError("HLS_SEGMENT_WITHOUT_DURATION")
                 references.append(urljoin(base, line))
                 pending = False
         if pending:
-            raise m.UpdateError("HLS_SEGMENT_MISSING")
+            raise UpdateError("HLS_SEGMENT_MISSING")
     if not references:
-        raise m.UpdateError("HLS_EMPTY_PLAYLIST")
+        raise UpdateError("HLS_EMPTY_PLAYLIST")
     for reference in references:
-        m.validate_url(reference, "media")
+        validate_url(reference, "media")
     return "master" if master else "media", references
 
-# Built-in channel metadata and official API: migu/native.py
+from types import SimpleNamespace as _SharedNamespace
+m = _SharedNamespace(**{key: value for key, value in globals().copy().items() if not key.startswith("__")})
+
+
+# migu/workers.py
+from concurrent.futures import Future
+from queue import Queue, Empty, Full
+import threading
+
+
+class BoundedExecutor:
+    def __init__(self, max_workers, thread_name_prefix='migu', max_pending=8):
+        self.max_workers, self.prefix = max_workers, thread_name_prefix
+        self.queue, self.lock = Queue(max_pending), threading.Lock()
+        self.threads, self.closed = [], False
+
+    def submit(self, function, *args, **kwargs):
+        future = Future()
+        with self.lock:
+            if self.closed:
+                raise RuntimeError('Executor already stopped')
+            try:
+                self.queue.put_nowait((future, function, args, kwargs))
+            except Full:
+                raise RuntimeError('Executor queue full') from None
+            if len(self.threads) < self.max_workers:
+                thread = threading.Thread(target=self._run, daemon=True, name=f'{self.prefix}-{len(self.threads)+1}')
+                self.threads.append(thread)
+                try:
+                    thread.start()
+                except BaseException:
+                    self.threads.remove(thread)
+                    self.closed = True
+                    while True:
+                        try: self.queue.get_nowait()[0].cancel()
+                        except Empty: break
+                    raise
+        return future
+
+    def _run(self):
+        while True:
+            try:
+                future, function, args, kwargs = self.queue.get(timeout=.2)
+            except Empty:
+                if self.closed:
+                    return
+                continue
+            if self.closed:
+                future.cancel()
+            elif future.set_running_or_notify_cancel():
+                try:
+                    result = function(*args, **kwargs)
+                except BaseException as failure:
+                    future.set_exception(failure)
+                else:
+                    future.set_result(result)
+            # Release arguments/results before waiting for another task.
+            future = function = args = kwargs = result = None
+            if self.closed:
+                return
+
+    def shutdown(self, wait=False, cancel_futures=True):
+        with self.lock:
+            self.closed = True
+            while True:
+                try:
+                    future, _, _, _ = self.queue.get_nowait()
+                    future.cancel()
+                except Empty:
+                    break
+        if wait:
+            for thread in self.threads:
+                if thread is not threading.current_thread():
+                    thread.join()
+
+# migu/native.py
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 import hashlib
 import json
@@ -782,12 +549,12 @@ class NativeStore:
 
     def __init__(self, resolver=native_play_url, clock=time.monotonic):
         self.resolver, self.clock = resolver, clock
-        self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="migu-api")
+        self.pool = BoundedExecutor(max_workers=4, thread_name_prefix="migu-api")
         self.lock = threading.RLock()
         self.flights, self.entries = {}, OrderedDict()
         self.closed, self.last_error, self.fetches = False, None, 0
         channels = {"p" + pid: m.Channel(name, name, name, group, "", "", m.utcnow()) for pid, name, group in BUILTIN_CHANNELS}
-        self.snapshot = NativeSnapshot(m.Playlist(tuple(channels.values()), False), MappingProxyType(channels))
+        self.snapshot = NativeSnapshot(None, MappingProxyType(channels))
 
     def get(self, wait=0):
         with self.lock:
@@ -801,7 +568,7 @@ class NativeStore:
         except Exception as failure:
             url, error = "", str(failure) if isinstance(failure, m.UpdateError) else "MIGU_API_ERROR"
         with self.lock:
-            if self.flights.get(key) is not future:
+            if self.closed or self.flights.get(key) is not future:
                 return
             del self.flights[key]
             self.last_error = error
@@ -849,13 +616,224 @@ class NativeStore:
             self.closed = True
         self.pool.shutdown(wait=False, cancel_futures=True)
 
-# Service implementation: migu/service.py
+# migu/epg.py
+from concurrent.futures import TimeoutError as FutureTimeout, CancelledError, as_completed
+from datetime import datetime, timedelta, timezone
+import json
+import threading
+import time
+import xml.etree.ElementTree as ET
+
+
+
+def official_programmes(pid, raw, now=None):
+    now = now or m.utcnow()
+    if not isinstance(raw, bytes) or len(raw) > 512*1024:
+        raise m.FetchError('EPG_RESPONSE_TOO_LARGE')
+    try:
+        payload = json.loads(raw)
+        if str(payload.get('code')) != '200':
+            raise m.FetchError('EPG_API_REJECTED')
+        programmes = (payload.get('body') or {}).get('program') or []
+        if not isinstance(programmes, list) or len(programmes) > 7:
+            raise m.FetchError('EPG_API_FORMAT_CHANGED')
+        rows = set()
+        count = 0
+        for group in programmes:
+            for programme in group.get('content') or []:
+                count += 1
+                if count > 1000:
+                    raise m.FetchError('EPG_TOO_MANY_PROGRAMMES')
+                if str(programme.get('pID', pid)) != pid:
+                    continue
+                title = programme.get('contName')
+                begin, end = programme.get('startTime'), programme.get('endTime')
+                if not isinstance(title, str) or not title.strip() or len(title) > 512 or not m.clean_text(title):
+                    continue
+                if type(begin) not in {int, float} or type(end) not in {int, float}:
+                    continue
+                try:
+                    start = datetime.fromtimestamp(begin/1000, timezone.utc)
+                    stop = datetime.fromtimestamp(end/1000, timezone.utc)
+                except (ValueError, OverflowError, OSError):
+                    continue
+                if not timedelta(0) < stop-start <= timedelta(days=2) or stop < now-timedelta(days=1) or start > now+timedelta(days=7):
+                    continue
+                rows.add((start, stop, title))
+        return tuple(sorted(rows))
+    except (ValueError, TypeError, AttributeError) as failure:
+        if isinstance(failure, m.UpdateError):
+            raise
+        raise m.FetchError('EPG_API_FORMAT_CHANGED') from None
+
+
+def render_epg(schedules, now=None):
+    now = now or m.utcnow()
+    root = ET.Element('tv', {'generator-info-name': 'migu-live'})
+    matched, count, latest = set(), 0, None
+    for pid, name, _ in BUILTIN_CHANNELS:
+        channel = ET.SubElement(root, 'channel', {'id': 'p'+pid})
+        ET.SubElement(channel, 'display-name', {'lang': 'zh'}).text = name
+    for pid, _, _ in BUILTIN_CHANNELS:
+        for start, stop, title in schedules.get(pid, ()):
+            if stop < now-timedelta(days=1):
+                continue
+            count += 1
+            if count > 10000:
+                raise m.FetchError('EPG_TOO_MANY_PROGRAMMES')
+            matched.add(pid)
+            node = ET.SubElement(root, 'programme', {'channel': 'p'+pid,
+                'start': start.astimezone(m.CHINA).strftime('%Y%m%d%H%M%S %z'),
+                'stop': stop.astimezone(m.CHINA).strftime('%Y%m%d%H%M%S %z')})
+            ET.SubElement(node, 'title', {'lang': 'zh'}).text = title
+            latest = max(latest, stop) if latest else stop
+    if latest is None or latest <= now:
+        raise m.FetchError('EPG_EMPTY_OR_EXPIRED')
+    raw = ET.tostring(root, encoding='utf-8', xml_declaration=True)
+    if len(raw) > m.MAX_BYTES:
+        raise m.FetchError('EPG_TOO_LARGE')
+    return raw, {'programmes': count, 'matched_channels': len(matched),
+                 'missing_channels': [name for pid, name, _ in BUILTIN_CHANNELS if pid not in matched]}, latest
+
+
+class EpgStore:
+    def __init__(self, client_factory=m.HttpClient, clock=time.monotonic, enabled=True):
+        self.client_factory, self.clock, self.enabled = client_factory, clock, enabled
+        self.lock, self.ready = threading.RLock(), threading.Event()
+        self.pool = BoundedExecutor(1, thread_name_prefix='migu-epg-refresh', max_pending=1)
+        self.downloads = BoundedExecutor(4, thread_name_prefix='migu-epg', max_pending=4)
+        self.future, self.closed, self.data = None, False, None
+        self.details, self.latest, self.last_error, self.updated = {}, None, None, None
+        self.fresh_until, self.retry_at, self.valid_until = 0, 0, 0
+        self.rows, self.day = {}, None
+        self.attempts = {}
+        self.upstream_error = None
+
+    def _usable(self):
+        return self.data is not None and self.clock() < self.valid_until and self.latest > m.utcnow()
+
+    def _fetch(self, pid, day):
+        url = f'https://program-sc.miguvideo.com/live/v2/tv-programs-data/{pid}/{day}'
+        raw, _ = self.client_factory('epg', attempts=1, timeout=5, budget=6).get(url, limit=512*1024)
+        return official_programmes(pid, raw)
+
+    def _publish(self):
+        result = render_epg(self.rows)
+        with self.lock:
+            if self.closed:
+                return
+            self.data, self.details, self.latest = result
+            self.valid_until = self.clock() + 36*3600
+            self.updated = m.iso(m.utcnow())
+            self.ready.set()
+
+    def _refresh(self, day):
+        try:
+            if self.day != day:
+                self.rows, self.attempts, self.day = {}, {}, day
+            failures = 0
+            deadline = time.monotonic() + 120
+            pending = [pid for pid, _, _ in BUILTIN_CHANNELS if self.clock() >= self.attempts.get(pid, 0)]
+            for index in range(0, len(pending), 4):
+                if self.closed or time.monotonic() >= deadline:
+                    break
+                batch = {self.downloads.submit(self._fetch, pid, day): pid for pid in pending[index:index+4]}
+                completed = set()
+                try:
+                    for future in as_completed(batch, timeout=8):
+                        pid = batch[future]
+                        completed.add(future)
+                        try:
+                            rows = future.result()
+                            self.rows[pid] = rows
+                            self.attempts[pid] = self.clock() + (6*3600 if rows else 15*60)
+                            if self.data is None and rows:
+                                try:
+                                    self._publish()  # A slow sibling must not hide ready programmes.
+                                except m.UpdateError:
+                                    pass
+                        except Exception as failure:
+                            failures += 1
+                            with self.lock:
+                                self.upstream_error = str(failure) if isinstance(failure, m.UpdateError) else 'EPG_FETCH_ERROR'
+                            self.attempts[pid] = self.clock() + 15*60
+                except FutureTimeout:
+                    for future in set(batch)-completed:
+                        future.cancel()
+                        self.attempts[batch[future]] = self.clock() + 15*60
+                        failures += 1
+                if self.closed:
+                    return
+                try:
+                    self._publish()  # Publish usable partial data; continue filling other channels.
+                except m.UpdateError:
+                    pass
+            with self.lock:
+                if not self.closed:
+                    self.upstream_error = self.upstream_error if failures else None
+                    self.last_error = 'EPG_REFRESH_PARTIAL_FAILURE' if failures else (None if self.details.get('matched_channels') == len(BUILTIN_CHANNELS) else 'EPG_PARTIAL_OR_FAILED')
+                    self.fresh_until = self.clock() + (60 if len(self.attempts) < len(BUILTIN_CHANNELS) else 15*60)
+                    self.retry_at = self.clock() + 60
+                    if not self._usable():
+                        self.last_error = 'EPG_EMPTY_OR_UNAVAILABLE'
+                    self.ready.set()
+        except Exception as failure:
+            with self.lock:
+                if not self.closed:
+                    self.last_error = str(failure) if isinstance(failure, m.UpdateError) else 'EPG_REFRESH_ERROR'
+                    self.retry_at = self.clock() + 60
+                    self.ready.set()
+        finally:
+            with self.lock:
+                self.future = None
+
+    def get(self, wait=5):
+        with self.lock:
+            if not self.enabled:
+                raise m.FetchError('EPG_DISABLED')
+            if self.closed:
+                raise m.FetchError('SERVICE_STOPPING')
+            day = m.utcnow().astimezone(m.CHINA).strftime('%Y%m%d')
+            usable = self._usable()
+            if usable and self.clock() < self.fresh_until and self.day == day:
+                return self.data
+            if self.future is None and (self.clock() >= self.retry_at or self.day != day):
+                if not usable:
+                    self.ready.clear()
+                self.future = self.pool.submit(self._refresh, day)
+            if usable:
+                return self.data
+            future = self.future
+        if future is not None:
+            try:
+                future.result(timeout=wait)
+            except (FutureTimeout, CancelledError):
+                pass
+        with self.lock:
+            if self.closed:
+                raise m.FetchError('SERVICE_STOPPING')
+            if self._usable():
+                return self.data
+            raise m.FetchError(self.last_error or 'EPG_LOADING')
+
+    def status(self):
+        with self.lock:
+            return {'enabled': self.enabled, 'source': 'migu-official', 'ready': self._usable(),
+                    'refreshing': self.future is not None, 'updated_utc': self.updated,
+                    'last_error': self.last_error, 'upstream_error': self.upstream_error, **self.details}
+
+    def close(self):
+        with self.lock:
+            self.closed = True
+            self.ready.set()
+        self.pool.shutdown(wait=False)
+        self.downloads.shutdown(wait=False)
+
+# migu/service.py
 import argparse
 from collections import OrderedDict, deque
-from contextlib import nullcontext
-from concurrent.futures import CancelledError, ThreadPoolExecutor, TimeoutError as FutureTimeout
-from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from concurrent.futures import CancelledError, TimeoutError as FutureTimeout
+import socket
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
@@ -869,21 +847,30 @@ import sys
 import tempfile
 import threading
 import time
-from types import MappingProxyType
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
+EVENT_MESSAGES = {
+    "HTTP_SERVER_STARTED": "本地 HTTP 服务已启动",
+    "MIGU_REGION_RESTRICTED": "咪咕限制当前出口地区",
+    "MIGU_LOGIN_OR_MEMBERSHIP_REQUIRED": "当前匿名模式没有所需登录或会员权限",
+    "MIGU_API_FORMAT_CHANGED": "咪咕接口格式变化，需要更新适配",
+    "MIGU_PLAY_URL_FORMAT_CHANGED": "播放地址格式变化，需要更新适配",
+    "NETWORK_ERROR": "网络连接失败或请求超时",
+    "TLS_ERROR": "TLS 证书校验失败",
+    "EPG_LOADING": "节目单正在后台加载，请稍后刷新",
+    "EPG_EMPTY_OR_UNAVAILABLE": "暂未取得有效节目单，请查看节目单状态",
+    "EPG_DISABLED": "节目单已关闭",
+}
 URI_ATTRIBUTE = re.compile(r'(?<![\w-])URI="([^"\r\n]*)"')
-
 
 class ServiceError(Exception):
     def __init__(self, code, status=503):
         super().__init__(code)
         self.code, self.status = code, status
-
 
 class Diagnostics:
     """Small per-service ring; only fixed event codes, never exception text/URLs."""
@@ -902,17 +889,16 @@ class Diagnostics:
             self.last.move_to_end(code)
             while len(self.last) > 64:
                 self.last.popitem(last=False)
-            line = {"time_utc": m.iso(m.utcnow()), "code": code}
+            line = {"time_utc": m.iso(m.utcnow()), "code": code, "message": EVENT_MESSAGES.get(code, "")}
             self.events.append(line)
         try:
-            print(f"[{line['time_utc']}] {code}", flush=True)
+            print(f"[{line['time_utc']}] {code} {line['message']}", flush=True)
         except (OSError, ValueError):
             pass  # A closed app console must not interrupt serving a player.
 
     def snapshot(self):
         with self.lock:
             return list(self.events)
-
 
 def read_private(path, limit):
     if path.is_symlink():
@@ -922,23 +908,6 @@ def read_private(path, limit):
     if len(raw) > limit:
         raise ServiceError("CACHE_TOO_LARGE")
     return raw
-
-
-def private_write(path, data):
-    if path.is_symlink():
-        raise ServiceError("CACHE_SYMLINK_NOT_ALLOWED")
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
-            temporary = Path(handle.name)  # 0600; never use the public updater's 0644 default.
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-
 
 def load_access_token(directory, variable=None):
     if variable:
@@ -962,157 +931,6 @@ def load_access_token(directory, variable=None):
         raise ServiceError("TOKEN_MUST_BE_32_TO_128_URLSAFE_CHARACTERS")
     return token
 
-
-def channel_key(channel):
-    programme = parse_qs(urlsplit(channel.url).query).get("ProgramID", [""])[0]
-    return "p" + programme if re.fullmatch(r"\d{1,20}", programme) else "n" + m.digest(channel.id.encode())[:24]
-
-
-@dataclass(frozen=True)
-class Snapshot:
-    playlist: m.Playlist
-    channels: object
-    raw: bytes
-
-
-def make_snapshot(playlist):
-    channels = {}
-    for channel in playlist.channels:
-        key = channel_key(channel)
-        if key in channels and channels[key].id != channel.id:
-            raise ServiceError("CHANNEL_ID_COLLISION")
-        channels.setdefault(key, channel)
-    return Snapshot(playlist, MappingProxyType(channels), playlist.render())
-
-
-class CatalogueStore:
-    """One bounded source refresh, shared by all channels and all viewers."""
-    def __init__(self, directory, *, source=m.DEFAULT_SOURCE, input_path=None, refresh_seconds=60,
-                 max_age_hours=12, min_channels=100, client_factory=m.HttpClient, clock=time.monotonic):
-        self.directory, self.source, self.input_path = directory, source, input_path
-        self.refresh_seconds, self.max_age_hours, self.min_channels = refresh_seconds, max_age_hours, min_channels
-        self.client_factory, self.clock = client_factory, clock
-        self.lock = threading.Lock()
-        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="migu-catalogue")
-        self.future, self.snapshot, self.closed = None, None, False
-        self.fresh_until, self.retry_at, self.failures = 0, 0, 0
-        self.last_error, self.refreshes, self.last_success = None, 0, None
-        self.cache = directory / "catalogue.m3u8"
-        self.meta_path = directory / "catalogue-meta.json"
-        self.source_id = m.digest(("file:" + str(input_path.resolve()) if input_path else source).encode())
-        try:
-            candidate = m.parse_playlist(read_private(self.cache, m.MAX_BYTES))
-            self._validate(candidate)
-            self.snapshot = make_snapshot(candidate)
-        except (OSError, ValueError, ServiceError):
-            pass  # Startup never describes an expired or malformed disk cache as usable.
-
-    def _validate(self, candidate, previous=None):
-        m.validate_candidate(candidate, previous, min_channels=self.min_channels, max_age_hours=self.max_age_hours)
-
-    def _usable(self, snapshot):
-        if snapshot is None:
-            return False
-        try:
-            self._validate(snapshot.playlist)
-            return True
-        except m.UpdateError:
-            return False
-
-    def _refresh(self):
-        try:
-            with self.lock:
-                previous = self.snapshot
-            metadata = m.read_json(self.meta_path) if not self.meta_path.is_symlink() else {}
-            headers = {}
-            if previous and metadata.get("source_sha256") == self.source_id and metadata.get("output_sha256") == m.digest(previous.raw):
-                for key, name in (("etag", "If-None-Match"), ("last_modified", "If-Modified-Since")):
-                    if m.safe_validator(metadata.get(key)):
-                        headers[name] = metadata[key]
-            if self.input_path:
-                raw, response_headers = read_private(self.input_path, m.MAX_BYTES), {}
-            else:
-                client = self.client_factory(attempts=2, timeout=6, budget=15)
-                raw, response_headers = client.get(self.source, headers=headers)
-            if raw is None:
-                if previous is None or not headers:
-                    raise ServiceError("UNEXPECTED_NOT_MODIFIED")
-                candidate = previous.playlist
-            else:
-                candidate = m.parse_playlist(raw)
-            self._validate(candidate, previous.playlist if previous else None)
-            snapshot = make_snapshot(candidate)
-            metadata = {"source_sha256": self.source_id, "output_sha256": m.digest(snapshot.raw)}
-            for key, header in (("etag", "etag"), ("last_modified", "last-modified")):
-                value = next((value for name, value in response_headers.items() if name.lower() == header), None)
-                if raw is None:
-                    value = headers.get("If-None-Match" if key == "etag" else "If-Modified-Since")
-                if m.safe_validator(value):
-                    metadata[key] = value
-            with self.lock:
-                if self.closed:
-                    return
-            # Disk failure leaves the previous in-memory generation untouched.
-            if previous is None or previous.raw != snapshot.raw:
-                private_write(self.cache, snapshot.raw)
-            encoded_metadata = m.json_bytes(metadata)
-            if not self.meta_path.exists() or read_private(self.meta_path, 65536) != encoded_metadata:
-                private_write(self.meta_path, encoded_metadata)
-            with self.lock:
-                self.snapshot = snapshot
-                self.fresh_until = self.clock() + self.refresh_seconds
-                self.failures, self.retry_at, self.last_error = 0, 0, None
-                self.refreshes += 1
-                self.last_success = m.iso(m.utcnow())
-        except Exception as error:
-            with self.lock:
-                self.failures += 1
-                self.retry_at = self.clock() + min(60, 5 * 2 ** min(self.failures - 1, 4))
-                self.last_error = str(error) if isinstance(error, (m.UpdateError, ServiceError)) else "SOURCE_OR_CACHE_ERROR"
-        finally:
-            with self.lock:
-                self.future = None
-
-    def get(self, wait=5):
-        with self.lock:
-            if self.closed:
-                raise ServiceError("SERVICE_STOPPING")
-            usable = self.snapshot if self._usable(self.snapshot) else None
-            now = self.clock()
-            if usable and now < self.fresh_until:
-                return usable
-            if self.future is None and now >= self.retry_at:
-                self.future = self.pool.submit(self._refresh)
-            future = self.future
-            if usable:
-                return usable  # stale-while-refresh, within absolute signature-age policy only.
-        if future is not None:
-            try:
-                future.result(timeout=wait)
-            except FutureTimeout:
-                raise ServiceError("CATALOGUE_LOADING") from None
-            except CancelledError:
-                raise ServiceError("SERVICE_STOPPING") from None
-        with self.lock:
-            if self._usable(self.snapshot):
-                return self.snapshot
-            raise ServiceError(self.last_error or "CATALOGUE_UNAVAILABLE")
-
-    def status(self):
-        with self.lock:
-            ready = self._usable(self.snapshot)
-            return {"catalogue_ready": ready, "channels": len(self.snapshot.channels) if ready else 0,
-                    "refreshing": self.future is not None, "refreshes": self.refreshes,
-                    "last_source_success_utc": self.last_success, "last_error": self.last_error,
-                    "source_transport": "local" if self.input_path else urlsplit(self.source).scheme,
-                    "playback_verified": False}
-
-    def close(self):
-        with self.lock:
-            self.closed = True
-        self.pool.shutdown(wait=False, cancel_futures=True)
-
-
 def rewrite_manifest(raw, final_url):
     hls_references(raw, final_url)  # Reject HTML/empty/truncated or non-media catalogues.
     text = raw.decode("utf-8-sig").replace("\r\n", "\n")
@@ -1131,13 +949,12 @@ def rewrite_manifest(raw, final_url):
         lines.append(line)
     return ("\n".join(lines) + "\n").encode("utf-8")
 
-
 class ManifestCache:
     """At most four fetches/eight pending keys; bounded shared results and failures."""
     def __init__(self, client_factory=m.HttpClient, clock=time.monotonic):
         self.client_factory, self.clock = client_factory, clock
         self.lock = threading.RLock()
-        self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="migu-manifest")
+        self.pool = BoundedExecutor(max_workers=4, thread_name_prefix="migu-manifest")
         self.flights, self.entries = {}, OrderedDict()
         self.closed, self.bytes, self.fetches = False, 0, 0
 
@@ -1155,7 +972,7 @@ class ManifestCache:
             data = b""
             error = str(failure) if isinstance(failure, (m.UpdateError, ServiceError)) else "UPSTREAM_ERROR"
         with self.lock:
-            if self.flights.get(key) is not future:
+            if self.closed or self.flights.get(key) is not future:
                 return
             del self.flights[key]
             old = self.entries.pop(key, None)
@@ -1203,46 +1020,30 @@ class ManifestCache:
             self.closed = True
         self.pool.shutdown(wait=False, cancel_futures=True)
 
-
-def catchup_suffix(query):
-    start, end = query.get("playbackbegin"), query.get("playbackend")
-    if not start and not end:
-        return ""
-    if not start or not end or any(re.fullmatch(r"\d{14}", value) is None for value in (start[0], end[0])):
-        raise ServiceError("CATCHUP_TIME_INVALID", 400)
-    try:
-        begin = datetime.strptime(start[0], "%Y%m%d%H%M%S").replace(tzinfo=m.CHINA)
-        finish = datetime.strptime(end[0], "%Y%m%d%H%M%S").replace(tzinfo=m.CHINA)
-    except ValueError:
-        raise ServiceError("CATCHUP_TIME_INVALID", 400) from None
-    now = m.utcnow()
-    if not begin < finish or finish - begin > timedelta(days=1) or begin < now - timedelta(days=7) or finish > now + timedelta(minutes=5):
-        raise ServiceError("CATCHUP_TIME_OUT_OF_POLICY", 400)
-    return "&playbackbegin=" + start[0] + "&playbackend=" + end[0]
-
-
 class Service:
-    def __init__(self, store, token, public_base, mode="redirect", manifests=None, require_token=True):
+    def __init__(self, store, token, public_base, mode="redirect", manifests=None, require_token=True, epg=None):
         self.store, self.token, self.public_base, self.mode = store, token, public_base.rstrip("/"), mode
         self.manifests = manifests or ManifestCache()
         self.require_token = require_token
         self.diagnostics = Diagnostics()
+        self.epg = epg or EpgStore()
+        self.runtime = {"python": sys.version.split()[0], "platform": sys.platform,
+                        "main_thread": threading.current_thread() is threading.main_thread()}
 
     def catalogue(self, snapshot):
         suffix = "?token=" + self.token if self.require_token else ""
-        channels = [replace(channel, url=f"{self.public_base}/live/{key}.m3u8{suffix}") for key, channel in snapshot.channels.items()]
-        rendered = m.Playlist(tuple(channels), snapshot.playlist.catchup).render()
-        if getattr(self.store, "provider", None) == "migu":
-            # Native mode has no external EPG dependency and advertises no unverified catchup.
-            rendered = b"#EXTM3U\n" + rendered.split(b"\n", 1)[1]
-        if not self.require_token:
-            rendered = rendered.replace(('catchup-source="' + m.CATCHUP_SOURCE).encode(), ('catchup-source="?' + m.CATCHUP_SOURCE[1:]).encode(), 1)
-        return rendered
+        epg_url = f'{self.public_base}/epg.xml{suffix}'
+        header = '#EXTM3U' + (f' x-tvg-url="{epg_url}"' if self.epg.enabled else '')
+        lines = [header]
+        for key, channel in snapshot.channels.items():
+            lines.append(f'#EXTINF:-1 tvg-id="{key}" tvg-name="{channel.name}" group-title="{channel.group}",{channel.display}')
+            lines.append(f'{self.public_base}/live/{key}.m3u8{suffix}')
+        return ('\n'.join(lines)+'\n').encode('utf-8')
 
     def close(self):
         self.store.close()
         self.manifests.close()
-
+        self.epg.close()
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "migu-live/" + VERSION
@@ -1301,10 +1102,13 @@ class Handler(BaseHTTPRequestHandler):
                 raise ServiceError("AUTH_REQUIRED", 401)
             if parts.path == "/diag":
                 self.send_body(200, m.json_bytes({"service": "migu-live", "version": VERSION,
-                    "status": service.store.status(), "events": service.diagnostics.snapshot()}))
+                    "runtime": service.runtime, "status": {**service.store.status(), "epg": service.epg.status()}, "events": service.diagnostics.snapshot()}))
                 return
             if parts.path in {"/", "/health", "/status"}:
-                self.send_body(200, m.json_bytes({"service": "migu-live", "version": VERSION, "process_up": True, "mode": service.mode, **service.store.status()}))
+                self.send_body(200, m.json_bytes({"service": "migu-live", "version": VERSION, "process_up": True, "mode": service.mode, "runtime": service.runtime, **service.store.status(), "epg": service.epg.status()}))
+                return
+            if parts.path == "/epg.xml":
+                self.send_body(200, service.epg.get(), "application/xml; charset=utf-8")
                 return
             if parts.path not in {"/all.m3u", "/migu.m3u8"} and re.fullmatch(r"/live/[pn][0-9a-f]{1,24}\.m3u8", parts.path) is None:
                 raise ServiceError("NOT_FOUND", 404)
@@ -1316,10 +1120,9 @@ class Handler(BaseHTTPRequestHandler):
             channel = snapshot.channels.get(key)
             if channel is None:
                 raise ServiceError("CHANNEL_NOT_FOUND", 404)
-            suffix = catchup_suffix(query)
-            if suffix and not snapshot.playlist.catchup:
+            if "playbackbegin" in query or "playbackend" in query:
                 raise ServiceError("CATCHUP_UNAVAILABLE", 400)
-            url = service.store.resolve(key) if getattr(service.store, "provider", None) == "migu" else channel.url + suffix
+            url = service.store.resolve(key)
             m.validate_url(url, "media")
             if service.mode == "redirect":
                 self.send_body(302, Location=url)
@@ -1331,13 +1134,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_body(error.status, m.json_bytes({"error": error.code}), **({"Retry_After": "3"} if error.status == 503 else {}))
         except m.UpdateError as error:
             service.diagnostics.record(str(error))
-            self.send_body(502, m.json_bytes({"error": str(error)}))
+            code = str(error)
+            status = 404 if code == "EPG_DISABLED" else 503 if code in {"EPG_LOADING", "EPG_UNAVAILABLE", "MIGU_API_LOADING", "MIGU_API_CAPACITY"} or code.startswith("EPG_") else 502
+            self.send_body(status, m.json_bytes({"error": code}), **({"Retry_After": "3"} if status == 503 else {}))
         except (ValueError, OSError):
             self.send_body(400, m.json_bytes({"error": "REQUEST_OR_IO_ERROR"}))
 
-
 class BoundedServer(ThreadingHTTPServer):
     daemon_threads = True
+    allow_reuse_address = True
     request_queue_size = 32
 
     def __init__(self, address, service, max_clients=32):
@@ -1345,12 +1150,32 @@ class BoundedServer(ThreadingHTTPServer):
             raise ServiceError("NON_LOOPBACK_REQUIRES_TOKEN")
         self.service = service
         self.slots = threading.BoundedSemaphore(max_clients)
+        self.connections, self.connection_lock = set(), threading.Lock()
         super().__init__(address, Handler)
 
     def get_request(self):
         sock, address = super().get_request()
         sock.settimeout(10)
+        with self.connection_lock:
+            self.connections.add(sock)
         return sock, address
+
+    def shutdown_request(self, request):
+        with self.connection_lock:
+            self.connections.discard(request)
+        super().shutdown_request(request)
+
+    def server_close(self):
+        super().server_close()
+        with self.connection_lock:
+            connections = list(self.connections)
+            self.connections.clear()
+        for connection in connections:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            connection.close()
 
     def process_request(self, request, client_address):
         if not self.slots.acquire(blocking=False):
@@ -1375,10 +1200,8 @@ class BoundedServer(ThreadingHTTPServer):
     def handle_error(self, request, client_address):
         pass  # Socket errors must not print a traceback containing request context.
 
-
 def stop_from_signal(*unused):
     raise KeyboardInterrupt()
-
 
 def service_data_directory(explicit=None):
     """Never assume the app's current working directory is writable."""
@@ -1391,88 +1214,83 @@ def service_data_directory(explicit=None):
         handle.flush()
     return directory
 
-
 def startup_error(stage, error):
     code = str(error) if isinstance(error, (ServiceError, m.UpdateError)) else type(error).__name__
     number = getattr(error, "errno", None)
     print(f"Startup failed [{stage}]: {code}" + (f" (errno={number}: {os.strerror(number)})" if number else ""), file=sys.stderr, flush=True)
     if stage == "bind":
         print("端口可能被占用，或当前 App 不允许本地监听；可尝试其他端口。", file=sys.stderr)
-    elif stage in {"data-directory", "cache-lock", "access-token"}:
-        print("请检查 App 的可写目录；默认官方取源、仅本机访问无需缓存目录或文件锁。", file=sys.stderr)
-
+    elif stage in {"data-directory", "access-token"}:
+        print("请检查访问令牌的可写目录；默认本机模式只使用内存。", file=sys.stderr)
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("port", type=int, nargs="?", default=DEFAULT_PORT)
     parser.add_argument("--bind", default="127.0.0.1")
-    parser.add_argument("--public-base", help="Fixed external URL; never inferred from Host/Forwarded headers")
-    parser.add_argument("--data-dir", type=Path, help="Private writable cache directory; native local mode writes no files")
-    parser.add_argument("--token-env", help="Explicit environment variable holding a URL-safe access token")
-    parser.add_argument("--require-token", action="store_true", help="Also require a token for local-only requests")
+    parser.add_argument("--public-base", help="Fixed external HTTP(S) URL")
+    parser.add_argument("--data-dir", type=Path, help="Only needed for a persistent service access token")
+    parser.add_argument("--token-env", help="Environment variable holding the service access token")
+    parser.add_argument("--require-token", action="store_true")
     parser.add_argument("--mode", choices=("redirect", "manifest"), default="redirect")
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument("--source", help="Explicit legacy catalogue URL; default uses built-in official Migu API")
-    source.add_argument("--input", type=Path)
-    parser.add_argument("--refresh-seconds", type=float, default=60)
-    parser.add_argument("--max-age-hours", type=float, default=12)
-    parser.add_argument("--min-channels", type=int, default=100)
+    parser.add_argument("--no-epg", action="store_true", help="Disable the XMLTV feed")
     args = parser.parse_args(argv)
     stage = "configuration"
     try:
         address = ipaddress.IPv4Address(args.bind)
-        if not 1 <= args.port <= 65535 or not 5 <= args.refresh_seconds <= 3600 or not 0 < args.max_age_hours <= 168 or args.min_channels < 1:
-            parser.error("port, refresh interval, age policy or minimum channel count is invalid")
+        if not 1 <= args.port <= 65535:
+            parser.error("port must be between 1 and 65535")
         base = args.public_base or f"http://{args.bind}:{args.port}"
         parts = urlsplit(base)
         if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username is not None or parts.password is not None or parts.query or parts.fragment or not m.clean_text(base) or any(ch.isspace() or ch in ('"', '<', '>', '\\') for ch in base):
             parser.error("public-base must be a fixed HTTP(S) URL without credentials/query/fragment")
         if not address.is_loopback and not args.public_base:
             parser.error("non-loopback bind requires an explicit --public-base")
-        if args.source:
-            m.validate_url(args.source, "source")
         try:
             public_loopback = ipaddress.ip_address(parts.hostname).is_loopback
         except ValueError:
             public_loopback = parts.hostname == "localhost"
         require_token = args.require_token or bool(args.token_env) or not address.is_loopback or not public_loopback
-        legacy = bool(args.source or args.input)
-        if legacy or (require_token and not args.token_env):
+        if require_token and not args.token_env:
             stage = "data-directory"
             args.data_dir = service_data_directory(args.data_dir)
         stage = "access-token"
         token = load_access_token(args.data_dir, args.token_env) if require_token else ""
-        stage = "cache-lock"
-        with m.output_lock(args.data_dir / "runtime") if legacy else nullcontext():
-            stage = "provider"
-            store = CatalogueStore(args.data_dir, source=args.source or m.DEFAULT_SOURCE, input_path=args.input, refresh_seconds=args.refresh_seconds, max_age_hours=args.max_age_hours, min_channels=args.min_channels) if legacy else NativeStore()
-            service = Service(store, token, base, args.mode, require_token=require_token)
+        stage = "provider"
+        service = Service(NativeStore(), token, base, args.mode, require_token=require_token, epg=EpgStore(enabled=not args.no_epg))
+        previous_signal = None
+        try:
+            stage = "bind"
+            server = BoundedServer((args.bind, args.port), service)
             try:
-                stage = "bind"
-                server = BoundedServer((args.bind, args.port), service)
-                previous_signal = None
-                try:
-                    if threading.current_thread() is threading.main_thread():
+                if threading.current_thread() is threading.main_thread():
+                    try:
                         previous_signal = signal.signal(signal.SIGTERM, stop_from_signal)
-                except (OSError, ValueError, AttributeError):
-                    print("当前运行环境不支持 SIGTERM；请使用 App 的停止按钮。", file=sys.stderr)
-                print(f"migu-live {VERSION}; provider={'legacy' if legacy else 'official-api'}; mode={args.mode}; listening={args.bind}:{args.port}", flush=True)
-                print(f"[系统] HTTP 服务启动成功；{'第三方列表按需加载' if legacy else '内置频道 ' + str(len(store.get().channels)) + ' 个，官方取源按需进行'}。", flush=True)
-                print(f"Subscription: {base.rstrip('/')}/all.m3u" + ("?token=<access-token>" if require_token else ""), flush=True)
-                print(f"Diagnostics: {base.rstrip('/')}/diag" + ("?token=<access-token>" if require_token else ""), flush=True)
-                service.diagnostics.record("HTTP_SERVER_STARTED")
+                    except (OSError, ValueError, AttributeError):
+                        print("[系统] 信号接口不可用，请使用 App 停止按钮。", flush=True)
+                print(f"migu-live {VERSION}; provider=official-api; mode={args.mode}; listening={args.bind}:{args.port}", flush=True)
+                print(f"[环境] Python {service.runtime['python']}; system={service.runtime['platform']}; main_thread={threading.current_thread() is threading.main_thread()}", flush=True)
+                print(f"[系统] HTTP 服务启动成功；内置频道 {len(service.store.get().channels)} 个，官方取源按需进行。", flush=True)
+                suffix = "?token=<access-token>" if require_token else ""
+                for label, path in (("Subscription", "/all.m3u"), ("Diagnostics", "/diag")):
+                    print(f"{label}: {base.rstrip('/')}{path}{suffix}", flush=True)
+                if not args.no_epg:
+                    print(f"EPG: {base.rstrip('/')}/epg.xml{suffix}", flush=True)
                 if require_token:
                     print("Token: explicit environment variable" if args.token_env else f"Token file: {args.data_dir / 'access.token'}", flush=True)
-                try:
-                    stage = "serve"
-                    server.serve_forever(poll_interval=0.2)
-                finally:
-                    server.server_close()
-                    if previous_signal is not None:
-                        signal.signal(signal.SIGTERM, previous_signal)
+                service.diagnostics.record("HTTP_SERVER_STARTED")
+                stage = "serve"
+                server.serve_forever(poll_interval=0.2)
             finally:
-                service.close()
+                server.server_close()
+                if previous_signal is not None:
+                    try:
+                        signal.signal(signal.SIGTERM, previous_signal)
+                    except (OSError, ValueError):
+                        pass
+        finally:
+            service.close()
     except KeyboardInterrupt:
+        print("[系统] 服务已停止，监听端口已释放。", flush=True)
         return 0
     except (OSError, ValueError, ServiceError, RuntimeError, ImportError) as error:
         startup_error(stage, error)

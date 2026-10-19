@@ -6,8 +6,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from migu import service as s
-import test_service as fixtures
-from test_service import TOKEN
+import live_fixture as fixtures
+from live_fixture import TOKEN
 
 
 class DiagnosticsTests(unittest.TestCase):
@@ -46,19 +46,19 @@ class DiagnosticsTests(unittest.TestCase):
 
 class DiagnosticHttpTests(unittest.TestCase):
     # Reuse the real HTTP fixture without inheriting and duplicating its tests.
-    server=fixtures.HttpTests.server
-    request=fixtures.HttpTests.request
+    server=fixtures.server
+    request=fixtures.request
 
     def test_diag_has_same_auth_and_host_controls_and_does_not_refresh_source(self):
         with self.server() as (server, service):
-            before=service.store.status()['refreshes']
+            before=service.store.status()['api_requests']
             service.diagnostics.record('UPSTREAM_ERROR')
             code,headers,body=self.request(server,'/diag')
             self.assertEqual(code,200)
             data=json.loads(body)
             self.assertEqual(data['events'][-1]['code'],'UPSTREAM_ERROR')
             self.assertFalse(data['status']['playback_verified'])
-            self.assertEqual(service.store.status()['refreshes'],before)
+            self.assertEqual(service.store.status()['api_requests'],before)
             self.assertEqual(headers['Cache-Control'],'no-store')
             self.assertNotIn(b'source-private',body)
             self.assertEqual(self.request(server,'/diag',headers={'Host':'evil.example'})[0],403)
