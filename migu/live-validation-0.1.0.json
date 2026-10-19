@@ -1,0 +1,32 @@
+{
+  "artifact_sha256": "6ab69ddd778e103237149dce25f10b603db8a266e1ec61a0619bd1f1dcb60e17",
+  "checked_at_utc": "2026-10-19T13:52:26+00:00",
+  "modes": [
+    {
+      "channel_http": 302,
+      "channels": 112,
+      "entry_kind": "master",
+      "local_subscription_without_token": true,
+      "media_manifest_accessible": true,
+      "mode": "redirect",
+      "redirect_host": "gslbmgsplive.miguvideo.com",
+      "segment_references": 4,
+      "shutdown_exit": 0,
+      "subscription_http": 200
+    },
+    {
+      "channel_http": 200,
+      "channels": 112,
+      "entry_kind": "master",
+      "local_subscription_without_token": true,
+      "media_manifest_accessible": true,
+      "mode": "manifest",
+      "segment_references": 4,
+      "shutdown_exit": 0,
+      "subscription_http": 200
+    }
+  ],
+  "scope": "Local standalone service plus current cloud network; no device playback validation.",
+  "video_decoded": false,
+  "video_segments_downloaded": false
+}

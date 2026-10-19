@@ -1,0 +1,10 @@
+{
+  "artifact": "migu-live-v0.1.0.py",
+  "inputs": {
+    "migu/probe.py": "ecb7d11c4ca2d7da178da2817e8694e183b6cabc069000885fe8d05ba48a457b",
+    "migu/service.py": "e30c32423e8792b47fc2bff811d5a22363047dec41f945e4dfdd797ed1107093",
+    "update_migu.py": "fe4b44f19ced347d550061208f94e2243058ce99d016af4dd1e4d26e690279b2"
+  },
+  "sha256": "6ab69ddd778e103237149dce25f10b603db8a266e1ec61a0619bd1f1dcb60e17",
+  "version": "0.1.0"
+}

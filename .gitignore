@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 /migu.m3u8.lock
 /migu-check.json
+/migu-live-data/
 catpaw/dist/
 joeshu-catpaw-storage.json*
 
