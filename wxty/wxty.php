@@ -24,6 +24,7 @@ final class WxtyGateway
     private $transport;
     private $resolver;
     private $decryptor;
+    private $curlHandle = null;
     private float $deadline = 0;
     private int $requests = 0;
     private array $dns = [];
@@ -45,12 +46,13 @@ final class WxtyGateway
             'timeout' => 20, 'http_timeout' => 6, 'max_requests' => 16, 'max_candidates' => 8,
             'scan_days' => 7, 'url_ttl' => 600, 'min_left' => 90,
             'max_bytes' => 2 * 1024 * 1024, 'max_cache_files' => 256,
+            'playlist_ttl' => 1,
         ], $config);
         if (!in_array($this->config['network_mode'], ['compatible', 'validated'], true)) {
             throw new WxtyError('invalid-network-mode');
         }
         foreach (['timeout' => [5, 60], 'http_timeout' => [1, 15], 'max_requests' => [1, 40],
-            'max_candidates' => [1, 20], 'scan_days' => [1, 7]] as $key => [$min, $max]) {
+            'max_candidates' => [1, 20], 'scan_days' => [1, 7], 'playlist_ttl' => [0, 2]] as $key => [$min, $max]) {
             $value = $env('KK_' . strtoupper($key), (string) $this->config[$key]);
             $this->config[$key] = max($min, min($max, (int) $value));
         }
@@ -70,6 +72,11 @@ final class WxtyGateway
                 throw new WxtyError('invalid-proxy-config');
             }
         }
+    }
+
+    public function __destruct()
+    {
+        if ($this->curlHandle !== null) curl_close($this->curlHandle);
     }
 
     private function checkBudget(): void
@@ -95,13 +102,13 @@ final class WxtyGateway
         if ($raw === false || strlen($raw) > $this->config['max_bytes'] + 1024) return null;
         $record = json_decode($raw, true);
         if (!is_array($record) || !is_numeric($record['expires_at'] ?? null)
-            || $record['expires_at'] <= time() || !is_array($record['data'] ?? null)) return null;
+            || $record['expires_at'] <= microtime(true) || !is_array($record['data'] ?? null)) return null;
         return $record['data'];
     }
 
-    private function writeCache(string $key, array $data, int $expires): void
+    private function writeCache(string $key, array $data, float $expires): void
     {
-        if ($expires <= time()) return;
+        if ($expires <= microtime(true)) return;
         $payload = json_encode(['expires_at' => $expires, 'data' => $data], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $tmp = @tempnam($this->config['cache_dir'], '.tmp-');
         if ($tmp === false) throw new WxtyError('cache-write-failed');
@@ -129,7 +136,7 @@ final class WxtyGateway
                 if ($file === $this->cachePath('uuid')) continue;
                 $raw = @file_get_contents($file);
                 $record = $raw === false ? null : json_decode($raw, true);
-                if (!is_array($record) || ($record['expires_at'] ?? 0) <= time()) @unlink($file);
+                if (!is_array($record) || ($record['expires_at'] ?? 0) <= microtime(true)) @unlink($file);
                 else $keep[$file] = @filemtime($file) ?: 0;
             }
             asort($keep);
@@ -239,9 +246,12 @@ final class WxtyGateway
         if ($this->config['proxy_prefix'] !== '' && strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https') {
             $requestUrl = $this->config['proxy_prefix'] . substr($url, 8);
         }
-        $ch = curl_init($requestUrl);
+        if ($this->curlHandle === null) $this->curlHandle = curl_init();
+        $ch = $this->curlHandle;
+        // Reset request options while retaining libcurl's connection/session cache.
+        curl_reset($ch);
         $body = ''; $responseHeaders = []; $tooLarge = false;
-        $options = [CURLOPT_HTTPHEADER => $headers, CURLOPT_FOLLOWLOCATION => false,
+        $options = [CURLOPT_URL => $requestUrl, CURLOPT_HTTPHEADER => $headers, CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
             CURLOPT_CONNECTTIMEOUT_MS => max(1, (int) (min(2, $timeout) * 1000)),
@@ -266,7 +276,6 @@ final class WxtyGateway
         if ($this->config['ca_bundle'] !== '') $options[CURLOPT_CAINFO] = $this->config['ca_bundle'];
         curl_setopt_array($ch, $options);
         $ok = curl_exec($ch); $errno = curl_errno($ch); $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         if ($tooLarge) throw new WxtyError('response-too-large');
         if ($ok === false) throw new WxtyError('curl-' . $errno);
         return ['status' => $status, 'headers' => $responseHeaders, 'body' => $body];
@@ -331,10 +340,12 @@ final class WxtyGateway
         }
     }
 
-    private function addresses($detail, string $source, ?array $program = null): Generator
+    private function addresses($detail, string $source, ?array $program = null, string $preferred = 'live'): Generator
     {
         if (!is_array($detail)) return;
-        foreach (['live_address' => 'live', 'shift_address' => 'shift'] as $key => $kind) {
+        $order = $preferred === 'shift' ? ['shift_address' => 'shift', 'live_address' => 'live']
+            : ['live_address' => 'live', 'shift_address' => 'shift'];
+        foreach ($order as $key => $kind) {
             if (is_string($detail[$key] ?? null) && $detail[$key] !== '') yield [
                 'addr' => $detail[$key], 'source' => $source, 'kind' => $kind,
                 'program' => $program['name'] ?? null, 'program_id' => $program['id'] ?? null];
@@ -350,13 +361,28 @@ final class WxtyGateway
 
     private function candidates(int $channel): Generator
     {
+        $seen = [];
+        $hint = $this->readCache('source-hint:' . $channel);
+        if ($hint && (is_string($hint['program_id'] ?? null) || is_int($hint['program_id'] ?? null))) {
+            $id = $hint['program_id']; $seen[(string) $id] = true;
+            // Always obtain a fresh signed address, rather than reusing an old ciphertext.
+            try { $pd = $this->api('/content/pc/tv/program/detail', ['channel_program_id' => $id]); }
+            catch (WxtyError $error) {
+                if (!in_array($error->reason, ['http-401', 'http-403'], true)) throw $error;
+                $pd = null;
+            }
+            yield from $this->addresses($pd['result']['channel_info'] ?? [], 'recent-program',
+                ['id' => $id, 'name' => $hint['program'] ?? null], $hint['kind'] ?? 'live');
+            @unlink($this->cachePath('source-hint:' . $channel));
+        }
         $detail = $this->api('/content/pc/tv/channel/detail', ['channel_id' => $channel]);
         yield from $this->addresses($detail['result'] ?? [], 'channel');
         $today = new DateTimeImmutable('today', new DateTimeZone('Asia/Shanghai'));
-        $list = $this->programs($channel, $today->format('Y-m-d')); $seen = [];
+        $list = $this->programs($channel, $today->format('Y-m-d'));
         foreach ($list as $p) {
             if (!isset($p['id']) || !is_scalar($p['id'])) continue;
             if ((int) ($p['start_time'] ?? 0) <= time() && time() < (int) ($p['end_time'] ?? 0)) {
+                if (isset($seen[(string) $p['id']])) break;
                 $seen[(string) $p['id']] = true;
                 $pd = $this->api('/content/pc/tv/program/detail', ['channel_program_id' => $p['id']], 30);
                 yield from $this->addresses($pd['result']['channel_info'] ?? [], 'current-program', $p);
@@ -522,6 +548,14 @@ final class WxtyGateway
     private function playlist(string $url, bool $verifyChild, int $depth = 0): array
     {
         if ($depth > 5) throw new WxtyError('playlist-depth');
+        $key = 'playlist:' . $url;
+        if ($this->config['playlist_ttl'] > 0) {
+            $cached = $this->readCache($key);
+            if ($cached && is_string($cached['playlist'] ?? null) && is_string($cached['url'] ?? null)
+                && (!$verifyChild || ($cached['checked_child'] ?? false) === true)) {
+                return ['playlist' => $cached['playlist'], 'url' => $cached['url'], 'playlist_cache' => 'HIT'];
+            }
+        }
         $response = $this->request($url);
         $body = self::rewritePlaylist($response['body'], $response['url']);
         if ($verifyChild && strpos($body, '#EXT-X-STREAM-INF:') !== false) {
@@ -537,7 +571,22 @@ final class WxtyGateway
             }
             if (!$valid) throw new WxtyError('no-playable-variant');
         }
-        return ['playlist' => $body, 'url' => $response['url']];
+        $ttl = $this->config['playlist_ttl'];
+        if (str_contains($body, '#EXT-X-PART') || str_contains($body, '#EXT-X-SERVER-CONTROL')) $ttl = 0;
+        elseif (preg_match('/^#EXT-X-TARGETDURATION:([0-9]+)/m', $body, $target)) $ttl = min($ttl, (int) $target[1] / 2);
+        if ($ttl > 0) $this->writeCache($key, ['playlist' => $body, 'url' => $response['url'],
+            'checked_child' => $verifyChild], microtime(true) + $ttl);
+        return ['playlist' => $body, 'url' => $response['url'], 'playlist_cache' => 'MISS'];
+    }
+
+    private function rememberSource(int $channel, array $record): void
+    {
+        if (!is_string($record['program_id'] ?? null) && !is_int($record['program_id'] ?? null)) return;
+        $hint = $this->readCache('source-hint:' . $channel);
+        $kind = str_starts_with($record['kind'] ?? '', 'shift') ? 'shift' : 'live';
+        if ($hint && ($hint['program_id'] ?? null) === $record['program_id'] && ($hint['kind'] ?? null) === $kind) return;
+        $this->writeCache('source-hint:' . $channel, ['program_id' => $record['program_id'],
+            'program' => $record['program'] ?? null, 'kind' => $kind], time() + 86400);
     }
 
     private function cachedResult(int $channel): ?array
@@ -546,6 +595,7 @@ final class WxtyGateway
         if (!$record || !is_string($record['url'] ?? null) || isset($this->rejected[$record['url']])) return null;
         try {
             $playlist = $this->playlist($record['url'], false);
+            $this->rememberSource($channel, $record);
             return array_merge($record, $playlist, ['cache' => 'HIT', 'requests' => $this->requests]);
         } catch (WxtyError $error) {
             if ($error->reason === 'rate-limited') $this->writeCache('failure:' . $channel, ['reason' => $error->reason], time() + 30);
@@ -596,6 +646,7 @@ final class WxtyGateway
                             'program' => $candidate['program'], 'program_id' => $candidate['program_id'],
                             'expires_at' => $effective, 'signed_expires_at' => $expires, 'created_at' => microtime(true)];
                         $this->writeCache('live:' . $channel, $result, $effective);
+                        $this->rememberSource($channel, $result);
                         @unlink($this->cachePath('failure:' . $channel));
                         return array_merge($result, $playlist, ['cache' => 'MISS', 'requests' => $this->requests]);
                     } catch (WxtyError $error) {
@@ -679,6 +730,8 @@ function wxtyMain(): void
         $gateway = new WxtyGateway(); $result = $gateway->resolve(WxtyGateway::CHANNELS[$id], $force);
         header('X-Live-Url-Cache: ' . $result['cache']);
         header('X-Live-Url-Source: ' . preg_replace('/[^a-z-]/', '', $result['source']));
+        header('X-Playlist-Cache: ' . $result['playlist_cache']);
+        header('X-Wxty-Requests: ' . $result['requests']);
         if ($info) {
             unset($result['playlist'], $result['url']);
             $result['id'] = $id; $result['channel_id'] = WxtyGateway::CHANNELS[$id];

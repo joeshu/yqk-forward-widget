@@ -25,6 +25,12 @@ function response(string $body, int $status = 200, array $headers = []): array
 }
 function apiResponse(array $result): array { return response(json_encode(['result' => $result], JSON_THROW_ON_ERROR)); }
 function media(string $segment = 'a.ts'): string { return "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\n" . $segment . "\n"; }
+function expireCache(string $dir, string $key): void
+{
+    $path = $dir . '/' . hash('sha256', $key) . '.json';
+    $record = json_decode(file_get_contents($path), true); $record['expires_at'] = microtime(true) - 1;
+    file_put_contents($path, json_encode($record, JSON_THROW_ON_ERROR));
+}
 function removeTree(string $dir): void
 {
     foreach (array_merge(glob($dir . '/*') ?: [], glob($dir . '/.[!.]*') ?: []) as $path) {
@@ -235,7 +241,8 @@ try {
         $g = gateway($dir, static function ($url) use (&$calls, $handler) { $calls[] = $url; return $handler($url); });
         $a = $g->resolve(10); $b = $g->resolve(10);
         same($a['cache'], 'MISS'); same($b['cache'], 'HIT'); same($b['source'], 'channel'); same($b['kind'], 'live');
-        same(count($calls), 3); same($b['expires_at'], $a['expires_at']);
+        same(count($calls), 2); same($b['expires_at'], $a['expires_at']);
+        same($b['playlist_cache'], 'HIT'); same($b['requests'], 0);
         same(str_contains($b['playlist'], 'https://cdn.example/live/a.ts'), true);
     });
     test('API signing compatibility and no forwarded client IP', static function ($dir) {
@@ -277,7 +284,7 @@ try {
             if (parse_url($url, PHP_URL_HOST) === 'kapi.kankanews.com') return apiResponse(['live_address' => 'https://cdn.example/' . ($fresh ? 'new' : 'old') . '.m3u8']);
             if ($fresh && str_contains($url, 'old.m3u8')) return response('expired', 403);
             return response(media());
-        });
+        }, ['playlist_ttl' => 0]);
         same($g->resolve(10)['cache'], 'MISS'); $fresh = true;
         same($g->resolve(10)['cache'], 'MISS'); same(count($calls), 5);
         $hit = $g->resolve(10); same($hit['cache'], 'HIT'); same($hit['url'], 'https://cdn.example/new.m3u8');
@@ -348,10 +355,98 @@ try {
         $calls = 0; $limited = false; $handler = normalHandler();
         $g = gateway($dir, static function ($url) use (&$calls, &$limited, $handler) {
             $calls++; return $limited ? response('limited', 429) : $handler($url);
-        });
+        }, ['playlist_ttl' => 0]);
         $g->resolve(10); $limited = true;
         raises(static fn() => $g->resolve(10), 'rate-limited'); $before = $calls;
         raises(static fn() => $g->resolve(10), 'rate-limited'); same($calls, $before);
+    });
+    test('expired playlist snapshot reads the newest segments', static function ($dir) {
+        $segments = 0;
+        $g = gateway($dir, static function ($url) use (&$segments) {
+            if (parse_url($url, PHP_URL_HOST) === 'kapi.kankanews.com') return apiResponse(['live_address' => 'https://cdn.example/live.m3u8']);
+            return response(media('segment-' . ++$segments . '.ts'));
+        });
+        $g->resolve(10); expireCache($dir, 'playlist:https://cdn.example/live.m3u8');
+        $r = $g->resolve(10); same($segments, 2); same($r['playlist_cache'], 'MISS'); same($r['requests'], 1);
+        same(str_contains($r['playlist'], '/segment-2.ts'), true);
+    });
+    test('low latency HLS is not served from snapshot cache', static function ($dir) {
+        $calls = 0;
+        $g = gateway($dir, static function ($url) use (&$calls) {
+            if (parse_url($url, PHP_URL_HOST) === 'kapi.kankanews.com') return apiResponse(['live_address' => 'https://cdn.example/live.m3u8']);
+            $calls++; return response(str_replace('#EXT-X-TARGETDURATION:6', "#EXT-X-TARGETDURATION:6\n#EXT-X-PART-INF:PART-TARGET=0.5", media()));
+        });
+        $g->resolve(10); $r = $g->resolve(10); same($calls, 2); same($r['playlist_cache'], 'MISS');
+    });
+    test('an unchecked cached master cannot replace fresh child verification', static function ($dir) {
+        $bad = false;
+        $g = gateway($dir, static function ($url) use (&$bad) {
+            if (parse_url($url, PHP_URL_HOST) === 'kapi.kankanews.com') return apiResponse(['live_address' => 'https://cdn.example/master.m3u8']);
+            if (str_contains($url, 'master.m3u8')) return response("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nchild.m3u8\n");
+            return $bad ? response('denied', 403) : response(media());
+        }, ['max_candidates' => 1]);
+        $g->resolve(10);
+        expireCache($dir, 'playlist:https://cdn.example/master.m3u8'); expireCache($dir, 'playlist:https://cdn.example/child.m3u8');
+        $g->resolve(10); $bad = true;
+        raises(static fn() => $g->resolve(10, true), 'no-playable-variant');
+    });
+    test('expired address refresh uses the successful program with a new signed URL', static function ($dir) {
+        $generation = 0; $paths = [];
+        $g = gateway($dir, static function ($url) use (&$generation, &$paths) {
+            $path = parse_url($url, PHP_URL_PATH); $paths[] = $path;
+            if ($path === '/content/pc/tv/channel/detail') return apiResponse([]);
+            if ($path === '/content/pc/tv/programs') return apiResponse(['programs' => [['id' => 7, 'name' => 'Program', 'start_time' => time()-10, 'end_time' => time()+100]]]);
+            if ($path === '/content/pc/tv/program/detail') return apiResponse(['channel_info' => ['live_address' => 'https://cdn.example/video-' . $generation . '.m3u8']]);
+            return response(media());
+        });
+        $g->resolve(10); expireCache($dir, 'live:10'); $generation = 1; $paths = [];
+        $r = $g->resolve(10); same($r['source'], 'recent-program'); same($r['requests'], 2);
+        same($paths, ['/content/pc/tv/program/detail', '/video-1.m3u8']); same($r['url'], 'https://cdn.example/video-1.m3u8');
+    });
+    test('failed program hint falls back without repeating its details', static function ($dir) {
+        $broken = false; $ids = [];
+        $g = gateway($dir, static function ($url) use (&$broken, &$ids) {
+            $path = parse_url($url, PHP_URL_PATH); parse_str(parse_url($url, PHP_URL_QUERY) ?? '', $query);
+            if ($path === '/content/pc/tv/channel/detail') return apiResponse([]);
+            if ($path === '/content/pc/tv/programs') return apiResponse(['programs' => [
+                ['id' => 7, 'start_time' => time()-10, 'end_time' => time()+100, 'can_review' => 1],
+                ['id' => 8, 'start_time' => time()-1000, 'end_time' => time()-100, 'can_review' => 1]]]);
+            if ($path === '/content/pc/tv/program/detail') {
+                $ids[] = $query['channel_program_id'];
+                if ($broken && $query['channel_program_id'] === '7') return apiResponse([]);
+                return apiResponse(['channel_info' => ['live_address' => 'https://cdn.example/' . $query['channel_program_id'] . '.m3u8']]);
+            }
+            return response(media());
+        });
+        $g->resolve(10); expireCache($dir, 'live:10'); $broken = true; $ids = [];
+        $r = $g->resolve(10); same($ids, ['7', '8']); same($r['source'], 'donor'); same($r['program_id'], 8);
+    });
+    test('program hint tries the last successful address kind first', static function ($dir) {
+        $badRequests = 0;
+        $g = gateway($dir, static function ($url) use (&$badRequests) {
+            $path = parse_url($url, PHP_URL_PATH);
+            if ($path === '/content/pc/tv/channel/detail') return apiResponse([]);
+            if ($path === '/content/pc/tv/programs') return apiResponse(['programs' => [['id' => 7, 'start_time' => time()-10, 'end_time' => time()+100]]]);
+            if ($path === '/content/pc/tv/program/detail') return apiResponse(['channel_info' => [
+                'live_address' => 'https://cdn.example/bad.m3u8', 'shift_address' => 'https://cdn.example/good.m3u8?start=1']]);
+            if ($path === '/bad.m3u8') { $badRequests++; return response('denied', 403); }
+            return response(media());
+        }, ['playlist_ttl' => 0]);
+        $g->resolve(10); same($badRequests, 1); expireCache($dir, 'live:10');
+        $r = $g->resolve(10); same($r['source'], 'recent-program'); same($badRequests, 1); same($r['requests'], 2);
+    });
+    test('a denied old program hint cannot prevent a working channel address', static function ($dir) {
+        $denied = false;
+        $g = gateway($dir, static function ($url) use (&$denied) {
+            $path = parse_url($url, PHP_URL_PATH);
+            if ($path === '/content/pc/tv/channel/detail') return apiResponse($denied ? ['live_address' => 'https://cdn.example/new.m3u8'] : []);
+            if ($path === '/content/pc/tv/programs') return apiResponse(['programs' => [['id' => 7, 'start_time' => time()-10, 'end_time' => time()+100]]]);
+            if ($path === '/content/pc/tv/program/detail') return $denied ? response('forbidden', 403)
+                : apiResponse(['channel_info' => ['live_address' => 'https://cdn.example/old.m3u8']]);
+            return response(media());
+        });
+        $g->resolve(10); expireCache($dir, 'live:10'); $denied = true;
+        $r = $g->resolve(10); same($r['source'], 'channel'); same($r['url'], 'https://cdn.example/new.m3u8');
     });
     test('oversize response rejected', static function ($dir) {
         $g = gateway($dir, static fn($url) => response(str_repeat('x', 600)), ['max_bytes' => 512, 'scan_days' => 1]);
@@ -532,6 +627,7 @@ try {
         same($misses, 1);
         $calls = file($dir . '/calls.log', FILE_IGNORE_NEW_LINES);
         same(count(array_filter($calls, static fn($path) => $path === '/content/pc/tv/channel/detail')), 1);
+        same(count(array_filter($calls, static fn($path) => $path === '/live/index.m3u8')), 1);
         foreach (glob($dir . '/*.json') as $path) {
             same(is_array(json_decode(file_get_contents($path), true)), true);
             same(fileperms($path) & 0777, 0600);
