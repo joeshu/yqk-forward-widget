@@ -10,7 +10,7 @@ https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu.m3u8
 
 ## 2026-10-19 的研究结论
 
-- 原上游已经提供 M3U，只是文件名为 `.txt`。当前 120 个频道、11 个分组，没有精确重复项；播放 URL 均带时间戳及签名，另含上游写入的 `client_ip`。下载到 GitHub 得到的是当时的快照。
+- 原上游已经提供 M3U，只是文件名为 `.txt`。最初快照有 120 个频道、11 个分组，没有精确重复项；后续数量以 `migu-status.json` 为准。播放 URL 均带时间戳及签名，另含上游写入的 `client_ip`。下载到 GitHub 得到的是当时的快照。
 - 入口 HTTP 200 不能证明实际播放成功。最初的探测错误地用原始 GSLB 入口解析相对子清单，得到 661；对照已确认，同一频道改用重定向后的最终 CDN 地址作为基址，媒体清单返回 200。该 661 是探测基址错误，不能据此归因于上游鉴权。修正探测后，5 个频道的实际媒体清单均可读取。可重跑的新版采样记录见 [研究记录](migu/research-2026-10-19.json)；未下载分片、未测试解码，仍不能代替设备实播。
 - 原上游为 `http://www.52top.com.cn:678/downloads/migu.txt`。测试同域 HTTPS 443/678 未取得有效列表，返回 503。实际 GSLB 会跳转到咪咕 CDN 的 8080 端口；媒体诊断仅为已允许的咪咕域名放行该端口。部分播放入口支持 HTTPS，但这不证明其重定向、子清单、分片和密钥都支持 HTTPS。因此没有盲目全局替换协议。
 - XMLTV 节目单来自 develop202 的公开文件。`svg-id/name` 改成 `tvg-id/name`；“上视新闻综合”的 EPG ID 使用“上海新闻综合”，显示名称保持原样。原样本的 120 个 ID 均匹配节目单。移除第三方 `gh-proxy.com` EPG 地址，仅保留两个直接 HTTPS 来源；它们是同一节目单的分发路径，不是两个独立节目单供应方。
@@ -45,7 +45,7 @@ python3 migu/probe.py --sample 5 --report migu-check.json
 
 本地已有来源文件可用 `--input /path/source.txt`；调整输出用 `--output /path/migu.m3u8`，状态记录默认写到同目录 `migu-status.json`。原取源站点确实永久缩减频道时，人工检查后可同时调整 `--min-channels` 和 `--allow-channel-drop`；该参数仍不会跳过签名倒退和时间检查。时间错误应先修正系统时钟。
 
-`.github/workflows/migu.yml` 在 main 的相关改动、手动运行及每小时 UTC 第 17/47 分钟执行测试和刷新。自动运行使用稀疏检出，仅修改 `migu.m3u8` 与 `migu-status.json`；只有刷新任务有 contents:write，PR 测试没有写权限。checkout 固定到已核对的 v6 提交；发布检出与测试相同的仓库提交。并发发布串行化，push 仅允许快进，冲突时失败而不强推，下一次重新获取 main。
+`.github/workflows/migu.yml` 在 main 的相关改动、手动运行及每小时 UTC 第 17/47 分钟执行测试和刷新。自动运行使用稀疏检出，仅修改 `migu.m3u8` 与 `migu-status.json`；只有刷新任务有 contents:write，PR 测试没有写权限。checkout 固定到已核对的 v6 提交；发布检出与测试相同的仓库提交。并发发布串行化，发布前重新获取 main；若新增提交仅修改其他模块，重放本次数据提交后再快进推送。若咪咕代码、测试、工作流或目录有并发改动则停止，绝不强推。同步后仍有新的推送竞争也安全失败，下一次重新获取 main。该流程有本地临时 Git 仓库的并发提交集成测试。
 
 GitHub 的定时任务可能延迟、丢弃，公共仓库长时间无活动也可能停用；Raw 有缓存，播放器也须重新加载订阅，自动刷新不能让已打开的旧频道 URL 自动换签。工作流实际执行状态请看 [Actions](https://github.com/joeshu/yqk-forward-widget/actions/workflows/migu.yml)。参见 [GitHub schedule 官方说明](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)。
 

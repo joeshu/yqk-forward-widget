@@ -60,18 +60,9 @@ jobs:
             /update_migu.py
             /migu.m3u8
             /migu-status.json
+            /migu/publish.sh
       - name: Download and validate before replacing the published catalogue
         run: python3 update_migu.py
       - name: Commit only a changed catalogue or publication record
         shell: bash
-        run: |
-          git add -- migu.m3u8 migu-status.json
-          if git diff --cached --quiet; then
-            echo 'No catalogue change.'
-            exit 0
-          fi
-          git diff --cached --check
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Refresh validated Migu playlist'
-          git push origin HEAD:main
+        run: bash migu/publish.sh
