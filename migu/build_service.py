@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INPUTS = ('update_migu.py', 'migu/probe.py', 'migu/native.py', 'migu/service.py')
-VERSION = '0.2.0'
+VERSION = '0.2.1'
 
 
 def strip_module(text, service=False):
@@ -37,7 +37,7 @@ def build():
     helper_source = ast.get_source_segment(sources['migu/probe.py'], helper)
     text = (
         '#!/usr/bin/env python3\n'
-        '"""Migu dynamic service 0.2.0. Generated from the project sources; Python 3.10+."""\n'
+        '"""Migu dynamic service 0.2.1. Generated from the project sources; Python 3.10+."""\n'
         'from __future__ import annotations\n\n'
         '# Shared catalogue validation and bounded transport: update_migu.py\n'
         + strip_module(sources['update_migu.py'])
@@ -51,7 +51,7 @@ def build():
     )
     ast.parse(text)
     data = text.encode('utf-8')
-    manifest = {'version': VERSION, 'artifact': f'migu-live-v{VERSION}.py', 'sha256': hashlib.sha256(data).hexdigest(),
+    manifest = {'version': VERSION, 'artifact': f'migu-live-v{VERSION}.py', 'sha256': hashlib.sha256(data).hexdigest(), 'standalone_alias': 'migu-live.py',
                 'inputs': {name: hashlib.sha256(sources[name].encode()).hexdigest() for name in INPUTS}}
     return data, (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2)+'\n').encode()
 
@@ -61,7 +61,7 @@ def main():
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
     artifact, manifest = build()
-    paths = [(ROOT/f'migu/migu-live-v{VERSION}.py', artifact), (ROOT/f'migu/migu-live-v{VERSION}.json', manifest)]
+    paths = [(ROOT/f'migu/migu-live-v{VERSION}.py', artifact), (ROOT/f'migu/migu-live-v{VERSION}.json', manifest), (ROOT/'migu-live.py', artifact)]
     if args.check:
         if any(not path.exists() or path.read_bytes() != value for path, value in paths):
             raise SystemExit('Service release differs from the source; rebuild first.')

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from contextlib import nullcontext
 from concurrent.futures import CancelledError, ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, replace
@@ -27,7 +27,8 @@ import update_migu as m
 from migu.probe import hls_references
 from migu.native import NativeStore
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
+DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 URI_ATTRIBUTE = re.compile(r'(?<![\w-])URI="([^"\r\n]*)"')
 
@@ -36,6 +37,35 @@ class ServiceError(Exception):
     def __init__(self, code, status=503):
         super().__init__(code)
         self.code, self.status = code, status
+
+
+class Diagnostics:
+    """Small per-service ring; only fixed event codes, never exception text/URLs."""
+    def __init__(self, clock=time.monotonic):
+        self.clock, self.lock = clock, threading.Lock()
+        self.events, self.last = deque(maxlen=120), OrderedDict()
+
+    def record(self, code):
+        if not isinstance(code, str) or re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", code) is None:
+            code = "UNCLASSIFIED_ERROR"
+        now = self.clock()
+        with self.lock:
+            if code in self.last and now - self.last[code] < 15:
+                return
+            self.last[code] = now
+            self.last.move_to_end(code)
+            while len(self.last) > 64:
+                self.last.popitem(last=False)
+            line = {"time_utc": m.iso(m.utcnow()), "code": code}
+            self.events.append(line)
+        try:
+            print(f"[{line['time_utc']}] {code}", flush=True)
+        except (OSError, ValueError):
+            pass  # A closed app console must not interrupt serving a player.
+
+    def snapshot(self):
+        with self.lock:
+            return list(self.events)
 
 
 def read_private(path, limit):
@@ -350,6 +380,7 @@ class Service:
         self.store, self.token, self.public_base, self.mode = store, token, public_base.rstrip("/"), mode
         self.manifests = manifests or ManifestCache()
         self.require_token = require_token
+        self.diagnostics = Diagnostics()
 
     def catalogue(self, snapshot):
         suffix = "?token=" + self.token if self.require_token else ""
@@ -393,6 +424,7 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_GET(self):
+        service = self.server.service
         try:
             if len(self.path) > 4096:
                 raise ServiceError("REQUEST_TOO_LONG", 414)
@@ -400,7 +432,6 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(parts.query, keep_blank_values=True, max_num_fields=4)
             if parts.scheme or parts.netloc or parts.fragment or set(query) - {"token", "playbackbegin", "playbackend"} or any(len(values) != 1 for values in query.values()):
                 raise ServiceError("REQUEST_INVALID", 400)
-            service = self.server.service
             hosts = self.headers.get_all("Host", [])
             if len(hosts) != 1:
                 raise ServiceError("HOST_REQUIRED", 400)
@@ -422,6 +453,10 @@ class Handler(BaseHTTPRequestHandler):
             supplied = query_token or bearer
             if service.require_token and (not TOKEN_PATTERN.fullmatch(supplied) or not hmac.compare_digest(service.token, supplied) or (bearer and query_token and not hmac.compare_digest(bearer, query_token))):
                 raise ServiceError("AUTH_REQUIRED", 401)
+            if parts.path == "/diag":
+                self.send_body(200, m.json_bytes({"service": "migu-live", "version": VERSION,
+                    "status": service.store.status(), "events": service.diagnostics.snapshot()}))
+                return
             if parts.path in {"/", "/health", "/status"}:
                 self.send_body(200, m.json_bytes({"service": "migu-live", "version": VERSION, "process_up": True, "mode": service.mode, **service.store.status()}))
                 return
@@ -445,8 +480,11 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send_body(200, service.manifests.get(url), "application/vnd.apple.mpegurl; charset=utf-8")
         except ServiceError as error:
+            if error.status >= 500:
+                service.diagnostics.record(error.code)
             self.send_body(error.status, m.json_bytes({"error": error.code}), **({"Retry_After": "3"} if error.status == 503 else {}))
         except m.UpdateError as error:
+            service.diagnostics.record(str(error))
             self.send_body(502, m.json_bytes({"error": str(error)}))
         except (ValueError, OSError):
             self.send_body(400, m.json_bytes({"error": "REQUEST_OR_IO_ERROR"}))
@@ -520,7 +558,7 @@ def startup_error(stage, error):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("port", type=int, nargs="?", default=18768)
+    parser.add_argument("port", type=int, nargs="?", default=DEFAULT_PORT)
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--public-base", help="Fixed external URL; never inferred from Host/Forwarded headers")
     parser.add_argument("--data-dir", type=Path, help="Private writable cache directory; native local mode writes no files")
@@ -573,7 +611,10 @@ def main(argv=None):
                 except (OSError, ValueError, AttributeError):
                     print("当前运行环境不支持 SIGTERM；请使用 App 的停止按钮。", file=sys.stderr)
                 print(f"migu-live {VERSION}; provider={'legacy' if legacy else 'official-api'}; mode={args.mode}; listening={args.bind}:{args.port}", flush=True)
+                print(f"[系统] HTTP 服务启动成功；{'第三方列表按需加载' if legacy else '内置频道 ' + str(len(store.get().channels)) + ' 个，官方取源按需进行'}。", flush=True)
                 print(f"Subscription: {base.rstrip('/')}/all.m3u" + ("?token=<access-token>" if require_token else ""), flush=True)
+                print(f"Diagnostics: {base.rstrip('/')}/diag" + ("?token=<access-token>" if require_token else ""), flush=True)
+                service.diagnostics.record("HTTP_SERVER_STARTED")
                 if require_token:
                     print("Token: explicit environment variable" if args.token_env else f"Token file: {args.data_dir / 'access.token'}", flush=True)
                 try:

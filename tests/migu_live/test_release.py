@@ -18,8 +18,9 @@ class ReleaseTests(unittest.TestCase):
     def test_release_is_reproducible_and_matches_current_sources(self):
         script, manifest = build_service.build()
         self.assertEqual(script, build_service.build()[0])
-        self.assertEqual(script, Path('migu/migu-live-v0.2.0.py').read_bytes())
-        self.assertEqual(manifest, Path('migu/migu-live-v0.2.0.json').read_bytes())
+        self.assertEqual(script, Path('migu/migu-live-v0.2.1.py').read_bytes())
+        self.assertEqual(script, Path('migu-live.py').read_bytes())
+        self.assertEqual(manifest, Path('migu/migu-live-v0.2.1.json').read_bytes())
         self.assertNotIn(b'import update_migu',script)
         self.assertNotIn(b'from migu.probe',script)
 
@@ -27,7 +28,7 @@ class ReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             script=root/'migu-live.py'
-            shutil.copyfile('migu/migu-live-v0.2.0.py',script)
+            shutil.copyfile('migu-live.py',script)
             source=root/'fixture.txt'
             source.write_bytes(catalogue())
             with closing(socket.socket()) as reserve:
@@ -71,7 +72,7 @@ class ReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             script=root/'migu-live.py'
-            shutil.copyfile('migu/migu-live-v0.2.0.py',script)
+            shutil.copyfile('migu-live.py',script)
             readonly=root/'readonly'; readonly.mkdir(); readonly.chmod(0o500)
             with closing(socket.socket()) as reserve:
                 reserve.bind(('127.0.0.1',0)); port=reserve.getsockname()[1]

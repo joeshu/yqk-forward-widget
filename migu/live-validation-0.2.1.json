@@ -1,0 +1,15 @@
+{
+  "checked_at_utc": "2026-10-19T14:16:59.849432+00:00",
+  "version": "0.2.1",
+  "entrypoint": "root migu-live.py copied/run alone",
+  "catalogue_http": 200,
+  "channels": 123,
+  "diagnostic_http": 200,
+  "startup_event": "HTTP_SERVER_STARTED",
+  "api_requests_before_play": 0,
+  "runtime_file_count": 0,
+  "ios_device_tested": false,
+  "media_decoded": false,
+  "upstream_validation": "Protocol unchanged from 0.2.0; no playback request in this startup check. See live-validation-0.2.0.json for region refusal.",
+  "shutdown_exit_code": 0
+}
