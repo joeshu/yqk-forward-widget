@@ -4,16 +4,19 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
-from http.client import HTTPException
+from http.client import HTTPException, HTTPConnection, HTTPSConnection
 import json
 import re
 import socket
 import ssl
 import time
+import threading
+from concurrent.futures import TimeoutError as FutureTimeout, CancelledError
+from migu.workers import BoundedExecutor
 import unicodedata
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urljoin, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPHandler, HTTPSHandler, Request, build_opener
 
 MAX_BYTES = 8 * 1024 * 1024
 MAX_LINE = 16 * 1024
@@ -151,18 +154,144 @@ def retry_delay(value):
             return None
 
 
+class DeadlineGuard:
+    def __init__(self, deadline):
+        self.deadline, self.lock, self.sockets = deadline, threading.Lock(), []
+        self.expired = False
+        self.timer = threading.Timer(max(0,deadline-time.monotonic()), self.abort)
+        self.timer.daemon = True
+        self.timer.start()
+
+    def watch(self, sock):
+        with self.lock:
+            self.sockets.append(sock)
+            expired = self.expired or time.monotonic() >= self.deadline
+        if expired:
+            self.abort()
+            raise FetchError('FETCH_BUDGET_EXCEEDED')
+
+    def abort(self):
+        with self.lock:
+            self.expired = True
+            sockets = list(self.sockets)
+        for sock in sockets:
+            try: sock.shutdown(socket.SHUT_RDWR)
+            except OSError: pass
+            try: sock.close()
+            except OSError: pass
+
+    def close(self):
+        self.timer.cancel()
+        with self.lock: sockets = list(self.sockets)
+        for sock in sockets:
+            try: sock.close()
+            except OSError: pass
+
+
+class GuardedHTTPConnection(HTTPConnection):
+    def __init__(self, host, guard, **kwargs):
+        self.guard = guard
+        super().__init__(host, **kwargs)
+
+    def connect(self):
+        super().connect()
+        self.guard.watch(self.sock)
+
+
+class GuardedHTTPSConnection(HTTPSConnection):
+    def __init__(self, host, guard, **kwargs):
+        self.guard = guard
+        super().__init__(host, **kwargs)
+
+    def _tunnel(self):
+        self.guard.watch(self.sock)
+        return super()._tunnel()
+
+    def connect(self):
+        super().connect()
+        self.guard.watch(self.sock)
+
+
+class GuardedHTTPHandler(HTTPHandler):
+    def __init__(self, guard):
+        super().__init__()
+        self.guard = guard
+
+    def http_open(self, request):
+        return self.do_open(lambda host, **kw: GuardedHTTPConnection(host, self.guard, **kw), request)
+
+
+class GuardedHTTPSHandler(HTTPSHandler):
+    def __init__(self, guard):
+        super().__init__()
+        self.guard = guard
+
+    def https_open(self, request):
+        return self.do_open(lambda host, **kw: GuardedHTTPSConnection(host, self.guard, **kw), request, context=self._context)
+
+
+_transport_lock = threading.Lock()
+_transport_workers = None
+
+
+def network_workers():
+    global _transport_workers
+    with _transport_lock:
+        if _transport_workers is None:
+            _transport_workers = BoundedExecutor(8, thread_name_prefix='migu-network', max_pending=24)
+        return _transport_workers
+
+
 class HttpClient:
-    def __init__(self, role="source", attempts=3, timeout=10, budget=45):
+    def __init__(self, role='api', attempts=1, timeout=6, budget=10):
         self.role, self.attempts, self.timeout, self.budget = role, attempts, timeout, budget
-        self.redirector = RestrictedRedirect(role)
-        self.opener = build_opener(self.redirector)  # Inherit proxies and TLS trust.
+        self.last_url = None
+
+    def _run(self, url, headers, limit, deadline):
+        if time.monotonic() >= deadline:
+            raise FetchError('FETCH_BUDGET_EXCEEDED')
+        guard = DeadlineGuard(deadline)
+        try:
+            transport = BoundedTransport(self.role, self.attempts, self.timeout, self.budget, guard)
+            raw, response_headers = transport.get(url, headers=headers, limit=limit, deadline=deadline)
+            return raw, response_headers, transport.last_url
+        finally:
+            guard.close()
 
     def get(self, url, *, headers=None, limit=MAX_BYTES):
         validate_url(url, self.role)
+        deadline = time.monotonic()+self.budget
+        try:
+            future = network_workers().submit(self._run, url, dict(headers or {}), limit, deadline)
+        except RuntimeError:
+            raise FetchError('FETCH_CAPACITY') from None
+        try:
+            raw, response_headers, final_url = future.result(timeout=max(0,deadline-time.monotonic()))
+        except (FutureTimeout, CancelledError):
+            future.cancel()
+            raise FetchError('FETCH_BUDGET_EXCEEDED') from None
+        except (OSError, ValueError) as failure:
+            if time.monotonic() >= deadline:
+                raise FetchError('FETCH_BUDGET_EXCEEDED') from None
+            raise failure
+        if time.monotonic() >= deadline:
+            raise FetchError('FETCH_BUDGET_EXCEEDED')
+        self.last_url = final_url
+        return raw, response_headers
+
+
+class BoundedTransport:
+    def __init__(self, role, attempts, timeout, budget, guard):
+        self.role, self.attempts, self.timeout, self.budget = role, attempts, timeout, budget
+        self.redirector = RestrictedRedirect(role)
+        self.opener = build_opener(self.redirector, GuardedHTTPHandler(guard), GuardedHTTPSHandler(guard))  # Inherit proxies and TLS trust.
+
+    def get(self, url, *, headers=None, limit=MAX_BYTES, deadline=None):
+        validate_url(url, self.role)
         self.last_url = url
-        deadline = time.monotonic() + self.budget
+        deadline = deadline if deadline is not None else time.monotonic() + self.budget
         self.redirector.deadline = deadline
-        request_headers = {"User-Agent": "MiguLive/0.3", "Accept-Encoding": "identity"}
+        request_headers = {"User-Agent": "MiguLive/0.4", "Accept-Encoding": "identity"}
         request_headers.update(headers or {})
         for attempt in range(self.attempts):
             try:

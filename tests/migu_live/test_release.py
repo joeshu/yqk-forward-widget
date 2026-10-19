@@ -17,9 +17,9 @@ class ReleaseTests(unittest.TestCase):
     def test_release_is_reproducible_and_matches_current_sources(self):
         script, manifest = build_service.build()
         self.assertEqual(script, build_service.build()[0])
-        self.assertEqual(script, Path('migu/migu-live-v0.3.0.py').read_bytes())
+        self.assertEqual(script, Path('migu/migu-live-v0.4.0.py').read_bytes())
         self.assertEqual(script, Path('migu-live.py').read_bytes())
-        self.assertEqual(manifest, Path('migu/migu-live-v0.3.0.json').read_bytes())
+        self.assertEqual(manifest, Path('migu/migu-live-v0.4.0.json').read_bytes())
         self.assertNotIn(b'import update_migu',script)
         self.assertNotIn(b'from migu.probe',script)
 

@@ -26,7 +26,7 @@ from migu.native import NativeStore
 from migu.epg import EpgStore
 from migu.workers import BoundedExecutor
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
@@ -130,7 +130,7 @@ class ManifestCache:
     def __init__(self, client_factory=m.HttpClient, clock=time.monotonic):
         self.client_factory, self.clock = client_factory, clock
         self.lock = threading.RLock()
-        self.pool = BoundedExecutor(max_workers=4, thread_name_prefix="migu-manifest")
+        self.pool = BoundedExecutor(max_workers=8, thread_name_prefix="migu-manifest")
         self.flights, self.entries = {}, OrderedDict()
         self.closed, self.bytes, self.fetches = False, 0, 0
 
@@ -203,7 +203,7 @@ class Service:
         self.require_token = require_token
         self.diagnostics = Diagnostics()
         self.epg = epg or EpgStore()
-        self.runtime = {"python": sys.version.split()[0], "platform": sys.platform,
+        self.runtime = {"network_concurrency": 8, "python": sys.version.split()[0], "platform": sys.platform,
                         "main_thread": threading.current_thread() is threading.main_thread()}
 
     def catalogue(self, snapshot):
@@ -408,6 +408,7 @@ def main(argv=None):
     parser.add_argument("--token-env", help="Environment variable holding the service access token")
     parser.add_argument("--require-token", action="store_true")
     parser.add_argument("--mode", choices=("redirect", "manifest"), default="redirect")
+    parser.add_argument("--epg-cache", action="store_true", help="Persist valid programme schedules; fall back to memory if unavailable")
     parser.add_argument("--no-epg", action="store_true", help="Disable the XMLTV feed")
     args = parser.parse_args(argv)
     stage = "configuration"
@@ -431,8 +432,15 @@ def main(argv=None):
             args.data_dir = service_data_directory(args.data_dir)
         stage = "access-token"
         token = load_access_token(args.data_dir, args.token_env) if require_token else ""
+        cache_path = None
+        if args.epg_cache and not args.no_epg:
+            try:
+                directory = service_data_directory(args.data_dir)
+                cache_path = directory / "epg-cache-v1.json"
+            except (OSError, ValueError, ServiceError):
+                print("[节目单] 缓存目录不可写，继续使用内存模式。", flush=True)
         stage = "provider"
-        service = Service(NativeStore(), token, base, args.mode, require_token=require_token, epg=EpgStore(enabled=not args.no_epg))
+        service = Service(NativeStore(), token, base, args.mode, require_token=require_token, epg=EpgStore(enabled=not args.no_epg, cache_path=cache_path))
         previous_signal = None
         try:
             stage = "bind"

@@ -204,7 +204,7 @@ class NativeStore:
 
     def __init__(self, resolver=native_play_url, clock=time.monotonic):
         self.resolver, self.clock = resolver, clock
-        self.pool = BoundedExecutor(max_workers=4, thread_name_prefix="migu-api")
+        self.pool = BoundedExecutor(max_workers=8, thread_name_prefix="migu-api")
         self.lock = threading.RLock()
         self.flights, self.entries = {}, OrderedDict()
         self.closed, self.last_error, self.fetches = False, None, 0

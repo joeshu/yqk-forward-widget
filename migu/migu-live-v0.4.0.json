@@ -1,0 +1,13 @@
+{
+  "artifact": "migu-live-v0.4.0.py",
+  "inputs": {
+    "migu/core.py": "178156c65011d22fe983c4f78c236b246a6f6992d8fa5a83cdabd7f408b028de",
+    "migu/epg.py": "bd3838b2ae5999c5fed161e2a0ed9f698685d1d2c7d76f9018cc382dd692b36c",
+    "migu/native.py": "56d5502b3c840764eb2f081e20833a80067fdd1611d367503960d455649e7149",
+    "migu/service.py": "13515bab08c498eb1e0d9512cf98a5667188230f9249dd1c3e92945fbcafe518",
+    "migu/workers.py": "c39be497a4ff2fe016ea79ed2184c35659a941bbc93672b68db551256a34ab09"
+  },
+  "sha256": "f86c0e1df6726a2a703c78441e305e5007f332ce4f9553103b03e0e88aa641aa",
+  "standalone_alias": "migu-live.py",
+  "version": "0.4.0"
+}

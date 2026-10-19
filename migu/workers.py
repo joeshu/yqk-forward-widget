@@ -7,7 +7,7 @@ import threading
 class BoundedExecutor:
     def __init__(self, max_workers, thread_name_prefix='migu', max_pending=8):
         self.max_workers, self.prefix = max_workers, thread_name_prefix
-        self.queue, self.lock = Queue(max_pending), threading.Lock()
+        self.queue, self.lock = Queue(max(max_pending,max_workers)), threading.Lock()
         self.threads, self.closed = [], False
 
     def submit(self, function, *args, **kwargs):
@@ -28,19 +28,22 @@ class BoundedExecutor:
                     self.threads.remove(thread)
                     self.closed = True
                     while True:
-                        try: self.queue.get_nowait()[0].cancel()
+                        try:
+                            queued = self.queue.get_nowait()
+                            if queued is not None: queued[0].cancel()
                         except Empty: break
+                    for _ in self.threads:
+                        self.queue.put_nowait(None)
                     raise
         return future
 
     def _run(self):
         while True:
-            try:
-                future, function, args, kwargs = self.queue.get(timeout=.2)
-            except Empty:
-                if self.closed:
-                    return
-                continue
+            item = self.queue.get()
+            if item is None:
+                return
+            future, function, args, kwargs = item
+            item = None
             if self.closed:
                 future.cancel()
             elif future.set_running_or_notify_cancel():
@@ -60,10 +63,12 @@ class BoundedExecutor:
             self.closed = True
             while True:
                 try:
-                    future, _, _, _ = self.queue.get_nowait()
-                    future.cancel()
+                    queued = self.queue.get_nowait()
+                    if queued is not None: queued[0].cancel()
                 except Empty:
                     break
+            for _ in self.threads:
+                self.queue.put_nowait(None)
         if wait:
             for thread in self.threads:
                 if thread is not threading.current_thread():

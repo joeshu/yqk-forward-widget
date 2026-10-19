@@ -1,0 +1,55 @@
+{
+  "version": "0.4.0",
+  "checked_at_utc": "2026-10-19T14:57:48.811586+00:00",
+  "network_concurrency": 8,
+  "ios_tested": false,
+  "video_decoded": false,
+  "cold_seconds": 44.74,
+  "cold_epg": {
+    "enabled": true,
+    "source": "migu-official",
+    "concurrency": 8,
+    "ready": true,
+    "refreshing": false,
+    "updated_utc": "2026-10-19T14:58:33+00:00",
+    "last_error": "EPG_REFRESH_PARTIAL_FAILURE",
+    "upstream_error": "NETWORK_ERROR",
+    "storage": "disk",
+    "cache_error": null,
+    "programmes": 3748,
+    "matched_channels": 122,
+    "missing_channels": [
+      "海南广播电视总台少儿频道"
+    ]
+  },
+  "cache_exists": true,
+  "warm_ready_on_load": true,
+  "warm_seconds": 0.2993,
+  "warm_network_requests": 0,
+  "warm_epg": {
+    "enabled": true,
+    "source": "migu-official",
+    "concurrency": 8,
+    "ready": true,
+    "refreshing": false,
+    "updated_utc": "2026-10-19T14:58:33+00:00",
+    "last_error": "EPG_PARTIAL_OR_FAILED",
+    "upstream_error": null,
+    "storage": "disk",
+    "cache_error": null,
+    "programmes": 3748,
+    "matched_channels": 122,
+    "missing_channels": [
+      "海南广播电视总台少儿频道"
+    ]
+  },
+  "standalone_check": {
+    "sha256": "f86c0e1df6726a2a703c78441e305e5007f332ce4f9553103b03e0e88aa641aa",
+    "standalone_cached_status_http": 200,
+    "cached_storage": "disk",
+    "network_concurrency": 8,
+    "shutdown_seconds": 0.049,
+    "shutdown_exit_code": 0,
+    "same_port_restarts": 2
+  }
+}

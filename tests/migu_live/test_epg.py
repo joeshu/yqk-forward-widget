@@ -71,7 +71,7 @@ class EpgTests(unittest.TestCase):
             for future in futures: self.assertIn(b'<programme',future.result(4))
         self.finish(store)
         self.assertEqual(client.get.call_count,len(n.BUILTIN_CHANNELS))
-        self.assertLessEqual(active[1],4)
+        self.assertLessEqual(active[1],8)
         store.get(); self.assertEqual(client.get.call_count,len(n.BUILTIN_CHANNELS))
         self.assertEqual(store.status()['matched_channels'],len(n.BUILTIN_CHANNELS))
 
@@ -80,7 +80,7 @@ class EpgTests(unittest.TestCase):
         self.addCleanup(release.set)
         original=client.get.side_effect
         def get(url,**kwargs):
-            if urlsplit(url).path.split('/')[-2] not in {x[0] for x in n.BUILTIN_CHANNELS[:4]}:
+            if urlsplit(url).path.split('/')[-2] not in {x[0] for x in n.BUILTIN_CHANNELS[:8]}:
                 release.wait(2)
             return original(url,**kwargs)
         client.get.side_effect=get
