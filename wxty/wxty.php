@@ -359,6 +359,71 @@ final class WxtyGateway
         return is_array($list) ? array_values(array_filter($list, 'is_array')) : [];
     }
 
+    public function epg(): array
+    {
+        $this->deadline = microtime(true) + $this->config['timeout'];
+        $this->requests = 0;
+        $date = (new DateTimeImmutable('now', new DateTimeZone('Asia/Shanghai')))->format('Y-m-d');
+        $key = 'epg:' . $date;
+        if (($hit = $this->readCache($key)) !== null) return $hit;
+        $lock = $this->lock('epg');
+        try {
+            if (($hit = $this->readCache($key)) !== null) return $hit;
+            $schedule = []; $missing = []; $stale = [];
+            foreach (self::CHANNELS as $id => $channel) {
+                $channelKey = 'epg-channel:' . $date . ':' . $channel;
+                $previous = $this->readCache($channelKey);
+                try {
+                    $response = $this->api('/content/pc/tv/programs', ['channel_id' => $channel, 'date' => $date]);
+                    $items = $response['result']['programs'] ?? null;
+                    if (!is_array($items)) throw new WxtyError('epg-unavailable');
+                    $items = array_values(array_filter($items, 'is_array'));
+                    $schedule[$id] = $items;
+                    $this->writeCache($channelKey, ['items' => $items], time() + 86400);
+                } catch (WxtyError $error) {
+                    if ($previous !== null) { $schedule[$id] = $previous['items']; $stale[] = $id; }
+                    else { $schedule[$id] = []; $missing[] = $id; }
+                    error_log('[wxty] epg channel=' . $id . ' reason=' . $error->reason);
+                }
+            }
+            if (count($missing) === count(self::CHANNELS)) throw new WxtyError('epg-unavailable');
+            $result = ['xml' => self::xmltv($schedule), 'missing' => $missing, 'stale' => $stale];
+            $midnight = (new DateTimeImmutable($date, new DateTimeZone('Asia/Shanghai')))->modify('+1 day')->getTimestamp();
+            $this->writeCache($key, $result, min($midnight, time() + (($missing || $stale) ? 30 : 900)));
+            return $result;
+        } finally { flock($lock, LOCK_UN); fclose($lock); }
+    }
+
+    public static function xmltv(array $schedule): string
+    {
+        $escape = static fn(string $value): string => htmlspecialchars(
+            preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $value), ENT_XML1 | ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<tv generator-info-name="wxty">'];
+        $zone = new DateTimeZone('Asia/Shanghai');
+        foreach (self::CHANNELS as $id => $channel) {
+            $lines[] = '<channel id="' . $id . '"><display-name lang="zh">' . $escape(self::NAMES[$id]) . '</display-name></channel>';
+        }
+        foreach (self::CHANNELS as $id => $channel) {
+            $items = $schedule[$id] ?? [];
+            usort($items, static fn($a, $b) => (int) ($a['start_time'] ?? 0) <=> (int) ($b['start_time'] ?? 0));
+            $seen = [];
+            foreach ($items as $item) {
+                $name = $item['name'] ?? null;
+                $start = filter_var($item['start_time'] ?? null, FILTER_VALIDATE_INT);
+                $end = filter_var($item['end_time'] ?? null, FILTER_VALIDATE_INT);
+                if (!is_string($name) || trim($name) === '' || $start === false || $end === false || $start <= 0 || $end <= $start) continue;
+                $identity = $start . ':' . $end . ':' . $name;
+                if (isset($seen[$identity])) continue;
+                $seen[$identity] = true;
+                $format = static fn(int $time): string => (new DateTimeImmutable('@' . $time))->setTimezone($zone)->format('YmdHis O');
+                $lines[] = '<programme start="' . $format($start) . '" stop="' . $format($end) . '" channel="' . $id
+                    . '"><title lang="zh">' . $escape($name) . '</title></programme>';
+            }
+        }
+        $lines[] = '</tv>';
+        return implode("\n", $lines) . "\n";
+    }
+
     private function candidates(int $channel): Generator
     {
         $seen = [];
@@ -664,7 +729,7 @@ final class WxtyGateway
     }
 }
 
-function wxtySubscription(): string
+function wxtyPublicBase(): string
 {
     $configured = getenv('KK_PUBLIC_BASE_URL') ?: '';
     if ($configured !== '') $base = rtrim($configured, '/');
@@ -686,7 +751,14 @@ function wxtySubscription(): string
         || !filter_var($base, FILTER_VALIDATE_URL)) {
         throw new WxtyError($configured === '' ? 'invalid-request-origin' : 'invalid-public-base');
     }
-    $lines = ['#EXTM3U'];
+    return $base;
+}
+
+function wxtySubscription(): string
+{
+    $base = wxtyPublicBase();
+    $epg = $base . '/wxty.php?epg=1';
+    $lines = ['#EXTM3U x-tvg-url="' . $epg . '" url-tvg="' . $epg . '"'];
     foreach (WxtyGateway::CHANNELS as $id => $channel) {
         $name = WxtyGateway::NAMES[$id];
         $lines[] = '#EXTINF:-1 tvg-id="' . $id . '" tvg-name="' . $name . '" group-title="看看新闻",' . $name;
@@ -712,6 +784,22 @@ function wxtyMain(): void
     $force = isset($_GET['refresh']) && $_GET['refresh'] !== '0';
     $info = isset($_GET['info']);
     if (($force || $info) && !$isAdmin) { http_response_code(403); echo '需要管理员 Bearer 令牌'; return; }
+    if (isset($_GET['epg'])) {
+        if ($_GET['epg'] !== '1') { http_response_code(400); return; }
+        header('Content-Type: application/xml; charset=utf-8');
+        if ($method === 'HEAD') return;
+        try {
+            $result = (new WxtyGateway())->epg();
+            header('X-EPG-Missing: ' . implode(',', $result['missing']));
+            header('X-EPG-Stale: ' . implode(',', $result['stale']));
+            echo $result['xml'];
+        } catch (Throwable $error) {
+            http_response_code(503); header('Retry-After: 30');
+            header('Content-Type: text/plain; charset=utf-8');
+            echo '暂时无法获取节目单';
+        }
+        return;
+    }
     if (isset($_GET['list'])) {
         if ($_GET['list'] !== '1') { http_response_code(400); echo '无效订阅参数'; return; }
         try { $subscription = wxtySubscription(); }
@@ -758,7 +846,7 @@ function wxtyDispatch(): void
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '/wxty.php', PHP_URL_PATH);
     $script = $_SERVER['SCRIPT_NAME'] ?? '/wxty.php';
     $direct = is_string($path) && $path === $script && basename($script) === basename(__FILE__);
-    if (!in_array($path, ['/', '/all.m3u', '/wxty.php'], true) && !$direct) {
+    if (!in_array($path, ['/', '/all.m3u', '/epg.xml', '/wxty.php'], true) && !$direct) {
         http_response_code(404);
         header('Content-Type: text/plain; charset=utf-8');
         echo 'Not found';
@@ -766,6 +854,7 @@ function wxtyDispatch(): void
     }
     if (!$direct || $path === '/' || $path === '/all.m3u') $_SERVER['SCRIPT_NAME'] = '/wxty.php';
     if ($path === '/' || $path === '/all.m3u') $_GET['list'] = '1';
+    if ($path === '/epg.xml') $_GET['epg'] = '1';
     wxtyMain();
 }
 

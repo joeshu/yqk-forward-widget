@@ -4,6 +4,8 @@
 
 这 8 个频道都来自「看看新闻」——上海广播电视台（SMG）旗下的平台，官网：[https://www.kankanews.com/](https://www.kankanews.com/)。包括东方卫视、上海新闻综合、上海都市、第一财经、哈哈炫动、五星体育、东方影视、纪实人文。
 
+支持看看新闻当天 XMLTV 节目单：`/all.m3u` 自动关联 EPG，也可在播放器中手动填写 `http://127.0.0.1:52451/epg.xml`。更新同一个 `wxty.php` 后重启并刷新订阅即可，详见 [节目单说明](./wxty/README.md)。
+
 2026-10-17：完成CatPaw 0.8.2与六个Forward移植组件0.1.1的分页、并发缓存及发布完整性优化。研究结论、460项回归与三个源的线上只读抽样见 [OPTIMIZATION_REVIEW.md](./OPTIMIZATION_REVIEW.md)。
 
 当前订阅包含18个独立模块，全部通过同一个Pages地址发布。聚爷爷影视已从订阅移除。版本见 [yqk.fwd](./yqk.fwd)，本轮逐项梳理见 [COLLECTION_REVIEW.md](./COLLECTION_REVIEW.md)。旧版验证记录和固定脚本继续保留，本轮片单检查以 `collection-validation.json` 为准。

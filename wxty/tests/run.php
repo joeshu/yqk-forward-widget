@@ -474,10 +474,73 @@ try {
     test('admin token can authenticate protected HEAD', static fn() => same(endpoint(['info' => '1'],
         ['REQUEST_METHOD' => 'HEAD', 'HTTP_AUTHORIZATION' => 'Bearer admin-token'],
         ['KK_ACCESS_TOKEN' => 'access-token', 'KK_ADMIN_TOKEN' => 'admin-token'])['status'], 200));
+    test('XMLTV escapes titles, rejects invalid intervals and matches subscription IDs', static function () {
+        $xml = WxtyGateway::xmltv(['dycj' => [
+            ['name' => '财经<&"', 'start_time' => 1792339200, 'end_time' => 1792339800],
+            ['name' => '财经<&"', 'start_time' => 1792339200, 'end_time' => 1792339800],
+            ['name' => 'bad', 'start_time' => 10, 'end_time' => 9],
+        ]]);
+        same(substr_count($xml, '<channel id='), 8);
+        same(substr_count($xml, '<programme '), 1);
+        same(str_contains($xml, 'start="20261019000000 +0800"'), true);
+        same(str_contains($xml, 'channel="dycj"'), true);
+        same(str_contains($xml, '财经&lt;&amp;&quot;'), true);
+    });
+    test('EPG caches eight channel schedules without playback requests', static function ($dir) {
+        $calls = 0;
+        $g = gateway($dir, static function ($url) use (&$calls) {
+            same(parse_url($url, PHP_URL_PATH), '/content/pc/tv/programs');
+            $calls++;
+            return apiResponse(['programs' => [['name' => '新闻', 'start_time' => 1792339200, 'end_time' => 1792342800]]]);
+        });
+        $a = $g->epg(); $b = $g->epg();
+        same($calls, 8); same($a, $b); same($a['missing'], []);
+        same(substr_count($a['xml'], '<programme '), 8);
+    });
+    test('EPG partial failure preserves other channels and reports missing', static function ($dir) {
+        $g = gateway($dir, static function ($url) {
+            parse_str(parse_url($url, PHP_URL_QUERY), $query);
+            if ($query['channel_id'] === '5') return response('', 403);
+            return apiResponse(['programs' => []]);
+        });
+        $result = $g->epg(); same($result['missing'], ['dycj']);
+        same(substr_count($result['xml'], '<channel id='), 8);
+    });
+    test('EPG refresh uses last same-day schedule when upstream fails', static function ($dir) {
+        $fail = false;
+        $g = gateway($dir, static function () use (&$fail) {
+            if ($fail) return response('', 403);
+            return apiResponse(['programs' => [['name' => '保留节目', 'start_time' => 1792339200, 'end_time' => 1792342800]]]);
+        });
+        $first = $g->epg();
+        $date = (new DateTimeImmutable('now', new DateTimeZone('Asia/Shanghai')))->format('Y-m-d');
+        expireCache($dir, 'epg:' . $date); $fail = true;
+        $second = $g->epg();
+        same($first['xml'], $second['xml']); same($second['missing'], []);
+        same(count($second['stale']), 8);
+    });
+    test('EPG XML route serves cached guide in a fresh single-file process', static function ($dir) {
+        $g = gateway($dir, static fn() => apiResponse(['programs' => []]));
+        $expected = $g->epg()['xml'];
+        $r = endpoint([], ['REQUEST_URI' => '/epg.xml'], ['KK_CACHE_DIR' => $dir], true);
+        same($r['status'], 200); same($r['body'], $expected);
+    });
+    test('EPG total failure does not publish an empty successful guide', static function ($dir) {
+        $g = gateway($dir, static fn() => response('', 403));
+        raises(static fn() => $g->epg(), 'epg-unavailable');
+    });
+    test('EPG route HEAD has no network or cache side effects', static function ($dir) {
+        $r = endpoint([], ['REQUEST_URI' => '/epg.xml', 'REQUEST_METHOD' => 'HEAD'], ['KK_CACHE_DIR' => $dir], true);
+        same($r['status'], 200); same($r['body'], ''); same(is_dir($dir), false);
+    });
+    test('EPG shares access authentication', static fn() => same(endpoint(['epg' => '1'],
+        ['REQUEST_METHOD' => 'HEAD'], ['KK_ACCESS_TOKEN' => 'secret'])['status'], 401));
+    test('EPG rejects array parameter', static fn() => same(endpoint(['epg' => ['1']])['status'], 400));
     test('subscription includes all eight local channel URLs without fetching upstream', static function ($dir) {
         $result = endpoint(['list' => '1'], ['HTTP_HOST' => '127.0.0.1:52451', 'SCRIPT_NAME' => '/wxty.php'], ['KK_CACHE_DIR' => $dir]);
-        same($result['status'], 200); same(str_starts_with($result['body'], "#EXTM3U\n"), true);
+        same($result['status'], 200); same(str_starts_with($result['body'], '#EXTM3U x-tvg-url="'), true);
         same(substr_count($result['body'], '#EXTINF:'), 8);
+        same(str_contains($result['body'], 'x-tvg-url="http://127.0.0.1:52451/wxty.php?epg=1"'), true);
         foreach (WxtyGateway::CHANNELS as $id => $channel) {
             same(str_contains($result['body'], 'http://127.0.0.1:52451/wxty.php?id=' . $id . "\n"), true);
             same(str_contains($result['body'], WxtyGateway::NAMES[$id]), true);
