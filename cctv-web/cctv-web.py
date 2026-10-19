@@ -301,10 +301,18 @@ class App:
                 pass
 
         async def close_browser():
-            if self.browser is not None:
-                await self.browser.close()
-            if self.playwright is not None:
-                await self.playwright.stop()
+            try:
+                if self.browser is not None:
+                    await self.browser.close()
+            except Exception:
+                # Ctrl-C can terminate the browser driver before Python handles it.
+                pass
+            finally:
+                if self.playwright is not None:
+                    try:
+                        await self.playwright.stop()
+                    except Exception:
+                        pass
 
         try:
             asyncio.run_coroutine_threadsafe(close_browser(), self.loop).result(timeout=10)

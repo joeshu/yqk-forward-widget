@@ -136,5 +136,24 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.get("/all.m3u", headers={"Host": 'bad"host'})[0], 400)
 
 
+class CleanupTests(unittest.TestCase):
+    def test_disconnected_browser_still_stops_runtime_and_cleans_files(self):
+        stopped = []
+        class Browser:
+            async def close(self):
+                raise RuntimeError("connection already closed")
+        class Runtime:
+            async def stop(self):
+                stopped.append(True)
+        with tempfile.TemporaryDirectory() as name:
+            app = service.App(SimpleNamespace(data_dir=name))
+            folder = app.folder
+            app.browser, app.playwright = Browser(), Runtime()
+            app.close()
+            self.assertEqual(stopped, [True])
+            self.assertTrue(app.loop.is_closed())
+            self.assertFalse(folder.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
