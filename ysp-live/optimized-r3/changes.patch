@@ -1,0 +1,1754 @@
+--- a/ysp-live-v9.5.py
++++ b/ysp-live-v9.5.py
+@@ -1,4 +1,5 @@
+ from __future__ import annotations 
++import ipaddress
+ import argparse 
+ import atexit 
+ import base64 
+@@ -32,7 +33,41 @@
+ import urllib .request 
+ import uuid 
+ from collections import deque 
+-urllib .request .install_opener (urllib .request .build_opener (urllib .request .ProxyHandler ({}))) 
++def _is_loopback_host(host):
++    host = (host or '').strip('[]').lower()
++    if host == 'localhost':
++        return True
++    try:
++        return ipaddress.ip_address(host).is_loopback
++    except ValueError:
++        return False
++
++def configured_proxy(target):
++    parsed = urllib.parse.urlsplit(target)
++    if _is_loopback_host(parsed.hostname) or os.environ.get('YSP_DIRECT') == '1':
++        return None
++    if urllib.request.proxy_bypass(parsed.netloc):
++        return None
++    value = urllib.request.getproxies().get(parsed.scheme)
++    if not value:
++        return None
++    proxy = urllib.parse.urlsplit(value if '://' in value else 'http://' + value)
++    if proxy.scheme != 'http' or not proxy.hostname or proxy.query or proxy.fragment or proxy.path not in ('', '/'):
++        raise ValueError('Use an HTTP forward proxy (HTTP CONNECT for HTTPS upstreams)')
++    # Parse ports here so invalid configuration fails without leaking credentials.
++    _ = proxy.port
++    return proxy
++
++class EnvironmentProxyHandler(urllib.request.ProxyHandler):
++    def __init__(self):
++        super().__init__(urllib.request.getproxies())
++    def proxy_open(self, req, proxy, type):
++        chosen = configured_proxy(req.full_url)
++        if chosen is None:
++            return None
++        return super().proxy_open(req, chosen.geturl(), type)
++
++urllib.request.install_opener(urllib.request.build_opener(EnvironmentProxyHandler())) 
+ __version__ ='9.5.0'
+ AUTHOR_COMMUNITY ='https://t.me/garysclub'
+ AUTHOR_CHANNEL ='https://t.me/garysclubchannel'
+@@ -703,7 +738,7 @@
+     for line in _rs_lines (text ):
+         stripped =line .strip ()
+         if not stripped or stripped .startswith ('#'):
+-            out .append (line )
++            out.append(re.sub(r'URI="([^"]+)"', lambda match: 'URI="' + urllib.parse.urljoin(base_url, match.group(1)) + '"', line) if has_base else line)
+         elif has_base :
+             out .append (urllib .parse .urljoin (base_url ,stripped ))
+         else :
+@@ -756,7 +791,7 @@
+             self ._ctx =ssl .create_default_context ()
+         jar =http .cookiejar .CookieJar ()
+         https_handler =urllib .request .HTTPSHandler (context =self ._ctx )
+-        self ._opener =urllib .request .build_opener (urllib .request .ProxyHandler ({}),urllib .request .HTTPCookieProcessor (jar ),https_handler )
++        self ._opener =urllib .request .build_opener (EnvironmentProxyHandler(),urllib .request .HTTPCookieProcessor (jar ),https_handler )
+         self ._jar =jar 
+     def _send (self ,method :str ,url :str ,headers :dict ,data :bytes |None )->HttpResponse :
+         req =urllib .request .Request (url ,data =data ,method =method )
+@@ -1206,7 +1241,7 @@
+                 entry =self .refresh_channel_controlled (channel )
+             except YsptpError as err :
+                 err_text =str (err )
+-                if 'HTTP 400'in err_text and self .rotate_device_on_400 (channel +':'+err_text [:60 ]):
++                if ('app/start' in err_text.lower() or 'cloud' in err_text.lower()) and 'HTTP 400' in err_text and self.rotate_device_on_400(channel + ':' + type(err).__name__):
+                     try :
+                         entry =self .refresh_channel_controlled (channel )
+                     except Exception :
+@@ -1676,8 +1711,8 @@
+             if not stripped or stripped .startswith ('#'):
+                 out .append (line )
+             elif is_ts_url (stripped ):
+-                encoded =base64 .urlsafe_b64encode (stripped .encode ('utf-8')).rstrip (b'=')
+-                out .append (f"{origin }{proxy_query }{encoded .decode ('ascii')}")
++                encoded = encode_proxy_ts_url(stripped)
++                out .append (f"{origin }{proxy_query }{encoded}")
+             else :
+                 out .append (line )
+         return ''.join ((ln +'\n'for ln in out ))
+@@ -1858,50 +1893,21 @@
+     if extra :
+         headers .update (extra )
+     return headers 
+-def fetch_playlist_http1 (final_url :str ,playback_headers :dict ):
+-    current_url =final_url 
+-    for _ in range (4 ):
+-        try :
+-            parts =urllib .parse .urlsplit (current_url )
+-        except ValueError as e :
+-            raise YsptpError (f'invalid final URL: {e }')
+-        if parts .scheme not in ('http','https'):
+-            raise YsptpError (f'manual playlist fetch currently expects http or https URL, got {parts .scheme }')
+-        host =parts .hostname 
+-        if not host :
+-            raise YsptpError ('final URL missing host')
+-        is_https =(parts .scheme =='https')
+-        port =parts .port or (443 if is_https else 80 )
+-        host_header =f'{host }:{parts .port }'if parts .port else host 
+-        target =parts .path or '/'
+-        if parts .query :
+-            target +='?'+parts .query 
+-        headers =_playback_request_headers (playback_headers )
+-        headers ['Host']=host_header 
+-        if is_https :
+-            conn =http .client .HTTPSConnection (host ,port ,timeout =20 ,context =ssl .create_default_context ())
+-        else :
+-            conn =http .client .HTTPConnection (host ,port ,timeout =20 )
+-        try :
+-            try :
+-                conn .request ('GET',target ,headers =headers )
+-                resp =conn .getresponse ()
+-            except Exception as e :
+-                raise YsptpError (_normalize_network_error (e ))
+-            status =resp .status 
+-            loc =resp .getheader ('Location')
+-            content_type =resp .getheader ('Content-Type')or 'application/vnd.apple.mpegurl'
+-            try :
+-                body =resp .read ()
+-            except Exception as e :
+-                raise YsptpError (_normalize_network_error (e ))
+-        finally :
+-            conn .close ()
+-        if status in (301 ,302 ,303 ,307 ,308 )and loc :
+-            current_url =urllib .parse .urljoin (current_url ,loc )
+-            continue 
+-        return (status ,content_type ,body .decode ('utf-8',errors ='replace'))
+-    raise YsptpError ('too many redirects fetching playlist')
++def fetch_playlist_http1(final_url: str, playback_headers: dict):
++    for attempt in range(2):
++        try:
++            with open_proxy_upstream(final_url, _playback_request_headers(playback_headers)) as response:
++                body = response.read(2 * 1024 * 1024 + 1)
++                if len(body) > 2 * 1024 * 1024:
++                    raise YsptpError('upstream playlist too large')
++                if response.status in (502, 503, 504) and attempt == 0:
++                    continue
++                return response.status, response.getheader('Content-Type', 'application/vnd.apple.mpegurl'), body.decode('utf-8', errors='replace')
++        except (OSError, http.client.HTTPException):
++            if attempt:
++                raise
++    raise YsptpError('playlist fetch failed')
++
+ def query_param (url :str ,name :str ):
+     if '?'not in url :
+         return None 
+@@ -1927,25 +1933,131 @@
+     if query and '='not in query :
+         return query 
+     return None 
+-def decode_proxy_ts_url (token :str )->str :
+-    padded =token +'='*(-len (token )%4 )
+-    try :
+-        raw =base64 .urlsafe_b64decode (padded .encode ('ascii'))
+-    except (binascii .Error ,ValueError )as e :
+-        raise YsptpError (f'invalid proxy ts token: {e }')
+-    try :
+-        value =raw .decode ('utf-8')
+-    except UnicodeDecodeError as e :
+-        raise YsptpError (f'proxy ts token is not UTF-8: {e }')
+-    try :
+-        parsed =urllib .parse .urlsplit (value )
+-    except ValueError as e :
+-        raise YsptpError (f'proxy ts token is not a URL: {e }')
+-    if parsed .scheme not in ('http','https'):
+-        raise YsptpError (f'proxy ts currently requires http or https URL, got {parsed .scheme }')
+-    if not parsed .path .lower ().endswith ('.ts'):
+-        raise YsptpError ('proxy ts URL is not a .ts segment')
+-    return value 
++_PROXY_SECRET = secrets.token_bytes(32)
++PROXY_TOKEN_TTL = 900
++MAX_SEGMENT_BYTES = 35 * 1024 * 1024
++
++def encode_proxy_ts_url(url: str) -> str:
++    payload = base64.urlsafe_b64encode(url.encode()).decode().rstrip('=')
++    value = f'{int(time.time()) + PROXY_TOKEN_TTL}.{payload}'
++    signature = _hmac.new(_PROXY_SECRET, value.encode(), hashlib.sha256).hexdigest()
++    return f'{value}.{signature}'
++
++def decode_proxy_ts_url(token: str, allow_engine=False) -> str:
++    try:
++        expiry, payload, signature = token.split('.')
++        value = f'{expiry}.{payload}'
++        expected = _hmac.new(_PROXY_SECRET, value.encode(), hashlib.sha256).hexdigest()
++        if not _hmac.compare_digest(signature, expected):
++            raise ValueError('invalid signature')
++        remaining = int(expiry) - time.time()
++        if remaining < 0 or remaining > PROXY_TOKEN_TTL:
++            raise ValueError('expired token')
++        raw = base64.b64decode(payload + '=' * (-len(payload) % 4), altchars=b'-_', validate=True)
++        target = raw.decode('utf-8')
++        parsed = validate_proxy_target(target, allow_engine=allow_engine)
++        if not allow_engine and not parsed.path.lower().endswith('.ts'):
++            raise ValueError('not a TS segment')
++        return target
++    except (ValueError, UnicodeError, binascii.Error) as exc:
++        raise YsptpError(f'invalid proxy token: {exc}') from exc
++
++def validate_proxy_target(target: str, allow_engine=False):
++    try:
++        parsed = urllib.parse.urlsplit(target)
++        host = (parsed.hostname or '').lower()
++        if parsed.scheme not in ('http', 'https') or not host or parsed.username is not None or parsed.password is not None:
++            raise ValueError('invalid scheme or authority')
++        port = parsed.port or (443 if parsed.scheme == 'https' else 80)
++        if allow_engine and host == '127.0.0.1' and port == engine_port and parsed.scheme == 'http' and parsed.path == '/segment':
++            inner = urllib.parse.parse_qs(parsed.query).get('url', [''])[0]
++            validate_proxy_target(inner)
++            return parsed
++        if port != (443 if parsed.scheme == 'https' else 80):
++            raise ValueError('forbidden port')
++        if not any(host == suffix[1:] or host.endswith(suffix) for suffix in ALLOWED_ENGINE_PROXY_SUFFIXES):
++            raise ValueError('forbidden host')
++        return parsed
++    except ValueError as exc:
++        raise YsptpError(f'forbidden upstream URL: {exc}') from exc
++
++def _proxy_addresses(parsed, allow_engine=False):
++    host = parsed.hostname
++    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
++    addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
++    if not addresses:
++        raise YsptpError('upstream DNS returned no address')
++    local_engine = allow_engine and host == '127.0.0.1' and port == engine_port
++    for _, _, _, _, sockaddr in addresses:
++        addr = ipaddress.ip_address(sockaddr[0].split('%')[0])
++        if not local_engine and (not addr.is_global or (getattr(addr, 'ipv4_mapped', None) and not addr.ipv4_mapped.is_global)):
++            raise YsptpError('upstream DNS resolved to a non-public address')
++    return addresses
++
++class _PinnedHTTPConnection(http.client.HTTPConnection):
++    def __init__(self, parsed, addresses):
++        super().__init__(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80), timeout=15)
++        self.parsed, self.addresses = parsed, addresses
++    def connect(self):
++        last_error = None
++        for family, socktype, proto, _, sockaddr in self.addresses:
++            sock = socket.socket(family, socktype, proto)
++            sock.settimeout(self.timeout)
++            try:
++                sock.connect(sockaddr)
++                if self.parsed.scheme == 'https':
++                    sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
++                self.sock = sock
++                return
++            except OSError as exc:
++                last_error = exc
++                sock.close()
++        raise last_error or OSError('no upstream address')
++
++def media_connection(parsed, addresses):
++    proxy = configured_proxy(parsed.geturl())
++    target = urllib.parse.urlunsplit(('', '', parsed.path or '/', parsed.query, ''))
++    if proxy is None:
++        return _PinnedHTTPConnection(parsed, addresses), target, {}
++    authorization = {}
++    if proxy.username is not None:
++        credentials = urllib.parse.unquote(proxy.username) + ':' + urllib.parse.unquote(proxy.password or '')
++        authorization['Proxy-Authorization'] = 'Basic ' + base64.b64encode(credentials.encode()).decode()
++    if parsed.scheme == 'https':
++        conn = http.client.HTTPSConnection(proxy.hostname, proxy.port or 80, timeout=15, context=ssl.create_default_context())
++        conn.set_tunnel(parsed.hostname, parsed.port or 443, headers=authorization)
++        return conn, target, {}
++    conn = http.client.HTTPConnection(proxy.hostname, proxy.port or 80, timeout=15)
++    return conn, parsed.geturl(), {'Host': parsed.netloc, **authorization}
++
++@contextlib.contextmanager
++def open_proxy_upstream(target, headers=None, method='GET', allow_engine=False):
++    request_headers = dict(headers or {})
++    conn = None
++    try:
++        for _ in range(5):
++            parsed = validate_proxy_target(target, allow_engine)
++            addresses = _proxy_addresses(parsed, allow_engine)
++            conn, request_target, transport_headers = media_connection(parsed, addresses)
++            request_headers.pop('Host', None)
++            conn.request(method, request_target, headers={**request_headers, **transport_headers})
++            resp = conn.getresponse()
++            location = resp.getheader('Location')
++            if resp.status in (301, 302, 303, 307, 308) and location:
++                next_target = urllib.parse.urljoin(target, location)
++                next_parts = validate_proxy_target(next_target, allow_engine)
++                if (next_parts.scheme, next_parts.netloc) != (parsed.scheme, parsed.netloc):
++                    request_headers = {k: v for k, v in request_headers.items() if k.lower() in ('user-agent', 'accept', 'accept-encoding', 'range')}
++                conn.close()
++                target = next_target
++                continue
++            yield resp
++            return
++        raise YsptpError('too many upstream redirects')
++    finally:
++        if conn:
++            conn.close()
++
+ def current_cctv_android_id (resolver :Resolver )->str :
+     if os .path .exists (resolver .args .device_json ):
+         loaded ,_ =load_device_state (resolver .args .device_json )
+@@ -2179,6 +2291,20 @@
+         return None 
+     rc =R (payload [16 :-1 ]).struct ()
+     return rc .get (1 )or b''
++def open_readonly_request(request, timeout=10, attempts=2):
++    for attempt in range(attempts):
++        try:
++            return urllib.request.urlopen(request, timeout=timeout)
++        except urllib.error.HTTPError as exc:
++            if exc.code not in (502, 503, 504) or attempt + 1 == attempts:
++                raise
++            exc.close()
++        except (OSError, http.client.HTTPException, urllib.error.URLError):
++            if attempt + 1 == attempts:
++                raise
++        time.sleep(0.2 + random.uniform(0, 0.15))
++    raise YsptpError('read-only request failed')
++
+ class DeadHostError (RuntimeError ):
+     pass 
+ def jce_timeshift_url (pid ,sid ,start ,end ,stream ='fhd'):
+@@ -2194,7 +2320,7 @@
+     packet =_wrap (CMD ,body ,reqid )
+     req =urllib .request .Request ('https://jacc.ysp.cctv.cn',data =packet ,method ='POST')
+     req .add_header ('Content-Type','application/octet-stream')
+-    with urllib .request .urlopen (req ,timeout =15 )as resp :
++    with open_readonly_request(req, timeout=8)as resp :
+         raw =resp .read ()
+     resp_body =_unwrap (raw )
+     if not resp_body :
+@@ -2272,7 +2398,7 @@
+     t =_ckey (channel_id )
+     q =urllib .parse .urlencode ({'atime':'120','livepid':live_pid ,'cnlid':channel_id ,'appVer':_CK_APPVER ,'app_version':'300090','caplv':'1','cmd':'2','defn':defn ,'device':'iPhone','encryptVer':'4.2','getpreviewinfo':'0','hevclv':'0','lang':'zh-Hans_CN','livequeue':'0','logintype':'1','nettype':'1','newnettype':'1','newplatform':str (_CK_PLATFORM ),'platform':str (_CK_PLATFORM ),'sdtfrom':'v3021','spacode':'23','spaudio':'1','spdemuxer':'6','spdrm':'2','spdynamicrange':'1','spflv':'1','spflvaudio':'1','sphdrfps':'60','sphttps':'1','spvcode':_BK_H264 ,'spvideo':'4','stream':'1','system':'1','sysver':'ios18.2.1','uhd_flag':'0','cKey':t ['cKey'],'guid':t ['guid'],'fntick':str (t ['ts']),'flowid':t ['flowId'],'playbacktime':'0'})
+     req =urllib .request .Request ('https://bkliveinfo.ysp.cctv.cn/?'+q ,headers ={'User-Agent':'qqlive','Accept':'application/json'})
+-    with urllib .request .urlopen (req ,timeout =5 )as r :
++    with open_readonly_request(req, timeout=5)as r :
+         p =json .loads (r .read ().decode ())
+     if int (p .get ('iretcode',-1 ))!=0 :
+         raise RuntimeError ('iretcode=%s %s'%(p .get ('iretcode'),p .get ('errinfo','')))
+@@ -2292,7 +2418,7 @@
+     return urls 
+ def fetch_abs_playlist (url ,depth =0 ):
+     req =urllib .request .Request (url ,headers ={'User-Agent':'qqlive','Referer':'https://live.cctv.cn/','Accept':'application/vnd.apple.mpegurl,application/json,*/*'})
+-    with urllib .request .urlopen (req ,timeout =10 )as r :
++    with open_readonly_request(req, timeout=8)as r :
+         text =r .read ().decode ('utf-8','replace')
+         final =r .geturl ()
+     if depth <2 :
+@@ -2310,7 +2436,7 @@
+         if s and (not s .startswith ('#')):
+             out .append (urllib .parse .urljoin (final ,s ))
+         else :
+-            out .append (ln )
++            out.append(re.sub(r'URI="([^"]+)"', lambda match: 'URI="' + urllib.parse.urljoin(final, match.group(1)) + '"', ln))
+     return '\n'.join (out )
+ DEFAULT_CHANNELS =[
+ ('cctv1','CCTV-1 综合','2024078201','600001859','fhd'),
+@@ -2556,8 +2682,7 @@
+         self .max_bytes =max_mb *1024 *1024 
+         self .max_age =max_age_sec 
+         self .lock =threading .Lock ()
+-        self .cache :dict [str ,tuple [bytes ,dict ,float ]]={}
+-        self .order =collections .deque ()
++        self.cache = collections.OrderedDict()
+         self .curr_bytes =0 
+         self .hits =0 
+         self .misses =0 
+@@ -2568,36 +2693,27 @@
+                 self .misses +=1 
+                 return None 
+             data ,headers ,expire_at =item 
+-            if time .time ()>expire_at :
++            if time.monotonic()>expire_at :
+                 self .cache .pop (key ,None )
+-                try :
+-                    self .order .remove (key )
+-                except ValueError :
+-                    pass 
+                 self .curr_bytes -=len (data )
+                 self .misses +=1 
+                 return None 
++            self.cache.move_to_end(key)
+             self .hits +=1 
+             return data ,headers 
+     def set (self ,key :str ,data :bytes ,headers :dict ):
+         with self .lock :
+-            if len (data )>self .max_bytes :
++            if self.max_bytes <= 0 or len (data )>self .max_bytes :
+                 return 
+             if key in self .cache :
+                 old =self .cache .pop (key )
+                 self .curr_bytes -=len (old [0 ])
+-                try :
+-                    self .order .remove (key )
+-                except ValueError :
+-                    pass 
+-            now =time .time ()
+-            while (self .curr_bytes +len (data )>self .max_bytes )and self .order :
+-                old_key =self .order .popleft ()
+-                old_val =self .cache .pop (old_key ,None )
++            now =time.monotonic()
++            while (self .curr_bytes +len (data )>self .max_bytes )and self.cache:
++                _, old_val = self.cache.popitem(last=False)
+                 if old_val :
+                     self .curr_bytes -=len (old_val [0 ])
+             self .cache [key ]=(data ,headers ,now +self .max_age )
+-            self .order .append (key )
+             self .curr_bytes +=len (data )
+     def stats (self )->dict :
+         with self .lock :
+@@ -2667,7 +2783,7 @@
+     now =int (time .time ())
+     m3u8_url =jce_timeshift_url (ch .pid ,ch .sid ,now -WINDOW ,now ,ch .defn )
+     req =urllib .request .Request (m3u8_url ,headers ={'User-Agent':UA })
+-    with urllib .request .urlopen (req ,timeout =20 )as r :
++    with open_readonly_request(req, timeout=8)as r :
+         text =r .read ().decode ('utf-8','replace')
+     segs ,dur ,pdt =([],6.0 ,'')
+     for line in text .splitlines ():
+@@ -2767,24 +2883,30 @@
+     ch .bk_urls =[]
+     ch .bk_urls_time =0 
+     raise RuntimeError (last_err [:120 ]or 'bk playlist failed')
+-def refresh_once (ch ):
+-    try :
+-        if ch .mode =='bk':
+-            ok =bk_refresh (ch )
+-        else :
+-            try :
+-                ok =jce_refresh (ch )
+-            except DeadHostError :
+-                ch .mode ='bk'
+-                log (f'[{ch .slug }] JCE 域名受限，自动切换 bkliveinfo 备用通道',min_interval =10.0 )
+-                ok =bk_refresh (ch )
+-        if ok :
+-            ch .last_ok =time .time ()
+-        return ok 
+-    except Exception as e :
+-        ch .last_error =('%s: %s'%(type (e ).__name__ ,e ))[:120 ]
+-        log (f'[{ch .slug }] {defn_label (ch .defn )} 刷新异常: {ch .last_error }',min_interval =15.0 )
+-        return False 
++def refresh_once(ch):
++    try:
++        retry_primary = ch.mode == 'bk' and ch.slug not in FORCE_BK and time.monotonic() >= getattr(ch, 'primary_retry_at', float('inf'))
++        if ch.mode == 'bk' and not retry_primary:
++            ok = bk_refresh(ch)
++        else:
++            try:
++                ok = jce_refresh(ch)
++                ch.mode = 'jce'
++                ch.last_primary_error = ''
++            except (OSError, http.client.HTTPException, urllib.error.URLError, RuntimeError, YsptpError) as exc:
++                ch.last_primary_error = type(exc).__name__
++                ch.mode = 'bk'
++                ch.primary_retry_at = time.monotonic() + (600 if isinstance(exc, DeadHostError) else 60)
++                log(f'[{ch.slug}] JCE 不可用 ({type(exc).__name__})，尝试 BK 备用通道', min_interval=15)
++                ok = bk_refresh(ch)
++        if ok:
++            ch.last_ok = time.time()
++        return ok
++    except Exception as exc:
++        ch.last_error = f'{type(exc).__name__}: {exc}'[:120]
++        log(f'[{ch.slug}] 刷新未成功 ({type(exc).__name__})，保留其他回退通道', min_interval=15)
++        return False
++
+ def refresh_loop (ch ):
+     log (f'[{ch .slug }] {defn_label (ch .defn )} 后台拉取启动 [{ch .mode }]',min_interval =10.0 )
+     fails =0 
+@@ -2792,7 +2914,8 @@
+         build_playlist (ch ,holdback =True )
+         time .sleep (REFRESH_INTERVAL )
+     while time .time ()-ch .last_access <IDLE_TIMEOUT :
+-        ok =refresh_once (ch )
++        coalesce_refresh(ch.slug, lambda: refresh_and_build(ch))
++        ok = time.time() - ch.last_ok < REFRESH_INTERVAL
+         if ok :
+             build_playlist (ch ,holdback =True )
+         fails =0 if ok else fails +1 
+@@ -2861,14 +2984,12 @@
+         ch .last_built_playlist =res 
+         ch .last_built_time =time .time ()
+     return res 
+-def trigger_background_refresh (ch ):
+-    with _inflight_lock :
+-        if ch .slug in _inflight_refresh :
+-            return 
+-    def _do ():
+-        if refresh_once (ch ):
+-            build_playlist (ch ,holdback =True )
+-    threading .Thread (target =coalesce_refresh ,args =(ch .slug ,_do ),daemon =True ).start ()
++def refresh_and_build(ch):
++    if refresh_once(ch):
++        build_playlist(ch, holdback=True)
++
++def trigger_background_refresh(ch):
++    coalesce_refresh(ch.slug, lambda: refresh_and_build(ch), timeout=0)
+ CHANNEL_MAP :dict [str ,Channel ]={c [0 ]:Channel (*c )for c in DEFAULT_CHANNELS }
+ FORCE_BK ={'cctv11','cctv12','cctv14','cctv15','cctv16','cctv17','cctvfyjc','cctvdyjc','cctvhjjc'}
+ for _s in FORCE_BK :
+@@ -2903,27 +3024,8 @@
+     return None 
+ engine_port =8787 
+ ALLOWED_ENGINE_PROXY_SUFFIXES =('.cctv.cn','.cctv.com','.cctvpic.com','.citvc.com','.yangshipin.cn','.cntv.cn','.cntv.com','.myqcloud.com','.qqlive.com','.gtimg.cn','.smtcdns.net','.smtcdns.com','.tcdnlive.com','.alicdn.com','.alikunlun.com','.wscdns.com','.chinanetcenter.com','.bdydns.com','.ksyungslb.com','.ks-cdn.com')
+-def _is_safe_engine_proxy_url (target :str ,_depth :int =0 )->bool :
+-    if _depth >2 :
+-        return False 
+-    try :
+-        parsed =urllib .parse .urlsplit (target )
+-    except ValueError :
+-        return False 
+-    if parsed .scheme not in ('http','https'):
+-        return False 
+-    host =(parsed .hostname or '').lower ()
+-    if not host :
+-        return False 
+-    if host in ('127.0.0.1','localhost'):
+-        if parsed .port !=engine_port or not parsed .path .startswith ('/segment'):
+-            return False 
+-        qs =urllib .parse .parse_qs (parsed .query )
+-        inner =qs .get ('url',[None ])[0 ]
+-        return bool (inner )and _is_safe_engine_proxy_url (inner ,_depth +1 )
+-    return any ((host ==s [1 :]or host .endswith (s )for s in ALLOWED_ENGINE_PROXY_SUFFIXES ))
+ def inject_hls_discontinuity (pl :str )->str :
+-    if '#EXT-X-DISCONTINUITY'in pl :
++    if '#EXT-X-DISCONTINUITY' in (line.strip() for line in pl.splitlines()):
+         return pl 
+     lines =pl .splitlines ()
+     out =[]
+@@ -2937,36 +3039,71 @@
+     if not inserted :
+         return pl 
+     return '\n'.join (out )+('\n'if pl .endswith ('\n')else '')
+-def fetch_upstream_engine_playlist (canonical :str ,host :str ,proto :str ='http')->str |None :
+-    global engine_port 
+-    scheme =proto if proto in ('http','https')else 'http'
+-    for u in (f'http://127.0.0.1:{engine_port }/live/{canonical }.m3u8',f'http://127.0.0.1:{engine_port }/{canonical }.m3u8'):
+-        try :
+-            req =urllib .request .Request (u ,headers ={'User-Agent':UA })
+-            with urllib .request .urlopen (req ,timeout =10.0 )as resp :
+-                if resp .status ==200 :
+-                    text =resp .read ().decode ('utf-8',errors ='ignore')
+-                    if '#EXTM3U'in text :
+-                        base_prefix =f'{scheme }://{host }/engine_proxy?url='
+-                        out_lines =[]
+-                        for line in text .splitlines ():
+-                            line_str =line .strip ()
+-                            if not line_str :
+-                                continue 
+-                            if line_str .startswith ('#'):
+-                                out_lines .append (line_str )
+-                            else :
+-                                if line_str .startswith ('http://')or line_str .startswith ('https://'):
+-                                    full_target =line_str 
+-                                else :
+-                                    full_target =urllib .parse .urljoin (u ,line_str )
+-                                out_lines .append (base_prefix +urllib .parse .quote (full_target ,safe =''))
+-                        return '\n'.join (out_lines )+'\n'
+-        except Exception :
+-            pass 
+-    return None 
++def gateway_playlist_urls(playlist, host, proto='http', base_url=None):
++    scheme = proto if proto in ('http', 'https') else 'http'
++    prefix = f'{scheme}://{host}/engine_proxy?token='
++    def wrap(value):
++        target = urllib.parse.urljoin(base_url, value) if base_url else value
++        validate_proxy_target(target, allow_engine=True)
++        return prefix + encode_proxy_ts_url(target)
++    result = []
++    for line in playlist.splitlines():
++        if line.startswith('#'):
++            result.append(re.sub(r'URI="([^"]+)"', lambda match: 'URI="' + wrap(match.group(1)) + '"', line))
++        elif line.strip():
++            result.append(wrap(line.strip()))
++        else:
++            result.append(line)
++    return '\n'.join(result) + '\n'
++
++def fetch_upstream_engine_playlist(canonical: str, host: str, proto: str = 'http'):
++    target = f'http://127.0.0.1:{engine_port}/live/{canonical}.m3u8'
++    try:
++        request = urllib.request.Request(target, headers={'User-Agent': UA})
++        with urllib.request.urlopen(request, timeout=12) as response:
++            text = response.read(2 * 1024 * 1024).decode('utf-8', errors='replace')
++            if response.status == 200 and text.startswith('#EXTM3U'):
++                return gateway_playlist_urls(text, host, proto, target)
++    except (OSError, ValueError, http.client.HTTPException, YsptpError):
++        pass
++    return None
++
++download_slots = threading.BoundedSemaphore(8)
++_segment_flights = {}
++_segment_flight_lock = threading.Lock()
++
++class BoundedHTTPServer(ThreadingHTTPServer):
++    daemon_threads = True
++    request_queue_size = 64
++    def __init__(self, address, handler, max_requests=64):
++        self.request_slots = threading.BoundedSemaphore(max_requests)
++        super().__init__(address, handler)
++    def get_request(self):
++        request, address = super().get_request()
++        request.settimeout(15)
++        return request, address
++    def process_request(self, request, client_address):
++        if not self.request_slots.acquire(blocking=False):
++            try:
++                request.settimeout(0.2)
++                request.sendall(b'HTTP/1.0 503 Service Unavailable\r\nContent-Length: 0\r\nRetry-After: 1\r\nConnection: close\r\n\r\n')
++            except OSError:
++                pass
++            self.shutdown_request(request)
++            return
++        try:
++            super().process_request(request, client_address)
++        except BaseException:
++            self.request_slots.release()
++            raise
++    def process_request_thread(self, request, client_address):
++        try:
++            super().process_request_thread(request, client_address)
++        finally:
++            self.request_slots.release()
++
+ class Handler (BaseHTTPRequestHandler ):
+-    server_version ='ysp-live/9.5.0'
++    server_version ='ysp-live/9.5.0-r2'
+     def log_message (self ,fmt ,*args ):
+         pass 
+     def _send (self ,code ,body ,ctype ='text/plain; charset=utf-8',head_only =False ,extra_headers =None ):
+@@ -2976,7 +3113,8 @@
+             self .send_header ('Content-Type',ctype )
+             self .send_header ('Content-Length',str (len (data )))
+             self .send_header ('Access-Control-Allow-Origin','*')
+-            self .send_header ('Cache-Control','no-cache, no-store, max-age=0')
++            if not extra_headers or not any(k.lower() == 'cache-control' for k in extra_headers):
++                self.send_header('Cache-Control', 'no-cache, no-store, max-age=0')
+             if extra_headers :
+                 for k ,v in extra_headers .items ():
+                     self .send_header (k ,v )
+@@ -2985,6 +3123,105 @@
+                 self .wfile .write (data )
+         except (BrokenPipeError ,ConnectionResetError ):
+             pass 
++    def _proxy_segment(self, target, head_only=False, engine=False):
++        if not download_slots.acquire(blocking=False):
++            self._send(503, 'download capacity reached\n', head_only=head_only, extra_headers={'Retry-After': '1'})
++            return
++        range_value = self.headers.get('Range')
++        key = ('engine:' if engine else 'device:') + target
++        flight_key = (key, range_value, head_only)
++        owner = False
++        sent = False
++        try:
++            with _segment_flight_lock:
++                event = _segment_flights.get(flight_key)
++                if event is None:
++                    event = threading.Event()
++                    _segment_flights[flight_key] = event
++                    owner = True
++            if not owner:
++                if not event.wait(20):
++                    self._send(503, 'segment download pending\n', head_only=head_only)
++                    return
++            cached = global_ts_cache.get(key) if not range_value else None
++            if cached:
++                data, headers = cached
++                self._send(200, data, headers.get('Content-Type', 'video/mp2t'), head_only,
++                           {'X-Cache': 'HIT-RAM', 'Cache-Control': 'public, max-age=180'})
++                return
++            # Followers retry on the next player request if the leader failed or
++            # buffering is disabled, rather than launching duplicate downloads.
++            if not owner:
++                self._send(503, 'segment not cached; retry\n', head_only=head_only, extra_headers={'Retry-After': '1'})
++                return
++            playback = {'User-Agent': 'qqlive', 'Referer': 'https://live.cctv.cn/'} if engine else ({} if resolver is None else resolver.playback_headers_for_ts_url(target))
++            headers = _playback_request_headers(playback)
++            if range_value:
++                headers['Range'] = header_value_clean(range_value)
++            with open_proxy_upstream(target, headers, 'HEAD' if head_only else 'GET', allow_engine=engine) as upstream:
++                length = upstream.getheader('Content-Length')
++                if length and int(length) > MAX_SEGMENT_BYTES:
++                    raise YsptpError('upstream segment too large')
++                self.send_response(upstream.status)
++                for name in ('Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges'):
++                    value = upstream.getheader(name)
++                    if value is not None:
++                        self.send_header(name, value)
++                self.send_header('X-Cache', 'MISS-UPSTREAM')
++                self.send_header('Access-Control-Allow-Origin', '*')
++                self.send_header('Cache-Control', 'public, max-age=180' if upstream.status == 200 else 'no-store')
++                self.end_headers()
++                sent = True
++                if head_only:
++                    return
++                cache_limit = min(MAX_SEGMENT_BYTES, global_ts_cache.max_bytes)
++                buffer = bytearray() if upstream.status == 200 and not range_value and cache_limit > 0 else None
++                total = 0
++                deadline = time.monotonic() + 45
++                while True:
++                    if time.monotonic() > deadline:
++                        raise YsptpError("segment transfer deadline exceeded")
++                    chunk = upstream.read(65536)
++                    if not chunk:
++                        break
++                    total += len(chunk)
++                    if total > MAX_SEGMENT_BYTES:
++                        raise YsptpError('upstream segment too large')
++                    self.wfile.write(chunk)
++                    if buffer is not None:
++                        if total <= cache_limit:
++                            buffer.extend(chunk)
++                        else:
++                            buffer = None
++                if buffer and (length is None or total == int(length)):
++                    global_ts_cache.set(key, bytes(buffer), {'Content-Type': upstream.getheader('Content-Type', 'video/mp2t')})
++        except (BrokenPipeError, ConnectionResetError):
++            pass  # Closing the context cancels the upstream download.
++        except Exception as exc:
++            if not sent:
++                self._send(502, 'upstream segment unavailable\n', head_only=head_only)
++            log(f'[proxy] {type(exc).__name__}: segment transfer failed', min_interval=10)
++        finally:
++            self.close_connection = True
++            if owner:
++                with _segment_flight_lock:
++                    _segment_flights.pop(flight_key, None)
++                    event.set()
++            download_slots.release()
++
++    def _send_channel_playlist(self, ch, playlist, source, proto, head_only=False, extra_headers=None):
++        if source in ('jce', 'bk', 'catchup'):
++            playlist = gateway_playlist_urls(playlist, self.headers.get('Host', f'localhost:{server_port}'), proto)
++        with ch.lock:
++            previous = getattr(ch, 'last_m3u8_source', None)
++            if previous and previous != source:
++                playlist = inject_hls_discontinuity(playlist)
++            ch.last_m3u8_source = source
++            ch.last_served_at = time.time()
++        headers = {'X-Playback-Source': source, 'X-Resolution-Verified': 'false'}
++        headers.update(extra_headers or {})
++        self._send(200, playlist, 'application/vnd.apple.mpegurl', head_only, headers)
++
+     def do_HEAD (self ):
+         self .do_GET (head_only =True )
+     def do_GET (self ,head_only =False ):
+@@ -3018,7 +3255,14 @@
+             active_slots =len ([s for s in (resolver .state .sessions .values ()if resolver else [])if s and resolver .app_session_fresh (s )])
+             health_data ={
+             "ok":True ,
++            "network_mode": "direct" if os.environ.get('YSP_DIRECT') == '1' else "environment",
++            "playback": {
++                "playlist_ready": any(now - getattr(channel, 'last_served_at', 0) < 30 for channel in CHANNEL_MAP.values()),
++                "resolution_verified": False,
++                "recent_sources": {slug: getattr(channel, 'last_m3u8_source', 'idle') for slug, channel in CHANNEL_MAP.items() if now - getattr(channel, 'last_served_at', 0) < 30}
++            },
+             "version":"9.5.0",
++            "build":"optimized-r2",
+             "author_community":AUTHOR_COMMUNITY ,
+             "author_channel":AUTHOR_CHANNEL ,
+             "notice":"其他渠道均非作者发布！",
+@@ -3028,7 +3272,7 @@
+             "active_device_slots":active_slots ,
+             "session_valid":bool (sess and resolver and resolver .app_session_fresh (sess )),
+             "heartbeat_count":sess .heartbeat_count if sess else 0 ,
+-            "guid":sess .cloud_guid if sess else ""
++            "guid_present":bool(sess and sess.cloud_guid)
+             },
+             "channels":len (global_channel_dir .unique_channels ()),
+             "ts_cache":cache_info ,
+@@ -3083,7 +3327,7 @@
+             links_limit_cfg =getattr (resolver .args ,'links_per_device',6 )if resolver else 6 
+             pool_ch_count =len (active_backend_channels )
+             info .append (f"单设备并发池状态: {engine_status }")
+-            info .append (f"高码率设备状态 ({pool_ch_count } 路共用): {('有效'if s0 and resolver and resolver .app_session_fresh (s0 )else '未就绪')}, 占用={len (s0 .linked_channels )if s0 else 0 }/{links_limit_cfg }, 心跳={(s0 .heartbeat_count if s0 else 0 )}, GUID={(s0 .cloud_guid if s0 else '无')}")
++            info .append (f"高码率设备状态 ({pool_ch_count } 路共用): {('有效'if s0 and resolver and resolver .app_session_fresh (s0 )else '未就绪')}, 占用={len (s0 .linked_channels )if s0 else 0 }/{links_limit_cfg }, 心跳={(s0 .heartbeat_count if s0 else 0 )}, GUID={'已设置' if s0 and s0.cloud_guid else '无'}")
+             if s0 and s0 .last_heartbeat_error :
+                 info .append (f'Slot 0 心跳日志: {s0 .last_heartbeat_error }')
+             c_stats =global_ts_cache .stats ()
+@@ -3093,7 +3337,7 @@
+                 slug =ch_meta ['slug']
+                 ch =CHANNEL_MAP .get (slug )
+                 age ='%ds前'%int (now -ch .last_ok )if ch and ch .last_ok else '从未拉取'
+-                mode_str ='4K/高码率'if slug in active_backend_channels and resolver_ready ()else (ch .mode if ch else 'idle')
++                mode_str = ('设备通道（分辨率未验证）' if ch and getattr(ch, 'last_m3u8_source', '') == 'device' else ('Web 备用' if ch and getattr(ch, 'last_m3u8_source', '') == 'web' else (ch.mode if ch and ch.last_ok else 'idle')))
+                 cooldown_str =''
+                 if resolver and resolver .is_channel_in_cooldown (slug ):
+                     fail_info =resolver .get_channel_failure_info (slug )
+@@ -3103,137 +3347,32 @@
+                         cooldown_str =f' [高码冷却剩{rem_sec }s]'
+                 err_msg =ch .last_error if ch else '无'
+                 info .append (f"{slug } ({ch_meta ['name']}) 模式={mode_str }{cooldown_str } 上次刷新={age } 错误={err_msg or '无'}")
++            if companion_log_ring:
++                info.append('--- 伴生引擎最近输出 ---')
++                info.extend(list(companion_log_ring))
+             if global_log_ring :
+                 info .append ('--- 最近运行事件 (最新 30 条) ---')
+                 clean_logs = [re.sub(r'\033\[[0-9;]*m', '', line) for line in list(global_log_ring)[-30:]]
+                 info .extend (clean_logs)
+             self ._send (200 ,'\n'.join (info )+'\n',head_only =head_only )
+             return 
+-        if path in ('/proxy.ts','/proxy'):
+-            token =proxy_ts_token (self .path )
+-            if not token :
+-                self ._send (400 ,'missing proxy ts token\n',head_only =head_only )
+-                return 
+-            try :
+-                real_url =decode_proxy_ts_url (token )
+-            except YsptpError as err :
+-                self ._send (400 ,f'{err }\n',head_only =head_only )
+-                return 
+-            range_header =self .headers .get ('Range')
+-            cached_item =global_ts_cache .get (real_url )if not range_header else None 
+-            if cached_item is not None :
+-                cached_bytes ,cached_headers =cached_item 
+-                try :
+-                    self .send_response (200 )
+-                    for k ,v in cached_headers .items ():
+-                        self .send_header (k ,v )
+-                    self .send_header ('X-Cache','HIT-RAM')
+-                    self .send_header ('Access-Control-Allow-Origin','*')
+-                    self .send_header ('Cache-Control','public, max-age=300')
+-                    self .end_headers ()
+-                    if not head_only :
+-                        self .wfile .write (cached_bytes )
+-                    return 
+-                except (BrokenPipeError ,ConnectionResetError ):
+-                    return 
+-            try :
+-                playback_headers =resolver .playback_headers_for_ts_url (real_url )if resolver else {}
+-            except YsptpError as err :
+-                self ._send (500 ,f'{err }\n',head_only =head_only )
+-                return 
+-            try :
+-                parts_url =urllib .parse .urlsplit (real_url )
+-                host =parts_url .hostname 
+-                if not host :
+-                    self ._send (400 ,'invalid ts host\n',head_only =head_only )
+-                    return 
+-                is_https =(parts_url .scheme =='https')
+-                port =parts_url .port or (443 if is_https else 80 )
+-                host_header =f'{host }:{parts_url .port }'if parts_url .port else host 
+-                target =parts_url .path or '/'
+-                if parts_url .query :
+-                    target +='?'+parts_url .query 
+-                extra ={}
+-                if range_header :
+-                    extra ['Range']=header_value_clean (range_header )
+-                headers =_playback_request_headers (playback_headers ,extra )
+-                headers ['Host']=host_header 
+-                if is_https :
+-                    conn =http .client .HTTPSConnection (host ,port ,timeout =30 ,context =ssl .create_default_context ())
+-                else :
+-                    conn =http .client .HTTPConnection (host ,port ,timeout =30 )
+-                try :
+-                    req_method ='HEAD'if head_only else 'GET'
+-                    conn .request (req_method ,target ,headers =headers )
+-                    resp =conn .getresponse ()
+-                    resp_headers_to_pass ={}
+-                    for k ,v in resp .getheaders ():
+-                        kl =k .lower ()
+-                        if kl in ('content-type','content-range','accept-ranges','content-length','location'):
+-                            resp_headers_to_pass [k ]=v 
+-                    self .send_response (resp .status )
+-                    for k ,v in resp_headers_to_pass .items ():
+-                        self .send_header (k ,v )
+-                    self .send_header ('X-Cache','MISS-UPSTREAM')
+-                    self .send_header ('Access-Control-Allow-Origin','*')
+-                    self .send_header ('Cache-Control','public, max-age=300')
+-                    self .end_headers ()
+-                    if not head_only :
+-                        body_buffer =bytearray ()
+-                        is_oversized =False 
+-                        expected_len =None 
+-                        cl_val =resp_headers_to_pass .get ('Content-Length')or resp_headers_to_pass .get ('content-length')
+-                        if cl_val :
+-                            try :
+-                                expected_len =int (cl_val )
+-                                if expected_len >35 *1024 *1024 :
+-                                    is_oversized =True 
+-                            except ValueError :
+-                                pass 
+-                        while True :
+-                            chunk =resp .read (262144 )
+-                            if not chunk :
+-                                break 
+-                            self .wfile .write (chunk )
+-                            if resp .status ==200 and not is_oversized :
+-                                if len (body_buffer )+len (chunk )<=35 *1024 *1024 :
+-                                    body_buffer .extend (chunk )
+-                                else :
+-                                    is_oversized =True 
+-                                    body_buffer .clear ()
+-                        if resp .status ==200 and not is_oversized and body_buffer :
+-                            if expected_len is None or len (body_buffer )==expected_len :
+-                                global_ts_cache .set (real_url ,bytes (body_buffer ),resp_headers_to_pass )
+-                finally :
+-                    conn .close ()
+-            except (BrokenPipeError ,ConnectionResetError ):
+-                pass 
+-            except Exception as e :
+-                try :
+-                    self .send_error (502 ,f'Upstream CDN error: {e }')
+-                except Exception :
+-                    pass 
+-            return 
+-        if path =='/engine_proxy':
+-            qs =urllib .parse .parse_qs (parts .query )
+-            target =qs .get ('url',[''])[0 ]
+-            if not target :
+-                self ._send (400 ,'missing url\n',head_only =head_only )
+-                return 
+-            if not _is_safe_engine_proxy_url (target ):
+-                self ._send (403 ,'forbidden url\n',head_only =head_only )
+-                return 
+-            try :
+-                req =urllib .request .Request (target ,headers ={'User-Agent':UA ,'Accept':'*/*'})
+-                with urllib .request .urlopen (req ,timeout =10.0 )as resp :
+-                    data =resp .read (35 *1024 *1024 +1 )
+-                    if len (data )>35 *1024 *1024 :
+-                        self ._send (502 ,'upstream segment too large\n',head_only =head_only )
+-                        return 
+-                    self ._send (resp .status ,data ,resp .headers .get ('Content-Type','video/mp2t'),head_only =head_only )
+-            except Exception as e :
+-                self ._send (502 ,f'engine proxy error: {e }\n',head_only =head_only )
+-            return 
++        if path in ('/proxy.ts', '/proxy'):
++            try:
++                target = decode_proxy_ts_url(proxy_ts_token(self.path) or '')
++            except YsptpError as exc:
++                self._send(403, f'{exc}\n', head_only=head_only)
++                return
++            self._proxy_segment(target, head_only=head_only)
++            return
++        if path == '/engine_proxy':
++            token = urllib.parse.parse_qs(parts.query).get('token', [''])[0]
++            try:
++                target = decode_proxy_ts_url(token, allow_engine=True)
++            except YsptpError as exc:
++                self._send(403, f'{exc}\n', head_only=head_only)
++                return
++            self._proxy_segment(target, head_only=head_only, engine=True)
++            return
+         m =re .match (r'^/([\w-]+)\.m3u8$',path )
+         if m :
+             raw_slug =normalize_channel (m .group (1 ))
+@@ -3248,7 +3387,7 @@
+                 try :
+                     m3u8_url =jce_timeshift_url (ch .pid ,ch .sid ,start_ts ,end_ts ,ch .defn )
+                     pl =fetch_abs_playlist (m3u8_url )
+-                    self ._send (200 ,pl ,'application/vnd.apple.mpegurl',head_only =head_only )
++                    self._send_channel_playlist(ch, pl, 'catchup', proto, head_only)
+                     return 
+                 except Exception as e :
+                     log (f'[{canonical }] 时移获取失败: {e }，回退直播',min_interval =10.0 )
+@@ -3260,20 +3399,20 @@
+                         if pl and '#EXTM3U'in pl :
+                             with ch .lock :
+                                 prev_src =getattr (ch ,'last_m3u8_source',None )
+-                                ch .last_m3u8_source ='device'
+                                 ch .last_built_playlist =''
+                                 ch .last_built_time =0.0 
+                             if prev_src =='bk':
+                                 pl =inject_hls_discontinuity (pl )
+-                            self ._send (200 ,pl ,'application/vnd.apple.mpegurl',head_only =head_only )
++                            self._send_channel_playlist(ch, pl, 'device', proto, head_only)
+                             return 
+                     except Exception as e :
+                         with resolver .state_lock :
+                             resolver .state .cache .pop (canonical ,None )
+                             resolver .state .playlist_cache .pop (canonical ,None )
+                             prev =resolver .state .channel_failures .get (canonical )
+-                            fail_cnt =(prev [2 ]+1 )if prev else 1 
+-                            resolver .state .channel_failures [canonical ]=(now_f64 (),str (e ),fail_cnt )
++                            if not prev or prev[1] != str(e) or now_f64() - prev[0] > 2:
++                                fail_cnt = prev[2] + 1 if prev else 1
++                                resolver.state.channel_failures[canonical] = (now_f64(), str(e), fail_cnt)
+                         fail_info =resolver .get_channel_failure_info (canonical )if resolver else None 
+                         fail_cnt =fail_info [2 ]if fail_info else 1 
+                         if fail_cnt <=1 :
+@@ -3292,10 +3431,9 @@
+             if cached_pl and cached_age <15.0 and ('#EXTM3U'in cached_pl ):
+                 with ch .lock :
+                     prev_src =getattr (ch ,'last_m3u8_source',None )
+-                    ch .last_m3u8_source ='bk'
+                 if prev_src =='device':
+                     cached_pl =inject_hls_discontinuity (cached_pl )
+-                self ._send (200 ,cached_pl ,'application/vnd.apple.mpegurl',head_only =head_only ,extra_headers ={'X-SWR':'HIT'})
++                self._send_channel_playlist(ch, cached_pl, ch.mode, proto, head_only, {'X-SWR': 'HIT'})
+                 if cached_age >6.0 :
+                     trigger_background_refresh (ch )
+                 return 
+@@ -3304,16 +3442,15 @@
+             if pl and '#EXTM3U'in pl :
+                 with ch .lock :
+                     prev_src =getattr (ch ,'last_m3u8_source',None )
+-                    ch .last_m3u8_source ='bk'
+                 if prev_src =='device':
+                     pl =inject_hls_discontinuity (pl )
+-                self ._send (200 ,pl ,'application/vnd.apple.mpegurl',head_only =head_only )
++                self._send_channel_playlist(ch, pl, ch.mode, proto, head_only)
+                 return 
+             upstream_pl =fetch_upstream_engine_playlist (canonical ,self .headers .get ('Host',f'localhost:{server_port }'),proto )
+             if upstream_pl and '#EXTM3U'in upstream_pl :
+-                self ._send (200 ,upstream_pl ,'application/vnd.apple.mpegurl',head_only =head_only )
++                self._send_channel_playlist(ch, upstream_pl, 'web', proto, head_only)
+                 return 
+-            self ._send (503 ,'频道 %s 暂无数据 (%s), 请稍后重试\n'%(ch .name ,ch .last_error or '拉取中'),head_only =head_only )
++            self._send(503, '频道暂未就绪，请稍后重试\n', head_only=head_only, extra_headers={'Retry-After': '2'})
+             return 
+         self ._send (404 ,'not found\n',head_only =head_only )
+ def init_resolver ():
+@@ -3335,72 +3472,125 @@
+                 resolver .rotate_device_on_400 ('init:'+str (e )[:60 ])
+             backoff =min (15.0 * (1.5 ** min (retry_count - 1 ,4 )),60.0 )
+             time .sleep (backoff )
+-companion_proc =None 
+-def is_port_listening (port :int ,host :str ='127.0.0.1')->bool :
+-    try :
+-        with socket .socket (socket .AF_INET ,socket .SOCK_STREAM )as s :
+-            s .settimeout (0.5 )
+-            return s .connect_ex ((host ,port ))==0 
+-    except Exception :
+-        return False 
+-def start_companion_engine (script_dir :str ,port :int =8787 ):
+-    global companion_proc 
+-    if is_port_listening (port ):
+-        log (f'[引擎] Web WASM 引擎已就绪: 端口 {port } 已处于运行状态')
+-        return 
+-    candidates =[
+-        os .path .join (script_dir ,'ysp-engine.js'),
+-        os .path .join (os .getcwd (),'ysp-engine.js'),
+-        '/app/ysp-engine.js'
+-    ]
+-    engine_file =None 
+-    for p in candidates :
+-        if os .path .isfile (p ):
+-            engine_file =p 
+-            break 
+-    if not engine_file :
+-        log ('[引擎] 未找到 ysp-engine.js，Web WASM 伴生引擎未启用')
+-        return 
+-    node_bin =shutil .which ('node')
+-    if not node_bin :
+-        log ('[引擎] 未检测到 node 可执行程序，Web WASM 伴生引擎未启用 (走设备协议/1080p 回退)')
+-        return 
+-    try :
+-        subp =__import__ ('subprocess')
+-        companion_proc =subp .Popen (
+-            [node_bin ,engine_file ,str (port )],
+-            stdout =subp .DEVNULL ,
+-            stderr =subp .DEVNULL 
+-        )
+-        for _ in range (30 ):
+-            if is_port_listening (port ):
+-                log (f'[引擎] Web WASM 伴生引擎 (Node.js) 自动启动成功: 端口 {port }')
+-                return 
+-            time .sleep (0.1 )
+-        if companion_proc .poll ()is not None :
+-            log ('[引擎] 警告: Web WASM 伴生引擎启动异常退出')
+-            companion_proc =None 
+-        else :
+-            log (f'[引擎] Web WASM 伴生引擎已在后台启动 (端口 {port })')
+-    except Exception as e :
+-        log (f'[引擎] Web WASM 伴生引擎启动失败: {e }')
+-        companion_proc =None 
+-def stop_companion_engine ():
+-    global companion_proc 
+-    if companion_proc is not None :
+-        p =companion_proc 
+-        companion_proc =None 
+-        try :
+-            if p .poll ()is None :
+-                p .terminate ()
+-                try :
+-                    p .wait (timeout =2.0 )
+-                except Exception :
+-                    p .kill ()
+-            log ('[引擎] Web WASM 伴生引擎 (Node.js) 已停止')
+-        except Exception :
+-            pass 
+-atexit .register (stop_companion_engine )
++companion_proc = None
++_companion_stop = threading.Event()
++_companion_lock = threading.RLock()
++_companion_monitor = None
++companion_log_ring = collections.deque(maxlen=30)
++
++def is_port_listening(port: int, host: str = '127.0.0.1') -> bool:
++    try:
++        with socket.create_connection((host, port), timeout=0.5):
++            return True
++    except OSError:
++        return False
++
++def _engine_healthy(port):
++    try:
++        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=1)
++        try:
++            conn.request('GET', '/health')
++            resp = conn.getresponse()
++            data = json.loads(resp.read(4096))
++            return resp.status == 200 and data.get('engine') == 'ysp-engine'
++        finally:
++            conn.close()
++    except (OSError, ValueError, http.client.HTTPException):
++        return False
++
++def _capture_engine_output(proc):
++    try:
++        for line in proc.stdout:
++            cleaned = re.sub(r'(https?://[^\s?]+)\?[^\s]+', r'\1?[redacted]', line.strip())
++            companion_log_ring.append(cleaned[:500])
++    except (OSError, ValueError):
++        pass
++    finally:
++        proc.stdout.close()
++
++def _launch_engine(node_bin, engine_file, port):
++    global companion_proc
++    import subprocess
++    with _companion_lock:
++        if _companion_stop.is_set():
++            return None
++        env = dict(os.environ)
++        env.update(HOST='127.0.0.1', YSP_ENGINE_PORT=str(port))
++        companion_proc = subprocess.Popen(
++            [node_bin, engine_file, str(port)], env=env,
++            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
++            text=True, encoding='utf-8', errors='replace', bufsize=1)
++        threading.Thread(target=_capture_engine_output, args=(companion_proc,), daemon=True, name='engine-logs').start()
++        return companion_proc
++
++def _monitor_engine(node_bin, engine_file, port):
++    global companion_proc
++    backoff = 1.0
++    launched_at = time.monotonic()
++    while not _companion_stop.wait(0.5):
++        with _companion_lock:
++            proc = companion_proc
++        if proc is not None and proc.poll() is None:
++            if time.monotonic() - launched_at > 60:
++                backoff = 1.0
++            continue
++        log(f'[引擎] 伴生进程退出，将在 {backoff:g}s 后重启', min_interval=5)
++        if _companion_stop.wait(backoff):
++            return
++        try:
++            _launch_engine(node_bin, engine_file, port)
++            launched_at = time.monotonic()
++        except OSError as exc:
++            companion_log_ring.append(f'restart failed: {type(exc).__name__}')
++        backoff = min(backoff * 2, 60.0)
++
++def start_companion_engine(script_dir: str, port: int = 8787):
++    global _companion_monitor
++    if is_port_listening(port):
++        if _engine_healthy(port):
++            log(f'[引擎] 检测到已有 Web 引擎: 127.0.0.1:{port} (外部管理)')
++        else:
++            log(f'[引擎] 端口 {port} 已被其他服务占用，未启动伴生引擎')
++        return
++    candidates = [os.path.join(script_dir, 'ysp-engine.js'), os.path.join(os.getcwd(), 'ysp-engine.js'), '/app/ysp-engine.js']
++    engine_file = next((path for path in candidates if os.path.isfile(path)), None)
++    node_bin = shutil.which('node')
++    if not engine_file or not node_bin:
++        log('[引擎] 未找到 Node.js 或 ysp-engine.js，继续使用其他播放通道')
++        return
++    _companion_stop.clear()
++    try:
++        _launch_engine(node_bin, engine_file, port)
++        _companion_monitor = threading.Thread(target=_monitor_engine, args=(node_bin, engine_file, port), daemon=True, name='engine-monitor')
++        _companion_monitor.start()
++        for _ in range(30):
++            if _engine_healthy(port):
++                log(f'[引擎] Web WASM 伴生引擎已启动: 127.0.0.1:{port}')
++                return
++            if _companion_stop.wait(0.1):
++                return
++        log('[引擎] 尚未就绪，后台继续监测；可从 /diag 查看引擎日志')
++    except OSError as exc:
++        log(f'[引擎] 启动失败: {type(exc).__name__}')
++
++def stop_companion_engine():
++    global companion_proc
++    _companion_stop.set()
++    with _companion_lock:
++        proc = companion_proc
++        companion_proc = None
++    if proc is not None and proc.poll() is None:
++        proc.terminate()
++        try:
++            proc.wait(timeout=2)
++        except __import__('subprocess').TimeoutExpired:
++            proc.kill()
++            proc.wait(timeout=2)
++    monitor = _companion_monitor
++    if monitor is not None and monitor is not threading.current_thread():
++        monitor.join(timeout=2)
++
++atexit.register(stop_companion_engine)
+ def _handle_sigterm (signum ,frame ):
+     stop_companion_engine ()
+     sys .exit (0 )
+@@ -3423,12 +3613,16 @@
+     ap .add_argument ('--zap-debounce',type =float ,default =float (os .environ .get ('YSP_ZAP_DEBOUNCE','10.0')),help ='换台防抖秒数: 切台后先出 1080p, 停留超过该秒数才后台请求高码率 (默认 10.0, 设为 0 关闭)')
+     ap .add_argument ('--engine-port',type =int ,default =8787 ,help ='Web WASM 引擎端口 (默认 8787)')
+     ap .add_argument ('--timeout',type =float ,default =10.0 ,help ='设备协议 HTTP 超时秒数 (默认 10, 注册失败时更快回退 1080p)')
++    ap.add_argument('--direct', action='store_true', help='忽略环境代理，直接访问上游')
+     ap .add_argument ('--no-engine',action ='store_true',help ='不启动 Web WASM 伴生引擎')
+     args =ap .parse_args ()
++    if args.direct:
++        os.environ['YSP_DIRECT'] = '1'
++    urllib.request.install_opener(urllib.request.build_opener(EnvironmentProxyHandler()))
++    log('[网络] ' + ('直接连接' if os.environ.get('YSP_DIRECT') == '1' else '自动使用环境代理；本机连接始终直连'))
+     server_port =args .port 
+     engine_port =args .engine_port 
+-    if args .cache_mb >0 :
+-        global_ts_cache =TsSegmentCache (max_mb =args .cache_mb )
++    global_ts_cache = TsSegmentCache(max_mb=max(0, args.cache_mb))
+     here =os .path .dirname (os .path .abspath (__file__ ))
+     if not args .no_engine :
+         start_companion_engine (here ,engine_port )
+@@ -3476,7 +3670,7 @@
+         resolver .start_heartbeat ()
+         resolver .start_refresh_worker ()
+         threading .Thread (target =init_resolver ,daemon =True ,name ='engine-init').start ()
+-    srv =ThreadingHTTPServer ((args .bind ,args .port ),Handler )
++    srv =BoundedHTTPServer ((args .bind ,args .port ),Handler )
+     channels_count =len (global_channel_dir .unique_channels ())
+     c_yangshi =len ([c for c in global_channel_dir .unique_channels ()if c ['group']=='央视'])
+     c_weishi =len ([c for c in global_channel_dir .unique_channels ()if c ['group']=='卫视'])
+@@ -3499,6 +3693,7 @@
+     except KeyboardInterrupt :
+         log ('[系统] 服务已停止')
+     finally :
++        srv.server_close()
+         stop_companion_engine ()
+ if __name__ =='__main__':
+     main ()
+--- a/ysp-engine.js
++++ b/ysp-engine.js
+@@ -1,11 +1,16 @@
+ const http = require('http');
+ const https = require('https');
+ const crypto = require('crypto');
++const dns = require('dns');
++const net = require('net');
++const tls = require('tls');
++const { Transform } = require('stream');
++const { pipeline } = require('stream/promises');
+ const url = require('url');
+ 
+ const VERSION = '9.5.0';
+ const PORT = parseInt(process.env.YSP_ENGINE_PORT || process.env.PORT || process.argv[2] || '8787', 10);
+-const HOST = process.env.HOST || '0.0.0.0';
++const HOST = '127.0.0.1';
+ 
+ const CHANNELS = { "cctv1": { "name": "CCTV-1 综合", "cnlid": "2024078201", "livepid": "600001859", "defn": "fhd" }, "cctv2": { "name": "CCTV-2 财经", "cnlid": "2024075401", "livepid": "600001800", "defn": "fhd" }, "cctv3": { "name": "CCTV-3 综艺", "cnlid": "2024068501", "livepid": "600001801", "defn": "fhd" }, "cctv4": { "name": "CCTV-4 中文国际", "cnlid": "2029797101", "livepid": "600001814", "defn": "fhd" }, "cctv5": { "name": "CCTV-5 体育", "cnlid": "2024078401", "livepid": "600001818", "defn": "fhd" }, "cctv5p": { "name": "CCTV-5+ 体育赛事", "cnlid": "2024078001", "livepid": "600001817", "defn": "fhd" }, "cctv6": { "name": "CCTV-6 电影", "cnlid": "2013693901", "livepid": "600108442", "defn": "fhd" }, "cctv7": { "name": "CCTV-7 国防军事", "cnlid": "2024072001", "livepid": "600004092", "defn": "fhd" }, "cctv8": { "name": "CCTV-8 电视剧", "cnlid": "2029793001", "livepid": "600001803", "defn": "fhd" }, "cctv9": { "name": "CCTV-9 纪录", "cnlid": "2024078601", "livepid": "600004078", "defn": "fhd" }, "cctv10": { "name": "CCTV-10 科教", "cnlid": "2024078701", "livepid": "600001805", "defn": "fhd" }, "cctv11": { "name": "CCTV-11 戏曲", "cnlid": "2027248701", "livepid": "600001806", "defn": "fhd" }, "cctv12": { "name": "CCTV-12 社会与法", "cnlid": "2027248801", "livepid": "600001807", "defn": "fhd" }, "cctv13": { "name": "CCTV-13 新闻", "cnlid": "2029797201", "livepid": "600001811", "defn": "fhd" }, "cctv14": { "name": "CCTV-14 少儿", "cnlid": "2027248901", "livepid": "600001809", "defn": "fhd" }, "cctv15": { "name": "CCTV-15 音乐", "cnlid": "2027249001", "livepid": "600001815", "defn": "fhd" }, "cctv16": { "name": "CCTV-16 奥林匹克", "cnlid": "2027249101", "livepid": "600098637", "defn": "fhd" }, "cctv164k": { "name": "CCTV-16 4K", "cnlid": "2027249301", "livepid": "600099502", "defn": "fhd" }, "cctv17": { "name": "CCTV-17 农业农村", "cnlid": "2027249401", "livepid": "600001810", "defn": "fhd" }, "cctv4k": { "name": "CCTV-4K 超高清", "cnlid": "2029810301", "livepid": "600002264", "defn": "fhd" }, "cctv8k": { "name": "CCTV-8K 超高清", "cnlid": "2026774101", "livepid": "600156816", "defn": "fhd" }, "cgtn": { "name": "CGTN", "cnlid": "2024181701", "livepid": "600014550", "defn": "fhd" }, "cgtnfr": { "name": "CGTN 法语", "cnlid": "2024181801", "livepid": "600084704", "defn": "fhd" }, "cgtnru": { "name": "CGTN 俄语", "cnlid": "2024181901", "livepid": "600084758", "defn": "fhd" }, "cgtnar": { "name": "CGTN 阿拉伯语", "cnlid": "2024182001", "livepid": "600084782", "defn": "fhd" }, "cgtnes": { "name": "CGTN 西班牙语", "cnlid": "2024182101", "livepid": "600084744", "defn": "fhd" }, "cgtndoc": { "name": "CGTN 纪录", "cnlid": "2024182301", "livepid": "600084781", "defn": "fhd" }, "cctvfyjc": { "name": "CCTV 风云剧场", "cnlid": "2025637102", "livepid": "600099658", "defn": "shd" }, "cctvdyjc": { "name": "CCTV 第一剧场", "cnlid": "2026874202", "livepid": "600099655", "defn": "shd" }, "cctvhjjc": { "name": "CCTV 怀旧剧场", "cnlid": "2026874302", "livepid": "600099620", "defn": "shd" }, "bjws": { "name": "北京卫视", "cnlid": "2024052703", "livepid": "600002309", "defn": "fhd" }, "jsws": { "name": "江苏卫视", "cnlid": "2024171103", "livepid": "600002521", "defn": "fhd" }, "dfws": { "name": "东方卫视", "cnlid": "2024054503", "livepid": "600002483", "defn": "fhd" }, "zjws": { "name": "浙江卫视", "cnlid": "2024054703", "livepid": "600002520", "defn": "fhd" }, "hnws": { "name": "湖南卫视", "cnlid": "2024054803", "livepid": "600002475", "defn": "fhd" }, "hbws": { "name": "湖北卫视", "cnlid": "2024171203", "livepid": "600002508", "defn": "fhd" }, "gdws": { "name": "广东卫视", "cnlid": "2024060903", "livepid": "600002485", "defn": "fhd" }, "gxws": { "name": "广西卫视", "cnlid": "2024060703", "livepid": "600002509", "defn": "fhd" }, "hljws": { "name": "黑龙江卫视", "cnlid": "2029797003", "livepid": "600002498", "defn": "fhd" }, "hainanws": { "name": "海南卫视", "cnlid": "2024055603", "livepid": "600002506", "defn": "fhd" }, "cqws": { "name": "重庆卫视", "cnlid": "2024061103", "livepid": "600002531", "defn": "fhd" }, "szws": { "name": "深圳卫视", "cnlid": "2024061303", "livepid": "600002481", "defn": "fhd" }, "scws": { "name": "四川卫视", "cnlid": "2024061403", "livepid": "600002516", "defn": "fhd" }, "henanws": { "name": "河南卫视", "cnlid": "2029797303", "livepid": "600002525", "defn": "fhd" }, "dnws": { "name": "东南卫视", "cnlid": "2024061503", "livepid": "600002484", "defn": "fhd" }, "gzws": { "name": "贵州卫视", "cnlid": "2024061603", "livepid": "600002490", "defn": "fhd" }, "jxws": { "name": "江西卫视", "cnlid": "2024061703", "livepid": "600002503", "defn": "fhd" }, "lnws": { "name": "辽宁卫视", "cnlid": "2024171303", "livepid": "600002505", "defn": "fhd" }, "ahws": { "name": "安徽卫视", "cnlid": "2024171403", "livepid": "600002532", "defn": "fhd" }, "hebws": { "name": "河北卫视", "cnlid": "2024171503", "livepid": "600002493", "defn": "fhd" }, "sdws": { "name": "山东卫视", "cnlid": "2029787903", "livepid": "600002513", "defn": "fhd" }, "tjws": { "name": "天津卫视", "cnlid": "2019927003", "livepid": "600152137", "defn": "fhd" }, "jlws": { "name": "吉林卫视", "cnlid": "2025561503", "livepid": "600190405", "defn": "fhd" }, "saxws": { "name": "陕西卫视", "cnlid": "2029795103", "livepid": "600190400", "defn": "fhd" }, "nxws": { "name": "宁夏卫视", "cnlid": "2025608503", "livepid": "600190737", "defn": "fhd" }, "nmgws": { "name": "内蒙古卫视", "cnlid": "2025561203", "livepid": "600190401", "defn": "fhd" }, "ynws": { "name": "云南卫视", "cnlid": "2025561303", "livepid": "600190402", "defn": "fhd" }, "shanxiws": { "name": "山西卫视", "cnlid": "2025560803", "livepid": "600190407", "defn": "fhd" }, "gsws": { "name": "甘肃卫视", "cnlid": "2025561703", "livepid": "600190408", "defn": "fhd" }, "qhws": { "name": "青海卫视", "cnlid": "2025559103", "livepid": "600190406", "defn": "fhd" }, "xizangws": { "name": "西藏卫视", "cnlid": "2025558003", "livepid": "600190403", "defn": "fhd" }, "xjws": { "name": "新疆卫视", "cnlid": "2019927403", "livepid": "600152138", "defn": "fhd" }, "cetv1": { "name": "CETV-1", "cnlid": "2022823801", "livepid": "600171827", "defn": "fhd" }, "guoxue": { "name": "国学频道", "cnlid": "2029360403", "livepid": "600213139", "defn": "fhd" } };
+ const ALIAS_MAP = { "anhuiws": "ahws", "beijingws": "bjws", "cctv16hd": "cctv16", "cctv5plus": "cctv5p", "cctvdiyijuchang": "cctvdyjc", "cctvfengyunjuchang": "cctvfyjc", "cctvhuaijiujuchang": "cctvhjjc", "cgtnalaboyu": "cgtnar", "cgtneyu": "cgtnru", "cgtnfayu": "cgtnfr", "cgtnwaiyujilu": "cgtndoc", "cgtnxibanyayu": "cgtnes", "chongqingws": "cqws", "dongfangws": "dfws", "fujiandongnanws": "dnws", "guangdongws": "gdws", "guangxiws": "gxws", "guizhouws": "gzws", "hebeiws": "hebws", "heilongjiangws": "hljws", "hubeiws": "hbws", "hunanws": "hnws", "jiangsuws": "jsws", "jiangxiws": "jxws", "jilinws": "jlws", "liaoningws": "lnws", "neimengguws": "nmgws", "ningxiaws": "nxws", "qinghaiws": "qhws", "shandongws": "sdws", "shannxiws": "saxws", "shenzhenws": "szws", "sichuanws": "scws", "tianjinws": "tjws", "xinjiangws": "xjws", "yunnanws": "ynws", "zhejiangws": "zjws" };
+@@ -239,68 +244,294 @@
+   keepAliveMsecs: 30000
+ });
+ 
+-function httpPost(targetUrl, headers, body) {
++function proxyFor(target) {
++  if (process.env.YSP_DIRECT === '1') return null;
++  const host = target.hostname.replace(/^\[|\]$/g, '').toLowerCase();
++  if (host === 'localhost' || host === '::1' || /^127\./.test(host)) return null;
++  const bypass = process.env.no_proxy || process.env.NO_PROXY || '';
++  const port = target.port || (target.protocol === 'https:' ? '443' : '80');
++  for (const item of bypass.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)) {
++    if (item === '*') return null;
++    const match = item.match(/^(.*?)(?::(\d+))?$/);
++    const suffix = match[1].replace(/^\*?\./, '');
++    if ((!match[2] || match[2] === port) && (host === suffix || host.endsWith('.' + suffix))) return null;
++  }
++  const name = target.protocol === 'https:' ? 'https_proxy' : 'http_proxy';
++  const value = process.env[name] || process.env[name.toUpperCase()];
++  if (!value) return null;
++  let proxy;
++  try { proxy = new url.URL(value.includes('://') ? value : 'http://' + value); }
++  catch (_) { throw new Error('invalid proxy configuration'); }
++  if (proxy.protocol !== 'http:' || !proxy.hostname || proxy.search || proxy.hash || !['', '/'].includes(proxy.pathname)) {
++    throw new Error('use an HTTP forward proxy');
++  }
++  return proxy;
++}
++function proxyAuthorization(proxy) {
++  return proxy.username ? 'Basic ' + Buffer.from(decodeURIComponent(proxy.username) + ':' + decodeURIComponent(proxy.password)).toString('base64') : undefined;
++}
++const tunnelAgents = new Map();
++function tunnelAgent(proxy) {
++  const key = proxy.toString();
++  if (tunnelAgents.has(key)) return tunnelAgents.get(key);
++  const agent = new https.Agent({ keepAlive: true, maxSockets: 16, maxFreeSockets: 4, timeout: 30000 });
++  agent.createConnection = (options, callback) => {
++    const authority = options.host + ':' + (options.port || 443);
++    const headers = { Host: authority };
++    const authorization = proxyAuthorization(proxy);
++    if (authorization) headers['Proxy-Authorization'] = authorization;
++    let done = false;
++    const complete = (error, socket) => {
++      if (done) return;
++      done = true;
++      callback(error, socket);
++    };
++    const request = http.request({ hostname: proxy.hostname, port: proxy.port || 80,
++      method: 'CONNECT', path: authority, headers, agent: false, timeout: 10000 });
++    request.on('error', error => complete(error));
++    request.on('timeout', () => request.destroy(new Error('proxy tunnel timeout')));
++    request.once('connect', (response, socket, head) => {
++      if (response.statusCode !== 200) {
++        socket.destroy(); complete(new Error('proxy tunnel refused')); return;
++      }
++      if (head.length) socket.unshift(head);
++      const secure = tls.connect({ socket, servername: options.servername || options.host,
++        rejectUnauthorized: true });
++      secure.setTimeout(15000, () => secure.destroy(new Error('upstream TLS timeout')));
++      secure.once('secureConnect', () => complete(null, secure));
++      secure.on('error', error => complete(error));
++    });
++    request.end();
++  };
++  tunnelAgents.set(key, agent);
++  return agent;
++}
++function requestUpstream(target, options, callback) {
++  const parsed = target instanceof url.URL ? target : new url.URL(target);
++  const proxy = proxyFor(parsed);
++  const opts = { ...options, headers: { ...(options.headers || {}) } };
++  // Proxy authorization belongs only to the configured transport.
++  for (const key of Object.keys(opts.headers)) {
++    if (key.toLowerCase() === 'proxy-authorization') delete opts.headers[key];
++  }
++  if (!proxy) {
++    const client = parsed.protocol === 'https:' ? https : http;
++    opts.agent = parsed.protocol === 'https:' ? httpsAgent : httpAgent;
++    return client.request(parsed, opts, callback);
++  }
++  delete opts.lookup; // The trusted proxy owns remote name resolution.
++  if (parsed.protocol === 'https:') {
++    opts.agent = tunnelAgent(proxy);
++    return https.request(parsed, opts, callback);
++  }
++  const authorization = proxyAuthorization(proxy);
++  if (authorization) opts.headers['Proxy-Authorization'] = authorization;
++  opts.headers.Host = parsed.host;
++  return http.request({ ...opts, hostname: proxy.hostname, port: proxy.port || 80,
++    path: parsed.href, agent: httpAgent }, callback);
++}
++function textRequest(target, method, headers = {}, body) {
+   return new Promise((resolve, reject) => {
+-    const u = new url.URL(targetUrl);
+-    const req = https.request({
+-      protocol: u.protocol,
+-      hostname: u.hostname,
+-      path: u.pathname + u.search,
+-      method: 'POST',
+-      headers: { ...headers, 'content-length': Buffer.byteLength(body) },
+-      agent: httpsAgent,
+-      timeout: 10000
+-    }, res => {
++    const req = requestUpstream(target, { method, headers, timeout: 10000 }, response => {
+       const chunks = [];
+-      res.on('data', d => chunks.push(d));
+-      res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, data: Buffer.concat(chunks).toString('utf8') }));
++      let size = 0;
++      response.on('error', reject);
++      response.on('aborted', () => reject(new Error('upstream response interrupted')));
++      response.on('data', chunk => {
++        size += chunk.length;
++        if (size > 2 * 1024 * 1024) { response.destroy(new Error('upstream text too large')); return; }
++        chunks.push(chunk);
++      });
++      response.on('end', () => resolve({ statusCode: response.statusCode, headers: response.headers, data: Buffer.concat(chunks).toString('utf8') }));
+     });
+     req.on('error', reject);
+-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+-    req.write(body);
+-    req.end();
++    req.on('timeout', () => req.destroy(new Error('upstream timeout')));
++    req.end(body);
+   });
+ }
+-
+-function httpGet(targetUrl, headers = {}) {
+-  return new Promise((resolve, reject) => {
+-    const req = https.get(targetUrl, { headers, agent: httpsAgent, timeout: 10000 }, res => {
+-      const chunks = [];
+-      res.on('data', d => chunks.push(d));
+-      res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, data: Buffer.concat(chunks).toString('utf8') }));
+-    });
+-    req.on('error', reject);
+-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
++function httpPost(target, headers, body) {
++  return textRequest(target, 'POST', { ...headers, 'Content-Length': Buffer.byteLength(body) }, body);
++}
++async function httpGet(target, headers = {}) {
++  for (let attempt = 0; attempt < 2; attempt++) {
++    let current = target;
++    try {
++      for (let redirects = 0; redirects < 5; redirects++) {
++        const response = await textRequest(current, 'GET', headers);
++        if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
++          const next = new url.URL(response.headers.location, current);
++          if (!['http:', 'https:'].includes(next.protocol)) throw new Error('invalid upstream redirect');
++          current = next.toString(); continue;
++        }
++        return { ...response, finalUrl: current };
++      }
++      throw new Error('too many upstream redirects');
++    } catch (error) {
++      if (attempt) throw error;
++    }
++  }
++}
++
++const MAX_SEGMENT_BYTES = 35 * 1024 * 1024;
++const allowedSuffixes = ['.cctv.cn', '.cctv.com', '.cctvpic.com', '.citvc.com', '.yangshipin.cn', '.cntv.cn', '.cntv.com', '.myqcloud.com', '.qqlive.com', '.gtimg.cn', '.smtcdns.net', '.smtcdns.com', '.tcdnlive.com', '.alicdn.com', '.alikunlun.com', '.wscdns.com', '.chinanetcenter.com', '.bdydns.com', '.ksyungslb.com', '.ks-cdn.com'];
++const blockedIPs = new net.BlockList();
++for (const [address, prefix] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]]) {
++  blockedIPs.addSubnet(address, prefix, 'ipv4');
++}
++blockedIPs.addSubnet('2001::', 23, 'ipv6');
++blockedIPs.addSubnet('2001:db8::', 32, 'ipv6');
++blockedIPs.addSubnet('2002::', 16, 'ipv6');
++function isPublicIP(address) {
++  const family = net.isIP(address);
++  if (family === 4) return !blockedIPs.check(address, 'ipv4');
++  // Permit native global unicast only; exclude mapped, local and transition IPs.
++  return family === 6 && /^[23][0-9a-f]{3}:/i.test(address) && !blockedIPs.check(address, 'ipv6');
++}
++function safeLookup(hostname, options, callback) {
++  dns.lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
++    if (error) return callback(error);
++    if (!addresses.length || addresses.some(item => !isPublicIP(item.address))) {
++      return callback(new Error('upstream DNS returned a non-public address'));
++    }
++    const candidates = options.family ? addresses.filter(item => item.family === options.family) : addresses;
++    if (!candidates.length) return callback(new Error('no compatible upstream address'));
++    if (options.all) return callback(null, candidates);
++    callback(null, candidates[0].address, candidates[0].family);
+   });
+ }
+-
+-function httpGetBuffer(targetUrl, headers = {}) {
+-  return new Promise((resolve, reject) => {
+-    const isHttps = targetUrl.startsWith('https:');
+-    const client = isHttps ? https : http;
+-    const req = client.get(targetUrl, { headers, agent: isHttps ? httpsAgent : httpAgent, timeout: 15000 }, res => {
+-      const chunks = [];
+-      res.on('data', d => chunks.push(d));
+-      res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, buffer: Buffer.concat(chunks) }));
+-    });
+-    req.on('error', reject);
+-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+-  });
+-}
+-
++function validateSegmentTarget(target) {
++  const parsed = new url.URL(target);
++  const host = parsed.hostname.toLowerCase();
++  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.port ||
++      !allowedSuffixes.some(s => host === s.slice(1) || host.endsWith(s))) {
++    throw new Error('forbidden segment URL');
++  }
++  return parsed;
++}
++async function streamSegment(req, res, target) {
++  let current = target;
++  for (let redirects = 0; redirects < 5; redirects++) {
++    const parsed = validateSegmentTarget(current);
++    if (proxyFor(parsed)) {
++      await new Promise((resolve, reject) => safeLookup(parsed.hostname, {}, error => error ? reject(error) : resolve()));
++    }
++    const headers = { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.yangshipin.cn/', 'Accept-Encoding': 'identity' };
++    if (req.headers.range) headers.Range = req.headers.range;
++    let upstreamRequest;
++    const cancel = () => { if (upstreamRequest) upstreamRequest.destroy(); };
++    res.once('close', cancel);
++    const deadline = setTimeout(cancel, 30000);
++    try {
++      const upstream = await new Promise((resolve, reject) => {
++        upstreamRequest = requestUpstream(parsed, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers,
++          lookup: safeLookup, timeout: 15000 }, resolve);
++        upstreamRequest.on('error', reject);
++        upstreamRequest.on('timeout', () => upstreamRequest.destroy(new Error('upstream timeout')));
++        upstreamRequest.end();
++      });
++      if ([301, 302, 303, 307, 308].includes(upstream.statusCode) && upstream.headers.location) {
++        current = new url.URL(upstream.headers.location, current).toString();
++        validateSegmentTarget(current);
++        upstream.destroy();
++        continue;
++      }
++      const length = upstream.headers['content-length'];
++      if (length && Number(length) > MAX_SEGMENT_BYTES) {
++        upstream.destroy();
++        throw new Error('upstream segment too large');
++      }
++      const passed = {};
++      for (const name of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
++        if (upstream.headers[name] !== undefined) passed[name] = upstream.headers[name];
++      }
++      res.writeHead(upstream.statusCode || 502, passed);
++      if (req.method === 'HEAD') {
++        upstream.destroy();
++        res.end();
++        return;
++      }
++      let transferred = 0;
++      const limit = new Transform({ transform(chunk, encoding, callback) {
++        transferred += chunk.length;
++        callback(transferred > MAX_SEGMENT_BYTES ? new Error('upstream segment too large') : null, chunk);
++      }});
++      await pipeline(upstream, limit, res);
++      return;
++    } finally {
++      clearTimeout(deadline);
++      res.removeListener('close', cancel);
++      cancel();
++    }
++  }
++  throw new Error('too many upstream redirects');
++}
++let activeSegments = 0;
++let activeResolves = 0;
+ const playlistCache = new Map();
+-
++const playUrlCache = new Map();
++
++const liveFlights = new Map();
+ async function resolveChannelLive(slug) {
++  const canonical = ALIAS_MAP[slug] || slug;
++  if (liveFlights.has(canonical)) return liveFlights.get(canonical);
++  const pending = resolveChannelLiveOnce(canonical);
++  liveFlights.set(canonical, pending);
++  try { return await pending; }
++  finally { liveFlights.delete(canonical); }
++}
++async function resolveChannelLiveOnce(slug) {
+   const canonical = ALIAS_MAP[slug] || slug;
+   const meta = CHANNELS[canonical];
+   if (!meta) return null;
+ 
+   const cached = playlistCache.get(canonical);
+   const now = Date.now();
+-  if (cached && now - cached.time < 30000) {
++  if (cached && now - cached.time < cached.ttl) {
+     return cached.playlist;
+   }
+ 
++  let playurl;
++  const cachedUrl = playUrlCache.get(canonical);
++  if (cachedUrl && Date.now() - cachedUrl.time < 60000) {
++    playurl = cachedUrl.url;
++  } else {
++    playurl = await resolvePlayUrl(meta, now);
++    playUrlCache.set(canonical, { url: playurl, time: Date.now() });
++  }
++
++  const m3u8Res = await httpGet(playurl, {
++    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
++    'Referer': 'https://www.yangshipin.cn/'
++  });
++
++  if (m3u8Res.statusCode !== 200 || !m3u8Res.data.includes('#EXTM3U')) {
++    playUrlCache.delete(canonical);
++    throw new Error('invalid upstream m3u8');
++  }
++
++  const lines = m3u8Res.data.split('\n');
++  const outLines = [];
++  for (const line of lines) {
++    const trimmed = line.trim();
++    if (!trimmed) continue;
++    if (trimmed.startsWith('#')) {
++      outLines.push(trimmed.replace(/URI="([^"]+)"/g, (_, value) => 'URI="' + new url.URL(value, m3u8Res.finalUrl || playurl).toString() + '"'));
++    } else {
++      let fullSegUrl = trimmed;
++      if (!fullSegUrl.startsWith('http://') && !fullSegUrl.startsWith('https://')) {
++        fullSegUrl = new url.URL(trimmed, m3u8Res.finalUrl || playurl).toString();
++      }
++      outLines.push('http://127.0.0.1:' + PORT + '/segment?url=' + encodeURIComponent(fullSegUrl));
++    }
++  }
++
++  const finalPlaylist = outLines.join('\n') + '\n';
++  const duration = Number((m3u8Res.data.match(/#EXT-X-TARGETDURATION:(\d+)/) || [])[1]) || 6;
++  playlistCache.set(canonical, { playlist: finalPlaylist, time: Date.now(), ttl: Math.min(5000, Math.max(1000, duration * 500)) });
++  return finalPlaylist;
++}
++
++async function resolvePlayUrl(meta, now) {
+   const guid = base36(now) + '_' + randStr(13);
+   const cookie = ['guid=' + guid, 'versionName=99.99.99', 'versionCode=999999', 'vplatform=109', 'platformVersion=Chrome', 'deviceModel=148', 'newLogin=1', 'pc_version=1.1.16'].join('; ');
+ 
+@@ -397,34 +628,7 @@
+     playurl += liveJson.data.extended_param;
+   }
+ 
+-  const m3u8Res = await httpGet(playurl, {
+-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+-    'Referer': 'https://www.yangshipin.cn/'
+-  });
+-
+-  if (m3u8Res.statusCode !== 200 || !m3u8Res.data.includes('#EXTM3U')) {
+-    throw new Error('invalid upstream m3u8');
+-  }
+-
+-  const lines = m3u8Res.data.split('\n');
+-  const outLines = [];
+-  for (const line of lines) {
+-    const trimmed = line.trim();
+-    if (!trimmed) continue;
+-    if (trimmed.startsWith('#')) {
+-      outLines.push(trimmed);
+-    } else {
+-      let fullSegUrl = trimmed;
+-      if (!fullSegUrl.startsWith('http://') && !fullSegUrl.startsWith('https://')) {
+-        fullSegUrl = new url.URL(trimmed, playurl).toString();
+-      }
+-      outLines.push('http://127.0.0.1:' + PORT + '/segment?url=' + encodeURIComponent(fullSegUrl));
+-    }
+-  }
+-
+-  const finalPlaylist = outLines.join('\n') + '\n';
+-  playlistCache.set(canonical, { playlist: finalPlaylist, time: now });
+-  return finalPlaylist;
++  return playurl;
+ }
+ 
+ const server = http.createServer(async (req, res) => {
+@@ -452,41 +656,20 @@
+   }
+ 
+   if (pathname === '/segment') {
+-    const targetUrl = parsed.searchParams.get('url');
+-    if (!targetUrl) {
+-      res.writeHead(400, { 'Content-Type': 'text/plain' });
+-      res.end('missing url\n');
+-      return;
+-    }
+-    let targetParsed;
++    const target = parsed.searchParams.get('url');
++    try { validateSegmentTarget(target || ''); } catch (_) {
++      res.writeHead(403); res.end('forbidden segment URL\n'); return;
++    }
++    if (activeSegments >= 8) {
++      res.writeHead(503, { 'Retry-After': '1' }); res.end('download capacity reached\n'); return;
++    }
++    activeSegments++;
+     try {
+-      targetParsed = new url.URL(targetUrl);
+-    } catch (e) {
+-      res.writeHead(400, { 'Content-Type': 'text/plain' });
+-      res.end('invalid url\n');
+-      return;
+-    }
+-    const allowedSuffixes = ['.cctv.cn', '.cctv.com', '.cctvpic.com', '.citvc.com', '.yangshipin.cn', '.cntv.cn', '.cntv.com', '.myqcloud.com', '.qqlive.com', '.gtimg.cn', '.smtcdns.net', '.smtcdns.com', '.tcdnlive.com', '.alicdn.com', '.alikunlun.com', '.wscdns.com', '.chinanetcenter.com', '.bdydns.com', '.ksyungslb.com', '.ks-cdn.com'];
+-    const thost = (targetParsed.hostname || '').toLowerCase();
+-    if ((targetParsed.protocol !== 'http:' && targetParsed.protocol !== 'https:') || !allowedSuffixes.some(s => thost === s.slice(1) || thost.endsWith(s))) {
+-      res.writeHead(403, { 'Content-Type': 'text/plain' });
+-      res.end('forbidden segment url\n');
+-      return;
+-    }
+-    try {
+-      const resp = await httpGetBuffer(targetUrl, {
+-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+-        'Referer': 'https://www.yangshipin.cn/'
+-      });
+-      res.writeHead(resp.statusCode || 200, {
+-        'Content-Type': resp.headers['content-type'] || 'video/mp2t',
+-        'Content-Length': resp.buffer.length
+-      });
+-      res.end(resp.buffer);
+-    } catch (e) {
+-      res.writeHead(502, { 'Content-Type': 'text/plain' });
+-      res.end('segment error: ' + e.message + '\n');
+-    }
++      await streamSegment(req, res, target);
++    } catch (error) {
++      if (res.headersSent) res.destroy();
++      else { res.writeHead(502); res.end('upstream segment unavailable\n'); }
++    } finally { activeSegments--; }
+     return;
+   }
+ 
+@@ -495,6 +678,10 @@
+ 
+   if (match) {
+     const slug = match[1];
++    if (activeResolves >= 8) {
++      res.writeHead(503, { 'Retry-After': '1' }); res.end('resolve capacity reached\n'); return;
++    }
++    activeResolves++;
+     try {
+       const pl = await resolveChannelLive(slug);
+       if (pl) {
+@@ -504,9 +691,9 @@
+       }
+     } catch (e) {
+       res.writeHead(500, { 'Content-Type': 'text/plain' });
+-      res.end('resolve error: ' + e.message + '\n');
++      res.end('resolve unavailable\n');
+       return;
+-    }
++    } finally { activeResolves--; }
+     res.writeHead(404, { 'Content-Type': 'text/plain' });
+     res.end('unknown channel\n');
+     return;
+@@ -516,18 +703,21 @@
+   res.end('not found\n');
+ });
+ 
+-server.listen(PORT, HOST, () => {
+-  console.log('[ysp-engine v' + VERSION + '] listening on http://' + HOST + ':' + PORT);
+-});
+-process.on('SIGINT', () => {
+-  server.close(() => process.exit(0));
+-});
+-process.on('SIGTERM', () => {
+-  server.close(() => process.exit(0));
+-});
+-process.on('uncaughtException', err => {
+-  console.error('[ysp-engine] uncaughtException:', err && err.message ? err.message : err);
+-});
+-process.on('unhandledRejection', reason => {
+-  console.error('[ysp-engine] unhandledRejection:', reason && reason.message ? reason.message : reason);
+-});
++server.requestTimeout = 30000;
++server.headersTimeout = 10000;
++server.timeout = 30000;
++server.maxConnections = 64;
++if (require.main === module) {
++  server.listen(PORT, HOST, () => {
++    console.log('[ysp-engine v' + VERSION + '] listening on http://' + HOST + ':' + PORT);
++  });
++  const stop = () => {
++    httpsAgent.destroy();
++    httpAgent.destroy();
++    for (const agent of tunnelAgents.values()) agent.destroy();
++    server.close(() => process.exit(0));
++  };
++  process.on('SIGINT', stop);
++  process.on('SIGTERM', stop);
++}
++module.exports = { server, isPublicIP, safeLookup, validateSegmentTarget, streamSegment, proxyFor, requestUpstream, httpGet, resolveChannelLive };

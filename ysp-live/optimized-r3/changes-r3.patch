@@ -1,0 +1,91 @@
+--- ../ysp-live-v9.5-optimized-r2/ysp-live-v9.5.py	2026-10-18 16:17:34.488017986 +0000
++++ ysp-live-v9.5.py	2026-10-18 16:17:31.194141938 +0000
+@@ -934,6 +934,9 @@
+         self .state =ResolverState ()
+         self .state_lock =threading .Lock ()
+         self .control_lock =threading .RLock ()
++        self .control_request_lock =threading .Lock ()
++        self .session_locks_lock =threading .Lock ()
++        self .session_locks :dict [int ,threading .Lock ]={}
+         self .playlist_locks_lock =threading .Lock ()
+         self .playlist_locks :dict [str ,threading .Lock ]={}
+         self .refresh_queue =RefreshQueue ()
+@@ -994,6 +997,13 @@
+                     q .failed_total +=1 
+     @contextlib .contextmanager 
+     def control_request_slot (self ,_label :str ):
++        # Keep the lock for the complete interval (including the request), so
++        # concurrent workers cannot pass the same timestamp check together.
++        with self .control_request_lock:
++            with self ._control_request_slot_locked (_label):
++                yield
++    @contextlib .contextmanager
++    def _control_request_slot_locked (self ,_label :str ):
+         min_interval =max (0.0 ,float (self .args .refresh_interval ))
+         while True :
+             with self .state_lock :
+@@ -1125,14 +1135,9 @@
+     def get_slot_for_channel (self ,channel :str )->int :
+         return 0 
+     def ensure_slot_session (self ,slot :int )->AppSession :
+-        with self .state_lock :
+-            sess =self .state .sessions .get (slot )
+-            if sess is not None and self .app_session_fresh (sess ):
+-                rem =self .app_session_ttl_remaining (sess )
+-                if rem is None or rem >300.0 :
+-                    return sess 
+-        self .control_lock .acquire ()
+-        try :
++        with self .session_locks_lock:
++            slot_lock =self .session_locks.setdefault (slot ,threading.Lock ())
++        with slot_lock:
+             with self .state_lock :
+                 sess =self .state .sessions .get (slot )
+                 if sess is not None and self .app_session_fresh (sess ):
+@@ -1143,20 +1148,14 @@
+                 self .state .session_generation +=1 
+                 gen =self .state .session_generation 
+             target_json =self .slot_device_json_path (slot )
+-        finally :
+-            self .control_lock .release ()
+-        sess =self .bootstrap_session (gen ,save_to_disk =True ,fast =True ,device_json =target_json )
+-        self .control_lock .acquire ()
+-        try :
++            sess =self .bootstrap_session (gen ,save_to_disk =True ,fast =True ,device_json =target_json )
+             with self .state_lock :
+                 cur =self .state .sessions .get (slot )
+                 if cur is None or not self .app_session_fresh (cur )or cur .generation <gen :
+-                    self .state .sessions [slot ]=sess 
+-                else :
+-                    sess =cur 
+-        finally :
+-            self .control_lock .release ()
+-        return sess 
++                    self .state .sessions [slot ]=sess
++                else:
++                    sess =cur
++            return sess
+     def record_recoverable_error (self ,reason :str )->bool :
+         if not is_identity_recoverable_error (reason ):
+             return False 
+@@ -1418,7 +1417,7 @@
+             except OSError :
+                 pass 
+         hb =self .heartbeat_flow (profile ,identity ,app_channel ,version ,cloud_guid )
+-        def _bg_telemetry ():
++        def _telemetry ():
+             try :
+                 self .collect_report (profile ,{'key':'app_start_d1','value':build_report_common_value (profile ,identity .x_uid ,app_channel ,version ,COLLECT_SDK_VERSION ,current_time_ms ())})
+             except Exception :
+@@ -1440,7 +1439,10 @@
+                 self .warmup_flow (client ,identity ,version )
+             except Exception :
+                 pass 
+-        threading .Thread (target =_bg_telemetry ,daemon =True ,name ='telemetry-worker').start ()
++        if fast:
++            _telemetry ()
++        else:
++            threading .Thread (target =_telemetry ,daemon =True ,name ='telemetry-worker').start ()
+         return AppSession (profile =profile ,identity =identity ,client =client ,session_key =session_key ,cloud_guid =cloud_guid ,version =version ,screen_param =device_state .screen_param ,cast_model =device_state .cast_model ,created_at =now_f64 (),generation =generation ,last_heartbeat_at =now_f64 (),heartbeat_count =1 ,last_heartbeat_result =hb ,last_heartbeat_error ='')
+     def collect_report (self ,profile :DeviceProfile ,body :dict )->None :
+         headers =build_collect_headers (profile )
