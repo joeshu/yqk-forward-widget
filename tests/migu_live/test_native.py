@@ -22,7 +22,7 @@ class NativeTests(unittest.TestCase):
         return factory, client
 
     def response(self, url=None):
-        return {'code': '200', 'body': {'content': {'contId': '608807420'}, 'urlInfo': {'url': url or 'http://gslbmgsplive.miguvideo.com/live/index.m3u8?puData=0123456789abcdef0123456789abcdef'}}}
+        return {'code': '200', 'body': {'content': {'contId': '608807420'}, 'urlInfo': {'url': url or 'http://gslbmgsplive.miguvideo.com/live/index.m3u8?timestamp=20261020064230&puData=0123456789abcdef0123456789abcdef'}}}
 
     def test_anonymous_sd_request_no_credentials_and_complete_url_preserved(self):
         url = 'http://gslbmgsplive.miguvideo.com/live/index.m3u8?ddCalcu=x&sig=a%2Bb'
@@ -31,7 +31,7 @@ class NativeTests(unittest.TestCase):
         factory.assert_called_once_with('api', attempts=1, timeout=8, budget=10)
         endpoint = client.get.call_args.args[0]
         query = parse_qs(urlsplit(endpoint).query)
-        self.assertEqual(query['rateType'], ['2'])
+        self.assertEqual(query['rateType'], ['3'])
         self.assertEqual(query['contId'], ['608807420'])
         self.assertEqual(len(query['sign'][0]), 32)
         self.assertNotIn('UserToken', client.get.call_args.kwargs['headers'])
@@ -42,9 +42,9 @@ class NativeTests(unittest.TestCase):
         url = n.native_play_url('608807420', factory)
         self.assertTrue(url.startswith(self.response()['body']['urlInfo']['url'] + '&ddCalcu='))
         proof = parse_qs(urlsplit(url).query)['ddCalcu'][0]
-        expected = ''.join('0123456789abcdef0123456789abcdef'[-i-1] + '0123456789abcdef0123456789abcdef'[i] + {1:'v',2:'a',3:'y',4:'a'}.get(i,'') for i in range(16))
+        expected = ''.join('0123456789abcdef0123456789abcdef'[-i-1] + '0123456789abcdef0123456789abcdef'[i] + {1:'e',2:'2',3:'8',4:'0'}.get(i,'') for i in range(16))
         self.assertEqual(proof, expected)
-        self.assertTrue(url.endswith('&sv=10004&ct=android'))
+        self.assertNotIn('&sv=',url)
 
     def test_denials_bad_json_missing_url_and_untrusted_media_fail_closed(self):
         cases = [({'code':'403','rid':'COPYRIGHT_AREA_INVALID'}, 'MIGU_REGION_RESTRICTED'),

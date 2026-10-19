@@ -1,8 +1,8 @@
-# 咪咕单文件服务 0.6.0
+# 咪咕单文件服务 0.6.1
 
-下载 [migu-live-v0.6.0.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.6.0.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，仅需一个文件，无 pip、Node 或项目目录依赖。
+下载 [migu-live-v0.6.1.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.6.1.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，仅需一个文件，无 pip、Node 或项目目录依赖。
 
-**0.6.0 按需求改为默认内置频道、直接请求咪咕 API，不读取外部播放列表。结构与配置已完成，但尚未完成原生路径成功验播。** 本次服务器匿名 CCTV1 请求仍返回 `COPYRIGHT_AREA_INVALID`，见 `live-validation-0.6.0.json`。0.5.0 的三频道解码成功记录属于发布列表路径，不能用来证明本版原生取源可播放。
+**0.6.1 按需求改为默认内置频道、直接请求咪咕 API，不读取外部播放列表。结构与配置已完成，但尚未完成原生路径成功验播。** 本版已匹配原始列表全部 117 条播放地址的校验算法；直接取源请求在服务器仍返回 `COPYRIGHT_AREA_INVALID`，见 `live-validation-0.6.1.json`。0.5.0 的三频道解码成功记录属于发布列表路径，不能用来证明本版原生取源可播放。
 
 ```sh
 python3 migu-live.py 18768
@@ -29,23 +29,32 @@ http://127.0.0.1:18768/all.m3u
 
 8 路请求上限、同频道合并请求和短期内存缓存保留。默认不会因原生授权失败自动读取仓库或原始列表。旧列表模式仅通过显式 `--provider list` 使用；它不是本版原生取源验收结果。
 
+## 本轮取源研究结论
+
+原列表地址的客户端标识为 `2600000900` 系列，不是之前默认使用的 `2600037000` 系列。公开的[旧版参考实现](https://kaniptv.com/forum.php?mod=viewthread&page=4&tid=433)给出了候选 API 请求参数与地址校验规则。没有执行该 PHP 程序，也没有沿用它关闭 TLS 校验、永久缓存地址或只做 HEAD 验证的做法。
+
+对公开原列表的 117 条地址，直接调用本版 `native_proof()` 全部重算一致：`puData` 首尾交错，在四个位置加入 `e`、URL 中 `timestamp` 的第 7 个字符、`ProgramID` 的第 3 个字符、`0`（均按人类从 1 开始计数）。奇数长度保留中间字符一次；计算使用签发 URL 自身时间，避免跨午夜后本机日期变化导致校验错误。服务运行时不需要读取列表来计算这些值。
+
+本版采用公开参考的旧版请求签名参数。服务器上该候选接口的画质 2、3 请求都返回 `COPYRIGHT_AREA_INVALID`，没有媒体 URL；生产函数的实测结果记录在 `live-validation-0.6.1.json`。这只证明当前网络未获播放地址，既不能证明签名已被接口接受，也不能证明接口在用户设备上必定可用。未做 IP 伪造或忽略授权错误。
+
 ## 顶部授权与协议配置
 
 生成的单文件最上方就是 `NATIVE_SETTINGS`，无需寻找分散的代码。修改配置后停止并重启脚本。
 
 | 字段 | 用途 |
 | --- | --- |
-| `app_version`、`client_channel` | 已实现 Android 协议的客户端信息，必须配套 |
+| `app_version`、`client_channel` | 已实现的旧版客户端信息，必须与请求签名方案配套 |
 | `sign_salt`、`sign_suffix` | 请求签名参数，签名仍按当前实现的两次 MD5 规则计算 |
 | `user_id`、`user_token` | 自己账号的一对授权字段，默认均为空 |
-| `rate_type` | 默认 2；3/4 需要配置成对账号字段，实际画质仍由上游决定 |
-| `dd_keys`、`dd_anonymous_word`、`dd_year_index`、`dd_program_index`、`dd_tail` | 已实现 Android 播放地址校验规则的参数 |
+| `rate_type` | 默认请求 3，旧版广东卫视使用 2；实际画质与授权仍由上游决定 |
+| `dd_keys`、`dd_anonymous_word`、`dd_timestamp_index`、`dd_program_index`、`dd_tail` | 播放地址校验参数；默认匹配原始列表的旧版规则 |
+| `dd_suffix`、`app_code` | 默认空，不强加新客户端的 URL 后缀或 appCode 请求头 |
 
 支持直接编辑本地文件中的两个账号字段；请不要将填写后的文件提交到公开仓库。也可通过 `MIGU_USER_ID` / `MIGU_USER_TOKEN` 环境变量覆盖它们，避免凭据留在脚本内。服务访问令牌 `--token-env` 用于保护本地 HTTP 服务，与咪咕账号授权不同。
 
 账号字段只发送到固定咪咕 API 的请求头，不加入订阅 URL。配置检查会拒绝单边凭据、非法控制字符、错误类型或未知字段；状态和诊断只显示是否配置账号，不显示 ID、令牌或签名密钥。配置账号不代表已验证有效、具有会员权益或能解除地区限制；上游明确拒绝时停止，不返回拒绝响应中的播放地址。
 
-这个配置区方便维护**当前已实现协议**。如果以后仅参数变动，可以集中替换；如果接口、签名算法或授权流程变化，仍需修改取源适配代码，不能保证只换一项就恢复。原始列表的生成端没有公开，其签名结构与当前 Android 实现也不完全一致；本版没有宣称已复现发布方私有取源流程。研究依据见 [source-research.md](source-research.md)。
+这个配置区方便维护**当前已实现协议**。如果以后仅参数变动，可以集中替换；如果接口、签名算法或授权流程变化，仍需修改取源适配代码，不能保证只换一项就恢复。原始列表的 `ddCalcu` 规则现已逐条匹配，但生成端没有公开；上游 API 请求所用授权及运行网络尚未确认，不能把校验算法匹配等同于完整取源成功。研究依据见 [source-research.md](source-research.md)。
 
 ## 保留的性能改进
 
@@ -107,7 +116,7 @@ python3 migu-live.py 18768 --no-epg
 
 ## 直播行为和限制
 
-列表模式的频道、清晰度和可用性取决于上游列表及其地址。默认原生模式使用内置频道，默认匿名标清 `rateType=2`，也可配置自己的账号及请求画质。本服务不注册设备、不自动申请账号或会员权限；不会在原生模式被授权拒绝后静默改用列表。
+列表模式的频道、清晰度和可用性取决于上游列表及其地址。默认原生模式使用内置频道，默认匿名请求 `rateType=3`，也可配置自己的账号及请求画质。本服务不注册设备、不自动申请账号或会员权限；不会在原生模式被授权拒绝后静默改用列表。
 
 原生模式同频道请求合并，成功地址缓存 30 秒、失败冷却 5 秒，最多 64 条；列表模式则统一共享一份频道目录，不为每个频道分别下载整份列表。媒体和 API 地址限制主机、端口、路径、重定向及响应大小；保留系统代理和 TLS 校验。
 
@@ -147,7 +156,7 @@ python3 -m unittest discover -s tests/migu_live -v
 python3 migu/build_service.py --check
 ```
 
-测试覆盖缓存重启复用、损坏/不可写回退、递增退避、8 路并发和慢响应头/体的截止时间，也包括当前 HTTP 权限、节目单转换、部分更新、失败和日期切换、线程/队列上限、停止与原端口重启，以及历史发布的兼容回归。原生请求结果见 [0.6.0 验证记录](live-validation-0.6.0.json)，历史列表模式结果见 [0.5.0 验证记录](live-validation-0.5.0.json)。Linux 下的测试不能代替用户 App 的实机验证。
+测试覆盖缓存重启复用、损坏/不可写回退、递增退避、8 路并发和慢响应头/体的截止时间，也包括当前 HTTP 权限、节目单转换、部分更新、失败和日期切换、线程/队列上限、停止与原端口重启，以及历史发布的兼容回归。原生请求结果见 [0.6.1 验证记录](live-validation-0.6.1.json)，历史列表模式结果见 [0.5.0 验证记录](live-validation-0.5.0.json)。Linux 下的测试不能代替用户 App 的实机验证。
 
 参考：用户提供的 [YSP v9.5](https://garysclub.sharewithyou.dpdns.org/ysp-live/ysp-live-v9.5.py) 的启动与诊断方式，以及 [develop202/migu_video](https://github.com/develop202/migu_video) 中公开的咪咕接口字段；没有执行它们的代码或复制账号/设备注册流程。节目单使用固定 HTTPS 接口 `https://program-sc.miguvideo.com/live/v2/tv-programs-data/<频道ID>/<北京时间日期>`。
 

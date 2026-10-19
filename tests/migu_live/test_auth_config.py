@@ -32,7 +32,7 @@ class AuthConfigTests(unittest.TestCase):
         self.assertNotIn('test-account-token', repr(auth))
 
     def test_partial_credentials_bad_headers_and_unknown_configuration_fail_before_network(self):
-        for changes in ({'user_id':'123456789'}, {'user_token':'test-token'}, {'user_id':'123456789','user_token':'bad\r\nInjected:yes'}, {'rate_type':3}, {'dd_year_index':4}, {'unexpected':'value'}):
+        for changes in ({'user_id':'123456789'}, {'user_token':'test-token'}, {'user_id':'123456789','user_token':'bad\r\nInjected:yes'}, {'dd_timestamp_index':14}, {'unexpected':'value'}):
             with self.subTest(fields=list(changes)):
                 with self.assertRaises(ValueError):
                     self.auth(**changes)
@@ -55,11 +55,11 @@ class AuthConfigTests(unittest.TestCase):
         self.assertEqual(store.status()['authorization'],'configured-account')
 
     def test_proof_uses_returned_quality_not_requested_quality(self):
-        auth=self.auth(user_id='123456789',user_token='test-account-token',rate_type=3)
+        auth=self.auth(user_id='123456789',user_token='test-account-token',rate_type=3,dd_keys='cdabyzwxkl',dd_anonymous_word='v',dd_timestamp_index=0,dd_program_index=6,dd_tail='a',dd_suffix='&sv=10004&ct=android')
         seed='0123456789abcdef0123456789abcdef'
         def resolve(rate):
             client=Mock()
-            client.get.return_value=(json.dumps({'code':'200','body':{'content':{'contId':'608807420'},'urlInfo':{'url':'http://gslbmgsplive.miguvideo.com/live/index.m3u8?puData='+seed,'rateType':rate}}}).encode(),{})
+            client.get.return_value=(json.dumps({'code':'200','body':{'content':{'contId':'608807420'},'urlInfo':{'url':'http://gslbmgsplive.miguvideo.com/live/index.m3u8?timestamp=20261020064230&puData='+seed,'rateType':rate}}}).encode(),{})
             return parse_qs(urlsplit(n.native_play_url('608807420',Mock(return_value=client),auth=auth)).query)['ddCalcu'][0]
         self.assertEqual(resolve(2)[4],'v')
         self.assertEqual(resolve(3)[4],auth.dd_keys[8])

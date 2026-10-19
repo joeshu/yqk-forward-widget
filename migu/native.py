@@ -167,18 +167,20 @@ def api_status(data, pid):
 # Editable settings are at the top of the generated single-file release.
 # Protocol constants are not account entitlements. Never commit real credentials.
 NATIVE_SETTINGS = {
-    "app_version": "2600037000",
+    "app_version": "2600000900",
     "client_channel": "2600037000-99000-200300220100002",
-    "sign_salt": "1230024",
-    "sign_suffix": "3ce941cc3cbc40528bfd1c64f9fdf6c0migu0123",
-    "rate_type": 2,
+    "sign_salt": "66666601",
+    "sign_suffix": "770fafdf5ba04d279a59ef1600baae98migu6666",
+    "rate_type": 3,
     "user_id": "",       # Or environment MIGU_USER_ID
     "user_token": "",    # Or environment MIGU_USER_TOKEN
-    "dd_keys": "cdabyzwxkl",
-    "dd_anonymous_word": "v",
-    "dd_year_index": 0,
-    "dd_program_index": 6,
-    "dd_tail": "a",
+    "dd_keys": "0123456789",
+    "dd_anonymous_word": "e",
+    "dd_timestamp_index": 6,
+    "dd_program_index": 2,
+    "dd_tail": "0",
+    "dd_suffix": "",
+    "app_code": "",
 }
 
 
@@ -193,9 +195,11 @@ class NativeAuth:
     user_token: str = field(repr=False)
     dd_keys: str
     dd_anonymous_word: str
-    dd_year_index: int
+    dd_timestamp_index: int
     dd_program_index: int
     dd_tail: str
+    dd_suffix: str
+    app_code: str
 
     @classmethod
     def load(cls, settings=None, environ=None):
@@ -207,7 +211,7 @@ class NativeAuth:
         if set(values) != set(cls.__dataclass_fields__):
             raise ValueError("MIGU_CONFIG_FIELDS_INVALID")
         for key, value in values.items():
-            if key in {"rate_type", "dd_year_index", "dd_program_index"}:
+            if key in {"rate_type", "dd_timestamp_index", "dd_program_index"}:
                 if type(value) is not int:
                     raise ValueError("MIGU_CONFIG_NUMBER_INVALID")
             elif not isinstance(value, str) or len(value) > 4096 or any(not 33 <= ord(c) <= 126 for c in value):
@@ -216,7 +220,7 @@ class NativeAuth:
             raise ValueError("MIGU_CONFIG_PROTOCOL_INVALID")
         if not values['client_channel'] or not values['sign_suffix'] or values['rate_type'] not in {2,3,4}:
             raise ValueError("MIGU_CONFIG_PROTOCOL_INVALID")
-        if not 0 <= values['dd_year_index'] <= 3 or not 0 <= values['dd_program_index'] <= 8:
+        if not 0 <= values['dd_timestamp_index'] <= 13 or not 0 <= values['dd_program_index'] <= 8:
             raise ValueError("MIGU_CONFIG_PROOF_INVALID")
         if len(values['dd_keys']) != 10 or len(values['dd_anonymous_word']) != 1 or len(values['dd_tail']) != 1:
             raise ValueError("MIGU_CONFIG_PROOF_INVALID")
@@ -224,8 +228,8 @@ class NativeAuth:
             raise ValueError("MIGU_CREDENTIAL_PAIR_REQUIRED")
         if values['user_id'] and not re.fullmatch(r"[0-9]{4,32}", values['user_id']):
             raise ValueError("MIGU_USER_ID_INVALID")
-        if values['rate_type'] != 2 and not values['user_id']:
-            raise ValueError("MIGU_HIGHER_QUALITY_REQUIRES_CREDENTIALS")
+        if values['dd_suffix'] not in {"", "&sv=10004&ct=android"} or values['app_code'] not in {"", "miguvideo_default_android"}:
+            raise ValueError("MIGU_CONFIG_PROTOCOL_INVALID")
         return cls(**values)
 
 
@@ -233,26 +237,27 @@ def native_request(pid, auth, timestamp):
     payload = hashlib.md5((timestamp + pid + auth.app_version[:8]).encode()).hexdigest()
     signature = hashlib.md5((payload + auth.sign_suffix).encode()).hexdigest()
     endpoint = "https://play.miguvideo.com/playurl/v1/play/playurl?" + urlencode({
-        "contId": pid, "rateType": auth.rate_type, "timestamp": timestamp,
+        "contId": pid, "rateType": 2 if pid == "608831231" and auth.app_version == "2600000900" else auth.rate_type, "timestamp": timestamp,
         "salt": auth.sign_salt, "sign": signature})
     headers = {"AppVersion": auth.app_version, "TerminalId": "android",
                "X-UP-CLIENT-CHANNEL-ID": auth.client_channel}
-    if pid not in {"641886683", "641886773"}:
-        headers["appCode"] = "miguvideo_default_android"
+    if auth.app_code and pid not in {"641886683", "641886773"}:
+        headers["appCode"] = auth.app_code
     if auth.user_id:
         headers.update(UserId=auth.user_id, UserToken=auth.user_token)
     return endpoint, headers
 
 
-def native_proof(seed, pid, auth, rate_type):
-    if len(seed) % 2 or len(pid) <= auth.dd_program_index:
+def native_proof(seed, pid, timestamp, auth, rate_type):
+    if len(pid) <= auth.dd_program_index or not re.fullmatch(r"[0-9]{14}", timestamp):
         raise m.FetchError("MIGU_PLAY_URL_FORMAT_CHANGED")
     word = auth.dd_anonymous_word
-    if rate_type != 2 and auth.user_id:
+    if auth.dd_keys != "0123456789" and rate_type != 2 and auth.user_id:
         word = "e" if len(auth.user_id) <= 8 else auth.dd_keys[int(auth.user_id[7])]
-    extra = {1: word, 2: auth.dd_keys[int(str(m.utcnow().astimezone(m.CHINA).year)[auth.dd_year_index])],
+    extra = {1: word, 2: auth.dd_keys[int(timestamp[auth.dd_timestamp_index])],
              3: auth.dd_keys[int(pid[auth.dd_program_index])], 4: auth.dd_tail}
-    return "".join(seed[-i-1] + seed[i] + extra.get(i, "") for i in range(len(seed)//2))
+    proof = "".join(seed[-i-1] + seed[i] + extra.get(i, "") for i in range(len(seed)//2))
+    return proof + (seed[len(seed)//2] if len(seed) % 2 else "")
 
 
 def native_play_url(pid, client_factory=m.HttpClient, auth=None):
@@ -298,8 +303,11 @@ def native_play_url(pid, client_factory=m.HttpClient, auth=None):
             raise m.FetchError("MIGU_API_FORMAT_CHANGED") from None
         if returned_rate not in {2,3,4}:
             raise m.FetchError("MIGU_API_FORMAT_CHANGED")
-        proof = native_proof(seed, pid, auth, returned_rate)
-        return url + "&ddCalcu=" + proof + "&sv=10004&ct=android"
+        timestamps = query.get("timestamp", [])
+        if len(timestamps) != 1:
+            raise m.FetchError("MIGU_PLAY_URL_FORMAT_CHANGED")
+        proof = native_proof(seed, pid, timestamps[0], auth, returned_rate)
+        return url + "&ddCalcu=" + proof + auth.dd_suffix
     except (TypeError, AttributeError, IndexError, json.JSONDecodeError):
         raise m.FetchError("MIGU_API_FORMAT_CHANGED") from None
 
@@ -382,7 +390,7 @@ class NativeStore:
                     "source_transport": "https", "last_error": self.last_error, "last_upstream": self.last_upstream, "api_requests": self.fetches,
                     "playback_verified": False, "quality": self.auth.rate_type, "storage": "memory",
                     "authorization": "configured-account" if self.auth.user_id else "anonymous",
-                    "external_playlist": False}
+                    "external_playlist": False, "client_version": self.auth.app_version}
 
     def close(self):
         with self.lock:

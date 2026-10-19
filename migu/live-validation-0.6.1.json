@@ -1,0 +1,25 @@
+{
+  "version": "0.6.1",
+  "checked_at": "2026-10-19T23:31:24.963473+00:00",
+  "provider": "native",
+  "proof_scheme": "legacy-09",
+  "source_proof_comparison": {
+    "checked": 117,
+    "matched": 117,
+    "live_urls_saved": false
+  },
+  "runtime_external_playlist_read": false,
+  "credentials_configured": false,
+  "playback_verified": false,
+  "ios_tested": false,
+  "error": "MIGU_REGION_RESTRICTED",
+  "upstream": {
+    "channel_id": "608807420",
+    "api_code": "403",
+    "rid": "COPYRIGHT_AREA_INVALID",
+    "auth_result": "UNKNOWN",
+    "logged_in": null,
+    "has_play_url": false,
+    "returned_quality": "UNKNOWN"
+  }
+}
