@@ -6,13 +6,18 @@
 
 **运行**
 
-单频道及查询形式的订阅仅需 `wxty.php`，不依赖 Composer。使用 PHP 内置服务的 `/all.m3u` 路径时，还需同目录下的 `router.php`。要求 PHP 8.2 或更新版本，启用 cURL、OpenSSL 和 JSON；缓存目录必须可写，并放在 Web 根目录外。生产环境使用 Nginx/Apache + PHP-FPM，配置合适的上游超时及访问限流。PHP-FPM 默认可能清理环境变量，需要显式传入下面使用的配置。
+只需下载并启动 **`wxty.php` 这一个文件**，订阅、频道路由和本地服务启动都在其中，不依赖 `router.php` 或 Composer。启动文件地址：
+
+```text
+https://raw.githubusercontent.com/joeshu/yqk-forward-widget/refs/heads/main/wxty/wxty.php
+```
+
+要求 PHP 8.2 或更新版本，启用 cURL、OpenSSL 和 JSON；缓存目录必须可写，并放在 Web 根目录外。生产环境使用 Nginx/Apache + PHP-FPM，配置合适的上游超时及访问限流。PHP-FPM 默认可能清理环境变量，需要显式传入下面使用的配置。
 
 本地验证：
 
 ```bash
-cd wxty
-php -S 127.0.0.1:52451 router.php
+php wxty.php
 ```
 
 在 IPTV 播放器中添加以下订阅地址，就能导入本脚本支持的全部 8 个频道：
@@ -23,11 +28,15 @@ http://127.0.0.1:52451/all.m3u
 
 根路径 `/` 也返回同一份订阅。订阅仅列出频道，不会预先请求八个频道的上游；选台播放时才解析相应频道。条目包含频道名和分组，播放链接自动使用本次请求的主机、端口及安装路径，不写死 `127.0.0.1`。
 
-已有服务需要使用带 `router.php` 的命令重启；仅运行 `php -S 127.0.0.1:52451` 不会自动处理 `/all.m3u`。不配置路由时，也可直接订阅 `http://127.0.0.1:52451/wxty.php?list=1`。Nginx/Apache 应将 `/all.m3u` 内部转发到 `/wxty.php?list=1`，并保留原有 PHP 执行配置。
+更新已有启动器中的 `wxty.php` 后重启即可，无需再下载其他 PHP 文件。直接执行文件时，默认启动在 `127.0.0.1:52451`；由启动器管理 HTTP 服务时，将请求交给本文件即可处理 `/`、`/all.m3u`、`/wxty.php`。也支持显式命令 `php -S 127.0.0.1:52451 wxty.php`，仍然只使用同一个文件。原 `router.php` 仅作为旧启动命令的兼容包装保留。
+
+直接执行模式使用 PHP 内置 Web 服务；需要 PHP 支持 `pcntl_exec` 或 `proc_open`。若启动器自行提供 HTTP 服务，不需要本文件再创建进程。仅运行 `php -S 127.0.0.1:52451` 且不指定处理脚本时，PHP 无法将不存在的 `/all.m3u` 交给本文件；这时需指定同一个 `wxty.php`，不必添加另一个路由文件。
+
+原有订阅 `http://127.0.0.1:52451/wxty.php?list=1` 继续可用。Nginx/Apache 应将 `/all.m3u` 内部转发到 `/wxty.php?list=1`，并保留原有 PHP 执行配置。
 
 单台播放地址仍是 `http://127.0.0.1:52451/wxty.php?id=wxty`。这里的“全部频道”仅指下表 8 个频道，不包含仓库中其他项目的频道。
 
-手机或电视访问时，服务改为监听 `0.0.0.0:52451`，订阅地址中的 `127.0.0.1` 改为服务器的局域网 IP。反向代理无法直接推导公网前缀时，设置 `KK_PUBLIC_BASE_URL`，例如 `https://tv.example/wxty`；不自动信任客户端提供的 `X-Forwarded-Host/Proto`。
+手机或电视访问时，可用 `php wxty.php --host=0.0.0.0`，订阅地址中的 `127.0.0.1` 改为服务器的局域网 IP。可用 `--port=52451` 修改端口，`--help` 查看启动参数。反向代理无法直接推导公网前缀时，设置 `KK_PUBLIC_BASE_URL`，例如 `https://tv.example/wxty`；不自动信任客户端提供的 `X-Forwarded-Host/Proto`。
 
 | id | 频道 ID |
 | --- | --- |
@@ -53,6 +62,8 @@ http://127.0.0.1:52451/all.m3u
 
 | 名称 | 默认值及作用 |
 | --- | --- |
+| `KK_BIND_HOST` | 单文件直接启动时的监听 IP，默认 `127.0.0.1`；可用 `--host` 覆盖 |
+| `KK_PORT` | 单文件直接启动时的监听端口，默认 `52451`；可用 `--port` 覆盖 |
 | `KK_CACHE_DIR` | 系统临时目录下按脚本路径隔离的目录；部署时建议指定持久化私有目录 |
 | `KK_API_VERSION` | `2.42.23`；只在确认上游协议变更时调整 |
 | `KK_TIMEOUT` | 20 秒，范围 5–60；HTTP 请求和刷新等待共用的解析预算 |
@@ -100,8 +111,7 @@ RSA 使用 OpenSSL，按公钥实际位数分块，要求每个密文块都成�
 
 ```bash
 php -l wxty.php
-php -l router.php
 php tests/run.php
 ```
 
-回归不调用真实上游，覆盖 RFC URI 解析、特殊网段和域名限制、重定向、HLS 音轨及分片标签、RSA 残块、签名兼容、到期解析、坏候选回退、冷却、鉴权、HEAD、真实多进程刷新，以及真实本地 HTTP 服务上的订阅和路由。GitHub Actions 对 PHP 8.2/8.3/8.4 执行同一套测试。实际网络抽样的范围见 [VALIDATION.md](VALIDATION.md)。
+回归不调用真实上游，覆盖 RFC URI 解析、特殊网段和域名限制、重定向、HLS 音轨及分片标签、RSA 残块、签名兼容、到期解析、坏候选回退、冷却、鉴权、HEAD、真实多进程刷新，以及真实本地 HTTP 服务上的订阅和路由。单文件验证只将 `wxty.php` 复制到空目录，分别检查默认端口直接启动、自定义端口和以本文件作为请求路由三种方式，保证不依赖仓库的其他 PHP 文件。GitHub Actions 对 PHP 8.2/8.3/8.4 执行同一套测试。实际网络抽样的范围见 [VALIDATION.md](VALIDATION.md)。

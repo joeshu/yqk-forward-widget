@@ -51,12 +51,13 @@ function normalHandler(?string $log = null): callable
         return response(media());
     };
 }
-function endpoint(array $query, array $server = [], array $env = []): array
+function endpoint(array $query, array $server = [], array $env = [], bool $dispatch = false): array
 {
     $code = 'define("WXTY_LIBRARY_ONLY",true); require ' . var_export(dirname(__DIR__) . '/wxty.php', true) . ';';
     foreach ($env as $key => $value) $code .= 'putenv(' . var_export($key . '=' . $value, true) . ');';
     $code .= '$_GET=' . var_export($query, true) . '; $_SERVER=' . var_export($server, true)
-        . ';http_response_code(200);ob_start();wxtyMain();$body=ob_get_clean();echo json_encode(["status"=>http_response_code(),"body"=>$body]);';
+        . ';http_response_code(200);ob_start();' . ($dispatch ? 'wxtyDispatch' : 'wxtyMain')
+        . '();$body=ob_get_clean();echo json_encode(["status"=>http_response_code(),"body"=>$body]);';
     $proc = proc_open([PHP_BINARY, '-r', $code], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
     fclose($pipes[0]); $out = stream_get_contents($pipes[1]); $err = stream_get_contents($pipes[2]);
     fclose($pipes[1]); fclose($pipes[2]); same(proc_close($proc), 0);
@@ -370,6 +371,69 @@ try {
         $server['HTTP_AUTHORIZATION'] = 'Bearer private-playback-token';
         $r = endpoint(['list' => '1'], $server, $env); same($r['status'], 200);
         same(str_contains($r['body'], 'private-playback-token'), false);
+    });
+    test('single file handles all.m3u from an external launcher', static function ($dir) {
+        $r = endpoint([], ['REQUEST_URI' => '/all.m3u', 'SCRIPT_NAME' => '/all.m3u', 'HTTP_HOST' => '127.0.0.1:52451'],
+            ['KK_CACHE_DIR' => $dir], true);
+        same($r['status'], 200); same(substr_count($r['body'], '#EXTINF:'), 8);
+        same(str_contains($r['body'], 'http://127.0.0.1:52451/wxty.php?id=wxty'), true);
+        same(is_dir($dir), false);
+    });
+    test('single file dispatch preserves installed script prefix', static function () {
+        $r = endpoint(['list' => '1'], ['REQUEST_URI' => '/gateway/wxty.php?list=1', 'SCRIPT_NAME' => '/gateway/wxty.php',
+            'HTTP_HOST' => '127.0.0.1:52451'], [], true);
+        same($r['status'], 200); same(str_contains($r['body'], 'http://127.0.0.1:52451/gateway/wxty.php?id=wxty'), true);
+    });
+    test('single file dispatch rejects unknown paths', static fn() => same(endpoint([],
+        ['REQUEST_URI' => '/missing', 'SCRIPT_NAME' => '/missing'], [], true)['status'], 404));
+    foreach ([['--help', 0], ['--port=70000', 2], ['--host=invalid/host', 2]] as [$argument, $expected]) {
+        test('single file CLI validates ' . $argument, static function () use ($argument, $expected) {
+            $proc = proc_open([PHP_BINARY, dirname(__DIR__) . '/wxty.php', $argument],
+                [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+            fclose($pipes[0]); stream_get_contents($pipes[1]); stream_get_contents($pipes[2]);
+            fclose($pipes[1]); fclose($pipes[2]); same(proc_close($proc), $expected);
+        });
+    }
+    foreach (['router', 'default', 'custom'] as $mode) test('isolated single file HTTP ' . $mode, static function ($dir) use ($mode) {
+        $standalone = $mode !== 'router';
+        mkdir($dir, 0700, true);
+        copy(dirname(__DIR__) . '/wxty.php', $dir . '/wxty.php');
+        same(count(glob($dir . '/*.php')), 1);
+        $socket = stream_socket_server('tcp://127.0.0.1:' . ($mode === 'default' ? '52451' : '0'), $errno, $error);
+        $address = stream_socket_get_name($socket, false); fclose($socket);
+        $port = substr($address, strrpos($address, ':') + 1);
+        $command = $mode === 'router' ? [PHP_BINARY, '-S', $address, '-t', $dir, $dir . '/wxty.php']
+            : ($mode === 'default' ? [PHP_BINARY, $dir . '/wxty.php'] : [PHP_BINARY, $dir . '/wxty.php', '--port=' . $port]);
+        $proc = proc_open($command, [0 => ['pipe', 'r'], 1 => ['file', $dir . '/http.log', 'a'],
+            2 => ['file', $dir . '/http.log', 'a']], $pipes, $dir);
+        fclose($pipes[0]); $parent = proc_get_status($proc)['pid'];
+        try {
+            $ready = false;
+            for ($i = 0; $i < 100; $i++) {
+                $probe = @stream_socket_client('tcp://' . $address, $errno, $error, 0.05);
+                if ($probe) { fclose($probe); $ready = true; break; }
+                usleep(20000);
+            }
+            if (!$ready) throw new RuntimeException('Server did not start: ' . file_get_contents($dir . '/http.log'));
+            $r = routerRequest($address, '/all.m3u'); same($r['status'], 200);
+            same($r['headers']['content-type'], 'audio/x-mpegurl; charset=utf-8');
+            same(substr_count($r['body'], '#EXTINF:'), 8);
+            foreach (WxtyGateway::CHANNELS as $id => $channel) {
+                same(str_contains($r['body'], 'http://' . $address . '/wxty.php?id=' . $id . "\n"), true);
+                same(routerRequest($address, '/wxty.php?id=' . $id, 'HEAD')['status'], 200);
+            }
+            same(routerRequest($address, '/')['body'], $r['body']);
+            same(routerRequest($address, '/wxty.php?list=1')['body'], $r['body']);
+            same(routerRequest($address, '/all.m3u', 'HEAD')['body'], '');
+            same(routerRequest($address, '/missing')['status'], 404);
+            same(routerRequest($address, '/all.m3u', 'POST')['status'], 405);
+        } finally {
+            if ($standalone) {
+                preg_match_all('/wxty-server-pid=([0-9]+)/', file_get_contents($dir . '/http.log'), $matches);
+                foreach (array_unique($matches[1]) as $pid) if ((int) $pid !== $parent) posix_kill((int) $pid, 15);
+            }
+            proc_terminate($proc); proc_close($proc);
+        }
     });
     test('real HTTP router serves all.m3u and every listed channel path', static function ($dir) {
         mkdir($dir, 0700, true);

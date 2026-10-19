@@ -688,4 +688,73 @@ function wxtyMain(): void
     }
 }
 
-if (!defined('WXTY_LIBRARY_ONLY')) wxtyMain();
+function wxtyDispatch(): void
+{
+    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/wxty.php', PHP_URL_PATH);
+    $script = $_SERVER['SCRIPT_NAME'] ?? '/wxty.php';
+    $direct = is_string($path) && $path === $script && basename($script) === basename(__FILE__);
+    if (!in_array($path, ['/', '/all.m3u', '/wxty.php'], true) && !$direct) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Not found';
+        return;
+    }
+    if (!$direct || $path === '/' || $path === '/all.m3u') $_SERVER['SCRIPT_NAME'] = '/wxty.php';
+    if ($path === '/' || $path === '/all.m3u') $_GET['list'] = '1';
+    wxtyMain();
+}
+
+function wxtyServe(array $arguments): int
+{
+    $host = getenv('KK_BIND_HOST') ?: '127.0.0.1';
+    $port = getenv('KK_PORT') ?: '52451';
+    foreach ($arguments as $argument) {
+        if ($argument === '--help') {
+            echo "Usage: php wxty.php [--host=127.0.0.1] [--port=52451]\n";
+            return 0;
+        }
+        if (str_starts_with($argument, '--host=')) $host = substr($argument, 7);
+        elseif (str_starts_with($argument, '--port=')) $port = substr($argument, 7);
+        else { fwrite(STDERR, "未知启动参数；使用 --help 查看用法\n"); return 2; }
+    }
+    if (($host !== 'localhost' && !filter_var($host, FILTER_VALIDATE_IP))
+        || !ctype_digit($port) || (int) $port < 1 || (int) $port > 65535) {
+        fwrite(STDERR, "无效监听地址或端口\n"); return 2;
+    }
+    $listenHost = str_contains($host, ':') ? '[' . $host . ']' : $host;
+    $listen = $listenHost . ':' . (int) $port;
+    $publicHost = in_array($host, ['0.0.0.0', '::'], true) ? '127.0.0.1' : $listenHost;
+    echo '订阅地址：http://' . $publicHost . ':' . (int) $port . "/all.m3u\n";
+    $command = ['-S', $listen, '-t', __DIR__, __FILE__];
+    // Replace the launcher where supported; otherwise keep the standard server as a child.
+    if (function_exists('pcntl_exec')) {
+        echo 'wxty-server-pid=' . getmypid() . "\n"; fflush(STDOUT);
+        @pcntl_exec(PHP_BINARY, $command);
+    }
+    if (!function_exists('proc_open')) {
+        fwrite(STDERR, "当前 PHP 禁止启动内置服务器；可使用 php -S 127.0.0.1:52451 wxty.php\n"); return 1;
+    }
+    $process = @proc_open(array_merge([PHP_BINARY], $command), [STDIN, STDOUT, STDERR], $pipes, __DIR__);
+    if (!is_resource($process)) { fwrite(STDERR, "启动 PHP 内置服务器失败\n"); return 1; }
+    $status = proc_get_status($process);
+    echo 'wxty-server-pid=' . $status['pid'] . "\n"; fflush(STDOUT);
+    $stop = static function () use ($process): void {
+        if (is_resource($process) && proc_get_status($process)['running']) proc_terminate($process);
+    };
+    register_shutdown_function($stop);
+    if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
+        pcntl_async_signals(true);
+        foreach ([SIGINT, SIGTERM] as $signal) pcntl_signal($signal, static function ($signal) use ($stop) {
+            $stop(); exit(128 + $signal);
+        });
+    }
+    $code = proc_close($process);
+    return $code < 0 ? 1 : $code;
+}
+
+if (!defined('WXTY_LIBRARY_ONLY')) {
+    if (PHP_SAPI === 'cli' && !isset($_SERVER['REQUEST_METHOD']) && !isset($_SERVER['REQUEST_URI'])) {
+        exit(wxtyServe(array_slice($argv ?? [], 1)));
+    }
+    wxtyDispatch();
+}
