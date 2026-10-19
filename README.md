@@ -1,5 +1,7 @@
 # joeshu 影视组件合集
 
+2026-10-19：新增独立的 [wxty PHP 频道网关](./wxty/README.md)，修复 URL/HLS、缓存并发和有界回退，保留 CDN 直连及可配置的回看转直播兼容路径。需部署到 PHP 主机，GitHub Pages 不执行 PHP；现有 Forward 订阅不变。
+
 2026-10-17：完成CatPaw 0.8.2与六个Forward移植组件0.1.1的分页、并发缓存及发布完整性优化。研究结论、460项回归与三个源的线上只读抽样见 [OPTIMIZATION_REVIEW.md](./OPTIMIZATION_REVIEW.md)。
 
 当前订阅包含18个独立模块，全部通过同一个Pages地址发布。聚爷爷影视已从订阅移除。版本见 [yqk.fwd](./yqk.fwd)，本轮逐项梳理见 [COLLECTION_REVIEW.md](./COLLECTION_REVIEW.md)。旧版验证记录和固定脚本继续保留，本轮片单检查以 `collection-validation.json` 为准。

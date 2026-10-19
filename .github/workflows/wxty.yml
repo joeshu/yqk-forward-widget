@@ -1,0 +1,27 @@
+name: Test Wxty PHP gateway
+
+on:
+  push:
+    paths: ['wxty/**', '.github/workflows/wxty.yml']
+  pull_request:
+    paths: ['wxty/**', '.github/workflows/wxty.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.2', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: curl, openssl
+          coverage: none
+      - run: php -l wxty/wxty.php
+      - run: php wxty/tests/run.php
