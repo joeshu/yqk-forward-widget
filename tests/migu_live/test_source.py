@@ -21,11 +21,11 @@ class SourceTests(unittest.TestCase):
         with store.lock:future=store.future
         if future:future.result(3)
 
-    def test_default_entrypoint_selects_list_and_never_instantiates_native_resolver(self):
+    def test_explicit_list_entrypoint_never_instantiates_native_resolver(self):
         store,client=self.store()
         server=Mock();server.serve_forever.side_effect=KeyboardInterrupt
         with patch.object(s,'ListStore',return_value=store) as selected, patch.object(s,'NativeStore',side_effect=AssertionError('anonymous API selected')), patch.object(s,'BoundedServer',return_value=server):
-            self.assertEqual(s.main([]),0)
+            self.assertEqual(s.main(["--provider","list"]),0)
         selected.assert_called_once_with('auto')
         client.get.assert_not_called()
 

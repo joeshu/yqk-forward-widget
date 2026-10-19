@@ -1,0 +1,19 @@
+{
+  "version": "0.6.0",
+  "checked_at": "2026-10-19T23:25:13.166052+00:00",
+  "provider": "native",
+  "external_playlist_read": false,
+  "credentials_configured": false,
+  "playback_verified": false,
+  "ios_tested": false,
+  "error": "MIGU_REGION_RESTRICTED",
+  "upstream": {
+    "channel_id": "608807420",
+    "api_code": "403",
+    "rid": "COPYRIGHT_AREA_INVALID",
+    "auth_result": "UNKNOWN",
+    "logged_in": null,
+    "has_play_url": false,
+    "returned_quality": "UNKNOWN"
+  }
+}

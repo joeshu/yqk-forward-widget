@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
-"""Migu dynamic service 0.5.0. Standalone Python 3.10+, standard library only."""
+"""Migu dynamic service 0.6.0. Standalone Python 3.10+, standard library only."""
 from __future__ import annotations
+
+# Edit only this block for protocol settings and your own credentials.
+# Environment MIGU_USER_ID / MIGU_USER_TOKEN override the two account fields.
+NATIVE_SETTINGS = {
+    "app_version": "2600037000",
+    "client_channel": "2600037000-99000-200300220100002",
+    "sign_salt": "1230024",
+    "sign_suffix": "3ce941cc3cbc40528bfd1c64f9fdf6c0migu0123",
+    "rate_type": 2,
+    "user_id": "",       # Or environment MIGU_USER_ID
+    "user_token": "",    # Or environment MIGU_USER_TOKEN
+    "dd_keys": "cdabyzwxkl",
+    "dd_anonymous_word": "v",
+    "dd_year_index": 0,
+    "dd_program_index": 6,
+    "dd_tail": "a",
+}
 
 # Bounded transport and HLS validation: migu/core.py
 from dataclasses import dataclass
@@ -490,14 +507,15 @@ class BoundedExecutor:
 # migu/native.py
 from collections import OrderedDict
 from concurrent.futures import TimeoutError as FutureTimeout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
+import os
 import re
 import threading
 import time
 from types import MappingProxyType
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlsplit, urlencode
 
 
 BUILTIN_CHANNELS = (
@@ -646,19 +664,89 @@ def api_status(data, pid):
             'has_play_url': isinstance(info.get('url'), str) and bool(info.get('url')), 'returned_quality': tag(info.get('rateType'))}
 
 
-def native_play_url(pid, client_factory=m.HttpClient):
-    if pid not in {item[0] for item in BUILTIN_CHANNELS}:
-        raise m.FetchError("MIGU_UNKNOWN_CHANNEL")
-    timestamp = str(int(time.time() * 1000))
-    payload = hashlib.md5((timestamp + pid + "26000370").encode()).hexdigest()
-    signature = hashlib.md5((payload + "3ce941cc3cbc40528bfd1c64f9fdf6c0migu0123").encode()).hexdigest()
-    endpoint = ("https://play.miguvideo.com/playurl/v1/play/playurl"
-                f"?contId={pid}&rateType=2&timestamp={timestamp}&salt=1230024&sign={signature}")
-    headers = {"AppVersion": "2600037000", "TerminalId": "android",
-               "X-UP-CLIENT-CHANNEL-ID": "2600037000-99000-200300220100002"}
-    # Do not request FLV, H265, HDR or higher paid quality profiles.
+# Editable settings are at the top of the generated single-file release.
+# Protocol constants are not account entitlements. Never commit real credentials.
+# NATIVE_SETTINGS is defined at the top of this file.
+
+
+@dataclass(frozen=True, repr=False)
+class NativeAuth:
+    app_version: str
+    client_channel: str
+    sign_salt: str
+    sign_suffix: str
+    rate_type: int
+    user_id: str = field(repr=False)
+    user_token: str = field(repr=False)
+    dd_keys: str
+    dd_anonymous_word: str
+    dd_year_index: int
+    dd_program_index: int
+    dd_tail: str
+
+    @classmethod
+    def load(cls, settings=None, environ=None):
+        values = dict(NATIVE_SETTINGS if settings is None else settings)
+        env = os.environ if environ is None else environ
+        for key, name in (("user_id", "MIGU_USER_ID"), ("user_token", "MIGU_USER_TOKEN")):
+            if name in env:
+                values[key] = env[name]
+        if set(values) != set(cls.__dataclass_fields__):
+            raise ValueError("MIGU_CONFIG_FIELDS_INVALID")
+        for key, value in values.items():
+            if key in {"rate_type", "dd_year_index", "dd_program_index"}:
+                if type(value) is not int:
+                    raise ValueError("MIGU_CONFIG_NUMBER_INVALID")
+            elif not isinstance(value, str) or len(value) > 4096 or any(not 33 <= ord(c) <= 126 for c in value):
+                raise ValueError("MIGU_CONFIG_TEXT_INVALID")
+        if not re.fullmatch(r"[0-9]{8,12}", values['app_version']) or not re.fullmatch(r"[0-9]{1,16}", values['sign_salt']):
+            raise ValueError("MIGU_CONFIG_PROTOCOL_INVALID")
+        if not values['client_channel'] or not values['sign_suffix'] or values['rate_type'] not in {2,3,4}:
+            raise ValueError("MIGU_CONFIG_PROTOCOL_INVALID")
+        if not 0 <= values['dd_year_index'] <= 3 or not 0 <= values['dd_program_index'] <= 8:
+            raise ValueError("MIGU_CONFIG_PROOF_INVALID")
+        if len(values['dd_keys']) != 10 or len(values['dd_anonymous_word']) != 1 or len(values['dd_tail']) != 1:
+            raise ValueError("MIGU_CONFIG_PROOF_INVALID")
+        if bool(values['user_id']) != bool(values['user_token']):
+            raise ValueError("MIGU_CREDENTIAL_PAIR_REQUIRED")
+        if values['user_id'] and not re.fullmatch(r"[0-9]{4,32}", values['user_id']):
+            raise ValueError("MIGU_USER_ID_INVALID")
+        if values['rate_type'] != 2 and not values['user_id']:
+            raise ValueError("MIGU_HIGHER_QUALITY_REQUIRES_CREDENTIALS")
+        return cls(**values)
+
+
+def native_request(pid, auth, timestamp):
+    payload = hashlib.md5((timestamp + pid + auth.app_version[:8]).encode()).hexdigest()
+    signature = hashlib.md5((payload + auth.sign_suffix).encode()).hexdigest()
+    endpoint = "https://play.miguvideo.com/playurl/v1/play/playurl?" + urlencode({
+        "contId": pid, "rateType": auth.rate_type, "timestamp": timestamp,
+        "salt": auth.sign_salt, "sign": signature})
+    headers = {"AppVersion": auth.app_version, "TerminalId": "android",
+               "X-UP-CLIENT-CHANNEL-ID": auth.client_channel}
     if pid not in {"641886683", "641886773"}:
         headers["appCode"] = "miguvideo_default_android"
+    if auth.user_id:
+        headers.update(UserId=auth.user_id, UserToken=auth.user_token)
+    return endpoint, headers
+
+
+def native_proof(seed, pid, auth, rate_type):
+    if len(seed) % 2 or len(pid) <= auth.dd_program_index:
+        raise m.FetchError("MIGU_PLAY_URL_FORMAT_CHANGED")
+    word = auth.dd_anonymous_word
+    if rate_type != 2 and auth.user_id:
+        word = "e" if len(auth.user_id) <= 8 else auth.dd_keys[int(auth.user_id[7])]
+    extra = {1: word, 2: auth.dd_keys[int(str(m.utcnow().astimezone(m.CHINA).year)[auth.dd_year_index])],
+             3: auth.dd_keys[int(pid[auth.dd_program_index])], 4: auth.dd_tail}
+    return "".join(seed[-i-1] + seed[i] + extra.get(i, "") for i in range(len(seed)//2))
+
+
+def native_play_url(pid, client_factory=m.HttpClient, auth=None):
+    if pid not in {item[0] for item in BUILTIN_CHANNELS}:
+        raise m.FetchError("MIGU_UNKNOWN_CHANNEL")
+    auth = auth or NativeAuth.load()
+    endpoint, headers = native_request(pid, auth, str(int(time.time() * 1000)))
     raw, _ = client_factory("api", attempts=1, timeout=8, budget=10).get(endpoint, headers=headers, limit=256 * 1024)
     try:
         data = json.loads(raw)
@@ -691,9 +779,13 @@ def native_play_url(pid, client_factory=m.HttpClient):
         if len(seed) != 1 or re.fullmatch(r"[0-9a-fA-F]{16,128}", seed[0]) is None:
             raise m.FetchError("MIGU_PLAY_URL_FORMAT_CHANGED")
         seed = seed[0]
-        keys = "cdabyzwxkl"
-        extra = {1: "v", 2: keys[int(str(m.utcnow().astimezone(m.CHINA).year)[0])], 3: keys[int(pid[6])], 4: "a"}
-        proof = "".join(seed[-i-1] + seed[i] + extra.get(i, "") for i in range((len(seed)+1)//2))
+        try:
+            returned_rate = int(info.get("rateType", auth.rate_type))
+        except (TypeError, ValueError):
+            raise m.FetchError("MIGU_API_FORMAT_CHANGED") from None
+        if returned_rate not in {2,3,4}:
+            raise m.FetchError("MIGU_API_FORMAT_CHANGED")
+        proof = native_proof(seed, pid, auth, returned_rate)
         return url + "&ddCalcu=" + proof + "&sv=10004&ct=android"
     except (TypeError, AttributeError, IndexError, json.JSONDecodeError):
         raise m.FetchError("MIGU_API_FORMAT_CHANGED") from None
@@ -709,8 +801,10 @@ class NativeStore:
     """Built-in metadata; bounded, coalesced on-demand resolution, memory only."""
     provider = "migu"
 
-    def __init__(self, resolver=native_play_url, clock=time.monotonic):
-        self.resolver, self.clock = resolver, clock
+    def __init__(self, resolver=native_play_url, clock=time.monotonic, auth=None):
+        self.auth = auth or NativeAuth.load()
+        self.resolver = (lambda pid: native_play_url(pid, auth=self.auth)) if resolver is native_play_url else resolver
+        self.clock = clock
         self.pool = BoundedExecutor(max_workers=8, thread_name_prefix="migu-api")
         self.lock = threading.RLock()
         self.flights, self.entries = {}, OrderedDict()
@@ -773,7 +867,9 @@ class NativeStore:
         with self.lock:
             return {"provider": self.provider, "catalogue_ready": True, "channels": len(self.snapshot.channels),
                     "source_transport": "https", "last_error": self.last_error, "last_upstream": self.last_upstream, "api_requests": self.fetches,
-                    "playback_verified": False, "quality": "anonymous-SD", "storage": "memory"}
+                    "playback_verified": False, "quality": self.auth.rate_type, "storage": "memory",
+                    "authorization": "configured-account" if self.auth.user_id else "anonymous",
+                    "external_playlist": False}
 
     def close(self):
         with self.lock:
@@ -1380,7 +1476,7 @@ import time
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
@@ -1778,7 +1874,7 @@ def main(argv=None):
     parser.add_argument("--data-dir", type=Path, help="Only needed for a persistent service access token")
     parser.add_argument("--token-env", help="Environment variable holding the service access token")
     parser.add_argument("--require-token", action="store_true")
-    parser.add_argument("--provider", choices=("list","native"), default="list", help="Default: existing URLs from the published list; native is an explicit diagnostic option")
+    parser.add_argument("--provider", choices=("list","native"), default="native", help="Default: built-in channels and direct API signing; list is an explicit legacy option")
     parser.add_argument("--list-source", choices=("auto","github","upstream"), default="auto")
     parser.add_argument("--mode", choices=("redirect", "manifest"), default="redirect")
     parser.add_argument("--epg-cache", action="store_true", help="Persist valid programme schedules; fall back to memory if unavailable")
