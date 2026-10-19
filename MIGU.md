@@ -49,6 +49,12 @@ python3 migu/probe.py --sample 5 --report migu-check.json
 
 GitHub 的定时任务可能延迟、丢弃，公共仓库长时间无活动也可能停用；Raw 有缓存，播放器也须重新加载订阅，自动刷新不能让已打开的旧频道 URL 自动换签。工作流实际执行状态请看 [Actions](https://github.com/joeshu/yqk-forward-widget/actions/workflows/migu.yml)。参见 [GitHub schedule 官方说明](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)。
 
+### 当前自动发布的安全阻断（2026-10-19）
+
+39 项回归在本地及 GitHub 测试任务通过，GitHub 刷新任务已成功下载并校验更新后的 112 频道来源。但是 [发布运行 39254822998](https://github.com/joeshu/yqk-forward-widget/actions/runs/39254822998) 的最终推送被 GitHub Push Protection 拒绝：`migu.m3u8:83` 被识别为疑似 `Databricks Federated Account Session Token`。
+
+对该来源行的脱敏检查只观察到咪咕既有参数和签名形式，没有发现明确的 Databricks 令牌前缀；这不足以认定误报。没有解除推送保护、编码隐藏匹配值或更换发布渠道。疑似凭据应由仓库所有者在 GitHub 核实处理。当前已发布目录继续保留上一版；半小时刷新虽已配置，**自动发布尚未完整成功**，不能承诺当前订阅已经获得这个 112 频道的新快照。后续仍受 GitHub 安全检查约束。
+
 ## 尚未解决的上游限制
 
 原列表、台标及部分播放链路仍使用 HTTP，允许域名和格式校验无法验证 HTTP 内容的真实性。`source_transport_authenticated: false` 如实记录此问题。GitHub Raw 的 HTTPS 只保护 GitHub 到播放器这一段。若上游以后提供可验证的 HTTPS 列表，需先完整验证再变更默认地址。
