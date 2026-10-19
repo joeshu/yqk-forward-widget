@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the readable native-only single-file release and its stable root alias."""
+"""Build the readable list/native single-file release and its stable root alias."""
 import argparse
 import ast
 import hashlib
@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-INPUTS = ('migu/core.py', 'migu/workers.py', 'migu/native.py', 'migu/epg.py', 'migu/service.py')
-VERSION = '0.4.1'
+INPUTS = ('migu/core.py', 'migu/workers.py', 'migu/native.py', 'migu/source.py', 'migu/epg.py', 'migu/service.py')
+VERSION = '0.5.0'
 
 
 def strip_module(text):
@@ -43,9 +43,9 @@ def build():
     text += '\nif __name__ == "__main__":\n    raise SystemExit(main())\n'
     ast.parse(text)
     data = text.encode('utf-8')
-    for unwanted in (b'52top', b'fcntl', b'CatalogueStore', b'import update_migu', b'ThreadPoolExecutor'):
+    for unwanted in (b'fcntl', b'CatalogueStore', b'import update_migu', b'ThreadPoolExecutor'):
         if unwanted in data:
-            raise ValueError('Legacy dependency in native release')
+            raise ValueError('Unexpected dependency in standalone release')
     manifest = {'version': VERSION, 'artifact': f'migu-live-v{VERSION}.py',
                 'sha256': hashlib.sha256(data).hexdigest(), 'standalone_alias': 'migu-live.py',
                 'inputs': {name: hashlib.sha256(sources[name].encode()).hexdigest() for name in INPUTS}}

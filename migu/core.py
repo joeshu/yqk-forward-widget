@@ -67,7 +67,12 @@ def validate_url(url, role):
     host = (parts.hostname or "").lower()
     if parts.scheme not in {"http", "https"} or not host or parts.username is not None or parts.password is not None or parts.fragment:
         raise UpdateError("URL_SCHEME_OR_AUTHORITY")
-    if role == "epg":
+    if role == "catalogue":
+        allowed = url in {
+            "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu.m3u8",
+            "http://www.52top.com.cn:678/downloads/migu.txt",
+        }
+    elif role == "epg":
         allowed = parts.scheme == "https" and host == "program-sc.miguvideo.com" and port in {None, 443} and re.fullmatch(r"/live/v2/tv-programs-data/[0-9]{6,20}/[0-9]{8}", parts.path) is not None and not parts.query
     elif role == "api":
         allowed = parts.scheme == "https" and host == "play.miguvideo.com" and port in {None, 443} and parts.path == "/playurl/v1/play/playurl"

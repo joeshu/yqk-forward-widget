@@ -23,10 +23,11 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 from migu import core as m
 from migu.core import hls_references
 from migu.native import NativeStore
+from migu.source import ListStore, CATCHUP_SOURCE, list_catchup
 from migu.epg import EpgStore
 from migu.workers import BoundedExecutor
 
-VERSION = "0.4.1"
+VERSION = "0.5.0"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
@@ -42,6 +43,8 @@ EVENT_MESSAGES = {
     "TLS_ERROR": "TLS 证书校验失败",
     "EPG_LOADING": "节目单正在后台加载，请稍后刷新",
     "EPG_EMPTY_OR_UNAVAILABLE": "暂未取得有效节目单，请查看节目单状态",
+    "LIST_LOADING": "频道列表正在加载，请稍后重试",
+    "SOURCE_SNAPSHOT_TOO_OLD": "频道快照已过期，正在尝试原始列表源",
     "EPG_DISABLED": "节目单已关闭",
 }
 URI_ATTRIBUTE = re.compile(r'(?<![\w-])URI="([^"\r\n]*)"')
@@ -215,9 +218,12 @@ class Service:
         suffix = "?token=" + self.token if self.require_token else ""
         epg_url = f'{self.public_base}/epg.xml{suffix}'
         header = '#EXTM3U' + (f' x-tvg-url="{epg_url}"' if self.epg.enabled else '')
+        if getattr(snapshot.playlist, 'catchup', False):
+            header += ' catchup="append" catchup-source="' + ('&' if self.require_token else '?') + CATCHUP_SOURCE[1:] + '"'
         lines = [header]
         for key, channel in snapshot.channels.items():
-            lines.append(f'#EXTINF:-1 tvg-id="{key}" tvg-name="{channel.name}" group-title="{channel.group}",{channel.display}')
+            logo = f' tvg-logo="{channel.logo}"' if channel.logo else ''
+            lines.append(f'#EXTINF:-1 tvg-id="{key}" tvg-name="{channel.name}" group-title="{channel.group}"{logo},{channel.display}')
             lines.append(f'{self.public_base}/live/{key}.m3u8{suffix}')
         return ('\n'.join(lines)+'\n').encode('utf-8')
 
@@ -301,9 +307,15 @@ class Handler(BaseHTTPRequestHandler):
             channel = snapshot.channels.get(key)
             if channel is None:
                 raise ServiceError("CHANNEL_NOT_FOUND", 404)
+            suffix = ''
             if "playbackbegin" in query or "playbackend" in query:
-                raise ServiceError("CATCHUP_UNAVAILABLE", 400)
-            url = service.store.resolve(key)
+                if not getattr(snapshot.playlist, 'catchup', False):
+                    raise ServiceError("CATCHUP_UNAVAILABLE", 400)
+                try:
+                    suffix = list_catchup(query)
+                except m.UpdateError as failure:
+                    raise ServiceError(str(failure),400) from None
+            url = service.store.resolve(key) + suffix
             m.validate_url(url, "media")
             if service.mode == "redirect":
                 self.send_body(302, Location=url)
@@ -317,7 +329,7 @@ class Handler(BaseHTTPRequestHandler):
             details = getattr(error, "details", None)
             service.diagnostics.record(str(error), details)
             code = str(error)
-            status = 403 if code in {"MIGU_AUTHORIZATION_REJECTED", "MIGU_LOGIN_REQUIRED", "MIGU_MEMBERSHIP_REQUIRED", "MIGU_REGION_RESTRICTED"} else 404 if code == "EPG_DISABLED" else 503 if code in {"EPG_LOADING", "EPG_UNAVAILABLE", "MIGU_API_LOADING", "MIGU_API_CAPACITY"} or code.startswith("EPG_") else 502
+            status = 403 if code in {"MIGU_AUTHORIZATION_REJECTED", "MIGU_LOGIN_REQUIRED", "MIGU_MEMBERSHIP_REQUIRED", "MIGU_REGION_RESTRICTED"} else 404 if code == "EPG_DISABLED" else 503 if code in {"EPG_LOADING", "EPG_UNAVAILABLE", "MIGU_API_LOADING", "MIGU_API_CAPACITY"} or (code.startswith("EPG_") or code.startswith("LIST_") or code in {"SOURCE_SNAPSHOT_TOO_OLD", "TOO_FEW_CHANNELS"}) else 502
             self.send_body(status, m.json_bytes({"error": code, **({"upstream": details} if details else {})}), **({"Retry_After": "3"} if status == 503 else {}))
         except (ValueError, OSError):
             self.send_body(400, m.json_bytes({"error": "REQUEST_OR_IO_ERROR"}))
@@ -413,6 +425,8 @@ def main(argv=None):
     parser.add_argument("--data-dir", type=Path, help="Only needed for a persistent service access token")
     parser.add_argument("--token-env", help="Environment variable holding the service access token")
     parser.add_argument("--require-token", action="store_true")
+    parser.add_argument("--provider", choices=("list","native"), default="list", help="Default: existing URLs from the published list; native is an explicit diagnostic option")
+    parser.add_argument("--list-source", choices=("auto","github","upstream"), default="auto")
     parser.add_argument("--mode", choices=("redirect", "manifest"), default="redirect")
     parser.add_argument("--epg-cache", action="store_true", help="Persist valid programme schedules; fall back to memory if unavailable")
     parser.add_argument("--no-epg", action="store_true", help="Disable the XMLTV feed")
@@ -446,7 +460,8 @@ def main(argv=None):
             except (OSError, ValueError, ServiceError):
                 print("[节目单] 缓存目录不可写，继续使用内存模式。", flush=True)
         stage = "provider"
-        service = Service(NativeStore(), token, base, args.mode, require_token=require_token, epg=EpgStore(enabled=not args.no_epg, cache_path=cache_path))
+        store = ListStore(args.list_source) if args.provider == "list" else NativeStore()
+        service = Service(store, token, base, args.mode, require_token=require_token, epg=EpgStore(enabled=not args.no_epg, cache_path=cache_path))
         previous_signal = None
         try:
             stage = "bind"
@@ -457,9 +472,9 @@ def main(argv=None):
                         previous_signal = signal.signal(signal.SIGTERM, stop_from_signal)
                     except (OSError, ValueError, AttributeError):
                         print("[系统] 信号接口不可用，请使用 App 停止按钮。", flush=True)
-                print(f"migu-live {VERSION}; provider=official-api; mode={args.mode}; listening={args.bind}:{args.port}", flush=True)
+                print(f"migu-live {VERSION}; provider={store.provider}; mode={args.mode}; listening={args.bind}:{args.port}", flush=True)
                 print(f"[环境] Python {service.runtime['python']}; system={service.runtime['platform']}; main_thread={threading.current_thread() is threading.main_thread()}", flush=True)
-                print(f"[系统] HTTP 服务启动成功；内置频道 {len(service.store.get().channels)} 个，官方取源按需进行。", flush=True)
+                print("[系统] HTTP 服务启动成功；列表地址在首次订阅时加载，不调用官方匿名播放接口。" if args.provider == "list" else f"[系统] HTTP 服务启动成功；内置频道 {len(store.get().channels)} 个，官方取源按需进行。", flush=True)
                 suffix = "?token=<access-token>" if require_token else ""
                 for label, path in (("Subscription", "/all.m3u"), ("Diagnostics", "/diag")):
                     print(f"{label}: {base.rstrip('/')}{path}{suffix}", flush=True)

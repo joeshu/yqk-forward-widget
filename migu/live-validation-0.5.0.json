@@ -1,0 +1,72 @@
+{
+  "version": "0.5.0",
+  "checked_at_utc": "2026-10-19T23:08:58+00:00",
+  "provider": "published-list",
+  "video_decoded": true,
+  "ios_tested": false,
+  "source_status": {
+    "provider": "published-list",
+    "catalogue_ready": true,
+    "channels": 117,
+    "refreshing": false,
+    "source": "github",
+    "updated_utc": "2026-10-19T23:08:59+00:00",
+    "last_error": null,
+    "catalogue_refreshes": 1,
+    "playback_verified": false,
+    "quality": "source-provided",
+    "storage": "memory"
+  },
+  "catalogue_seconds": 0.545,
+  "sample": "CCTV1综合",
+  "entry_kind": "master",
+  "entry_http": 200,
+  "media_kind": "media",
+  "media_http": 200,
+  "segment_count": 4,
+  "standalone_catalogue_http": 200,
+  "standalone_channels": 117,
+  "actual_samples": [
+    {
+      "channel": "CCTV1综合",
+      "video_decoded": true,
+      "local_entry_http": 302,
+      "media_http": 200,
+      "video_streams": [
+        {
+          "codec_name": "h264",
+          "width": 854,
+          "height": 480
+        }
+      ]
+    },
+    {
+      "channel": "CCTV2财经",
+      "video_decoded": true,
+      "local_entry_http": 302,
+      "media_http": 200,
+      "video_streams": [
+        {
+          "codec_name": "h264",
+          "width": 854,
+          "height": 480
+        }
+      ]
+    },
+    {
+      "channel": "CCTV13新闻",
+      "video_decoded": true,
+      "local_entry_http": 302,
+      "media_http": 200,
+      "video_streams": [
+        {
+          "codec_name": "h264",
+          "width": 854,
+          "height": 480
+        }
+      ]
+    }
+  ],
+  "shutdown_exit_code": 0,
+  "shutdown_seconds": 0.058
+}

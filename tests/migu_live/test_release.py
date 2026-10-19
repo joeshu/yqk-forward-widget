@@ -17,9 +17,9 @@ class ReleaseTests(unittest.TestCase):
     def test_release_is_reproducible_and_matches_current_sources(self):
         script, manifest = build_service.build()
         self.assertEqual(script, build_service.build()[0])
-        self.assertEqual(script, Path('migu/migu-live-v0.4.1.py').read_bytes())
+        self.assertEqual(script, Path('migu/migu-live-v0.5.0.py').read_bytes())
         self.assertEqual(script, Path('migu-live.py').read_bytes())
-        self.assertEqual(manifest, Path('migu/migu-live-v0.4.1.json').read_bytes())
+        self.assertEqual(manifest, Path('migu/migu-live-v0.5.0.json').read_bytes())
         self.assertNotIn(b'import update_migu',script)
         self.assertNotIn(b'from migu.probe',script)
 
@@ -31,7 +31,7 @@ class ReleaseTests(unittest.TestCase):
             with closing(socket.socket()) as reserve:
                 reserve.bind(('127.0.0.1',0))
                 port=reserve.getsockname()[1]
-            process=subprocess.Popen([sys.executable,str(script),str(port)],cwd=root,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            process=subprocess.Popen([sys.executable,str(script),str(port),"--provider","native"],cwd=root,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
             body=None
             try:
                 for _ in range(500):
@@ -73,7 +73,7 @@ class ReleaseTests(unittest.TestCase):
             readonly=root/'readonly'; readonly.mkdir(); readonly.chmod(0o500)
             with closing(socket.socket()) as reserve:
                 reserve.bind(('127.0.0.1',0)); port=reserve.getsockname()[1]
-            process=subprocess.Popen([sys.executable,str(script),str(port)],cwd=readonly,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            process=subprocess.Popen([sys.executable,str(script),str(port),"--provider","native"],cwd=readonly,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
             try:
                 for _ in range(500):
                     if process.poll() is not None: self.fail(process.communicate()[1])
@@ -94,7 +94,7 @@ class ReleaseTests(unittest.TestCase):
                     process.kill(); process.communicate(); raise
                 finally: readonly.chmod(0o700)
             self.assertEqual(process.returncode,0,error)
-            self.assertIn('provider=official-api',out)
+            self.assertIn('provider=migu',out)
 
 
 if __name__=='__main__':
