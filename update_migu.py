@@ -86,6 +86,8 @@ def validate_url(url, role):
         allowed = host in SOURCE_HOSTS and port in {None, 443}
         if parts.scheme == "http":
             allowed = url == DEFAULT_SOURCE  # Explicit exception for the known legacy source.
+    elif role == "api":
+        allowed = parts.scheme == "https" and host == "play.miguvideo.com" and port in {None, 443} and parts.path == "/playurl/v1/play/playurl"
     elif role in {"stream", "media"}:
         # The live GSLB redirects to hlszymgsplive.miguvideo.com:8080.
         allowed_ports = {None, 80, 443, 8080} if role == "media" else {None, 80, 443}

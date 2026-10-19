@@ -5,6 +5,7 @@ on:
     paths:
       - 'migu-live.py'
       - 'migu/service.py'
+      - 'migu/native.py'
       - 'migu/probe.py'
       - 'migu/build_service.py'
       - 'migu/migu-live-v*.py'
@@ -16,6 +17,7 @@ on:
     paths:
       - 'migu-live.py'
       - 'migu/service.py'
+      - 'migu/native.py'
       - 'migu/probe.py'
       - 'migu/build_service.py'
       - 'migu/migu-live-v*.py'
@@ -39,4 +41,4 @@ jobs:
       - run: python3 -m unittest discover -s tests/migu -v
       - run: python3 -m unittest discover -s tests/migu_live -v
       - run: python3 migu/build_service.py --check
-      - run: python3 migu/migu-live-v0.1.0.py --help
+      - run: python3 migu/migu-live-v0.2.0.py --help

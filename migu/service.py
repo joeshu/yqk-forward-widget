@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections import OrderedDict
+from contextlib import nullcontext
 from concurrent.futures import CancelledError, ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -24,8 +25,9 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 
 import update_migu as m
 from migu.probe import hls_references
+from migu.native import NativeStore
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 URI_ATTRIBUTE = re.compile(r'(?<![\w-])URI="([^"\r\n]*)"')
 
@@ -353,6 +355,9 @@ class Service:
         suffix = "?token=" + self.token if self.require_token else ""
         channels = [replace(channel, url=f"{self.public_base}/live/{key}.m3u8{suffix}") for key, channel in snapshot.channels.items()]
         rendered = m.Playlist(tuple(channels), snapshot.playlist.catchup).render()
+        if getattr(self.store, "provider", None) == "migu":
+            # Native mode has no external EPG dependency and advertises no unverified catchup.
+            rendered = b"#EXTM3U\n" + rendered.split(b"\n", 1)[1]
         if not self.require_token:
             rendered = rendered.replace(('catchup-source="' + m.CATCHUP_SOURCE).encode(), ('catchup-source="?' + m.CATCHUP_SOURCE[1:]).encode(), 1)
         return rendered
@@ -433,7 +438,7 @@ class Handler(BaseHTTPRequestHandler):
             suffix = catchup_suffix(query)
             if suffix and not snapshot.playlist.catchup:
                 raise ServiceError("CATCHUP_UNAVAILABLE", 400)
-            url = channel.url + suffix
+            url = service.store.resolve(key) if getattr(service.store, "provider", None) == "migu" else channel.url + suffix
             m.validate_url(url, "media")
             if service.mode == "redirect":
                 self.send_body(302, Location=url)
@@ -441,6 +446,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_body(200, service.manifests.get(url), "application/vnd.apple.mpegurl; charset=utf-8")
         except ServiceError as error:
             self.send_body(error.status, m.json_bytes({"error": error.code}), **({"Retry_After": "3"} if error.status == 503 else {}))
+        except m.UpdateError as error:
+            self.send_body(502, m.json_bytes({"error": str(error)}))
         except (ValueError, OSError):
             self.send_body(400, m.json_bytes({"error": "REQUEST_OR_IO_ERROR"}))
 
@@ -489,22 +496,45 @@ def stop_from_signal(*unused):
     raise KeyboardInterrupt()
 
 
+def service_data_directory(explicit=None):
+    """Never assume the app's current working directory is writable."""
+    directory = explicit or Path.home() / ".cache" / "migu-live"
+    if directory.is_symlink():
+        raise ServiceError("DATA_DIRECTORY_SYMLINK_NOT_ALLOWED")
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with tempfile.TemporaryFile(dir=directory) as handle:
+        handle.write(b"probe")
+        handle.flush()
+    return directory
+
+
+def startup_error(stage, error):
+    code = str(error) if isinstance(error, (ServiceError, m.UpdateError)) else type(error).__name__
+    number = getattr(error, "errno", None)
+    print(f"Startup failed [{stage}]: {code}" + (f" (errno={number}: {os.strerror(number)})" if number else ""), file=sys.stderr, flush=True)
+    if stage == "bind":
+        print("端口可能被占用，或当前 App 不允许本地监听；可尝试其他端口。", file=sys.stderr)
+    elif stage in {"data-directory", "cache-lock", "access-token"}:
+        print("请检查 App 的可写目录；默认官方取源、仅本机访问无需缓存目录或文件锁。", file=sys.stderr)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("port", type=int, nargs="?", default=18768)
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--public-base", help="Fixed external URL; never inferred from Host/Forwarded headers")
-    parser.add_argument("--data-dir", type=Path, default=Path("migu-live-data"))
+    parser.add_argument("--data-dir", type=Path, help="Private writable cache directory; native local mode writes no files")
     parser.add_argument("--token-env", help="Explicit environment variable holding a URL-safe access token")
     parser.add_argument("--require-token", action="store_true", help="Also require a token for local-only requests")
     parser.add_argument("--mode", choices=("redirect", "manifest"), default="redirect")
     source = parser.add_mutually_exclusive_group()
-    source.add_argument("--source", default=m.DEFAULT_SOURCE)
+    source.add_argument("--source", help="Explicit legacy catalogue URL; default uses built-in official Migu API")
     source.add_argument("--input", type=Path)
     parser.add_argument("--refresh-seconds", type=float, default=60)
     parser.add_argument("--max-age-hours", type=float, default=12)
     parser.add_argument("--min-channels", type=int, default=100)
     args = parser.parse_args(argv)
+    stage = "configuration"
     try:
         address = ipaddress.IPv4Address(args.bind)
         if not 1 <= args.port <= 65535 or not 5 <= args.refresh_seconds <= 3600 or not 0 < args.max_age_hours <= 168 or args.min_channels < 1:
@@ -515,37 +545,49 @@ def main(argv=None):
             parser.error("public-base must be a fixed HTTP(S) URL without credentials/query/fragment")
         if not address.is_loopback and not args.public_base:
             parser.error("non-loopback bind requires an explicit --public-base")
-        if not args.input:
+        if args.source:
             m.validate_url(args.source, "source")
-        if args.data_dir.is_symlink():
-            raise ServiceError("DATA_DIRECTORY_SYMLINK_NOT_ALLOWED")
-        args.data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         try:
             public_loopback = ipaddress.ip_address(parts.hostname).is_loopback
         except ValueError:
             public_loopback = parts.hostname == "localhost"
         require_token = args.require_token or bool(args.token_env) or not address.is_loopback or not public_loopback
+        legacy = bool(args.source or args.input)
+        if legacy or (require_token and not args.token_env):
+            stage = "data-directory"
+            args.data_dir = service_data_directory(args.data_dir)
+        stage = "access-token"
         token = load_access_token(args.data_dir, args.token_env) if require_token else ""
-        with m.output_lock(args.data_dir / "runtime"):
-            store = CatalogueStore(args.data_dir, source=args.source, input_path=args.input, refresh_seconds=args.refresh_seconds, max_age_hours=args.max_age_hours, min_channels=args.min_channels)
+        stage = "cache-lock"
+        with m.output_lock(args.data_dir / "runtime") if legacy else nullcontext():
+            stage = "provider"
+            store = CatalogueStore(args.data_dir, source=args.source or m.DEFAULT_SOURCE, input_path=args.input, refresh_seconds=args.refresh_seconds, max_age_hours=args.max_age_hours, min_channels=args.min_channels) if legacy else NativeStore()
             service = Service(store, token, base, args.mode, require_token=require_token)
             try:
+                stage = "bind"
                 server = BoundedServer((args.bind, args.port), service)
-                if threading.current_thread() is threading.main_thread():
-                    signal.signal(signal.SIGTERM, stop_from_signal)
-                print(f"migu-live {VERSION}; mode={args.mode}; listening={args.bind}:{args.port}", flush=True)
+                previous_signal = None
+                try:
+                    if threading.current_thread() is threading.main_thread():
+                        previous_signal = signal.signal(signal.SIGTERM, stop_from_signal)
+                except (OSError, ValueError, AttributeError):
+                    print("当前运行环境不支持 SIGTERM；请使用 App 的停止按钮。", file=sys.stderr)
+                print(f"migu-live {VERSION}; provider={'legacy' if legacy else 'official-api'}; mode={args.mode}; listening={args.bind}:{args.port}", flush=True)
                 print(f"Subscription: {base.rstrip('/')}/all.m3u" + ("?token=<access-token>" if require_token else ""), flush=True)
                 if require_token:
                     print("Token: explicit environment variable" if args.token_env else f"Token file: {args.data_dir / 'access.token'}", flush=True)
                 try:
+                    stage = "serve"
                     server.serve_forever(poll_interval=0.2)
                 finally:
                     server.server_close()
+                    if previous_signal is not None:
+                        signal.signal(signal.SIGTERM, previous_signal)
             finally:
                 service.close()
     except KeyboardInterrupt:
         return 0
-    except (OSError, ValueError, ServiceError):
-        print("Startup failed: check bind, private data directory, access token and source policy.", file=sys.stderr)
+    except (OSError, ValueError, ServiceError, RuntimeError, ImportError) as error:
+        startup_error(stage, error)
         return 1
     return 0

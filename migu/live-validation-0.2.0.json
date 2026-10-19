@@ -1,0 +1,33 @@
+{
+  "checked_at_utc": "2026-10-19T14:11:58.592287+00:00",
+  "platform": "linux",
+  "python": "3.12.14",
+  "version": "0.2.0",
+  "provider": "official-api",
+  "catalogue_status": 200,
+  "channels": 123,
+  "default_runtime_files": 0,
+  "sample_channel": "CCTV1综合",
+  "sample_http_status": 502,
+  "sample_result": {
+    "error": "MIGU_REGION_RESTRICTED"
+  },
+  "status_result": {
+    "api_requests": 1,
+    "catalogue_ready": true,
+    "channels": 123,
+    "last_error": "MIGU_REGION_RESTRICTED",
+    "mode": "redirect",
+    "playback_verified": false,
+    "process_up": true,
+    "provider": "migu",
+    "quality": "anonymous-SD",
+    "service": "migu-live",
+    "source_transport": "https",
+    "storage": "memory",
+    "version": "0.2.0"
+  },
+  "media_decoded": false,
+  "ios_device_tested": false,
+  "shutdown_exit_code": 0
+}

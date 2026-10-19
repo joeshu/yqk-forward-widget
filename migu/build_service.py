@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-INPUTS = ('update_migu.py', 'migu/probe.py', 'migu/service.py')
-VERSION = '0.1.0'
+INPUTS = ('update_migu.py', 'migu/probe.py', 'migu/native.py', 'migu/service.py')
+VERSION = '0.2.0'
 
 
 def strip_module(text, service=False):
@@ -20,7 +20,7 @@ def strip_module(text, service=False):
         discard |= isinstance(node, ast.If) and ast.unparse(node.test) in ("__name__ == '__main__'", '__name__ == "__main__"')
         if service:
             discard |= isinstance(node, ast.Import) and any(alias.name == 'update_migu' for alias in node.names)
-            discard |= isinstance(node, ast.ImportFrom) and node.module == 'migu.probe'
+            discard |= isinstance(node, ast.ImportFrom) and node.module in {'migu.probe', 'migu.native'}
         if discard:
             remove.update(range(node.lineno, node.end_lineno + 1))
     return '\n'.join(line for number, line in enumerate(text.splitlines(), 1) if number not in remove).strip() + '\n'
@@ -37,7 +37,7 @@ def build():
     helper_source = ast.get_source_segment(sources['migu/probe.py'], helper)
     text = (
         '#!/usr/bin/env python3\n'
-        '"""Migu dynamic service 0.1.0. Generated from the project sources; Python 3.10+."""\n'
+        '"""Migu dynamic service 0.2.0. Generated from the project sources; Python 3.10+."""\n'
         'from __future__ import annotations\n\n'
         '# Shared catalogue validation and bounded transport: update_migu.py\n'
         + strip_module(sources['update_migu.py'])
@@ -45,6 +45,7 @@ def build():
         + 'from types import SimpleNamespace as _SharedNamespace\n'
         + 'm = _SharedNamespace(**{key: value for key, value in globals().copy().items() if not key.startswith("__")})\n\n'
         + '# Shared HLS validation: migu/probe.py\n' + helper_source + '\n\n'
+        + '# Built-in channel metadata and official API: migu/native.py\n' + strip_module(sources['migu/native.py'], service=True) + '\n'
         + '# Service implementation: migu/service.py\n' + strip_module(sources['migu/service.py'], service=True)
         + '\nif __name__ == "__main__":\n    raise SystemExit(main())\n'
     )
