@@ -48,7 +48,7 @@ class NativeTests(unittest.TestCase):
 
     def test_denials_bad_json_missing_url_and_untrusted_media_fail_closed(self):
         cases = [({'code':'403','rid':'COPYRIGHT_AREA_INVALID'}, 'MIGU_REGION_RESTRICTED'),
-                 ({'code':'200','rid':'TIPS_NEED_MEMBER'}, 'MIGU_LOGIN_OR_MEMBERSHIP_REQUIRED'),
+                 ({'code':'200','rid':'TIPS_NEED_MEMBER'}, 'MIGU_MEMBERSHIP_REQUIRED'),
                  ({'code':'200','body':{'urlInfo':{}}}, 'MIGU_PLAY_URL_MISSING'),
                  (self.response('http://127.0.0.1/index.m3u8?puData=abcd'), 'URL_HOST_OR_PORT_NOT_ALLOWED'),
                  (self.response('http://gslbmgsplive.miguvideo.com/live/index.m3u8?puData=weird'), 'MIGU_PLAY_URL_FORMAT_CHANGED')]
@@ -61,6 +61,30 @@ class NativeTests(unittest.TestCase):
         client.get.return_value = b'<html>no</html>', {}
         with self.assertRaisesRegex(m.FetchError, 'MIGU_API_FORMAT_CHANGED'):
             n.native_play_url('608807420', factory)
+
+    def test_generic_authorization_failure_is_not_claimed_to_require_membership(self):
+        response=self.response('http://gslbmgsplive.miguvideo.com/live/index.m3u8?ddCalcu=private')
+        response['body']['auth']={'authResult':'FAIL','logined':False,'resultDesc':'private description'}
+        factory,_=self.api(response)
+        with self.assertRaises(n.MiguApiError) as caught:
+            n.native_play_url('608807420',factory)
+        self.assertEqual(str(caught.exception),'MIGU_AUTHORIZATION_REJECTED')
+        details=caught.exception.details
+        self.assertEqual(details['api_code'],'200')
+        self.assertTrue(details['has_play_url'])
+        self.assertFalse(details['logged_in'])
+        self.assertNotIn('private',json.dumps(details))
+
+    def test_negative_cache_keeps_safe_upstream_details(self):
+        resolver=Mock(side_effect=n.MiguApiError('MIGU_LOGIN_REQUIRED',{'channel_id':'608807420','api_code':'403','rid':'NEED_LOGIN','token':'secret','has_play_url':False}))
+        store=n.NativeStore(resolver);self.addCleanup(store.close)
+        for _ in range(2):
+            with self.assertRaises(n.MiguApiError) as caught:
+                store.resolve('p608807420')
+            self.assertEqual(caught.exception.details['rid'],'NEED_LOGIN')
+            self.assertNotIn('secret',json.dumps(caught.exception.details))
+        self.assertEqual(resolver.call_count,1)
+        self.assertEqual(store.status()['last_upstream']['rid'],'NEED_LOGIN')
 
     def test_api_role_restricts_https_host_path_and_redirect(self):
         m.validate_url('https://play.miguvideo.com/playurl/v1/play/playurl?x=1', 'api')
@@ -85,7 +109,7 @@ class NativeTests(unittest.TestCase):
             self.assertEqual(get('/live/p608807420.m3u8?playbackbegin=20261019000000&playbackend=20261019001000')[0],400)
             resolver.assert_not_called()
             code,body=get('/live/p608807420.m3u8')
-            self.assertEqual(code,502)
+            self.assertEqual(code,403)
             self.assertEqual(json.loads(body),{'error':'MIGU_REGION_RESTRICTED'})
         finally:
             server.shutdown(); server.server_close(); service.close(); thread.join(2)

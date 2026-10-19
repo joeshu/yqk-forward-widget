@@ -1,0 +1,26 @@
+{
+  "checked_at_utc": "2026-10-19T15:11:29.753675+00:00",
+  "version": "0.4.1",
+  "purpose": "Correct authorization diagnostics; not a successful playback claim",
+  "official_anonymous_sample": {
+    "channel": "CCTV1综合",
+    "api_code": "403",
+    "rid": "COPYRIGHT_AREA_INVALID",
+    "has_play_url": false
+  },
+  "legacy_list_sample": {
+    "catalogue_channels": 119,
+    "channel": "CCTV1综合",
+    "entry_manifest_accessible": true,
+    "media_manifest_accessible": true,
+    "segment_count": 4,
+    "video_decoded": false
+  },
+  "reported_ios_runtime": {
+    "python": "3.14.6",
+    "main_thread": false,
+    "http_started": true
+  },
+  "user_device_playback_root_cause_confirmed": false,
+  "ios_playback_verified": false
+}

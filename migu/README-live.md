@@ -1,6 +1,6 @@
-# 咪咕单文件服务 0.4.0
+# 咪咕单文件服务 0.4.1
 
-下载 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)，Python 3.10+，仅需一个文件，无 pip、Node 或项目目录依赖。固定版本为 [migu-live-v0.4.0.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.4.0.py)。
+下载 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)，Python 3.10+，仅需一个文件，无 pip、Node 或项目目录依赖。固定版本为 [migu-live-v0.4.1.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.4.1.py)。
 
 ```sh
 python3 migu-live.py 18768
@@ -14,7 +14,15 @@ http://127.0.0.1:18768/all.m3u
 
 `/migu.m3u8` 是同一目录的别名。`127.0.0.1` 指播放器所在设备；跨设备使用见下文。App 挂起脚本或关闭运行环境时，本地服务会停止。
 
-## 0.4.0 的性能改进
+## 0.4.1 的取源诊断修正
+
+0.4.0 把上游所有 `authResult=FAIL` 都描述为“需要登录或会员”，证据不足。本版只在咪咕明确返回对应原因时标为登录/会员要求；一般授权拒绝单独显示 `MIGU_AUTHORIZATION_REJECTED`，地区拒绝也单独显示。明确授权拒绝立即返回 HTTP 403，不当作网络超时反复重试。
+
+日志、播放器错误响应及 `/diag` 只保留脱敏字段：频道 ID、API 状态码、`rid`、授权状态、是否登录、是否包含地址和返回清晰度。不会输出播放地址、签名、账号 ID、token 或原始响应。仍拒绝使用明确未通过授权的地址。
+
+**此修正改善错误判断，不代表已经恢复播放。** 当前默认的官方匿名取源未完成用户设备上的成功播放验收。之前列表模式读取的是外部发布者已经生成的地址，本地服务只负责解析和转发；它与匿名向咪咕申请地址是两种不同方式。增加并发、节目单缓存或修改超时都不会授予播放权限。把某次带签名地址写死进单文件也不能解决地址过期。
+
+## 0.4.1 的性能改进
 
 取源、清单和节目单下载各自支持 8 路工作任务，实际出站网络请求再由一个总上限为 **8 路** 的传输池约束；不会叠加成 24 路连接。请求排队时间也计入超时预算。空闲线程阻塞等待任务，不周期性唤醒轮询。
 
@@ -116,6 +124,6 @@ python3 -m unittest discover -s tests/migu_live -v
 python3 migu/build_service.py --check
 ```
 
-测试覆盖缓存重启复用、损坏/不可写回退、递增退避、8 路并发和慢响应头/体的截止时间，也包括当前 HTTP 权限、节目单转换、部分更新、失败和日期切换、线程/队列上限、停止与原端口重启，以及历史发布的兼容回归。真实网络结果见 [0.4.0 验证记录](live-validation-0.4.0.json)。Linux 下的测试不能代替用户 App 的实机验证。
+测试覆盖缓存重启复用、损坏/不可写回退、递增退避、8 路并发和慢响应头/体的截止时间，也包括当前 HTTP 权限、节目单转换、部分更新、失败和日期切换、线程/队列上限、停止与原端口重启，以及历史发布的兼容回归。真实网络结果见 [0.4.1 验证记录](live-validation-0.4.1.json)。Linux 下的测试不能代替用户 App 的实机验证。
 
 参考：用户提供的 [YSP v9.5](https://garysclub.sharewithyou.dpdns.org/ysp-live/ysp-live-v9.5.py) 的启动与诊断方式，以及 [develop202/migu_video](https://github.com/develop202/migu_video) 中公开的咪咕接口字段；没有执行它们的代码或复制账号/设备注册流程。节目单使用固定 HTTPS 接口 `https://program-sc.miguvideo.com/live/v2/tv-programs-data/<频道ID>/<北京时间日期>`。

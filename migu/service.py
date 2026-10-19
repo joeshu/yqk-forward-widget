@@ -26,13 +26,16 @@ from migu.native import NativeStore
 from migu.epg import EpgStore
 from migu.workers import BoundedExecutor
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
     "HTTP_SERVER_STARTED": "本地 HTTP 服务已启动",
     "MIGU_REGION_RESTRICTED": "咪咕限制当前出口地区",
-    "MIGU_LOGIN_OR_MEMBERSHIP_REQUIRED": "当前匿名模式没有所需登录或会员权限",
+    "MIGU_LOGIN_OR_MEMBERSHIP_REQUIRED": "上游授权拒绝，需核对具体原因",
+    "MIGU_AUTHORIZATION_REJECTED": "咪咕拒绝当前播放授权；不能仅凭此判定需要会员",
+    "MIGU_LOGIN_REQUIRED": "咪咕明确要求登录",
+    "MIGU_MEMBERSHIP_REQUIRED": "咪咕明确返回会员权限要求",
     "MIGU_API_FORMAT_CHANGED": "咪咕接口格式变化，需要更新适配",
     "MIGU_PLAY_URL_FORMAT_CHANGED": "播放地址格式变化，需要更新适配",
     "NETWORK_ERROR": "网络连接失败或请求超时",
@@ -54,7 +57,7 @@ class Diagnostics:
         self.clock, self.lock = clock, threading.Lock()
         self.events, self.last = deque(maxlen=120), OrderedDict()
 
-    def record(self, code):
+    def record(self, code, details=None):
         if not isinstance(code, str) or re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", code) is None:
             code = "UNCLASSIFIED_ERROR"
         now = self.clock()
@@ -66,9 +69,11 @@ class Diagnostics:
             while len(self.last) > 64:
                 self.last.popitem(last=False)
             line = {"time_utc": m.iso(m.utcnow()), "code": code, "message": EVENT_MESSAGES.get(code, "")}
+            if details:
+                line['upstream'] = {key: value for key, value in details.items() if key in {'channel_id','api_code','rid','auth_result','logged_in','has_play_url','returned_quality'} and (type(value) is bool or value is None or (isinstance(value,str) and re.fullmatch(r'[A-Z0-9_]{1,80}',value)))}
             self.events.append(line)
         try:
-            print(f"[{line['time_utc']}] {code} {line['message']}", flush=True)
+            print(f"[{line['time_utc']}] {code} {line['message']}" + (" " + json.dumps(line["upstream"],ensure_ascii=False,sort_keys=True) if "upstream" in line else ""), flush=True)
         except (OSError, ValueError):
             pass  # A closed app console must not interrupt serving a player.
 
@@ -309,10 +314,11 @@ class Handler(BaseHTTPRequestHandler):
                 service.diagnostics.record(error.code)
             self.send_body(error.status, m.json_bytes({"error": error.code}), **({"Retry_After": "3"} if error.status == 503 else {}))
         except m.UpdateError as error:
-            service.diagnostics.record(str(error))
+            details = getattr(error, "details", None)
+            service.diagnostics.record(str(error), details)
             code = str(error)
-            status = 404 if code == "EPG_DISABLED" else 503 if code in {"EPG_LOADING", "EPG_UNAVAILABLE", "MIGU_API_LOADING", "MIGU_API_CAPACITY"} or code.startswith("EPG_") else 502
-            self.send_body(status, m.json_bytes({"error": code}), **({"Retry_After": "3"} if status == 503 else {}))
+            status = 403 if code in {"MIGU_AUTHORIZATION_REJECTED", "MIGU_LOGIN_REQUIRED", "MIGU_MEMBERSHIP_REQUIRED", "MIGU_REGION_RESTRICTED"} else 404 if code == "EPG_DISABLED" else 503 if code in {"EPG_LOADING", "EPG_UNAVAILABLE", "MIGU_API_LOADING", "MIGU_API_CAPACITY"} or code.startswith("EPG_") else 502
+            self.send_body(status, m.json_bytes({"error": code, **({"upstream": details} if details else {})}), **({"Retry_After": "3"} if status == 503 else {}))
         except (ValueError, OSError):
             self.send_body(400, m.json_bytes({"error": "REQUEST_OR_IO_ERROR"}))
 

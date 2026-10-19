@@ -144,6 +144,25 @@ BUILTIN_CHANNELS = (
 )
 
 
+class MiguApiError(m.FetchError):
+    def __init__(self, code, details=None):
+        super().__init__(code)
+        self.details = {key: value for key, value in (details or {}).items()
+            if key in {'channel_id','api_code','rid','auth_result','logged_in','has_play_url','returned_quality'}
+            and (type(value) is bool or value is None or (isinstance(value,str) and re.fullmatch(r'[A-Z0-9_]{1,80}', value)))}
+
+
+def api_status(data, pid):
+    body = data.get('body') or {}
+    auth, info = body.get('auth') or {}, body.get('urlInfo') or {}
+    def tag(value):
+        value = str(value) if value is not None else ''
+        return value if re.fullmatch(r'[A-Z0-9_]{1,80}', value) else 'UNKNOWN'
+    return {'channel_id': pid, 'api_code': tag(data.get('code')), 'rid': tag(data.get('rid')),
+            'auth_result': tag(auth.get('authResult')), 'logged_in': auth.get('logined') if type(auth.get('logined')) is bool else None,
+            'has_play_url': isinstance(info.get('url'), str) and bool(info.get('url')), 'returned_quality': tag(info.get('rateType'))}
+
+
 def native_play_url(pid, client_factory=m.HttpClient):
     if pid not in {item[0] for item in BUILTIN_CHANNELS}:
         raise m.FetchError("MIGU_UNKNOWN_CHANNEL")
@@ -163,15 +182,20 @@ def native_play_url(pid, client_factory=m.HttpClient):
         body = data.get("body") or {}
         info = body.get("urlInfo") or {}
         reason = data.get("rid", "")
+        details = api_status(data, pid)
         if reason == "COPYRIGHT_AREA_INVALID":
-            raise m.FetchError("MIGU_REGION_RESTRICTED")
-        if reason in {"TIPS_NEED_MEMBER", "NEED_LOGIN", "USER_NOT_LOGIN"} or (body.get("auth") or {}).get("authResult") == "FAIL":
-            raise m.FetchError("MIGU_LOGIN_OR_MEMBERSHIP_REQUIRED")
+            raise MiguApiError("MIGU_REGION_RESTRICTED", details)
+        if reason == "TIPS_NEED_MEMBER":
+            raise MiguApiError("MIGU_MEMBERSHIP_REQUIRED", details)
+        if reason in {"NEED_LOGIN", "USER_NOT_LOGIN"}:
+            raise MiguApiError("MIGU_LOGIN_REQUIRED", details)
+        if (body.get("auth") or {}).get("authResult") == "FAIL":
+            raise MiguApiError("MIGU_AUTHORIZATION_REJECTED", details)
         if str(data.get("code")) != "200":
-            raise m.FetchError("MIGU_API_REJECTED")
+            raise MiguApiError("MIGU_API_REJECTED", details)
         url = info.get("url")
         if not isinstance(url, str) or not url:
-            raise m.FetchError("MIGU_PLAY_URL_MISSING")
+            raise MiguApiError("MIGU_PLAY_URL_MISSING", details)
         m.validate_url(url, "stream")
         content_pid = str((body.get("content") or {}).get("contId", pid))
         if content_pid != pid:
@@ -208,6 +232,7 @@ class NativeStore:
         self.lock = threading.RLock()
         self.flights, self.entries = {}, OrderedDict()
         self.closed, self.last_error, self.fetches = False, None, 0
+        self.last_upstream = None
         channels = {"p" + pid: m.Channel(name, name, name, group, "", "", m.utcnow()) for pid, name, group in BUILTIN_CHANNELS}
         self.snapshot = NativeSnapshot(None, MappingProxyType(channels))
 
@@ -221,12 +246,13 @@ class NativeStore:
         try:
             url, error = future.result(), None
         except Exception as failure:
-            url, error = "", str(failure) if isinstance(failure, m.UpdateError) else "MIGU_API_ERROR"
+            url, error = "", (str(failure), dict(getattr(failure, "details", {}))) if isinstance(failure, m.UpdateError) else ("MIGU_API_ERROR", {})
         with self.lock:
             if self.closed or self.flights.get(key) is not future:
                 return
             del self.flights[key]
-            self.last_error = error
+            self.last_error = error[0] if error else None
+            self.last_upstream = error[1] if error else None
             self.entries[key] = (self.clock() + (5 if error else 30), url, error)
             while len(self.entries) > 64:
                 self.entries.popitem(last=False)
@@ -241,7 +267,7 @@ class NativeStore:
             if cached and cached[0] > self.clock():
                 self.entries.move_to_end(key)
                 if cached[2]:
-                    raise m.FetchError(cached[2])
+                    raise MiguApiError(cached[2][0], cached[2][1])
                 return cached[1]
             future = self.flights.get(key)
             if future is None:
@@ -263,7 +289,7 @@ class NativeStore:
     def status(self):
         with self.lock:
             return {"provider": self.provider, "catalogue_ready": True, "channels": len(self.snapshot.channels),
-                    "source_transport": "https", "last_error": self.last_error, "api_requests": self.fetches,
+                    "source_transport": "https", "last_error": self.last_error, "last_upstream": self.last_upstream, "api_requests": self.fetches,
                     "playback_verified": False, "quality": "anonymous-SD", "storage": "memory"}
 
     def close(self):
