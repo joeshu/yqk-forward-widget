@@ -65,6 +65,7 @@ class ManagedChannel(Channel):
                 self.size = self.counter = self.discarded_discontinuities = 0
                 self.generation = uuid.uuid4().hex
                 self.state = 'source'
+                self.last_segment_timing = {}
             print('[cctv-native] cache-resume channel='+self.channel_id+
                   ' fresh_buffer='+str(fresh).lower(), flush=True)
             self.condition.notify_all()

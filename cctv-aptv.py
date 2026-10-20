@@ -24,7 +24,7 @@ This module intentionally does not pretend that each HLS chunk is independent.
 import bisect
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Iterable
+from typing import Callable, Iterable, NamedTuple
 
 
 class TSFormatError(ValueError):
@@ -78,8 +78,7 @@ class TSAnalysis:
         return self.elementary[nal.payload_offset : nal.end_offset]
 
 
-@dataclass(frozen=True)
-class _Packet:
+class _Packet(NamedTuple):
     pid: int
     pusi: bool
     payload_offset: int
@@ -657,6 +656,8 @@ def transform_pes_nals(
         sizes = [len(packet.payload) for packet in group.packets]
         freed = len(group.data) - len(pes)
         for packet_index in range(len(sizes) - 1, -1, -1):
+            if not freed:
+                break
             amount = min(freed, sizes[packet_index] - 1)
             sizes[packet_index] -= amount
             freed -= amount
@@ -670,8 +671,15 @@ def transform_pes_nals(
     for group, pes, sizes in prepared:
         cursor = 0
         for packet, size in zip(group.packets, sizes):
-            offset, rewritten = _packet_with_smaller_payload(data, packet, pes[cursor : cursor + size])
-            result[offset : offset + 188] = rewritten
+            payload = pes[cursor : cursor + size]
+            if size == len(packet.payload):
+                # The original header/adaptation bytes are already in result.
+                # Most packets retain their payload length; copy only payload
+                # and avoid allocating/rebuilding another whole 188-byte slot.
+                result[packet.payload_offset : packet.payload_offset + size] = payload
+            else:
+                offset, rewritten = _packet_with_smaller_payload(data, packet, payload)
+                result[offset : offset + 188] = rewritten
             cursor += size
     output = bytes(result)
     # Validate every TS/PES/NAL and the exact ES again, without constructing
@@ -715,6 +723,8 @@ UA = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile
 REFERER = 'https://tv.cctv.com/live/cctv2/m/index.shtml'
 CDNS = ('.cntv.cn', '.cctv.com', '.cdn20.com', '.kcdnvip.com', '.bdydns.com',
         '.myalicdn.com', '.myqcloud.com', '.myhwcdn.cn', '.volcfcdn.com')
+# Exact website CDN observed in the user's 2026-10-20 official dispatch log.
+EXACT_CDNS = frozenset({'ldocctvwbcdcnc.v.wscdns.com'})
 # Replaced by the single-file build; source checkout uses the adjacent engine.
 ENGINE_SOURCE = None
 
@@ -767,7 +777,8 @@ def validate_source(url):
         parsed = urlsplit(url)
         allowed = (parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password
                    and parsed.port in (None, 443)
-                   and any(parsed.hostname == suffix[1:] or parsed.hostname.endswith(suffix) for suffix in CDNS))
+                   and (parsed.hostname in EXACT_CDNS or
+                        any(parsed.hostname == suffix[1:] or parsed.hostname.endswith(suffix) for suffix in CDNS)))
     except ValueError:
         allowed = False
     if not allowed:
@@ -1155,6 +1166,7 @@ class Channel:
         self.playlist_entries = 0
         self.last_segment_bytes = 0
         self.preparation_phase = 'disabled'
+        self.last_segment_timing = {}
 
     def checkpoint(self):
         return not self.stop.is_set()
@@ -1202,6 +1214,7 @@ class Channel:
             self.operation, self.operation_started = 'initializing', 0
             self.seen_operations.clear()
             self.preparation_phase = 'disabled'
+            self.last_segment_timing = {}
             self.playlist_entries = self.last_segment_bytes = 0
             self.error, self.state, self.timings = '', 'initializing', {}
             self.started_at = time.monotonic()
@@ -1225,7 +1238,7 @@ class Channel:
             if len(self.ring) >= 2:
                 first_ready = self.state != 'ready'
                 self.stage('ready')
-                if first_ready:
+                if first_ready and not getattr(self, 'resumed_at', 0):
                     print('[cctv-native] media-ready startup_seconds='+str(self.timings['ready'])+' channel='+self.channel_id, flush=True)
             self.condition.notify_all()
 
@@ -1261,6 +1274,7 @@ class Channel:
                     'preparation_phase': self.preparation_phase,
                     'operation_seconds': round(time.monotonic()-self.operation_started, 3) if self.operation_started else 0,
                     'playlist_entries': self.playlist_entries, 'last_segment_bytes': self.last_segment_bytes,
+                    'last_segment_timing': dict(self.last_segment_timing),
                     'media_transfer': ('typed-array' if getattr(getattr(self.engine, 'context', None), 'buffer_api', False) else 'base64'),
                     'stage_seconds': dict(self.timings), 'media_ready': self.playlist() is not None}
 
@@ -1412,13 +1426,16 @@ class Channel:
                         if following['seq'] != e['seq']+1 or following['discontinuity']:
                             raise NativeError('source-boundary-not-proven')
                         self.operation_phase('segment-download')
+                        download_started = time.perf_counter()
                         current_download = self._await_future(cached[e['seq']])
                         next_download = self._await_future(cached[following['seq']])
                         raw, lookahead = current_download[0], next_download[0]
                         if not self.checkpoint():
                             break
+                        download_wait = time.perf_counter()-download_started
                         self.last_segment_bytes = len(raw)
                         self.operation_phase('ts-analysis')
+                        analysis_started = time.perf_counter()
                         analysis = current_download[2] if len(current_download) == 3 else analyses.get(e['seq'])
                         if analysis is None or analysis._source is not raw:
                             analysis = inspect_ts(raw)
@@ -1439,17 +1456,31 @@ class Channel:
                             replace(analysis.nals[-1], complete=True),))
                         if not self.checkpoint():
                             break
+                        analysis_seconds = time.perf_counter()-analysis_started
                         self.operation_phase('sdk-transform')
+                        sdk_started = time.perf_counter()
                         processed = engine.transform([analysis.nal_bytes(n) for n in analysis.nals])
                         if not self.checkpoint():
                             break
+                        sdk_seconds = time.perf_counter()-sdk_started
                         converted = {n.payload_offset: value for n, value in zip(analysis.nals, processed)}
                         self.operation_phase('ts-repack')
+                        repack_started = time.perf_counter()
                         output, _ = transform_pes_nals(raw, lambda n, _data: converted[n.payload_offset],
                                                    nal_types=(1, 5, 7), final_nal_complete=True, _prepared=analysis)
                         if not self.checkpoint():
                             break
+                        timing = {'download_wait': round(download_wait,3),
+                                  'owner_analysis': round(analysis_seconds,3),
+                                  'sdk_transform': round(sdk_seconds,3),
+                                  'ts_repack': round(time.perf_counter()-repack_started,3)}
                         self.publish(output, e, pending_discontinuity or e['discontinuity'])
+                        with self.condition:
+                            self.last_segment_timing = timing
+                            first_segments = self.counter <= 2
+                        if first_segments:
+                            print('[cctv-native] segment-timing channel='+self.channel_id+' '+
+                                  json.dumps(timing), flush=True)
                         rejected_sources = 0
                         pending_discontinuity, last_seq, last_progress = False, e['seq'], time.monotonic()
                     if not self.checkpoint():
@@ -1973,6 +2004,7 @@ class ManagedChannel(Channel):
                 self.size = self.counter = self.discarded_discontinuities = 0
                 self.generation = uuid.uuid4().hex
                 self.state = 'source'
+                self.last_segment_timing = {}
             print('[cctv-native] cache-resume channel='+self.channel_id+
                   ' fresh_buffer='+str(fresh).lower(), flush=True)
             self.condition.notify_all()

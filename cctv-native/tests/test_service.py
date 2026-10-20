@@ -671,3 +671,21 @@ class TestWebsiteSourceSelection(unittest.TestCase):
             with self.assertRaisesRegex(service.NativeError,'unknown-channel'):
                 service.source_url('injected-host')
             fetch.assert_not_called()
+
+
+class TestExactWebsiteCDN(unittest.TestCase):
+    def test_observed_official_dispatch_and_redirect_are_accepted(self):
+        url='https://ldocctvwbcdcnc.v.wscdns.com/live/index.m3u8'
+        service.validate_source(url)
+        request=service.SourceRedirect().redirect_request(service.Request(BASE),None,302,'moved',{},url)
+        self.assertEqual(request.full_url,url)
+
+    def test_exception_does_not_allow_sibling_subdomain_credentials_or_http(self):
+        for url in ('https://other.v.wscdns.com/a',
+                    'https://ldocctvwbcdcnc.v.wscdns.com.attacker.example/a',
+                    'https://child.ldocctvwbcdcnc.v.wscdns.com/a',
+                    'http://ldocctvwbcdcnc.v.wscdns.com/a',
+                    'https://user:secret@ldocctvwbcdcnc.v.wscdns.com/a',
+                    'https://ldocctvwbcdcnc.v.wscdns.com:444/a'):
+            with self.subTest(url=url),self.assertRaises(service.UnsupportedSource):
+                service.validate_source(url)

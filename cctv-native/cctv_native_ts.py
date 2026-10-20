@@ -18,7 +18,7 @@ from __future__ import annotations
 import bisect
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Iterable
+from typing import Callable, Iterable, NamedTuple
 
 
 class TSFormatError(ValueError):
@@ -72,8 +72,7 @@ class TSAnalysis:
         return self.elementary[nal.payload_offset : nal.end_offset]
 
 
-@dataclass(frozen=True)
-class _Packet:
+class _Packet(NamedTuple):
     pid: int
     pusi: bool
     payload_offset: int
@@ -651,6 +650,8 @@ def transform_pes_nals(
         sizes = [len(packet.payload) for packet in group.packets]
         freed = len(group.data) - len(pes)
         for packet_index in range(len(sizes) - 1, -1, -1):
+            if not freed:
+                break
             amount = min(freed, sizes[packet_index] - 1)
             sizes[packet_index] -= amount
             freed -= amount
@@ -664,8 +665,15 @@ def transform_pes_nals(
     for group, pes, sizes in prepared:
         cursor = 0
         for packet, size in zip(group.packets, sizes):
-            offset, rewritten = _packet_with_smaller_payload(data, packet, pes[cursor : cursor + size])
-            result[offset : offset + 188] = rewritten
+            payload = pes[cursor : cursor + size]
+            if size == len(packet.payload):
+                # The original header/adaptation bytes are already in result.
+                # Most packets retain their payload length; copy only payload
+                # and avoid allocating/rebuilding another whole 188-byte slot.
+                result[packet.payload_offset : packet.payload_offset + size] = payload
+            else:
+                offset, rewritten = _packet_with_smaller_payload(data, packet, payload)
+                result[offset : offset + 188] = rewritten
             cursor += size
     output = bytes(result)
     # Validate every TS/PES/NAL and the exact ES again, without constructing

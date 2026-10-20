@@ -1,0 +1,167 @@
+{
+  "date": "2026-10-20",
+  "environment": "Linux Python 3.12 / JavaScriptCoreGTK 2.54, inherited proxy and verified TLS",
+  "phone_log_findings": {
+    "observed_rejected_manifest_host": "ldocctvwbcdcnc.v.wscdns.com",
+    "cold_ready_seconds": [
+      4.777,
+      8.358,
+      3.328,
+      6.154,
+      7.422,
+      5.294
+    ],
+    "stale_buffer_resume_seconds": [
+      6.529,
+      3.088
+    ],
+    "interpretation": "Successful phone playback is recorded; one dispatch was rejected before retry; both observed resumes discarded old buffers. First-operation phase labels cannot isolate per-segment CPU time."
+  },
+  "cdn_change": {
+    "exact_host": "ldocctvwbcdcnc.v.wscdns.com",
+    "host_source": "User official-source rejection log, 2026-10-20T14:16:00Z",
+    "root_https_status": 403,
+    "developer_api_samples": [
+      {
+        "channel": "cctv2",
+        "official_manifest_host": "ldocctvwbcdkshw.v.kcdnvip.com",
+        "allowed": true
+      },
+      {
+        "channel": "cctv1",
+        "official_manifest_host": "ldncctvwbcdkshw.v.kcdnvip.com",
+        "allowed": true
+      },
+      {
+        "channel": "cctv12",
+        "official_manifest_host": "ldocctvwbcdkshw.v.kcdnvip.com",
+        "allowed": true
+      },
+      {
+        "channel": "cctv2",
+        "official_manifest_host": "ldocctvwbcdcnchw.v.cdn20.com",
+        "allowed": true
+      },
+      {
+        "channel": "cctv1",
+        "official_manifest_host": "ldncctvwbcdkshw.v.kcdnvip.com",
+        "allowed": true
+      },
+      {
+        "channel": "cctv12",
+        "official_manifest_host": "ldocctvwbcdcnchw.v.cdn20.com",
+        "allowed": true
+      },
+      {
+        "channel": "cctv2",
+        "official_manifest_host": "ldocctvwbcdcnchw.v.cdn20.com",
+        "allowed": true
+      },
+      {
+        "channel": "cctv1",
+        "official_manifest_host": "ldncctvwbcdkshw.v.kcdnvip.com",
+        "allowed": true
+      },
+      {
+        "channel": "cctv12",
+        "official_manifest_host": "ldocctvwbcdcnchw.v.cdn20.com",
+        "allowed": true
+      },
+      {
+        "channel": "cctv2",
+        "official_manifest_host": "ldocctvwbcdcnchw.v.cdn20.com",
+        "allowed": true
+      },
+      {
+        "channel": "cctv1",
+        "official_manifest_host": "ldncctvwbcdkshw.v.kcdnvip.com",
+        "allowed": true
+      },
+      {
+        "channel": "cctv12",
+        "official_manifest_host": "ldocctvwbcdkshw.v.kcdnvip.com",
+        "allowed": true
+      }
+    ],
+    "limitations": "Verified HTTPS root response is not a media playback proof. Developer API samples did not dispatch to this host. Exact-host admission is regression-tested; this CDN media route still needs phone validation."
+  },
+  "repack": {
+    "scope": "Same recorded CCTV-2 segment, same original-SDK output; prepared input; alternating before/after, 2 warmup and 20 measured CPU samples each. Linux developer CPU, not iPhone startup.",
+    "input_bytes": 641080,
+    "nal_count": 204,
+    "median_repack_cpu_seconds_before": 0.015006,
+    "median_repack_cpu_seconds_after": 0.013252,
+    "output_bytes_identical": true,
+    "decode_returncode": 0,
+    "decode_error_bytes": 0
+  },
+  "live": {
+    "scope": "Four fresh SDK contexts and channel managers; runtime bytes already in memory. First local playlist followed by 8 seconds strict live decode per channel. Not iPhone first visible frame.",
+    "trials": [
+      {
+        "channel": "cctv1",
+        "parallel": true,
+        "first_playlist_seconds": 10.549,
+        "media_ready_seconds": 10.537,
+        "first_media_requested": 10.606,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "last_segment_timing": {
+          "download_wait": 0.567,
+          "owner_analysis": 0.0,
+          "sdk_transform": 0.156,
+          "ts_repack": 0.02
+        }
+      },
+      {
+        "channel": "cctv2",
+        "parallel": true,
+        "first_playlist_seconds": 9.78,
+        "media_ready_seconds": 9.778,
+        "first_media_requested": 9.853,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "last_segment_timing": {
+          "download_wait": 1.449,
+          "owner_analysis": 0.0,
+          "sdk_transform": 0.105,
+          "ts_repack": 0.013
+        }
+      },
+      {
+        "channel": "cctv12",
+        "parallel": true,
+        "first_playlist_seconds": 4.454,
+        "media_ready_seconds": 4.452,
+        "first_media_requested": 4.52,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "last_segment_timing": {
+          "download_wait": 0.36,
+          "owner_analysis": 0.0,
+          "sdk_transform": 0.085,
+          "ts_repack": 0.01
+        }
+      },
+      {
+        "channel": "cctveurope",
+        "parallel": true,
+        "first_playlist_seconds": 2.737,
+        "media_ready_seconds": 2.735,
+        "first_media_requested": 2.803,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "last_segment_timing": {
+          "download_wait": 0.443,
+          "owner_analysis": 0.0,
+          "sdk_transform": 0.084,
+          "ts_repack": 0.011
+        }
+      }
+    ]
+  },
+  "tests": {
+    "total": 146,
+    "real_jscore": 6
+  }
+}
