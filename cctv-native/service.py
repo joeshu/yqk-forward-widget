@@ -6,6 +6,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.client import IncompleteRead
 import json
 import math
 import os
@@ -20,7 +21,7 @@ import subprocess
 import sys
 import threading
 import time
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, HTTPRedirectHandler, build_opener
 import uuid
@@ -226,10 +227,14 @@ class Engine:
             self.process.stdin.write(line.encode() + b'\n')
             self.process.stdin.flush()
             result = self.receive(20)
-        except (OSError, ValueError, NativeError):
+        except (OSError, ValueError, NativeError) as error:
             if expired.is_set():
                 raise NativeError('engine-timeout') from None
-            raise
+            if isinstance(error, NativeError):
+                raise
+            # Engine pipe failures are not upstream transport failures and
+            # must never enter the CDN retry loop.
+            raise NativeError('engine-io-failed') from None
         finally:
             watchdog.cancel()
         if result.get('id') != self.counter or result.get('ok') is not True:
@@ -268,6 +273,8 @@ class Channel:
         self.size = self.counter = self.requests = self.processed = 0
         self.discarded_discontinuities = 0
         self.source_gaps = 0
+        self.transport_retries = 0
+        self.last_transport_error = ''
         self.last_request = 0
         self.failed_at = 0
         self.waiters = 0
@@ -292,6 +299,8 @@ class Channel:
             self.size = self.counter = self.processed = self.requests = 0
             self.discarded_discontinuities = 0
             self.source_gaps = 0
+            self.transport_retries = 0
+            self.last_transport_error = ''
             self.error, self.state, self.timings = '', 'initializing', {}
             self.started_at = time.monotonic()
             self.thread = threading.Thread(target=self.run, daemon=True, name='cctv-native')
@@ -335,6 +344,8 @@ class Channel:
                     'mode': 'official-runtime-original-ts', 'processed_segments': self.processed,
                     'buffer_bytes': self.size, 'buffer_segments': len(self.ring),
                     'source_gaps': self.source_gaps,
+                    'transport_retries': self.transport_retries,
+                    'last_transport_error': self.last_transport_error,
                     'stage_seconds': dict(self.timings), 'media_ready': self.playlist() is not None}
 
     def run(self):
@@ -346,7 +357,7 @@ class Channel:
             if self.stop.is_set():
                 return
             self.stage('source')
-            url, refreshed = source_url(), time.monotonic()
+            url, refreshed, failures = None, 0, 0
             current_source, last_seq, last_progress = None, None, time.monotonic()
             pending_discontinuity = False
             cached = {}
@@ -355,10 +366,14 @@ class Channel:
                     if not self.waiters and time.monotonic()-self.last_request > self.args.idle_timeout:
                         self.state = 'idle'
                         break
-                    if time.monotonic()-refreshed > 120:
-                        url, refreshed = source_url(), time.monotonic()
+                    if time.monotonic()-last_progress > 30:
+                        raise NativeError('source-media-stalled')
                     try:
+                        if url is None or time.monotonic()-refreshed > 120:
+                            url, refreshed = source_url(), time.monotonic()
                         entries, final = media_playlist(url)
+                        # Resolve the master only once per source refresh.
+                        url = final
                         self.requests += 1
                         source = (urlsplit(final).hostname, urlsplit(final).path)
                         changed = current_source is not None and source != current_source
@@ -397,11 +412,27 @@ class Channel:
                         cached = {k:v for k,v in cached.items() if last_seq is None or k > last_seq}
                         if time.monotonic()-last_progress > 30:
                             raise NativeError('source-media-stalled')
-                    except HTTPError as error:
-                        if error.code in (401, 403, 404):
-                            url, refreshed, cached = source_url(), time.monotonic(), {}
+                        failures, self.last_transport_error = 0, ''
+                    except (HTTPError, URLError, TimeoutError, ConnectionError, IncompleteRead) as error:
+                        if isinstance(error, HTTPError):
+                            if error.code in (401, 403, 404):
+                                url = None
+                            elif error.code not in (408, 429) and not 500 <= error.code < 600:
+                                raise
+                            code = f'http-{error.code}'
                         else:
-                            raise
+                            code = type(error).__name__
+                        self.transport_retries += 1
+                        self.last_transport_error = code
+                        failures += 1
+                        # A failed Future must be evicted or every subsequent
+                        # poll would replay the same exception without a GET.
+                        cached = {key: value for key, value in cached.items()
+                                  if not value.cancelled() and (not value.done() or value.exception() is None)}
+                        if time.monotonic()-last_progress > 30:
+                            raise NativeError('source-media-stalled') from None
+                        self.stop.wait(min(4, 0.8 * 2**min(failures-1, 3)))
+                        continue
                     if time.monotonic()-last_progress > 30:
                         raise NativeError('source-media-stalled')
                     self.stop.wait(0.8)

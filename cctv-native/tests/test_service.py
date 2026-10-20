@@ -74,7 +74,126 @@ class TestPlaylists(unittest.TestCase):
                 service.parse_playlist(text, BASE)
 
 
+class TestEnginePipe(unittest.TestCase):
+    def test_engine_broken_pipe_is_not_retryable_upstream_transport(self):
+        engine = service.Engine.__new__(service.Engine)
+        engine.counter = 0
+        engine.process = mock.Mock()
+        engine.process.stdin.write.side_effect = BrokenPipeError('closed engine pipe')
+        with self.assertRaisesRegex(service.NativeError, '^engine-io-failed$'):
+            engine.transform([b'\x09\xf0'])
+        engine.process.kill.assert_not_called()
+
+
 class TestChannelRing(unittest.TestCase):
+    def test_transient_playlist_failure_keeps_ready_media_and_reuses_child_url(self):
+        from test_pes import stream
+        raw, _ = stream()
+        channel = service.Channel(arguments())
+        channel.started_at = channel.last_request = time.monotonic()
+        engine = mock.Mock(transform=mock.Mock(side_effect=lambda values: values))
+        child = 'https://media.cntv.cn/live/child.m3u8'
+        calls, published = [], []
+        def playlist(url):
+            calls.append(url)
+            if len(calls) == 2:
+                self.assertIsNotNone(channel.playlist())
+                raise service.HTTPError(BASE, 503, 'temporary', {}, None)
+            if len(calls) == 3:
+                self.assertIsNotNone(channel.playlist())
+                self.assertEqual(channel.last_transport_error, 'http-503')
+            start = 0 if len(calls) == 1 else 1
+            return ([dict(seq=i, duration=4, url=BASE+str(i), discontinuity=False)
+                     for i in range(start, start+3)], child)
+        publish = channel.publish
+        def capture(body, entry, discontinuity):
+            published.append(entry['seq'])
+            publish(body, entry, discontinuity)
+            if len(published) == 3:
+                channel.stop.set()
+        with mock.patch.object(service, 'Engine', return_value=engine), \
+                mock.patch.object(service, 'source_url', return_value=BASE) as source, \
+                mock.patch.object(service, 'media_playlist', side_effect=playlist), \
+                mock.patch.object(service, 'get', return_value=(raw, BASE)), \
+                mock.patch.object(channel, 'publish', side_effect=capture), \
+                mock.patch.object(channel.stop, 'wait', return_value=False):
+            channel.run()
+        self.assertEqual(published, [0, 1, 2])
+        self.assertEqual(calls, [BASE, child, child])
+        source.assert_called_once()
+        self.assertEqual(channel.transport_retries, 1)
+        self.assertEqual(channel.last_transport_error, '')
+        self.assertEqual(channel.error, '')
+
+    def test_failed_segment_future_is_downloaded_again(self):
+        from test_pes import stream
+        raw, _ = stream()
+        channel = service.Channel(arguments())
+        channel.started_at = channel.last_request = time.monotonic()
+        engine = mock.Mock(transform=mock.Mock(side_effect=lambda values: values))
+        entries = [dict(seq=i, duration=4, url=BASE+str(i), discontinuity=False) for i in range(3)]
+        downloaded = []
+        def download(url):
+            with channel.condition:
+                downloaded.append(url)
+                fail = url == entries[0]['url'] and downloaded.count(url) == 1
+            if fail:
+                raise service.URLError('temporary disconnect')
+            return raw, BASE
+        publish = channel.publish
+        def capture(*args):
+            publish(*args)
+            if channel.processed == 2:
+                channel.stop.set()
+        with mock.patch.object(service, 'Engine', return_value=engine), \
+                mock.patch.object(service, 'source_url', return_value=BASE), \
+                mock.patch.object(service, 'media_playlist', return_value=(entries, BASE)), \
+                mock.patch.object(service, 'get', side_effect=download), \
+                mock.patch.object(channel, 'publish', side_effect=capture), \
+                mock.patch.object(channel.stop, 'wait', return_value=False):
+            channel.run()
+        self.assertEqual(downloaded.count(entries[0]['url']), 2)
+        self.assertEqual(channel.processed, 2)
+        self.assertEqual(channel.transport_retries, 1)
+        self.assertEqual(channel.error, '')
+
+    def test_persistent_transport_failure_has_a_progress_deadline(self):
+        channel = service.Channel(arguments())
+        now = [1000.0]
+        channel.started_at = channel.last_request = now[0]
+        engine = mock.Mock()
+        def wait(_seconds):
+            now[0] += 31
+        with mock.patch.object(service, 'Engine', return_value=engine), \
+                mock.patch.object(service, 'source_url', return_value=BASE), \
+                mock.patch.object(service, 'media_playlist', side_effect=TimeoutError()) as playlist, \
+                mock.patch.object(service.time, 'monotonic', side_effect=lambda: now[0]), \
+                mock.patch.object(channel.stop, 'wait', side_effect=wait), \
+                mock.patch('builtins.print'):
+            channel.run()
+        playlist.assert_called_once()
+        self.assertEqual(channel.error, 'source-media-stalled')
+        self.assertEqual(channel.transport_retries, 1)
+        engine.close.assert_called_once()
+
+    def test_expired_url_refresh_stops_when_official_api_denies_playback(self):
+        channel = service.Channel(arguments())
+        channel.started_at = channel.last_request = time.monotonic()
+        engine = mock.Mock()
+        with mock.patch.object(service, 'Engine', return_value=engine), \
+                mock.patch.object(service, 'source_url', side_effect=[
+                    BASE, service.NativeError('official-playback-not-permitted')]) as source, \
+                mock.patch.object(service, 'media_playlist', side_effect=
+                    service.HTTPError(BASE, 403, 'expired', {}, None)) as playlist, \
+                mock.patch.object(channel.stop, 'wait', return_value=False), \
+                mock.patch('builtins.print'):
+            channel.run()
+        self.assertEqual(source.call_count, 2)
+        playlist.assert_called_once()
+        self.assertEqual(channel.error, 'official-playback-not-permitted')
+        self.assertEqual(channel.transport_retries, 1)
+        engine.close.assert_called_once()
+
     def test_window_gap_resyncs_with_discontinuity_and_updates_every_nal(self):
         from test_pes import stream
         raw, _ = stream()
@@ -285,7 +404,8 @@ class TestLocalHTTP(unittest.TestCase):
         self.assertEqual(headers["Cache-Control"], "no-store")
         self.assertEqual(headers["Retry-After"], "3")
         self.assertEqual(json.loads(body)["error"], "simulated-source-unavailable")
-        self.assertEqual(self.channel.waiters, 0)
+        with self.channel.condition:
+            self.assertTrue(self.channel.condition.wait_for(lambda: self.channel.waiters == 0, timeout=1))
 
     def test_unknown_route_is_404_without_starting_channel(self):
         status, headers, _ = self.request("GET", "/not-a-route")
