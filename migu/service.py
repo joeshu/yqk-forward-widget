@@ -28,8 +28,8 @@ from migu.source import ListStore, CATCHUP_SOURCE, list_catchup
 from migu.epg import EpgStore
 from migu.workers import BoundedExecutor
 
-VERSION = "0.8.4"
-DEFAULT_PORT = 18768
+VERSION = "0.8.5"
+DEFAULT_PORT = 28768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
     "HTTP_SERVER_STARTED": "本地 HTTP 服务已启动",

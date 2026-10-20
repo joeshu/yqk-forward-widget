@@ -1,17 +1,17 @@
-# 咪咕单文件服务 0.8.4
+# 咪咕单文件服务 0.8.5
 
-下载 [migu-live-v0.8.4.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.8.4.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，标准库，无 pip、Node、浏览器或项目目录依赖。
+下载 [migu-live-v0.8.5.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.8.5.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，标准库，无 pip、Node、浏览器或项目目录依赖。
 
 **默认直接按公开参考项目的取源分支请求咪咕，不读取外部播放列表，也不会在取源失败时自动切换列表。** 用户已反馈 iOS 可播，0.8.4 针对快速切台的排队及临时失败恢复进行优化。此前 0.8.1 服务器的地区拒绝仅代表当时服务器环境，记录见 [live-validation-0.8.1.json](live-validation-0.8.1.json)。
 
 ```sh
-python3 migu-live.py 18768
+python3 migu-live.py 28768
 ```
 
-手机 App 直接运行同样默认端口 18768。日志应显示 `0.8.4`、`provider=migu-android`。保持脚本运行，在同一设备播放器订阅：
+0.8.5 将默认端口改为 28768。手机 App 直接运行同样默认端口 28768。日志应显示 `0.8.5`、`provider=migu-android`。保持脚本运行，在同一设备播放器订阅：
 
 ```text
-http://127.0.0.1:18768/all.m3u
+http://127.0.0.1:28768/all.m3u
 ```
 
 `/migu.m3u8` 是目录别名。App 挂起或停止 Python 时，本地服务也会停止。
@@ -39,7 +39,7 @@ http://127.0.0.1:18768/all.m3u
 
 ```sh
 MIGU_USER_ID=你的账号ID MIGU_USER_TOKEN=你的令牌 MIGU_RATE_TYPE=3 \
-python3 migu-live.py 18768
+python3 migu-live.py 28768
 ```
 
 没有账号也可启动并发起参考项目的游客请求，上游决定是否授权及实际画质。`MIGU_RATE_TYPE` 支持 2/3/4/7/8/9。默认不额外请求投屏专用档位，不自动注册设备、登录或刷新账号令牌。`MIGU_HDR=0`、`MIGU_H265=0` 可关闭对应请求参数。
@@ -53,8 +53,8 @@ python3 migu-live.py 18768
 ## 明确选择其他提供方
 
 ```sh
-python3 migu-live.py 18768 --provider native
-python3 migu-live.py 18768 --provider list
+python3 migu-live.py 28768 --provider native
+python3 migu-live.py 28768 --provider list
 ```
 
 原生及 Android 模式都使用内置 123 个频道，目录无需联网即可生成。列表模式是显式选项，优先下载实时原始列表，失败或校验不合格时尝试仓库快照；支持同源 ETag 条件刷新，不保存签名 URL 到磁盘。默认模式不执行这些列表请求。
@@ -89,14 +89,14 @@ python3 migu-live.py 18768 --provider list
 
 ## 节目单与重启缓存
 
-订阅自动声明 `http://127.0.0.1:18768/epg.xml`。不支持自动发现的播放器可手动填入。XMLTV 使用稳定的 `p<频道ID>` 与目录对应；节目单就绪不表示频道有播放权限。
+订阅自动声明 `http://127.0.0.1:28768/epg.xml`。不支持自动发现的播放器可手动填入。XMLTV 使用稳定的 `p<频道ID>` 与目录对应；节目单就绪不表示频道有播放权限。
 
 节目来自固定的咪咕官方当天节目接口，日期按北京时间计算；没有改回旧的 GitHub XML 镜像。首次请求才后台获取，每批最多 8 个频道、每轮最多 2 分钟。首次等待最多 5 秒，可返回已加载的部分节目；无有效节目时返回 503，稍后刷新。
 
 成功数据缓存 6 小时；缺失/失败频道按 15 分钟、30 分钟、1 小时逐级退避，最长 6 小时。跨北京时间零点重新取当天节目。节目单失败独立于频道目录和播放入口。
 
 ```sh
-python3 migu-live.py 18768 --epg-cache
+python3 migu-live.py 28768 --epg-cache
 ```
 
 默认纯内存。此选项将有效节目及重试状态原子保存到 `~/.cache/migu-live/epg-cache-v1.json`，可配合 `--data-dir` 指定可写目录；不保存签名 URL 或账号。损坏、过期、符号链接或不可写缓存退回内存，不阻止启动。禁用节目单用 `--no-epg`。
@@ -110,7 +110,7 @@ python3 migu-live.py 18768 --epg-cache
 默认仅监听 `127.0.0.1`，无需服务访问令牌。跨设备需显式配置地址并自动启用令牌：
 
 ```sh
-python3 migu-live.py 18768 --bind 0.0.0.0 --public-base http://192.168.1.10:18768 --data-dir /可写目录/migu-live
+python3 migu-live.py 28768 --bind 0.0.0.0 --public-base http://192.168.1.10:28768 --data-dir /可写目录/migu-live
 ```
 
 订阅增加 `?token=文件中的令牌`，节目单自动携带同一令牌。可用 `--token-env MIGU_ACCESS_TOKEN` 提供服务令牌；该令牌与咪咕账号授权不同。权限、Host/Origin 检查保持；公网使用 HTTPS 反向代理。
