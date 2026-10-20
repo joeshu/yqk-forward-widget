@@ -25,3 +25,9 @@ iPhone 上只需在 APTV 加载根目录 `cctv-aptv.py` 并启动，默认订阅
 权限兼容修订：用户选台后出现通用 PermissionError，日志尚不能证明具体失败系统调用。旧版在启动引擎时默认对 Path.home() 下缓存目录进行 mkdir/read/write，存在 APTV 沙盒写入权限问题。现默认不访问文件系统，官方组件校验后存放内存，当前服务进程内复用；可选磁盘缓存读写失败也退回内存，下载 PermissionError 单独标记 official-runtime-download-permission-denied。新增默认零文件访问、只读缓存、无法创建目录、下载权限错误定位和拒绝错误哈希五项回归，共 80 项（含 4 项真实 JSC 测试）通过。手机修订版仍待用户验证。
 
 停滞诊断修订：用户提供新截图，服务监听正常、内存缓存版本触发 source-media-stalled。此错误只会在 Engine 构造完成后出现，因此 SDK 初始化已通过；截图不足以区分网络重试、清单不前进或下载阶段。新增具体操作阶段、清单项数、末片字节数、嵌套网络异常类型/数值 errno、重试日志及失败时自动脱敏状态输出。未放宽 30 秒保护，也未宣称解决未知停滞原因。82 项回归通过，包括阶段定位、保留最后网络错误与诊断日志不泄露上游令牌；真实 JSC 四项也通过。
+
+TLS 定位与兼容修订：用户导出的 09:13:25Z 日志证明 SDK 初始化约 0.855 秒完成，随后 source-api 阶段连续 9 次 URLError:SSLError:errno-1，playlist_entries、last_segment_bytes、processed_segments 都为 0；失败发生在 HTTPS 取源接口，尚未请求媒体清单。旧版没有记录 SSLError.library/reason，不能由 errno=1 推断确切握手原因。
+
+现仅针对 vdnx.live.cntv.cn 的 /api/v3/vdn/live，在非证书类 SSL 错误后尝试一次验证完整的 TLS 1.2 请求：同 URL、同签名头、相同代理/CA、主机名验证和重定向限制，不切换来源、不使用 HTTP、不启用不验证证书的连接。SSLCertVerificationError 不触发该重试。SSL 原因只输出符合枚举格式的 library/reason，不转发异常原文。
+
+本地真实联网验证：首次请求人工注入 SSL 失败，随后由新分支调用真实官方 API，play 检查通过并取得 HTTPS 播放地址，约 0.969 秒。该证据来自开发机当前代理网络，不代表已复现或解决 iOS 原生网络的握手错误。86 项测试通过，包括真实 JSC 四项、TLS 范围/证书校验/请求保持及 SSL 日志脱敏。手机仍需验证，超时保护保持不变。

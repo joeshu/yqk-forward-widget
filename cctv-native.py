@@ -29,7 +29,7 @@ import threading
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlsplit
-from urllib.request import Request, HTTPRedirectHandler, build_opener
+from urllib.request import Request, HTTPRedirectHandler, HTTPSHandler, build_opener
 import uuid
 from cctv_native_ts import inspect_ts, transform_pes_nals, boundary_proven_by, TSFormatError
 
@@ -60,6 +60,11 @@ def transport_error_code(error):
         code += ':errno-'+str(reason.errno)
     if isinstance(reason, ssl.SSLCertVerificationError) and isinstance(getattr(reason, 'verify_code', None), int):
         code += ':verify-'+str(reason.verify_code)
+    if isinstance(reason, ssl.SSLError):
+        for attribute in ('library', 'reason'):
+            value = getattr(reason, attribute, None)
+            if isinstance(value, str) and re.fullmatch(r'[A-Z0-9_]{1,100}', value):
+                code += ':'+attribute+'-'+value
     return code
 
 
@@ -80,12 +85,30 @@ class SourceRedirect(HTTPRedirectHandler):
 def get(url, *, headers=None, limit=8*1024*1024, timeout=12):
     validate_source(url)
     req = Request(url, headers={'User-Agent': UA, 'Referer': REFERER, **(headers or {})})
-    with build_opener(SourceRedirect()).open(req, timeout=timeout) as response:
-        body = response.read(limit + 1)
-        if len(body) > limit:
-            raise NativeError('response-too-large')
-        validate_source(response.url)
-        return body, response.url
+    def read_response(opener):
+        with opener.open(req, timeout=timeout) as response:
+            body = response.read(limit + 1)
+            if len(body) > limit:
+                raise NativeError('response-too-large')
+            validate_source(response.url)
+            return body, response.url
+    try:
+        return read_response(build_opener(SourceRedirect()))
+    except URLError as error:
+        reason = error.reason
+        parsed = urlsplit(url)
+        if (parsed.hostname != 'vdnx.live.cntv.cn' or parsed.path != '/api/v3/vdn/live'
+                or not isinstance(reason, ssl.SSLError)
+                or isinstance(reason, ssl.SSLCertVerificationError)):
+            raise
+        print('[cctv-native] source-api TLS failure='+transport_error_code(error)+
+              '; retrying verified TLSv1.2', flush=True)
+        context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+        # Keep default certificate/hostname verification, trusted CA handling,
+        # proxy discovery, redirect validation and the exact official request.
+        return read_response(build_opener(SourceRedirect(), HTTPSHandler(context=context)))
 
 
 def source_url():

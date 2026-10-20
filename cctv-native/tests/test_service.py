@@ -435,3 +435,61 @@ class TestTransportDiagnostics(unittest.TestCase):
 
     def test_text_reason_is_never_forwarded(self):
         self.assertEqual(service.transport_error_code(service.URLError(BASE)), 'URLError')
+
+
+class TestSourceTLSCompatibility(unittest.TestCase):
+    URL = 'https://vdnx.live.cntv.cn/api/v3/vdn/live?temporary=secret-source-token'
+
+    def test_ssl_handshake_retry_preserves_verification_request_and_body_limit(self):
+        failure = service.URLError(service.ssl.SSLError(1, self.URL))
+        first, second = mock.Mock(), mock.Mock()
+        first.open.side_effect = failure
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.url = self.URL
+        response.read.return_value = b'{}'
+        second.open.return_value = response
+        with mock.patch.object(service, 'build_opener', side_effect=[first, second]) as build, \
+             mock.patch('builtins.print') as logged:
+            raw, final = service.get(self.URL, headers={'auth-key':'private-header'},limit=50,timeout=3)
+        self.assertEqual((raw,final),(b'{}',self.URL))
+        response.read.assert_called_once_with(51)
+        self.assertIs(first.open.call_args.args[0],second.open.call_args.args[0])
+        self.assertEqual(second.open.call_args.kwargs['timeout'],3)
+        handler = build.call_args_list[1].args[1]
+        context = handler._context
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(context.verify_mode,service.ssl.CERT_REQUIRED)
+        self.assertEqual(context.minimum_version,service.ssl.TLSVersion.TLSv1_2)
+        self.assertEqual(context.maximum_version,service.ssl.TLSVersion.TLSv1_2)
+        logs = str(logged.call_args_list)
+        self.assertNotIn('secret-source-token',logs)
+        self.assertNotIn('private-header',logs)
+
+    def test_certificate_failure_is_not_given_protocol_retry(self):
+        opener=mock.Mock()
+        opener.open.side_effect=service.URLError(service.ssl.SSLCertVerificationError(1,'private'))
+        with mock.patch.object(service,'build_opener',return_value=opener) as build:
+            with self.assertRaises(service.URLError):
+                service.get(self.URL)
+        self.assertEqual(build.call_count,1)
+
+    def test_other_hosts_and_media_paths_do_not_receive_api_compatibility_policy(self):
+        for url in (BASE,'https://vdnx.live.cntv.cn/media/index.m3u8'):
+            with self.subTest(url=url):
+                opener=mock.Mock()
+                opener.open.side_effect=service.URLError(service.ssl.SSLError(1,'private'))
+                with mock.patch.object(service,'build_opener',return_value=opener) as build:
+                    with self.assertRaises(service.URLError):service.get(url)
+                self.assertEqual(build.call_count,1)
+
+    def test_ssl_reason_is_enum_only_and_does_not_forward_exception_text(self):
+        error=service.ssl.SSLError(1,self.URL)
+        error.library='SSL'
+        error.reason='TLSV1_ALERT_INTERNAL_ERROR'
+        code=service.transport_error_code(service.URLError(error))
+        self.assertIn('library-SSL',code)
+        self.assertIn('reason-TLSV1_ALERT_INTERNAL_ERROR',code)
+        self.assertNotIn('secret-source-token',code)
+        error.reason=self.URL
+        self.assertNotIn('secret-source-token',service.transport_error_code(service.URLError(error)))

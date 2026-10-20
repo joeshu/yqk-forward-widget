@@ -103,3 +103,5 @@ python -m py_compile cctv-native.py cctv-native/service.py cctv-native/cctv_nati
 CI 运行 Python 3.10 / 3.12 与 Node 22 的离线检查，不执行官方接口实播。FFmpeg 可用于开发时验证输出解码，服务运行不依赖它。
 
 取流停滞排查：`source-media-stalled` 表示播放器初始化已完成，但 30 秒内没有发布新分片，不直接说明原因。新版日志打印首次进入的 `phase`、每次网络重试的 `operation/cause`，出错时自动打印脱敏 `diagnostics` JSON；`/status` 同时提供 `operation`、`operation_seconds`、`playlist_entries` 和 `last_segment_bytes`。`media-playlist` 指清单获取，`segment-download` 指分片下载，`sdk-transform` 指原组件处理。诊断不输出上游地址、签名、异常原文或证书内容，仍保留原来的超时保护。
+
+若 `source-api` 出现 `URLError:SSLError`，新版只为该官方 API 增加一次保留证书与主机名校验的 TLS 1.2 兼容重试，其他媒体请求不套用这项协议限制。日志同时显示 OpenSSL 的枚举原因，便于进一步区分握手故障；证书验证失败不会触发兼容重试。手机该故障尚待新版实测，不保证 TLS 1.2 一定解决。
