@@ -58,3 +58,28 @@ class TestPreparedRepack(unittest.TestCase):
         for bad in (bytes(bad_sync),bytes(bad_crc),bytes(bad_nal),raw[:-1]):
             with self.subTest(bad=bad[:5]),self.assertRaises(TSFormatError):
                 inspect_ts(bad,_map_bytes=False)
+
+    def test_packet_only_parse_supports_identical_identity_and_shrinking_repack(self):
+        for options in ({},{'second_pes':True,'pcr':True},{'sizes':(2,3,4,61),'pts_dts':True}):
+            raw,_=stream(**options)
+            full=inspect_ts(raw,final_nal_complete=True)
+            packet_only=inspect_ts(raw,final_nal_complete=True,_map_bytes=False,_retain_packets=True)
+            self.assertEqual(packet_only._packet_view,full._packet_view)
+            self.assertEqual(packet_only.spans,())
+            self.assertTrue(all(not n.spans for n in packet_only.nals))
+            for callback in (lambda n,b:b,lambda n,b:b[:-1] if len(b)>2 else b):
+                expected,_=transform_pes_nals(raw,callback,final_nal_complete=True,_prepared=full)
+                actual,_=transform_pes_nals(raw,callback,final_nal_complete=True,_prepared=packet_only)
+                self.assertEqual(actual,expected)
+
+    def test_packet_only_parse_keeps_rejection_and_source_identity(self):
+        raw,_=stream();full=inspect_ts(raw)
+        bad_sync=bytearray(raw);bad_sync[0]=0
+        bad_crc=bytearray(raw);bad_crc[187]^=1
+        bad_nal=bytearray(raw);bad_nal[full.nals[0].spans[0].ts_offset]=0x80
+        for bad in (bytes(bad_sync),bytes(bad_crc),bytes(bad_nal),raw[:-1]):
+            with self.assertRaises(TSFormatError):
+                inspect_ts(bad,_map_bytes=False,_retain_packets=True)
+        checked=inspect_ts(raw,final_nal_complete=True,_map_bytes=False,_retain_packets=True)
+        with self.assertRaisesRegex(TSFormatError,'Prepared TS analysis'):
+            transform_pes_nals(bytes(bytearray(raw)),lambda n,b:b,final_nal_complete=True,_prepared=checked)

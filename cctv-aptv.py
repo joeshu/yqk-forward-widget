@@ -382,11 +382,14 @@ def inspect_ts(
     video_pid: int | None = None,
     final_nal_complete: bool = False,
     _map_bytes: bool = True,
+    _retain_packets: bool = False,
 ) -> TSAnalysis:
     """Locate H.264 NALs and their original bytes without changing the stream.
 
     ``final_nal_complete`` is an explicit caller assertion about the final NAL,
     not a conclusion inferred from a TS or HLS file ending.
+    Internal PES callers may retain validated packets without byte mappings;
+    this changes retained metadata only, never TS/PES/NAL validation.
     """
     packets = _packets(data)
     program, pmt, pcr, video = _program(packets, program_number, video_pid)
@@ -413,7 +416,7 @@ def inspect_ts(
                     _mapped_slice(spans, begin, end) if _map_bytes else ())
         )
     return TSAnalysis(program, pmt, pcr, video, elementary, spans, tuple(nals), pes_count, last_unbounded,
-                      _source=data, _packet_view=tuple(packets) if _map_bytes else ())
+                      _source=data, _packet_view=tuple(packets) if _map_bytes or _retain_packets else ())
 
 
 def boundary_proven_by(
@@ -1407,7 +1410,7 @@ class Channel:
         analysis = None
         if not self.stop.is_set() and not getattr(self, 'parked_at', 0):
             try:
-                analysis = inspect_ts(raw)
+                analysis = inspect_ts(raw, _map_bytes=False, _retain_packets=True)
             except TSFormatError:
                 pass
         return raw, final, analysis
@@ -1431,7 +1434,7 @@ class Channel:
             if status == 200 and not content_range:
                 # Some CDNs ignore Range. Reuse that already complete download.
                 try:
-                    analysis = inspect_ts(raw)
+                    analysis = inspect_ts(raw, _map_bytes=False, _retain_packets=True)
                 except TSFormatError:
                     analysis = None
                 with self.condition:
@@ -1444,7 +1447,7 @@ class Channel:
                 if len(raw) == end+1 and 0 <= end < count and end < total <= 8*1024*1024:
                     if total == len(raw):
                         try:
-                            analysis = inspect_ts(raw)
+                            analysis = inspect_ts(raw, _map_bytes=False, _retain_packets=True)
                         except TSFormatError:
                             analysis = None
                         with self.condition:
@@ -1648,13 +1651,14 @@ class Channel:
                         analysis_started = time.perf_counter()
                         analysis = current_download[2] if len(current_download) == 3 else analyses.get(e['seq'])
                         if analysis is None or analysis._source is not raw:
-                            analysis = inspect_ts(raw)
+                            analysis = inspect_ts(raw, _map_bytes=False, _retain_packets=True)
                         next_analysis = (next_download.analysis if boundary_only else
                                          next_download[2] if len(next_download) == 3 else analyses.get(following['seq']))
                         if next_analysis is None or next_analysis._source is not lookahead:
                             try:
                                 next_analysis = inspect_ts(lookahead, program_number=analysis.program_number,
-                                                           video_pid=analysis.video_pid)
+                                                           video_pid=analysis.video_pid, _map_bytes=False,
+                                                           _retain_packets=True)
                             except TSFormatError:
                                 raise NativeError('source-boundary-not-proven') from None
                         if not boundary_proven_by(lookahead, program_number=analysis.program_number,

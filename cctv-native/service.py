@@ -762,7 +762,7 @@ class Channel:
         analysis = None
         if not self.stop.is_set() and not getattr(self, 'parked_at', 0):
             try:
-                analysis = inspect_ts(raw)
+                analysis = inspect_ts(raw, _map_bytes=False, _retain_packets=True)
             except TSFormatError:
                 pass
         return raw, final, analysis
@@ -786,7 +786,7 @@ class Channel:
             if status == 200 and not content_range:
                 # Some CDNs ignore Range. Reuse that already complete download.
                 try:
-                    analysis = inspect_ts(raw)
+                    analysis = inspect_ts(raw, _map_bytes=False, _retain_packets=True)
                 except TSFormatError:
                     analysis = None
                 with self.condition:
@@ -799,7 +799,7 @@ class Channel:
                 if len(raw) == end+1 and 0 <= end < count and end < total <= 8*1024*1024:
                     if total == len(raw):
                         try:
-                            analysis = inspect_ts(raw)
+                            analysis = inspect_ts(raw, _map_bytes=False, _retain_packets=True)
                         except TSFormatError:
                             analysis = None
                         with self.condition:
@@ -1003,13 +1003,14 @@ class Channel:
                         analysis_started = time.perf_counter()
                         analysis = current_download[2] if len(current_download) == 3 else analyses.get(e['seq'])
                         if analysis is None or analysis._source is not raw:
-                            analysis = inspect_ts(raw)
+                            analysis = inspect_ts(raw, _map_bytes=False, _retain_packets=True)
                         next_analysis = (next_download.analysis if boundary_only else
                                          next_download[2] if len(next_download) == 3 else analyses.get(following['seq']))
                         if next_analysis is None or next_analysis._source is not lookahead:
                             try:
                                 next_analysis = inspect_ts(lookahead, program_number=analysis.program_number,
-                                                           video_pid=analysis.video_pid)
+                                                           video_pid=analysis.video_pid, _map_bytes=False,
+                                                           _retain_packets=True)
                             except TSFormatError:
                                 raise NativeError('source-boundary-not-proven') from None
                         if not boundary_proven_by(lookahead, program_number=analysis.program_number,

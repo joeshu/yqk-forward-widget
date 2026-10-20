@@ -376,11 +376,14 @@ def inspect_ts(
     video_pid: int | None = None,
     final_nal_complete: bool = False,
     _map_bytes: bool = True,
+    _retain_packets: bool = False,
 ) -> TSAnalysis:
     """Locate H.264 NALs and their original bytes without changing the stream.
 
     ``final_nal_complete`` is an explicit caller assertion about the final NAL,
     not a conclusion inferred from a TS or HLS file ending.
+    Internal PES callers may retain validated packets without byte mappings;
+    this changes retained metadata only, never TS/PES/NAL validation.
     """
     packets = _packets(data)
     program, pmt, pcr, video = _program(packets, program_number, video_pid)
@@ -407,7 +410,7 @@ def inspect_ts(
                     _mapped_slice(spans, begin, end) if _map_bytes else ())
         )
     return TSAnalysis(program, pmt, pcr, video, elementary, spans, tuple(nals), pes_count, last_unbounded,
-                      _source=data, _packet_view=tuple(packets) if _map_bytes else ())
+                      _source=data, _packet_view=tuple(packets) if _map_bytes or _retain_packets else ())
 
 
 def boundary_proven_by(
