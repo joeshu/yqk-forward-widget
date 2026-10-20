@@ -297,7 +297,7 @@ def _mapped_slice(spans: list[ByteSpan] | tuple[ByteSpan, ...], begin: int, end:
     return tuple(result)
 
 
-def _elementary(packets: list[_Packet], video_pid: int) -> tuple[bytes, tuple[ByteSpan, ...], int, bool]:
+def _elementary(packets: list[_Packet], video_pid: int, *, map_bytes: bool = True) -> tuple[bytes, tuple[ByteSpan, ...], int, bool]:
     elementary = bytearray()
     spans: list[ByteSpan] = []
     pending = bytearray()
@@ -329,8 +329,9 @@ def _elementary(packets: list[_Packet], video_pid: int) -> tuple[bytes, tuple[By
             raise TSFormatError("Bounded PES packet is truncated or has unexplained trailing bytes")
         base = len(elementary)
         elementary.extend(pending[header_length:])
-        for span in _mapped_slice(pending_spans, header_length, len(pending)):
-            spans.append(ByteSpan(base + span.es_offset - header_length, span.ts_offset, span.length))
+        if map_bytes:
+            for span in _mapped_slice(pending_spans, header_length, len(pending)):
+                spans.append(ByteSpan(base + span.es_offset - header_length, span.ts_offset, span.length))
         pending.clear()
         pending_spans.clear()
         active = False
@@ -355,7 +356,8 @@ def _elementary(packets: list[_Packet], video_pid: int) -> tuple[bytes, tuple[By
             active = True
         elif not active:
             raise TSFormatError("Video begins with PES continuation; retain the previous HLS chunk")
-        pending_spans.append(ByteSpan(len(pending), packet.payload_offset, len(packet.payload)))
+        if map_bytes:
+            pending_spans.append(ByteSpan(len(pending), packet.payload_offset, len(packet.payload)))
         pending.extend(packet.payload)
         if len(pending) >= 6:
             packet_length = int.from_bytes(pending[4:6], "big")
@@ -374,6 +376,7 @@ def inspect_ts(
     program_number: int | None = None,
     video_pid: int | None = None,
     final_nal_complete: bool = False,
+    _map_bytes: bool = True,
 ) -> TSAnalysis:
     """Locate H.264 NALs and their original bytes without changing the stream.
 
@@ -382,7 +385,7 @@ def inspect_ts(
     """
     packets = _packets(data)
     program, pmt, pcr, video = _program(packets, program_number, video_pid)
-    elementary, spans, pes_count, last_unbounded = _elementary(packets, video)
+    elementary, spans, pes_count, last_unbounded = _elementary(packets, video, map_bytes=_map_bytes)
     # Match the official player's capped three-zero state machine. Extra zero
     # bytes before a four-byte prefix belong to the preceding protected NAL;
     # trimming the entire run can remove bytes the runtime still needs.
@@ -402,10 +405,10 @@ def inspect_ts(
         nals.append(
             NALUnit(nal_type, marker.start(), marker.end() - marker.start(), begin, end,
                     index + 1 < len(markers) or final_nal_complete,
-                    _mapped_slice(spans, begin, end))
+                    _mapped_slice(spans, begin, end) if _map_bytes else ())
         )
     return TSAnalysis(program, pmt, pcr, video, elementary, spans, tuple(nals), pes_count, last_unbounded,
-                      _source=data, _packet_view=tuple(packets))
+                      _source=data, _packet_view=tuple(packets) if _map_bytes else ())
 
 
 def boundary_proven_by(
@@ -665,8 +668,10 @@ def transform_pes_nals(
             result[offset : offset + 188] = rewritten
             cursor += size
     output = bytes(result)
+    # Validate every TS/PES/NAL and the exact ES again, without constructing
+    # a second byte-to-packet mapping that this comparison never consumes.
     verified = inspect_ts(output, program_number=analysis.program_number, video_pid=analysis.video_pid,
-                          final_nal_complete=final_nal_complete)
+                          final_nal_complete=final_nal_complete, _map_bytes=False)
     if verified.elementary != b"".join(expected_es) or len(output) != len(data):
         raise TSFormatError("Repacketized output differs from the exact requested elementary stream")
     return output, analysis

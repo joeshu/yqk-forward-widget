@@ -12,17 +12,117 @@ class ManagedChannel(Channel):
     def __init__(self, args, slots):
         super().__init__(args)
         self.slots = slots
+        self.slot_held = False
+        self.parked_at = 0
+        self.resume_pending = False
+        self.resume_reset_sequence = False
+        self.cache_hits = 0
+        self.cache_buffer_hits = 0
+        self.resumed_at = 0
+        self.resume_ready_seconds = None
+        self.cache_ttl = getattr(args, 'recent_channel_seconds', 15)
+
+    def retire(self):
+        with self.condition:
+            self.stop.set()
+            self.parked_at = 0
+            self.condition.notify_all()
+
+    def park(self):
+        with self.condition:
+            if (not self.cache_ttl or self.stop.is_set() or self.state != 'ready'
+                    or not self.thread or not self.thread.is_alive()):
+                self.retire()
+                return
+            # Keep only two latest validated outputs while the VM is parked.
+            while len(self.ring) > 2:
+                _, old = self.ring.popitem(last=False)
+                self.size -= len(old[0])
+                self.discarded_discontinuities += bool(old[2])
+            self.parked_at = time.monotonic()
+            self.condition.notify_all()
+
+    def resume(self):
+        with self.condition:
+            now = time.monotonic()
+            if (not self.parked_at or self.stop.is_set() or not self.thread or not self.thread.is_alive()
+                    or now-self.parked_at >= self.cache_ttl or self.state != 'ready'):
+                return False
+            durations = sum(item[1] for item in self.ring.values())
+            fresh = (len(self.ring) >= 2 and self.last_published_at > 0
+                     and now-self.last_published_at <= min(8, durations))
+            self.parked_at = 0
+            self.resume_pending = True
+            self.resume_reset_sequence = not fresh
+            self.last_request = now
+            self.resumed_at = now
+            self.resume_ready_seconds = 0.0 if fresh else None
+            self.cache_hits += 1
+            self.cache_buffer_hits += bool(fresh)
+            if not fresh:
+                # Never expose a frozen live window as a fast cache hit.
+                self.ring.clear()
+                self.size = self.counter = self.discarded_discontinuities = 0
+                self.generation = uuid.uuid4().hex
+                self.state = 'source'
+            print('[cctv-native] cache-resume channel='+self.channel_id+
+                  ' fresh_buffer='+str(fresh).lower(), flush=True)
+            self.condition.notify_all()
+            return True
+
+    def checkpoint(self):
+        with self.condition:
+            while self.parked_at and not self.stop.is_set():
+                remaining = self.cache_ttl-(time.monotonic()-self.parked_at)
+                if remaining <= 0:
+                    self.stop.set()
+                    self.parked_at = 0
+                    break
+                self.condition.wait(min(.25, remaining))
+            if self.stop.is_set():
+                return False
+            if self.resume_pending:
+                self.resume_pending = False
+                raise ResumePreparation(self.resume_reset_sequence)
+            return True
+
+    def publish(self, body, entry, discontinuity):
+        # Selection can change between the owner's pre-publish check and lock.
+        # Make the final check atomic with exposing a new cached segment.
+        with self.condition:
+            if self.checkpoint():
+                super().publish(body, entry, discontinuity)
+                if self.resumed_at and self.resume_ready_seconds is None and self.state == 'ready':
+                    self.resume_ready_seconds = round(time.monotonic()-self.resumed_at,3)
+                    print('[cctv-native] cache-media-ready seconds='+str(self.resume_ready_seconds)+
+                          ' channel='+self.channel_id, flush=True)
+
+    def snapshot(self):
+        result = super().snapshot()
+        with self.condition:
+            result.update(parked=bool(self.parked_at), cache_hits=self.cache_hits,
+                          cache_buffer_hits=self.cache_buffer_hits,
+                          resume_ready_seconds=self.resume_ready_seconds,
+                          buffer_age_seconds=round(time.monotonic()-self.last_published_at,3)
+                          if self.last_published_at else None)
+        return result
+
+    def native_context_closed(self):
+        if self.slot_held:
+            self.slot_held = False
+            self.slots.release()
 
     def run(self):
-        # SDKs are created/released only in their owner thread. Fast switching
-        # cannot accumulate an unbounded number of native contexts.
+        # Only the owner closes JSC. Release its slot before waiting on any
+        # already-running HTTP reads; eviction cannot hold a new VM hostage.
         while not self.stop.is_set():
             if self.slots.acquire(timeout=.2):
+                self.slot_held = True
                 try:
                     if not self.stop.is_set():
                         super().run()
                 finally:
-                    self.slots.release()
+                    self.native_context_closed()
                 return
 
 
@@ -43,11 +143,20 @@ class ChannelManager:
                 raise NativeError('service-stopping')
             if self.current == cid:
                 return self.channels[cid]
-            if self.current:
-                previous = self.channels[self.current]
-                previous.stop.set()
-                with previous.condition:
-                    previous.condition.notify_all()
+            previous = self.channels.get(self.current)
+            target = self.channels.get(cid)
+            # At most current + one most recent parked channel. Retire the
+            # older VM before creating a third candidate; semaphore stays 2.
+            for other in self.channels.values():
+                if other is not previous and other is not target:
+                    other.retire()
+            if previous:
+                previous.park()
+            if target is not None and target.resume():
+                self.current = cid
+                return target
+            if target:
+                target.retire()
             args = SimpleNamespace(**vars(self.args))
             args.channel_id = cid
             channel = ManagedChannel(args, self.slots)
@@ -66,6 +175,9 @@ class ChannelManager:
             result.update(current_channel=self.current, channel_count=len(PUBLISHED_CHANNELS),
                           channels=[{'id':cid,'name':name} for cid,name in PUBLISHED_CHANNELS.items()],
                           native_context_limit=2,
+                          recent_channel_seconds=getattr(self.args,'recent_channel_seconds',15),
+                          recent_channels=[c.channel_id for c in self.channels.values()
+                                           if c.parked_at and not c.stop.is_set()],
                           source_api_tls=('TLSv1.2-legacy-server' if _API_LEGACY_ENABLED and _API_LEGACY_PREFERRED else
                                           'TLSv1.2' if _API_TLS12_PREFERRED else 'default'))
             return result
@@ -74,9 +186,7 @@ class ChannelManager:
         with self.lock:
             self.closed = True
             for channel in self.channels.values():
-                channel.stop.set()
-                with channel.condition:
-                    channel.condition.notify_all()
+                channel.retire()
         # No cross-thread JSC calls and no HTTP thread blocked on VM teardown.
 
 

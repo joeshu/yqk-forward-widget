@@ -4,7 +4,7 @@ import argparse
 import base64
 from collections import OrderedDict
 from dataclasses import replace
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.client import IncompleteRead
@@ -61,6 +61,12 @@ def transport_error_code(error):
             if isinstance(value, str) and re.fullmatch(r'[A-Z0-9_]{1,100}', value):
                 code += ':'+attribute+'-'+value
     return code
+
+
+class ResumePreparation(Exception):
+    """Owner-thread signal: discard in-flight input after a cached resume."""
+    def __init__(self, reset_sequence=False):
+        self.reset_sequence = reset_sequence
 
 
 class UnsupportedSource(NativeError):
@@ -413,12 +419,19 @@ class Channel:
         self.waiters = 0
         self.timings = {}
         self.started_at = 0
+        self.last_published_at = 0
         self.operation = 'idle'
         self.operation_started = 0
         self.seen_operations = set()
         self.playlist_entries = 0
         self.last_segment_bytes = 0
         self.preparation_phase = 'disabled'
+
+    def checkpoint(self):
+        return not self.stop.is_set()
+
+    def native_context_closed(self):
+        """Called by the VM owner after native teardown, before I/O joins."""
 
     def operation_phase(self, value):
         with self.condition:
@@ -463,6 +476,7 @@ class Channel:
             self.playlist_entries = self.last_segment_bytes = 0
             self.error, self.state, self.timings = '', 'initializing', {}
             self.started_at = time.monotonic()
+            self.last_published_at = 0
             self.thread = threading.Thread(target=self.run, daemon=True, name='cctv-native')
             self.thread.start()
 
@@ -471,6 +485,7 @@ class Channel:
             index = self.counter
             self.counter += 1
             self.processed += 1
+            self.last_published_at = time.monotonic()
             self.last_transport_error = ''
             self.ring[index] = (body, entry['duration'], discontinuity)
             self.size += len(body)
@@ -519,13 +534,25 @@ class Channel:
                     'media_transfer': ('typed-array' if getattr(getattr(self.engine, 'context', None), 'buffer_api', False) else 'base64'),
                     'stage_seconds': dict(self.timings), 'media_ready': self.playlist() is not None}
 
+    def _await_future(self, task):
+        while True:
+            if not self.checkpoint():
+                raise ResumePreparation()
+            try:
+                return task.result(timeout=.2)
+            except FutureTimeoutError:
+                # A socket timeout is a real transport failure; a wait timeout
+                # only gives the owner a chance to park or close its native VM.
+                if task.done():
+                    return task.result()
+
     def _download_segment(self, url):
         raw, final = get(url)
         # Parse only media bytes on an I/O worker. ctypes releases the GIL
         # during native JSC work, so the next input can be validated meanwhile.
         # Invalid media is rechecked by the owner to retain its boundary error.
         analysis = None
-        if not self.stop.is_set():
+        if not self.stop.is_set() and not getattr(self, 'parked_at', 0):
             try:
                 analysis = inspect_ts(raw)
             except TSFormatError:
@@ -593,12 +620,14 @@ class Channel:
                 if time.monotonic()-last_progress > 30:
                     raise NativeError('source-media-stalled')
                 try:
+                    if not self.checkpoint():
+                        break
                     initial_downloads = {}
                     if preparation is not None:
                         pending, preparation = preparation, None
                         self.operation_phase(self.preparation_phase if self.preparation_phase != 'disabled' else 'source-api')
                         try:
-                            prepared = pending.result()
+                            prepared = self._await_future(pending)
                         except Exception:
                             self.operation_phase(self.preparation_phase)
                             raise
@@ -619,11 +648,11 @@ class Channel:
                         if url is None or time.monotonic()-refreshed > 120:
                             self.operation_phase('source-api')
                             url, refreshed = (source_url() if self.channel_id == 'cctv2' else source_url(self.channel_id)), time.monotonic()
-                            if self.stop.is_set():
+                            if not self.checkpoint():
                                 break
                         self.operation_phase('media-playlist')
                         entries, final = media_playlist(url)
-                    if self.stop.is_set():
+                    if not self.checkpoint():
                         break
                     self.playlist_entries = len(entries)
                     # Resolve the master only once per source refresh.
@@ -648,15 +677,15 @@ class Channel:
                         if e['seq'] not in cached:
                             cached[e['seq']] = self._submit_segment(pool, e['url'])
                     for e, following in zip(wanted, wanted[1:]):
-                        if self.stop.is_set():
+                        if not self.checkpoint():
                             break
                         if following['seq'] != e['seq']+1 or following['discontinuity']:
                             raise NativeError('source-boundary-not-proven')
                         self.operation_phase('segment-download')
-                        current_download = cached[e['seq']].result()
-                        next_download = cached[following['seq']].result()
+                        current_download = self._await_future(cached[e['seq']])
+                        next_download = self._await_future(cached[following['seq']])
                         raw, lookahead = current_download[0], next_download[0]
-                        if self.stop.is_set():
+                        if not self.checkpoint():
                             break
                         self.last_segment_bytes = len(raw)
                         self.operation_phase('ts-analysis')
@@ -678,28 +707,37 @@ class Channel:
                         # its completeness bit changes; reuse the parsed TS.
                         analysis = replace(analysis, nals=analysis.nals[:-1]+(
                             replace(analysis.nals[-1], complete=True),))
-                        if self.stop.is_set():
+                        if not self.checkpoint():
                             break
                         self.operation_phase('sdk-transform')
                         processed = engine.transform([analysis.nal_bytes(n) for n in analysis.nals])
-                        if self.stop.is_set():
+                        if not self.checkpoint():
                             break
                         converted = {n.payload_offset: value for n, value in zip(analysis.nals, processed)}
                         self.operation_phase('ts-repack')
                         output, _ = transform_pes_nals(raw, lambda n, _data: converted[n.payload_offset],
                                                    nal_types=(1, 5, 7), final_nal_complete=True, _prepared=analysis)
-                        if self.stop.is_set():
+                        if not self.checkpoint():
                             break
                         self.publish(output, e, pending_discontinuity or e['discontinuity'])
                         rejected_sources = 0
                         pending_discontinuity, last_seq, last_progress = False, e['seq'], time.monotonic()
-                    if self.stop.is_set():
+                    if not self.checkpoint():
                         break
                     cached = {k:v for k,v in cached.items() if last_seq is None or k > last_seq}
                     analyses = {k:v for k,v in analyses.items() if k in cached}
                     if time.monotonic()-last_progress > 30:
                         raise NativeError('source-media-stalled')
                     failures, self.last_transport_error = 0, ''
+                except ResumePreparation as resumed:
+                    for task in cached.values():
+                        task.cancel()
+                    cached, analyses = {}, {}
+                    if resumed.reset_sequence:
+                        last_seq, current_source, pending_discontinuity = None, None, True
+                    # Time spent parked is not an upstream progress failure.
+                    last_progress = time.monotonic()
+                    continue
                 except UnsupportedSource as error:
                     self.last_source_rejection = dict(error.details)
                     print('[cctv-native] source-rejected channel='+self.channel_id+' '+
@@ -756,6 +794,7 @@ class Channel:
             cancel_preparation.set()
             if engine:
                 engine.close()
+            self.native_context_closed()
             with self.condition:
                 self.engine = None
                 self.ring.clear()

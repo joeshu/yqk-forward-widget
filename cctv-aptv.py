@@ -303,7 +303,7 @@ def _mapped_slice(spans: list[ByteSpan] | tuple[ByteSpan, ...], begin: int, end:
     return tuple(result)
 
 
-def _elementary(packets: list[_Packet], video_pid: int) -> tuple[bytes, tuple[ByteSpan, ...], int, bool]:
+def _elementary(packets: list[_Packet], video_pid: int, *, map_bytes: bool = True) -> tuple[bytes, tuple[ByteSpan, ...], int, bool]:
     elementary = bytearray()
     spans: list[ByteSpan] = []
     pending = bytearray()
@@ -335,8 +335,9 @@ def _elementary(packets: list[_Packet], video_pid: int) -> tuple[bytes, tuple[By
             raise TSFormatError("Bounded PES packet is truncated or has unexplained trailing bytes")
         base = len(elementary)
         elementary.extend(pending[header_length:])
-        for span in _mapped_slice(pending_spans, header_length, len(pending)):
-            spans.append(ByteSpan(base + span.es_offset - header_length, span.ts_offset, span.length))
+        if map_bytes:
+            for span in _mapped_slice(pending_spans, header_length, len(pending)):
+                spans.append(ByteSpan(base + span.es_offset - header_length, span.ts_offset, span.length))
         pending.clear()
         pending_spans.clear()
         active = False
@@ -361,7 +362,8 @@ def _elementary(packets: list[_Packet], video_pid: int) -> tuple[bytes, tuple[By
             active = True
         elif not active:
             raise TSFormatError("Video begins with PES continuation; retain the previous HLS chunk")
-        pending_spans.append(ByteSpan(len(pending), packet.payload_offset, len(packet.payload)))
+        if map_bytes:
+            pending_spans.append(ByteSpan(len(pending), packet.payload_offset, len(packet.payload)))
         pending.extend(packet.payload)
         if len(pending) >= 6:
             packet_length = int.from_bytes(pending[4:6], "big")
@@ -380,6 +382,7 @@ def inspect_ts(
     program_number: int | None = None,
     video_pid: int | None = None,
     final_nal_complete: bool = False,
+    _map_bytes: bool = True,
 ) -> TSAnalysis:
     """Locate H.264 NALs and their original bytes without changing the stream.
 
@@ -388,7 +391,7 @@ def inspect_ts(
     """
     packets = _packets(data)
     program, pmt, pcr, video = _program(packets, program_number, video_pid)
-    elementary, spans, pes_count, last_unbounded = _elementary(packets, video)
+    elementary, spans, pes_count, last_unbounded = _elementary(packets, video, map_bytes=_map_bytes)
     # Match the official player's capped three-zero state machine. Extra zero
     # bytes before a four-byte prefix belong to the preceding protected NAL;
     # trimming the entire run can remove bytes the runtime still needs.
@@ -408,10 +411,10 @@ def inspect_ts(
         nals.append(
             NALUnit(nal_type, marker.start(), marker.end() - marker.start(), begin, end,
                     index + 1 < len(markers) or final_nal_complete,
-                    _mapped_slice(spans, begin, end))
+                    _mapped_slice(spans, begin, end) if _map_bytes else ())
         )
     return TSAnalysis(program, pmt, pcr, video, elementary, spans, tuple(nals), pes_count, last_unbounded,
-                      _source=data, _packet_view=tuple(packets))
+                      _source=data, _packet_view=tuple(packets) if _map_bytes else ())
 
 
 def boundary_proven_by(
@@ -671,8 +674,10 @@ def transform_pes_nals(
             result[offset : offset + 188] = rewritten
             cursor += size
     output = bytes(result)
+    # Validate every TS/PES/NAL and the exact ES again, without constructing
+    # a second byte-to-packet mapping that this comparison never consumes.
     verified = inspect_ts(output, program_number=analysis.program_number, video_pid=analysis.video_pid,
-                          final_nal_complete=final_nal_complete)
+                          final_nal_complete=final_nal_complete, _map_bytes=False)
     if verified.elementary != b"".join(expected_es) or len(output) != len(data):
         raise TSFormatError("Repacketized output differs from the exact requested elementary stream")
     return output, analysis
@@ -682,7 +687,7 @@ import argparse
 import base64
 from collections import OrderedDict
 from dataclasses import replace
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.client import IncompleteRead
@@ -735,6 +740,12 @@ def transport_error_code(error):
             if isinstance(value, str) and re.fullmatch(r'[A-Z0-9_]{1,100}', value):
                 code += ':'+attribute+'-'+value
     return code
+
+
+class ResumePreparation(Exception):
+    """Owner-thread signal: discard in-flight input after a cached resume."""
+    def __init__(self, reset_sequence=False):
+        self.reset_sequence = reset_sequence
 
 
 class UnsupportedSource(NativeError):
@@ -961,12 +972,19 @@ class Channel:
         self.waiters = 0
         self.timings = {}
         self.started_at = 0
+        self.last_published_at = 0
         self.operation = 'idle'
         self.operation_started = 0
         self.seen_operations = set()
         self.playlist_entries = 0
         self.last_segment_bytes = 0
         self.preparation_phase = 'disabled'
+
+    def checkpoint(self):
+        return not self.stop.is_set()
+
+    def native_context_closed(self):
+        """Called by the VM owner after native teardown, before I/O joins."""
 
     def operation_phase(self, value):
         with self.condition:
@@ -1011,6 +1029,7 @@ class Channel:
             self.playlist_entries = self.last_segment_bytes = 0
             self.error, self.state, self.timings = '', 'initializing', {}
             self.started_at = time.monotonic()
+            self.last_published_at = 0
             self.thread = threading.Thread(target=self.run, daemon=True, name='cctv-native')
             self.thread.start()
 
@@ -1019,6 +1038,7 @@ class Channel:
             index = self.counter
             self.counter += 1
             self.processed += 1
+            self.last_published_at = time.monotonic()
             self.last_transport_error = ''
             self.ring[index] = (body, entry['duration'], discontinuity)
             self.size += len(body)
@@ -1067,13 +1087,25 @@ class Channel:
                     'media_transfer': ('typed-array' if getattr(getattr(self.engine, 'context', None), 'buffer_api', False) else 'base64'),
                     'stage_seconds': dict(self.timings), 'media_ready': self.playlist() is not None}
 
+    def _await_future(self, task):
+        while True:
+            if not self.checkpoint():
+                raise ResumePreparation()
+            try:
+                return task.result(timeout=.2)
+            except FutureTimeoutError:
+                # A socket timeout is a real transport failure; a wait timeout
+                # only gives the owner a chance to park or close its native VM.
+                if task.done():
+                    return task.result()
+
     def _download_segment(self, url):
         raw, final = get(url)
         # Parse only media bytes on an I/O worker. ctypes releases the GIL
         # during native JSC work, so the next input can be validated meanwhile.
         # Invalid media is rechecked by the owner to retain its boundary error.
         analysis = None
-        if not self.stop.is_set():
+        if not self.stop.is_set() and not getattr(self, 'parked_at', 0):
             try:
                 analysis = inspect_ts(raw)
             except TSFormatError:
@@ -1141,12 +1173,14 @@ class Channel:
                 if time.monotonic()-last_progress > 30:
                     raise NativeError('source-media-stalled')
                 try:
+                    if not self.checkpoint():
+                        break
                     initial_downloads = {}
                     if preparation is not None:
                         pending, preparation = preparation, None
                         self.operation_phase(self.preparation_phase if self.preparation_phase != 'disabled' else 'source-api')
                         try:
-                            prepared = pending.result()
+                            prepared = self._await_future(pending)
                         except Exception:
                             self.operation_phase(self.preparation_phase)
                             raise
@@ -1167,11 +1201,11 @@ class Channel:
                         if url is None or time.monotonic()-refreshed > 120:
                             self.operation_phase('source-api')
                             url, refreshed = (source_url() if self.channel_id == 'cctv2' else source_url(self.channel_id)), time.monotonic()
-                            if self.stop.is_set():
+                            if not self.checkpoint():
                                 break
                         self.operation_phase('media-playlist')
                         entries, final = media_playlist(url)
-                    if self.stop.is_set():
+                    if not self.checkpoint():
                         break
                     self.playlist_entries = len(entries)
                     # Resolve the master only once per source refresh.
@@ -1196,15 +1230,15 @@ class Channel:
                         if e['seq'] not in cached:
                             cached[e['seq']] = self._submit_segment(pool, e['url'])
                     for e, following in zip(wanted, wanted[1:]):
-                        if self.stop.is_set():
+                        if not self.checkpoint():
                             break
                         if following['seq'] != e['seq']+1 or following['discontinuity']:
                             raise NativeError('source-boundary-not-proven')
                         self.operation_phase('segment-download')
-                        current_download = cached[e['seq']].result()
-                        next_download = cached[following['seq']].result()
+                        current_download = self._await_future(cached[e['seq']])
+                        next_download = self._await_future(cached[following['seq']])
                         raw, lookahead = current_download[0], next_download[0]
-                        if self.stop.is_set():
+                        if not self.checkpoint():
                             break
                         self.last_segment_bytes = len(raw)
                         self.operation_phase('ts-analysis')
@@ -1226,28 +1260,37 @@ class Channel:
                         # its completeness bit changes; reuse the parsed TS.
                         analysis = replace(analysis, nals=analysis.nals[:-1]+(
                             replace(analysis.nals[-1], complete=True),))
-                        if self.stop.is_set():
+                        if not self.checkpoint():
                             break
                         self.operation_phase('sdk-transform')
                         processed = engine.transform([analysis.nal_bytes(n) for n in analysis.nals])
-                        if self.stop.is_set():
+                        if not self.checkpoint():
                             break
                         converted = {n.payload_offset: value for n, value in zip(analysis.nals, processed)}
                         self.operation_phase('ts-repack')
                         output, _ = transform_pes_nals(raw, lambda n, _data: converted[n.payload_offset],
                                                    nal_types=(1, 5, 7), final_nal_complete=True, _prepared=analysis)
-                        if self.stop.is_set():
+                        if not self.checkpoint():
                             break
                         self.publish(output, e, pending_discontinuity or e['discontinuity'])
                         rejected_sources = 0
                         pending_discontinuity, last_seq, last_progress = False, e['seq'], time.monotonic()
-                    if self.stop.is_set():
+                    if not self.checkpoint():
                         break
                     cached = {k:v for k,v in cached.items() if last_seq is None or k > last_seq}
                     analyses = {k:v for k,v in analyses.items() if k in cached}
                     if time.monotonic()-last_progress > 30:
                         raise NativeError('source-media-stalled')
                     failures, self.last_transport_error = 0, ''
+                except ResumePreparation as resumed:
+                    for task in cached.values():
+                        task.cancel()
+                    cached, analyses = {}, {}
+                    if resumed.reset_sequence:
+                        last_seq, current_source, pending_discontinuity = None, None, True
+                    # Time spent parked is not an upstream progress failure.
+                    last_progress = time.monotonic()
+                    continue
                 except UnsupportedSource as error:
                     self.last_source_rejection = dict(error.details)
                     print('[cctv-native] source-rejected channel='+self.channel_id+' '+
@@ -1304,6 +1347,7 @@ class Channel:
             cancel_preparation.set()
             if engine:
                 engine.close()
+            self.native_context_closed()
             with self.condition:
                 self.engine = None
                 self.ring.clear()
@@ -1699,17 +1743,117 @@ class ManagedChannel(Channel):
     def __init__(self, args, slots):
         super().__init__(args)
         self.slots = slots
+        self.slot_held = False
+        self.parked_at = 0
+        self.resume_pending = False
+        self.resume_reset_sequence = False
+        self.cache_hits = 0
+        self.cache_buffer_hits = 0
+        self.resumed_at = 0
+        self.resume_ready_seconds = None
+        self.cache_ttl = getattr(args, 'recent_channel_seconds', 15)
+
+    def retire(self):
+        with self.condition:
+            self.stop.set()
+            self.parked_at = 0
+            self.condition.notify_all()
+
+    def park(self):
+        with self.condition:
+            if (not self.cache_ttl or self.stop.is_set() or self.state != 'ready'
+                    or not self.thread or not self.thread.is_alive()):
+                self.retire()
+                return
+            # Keep only two latest validated outputs while the VM is parked.
+            while len(self.ring) > 2:
+                _, old = self.ring.popitem(last=False)
+                self.size -= len(old[0])
+                self.discarded_discontinuities += bool(old[2])
+            self.parked_at = time.monotonic()
+            self.condition.notify_all()
+
+    def resume(self):
+        with self.condition:
+            now = time.monotonic()
+            if (not self.parked_at or self.stop.is_set() or not self.thread or not self.thread.is_alive()
+                    or now-self.parked_at >= self.cache_ttl or self.state != 'ready'):
+                return False
+            durations = sum(item[1] for item in self.ring.values())
+            fresh = (len(self.ring) >= 2 and self.last_published_at > 0
+                     and now-self.last_published_at <= min(8, durations))
+            self.parked_at = 0
+            self.resume_pending = True
+            self.resume_reset_sequence = not fresh
+            self.last_request = now
+            self.resumed_at = now
+            self.resume_ready_seconds = 0.0 if fresh else None
+            self.cache_hits += 1
+            self.cache_buffer_hits += bool(fresh)
+            if not fresh:
+                # Never expose a frozen live window as a fast cache hit.
+                self.ring.clear()
+                self.size = self.counter = self.discarded_discontinuities = 0
+                self.generation = uuid.uuid4().hex
+                self.state = 'source'
+            print('[cctv-native] cache-resume channel='+self.channel_id+
+                  ' fresh_buffer='+str(fresh).lower(), flush=True)
+            self.condition.notify_all()
+            return True
+
+    def checkpoint(self):
+        with self.condition:
+            while self.parked_at and not self.stop.is_set():
+                remaining = self.cache_ttl-(time.monotonic()-self.parked_at)
+                if remaining <= 0:
+                    self.stop.set()
+                    self.parked_at = 0
+                    break
+                self.condition.wait(min(.25, remaining))
+            if self.stop.is_set():
+                return False
+            if self.resume_pending:
+                self.resume_pending = False
+                raise ResumePreparation(self.resume_reset_sequence)
+            return True
+
+    def publish(self, body, entry, discontinuity):
+        # Selection can change between the owner's pre-publish check and lock.
+        # Make the final check atomic with exposing a new cached segment.
+        with self.condition:
+            if self.checkpoint():
+                super().publish(body, entry, discontinuity)
+                if self.resumed_at and self.resume_ready_seconds is None and self.state == 'ready':
+                    self.resume_ready_seconds = round(time.monotonic()-self.resumed_at,3)
+                    print('[cctv-native] cache-media-ready seconds='+str(self.resume_ready_seconds)+
+                          ' channel='+self.channel_id, flush=True)
+
+    def snapshot(self):
+        result = super().snapshot()
+        with self.condition:
+            result.update(parked=bool(self.parked_at), cache_hits=self.cache_hits,
+                          cache_buffer_hits=self.cache_buffer_hits,
+                          resume_ready_seconds=self.resume_ready_seconds,
+                          buffer_age_seconds=round(time.monotonic()-self.last_published_at,3)
+                          if self.last_published_at else None)
+        return result
+
+    def native_context_closed(self):
+        if self.slot_held:
+            self.slot_held = False
+            self.slots.release()
 
     def run(self):
-        # SDKs are created/released only in their owner thread. Fast switching
-        # cannot accumulate an unbounded number of native contexts.
+        # Only the owner closes JSC. Release its slot before waiting on any
+        # already-running HTTP reads; eviction cannot hold a new VM hostage.
         while not self.stop.is_set():
             if self.slots.acquire(timeout=.2):
+                self.slot_held = True
                 try:
                     if not self.stop.is_set():
                         super().run()
                 finally:
-                    self.slots.release()
+                    self.native_context_closed()
                 return
 
 
@@ -1730,11 +1874,20 @@ class ChannelManager:
                 raise NativeError('service-stopping')
             if self.current == cid:
                 return self.channels[cid]
-            if self.current:
-                previous = self.channels[self.current]
-                previous.stop.set()
-                with previous.condition:
-                    previous.condition.notify_all()
+            previous = self.channels.get(self.current)
+            target = self.channels.get(cid)
+            # At most current + one most recent parked channel. Retire the
+            # older VM before creating a third candidate; semaphore stays 2.
+            for other in self.channels.values():
+                if other is not previous and other is not target:
+                    other.retire()
+            if previous:
+                previous.park()
+            if target is not None and target.resume():
+                self.current = cid
+                return target
+            if target:
+                target.retire()
             args = SimpleNamespace(**vars(self.args))
             args.channel_id = cid
             channel = ManagedChannel(args, self.slots)
@@ -1753,6 +1906,9 @@ class ChannelManager:
             result.update(current_channel=self.current, channel_count=len(PUBLISHED_CHANNELS),
                           channels=[{'id':cid,'name':name} for cid,name in PUBLISHED_CHANNELS.items()],
                           native_context_limit=2,
+                          recent_channel_seconds=getattr(self.args,'recent_channel_seconds',15),
+                          recent_channels=[c.channel_id for c in self.channels.values()
+                                           if c.parked_at and not c.stop.is_set()],
                           source_api_tls=('TLSv1.2-legacy-server' if _API_LEGACY_ENABLED and _API_LEGACY_PREFERRED else
                                           'TLSv1.2' if _API_TLS12_PREFERRED else 'default'))
             return result
@@ -1761,9 +1917,7 @@ class ChannelManager:
         with self.lock:
             self.closed = True
             for channel in self.channels.values():
-                channel.stop.set()
-                with channel.condition:
-                    channel.condition.notify_all()
+                channel.retire()
         # No cross-thread JSC calls and no HTTP thread blocked on VM teardown.
 
 
@@ -1851,13 +2005,15 @@ def main(argv=None):
     parser.add_argument('--no-legacy-source-tls',action='store_true',help='关闭仅官方取源接口的旧服务器握手兼容')
     parser.add_argument('--parallel-prepare',action=argparse.BooleanOptionalAction,default=True,
                         help='并行初始化组件与准备首批分片；--no-parallel-prepare 可关闭')
+    parser.add_argument('--recent-channel-seconds', type=int, default=15,
+                        help='最近一个频道的组件保留秒数（0 关闭，最多 30）；过旧分片不直接播放')
     parser.add_argument('--buffer-mb', type=int, default=32)
     parser.add_argument('--idle-timeout', type=int, default=120)
     parser.add_argument('--jscore-library', default=APPLE_FRAMEWORK, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     _API_LEGACY_ENABLED = not args.no_legacy_source_tls
-    if not 1 <= args.port <= 65535 or not 16 <= args.buffer_mb <= 256 or not 30 <= args.idle_timeout <= 3600:
-        parser.error('invalid port/buffer/idle timeout')
+    if not 1 <= args.port <= 65535 or not 16 <= args.buffer_mb <= 256 or not 30 <= args.idle_timeout <= 3600 or not 0 <= args.recent_channel_seconds <= 30:
+        parser.error('invalid port/buffer/idle timeout/recent channel seconds')
     manager = ChannelManager(args)
     server = ThreadingHTTPServer((args.bind, args.port), MultiChannelHandler)
     server.daemon_threads = True
