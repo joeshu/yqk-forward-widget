@@ -1,0 +1,154 @@
+{
+  "version": "0.8.0",
+  "provider": "android",
+  "runtime_external_playlist_read": false,
+  "ios_tested": false,
+  "standalone_catalogue_http": 200,
+  "standalone_channels": 123,
+  "status": {
+    "api_requests": 0,
+    "authorization": "anonymous",
+    "cache_hits": 0,
+    "cache_success_seconds": 300,
+    "catalogue_ready": true,
+    "channels": 123,
+    "client": "android",
+    "client_dispatch": true,
+    "epg": {
+      "cache_error": null,
+      "concurrency": 8,
+      "enabled": true,
+      "last_error": null,
+      "ready": false,
+      "refreshing": false,
+      "source": "migu-official",
+      "storage": "memory",
+      "updated_utc": null,
+      "upstream_error": null
+    },
+    "external_playlist": false,
+    "h265": true,
+    "hdr": true,
+    "last_error": null,
+    "last_upstream": null,
+    "mode": "redirect",
+    "playback_verified": false,
+    "process_up": true,
+    "provider": "migu-android",
+    "quality": 3,
+    "request_profile": "legacy720p",
+    "runtime": {
+      "main_thread": true,
+      "network_concurrency": 8,
+      "platform": "linux",
+      "python": "3.12.14"
+    },
+    "service": "migu-live",
+    "source_transport": "https",
+    "storage": "memory",
+    "version": "0.8.0"
+  },
+  "checked_at": "2026-10-20T05:51:55.121952+00:00",
+  "actual_samples": [
+    {
+      "channel": "CCTV1综合",
+      "video_decoded": false,
+      "local_entry_http": 403,
+      "upstream_error": "MIGU_REGION_RESTRICTED",
+      "error": "RuntimeError"
+    },
+    {
+      "channel": "CCTV2财经",
+      "video_decoded": false,
+      "local_entry_http": 403,
+      "upstream_error": "MIGU_REGION_RESTRICTED",
+      "error": "RuntimeError"
+    },
+    {
+      "channel": "CCTV13新闻",
+      "video_decoded": false,
+      "local_entry_http": 403,
+      "upstream_error": "MIGU_REGION_RESTRICTED",
+      "error": "RuntimeError"
+    }
+  ],
+  "video_decoded": false,
+  "diagnostics": {
+    "events": [
+      {
+        "code": "HTTP_SERVER_STARTED",
+        "message": "本地 HTTP 服务已启动",
+        "time_utc": "2026-10-20T05:51:55+00:00"
+      },
+      {
+        "code": "MIGU_REGION_RESTRICTED",
+        "message": "咪咕限制当前出口地区",
+        "time_utc": "2026-10-20T05:51:56+00:00",
+        "upstream": {
+          "api_code": "COPYRIGHT_AREA_INVALID",
+          "channel_id": "608807420"
+        }
+      }
+    ],
+    "runtime": {
+      "main_thread": true,
+      "network_concurrency": 8,
+      "platform": "linux",
+      "python": "3.12.14"
+    },
+    "service": "migu-live",
+    "status": {
+      "api_requests": 3,
+      "authorization": "anonymous",
+      "cache_hits": 3,
+      "cache_success_seconds": 300,
+      "catalogue_ready": true,
+      "channels": 123,
+      "client": "android",
+      "client_dispatch": true,
+      "epg": {
+        "cache_error": null,
+        "concurrency": 8,
+        "enabled": true,
+        "last_error": null,
+        "ready": false,
+        "refreshing": false,
+        "source": "migu-official",
+        "storage": "memory",
+        "updated_utc": null,
+        "upstream_error": null
+      },
+      "external_playlist": false,
+      "h265": true,
+      "hdr": true,
+      "last_error": "MIGU_REGION_RESTRICTED",
+      "last_upstream": {
+        "api_code": "COPYRIGHT_AREA_INVALID",
+        "channel_id": "608807423"
+      },
+      "playback_verified": false,
+      "provider": "migu-android",
+      "quality": 3,
+      "request_profile": "legacy720p",
+      "source_transport": "https",
+      "storage": "memory"
+    },
+    "version": "0.8.0"
+  },
+  "shutdown_exit_code": 0,
+  "shutdown_seconds": 0.047,
+  "legacy09_diagnostic": {
+    "purpose": "Check documented legacy09 candidate, not a fallback or identity rotation",
+    "playback_verified": false,
+    "upstream": {
+      "channel_id": "608807420",
+      "api_code": "403",
+      "rid": "COPYRIGHT_AREA_INVALID",
+      "auth_result": "UNKNOWN",
+      "logged_in": null,
+      "has_play_url": false,
+      "returned_quality": "UNKNOWN"
+    },
+    "error": "MIGU_REGION_RESTRICTED"
+  }
+}

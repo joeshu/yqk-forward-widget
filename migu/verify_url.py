@@ -48,9 +48,9 @@ def analyse(url):
         try:
             legacy = native_proof(pu_data, pid, timestamp, auth, 3)
             result["legacy_match"] = bool(given) and legacy == given
-        except (ValueError, IndexError):
+        except (ValueError, IndexError, m.UpdateError):
             result["legacy_match"] = False
-        modern = a.dd_calcu(pu_data, pid, 3)
+        modern = a.dd_calcu(pu_data, pid, 3, timestamp=timestamp)
         result["modern_match"] = bool(given) and modern == given
     return result
 

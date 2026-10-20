@@ -29,7 +29,7 @@ class RequestTests(unittest.TestCase):
         self.assertTrue(url.startswith(a.PLAYURL + "?sign="))
         self.assertIn("&rateType=3&contId=631780532&timestamp=", url)
         self.assertIn("&salt=1230024&flvEnable=true&super4k=true&h265N=true&4kvivid=true", url)
-        self.assertEqual(headers["AppVersion"], "26000370")
+        self.assertEqual(headers["AppVersion"], "2600037000")
         self.assertEqual(headers["X-UP-CLIENT-CHANNEL-ID"], "2600037000-99000-200300220100002")
         self.assertEqual(headers["UserId"], "12345678")
 
@@ -62,7 +62,7 @@ class SettingsTests(unittest.TestCase):
                     a.AndroidSettings.load(environ)
 
     def test_client_identity_is_validated_before_use(self):
-        self.assertEqual(a.AndroidSettings.load({"MIGU_APP_VERSION": "2600000900"}).app_version, "2600000900")
+        self.assertEqual(a.AndroidSettings.load({"MIGU_APP_VERSION": "2600037000"}).app_version, "2600037000")
         for environ in ({"MIGU_APP_VERSION": "abc"}, {"MIGU_APP_CODE": "bad code"},
                         {"MIGU_CLIENT_CHANNEL_ID": "x"}):
             with self.subTest(environ=environ):
@@ -70,9 +70,9 @@ class SettingsTests(unittest.TestCase):
                     a.AndroidSettings.load(environ)
 
     def test_configured_version_reaches_header_and_signature_input(self):
-        settings = a.AndroidSettings.load({"MIGU_APP_VERSION": "2600000900"})
+        settings = a.AndroidSettings.load({"MIGU_APP_VERSION": "2600037000"})
         url, headers = a.playurl_request("631780532", 3, settings=settings)
-        self.assertEqual(headers["AppVersion"], "2600000900")
+        self.assertEqual(headers["AppVersion"], "2600037000")
         self.assertIn("sign=", url)
 
     def test_defaults_are_guest_720p_with_scan_protection(self):
@@ -106,7 +106,7 @@ class ResolveTests(unittest.TestCase):
         refused = json.dumps({"rid": "TIPS_NEED_MEMBER", "body": {"urlInfo": {"rateType": 3}}}).encode()
         client = Mock()
         client.get.side_effect = [(refused, {}), (self.payload(), {})]
-        url = a.android_play_url("631780532", a.AndroidSettings(rate_type=4), client_factory=Mock(return_value=client))
+        url = a.android_play_url("631780532", a.AndroidSettings(rate_type=4,user_id="123456789",token="test-token"), client_factory=Mock(return_value=client))
         self.assertIn("ddCalcu=", url)
         self.assertEqual(client.get.call_count, 2)
         self.assertIn("rateType=3", client.get.call_args_list[1].args[0])

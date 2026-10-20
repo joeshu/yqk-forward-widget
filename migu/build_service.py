@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INPUTS = ('migu/core.py', 'migu/workers.py', 'migu/native.py', 'migu/android.py', 'migu/source.py', 'migu/epg.py', 'migu/service.py')
-VERSION = '0.7.1'
+VERSION = '0.8.0'
 
 
 def strip_module(text):
@@ -34,12 +34,16 @@ def build():
     native_tree = ast.parse(sources['migu/native.py'])
     settings_node = next(node for node in native_tree.body if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'NATIVE_SETTINGS' for t in node.targets))
     settings_text = '\n'.join(sources['migu/native.py'].splitlines()[settings_node.lineno-1:settings_node.end_lineno])
+    android_tree = ast.parse(sources['migu/android.py'])
+    options_node = next(node for node in android_tree.body if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'ANDROID_OPTIONS' for t in node.targets))
+    options_text = '\n'.join(sources['migu/android.py'].splitlines()[options_node.lineno-1:options_node.end_lineno])
     text = ('#!/usr/bin/env python3\n'
             f'"""Migu dynamic service {VERSION}. Standalone Python 3.10+, standard library only."""\n'
             'from __future__ import annotations\n\n'
             '# Edit only this block for protocol settings and your own credentials.\n'
             '# Environment MIGU_USER_ID / MIGU_USER_TOKEN override the two account fields.\n'
-            + settings_text + '\n\n'
+            + '# Default Android provider settings:\n' + options_text + '\n\n'
+            + '# Optional native provider settings:\n' + settings_text + '\n\n'
             + '# Bounded transport and HLS validation: migu/core.py\n'
             + strip_module(sources['migu/core.py'])
             + '\nfrom types import SimpleNamespace as _SharedNamespace\n'
@@ -48,6 +52,8 @@ def build():
         module = strip_module(sources[path])
         if path == 'migu/native.py':
             module = module.replace(settings_text, '# NATIVE_SETTINGS is defined at the top of this file.', 1)
+        if path == 'migu/android.py':
+            module = module.replace(options_text, '# ANDROID_OPTIONS is defined at the top of this file.', 1)
         text += f'\n# {path}\n' + module
     text += '\nif __name__ == "__main__":\n    raise SystemExit(main())\n'
     ast.parse(text)

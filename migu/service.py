@@ -28,7 +28,7 @@ from migu.source import ListStore, CATCHUP_SOURCE, list_catchup
 from migu.epg import EpgStore
 from migu.workers import BoundedExecutor
 
-VERSION = "0.7.1"
+VERSION = "0.8.0"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
@@ -333,8 +333,8 @@ class Handler(BaseHTTPRequestHandler):
             details = getattr(error, "details", None)
             service.diagnostics.record(str(error), details)
             code = str(error)
-            status = 403 if code in {"MIGU_AUTHORIZATION_REJECTED", "MIGU_LOGIN_REQUIRED", "MIGU_MEMBERSHIP_REQUIRED", "MIGU_REGION_RESTRICTED"} else 404 if code == "EPG_DISABLED" else 503 if code in {"EPG_LOADING", "EPG_UNAVAILABLE", "MIGU_API_LOADING", "MIGU_API_CAPACITY"} or (code.startswith("EPG_") or code.startswith("LIST_") or code in {"SOURCE_SNAPSHOT_TOO_OLD", "TOO_FEW_CHANNELS"}) else 502
-            self.send_body(status, m.json_bytes({"error": code, **({"upstream": details} if details else {})}), **({"Retry_After": "3"} if status == 503 else {}))
+            status = 403 if code in {"MIGU_AUTHORIZATION_REJECTED", "MIGU_LOGIN_REQUIRED", "MIGU_MEMBERSHIP_REQUIRED", "MIGU_REGION_RESTRICTED", "MIGU_TERMINAL_BLOCKED", "MIGU_COPYRIGHT_SHIELD", "MIGU_CLIENT_VERSION_UPGRADE_REQUIRED"} else 429 if code == "MIGU_RESOLVE_BURST_LIMIT" else 404 if code == "EPG_DISABLED" else 503 if code in {"EPG_LOADING", "EPG_UNAVAILABLE", "MIGU_API_LOADING", "MIGU_API_CAPACITY"} or (code.startswith("EPG_") or code.startswith("LIST_") or code in {"SOURCE_SNAPSHOT_TOO_OLD", "TOO_FEW_CHANNELS"}) else 502
+            self.send_body(status, m.json_bytes({"error": code, **({"upstream": details} if details else {})}), **({"Retry_After": "60" if status == 429 else "3"} if status in {429,503} else {}))
         except (ValueError, OSError):
             self.send_body(400, m.json_bytes({"error": "REQUEST_OR_IO_ERROR"}))
 
@@ -429,7 +429,7 @@ def main(argv=None):
     parser.add_argument("--data-dir", type=Path, help="Only needed for a persistent service access token")
     parser.add_argument("--token-env", help="Environment variable holding the service access token")
     parser.add_argument("--require-token", action="store_true")
-    parser.add_argument("--provider", choices=("list","native","android"), default="list", help="list: signed published catalogue (default); android: Android playurl compatibility mode; native: legacy API mode")
+    parser.add_argument("--provider", choices=("list","native","android"), default="android", help="android: direct reference-compatible API (default); native: older API; list: explicit external catalogue")
     parser.add_argument("--list-source", choices=("auto","github","upstream"), default="auto")
     parser.add_argument("--mode", choices=("redirect", "manifest"), default="redirect")
     parser.add_argument("--epg-cache", action="store_true", help="Persist valid programme schedules; fall back to memory if unavailable")

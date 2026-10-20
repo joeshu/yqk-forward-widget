@@ -281,7 +281,14 @@ def native_play_url(pid, client_factory=m.HttpClient, auth=None):
             raise MiguApiError("MIGU_MEMBERSHIP_REQUIRED", details)
         if reason in {"NEED_LOGIN", "USER_NOT_LOGIN"}:
             raise MiguApiError("MIGU_LOGIN_REQUIRED", details)
+        refusals = {"BLACK_APP_OR_TERMINAL": "MIGU_TERMINAL_BLOCKED", "COPYRIGHT_SHIELD_INVALID": "MIGU_COPYRIGHT_SHIELD", "WUDALIANSAI_FUFEI_VERSION_UPGRADE": "MIGU_CLIENT_VERSION_UPGRADE_REQUIRED"}
+        if reason in refusals:
+            raise MiguApiError(refusals[reason], details)
+        if reason and reason != "SUCCESS":
+            raise MiguApiError("MIGU_API_REJECTED", details)
         auth_result = (body.get("auth") or {}).get("authResult")
+        if auth_result == "FAIL" and reason != "SUCCESS":
+            raise MiguApiError("MIGU_AUTHORIZATION_REJECTED", details)
         if str(data.get("code")) != "200":
             raise MiguApiError("MIGU_API_REJECTED", details)
         url = info.get("url")

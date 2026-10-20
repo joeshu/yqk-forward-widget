@@ -29,12 +29,12 @@ ANDROID_KEYS = "cdabyzwxkl"
 ANDROID_SUFFIX = "&sv=10004&ct=android"
 LEGACY_APP_VERSION = "2600034600"
 LEGACY_SUFFIX = "2cac4f2c6c3346a5b34e085725ef7e33migu"
-MODERN_APP_VERSION = "26000370"
+MODERN_APP_VERSION = "2600037000"
 MODERN_SUFFIX = "3ce941cc3cbc40528bfd1c64f9fdf6c0migu0123"
 MODERN_SALT = "1230024"
 FLV_DISABLED_PIDS = ("641886683", "641886773")
 PLAYURL = "https://play.miguvideo.com/playurl/v1/play/playurl"
-CACHE_SUCCESS = 3 * 60 * 60
+CACHE_SUCCESS = 5 * 60
 CACHE_FAILURE = 60
 BURST_WINDOW = 60.0
 BURST_LIMIT = 30
@@ -61,7 +61,7 @@ def _at(text, index):
     return text[index] if 0 <= index < len(text) else ""
 
 
-def dd_calcu(pu_data, program_id, rate_type, user_id="", *, legacy=False):
+def dd_calcu(pu_data, program_id, rate_type, user_id="", *, legacy=False, timestamp=None):
     """Build ddCalcu exactly as the reference implementation does.
 
     ``legacy`` selects the older 720p variant (fixed words, date digit 3).
@@ -69,7 +69,7 @@ def dd_calcu(pu_data, program_id, rate_type, user_id="", *, legacy=False):
     if not pu_data or not program_id:
         return ""
     words = ["v", "a", "0", "a"]
-    date = _date_string()
+    date = timestamp[:8] if timestamp and re.fullmatch(r"[0-9]{14}", timestamp) else _date_string()
     if legacy:
         words[0] = "v"
         date_index = 2
@@ -85,7 +85,7 @@ def dd_calcu(pu_data, program_id, rate_type, user_id="", *, legacy=False):
         program_index = 6
     out = []
     i = 0
-    while i * 2 < len(pu_data):
+    while i < len(pu_data) // 2:
         out.append(pu_data[len(pu_data) - i - 1])
         out.append(pu_data[i])
         if i == 1:
@@ -98,6 +98,8 @@ def dd_calcu(pu_data, program_id, rate_type, user_id="", *, legacy=False):
         elif i == 4:
             out.append(words[3])
         i += 1
+    if len(pu_data) % 2:
+        out.append(pu_data[len(pu_data)//2])
     return "".join(out)
 
 
@@ -123,7 +125,7 @@ def playurl_request(pid, rate_type, user_id="", token="", *, legacy=False, hdr=T
         sign = _md5(digest + LEGACY_SUFFIX + salt[:4])
         rate_type = 3
     else:
-        digest = _md5(timestamp + pid + (settings.app_version if settings else MODERN_APP_VERSION))
+        digest = _md5(timestamp + pid + (settings.app_version if settings else MODERN_APP_VERSION)[:8])
         salt = MODERN_SALT
         sign = _md5(digest + MODERN_SUFFIX)
     query = (f"?sign={sign}&rateType={rate_type}&contId={pid}&timestamp={timestamp}"
@@ -136,50 +138,64 @@ def playurl_request(pid, rate_type, user_id="", token="", *, legacy=False, hdr=T
                                       rate_type=rate_type, settings=settings)
 
 
-@dataclass(frozen=True)
+ANDROID_OPTIONS = {
+    "user_id": "", "token": "", "rate_type": 3,
+    "hdr": True, "h265": True, "client_dispatch": True,
+    "app_version": "2600037000", "app_code": "miguvideo_default_android",
+    "client_channel_id": "2600037000-99000-200300220100002",
+}
+
+
+@dataclass(frozen=True, repr=False)
 class AndroidSettings:
-    user_id: str = ""
-    token: str = ""
-    rate_type: int = 3
-    hdr: bool = True
-    h265: bool = True
-    client_dispatch: bool = True
+    user_id: str = ANDROID_OPTIONS["user_id"]
+    token: str = ANDROID_OPTIONS["token"]
+    rate_type: int = ANDROID_OPTIONS["rate_type"]
+    hdr: bool = ANDROID_OPTIONS["hdr"]
+    h265: bool = ANDROID_OPTIONS["h265"]
+    client_dispatch: bool = ANDROID_OPTIONS["client_dispatch"]
     # Compatibility knobs.  Set these to the values of your own installed,
     # officially released client.  They are not a licence to impersonate another
     # terminal: the upstream server still decides whether that client is allowed.
-    app_version: str = MODERN_APP_VERSION
-    app_code: str = "miguvideo_default_android"
-    client_channel_id: str = "2600037000-99000-200300220100002"
+    app_version: str = ANDROID_OPTIONS["app_version"]
+    app_code: str = ANDROID_OPTIONS["app_code"]
+    client_channel_id: str = ANDROID_OPTIONS["client_channel_id"]
 
     @classmethod
     def load(cls, environ=None):
         environ = os.environ if environ is None else environ
-        user_id = environ.get("MIGU_USER_ID", "").strip()
-        token = environ.get("MIGU_USER_TOKEN", "").strip()
+        user_id = environ.get("MIGU_USER_ID", ANDROID_OPTIONS["user_id"]).strip()
+        token = environ.get("MIGU_USER_TOKEN", ANDROID_OPTIONS["token"]).strip()
         if bool(user_id) != bool(token):
             raise m.UpdateError("MIGU_CREDENTIALS_INCOMPLETE")
         for value in (user_id, token):
-            if any(ch in value for ch in "\r\n\t") or not m.clean_text(value):
+            if len(value) > 4096 or any(not 33 <= ord(ch) <= 126 for ch in value):
                 raise m.UpdateError("MIGU_CREDENTIALS_INVALID")
         try:
-            rate_type = int(environ.get("MIGU_RATE_TYPE", "3"))
+            rate_type = int(environ.get("MIGU_RATE_TYPE", str(ANDROID_OPTIONS["rate_type"])))
         except ValueError:
             raise m.UpdateError("MIGU_RATE_TYPE_INVALID") from None
         if rate_type not in {2, 3, 4, 7, 8, 9}:
             raise m.UpdateError("MIGU_RATE_TYPE_INVALID")
-        app_version = environ.get("MIGU_APP_VERSION", MODERN_APP_VERSION).strip()
+        app_version = environ.get("MIGU_APP_VERSION", ANDROID_OPTIONS["app_version"]).strip()
         if re.fullmatch(r"[0-9]{6,12}", app_version) is None:
             raise m.UpdateError("MIGU_APP_VERSION_INVALID")
-        app_code = environ.get("MIGU_APP_CODE", "miguvideo_default_android").strip()
+        if app_version == "26000370":
+            app_version = "2600037000"
+        if app_version[:8] in {"26000009", "26000346"}:
+            raise m.UpdateError("MIGU_PROTOCOL_PROFILE_MISMATCH")
+        app_code = environ.get("MIGU_APP_CODE", ANDROID_OPTIONS["app_code"]).strip()
         if re.fullmatch(r"[A-Za-z0-9_]{1,64}", app_code) is None:
             raise m.UpdateError("MIGU_APP_CODE_INVALID")
-        channel_id = environ.get("MIGU_CLIENT_CHANNEL_ID", "2600037000-99000-200300220100002").strip()
+        channel_id = environ.get("MIGU_CLIENT_CHANNEL_ID", ANDROID_OPTIONS["client_channel_id"]).strip()
         if re.fullmatch(r"[A-Za-z0-9_-]{8,64}", channel_id) is None:
             raise m.UpdateError("MIGU_CLIENT_CHANNEL_ID_INVALID")
+        if environ.get("MIGU_CLIENT_DISPATCH", "1" if ANDROID_OPTIONS["client_dispatch"] else "0") == "0":
+            raise m.UpdateError("MIGU_SERVER_DISPATCH_UNSUPPORTED")
         return cls(user_id=user_id, token=token, rate_type=rate_type,
-                   hdr=environ.get("MIGU_HDR", "1") != "0",
-                   h265=environ.get("MIGU_H265", "1") != "0",
-                   client_dispatch=environ.get("MIGU_CLIENT_DISPATCH", "1") != "0",
+                   hdr=environ.get("MIGU_HDR", "1" if ANDROID_OPTIONS["hdr"] else "0") != "0",
+                   h265=environ.get("MIGU_H265", "1" if ANDROID_OPTIONS["h265"] else "0") != "0",
+                   client_dispatch=environ.get("MIGU_CLIENT_DISPATCH", "1" if ANDROID_OPTIONS["client_dispatch"] else "0") != "0",
                    app_version=app_version, app_code=app_code, client_channel_id=channel_id)
 
 
@@ -193,6 +209,10 @@ def _fetch_json(client, url, headers):
         raise MiguApiError("MIGU_API_FORMAT_CHANGED") from None
     if not isinstance(payload, dict):
         raise MiguApiError("MIGU_API_FORMAT_CHANGED")
+    body = payload.get("body")
+    if body is not None:
+        if not isinstance(body, dict) or any(body.get(key) is not None and not isinstance(body[key], dict) for key in ("urlInfo", "content", "auth")):
+            raise MiguApiError("MIGU_API_FORMAT_CHANGED")
     return payload
 
 
@@ -201,10 +221,17 @@ def android_play_url(pid, settings, client_factory=m.HttpClient):
     if pid not in {item[0] for item in BUILTIN_CHANNELS}:
         raise MiguApiError("MIGU_UNKNOWN_CHANNEL")
     client = client_factory("api", attempts=1, timeout=8, budget=12)
-    legacy = settings.rate_type == 2
-    sends_account = (not legacy and settings.user_id and settings.token)
+    legacy = settings.rate_type >= 3 and not (settings.user_id and settings.token)
+    sends_account = bool(not legacy and settings.rate_type != 2 and settings.user_id and settings.token)
+    deadline = time.monotonic() + 12
+    attempted = set()
 
     def call(rate):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise m.FetchError("FETCH_BUDGET_EXCEEDED")
+        client.budget = remaining
+        attempted.add(rate)
         url, headers = playurl_request(pid, rate, settings.user_id if sends_account else "",
                                        settings.token if sends_account else "",
                                        legacy=legacy, hdr=settings.hdr, h265=settings.h265,
@@ -212,35 +239,66 @@ def android_play_url(pid, settings, client_factory=m.HttpClient):
         m.validate_url(url, "api")
         return _fetch_json(client, url, headers)
 
-    payload = call(settings.rate_type)
-    if payload.get("rid") == "TIPS_NEED_MEMBER":
+    payload = call(3 if legacy else settings.rate_type)
+    # Only request a genuinely lower supported tier. Never repeat or upgrade on denial.
+    for _ in range(2):
+        if payload.get("rid") != "TIPS_NEED_MEMBER":
+            break
         info = (payload.get("body") or {}).get("urlInfo") or {}
         try:
             offered = int(info.get("rateType", 0))
         except (TypeError, ValueError):
             offered = 0
-        fallback = 4 if offered >= 4 else 3
+        current = min(attempted)
+        fallback = 4 if offered >= 4 and current > 4 else 3
+        if fallback >= current or fallback in attempted:
+            break
         payload = call(fallback)
-        if payload.get("rid") == "TIPS_NEED_MEMBER" and fallback != 3:
-            payload = call(3)
 
     rid = payload.get("rid")
     if rid != "SUCCESS":
         raise MiguApiError(RID_MESSAGES.get(rid, "MIGU_API_REJECTED"),
                            {"api_code": str(rid or "")[:80], "channel_id": pid})
+    code = payload.get("code")
+    if code is not None and str(code) != "200":
+        raise MiguApiError("MIGU_API_REJECTED", {"api_code": str(code), "channel_id": pid})
     body = payload.get("body") or {}
     info = body.get("urlInfo") or {}
+    if not isinstance(body, dict) or not isinstance(info, dict):
+        raise MiguApiError("MIGU_API_FORMAT_CHANGED")
     url = info.get("url")
-    if not url:
+    if not isinstance(url, str) or not url:
         raise MiguApiError("MIGU_PLAY_URL_MISSING", {"api_code": str(rid)[:80], "channel_id": pid})
     m.validate_url(url, "stream")
     query = parse_qs(urlsplit(url).query, keep_blank_values=True)
-    pu_data = query.get("puData", [""])[0]
-    program_id = ((body.get("content") or {}).get("contId")) or pid
-    proof = dd_calcu(pu_data, program_id, info.get("rateType", settings.rate_type), settings.user_id, legacy=legacy)
-    if not proof:
+    content = body.get("content") or {}
+    if not isinstance(content, dict):
+        raise MiguApiError("MIGU_API_FORMAT_CHANGED")
+    program_id = str(content.get("contId") or pid)
+    if program_id != pid or ("ProgramID" in query and query["ProgramID"] != [pid]):
+        raise MiguApiError("MIGU_CHANNEL_MISMATCH")
+    if "ddCalcu" in query:
+        if len(query["ddCalcu"]) != 1 or not query["ddCalcu"][0]:
+            raise MiguApiError("MIGU_PLAY_URL_FORMAT_CHANGED")
+        return url
+    seeds = query.get("puData", [])
+    stamps = query.get("timestamp", [])
+    if len(seeds) != 1 or re.fullmatch(r"[0-9a-fA-F]{6,128}", seeds[0]) is None or len(stamps) != 1 or re.fullmatch(r"[0-9]{14}", stamps[0]) is None:
         raise MiguApiError("MIGU_PLAY_URL_FORMAT_CHANGED")
-    return url + "&ddCalcu=" + proof + ANDROID_SUFFIX
+    try:
+        returned_rate = int(info.get("rateType", 3 if legacy else settings.rate_type))
+    except (TypeError, ValueError):
+        raise MiguApiError("MIGU_API_FORMAT_CHANGED") from None
+    if returned_rate not in {2,3,4,7,8,9}:
+        raise MiguApiError("MIGU_API_FORMAT_CHANGED")
+    proof = dd_calcu(seeds[0], pid, returned_rate, settings.user_id if sends_account else "", legacy=legacy, timestamp=stamps[0])
+    suffix = "&ddCalcu=" + proof
+    for key, value in (("sv", "10004"), ("ct", "android")):
+        if key in query and query[key] != [value]:
+            raise MiguApiError("MIGU_PLAY_URL_FORMAT_CHANGED")
+        if key not in query:
+            suffix += "&" + key + "=" + value
+    return url + suffix
 
 
 @dataclass(frozen=True)
@@ -338,7 +396,9 @@ class AndroidStore:
                     "authorization": "configured-account" if self.settings.user_id else "anonymous",
                     "external_playlist": False, "client": "android",
                     "hdr": self.settings.hdr, "h265": self.settings.h265,
-                    "client_dispatch": self.settings.client_dispatch}
+                    "client_dispatch": self.settings.client_dispatch,
+                    "request_profile": "legacy720p" if self.settings.rate_type >= 3 and not self.settings.user_id else "modern",
+                    "cache_success_seconds": CACHE_SUCCESS}
 
     def close(self):
         with self.lock:

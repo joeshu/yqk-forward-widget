@@ -66,6 +66,7 @@ class NativeTests(unittest.TestCase):
         # The server may hand out a playable guest stream while authResult is FAIL;
         # the address must be served, not discarded (reference behaviour).
         response=self.response('http://gslbmgsplive.miguvideo.com/live/index.m3u8?ddCalcu=private')
+        response['rid']='SUCCESS'
         response['body']['auth']={'authResult':'FAIL','logined':False,'resultDesc':'private description'}
         factory,_=self.api(response)
         self.assertEqual(n.native_play_url('608807420',factory),'http://gslbmgsplive.miguvideo.com/live/index.m3u8?ddCalcu=private')

@@ -11,15 +11,15 @@ class AuthConfigTests(unittest.TestCase):
     def auth(self, **changes):
         return n.NativeAuth.load({**n.NATIVE_SETTINGS, **changes}, environ={})
 
-    def test_default_startup_uses_signed_list_without_native_resolver(self):
+    def test_default_startup_uses_android_without_external_list(self):
         server = Mock()
         server.serve_forever.side_effect = KeyboardInterrupt
         store = Mock()
-        store.provider = 'published-list'
+        store.provider = 'migu-android'
         store.get.return_value = Mock(channels={})
-        with patch.object(s, 'ListStore', return_value=store) as selected, patch.object(s, 'NativeStore', side_effect=AssertionError('experimental API selected')), patch.object(s, 'BoundedServer', return_value=server):
+        with patch.object(s, 'AndroidStore', return_value=store) as selected, patch.object(s, 'ListStore', side_effect=AssertionError('external list selected')), patch.object(s, 'NativeStore', side_effect=AssertionError('experimental API selected')), patch.object(s, 'BoundedServer', return_value=server):
             self.assertEqual(s.main([]), 0)
-        selected.assert_called_once_with('auto')
+        selected.assert_called_once_with()
 
     def test_changed_protocol_settings_are_used_and_credentials_are_headers_only(self):
         auth = self.auth(app_version='2600099900', client_channel='test-channel', sign_salt='1111111', sign_suffix='test-protocol-key', user_id='123456789', user_token='test-account-token', rate_type=3)
@@ -46,7 +46,7 @@ class AuthConfigTests(unittest.TestCase):
     def test_account_denial_serves_guest_address_without_leaking_credentials(self):
         auth=self.auth(user_id='123456789',user_token='test-account-token',rate_type=3)
         client=Mock()
-        client.get.return_value=(json.dumps({'code':'200','body':{'auth':{'authResult':'FAIL','logined':True},'urlInfo':{'url':'http://gslbmgsplive.miguvideo.com/live/index.m3u8?ddCalcu=secret'}}}).encode(),{})
+        client.get.return_value=(json.dumps({'code':'200','rid':'SUCCESS','body':{'auth':{'authResult':'FAIL','logined':True},'urlInfo':{'url':'http://gslbmgsplive.miguvideo.com/live/index.m3u8?ddCalcu=secret'}}}).encode(),{})
         self.assertEqual(n.native_play_url('608807420',Mock(return_value=client),auth=auth),
                          'http://gslbmgsplive.miguvideo.com/live/index.m3u8?ddCalcu=secret')
         denied=n.MiguApiError('MIGU_AUTHORIZATION_REJECTED',{'channel_id':'608807420','has_play_url':False})
