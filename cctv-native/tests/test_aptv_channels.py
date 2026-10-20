@@ -36,6 +36,7 @@ class TestMultiChannelHTTP(unittest.TestCase):
         self.assertIn(b'/cctvjilu.m3u8',body)
         self.assertIn(b'/cctvchild.m3u8',body)
         self.assertNotIn(b'/cctv5.m3u8',body)
+        self.assertNotIn(b'/cctv9.m3u8',body)
         self.assertIsNone(self.manager.current)
         self.assertEqual(self.request('/all.m3u',host='invalid@host')[0],400)
 

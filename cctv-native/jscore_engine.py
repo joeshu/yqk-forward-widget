@@ -26,12 +26,21 @@ class JSContext:
                 ('JSStringRelease', None, [p]),
                 ('JSEvaluateScript', p, [p, p, p, p, c.c_int, c.POINTER(p)]),
                 ('JSValueToStringCopy', p, [p, p, c.POINTER(p)]),
+                ('JSValueToObject', p, [p, p, c.POINTER(p)]),
                 ('JSStringGetMaximumUTF8CStringSize', c.c_size_t, [p]),
                 ('JSStringGetUTF8CString', c.c_size_t, [p, p, c.c_size_t]),
             ]
             for name, result, arguments in signatures:
                 function = getattr(self.library, name)
                 function.restype, function.argtypes = result, arguments
+            self.buffer_api = True
+            for name, result in (('JSObjectGetTypedArrayBytesPtr',p),
+                                 ('JSObjectGetTypedArrayByteLength',c.c_size_t)):
+                try:
+                    function = getattr(self.library,name)
+                    function.restype, function.argtypes = result, [p,p,c.POINTER(p)]
+                except AttributeError:
+                    self.buffer_api = False
             self.context = self.library.JSGlobalContextCreate(None)
             if not self.context:
                 raise NativeError('jscore-context-creation-failed')
@@ -71,6 +80,54 @@ class JSContext:
             if source:
                 j.JSStringRelease(source)
             j.JSContextGroupClearExecutionTimeLimit(self.group)
+
+    def _media_reference(self, expression):
+        if threading.get_ident() != self.owner or not self.context:
+            raise NativeError('jscore-wrong-thread-or-closed')
+        j = self.library
+        source = None
+        j.JSContextGroupSetExecutionTimeLimit(self.group,15,None,None)
+        try:
+            source = j.JSStringCreateWithUTF8CString(expression.encode('ascii'))
+            if not source:
+                raise NativeError('jscore-source-creation-failed')
+            exception = c.c_void_p()
+            value = j.JSEvaluateScript(self.context,source,None,None,1,c.byref(exception))
+            if exception.value or not value:
+                raise NativeError('jscore-media-buffer-failed')
+            # The object stays rooted in __mediaInput/__mediaOutput, not only
+            # in an unprotected native JSValueRef, during subsequent API calls.
+            obj = j.JSValueToObject(self.context,value,c.byref(exception))
+            if exception.value or not obj:
+                raise NativeError('jscore-media-buffer-object-failed')
+            return obj
+        finally:
+            if source:
+                j.JSStringRelease(source)
+            j.JSContextGroupClearExecutionTimeLimit(self.group)
+
+    def put_media(self, data):
+        if not self.buffer_api or not 0 < len(data) <= 16*1024*1024:
+            raise NativeError('jscore-media-buffer-invalid')
+        value = self._media_reference('__mediaInput=new Uint8Array('+str(len(data))+')')
+        exception = c.c_void_p()
+        pointer = self.library.JSObjectGetTypedArrayBytesPtr(self.context,value,c.byref(exception))
+        if exception.value or not pointer:
+            raise NativeError('jscore-media-buffer-pointer-failed')
+        # WebKit pointers are valid until the next JSC API call. Copy now;
+        # never retain the pointer across evaluate/GC or other API calls.
+        c.memmove(pointer,data,len(data))
+
+    def read_media(self, limit):
+        value = self._media_reference('__mediaOutput')
+        exception = c.c_void_p()
+        size = self.library.JSObjectGetTypedArrayByteLength(self.context,value,c.byref(exception))
+        if exception.value or not 0 < size <= limit:
+            raise NativeError('jscore-media-buffer-length-invalid')
+        pointer = self.library.JSObjectGetTypedArrayBytesPtr(self.context,value,c.byref(exception))
+        if exception.value or not pointer:
+            raise NativeError('jscore-media-buffer-pointer-failed')
+        return c.string_at(pointer,size)
 
     def close(self):
         if threading.get_ident() != self.owner:
@@ -153,6 +210,8 @@ class Engine:
                     raise NativeError('official-runtime-initialization-failed')
                 if state.get('init') and state.get('config') and state.get('pending') == 0:
                     self.context.evaluate(JSCORE_TRANSFORM)
+                    print('[cctv-native] media-transfer='+('typed-array' if self.context.buffer_api else 'base64')+
+                          ' channel='+getattr(args,'channel_id','cctv2'),flush=True)
                     return
                 time.sleep(0.01)
             raise NativeError('official-runtime-initialization-timeout')
@@ -190,7 +249,26 @@ class Engine:
             raise NativeError('engine-invalid-media-input')
         if sum(map(len, units)) > 16*1024*1024:
             raise NativeError('engine-message-too-large')
+        if not units:
+            return []
         self.pump()
+        if self.context.buffer_api:
+            lengths = list(map(len,units))
+            self.context.put_media(b''.join(units))
+            sizes = json.loads(self.context.evaluate('__transformBinary('+json.dumps(lengths)+')'))
+            if (not isinstance(sizes,list) or len(sizes)!=len(units)
+                    or any(type(size) is not int or not 0 < size <= length for size,length in zip(sizes,lengths))):
+                raise NativeError('engine-response-lengths-invalid')
+            raw = self.context.read_media(sum(lengths))
+            if sum(sizes) != len(raw):
+                raise NativeError('engine-response-lengths-invalid')
+            output,offset = [],0
+            for size in sizes:
+                output.append(raw[offset:offset+size]);offset+=size
+            self.context.evaluate('__mediaOutput=null;__mediaInput=null;')
+            if any(value[0]!=original[0] for original,value in zip(units,output)):
+                raise NativeError('engine-response-invalid')
+            return output
         encoded = json.dumps([base64.b64encode(x).decode() for x in units])
         values = json.loads(self.context.evaluate('__transform('+encoded+')', timeout=15))
         if not isinstance(values, list) or len(values) != len(units):

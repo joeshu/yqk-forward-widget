@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import bisect
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
 
@@ -60,6 +60,9 @@ class TSAnalysis:
     nals: tuple[NALUnit, ...]
     pes_count: int
     unbounded_final_pes: bool
+    # Private immutable parse products for an internal same-bytes fast path.
+    _source: bytes = field(default=b'',repr=False,compare=False)
+    _packet_view: tuple[_Packet, ...] = field(default=(),repr=False,compare=False)
 
     @property
     def slice_nals(self) -> tuple[NALUnit, ...]:
@@ -401,7 +404,8 @@ def inspect_ts(
                     index + 1 < len(markers) or final_nal_complete,
                     _mapped_slice(spans, begin, end))
         )
-    return TSAnalysis(program, pmt, pcr, video, elementary, spans, tuple(nals), pes_count, last_unbounded)
+    return TSAnalysis(program, pmt, pcr, video, elementary, spans, tuple(nals), pes_count, last_unbounded,
+                      _source=data, _packet_view=tuple(packets))
 
 
 def boundary_proven_by(
@@ -553,6 +557,7 @@ def transform_pes_nals(
     video_pid: int | None = None,
     final_nal_complete: bool = False,
     nal_types: Iterable[int] = (1, 5),
+    _prepared: TSAnalysis | None = None,
 ) -> tuple[bytes, TSAnalysis]:
     """Apply non-growing NAL replacements while preserving original TS slots.
 
@@ -578,12 +583,20 @@ def transform_pes_nals(
     selected_types = frozenset(nal_types)
     if not selected_types or any(type(value) is not int or not 1 <= value <= 23 for value in selected_types):
         raise ValueError("nal_types must contain supported NAL type integers from 1 to 23")
-    analysis = inspect_ts(data, program_number=program_number, video_pid=video_pid,
-                          final_nal_complete=final_nal_complete)
+    if _prepared is not None:
+        if (_prepared._source is not data or not _prepared._packet_view
+                or (program_number is not None and _prepared.program_number != program_number)
+                or (video_pid is not None and _prepared.video_pid != video_pid)
+                or _prepared.nals[-1].complete != final_nal_complete):
+            raise TSFormatError("Prepared TS analysis does not match immutable input or boundary assertion")
+        analysis = _prepared
+    else:
+        analysis = inspect_ts(data, program_number=program_number, video_pid=video_pid,
+                              final_nal_complete=final_nal_complete)
     selected = tuple(nal for nal in analysis.nals if nal.nal_type in selected_types)
     if any(not nal.complete for nal in selected):
         raise TSFormatError("Final selected NAL has no proven boundary; retain it across HLS chunks")
-    groups = _pes_groups(_packets(data), analysis.video_pid)
+    groups = _pes_groups(analysis._packet_view, analysis.video_pid)
     group_starts = [group.es_offset for group in groups]
     memberships = []
     for nal in selected:

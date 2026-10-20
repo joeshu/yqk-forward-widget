@@ -75,3 +75,16 @@ function failure(s){return Error(s);}
 
 
 function __transform(values){return JSON.stringify(values.map(v=>{var b=atob(v),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);var out=transformNAL(u),s="";for(var x of out)s+=String.fromCharCode(x);return btoa(s);}));}
+// Media-only typed arrays: no SDK heap pointers or SDK internals cross the API.
+var __mediaInput=null, __mediaOutput=null;
+function __transformBinary(lengths) {
+    var outputs=[], sizes=[], offset=0, total=0;
+    for(var length of lengths) {
+        var output=transformNAL(__mediaInput.subarray(offset,offset+length));
+        outputs.push(output);sizes.push(output.length);
+        offset+=length;total+=output.length;
+    }
+    __mediaOutput=new Uint8Array(total);offset=0;
+    for(var output of outputs) {__mediaOutput.set(output,offset);offset+=output.length;}
+    return JSON.stringify(sizes);
+}

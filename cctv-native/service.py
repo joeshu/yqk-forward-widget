@@ -130,6 +130,9 @@ WEBSITE_CHANNELS = (
     ('cctvchild', 'CCTV-14 少儿'), ('cctv15', 'CCTV-15 音乐'),
     ('cctv16', 'CCTV-16 奥林匹克'), ('cctv17', 'CCTV-17 农业农村'),
     ('cctveurope', 'CCTV-4 欧洲'), ('cctvamerica', 'CCTV-4 美洲'),
+    ('cctv9', 'CCTV-NEWS 英语新闻'), ('cctvdoc', 'CCTV-9 纪录（英）'),
+    ('cctvxiyu', 'CCTV-Español'), ('cctvfrench', 'CCTV-Français'),
+    ('cctvarabic', 'CCTV-العربية'), ('cctvrussian', 'CCTV-Русский'),
 )
 
 
@@ -437,6 +440,7 @@ class Channel:
                     'operation': self.operation,
                     'operation_seconds': round(time.monotonic()-self.operation_started, 3) if self.operation_started else 0,
                     'playlist_entries': self.playlist_entries, 'last_segment_bytes': self.last_segment_bytes,
+                    'media_transfer': ('typed-array' if getattr(getattr(self.engine, 'context', None), 'buffer_api', False) else 'base64'),
                     'stage_seconds': dict(self.timings), 'media_ready': self.playlist() is not None}
 
     def run(self):
@@ -509,7 +513,7 @@ class Channel:
                             converted = {n.payload_offset: value for n, value in zip(analysis.nals, processed)}
                             self.operation_phase('ts-repack')
                             output, _ = transform_pes_nals(raw, lambda n, _data: converted[n.payload_offset],
-                                                       nal_types=(1, 5, 7), final_nal_complete=True)
+                                                       nal_types=(1, 5, 7), final_nal_complete=True, _prepared=analysis)
                             self.publish(output, e, pending_discontinuity or e['discontinuity'])
                             pending_discontinuity, last_seq, last_progress = False, e['seq'], time.monotonic()
                         cached = {k:v for k,v in cached.items() if last_seq is None or k > last_seq}
@@ -533,7 +537,16 @@ class Channel:
                                   if not value.cancelled() and (not value.done() or value.exception() is None)}
                         if time.monotonic()-last_progress > 30:
                             raise NativeError('source-media-stalled') from None
-                        self.stop.wait(min(4, 0.8 * 2**min(failures-1, 3)))
+                        delay = min(4, 0.8 * 2**min(failures-1, 3))
+                        reason = getattr(error, 'reason', None)
+                        if (self.operation == 'source-api' and failures <= 2
+                                and isinstance(reason, ssl.SSLError)
+                                and getattr(reason, 'reason', None) == 'UNSAFE_LEGACY_RENEGOTIATION_DISABLED'):
+                            # Two short initial retries for this immediate handshake
+                            # failure; persistent failure still uses normal backoff
+                            # and the same no-progress deadline/certificate policy.
+                            delay = 0.15 * failures
+                        self.stop.wait(delay)
                         continue
                     if time.monotonic()-last_progress > 30:
                         raise NativeError('source-media-stalled')

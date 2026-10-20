@@ -127,6 +127,18 @@ class TestRealJSCore(unittest.TestCase):
         self.assertEqual(self.context.evaluate('saved+1'),'42')
         self.assertEqual(self.context.evaluate('typeof WebAssembly'),'object')
 
+    def test_native_media_buffer_transfer_preserves_arbitrary_binary_bytes(self):
+        self.assertTrue(self.context.buffer_api)
+        data=bytes(range(256))*4096
+        self.context.put_media(data)
+        self.context.evaluate('__mediaOutput=__mediaInput;')
+        self.assertEqual(self.context.read_media(len(data)),data)
+
+    def test_native_media_copy_rejects_output_larger_than_input_limit(self):
+        self.context.evaluate('var __mediaOutput=new Uint8Array(100);')
+        with self.assertRaisesRegex(self.module.NativeError,'jscore-media-buffer-length-invalid'):
+            self.context.read_media(10)
+
     def test_infinite_script_is_terminated_by_native_time_limit(self):
         start=time.monotonic()
         with self.assertRaises(self.module.NativeError):

@@ -185,6 +185,20 @@ class TestChannelRing(unittest.TestCase):
         self.assertIn('operation=media-playlist cause=TimeoutError', lines)
         self.assertNotIn('secret-source-token', lines)
 
+    def test_two_initial_legacy_handshake_failures_have_short_bounded_delays(self):
+        error=service.ssl.SSLError(1,'handshake-failed')
+        error.reason='UNSAFE_LEGACY_RENEGOTIATION_DISABLED'
+        channel=service.Channel(arguments())
+        channel.started_at=channel.last_request=time.monotonic()
+        engine=mock.Mock()
+        with mock.patch.object(service,'Engine',return_value=engine), \
+             mock.patch.object(service,'source_url',side_effect=[service.URLError(error),service.URLError(error),service.NativeError('official-playback-not-permitted')]), \
+             mock.patch.object(channel.stop,'wait',return_value=False) as wait, \
+             mock.patch('builtins.print'):
+            channel.run()
+        self.assertEqual([c.args[0] for c in wait.call_args_list],[.15,.30])
+        self.assertEqual(channel.error,'official-playback-not-permitted')
+
     def test_expired_url_refresh_stops_when_official_api_denies_playback(self):
         channel = service.Channel(arguments())
         channel.started_at = channel.last_request = time.monotonic()

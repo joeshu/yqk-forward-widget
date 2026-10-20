@@ -9,27 +9,27 @@
       "passed": true,
       "decode_error_bytes": 0,
       "nals": 204,
-      "media_bytes": 408900,
+      "media_bytes": 847504,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 10.546
+      "seconds": 9.646
     },
     {
       "id": "cctv2",
       "name": "CCTV-2 财经",
       "passed": true,
       "decode_error_bytes": 0,
-      "nals": 204,
-      "media_bytes": 659692,
+      "nals": 208,
+      "media_bytes": 1032120,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 10.131
+      "seconds": 9.413
     },
     {
       "id": "cctv4",
@@ -37,13 +37,13 @@
       "passed": true,
       "decode_error_bytes": 0,
       "nals": 204,
-      "media_bytes": 1047536,
+      "media_bytes": 876832,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 7.508
+      "seconds": 9.926
     },
     {
       "id": "cctv7",
@@ -51,41 +51,41 @@
       "passed": true,
       "decode_error_bytes": 0,
       "nals": 204,
-      "media_bytes": 816108,
+      "media_bytes": 907100,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 7.247
+      "seconds": 8.699
     },
     {
       "id": "cctvjilu",
       "name": "CCTV-9 纪录",
       "passed": true,
       "decode_error_bytes": 0,
-      "nals": 202,
-      "media_bytes": 1134392,
+      "nals": 204,
+      "media_bytes": 543320,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 5.289
+      "seconds": 5.486
     },
     {
       "id": "cctv10",
       "name": "CCTV-10 科教",
       "passed": true,
       "decode_error_bytes": 0,
-      "nals": 206,
-      "media_bytes": 561744,
+      "nals": 204,
+      "media_bytes": 342160,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 6.199
+      "seconds": 6.552
     },
     {
       "id": "cctv11",
@@ -93,13 +93,13 @@
       "passed": true,
       "decode_error_bytes": 0,
       "nals": 204,
-      "media_bytes": 628484,
+      "media_bytes": 371300,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 4.53
+      "seconds": 4.215
     },
     {
       "id": "cctv12",
@@ -107,13 +107,13 @@
       "passed": true,
       "decode_error_bytes": 0,
       "nals": 204,
-      "media_bytes": 386904,
+      "media_bytes": 968012,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 7.43
+      "seconds": 6.026
     },
     {
       "id": "cctv13",
@@ -121,13 +121,13 @@
       "passed": true,
       "decode_error_bytes": 0,
       "nals": 204,
-      "media_bytes": 1028172,
+      "media_bytes": 638824,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 6.741
+      "seconds": 4.514
     },
     {
       "id": "cctvchild",
@@ -135,27 +135,27 @@
       "passed": true,
       "decode_error_bytes": 0,
       "nals": 204,
-      "media_bytes": 904844,
+      "media_bytes": 640328,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 5.091
+      "seconds": 5.235
     },
     {
       "id": "cctv15",
       "name": "CCTV-15 音乐",
       "passed": true,
       "decode_error_bytes": 0,
-      "nals": 204,
-      "media_bytes": 829080,
+      "nals": 200,
+      "media_bytes": 704436,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 3.575
+      "seconds": 4.472
     },
     {
       "id": "cctv17",
@@ -163,13 +163,13 @@
       "passed": true,
       "decode_error_bytes": 0,
       "nals": 204,
-      "media_bytes": 343476,
+      "media_bytes": 1045656,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 5.694
+      "seconds": 3.229
     },
     {
       "id": "cctveurope",
@@ -177,13 +177,13 @@
       "passed": true,
       "decode_error_bytes": 0,
       "nals": 204,
-      "media_bytes": 471880,
+      "media_bytes": 769484,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 5.332
+      "seconds": 3.461
     },
     {
       "id": "cctvamerica",
@@ -191,13 +191,13 @@
       "passed": true,
       "decode_error_bytes": 0,
       "nals": 204,
-      "media_bytes": 485604,
+      "media_bytes": 963876,
       "video": {
         "codec_name": "h264",
         "width": 1280,
         "height": 720
       },
-      "seconds": 2.139
+      "seconds": 2.474
     }
   ],
   "excluded": [
@@ -236,6 +236,69 @@
       "name": "CCTV-16 奥林匹克",
       "api": false,
       "error": "official-playback-not-permitted"
+    },
+    {
+      "id": "cctvdoc",
+      "name": "CCTV-9 纪录（英）",
+      "website": "https://tv.cctv.com/live/cctvdoc/",
+      "api": false,
+      "error": "official-playback-not-permitted"
+    },
+    {
+      "id": "cctvxiyu",
+      "name": "CCTV-Español",
+      "website": "https://tv.cctv.com/live/cctvxiyu/",
+      "api": false,
+      "error": "official-playback-not-permitted"
+    },
+    {
+      "id": "cctvfrench",
+      "name": "CCTV-Français",
+      "website": "https://tv.cctv.com/live/cctvfrench/",
+      "api": false,
+      "error": "official-playback-not-permitted"
+    },
+    {
+      "id": "cctvarabic",
+      "name": "CCTV-العربية",
+      "website": "https://tv.cctv.com/live/cctvarabic/",
+      "api": false,
+      "error": "official-playback-not-permitted"
+    },
+    {
+      "id": "cctvrussian",
+      "name": "CCTV-Русский",
+      "website": "https://tv.cctv.com/live/cctvrussian/",
+      "api": false,
+      "error": "official-playback-not-permitted"
+    },
+    {
+      "id": "cctv9",
+      "error": "duplicate-channel-content",
+      "duplicate_of": "cctvjilu",
+      "website": "https://tv.cctv.com/new/live/cctvnews/"
     }
-  ]
+  ],
+  "additional_official_catalog": "https://tv.cctv.com/new/live/cctv/",
+  "candidate_media_checks": [
+    {
+      "id": "cctv9",
+      "name": "CCTV-NEWS 英语新闻",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 990196,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 4.694,
+      "duplicate_of": "cctvjilu",
+      "website": "https://tv.cctv.com/new/live/cctvnews/",
+      "note": "Official legacy page still selects cctv9; decoded frame shows CCTV-9 Chinese documentary, not a new English channel."
+    }
+  ],
+  "published_count": 14,
+  "candidate_count": 26
 }
