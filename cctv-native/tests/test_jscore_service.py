@@ -3,6 +3,7 @@ import ast
 import builtins
 import importlib.util
 import os
+import sys
 from pathlib import Path
 import threading
 import time
@@ -15,6 +16,7 @@ HERE = Path(__file__).resolve().parents[1]
 def load_service():
     spec = importlib.util.spec_from_file_location('cctv_aptv_test', HERE.parent/'cctv-aptv.py')
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -33,6 +35,12 @@ class TestAPTVBuild(unittest.TestCase):
         with mock.patch('builtins.__import__', side_effect=guarded):
             module = load_service()
         self.assertTrue(callable(module.main))
+        tree = ast.parse((HERE.parent/'cctv-aptv.py').read_text())
+        definitions = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+        self.assertIn('main', definitions)
+        self.assertIn('start', definitions)
+        self.assertFalse(any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name)
+                             and n.func.id in ('exec','compile') for n in ast.walk(tree)))
         self.assertFalse(hasattr(module, 'subprocess'))
 
     def test_generated_server_starts_before_sdk_download_and_provides_subscription(self):

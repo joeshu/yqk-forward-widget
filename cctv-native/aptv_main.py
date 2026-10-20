@@ -29,5 +29,10 @@ def main(argv=None):
             channel.thread.join(35)
 
 
+def start(ctx=None):
+    """Entry for embedded runners that import the file and invoke start(ctx)."""
+    main([])
+
+
 if __name__ == '__main__':
     main()
