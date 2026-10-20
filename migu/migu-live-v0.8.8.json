@@ -1,0 +1,16 @@
+{
+  "artifact": "migu-live-v0.8.8.py",
+  "external_catalogues_embedded": false,
+  "inputs": {
+    "migu/android.py": "f43791d62b5592ee763eeab06a13eff3e478178df69a10d297c342adb6a5165c",
+    "migu/core.py": "2ddd8d81dd13d9f3865f845db1d104ec1b0c286202058e4537ea7b51932b1d0a",
+    "migu/epg.py": "bd3838b2ae5999c5fed161e2a0ed9f698685d1d2c7d76f9018cc382dd692b36c",
+    "migu/native.py": "aa1adb824645f6d2875d13dd1e2e68d4d5ae91bfc7d9391493dfbba29b1e2498",
+    "migu/service.py": "97df02271bb4e2491cb3d0e5589d02da6a4e16ccdd3caed418f01f03809a7d41",
+    "migu/source.py": "ce5b98055b242e0f0e5672d0b47a2572a26723f9a9539956dd77758e9e679b2d",
+    "migu/workers.py": "b769e00b8084656466f54a89ff774d93d9aa3ed970acdef33ec34ad30ae7bdeb"
+  },
+  "sha256": "be7a79495ec36cf0e413a418bea46bd12ed7696dd82cd8515a7dfc0eb81f9d05",
+  "standalone_alias": "migu-live.py",
+  "version": "0.8.8"
+}

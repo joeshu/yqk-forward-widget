@@ -301,9 +301,13 @@ def native_play_url(pid, client_factory=m.HttpClient, auth=None):
         content_pid = str((body.get("content") or {}).get("contId", pid))
         if content_pid != pid:
             raise m.FetchError("MIGU_CHANNEL_MISMATCH")
-        query = parse_qs(urlsplit(url).query)
+        query = parse_qs(urlsplit(url).query, keep_blank_values=True)
+        if "ProgramID" in query and query["ProgramID"] != [pid]:
+            raise m.FetchError("MIGU_CHANNEL_MISMATCH")
         # Already complete URLs are preserved byte for byte.
         if "ddCalcu" in query:
+            if len(query["ddCalcu"]) != 1 or not query["ddCalcu"][0]:
+                raise m.FetchError("MIGU_PLAY_URL_FORMAT_CHANGED")
             return url
         seed = query.get("puData", [""])
         if len(seed) != 1 or re.fullmatch(r"[0-9a-fA-F]{16,128}", seed[0]) is None:

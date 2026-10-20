@@ -77,8 +77,8 @@ def validate_url(url, role):
     elif role == "api":
         allowed = parts.scheme == "https" and host == "play.miguvideo.com" and port in {None, 443} and parts.path == "/playurl/v1/play/playurl"
     elif role in {"stream", "media"}:
-        # The live GSLB redirects to hlszymgsplive.miguvideo.com:8080.
-        allowed_ports = {None, 80, 443, 8080} if role == "media" else {None, 80, 443}
+        # Captured live manifests and their segments also use CDN port 8088.
+        allowed_ports = {None, 80, 443, 8080, 8088} if role == "media" else {None, 80, 443, 8088}
         allowed = any(host == domain or host.endswith("." + domain) for domain in ("miguvideo.com", "cmvideo.cn")) and port in allowed_ports
         if role == "stream":
             allowed = allowed and parts.path.endswith(".m3u8")

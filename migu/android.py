@@ -47,6 +47,8 @@ RID_MESSAGES = {
     "COPYRIGHT_SHIELD_INVALID": "MIGU_COPYRIGHT_SHIELD",
     "TIPS_NEED_MEMBER": "MIGU_MEMBERSHIP_REQUIRED",
     "TIPS_NEED_LOGIN": "MIGU_LOGIN_REQUIRED",
+    "NEED_LOGIN": "MIGU_LOGIN_REQUIRED",
+    "USER_NOT_LOGIN": "MIGU_LOGIN_REQUIRED",
     "BLACK_APP_OR_TERMINAL": "MIGU_TERMINAL_BLOCKED",
     "WUDALIANSAI_FUFEI_VERSION_UPGRADE": "MIGU_CLIENT_VERSION_UPGRADE_REQUIRED",
 }
@@ -234,15 +236,21 @@ def android_play_url(pid, settings, client_factory=m.HttpClient, observer=None):
         raise MiguApiError("MIGU_UNKNOWN_CHANNEL")
     client = client_factory("api", attempts=1, timeout=8, budget=12)
     legacy = settings.rate_type >= 3 and not (settings.user_id and settings.token)
-    sends_account = bool(not legacy and settings.rate_type != 2 and settings.user_id and settings.token)
+    sends_account = False
+    requested_rate = 3 if legacy else settings.rate_type
     deadline = time.monotonic() + 12
     attempted = set()
 
     def call(rate):
+        nonlocal sends_account, requested_rate
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise m.FetchError("FETCH_BUDGET_EXCEEDED")
         client.budget = remaining
+        # SD requests are anonymous. Sign the eventual URL with the same
+        # account and quality used by the request that actually succeeded.
+        requested_rate = 3 if legacy else rate
+        sends_account = bool(not legacy and rate != 2 and settings.user_id and settings.token)
         attempted.add(rate)
         url, headers = playurl_request(pid, rate, settings.user_id if sends_account else "",
                                        settings.token if sends_account else "",
@@ -253,8 +261,8 @@ def android_play_url(pid, settings, client_factory=m.HttpClient, observer=None):
 
     payload = call(3 if legacy else settings.rate_type)
     # Only request a genuinely lower supported tier. Never repeat or upgrade on denial.
-    for _ in range(2):
-        if payload.get("rid") != "TIPS_NEED_MEMBER":
+    for _ in range(3):
+        if legacy or payload.get("rid") != "TIPS_NEED_MEMBER":
             break
         info = (payload.get("body") or {}).get("urlInfo") or {}
         try:
@@ -262,7 +270,7 @@ def android_play_url(pid, settings, client_factory=m.HttpClient, observer=None):
         except (TypeError, ValueError):
             offered = 0
         current = min(attempted)
-        fallback = 4 if offered >= 4 and current > 4 else 3
+        fallback = 4 if offered >= 4 and current > 4 else (3 if current > 3 else 2)
         if fallback >= current or fallback in attempted:
             break
         payload = call(fallback)
@@ -278,7 +286,8 @@ def android_play_url(pid, settings, client_factory=m.HttpClient, observer=None):
                 return None
             return parsed if 0 <= parsed <= maximum else None
         observer({**details, "account_sent": sends_account,
-                  "requested_quality": 3 if legacy else settings.rate_type,
+                  "requested_quality": requested_rate,
+                  "initial_requested_quality": 3 if legacy else settings.rate_type,
                   "actual_quality": number("rateType", 9),
                   "trial_seconds": number("trySeeDuration", 86400)})
     rid = payload.get("rid")
@@ -319,7 +328,7 @@ def android_play_url(pid, settings, client_factory=m.HttpClient, observer=None):
         raise MiguApiError("MIGU_API_FORMAT_CHANGED")
     # The public client signs using its requested mode before replacing rateType
     # with the server's actual quality. Account -> guest downgrades depend on this.
-    proof = dd_calcu(seeds[0], pid, 3 if legacy else settings.rate_type, settings.user_id if sends_account else "", legacy=legacy, timestamp=stamps[0])
+    proof = dd_calcu(seeds[0], pid, requested_rate, settings.user_id if sends_account else "", legacy=legacy, timestamp=stamps[0])
     suffix = "&ddCalcu=" + proof
     for key, value in (("sv", "10004"), ("ct", "android")):
         if key in query and query[key] != [value]:
