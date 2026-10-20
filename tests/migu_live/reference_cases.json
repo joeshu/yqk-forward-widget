@@ -1,0 +1,65 @@
+{
+  "reference_commit": "e475b2f6d24029f844ada2b362d703c8b88c2e9b",
+  "cases": [
+    {
+      "name": "guest_hd",
+      "account": false,
+      "requested": 3,
+      "returned": 3,
+      "pid": "631780532",
+      "timestamp_ms": 1792454400000,
+      "salt_prefix": 123456,
+      "request_hash": "2946bef062a9e4c077828fe01bec8efd79f0d9202dc32089f29233ad5cbf2973",
+      "headers_hash": "ea1d776db7e43fbffaa0725293b1878846d9940f72a80c2f27ca4cf68f02aa96",
+      "stream_hash": "4d3fbeb26885e8e3c9c2e6275693ce0a4c9afad829aed96d947e0529548aab80"
+    },
+    {
+      "name": "account_hd",
+      "account": true,
+      "requested": 3,
+      "returned": 3,
+      "pid": "631780532",
+      "timestamp_ms": 1792454400000,
+      "salt_prefix": 123456,
+      "request_hash": "5f9c25be395c422e46ac5a12d465e042d8af95dcdae82f8aba95645eb46012dc",
+      "headers_hash": "11074ef30d2112900ef6027594bee69fa71dd97c593e45503716031d528b59b3",
+      "stream_hash": "a9b745c1448eaf69084b42468ebeaf5c068b007392aa9b80f35546b89392baec"
+    },
+    {
+      "name": "account_guest_downgrade",
+      "account": true,
+      "requested": 3,
+      "returned": 2,
+      "pid": "631780532",
+      "timestamp_ms": 1792454400000,
+      "salt_prefix": 123456,
+      "request_hash": "5f9c25be395c422e46ac5a12d465e042d8af95dcdae82f8aba95645eb46012dc",
+      "headers_hash": "11074ef30d2112900ef6027594bee69fa71dd97c593e45503716031d528b59b3",
+      "stream_hash": "a9b745c1448eaf69084b42468ebeaf5c068b007392aa9b80f35546b89392baec"
+    },
+    {
+      "name": "guest_sd",
+      "account": false,
+      "requested": 2,
+      "returned": 2,
+      "pid": "631780532",
+      "timestamp_ms": 1792454400000,
+      "salt_prefix": 123456,
+      "request_hash": "96ed7fe2f43c8127019792fe376e8ba5fd64aa4ec4cfead82325e5f59bf5b410",
+      "headers_hash": "15f4f0356ebb3e23dd81a4c434e8106ae7c565b695a655393920b5c93cb609f0",
+      "stream_hash": "4d3fbeb26885e8e3c9c2e6275693ce0a4c9afad829aed96d947e0529548aab80"
+    },
+    {
+      "name": "account_sports",
+      "account": true,
+      "requested": 3,
+      "returned": 3,
+      "pid": "641886683",
+      "timestamp_ms": 1792454400000,
+      "salt_prefix": 123456,
+      "request_hash": "ccb3435cc9e4169050fa98aa1b7797f0cf3ce9a32746d1dfd8ac882574f69e74",
+      "headers_hash": "b518e79e6efc8f5236eefe036b851f3e30adf5409ad279d2f6a45a70858f4923",
+      "stream_hash": "379864ff451aa932df71cc97fe4425c3cd82e7432ed70f65bc7194a5c7310d08"
+    }
+  ]
+}

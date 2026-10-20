@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Migu dynamic service 0.8.1. Standalone Python 3.10+, standard library only."""
+"""Migu dynamic service 0.8.2. Standalone Python 3.10+, standard library only."""
 from __future__ import annotations
 
 # Edit only this block for protocol settings and your own credentials.
@@ -1196,7 +1196,9 @@ def android_play_url(pid, settings, client_factory=m.HttpClient, observer=None):
         raise MiguApiError("MIGU_API_FORMAT_CHANGED") from None
     if returned_rate not in {2,3,4,7,8,9}:
         raise MiguApiError("MIGU_API_FORMAT_CHANGED")
-    proof = dd_calcu(seeds[0], pid, returned_rate, settings.user_id if sends_account else "", legacy=legacy, timestamp=stamps[0])
+    # The public client signs using its requested mode before replacing rateType
+    # with the server's actual quality. Account -> guest downgrades depend on this.
+    proof = dd_calcu(seeds[0], pid, 3 if legacy else settings.rate_type, settings.user_id if sends_account else "", legacy=legacy, timestamp=stamps[0])
     suffix = "&ddCalcu=" + proof
     for key, value in (("sv", "10004"), ("ct", "android")):
         if key in query and query[key] != [value]:
@@ -1951,7 +1953,7 @@ import time
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 
-VERSION = "0.8.1"
+VERSION = "0.8.2"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {

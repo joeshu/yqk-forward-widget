@@ -1,0 +1,74 @@
+{
+  "version": "0.8.2",
+  "reference_commit": "e475b2f6d24029f844ada2b362d703c8b88c2e9b",
+  "verification": "reference JavaScript functions executed with synthetic fetch responses and fixed time/randomness; no upstream network or real accounts",
+  "baseline": "0.8.1",
+  "results": {
+    "before": [
+      {
+        "case": "guest_hd",
+        "request_matches": true,
+        "headers_match": true,
+        "stream_matches": true
+      },
+      {
+        "case": "account_hd",
+        "request_matches": true,
+        "headers_match": true,
+        "stream_matches": true
+      },
+      {
+        "case": "account_guest_downgrade",
+        "request_matches": true,
+        "headers_match": true,
+        "stream_matches": false
+      },
+      {
+        "case": "guest_sd",
+        "request_matches": true,
+        "headers_match": true,
+        "stream_matches": true
+      },
+      {
+        "case": "account_sports",
+        "request_matches": true,
+        "headers_match": true,
+        "stream_matches": true
+      }
+    ],
+    "after": [
+      {
+        "case": "guest_hd",
+        "request_matches": true,
+        "headers_match": true,
+        "stream_matches": true
+      },
+      {
+        "case": "account_hd",
+        "request_matches": true,
+        "headers_match": true,
+        "stream_matches": true
+      },
+      {
+        "case": "account_guest_downgrade",
+        "request_matches": true,
+        "headers_match": true,
+        "stream_matches": true
+      },
+      {
+        "case": "guest_sd",
+        "request_matches": true,
+        "headers_match": true,
+        "stream_matches": true
+      },
+      {
+        "case": "account_sports",
+        "request_matches": true,
+        "headers_match": true,
+        "stream_matches": true
+      }
+    ]
+  },
+  "live_playback_verified": false,
+  "remaining_network_evidence": "live-validation-0.8.2.json"
+}

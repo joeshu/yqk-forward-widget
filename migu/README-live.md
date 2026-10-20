@@ -1,14 +1,14 @@
-# 咪咕单文件服务 0.8.1
+# 咪咕单文件服务 0.8.2
 
-下载 [migu-live-v0.8.1.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.8.1.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，标准库，无 pip、Node、浏览器或项目目录依赖。
+下载 [migu-live-v0.8.2.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.8.2.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，标准库，无 pip、Node、浏览器或项目目录依赖。
 
-**默认直接按公开参考项目的取源分支请求咪咕，不读取外部播放列表，也不会在取源失败时自动切换列表。** 已修复协议实现差异；本次服务器实测仍收到地区拒绝，尚未成功解码视频，不能承诺解决上游地区、终端或账号限制。实测见 [live-validation-0.8.1.json](live-validation-0.8.1.json)。
+**默认直接按公开参考项目的取源分支请求咪咕，不读取外部播放列表，也不会在取源失败时自动切换列表。** 已修复协议实现差异；此前 0.8.1 服务器实测收到地区拒绝，尚未成功解码视频，不能承诺解决上游地区、终端或账号限制。实测见 [live-validation-0.8.1.json](live-validation-0.8.1.json)。
 
 ```sh
 python3 migu-live.py 18768
 ```
 
-手机 App 直接运行同样默认端口 18768。日志应显示 `0.8.1`、`provider=migu-android`。保持脚本运行，在同一设备播放器订阅：
+手机 App 直接运行同样默认端口 18768。日志应显示 `0.8.2`、`provider=migu-android`。保持脚本运行，在同一设备播放器订阅：
 
 ```text
 http://127.0.0.1:18768/all.m3u
@@ -18,9 +18,11 @@ http://127.0.0.1:18768/all.m3u
 
 0.8.1 继续对照参考项目的 `utils/net.js`、`account.js`：API 请求补齐其默认 `User-Agent: node-fetch` 和 `Accept: */*`。仍请求 identity 编码，保留本地响应大小与解码边界；不轮换请求头或客户端试探放行。账号与实际画质只从正常播放响应观测，不额外轮询上游。
 
+0.8.2 新增独立的参考代码对照：固定时间、随机数与合成响应，实际执行经哈希核对的参考 JavaScript 函数，比较生成的请求与播放地址。发现并修复账号请求高清却收到游客标清时的补签差异：校验沿用请求模式，返回画质仅用于观测。5 个场景的请求、模块请求头及播放地址均与参考输出一致，见 [对照记录](reference-comparison-0.8.2.json)。这不是实际账号或真实媒体播放验收，不能解决 API 返回地区拒绝的问题。
+
 ## 与参考项目对齐的取源规则
 
-本轮阅读 [akiralereal/iptv 的 migu 模块](https://github.com/akiralereal/iptv/tree/e475b2f6d24029f844ada2b362d703c8b88c2e9b/extractors/migu)，未执行其远程程序。代码协议参考该项目，保留本地有界线程、系统代理、TLS 校验、固定媒体域名及有限请求预算。参考项目的存在不代表同一接口在所有网络均能播放。
+本轮阅读 [akiralereal/iptv 的 migu 模块](https://github.com/akiralereal/iptv/tree/e475b2f6d24029f844ada2b362d703c8b88c2e9b/extractors/migu)，未启动其服务器、登录流程或安装脚本。代码协议参考该项目，保留本地有界线程、系统代理、TLS 校验、固定媒体域名及有限请求预算。参考项目的存在不代表同一接口在所有网络均能播放。
 
 - 未登录且请求档位 ≥3：按 `resolve.js` 走 `2600034600` 旧版高清请求，实际请求档位 3、随机盐值，以 `25` 结尾；不发送账号头。
 - 请求档位 2，或登录后请求更高档位：走现代接口，请求头 `AppVersion=2600037000`，签名版本取前 8 位 `26000370`。档位 2 不发送账号头。
@@ -102,3 +104,11 @@ python3 migu/build_service.py --check
 ```
 
 0.5.0 列表模式的三频道解码记录仅属于历史列表路径，不能证明新版直接取源可播。本版当前网络、iPhone、全部频道和长期播放的结论以实际验证范围为准。
+
+开发者可用 Node 单独重建参考基准（播放器运行不需要 Node）：
+
+```sh
+node migu/capture_reference.cjs /path/to/iptv > tests/migu_live/reference_cases.json
+```
+
+工具只加载已审阅且源文件哈希匹配的两份协议代码，使用合成账号、固定时间和模拟响应，不调用网络、不读取参考项目账号配置。参考源码变化时会拒绝执行，需先人工重新审阅。
