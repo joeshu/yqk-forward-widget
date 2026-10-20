@@ -84,32 +84,63 @@ class SourceRedirect(HTTPRedirectHandler):
 
 
 _API_TLS12_PREFERRED = False
+_API_LEGACY_PREFERRED = False
+_API_LEGACY_ENABLED = True
+
+
+def _legacy_source_error(error):
+    reason = getattr(error, 'reason', None)
+    return (isinstance(reason, ssl.SSLError)
+            and not isinstance(reason, ssl.SSLCertVerificationError)
+            and getattr(reason, 'reason', None) == 'UNSAFE_LEGACY_RENEGOTIATION_DISABLED')
+
+
+class LegacyAPIRedirect(SourceRedirect):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        parsed = urlsplit(newurl)
+        if parsed.hostname != 'vdnx.live.cntv.cn' or parsed.path != '/api/v3/vdn/live':
+            raise NativeError('source-api-legacy-redirect-denied')
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def get(url, *, headers=None, limit=8*1024*1024, timeout=12):
-    global _API_TLS12_PREFERRED
+    global _API_TLS12_PREFERRED, _API_LEGACY_PREFERRED
     validate_source(url)
     req = Request(url, headers={'User-Agent': UA, 'Referer': REFERER, **(headers or {})})
     parsed = urlsplit(url)
     source_api = parsed.hostname == 'vdnx.live.cntv.cn' and parsed.path == '/api/v3/vdn/live'
 
-    def read_response(tls12=False):
-        handlers = [SourceRedirect()]
+    def read_response(tls12=False, legacy=False):
+        handlers = [LegacyAPIRedirect() if legacy else SourceRedirect()]
         if tls12:
             context = ssl.create_default_context()
             context.minimum_version = ssl.TLSVersion.TLSv1_2
             context.maximum_version = ssl.TLSVersion.TLSv1_2
+            if legacy:
+                connect = getattr(ssl,'OP_LEGACY_SERVER_CONNECT',0)
+                no_renegotiation = getattr(ssl,'OP_NO_RENEGOTIATION',0)
+                if not connect or not no_renegotiation:
+                    raise NativeError('source-api-legacy-tls-unavailable')
+                # Only a confirmed unpatched-server initial handshake receives
+                # this compatibility option. Keep CA/hostname verification and
+                # refuse later renegotiation; never apply to media/SDK hosts.
+                context.options |= connect | no_renegotiation
             handlers.append(HTTPSHandler(context=context))
         with build_opener(*handlers).open(req, timeout=timeout) as response:
             body = response.read(limit + 1)
             if len(body) > limit:
                 raise NativeError('response-too-large')
             validate_source(response.url)
+            if legacy:
+                target = urlsplit(response.url)
+                if target.hostname != parsed.hostname or target.path != parsed.path:
+                    raise NativeError('source-api-legacy-redirect-denied')
             return body, response.url
 
-    preferred = source_api and _API_TLS12_PREFERRED
+    preferred_legacy = source_api and _API_LEGACY_ENABLED and _API_LEGACY_PREFERRED
+    preferred = source_api and (_API_TLS12_PREFERRED or preferred_legacy)
     try:
-        return read_response(preferred)
+        return read_response(preferred,preferred_legacy)
     except URLError as error:
         reason = error.reason
         if (not source_api or not isinstance(reason, ssl.SSLError)
@@ -118,10 +149,22 @@ def get(url, *, headers=None, limit=8*1024*1024, timeout=12):
         mode = not preferred
         print('[cctv-native] source-api TLS failure='+transport_error_code(error)+
               '; retrying verified '+('TLSv1.2' if mode else 'default TLS'), flush=True)
-        result = read_response(mode)
-        # Learn only after a verified request succeeds. A failed retry never
-        # poisons the preference; host/proxy/CA/redirect policy stays unchanged.
-        _API_TLS12_PREFERRED = mode
+        try:
+            result = read_response(mode)
+        except URLError as second:
+            if (preferred_legacy or not _API_LEGACY_ENABLED or not _legacy_source_error(second)
+                    or not getattr(ssl,'OP_LEGACY_SERVER_CONNECT',0)
+                    or not getattr(ssl,'OP_NO_RENEGOTIATION',0)):
+                raise
+            # A protocol-version change did not resolve the confirmed legacy
+            # handshake failure. Never enable this for generic/certificate errors.
+            print('[cctv-native] source-api confirmed legacy handshake; '
+                  'trying verified TLSv1.2 legacy-server-connect, renegotiation disabled',flush=True)
+            result = read_response(True,True)
+            _API_TLS12_PREFERRED, _API_LEGACY_PREFERRED = True, True
+            return result
+        # Learn only after a verified request succeeds.
+        _API_TLS12_PREFERRED, _API_LEGACY_PREFERRED = mode, False
         return result
 
 
@@ -405,6 +448,7 @@ class Channel:
             index = self.counter
             self.counter += 1
             self.processed += 1
+            self.last_transport_error = ''
             self.ring[index] = (body, entry['duration'], discontinuity)
             self.size += len(body)
             while len(self.ring) > 10 or self.size > self.args.buffer_mb*1024*1024:
@@ -474,8 +518,12 @@ class Channel:
                         if url is None or time.monotonic()-refreshed > 120:
                             self.operation_phase('source-api')
                             url, refreshed = (source_url() if self.channel_id == 'cctv2' else source_url(self.channel_id)), time.monotonic()
+                            if self.stop.is_set():
+                                break
                         self.operation_phase('media-playlist')
                         entries, final = media_playlist(url)
+                        if self.stop.is_set():
+                            break
                         self.playlist_entries = len(entries)
                         # Resolve the master only once per source refresh.
                         url = final
@@ -504,6 +552,8 @@ class Channel:
                             self.operation_phase('segment-download')
                             raw = cached[e['seq']].result()[0]
                             lookahead = cached[following['seq']].result()[0]
+                            if self.stop.is_set():
+                                break
                             self.last_segment_bytes = len(raw)
                             self.operation_phase('ts-analysis')
                             analysis = inspect_ts(raw)
@@ -514,14 +564,22 @@ class Channel:
                             # its completeness bit changes; reuse the parsed TS.
                             analysis = replace(analysis, nals=analysis.nals[:-1]+(
                                 replace(analysis.nals[-1], complete=True),))
+                            if self.stop.is_set():
+                                break
                             self.operation_phase('sdk-transform')
                             processed = engine.transform([analysis.nal_bytes(n) for n in analysis.nals])
+                            if self.stop.is_set():
+                                break
                             converted = {n.payload_offset: value for n, value in zip(analysis.nals, processed)}
                             self.operation_phase('ts-repack')
                             output, _ = transform_pes_nals(raw, lambda n, _data: converted[n.payload_offset],
                                                        nal_types=(1, 5, 7), final_nal_complete=True, _prepared=analysis)
+                            if self.stop.is_set():
+                                break
                             self.publish(output, e, pending_discontinuity or e['discontinuity'])
                             pending_discontinuity, last_seq, last_progress = False, e['seq'], time.monotonic()
+                        if self.stop.is_set():
+                            break
                         cached = {k:v for k,v in cached.items() if last_seq is None or k > last_seq}
                         if time.monotonic()-last_progress > 30:
                             raise NativeError('source-media-stalled')
@@ -654,16 +712,19 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
+    global _API_LEGACY_ENABLED
     parser = argparse.ArgumentParser(description='CCTV-2 网页同源原分片订阅（Python + Node，无浏览器/转码）')
     parser.add_argument('port', type=int, nargs='?', default=18768)
     parser.add_argument('--bind', default='127.0.0.1')
     parser.add_argument('--node', default=shutil.which('node') or 'node')
     parser.add_argument('--cache-dir', default=str(Path.home()/'.cache'/'cctv-native'))
     parser.add_argument('--setup', action='store_true', help='安装独立Node依赖并缓存官方运行时后退出')
+    parser.add_argument('--no-legacy-source-tls',action='store_true',help='关闭官方取源接口旧服务器握手兼容')
     parser.add_argument('--warmup', action='store_true', help='GET订阅时后台提前取源')
     parser.add_argument('--buffer-mb', type=int, default=64)
     parser.add_argument('--idle-timeout', type=int, default=120)
     args = parser.parse_args(argv)
+    _API_LEGACY_ENABLED = not args.no_legacy_source_tls
     if not 1 <= args.port <= 65535 or not 16 <= args.buffer_mb <= 256 or not 30 <= args.idle_timeout <= 3600:
         parser.error('invalid port/buffer/idle timeout')
     if not shutil.which(args.node):

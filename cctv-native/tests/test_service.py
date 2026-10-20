@@ -199,6 +199,30 @@ class TestChannelRing(unittest.TestCase):
         self.assertEqual([c.args[0] for c in wait.call_args_list],[.15,.30])
         self.assertEqual(channel.error,'official-playback-not-permitted')
 
+    def test_channel_switch_after_sdk_does_not_repack_or_publish_old_media(self):
+        from test_pes import stream
+        raw,_=stream()
+        channel=service.Channel(arguments())
+        channel.started_at=channel.last_request=time.monotonic()
+        engine=mock.Mock()
+        def transform(values):
+            channel.stop.set()
+            return values
+        engine.transform.side_effect=transform
+        entries=[dict(seq=i,duration=4,url=BASE+str(i),discontinuity=False) for i in range(3)]
+        with mock.patch.object(service,'Engine',return_value=engine), \
+             mock.patch.object(service,'source_url',return_value=BASE), \
+             mock.patch.object(service,'media_playlist',return_value=(entries,BASE)), \
+             mock.patch.object(service,'get',return_value=(raw,BASE)), \
+             mock.patch.object(service,'transform_pes_nals') as repack, \
+             mock.patch.object(channel,'publish') as publish, \
+             mock.patch('builtins.print'):
+            channel.run()
+        engine.transform.assert_called_once()
+        repack.assert_not_called();publish.assert_not_called()
+        engine.close.assert_called_once()
+        self.assertEqual(channel.error,'')
+
     def test_expired_url_refresh_stops_when_official_api_denies_playback(self):
         channel = service.Channel(arguments())
         channel.started_at = channel.last_request = time.monotonic()
@@ -456,6 +480,9 @@ class TestSourceTLSCompatibility(unittest.TestCase):
         self.policy = mock.patch.object(service, '_API_TLS12_PREFERRED', False)
         self.policy.start()
         self.addCleanup(self.policy.stop)
+        self.legacy_policy=mock.patch.object(service,'_API_LEGACY_PREFERRED',False)
+        self.legacy_policy.start()
+        self.addCleanup(self.legacy_policy.stop)
 
     URL = 'https://vdnx.live.cntv.cn/api/v3/vdn/live?temporary=secret-source-token'
 
@@ -512,6 +539,74 @@ class TestSourceTLSCompatibility(unittest.TestCase):
         self.assertEqual(len(build.call_args_list[0].args),2)
         self.assertEqual(len(build.call_args_list[1].args),1)
         self.assertFalse(service._API_TLS12_PREFERRED)
+
+    @unittest.skipUnless(hasattr(service.ssl,'OP_LEGACY_SERVER_CONNECT'),'Python/OpenSSL lacks legacy-connect flag')
+    def test_confirmed_legacy_server_retry_keeps_certificate_checks_and_is_cached(self):
+        error=service.ssl.SSLError(1,'private source details')
+        error.reason='UNSAFE_LEGACY_RENEGOTIATION_DISABLED'
+        first,second,third,fourth=[mock.Mock() for _ in range(4)]
+        first.open.side_effect=second.open.side_effect=service.URLError(error)
+        response=mock.MagicMock();response.__enter__.return_value=response
+        response.url=self.URL;response.read.return_value=b'{}'
+        third.open.return_value=fourth.open.return_value=response
+        with mock.patch.object(service,'build_opener',side_effect=[first,second,third,fourth]) as build, \
+             mock.patch('builtins.print') as logged:
+            service.get(self.URL)
+            self.assertTrue(service._API_LEGACY_PREFERRED)
+            service.get(self.URL)
+        self.assertEqual(build.call_count,4)
+        for call in build.call_args_list[2:]:
+            self.assertIsInstance(call.args[0],service.LegacyAPIRedirect)
+            context=call.args[1]._context
+            self.assertEqual(context.verify_mode,service.ssl.CERT_REQUIRED)
+            self.assertTrue(context.check_hostname)
+            self.assertTrue(context.options & service.ssl.OP_LEGACY_SERVER_CONNECT)
+            self.assertTrue(context.options & service.ssl.OP_NO_RENEGOTIATION)
+            self.assertEqual(context.minimum_version,service.ssl.TLSVersion.TLSv1_2)
+        self.assertNotIn('private source details',str(logged.call_args_list))
+
+    def test_explicit_opt_out_disables_legacy_fallback(self):
+        error=service.ssl.SSLError(1,'legacy');error.reason='UNSAFE_LEGACY_RENEGOTIATION_DISABLED'
+        opener=mock.Mock();opener.open.side_effect=service.URLError(error)
+        with mock.patch.object(service,'_API_LEGACY_ENABLED',False), \
+             mock.patch.object(service,'build_opener',return_value=opener) as build,mock.patch('builtins.print'):
+            with self.assertRaises(service.URLError):service.get(self.URL)
+        self.assertEqual(build.call_count,2)
+        self.assertFalse(service._API_LEGACY_PREFERRED)
+
+    def test_generic_ssl_error_does_not_enable_legacy_handshake(self):
+        openers=[mock.Mock(),mock.Mock()]
+        for opener in openers:opener.open.side_effect=service.URLError(service.ssl.SSLError(1,'generic'))
+        with mock.patch.object(service,'build_opener',side_effect=openers) as build, mock.patch('builtins.print'):
+            with self.assertRaises(service.URLError):service.get(self.URL)
+        self.assertEqual(build.call_count,2)
+        self.assertFalse(service._API_LEGACY_PREFERRED)
+
+    def test_certificate_failure_on_protocol_retry_does_not_enable_legacy(self):
+        first,second=mock.Mock(),mock.Mock()
+        error=service.ssl.SSLError(1,'legacy');error.reason='UNSAFE_LEGACY_RENEGOTIATION_DISABLED'
+        first.open.side_effect=service.URLError(error)
+        second.open.side_effect=service.URLError(service.ssl.SSLCertVerificationError(1,'certificate'))
+        with mock.patch.object(service,'build_opener',side_effect=[first,second]) as build,mock.patch('builtins.print'):
+            with self.assertRaises(service.URLError):service.get(self.URL)
+        self.assertEqual(build.call_count,2)
+        self.assertFalse(service._API_LEGACY_PREFERRED)
+
+    def test_legacy_policy_cannot_follow_redirect_to_another_host_or_path(self):
+        redirect=service.LegacyAPIRedirect()
+        for target in ('https://tv.cctv.com/Library/H5player.json','https://vdnx.live.cntv.cn/other'):
+            with self.assertRaisesRegex(service.NativeError,'legacy-redirect-denied'):
+                redirect.redirect_request(service.Request(self.URL),None,302,'moved',{},target)
+
+    def test_unavailable_legacy_flag_fails_explicitly_without_disabling_verification(self):
+        error=service.ssl.SSLError(1,'legacy');error.reason='UNSAFE_LEGACY_RENEGOTIATION_DISABLED'
+        opener=mock.Mock();opener.open.side_effect=service.URLError(error)
+        with mock.patch.object(service.ssl,'OP_LEGACY_SERVER_CONNECT',0,create=True), \
+             mock.patch.object(service,'build_opener',return_value=opener) as build,mock.patch('builtins.print'):
+            with self.assertRaises(service.URLError):
+                service.get(self.URL)
+        self.assertEqual(build.call_count,2)
+        self.assertFalse(service._API_LEGACY_PREFERRED)
 
     def test_certificate_failure_is_not_given_protocol_retry(self):
         opener=mock.Mock()

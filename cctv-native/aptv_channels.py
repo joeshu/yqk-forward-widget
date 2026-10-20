@@ -66,7 +66,8 @@ class ChannelManager:
             result.update(current_channel=self.current, channel_count=len(PUBLISHED_CHANNELS),
                           channels=[{'id':cid,'name':name} for cid,name in PUBLISHED_CHANNELS.items()],
                           native_context_limit=2,
-                          source_api_tls='TLSv1.2' if _API_TLS12_PREFERRED else 'default')
+                          source_api_tls=('TLSv1.2-legacy-server' if _API_LEGACY_ENABLED and _API_LEGACY_PREFERRED else
+                                          'TLSv1.2' if _API_TLS12_PREFERRED else 'default'))
             return result
 
     def close(self):

@@ -123,6 +123,16 @@ CI 运行 Python 3.10 / 3.12 与 Node 22 的离线检查，不执行官方接口
 
 新版在系统支持时使用 JavaScriptCore 的公开 TypedArray C API 复制视频媒体缓冲区，减少逐字节 Base64 与字符串转换；日志显示 `media-transfer=typed-array`，`/status` 的 `media_transfer` 同步报告。系统无相应符号时仍使用原 Base64 路径。复制的只是提交给处理器的视频媒体，不读取或修改 SDK 内部内存。原组件、网络许可检查及输出校验均保留。
 
-TS 解析结果会绑定同一不可变原始分片，供重组复用；不同字节对象或未证明末尾边界时拒绝复用，输出仍重新解析核对。明确的旧式 TLS 握手失败仅前两次采用 0.15/0.30 秒短退避，此后仍用原有退避及无媒体进展保护，不放宽证书或协议安全设置。它能减少部分本地处理与重试等待，不保证手机固定几秒换台。
+TS 解析结果会绑定同一不可变原始分片，供重组复用；不同字节对象或未证明末尾边界时拒绝复用，输出仍重新解析核对。明确的旧式 TLS 握手失败仅前两次采用 0.15/0.30 秒短退避，此后仍用原有退避及无媒体进展保护，该退避策略本身不改变 TLS 配置。它能减少部分本地处理与重试等待，不保证手机固定几秒换台。
 
 继续核对了[官网旧频道目录](https://tv.cctv.com/new/live/cctv/)的 6 个入口，共累计核对 26 个标识。5 个新增候选被官方接口拒绝；旧英语新闻入口虽返回视频，但新页面的 `rel_url=cctv9` 实际已映射到中文 CCTV-9 纪录，核验解码画面后作为重复排除。因此目前仍是 14 个独立频道，不按页面旧名称虚增数量。逐项证据见 [CHANNEL-VALIDATION.json](CHANNEL-VALIDATION.json)。
+
+### 明确旧服务器握手错误的兼容
+
+手机最新日志显示已启用 TypedArray，但取源仍反复出现 `UNSAFE_LEGACY_RENEGOTIATION_DISABLED`。仅在该官方 API 的标准 TLS 与 TLS 1.2 均失败、最后错误明确为此枚举时，新版才使用 Python/OpenSSL 的 `OP_LEGACY_SERVER_CONNECT` 兼容旧服务器；它会接受未提供安全重协商扩展的旧服务端，因此这是一项限定范围的握手兼容，不是完全不改变 TLS 行为。证书链、主机名验证和 TLS 1.2 最低版本保留，同时设置 `OP_NO_RENEGOTIATION` 禁止后续重协商。
+
+兼容范围严格限制为 `vdnx.live.cntv.cn/api/v3/vdn/live`，该配置下不跟随其他域名或路径的重定向；不会用于 SDK 下载或媒体分片，不启用全局关闭证书验证、不更换官方来源。成功后仅在内存记住此模式；`/status` 显示 `source_api_tls=TLSv1.2-legacy-server`。可用 `--no-legacy-source-tls` 关闭此兼容；缺少相关 OpenSSL 标志的旧 Python 保留原重试行为。
+
+依据：[Python SSL 选项文档](https://docs.python.org/3/library/ssl.html#ssl.OP_LEGACY_SERVER_CONNECT)。本地通过人为注入前两次同类握手失败，第三次使用真实官方接口验证成功；开发网络代理与手机实际网络不同，仍需新版手机实测。
+
+换台取消也已补全：旧频道完成当前下载/SDK 步骤后检查停止状态，不再继续做已无观众需要的 TS 重组和发布，减少与新频道争用手机 CPU。
