@@ -5,11 +5,13 @@ on:
     paths:
       - 'cctv-native/**'
       - 'cctv-native.py'
+      - 'cctv-aptv.py'
       - '.github/workflows/cctv-native.yml'
   pull_request:
     paths:
       - 'cctv-native/**'
       - 'cctv-native.py'
+      - 'cctv-aptv.py'
       - '.github/workflows/cctv-native.yml'
 
 permissions:
@@ -33,6 +35,8 @@ jobs:
         run: python -m unittest discover -s cctv-native/tests -v
       - name: Check standalone build
         run: python cctv-native/build_service.py --check
+      - name: Check APTV standalone build
+        run: python cctv-native/build_aptv.py --check
       - name: Check Node syntax
         run: node --check cctv-native/engine.cjs
       - name: Check Python syntax

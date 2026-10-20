@@ -95,9 +95,56 @@ def report():
     return result
 
 
-if __name__ == '__main__':
+def main(argv=None):
+    import argparse
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    parser = argparse.ArgumentParser(description='JavaScriptCore 原生检测；不是播放服务')
+    parser.add_argument('port', nargs='?', type=int, default=18770)
+    parser.add_argument('--once', action='store_true')
+    args = parser.parse_args(argv)
+    if not 1 <= args.port <= 65535:
+        parser.error('invalid port')
     print('JavaScriptCore 原生检测：不是频道服务，不提供 all.m3u。', flush=True)
     print('开始调用系统 JavaScriptCore；若服务中止，请保留日志。', flush=True)
     result = report()
     print('原生引擎检测结果：'+json.dumps(result, ensure_ascii=False), flush=True)
-    print('检测结束；wasm-test-passed 仅证明基础运行能力，尚不证明央视可播放。', flush=True)
+    print('wasm-test-passed 仅证明基础运行能力，尚不证明央视可播放。', flush=True)
+    if args.once:
+        return
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_HEAD(self):
+            self.do_GET()
+
+        def do_GET(self):
+            path = self.path.split('?', 1)[0]
+            status = 200 if path in ('/', '/status') else 503 if path == '/all.m3u' else 404
+            value = result if status == 200 else {'error': 'diagnostic-only-no-playlist'}
+            body = json.dumps(value, ensure_ascii=False).encode('utf-8')
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            if self.command != 'HEAD':
+                try:
+                    self.wfile.write(body)
+                except OSError:
+                    pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
+    server.daemon_threads = True
+    print(f'检测报告监听：http://127.0.0.1:{args.port}/status', flush=True)
+    try:
+        server.serve_forever(poll_interval=.2)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+if __name__ == '__main__':
+    main()

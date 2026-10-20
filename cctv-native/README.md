@@ -2,20 +2,29 @@
 
 使用 [CCTV-2 官方手机网页](https://tv.cctv.com/live/cctv2/m/index.shtml) 对应的播放来源，只提供 CCTV-2 财经。本服务独立于 `ysp-live`，不会替换成央视频或其他平台的来源。
 
-**当前播放服务用于电脑/服务器，不能直接在 APTV 内置 Python 运行。** APTV 截图已确认没有 Node，且提示不支持 `subprocess`；下载旧播放脚本不会解决这个限制。手机直跑方案仍在研究，尚未验证可播。可在 APTV 加载 [aptv-probe.py 环境检测脚本](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/refs/heads/main/cctv-native/aptv-probe.py)，将日志中的“Python版本”和“可见候选模块”用于后续适配。检测脚本仅使用标准库、不导入候选原生模块、不启动子进程、不访问外网，也不提供频道订阅；完整报告位于 `http://127.0.0.1:18770/status`，模块可见不代表可用或支持 WebAssembly。
+**APTV 手机实验版现已独立提供：[cctv-aptv.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/refs/heads/main/cctv-aptv.py)。** 用户 iPhone 日志已确认 Python 3.14.6 可以直接调用系统 JavaScriptCore 并执行微型 WASM。新版本使用该引擎，不依赖 Node、npm、浏览器、FFmpeg 或子进程；已在 Linux JavaScriptCore 中通过真实央视分片处理及连续解码验证，**手机完整播放尚待用户验证**。详见 [APTV 验证记录](APTV-VALIDATION.md)。原有 `cctv-native.py` 仍用于电脑/服务器，需要 Node。
+
+在 APTV 添加 Python 服务，远程链接填写上面的 `cctv-aptv.py`，加载最新代码并启动，然后订阅：
+
+```text
+http://127.0.0.1:18768/all.m3u
+```
+
+仅提供 CCTV-2 财经，来源仍为指定央视网页。若运行设置更改端口，订阅中的端口也要对应更改。服务会立即监听；第一次选台时下载并校验固定版本官方组件，无需 `--setup`。查看 `http://127.0.0.1:18768/status` 可区分初始化、取源、就绪或错误；`jscore-framework-or-time-limit-unavailable` 表示所需系统接口不全，不能据微型测试通过推断完整服务一定可用。初次播放需要等待组件及相邻分片准备，本次 Linux 连续测试约 19.6 秒进入就绪；不保证手机同等速度。
+
+`aptv-jscore-probe.py` 是独立诊断脚本，现默认监听 `18770/status`，避免 APTV 将“打印后正常退出”显示为启动失败。`--once` 可恢复仅打印行为。诊断脚本不提供频道，请使用新播放服务的链接。
 
 **需要 Python 3.10+、Node.js 20+ 和 npm，不需要 Chromium、Playwright 或 FFmpeg。** Python 提供本地订阅和分片缓存，Node 运行固定版本的官方组件；处理后的原 TS 分片直接供播放器解码，不采集网页画面、不重新编码。这仍是 Python + Node 程序，只有纯 Python 的环境不能运行。
 
 
-### APTV 原生引擎路线（实验检测）
+### APTV 适配实现
 
-新增 [aptv-jscore-probe.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/refs/heads/main/cctv-native/aptv-jscore-probe.py)，可作为 APTV Python 服务的远程文件加载。它直接通过 `ctypes` 调用 Apple 系统 JavaScriptCore，执行 JavaScript 与一个返回 42 的微型 WASM；不启动 Node、浏览器或子进程，不安装依赖、不访问网络。与上面的模块可见性检测不同，**这个脚本会实际调用原生框架**；若 APTV 不允许调用或服务中止，应保留日志。它打印结果后退出，不提供 `/all.m3u`。
+手机服务复用已有 TS 映射、同源调度、播放许可检查、缓存、重试和 HTTP 逻辑。Python 通过系统 C API 执行原样官方 JS/WASM；使用原 Emscripten `instantiateWasm` 接口同步实例化，网络与定时器由 Python 驱动，存储使用固定版本 fake-indexeddb。原始官方组件下载后校验 SHA-256，不写入仓库，不替换来源。全部 JavaScriptCore 操作由同一工作线程执行，原生执行时间限制终止失控脚本，不创建 Python 原生回调。
 
-结果中 `wasm-test-passed` 只表示基础 JS/WASM 可用；`native-engine-unavailable` 表示原生调用路径不可用；`wasm-test-failed` 表示基础 WASM 测试未通过。请提供日志中“原生引擎检测结果”整行，用于决定是否继续适配这条路线。
+第三方 fake-indexeddb 6.2.6 的原始 CommonJS 内容和本地加载器随单文件打包，Apache-2.0 许可完整保留在 [vendor/fake-indexeddb-LICENSE](vendor/fake-indexeddb-LICENSE) 以及单文件 `THIRD_PARTY_LICENSE` 中。该依赖只是浏览器存储接口，不是新的节目源。
 
-当前证据：在 Linux JavaScriptCoreGTK 中，完全相同的 Python C API 绑定已实际执行 JS/WASM 测试并得到 42，央视原始 87,228 字节 WASM 模块也成功编译。**这不等于 iPhone APTV 实测成功，更不等于央视视频已可播放。** 手机端仍需确认框架访问权限与 WASM 支持，随后补齐网络、定时器、存储等宿主接口，再验证真实分片及解码。
+构建：`python cctv-native/build_aptv.py`；检查：`python cctv-native/build_aptv.py --check`。iOS 运行不安装任何 pip/npm 包。Linux 开发验证可通过隐藏参数 `--jscore-library /绝对路径/libjavascriptcoregtk-4.1.so.0` 指定测试系统库，这不属于手机安装要求。
 
-另一条纯 Python 解释器路线已能按原加载器数据初始化原始 WASM，但尚未进入正常取流，未发布为播放服务。上述研究继续使用指定的央视网页来源，不替换成参考文件中的央视频接口。
 
 ## 下载与启动
 
