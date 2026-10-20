@@ -12,6 +12,7 @@ class TestMultiChannelHTTP(unittest.TestCase):
         self.m = load_service()
         self.args = SimpleNamespace(warmup=False,buffer_mb=16,idle_timeout=120)
         self.manager = self.m.ChannelManager(self.args)
+        self.manager.epg.refresh = mock.Mock()
         self.server = self.m.ThreadingHTTPServer(('127.0.0.1',0),self.m.MultiChannelHandler)
         self.server.daemon_threads=True
         self.server.args,self.server.manager=self.args,self.manager
@@ -79,6 +80,19 @@ class TestMultiChannelHTTP(unittest.TestCase):
         self.assertEqual(value['channel_count'],14)
         self.manager.close()
         with self.assertRaises(self.m.NativeError):self.manager.activate('cctv1')
+
+
+    def test_epg_http_uses_same_ids_and_head_has_no_refresh(self):
+        self.assertEqual(self.request('/epg.xml',method='HEAD'),(200,b''))
+        self.manager.epg.refresh.assert_not_called()
+        self.manager.epg.document = mock.Mock(return_value=b'<?xml version="1.0"?><tv/>')
+        self.assertEqual(self.request('/epg.xml'),(200,b'<?xml version="1.0"?><tv/>'))
+        self.assertIsNone(self.manager.current)
+        self.manager.epg.document.return_value=None
+        self.assertEqual(self.request('/epg.xml')[0],503)
+        status,body=self.request('/all.m3u')
+        self.assertIn(b'x-tvg-url="http://127.0.0.1:',body)
+        self.assertIn(b'/epg.xml"',body)
 
 
 class TestNativeContextBound(unittest.TestCase):

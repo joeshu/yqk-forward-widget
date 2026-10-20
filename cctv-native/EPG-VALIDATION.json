@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-21",
+  "official_endpoint": "https://api.cntv.cn/epg/epginfo",
+  "source_requests_per_refresh": 3,
+  "xml_bytes": 196103,
+  "subscription_seconds": 0.0097,
+  "cached_xml_seconds": 0.0015,
+  "channel_programme_counts": {
+    "cctv1": 107,
+    "cctv2": 115,
+    "cctv4": 128,
+    "cctv7": 110,
+    "cctvjilu": 84,
+    "cctv10": 105,
+    "cctv11": 54,
+    "cctv12": 93,
+    "cctv13": 102,
+    "cctvchild": 56,
+    "cctv15": 51,
+    "cctv17": 86,
+    "cctveurope": 125,
+    "cctvamerica": 125
+  },
+  "status": {
+    "programmes": 1341,
+    "missing_channels": [],
+    "refreshing": false,
+    "error": "",
+    "day": "2026-10-21"
+  },
+  "m3u_auto_epg_link": true,
+  "video_activated": false,
+  "all_times_beijing": true,
+  "regression_tests": 179,
+  "native_jscore_tests": 11,
+  "phone_display_validation": "pending"
+}

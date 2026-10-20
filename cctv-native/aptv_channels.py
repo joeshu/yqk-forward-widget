@@ -135,6 +135,7 @@ class ChannelManager:
         self.channels = {}
         self.current = None
         self.closed = False
+        self.epg = OfficialEPG(PUBLISHED_CHANNELS)
 
     def activate(self, cid):
         if cid not in PUBLISHED_CHANNELS:
@@ -175,7 +176,7 @@ class ChannelManager:
             result = current.snapshot() if current else {'state':'idle','media_ready':False}
             result.update(current_channel=self.current, channel_count=len(PUBLISHED_CHANNELS),
                           channels=[{'id':cid,'name':name} for cid,name in PUBLISHED_CHANNELS.items()],
-                          native_context_limit=2, http_connections=_HTTP_POOL.snapshot(),
+                          epg=self.epg.snapshot(), native_context_limit=2, http_connections=_HTTP_POOL.snapshot(),
                           recent_channel_seconds=getattr(self.args,'recent_channel_seconds',15),
                           recent_channels=[c.channel_id for c in self.channels.values()
                                            if c.parked_at and not c.stop.is_set()],
@@ -186,6 +187,7 @@ class ChannelManager:
     def close(self):
         with self.lock:
             self.closed = True
+            self.epg.close()
             for channel in self.channels.values():
                 channel.retire()
         # No cross-thread JSC calls and no HTTP thread blocked on VM teardown.
@@ -220,7 +222,9 @@ class MultiChannelHandler(Handler):
                     return self.send(400,'invalid-host')
             except ValueError:
                 return self.send(400,'invalid-host')
-            lines = ['#EXTM3U']
+            lines = [f'#EXTM3U x-tvg-url="http://{host}/epg.xml" url-tvg="http://{host}/epg.xml"']
+            if self.command == 'GET':
+                manager.epg.refresh()
             for cid,name in PUBLISHED_CHANNELS.items():
                 lines.extend([f'#EXTINF:-1 tvg-id="{cid}" group-title="央视网页",{name}',
                               f'http://{host}/{cid}.m3u8'])
@@ -230,6 +234,13 @@ class MultiChannelHandler(Handler):
                     if manager.current is None:
                         manager.activate('cctv2').demand()
             return self.send(200,'\n'.join(lines)+'\n','audio/x-mpegurl; charset=utf-8')
+        if path == '/epg.xml':
+            if self.command == 'HEAD':
+                return self.send(200, mime='application/xml; charset=utf-8')
+            body = manager.epg.document()
+            if body is None:
+                return self.send(503, 'epg-not-ready; retry shortly')
+            return self.send(200, body, 'application/xml; charset=utf-8')
         if path == '/status':
             return self.send(200,json.dumps(manager.snapshot(),ensure_ascii=False),'application/json; charset=utf-8')
         match = re.fullmatch(r'/([a-z0-9]+)\.m3u8',path)
