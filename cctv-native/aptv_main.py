@@ -10,6 +10,8 @@ def main(argv=None):
     parser.add_argument('--no-legacy-source-tls',action='store_true',help='关闭仅官方取源接口的旧服务器握手兼容')
     parser.add_argument('--parallel-prepare',action=argparse.BooleanOptionalAction,default=True,
                         help='并行初始化组件与准备首批分片；--no-parallel-prepare 可关闭')
+    parser.add_argument('--prefix-lookahead', action=argparse.BooleanOptionalAction, default=True,
+                        help='首播仅下载第三片的已校验边界前缀；不支持时自动下载整片')
     parser.add_argument('--no-http-reuse', action='store_true', help='关闭上游 HTTPS 连接复用')
     parser.add_argument('--recent-channel-seconds', type=int, default=15,
                         help='最近一个频道的组件保留秒数（0 关闭，最多 30）；过旧分片不直接播放')

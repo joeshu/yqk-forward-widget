@@ -446,6 +446,90 @@ def boundary_proven_by(
     return bool(analysis.nals and analysis.nals[0].start_code_offset == 0)
 
 
+
+def inspect_boundary_prefix(
+    data: bytes,
+    *,
+    program_number: int | None = None,
+    video_pid: int | None = None,
+) -> tuple[bytes, TSAnalysis] | None:
+    """Validate a boundary-only prefix ending at a complete first video PES.
+
+    This explicit prefix-input API may omit an incomplete trailing TS slot.
+    Bounded PES must finish; an unbounded PES needs the next video PUSI and a
+    complete valid next PES header. The returned bytes pass unchanged
+    ``inspect_ts``. No final NAL is asserted complete. Callers must separately
+    establish offset zero, consecutive HLS sequence and no discontinuity.
+    A returned prefix is not a complete segment and MUST NOT be published.
+    """
+    if not isinstance(data, bytes):
+        raise TypeError("data must be immutable bytes")
+    try:
+        aligned = data[:len(data) // 188 * 188]
+        packets = _packets(aligned)
+        program, _pmt, _pcr, video = _program(packets, program_number, video_pid)
+
+        def checked(end):
+            prefix = aligned[:end]
+            analysis = inspect_ts(prefix, program_number=program, video_pid=video,
+                                  _map_bytes=False)
+            if boundary_proven_by(prefix, program_number=program, video_pid=video,
+                                  _prepared=analysis):
+                return prefix, analysis
+            return None
+
+        pending = bytearray()
+        next_header = bytearray()
+        active = False
+        unbounded_end = None
+        for packet in packets:
+            if packet.pid != video or not packet.payload:
+                continue
+            if unbounded_end is None and packet.pusi and active:
+                # A second PUSI proves the preceding zero-length PES ended,
+                # provided this next PES header also validates below.
+                if len(pending) < 9 or int.from_bytes(pending[4:6], "big"):
+                    return None
+                unbounded_end = packet.payload_offset + len(packet.payload) - 188
+            if unbounded_end is not None:
+                if (packet.scrambling or packet.duplicate or packet.discontinuity
+                        or packet.pusi and next_header):
+                    return None
+                next_header.extend(packet.payload)
+                if len(next_header) < 9:
+                    continue
+                if (next_header[:3] != b"\x00\x00\x01" or not 0xE0 <= next_header[3] <= 0xEF
+                        or next_header[6] & 0xC0 != 0x80 or next_header[6] & 0x30
+                        or next_header[7] & 0xC0 == 0x40):
+                    return None
+                header_length = 9 + next_header[8]
+                pts_dts = next_header[7] >> 6
+                required = 10 if pts_dts == 3 else (5 if pts_dts == 2 else 0)
+                length = int.from_bytes(next_header[4:6], "big")
+                if next_header[8] < required or length and length + 6 < header_length:
+                    return None
+                if len(next_header) >= header_length:
+                    return checked(unbounded_end)
+                continue
+            if packet.pusi:
+                active = True
+            elif not active:
+                return None
+            pending.extend(packet.payload)
+            if len(pending) < 6:
+                continue
+            length = int.from_bytes(pending[4:6], "big")
+            if not length:
+                continue
+            if len(pending) > length + 6:
+                return None
+            if len(pending) == length + 6:
+                return checked(packet.payload_offset + len(packet.payload))
+    except TSFormatError:
+        return None
+    return None
+
+
 def transform_nals(
     data: bytes,
     callback: Callable[[NALUnit, bytes], bytes],
@@ -694,7 +778,7 @@ def transform_pes_nals(
 import argparse
 import base64
 from collections import OrderedDict
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -991,7 +1075,7 @@ class PooledHTTPSHandler(HTTPSHandler):
                 raise
 
 
-def get(url, *, headers=None, limit=8*1024*1024, timeout=12):
+def get(url, *, headers=None, limit=8*1024*1024, timeout=12, response_info=False):
     global _API_TLS12_PREFERRED, _API_LEGACY_PREFERRED
     validate_source(url)
     req = Request(url, headers={'User-Agent': UA, 'Referer': REFERER, **(headers or {})})
@@ -1018,6 +1102,9 @@ def get(url, *, headers=None, limit=8*1024*1024, timeout=12):
                 target = urlsplit(response.url)
                 if target.hostname != parsed.hostname or target.path != parsed.path:
                     raise NativeError('source-api-legacy-redirect-denied')
+            if response_info:
+                return body, response.url, {'status': response.status,
+                    'content_range': response.headers.get('Content-Range', '')}
             return body, response.url
 
     preferred_legacy = source_api and _API_LEGACY_ENABLED and _API_LEGACY_PREFERRED
@@ -1138,6 +1225,20 @@ def media_playlist(url):
 
 
 
+class SourceEntityChanged(NativeError):
+    def __init__(self):
+        super().__init__('source-entity-changed')
+
+
+@dataclass(frozen=True)
+class BoundaryPrefix:
+    """Verified boundary-only bytes: never eligible to publish or transform."""
+    data: bytes
+    analysis: object
+    range_data: bytes
+    total_bytes: int
+
+
 class Channel:
     def __init__(self, args):
         self.args = args
@@ -1167,6 +1268,8 @@ class Channel:
         self.last_segment_bytes = 0
         self.preparation_phase = 'disabled'
         self.last_segment_timing = {}
+        self.boundary_prefix_hits = self.boundary_prefix_fallbacks = 0
+        self.boundary_prefix_saved_bytes = 0
 
     def checkpoint(self):
         return not self.stop.is_set()
@@ -1215,6 +1318,8 @@ class Channel:
             self.seen_operations.clear()
             self.preparation_phase = 'disabled'
             self.last_segment_timing = {}
+            self.boundary_prefix_hits = self.boundary_prefix_fallbacks = 0
+            self.boundary_prefix_saved_bytes = 0
             self.playlist_entries = self.last_segment_bytes = 0
             self.error, self.state, self.timings = '', 'initializing', {}
             self.started_at = time.monotonic()
@@ -1275,6 +1380,10 @@ class Channel:
                     'operation_seconds': round(time.monotonic()-self.operation_started, 3) if self.operation_started else 0,
                     'playlist_entries': self.playlist_entries, 'last_segment_bytes': self.last_segment_bytes,
                     'last_segment_timing': dict(self.last_segment_timing),
+                    'prefix_lookahead': bool(getattr(self.args,'prefix_lookahead',False)),
+                    'boundary_prefix_hits': self.boundary_prefix_hits,
+                    'boundary_prefix_fallbacks': self.boundary_prefix_fallbacks,
+                    'startup_lookahead_saved_bytes': self.boundary_prefix_saved_bytes,
                     'media_transfer': ('typed-array' if getattr(getattr(self.engine, 'context', None), 'buffer_api', False) else 'base64'),
                     'stage_seconds': dict(self.timings), 'media_ready': self.playlist() is not None}
 
@@ -1307,6 +1416,95 @@ class Channel:
         worker = self._download_segment if getattr(self.args, 'parallel_prepare', False) else get
         return pool.submit(worker, url)
 
+    def _download_boundary(self, url):
+        # Only the third startup input needs a boundary, not playable media.
+        # Its full body can overlap SDK work after the first two inputs finish.
+        count = 128*1024
+        try:
+            raw, final, info = get(url, headers={'Range':f'bytes=0-{count-1}',
+                'Accept-Encoding':'identity'}, response_info=True, timeout=8)
+        except HTTPError as error:
+            if error.code not in (400, 405, 416, 501):
+                raise
+        else:
+            status, content_range = info['status'], info['content_range']
+            if status == 200 and not content_range:
+                # Some CDNs ignore Range. Reuse that already complete download.
+                try:
+                    analysis = inspect_ts(raw)
+                except TSFormatError:
+                    analysis = None
+                with self.condition:
+                    self.boundary_prefix_fallbacks += 1
+                return raw, final, analysis
+            match = (re.fullmatch(r'bytes 0-(\d+)/(\d+)', content_range)
+                     if status == 206 and isinstance(content_range,str) and len(content_range) <= 100 else None)
+            if match:
+                end, total = map(int, match.groups())
+                if len(raw) == end+1 and 0 <= end < count and end < total <= 8*1024*1024:
+                    if total == len(raw):
+                        try:
+                            analysis = inspect_ts(raw)
+                        except TSFormatError:
+                            analysis = None
+                        with self.condition:
+                            self.boundary_prefix_fallbacks += 1
+                        return raw, final, analysis
+                    proved = inspect_boundary_prefix(raw)
+                    if proved is not None:
+                        prefix, analysis = proved
+                        with self.condition:
+                            self.boundary_prefix_hits += 1
+                            self.boundary_prefix_saved_bytes += total-len(raw)
+                        print('[cctv-native] startup-lookahead=prefix channel='+self.channel_id+
+                              ' fetched_bytes='+str(len(raw))+' complete_prefix_bytes='+str(len(prefix))+
+                              ' full_bytes='+str(total), flush=True)
+                        return BoundaryPrefix(prefix, analysis, raw, total)
+        if self.stop.is_set():
+            raise ResumePreparation()
+        with self.condition:
+            self.boundary_prefix_fallbacks += 1
+        return self._download_segment(url)
+
+    def _upgrade_boundary(self, url, boundary):
+        raw, final, analysis = self._download_segment(url)
+        # Signed HLS resources should be immutable. Even without ETag support,
+        # retain and compare every ranged byte before consuming the full third.
+        if len(raw) != boundary.total_bytes or not raw.startswith(boundary.range_data):
+            raise SourceEntityChanged()
+        return raw, final, analysis
+
+    def _submit_inputs(self, pool, entries, cached, *, startup=False, upgrades=None):
+        for index, entry in enumerate(entries):
+            seq = entry['seq']
+            task = cached.get(seq)
+            if task is None:
+                if startup and len(entries) == 3 and index == 2:
+                    cached[seq] = pool.submit(self._download_boundary, entry['url'])
+                else:
+                    cached[seq] = self._submit_segment(pool, entry['url'])
+            elif index < len(entries)-1 and task.done() and not task.cancelled() and task.exception() is None:
+                value = task.result()
+                if isinstance(value, BoundaryPrefix):
+                    if upgrades is not None and seq in upgrades:
+                        cached[seq] = upgrades[seq]
+                    else:
+                        cached[seq] = pool.submit(self._upgrade_boundary, entry['url'], value)
+                        if upgrades is not None:
+                            upgrades[seq] = cached[seq]
+
+    def _start_boundary_upgrades(self, pool, entries, cached, upgrades):
+        # Called only after the first two full inputs are downloaded. Extra
+        # network work can then overlap native SDK work without delaying them.
+        for entry in entries:
+            seq = entry['seq']
+            task = cached.get(seq)
+            if seq in upgrades or task is None or not task.done() or task.cancelled() or task.exception() is not None:
+                continue
+            value = task.result()
+            if isinstance(value, BoundaryPrefix):
+                upgrades[seq] = pool.submit(self._upgrade_boundary, entry['url'], value)
+
     def _prepare_initial(self, pool, cancel):
         """Independent HTTPS work; never touches the thread-owned native VM."""
         def cancelled():
@@ -1324,10 +1522,8 @@ class Channel:
             return None
         self.preparation_phase = 'segment-download'
         downloads = {}
-        for entry in entries[:3]:
-            if cancelled():
-                return None
-            downloads[entry['seq']] = self._submit_segment(pool, entry['url'])
+        self._submit_inputs(pool, entries[:3], downloads,
+                            startup=bool(getattr(self.args,'prefix_lookahead',False)))
         return entries, final, downloads, refreshed, time.monotonic()
 
     def run(self):
@@ -1340,6 +1536,7 @@ class Channel:
         engine = None
         preparation = None
         cancel_preparation = threading.Event()
+        upgrades = {}
         try:
             if getattr(self.args,'parallel_prepare',False):
                 print('[cctv-native] source-preparation=parallel channel='+self.channel_id,flush=True)
@@ -1407,6 +1604,9 @@ class Channel:
                     pending_discontinuity = pending_discontinuity or changed
                     if source != current_source:
                         last_seq, cached, analyses = None, {}, {}
+                        for task in upgrades.values():
+                            task.cancel()
+                        upgrades = {}
                         current_source = source
                     if last_seq is not None and entries[0]['seq'] > last_seq+1:
                         # A live window can move past a slow download. Drop
@@ -1414,12 +1614,14 @@ class Channel:
                         # window; never join bytes across missing segments.
                         self.source_gaps += 1
                         last_seq, cached, analyses, pending_discontinuity = None, {}, {}, True
+                        for task in upgrades.values():
+                            task.cancel()
+                        upgrades = {}
                     cached.update(initial_downloads)
                     initial_downloads = {}
                     wanted = [e for e in entries if last_seq is None or e['seq'] > last_seq][:3]
-                    for e in wanted:
-                        if e['seq'] not in cached:
-                            cached[e['seq']] = self._submit_segment(pool, e['url'])
+                    self._submit_inputs(pool, wanted, cached, startup=(self.counter == 0 and
+                                        bool(getattr(self.args,'prefix_lookahead',False))), upgrades=upgrades)
                     for e, following in zip(wanted, wanted[1:]):
                         if not self.checkpoint():
                             break
@@ -1429,9 +1631,17 @@ class Channel:
                         download_started = time.perf_counter()
                         current_download = self._await_future(cached[e['seq']])
                         next_download = self._await_future(cached[following['seq']])
-                        raw, lookahead = current_download[0], next_download[0]
+                        if isinstance(current_download, BoundaryPrefix):
+                            if e['seq'] not in upgrades:
+                                upgrades[e['seq']] = pool.submit(self._upgrade_boundary, e['url'], current_download)
+                            cached[e['seq']] = upgrades[e['seq']]
+                            current_download = self._await_future(upgrades[e['seq']])
+                        raw = current_download[0]
+                        boundary_only = isinstance(next_download, BoundaryPrefix)
+                        lookahead = next_download.data if boundary_only else next_download[0]
                         if not self.checkpoint():
                             break
+                        self._start_boundary_upgrades(pool, wanted, cached, upgrades)
                         download_wait = time.perf_counter()-download_started
                         self.last_segment_bytes = len(raw)
                         self.operation_phase('ts-analysis')
@@ -1439,7 +1649,8 @@ class Channel:
                         analysis = current_download[2] if len(current_download) == 3 else analyses.get(e['seq'])
                         if analysis is None or analysis._source is not raw:
                             analysis = inspect_ts(raw)
-                        next_analysis = next_download[2] if len(next_download) == 3 else analyses.get(following['seq'])
+                        next_analysis = (next_download.analysis if boundary_only else
+                                         next_download[2] if len(next_download) == 3 else analyses.get(following['seq']))
                         if next_analysis is None or next_analysis._source is not lookahead:
                             try:
                                 next_analysis = inspect_ts(lookahead, program_number=analysis.program_number,
@@ -1449,7 +1660,8 @@ class Channel:
                         if not boundary_proven_by(lookahead, program_number=analysis.program_number,
                                                   video_pid=analysis.video_pid, _prepared=next_analysis):
                             raise NativeError('source-boundary-not-proven')
-                        analyses[following['seq']] = next_analysis
+                        if not boundary_only:
+                            analyses[following['seq']] = next_analysis
                         # The lookahead proved the final boundary above. Only
                         # its completeness bit changes; reuse the parsed TS.
                         analysis = replace(analysis, nals=analysis.nals[:-1]+(
@@ -1486,11 +1698,38 @@ class Channel:
                     if not self.checkpoint():
                         break
                     cached = {k:v for k,v in cached.items() if last_seq is None or k > last_seq}
+                    # Two full outputs are now ready; complete the retained
+                    # boundary input in parallel with the player's first reads.
+                    if self.counter >= 2:
+                        by_sequence = {entry['seq']:entry for entry in entries}
+                        for seq, task in list(cached.items()):
+                            if task.done() and not task.cancelled() and task.exception() is None:
+                                value = task.result()
+                                if isinstance(value, BoundaryPrefix) and seq in by_sequence:
+                                    if seq not in upgrades:
+                                        upgrades[seq] = pool.submit(self._upgrade_boundary, by_sequence[seq]['url'], value)
+                                    cached[seq] = upgrades[seq]
                     analyses = {k:v for k,v in analyses.items() if k in cached}
+                    upgrades = {k:v for k,v in upgrades.items() if k in cached}
                     if time.monotonic()-last_progress > 30:
                         raise NativeError('source-media-stalled')
                     failures, self.last_transport_error = 0, ''
+                except SourceEntityChanged:
+                    for task in upgrades.values():
+                        task.cancel()
+                    upgrades = {}
+                    for task in cached.values():
+                        task.cancel()
+                    cached, analyses = {}, {}
+                    url, current_source, last_seq, pending_discontinuity = None, None, None, True
+                    self.source_gaps += 1
+                    print('[cctv-native] source-entity-changed channel='+self.channel_id+
+                          '; refreshing official source', flush=True)
+                    continue
                 except ResumePreparation as resumed:
+                    for task in upgrades.values():
+                        task.cancel()
+                    upgrades = {}
                     for task in cached.values():
                         task.cancel()
                     cached, analyses = {}, {}
@@ -1553,6 +1792,8 @@ class Channel:
             print('[cctv-native] diagnostics='+json.dumps(self.snapshot(), ensure_ascii=False), flush=True)
         finally:
             cancel_preparation.set()
+            for task in upgrades.values():
+                task.cancel()
             if engine:
                 engine.close()
             self.native_context_closed()
@@ -1703,7 +1944,7 @@ class JSContext:
         except (ImportError, OSError, AttributeError):
             raise NativeError('jscore-framework-or-time-limit-unavailable') from None
 
-    def evaluate(self, script, timeout=15):
+    def evaluate(self, script, timeout=15, *, _string_result=True):
         if threading.get_ident() != self.owner or not self.context:
             raise NativeError('jscore-wrong-thread-or-closed')
         j = self.library
@@ -1719,6 +1960,8 @@ class JSContext:
             value = j.JSEvaluateScript(self.context, source, None, None, 1, c.byref(exception))
             if exception.value or not value:
                 raise NativeError('jscore-script-failed-or-timed-out')
+            if not _string_result:
+                return None
             output = j.JSValueToStringCopy(self.context, value, c.byref(exception))
             if exception.value or not output:
                 raise NativeError('jscore-result-conversion-failed')
@@ -1735,6 +1978,11 @@ class JSContext:
             if source:
                 j.JSStringRelease(source)
             j.JSContextGroupClearExecutionTimeLimit(self.group)
+
+    def execute(self, script, timeout=15):
+        # Preserve each script/microtask turn, but avoid converting unused
+        # values (usually undefined) to strings through several native calls.
+        return self.evaluate(script, timeout, _string_result=False)
 
     def _media_reference(self, expression):
         if threading.get_ident() != self.owner or not self.context:
@@ -1846,25 +2094,22 @@ class Engine:
         match = re.search(rb'wasmBinaryFile="data:application/octet-stream;base64,([A-Za-z0-9+/=]+)"', raw)
         if not match:
             raise NativeError('official-wasm-not-found')
-        wasm = match.group(1).decode('ascii')
+        wasm = match.group(1)
         try:
             self.context = JSContext(getattr(args, 'jscore_library', APPLE_FRAMEWORK))
-            self.context.evaluate(JSCORE_HOST.replace('/live/cctv2/m/index.shtml',
+            self.context.execute(JSCORE_HOST.replace('/live/cctv2/m/index.shtml',
                 '/live/'+getattr(args, 'channel_id', 'cctv2')+'/m/index.shtml'))
-            self.context.evaluate(IDB_SOURCE)
-            self.context.evaluate(raw.decode('utf-8'))
-            self.context.evaluate('var __wasmText=atob('+json.dumps(wasm)+');'
-                'var __wasm=new Uint8Array(__wasmText.length);'
-                'for(var i=0;i<__wasmText.length;i++)__wasm[i]=__wasmText.charCodeAt(i);'
-                '__wasmText=null;')
-            self.context.evaluate(JSCORE_BOOT)
+            self.context.execute(IDB_SOURCE)
+            self.context.execute(raw.decode('utf-8'))
+            self._install_wasm(wasm)
+            self.context.execute(JSCORE_BOOT)
             deadline = time.monotonic()+25
             while time.monotonic() < deadline:
                 state = self.pump()
                 if state.get('error'):
                     raise NativeError('official-runtime-initialization-failed')
                 if state.get('init') and state.get('config') and state.get('pending') == 0:
-                    self.context.evaluate(JSCORE_TRANSFORM)
+                    self.context.execute(JSCORE_TRANSFORM)
                     print('[cctv-native] media-transfer='+('typed-array' if self.context.buffer_api else 'base64')+
                           ' channel='+getattr(args,'channel_id','cctv2'),flush=True)
                     return
@@ -1874,9 +2119,22 @@ class Engine:
             self.close()
             raise
 
+    def _install_wasm(self, encoded):
+        if self.context.buffer_api:
+            # The pinned SDK's public embedded binary is decoded unchanged by
+            # Python's C implementation, then copied into a host-owned array.
+            # __wasm roots it after the transient media input is released.
+            self.context.put_media(base64.b64decode(encoded, validate=True))
+            self.context.execute('var __wasm=__mediaInput;__mediaInput=null;')
+        else:
+            self.context.execute('var __wasmText=atob('+json.dumps(encoded.decode('ascii'))+');'
+                'var __wasm=new Uint8Array(__wasmText.length);'
+                'for(var i=0;i<__wasmText.length;i++)__wasm[i]=__wasmText.charCodeAt(i);'
+                '__wasmText=null;')
+
     def pump(self):
         ctx = self.context
-        ctx.evaluate('__tick()')
+        ctx.execute('__tick()')
         requests = json.loads(ctx.evaluate('JSON.stringify(__requests.splice(0))'))
         if len(requests) > 32:
             raise NativeError('runtime-too-many-requests')
@@ -1891,11 +2149,11 @@ class Engine:
                 raw, _ = get(target, headers=request.get('headers'), limit=4*1024*1024, timeout=8)
             except Exception:
                 raise NativeError('official-runtime-network-failed') from None
-            ctx.evaluate('__respond('+str(int(request['id']))+',200,'+
+            ctx.execute('__respond('+str(int(request['id']))+',200,'+
                          json.dumps(base64.b64encode(raw).decode())+')')
         # Drain several turns so IndexedDB transaction completion follows XHR.
         for _ in range(4):
-            ctx.evaluate('__tick()')
+            ctx.execute('__tick()')
         return json.loads(ctx.evaluate('JSON.stringify(Object.assign({},__state,'
                                       '{pending:Object.keys(__xhr).length+__requests.length}))'))
 
@@ -1920,7 +2178,7 @@ class Engine:
             output,offset = [],0
             for size in sizes:
                 output.append(raw[offset:offset+size]);offset+=size
-            self.context.evaluate('__mediaOutput=null;__mediaInput=null;')
+            self.context.execute('__mediaOutput=null;__mediaInput=null;')
             if any(value[0]!=original[0] for original,value in zip(units,output)):
                 raise NativeError('engine-response-invalid')
             return output
@@ -2214,6 +2472,8 @@ def main(argv=None):
     parser.add_argument('--no-legacy-source-tls',action='store_true',help='关闭仅官方取源接口的旧服务器握手兼容')
     parser.add_argument('--parallel-prepare',action=argparse.BooleanOptionalAction,default=True,
                         help='并行初始化组件与准备首批分片；--no-parallel-prepare 可关闭')
+    parser.add_argument('--prefix-lookahead', action=argparse.BooleanOptionalAction, default=True,
+                        help='首播仅下载第三片的已校验边界前缀；不支持时自动下载整片')
     parser.add_argument('--no-http-reuse', action='store_true', help='关闭上游 HTTPS 连接复用')
     parser.add_argument('--recent-channel-seconds', type=int, default=15,
                         help='最近一个频道的组件保留秒数（0 关闭，最多 30）；过旧分片不直接播放')

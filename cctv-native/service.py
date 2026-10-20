@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 from collections import OrderedDict
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,7 +27,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, HTTPRedirectHandler, HTTPSHandler, build_opener
 import uuid
-from cctv_native_ts import inspect_ts, transform_pes_nals, boundary_proven_by, TSFormatError
+from cctv_native_ts import inspect_boundary_prefix, inspect_ts, transform_pes_nals, boundary_proven_by, TSFormatError
 
 RUNTIME_URL = 'https://js.player.cntv.cn/creator/live.worker.js'
 RUNTIME_SHA = 'ad9fd2d188015074e59632cedecf13eda29f2c76ea92f17b5f00bc799451bc13'
@@ -304,7 +304,7 @@ class PooledHTTPSHandler(HTTPSHandler):
                 raise
 
 
-def get(url, *, headers=None, limit=8*1024*1024, timeout=12):
+def get(url, *, headers=None, limit=8*1024*1024, timeout=12, response_info=False):
     global _API_TLS12_PREFERRED, _API_LEGACY_PREFERRED
     validate_source(url)
     req = Request(url, headers={'User-Agent': UA, 'Referer': REFERER, **(headers or {})})
@@ -331,6 +331,9 @@ def get(url, *, headers=None, limit=8*1024*1024, timeout=12):
                 target = urlsplit(response.url)
                 if target.hostname != parsed.hostname or target.path != parsed.path:
                     raise NativeError('source-api-legacy-redirect-denied')
+            if response_info:
+                return body, response.url, {'status': response.status,
+                    'content_range': response.headers.get('Content-Range', '')}
             return body, response.url
 
     preferred_legacy = source_api and _API_LEGACY_ENABLED and _API_LEGACY_PREFERRED
@@ -577,6 +580,20 @@ class Engine:
             self.process.stdout.close()
 
 
+class SourceEntityChanged(NativeError):
+    def __init__(self):
+        super().__init__('source-entity-changed')
+
+
+@dataclass(frozen=True)
+class BoundaryPrefix:
+    """Verified boundary-only bytes: never eligible to publish or transform."""
+    data: bytes
+    analysis: object
+    range_data: bytes
+    total_bytes: int
+
+
 class Channel:
     def __init__(self, args):
         self.args = args
@@ -606,6 +623,8 @@ class Channel:
         self.last_segment_bytes = 0
         self.preparation_phase = 'disabled'
         self.last_segment_timing = {}
+        self.boundary_prefix_hits = self.boundary_prefix_fallbacks = 0
+        self.boundary_prefix_saved_bytes = 0
 
     def checkpoint(self):
         return not self.stop.is_set()
@@ -654,6 +673,8 @@ class Channel:
             self.seen_operations.clear()
             self.preparation_phase = 'disabled'
             self.last_segment_timing = {}
+            self.boundary_prefix_hits = self.boundary_prefix_fallbacks = 0
+            self.boundary_prefix_saved_bytes = 0
             self.playlist_entries = self.last_segment_bytes = 0
             self.error, self.state, self.timings = '', 'initializing', {}
             self.started_at = time.monotonic()
@@ -714,6 +735,10 @@ class Channel:
                     'operation_seconds': round(time.monotonic()-self.operation_started, 3) if self.operation_started else 0,
                     'playlist_entries': self.playlist_entries, 'last_segment_bytes': self.last_segment_bytes,
                     'last_segment_timing': dict(self.last_segment_timing),
+                    'prefix_lookahead': bool(getattr(self.args,'prefix_lookahead',False)),
+                    'boundary_prefix_hits': self.boundary_prefix_hits,
+                    'boundary_prefix_fallbacks': self.boundary_prefix_fallbacks,
+                    'startup_lookahead_saved_bytes': self.boundary_prefix_saved_bytes,
                     'media_transfer': ('typed-array' if getattr(getattr(self.engine, 'context', None), 'buffer_api', False) else 'base64'),
                     'stage_seconds': dict(self.timings), 'media_ready': self.playlist() is not None}
 
@@ -746,6 +771,95 @@ class Channel:
         worker = self._download_segment if getattr(self.args, 'parallel_prepare', False) else get
         return pool.submit(worker, url)
 
+    def _download_boundary(self, url):
+        # Only the third startup input needs a boundary, not playable media.
+        # Its full body can overlap SDK work after the first two inputs finish.
+        count = 128*1024
+        try:
+            raw, final, info = get(url, headers={'Range':f'bytes=0-{count-1}',
+                'Accept-Encoding':'identity'}, response_info=True, timeout=8)
+        except HTTPError as error:
+            if error.code not in (400, 405, 416, 501):
+                raise
+        else:
+            status, content_range = info['status'], info['content_range']
+            if status == 200 and not content_range:
+                # Some CDNs ignore Range. Reuse that already complete download.
+                try:
+                    analysis = inspect_ts(raw)
+                except TSFormatError:
+                    analysis = None
+                with self.condition:
+                    self.boundary_prefix_fallbacks += 1
+                return raw, final, analysis
+            match = (re.fullmatch(r'bytes 0-(\d+)/(\d+)', content_range)
+                     if status == 206 and isinstance(content_range,str) and len(content_range) <= 100 else None)
+            if match:
+                end, total = map(int, match.groups())
+                if len(raw) == end+1 and 0 <= end < count and end < total <= 8*1024*1024:
+                    if total == len(raw):
+                        try:
+                            analysis = inspect_ts(raw)
+                        except TSFormatError:
+                            analysis = None
+                        with self.condition:
+                            self.boundary_prefix_fallbacks += 1
+                        return raw, final, analysis
+                    proved = inspect_boundary_prefix(raw)
+                    if proved is not None:
+                        prefix, analysis = proved
+                        with self.condition:
+                            self.boundary_prefix_hits += 1
+                            self.boundary_prefix_saved_bytes += total-len(raw)
+                        print('[cctv-native] startup-lookahead=prefix channel='+self.channel_id+
+                              ' fetched_bytes='+str(len(raw))+' complete_prefix_bytes='+str(len(prefix))+
+                              ' full_bytes='+str(total), flush=True)
+                        return BoundaryPrefix(prefix, analysis, raw, total)
+        if self.stop.is_set():
+            raise ResumePreparation()
+        with self.condition:
+            self.boundary_prefix_fallbacks += 1
+        return self._download_segment(url)
+
+    def _upgrade_boundary(self, url, boundary):
+        raw, final, analysis = self._download_segment(url)
+        # Signed HLS resources should be immutable. Even without ETag support,
+        # retain and compare every ranged byte before consuming the full third.
+        if len(raw) != boundary.total_bytes or not raw.startswith(boundary.range_data):
+            raise SourceEntityChanged()
+        return raw, final, analysis
+
+    def _submit_inputs(self, pool, entries, cached, *, startup=False, upgrades=None):
+        for index, entry in enumerate(entries):
+            seq = entry['seq']
+            task = cached.get(seq)
+            if task is None:
+                if startup and len(entries) == 3 and index == 2:
+                    cached[seq] = pool.submit(self._download_boundary, entry['url'])
+                else:
+                    cached[seq] = self._submit_segment(pool, entry['url'])
+            elif index < len(entries)-1 and task.done() and not task.cancelled() and task.exception() is None:
+                value = task.result()
+                if isinstance(value, BoundaryPrefix):
+                    if upgrades is not None and seq in upgrades:
+                        cached[seq] = upgrades[seq]
+                    else:
+                        cached[seq] = pool.submit(self._upgrade_boundary, entry['url'], value)
+                        if upgrades is not None:
+                            upgrades[seq] = cached[seq]
+
+    def _start_boundary_upgrades(self, pool, entries, cached, upgrades):
+        # Called only after the first two full inputs are downloaded. Extra
+        # network work can then overlap native SDK work without delaying them.
+        for entry in entries:
+            seq = entry['seq']
+            task = cached.get(seq)
+            if seq in upgrades or task is None or not task.done() or task.cancelled() or task.exception() is not None:
+                continue
+            value = task.result()
+            if isinstance(value, BoundaryPrefix):
+                upgrades[seq] = pool.submit(self._upgrade_boundary, entry['url'], value)
+
     def _prepare_initial(self, pool, cancel):
         """Independent HTTPS work; never touches the thread-owned native VM."""
         def cancelled():
@@ -763,10 +877,8 @@ class Channel:
             return None
         self.preparation_phase = 'segment-download'
         downloads = {}
-        for entry in entries[:3]:
-            if cancelled():
-                return None
-            downloads[entry['seq']] = self._submit_segment(pool, entry['url'])
+        self._submit_inputs(pool, entries[:3], downloads,
+                            startup=bool(getattr(self.args,'prefix_lookahead',False)))
         return entries, final, downloads, refreshed, time.monotonic()
 
     def run(self):
@@ -779,6 +891,7 @@ class Channel:
         engine = None
         preparation = None
         cancel_preparation = threading.Event()
+        upgrades = {}
         try:
             if getattr(self.args,'parallel_prepare',False):
                 print('[cctv-native] source-preparation=parallel channel='+self.channel_id,flush=True)
@@ -846,6 +959,9 @@ class Channel:
                     pending_discontinuity = pending_discontinuity or changed
                     if source != current_source:
                         last_seq, cached, analyses = None, {}, {}
+                        for task in upgrades.values():
+                            task.cancel()
+                        upgrades = {}
                         current_source = source
                     if last_seq is not None and entries[0]['seq'] > last_seq+1:
                         # A live window can move past a slow download. Drop
@@ -853,12 +969,14 @@ class Channel:
                         # window; never join bytes across missing segments.
                         self.source_gaps += 1
                         last_seq, cached, analyses, pending_discontinuity = None, {}, {}, True
+                        for task in upgrades.values():
+                            task.cancel()
+                        upgrades = {}
                     cached.update(initial_downloads)
                     initial_downloads = {}
                     wanted = [e for e in entries if last_seq is None or e['seq'] > last_seq][:3]
-                    for e in wanted:
-                        if e['seq'] not in cached:
-                            cached[e['seq']] = self._submit_segment(pool, e['url'])
+                    self._submit_inputs(pool, wanted, cached, startup=(self.counter == 0 and
+                                        bool(getattr(self.args,'prefix_lookahead',False))), upgrades=upgrades)
                     for e, following in zip(wanted, wanted[1:]):
                         if not self.checkpoint():
                             break
@@ -868,9 +986,17 @@ class Channel:
                         download_started = time.perf_counter()
                         current_download = self._await_future(cached[e['seq']])
                         next_download = self._await_future(cached[following['seq']])
-                        raw, lookahead = current_download[0], next_download[0]
+                        if isinstance(current_download, BoundaryPrefix):
+                            if e['seq'] not in upgrades:
+                                upgrades[e['seq']] = pool.submit(self._upgrade_boundary, e['url'], current_download)
+                            cached[e['seq']] = upgrades[e['seq']]
+                            current_download = self._await_future(upgrades[e['seq']])
+                        raw = current_download[0]
+                        boundary_only = isinstance(next_download, BoundaryPrefix)
+                        lookahead = next_download.data if boundary_only else next_download[0]
                         if not self.checkpoint():
                             break
+                        self._start_boundary_upgrades(pool, wanted, cached, upgrades)
                         download_wait = time.perf_counter()-download_started
                         self.last_segment_bytes = len(raw)
                         self.operation_phase('ts-analysis')
@@ -878,7 +1004,8 @@ class Channel:
                         analysis = current_download[2] if len(current_download) == 3 else analyses.get(e['seq'])
                         if analysis is None or analysis._source is not raw:
                             analysis = inspect_ts(raw)
-                        next_analysis = next_download[2] if len(next_download) == 3 else analyses.get(following['seq'])
+                        next_analysis = (next_download.analysis if boundary_only else
+                                         next_download[2] if len(next_download) == 3 else analyses.get(following['seq']))
                         if next_analysis is None or next_analysis._source is not lookahead:
                             try:
                                 next_analysis = inspect_ts(lookahead, program_number=analysis.program_number,
@@ -888,7 +1015,8 @@ class Channel:
                         if not boundary_proven_by(lookahead, program_number=analysis.program_number,
                                                   video_pid=analysis.video_pid, _prepared=next_analysis):
                             raise NativeError('source-boundary-not-proven')
-                        analyses[following['seq']] = next_analysis
+                        if not boundary_only:
+                            analyses[following['seq']] = next_analysis
                         # The lookahead proved the final boundary above. Only
                         # its completeness bit changes; reuse the parsed TS.
                         analysis = replace(analysis, nals=analysis.nals[:-1]+(
@@ -925,11 +1053,38 @@ class Channel:
                     if not self.checkpoint():
                         break
                     cached = {k:v for k,v in cached.items() if last_seq is None or k > last_seq}
+                    # Two full outputs are now ready; complete the retained
+                    # boundary input in parallel with the player's first reads.
+                    if self.counter >= 2:
+                        by_sequence = {entry['seq']:entry for entry in entries}
+                        for seq, task in list(cached.items()):
+                            if task.done() and not task.cancelled() and task.exception() is None:
+                                value = task.result()
+                                if isinstance(value, BoundaryPrefix) and seq in by_sequence:
+                                    if seq not in upgrades:
+                                        upgrades[seq] = pool.submit(self._upgrade_boundary, by_sequence[seq]['url'], value)
+                                    cached[seq] = upgrades[seq]
                     analyses = {k:v for k,v in analyses.items() if k in cached}
+                    upgrades = {k:v for k,v in upgrades.items() if k in cached}
                     if time.monotonic()-last_progress > 30:
                         raise NativeError('source-media-stalled')
                     failures, self.last_transport_error = 0, ''
+                except SourceEntityChanged:
+                    for task in upgrades.values():
+                        task.cancel()
+                    upgrades = {}
+                    for task in cached.values():
+                        task.cancel()
+                    cached, analyses = {}, {}
+                    url, current_source, last_seq, pending_discontinuity = None, None, None, True
+                    self.source_gaps += 1
+                    print('[cctv-native] source-entity-changed channel='+self.channel_id+
+                          '; refreshing official source', flush=True)
+                    continue
                 except ResumePreparation as resumed:
+                    for task in upgrades.values():
+                        task.cancel()
+                    upgrades = {}
                     for task in cached.values():
                         task.cancel()
                     cached, analyses = {}, {}
@@ -992,6 +1147,8 @@ class Channel:
             print('[cctv-native] diagnostics='+json.dumps(self.snapshot(), ensure_ascii=False), flush=True)
         finally:
             cancel_preparation.set()
+            for task in upgrades.values():
+                task.cancel()
             if engine:
                 engine.close()
             self.native_context_closed()

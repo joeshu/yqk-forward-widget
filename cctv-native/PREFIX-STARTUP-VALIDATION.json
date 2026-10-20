@@ -1,0 +1,210 @@
+{
+  "date": "2026-10-20",
+  "scope": "Linux development network and JavaScriptCore; not iPhone timings. Official runtime unchanged, highest rendition retained, two complete outputs required.",
+  "engine_initialization": {
+    "scope": "Ten fresh official-SDK contexts per mode, alternating; pinned runtime already in RAM, normally fetched real SDK network response bodies memoized in this benchmark only to isolate host/SDK initialization. Not iPhone speed or network startup.",
+    "samples_per_mode": 10,
+    "median_wall_seconds": [
+      0.17274222049672971,
+      0.12873325849795947
+    ],
+    "median_process_cpu_seconds": [
+      0.19495603849999998,
+      0.1447716429999999
+    ],
+    "wall_seconds": [
+      [
+        0.19190588699711952,
+        0.16391829399799462,
+        0.17123658799391706,
+        0.1770436239967239,
+        0.17541571200126782,
+        0.16410524600360077,
+        0.16939724599797046,
+        0.17424785299954237,
+        0.19181068400212098,
+        0.17086799199751113
+      ],
+      [
+        0.12363644599827239,
+        0.12784750999708194,
+        0.13119815599930007,
+        0.12820808299875353,
+        0.13249712299875682,
+        0.12717257300391793,
+        0.1292584339971654,
+        0.1363890860011452,
+        0.14661656199314166,
+        0.11505271700298181
+      ]
+    ],
+    "cpu_seconds": [
+      [
+        0.21490960399999998,
+        0.18104187900000013,
+        0.19408735200000016,
+        0.19660477999999992,
+        0.19747003500000004,
+        0.18250553000000025,
+        0.18818114700000033,
+        0.19553956099999992,
+        0.222090122,
+        0.19437251600000005
+      ],
+      [
+        0.13928966099999995,
+        0.14762199399999998,
+        0.14953977299999988,
+        0.14458637099999994,
+        0.1441146339999999,
+        0.14111228900000006,
+        0.14495691499999985,
+        0.152295128,
+        0.1663497030000003,
+        0.136053231
+      ]
+    ]
+  },
+  "controlled_media_startup": {
+    "scope": "Same approved CCTV-12 media URLs, fresh SDK and HTTP pool each trial; SDK configuration responses memoized only in benchmark; source API and playlist retrieval excluded. Six alternating trials, three per mode; small sample with network variation.",
+    "trials": [
+      {
+        "prefix": false,
+        "first_playlist_seconds": 3.0599,
+        "hits": 0,
+        "saved_bytes": 0,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0
+      },
+      {
+        "prefix": true,
+        "first_playlist_seconds": 2.3135,
+        "hits": 1,
+        "saved_bytes": 206388,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0
+      },
+      {
+        "prefix": true,
+        "first_playlist_seconds": 1.7141,
+        "hits": 1,
+        "saved_bytes": 206388,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0
+      },
+      {
+        "prefix": false,
+        "first_playlist_seconds": 2.5166,
+        "hits": 0,
+        "saved_bytes": 0,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0
+      },
+      {
+        "prefix": false,
+        "first_playlist_seconds": 4.4893,
+        "hits": 0,
+        "saved_bytes": 0,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0
+      },
+      {
+        "prefix": true,
+        "first_playlist_seconds": 1.5793,
+        "hits": 1,
+        "saved_bytes": 206388,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0
+      }
+    ]
+  },
+  "live_startup": {
+    "scope": "Fresh official API, playlists and SDK; different live URLs and CDN/network conditions. These trials do not demonstrate an overall cold-start improvement. Each followed by 16 seconds strict live decode.",
+    "trials": [
+      {
+        "channel": "cctv2",
+        "prefix": false,
+        "first_playlist_seconds": 5.608,
+        "prefix_hits": 0,
+        "prefix_fallbacks": 0,
+        "startup_lookahead_saved_bytes": 0,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "processed_segments": 5,
+        "source_gaps": 0,
+        "transport_retries": 0
+      },
+      {
+        "channel": "cctv2",
+        "prefix": true,
+        "first_playlist_seconds": 10.107,
+        "prefix_hits": 1,
+        "prefix_fallbacks": 0,
+        "startup_lookahead_saved_bytes": 569980,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "processed_segments": 5,
+        "source_gaps": 0,
+        "transport_retries": 0
+      },
+      {
+        "channel": "cctv12",
+        "prefix": true,
+        "first_playlist_seconds": 5.615,
+        "prefix_hits": 1,
+        "prefix_fallbacks": 0,
+        "startup_lookahead_saved_bytes": 416196,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "processed_segments": 5,
+        "source_gaps": 0,
+        "transport_retries": 0
+      },
+      {
+        "channel": "cctv12",
+        "prefix": false,
+        "first_playlist_seconds": 3.018,
+        "prefix_hits": 0,
+        "prefix_fallbacks": 0,
+        "startup_lookahead_saved_bytes": 0,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "processed_segments": 5,
+        "source_gaps": 0,
+        "transport_retries": 0
+      },
+      {
+        "channel": "cctv1",
+        "prefix": true,
+        "first_playlist_seconds": 6.965,
+        "prefix_hits": 1,
+        "prefix_fallbacks": 0,
+        "startup_lookahead_saved_bytes": 215036,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "processed_segments": 5,
+        "source_gaps": 0,
+        "transport_retries": 0
+      },
+      {
+        "channel": "cctveurope",
+        "prefix": true,
+        "first_playlist_seconds": 4.877,
+        "prefix_hits": 1,
+        "prefix_fallbacks": 0,
+        "startup_lookahead_saved_bytes": 772080,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "processed_segments": 6,
+        "source_gaps": 0,
+        "transport_retries": 0
+      }
+    ]
+  },
+  "validation": {
+    "unit_tests": 169,
+    "native_jscore_tests": 11,
+    "strict_decode_errors": 0,
+    "phone_validation": "pending"
+  }
+}

@@ -440,6 +440,90 @@ def boundary_proven_by(
     return bool(analysis.nals and analysis.nals[0].start_code_offset == 0)
 
 
+
+def inspect_boundary_prefix(
+    data: bytes,
+    *,
+    program_number: int | None = None,
+    video_pid: int | None = None,
+) -> tuple[bytes, TSAnalysis] | None:
+    """Validate a boundary-only prefix ending at a complete first video PES.
+
+    This explicit prefix-input API may omit an incomplete trailing TS slot.
+    Bounded PES must finish; an unbounded PES needs the next video PUSI and a
+    complete valid next PES header. The returned bytes pass unchanged
+    ``inspect_ts``. No final NAL is asserted complete. Callers must separately
+    establish offset zero, consecutive HLS sequence and no discontinuity.
+    A returned prefix is not a complete segment and MUST NOT be published.
+    """
+    if not isinstance(data, bytes):
+        raise TypeError("data must be immutable bytes")
+    try:
+        aligned = data[:len(data) // 188 * 188]
+        packets = _packets(aligned)
+        program, _pmt, _pcr, video = _program(packets, program_number, video_pid)
+
+        def checked(end):
+            prefix = aligned[:end]
+            analysis = inspect_ts(prefix, program_number=program, video_pid=video,
+                                  _map_bytes=False)
+            if boundary_proven_by(prefix, program_number=program, video_pid=video,
+                                  _prepared=analysis):
+                return prefix, analysis
+            return None
+
+        pending = bytearray()
+        next_header = bytearray()
+        active = False
+        unbounded_end = None
+        for packet in packets:
+            if packet.pid != video or not packet.payload:
+                continue
+            if unbounded_end is None and packet.pusi and active:
+                # A second PUSI proves the preceding zero-length PES ended,
+                # provided this next PES header also validates below.
+                if len(pending) < 9 or int.from_bytes(pending[4:6], "big"):
+                    return None
+                unbounded_end = packet.payload_offset + len(packet.payload) - 188
+            if unbounded_end is not None:
+                if (packet.scrambling or packet.duplicate or packet.discontinuity
+                        or packet.pusi and next_header):
+                    return None
+                next_header.extend(packet.payload)
+                if len(next_header) < 9:
+                    continue
+                if (next_header[:3] != b"\x00\x00\x01" or not 0xE0 <= next_header[3] <= 0xEF
+                        or next_header[6] & 0xC0 != 0x80 or next_header[6] & 0x30
+                        or next_header[7] & 0xC0 == 0x40):
+                    return None
+                header_length = 9 + next_header[8]
+                pts_dts = next_header[7] >> 6
+                required = 10 if pts_dts == 3 else (5 if pts_dts == 2 else 0)
+                length = int.from_bytes(next_header[4:6], "big")
+                if next_header[8] < required or length and length + 6 < header_length:
+                    return None
+                if len(next_header) >= header_length:
+                    return checked(unbounded_end)
+                continue
+            if packet.pusi:
+                active = True
+            elif not active:
+                return None
+            pending.extend(packet.payload)
+            if len(pending) < 6:
+                continue
+            length = int.from_bytes(pending[4:6], "big")
+            if not length:
+                continue
+            if len(pending) > length + 6:
+                return None
+            if len(pending) == length + 6:
+                return checked(packet.payload_offset + len(packet.payload))
+    except TSFormatError:
+        return None
+    return None
+
+
 def transform_nals(
     data: bytes,
     callback: Callable[[NALUnit, bytes], bytes],

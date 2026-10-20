@@ -48,7 +48,7 @@ class JSContext:
         except (ImportError, OSError, AttributeError):
             raise NativeError('jscore-framework-or-time-limit-unavailable') from None
 
-    def evaluate(self, script, timeout=15):
+    def evaluate(self, script, timeout=15, *, _string_result=True):
         if threading.get_ident() != self.owner or not self.context:
             raise NativeError('jscore-wrong-thread-or-closed')
         j = self.library
@@ -64,6 +64,8 @@ class JSContext:
             value = j.JSEvaluateScript(self.context, source, None, None, 1, c.byref(exception))
             if exception.value or not value:
                 raise NativeError('jscore-script-failed-or-timed-out')
+            if not _string_result:
+                return None
             output = j.JSValueToStringCopy(self.context, value, c.byref(exception))
             if exception.value or not output:
                 raise NativeError('jscore-result-conversion-failed')
@@ -80,6 +82,11 @@ class JSContext:
             if source:
                 j.JSStringRelease(source)
             j.JSContextGroupClearExecutionTimeLimit(self.group)
+
+    def execute(self, script, timeout=15):
+        # Preserve each script/microtask turn, but avoid converting unused
+        # values (usually undefined) to strings through several native calls.
+        return self.evaluate(script, timeout, _string_result=False)
 
     def _media_reference(self, expression):
         if threading.get_ident() != self.owner or not self.context:
@@ -191,25 +198,22 @@ class Engine:
         match = re.search(rb'wasmBinaryFile="data:application/octet-stream;base64,([A-Za-z0-9+/=]+)"', raw)
         if not match:
             raise NativeError('official-wasm-not-found')
-        wasm = match.group(1).decode('ascii')
+        wasm = match.group(1)
         try:
             self.context = JSContext(getattr(args, 'jscore_library', APPLE_FRAMEWORK))
-            self.context.evaluate(JSCORE_HOST.replace('/live/cctv2/m/index.shtml',
+            self.context.execute(JSCORE_HOST.replace('/live/cctv2/m/index.shtml',
                 '/live/'+getattr(args, 'channel_id', 'cctv2')+'/m/index.shtml'))
-            self.context.evaluate(IDB_SOURCE)
-            self.context.evaluate(raw.decode('utf-8'))
-            self.context.evaluate('var __wasmText=atob('+json.dumps(wasm)+');'
-                'var __wasm=new Uint8Array(__wasmText.length);'
-                'for(var i=0;i<__wasmText.length;i++)__wasm[i]=__wasmText.charCodeAt(i);'
-                '__wasmText=null;')
-            self.context.evaluate(JSCORE_BOOT)
+            self.context.execute(IDB_SOURCE)
+            self.context.execute(raw.decode('utf-8'))
+            self._install_wasm(wasm)
+            self.context.execute(JSCORE_BOOT)
             deadline = time.monotonic()+25
             while time.monotonic() < deadline:
                 state = self.pump()
                 if state.get('error'):
                     raise NativeError('official-runtime-initialization-failed')
                 if state.get('init') and state.get('config') and state.get('pending') == 0:
-                    self.context.evaluate(JSCORE_TRANSFORM)
+                    self.context.execute(JSCORE_TRANSFORM)
                     print('[cctv-native] media-transfer='+('typed-array' if self.context.buffer_api else 'base64')+
                           ' channel='+getattr(args,'channel_id','cctv2'),flush=True)
                     return
@@ -219,9 +223,22 @@ class Engine:
             self.close()
             raise
 
+    def _install_wasm(self, encoded):
+        if self.context.buffer_api:
+            # The pinned SDK's public embedded binary is decoded unchanged by
+            # Python's C implementation, then copied into a host-owned array.
+            # __wasm roots it after the transient media input is released.
+            self.context.put_media(base64.b64decode(encoded, validate=True))
+            self.context.execute('var __wasm=__mediaInput;__mediaInput=null;')
+        else:
+            self.context.execute('var __wasmText=atob('+json.dumps(encoded.decode('ascii'))+');'
+                'var __wasm=new Uint8Array(__wasmText.length);'
+                'for(var i=0;i<__wasmText.length;i++)__wasm[i]=__wasmText.charCodeAt(i);'
+                '__wasmText=null;')
+
     def pump(self):
         ctx = self.context
-        ctx.evaluate('__tick()')
+        ctx.execute('__tick()')
         requests = json.loads(ctx.evaluate('JSON.stringify(__requests.splice(0))'))
         if len(requests) > 32:
             raise NativeError('runtime-too-many-requests')
@@ -236,11 +253,11 @@ class Engine:
                 raw, _ = get(target, headers=request.get('headers'), limit=4*1024*1024, timeout=8)
             except Exception:
                 raise NativeError('official-runtime-network-failed') from None
-            ctx.evaluate('__respond('+str(int(request['id']))+',200,'+
+            ctx.execute('__respond('+str(int(request['id']))+',200,'+
                          json.dumps(base64.b64encode(raw).decode())+')')
         # Drain several turns so IndexedDB transaction completion follows XHR.
         for _ in range(4):
-            ctx.evaluate('__tick()')
+            ctx.execute('__tick()')
         return json.loads(ctx.evaluate('JSON.stringify(Object.assign({},__state,'
                                       '{pending:Object.keys(__xhr).length+__requests.length}))'))
 
@@ -265,7 +282,7 @@ class Engine:
             output,offset = [],0
             for size in sizes:
                 output.append(raw[offset:offset+size]);offset+=size
-            self.context.evaluate('__mediaOutput=null;__mediaInput=null;')
+            self.context.execute('__mediaOutput=null;__mediaInput=null;')
             if any(value[0]!=original[0] for original,value in zip(units,output)):
                 raise NativeError('engine-response-invalid')
             return output
