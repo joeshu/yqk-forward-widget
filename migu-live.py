@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Migu dynamic service 0.8.2. Standalone Python 3.10+, standard library only."""
+"""Migu dynamic service 0.8.3. Standalone Python 3.10+, standard library only."""
 from __future__ import annotations
 
 # Edit only this block for protocol settings and your own credentials.
@@ -911,6 +911,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 import random
 import re
@@ -942,6 +943,12 @@ RID_MESSAGES = {
     "BLACK_APP_OR_TERMINAL": "MIGU_TERMINAL_BLOCKED",
     "WUDALIANSAI_FUFEI_VERSION_UPGRADE": "MIGU_CLIENT_VERSION_UPGRADE_REQUIRED",
 }
+
+
+class MiguRateLimitError(m.FetchError):
+    def __init__(self, retry_after):
+        super().__init__("MIGU_RESOLVE_BURST_LIMIT")
+        self.retry_after = max(1, min(60, int(retry_after)))
 
 
 def _md5(text):
@@ -1228,6 +1235,7 @@ class AndroidStore:
         self.closed, self.last_error, self.fetches, self.cache_hits = False, None, 0, 0
         self.last_upstream, self.recent = None, deque()
         self.upstream_observation = None
+        self.resolve_samples = deque(maxlen=32)
         self.credential_state = "unchecked" if self.settings.user_id else "unconfigured"
         channels = {"p" + pid: m.Channel(name, name, name, group, "", "", m.utcnow()) for pid, name, group in BUILTIN_CHANNELS}
         self.snapshot = AndroidSnapshot(None, MappingProxyType(channels))
@@ -1245,13 +1253,18 @@ class AndroidStore:
             elif self.settings.user_id:
                 self.credential_state = "not_sent"
 
-    def _burst_ok(self):
+    def _retry_after(self):
         now = self.clock()
-        while self.recent and now - self.recent[0] > BURST_WINDOW:
+        while self.recent and now - self.recent[0] >= BURST_WINDOW:
             self.recent.popleft()
-        if len(self.recent) >= BURST_LIMIT:
+        if len(self.recent) < BURST_LIMIT:
+            return 0
+        return max(1, min(60, math.ceil(BURST_WINDOW - (now - self.recent[0]))))
+
+    def _burst_ok(self):
+        if self._retry_after():
             return False
-        self.recent.append(now)
+        self.recent.append(self.clock())
         return True
 
     def _finish(self, key, future):
@@ -1278,6 +1291,27 @@ class AndroidStore:
             return self.snapshot
 
     def resolve(self, key, wait=9):
+        started, result = time.perf_counter(), "OK"
+        try:
+            return self._resolve(key, wait)
+        except Exception as error:
+            text = str(error)
+            result = text if isinstance(error, m.UpdateError) and re.fullmatch(r"[A-Z0-9_]{1,80}", text) else "MIGU_API_ERROR"
+            raise
+        finally:
+            elapsed = min(120000, max(0, round((time.perf_counter()-started)*1000)))
+            sample = None
+            with self.lock:
+                if not self.closed and key in self.snapshot.channels:
+                    sample = {"channel_id": key[1:], "elapsed_ms": elapsed, "result": result}
+                    self.resolve_samples.append(sample)
+            if sample and elapsed >= 1000:
+                try:
+                    print(f"[{m.iso(m.utcnow())}] MIGU_SLOW_RESOLVE 本地取源等待（不含播放器缓冲） " + json.dumps(sample, sort_keys=True), flush=True)
+                except (OSError, ValueError):
+                    pass
+
+    def _resolve(self, key, wait=9):
         with self.lock:
             if self.closed:
                 raise m.FetchError("SERVICE_STOPPING")
@@ -1295,7 +1329,7 @@ class AndroidStore:
                 if len(self.flights) >= 8:
                     raise m.FetchError("MIGU_API_CAPACITY")
                 if not self._burst_ok():
-                    raise m.FetchError("MIGU_RESOLVE_BURST_LIMIT")
+                    raise MiguRateLimitError(self._retry_after())
                 future = self.pool.submit(self.resolver, key[1:])
                 self.flights[key] = future
                 self.fetches += 1
@@ -1322,6 +1356,8 @@ class AndroidStore:
                     "request_profile": "legacy720p" if self.settings.rate_type >= 3 and not self.settings.user_id else "modern",
                     "cache_success_seconds": CACHE_SUCCESS,
                     "credential_state": self.credential_state,
+                    "rate_limit_retry_after_seconds": self._retry_after(),
+                    "recent_resolves": list(self.resolve_samples),
                     "upstream_observation": dict(self.upstream_observation) if self.upstream_observation else None}
 
     def close(self):
@@ -1953,7 +1989,7 @@ import time
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 
-VERSION = "0.8.2"
+VERSION = "0.8.3"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
@@ -2188,6 +2224,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         service = self.server.service
+        request_channel_id = None
         try:
             if len(self.path) > 4096:
                 raise ServiceError("REQUEST_TOO_LONG", 414)
@@ -2236,6 +2273,7 @@ class Handler(BaseHTTPRequestHandler):
             channel = snapshot.channels.get(key)
             if channel is None:
                 raise ServiceError("CHANNEL_NOT_FOUND", 404)
+            request_channel_id = key[1:] if key.startswith("p") else None
             suffix = ''
             if "playbackbegin" in query or "playbackend" in query:
                 if not getattr(snapshot.playlist, 'catchup', False):
@@ -2256,10 +2294,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_body(error.status, m.json_bytes({"error": error.code}), **({"Retry_After": "3"} if error.status == 503 else {}))
         except m.UpdateError as error:
             details = getattr(error, "details", None)
-            service.diagnostics.record(str(error), details)
+            log_details = dict(details or {})
+            if request_channel_id:
+                log_details.setdefault("channel_id", request_channel_id)
+            service.diagnostics.record(str(error), log_details)
             code = str(error)
             status = 403 if code in {"MIGU_AUTHORIZATION_REJECTED", "MIGU_LOGIN_REQUIRED", "MIGU_MEMBERSHIP_REQUIRED", "MIGU_REGION_RESTRICTED", "MIGU_TERMINAL_BLOCKED", "MIGU_COPYRIGHT_SHIELD", "MIGU_CLIENT_VERSION_UPGRADE_REQUIRED"} else 429 if code == "MIGU_RESOLVE_BURST_LIMIT" else 404 if code == "EPG_DISABLED" else 503 if code in {"EPG_LOADING", "EPG_UNAVAILABLE", "MIGU_API_LOADING", "MIGU_API_CAPACITY"} or (code.startswith("EPG_") or code.startswith("LIST_") or code in {"SOURCE_SNAPSHOT_TOO_OLD", "TOO_FEW_CHANNELS"}) else 502
-            self.send_body(status, m.json_bytes({"error": code, **({"upstream": details} if details else {})}), **({"Retry_After": "60" if status == 429 else "3"} if status in {429,503} else {}))
+            self.send_body(status, m.json_bytes({"error": code, **({"upstream": details} if details else {})}), **({"Retry_After": str(getattr(error, "retry_after", 60)) if status == 429 else "3"} if status in {429,503} else {}))
         except (ValueError, OSError):
             self.send_body(400, m.json_bytes({"error": "REQUEST_OR_IO_ERROR"}))
 

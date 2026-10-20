@@ -28,7 +28,7 @@ from migu.source import ListStore, CATCHUP_SOURCE, list_catchup
 from migu.epg import EpgStore
 from migu.workers import BoundedExecutor
 
-VERSION = "0.8.2"
+VERSION = "0.8.3"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
@@ -263,6 +263,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         service = self.server.service
+        request_channel_id = None
         try:
             if len(self.path) > 4096:
                 raise ServiceError("REQUEST_TOO_LONG", 414)
@@ -311,6 +312,7 @@ class Handler(BaseHTTPRequestHandler):
             channel = snapshot.channels.get(key)
             if channel is None:
                 raise ServiceError("CHANNEL_NOT_FOUND", 404)
+            request_channel_id = key[1:] if key.startswith("p") else None
             suffix = ''
             if "playbackbegin" in query or "playbackend" in query:
                 if not getattr(snapshot.playlist, 'catchup', False):
@@ -331,10 +333,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_body(error.status, m.json_bytes({"error": error.code}), **({"Retry_After": "3"} if error.status == 503 else {}))
         except m.UpdateError as error:
             details = getattr(error, "details", None)
-            service.diagnostics.record(str(error), details)
+            log_details = dict(details or {})
+            if request_channel_id:
+                log_details.setdefault("channel_id", request_channel_id)
+            service.diagnostics.record(str(error), log_details)
             code = str(error)
             status = 403 if code in {"MIGU_AUTHORIZATION_REJECTED", "MIGU_LOGIN_REQUIRED", "MIGU_MEMBERSHIP_REQUIRED", "MIGU_REGION_RESTRICTED", "MIGU_TERMINAL_BLOCKED", "MIGU_COPYRIGHT_SHIELD", "MIGU_CLIENT_VERSION_UPGRADE_REQUIRED"} else 429 if code == "MIGU_RESOLVE_BURST_LIMIT" else 404 if code == "EPG_DISABLED" else 503 if code in {"EPG_LOADING", "EPG_UNAVAILABLE", "MIGU_API_LOADING", "MIGU_API_CAPACITY"} or (code.startswith("EPG_") or code.startswith("LIST_") or code in {"SOURCE_SNAPSHOT_TOO_OLD", "TOO_FEW_CHANNELS"}) else 502
-            self.send_body(status, m.json_bytes({"error": code, **({"upstream": details} if details else {})}), **({"Retry_After": "60" if status == 429 else "3"} if status in {429,503} else {}))
+            self.send_body(status, m.json_bytes({"error": code, **({"upstream": details} if details else {})}), **({"Retry_After": str(getattr(error, "retry_after", 60)) if status == 429 else "3"} if status in {429,503} else {}))
         except (ValueError, OSError):
             self.send_body(400, m.json_bytes({"error": "REQUEST_OR_IO_ERROR"}))
 

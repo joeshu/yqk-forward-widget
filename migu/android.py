@@ -13,6 +13,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 import random
 import re
@@ -47,6 +48,12 @@ RID_MESSAGES = {
     "BLACK_APP_OR_TERMINAL": "MIGU_TERMINAL_BLOCKED",
     "WUDALIANSAI_FUFEI_VERSION_UPGRADE": "MIGU_CLIENT_VERSION_UPGRADE_REQUIRED",
 }
+
+
+class MiguRateLimitError(m.FetchError):
+    def __init__(self, retry_after):
+        super().__init__("MIGU_RESOLVE_BURST_LIMIT")
+        self.retry_after = max(1, min(60, int(retry_after)))
 
 
 def _md5(text):
@@ -338,6 +345,7 @@ class AndroidStore:
         self.closed, self.last_error, self.fetches, self.cache_hits = False, None, 0, 0
         self.last_upstream, self.recent = None, deque()
         self.upstream_observation = None
+        self.resolve_samples = deque(maxlen=32)
         self.credential_state = "unchecked" if self.settings.user_id else "unconfigured"
         channels = {"p" + pid: m.Channel(name, name, name, group, "", "", m.utcnow()) for pid, name, group in BUILTIN_CHANNELS}
         self.snapshot = AndroidSnapshot(None, MappingProxyType(channels))
@@ -355,13 +363,18 @@ class AndroidStore:
             elif self.settings.user_id:
                 self.credential_state = "not_sent"
 
-    def _burst_ok(self):
+    def _retry_after(self):
         now = self.clock()
-        while self.recent and now - self.recent[0] > BURST_WINDOW:
+        while self.recent and now - self.recent[0] >= BURST_WINDOW:
             self.recent.popleft()
-        if len(self.recent) >= BURST_LIMIT:
+        if len(self.recent) < BURST_LIMIT:
+            return 0
+        return max(1, min(60, math.ceil(BURST_WINDOW - (now - self.recent[0]))))
+
+    def _burst_ok(self):
+        if self._retry_after():
             return False
-        self.recent.append(now)
+        self.recent.append(self.clock())
         return True
 
     def _finish(self, key, future):
@@ -388,6 +401,27 @@ class AndroidStore:
             return self.snapshot
 
     def resolve(self, key, wait=9):
+        started, result = time.perf_counter(), "OK"
+        try:
+            return self._resolve(key, wait)
+        except Exception as error:
+            text = str(error)
+            result = text if isinstance(error, m.UpdateError) and re.fullmatch(r"[A-Z0-9_]{1,80}", text) else "MIGU_API_ERROR"
+            raise
+        finally:
+            elapsed = min(120000, max(0, round((time.perf_counter()-started)*1000)))
+            sample = None
+            with self.lock:
+                if not self.closed and key in self.snapshot.channels:
+                    sample = {"channel_id": key[1:], "elapsed_ms": elapsed, "result": result}
+                    self.resolve_samples.append(sample)
+            if sample and elapsed >= 1000:
+                try:
+                    print(f"[{m.iso(m.utcnow())}] MIGU_SLOW_RESOLVE 本地取源等待（不含播放器缓冲） " + json.dumps(sample, sort_keys=True), flush=True)
+                except (OSError, ValueError):
+                    pass
+
+    def _resolve(self, key, wait=9):
         with self.lock:
             if self.closed:
                 raise m.FetchError("SERVICE_STOPPING")
@@ -405,7 +439,7 @@ class AndroidStore:
                 if len(self.flights) >= 8:
                     raise m.FetchError("MIGU_API_CAPACITY")
                 if not self._burst_ok():
-                    raise m.FetchError("MIGU_RESOLVE_BURST_LIMIT")
+                    raise MiguRateLimitError(self._retry_after())
                 future = self.pool.submit(self.resolver, key[1:])
                 self.flights[key] = future
                 self.fetches += 1
@@ -432,6 +466,8 @@ class AndroidStore:
                     "request_profile": "legacy720p" if self.settings.rate_type >= 3 and not self.settings.user_id else "modern",
                     "cache_success_seconds": CACHE_SUCCESS,
                     "credential_state": self.credential_state,
+                    "rate_limit_retry_after_seconds": self._retry_after(),
+                    "recent_resolves": list(self.resolve_samples),
                     "upstream_observation": dict(self.upstream_observation) if self.upstream_observation else None}
 
     def close(self):
