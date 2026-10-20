@@ -1418,8 +1418,8 @@ from urllib.parse import parse_qs, urlsplit
 # Prefer the live signed catalogue.  The repository copy is a validated fallback
 # when the upstream HTTP source is unavailable or fails freshness policy.
 LIST_SOURCES = (
-    'http://www.52top.com.cn:678/downloads/migu.txt',
-    'https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu.m3u8',
+    ' ',
+    ' ',
 )
 CATCHUP_SOURCE = '&playbackbegin=${(b)yyyyMMddHHmmss}&playbackend=${(e)yyyyMMddHHmmss}'
 EPG_ID_ALIASES = {'上视新闻综合': '上海新闻综合'}
