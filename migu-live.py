@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Migu dynamic service 0.8.0. Standalone Python 3.10+, standard library only."""
+"""Migu dynamic service 0.8.1. Standalone Python 3.10+, standard library only."""
 from __future__ import annotations
 
 # Edit only this block for protocol settings and your own credentials.
@@ -1002,7 +1002,8 @@ def _headers(pid, *, legacy, user_id, token, rate_type, settings=None):
     app_version = LEGACY_APP_VERSION if legacy else (settings.app_version if settings else MODERN_APP_VERSION)
     channel = (f"{app_version}-99000-201600010010028" if legacy
                else (settings.client_channel_id if settings else "2600037000-99000-200300220100002"))
-    headers = {"AppVersion": app_version, "TerminalId": "android", "X-UP-CLIENT-CHANNEL-ID": channel}
+    headers = {"AppVersion": app_version, "TerminalId": "android", "X-UP-CLIENT-CHANNEL-ID": channel,
+               "User-Agent": "node-fetch", "Accept": "*/*"}
     if pid not in FLV_DISABLED_PIDS:
         headers["appCode"] = settings.app_code if settings else "miguvideo_default_android"
     # Reference: 标清 (rateType 2) always asks as a guest.
@@ -1106,7 +1107,7 @@ def _fetch_json(client, url, headers):
     return payload
 
 
-def android_play_url(pid, settings, client_factory=m.HttpClient):
+def android_play_url(pid, settings, client_factory=m.HttpClient, observer=None):
     """Resolve one channel, mirroring the reference flow including tier fallback."""
     if pid not in {item[0] for item in BUILTIN_CHANNELS}:
         raise MiguApiError("MIGU_UNKNOWN_CHANNEL")
@@ -1145,20 +1146,34 @@ def android_play_url(pid, settings, client_factory=m.HttpClient):
             break
         payload = call(fallback)
 
+    details = api_status(payload, pid)
+    if observer is not None:
+        info = (payload.get("body") or {}).get("urlInfo") or {}
+        def number(key, maximum):
+            value = info.get(key)
+            try:
+                parsed = int(value) if type(value) is int or (isinstance(value, str) and value.isascii() and value.isdigit()) else -1
+            except ValueError:
+                return None
+            return parsed if 0 <= parsed <= maximum else None
+        observer({**details, "account_sent": sends_account,
+                  "requested_quality": 3 if legacy else settings.rate_type,
+                  "actual_quality": number("rateType", 9),
+                  "trial_seconds": number("trySeeDuration", 86400)})
     rid = payload.get("rid")
     if rid != "SUCCESS":
         raise MiguApiError(RID_MESSAGES.get(rid, "MIGU_API_REJECTED"),
-                           {"api_code": str(rid or "")[:80], "channel_id": pid})
+                           details)
     code = payload.get("code")
     if code is not None and str(code) != "200":
-        raise MiguApiError("MIGU_API_REJECTED", {"api_code": str(code), "channel_id": pid})
+        raise MiguApiError("MIGU_API_REJECTED", details)
     body = payload.get("body") or {}
     info = body.get("urlInfo") or {}
     if not isinstance(body, dict) or not isinstance(info, dict):
         raise MiguApiError("MIGU_API_FORMAT_CHANGED")
     url = info.get("url")
     if not isinstance(url, str) or not url:
-        raise MiguApiError("MIGU_PLAY_URL_MISSING", {"api_code": str(rid)[:80], "channel_id": pid})
+        raise MiguApiError("MIGU_PLAY_URL_MISSING", details)
     m.validate_url(url, "stream")
     query = parse_qs(urlsplit(url).query, keep_blank_values=True)
     content = body.get("content") or {}
@@ -1203,15 +1218,30 @@ class AndroidStore:
 
     def __init__(self, settings=None, resolver=android_play_url, clock=time.monotonic):
         self.settings = settings or AndroidSettings.load()
-        self.resolver = (lambda pid: android_play_url(pid, self.settings)) if resolver is android_play_url else resolver
+        self.resolver = (lambda pid: android_play_url(pid, self.settings, observer=self._observe)) if resolver is android_play_url else resolver
         self.clock = clock
         self.pool = BoundedExecutor(max_workers=8, thread_name_prefix="migu-android")
         self.lock = threading.RLock()
         self.flights, self.entries = {}, OrderedDict()
         self.closed, self.last_error, self.fetches, self.cache_hits = False, None, 0, 0
         self.last_upstream, self.recent = None, deque()
+        self.upstream_observation = None
+        self.credential_state = "unchecked" if self.settings.user_id else "unconfigured"
         channels = {"p" + pid: m.Channel(name, name, name, group, "", "", m.utcnow()) for pid, name, group in BUILTIN_CHANNELS}
         self.snapshot = AndroidSnapshot(None, MappingProxyType(channels))
+
+    def _observe(self, observation):
+        # Only this store's configured account can change its account state.
+        # No additional network request is made for diagnostics.
+        with self.lock:
+            if self.closed:
+                return
+            self.upstream_observation = dict(observation)
+            if observation['account_sent']:
+                logged_in = observation['logged_in']
+                self.credential_state = "accepted" if logged_in is True else "not_recognized" if logged_in is False else "unknown"
+            elif self.settings.user_id:
+                self.credential_state = "not_sent"
 
     def _burst_ok(self):
         now = self.clock()
@@ -1288,7 +1318,9 @@ class AndroidStore:
                     "hdr": self.settings.hdr, "h265": self.settings.h265,
                     "client_dispatch": self.settings.client_dispatch,
                     "request_profile": "legacy720p" if self.settings.rate_type >= 3 and not self.settings.user_id else "modern",
-                    "cache_success_seconds": CACHE_SUCCESS}
+                    "cache_success_seconds": CACHE_SUCCESS,
+                    "credential_state": self.credential_state,
+                    "upstream_observation": dict(self.upstream_observation) if self.upstream_observation else None}
 
     def close(self):
         with self.lock:
@@ -1919,7 +1951,7 @@ import time
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {

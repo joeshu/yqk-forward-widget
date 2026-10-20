@@ -1,20 +1,22 @@
-# 咪咕单文件服务 0.8.0
+# 咪咕单文件服务 0.8.1
 
-下载 [migu-live-v0.8.0.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.8.0.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，标准库，无 pip、Node、浏览器或项目目录依赖。
+下载 [migu-live-v0.8.1.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.8.1.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，标准库，无 pip、Node、浏览器或项目目录依赖。
 
-**默认直接按公开参考项目的取源分支请求咪咕，不读取外部播放列表，也不会在取源失败时自动切换列表。** 已修复协议实现差异；本次服务器实测仍收到地区拒绝，尚未成功解码视频，不能承诺解决上游地区、终端或账号限制。实测见 [live-validation-0.8.0.json](live-validation-0.8.0.json)。
+**默认直接按公开参考项目的取源分支请求咪咕，不读取外部播放列表，也不会在取源失败时自动切换列表。** 已修复协议实现差异；本次服务器实测仍收到地区拒绝，尚未成功解码视频，不能承诺解决上游地区、终端或账号限制。实测见 [live-validation-0.8.1.json](live-validation-0.8.1.json)。
 
 ```sh
 python3 migu-live.py 18768
 ```
 
-手机 App 直接运行同样默认端口 18768。日志应显示 `0.8.0`、`provider=migu-android`。保持脚本运行，在同一设备播放器订阅：
+手机 App 直接运行同样默认端口 18768。日志应显示 `0.8.1`、`provider=migu-android`。保持脚本运行，在同一设备播放器订阅：
 
 ```text
 http://127.0.0.1:18768/all.m3u
 ```
 
 `/migu.m3u8` 是目录别名。App 挂起或停止 Python 时，本地服务也会停止。
+
+0.8.1 继续对照参考项目的 `utils/net.js`、`account.js`：API 请求补齐其默认 `User-Agent: node-fetch` 和 `Accept: */*`。仍请求 identity 编码，保留本地响应大小与解码边界；不轮换请求头或客户端试探放行。账号与实际画质只从正常播放响应观测，不额外轮询上游。
 
 ## 与参考项目对齐的取源规则
 
@@ -80,6 +82,8 @@ python3 migu-live.py 18768 --epg-cache
 ## 诊断与局域网
 
 访问 `/status` 或 `/diag` 查看当前版本、提供方、`request_profile`、节目单进度和脱敏错误。`playback_verified: false` 表示没有据此完成视频解码验收。
+
+`credential_state` 区分未配置、未检查、未发送账号、上游认可、上游不认可及未知。只有实际发送了账号的响应才用于判断是否被认可；请求标清时不发送账号，不能将游客响应误报为令牌失效。`upstream_observation` 提供脱敏的 `account_sent`、`logged_in`、`requested_quality`、`actual_quality`、`trial_seconds`、接口 code/rid 及是否有地址。实际档位与配置档位可能不同，试看时长为空表示上游未提供，不等于无限制播放。上游不认可登录不直接判定令牌过期原因。以上信息不含账号、令牌、签名或原始 URL。
 
 默认仅监听 `127.0.0.1`，无需服务访问令牌。跨设备需显式配置地址并自动启用令牌：
 
