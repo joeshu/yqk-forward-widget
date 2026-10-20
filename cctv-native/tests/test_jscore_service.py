@@ -66,6 +66,53 @@ class TestAPTVBuild(unittest.TestCase):
             server.shutdown();server.server_close();thread.join(2)
 
 
+class TestRuntimeMemoryCache(unittest.TestCase):
+    def prepare(self):
+        import hashlib
+        module = load_service()
+        raw = b'unit-test-runtime-bytes'
+        module.RUNTIME_SHA = hashlib.sha256(raw).hexdigest()
+        return module, raw
+
+    def test_default_never_accesses_filesystem_and_reuses_verified_memory(self):
+        module, raw = self.prepare()
+        with mock.patch.object(module,'Path',side_effect=AssertionError('filesystem accessed')), \
+             mock.patch.object(module,'get',return_value=(raw,module.RUNTIME_URL)) as fetch:
+            self.assertEqual(module.load_runtime(),raw)
+            self.assertEqual(module.load_runtime(),raw)
+            fetch.assert_called_once()
+
+    def test_unwritable_explicit_cache_does_not_prevent_playback(self):
+        module,raw=self.prepare()
+        with mock.patch.object(module.Path,'is_file',return_value=False), \
+             mock.patch.object(module.Path,'mkdir',side_effect=PermissionError('sandbox path')), \
+             mock.patch.object(module,'get',return_value=(raw,module.RUNTIME_URL)):
+            self.assertEqual(module.load_runtime('/restricted/cache'),raw)
+        self.assertEqual(module._RUNTIME_MEMORY,raw)
+
+    def test_unreadable_explicit_cache_can_download_into_memory(self):
+        module,raw=self.prepare()
+        with mock.patch.object(module.Path,'is_file',return_value=True), \
+             mock.patch.object(module.Path,'read_bytes',side_effect=PermissionError('sandbox path')), \
+             mock.patch.object(module.Path,'mkdir',side_effect=PermissionError('sandbox path')), \
+             mock.patch.object(module,'get',return_value=(raw,module.RUNTIME_URL)):
+            self.assertEqual(module.load_runtime('/restricted/cache'),raw)
+
+    def test_download_permission_error_reports_operation_without_private_path(self):
+        module,_=self.prepare()
+        with mock.patch.object(module,'get',side_effect=PermissionError('private path')):
+            with self.assertRaisesRegex(module.NativeError,'^official-runtime-download-permission-denied$'):
+                module.load_runtime()
+        self.assertIsNone(module._RUNTIME_MEMORY)
+
+    def test_changed_runtime_is_rejected_before_it_enters_memory_cache(self):
+        module,_=self.prepare()
+        with mock.patch.object(module,'get',return_value=(b'wrong',module.RUNTIME_URL)):
+            with self.assertRaisesRegex(module.NativeError,'official-runtime-version-changed'):
+                module.load_runtime()
+        self.assertIsNone(module._RUNTIME_MEMORY)
+
+
 @unittest.skipUnless(os.environ.get('CCTV_JSCORE_TEST_LIBRARY'), 'real JavaScriptCore library not configured')
 class TestRealJSCore(unittest.TestCase):
     def setUp(self):

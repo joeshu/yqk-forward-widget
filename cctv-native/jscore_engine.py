@@ -81,20 +81,54 @@ class JSContext:
             self.context = None
 
 
+_RUNTIME_MEMORY = None
+_RUNTIME_LOCK = threading.Lock()
+
+
+def load_runtime(cache_dir=None):
+    """Memory is the default; disk is optional and never required for playback."""
+    global _RUNTIME_MEMORY
+    with _RUNTIME_LOCK:
+        if _RUNTIME_MEMORY is not None:
+            return _RUNTIME_MEMORY
+        raw = b''
+        runtime = None
+        if cache_dir:
+            try:
+                root = Path(cache_dir).expanduser()
+                runtime = root / ('runtime-'+RUNTIME_SHA[:12]+'.js')
+                if runtime.is_file():
+                    raw = runtime.read_bytes()
+            except OSError:
+                print('[cctv-aptv] disk-cache-read-unavailable; using memory', flush=True)
+        if hashlib.sha256(raw).hexdigest() != RUNTIME_SHA:
+            try:
+                raw, _ = get(RUNTIME_URL, limit=4*1024*1024)
+            except PermissionError:
+                raise NativeError('official-runtime-download-permission-denied') from None
+            if hashlib.sha256(raw).hexdigest() != RUNTIME_SHA:
+                raise NativeError('official-runtime-version-changed')
+            if runtime is not None:
+                temporary = runtime.with_name('runtime-'+uuid.uuid4().hex+'.tmp')
+                try:
+                    runtime.parent.mkdir(parents=True, exist_ok=True)
+                    temporary.write_bytes(raw)
+                    temporary.replace(runtime)
+                except OSError:
+                    print('[cctv-aptv] disk-cache-write-unavailable; using memory', flush=True)
+                finally:
+                    try:
+                        temporary.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+        _RUNTIME_MEMORY = raw
+        return raw
+
+
 class Engine:
     def __init__(self, args):
         self.context = None
-        root = Path(args.cache_dir).expanduser()
-        root.mkdir(parents=True, exist_ok=True)
-        runtime = root / ('runtime-'+RUNTIME_SHA[:12]+'.js')
-        raw = runtime.read_bytes() if runtime.is_file() else b''
-        if hashlib.sha256(raw).hexdigest() != RUNTIME_SHA:
-            raw, _ = get(RUNTIME_URL, limit=4*1024*1024)
-            if hashlib.sha256(raw).hexdigest() != RUNTIME_SHA:
-                raise NativeError('official-runtime-version-changed')
-            temporary = root / ('runtime-'+uuid.uuid4().hex+'.tmp')
-            temporary.write_bytes(raw)
-            temporary.replace(runtime)
+        raw = load_runtime(getattr(args, 'cache_dir', None))
         # Use Emscripten's normal instantiateWasm host hook for synchronous
         # compilation, avoiding a browser event loop for async WASM completion.
         match = re.search(rb'wasmBinaryFile="data:application/octet-stream;base64,([A-Za-z0-9+/=]+)"', raw)

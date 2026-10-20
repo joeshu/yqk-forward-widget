@@ -3,7 +3,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='CCTV-2 APTV 实验版（系统JavaScriptCore，无Node/子进程）')
     parser.add_argument('port', type=int, nargs='?', default=18768)
     parser.add_argument('--bind', default='127.0.0.1')
-    parser.add_argument('--cache-dir', default=str(Path.home()/'.cache'/'cctv-aptv'))
+    parser.add_argument('--cache-dir', default=None, help='可选磁盘缓存目录；默认仅内存，无需文件写入权限')
     parser.add_argument('--warmup', action='store_true')
     parser.add_argument('--buffer-mb', type=int, default=32)
     parser.add_argument('--idle-timeout', type=int, default=120)
@@ -16,7 +16,7 @@ def main(argv=None):
     server.daemon_threads = True
     server.channel, server.args = channel, args
     print(f'APTV 央视网页原分片实验版：http://127.0.0.1:{args.port}/all.m3u', flush=True)
-    print('状态：/status；仅 CCTV-2。首次选台自动缓存并校验官方组件。', flush=True)
+    print('状态：/status；仅 CCTV-2。首次选台下载并校验官方组件（默认内存缓存，不写磁盘）。', flush=True)
     try:
         server.serve_forever(poll_interval=0.2)
     except KeyboardInterrupt:
