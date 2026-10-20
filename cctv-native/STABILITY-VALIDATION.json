@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-20",
+  "environment": "Linux Python 3.12 / JavaScriptCoreGTK 2.54, current proxy network",
+  "scope": "Final implementation: fresh SDK per channel, runtime bytes already in memory; first HTTP playlist and 8 seconds strict live decode. Not iPhone first visible frame.",
+  "limitations": "Two different-channel samples do not establish speedup. CCTV-7 logged one later segment download timeout; the requested decode still completed without errors. Rejected CDN was not reproduced on this network.",
+  "trials": [
+    {
+      "channel": "cctv4",
+      "parallel": true,
+      "first_playlist_seconds": 5.225,
+      "media_ready_seconds": 5.213,
+      "first_media_requested": 5.289,
+      "decode_returncode": 0,
+      "decode_error_bytes": 0
+    },
+    {
+      "channel": "cctv7",
+      "parallel": true,
+      "first_playlist_seconds": 9.264,
+      "media_ready_seconds": 9.261,
+      "first_media_requested": 9.325,
+      "decode_returncode": 0,
+      "decode_error_bytes": 0
+    }
+  ]
+}

@@ -413,6 +413,7 @@ def boundary_proven_by(
     *,
     program_number: int | None = None,
     video_pid: int | None = None,
+    _prepared: TSAnalysis | None = None,
 ) -> bool:
     """Whether an independently valid next segment starts a new Annex B NAL.
 
@@ -425,7 +426,13 @@ def boundary_proven_by(
     permission to process the preceding segment's unfinished final NAL.
     """
     try:
-        analysis = inspect_ts(next_data, program_number=program_number, video_pid=video_pid)
+        analysis = _prepared
+        if analysis is None:
+            analysis = inspect_ts(next_data, program_number=program_number, video_pid=video_pid)
+        elif (analysis._source is not next_data
+              or program_number is not None and analysis.program_number != program_number
+              or video_pid is not None and analysis.video_pid != video_pid):
+            return False
     except TSFormatError:
         return False
     return bool(analysis.nals and analysis.nals[0].start_code_offset == 0)

@@ -27,3 +27,14 @@ class TestPreparedRepack(unittest.TestCase):
         analysis=inspect_ts(raw)
         with self.assertRaisesRegex(TSFormatError,'boundary assertion'):
             transform_pes_nals(raw,lambda n,data:data,final_nal_complete=True,_prepared=analysis)
+
+    def test_prepared_boundary_requires_same_bytes_and_stream_selection(self):
+        from cctv_native_ts import boundary_proven_by
+        from unittest import mock
+        raw,_=stream();analysis=inspect_ts(raw)
+        with mock.patch('cctv_native_ts.inspect_ts',side_effect=AssertionError('duplicate parse')):
+            self.assertTrue(boundary_proven_by(raw,program_number=analysis.program_number,
+                                             video_pid=analysis.video_pid,_prepared=analysis))
+            self.assertFalse(boundary_proven_by(bytes(bytearray(raw)),_prepared=analysis))
+            self.assertFalse(boundary_proven_by(raw,program_number=analysis.program_number+1,_prepared=analysis))
+            self.assertFalse(boundary_proven_by(raw,video_pid=analysis.video_pid+1,_prepared=analysis))

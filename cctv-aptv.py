@@ -419,6 +419,7 @@ def boundary_proven_by(
     *,
     program_number: int | None = None,
     video_pid: int | None = None,
+    _prepared: TSAnalysis | None = None,
 ) -> bool:
     """Whether an independently valid next segment starts a new Annex B NAL.
 
@@ -431,7 +432,13 @@ def boundary_proven_by(
     permission to process the preceding segment's unfinished final NAL.
     """
     try:
-        analysis = inspect_ts(next_data, program_number=program_number, video_pid=video_pid)
+        analysis = _prepared
+        if analysis is None:
+            analysis = inspect_ts(next_data, program_number=program_number, video_pid=video_pid)
+        elif (analysis._source is not next_data
+              or program_number is not None and analysis.program_number != program_number
+              or video_pid is not None and analysis.video_pid != video_pid):
+            return False
     except TSFormatError:
         return False
     return bool(analysis.nals and analysis.nals[0].start_code_offset == 0)
@@ -730,12 +737,29 @@ def transport_error_code(error):
     return code
 
 
+class UnsupportedSource(NativeError):
+    def __init__(self, url):
+        super().__init__('unsupported-source-host')
+        # Never retain/print the path, query, credentials or original URL.
+        try:
+            parsed = urlsplit(url)
+            host = parsed.hostname or ''
+            self.details = {'scheme': parsed.scheme if parsed.scheme in ('http', 'https') else 'other',
+                            'host': host if re.fullmatch(r'[A-Za-z0-9.-]{1,253}', host) else 'invalid'}
+        except ValueError:
+            self.details = {'scheme': 'invalid', 'host': 'invalid'}
+
+
 def validate_source(url):
-    parsed = urlsplit(url)
-    if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
-            or parsed.port not in (None, 443)
-            or not any(parsed.hostname == suffix[1:] or parsed.hostname.endswith(suffix) for suffix in CDNS)):
-        raise NativeError('unsupported-source-host')
+    try:
+        parsed = urlsplit(url)
+        allowed = (parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password
+                   and parsed.port in (None, 443)
+                   and any(parsed.hostname == suffix[1:] or parsed.hostname.endswith(suffix) for suffix in CDNS))
+    except ValueError:
+        allowed = False
+    if not allowed:
+        raise UnsupportedSource(url)
 
 
 class SourceRedirect(HTTPRedirectHandler):
@@ -931,6 +955,7 @@ class Channel:
         self.source_gaps = 0
         self.transport_retries = 0
         self.last_transport_error = ''
+        self.last_source_rejection = {}
         self.last_request = 0
         self.failed_at = 0
         self.waiters = 0
@@ -979,6 +1004,7 @@ class Channel:
             self.source_gaps = 0
             self.transport_retries = 0
             self.last_transport_error = ''
+            self.last_source_rejection = {}
             self.operation, self.operation_started = 'initializing', 0
             self.seen_operations.clear()
             self.preparation_phase = 'disabled'
@@ -1032,6 +1058,7 @@ class Channel:
                     'source_gaps': self.source_gaps,
                     'transport_retries': self.transport_retries,
                     'last_transport_error': self.last_transport_error,
+                    'last_source_rejection': dict(self.last_source_rejection),
                     'operation': self.operation,
                     'parallel_preparation': bool(getattr(self.args,'parallel_prepare',False)),
                     'preparation_phase': self.preparation_phase,
@@ -1039,6 +1066,23 @@ class Channel:
                     'playlist_entries': self.playlist_entries, 'last_segment_bytes': self.last_segment_bytes,
                     'media_transfer': ('typed-array' if getattr(getattr(self.engine, 'context', None), 'buffer_api', False) else 'base64'),
                     'stage_seconds': dict(self.timings), 'media_ready': self.playlist() is not None}
+
+    def _download_segment(self, url):
+        raw, final = get(url)
+        # Parse only media bytes on an I/O worker. ctypes releases the GIL
+        # during native JSC work, so the next input can be validated meanwhile.
+        # Invalid media is rechecked by the owner to retain its boundary error.
+        analysis = None
+        if not self.stop.is_set():
+            try:
+                analysis = inspect_ts(raw)
+            except TSFormatError:
+                pass
+        return raw, final, analysis
+
+    def _submit_segment(self, pool, url):
+        worker = self._download_segment if getattr(self.args, 'parallel_prepare', False) else get
+        return pool.submit(worker, url)
 
     def _prepare_initial(self, pool, cancel):
         """Independent HTTPS work; never touches the thread-owned native VM."""
@@ -1060,7 +1104,7 @@ class Channel:
         for entry in entries[:3]:
             if cancelled():
                 return None
-            downloads[entry['seq']] = pool.submit(get,entry['url'])
+            downloads[entry['seq']] = self._submit_segment(pool, entry['url'])
         return entries, final, downloads, refreshed, time.monotonic()
 
     def run(self):
@@ -1088,7 +1132,8 @@ class Channel:
             url, refreshed, failures = None, 0, 0
             current_source, last_seq, last_progress = None, None, time.monotonic()
             pending_discontinuity = False
-            cached = {}
+            cached, analyses = {}, {}
+            rejected_sources = 0
             while not self.stop.is_set():
                 if not self.waiters and time.monotonic()-self.last_request > self.args.idle_timeout:
                     self.state = 'idle'
@@ -1136,36 +1181,47 @@ class Channel:
                     changed = current_source is not None and source != current_source
                     pending_discontinuity = pending_discontinuity or changed
                     if source != current_source:
-                        last_seq, cached = None, {}
+                        last_seq, cached, analyses = None, {}, {}
                         current_source = source
                     if last_seq is not None and entries[0]['seq'] > last_seq+1:
                         # A live window can move past a slow download. Drop
                         # that gap, then prove boundaries within the new
                         # window; never join bytes across missing segments.
                         self.source_gaps += 1
-                        last_seq, cached, pending_discontinuity = None, {}, True
+                        last_seq, cached, analyses, pending_discontinuity = None, {}, {}, True
                     cached.update(initial_downloads)
                     initial_downloads = {}
                     wanted = [e for e in entries if last_seq is None or e['seq'] > last_seq][:3]
                     for e in wanted:
                         if e['seq'] not in cached:
-                            cached[e['seq']] = pool.submit(get, e['url'])
+                            cached[e['seq']] = self._submit_segment(pool, e['url'])
                     for e, following in zip(wanted, wanted[1:]):
                         if self.stop.is_set():
                             break
                         if following['seq'] != e['seq']+1 or following['discontinuity']:
                             raise NativeError('source-boundary-not-proven')
                         self.operation_phase('segment-download')
-                        raw = cached[e['seq']].result()[0]
-                        lookahead = cached[following['seq']].result()[0]
+                        current_download = cached[e['seq']].result()
+                        next_download = cached[following['seq']].result()
+                        raw, lookahead = current_download[0], next_download[0]
                         if self.stop.is_set():
                             break
                         self.last_segment_bytes = len(raw)
                         self.operation_phase('ts-analysis')
-                        analysis = inspect_ts(raw)
+                        analysis = current_download[2] if len(current_download) == 3 else analyses.get(e['seq'])
+                        if analysis is None or analysis._source is not raw:
+                            analysis = inspect_ts(raw)
+                        next_analysis = next_download[2] if len(next_download) == 3 else analyses.get(following['seq'])
+                        if next_analysis is None or next_analysis._source is not lookahead:
+                            try:
+                                next_analysis = inspect_ts(lookahead, program_number=analysis.program_number,
+                                                           video_pid=analysis.video_pid)
+                            except TSFormatError:
+                                raise NativeError('source-boundary-not-proven') from None
                         if not boundary_proven_by(lookahead, program_number=analysis.program_number,
-                                                  video_pid=analysis.video_pid):
+                                                  video_pid=analysis.video_pid, _prepared=next_analysis):
                             raise NativeError('source-boundary-not-proven')
+                        analyses[following['seq']] = next_analysis
                         # The lookahead proved the final boundary above. Only
                         # its completeness bit changes; reuse the parsed TS.
                         analysis = replace(analysis, nals=analysis.nals[:-1]+(
@@ -1183,13 +1239,30 @@ class Channel:
                         if self.stop.is_set():
                             break
                         self.publish(output, e, pending_discontinuity or e['discontinuity'])
+                        rejected_sources = 0
                         pending_discontinuity, last_seq, last_progress = False, e['seq'], time.monotonic()
                     if self.stop.is_set():
                         break
                     cached = {k:v for k,v in cached.items() if last_seq is None or k > last_seq}
+                    analyses = {k:v for k,v in analyses.items() if k in cached}
                     if time.monotonic()-last_progress > 30:
                         raise NativeError('source-media-stalled')
                     failures, self.last_transport_error = 0, ''
+                except UnsupportedSource as error:
+                    self.last_source_rejection = dict(error.details)
+                    print('[cctv-native] source-rejected channel='+self.channel_id+' '+
+                          json.dumps(error.details, ensure_ascii=True), flush=True)
+                    # Refuse the address, but let the ordinary official API
+                    # dispatch again. Never fetch the rejected host, downgrade
+                    # HTTPS or retry an explicit official play denial.
+                    if rejected_sources >= 2 or time.monotonic()-last_progress > 30:
+                        raise
+                    rejected_sources += 1
+                    self.transport_retries += 1
+                    self.last_transport_error = 'unsupported-source-host'
+                    url = None
+                    self.stop.wait(.15 * rejected_sources)
+                    continue
                 except (HTTPError, URLError, TimeoutError, ConnectionError, IncompleteRead) as error:
                     if isinstance(error, HTTPError):
                         if error.code in (401, 403, 404):
