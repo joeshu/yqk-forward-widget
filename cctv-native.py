@@ -13,7 +13,8 @@ from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from http.client import IncompleteRead
+from http.client import (IncompleteRead, HTTPSConnection, RemoteDisconnected,
+                         CannotSendRequest, ResponseNotReady)
 import json
 import math
 import os
@@ -102,7 +103,12 @@ def validate_source(url):
 
 class SourceRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        validate_source(newurl)
+        try:
+            validate_source(newurl)
+        except NativeError:
+            if fp is not None:
+                fp.close()
+            raise
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -122,8 +128,183 @@ class LegacyAPIRedirect(SourceRedirect):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         parsed = urlsplit(newurl)
         if parsed.hostname != 'vdnx.live.cntv.cn' or parsed.path != '/api/v3/vdn/live':
+            if fp is not None:
+                fp.close()
             raise NativeError('source-api-legacy-redirect-denied')
         return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+class HTTPSConnectionPool:
+    """Bounded idle connections; checked-out connections belong to one request."""
+    def __init__(self, max_idle=6, idle_seconds=15):
+        self.lock = threading.Lock()
+        self.idle = OrderedDict()
+        self.max_idle, self.idle_seconds = max_idle, idle_seconds
+        self.created = self.reused = self.stale_retries = 0
+
+    def take(self, key, create):
+        with self.lock:
+            now = time.monotonic()
+            for token, (saved_key, conn, saved_at) in list(self.idle.items()):
+                if now-saved_at >= self.idle_seconds:
+                    self.idle.pop(token)
+                    conn.close()
+            for token in reversed(self.idle):
+                saved_key, conn, _ = self.idle[token]
+                if saved_key == key:
+                    self.idle.pop(token)
+                    self.reused += 1
+                    return conn, True
+            self.created += 1
+        return create(), False
+
+    def put(self, key, conn):
+        with self.lock:
+            self.idle[id(conn)] = (key, conn, time.monotonic())
+            while len(self.idle) > self.max_idle:
+                _, (_, old, _) = self.idle.popitem(last=False)
+                old.close()
+
+    def clear(self):
+        with self.lock:
+            saved = list(self.idle.values())
+            self.idle.clear()
+        for _, conn, _ in saved:
+            conn.close()
+
+    def snapshot(self):
+        with self.lock:
+            return {'enabled': _HTTP_REUSE_ENABLED, 'created': self.created,
+                    'reused': self.reused, 'stale_retries': self.stale_retries,
+                    'idle_connections': len(self.idle), 'max_idle_connections': self.max_idle}
+
+
+_HTTP_REUSE_ENABLED = True
+_HTTP_POOL = HTTPSConnectionPool()
+_TLS_CONTEXTS = {}
+_TLS_CONTEXT_LOCK = threading.Lock()
+
+
+def source_tls_context(tls12=False, legacy=False):
+    if legacy and (not getattr(ssl,'OP_LEGACY_SERVER_CONNECT',0)
+                   or not getattr(ssl,'OP_NO_RENEGOTIATION',0)):
+        raise NativeError('source-api-legacy-tls-unavailable')
+    key = (tls12, legacy)
+    with _TLS_CONTEXT_LOCK:
+        if key not in _TLS_CONTEXTS:
+            context = ssl.create_default_context()
+            if tls12:
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                context.maximum_version = ssl.TLSVersion.TLSv1_2
+            if legacy:
+                context.options |= ssl.OP_LEGACY_SERVER_CONNECT | ssl.OP_NO_RENEGOTIATION
+            _TLS_CONTEXTS[key] = context
+        return _TLS_CONTEXTS[key]
+
+
+class PooledHTTPResponse:
+    def __init__(self, response, connection, key, pool, url, keep_alive=True):
+        self.response, self.connection, self.key, self.pool = response, connection, key, pool
+        self.url = url
+        self.status = self.code = response.status
+        self.reason = self.msg = response.reason
+        self.headers = response.headers
+        self.closed = False
+        self.failed = False
+        self.keep_alive = keep_alive
+
+    def info(self):
+        return self.headers
+
+    def geturl(self):
+        return self.url
+
+    def getcode(self):
+        return self.code
+
+    def read(self, amount=None):
+        try:
+            # urllib drains redirect bodies with read() before closing them.
+            # Give that operation the same finite upper bound as media reads.
+            unbounded = amount is None or amount < 0
+            requested = 8*1024*1024+1 if unbounded else amount
+            expected = self.response.length
+            data = self.response.read(requested)
+            if expected is not None and len(data) < min(expected, requested):
+                raise IncompleteRead(data, expected-len(data))
+            if unbounded and len(data) > 8*1024*1024:
+                raise NativeError('response-too-large')
+            if self.response.isclosed() and self.response.length not in (None, 0):
+                raise IncompleteRead(data, self.response.length)
+            return data
+        except BaseException:
+            self.failed = True
+            self.close()
+            raise
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        reusable = (self.keep_alive and not self.failed and not self.response.will_close
+                    and self.response.isclosed() and self.response.length in (None, 0)
+                    and self.connection.sock is not None)
+        self.response.close()
+        if reusable:
+            self.pool.put(self.key, self.connection)
+        else:
+            self.connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.close()
+
+
+class PooledHTTPSHandler(HTTPSHandler):
+    def https_open(self, req):
+        # ProxyHandler already selected the inherited proxy and CONNECT target.
+        # A tunnel, TLS policy or proxy credential change must select another
+        # connection. No per-request signed URL or origin headers are cached.
+        headers = dict(req.unredirected_hdrs)
+        headers.update({k:v for k,v in req.headers.items() if k not in headers})
+        headers = {name.title(): value for name,value in headers.items()}
+        tunnel = req._tunnel_host
+        proxy_auth = headers.pop('Proxy-Authorization', '') if tunnel else ''
+        headers.setdefault('Connection', 'keep-alive')
+        key = (req.host, tunnel, id(self._context), hashlib.sha256(proxy_auth.encode()).digest())
+
+        def create():
+            conn = HTTPSConnection(req.host, timeout=req.timeout, context=self._context)
+            if tunnel:
+                conn.set_tunnel(tunnel, headers={'Proxy-Authorization':proxy_auth} if proxy_auth else {})
+            return conn
+
+        for attempt in range(2):
+            conn, reused = _HTTP_POOL.take(key, create)
+            try:
+                conn.timeout = req.timeout
+                if conn.sock is not None:
+                    conn.sock.settimeout(req.timeout)
+                conn.request(req.get_method(), req.selector, req.data, headers,
+                             encode_chunked=req.has_header('Transfer-encoding'))
+                response = conn.getresponse()
+                return PooledHTTPResponse(response, conn, key, _HTTP_POOL, req.get_full_url(),
+                                          keep_alive=headers['Connection'].lower() != 'close')
+            except (RemoteDisconnected, BrokenPipeError, ConnectionResetError,
+                    ConnectionAbortedError, CannotSendRequest, ResponseNotReady, ssl.SSLEOFError) as error:
+                conn.close()
+                if not reused or attempt or req.get_method() != 'GET':
+                    raise URLError(error) from None
+                with _HTTP_POOL.lock:
+                    _HTTP_POOL.stale_retries += 1
+            except OSError as error:
+                conn.close()
+                raise URLError(error) from None
+            except BaseException:
+                conn.close()
+                raise
 
 
 def get(url, *, headers=None, limit=8*1024*1024, timeout=12):
@@ -135,21 +316,16 @@ def get(url, *, headers=None, limit=8*1024*1024, timeout=12):
 
     def read_response(tls12=False, legacy=False):
         handlers = [LegacyAPIRedirect() if legacy else SourceRedirect()]
-        if tls12:
-            context = ssl.create_default_context()
-            context.minimum_version = ssl.TLSVersion.TLSv1_2
-            context.maximum_version = ssl.TLSVersion.TLSv1_2
-            if legacy:
-                connect = getattr(ssl,'OP_LEGACY_SERVER_CONNECT',0)
-                no_renegotiation = getattr(ssl,'OP_NO_RENEGOTIATION',0)
-                if not connect or not no_renegotiation:
-                    raise NativeError('source-api-legacy-tls-unavailable')
-                # Only a confirmed unpatched-server initial handshake receives
-                # this compatibility option. Keep CA/hostname verification and
-                # refuse later renegotiation; never apply to media/SDK hosts.
-                context.options |= connect | no_renegotiation
-            handlers.append(HTTPSHandler(context=context))
-        with build_opener(*handlers).open(req, timeout=timeout) as response:
+        if _HTTP_REUSE_ENABLED:
+            handlers.append(PooledHTTPSHandler(context=source_tls_context(tls12,legacy)))
+        elif tls12:
+            handlers.append(HTTPSHandler(context=source_tls_context(tls12,legacy)))
+        try:
+            response = build_opener(*handlers).open(req, timeout=timeout)
+        except HTTPError as error:
+            error.close()
+            raise
+        with response:
             body = response.read(limit + 1)
             if len(body) > limit:
                 raise NativeError('response-too-large')
@@ -532,6 +708,7 @@ class Channel:
                     'transport_retries': self.transport_retries,
                     'last_transport_error': self.last_transport_error,
                     'last_source_rejection': dict(self.last_source_rejection),
+                    'http_connections': _HTTP_POOL.snapshot(),
                     'operation': self.operation,
                     'parallel_preparation': bool(getattr(self.args,'parallel_prepare',False)),
                     'preparation_phase': self.preparation_phase,
@@ -892,7 +1069,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
-    global _API_LEGACY_ENABLED
+    global _API_LEGACY_ENABLED, _HTTP_REUSE_ENABLED
     parser = argparse.ArgumentParser(description='CCTV-2 网页同源原分片订阅（Python + Node，无浏览器/转码）')
     parser.add_argument('port', type=int, nargs='?', default=18768)
     parser.add_argument('--bind', default='127.0.0.1')
@@ -900,11 +1077,13 @@ def main(argv=None):
     parser.add_argument('--cache-dir', default=str(Path.home()/'.cache'/'cctv-native'))
     parser.add_argument('--setup', action='store_true', help='安装独立Node依赖并缓存官方运行时后退出')
     parser.add_argument('--no-legacy-source-tls',action='store_true',help='关闭官方取源接口旧服务器握手兼容')
+    parser.add_argument('--no-http-reuse', action='store_true', help='关闭上游 HTTPS 连接复用')
     parser.add_argument('--warmup', action='store_true', help='GET订阅时后台提前取源')
     parser.add_argument('--buffer-mb', type=int, default=64)
     parser.add_argument('--idle-timeout', type=int, default=120)
     args = parser.parse_args(argv)
     _API_LEGACY_ENABLED = not args.no_legacy_source_tls
+    _HTTP_REUSE_ENABLED = not args.no_http_reuse
     if not 1 <= args.port <= 65535 or not 16 <= args.buffer_mb <= 256 or not 30 <= args.idle_timeout <= 3600:
         parser.error('invalid port/buffer/idle timeout')
     if not shutil.which(args.node):
@@ -939,6 +1118,7 @@ def main(argv=None):
             channel.engine.close()
         if channel.thread:
             channel.thread.join(35)
+        _HTTP_POOL.clear()
 
 
 if __name__ == '__main__':

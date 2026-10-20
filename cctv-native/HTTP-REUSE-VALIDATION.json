@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-20",
+  "environment": "Linux Python 3.12 / JavaScriptCoreGTK 2.54, inherited proxy and verified TLS",
+  "reference": "User-provided ysp-engine.js (keepAlive agents) and ysp-live-v9.5.py (coalescing, caches, per-device linked-channel quota).",
+  "policy": {
+    "max_idle_connections": 6,
+    "idle_reuse_max_age_seconds": 15,
+    "exclusive_checkout": true,
+    "pool_separation": "origin/CONNECT destination, proxy route, TLS context, proxy credential digest",
+    "retry_stale_get_on_fresh_connection_once": true,
+    "certificate_verification": true,
+    "honors_inherited_proxy": true,
+    "opt_out": "--no-http-reuse"
+  },
+  "startup": {
+    "order": "disabled, enabled, enabled, disabled",
+    "scope": "Fresh channel manager and SDK context each trial; runtime bytes already in memory; source API TLS compatibility learned before comparisons. First local HLS playlist, then 8 seconds strict decode.",
+    "limitations": "Four samples with substantial network variation do not establish consistent startup improvement. created/reused counters describe this new pool only; zeros in disabled mode do not mean zero network connections. Not iPhone first frame.",
+    "trials": [
+      {
+        "http_reuse": false,
+        "first_playlist_seconds": 11.154,
+        "media_ready_seconds": 11.143,
+        "first_media_requested": 11.259,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "created_connections": 0,
+        "reused_connections": 0
+      },
+      {
+        "http_reuse": true,
+        "first_playlist_seconds": 7.11,
+        "media_ready_seconds": 7.107,
+        "first_media_requested": 7.176,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "created_connections": 5,
+        "reused_connections": 6
+      },
+      {
+        "http_reuse": true,
+        "first_playlist_seconds": 8.026,
+        "media_ready_seconds": 8.024,
+        "first_media_requested": 8.099,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "created_connections": 5,
+        "reused_connections": 5
+      },
+      {
+        "http_reuse": false,
+        "first_playlist_seconds": 6.132,
+        "media_ready_seconds": 6.129,
+        "first_media_requested": 6.2,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "created_connections": 0,
+        "reused_connections": 0
+      }
+    ]
+  },
+  "recent_channel": {
+    "scope": "Connection reuse and recent-channel cache both enabled; A=CCTV-2, B=CCTV-4, A -> B -> A -> B. Returned channels strictly decoded for 16 seconds, including newly processed media.",
+    "trials": [
+      {
+        "phase": "cold-A",
+        "channel": "cctv2",
+        "first_playlist_seconds": 8.959,
+        "cache_hits": 0,
+        "cache_buffer_hits": 0,
+        "buffer_age_seconds": 0.004
+      },
+      {
+        "phase": "cold-B",
+        "channel": "cctv4",
+        "first_playlist_seconds": 5.7564,
+        "cache_hits": 0,
+        "cache_buffer_hits": 0,
+        "buffer_age_seconds": 0.002
+      },
+      {
+        "phase": "return-A",
+        "channel": "cctv2",
+        "first_playlist_seconds": 0.0023,
+        "cache_hits": 1,
+        "cache_buffer_hits": 1,
+        "buffer_age_seconds": 5.762,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "processed_segments_after": 4
+      },
+      {
+        "phase": "return-B",
+        "channel": "cctv4",
+        "first_playlist_seconds": 0.0017,
+        "cache_hits": 1,
+        "cache_buffer_hits": 1,
+        "buffer_age_seconds": 6.864,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "processed_segments_after": 5
+      }
+    ]
+  },
+  "offline_tests": {
+    "total": 144,
+    "real_jscore_tests": 6,
+    "transport_tests": 14
+  }
+}

@@ -553,7 +553,10 @@ class TestSourceTLSCompatibility(unittest.TestCase):
              mock.patch('builtins.print'):
             service.get(self.URL)
         self.assertEqual(len(build.call_args_list[0].args),2)
-        self.assertEqual(len(build.call_args_list[1].args),1)
+        context=build.call_args_list[1].args[1]._context
+        self.assertEqual(context.verify_mode,service.ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertNotEqual(context.maximum_version,service.ssl.TLSVersion.TLSv1_2)
         self.assertFalse(service._API_TLS12_PREFERRED)
 
     @unittest.skipUnless(hasattr(service.ssl,'OP_LEGACY_SERVER_CONNECT'),'Python/OpenSSL lacks legacy-connect flag')

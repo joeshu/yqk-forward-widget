@@ -174,7 +174,7 @@ class ChannelManager:
             result = current.snapshot() if current else {'state':'idle','media_ready':False}
             result.update(current_channel=self.current, channel_count=len(PUBLISHED_CHANNELS),
                           channels=[{'id':cid,'name':name} for cid,name in PUBLISHED_CHANNELS.items()],
-                          native_context_limit=2,
+                          native_context_limit=2, http_connections=_HTTP_POOL.snapshot(),
                           recent_channel_seconds=getattr(self.args,'recent_channel_seconds',15),
                           recent_channels=[c.channel_id for c in self.channels.values()
                                            if c.parked_at and not c.stop.is_set()],
