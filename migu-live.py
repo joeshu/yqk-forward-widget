@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Migu dynamic service 0.8.5. Standalone Python 3.10+, standard library only."""
+"""Migu dynamic service 0.8.6. Standalone Python 3.10+, standard library only."""
 from __future__ import annotations
 
 # Edit only this block for protocol settings and your own credentials.
@@ -99,8 +99,8 @@ def validate_url(url, role):
         raise UpdateError("URL_SCHEME_OR_AUTHORITY")
     if role == "catalogue":
         allowed = url in {
-            "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu.m3u8",
-            "http://www.52top.com.cn:678/downloads/migu.txt",
+            "",
+            "",
         }
     elif role == "epg":
         allowed = parts.scheme == "https" and host == "program-sc.miguvideo.com" and port in {None, 443} and re.fullmatch(r"/live/v2/tv-programs-data/[0-9]{6,20}/[0-9]{8}", parts.path) is not None and not parts.query
@@ -456,6 +456,7 @@ class BoundedExecutor:
         with self.lock:
             if self.closed:
                 raise RuntimeError('Executor already stopped')
+            self._purge_cancelled()
             try:
                 self.queue.put_nowait((future, function, args, kwargs))
             except Full:
@@ -477,6 +478,26 @@ class BoundedExecutor:
                         self.queue.put_nowait(None)
                     raise
         return future
+
+    def _purge_cancelled(self):
+        # Queue has no public remove operation. Its mutex protects the backing
+        # deque/list and accounting for both FIFO and LIFO implementations.
+        with self.queue.mutex:
+            kept = [item for item in self.queue.queue if item is None or not item[0].cancelled()]
+            removed = len(self.queue.queue) - len(kept)
+            if removed:
+                self.queue.queue = type(self.queue.queue)(kept)
+                self.queue.unfinished_tasks -= removed
+                self.queue.not_full.notify_all()
+                if not self.queue.unfinished_tasks:
+                    self.queue.all_tasks_done.notify_all()
+
+    def cancel(self, future):
+        # Invoke Future callbacks without holding executor/queue locks.
+        cancelled = future.cancel()
+        if cancelled:
+            self._purge_cancelled()
+        return cancelled
 
     def _run(self):
         while True:
@@ -1109,6 +1130,8 @@ def _fetch_json(client, url, headers):
         raise MiguApiError("MIGU_API_FORMAT_CHANGED") from None
     if not isinstance(payload, dict):
         raise MiguApiError("MIGU_API_FORMAT_CHANGED")
+    if payload.get("rid") is not None and not isinstance(payload["rid"], str):
+        raise MiguApiError("MIGU_API_FORMAT_CHANGED")
     body = payload.get("body")
     if body is not None:
         if not isinstance(body, dict) or any(body.get(key) is not None and not isinstance(body[key], dict) for key in ("urlInfo", "content", "auth")):
@@ -1252,7 +1275,12 @@ class AndroidStore:
             self.upstream_observation = dict(observation)
             if observation['account_sent']:
                 logged_in = observation['logged_in']
-                self.credential_state = "accepted" if logged_in is True else "not_recognized" if logged_in is False else "unknown"
+                if logged_in is True:
+                    self.credential_state = "accepted"
+                elif logged_in is False:
+                    self.credential_state = "not_recognized"
+                elif self.credential_state in {"unchecked", "unknown"}:
+                    self.credential_state = "unknown"
             elif self.settings.user_id:
                 self.credential_state = "not_sent"
 
@@ -1378,7 +1406,7 @@ class AndroidStore:
                     self.waiters[future] = remaining
                 else:
                     self.waiters.pop(future, None)
-                    future.cancel()  # Only succeeds for work not started; shared/running work stays.
+                    self.pool.cancel(future)  # Also release the cancelled queue slot immediately.
 
     def status(self):
         with self.lock:
@@ -1418,8 +1446,8 @@ from urllib.parse import parse_qs, urlsplit
 # Prefer the live signed catalogue.  The repository copy is a validated fallback
 # when the upstream HTTP source is unavailable or fails freshness policy.
 LIST_SOURCES = (
-    'http://www.52top.com.cn:678/downloads/migu.txt',
-    'https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu.m3u8',
+    '',
+    '',
 )
 CATCHUP_SOURCE = '&playbackbegin=${(b)yyyyMMddHHmmss}&playbackend=${(e)yyyyMMddHHmmss}'
 EPG_ID_ALIASES = {'上视新闻综合': '上海新闻综合'}
@@ -1584,6 +1612,8 @@ class ListStore:
     provider = 'published-list'
 
     def __init__(self, source='auto', client_factory=m.HttpClient, clock=time.monotonic, min_channels=100):
+        if not LIST_SOURCES or any(not url.strip() for url in LIST_SOURCES):
+            raise m.FetchError('LIST_PROVIDER_DISABLED')
         self.sources = LIST_SOURCES if source=='auto' else (LIST_SOURCES[1 if source=='github' else 0],)
         self.client_factory, self.clock, self.min_channels = client_factory, clock, min_channels
         self.lock = threading.RLock()
@@ -2029,7 +2059,7 @@ import time
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 
-VERSION = "0.8.5"
+VERSION = "0.8.6"
 DEFAULT_PORT = 28768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
@@ -2435,7 +2465,7 @@ def main(argv=None):
     parser.add_argument("--data-dir", type=Path, help="Only needed for a persistent service access token")
     parser.add_argument("--token-env", help="Environment variable holding the service access token")
     parser.add_argument("--require-token", action="store_true")
-    parser.add_argument("--provider", choices=("list","native","android"), default="android", help="android: direct reference-compatible API (default); native: older API; list: explicit external catalogue")
+    parser.add_argument("--provider", choices=("list","native","android"), default="android", help="android: direct reference-compatible API (default); native: older API; list: developer catalogue mode (disabled in standalone release)")
     parser.add_argument("--list-source", choices=("auto","github","upstream"), default="auto")
     parser.add_argument("--mode", choices=("redirect", "manifest"), default="redirect")
     parser.add_argument("--epg-cache", action="store_true", help="Persist valid programme schedules; fall back to memory if unavailable")

@@ -1,6 +1,6 @@
-# 咪咕单文件服务 0.8.5
+# 咪咕单文件服务 0.8.6
 
-下载 [migu-live-v0.8.5.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.8.5.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，标准库，无 pip、Node、浏览器或项目目录依赖。
+下载 [migu-live-v0.8.6.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.8.6.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，标准库，无 pip、Node、浏览器或项目目录依赖。
 
 **默认直接按公开参考项目的取源分支请求咪咕，不读取外部播放列表，也不会在取源失败时自动切换列表。** 用户已反馈 iOS 可播，0.8.4 针对快速切台的排队及临时失败恢复进行优化。此前 0.8.1 服务器的地区拒绝仅代表当时服务器环境，记录见 [live-validation-0.8.1.json](live-validation-0.8.1.json)。
 
@@ -8,7 +8,7 @@
 python3 migu-live.py 28768
 ```
 
-0.8.5 将默认端口改为 28768。手机 App 直接运行同样默认端口 28768。日志应显示 `0.8.5`、`provider=migu-android`。保持脚本运行，在同一设备播放器订阅：
+0.8.5 将默认端口改为 28768。手机 App 直接运行同样默认端口 28768。日志应显示 `0.8.6`、`provider=migu-android`。保持脚本运行，在同一设备播放器订阅：
 
 ```text
 http://127.0.0.1:28768/all.m3u
@@ -50,14 +50,21 @@ python3 migu-live.py 28768
 
 默认将 GSLB 地址交给观看设备，由观看设备选择 CDN，不在服务器预先固定 CDN 节点。不支持服务端节点解析开关，设置 `MIGU_CLIENT_DISPATCH=0` 会明确报错，避免此前选项存在但未生效的问题。
 
-## 明确选择其他提供方
+## 0.8.6 单文件审核
+
+取消的排队任务现在立即释放实际队列位置，下一次提交也会清理已取消任务；不改变有效任务的 FIFO/LIFO 顺序、8 路执行上限或同频道共享请求。
+
+接口未提供登录状态时保留此前明确的登录判断；`credential_state` 表示最近一次已知结论，实时响应见 `upstream_observation`，不能将缺失字段理解为账号状态发生变化。非字符串错误码明确报告接口格式变化。
+
+你在 0.8.5 下载文件中清空的外部列表地址已作为新构建策略保留。**0.8.6 单文件不再嵌入这两个列表 URL**；根目录入口与版本文件由相同源码构建并记录指纹。`--provider list` 返回 `LIST_PROVIDER_DISABLED`，不会尝试请求空地址。历史版本中用户的修改没有覆盖。
+
+默认 Android 模式使用内置频道；仍可显式选择旧版实验取源：
 
 ```sh
 python3 migu-live.py 28768 --provider native
-python3 migu-live.py 28768 --provider list
 ```
 
-原生及 Android 模式都使用内置 123 个频道，目录无需联网即可生成。列表模式是显式选项，优先下载实时原始列表，失败或校验不合格时尝试仓库快照；支持同源 ETag 条件刷新，不保存签名 URL 到磁盘。默认模式不执行这些列表请求。
+更多审核依据见 [audit-notes-0.8.6.md](audit-notes-0.8.6.md)。
 
 ## 0.8.4：快速切台
 

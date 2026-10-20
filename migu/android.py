@@ -219,6 +219,8 @@ def _fetch_json(client, url, headers):
         raise MiguApiError("MIGU_API_FORMAT_CHANGED") from None
     if not isinstance(payload, dict):
         raise MiguApiError("MIGU_API_FORMAT_CHANGED")
+    if payload.get("rid") is not None and not isinstance(payload["rid"], str):
+        raise MiguApiError("MIGU_API_FORMAT_CHANGED")
     body = payload.get("body")
     if body is not None:
         if not isinstance(body, dict) or any(body.get(key) is not None and not isinstance(body[key], dict) for key in ("urlInfo", "content", "auth")):
@@ -362,7 +364,12 @@ class AndroidStore:
             self.upstream_observation = dict(observation)
             if observation['account_sent']:
                 logged_in = observation['logged_in']
-                self.credential_state = "accepted" if logged_in is True else "not_recognized" if logged_in is False else "unknown"
+                if logged_in is True:
+                    self.credential_state = "accepted"
+                elif logged_in is False:
+                    self.credential_state = "not_recognized"
+                elif self.credential_state in {"unchecked", "unknown"}:
+                    self.credential_state = "unknown"
             elif self.settings.user_id:
                 self.credential_state = "not_sent"
 
@@ -488,7 +495,7 @@ class AndroidStore:
                     self.waiters[future] = remaining
                 else:
                     self.waiters.pop(future, None)
-                    future.cancel()  # Only succeeds for work not started; shared/running work stays.
+                    self.pool.cancel(future)  # Also release the cancelled queue slot immediately.
 
     def status(self):
         with self.lock:

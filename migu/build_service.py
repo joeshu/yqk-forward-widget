@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INPUTS = ('migu/core.py', 'migu/workers.py', 'migu/native.py', 'migu/android.py', 'migu/source.py', 'migu/epg.py', 'migu/service.py')
-VERSION = '0.8.5'
+VERSION = '0.8.6'
 
 
 def strip_module(text):
@@ -56,13 +56,18 @@ def build():
             module = module.replace(options_text, '# ANDROID_OPTIONS is defined at the top of this file.', 1)
         text += f'\n# {path}\n' + module
     text += '\nif __name__ == "__main__":\n    raise SystemExit(main())\n'
+    # Preserve the user's removal of catalogue URLs from the downloadable file.
+    # Modular historical tools keep their explicit list mode; standalone cannot use it.
+    for endpoint in ('http://www.52top.com.cn:678/downloads/migu.txt',
+                     'https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu.m3u8'):
+        text = text.replace(endpoint, '')
     ast.parse(text)
     data = text.encode('utf-8')
     for unwanted in (b'fcntl', b'CatalogueStore', b'import update_migu', b'ThreadPoolExecutor'):
         if unwanted in data:
             raise ValueError('Unexpected dependency in standalone release')
     manifest = {'version': VERSION, 'artifact': f'migu-live-v{VERSION}.py',
-                'sha256': hashlib.sha256(data).hexdigest(), 'standalone_alias': 'migu-live.py',
+                'sha256': hashlib.sha256(data).hexdigest(), 'standalone_alias': 'migu-live.py', 'external_catalogues_embedded': False,
                 'inputs': {name: hashlib.sha256(sources[name].encode()).hexdigest() for name in INPUTS}}
     return data, (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2)+'\n').encode()
 

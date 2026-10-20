@@ -181,6 +181,8 @@ class ListStore:
     provider = 'published-list'
 
     def __init__(self, source='auto', client_factory=m.HttpClient, clock=time.monotonic, min_channels=100):
+        if not LIST_SOURCES or any(not url.strip() for url in LIST_SOURCES):
+            raise m.FetchError('LIST_PROVIDER_DISABLED')
         self.sources = LIST_SOURCES if source=='auto' else (LIST_SOURCES[1 if source=='github' else 0],)
         self.client_factory, self.clock, self.min_channels = client_factory, clock, min_channels
         self.lock = threading.RLock()

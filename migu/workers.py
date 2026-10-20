@@ -15,6 +15,7 @@ class BoundedExecutor:
         with self.lock:
             if self.closed:
                 raise RuntimeError('Executor already stopped')
+            self._purge_cancelled()
             try:
                 self.queue.put_nowait((future, function, args, kwargs))
             except Full:
@@ -36,6 +37,26 @@ class BoundedExecutor:
                         self.queue.put_nowait(None)
                     raise
         return future
+
+    def _purge_cancelled(self):
+        # Queue has no public remove operation. Its mutex protects the backing
+        # deque/list and accounting for both FIFO and LIFO implementations.
+        with self.queue.mutex:
+            kept = [item for item in self.queue.queue if item is None or not item[0].cancelled()]
+            removed = len(self.queue.queue) - len(kept)
+            if removed:
+                self.queue.queue = type(self.queue.queue)(kept)
+                self.queue.unfinished_tasks -= removed
+                self.queue.not_full.notify_all()
+                if not self.queue.unfinished_tasks:
+                    self.queue.all_tasks_done.notify_all()
+
+    def cancel(self, future):
+        # Invoke Future callbacks without holding executor/queue locks.
+        cancelled = future.cancel()
+        if cancelled:
+            self._purge_cancelled()
+        return cancelled
 
     def _run(self):
         while True:

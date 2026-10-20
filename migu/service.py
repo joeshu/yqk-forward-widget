@@ -28,7 +28,7 @@ from migu.source import ListStore, CATCHUP_SOURCE, list_catchup
 from migu.epg import EpgStore
 from migu.workers import BoundedExecutor
 
-VERSION = "0.8.5"
+VERSION = "0.8.6"
 DEFAULT_PORT = 28768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
@@ -434,7 +434,7 @@ def main(argv=None):
     parser.add_argument("--data-dir", type=Path, help="Only needed for a persistent service access token")
     parser.add_argument("--token-env", help="Environment variable holding the service access token")
     parser.add_argument("--require-token", action="store_true")
-    parser.add_argument("--provider", choices=("list","native","android"), default="android", help="android: direct reference-compatible API (default); native: older API; list: explicit external catalogue")
+    parser.add_argument("--provider", choices=("list","native","android"), default="android", help="android: direct reference-compatible API (default); native: older API; list: developer catalogue mode (disabled in standalone release)")
     parser.add_argument("--list-source", choices=("auto","github","upstream"), default="auto")
     parser.add_argument("--mode", choices=("redirect", "manifest"), default="redirect")
     parser.add_argument("--epg-cache", action="store_true", help="Persist valid programme schedules; fall back to memory if unavailable")
