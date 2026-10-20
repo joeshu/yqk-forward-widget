@@ -2,6 +2,8 @@
 
 使用 [CCTV-2 官方手机网页](https://tv.cctv.com/live/cctv2/m/index.shtml) 对应的播放来源，只提供 CCTV-2 财经。本服务独立于 `ysp-live`，不会替换成央视频或其他平台的来源。
 
+**当前播放服务用于电脑/服务器，不能直接在 APTV 内置 Python 运行。** APTV 截图已确认没有 Node，且提示不支持 `subprocess`；下载旧播放脚本不会解决这个限制。手机直跑方案仍在研究，尚未验证可播。可在 APTV 加载 [aptv-probe.py 环境检测脚本](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/refs/heads/main/cctv-native/aptv-probe.py)，将日志中的“Python版本”和“可见候选模块”用于后续适配。检测脚本仅使用标准库、不导入候选原生模块、不启动子进程、不访问外网，也不提供频道订阅；完整报告位于 `http://127.0.0.1:18770/status`，模块可见不代表可用或支持 WebAssembly。
+
 **需要 Python 3.10+、Node.js 20+ 和 npm，不需要 Chromium、Playwright 或 FFmpeg。** Python 提供本地订阅和分片缓存，Node 运行固定版本的官方组件；处理后的原 TS 分片直接供播放器解码，不采集网页画面、不重新编码。这仍是 Python + Node 程序，只有纯 Python 的环境不能运行。
 
 ## 下载与启动
