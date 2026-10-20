@@ -1,13 +1,13 @@
 """Bounded daemon workers: cancelled queues never keep an embedded app alive."""
 from concurrent.futures import Future
-from queue import Queue, Empty, Full
+from queue import Queue, LifoQueue, Empty, Full
 import threading
 
 
 class BoundedExecutor:
-    def __init__(self, max_workers, thread_name_prefix='migu', max_pending=8):
+    def __init__(self, max_workers, thread_name_prefix='migu', max_pending=8, lifo=False):
         self.max_workers, self.prefix = max_workers, thread_name_prefix
-        self.queue, self.lock = Queue(max(max_pending,max_workers)), threading.Lock()
+        self.queue, self.lock = (LifoQueue if lifo else Queue)(max(max_pending,max_workers)), threading.Lock()
         self.threads, self.closed = [], False
 
     def submit(self, function, *args, **kwargs):

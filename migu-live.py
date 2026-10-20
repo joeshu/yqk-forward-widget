@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Migu dynamic service 0.8.3. Standalone Python 3.10+, standard library only."""
+"""Migu dynamic service 0.8.4. Standalone Python 3.10+, standard library only."""
 from __future__ import annotations
 
 # Edit only this block for protocol settings and your own credentials.
@@ -441,14 +441,14 @@ m = _SharedNamespace(**{key: value for key, value in globals().copy().items() if
 
 # migu/workers.py
 from concurrent.futures import Future
-from queue import Queue, Empty, Full
+from queue import Queue, LifoQueue, Empty, Full
 import threading
 
 
 class BoundedExecutor:
-    def __init__(self, max_workers, thread_name_prefix='migu', max_pending=8):
+    def __init__(self, max_workers, thread_name_prefix='migu', max_pending=8, lifo=False):
         self.max_workers, self.prefix = max_workers, thread_name_prefix
-        self.queue, self.lock = Queue(max(max_pending,max_workers)), threading.Lock()
+        self.queue, self.lock = (LifoQueue if lifo else Queue)(max(max_pending,max_workers)), threading.Lock()
         self.threads, self.closed = [], False
 
     def submit(self, function, *args, **kwargs):
@@ -907,7 +907,7 @@ class NativeStore:
 
 # migu/android.py
 from collections import OrderedDict, deque
-from concurrent.futures import TimeoutError as FutureTimeout
+from concurrent.futures import TimeoutError as FutureTimeout, CancelledError
 from dataclasses import dataclass
 import hashlib
 import json
@@ -932,6 +932,8 @@ FLV_DISABLED_PIDS = ("641886683", "641886773")
 PLAYURL = "https://play.miguvideo.com/playurl/v1/play/playurl"
 CACHE_SUCCESS = 5 * 60
 CACHE_FAILURE = 60
+CACHE_TRANSIENT = 3
+TRANSIENT_FAILURES = {"NETWORK_ERROR", "FETCH_BUDGET_EXCEEDED", "MIGU_API_ERROR", "HTTP_408", "HTTP_429", "HTTP_500", "HTTP_502", "HTTP_503", "HTTP_504"}
 BURST_WINDOW = 60.0
 BURST_LIMIT = 30
 
@@ -1229,9 +1231,10 @@ class AndroidStore:
         self.settings = settings or AndroidSettings.load()
         self.resolver = (lambda pid: android_play_url(pid, self.settings, observer=self._observe)) if resolver is android_play_url else resolver
         self.clock = clock
-        self.pool = BoundedExecutor(max_workers=8, thread_name_prefix="migu-android")
+        self.pool = BoundedExecutor(max_workers=8, thread_name_prefix="migu-android", max_pending=8, lifo=True)
         self.lock = threading.RLock()
         self.flights, self.entries = {}, OrderedDict()
+        self.waiters, self.active = {}, 0
         self.closed, self.last_error, self.fetches, self.cache_hits = False, None, 0, 0
         self.last_upstream, self.recent = None, deque()
         self.upstream_observation = None
@@ -1267,10 +1270,26 @@ class AndroidStore:
         self.recent.append(self.clock())
         return True
 
+    def _run_resolver(self, pid):
+        with self.lock:
+            if self.closed:
+                raise m.FetchError("SERVICE_STOPPING")
+            if not self._burst_ok():
+                raise MiguRateLimitError(self._retry_after())
+            self.fetches += 1
+            self.active += 1
+        try:
+            return self.resolver(pid)
+        finally:
+            with self.lock:
+                self.active -= 1
+
     def _finish(self, key, future):
+        cancelled, local_limit = future.cancelled(), False
         try:
             url, error = future.result(), None
         except Exception as failure:
+            local_limit = isinstance(failure, MiguRateLimitError)
             url = ""
             error = ((str(failure), dict(getattr(failure, "details", {})))
                      if isinstance(failure, m.UpdateError) else ("MIGU_API_ERROR", {}))
@@ -1278,9 +1297,14 @@ class AndroidStore:
             if self.closed or self.flights.get(key) is not future:
                 return
             del self.flights[key]
+            if cancelled:
+                return
             self.last_error = error[0] if error else None
             self.last_upstream = error[1] if error else None
-            self.entries[key] = (self.clock() + (CACHE_FAILURE if error else CACHE_SUCCESS), url, error)
+            if local_limit:
+                return  # Local queue/rate rejection must never poison a channel cache.
+            ttl = CACHE_TRANSIENT if error and error[0] in TRANSIENT_FAILURES else CACHE_FAILURE if error else CACHE_SUCCESS
+            self.entries[key] = (self.clock() + ttl, url, error)
             while len(self.entries) > 64:
                 self.entries.popitem(last=False)
 
@@ -1326,22 +1350,35 @@ class AndroidStore:
                 return cached[1]
             future = self.flights.get(key)
             if future is None:
-                if len(self.flights) >= 8:
+                if len(self.flights) >= 16:
                     raise m.FetchError("MIGU_API_CAPACITY")
-                if not self._burst_ok():
+                if self._retry_after():
                     raise MiguRateLimitError(self._retry_after())
-                future = self.pool.submit(self.resolver, key[1:])
+                try:
+                    future = self.pool.submit(self._run_resolver, key[1:])
+                except RuntimeError:
+                    raise m.FetchError("MIGU_API_CAPACITY") from None
                 self.flights[key] = future
-                self.fetches += 1
                 future.add_done_callback(lambda done: self._finish(key, done))
+            self.waiters[future] = self.waiters.get(future, 0) + 1
         try:
             return future.result(timeout=wait)
         except FutureTimeout:
+            raise m.FetchError("MIGU_API_LOADING") from None
+        except CancelledError:
             raise m.FetchError("MIGU_API_LOADING") from None
         except m.UpdateError:
             raise
         except Exception:
             raise m.FetchError("MIGU_API_ERROR") from None
+        finally:
+            with self.lock:
+                remaining = self.waiters.get(future, 1) - 1
+                if remaining:
+                    self.waiters[future] = remaining
+                else:
+                    self.waiters.pop(future, None)
+                    future.cancel()  # Only succeeds for work not started; shared/running work stays.
 
     def status(self):
         with self.lock:
@@ -1355,6 +1392,9 @@ class AndroidStore:
                     "client_dispatch": self.settings.client_dispatch,
                     "request_profile": "legacy720p" if self.settings.rate_type >= 3 and not self.settings.user_id else "modern",
                     "cache_success_seconds": CACHE_SUCCESS,
+                    "transient_failure_seconds": CACHE_TRANSIENT,
+                    "active_resolves": self.active,
+                    "pending_resolves": max(0, len(self.flights)-self.active),
                     "credential_state": self.credential_state,
                     "rate_limit_retry_after_seconds": self._retry_after(),
                     "recent_resolves": list(self.resolve_samples),
@@ -1989,7 +2029,7 @@ import time
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 
-VERSION = "0.8.3"
+VERSION = "0.8.4"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
