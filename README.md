@@ -1,7 +1,7 @@
 # joeshu 影视组件合集
 
 
-新增 [APTV 手机单文件实验版 cctv-aptv.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/refs/heads/main/cctv-aptv.py)：使用 iOS 系统 JavaScriptCore，无 Node、npm、浏览器、FFmpeg 或子进程。APTV 加载并启动后订阅 `http://127.0.0.1:18768/all.m3u`，仅 CCTV-2，仍为指定央视网页来源。已在 Linux JavaScriptCore 连续严格解码验证 60 秒；iPhone 完整播放待用户验收，详见 [APTV 使用与验证](./cctv-native/README.md)。
+新增 [APTV 手机单文件实验版 cctv-aptv.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-aptv.py)：使用 iOS 系统 JavaScriptCore，无 Node、npm、浏览器、FFmpeg 或子进程。APTV 加载并启动后订阅 `http://127.0.0.1:18768/all.m3u`，仅 CCTV-2，仍为指定央视网页来源。已在 Linux JavaScriptCore 连续严格解码验证 60 秒；iPhone 完整播放待用户验收，详见 [APTV 使用与验证](./cctv-native/README.md)。
 新增 [CCTV-2 网页原分片实验版](./cctv-native/README.md)：使用指定央视网页来源，Python + Node 提供 `http://127.0.0.1:18768/all.m3u`，无需 Chromium、Playwright 或 FFmpeg。此前的 [浏览器采集转码版](./cctv-web/README.md) 独立保留；两版均仅提供 CCTV-2，与下方央视频服务来源不同。
 
 Python 央视订阅可使用仓库现有的 [ysp-live 单文件版](./ysp-live/README.md)：`python ysp-live-v9.5.19.py 18767 --bind 127.0.0.1 --no-4k --no-engine`，播放器订阅 `http://127.0.0.1:18767/all.m3u`。本轮 CCTV-2 分片实测为 1080p，严格解码通过；64 条配置未逐台验证，详见 [CCTV-2 实测与下载入口](./ysp-live/CCTV2-CHECK-2026-10-19.md)。

@@ -2,7 +2,7 @@
 
 使用 [CCTV-2 官方手机网页](https://tv.cctv.com/live/cctv2/m/index.shtml) 对应的播放来源，只提供 CCTV-2 财经。本服务独立于 `ysp-live`，不会替换成央视频或其他平台的来源。
 
-**APTV 手机实验版现已独立提供：[cctv-aptv.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/refs/heads/main/cctv-aptv.py)。** 用户 iPhone 日志已确认 Python 3.14.6 可以直接调用系统 JavaScriptCore 并执行微型 WASM。新版本使用该引擎，不依赖 Node、npm、浏览器、FFmpeg 或子进程；已在 Linux JavaScriptCore 中通过真实央视分片处理及连续解码验证，**手机完整播放尚待用户验证**。详见 [APTV 验证记录](APTV-VALIDATION.md)。原有 `cctv-native.py` 仍用于电脑/服务器，需要 Node。
+**APTV 手机实验版现已独立提供：[cctv-aptv.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-aptv.py)。** 用户 iPhone 日志已确认 Python 3.14.6 可以直接调用系统 JavaScriptCore 并执行微型 WASM。新版本使用该引擎，不依赖 Node、npm、浏览器、FFmpeg 或子进程；已在 Linux JavaScriptCore 中通过真实央视分片处理及连续解码验证，**手机完整播放尚待用户验证**。详见 [APTV 验证记录](APTV-VALIDATION.md)。原有 `cctv-native.py` 仍用于电脑/服务器，需要 Node。
 
 在 APTV 添加 Python 服务，远程链接填写上面的 `cctv-aptv.py`，加载最新代码并启动，然后订阅：
 
