@@ -277,10 +277,12 @@ def _program(
 def _mapped_slice(spans: list[ByteSpan] | tuple[ByteSpan, ...], begin: int, end: int) -> tuple[ByteSpan, ...]:
     if begin >= end:
         return ()
-    starts = [span.es_offset for span in spans]
-    index = max(0, bisect.bisect_right(starts, begin) - 1)
+    # Search the existing sorted spans directly; avoid rebuilding all offsets
+    # and slicing the remaining span table for every NAL. Python 3.10+ key API.
+    index = max(0, bisect.bisect_right(spans, begin, key=lambda span: span.es_offset) - 1)
     result = []
-    for span in spans[index:]:
+    for position in range(index, len(spans)):
+        span = spans[position]
         if span.es_offset >= end:
             break
         start = max(begin, span.es_offset)

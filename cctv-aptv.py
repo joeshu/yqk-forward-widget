@@ -283,10 +283,12 @@ def _program(
 def _mapped_slice(spans: list[ByteSpan] | tuple[ByteSpan, ...], begin: int, end: int) -> tuple[ByteSpan, ...]:
     if begin >= end:
         return ()
-    starts = [span.es_offset for span in spans]
-    index = max(0, bisect.bisect_right(starts, begin) - 1)
+    # Search the existing sorted spans directly; avoid rebuilding all offsets
+    # and slicing the remaining span table for every NAL. Python 3.10+ key API.
+    index = max(0, bisect.bisect_right(spans, begin, key=lambda span: span.es_offset) - 1)
     result = []
-    for span in spans[index:]:
+    for position in range(index, len(spans)):
+        span = spans[position]
         if span.es_offset >= end:
             break
         start = max(begin, span.es_offset)
@@ -659,6 +661,7 @@ def transform_pes_nals(
 import argparse
 import base64
 from collections import OrderedDict
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -898,7 +901,10 @@ class Channel:
                 self.size -= len(old[0])
                 self.discarded_discontinuities += bool(old[2])
             if len(self.ring) >= 2:
+                first_ready = self.state != 'ready'
                 self.stage('ready')
+                if first_ready:
+                    print('[cctv-native] media-ready startup_seconds='+str(self.timings['ready']), flush=True)
             self.condition.notify_all()
 
     def playlist(self):
@@ -992,7 +998,10 @@ class Channel:
                             if not boundary_proven_by(lookahead, program_number=analysis.program_number,
                                                       video_pid=analysis.video_pid):
                                 raise NativeError('source-boundary-not-proven')
-                            analysis = inspect_ts(raw, final_nal_complete=True)
+                            # The lookahead proved the final boundary above. Only
+                            # its completeness bit changes; reuse the parsed TS.
+                            analysis = replace(analysis, nals=analysis.nals[:-1]+(
+                                replace(analysis.nals[-1], complete=True),))
                             self.operation_phase('sdk-transform')
                             processed = engine.transform([analysis.nal_bytes(n) for n in analysis.nals])
                             converted = {n.payload_offset: value for n, value in zip(analysis.nals, processed)}
@@ -1341,7 +1350,8 @@ def main(argv=None):
     parser.add_argument('port', type=int, nargs='?', default=18768)
     parser.add_argument('--bind', default='127.0.0.1')
     parser.add_argument('--cache-dir', default=None, help='可选磁盘缓存目录；默认仅内存，无需文件写入权限')
-    parser.add_argument('--warmup', action='store_true')
+    parser.add_argument('--warmup', action=argparse.BooleanOptionalAction, default=True,
+                        help='默认 GET 订阅时提前准备频道；--no-warmup 可关闭')
     parser.add_argument('--buffer-mb', type=int, default=32)
     parser.add_argument('--idle-timeout', type=int, default=120)
     parser.add_argument('--jscore-library', default=APPLE_FRAMEWORK, help=argparse.SUPPRESS)

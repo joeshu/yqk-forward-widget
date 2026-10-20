@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 from collections import OrderedDict
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -372,7 +373,10 @@ class Channel:
                 self.size -= len(old[0])
                 self.discarded_discontinuities += bool(old[2])
             if len(self.ring) >= 2:
+                first_ready = self.state != 'ready'
                 self.stage('ready')
+                if first_ready:
+                    print('[cctv-native] media-ready startup_seconds='+str(self.timings['ready']), flush=True)
             self.condition.notify_all()
 
     def playlist(self):
@@ -466,7 +470,10 @@ class Channel:
                             if not boundary_proven_by(lookahead, program_number=analysis.program_number,
                                                       video_pid=analysis.video_pid):
                                 raise NativeError('source-boundary-not-proven')
-                            analysis = inspect_ts(raw, final_nal_complete=True)
+                            # The lookahead proved the final boundary above. Only
+                            # its completeness bit changes; reuse the parsed TS.
+                            analysis = replace(analysis, nals=analysis.nals[:-1]+(
+                                replace(analysis.nals[-1], complete=True),))
                             self.operation_phase('sdk-transform')
                             processed = engine.transform([analysis.nal_bytes(n) for n in analysis.nals])
                             converted = {n.payload_offset: value for n, value in zip(analysis.nals, processed)}

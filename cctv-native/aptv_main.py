@@ -4,7 +4,8 @@ def main(argv=None):
     parser.add_argument('port', type=int, nargs='?', default=18768)
     parser.add_argument('--bind', default='127.0.0.1')
     parser.add_argument('--cache-dir', default=None, help='可选磁盘缓存目录；默认仅内存，无需文件写入权限')
-    parser.add_argument('--warmup', action='store_true')
+    parser.add_argument('--warmup', action=argparse.BooleanOptionalAction, default=True,
+                        help='默认 GET 订阅时提前准备频道；--no-warmup 可关闭')
     parser.add_argument('--buffer-mb', type=int, default=32)
     parser.add_argument('--idle-timeout', type=int, default=120)
     parser.add_argument('--jscore-library', default=APPLE_FRAMEWORK, help=argparse.SUPPRESS)
