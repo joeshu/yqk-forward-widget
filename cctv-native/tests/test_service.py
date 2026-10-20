@@ -438,6 +438,11 @@ class TestTransportDiagnostics(unittest.TestCase):
 
 
 class TestSourceTLSCompatibility(unittest.TestCase):
+    def setUp(self):
+        self.policy = mock.patch.object(service, '_API_TLS12_PREFERRED', False)
+        self.policy.start()
+        self.addCleanup(self.policy.stop)
+
     URL = 'https://vdnx.live.cntv.cn/api/v3/vdn/live?temporary=secret-source-token'
 
     def test_ssl_handshake_retry_preserves_verification_request_and_body_limit(self):
@@ -466,6 +471,34 @@ class TestSourceTLSCompatibility(unittest.TestCase):
         self.assertNotIn('secret-source-token',logs)
         self.assertNotIn('private-header',logs)
 
+    def test_successful_tls12_is_remembered_and_reused_for_next_channel(self):
+        first, second, third = mock.Mock(), mock.Mock(), mock.Mock()
+        first.open.side_effect = service.URLError(service.ssl.SSLError(1,'handshake-failure'))
+        response=mock.MagicMock();response.__enter__.return_value=response
+        response.url=self.URL;response.read.return_value=b'{}'
+        second.open.return_value=response;third.open.return_value=response
+        with mock.patch.object(service,'build_opener',side_effect=[first,second,third]) as build, \
+             mock.patch('builtins.print'):
+            service.get(self.URL)
+            self.assertTrue(service._API_TLS12_PREFERRED)
+            service.get(self.URL)
+        self.assertEqual(build.call_count,3)
+        self.assertEqual(len(build.call_args_list[2].args),2)
+        self.assertEqual(build.call_args_list[2].args[1]._context.maximum_version,service.ssl.TLSVersion.TLSv1_2)
+
+    def test_learned_preference_recovers_after_network_changes(self):
+        service._API_TLS12_PREFERRED=True
+        first,second=mock.Mock(),mock.Mock()
+        first.open.side_effect=service.URLError(service.ssl.SSLError(1,'network-changed'))
+        response=mock.MagicMock();response.__enter__.return_value=response
+        response.url=self.URL;response.read.return_value=b'{}';second.open.return_value=response
+        with mock.patch.object(service,'build_opener',side_effect=[first,second]) as build, \
+             mock.patch('builtins.print'):
+            service.get(self.URL)
+        self.assertEqual(len(build.call_args_list[0].args),2)
+        self.assertEqual(len(build.call_args_list[1].args),1)
+        self.assertFalse(service._API_TLS12_PREFERRED)
+
     def test_certificate_failure_is_not_given_protocol_retry(self):
         opener=mock.Mock()
         opener.open.side_effect=service.URLError(service.ssl.SSLCertVerificationError(1,'private'))
@@ -493,3 +526,20 @@ class TestSourceTLSCompatibility(unittest.TestCase):
         self.assertNotIn('secret-source-token',code)
         error.reason=self.URL
         self.assertNotIn('secret-source-token',service.transport_error_code(service.URLError(error)))
+
+
+class TestWebsiteSourceSelection(unittest.TestCase):
+    def test_channel_api_receives_correct_official_identifier(self):
+        data={'play':'1','manifest':{'hls_cdrm':BASE}}
+        with mock.patch.object(service,'get',return_value=(json.dumps(data).encode(),BASE)) as fetch:
+            self.assertEqual(service.source_url('cctvjilu'),BASE)
+        self.assertIn('channel=cctvjilu&',fetch.call_args.args[0])
+
+    def test_other_channel_denial_is_not_bypassed(self):
+        with mock.patch.object(service,'get',return_value=(b'{"play":0}',BASE)):
+            with self.assertRaisesRegex(service.NativeError,'official-playback-not-permitted'):
+                service.source_url('cctv3')
+        with mock.patch.object(service,'get') as fetch:
+            with self.assertRaisesRegex(service.NativeError,'unknown-channel'):
+                service.source_url('injected-host')
+            fetch.assert_not_called()

@@ -1,0 +1,241 @@
+{
+  "date": "2026-10-20",
+  "website": "https://tv.cctv.com/live/",
+  "scope": "one complete real TS segment per channel, following-segment boundary proof, original SDK, full-segment strict decoding on Linux JavaScriptCoreGTK; not all-device or continuous-play certification",
+  "channels": [
+    {
+      "id": "cctv1",
+      "name": "CCTV-1 综合",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 408900,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 10.546
+    },
+    {
+      "id": "cctv2",
+      "name": "CCTV-2 财经",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 659692,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 10.131
+    },
+    {
+      "id": "cctv4",
+      "name": "CCTV-4 中文国际",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 1047536,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 7.508
+    },
+    {
+      "id": "cctv7",
+      "name": "CCTV-7 国防军事",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 816108,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 7.247
+    },
+    {
+      "id": "cctvjilu",
+      "name": "CCTV-9 纪录",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 202,
+      "media_bytes": 1134392,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 5.289
+    },
+    {
+      "id": "cctv10",
+      "name": "CCTV-10 科教",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 206,
+      "media_bytes": 561744,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 6.199
+    },
+    {
+      "id": "cctv11",
+      "name": "CCTV-11 戏曲",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 628484,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 4.53
+    },
+    {
+      "id": "cctv12",
+      "name": "CCTV-12 社会与法",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 386904,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 7.43
+    },
+    {
+      "id": "cctv13",
+      "name": "CCTV-13 新闻",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 1028172,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 6.741
+    },
+    {
+      "id": "cctvchild",
+      "name": "CCTV-14 少儿",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 904844,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 5.091
+    },
+    {
+      "id": "cctv15",
+      "name": "CCTV-15 音乐",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 829080,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 3.575
+    },
+    {
+      "id": "cctv17",
+      "name": "CCTV-17 农业农村",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 343476,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 5.694
+    },
+    {
+      "id": "cctveurope",
+      "name": "CCTV-4 欧洲",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 471880,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 5.332
+    },
+    {
+      "id": "cctvamerica",
+      "name": "CCTV-4 美洲",
+      "passed": true,
+      "decode_error_bytes": 0,
+      "nals": 204,
+      "media_bytes": 485604,
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720
+      },
+      "seconds": 2.139
+    }
+  ],
+  "excluded": [
+    {
+      "id": "cctv3",
+      "name": "CCTV-3 综艺",
+      "api": false,
+      "error": "official-playback-not-permitted"
+    },
+    {
+      "id": "cctv5",
+      "name": "CCTV-5 体育",
+      "api": false,
+      "error": "official-playback-not-permitted"
+    },
+    {
+      "id": "cctv5plus",
+      "name": "CCTV-5+ 体育赛事",
+      "api": false,
+      "error": "official-playback-not-permitted"
+    },
+    {
+      "id": "cctv6",
+      "name": "CCTV-6 电影",
+      "api": false,
+      "error": "official-playback-not-permitted"
+    },
+    {
+      "id": "cctv8",
+      "name": "CCTV-8 电视剧",
+      "api": false,
+      "error": "official-playback-not-permitted"
+    },
+    {
+      "id": "cctv16",
+      "name": "CCTV-16 奥林匹克",
+      "api": false,
+      "error": "official-playback-not-permitted"
+    }
+  ]
+}

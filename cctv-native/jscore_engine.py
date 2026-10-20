@@ -137,7 +137,8 @@ class Engine:
         wasm = match.group(1).decode('ascii')
         try:
             self.context = JSContext(getattr(args, 'jscore_library', APPLE_FRAMEWORK))
-            self.context.evaluate(JSCORE_HOST)
+            self.context.evaluate(JSCORE_HOST.replace('/live/cctv2/m/index.shtml',
+                '/live/'+getattr(args, 'channel_id', 'cctv2')+'/m/index.shtml'))
             self.context.evaluate(IDB_SOURCE)
             self.context.evaluate(raw.decode('utf-8'))
             self.context.evaluate('var __wasmText=atob('+json.dumps(wasm)+');'

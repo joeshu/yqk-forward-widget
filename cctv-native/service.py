@@ -77,39 +77,68 @@ class SourceRedirect(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+_API_TLS12_PREFERRED = False
+
+
 def get(url, *, headers=None, limit=8*1024*1024, timeout=12):
+    global _API_TLS12_PREFERRED
     validate_source(url)
     req = Request(url, headers={'User-Agent': UA, 'Referer': REFERER, **(headers or {})})
-    def read_response(opener):
-        with opener.open(req, timeout=timeout) as response:
+    parsed = urlsplit(url)
+    source_api = parsed.hostname == 'vdnx.live.cntv.cn' and parsed.path == '/api/v3/vdn/live'
+
+    def read_response(tls12=False):
+        handlers = [SourceRedirect()]
+        if tls12:
+            context = ssl.create_default_context()
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.maximum_version = ssl.TLSVersion.TLSv1_2
+            handlers.append(HTTPSHandler(context=context))
+        with build_opener(*handlers).open(req, timeout=timeout) as response:
             body = response.read(limit + 1)
             if len(body) > limit:
                 raise NativeError('response-too-large')
             validate_source(response.url)
             return body, response.url
+
+    preferred = source_api and _API_TLS12_PREFERRED
     try:
-        return read_response(build_opener(SourceRedirect()))
+        return read_response(preferred)
     except URLError as error:
         reason = error.reason
-        parsed = urlsplit(url)
-        if (parsed.hostname != 'vdnx.live.cntv.cn' or parsed.path != '/api/v3/vdn/live'
-                or not isinstance(reason, ssl.SSLError)
+        if (not source_api or not isinstance(reason, ssl.SSLError)
                 or isinstance(reason, ssl.SSLCertVerificationError)):
             raise
+        mode = not preferred
         print('[cctv-native] source-api TLS failure='+transport_error_code(error)+
-              '; retrying verified TLSv1.2', flush=True)
-        context = ssl.create_default_context()
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.maximum_version = ssl.TLSVersion.TLSv1_2
-        # Keep default certificate/hostname verification, trusted CA handling,
-        # proxy discovery, redirect validation and the exact official request.
-        return read_response(build_opener(SourceRedirect(), HTTPSHandler(context=context)))
+              '; retrying verified '+('TLSv1.2' if mode else 'default TLS'), flush=True)
+        result = read_response(mode)
+        # Learn only after a verified request succeeds. A failed retry never
+        # poisons the preference; host/proxy/CA/redirect policy stays unchanged.
+        _API_TLS12_PREFERRED = mode
+        return result
 
 
-def source_url():
+WEBSITE_CHANNELS = (
+    ('cctv1', 'CCTV-1 综合'), ('cctv2', 'CCTV-2 财经'),
+    ('cctv3', 'CCTV-3 综艺'), ('cctv4', 'CCTV-4 中文国际'),
+    ('cctv5', 'CCTV-5 体育'), ('cctv5plus', 'CCTV-5+ 体育赛事'),
+    ('cctv6', 'CCTV-6 电影'), ('cctv7', 'CCTV-7 国防军事'),
+    ('cctv8', 'CCTV-8 电视剧'), ('cctvjilu', 'CCTV-9 纪录'),
+    ('cctv10', 'CCTV-10 科教'), ('cctv11', 'CCTV-11 戏曲'),
+    ('cctv12', 'CCTV-12 社会与法'), ('cctv13', 'CCTV-13 新闻'),
+    ('cctvchild', 'CCTV-14 少儿'), ('cctv15', 'CCTV-15 音乐'),
+    ('cctv16', 'CCTV-16 奥林匹克'), ('cctv17', 'CCTV-17 农业农村'),
+    ('cctveurope', 'CCTV-4 欧洲'), ('cctvamerica', 'CCTV-4 美洲'),
+)
+
+
+def source_url(channel_id='cctv2'):
+    if channel_id not in dict(WEBSITE_CHANNELS):
+        raise NativeError('unknown-channel')
     stamp, nonce = int(time.time()*1000), random.randint(100, 1000)
-    signature = hashlib.md5(f'cctv2{stamp}{nonce}4f779c20f6974ccba20e28d63529d0ef'.encode()).hexdigest()
-    query = urlencode({'channel': 'cctv2', 'vn': '1000', 'pdrm': '1', 'uid': '', 'hbss': stamp})
+    signature = hashlib.md5(f'{channel_id}{stamp}{nonce}4f779c20f6974ccba20e28d63529d0ef'.encode()).hexdigest()
+    query = urlencode({'channel': channel_id, 'vn': '1000', 'pdrm': '1', 'uid': '', 'hbss': stamp})
     raw, _ = get('https://vdnx.live.cntv.cn/api/v3/vdn/live?' + query,
                  headers={'auth-key': f'{stamp}-{nonce}-{signature}'}, limit=1024*1024)
     data = json.loads(raw)
@@ -303,6 +332,7 @@ class Engine:
 class Channel:
     def __init__(self, args):
         self.args = args
+        self.channel_id = getattr(args, 'channel_id', 'cctv2')
         self.condition = threading.Condition(threading.RLock())
         self.stop = threading.Event()
         self.thread = None
@@ -331,7 +361,7 @@ class Channel:
             self.operation_started = time.monotonic()
             if value not in self.seen_operations:
                 self.seen_operations.add(value)
-                print('[cctv-native] phase='+value, flush=True)
+                print('[cctv-native] phase='+value+' channel='+self.channel_id, flush=True)
 
     def stage(self, stage):
         with self.condition:
@@ -376,7 +406,7 @@ class Channel:
                 first_ready = self.state != 'ready'
                 self.stage('ready')
                 if first_ready:
-                    print('[cctv-native] media-ready startup_seconds='+str(self.timings['ready']), flush=True)
+                    print('[cctv-native] media-ready startup_seconds='+str(self.timings['ready'])+' channel='+self.channel_id, flush=True)
             self.condition.notify_all()
 
     def playlist(self):
@@ -398,7 +428,7 @@ class Channel:
 
     def snapshot(self):
         with self.condition:
-            return {'state': self.state, 'error': self.error, 'source': 'tv.cctv.com/cctv2',
+            return {'state': self.state, 'error': self.error, 'source': 'tv.cctv.com/'+self.channel_id,
                     'mode': 'official-runtime-original-ts', 'processed_segments': self.processed,
                     'buffer_bytes': self.size, 'buffer_segments': len(self.ring),
                     'source_gaps': self.source_gaps,
@@ -433,7 +463,7 @@ class Channel:
                     try:
                         if url is None or time.monotonic()-refreshed > 120:
                             self.operation_phase('source-api')
-                            url, refreshed = source_url(), time.monotonic()
+                            url, refreshed = (source_url() if self.channel_id == 'cctv2' else source_url(self.channel_id)), time.monotonic()
                         self.operation_phase('media-playlist')
                         entries, final = media_playlist(url)
                         self.playlist_entries = len(entries)
@@ -452,7 +482,7 @@ class Channel:
                             # window; never join bytes across missing segments.
                             self.source_gaps += 1
                             last_seq, cached, pending_discontinuity = None, {}, True
-                        wanted = [e for e in entries if last_seq is None or e['seq'] > last_seq]
+                        wanted = [e for e in entries if last_seq is None or e['seq'] > last_seq][:3]
                         for e in wanted:
                             if e['seq'] not in cached:
                                 cached[e['seq']] = pool.submit(get, e['url'])
