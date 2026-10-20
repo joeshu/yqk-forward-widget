@@ -101,3 +101,5 @@ python -m py_compile cctv-native.py cctv-native/service.py cctv-native/cctv_nati
 ```
 
 CI 运行 Python 3.10 / 3.12 与 Node 22 的离线检查，不执行官方接口实播。FFmpeg 可用于开发时验证输出解码，服务运行不依赖它。
+
+取流停滞排查：`source-media-stalled` 表示播放器初始化已完成，但 30 秒内没有发布新分片，不直接说明原因。新版日志打印首次进入的 `phase`、每次网络重试的 `operation/cause`，出错时自动打印脱敏 `diagnostics` JSON；`/status` 同时提供 `operation`、`operation_seconds`、`playlist_entries` 和 `last_segment_bytes`。`media-playlist` 指清单获取，`segment-download` 指分片下载，`sdk-transform` 指原组件处理。诊断不输出上游地址、签名、异常原文或证书内容，仍保留原来的超时保护。

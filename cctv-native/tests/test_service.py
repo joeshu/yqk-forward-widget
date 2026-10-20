@@ -166,15 +166,24 @@ class TestChannelRing(unittest.TestCase):
             now[0] += 31
         with mock.patch.object(service, 'Engine', return_value=engine), \
                 mock.patch.object(service, 'source_url', return_value=BASE), \
-                mock.patch.object(service, 'media_playlist', side_effect=TimeoutError()) as playlist, \
+                mock.patch.object(service, 'media_playlist', side_effect=TimeoutError(BASE)) as playlist, \
                 mock.patch.object(service.time, 'monotonic', side_effect=lambda: now[0]), \
                 mock.patch.object(channel.stop, 'wait', side_effect=wait), \
-                mock.patch('builtins.print'):
+                mock.patch('builtins.print') as logged:
             channel.run()
         playlist.assert_called_once()
         self.assertEqual(channel.error, 'source-media-stalled')
         self.assertEqual(channel.transport_retries, 1)
         engine.close.assert_called_once()
+        value = channel.snapshot()
+        self.assertEqual(value['operation'], 'media-playlist')
+        self.assertEqual(value['last_transport_error'], 'TimeoutError')
+        self.assertEqual(value['playlist_entries'], 0)
+        self.assertEqual(value['last_segment_bytes'], 0)
+        lines = ' '.join(str(call.args) for call in logged.call_args_list)
+        self.assertIn('diagnostics=', lines)
+        self.assertIn('operation=media-playlist cause=TimeoutError', lines)
+        self.assertNotIn('secret-source-token', lines)
 
     def test_expired_url_refresh_stops_when_official_api_denies_playback(self):
         channel = service.Channel(arguments())
@@ -416,3 +425,13 @@ class TestLocalHTTP(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTransportDiagnostics(unittest.TestCase):
+    def test_nested_network_error_reports_type_and_errno_without_address(self):
+        error = service.URLError(ConnectionRefusedError(61, BASE))
+        self.assertEqual(service.transport_error_code(error), 'URLError:ConnectionRefusedError:errno-61')
+        self.assertNotIn('secret-source-token',service.transport_error_code(error))
+
+    def test_text_reason_is_never_forwarded(self):
+        self.assertEqual(service.transport_error_code(service.URLError(BASE)), 'URLError')

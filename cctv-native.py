@@ -48,6 +48,21 @@ class NativeError(Exception):
     pass
 
 
+def transport_error_code(error):
+    """Describe network failures without URLs, paths, certificate text or tokens."""
+    if isinstance(error, HTTPError):
+        return f'http-{error.code}'
+    code = type(error).__name__
+    reason = error.reason if isinstance(error, URLError) else error
+    if isinstance(error, URLError) and isinstance(reason, BaseException):
+        code += ':'+type(reason).__name__
+    if isinstance(reason, OSError) and isinstance(reason.errno, int):
+        code += ':errno-'+str(reason.errno)
+    if isinstance(reason, ssl.SSLCertVerificationError) and isinstance(getattr(reason, 'verify_code', None), int):
+        code += ':verify-'+str(reason.verify_code)
+    return code
+
+
 def validate_source(url):
     parsed = urlsplit(url)
     if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
@@ -286,6 +301,19 @@ class Channel:
         self.waiters = 0
         self.timings = {}
         self.started_at = 0
+        self.operation = 'idle'
+        self.operation_started = 0
+        self.seen_operations = set()
+        self.playlist_entries = 0
+        self.last_segment_bytes = 0
+
+    def operation_phase(self, value):
+        with self.condition:
+            self.operation = value
+            self.operation_started = time.monotonic()
+            if value not in self.seen_operations:
+                self.seen_operations.add(value)
+                print('[cctv-native] phase='+value, flush=True)
 
     def stage(self, stage):
         with self.condition:
@@ -307,6 +335,9 @@ class Channel:
             self.source_gaps = 0
             self.transport_retries = 0
             self.last_transport_error = ''
+            self.operation, self.operation_started = 'initializing', 0
+            self.seen_operations.clear()
+            self.playlist_entries = self.last_segment_bytes = 0
             self.error, self.state, self.timings = '', 'initializing', {}
             self.started_at = time.monotonic()
             self.thread = threading.Thread(target=self.run, daemon=True, name='cctv-native')
@@ -352,11 +383,15 @@ class Channel:
                     'source_gaps': self.source_gaps,
                     'transport_retries': self.transport_retries,
                     'last_transport_error': self.last_transport_error,
+                    'operation': self.operation,
+                    'operation_seconds': round(time.monotonic()-self.operation_started, 3) if self.operation_started else 0,
+                    'playlist_entries': self.playlist_entries, 'last_segment_bytes': self.last_segment_bytes,
                     'stage_seconds': dict(self.timings), 'media_ready': self.playlist() is not None}
 
     def run(self):
         engine = None
         try:
+            self.operation_phase('engine-initialization')
             engine = Engine(self.args)
             with self.condition:
                 self.engine = engine
@@ -376,8 +411,11 @@ class Channel:
                         raise NativeError('source-media-stalled')
                     try:
                         if url is None or time.monotonic()-refreshed > 120:
+                            self.operation_phase('source-api')
                             url, refreshed = source_url(), time.monotonic()
+                        self.operation_phase('media-playlist')
                         entries, final = media_playlist(url)
+                        self.playlist_entries = len(entries)
                         # Resolve the master only once per source refresh.
                         url = final
                         self.requests += 1
@@ -402,15 +440,20 @@ class Channel:
                                 break
                             if following['seq'] != e['seq']+1 or following['discontinuity']:
                                 raise NativeError('source-boundary-not-proven')
+                            self.operation_phase('segment-download')
                             raw = cached[e['seq']].result()[0]
                             lookahead = cached[following['seq']].result()[0]
+                            self.last_segment_bytes = len(raw)
+                            self.operation_phase('ts-analysis')
                             analysis = inspect_ts(raw)
                             if not boundary_proven_by(lookahead, program_number=analysis.program_number,
                                                       video_pid=analysis.video_pid):
                                 raise NativeError('source-boundary-not-proven')
                             analysis = inspect_ts(raw, final_nal_complete=True)
+                            self.operation_phase('sdk-transform')
                             processed = engine.transform([analysis.nal_bytes(n) for n in analysis.nals])
                             converted = {n.payload_offset: value for n, value in zip(analysis.nals, processed)}
+                            self.operation_phase('ts-repack')
                             output, _ = transform_pes_nals(raw, lambda n, _data: converted[n.payload_offset],
                                                        nal_types=(1, 5, 7), final_nal_complete=True)
                             self.publish(output, e, pending_discontinuity or e['discontinuity'])
@@ -425,11 +468,10 @@ class Channel:
                                 url = None
                             elif error.code not in (408, 429) and not 500 <= error.code < 600:
                                 raise
-                            code = f'http-{error.code}'
-                        else:
-                            code = type(error).__name__
+                        code = transport_error_code(error)
                         self.transport_retries += 1
                         self.last_transport_error = code
+                        print('[cctv-native] retry='+str(self.transport_retries)+' operation='+self.operation+' cause='+code, flush=True)
                         failures += 1
                         # A failed Future must be evicted or every subsequent
                         # poll would replay the same exception without a GET.
@@ -447,6 +489,7 @@ class Channel:
                 'transport-stream-unsupported' if isinstance(error, TSFormatError) else type(error).__name__)
             self.state, self.failed_at = 'error', time.monotonic()
             print('[cctv-native] '+self.error, flush=True)
+            print('[cctv-native] diagnostics='+json.dumps(self.snapshot(), ensure_ascii=False), flush=True)
         finally:
             if engine:
                 engine.close()
