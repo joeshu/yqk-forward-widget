@@ -8,6 +8,8 @@ def main(argv=None):
     parser.add_argument('--warmup', action=argparse.BooleanOptionalAction, default=True,
                         help='默认 GET 订阅时提前准备频道；--no-warmup 可关闭')
     parser.add_argument('--no-legacy-source-tls',action='store_true',help='关闭仅官方取源接口的旧服务器握手兼容')
+    parser.add_argument('--parallel-prepare',action=argparse.BooleanOptionalAction,default=True,
+                        help='并行初始化组件与准备首批分片；--no-parallel-prepare 可关闭')
     parser.add_argument('--buffer-mb', type=int, default=32)
     parser.add_argument('--idle-timeout', type=int, default=120)
     parser.add_argument('--jscore-library', default=APPLE_FRAMEWORK, help=argparse.SUPPRESS)

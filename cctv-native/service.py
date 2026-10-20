@@ -400,6 +400,7 @@ class Channel:
         self.seen_operations = set()
         self.playlist_entries = 0
         self.last_segment_bytes = 0
+        self.preparation_phase = 'disabled'
 
     def operation_phase(self, value):
         with self.condition:
@@ -408,6 +409,14 @@ class Channel:
             if value not in self.seen_operations:
                 self.seen_operations.add(value)
                 print('[cctv-native] phase='+value+' channel='+self.channel_id, flush=True)
+
+    def note_client_request(self, kind):
+        with self.condition:
+            if not self.started_at or kind in self.timings:
+                return
+            elapsed = round(time.monotonic()-self.started_at,3)
+            self.timings[kind] = elapsed
+            print('[cctv-native] '+kind+' seconds='+str(elapsed)+' channel='+self.channel_id,flush=True)
 
     def stage(self, stage):
         with self.condition:
@@ -431,6 +440,7 @@ class Channel:
             self.last_transport_error = ''
             self.operation, self.operation_started = 'initializing', 0
             self.seen_operations.clear()
+            self.preparation_phase = 'disabled'
             self.playlist_entries = self.last_segment_bytes = 0
             self.error, self.state, self.timings = '', 'initializing', {}
             self.started_at = time.monotonic()
@@ -482,14 +492,51 @@ class Channel:
                     'transport_retries': self.transport_retries,
                     'last_transport_error': self.last_transport_error,
                     'operation': self.operation,
+                    'parallel_preparation': bool(getattr(self.args,'parallel_prepare',False)),
+                    'preparation_phase': self.preparation_phase,
                     'operation_seconds': round(time.monotonic()-self.operation_started, 3) if self.operation_started else 0,
                     'playlist_entries': self.playlist_entries, 'last_segment_bytes': self.last_segment_bytes,
                     'media_transfer': ('typed-array' if getattr(getattr(self.engine, 'context', None), 'buffer_api', False) else 'base64'),
                     'stage_seconds': dict(self.timings), 'media_ready': self.playlist() is not None}
 
+    def _prepare_initial(self, pool, cancel):
+        """Independent HTTPS work; never touches the thread-owned native VM."""
+        def cancelled():
+            return self.stop.is_set() or cancel.is_set()
+        if cancelled():
+            return None
+        self.preparation_phase = 'source-api'
+        url = source_url() if self.channel_id == 'cctv2' else source_url(self.channel_id)
+        refreshed = time.monotonic()
+        if cancelled():
+            return None
+        self.preparation_phase = 'media-playlist'
+        entries, final = media_playlist(url)
+        if cancelled():
+            return None
+        self.preparation_phase = 'segment-download'
+        downloads = {}
+        for entry in entries[:3]:
+            if cancelled():
+                return None
+            downloads[entry['seq']] = pool.submit(get,entry['url'])
+        return entries, final, downloads, refreshed, time.monotonic()
+
     def run(self):
+        # The native engine is created and released on this owner thread;
+        # bounded I/O workers can fetch independently while it initializes.
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            self._run_owned(pool)
+
+    def _run_owned(self, pool):
         engine = None
+        preparation = None
+        cancel_preparation = threading.Event()
         try:
+            if getattr(self.args,'parallel_prepare',False):
+                print('[cctv-native] source-preparation=parallel channel='+self.channel_id,flush=True)
+                self.preparation_phase = 'source-api'
+                preparation = pool.submit(self._prepare_initial,pool,cancel_preparation)
             self.operation_phase('engine-initialization')
             engine = Engine(self.args)
             with self.condition:
@@ -501,14 +548,36 @@ class Channel:
             current_source, last_seq, last_progress = None, None, time.monotonic()
             pending_discontinuity = False
             cached = {}
-            with ThreadPoolExecutor(max_workers=3) as pool:
-                while not self.stop.is_set():
-                    if not self.waiters and time.monotonic()-self.last_request > self.args.idle_timeout:
-                        self.state = 'idle'
-                        break
-                    if time.monotonic()-last_progress > 30:
-                        raise NativeError('source-media-stalled')
-                    try:
+            while not self.stop.is_set():
+                if not self.waiters and time.monotonic()-self.last_request > self.args.idle_timeout:
+                    self.state = 'idle'
+                    break
+                if time.monotonic()-last_progress > 30:
+                    raise NativeError('source-media-stalled')
+                try:
+                    initial_downloads = {}
+                    if preparation is not None:
+                        pending, preparation = preparation, None
+                        self.operation_phase(self.preparation_phase if self.preparation_phase != 'disabled' else 'source-api')
+                        try:
+                            prepared = pending.result()
+                        except Exception:
+                            self.operation_phase(self.preparation_phase)
+                            raise
+                        if prepared is None or self.stop.is_set():
+                            break
+                        entries, final, initial_downloads, refreshed, prepared_at = prepared
+                        pending = prepared = None
+                        url = final
+                        if time.monotonic()-prepared_at > 8:
+                            # A slow SDK initialization must not start playback
+                            # from an obsolete live window just to reuse work.
+                            for task in initial_downloads.values():
+                                task.cancel()
+                            initial_downloads = {}
+                            self.operation_phase('media-playlist')
+                            entries, final = media_playlist(url)
+                    else:
                         if url is None or time.monotonic()-refreshed > 120:
                             self.operation_phase('source-api')
                             url, refreshed = (source_url() if self.channel_id == 'cctv2' else source_url(self.channel_id)), time.monotonic()
@@ -516,99 +585,101 @@ class Channel:
                                 break
                         self.operation_phase('media-playlist')
                         entries, final = media_playlist(url)
+                    if self.stop.is_set():
+                        break
+                    self.playlist_entries = len(entries)
+                    # Resolve the master only once per source refresh.
+                    url = final
+                    self.requests += 1
+                    source = (urlsplit(final).hostname, urlsplit(final).path)
+                    changed = current_source is not None and source != current_source
+                    pending_discontinuity = pending_discontinuity or changed
+                    if source != current_source:
+                        last_seq, cached = None, {}
+                        current_source = source
+                    if last_seq is not None and entries[0]['seq'] > last_seq+1:
+                        # A live window can move past a slow download. Drop
+                        # that gap, then prove boundaries within the new
+                        # window; never join bytes across missing segments.
+                        self.source_gaps += 1
+                        last_seq, cached, pending_discontinuity = None, {}, True
+                    cached.update(initial_downloads)
+                    initial_downloads = {}
+                    wanted = [e for e in entries if last_seq is None or e['seq'] > last_seq][:3]
+                    for e in wanted:
+                        if e['seq'] not in cached:
+                            cached[e['seq']] = pool.submit(get, e['url'])
+                    for e, following in zip(wanted, wanted[1:]):
                         if self.stop.is_set():
                             break
-                        self.playlist_entries = len(entries)
-                        # Resolve the master only once per source refresh.
-                        url = final
-                        self.requests += 1
-                        source = (urlsplit(final).hostname, urlsplit(final).path)
-                        changed = current_source is not None and source != current_source
-                        pending_discontinuity = pending_discontinuity or changed
-                        if source != current_source:
-                            last_seq, cached = None, {}
-                            current_source = source
-                        if last_seq is not None and entries[0]['seq'] > last_seq+1:
-                            # A live window can move past a slow download. Drop
-                            # that gap, then prove boundaries within the new
-                            # window; never join bytes across missing segments.
-                            self.source_gaps += 1
-                            last_seq, cached, pending_discontinuity = None, {}, True
-                        wanted = [e for e in entries if last_seq is None or e['seq'] > last_seq][:3]
-                        for e in wanted:
-                            if e['seq'] not in cached:
-                                cached[e['seq']] = pool.submit(get, e['url'])
-                        for e, following in zip(wanted, wanted[1:]):
-                            if self.stop.is_set():
-                                break
-                            if following['seq'] != e['seq']+1 or following['discontinuity']:
-                                raise NativeError('source-boundary-not-proven')
-                            self.operation_phase('segment-download')
-                            raw = cached[e['seq']].result()[0]
-                            lookahead = cached[following['seq']].result()[0]
-                            if self.stop.is_set():
-                                break
-                            self.last_segment_bytes = len(raw)
-                            self.operation_phase('ts-analysis')
-                            analysis = inspect_ts(raw)
-                            if not boundary_proven_by(lookahead, program_number=analysis.program_number,
-                                                      video_pid=analysis.video_pid):
-                                raise NativeError('source-boundary-not-proven')
-                            # The lookahead proved the final boundary above. Only
-                            # its completeness bit changes; reuse the parsed TS.
-                            analysis = replace(analysis, nals=analysis.nals[:-1]+(
-                                replace(analysis.nals[-1], complete=True),))
-                            if self.stop.is_set():
-                                break
-                            self.operation_phase('sdk-transform')
-                            processed = engine.transform([analysis.nal_bytes(n) for n in analysis.nals])
-                            if self.stop.is_set():
-                                break
-                            converted = {n.payload_offset: value for n, value in zip(analysis.nals, processed)}
-                            self.operation_phase('ts-repack')
-                            output, _ = transform_pes_nals(raw, lambda n, _data: converted[n.payload_offset],
-                                                       nal_types=(1, 5, 7), final_nal_complete=True, _prepared=analysis)
-                            if self.stop.is_set():
-                                break
-                            self.publish(output, e, pending_discontinuity or e['discontinuity'])
-                            pending_discontinuity, last_seq, last_progress = False, e['seq'], time.monotonic()
+                        if following['seq'] != e['seq']+1 or following['discontinuity']:
+                            raise NativeError('source-boundary-not-proven')
+                        self.operation_phase('segment-download')
+                        raw = cached[e['seq']].result()[0]
+                        lookahead = cached[following['seq']].result()[0]
                         if self.stop.is_set():
                             break
-                        cached = {k:v for k,v in cached.items() if last_seq is None or k > last_seq}
-                        if time.monotonic()-last_progress > 30:
-                            raise NativeError('source-media-stalled')
-                        failures, self.last_transport_error = 0, ''
-                    except (HTTPError, URLError, TimeoutError, ConnectionError, IncompleteRead) as error:
-                        if isinstance(error, HTTPError):
-                            if error.code in (401, 403, 404):
-                                url = None
-                            elif error.code not in (408, 429) and not 500 <= error.code < 600:
-                                raise
-                        code = transport_error_code(error)
-                        self.transport_retries += 1
-                        self.last_transport_error = code
-                        print('[cctv-native] retry='+str(self.transport_retries)+' operation='+self.operation+' cause='+code, flush=True)
-                        failures += 1
-                        # A failed Future must be evicted or every subsequent
-                        # poll would replay the same exception without a GET.
-                        cached = {key: value for key, value in cached.items()
-                                  if not value.cancelled() and (not value.done() or value.exception() is None)}
-                        if time.monotonic()-last_progress > 30:
-                            raise NativeError('source-media-stalled') from None
-                        delay = min(4, 0.8 * 2**min(failures-1, 3))
-                        reason = getattr(error, 'reason', None)
-                        if (self.operation == 'source-api' and failures <= 2
-                                and isinstance(reason, ssl.SSLError)
-                                and getattr(reason, 'reason', None) == 'UNSAFE_LEGACY_RENEGOTIATION_DISABLED'):
-                            # Two short initial retries for this immediate handshake
-                            # failure; persistent failure still uses normal backoff
-                            # and the same no-progress deadline/certificate policy.
-                            delay = 0.15 * failures
-                        self.stop.wait(delay)
-                        continue
+                        self.last_segment_bytes = len(raw)
+                        self.operation_phase('ts-analysis')
+                        analysis = inspect_ts(raw)
+                        if not boundary_proven_by(lookahead, program_number=analysis.program_number,
+                                                  video_pid=analysis.video_pid):
+                            raise NativeError('source-boundary-not-proven')
+                        # The lookahead proved the final boundary above. Only
+                        # its completeness bit changes; reuse the parsed TS.
+                        analysis = replace(analysis, nals=analysis.nals[:-1]+(
+                            replace(analysis.nals[-1], complete=True),))
+                        if self.stop.is_set():
+                            break
+                        self.operation_phase('sdk-transform')
+                        processed = engine.transform([analysis.nal_bytes(n) for n in analysis.nals])
+                        if self.stop.is_set():
+                            break
+                        converted = {n.payload_offset: value for n, value in zip(analysis.nals, processed)}
+                        self.operation_phase('ts-repack')
+                        output, _ = transform_pes_nals(raw, lambda n, _data: converted[n.payload_offset],
+                                                   nal_types=(1, 5, 7), final_nal_complete=True, _prepared=analysis)
+                        if self.stop.is_set():
+                            break
+                        self.publish(output, e, pending_discontinuity or e['discontinuity'])
+                        pending_discontinuity, last_seq, last_progress = False, e['seq'], time.monotonic()
+                    if self.stop.is_set():
+                        break
+                    cached = {k:v for k,v in cached.items() if last_seq is None or k > last_seq}
                     if time.monotonic()-last_progress > 30:
                         raise NativeError('source-media-stalled')
-                    self.stop.wait(0.8)
+                    failures, self.last_transport_error = 0, ''
+                except (HTTPError, URLError, TimeoutError, ConnectionError, IncompleteRead) as error:
+                    if isinstance(error, HTTPError):
+                        if error.code in (401, 403, 404):
+                            url = None
+                        elif error.code not in (408, 429) and not 500 <= error.code < 600:
+                            raise
+                    code = transport_error_code(error)
+                    self.transport_retries += 1
+                    self.last_transport_error = code
+                    print('[cctv-native] retry='+str(self.transport_retries)+' operation='+self.operation+' cause='+code, flush=True)
+                    failures += 1
+                    # A failed Future must be evicted or every subsequent
+                    # poll would replay the same exception without a GET.
+                    cached = {key: value for key, value in cached.items()
+                              if not value.cancelled() and (not value.done() or value.exception() is None)}
+                    if time.monotonic()-last_progress > 30:
+                        raise NativeError('source-media-stalled') from None
+                    delay = min(4, 0.8 * 2**min(failures-1, 3))
+                    reason = getattr(error, 'reason', None)
+                    if (self.operation == 'source-api' and failures <= 2
+                            and isinstance(reason, ssl.SSLError)
+                            and getattr(reason, 'reason', None) == 'UNSAFE_LEGACY_RENEGOTIATION_DISABLED'):
+                        # Two short initial retries for this immediate handshake
+                        # failure; persistent failure still uses normal backoff
+                        # and the same no-progress deadline/certificate policy.
+                        delay = 0.15 * failures
+                    self.stop.wait(delay)
+                    continue
+                if time.monotonic()-last_progress > 30:
+                    raise NativeError('source-media-stalled')
+                self.stop.wait(0.8)
         except Exception as error:
             self.error = str(error) if isinstance(error, NativeError) else (
                 'transport-stream-unsupported' if isinstance(error, TSFormatError) else type(error).__name__)
@@ -616,6 +687,7 @@ class Channel:
             print('[cctv-native] '+self.error, flush=True)
             print('[cctv-native] diagnostics='+json.dumps(self.snapshot(), ensure_ascii=False), flush=True)
         finally:
+            cancel_preparation.set()
             if engine:
                 engine.close()
             with self.condition:
@@ -675,11 +747,13 @@ class Handler(BaseHTTPRequestHandler):
                 ch.waiters += 1
             try:
                 ch.demand()
+                ch.note_client_request('playlist_requested')
                 deadline = time.monotonic()+50
                 with ch.condition:
                     while time.monotonic() < deadline and not ch.stop.is_set():
                         body = ch.playlist()
                         if body:
+                            ch.note_client_request('playlist_available')
                             return self.send(200, body, 'application/vnd.apple.mpegurl')
                         if ch.state == 'error':
                             break
@@ -701,6 +775,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(410, 'expired-media')
             if self.command != 'HEAD':
                 ch.demand(start=False)
+                ch.note_client_request('first_media_requested')
             return self.send(200, item[0], 'video/mp2t')
         self.send(404, 'not-found')
 

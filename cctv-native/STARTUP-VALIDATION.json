@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-20",
+  "channel": "cctv2",
+  "environment": "Linux Python 3.12 / JavaScriptCoreGTK 2.54, current proxy network",
+  "order": "serial, parallel, parallel, serial",
+  "scope": "Fresh SDK context per trial; runtime bytes already in memory; first local HLS playlist response, followed by 8 seconds strict decode per trial. This does not measure APTV first visible frame.",
+  "limitations": "Four network-dependent samples, not a controlled estimate of speedup; no promise of fixed iPhone startup duration.",
+  "trials": [
+    {
+      "parallel": false,
+      "first_playlist_seconds": 12.234,
+      "media_ready_seconds": 12.216,
+      "first_media_requested": 12.299,
+      "decode_returncode": 0,
+      "decode_error_bytes": 0
+    },
+    {
+      "parallel": true,
+      "first_playlist_seconds": 6.319,
+      "media_ready_seconds": 6.316,
+      "first_media_requested": 6.391,
+      "decode_returncode": 0,
+      "decode_error_bytes": 0
+    },
+    {
+      "parallel": true,
+      "first_playlist_seconds": 5.722,
+      "media_ready_seconds": 5.72,
+      "first_media_requested": 5.781,
+      "decode_returncode": 0,
+      "decode_error_bytes": 0
+    },
+    {
+      "parallel": false,
+      "first_playlist_seconds": 6.409,
+      "media_ready_seconds": 6.407,
+      "first_media_requested": 6.488,
+      "decode_returncode": 0,
+      "decode_error_bytes": 0
+    }
+  ]
+}

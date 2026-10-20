@@ -420,6 +420,22 @@ class TestLocalHTTP(unittest.TestCase):
             self.assertTrue(self.channel.condition.wait_for(lambda: self.channel.waiters == 0, timeout=1))
         self.channel.demand.assert_called_once_with()
 
+    def test_client_timing_markers_skip_head_and_are_not_reset_by_polling(self):
+        self.ready()
+        self.request('GET','/cctv2.m3u8')
+        initial=dict(self.channel.timings)
+        current=f'/media/{self.channel.generation}/0.ts'
+        self.request('HEAD',current)
+        self.assertNotIn('first_media_requested',self.channel.timings)
+        self.request('GET',current)
+        first=self.channel.timings['first_media_requested']
+        self.assertGreaterEqual(first,initial['playlist_available'])
+        self.request('GET','/cctv2.m3u8')
+        self.request('GET',current)
+        self.assertEqual(self.channel.timings['first_media_requested'],first)
+        self.assertEqual(self.channel.timings['playlist_requested'],initial['playlist_requested'])
+        self.assertEqual(self.channel.timings['playlist_available'],initial['playlist_available'])
+
     def test_media_get_is_cached_head_has_no_demand_and_stale_entries_expire(self):
         self.ready()
         current = f"/media/{self.channel.generation}/0.ts"
