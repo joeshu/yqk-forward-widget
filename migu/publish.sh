@@ -4,12 +4,18 @@ set -euo pipefail
 
 migu_tested_sha="${GITHUB_SHA:-$(git rev-parse HEAD)}"
 git add -- migu.m3u8 migu-status.json
-while IFS= read -r -d '' migu_staged_path; do
+# Avoid process substitution: it is unavailable in some constrained shells
+# despite invoking this file through bash (notably iSH test environments).
+migu_staged_paths="$(git diff --cached --name-only)"
+while IFS= read -r migu_staged_path; do
+  [ -z "$migu_staged_path" ] && continue
   case "$migu_staged_path" in
     migu.m3u8|migu-status.json) ;;
     *) echo 'Refusing to publish unrelated staged files.'; exit 1 ;;
   esac
-done < <(git diff --cached --name-only -z)
+done <<EOF
+$migu_staged_paths
+EOF
 if git diff --cached --quiet; then
   echo 'No catalogue change.'
   exit 0

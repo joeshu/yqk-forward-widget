@@ -205,7 +205,10 @@ class NativeAuth:
     def load(cls, settings=None, environ=None):
         values = dict(NATIVE_SETTINGS if settings is None else settings)
         env = os.environ if environ is None else environ
-        for key, name in (("user_id", "MIGU_USER_ID"), ("user_token", "MIGU_USER_TOKEN")):
+        for key, name in (("user_id", "MIGU_USER_ID"), ("user_token", "MIGU_USER_TOKEN"),
+                          ("app_version", "MIGU_APP_VERSION"),
+                          ("client_channel", "MIGU_CLIENT_CHANNEL_ID"),
+                          ("app_code", "MIGU_APP_CODE")):
             if name in env:
                 values[key] = env[name]
         if set(values) != set(cls.__dataclass_fields__):
@@ -228,7 +231,7 @@ class NativeAuth:
             raise ValueError("MIGU_CREDENTIAL_PAIR_REQUIRED")
         if values['user_id'] and not re.fullmatch(r"[0-9]{4,32}", values['user_id']):
             raise ValueError("MIGU_USER_ID_INVALID")
-        if values['dd_suffix'] not in {"", "&sv=10004&ct=android"} or values['app_code'] not in {"", "miguvideo_default_android"}:
+        if values['dd_suffix'] not in {"", "&sv=10004&ct=android"} or values['app_code'] not in {"", "miguvideo_default_android", "miguvideo_android"}:
             raise ValueError("MIGU_CONFIG_PROTOCOL_INVALID")
         return cls(**values)
 
@@ -278,12 +281,14 @@ def native_play_url(pid, client_factory=m.HttpClient, auth=None):
             raise MiguApiError("MIGU_MEMBERSHIP_REQUIRED", details)
         if reason in {"NEED_LOGIN", "USER_NOT_LOGIN"}:
             raise MiguApiError("MIGU_LOGIN_REQUIRED", details)
-        if (body.get("auth") or {}).get("authResult") == "FAIL":
-            raise MiguApiError("MIGU_AUTHORIZATION_REJECTED", details)
+        auth_result = (body.get("auth") or {}).get("authResult")
         if str(data.get("code")) != "200":
             raise MiguApiError("MIGU_API_REJECTED", details)
         url = info.get("url")
         if not isinstance(url, str) or not url:
+            # No address and a failed authorization: report the real cause.
+            if auth_result == "FAIL":
+                raise MiguApiError("MIGU_AUTHORIZATION_REJECTED", details)
             raise MiguApiError("MIGU_PLAY_URL_MISSING", details)
         m.validate_url(url, "stream")
         content_pid = str((body.get("content") or {}).get("contId", pid))

@@ -62,17 +62,25 @@ class NativeTests(unittest.TestCase):
         with self.assertRaisesRegex(m.FetchError, 'MIGU_API_FORMAT_CHANGED'):
             n.native_play_url('608807420', factory)
 
-    def test_generic_authorization_failure_is_not_claimed_to_require_membership(self):
+    def test_guest_stream_with_address_is_served_and_failure_without_address_is_reported(self):
+        # The server may hand out a playable guest stream while authResult is FAIL;
+        # the address must be served, not discarded (reference behaviour).
         response=self.response('http://gslbmgsplive.miguvideo.com/live/index.m3u8?ddCalcu=private')
         response['body']['auth']={'authResult':'FAIL','logined':False,'resultDesc':'private description'}
         factory,_=self.api(response)
+        self.assertEqual(n.native_play_url('608807420',factory),'http://gslbmgsplive.miguvideo.com/live/index.m3u8?ddCalcu=private')
+
+        denied=self.response(None)
+        denied['code']='200'
+        denied['rid']='SUCCESS'
+        denied['body']={'auth':{'authResult':'FAIL','logined':False,'resultDesc':'private description'},'urlInfo':{},'content':{'contId':'608807420'}}
+        factory,_=self.api(denied)
         with self.assertRaises(n.MiguApiError) as caught:
             n.native_play_url('608807420',factory)
         self.assertEqual(str(caught.exception),'MIGU_AUTHORIZATION_REJECTED')
         details=caught.exception.details
         self.assertEqual(details['api_code'],'200')
-        self.assertTrue(details['has_play_url'])
-        self.assertFalse(details['logged_in'])
+        self.assertFalse(details['has_play_url'])
         self.assertNotIn('private',json.dumps(details))
 
     def test_negative_cache_keeps_safe_upstream_details(self):

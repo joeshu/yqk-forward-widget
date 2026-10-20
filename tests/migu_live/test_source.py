@@ -36,14 +36,32 @@ class SourceTests(unittest.TestCase):
         self.assertIn('token=source-private',store.resolve('p100'))
         self.assertEqual(client.get.call_args.args[0],p.LIST_SOURCES[0])
         self.assertEqual(client.get.call_count,1)
-        self.assertEqual(store.status()['source'],'github')
+        self.assertEqual(store.status()['source'],'upstream-http')
 
-    def test_stale_github_snapshot_falls_back_to_fresh_original_source(self):
+    def test_live_upstream_failure_falls_back_to_published_snapshot(self):
+        client=Mock();client.get.side_effect=[m.FetchError('NETWORK_ERROR'),(catalogue(),{})]
+        store=p.ListStore(client_factory=Mock(return_value=client),min_channels=1);self.addCleanup(store.close)
+        self.assertEqual(len(store.get(2).channels),2)
+        self.assertEqual(store.status()['source'],'github')
+        self.assertEqual([call.args[0] for call in client.get.call_args_list],list(p.LIST_SOURCES))
+
+    def test_stale_live_source_falls_back_to_published_snapshot(self):
         client=Mock();client.get.side_effect=[(catalogue(signed_at=m.utcnow()-timedelta(hours=13)),{}),(catalogue(),{})]
         store=p.ListStore(client_factory=Mock(return_value=client),min_channels=1);self.addCleanup(store.close)
         self.assertEqual(len(store.get(2).channels),2)
-        self.assertEqual(store.status()['source'],'upstream-http')
+        self.assertEqual(store.status()['source'],'github')
         self.assertEqual([call.args[0] for call in client.get.call_args_list],list(p.LIST_SOURCES))
+
+    def test_etag_304_reuses_only_validated_memory_snapshot(self):
+        now=[0]
+        client=Mock();client.get.side_effect=[(catalogue(),{'ETag':'"v1"'}),(None,{})]
+        store=p.ListStore(client_factory=Mock(return_value=client),min_channels=1,clock=lambda:now[0]);self.addCleanup(store.close)
+        first=store.get(2)
+        now[0]=61
+        self.assertIs(store.get(0),first);self.finish(store)
+        self.assertIs(store.get(0),first)
+        self.assertEqual(client.get.call_args_list[1].kwargs['headers'],{'If-None-Match':'"v1"'})
+        self.assertEqual(store.status()['catalogue_not_modified'],1)
 
     def test_parallel_subscriptions_share_one_fetch_and_refresh_failure_keeps_good_snapshot(self):
         now=[0];store,client=self.store(clock=lambda:now[0]);gate=threading.Event();entered=threading.Event()

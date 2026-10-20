@@ -12,9 +12,11 @@ from migu import core as m
 from migu.core import Channel, CHINA, MAX_BYTES, MAX_LINE, UpdateError, clean_text, validate_url, utcnow
 from migu.workers import BoundedExecutor
 
+# Prefer the live signed catalogue.  The repository copy is a validated fallback
+# when the upstream HTTP source is unavailable or fails freshness policy.
 LIST_SOURCES = (
-    'https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu.m3u8',
     'http://www.52top.com.cn:678/downloads/migu.txt',
+    'https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu.m3u8',
 )
 CATCHUP_SOURCE = '&playbackbegin=${(b)yyyyMMddHHmmss}&playbackend=${(e)yyyyMMddHHmmss}'
 EPG_ID_ALIASES = {'上视新闻综合': '上海新闻综合'}
@@ -179,13 +181,15 @@ class ListStore:
     provider = 'published-list'
 
     def __init__(self, source='auto', client_factory=m.HttpClient, clock=time.monotonic, min_channels=100):
-        self.sources = LIST_SOURCES if source=='auto' else (LIST_SOURCES[0 if source=='github' else 1],)
+        self.sources = LIST_SOURCES if source=='auto' else (LIST_SOURCES[1 if source=='github' else 0],)
         self.client_factory, self.clock, self.min_channels = client_factory, clock, min_channels
         self.lock = threading.RLock()
         self.pool = BoundedExecutor(1,thread_name_prefix='migu-list',max_pending=1)
         self.snapshot, self.future, self.closed = None,None,False
         self.fresh_until, self.retry_at, self.failures = 0,0,0
         self.last_error, self.updated, self.active_source = None,None,None
+        # Validators are process-memory only; signed media URLs are never persisted.
+        self.etags, self.not_modified = {}, 0
         self.fetches = 0
 
     def _usable(self):
@@ -206,10 +210,30 @@ class ListStore:
                 if self.closed:
                     return
                 try:
-                    raw,_ = self.client_factory('catalogue',attempts=1,timeout=5,budget=8).get(source,limit=m.MAX_BYTES)
+                    with self.lock:
+                        # A validator is usable only for the snapshot currently
+                        # served from that same source; a fallback snapshot must
+                        # never be treated as the body behind another source's 304.
+                        etag = self.etags.get(source, '') if self.active_source == ('upstream-http' if source == LIST_SOURCES[0] else 'github') else ''
+                    headers = {'If-None-Match': etag} if etag else None
+                    raw, response_headers = self.client_factory('catalogue',attempts=1,timeout=5,budget=8).get(source,headers=headers,limit=m.MAX_BYTES)
+                    if raw is None:
+                        # A 304 only proves the selected source is unchanged.  It is
+                        # safe only when the in-memory snapshot passed full validation.
+                        if previous is None:
+                            raise m.FetchError('LIST_UNEXPECTED_304')
+                        validate_list_candidate(previous.playlist,min_channels=self.min_channels)
+                        selected = previous
+                        with self.lock:
+                            self.not_modified += 1
+                        break
                     playlist=parse_source_list(raw)
                     validate_list_candidate(playlist,previous.playlist if previous else None,min_channels=self.min_channels)
                     selected=list_snapshot(playlist)
+                    returned_etag = response_headers.get('ETag', '')
+                    if returned_etag and len(returned_etag) <= 256 and '\r' not in returned_etag and '\n' not in returned_etag:
+                        with self.lock:
+                            self.etags[source] = returned_etag
                     break
                 except (ValueError,OSError) as failure:
                     error=str(failure) if isinstance(failure,m.UpdateError) else 'LIST_NETWORK_ERROR'
@@ -218,7 +242,7 @@ class ListStore:
             with self.lock:
                 if self.closed:return
                 self.snapshot=selected
-                self.active_source='github' if source==LIST_SOURCES[0] else 'upstream-http'
+                self.active_source='upstream-http' if source==LIST_SOURCES[0] else 'github'
                 self.fresh_until=self.clock()+60
                 self.retry_at,self.failures,self.last_error=0,0,None
                 self.updated=m.iso(m.utcnow())
@@ -257,8 +281,8 @@ class ListStore:
             ready=self._usable()
             return {'provider':self.provider,'catalogue_ready':ready,'channels':len(self.snapshot.channels) if ready else 0,
                     'refreshing':self.future is not None,'source':self.active_source,'updated_utc':self.updated,
-                    'last_error':self.last_error,'catalogue_refreshes':self.fetches,'playback_verified':False,
-                    'quality':'source-provided','storage':'memory'}
+                    'last_error':self.last_error,'catalogue_refreshes':self.fetches,'catalogue_not_modified':self.not_modified,
+                    'playback_verified':False,'quality':'source-provided','storage':'memory'}
 
     def close(self):
         with self.lock:self.closed=True

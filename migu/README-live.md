@@ -1,14 +1,14 @@
-# 咪咕单文件服务 0.6.1
+# 咪咕单文件服务 0.7.1
 
-下载 [migu-live-v0.6.1.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.6.1.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，仅需一个文件，无 pip、Node 或项目目录依赖。
+下载 [migu-live-v0.7.1.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.7.1.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，仅需一个文件，无 pip、Node 或项目目录依赖。
 
-**0.6.1 按需求改为默认内置频道、直接请求咪咕 API，不读取外部播放列表。结构与配置已完成，但尚未完成原生路径成功验播。** 本版已匹配原始列表全部 117 条播放地址的校验算法；直接取源请求在服务器仍返回 `COPYRIGHT_AREA_INVALID`，见 `live-validation-0.6.1.json`。0.5.0 的三频道解码成功记录属于发布列表路径，不能用来证明本版原生取源可播放。
+**0.7.0 保留默认的列表安全转发，并新增与公开参考实现对齐的 `--provider android` 客户端兼容模式。** 默认仍先读取实时上游 `migu.txt`，不可用、过期或校验失败时回退仓库中最近一次通过校验的快照；进程内用 `ETag` / `If-None-Match` 条件刷新，不把签名 URL 写入磁盘。`android` 模式按公开参考实现请求咪咕 playurl 接口、补 `ddCalcu` 与 `sv/ct` 后缀，支持游客或自己的账号（`MIGU_USER_ID` / `MIGU_USER_TOKEN`）；上游返回什么地区和权益，就如实返回什么，不做改区、换出口或会员伪装。
 
 ```sh
 python3 migu-live.py 18768
 ```
 
-手机 App 直接运行时默认端口也是 18768，日志显示 `provider=migu`。保持运行，在同一设备播放器订阅：
+手机 App 直接运行时默认端口也是 18768，日志显示 `provider=published-list`。保持运行，在同一设备播放器订阅：
 
 ```text
 http://127.0.0.1:18768/all.m3u
@@ -16,18 +16,111 @@ http://127.0.0.1:18768/all.m3u
 
 `/migu.m3u8` 是目录别名。App 挂起脚本或停止运行时，本地服务也会停止。
 
-## 不读取列表的播放路径
+## 默认列表播放路径
 
-文件已内置 123 个频道的 ProgramID、名称和分组。2026-10-19 对照原始列表的 117 个 ProgramID，全部已包含在内；没有内置该列表的临时签名或完整媒体 URL。
+实时列表含已签发的频道 URL，服务不解码、重排或本地续签其中的查询参数。首次订阅时加载目录，以 `ProgramID` 导出稳定的本地频道键；之后播放器访问固定本地入口，服务返回原始签名地址的 `302`。因此上游刷新签名或更新显示名后，播放器订阅地址不变。
 
-播放器打开固定本地频道入口后，服务按需执行：
+默认源优先级：
 
-1. 使用频道 ProgramID、当前时间及配置计算 API 请求签名。
-2. 直接向固定的咪咕 HTTPS 取源端点请求地址，可附带自己配置的账号授权。
-3. 检查接口状态、地区及登录/会员授权、频道 ID 和媒体域名。
-4. 上游已经给出完整地址则原文使用；否则按配置计算 `ddCalcu`，再返回播放地址。
+1. 实时原始列表 `http://www.52top.com.cn:678/downloads/migu.txt`；
+2. 仓库中最近一次校验通过的 `migu.m3u8` 快照（仅当实时源网络失败、过期或验证失败时使用）。
 
-8 路请求上限、同频道合并请求和短期内存缓存保留。默认不会因原生授权失败自动读取仓库或原始列表。旧列表模式仅通过显式 `--provider list` 使用；它不是本版原生取源验收结果。
+每次刷新都受频道数量、签名时间、频道保留率、可信域名/端口和重定向边界约束；保留有效内存快照并合并并发刷新。单文件在进程内保存来源 `ETag`，下一次刷新发送 `If-None-Match`；收到 `304` 时只复用仍通过完整校验的内存快照，不下载重复列表、不落盘签名 URL。默认不调用匿名咪咕 API，也不因为刷新失败返回未校验的新地址。
+
+## 可选 Android 客户端兼容模式
+
+`--provider android` 按公开参考实现 [`akiralereal/iptv` 的咪咕模块](https://github.com/akiralereal/iptv/tree/main/extractors/migu) 对齐实现，代码位于 `migu/android.py`：
+
+- 请求 `https://play.miguvideo.com/playurl/v1/play/playurl`，参数顺序为 `sign`、`rateType`、`contId`、`timestamp`、`salt`、`flvEnable`、`super4k`，随后按开关追加 `h265N`、`4kvivid/2Kvivid/vivid`；
+- 现代档位使用 `AppVersion 26000370` 与固定 `salt=1230024`；标清（`rateType=2`）走旧版 `2600034600` 与随机 8 位 salt；
+- 返回地址按参考规则补 `ddCalcu` 与 `&sv=10004&ct=android`，`puData` 逐字符处理，不做 URL 重编码；
+- `TIPS_NEED_MEMBER` 时按参考降一档重试一次，其次再降到高清；地区或版权拒绝如实上报，不重试、不改参数；
+- 同一频道成功缓存 3 小时、失败缓存 1 分钟，同频道并发合并，60 秒内超过 30 次解析返回 `MIGU_RESOLVE_BURST_LIMIT`，避免播放器批量扫描打到上游；
+- 默认“客户端就近取流”，把 GSLB 地址直接交给播放器，由观看设备选 CDN。
+
+可选配置：
+
+```sh
+MIGU_USER_ID=你的账号 MIGU_USER_TOKEN=你的令牌 MIGU_RATE_TYPE=3 \
+python3 migu-live.py 18768 --provider android
+```
+
+`MIGU_RATE_TYPE` 支持 2/3/4/7/8/9；`MIGU_HDR=0`、`MIGU_H265=0`、`MIGU_CLIENT_DISPATCH=0` 可关闭对应行为。凭据只进请求头，不会出现在订阅地址、状态或日志中；账号失效、会员不足、地区限制都按上游真实结果返回。
+
+2026-10-20 在本机网络实测该模式：请求按上述格式发出，上游返回 `rid=BLACK_APP_OR_TERMINAL`（映射为 `MIGU_TERMINAL_BLOCKED`），即咪咕拒绝当前声明的客户端/终端标识。CCTV1、CCTV3、东方卫视均返回同一 rid，说明是**客户端标识/出口层面**的整体拒绝，不是单个频道问题；CCTV5 另返回 `WUDALIANSAI_FUFEI_VERSION_UPGRADE`（映射为 `MIGU_CLIENT_VERSION_UPGRADE_REQUIRED`），属于上游要求客户端版本升级。
+
+可用的兼容项（默认值即上表；应填**你自己设备上官方商店版本**的真实值）：
+
+```sh
+MIGU_APP_VERSION=你的客户端版本号 \
+MIGU_APP_CODE=miguvideo_default_android \
+MIGU_CLIENT_CHANNEL_ID=你的客户端渠道标识 \
+python3 migu-live.py 18768 --provider android
+```
+
+这三项只用于让请求与你实际安装的官方客户端一致，不用于伪造成其他终端去换取放行；服务不会自动轮换标识试探。若改用自己网络与自有账号后仍返回 `BLACK_APP_OR_TERMINAL`，说明该出站网络或该客户端未被上游允许，应回到默认列表模式。是否可播需在你自己的网络与合法账号环境下验证。
+
+## 那条列表 URL 说明了什么
+
+对列表中任一地址（`puData` + `ddCalcu` + `timestamp` + `ProgramID`）做离线复算，可判定它由哪套客户端规则签发。本次实测：
+
+```text
+urls: 115
+legacy_rule_matches: 115
+modern_rule_matches: 0
+client_id_families: ['0116_2600000900']
+app_codes: ['miguvideo_android']
+```
+
+也就是说，列表里的地址全部由 **`2600000900` 系列旧版客户端规则**签发，与本项目 `--provider native` 使用的规则一致；`--provider android` 使用的 `26000370` 现代标识与它不同，因此被上游以 `BLACK_APP_OR_TERMINAL` 拒绝。
+
+由此可得出两点：
+
+1. 项目对这类 URL 的算法复现是正确的（115/115 匹配），问题不在 `ddCalcu` 实现；
+2. 列表能播是因为**发布者的出口、会话与账号已在签发时通过上游校验**，本项目复算只能验证结构，不能凭空获得同样的放行。
+
+离线核验单条或整份列表（不联网、不打印签名值）：
+
+```sh
+python3 -m migu.verify_url '<播放地址>'
+python3 -m migu.verify_url --file migu.m3u8
+```
+
+若确实要让 `--provider android` 与列表使用同一客户端家族，可显式对齐标识（仍需你的出口与账号被上游放行）：
+
+```sh
+MIGU_APP_VERSION=2600000900 \
+MIGU_CLIENT_CHANNEL_ID=0116_2600000900-99000-201600010010027 \
+MIGU_APP_CODE=miguvideo_android \
+python3 migu-live.py 18768 --provider android
+```
+
+### 方式 B 实测结果（0.7.1）
+
+把内置客户端渠道标识也对齐列表后，本机上游响应从地区拒绝变为正常签发：
+
+```text
+rid=SUCCESS  code=200  has_play_url=True  authResult=FAIL(guest)  rateType=2
+```
+
+`--provider native` 此前会因 `authResult=FAIL` 直接丢弃这个可播地址；本版已按参考实现修正：**只要返回了播放地址就转发**，仅在“授权失败且没有地址”时才报 `MIGU_AUTHORIZATION_REJECTED`。四个抽样频道（CCTV1、CCTV3、东方卫视、CCTV5）均能取得地址。
+
+本地服务实测：`/live/p608807420.m3u8` 返回 `302`，目标为咪咕 GSLB，再由 GSLB 跳 `bofang.miguvideo.net.cn`。本沙箱环境解析该调度域为 IPv6 私网/代理地址，无法完成第二跳；官方 App 通常可达。因此**能否出画面取决于你运行服务的网络**，代码侧链路已通。
+
+启动命令（可与列表模式共存）：
+
+```sh
+MIGU_APP_VERSION=2600000900 \
+MIGU_CLIENT_CHANNEL_ID=0116_2600000900-99000-201600010010027 \
+MIGU_APP_CODE=miguvideo_android \
+python3 migu-live.py 18768 --provider native
+```
+
+`MIGU_APP_VERSION`、`MIGU_CLIENT_CHANNEL_ID`、`MIGU_APP_CODE` 同时被 `--provider native` 与 `--provider android` 读取；填你自己环境的值，不要用于伪造成其他终端换取放行。
+
+## 可选原生 API 实验路径
+
+文件内置 123 个频道的 ProgramID、名称和分组。使用 `--provider native` 时，服务按频道 ID 和当前时间计算 API 请求签名、向固定 HTTPS 端点请求地址，并检查地区及账号授权后返回上游地址。该路径可配置自己的账号，但当前服务器验证记录为 `COPYRIGHT_AREA_INVALID`，未完成成功验播；它不应替代默认列表路径。
 
 ## 本轮取源研究结论
 
@@ -116,7 +209,7 @@ python3 migu-live.py 18768 --no-epg
 
 ## 直播行为和限制
 
-列表模式的频道、清晰度和可用性取决于上游列表及其地址。默认原生模式使用内置频道，默认匿名请求 `rateType=3`，也可配置自己的账号及请求画质。本服务不注册设备、不自动申请账号或会员权限；不会在原生模式被授权拒绝后静默改用列表。
+默认列表模式的频道、清晰度和可用性取决于上游已签发地址；每次目录刷新优先拉取实时原始列表，失败时才使用仓库快照。原生模式使用内置频道、默认匿名请求 `rateType=3`，可通过 `--provider native` 显式启用并配置自己的账号及请求画质；它当前没有成功验播记录。本服务不注册设备、不自动申请账号或会员权限，也不尝试伪造或延长第三方播放签名。
 
 原生模式同频道请求合并，成功地址缓存 30 秒、失败冷却 5 秒，最多 64 条；列表模式则统一共享一份频道目录，不为每个频道分别下载整份列表。媒体和 API 地址限制主机、端口、路径、重定向及响应大小；保留系统代理和 TLS 校验。
 

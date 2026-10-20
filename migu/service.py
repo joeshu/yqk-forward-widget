@@ -23,11 +23,12 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 from migu import core as m
 from migu.core import hls_references
 from migu.native import NativeStore
+from migu.android import AndroidStore
 from migu.source import ListStore, CATCHUP_SOURCE, list_catchup
 from migu.epg import EpgStore
 from migu.workers import BoundedExecutor
 
-VERSION = "0.6.1"
+VERSION = "0.7.1"
 DEFAULT_PORT = 18768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
@@ -39,6 +40,9 @@ EVENT_MESSAGES = {
     "MIGU_MEMBERSHIP_REQUIRED": "咪咕明确返回会员权限要求",
     "MIGU_API_FORMAT_CHANGED": "咪咕接口格式变化，需要更新适配",
     "MIGU_PLAY_URL_FORMAT_CHANGED": "播放地址格式变化，需要更新适配",
+    "MIGU_TERMINAL_BLOCKED": "咪咕拒绝当前客户端/终端标识，需上游确认该客户端是否仍被允许",
+    "MIGU_COPYRIGHT_SHIELD": "咪咕按节目版权临时屏蔽，节目结束后可能恢复",
+    "MIGU_RESOLVE_BURST_LIMIT": "解析请求过于密集，已暂停，稍后重试",
     "NETWORK_ERROR": "网络连接失败或请求超时",
     "TLS_ERROR": "TLS 证书校验失败",
     "EPG_LOADING": "节目单正在后台加载，请稍后刷新",
@@ -425,7 +429,7 @@ def main(argv=None):
     parser.add_argument("--data-dir", type=Path, help="Only needed for a persistent service access token")
     parser.add_argument("--token-env", help="Environment variable holding the service access token")
     parser.add_argument("--require-token", action="store_true")
-    parser.add_argument("--provider", choices=("list","native"), default="native", help="Default: built-in channels and direct API signing; list is an explicit legacy option")
+    parser.add_argument("--provider", choices=("list","native","android"), default="list", help="list: signed published catalogue (default); android: Android playurl compatibility mode; native: legacy API mode")
     parser.add_argument("--list-source", choices=("auto","github","upstream"), default="auto")
     parser.add_argument("--mode", choices=("redirect", "manifest"), default="redirect")
     parser.add_argument("--epg-cache", action="store_true", help="Persist valid programme schedules; fall back to memory if unavailable")
@@ -460,7 +464,12 @@ def main(argv=None):
             except (OSError, ValueError, ServiceError):
                 print("[节目单] 缓存目录不可写，继续使用内存模式。", flush=True)
         stage = "provider"
-        store = ListStore(args.list_source) if args.provider == "list" else NativeStore()
+        if args.provider == "list":
+            store = ListStore(args.list_source)
+        elif args.provider == "android":
+            store = AndroidStore()
+        else:
+            store = NativeStore()
         service = Service(store, token, base, args.mode, require_token=require_token, epg=EpgStore(enabled=not args.no_epg, cache_path=cache_path))
         previous_signal = None
         try:
