@@ -1,6 +1,6 @@
 # joeshu 影视组件合集
 
-新增 [CCTV 网页来源 Python 实验版](./cctv-web/README.md)：使用 CCTV-2 官方手机网页本身，电脑/服务器运行 `python cctv-web.py 18768`，订阅 `http://127.0.0.1:18768/all.m3u`。需要 Playwright、Chromium、FFmpeg，采用网页采集转码；仅 CCTV-2，720p 输出与 10 秒连续解码已实测，首次准备约 22–23 秒。它与下方央视频取源服务相互独立。
+新增 [CCTV-2 网页原分片实验版](./cctv-native/README.md)：使用指定央视网页来源，Python + Node 提供 `http://127.0.0.1:18768/all.m3u`，无需 Chromium、Playwright 或 FFmpeg。此前的 [浏览器采集转码版](./cctv-web/README.md) 独立保留；两版均仅提供 CCTV-2，与下方央视频服务来源不同。
 
 Python 央视订阅可使用仓库现有的 [ysp-live 单文件版](./ysp-live/README.md)：`python ysp-live-v9.5.19.py 18767 --bind 127.0.0.1 --no-4k --no-engine`，播放器订阅 `http://127.0.0.1:18767/all.m3u`。本轮 CCTV-2 分片实测为 1080p，严格解码通过；64 条配置未逐台验证，详见 [CCTV-2 实测与下载入口](./ysp-live/CCTV2-CHECK-2026-10-19.md)。
 
@@ -14,6 +14,12 @@ Python 央视订阅可使用仓库现有的 [ysp-live 单文件版](./ysp-live/R
 
 当前订阅包含18个独立模块，全部通过同一个Pages地址发布。聚爷爷影视已从订阅移除。版本见 [yqk.fwd](./yqk.fwd)，本轮逐项梳理见 [COLLECTION_REVIEW.md](./COLLECTION_REVIEW.md)。旧版验证记录和固定脚本继续保留，本轮片单检查以 `collection-validation.json` 为准。
 https://he2o.vercel.app/Resource/RexWidgets/sfw.fwd
+
+## CCTV-2 原分片订阅实验版
+
+新增 [cctv-native](./cctv-native/README.md)：使用 CCTV-2 官方手机网页对应来源，由 Python 提供订阅、Node 运行固定版本的原样官方组件，再重组原 TS 分片供播放器解码。无需 Chromium、Playwright 或 FFmpeg，仍需 Python 3.10+、Node.js 20+ 和 npm；只支持 CCTV-2，不替换成央视频来源。
+
+下载根目录单文件 [cctv-native.py](./cctv-native.py)，首次执行 `python cctv-native.py --setup`，之后执行 `python cctv-native.py 18768 --warmup`，订阅 `http://127.0.0.1:18768/all.m3u`。与旧 `cctv-web.py` 不要同时占用 18768 端口。当前为实验版，其他网络及用户播放器仍需验收；具体证据见 [验证记录](./cctv-native/VALIDATION.md)。
 
 ## CatPaw 0.7.0 的六源 Forward 移植
 
