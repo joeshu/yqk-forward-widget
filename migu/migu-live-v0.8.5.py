@@ -99,8 +99,8 @@ def validate_url(url, role):
         raise UpdateError("URL_SCHEME_OR_AUTHORITY")
     if role == "catalogue":
         allowed = url in {
-            "https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu.m3u8",
-            "http://www.52top.com.cn:678/downloads/migu.txt",
+            " ",
+            " ",
         }
     elif role == "epg":
         allowed = parts.scheme == "https" and host == "program-sc.miguvideo.com" and port in {None, 443} and re.fullmatch(r"/live/v2/tv-programs-data/[0-9]{6,20}/[0-9]{8}", parts.path) is not None and not parts.query
