@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INPUTS = ('migu/core.py', 'migu/workers.py', 'migu/native.py', 'migu/android.py', 'migu/source.py', 'migu/epg.py', 'migu/service.py')
-VERSION = '0.8.6'
+VERSION = '0.8.7'
 
 
 def strip_module(text):

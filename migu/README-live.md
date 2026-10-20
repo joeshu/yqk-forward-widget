@@ -1,6 +1,6 @@
-# 咪咕单文件服务 0.8.6
+# 咪咕单文件服务 0.8.7
 
-下载 [migu-live-v0.8.6.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.8.6.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，标准库，无 pip、Node、浏览器或项目目录依赖。
+下载 [migu-live-v0.8.7.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu/migu-live-v0.8.7.py)，或更新根目录 [migu-live.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/migu-live.py)。Python 3.10+，标准库，无 pip、Node、浏览器或项目目录依赖。
 
 **默认直接按公开参考项目的取源分支请求咪咕，不读取外部播放列表，也不会在取源失败时自动切换列表。** 用户已反馈 iOS 可播，0.8.4 针对快速切台的排队及临时失败恢复进行优化。此前 0.8.1 服务器的地区拒绝仅代表当时服务器环境，记录见 [live-validation-0.8.1.json](live-validation-0.8.1.json)。
 
@@ -8,7 +8,7 @@
 python3 migu-live.py 28768
 ```
 
-0.8.5 将默认端口改为 28768。手机 App 直接运行同样默认端口 28768。日志应显示 `0.8.6`、`provider=migu-android`。保持脚本运行，在同一设备播放器订阅：
+0.8.5 将默认端口改为 28768。手机 App 直接运行同样默认端口 28768。日志应显示 `0.8.7`、`provider=migu-android`。保持脚本运行，在同一设备播放器订阅：
 
 ```text
 http://127.0.0.1:28768/all.m3u
@@ -50,13 +50,13 @@ python3 migu-live.py 28768
 
 默认将 GSLB 地址交给观看设备，由观看设备选择 CDN，不在服务器预先固定 CDN 节点。不支持服务端节点解析开关，设置 `MIGU_CLIENT_DISPATCH=0` 会明确报错，避免此前选项存在但未生效的问题。
 
-## 0.8.6 单文件审核
+## 0.8.7 单文件审核
 
 取消的排队任务现在立即释放实际队列位置，下一次提交也会清理已取消任务；不改变有效任务的 FIFO/LIFO 顺序、8 路执行上限或同频道共享请求。
 
 接口未提供登录状态时保留此前明确的登录判断；`credential_state` 表示最近一次已知结论，实时响应见 `upstream_observation`，不能将缺失字段理解为账号状态发生变化。非字符串错误码明确报告接口格式变化。
 
-你在 0.8.5 下载文件中清空的外部列表地址已作为新构建策略保留。**0.8.6 单文件不再嵌入这两个列表 URL**；根目录入口与版本文件由相同源码构建并记录指纹。`--provider list` 返回 `LIST_PROVIDER_DISABLED`，不会尝试请求空地址。历史版本中用户的修改没有覆盖。
+你在 0.8.5 下载文件中清空的外部列表地址已作为新构建策略保留。**0.8.7 单文件不再嵌入这两个列表 URL**；根目录入口与版本文件由相同源码构建并记录指纹。`--provider list` 返回 `LIST_PROVIDER_DISABLED`，不会尝试请求空地址。历史版本中用户的修改没有覆盖。
 
 默认 Android 模式使用内置频道；仍可显式选择旧版实验取源：
 
@@ -64,7 +64,7 @@ python3 migu-live.py 28768
 python3 migu-live.py 28768 --provider native
 ```
 
-更多审核依据见 [audit-notes-0.8.6.md](audit-notes-0.8.6.md)。
+更多审核依据见 [audit-notes-0.8.7.md](audit-notes-0.8.7.md)。
 
 ## 0.8.4：快速切台
 
@@ -139,3 +139,13 @@ node migu/capture_reference.cjs /path/to/iptv > tests/migu_live/reference_cases.
 ```
 
 工具只加载已审阅且源文件哈希匹配的两份协议代码，使用合成账号、固定时间和模拟响应，不调用网络、不读取参考项目账号配置。参考源码变化时会拒绝执行，需先人工重新审阅。
+
+## 0.8.7 手机抓包复核
+
+手机样本中的 CCTV5 清单使用 H.265，包含三个各 6 秒分片；没有分辨率字段，也没有播放鉴权 API 响应。不能据此推断游客可获 1080P。继续保留默认 H.265、档位 3 和直接重定向，避免为诊断额外请求清单或视频分片。不复制 iOS 的账号 Cookie、设备标识、临时签名，也不将 Android 协议的 `ct` 强改成 iOS。
+
+修复清单模式中行首尾空白与校验器处理不一致的问题，确保相对分片和密钥地址正确改写；签名查询字节、全部分片、序号及时间线保持不变。不裁剪三个分片的直播窗口，不注入强制起播点。
+
+`--mode manifest` 下，`/diag` 的 `status.manifest`（以及 `/status` 的 `manifest`）记录最近一次已获取清单的耗时、分片数、窗口长度、目标分片时长和观测年龄。不保存完整地址或密钥，不测量解码分辨率。默认重定向模式未抓取清单时，该观测为空。窗口长度不是实测播放延迟，master 清单也不代表已读取子清单。这些统计不会增加网络请求。
+
+原始 HAR 含账号令牌与播放授权地址，不随项目发布。本轮使用脱敏合成清单验证，不宣称完成手机实播或高清权限验收。

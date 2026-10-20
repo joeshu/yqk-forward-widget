@@ -159,6 +159,31 @@ class ManifestTests(unittest.TestCase):
             self.assertIn(marker, result)
         self.assertIn(b'URI="https://hlszymgsplive.miguvideo.com/a/key.bin"', result)
 
+    def test_phone_style_three_segment_window_preserves_timeline_and_padding(self):
+        raw = (b'#EXTM3U\n  #EXT-X-TARGETDURATION:6  \n'
+               b' #EXT-X-KEY:METHOD=AES-128,URI="key.bin?sig=a%2Bb" \n'
+               b'#EXT-X-MEDIA-SEQUENCE:42\n' +
+               b''.join(b' #EXTINF:6.000000, \n segment%d.ts?sig=a%%2Bb \n' % i for i in range(3)))
+        class Client:
+            last_url = 'https://mgsp-cty2.live.miguvideo.com/live/index.m3u8?secret=private'
+            def get(self, url, limit):
+                return raw, None
+        cache = current.ManifestCache(client_factory=lambda *args, **kwargs: Client())
+        self.addCleanup(cache.close)
+        self.assertIsNone(cache.status()['last_observation'])
+        data = cache.get(Client.last_url)
+        self.assertEqual(data.count(b'#EXTINF:'), 3)
+        self.assertIn(b'#EXT-X-MEDIA-SEQUENCE:42', data)
+        self.assertIn(b'URI="https://mgsp-cty2.live.miguvideo.com/live/key.bin?sig=a%2Bb"', data)
+        self.assertIn(b'https://mgsp-cty2.live.miguvideo.com/live/segment2.ts?sig=a%2Bb', data)
+        observed = cache.status()['last_observation']
+        self.assertEqual(observed['window_seconds'], 18)
+        self.assertEqual(observed['target_duration_seconds'], 6)
+        self.assertFalse(observed['endlist'])
+        self.assertNotIn('private', json.dumps(cache.status()))
+        self.assertNotIn('miguvideo', json.dumps(cache.status()))
+        self.assertFalse(cache.status()['resolution_verified'])
+
     def test_unsafe_key_uri_and_html_are_rejected(self):
         raw = b'#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-KEY:METHOD=AES-128,URI="http://127.0.0.1/private"\n#EXTINF:6,\nsegment.ts\n'
         for body in (raw, b'<html>error</html>'):

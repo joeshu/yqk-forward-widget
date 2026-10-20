@@ -28,7 +28,7 @@ from migu.source import ListStore, CATCHUP_SOURCE, list_catchup
 from migu.epg import EpgStore
 from migu.workers import BoundedExecutor
 
-VERSION = "0.8.6"
+VERSION = "0.8.7"
 DEFAULT_PORT = 28768
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 EVENT_MESSAGES = {
@@ -130,6 +130,7 @@ def rewrite_manifest(raw, final_url):
 
     lines = []
     for line in text.splitlines():
+        line = line.strip()  # Match the validator; padded tags must not become media URLs.
         if line and not line.startswith("#"):
             line = absolute(line)
         elif line.startswith("#"):
@@ -138,20 +139,36 @@ def rewrite_manifest(raw, final_url):
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 class ManifestCache:
-    """At most four fetches/eight pending keys; bounded shared results and failures."""
+    """At most eight in-flight keys; bounded shared results and failures."""
     def __init__(self, client_factory=m.HttpClient, clock=time.monotonic):
         self.client_factory, self.clock = client_factory, clock
         self.lock = threading.RLock()
         self.pool = BoundedExecutor(max_workers=8, thread_name_prefix="migu-manifest")
         self.flights, self.entries = {}, OrderedDict()
         self.closed, self.bytes, self.fetches = False, 0, 0
+        self.last_observation = None
 
     def _fetch(self, url):
+        started = self.clock()
         client = self.client_factory("media", attempts=1, timeout=8, budget=12)
         raw, _ = client.get(url, limit=512 * 1024)
         if raw is None:
             raise ServiceError("UPSTREAM_UNEXPECTED_304", 502)
-        return rewrite_manifest(raw, client.last_url)
+        data = rewrite_manifest(raw, client.last_url)
+        lines = data.decode("utf-8").splitlines()
+        durations = [float(line[8:].split(",", 1)[0]) for line in lines if line.startswith("#EXTINF:")]
+        # Only aggregate validated media data. Never retain URLs, keys or account headers.
+        observation = {"kind": "media" if durations else "master",
+            "fetch_ms": max(0, round((self.clock() - started) * 1000)),
+            "segment_count": len(durations),
+            "window_seconds": round(sum(durations), 3) if durations and sum(durations) < float("inf") else None,
+            "target_duration_seconds": next((int(line.split(":", 1)[1]) for line in lines
+                if re.fullmatch(r"#EXT-X-TARGETDURATION:[1-9]\d{0,5}", line)), None),
+            "endlist": "#EXT-X-ENDLIST" in lines}
+        with self.lock:
+            if not self.closed:
+                self.last_observation = (self.clock(), observation)
+        return data
 
     def _finish(self, key, future):
         try:
@@ -202,6 +219,14 @@ class ManifestCache:
         if error:
             raise ServiceError(error, 502)
         return data
+
+    def status(self):
+        with self.lock:
+            observed = self.last_observation
+            return {"fetches": self.fetches, "inflight": len(self.flights),
+                "last_observation": ({**observed[1], "age_seconds": max(0, round(self.clock() - observed[0], 1))}
+                    if observed else None),
+                "window_is_playback_latency": False, "resolution_verified": False}
 
     def close(self):
         with self.lock:
@@ -294,10 +319,10 @@ class Handler(BaseHTTPRequestHandler):
                 raise ServiceError("AUTH_REQUIRED", 401)
             if parts.path == "/diag":
                 self.send_body(200, m.json_bytes({"service": "migu-live", "version": VERSION,
-                    "runtime": service.runtime, "status": {**service.store.status(), "epg": service.epg.status()}, "events": service.diagnostics.snapshot()}))
+                    "runtime": service.runtime, "status": {**service.store.status(), "epg": service.epg.status(), "manifest": service.manifests.status()}, "events": service.diagnostics.snapshot()}))
                 return
             if parts.path in {"/", "/health", "/status"}:
-                self.send_body(200, m.json_bytes({"service": "migu-live", "version": VERSION, "process_up": True, "mode": service.mode, "runtime": service.runtime, **service.store.status(), "epg": service.epg.status()}))
+                self.send_body(200, m.json_bytes({"service": "migu-live", "version": VERSION, "process_up": True, "mode": service.mode, "runtime": service.runtime, **service.store.status(), "epg": service.epg.status(), "manifest": service.manifests.status()}))
                 return
             if parts.path == "/epg.xml":
                 self.send_body(200, service.epg.get(), "application/xml; charset=utf-8")
