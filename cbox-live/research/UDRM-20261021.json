@@ -1,0 +1,202 @@
+{
+  "date": "2026-10-21",
+  "app_udrm_resolved": false,
+  "user_observation": "Original iOS CCTV App picture and audio normal during capture; exact iOS App version not supplied.",
+  "captures": {
+    "152053": {
+      "entries": 683,
+      "playlist_requests": 24,
+      "ts_requests": 0
+    },
+    "153830": {
+      "entries": 866,
+      "playlist_requests": 47,
+      "ts_requests": 55
+    }
+  },
+  "continuous_same_source_samples": {
+    "cctv7": {
+      "bytes": 854460,
+      "packets": 4545,
+      "tei_packets": 0,
+      "scrambled_packets": 0,
+      "continuity_errors": 0,
+      "duplicate_packets": 0,
+      "pid_packets": {
+        "0": 3,
+        "4097": 3,
+        "257": 1106,
+        "256": 3433
+      },
+      "error_lines": 282,
+      "output_frames": "300",
+      "output_time": "00:00:12.000000",
+      "exit": 0
+    },
+    "cctv1": {
+      "bytes": 1095664,
+      "packets": 5828,
+      "tei_packets": 0,
+      "scrambled_packets": 0,
+      "continuity_errors": 0,
+      "duplicate_packets": 4,
+      "pid_packets": {
+        "0": 3,
+        "4097": 3,
+        "256": 4529,
+        "257": 1293
+      },
+      "error_lines": 271,
+      "output_frames": "300",
+      "output_time": "00:00:12.000000",
+      "exit": 0
+    },
+    "guizhou": {
+      "bytes": 4825396,
+      "packets": 25667,
+      "tei_packets": 0,
+      "scrambled_packets": 0,
+      "continuity_errors": 0,
+      "duplicate_packets": 8,
+      "pid_packets": {
+        "0": 5,
+        "4097": 5,
+        "256": 23597,
+        "257": 2060
+      },
+      "error_lines": 0,
+      "output_frames": "500",
+      "output_time": "00:00:20.000000",
+      "exit": 0
+    }
+  },
+  "private_video_nal": {
+    "cctv1": {
+      "nal_type": 24,
+      "count": 300,
+      "length_bytes": 167,
+      "variable_byte_positions": 20,
+      "remove_private_nal_error_lines": 271
+    },
+    "cctv7": {
+      "nal_type": 24,
+      "count": 300,
+      "length_bytes": 167,
+      "variable_byte_positions": 20,
+      "remove_private_nal_error_lines": 282
+    },
+    "guizhou": {
+      "nal_type24_count": 0
+    },
+    "meaning_of_variable_bytes": "undetermined"
+  },
+  "web_worker": {
+    "url": "https://js.player.cntv.cn/creator/live.worker.js",
+    "sha256": "ad9fd2d188015074e59632cedecf13eda29f2c76ea92f17b5f00bc799451bc13",
+    "results": [
+      {
+        "channel": "guizhou",
+        "changed_nals": 0,
+        "selected_nals": 510,
+        "error_lines": 0,
+        "exit": 0
+      },
+      {
+        "channel": "cctv7",
+        "changed_nals": 0,
+        "selected_nals": 306,
+        "error_lines": 282,
+        "exit": 0
+      },
+      {
+        "channel": "cctv1",
+        "changed_nals": 0,
+        "selected_nals": 306,
+        "error_lines": 271,
+        "exit": 0
+      }
+    ],
+    "limitation": "Existing official web invocation path did not process these App NALs. This does not test every SDK API."
+  },
+  "app_license_config": {
+    "har_entry": 55,
+    "source": "https://cbox.cctv.com/app/online/801/iosmainconfig/index.json",
+    "primary": "https://drm.live.cntv.cn:444/udrm/udmCNTVGetLicense",
+    "secondary": "https://cdrm.live.cntv.cn/udrm/udmCNTVGetLicense",
+    "empty_get_probe": {
+      "http_status": 200,
+      "body": "[UDRM] udrmCNTVGetLicense recv data is null",
+      "license_obtained": false
+    },
+    "captured_license_host_requests": 0
+  },
+  "official_android_apk": {
+    "url": "https://download.cntv.cn/app/cntv/cbox_7.9.31_release_androidguanwang.apk",
+    "version": "7.9.31",
+    "bytes": 49271128,
+    "sha256": "f6c8bde63f14b3bffb57d1e838a71e80e85abf5cbe4717b983aa787134324d75",
+    "analysis": "static only; package not executed or redistributed",
+    "library": "lib/arm64-v8a/libudrm.so",
+    "format": "Android AArch64 ELF",
+    "dependencies": [
+      "liblog.so",
+      "libm.so",
+      "libdl.so",
+      "libc.so"
+    ],
+    "native_parameter_names": {
+      "Java_cn_cntv_drm_Drm_nativeDecrypt": [
+        "env",
+        "thiz",
+        "buffer",
+        "len"
+      ],
+      "Java_cn_cntv_drm_Drm_nativeInitSdk": [
+        "env",
+        "thiz",
+        "content_id",
+        "drm_url",
+        "version",
+        "mac",
+        "isLocal"
+      ],
+      "Java_cn_cntv_drm_Drm_nativeLicensePath": [
+        "env",
+        "thiz",
+        "path",
+        "mac"
+      ],
+      "Java_cn_cntv_drm_Drm_nativeDeleteContentId": [
+        "env",
+        "thiz",
+        "content_id"
+      ],
+      "UDRM32_DecryptSample": [
+        "drmSessionHandle",
+        "pkt_data",
+        "pkt_size",
+        "out_size",
+        "flag"
+      ],
+      "UDRM32_GetCheckRightsRequest": [
+        "drmSessionHandle",
+        "ContentID",
+        "ucVer",
+        "ucMAC",
+        "reqbuff",
+        "reqlen"
+      ],
+      "UDRM32_ProvideCheckRightsResponse": [
+        "drmSessionHandle",
+        "reponseStr"
+      ]
+    },
+    "ios_compatibility_verified": false
+  },
+  "delivery": {
+    "production_script_changed": false,
+    "runtime_har_dependency_added": false,
+    "captured_credentials_replayed": false,
+    "device_keys_requested": false
+  }
+}

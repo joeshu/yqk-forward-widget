@@ -49,6 +49,9 @@ http://127.0.0.1:8767/aptv-epg.xml.gz
 
 原 App 的 `request_generation` 为 `APP_SIGNER_NOT_IMPLEMENTED`，`video_processing` 为 `UDRM_NOT_IMPLEMENTED`。`CORE_B85` 是网页处理核心，不代表原 App 已实现；网页签名常量也不能直接当作 App 签名算法使用。
 
+
+最新原 App UDRM 离线研究见 [2026-10-21 研究记录](research/UDRM-20261021.md)：已定位 App 配置中的公开许可入口和官方 Android 原生处理接口，iOS APTV 的原 App UDRM 仍未实现。
+
 ## 切台与诊断
 
 央视频首选清单超过 0.65 秒仍未完成时，才尝试一个官方备用，使用先成功的有效结果。清单单请求超时默认 3 秒；短缓存、票据续期、已观察分片窗口与观看期间共享刷新保留。实际出画面时间还受官方 CDN、网络和播放器缓冲影响。
