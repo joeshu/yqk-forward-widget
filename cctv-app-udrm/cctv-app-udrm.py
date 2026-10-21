@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.2.1: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.2.2: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -166,6 +166,7 @@ JS_SOURCES = {
         '   }\n'
         "   case 'inet_ntop':{if(a[0]!==2)throw Error('unsupported native IP family');const text=Array.from(this.read(a[1],4)).join('.');if(a[3]<text.length+1){this.write32(this.errno,28);return 0;}const bytes=new Uint8Array(text.length+1);for(let i=0;i<text.length;i++)bytes[i]=text.charCodeAt(i);this.write(a[2],bytes);return a[2];}\n"
         "   case 'inet_addr':{const parts=this.string(a[0]).split('.').map(Number);if(parts.length!==4||parts.some(v=>!Number.isInteger(v)||v<0||v>255))return 0xffffffff;return (parts[0]+parts[1]*256+parts[2]*65536+parts[3]*16777216)>>>0;}\n"
+        "   case 'usleep':return this.hostCall(name,[a[0]>>>0]);\n"
         "   case 'socket':case 'connect':case 'send':case 'sendto':case 'recv':case 'recvfrom':case 'setsockopt':case 'getsockopt':case 'getsockname':case 'getpeername':case 'shutdown':return this.hostCall(name,a);\n"
         "   case 'poll':{let ready=0,all=true;for(let i=0;i<a[1];i++){const fd=this.read32(a[0]+i*8);if(!this.files.has(fd)){all=false;break;}}if(!all)return this.hostCall(name,a);for(let i=0;i<a[1];i++){const p=a[0]+i*8,b=this.read(p,8),view=new DataView(b.buffer);const events=view.getInt16(4,true);const result=events&1;view.setInt16(6,result,true);this.write(p,b);if(result)ready++;}return ready;}\n"
         "   case 'fcntl':if(this.files.has(a[0]))return 0;return this.hostCall(name,a);\n"
@@ -513,7 +514,7 @@ PYTHON_SOURCES = {
         '\n'
         'def _get_sdk_range(progress):\n'
         '    end=SDK_OFFSET+SDK_COMPRESSED_SIZE-1\n'
-        "    request=Request(APK_URL,headers={'User-Agent':'cctv-app-udrm/0.2.1',\n"
+        "    request=Request(APK_URL,headers={'User-Agent':'cctv-app-udrm/0.2.2',\n"
         "        'Accept-Encoding':'identity','Range':f'bytes={SDK_OFFSET}-{end}'})\n"
         '    try:\n'
         '        response=urlopen(request,timeout=30)\n'
@@ -593,7 +594,7 @@ PYTHON_SOURCES = {
         '\n'
         'def _get(url,limit,progress,label):\n'
         '    try:\n'
-        "        request=Request(url,headers={'User-Agent':'cctv-app-udrm/0.2.1','Accept-Encoding':'identity'})\n"
+        "        request=Request(url,headers={'User-Agent':'cctv-app-udrm/0.2.2','Accept-Encoding':'identity'})\n"
         '        with urlopen(request,timeout=30) as response:\n'
         "            if response.status!=200 or not response.geturl().startswith('https://'):raise BootstrapError('下载未返回有效HTTPS响应')\n"
         '            chunks=[];n=0;announced=0\n'
@@ -675,7 +676,14 @@ PYTHON_SOURCES = {
         "  fd=struct.unpack('<i',struct.pack('<I',a[0]&0xffffffff))[0]\n"
         "  reply={'result':0,'writes':[]}\n"
         '  try:\n'
-        "   if name=='socket':\n"
+        "   if name=='usleep':\n"
+        '    # Real host wait yields the GIL, allowing the loopback licensing server to run.\n'
+        '    # Never busy-wait or report success without honoring the requested duration.\n'
+        '    micros=a[0]\n'
+        '    if not isinstance(micros,int) or not 0<=micros<=30000000:\n'
+        "     raise OSError(errno.EINVAL,'SDK sleep exceeds operation budget')\n"
+        '    time.sleep(micros/1000000)\n'
+        "   elif name=='socket':\n"
         "    if a[0]!=2 or a[1]&15!=1:raise OSError(errno.EAFNOSUPPORT,'Only loopback IPv4 TCP')\n"
         '    sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM);sock.settimeout(15)\n'
         "    fd=self.sequence;self.sequence+=1;self.sockets[fd]=sock;reply['result']=fd\n"
@@ -1320,7 +1328,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.2.1'\n"
+        "VERSION = '0.2.2'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'DEFAULTS = {\n'
         " 'cctv1': ('CCTV-1 综合', 'https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8'),\n"

@@ -1,0 +1,58 @@
+{
+  "version": "0.2.2",
+  "recorded_at_utc": "2026-10-21T16:03:12.052532+00:00",
+  "iphone_aptv_device_tested": false,
+  "user_device_evidence": "v0.2.1: JavaScriptCore/WebAssembly preflight passed; SDK cached hash verified; initialization failed with unsupported libc import usleep",
+  "change": "usleep unsigned 32-bit microseconds -> yielding Python time.sleep -> ARM64 continuation; EINTR/EINVAL propagated; max individual wait 30 seconds",
+  "regressions_passed": 21,
+  "final_artifact_forced_native_wait_and_media": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 5.635
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.799
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.613
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "forced_native_usleep_probes": [
+      {
+        "microseconds": 20000,
+        "result": 0,
+        "elapsed_seconds": 0.0236
+      }
+    ],
+    "wall_seconds": 8.045,
+    "script_sha256": "38b94d5a453645e5856d47a4a271ac187cc8343ef1e8b77dd1c0a2eb9a68d595"
+  }
+}
