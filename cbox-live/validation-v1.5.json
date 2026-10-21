@@ -1,0 +1,156 @@
+{
+  "version": "1.5.0",
+  "created_at_utc": "2026-10-21T00:13:54.630535+00:00",
+  "sha256": "329f87c08a80263842c56586909a7aababb146c0ec03fe0a7ca3c94c3f5101e5",
+  "tests": {
+    "passed": true,
+    "count": 93,
+    "command": "python -m unittest -q test_cbox_v15 test_cbox_v14 test_cbox_v13 test_cbox_v12 test_cbox_v11"
+  },
+  "catalogue": {
+    "aptv_channels": 85,
+    "original_61_preserved": true,
+    "new_distinct_channel_entries": 24,
+    "combined_source_entries": 134,
+    "reference_configuration_entries": 776,
+    "reference_configuration_is_not_playable_count": true
+  },
+  "dependencies": {
+    "yangshipin": "Python 3.10+ standard library only",
+    "web_cdrm": "optional Node.js 18+",
+    "diagnostics": "optional FFmpeg"
+  },
+  "signature_parity": {
+    "matches_original_js": true,
+    "vector_file": "ysp-signer-vector.json",
+    "random_byte": 58
+  },
+  "python_only_live_test": {
+    "node_visible_to_service": false,
+    "web_core": "CDRM_NODE_MISSING",
+    "subscriptions": {
+      "/aptv.m3u": 85,
+      "/combined.m3u": 134,
+      "/web/all.m3u": 61,
+      "/app/all.m3u": 61
+    },
+    "playback_tests": [
+      {
+        "channel": "cctv1",
+        "source": "ysp",
+        "segments": 3,
+        "bytes": 5802620,
+        "ffmpeg_exit": 0,
+        "error_lines": 0,
+        "passed": true,
+        "diagnostics": []
+      },
+      {
+        "channel": "cctv13",
+        "source": "ysp",
+        "segments": 3,
+        "bytes": 5804688,
+        "ffmpeg_exit": 0,
+        "error_lines": 0,
+        "passed": true,
+        "diagnostics": []
+      },
+      {
+        "channel": "ysp-hnws",
+        "source": "ysp",
+        "segments": 3,
+        "bytes": 5870676,
+        "ffmpeg_exit": 0,
+        "error_lines": 0,
+        "passed": true,
+        "diagnostics": []
+      },
+      {
+        "channel": "ningxia",
+        "source": "ysp",
+        "segments": 3,
+        "bytes": 5491104,
+        "ffmpeg_exit": 0,
+        "error_lines": 0,
+        "passed": true,
+        "diagnostics": []
+      }
+    ],
+    "server_exit": 0
+  },
+  "live_backup_test": {
+    "test": "模拟首选央视频清单失败，读取真实宁夏官方备用",
+    "selected_source": "regional",
+    "segments": 3,
+    "bytes": 2320672,
+    "ffmpeg_exit": 0,
+    "error_lines": 0,
+    "passed": true,
+    "diagnostics": []
+  },
+  "config_776_probe": [
+    {
+      "channel": "bcctv1",
+      "error": "VDN 拒绝当前请求"
+    },
+    {
+      "channel": "bcctv13",
+      "error": "VDN 拒绝当前请求"
+    },
+    {
+      "channel": "ccctv1",
+      "error": "VDN 拒绝当前请求"
+    },
+    {
+      "channel": "ccctv13",
+      "error": "VDN 拒绝当前请求"
+    },
+    {
+      "channel": "cctvfrench",
+      "error": "VDN 拒绝当前请求"
+    },
+    {
+      "channel": "cctvarabic",
+      "error": "VDN 拒绝当前请求"
+    },
+    {
+      "channel": "cctvrussian",
+      "error": "VDN 拒绝当前请求"
+    },
+    {
+      "channel": "cctvxiyu",
+      "error": "VDN 拒绝当前请求"
+    },
+    {
+      "channel": "cctvdoc",
+      "error": "VDN 拒绝当前请求"
+    },
+    {
+      "channel": "taiqiu",
+      "error": "VDN 拒绝当前请求"
+    },
+    {
+      "channel": "cctv4k_1080p",
+      "error": "VDN 拒绝当前请求"
+    },
+    {
+      "channel": "cctv9",
+      "ack": "yes",
+      "play": "1",
+      "manifest_keys": [
+        "hls_cdrm",
+        "hls_cdrm_timeshift",
+        "hls_pic",
+        "hls_timebase"
+      ],
+      "drm": "1"
+    }
+  ],
+  "limitations": [
+    "85 条推荐目录未在本轮逐台长期播放",
+    "未在用户手机 APTV 上实测",
+    "原 App UDRM 仍未实现",
+    "地区版权与 CDN 失败不能由目录或签名修复",
+    "跨来源失败切换不保证时间线无缝"
+  ]
+}

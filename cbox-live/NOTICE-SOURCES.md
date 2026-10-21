@@ -1,0 +1,24 @@
+# 新增来源代码与资料
+
+上游：akiralereal/iptv — https://github.com/akiralereal/iptv
+
+版本：提交 e475b2f6d24029f844ada2b362d703c8b88c2e9b（2026-10-20）。
+
+上游许可证：GNU General Public License, version 3（GPL-3.0）。许可全文随交付包提供，并压缩内嵌于 Python 文件，可用 `--licenses` 输出。
+
+涉及文件：
+
+- `extractors/yangshipin/ckey.js`：完整代码压缩内嵌，运行时仅调整 ES module 导出并添加调用入口，使用 Node 内置 crypto，未修改其签名算法。
+- `extractors/yangshipin/api.js`：参考请求参数、返回字段、主备地址规则，实现 Python HTTP 集成。
+- `extractors/yangshipin/channels.js`：63 个公开请求目录、官方台标及分频道清晰度数据。
+- `extractors/yangshipin/epg.js`：参考官方节目单 protobuf 字段，新增有边界校验的 Python 读取器。
+- `extractors/ningxia/api.js`、`epg.js`：官方固定目录与官方节目单资料。
+- `extractors/heilongjiang/api.js`：官方固定目录、台标及 4430 端口资料。
+- `utils/cntvEpg.js`：v1.3 起参考备用官方节目单接口。
+
+本次修改：新增 Python SourceClient、来源独立缓存和代理令牌、多来源 M3U/XMLTV 汇总、官方节目单故障切换及验证记录。完整新增适配源码随 Python 文件提供；内嵌 JS 的源文本也能由该文件中的 gzip/base85 常量直接还原。
+
+本许可记录针对新增适配及上游参考材料。现有官方播放器内核等第三方材料保留其原有权利，频道及节目内容权利属于相应权利人。
+
+
+v1.5 修改：将原 cKey 算法移植为 Python 标准库实现，保留原 JS 参考源码与许可；新增 AptvCatalog 同台来源对应、优先选择及失败退避、统一 XMLTV ID、节目单 ETag/304、错误媒体识别。签名无需 Node；原网页 CDRM 内核仍为可选 Node 功能。
