@@ -1,4 +1,4 @@
-# 央视影音 App UDRM 单文件 v0.2.7（无 JDK）
+# 央视影音 App UDRM 单文件 v0.2.8（无 JDK）
 
 v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + WebAssembly 解释器**。运行只使用 Python 标准库和系统 JavaScriptCore，不再启动 Java、Node、编译器、FFmpeg 或外部 OpenSSL 命令。许可和视频处理继续由原样官方 SDK 完成。
 
@@ -7,10 +7,10 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 ## APTV 添加与订阅
 
 1. 停止旧的 JDK 版服务，添加下面带版本号的 Python 文件。
-2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.2.7`。
+2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.2.8`。
 3. 首次先检查宿主的 JavaScriptCore/WebAssembly 能力，再下载约3.55MiB（SDK压缩段约2.10MiB、解释器约1.45MiB）。看到“SDK 已取得许可并就绪”后刷新订阅；17ms之类的列表测速不表示SDK已经就绪。若服务器不支持分段下载，日志会说明回退约47MiB的完整安装包。
 
-[下载 cctv-app-udrm-v0.2.7.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.2.7.py)
+[下载 cctv-app-udrm-v0.2.8.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.2.8.py)
 
 手机同机订阅：
 
@@ -18,18 +18,18 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 http://127.0.0.1:8769/all.m3u
 ```
 
-状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.2.7`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
+状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.2.8`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
 
 脚本运行需要 Python 3.10+、`ctypes`、`ssl`，以及支持 WebAssembly、BigInt 的系统 JavaScriptCore。默认从 iOS 系统路径加载框架。没有手工安装 pip 包、JS文件、JAR或完整安卓虚拟机的步骤。当前默认文件 [cctv-app-udrm.py](cctv-app-udrm.py) 与带版本号文件完全相同。
 
 终端运行：
 
 ```bash
-python3 cctv-app-udrm-v0.2.7.py
+python3 cctv-app-udrm-v0.2.8.py
 # 指定端口、缓存或关闭预热
-python3 cctv-app-udrm-v0.2.7.py 8769 --cache-dir ./cbox-cache --no-warmup
+python3 cctv-app-udrm-v0.2.8.py 8769 --cache-dir ./cbox-cache --no-warmup
 # 能力检查，不访问节目源
-python3 cctv-app-udrm-v0.2.7.py --doctor
+python3 cctv-app-udrm-v0.2.8.py --doctor
 ```
 
 电脑/服务器供手机访问时，显式加 `--host 0.0.0.0`，订阅地址改为该电脑的局域网IP。Linux开发测试使用JavaScriptCoreGTK共享库，通过 `--jscore-library /path/to/libjavascriptcoregtk-4.1.so.0` 指定；它不是iPhone需下载的依赖。
@@ -44,6 +44,22 @@ python3 cctv-app-udrm-v0.2.7.py --doctor
 - 已人工查看处理后的央视画面，台标、字幕和画面正常。原SDK样本对照仍见 [SAMPLE-VALIDATION.json](SAMPLE-VALIDATION.json)。
 
 本入口尚未合并EPG，原61台服务的节目单继续保留。更多频道的实时调度签名、CDN权限与用户手机的内存/首帧表现仍需继续核对。
+
+## 0.2.8 CCTV-7 CDN线路修复
+
+用户提供的0.2.6日志里CCTV-7连续失败于 `URLError/SSLEOFError` 和 `URLError/TimeoutError`，没有该频道进入SDK分片处理的记录；其他频道已完成许可。这定位到原固定CDN连接路径，不能通过继续等待SDK加速解决。
+
+从离线官方App响应中核对备用主机后，使用不含抓包鉴权参数的规范地址重新请求验证。网宿与百度均拿到完整分片，原SDK处理后均为1280×720、100帧音视频错误0；腾讯候选分片返回503，未纳入备用目录。HAR仍仅用于离线研究，运行不读取HAR或重放抓包凭据。
+
+默认 `cctv7` 改用网宿，主订阅 `/all.m3u` 仍为三台。新增可单独订阅的CCTV-7线路目录：
+
+```text
+http://127.0.0.1:8769/cctv7.m3u
+```
+
+该目录分别提供网宿、百度、原KS线路。独立地址为 `/live/cctv7.m3u8`、`/live/cctv7_bd.m3u8`、`/live/cctv7_ks.m3u8`。每条线路使用独立缓存、序列和SDK频道状态，用户可选备用，不在一次播放中拼接不同CDN的TS。这里没有承诺无缝自动故障切换；原KS线路在用户网络报错，保留仅供其他网络选择。
+
+`/status` 现在显示各路线的 `upstream_host`，日志提示CCTV-7默认域名已更换。清晰度上限和其他频道的地址不变，原61台服务保留。40项回归检查通过；最终单文件的网宿主线路和百度备用各连续20秒音视频解码错误0。验证见 [0.2.8报告](CCTV7-VALIDATION-v0.2.8.json)，开发环境可用不代表用户网络必然可达。
 
 ## 0.2.7 寄存器批量读取与TLS EOF恢复
 

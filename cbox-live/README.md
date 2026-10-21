@@ -50,7 +50,7 @@ http://127.0.0.1:8767/aptv-epg.xml.gz
 本脚本原 App 的 `request_generation` 为 `APP_SIGNER_NOT_IMPLEMENTED`，`video_processing` 为 `UDRM_NOT_IMPLEMENTED`。`CORE_B85` 是网页处理核心，不代表原 App 已实现；网页签名常量也不能直接当作 App 签名算法使用。
 
 
-原 App UDRM 现已在独立的 [cctv-app-udrm 单文件服务](../cctv-app-udrm/) 中跑通：旧错误样本和三路实时源均通过音视频解码验证，详见 [2026-10-21 研究记录](research/UDRM-20261021.md)。新服务的 v0.2.7 已移植到系统 JavaScriptCore，无需JDK；手机同机订阅 `http://127.0.0.1:8769/all.m3u`，实机待验收。本脚本原61台目录及节目单继续保留。
+原 App UDRM 现已在独立的 [cctv-app-udrm 单文件服务](../cctv-app-udrm/) 中跑通：旧错误样本和三路实时源均通过音视频解码验证，详见 [2026-10-21 研究记录](research/UDRM-20261021.md)。新服务的 v0.2.8 已移植到系统 JavaScriptCore，无需JDK；手机同机订阅 `http://127.0.0.1:8769/all.m3u`，实机待验收。本脚本原61台目录及节目单继续保留。
 
 ## 切台与诊断
 

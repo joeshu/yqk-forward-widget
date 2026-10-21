@@ -1,0 +1,221 @@
+{
+  "version": "0.2.8",
+  "recorded_at_utc": "2026-10-21T23:48:49.563435+00:00",
+  "script_sha256": "2dbd8c2f278a0f9ef74325b3371d636e6521157a942fd1ea6dad51c860ec5342",
+  "iphone_aptv_device_tested": false,
+  "regressions_passed": 40,
+  "user_log_version": "0.2.6",
+  "user_log_cctv7_failures": [
+    "URLError/SSLEOFError",
+    "URLError/TimeoutError"
+  ],
+  "change": "CCTV7 default KS -> WSC; separate BD and original KS routes in /cctv7.m3u; no cross-CDN TS concatenation",
+  "source_probe_results": [
+    {
+      "url": "https://ldocctvcpudtxy.liveplay.myqcloud.com/ldocctvcpud/udrmldcctv7_1/index.m3u8",
+      "entries": 3,
+      "target": 4,
+      "first_seq": 448156574,
+      "ok": false,
+      "error": "Upstream HTTP 503",
+      "seconds": 9.241
+    },
+    {
+      "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv7_1/index.m3u8",
+      "entries": 3,
+      "target": 4,
+      "first_seq": 1792591656,
+      "ok": true,
+      "seconds": 6.677
+    },
+    {
+      "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv7_1/index.m3u8",
+      "entries": 3,
+      "target": 4,
+      "first_seq": 448156575,
+      "ok": true,
+      "seconds": 3.455
+    }
+  ],
+  "alternate_sdk_and_720p_validation": {
+    "sources": [
+      {
+        "source": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv7_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": "100",
+        "video": {
+          "programs": [
+            {
+              "streams": [
+                {
+                  "width": 1280,
+                  "height": 720
+                }
+              ]
+            }
+          ],
+          "stream_groups": [],
+          "streams": [
+            {
+              "width": 1280,
+              "height": 720
+            }
+          ]
+        },
+        "processed_sha256": "99015eae5ce736238822510ca734e19b32cd09304b8e9b7853dbd23c64dd2790"
+      },
+      {
+        "source": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv7_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": "100",
+        "video": {
+          "programs": [
+            {
+              "streams": [
+                {
+                  "width": 1280,
+                  "height": 720
+                }
+              ]
+            }
+          ],
+          "stream_groups": [],
+          "streams": [
+            {
+              "width": 1280,
+              "height": 720
+            }
+          ]
+        },
+        "processed_sha256": "b024fc4a1b802b376e13c89036dcd2525b3f1765e62f3453b4a7e45895fec170"
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "environment": "Linux JavaScriptCoreGTK, not user iPhone"
+  },
+  "final_artifact_live_validation": {
+    "version": "0.2.8",
+    "environment": "Linux JavaScriptCoreGTK; single selected channel, sequential 20s audio/video decodes; not iPhone",
+    "script_sha256": "2dbd8c2f278a0f9ef74325b3371d636e6521157a942fd1ea6dad51c860ec5342",
+    "channels": [
+      {
+        "channel": "cctv7",
+        "first_playlist_seconds": 8.544,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "497",
+        "duration": "00:00:20.000000"
+      },
+      {
+        "channel": "cctv7_bd",
+        "first_playlist_seconds": 6.913,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "497",
+        "duration": "00:00:20.000000"
+      }
+    ],
+    "status": {
+      "version": "0.2.8",
+      "uptime_seconds": 44,
+      "engine": "javascriptcore-unicorn-wasm",
+      "jdk_required": false,
+      "sdk_phase": "ready",
+      "preparation_progress": "官方SDK和无JDK解释器已校验就绪",
+      "preparation_error": null,
+      "runtime_features": {
+        "bulk_memory": true,
+        "register_batch": true,
+        "register_scalar": true
+      },
+      "media_timings": {
+        "cctv7": {
+          "parse_seconds": 0.017,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.491,
+          "map_verify_seconds": 0.008,
+          "video_pes": 100
+        },
+        "cctv7_bd": {
+          "parse_seconds": 0.013,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.377,
+          "map_verify_seconds": 0.007,
+          "video_pes": 100
+        }
+      },
+      "max_bitrate": 2500000,
+      "sdk_sessions": 1,
+      "processed_video_pes": 1200,
+      "license_exchanges": [
+        {
+          "request_bytes": 368,
+          "http_status": 200,
+          "response_bytes": 232,
+          "business_status": 0,
+          "protected_license_count": 1
+        }
+      ],
+      "channels": {
+        "cctv1": {
+          "name": "CCTV-1 综合",
+          "upstream_host": "ldncctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv7": {
+          "name": "CCTV-7 国防军事",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 6,
+          "playlist_age_seconds": 25.88,
+          "last_refresh_seconds": 1.542,
+          "processing_to_video_ratio": 0.129,
+          "error": ""
+        },
+        "guizhou": {
+          "name": "贵州卫视",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv7_bd": {
+          "name": "CCTV-7 国防军事（百度备用）",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 6,
+          "playlist_age_seconds": 0.77,
+          "last_refresh_seconds": 2.138,
+          "processing_to_video_ratio": 0.1,
+          "error": ""
+        },
+        "cctv7_ks": {
+          "name": "CCTV-7 国防军事（原快手线路）",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        }
+      }
+    }
+  },
+  "limitations": "Development network only. Independent selectable backups, not seamless automatic CDN failover. Tencent candidate returned HTTP503 and is excluded."
+}

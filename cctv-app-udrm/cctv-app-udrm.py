@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.2.7: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.2.8: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -1453,12 +1453,16 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.2.7'\n"
+        "VERSION = '0.2.8'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'DEFAULTS = {\n'
         " 'cctv1': ('CCTV-1 综合', 'https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8'),\n"
-        " 'cctv7': ('CCTV-7 国防军事', 'https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv7_1/index.m3u8'),\n"
+        " 'cctv7': ('CCTV-7 国防军事', 'https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv7_1/index.m3u8'),\n"
         " 'guizhou': ('贵州卫视', 'https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmguizhou_1/index.m3u8'),\n"
+        '}\n'
+        'CCTV7_ALTERNATES = {\n'
+        " 'cctv7_bd': ('CCTV-7 国防军事（百度备用）','https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv7_1/index.m3u8'),\n"
+        " 'cctv7_ks': ('CCTV-7 国防军事（原快手线路）','https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv7_1/index.m3u8'),\n"
         '}\n'
         'MAX_TS = 16 * 1024 * 1024\n'
         '\n'
@@ -1687,6 +1691,7 @@ PYTHON_SOURCES = {
         '    ready: object = field(default_factory=threading.Event)\n'
         '    realtime_ratio: float = 0\n'
         '    failures: int = 0\n'
+        '    catalog: bool = True\n'
         '\n'
         '\n'
         'class LiveService:\n'
@@ -1836,7 +1841,7 @@ PYTHON_SOURCES = {
         "            'media_timings':dict(self.sdk.timings),'max_bitrate':self.max_bitrate,\n"
         "            'sdk_sessions':self.sdk.sessions,'processed_video_pes':self.sdk.processed_frames,\n"
         "            'license_exchanges':self.sdk.license_records,\n"
-        "            'channels':{ch.ident:{'name':ch.name,'cached_segments':len(ch.cache),\n"
+        "            'channels':{ch.ident:{'name':ch.name,'upstream_host':urlsplit(ch.url).hostname,'cached_segments':len(ch.cache),\n"
         "                'playlist_age_seconds':round(time.monotonic()-ch.updated,2) if ch.updated else None,\n"
         "                'last_refresh_seconds':ch.seconds,'processing_to_video_ratio':ch.realtime_ratio,'error':ch.error} for ch in self.channels.values()}}\n"
         '\n'
@@ -1854,12 +1859,15 @@ PYTHON_SOURCES = {
         '        def dispatch(self,head):\n'
         '            try:\n'
         '                path=urlsplit(self.path).path\n'
-        "                if path in ('/','/all.m3u','/aptv.m3u'):\n"
+        "                if path in ('/','/all.m3u','/aptv.m3u','/cctv7.m3u'):\n"
         "                    host=self.headers.get('Host','127.0.0.1:8769')\n"
         "                    if not re.fullmatch(r'[A-Za-z0-9.\\-\\[\\]:]+',host):\n"
         "                        return self.respond(400,b'Invalid Host','text/plain',head)\n"
         "                    lines=['#EXTM3U']\n"
         '                    for ch in service.channels.values():\n'
+        "                        if path=='/cctv7.m3u':\n"
+        "                            if ch.ident!='cctv7' and ch.ident not in CCTV7_ALTERNATES:continue\n"
+        '                        elif not ch.catalog:continue\n'
         '                        lines.extend([f\'#EXTINF:-1 tvg-id="{ch.ident}" group-title="央视影音 App",{ch.name}\',\n'
         "                            f'http://{host}/live/{ch.ident}.m3u8'])\n"
         "                    return self.respond(200,('\\n'.join(lines)+'\\n').encode(),'audio/x-mpegurl',head)\n"
@@ -1937,6 +1945,7 @@ PYTHON_SOURCES = {
         "        except BootstrapError as error:parser.exit(1,str(error)+'\\n')\n"
         '        return\n'
         '    channels={ident:Channel(ident,name,url) for ident,(name,url) in DEFAULTS.items()}\n'
+        '    channels.update({ident:Channel(ident,name,url,catalog=False) for ident,(name,url) in CCTV7_ALTERNATES.items()})\n'
         '    for source in args.source:\n'
         "        ident,sep,url=source.partition('=')\n"
         "        if not sep or not re.fullmatch(r'[a-z0-9_-]{1,48}',ident) or urlsplit(url).scheme not in ('http','https'):\n"
@@ -1954,7 +1963,8 @@ PYTHON_SOURCES = {
         '            try:service.sdk.ensure_ready()\n'
         "            except Exception as error:LOG.warning('SDK预热暂不可用：%s',str(error)[:200])\n"
         '        service.refresh_pool.submit(warmup)\n'
-        "    LOG.info('原 App UDRM 无JDK版 %s；%s 台；订阅 http://127.0.0.1:%s/all.m3u',VERSION,len(channels),args.port)\n"
+        "    LOG.info('原 App UDRM 无JDK版 %s；%s 台；订阅 http://127.0.0.1:%s/all.m3u',VERSION,sum(ch.catalog for ch in channels.values()),args.port)\n"
+        "    LOG.info('CCTV-7 默认改用网宿CDN；独立备用线路订阅 http://127.0.0.1:%s/cctv7.m3u',args.port)\n"
         "    LOG.info('首次会自动准备SDK；状态 /status；运行不读取HAR，不启动Java/Node/FFmpeg或外部命令')\n"
         '    try:server.serve_forever(poll_interval=0.3)\n'
         '    except KeyboardInterrupt:pass\n'
