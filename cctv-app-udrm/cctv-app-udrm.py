@@ -1,686 +1,750 @@
 #!/usr/bin/env python3
-# CCTV App UDRM bridge 0.1.0. Requires Python 3.10+, JDK 21 and OpenSSL.
-# One runtime Python file; source resources below are plain text, not bytecode.
-# HAR files are offline research only. Runtime never imports captured sessions.
+# CCTV App UDRM 0.2.0: Python + system JavaScriptCore, without a JVM or subprocess.
+# Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
+# This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
 import types
 
-JAVA_SOURCES = {
-    'pom.xml': (
-        '<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd"><modelVersion>4.0.0</modelVersion><groupId>local.research</groupId><artifactId>udrm-android-probe</artifactId><version>0.1</version><properties><maven.compiler.source>21</maven.compiler.source><maven.compiler.target>21</maven.compiler.target><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties><dependencies><dependency><groupId>com.github.zhkl0228</groupId><artifactId>unidbg-android</artifactId><version>0.9.9</version></dependency><dependency><groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId><version>2.0.16</version></dependency><dependency><groupId>com.github.zhkl0228</groupId><artifactId>unidbg-unicorn2</artifactId><version>0.9.9</version></dependency></dependencies><build><plugins><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.14.1</version></plugin><plugin><groupId>org.codehaus.mojo</groupId><artifactId>exec-maven-plugin</artifactId><version>3.5.0</version></plugin></plugins></build></project>'
-    ),
-    'src/main/java/KooProbe.java': (
-        'import com.github.unidbg.AndroidEmulator;\n'
-        'import com.github.unidbg.Module;\n'
-        'import com.github.unidbg.arm.backend.Unicorn2Factory;\n'
-        'import com.github.unidbg.linux.android.AndroidEmulatorBuilder;\n'
-        'import com.github.unidbg.linux.android.AndroidResolver;\n'
-        'import com.github.unidbg.linux.android.dvm.AbstractJni;\n'
-        'import com.github.unidbg.linux.android.dvm.DalvikModule;\n'
-        'import com.github.unidbg.linux.android.dvm.VM;\n'
-        'import com.github.unidbg.linux.android.dvm.BaseVM;\n'
-        'import com.github.unidbg.linux.android.dvm.DvmClass;\n'
-        'import com.github.unidbg.linux.android.dvm.DvmObject;\n'
-        'import com.github.unidbg.linux.android.dvm.StringObject;\n'
-        'import java.io.File;\n'
+JS_SOURCES = {
+    'koo_vm.js': (
+        '/* Host-side ELF/JNI adapter. Official vendor code is never patched. */\n'
+        'class KooVM {\n'
+        ' constructor(uc,plan,entropy) {\n'
+        '  this.uc=uc;this.plan=plan;this.e=new uc.Unicorn(uc.ARCH_ARM64,uc.MODE_ARM);\n'
+        '  this.base=0x10000000;this.stub=0x20000000;this.heap=0x30000000;this.stack=0x40000000;this.stop=0x50000000;\n'
+        '  this.bump=this.heap;this.allocations=new Map();this.freeBlocks=[];this.keys=new Map();this.keySequence=1;this.objects=new Map();this.objectSequence=1;this.natives={};this.states=new Map();this.trap=null;this.counts={};this.entropy=entropy;this.entropyPosition=0;this.randomSeed=1;this.files=new Map();this.nextFD=100;\n'
+        '  const e=this.e;\n'
+        '  for(const [address,size] of [[this.base,plan.length],[this.stub,0x20000],[this.heap,0x800000],[this.stack,0x200000],[this.stop,0x1000]])e.mem_map(address,size,uc.PROT_ALL);\n'
+        '  for(const segment of plan.segments)e.mem_write(this.base+segment.address,this.unbase64(segment.data));\n'
+        '  this.importAddresses={};this.addressImports={};plan.imports.forEach((name,i)=>{this.importAddresses[name]=this.stub+i*8;this.addressImports[this.stub+i*8]=name;});\n'
+        '  for(const r of plan.relocations) {\n'
+        '   let value;\n'
+        '   if(r.type===1027)value=this.base+r.addend;\n'
+        '   else if([257,1025,1026].includes(r.type))value=(r.import?this.importAddresses[r.import]:this.base+r.symbol)+r.addend;\n'
+        "   else throw Error('unsupported ELF relocation '+r.type);\n"
+        '   this.write64(this.base+r.offset,value);\n'
+        '  }\n'
+        '  e.hook_add(uc.HOOK_CODE,(_u,address)=>{this.trap=Number(address);e.emu_stop();},null,this.stub,this.stub+0x1ffff);\n'
+        '  this.jniTable=this.allocate(0x1000,true);this.env=this.allocate(8,true);this.write64(this.env,this.jniTable);\n'
+        '  this.jvmTable=this.allocate(0x100,true);this.jvm=this.allocate(8,true);this.write64(this.jvm,this.jvmTable);\n'
+        "  for(let i=0;i<240;i++){const address=this.stub+0x4000+i*8;this.write64(this.jniTable+i*8,address);this.addressImports[address]='jni:'+i;}\n"
+        "  for(let i=0;i<10;i++){const address=this.stub+0x5000+i*8;this.write64(this.jvmTable+i*8,address);this.addressImports[address]='jvm:'+i;}\n"
+        '  this.errno=this.allocate(16,true);this.tls=this.allocate(0x1000,true);\n'
+        '  if(uc.ARM64_REG_TPIDR_EL0)e.reg_write_i64(uc.ARM64_REG_TPIDR_EL0,BigInt(this.tls));\n'
+        '  // Import data are ordinary host ABI storage, never credentials or rights state.\n'
+        '  if(this.importAddresses.__stack_chk_guard)this.write64(this.importAddresses.__stack_chk_guard,0x18d4a256);\n'
+        ' }\n'
+        ' unbase64(text){const s=atob(text),b=new Uint8Array(s.length);for(let i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b;}\n'
+        " base64(bytes){let s='';for(let i=0;i<bytes.length;i+=8192)s+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(s);}\n"
+        " read(address,size){if(!Number.isSafeInteger(size)||size<0||size>16*1024*1024)throw Error('host read limit');return this.e.mem_read(address,size);}\n"
+        ' write(address,bytes){this.e.mem_write(address,bytes);}\n'
+        ' read32(address){return new DataView(this.read(address,4).buffer).getUint32(0,true);}\n'
+        ' read64(address){return Number(new DataView(this.read(address,8).buffer).getBigUint64(0,true));}\n'
+        ' write32(address,value){const b=new Uint8Array(4);new DataView(b.buffer).setUint32(0,value,true);this.write(address,b);}\n'
+        ' write64(address,value){const b=new Uint8Array(8);new DataView(b.buffer).setBigUint64(0,BigInt.asUintN(64,BigInt(value)),true);this.write(address,b);}\n'
+        " cbytes(address,limit=1048576){if(!address)throw Error('NULL C string');const chunks=[];let size=0;\n"
+        '  while(size<limit){const n=Math.min(128,limit-size,4096-((address+size)&4095));const b=this.read(address+size,n);const end=b.indexOf(0);if(end>=0){chunks.push(b.subarray(0,end));size+=end;const out=new Uint8Array(size);let p=0;for(const c of chunks){out.set(c,p);p+=c.length;}return out;}chunks.push(b);size+=n;}\n'
+        "  throw Error('unterminated C string');\n"
+        ' }\n'
+        " string(address,limit){const b=this.cbytes(address,limit);let s='';for(let i=0;i<b.length;i+=8192)s+=String.fromCharCode(...b.subarray(i,i+8192));return s;}\n"
+        ' cstring(text){const b=new Uint8Array(text.length+1);for(let i=0;i<text.length;i++)b[i]=text.charCodeAt(i)&255;const p=this.allocate(b.length);this.write(p,b);return p;}\n'
+        ' allocate(size,zero=false){\n'
+        "  if(!Number.isSafeInteger(size)||size<0||size>4*1024*1024+4096)throw Error('host malloc limit');\n"
+        '  size=Math.max(16,Math.ceil(size/16)*16);let pointer,index=-1,best=Infinity;\n'
+        '  for(let i=0;i<this.freeBlocks.length;i++){const block=this.freeBlocks[i];if(block.size>=size&&block.size<best){index=i;best=block.size;}}\n'
+        '  if(index>=0){\n'
+        '   const block=this.freeBlocks.splice(index,1)[0];pointer=block.pointer;\n'
+        '   if(block.size>size)this.freeBlocks.push({pointer:pointer+size,size:block.size-size});\n'
+        '  }else{\n'
+        "   pointer=this.bump;if(pointer+size>this.heap+0x800000)throw Error('host heap exhausted');this.bump+=size;\n"
+        '  }\n'
+        '  this.allocations.set(pointer,size);if(zero)this.write(pointer,new Uint8Array(size));return pointer;\n'
+        ' }\n'
+        ' free(pointer){\n'
+        "  if(!pointer)return;const size=this.allocations.get(pointer);if(size===undefined)throw Error('host invalid free');\n"
+        '  this.allocations.delete(pointer);this.freeBlocks.push({pointer,size});this.freeBlocks.sort((a,b)=>a.pointer-b.pointer);\n'
+        '  const merged=[];\n'
+        '  for(const block of this.freeBlocks){const last=merged[merged.length-1];if(last&&last.pointer+last.size===block.pointer)last.size+=block.size;else merged.push({...block});}\n'
+        '  while(merged.length&&merged[merged.length-1].pointer+merged[merged.length-1].size===this.bump)this.bump=merged.pop().pointer;\n'
+        '  this.freeBlocks=merged;\n'
+        ' }\n'
+        ' object(kind,value){const id=this.allocate(16,true);this.objects.set(id,{kind,value});return id;}\n'
+        " reg(i){return Number(this.e.reg_read_i64(this.uc['ARM64_REG_X'+i]));}\n"
+        ' result(value){this.e.reg_write_i64(this.uc.ARM64_REG_X0,BigInt.asUintN(64,BigInt(value||0)));}\n'
+        ' invoke(address,args=[],nested=false){\n'
+        '  const e=this.e,uc=this.uc;let context=null;\n'
+        '  if(nested){context=e.context_alloc();e.context_save(context);}\n'
+        '  try{\n'
+        '   const sp=nested?Number(e.reg_read_i64(uc.ARM64_REG_SP))-0x2000:this.stack+0x1ff000;\n'
+        '   e.reg_write_i64(uc.ARM64_REG_SP,BigInt(sp));e.reg_write_i64(uc.ARM64_REG_LR,BigInt(this.stop));\n'
+        "   for(let i=0;i<args.length;i++)e.reg_write_i64(uc['ARM64_REG_X'+i],BigInt.asUintN(64,BigInt(args[i])));\n"
+        '   const result=this.run(address);\n'
+        "   if(nested&&result&&typeof result==='object')throw Error('unsupported nested host I/O');\n"
+        '   return result;\n'
+        '  }finally{if(context!==null){e.context_restore(context);e.context_free(context);}}\n'
+        ' }\n'
+        ' run(pc){\n'
+        '  const e=this.e,uc=this.uc;let steps=0;\n'
+        '  while(true){\n'
+        "   if(++steps>300000)throw Error('too many host ABI calls');this.trap=null;\n"
+        "   try{e.emu_start(pc,this.stop,0,0);}catch(error){throw Error('emulation fault pc=0x'+e.reg_read_i64(uc.ARM64_REG_PC).toString(16)+' '+String(error));}\n"
+        "   if(this.trap===null){if(Number(e.reg_read_i64(uc.ARM64_REG_PC))!==this.stop)throw Error('instruction budget exceeded');break;}\n"
+        "   const name=this.addressImports[this.trap];if(!name)throw Error('unknown host trampoline');\n"
+        '   this.counts[name]=(this.counts[name]||0)+1;\n'
+        '   const lr=Number(e.reg_read_i64(uc.ARM64_REG_LR));const args=Array.from({length:8},(_,i)=>this.reg(i));\n'
+        '   const value=this.dispatch(name,args);\n'
+        "   if(value&&typeof value==='object'&&value.host_request){this.pending={lr};return value;}\n"
+        '   this.result(value);pc=lr;\n'
+        '  }\n'
+        '  return Number(BigInt.asIntN(64,e.reg_read_i64(uc.ARM64_REG_X0)));\n'
+        ' }\n'
+        ' resume(reply){\n'
+        "  if(!this.pending)throw Error('no pending host I/O');const pc=this.pending.lr;this.pending=null;\n"
+        '  if(reply.errno)this.write32(this.errno,reply.errno);\n'
+        '  for(const write of reply.writes||[])this.write(write.address,this.unbase64(write.data));\n'
+        '  this.result(reply.result);return this.run(pc);\n'
+        ' }\n'
+        ' dispatch(name,a){\n'
+        "  if(name.startsWith('jni:'))return this.jni(Number(name.slice(4)),a);\n"
+        "  if(name.startsWith('jvm:')){\n"
+        '   const index=Number(name.slice(4));if(index===6){this.write64(a[1],this.env);return 0;}\n'
+        "   throw Error('unsupported JavaVM entry '+index);\n"
+        '  }\n'
+        '  switch(name){\n'
+        "   case 'malloc':return this.allocate(a[0]);\n"
+        "   case 'calloc':return this.allocate(a[0]*a[1],true);\n"
+        "   case 'free':this.free(a[0]);return 0;\n"
+        "   case 'realloc':{if(!a[0])return this.allocate(a[1]);const n=this.allocations.get(a[0]);if(n===undefined)throw Error('invalid realloc');const p=this.allocate(a[1]);this.write(p,this.read(a[0],Math.min(n,a[1])));this.free(a[0]);return p;}\n"
+        "   case 'posix_memalign':{if(a[1]>16)throw Error('unsupported alignment');this.write64(a[0],this.allocate(a[2]));return 0;}\n"
+        "   case 'memcpy':case 'memmove':this.write(a[0],this.read(a[1],a[2]));return a[0];\n"
+        "   case 'memset':this.write(a[0],new Uint8Array(a[2]).fill(a[1]&255));return a[0];\n"
+        "   case 'strlen':return this.cbytes(a[0]).length;\n"
+        "   case 'strdup':return this.cstring(this.string(a[0]));\n"
+        "   case 'strcpy':{const s=this.cbytes(a[1]);this.write(a[0],s);this.write(a[0]+s.length,new Uint8Array(1));return a[0];}\n"
+        "   case 'strncpy':{const s=this.cbytes(a[1]),out=new Uint8Array(a[2]);out.set(s.subarray(0,a[2]));this.write(a[0],out);return a[0];}\n"
+        "   case 'strlcpy':{const s=this.cbytes(a[1]);if(a[2]){const n=Math.min(s.length,a[2]-1);this.write(a[0],s.subarray(0,n));this.write(a[0]+n,new Uint8Array(1));}return s.length;}\n"
+        "   case 'strcat':{const n=this.cbytes(a[0]).length,s=this.cbytes(a[1]);this.write(a[0]+n,s);this.write(a[0]+n+s.length,new Uint8Array(1));return a[0];}\n"
+        "   case 'strcmp':case 'strcasecmp':case 'strncmp':case 'strncasecmp':{\n"
+        "    let x=this.string(a[0]),y=this.string(a[1]);if(name.includes('case')){x=x.toLowerCase();y=y.toLowerCase();}if(name.startsWith('strn')){x=x.slice(0,a[2]);y=y.slice(0,a[2]);}\n"
+        '    for(let i=0;i<Math.max(x.length,y.length);i++){const d=(x.charCodeAt(i)||0)-(y.charCodeAt(i)||0);if(d)return d;}return 0;\n'
+        '   }\n'
+        "   case 'memcmp':{const x=this.read(a[0],a[2]),y=this.read(a[1],a[2]);for(let i=0;i<x.length;i++)if(x[i]!==y[i])return x[i]-y[i];return 0;}\n"
+        "   case 'memchr':{const n=this.read(a[0],a[2]).indexOf(a[1]&255);return n<0?0:a[0]+n;}\n"
+        "   case 'strchr':case 'strrchr':{const s=this.string(a[0]),n=(name==='strchr'?s.indexOf(String.fromCharCode(a[1]&255)):s.lastIndexOf(String.fromCharCode(a[1]&255)));return (a[1]&255)===0?a[0]+s.length:n<0?0:a[0]+n;}\n"
+        "   case 'strstr':{const n=this.string(a[0]).indexOf(this.string(a[1]));return n<0?0:a[0]+n;}\n"
+        "   case 'strspn':case 'strcspn':{const s=this.string(a[0]),set=new Set(this.string(a[1]));let n=0;while(n<s.length&&(set.has(s[n])===(name==='strspn')))n++;return n;}\n"
+        "   case 'atoi':case 'atoll':return parseInt(this.string(a[0]),10)||0;\n"
+        "   case 'strtol':case 'strtoul':case 'strtoll':case 'strtoumax':{const s=this.string(a[0]);const match=/^\\s*[+-]?(?:0[xX][0-9a-fA-F]+|[0-9a-zA-Z]+)/.exec(s);if(a[1])this.write64(a[1],a[0]+(match?match[0].length:0));return parseInt(s,a[2]||0)||0;}\n"
+        "   case 'isspace':return /[\\t\\n\\v\\f\\r ]/.test(String.fromCharCode(a[0]&255))?1:0;\n"
+        "   case 'isalnum':return /[a-zA-Z0-9]/.test(String.fromCharCode(a[0]&255))?1:0;\n"
+        "   case 'isxdigit':return /[a-fA-F0-9]/.test(String.fromCharCode(a[0]&255))?1:0;\n"
+        "   case 'isupper':return a[0]>=65&&a[0]<=90?1:0;\n"
+        "   case 'toupper':return a[0]>=97&&a[0]<=122?a[0]-32:a[0];\n"
+        "   case '__android_log_print':case 'printf':case 'fprintf':case 'vfprintf':case 'puts':case 'fputs':case 'putchar':case 'fflush':return 0;\n"
+        "   case '__cxa_atexit':case '__cxa_finalize':return 0;\n"
+        "   case 'pthread_mutex_init':case 'pthread_mutex_destroy':case 'pthread_mutex_lock':case 'pthread_mutex_unlock':case 'pthread_cond_init':case 'pthread_cond_destroy':case 'pthread_cond_signal':case 'pthread_cond_broadcast':case 'pthread_attr_init':case 'pthread_attr_setdetachstate':case 'pthread_attr_setscope':case 'pthread_detach':return 0;\n"
+        "   case 'pthread_once':{if(!this.read32(a[0])){this.write32(a[0],1);this.invoke(a[1],[],true);this.write32(a[0],2);}return 0;}\n"
+        "   case 'pthread_key_create':{const key=this.keySequence++;this.write32(a[0],key);return 0;}\n"
+        "   case 'pthread_setspecific':this.keys.set(a[0],a[1]);return 0;\n"
+        "   case 'pthread_getspecific':return this.keys.get(a[0])||0;\n"
+        "   case 'pthread_self':return this.tls;\n"
+        "   case 'pthread_create':return 11; // resource unavailable: this adapter is single-threaded\n"
+        "   case '__errno':return this.errno;\n"
+        "   case 'strerror':return this.cstring('System error '+a[0]);\n"
+        "   case 'isatty':this.write32(this.errno,25);return 0;\n"
+        "   case 'pow':{const x=this.e.reg_read_double(this.uc.ARM64_REG_D0),y=this.e.reg_read_double(this.uc.ARM64_REG_D1);this.e.reg_write_double(this.uc.ARM64_REG_D0,Math.pow(x,y));return 0;}\n"
+        "   case 'srand':this.randomSeed=a[0]||1;return 0;\n"
+        "   case 'rand':this.randomSeed=Number((BigInt(this.randomSeed)*1103515245n+12345n)&2147483647n);return this.randomSeed;\n"
+        "   case 'arc4random':{const b=this.takeEntropy(4);return new DataView(b.buffer).getUint32(0,true);}\n"
+        "   case 'getpid':return 23456;\n"
+        "   case 'getuid':return 10000;\n"
+        "   case 'getauxval':return 0;\n"
+        "   case 'getenv':return 0;\n"
+        "   case 'gethostbyname':{const host=this.string(a[0]);if(host!=='127.0.0.1')throw Error('non-loopback native DNS denied');\n"
+        '    const entry=this.allocate(32,true),aliases=this.allocate(8,true),list=this.allocate(16,true),ip=this.allocate(4,true);\n'
+        '    this.write(ip,new Uint8Array([127,0,0,1]));this.write64(entry,this.cstring(host));this.write64(entry+8,aliases);this.write32(entry+16,2);this.write32(entry+20,4);this.write64(entry+24,list);this.write64(list,ip);return entry;\n'
+        '   }\n'
+        "   case 'inet_ntop':{if(a[0]!==2)throw Error('unsupported native IP family');const text=Array.from(this.read(a[1],4)).join('.');if(a[3]<text.length+1){this.write32(this.errno,28);return 0;}const bytes=new Uint8Array(text.length+1);for(let i=0;i<text.length;i++)bytes[i]=text.charCodeAt(i);this.write(a[2],bytes);return a[2];}\n"
+        "   case 'inet_addr':{const parts=this.string(a[0]).split('.').map(Number);if(parts.length!==4||parts.some(v=>!Number.isInteger(v)||v<0||v>255))return 0xffffffff;return (parts[0]+parts[1]*256+parts[2]*65536+parts[3]*16777216)>>>0;}\n"
+        "   case 'socket':case 'connect':case 'send':case 'sendto':case 'recv':case 'recvfrom':case 'setsockopt':case 'getsockopt':case 'getsockname':case 'getpeername':case 'shutdown':return this.hostCall(name,a);\n"
+        "   case 'poll':{let ready=0,all=true;for(let i=0;i<a[1];i++){const fd=this.read32(a[0]+i*8);if(!this.files.has(fd)){all=false;break;}}if(!all)return this.hostCall(name,a);for(let i=0;i<a[1];i++){const p=a[0]+i*8,b=this.read(p,8),view=new DataView(b.buffer);const events=view.getInt16(4,true);const result=events&1;view.setInt16(6,result,true);this.write(p,b);if(result)ready++;}return ready;}\n"
+        "   case 'fcntl':if(this.files.has(a[0]))return 0;return this.hostCall(name,a);\n"
+        "   case 'write':if(a[0]===1||a[0]===2)return a[2];return this.hostCall(name,a);\n"
         '\n'
-        '/** Loads the official Koo SDK and accepts media only after its rights check. */\n'
-        'public final class KooProbe {\n'
-        '    public static void main(String[] args) throws Exception {\n'
-        '        NativeDiagnostics.install();\n'
-        '        AndroidEmulator emulator=AndroidEmulatorBuilder.for64Bit()\n'
-        '            .setProcessName("local.research.koo.offlineprobe")\n'
-        '            .addBackendFactory(new Unicorn2Factory(false)).build();\n'
-        '        emulator.setTimeout(15_000_000L);\n'
-        '        try {\n'
-        '            emulator.getMemory().setLibraryResolver(new AndroidResolver(23));\n'
-        '            VM vm=emulator.createDalvikVM();vm.setJni(new AbstractJni(){\n'
-        '                @Override public int getStaticIntField(BaseVM vm,DvmClass clazz,String signature){\n'
-        '                    if (signature.equals("android/os/Build$VERSION->SDK_INT:I")) return 23;\n'
-        '                    return super.getStaticIntField(vm,clazz,signature);\n'
-        '                }\n'
-        '            });vm.setVerbose(false);\n'
-        '            vm.resolveClass("cntv/player/media/player/KooMediaPlayer");\n'
-        '            System.out.println("KOO phase=emulator result=ready abi=arm64-v8a");\n'
-        '            String libraryPath=System.getenv("UDRM_KOO_LIBRARY");\n'
-        '            if(libraryPath==null||libraryPath.isEmpty())throw new IllegalArgumentException("UDRM_KOO_LIBRARY is required");\n'
-        '            File library=new File(libraryPath);\n'
-        '            if("1".equals(System.getenv("UDRM_PROCESS_STDIN")))KooSessionBridge.verifyLibrary(library);\n'
-        '            DalvikModule dm=vm.loadLibrary(library,false);\n'
-        '            Module module=dm.getModule();\n'
-        '            System.out.println("KOO phase=load result=loaded jni_onload="+(module.findSymbolByName("JNI_OnLoad")!=null));\n'
-        '            if (args.length>0 && (args[0].equals("onload") || args[0].equals("rights"))) {\n'
-        '                dm.callJNI_OnLoad(emulator);\n'
-        '                System.out.println("KOO phase=jni_onload result=returned");\n'
-        '            }\n'
-        '            if(args.length>0 && args[0].equals("rights")) {\n'
-        '                vm.setVerbose(false);\n'
-        '                DvmObject<?> player=vm.resolveClass("cntv/player/media/player/KooMediaPlayer").newObject(null);\n'
-        '                System.out.println("KOO phase=rights starting=offline_loopback_only");\n'
-        '                String endpoint=System.getenv().getOrDefault("UDRM_PROBE_URL","https://127.0.0.1:9/udrm/offline-probe");\n'
-        '                java.net.URI parsed=java.net.URI.create(endpoint);\n'
-        '                if(!"https".equals(parsed.getScheme())||!"127.0.0.1".equals(parsed.getHost())\n'
-        '                    ||parsed.getUserInfo()!=null||parsed.getFragment()!=null) {\n'
-        '                    throw new IllegalArgumentException("UDRM_PROBE_URL must be HTTPS on 127.0.0.1");\n'
-        '                }\n'
-        '                // Verified native parser extracts CONTENTID= up to comma, URI= to end.\n'
-        '                String content=System.getenv().getOrDefault("UDRM_CONTENT_ID","UDRM_OFFLINE_PROBE_NOT_CONTENT");\n'
-        '                if(!content.matches("[A-Za-z0-9_.-]{1,96}")||endpoint.length()>768) {\n'
-        '                    throw new IllegalArgumentException("Invalid content ID or oversized loopback endpoint");\n'
-        '                }\n'
-        '                String drmInfo="CONTENTID="+content+",URI="+endpoint;\n'
-        '                int result=player.callJniMethodInt(emulator,"drmCheckRights(Ljava/lang/String;Ljava/lang/String;)I",\n'
-        '                    new StringObject(vm,drmInfo),new StringObject(vm,"OFFLINE_PROBE"));\n'
-        '                System.out.println("KOO phase=rights returned="+result+" sdk_license_accepted="+(result==0));\n'
-        '                if(result==0&&"1".equals(System.getenv("UDRM_PROCESS_STDIN")))\n'
-        '                    KooSessionBridge.serve(emulator,module,library,true);\n'
-        '                \n'
-        '            }\n'
-        '            System.out.println("KOO phase=done media="+(System.getenv("UDRM_MEDIA_INPUT")==null?"not_attempted":"attempted"));\n'
-        '        } finally {emulator.close();}\n'
-        '    }\n'
+        "   case 'dlopen':{const name=a[0]?this.string(a[0]):'';return name.includes('kooplayer')||!name?this.base:0;}\n"
+        "   case 'dlclose':return 0;\n"
+        "   case 'dlerror':return this.cstring('Library not present in this Android compatibility profile');\n"
+        "   case 'dlsym':{const name=this.string(a[1]);return this.plan.symbols[name]?this.base+this.plan.symbols[name]:this.importAddresses[name]||0;}\n"
+        "   case 'dladdr':{if(a[0]<this.base||a[0]>=this.base+this.plan.length)return 0;this.write64(a[1],this.cstring('/data/app/cn.cntv/lib/arm64/libkooplayer.so'));this.write64(a[1]+8,this.base);this.write64(a[1]+16,0);this.write64(a[1]+24,0);return 1;}\n"
+        '\n'
+        "   case 'gettimeofday':{const ms=Date.now();if(a[0]){this.write64(a[0],Math.floor(ms/1000));this.write64(a[0]+8,(ms%1000)*1000);}return 0;}\n"
+        "   case 'time':{const n=Math.floor(Date.now()/1000);if(a[0])this.write64(a[0],n);return n;}\n"
+        "   case 'clock_gettime':{const ms=Date.now();this.write64(a[1],Math.floor(ms/1000));this.write64(a[1]+8,(ms%1000)*1000000);return 0;}\n"
+        "   case 'qsort':{const items=[];for(let i=0;i<a[1];i++)items.push(this.read(a[0]+i*a[2],a[2]));const x=this.allocate(a[2]),y=this.allocate(a[2]);items.sort((l,r)=>{this.write(x,l);this.write(y,r);return Number(BigInt.asIntN(32,BigInt(this.invoke(a[3],[x,y],true))));});for(let i=0;i<items.length;i++)this.write(a[0]+i*a[2],items[i]);this.free(x);this.free(y);return 0;}\n"
+        "   case 'open':case 'fopen':{const path=this.string(a[0]);if(path==='/dev/urandom'||path==='/dev/random'){const fd=this.nextFD++;this.files.set(fd,{kind:'entropy',position:0});return fd;}this.write32(this.errno,2);return name==='fopen'?0:-1;}\n"
+        "   case 'fstat':{const file=this.files.get(a[0]);if(!file){this.write32(this.errno,9);return -1;}this.write(a[1],new Uint8Array(128));this.write32(a[1]+16,file.kind==='entropy'?0x21b6:0x81a4);this.write32(a[1]+20,1);this.write32(a[1]+56,4096);return 0;}\n"
+        "   case 'read':{const file=this.files.get(a[0]);if(file?.kind==='entropy'){this.write(a[1],this.takeEntropy(a[2]));file.position+=a[2];return a[2];}return this.hostCall(name,a);}\n"
+        "   case 'fread':{const file=this.files.get(a[3]);if(file?.kind==='entropy'){this.write(a[0],this.takeEntropy(a[1]*a[2]));file.position+=a[1]*a[2];return a[2];}throw Error('unsupported FILE read');}\n"
+        "   case 'feof':case 'ferror':return 0;\n"
+        "   case 'ftell':return this.files.get(a[0])?.position||0;\n"
+        "   case 'fclose':if(this.files.delete(a[0]))return 0;this.write32(this.errno,9);return -1;\n"
+        "   case 'close':if(this.files.delete(a[0]))return 0;return this.hostCall(name,a);\n"
+        "   case 'access':case 'stat':case 'lstat':this.write32(this.errno,2);return -1;\n"
+        "   case 'snprintf':case 'sprintf':case 'vsnprintf':return this.format(name,a);\n"
+        "   case 'abort':case 'exit':case '__stack_chk_fail':throw Error('official library terminated: '+name);\n"
+        "   default:throw Error('unsupported libc import '+name);\n"
+        '  }\n'
+        ' }\n'
+        " takeEntropy(n){if(this.entropyPosition+n>this.entropy.length)throw Error('host entropy exhausted');const b=this.entropy.slice(this.entropyPosition,this.entropyPosition+n);this.entropyPosition+=n;return b;}\n"
+        ' hostCall(name,args){\n'
+        '  const request={name,args};\n'
+        "  if(['send','sendto','write','connect'].includes(name))request.data=this.base64(this.read(args[1],args[2]));\n"
+        "  if(name==='setsockopt')request.data=this.base64(this.read(args[3],args[4]));\n"
+        "  if(name==='getsockopt'||name==='getsockname'||name==='getpeername')request.length=this.read32(args[name==='getsockopt'?4:2]);\n"
+        "  if(name==='poll')request.data=this.base64(this.read(args[0],args[1]*8));\n"
+        '  return {host_request:request};\n'
+        ' }\n'
+        ' format(name,a){\n'
+        "  const fmt=this.string(a[name==='sprintf'?1:2]);let reg=name==='sprintf'?2:3,stack=Number(this.e.reg_read_i64(this.uc.ARM64_REG_SP));\n"
+        "  let va=name==='vsnprintf'?a[3]:0;\n"
+        '  const next=()=>{if(va){const off=new DataView(this.read(va+24,4).buffer).getInt32(0,true);if(off<0){const value=this.read64(this.read64(va+8)+off);this.write32(va+24,off+8);return value;}const p=this.read64(va);this.write64(va,p+8);return this.read64(p);}return reg<8?a[reg++]:this.read64(stack+(reg++-8)*8);};\n'
+        '  const out=fmt.replace(/%([-+ #0]*)(\\d+|\\*)?(?:\\.(\\d+|\\*))?(hh|ll|[hljztL])?([%csdiuoxXp])/g,(whole,flags,width,precision,length,type)=>{\n'
+        "   if(type==='%')return '%';if(width==='*')width=next();if(precision==='*')precision=next();const value=next();let result;\n"
+        "   if(type==='s'){result=value?this.string(value):'(null)';if(precision!==undefined)result=result.slice(0,Number(precision));}\n"
+        "   else if(type==='c')result=String.fromCharCode(value&255);\n"
+        "   else if(type==='p')result='0x'+value.toString(16);\n"
+        "   else{let v=BigInt(value);if(!['ll','l','z','t','j'].includes(length))v=BigInt.asUintN(32,v);if(type==='d'||type==='i')v=BigInt.asIntN(length==='ll'||length==='l'?64:32,v);result=v.toString(type==='x'||type==='X'?16:type==='o'?8:10);if(type==='X')result=result.toUpperCase();}\n"
+        "   if(width&&result.length<Number(width))result=flags.includes('-')?result.padEnd(Number(width),' '):result.padStart(Number(width),flags.includes('0')?'0':' ');return result;\n"
+        '  });\n'
+        "  if(/%[^%]/.test(out))throw Error('unsupported C format');const max=name==='sprintf'?out.length+1:a[1];if(max){const n=Math.min(out.length,max-1);const b=new Uint8Array(n+1);for(let i=0;i<n;i++)b[i]=out.charCodeAt(i)&255;this.write(a[0],b);}return out.length;\n"
+        ' }\n'
+        ' jni(index,a){\n'
+        '  switch(index){\n'
+        "   case 6:return this.object('class',this.string(a[1])); // FindClass\n"
+        '   case 15:return 0; // ExceptionOccurred\n'
+        '   case 17:return 0; // ExceptionClear\n'
+        '   case 21:case 25:return a[1]; // NewGlobalRef / NewLocalRef\n'
+        '   case 22:case 23:return 0; // DeleteGlobalRef / DeleteLocalRef\n'
+        '   case 24:return a[1]===a[2]?1:0;\n'
+        "   case 33:case 94:case 113:case 144:return this.object('member',{owner:this.objects.get(a[1]),name:this.string(a[2]),signature:this.string(a[3])});\n"
+        "   case 150:{const member=this.objects.get(a[2]);if(member?.value.name==='SDK_INT')return 23;throw Error('unsupported static int field');}\n"
+        '   case 167:return this.cstring(this.string(a[1]));\n'
+        '   case 168:return this.cbytes(a[1]).length;\n'
+        '   case 169:if(a[2])this.write(a[2],new Uint8Array(1));return a[1];\n'
+        '   case 170:return 0;\n'
+        '   case 215:{for(let i=0;i<a[3];i++){const p=a[2]+i*24;const name=this.string(this.read64(p)),signature=this.string(this.read64(p+8));this.natives[name+signature]=this.read64(p+16);}return 0;}\n'
+        '   case 219:this.write64(a[1],this.jvm);return 0;\n'
+        '   case 228:return 0; // ExceptionCheck\n'
+        "   default:throw Error('unsupported JNI entry '+index);\n"
+        '  }\n'
+        ' }\n'
+        ' packetBinary(channel,length){\n'
+        '  const data=globalThis.__mediaInput.subarray(0,length);\n'
+        "  if(length<4||length>4*1024*1024||!(data[0]===0&&data[1]===0&&(data[2]===1||(data[2]===0&&data[3]===1))))throw Error('invalid Annex B media');\n"
+        '  let state=this.states.get(channel);\n'
+        '  if(state){this.states.delete(channel);this.states.set(channel,state);}\n'
+        '  else{if(this.states.size>=8){const old=this.states.keys().next().value;this.free(this.states.get(old));this.states.delete(old);}state=this.allocate(1024,true);this.states.set(channel,state);}\n'
+        '  const buffer=this.allocate(length+64,true);this.write(buffer,data);\n'
+        "  try{const code=this.invoke(this.base+0xfec68,[buffer,length,0,state]);if(typeof code!=='number')throw Error('unexpected media I/O');globalThis.__mediaOutput=code===0?this.read(buffer,length):null;return {code};}\n"
+        '  finally{this.free(buffer);}\n'
+        ' }\n'
+        ' reset(channel){const old=this.states.get(channel);if(old){this.free(old);this.states.delete(channel);}}\n'
+        ' close(){this.e.close();}\n'
         '}\n'
-    ),
-    'src/main/java/KooSessionBridge.java': (
-        'import com.alibaba.fastjson.JSON;\n'
-        'import com.alibaba.fastjson.JSONObject;\n'
-        'import com.alibaba.fastjson.JSONException;\n'
-        'import com.alibaba.fastjson.serializer.SerializerFeature;\n'
-        'import com.alibaba.fastjson.parser.Feature;\n'
-        'import com.github.unidbg.AndroidEmulator;\n'
-        'import com.github.unidbg.Module;\n'
-        'import com.github.unidbg.memory.MemoryBlock;\n'
-        'import java.io.BufferedInputStream;\n'
-        'import java.io.ByteArrayOutputStream;\n'
-        'import java.io.File;\n'
-        'import java.io.IOException;\n'
-        'import java.io.InputStream;\n'
-        'import java.nio.charset.StandardCharsets;\n'
-        'import java.nio.file.Files;\n'
-        'import java.security.MessageDigest;\n'
-        'import java.util.Base64;\n'
-        'import java.util.Iterator;\n'
-        'import java.util.LinkedHashMap;\n'
-        'import java.util.Map;\n'
-        '\n'
-        '/** Serial NDJSON bridge over an already authorized, unmodified Koo SDK session.\n'
-        ' * Reads only user media and never returns license, identity, state or key data.\n'
-        ' */\n'
-        'public final class KooSessionBridge {\n'
-        '    public static final String PREFIX="UDRM_RPC ";\n'
-        '    public static final int MAX_PACKET=4*1024*1024;\n'
-        '    private static final int MAX_BASE64=((MAX_PACKET+2)/3)*4;\n'
-        '    private static final int MAX_LINE=MAX_BASE64+16384;\n'
-        '    private static final int MAX_CHANNELS=8;\n'
-        '    private static final String LIBRARY_SHA256="41cd081ba0348b9802cedfceedb6bfa12c4db8f7cc462ffd3b531df6874f0a9e";\n'
-        '    private static final long PROCESS_OFFSET=0xfec68L;\n'
-        '\n'
-        '    public static void verifyLibrary(File library)throws Exception{\n'
-        '        MessageDigest digest=MessageDigest.getInstance("SHA-256");\n'
-        '        try(InputStream input=Files.newInputStream(library.toPath())){\n'
-        '            byte[] bytes=new byte[65536];int count;\n'
-        '            while((count=input.read(bytes))!=-1)digest.update(bytes,0,count);\n'
-        '        }\n'
-        '        StringBuilder value=new StringBuilder();\n'
-        '        for(byte b:digest.digest())value.append(String.format("%02x",b&255));\n'
-        '        if(!LIBRARY_SHA256.equals(value.toString()))\n'
-        '            throw new IllegalStateException("Unsupported Koo library SHA-256");\n'
-        '    }\n'
-        '    private static void emit(Object id,int code,String data,String error,String event){\n'
-        '        JSONObject response=new JSONObject(true);\n'
-        '        response.put("id",id);response.put("code",code);response.put("data",data);\n'
-        '        if(error!=null)response.put("error",error);\n'
-        '        if(event!=null)response.put("event",event);\n'
-        '        System.out.println(PREFIX+JSON.toJSONString(response,SerializerFeature.WriteMapNullValue));System.out.flush();\n'
-        '    }\n'
-        '    /** Drains oversized records without retaining their contents or losing framing. */\n'
-        '    private static final class Lines {\n'
-        '        private final InputStream input=new BufferedInputStream(System.in,65536);\n'
-        '        byte[] next()throws IOException{\n'
-        '            ByteArrayOutputStream line=new ByteArrayOutputStream(4096);\n'
-        '            boolean oversize=false,any=false;int value;\n'
-        '            while((value=input.read())!=-1){\n'
-        "                any=true;if(value=='\\n')break;\n"
-        '                if(!oversize){\n'
-        '                    if(line.size()>=MAX_LINE){oversize=true;line.reset();}\n'
-        '                    else line.write(value);\n'
-        '                }\n'
-        '            }\n'
-        '            if(!any&&value==-1)return null;\n'
-        '            return oversize?new byte[0]:line.toByteArray();\n'
-        '        }\n'
-        '    }\n'
-        '    private static boolean annexB(byte[] data){\n'
-        '        return data.length>=4&&data[0]==0&&data[1]==0\n'
-        '            &&(data[2]==1||(data[2]==0&&data[3]==1));\n'
-        '    }\n'
-        '    private static boolean safeId(Object id){\n'
-        '        return id==null||((id instanceof String||id instanceof Number)&&id.toString().length()<=128);\n'
-        '    }\n'
-        '    public static void serve(AndroidEmulator emulator,Module module,File library,boolean sdkLicenseAccepted)throws Exception{\n'
-        '        if(!sdkLicenseAccepted)throw new IllegalStateException("Official SDK license required");\n'
-        '        verifyLibrary(library);\n'
-        '        LinkedHashMap<String,MemoryBlock> states=new LinkedHashMap<>(16,0.75f,true);\n'
-        '        Lines lines=new Lines();\n'
-        '        emit(null,0,"",null,"ready");\n'
-        '        try{\n'
-        '            byte[] line;\n'
-        '            while((line=lines.next())!=null){\n'
-        '                if(line.length==0){emit(null,-413,"","empty_or_oversized_record",null);continue;}\n'
-        '                Object id=null;MemoryBlock packet=null;\n'
-        '                try{\n'
-        '                    // Treat special JSON keys as ordinary keys; never enable auto types.\n'
-        '                    JSONObject request=JSON.parseObject(new String(line,StandardCharsets.UTF_8),Feature.DisableSpecialKeyDetect);\n'
-        '                    if(request==null)throw new IllegalArgumentException();\n'
-        '                    id=request.get("id");\n'
-        '                    if(!safeId(id)){id=null;throw new IllegalArgumentException();}\n'
-        '                    Object channelValue=request.get("channel");\n'
-        '                    if(!(channelValue instanceof String))throw new IllegalArgumentException();\n'
-        '                    String channel=(String)channelValue;\n'
-        "                    if(channel.isEmpty()||channel.length()>128||channel.indexOf('\\0')>=0)throw new IllegalArgumentException();\n"
-        '                    Object op=request.get("op");\n'
-        '                    if("reset".equals(op)){\n'
-        '                        MemoryBlock old=states.remove(channel);if(old!=null)old.free();\n'
-        '                        emit(id,0,"",null,"reset");continue;\n'
-        '                    }\n'
-        '                    if(op!=null&&!"process".equals(op))throw new IllegalArgumentException();\n'
-        '                    Object dataValue=request.get("data");\n'
-        '                    if(!(dataValue instanceof String))throw new IllegalArgumentException();\n'
-        '                    String encoded=(String)dataValue;\n'
-        '                    if(encoded.length()>MAX_BASE64){emit(id,-413,"","media_too_large",null);continue;}\n'
-        '                    byte[] data=Base64.getDecoder().decode(encoded);\n'
-        '                    if(data.length>MAX_PACKET){emit(id,-413,"","media_too_large",null);continue;}\n'
-        '                    if(!annexB(data))throw new IllegalArgumentException();\n'
-        '                    MemoryBlock state=states.get(channel);\n'
-        '                    if(state==null){\n'
-        '                        if(states.size()>=MAX_CHANNELS){\n'
-        '                            Iterator<Map.Entry<String,MemoryBlock>> iterator=states.entrySet().iterator();\n'
-        '                            Map.Entry<String,MemoryBlock> oldest=iterator.next();oldest.getValue().free();iterator.remove();\n'
-        '                        }\n'
-        '                        state=emulator.getMemory().malloc(1024,true);\n'
-        '                        state.getPointer().write(0,new byte[1024],0,1024);states.put(channel,state);\n'
-        '                    }\n'
-        '                    packet=emulator.getMemory().malloc(data.length+64,true);\n'
-        '                    packet.getPointer().write(0,data,0,data.length);\n'
-        '                    packet.getPointer().write(data.length,new byte[64],0,64);\n'
-        '                    // Mirror the verified Koo packet ABI, after official rights==0.\n'
-        '                    int result=module.callFunction(emulator,PROCESS_OFFSET,\n'
-        '                        packet.getPointer(),data.length,0,state.getPointer()).intValue();\n'
-        '                    if(result==0){\n'
-        '                        byte[] processed=packet.getPointer().getByteArray(0,data.length);\n'
-        '                        emit(id,0,Base64.getEncoder().encodeToString(processed),null,null);\n'
-        '                    }else emit(id,result,"","sdk_media_rejected",null);\n'
-        '                }catch(IllegalArgumentException|JSONException error){\n'
-        '                    emit(id,-400,"","invalid_request_or_annexb",null);\n'
-        '                }catch(RuntimeException error){\n'
-        '                    // Native/runtime faults can corrupt state; fail closed and exit.\n'
-        '                    emit(id,-500,"","native_runtime_failure",null);throw error;\n'
-        '                }finally{if(packet!=null)packet.free();}\n'
-        '            }\n'
-        '        }finally{\n'
-        '            for(MemoryBlock state:states.values())state.free();states.clear();\n'
-        '        }\n'
-        '    }\n'
-        '}\n'
-    ),
-    'src/main/java/NativeDiagnostics.java': (
-        'import java.io.ByteArrayOutputStream;\n'
-        'import java.io.IOException;\n'
-        'import java.io.OutputStream;\n'
-        'import java.io.PrintStream;\n'
-        'import java.nio.charset.StandardCharsets;\n'
-        '/** Suppress vendor challenge, identity and license payloads from probe logs. */\n'
-        'final class NativeDiagnostics extends OutputStream {\n'
-        '    private final PrintStream destination;\n'
-        '    private final ByteArrayOutputStream line=new ByteArrayOutputStream();\n'
-        '    NativeDiagnostics(PrintStream destination){this.destination=destination;}\n'
-        '    static void install() throws Exception {\n'
-        '        System.setErr(new PrintStream(new NativeDiagnostics(System.err),true,StandardCharsets.UTF_8.name()));\n'
-        '    }\n'
-        '    @Override public synchronized void write(int value) throws IOException {\n'
-        "        if(value!='\\n'){line.write(value);return;}\n"
-        '        String text=line.toString(StandardCharsets.UTF_8.name());line.reset();\n'
-        '        if(text.contains("certificateChain")||text.contains("\\"nonce\\"")||text.contains("\\"signature\\"")\n'
-        '            ||text.contains("ucDeviceID")||text.contains("LICENSE_PRINT")||text.contains("send:[")||text.contains("recv:[")) {\n'
-        '            destination.println("[SDK request/identity/license diagnostics omitted]");\n'
-        '        } else destination.println(text);\n'
-        '    }\n'
-        '    @Override public void flush(){destination.flush();}\n'
-        '}\n'
-    ),
-    'src/main/java/com/github/unidbg/linux/file/DnsProxyDaemon.java': (
-        'package com.github.unidbg.linux.file;\n'
-        '\n'
-        'import com.github.unidbg.file.linux.StatStructure;\n'
-        'import java.io.ByteArrayOutputStream;\n'
-        'import java.io.DataOutputStream;\n'
-        'import java.io.IOException;\n'
-        'import java.nio.charset.StandardCharsets;\n'
-        '\n'
-        '/** Minimal Android API23 netd gethostbyname adapter, restricted to loopback.\n'
-        ' * This replaces an unsupported unidbg OS service, not any DRM code or check.\n'
-        ' * Wire schema: AOSP android-6.0.1_r1 system/netd/server/DnsProxyListener.cpp,\n'
-        ' * sendhostent(). No DNS resolution or off-host network access is performed.\n'
-        ' */\n'
-        'class DnsProxyDaemon implements LocalSocketIO.SocketHandler {\n'
-        '    private final ByteArrayOutputStream pending = new ByteArrayOutputStream();\n'
-        '    DnsProxyDaemon(int sdk) {}\n'
-        '    @Override public int fstat(StatStructure stat) {\n'
-        '        stat.st_size = 0; stat.st_blksize = 0; stat.pack(); return 0;\n'
-        '    }\n'
-        '    @Override public byte[] handle(byte[] request) throws IOException {\n'
-        '        pending.write(request);\n'
-        '        byte[] data = pending.toByteArray();\n'
-        '        int end = -1;\n'
-        '        for (int i=0; i<data.length; i++) if (data[i]==0) { end=i; break; }\n'
-        '        if (end<0) return null;\n'
-        '        pending.reset();\n'
-        '        String command = new String(data,0,end,StandardCharsets.US_ASCII);\n'
-        '        String[] tokens=command.split("\\\\s+");\n'
-        '        if (tokens.length==4 && tokens[0].equals("gethostbyname")\n'
-        '            && tokens[2].equals("127.0.0.1") && tokens[3].equals("2")) {\n'
-        '            ByteArrayOutputStream out=new ByteArrayOutputStream();\n'
-        '            DataOutputStream wire=new DataOutputStream(out);\n'
-        '            wire.write("222\\0".getBytes(StandardCharsets.US_ASCII));\n'
-        '            byte[] host="127.0.0.1\\0".getBytes(StandardCharsets.US_ASCII);\n'
-        '            wire.writeInt(host.length); wire.write(host);\n'
-        '            wire.writeInt(0); // no aliases\n'
-        '            wire.writeInt(2); // AF_INET\n'
-        '            wire.writeInt(4); // IPv4 address length\n'
-        '            // API23 netd serializes each hostent address in a 16-byte slot.\n'
-        '            wire.writeInt(16); wire.write(new byte[]{127,0,0,1}); wire.write(new byte[12]);\n'
-        '            wire.writeInt(0); // end address list\n'
-        '            System.out.println("PROBE phase=dns result=loopback_resolved adapter=android_netd_api23");\n'
-        '            return out.toByteArray();\n'
-        '        }\n'
-        '        System.out.println("PROBE phase=dns result=denied_non_loopback_or_unsupported");\n'
-        "        return new byte[]{'4','0','1',0,0,0,0,0};\n"
-        '    }\n'
-        '}\n'
-    ),
+        'globalThis.KooVM=KooVM;\n'
+    )
 }
 
 PYTHON_SOURCES = {
-    'bootstrap': (
-        '"""Verified, cache-local bootstrap for the standalone CCTV App research bridge.\n'
-        '\n'
-        "Only Python's standard library is used here.  SDK binaries are obtained from the\n"
-        'pinned official APK at setup time; no HAR, credentials or licences are embedded.\n'
-        '"""\n'
-        'from __future__ import annotations\n'
-        '\n'
-        'import contextlib\n'
-        'import hashlib\n'
+    'jsc_host': (
+        '"""Callback-free JavaScriptCore host; supports embedded NUL via UTF-16 API."""\n'
+        'import ctypes as c\n'
         'import json\n'
+        'import threading\n'
+        'import time\n'
+        'from pathlib import Path\n'
+        "APPLE='/System/Library/Frameworks/JavaScriptCore.framework/JavaScriptCore'\n"
+        'class JSCHost:\n'
+        ' def __init__(self,library=APPLE):\n'
+        '  self.owner=threading.get_ident();self.j=c.CDLL(str(library));p=c.c_void_p\n'
+        "  for n,result,args in [('JSGlobalContextCreate',p,[p]),('JSGlobalContextRelease',None,[p]),('JSContextGetGroup',p,[p]),('JSContextGroupSetExecutionTimeLimit',None,[p,c.c_double,p,p]),('JSContextGroupClearExecutionTimeLimit',None,[p]),('JSStringCreateWithCharacters',p,[p,c.c_size_t]),('JSStringRelease',None,[p]),('JSEvaluateScript',p,[p,p,p,p,c.c_int,c.POINTER(p)]),('JSValueToStringCopy',p,[p,p,c.POINTER(p)]),('JSStringGetMaximumUTF8CStringSize',c.c_size_t,[p]),('JSStringGetUTF8CString',c.c_size_t,[p,p,c.c_size_t])]:\n"
+        '   fn=getattr(self.j,n);fn.restype=result;fn.argtypes=args\n'
+        "  for n,result,args in [('JSValueToObject',p,[p,p,c.POINTER(p)]),('JSObjectGetTypedArrayBytesPtr',p,[p,p,c.POINTER(p)]),('JSObjectGetTypedArrayByteLength',c.c_size_t,[p,p,c.POINTER(p)]),('JSGarbageCollect',None,[p]),('JSContextGetGlobalObject',p,[p]),('JSValueMakeFromJSONString',p,[p,p]),('JSObjectSetProperty',None,[p,p,p,p,c.c_uint,c.POINTER(p)])]:\n"
+        '   fn=getattr(self.j,n);fn.restype=result;fn.argtypes=args\n'
+        '  self.context=self.j.JSGlobalContextCreate(None);self.group=self.j.JSContextGetGroup(self.context)\n'
+        ' def _text(self,value):\n'
+        '  err=c.c_void_p();s=self.j.JSValueToStringCopy(self.context,value,c.byref(err))\n'
+        "  if not s:return '<unprintable>'\n"
+        '  try:\n'
+        '   n=self.j.JSStringGetMaximumUTF8CStringSize(s)\n'
+        "   if n>24*1024*1024:raise RuntimeError('JSC result limit')\n"
+        "   b=c.create_string_buffer(n);self.j.JSStringGetUTF8CString(s,b,n);return b.value.decode('utf8')\n"
+        '  finally:self.j.JSStringRelease(s)\n'
+        ' def evaluate(self,source,timeout=30):\n'
+        "  if self.owner!=threading.get_ident():raise RuntimeError('JSC owner thread')\n"
+        "  raw=source.encode('utf-16-le');buffer=c.create_string_buffer(raw);s=self.j.JSStringCreateWithCharacters(buffer,len(raw)//2)\n"
+        '  self.j.JSContextGroupSetExecutionTimeLimit(self.group,timeout,None,None)\n'
+        '  try:\n'
+        '   error=c.c_void_p();value=self.j.JSEvaluateScript(self.context,s,None,None,1,c.byref(error))\n'
+        "   if error.value:raise RuntimeError('JSC: '+self._text(error)[:500])\n"
+        "   if not value:raise RuntimeError('JSC empty result')\n"
+        '   return self._text(value)\n'
+        '  finally:self.j.JSStringRelease(s);self.j.JSContextGroupClearExecutionTimeLimit(self.group)\n'
+        ' def install_json(self,name,text):\n'
+        "  if self.owner!=threading.get_ident():raise RuntimeError('JSC owner thread')\n"
+        '  strings=[]\n'
+        '  try:\n'
+        '   for value in [name,text]:\n'
+        "    raw=value.encode('utf-16-le');buffer=c.create_string_buffer(raw)\n"
+        '    strings.append(self.j.JSStringCreateWithCharacters(buffer,len(raw)//2))\n'
+        '   value=self.j.JSValueMakeFromJSONString(self.context,strings[1])\n'
+        "   if not value:raise RuntimeError('JSC JSON parsing failed')\n"
+        '   error=c.c_void_p();obj=self.j.JSContextGetGlobalObject(self.context)\n'
+        '   self.j.JSObjectSetProperty(self.context,obj,strings[0],value,0,c.byref(error))\n'
+        "   if error.value:raise RuntimeError('JSC global JSON binding failed')\n"
+        '  finally:\n'
+        '   for value in strings:self.j.JSStringRelease(value)\n'
+        ' def _media_object(self,expression):\n'
+        "  if self.owner!=threading.get_ident():raise RuntimeError('JSC owner thread')\n"
+        "  raw=expression.encode('utf-16-le');buffer=c.create_string_buffer(raw);source=self.j.JSStringCreateWithCharacters(buffer,len(raw)//2)\n"
+        '  try:\n'
+        '   error=c.c_void_p();value=self.j.JSEvaluateScript(self.context,source,None,None,1,c.byref(error))\n'
+        "   if error.value or not value:raise RuntimeError('JSC media reference failed')\n"
+        '   obj=self.j.JSValueToObject(self.context,value,c.byref(error))\n'
+        "   if error.value or not obj:raise RuntimeError('JSC media object failed')\n"
+        '   return obj\n'
+        '  finally:self.j.JSStringRelease(source)\n'
+        ' def put_media(self,data):\n'
+        "  if not 0<len(data)<=4*1024*1024:raise ValueError('Media buffer limit')\n"
+        '  # Only host-owned media buffers cross this API, never SDK heap/state pointers.\n'
+        '  obj=self._media_object(\'if(typeof __mediaInput==="undefined"||__mediaInput.length<\'+str(len(data))+\')__mediaInput=new Uint8Array(\'+str(max(65536,1<<(len(data)-1).bit_length()))+\');__mediaInput\')\n'
+        '  error=c.c_void_p();pointer=self.j.JSObjectGetTypedArrayBytesPtr(self.context,obj,c.byref(error))\n'
+        "  if error.value or not pointer:raise RuntimeError('JSC input buffer failed')\n"
+        '  c.memmove(pointer,data,len(data))\n'
+        ' def read_media(self,size):\n'
+        "  obj=self._media_object('__mediaOutput');error=c.c_void_p()\n"
+        '  actual=self.j.JSObjectGetTypedArrayByteLength(self.context,obj,c.byref(error))\n'
+        "  if error.value or actual!=size:raise RuntimeError('JSC output buffer length failed')\n"
+        '  pointer=self.j.JSObjectGetTypedArrayBytesPtr(self.context,obj,c.byref(error))\n'
+        "  if error.value or not pointer:raise RuntimeError('JSC output buffer failed')\n"
+        '  return c.string_at(pointer,size)\n'
+        ' def collect(self):self.j.JSGarbageCollect(self.context)\n'
+        ' def close(self):\n'
+        '  if self.context:self.j.JSGlobalContextRelease(self.context);self.context=None\n'
+    ),
+    'elf_image': (
+        '"""Pinned AArch64 ELF description for the WASM guest, using only struct."""\n'
+        'import base64\n'
+        'import hashlib\n'
+        'import struct\n'
+        '\n'
+        "SDK_SHA256='41cd081ba0348b9802cedfceedb6bfa12c4db8f7cc462ffd3b531df6874f0a9e'\n"
+        'class ELFError(ValueError):pass\n'
+        '\n'
+        'def image_plan(data):\n'
+        "    if hashlib.sha256(data).hexdigest()!=SDK_SHA256:raise ELFError('Unsupported official SDK SHA-256')\n"
+        "    if data[:6]!=b'\\x7fELF\\x02\\x01':raise ELFError('Expected little-endian ELF64')\n"
+        "    header=struct.unpack_from('<HHIQQQIHHHHHH',data,16)\n"
+        '    kind,machine,version,entry,phoff,shoff,flags,ehsize,phsize,phnum,shsize,shnum,shstr=header\n'
+        "    if machine!=183 or kind!=3 or phsize!=56 or shsize!=64 or phnum>128 or shnum>4096:raise ELFError('Unsupported ELF layout')\n"
+        '    def region(offset,size):\n'
+        "        if offset<0 or size<0 or offset+size>len(data):raise ELFError('ELF region out of bounds')\n"
+        '        return data[offset:offset+size]\n'
+        '    segments=[];limit=0\n'
+        '    for i in range(phnum):\n'
+        "        t,f,offset,address,physical,filesize,memsize,align=struct.unpack('<IIQQQQQQ',region(phoff+i*phsize,56))\n"
+        '        if t==1:\n'
+        "            if memsize<filesize or address+memsize>64*1024*1024:raise ELFError('ELF segment size invalid')\n"
+        "            segments.append({'address':address,'memory':memsize,'data':base64.b64encode(region(offset,filesize)).decode()})\n"
+        '            limit=max(limit,address+memsize)\n'
+        "    if not segments:raise ELFError('ELF has no load segments')\n"
+        "    sections=[struct.unpack('<IIQQQQIIQQ',region(shoff+i*shsize,64)) for i in range(shnum)]\n"
+        '    def section(i):\n'
+        "        if not 0<=i<len(sections):raise ELFError('ELF section index invalid')\n"
+        '        return sections[i]\n'
+        '    def symbols(i):\n'
+        '        sec=section(i);strings=section(sec[6]);names=region(strings[4],strings[5]);result=[]\n'
+        "        if sec[9]!=24 or sec[5]%24:raise ELFError('Unsupported symbol table')\n"
+        '        for cursor in range(sec[4],sec[4]+sec[5],24):\n'
+        "            offset,info,other,index,value,size=struct.unpack('<IBBHQQ',region(cursor,24))\n"
+        "            end=names.find(b'\\0',offset)\n"
+        "            if end<0:raise ELFError('ELF symbol name unterminated')\n"
+        "            result.append((names[offset:end].decode('utf8'),index,value))\n"
+        '        return result\n'
+        '    symtabs={i:symbols(i) for i,s in enumerate(sections) if s[1]==11}\n'
+        '    exported={name:value for table in symtabs.values() for name,index,value in table if name and index!=0}\n'
+        '    relocations=[];imports=[]\n'
+        '    for sec in sections:\n'
+        '        if sec[1]!=4:continue\n'
+        "        if sec[9]!=24 or sec[5]%24:raise ELFError('Unsupported relocation table')\n"
+        '        table=symtabs.get(sec[6])\n'
+        "        if table is None:raise ELFError('Relocations do not use the dynamic symbol table')\n"
+        '        for cursor in range(sec[4],sec[4]+sec[5],24):\n'
+        "            offset,info,addend=struct.unpack('<QQq',region(cursor,24));t=info&0xffffffff;index=info>>32\n"
+        "            if t not in (257,1025,1026,1027) or offset+8>limit or index>=len(table):raise ELFError('Unsupported ELF relocation')\n"
+        "            name,section_index,value=table[index];name=name if section_index==0 else ''\n"
+        '            if name and name not in imports:imports.append(name)\n'
+        "            relocations.append({'offset':offset,'type':t,'addend':addend,'symbol':value,'import':name})\n"
+        "    return {'length':(limit+4095)&~4095,'segments':segments,'symbols':exported,'relocations':relocations,'imports':imports}\n"
+    ),
+    'local_tls': (
+        '"""Generate only this process\'s loopback TLS certificate, with stdlib RSA.\n'
+        'No vendor/device keys are read. The small certificate is never used for upstream\n'
+        'trust; external HTTPS still uses the ordinary system CA verification.\n'
+        '"""\n'
+        'import base64\n'
+        'from datetime import datetime,timedelta,timezone\n'
+        'import hashlib\n'
+        'import math\n'
         'import os\n'
-        'from pathlib import Path, PurePosixPath\n'
-        'import re\n'
-        'import shutil\n'
-        'import subprocess\n'
+        'from pathlib import Path\n'
+        'import secrets\n'
+        'import ssl\n'
+        'import tempfile\n'
+        '\n'
+        '\n'
+        'def _der(tag,body):\n'
+        '    n=len(body)\n'
+        "    length=bytes([n]) if n<128 else (lambda b:bytes([128|len(b)])+b)(n.to_bytes((n.bit_length()+7)//8,'big'))\n"
+        '    return bytes([tag])+length+body\n'
+        '\n'
+        "def _seq(*items):return _der(0x30,b''.join(items))\n"
+        'def _integer(n):\n'
+        "    b=n.to_bytes(max(1,(n.bit_length()+7)//8),'big')\n"
+        "    return _der(2,(b'\\0' if b[0]&128 else b'')+b)\n"
+        'def _oid(parts):\n'
+        '    values=[40*parts[0]+parts[1]]+list(parts[2:]);result=bytearray()\n'
+        '    for value in values:\n'
+        '        b=[value&127];value>>=7\n'
+        '        while value:b.insert(0,128|(value&127));value>>=7\n'
+        '        result.extend(b)\n'
+        '    return _der(6,bytes(result))\n'
+        'def _pem(label,data):\n'
+        '    body=base64.b64encode(data)\n'
+        "    return b'-----BEGIN '+label+b'-----\\n'+b'\\n'.join(body[i:i+64] for i in range(0,len(body),64))+b'\\n-----END '+label+b'-----\\n'\n"
+        '\n'
+        '_SMALL=(3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97)\n'
+        'def _prime(bits):\n'
+        '    while True:\n'
+        '        n=secrets.randbits(bits)|(3<<(bits-2))|1\n'
+        '        if any(n%p==0 for p in _SMALL) or math.gcd(n-1,65537)!=1:continue\n'
+        '        d=n-1;s=0\n'
+        '        while d%2==0:d//=2;s+=1\n'
+        '        for _ in range(40):\n'
+        '            x=pow(2+secrets.randbelow(n-3),d,n)\n'
+        '            if x in (1,n-1):continue\n'
+        '            for _ in range(s-1):\n'
+        '                x=x*x%n\n'
+        '                if x==n-1:break\n'
+        '            else:break\n'
+        '        else:return n\n'
+        '\n'
+        '\n'
+        'def certificate_pem():\n'
+        '    """Return a new local RSA-2048 key/cert. No third-party crypto package."""\n'
+        '    p=_prime(1024);q=_prime(1024)\n'
+        '    while p==q or (p*q).bit_length()!=2048:q=_prime(1024)\n'
+        '    n=p*q;e=65537;d=pow(e,-1,math.lcm(p-1,q-1))\n'
+        '    key=_seq(*map(_integer,[0,n,e,d,p,q,d%(p-1),d%(q-1),pow(q,-1,p)]))\n'
+        "    null=_der(5,b'')\n"
+        '    algorithm=_seq(_oid((1,2,840,113549,1,1,11)),null)\n'
+        "    public=_seq(_seq(_oid((1,2,840,113549,1,1,1)),null),_der(3,b'\\0'+_seq(_integer(n),_integer(e))))\n"
+        "    name=_seq(_der(0x31,_seq(_oid((2,5,4,3)),_der(12,b'Local SDK Transport'))))\n"
+        '    now=datetime.now(timezone.utc)\n'
+        "    validity=_seq(*[_der(0x17,t.strftime('%y%m%d%H%M%SZ').encode()) for t in (now-timedelta(days=1),now+timedelta(days=7))])\n"
+        "    san=_seq(_oid((2,5,29,17)),_der(4,_seq(_der(0x87,b'\\x7f\\0\\0\\x01'))))\n"
+        '    tbs=_seq(_der(0xa0,_integer(2)),_integer(secrets.randbits(127)|1),algorithm,name,validity,name,public,_der(0xa3,_seq(san)))\n'
+        "    digest_info=bytes.fromhex('3031300d060960864801650304020105000420')+hashlib.sha256(tbs).digest()\n"
+        "    encoded=b'\\x00\\x01'+b'\\xff'*(256-len(digest_info)-3)+b'\\x00'+digest_info\n"
+        "    signature=pow(int.from_bytes(encoded,'big'),d,n).to_bytes(256,'big')\n"
+        "    cert=_seq(tbs,algorithm,_der(3,b'\\0'+signature))\n"
+        "    return _pem(b'CERTIFICATE',cert),_pem(b'RSA PRIVATE KEY',key)\n"
+        '\n'
+        '\n'
+        'def make_server_context():\n'
+        '    cert,key=certificate_pem()\n'
+        '    context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)\n'
+        "    # Python's SSL API accepts certificate filenames, so use the app's writable\n"
+        '    # temporary directory briefly and unlink both files immediately after load.\n'
+        "    with tempfile.TemporaryDirectory(prefix='cbox-local-tls-') as name:\n"
+        '        root=Path(name);root.chmod(0o700)\n'
+        "        for filename,data in [('cert.pem',cert),('key.pem',key)]:\n"
+        '            target=root/filename\n'
+        '            fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)\n'
+        "            with os.fdopen(fd,'wb') as stream:stream.write(data)\n"
+        "        context.load_cert_chain(root/'cert.pem',root/'key.pem')\n"
+        '    return context\n'
+    ),
+    'bootstrap_nojdk': (
+        '"""Verified official SDK and WASM downloads; no compiler, JVM, pip or shell."""\n'
+        'import base64\n'
+        'import hashlib\n'
+        'import io\n'
+        'import logging\n'
+        'import os\n'
+        'from pathlib import Path\n'
         'import tarfile\n'
         'import tempfile\n'
-        'import time\n'
-        'from typing import Callable, Mapping\n'
-        'from urllib.parse import unquote, urlsplit\n'
-        'from urllib.request import Request, getproxies, urlopen\n'
-        'import xml.etree.ElementTree as ET\n'
+        'import threading\n'
+        'from urllib.request import Request,urlopen\n'
         'import zipfile\n'
+        'from elf_image import SDK_SHA256\n'
         '\n'
-        "APK_URL = 'https://download.cntv.cn/app/cntv/cbox_7.9.31_release_androidguanwang.apk'\n"
-        "APK_SHA256 = 'f6c8bde63f14b3bffb57d1e838a71e80e85abf5cbe4717b983aa787134324d75'\n"
-        "LIBRARY_MEMBER = 'lib/arm64-v8a/libkooplayer260728D.so'\n"
-        "LIBRARY_SHA256 = '41cd081ba0348b9802cedfceedb6bfa12c4db8f7cc462ffd3b531df6874f0a9e'\n"
-        'LIBRARY_BYTES = 5229120\n'
-        "MAVEN_VERSION = '3.9.11'\n"
-        "MAVEN_URL = ('https://archive.apache.org/dist/maven/maven-3/' + MAVEN_VERSION\n"
-        "             + '/binaries/apache-maven-' + MAVEN_VERSION + '-bin.tar.gz')\n"
-        "MAVEN_SHA512 = ('bcfe4fe305c962ace56ac7b5fc7a08b87d5abd8b7e89027ab251069faebee516b'\n"
-        "                '0ded8961445d6d91ec1985dfe30f8153268843c89aa392733d1a3ec956c9978')\n"
+        "APK_URL='https://download.cntv.cn/app/cntv/cbox_7.9.31_release_androidguanwang.apk'\n"
+        "APK_SHA256='f6c8bde63f14b3bffb57d1e838a71e80e85abf5cbe4717b983aa787134324d75'\n"
+        "SDK_MEMBER='lib/arm64-v8a/libkooplayer260728D.so'\n"
+        "WASM_URL='https://cdn.jsdelivr.net/npm/@alexaltea/unicorn-js@2.1.4/dist/unicorn_aarch64.js'\n"
+        "WASM_SHA256='b497aa99d973f0a5eb27fe7e14e8d32f76298bf6cc6008f9035c4a8d8b91cb37'\n"
+        "NPM_URL='https://registry.npmjs.org/@alexaltea/unicorn-js/-/unicorn-js-2.1.4.tgz'\n"
+        "NPM_INTEGRITY='UAml23tgHyXEuP2A7Y50qDCNYMIRHJobsjlhetPRrtH+PXg0+BNAyvPQEKoCd+VHAF1nDfPHE4yJCqSLVtOrXA=='\n"
+        "LOG=logging.getLogger('cbox-app-udrm')\n"
+        '_LOCK=threading.Lock();_MEMORY={};_CACHE_WARNING=False\n'
+        'class BootstrapError(RuntimeError):pass\n'
         '\n'
-        '\n'
-        'class BootstrapError(RuntimeError):\n'
-        '    """A setup error safe to show without exposing environment proxy values."""\n'
-        '\n'
-        '\n'
-        'def default_cache_dir() -> Path:\n'
-        "    base = os.environ.get('XDG_CACHE_HOME')\n"
-        "    return (Path(base).expanduser() if base else Path.home() / '.cache') / 'cbox-app-udrm'\n"
-        '\n'
-        '\n'
-        'def _private_dir(path: Path) -> None:\n'
-        '    path.mkdir(parents=True, exist_ok=True)\n'
-        "    if os.name != 'nt':\n"
-        '        path.chmod(0o700)\n'
-        '\n'
-        '\n'
-        'def _atomic_bytes(path: Path, data: bytes, mode: int = 0o600) -> None:\n'
-        '    path.parent.mkdir(parents=True, exist_ok=True)\n'
-        "    fd, temp_name = tempfile.mkstemp(prefix='.' + path.name + '.', dir=path.parent)\n"
-        '    temp = Path(temp_name)\n'
+        'def _read_cached(cache,name,digest):\n'
+        '    global _CACHE_WARNING\n'
+        '    if cache is None:return None\n'
         '    try:\n'
-        "        with os.fdopen(fd, 'wb') as stream:\n"
-        '            stream.write(data)\n'
-        '            stream.flush()\n'
-        '            os.fsync(stream.fileno())\n'
-        '        temp.chmod(mode)\n'
-        '        os.replace(temp, path)\n'
+        '        path=cache/name\n'
+        '        if path.is_file():\n'
+        '            data=path.read_bytes()\n'
+        '            if hashlib.sha256(data).hexdigest()==digest:return data\n'
+        '    except OSError:\n'
+        "        if not _CACHE_WARNING:LOG.info('缓存不可读；使用内存');_CACHE_WARNING=True\n"
+        '    return None\n'
+        '\n'
+        'def _cache(cache,name,data):\n'
+        '    global _CACHE_WARNING\n'
+        '    if cache is None:return\n'
+        '    temporary=None\n'
+        '    try:\n'
+        '        cache.mkdir(parents=True,exist_ok=True);cache.chmod(0o700)\n'
+        "        fd,name_tmp=tempfile.mkstemp(prefix='.download-',dir=cache);temporary=Path(name_tmp)\n"
+        "        with os.fdopen(fd,'wb') as stream:stream.write(data)\n"
+        '        temporary.chmod(0o600);os.replace(temporary,cache/name)\n'
+        '    except OSError:\n'
+        "        if not _CACHE_WARNING:LOG.info('缓存目录不可写；使用内存，不影响取流');_CACHE_WARNING=True\n"
         '    finally:\n'
-        '        with contextlib.suppress(FileNotFoundError):\n'
-        '            temp.unlink()\n'
+        '        if temporary:\n'
+        '            try:temporary.unlink(missing_ok=True)\n'
+        '            except OSError:pass\n'
         '\n'
-        '\n'
-        "def _sha(path: Path, algorithm: str = 'sha256') -> str:\n"
-        '    h = hashlib.new(algorithm)\n'
-        "    with path.open('rb') as stream:\n"
-        "        for part in iter(lambda: stream.read(1024 * 1024), b''):\n"
-        '            h.update(part)\n'
-        '    return h.hexdigest()\n'
-        '\n'
-        '\n'
-        "def _matches(path: Path, digest: str, algorithm: str = 'sha256') -> bool:\n"
-        '    return path.is_file() and _sha(path, algorithm) == digest\n'
-        '\n'
-        '\n'
-        'def _download(url: str, destination: Path, expected: str | None, *,\n'
-        "              algorithm: str = 'sha256', limit: int = 100 * 1024 * 1024) -> None:\n"
-        '    """Use normal urllib proxy and CA handling; never disable TLS verification."""\n'
-        '    if expected and _matches(destination, expected, algorithm):\n'
-        '        return\n'
-        '    destination.parent.mkdir(parents=True, exist_ok=True)\n'
-        "    fd, temp_name = tempfile.mkstemp(prefix='.' + destination.name + '.', dir=destination.parent)\n"
-        '    temp = Path(temp_name)\n'
+        'def _get(url,limit,progress,label):\n'
         '    try:\n'
-        '        h = hashlib.new(algorithm)\n'
-        '        size = 0\n'
-        "        request = Request(url, headers={'User-Agent': 'cbox-app-udrm-bootstrap/1'})\n"
-        '        try:\n'
-        "            with urlopen(request, timeout=45) as response, os.fdopen(fd, 'wb') as stream:\n"
-        '                fd = -1\n'
-        "                if response.geturl().split(':', 1)[0].lower() != 'https':\n"
-        "                    raise BootstrapError('Verified setup download redirected away from HTTPS')\n"
-        "                for part in iter(lambda: response.read(1024 * 1024), b''):\n"
-        '                    size += len(part)\n'
-        '                    if size > limit:\n'
-        "                        raise BootstrapError('Setup download exceeded its expected size limit')\n"
-        '                    h.update(part)\n'
-        '                    stream.write(part)\n'
-        '                stream.flush()\n'
-        '                os.fsync(stream.fileno())\n'
-        '        except BootstrapError:\n'
-        '            raise\n'
-        '        except Exception as exc:\n'
-        '            # HTTP/proxy URLs can include passwords.  Deliberately omit repr(exc).\n'
-        "            raise BootstrapError('Setup download failed (' + type(exc).__name__ + ')') from None\n"
-        '        if expected and h.hexdigest() != expected:\n'
-        "            raise BootstrapError('Setup download checksum mismatch; cached working files retained')\n"
-        '        temp.chmod(0o600)\n'
-        '        os.replace(temp, destination)\n'
-        '    finally:\n'
-        '        if fd >= 0:\n'
-        '            os.close(fd)\n'
-        '        with contextlib.suppress(FileNotFoundError):\n'
-        '            temp.unlink()\n'
+        "        request=Request(url,headers={'User-Agent':'cctv-app-udrm/0.2.0','Accept-Encoding':'identity'})\n"
+        '        with urlopen(request,timeout=30) as response:\n'
+        "            if response.status!=200 or not response.geturl().startswith('https://'):raise BootstrapError('下载未返回有效HTTPS响应')\n"
+        '            chunks=[];n=0;announced=0\n'
+        '            while True:\n'
+        '                chunk=response.read(512*1024)\n'
+        '                if not chunk:break\n'
+        '                chunks.append(chunk);n+=len(chunk)\n'
+        "                if n>limit:raise BootstrapError('下载内容超过长度限制')\n"
+        "                if n-announced>=8*1024*1024:progress(label+'：'+str(n//(1024*1024))+' MiB');announced=n\n"
+        "            length=response.headers.get('Content-Length')\n"
+        "            if length is not None and (not length.isdecimal() or int(length)!=n):raise BootstrapError('下载正文不完整')\n"
+        "            return b''.join(chunks)\n"
+        '    except BootstrapError:raise\n'
+        "    except Exception as error:raise BootstrapError('下载失败：'+type(error).__name__) from None\n"
         '\n'
-        '\n'
-        'def _ensure_library(cache: Path, progress: Callable[[str], None]) -> Path:\n'
-        "    library = cache / 'sdk' / Path(LIBRARY_MEMBER).name\n"
-        '    if _matches(library, LIBRARY_SHA256):\n'
-        '        return library\n'
-        "    progress('Downloading the pinned official CCTV APK and verifying SHA-256')\n"
-        "    apk = cache / 'downloads' / 'cbox-7.9.31.apk'\n"
-        '    _download(APK_URL, apk, APK_SHA256)\n'
-        '    try:\n'
-        '        with zipfile.ZipFile(apk) as archive:\n'
-        '            member = archive.getinfo(LIBRARY_MEMBER)\n'
-        '            if member.file_size != LIBRARY_BYTES:\n'
-        "                raise BootstrapError('Official APK library has an unexpected size')\n"
-        '            data = archive.read(member)\n'
-        '    except BootstrapError:\n'
-        '        raise\n'
-        '    except (KeyError, OSError, zipfile.BadZipFile):\n'
-        "        raise BootstrapError('Verified APK does not contain the expected player library') from None\n"
-        '    if hashlib.sha256(data).hexdigest() != LIBRARY_SHA256:\n'
-        "        raise BootstrapError('Official player library checksum mismatch')\n"
-        '    _atomic_bytes(library, data)\n'
-        '    return library\n'
-        '\n'
-        '\n'
-        'def _extract_maven(archive: Path, destination: Path) -> None:\n'
-        '    """Extract only ordinary files/directories under the expected Maven root."""\n'
-        "    expected_root = 'apache-maven-' + MAVEN_VERSION\n"
-        "    stage = Path(tempfile.mkdtemp(prefix='.maven-extract-', dir=destination.parent))\n"
-        '    total = 0\n'
-        '    try:\n'
-        "        with tarfile.open(archive, 'r:gz') as bundle:\n"
-        '            for member in bundle:\n'
-        '                name = PurePosixPath(member.name)\n'
-        "                if (name.is_absolute() or '..' in name.parts or not name.parts\n"
-        "                        or name.parts[0] != expected_root or '\\\\' in member.name):\n"
-        "                    raise BootstrapError('Unexpected path in the verified Maven archive')\n"
-        '                target = stage.joinpath(*name.parts)\n'
-        '                if member.isdir():\n'
-        '                    target.mkdir(parents=True, exist_ok=True)\n'
-        '                    continue\n'
-        '                if not member.isfile():\n'
-        "                    raise BootstrapError('Unexpected link or special file in the Maven archive')\n"
-        '                total += member.size\n'
-        '                if member.size > 64 * 1024 * 1024 or total > 160 * 1024 * 1024:\n'
-        "                    raise BootstrapError('Maven archive exceeds its extraction size limit')\n"
-        '                source = bundle.extractfile(member)\n'
-        '                if source is None:\n'
-        "                    raise BootstrapError('Unable to read the Maven archive')\n"
-        '                target.parent.mkdir(parents=True, exist_ok=True)\n'
-        "                with source, target.open('wb') as output:\n"
-        '                    shutil.copyfileobj(source, output)\n'
-        '                target.chmod(0o700 if (member.mode & 0o111) else 0o600)\n'
-        '        extracted = stage / expected_root\n'
-        "        if not (extracted / 'bin' / 'mvn').is_file():\n"
-        "            raise BootstrapError('Maven launcher is missing')\n"
-        '        if destination.exists():\n'
-        '            shutil.rmtree(destination)\n'
-        '        os.replace(extracted, destination)\n'
-        '    except (OSError, tarfile.TarError):\n'
-        "        raise BootstrapError('Unable to extract the verified Maven archive') from None\n"
-        '    finally:\n'
-        '        shutil.rmtree(stage, ignore_errors=True)\n'
-        '\n'
-        '\n'
-        'def _ensure_maven(cache: Path, progress: Callable[[str], None]) -> Path:\n'
-        "    target = cache / ('apache-maven-' + MAVEN_VERSION)\n"
-        "    stamp = target / '.verified-distribution.json'\n"
-        "    if stamp.is_file() and (target / 'bin' / 'mvn').is_file():\n"
-        '        try:\n'
-        "            if json.loads(stamp.read_text()) == {'sha512': MAVEN_SHA512}:\n"
-        '                return target\n'
-        '        except (OSError, ValueError, TypeError):\n'
-        '            pass\n'
-        "    progress('Downloading Maven 3.9.11 and verifying the official SHA-512')\n"
-        "    sha_file = cache / 'downloads' / 'apache-maven-3.9.11-bin.tar.gz.sha512'\n"
-        "    _download(MAVEN_URL + '.sha512', sha_file, None, limit=4096)\n"
-        "    match = re.search(r'\\b[0-9a-fA-F]{128}\\b', sha_file.read_text(encoding='ascii'))\n"
-        '    if not match or match.group().lower() != MAVEN_SHA512:\n'
-        "        raise BootstrapError('Official Maven SHA-512 differs from the pinned distribution')\n"
-        "    archive = cache / 'downloads' / 'apache-maven-3.9.11-bin.tar.gz'\n"
-        "    _download(MAVEN_URL, archive, MAVEN_SHA512, algorithm='sha512', limit=25 * 1024 * 1024)\n"
-        '    _extract_maven(archive, target)\n'
-        "    _atomic_bytes(stamp, json.dumps({'sha512': MAVEN_SHA512}).encode())\n"
-        '    return target\n'
-        '\n'
-        '\n'
-        'def _java_info(java_cmd: str | None) -> tuple[str, Path, str]:\n'
-        "    candidate = java_cmd or (str(Path(os.environ['JAVA_HOME']) / 'bin' / 'java')\n"
-        "                             if os.environ.get('JAVA_HOME') else shutil.which('java'))\n"
-        '    if not candidate:\n'
-        "        raise BootstrapError('JDK 21 is required; install it and put java on PATH or set JAVA_HOME')\n"
-        '    try:\n'
-        "        version = subprocess.run([candidate, '-XshowSettings:properties', '-version'],\n"
-        '                                 capture_output=True, text=True, timeout=30)\n'
-        "        modules = subprocess.run([candidate, '--list-modules'], capture_output=True,\n"
-        '                                 text=True, timeout=30)\n'
-        '    except (OSError, subprocess.TimeoutExpired):\n'
-        "        raise BootstrapError('Unable to run the installed JDK 21') from None\n"
-        "    properties = version.stdout + '\\n' + version.stderr\n"
-        "    major = re.search(r'^\\s*java\\.version\\s*=\\s*(\\d+)([^\\r\\n]*)', properties, re.M)\n"
-        "    java_home = re.search(r'^\\s*java\\.home\\s*=\\s*(.+?)\\s*$', properties, re.M)\n"
-        "    if version.returncode or not major or major.group(1) != '21' or not java_home:\n"
-        "        raise BootstrapError('JDK 21 is required; this bootstrap does not install system Java')\n"
-        "    if modules.returncode or not re.search(r'^jdk\\.compiler(?:@|$)', modules.stdout, re.M):\n"
-        "        raise BootstrapError('Java 21 is present but the jdk.compiler module is missing; use a JDK')\n"
-        '    return candidate, Path(java_home.group(1)), major.group(1) + major.group(2)\n'
-        '\n'
-        '\n'
-        'def _write_settings(path: Path) -> None:\n'
-        '    """Translate inherited HTTP(S) proxy configuration into private Maven XML."""\n'
-        "    root = ET.Element('settings', {'xmlns': 'http://maven.apache.org/SETTINGS/1.2.0'})\n"
-        '    proxies = getproxies()\n'
-        "    parent = ET.SubElement(root, 'proxies')\n"
-        "    for protocol in ('http', 'https'):\n"
-        "        address = proxies.get(protocol) or proxies.get('all')\n"
-        '        if not address:\n'
-        '            continue\n'
-        "        if '://' not in address:\n"
-        "            address = 'http://' + address\n"
-        '        try:\n'
-        '            parsed = urlsplit(address)\n'
-        "            if parsed.scheme not in ('http', 'https') or not parsed.hostname:\n"
-        '                raise ValueError()\n'
-        "            port = parsed.port or (443 if parsed.scheme == 'https' else 80)\n"
-        '        except ValueError:\n'
-        "            raise BootstrapError('Maven requires a valid HTTP(S) environment proxy') from None\n"
-        "        item = ET.SubElement(parent, 'proxy')\n"
-        "        fields = [('id', 'environment-' + protocol), ('active', 'true'),\n"
-        "                  ('protocol', protocol), ('host', parsed.hostname), ('port', str(port)),\n"
-        "                  ('nonProxyHosts', 'localhost|127.0.0.1|[::1]')]\n"
-        '        if parsed.username is not None:\n'
-        "            fields.append(('username', unquote(parsed.username)))\n"
-        '        if parsed.password is not None:\n'
-        "            fields.append(('password', unquote(parsed.password)))\n"
-        '        for key, value in fields:\n'
-        '            ET.SubElement(item, key).text = value\n'
-        "    _atomic_bytes(path, ET.tostring(root, encoding='utf-8', xml_declaration=True), 0o600)\n"
-        '\n'
-        '\n'
-        'def _normal_sources(sources: Mapping[str, str]) -> dict[str, str]:\n'
-        '    normalized: dict[str, str] = {}\n'
-        '    for filename, text in sources.items():\n'
-        '        if not isinstance(filename, str) or not isinstance(text, str):\n'
-        "            raise BootstrapError('Bridge sources must map relative paths to source text')\n"
-        '        name = PurePosixPath(filename)\n'
-        "        if (name.is_absolute() or '..' in name.parts or not name.parts\n"
-        "                or '\\\\' in filename or ':' in filename or '\\0' in filename):\n"
-        "            raise BootstrapError('Bridge source paths must stay inside the build cache')\n"
-        '        normalized[str(name)] = text\n'
-        "    if 'pom.xml' not in normalized or not any(\n"
-        "            x.startswith('src/main/java/') and x.endswith('.java') for x in normalized):\n"
-        "        raise BootstrapError('Bridge sources must include pom.xml and src/main/java/*.java')\n"
-        '    return normalized\n'
-        '\n'
-        '\n'
-        '@contextlib.contextmanager\n'
-        'def _setup_lock(cache: Path):\n'
-        "    lock = cache / '.setup.lock'\n"
-        "    with lock.open('a+b') as stream:\n"
-        "        if os.name != 'nt':\n"
-        '            import fcntl\n'
-        '            os.chmod(lock, 0o600)\n'
-        '            fcntl.flock(stream, fcntl.LOCK_EX)\n'
+        'def prepare(vm_source,*,cache_dir=None,jscore_library=None,progress=None):\n'
+        '    notify=progress or LOG.info\n'
+        "    cache=Path(cache_dir).expanduser() if cache_dir else Path(tempfile.gettempdir())/'cctv-app-udrm-v02'\n"
+        '    with _LOCK:\n'
+        "        sdk=_MEMORY.get('sdk') or _read_cached(cache,'libkooplayer260728D.so',SDK_SHA256)\n"
+        '        if sdk is None:\n'
+        "            notify('首次准备：下载官方App SDK并校验，运行不需要JDK')\n"
+        "            apk=_get(APK_URL,64*1024*1024,notify,'官方SDK下载')\n"
+        "            if hashlib.sha256(apk).hexdigest()!=APK_SHA256:raise BootstrapError('官方APK摘要变化，停止加载')\n"
         '            try:\n'
-        '                yield\n'
-        '            finally:\n'
-        '                fcntl.flock(stream, fcntl.LOCK_UN)\n'
-        '        else:\n'
-        '            import msvcrt\n'
-        '            stream.seek(0)\n'
-        "            stream.write(b'0')\n"
-        '            stream.flush()\n'
-        '            stream.seek(0)\n'
-        '            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)\n'
-        '            try:\n'
-        '                yield\n'
-        '            finally:\n'
-        '                stream.seek(0)\n'
-        '                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)\n'
-        '\n'
-        '\n'
-        'def setup(sources: Mapping[str, str], cache_dir: str | os.PathLike | None = None, *,\n'
-        '          java_cmd: str | None = None,\n'
-        '          progress: Callable[[str], None] | None = None) -> dict[str, str]:\n'
-        '    """Prepare source-only Java bridge; return java/classpath/librarypath/workdir.\n'
-        '\n'
-        '    ``sources`` contains relative source paths and their text, including pom.xml.\n'
-        '    ``librarypath`` is the full verified .so filename, not a containing directory.\n'
-        "    Only the official APK/Maven are downloaded; Maven resolves the pinned POM's\n"
-        '    normal Java dependencies. No HAR is loaded and no licence request is made.\n'
-        '    """\n'
-        '    notify = progress or (lambda message: None)\n'
-        '    normalized = _normal_sources(sources)\n'
-        '    java, java_home, java_version = _java_info(java_cmd)\n'
-        '    cache = Path(cache_dir).expanduser().resolve() if cache_dir else default_cache_dir().resolve()\n'
-        '    try:\n'
-        '        _private_dir(cache)\n'
-        '        with _setup_lock(cache):\n'
-        '            library = _ensure_library(cache, notify)\n'
-        '            maven = _ensure_maven(cache, notify)\n'
-        '            fingerprint = hashlib.sha256(json.dumps(\n'
-        "                {'sources': normalized, 'java_version': java_version, 'java_home': str(java_home)},\n"
-        '                sort_keys=True, ensure_ascii=False).encode()).hexdigest()\n'
-        "            workdir = cache / 'builds' / fingerprint[:24]\n"
-        '            _private_dir(workdir)\n'
-        '            for filename, text in normalized.items():\n'
-        '                path = workdir.joinpath(*PurePosixPath(filename).parts)\n'
-        "                data = text.encode('utf-8')\n"
-        '                if not path.is_file() or path.read_bytes() != data:\n'
-        '                    _atomic_bytes(path, data)\n'
-        "            settings = workdir / 'maven-settings.private.xml'\n"
-        '            _write_settings(settings)\n'
-        "            classpath_file = workdir / 'dependencies.classpath'\n"
-        "            stamp = workdir / 'build-complete.json'\n"
-        "            classes = workdir / 'target' / 'classes'\n"
-        '            built = False\n'
-        '            if stamp.is_file() and classpath_file.is_file() and classes.is_dir():\n'
+        '                with zipfile.ZipFile(io.BytesIO(apk)) as archive:\n'
+        '                    member=archive.getinfo(SDK_MEMBER)\n'
+        "                    if member.file_size!=5229120:raise BootstrapError('官方SDK大小变化')\n"
+        '                    sdk=archive.read(member)\n'
+        "            except (OSError,zipfile.BadZipFile,KeyError):raise BootstrapError('官方APK读取失败') from None\n"
+        '            finally:del apk\n'
+        "            if hashlib.sha256(sdk).hexdigest()!=SDK_SHA256:raise BootstrapError('官方SDK摘要不符')\n"
+        "            _cache(cache,'libkooplayer260728D.so',sdk)\n"
+        "        wasm=_MEMORY.get('wasm') or _read_cached(cache,'unicorn-aarch64-2.1.4.js',WASM_SHA256)\n"
+        '        if wasm is None:\n'
+        "            notify('准备无JDK的ARM64 WebAssembly解释器')\n"
+        "            try:wasm=_get(WASM_URL,3*1024*1024,notify,'解释器下载')\n"
+        '            except BootstrapError:\n'
+        "                package=_get(NPM_URL,12*1024*1024,notify,'解释器包下载')\n"
+        "                if base64.b64encode(hashlib.sha512(package).digest()).decode()!=NPM_INTEGRITY:raise BootstrapError('解释器包摘要不符')\n"
         '                try:\n'
-        '                    cp = classpath_file.read_text().strip()\n'
-        "                    built = (json.loads(stamp.read_text()).get('fingerprint') == fingerprint\n"
-        '                             and bool(cp) and all(Path(x).is_file() for x in cp.split(os.pathsep))\n'
-        "                             and any(classes.rglob('*.class')))\n"
-        '                except (OSError, ValueError, TypeError):\n'
-        '                    pass\n'
-        '            if not built:\n'
-        "                notify('Resolving Java dependencies and compiling the bridge with JDK 21')\n"
-        '                env = os.environ.copy()\n'
-        "                env['JAVA_HOME'] = str(java_home)\n"
-        "                env['MAVEN_SKIP_RC'] = 'true'\n"
-        "                launcher = maven / 'bin' / ('mvn.cmd' if os.name == 'nt' else 'mvn')\n"
-        "                command = [str(launcher), '--batch-mode', '--no-transfer-progress',\n"
-        "                           '--settings', str(settings), '-f', str(workdir / 'pom.xml'),\n"
-        "                           '-Dmaven.repo.local=' + str(cache / 'm2'), '-DskipTests',\n"
-        "                           'compile', 'org.apache.maven.plugins:maven-dependency-plugin:3.8.1:build-classpath',\n"
-        "                           '-Dmdep.outputFile=' + str(classpath_file)]\n"
-        "                log = workdir / 'maven-build.private.log'\n"
-        '                try:\n'
-        '                    result = subprocess.run(command, cwd=workdir, env=env,\n'
-        '                                            capture_output=True, timeout=900)\n'
-        '                except subprocess.TimeoutExpired as exc:\n'
-        "                    _atomic_bytes(log, (exc.stdout or b'') + b'\\n' + (exc.stderr or b''))\n"
-        "                    raise BootstrapError('Java bridge build timed out; private log: ' + str(log)) from None\n"
-        '                except OSError:\n'
-        "                    raise BootstrapError('Unable to start the verified Maven launcher') from None\n"
-        "                _atomic_bytes(log, result.stdout + b'\\n' + result.stderr)\n"
-        '                if result.returncode:\n'
-        "                    raise BootstrapError('Java bridge build failed (exit ' + str(result.returncode)\n"
-        "                                         + '); private log: ' + str(log))\n"
-        "                if not classpath_file.is_file() or not any(classes.rglob('*.class')):\n"
-        "                    raise BootstrapError('Java bridge build did not produce classes and a classpath')\n"
-        "                _atomic_bytes(stamp, json.dumps({'fingerprint': fingerprint}).encode())\n"
-        '            dependencies = classpath_file.read_text().strip()\n'
-        "            notify('Verified SDK and Java bridge are ready')\n"
-        "            return {'java': java, 'classpath': str(classes) + os.pathsep + dependencies,\n"
-        "                    'librarypath': str(library), 'workdir': str(workdir), 'cache_dir': str(cache),\n"
-        "                    'source_fingerprint': fingerprint}\n"
-        '    except BootstrapError:\n'
-        '        raise\n'
-        '    except OSError as exc:\n'
-        "        raise BootstrapError('Setup cache is unavailable (' + type(exc).__name__ + ')') from None\n"
+        "                    with tarfile.open(fileobj=io.BytesIO(package),mode='r:gz') as archive:\n"
+        "                        member=archive.getmember('package/dist/unicorn_aarch64.js')\n"
+        "                        if not member.isfile() or member.size>3*1024*1024:raise BootstrapError('解释器包结构不符')\n"
+        '                        with archive.extractfile(member) as stream:wasm=stream.read()\n'
+        "                except (tarfile.TarError,KeyError,OSError):raise BootstrapError('解释器包读取失败') from None\n"
+        "            if hashlib.sha256(wasm).hexdigest()!=WASM_SHA256:raise BootstrapError('解释器版本变化，停止加载')\n"
+        "            _cache(cache,'unicorn-aarch64-2.1.4.js',wasm)\n"
+        '        _MEMORY.update(sdk=sdk,wasm=wasm)\n'
+        "        notify('官方SDK和无JDK解释器已校验就绪')\n"
+        "        return {'sdk_bytes':sdk,'unicorn_source':wasm.decode('utf8'),'vm_source':vm_source,'jscore_library':jscore_library}\n"
+    ),
+    'wasm_sdk': (
+        '"""No JVM: original ARM64 SDK under Unicorn WASM in JavaScriptCore."""\n'
+        'from __future__ import annotations\n'
+        'import base64\n'
+        'import errno\n'
+        'import json\n'
+        'import os\n'
+        'from pathlib import Path\n'
+        'import select\n'
+        'import socket\n'
+        'import struct\n'
+        'import time\n'
+        'from jsc_host import JSCHost,APPLE\n'
+        'from elf_image import image_plan\n'
+        '\n'
+        'class LoopbackSockets:\n'
+        ' def __init__(self):self.sockets={};self.sequence=1000;self.calls={}\n'
+        ' @staticmethod\n'
+        " def _write(address,data):return {'address':address,'data':base64.b64encode(data).decode()}\n"
+        ' def handle(self,request):\n'
+        "  name=request['name'];a=request['args'];self.calls[name]=self.calls.get(name,0)+1\n"
+        "  fd=struct.unpack('<i',struct.pack('<I',a[0]&0xffffffff))[0]\n"
+        "  reply={'result':0,'writes':[]}\n"
+        '  try:\n'
+        "   if name=='socket':\n"
+        "    if a[0]!=2 or a[1]&15!=1:raise OSError(errno.EAFNOSUPPORT,'Only loopback IPv4 TCP')\n"
+        '    sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM);sock.settimeout(15)\n'
+        "    fd=self.sequence;self.sequence+=1;self.sockets[fd]=sock;reply['result']=fd\n"
+        "   elif name=='poll':\n"
+        "    raw=bytearray(base64.b64decode(request['data'],validate=True));read=[];write=[];check=[]\n"
+        "    rows=[struct.unpack_from('<ihh',raw,i*8) for i in range(a[1])]\n"
+        '    invalid=False\n'
+        '    for n,events,_ in rows:\n'
+        '     if n<0:continue\n'
+        '     sock=self.sockets.get(n)\n'
+        '     if sock is None:invalid=True;continue\n'
+        '     if events&1:read.append(sock)\n'
+        '     if events&4:write.append(sock)\n'
+        '     check.append(sock)\n'
+        "    timeout=struct.unpack('<i',struct.pack('<I',a[2]&0xffffffff))[0]\n"
+        '    readable,writable,errors=select.select(read,write,check,0 if invalid else min(30,max(0,timeout/1000)))\n'
+        '    count=0\n'
+        '    for i,(n,events,_) in enumerate(rows):\n'
+        '     sock=self.sockets.get(n);revents=0\n'
+        '     if n>=0 and sock is None:revents=32\n'
+        '     elif sock:\n'
+        '      if sock in readable:revents|=1\n'
+        '      if sock in writable:revents|=4\n'
+        '      if sock in errors:revents|=8\n'
+        "     struct.pack_into('<h',raw,i*8+6,revents)\n"
+        '     if revents:count+=1\n'
+        '    reply.update(result=count,writes=[self._write(a[0],raw)])\n'
+        '   else:\n'
+        '    sock=self.sockets.get(fd)\n'
+        "    if sock is None:raise OSError(errno.EBADF,'Unknown owned socket')\n"
+        "    if name=='connect':\n"
+        "     raw=base64.b64decode(request['data'],validate=True)\n"
+        "     family=struct.unpack_from('<H',raw)[0];port=struct.unpack_from('>H',raw,2)[0];host=socket.inet_ntoa(raw[4:8])\n"
+        "     if family!=2 or host!='127.0.0.1':raise OSError(errno.EACCES,'Native SDK network is loopback only')\n"
+        '     code=sock.connect_ex((host,port));reply.update(result=0 if code==0 else -1,errno=code)\n'
+        "    elif name=='fcntl':\n"
+        '     command=a[1]\n'
+        "     if command==3:reply['result']=2|(0x800 if sock.gettimeout()==0 else 0)\n"
+        '     elif command==4:sock.setblocking(not bool(a[2]&0x800))\n'
+        "     elif command==1:reply['result']=1\n"
+        "     elif command!=2:raise OSError(errno.EINVAL,'Unsupported socket fcntl')\n"
+        "    elif name in ('send','sendto','write'):\n"
+        "     data=base64.b64decode(request['data'],validate=True)\n"
+        "     if name=='sendto' and a[4]:raise OSError(errno.EOPNOTSUPP,'Explicit sendto destination unsupported')\n"
+        "     reply['result']=sock.send(data,a[3] if name!='write' else 0)\n"
+        "    elif name in ('recv','recvfrom','read'):\n"
+        "     if not 0<=a[2]<=1024*1024:raise OSError(errno.EINVAL,'Native receive size limit')\n"
+        "     data=sock.recv(a[2],a[3] if name!='read' else 0)\n"
+        '     reply.update(result=len(data),writes=[self._write(a[1],data)])\n'
+        "    elif name=='close':sock.close();del self.sockets[fd]\n"
+        "    elif name=='shutdown':sock.shutdown(a[1])\n"
+        "    elif name=='setsockopt':\n"
+        "     data=base64.b64decode(request['data'],validate=True)\n"
+        '     sock.setsockopt(a[1],a[2],data)\n'
+        "    elif name=='getsockopt':\n"
+        "     data=sock.getsockopt(a[1],a[2],min(request['length'],256))\n"
+        "     reply['writes']=[self._write(a[3],data),self._write(a[4],struct.pack('<I',len(data)))]\n"
+        "    elif name in ('getsockname','getpeername'):\n"
+        "     host,port=sock.getsockname() if name=='getsockname' else sock.getpeername()\n"
+        "     data=struct.pack('<H',2)+struct.pack('>H',port)+socket.inet_aton(host)+b'\\0'*8\n"
+        "     reply['writes']=[self._write(a[1],data[:request['length']]),self._write(a[2],struct.pack('<I',16))]\n"
+        "    else:raise OSError(errno.ENOSYS,'Unsupported SDK socket operation')\n"
+        '  except OSError as error:reply.update(result=-1,errno=error.errno or errno.EIO)\n'
+        '  return reply\n'
+        ' def close(self):\n'
+        '  for sock in self.sockets.values():sock.close()\n'
+        '  self.sockets.clear()\n'
+        '\n'
+        'class WasmSDK:\n'
+        ' def __init__(self,prepared):\n'
+        "  self.host=JSCHost(prepared.get('jscore_library') or APPLE);self.transport=LoopbackSockets();self.licensed=False\n"
+        '  try:self._initialize(prepared)\n'
+        '  except BaseException:\n'
+        '   self.close();raise\n'
+        ' def _initialize(self,prepared):\n'
+        "  self.host.evaluate('var console={log:function(){},error:function(){}};var performance={now:function(){return Date.now();}};')\n"
+        '  self.host.evaluate(self._base64_host())\n'
+        "  source=prepared['unicorn_source']\n"
+        '  self.host.evaluate(source)\n'
+        "  start=source.index('function findWasmBinary(){return binaryDecode(')+len('function findWasmBinary(){return binaryDecode(')\n"
+        '  end=start+1\n'
+        '  while end<len(source):\n'
+        "   if source[end]=='\\\\':end+=2;continue\n"
+        '   if source[end]=="\'":break\n'
+        '   end+=1\n'
+        '  literal=source[start:end+1]\n'
+        "  self.host.evaluate('var __wtext='+literal+';var __wbytes=new Uint8Array(__wtext.length);for(var i=0;i<__wtext.length;i++){var c=__wtext.charCodeAt(i);__wbytes[i]=~c>>8&c;}__wtext=null;void 0;')\n"
+        "  self.host.evaluate('var __uc=null;var __loadError=null;MUnicorn({print:function(){},printErr:function(){},instantiateWasm:function(imports,done){var mod=new WebAssembly.Module(__wbytes);var inst=new WebAssembly.Instance(mod,imports);done(inst,mod);return inst.exports;}}).then(x=>__uc=x).catch(e=>__loadError=String(e));')\n"
+        '  deadline=time.monotonic()+20\n'
+        '  while time.monotonic()<deadline:\n'
+        "   state=json.loads(self.host.evaluate('JSON.stringify({ready:!!__uc,error:__loadError})'))\n"
+        "   if state['error']:raise RuntimeError('WASM initialization failed')\n"
+        "   if state['ready']:break\n"
+        '   time.sleep(0.01)\n'
+        "  else:raise RuntimeError('WASM initialization timeout')\n"
+        "  self.host.evaluate(prepared['vm_source'])\n"
+        "  plan=json.dumps(image_plan(prepared['sdk_bytes']),separators=(',',':'))\n"
+        '  entropy=base64.b64encode(os.urandom(128*1024)).decode()\n'
+        "  self.host.install_json('__plan',plan)\n"
+        "  self.host.evaluate('var __entropy=Uint8Array.from(atob('+json.dumps(entropy)+'),c=>c.charCodeAt(0));var __vm=new KooVM(__uc,__plan,__entropy);__plan.segments=null;void 0;')\n"
+        "  result=self._call('__vm.invoke(__vm.base+__plan.symbols.JNI_OnLoad,[__vm.jvm,0])')\n"
+        "  if result!=65540:raise RuntimeError('Official SDK JNI initialization rejected')\n"
+        '  self.host.collect()\n'
+        ' def _call(self,expression):\n'
+        "  result=json.loads(self.host.evaluate('JSON.stringify('+expression+')',timeout=30));deadline=time.monotonic()+45\n"
+        "  while isinstance(result,dict) and 'host_request' in result:\n"
+        "   if time.monotonic()>deadline:raise RuntimeError('SDK I/O deadline')\n"
+        "   reply=self.transport.handle(result['host_request'])\n"
+        "   result=json.loads(self.host.evaluate('JSON.stringify(__vm.resume('+json.dumps(reply,separators=(',',':'))+'))',timeout=30))\n"
+        '  return result\n'
+        ' def rights(self,url):\n'
+        '  from urllib.parse import urlsplit\n'
+        '  parsed=urlsplit(url)\n'
+        "  if parsed.scheme!='https' or parsed.hostname!='127.0.0.1' or not parsed.port or parsed.username or parsed.fragment:raise ValueError('SDK transport must be loopback HTTPS')\n"
+        '  self.host.evaluate(\'var __info=__vm.cstring(\'+json.dumps(\'CONTENTID=2820180516001,URI=\'+url)+\');var __context=__vm.object("player",{});var __label=__vm.cstring("OFFLINE_PROBE");\')\n'
+        '  result=self._call(\'__vm.invoke(__vm.natives["drmCheckRights(Ljava/lang/String;Ljava/lang/String;)I"],[__vm.env,__context,__info,__label])\')\n'
+        "  result=struct.unpack('<i',struct.pack('<I',result&0xffffffff))[0]\n"
+        '  self.licensed=result==0;return result\n'
+        ' def process(self,channel,data):\n'
+        "  if not self.licensed:raise RuntimeError('Official license required')\n"
+        "  if not isinstance(data,bytes) or not 4<=len(data)<=4*1024*1024:raise ValueError('Media size invalid')\n"
+        '  self.host.put_media(data)\n'
+        "  reply=self._call('__vm.packetBinary('+json.dumps(channel)+','+str(len(data))+')')\n"
+        "  if reply['code']!=0:raise RuntimeError('SDK media rejected code='+str(reply['code']))\n"
+        '  return self.host.read_media(len(data))\n'
+        " def reset(self,channel):self.host.evaluate('__vm.reset('+json.dumps(channel)+')')\n"
+        " def counts(self):return json.loads(self.host.evaluate('JSON.stringify(__vm.counts)'))\n"
+        ' def close(self):\n'
+        '  self.transport.close()\n'
+        '  try:self.host.evaluate(\'if(typeof __vm!=="undefined")__vm.close()\')\n'
+        '  finally:self.host.close()\n'
+        ' @staticmethod\n'
+        ' def _base64_host():\n'
+        "  return '''var __b64chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\n"
+        "function atob(text){var value=0,bits=0,out='';for(var c of text){if(c==='=')break;var n=__b64chars.indexOf(c);if(n<0)throw Error('Invalid base64');value=(value<<6)|n;bits+=6;if(bits>=8){bits-=8;out+=String.fromCharCode((value>>bits)&255);}}return out;}\n"
+        "function btoa(text){var out='',value=0,bits=0;for(var i=0;i<text.length;i++){var c=text.charCodeAt(i);if(c>255)throw Error('Invalid base64 byte');value=(value<<8)|c;bits+=8;while(bits>=6){bits-=6;out+=__b64chars[(value>>bits)&63];}}if(bits)out+=__b64chars[(value<<(6-bits))&63];while(out.length%4)out+='=';return out;}'''\n"
     ),
     'license_relay': (
         '"""Loopback transport for unchanged SDK license POSTs, without persistent licenses.\n'
@@ -692,7 +756,7 @@ PYTHON_SOURCES = {
         'from pathlib import Path\n'
         'import json\n'
         'import ssl\n'
-        'import subprocess\n'
+        'from local_tls import make_server_context\n'
         'import threading\n'
         '\n'
         'ENDPOINTS = {\n'
@@ -706,29 +770,13 @@ PYTHON_SOURCES = {
         '        return None\n'
         '\n'
         '\n'
-        'def local_certificate(workdir):\n'
-        "    tls=Path(workdir)/'tls';tls.mkdir(parents=True,exist_ok=True);tls.chmod(0o700)\n"
-        "    cert=tls/'local.crt';key=tls/'local.key'\n"
-        '    valid=cert.is_file() and key.is_file()\n'
-        '    if valid:\n'
-        "        valid=subprocess.run(['openssl','x509','-checkend','3600','-noout','-in',str(cert)],\n"
-        '            stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0\n'
-        '    if not valid:\n'
-        '        # These are newly generated loopback transport credentials, never vendor keys.\n'
-        "        subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes',\n"
-        "            '-keyout',str(key),'-out',str(cert),'-subj','/CN=UDRM Local Transport',\n"
-        "            '-addext','subjectAltName=IP:127.0.0.1','-days','7'],check=True,\n"
-        '            stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n'
-        '    key.chmod(0o600);cert.chmod(0o600)\n'
-        '    return cert,key\n'
         '\n'
         '\n'
         'class LicenseRelay:\n'
-        "    def __init__(self,workdir,target='primary'):\n"
+        "    def __init__(self,workdir=None,target='primary'):\n"
         '        self.records=[];self.target=ENDPOINTS[target]\n'
         '        self.opener=build_opener(NoRedirect())\n'
-        '        cert,key=local_certificate(workdir)\n'
-        '        context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(cert,key)\n'
+        '        context=make_server_context()\n'
         '        relay=self\n'
         '        class Server(HTTPServer):\n'
         '            def get_request(self):\n'
@@ -780,486 +828,87 @@ PYTHON_SOURCES = {
         '        self.server.shutdown();self.server.server_close();self.thread.join(timeout=2)\n'
     ),
     'sdk_client': (
-        '"""Bounded, serial client for an already licensed Koo NDJSON media process.\n'
-        '\n'
-        'This module neither reads HAR files nor obtains/parses license responses. The\n'
-        'caller owns LicenseRelay and passes its local endpoint in the child environment.\n'
-        'All subprocess diagnostics are filtered; RPC data contains user media only.\n'
-        '"""\n'
-        'from __future__ import annotations\n'
-        '\n'
-        'import base64\n'
-        'import binascii\n'
-        'from contextlib import contextmanager\n'
-        'from dataclasses import dataclass, field\n'
-        'import json\n'
-        'import logging\n'
-        'import os\n'
-        'from pathlib import Path\n'
+        '"""Serialize SDK calls on one owner thread; no subprocess or Java runtime."""\n'
+        'from dataclasses import dataclass,field\n'
         'import queue\n'
-        'import re\n'
-        'import subprocess\n'
         'import threading\n'
-        'import time\n'
-        'from typing import Mapping, Sequence\n'
+        'from wasm_sdk import WasmSDK\n'
         '\n'
-        'LOG = logging.getLogger(__name__)\n'
-        'RPC_PREFIX = b"UDRM_RPC "\n'
-        'MAX_PACKET = 4 * 1024 * 1024\n'
-        '_MAX_B64 = ((MAX_PACKET + 2) // 3) * 4\n'
-        '_MAX_RPC_LINE = _MAX_B64 + 16384\n'
-        '_MAX_DIAGNOSTIC_LINE = 16384\n'
-        '_PHASE = re.compile(rb"^KOO phase=(emulator|load|jni_onload|rights|done)(?: |$)")\n'
-        '_RIGHTS_CODE = re.compile(rb"^KOO phase=rights returned=(-?\\d+)(?: |$)")\n'
-        '_RUNTIME_FAULTS = (\n'
-        '    b"UC_ERR_", b"UnicornException", b"java.lang.AbstractMethodError",\n'
-        '    b"java.lang.UnsupportedOperationException", b"Illegal JNI version",\n'
-        '    b"Invalid memory write", b"Invalid memory read",\n'
-        ')\n'
-        '\n'
-        '\n'
-        'class SDKError(RuntimeError):\n'
-        '    """Failure with a fixed diagnostic reason and optional official SDK code."""\n'
-        '\n'
-        '    def __init__(self, reason: str, *, code: int | None = None):\n'
-        '        self.reason = reason\n'
-        '        self.code = code\n'
-        '        super().__init__(reason if code is None else f"{reason} (code={code})")\n'
-        '\n'
-        '\n'
-        'class SDKBusyError(SDKError):\n'
-        '    """The serialization lock was busy; the running SDK remains usable."""\n'
-        '\n'
+        'class SDKError(RuntimeError):pass\n'
         '\n'
         '@dataclass\n'
-        'class _Write:\n'
-        '    data: bytes\n'
-        '    done: threading.Event = field(default_factory=threading.Event)\n'
-        '    failed: bool = False\n'
-        '\n'
-        '\n'
-        'def _bad_constant(_value):\n'
-        '    raise ValueError("non-finite JSON value")\n'
-        '\n'
+        'class Job:\n'
+        '    op: str\n'
+        '    args: tuple\n'
+        '    done: object=field(default_factory=threading.Event)\n'
+        '    result: object=None\n'
+        "    error: str=''\n"
         '\n'
         'class SDKClient:\n'
-        '    """One Java/SDK process, one license session and serialized media requests.\n'
-        '\n'
-        '    The command must start the Java bridge directly, without a shell. Child\n'
-        "    environment overrides preserve the parent's proxy settings. A failed client\n"
-        '    is terminal: create a new instance to acquire a new official SDK session.\n'
-        '    """\n'
-        '\n'
-        '    def __init__(\n'
-        '        self,\n'
-        '        command: Sequence[str | os.PathLike],\n'
-        '        *,\n'
-        '        workdir: str | os.PathLike,\n'
-        '        env: Mapping[str, str] | None = None,\n'
-        '        startup_timeout: float = 30.0,\n'
-        '        request_timeout: float = 15.0,\n'
-        '        write_timeout: float = 5.0,\n'
-        '        queue_limit: int = 8,\n'
-        '        logger: logging.Logger | None = None,\n'
-        '    ):\n'
-        '        if isinstance(command, (str, bytes)) or not command:\n'
-        '            raise ValueError("command must be a nonempty argument sequence")\n'
-        '        self.command = tuple(os.fspath(arg) for arg in command)\n'
-        '        self.workdir = Path(workdir)\n'
-        '        self.env = dict(env or {})\n'
-        '        self.env["UDRM_PROCESS_STDIN"] = "1"\n'
-        '        for value in (startup_timeout, request_timeout, write_timeout):\n'
-        '            if not 0 < value <= 3600:\n'
-        '                raise ValueError("timeouts must be positive and bounded")\n'
-        '        if not 1 <= queue_limit <= 64:\n'
-        '            raise ValueError("queue_limit must be between 1 and 64")\n'
-        '        self.startup_timeout = float(startup_timeout)\n'
-        '        self.request_timeout = float(request_timeout)\n'
-        '        self.write_timeout = float(write_timeout)\n'
-        '        self.log = logger or LOG\n'
-        '        self._operations = threading.Lock()\n'
-        '        self._status = threading.Lock()\n'
-        '        self._close_lock = threading.Lock()\n'
-        '        self._closed = threading.Event()\n'
-        '        self._failed = threading.Event()\n'
-        '        self._failure: tuple[str, int | None] | None = None\n'
-        '        self._responses: queue.Queue = queue.Queue(maxsize=queue_limit)\n'
-        '        self._writes: queue.Queue = queue.Queue(maxsize=1)\n'
-        '        self._process: subprocess.Popen | None = None\n'
-        '        self._threads: list[threading.Thread] = []\n'
-        '        self._ready = False\n'
-        '        self._sequence = 0\n'
-        '\n'
-        '    @classmethod\n'
-        '    def from_java(\n'
-        '        cls,\n'
-        '        *,\n'
-        '        java: str | os.PathLike,\n'
-        '        classpath: str,\n'
-        '        workdir: str | os.PathLike,\n'
-        '        license_env: Mapping[str, str],\n'
-        '        library_path: str | os.PathLike | None = None,\n'
-        '        java_options: Sequence[str] = (),\n'
-        '        main_class: str = "KooProbe",\n'
-        '        **options,\n'
-        '    ) -> "SDKClient":\n'
-        '        """Build the command; LicenseRelay itself remains caller-owned.\n'
-        '\n'
-        "        library_path is forwarded as UDRM_KOO_LIBRARY for the bootstrap's Java\n"
-        '        entrypoint. No credential, endpoint, classpath or command is logged.\n'
-        '        """\n'
-        '        if not isinstance(classpath, str) or not classpath:\n'
-        '            raise ValueError("classpath is required")\n'
-        '        env = dict(license_env)\n'
-        '        if library_path is not None:\n'
-        '            env["UDRM_KOO_LIBRARY"] = os.fspath(library_path)\n'
-        '        command = [os.fspath(java), *java_options, "-cp", classpath, main_class, "rights"]\n'
-        '        return cls(command, workdir=workdir, env=env, **options)\n'
-        '\n'
-        '    @property\n'
-        '    def healthy(self) -> bool:\n'
-        '        process = self._process\n'
-        '        return bool(self._ready and not self._closed.is_set()\n'
-        '                    and not self._failed.is_set() and process is not None\n'
-        '                    and process.poll() is None)\n'
-        '\n'
-        '    def _error(self) -> SDKError:\n'
-        '        with self._status:\n'
-        '            failure = self._failure\n'
-        '        if failure is not None:\n'
-        '            return SDKError(failure[0], code=failure[1])\n'
-        '        return SDKError("sdk_closed" if self._closed.is_set() else "sdk_unavailable")\n'
-        '\n'
-        '    def _mark_failure(self, reason: str, code: int | None = None) -> None:\n'
-        '        with self._status:\n'
-        '            first = self._failure is None and not self._closed.is_set()\n'
-        '            if first:\n'
-        '                self._failure = (reason, code)\n'
-        '            self._failed.set()\n'
-        '        if first:\n'
-        '            self.log.warning("UDRM SDK failure: phase=%s code=%s", reason, code)\n'
-        '        process = self._process\n'
-        '        if process is not None and process.poll() is None:\n'
-        '            try:\n'
-        '                process.terminate()\n'
-        '            except OSError:\n'
-        '                pass\n'
-        '        try:\n'
-        '            self._writes.put_nowait(None)\n'
-        '        except queue.Full:\n'
-        '            pass\n'
-        '\n'
-        '    def _check(self) -> None:\n'
-        '        if self._closed.is_set() or self._failed.is_set():\n'
-        '            raise self._error()\n'
-        '        process = self._process\n'
-        '        if process is not None and process.poll() is not None:\n'
-        '            self._mark_failure("sdk_exited")\n'
-        '            raise self._error()\n'
-        '\n'
-        '    @contextmanager\n'
-        '    def _serialized(self, timeout: float):\n'
-        '        if not self._operations.acquire(timeout=timeout):\n'
-        '            raise SDKBusyError("sdk_busy")\n'
-        '        try:\n'
-        '            yield\n'
-        '        finally:\n'
-        '            self._operations.release()\n'
-        '\n'
-        '    def start(self) -> "SDKClient":\n'
-        '        with self._serialized(self.startup_timeout):\n'
-        '            self._start_locked()\n'
+        '    def __init__(self,prepared,license_url,*,startup_timeout=60,request_timeout=20):\n'
+        '        self.prepared=prepared;self.license_url=license_url\n'
+        '        self.startup_timeout=startup_timeout;self.request_timeout=request_timeout\n'
+        '        self.jobs=queue.Queue(maxsize=4);self.ready=threading.Event();self.stopping=threading.Event()\n'
+        "        self.start_error='';self.started=False;self.lock=threading.RLock()\n"
+        "        self.thread=threading.Thread(target=self._worker,name='cbox-sdk-jscore',daemon=True)\n"
+        '    def start(self):\n'
+        '        with self.lock:\n'
+        "            if self.stopping.is_set():raise SDKError('sdk_closed')\n"
+        '            if not self.started:self.thread.start();self.started=True\n'
+        '        if not self.ready.wait(self.startup_timeout):\n'
+        "            self.close();raise SDKError('sdk_startup_timeout')\n"
+        '        if self.start_error:\n'
+        '            self.close();raise SDKError(self.start_error)\n'
         '        return self\n'
-        '\n'
-        '    def _start_locked(self) -> None:\n'
-        '        self._check()\n'
-        '        if self._ready:\n'
-        '            return\n'
-        '        if self._process is not None:\n'
-        '            self._mark_failure("sdk_not_ready")\n'
-        '            raise self._error()\n'
-        '        environment = os.environ.copy()\n'
-        '        environment.update(self.env)\n'
+        '    def _worker(self):\n'
+        '        sdk=None\n'
         '        try:\n'
-        '            self._process = subprocess.Popen(\n'
-        '                self.command, cwd=self.workdir, env=environment,\n'
-        '                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,\n'
-        '                bufsize=0, close_fds=True,\n'
-        '            )\n'
-        '        except (OSError, ValueError):\n'
-        '            self._mark_failure("sdk_spawn_failed")\n'
-        '            raise self._error() from None\n'
-        '        for target, name in ((self._read_stdout, "udrm-stdout"),\n'
-        '                             (self._read_stderr, "udrm-stderr"),\n'
-        '                             (self._write_stdin, "udrm-stdin")):\n'
-        '            thread = threading.Thread(target=target, name=name, daemon=True)\n'
-        '            self._threads.append(thread)\n'
-        '            thread.start()\n'
-        '        try:\n'
-        '            ready = self._receive(time.monotonic() + self.startup_timeout)\n'
-        '            if (ready.get("event") != "ready" or ready.get("id") is not None\n'
-        '                    or ready.get("code") != 0 or ready.get("data") != ""):\n'
-        '                self._mark_failure("sdk_invalid_ready")\n'
-        '                raise self._error()\n'
-        '            self._ready = True\n'
-        '            self.log.debug("UDRM SDK phase=ready code=0")\n'
-        '        except SDKError:\n'
-        '            self.close()\n'
-        '            raise\n'
-        '\n'
-        '    def _read_stdout(self) -> None:\n'
-        '        import io\n'
-        '        process = self._process\n'
-        '        assert process is not None and process.stdout is not None\n'
-        '        try:\n'
-        '            stream = io.BufferedReader(process.stdout, 65536)\n'
-        '            while not self._closed.is_set():\n'
-        '                line = stream.readline(_MAX_RPC_LINE + 1)\n'
-        '                if not line:\n'
-        '                    if not self._closed.is_set():\n'
-        '                        self._mark_failure("sdk_stdout_closed")\n'
-        '                    return\n'
-        '                if len(line) > _MAX_RPC_LINE:\n'
-        '                    self._mark_failure("sdk_output_too_large")\n'
-        '                    return\n'
-        '                if not line.startswith(RPC_PREFIX):\n'
-        '                    phase = _PHASE.match(line)\n'
-        '                    if phase:\n'
-        '                        code_match = _RIGHTS_CODE.match(line)\n'
-        '                        code = int(code_match[1]) if code_match else None\n'
-        '                        self.log.debug("UDRM SDK phase=%s code=%s", phase[1].decode("ascii"), code)\n'
-        '                        if code is not None and code != 0:\n'
-        '                            self._mark_failure("sdk_license_rejected", code)\n'
-        '                            return\n'
-        '                    continue\n'
+        '            sdk=WasmSDK(self.prepared)\n'
+        '            code=sdk.rights(self.license_url)\n'
+        "            if code!=0:raise SDKError('sdk_license_rejected code='+str(code))\n"
+        '            self.ready.set()\n'
+        '            while not self.stopping.is_set():\n'
+        '                try:job=self.jobs.get(timeout=0.2)\n'
+        '                except queue.Empty:continue\n'
+        '                if job is None:break\n'
         '                try:\n'
-        '                    record = json.loads(line[len(RPC_PREFIX):], parse_constant=_bad_constant)\n'
-        '                    if (not isinstance(record, dict) or type(record.get("code")) is not int\n'
-        '                            or not -(2 ** 31) <= record["code"] < 2 ** 31\n'
-        '                            or not isinstance(record.get("data"), str)):\n'
-        '                        raise ValueError("invalid RPC shape")\n'
-        '                except (ValueError, UnicodeError, RecursionError):\n'
-        '                    self._mark_failure("sdk_invalid_json")\n'
-        '                    return\n'
-        '                try:\n'
-        '                    self._responses.put_nowait(record)\n'
-        '                except queue.Full:\n'
-        '                    self._mark_failure("sdk_response_queue_full")\n'
-        '                    return\n'
-        '        except (OSError, ValueError):\n'
-        '            if not self._closed.is_set():\n'
-        '                self._mark_failure("sdk_stdout_failed")\n'
-        '\n'
+        "                    if job.op=='process':job.result=sdk.process(*job.args)\n"
+        "                    elif job.op=='reset':sdk.reset(*job.args)\n"
+        "                    else:raise SDKError('invalid_sdk_operation')\n"
+        '                except Exception as error:\n'
+        "                    job.error='sdk_media_failed '+str(error)[:160]\n"
+        '                    self.stopping.set()\n'
+        '                finally:job.done.set()\n'
+        '        except Exception as error:\n'
+        "            self.start_error=str(error)[:180] if isinstance(error,SDKError) else 'sdk_initialization_failed '+str(error)[:160]\n"
         '        finally:\n'
-        '            try:\n'
-        '                stream.close()\n'
-        '            except (OSError, ValueError):\n'
-        '                pass\n'
-        '\n'
-        '    def _read_stderr(self) -> None:\n'
-        '        import io\n'
-        '        process = self._process\n'
-        '        assert process is not None and process.stderr is not None\n'
-        '        try:\n'
-        '            stream = io.BufferedReader(process.stderr, 65536)\n'
-        '            while not self._closed.is_set():\n'
-        '                line = stream.readline(_MAX_DIAGNOSTIC_LINE)\n'
-        '                if not line:\n'
-        '                    return\n'
-        '                # Never relay raw diagnostics, exception text, payload or URLs.\n'
-        '                if any(marker in line for marker in _RUNTIME_FAULTS):\n'
-        '                    self._mark_failure("sdk_native_runtime_error")\n'
-        '                    return\n'
-        '        except (OSError, ValueError):\n'
-        '            if not self._closed.is_set():\n'
-        '                self._mark_failure("sdk_stderr_failed")\n'
-        '\n'
-        '        finally:\n'
-        '            try:\n'
-        '                stream.close()\n'
-        '            except (OSError, ValueError):\n'
-        '                pass\n'
-        '\n'
-        '    def _write_stdin(self) -> None:\n'
-        '        process = self._process\n'
-        '        assert process is not None and process.stdin is not None\n'
-        '        while not self._closed.is_set() and not self._failed.is_set():\n'
-        '            try:\n'
-        '                job = self._writes.get(timeout=0.1)\n'
-        '            except queue.Empty:\n'
-        '                continue\n'
-        '            if job is None:\n'
-        '                return\n'
-        '            try:\n'
-        '                view = memoryview(job.data)\n'
-        '                while view:\n'
-        '                    if self._closed.is_set() or self._failed.is_set():\n'
-        '                        raise OSError("SDK stopped")\n'
-        '                    written = os.write(process.stdin.fileno(), view)\n'
-        '                    if written <= 0:\n'
-        '                        raise OSError("SDK pipe closed")\n'
-        '                    view = view[written:]\n'
-        '            except (OSError, ValueError):\n'
-        '                job.failed = True\n'
-        '                if not self._closed.is_set():\n'
-        '                    self._mark_failure("sdk_stdin_failed")\n'
-        '            finally:\n'
-        '                job.done.set()\n'
-        '\n'
-        '    def _receive(self, deadline: float) -> dict:\n'
-        '        while True:\n'
-        '            self._check()\n'
-        '            remaining = deadline - time.monotonic()\n'
-        '            if remaining <= 0:\n'
-        '                self._mark_failure("sdk_response_timeout")\n'
-        '                raise self._error()\n'
-        '            try:\n'
-        '                response = self._responses.get(timeout=min(remaining, 0.1))\n'
-        '            except queue.Empty:\n'
-        '                continue\n'
-        '            self._check()\n'
-        '            return response\n'
-        '\n'
-        '    def _exchange(self, request: dict, timeout: float) -> dict:\n'
-        '        self._check()\n'
-        '        self._sequence += 1\n'
-        '        request["id"] = self._sequence\n'
-        '        data = (json.dumps(request, separators=(",", ":"), ensure_ascii=True) + "\\n").encode("ascii")\n'
-        '        deadline = time.monotonic() + timeout\n'
-        '        job = _Write(data)\n'
-        '        try:\n'
-        '            self._writes.put_nowait(job)\n'
-        '        except queue.Full:\n'
-        '            self._mark_failure("sdk_write_queue_full")\n'
-        '            raise self._error()\n'
-        '        if not job.done.wait(min(self.write_timeout, timeout)):\n'
-        '            self._mark_failure("sdk_write_timeout")\n'
-        '            raise self._error()\n'
-        '        self._check()\n'
-        '        if job.failed:\n'
-        '            self._mark_failure("sdk_stdin_failed")\n'
-        '            raise self._error()\n'
-        '        response = self._receive(deadline)\n'
-        '        if type(response.get("id")) is not int or response["id"] != self._sequence:\n'
-        '            self._mark_failure("sdk_reply_id_mismatch")\n'
-        '            raise self._error()\n'
-        '        if response["code"] != 0:\n'
-        '            self._mark_failure("sdk_media_rejected", response["code"])\n'
-        '            raise self._error()\n'
-        '        return response\n'
-        '\n'
-        '    @staticmethod\n'
-        '    def _channel(channel: str) -> None:\n'
-        '        if not isinstance(channel, str) or not channel or len(channel) > 128 or "\\x00" in channel:\n'
-        '            raise ValueError("invalid channel")\n'
-        '\n'
-        '    def process(self, channel: str, data: bytes, *, timeout: float | None = None) -> bytes:\n'
-        '        """Process video PES Annex-B in place; output must have the same length."""\n'
-        '        self._channel(channel)\n'
-        '        if not isinstance(data, (bytes, bytearray, memoryview)):\n'
-        '            raise TypeError("media must be bytes")\n'
-        '        data = bytes(data)\n'
-        '        if not 4 <= len(data) <= MAX_PACKET:\n'
-        '            raise ValueError("invalid media size")\n'
-        '        if not (data.startswith(b"\\0\\0\\1") or data.startswith(b"\\0\\0\\0\\1")):\n'
-        '            raise ValueError("media must be Annex-B")\n'
-        '        timeout = self.request_timeout if timeout is None else float(timeout)\n'
-        '        if not 0 < timeout <= 3600:\n'
-        '            raise ValueError("invalid timeout")\n'
-        '        with self._serialized(timeout):\n'
-        '            try:\n'
-        '                self._start_locked()\n'
-        '                response = self._exchange({"channel": channel, "data": base64.b64encode(data).decode("ascii")}, timeout)\n'
-        '                if response.get("event") is not None or len(response["data"]) > _MAX_B64:\n'
-        '                    raise ValueError("invalid media reply")\n'
-        '                output = base64.b64decode(response["data"], validate=True)\n'
-        '                if len(output) != len(data):\n'
-        '                    raise ValueError("changed media size")\n'
-        '                return output\n'
-        '            except (ValueError, binascii.Error):\n'
-        '                self._mark_failure("sdk_invalid_media_reply")\n'
-        '                self.close()\n'
-        '                raise self._error() from None\n'
-        '            except SDKError:\n'
-        '                self.close()\n'
-        '                raise\n'
-        '\n'
-        '    process_packet = process\n'
-        '\n'
-        '    def reset(self, channel: str, *, timeout: float | None = None) -> None:\n'
-        '        """Release a channel\'s Java state without replacing its SDK license."""\n'
-        '        self._channel(channel)\n'
-        '        timeout = self.request_timeout if timeout is None else float(timeout)\n'
-        '        if not 0 < timeout <= 3600:\n'
-        '            raise ValueError("invalid timeout")\n'
-        '        with self._serialized(timeout):\n'
-        '            try:\n'
-        '                self._start_locked()\n'
-        '                response = self._exchange({"channel": channel, "op": "reset"}, timeout)\n'
-        '                if response.get("event") != "reset" or response["data"] != "":\n'
-        '                    self._mark_failure("sdk_invalid_reset_reply")\n'
-        '                    raise self._error()\n'
-        '            except SDKError:\n'
-        '                self.close()\n'
-        '                raise\n'
-        '\n'
-        '    def close(self) -> None:\n'
-        '        """Send EOF, then bound termination/cleanup even if a writer is blocked."""\n'
-        '        with self._close_lock:\n'
-        '            self._closed.set()\n'
-        '            self._ready = False\n'
-        '            try:\n'
-        '                self._writes.put_nowait(None)\n'
-        '            except queue.Full:\n'
-        '                pass\n'
-        '            process = self._process\n'
-        '            if process is None:\n'
-        '                return\n'
-        '            try:\n'
-        '                if process.stdin is not None:\n'
-        '                    process.stdin.close()\n'
-        '            except (OSError, ValueError):\n'
-        '                pass\n'
-        '            try:\n'
-        '                process.wait(timeout=0.75)\n'
-        '            except subprocess.TimeoutExpired:\n'
-        '                try:\n'
-        '                    process.terminate()\n'
-        '                    process.wait(timeout=0.75)\n'
-        '                except subprocess.TimeoutExpired:\n'
-        '                    process.kill()\n'
-        '                    process.wait(timeout=1.0)\n'
-        '                except OSError:\n'
-        '                    pass\n'
-        '            for stream in (process.stdout, process.stderr):\n'
-        '                try:\n'
-        '                    if stream is not None:\n'
-        '                        stream.close()\n'
-        '                except (OSError, ValueError):\n'
-        '                    pass\n'
-        '            current = threading.current_thread()\n'
-        '            for thread in self._threads:\n'
-        '                if thread is not current:\n'
-        '                    thread.join(timeout=0.25)\n'
+        '            self.ready.set();self.stopping.set()\n'
+        '            if sdk:\n'
+        '                try:sdk.close()\n'
+        '                except Exception:pass\n'
         '            while True:\n'
-        '                try:\n'
-        '                    self._responses.get_nowait()\n'
-        '                except queue.Empty:\n'
-        '                    break\n'
-        '            while True:\n'
-        '                try:\n'
-        '                    job = self._writes.get_nowait()\n'
-        '                    if job is not None:\n'
-        '                        job.failed = True\n'
-        '                        job.done.set()\n'
-        '                except queue.Empty:\n'
-        '                    break\n'
-        '\n'
-        '    def __enter__(self) -> "SDKClient":\n'
-        '        return self.start()\n'
-        '\n'
-        '    def __exit__(self, _type, _value, _traceback) -> None:\n'
-        '        self.close()\n'
+        '                try:job=self.jobs.get_nowait()\n'
+        '                except queue.Empty:break\n'
+        "                if job:job.error='sdk_closed';job.done.set()\n"
+        '    def _request(self,op,args):\n'
+        '        self.start()\n'
+        "        if self.stopping.is_set():raise SDKError('sdk_closed')\n"
+        '        job=Job(op,args)\n'
+        '        try:self.jobs.put(job,timeout=1)\n'
+        "        except queue.Full:raise SDKError('sdk_busy') from None\n"
+        '        if not job.done.wait(self.request_timeout):\n'
+        "            self.close();raise SDKError('sdk_response_timeout')\n"
+        '        if job.error:raise SDKError(job.error)\n'
+        '        return job.result\n'
+        "    def process(self,channel,data):return self._request('process',(channel,data))\n"
+        "    def reset(self,channel):self._request('reset',(channel,))\n"
+        '    def close(self):\n'
+        '        self.stopping.set()\n'
+        '        try:self.jobs.put_nowait(None)\n'
+        '        except queue.Full:pass\n'
+        '        if self.started and threading.current_thread() is not self.thread:self.thread.join(timeout=3)\n'
+        '    def __enter__(self):return self.start()\n'
+        '    def __exit__(self,*args):self.close()\n'
     ),
     'ts_validator': (
         '"""Strict 188-byte TS, PSI and H.264 program validation. No cryptography."""\n'
@@ -1597,13 +1246,14 @@ PYTHON_SOURCES = {
         'from urllib.parse import urljoin, urlsplit\n'
         'from urllib.request import Request, urlopen\n'
         '\n'
-        'from bootstrap import setup, BootstrapError\n'
+        'from bootstrap_nojdk import prepare, BootstrapError\n'
         'from license_relay import LicenseRelay\n'
         'from sdk_client import SDKClient, SDKError\n'
+        'from jsc_host import JSCHost,APPLE\n'
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.1.0'\n"
+        "VERSION = '0.2.0'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'DEFAULTS = {\n'
         " 'cctv1': ('CCTV-1 综合', 'https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8'),\n"
@@ -1718,22 +1368,26 @@ PYTHON_SOURCES = {
         '\n'
         '\n'
         'class MediaSDK:\n'
-        '    def __init__(self, prepared):\n'
-        '        self.prepared=prepared;self.client=None;self.relay=None\n'
+        '    def __init__(self, config):\n'
+        "        self.config=config;self.prepared=None;self.phase='idle';self.client=None;self.relay=None\n"
         '        self.lock=threading.RLock();self.sessions=0;self.processed_frames=0\n'
         '        self.license_records=[]\n'
         '    def _start(self):\n'
         '        if self.client is not None:return\n'
-        "        self.relay=LicenseRelay(self.prepared['workdir']);self.relay.__enter__()\n"
-        "        env={'UDRM_PROBE_URL':self.relay.url,'UDRM_CONTENT_ID':'2820180516001'}\n"
+        "        self.phase='preparing'\n"
+        '        if self.prepared is None:self.prepared=prepare(**self.config)\n'
+        "        self.phase='licensing'\n"
+        '        self.relay=LicenseRelay();self.relay.__enter__()\n'
         '        try:\n'
-        "            self.client=SDKClient.from_java(java=self.prepared['java'],classpath=self.prepared['classpath'],\n"
-        "                workdir=self.prepared['workdir'],library_path=self.prepared['librarypath'],license_env=env)\n"
-        '            self.client.start();self.sessions+=1\n'
+        '            self.client=SDKClient(self.prepared,self.relay.url)\n'
+        "            self.client.start();self.sessions+=1;self.phase='ready'\n"
         '            self.license_records.extend(dict(x) for x in self.relay.records)\n'
         "            LOG.info('原 App SDK 已取得许可并就绪；会话 %s',self.sessions)\n"
         '        except Exception:\n'
-        '            self._close();raise\n'
+        "            self.phase='failed';self._close();raise\n"
+        '    def ensure_ready(self):\n'
+        "        if self.phase!='ready':\n"
+        '            with self.lock:self._start()\n'
         '    def _close(self):\n'
         '        if self.client:\n'
         '            self.client.close();self.client=None\n'
@@ -1749,7 +1403,8 @@ PYTHON_SOURCES = {
         '                    result=transform_plan(plan,lambda data:self.client.process(channel,data))\n'
         '                    self.processed_frames+=len(plan.frames)\n'
         '                    return result\n'
-        '                except SDKError:\n'
+        '                except SDKError as error:\n'
+        "                    LOG.info('SDK 当前会话停止：%s',str(error)[:180])\n"
         '                    self._close()\n'
         '                    if attempt:raise\n'
         "                    LOG.info('SDK 会话失效，重新取得许可后重试当前分片')\n"
@@ -1799,6 +1454,9 @@ PYTHON_SOURCES = {
         "                raise LiveError(ch.error or 'Upstream is cooling down')\n"
         '            started=now\n'
         '            try:\n'
+        '                # Prepare before acquiring a live window: a first SDK download\n'
+        '                # can take minutes, while an upstream window lasts ~12 seconds.\n'
+        '                self.sdk.ensure_ready()\n'
         '                media=read_playlist(ch.url,self.max_bitrate)\n'
         '                # A sequence rollback / URL change starts a separate stream timeline.\n'
         '                if (media.entries[-1].seq < ch.last_seq or any(\n'
@@ -1839,7 +1497,7 @@ PYTHON_SOURCES = {
         '                for item in reversed(history):\n'
         '                    if chosen and item[0].seq!=chosen[-1][0].seq-1:break\n'
         '                    chosen.append(item)\n'
-        '                    if len(chosen)>=3:break\n'
+        '                    if len(chosen)>=5:break\n'
         '                chosen.reverse()\n'
         "                if not chosen:raise LiveError('Waiting for a complete PES boundary')\n"
         '                media=Playlist(tuple(item[0] for item in chosen),media.target,chosen[0][1],media.end)\n'
@@ -1856,7 +1514,7 @@ PYTHON_SOURCES = {
         "                if decoded:LOG.info('%s 更新 %s 个分片，耗时 %.2fs',ch.ident,len(decoded),ch.seconds)\n"
         '            except Exception as error:\n'
         "                for future in locals().get('futures',{}).values():future.cancel()\n"
-        '                ch.error=str(error) if isinstance(error,(LiveError,TSFormatError,SDKError)) else type(error).__name__\n'
+        '                ch.error=str(error) if isinstance(error,(LiveError,TSFormatError,SDKError,BootstrapError)) else type(error).__name__\n'
         '                ch.retry_at=time.monotonic()+3\n'
         "                LOG.warning('%s 暂不可用：%s',ch.ident,ch.error)\n"
         '                # A previously valid playlist can bridge one transient CDN failure.\n'
@@ -1890,6 +1548,7 @@ PYTHON_SOURCES = {
         '        self.pool.shutdown(wait=True,cancel_futures=True);self.sdk.close()\n'
         '    def status(self):\n'
         "        return {'version':VERSION,'uptime_seconds':round(time.monotonic()-self.started),\n"
+        "            'engine':'javascriptcore-unicorn-wasm','jdk_required':False,'sdk_phase':self.sdk.phase,\n"
         "            'sdk_sessions':self.sdk.sessions,'processed_video_pes':self.sdk.processed_frames,\n"
         "            'license_exchanges':self.sdk.license_records,\n"
         "            'channels':{ch.ident:{'name':ch.name,'cached_segments':len(ch.cache),\n"
@@ -1962,56 +1621,73 @@ PYTHON_SOURCES = {
         '    return Handler\n'
         '\n'
         '\n'
-        'def main(sources):\n'
-        "    parser=argparse.ArgumentParser(description='央视影音 App 原生 SDK 本地 HLS 桥（需要 JDK 21 / OpenSSL）')\n"
-        "    parser.add_argument('--host',default='0.0.0.0')\n"
-        "    parser.add_argument('--port',type=int,default=8769)\n"
+        'def main(vm_source,argv=None):\n'
+        "    parser=argparse.ArgumentParser(description='央视影音 App UDRM 手机单文件服务（系统JavaScriptCore，无JDK）')\n"
+        "    parser.add_argument('port',type=int,nargs='?',default=8769)\n"
+        "    parser.add_argument('--port',dest='port_override',type=int,help=argparse.SUPPRESS)\n"
+        "    parser.add_argument('--host',default='127.0.0.1')\n"
         "    parser.add_argument('--cache-dir')\n"
-        "    parser.add_argument('--java',help='JDK 21 java executable')\n"
+        "    parser.add_argument('--jscore-library',default=APPLE,help=argparse.SUPPRESS)\n"
         "    parser.add_argument('--setup-only',action='store_true')\n"
-        "    parser.add_argument('--warmup',action='store_true',help='启动时预取默认频道，缩短首次打开等待')\n"
+        "    parser.add_argument('--doctor',action='store_true',help='只检查本机JavaScriptCore能力，不访问节目源')\n"
+        "    parser.add_argument('--warmup',action=argparse.BooleanOptionalAction,default=True)\n"
         "    parser.add_argument('--max-bitrate',type=int,default=2500000)\n"
-        "    parser.add_argument('--source',action='append',default=[],metavar='ID=URL',help='增加本人有权使用的 App HLS 源；不接受 HAR')\n"
-        '    args=parser.parse_args()\n'
+        "    parser.add_argument('--source',action='append',default=[],metavar='ID=URL')\n"
+        '    args=parser.parse_args(argv)\n'
+        '    if args.port_override is not None:args.port=args.port_override\n'
         "    logging.basicConfig(level=logging.INFO,format='%(asctime)s [%(levelname)s] %(message)s')\n"
+        "    if not 1<=args.port<=65535 or not 100000<=args.max_bitrate<=20000000:parser.error('端口或码率不合法')\n"
+        '    if args.doctor:\n'
+        '        context=None\n'
+        '        try:\n'
+        '            context=JSCHost(args.jscore_library)\n'
+        '            print(context.evaluate(\'JSON.stringify({javascriptcore:true,webassembly:typeof WebAssembly==="object",bigint:typeof BigInt==="function",jdk_required:false})\'),flush=True)\n'
+        "        except Exception as error:parser.exit(1,'JavaScriptCore不可用：'+type(error).__name__+'\\n')\n"
+        '        finally:\n'
+        '            if context:context.close()\n'
+        '        return\n'
+        "    config={'vm_source':vm_source,'cache_dir':args.cache_dir,'jscore_library':args.jscore_library,'progress':LOG.info}\n"
+        '    if args.setup_only:\n'
+        '        try:prepare(**config)\n'
+        "        except BootstrapError as error:parser.exit(1,str(error)+'\\n')\n"
+        '        return\n'
         '    channels={ident:Channel(ident,name,url) for ident,(name,url) in DEFAULTS.items()}\n'
         '    for source in args.source:\n'
         "        ident,sep,url=source.partition('=')\n"
         "        if not sep or not re.fullmatch(r'[a-z0-9_-]{1,48}',ident) or urlsplit(url).scheme not in ('http','https'):\n"
         "            parser.error('--source 必须是 ID=https://.../index.m3u8')\n"
         "        channels[ident]=Channel(ident,DEFAULTS.get(ident,(ident,''))[0],url)\n"
-        '    try:prepared=setup(sources,args.cache_dir,java_cmd=args.java,progress=LOG.info)\n'
-        "    except BootstrapError as error:parser.exit(1,str(error)+'\\n')\n"
-        '    if args.setup_only:return\n'
-        '    service=LiveService(prepared,channels,args.max_bitrate)\n'
+        '    service=LiveService(config,channels,args.max_bitrate)\n'
         '    server=ThreadingHTTPServer((args.host,args.port),make_handler(service));server.daemon_threads=True\n'
         '    def stop(signum,frame):\n'
         '        threading.Thread(target=server.shutdown,daemon=True).start()\n'
-        '    signal.signal(signal.SIGINT,stop);signal.signal(signal.SIGTERM,stop)\n'
+        '    if threading.current_thread() is threading.main_thread():\n'
+        '        signal.signal(signal.SIGINT,stop);signal.signal(signal.SIGTERM,stop)\n'
+        "    else:LOG.info('APTV托管线程：跳过进程信号注册')\n"
         '    if args.warmup:\n'
         '        def warmup(ch):\n'
         '            try:service.refresh(ch)\n'
         '            except LiveError:pass\n'
-        '        for ch in channels.values():\n'
-        '            service.refresh_pool.submit(warmup,ch)\n'
-        "    LOG.info('原 App SDK 桥 %s；%s 台；APTV 订阅 http://运行电脑局域网IP:%s/all.m3u',VERSION,len(channels),args.port)\n"
+        '        for ch in channels.values():service.refresh_pool.submit(warmup,ch)\n'
+        "    LOG.info('原 App UDRM 无JDK版 %s；%s 台；订阅 http://127.0.0.1:%s/all.m3u',VERSION,len(channels),args.port)\n"
+        "    LOG.info('首次会自动准备SDK；状态 /status；运行不读取HAR，不启动Java/Node/FFmpeg或外部命令')\n"
         '    try:server.serve_forever(poll_interval=0.3)\n'
+        '    except KeyboardInterrupt:pass\n'
         '    finally:\n'
         '        server.server_close();service.close()\n'
-        '\n'
-        "if __name__=='__main__':\n"
-        '    from prepare_bridge import SOURCES\n'
-        '    main(SOURCES)\n'
     ),
 }
 
 def load_modules():
     for name, source in PYTHON_SOURCES.items():
         module = types.ModuleType(name)
-        module.__file__ = __file__ + "::" + name
+        module.__file__ = globals().get("__file__", "cctv-app-udrm.py") + "::" + name
         sys.modules[name] = module
         exec(compile(source, module.__file__, "exec"), module.__dict__)
     return sys.modules["service"]
 
+def start(ctx=None):
+    load_modules().main(JS_SOURCES["koo_vm.js"], [])
+
 if __name__ == "__main__":
-    load_modules().main(JAVA_SOURCES)
+    load_modules().main(JS_SOURCES["koo_vm.js"])

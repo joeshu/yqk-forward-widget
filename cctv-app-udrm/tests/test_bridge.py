@@ -81,32 +81,64 @@ class MappingTests(unittest.TestCase):
         with self.assertRaises(TSFormatError):following_proves_complete(source,bytes(bad))
 
 
-FAKE='''import sys,json,time
-print('UDRM_RPC '+json.dumps({'id':None,'code':0,'data':'','event':'ready'}),flush=True)
-for line in sys.stdin:
- o=json.loads(line)
- if sys.argv[1]=='timeout':time.sleep(5)
- r={'id':o['id'] if sys.argv[1]!='wrong' else -999,'code':0,'data':o.get('data','')}
- if o.get('op')=='reset':r['event']='reset'
- print('UDRM_RPC '+json.dumps(r),flush=True)
-'''
+
 class SDKProtocolTests(unittest.TestCase):
-    def client(self,directory,mode):
-        path=Path(directory)/'fake.py';path.write_text(FAKE)
-        return SDKClient([sys.executable,'-u',str(path),mode],workdir=directory,
-            request_timeout=0.4,write_timeout=0.4,startup_timeout=2)
-    def test_ready_process_reset_close(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.client(tmp,'good') as client:
+    class FakeSDK:
+        code=0
+        def __init__(self,prepared):self.owner=threading.get_ident()
+        def rights(self,url):return self.code
+        def process(self,channel,data):
+            if threading.get_ident()!=self.owner:raise RuntimeError('Wrong JSC owner')
+            if channel=='bad':raise RuntimeError('Native media rejection')
+            return data
+        def reset(self,channel):
+            if threading.get_ident()!=self.owner:raise RuntimeError('Wrong JSC owner')
+        def close(self):pass
+    def test_owner_thread_process_reset_and_no_external_process(self):
+        import sdk_client
+        with patch.object(sdk_client,'WasmSDK',self.FakeSDK),patch('subprocess.Popen',side_effect=AssertionError('No child process')):
+            with SDKClient({},'https://127.0.0.1:12345/udrm') as client:
                 data=b'\x00\x00\x01\x65MEDIA'
                 self.assertEqual(client.process('test',data),data);client.reset('test')
-            self.assertFalse(client.healthy)
-    def test_out_of_order_or_timeout_never_returns_media(self):
-        for mode in ('wrong','timeout'):
-            with self.subTest(mode=mode),tempfile.TemporaryDirectory() as tmp:
-                with self.client(tmp,mode) as client:
-                    with self.assertRaises(SDKError):client.process('test',b'\x00\x00\x01\x65MEDIA')
-                    self.assertFalse(client.healthy)
+    def test_license_rejection_and_media_error_never_return_raw_data(self):
+        import sdk_client
+        class Rejected(self.FakeSDK):code=-80003001
+        with patch.object(sdk_client,'WasmSDK',Rejected):
+            with self.assertRaisesRegex(SDKError,'license_rejected'):SDKClient({},'https://127.0.0.1/').start()
+        with patch.object(sdk_client,'WasmSDK',self.FakeSDK):
+            with SDKClient({},'https://127.0.0.1/') as client:
+                with self.assertRaises(SDKError):client.process('bad',b'\x00\x00\x01\x65MEDIA')
+                with self.assertRaises(SDKError):client.process('test',b'\x00\x00\x01\x65MEDIA')
+
+class DependencyTests(unittest.TestCase):
+    def test_hosted_entry_does_not_register_process_signals(self):
+        class Server:
+            def __init__(self,*args):pass
+            def serve_forever(self,**kwargs):pass
+            def server_close(self):pass
+        errors=[]
+        def run():
+            try:service.main(standalone.JS_SOURCES['koo_vm.js'],['--no-warmup'])
+            except Exception as error:errors.append(error)
+        with patch.object(service,'ThreadingHTTPServer',Server),patch.object(service.signal,'signal',side_effect=AssertionError('Hosted process signal')):
+            thread=threading.Thread(target=run);thread.start();thread.join(timeout=3)
+        self.assertFalse(thread.is_alive());self.assertEqual(errors,[])
+    def test_runtime_sources_do_not_import_external_process_tools(self):
+        import ast
+        denied={'subprocess','java','jpype','jnius'}
+        for name,text in standalone.PYTHON_SOURCES.items():
+            tree=ast.parse(text)
+            imports=[]
+            for node in ast.walk(tree):
+                if isinstance(node,ast.Import):imports.extend(item.name.split('.')[0] for item in node.names)
+                elif isinstance(node,ast.ImportFrom) and node.module:imports.append(node.module.split('.')[0])
+            self.assertFalse(denied.intersection(imports),name)
+    def test_read_only_cache_falls_back_without_raising(self):
+        import bootstrap_nojdk
+        with patch.object(Path,'mkdir',side_effect=PermissionError('read only')):
+            bootstrap_nojdk._cache(Path('/read-only'),'probe.bin',b'probe')
+        with patch.object(Path,'is_file',side_effect=PermissionError('read only')):
+            self.assertIsNone(bootstrap_nojdk._read_cached(Path('/read-only'),'probe.bin','digest'))
 
 
 class PlaylistHTTPTests(unittest.TestCase):

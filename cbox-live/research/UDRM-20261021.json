@@ -217,10 +217,15 @@
     ],
     "all_61_app_channels_verified": false,
     "runtime_har_dependency": false,
-    "single_file": "../../cctv-app-udrm/cctv-app-udrm.py",
+    "single_file": "../../cctv-app-udrm/cctv-app-udrm-v0.2.0.py",
     "sample_evidence": "../../cctv-app-udrm/SAMPLE-VALIDATION.json",
     "fresh_evidence": "../../cctv-app-udrm/FRESH-VALIDATION.json",
     "live_evidence": "../../cctv-app-udrm/LIVE-VALIDATION.json",
-    "iphone_aptv_device_tested": false
+    "iphone_aptv_device_tested": false,
+    "runtime": "Python standard library + system JavaScriptCore + pinned Unicorn WASM/TCI; no JDK, Node, compiler or external OpenSSL command",
+    "standalone_version": "0.2.0",
+    "jdk_required": false,
+    "external_processes_required": false,
+    "nojdk_evidence": "../../cctv-app-udrm/NOJDK-VALIDATION.json"
   }
 }

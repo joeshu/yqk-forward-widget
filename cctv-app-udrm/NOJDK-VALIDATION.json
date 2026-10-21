@@ -1,0 +1,309 @@
+{
+  "version": "0.2.0",
+  "script_sha256": "fa1ac94ec973ad50c56b3614dd3fba2bfc24b67359ff1917b9c85d96c619439c",
+  "recorded_at_utc": "2026-10-21T15:30:28Z",
+  "runtime_jdk_required": false,
+  "runtime_external_processes_required": false,
+  "runtime_har_dependency": false,
+  "iphone_aptv_device_tested": false,
+  "runtime_test_environment": "Linux x86_64, Python 3.12, JavaScriptCoreGTK 2.52.6, Unicorn WASM/TCI 2.1.4; no JVM, Node, compiler or external OpenSSL command",
+  "original_sdk_sha256": "41cd081ba0348b9802cedfceedb6bfa12c4db8f7cc462ffd3b531df6874f0a9e",
+  "unicorn_release": "@alexaltea/unicorn-js 2.1.4",
+  "unicorn_aarch64_sha256": "b497aa99d973f0a5eb27fe7e14e8d32f76298bf6cc6008f9035c4a8d8b91cb37",
+  "wasm_five_sample_equivalence": {
+    "scope": "Original unmodified SDK in JavaScriptCore/WASM prototype; final single-file checks below additionally remove external certificate commands and bind the delivered artifact hash.",
+    "rights_code": 0,
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "samples": [
+      {
+        "sample": "cctv7",
+        "video_pes_count": 300,
+        "input_bytes": 854460,
+        "output_bytes": 854460,
+        "changed_bytes": 105488,
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "matches_jvm_sdk_output": true,
+        "processing_seconds": 0.667,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "duration": "00:00:11.989333"
+      },
+      {
+        "sample": "cctv1",
+        "video_pes_count": 300,
+        "input_bytes": 1095664,
+        "output_bytes": 1095664,
+        "changed_bytes": 125432,
+        "output_sha256": "9759e905d57a5a48668b7373d677abe847a5959f1930dafe7536901cd084250b",
+        "matches_jvm_sdk_output": true,
+        "processing_seconds": 0.722,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "duration": "00:00:11.989333"
+      },
+      {
+        "sample": "guizhou",
+        "video_pes_count": 500,
+        "input_bytes": 4825396,
+        "output_bytes": 4825396,
+        "changed_bytes": 0,
+        "output_sha256": "e0d4d8cf08006945a11d708200ea3c7d1f14e04e00caf57c839584f0baad567c",
+        "matches_jvm_sdk_output": true,
+        "processing_seconds": 1.931,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "500",
+        "duration": "00:00:20.000000"
+      },
+      {
+        "sample": "old95",
+        "video_pes_count": 200,
+        "input_bytes": 1307916,
+        "output_bytes": 1307916,
+        "changed_bytes": 140118,
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "matches_jvm_sdk_output": true,
+        "processing_seconds": 0.933,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "duration": "00:00:08.000333"
+      },
+      {
+        "sample": "app1500",
+        "video_pes_count": 100,
+        "input_bytes": 1049792,
+        "output_bytes": 1049792,
+        "changed_bytes": 108267,
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "matches_jvm_sdk_output": true,
+        "processing_seconds": 0.771,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "duration": "00:00:03.989333"
+      }
+    ]
+  },
+  "final_single_file_with_subprocess_popen_blocked": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 6.264
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 1.495
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 1.006
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "wall_seconds": 10.522,
+    "script_sha256": "fa1ac94ec973ad50c56b3614dd3fba2bfc24b67359ff1917b9c85d96c619439c"
+  },
+  "final_live_http": {
+    "recorded_at_utc": "2026-10-21T15:30:28Z",
+    "script_sha256": "fa1ac94ec973ad50c56b3614dd3fba2bfc24b67359ff1917b9c85d96c619439c",
+    "runtime": "Linux x86_64, Python 3.12, JavaScriptCoreGTK 2.52.6, Unicorn WASM/TCI 2.1.4; no JVM, Node, compiler or external OpenSSL command",
+    "channels": [
+      {
+        "channel": "cctv1",
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "1497",
+        "duration": "00:01:00.000000",
+        "wall_seconds": 51.365
+      },
+      {
+        "channel": "cctv7",
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "1495",
+        "duration": "00:01:00.000000",
+        "wall_seconds": 51.378
+      },
+      {
+        "channel": "guizhou",
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "1500",
+        "duration": "00:01:00.000000",
+        "wall_seconds": 50.701
+      }
+    ],
+    "http_response_metrics": [
+      {
+        "channel": "cctv1",
+        "playlist_http": 200,
+        "playlist_seconds": 12.2247,
+        "first_segment_http": 200,
+        "segment_seconds": 0.0019,
+        "segment_bytes": 1029864,
+        "phase": "first_pass"
+      },
+      {
+        "channel": "cctv7",
+        "playlist_http": 200,
+        "playlist_seconds": 2.0237,
+        "first_segment_http": 200,
+        "segment_seconds": 0.0016,
+        "segment_bytes": 592764,
+        "phase": "first_pass"
+      },
+      {
+        "channel": "guizhou",
+        "playlist_http": 200,
+        "playlist_seconds": 2.357,
+        "first_segment_http": 200,
+        "segment_seconds": 0.0025,
+        "segment_bytes": 1281784,
+        "phase": "first_pass"
+      },
+      {
+        "channel": "cctv1",
+        "playlist_http": 200,
+        "playlist_seconds": 0.0009,
+        "first_segment_http": 200,
+        "segment_seconds": 0.0014,
+        "segment_bytes": 1029864,
+        "phase": "repeat_cached"
+      },
+      {
+        "channel": "cctv7",
+        "playlist_http": 200,
+        "playlist_seconds": 0.0007,
+        "first_segment_http": 200,
+        "segment_seconds": 0.0008,
+        "segment_bytes": 592764,
+        "phase": "repeat_cached"
+      },
+      {
+        "channel": "guizhou",
+        "playlist_http": 200,
+        "playlist_seconds": 0.0006,
+        "first_segment_http": 200,
+        "segment_seconds": 0.0015,
+        "segment_bytes": 1281784,
+        "phase": "repeat_cached"
+      },
+      {
+        "channel": "cctv1",
+        "playlist_http": 200,
+        "playlist_seconds": 0.0005,
+        "first_segment_http": 200,
+        "segment_seconds": 0.0008,
+        "segment_bytes": 1029864,
+        "phase": "repeat_cached"
+      },
+      {
+        "channel": "cctv7",
+        "playlist_http": 200,
+        "playlist_seconds": 0.0006,
+        "first_segment_http": 200,
+        "segment_seconds": 0.0009,
+        "segment_bytes": 592764,
+        "phase": "repeat_cached"
+      },
+      {
+        "channel": "guizhou",
+        "playlist_http": 200,
+        "playlist_seconds": 0.0006,
+        "first_segment_http": 200,
+        "segment_seconds": 0.0015,
+        "segment_bytes": 1281784,
+        "phase": "repeat_cached"
+      }
+    ],
+    "metric_limitation": "Local service response latency, not iPhone APTV first-frame or device playback measurement.",
+    "service_status": {
+      "version": "0.2.0",
+      "uptime_seconds": 68,
+      "engine": "javascriptcore-unicorn-wasm",
+      "jdk_required": false,
+      "sdk_phase": "ready",
+      "sdk_sessions": 1,
+      "processed_video_pes": 4795,
+      "license_exchanges": [
+        {
+          "request_bytes": 368,
+          "http_status": 200,
+          "response_bytes": 232,
+          "business_status": 0,
+          "protected_license_count": 1
+        }
+      ],
+      "channels": {
+        "cctv1": {
+          "name": "CCTV-1 综合",
+          "cached_segments": 8,
+          "playlist_age_seconds": 1.8,
+          "last_refresh_seconds": 1.852,
+          "error": ""
+        },
+        "cctv7": {
+          "name": "CCTV-7 国防军事",
+          "cached_segments": 8,
+          "playlist_age_seconds": 0.29,
+          "last_refresh_seconds": 5.862,
+          "error": ""
+        },
+        "guizhou": {
+          "name": "贵州卫视",
+          "cached_segments": 8,
+          "playlist_age_seconds": 2.68,
+          "last_refresh_seconds": 1.472,
+          "error": ""
+        }
+      }
+    }
+  },
+  "offline_regressions": {
+    "passed": 12,
+    "includes_jsc_allocator_iterations": 10000,
+    "external_process_import_check": true,
+    "read_only_cache_fallback_check": true,
+    "hosted_thread_and_owner_thread_checks": true
+  },
+  "limitations": [
+    "Development verification uses Linux JavaScriptCoreGTK; iPhone APTV execution and first-frame latency require user-device verification.",
+    "Default App live sources verified for CCTV-1, CCTV-7 and Guizhou only; original 61-channel catalogue is preserved separately.",
+    "HTTP response measurements are local-service latency, not APTV first-frame latency."
+  ]
+}
