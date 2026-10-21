@@ -37,7 +37,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = '1.5.2'
+VERSION = '1.5.3'
 CONFIG_CATALOG_B85 = 'ABzY8000000t4-xO>f-B9menZ6oJoiyffs!C_oN24AcRH)PRFtibCMqa!7H9yE~+o+{i$42!i%n6zHWd$D%#A=od=be2bD?EiJ#uk+-hBKXZ)OP{@_^`#&7c^UQEae*MwM&7V7dQmnlqI!p9Czw_D0Uw2!(J&&F|Y&P8a&+q>D{kOll^U1RvSKI&j?GOL@_WJfm-S!{<{)ZQ~Kl!TL@xx!fdtt}vZu>vJ`S<Ui+x~dB{ZHTg`0GDk-+q7hi@*EZ_rLw?oo@5fPoA$Lj7-3-A_(<Q9uEI=DMzEb&SW%txf=g-(QLmf#q&EK?RPrOPVwS*es#5X*6x(g?>ycA&Su}V+4UT5X`=PbyubM3@w1=%BJSzWfA+<f&wliaz+b+wzhi!0D&=V%W&7Xz%l><x5nTUV`=f%OxDeNVOSeDs+g&ehzACHT_vGQ_qlcG`N|&b(FPmfc;t$B<M4w&zd~=*GpS<+3$Ll0tCq><U;^iL_t{1Pw@X9dBcYFFBPd~Y3t#UxMI&WSpvru<H2i03d>m=|7RB=?U^JO%kg2zLub(xiBK=n?B(kD*`bWmqQIjCupl><7iVl<>;hcpZjLmCGNXF$aUD#^kj9o!+MMR7xX8hwz(4kkj$!T78kjLFKuIIR32?DgYU{JBN-UMLQnLgpQ5FRx2&#G6|XwA73B5K3*E?|dEUKn-OS@2x#Q35HVbx-=&7^iayJlDZs9ttUe%G|UHax)xrtN(Rw-t3;niVXouFO+C}=O!od!Ty#A@6QkK^c|b;Zz5K7({niWck36)F-fpFGFqJxksni`zr3Wv0fYy8Hf(K~1<Ka|#*kT80wUfbAIvq@<v%yq)*ir{*v4<>lpq4tE)Gvk;`^9i_|A7k}s0Vg9>F|)n4b)Nxk(h!5Cz<Xa2e<<yFOs@Umbbk`dy#}uepb}W=oX8J+Qx^ONbh8jR)$sv$I8&k;94148OBzIR)&d{p_O53WoTuXSs7XxPOJ=Fd>UCDIvs3|-05J0<W2{hBzHR4D7n+YX33onHcakxuxWCqgN>6r9c-T5%|qEdxzoYs$(;^1PwsTEd2*+N&67JF2A?Op+s;Do+#AY`XJ>g<FP2F#5`(K)4z6McdZ$NUfcwr082x_=7}E=w&<mIX3s`tXpza^iMZfpc_X=Hd(H$<j%S9hk(I0S6(+Aws^a1xYeZW0UA0SWDc6f(8Njq@jDXN2|H-x3drf9!Y45w5%oKl_Pl<E$rRN{DiM?S%lPqE}PEcpqR{MKs$j}TpO(Ipq%;i9`-bfS}Pyd?0FL&k!quSGw7XXuiP?r_mvAbJqpcq`~}U;m44e0tc?b30IO;)J9sHS$S@TNR~=r(+<xr&XB%xwFK}b%K<<Xqrlz5Zigz$SY!VF-f3G=2KEtuHzN6rK>2(8hUEq7?;Ub<t5Tc{U|{;7-j&dOU(q2OKOj<B4!ge&6f^R@ifU2Y#VPMlTN(q9wm!N$1%}_TFIHcVjH)VM?6QXWDCt&o;Jir-i|@5#3K$v*WN|*6%X8JPJ*`G;hcGLwwXm#%>GbQN1v_e(A3gNj_l6;8{Z^w<ZUI=+vYD*ahHiLnb;F1_LPY|V`4i@>=R-RH&x2)Om^gBEcpye&TZ!omRxX8Q2|!n<)Tx2#*%4ARXgg8o4=bVF^V}`;VqDZxE;8_l1nVPgC%#lOSgO_$?(Jpt}rSth^x0k=!)%-Ik4MxEp_rvC(hsEd#&P)ahcp2dAnIF_>?L*@vh2Eycr27w}f&#P;M8>J%(~mpxjd^H}O#fX&oc`@0MFaxg97svH#A>APK!3*~a(m#C9HfnkxGhI#Kn)OWI{-NZI%7WZfMwy9;I?gV`rwc4AVm(jo|z*+S7(wJf0Mi`r1zOH3qJ##D18_a<X<FMOkr;LEx|a#t#>VkCLI2$?OVh__Vm8VOz#8+f!ZUh^}N;I(3MZ{~&xzO0r+@@=}=X0`IE=v4tF_x(&!(KDjxsZlCqUMDh&d7Y@?cA?x3l$$scx22w#TjqJWWj60Evo{G<U9ZdnOI}dPoBxOx%#|_eHe`}-Q?n#4e5y^Y=TPt}R8Y+u@PIg-<r}lD{4k5D?9m!Z?gs`+UKCL96gjJ9OlIPMN<QBh<OPZjK27H)q{0`-g$bDn=S3Yt$>VuOyr!j#!Vl9BiXPSm%f5_}E1z2QOl^^}*HsoEmsiwP75auszMLb$RiG6Vye9T6MXl1J))^MvK*@E1Z7*x2=wVu~>P%qCC6heb5U*b>!nE;F<5STWDy^%OOdqGnt4Eayi^4F;4Kk*0+NL6?;KW|NN>*h=97Wg2r6MZZ)<J*-uaMKZD%&8}hBn;Hb`qO9+ZIco$)2S}jGX&#*v)cVg;e3gCA7_$>fEeSD!EyO+cg(IAd+v33Q3K;np<cjHL)w4t2hYb1(jSY=8aqFLNRZCO8q(W)~D30kqfyS@-z)ICVB18nc&_$tdMuJ)`e+8))9b@-W<Hz#!PTOt(oB4dJY87(l{_%qtB0GmFOY#n>eeBI;#wnKde=C9M^{qqBq2Lqbsv4!bMyMDqEBJsq9KEGa$Q(wK<B*E^i91+Gi^v$vep<5Ijsnq~Obf*~FK193a7~V5OMg;XGX-$%|AeE;z9_+}5igte72(!J6k4I<djT&4>=Ec{>ypSa4!f@swgVm3gp1a%W2uFH+6y6Lr1uH%xSO4$bBrxTJzRRB)FHKBj_CsNhp7_z4vJDBciy5IAxcaT}i_ozu@^WN+AV6MeJVFeipKL0whM`A_3BC(8YTIr$l`nS%&zsDq!HI+t~YF1hFq7v1HekGbd*F8Y*<KI5XFV9}97&{dc*y|e?DRB(q1?oz?WRPYHEoampXhOS6V6|;%QS&hBcjJ=S>jE9Q4fJGr&O3O`j`(nXtCoQ*xa#P#Mn8{r%m{a^F-3HinMdd~=Zw{*!bcVmXAB%baLA{x0Nbbc^yz}<Wxy_n*k8?A&XEyK-TvEY_V~D_8g$g+<k)_Bc9tVLgE~GoUn{9n`1>&yB=Ew??rKdyh)!^ba;Ex_&KKbh5<>|xAmm#w}PW0LJ4?k%>{l1^*va3{#Mx$F+>y?H2spH3!p-OTcFT5Q21mPZDlHnaPyi0~3li??1_$e8FMutBD!ym;em4o5Q4lBqGE65Hj$PO#W4lBqGE65Hj$PO#W4lBtHE6ENk$qp;Y4l9WcJNA}K;=94JK$Uvq>EoSZ6mPFsPsdrA*QKtLBY8r~o0bqnMkPe<ptv||_1B)J;s<_SF&j-!FVXZwQ`6A~*=Aa93FW4?6Bo)ohH_7!+*2s`49b1N<VMcUx7<*_6i~msaXGR$dT>bvcc|bl6?{wupHRW4RPY%U`~(UvMpSUBa|)_+3aWDos&fjea|)_+3aWDos&fjeb4sFfE~0fD5eNAlxTJzRRB)FHKBj_CsNhp7_>2mELIp=okMGE_-YKx=DX{J-u=Xji{wc5qDzFYJuofz?9x9=im`#>kMA*xo9lRvNJ7jp53_m8rPss37GW?7Te*%WbUK;J-$qp;X4lBqGE65Hj$PO#W4lBqGE65Hj$PSCVgxcN|B^RCc&|A88^b$?)K<R}znx->41b_S?;1eGnyLjEa*-O9XA_=4Xtf-gKPd=xyyFI+SpZtA2sPQl<q?KYXg=3}IOW|56_EL<k6niNqR*Jn8Q!B+@ikX#SFU5(K;!28JuT2_&6gF-4QrNWFOJUPyFNIB;y%aWW_EOli*-K&5W-o<Jo4ph^ZSJLzHf{D&*tFS8Vbf+Wg-x5i6gF-4QrNWFOJUPyFNIB;y%aWW_EOlixtGGRX|tEYrp;aon>KqXY})LluxYcG!lun$3Y#{2DQw#8rLbwUm%^say%erZo4ph^ZT3>wwAo8x(`GM)O`E+GHf{D&*tFS8Vbf+Wg-x5i6gF+{r5M|^*-K&5W-o<Jo4ph^ZT3>wwAo8x(`GM)O`E+GHf{D&*tFS8VbkVbiphtcHuqoM>h0c1;3Z;oz#}P7Ut7cJJ9rIy$1cI_4w&6VvU?%<@h@ja<(m<kUZUx#53f0ka~;<Sx9wc<OE^Eh{kU-cF_nM!%3*`Xmu!58h;LNV{$Gsj`FnU`x8KC%VxF%T5mNeR^la@NG`)+aAEW6fX!<ET=&*ARJLaJ2T{Jy=crroLvwO@Ln*M}Lk9;TQGkUbw3bfY>wATu>*9x@P3bfY>wATu>*9x@PBHx{9l$S?q=nQO!F1hFq7oF&@t5ubFc~v6USoH9c4DXQP(QSTAhMyqe166KSu493wmuPxshZB1_xaI8WC7Pbua_U6aWmF_}3B<3<tkm2kA=mIF8{c8$yKMY18-K#apR)01Z2S{6KJs$gHGH<~A}_d=20H!PfnybSsNlqG6PI~29``h|o%isP4DTS}n@+tMjzgQx6+E%os4{HtNh)=nK*!?GSHM38#Piq78~W88tNpgSFYkcX|7iEXh12)<%!U7@-~&#U8>@W}Yca&=kh}li)gcpatyVb_v##DD6x($r@6LzbGPtCIJ5+F&3O=TSPpIHiD)@{FenJI*hts=nn;h$%0&AWE>z)E@p91Tj0&AcG>!1Q_p#tln66>LoJO0FasKk1x#CoX2dZ@&DsKk1x#CoX2dZ>f-PzURw4tEk4>!A+TLmjM#I#>_IUJM%@TCE&ZwKtqn;={Yp*;TvDN;8Ct%`#sXrii?SH>`5~VU-&UtK4un<sxqzxI&j)bcc)Xa?!_J^a&Sz%0-`X(NDPO<SvHX$B;W2axX*fX2|^v^PzuN?Bv`I4(<}1+$GpoCD>Ob*jFXkS0&h2CD>OTu&+8`Uv<b6Vqjl&z`p8$eboW`ssr{_2kfg3*jHV!uexAgb-}*slCLy@eboi~s*8OIOrF(?WfFj2XuYpM;wwPD)>>&p#9pa$PshGTd<3MY{lwEiavdd$NXKzWTwQ(zzfs86zV+ItYa!9Aq=hFocmJRz+DE}Hq1+CX+l6uyLwl9zxbPCAJQb1g8#hvA&aEKMn=FtcyLKtgHGRo*_tmd<pS-ioygFJpA9+^uor`E~l3aK7etKQIJLP(p{flDx*}Z$a@BK8;#YOYaJyUo(^w#0Mz|X5kp?SR9Z8r1WFMs;c)Bge<5B*OpV*&s'
 NOTICE = 'App UDRM 尚未修复；网页 CDRM 已通过连续样本解码验证，各频道需单独检查。'
 # EMBEDDED_PROFILES 在构建时由用户提供的成功抓包提取，不包含 Cookie。
@@ -64,9 +64,13 @@ class MediaCapabilityError(LiveError):
 
 
 class UpstreamError(LiveError):
-    def __init__(self, status):
+    def __init__(self, status, target=None):
         self.status = status
-        super().__init__(f'上游 HTTP {status}')
+        parsed = urlparse.urlsplit(target or '')
+        self.host = parsed.hostname
+        self.stage = 'manifest' if parsed.path.endswith('.m3u8') else ('api' if parsed.hostname == 'bkliveinfo.ysp.cctv.cn' or parsed.path == API_PATH else 'media')
+        detail = f'（{self.host}，{self.stage}）' if self.host else ''
+        super().__init__(f'上游 HTTP {status}' + detail)
 
 
 def is_hls(body):
@@ -551,6 +555,8 @@ class Client:
             handlers.append(urllib.request.ProxyHandler({}))
         self.opener = urllib.request.build_opener(*handlers)
         self.cache = Cache(args.cache_mb)
+        self.transfer_locks = [threading.Lock() for _ in range(32)]
+        self.media_failures = collections.OrderedDict()
         self.state_lock = threading.Lock()
         self.states = {}
         self.locks = {k: threading.Lock() for k in self.profiles}
@@ -697,13 +703,65 @@ class Client:
                 if not is_api and attempt == 0 and status in (500, 502, 503, 504):
                     time.sleep(0.2)
                     continue
-                raise UpstreamError(status) from None
+                raise UpstreamError(status, target) from None
             except (urllib.error.URLError, TimeoutError, OSError, http.client.IncompleteRead):
                 if not is_api and attempt == 0:
                     time.sleep(0.2)
                     continue
                 raise LiveError('上游网络连接失败、响应中断或超时') from None
         raise LiveError('上游请求失败')
+
+    def fetch_media(self, channel, target, headers):
+        return self.fetch(target, headers)
+
+    def load_asset(self, channel, target, media_kind, range_value, processed):
+        whole_ts = processed or (self.api_mode == 'ysp' and urlparse.urlsplit(target).path.lower().endswith('.ts'))
+        key = (channel, target, media_kind, None if whole_ts else range_value)
+        stripe = int.from_bytes(hashlib.sha256(repr(key).encode()).digest()[:4], 'big') % len(self.transfer_locks)
+        with self.transfer_locks[stripe]:
+            cached = self.cache.get(key)
+            if cached:
+                return cached
+            with self.state_lock:
+                blocked = self.media_failures.get(key)
+            if blocked and time.monotonic() < blocked[0]:
+                raise blocked[1]
+            headers = self.media_headers(channel)
+            if range_value and not whole_ts:
+                headers['Range'] = range_value
+            try:
+                status, rh, body, final = self.fetch_media(channel, target, headers)
+                if is_hls(body):
+                    return status, rh, body, final
+                path = urlparse.urlsplit(target).path.lower()
+                bad_mime = rh.get('content-type', '').lower().split(';')[0] in ('text/html', 'application/json', 'image/jpeg', 'image/png')
+                bad_body = body.lstrip().lower().startswith((b'<!doctype html', b'<html', b'<?xml', b'{"error', b'{"code')) or body.startswith((b'\xff\xd8\xff', b'\x89PNG\r\n\x1a\n'))
+                if path.endswith('.ts') and (bad_mime or bad_body):
+                    raise LiveError('媒体地址返回网页、图片或接口错误；不缓存为视频')
+                if processed:
+                    if status != 200:
+                        raise LiveError('CDRM 处理需要完整分片，上游未返回 HTTP 200')
+                    body = self.process_segment(channel, target, body, media_kind)
+                    rh = {'content-type': 'video/mp2t'}
+                result = status, rh, body, final
+                if path.endswith('.ts'):
+                    self.cache.put(key, result)
+                with self.state_lock:
+                    self.media_failures.pop(key, None)
+                return result
+            except LiveError as exc:
+                with self.state_lock:
+                    self.states.setdefault(channel, {}).update(
+                        last_media_error=str(exc), last_media_error_at=int(time.time()),
+                        last_media_host=getattr(exc, 'host', urlparse.urlsplit(target).hostname),
+                        last_media_stage=getattr(exc, 'stage', 'media'),
+                        last_media_status=getattr(exc, 'status', None))
+                    self.resolved.pop(channel, None)
+                    self.media_failures[key] = time.monotonic() + 5, exc
+                    self.media_failures.move_to_end(key)
+                    while len(self.media_failures) > 128:
+                        self.media_failures.popitem(last=False)
+                raise
 
     def resolve(self, channel, force=False):
         self.refresh_har()
@@ -1039,6 +1097,9 @@ class SourceClient(Client):
         self.epg_payload_lock = threading.Lock()
         self.epg_payload = None
         self.epg_payload_at = 0
+        self.playlist_locks = {ch: threading.Lock() for ch in self.profiles}
+        self.manifest_cache = {}
+        self.segment_pins = {}
 
     def refresh_har(self, force=False):
         return
@@ -1116,7 +1177,55 @@ class SourceClient(Client):
         for url in data['urls']:
             yield (url, 'raw') if include_kind else url
 
+    def rewrite(self, text, base, channel, origin, kind=None):
+        plain = '#EXT-X-STREAM-INF:' not in text and re.search(r'^#EXT-X-MEDIA-SEQUENCE:\s*\d+', text, re.M)
+        unsupported = re.search(r'^#EXT-X-(?:KEY|MAP|BYTERANGE|DISCONTINUITY|PART)\b', text, re.M)
+        if self.api_mode == 'ysp' and plain and not unsupported:
+            lines = []
+            with self.state_lock:
+                pins = self.segment_pins.setdefault(channel, collections.OrderedDict())
+                for line in text.splitlines():
+                    if line.strip() and not line.startswith('#'):
+                        target = urlparse.urljoin(base, line.strip())
+                        filename = urlparse.urlsplit(target).path.rsplit('/', 1)[-1]
+                        if re.fullmatch(r'[A-Za-z0-9_]+-\d+\.ts', filename):
+                            if not valid_media_url(target):
+                                raise LiveError('HLS 包含未支持的媒体地址')
+                            previous = pins.get(filename)
+                            public = previous[0] if previous else target
+                            pins[filename] = (public, target)
+                            pins.move_to_end(filename)
+                            line = public
+                    lines.append(line)
+                while len(pins) > 64:
+                    pins.popitem(last=False)
+            text = '\n'.join(lines) + '\n'
+        return super().rewrite(text, base, channel, origin, kind)
+
+    def fetch_media(self, channel, target, headers):
+        actual = target
+        if self.api_mode == 'ysp':
+            filename = urlparse.urlsplit(target).path.rsplit('/', 1)[-1]
+            with self.state_lock:
+                pin = self.segment_pins.get(channel, {}).get(filename)
+            if pin and pin[0] == target:
+                # Preserve the outward URL for AVPlayer while using the latest
+                # official URL observed for that exact same segment filename.
+                actual = pin[1]
+        return self.fetch(actual, headers)
+
     def playlist(self, channel):
+        if channel not in self.playlist_locks:
+            raise LiveError('未知新增源频道')
+        with self.playlist_locks[channel]:
+            cached = self.manifest_cache.get(channel)
+            if cached and time.monotonic() - cached[0] < 2:
+                return cached[1]
+            result = self._playlist_fetch(channel)
+            self.manifest_cache[channel] = time.monotonic(), result
+            return result
+
+    def _playlist_fetch(self, channel):
         errors = []
         for force in (False, True):
             data = self.resolve(channel, force)
@@ -1127,7 +1236,7 @@ class SourceClient(Client):
                         raise LiveError('官方源没有返回 HLS 清单')
                     text = body.decode('utf-8-sig')
                     # Validate every reference before exposing the playlist.
-                    self.rewrite(text, final, channel, 'http://localhost', 'raw')
+                    Client.rewrite(self, text, final, channel, 'http://localhost', 'raw')
                     with self.state_lock:
                         self.media_types[channel] = 'raw'
                         self.states.setdefault(channel, {}).update(playlist_ok=True, playlist_at=int(time.time()), media_type='raw')
@@ -1217,14 +1326,22 @@ class AptvCatalog:
                 with current.state_lock:
                     state = dict(current.states.get(ch, {}))
                 recent_media_error = state.get('last_media_error') and time.time() - state.get('last_media_error_at', 0) < 30
-                if cooldown.get(source, {}).get('until', 0) > now or recent_media_error:
+                no_decoder = mode == 'web' and current.video_core is None and not shutil.which('node') and not current.args.audio
+                if no_decoder or cooldown.get(source, {}).get('until', 0) > now or recent_media_error:
                     cooling.append(source)
                 else:
                     usable.append(source)
             # If every source is cooling down, return the known failure briefly
             # instead of retrying every dead CDN on every APTV playlist poll.
             if not usable:
-                raise LiveError('同台来源暂不可用；请稍后重试，状态见 /aptv/channels.json')
+                reasons = []
+                for mode, ch in cooling:
+                    with self.clients[mode].state_lock:
+                        last = dict(self.clients[mode].states.get(ch, {}))
+                    reason = last.get('last_media_error') or cooldown.get((mode, ch), {}).get('error')
+                    if reason:
+                        reasons.append(mode + ': ' + reason)
+                raise LiveError('频道 ' + channel + ' 同台来源暂不可用；' + ('；'.join(reasons) if reasons else '请查看 /aptv/channels.json'))
             errors = []
             for mode, ch in usable:
                 current = self.clients[mode]
@@ -1297,9 +1414,12 @@ class AptvCatalog:
                 with current.state_lock:
                     state = dict(current.states.get(source, {}))
                 failure = failures.get((mode, source), {})
+                media_wait = max(0, 30 - (time.time() - state.get('last_media_error_at', 0))) if state.get('last_media_error') else 0
+                runtime_supported = not (mode == 'web' and current.video_core is None and not current.args.audio) and mode != 'app'
                 sources.append({'mode': mode, 'channel': source, 'state': state,
-                                'cooldown_seconds': max(0, round(failure.get('until', 0) - time.monotonic())),
-                                'error': failure.get('error')})
+                                'runtime_supported': runtime_supported,
+                                'cooldown_seconds': max(0, round(failure.get('until', 0) - time.monotonic()), round(media_wait)),
+                                'error': failure.get('error') or state.get('last_media_error')})
             selected = active.get(ch, {}).get('source')
             rows.append({'id': ch, **row['meta'], 'sources': sources,
                          'active_source': {'mode': selected[0], 'channel': selected[1]} if selected else None})
@@ -1315,6 +1435,7 @@ def handler_for(client, app_client=None, source_clients=None):
     clients.update({c.api_mode: c for c in (source_clients or [])})
     aptv = AptvCatalog(clients)
     capability_notice_at = {'time': float('-inf')}
+    warning_times = {}
     mobile_default = (default_client.api_mode == 'web' and default_client.video_core is None
                       and not shutil.which('node') and 'ysp' in clients and not default_client.args.audio)
     class Handler(BaseHTTPRequestHandler):
@@ -1382,6 +1503,8 @@ def handler_for(client, app_client=None, source_clients=None):
             try:
                 path = urlparse.urlsplit(self.path).path
                 self.route_prefix = ''
+                self.request_channel = None
+                self.request_mode = 'route'
                 mode = default_client.api_mode
                 for candidate in ('web', 'app', 'ysp', 'regional'):
                     if path == '/' + candidate or path.startswith('/' + candidate + '/'):
@@ -1408,10 +1531,18 @@ def handler_for(client, app_client=None, source_clients=None):
                     self.send(200, body, 'application/gzip' if path.endswith('.gz') else 'application/xml; charset=utf-8')
                 elif path == '/aptv/channels.json':
                     self.send(200, json.dumps(aptv.status(), ensure_ascii=False, indent=2), 'application/json; charset=utf-8')
+                elif path == '/diagnostics.json':
+                    import os
+                    snapshot = {'version': VERSION, 'python': sys.version.split()[0],
+                                'node_available': bool(shutil.which('node')),
+                                'proxy_environment_set': any(bool(os.environ.get(k)) for k in ('HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy')),
+                                'channels': aptv.status(), 'modes': {k: v.health() for k, v in clients.items()}}
+                    self.send(200, json.dumps(snapshot, ensure_ascii=False, indent=2), 'application/json; charset=utf-8')
                 elif path == '/config-catalog.json':
                     self.send(200, gzip.decompress(base64.b85decode(CONFIG_CATALOG_B85)), 'application/json; charset=utf-8')
                 elif re.fullmatch(r'/aptv/play/[A-Za-z0-9_-]+\.m3u8', path):
                     logical = path[len('/aptv/play/'):-5]
+                    self.request_channel, self.request_mode = logical, 'aptv'
                     if logical not in aptv.entries:
                         self.send(404, '未知 APTV 频道')
                         return
@@ -1494,7 +1625,8 @@ def handler_for(client, app_client=None, source_clients=None):
                     except LiveError as exc:
                         self.send(403, str(exc))
                         return
-                    headers = client.media_headers(channel)
+                    self.request_channel = channel
+                    self.request_mode = client.api_mode
                     range_value = self.headers.get('Range')
                     if range_value and not re.fullmatch(r'bytes=(?:\d+-\d*|-\d+)', range_value):
                         self.send(416, '仅支持单一字节范围')
@@ -1502,40 +1634,12 @@ def handler_for(client, app_client=None, source_clients=None):
                     processed = client.should_process(target, media_kind) and '.ts' in urlparse.urlsplit(target).path
                     if processed and client.video_core is None:
                         raise MediaCapabilityError('此旧媒体地址需要网页 CDRM 内核；请刷新 /aptv.m3u 或默认订阅')
-                    if range_value and not processed:
-                        headers['Range'] = range_value
-                    cache_key = (channel, target, media_kind, None if processed else range_value)
-                    cached = client.cache.get(cache_key)
-                    if cached:
-                        status, rh, body, final = cached
-                    else:
-                        try:
-                            status, rh, body, final = client.fetch(target, headers)
-                        except LiveError as exc:
-                            with client.state_lock:
-                                client.states.setdefault(channel, {}).update(last_media_error=str(exc), last_media_error_at=int(time.time()))
-                                client.resolved.pop(channel, None)
-                            raise
+                    status, rh, body, final = client.load_asset(channel, target, media_kind, range_value, processed)
                     if is_hls(body):
                         rewritten = client.rewrite(body.decode('utf-8-sig'), final, channel, self.origin(), media_kind)
                         self.send(status, rewritten, 'application/vnd.apple.mpegurl; charset=utf-8')
                     else:
-                        media_path = urlparse.urlsplit(target).path.lower()
-                        bad_mime = rh.get('content-type', '').lower().split(';')[0] in ('text/html', 'application/json', 'image/jpeg', 'image/png')
-                        bad_body = body.lstrip().lower().startswith((b'<!doctype html', b'<html', b'<?xml', b'{"error', b'{"code')) or body.startswith((b'\xff\xd8\xff', b'\x89PNG\r\n\x1a\n'))
-                        if media_path.endswith('.ts') and (bad_mime or bad_body):
-                            with client.state_lock:
-                                client.states.setdefault(channel, {}).update(last_media_error='媒体地址返回网页、图片或接口错误', last_media_error_at=int(time.time()))
-                                client.resolved.pop(channel, None)
-                            raise LiveError('媒体地址返回网页、图片或接口错误；不缓存为视频')
-                        if processed and not cached:
-                            if status != 200:
-                                raise LiveError('CDRM 处理需要完整分片，上游未返回 HTTP 200')
-                            body = client.process_segment(channel, target, body, media_kind)
-                            rh = {'content-type': 'video/mp2t'}
-                        if not cached and '.ts' in urlparse.urlsplit(target).path:
-                            client.cache.put(cache_key, (status, rh, body, final))
-                        if processed:
+                        if processed or (client.api_mode == 'ysp' and urlparse.urlsplit(target).path.lower().endswith('.ts')):
                             status, body, extra = local_range(body, range_value)
                         else:
                             extra = {k: rh[k] for k in ('content-range', 'accept-ranges') if k in rh}
@@ -1544,6 +1648,7 @@ def handler_for(client, app_client=None, source_clients=None):
                         self.send(status, body, rh.get('content-type', 'application/octet-stream'), extra)
                 elif re.fullmatch(r'/[A-Za-z0-9_-]+\.m3u8', path):
                     channel = path[1:-5]
+                    self.request_channel, self.request_mode = channel, ('aptv' if mobile_default and not self.route_prefix else client.api_mode)
                     if channel not in client.profiles:
                         self.send(404, '没有此频道的抓包配置')
                         return
@@ -1569,7 +1674,17 @@ def handler_for(client, app_client=None, source_clients=None):
                     if emit_notice:
                         LOG.info('检测到需要 Node 的旧网页媒体入口；请刷新默认订阅或使用 /aptv.m3u（相同提示一分钟最多一次）')
                 else:
-                    LOG.warning('%s', message)
+                    tag = getattr(self, 'request_mode', 'route') + '/' + str(getattr(self, 'request_channel', None) or '-')
+                    warning_key = (tag, message)
+                    with aptv.lock:
+                        emit_warning = time.monotonic() - warning_times.get(warning_key, float('-inf')) >= 10
+                        if emit_warning:
+                            warning_times[warning_key] = time.monotonic()
+                        if len(warning_times) > 256:
+                            for key in list(warning_times)[:128]:
+                                warning_times.pop(key, None)
+                    if emit_warning:
+                        LOG.warning('[%s] %s', tag, message)
                 try:
                     self.send(503 if isinstance(exc, MediaCapabilityError) else 502, message + '\n查看 /aptv/channels.json 或 /diag 获取状态。\n')
                 except (BrokenPipeError, ConnectionResetError):

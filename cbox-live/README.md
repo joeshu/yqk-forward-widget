@@ -1,8 +1,24 @@
-# cbox-live v1.5.2 单文件：APTV 推荐版
+# cbox-live v1.5.3 单文件：APTV 推荐版
 
 Python 文件既可在 APTV 内置 Python 服务中运行，也可放在电脑、NAS 或服务器上运行。先启动脚本服务，再用它提供的 HTTP 地址加载频道；raw Python 下载地址不是频道订阅地址。
 
 
+
+## v1.5.3：减少重复回源，补齐 403 诊断
+
+最新手机日志中服务已启动并持续运行，主要失败为 62 次上游 HTTP 403。旧日志没有记录被拒绝的频道、域名和请求阶段，因此尚不能确认手机端的具体原因，也不能宣布 403 已解决。
+
+本版合并同一分片的并发请求；央视频 TS 的 Range 探测与完整读取共享一次完整回源，并由本地返回所需范围。失败请求短暂退避，避免播放器立即重复请求同一个失败地址。官方直播清单共享两秒；对于支持的普通 TS 清单，同一频道、同一分片保持对外地址稳定，实际读取使用官方清单最新提供的地址。加密、字节范围、时间线中断等复杂清单不应用这一地址稳定处理。
+
+日志增加频道、上游域名及 API/清单/媒体阶段，避免只剩“HTTP 403”；缺少 Node 时跳过无法使用的网页备用来源，仍保留原 61 台目录。新增诊断导出：
+
+```text
+http://127.0.0.1:8767/diagnostics.json
+```
+
+诊断含来源状态与最近媒体错误，不输出签名参数、抓包模板或代理凭据。若更新后仍然失败，请在尝试播放后保存新的服务日志和诊断 JSON，并说明频道名称、手机是否开启代理。JSON 中的代理环境变量标记不能判断手机 VPN 或抓包软件是否启用。
+
+验证：114 项自动测试通过；无 Node 的测试进程中，CCTV1 清单轮询 7 次、持续约 63 秒，获取 13 个不同分片，首次 Range 请求返回 206，拼接媒体 FFmpeg 解码零错误。这些是测试环境结果，未在用户 iOS 上验证，也不代表全部 85 条目录均可播放。原 App UDRM 仍未实现。
 
 ## v1.5.2：APTV 内置 Python 兼容
 
@@ -141,6 +157,6 @@ python cbox-live.py --compare cctv1 --extra-sources none
 运行 `python cbox-live.py --licenses` 可查看署名及许可。单文件运行无需另放 JS、WASM、HAR 或许可证文件；完整交付包另附易读说明、验证记录与许可记录。
 
 
-最新验证见 `validation-v1.5.2.json`。
+最新验证见 `validation-v1.5.3.json`。
 
-[下载单文件 Python](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live.py?v=1.5.2)
+[下载单文件 Python](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live.py?v=1.5.3)

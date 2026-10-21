@@ -1,0 +1,96 @@
+{
+  "version": "1.5.3",
+  "created_at_utc": "2026-10-21T01:08:26.425676+00:00",
+  "sha256": "f69103b5f2ffe7c1768803ec7c05b46cf5cd888808d89188f29dcefd1570fbd5",
+  "reported_runtime": "APTV embedded Python 3.14.6 on iOS, according to user log",
+  "log_findings": {
+    "startup_healthy": true,
+    "upstream_http_403_count": 62,
+    "channel_host_stage_in_old_log": false,
+    "specific_phone_403_cause": "unconfirmed"
+  },
+  "fixes": [
+    "Coalesce concurrent segment requests and share complete YSP TS across Range/full reads",
+    "Cache failed media requests for five seconds with bounded entries",
+    "Share source manifests for two seconds",
+    "Keep supported plain YSP TS segment URLs stable while fetching latest officially observed address",
+    "Include channel, upstream host and request stage in errors",
+    "Skip unavailable web backup without deleting catalogue entries",
+    "Add diagnostics.json without signing parameters or proxy credentials"
+  ],
+  "regression_tests": {
+    "count": 114,
+    "passed": true,
+    "command": "python -m unittest -q test_cbox_v153 test_cbox_v152 test_cbox_v151 test_cbox_v15 test_cbox_v14 test_cbox_v13 test_cbox_v12 test_cbox_v11"
+  },
+  "live_no_node_sustained": {
+    "scope": "Python-only backend, CCTV1 repeated live manifest polls, range + full media reads",
+    "first_range": {
+      "status": 206,
+      "length": 188
+    },
+    "polls": [
+      {
+        "poll": 1,
+        "source": "ysp",
+        "new_segments": 3
+      },
+      {
+        "poll": 2,
+        "source": "ysp",
+        "new_segments": 1
+      },
+      {
+        "poll": 3,
+        "source": "ysp",
+        "new_segments": 2
+      },
+      {
+        "poll": 4,
+        "source": "ysp",
+        "new_segments": 1
+      },
+      {
+        "poll": 5,
+        "source": "ysp",
+        "new_segments": 3
+      },
+      {
+        "poll": 6,
+        "source": "ysp",
+        "new_segments": 1
+      },
+      {
+        "poll": 7,
+        "source": "ysp",
+        "new_segments": 2
+      }
+    ],
+    "seconds": 63.41,
+    "unique_segments": 13,
+    "stable_url_comparisons": 8,
+    "bytes": 28946360,
+    "ffmpeg_exit": 0,
+    "error_lines": 0,
+    "diagnostics": [],
+    "passed": true,
+    "server_exit": 0
+  },
+  "catalogue_counts": {
+    "aptv": 85,
+    "original_web": 61,
+    "original_app": 61,
+    "combined_sources": 134
+  },
+  "user_instructions": {
+    "same_phone_subscription": "http://127.0.0.1:8767/aptv.m3u",
+    "diagnostics": "http://127.0.0.1:8767/diagnostics.json",
+    "update": "Stop service, replace file, restart and refresh subscription"
+  },
+  "limitations": [
+    "User phone 403 not proven resolved; updated diagnostics needed if reproducible",
+    "No direct iOS testing or complete 85-channel playback verification",
+    "Original App UDRM unsupported",
+    "Availability depends on official API, CDN and regional rights"
+  ]
+}
