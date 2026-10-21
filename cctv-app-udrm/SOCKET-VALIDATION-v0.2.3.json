@@ -1,0 +1,63 @@
+{
+  "version": "0.2.3",
+  "recorded_at_utc": "2026-10-21T16:07:49.293382+00:00",
+  "iphone_aptv_device_tested": false,
+  "regressions_passed": 26,
+  "darwin_abi_checks": [
+    "connect_ex host EINPROGRESS 36 -> guest 115",
+    "host EAGAIN 35 -> guest 11",
+    "SOL_SOCKET and SO_ERROR option names -> native constants",
+    "SO_ERROR value native errno -> Linux errno",
+    "MSG_NOSIGNAL guest flag -> host flag or Darwin SO_NOSIGPIPE"
+  ],
+  "final_artifact_media_check": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 5.294
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.81
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.675
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "forced_native_usleep_probes": [
+      {
+        "microseconds": 20000,
+        "result": 0,
+        "elapsed_seconds": 0.0244
+      }
+    ],
+    "wall_seconds": 7.73,
+    "script_sha256": "688fac9caeeee6d91b9ab49f4b7bb88f2dec5b289d990274eb2111664bfa8ab3"
+  }
+}

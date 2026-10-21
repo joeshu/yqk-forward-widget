@@ -1,4 +1,4 @@
-# 央视影音 App UDRM 单文件 v0.2.2（无 JDK）
+# 央视影音 App UDRM 单文件 v0.2.3（无 JDK）
 
 v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + WebAssembly 解释器**。运行只使用 Python 标准库和系统 JavaScriptCore，不再启动 Java、Node、编译器、FFmpeg 或外部 OpenSSL 命令。许可和视频处理继续由原样官方 SDK 完成。
 
@@ -7,10 +7,10 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 ## APTV 添加与订阅
 
 1. 停止旧的 JDK 版服务，添加下面带版本号的 Python 文件。
-2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.2.2`。
+2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.2.3`。
 3. 首次先检查宿主的 JavaScriptCore/WebAssembly 能力，再下载约3.55MiB（SDK压缩段约2.10MiB、解释器约1.45MiB）。看到“SDK 已取得许可并就绪”后刷新订阅；17ms之类的列表测速不表示SDK已经就绪。若服务器不支持分段下载，日志会说明回退约47MiB的完整安装包。
 
-[下载 cctv-app-udrm-v0.2.2.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.2.2.py)
+[下载 cctv-app-udrm-v0.2.3.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.2.3.py)
 
 手机同机订阅：
 
@@ -18,18 +18,18 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 http://127.0.0.1:8769/all.m3u
 ```
 
-状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.2.2`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
+状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.2.3`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
 
 脚本运行需要 Python 3.10+、`ctypes`、`ssl`，以及支持 WebAssembly、BigInt 的系统 JavaScriptCore。默认从 iOS 系统路径加载框架。没有手工安装 pip 包、JS文件、JAR或完整安卓虚拟机的步骤。当前默认文件 [cctv-app-udrm.py](cctv-app-udrm.py) 与带版本号文件完全相同。
 
 终端运行：
 
 ```bash
-python3 cctv-app-udrm-v0.2.2.py
+python3 cctv-app-udrm-v0.2.3.py
 # 指定端口、缓存或关闭预热
-python3 cctv-app-udrm-v0.2.2.py 8769 --cache-dir ./cbox-cache --no-warmup
+python3 cctv-app-udrm-v0.2.3.py 8769 --cache-dir ./cbox-cache --no-warmup
 # 能力检查，不访问节目源
-python3 cctv-app-udrm-v0.2.2.py --doctor
+python3 cctv-app-udrm-v0.2.3.py --doctor
 ```
 
 电脑/服务器供手机访问时，显式加 `--host 0.0.0.0`，订阅地址改为该电脑的局域网IP。Linux开发测试使用JavaScriptCoreGTK共享库，通过 `--jscore-library /path/to/libjavascriptcoregtk-4.1.so.0` 指定；它不是iPhone需下载的依赖。
@@ -44,6 +44,14 @@ python3 cctv-app-udrm-v0.2.2.py --doctor
 - 已人工查看处理后的央视画面，台标、字幕和画面正常。原SDK样本对照仍见 [SAMPLE-VALIDATION.json](SAMPLE-VALIDATION.json)。
 
 本入口尚未合并EPG，原61台服务的节目单继续保留。更多频道的实时调度签名、CDN权限与用户手机的内存/首帧表现仍需继续核对。
+
+## 0.2.3 Android/Linux 与 iOS socket ABI 转换
+
+用户0.2.2手机日志中的 `sdk_license_rejected code=80001001` 是SDK返回码，不能单凭它认定官方服务器已收到并拒绝许可请求。审查发现桥接层曾直接透传主机socket常量和errno，Linux开发机上碰巧相同，Darwin/iOS上并不相同。
+
+新增非阻塞连接errno、socket选项及消息标志转换。例如iOS `EINPROGRESS=36` 转成Android/Linux的115；`SOL_SOCKET`、`SO_ERROR`、收发超时等按主机名称映射；`SO_ERROR`返回的主机errno再次转成Linux值。Darwin发送使用可用的SO_NOSIGPIPE，未知选项/标志明确失败，不直接套用错误编号。许可失败时保留并打印请求长度、HTTP状态、业务状态或传输异常类型；未记录许可正文或密钥。空记录表示尚无完整HTTP POST到达本地许可处理器，并不能区分TLS握手与更早的连接失败。
+
+开发环境26项检查通过，其中5项模拟Darwin编号差异；最终文件真实官方许可通过，三组样本600帧解码错误0。见 [0.2.3验证](SOCKET-VALIDATION-v0.2.3.json)。已修复确定的跨平台兼容缺陷，尚待手机确认是否解决此次80001001；没有把模拟编号测试当作iPhone实测。
 
 ## 0.2.2 手机初始化等待修复
 

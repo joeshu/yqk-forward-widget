@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.2.2: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.2.3: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -667,6 +667,38 @@ PYTHON_SOURCES = {
         'from jsc_host import JSCHost,APPLE\n'
         'from elf_image import image_plan\n'
         '\n'
+        '# Guest ABI is Android/Bionic (Linux), irrespective of Python host OS.\n'
+        "LINUX_ERRNOS={'EPERM':1,'ENOENT':2,'EINTR':4,'EIO':5,'EBADF':9,'EAGAIN':11,\n"
+        " 'ENOMEM':12,'EACCES':13,'EFAULT':14,'EINVAL':22,'EMFILE':24,'EPIPE':32,\n"
+        " 'ENOSYS':38,'ENOTSOCK':88,'EDESTADDRREQ':89,'EMSGSIZE':90,'EPROTOTYPE':91,\n"
+        " 'ENOPROTOOPT':92,'EPROTONOSUPPORT':93,'EOPNOTSUPP':95,'EAFNOSUPPORT':97,\n"
+        " 'EADDRINUSE':98,'EADDRNOTAVAIL':99,'ENETDOWN':100,'ENETUNREACH':101,\n"
+        " 'ECONNABORTED':103,'ECONNRESET':104,'ENOBUFS':105,'EISCONN':106,'ENOTCONN':107,\n"
+        " 'ETIMEDOUT':110,'ECONNREFUSED':111,'EHOSTUNREACH':113,'EALREADY':114,'EINPROGRESS':115}\n"
+        'def linux_errno(code):\n'
+        ' if not code:return 0\n'
+        " return LINUX_ERRNOS.get(errno.errorcode.get(code,''),5)\n"
+        'def host_sockopt(level,option):\n'
+        ' if level==1:\n'
+        "  names={2:'SO_REUSEADDR',3:'SO_TYPE',4:'SO_ERROR',5:'SO_DONTROUTE',6:'SO_BROADCAST',\n"
+        "   7:'SO_SNDBUF',8:'SO_RCVBUF',9:'SO_KEEPALIVE',10:'SO_OOBINLINE',13:'SO_LINGER',\n"
+        "   15:'SO_REUSEPORT',18:'SO_RCVLOWAT',19:'SO_SNDLOWAT',20:'SO_RCVTIMEO',21:'SO_SNDTIMEO'}\n"
+        '  name=names.get(option)\n'
+        "  if name is None or not hasattr(socket,name):raise OSError(errno.ENOPROTOOPT,'Unsupported guest socket option')\n"
+        '  return socket.SOL_SOCKET,getattr(socket,name)\n'
+        ' if level==6 and option==1:return socket.IPPROTO_TCP,socket.TCP_NODELAY\n'
+        " raise OSError(errno.ENOPROTOOPT,'Unsupported guest socket level/option')\n"
+        'def host_message_flags(flags):\n'
+        ' result=0\n'
+        " for guest,name in [(1,'MSG_OOB'),(2,'MSG_PEEK'),(4,'MSG_DONTROUTE'),(64,'MSG_DONTWAIT'),(256,'MSG_WAITALL'),(16384,'MSG_NOSIGNAL')]:\n"
+        '  if flags&guest:\n'
+        '   value=getattr(socket,name,None)\n'
+        "   if value is None and name=='MSG_NOSIGNAL':value=0 # Python ignores SIGPIPE; Darwin also uses SO_NOSIGPIPE below.\n"
+        "   if value is None:raise OSError(errno.EOPNOTSUPP,'Unsupported guest message flag')\n"
+        '   result|=value;flags&=~guest\n'
+        " if flags:raise OSError(errno.EOPNOTSUPP,'Unknown guest message flag')\n"
+        ' return result\n'
+        '\n'
         'class LoopbackSockets:\n'
         ' def __init__(self):self.sockets={};self.sequence=1000;self.calls={}\n'
         ' @staticmethod\n'
@@ -686,6 +718,7 @@ PYTHON_SOURCES = {
         "   elif name=='socket':\n"
         "    if a[0]!=2 or a[1]&15!=1:raise OSError(errno.EAFNOSUPPORT,'Only loopback IPv4 TCP')\n"
         '    sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM);sock.settimeout(15)\n'
+        "    if hasattr(socket,'SO_NOSIGPIPE'):sock.setsockopt(socket.SOL_SOCKET,socket.SO_NOSIGPIPE,1)\n"
         "    fd=self.sequence;self.sequence+=1;self.sockets[fd]=sock;reply['result']=fd\n"
         "   elif name=='poll':\n"
         "    raw=bytearray(base64.b64decode(request['data'],validate=True));read=[];write=[];check=[]\n"
@@ -718,7 +751,7 @@ PYTHON_SOURCES = {
         "     raw=base64.b64decode(request['data'],validate=True)\n"
         "     family=struct.unpack_from('<H',raw)[0];port=struct.unpack_from('>H',raw,2)[0];host=socket.inet_ntoa(raw[4:8])\n"
         "     if family!=2 or host!='127.0.0.1':raise OSError(errno.EACCES,'Native SDK network is loopback only')\n"
-        '     code=sock.connect_ex((host,port));reply.update(result=0 if code==0 else -1,errno=code)\n'
+        '     code=sock.connect_ex((host,port));reply.update(result=0 if code==0 else -1,errno=linux_errno(code))\n'
         "    elif name=='fcntl':\n"
         '     command=a[1]\n'
         "     if command==3:reply['result']=2|(0x800 if sock.gettimeout()==0 else 0)\n"
@@ -728,25 +761,31 @@ PYTHON_SOURCES = {
         "    elif name in ('send','sendto','write'):\n"
         "     data=base64.b64decode(request['data'],validate=True)\n"
         "     if name=='sendto' and a[4]:raise OSError(errno.EOPNOTSUPP,'Explicit sendto destination unsupported')\n"
-        "     reply['result']=sock.send(data,a[3] if name!='write' else 0)\n"
+        "     reply['result']=sock.send(data,host_message_flags(a[3]) if name!='write' else 0)\n"
         "    elif name in ('recv','recvfrom','read'):\n"
         "     if not 0<=a[2]<=1024*1024:raise OSError(errno.EINVAL,'Native receive size limit')\n"
-        "     data=sock.recv(a[2],a[3] if name!='read' else 0)\n"
+        "     data=sock.recv(a[2],host_message_flags(a[3]) if name!='read' else 0)\n"
         '     reply.update(result=len(data),writes=[self._write(a[1],data)])\n'
         "    elif name=='close':sock.close();del self.sockets[fd]\n"
         "    elif name=='shutdown':sock.shutdown(a[1])\n"
         "    elif name=='setsockopt':\n"
         "     data=base64.b64decode(request['data'],validate=True)\n"
-        '     sock.setsockopt(a[1],a[2],data)\n'
+        '     level,option=host_sockopt(a[1],a[2])\n'
+        '     if a[1]==1 and a[2] in (20,21):\n'
+        "      seconds,micros=struct.unpack('<qq',data);data=struct.pack('@ll',seconds,micros)\n"
+        '     sock.setsockopt(level,option,data)\n'
         "    elif name=='getsockopt':\n"
-        "     data=sock.getsockopt(a[1],a[2],min(request['length'],256))\n"
+        '     level,option=host_sockopt(a[1],a[2])\n'
+        '     if a[1]==1 and a[2]==4:\n'
+        "      data=struct.pack('<i',linux_errno(sock.getsockopt(level,option)))\n"
+        "     else:data=sock.getsockopt(level,option,min(request['length'],256))\n"
         "     reply['writes']=[self._write(a[3],data),self._write(a[4],struct.pack('<I',len(data)))]\n"
         "    elif name in ('getsockname','getpeername'):\n"
         "     host,port=sock.getsockname() if name=='getsockname' else sock.getpeername()\n"
         "     data=struct.pack('<H',2)+struct.pack('>H',port)+socket.inet_aton(host)+b'\\0'*8\n"
         "     reply['writes']=[self._write(a[1],data[:request['length']]),self._write(a[2],struct.pack('<I',16))]\n"
         "    else:raise OSError(errno.ENOSYS,'Unsupported SDK socket operation')\n"
-        '  except OSError as error:reply.update(result=-1,errno=error.errno or errno.EIO)\n'
+        '  except OSError as error:reply.update(result=-1,errno=linux_errno(error.errno or errno.EIO))\n'
         '  return reply\n'
         ' def close(self):\n'
         '  for sock in self.sockets.values():sock.close()\n'
@@ -1328,7 +1367,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.2.2'\n"
+        "VERSION = '0.2.3'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'DEFAULTS = {\n'
         " 'cctv1': ('CCTV-1 综合', 'https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8'),\n"
@@ -1468,7 +1507,10 @@ PYTHON_SOURCES = {
         '            self.license_records.extend(dict(x) for x in self.relay.records)\n'
         "            LOG.info('原 App SDK 已取得许可并就绪；会话 %s',self.sessions)\n"
         '        except Exception as error:\n'
-        "            self.phase='failed';self.error=str(error);self._close();raise\n"
+        "            self.phase='failed';self.error=str(error)\n"
+        '            self.license_records.extend(dict(x) for x in self.relay.records)\n'
+        "            LOG.warning('许可通信诊断：%s',json.dumps(self.relay.records,ensure_ascii=False))\n"
+        '            self._close();raise\n'
         '    def ensure_ready(self):\n'
         "        if self.phase!='ready':\n"
         '            with self.lock:self._start()\n'
