@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.2.6: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.2.7: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -50,6 +50,33 @@ JS_SOURCES = {
         '   return this.bulk.pointer;\n'
         '  };\n'
         "  const check=address=>{if(!Number.isSafeInteger(address)||address<0)throw Error('bulk memory address');};\n"
+        "  if(typeof m._uc_reg_read==='function'&&typeof m._uc_reg_write==='function'){\n"
+        "   const pointer=m._malloc(512);if(!pointer)throw Error('register scratch allocation failed');\n"
+        '   this.bulk.registerPointer=pointer;this.bulk.scalarRegisters=true;\n'
+        '   const scalar=pointer+256;\n'
+        '   e.reg_read_i64=regid=>{\n'
+        '    const code=m._uc_reg_read(handle,regid,scalar);\n'
+        "    if(code!==m.ERR_OK)throw Error('register read failed '+code);\n"
+        '    return new DataView(memory.buffer,scalar,8).getBigInt64(0,true);\n'
+        '   };\n'
+        '   e.reg_write_i64=(regid,value)=>{\n'
+        '    new DataView(memory.buffer,scalar,8).setBigInt64(0,BigInt(value||0),true);\n'
+        '    const code=m._uc_reg_write(handle,regid,scalar);\n'
+        "    if(code!==m.ERR_OK)throw Error('register write failed '+code);\n"
+        '   };\n'
+        "   if(typeof m._uc_reg_read_batch==='function'){\n"
+        "    const ids=Array.from({length:8},(_,i)=>m['ARM64_REG_X'+i]).concat([m.ARM64_REG_LR]);\n"
+        '    const view=new DataView(memory.buffer);\n'
+        '    for(let i=0;i<9;i++){view.setInt32(pointer+i*4,ids[i],true);view.setUint32(pointer+64+i*4,pointer+128+i*8,true);}\n'
+        '    this.readNativeArguments=()=>{\n'
+        '     const code=m._uc_reg_read_batch(handle,pointer,pointer+64,9);\n'
+        "     if(code!==m.ERR_OK)throw Error('register batch read failed '+code);\n"
+        '     const view=new DataView(memory.buffer,pointer+128,72),values=[];\n'
+        '     for(let i=0;i<9;i++)values.push(Number(view.getBigInt64(i*8,true)));\n'
+        '     return {args:values.slice(0,8),lr:values[8]};\n'
+        '    };\n'
+        '   }\n'
+        '  }\n'
         '  e.mem_read=(address,size)=>{\n'
         '   check(address);const pointer=scratch(size);if(!size)return new Uint8Array(0);\n'
         "   const code=m.ccall('uc_mem_read','number',['pointer','number','pointer','number'],[handle,BigInt(address),pointer,BigInt(size)]);\n"
@@ -122,7 +149,8 @@ JS_SOURCES = {
         "   if(this.trap===null){if(Number(e.reg_read_i64(uc.ARM64_REG_PC))!==this.stop)throw Error('instruction budget exceeded');break;}\n"
         "   const name=this.addressImports[this.trap];if(!name)throw Error('unknown host trampoline');\n"
         '   this.counts[name]=(this.counts[name]||0)+1;\n'
-        '   const lr=Number(e.reg_read_i64(uc.ARM64_REG_LR));const args=Array.from({length:8},(_,i)=>this.reg(i));\n'
+        '   const registers=this.readNativeArguments?this.readNativeArguments():{lr:Number(e.reg_read_i64(uc.ARM64_REG_LR)),args:Array.from({length:8},(_,i)=>this.reg(i))};\n'
+        '   const lr=registers.lr,args=registers.args;\n'
         '   const value=this.dispatch(name,args);\n'
         "   if(value&&typeof value==='object'&&value.host_request){this.pending={lr};return value;}\n"
         '   this.result(value);pc=lr;\n'
@@ -292,7 +320,7 @@ JS_SOURCES = {
         '  globalThis.__mediaOutput=output;return {code:0};\n'
         ' }\n'
         ' reset(channel){const old=this.states.get(channel);if(old){this.free(old);this.states.delete(channel);}}\n'
-        ' close(){if(this.bulk&&this.bulk.pointer){this.uc._free(this.bulk.pointer);this.bulk.pointer=0;}this.e.close();}\n'
+        ' close(){if(this.bulk&&this.bulk.registerPointer){this.uc._free(this.bulk.registerPointer);this.bulk.registerPointer=0;}if(this.bulk&&this.bulk.pointer){this.uc._free(this.bulk.pointer);this.bulk.pointer=0;}this.e.close();}\n'
         '}\n'
         'globalThis.KooVM=KooVM;\n'
     )
@@ -902,6 +930,8 @@ PYTHON_SOURCES = {
         '  for f in frames:result.append(output[offset:offset+len(f)]);offset+=len(f)\n'
         '  return result\n'
         " def reset(self,channel):self.host.evaluate('__vm.reset('+json.dumps(channel)+')')\n"
+        ' def features(self):\n'
+        "  return json.loads(self.host.evaluate('JSON.stringify({bulk_memory:!!__vm.bulk,register_batch:!!__vm.readNativeArguments,register_scalar:!!(__vm.bulk&&__vm.bulk.scalarRegisters)})'))\n"
         " def counts(self):return json.loads(self.host.evaluate('JSON.stringify(__vm.counts)'))\n"
         ' def close(self):\n'
         '  self.transport.close()\n'
@@ -1016,7 +1046,7 @@ PYTHON_SOURCES = {
         '        self.prepared=prepared;self.license_url=license_url\n'
         '        self.startup_timeout=startup_timeout;self.request_timeout=request_timeout\n'
         '        self.jobs=queue.Queue(maxsize=4);self.ready=threading.Event();self.stopping=threading.Event()\n'
-        "        self.start_error='';self.started=False;self.lock=threading.RLock()\n"
+        "        self.runtime_features={};self.start_error='';self.started=False;self.lock=threading.RLock()\n"
         "        self.thread=threading.Thread(target=self._worker,name='cbox-sdk-jscore',daemon=True)\n"
         '    def start(self):\n'
         '        with self.lock:\n'
@@ -1033,6 +1063,7 @@ PYTHON_SOURCES = {
         '            sdk=WasmSDK(self.prepared)\n'
         '            code=sdk.rights(self.license_url)\n'
         "            if code!=0:raise SDKError('sdk_license_rejected code='+str(code))\n"
+        "            self.runtime_features=getattr(sdk,'features',lambda:{})()\n"
         '            self.ready.set()\n'
         '            while not self.stopping.is_set():\n'
         '                try:job=self.jobs.get(timeout=0.2)\n'
@@ -1422,7 +1453,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.2.6'\n"
+        "VERSION = '0.2.7'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'DEFAULTS = {\n'
         " 'cctv1': ('CCTV-1 综合', 'https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8'),\n"
@@ -1438,7 +1469,7 @@ PYTHON_SOURCES = {
         '    pass\n'
         '\n'
         '\n'
-        'def fetch(url, limit, timeout=10):\n'
+        'def _fetch_once(url, limit, timeout=10):\n'
         "    if urlsplit(url).scheme not in ('https', 'http'):\n"
         "        raise LiveError('Unsupported upstream URL scheme')\n"
         '    try:\n'
@@ -1470,6 +1501,18 @@ PYTHON_SOURCES = {
         "        raise LiveError('Upstream transport URLError/'+type(error.reason).__name__) from None\n"
         '    except Exception as error:\n'
         "        raise LiveError('Upstream transport ' + type(error).__name__) from None\n"
+        '\n'
+        '\n'
+        'def fetch(url,limit,timeout=10):\n'
+        '    # A fresh connection may recover an early TLS EOF. Never retry rejected\n'
+        '    # certificates, HTTP denials, corrupt bodies or ordinary timeouts here.\n'
+        '    try:return _fetch_once(url,limit,timeout)\n'
+        '    except LiveError as error:\n'
+        "        if str(error) not in {'Upstream transport URLError/SSLEOFError',\n"
+        "                'Upstream transport SSLEOFError','Upstream transport RemoteDisconnected',\n"
+        "                'Upstream transport URLError/RemoteDisconnected'}:raise\n"
+        "        LOG.info('上游TLS连接提前关闭，使用新连接重试一次')\n"
+        '        return _fetch_once(url,limit,timeout)\n'
         '\n'
         '\n'
         '@dataclass(frozen=True)\n'
@@ -1565,7 +1608,7 @@ PYTHON_SOURCES = {
         '            self.client=SDKClient(self.prepared,self.relay.url)\n'
         "            self.client.start();self.sessions+=1;self.phase='ready'\n"
         '            self.license_records.extend(dict(x) for x in self.relay.records)\n'
-        "            LOG.info('原 App SDK 已取得许可并就绪；会话 %s',self.sessions)\n"
+        "            LOG.info('原 App SDK 已取得许可并就绪；会话 %s；加速能力 %s',self.sessions,json.dumps(self.client.runtime_features,ensure_ascii=False))\n"
         '        except Exception as error:\n'
         "            self.phase='failed';self.error=str(error)\n"
         '            self.license_records.extend(dict(x) for x in self.relay.records)\n'
@@ -1789,6 +1832,7 @@ PYTHON_SOURCES = {
         "        return {'version':VERSION,'uptime_seconds':round(time.monotonic()-self.started),\n"
         "            'engine':'javascriptcore-unicorn-wasm','jdk_required':False,'sdk_phase':self.sdk.phase,\n"
         "            'preparation_progress':self.sdk.progress,'preparation_error':self.sdk.error,\n"
+        "            'runtime_features':dict(getattr(self.sdk.client,'runtime_features',{})),\n"
         "            'media_timings':dict(self.sdk.timings),'max_bitrate':self.max_bitrate,\n"
         "            'sdk_sessions':self.sdk.sessions,'processed_video_pes':self.sdk.processed_frames,\n"
         "            'license_exchanges':self.sdk.license_records,\n"
