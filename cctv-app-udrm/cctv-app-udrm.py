@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.2.3: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.2.4: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -248,6 +248,17 @@ JS_SOURCES = {
         '  const buffer=this.allocate(length+64,true);this.write(buffer,data);\n'
         "  try{const code=this.invoke(this.base+0xfec68,[buffer,length,0,state]);if(typeof code!=='number')throw Error('unexpected media I/O');globalThis.__mediaOutput=code===0?this.read(buffer,length):null;return {code};}\n"
         '  finally{this.free(buffer);}\n'
+        ' }\n'
+        ' batchBinary(channel,lengths){\n'
+        '  const input=globalThis.__mediaInput,total=lengths.reduce((a,b)=>a+b,0),output=new Uint8Array(total);\n'
+        '  let offset=0;\n'
+        '  try{for(const length of lengths){\n'
+        '   globalThis.__mediaInput=input.subarray(offset,offset+length);\n'
+        '   const result=this.packetBinary(channel,length);\n'
+        '   if(result.code!==0){globalThis.__mediaOutput=null;return result;}\n'
+        '   output.set(globalThis.__mediaOutput,offset);offset+=length;\n'
+        '  }}finally{globalThis.__mediaInput=input;}\n'
+        '  globalThis.__mediaOutput=output;return {code:0};\n'
         ' }\n'
         ' reset(channel){const old=this.states.get(channel);if(old){this.free(old);this.states.delete(channel);}}\n'
         ' close(){this.e.close();}\n'
@@ -848,6 +859,17 @@ PYTHON_SOURCES = {
         "  reply=self._call('__vm.packetBinary('+json.dumps(channel)+','+str(len(data))+')')\n"
         "  if reply['code']!=0:raise RuntimeError('SDK media rejected code='+str(reply['code']))\n"
         '  return self.host.read_media(len(data))\n'
+        ' def process_batch(self,channel,frames):\n'
+        "  if not self.licensed:raise RuntimeError('Official license required')\n"
+        "  if not 1<=len(frames)<=4 or any(not isinstance(f,bytes) or len(f)<4 for f in frames):raise ValueError('Invalid media batch')\n"
+        "  data=b''.join(frames)\n"
+        "  if len(data)>4*1024*1024:raise ValueError('Media batch size limit')\n"
+        '  self.host.put_media(data)\n'
+        "  reply=self._call('__vm.batchBinary('+json.dumps(channel)+','+json.dumps([len(f) for f in frames])+')')\n"
+        "  if reply['code']!=0:raise RuntimeError('SDK media rejected code='+str(reply['code']))\n"
+        '  output=self.host.read_media(len(data));result=[];offset=0\n'
+        '  for f in frames:result.append(output[offset:offset+len(f)]);offset+=len(f)\n'
+        '  return result\n'
         " def reset(self,channel):self.host.evaluate('__vm.reset('+json.dumps(channel)+')')\n"
         " def counts(self):return json.loads(self.host.evaluate('JSON.stringify(__vm.counts)'))\n"
         ' def close(self):\n'
@@ -987,6 +1009,7 @@ PYTHON_SOURCES = {
         '                if job is None:break\n'
         '                try:\n'
         "                    if job.op=='process':job.result=sdk.process(*job.args)\n"
+        "                    elif job.op=='process_batch':job.result=sdk.process_batch(*job.args)\n"
         "                    elif job.op=='reset':sdk.reset(*job.args)\n"
         "                    else:raise SDKError('invalid_sdk_operation')\n"
         '                except Exception as error:\n'
@@ -1015,6 +1038,7 @@ PYTHON_SOURCES = {
         '        if job.error:raise SDKError(job.error)\n'
         '        return job.result\n'
         "    def process(self,channel,data):return self._request('process',(channel,data))\n"
+        "    def process_batch(self,channel,frames):return self._request('process_batch',(channel,frames))\n"
         "    def reset(self,channel):self._request('reset',(channel,))\n"
         '    def close(self):\n'
         '        self.stopping.set()\n'
@@ -1367,7 +1391,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.2.3'\n"
+        "VERSION = '0.2.4'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'DEFAULTS = {\n'
         " 'cctv1': ('CCTV-1 综合', 'https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8'),\n"
@@ -1526,7 +1550,15 @@ PYTHON_SOURCES = {
         '                try:\n'
         '                    self._start()\n'
         '                    if reset or attempt:self.client.reset(channel)\n'
-        '                    result=transform_plan(plan,lambda data:self.client.process(channel,data))\n'
+        '                    replacements=[];group=[];size=0\n'
+        '                    for frame in plan.frames:\n'
+        '                        if group and (len(group)>=4 or size+len(frame.data)>4*1024*1024):\n'
+        '                            replacements.extend(self.client.process_batch(channel,group));group=[];size=0\n'
+        '                        group.append(frame.data);size+=len(frame.data)\n'
+        '                    if group:replacements.extend(self.client.process_batch(channel,group))\n'
+        "                    if len(replacements)!=len(plan.frames):raise SDKError('SDK batch frame count mismatch')\n"
+        '                    iterator=iter(replacements)\n'
+        '                    result=transform_plan(plan,lambda data:next(iterator))\n'
         '                    self.processed_frames+=len(plan.frames)\n'
         '                    return result\n'
         '                except SDKError as error:\n'
@@ -1556,6 +1588,8 @@ PYTHON_SOURCES = {
         "    error: str = ''\n"
         '    retry_at: float = 0\n'
         '    seconds: float = 0\n'
+        '    ready: object = field(default_factory=threading.Event)\n'
+        '    realtime_ratio: float = 0\n'
         '\n'
         '\n'
         'class LiveService:\n'
@@ -1563,7 +1597,7 @@ PYTHON_SOURCES = {
         '        self.sdk=MediaSDK(prepared);self.channels=channels;self.max_bitrate=max_bitrate\n'
         "        self.pool=ThreadPoolExecutor(max_workers=4,thread_name_prefix='upstream')\n"
         "        self.refresh_pool=ThreadPoolExecutor(max_workers=min(4,len(channels)),thread_name_prefix='refresh')\n"
-        '        self.refresh_jobs={}\n'
+        '        self.refresh_jobs={};self.jobs_lock=threading.Lock();self.active_channel=None\n'
         '        self.stopping=threading.Event();self.started=time.monotonic()\n'
         "        self.worker=threading.Thread(target=self._background,name='refresh',daemon=True)\n"
         '        self.worker.start()\n'
@@ -1609,33 +1643,22 @@ PYTHON_SOURCES = {
         '                            if neighbor is None or following.discontinuity or not following_proves_complete(source,neighbor):\n'
         "                                raise TSFormatError('Unbounded PES spans HLS objects; unsupported input')\n"
         '                            complete=True\n'
+        '                        transform_started=time.monotonic()\n'
         '                        output=self.sdk.transform(ch.ident,source,\n'
         '                            reset=entry.discontinuity or entry.seq!=ch.last_seq+1,\n'
         '                            final_pes_complete=complete)\n'
+        '                        elapsed=time.monotonic()-transform_started\n'
+        '                        ch.realtime_ratio=round(elapsed/max(entry.duration,0.001),3)\n'
+        "                        if ch.realtime_ratio>1:LOG.warning('%s 分片处理 %.2fs / 视频 %.2fs，低于实时速度',ch.ident,elapsed,entry.duration)\n"
         '                        ch.last_seq=entry.seq\n'
         '                        decoded.append((token,output))\n'
         '                        with ch.cache_lock:ch.cache[token]=output\n'
         '                    ch.history[entry.seq]=(entry,discontinuities)\n'
         '                    if entry.discontinuity:discontinuities+=1\n'
+        '                    self._publish(ch,media)\n'
+        '                    if self.active_channel and self.active_channel!=ch.ident:break\n'
         '                # Retain the previous verified object while the newest needs its boundary.\n'
-        '                history=sorted(ch.history.values(),key=lambda x:x[0].seq)\n'
-        '                chosen=[]\n'
-        '                for item in reversed(history):\n'
-        '                    if chosen and item[0].seq!=chosen[-1][0].seq-1:break\n'
-        '                    chosen.append(item)\n'
-        '                    if len(chosen)>=5:break\n'
-        '                chosen.reverse()\n'
-        "                if not chosen:raise LiveError('Waiting for a complete PES boundary')\n"
-        '                media=Playlist(tuple(item[0] for item in chosen),media.target,chosen[0][1],media.end)\n'
-        '                keep={self.token(ch,e) for e in media.entries}\n'
-        '                with ch.cache_lock:\n'
-        '                    while len(ch.cache)>8 or sum(map(len,ch.cache.values()))>64*1024*1024:\n'
-        '                        token=next(iter(ch.cache))\n'
-        '                        if token in keep:break\n'
-        '                        ch.cache.pop(token)\n'
-        '                while len(ch.raw)>8:ch.raw.popitem(last=False)\n'
-        '                while len(ch.history)>8:ch.history.popitem(last=False)\n'
-        "                ch.playlist=media;ch.updated=time.monotonic();ch.error='';ch.retry_at=0\n"
+        '                self._publish(ch,media)\n'
         '                ch.seconds=round(ch.updated-started,3)\n'
         "                if decoded:LOG.info('%s 更新 %s 个分片，耗时 %.2fs',ch.ident,len(decoded),ch.seconds)\n"
         '            except Exception as error:\n'
@@ -1646,12 +1669,38 @@ PYTHON_SOURCES = {
         '                # A previously valid playlist can bridge one transient CDN failure.\n'
         '                if ch.playlist and time.monotonic()-ch.updated<ch.playlist.target*2:return\n'
         '                raise LiveError(ch.error) from None\n'
+        '    def _publish(self,ch,media):\n'
+        '        history=sorted(ch.history.values(),key=lambda x:x[0].seq)\n'
+        '        chosen=[]\n'
+        '        for item in reversed(history):\n'
+        '            if chosen and item[0].seq!=chosen[-1][0].seq-1:break\n'
+        '            chosen.append(item)\n'
+        '            if len(chosen)>=5:break\n'
+        '        chosen.reverse()\n'
+        "        if not chosen:raise LiveError('Waiting for a complete PES boundary')\n"
+        '        media=Playlist(tuple(item[0] for item in chosen),media.target,chosen[0][1],media.end)\n'
+        '        keep={self.token(ch,e) for e in media.entries}\n'
+        '        with ch.cache_lock:\n'
+        '            while len(ch.cache)>8 or sum(map(len,ch.cache.values()))>64*1024*1024:\n'
+        '                token=next(iter(ch.cache))\n'
+        '                if token in keep:break\n'
+        '                ch.cache.pop(token)\n'
+        '        while len(ch.raw)>8:ch.raw.popitem(last=False)\n'
+        '        while len(ch.history)>8:ch.history.popitem(last=False)\n'
+        "        ch.playlist=media;ch.updated=time.monotonic();ch.error='';ch.retry_at=0\n"
+        '        ch.ready.set()\n'
         '    def playlist_bytes(self,ch):\n'
         '        ch.last_active=time.monotonic()\n'
+        '        self.active_channel=ch.ident\n'
         '        p=ch.playlist\n'
-        '        # Serve an immutable, recently verified playlist while refresh does I/O.\n'
         '        if p is None or time.monotonic()-ch.updated>p.target:\n'
-        '            self.refresh(ch);p=ch.playlist\n'
+        '            self._schedule(ch)\n'
+        '        if p is None:\n'
+        '            # Bound each HTTP request; publish each verified segment immediately.\n'
+        '            # APTV can retry while SDK starts, without waiting for all channels.\n'
+        '            ch.ready.wait(8)\n'
+        '            p=ch.playlist\n'
+        "            if p is None:raise LiveError(ch.error or 'SDK/首个分片准备中，请稍后重试；详情 /status')\n"
         "        lines=['#EXTM3U','#EXT-X-VERSION:3',f'#EXT-X-TARGETDURATION:{max(p.target,math.ceil(max(e.duration for e in p.entries)))}',\n"
         "            f'#EXT-X-MEDIA-SEQUENCE:{p.entries[0].seq}',f'#EXT-X-DISCONTINUITY-SEQUENCE:{p.discontinuity_sequence}']\n"
         '        for entry in p.entries:\n'
@@ -1659,15 +1708,18 @@ PYTHON_SOURCES = {
         "            lines.extend([f'#EXTINF:{entry.duration:.3f},',f'/segments/{ch.ident}/{self.token(ch,entry)}.ts'])\n"
         "        if p.end:lines.append('#EXT-X-ENDLIST')\n"
         "        return ('\\n'.join(lines)+'\\n').encode()\n"
-        '    def _background(self):\n'
-        '        def refresh(ch):\n'
+        '    def _schedule(self,ch):\n'
+        '        def refresh():\n'
         '            try:self.refresh(ch,background=True)\n'
         '            except LiveError:pass\n'
+        '        with self.jobs_lock:\n'
+        '            job=self.refresh_jobs.get(ch.ident)\n'
+        '            if job is None or job.done():self.refresh_jobs[ch.ident]=self.refresh_pool.submit(refresh)\n'
+        '    def _background(self):\n'
         '        while not self.stopping.wait(0.5):\n'
-        '            for ch in self.channels.values():\n'
-        '                job=self.refresh_jobs.get(ch.ident)\n'
-        '                if ch.last_active and time.monotonic()-ch.last_active<30 and (job is None or job.done()):\n'
-        '                    self.refresh_jobs[ch.ident]=self.refresh_pool.submit(refresh,ch)\n'
+        '            ch=self.channels.get(self.active_channel)\n'
+        '            if ch and ch.last_active and time.monotonic()-ch.last_active<30:\n'
+        '                if ch.playlist is None or time.monotonic()-ch.updated>=ch.playlist.target/2:self._schedule(ch)\n'
         '    def close(self):\n'
         '        self.stopping.set();self.worker.join(timeout=2)\n'
         '        self.refresh_pool.shutdown(wait=True,cancel_futures=True)\n'
@@ -1680,7 +1732,7 @@ PYTHON_SOURCES = {
         "            'license_exchanges':self.sdk.license_records,\n"
         "            'channels':{ch.ident:{'name':ch.name,'cached_segments':len(ch.cache),\n"
         "                'playlist_age_seconds':round(time.monotonic()-ch.updated,2) if ch.updated else None,\n"
-        "                'last_refresh_seconds':ch.seconds,'error':ch.error} for ch in self.channels.values()}}\n"
+        "                'last_refresh_seconds':ch.seconds,'processing_to_video_ratio':ch.realtime_ratio,'error':ch.error} for ch in self.channels.values()}}\n"
         '\n'
         '\n'
         'def make_handler(service):\n'
@@ -1792,10 +1844,10 @@ PYTHON_SOURCES = {
         '        signal.signal(signal.SIGINT,stop);signal.signal(signal.SIGTERM,stop)\n'
         "    else:LOG.info('APTV托管线程：跳过进程信号注册')\n"
         '    if args.warmup:\n'
-        '        def warmup(ch):\n'
-        '            try:service.refresh(ch)\n'
-        '            except LiveError:pass\n'
-        '        for ch in channels.values():service.refresh_pool.submit(warmup,ch)\n'
+        '        def warmup():\n'
+        '            try:service.sdk.ensure_ready()\n'
+        "            except Exception as error:LOG.warning('SDK预热暂不可用：%s',str(error)[:200])\n"
+        '        service.refresh_pool.submit(warmup)\n'
         "    LOG.info('原 App UDRM 无JDK版 %s；%s 台；订阅 http://127.0.0.1:%s/all.m3u',VERSION,len(channels),args.port)\n"
         "    LOG.info('首次会自动准备SDK；状态 /status；运行不读取HAR，不启动Java/Node/FFmpeg或外部命令')\n"
         '    try:server.serve_forever(poll_interval=0.3)\n'
