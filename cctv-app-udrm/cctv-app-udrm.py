@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.2.0: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.2.1: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -481,6 +481,7 @@ PYTHON_SOURCES = {
         'import hashlib\n'
         'import io\n'
         'import logging\n'
+        'import zlib\n'
         'import os\n'
         'from pathlib import Path\n'
         'import tarfile\n'
@@ -500,6 +501,67 @@ PYTHON_SOURCES = {
         "LOG=logging.getLogger('cbox-app-udrm')\n"
         '_LOCK=threading.Lock();_MEMORY={};_CACHE_WARNING=False\n'
         'class BootstrapError(RuntimeError):pass\n'
+        'class RangeUnavailable(BootstrapError):pass\n'
+        '\n'
+        '# Byte positions belong only to the pinned official 7.9.31 APK above.\n'
+        '# Final uncompressed SHA-256 is mandatory, including for range downloads.\n'
+        'SDK_OFFSET=1674252\n'
+        'SDK_COMPRESSED_SIZE=2198880\n'
+        'APK_SIZE=49271128\n'
+        'SDK_SIZE=5229120\n'
+        'SDK_CRC=1091805562\n'
+        '\n'
+        'def _get_sdk_range(progress):\n'
+        '    end=SDK_OFFSET+SDK_COMPRESSED_SIZE-1\n'
+        "    request=Request(APK_URL,headers={'User-Agent':'cctv-app-udrm/0.2.1',\n"
+        "        'Accept-Encoding':'identity','Range':f'bytes={SDK_OFFSET}-{end}'})\n"
+        '    try:\n'
+        '        response=urlopen(request,timeout=30)\n'
+        '    except Exception as error:\n'
+        "        raise RangeUnavailable('SDK分段请求失败：'+type(error).__name__) from None\n"
+        '    with response:\n'
+        '        if response.status==200:\n'
+        "            raise RangeUnavailable('服务器不支持分段下载')\n"
+        "        if response.status!=206 or not response.geturl().startswith('https://'):\n"
+        "            raise BootstrapError('SDK分段响应无效')\n"
+        "        expected=f'bytes {SDK_OFFSET}-{end}/{APK_SIZE}'\n"
+        "        if response.headers.get('Content-Range')!=expected:\n"
+        "            raise BootstrapError('SDK分段范围不符，停止加载')\n"
+        "        length=response.headers.get('Content-Length')\n"
+        '        if length is not None and length!=str(SDK_COMPRESSED_SIZE):\n'
+        "            raise BootstrapError('SDK分段长度不符')\n"
+        "        if response.headers.get('Content-Encoding','identity').lower()!='identity':\n"
+        "            raise BootstrapError('SDK分段传输编码不符')\n"
+        '        chunks=[];size=0\n'
+        '        while size<SDK_COMPRESSED_SIZE:\n'
+        '            chunk=response.read(min(256*1024,SDK_COMPRESSED_SIZE-size))\n'
+        "            if not chunk:raise BootstrapError('SDK分段下载被截断')\n"
+        '            chunks.append(chunk);size+=len(chunk)\n'
+        "            progress(f'官方SDK分段下载：{size*100//SDK_COMPRESSED_SIZE}%（{size//1024}/{SDK_COMPRESSED_SIZE//1024} KiB）')\n"
+        "        if response.read(1):raise BootstrapError('SDK分段正文超长')\n"
+        '    try:\n'
+        '        decoder=zlib.decompressobj(-15)\n'
+        "        sdk=decoder.decompress(b''.join(chunks),SDK_SIZE+1)\n"
+        '        if not decoder.eof or decoder.unused_data or decoder.unconsumed_tail or len(sdk)!=SDK_SIZE:\n'
+        "            raise BootstrapError('SDK分段解压长度不符')\n"
+        "    except zlib.error:raise BootstrapError('SDK分段解压失败') from None\n"
+        '    if zlib.crc32(sdk)!=SDK_CRC or hashlib.sha256(sdk).hexdigest()!=SDK_SHA256:\n'
+        "        raise BootstrapError('官方SDK分段摘要不符，停止加载')\n"
+        '    return sdk\n'
+        '\n'
+        'def _preflight(jscore_library,notify):\n'
+        '    from jsc_host import JSCHost,APPLE\n'
+        '    host=None\n'
+        '    try:\n'
+        '        host=JSCHost(jscore_library or APPLE)\n'
+        '        result=host.evaluate("(function(){var b=new Uint8Array([0,97,115,109,1,0,0,0]);new WebAssembly.Instance(new WebAssembly.Module(b));return typeof BigInt===\'function\'?\'ok\':\'missing BigInt\';})()")\n'
+        "        if result!='ok':raise RuntimeError('BigInt unavailable')\n"
+        '    except Exception as error:\n'
+        "        raise BootstrapError('当前宿主无法运行JavaScriptCore/WebAssembly（'+type(error).__name__+'）；尚未下载SDK，请使用支持该能力的运行环境') from None\n"
+        '    finally:\n'
+        '        if host is not None:host.close()\n'
+        "    notify('系统JavaScriptCore/WebAssembly能力检查通过')\n"
+        '\n'
         '\n'
         'def _read_cached(cache,name,digest):\n'
         '    global _CACHE_WARNING\n'
@@ -531,7 +593,7 @@ PYTHON_SOURCES = {
         '\n'
         'def _get(url,limit,progress,label):\n'
         '    try:\n'
-        "        request=Request(url,headers={'User-Agent':'cctv-app-udrm/0.2.0','Accept-Encoding':'identity'})\n"
+        "        request=Request(url,headers={'User-Agent':'cctv-app-udrm/0.2.1','Accept-Encoding':'identity'})\n"
         '        with urlopen(request,timeout=30) as response:\n'
         "            if response.status!=200 or not response.geturl().startswith('https://'):raise BootstrapError('下载未返回有效HTTPS响应')\n"
         '            chunks=[];n=0;announced=0\n'
@@ -540,7 +602,7 @@ PYTHON_SOURCES = {
         '                if not chunk:break\n'
         '                chunks.append(chunk);n+=len(chunk)\n'
         "                if n>limit:raise BootstrapError('下载内容超过长度限制')\n"
-        "                if n-announced>=8*1024*1024:progress(label+'：'+str(n//(1024*1024))+' MiB');announced=n\n"
+        "                if n-announced>=1024*1024:progress(label+'：'+str(n//(1024*1024))+' MiB');announced=n\n"
         "            length=response.headers.get('Content-Length')\n"
         "            if length is not None and (not length.isdecimal() or int(length)!=n):raise BootstrapError('下载正文不完整')\n"
         "            return b''.join(chunks)\n"
@@ -551,19 +613,24 @@ PYTHON_SOURCES = {
         '    notify=progress or LOG.info\n'
         "    cache=Path(cache_dir).expanduser() if cache_dir else Path(tempfile.gettempdir())/'cctv-app-udrm-v02'\n"
         '    with _LOCK:\n'
+        '        _preflight(jscore_library,notify)\n'
         "        sdk=_MEMORY.get('sdk') or _read_cached(cache,'libkooplayer260728D.so',SDK_SHA256)\n"
         '        if sdk is None:\n'
         "            notify('首次准备：下载官方App SDK并校验，运行不需要JDK')\n"
-        "            apk=_get(APK_URL,64*1024*1024,notify,'官方SDK下载')\n"
-        "            if hashlib.sha256(apk).hexdigest()!=APK_SHA256:raise BootstrapError('官方APK摘要变化，停止加载')\n"
         '            try:\n'
-        '                with zipfile.ZipFile(io.BytesIO(apk)) as archive:\n'
-        '                    member=archive.getinfo(SDK_MEMBER)\n'
-        "                    if member.file_size!=5229120:raise BootstrapError('官方SDK大小变化')\n"
-        '                    sdk=archive.read(member)\n'
-        "            except (OSError,zipfile.BadZipFile,KeyError):raise BootstrapError('官方APK读取失败') from None\n"
-        '            finally:del apk\n'
-        "            if hashlib.sha256(sdk).hexdigest()!=SDK_SHA256:raise BootstrapError('官方SDK摘要不符')\n"
+        '                sdk=_get_sdk_range(notify)\n'
+        '            except RangeUnavailable:\n'
+        "                notify('分段下载不可用，回退完整官方安装包（约47 MiB）')\n"
+        "                apk=_get(APK_URL,64*1024*1024,notify,'官方SDK下载')\n"
+        "                if hashlib.sha256(apk).hexdigest()!=APK_SHA256:raise BootstrapError('官方APK摘要变化，停止加载')\n"
+        '                try:\n'
+        '                    with zipfile.ZipFile(io.BytesIO(apk)) as archive:\n'
+        '                        member=archive.getinfo(SDK_MEMBER)\n'
+        "                        if member.file_size!=5229120:raise BootstrapError('官方SDK大小变化')\n"
+        '                        sdk=archive.read(member)\n'
+        "                except (OSError,zipfile.BadZipFile,KeyError):raise BootstrapError('官方APK读取失败') from None\n"
+        '                finally:del apk\n'
+        "                if hashlib.sha256(sdk).hexdigest()!=SDK_SHA256:raise BootstrapError('官方SDK摘要不符')\n"
         "            _cache(cache,'libkooplayer260728D.so',sdk)\n"
         "        wasm=_MEMORY.get('wasm') or _read_cached(cache,'unicorn-aarch64-2.1.4.js',WASM_SHA256)\n"
         '        if wasm is None:\n'
@@ -1253,7 +1320,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.2.0'\n"
+        "VERSION = '0.2.1'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'DEFAULTS = {\n'
         " 'cctv1': ('CCTV-1 综合', 'https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8'),\n"
@@ -1369,13 +1436,22 @@ PYTHON_SOURCES = {
         '\n'
         'class MediaSDK:\n'
         '    def __init__(self, config):\n'
-        "        self.config=config;self.prepared=None;self.phase='idle';self.client=None;self.relay=None\n"
+        "        self.config=dict(config);self.progress='尚未准备';self.error=None\n"
+        "        callback=self.config.get('progress') or LOG.info\n"
+        '        def progress(message):\n'
+        '            self.progress=message;callback(message)\n'
+        "        self.config['progress']=progress\n"
+        "        self.prepared=None;self.phase='idle';self.client=None;self.relay=None\n"
         '        self.lock=threading.RLock();self.sessions=0;self.processed_frames=0\n'
         '        self.license_records=[]\n'
         '    def _start(self):\n'
         '        if self.client is not None:return\n'
         "        self.phase='preparing'\n"
-        '        if self.prepared is None:self.prepared=prepare(**self.config)\n'
+        '        try:\n'
+        '            if self.prepared is None:self.prepared=prepare(**self.config)\n'
+        '            self.error=None\n'
+        '        except Exception as error:\n'
+        "            self.phase='failed';self.error=str(error);raise\n"
         "        self.phase='licensing'\n"
         '        self.relay=LicenseRelay();self.relay.__enter__()\n'
         '        try:\n'
@@ -1383,8 +1459,8 @@ PYTHON_SOURCES = {
         "            self.client.start();self.sessions+=1;self.phase='ready'\n"
         '            self.license_records.extend(dict(x) for x in self.relay.records)\n'
         "            LOG.info('原 App SDK 已取得许可并就绪；会话 %s',self.sessions)\n"
-        '        except Exception:\n'
-        "            self.phase='failed';self._close();raise\n"
+        '        except Exception as error:\n'
+        "            self.phase='failed';self.error=str(error);self._close();raise\n"
         '    def ensure_ready(self):\n'
         "        if self.phase!='ready':\n"
         '            with self.lock:self._start()\n'
@@ -1549,6 +1625,7 @@ PYTHON_SOURCES = {
         '    def status(self):\n'
         "        return {'version':VERSION,'uptime_seconds':round(time.monotonic()-self.started),\n"
         "            'engine':'javascriptcore-unicorn-wasm','jdk_required':False,'sdk_phase':self.sdk.phase,\n"
+        "            'preparation_progress':self.sdk.progress,'preparation_error':self.sdk.error,\n"
         "            'sdk_sessions':self.sdk.sessions,'processed_video_pes':self.sdk.processed_frames,\n"
         "            'license_exchanges':self.sdk.license_records,\n"
         "            'channels':{ch.ident:{'name':ch.name,'cached_segments':len(ch.cache),\n"

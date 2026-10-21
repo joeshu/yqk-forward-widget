@@ -1,0 +1,84 @@
+{
+  "version": "0.2.1",
+  "recorded_at_utc": "2026-10-21T15:54:09.498588+00:00",
+  "script_sha256": "b128fbe296cde9fa7409587f66503b7f99992bb855351b4a787a5c5dfddaf477",
+  "iphone_aptv_device_tested": false,
+  "runtime_external_processes_required": false,
+  "runtime_har_dependency": false,
+  "empty_cache_bootstrap": {
+    "script_sha256": "b128fbe296cde9fa7409587f66503b7f99992bb855351b4a787a5c5dfddaf477",
+    "sdk_sha256": "41cd081ba0348b9802cedfceedb6bfa12c4db8f7cc462ffd3b531df6874f0a9e",
+    "sdk_transfer_bytes": 2198880,
+    "wasm_transfer_bytes": 1522535,
+    "seconds": 9.139,
+    "progress": [
+      "系统JavaScriptCore/WebAssembly能力检查通过",
+      "首次准备：下载官方App SDK并校验，运行不需要JDK",
+      "官方SDK分段下载：11%（256/2147 KiB）",
+      "官方SDK分段下载：23%（512/2147 KiB）",
+      "官方SDK分段下载：35%（768/2147 KiB）",
+      "官方SDK分段下载：47%（1024/2147 KiB）",
+      "官方SDK分段下载：59%（1280/2147 KiB）",
+      "官方SDK分段下载：71%（1536/2147 KiB）",
+      "官方SDK分段下载：83%（1792/2147 KiB）",
+      "官方SDK分段下载：95%（2048/2147 KiB）",
+      "官方SDK分段下载：100%（2147/2147 KiB）",
+      "准备无JDK的ARM64 WebAssembly解释器",
+      "解释器下载：1 MiB",
+      "官方SDK和无JDK解释器已校验就绪"
+    ],
+    "environment": "Linux JavaScriptCoreGTK; empty cache; not iPhone"
+  },
+  "final_artifact_media_check": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 6.064
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.785
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.625
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "wall_seconds": 8.381,
+    "script_sha256": "b128fbe296cde9fa7409587f66503b7f99992bb855351b4a787a5c5dfddaf477"
+  },
+  "offline_regressions": {
+    "passed": 17,
+    "tests": "tests/"
+  },
+  "prior_live_validation": {
+    "version": "0.2.0",
+    "report": "NOJDK-VALIDATION.json",
+    "note": "3 sources x 60 seconds; not rerun for bootstrap-only update"
+  }
+}
