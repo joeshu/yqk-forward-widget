@@ -1,0 +1,147 @@
+{
+  "scope": "Linux developer JavaScriptCore and official CCTV live sources; six sequential cold channels followed by returning to first and sixth, no background channel updates. Memory is whole Python process RSS, not iPhone memory. Each return strictly decoded 16 seconds.",
+  "baseline_rss_bytes": 30969856,
+  "trials": [
+    {
+      "channel": "cctv1",
+      "playlist_seconds": 5.1258,
+      "same_channel_object": false,
+      "cache_hits": 0,
+      "fresh_buffer_hits": 0,
+      "retained_channels": 1,
+      "rss_bytes": 109527040,
+      "cached_output_bytes": 849196,
+      "engine_initializations": {
+        "cctv1": 1
+      }
+    },
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 1.8844,
+      "same_channel_object": false,
+      "cache_hits": 0,
+      "fresh_buffer_hits": 0,
+      "retained_channels": 2,
+      "rss_bytes": 156336128,
+      "cached_output_bytes": 1920984,
+      "engine_initializations": {
+        "cctv1": 1,
+        "cctv2": 1
+      }
+    },
+    {
+      "channel": "cctv4",
+      "playlist_seconds": 1.4643,
+      "same_channel_object": false,
+      "cache_hits": 0,
+      "fresh_buffer_hits": 0,
+      "retained_channels": 3,
+      "rss_bytes": 191533056,
+      "cached_output_bytes": 2754764,
+      "engine_initializations": {
+        "cctv1": 1,
+        "cctv2": 1,
+        "cctv4": 1
+      }
+    },
+    {
+      "channel": "cctv7",
+      "playlist_seconds": 1.8175,
+      "same_channel_object": false,
+      "cache_hits": 0,
+      "fresh_buffer_hits": 0,
+      "retained_channels": 4,
+      "rss_bytes": 223326208,
+      "cached_output_bytes": 3601328,
+      "engine_initializations": {
+        "cctv1": 1,
+        "cctv2": 1,
+        "cctv4": 1,
+        "cctv7": 1
+      }
+    },
+    {
+      "channel": "cctvjilu",
+      "playlist_seconds": 1.2903,
+      "same_channel_object": false,
+      "cache_hits": 0,
+      "fresh_buffer_hits": 0,
+      "retained_channels": 5,
+      "rss_bytes": 251506688,
+      "cached_output_bytes": 4101408,
+      "engine_initializations": {
+        "cctv1": 1,
+        "cctv2": 1,
+        "cctv4": 1,
+        "cctv7": 1,
+        "cctvjilu": 1
+      }
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 1.2845,
+      "same_channel_object": false,
+      "cache_hits": 0,
+      "fresh_buffer_hits": 0,
+      "retained_channels": 6,
+      "rss_bytes": 280100864,
+      "cached_output_bytes": 4526664,
+      "engine_initializations": {
+        "cctv1": 1,
+        "cctv2": 1,
+        "cctv4": 1,
+        "cctv7": 1,
+        "cctvjilu": 1,
+        "cctv12": 1
+      }
+    },
+    {
+      "channel": "cctv1",
+      "playlist_seconds": 2.7304,
+      "same_channel_object": true,
+      "cache_hits": 1,
+      "fresh_buffer_hits": 0,
+      "retained_channels": 6,
+      "rss_bytes": 294424576,
+      "cached_output_bytes": 4793060,
+      "engine_initializations": {
+        "cctv1": 1,
+        "cctv2": 1,
+        "cctv4": 1,
+        "cctv7": 1,
+        "cctvjilu": 1,
+        "cctv12": 1
+      },
+      "decode_returncode": 0,
+      "decode_error_bytes": 0,
+      "processed_segments": 6
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 1.4629,
+      "same_channel_object": true,
+      "cache_hits": 1,
+      "fresh_buffer_hits": 0,
+      "retained_channels": 6,
+      "rss_bytes": 302698496,
+      "cached_output_bytes": 4822952,
+      "engine_initializations": {
+        "cctv1": 1,
+        "cctv2": 1,
+        "cctv4": 1,
+        "cctv7": 1,
+        "cctvjilu": 1,
+        "cctv12": 1
+      },
+      "decode_returncode": 0,
+      "decode_error_bytes": 0,
+      "processed_segments": 6
+    }
+  ],
+  "rss_after_close_bytes": 271921152,
+  "regression_tests": 185,
+  "native_jscore_tests": 11,
+  "phone_validation": "pending",
+  "other_source_observation": "An earlier trial was stopped when official CCTV-10 source API denied playback. That denial was retained; final six-context trial used CCTV-12 instead.",
+  "resource_limit_validation": "Seven real owner threads with fake SDK media processing: peak six engine instances, seventh starts after oldest owner closes; all engines close on their owner thread."
+}

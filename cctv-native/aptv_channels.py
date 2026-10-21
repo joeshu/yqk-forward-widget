@@ -26,6 +26,8 @@ class ManagedChannel(Channel):
         with self.condition:
             self.stop.set()
             self.parked_at = 0
+            self.ring.clear()
+            self.size = 0
             self.condition.notify_all()
 
     def park(self):
@@ -49,7 +51,7 @@ class ManagedChannel(Channel):
                     or now-self.parked_at >= self.cache_ttl or self.state != 'ready'):
                 return False
             durations = sum(item[1] for item in self.ring.values())
-            fresh = (len(self.ring) >= 2 and self.last_published_at > 0
+            fresh = (len(self.ring) >= getattr(self.args, 'startup_segments', 2) and self.last_published_at > 0
                      and now-self.last_published_at <= min(8, durations))
             self.parked_at = 0
             self.resume_pending = True
@@ -76,8 +78,7 @@ class ManagedChannel(Channel):
             while self.parked_at and not self.stop.is_set():
                 remaining = self.cache_ttl-(time.monotonic()-self.parked_at)
                 if remaining <= 0:
-                    self.stop.set()
-                    self.parked_at = 0
+                    self.retire()
                     break
                 self.condition.wait(min(.25, remaining))
             if self.stop.is_set():
@@ -131,7 +132,8 @@ class ChannelManager:
     def __init__(self, args):
         self.args = args
         self.lock = threading.RLock()
-        self.slots = threading.BoundedSemaphore(2)
+        self.cache_limit = getattr(args, 'channel_cache_size', 2)
+        self.slots = threading.BoundedSemaphore(self.cache_limit)
         self.channels = {}
         self.current = None
         self.closed = False
@@ -147,13 +149,20 @@ class ChannelManager:
                 return self.channels[cid]
             previous = self.channels.get(self.current)
             target = self.channels.get(cid)
-            # At most current + one most recent parked channel. Retire the
-            # older VM before creating a third candidate; semaphore stays 2.
-            for other in self.channels.values():
-                if other is not previous and other is not target:
-                    other.retire()
             if previous:
                 previous.park()
+            # Bound all retained VMs, including the selected channel. Paused
+            # owners do no background media processing. Evict least-recently
+            # parked first; only that owner may release its native context.
+            now = time.monotonic()
+            for other in self.channels.values():
+                if other is not target and other.parked_at and now-other.parked_at >= other.cache_ttl:
+                    other.retire()
+            parked = sorted((other for other in self.channels.values()
+                             if other is not target and other.parked_at and not other.stop.is_set()),
+                            key=lambda other:other.parked_at)
+            while len(parked) >= self.cache_limit:
+                parked.pop(0).retire()
             if target is not None and target.resume():
                 self.current = cid
                 return target
@@ -176,7 +185,11 @@ class ChannelManager:
             result = current.snapshot() if current else {'state':'idle','media_ready':False}
             result.update(current_channel=self.current, channel_count=len(PUBLISHED_CHANNELS),
                           channels=[{'id':cid,'name':name} for cid,name in PUBLISHED_CHANNELS.items()],
-                          epg=self.epg.snapshot(), native_context_limit=2, http_connections=_HTTP_POOL.snapshot(),
+                          epg=self.epg.snapshot(), native_context_limit=self.cache_limit,
+                          channel_cache_size=self.cache_limit,
+                          cached_media_bytes=sum(c.size for c in self.channels.values() if not c.stop.is_set()),
+                          retained_channel_count=sum(not c.stop.is_set() for c in self.channels.values()),
+                          http_connections=_HTTP_POOL.snapshot(),
                           recent_channel_seconds=getattr(self.args,'recent_channel_seconds',15),
                           recent_channels=[c.channel_id for c in self.channels.values()
                                            if c.parked_at and not c.stop.is_set()],

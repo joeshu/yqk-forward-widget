@@ -2368,6 +2368,8 @@ class ManagedChannel(Channel):
         with self.condition:
             self.stop.set()
             self.parked_at = 0
+            self.ring.clear()
+            self.size = 0
             self.condition.notify_all()
 
     def park(self):
@@ -2391,7 +2393,7 @@ class ManagedChannel(Channel):
                     or now-self.parked_at >= self.cache_ttl or self.state != 'ready'):
                 return False
             durations = sum(item[1] for item in self.ring.values())
-            fresh = (len(self.ring) >= 2 and self.last_published_at > 0
+            fresh = (len(self.ring) >= getattr(self.args, 'startup_segments', 2) and self.last_published_at > 0
                      and now-self.last_published_at <= min(8, durations))
             self.parked_at = 0
             self.resume_pending = True
@@ -2418,8 +2420,7 @@ class ManagedChannel(Channel):
             while self.parked_at and not self.stop.is_set():
                 remaining = self.cache_ttl-(time.monotonic()-self.parked_at)
                 if remaining <= 0:
-                    self.stop.set()
-                    self.parked_at = 0
+                    self.retire()
                     break
                 self.condition.wait(min(.25, remaining))
             if self.stop.is_set():
@@ -2473,7 +2474,8 @@ class ChannelManager:
     def __init__(self, args):
         self.args = args
         self.lock = threading.RLock()
-        self.slots = threading.BoundedSemaphore(2)
+        self.cache_limit = getattr(args, 'channel_cache_size', 2)
+        self.slots = threading.BoundedSemaphore(self.cache_limit)
         self.channels = {}
         self.current = None
         self.closed = False
@@ -2489,13 +2491,20 @@ class ChannelManager:
                 return self.channels[cid]
             previous = self.channels.get(self.current)
             target = self.channels.get(cid)
-            # At most current + one most recent parked channel. Retire the
-            # older VM before creating a third candidate; semaphore stays 2.
-            for other in self.channels.values():
-                if other is not previous and other is not target:
-                    other.retire()
             if previous:
                 previous.park()
+            # Bound all retained VMs, including the selected channel. Paused
+            # owners do no background media processing. Evict least-recently
+            # parked first; only that owner may release its native context.
+            now = time.monotonic()
+            for other in self.channels.values():
+                if other is not target and other.parked_at and now-other.parked_at >= other.cache_ttl:
+                    other.retire()
+            parked = sorted((other for other in self.channels.values()
+                             if other is not target and other.parked_at and not other.stop.is_set()),
+                            key=lambda other:other.parked_at)
+            while len(parked) >= self.cache_limit:
+                parked.pop(0).retire()
             if target is not None and target.resume():
                 self.current = cid
                 return target
@@ -2518,7 +2527,11 @@ class ChannelManager:
             result = current.snapshot() if current else {'state':'idle','media_ready':False}
             result.update(current_channel=self.current, channel_count=len(PUBLISHED_CHANNELS),
                           channels=[{'id':cid,'name':name} for cid,name in PUBLISHED_CHANNELS.items()],
-                          epg=self.epg.snapshot(), native_context_limit=2, http_connections=_HTTP_POOL.snapshot(),
+                          epg=self.epg.snapshot(), native_context_limit=self.cache_limit,
+                          channel_cache_size=self.cache_limit,
+                          cached_media_bytes=sum(c.size for c in self.channels.values() if not c.stop.is_set()),
+                          retained_channel_count=sum(not c.stop.is_set() for c in self.channels.values()),
+                          http_connections=_HTTP_POOL.snapshot(),
                           recent_channel_seconds=getattr(self.args,'recent_channel_seconds',15),
                           recent_channels=[c.channel_id for c in self.channels.values()
                                            if c.parked_at and not c.stop.is_set()],
@@ -2631,8 +2644,10 @@ def main(argv=None):
     parser.add_argument('--prefix-lookahead', action=argparse.BooleanOptionalAction, default=True,
                         help='首播仅下载第三片的已校验边界前缀；不支持时自动下载整片')
     parser.add_argument('--no-http-reuse', action='store_true', help='关闭上游 HTTPS 连接复用')
-    parser.add_argument('--recent-channel-seconds', type=int, default=15,
-                        help='最近一个频道的组件保留秒数（0 关闭，最多 30）；过旧分片不直接播放')
+    parser.add_argument('--recent-channel-seconds', type=int, default=60,
+                        help='最近频道组件保留秒数（0 关闭，最多 180）；过旧分片重新准备直播')
+    parser.add_argument('--channel-cache-size', type=int, choices=range(1,7), default=6,
+                        help='保留频道总数，含当前频道，默认 6；后台频道暂停处理')
     parser.add_argument('--startup-segments', type=int, choices=(1,2), default=1,
                         help='首播完整分片数，默认 1；设为 2 恢复原缓冲策略')
     parser.add_argument('--buffer-mb', type=int, default=32)
@@ -2641,13 +2656,14 @@ def main(argv=None):
     args = parser.parse_args(argv)
     _API_LEGACY_ENABLED = not args.no_legacy_source_tls
     _HTTP_REUSE_ENABLED = not args.no_http_reuse
-    if not 1 <= args.port <= 65535 or not 16 <= args.buffer_mb <= 256 or not 30 <= args.idle_timeout <= 3600 or not 0 <= args.recent_channel_seconds <= 30:
+    if not 1 <= args.port <= 65535 or not 16 <= args.buffer_mb <= 256 or not 30 <= args.idle_timeout <= 3600 or not 0 <= args.recent_channel_seconds <= 180:
         parser.error('invalid port/buffer/idle timeout/recent channel seconds')
     manager = ChannelManager(args)
     server = ThreadingHTTPServer((args.bind, args.port), MultiChannelHandler)
     server.daemon_threads = True
     server.manager, server.args = manager, args
     print(f'APTV 央视网页原分片实验版：http://127.0.0.1:{args.port}/all.m3u', flush=True)
+    print('频道缓存：'+str(args.channel_cache_size)+' 路（含当前）；组件保留 '+str(args.recent_channel_seconds)+' 秒，后台暂停处理。', flush=True)
     print('首播完整分片数：'+str(args.startup_segments)+'；--startup-segments 2 恢复两片缓冲。', flush=True)
     print('状态：/status；同源多频道，按需加载。首次选台下载并校验官方组件（默认内存缓存，不写磁盘）。', flush=True)
     try:

@@ -142,3 +142,70 @@ class TestRecentChannels(unittest.TestCase):
     def test_future_socket_timeout_is_preserved(self):
         a=self.manager.activate('cctv2');task=Future();task.set_exception(TimeoutError('network'))
         with self.assertRaises(TimeoutError):a._await_future(task)
+
+    def test_six_channel_lru_reuses_all_six_and_evicts_oldest_on_seventh(self):
+        self.manager.close();self.args.channel_cache_size=6
+        self.manager=self.m.ChannelManager(self.args)
+        ids=list(self.m.PUBLISHED_CHANNELS)[:7]
+        retained={cid:self.ready(cid) for cid in ids[:6]}
+        self.assertTrue(all(not c.stop.is_set() for c in retained.values()))
+        self.assertEqual(len(self.manager.snapshot()['recent_channels']),5)
+        self.assertEqual(self.manager.snapshot()['native_context_limit'],6)
+        first=retained[ids[0]]
+        self.assertIs(self.manager.activate(ids[0]),first)
+        with self.assertRaises(self.m.ResumePreparation):first.checkpoint()
+        self.ready(ids[6])
+        self.assertTrue(retained[ids[1]].stop.is_set())
+        self.assertFalse(first.stop.is_set())
+        self.assertEqual(len(retained[ids[1]].ring),0)
+        self.assertEqual(retained[ids[1]].size,0)
+        self.assertEqual(sum(not c.stop.is_set() for c in self.manager.channels.values()),6)
+
+    def test_single_complete_fresh_segment_is_reused_in_single_startup_mode(self):
+        self.args.startup_segments=1
+        a=self.ready('cctv2')
+        while len(a.ring)>1:
+            _,old=a.ring.popitem(last=False);a.size-=len(old[0])
+        self.manager.activate('cctv4');generation=a.generation
+        self.assertIs(self.manager.activate('cctv2'),a)
+        self.assertEqual(a.generation,generation)
+        self.assertIsNotNone(a.playlist());self.assertEqual(a.cache_buffer_hits,1)
+
+    def test_cache_size_one_retires_previous_and_releases_cached_bytes(self):
+        self.manager.close();self.args.channel_cache_size=1
+        self.manager=self.m.ChannelManager(self.args)
+        a=self.ready('cctv2');self.manager.activate('cctv4')
+        self.assertTrue(a.stop.is_set());self.assertEqual(a.size,0)
+        self.assertEqual(len(a.ring),0)
+
+    def test_seventh_worker_waits_for_owner_eviction_and_never_exceeds_six_vms(self):
+        self.manager.close();self.args.channel_cache_size=6;self.args.startup_segments=1
+        self.manager=self.m.ChannelManager(self.args)
+        lock=threading.Lock();active=set();peak=[0];closed=[]
+        def engine(args):
+            owner=threading.get_ident()
+            with lock:
+                active.add(args.channel_id);peak[0]=max(peak[0],len(active))
+            value=mock.Mock(transform=lambda units:units)
+            def close():
+                self.assertEqual(threading.get_ident(),owner)
+                with lock:active.remove(args.channel_id);closed.append(args.channel_id)
+            value.close.side_effect=close
+            return value
+        def playlist(url):
+            return ([dict(seq=i,duration=4,url=url+'/'+str(i),discontinuity=False) for i in range(3)],url)
+        ids=list(self.m.PUBLISHED_CHANNELS)[:7]
+        with mock.patch.object(self.m,'Engine',side_effect=engine), \
+             mock.patch.object(self.m,'source_url',side_effect=lambda cid='cctv2':'https://media.cntv.cn/'+cid), \
+             mock.patch.object(self.m,'media_playlist',side_effect=playlist), \
+             mock.patch.object(self.m,'get',return_value=(self.raw,'https://media.cntv.cn/a')),mock.patch('builtins.print'):
+            for cid in ids:
+                channel=self.manager.activate(cid);self.workers.append(channel);channel.demand()
+                with channel.condition:
+                    self.assertTrue(channel.condition.wait_for(lambda:channel.playlist() is not None,2))
+            self.assertIn(ids[0],closed)
+            self.assertEqual(peak[0],6)
+            self.assertEqual(len(active),6)
+            self.manager.close()
+            for channel in self.workers:channel.thread.join(2)
+        self.assertFalse(active);self.assertCountEqual(closed,ids)
