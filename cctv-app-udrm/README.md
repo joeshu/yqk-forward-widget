@@ -1,4 +1,4 @@
-# 央视影音 App UDRM 单文件 v0.2.5（无 JDK）
+# 央视影音 App UDRM 单文件 v0.2.6（无 JDK）
 
 v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + WebAssembly 解释器**。运行只使用 Python 标准库和系统 JavaScriptCore，不再启动 Java、Node、编译器、FFmpeg 或外部 OpenSSL 命令。许可和视频处理继续由原样官方 SDK 完成。
 
@@ -7,10 +7,10 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 ## APTV 添加与订阅
 
 1. 停止旧的 JDK 版服务，添加下面带版本号的 Python 文件。
-2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.2.5`。
+2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.2.6`。
 3. 首次先检查宿主的 JavaScriptCore/WebAssembly 能力，再下载约3.55MiB（SDK压缩段约2.10MiB、解释器约1.45MiB）。看到“SDK 已取得许可并就绪”后刷新订阅；17ms之类的列表测速不表示SDK已经就绪。若服务器不支持分段下载，日志会说明回退约47MiB的完整安装包。
 
-[下载 cctv-app-udrm-v0.2.5.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.2.5.py)
+[下载 cctv-app-udrm-v0.2.6.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.2.6.py)
 
 手机同机订阅：
 
@@ -18,18 +18,18 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 http://127.0.0.1:8769/all.m3u
 ```
 
-状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.2.5`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
+状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.2.6`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
 
 脚本运行需要 Python 3.10+、`ctypes`、`ssl`，以及支持 WebAssembly、BigInt 的系统 JavaScriptCore。默认从 iOS 系统路径加载框架。没有手工安装 pip 包、JS文件、JAR或完整安卓虚拟机的步骤。当前默认文件 [cctv-app-udrm.py](cctv-app-udrm.py) 与带版本号文件完全相同。
 
 终端运行：
 
 ```bash
-python3 cctv-app-udrm-v0.2.5.py
+python3 cctv-app-udrm-v0.2.6.py
 # 指定端口、缓存或关闭预热
-python3 cctv-app-udrm-v0.2.5.py 8769 --cache-dir ./cbox-cache --no-warmup
+python3 cctv-app-udrm-v0.2.6.py 8769 --cache-dir ./cbox-cache --no-warmup
 # 能力检查，不访问节目源
-python3 cctv-app-udrm-v0.2.5.py --doctor
+python3 cctv-app-udrm-v0.2.6.py --doctor
 ```
 
 电脑/服务器供手机访问时，显式加 `--host 0.0.0.0`，订阅地址改为该电脑的局域网IP。Linux开发测试使用JavaScriptCoreGTK共享库，通过 `--jscore-library /path/to/libjavascriptcoregtk-4.1.so.0` 指定；它不是iPhone需下载的依赖。
@@ -44,6 +44,16 @@ python3 cctv-app-udrm-v0.2.5.py --doctor
 - 已人工查看处理后的央视画面，台标、字幕和画面正常。原SDK样本对照仍见 [SAMPLE-VALIDATION.json](SAMPLE-VALIDATION.json)。
 
 本入口尚未合并EPG，原61台服务的节目单继续保留。更多频道的实时调度签名、CDN权限与用户手机的内存/首帧表现仍需继续核对。
+
+## 0.2.6 保持高清，优化内存复制
+
+按用户要求恢复原有2.5Mbps码率选择上限：CCTV-1/7官方主清单当前选择1280×720、1.8Mbps；贵州卫视使用其原有档位。没有使用0.2.5默认的600kbps降档，不转码、不修改分辨率、音频或时间戳。
+
+确认Unicorn.js 2.1.4的 `mem_read` 包装逐字节清零和读取结果，并且每次分配/释放临时空间。新增自有批量适配层，通过同一模拟器导出的 `uc_mem_read` / `uc_mem_write` C接口和可复用暂存区传递数据，用TypedArray批量复制。WebAssembly.Memory来自标准instantiateWasm宿主钩子；每次分配后重新获取视图以适应内存增长，原生调用失败时不返回任何未初始化内容。已固定摘要的官方SDK和Unicorn二进制均未修改。能力不完整时仍保留原包装层兼容路径。
+
+每个最多4-PES批次仅分配一个媒体工作缓冲区，逐帧复用并清零64字节尾部，避免逐帧分配及先清零整帧再覆盖。每帧仍完整交给原SDK，保持同台状态和等长校验，不通过跳过保护数据换取速度。
+
+开发环境单项基准：512KiB往返读写30轮，旧包装547ms，新适配8ms；这是内存复制微基准，不是整段SDK、首帧或手机播放提速倍数。原三组样本输出SHA-256与历史正确输出一致，600帧音视频解码错误0，36项检查通过。三路高清依次各20秒解码无错误；CCTV-1首轮397帧、重复测试498帧，保留首轮可能存在的时间连续性/可用性问题，不把“无解码错误”等同于已经完全无卡顿。见 [0.2.6验证](HD-VALIDATION-v0.2.6.json)。手机实际改善仍需同清晰度实测；模拟器内部执行、上游等待仍可能限制实时性。
 
 ## 0.2.5 手机码率、抢占与重试
 

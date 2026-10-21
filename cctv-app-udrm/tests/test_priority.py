@@ -4,6 +4,10 @@ from unittest.mock import Mock,patch
 from test_bridge import service,Builder
 
 class PriorityTests(unittest.TestCase):
+ def test_default_preserves_previous_hd_cap(self):
+  live=service.LiveService({}, {'a':service.Channel('a','A','https://example.test/a')})
+  try:self.assertEqual(live.max_bitrate,2500000)
+  finally:live.close()
  def test_upstream_error_reports_safe_reason_type(self):
   with patch.object(service,'urlopen',side_effect=service.URLError(TimeoutError('private detail'))):
    with self.assertRaisesRegex(service.LiveError,'URLError/TimeoutError') as caught:service.fetch('https://example.test/a',1024)
@@ -20,7 +24,7 @@ class PriorityTests(unittest.TestCase):
   with self.assertRaises(service.Superseded):sdk.transform('a',source,current=lambda:next(decisions))
   self.assertEqual(sdk.client.process_batch.call_count,1)
   sdk.client.reset.assert_called_once_with('a');self.assertNotIn('a',sdk.timings)
- def test_phone_default_selects_advertised_low_bitrate(self):
+ def test_explicit_bitrate_cap_selects_advertised_variant(self):
   master=b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1800000\nhd.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=600000\nmd.m3u8\n'
   child=b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:4,\na.ts\n'
   requested=[]

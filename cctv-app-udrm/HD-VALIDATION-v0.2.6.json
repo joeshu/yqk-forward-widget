@@ -1,0 +1,283 @@
+{
+  "version": "0.2.6",
+  "recorded_at_utc": "2026-10-21T23:20:14.441284+00:00",
+  "script_sha256": "9654a8d56ef665481627d3c1c5c27ee53afa28585f3716daa47301e15d39e4a3",
+  "iphone_aptv_device_tested": false,
+  "regressions_passed": 36,
+  "quality": {
+    "default_max_bitrate_restored": 2500000,
+    "cctv1_and_cctv7_advertised_selected_variant": "1280x720 / 1800000 bps, matching pre-0.2.5 default",
+    "transcoding": false,
+    "original_es_output_hashes_preserved": true
+  },
+  "bulk_memory_microbenchmark": {
+    "baseline": {
+      "bulk_enabled": false,
+      "bytes_per_round": 524288,
+      "rounds": 30,
+      "copy_milliseconds": 547,
+      "roundtrip_equal": true,
+      "unmapped_read_rejected": true,
+      "script_sha256": "56f1759aa215ed8712fa069a7c2d0cd13de84b4e882b73ef258e422764eca604",
+      "setup_seconds": 1.28,
+      "environment": "Linux JavaScriptCoreGTK; not iPhone"
+    },
+    "optimized": {
+      "bulk_enabled": true,
+      "bytes_per_round": 524288,
+      "rounds": 30,
+      "copy_milliseconds": 8,
+      "roundtrip_equal": true,
+      "unmapped_read_rejected": true,
+      "script_sha256": "9654a8d56ef665481627d3c1c5c27ee53afa28585f3716daa47301e15d39e4a3",
+      "setup_seconds": 1.324,
+      "environment": "Linux JavaScriptCoreGTK; not iPhone"
+    },
+    "scope": "Memory copying only, not total SDK or phone playback speedup"
+  },
+  "final_artifact_samples": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 5.101
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.676
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.551
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "forced_native_usleep_probes": [
+      {
+        "microseconds": 20000,
+        "result": 0,
+        "elapsed_seconds": 0.024
+      }
+    ],
+    "wall_seconds": 7.6,
+    "script_sha256": "9654a8d56ef665481627d3c1c5c27ee53afa28585f3716daa47301e15d39e4a3"
+  },
+  "sequential_hd_live_validation": {
+    "version": "0.2.6",
+    "environment": "Linux JavaScriptCoreGTK; single selected channel, sequential 20s audio/video decodes; not iPhone",
+    "script_sha256": "9654a8d56ef665481627d3c1c5c27ee53afa28585f3716daa47301e15d39e4a3",
+    "channels": [
+      {
+        "channel": "cctv1",
+        "first_playlist_seconds": 10.291,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "397",
+        "duration": "00:00:20.000000"
+      },
+      {
+        "channel": "cctv7",
+        "first_playlist_seconds": 8.506,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "495",
+        "duration": "00:00:20.000000"
+      },
+      {
+        "channel": "guizhou",
+        "first_playlist_seconds": 6.141,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "500",
+        "duration": "00:00:20.000000"
+      }
+    ],
+    "status": {
+      "version": "0.2.6",
+      "uptime_seconds": 68,
+      "engine": "javascriptcore-unicorn-wasm",
+      "jdk_required": false,
+      "sdk_phase": "ready",
+      "preparation_progress": "官方SDK和无JDK解释器已校验就绪",
+      "preparation_error": null,
+      "media_timings": {
+        "cctv1": {
+          "parse_seconds": 0.013,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.433,
+          "map_verify_seconds": 0.006,
+          "video_pes": 100
+        },
+        "cctv7": {
+          "parse_seconds": 0.007,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.351,
+          "map_verify_seconds": 0.005,
+          "video_pes": 100
+        },
+        "guizhou": {
+          "parse_seconds": 0.009,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.126,
+          "map_verify_seconds": 0.006,
+          "video_pes": 100
+        }
+      },
+      "max_bitrate": 2500000,
+      "sdk_sessions": 1,
+      "processed_video_pes": 1700,
+      "license_exchanges": [
+        {
+          "request_bytes": 368,
+          "http_status": 200,
+          "response_bytes": 232,
+          "business_status": 0,
+          "protected_license_count": 1
+        }
+      ],
+      "channels": {
+        "cctv1": {
+          "name": "CCTV-1 综合",
+          "cached_segments": 5,
+          "playlist_age_seconds": 45.52,
+          "last_refresh_seconds": 2.335,
+          "processing_to_video_ratio": 0.113,
+          "error": ""
+        },
+        "cctv7": {
+          "name": "CCTV-7 国防军事",
+          "cached_segments": 6,
+          "playlist_age_seconds": 18.5,
+          "last_refresh_seconds": 5.609,
+          "processing_to_video_ratio": 0.091,
+          "error": ""
+        },
+        "guizhou": {
+          "name": "贵州卫视",
+          "cached_segments": 6,
+          "playlist_age_seconds": 3.19,
+          "last_refresh_seconds": 1.649,
+          "processing_to_video_ratio": 0.035,
+          "error": ""
+        }
+      }
+    }
+  },
+  "cctv1_repeat_validation": {
+    "version": "0.2.6",
+    "environment": "Linux JavaScriptCoreGTK; single selected channel, sequential 20s audio/video decodes; not iPhone",
+    "script_sha256": "9654a8d56ef665481627d3c1c5c27ee53afa28585f3716daa47301e15d39e4a3",
+    "channels": [
+      {
+        "channel": "cctv1",
+        "first_playlist_seconds": 0.002,
+        "initial_playlist_segments": 3,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "498",
+        "duration": "00:00:20.000000"
+      }
+    ],
+    "status": {
+      "version": "0.2.6",
+      "uptime_seconds": 24030,
+      "engine": "javascriptcore-unicorn-wasm",
+      "jdk_required": false,
+      "sdk_phase": "ready",
+      "preparation_progress": "官方SDK和无JDK解释器已校验就绪",
+      "preparation_error": null,
+      "media_timings": {
+        "cctv1": {
+          "parse_seconds": 0.018,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.49,
+          "map_verify_seconds": 0.008,
+          "video_pes": 100
+        },
+        "cctv7": {
+          "parse_seconds": 0.007,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.351,
+          "map_verify_seconds": 0.005,
+          "video_pes": 100
+        },
+        "guizhou": {
+          "parse_seconds": 0.016,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.172,
+          "map_verify_seconds": 0.01,
+          "video_pes": 100
+        }
+      },
+      "max_bitrate": 2500000,
+      "sdk_sessions": 1,
+      "processed_video_pes": 2900,
+      "license_exchanges": [
+        {
+          "request_bytes": 368,
+          "http_status": 200,
+          "response_bytes": 232,
+          "business_status": 0,
+          "protected_license_count": 1
+        }
+      ],
+      "channels": {
+        "cctv1": {
+          "name": "CCTV-1 综合",
+          "cached_segments": 8,
+          "playlist_age_seconds": 0.64,
+          "last_refresh_seconds": 3.958,
+          "processing_to_video_ratio": 0.129,
+          "error": ""
+        },
+        "cctv7": {
+          "name": "CCTV-7 国防军事",
+          "cached_segments": 6,
+          "playlist_age_seconds": 23980.27,
+          "last_refresh_seconds": 5.609,
+          "processing_to_video_ratio": 0.091,
+          "error": ""
+        },
+        "guizhou": {
+          "name": "贵州卫视",
+          "cached_segments": 8,
+          "playlist_age_seconds": 23933.03,
+          "last_refresh_seconds": 1.053,
+          "processing_to_video_ratio": 0.05,
+          "error": ""
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Development environment only; user iPhone performance requires same-quality device measurement.",
+    "Initial C1 20s decode reported 397 frames; repeat reported 498 frames with no decode errors. A transient timeline/availability issue remains possible; zero decode errors alone does not prove uninterrupted playback.",
+    "Native ARM64 emulation and upstream wait remain; memory-copy acceleration does not guarantee real-time playback."
+  ]
+}

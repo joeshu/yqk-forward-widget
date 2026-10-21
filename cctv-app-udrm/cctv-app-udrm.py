@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.2.5: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.2.6: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -14,6 +14,7 @@ JS_SOURCES = {
         '  this.base=0x10000000;this.stub=0x20000000;this.heap=0x30000000;this.stack=0x40000000;this.stop=0x50000000;\n'
         '  this.bump=this.heap;this.allocations=new Map();this.freeBlocks=[];this.keys=new Map();this.keySequence=1;this.objects=new Map();this.objectSequence=1;this.natives={};this.states=new Map();this.trap=null;this.counts={};this.entropy=entropy;this.entropyPosition=0;this.randomSeed=1;this.files=new Map();this.nextFD=100;\n'
         '  const e=this.e;\n'
+        '  this.bulk=null;this.installBulkMemory(globalThis.__ucMemory);\n'
         '  for(const [address,size] of [[this.base,plan.length],[this.stub,0x20000],[this.heap,0x800000],[this.stack,0x200000],[this.stop,0x1000]])e.mem_map(address,size,uc.PROT_ALL);\n'
         '  for(const segment of plan.segments)e.mem_write(this.base+segment.address,this.unbase64(segment.data));\n'
         '  this.importAddresses={};this.addressImports={};plan.imports.forEach((name,i)=>{this.importAddresses[name]=this.stub+i*8;this.addressImports[this.stub+i*8]=name;});\n'
@@ -33,6 +34,36 @@ JS_SOURCES = {
         '  if(uc.ARM64_REG_TPIDR_EL0)e.reg_write_i64(uc.ARM64_REG_TPIDR_EL0,BigInt(this.tls));\n'
         '  // Import data are ordinary host ABI storage, never credentials or rights state.\n'
         '  if(this.importAddresses.__stack_chk_guard)this.write64(this.importAddresses.__stack_chk_guard,0x18d4a256);\n'
+        ' }\n'
+        ' installBulkMemory(memory){\n'
+        '  const m=this.uc,e=this.e;\n'
+        "  if(!(memory instanceof WebAssembly.Memory)||typeof m.ccall!=='function'||typeof m._malloc!=='function'||typeof m._free!=='function'||typeof m.getValue!=='function')return;\n"
+        "  const handle=m.getValue(e.handle_ptr,'*');this.bulk={pointer:0,capacity:0};\n"
+        '  const scratch=size=>{\n'
+        "   if(!Number.isSafeInteger(size)||size<0||size>16*1024*1024)throw Error('bulk memory size limit');\n"
+        '   if(size>this.bulk.capacity){\n'
+        '    const capacity=Math.max(65536,2**Math.ceil(Math.log2(size)));\n'
+        "    const pointer=m._malloc(capacity);if(!pointer)throw Error('bulk scratch allocation failed');\n"
+        '    if(this.bulk.pointer)m._free(this.bulk.pointer);\n'
+        '    this.bulk.pointer=pointer;this.bulk.capacity=capacity;\n'
+        '   }\n'
+        '   return this.bulk.pointer;\n'
+        '  };\n'
+        "  const check=address=>{if(!Number.isSafeInteger(address)||address<0)throw Error('bulk memory address');};\n"
+        '  e.mem_read=(address,size)=>{\n'
+        '   check(address);const pointer=scratch(size);if(!size)return new Uint8Array(0);\n'
+        "   const code=m.ccall('uc_mem_read','number',['pointer','number','pointer','number'],[handle,BigInt(address),pointer,BigInt(size)]);\n"
+        "   if(code!==m.ERR_OK)throw Error('bulk uc_mem_read failed '+code);\n"
+        '   return new Uint8Array(memory.buffer,pointer,size).slice();\n'
+        '  };\n'
+        '  e.mem_write=(address,bytes)=>{\n'
+        '   check(address);if(!(bytes instanceof Uint8Array))bytes=Uint8Array.from(bytes);\n'
+        '   const pointer=scratch(bytes.length);if(!bytes.length)return;\n'
+        '   // Always reacquire the view after malloc: WebAssembly memory may grow.\n'
+        '   new Uint8Array(memory.buffer,pointer,bytes.length).set(bytes);\n'
+        "   const code=m.ccall('uc_mem_write','number',['pointer','number','pointer','number'],[handle,BigInt(address),pointer,BigInt(bytes.length)]);\n"
+        "   if(code!==m.ERR_OK)throw Error('bulk uc_mem_write failed '+code);\n"
+        '  };\n'
         ' }\n'
         ' unbase64(text){const s=atob(text),b=new Uint8Array(s.length);for(let i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b;}\n'
         " base64(bytes){let s='';for(let i=0;i<bytes.length;i+=8192)s+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(s);}\n"
@@ -239,29 +270,29 @@ JS_SOURCES = {
         "   default:throw Error('unsupported JNI entry '+index);\n"
         '  }\n'
         ' }\n'
-        ' packetBinary(channel,length){\n'
+        ' packetBinary(channel,length,workspace=0){\n'
         '  const data=globalThis.__mediaInput.subarray(0,length);\n'
         "  if(length<4||length>4*1024*1024||!(data[0]===0&&data[1]===0&&(data[2]===1||(data[2]===0&&data[3]===1))))throw Error('invalid Annex B media');\n"
         '  let state=this.states.get(channel);\n'
         '  if(state){this.states.delete(channel);this.states.set(channel,state);}\n'
         '  else{if(this.states.size>=8){const old=this.states.keys().next().value;this.free(this.states.get(old));this.states.delete(old);}state=this.allocate(1024,true);this.states.set(channel,state);}\n'
-        '  const buffer=this.allocate(length+64,true);this.write(buffer,data);\n'
+        '  const buffer=workspace||this.allocate(length+64);this.write(buffer+length,new Uint8Array(64));this.write(buffer,data);\n'
         "  try{const code=this.invoke(this.base+0xfec68,[buffer,length,0,state]);if(typeof code!=='number')throw Error('unexpected media I/O');globalThis.__mediaOutput=code===0?this.read(buffer,length):null;return {code};}\n"
-        '  finally{this.free(buffer);}\n'
+        '  finally{if(!workspace)this.free(buffer);}\n'
         ' }\n'
         ' batchBinary(channel,lengths){\n'
         '  const input=globalThis.__mediaInput,total=lengths.reduce((a,b)=>a+b,0),output=new Uint8Array(total);\n'
-        '  let offset=0;\n'
+        '  let offset=0;const workspace=this.allocate(Math.max(...lengths)+64);\n'
         '  try{for(const length of lengths){\n'
         '   globalThis.__mediaInput=input.subarray(offset,offset+length);\n'
-        '   const result=this.packetBinary(channel,length);\n'
+        '   const result=this.packetBinary(channel,length,workspace);\n'
         '   if(result.code!==0){globalThis.__mediaOutput=null;return result;}\n'
         '   output.set(globalThis.__mediaOutput,offset);offset+=length;\n'
-        '  }}finally{globalThis.__mediaInput=input;}\n'
+        '  }}finally{globalThis.__mediaInput=input;this.free(workspace);}\n'
         '  globalThis.__mediaOutput=output;return {code:0};\n'
         ' }\n'
         ' reset(channel){const old=this.states.get(channel);if(old){this.free(old);this.states.delete(channel);}}\n'
-        ' close(){this.e.close();}\n'
+        ' close(){if(this.bulk&&this.bulk.pointer){this.uc._free(this.bulk.pointer);this.bulk.pointer=0;}this.e.close();}\n'
         '}\n'
         'globalThis.KooVM=KooVM;\n'
     )
@@ -821,7 +852,7 @@ PYTHON_SOURCES = {
         '   end+=1\n'
         '  literal=source[start:end+1]\n'
         "  self.host.evaluate('var __wtext='+literal+';var __wbytes=new Uint8Array(__wtext.length);for(var i=0;i<__wtext.length;i++){var c=__wtext.charCodeAt(i);__wbytes[i]=~c>>8&c;}__wtext=null;void 0;')\n"
-        "  self.host.evaluate('var __uc=null;var __loadError=null;MUnicorn({print:function(){},printErr:function(){},instantiateWasm:function(imports,done){var mod=new WebAssembly.Module(__wbytes);var inst=new WebAssembly.Instance(mod,imports);done(inst,mod);return inst.exports;}}).then(x=>__uc=x).catch(e=>__loadError=String(e));')\n"
+        "  self.host.evaluate('var __uc=null;var __loadError=null;MUnicorn({print:function(){},printErr:function(){},instantiateWasm:function(imports,done){var mod=new WebAssembly.Module(__wbytes);var inst=new WebAssembly.Instance(mod,imports);globalThis.__ucMemory=Object.values(inst.exports).find(v=>v instanceof WebAssembly.Memory);done(inst,mod);return inst.exports;}}).then(x=>__uc=x).catch(e=>__loadError=String(e));')\n"
         '  deadline=time.monotonic()+20\n'
         '  while time.monotonic()<deadline:\n'
         "   state=json.loads(self.host.evaluate('JSON.stringify({ready:!!__uc,error:__loadError})'))\n"
@@ -1391,7 +1422,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.2.5'\n"
+        "VERSION = '0.2.6'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'DEFAULTS = {\n'
         " 'cctv1': ('CCTV-1 综合', 'https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8'),\n"
@@ -1616,7 +1647,7 @@ PYTHON_SOURCES = {
         '\n'
         '\n'
         'class LiveService:\n'
-        '    def __init__(self,prepared,channels,max_bitrate=600000):\n'
+        '    def __init__(self,prepared,channels,max_bitrate=2500000):\n'
         '        self.sdk=MediaSDK(prepared);self.channels=channels;self.max_bitrate=max_bitrate\n'
         "        self.pool=ThreadPoolExecutor(max_workers=4,thread_name_prefix='upstream')\n"
         "        self.refresh_pool=ThreadPoolExecutor(max_workers=min(4,len(channels)),thread_name_prefix='refresh')\n"
@@ -1841,7 +1872,7 @@ PYTHON_SOURCES = {
         "    parser.add_argument('--setup-only',action='store_true')\n"
         "    parser.add_argument('--doctor',action='store_true',help='只检查本机JavaScriptCore能力，不访问节目源')\n"
         "    parser.add_argument('--warmup',action=argparse.BooleanOptionalAction,default=True)\n"
-        "    parser.add_argument('--max-bitrate',type=int,default=600000)\n"
+        "    parser.add_argument('--max-bitrate',type=int,default=2500000)\n"
         "    parser.add_argument('--source',action='append',default=[],metavar='ID=URL')\n"
         '    args=parser.parse_args(argv)\n'
         '    if args.port_override is not None:args.port=args.port_override\n'
