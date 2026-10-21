@@ -162,3 +162,9 @@ APTV 默认 `--channel-cache-size 6`，包含当前频道与最多 5 个最近�
 追加开启预取的 75 秒前台严格解码：零错误、19 片、无缺片或传输重试；采样到媒体缓存最大 11,262,140 字节（约 10.7 MiB），低于 32 MiB 预算；后台频道 60 秒到期后媒体数据清零，预取线程关闭正常。204 项测试通过（11 项真实 JSC），手机实际首帧、耗电和长期表现待验收。记录见 [RECENT-PREFETCH-VALIDATION.json](RECENT-PREFETCH-VALIDATION.json)。
 
 后续启动路径梳理：冷启动和最近频道预取改用清单中最新的一组连续分片，而不再从窗口开头取较旧分片；若最新位置有断点，则回退到最近可证明连续的一组。这样能减少不必要的旧片下载，让首批视频更接近直播边缘。预取更新时只暂留序号与完整 URL 都匹配的旧分片，先释放其余旧数据再取新片，降低手机内存峰值。该变更尚未做手机首帧、长时网络和内存测量，不据代码路径推断具体提速幅度。
+
+### UA 对照：手机 UA 与 PC UA（2026-10-21）
+
+当前 HTTP 请求确实使用 Android 14 / Chrome 130 手机 UA，Referer 指向 CCTV-2 手机页。以相同服务代码分别尝试手机 UA、仅替换 PC UA、PC UA 加桌面页 Referer。三组各跑三次，官方 CCTV-2 接口均许可播放，清单均返回 3 片，最新分片均通过 TS 同步字节检查。全链路中位数分别为 4.054、4.419、5.698 秒；PC UA 没有稳定提速，单阶段和整轮数据受 CDN/网络波动影响明显。另用两种 UA 下载相同签名分片，三组返回字节均完全相同；先后顺序不同会带来明显耗时变化，不能把单次快慢归因于 UA。
+
+检查固定官方 JS/WASM 的 UA 分支后，发现它只据 UA 判断 Chrome、Firefox、Safari、Opera 和微信浏览器，没有 Android/Mobile 或 `navigator.platform` 分支；两种 Chrome UA 会进入相同浏览器判断。实验只在 Linux 云端网络测了官方取源、清单和单片下载，没有测 JavaScriptCore 首次初始化、APTV 首帧或 iPhone/Loon 网络。现阶段保留手机 UA 与手机页 Referer，不改默认配置。完整记录见 [UA-VALIDATION.json](UA-VALIDATION.json)。

@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-21",
+  "scope": "Linux cloud network via inherited HTTPS proxy. Measures official source API, HLS playlist and one complete latest segment; excludes JavaScriptCore initialization, TS processing, APTV buffering and phone first frame.",
+  "profiles": {
+    "mobile": {
+      "user_agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36",
+      "referer": "https://tv.cctv.com/live/cctv2/m/index.shtml"
+    },
+    "pc": {
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+      "referer": "https://tv.cctv.com/live/cctv2/"
+    }
+  },
+  "full_chain_trials_seconds": [
+    {"round": 1, "profile": "mobile", "source_api": 1.376, "playlist": 3.724, "segment": 1.923, "total": 7.023, "playlist_entries": 3, "segment_bytes": 605736, "ts_sync_valid": true},
+    {"round": 1, "profile": "pc_user_agent_mobile_referer", "source_api": 1.172, "playlist": 1.225, "segment": 1.727, "total": 4.124, "playlist_entries": 3, "segment_bytes": 799940, "ts_sync_valid": true},
+    {"round": 1, "profile": "pc", "source_api": 1.043, "playlist": 2.363, "segment": 2.292, "total": 5.698, "playlist_entries": 3, "segment_bytes": 643712, "ts_sync_valid": true},
+    {"round": 2, "profile": "pc_user_agent_mobile_referer", "source_api": 1.238, "playlist": 6.879, "segment": 2.556, "total": 10.674, "playlist_entries": 3, "segment_bytes": 567384, "ts_sync_valid": true},
+    {"round": 2, "profile": "pc", "source_api": 0.563, "playlist": 3.116, "segment": 3.704, "total": 7.383, "playlist_entries": 3, "segment_bytes": 748428, "ts_sync_valid": true},
+    {"round": 2, "profile": "mobile", "source_api": 1.514, "playlist": 1.298, "segment": 1.243, "total": 4.054, "playlist_entries": 3, "segment_bytes": 829456, "ts_sync_valid": true},
+    {"round": 3, "profile": "pc", "source_api": 1.042, "playlist": 0.773, "segment": 0.515, "total": 2.329, "playlist_entries": 3, "segment_bytes": 995648, "ts_sync_valid": true},
+    {"round": 3, "profile": "mobile", "source_api": 0.218, "playlist": 1.424, "segment": 1.412, "total": 3.054, "playlist_entries": 3, "segment_bytes": 981172, "ts_sync_valid": true},
+    {"round": 3, "profile": "pc_user_agent_mobile_referer", "source_api": 2.251, "playlist": 1.136, "segment": 1.032, "total": 4.419, "playlist_entries": 3, "segment_bytes": 664392, "ts_sync_valid": true}
+  ],
+  "three_trial_medians_seconds": {
+    "mobile": {"source_api": 1.376, "playlist": 1.424, "segment": 1.412, "total": 4.054},
+    "pc_user_agent_mobile_referer": {"source_api": 1.238, "playlist": 1.225, "segment": 1.727, "total": 4.419},
+    "pc_user_agent_pc_referer": {"source_api": 1.042, "playlist": 2.363, "segment": 2.292, "total": 5.698}
+  },
+  "same_signed_segment_comparisons": [
+    {"source_profile": "mobile", "segment_bytes": 711016, "request_order": ["mobile", "pc"], "mobile_seconds": 1.09, "pc_seconds": 0.428, "bytes_identical": true, "ts_sync_valid": true},
+    {"source_profile": "pc", "segment_bytes": 888300, "request_order": ["mobile", "pc"], "mobile_seconds": 1.084, "pc_seconds": 1.108, "bytes_identical": true, "ts_sync_valid": true},
+    {"source_profile": "pc", "segment_bytes": 573400, "request_order": ["pc", "mobile"], "pc_seconds": 1.888, "mobile_seconds": 3.236, "bytes_identical": true, "ts_sync_valid": true}
+  ],
+  "official_sdk_user_agent_inspection": {
+    "runtime_sha256": "ad9fd2d188015074e59632cedecf13eda29f2c76ea92f17b5f00bc799451bc13",
+    "navigator_user_agent_checks": ["Firefox", "Safari excluding Chrome", "Opera", "MicroMessenger", "Chrome"],
+    "android_or_mobile_detection_found": false,
+    "navigator_platform_detection_found": false,
+    "both_profiles_identify_as_chrome": true
+  },
+  "conclusion": "The service currently sends Android Chrome 130 UA and the CCTV mobile-page Referer. All nine profile trials received playback permission and valid TS segment starts. PC headers showed no repeatable latency improvement; three-trial medians varied by phase and the full-chain median was slower for both PC profiles. Exact same signed segment URLs returned byte-identical media under both UAs. CDN host and network timing varied between requests. Keep the mobile profile as default; this cloud sample does not predict iPhone or Loon performance."
+}
