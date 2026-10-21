@@ -1,8 +1,37 @@
-# cbox-live v1.5.7 单文件：APTV 推荐版
+# cbox-live v1.5.8 单文件：APTV 推荐版
 
 Python 文件既可在 APTV 内置 Python 服务中运行，也可放在电脑、NAS 或服务器上运行。先启动脚本服务，再用它提供的 HTTP 地址加载频道；raw Python 下载地址不是频道订阅地址。
 
 
+
+## v1.5.8：原 App UDRM 取流流程优化
+
+根据用户提供的 CBox iOS 研究报告核对现有协议，修复原 App 取流流程。本版没有新增 UDRM 解密器，状态仍明确为 `UDRM_NOT_IMPLEMENTED`；TS 同步字节或缺少 `EXT-X-KEY` 不能证明视频载荷是明文。原 App 来源仍独立于推荐目录的同台自动备用选择。
+
+- **保留原始 URL 参数**：原 App 的官方播放 URL 保留已有查询参数及百分号编码，包括 `contentid`、`b`、`hls_source`、`hbss`、`muid`、`clientsid`。此前重建参数会丢掉已有 `muid` 并覆盖部分值；现只补缺失项，已有参数不重写，不把 Web 模式拼参规则套到 App。
+- **HAR 中的对应媒体上下文**：导入时按官方主机和完整清单路径关联成功的媒体请求，读取实际观察到的 32 位十六进制 `muid` 以及媒体 UA/Referer。只有对应 HAR 中存在时才补缺失的 `muid`，不会随机生成或从别的频道借用。API `auth-key` 不转发给 CDN。
+- **业务状态独立校验**：除 HTTP 200 和 `ack=yes` 外，对原 App 已提供的 `status` 要求为抓包中观察到的成功值 `1`，并继续检查 `play` 与频道匹配。24、25 等业务拒绝不会因为响应里仍有 `client_sid` 而当作成功，也不反复换 API 主机尝试同一无效模板。
+- **短缓存与热更新**：原 App VDN 结果缓存默认最多 15 秒，继续支持 HAR 热更新、媒体失败后清除取流结果。这里的缓存是接口结果，直播清单仍独立读取；15 秒不是官方票据有效期的断言。
+- **客户端上下文隔离**：各服务实例独立持有请求模板和媒体上下文，防止同进程不同模式或实例互相改动请求头。
+- **诊断与路径回归**：新增业务失败状态和参数存在标记，诊断不输出参数值；验证站点根绝对路径按 CDN 根解析、子清单自身查询参数按原样保留，不凭空继承父清单签名参数。
+
+离线重读此前附件中的五份有效 VDN HAR，成功导入 1–3 个频道模板；部分存在可关联媒体 UA，但没有找到可关联的有效 `muid`。这些旧 HAR 不等同于截图报告的原始样本，不能据此确认新报告的明文结论。旧 App 连续分片重新抽检仍有 95 条解码错误，虽然 FFmpeg 返回码为 0，结果仍判为未通过。
+
+173 项自动测试通过，覆盖参数及编码保留、缺失上下文不编造、业务失败、15 秒缓存、媒体请求头隔离、HAR 关联、根路径解析以及此前央视频/网页/地方源功能。原 61 台目录、85 条推荐目录保持不变；本轮未证明旧签名可长期重放，也未在用户 iOS 上证明原 App 视频已正常解码。
+
+**原 App 独立测试入口：**默认双模式服务使用：
+
+```text
+http://127.0.0.1:8767/app/all.m3u
+```
+
+原 App 仍需各频道有效的 HAR 请求模板；仅替换 Python 不能生成新的 App 鉴权。可在支持命令参数的运行环境导入：
+
+```bash
+python cbox-live.py 8767 --api-mode app --extra-sources none --har 你的有效抓包.har
+```
+
+`--app-resolve-ttl 15` 可调整 App 接口缓存上限；实际缓存还受 `--resolve-ttl` 限制。推荐央视频订阅仍为 `/aptv.m3u`，原 App 测试结果不会被央视频播放成功替代。
 
 ## v1.5.7：减少切台时的清单等待
 
@@ -67,7 +96,7 @@ http://127.0.0.1:8767/aptv.m3u
 
 加密、字节范围、分片初始化映射、时间线中断等复杂 HLS 清单不做这套历史合并，仍走原有清单重写路径。原 61 台全部保留，推荐目录仍为 85 条；没有把上游的 10 个浏览器登录/VIP 频道当作新增可播台。浏览器会员桥接、libVLC 专用垫片、原 App UDRM 未加入此版。
 
-**独立研究版下载：**[cbox-live-next.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live-next.py?v=1.5.5-preview)。当时主文件 `cbox-live.py` 保持 v1.5.4；最新版请使用页首的 v1.5.7。研究版仍为单文件，无需另放 JS。试用时停止旧服务，启动研究版，刷新 `http://127.0.0.1:8767/aptv.m3u`。
+**独立研究版下载：**[cbox-live-next.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live-next.py?v=1.5.5-preview)。当时主文件 `cbox-live.py` 保持 v1.5.4；最新版请使用页首的 v1.5.8。研究版仍为单文件，无需另放 JS。试用时停止旧服务，启动研究版，刷新 `http://127.0.0.1:8767/aptv.m3u`。
 
 验证：144 项完整回归测试通过。持续取流结果和失败均记录在 `validation-v1.5.5-preview.json`；三轮抽检均遇到官方 CDN 分片 HTTP 403，第二、三轮已定位域名为 `outlivecloud-cdn.ysp.cctv.cn`，被拒绝分片位于当时诊断记录的最新窗口中。当时因长播尚未通过而未替换主文件，后续验证改进见 v1.5.6。不得据本版功能或自动测试宣称所有 403 已解决，手机实播仍需 APTV 日志确认。
 
@@ -248,6 +277,6 @@ python cbox-live.py --compare cctv1 --extra-sources none
 运行 `python cbox-live.py --licenses` 可查看署名及许可。单文件运行无需另放 JS、WASM、HAR 或许可证文件；完整交付包另附易读说明、验证记录与许可记录。
 
 
-最新主文件验证见 `validation-v1.5.7.json`，历史研究版记录见 `validation-v1.5.5-preview.json`。
+最新主文件验证见 `validation-v1.5.8.json`，历史研究版记录见 `validation-v1.5.5-preview.json`。
 
-[下载单文件 Python](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live.py?v=1.5.7)
+[下载单文件 Python](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live.py?v=1.5.8)

@@ -1,0 +1,82 @@
+{
+  "version": "1.5.8",
+  "created_at_utc": "2026-10-21T06:25:50.809231+00:00",
+  "sha256": "05c3bff7786e44158ebfa08466857b062eef54b5052253f7eb0b3d5979b022ec",
+  "changes": [
+    "Preserve raw App playback URL query parameters and exact encoding; append missing fields only",
+    "Correlate successful official HAR manifest requests to observed media context without synthesizing muid",
+    "Reject App business errors even when HTTP 200, ack=yes and client_sid present",
+    "Stop repeated API-host attempts on explicit App business rejection",
+    "Default App resolve cache capped at 15 seconds; existing HAR reload and media-failure invalidation retained",
+    "Deep-copy embedded request contexts per instance",
+    "Retain UDRM_NOT_IMPLEMENTED capability and independent App source routing"
+  ],
+  "regression_tests": {
+    "count": 173,
+    "passed": true,
+    "command": "python -m unittest -q test_cbox_v158 test_cbox_v157 test_cbox_v156 test_cbox_v155 test_cbox_v154 test_cbox_v153 test_cbox_v152 test_cbox_v151 test_cbox_v15 test_cbox_v14 test_cbox_v13 test_cbox_v12 test_cbox_v11"
+  },
+  "offline_har_review": [
+    {
+      "file": "1-apicatcher-export-20261021010731.har",
+      "channels": 3,
+      "muid_contexts": 0,
+      "media_header_contexts": 0
+    },
+    {
+      "file": "2-HTTPS_Capture_Session_1792515405_f022dc8a.har",
+      "channels": 1,
+      "muid_contexts": 0,
+      "media_header_contexts": 1
+    },
+    {
+      "file": "1-HTTPS_Capture_Session_1792515600_51436445.har",
+      "channels": 3,
+      "muid_contexts": 0,
+      "media_header_contexts": 2
+    },
+    {
+      "file": "2-quantumult-x-20261021-002524.har",
+      "channels": 1,
+      "muid_contexts": 0,
+      "media_header_contexts": 0
+    },
+    {
+      "file": "3-quantumult-x-20261021-002620.har",
+      "channels": 1,
+      "muid_contexts": 0,
+      "media_header_contexts": 0
+    }
+  ],
+  "original_app_sample_decode": {
+    "decode_test": "failed",
+    "ffmpeg_exit": 0,
+    "error_lines": 95,
+    "diagnostics": [
+      "[h264 @ 0x55cce4e21500] top block unavailable for requested intra mode -1",
+      "[h264 @ 0x55cce4e21500] error while decoding MB 5 0, bytestream 45345",
+      "[h264 @ 0x55cce4eae800] top block unavailable for requested intra mode -1",
+      "[h264 @ 0x55cce4eae800] error while decoding MB 5 0, bytestream 45345",
+      "[h264 @ 0x55cce50dc8c0] Reference 2 >= 2",
+      "[h264 @ 0x55cce50dc8c0] error while decoding MB 14 10, bytestream 608",
+      "[h264 @ 0x55cce5062bc0] Reference 4 >= 3",
+      "[h264 @ 0x55cce5062bc0] error while decoding MB 9 0, bytestream 19493"
+    ],
+    "scope": "仅测试所提供样本，不保证后续直播或 APTV 兼容性",
+    "sha256": "95966390f1430443b89297b02921e6e6c5d989829e2cd2512315dbbb8305c2b2",
+    "sample": "Previously provided consecutive original App TS segments; not the screenshot report sample"
+  },
+  "catalogue_counts": {
+    "aptv": 85,
+    "original_web": 61,
+    "original_app": 61,
+    "combined_sources": 134
+  },
+  "limits": [
+    "Protocol/request-flow improvements only; original App UDRM decoding not solved",
+    "Old provided sample still fails video decoding with 95 error lines",
+    "No new authenticated App live-playback or direct iOS verification in this round",
+    "Screenshot corresponding HAR/media bodies not supplied",
+    "No new App auth-key generation or promise of indefinite HAR replay"
+  ]
+}
