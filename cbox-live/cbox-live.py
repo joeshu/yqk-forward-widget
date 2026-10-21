@@ -37,7 +37,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = '1.5.1'
+VERSION = '1.5.2'
 CONFIG_CATALOG_B85 = 'ABzY8000000t4-xO>f-B9menZ6oJoiyffs!C_oN24AcRH)PRFtibCMqa!7H9yE~+o+{i$42!i%n6zHWd$D%#A=od=be2bD?EiJ#uk+-hBKXZ)OP{@_^`#&7c^UQEae*MwM&7V7dQmnlqI!p9Czw_D0Uw2!(J&&F|Y&P8a&+q>D{kOll^U1RvSKI&j?GOL@_WJfm-S!{<{)ZQ~Kl!TL@xx!fdtt}vZu>vJ`S<Ui+x~dB{ZHTg`0GDk-+q7hi@*EZ_rLw?oo@5fPoA$Lj7-3-A_(<Q9uEI=DMzEb&SW%txf=g-(QLmf#q&EK?RPrOPVwS*es#5X*6x(g?>ycA&Su}V+4UT5X`=PbyubM3@w1=%BJSzWfA+<f&wliaz+b+wzhi!0D&=V%W&7Xz%l><x5nTUV`=f%OxDeNVOSeDs+g&ehzACHT_vGQ_qlcG`N|&b(FPmfc;t$B<M4w&zd~=*GpS<+3$Ll0tCq><U;^iL_t{1Pw@X9dBcYFFBPd~Y3t#UxMI&WSpvru<H2i03d>m=|7RB=?U^JO%kg2zLub(xiBK=n?B(kD*`bWmqQIjCupl><7iVl<>;hcpZjLmCGNXF$aUD#^kj9o!+MMR7xX8hwz(4kkj$!T78kjLFKuIIR32?DgYU{JBN-UMLQnLgpQ5FRx2&#G6|XwA73B5K3*E?|dEUKn-OS@2x#Q35HVbx-=&7^iayJlDZs9ttUe%G|UHax)xrtN(Rw-t3;niVXouFO+C}=O!od!Ty#A@6QkK^c|b;Zz5K7({niWck36)F-fpFGFqJxksni`zr3Wv0fYy8Hf(K~1<Ka|#*kT80wUfbAIvq@<v%yq)*ir{*v4<>lpq4tE)Gvk;`^9i_|A7k}s0Vg9>F|)n4b)Nxk(h!5Cz<Xa2e<<yFOs@Umbbk`dy#}uepb}W=oX8J+Qx^ONbh8jR)$sv$I8&k;94148OBzIR)&d{p_O53WoTuXSs7XxPOJ=Fd>UCDIvs3|-05J0<W2{hBzHR4D7n+YX33onHcakxuxWCqgN>6r9c-T5%|qEdxzoYs$(;^1PwsTEd2*+N&67JF2A?Op+s;Do+#AY`XJ>g<FP2F#5`(K)4z6McdZ$NUfcwr082x_=7}E=w&<mIX3s`tXpza^iMZfpc_X=Hd(H$<j%S9hk(I0S6(+Aws^a1xYeZW0UA0SWDc6f(8Njq@jDXN2|H-x3drf9!Y45w5%oKl_Pl<E$rRN{DiM?S%lPqE}PEcpqR{MKs$j}TpO(Ipq%;i9`-bfS}Pyd?0FL&k!quSGw7XXuiP?r_mvAbJqpcq`~}U;m44e0tc?b30IO;)J9sHS$S@TNR~=r(+<xr&XB%xwFK}b%K<<Xqrlz5Zigz$SY!VF-f3G=2KEtuHzN6rK>2(8hUEq7?;Ub<t5Tc{U|{;7-j&dOU(q2OKOj<B4!ge&6f^R@ifU2Y#VPMlTN(q9wm!N$1%}_TFIHcVjH)VM?6QXWDCt&o;Jir-i|@5#3K$v*WN|*6%X8JPJ*`G;hcGLwwXm#%>GbQN1v_e(A3gNj_l6;8{Z^w<ZUI=+vYD*ahHiLnb;F1_LPY|V`4i@>=R-RH&x2)Om^gBEcpye&TZ!omRxX8Q2|!n<)Tx2#*%4ARXgg8o4=bVF^V}`;VqDZxE;8_l1nVPgC%#lOSgO_$?(Jpt}rSth^x0k=!)%-Ik4MxEp_rvC(hsEd#&P)ahcp2dAnIF_>?L*@vh2Eycr27w}f&#P;M8>J%(~mpxjd^H}O#fX&oc`@0MFaxg97svH#A>APK!3*~a(m#C9HfnkxGhI#Kn)OWI{-NZI%7WZfMwy9;I?gV`rwc4AVm(jo|z*+S7(wJf0Mi`r1zOH3qJ##D18_a<X<FMOkr;LEx|a#t#>VkCLI2$?OVh__Vm8VOz#8+f!ZUh^}N;I(3MZ{~&xzO0r+@@=}=X0`IE=v4tF_x(&!(KDjxsZlCqUMDh&d7Y@?cA?x3l$$scx22w#TjqJWWj60Evo{G<U9ZdnOI}dPoBxOx%#|_eHe`}-Q?n#4e5y^Y=TPt}R8Y+u@PIg-<r}lD{4k5D?9m!Z?gs`+UKCL96gjJ9OlIPMN<QBh<OPZjK27H)q{0`-g$bDn=S3Yt$>VuOyr!j#!Vl9BiXPSm%f5_}E1z2QOl^^}*HsoEmsiwP75auszMLb$RiG6Vye9T6MXl1J))^MvK*@E1Z7*x2=wVu~>P%qCC6heb5U*b>!nE;F<5STWDy^%OOdqGnt4Eayi^4F;4Kk*0+NL6?;KW|NN>*h=97Wg2r6MZZ)<J*-uaMKZD%&8}hBn;Hb`qO9+ZIco$)2S}jGX&#*v)cVg;e3gCA7_$>fEeSD!EyO+cg(IAd+v33Q3K;np<cjHL)w4t2hYb1(jSY=8aqFLNRZCO8q(W)~D30kqfyS@-z)ICVB18nc&_$tdMuJ)`e+8))9b@-W<Hz#!PTOt(oB4dJY87(l{_%qtB0GmFOY#n>eeBI;#wnKde=C9M^{qqBq2Lqbsv4!bMyMDqEBJsq9KEGa$Q(wK<B*E^i91+Gi^v$vep<5Ijsnq~Obf*~FK193a7~V5OMg;XGX-$%|AeE;z9_+}5igte72(!J6k4I<djT&4>=Ec{>ypSa4!f@swgVm3gp1a%W2uFH+6y6Lr1uH%xSO4$bBrxTJzRRB)FHKBj_CsNhp7_z4vJDBciy5IAxcaT}i_ozu@^WN+AV6MeJVFeipKL0whM`A_3BC(8YTIr$l`nS%&zsDq!HI+t~YF1hFq7v1HekGbd*F8Y*<KI5XFV9}97&{dc*y|e?DRB(q1?oz?WRPYHEoampXhOS6V6|;%QS&hBcjJ=S>jE9Q4fJGr&O3O`j`(nXtCoQ*xa#P#Mn8{r%m{a^F-3HinMdd~=Zw{*!bcVmXAB%baLA{x0Nbbc^yz}<Wxy_n*k8?A&XEyK-TvEY_V~D_8g$g+<k)_Bc9tVLgE~GoUn{9n`1>&yB=Ew??rKdyh)!^ba;Ex_&KKbh5<>|xAmm#w}PW0LJ4?k%>{l1^*va3{#Mx$F+>y?H2spH3!p-OTcFT5Q21mPZDlHnaPyi0~3li??1_$e8FMutBD!ym;em4o5Q4lBqGE65Hj$PO#W4lBqGE65Hj$PO#W4lBtHE6ENk$qp;Y4l9WcJNA}K;=94JK$Uvq>EoSZ6mPFsPsdrA*QKtLBY8r~o0bqnMkPe<ptv||_1B)J;s<_SF&j-!FVXZwQ`6A~*=Aa93FW4?6Bo)ohH_7!+*2s`49b1N<VMcUx7<*_6i~msaXGR$dT>bvcc|bl6?{wupHRW4RPY%U`~(UvMpSUBa|)_+3aWDos&fjea|)_+3aWDos&fjeb4sFfE~0fD5eNAlxTJzRRB)FHKBj_CsNhp7_>2mELIp=okMGE_-YKx=DX{J-u=Xji{wc5qDzFYJuofz?9x9=im`#>kMA*xo9lRvNJ7jp53_m8rPss37GW?7Te*%WbUK;J-$qp;X4lBqGE65Hj$PO#W4lBqGE65Hj$PSCVgxcN|B^RCc&|A88^b$?)K<R}znx->41b_S?;1eGnyLjEa*-O9XA_=4Xtf-gKPd=xyyFI+SpZtA2sPQl<q?KYXg=3}IOW|56_EL<k6niNqR*Jn8Q!B+@ikX#SFU5(K;!28JuT2_&6gF-4QrNWFOJUPyFNIB;y%aWW_EOli*-K&5W-o<Jo4ph^ZSJLzHf{D&*tFS8Vbf+Wg-x5i6gF-4QrNWFOJUPyFNIB;y%aWW_EOlixtGGRX|tEYrp;aon>KqXY})LluxYcG!lun$3Y#{2DQw#8rLbwUm%^say%erZo4ph^ZT3>wwAo8x(`GM)O`E+GHf{D&*tFS8Vbf+Wg-x5i6gF+{r5M|^*-K&5W-o<Jo4ph^ZT3>wwAo8x(`GM)O`E+GHf{D&*tFS8VbkVbiphtcHuqoM>h0c1;3Z;oz#}P7Ut7cJJ9rIy$1cI_4w&6VvU?%<@h@ja<(m<kUZUx#53f0ka~;<Sx9wc<OE^Eh{kU-cF_nM!%3*`Xmu!58h;LNV{$Gsj`FnU`x8KC%VxF%T5mNeR^la@NG`)+aAEW6fX!<ET=&*ARJLaJ2T{Jy=crroLvwO@Ln*M}Lk9;TQGkUbw3bfY>wATu>*9x@P3bfY>wATu>*9x@PBHx{9l$S?q=nQO!F1hFq7oF&@t5ubFc~v6USoH9c4DXQP(QSTAhMyqe166KSu493wmuPxshZB1_xaI8WC7Pbua_U6aWmF_}3B<3<tkm2kA=mIF8{c8$yKMY18-K#apR)01Z2S{6KJs$gHGH<~A}_d=20H!PfnybSsNlqG6PI~29``h|o%isP4DTS}n@+tMjzgQx6+E%os4{HtNh)=nK*!?GSHM38#Piq78~W88tNpgSFYkcX|7iEXh12)<%!U7@-~&#U8>@W}Yca&=kh}li)gcpatyVb_v##DD6x($r@6LzbGPtCIJ5+F&3O=TSPpIHiD)@{FenJI*hts=nn;h$%0&AWE>z)E@p91Tj0&AcG>!1Q_p#tln66>LoJO0FasKk1x#CoX2dZ@&DsKk1x#CoX2dZ>f-PzURw4tEk4>!A+TLmjM#I#>_IUJM%@TCE&ZwKtqn;={Yp*;TvDN;8Ct%`#sXrii?SH>`5~VU-&UtK4un<sxqzxI&j)bcc)Xa?!_J^a&Sz%0-`X(NDPO<SvHX$B;W2axX*fX2|^v^PzuN?Bv`I4(<}1+$GpoCD>Ob*jFXkS0&h2CD>OTu&+8`Uv<b6Vqjl&z`p8$eboW`ssr{_2kfg3*jHV!uexAgb-}*slCLy@eboi~s*8OIOrF(?WfFj2XuYpM;wwPD)>>&p#9pa$PshGTd<3MY{lwEiavdd$NXKzWTwQ(zzfs86zV+ItYa!9Aq=hFocmJRz+DE}Hq1+CX+l6uyLwl9zxbPCAJQb1g8#hvA&aEKMn=FtcyLKtgHGRo*_tmd<pS-ioygFJpA9+^uor`E~l3aK7etKQIJLP(p{flDx*}Z$a@BK8;#YOYaJyUo(^w#0Mz|X5kp?SR9Z8r1WFMs;c)Bge<5B*OpV*&s'
 NOTICE = 'App UDRM 尚未修复；网页 CDRM 已通过连续样本解码验证，各频道需单独检查。'
 # EMBEDDED_PROFILES 在构建时由用户提供的成功抓包提取，不包含 Cookie。
@@ -56,6 +56,10 @@ LOG = logging.getLogger('cbox')
 
 
 class LiveError(Exception):
+    pass
+
+
+class MediaCapabilityError(LiveError):
     pass
 
 
@@ -618,7 +622,7 @@ class Client:
         kind = kind or self.media_types.get(channel)
         if self.should_process(target, kind):
             if self.video_core is None:
-                raise LiveError('网页 CDRM 处理需要 Node.js 18+；可先使用 /aptv.m3u 的央视频来源')
+                raise MediaCapabilityError('网页 CDRM 处理需要 Node.js 18+；请使用 /aptv.m3u 或 /ysp/all.m3u')
             return self.video_core.process(body)
         return body
 
@@ -777,6 +781,8 @@ class Client:
             yield (candidate, 'cdrm' if selected_key == 'hls_cdrm' else 'raw') if include_kind else candidate
 
     def playlist(self, channel):
+        if self.api_mode == 'web' and self.video_core is None and not self.args.audio:
+            raise MediaCapabilityError('当前运行环境没有网页 CDRM 内核；请使用 /aptv.m3u 或 /ysp/all.m3u，Node.js 仅用于网页来源')
         error = None
         for force in (False, True):
             data = self.resolve(channel, force=force)
@@ -1308,12 +1314,29 @@ def handler_for(client, app_client=None, source_clients=None):
         clients[app_client.api_mode] = app_client
     clients.update({c.api_mode: c for c in (source_clients or [])})
     aptv = AptvCatalog(clients)
+    capability_notice_at = {'time': float('-inf')}
+    mobile_default = (default_client.api_mode == 'web' and default_client.video_core is None
+                      and not shutil.which('node') and 'ysp' in clients and not default_client.args.audio)
     class Handler(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
 
         def setup(self):
             super().setup()
             self.connection.settimeout(30)
+
+        def handle(self):
+            try:
+                super().handle()
+            except (ConnectionResetError, BrokenPipeError, TimeoutError):
+                # iOS APTV cancels probes and keep-alive sockets while changing
+                # channels. Handle resets at the read loop, outside do_GET too.
+                self.close_connection = True
+
+        def finish(self):
+            try:
+                super().finish()
+            except (ConnectionResetError, BrokenPipeError):
+                self.close_connection = True
 
         def log_message(self, *_):
             pass
@@ -1372,13 +1395,13 @@ def handler_for(client, app_client=None, source_clients=None):
                     return
                 self.selected_client = client
                 if path == '/modes.json':
-                    self.send(200, json.dumps({'default_mode': default_client.api_mode, 'modes': {k: v.health() for k, v in clients.items()}}, ensure_ascii=False, indent=2), 'application/json; charset=utf-8')
-                elif path == '/aptv.m3u':
+                    self.send(200, json.dumps({'default_mode': default_client.api_mode, 'mobile_default': bool(mobile_default), 'recommended_subscription': '/aptv.m3u', 'modes': {k: v.health() for k, v in clients.items()}}, ensure_ascii=False, indent=2), 'application/json; charset=utf-8')
+                elif path == '/aptv.m3u' or (mobile_default and not self.route_prefix and path in ('/all.m3u', '/playlist.m3u')):
                     origin = self.origin()
                     if self.route_prefix:
                         origin = origin[:-len(self.route_prefix)]
                     self.send(200, aptv.m3u(origin), 'audio/x-mpegurl; charset=utf-8')
-                elif path in ('/aptv-epg.xml', '/aptv-epg.xml.gz'):
+                elif path in ('/aptv-epg.xml', '/aptv-epg.xml.gz') or (mobile_default and not self.route_prefix and path in ('/epg.xml', '/epg.xml.gz')):
                     body = aptv.xml(client.args.epg_wait)
                     if path.endswith('.gz'):
                         body = gzip.compress(body, mtime=0)
@@ -1477,6 +1500,8 @@ def handler_for(client, app_client=None, source_clients=None):
                         self.send(416, '仅支持单一字节范围')
                         return
                     processed = client.should_process(target, media_kind) and '.ts' in urlparse.urlsplit(target).path
+                    if processed and client.video_core is None:
+                        raise MediaCapabilityError('此旧媒体地址需要网页 CDRM 内核；请刷新 /aptv.m3u 或默认订阅')
                     if range_value and not processed:
                         headers['Range'] = range_value
                     cache_key = (channel, target, media_kind, None if processed else range_value)
@@ -1522,17 +1547,31 @@ def handler_for(client, app_client=None, source_clients=None):
                     if channel not in client.profiles:
                         self.send(404, '没有此频道的抓包配置')
                         return
-                    text, base = client.playlist(channel)
-                    self.send(200, client.rewrite(text, base, channel, self.origin()), 'application/vnd.apple.mpegurl; charset=utf-8')
+                    if mobile_default and not self.route_prefix and channel in aptv.entries:
+                        current, source, text, base = aptv.playlist(channel)
+                        self.send(200, current.rewrite(text, base, source, self.origin() + '/' + current.api_mode),
+                                  'application/vnd.apple.mpegurl; charset=utf-8',
+                                  {'X-Playback-Source': current.api_mode, 'X-Playback-Channel': source})
+                    else:
+                        text, base = client.playlist(channel)
+                        self.send(200, client.rewrite(text, base, channel, self.origin()), 'application/vnd.apple.mpegurl; charset=utf-8')
                 else:
                     self.send(404, 'not found')
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as exc:
                 message = str(exc) if isinstance(exc, LiveError) else '响应处理失败'
-                LOG.warning('%s', message)
+                if isinstance(exc, MediaCapabilityError):
+                    with aptv.lock:
+                        emit_notice = time.monotonic() - capability_notice_at['time'] >= 60
+                        if emit_notice:
+                            capability_notice_at['time'] = time.monotonic()
+                    if emit_notice:
+                        LOG.info('检测到需要 Node 的旧网页媒体入口；请刷新默认订阅或使用 /aptv.m3u（相同提示一分钟最多一次）')
+                else:
+                    LOG.warning('%s', message)
                 try:
-                    self.send(502, message + '\n查看 /diag；获取地址成功不代表 UDRM 解码成功。\n')
+                    self.send(503 if isinstance(exc, MediaCapabilityError) else 502, message + '\n查看 /aptv/channels.json 或 /diag 获取状态。\n')
                 except (BrokenPipeError, ConnectionResetError):
                     pass
     return Handler
@@ -1626,6 +1665,7 @@ def main(argv=None):
         if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password or u.query or u.fragment or any(c in args.public_base for c in '\r\n'):
             parser.error('--public-base 必须是有效 HTTP(S) 地址，不能包含认证、查询参数或片段')
     logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s [%(levelname)s] %(message)s')
+    LOG.info('cbox-live v%s；Python %s；运行线程 %s', VERSION, sys.version.split()[0], 'main' if threading.current_thread() is threading.main_thread() else 'hosted')
     client = None
     app_client = None
     source_clients = []
@@ -1693,6 +1733,8 @@ def main(argv=None):
         server = ThreadingHTTPServer((args.bind, args.port), handler_for(client, app_client, source_clients))
         LOG.info('新增来源 %s；APTV 合并订阅 /combined.m3u', {c.api_mode: len(c.profiles) for c in [client, *source_clients]})
         server.daemon_threads = True
+        if client.api_mode == 'web' and client.video_core is None and any(c.api_mode == 'ysp' for c in source_clients):
+            LOG.info('无 Node 兼容入口：/all.m3u 自动使用 APTV 同台多源目录；手机内置服务可用 http://127.0.0.1:%s/aptv.m3u', args.port)
         if client.api_mode == 'app':
             LOG.warning(NOTICE)
         elif client.api_mode == 'web':
@@ -1702,7 +1744,7 @@ def main(argv=None):
                 LOG.warning('未安装 Node.js：网页 CDRM 不可解码；纯 Python 央视频仍可使用 /aptv.m3u')
         else:
             LOG.info('新增 %s 官方来源已登记，取流和解码结果见 /diag', client.api_mode)
-        LOG.info('监听 %s:%s；订阅 %s 台 / 目录 %s 台；手机 APTV 推荐 http://运行设备的局域网IP:%s/aptv.m3u',
+        LOG.info('监听 %s:%s；主模式目录 %s 台 / 保留目录 %s 台；手机 APTV 推荐 http://运行设备的局域网IP:%s/aptv.m3u',
                  args.bind, args.port, len(client.subscription_channels), len(client.profiles), args.port)
         def terminate_handler(signum, frame):
             raise KeyboardInterrupt

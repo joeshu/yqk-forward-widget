@@ -1,0 +1,89 @@
+{
+  "version": "1.5.2",
+  "created_at_utc": "2026-10-21T00:51:34.316489+00:00",
+  "sha256": "e34d73e8035bcb78620f8a393b9007341d096683414c099f70e7424b0f25b59e",
+  "reported_runtime": "APTV embedded Python 3.14 on iOS, based on user-provided log",
+  "log_findings": {
+    "process_start_fix_active": true,
+    "missing_cdrm_capability_warnings": 70,
+    "connection_reset_tracebacks": 24,
+    "service_exit_code_in_new_log": null
+  },
+  "fixes": [
+    "When default web mode has no Node and ysp is enabled, unprefixed all.m3u/playlist.m3u and corresponding XMLTV use the same-channel APTV catalogue",
+    "Old unprefixed channel URLs use same-channel source selection, with namespaced signed media URLs",
+    "Explicit web CDRM requests fail with HTTP 503 before fetching encrypted media when core is unavailable",
+    "Legacy capability notices limited to once per minute",
+    "Handle client resets during HTTP request reads and finish; retain reporting of unrelated errors",
+    "Startup prints version and Python runtime/thread context"
+  ],
+  "regression_tests": {
+    "count": 104,
+    "passed": true,
+    "command": "python -m unittest -q test_cbox_v152 test_cbox_v151 test_cbox_v15 test_cbox_v14 test_cbox_v13 test_cbox_v12 test_cbox_v11"
+  },
+  "live_no_node_legacy_routes": {
+    "node_visible_to_service": false,
+    "web_core": "CDRM_NODE_MISSING",
+    "subscriptions": {
+      "/all.m3u": 85,
+      "/aptv.m3u": 85,
+      "/combined.m3u": 134,
+      "/web/all.m3u": 61,
+      "/app/all.m3u": 61
+    },
+    "playback_tests": [
+      {
+        "channel": "cctv1",
+        "source": "ysp",
+        "segments": 3,
+        "bytes": 7306620,
+        "ffmpeg_exit": 0,
+        "error_lines": 0,
+        "passed": true,
+        "diagnostics": []
+      },
+      {
+        "channel": "cctv13",
+        "source": "ysp",
+        "segments": 3,
+        "bytes": 6417380,
+        "ffmpeg_exit": 0,
+        "error_lines": 0,
+        "passed": true,
+        "diagnostics": []
+      },
+      {
+        "channel": "ysp-hnws",
+        "source": "ysp",
+        "segments": 3,
+        "bytes": 7307560,
+        "ffmpeg_exit": 0,
+        "error_lines": 0,
+        "passed": true,
+        "diagnostics": []
+      },
+      {
+        "channel": "ningxia",
+        "source": "ysp",
+        "segments": 3,
+        "bytes": 6142336,
+        "ffmpeg_exit": 0,
+        "error_lines": 0,
+        "passed": true,
+        "diagnostics": []
+      }
+    ],
+    "server_exit": 0
+  },
+  "user_instructions": {
+    "same_phone_subscription": "http://127.0.0.1:8767/aptv.m3u",
+    "same_phone_epg": "http://127.0.0.1:8767/aptv-epg.xml.gz",
+    "update": "Stop old service, replace Python file, restart and refresh subscription"
+  },
+  "limitations": [
+    "Tests were performed in the execution environment, not directly on user iOS device",
+    "Original App UDRM remains unsupported",
+    "Station availability still depends on official API, CDN and regional rights"
+  ]
+}
