@@ -1,0 +1,87 @@
+{
+  "version": "1.5.9",
+  "created_at_utc": "2026-10-21T07:16:12.937283+00:00",
+  "sha256": "d56f08c90ce5ed12ed29673c037962dd0f7c845b4e3c117275552208ee223166",
+  "changes": [
+    "Accept complete zero-based 206 HLS response in original App mode with exact Content-Range/body-length validation",
+    "Import successful complete-206 HAR media context",
+    "Correlate alternate official CDN context only when full path, contentid and decoded clientsid match; reject ambiguous different contexts"
+  ],
+  "regression_tests": {
+    "count": 179,
+    "passed": true,
+    "command": "python -m unittest -q test_cbox_v159 test_cbox_v158 test_cbox_v157 test_cbox_v156 test_cbox_v155 test_cbox_v154 test_cbox_v153 test_cbox_v152 test_cbox_v151 test_cbox_v15 test_cbox_v14 test_cbox_v13 test_cbox_v12 test_cbox_v11"
+  },
+  "new_capture_summary": {
+    "channel": "cctv7",
+    "entries": 51,
+    "vdn_success": true,
+    "master_http_status": 206,
+    "master_body_bytes": 475,
+    "complete_ts_segments": 1,
+    "segment_bytes": 1049792,
+    "segment_sha256": "9e6ae33ec47589919beb92f497b712f336a0cdfca027e388caa413ab20f31bac",
+    "media_context_import_after_fix": {
+      "muid_present": true,
+      "media_header_names": [
+        "user-agent",
+        "referer"
+      ]
+    }
+  },
+  "sample_decode": {
+    "decode_test": "failed",
+    "ffmpeg_exit": 0,
+    "error_lines": 126,
+    "diagnostics": [
+      "[h264 @ 0x556c8e5f2a00] top block unavailable for requested intra mode -1",
+      "[h264 @ 0x556c8e5f2a00] error while decoding MB 11 0, bytestream 46238",
+      "[h264 @ 0x556c8e6a1640] top block unavailable for requested intra mode -1",
+      "[h264 @ 0x556c8e6a1640] error while decoding MB 11 0, bytestream 46238",
+      "[h264 @ 0x556c8e884840] top block unavailable for requested intra mode",
+      "[h264 @ 0x556c8e884840] error while decoding MB 23 0, bytestream 24491",
+      "[h264 @ 0x556c8e68c8c0] Reference 2 >= 2",
+      "[h264 @ 0x556c8e68c8c0] error while decoding MB 24 1, bytestream 11299"
+    ],
+    "scope": "仅测试所提供样本，不保证后续直播或 APTV 兼容性",
+    "streams": [
+      {
+        "codec_name": "h264",
+        "codec_type": "video",
+        "width": 1280,
+        "height": 720
+      },
+      {
+        "codec_name": "aac",
+        "codec_type": "audio"
+      }
+    ],
+    "probe_error_lines": 2
+  },
+  "transport_checks": {
+    "packets": 5584,
+    "all_packet_sync": true,
+    "transport_error_indicator_packets": 0,
+    "transport_scrambling_marked_packets": 0,
+    "continuity_discontinuities_without_flag": {},
+    "identical_duplicate_packets": 0,
+    "private_marker_occurrences": {
+      "adxlbaro": 200,
+      "udrmGetLicense": 100
+    },
+    "scope": "TS transport checks only; not proof of video payload being plaintext or encrypted"
+  },
+  "catalogue_counts": {
+    "aptv": 85,
+    "original_web": 61,
+    "original_app": 61,
+    "combined_sources": 134
+  },
+  "limits": [
+    "Original App UDRM decoding not solved; current sample still has 126 FFmpeg decode errors",
+    "Only one TS response body provided; no multi-segment boundary validation",
+    "Official App playback state not confirmed by user at publication",
+    "No network replay of new HAR authentication in this round",
+    "No raw HAR, media bodies or session/device parameter values published"
+  ]
+}
