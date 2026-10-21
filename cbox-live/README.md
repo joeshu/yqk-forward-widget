@@ -4,6 +4,23 @@ Python 文件既可在 APTV 内置 Python 服务中运行，也可放在电脑�
 
 
 
+## v1.5.5-preview 研究版：央视频直播窗口与观看期间共享刷新
+
+继续对照上游 `resolver.js` 和 `playlist-history.js`，新增以下适合 APTV 单文件运行的处理，维持默认分片直连官方 CDN：
+
+- **直连地址也保持稳定**：同频道、同流 ID、同分片序号，在相邻清单中保留第一次观察到的完整 URL，以及该片原有时长和时间标签。切换 CDN 或续票时，减少 AVPlayer 因重叠分片 URL 变化而拒绝清单的风险。
+- **保留已观察的直播窗口**：仅对支持的普通 TS 清单，结合官方 `EXT-QQHLS-SEGMENT_RANGE` 保留尚在官方留存范围中的连续分片，最多 10 片、目标约 30 秒；短片达到 10 片时可能少于 30 秒。缺少留存范围时只稳定重叠地址，不扩展窗口。出现未观察到的缺口就停止向前拼接，不猜测分片地址或时长。
+- **观看期间共享刷新**：同频道的 GET 轮询确认正在观看后，由单个后台调度线程共享更新；普通频道约每 5 秒、短分片频道按目标时长检查一次。同频道已有取清单任务时继续复用。停止轮询约 15 秒后退出该台的定时刷新，单次探台和 HEAD 不启动持续刷新。
+- **容忍短暂落后的 CDN**：同一流偶尔返回落后不超过 10 片的清单时，短暂保留已有进度，最多约 10 秒；不会无限维持旧清单。序号大幅重置、流 ID 更换或闲置过久时清空旧窗口。
+- **结合现有节目单处理版权停播**：若内存节目单已包含当前节目，则冷却至节目结束，最多五分钟；没有现成节目单则沿用三分钟兜底，不为这一步阻塞播放并额外请求节目单。
+- **扩展诊断**：`/diagnostics.json` 的央视频状态新增 `live_windows`、`active_refresh_channels`，显示实际保留片数、覆盖秒数、序号范围和慢节点识别结果，不包含签名 URL。
+
+加密、字节范围、分片初始化映射、时间线中断等复杂 HLS 清单不做这套历史合并，仍走原有清单重写路径。原 61 台全部保留，推荐目录仍为 85 条；没有把上游的 10 个浏览器登录/VIP 频道当作新增可播台。浏览器会员桥接、libVLC 专用垫片、原 App UDRM 未加入此版。
+
+**独立研究版下载：**[cbox-live-next.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live-next.py?v=1.5.5-preview)。主文件 `cbox-live.py` 保持 v1.5.4。研究版仍为单文件，无需另放 JS。试用时停止旧服务，启动研究版，刷新 `http://127.0.0.1:8767/aptv.m3u`。
+
+验证：144 项完整回归测试通过。持续取流结果和失败均记录在 `validation-v1.5.5-preview.json`；三轮抽检均遇到官方 CDN 分片 HTTP 403，第二、三轮已定位域名为 `outlivecloud-cdn.ysp.cctv.cn`，被拒绝分片位于当时诊断记录的最新窗口中。由于长播尚未通过，不替换主文件。不得据本版功能或自动测试宣称所有 403 已解决，手机实播仍需 APTV 日志确认。
+
 ## v1.5.4：央视频清单中转、分片直连
 
 默认央视频采用 `relay`：Python 获取并下发直播清单，公开媒体分片使用官方绝对地址，由 APTV 自己连接 CDN 下载；嵌套清单仍通过本地代理读取和重写。服务不再为了普通播放先下载这些分片，也不会通过“试拉分片”选择 CDN。央视频取票仍为纯 Python，APTV 内置运行无需 Node。
@@ -181,6 +198,6 @@ python cbox-live.py --compare cctv1 --extra-sources none
 运行 `python cbox-live.py --licenses` 可查看署名及许可。单文件运行无需另放 JS、WASM、HAR 或许可证文件；完整交付包另附易读说明、验证记录与许可记录。
 
 
-最新验证见 `validation-v1.5.4.json`。
+主文件验证见 `validation-v1.5.4.json`，研究版验证见 `validation-v1.5.5-preview.json`。
 
 [下载单文件 Python](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live.py?v=1.5.4)

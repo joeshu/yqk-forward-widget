@@ -34,3 +34,6 @@ v1.5.3：参考上游央视频取流器关于重复 CDN 请求及直播分片地
 
 
 v1.5.4：参考同一上游版本的 extractors/yangshipin/index.js、api.js、resolver.js 关于清单 relay、播放器直连分片、取票预算、403 冷却及 APTV 清单超时恢复的处理思路，以 Python 标准库实现。仅采用公开流官方返回的媒体地址；保留可选旧代理模式。预算、缓存与恢复策略为本项目适配，不是对上游所有功能的完整移植；未加入浏览器会员流或原 App UDRM。
+
+
+v1.5.5-preview（独立研究版）：继续参照同一上游版本 extractors/yangshipin/resolver.js 与 playlist-history.js，以 Python 实现直连分片重叠 URL/时长稳定、基于官方留存范围的已观察连续历史、慢节点短暂回退容忍、观看期间共享刷新与缓存节目单辅助版权冷却。本项目未移植猜测缺片 URL/时长的补洞、浏览器会员桥接和 libVLC 垫片；复杂 HLS 不作历史合并。

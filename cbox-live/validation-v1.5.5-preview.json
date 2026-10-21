@@ -1,0 +1,190 @@
+{
+  "version": "1.5.5-preview",
+  "stable_main_version": "1.5.4",
+  "delivery_file": "cbox-live-next.py",
+  "created_at_utc": "2026-10-21T01:23:31.153839+00:00",
+  "sha256": "e94690d83fa70900e1bbf83c075a52d9aa4cb2815cf77d09c90bf9baa3bba652",
+  "reference_commit": "e475b2f6d24029f844ada2b362d703c8b88c2e9b",
+  "changes": [
+    "Stable direct CDN URLs and original duration/tags for overlapping same-stream segments",
+    "Observed contiguous TS history bounded by explicit official retention range, maximum 10 entries",
+    "Active viewing shared refresh, idle expiry 15 seconds, one source poller thread",
+    "Minor CDN regression held at most 10 seconds; reset on identity, sequence reset or idle",
+    "Cached EPG current programme end assists copyright cooldown, capped 300 seconds",
+    "Diagnostic live window and active refresh status without signed URLs"
+  ],
+  "regression_tests": {
+    "count": 144,
+    "passed": true,
+    "command": "python -m unittest -q test_cbox_v155 test_cbox_v154 test_cbox_v153 test_cbox_v152 test_cbox_v151 test_cbox_v15 test_cbox_v14 test_cbox_v13 test_cbox_v12 test_cbox_v11"
+  },
+  "live_attempts": [
+    {
+      "scope": "No-Node YSP relay, stable observed history, direct CDN reads; execution environment, not iOS",
+      "passed": false,
+      "error": "HTTP Error 403: Forbidden",
+      "polls": [
+        {
+          "poll": 1,
+          "source": "ysp",
+          "new_segments": 3
+        },
+        {
+          "poll": 2,
+          "source": "ysp",
+          "new_segments": 2
+        },
+        {
+          "poll": 3,
+          "source": "ysp",
+          "new_segments": 1
+        },
+        {
+          "poll": 4,
+          "source": "ysp",
+          "new_segments": 1
+        },
+        {
+          "poll": 5,
+          "source": "ysp",
+          "new_segments": 2
+        }
+      ],
+      "server_exit": 0
+    },
+    {
+      "scope": "No-Node YSP relay, stable observed history, direct CDN reads; execution environment, not iOS",
+      "last_media_attempt": {
+        "host": "outlivecloud-cdn.ysp.cctv.cn",
+        "segment": "2024078203-1786233819.ts",
+        "poll": 6
+      },
+      "passed": false,
+      "error": "HTTP Error 403: Forbidden",
+      "polls": [
+        {
+          "poll": 1,
+          "source": "ysp",
+          "new_segments": 3
+        },
+        {
+          "poll": 2,
+          "source": "ysp",
+          "new_segments": 1
+        },
+        {
+          "poll": 3,
+          "source": "ysp",
+          "new_segments": 1
+        },
+        {
+          "poll": 4,
+          "source": "ysp",
+          "new_segments": 2
+        },
+        {
+          "poll": 5,
+          "source": "ysp",
+          "new_segments": 1
+        }
+      ],
+      "unique_segments": 9,
+      "ysp_live_windows": {
+        "ysp-cctv1": {
+          "supported": true,
+          "segments": 6,
+          "seconds": 32.36,
+          "first_sequence": 1786233814,
+          "last_sequence": 1786233819,
+          "lag_ignored": false,
+          "retention_known": true
+        }
+      },
+      "active_refresh_channels": [
+        "ysp-cctv1"
+      ],
+      "server_exit": 0
+    },
+    {
+      "scope": "No-Node YSP relay, stable observed history, direct CDN reads; execution environment, not iOS",
+      "last_media_attempt": {
+        "host": "outlivecloud-cdn.ysp.cctv.cn",
+        "segment": "2024078203-1786233828.ts",
+        "poll": 4
+      },
+      "passed": false,
+      "error": "HTTP Error 403: Forbidden",
+      "polls": [
+        {
+          "poll": 1,
+          "source": "ysp",
+          "new_segments": 3
+        },
+        {
+          "poll": 2,
+          "source": "ysp",
+          "new_segments": 1
+        },
+        {
+          "poll": 3,
+          "source": "ysp",
+          "new_segments": 1
+        }
+      ],
+      "unique_segments": 5,
+      "ysp_live_windows": {
+        "ysp-cctv1": {
+          "supported": true,
+          "segments": 6,
+          "seconds": 34.4,
+          "first_sequence": 1786233823,
+          "last_sequence": 1786233828,
+          "lag_ignored": false,
+          "retention_known": true
+        }
+      },
+      "active_refresh_channels": [
+        "ysp-cctv1"
+      ],
+      "server_exit": 0
+    }
+  ],
+  "baseline_v154_after_trials": {
+    "scope": "Unchanged v1.5.4 baseline in same environment after new-feature trials",
+    "last_media_attempt": {
+      "host": "outlivecloud-cdn.ysp.cctv.cn",
+      "segment": "2024078203-1786233840.ts",
+      "poll": 3
+    },
+    "passed": false,
+    "error": "HTTP Error 403: Forbidden",
+    "polls": [
+      {
+        "poll": 1,
+        "source": "ysp",
+        "new_segments": 3
+      },
+      {
+        "poll": 2,
+        "source": "ysp",
+        "new_segments": 1
+      }
+    ],
+    "unique_segments": 5,
+    "ysp_live_windows": null,
+    "active_refresh_channels": null,
+    "server_exit": 0
+  },
+  "catalogue_counts": {
+    "aptv": 85,
+    "original_web": 61,
+    "original_app": 61,
+    "combined_sources": 134
+  },
+  "limitations": [
+    "All three live trials hit direct CDN HTTP 403; exact cause unconfirmed; preview not promoted to main file",
+    "Not tested directly on user iOS device",
+    "No guarantee all 85 catalogue entries playable",
+    "No invented gap segments, browser VIP bridge, libVLC filler or original App UDRM"
+  ]
+}
