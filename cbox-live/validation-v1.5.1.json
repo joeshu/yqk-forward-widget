@@ -1,0 +1,38 @@
+{
+  "version": "1.5.1",
+  "created_at_utc": "2026-10-21T00:40:59.867991+00:00",
+  "sha256": "d1b78a1a0a665ec7f73c30b418a99cad1e54f186fdf21d6335a94c54d24225e6",
+  "issue": {
+    "reported_behavior": "logs show listening then exit with code 1",
+    "reproduced_v1_5_root_exception": "ValueError: signal only works in main thread of the main interpreter",
+    "reproduction_conditions": [
+      "non-main Python thread",
+      "unwritable EPG directory",
+      "Node unavailable"
+    ]
+  },
+  "fixes": [
+    "skip signal registration outside main thread",
+    "continue serving when runtime rejects signal registration",
+    "restore only successfully registered signal handlers",
+    "close listening socket on failure and shutdown",
+    "degrade inaccessible EPG storage to memory",
+    "remove duplicate EPG initialization for source clients and shared App mode",
+    "report concrete OS/config exceptions",
+    "default normal logging to stdout with level labels"
+  ],
+  "regression_tests": {
+    "count": 98,
+    "passed": true,
+    "command": "python -m unittest -q test_cbox_v151 test_cbox_v15 test_cbox_v14 test_cbox_v13 test_cbox_v12 test_cbox_v11",
+    "runtime_tests": [
+      "HTTP service stays running inside worker thread",
+      "85-entry APTV subscription returned with no Node and readonly cache",
+      "61 App entries preserved",
+      "server thread returns 0 on shutdown and port can be rebound",
+      "bad cache structure does not abort startup",
+      "actual port collision reports OSError"
+    ]
+  },
+  "scope": "Runtime compatibility fix; source signing, media processing, original 61 catalogue and 85-entry APTV catalogue unchanged. Previous playback tests are recorded in validation-v1.5.json. User device has not been tested directly."
+}

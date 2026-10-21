@@ -1,6 +1,17 @@
-# cbox-live v1.5 单文件：APTV 推荐版
+# cbox-live v1.5.1 单文件：APTV 推荐版
 
 Python 文件在电脑、NAS 或服务器持续运行，手机 APTV 填写它提供的 HTTP 订阅地址。手机不能把 `.py` 文件直接当成 IPTV 订阅导入。
+
+
+## v1.5.1 托管运行修复
+
+针对“显示监听地址后立即退出，退出码 1”的日志，已在旧版复现底层异常：`ValueError: signal only works in main thread of the main interpreter`。
+
+本版在非主线程运行时跳过进程信号注册，继续提供 HTTP 服务；主线程但运行平台不支持信号注册时也可继续服务。退出时只恢复本进程成功注册的信号，并确保关闭服务端端口。
+
+缓存目录不可访问时明确切换为内存模式；避免为同一来源重复初始化缓存。缓存格式损坏时重新读取官方节目单，不因此阻止服务启动。程序默认将普通运行日志写入 stdout，并标注 INFO/WARNING，减少托管器把正常输出统称 error 的情况；真实文件或端口异常显示具体类型与原因。
+
+已在“非主线程 + 缓存不可写 + 无 Node”的组合环境中，验证 HTTP 订阅持续可用、推荐目录 85 条、原 App 目录 61 条，以及关闭后端口可重新绑定。原有播放源和订阅 URL 不变。本次完整回归共 98 项通过。
 
 ## 启动
 
@@ -109,8 +120,6 @@ python cbox-live.py --compare cctv1 --extra-sources none
 运行 `python cbox-live.py --licenses` 可查看署名及许可。单文件运行无需另放 JS、WASM、HAR 或许可证文件；完整交付包另附易读说明、验证记录与许可记录。
 
 
-## 仓库下载
+最新运行兼容性验证见 `validation-v1.5.1.json`；上一版播放样本验证保留在 `validation-v1.5.json`。
 
-[单文件 Python 原始地址](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live.py)
-
-下载后运行 `python cbox-live.py 8767`，APTV 使用运行设备的 `/aptv.m3u` 地址。raw 地址用于下载代码，不能直接作为 APTV 直播订阅。
+[下载单文件 Python](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live.py)；此 raw 地址用于下载代码，APTV 订阅使用运行设备的 `/aptv.m3u`。

@@ -37,7 +37,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = '1.5.0'
+VERSION = '1.5.1'
 CONFIG_CATALOG_B85 = 'ABzY8000000t4-xO>f-B9menZ6oJoiyffs!C_oN24AcRH)PRFtibCMqa!7H9yE~+o+{i$42!i%n6zHWd$D%#A=od=be2bD?EiJ#uk+-hBKXZ)OP{@_^`#&7c^UQEae*MwM&7V7dQmnlqI!p9Czw_D0Uw2!(J&&F|Y&P8a&+q>D{kOll^U1RvSKI&j?GOL@_WJfm-S!{<{)ZQ~Kl!TL@xx!fdtt}vZu>vJ`S<Ui+x~dB{ZHTg`0GDk-+q7hi@*EZ_rLw?oo@5fPoA$Lj7-3-A_(<Q9uEI=DMzEb&SW%txf=g-(QLmf#q&EK?RPrOPVwS*es#5X*6x(g?>ycA&Su}V+4UT5X`=PbyubM3@w1=%BJSzWfA+<f&wliaz+b+wzhi!0D&=V%W&7Xz%l><x5nTUV`=f%OxDeNVOSeDs+g&ehzACHT_vGQ_qlcG`N|&b(FPmfc;t$B<M4w&zd~=*GpS<+3$Ll0tCq><U;^iL_t{1Pw@X9dBcYFFBPd~Y3t#UxMI&WSpvru<H2i03d>m=|7RB=?U^JO%kg2zLub(xiBK=n?B(kD*`bWmqQIjCupl><7iVl<>;hcpZjLmCGNXF$aUD#^kj9o!+MMR7xX8hwz(4kkj$!T78kjLFKuIIR32?DgYU{JBN-UMLQnLgpQ5FRx2&#G6|XwA73B5K3*E?|dEUKn-OS@2x#Q35HVbx-=&7^iayJlDZs9ttUe%G|UHax)xrtN(Rw-t3;niVXouFO+C}=O!od!Ty#A@6QkK^c|b;Zz5K7({niWck36)F-fpFGFqJxksni`zr3Wv0fYy8Hf(K~1<Ka|#*kT80wUfbAIvq@<v%yq)*ir{*v4<>lpq4tE)Gvk;`^9i_|A7k}s0Vg9>F|)n4b)Nxk(h!5Cz<Xa2e<<yFOs@Umbbk`dy#}uepb}W=oX8J+Qx^ONbh8jR)$sv$I8&k;94148OBzIR)&d{p_O53WoTuXSs7XxPOJ=Fd>UCDIvs3|-05J0<W2{hBzHR4D7n+YX33onHcakxuxWCqgN>6r9c-T5%|qEdxzoYs$(;^1PwsTEd2*+N&67JF2A?Op+s;Do+#AY`XJ>g<FP2F#5`(K)4z6McdZ$NUfcwr082x_=7}E=w&<mIX3s`tXpza^iMZfpc_X=Hd(H$<j%S9hk(I0S6(+Aws^a1xYeZW0UA0SWDc6f(8Njq@jDXN2|H-x3drf9!Y45w5%oKl_Pl<E$rRN{DiM?S%lPqE}PEcpqR{MKs$j}TpO(Ipq%;i9`-bfS}Pyd?0FL&k!quSGw7XXuiP?r_mvAbJqpcq`~}U;m44e0tc?b30IO;)J9sHS$S@TNR~=r(+<xr&XB%xwFK}b%K<<Xqrlz5Zigz$SY!VF-f3G=2KEtuHzN6rK>2(8hUEq7?;Ub<t5Tc{U|{;7-j&dOU(q2OKOj<B4!ge&6f^R@ifU2Y#VPMlTN(q9wm!N$1%}_TFIHcVjH)VM?6QXWDCt&o;Jir-i|@5#3K$v*WN|*6%X8JPJ*`G;hcGLwwXm#%>GbQN1v_e(A3gNj_l6;8{Z^w<ZUI=+vYD*ahHiLnb;F1_LPY|V`4i@>=R-RH&x2)Om^gBEcpye&TZ!omRxX8Q2|!n<)Tx2#*%4ARXgg8o4=bVF^V}`;VqDZxE;8_l1nVPgC%#lOSgO_$?(Jpt}rSth^x0k=!)%-Ik4MxEp_rvC(hsEd#&P)ahcp2dAnIF_>?L*@vh2Eycr27w}f&#P;M8>J%(~mpxjd^H}O#fX&oc`@0MFaxg97svH#A>APK!3*~a(m#C9HfnkxGhI#Kn)OWI{-NZI%7WZfMwy9;I?gV`rwc4AVm(jo|z*+S7(wJf0Mi`r1zOH3qJ##D18_a<X<FMOkr;LEx|a#t#>VkCLI2$?OVh__Vm8VOz#8+f!ZUh^}N;I(3MZ{~&xzO0r+@@=}=X0`IE=v4tF_x(&!(KDjxsZlCqUMDh&d7Y@?cA?x3l$$scx22w#TjqJWWj60Evo{G<U9ZdnOI}dPoBxOx%#|_eHe`}-Q?n#4e5y^Y=TPt}R8Y+u@PIg-<r}lD{4k5D?9m!Z?gs`+UKCL96gjJ9OlIPMN<QBh<OPZjK27H)q{0`-g$bDn=S3Yt$>VuOyr!j#!Vl9BiXPSm%f5_}E1z2QOl^^}*HsoEmsiwP75auszMLb$RiG6Vye9T6MXl1J))^MvK*@E1Z7*x2=wVu~>P%qCC6heb5U*b>!nE;F<5STWDy^%OOdqGnt4Eayi^4F;4Kk*0+NL6?;KW|NN>*h=97Wg2r6MZZ)<J*-uaMKZD%&8}hBn;Hb`qO9+ZIco$)2S}jGX&#*v)cVg;e3gCA7_$>fEeSD!EyO+cg(IAd+v33Q3K;np<cjHL)w4t2hYb1(jSY=8aqFLNRZCO8q(W)~D30kqfyS@-z)ICVB18nc&_$tdMuJ)`e+8))9b@-W<Hz#!PTOt(oB4dJY87(l{_%qtB0GmFOY#n>eeBI;#wnKde=C9M^{qqBq2Lqbsv4!bMyMDqEBJsq9KEGa$Q(wK<B*E^i91+Gi^v$vep<5Ijsnq~Obf*~FK193a7~V5OMg;XGX-$%|AeE;z9_+}5igte72(!J6k4I<djT&4>=Ec{>ypSa4!f@swgVm3gp1a%W2uFH+6y6Lr1uH%xSO4$bBrxTJzRRB)FHKBj_CsNhp7_z4vJDBciy5IAxcaT}i_ozu@^WN+AV6MeJVFeipKL0whM`A_3BC(8YTIr$l`nS%&zsDq!HI+t~YF1hFq7v1HekGbd*F8Y*<KI5XFV9}97&{dc*y|e?DRB(q1?oz?WRPYHEoampXhOS6V6|;%QS&hBcjJ=S>jE9Q4fJGr&O3O`j`(nXtCoQ*xa#P#Mn8{r%m{a^F-3HinMdd~=Zw{*!bcVmXAB%baLA{x0Nbbc^yz}<Wxy_n*k8?A&XEyK-TvEY_V~D_8g$g+<k)_Bc9tVLgE~GoUn{9n`1>&yB=Ew??rKdyh)!^ba;Ex_&KKbh5<>|xAmm#w}PW0LJ4?k%>{l1^*va3{#Mx$F+>y?H2spH3!p-OTcFT5Q21mPZDlHnaPyi0~3li??1_$e8FMutBD!ym;em4o5Q4lBqGE65Hj$PO#W4lBqGE65Hj$PO#W4lBtHE6ENk$qp;Y4l9WcJNA}K;=94JK$Uvq>EoSZ6mPFsPsdrA*QKtLBY8r~o0bqnMkPe<ptv||_1B)J;s<_SF&j-!FVXZwQ`6A~*=Aa93FW4?6Bo)ohH_7!+*2s`49b1N<VMcUx7<*_6i~msaXGR$dT>bvcc|bl6?{wupHRW4RPY%U`~(UvMpSUBa|)_+3aWDos&fjea|)_+3aWDos&fjeb4sFfE~0fD5eNAlxTJzRRB)FHKBj_CsNhp7_>2mELIp=okMGE_-YKx=DX{J-u=Xji{wc5qDzFYJuofz?9x9=im`#>kMA*xo9lRvNJ7jp53_m8rPss37GW?7Te*%WbUK;J-$qp;X4lBqGE65Hj$PO#W4lBqGE65Hj$PSCVgxcN|B^RCc&|A88^b$?)K<R}znx->41b_S?;1eGnyLjEa*-O9XA_=4Xtf-gKPd=xyyFI+SpZtA2sPQl<q?KYXg=3}IOW|56_EL<k6niNqR*Jn8Q!B+@ikX#SFU5(K;!28JuT2_&6gF-4QrNWFOJUPyFNIB;y%aWW_EOli*-K&5W-o<Jo4ph^ZSJLzHf{D&*tFS8Vbf+Wg-x5i6gF-4QrNWFOJUPyFNIB;y%aWW_EOlixtGGRX|tEYrp;aon>KqXY})LluxYcG!lun$3Y#{2DQw#8rLbwUm%^say%erZo4ph^ZT3>wwAo8x(`GM)O`E+GHf{D&*tFS8Vbf+Wg-x5i6gF+{r5M|^*-K&5W-o<Jo4ph^ZT3>wwAo8x(`GM)O`E+GHf{D&*tFS8VbkVbiphtcHuqoM>h0c1;3Z;oz#}P7Ut7cJJ9rIy$1cI_4w&6VvU?%<@h@ja<(m<kUZUx#53f0ka~;<Sx9wc<OE^Eh{kU-cF_nM!%3*`Xmu!58h;LNV{$Gsj`FnU`x8KC%VxF%T5mNeR^la@NG`)+aAEW6fX!<ET=&*ARJLaJ2T{Jy=crroLvwO@Ln*M}Lk9;TQGkUbw3bfY>wATu>*9x@P3bfY>wATu>*9x@PBHx{9l$S?q=nQO!F1hFq7oF&@t5ubFc~v6USoH9c4DXQP(QSTAhMyqe166KSu493wmuPxshZB1_xaI8WC7Pbua_U6aWmF_}3B<3<tkm2kA=mIF8{c8$yKMY18-K#apR)01Z2S{6KJs$gHGH<~A}_d=20H!PfnybSsNlqG6PI~29``h|o%isP4DTS}n@+tMjzgQx6+E%os4{HtNh)=nK*!?GSHM38#Piq78~W88tNpgSFYkcX|7iEXh12)<%!U7@-~&#U8>@W}Yca&=kh}li)gcpatyVb_v##DD6x($r@6LzbGPtCIJ5+F&3O=TSPpIHiD)@{FenJI*hts=nn;h$%0&AWE>z)E@p91Tj0&AcG>!1Q_p#tln66>LoJO0FasKk1x#CoX2dZ@&DsKk1x#CoX2dZ>f-PzURw4tEk4>!A+TLmjM#I#>_IUJM%@TCE&ZwKtqn;={Yp*;TvDN;8Ct%`#sXrii?SH>`5~VU-&UtK4un<sxqzxI&j)bcc)Xa?!_J^a&Sz%0-`X(NDPO<SvHX$B;W2axX*fX2|^v^PzuN?Bv`I4(<}1+$GpoCD>Ob*jFXkS0&h2CD>OTu&+8`Uv<b6Vqjl&z`p8$eboW`ssr{_2kfg3*jHV!uexAgb-}*slCLy@eboi~s*8OIOrF(?WfFj2XuYpM;wwPD)>>&p#9pa$PshGTd<3MY{lwEiavdd$NXKzWTwQ(zzfs86zV+ItYa!9Aq=hFocmJRz+DE}Hq1+CX+l6uyLwl9zxbPCAJQb1g8#hvA&aEKMn=FtcyLKtgHGRo*_tmd<pS-ioygFJpA9+^uor`E~l3aK7etKQIJLP(p{flDx*}Z$a@BK8;#YOYaJyUo(^w#0Mz|X5kp?SR9Z8r1WFMs;c)Bge<5B*OpV*&s'
 NOTICE = 'App UDRM 尚未修复；网页 CDRM 已通过连续样本解码验证，各频道需单独检查。'
 # EMBEDDED_PROFILES 在构建时由用户提供的成功抓包提取，不包含 Cookie。
@@ -342,6 +342,8 @@ class EpgStore:
                 self.path = directory / getattr(client, 'epg_cache_file', 'epg-cache-v2.json')
                 if self.path.exists() and self.path.stat().st_size < MAX_BODY:
                     data = json.loads(self.path.read_text(encoding='utf-8'))
+                    if not isinstance(data, dict) or not isinstance(data.get('rows'), dict):
+                        raise ValueError('EPG 缓存结构不正确')
                     for ch, rows in data['rows'].items():
                         if ch in client.profiles and isinstance(rows, list):
                             # Revalidate persisted data before exposing XML.
@@ -355,9 +357,14 @@ class EpgStore:
                     saved_errors = data.get('errors', {})
                     if isinstance(saved_errors, dict):
                         self.errors = {ch: str(err)[:200] for ch, err in saved_errors.items() if ch in client.profiles}
-            except (OSError, ValueError, TypeError, KeyError):
-                LOG.warning('EPG 磁盘缓存不可用，使用内存缓存')
+            except OSError as exc:
+                self.path = None
                 self.updated = 0
+                LOG.info('EPG 缓存目录不可用（%s）；使用内存缓存，不影响取流', type(exc).__name__)
+            except (ValueError, TypeError, KeyError):
+                self.rows.clear()
+                self.updated = 0
+                LOG.info('EPG 磁盘缓存格式无效，将重新获取节目单')
 
     def trigger(self):
         with self.lock:
@@ -506,7 +513,7 @@ def local_range(body, value):
 
 
 class Client:
-    def __init__(self, args):
+    def __init__(self, args, init_epg=True):
         self.args = args
         self.api_mode = 'web' if getattr(args, 'api_mode', 'app') == 'both' else getattr(args, 'api_mode', 'app')
         for key, default in [('epg_ttl', 3600), ('epg_wait', 20), ('data_dir', '')]:
@@ -548,12 +555,13 @@ class Client:
         self.started = time.time()
         self.metadata = {ch: dict(CATALOG.get(ch, {'name': NAMES.get(ch, ch), 'group': '其他', 'logo': ''})) for ch in self.profiles}
         self.subscription_channels = set(self.profiles)
-        self.epg = EpgStore(self)
+        self.epg = EpgStore(self) if init_epg else None
         if self.api_mode == 'web' and shutil.which('node'):
             self.video_core = VideoCore()
 
     def close(self):
-        self.epg.closed.set()
+        if self.epg is not None:
+            self.epg.closed.set()
         if self.video_core:
             self.video_core.close()
 
@@ -1003,11 +1011,10 @@ class SourceClient(Client):
     def __init__(self, args, mode):
         copied = argparse.Namespace(**vars(args))
         copied.api_mode, copied.har, copied.channels = 'app', [], None
-        super().__init__(copied)
+        super().__init__(copied, init_epg=False)
         self.args = argparse.Namespace(**vars(args))
         self.args.audio = False
         self.api_mode = mode
-        self.epg.closed.set()
         self.profiles = {('ysp-' + r['id']): dict(r, provider='ysp') for r in YSP_CHANNELS} if mode == 'ysp' else dict(REGIONAL_CHANNELS)
         if args.channels:
             chosen = args.channels.split(',')
@@ -1618,10 +1625,11 @@ def main(argv=None):
         u = urlparse.urlsplit(args.public_base)
         if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password or u.query or u.fragment or any(c in args.public_base for c in '\r\n'):
             parser.error('--public-base 必须是有效 HTTP(S) 地址，不能包含认证、查询参数或片段')
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s [%(levelname)s] %(message)s')
     client = None
     app_client = None
     source_clients = []
+    server = None
     try:
         if args.sample:
             result = inspect_sample(args.sample)
@@ -1631,7 +1639,7 @@ def main(argv=None):
         if args.api_mode == 'both':
             app_args = argparse.Namespace(**vars(args))
             app_args.api_mode = 'app'
-            app_client = Client(app_args)
+            app_client = Client(app_args, init_epg=False)
             app_client.epg = client.epg
         selected_sources = ('ysp', 'regional') if args.extra_sources == 'all' else (() if args.extra_sources == 'none' else (args.extra_sources,))
         for mode in selected_sources:
@@ -1698,21 +1706,35 @@ def main(argv=None):
                  args.bind, args.port, len(client.subscription_channels), len(client.profiles), args.port)
         def terminate_handler(signum, frame):
             raise KeyboardInterrupt
-        previous_term = signal.signal(signal.SIGTERM, terminate_handler)
+        previous_term = None
+        signal_registered = False
+        if threading.current_thread() is threading.main_thread():
+            try:
+                previous_term = signal.signal(signal.SIGTERM, terminate_handler)
+                signal_registered = True
+            except (ValueError, OSError, AttributeError) as exc:
+                LOG.info('运行环境不支持退出信号注册（%s）；继续提供 HTTP 服务', type(exc).__name__)
+        else:
+            LOG.info('托管线程运行：跳过进程信号注册，继续提供 HTTP 服务')
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
         finally:
             server.server_close()
-            client.close()
-            signal.signal(signal.SIGTERM, previous_term)
+            if signal_registered:
+                try:
+                    signal.signal(signal.SIGTERM, previous_term)
+                except (ValueError, OSError, AttributeError):
+                    LOG.info('运行环境未恢复退出信号，HTTP 服务已关闭')
         return 0
     except (LiveError, OSError, ValueError) as exc:
-        message = str(exc) if isinstance(exc, LiveError) else '文件、配置或监听端口错误，请检查参数和文件权限'
+        message = str(exc) if isinstance(exc, LiveError) else type(exc).__name__ + ': ' + str(exc)
         print('错误：' + message, file=sys.stderr)
         return 1
     finally:
+        if server is not None:
+            server.server_close()
         for additional in source_clients:
             additional.close()
         if app_client is not None:
