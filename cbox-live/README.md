@@ -1,8 +1,35 @@
-# cbox-live v1.5.6 单文件：APTV 推荐版
+# cbox-live v1.5.7 单文件：APTV 推荐版
 
 Python 文件既可在 APTV 内置 Python 服务中运行，也可放在电脑、NAS 或服务器上运行。先启动脚本服务，再用它提供的 HTTP 地址加载频道；raw Python 下载地址不是频道订阅地址。
 
 
+
+## v1.5.7：减少切台时的清单等待
+
+针对“切台慢”，本版缩短故障入口等待并记录阶段耗时，保持原画质选择、原 61 台及 85 条推荐目录，央视频分片继续由播放器直连官方 CDN。
+
+- **首选入口慢时尝试备用**：首选清单超过 0.65 秒仍未完成，才并行尝试一个官方备用入口，使用先成功返回的有效清单。首选响应快则只请求首选；晚到的结果不覆盖已选来源。同次选择最多两个请求并发，只读取清单。
+- **避免重复等待坏入口**：央视频清单单次套接字超时默认 3 秒，API 默认至多 5 秒；这些请求取消网络层的重复等待，清单层仍保留官方主备选择和一次续票。分片代理和其他来源保留各自原超时。
+- **后台请求尚在加载时短暂退避**：首次清单请求等待最多约 12 秒；后台仍在加载时，推荐目录短暂退避约 1 秒后允许再试，避免此前额外挡住 20 秒。这是响应等待上限，不代表所有频道都能在该时间内出画面。
+- **定位慢在哪一步**：首次请求、较长间隔后的重新打开以及明显慢请求，日志增加“频道清单响应 X 秒”；`/diagnostics.json` 增加 `api_wait_ms`、`manifest_wait_ms`、`playlist_wait_ms`。这些字段分别是最近一次取票、选中清单下载、本地清单调用的耗时，不包含播放器下载分片或缓冲。
+
+截图中的 EPG `PermissionError` 已降级到内存缓存；无 Node 提示只说明网页 CDRM 不可用，不能据这两条启动提示判断央视频切台慢的原因。
+
+测试环境样本（不是手机 APTV 点选到画面的计时，前后网络情况未严格控制）：
+
+| 频道 | v1.5.6 返回清单 | v1.5.7 返回清单 |
+|---|---:|---:|
+| CCTV1 首次 | 2.694 秒 | 1.259 秒 |
+| CCTV13 首次 | 2.212 秒 | 1.344 秒 |
+| CCTV1 再打开 | 0.248 秒 | 0.002 秒 |
+
+v1.5.7 湖南卫视返回清单 0.787 秒。随后单独启动 FFmpeg 读取各台首帧，四次均解码成功；这两段分开计时，不能直接当作 APTV 完整切台耗时。旧基准的湖南条目用了不正确的路由，不参与前后比较。另有 30 秒 HLS 播放抽检，详细日志见验证记录。
+
+完整回归测试 163 项通过，包含慢首选与快备用、快首选不触发额外请求、晚到结果隔离、请求超时及后台加载时的退避。实际手机切台仍受 5G 网络、官方分片和 APTV 缓冲影响，不能承诺固定秒数。
+
+**更新：**停止旧服务，替换单文件，重新启动并刷新 `http://127.0.0.1:8767/aptv.m3u`。如果仍慢，请导出新日志中对应频道的“频道清单响应”行，并说明点选到出画面大约几秒。
+
+网络较慢时可调整 `--ysp-manifest-timeout 8`；若需关闭并行备用，可用 `--ysp-hedge-delay 0`。默认参数已启用本版处理，无需额外设置。
 
 ## v1.5.6：续票恢复与真实 HLS 播放验证
 
@@ -40,7 +67,7 @@ http://127.0.0.1:8767/aptv.m3u
 
 加密、字节范围、分片初始化映射、时间线中断等复杂 HLS 清单不做这套历史合并，仍走原有清单重写路径。原 61 台全部保留，推荐目录仍为 85 条；没有把上游的 10 个浏览器登录/VIP 频道当作新增可播台。浏览器会员桥接、libVLC 专用垫片、原 App UDRM 未加入此版。
 
-**独立研究版下载：**[cbox-live-next.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live-next.py?v=1.5.5-preview)。当时主文件 `cbox-live.py` 保持 v1.5.4；最新版请使用页首的 v1.5.6。研究版仍为单文件，无需另放 JS。试用时停止旧服务，启动研究版，刷新 `http://127.0.0.1:8767/aptv.m3u`。
+**独立研究版下载：**[cbox-live-next.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live-next.py?v=1.5.5-preview)。当时主文件 `cbox-live.py` 保持 v1.5.4；最新版请使用页首的 v1.5.7。研究版仍为单文件，无需另放 JS。试用时停止旧服务，启动研究版，刷新 `http://127.0.0.1:8767/aptv.m3u`。
 
 验证：144 项完整回归测试通过。持续取流结果和失败均记录在 `validation-v1.5.5-preview.json`；三轮抽检均遇到官方 CDN 分片 HTTP 403，第二、三轮已定位域名为 `outlivecloud-cdn.ysp.cctv.cn`，被拒绝分片位于当时诊断记录的最新窗口中。当时因长播尚未通过而未替换主文件，后续验证改进见 v1.5.6。不得据本版功能或自动测试宣称所有 403 已解决，手机实播仍需 APTV 日志确认。
 
@@ -221,6 +248,6 @@ python cbox-live.py --compare cctv1 --extra-sources none
 运行 `python cbox-live.py --licenses` 可查看署名及许可。单文件运行无需另放 JS、WASM、HAR 或许可证文件；完整交付包另附易读说明、验证记录与许可记录。
 
 
-最新主文件验证见 `validation-v1.5.6.json`，历史研究版记录见 `validation-v1.5.5-preview.json`。
+最新主文件验证见 `validation-v1.5.7.json`，历史研究版记录见 `validation-v1.5.5-preview.json`。
 
-[下载单文件 Python](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live.py?v=1.5.6)
+[下载单文件 Python](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live.py?v=1.5.7)

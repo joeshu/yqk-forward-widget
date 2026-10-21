@@ -1,0 +1,211 @@
+{
+  "version": "1.5.7",
+  "created_at_utc": "2026-10-21T04:08:09.815262+00:00",
+  "sha256": "d5d3fb4e5fe5e2e65b5bce6fa3e6bd538141b2c534cd7f609c12b430de9e2b63",
+  "changes": [
+    "Hedge official backup manifest after 0.65 seconds only if preferred is still pending",
+    "Fast preferred entry makes no additional backup request; at most two simultaneous manifest reads",
+    "Late losing result does not change chosen source",
+    "YSP manifest socket timeout 3 seconds and API timeout up to 5 seconds without hidden network-layer retries",
+    "Initial manifest wait capped at 12 seconds; pending background load uses 1-second catalogue backoff",
+    "API, manifest and local response timing diagnostics"
+  ],
+  "regression_tests": {
+    "count": 163,
+    "passed": true,
+    "command": "python -m unittest -q test_cbox_v157 test_cbox_v156 test_cbox_v155 test_cbox_v154 test_cbox_v153 test_cbox_v152 test_cbox_v151 test_cbox_v15 test_cbox_v14 test_cbox_v13 test_cbox_v12 test_cbox_v11"
+  },
+  "switch_samples": {
+    "scope": "Server HLS response latency and FFmpeg first decoded frame; not APTV UI timing",
+    "build": "157",
+    "channels": [
+      {
+        "channel": "cctv1",
+        "status": 200,
+        "hls_response_seconds": 1.259,
+        "hls_bytes": 1811,
+        "source": "ysp",
+        "ffmpeg_first_frame_seconds": 1.032,
+        "frame": "1",
+        "ffmpeg_exit": 0,
+        "error_lines": 0
+      },
+      {
+        "channel": "cctv13",
+        "status": 200,
+        "hls_response_seconds": 1.344,
+        "hls_bytes": 1811,
+        "source": "ysp",
+        "ffmpeg_first_frame_seconds": 1.044,
+        "frame": "1",
+        "ffmpeg_exit": 0,
+        "error_lines": 0
+      },
+      {
+        "channel": "ysp-hnws",
+        "status": 200,
+        "hls_response_seconds": 0.787,
+        "hls_bytes": 1811,
+        "source": null,
+        "ffmpeg_first_frame_seconds": 0.765,
+        "frame": "1",
+        "ffmpeg_exit": 0,
+        "error_lines": 0
+      },
+      {
+        "channel": "cctv1",
+        "status": 200,
+        "hls_response_seconds": 0.002,
+        "hls_bytes": 1811,
+        "source": "ysp",
+        "ffmpeg_first_frame_seconds": 0.904,
+        "frame": "1",
+        "ffmpeg_exit": 0,
+        "error_lines": 0
+      }
+    ],
+    "upstream": {
+      "ysp-cctv1": {
+        "api_wait_ms": 906,
+        "api_ok": true,
+        "api_at": 1792550703,
+        "last_error": null,
+        "playlist_ok": true,
+        "playlist_at": 1792550709,
+        "media_type": "raw",
+        "manifest_host": "outlivecloud-cdn.ysp.cctv.cn",
+        "manifest_wait_ms": 213,
+        "ticket_renewed": false,
+        "manifest_all_forbidden": false,
+        "manifest_proxy_denied": false,
+        "playlist_wait_ms": 214
+      },
+      "ysp-cctv13": {
+        "api_wait_ms": 677,
+        "api_ok": true,
+        "api_at": 1792550705,
+        "last_error": null,
+        "playlist_ok": true,
+        "playlist_at": 1792550706,
+        "media_type": "raw",
+        "manifest_host": "outlivecloud-cdn.ysp.cctv.cn",
+        "manifest_wait_ms": 663,
+        "ticket_renewed": false,
+        "manifest_all_forbidden": false,
+        "manifest_proxy_denied": false,
+        "playlist_wait_ms": 0
+      },
+      "ysp-hnws": {
+        "api_wait_ms": 557,
+        "api_ok": true,
+        "api_at": 1792550708,
+        "last_error": null,
+        "playlist_ok": true,
+        "playlist_at": 1792550708,
+        "media_type": "raw",
+        "manifest_host": "outlivecloud-cdn.ysp.cctv.cn",
+        "manifest_wait_ms": 226,
+        "ticket_renewed": false,
+        "manifest_all_forbidden": false,
+        "manifest_proxy_denied": false,
+        "playlist_wait_ms": 0
+      }
+    },
+    "service_exit": 0
+  },
+  "baseline_switch_samples": {
+    "scope": "Server HLS response latency and FFmpeg first decoded frame; not APTV UI timing",
+    "build": "156",
+    "channels": [
+      {
+        "channel": "cctv1",
+        "status": 200,
+        "hls_response_seconds": 2.694,
+        "hls_bytes": 1811,
+        "source": "ysp",
+        "ffmpeg_first_frame_seconds": 1.554,
+        "frame": "1",
+        "ffmpeg_exit": 0,
+        "error_lines": 0
+      },
+      {
+        "channel": "cctv13",
+        "status": 200,
+        "hls_response_seconds": 2.212,
+        "hls_bytes": 1811,
+        "source": "ysp",
+        "ffmpeg_first_frame_seconds": 2.02,
+        "frame": "1",
+        "ffmpeg_exit": 0,
+        "error_lines": 0
+      },
+      {
+        "channel": "ysp-hnws",
+        "error": "HTTPError"
+      },
+      {
+        "channel": "cctv1",
+        "status": 200,
+        "hls_response_seconds": 0.248,
+        "hls_bytes": 2340,
+        "source": "ysp",
+        "ffmpeg_first_frame_seconds": 0.672,
+        "frame": "1",
+        "ffmpeg_exit": 0,
+        "error_lines": 0
+      }
+    ],
+    "upstream": {
+      "ysp-cctv1": {
+        "api_ok": true,
+        "api_at": 1792550522,
+        "last_error": null,
+        "playlist_ok": true,
+        "playlist_at": 1792550529,
+        "media_type": "raw",
+        "manifest_host": "outlivecloud-cdn.ysp.cctv.cn",
+        "ticket_renewed": false
+      },
+      "ysp-cctv13": {
+        "api_ok": true,
+        "api_at": 1792550526,
+        "last_error": null,
+        "playlist_ok": true,
+        "playlist_at": 1792550527,
+        "media_type": "raw",
+        "manifest_host": "outlivecloud-cdn.ysp.cctv.cn",
+        "ticket_renewed": false
+      }
+    },
+    "service_exit": 0
+  },
+  "baseline_note": "Hunan baseline route was incorrect; exclude that row from comparison. Network conditions not controlled; no claimed fixed performance gain.",
+  "hls_playback": {
+    "scope": "FFmpeg HLS client through configured environment proxy, direct CDN media; not iOS",
+    "headers": "default FFmpeg player UA",
+    "target_seconds": 30,
+    "progress": {
+      "frame": "750",
+      "out_time": "00:00:30.000000",
+      "out_time_us": "30000000",
+      "progress": "end"
+    },
+    "exit": 0,
+    "seconds": 18.36,
+    "error_lines": 0,
+    "diagnostics": [],
+    "passed": true,
+    "service_exit": 0
+  },
+  "catalogue_counts": {
+    "aptv": 85,
+    "original_web": 61,
+    "original_app": 61,
+    "combined_sources": 134
+  },
+  "limitations": [
+    "HLS HTTP response and separate FFmpeg first-frame timings, not measured APTV UI latency",
+    "Network-dependent samples; no universal switching-time guarantee",
+    "Original App UDRM unsupported"
+  ]
+}
