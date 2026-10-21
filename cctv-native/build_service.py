@@ -25,7 +25,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
-    output = Path(__file__).resolve().parents[1] / 'cctv-native.py'
+    output = Path(__file__).resolve().parent / 'cctv-native.py'
     content = render()
     if args.check:
         if not output.is_file() or output.read_text(encoding='utf-8') != content:

@@ -56,7 +56,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
-    target = HERE.parent/'cctv-aptv.py'
+    target = HERE/'cctv-aptv.py'
     content = render()
     if args.check:
         if not target.exists() or target.read_text()!=content:

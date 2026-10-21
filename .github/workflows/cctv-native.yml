@@ -4,14 +4,10 @@ on:
   push:
     paths:
       - 'cctv-native/**'
-      - 'cctv-native.py'
-      - 'cctv-aptv.py'
       - '.github/workflows/cctv-native.yml'
   pull_request:
     paths:
       - 'cctv-native/**'
-      - 'cctv-native.py'
-      - 'cctv-aptv.py'
       - '.github/workflows/cctv-native.yml'
 
 permissions:
@@ -40,4 +36,4 @@ jobs:
       - name: Check Node syntax
         run: node --check cctv-native/engine.cjs
       - name: Check Python syntax
-        run: python -m py_compile cctv-native.py cctv-native/service.py cctv-native/cctv_native_ts.py cctv-native/build_service.py
+        run: python -m py_compile cctv-native/cctv-native.py cctv-native/cctv-aptv.py cctv-native/service.py cctv-native/cctv_native_ts.py cctv-native/build_service.py

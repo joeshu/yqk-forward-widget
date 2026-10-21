@@ -2,7 +2,22 @@
 
 使用 [央视官网直播](https://tv.cctv.com/live/) 对应的播放来源：APTV 手机版现提供 14 个已通过真实分片验证的频道，原 Python + Node 电脑版继续仅提供 CCTV-2。本服务独立于 `ysp-live`，不会替换成央视频或其他平台的来源。
 
-**APTV 手机实验版现已独立提供：[cctv-aptv.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-aptv.py)。** 用户 iPhone 日志已确认 Python 3.14.6 可以直接调用系统 JavaScriptCore 并执行微型 WASM。新版本使用该引擎，不依赖 Node、npm、浏览器、FFmpeg 或子进程；已在 Linux JavaScriptCore 中通过真实央视分片处理及连续解码验证，**用户已确认关闭 MitM 后可在 iPhone APTV 播放**。详见 [APTV 验证记录](APTV-VALIDATION.md)。原有 `cctv-native.py` 仍用于电脑/服务器，需要 Node。
+**APTV 手机实验版现已独立提供：[cctv-aptv.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-native/cctv-aptv.py)。** 用户 iPhone 日志已确认 Python 3.14.6 可以直接调用系统 JavaScriptCore 并执行微型 WASM。新版本使用该引擎，不依赖 Node、npm、浏览器、FFmpeg 或子进程；已在 Linux JavaScriptCore 中通过真实央视分片处理及连续解码验证，**用户已确认关闭 MitM 后可在 iPhone APTV 播放**。详见 [APTV 验证记录](APTV-VALIDATION.md)。原有 `cctv-native.py` 仍用于电脑/服务器，需要 Node。
+
+
+所有相关文件现集中在本目录：
+
+| 位置 | 用途 |
+| --- | --- |
+| `cctv-aptv.py` | APTV 手机直接加载的单文件入口 |
+| `cctv-native.py` | 电脑/服务器单文件入口，需要 Node |
+| `service.py`、`aptv_*.py`、`jscore_*.py`、`*.js` | 服务与引擎源码 |
+| `build_aptv.py`、`build_service.py` | 生成上述单文件 |
+| `tests/` | 回归测试 |
+| `vendor/` | 固定组件、依赖及来源说明 |
+| `*-VALIDATION.*`、`VALIDATION.md` | 历次测试记录 |
+
+APTV 原远程链接若指向仓库根目录，请改为本目录的新链接后重新加载；本地订阅地址不变。
 
 在 APTV 添加 Python 服务，远程链接填写上面的 `cctv-aptv.py`，加载最新代码并启动，然后订阅：
 
@@ -57,7 +72,7 @@ CPU 优化只省去输出校验中不会使用的字节映射，TS/PES/NAL 检�
 
 ## 下载与启动
 
-下载仓库根目录的单文件 [cctv-native.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/refs/heads/main/cctv-native.py)，保存到本地。无需同时下载本目录的源码。
+下载本目录的单文件 [cctv-native.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/refs/heads/main/cctv-native/cctv-native.py)，保存到本地。无需同时下载本目录的源码。
 
 首次安装独立运行依赖：
 
@@ -126,7 +141,7 @@ python cctv-native/build_service.py
 python -m unittest discover -s cctv-native/tests -v
 python cctv-native/build_service.py --check
 node --check cctv-native/engine.cjs
-python -m py_compile cctv-native.py cctv-native/service.py cctv-native/cctv_native_ts.py cctv-native/build_service.py
+python -m py_compile cctv-native/cctv-native.py cctv-native/cctv-aptv.py cctv-native/service.py cctv-native/cctv_native_ts.py cctv-native/build_service.py
 ```
 
 CI 运行 Python 3.10 / 3.12 与 Node 22 的离线检查，不执行官方接口实播。FFmpeg 可用于开发时验证输出解码，服务运行不依赖它。

@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parents[1]
 
 
 def load_service():
-    spec = importlib.util.spec_from_file_location('cctv_aptv_test', HERE.parent/'cctv-aptv.py')
+    spec = importlib.util.spec_from_file_location('cctv_aptv_test', HERE/'cctv-aptv.py')
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -26,7 +26,7 @@ class TestAPTVBuild(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('build_aptv', HERE/'build_aptv.py')
         builder = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(builder)
-        self.assertEqual((HERE.parent/'cctv-aptv.py').read_text(), builder.render())
+        self.assertEqual((HERE/'cctv-aptv.py').read_text(), builder.render())
         original = builtins.__import__
         def guarded(name, *args, **kwargs):
             if name.split('.')[0] in ('subprocess', 'shutil', 'signal'):
@@ -35,7 +35,7 @@ class TestAPTVBuild(unittest.TestCase):
         with mock.patch('builtins.__import__', side_effect=guarded):
             module = load_service()
         self.assertTrue(callable(module.main))
-        tree = ast.parse((HERE.parent/'cctv-aptv.py').read_text())
+        tree = ast.parse((HERE/'cctv-aptv.py').read_text())
         definitions = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
         self.assertIn('main', definitions)
         self.assertIn('start', definitions)
