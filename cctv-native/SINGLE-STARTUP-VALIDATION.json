@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-21",
+  "scope": "Four fresh official CCTV source/playlist/SDK runs on development network, alternating readiness threshold by channel. Different live segments and network conditions: not a controlled speedup estimate or APTV first-frame measurement. Each run followed by 16 seconds strict FFmpeg decode.",
+  "trials": [
+    {
+      "channel": "cctv2",
+      "startup_segments": 2,
+      "first_playlist_seconds": 10.657,
+      "initial_buffer_segments": 2,
+      "prefix_hits": 1,
+      "prefix_fallbacks": 0,
+      "startup_lookahead_saved_bytes": 391192,
+      "decode_returncode": 0,
+      "decode_error_bytes": 0,
+      "processed_segments": 5,
+      "source_gaps": 0,
+      "transport_retries": 0
+    },
+    {
+      "channel": "cctv2",
+      "startup_segments": 1,
+      "first_playlist_seconds": 3.928,
+      "initial_buffer_segments": 1,
+      "prefix_hits": 1,
+      "prefix_fallbacks": 0,
+      "startup_lookahead_saved_bytes": 420896,
+      "decode_returncode": 0,
+      "decode_error_bytes": 0,
+      "processed_segments": 5,
+      "source_gaps": 0,
+      "transport_retries": 0
+    },
+    {
+      "channel": "cctv12",
+      "startup_segments": 1,
+      "first_playlist_seconds": 5.929,
+      "initial_buffer_segments": 1,
+      "prefix_hits": 1,
+      "prefix_fallbacks": 0,
+      "startup_lookahead_saved_bytes": 284972,
+      "decode_returncode": 0,
+      "decode_error_bytes": 0,
+      "processed_segments": 5,
+      "source_gaps": 0,
+      "transport_retries": 0
+    },
+    {
+      "channel": "cctv12",
+      "startup_segments": 2,
+      "first_playlist_seconds": 2.987,
+      "initial_buffer_segments": 2,
+      "prefix_hits": 1,
+      "prefix_fallbacks": 0,
+      "startup_lookahead_saved_bytes": 233460,
+      "decode_returncode": 0,
+      "decode_error_bytes": 0,
+      "processed_segments": 5,
+      "source_gaps": 0,
+      "transport_retries": 0
+    }
+  ],
+  "tests": 181,
+  "native_jscore_tests": 11,
+  "pipeline_regression": "A blocked third boundary download cannot prevent the first complete validated output from being served in single-segment mode; two-segment fallback remains covered.",
+  "phone_first_frame": "pending",
+  "long_running_stability": "not established by these short tests"
+}

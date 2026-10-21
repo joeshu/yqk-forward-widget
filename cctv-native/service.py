@@ -695,7 +695,7 @@ class Channel:
                 _, old = self.ring.popitem(last=False)
                 self.size -= len(old[0])
                 self.discarded_discontinuities += bool(old[2])
-            if len(self.ring) >= 2:
+            if len(self.ring) >= getattr(self.args, 'startup_segments', 2):
                 first_ready = self.state != 'ready'
                 self.stage('ready')
                 if first_ready and not getattr(self, 'resumed_at', 0):
@@ -704,7 +704,7 @@ class Channel:
 
     def playlist(self):
         with self.condition:
-            if len(self.ring) < 2 or self.state != 'ready':
+            if len(self.ring) < getattr(self.args, 'startup_segments', 2) or self.state != 'ready':
                 return None
             entries = list(self.ring.items())[-6:]
             target = max(math.ceil(value[1]) for _, value in entries)
@@ -724,6 +724,7 @@ class Channel:
             return {'state': self.state, 'error': self.error, 'source': 'tv.cctv.com/'+self.channel_id,
                     'mode': 'official-runtime-original-ts', 'processed_segments': self.processed,
                     'buffer_bytes': self.size, 'buffer_segments': len(self.ring),
+                    'startup_segments': getattr(self.args, 'startup_segments', 2),
                     'source_gaps': self.source_gaps,
                     'transport_retries': self.transport_retries,
                     'last_transport_error': self.last_transport_error,

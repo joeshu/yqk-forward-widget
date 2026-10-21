@@ -15,6 +15,8 @@ def main(argv=None):
     parser.add_argument('--no-http-reuse', action='store_true', help='关闭上游 HTTPS 连接复用')
     parser.add_argument('--recent-channel-seconds', type=int, default=15,
                         help='最近一个频道的组件保留秒数（0 关闭，最多 30）；过旧分片不直接播放')
+    parser.add_argument('--startup-segments', type=int, choices=(1,2), default=1,
+                        help='首播完整分片数，默认 1；设为 2 恢复原缓冲策略')
     parser.add_argument('--buffer-mb', type=int, default=32)
     parser.add_argument('--idle-timeout', type=int, default=120)
     parser.add_argument('--jscore-library', default=APPLE_FRAMEWORK, help=argparse.SUPPRESS)
@@ -28,6 +30,7 @@ def main(argv=None):
     server.daemon_threads = True
     server.manager, server.args = manager, args
     print(f'APTV 央视网页原分片实验版：http://127.0.0.1:{args.port}/all.m3u', flush=True)
+    print('首播完整分片数：'+str(args.startup_segments)+'；--startup-segments 2 恢复两片缓冲。', flush=True)
     print('状态：/status；同源多频道，按需加载。首次选台下载并校验官方组件（默认内存缓存，不写磁盘）。', flush=True)
     try:
         server.serve_forever(poll_interval=0.2)

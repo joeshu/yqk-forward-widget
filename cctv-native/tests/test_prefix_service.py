@@ -136,3 +136,31 @@ class TestBoundaryDownload(unittest.TestCase):
         self.assertEqual(channel.error,'')
         self.assertEqual(source.call_count,2);self.assertEqual(channel.source_gaps,1)
         self.assertEqual(published,[(0,False),(1,False),(10,True),(11,False)])
+
+    def test_single_segment_ready_does_not_wait_for_second_segment_boundary(self):
+        channel=service.Channel(arguments(parallel_prepare=True,prefix_lookahead=True,startup_segments=1))
+        entries=[dict(seq=i,duration=4,url=BASE+str(i),discontinuity=False) for i in range(3)]
+        blocked=threading.Event();release=threading.Event();ready=threading.Event()
+        def get(url,**kwargs):
+            if kwargs.get('response_info'):
+                blocked.set();release.wait(3);return self.ranged,BASE,self.info
+            return self.raw,BASE
+        original=channel.publish
+        def publish(body,entry,discontinuity):
+            original(body,entry,discontinuity)
+            self.assertEqual(body,self.raw)
+            self.assertEqual(channel.playlist().count('#EXTINF:'),1)
+            ready.set();channel.stop.set()
+        with mock.patch.object(service,'Engine',return_value=mock.Mock(transform=lambda values:values)), \
+             mock.patch.object(service,'source_url',return_value=BASE), \
+             mock.patch.object(service,'media_playlist',return_value=(entries,BASE)), \
+             mock.patch.object(service,'get',side_effect=get), \
+             mock.patch.object(channel,'publish',side_effect=publish),mock.patch('builtins.print'):
+            channel.demand()
+            try:
+                self.assertTrue(blocked.wait(1))
+                self.assertTrue(ready.wait(1))
+                self.assertEqual(channel.counter,1)
+            finally:
+                release.set();channel.stop.set();channel.thread.join(3)
+        self.assertFalse(channel.thread.is_alive());self.assertEqual(channel.error,'')
