@@ -9,7 +9,7 @@ class ProgressiveTests(unittest.TestCase):
  def test_first_segment_published_before_second_finishes(self):
   ch=service.Channel('test','Test','https://example.test/main.m3u8')
   live=service.LiveService({}, {'test':ch});live.stopping.set();live.worker.join();live.active_channel='test'
-  live.sdk=Mock();source=Builder().stream();second=threading.Event();release=threading.Event();calls=[]
+  live.sdk=Mock();live.sdk.timings={};source=Builder().stream();second=threading.Event();release=threading.Event();calls=[]
   def transform(*args,**kwargs):
    calls.append(args)
    if len(calls)==2:second.set();release.wait(3)

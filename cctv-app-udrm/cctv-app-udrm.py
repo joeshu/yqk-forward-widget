@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.2.4: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.2.5: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -1380,7 +1380,7 @@ PYTHON_SOURCES = {
         'import signal\n'
         'import threading\n'
         'import time\n'
-        'from urllib.error import HTTPError\n'
+        'from urllib.error import HTTPError, URLError\n'
         'from urllib.parse import urljoin, urlsplit\n'
         'from urllib.request import Request, urlopen\n'
         '\n'
@@ -1391,7 +1391,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.2.4'\n"
+        "VERSION = '0.2.5'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'DEFAULTS = {\n'
         " 'cctv1': ('CCTV-1 综合', 'https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8'),\n"
@@ -1401,6 +1401,9 @@ PYTHON_SOURCES = {
         'MAX_TS = 16 * 1024 * 1024\n'
         '\n'
         'class LiveError(RuntimeError):\n'
+        '    pass\n'
+        '\n'
+        'class Superseded(LiveError):\n'
         '    pass\n'
         '\n'
         '\n'
@@ -1432,6 +1435,8 @@ PYTHON_SOURCES = {
         "        raise LiveError('Upstream HTTP ' + str(error.code)) from None\n"
         '    except LiveError:\n'
         '        raise\n'
+        '    except URLError as error:\n'
+        "        raise LiveError('Upstream transport URLError/'+type(error.reason).__name__) from None\n"
         '    except Exception as error:\n'
         "        raise LiveError('Upstream transport ' + type(error).__name__) from None\n"
         '\n'
@@ -1514,7 +1519,7 @@ PYTHON_SOURCES = {
         "        self.config['progress']=progress\n"
         "        self.prepared=None;self.phase='idle';self.client=None;self.relay=None\n"
         '        self.lock=threading.RLock();self.sessions=0;self.processed_frames=0\n'
-        '        self.license_records=[]\n'
+        '        self.license_records=[];self.timings={}\n'
         '    def _start(self):\n'
         '        if self.client is not None:return\n'
         "        self.phase='preparing'\n"
@@ -1543,22 +1548,39 @@ PYTHON_SOURCES = {
         '            self.client.close();self.client=None\n'
         '        if self.relay:\n'
         '            self.relay.__exit__(None,None,None);self.relay=None\n'
-        '    def transform(self,channel,source,reset=False,final_pes_complete=False):\n'
+        '    def transform(self,channel,source,reset=False,final_pes_complete=False,current=None):\n'
+        '        parse_started=time.monotonic()\n'
         '        plan=plan_ts(source,final_pes_complete=final_pes_complete)\n'
+        '        parsed=time.monotonic()\n'
         '        with self.lock:\n'
+        '            acquired=time.monotonic()\n'
+        '            if current is not None and not current():raise Superseded("Channel selection changed")\n'
         '            for attempt in range(2):\n'
         '                try:\n'
         '                    self._start()\n'
         '                    if reset or attempt:self.client.reset(channel)\n'
-        '                    replacements=[];group=[];size=0\n'
+        '                    replacements=[];group=[];size=0;sdk_seconds=0\n'
+        '                    def process_group(frames):\n'
+        '                        nonlocal sdk_seconds\n'
+        '                        if current is not None and not current():\n'
+        '                            self.client.reset(channel)\n'
+        "                            raise Superseded('Channel selection changed')\n"
+        '                        begin=time.monotonic()\n'
+        '                        result=self.client.process_batch(channel,frames)\n'
+        '                        sdk_seconds+=time.monotonic()-begin\n'
+        '                        return result\n'
         '                    for frame in plan.frames:\n'
         '                        if group and (len(group)>=4 or size+len(frame.data)>4*1024*1024):\n'
-        '                            replacements.extend(self.client.process_batch(channel,group));group=[];size=0\n'
+        '                            replacements.extend(process_group(group));group=[];size=0\n'
         '                        group.append(frame.data);size+=len(frame.data)\n'
-        '                    if group:replacements.extend(self.client.process_batch(channel,group))\n'
+        '                    if group:replacements.extend(process_group(group))\n'
         "                    if len(replacements)!=len(plan.frames):raise SDKError('SDK batch frame count mismatch')\n"
         '                    iterator=iter(replacements)\n'
         '                    result=transform_plan(plan,lambda data:next(iterator))\n'
+        "                    self.timings[channel]={'parse_seconds':round(parsed-parse_started,3),\n"
+        "                        'queue_seconds':round(acquired-parsed,3),'sdk_seconds':round(sdk_seconds,3),\n"
+        "                        'map_verify_seconds':round(time.monotonic()-acquired-sdk_seconds,3),\n"
+        "                        'video_pes':len(plan.frames)}\n"
         '                    self.processed_frames+=len(plan.frames)\n'
         '                    return result\n'
         '                except SDKError as error:\n'
@@ -1590,10 +1612,11 @@ PYTHON_SOURCES = {
         '    seconds: float = 0\n'
         '    ready: object = field(default_factory=threading.Event)\n'
         '    realtime_ratio: float = 0\n'
+        '    failures: int = 0\n'
         '\n'
         '\n'
         'class LiveService:\n'
-        '    def __init__(self,prepared,channels,max_bitrate=2500000):\n'
+        '    def __init__(self,prepared,channels,max_bitrate=600000):\n'
         '        self.sdk=MediaSDK(prepared);self.channels=channels;self.max_bitrate=max_bitrate\n'
         "        self.pool=ThreadPoolExecutor(max_workers=4,thread_name_prefix='upstream')\n"
         "        self.refresh_pool=ThreadPoolExecutor(max_workers=min(4,len(channels)),thread_name_prefix='refresh')\n"
@@ -1629,6 +1652,7 @@ PYTHON_SOURCES = {
         '                for entry in fetches:ch.raw[self.token(ch,entry)]=futures[entry].result()[0]\n'
         '                decoded=[];discontinuities=media.discontinuity_sequence\n'
         '                for index,entry in enumerate(media.entries):\n'
+        "                    if self.active_channel and self.active_channel!=ch.ident:raise Superseded('Channel selection changed')\n"
         '                    token=self.token(ch,entry)\n'
         '                    if token not in ch.cache:\n'
         '                        source=ch.raw[token];complete=False\n'
@@ -1646,10 +1670,12 @@ PYTHON_SOURCES = {
         '                        transform_started=time.monotonic()\n'
         '                        output=self.sdk.transform(ch.ident,source,\n'
         '                            reset=entry.discontinuity or entry.seq!=ch.last_seq+1,\n'
-        '                            final_pes_complete=complete)\n'
+        '                            final_pes_complete=complete,current=lambda:self.active_channel in (None,ch.ident))\n'
         '                        elapsed=time.monotonic()-transform_started\n'
         '                        ch.realtime_ratio=round(elapsed/max(entry.duration,0.001),3)\n'
         "                        if ch.realtime_ratio>1:LOG.warning('%s 分片处理 %.2fs / 视频 %.2fs，低于实时速度',ch.ident,elapsed,entry.duration)\n"
+        '                        timing=self.sdk.timings.get(ch.ident,{})\n'
+        "                        LOG.info('%s 分片耗时：排队 %.2fs，SDK %.2fs，映射校验 %.2fs，视频 %.2fs',ch.ident,timing.get('queue_seconds',0),timing.get('sdk_seconds',0),timing.get('map_verify_seconds',0),entry.duration)\n"
         '                        ch.last_seq=entry.seq\n'
         '                        decoded.append((token,output))\n'
         '                        with ch.cache_lock:ch.cache[token]=output\n'
@@ -1661,10 +1687,14 @@ PYTHON_SOURCES = {
         '                self._publish(ch,media)\n'
         '                ch.seconds=round(ch.updated-started,3)\n'
         "                if decoded:LOG.info('%s 更新 %s 个分片，耗时 %.2fs',ch.ident,len(decoded),ch.seconds)\n"
+        '            except Superseded:\n'
+        "                for future in locals().get('futures',{}).values():future.cancel()\n"
+        '                return\n'
         '            except Exception as error:\n'
         "                for future in locals().get('futures',{}).values():future.cancel()\n"
         '                ch.error=str(error) if isinstance(error,(LiveError,TSFormatError,SDKError,BootstrapError)) else type(error).__name__\n'
-        '                ch.retry_at=time.monotonic()+3\n'
+        '                ch.failures+=1\n'
+        '                ch.retry_at=time.monotonic()+min(30,3*(2**min(ch.failures-1,4)))\n'
         "                LOG.warning('%s 暂不可用：%s',ch.ident,ch.error)\n"
         '                # A previously valid playlist can bridge one transient CDN failure.\n'
         '                if ch.playlist and time.monotonic()-ch.updated<ch.playlist.target*2:return\n'
@@ -1687,7 +1717,7 @@ PYTHON_SOURCES = {
         '                ch.cache.pop(token)\n'
         '        while len(ch.raw)>8:ch.raw.popitem(last=False)\n'
         '        while len(ch.history)>8:ch.history.popitem(last=False)\n'
-        "        ch.playlist=media;ch.updated=time.monotonic();ch.error='';ch.retry_at=0\n"
+        "        ch.playlist=media;ch.updated=time.monotonic();ch.error='';ch.retry_at=0;ch.failures=0\n"
         '        ch.ready.set()\n'
         '    def playlist_bytes(self,ch):\n'
         '        ch.last_active=time.monotonic()\n'
@@ -1728,6 +1758,7 @@ PYTHON_SOURCES = {
         "        return {'version':VERSION,'uptime_seconds':round(time.monotonic()-self.started),\n"
         "            'engine':'javascriptcore-unicorn-wasm','jdk_required':False,'sdk_phase':self.sdk.phase,\n"
         "            'preparation_progress':self.sdk.progress,'preparation_error':self.sdk.error,\n"
+        "            'media_timings':dict(self.sdk.timings),'max_bitrate':self.max_bitrate,\n"
         "            'sdk_sessions':self.sdk.sessions,'processed_video_pes':self.sdk.processed_frames,\n"
         "            'license_exchanges':self.sdk.license_records,\n"
         "            'channels':{ch.ident:{'name':ch.name,'cached_segments':len(ch.cache),\n"
@@ -1810,7 +1841,7 @@ PYTHON_SOURCES = {
         "    parser.add_argument('--setup-only',action='store_true')\n"
         "    parser.add_argument('--doctor',action='store_true',help='只检查本机JavaScriptCore能力，不访问节目源')\n"
         "    parser.add_argument('--warmup',action=argparse.BooleanOptionalAction,default=True)\n"
-        "    parser.add_argument('--max-bitrate',type=int,default=2500000)\n"
+        "    parser.add_argument('--max-bitrate',type=int,default=600000)\n"
         "    parser.add_argument('--source',action='append',default=[],metavar='ID=URL')\n"
         '    args=parser.parse_args(argv)\n'
         '    if args.port_override is not None:args.port=args.port_override\n'

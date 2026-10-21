@@ -1,0 +1,178 @@
+{
+  "version": "0.2.5",
+  "recorded_at_utc": "2026-10-21T16:34:41.505047+00:00",
+  "script_sha256": "56f1759aa215ed8712fa069a7c2d0cd13de84b4e882b73ef258e422764eca604",
+  "iphone_aptv_device_tested": false,
+  "regressions_passed": 34,
+  "source_variants_observed": {
+    "cctv1": {
+      "previous_bitrate": 1800000,
+      "selected_bitrate": 600000,
+      "advertised_resolution": "640x360"
+    },
+    "cctv7": {
+      "previous_bitrate": 1800000,
+      "selected_bitrate": 600000,
+      "advertised_resolution": "640x360"
+    },
+    "guizhou": {
+      "lowest_advertised_bitrate": 800000
+    }
+  },
+  "final_artifact_samples": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 4.839
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.736
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.609
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "forced_native_usleep_probes": [
+      {
+        "microseconds": 20000,
+        "result": 0,
+        "elapsed_seconds": 0.0235
+      }
+    ],
+    "wall_seconds": 7.111,
+    "script_sha256": "56f1759aa215ed8712fa069a7c2d0cd13de84b4e882b73ef258e422764eca604"
+  },
+  "live_validation": {
+    "version": "0.2.5",
+    "environment": "Linux JavaScriptCoreGTK; single selected channel, sequential 20s audio/video decodes; not iPhone",
+    "script_sha256": "56f1759aa215ed8712fa069a7c2d0cd13de84b4e882b73ef258e422764eca604",
+    "channels": [
+      {
+        "channel": "cctv1",
+        "first_playlist_seconds": 5.909,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "498",
+        "duration": "00:00:20.000000"
+      },
+      {
+        "channel": "cctv7",
+        "first_playlist_seconds": 26.958,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "495",
+        "duration": "00:00:20.000000"
+      },
+      {
+        "channel": "guizhou",
+        "first_playlist_seconds": 5.892,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "500",
+        "duration": "00:00:20.000000"
+      }
+    ],
+    "status": {
+      "version": "0.2.5",
+      "uptime_seconds": 99,
+      "engine": "javascriptcore-unicorn-wasm",
+      "jdk_required": false,
+      "sdk_phase": "ready",
+      "preparation_progress": "官方SDK和无JDK解释器已校验就绪",
+      "preparation_error": null,
+      "media_timings": {
+        "cctv1": {
+          "parse_seconds": 0.008,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.268,
+          "map_verify_seconds": 0.003,
+          "video_pes": 95
+        },
+        "cctv7": {
+          "parse_seconds": 0.004,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.222,
+          "map_verify_seconds": 0.004,
+          "video_pes": 100
+        },
+        "guizhou": {
+          "parse_seconds": 0.006,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.105,
+          "map_verify_seconds": 0.005,
+          "video_pes": 100
+        }
+      },
+      "max_bitrate": 600000,
+      "sdk_sessions": 1,
+      "processed_video_pes": 2000,
+      "license_exchanges": [
+        {
+          "request_bytes": 368,
+          "http_status": 200,
+          "response_bytes": 232,
+          "business_status": 0,
+          "protected_license_count": 1
+        }
+      ],
+      "channels": {
+        "cctv1": {
+          "name": "CCTV-1 综合",
+          "cached_segments": 7,
+          "playlist_age_seconds": 59.76,
+          "last_refresh_seconds": 6.492,
+          "processing_to_video_ratio": 0.074,
+          "error": ""
+        },
+        "cctv7": {
+          "name": "CCTV-7 国防军事",
+          "cached_segments": 7,
+          "playlist_age_seconds": 19.24,
+          "last_refresh_seconds": 3.492,
+          "processing_to_video_ratio": 0.057,
+          "error": ""
+        },
+        "guizhou": {
+          "name": "贵州卫视",
+          "cached_segments": 6,
+          "playlist_age_seconds": 2.67,
+          "last_refresh_seconds": 1.546,
+          "processing_to_video_ratio": 0.029,
+          "error": ""
+        }
+      }
+    }
+  },
+  "upstream_observation": "CCTV-7 experienced one upstream TimeoutError; first playlist 26.958s includes recovery. Not all first-play times improved.",
+  "limitations": "Linux development environment, not iPhone. Lower bitrate and cancellation reduce workload but do not establish sustained real-time smartphone performance."
+}
