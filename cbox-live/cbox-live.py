@@ -2,7 +2,7 @@
 """央视影音 VDN 单文件代理。Python 3.10+，仅使用标准库。
 
 推荐 /aptv.m3u 同台多源订阅。央视频签名仅需 Python 标准库；网页 CDRM 可选 Node.js 18+。
---api-mode app 保留原抓包协议，但该模式的 UDRM 视频处理尚未实现。
+--api-mode app 保留原协议研究入口；实时签名和 UDRM 视频处理尚未实现。
 HTTP 200 不代表视频可正常解码。用 --doctor 检查实际视频样本。
 参考用户提供的 ysp-live v9.5 的本地 HTTP 服务、M3U 和诊断入口形式；
 原有两种模式使用央视影音 VDN；新增央视频 bkliveinfo 和各地官方源，完整来源入口 /combined.m3u。
@@ -10,7 +10,6 @@ HTTP 200 不代表视频可正常解码。用 --doctor 检查实际视频样本�
 """
 from __future__ import annotations
 import argparse
-import copy
 import base64
 import collections
 import concurrent.futures
@@ -38,11 +37,9 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = '1.5.9'
+VERSION = '1.6.0'
 CONFIG_CATALOG_B85 = 'ABzY8000000t4-xO>f-B9menZ6oJoiyffs!C_oN24AcRH)PRFtibCMqa!7H9yE~+o+{i$42!i%n6zHWd$D%#A=od=be2bD?EiJ#uk+-hBKXZ)OP{@_^`#&7c^UQEae*MwM&7V7dQmnlqI!p9Czw_D0Uw2!(J&&F|Y&P8a&+q>D{kOll^U1RvSKI&j?GOL@_WJfm-S!{<{)ZQ~Kl!TL@xx!fdtt}vZu>vJ`S<Ui+x~dB{ZHTg`0GDk-+q7hi@*EZ_rLw?oo@5fPoA$Lj7-3-A_(<Q9uEI=DMzEb&SW%txf=g-(QLmf#q&EK?RPrOPVwS*es#5X*6x(g?>ycA&Su}V+4UT5X`=PbyubM3@w1=%BJSzWfA+<f&wliaz+b+wzhi!0D&=V%W&7Xz%l><x5nTUV`=f%OxDeNVOSeDs+g&ehzACHT_vGQ_qlcG`N|&b(FPmfc;t$B<M4w&zd~=*GpS<+3$Ll0tCq><U;^iL_t{1Pw@X9dBcYFFBPd~Y3t#UxMI&WSpvru<H2i03d>m=|7RB=?U^JO%kg2zLub(xiBK=n?B(kD*`bWmqQIjCupl><7iVl<>;hcpZjLmCGNXF$aUD#^kj9o!+MMR7xX8hwz(4kkj$!T78kjLFKuIIR32?DgYU{JBN-UMLQnLgpQ5FRx2&#G6|XwA73B5K3*E?|dEUKn-OS@2x#Q35HVbx-=&7^iayJlDZs9ttUe%G|UHax)xrtN(Rw-t3;niVXouFO+C}=O!od!Ty#A@6QkK^c|b;Zz5K7({niWck36)F-fpFGFqJxksni`zr3Wv0fYy8Hf(K~1<Ka|#*kT80wUfbAIvq@<v%yq)*ir{*v4<>lpq4tE)Gvk;`^9i_|A7k}s0Vg9>F|)n4b)Nxk(h!5Cz<Xa2e<<yFOs@Umbbk`dy#}uepb}W=oX8J+Qx^ONbh8jR)$sv$I8&k;94148OBzIR)&d{p_O53WoTuXSs7XxPOJ=Fd>UCDIvs3|-05J0<W2{hBzHR4D7n+YX33onHcakxuxWCqgN>6r9c-T5%|qEdxzoYs$(;^1PwsTEd2*+N&67JF2A?Op+s;Do+#AY`XJ>g<FP2F#5`(K)4z6McdZ$NUfcwr082x_=7}E=w&<mIX3s`tXpza^iMZfpc_X=Hd(H$<j%S9hk(I0S6(+Aws^a1xYeZW0UA0SWDc6f(8Njq@jDXN2|H-x3drf9!Y45w5%oKl_Pl<E$rRN{DiM?S%lPqE}PEcpqR{MKs$j}TpO(Ipq%;i9`-bfS}Pyd?0FL&k!quSGw7XXuiP?r_mvAbJqpcq`~}U;m44e0tc?b30IO;)J9sHS$S@TNR~=r(+<xr&XB%xwFK}b%K<<Xqrlz5Zigz$SY!VF-f3G=2KEtuHzN6rK>2(8hUEq7?;Ub<t5Tc{U|{;7-j&dOU(q2OKOj<B4!ge&6f^R@ifU2Y#VPMlTN(q9wm!N$1%}_TFIHcVjH)VM?6QXWDCt&o;Jir-i|@5#3K$v*WN|*6%X8JPJ*`G;hcGLwwXm#%>GbQN1v_e(A3gNj_l6;8{Z^w<ZUI=+vYD*ahHiLnb;F1_LPY|V`4i@>=R-RH&x2)Om^gBEcpye&TZ!omRxX8Q2|!n<)Tx2#*%4ARXgg8o4=bVF^V}`;VqDZxE;8_l1nVPgC%#lOSgO_$?(Jpt}rSth^x0k=!)%-Ik4MxEp_rvC(hsEd#&P)ahcp2dAnIF_>?L*@vh2Eycr27w}f&#P;M8>J%(~mpxjd^H}O#fX&oc`@0MFaxg97svH#A>APK!3*~a(m#C9HfnkxGhI#Kn)OWI{-NZI%7WZfMwy9;I?gV`rwc4AVm(jo|z*+S7(wJf0Mi`r1zOH3qJ##D18_a<X<FMOkr;LEx|a#t#>VkCLI2$?OVh__Vm8VOz#8+f!ZUh^}N;I(3MZ{~&xzO0r+@@=}=X0`IE=v4tF_x(&!(KDjxsZlCqUMDh&d7Y@?cA?x3l$$scx22w#TjqJWWj60Evo{G<U9ZdnOI}dPoBxOx%#|_eHe`}-Q?n#4e5y^Y=TPt}R8Y+u@PIg-<r}lD{4k5D?9m!Z?gs`+UKCL96gjJ9OlIPMN<QBh<OPZjK27H)q{0`-g$bDn=S3Yt$>VuOyr!j#!Vl9BiXPSm%f5_}E1z2QOl^^}*HsoEmsiwP75auszMLb$RiG6Vye9T6MXl1J))^MvK*@E1Z7*x2=wVu~>P%qCC6heb5U*b>!nE;F<5STWDy^%OOdqGnt4Eayi^4F;4Kk*0+NL6?;KW|NN>*h=97Wg2r6MZZ)<J*-uaMKZD%&8}hBn;Hb`qO9+ZIco$)2S}jGX&#*v)cVg;e3gCA7_$>fEeSD!EyO+cg(IAd+v33Q3K;np<cjHL)w4t2hYb1(jSY=8aqFLNRZCO8q(W)~D30kqfyS@-z)ICVB18nc&_$tdMuJ)`e+8))9b@-W<Hz#!PTOt(oB4dJY87(l{_%qtB0GmFOY#n>eeBI;#wnKde=C9M^{qqBq2Lqbsv4!bMyMDqEBJsq9KEGa$Q(wK<B*E^i91+Gi^v$vep<5Ijsnq~Obf*~FK193a7~V5OMg;XGX-$%|AeE;z9_+}5igte72(!J6k4I<djT&4>=Ec{>ypSa4!f@swgVm3gp1a%W2uFH+6y6Lr1uH%xSO4$bBrxTJzRRB)FHKBj_CsNhp7_z4vJDBciy5IAxcaT}i_ozu@^WN+AV6MeJVFeipKL0whM`A_3BC(8YTIr$l`nS%&zsDq!HI+t~YF1hFq7v1HekGbd*F8Y*<KI5XFV9}97&{dc*y|e?DRB(q1?oz?WRPYHEoampXhOS6V6|;%QS&hBcjJ=S>jE9Q4fJGr&O3O`j`(nXtCoQ*xa#P#Mn8{r%m{a^F-3HinMdd~=Zw{*!bcVmXAB%baLA{x0Nbbc^yz}<Wxy_n*k8?A&XEyK-TvEY_V~D_8g$g+<k)_Bc9tVLgE~GoUn{9n`1>&yB=Ew??rKdyh)!^ba;Ex_&KKbh5<>|xAmm#w}PW0LJ4?k%>{l1^*va3{#Mx$F+>y?H2spH3!p-OTcFT5Q21mPZDlHnaPyi0~3li??1_$e8FMutBD!ym;em4o5Q4lBqGE65Hj$PO#W4lBqGE65Hj$PO#W4lBtHE6ENk$qp;Y4l9WcJNA}K;=94JK$Uvq>EoSZ6mPFsPsdrA*QKtLBY8r~o0bqnMkPe<ptv||_1B)J;s<_SF&j-!FVXZwQ`6A~*=Aa93FW4?6Bo)ohH_7!+*2s`49b1N<VMcUx7<*_6i~msaXGR$dT>bvcc|bl6?{wupHRW4RPY%U`~(UvMpSUBa|)_+3aWDos&fjea|)_+3aWDos&fjeb4sFfE~0fD5eNAlxTJzRRB)FHKBj_CsNhp7_>2mELIp=okMGE_-YKx=DX{J-u=Xji{wc5qDzFYJuofz?9x9=im`#>kMA*xo9lRvNJ7jp53_m8rPss37GW?7Te*%WbUK;J-$qp;X4lBqGE65Hj$PO#W4lBqGE65Hj$PSCVgxcN|B^RCc&|A88^b$?)K<R}znx->41b_S?;1eGnyLjEa*-O9XA_=4Xtf-gKPd=xyyFI+SpZtA2sPQl<q?KYXg=3}IOW|56_EL<k6niNqR*Jn8Q!B+@ikX#SFU5(K;!28JuT2_&6gF-4QrNWFOJUPyFNIB;y%aWW_EOli*-K&5W-o<Jo4ph^ZSJLzHf{D&*tFS8Vbf+Wg-x5i6gF-4QrNWFOJUPyFNIB;y%aWW_EOlixtGGRX|tEYrp;aon>KqXY})LluxYcG!lun$3Y#{2DQw#8rLbwUm%^say%erZo4ph^ZT3>wwAo8x(`GM)O`E+GHf{D&*tFS8Vbf+Wg-x5i6gF+{r5M|^*-K&5W-o<Jo4ph^ZT3>wwAo8x(`GM)O`E+GHf{D&*tFS8VbkVbiphtcHuqoM>h0c1;3Z;oz#}P7Ut7cJJ9rIy$1cI_4w&6VvU?%<@h@ja<(m<kUZUx#53f0ka~;<Sx9wc<OE^Eh{kU-cF_nM!%3*`Xmu!58h;LNV{$Gsj`FnU`x8KC%VxF%T5mNeR^la@NG`)+aAEW6fX!<ET=&*ARJLaJ2T{Jy=crroLvwO@Ln*M}Lk9;TQGkUbw3bfY>wATu>*9x@P3bfY>wATu>*9x@PBHx{9l$S?q=nQO!F1hFq7oF&@t5ubFc~v6USoH9c4DXQP(QSTAhMyqe166KSu493wmuPxshZB1_xaI8WC7Pbua_U6aWmF_}3B<3<tkm2kA=mIF8{c8$yKMY18-K#apR)01Z2S{6KJs$gHGH<~A}_d=20H!PfnybSsNlqG6PI~29``h|o%isP4DTS}n@+tMjzgQx6+E%os4{HtNh)=nK*!?GSHM38#Piq78~W88tNpgSFYkcX|7iEXh12)<%!U7@-~&#U8>@W}Yca&=kh}li)gcpatyVb_v##DD6x($r@6LzbGPtCIJ5+F&3O=TSPpIHiD)@{FenJI*hts=nn;h$%0&AWE>z)E@p91Tj0&AcG>!1Q_p#tln66>LoJO0FasKk1x#CoX2dZ@&DsKk1x#CoX2dZ>f-PzURw4tEk4>!A+TLmjM#I#>_IUJM%@TCE&ZwKtqn;={Yp*;TvDN;8Ct%`#sXrii?SH>`5~VU-&UtK4un<sxqzxI&j)bcc)Xa?!_J^a&Sz%0-`X(NDPO<SvHX$B;W2axX*fX2|^v^PzuN?Bv`I4(<}1+$GpoCD>Ob*jFXkS0&h2CD>OTu&+8`Uv<b6Vqjl&z`p8$eboW`ssr{_2kfg3*jHV!uexAgb-}*slCLy@eboi~s*8OIOrF(?WfFj2XuYpM;wwPD)>>&p#9pa$PshGTd<3MY{lwEiavdd$NXKzWTwQ(zzfs86zV+ItYa!9Aq=hFocmJRz+DE}Hq1+CX+l6uyLwl9zxbPCAJQb1g8#hvA&aEKMn=FtcyLKtgHGRo*_tmd<pS-ioygFJpA9+^uor`E~l3aK7etKQIJLP(p{flDx*}Z$a@BK8;#YOYaJyUo(^w#0Mz|X5kp?SR9Z8r1WFMs;c)Bge<5B*OpV*&s'
-NOTICE = 'App UDRM 尚未修复；网页 CDRM 已通过连续样本解码验证，各频道需单独检查。'
-# EMBEDDED_PROFILES 在构建时由用户提供的成功抓包提取，不包含 Cookie。
-EMBEDDED_PROFILES = {'cctv1': {'url': 'https://vdnx.live.cntv.cn/api/v3/vdn/live?channel=cctv1&starttime=1792517101200&vn=3002&ifdwk=0&video-player=1&pdrm=1&iflv=1&uid=ateUbgIoOAADALXs1kck00N7', 'headers': {'origin': 'https://cboxios.cctv.com', 'auth-key': '1792517101200-135-fb6ad6d9d7a5e89029f040eb4dd530ed', 'vtoken': '', 'user-agent': '', 'referer': 'https://cboxios.cctv.com', 'accept-language': 'zh-CN,zh-Hans;q=0.9'}, 'captured_at': '2026-10-20T17:25:01.204Z', 'source': 'github-capture.har'}, 'cctv4': {'url': 'https://vdnx.live.cntv.cn/api/v3/vdn/live?channel=cctv4&starttime=1792515603668&vn=3002&ifdwk=0&video-player=1&pdrm=1&iflv=1&uid=ateUbgIoOAADALXs1kck00N7&hbss=1792515603628', 'headers': {'auth-key': '1792515603668-609-06e52a281d5b1b99aa8f16edc74b866d', 'accept-language': 'zh-CN,zh-Hans;q=0.9', 'origin': 'https://cboxios.cctv.com', 'user-agent': '', 'referer': 'https://cboxios.cctv.com', 'vtoken': ''}, 'captured_at': '2026-10-20T17:00:03.691Z', 'source': '1-HTTPS_Capture_Session_1792515600_51436445.har'}, 'cctv2': {'url': 'https://vdnx.live.cntv.cn/api/v3/vdn/live?channel=cctv2&starttime=1792517118363&vn=3002&ifdwk=0&video-player=1&pdrm=1&iflv=1&uid=ateUbgIoOAADALXs1kck00N7', 'headers': {'origin': 'https://cboxios.cctv.com', 'auth-key': '1792517118363-199-f5b8d9e7978b4b9e0f6b687ec8977b97', 'vtoken': '', 'user-agent': '', 'referer': 'https://cboxios.cctv.com', 'accept-language': 'zh-CN,zh-Hans;q=0.9'}, 'captured_at': '2026-10-20T17:25:18.366Z', 'source': 'github-capture.har'}}
+NOTICE = '原 App 实时签名与 UDRM 处理尚未实现；网页 CDRM 已通过连续样本解码验证，各频道需单独检查。'
 CATALOG = {'cctv1': {'name': 'CCTV-1 综合', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv1.png?q=75', 'group': '央视'}, 'cctv2': {'name': 'CCTV-2 财经', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv2.png?q=75', 'group': '央视'}, 'cctv3': {'name': 'CCTV-3 综艺', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv3.png?q=75', 'group': '央视'}, 'cctv4': {'name': 'CCTV-4 (亚洲)', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv4.png?q=75', 'group': '央视'}, 'cctveurope': {'name': 'CCTV-4 (欧洲)', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctveurope.png?q=75', 'group': '央视'}, 'cctvamerica': {'name': 'CCTV-4 (美洲)', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctvamerica.png?q=75', 'group': '央视'}, 'cctv5': {'name': 'CCTV-5 体育', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv5.png?q=75', 'group': '央视'}, 'cctv5plus': {'name': 'CCTV-5+ 体育赛事', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv5plus.png?q=75', 'group': '央视'}, 'cctv6': {'name': 'CCTV-6 电影', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv6.png?q=75', 'group': '央视'}, 'cctv7': {'name': 'CCTV-7 国防军事', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv7.png?q=75', 'group': '央视'}, 'cctv8': {'name': 'CCTV-8 电视剧', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv8.png?q=75', 'group': '央视'}, 'cctvjilu': {'name': 'CCTV-9 纪录', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctvjilu.png?q=75', 'group': '央视'}, 'cctv10': {'name': 'CCTV-10 科教', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv10.png?q=75', 'group': '央视'}, 'cctv11': {'name': 'CCTV-11 戏曲', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv11.png?q=75', 'group': '央视'}, 'cctv12': {'name': 'CCTV-12 社会与法', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv12.png?q=75', 'group': '央视'}, 'cctv13': {'name': 'CCTV-13 新闻', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv13.png?q=75', 'group': '央视'}, 'cctvchild': {'name': 'CCTV-14 少儿', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctvchild.png?q=75', 'group': '央视'}, 'cctv15': {'name': 'CCTV-15 音乐', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv15.png?q=75', 'group': '央视'}, 'cctv16': {'name': 'CCTV-16奥林匹克', 'logo': 'https://p3.img.cctvpic.com/oms/upload/image/20211025/oms_pic_2025826477904584704.png?q=75', 'group': '央视'}, 'cctv17': {'name': 'CCTV-17农业农村', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cctv17.png?q=75', 'group': '央视'}, 'guangdong': {'name': '广东卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/guangdong.png?q=75', 'group': '卫视'}, 'btv1': {'name': '北京卫视', 'logo': 'https://p2.img.cctvpic.com/oms/upload/image/20221021/oms_pic_2287685355677843456.png?q=75', 'group': '卫视'}, 'dongfang': {'name': '东方卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/dongfang.png?q=75', 'group': '卫视'}, 'cetv1': {'name': 'CETV-1', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cetv1.png?q=75', 'group': '教育'}, 'cetv2': {'name': 'CETV-2', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/cetv2.png?q=75', 'group': '教育'}, 'neimenggu': {'name': '内蒙古卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/neimenggu.png?q=75', 'group': '卫视'}, 'dongnan': {'name': '东南卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/dongnan.png?q=75', 'group': '卫视'}, 'henan': {'name': '河南卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/henan.png?q=75', 'group': '卫视'}, 'guangxi': {'name': '广西卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/guangxi.png?q=75', 'group': '卫视'}, 'guizhou': {'name': '贵州卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/guizhou.png?q=75', 'group': '卫视'}, 'gansu': {'name': '甘肃卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/gansu.png?q=75', 'group': '卫视'}, 'tianjin': {'name': '天津卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/tianjin.png?q=75', 'group': '卫视'}, 'liaoning': {'name': '辽宁卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/liaoning.png?q=75', 'group': '卫视'}, 'jiangxi': {'name': '江西卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/jiangxi.png?q=75', 'group': '卫视'}, 'hubei': {'name': '湖北卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/hubei.png?q=75', 'group': '卫视'}, 'travel': {'name': '海南卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/travel.png?q=75', 'group': '卫视'}, 'yunnan': {'name': '云南卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/yunnan.png?q=75', 'group': '卫视'}, 'qinghai': {'name': '青海卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/qinghai.png?q=75', 'group': '卫视'}, 'hebei': {'name': '河北卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/hebei.png?q=75', 'group': '卫视'}, 'jilin': {'name': '吉林卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/jilin.png?q=75', 'group': '卫视'}, 'shandong': {'name': '山东卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/shandong.png?q=75', 'group': '卫视'}, 'chongqing': {'name': '重庆卫视', 'logo': 'https://p3.img.cctvpic.com/oms/upload/image/2024/01/10/oms_pic_2610873786987241472.png?q=75', 'group': '卫视'}, 'xizang': {'name': '西藏卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/xizang.png?q=75', 'group': '卫视'}, 'ningxia': {'name': '宁夏卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/ningxia.png?q=75', 'group': '卫视'}, 'shan1xi': {'name': '山西卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/shan1xi.png?q=75', 'group': '卫视'}, 'heilongjiang': {'name': '黑龙江卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/heilongjiang.png?q=75', 'group': '卫视'}, 'anhui': {'name': '安徽卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/anhui.png?q=75', 'group': '卫视'}, 'sichuan': {'name': '四川卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/sichuan.png?q=75', 'group': '卫视'}, 'shan3xi': {'name': '陕西卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/shan3xi.png?q=75', 'group': '卫视'}, 'xinjiang': {'name': '新疆卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/xinjiang.png?q=75', 'group': '卫视'}, 'xianggangweishi': {'name': '香港卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/xianggangweishi.png?q=75', 'group': '卫视'}, 'shenzhen': {'name': '深圳卫视', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/shenzhen.png?q=75', 'group': '卫视'}, 'btv5': {'name': 'BRTV财经', 'logo': 'https://p3.img.cctvpic.com/oms/upload/image/20221021/oms_pic_2287680770416058368.png?q=75', 'group': '地方'}, 'btv2': {'name': 'BRTV文艺', 'logo': 'https://p2.img.cctvpic.com/oms/upload/image/20221021/oms_pic_2287681502110711808.png?q=75', 'group': '地方'}, 'btv3': {'name': 'BRTV纪实科教', 'logo': 'https://p2.img.cctvpic.com/oms/upload/image/20221021/oms_pic_2287681983920480256.png?q=75', 'group': '地方'}, 'btv4': {'name': 'BRTV影视', 'logo': 'https://p3.img.cctvpic.com/oms/upload/image/20221021/oms_pic_2287682567262601216.png?q=75', 'group': '地方'}, 'btv7': {'name': 'BRTV生活', 'logo': 'https://p3.img.cctvpic.com/oms/upload/image/20221021/oms_pic_2287682959986294784.png?q=75', 'group': '地方'}, 'btv9': {'name': 'BRTV新闻', 'logo': 'https://p3.img.cctvpic.com/oms/upload/image/20221021/oms_pic_2287683883370708992.png?q=75', 'group': '地方'}, 'neimenggu2': {'name': '蒙语台', 'logo': 'https://app.cctv.com/special/appchannellogo/square/l/neimenggu2.png?q=75', 'group': '地方'}, 'cetv3': {'name': 'CETV-3', 'logo': 'https://p2.img.cctvpic.com/oms/upload/image/20200723/CkcN5V8ZYPqAZ-H6AAC4YS6PfYg036.png?q=75', 'group': '教育'}, 'cetv4': {'name': 'CETV-4', 'logo': 'https://p2.img.cctvpic.com/oms/upload/image/20200902/CkYiPl9O9W6AGR4tAAC0PByEHDg033.png?q=75', 'group': '教育'}}
 NAMES = {'cctv1': 'CCTV-1 综合', 'cctv2': 'CCTV-2 财经', 'cctv4': 'CCTV-4 中文国际'}
 API_HOSTS = {'vdnx.live.cntv.cn', 'vdnxbk.live.cntv.cn'}
@@ -64,7 +61,7 @@ class AppRequestError(LiveError):
     def __init__(self, code):
         value = str(code)
         self.business_status = value if re.fullmatch(r'[0-9]{1,5}|unknown', value) else 'invalid'
-        super().__init__('原 App VDN 业务拒绝（status=' + self.business_status + '）；请更新该频道的有效 HAR 请求模板')
+        super().__init__('原 App VDN 业务拒绝（status=' + self.business_status + '）；需实现原 App 实时签名并核对该频道授权状态')
 
 
 class PlaylistPendingError(LiveError):
@@ -115,10 +112,6 @@ def complete_hls_status(status, headers, size):
     return bool(match and int(match[1]) + 1 == int(match[2]) == size and size > 0)
 
 
-def normalized_app_sid(value):
-    for _ in range(2):
-        value = urlparse.unquote(value)
-    return value
 
 
 def valid_media_url(value):
@@ -132,87 +125,6 @@ def valid_media_url(value):
         return False
 
 
-def har_profiles(paths):
-    result = {}
-    for path in paths:
-        root = json.loads(Path(path).read_text(encoding='utf-8-sig'))
-        entries = root.get('log', {}).get('entries', [])
-        media_contexts = {}
-        media_records = []
-        for entry in entries:
-            request = entry.get('request', {})
-            media_url = request.get('url', '')
-            parsed = urlparse.urlsplit(media_url)
-            response = entry.get('response', {})
-            response_headers = {h['name'].lower(): h['value'] for h in response.get('headers', [])}
-            if (request.get('method') == 'GET' and complete_hls_status(response.get('status'), response_headers, response.get('content', {}).get('size', -1))
-                    and parsed.path.lower().endswith(('.m3u8', '.m3u')) and valid_media_url(media_url)):
-                context = {}
-                for piece in parsed.query.split('&'):
-                    key, _, value = piece.partition('=')
-                    if urlparse.unquote_plus(key) == 'muid' and re.fullmatch(r'[A-Fa-f0-9]{32}', urlparse.unquote(value)):
-                        context['muid'] = value
-                media_headers = {h['name'].lower(): h['value'] for h in request.get('headers', [])
-                                 if h['name'].lower() in ('user-agent', 'referer', 'origin')}
-                media_contexts[(parsed.hostname, parsed.path)] = (context, media_headers)
-                media_records.append((parsed, context, media_headers))
-        for e in entries:
-            request, response = e.get('request', {}), e.get('response', {})
-            u = urlparse.urlsplit(request.get('url', ''))
-            if urlparse.parse_qs(u.query).get('vn', [''])[0] != '3002':
-                continue
-            if (u.scheme != 'https' or u.hostname not in API_HOSTS or u.path != API_PATH
-                    or request.get('method') != 'GET' or response.get('status') != 200):
-                continue
-            content = response.get('content', {})
-            raw = content.get('text', '')
-            if content.get('encoding') == 'base64':
-                raw = base64.b64decode(raw).decode('utf-8')
-            try:
-                data = json.loads(raw)
-                if not isinstance(data, dict):
-                    continue
-            except (ValueError, TypeError):
-                continue
-            if data.get('ack') != 'yes' or str(data.get('status', '1')) != '1' or str(data.get('play', '1')) == '0':
-                continue
-            channel = urlparse.parse_qs(u.query).get('channel', [''])[0]
-            if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', channel):
-                continue
-            if data.get('channel') not in (None, channel):
-                continue
-            headers = {x['name'].lower(): x['value'] for x in request.get('headers', [])
-                       if x['name'].lower() in REQUEST_HEADERS}
-            profile = {'url': request['url'], 'headers': headers,
-                       'captured_at': e.get('startedDateTime', ''), 'source': Path(path).name}
-            for group in ('manifest', 'backup'):
-                container = data.get(group)
-                value = container.get('hls_udrm') if isinstance(container, dict) else None
-                if isinstance(value, str):
-                    parsed = urlparse.urlsplit(value)
-                    observed = media_contexts.get((parsed.hostname, parsed.path))
-                    if observed is None and data.get('client_sid'):
-                        expected = urlparse.parse_qs(parsed.query).get('contentid', [''])[0]
-                        session = normalized_app_sid(str(data['client_sid']))
-                        matches = []
-                        for captured, context, media_headers in media_records:
-                            query = urlparse.parse_qs(captured.query)
-                            if (expected and captured.path == parsed.path
-                                    and query.get('contentid', [''])[0] == expected
-                                    and normalized_app_sid(query.get('clientsid', [''])[0]) == session):
-                                matches.append((context, media_headers))
-                        if matches and all(item == matches[0] for item in matches):
-                            observed = matches[0]
-                    if observed:
-                        context, media_headers = observed
-                        if context:
-                            profile['media_context'] = context
-                        if media_headers:
-                            profile['media_headers'] = media_headers
-                        break
-            if channel not in result or profile['captured_at'] >= result[channel]['captured_at']:
-                result[channel] = profile
-    return result
 
 
 class CheckedRedirect(urllib.request.HTTPRedirectHandler):
@@ -302,7 +214,7 @@ class VideoCore:
     def __init__(self, timeout=20):
         self.node = shutil.which('node')
         if not self.node:
-            raise LiveError('网页 CDRM 模式需要 Node.js 18+；安装后重试。--api-mode app 仅是未修复的 UDRM 代理。')
+            raise LiveError('网页 CDRM 模式需要 Node.js 18+；安装后重试。--api-mode app 的实时签名及 UDRM 处理尚未实现。')
         try:
             version = subprocess.run([self.node, '--version'], capture_output=True, text=True, timeout=5)
             major = int(re.match(r'v(\d+)', version.stdout.strip())[1])
@@ -622,25 +534,14 @@ class Client:
         self.uid = secrets.token_hex(16)
         self.secret = secrets.token_bytes(32)
         self.profiles = {ch: {'source': 'official_catalog'} for ch in CATALOG}
-        if self.api_mode == 'app':
-            self.profiles.update(copy.deepcopy(EMBEDDED_PROFILES))
-        imported = har_profiles(args.har)
-        if args.har and not imported:
-            raise LiveError('指定 HAR 中没有成功的央视影音 VDN 请求')
-        self.profiles.update(imported)
-        self.har_lock = threading.Lock()
-        self.har_generation = 0
-        self.har_reload_error = None
-        self.har_next_scan = 0
-        self.har_stamps = self._har_stamps()
         if args.channels:
             selected = args.channels.split(',')
             missing = set(selected) - self.profiles.keys()
             if missing:
-                raise LiveError('没有这些频道的抓包请求：' + ', '.join(sorted(missing)))
+                raise LiveError('目录中没有这些频道 ID：' + ', '.join(sorted(missing)))
             self.profiles = {k: self.profiles[k] for k in selected}
         if not self.profiles:
-            raise LiveError('没有频道配置，请用 --har 导入成功抓包')
+            raise LiveError('所选频道目录为空')
         handlers = [CheckedRedirect()]
         if args.direct:
             handlers.append(urllib.request.ProxyHandler({}))
@@ -666,44 +567,14 @@ class Client:
         if self.video_core:
             self.video_core.close()
 
-    def _har_stamps(self):
-        return tuple((str(path), Path(path).stat().st_mtime_ns, Path(path).stat().st_size) for path in self.args.har)
 
-    def refresh_har(self, force=False):
-        if self.api_mode != 'app' or not self.args.har:
-            return
-        with self.har_lock:
-            if not force and time.monotonic() < self.har_next_scan:
-                return
-            self.har_next_scan = time.monotonic() + 2
-            try:
-                stamps = self._har_stamps()
-                if not force and stamps == self.har_stamps:
-                    return
-                profiles = har_profiles(self.args.har)
-                if not profiles:
-                    raise LiveError('HAR 更新中尚未找到成功的 App 请求，保留已有模板')
-                changed = [ch for ch in profiles if ch in self.profiles and profiles[ch] != self.profiles[ch]]
-                with self.state_lock:
-                    for ch in changed:
-                        self.profiles[ch] = profiles[ch]
-                        self.resolved.pop(ch, None)
-                        self.states.pop(ch, None)
-                    if changed:
-                        self.har_generation += 1
-                self.har_stamps = stamps
-                self.har_reload_error = None
-                if changed:
-                    LOG.info('原 App HAR 已自动重载：更新 %s 个请求模板，目录保留 %s 台', len(changed), len(self.profiles))
-            except (OSError, ValueError, TypeError, KeyError, LiveError):
-                self.har_reload_error = 'HAR 读取或解析失败；继续使用上次成功导入的请求模板'
+
+    def app_request_profile(self, channel):
+        raise MediaCapabilityError('原 App 实时签名生成尚未实现，UDRM 视频处理也尚未实现；请使用 /aptv.m3u 的已实现来源')
 
     def request_profile(self, channel):
         if self.api_mode == 'app':
-            profile = self.profiles[channel]
-            if not profile.get('url') or not profile.get('headers', {}).get('auth-key'):
-                raise LiveError('该频道尚无原 App 签名请求模板；请用 --har 导入含此频道的成功抓包，目录不会删台')
-            return profile
+            return self.app_request_profile(channel)
         timestamp = str(int(time.time() * 1000))
         nonce = str(100 + secrets.randbelow(900))
         digest = hashlib.md5((channel + timestamp + nonce + WEB_VDN_KEY).encode()).hexdigest()
@@ -724,13 +595,11 @@ class Client:
         return body
 
     def channel_list(self):
-        self.refresh_har()
         with self.state_lock:
             states = {ch: dict(v) for ch, v in self.states.items()}
         return [{'id': ch, **meta, 'api_mode': self.api_mode,
-                 'api_status': 'missing_app_request' if self.api_mode == 'app' and not self.profiles[ch].get('url') else (('available' if states[ch]['api_ok'] else 'failed') if ch in states and 'api_ok' in states[ch] else 'not_checked'),
-                 'request_configured': self.api_mode == 'web' or bool(self.profiles[ch].get('url')),
-                 'request_captured_at': self.profiles[ch].get('captured_at') if self.api_mode == 'app' else None,
+                 'api_status': 'app_signer_unavailable' if self.api_mode == 'app' else (('available' if states[ch]['api_ok'] else 'failed') if ch in states and 'api_ok' in states[ch] else 'not_checked'),
+                 'request_configured': self.api_mode == 'web',
                  'video_decode': states.get(ch, {}).get('video_decode', 'unverified'),
                  'last_error': states.get(ch, {}).get('last_error'), 'in_subscription': ch in self.subscription_channels}
                 for ch, meta in self.metadata.items()]
@@ -862,14 +731,12 @@ class Client:
                 raise
 
     def resolve(self, channel, force=False):
-        self.refresh_har()
         if channel not in self.profiles:
             raise LiveError('未知频道')
         with self.locks[channel]:
             cached = self.resolved.get(channel)
-            if cached and not force and (cached[2] if len(cached) > 2 else 0) == self.har_generation and time.monotonic() - cached[0] < (min(self.args.resolve_ttl, getattr(self.args, 'app_resolve_ttl', 15)) if self.api_mode == 'app' else self.args.resolve_ttl):
+            if cached and not force and time.monotonic() - cached[0] < (min(self.args.resolve_ttl, getattr(self.args, 'app_resolve_ttl', 15)) if self.api_mode == 'app' else self.args.resolve_ttl):
                 return cached[1]
-            generation = self.har_generation
             try:
                 profile = self.request_profile(channel)
             except LiveError as exc:
@@ -889,12 +756,12 @@ class Client:
                     if self.api_mode == 'app' and (data.get('ack') != 'yes' or str(data.get('status', '1')) != '1'):
                         raise AppRequestError(data.get('status', 'unknown'))
                     if status != 200 or data.get('ack') != 'yes':
-                        raise LiveError('VDN 拒绝当前请求' if self.api_mode == 'web' else 'VDN 未返回成功结果；请更新 HAR 中的签名参数')
+                        raise LiveError('VDN 拒绝当前请求' if self.api_mode == 'web' else 'VDN 未返回成功结果；原 App 实时签名或授权校验未通过')
                     if str(data.get('play', '1')) == '0':
                         raise LiveError('VDN 返回当前频道不可播放')
                     if data.get('channel') != channel:
                         raise LiveError('VDN 返回频道与请求不符')
-                    self.resolved[channel] = (time.monotonic(), data, generation)
+                    self.resolved[channel] = (time.monotonic(), data)
                     with self.state_lock:
                         self.states[channel] = {'api_ok': True, 'api_at': int(time.time()),
                                                 'drm': data.get('drm'), 'api_host': host,
@@ -1030,7 +897,6 @@ class Client:
         return '\n'.join(lines) + '\n'
 
     def health(self):
-        self.refresh_har()
         with self.state_lock:
             states = {k: dict(v) for k, v in self.states.items()}
         runtime_ready = bool(self.video_core and self.video_core.proc and self.video_core.proc.poll() is None)
@@ -1038,11 +904,9 @@ class Client:
                 'video_processing': ('CDRM_CORE_READY' if runtime_ready else ('CDRM_NODE_MISSING' if self.video_core is None else 'CDRM_RESTART_PENDING')) if self.api_mode == 'web' else 'UDRM_NOT_IMPLEMENTED',
                 'video_worker_running': runtime_ready, 'notice': NOTICE,
                 'uptime_seconds': int(time.time() - self.started),
-                'request_templates': sum(bool(p.get('url')) for p in self.profiles.values()) if self.api_mode == 'app' else len(self.profiles),
-                'har_reload': {'generation': self.har_generation, 'error': self.har_reload_error},
+                'request_generation': 'WEB_DYNAMIC_SIGNING' if self.api_mode == 'web' else 'APP_SIGNER_NOT_IMPLEMENTED',
                 'capabilities': {'fresh_request_signing': self.api_mode == 'web',
-                                 'video_processing': self.api_mode == 'web',
-                                 'har_auto_reload': self.api_mode == 'app' and bool(self.args.har)},
+                                 'video_processing': self.api_mode == 'web'},
                 'channels': list(self.profiles), 'subscription_channels': [ch for ch in self.profiles if ch in self.subscription_channels], 'upstream': states, 'epg': self.epg.stats()}
 
 
@@ -1323,7 +1187,7 @@ class YspPlaylistWindow:
 class SourceClient(Client):
     def __init__(self, args, mode):
         copied = argparse.Namespace(**vars(args))
-        copied.api_mode, copied.har, copied.channels = 'app', [], None
+        copied.api_mode, copied.channels = 'app', None
         super().__init__(copied, init_epg=False)
         self.args = argparse.Namespace(**vars(args))
         self.args.audio = False
@@ -1340,7 +1204,6 @@ class SourceClient(Client):
                          for ch, p in self.profiles.items()}
         self.subscription_channels = set(self.profiles)
         self.locks = {ch: threading.Lock() for ch in self.profiles}
-        self.har_stamps = ()
         self.epg_cache_file = 'epg-' + mode + '-v1.json'
         self.epg = SourceEpgStore(self)
         self.epg_payload_lock = threading.Lock()
@@ -1393,8 +1256,6 @@ class SourceClient(Client):
         while not self.live_closed.wait(1):
             self._poll_active()
 
-    def refresh_har(self, force=False):
-        return
 
     def ningxia_epg(self):
         with self.epg_payload_lock:
@@ -2215,7 +2076,6 @@ def main(argv=None):
     parser.add_argument('port', nargs='?', type=int, default=8767)
     parser.add_argument('--bind', default='0.0.0.0')
     parser.add_argument('--public-base', help='反向代理外部地址，例如 https://tv.example.com')
-    parser.add_argument('--har', action='append', default=[], help='导入原 App 签名请求（--api-mode app 使用），可重复')
     parser.add_argument('--api-mode', choices=['both', 'web', 'app', 'ysp', 'regional'], default='both', help='默认保留双模式；央视频签名为纯 Python；仅网页 CDRM 需要 Node.js 18+')
     parser.add_argument('--extra-sources', choices=['all', 'none', 'ysp', 'regional'], default='all', help='新增来源，默认同时提供央视频及宁夏/黑龙江官方源；合并订阅 /combined.m3u')
     parser.add_argument('--licenses', action='store_true', help='显示新增源上游署名和 GPL-3.0 许可证')
@@ -2230,7 +2090,7 @@ def main(argv=None):
     parser.add_argument('--timeout', type=float, default=8)
     parser.add_argument('--resolve-ttl', type=float, default=30)
     parser.add_argument('--ysp-media', choices=['relay', 'proxy'], default='relay', help='央视频默认仅代理清单、播放器直连分片；proxy 保留分片转发诊断模式')
-    parser.add_argument('--app-resolve-ttl', type=float, default=15, help='原 App VDN 结果缓存秒数上限，默认 15；仍需有效 HAR 签名模板')
+    parser.add_argument('--app-resolve-ttl', type=float, default=15, help='原 App VDN 结果缓存秒数上限，默认 15；原 App 实时签名尚未实现')
     parser.add_argument('--ysp-manifest-timeout', type=float, default=3, help='央视频单个清单请求超时秒数，默认 3，不重复等待同一坏入口')
     parser.add_argument('--ysp-hedge-delay', type=float, default=0.65, help='首选清单超过此秒数时并行尝试一个官方备用；0 禁用，默认 0.65')
     parser.add_argument('--ysp-ticket-ttl', type=float, default=300, help='央视频官方取票缓存秒数，默认 300；清单继续独立刷新')
