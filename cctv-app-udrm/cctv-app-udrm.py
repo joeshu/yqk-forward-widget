@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.2.8: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.2.9: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -892,7 +892,7 @@ PYTHON_SOURCES = {
         "  plan=json.dumps(image_plan(prepared['sdk_bytes']),separators=(',',':'))\n"
         '  entropy=base64.b64encode(os.urandom(128*1024)).decode()\n'
         "  self.host.install_json('__plan',plan)\n"
-        "  self.host.evaluate('var __entropy=Uint8Array.from(atob('+json.dumps(entropy)+'),c=>c.charCodeAt(0));var __vm=new KooVM(__uc,__plan,__entropy);__plan.segments=null;void 0;')\n"
+        "  self.host.evaluate('var __entropy=Uint8Array.from(atob('+json.dumps(entropy)+'),c=>c.charCodeAt(0));var __vm=new KooVM(__uc,__plan,__entropy);__plan.segments=null;__plan.relocations=null;__plan.imports=null;__wbytes=null;__entropy=null;void 0;')\n"
         "  result=self._call('__vm.invoke(__vm.base+__plan.symbols.JNI_OnLoad,[__vm.jvm,0])')\n"
         "  if result!=65540:raise RuntimeError('Official SDK JNI initialization rejected')\n"
         '  self.host.collect()\n'
@@ -1453,7 +1453,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.2.8'\n"
+        "VERSION = '0.2.9'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'DEFAULTS = {\n'
         " 'cctv1': ('CCTV-1 综合', 'https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8'),\n"
@@ -1719,6 +1719,7 @@ PYTHON_SOURCES = {
         '                # Prepare before acquiring a live window: a first SDK download\n'
         '                # can take minutes, while an upstream window lasts ~12 seconds.\n'
         '                self.sdk.ensure_ready()\n'
+        "                if self.active_channel and self.active_channel!=ch.ident:raise Superseded('Channel selection changed')\n"
         '                media=read_playlist(ch.url,self.max_bitrate)\n'
         '                # A sequence rollback / URL change starts a separate stream timeline.\n'
         '                if (media.entries[-1].seq < ch.last_seq or any(\n'
@@ -1727,14 +1728,28 @@ PYTHON_SOURCES = {
         '                    with ch.cache_lock:ch.cache.clear()\n'
         '                missing=[entry for entry in media.entries if self.token(ch,entry) not in ch.cache]\n'
         '                fetches=[entry for entry in missing if self.token(ch,entry) not in ch.raw]\n'
-        '                futures={e:self.pool.submit(fetch,e.url,MAX_TS) for e in fetches}\n'
-        '                for entry in fetches:ch.raw[self.token(ch,entry)]=futures[entry].result()[0]\n'
-        '                decoded=[];discontinuities=media.discontinuity_sequence\n'
+        '                futures={e:self.pool.submit(fetch,e.url,MAX_TS) for e in fetches[:2]}\n'
+        '                def raw(entry):\n'
+        '                    token=self.token(ch,entry)\n'
+        '                    if token in ch.raw:return ch.raw[token]\n'
+        '                    future=futures.get(entry)\n'
+        '                    if future is None:\n'
+        '                        future=self.pool.submit(fetch,entry.url,MAX_TS);futures[entry]=future\n'
+        '                    while True:\n'
+        "                        if self.active_channel and self.active_channel!=ch.ident:raise Superseded('Channel selection changed')\n"
+        '                        try:\n'
+        '                            data=future.result(timeout=.1)[0];break\n'
+        '                        except TimeoutError:\n'
+        '                            if future.done():raise\n'
+        '                    ch.raw[token]=data\n'
+        '                    futures.pop(entry,None)\n'
+        '                    return data\n'
+        '                decoded=0;discontinuities=media.discontinuity_sequence\n'
         '                for index,entry in enumerate(media.entries):\n'
         "                    if self.active_channel and self.active_channel!=ch.ident:raise Superseded('Channel selection changed')\n"
         '                    token=self.token(ch,entry)\n'
         '                    if token not in ch.cache:\n'
-        '                        source=ch.raw[token];complete=False\n'
+        '                        source=raw(entry);complete=False\n'
         '                        try:plan_ts(source)\n'
         '                        except TSFormatError as error:\n'
         "                            if str(error)!='Need next PES boundary to complete unbounded video PES':raise\n"
@@ -1742,7 +1757,7 @@ PYTHON_SOURCES = {
         '                                # Hold this object until the next playlist proves its boundary.\n'
         '                                continue\n'
         '                            following=media.entries[index+1]\n'
-        '                            neighbor=ch.raw.get(self.token(ch,following))\n'
+        '                            neighbor=raw(following)\n'
         '                            if neighbor is None or following.discontinuity or not following_proves_complete(source,neighbor):\n'
         "                                raise TSFormatError('Unbounded PES spans HLS objects; unsupported input')\n"
         '                            complete=True\n'
@@ -1756,7 +1771,8 @@ PYTHON_SOURCES = {
         '                        timing=self.sdk.timings.get(ch.ident,{})\n'
         "                        LOG.info('%s 分片耗时：排队 %.2fs，SDK %.2fs，映射校验 %.2fs，视频 %.2fs',ch.ident,timing.get('queue_seconds',0),timing.get('sdk_seconds',0),timing.get('map_verify_seconds',0),entry.duration)\n"
         '                        ch.last_seq=entry.seq\n'
-        '                        decoded.append((token,output))\n'
+        '                        decoded+=1\n'
+        '                        ch.raw.pop(token,None)\n'
         '                        with ch.cache_lock:ch.cache[token]=output\n'
         '                    ch.history[entry.seq]=(entry,discontinuities)\n'
         '                    if entry.discontinuity:discontinuities+=1\n'
@@ -1765,7 +1781,7 @@ PYTHON_SOURCES = {
         '                # Retain the previous verified object while the newest needs its boundary.\n'
         '                self._publish(ch,media)\n'
         '                ch.seconds=round(ch.updated-started,3)\n'
-        "                if decoded:LOG.info('%s 更新 %s 个分片，耗时 %.2fs',ch.ident,len(decoded),ch.seconds)\n"
+        "                if decoded:LOG.info('%s 更新 %s 个分片，耗时 %.2fs',ch.ident,decoded,ch.seconds)\n"
         '            except Superseded:\n'
         "                for future in locals().get('futures',{}).values():future.cancel()\n"
         '                return\n'
@@ -1778,30 +1794,41 @@ PYTHON_SOURCES = {
         '                # A previously valid playlist can bridge one transient CDN failure.\n'
         '                if ch.playlist and time.monotonic()-ch.updated<ch.playlist.target*2:return\n'
         '                raise LiveError(ch.error) from None\n'
+        '            finally:\n'
+        "                for future in locals().get('futures',{}).values():future.cancel()\n"
         '    def _publish(self,ch,media):\n'
-        '        history=sorted(ch.history.values(),key=lambda x:x[0].seq)\n'
+        '        history=sorted((x for x in ch.history.values() if self.token(ch,x[0]) in ch.cache),key=lambda x:x[0].seq)\n'
         '        chosen=[]\n'
         '        for item in reversed(history):\n'
         '            if chosen and item[0].seq!=chosen[-1][0].seq-1:break\n'
         '            chosen.append(item)\n'
         '            if len(chosen)>=5:break\n'
+        '        total=0;bounded=[]\n'
+        '        for item in chosen:\n'
+        "            size=len(ch.cache.get(self.token(ch,item[0]),b''))\n"
+        '            if bounded and total+size>24*1024*1024:break\n'
+        '            bounded.append(item);total+=size\n'
+        '        chosen=bounded\n'
         '        chosen.reverse()\n'
         "        if not chosen:raise LiveError('Waiting for a complete PES boundary')\n"
         '        media=Playlist(tuple(item[0] for item in chosen),media.target,chosen[0][1],media.end)\n'
         '        keep={self.token(ch,e) for e in media.entries}\n'
         '        with ch.cache_lock:\n'
-        '            while len(ch.cache)>8 or sum(map(len,ch.cache.values()))>64*1024*1024:\n'
-        '                token=next(iter(ch.cache))\n'
-        '                if token in keep:break\n'
-        '                ch.cache.pop(token)\n'
-        '        while len(ch.raw)>8:ch.raw.popitem(last=False)\n'
+        '            grace=[key for key in ch.cache if key not in keep]\n'
+        '            while grace and (len(grace)>2 or sum(map(len,ch.cache.values()))>32*1024*1024):\n'
+        '                ch.cache.pop(grace.pop(0),None)\n'
+        '        while len(ch.raw)>2:ch.raw.popitem(last=False)\n'
         '        while len(ch.history)>8:ch.history.popitem(last=False)\n'
         "        ch.playlist=media;ch.updated=time.monotonic();ch.error='';ch.retry_at=0;ch.failures=0\n"
         '        ch.ready.set()\n'
+        '        self._trim_memory(keep=ch.ident)\n'
         '    def playlist_bytes(self,ch):\n'
         '        ch.last_active=time.monotonic()\n'
-        '        self.active_channel=ch.ident\n'
+        '        with self.jobs_lock:self.active_channel=ch.ident\n'
         '        p=ch.playlist\n'
+        '        if p is not None and time.monotonic()-ch.updated>max(8,p.target*2):\n'
+        '            with ch.cache_lock:\n'
+        '                ch.playlist=None;ch.ready.clear();p=None\n'
         '        if p is None or time.monotonic()-ch.updated>p.target:\n'
         '            self._schedule(ch)\n'
         '        if p is None:\n'
@@ -1824,8 +1851,41 @@ PYTHON_SOURCES = {
         '        with self.jobs_lock:\n'
         '            job=self.refresh_jobs.get(ch.ident)\n'
         '            if job is None or job.done():self.refresh_jobs[ch.ident]=self.refresh_pool.submit(refresh)\n'
+        '    def _trim_memory(self,keep=None):\n'
+        '        with self.jobs_lock:self._trim_memory_locked(keep)\n'
+        '    def _trim_memory_locked(self,keep=None):\n'
+        '        now=time.monotonic()\n'
+        '        ordered=sorted(self.channels.values(),key=lambda c:c.last_active)\n'
+        '        for channel in ordered:\n'
+        '            if channel.ident in (self.active_channel,keep) or not channel.lock.acquire(blocking=False):continue\n'
+        '            try:\n'
+        '                channel.raw.clear()\n'
+        '                with channel.cache_lock:\n'
+        '                    if now-channel.last_active>20:\n'
+        '                        channel.cache.clear();channel.history.clear();channel.playlist=None;channel.ready.clear()\n'
+        '                    else:\n'
+        '                        while len(channel.cache)>2:channel.cache.popitem(last=False)\n'
+        '                        valid=[item for item in channel.history.values() if self.token(channel,item[0]) in channel.cache]\n'
+        '                        if valid:\n'
+        '                            valid=sorted(valid,key=lambda x:x[0].seq)[-2:]\n'
+        '                            channel.playlist=Playlist(tuple(x[0] for x in valid),channel.playlist.target if channel.playlist else 4,valid[0][1],False)\n'
+        '                        else:channel.playlist=None;channel.ready.clear()\n'
+        '            finally:channel.lock.release()\n'
+        '        # Inactive caches are expendable under pressure; active advertised bytes\n'
+        '        # have their own 24MiB window budget above and must remain available.\n'
+        '        total=0\n'
+        '        for candidate in self.channels.values():\n'
+        '            with candidate.cache_lock:total+=sum(map(len,candidate.cache.values()))\n'
+        '        for channel in ordered:\n'
+        '            if total<=32*1024*1024:break\n'
+        '            if channel.ident in (self.active_channel,keep) or not channel.lock.acquire(blocking=False):continue\n'
+        '            try:\n'
+        '                with channel.cache_lock:\n'
+        '                    total-=sum(map(len,channel.cache.values()));channel.cache.clear();channel.history.clear();channel.playlist=None;channel.ready.clear()\n'
+        '            finally:channel.lock.release()\n'
         '    def _background(self):\n'
         '        while not self.stopping.wait(0.5):\n'
+        '            self._trim_memory()\n'
         '            ch=self.channels.get(self.active_channel)\n'
         '            if ch and ch.last_active and time.monotonic()-ch.last_active<30:\n'
         '                if ch.playlist is None or time.monotonic()-ch.updated>=ch.playlist.target/2:self._schedule(ch)\n'
@@ -1833,11 +1893,24 @@ PYTHON_SOURCES = {
         '        self.stopping.set();self.worker.join(timeout=2)\n'
         '        self.refresh_pool.shutdown(wait=True,cancel_futures=True)\n'
         '        self.pool.shutdown(wait=True,cancel_futures=True);self.sdk.close()\n'
+        '    def _cache_stats(self):\n'
+        '        processed=0;raw=0\n'
+        '        for channel in self.channels.values():\n'
+        '            with channel.cache_lock:processed+=sum(map(len,channel.cache.values()))\n'
+        '            # raw is written under channel.lock; skip in-flight raw accounting\n'
+        '            # rather than blocking an HTTP status request behind network I/O.\n'
+        '            if channel.lock.acquire(blocking=False):\n'
+        '                try:raw+=sum(map(len,channel.raw.values()))\n'
+        '                finally:channel.lock.release()\n'
+        "        return {'processed_bytes':processed,'raw_bytes_observed_idle':raw,'raw_observation_skips_busy_channels':True,\n"
+        "            'processed_budget_bytes':32*1024*1024,'active_window_budget_bytes':24*1024*1024,\n"
+        "            'note':'Cache bytes only; excludes in-flight downloads, Python, JavaScriptCore and WASM memory'}\n"
         '    def status(self):\n'
         "        return {'version':VERSION,'uptime_seconds':round(time.monotonic()-self.started),\n"
         "            'engine':'javascriptcore-unicorn-wasm','jdk_required':False,'sdk_phase':self.sdk.phase,\n"
         "            'preparation_progress':self.sdk.progress,'preparation_error':self.sdk.error,\n"
         "            'runtime_features':dict(getattr(self.sdk.client,'runtime_features',{})),\n"
+        "            'memory_cache':self._cache_stats(),\n"
         "            'media_timings':dict(self.sdk.timings),'max_bitrate':self.max_bitrate,\n"
         "            'sdk_sessions':self.sdk.sessions,'processed_video_pes':self.sdk.processed_frames,\n"
         "            'license_exchanges':self.sdk.license_records,\n"

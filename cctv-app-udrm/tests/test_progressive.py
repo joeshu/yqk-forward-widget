@@ -30,7 +30,7 @@ class ProgressiveTests(unittest.TestCase):
   ch=service.Channel('test','Test','https://example.test/main.m3u8')
   live=service.LiveService({}, {'test':ch});live.stopping.set();live.worker.join()
   ch.playlist=service.Playlist((service.Entry(1,4,'https://example.test/1.ts'),),4,0,False)
-  ch.updated=time.monotonic()-10
+  ch.updated=time.monotonic()-6
   try:
    with patch.object(live,'_schedule') as schedule,ch.lock:
     started=time.monotonic();self.assertIn(b'#EXTINF',live.playlist_bytes(ch))

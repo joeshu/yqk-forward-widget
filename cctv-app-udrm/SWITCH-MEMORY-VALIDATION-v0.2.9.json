@@ -1,0 +1,268 @@
+{
+  "version": "0.2.9",
+  "recorded_at_utc": "2026-10-21T23:58:31.645612+00:00",
+  "script_sha256": "5d3fa3c62035157094596095556567cc391579efbd9970e0847b79338602e4e7",
+  "iphone_aptv_device_tested": false,
+  "regressions_passed": 45,
+  "quality": "Unchanged HD selection cap and original SDK processing",
+  "final_artifact_samples": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 5.933
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.608
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.506
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "forced_native_usleep_probes": [
+      {
+        "microseconds": 20000,
+        "result": 0,
+        "elapsed_seconds": 0.0245
+      }
+    ],
+    "wall_seconds": 8.027,
+    "script_sha256": "5d3fa3c62035157094596095556567cc391579efbd9970e0847b79338602e4e7"
+  },
+  "live_switch_and_playback": {
+    "version": "0.2.9",
+    "script_sha256": "5d3fa3c62035157094596095556567cc391579efbd9970e0847b79338602e4e7",
+    "environment": "Linux JavaScriptCoreGTK, not iPhone",
+    "http_switch_metrics": [
+      {
+        "channel": "cctv7",
+        "playlist_seconds": 4.2136,
+        "cached_playlist_age_before": null,
+        "first_segment_status": 200,
+        "first_segment_bytes": 1019900,
+        "playlist_entries": 1
+      },
+      {
+        "channel": "cctv1",
+        "playlist_seconds": 5.4296,
+        "cached_playlist_age_before": null,
+        "first_segment_status": 200,
+        "first_segment_bytes": 643336,
+        "playlist_entries": 1
+      },
+      {
+        "channel": "cctv7",
+        "playlist_seconds": 0.0017,
+        "cached_playlist_age_before": 5.45,
+        "first_segment_status": 200,
+        "first_segment_bytes": 1019900,
+        "playlist_entries": 1
+      },
+      {
+        "channel": "cctv1",
+        "playlist_seconds": 0.0028,
+        "cached_playlist_age_before": 0.02,
+        "first_segment_status": 200,
+        "first_segment_bytes": 643336,
+        "playlist_entries": 1
+      },
+      {
+        "channel": "cctv7",
+        "playlist_seconds": 1.6233,
+        "cached_playlist_age_before": 13.75,
+        "first_segment_status": 200,
+        "first_segment_bytes": 649164,
+        "playlist_entries": 1
+      },
+      {
+        "channel": "guizhou",
+        "playlist_seconds": 4.8752,
+        "cached_playlist_age_before": null,
+        "first_segment_status": 200,
+        "first_segment_bytes": 887172,
+        "playlist_entries": 1
+      }
+    ],
+    "sequential_15s_audio_video_decodes": [
+      {
+        "channel": "cctv1",
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "372",
+        "duration": "00:00:15.000000"
+      },
+      {
+        "channel": "cctv7",
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "372",
+        "duration": "00:00:15.000000"
+      },
+      {
+        "channel": "guizhou",
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "375",
+        "duration": "00:00:15.000000"
+      }
+    ],
+    "status": {
+      "version": "0.2.9",
+      "uptime_seconds": 60,
+      "engine": "javascriptcore-unicorn-wasm",
+      "jdk_required": false,
+      "sdk_phase": "ready",
+      "preparation_progress": "官方SDK和无JDK解释器已校验就绪",
+      "preparation_error": null,
+      "runtime_features": {
+        "bulk_memory": true,
+        "register_batch": true,
+        "register_scalar": true
+      },
+      "memory_cache": {
+        "processed_bytes": 6273748,
+        "raw_bytes_observed_idle": 0,
+        "raw_observation_skips_busy_channels": true,
+        "processed_budget_bytes": 33554432,
+        "active_window_budget_bytes": 25165824,
+        "note": "Cache bytes only; excludes in-flight downloads, Python, JavaScriptCore and WASM memory"
+      },
+      "media_timings": {
+        "cctv7": {
+          "parse_seconds": 0.006,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.273,
+          "map_verify_seconds": 0.004,
+          "video_pes": 100
+        },
+        "cctv1": {
+          "parse_seconds": 0.01,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.3,
+          "map_verify_seconds": 0.005,
+          "video_pes": 100
+        },
+        "guizhou": {
+          "parse_seconds": 0.01,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.163,
+          "map_verify_seconds": 0.012,
+          "video_pes": 100
+        }
+      },
+      "max_bitrate": 2500000,
+      "sdk_sessions": 1,
+      "processed_video_pes": 1400,
+      "license_exchanges": [
+        {
+          "request_bytes": 368,
+          "http_status": 200,
+          "response_bytes": 232,
+          "business_status": 0,
+          "protected_license_count": 1
+        }
+      ],
+      "channels": {
+        "cctv1": {
+          "name": "CCTV-1 综合",
+          "upstream_host": "ldncctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": 24.8,
+          "last_refresh_seconds": 2.901,
+          "processing_to_video_ratio": 0.079,
+          "error": ""
+        },
+        "cctv7": {
+          "name": "CCTV-7 国防军事",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 2,
+          "playlist_age_seconds": 13.78,
+          "last_refresh_seconds": 1.463,
+          "processing_to_video_ratio": 0.071,
+          "error": ""
+        },
+        "guizhou": {
+          "name": "贵州卫视",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 5,
+          "playlist_age_seconds": 2.42,
+          "last_refresh_seconds": 2.273,
+          "processing_to_video_ratio": 0.047,
+          "error": ""
+        },
+        "cctv7_bd": {
+          "name": "CCTV-7 国防军事（百度备用）",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv7_ks": {
+          "name": "CCTV-7 国防军事（原快手线路）",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        }
+      }
+    },
+    "limitation": "HTTP response latency is not player/device first-frame latency. Cache stats exclude in-flight requests and runtime memory."
+  },
+  "loader_retention_and_linux_process_memory": {
+    "baseline": {
+      "relocations_retained": 16060,
+      "imports_retained": 300,
+      "wasm_source_bytes_retained": 1292490,
+      "rss_kib": 423392,
+      "peak_rss_kib": 430732,
+      "script_sha256": "2dbd8c2f278a0f9ef74325b3371d636e6521157a942fd1ea6dad51c860ec5342",
+      "environment": "Linux JavaScriptCoreGTK, isolated process after JNI initialization; not iPhone"
+    },
+    "optimized": {
+      "relocations_retained": 0,
+      "imports_retained": 0,
+      "wasm_source_bytes_retained": 0,
+      "rss_kib": 434952,
+      "peak_rss_kib": 443604,
+      "script_sha256": "5d3fa3c62035157094596095556567cc391579efbd9970e0847b79338602e4e7",
+      "environment": "Linux JavaScriptCoreGTK, isolated process after JNI initialization; not iPhone"
+    },
+    "conclusion": "Loader metadata retention removed. This single RSS comparison did not show a decrease; no overall RSS reduction claimed."
+  },
+  "limitations": [
+    "Cache budget is not a process RSS cap; excludes in-flight network buffers and language/emulator runtimes.",
+    "Socket operations already running may complete at timeout; obsolete waiters and queued work are canceled.",
+    "Recent cached playlist response time is not mobile first-frame latency.",
+    "Inactive cache cleanup may be deferred while a channel holds its processing lock."
+  ]
+}
