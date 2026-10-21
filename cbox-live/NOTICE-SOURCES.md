@@ -37,3 +37,6 @@ v1.5.4：参考同一上游版本的 extractors/yangshipin/index.js、api.js、r
 
 
 v1.5.5-preview（独立研究版）：继续参照同一上游版本 extractors/yangshipin/resolver.js 与 playlist-history.js，以 Python 实现直连分片重叠 URL/时长稳定、基于官方留存范围的已观察连续历史、慢节点短暂回退容忍、观看期间共享刷新与缓存节目单辅助版权冷却。本项目未移植猜测缺片 URL/时长的补洞、浏览器会员桥接和 libVLC 垫片；复杂 HLS 不作历史合并。
+
+
+v1.5.6：合入 v1.5.5-preview 的直播窗口与共享刷新；继续参考 extractors/yangshipin/resolver.js 的旧票据失效续票、官方候选入口优先顺序及全 403 识别，新增 Python 有界重试和安全代理拒绝诊断。增加真实 HLS 客户端连续解码验证，保留原逐片测试的失败记录与验证范围说明。

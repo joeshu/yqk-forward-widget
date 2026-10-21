@@ -1,0 +1,84 @@
+{
+  "version": "1.5.6",
+  "created_at_utc": "2026-10-21T02:32:55.045213+00:00",
+  "sha256": "9727846961210eb5014e984165ac474eec04cd1420b2a60ebcff9a01243733a2",
+  "reference_commit": "e475b2f6d24029f844ada2b362d703c8b88c2e9b",
+  "fixes": [
+    "Renew exhausted official YSP ticket once before cooldown, including all-403 old entry failures",
+    "Prefer last successful official candidate only while still present in current candidate list",
+    "Typed all-forbidden classification, mixed-error distinction, bounded numeric Retry-After",
+    "Safe explicit network-proxy denial markers without headers/body/credentials export",
+    "Promote observed live-window and active refresh functionality from preview"
+  ],
+  "regression_tests": {
+    "count": 153,
+    "passed": true,
+    "command": "python -m unittest -q test_cbox_v156 test_cbox_v155 test_cbox_v154 test_cbox_v153 test_cbox_v152 test_cbox_v151 test_cbox_v15 test_cbox_v14 test_cbox_v13 test_cbox_v12 test_cbox_v11"
+  },
+  "real_hls_client": {
+    "scope": "FFmpeg HLS client through configured environment proxy, direct CDN media; not iOS",
+    "headers": "default FFmpeg player UA",
+    "target_seconds": 90,
+    "progress": {
+      "frame": "2250",
+      "out_time": "00:01:30.000000",
+      "out_time_us": "90000000",
+      "progress": "end"
+    },
+    "exit": 0,
+    "seconds": 88.69,
+    "error_lines": 2,
+    "diagnostics": [
+      "[https @ 0x55921e940500] Cannot reuse HTTP connection for different host: outlivecloud-cdn.ysp.cctv.cn:-1 != bkoutlivecloud-cdn.ysp.cctv.cn:-1",
+      "[https @ 0x55921e940500] Cannot reuse HTTP connection for different host: bkoutlivecloud-cdn.ysp.cctv.cn:-1 != outlivecloud-cdn.ysp.cctv.cn:-1"
+    ],
+    "passed": false,
+    "service_exit": 0,
+    "strict_no_error_log_passed": false,
+    "connection_reopen_messages": 2,
+    "other_error_diagnostics": [],
+    "playback_completed": true,
+    "playback_validation_passed": true,
+    "classification_note": "Original error_lines and strict passed flag retained; only exact FFmpeg different-host connection-reuse messages classified as recovered when full target playback completes."
+  },
+  "live_ysp_status": {
+    "version": "1.5.6",
+    "delivery": "relay",
+    "upstream": {
+      "ysp-cctv1": {
+        "api_ok": true,
+        "api_at": 1792549815,
+        "last_error": null,
+        "playlist_ok": true,
+        "playlist_at": 1792549899,
+        "media_type": "raw",
+        "manifest_host": "outlivecloud-cdn.ysp.cctv.cn",
+        "ticket_renewed": false
+      }
+    },
+    "live_windows": {
+      "ysp-cctv1": {
+        "supported": true,
+        "segments": 6,
+        "seconds": 33.68,
+        "first_sequence": 1786234556,
+        "last_sequence": 1786234561,
+        "lag_ignored": false,
+        "retention_known": true
+      }
+    }
+  },
+  "catalogue_counts": {
+    "aptv": 85,
+    "original_web": 61,
+    "original_app": 61,
+    "combined_sources": 134
+  },
+  "limits": [
+    "Execution environment FFmpeg client, not direct user iOS verification",
+    "Old Python segment-reader 403 results remain valid observations with incomplete cause attribution",
+    "Proxy error classification requires explicit known marker; marker absence does not prove CDN origin",
+    "No complete 85-channel or all-day playback guarantee",
+    "Original App UDRM unsupported"
+  ]
+}

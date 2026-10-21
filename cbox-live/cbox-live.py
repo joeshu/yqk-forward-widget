@@ -37,7 +37,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = '1.5.4'
+VERSION = '1.5.6'
 CONFIG_CATALOG_B85 = 'ABzY8000000t4-xO>f-B9menZ6oJoiyffs!C_oN24AcRH)PRFtibCMqa!7H9yE~+o+{i$42!i%n6zHWd$D%#A=od=be2bD?EiJ#uk+-hBKXZ)OP{@_^`#&7c^UQEae*MwM&7V7dQmnlqI!p9Czw_D0Uw2!(J&&F|Y&P8a&+q>D{kOll^U1RvSKI&j?GOL@_WJfm-S!{<{)ZQ~Kl!TL@xx!fdtt}vZu>vJ`S<Ui+x~dB{ZHTg`0GDk-+q7hi@*EZ_rLw?oo@5fPoA$Lj7-3-A_(<Q9uEI=DMzEb&SW%txf=g-(QLmf#q&EK?RPrOPVwS*es#5X*6x(g?>ycA&Su}V+4UT5X`=PbyubM3@w1=%BJSzWfA+<f&wliaz+b+wzhi!0D&=V%W&7Xz%l><x5nTUV`=f%OxDeNVOSeDs+g&ehzACHT_vGQ_qlcG`N|&b(FPmfc;t$B<M4w&zd~=*GpS<+3$Ll0tCq><U;^iL_t{1Pw@X9dBcYFFBPd~Y3t#UxMI&WSpvru<H2i03d>m=|7RB=?U^JO%kg2zLub(xiBK=n?B(kD*`bWmqQIjCupl><7iVl<>;hcpZjLmCGNXF$aUD#^kj9o!+MMR7xX8hwz(4kkj$!T78kjLFKuIIR32?DgYU{JBN-UMLQnLgpQ5FRx2&#G6|XwA73B5K3*E?|dEUKn-OS@2x#Q35HVbx-=&7^iayJlDZs9ttUe%G|UHax)xrtN(Rw-t3;niVXouFO+C}=O!od!Ty#A@6QkK^c|b;Zz5K7({niWck36)F-fpFGFqJxksni`zr3Wv0fYy8Hf(K~1<Ka|#*kT80wUfbAIvq@<v%yq)*ir{*v4<>lpq4tE)Gvk;`^9i_|A7k}s0Vg9>F|)n4b)Nxk(h!5Cz<Xa2e<<yFOs@Umbbk`dy#}uepb}W=oX8J+Qx^ONbh8jR)$sv$I8&k;94148OBzIR)&d{p_O53WoTuXSs7XxPOJ=Fd>UCDIvs3|-05J0<W2{hBzHR4D7n+YX33onHcakxuxWCqgN>6r9c-T5%|qEdxzoYs$(;^1PwsTEd2*+N&67JF2A?Op+s;Do+#AY`XJ>g<FP2F#5`(K)4z6McdZ$NUfcwr082x_=7}E=w&<mIX3s`tXpza^iMZfpc_X=Hd(H$<j%S9hk(I0S6(+Aws^a1xYeZW0UA0SWDc6f(8Njq@jDXN2|H-x3drf9!Y45w5%oKl_Pl<E$rRN{DiM?S%lPqE}PEcpqR{MKs$j}TpO(Ipq%;i9`-bfS}Pyd?0FL&k!quSGw7XXuiP?r_mvAbJqpcq`~}U;m44e0tc?b30IO;)J9sHS$S@TNR~=r(+<xr&XB%xwFK}b%K<<Xqrlz5Zigz$SY!VF-f3G=2KEtuHzN6rK>2(8hUEq7?;Ub<t5Tc{U|{;7-j&dOU(q2OKOj<B4!ge&6f^R@ifU2Y#VPMlTN(q9wm!N$1%}_TFIHcVjH)VM?6QXWDCt&o;Jir-i|@5#3K$v*WN|*6%X8JPJ*`G;hcGLwwXm#%>GbQN1v_e(A3gNj_l6;8{Z^w<ZUI=+vYD*ahHiLnb;F1_LPY|V`4i@>=R-RH&x2)Om^gBEcpye&TZ!omRxX8Q2|!n<)Tx2#*%4ARXgg8o4=bVF^V}`;VqDZxE;8_l1nVPgC%#lOSgO_$?(Jpt}rSth^x0k=!)%-Ik4MxEp_rvC(hsEd#&P)ahcp2dAnIF_>?L*@vh2Eycr27w}f&#P;M8>J%(~mpxjd^H}O#fX&oc`@0MFaxg97svH#A>APK!3*~a(m#C9HfnkxGhI#Kn)OWI{-NZI%7WZfMwy9;I?gV`rwc4AVm(jo|z*+S7(wJf0Mi`r1zOH3qJ##D18_a<X<FMOkr;LEx|a#t#>VkCLI2$?OVh__Vm8VOz#8+f!ZUh^}N;I(3MZ{~&xzO0r+@@=}=X0`IE=v4tF_x(&!(KDjxsZlCqUMDh&d7Y@?cA?x3l$$scx22w#TjqJWWj60Evo{G<U9ZdnOI}dPoBxOx%#|_eHe`}-Q?n#4e5y^Y=TPt}R8Y+u@PIg-<r}lD{4k5D?9m!Z?gs`+UKCL96gjJ9OlIPMN<QBh<OPZjK27H)q{0`-g$bDn=S3Yt$>VuOyr!j#!Vl9BiXPSm%f5_}E1z2QOl^^}*HsoEmsiwP75auszMLb$RiG6Vye9T6MXl1J))^MvK*@E1Z7*x2=wVu~>P%qCC6heb5U*b>!nE;F<5STWDy^%OOdqGnt4Eayi^4F;4Kk*0+NL6?;KW|NN>*h=97Wg2r6MZZ)<J*-uaMKZD%&8}hBn;Hb`qO9+ZIco$)2S}jGX&#*v)cVg;e3gCA7_$>fEeSD!EyO+cg(IAd+v33Q3K;np<cjHL)w4t2hYb1(jSY=8aqFLNRZCO8q(W)~D30kqfyS@-z)ICVB18nc&_$tdMuJ)`e+8))9b@-W<Hz#!PTOt(oB4dJY87(l{_%qtB0GmFOY#n>eeBI;#wnKde=C9M^{qqBq2Lqbsv4!bMyMDqEBJsq9KEGa$Q(wK<B*E^i91+Gi^v$vep<5Ijsnq~Obf*~FK193a7~V5OMg;XGX-$%|AeE;z9_+}5igte72(!J6k4I<djT&4>=Ec{>ypSa4!f@swgVm3gp1a%W2uFH+6y6Lr1uH%xSO4$bBrxTJzRRB)FHKBj_CsNhp7_z4vJDBciy5IAxcaT}i_ozu@^WN+AV6MeJVFeipKL0whM`A_3BC(8YTIr$l`nS%&zsDq!HI+t~YF1hFq7v1HekGbd*F8Y*<KI5XFV9}97&{dc*y|e?DRB(q1?oz?WRPYHEoampXhOS6V6|;%QS&hBcjJ=S>jE9Q4fJGr&O3O`j`(nXtCoQ*xa#P#Mn8{r%m{a^F-3HinMdd~=Zw{*!bcVmXAB%baLA{x0Nbbc^yz}<Wxy_n*k8?A&XEyK-TvEY_V~D_8g$g+<k)_Bc9tVLgE~GoUn{9n`1>&yB=Ew??rKdyh)!^ba;Ex_&KKbh5<>|xAmm#w}PW0LJ4?k%>{l1^*va3{#Mx$F+>y?H2spH3!p-OTcFT5Q21mPZDlHnaPyi0~3li??1_$e8FMutBD!ym;em4o5Q4lBqGE65Hj$PO#W4lBqGE65Hj$PO#W4lBtHE6ENk$qp;Y4l9WcJNA}K;=94JK$Uvq>EoSZ6mPFsPsdrA*QKtLBY8r~o0bqnMkPe<ptv||_1B)J;s<_SF&j-!FVXZwQ`6A~*=Aa93FW4?6Bo)ohH_7!+*2s`49b1N<VMcUx7<*_6i~msaXGR$dT>bvcc|bl6?{wupHRW4RPY%U`~(UvMpSUBa|)_+3aWDos&fjea|)_+3aWDos&fjeb4sFfE~0fD5eNAlxTJzRRB)FHKBj_CsNhp7_>2mELIp=okMGE_-YKx=DX{J-u=Xji{wc5qDzFYJuofz?9x9=im`#>kMA*xo9lRvNJ7jp53_m8rPss37GW?7Te*%WbUK;J-$qp;X4lBqGE65Hj$PO#W4lBqGE65Hj$PSCVgxcN|B^RCc&|A88^b$?)K<R}znx->41b_S?;1eGnyLjEa*-O9XA_=4Xtf-gKPd=xyyFI+SpZtA2sPQl<q?KYXg=3}IOW|56_EL<k6niNqR*Jn8Q!B+@ikX#SFU5(K;!28JuT2_&6gF-4QrNWFOJUPyFNIB;y%aWW_EOli*-K&5W-o<Jo4ph^ZSJLzHf{D&*tFS8Vbf+Wg-x5i6gF-4QrNWFOJUPyFNIB;y%aWW_EOlixtGGRX|tEYrp;aon>KqXY})LluxYcG!lun$3Y#{2DQw#8rLbwUm%^say%erZo4ph^ZT3>wwAo8x(`GM)O`E+GHf{D&*tFS8Vbf+Wg-x5i6gF+{r5M|^*-K&5W-o<Jo4ph^ZT3>wwAo8x(`GM)O`E+GHf{D&*tFS8VbkVbiphtcHuqoM>h0c1;3Z;oz#}P7Ut7cJJ9rIy$1cI_4w&6VvU?%<@h@ja<(m<kUZUx#53f0ka~;<Sx9wc<OE^Eh{kU-cF_nM!%3*`Xmu!58h;LNV{$Gsj`FnU`x8KC%VxF%T5mNeR^la@NG`)+aAEW6fX!<ET=&*ARJLaJ2T{Jy=crroLvwO@Ln*M}Lk9;TQGkUbw3bfY>wATu>*9x@P3bfY>wATu>*9x@PBHx{9l$S?q=nQO!F1hFq7oF&@t5ubFc~v6USoH9c4DXQP(QSTAhMyqe166KSu493wmuPxshZB1_xaI8WC7Pbua_U6aWmF_}3B<3<tkm2kA=mIF8{c8$yKMY18-K#apR)01Z2S{6KJs$gHGH<~A}_d=20H!PfnybSsNlqG6PI~29``h|o%isP4DTS}n@+tMjzgQx6+E%os4{HtNh)=nK*!?GSHM38#Piq78~W88tNpgSFYkcX|7iEXh12)<%!U7@-~&#U8>@W}Yca&=kh}li)gcpatyVb_v##DD6x($r@6LzbGPtCIJ5+F&3O=TSPpIHiD)@{FenJI*hts=nn;h$%0&AWE>z)E@p91Tj0&AcG>!1Q_p#tln66>LoJO0FasKk1x#CoX2dZ@&DsKk1x#CoX2dZ>f-PzURw4tEk4>!A+TLmjM#I#>_IUJM%@TCE&ZwKtqn;={Yp*;TvDN;8Ct%`#sXrii?SH>`5~VU-&UtK4un<sxqzxI&j)bcc)Xa?!_J^a&Sz%0-`X(NDPO<SvHX$B;W2axX*fX2|^v^PzuN?Bv`I4(<}1+$GpoCD>Ob*jFXkS0&h2CD>OTu&+8`Uv<b6Vqjl&z`p8$eboW`ssr{_2kfg3*jHV!uexAgb-}*slCLy@eboi~s*8OIOrF(?WfFj2XuYpM;wwPD)>>&p#9pa$PshGTd<3MY{lwEiavdd$NXKzWTwQ(zzfs86zV+ItYa!9Aq=hFocmJRz+DE}Hq1+CX+l6uyLwl9zxbPCAJQb1g8#hvA&aEKMn=FtcyLKtgHGRo*_tmd<pS-ioygFJpA9+^uor`E~l3aK7etKQIJLP(p{flDx*}Z$a@BK8;#YOYaJyUo(^w#0Mz|X5kp?SR9Z8r1WFMs;c)Bge<5B*OpV*&s'
 NOTICE = 'App UDRM 尚未修复；网页 CDRM 已通过连续样本解码验证，各频道需单独检查。'
 # EMBEDDED_PROFILES 在构建时由用户提供的成功抓包提取，不包含 Cookie。
@@ -64,13 +64,28 @@ class MediaCapabilityError(LiveError):
 
 
 class UpstreamError(LiveError):
-    def __init__(self, status, target=None):
+    def __init__(self, status, target=None, response_headers=None):
         self.status = status
+        headers = {k.lower(): str(v) for k, v in (response_headers or {}).items()}
+        reason = headers.get('x-mitmproxy-blocked-reason', '')
+        self.blocked_reason = reason if re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', reason) else None
+        self.denial_source = 'network_proxy' if self.blocked_reason else 'upstream_or_network'
+        retry = headers.get('retry-after', '')
+        self.retry_after = min(300, int(retry)) if re.fullmatch(r'[0-9]{1,6}', retry) else None
         parsed = urlparse.urlsplit(target or '')
         self.host = parsed.hostname
         self.stage = 'manifest' if parsed.path.endswith('.m3u8') else ('api' if parsed.hostname == 'bkliveinfo.ysp.cctv.cn' or parsed.path == API_PATH else 'media')
         detail = f'（{self.host}，{self.stage}）' if self.host else ''
-        super().__init__(f'上游 HTTP {status}' + detail)
+        proxy_detail = '；网络代理拒绝：' + self.blocked_reason if self.blocked_reason else ''
+        super().__init__(f'上游 HTTP {status}' + detail + proxy_detail)
+
+
+class ManifestError(LiveError):
+    def __init__(self, errors):
+        super().__init__('官方清单主备均失败：' + '；'.join(str(e) for e in errors[-4:]))
+        self.all_forbidden = bool(errors) and all(isinstance(e, UpstreamError) and e.status == 403 and not e.blocked_reason for e in errors)
+        self.proxy_denied = any(getattr(e, 'blocked_reason', None) for e in errors)
+        self.retry_after = max((getattr(e, 'retry_after', None) or 0 for e in errors), default=0)
 
 
 def is_hls(body):
@@ -699,11 +714,12 @@ class Client:
                     return response.status, rh, body, response.url
             except urllib.error.HTTPError as exc:
                 status = exc.code
+                response_headers = dict(exc.headers or {})
                 exc.close()
                 if not is_api and attempt == 0 and status in (500, 502, 503, 504):
                     time.sleep(0.2)
                     continue
-                raise UpstreamError(status, target) from None
+                raise UpstreamError(status, target, response_headers) from None
             except (urllib.error.URLError, TimeoutError, OSError, http.client.IncompleteRead):
                 if not is_api and attempt == 0:
                     time.sleep(0.2)
@@ -755,7 +771,9 @@ class Client:
                         last_media_error=str(exc), last_media_error_at=int(time.time()),
                         last_media_host=getattr(exc, 'host', urlparse.urlsplit(target).hostname),
                         last_media_stage=getattr(exc, 'stage', 'media'),
-                        last_media_status=getattr(exc, 'status', None))
+                        last_media_status=getattr(exc, 'status', None),
+                        last_media_denial_source=getattr(exc, 'denial_source', 'unknown'),
+                        last_media_blocked_reason=getattr(exc, 'blocked_reason', None))
                     self.resolved.pop(channel, None)
                     self.media_failures[key] = time.monotonic() + 5, exc
                     self.media_failures.move_to_end(key)
@@ -1074,6 +1092,121 @@ class SourceEpgStore(EpgStore):
         raise LiveError('该新增来源暂无已接入的官方节目单')
 
 
+class YspPlaylistWindow:
+    """Observed public TS entries only; preserve overlapping URLs and timing."""
+    allowed = ('#EXT-X-VERSION:', '#EXT-X-MEDIA-SEQUENCE:', '#EXT-X-TARGETDURATION:',
+               '#EXT-X-ALLOW-CACHE:', '#EXT-X-INDEPENDENT-SEGMENTS', '#EXT-X-START:',
+               '#EXT-X-PROGRAM-DATE-TIME:')
+    segment_tag = re.compile(r'^#(?:EXTINF|EXT-QQHLS-MACHINEID|EXT-QQHLS-START-TIME|EXT-SID|EXT-X-PROGRAM-DATE-TIME)\b')
+
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.entries = {}
+        self.identity = None
+        self.tail = -1
+        self.updated = self.progress = 0
+        self.target = 0
+        self.result = None
+        self.summary = {'supported': False, 'segments': 0, 'seconds': 0, 'lag_ignored': False}
+
+    def parse(self, text, base):
+        lines = text.replace('\r', '').strip().splitlines()
+        if any(line.startswith('#EXT-X-') and not line.startswith(self.allowed) for line in lines):
+            return None
+        match = re.search(r'^#EXT-X-MEDIA-SEQUENCE:\s*(\d+)\s*$', text, re.M)
+        if not match:
+            return None
+        first = int(match[1])
+        retained = re.search(r'^#EXT-QQHLS-SEGMENT_RANGE:\s*(\d+)-(\d+)\s*$', text, re.M)
+        bounds = (int(retained[1]), int(retained[2])) if retained else None
+        header, entries, tags, duration = [], [], [], None
+        for line in lines:
+            if self.segment_tag.match(line):
+                tags.append(line)
+                if line.startswith('#EXTINF:'):
+                    try:
+                        duration = float(line[8:].split(',')[0])
+                    except ValueError:
+                        return None
+            elif line and not line.startswith('#'):
+                seq = first + len(entries)
+                url = urlparse.urljoin(base, line.strip())
+                name = urlparse.urlsplit(url).path.rsplit('/', 1)[-1]
+                name_match = re.fullmatch(r'([A-Za-z0-9_]+)-(\d+)\.ts', name)
+                if (not name_match or int(name_match[2]) != seq or duration is None
+                        or not 0 < duration <= 15 or not valid_media_url(url)):
+                    return None
+                entries.append({'seq': seq, 'identity': name_match[1], 'duration': duration, 'lines': [*tags, url]})
+                tags, duration = [], None
+            elif line and not entries and not tags:
+                header.append(line)
+            elif line:
+                return None
+        if not entries or tags or len(entries) > 64 or len({e['identity'] for e in entries}) != 1:
+            return None
+        if bounds and (bounds[0] > first or bounds[1] < entries[-1]['seq']):
+            return None
+        return header, entries, bounds
+
+    def keep(self, text, base, now):
+        parsed = self.parse(text, base)
+        if parsed is None:
+            self.clear()
+            return text, base
+        header, observed, bounds = parsed
+        end, identity = observed[-1]['seq'], observed[0]['identity']
+        if self.identity != identity or now - self.updated > 30:
+            self.clear()
+        behind = self.tail - end
+        if 0 < behind <= 10 and now - self.progress <= 10 and self.result:
+            self.summary['lag_ignored'] = True
+            return self.result
+        if behind > 0:
+            self.clear()
+        if end > self.tail or self.result is None:
+            self.progress = now
+        self.identity, self.tail, self.updated = identity, end, now
+        for entry in observed:
+            self.entries.setdefault(entry['seq'], entry)
+        # Range is the official retention boundary, not an inferred URL pattern.
+        # Without it, stabilize overlaps but do not extend the live window.
+        first = bounds[0] if bounds else observed[0]['seq']
+        for seq in list(self.entries):
+            if seq < first or seq > end:
+                del self.entries[seq]
+        window, seconds = [], 0.0
+        for seq in range(end, first - 1, -1):
+            if seq not in self.entries or len(window) >= 10:
+                break
+            entry = self.entries[seq]
+            window.insert(0, entry)
+            seconds += entry['duration']
+            if seconds >= 30 and len(window) >= max(6, len(observed)):
+                break
+        # Never manufacture unobserved segments or estimate missing durations.
+        for seq in list(self.entries):
+            if seq < window[0]['seq']:
+                del self.entries[seq]
+        declared = re.search(r'^#EXT-X-TARGETDURATION:\s*(\d+)', text, re.M)
+        self.target = max(self.target, int(declared[1]) if declared else 0,
+                          *(int(e['duration']) + (e['duration'] % 1 > 0) for e in window))
+        output = []
+        for line in header:
+            if line.startswith('#EXT-X-MEDIA-SEQUENCE:'):
+                line = '#EXT-X-MEDIA-SEQUENCE:' + str(window[0]['seq'])
+            elif line.startswith('#EXT-X-TARGETDURATION:'):
+                line = '#EXT-X-TARGETDURATION:' + str(self.target)
+            output.append(line)
+        result = '\n'.join(output + [line for e in window for line in e['lines']]) + '\n'
+        self.summary = {'supported': True, 'segments': len(window), 'seconds': round(seconds, 3),
+                        'first_sequence': window[0]['seq'], 'last_sequence': end,
+                        'lag_ignored': False, 'retention_known': bool(bounds)}
+        self.result = result, base
+        return self.result
+
+
 class SourceClient(Client):
     def __init__(self, args, mode):
         copied = argparse.Namespace(**vars(args))
@@ -1106,8 +1239,46 @@ class SourceClient(Client):
         self.refresh_jobs = {}
         self.refresh_errors = {}
         self.source_cooling = {}
+        self.source_preferred = {}
+        self.live_windows = {}
+        self.live_asks = {}
+        self.live_active_until = {}
+        self.live_closed = threading.Event()
+        self.live_poller = None
         self.ticket_tokens = 8.0
         self.ticket_refilled_at = time.monotonic()
+
+    def close(self):
+        self.live_closed.set()
+        if self.live_poller and self.live_poller is not threading.current_thread():
+            self.live_poller.join(timeout=1.5)
+        super().close()
+
+    def _start_refresh_locked(self, channel):
+        job = self.refresh_jobs.get(channel)
+        if job is None:
+            job = threading.Event()
+            self.refresh_jobs[channel] = job
+            threading.Thread(target=self._refresh_manifest, args=(channel, job), daemon=True).start()
+        return job
+
+    def _poll_active(self):
+        with self.state_lock:
+            now = time.monotonic()
+            for channel, until in list(self.live_active_until.items()):
+                if now >= until:
+                    self.live_active_until.pop(channel, None)
+                    continue
+                cached = self.manifest_cache.get(channel)
+                cool = self.source_cooling.get(channel)
+                window = self.live_windows.get(channel)
+                interval = max(1, window.target) if window and 0 < window.target <= 3 else 5
+                if cached and now - cached[0] >= interval and not (cool and now < cool[0]):
+                    self._start_refresh_locked(channel)
+
+    def _live_poll_loop(self):
+        while not self.live_closed.wait(1):
+            self._poll_active()
 
     def refresh_har(self, force=False):
         return
@@ -1189,6 +1360,8 @@ class SourceClient(Client):
                 message = str(exc) if isinstance(exc, LiveError) else '新增源接口响应格式错误'
                 with self.state_lock:
                     self.states.setdefault(channel, {}).update(api_ok=False, last_error=message)
+                if isinstance(exc, UpstreamError):
+                    raise
                 raise LiveError(message) from None
 
     def stream_candidates(self, channel, data, include_kind=False):
@@ -1247,19 +1420,24 @@ class SourceClient(Client):
                 return result
         with self.state_lock:
             now = time.monotonic()
+            asked = self.live_asks.get(channel)
+            self.live_asks[channel] = now
+            if self.live_active_until.get(channel, 0) > now or (asked is not None and 0.8 <= now - asked <= 15):
+                self.live_active_until[channel] = now + 15
+                if self.live_poller is None:
+                    self.live_poller = threading.Thread(target=self._live_poll_loop, daemon=True)
+                    self.live_poller.start()
             cached = self.manifest_cache.get(channel)
-            if cached and now - cached[0] < 2:
+            window = self.live_windows.get(channel)
+            shared_seconds = (max(1, window.target) if window and 0 < window.target <= 3 else 5) if getattr(self.args, 'ysp_media', 'relay') == 'relay' else 2
+            if cached and now - cached[0] < shared_seconds:
                 return cached[1]
             cool = self.source_cooling.get(channel)
             if cool and now < cool[0]:
                 if cached and now - cached[0] <= 30:
                     return cached[1]
                 raise LiveError(cool[1])
-            job = self.refresh_jobs.get(channel)
-            if job is None:
-                job = threading.Event()
-                self.refresh_jobs[channel] = job
-                threading.Thread(target=self._refresh_manifest, args=(channel, job), daemon=True).start()
+            job = self._start_refresh_locked(channel)
             # Once a refresh has missed the deadline, return observed recent content
             # immediately on subsequent polls while that same job continues.
             immediate = channel in self.refresh_errors and cached and now - cached[0] <= 30
@@ -1277,14 +1455,26 @@ class SourceClient(Client):
         try:
             result = self._playlist_fetch(channel)
             with self.state_lock:
-                self.manifest_cache[channel] = time.monotonic(), result
+                now = time.monotonic()
+                window = self.live_windows.setdefault(channel, YspPlaylistWindow())
+                result = window.keep(*result, now)
+                self.manifest_cache[channel] = now, result
                 self.refresh_errors.pop(channel, None)
                 self.source_cooling.pop(channel, None)
         except Exception as exc:
             message = str(exc) if isinstance(exc, LiveError) else '央视频清单刷新异常'
             with self.state_lock:
                 self.refresh_errors[channel] = message
-                delay = 180 if '版权' in message else 30 if '403' in message else 5
+                delay = 180 if '版权' in message else 30 if getattr(exc, 'all_forbidden', False) or getattr(exc, 'proxy_denied', False) or (isinstance(exc, UpstreamError) and exc.status == 403) else 5
+                delay = max(delay, getattr(exc, 'retry_after', None) or 0)
+                if '版权' in message:
+                    wall_now = time.time()
+                    with self.epg.lock:
+                        show = next((row for row in self.epg.rows.get(channel, [])
+                                     if row['start'] <= wall_now < row['end']), None)
+                    if show:
+                        delay = min(300, max(1, show['end'] - wall_now))
+                        self.states.setdefault(channel, {}).update(blackout_programme=show['title'])
                 self.source_cooling[channel] = time.monotonic() + delay, message
                 self.states.setdefault(channel, {}).update(playlist_ok=False, last_error=message)
         finally:
@@ -1296,27 +1486,40 @@ class SourceClient(Client):
         errors = []
         for force in (False, True):
             data = self.resolve(channel, force)
-            for url in data['urls']:
+            urls = list(data['urls'])
+            preferred = self.source_preferred.get(channel)
+            if preferred in urls:
+                urls.remove(preferred)
+                urls.insert(0, preferred)
+            round_errors = []
+            for url in urls:
                 try:
                     status, _, body, final = self.fetch(url, self.media_headers(channel))
-                    if status != 200 or not is_hls(body):
+                    if status != 200:
+                        raise UpstreamError(status, url)
+                    if not is_hls(body):
                         raise LiveError('官方源没有返回 HLS 清单')
                     text = body.decode('utf-8-sig')
-                    # Validate every reference before exposing the playlist.
                     Client.rewrite(self, text, final, channel, 'http://localhost', 'raw')
                     with self.state_lock:
+                        self.source_preferred[channel] = url
                         self.media_types[channel] = 'raw'
-                        self.states.setdefault(channel, {}).update(playlist_ok=True, playlist_at=int(time.time()), media_type='raw')
+                        self.states.setdefault(channel, {}).update(playlist_ok=True, playlist_at=int(time.time()),
+                            media_type='raw', manifest_host=urlparse.urlsplit(final).hostname,
+                            ticket_renewed=force, last_error=None)
                     return text, final
                 except (LiveError, UnicodeError) as exc:
-                    errors.append(str(exc) if isinstance(exc, LiveError) else '清单字符编码错误')
-            # Fixed public addresses cannot be renewed; retrying them adds no value.
-            if self.api_mode == 'regional' or (errors and all('403' in e for e in errors)):
+                    round_errors.append(exc if isinstance(exc, LiveError) else LiveError('清单字符编码错误'))
+            errors.extend(round_errors)
+            # Renew an exhausted old ticket once before cooldown. A policy refusal
+            # is not a stale ticket and must not trigger repeated renewal attempts.
+            if self.api_mode == 'regional' or any(getattr(e, 'blocked_reason', None) for e in round_errors):
                 break
-        message = errors[-1] if errors else '新增源当前不可用'
+        failure = ManifestError(errors)
         with self.state_lock:
-            self.states.setdefault(channel, {}).update(playlist_ok=False, last_error=message)
-        raise LiveError(message)
+            self.states.setdefault(channel, {}).update(playlist_ok=False, last_error=str(failure),
+                manifest_all_forbidden=failure.all_forbidden, manifest_proxy_denied=failure.proxy_denied)
+        raise failure
 
     def channel_list(self):
         rows = super().channel_list()
@@ -1329,11 +1532,18 @@ class SourceClient(Client):
     def health(self):
         with self.state_lock:
             states = {k: dict(v) for k, v in self.states.items()}
+            windows = {ch: dict(window.summary) for ch, window in self.live_windows.items()}
+            active = [ch for ch, until in self.live_active_until.items() if until > time.monotonic()]
+            for ch, (until, _) in self.source_cooling.items():
+                states.setdefault(ch, {})['refresh_cooldown_seconds'] = max(0, int(until - time.monotonic()))
         return {'service_ready': True, 'version': VERSION, 'source': self.api_mode,
                 'api_mode': self.api_mode, 'channels': list(self.profiles),
                 'subscription_channels': list(self.profiles), 'upstream': states,
                 'video_processing': 'PUBLIC_HLS_PASSTHROUGH', 'media_delivery': getattr(self.args, 'ysp_media', 'relay') if self.api_mode == 'ysp' else 'proxy',
-                'refresh_pending': len(self.refresh_jobs), 'epg': self.epg.stats(),
+                'refresh_pending': len(self.refresh_jobs),
+                'live_windows': windows,
+                'active_refresh_channels': active,
+                'epg': self.epg.stats(),
                 'notice': 'HTTP 成功不代表视频已验证；4K/8K 取决于上游与播放设备解码能力。'}
 
 
