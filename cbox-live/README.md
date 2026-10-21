@@ -1,8 +1,32 @@
-# cbox-live v1.5.3 单文件：APTV 推荐版
+# cbox-live v1.5.4 单文件：APTV 推荐版
 
 Python 文件既可在 APTV 内置 Python 服务中运行，也可放在电脑、NAS 或服务器上运行。先启动脚本服务，再用它提供的 HTTP 地址加载频道；raw Python 下载地址不是频道订阅地址。
 
 
+
+## v1.5.4：央视频清单中转、分片直连
+
+默认央视频采用 `relay`：Python 获取并下发直播清单，公开媒体分片使用官方绝对地址，由 APTV 自己连接 CDN 下载；嵌套清单仍通过本地代理读取和重写。服务不再为了普通播放先下载这些分片，也不会通过“试拉分片”选择 CDN。央视频取票仍为纯 Python，APTV 内置运行无需 Node。
+
+这补齐上游项目 `extractors/yangshipin/index.js` 的关键处理方向。上游记录过服务端逐片代理被拒、播放器直连可播的情况；这不是对所有 403 的通用修复，实际手机播放仍需验证。
+
+- 央视频票据默认缓存 300 秒；清单独立刷新，同频道两秒内共享，避免把直播清单缓存五分钟。清单失败仍可尝试官方备用入口和提前换票。
+- 实例级新频道取票预算为容量 8、每 60 秒补充 8 个；近期仍在观看的频道刷新不消耗冷启动预算。大量切台或批量检测可能收到明确的暂缓提示，不删除频道。
+- 已知频道的 HEAD 请求仅本地确认路由存在，不代表已验证可播放，不向官方取票。
+- 已有最近有效清单时，刷新等待最多约 3.5 秒；超时先返回旧清单，同一个后台任务继续刷新，后续轮询可及时取得结果。旧清单最多使用 30 秒，不无限维持过期内容。
+- 上游 403 后短暂冷却，版权停播提示冷却约三分钟，避免播放器反复重试接口。目录仍为 85 个不同频道，原 61 台保留；不是 85 台均已逐台验证可播。
+
+**同一手机的 APTV 内运行：**停止旧服务、替换脚本、重新启动，并刷新订阅：
+
+```text
+http://127.0.0.1:8767/aptv.m3u
+```
+
+如需对比旧的央视频分片代理路径，可启动 `python cbox-live.py 8767 --ysp-media proxy`；默认无需添加参数。`--ysp-ticket-ttl 300` 可调整央视频取票缓存；原 `--resolve-ttl` 继续用于原有模式。批量检测也受取票保护限制，不建议反复运行全台检测或刷新预览图。
+
+诊断地址仍为 `http://127.0.0.1:8767/diagnostics.json`，其中央视频 `media_delivery` 应为 `relay`。直连后 Python 无法看到 APTV 与 CDN 之间的分片 HTTP 错误；若仍不能播放，请提供频道名称、APTV 播放器日志、服务日志，以及手机是否开启代理。`--direct` 只控制 Python 请求，不能控制 APTV 自己的网络路径。
+
+验证：126 项回归测试通过，另有 13 项最新专项测试通过（其中 12 项与回归重叠）；包括直连媒体地址、嵌套清单、并发刷新、取票预算、已知频道 HEAD、旧清单过期和真实超时后恢复。无 Node 测试进程使用旧 `/cctv1.m3u8` 入口持续读取清单，并直接向官方 CDN 下载分片，结果见 `validation-v1.5.4.json`。测试环境不等同于用户 iOS；原 App UDRM 仍未实现。
 
 ## v1.5.3：减少重复回源，补齐 403 诊断
 
@@ -157,6 +181,6 @@ python cbox-live.py --compare cctv1 --extra-sources none
 运行 `python cbox-live.py --licenses` 可查看署名及许可。单文件运行无需另放 JS、WASM、HAR 或许可证文件；完整交付包另附易读说明、验证记录与许可记录。
 
 
-最新验证见 `validation-v1.5.3.json`。
+最新验证见 `validation-v1.5.4.json`。
 
-[下载单文件 Python](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live.py?v=1.5.3)
+[下载单文件 Python](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cbox-live/cbox-live.py?v=1.5.4)

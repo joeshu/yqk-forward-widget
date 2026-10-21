@@ -1,0 +1,92 @@
+{
+  "version": "1.5.4",
+  "created_at_utc": "2026-10-21T01:16:12.514094+00:00",
+  "sha256": "4280b03cd8448c33929b7f813c14af64b52d916e6f7c9264ce69fc3991f1355f",
+  "reference_commit": "e475b2f6d24029f844ada2b362d703c8b88c2e9b",
+  "default_ysp_media": "relay: local manifests, direct official CDN media",
+  "ticket_policy": {
+    "cache_seconds": 300,
+    "cold_budget_capacity": 8,
+    "cold_budget_refill_per_60_seconds": 8,
+    "recent_playback_renewals_exempt": true
+  },
+  "manifest_policy": {
+    "shared_seconds": 2,
+    "stale_response_deadline_seconds": 3.5,
+    "max_stale_seconds": 30,
+    "one_background_refresh_per_channel": true
+  },
+  "regression_tests": {
+    "count": 126,
+    "passed": true,
+    "command": "python -m unittest -q test_cbox_v154 test_cbox_v153 test_cbox_v152 test_cbox_v151 test_cbox_v15 test_cbox_v14 test_cbox_v13 test_cbox_v12 test_cbox_v11"
+  },
+  "focused_latest_tests": {
+    "count": 13,
+    "passed": true,
+    "overlap_with_regression": 12,
+    "command": "python -m unittest -q test_cbox_v154"
+  },
+  "live_no_node_direct_media": {
+    "scope": "No-Node backend relay manifest, CCTV1 direct CDN segment reads; execution environment, not iOS",
+    "polls": [
+      {
+        "poll": 1,
+        "source": "ysp",
+        "new_segments": 3
+      },
+      {
+        "poll": 2,
+        "source": "ysp",
+        "new_segments": 2
+      },
+      {
+        "poll": 3,
+        "source": "ysp",
+        "new_segments": 2
+      },
+      {
+        "poll": 4,
+        "source": "ysp",
+        "new_segments": 1
+      },
+      {
+        "poll": 5,
+        "source": "ysp",
+        "new_segments": 2
+      },
+      {
+        "poll": 6,
+        "source": "ysp",
+        "new_segments": 1
+      },
+      {
+        "poll": 7,
+        "source": "ysp",
+        "new_segments": 1
+      }
+    ],
+    "seconds": 59.22,
+    "unique_segments": 12,
+    "overlapping_segment_observations": 9,
+    "bytes": 27401188,
+    "ffmpeg_exit": 0,
+    "error_lines": 0,
+    "diagnostics": [],
+    "passed": true,
+    "server_exit": 0
+  },
+  "catalogue_counts": {
+    "aptv": 85,
+    "original_web": 61,
+    "original_app": 61,
+    "combined_sources": 134
+  },
+  "limitations": [
+    "No direct user iOS test; phone 403 not proven resolved",
+    "Direct CDN media errors are visible to player, not Python proxy logs",
+    "Not all 85 catalogue entries tested",
+    "Original App UDRM and browser VIP bridging unsupported",
+    "Official rights and upstream restrictions still apply"
+  ]
+}
