@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-21",
+  "phone_log_findings": {
+    "failed_selections": 4,
+    "channels": [
+      "cctv2",
+      "cctv1",
+      "cctv2",
+      "cctv4"
+    ],
+    "error": "response-too-large",
+    "phase": "engine-initialization",
+    "processed_segments_each": 0
+  },
+  "official_url": "https://js.player.cntv.cn/creator/live.worker.js",
+  "observed_current_asset": {
+    "bytes": 4871689,
+    "sha256": "6dd48cc73249fe32cbc588d45e172e167d1310965592952b1f4970bd23712738",
+    "outcome": "Initialization succeeded after temporary host adaptation, but H.264 decode errors occurred. Not adopted.",
+    "trials": [
+      {
+        "channel": "cctv2",
+        "prefix": true,
+        "first_playlist_seconds": 7.194,
+        "prefix_hits": 1,
+        "prefix_fallbacks": 0,
+        "startup_lookahead_saved_bytes": 806296,
+        "decode_returncode": 0,
+        "decode_error_bytes": 19282,
+        "processed_segments": 6,
+        "source_gaps": 0,
+        "transport_retries": 0
+      }
+    ]
+  },
+  "packaged_verified_original": {
+    "bytes": 2344162,
+    "sha256": "ad9fd2d188015074e59632cedecf13eda29f2c76ea92f17b5f00bc799451bc13",
+    "zlib_bytes": 471976,
+    "zlib_sha256": "f3b7849847582e8b4fa343d58962dfca80bd1369250e843081e2130c7ccbb1e6",
+    "runtime_download_requests": 0,
+    "trials": [
+      {
+        "channel": "cctv2",
+        "prefix": true,
+        "first_playlist_seconds": 11.031,
+        "prefix_hits": 1,
+        "prefix_fallbacks": 0,
+        "startup_lookahead_saved_bytes": 740684,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "processed_segments": 5,
+        "source_gaps": 0,
+        "transport_retries": 0
+      },
+      {
+        "channel": "cctv1",
+        "prefix": true,
+        "first_playlist_seconds": 7.442,
+        "prefix_hits": 1,
+        "prefix_fallbacks": 0,
+        "startup_lookahead_saved_bytes": 423340,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "processed_segments": 5,
+        "source_gaps": 0,
+        "transport_retries": 0
+      },
+      {
+        "channel": "cctv4",
+        "prefix": true,
+        "first_playlist_seconds": 5.048,
+        "prefix_hits": 1,
+        "prefix_fallbacks": 0,
+        "startup_lookahead_saved_bytes": 640104,
+        "decode_returncode": 0,
+        "decode_error_bytes": 0,
+        "processed_segments": 5,
+        "source_gaps": 0,
+        "transport_retries": 0
+      }
+    ],
+    "scope": "Fresh generated script with no RAM runtime cache; official-runtime URL requests explicitly forbidden in harness. Original unchanged SDK. Three channels, 16 seconds strict decode each. Not a fixed speedup or iPhone verification."
+  },
+  "tests": 193,
+  "native_jscore_tests": 11,
+  "phone_validation": "pending"
+}

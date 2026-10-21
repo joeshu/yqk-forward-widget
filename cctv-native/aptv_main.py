@@ -34,7 +34,7 @@ def main(argv=None):
     print(f'APTV 央视网页原分片实验版：http://127.0.0.1:{args.port}/all.m3u', flush=True)
     print('频道缓存：'+str(args.channel_cache_size)+' 路（含当前）；组件保留 '+str(args.recent_channel_seconds)+' 秒，后台暂停处理。', flush=True)
     print('首播完整分片数：'+str(args.startup_segments)+'；--startup-segments 2 恢复两片缓冲。', flush=True)
-    print('状态：/status；同源多频道，按需加载。首次选台下载并校验官方组件（默认内存缓存，不写磁盘）。', flush=True)
+    print('状态：/status；同源多频道，按需加载。首次选台校验并载入随脚本固定的官方组件（默认内存缓存，不写磁盘）。', flush=True)
     try:
         server.serve_forever(poll_interval=0.2)
     except KeyboardInterrupt:

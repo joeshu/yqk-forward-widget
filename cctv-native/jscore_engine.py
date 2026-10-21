@@ -167,7 +167,9 @@ def load_runtime(cache_dir=None):
                 print('[cctv-aptv] disk-cache-read-unavailable; using memory', flush=True)
         if hashlib.sha256(raw).hexdigest() != RUNTIME_SHA:
             try:
-                raw, _ = get(RUNTIME_URL, limit=4*1024*1024)
+                raw = bundled_runtime()
+                if raw is None:
+                    raw, _ = get(RUNTIME_URL, limit=4*1024*1024)
             except PermissionError:
                 raise NativeError('official-runtime-download-permission-denied') from None
             if hashlib.sha256(raw).hexdigest() != RUNTIME_SHA:

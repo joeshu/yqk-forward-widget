@@ -72,6 +72,7 @@ class TestRuntimeMemoryCache(unittest.TestCase):
         module = load_service()
         raw = b'unit-test-runtime-bytes'
         module.RUNTIME_SHA = hashlib.sha256(raw).hexdigest()
+        module.RUNTIME_BUNDLE = None
         return module, raw
 
     def test_default_never_accesses_filesystem_and_reuses_verified_memory(self):
@@ -111,6 +112,27 @@ class TestRuntimeMemoryCache(unittest.TestCase):
             with self.assertRaisesRegex(module.NativeError,'official-runtime-version-changed'):
                 module.load_runtime()
         self.assertIsNone(module._RUNTIME_MEMORY)
+
+
+    def test_packaged_official_runtime_loads_without_filesystem_or_runtime_download(self):
+        import hashlib
+        module=load_service()
+        with mock.patch.object(module,'Path',side_effect=AssertionError('filesystem accessed')), \
+             mock.patch.object(module,'get',side_effect=AssertionError('unexpected runtime download')):
+            raw=module.load_runtime()
+            self.assertEqual(len(raw),2344162)
+            self.assertEqual(hashlib.sha256(raw).hexdigest(),module.RUNTIME_SHA)
+            self.assertIs(module.load_runtime(),raw)
+
+    def test_invalid_or_oversized_runtime_bundle_is_rejected_without_network_fallback(self):
+        import zlib,base64
+        for packed in (b'not compressed',zlib.compress(b'changed runtime'),
+                       zlib.compress(b'x'*(4*1024*1024+1))):
+            module=load_service();module.RUNTIME_BUNDLE=base64.b85encode(packed)
+            with mock.patch.object(module,'get',side_effect=AssertionError('network fallback')):
+                with self.assertRaisesRegex(module.NativeError,'official-runtime-bundle-invalid'):
+                    module.load_runtime()
+            self.assertIsNone(module._RUNTIME_MEMORY)
 
 
 @unittest.skipUnless(os.environ.get('CCTV_JSCORE_TEST_LIBRARY'), 'real JavaScriptCore library not configured')

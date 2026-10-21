@@ -1,6 +1,7 @@
 """Build the standalone Python entry with its own helper/Node source embedded."""
 from pathlib import Path
 import argparse
+import base64
 
 
 def render():
@@ -8,6 +9,7 @@ def render():
     helper = (here / 'cctv_native_ts.py').read_text(encoding='utf-8')
     engine = (here / 'engine.cjs').read_text(encoding='utf-8')
     service = (here / 'service.py').read_text(encoding='utf-8')
+    service = service.replace('RUNTIME_BUNDLE = None', 'RUNTIME_BUNDLE = '+repr(base64.b85encode((here/'vendor/cctv-live-worker-ad9fd2d18801.js.zlib').read_bytes())), 1)
     service = service.replace('from __future__ import annotations\n', '', 1)
     service = service.replace('ENGINE_SOURCE = None', 'ENGINE_SOURCE = ' + repr(engine), 1)
     prefix = ('#!/usr/bin/env python3\nfrom __future__ import annotations\n'

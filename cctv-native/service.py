@@ -27,6 +27,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, HTTPRedirectHandler, HTTPSHandler, build_opener
 import uuid
+import zlib
 from cctv_native_ts import inspect_boundary_prefix, inspect_ts, transform_pes_nals, boundary_proven_by, TSFormatError
 
 RUNTIME_URL = 'https://js.player.cntv.cn/creator/live.worker.js'
@@ -39,6 +40,7 @@ CDNS = ('.cntv.cn', '.cctv.com', '.cdn20.com', '.kcdnvip.com', '.bdydns.com',
 # Exact website CDN observed in the user's 2026-10-20 official dispatch log.
 EXACT_CDNS = frozenset({'ldocctvwbcdcnc.v.wscdns.com'})
 # Replaced by the single-file build; source checkout uses the adjacent engine.
+RUNTIME_BUNDLE = None
 ENGINE_SOURCE = None
 
 
@@ -453,6 +455,21 @@ def cache_paths(args):
     return root, root / 'node' / 'node_modules', root / ('runtime-' + RUNTIME_SHA[:12] + '.js')
 
 
+def bundled_runtime():
+    """Load only the unchanged, pinned public SDK; no network fallback mixing."""
+    if RUNTIME_BUNDLE is None:
+        return None
+    try:
+        decoder = zlib.decompressobj()
+        raw = decoder.decompress(base64.b85decode(RUNTIME_BUNDLE), 4*1024*1024+1)
+        if (not decoder.eof or decoder.unconsumed_tail or decoder.unused_data
+                or len(raw) > 4*1024*1024 or hashlib.sha256(raw).hexdigest() != RUNTIME_SHA):
+            raise ValueError('invalid bundle')
+    except Exception:
+        raise NativeError('official-runtime-bundle-invalid') from None
+    return raw
+
+
 def setup(args):
     root, modules, runtime = cache_paths(args)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -461,7 +478,9 @@ def setup(args):
         raise NativeError('npm-not-found')
     subprocess.run([npm, 'install', '--prefix', str(modules.parent), '--ignore-scripts', '--no-audit',
                     '--no-fund', '--save-exact', *PACKAGES], check=True)
-    raw, _ = get(RUNTIME_URL, limit=4*1024*1024)
+    raw = bundled_runtime()
+    if raw is None:
+        raw, _ = get(RUNTIME_URL, limit=4*1024*1024)
     if hashlib.sha256(raw).hexdigest() != RUNTIME_SHA:
         raise NativeError('official-runtime-version-changed')
     temporary = runtime.with_suffix('.tmp')

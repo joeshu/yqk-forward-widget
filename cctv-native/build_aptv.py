@@ -10,6 +10,7 @@ HERE = Path(__file__).resolve().parent
 
 def render():
     original = (HERE/'service.py').read_text()
+    original = original.replace('RUNTIME_BUNDLE = None', 'RUNTIME_BUNDLE = '+repr(base64.b85encode((HERE/'vendor/cctv-live-worker-ad9fd2d18801.js.zlib').read_bytes())), 1)
     tree = ast.parse(original)
     lines = original.splitlines(keepends=True)
     excluded = {'Engine', 'setup', 'cache_paths', 'main'}
