@@ -1,0 +1,48 @@
+{
+  "recorded_at_utc": "2026-10-21T10:24:46Z",
+  "license_exchanges": [
+    {
+      "request_bytes": 368,
+      "http_status": 200,
+      "response_bytes": 232,
+      "business_status": 0,
+      "protected_license_count": 1
+    }
+  ],
+  "wall_seconds": 4.603,
+  "samples": [
+    {
+      "channel": "cctv1",
+      "source_bytes": 1102056,
+      "output_bytes": 1102056,
+      "changed_bytes": 109300,
+      "output_sha256": "27e6d333276c0fd8a01644c0e8175f0020655d8c3be91631a86810f0ad863844",
+      "decode_exit": 0,
+      "decode_error_lines": 0,
+      "video_frames": "100",
+      "duration": "00:00:03.989333"
+    },
+    {
+      "channel": "cctv7",
+      "source_bytes": 230864,
+      "output_bytes": 230864,
+      "changed_bytes": 29904,
+      "output_sha256": "e8b3881c4d11dada9db2a7c4538cd7f38e491d26f59aa975d3b1e82c083411c9",
+      "decode_exit": 0,
+      "decode_error_lines": 0,
+      "video_frames": "100",
+      "duration": "00:00:03.989333"
+    },
+    {
+      "channel": "guizhou",
+      "source_bytes": 1292500,
+      "output_bytes": 1292500,
+      "changed_bytes": 0,
+      "output_sha256": "5c44b3e9d702daf979c4fbfaad61569474f47b925bc4e5123dcdf446a84aea48",
+      "decode_exit": 0,
+      "decode_error_lines": 0,
+      "video_frames": "100",
+      "duration": "00:00:04.000000"
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "process_exit": 0,
+  "sdk_ready": true,
+  "license_exchanges": [
+    {
+      "request_bytes": 368,
+      "http_status": 200,
+      "response_bytes": 232,
+      "business_status": 0,
+      "protected_license_count": 1
+    }
+  ],
+  "requested_frames": 1400,
+  "responded_frames": 1400,
+  "wall_seconds": 4.986,
+  "phases": [
+    "KOO phase=emulator result=ready abi=arm64-v8a",
+    "KOO phase=load result=loaded jni_onload=true",
+    "KOO phase=jni_onload result=returned",
+    "KOO phase=rights starting=offline_loopback_only",
+    "PROBE phase=dns result=loopback_resolved adapter=android_netd_api23",
+    "KOO phase=rights returned=0 sdk_license_accepted=true",
+    "KOO phase=done media=not_attempted"
+  ],
+  "samples": [
+    {
+      "sample": "cctv7",
+      "input_bytes": 854460,
+      "video_pes_count": 300,
+      "output_bytes": 854460,
+      "changed_bytes": 105488,
+      "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+      "decode_exit": 0,
+      "decode_error_lines": 0,
+      "video_frames": "300",
+      "duration": "00:00:11.989333"
+    },
+    {
+      "sample": "cctv1",
+      "input_bytes": 1095664,
+      "video_pes_count": 300,
+      "output_bytes": 1095664,
+      "changed_bytes": 125432,
+      "output_sha256": "9759e905d57a5a48668b7373d677abe847a5959f1930dafe7536901cd084250b",
+      "decode_exit": 0,
+      "decode_error_lines": 0,
+      "video_frames": "300",
+      "duration": "00:00:11.989333"
+    },
+    {
+      "sample": "guizhou",
+      "input_bytes": 4825396,
+      "video_pes_count": 500,
+      "output_bytes": 4825396,
+      "changed_bytes": 0,
+      "output_sha256": "e0d4d8cf08006945a11d708200ea3c7d1f14e04e00caf57c839584f0baad567c",
+      "decode_exit": 0,
+      "decode_error_lines": 0,
+      "video_frames": "500",
+      "duration": "00:00:20.000000"
+    },
+    {
+      "sample": "old95",
+      "input_bytes": 1307916,
+      "video_pes_count": 200,
+      "output_bytes": 1307916,
+      "changed_bytes": 140118,
+      "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+      "decode_exit": 0,
+      "decode_error_lines": 0,
+      "video_frames": "200",
+      "duration": "00:00:08.000333"
+    },
+    {
+      "sample": "app1500",
+      "input_bytes": 1049792,
+      "video_pes_count": 100,
+      "output_bytes": 1049792,
+      "changed_bytes": 108267,
+      "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+      "decode_exit": 0,
+      "decode_error_lines": 0,
+      "video_frames": "100",
+      "duration": "00:00:03.989333"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "date": "2026-10-21",
-  "app_udrm_resolved": false,
+  "app_udrm_resolved": true,
   "user_observation": "Original iOS CCTV App picture and audio normal during capture; exact iOS App version not supplied.",
   "captures": {
     "152053": {
@@ -135,7 +135,7 @@
     "version": "7.9.31",
     "bytes": 49271128,
     "sha256": "f6c8bde63f14b3bffb57d1e838a71e80e85abf5cbe4717b983aa787134324d75",
-    "analysis": "static only; package not executed or redistributed",
+    "analysis": "Official ARM64 Koo player library executed in unidbg/Unicorn2 with a formal SDK-generated rights exchange. Full App not installed for the successful path; vendor binaries not redistributed.",
     "library": "lib/arm64-v8a/libudrm.so",
     "format": "Android AArch64 ELF",
     "dependencies": [
@@ -191,12 +191,36 @@
         "reponseStr"
       ]
     },
-    "ios_compatibility_verified": false
+    "ios_compatibility_verified": false,
+    "successful_library": "lib/arm64-v8a/libkooplayer260728D.so",
+    "successful_library_sha256": "41cd081ba0348b9802cedfceedb6bfa12c4db8f7cc462ffd3b531df6874f0a9e",
+    "earlier_library_path_successful": false
   },
   "delivery": {
     "production_script_changed": false,
     "runtime_har_dependency_added": false,
     "captured_credentials_replayed": false,
-    "device_keys_requested": false
+    "device_keys_requested": false,
+    "new_standalone_sdk_service_added": true
+  },
+  "resolution_scope": "Official unmodified Android Koo SDK licensed processing verified for five known samples and three current App live sources; does not claim 61-channel coverage or iPhone-native runtime.",
+  "resolution": {
+    "official_license_http_status": 200,
+    "official_license_business_status": 0,
+    "sdk_rights_return": 0,
+    "sample_frames_processed": 1400,
+    "all_sample_av_decode_error_lines": 0,
+    "fresh_verified_channels": [
+      "cctv1",
+      "cctv7",
+      "guizhou"
+    ],
+    "all_61_app_channels_verified": false,
+    "runtime_har_dependency": false,
+    "single_file": "../../cctv-app-udrm/cctv-app-udrm.py",
+    "sample_evidence": "../../cctv-app-udrm/SAMPLE-VALIDATION.json",
+    "fresh_evidence": "../../cctv-app-udrm/FRESH-VALIDATION.json",
+    "live_evidence": "../../cctv-app-udrm/LIVE-VALIDATION.json",
+    "iphone_aptv_device_tested": false
   }
 }

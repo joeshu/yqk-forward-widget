@@ -1,5 +1,7 @@
 # joeshu 影视组件合集
 
+2026-10-21：新增独立的 [央视影音 App UDRM 单文件服务](./cctv-app-udrm/README.md)，正式官方SDK许可与媒体处理已跑通；CCTV-1、CCTV-7、贵州卫视三路实时音视频解码通过。电脑/服务器需要Python、JDK 21和OpenSSL，手机APTV订阅 `http://电脑局域网IP:8769/all.m3u`。旧61台项目继续保留，三路验证不代表全部61台App源均可播。
+
 
 新增 [APTV 手机单文件实验版 cctv-aptv.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-native/cctv-aptv.py)：使用 iOS 系统 JavaScriptCore，无 Node、npm、浏览器、FFmpeg 或子进程。APTV 加载并启动后订阅 `http://127.0.0.1:18768/all.m3u`，刷新订阅现可获得 14 个官网频道；逐台真实分片严格解码通过，仍为指定央视网页来源。用户已确认 CCTV-2 在关闭 MitM 后可于 iPhone 播放，多频道换台待手机验收，详见 [APTV 使用与验证](./cctv-native/README.md)。
 新增 [CCTV-2 网页原分片实验版](./cctv-native/README.md)：使用指定央视网页来源，Python + Node 提供 `http://127.0.0.1:18768/all.m3u`，无需 Chromium、Playwright 或 FFmpeg。此前的 [浏览器采集转码版](./cctv-web/README.md) 独立保留；两版均仅提供 CCTV-2，与下方央视频服务来源不同。

@@ -6,7 +6,7 @@
 
 - 移除 HAR 解析、`--har` 参数、文件变更轮询、热更新及相关锁、版本计数和诊断提示。
 - 移除内嵌的旧 App 抓包 URL、`auth-key` 和会话请求模板；不依靠过期请求模拟实时签名。
-- 保留原 App 的接口、清单与参数处理研究代码及 61 台目录。原 App 实时签名和 UDRM 处理尚未实现，打开其播放入口会明确返回 HTTP 503，不再要求用户导入抓包。
+- 保留原 App 的接口、清单与参数处理研究代码及 61 台目录。本脚本的原 App 实时签名和 UDRM 处理尚未接入，打开其播放入口会明确返回 HTTP 503，不再要求用户导入抓包。
 - 央视频纯 Python 签名、地方源、同台备用选择、节目单、分片直连、直播窗口及切台优化保留。推荐目录仍为 85 个不同频道条目，存在目录不等于已逐台验证可播。
 - 清理已合入主文件的旧 `cbox-live-next.py` 研究版副本，避免继续使用旧 HAR 运行方式。历史研究过程与版本记录可从 Git 历史查看。
 
@@ -43,14 +43,14 @@ http://127.0.0.1:8767/aptv-epg.xml.gz
 | `/ysp/all.m3u` | 63 | 央视频公开流，纯 Python 签名，默认分片直连 |
 | `/regional/all.m3u` | 10 | 宁夏及黑龙江官方源目录 |
 | `/web/all.m3u` | 61 | 原网页 CDRM，需可选 Node.js 18+ 内核 |
-| `/app/all.m3u` | 61 | 原 App 研究目录；实时签名和 UDRM 处理尚未实现，不能视为可播源 |
+| `/app/all.m3u` | 61 | 本脚本的原 App 研究目录；实时签名和 UDRM 尚未接入，不能视为可播源 |
 
 默认同时保留原网页和 App 研究入口，并启用央视频及地方来源。没有 Node 时，未加模式前缀的 `/all.m3u` 和旧频道入口自动使用推荐来源选择。显式网页来源缺少内核时返回能力说明。
 
-原 App 的 `request_generation` 为 `APP_SIGNER_NOT_IMPLEMENTED`，`video_processing` 为 `UDRM_NOT_IMPLEMENTED`。`CORE_B85` 是网页处理核心，不代表原 App 已实现；网页签名常量也不能直接当作 App 签名算法使用。
+本脚本原 App 的 `request_generation` 为 `APP_SIGNER_NOT_IMPLEMENTED`，`video_processing` 为 `UDRM_NOT_IMPLEMENTED`。`CORE_B85` 是网页处理核心，不代表原 App 已实现；网页签名常量也不能直接当作 App 签名算法使用。
 
 
-最新原 App UDRM 离线研究见 [2026-10-21 研究记录](research/UDRM-20261021.md)：已定位 App 配置中的公开许可入口和官方 Android 原生处理接口，iOS APTV 的原 App UDRM 仍未实现。
+原 App UDRM 现已在独立的 [cctv-app-udrm 单文件服务](../cctv-app-udrm/) 中跑通：旧错误样本和三路实时源均通过音视频解码验证，详见 [2026-10-21 研究记录](research/UDRM-20261021.md)。新服务需要电脑/服务器的 JDK 21，APTV通过局域网订阅；本脚本原61台目录及手机纯Python运行方式继续保留。
 
 ## 切台与诊断
 
