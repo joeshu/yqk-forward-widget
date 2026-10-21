@@ -4,7 +4,7 @@ import argparse
 import base64
 from collections import OrderedDict
 from dataclasses import dataclass, replace
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.client import (IncompleteRead, HTTPSConnection, RemoteDisconnected,
@@ -386,14 +386,14 @@ WEBSITE_CHANNELS = (
 )
 
 
-def source_url(channel_id='cctv2'):
+def source_url(channel_id='cctv2', *, timeout=12):
     if channel_id not in dict(WEBSITE_CHANNELS):
         raise NativeError('unknown-channel')
     stamp, nonce = int(time.time()*1000), random.randint(100, 1000)
     signature = hashlib.md5(f'{channel_id}{stamp}{nonce}4f779c20f6974ccba20e28d63529d0ef'.encode()).hexdigest()
     query = urlencode({'channel': channel_id, 'vn': '1000', 'pdrm': '1', 'uid': '', 'hbss': stamp})
     raw, _ = get('https://vdnx.live.cntv.cn/api/v3/vdn/live?' + query,
-                 headers={'auth-key': f'{stamp}-{nonce}-{signature}'}, limit=1024*1024)
+                 headers={'auth-key': f'{stamp}-{nonce}-{signature}'}, limit=1024*1024, timeout=timeout)
     data = json.loads(raw)
     if str(data.get('play')) != '1':
         raise NativeError('official-playback-not-permitted')
@@ -440,9 +440,9 @@ def parse_playlist(text, base):
     return {'entries': entries}
 
 
-def media_playlist(url):
+def media_playlist(url, *, timeout=12):
     for _ in range(4):
-        raw, final = get(url, limit=1024*1024)
+        raw, final = get(url, limit=1024*1024, timeout=timeout)
         parsed = parse_playlist(raw.decode('utf-8-sig'), final)
         if 'entries' in parsed:
             return parsed['entries'], final
@@ -648,6 +648,9 @@ class Channel:
 
     def checkpoint(self):
         return not self.stop.is_set()
+
+    def take_recent_preparation(self):
+        return None
 
     def native_context_closed(self):
         """Called by the VM owner after native teardown, before I/O joins."""
@@ -1139,6 +1142,11 @@ class Channel:
                     cached, analyses = {}, {}
                     if resumed.reset_sequence:
                         last_seq, current_source, pending_discontinuity = None, None, True
+                        recent = self.take_recent_preparation()
+                        if recent is not None:
+                            preparation = Future()
+                            preparation.set_result(recent)
+                            self.preparation_phase = 'recent-prefetch'
                     # Time spent parked is not an upstream progress failure.
                     last_progress = time.monotonic()
                     continue

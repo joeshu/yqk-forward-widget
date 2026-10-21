@@ -47,6 +47,7 @@ def render():
                          for k,v in assets.items())+'\n'
     payload += (HERE/'jscore_engine.py').read_text()+'\n'
     payload += (HERE/'aptv_epg.py').read_text()+'\n'
+    payload += (HERE/'aptv_prefetch.py').read_text()+'\n'
     payload += (HERE/'aptv_channels.py').read_text()+'\n'
     payload += (HERE/'aptv_main.py').read_text()
     return prefix+payload

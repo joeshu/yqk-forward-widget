@@ -9,9 +9,14 @@ PUBLISHED_CHANNELS = {cid: name for cid,name in WEBSITE_CHANNELS if cid in PUBLI
 
 
 class ManagedChannel(Channel):
-    def __init__(self, args, slots):
+    def __init__(self, args, slots, manager=None):
         super().__init__(args)
         self.slots = slots
+        self.manager = manager
+        self.prefetch_epoch = 0
+        self.recent_preparation = None
+        self.recent_preparation_bytes = 0
+        self.prefetch_hits = 0
         self.slot_held = False
         self.parked_at = 0
         self.resume_pending = False
@@ -25,6 +30,9 @@ class ManagedChannel(Channel):
     def retire(self):
         with self.condition:
             self.stop.set()
+            self.prefetch_epoch += 1
+            self.recent_preparation = None
+            self.recent_preparation_bytes = 0
             self._cancel_inputs()
             self.parked_at = 0
             self.ring.clear()
@@ -42,6 +50,9 @@ class ManagedChannel(Channel):
                 _, old = self.ring.popitem(last=False)
                 self.size -= len(old[0])
                 self.discarded_discontinuities += bool(old[2])
+            self.prefetch_epoch += 1
+            self.recent_preparation = None
+            self.recent_preparation_bytes = 0
             self.parked_at = time.monotonic()
             self._cancel_inputs()
             self.condition.notify_all()
@@ -55,12 +66,16 @@ class ManagedChannel(Channel):
             durations = sum(item[1] for item in self.ring.values())
             fresh = (len(self.ring) >= getattr(self.args, 'startup_segments', 2) and self.last_published_at > 0
                      and now-self.last_published_at <= min(8, durations))
+            self.prefetch_epoch += 1
             self.parked_at = 0
             self.resume_pending = True
             self.resume_reset_sequence = not fresh
             self.last_request = now
             self.resumed_at = now
             self.resume_ready_seconds = 0.0 if fresh else None
+            if fresh:
+                self.recent_preparation = None
+                self.recent_preparation_bytes = 0
             self.cache_hits += 1
             self.cache_buffer_hits += bool(fresh)
             if not fresh:
@@ -74,6 +89,16 @@ class ManagedChannel(Channel):
                   ' fresh_buffer='+str(fresh).lower(), flush=True)
             self.condition.notify_all()
             return True
+
+    def take_recent_preparation(self):
+        with self.condition:
+            prepared, self.recent_preparation = self.recent_preparation, None
+            self.recent_preparation_bytes = 0
+            if prepared is not None and time.monotonic()-prepared[4] <= 6:
+                self.prefetch_hits += 1
+                print('[cctv-native] recent-prefetch-hit channel='+self.channel_id, flush=True)
+                return prepared
+            return None
 
     def checkpoint(self):
         with self.condition:
@@ -101,10 +126,14 @@ class ManagedChannel(Channel):
                     print('[cctv-native] cache-media-ready seconds='+str(self.resume_ready_seconds)+
                           ' channel='+self.channel_id, flush=True)
 
+        if self.manager is not None:
+            self.manager.enforce_budget()
+
     def snapshot(self):
         result = super().snapshot()
         with self.condition:
-            result.update(parked=bool(self.parked_at), cache_hits=self.cache_hits,
+            result.update(prefetch_hits=self.prefetch_hits, prefetched_bytes=self.recent_preparation_bytes,
+                          parked=bool(self.parked_at), cache_hits=self.cache_hits,
                           cache_buffer_hits=self.cache_buffer_hits,
                           resume_ready_seconds=self.resume_ready_seconds,
                           buffer_age_seconds=round(time.monotonic()-self.last_published_at,3)
@@ -140,6 +169,10 @@ class ChannelManager:
         self.current = None
         self.closed = False
         self.epg = OfficialEPG(PUBLISHED_CHANNELS)
+        self.cache_bytes = getattr(args, 'cache_memory_mb', 32)*1024*1024
+        self.budget_evictions = 0
+        self.prefetch = RecentPrefetch(self, getattr(args, 'recent_prefetch', 0))
+        self.prefetch.start()
 
     def activate(self, cid):
         if cid not in PUBLISHED_CHANNELS:
@@ -172,10 +205,45 @@ class ChannelManager:
                 target.retire()
             args = SimpleNamespace(**vars(self.args))
             args.channel_id = cid
-            channel = ManagedChannel(args, self.slots)
+            args.buffer_mb = min(args.buffer_mb, self.cache_bytes//(1024*1024))
+            channel = ManagedChannel(args, self.slots, self)
             self.channels[cid] = channel
             self.current = cid
             return channel
+
+    def prefetch_targets(self):
+        with self.lock:
+            current = self.channels.get(self.current)
+            if (self.closed or current is None or current.state != 'ready'
+                    or len(current.ring) < 2 or time.monotonic()-current.last_published_at > 8):
+                return []
+            return sorted((c for c in self.channels.values() if c.parked_at and not c.stop.is_set()
+                           and time.monotonic()-c.parked_at < c.cache_ttl),
+                          key=lambda c:c.parked_at, reverse=True)[:self.prefetch.limit]
+
+    def enforce_budget(self):
+        with self.lock:
+            parked = sorted((c for c in self.channels.values() if c.parked_at and not c.stop.is_set()),
+                            key=lambda c:c.parked_at)
+            # Discard stale parked video first; retain its reusable native VM.
+            for channel in parked:
+                with channel.condition:
+                    if channel.recent_preparation is not None and time.monotonic()-channel.recent_preparation[4] > 6:
+                        channel.recent_preparation = None;channel.recent_preparation_bytes = 0
+                    if time.monotonic()-channel.last_published_at > 8:
+                        channel.ring.clear();channel.size = 0
+            def total():
+                return sum(c.size+c.recent_preparation_bytes for c in self.channels.values() if not c.stop.is_set())
+            for channel in parked:
+                if total() <= self.cache_bytes:
+                    break
+                with channel.condition:
+                    if channel.recent_preparation_bytes:
+                        channel.recent_preparation = None;channel.recent_preparation_bytes = 0
+                        self.budget_evictions += 1
+                    if total() > self.cache_bytes and channel.size:
+                        channel.ring.clear();channel.size = 0
+                        self.budget_evictions += 1
 
     def lookup(self, cid):
         with self.lock:
@@ -189,6 +257,10 @@ class ChannelManager:
                           channels=[{'id':cid,'name':name} for cid,name in PUBLISHED_CHANNELS.items()],
                           epg=self.epg.snapshot(), native_context_limit=self.cache_limit,
                           channel_cache_size=self.cache_limit,
+                          media_cache_budget_bytes=self.cache_bytes,
+                          budget_evictions=self.budget_evictions,
+                          recent_prefetch=self.prefetch.snapshot(),
+                          accounted_cache_bytes=sum(c.size+c.recent_preparation_bytes for c in self.channels.values() if not c.stop.is_set()),
                           cached_media_bytes=sum(c.size for c in self.channels.values() if not c.stop.is_set()),
                           retained_channel_count=sum(not c.stop.is_set() for c in self.channels.values()),
                           http_connections=_HTTP_POOL.snapshot(),
@@ -203,6 +275,7 @@ class ChannelManager:
         with self.lock:
             self.closed = True
             self.epg.close()
+            self.prefetch.close()
             for channel in self.channels.values():
                 channel.retire()
         # No cross-thread JSC calls and no HTTP thread blocked on VM teardown.

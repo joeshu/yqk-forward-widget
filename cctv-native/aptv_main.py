@@ -17,6 +17,10 @@ def main(argv=None):
                         help='最近频道组件保留秒数（0 关闭，最多 180）；过旧分片重新准备直播')
     parser.add_argument('--channel-cache-size', type=int, choices=range(1,7), default=6,
                         help='保留频道总数，含当前频道，默认 6；后台频道暂停处理')
+    parser.add_argument('--recent-prefetch', type=int, choices=(0,1,2), default=1,
+                        help='后台只预取最近频道的原始分片，默认 1 路；0 关闭')
+    parser.add_argument('--cache-memory-mb', type=int, default=32,
+                        help='输出视频及待用预取数据的缓存预算，不含原生组件，默认 32 MiB')
     parser.add_argument('--startup-segments', type=int, choices=(1,2), default=1,
                         help='首播完整分片数，默认 1；设为 2 恢复原缓冲策略')
     parser.add_argument('--buffer-mb', type=int, default=32)
@@ -25,14 +29,15 @@ def main(argv=None):
     args = parser.parse_args(argv)
     _API_LEGACY_ENABLED = not args.no_legacy_source_tls
     _HTTP_REUSE_ENABLED = not args.no_http_reuse
-    if not 1 <= args.port <= 65535 or not 16 <= args.buffer_mb <= 256 or not 30 <= args.idle_timeout <= 3600 or not 0 <= args.recent_channel_seconds <= 180:
+    if not 1 <= args.port <= 65535 or not 16 <= args.buffer_mb <= 256 or not 30 <= args.idle_timeout <= 3600 or not 0 <= args.recent_channel_seconds <= 180 or not 16 <= args.cache_memory_mb <= 256:
         parser.error('invalid port/buffer/idle timeout/recent channel seconds')
     manager = ChannelManager(args)
     server = ThreadingHTTPServer((args.bind, args.port), MultiChannelHandler)
     server.daemon_threads = True
     server.manager, server.args = manager, args
     print(f'APTV 央视网页原分片实验版：http://127.0.0.1:{args.port}/all.m3u', flush=True)
-    print('频道缓存：'+str(args.channel_cache_size)+' 路（含当前）；组件保留 '+str(args.recent_channel_seconds)+' 秒，后台暂停处理。', flush=True)
+    print('频道缓存：'+str(args.channel_cache_size)+' 路（含当前）；组件保留 '+str(args.recent_channel_seconds)+' 秒，后台组件暂停处理。', flush=True)
+    print('原始分片预取：最近 '+str(args.recent_prefetch)+' 路；媒体缓存预算 '+str(args.cache_memory_mb)+' MiB（不含原生组件）。', flush=True)
     print('首播完整分片数：'+str(args.startup_segments)+'；--startup-segments 2 恢复两片缓冲。', flush=True)
     print('状态：/status；同源多频道，按需加载。首次选台校验并载入随脚本固定的官方组件（默认内存缓存，不写磁盘）。', flush=True)
     try:

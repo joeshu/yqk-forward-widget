@@ -1,0 +1,134 @@
+{
+  "date": "2026-10-21",
+  "scope": "Linux JSC developer network, official sources, two separate runs (off then on). Different live media/network conditions; not a controlled speedup or APTV first-frame measurement. Foreground CCTV-4 watched/strictly decoded 16s, then return to stale CCTV-2 video with retained VM, strictly decode another 16s. Background worker never invokes video SDK.",
+  "trials": [
+    {
+      "recent_prefetch": 0,
+      "cold_open_seconds": {
+        "cctv2": 4.2815,
+        "cctv4": 6.6676
+      },
+      "decodes": [
+        {
+          "channel": "cctv4",
+          "returncode": 0,
+          "error_bytes": 0,
+          "processed_segments": 6
+        },
+        {
+          "channel": "cctv2",
+          "returncode": 0,
+          "error_bytes": 0,
+          "processed_segments": 6
+        }
+      ],
+      "before_return": {
+        "limit": 0,
+        "active_channel": null,
+        "last_error": "",
+        "completed": 0,
+        "failures": 0,
+        "download_bytes": 0,
+        "reused_segments": 0
+      },
+      "prepared_bytes_before_return": 0,
+      "return_playlist_seconds": 1.4885,
+      "prefetch_hits": 0,
+      "fresh_video_hits": 0,
+      "accounted_cache_bytes": 1623756,
+      "budget_bytes": 33554432,
+      "after_return": {
+        "limit": 0,
+        "active_channel": null,
+        "last_error": "",
+        "completed": 0,
+        "failures": 0,
+        "download_bytes": 0,
+        "reused_segments": 0
+      },
+      "prefetch_thread_stopped": true
+    },
+    {
+      "recent_prefetch": 1,
+      "cold_open_seconds": {
+        "cctv2": 2.8692,
+        "cctv4": 2.3039
+      },
+      "decodes": [
+        {
+          "channel": "cctv4",
+          "returncode": 0,
+          "error_bytes": 0,
+          "processed_segments": 6
+        },
+        {
+          "channel": "cctv2",
+          "returncode": 0,
+          "error_bytes": 0,
+          "processed_segments": 6
+        }
+      ],
+      "before_return": {
+        "limit": 1,
+        "active_channel": null,
+        "last_error": "",
+        "completed": 3,
+        "failures": 0,
+        "download_bytes": 3455064,
+        "reused_segments": 1
+      },
+      "prepared_bytes_before_return": 1649136,
+      "return_playlist_seconds": 0.1632,
+      "prefetch_hits": 1,
+      "fresh_video_hits": 0,
+      "accounted_cache_bytes": 2370116,
+      "budget_bytes": 33554432,
+      "after_return": {
+        "limit": 1,
+        "active_channel": null,
+        "last_error": "",
+        "completed": 4,
+        "failures": 0,
+        "download_bytes": 4765424,
+        "reused_segments": 1
+      },
+      "prefetch_thread_stopped": true
+    }
+  ],
+  "foreground_and_expiry_validation": {
+    "scope": "75 seconds strict foreground CCTV-4 decoding after parking CCTV-2. One network-only prefetch target, six context limit, 60-second TTL, 32MiB media budget. Whole-process/iPhone memory not measured.",
+    "decode_returncode": 0,
+    "decode_error_bytes": 0,
+    "processed_segments": 19,
+    "source_gaps": 0,
+    "transport_retries": 0,
+    "peak_accounted_cache_bytes": 11262140,
+    "budget_bytes": 33554432,
+    "parked_channel_expired": true,
+    "parked_bytes_after_expiry": 0,
+    "prefetch": {
+      "limit": 1,
+      "active_channel": null,
+      "last_error": "",
+      "completed": 8,
+      "failures": 0,
+      "download_bytes": 9208616,
+      "reused_segments": 4
+    },
+    "prefetch_thread_stopped": true
+  },
+  "regression_tests": 204,
+  "native_jscore_tests": 11,
+  "phone_first_frame": "pending",
+  "memory_scope": "Budget accounts retained output bytes and stored prefetch raw bytes. Native SDK/JSC heaps, in-flight buffers and Python overhead are excluded; not a whole-process RSS cap.",
+  "tests_cover": [
+    "Most recent one or two watched targets only; foreground needs two buffered outputs",
+    "No background SDK or TS transform calls",
+    "Reuse of identical input sequence/URL without another GET",
+    "Official playback denial does not fetch media",
+    "Channel selection invalidates in-flight prefetch writes",
+    "Stale or slow input is rejected",
+    "Owner consumes two prepared inputs without re-downloading",
+    "Old parked data trimmed while current playback retained"
+  ]
+}

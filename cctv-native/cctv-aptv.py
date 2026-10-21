@@ -782,7 +782,7 @@ import argparse
 import base64
 from collections import OrderedDict
 from dataclasses import dataclass, replace
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.client import (IncompleteRead, HTTPSConnection, RemoteDisconnected,
@@ -1160,14 +1160,14 @@ WEBSITE_CHANNELS = (
 )
 
 
-def source_url(channel_id='cctv2'):
+def source_url(channel_id='cctv2', *, timeout=12):
     if channel_id not in dict(WEBSITE_CHANNELS):
         raise NativeError('unknown-channel')
     stamp, nonce = int(time.time()*1000), random.randint(100, 1000)
     signature = hashlib.md5(f'{channel_id}{stamp}{nonce}4f779c20f6974ccba20e28d63529d0ef'.encode()).hexdigest()
     query = urlencode({'channel': channel_id, 'vn': '1000', 'pdrm': '1', 'uid': '', 'hbss': stamp})
     raw, _ = get('https://vdnx.live.cntv.cn/api/v3/vdn/live?' + query,
-                 headers={'auth-key': f'{stamp}-{nonce}-{signature}'}, limit=1024*1024)
+                 headers={'auth-key': f'{stamp}-{nonce}-{signature}'}, limit=1024*1024, timeout=timeout)
     data = json.loads(raw)
     if str(data.get('play')) != '1':
         raise NativeError('official-playback-not-permitted')
@@ -1214,9 +1214,9 @@ def parse_playlist(text, base):
     return {'entries': entries}
 
 
-def media_playlist(url):
+def media_playlist(url, *, timeout=12):
     for _ in range(4):
-        raw, final = get(url, limit=1024*1024)
+        raw, final = get(url, limit=1024*1024, timeout=timeout)
         parsed = parse_playlist(raw.decode('utf-8-sig'), final)
         if 'entries' in parsed:
             return parsed['entries'], final
@@ -1294,6 +1294,9 @@ class Channel:
 
     def checkpoint(self):
         return not self.stop.is_set()
+
+    def take_recent_preparation(self):
+        return None
 
     def native_context_closed(self):
         """Called by the VM owner after native teardown, before I/O joins."""
@@ -1785,6 +1788,11 @@ class Channel:
                     cached, analyses = {}, {}
                     if resumed.reset_sequence:
                         last_seq, current_source, pending_discontinuity = None, None, True
+                        recent = self.take_recent_preparation()
+                        if recent is not None:
+                            preparation = Future()
+                            preparation.set_result(recent)
+                            self.preparation_phase = 'recent-prefetch'
                     # Time spent parked is not an upstream progress failure.
                     last_progress = time.monotonic()
                     continue
@@ -2390,6 +2398,121 @@ class OfficialEPG:
             self.closed = True
             self.ready.set()
 
+"""Bounded, network-only preparation of previously watched CCTV channels."""
+
+class PrefetchCancelled(Exception):
+    pass
+
+
+class RecentPrefetch:
+    def __init__(self, manager, limit):
+        self.manager, self.limit = manager, limit
+        self.stop = threading.Event()
+        self.thread = None
+        self.attempts, self.sources = {}, {}
+        self.download_bytes = self.reused_segments = self.completed = self.failures = 0
+        self.active = None
+        self.last_error = ''
+
+    def start(self):
+        if self.limit:
+            self.thread = threading.Thread(target=self.run, name='cctv-recent-prefetch', daemon=True)
+            self.thread.start()
+
+    def close(self):
+        self.stop.set()
+
+    def snapshot(self):
+        return {'limit':self.limit, 'active_channel':self.active, 'last_error':self.last_error,
+                'completed':self.completed,'failures':self.failures,
+                'download_bytes':self.download_bytes,'reused_segments':self.reused_segments}
+
+    def run(self):
+        while not self.stop.is_set():
+            self.cycle()
+            self.stop.wait(.5)
+
+    def cycle(self):
+        self.manager.enforce_budget()
+        targets = self.manager.prefetch_targets()
+        for channel in targets:
+            cid = channel.channel_id
+            with channel.condition:
+                epoch = channel.prefetch_epoch
+                previous = channel.recent_preparation
+            attempt = self.attempts.get(cid)
+            if attempt and attempt[:2] == (channel,epoch) and time.monotonic() < attempt[2]:
+                continue
+            delay = 4
+            def eligible():
+                if (self.stop.is_set() or channel.stop.is_set() or not channel.parked_at
+                        or channel.prefetch_epoch != epoch or channel not in self.manager.prefetch_targets()):
+                    raise PrefetchCancelled()
+            self.active = cid
+            try:
+                eligible()
+                source = self.sources.get(cid)
+                if source is None or source[0] is not channel or time.monotonic()-source[2] >= 30:
+                    url = source_url(cid, timeout=4)
+                    source = (channel,url,time.monotonic())
+                    self.sources[cid] = source
+                eligible()
+                entries, final = media_playlist(source[1], timeout=4)
+                self.sources[cid] = (channel,final,source[2])
+                prepared_at = time.monotonic()
+                wanted = entries[:2]
+                if len(wanted) < 2 or wanted[1]['seq'] != wanted[0]['seq']+1 or wanted[1]['discontinuity']:
+                    raise NativeError('source-boundary-not-proven')
+                old = {}
+                if previous is not None:
+                    for entry in previous[0]:
+                        task = previous[2].get(entry['seq'])
+                        if task is not None and task.done() and task.exception() is None:
+                            old[(entry['seq'],entry['url'])] = task.result()
+                downloads, size = {}, 0
+                for entry in wanted:
+                    eligible()
+                    result = old.get((entry['seq'],entry['url']))
+                    if result is None:
+                        raw, target = get(entry['url'], limit=8*1024*1024, timeout=4)
+                        self.download_bytes += len(raw)
+                        if not raw or len(raw)%188 or raw[0] != 0x47:
+                            raise NativeError('prefetch-invalid-media')
+                        result = (raw,target,None)
+                    else:
+                        self.reused_segments += 1
+                    size += len(result[0])
+                    task = Future();task.set_result(result);downloads[entry['seq']] = task
+                eligible()
+                if time.monotonic()-prepared_at > 6 or size > self.manager.cache_bytes:
+                    delay = 10
+                    continue
+                # No native VM calls, TS transforms or publish calls here.
+                prepared = (wanted,final,downloads,source[2],prepared_at)
+                with channel.condition:
+                    if channel.prefetch_epoch != epoch or not channel.parked_at or channel.stop.is_set():
+                        raise PrefetchCancelled()
+                    channel.recent_preparation = prepared
+                    channel.recent_preparation_bytes = size
+                self.manager.enforce_budget()
+                self.completed += 1
+                self.last_error = ''
+                if channel.recent_preparation is None:
+                    delay = 10
+            except PrefetchCancelled:
+                pass
+            except Exception as error:
+                self.last_error = str(error) if isinstance(error, NativeError) else transport_error_code(error)
+                self.failures += 1
+                self.sources.pop(cid,None)
+                delay = 30
+                with channel.condition:
+                    if channel.prefetch_epoch == epoch:
+                        channel.recent_preparation = None;channel.recent_preparation_bytes = 0
+            finally:
+                self.active = None
+                self.attempts[cid] = (channel,epoch,time.monotonic()+delay)
+
 """On-demand website channels with bounded native VM concurrency on iPhone."""
 from types import SimpleNamespace
 
@@ -2401,9 +2524,14 @@ PUBLISHED_CHANNELS = {cid: name for cid,name in WEBSITE_CHANNELS if cid in PUBLI
 
 
 class ManagedChannel(Channel):
-    def __init__(self, args, slots):
+    def __init__(self, args, slots, manager=None):
         super().__init__(args)
         self.slots = slots
+        self.manager = manager
+        self.prefetch_epoch = 0
+        self.recent_preparation = None
+        self.recent_preparation_bytes = 0
+        self.prefetch_hits = 0
         self.slot_held = False
         self.parked_at = 0
         self.resume_pending = False
@@ -2417,6 +2545,9 @@ class ManagedChannel(Channel):
     def retire(self):
         with self.condition:
             self.stop.set()
+            self.prefetch_epoch += 1
+            self.recent_preparation = None
+            self.recent_preparation_bytes = 0
             self._cancel_inputs()
             self.parked_at = 0
             self.ring.clear()
@@ -2434,6 +2565,9 @@ class ManagedChannel(Channel):
                 _, old = self.ring.popitem(last=False)
                 self.size -= len(old[0])
                 self.discarded_discontinuities += bool(old[2])
+            self.prefetch_epoch += 1
+            self.recent_preparation = None
+            self.recent_preparation_bytes = 0
             self.parked_at = time.monotonic()
             self._cancel_inputs()
             self.condition.notify_all()
@@ -2447,12 +2581,16 @@ class ManagedChannel(Channel):
             durations = sum(item[1] for item in self.ring.values())
             fresh = (len(self.ring) >= getattr(self.args, 'startup_segments', 2) and self.last_published_at > 0
                      and now-self.last_published_at <= min(8, durations))
+            self.prefetch_epoch += 1
             self.parked_at = 0
             self.resume_pending = True
             self.resume_reset_sequence = not fresh
             self.last_request = now
             self.resumed_at = now
             self.resume_ready_seconds = 0.0 if fresh else None
+            if fresh:
+                self.recent_preparation = None
+                self.recent_preparation_bytes = 0
             self.cache_hits += 1
             self.cache_buffer_hits += bool(fresh)
             if not fresh:
@@ -2466,6 +2604,16 @@ class ManagedChannel(Channel):
                   ' fresh_buffer='+str(fresh).lower(), flush=True)
             self.condition.notify_all()
             return True
+
+    def take_recent_preparation(self):
+        with self.condition:
+            prepared, self.recent_preparation = self.recent_preparation, None
+            self.recent_preparation_bytes = 0
+            if prepared is not None and time.monotonic()-prepared[4] <= 6:
+                self.prefetch_hits += 1
+                print('[cctv-native] recent-prefetch-hit channel='+self.channel_id, flush=True)
+                return prepared
+            return None
 
     def checkpoint(self):
         with self.condition:
@@ -2493,10 +2641,14 @@ class ManagedChannel(Channel):
                     print('[cctv-native] cache-media-ready seconds='+str(self.resume_ready_seconds)+
                           ' channel='+self.channel_id, flush=True)
 
+        if self.manager is not None:
+            self.manager.enforce_budget()
+
     def snapshot(self):
         result = super().snapshot()
         with self.condition:
-            result.update(parked=bool(self.parked_at), cache_hits=self.cache_hits,
+            result.update(prefetch_hits=self.prefetch_hits, prefetched_bytes=self.recent_preparation_bytes,
+                          parked=bool(self.parked_at), cache_hits=self.cache_hits,
                           cache_buffer_hits=self.cache_buffer_hits,
                           resume_ready_seconds=self.resume_ready_seconds,
                           buffer_age_seconds=round(time.monotonic()-self.last_published_at,3)
@@ -2532,6 +2684,10 @@ class ChannelManager:
         self.current = None
         self.closed = False
         self.epg = OfficialEPG(PUBLISHED_CHANNELS)
+        self.cache_bytes = getattr(args, 'cache_memory_mb', 32)*1024*1024
+        self.budget_evictions = 0
+        self.prefetch = RecentPrefetch(self, getattr(args, 'recent_prefetch', 0))
+        self.prefetch.start()
 
     def activate(self, cid):
         if cid not in PUBLISHED_CHANNELS:
@@ -2564,10 +2720,45 @@ class ChannelManager:
                 target.retire()
             args = SimpleNamespace(**vars(self.args))
             args.channel_id = cid
-            channel = ManagedChannel(args, self.slots)
+            args.buffer_mb = min(args.buffer_mb, self.cache_bytes//(1024*1024))
+            channel = ManagedChannel(args, self.slots, self)
             self.channels[cid] = channel
             self.current = cid
             return channel
+
+    def prefetch_targets(self):
+        with self.lock:
+            current = self.channels.get(self.current)
+            if (self.closed or current is None or current.state != 'ready'
+                    or len(current.ring) < 2 or time.monotonic()-current.last_published_at > 8):
+                return []
+            return sorted((c for c in self.channels.values() if c.parked_at and not c.stop.is_set()
+                           and time.monotonic()-c.parked_at < c.cache_ttl),
+                          key=lambda c:c.parked_at, reverse=True)[:self.prefetch.limit]
+
+    def enforce_budget(self):
+        with self.lock:
+            parked = sorted((c for c in self.channels.values() if c.parked_at and not c.stop.is_set()),
+                            key=lambda c:c.parked_at)
+            # Discard stale parked video first; retain its reusable native VM.
+            for channel in parked:
+                with channel.condition:
+                    if channel.recent_preparation is not None and time.monotonic()-channel.recent_preparation[4] > 6:
+                        channel.recent_preparation = None;channel.recent_preparation_bytes = 0
+                    if time.monotonic()-channel.last_published_at > 8:
+                        channel.ring.clear();channel.size = 0
+            def total():
+                return sum(c.size+c.recent_preparation_bytes for c in self.channels.values() if not c.stop.is_set())
+            for channel in parked:
+                if total() <= self.cache_bytes:
+                    break
+                with channel.condition:
+                    if channel.recent_preparation_bytes:
+                        channel.recent_preparation = None;channel.recent_preparation_bytes = 0
+                        self.budget_evictions += 1
+                    if total() > self.cache_bytes and channel.size:
+                        channel.ring.clear();channel.size = 0
+                        self.budget_evictions += 1
 
     def lookup(self, cid):
         with self.lock:
@@ -2581,6 +2772,10 @@ class ChannelManager:
                           channels=[{'id':cid,'name':name} for cid,name in PUBLISHED_CHANNELS.items()],
                           epg=self.epg.snapshot(), native_context_limit=self.cache_limit,
                           channel_cache_size=self.cache_limit,
+                          media_cache_budget_bytes=self.cache_bytes,
+                          budget_evictions=self.budget_evictions,
+                          recent_prefetch=self.prefetch.snapshot(),
+                          accounted_cache_bytes=sum(c.size+c.recent_preparation_bytes for c in self.channels.values() if not c.stop.is_set()),
                           cached_media_bytes=sum(c.size for c in self.channels.values() if not c.stop.is_set()),
                           retained_channel_count=sum(not c.stop.is_set() for c in self.channels.values()),
                           http_connections=_HTTP_POOL.snapshot(),
@@ -2595,6 +2790,7 @@ class ChannelManager:
         with self.lock:
             self.closed = True
             self.epg.close()
+            self.prefetch.close()
             for channel in self.channels.values():
                 channel.retire()
         # No cross-thread JSC calls and no HTTP thread blocked on VM teardown.
@@ -2700,6 +2896,10 @@ def main(argv=None):
                         help='最近频道组件保留秒数（0 关闭，最多 180）；过旧分片重新准备直播')
     parser.add_argument('--channel-cache-size', type=int, choices=range(1,7), default=6,
                         help='保留频道总数，含当前频道，默认 6；后台频道暂停处理')
+    parser.add_argument('--recent-prefetch', type=int, choices=(0,1,2), default=1,
+                        help='后台只预取最近频道的原始分片，默认 1 路；0 关闭')
+    parser.add_argument('--cache-memory-mb', type=int, default=32,
+                        help='输出视频及待用预取数据的缓存预算，不含原生组件，默认 32 MiB')
     parser.add_argument('--startup-segments', type=int, choices=(1,2), default=1,
                         help='首播完整分片数，默认 1；设为 2 恢复原缓冲策略')
     parser.add_argument('--buffer-mb', type=int, default=32)
@@ -2708,14 +2908,15 @@ def main(argv=None):
     args = parser.parse_args(argv)
     _API_LEGACY_ENABLED = not args.no_legacy_source_tls
     _HTTP_REUSE_ENABLED = not args.no_http_reuse
-    if not 1 <= args.port <= 65535 or not 16 <= args.buffer_mb <= 256 or not 30 <= args.idle_timeout <= 3600 or not 0 <= args.recent_channel_seconds <= 180:
+    if not 1 <= args.port <= 65535 or not 16 <= args.buffer_mb <= 256 or not 30 <= args.idle_timeout <= 3600 or not 0 <= args.recent_channel_seconds <= 180 or not 16 <= args.cache_memory_mb <= 256:
         parser.error('invalid port/buffer/idle timeout/recent channel seconds')
     manager = ChannelManager(args)
     server = ThreadingHTTPServer((args.bind, args.port), MultiChannelHandler)
     server.daemon_threads = True
     server.manager, server.args = manager, args
     print(f'APTV 央视网页原分片实验版：http://127.0.0.1:{args.port}/all.m3u', flush=True)
-    print('频道缓存：'+str(args.channel_cache_size)+' 路（含当前）；组件保留 '+str(args.recent_channel_seconds)+' 秒，后台暂停处理。', flush=True)
+    print('频道缓存：'+str(args.channel_cache_size)+' 路（含当前）；组件保留 '+str(args.recent_channel_seconds)+' 秒，后台组件暂停处理。', flush=True)
+    print('原始分片预取：最近 '+str(args.recent_prefetch)+' 路；媒体缓存预算 '+str(args.cache_memory_mb)+' MiB（不含原生组件）。', flush=True)
     print('首播完整分片数：'+str(args.startup_segments)+'；--startup-segments 2 恢复两片缓冲。', flush=True)
     print('状态：/status；同源多频道，按需加载。首次选台校验并载入随脚本固定的官方组件（默认内存缓存，不写磁盘）。', flush=True)
     try:
