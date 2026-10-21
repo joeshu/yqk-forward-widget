@@ -613,6 +613,7 @@ class Channel:
         self.last_request = 0
         self.failed_at = 0
         self.waiters = 0
+        self.input_tasks = set()
         self.timings = {}
         self.started_at = 0
         self.last_published_at = 0
@@ -654,12 +655,16 @@ class Channel:
             self.timings.setdefault(stage, round(time.monotonic() - self.started_at, 3))
             self.condition.notify_all()
 
+    def retry_cooldown(self):
+        return 3 if self.error in ('source-media-stalled', 'TimeoutError', 'URLError',
+                                   'ConnectionError', 'IncompleteRead', 'RemoteDisconnected') else 30
+
     def demand(self, start=True):
         with self.condition:
             self.last_request = time.monotonic()
             if not start or self.stop.is_set() or self.thread and self.thread.is_alive():
                 return
-            if self.state == 'error' and time.monotonic()-self.failed_at < 30:
+            if self.state == 'error' and time.monotonic()-self.failed_at < self.retry_cooldown():
                 return
             self.generation = uuid.uuid4().hex
             self.ring.clear()
@@ -724,6 +729,8 @@ class Channel:
             return {'state': self.state, 'error': self.error, 'source': 'tv.cctv.com/'+self.channel_id,
                     'mode': 'official-runtime-original-ts', 'processed_segments': self.processed,
                     'buffer_bytes': self.size, 'buffer_segments': len(self.ring),
+                    'pending_input_tasks': len(self.input_tasks),
+                    'retry_after_seconds': max(0, round(self.retry_cooldown()-(time.monotonic()-self.failed_at),1)) if self.state == 'error' else 0,
                     'startup_segments': getattr(self.args, 'startup_segments', 2),
                     'source_gaps': self.source_gaps,
                     'transport_retries': self.transport_retries,
@@ -768,9 +775,30 @@ class Channel:
                 pass
         return raw, final, analysis
 
+    def _cancel_inputs(self):
+        # Running sockets retain their timeouts; never close another thread's
+        # connection. Cancel work that has not started and guard queued calls.
+        with self.condition:
+            for task in tuple(self.input_tasks):
+                task.cancel()
+
+    def _submit_input(self, pool, function, *args):
+        def guarded():
+            if self.stop.is_set() or getattr(self, 'parked_at', 0):
+                raise ResumePreparation()
+            return function(*args)
+        def finished(task):
+            with self.condition:
+                self.input_tasks.discard(task)
+        with self.condition:
+            task = pool.submit(guarded)
+            self.input_tasks.add(task)
+            task.add_done_callback(finished)
+            return task
+
     def _submit_segment(self, pool, url):
         worker = self._download_segment if getattr(self.args, 'parallel_prepare', False) else get
-        return pool.submit(worker, url)
+        return self._submit_input(pool, worker, url)
 
     def _download_boundary(self, url):
         # Only the third startup input needs a boundary, not playable media.
@@ -836,7 +864,7 @@ class Channel:
             task = cached.get(seq)
             if task is None:
                 if startup and len(entries) == 3 and index == 2:
-                    cached[seq] = pool.submit(self._download_boundary, entry['url'])
+                    cached[seq] = self._submit_input(pool, self._download_boundary, entry['url'])
                 else:
                     cached[seq] = self._submit_segment(pool, entry['url'])
             elif index < len(entries)-1 and task.done() and not task.cancelled() and task.exception() is None:
@@ -845,7 +873,7 @@ class Channel:
                     if upgrades is not None and seq in upgrades:
                         cached[seq] = upgrades[seq]
                     else:
-                        cached[seq] = pool.submit(self._upgrade_boundary, entry['url'], value)
+                        cached[seq] = self._submit_input(pool, self._upgrade_boundary, entry['url'], value)
                         if upgrades is not None:
                             upgrades[seq] = cached[seq]
 
@@ -859,7 +887,7 @@ class Channel:
                 continue
             value = task.result()
             if isinstance(value, BoundaryPrefix):
-                upgrades[seq] = pool.submit(self._upgrade_boundary, entry['url'], value)
+                upgrades[seq] = self._submit_input(pool, self._upgrade_boundary, entry['url'], value)
 
     def _prepare_initial(self, pool, cancel):
         """Independent HTTPS work; never touches the thread-owned native VM."""
@@ -897,7 +925,7 @@ class Channel:
             if getattr(self.args,'parallel_prepare',False):
                 print('[cctv-native] source-preparation=parallel channel='+self.channel_id,flush=True)
                 self.preparation_phase = 'source-api'
-                preparation = pool.submit(self._prepare_initial,pool,cancel_preparation)
+                preparation = self._submit_input(pool, self._prepare_initial,pool,cancel_preparation)
             self.operation_phase('engine-initialization')
             engine = Engine(self.args)
             with self.condition:
@@ -989,7 +1017,7 @@ class Channel:
                         next_download = self._await_future(cached[following['seq']])
                         if isinstance(current_download, BoundaryPrefix):
                             if e['seq'] not in upgrades:
-                                upgrades[e['seq']] = pool.submit(self._upgrade_boundary, e['url'], current_download)
+                                upgrades[e['seq']] = self._submit_input(pool, self._upgrade_boundary, e['url'], current_download)
                             cached[e['seq']] = upgrades[e['seq']]
                             current_download = self._await_future(upgrades[e['seq']])
                         raw = current_download[0]
@@ -1064,7 +1092,7 @@ class Channel:
                                 value = task.result()
                                 if isinstance(value, BoundaryPrefix) and seq in by_sequence:
                                     if seq not in upgrades:
-                                        upgrades[seq] = pool.submit(self._upgrade_boundary, by_sequence[seq]['url'], value)
+                                        upgrades[seq] = self._submit_input(pool, self._upgrade_boundary, by_sequence[seq]['url'], value)
                                     cached[seq] = upgrades[seq]
                     analyses = {k:v for k,v in analyses.items() if k in cached}
                     upgrades = {k:v for k,v in upgrades.items() if k in cached}
@@ -1125,6 +1153,8 @@ class Channel:
                     # poll would replay the same exception without a GET.
                     cached = {key: value for key, value in cached.items()
                               if not value.cancelled() and (not value.done() or value.exception() is None)}
+                    upgrades = {key: value for key, value in upgrades.items()
+                                if not value.cancelled() and (not value.done() or value.exception() is None)}
                     if time.monotonic()-last_progress > 30:
                         raise NativeError('source-media-stalled') from None
                     delay = min(4, 0.8 * 2**min(failures-1, 3))
@@ -1149,6 +1179,7 @@ class Channel:
             print('[cctv-native] diagnostics='+json.dumps(self.snapshot(), ensure_ascii=False), flush=True)
         finally:
             cancel_preparation.set()
+            self._cancel_inputs()
             for task in upgrades.values():
                 task.cancel()
             if engine:

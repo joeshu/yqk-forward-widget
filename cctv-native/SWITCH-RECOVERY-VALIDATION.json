@@ -1,0 +1,348 @@
+{
+  "scope": "Two freshly approved official CCTV sources, then 20 rapid alternating playlist selections on six-context configuration. First playlist timings are not APTV first-frame times. Final selected channel strictly decoded 16 seconds and must continue producing full segments. Linux developer network/JSC.",
+  "trials": [
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 4.7064,
+      "cache_hits": 0,
+      "fresh_buffer_hits": 0,
+      "pending_input_tasks": 1
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 2.2789,
+      "cache_hits": 0,
+      "fresh_buffer_hits": 0,
+      "pending_input_tasks": 1
+    },
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 0.0014,
+      "cache_hits": 1,
+      "fresh_buffer_hits": 1,
+      "pending_input_tasks": 0
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 0.0012,
+      "cache_hits": 1,
+      "fresh_buffer_hits": 1,
+      "pending_input_tasks": 1
+    },
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 0.0009,
+      "cache_hits": 2,
+      "fresh_buffer_hits": 2,
+      "pending_input_tasks": 0
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 0.001,
+      "cache_hits": 2,
+      "fresh_buffer_hits": 2,
+      "pending_input_tasks": 1
+    },
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 0.0007,
+      "cache_hits": 3,
+      "fresh_buffer_hits": 3,
+      "pending_input_tasks": 0
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 0.0007,
+      "cache_hits": 3,
+      "fresh_buffer_hits": 3,
+      "pending_input_tasks": 1
+    },
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 0.0014,
+      "cache_hits": 4,
+      "fresh_buffer_hits": 4,
+      "pending_input_tasks": 0
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 0.001,
+      "cache_hits": 4,
+      "fresh_buffer_hits": 4,
+      "pending_input_tasks": 1
+    },
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 0.0008,
+      "cache_hits": 5,
+      "fresh_buffer_hits": 5,
+      "pending_input_tasks": 0
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 0.0008,
+      "cache_hits": 5,
+      "fresh_buffer_hits": 5,
+      "pending_input_tasks": 1
+    },
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 0.0006,
+      "cache_hits": 6,
+      "fresh_buffer_hits": 6,
+      "pending_input_tasks": 0
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 0.0013,
+      "cache_hits": 6,
+      "fresh_buffer_hits": 6,
+      "pending_input_tasks": 1
+    },
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 0.0007,
+      "cache_hits": 7,
+      "fresh_buffer_hits": 7,
+      "pending_input_tasks": 0
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 0.0008,
+      "cache_hits": 7,
+      "fresh_buffer_hits": 7,
+      "pending_input_tasks": 1
+    },
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 0.0007,
+      "cache_hits": 8,
+      "fresh_buffer_hits": 8,
+      "pending_input_tasks": 0
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 0.0006,
+      "cache_hits": 8,
+      "fresh_buffer_hits": 8,
+      "pending_input_tasks": 1
+    },
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 0.0009,
+      "cache_hits": 9,
+      "fresh_buffer_hits": 9,
+      "pending_input_tasks": 0
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 0.0009,
+      "cache_hits": 9,
+      "fresh_buffer_hits": 9,
+      "pending_input_tasks": 1
+    },
+    {
+      "channel": "cctv2",
+      "playlist_seconds": 0.0007,
+      "cache_hits": 10,
+      "fresh_buffer_hits": 10,
+      "pending_input_tasks": 0
+    },
+    {
+      "channel": "cctv12",
+      "playlist_seconds": 0.0011,
+      "cache_hits": 10,
+      "fresh_buffer_hits": 10,
+      "pending_input_tasks": 1
+    }
+  ],
+  "decode_returncode": 0,
+  "decode_error_bytes": 0,
+  "processed_segments_after": 5,
+  "source_gaps": 0,
+  "transport_retries": 0,
+  "channel_errors": {
+    "cctv2": "",
+    "cctv12": ""
+  },
+  "pending_input_tasks_after_close": 0,
+  "regression_tests": 191,
+  "native_jscore_tests": 11,
+  "phone_validation": "pending",
+  "cancellation_regressions": {
+    "queued_reads_cancelled_without_calling_network": 12,
+    "running_read": "Allowed to finish with existing timeout; no cross-thread connection close",
+    "tracking_after_close": 0
+  },
+  "ninety_second_followup": {
+    "scope": "Two freshly approved official CCTV sources, then 20 rapid alternating playlist selections on six-context configuration. First playlist timings are not APTV first-frame times. Final selected channel strictly decoded 90 seconds and must continue producing full segments. Linux developer network/JSC.",
+    "trials": [
+      {
+        "channel": "cctv2",
+        "playlist_seconds": 2.8691,
+        "cache_hits": 0,
+        "fresh_buffer_hits": 0,
+        "pending_input_tasks": 1
+      },
+      {
+        "channel": "cctv12",
+        "playlist_seconds": 1.9912,
+        "cache_hits": 0,
+        "fresh_buffer_hits": 0,
+        "pending_input_tasks": 1
+      },
+      {
+        "channel": "cctv2",
+        "playlist_seconds": 0.0021,
+        "cache_hits": 1,
+        "fresh_buffer_hits": 1,
+        "pending_input_tasks": 0
+      },
+      {
+        "channel": "cctv12",
+        "playlist_seconds": 0.0012,
+        "cache_hits": 1,
+        "fresh_buffer_hits": 1,
+        "pending_input_tasks": 1
+      },
+      {
+        "channel": "cctv2",
+        "playlist_seconds": 0.0009,
+        "cache_hits": 2,
+        "fresh_buffer_hits": 2,
+        "pending_input_tasks": 0
+      },
+      {
+        "channel": "cctv12",
+        "playlist_seconds": 0.0014,
+        "cache_hits": 2,
+        "fresh_buffer_hits": 2,
+        "pending_input_tasks": 1
+      },
+      {
+        "channel": "cctv2",
+        "playlist_seconds": 0.0009,
+        "cache_hits": 3,
+        "fresh_buffer_hits": 3,
+        "pending_input_tasks": 0
+      },
+      {
+        "channel": "cctv12",
+        "playlist_seconds": 0.0008,
+        "cache_hits": 3,
+        "fresh_buffer_hits": 3,
+        "pending_input_tasks": 1
+      },
+      {
+        "channel": "cctv2",
+        "playlist_seconds": 0.0008,
+        "cache_hits": 4,
+        "fresh_buffer_hits": 4,
+        "pending_input_tasks": 0
+      },
+      {
+        "channel": "cctv12",
+        "playlist_seconds": 0.0008,
+        "cache_hits": 4,
+        "fresh_buffer_hits": 4,
+        "pending_input_tasks": 1
+      },
+      {
+        "channel": "cctv2",
+        "playlist_seconds": 0.001,
+        "cache_hits": 5,
+        "fresh_buffer_hits": 5,
+        "pending_input_tasks": 0
+      },
+      {
+        "channel": "cctv12",
+        "playlist_seconds": 0.0008,
+        "cache_hits": 5,
+        "fresh_buffer_hits": 5,
+        "pending_input_tasks": 1
+      },
+      {
+        "channel": "cctv2",
+        "playlist_seconds": 0.0008,
+        "cache_hits": 6,
+        "fresh_buffer_hits": 6,
+        "pending_input_tasks": 0
+      },
+      {
+        "channel": "cctv12",
+        "playlist_seconds": 0.0008,
+        "cache_hits": 6,
+        "fresh_buffer_hits": 6,
+        "pending_input_tasks": 1
+      },
+      {
+        "channel": "cctv2",
+        "playlist_seconds": 0.0008,
+        "cache_hits": 7,
+        "fresh_buffer_hits": 7,
+        "pending_input_tasks": 0
+      },
+      {
+        "channel": "cctv12",
+        "playlist_seconds": 0.0007,
+        "cache_hits": 7,
+        "fresh_buffer_hits": 7,
+        "pending_input_tasks": 1
+      },
+      {
+        "channel": "cctv2",
+        "playlist_seconds": 0.0009,
+        "cache_hits": 8,
+        "fresh_buffer_hits": 8,
+        "pending_input_tasks": 0
+      },
+      {
+        "channel": "cctv12",
+        "playlist_seconds": 0.0008,
+        "cache_hits": 8,
+        "fresh_buffer_hits": 8,
+        "pending_input_tasks": 1
+      },
+      {
+        "channel": "cctv2",
+        "playlist_seconds": 0.0008,
+        "cache_hits": 9,
+        "fresh_buffer_hits": 9,
+        "pending_input_tasks": 0
+      },
+      {
+        "channel": "cctv12",
+        "playlist_seconds": 0.0009,
+        "cache_hits": 9,
+        "fresh_buffer_hits": 9,
+        "pending_input_tasks": 1
+      },
+      {
+        "channel": "cctv2",
+        "playlist_seconds": 0.001,
+        "cache_hits": 10,
+        "fresh_buffer_hits": 10,
+        "pending_input_tasks": 0
+      },
+      {
+        "channel": "cctv12",
+        "playlist_seconds": 0.001,
+        "cache_hits": 10,
+        "fresh_buffer_hits": 10,
+        "pending_input_tasks": 1
+      }
+    ],
+    "decode_returncode": 0,
+    "decode_error_bytes": 0,
+    "processed_segments_after": 23,
+    "recent_channels_after": [],
+    "source_gaps": 0,
+    "transport_retries": 0,
+    "channel_errors": {
+      "cctv2": "",
+      "cctv12": ""
+    },
+    "pending_input_tasks_after_close": 0
+  },
+  "stability_scope": "Short developer validation only, not a guarantee of long-term/iPhone stability."
+}

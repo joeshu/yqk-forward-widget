@@ -25,6 +25,7 @@ class ManagedChannel(Channel):
     def retire(self):
         with self.condition:
             self.stop.set()
+            self._cancel_inputs()
             self.parked_at = 0
             self.ring.clear()
             self.size = 0
@@ -42,6 +43,7 @@ class ManagedChannel(Channel):
                 self.size -= len(old[0])
                 self.discarded_discontinuities += bool(old[2])
             self.parked_at = time.monotonic()
+            self._cancel_inputs()
             self.condition.notify_all()
 
     def resume(self):
