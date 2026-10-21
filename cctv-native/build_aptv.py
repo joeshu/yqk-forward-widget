@@ -6,6 +6,8 @@ from pathlib import Path
 import zlib
 
 HERE = Path(__file__).resolve().parent
+# Bump this for each published snapshot; the unversioned file remains a compatibility alias.
+VERSION = '0.1.0'
 
 
 def render():
@@ -57,10 +59,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
-    target = HERE/'cctv-aptv.py'
     content = render()
+    targets = (HERE/'cctv-aptv.py', HERE/('cctv-aptv-v'+VERSION+'.py'))
     if args.check:
-        if not target.exists() or target.read_text()!=content:
-            raise SystemExit('APTV standalone file is out of date')
+        stale = [target.name for target in targets
+                 if not target.exists() or target.read_text()!=content]
+        if stale:
+            raise SystemExit('APTV standalone files are out of date: '+', '.join(stale))
     else:
-        target.write_text(content)
+        for target in targets:
+            target.write_text(content)

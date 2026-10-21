@@ -36,4 +36,4 @@ jobs:
       - name: Check Node syntax
         run: node --check cctv-native/engine.cjs
       - name: Check Python syntax
-        run: python -m py_compile cctv-native/cctv-native.py cctv-native/cctv-aptv.py cctv-native/service.py cctv-native/cctv_native_ts.py cctv-native/build_service.py
+        run: python -m py_compile cctv-native/cctv-native.py cctv-native/cctv-aptv.py cctv-native/cctv-aptv-v0.1.0.py cctv-native/service.py cctv-native/cctv_native_ts.py cctv-native/build_service.py
