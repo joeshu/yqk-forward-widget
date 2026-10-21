@@ -610,6 +610,22 @@ class SourceEntityChanged(NativeError):
         super().__init__('source-entity-changed')
 
 
+def latest_contiguous_inputs(entries, limit=3):
+    """Choose the newest available run whose adjacent media boundaries are provable."""
+    for end in range(len(entries), 1, -1):
+        previous, current = entries[end-2], entries[end-1]
+        if current['seq'] != previous['seq']+1 or current['discontinuity']:
+            continue
+        start = end-2
+        while start > 0 and end-start < limit:
+            previous, current = entries[start-1], entries[start]
+            if current['seq'] != previous['seq']+1 or current['discontinuity']:
+                break
+            start -= 1
+        return entries[start:end]
+    return []
+
+
 @dataclass(frozen=True)
 class BoundaryPrefix:
     """Verified boundary-only bytes: never eligible to publish or transform."""
@@ -934,7 +950,8 @@ class Channel:
             return None
         self.preparation_phase = 'segment-download'
         downloads = {}
-        self._submit_inputs(pool, entries[:3], downloads,
+        initial_inputs = latest_contiguous_inputs(entries, 3)
+        self._submit_inputs(pool, initial_inputs, downloads,
                             startup=bool(getattr(self.args,'prefix_lookahead',False)))
         return entries, final, downloads, refreshed, time.monotonic()
 
@@ -1031,7 +1048,8 @@ class Channel:
                         upgrades = {}
                     cached.update(initial_downloads)
                     initial_downloads = {}
-                    wanted = [e for e in entries if last_seq is None or e['seq'] > last_seq][:3]
+                    wanted = (latest_contiguous_inputs(entries, 3) if last_seq is None else
+                              [e for e in entries if e['seq'] > last_seq][:3])
                     self._submit_inputs(pool, wanted, cached, startup=(self.counter == 0 and
                                         bool(getattr(self.args,'prefix_lookahead',False))), upgrades=upgrades)
                     for e, following in zip(wanted, wanted[1:]):

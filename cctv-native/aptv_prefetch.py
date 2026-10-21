@@ -60,19 +60,26 @@ class RecentPrefetch:
                 entries, final = media_playlist(source[1], timeout=4)
                 self.sources[cid] = (channel,final,source[2])
                 prepared_at = time.monotonic()
-                wanted = entries[:2]
-                if len(wanted) < 2 or wanted[1]['seq'] != wanted[0]['seq']+1 or wanted[1]['discontinuity']:
-                    raise NativeError('source-boundary-not-proven')
+                wanted = latest_contiguous_inputs(entries, 2)
+                if len(wanted) < 2:
+                    delay = 2
+                    continue
                 old = {}
                 if previous is not None:
+                    wanted_keys = {(entry['seq'],entry['url']) for entry in wanted}
                     for entry in previous[0]:
+                        key = (entry['seq'],entry['url'])
                         task = previous[2].get(entry['seq'])
-                        if task is not None and task.done() and task.exception() is None:
-                            old[(entry['seq'],entry['url'])] = task.result()
+                        if (key in wanted_keys and task is not None and task.done()
+                                and not task.cancelled() and task.exception() is None):
+                            old[key] = task.result()
+                # Release old nonmatching segment bodies before downloading the
+                # next live window; only exact sequence/URL matches stay alive.
+                previous = None
                 downloads, size = {}, 0
                 for entry in wanted:
                     eligible()
-                    result = old.get((entry['seq'],entry['url']))
+                    result = old.pop((entry['seq'],entry['url']),None)
                     if result is None:
                         raw, target = get(entry['url'], limit=8*1024*1024, timeout=4)
                         self.download_bytes += len(raw)
