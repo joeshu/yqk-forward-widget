@@ -83,6 +83,22 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("playViaSDK:cid title:name", body)
         self.assertIn("self.playbackGeneration += 1", method_body("- (void)playRemote:"))
 
+    def test_bottom_tabs_open_plugin_and_settings_pages(self):
+        self.assertIn('- (void)buildBottomBar', TEXT)
+        self.assertIn('[self openPluginPage]', TEXT)
+        self.assertIn('[self openSettingsPage]', TEXT)
+        self.assertIn('SettingsViewController *page', TEXT)
+
+    def test_channel_grid_uses_two_cards_per_row(self):
+        self.assertIn('(self.shownChannels.count + 1) / 2', TEXT)
+        self.assertIn('channel.grid', TEXT)
+        self.assertIn('onChannelCardTap:', TEXT)
+        self.assertNotIn('dequeueReusableCellWithIdentifier:cid', TEXT)
+
+    def test_favorites_tab_filters_catalog(self):
+        self.assertIn('self.favoritesOnly', TEXT)
+        self.assertIn('if (self.favoritesOnly) {', TEXT)
+
 
 if __name__ == "__main__":
     unittest.main()

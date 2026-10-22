@@ -70,7 +70,7 @@ for f in Frameworks/*.framework; do
   cp -R "$f" "$APP/Frameworks/"
 done
 
-SOURCES="Sources/main.m Sources/AppDelegate.m Sources/RootViewController.m Sources/EPGViewController.m Sources/M3UParser.m Sources/PyHost.m"
+SOURCES="Sources/main.m Sources/AppDelegate.m Sources/RootViewController.m Sources/EPGViewController.m Sources/M3UParser.m Sources/PyHost.m Sources/PluginViewController.m Sources/SettingsViewController.m"
 
 set -x
 clang -arch arm64 \
