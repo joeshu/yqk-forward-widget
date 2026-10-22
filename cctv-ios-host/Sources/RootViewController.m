@@ -63,6 +63,11 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, strong) NSTimer *cicadaFallbackTimer;
 // 日志
 @property (nonatomic, strong) NSMutableString *logBuffer;
+@property (nonatomic, copy) NSString *diagnosticLogPath;
+@property (nonatomic, strong) dispatch_queue_t diagnosticLogQueue;
+@property (nonatomic, strong) NSMutableString *pendingLogWrites;
+@property (nonatomic, strong) NSTimer *logFlushTimer;
+@property (nonatomic, assign) NSUInteger diagnosticLogGeneration;
 @property (nonatomic, strong) UITextView *logView;
 @property (nonatomic, assign) BOOL logRefreshPending;
 @property (nonatomic, assign) NSUInteger playbackGeneration;
@@ -96,6 +101,12 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.view.backgroundColor = [UIColor colorWithWhite:0.05 alpha:1];
     self.title = @"CCTVHost";
     self.logBuffer = [NSMutableString string];
+    self.diagnosticLogQueue = dispatch_queue_create("com.cctvhost.diagnostic-log", DISPATCH_QUEUE_SERIAL);
+    self.pendingLogWrites = [NSMutableString string];
+    self.logFlushTimer = [NSTimer scheduledTimerWithTimeInterval:1 target:self selector:@selector(flushDiagnosticLog) userInfo:nil repeats:YES];
+    NSString *supportDir = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+    self.diagnosticLogPath = [[supportDir stringByAppendingPathComponent:@"ysp"] stringByAppendingPathComponent:@"cctvhost.log"];
+    [self restoreDiagnosticLog];
     self.retryCount = 0;
 
     [self loadChannels];
@@ -106,6 +117,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self setupRemoteCommands];
     [self registerCallbackProtocol];
     [self setupSDK];
+    [self log:@"日志持久化已启用（每秒批量保存）"];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
@@ -116,6 +128,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self.watchdog invalidate];
     [self.epgTimer invalidate];
     [self.epgTask cancel];
+    [self.logFlushTimer invalidate];
+    [self flushDiagnosticLog];
 }
 
 - (void)onBackground {
@@ -130,11 +144,56 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
 #pragma mark - 日志
 
+- (void)restoreDiagnosticLog {
+    NSError *error=nil;
+    NSString *text=[NSString stringWithContentsOfFile:self.diagnosticLogPath encoding:NSUTF8StringEncoding error:&error];
+    if (text.length) {
+        [self.logBuffer appendString:@"—— 上次运行日志（崩溃/强制退出前）——\n"];
+        [self.logBuffer appendString:text];
+        if (![text hasSuffix:@"\n"]) [self.logBuffer appendString:@"\n"];
+        [self.logBuffer appendString:@"—— 本次启动 ——\n"];
+        NSLog(@"[CCTVHost] 已恢复上次运行日志，%lu 字符",(unsigned long)text.length);
+    }
+}
+- (void)persistDiagnosticLine:(NSString *)line {
+    @synchronized (self.pendingLogWrites) {
+        [self.pendingLogWrites appendString:line];
+    }
+}
+- (void)flushDiagnosticLog {
+    __block NSString *batch=nil;
+    __block NSUInteger generation=0;
+    @synchronized (self.pendingLogWrites) {
+        if (!self.pendingLogWrites.length) return;
+        batch=[self.pendingLogWrites copy];
+        generation=self.diagnosticLogGeneration;
+        [self.pendingLogWrites setString:@""];
+    }
+    if (!self.diagnosticLogPath.length) return;
+    dispatch_async(self.diagnosticLogQueue, ^{
+        @synchronized (self.pendingLogWrites) { if (generation != self.diagnosticLogGeneration) return; }
+        NSFileManager *fm=[NSFileManager defaultManager];
+        [fm createDirectoryAtPath:[self.diagnosticLogPath stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+        NSFileHandle *fh=[NSFileHandle fileHandleForWritingAtPath:self.diagnosticLogPath];
+        if (!fh) { [batch writeToFile:self.diagnosticLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil]; return; }
+        [fh seekToEndOfFile]; [fh writeData:[batch dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile];
+        NSDictionary *a=[fm attributesOfItemAtPath:self.diagnosticLogPath error:nil];
+        if ([a fileSize] > 512*1024) {
+            NSData *d=[NSData dataWithContentsOfFile:self.diagnosticLogPath];
+            if (d.length > 256*1024) {
+                NSData *tail=[d subdataWithRange:NSMakeRange(d.length-256*1024,256*1024)];
+                [tail writeToFile:self.diagnosticLogPath atomically:YES];
+            }
+        }
+    });
+}
 - (void)log:(NSString *)format, ... {
     va_list ap; va_start(ap, format);
     NSString *msg = [[NSString alloc] initWithFormat:format arguments:ap];
     va_end(ap);
+    NSString *line=[NSString stringWithFormat:@"[%@] %@\n",[[NSDate date] description],msg];
     NSLog(@"[CCTVHost] %@", msg);
+    [self persistDiagnosticLine:line];
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.logBuffer appendFormat:@"%@\n", msg];
         if (self.logBuffer.length > 20000) {
@@ -303,6 +362,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.logView.editable = NO;
     self.logView.selectable = YES;
     self.logView.hidden = YES;
+    self.logView.text = self.logBuffer ?: @"";
     self.logView.textContainerInset = UIEdgeInsetsMake(8, 8, 8, 8);
     [self.view addSubview:self.logView];
     self.logToolbar = [[UIToolbar alloc] init];
@@ -311,6 +371,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         [[UIBarButtonItem alloc] initWithTitle:@"关闭日志" style:UIBarButtonItemStyleDone target:self action:@selector(toggleLog)],
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil],
         [[UIBarButtonItem alloc] initWithTitle:@"复制" style:UIBarButtonItemStylePlain target:self action:@selector(copyDiagnosticLog)],
+        [[UIBarButtonItem alloc] initWithTitle:@"导出" style:UIBarButtonItemStylePlain target:self action:@selector(exportDiagnosticLog)],
         [[UIBarButtonItem alloc] initWithTitle:@"清空" style:UIBarButtonItemStylePlain target:self action:@selector(clearDiagnosticLog)]
     ];
     self.logToolbar.hidden = YES;
@@ -321,8 +382,23 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     UIPasteboard.generalPasteboard.string = self.logBuffer ?: @"";
 }
 
+- (void)exportDiagnosticLog {
+    [self flushDiagnosticLog];
+    dispatch_async(self.diagnosticLogQueue, ^{
+        NSURL *source=[NSURL fileURLWithPath:self.diagnosticLogPath];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (![NSFileManager.defaultManager fileExistsAtPath:source.path]) { [self log:@"日志文件尚未生成"]; return; }
+            UIActivityViewController *share=[[UIActivityViewController alloc] initWithActivityItems:@[source] applicationActivities:nil];
+            UIPopoverPresentationController *pop=share.popoverPresentationController;
+            if(pop){ pop.barButtonItem=self.navigationItem.rightBarButtonItem; }
+            [self presentViewController:share animated:YES completion:nil];
+        });
+    });
+}
 - (void)clearDiagnosticLog {
     [self.logBuffer setString:@""];
+    @synchronized (self.pendingLogWrites) { self.diagnosticLogGeneration++; [self.pendingLogWrites setString:@""]; }
+    dispatch_async(self.diagnosticLogQueue, ^{ [@"" writeToFile:self.diagnosticLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil]; });
     self.logView.text = @"";
 }
 
