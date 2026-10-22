@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 @interface M3UChannel : NSObject
 @property (nonatomic, copy) NSString *name;
 @property (nonatomic, copy) NSString *url;
@@ -11,3 +13,5 @@
 /// 解析 m3u/m3u8 文本；相对地址按 baseURL 解析
 + (NSArray<M3UChannel *> *)parse:(NSString *)text baseURL:(nullable NSURL *)baseURL;
 @end
+
+NS_ASSUME_NONNULL_END
