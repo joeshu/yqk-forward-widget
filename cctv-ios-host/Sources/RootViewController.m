@@ -5,11 +5,12 @@
 #import "M3UParser.h"
 #import "PyHost.h"
 #import <AVFoundation/AVFoundation.h>
+#import <MediaPlayer/MediaPlayer.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.11.0";
+static NSString *const kBuildTag = @"0.12.0";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
@@ -64,6 +65,9 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, assign) NSInteger watchdogTicks;
 @property (nonatomic, strong) NSTimer *epgTimer;
 @property (nonatomic, strong) NSURLSessionDataTask *epgTask;
+@property (nonatomic, strong) MPVolumeView *volumeView;
+@property (nonatomic, assign) NSTimeInterval playStartedAt;
+@property (nonatomic, assign) NSTimeInterval firstFrameSeconds;
 @property (nonatomic, copy) NSString *epgChannel;
 @end
 
@@ -83,6 +87,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self buildList];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"插件" style:UIBarButtonItemStylePlain target:self action:@selector(pluginMenu)];
     [self activateAudioSession];
+    [self setupRemoteCommands];
     [self registerCallbackProtocol];
     [self setupSDK];
 
@@ -185,6 +190,13 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         [self.controlBar addArrangedSubview:b];
     }
     [self.playerBox addSubview:self.controlBar];
+
+    self.volumeView = [[MPVolumeView alloc] initWithFrame:CGRectMake(-2000, -2000, 10, 10)];
+    self.volumeView.showsRouteButton = NO;
+    [self.view addSubview:self.volumeView];
+
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(onPan:)];
+    [self.playerBox addGestureRecognizer:pan];
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleOverlay)];
     [self.playerBox addGestureRecognizer:tap];
@@ -491,6 +503,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.firstRender = NO;
     self.stallReported = NO;
     self.retryCount = 0;
+    self.playStartedAt = NSDate.date.timeIntervalSince1970;
+    self.firstFrameSeconds = 0;
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 连接中", self.channelName];
     [self.spinner startAnimating];
     [self.table reloadData];
@@ -650,6 +664,34 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.spinner.center = CGPointMake(b.size.width / 2, b.size.height / 2);
 }
 
+#pragma mark - 订阅管理
+
+- (void)manageSubscriptions {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"订阅源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    if (!self.subscriptionURLs.count) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"暂无订阅" style:UIAlertActionStyleDefault handler:nil]];
+    }
+    for (NSString *u in self.subscriptionURLs.allObjects) {
+        NSString *title = u.length > 42 ? [[u substringToIndex:42] stringByAppendingString:@"…"] : u;
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+            UIAlertController *op = [UIAlertController alertControllerWithTitle:u message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+            [op addAction:[UIAlertAction actionWithTitle:@"刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *y) {
+                [self fetchSubscription:u silent:NO];
+            }]];
+            [op addAction:[UIAlertAction actionWithTitle:@"删除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *y) {
+                [self.subscriptionURLs removeObject:u];
+                [[NSUserDefaults standardUserDefaults] setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
+                [self log:@"已删除订阅 %@", u];
+            }]];
+            [op addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:op animated:YES completion:nil];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
 #pragma mark - 内置插件
 
 - (void)pluginMenu {
@@ -658,6 +700,10 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
                                                        preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"启动内置插件（ysp-live, 端口 8767）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
         [self startBuiltinPlugin];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"管理订阅（%lu）", (unsigned long)self.subscriptionURLs.count]
+                                          style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        [self manageSubscriptions];
     }]];
     [a addAction:[UIAlertAction actionWithTitle:@"添加订阅地址" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
         [self addSubscription];
@@ -686,6 +732,70 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         [[NSUserDefaults standardUserDefaults] setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
         [self fetchSubscription:u silent:NO];
     });
+}
+
+#pragma mark - 手势 / 锁屏
+
+- (UISlider *)systemVolumeSlider {
+    for (UIView *v in self.volumeView.subviews) {
+        if ([v isKindOfClass:UISlider.class]) return (UISlider *)v;
+    }
+    return nil;
+}
+
+- (void)onPan:(UIPanGestureRecognizer *)g {
+    CGPoint p = [g locationInView:self.playerBox];
+    CGFloat dy = [g translationInView:self.playerBox].y;
+    BOOL rightSide = p.x > self.playerBox.bounds.size.width / 2;
+    if (g.state == UIGestureRecognizerStateBegan) {
+        self.infoLabel.hidden = NO;
+        self.controlBar.hidden = NO;
+    }
+    CGFloat delta = -dy / 220.0;   // 上滑增大
+    if (rightSide) {
+        UISlider *slider = [self systemVolumeSlider];
+        if (slider) {
+            float v = MIN(1.0, MAX(0.0, slider.value + delta * 0.35));
+            [slider setValue:v animated:NO];
+            [slider sendActionsForControlEvents:UIControlEventTouchUpInside];
+            self.titleLabel.text = [NSString stringWithFormat:@"音量 %d%%", (int)(v * 100)];
+        }
+    } else {
+        CGFloat b = MIN(1.0, MAX(0.0, UIScreen.mainScreen.brightness + delta * 0.5));
+        UIScreen.mainScreen.brightness = b;
+        self.titleLabel.text = [NSString stringWithFormat:@"亮度 %d%%", (int)(b * 100)];
+    }
+    if (g.state == UIGestureRecognizerStateEnded || g.state == UIGestureRecognizerStateCancelled) {
+        [g setTranslation:CGPointZero inView:self.playerBox];
+        self.titleLabel.text = self.channelName;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (![self.titleLabel.text isEqualToString:self.channelName]) return;
+            self.controlBar.hidden = NO;
+        });
+    }
+}
+
+- (void)setupRemoteCommands {
+    MPRemoteCommandCenter *c = MPRemoteCommandCenter.sharedCommandCenter;
+    [c.playCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
+        [self togglePlayPause];
+        return MPRemoteCommandHandlerStatusSuccess;
+    }];
+    [c.pauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
+        [self togglePlayPause];
+        return MPRemoteCommandHandlerStatusSuccess;
+    }];
+}
+
+- (void)updateNowPlaying {
+    NSMutableDictionary *info = [NSMutableDictionary dictionary];
+    info[MPMediaItemPropertyTitle] = self.channelName ?: @"CCTVHost";
+    info[MPMediaItemPropertyArtist] = @"CCTVHost";
+    if (self.avPlayer.currentItem) {
+        CMTime d = self.avPlayer.currentItem.duration;
+        if (CMTIME_IS_NUMERIC(d)) info[MPMediaItemPropertyPlaybackDuration] = @(CMTimeGetSeconds(d));
+    }
+    MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = info;
 }
 
 #pragma mark - 台标
@@ -864,6 +974,8 @@ static NSCache *LogoCache(void) {
     self.channelName = ch[@"name"];
     self.routeName = @"订阅";
     self.firstRender = NO;
+    self.playStartedAt = NSDate.date.timeIntervalSince1970;
+    self.firstFrameSeconds = 0;
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 连接中", self.channelName];
     [self.spinner startAnimating];
     [self log:@"订阅起播 %@", u];
@@ -899,8 +1011,11 @@ static NSCache *LogoCache(void) {
         if (item.status == AVPlayerItemStatusReadyToPlay) {
             self.firstRender = YES;
             [self.spinner stopAnimating];
+            self.firstFrameSeconds = NSDate.date.timeIntervalSince1970 - self.playStartedAt;
             self.titleLabel.text = self.channelName;
-            [self log:@"订阅就绪，开始播放"];
+            [self.infoLabel setText:[NSString stringWithFormat:@"首帧 %.1fs · 版本 %@", self.firstFrameSeconds, kBuildTag]];
+            [self updateNowPlaying];
+            [self log:@"订阅就绪 %.2fs", self.firstFrameSeconds];
         } else if (item.status == AVPlayerItemStatusFailed) {
             [self.spinner stopAnimating];
             self.titleLabel.text = [NSString stringWithFormat:@"%@ · 失败", self.channelName];
