@@ -30,11 +30,38 @@ jobs:
             n="$(basename "$f" .framework)"; echo "== $n"; lipo -info "$f/$n"
           done
 
+      - name: Syntax check
+        working-directory: cctv-ios-host
+        run: |
+          set +e
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          : > syntax.log
+          for f in Sources/*.m; do
+            echo "== $f" >> syntax.log
+            xcrun --sdk iphoneos clang -fsyntax-only -arch arm64 -isysroot "$SDK" \
+              -miphoneos-version-min=15.0 -fobjc-arc -I Sources/Include \
+              -F Frameworks "$f" >> syntax.log 2>&1 || true
+          done
+          cat syntax.log
+          grep -E "error:|fatal error:" syntax.log | head -20 | sed 's/\r//' | while IFS= read -r l; do
+            echo "::error title=syntax::$l"
+          done
+          if grep -qE "error:|fatal error:" syntax.log; then exit 1; fi
+
       - name: Build app
         working-directory: cctv-ios-host
-        run: bash Scripts/ci-build.sh
+        run: |
+          set +e
+          bash Scripts/ci-build.sh > build.log 2>&1
+          rc=$?
+          tail -60 build.log
+          grep -E "error:|fatal error:|ld: |undefined symbol|No such file" build.log | head -25 | sed 's/\r//' | while IFS= read -r l; do
+            echo "::error title=build::$l"
+          done
+          exit $rc
 
       - uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: CCTVHost-unsigned-ipa
           path: |
