@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - '.github/workflows/python-probe.yml'
+      - 'cctv-ios-host/pyshim/**'
 
 permissions:
   contents: read
@@ -12,34 +13,49 @@ permissions:
 jobs:
   probe:
     runs-on: macos-14
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download Python-Apple-support
         run: |
           curl -sSL -o py.tar.gz 'https://github.com/beeware/Python-Apple-support/releases/download/3.13-b16/Python-3.13-iOS-support.b16.tar.gz'
-          ls -lh py.tar.gz
           mkdir -p py && tar -xzf py.tar.gz -C py
-          echo "::notice title=tar::$(du -sh py | cut -f1) extracted"
-          find py -maxdepth 3 -type d | head -20
+          echo "::notice title=extracted::$(du -sh py | cut -f1)"
 
-      - name: Inspect frameworks
+      - name: Locate lib, headers and stdlib
         run: |
-          XC=$(find py -maxdepth 3 -name 'Python.xcframework' -type d | head -1)
-          echo "xcframework: $XC"
-          [ -n "$XC" ] && echo "::notice title=xcframework::found $(basename "$XC")" || echo "::error title=xcframework::not found"
-          ls "$XC" 2>/dev/null | head
-          for d in "$XC"/ios-arm64*; do
-            [ -d "$d" ] || continue
-            echo "== $d"; ls "$d" | head -10
-            LIB=$(find "$d" -maxdepth 2 -name '*.a' | head -1)
-            [ -n "$LIB" ] && { echo "lib: $LIB ($(du -h "$LIB" | cut -f1))"; }
-            H=$(find "$d" -maxdepth 3 -name 'Python.h' | head -1)
-            [ -n "$H" ] && echo "::notice title=headers::$(dirname "$H")" || echo "::warning title=headers::Python.h not found in $d"
-            if [ -n "$LIB" ]; then
-              nm -gU "$LIB" 2>/dev/null | grep -c '_Py_Initialize' | sed 's/^/Py_Initialize symbols: /'
-              nm -gU "$LIB" 2>/dev/null | grep -c '_PyRun_SimpleString' | sed 's/^/PyRun_SimpleString symbols: /'
-            fi
-          done
-          Z=$(find py -name 'python3*.zip' | head -3)
-          echo "stdlib zips:"; echo "$Z"; for z in $Z; do echo "$(du -h "$z" | cut -f1) $z"; done
-          [ -n "$Z" ] && echo "::notice title=stdlib::$(du -sh $(dirname $(echo "$Z" | head -1)) | cut -f1)" || true
+          LIB=$(find py -name 'libpython3.13*.a' | head -1)
+          INC=$(dirname "$(find py -path '*ios-arm64/include*' -name 'Python.h' | head -1)")
+          ZIP=$(find py \( -name 'python313.zip' -o -name 'python3.13.zip' \) | head -1)
+          LIBS=$(find py -name 'lib*.a' | wc -l | tr -d ' ')
+          echo "LIB=$LIB" >> "$GITHUB_ENV"
+          echo "INC=$INC" >> "$GITHUB_ENV"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+          echo "::notice title=lib::$LIB ($(du -h "$LIB" 2>/dev/null | cut -f1))"
+          echo "::notice title=inc::$INC"
+          echo "::notice title=stdlibzip::${ZIP:-none} $(du -h "$ZIP" 2>/dev/null | cut -f1)"
+          echo "::notice title=static-libs::${LIBS} .a files"
+          find py -maxdepth 3 -name 'libpython*' | head -5
+
+      - name: Compile and link shim
+        run: |
+          mkdir -p cctv-ios-host/pyshim
+          cat > /tmp/shim.c <<'C'
+          #include <Python.h>
+          #include <stdio.h>
+          int main(void) { Py_Initialize(); printf("%s\n", Py_GetVersion()); Py_Finalize(); return 0; }
+          C
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          set +e
+          xcrun --sdk iphoneos clang -arch arm64 -isysroot "$SDK" -miphoneos-version-min=15.0 \
+            -I "$INC" -c /tmp/shim.c -o /tmp/shim.o 2>/tmp/cc.log
+          CC=$?
+          xcrun --sdk iphoneos clang -arch arm64 -isysroot "$SDK" -miphoneos-version-min=15.0 \
+            /tmp/shim.o "$LIB" -lz -lsqlite3 -lbz2 -liconv -lc++ -framework Foundation \
+            -o /tmp/shim 2>/tmp/ld.log
+          LD=$?
+          echo "::notice title=compile::exit=$CC $( [ $CC -ne 0 ] && head -3 /tmp/cc.log | tr '\n' ' ' )"
+          echo "::notice title=link::exit=$LD $( [ $LD -ne 0 ] && grep -m3 -E 'Undefined|error' /tmp/ld.log | tr '\n' ' ' )"
+          [ $LD -eq 0 ] && { file /tmp/shim; echo "::notice title=binary::$(file -b /tmp/shim)"; }
+          exit 0
