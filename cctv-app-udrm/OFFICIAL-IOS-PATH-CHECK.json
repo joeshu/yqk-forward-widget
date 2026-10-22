@@ -1,0 +1,36 @@
+{
+  "checked_at_utc": "2026-10-22T05:02:54.518977+00:00",
+  "official_config_url": "https://api.live.cntv.cn/liveconfig/bcsioslivecbox_000.json",
+  "config_sha256": "74ebd242e27c4f123f5896d274e36f573f5a027d47c0bf95cc117fb7a149cd0b",
+  "config_entries": 776,
+  "config_drm_counts": {
+    "1": 191,
+    "0": 585
+  },
+  "existing_program_count": 53,
+  "existing_program_drm_counts": {
+    "1": 53
+  },
+  "public_web_play_allowed": 45,
+  "public_web_play_denied": [
+    "cctv3",
+    "cctv6",
+    "cctv8",
+    "btv5",
+    "btv2",
+    "btv3",
+    "btv7",
+    "btv9"
+  ],
+  "public_web_all_include_cdrm_manifest": true,
+  "verified_plain_same_program_routes": 0,
+  "sample_app_unauth_requests": "pdrm=0 andpdrm=1 both HTTP200/play0/no manifest",
+  "probe_version": "0.1.0",
+  "probe_sha256": "2b19dd678d0b40a4d0229691b27b8ff8775675b1db39b00f74d231c90dfd6c87",
+  "probe_tests_passed": 7,
+  "probe_tests_environment": "Linux; Darwin/iOS observations tested with synthetic API objects, plus real local HTTP",
+  "iphone_probe_run": false,
+  "media_path_tested_this_round": false,
+  "official_ios_sdk_obtained": false,
+  "aptv_native_plugin_interface_verified": false
+}

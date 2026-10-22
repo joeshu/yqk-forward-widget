@@ -45,6 +45,10 @@ python3 cctv-app-udrm-v0.3.7.py --doctor
 
 节目单现已合并，详见下方0.3.1说明。原61台服务独立保留；用户手机的内存、首帧及节目单界面仍需实机核对。
 
+## 官方iOS路径与宿主检测
+
+新增 [官方路径实测与手机检测](OFFICIAL-IOS-PATH-CHECK.md)：当前53台仍均为App受保护流，尚未取得可核验的iOS SDK或APTV原生桥接接口。独立 [只读检测脚本](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/diagnostics/cctv-ios-native-probe-v0.1.0.py)可在APTV运行，结果 `/status` 位于18771端口，启动日志也输出JSON。它只观察已加载组件、公开符号及宿主能力名称，不处理播放或许可；生产播放版本保持0.3.7。
+
 ## 0.3.7 合并WASM快路径
 
 新增memcmp/strlen的WASM回调，并把五项通用内存/字符串操作合并为一个钩子，另保留一个通用停止钩子；普通内存读写优先调用原始WASM接口。正常状态 `runtime_features` 显示 `grouped_memory_hooks`、`wasm_compare_hooks`、`wasm_strlen_hooks`、`raw_memory_api` 为true，`code_hook_count` 为2。正式许可、官方SDK及高清设置不变。
