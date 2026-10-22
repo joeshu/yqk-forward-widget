@@ -1,0 +1,45 @@
+name: Probe embedded CPython for iOS
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/python-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - name: Download Python-Apple-support
+        run: |
+          curl -sSL -o py.tar.gz 'https://github.com/beeware/Python-Apple-support/releases/download/3.13-b16/Python-3.13-iOS-support.b16.tar.gz'
+          ls -lh py.tar.gz
+          mkdir -p py && tar -xzf py.tar.gz -C py
+          echo "::notice title=tar::$(du -sh py | cut -f1) extracted"
+          find py -maxdepth 3 -type d | head -20
+
+      - name: Inspect frameworks
+        run: |
+          XC=$(find py -maxdepth 3 -name 'Python.xcframework' -type d | head -1)
+          echo "xcframework: $XC"
+          [ -n "$XC" ] && echo "::notice title=xcframework::found $(basename "$XC")" || echo "::error title=xcframework::not found"
+          ls "$XC" 2>/dev/null | head
+          for d in "$XC"/ios-arm64*; do
+            [ -d "$d" ] || continue
+            echo "== $d"; ls "$d" | head -10
+            LIB=$(find "$d" -maxdepth 2 -name '*.a' | head -1)
+            [ -n "$LIB" ] && { echo "lib: $LIB ($(du -h "$LIB" | cut -f1))"; }
+            H=$(find "$d" -maxdepth 3 -name 'Python.h' | head -1)
+            [ -n "$H" ] && echo "::notice title=headers::$(dirname "$H")" || echo "::warning title=headers::Python.h not found in $d"
+            if [ -n "$LIB" ]; then
+              nm -gU "$LIB" 2>/dev/null | grep -c '_Py_Initialize' | sed 's/^/Py_Initialize symbols: /'
+              nm -gU "$LIB" 2>/dev/null | grep -c '_PyRun_SimpleString' | sed 's/^/PyRun_SimpleString symbols: /'
+            fi
+          done
+          Z=$(find py -name 'python3*.zip' | head -3)
+          echo "stdlib zips:"; echo "$Z"; for z in $Z; do echo "$(du -h "$z" | cut -f1) $z"; done
+          [ -n "$Z" ] && echo "::notice title=stdlib::$(du -sh $(dirname $(echo "$Z" | head -1)) | cut -f1)" || true
