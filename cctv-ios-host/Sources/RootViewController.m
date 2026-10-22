@@ -6,7 +6,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.6.0";
+static NSString *const kBuildTag = @"0.7.0";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
@@ -399,14 +399,12 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self log:@"起播 %@ (%@) 线路=%@", self.channelName, cid, self.routeName];
 
     [self stopPlayback];
-    if (route[@"url"]) {
-        self.cicadaPending = YES;
-        [self playViaSDKURL:route[@"url"] cid:cid title:self.channelName];
-        [self armCicadaFallback];
-    } else {
-        self.cicadaPending = NO;
-        [self playViaSDK:cid title:self.channelName];
+    if (route[@"provider"]) {
+        BOOL applied = [self applyCDNPreference:route[@"provider"]];
+        if (!applied) [self log:@"CDN 偏好未生效，按默认调度播放"];
     }
+    self.cicadaPending = NO;
+    [self playViaSDK:cid title:self.channelName];
 
     [self refreshNowNext];
     [self restartEPGTimer];
@@ -451,42 +449,6 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     if ([ok isKindOfClass:NSNumber.class] && ![ok boolValue]) {
         self.titleLabel.text = [NSString stringWithFormat:@"%@ · 起播被拒绝", self.channelName];
         [self log:@"两次起播均返回 0"];
-        return;
-    }
-    [self attachVideoView];
-    [self call:inst sel:@"prepareToPlay"];
-    [self startWatchdog];
-}
-
-- (void)playViaSDKURL:(NSString *)url cid:(NSString *)cid title:(NSString *)title {
-    Class cls = NSClassFromString(@"CNPlayer");
-    SEL sel = NSSelectorFromString(@"playLIVEWithUrl:delegate:configOptions:");
-    id inst = self.sdkPlayer;
-    if (!inst || ![inst respondsToSelector:sel]) {
-        @try { inst = [[cls alloc] init]; } @catch (NSException *e) { [self log:@"init 异常 %@", e.reason]; return; }
-        self.sdkPlayer = inst;
-        [self log:@"创建播放器实例（节点直连）"];
-    } else {
-        [self call:inst sel:@"reset"];
-        [self log:@"复用播放器实例（节点直连）"];
-    }
-    self.currentPlayer = inst;
-    @try { [inst setValue:@(YES) forKey:@"autoPlay"]; } @catch (NSException *e) {}
-
-    if (![inst respondsToSelector:sel]) {
-        // 老版本没有 URL 起播接口，直接回退
-        [self log:@"SDK 无 playLIVEWithUrl:，立即回退自动选线"];
-        self.cicadaPending = NO;
-        [self playViaSDK:cid title:title];
-        return;
-    }
-    NSDictionary *options = @{kOptTitle: title ?: cid};
-    [self log:@"节点起播 %@", url];
-    id ok = [self invokeTarget:inst selector:sel args:@[url, self, options]];
-    if ([ok isKindOfClass:NSNumber.class] && ![ok boolValue]) {
-        [self log:@"节点起播返回 0，回退自动选线"];
-        self.cicadaPending = NO;
-        [self playViaSDK:cid title:title];
         return;
     }
     [self attachVideoView];
@@ -568,6 +530,34 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.titleLabel.frame = CGRectMake(12, 8, b.size.width - 24, 20);
     self.infoLabel.frame = CGRectMake(12, 26, b.size.width - 24, 16);
     self.spinner.center = CGPointMake(b.size.width / 2, b.size.height / 2);
+}
+
+#pragma mark - CDN 偏好
+
+- (BOOL)applyCDNPreference:(NSString *)code {
+    Class itemCls = NSClassFromString(@"CNPlayerHlsCdnInfoItem");
+    Class playerCls = NSClassFromString(@"CNPlayer");
+    SEL setSel = NSSelectorFromString(@"configSDK_CDN_LIVEDefaultCDNInfo:");
+    SEL getSel = NSSelectorFromString(@"getVDNConfig_CDNLive_DefaultCDNInfo");
+    if (!itemCls || !playerCls || ![playerCls respondsToSelector:setSel]) {
+        [self log:@"SDK 无 CDN 偏好接口"];
+        return NO;
+    }
+    id item = nil;
+    @try { item = [[itemCls alloc] init]; } @catch (NSException *e) { return NO; }
+    [item setValue:code.lowercaseString forKey:@"cdn_code"];
+    [item setValue:code.uppercaseString forKey:@"cdn_name"];
+    @try { [item setValue:@(0) forKey:@"cdn_vip"]; } @catch (NSException *e) {}
+
+    // 参数既可能是数组也可能是单个对象，两种都试，并用 getter 校验
+    [self invokeTarget:playerCls selector:setSel args:@[@[item]]];
+    id now = [self invokeTarget:playerCls selector:getSel args:@[]];
+    if (!now) {
+        [self invokeTarget:playerCls selector:setSel args:@[item]];
+        now = [self invokeTarget:playerCls selector:getSel args:@[]];
+    }
+    [self log:@"CDN 偏好 %@ 生效值=%@", code, now ?: @"(空)"];
+    return now != nil;
 }
 
 #pragma mark - 节点失败自动回退
