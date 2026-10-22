@@ -138,10 +138,15 @@ finished:
         [[NSFileManager defaultManager] fileExistsAtPath:stdlib] &&
         [[NSFileManager defaultManager] fileExistsAtPath:dynload] &&
         [[NSFileManager defaultManager] fileExistsAtPath:caFile];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *extensionFiles = [fm contentsOfDirectoryAtPath:dynload error:nil] ?: @[];
     for (NSString *module in @[@"_ssl", @"_socket", @"_hashlib", @"select", @"_struct"]) {
-        NSString *extension = [dynload stringByAppendingPathComponent:[module stringByAppendingString:@".fwork"]];
-        NSString *plain = [dynload stringByAppendingPathComponent:[module stringByAppendingString:@".so"]];
-        if (![[NSFileManager defaultManager] fileExistsAtPath:extension] && ![[NSFileManager defaultManager] fileExistsAtPath:plain]) runtimeOK = NO;
+        NSString *prefix = [module stringByAppendingString:@"."];
+        BOOL found = NO;
+        for (NSString *filename in extensionFiles) {
+            if ([filename hasPrefix:prefix] && ([filename hasSuffix:@".fwork"] || [filename hasSuffix:@".so"])) { found = YES; break; }
+        }
+        if (!found) runtimeOK = NO;
     }
     if (!runtimeOK) {
         pthread_mutex_unlock(&gLock);

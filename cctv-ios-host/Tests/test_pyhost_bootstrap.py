@@ -29,6 +29,12 @@ class BootstrapTests(unittest.TestCase):
         with temp:
             self.assertEqual(bootstrap.runtime_paths(home), (stdlib, dyn))
 
+    def test_objc_host_accepts_versioned_iphoneos_fwork_names(self):
+        source = (MODULE.parents[1] / "Sources" / "PyHost.m").read_text()
+        self.assertIn("[filename hasPrefix:prefix]", source)
+        self.assertIn("[filename hasSuffix:@\".fwork\"]", source)
+        self.assertNotIn("[module stringByAppendingString:@\".fwork\"]", source)
+
     def test_missing_extension_fails_loudly(self):
         temp, home, _, dyn = self.fixture()
         with temp:
