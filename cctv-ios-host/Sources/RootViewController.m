@@ -256,7 +256,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
 - (void)buildList {
     CGFloat y = CGRectGetMaxY(self.playerBox.frame);
-    self.groupControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"央视", @"卫视", @"地方", @"教育", @"订阅"]];
+    self.groupControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"央视", @"卫视", @"地方", @"教育", @"熊猫", @"订阅"]];
     self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 28);
     self.groupControl.selectedSegmentIndex = 0;
     self.groupControl.tintColor = [UIColor colorWithWhite:0.75 alpha:1];
@@ -913,7 +913,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 #pragma mark - EPG 缓存
 
 - (NSString *)epgCachePath {
-    NSString *dir = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject];
+    NSString *dir = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
     return [dir stringByAppendingPathComponent:@"epg-cache.json"];
 }
 
@@ -982,7 +982,7 @@ static NSCache *LogoCache(void) {
 - (void)applyFilter {
     NSArray *base = self.allChannels;
     NSInteger idx = self.groupControl.selectedSegmentIndex;
-    NSArray *groups = @[@"全部", @"央视", @"卫视", @"地方", @"教育", @"订阅"];
+    NSArray *groups = @[@"全部", @"央视", @"卫视", @"地方", @"教育", @"熊猫", @"订阅"];
     if (idx > 0 && idx < (NSInteger)groups.count) {
         NSString *g = groups[idx];
         base = [base filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *o, NSDictionary *b) {

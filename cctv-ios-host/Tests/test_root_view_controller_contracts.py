@@ -60,6 +60,21 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("epgGeneration != weakSelf.playbackGeneration", body)
         self.assertIn("![weakSelf.channelID isEqualToString:cid]", body)
 
+    def test_panda_official_feed_is_grouped_but_not_claimed_verified(self):
+        import json
+        channels = json.loads((SOURCE.parents[1] / "Resources" / "channels.json").read_text(encoding="utf-8"))
+        matches = [c for c in channels if c["id"] == "ipanda-live"]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["group"], "熊猫")
+        self.assertFalse(matches[0]["verified"])
+        self.assertIn("not a specific camera", matches[0]["validationStatus"])
+        self.assertIn("@\"熊猫\"", TEXT)
+
+    def test_epg_cache_path_uses_valid_objc_message_expression(self):
+        body = method_body("- (NSString *)epgCachePath")
+        self.assertIn("NSSearchPathForDirectoriesInDomains(NSCachesDirectory", body)
+        self.assertNotIn(".firstObject];", body)
+
     def test_retry_is_bound_to_current_generation_and_playback_type(self):
         body = method_body("- (void)player:(id)player playbackFailed:")
         self.assertIn("generation != self.playbackGeneration", body)
