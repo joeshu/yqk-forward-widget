@@ -8,13 +8,13 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.8.0";
+static NSString *const kBuildTag = @"0.9.0";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
 static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTVGetLicense";
 
-@interface RootViewController () <UITableViewDataSource, UITableViewDelegate>
+@interface RootViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
 // 播放
 @property (nonatomic, strong) UIView *playerBox;
 @property (nonatomic, strong) UILabel *titleLabel;
@@ -33,6 +33,11 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, strong) AVPlayerLayer *avLayer;
 @property (nonatomic, strong) NSMutableArray<NSDictionary *> *subscriptions;
 @property (nonatomic, strong) NSMutableSet<NSString *> *subscriptionURLs;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *epgCache;
+@property (nonatomic, strong) NSMutableSet<NSString *> *epgInflight;
+@property (nonatomic, strong) NSMutableArray<NSDictionary *> *recents;
+@property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, copy) NSString *query;
 @property (nonatomic, strong) CicadaPlayer *cicadaPlayer;
 @property (nonatomic, copy) NSString *channelID;
 @property (nonatomic, copy) NSString *channelName;
@@ -230,11 +235,23 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onLongPress:)];
     [self.table addGestureRecognizer:lp];
 
+    UIRefreshControl *rc = [[UIRefreshControl alloc] init];
+    [rc addTarget:self action:@selector(onPullRefresh) forControlEvents:UIControlEventValueChanged];
+    self.table.refreshControl = rc;
+
+    self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
+    self.searchController.searchResultsUpdater = self;
+    self.searchController.obscuresBackgroundDuringPresentation = NO;
+    self.searchController.searchBar.placeholder = @"搜索频道";
+    self.navigationItem.searchController = self.searchController;
+    self.definesPresentationContext = YES;
+
     self.logView = [[UITextView alloc] initWithFrame:self.view.bounds];
     self.logView.backgroundColor = [UIColor colorWithWhite:0.03 alpha:0.98];
     self.logView.textColor = [UIColor colorWithRed:0.62 green:0.9 blue:0.65 alpha:1];
     self.logView.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
     self.logView.editable = NO;
+    self.logView.selectable = YES;
     self.logView.hidden = YES;
     self.logView.textContainerInset = UIEdgeInsetsMake(8, 8, 8, 8);
     [self.view addSubview:self.logView];
@@ -249,6 +266,9 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     }
     self.allChannels = [arr isKindOfClass:NSArray.class] ? arr : @[];
     self.shownChannels = self.allChannels;
+    self.epgCache = [NSMutableDictionary dictionary];
+    self.epgInflight = [NSMutableSet set];
+    self.recents = [NSMutableArray arrayWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:@"recents"] ?: @[]];
     self.subscriptions = [NSMutableArray array];
     self.subscriptionURLs = [NSMutableSet set];
     NSArray *saved = [[NSUserDefaults standardUserDefaults] arrayForKey:@"subscriptions"];
@@ -262,21 +282,27 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 }
 
 - (void)onGroupChanged {
-    NSArray *groups = @[@"全部", @"央视", @"卫视", @"地方", @"教育", @"订阅"];
-    NSInteger i = MAX(0, MIN((NSInteger)groups.count - 1, self.groupControl.selectedSegmentIndex));
-    NSString *g = groups[i];
-    if ([g isEqualToString:@"全部"]) {
-        self.shownChannels = self.allChannels;
-    } else {
-        self.shownChannels = [self.allChannels filteredArrayUsingPredicate:
-                              [NSPredicate predicateWithBlock:^BOOL(NSDictionary *o, NSDictionary *b) {
-            return [o[@"group"] isEqualToString:g];
-        }]];
-    }
-    [self.table reloadData];
+    [self applyFilter];
 }
 
-- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return (NSInteger)self.shownChannels.count; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)t {
+    return self.recents.count && !self.query.length && self.groupControl.selectedSegmentIndex == 0 ? 2 : 1;
+}
+
+- (NSString *)tableView:(UITableView *)t titleForHeaderInSection:(NSInteger)s {
+    if ([self numberOfSectionsInTableView:t] == 2) return s == 0 ? @"最近观看" : @"全部频道";
+    return nil;
+}
+
+- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
+    if ([self numberOfSectionsInTableView:t] == 2 && s == 0) return (NSInteger)self.recents.count;
+    return (NSInteger)self.shownChannels.count;
+}
+
+- (NSArray<NSDictionary *> *)channelsForSection:(NSInteger)section tableView:(UITableView *)t {
+    if ([self numberOfSectionsInTableView:t] == 2 && section == 0) return self.recents;
+    return self.shownChannels;
+}
 
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
     static NSString *cid = @"ch";
@@ -291,19 +317,31 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         bg.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1];
         cell.selectedBackgroundView = bg;
     }
-    NSDictionary *ch = self.shownChannels[ip.row];
+    NSArray *rows = [self channelsForSection:ip.section tableView:t];
+    NSDictionary *ch = rows[ip.row];
     BOOL playing = [ch[@"id"] isEqualToString:self.channelID];
     cell.textLabel.textColor = playing ? [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1] : UIColor.whiteColor;
     cell.textLabel.text = playing ? [NSString stringWithFormat:@"● %@", ch[@"name"]] : ch[@"name"];
-    NSUInteger n = [ch[@"routes"] isKindOfClass:NSArray.class] ? [ch[@"routes"] count] : 0;
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %lu 线路", ch[@"group"], (unsigned long)n];
+
+    NSDictionary *epg = self.epgCache[ch[@"id"] ?: @""];
+    if (epg[@"now"]) {
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"正在播：%@", epg[@"now"]];
+    } else if ([ch[@"remoteURL"] length]) {
+        cell.detailTextLabel.text = @"订阅源";
+    } else {
+        NSUInteger n = [ch[@"routes"] isKindOfClass:NSArray.class] ? [ch[@"routes"] count] : 0;
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %lu 线路", ch[@"group"], (unsigned long)n];
+    }
+    [self loadEPGForChannel:ch[@"id"] section:ip];
     return cell;
 }
 
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [t deselectRowAtIndexPath:ip animated:YES];
-    NSDictionary *ch = self.shownChannels[ip.row];
-    if (ch[@"remoteURL"]) { [self playRemote:ch]; return; }
+    NSArray *rows = [self channelsForSection:ip.section tableView:t];
+    NSDictionary *ch = rows[ip.row];
+    [self rememberChannel:ch];
+    if ([ch[@"remoteURL"] length]) { [self playRemote:ch]; return; }
     [self playChannel:ch route:nil];      // 单击 = 自动选线直接播放
 }
 
@@ -312,7 +350,22 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     CGPoint pt = [g locationInView:self.table];
     NSIndexPath *ip = [self.table indexPathForRowAtPoint:pt];
     if (!ip) return;
-    NSDictionary *ch = self.shownChannels[ip.row];
+    NSArray *rows = [self channelsForSection:ip.section tableView:self.table];
+    NSDictionary *ch = rows[ip.row];
+    if ([ch[@"remoteURL"] length]) {
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:ch[@"name"] message:@"订阅条目" preferredStyle:UIAlertControllerStyleActionSheet];
+        [a addAction:[UIAlertAction actionWithTitle:@"从列表移除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x) {
+            NSMutableArray *m = [self.allChannels mutableCopy];
+            [m removeObject:ch];
+            self.allChannels = m; self.shownChannels = m;
+            [self.table reloadData];
+        }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+        a.popoverPresentationController.sourceView = self.table;
+        a.popoverPresentationController.sourceRect = [self.table rectForRowAtIndexPath:ip];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
     [self presentRouteSheetForChannel:ch fromIndexPath:ip];
 }
 
@@ -395,6 +448,15 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     id ver = [self callClass:cls sel:@"SDKVersion" args:@[]];
     [self log:@"SDK 启动版本 %@", ver];
     [self callClass:cls sel:@"authed" args:@[]];
+
+    // 预热：提前建好播放器实例，缩短首次起播时间
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (weakSelf.sdkPlayer) return;
+        id inst = nil;
+        @try { inst = [[cls alloc] init]; } @catch (NSException *e) {}
+        if (inst) { weakSelf.sdkPlayer = inst; [weakSelf log:@"播放器实例已预热"]; }
+    });
 }
 
 #pragma mark - 播放
@@ -565,6 +627,85 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.titleLabel.frame = CGRectMake(12, 8, b.size.width - 24, 20);
     self.infoLabel.frame = CGRectMake(12, 26, b.size.width - 24, 16);
     self.spinner.center = CGPointMake(b.size.width / 2, b.size.height / 2);
+}
+
+#pragma mark - 搜索 / 最近 / 节目单缓存
+
+- (void)updateSearchResultsForSearchController:(UISearchController *)sc {
+    self.query = sc.searchBar.text;
+    [self applyFilter];
+}
+
+- (void)applyFilter {
+    NSArray *base = self.allChannels;
+    NSInteger idx = self.groupControl.selectedSegmentIndex;
+    NSArray *groups = @[@"全部", @"央视", @"卫视", @"地方", @"教育", @"订阅"];
+    if (idx > 0 && idx < (NSInteger)groups.count) {
+        NSString *g = groups[idx];
+        base = [base filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *o, NSDictionary *b) {
+            return [o[@"group"] isEqualToString:g];
+        }]];
+    }
+    if (self.query.length) {
+        NSString *q = self.query.lowercaseString;
+        base = [base filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *o, NSDictionary *b) {
+            return [[o[@"name"] lowercaseString] containsString:q] || [[o[@"id"] lowercaseString] containsString:q];
+        }]];
+    }
+    self.shownChannels = base;
+    [self.table reloadData];
+}
+
+- (void)rememberChannel:(NSDictionary *)ch {
+    if (!ch[@"id"]) return;
+    NSMutableDictionary *entry = [@{@"id": ch[@"id"],
+                                    @"name": ch[@"name"] ?: ch[@"id"],
+                                    @"group": ch[@"group"] ?: @""} mutableCopy];
+    if ([ch[@"remoteURL"] length]) entry[@"remoteURL"] = ch[@"remoteURL"];
+    NSMutableArray *m = [NSMutableArray arrayWithObject:entry];
+    for (NSDictionary *r in self.recents) {
+        if (![r[@"id"] isEqualToString:ch[@"id"]] && m.count < 8) [m addObject:r];
+    }
+    self.recents = m;
+    [[NSUserDefaults standardUserDefaults] setObject:m forKey:@"recents"];
+}
+
+- (void)onPullRefresh {
+    for (NSString *u in self.subscriptionURLs.allObjects) [self fetchSubscription:u silent:YES];
+    [self.table.refreshControl endRefreshing];
+}
+
+- (void)loadEPGForChannel:(NSString *)cid section:(NSIndexPath *)ip {
+    if (!cid.length || self.epgCache[cid] || [self.epgInflight containsObject:cid]) return;
+    if (self.epgInflight.count >= 3) return;
+    [self.epgInflight addObject:cid];
+    NSString *url = [NSString stringWithFormat:@"https://api.cntv.cn/epg/get3D12HEPG?c=%@&serviceId=cbox",
+                     [cid stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
+    req.timeoutInterval = 8;
+    __weak typeof(self) weakSelf = self;
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *r, NSError *e) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf.epgInflight removeObject:cid];
+            if (!data.length) return;
+            id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+            NSArray *rows = [json isKindOfClass:NSDictionary.class] ? [(NSDictionary *)json objectForKey:@"EPG"] : nil;
+            if (![rows isKindOfClass:NSArray.class]) return;
+            double now = NSDate.date.timeIntervalSince1970;
+            NSString *cur = nil, *nxt = nil;
+            for (NSDictionary *row in rows) {
+                if (![row isKindOfClass:NSDictionary.class]) continue;
+                double s0 = [row[@"startTime"] doubleValue], e0 = [row[@"endTime"] doubleValue];
+                if (s0 > 1e11) s0 /= 1000; if (e0 > 1e11) e0 /= 1000;
+                if (now >= s0 && now < e0) cur = row[@"title"];
+                else if (s0 > now && !nxt) nxt = row[@"title"];
+            }
+            if (cur || nxt) {
+                weakSelf.epgCache[cid] = @{@"now": cur ?: @"", @"next": nxt ?: @""};
+                [weakSelf.table reloadData];
+            }
+        });
+    }] resume];
 }
 
 #pragma mark - 订阅（m3u 源 / 本地插件）
