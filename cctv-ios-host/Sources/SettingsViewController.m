@@ -21,7 +21,7 @@
             @{ @"title": @"应用数据位置", @"detail": @"Application Support / ysp", @"icon": @"folder" }
         ]},
         @{ @"title": @"关于", @"footer": @"播放稳定性受官方调度、频道版权、网络和 iOS 后台策略影响。", @"rows": @[
-            @{ @"title": @"CCTVHost", @"detail": @"0.14.1", @"icon": @"info.circle" },
+            @{ @"title": @"CCTVHost", @"detail": @"0.14.2", @"icon": @"info.circle" },
             @{ @"title": @"iOS 插件运行模式", @"detail": @"内嵌 CPython · 前台服务", @"icon": @"curlybraces" }
         ]}
     ];
