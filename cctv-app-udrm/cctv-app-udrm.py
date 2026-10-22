@@ -1,9 +1,28 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.3.5: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.3.6: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
 import types
+
+# APTV: edit these values when the host has no script-argument input.
+PHONE_OPTIONS = {
+    'cache_mib': 32,
+    'inactive_cache_seconds': 20,
+    'inactive_cache_segments': 2,
+    'zap_debounce_ms': 0,
+    'download_workers': 4,
+    'refresh_workers': 4,
+    'wasm_memory_ops': True,
+}
+
+def phone_arguments():
+    result = []
+    for key in ('cache_mib', 'inactive_cache_seconds', 'inactive_cache_segments',
+                'zap_debounce_ms', 'download_workers', 'refresh_workers'):
+        result.extend(['--' + key.replace('_', '-'), str(PHONE_OPTIONS[key])])
+    result.append('--wasm-memory-ops' if PHONE_OPTIONS['wasm_memory_ops'] else '--no-wasm-memory-ops')
+    return result
 
 JS_SOURCES = {
     'koo_vm.js': (
@@ -25,7 +44,11 @@ JS_SOURCES = {
         "   else throw Error('unsupported ELF relocation '+r.type);\n"
         '   this.write64(this.base+r.offset,value);\n'
         '  }\n'
-        '  e.hook_add(uc.HOOK_CODE,(_u,address)=>{this.trap=Number(address);e.emu_stop();},null,this.stub,this.stub+0x1ffff);\n'
+        '  const excluded=this.installMemoryHooks();\n'
+        '  const stopHook=(_u,address)=>{this.trap=Number(address);e.emu_stop();};\n'
+        '  let begin=this.stub;\n'
+        '  for(const address of excluded){if(begin<address)e.hook_add(uc.HOOK_CODE,stopHook,null,begin,address-1);begin=address+8;}\n'
+        '  e.hook_add(uc.HOOK_CODE,stopHook,null,begin,this.stub+0x1ffff);\n'
         '  this.jniTable=this.allocate(0x1000,true);this.env=this.allocate(8,true);this.write64(this.env,this.jniTable);\n'
         '  this.jvmTable=this.allocate(0x100,true);this.jvm=this.allocate(8,true);this.write64(this.jvm,this.jvmTable);\n'
         "  for(let i=0;i<240;i++){const address=this.stub+0x4000+i*8;this.write64(this.jniTable+i*8,address);this.addressImports[address]='jni:'+i;}\n"
@@ -77,6 +100,23 @@ JS_SOURCES = {
         '    };\n'
         '   }\n'
         '  }\n'
+        '  // Independent WASM adapter: memory bytes stay in the existing emulator memory.\n'
+        "  if(globalThis.__useWasmMemoryOps!==false&&typeof m._uc_mem_read==='function'&&typeof m._uc_mem_write==='function'){\n"
+        '   try{\n'
+        "    const bytes=Uint8Array.from(atob('AGFzbQEAAAABTwxgBH9+f34Bf2AEf39/fwF/YAN/f38Bf2ABfwF/YAF/AGAFf35+f38Bf2AFf35/f38Bf2AFf39/f38Bf2ACf38AYAR/fn9/AGAAAGAAAX8CbggDZW52Bm1lbW9yeQIAAANlbnYEcmVhZAAAA2VudgV3cml0ZQAAA2Vudg5yZWdfcmVhZF9iYXRjaAABA2VudglyZWdfd3JpdGUAAgNlbnYEc3RvcAADA2VudgZtYWxsb2MAAwNlbnYEZnJlZQAEAwsKBQYHCAkKCwsLCgYkB38BQQALfwFBAAt/AUEAC38BQQALfwFBAAt/AUEAC38BQQALB1EJBGNvcHkABwRmaWxsAAgEaW5pdAAJBGhvb2sACwtjbGVhcl9lcnJvcgAMCmxhc3RfZXJyb3IADQZjb3BpZXMADgVmaWxscwAPBWNsb3NlABAKugMKLQEBfyADRQRAQQAPCyAAIAIgBCADrRAAIQUgBQRAIAUPCyAAIAEgBCADrRABCx8AIANFBEBBAA8LIAQgAiAD/AsAIAAgASAEIAOtEAELXABBwAAQBSQAIwBFBEBBAQ8LIAQkAyMAIAA2AgAjACABNgIEIwAgAjYCCCMAIAM2AgwjACMAQSBqNgIQIwAjAEEoajYCFCMAIwBBMGo2AhgjACMAQThqNgIcQQALCwAgASQEIAAQBBoLyQEBA38gACMAIwBBEGpBBBACIQQgBARAIAAgBBAKDwsjACkDMEKAgIAIVgRAIABBfxAKDwsjACkDMKchBSAFIwJLBEAgBRAFIQYgBkUEQCAAQX4QCg8LIwEEQCMBEAYLIAYkASAFJAILIAMEQCMGQQFqJAYgACMAKQMgIwApAyinIAUjARAIIQQFIwVBAWokBSAAIwApAyAjACkDKCAFIwEQByEECyAEBEAgACAEEAoPCyAAIwMjAEE4ahADIQQgBARAIAAgBBAKCwsGAEEAJAQLBAAjBAsEACMFCwQAIwYLIAAjAQRAIwEQBgsjAARAIwAQBgtBACQBQQAkAEEAJAIL'),c=>c.charCodeAt(0));\n"
+        '    const backend=new WebAssembly.Instance(new WebAssembly.Module(bytes),{env:{memory,read:m._uc_mem_read,write:m._uc_mem_write,reg_read_batch:m._uc_reg_read_batch,reg_write:m._uc_reg_write,stop:m._uc_emu_stop,malloc:m._malloc,free:m._free}}).exports;\n'
+        '    const perform=(kind,dst,src,size)=>{\n'
+        "     check(dst);if(kind==='copy')check(src);\n"
+        '     const pointer=scratch(size);\n'
+        "     const code=kind==='copy'?backend.copy(handle,BigInt(dst),BigInt(src),size,pointer):backend.fill(handle,BigInt(dst),src&255,size,pointer);\n"
+        "     if(code!==m.ERR_OK)throw Error('WASM memory '+kind+' failed '+code);\n"
+        '    };\n'
+        "    this.memoryCopy=(dst,src,size)=>perform('copy',dst,src,size);\n"
+        "    this.memoryFill=(dst,value,size)=>perform('fill',dst,value,size);\n"
+        '    this.bulk.wasmMemoryOps=true;this.memoryBackend=backend;\n'
+        '    this.bulk.directWasmImports=!!globalThis.__ucExports&&Object.values(globalThis.__ucExports).includes(m._uc_mem_read)&&Object.values(globalThis.__ucExports).includes(m._uc_mem_write);\n'
+        '   }catch(error){this.bulk.wasmMemoryOps=false;}\n'
+        '  }\n'
         '  e.mem_read=(address,size)=>{\n'
         '   check(address);const pointer=scratch(size);if(!size)return new Uint8Array(0);\n'
         "   const code=m.ccall('uc_mem_read','number',['pointer','number','pointer','number'],[handle,BigInt(address),pointer,BigInt(size)]);\n"
@@ -91,6 +131,30 @@ JS_SOURCES = {
         "   const code=m.ccall('uc_mem_write','number',['pointer','number','pointer','number'],[handle,BigInt(address),pointer,BigInt(bytes.length)]);\n"
         "   if(code!==m.ERR_OK)throw Error('bulk uc_mem_write failed '+code);\n"
         '  };\n'
+        ' }\n'
+        ' installMemoryHooks(){\n'
+        "  const m=this.uc,b=this.memoryBackend,handle=m.getValue(this.e.handle_ptr,'*'),installed=[];\n"
+        "  if(!b||!this.bulk.directWasmImports||typeof m.addFunction!=='function')return [];\n"
+        '  let callback=0;\n'
+        '  try{\n'
+        "   if(b.init(m.ARM64_REG_X0,m.ARM64_REG_X1,m.ARM64_REG_X2,m.ARM64_REG_LR,m.ARM64_REG_PC)!==0)throw Error('WASM hook init');\n"
+        "   callback=m.addFunction(b.hook,'vijii');\n"
+        "   for(const name of ['memcpy','memmove','memset']){\n"
+        '    const address=this.importAddresses[name];if(address===undefined)continue;\n'
+        "    const pointer=m._malloc(16);if(!pointer)throw Error('WASM hook storage');\n"
+        '    try{\n'
+        "     const code=m._uc_hook_add(handle,pointer,m.HOOK_CODE,callback,name==='memset'?1:0,BigInt(address),BigInt(address),pointer+8);\n"
+        "     if(code!==m.ERR_OK)throw Error('WASM hook installation '+code);\n"
+        "     installed.push({address,hook:m.getValue(pointer,'*')});\n"
+        '    }finally{m._free(pointer);}\n'
+        '   }\n'
+        '   this.fastMemoryHooks={installed,callback};this.bulk.wasmMemoryHooks=true;\n'
+        '   return installed.map(x=>x.address).sort((a,b)=>a-b);\n'
+        '  }catch(error){\n'
+        '   for(const item of installed)m._uc_hook_del(handle,item.hook);\n'
+        '   if(callback)m.removeFunction(callback);\n'
+        '   b.close();this.bulk.wasmMemoryHooks=false;return [];\n'
+        '  }\n'
         ' }\n'
         ' unbase64(text){const s=atob(text),b=new Uint8Array(s.length);for(let i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b;}\n'
         " base64(bytes){let s='';for(let i=0;i<bytes.length;i+=8192)s+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(s);}\n"
@@ -145,7 +209,9 @@ JS_SOURCES = {
         '  const e=this.e,uc=this.uc;let steps=0;\n'
         '  while(true){\n'
         "   if(++steps>300000)throw Error('too many host ABI calls');this.trap=null;\n"
+        '   if(this.fastMemoryHooks)this.memoryBackend.clear_error();\n'
         "   try{e.emu_start(pc,this.stop,0,0);}catch(error){throw Error('emulation fault pc=0x'+e.reg_read_i64(uc.ARM64_REG_PC).toString(16)+' '+String(error));}\n"
+        "   if(this.fastMemoryHooks&&this.memoryBackend.last_error())throw Error('WASM memory hook failed '+this.memoryBackend.last_error());\n"
         "   if(this.trap===null){if(Number(e.reg_read_i64(uc.ARM64_REG_PC))!==this.stop)throw Error('instruction budget exceeded');break;}\n"
         "   const name=this.addressImports[this.trap];if(!name)throw Error('unknown host trampoline');\n"
         '   this.counts[name]=(this.counts[name]||0)+1;\n'
@@ -175,8 +241,8 @@ JS_SOURCES = {
         "   case 'free':this.free(a[0]);return 0;\n"
         "   case 'realloc':{if(!a[0])return this.allocate(a[1]);const n=this.allocations.get(a[0]);if(n===undefined)throw Error('invalid realloc');const p=this.allocate(a[1]);this.write(p,this.read(a[0],Math.min(n,a[1])));this.free(a[0]);return p;}\n"
         "   case 'posix_memalign':{if(a[1]>16)throw Error('unsupported alignment');this.write64(a[0],this.allocate(a[2]));return 0;}\n"
-        "   case 'memcpy':case 'memmove':this.write(a[0],this.read(a[1],a[2]));return a[0];\n"
-        "   case 'memset':this.write(a[0],new Uint8Array(a[2]).fill(a[1]&255));return a[0];\n"
+        "   case 'memcpy':case 'memmove':if(this.memoryCopy)this.memoryCopy(a[0],a[1],a[2]);else this.write(a[0],this.read(a[1],a[2]));return a[0];\n"
+        "   case 'memset':if(this.memoryFill)this.memoryFill(a[0],a[1],a[2]);else this.write(a[0],new Uint8Array(a[2]).fill(a[1]&255));return a[0];\n"
         "   case 'strlen':return this.cbytes(a[0]).length;\n"
         "   case 'strdup':return this.cstring(this.string(a[0]));\n"
         "   case 'strcpy':{const s=this.cbytes(a[1]);this.write(a[0],s);this.write(a[0]+s.length,new Uint8Array(1));return a[0];}\n"
@@ -320,7 +386,7 @@ JS_SOURCES = {
         '  globalThis.__mediaOutput=output;return {code:0};\n'
         ' }\n'
         ' reset(channel){const old=this.states.get(channel);if(old){this.free(old);this.states.delete(channel);}}\n'
-        ' close(){if(this.bulk&&this.bulk.registerPointer){this.uc._free(this.bulk.registerPointer);this.bulk.registerPointer=0;}if(this.bulk&&this.bulk.pointer){this.uc._free(this.bulk.pointer);this.bulk.pointer=0;}this.e.close();}\n'
+        " close(){if(this.fastMemoryHooks){const m=this.uc,h=m.getValue(this.e.handle_ptr,'*');for(const item of this.fastMemoryHooks.installed)m._uc_hook_del(h,item.hook);m.removeFunction(this.fastMemoryHooks.callback);this.fastMemoryHooks=null;}if(this.memoryBackend)this.memoryBackend.close();if(this.bulk&&this.bulk.registerPointer){this.uc._free(this.bulk.registerPointer);this.bulk.registerPointer=0;}if(this.bulk&&this.bulk.pointer){this.uc._free(this.bulk.pointer);this.bulk.pointer=0;}this.e.close();}\n"
         '}\n'
         'globalThis.KooVM=KooVM;\n'
     )
@@ -688,7 +754,7 @@ PYTHON_SOURCES = {
         '    except BootstrapError:raise\n'
         "    except Exception as error:raise BootstrapError('下载失败：'+type(error).__name__) from None\n"
         '\n'
-        'def prepare(vm_source,*,cache_dir=None,jscore_library=None,progress=None):\n'
+        'def prepare(vm_source,*,cache_dir=None,jscore_library=None,progress=None,wasm_memory_ops=True):\n'
         '    notify=progress or LOG.info\n'
         "    cache=Path(cache_dir).expanduser() if cache_dir else Path(tempfile.gettempdir())/'cctv-app-udrm-v02'\n"
         '    with _LOCK:\n'
@@ -728,7 +794,7 @@ PYTHON_SOURCES = {
         "            _cache(cache,'unicorn-aarch64-2.1.4.js',wasm)\n"
         '        _MEMORY.update(sdk=sdk,wasm=wasm)\n'
         "        notify('官方SDK和无JDK解释器已校验就绪')\n"
-        "        return {'sdk_bytes':sdk,'unicorn_source':wasm.decode('utf8'),'vm_source':vm_source,'jscore_library':jscore_library}\n"
+        "        return {'wasm_memory_ops':wasm_memory_ops,'sdk_bytes':sdk,'unicorn_source':wasm.decode('utf8'),'vm_source':vm_source,'jscore_library':jscore_library}\n"
     ),
     'wasm_sdk': (
         '"""No JVM: original ARM64 SDK under Unicorn WASM in JavaScriptCore."""\n'
@@ -878,6 +944,7 @@ PYTHON_SOURCES = {
         ' def _initialize(self,prepared):\n'
         "  self.host.evaluate('var console={log:function(){},error:function(){}};var performance={now:function(){return Date.now();}};')\n"
         '  self.host.evaluate(self._base64_host())\n'
+        "  self.host.evaluate('globalThis.__useWasmMemoryOps='+str(prepared.get('wasm_memory_ops',True)).lower()+';void 0;')\n"
         "  source=prepared['unicorn_source']\n"
         '  self.host.evaluate(source)\n'
         "  start=source.index('function findWasmBinary(){return binaryDecode(')+len('function findWasmBinary(){return binaryDecode(')\n"
@@ -888,7 +955,7 @@ PYTHON_SOURCES = {
         '   end+=1\n'
         '  literal=source[start:end+1]\n'
         "  self.host.evaluate('var __wtext='+literal+';var __wbytes=new Uint8Array(__wtext.length);for(var i=0;i<__wtext.length;i++){var c=__wtext.charCodeAt(i);__wbytes[i]=~c>>8&c;}__wtext=null;void 0;')\n"
-        "  self.host.evaluate('var __uc=null;var __loadError=null;MUnicorn({print:function(){},printErr:function(){},instantiateWasm:function(imports,done){var mod=new WebAssembly.Module(__wbytes);var inst=new WebAssembly.Instance(mod,imports);globalThis.__ucMemory=Object.values(inst.exports).find(v=>v instanceof WebAssembly.Memory);done(inst,mod);return inst.exports;}}).then(x=>__uc=x).catch(e=>__loadError=String(e));')\n"
+        "  self.host.evaluate('var __uc=null;var __loadError=null;MUnicorn({print:function(){},printErr:function(){},instantiateWasm:function(imports,done){var mod=new WebAssembly.Module(__wbytes);var inst=new WebAssembly.Instance(mod,imports);globalThis.__ucExports=inst.exports;globalThis.__ucMemory=Object.values(inst.exports).find(v=>v instanceof WebAssembly.Memory);done(inst,mod);return inst.exports;}}).then(x=>__uc=x).catch(e=>__loadError=String(e));')\n"
         '  deadline=time.monotonic()+20\n'
         '  while time.monotonic()<deadline:\n'
         "   state=json.loads(self.host.evaluate('JSON.stringify({ready:!!__uc,error:__loadError})'))\n"
@@ -937,8 +1004,8 @@ PYTHON_SOURCES = {
         '  return self.host.read_media_parts(sizes)\n'
         " def reset(self,channel):self.host.evaluate('__vm.reset('+json.dumps(channel)+')')\n"
         ' def features(self):\n'
-        "  return json.loads(self.host.evaluate('JSON.stringify({bulk_memory:!!__vm.bulk,register_batch:!!__vm.readNativeArguments,register_scalar:!!(__vm.bulk&&__vm.bulk.scalarRegisters)})'))\n"
-        " def counts(self):return json.loads(self.host.evaluate('JSON.stringify(__vm.counts)'))\n"
+        "  return json.loads(self.host.evaluate('JSON.stringify({bulk_memory:!!__vm.bulk,wasm_memory_ops:!!(__vm.bulk&&__vm.bulk.wasmMemoryOps),wasm_memory_hooks:!!(__vm.bulk&&__vm.bulk.wasmMemoryHooks),direct_wasm_imports:!!(__vm.bulk&&__vm.bulk.directWasmImports),register_batch:!!__vm.readNativeArguments,register_scalar:!!(__vm.bulk&&__vm.bulk.scalarRegisters)})'))\n"
+        " def counts(self):return json.loads(self.host.evaluate('JSON.stringify(Object.assign({},__vm.counts,__vm.fastMemoryHooks?{wasm_memory_copies:__vm.memoryBackend.copies(),wasm_memory_fills:__vm.memoryBackend.fills()}:{}))'))\n"
         ' def close(self):\n'
         '  self.transport.close()\n'
         '  try:self.host.evaluate(\'if(typeof __vm!=="undefined")__vm.close()\')\n'
@@ -2068,7 +2135,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.3.5'\n"
+        "VERSION = '0.3.6'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'from route_catalog import CHANNEL_ROUTES,PROVIDER_LABELS,VERIFIED_AT_UTC\n'
         'from epg_store import EpgStore\n'
@@ -2385,11 +2452,16 @@ PYTHON_SOURCES = {
         '\n'
         '\n'
         'class LiveService:\n'
-        '    def __init__(self,prepared,channels,max_bitrate=2500000):\n'
+        '    def __init__(self,prepared,channels,max_bitrate=2500000,*,cache_mib=32,inactive_cache_seconds=20,inactive_cache_segments=2,zap_debounce_ms=0,download_workers=4,refresh_workers=4):\n'
+        "        if not (32<=cache_mib<=200 and 0<=inactive_cache_seconds<=180 and 1<=inactive_cache_segments<=15 and 0<=zap_debounce_ms<=10000 and 2<=download_workers<=8 and 1<=refresh_workers<=4):raise ValueError('Invalid resource policy')\n"
+        '        self.cache_budget=cache_mib*1024*1024;self.inactive_cache_seconds=inactive_cache_seconds\n'
+        '        self.inactive_cache_segments=inactive_cache_segments;self.zap_debounce=zap_debounce_ms/1000\n'
+        '        self.download_workers=download_workers;self.refresh_workers=min(refresh_workers,len(channels))\n'
+        '        self.selection_changed=0;self.debounce_skips=0\n'
         "        self.epg=EpgStore(CHANNEL_ROUTES,prepared.get('cache_dir'))\n"
         '        self.sdk=MediaSDK(prepared);self.channels=channels;self.max_bitrate=max_bitrate\n'
-        "        self.pool=ThreadPoolExecutor(max_workers=4,thread_name_prefix='upstream')\n"
-        "        self.refresh_pool=ThreadPoolExecutor(max_workers=min(4,len(channels)),thread_name_prefix='refresh')\n"
+        "        self.pool=ThreadPoolExecutor(max_workers=self.download_workers,thread_name_prefix='upstream')\n"
+        "        self.refresh_pool=ThreadPoolExecutor(max_workers=self.refresh_workers,thread_name_prefix='refresh')\n"
         '        self.auto_states={};self.auto_lock=threading.RLock()\n'
         '        self.refresh_jobs={};self.jobs_lock=threading.Lock();self.active_channel=None\n'
         '        self.refresh_cancelled=0;self.refresh_cooldown_skips=0;self.http_resources=None\n'
@@ -2508,16 +2580,22 @@ PYTHON_SOURCES = {
         '        keep={self.token(ch,e) for e in media.entries}\n'
         '        with ch.cache_lock:\n'
         '            grace=[key for key in ch.cache if key not in keep]\n'
-        '            while grace and (len(grace)>2 or sum(map(len,ch.cache.values()))>32*1024*1024):\n'
+        '            while grace and (len(grace)>max(2,self.inactive_cache_segments) or sum(map(len,ch.cache.values()))>self.cache_budget):\n'
         '                ch.cache.pop(grace.pop(0),None)\n'
         '        while len(ch.raw)>2:ch.raw.popitem(last=False)\n'
-        '        while len(ch.history)>8:ch.history.popitem(last=False)\n'
+        '        while len(ch.history)>max(8,self.inactive_cache_segments):ch.history.popitem(last=False)\n'
         "        ch.playlist=media;ch.updated=time.monotonic();ch.error='';ch.retry_at=0;ch.failures=0\n"
         '        ch.ready.set()\n'
         '        self._trim_memory(keep=ch.ident)\n'
+        '    def _select_channel(self,ch):\n'
+        '        with self.jobs_lock:\n'
+        '            old=self.channels.get(self.active_channel)\n'
+        '            if old is None or (old.logical_id or old.ident)!=(ch.logical_id or ch.ident):\n'
+        '                self.selection_changed=time.monotonic()\n'
+        '            self.active_channel=ch.ident\n'
         '    def playlist_bytes(self,ch):\n'
         '        ch.last_active=time.monotonic()\n'
-        '        with self.jobs_lock:self.active_channel=ch.ident\n'
+        '        self._select_channel(ch)\n'
         '        p=ch.playlist\n'
         '        if p is not None and time.monotonic()-ch.updated>max(8,p.target*2):\n'
         '            with ch.cache_lock:\n'
@@ -2551,14 +2629,14 @@ PYTHON_SOURCES = {
         '                self.playlist_bytes(ch)\n'
         '            except LiveError:\n'
         '                # A common SDK/license failure is not repaired by changing CDN.\n'
-        "                if self.sdk.phase!='ready':raise\n"
+        "                if self.sdk.phase!='ready' or not (ch.error or ch.failures):raise\n"
         "                now=time.monotonic();state['cooldown'][ch.ident]=now+30\n"
         '                candidates=[c for c in routes if c.ident!=ch.ident and\n'
         "                    state['cooldown'].get(c.ident,0)<=now and c.retry_at<=now]\n"
         '                if not candidates:raise\n'
         '                chosen=min(candidates,key=lambda c:(bool(c.error),c.failures,routes.index(c)))\n'
         "                state['route']=chosen.ident;state['switches']+=1\n"
-        '                with self.jobs_lock:self.active_channel=chosen.ident\n'
+        '                self._select_channel(chosen)\n'
         '                self._schedule(chosen)\n'
         "                LOG.warning('%s 自动换线：%s → %s；独立分片状态，等待备用就绪',logical,ch.ident,chosen.ident)\n"
         "                raise LiveError('备用线路准备中，请重试；详情 /status') from None\n"
@@ -2596,6 +2674,8 @@ PYTHON_SOURCES = {
         '            if self.stopping.is_set() or (self.active_channel and ch.ident!=self.active_channel):return\n'
         '            if time.monotonic()<ch.retry_at:\n'
         '                self.refresh_cooldown_skips+=1;return\n'
+        '            if ch.playlist is None and time.monotonic()<self.selection_changed+self.zap_debounce:\n'
+        '                self.debounce_skips+=1;return\n'
         '            job=self.refresh_jobs.get(ch.ident)\n'
         '            if job is None:self.refresh_jobs[ch.ident]=self.refresh_pool.submit(refresh)\n'
         '    def _trim_memory(self,keep=None):\n'
@@ -2608,13 +2688,13 @@ PYTHON_SOURCES = {
         '            try:\n'
         '                channel.raw.clear()\n'
         '                with channel.cache_lock:\n'
-        '                    if now-channel.last_active>20:\n'
+        '                    if now-channel.last_active>self.inactive_cache_seconds:\n'
         '                        channel.cache.clear();channel.history.clear();channel.playlist=None;channel.ready.clear()\n'
         '                    else:\n'
-        '                        while len(channel.cache)>2:channel.cache.popitem(last=False)\n'
+        '                        while len(channel.cache)>self.inactive_cache_segments:channel.cache.popitem(last=False)\n'
         '                        valid=[item for item in channel.history.values() if self.token(channel,item[0]) in channel.cache]\n'
         '                        if valid:\n'
-        '                            valid=sorted(valid,key=lambda x:x[0].seq)[-2:]\n'
+        '                            valid=sorted(valid,key=lambda x:x[0].seq)[-self.inactive_cache_segments:]\n'
         '                            channel.playlist=Playlist(tuple(x[0] for x in valid),channel.playlist.target if channel.playlist else 4,valid[0][1],False)\n'
         '                        else:channel.playlist=None;channel.ready.clear()\n'
         '            finally:channel.lock.release()\n'
@@ -2624,7 +2704,7 @@ PYTHON_SOURCES = {
         '        for candidate in self.channels.values():\n'
         '            with candidate.cache_lock:total+=sum(map(len,candidate.cache.values()))\n'
         '        for channel in ordered:\n'
-        '            if total<=32*1024*1024:break\n'
+        '            if total<=self.cache_budget:break\n'
         '            if channel.ident in (self.active_channel,keep) or not channel.lock.acquire(blocking=False):continue\n'
         '            try:\n'
         '                with channel.cache_lock:\n'
@@ -2651,7 +2731,7 @@ PYTHON_SOURCES = {
         '                try:raw+=sum(map(len,channel.raw.values()))\n'
         '                finally:channel.lock.release()\n'
         "        return {'processed_bytes':processed,'raw_bytes_observed_idle':raw,'raw_observation_skips_busy_channels':True,\n"
-        "            'processed_budget_bytes':32*1024*1024,'active_window_budget_bytes':24*1024*1024,\n"
+        "            'processed_budget_bytes':self.cache_budget,'active_window_budget_bytes':24*1024*1024,\n"
         "            'note':'Cache bytes only; excludes in-flight downloads, Python, JavaScriptCore and WASM memory'}\n"
         '    def status(self):\n'
         "        return {'version':VERSION,'uptime_seconds':round(time.monotonic()-self.started),\n"
@@ -2659,7 +2739,8 @@ PYTHON_SOURCES = {
         "            'preparation_progress':self.sdk.progress,'preparation_error':self.sdk.error,\n"
         "            'runtime_features':dict(getattr(self.sdk.client,'runtime_features',{})),\n"
         "            'memory_cache':self._cache_stats(),'epg':self.epg.status(),\n"
-        "            'scheduling':{'obsolete_queued_cancelled':self.refresh_cancelled,'cooldown_submissions_skipped':self.refresh_cooldown_skips},\n"
+        "            'scheduling':{'obsolete_queued_cancelled':self.refresh_cancelled,'cooldown_submissions_skipped':self.refresh_cooldown_skips,'debounce_submissions_skipped':self.debounce_skips},\n"
+        "            'resource_policy':{'cache_mib':self.cache_budget//(1024*1024),'inactive_cache_seconds':self.inactive_cache_seconds,'inactive_cache_segments':self.inactive_cache_segments,'zap_debounce_ms':round(self.zap_debounce*1000),'download_workers':self.download_workers,'refresh_workers':self.refresh_workers},\n"
         "            'http_resources':self.http_resources() if self.http_resources else None,\n"
         "            'auto_routes':{k:{'route':v['route'],'switches':v['switches']} for k,v in list(self.auto_states.items())},\n"
         "            'media_timings':dict(self.sdk.timings),'max_bitrate':self.max_bitrate,\n"
@@ -2774,12 +2855,20 @@ PYTHON_SOURCES = {
         "    parser.add_argument('--setup-only',action='store_true')\n"
         "    parser.add_argument('--doctor',action='store_true',help='只检查本机JavaScriptCore能力，不访问节目源')\n"
         "    parser.add_argument('--warmup',action=argparse.BooleanOptionalAction,default=True)\n"
+        "    parser.add_argument('--wasm-memory-ops',action=argparse.BooleanOptionalAction,default=True)\n"
         "    parser.add_argument('--max-bitrate',type=int,default=2500000)\n"
+        "    parser.add_argument('--cache-mib',type=int,default=32)\n"
+        "    parser.add_argument('--inactive-cache-seconds',type=int,default=20)\n"
+        "    parser.add_argument('--inactive-cache-segments',type=int,default=2)\n"
+        "    parser.add_argument('--zap-debounce-ms',type=int,default=0)\n"
+        "    parser.add_argument('--download-workers',type=int,default=4)\n"
+        "    parser.add_argument('--refresh-workers',type=int,default=4)\n"
         "    parser.add_argument('--source',action='append',default=[],metavar='ID=URL')\n"
         '    args=parser.parse_args(argv)\n'
         '    if args.port_override is not None:args.port=args.port_override\n'
         "    logging.basicConfig(level=logging.INFO,format='%(asctime)s [%(levelname)s] %(message)s')\n"
         "    if not 1<=args.port<=65535 or not 100000<=args.max_bitrate<=20000000:parser.error('端口或码率不合法')\n"
+        "    if not (32<=args.cache_mib<=200 and 0<=args.inactive_cache_seconds<=180 and 1<=args.inactive_cache_segments<=15 and 0<=args.zap_debounce_ms<=10000 and 2<=args.download_workers<=8 and 1<=args.refresh_workers<=4):parser.error('资源参数超出允许范围')\n"
         '    if args.doctor:\n'
         '        context=None\n'
         '        try:\n'
@@ -2789,7 +2878,7 @@ PYTHON_SOURCES = {
         '        finally:\n'
         '            if context:context.close()\n'
         '        return\n'
-        "    config={'vm_source':vm_source,'cache_dir':args.cache_dir,'jscore_library':args.jscore_library,'progress':LOG.info}\n"
+        "    config={'vm_source':vm_source,'cache_dir':args.cache_dir,'jscore_library':args.jscore_library,'progress':LOG.info,'wasm_memory_ops':args.wasm_memory_ops}\n"
         '    if args.setup_only:\n'
         '        try:prepare(**config)\n'
         "        except BootstrapError as error:parser.exit(1,str(error)+'\\n')\n"
@@ -2800,7 +2889,7 @@ PYTHON_SOURCES = {
         "        if not sep or not re.fullmatch(r'[a-z0-9_-]{1,48}',ident) or urlsplit(url).scheme not in ('http','https'):\n"
         "            parser.error('--source 必须是 ID=https://.../index.m3u8')\n"
         "        channels[ident]=Channel(ident,DEFAULTS.get(ident,(ident,''))[0],url)\n"
-        '    service=LiveService(config,channels,args.max_bitrate)\n'
+        '    service=LiveService(config,channels,args.max_bitrate,cache_mib=args.cache_mib,inactive_cache_seconds=args.inactive_cache_seconds,inactive_cache_segments=args.inactive_cache_segments,zap_debounce_ms=args.zap_debounce_ms,download_workers=args.download_workers,refresh_workers=args.refresh_workers)\n'
         '    server=ThreadingHTTPServer((args.host,args.port),make_handler(service));server.daemon_threads=True\n'
         "    service.http_resources=getattr(server,'resource_status',None)\n"
         '    def stop(signum,frame):\n'
@@ -2833,7 +2922,7 @@ def load_modules():
     return sys.modules["service"]
 
 def start(ctx=None):
-    load_modules().main(JS_SOURCES["koo_vm.js"], [])
+    load_modules().main(JS_SOURCES["koo_vm.js"], phone_arguments())
 
 if __name__ == "__main__":
-    load_modules().main(JS_SOURCES["koo_vm.js"])
+    load_modules().main(JS_SOURCES["koo_vm.js"], phone_arguments() + sys.argv[1:])

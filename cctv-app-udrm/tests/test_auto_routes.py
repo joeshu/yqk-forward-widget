@@ -30,6 +30,10 @@ class AutoRouteTests(unittest.TestCase):
    self.ready(self.a,1)
    result=self.live.auto_playlist_bytes('demo')
    self.assertIn(b'MEDIA-SEQUENCE:102',result);self.assertIn(b'DISCONTINUITY-SEQUENCE:12',result)
+ def test_initial_wait_without_route_error_does_not_rotate_cdns(self):
+  with patch.object(self.live,'playlist_bytes',side_effect=service.LiveError('首片或防抖准备中')),patch.object(self.live,'_schedule') as schedule:
+   with self.assertRaises(service.LiveError):self.live.auto_playlist_bytes('demo')
+   schedule.assert_not_called();self.assertEqual(self.live.auto_states['demo']['route'],'demo')
  def test_common_sdk_failure_does_not_rotate_cdns(self):
   self.live.sdk.phase='failed';self.a.error='license';self.a.failures=2
   with patch.object(self.live,'_schedule') as schedule:
