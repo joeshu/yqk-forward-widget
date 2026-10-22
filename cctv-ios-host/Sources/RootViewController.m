@@ -18,7 +18,7 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
 - (void)log:(NSString *)format, ...;
 - (void)setupSDK;
 - (id)callClass:(Class)cls selector:(SEL)sel args:(NSArray *)args;
-- (void)callInstance:(id)obj selector:(SEL)sel args:(NSArray *)args;
+- (id)callInstance:(id)obj selector:(SEL)sel args:(NSArray *)args;
 - (void)tapChannel:(UIButton *)sender;
 - (void)tapCicada:(UIButton *)sender;
 @end
@@ -126,6 +126,15 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
         [self log:@"defaultOptions = %@", opts];
         [CNPlayer startPlayerSDK_Options:opts];
         self.statusLabel.text = @"SDK 启动指令已发出，等待内部 auth/VDN";
+
+        id ver = [self callClass:CNPlayerCls selector:NSSelectorFromString(@"SDKVersion") args:@[]];
+        [self log:@"SDKVersion = %@", ver];
+        [self callClass:CNPlayerCls selector:NSSelectorFromString(@"authed") args:@[]];
+
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [weakSelf callClass:CNPlayerCls selector:NSSelectorFromString(@"authed") args:@[]];
+        });
     } @catch (NSException *e) {
         [self log:@"startPlayerSDK_Options 异常: %@", e];
     }
@@ -184,10 +193,10 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
     return nil;
 }
 
-- (void)callInstance:(id)obj selector:(SEL)sel args:(NSArray *)args {
+- (id)callInstance:(id)obj selector:(SEL)sel args:(NSArray *)args {
     if (![obj respondsToSelector:sel]) {
         [self log:@"跳过（实例方法不存在）: %@", NSStringFromSelector(sel)];
-        return;
+        return nil;
     }
     NSMethodSignature *sig = [obj methodSignatureForSelector:sel];
     NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
@@ -208,7 +217,20 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
             [inv setArgument:&a atIndex:i + 2];
         }
     }
-    @try { [inv invoke]; } @catch (NSException *e) { [self log:@"调用异常: %@", e]; }
+    @try { [inv invoke]; } @catch (NSException *e) { [self log:@"调用异常: %@", e]; return nil; }
+    const char *rt = sig.methodReturnType;
+    [self log:@"- [%@ %@] 返回类型 %s", [obj class], NSStringFromSelector(sel), rt];
+    if (rt[0] == '@') {
+        void *p = NULL;
+        [inv getReturnValue:&p];
+        return (__bridge id)p;
+    }
+    if (rt[0] == 'B' || rt[0] == 'c') {
+        char r = 0;
+        [inv getReturnValue:&r];
+        [self log:@"   返回 %d", r];
+    }
+    return nil;
 }
 
 #pragma mark - 播放
@@ -218,47 +240,39 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
     NSString *cid = channels[sender.tag];
     Class CNPlayerCls = NSClassFromString(@"CNPlayer");
     [self log:@"—— 起播 %@ ——", cid];
-    SEL playSel = NSSelectorFromString(@"playLIVEWithChannelID:delegate:configOptions:");
-    NSArray *playArgs = @[cid, NSNull.null, @{@"Title": cid}];
 
-    id player = [self callClass:CNPlayerCls selector:playSel args:playArgs];
-
-    // 兼容：若 playLIVE… 实为实例方法（返回值不是对象），退回 alloc+init 再调用
-    if (!player) {
-        [self log:@"类方法未返回 player，尝试实例方法路径"];
-        id inst = nil;
-        @try { inst = [[CNPlayerCls alloc] init]; } @catch (NSException *e) { [self log:@"init 异常: %@", e]; }
-        if (inst) {
-            SEL initLive = NSSelectorFromString(@"initWithLivePlayItem:delegate:configOptions:");
-            if ([inst respondsToSelector:initLive]) {
-                [self log:@"存在 initWithLivePlayItem:，需要 CNPlayerItem（本版未构造），跳过"];
-            } else if ([inst respondsToSelector:playSel]) {
-                [self callInstance:inst selector:playSel args:playArgs];
-                player = inst;
-            }
-        }
-    }
-    if (!player) {
-        [self log:@"未取得 player 实例：停止在日志判读（见 README 第五节）"];
+    id inst = nil;
+    @try { inst = [[CNPlayerCls alloc] init]; } @catch (NSException *e) { [self log:@"init 异常: %@", e]; }
+    if (!inst) {
+        [self log:@"CNPlayer 实例化失败"];
         return;
     }
-    self.currentPlayer = player;
+    [self log:@"CNPlayer 实例 = %@", inst];
+
+    SEL playSel = NSSelectorFromString(@"playLIVEWithChannelID:delegate:configOptions:");
+    if (![inst respondsToSelector:playSel]) {
+        [self log:@"实例也不响应 playLIVEWithChannelID:，SDK 版本可能不同"];
+        return;
+    }
+    [self callInstance:inst selector:playSel args:@[cid, NSNull.null, @{@"Title": cid}]];
+
+    self.currentPlayer = inst;
     id view = nil;
     @try {
-        if ([player respondsToSelector:NSSelectorFromString(@"view")]) {
-            view = [player valueForKey:@"view"];
+        if ([inst respondsToSelector:NSSelectorFromString(@"view")]) {
+            view = [inst valueForKey:@"view"];
         }
     } @catch (NSException *e) {
         [self log:@"取 view 异常: %@", e];
     }
-    [self log:@"player = %@, view = %@", player, view];
+    [self log:@"player.view = %@", view];
     if ([view isKindOfClass:UIView.class]) {
         UIView *v = view;
         v.frame = self.playerBox.bounds;
         v.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         [self.playerBox addSubview:v];
     }
-    [self callInstance:player selector:NSSelectorFromString(@"prepareToPlay") args:@[]];
+    [self callInstance:inst selector:NSSelectorFromString(@"prepareToPlay") args:@[]];
     self.statusLabel.text = [NSString stringWithFormat:@"请求起播 %@", cid];
 }
 
