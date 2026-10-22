@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.3.6: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.3.7: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -36,7 +36,10 @@ JS_SOURCES = {
         '  this.bulk=null;this.installBulkMemory(globalThis.__ucMemory);\n'
         '  for(const [address,size] of [[this.base,plan.length],[this.stub,0x20000],[this.heap,0x800000],[this.stack,0x200000],[this.stop,0x1000]])e.mem_map(address,size,uc.PROT_ALL);\n'
         '  for(const segment of plan.segments)e.mem_write(this.base+segment.address,this.unbase64(segment.data));\n'
-        '  this.importAddresses={};this.addressImports={};plan.imports.forEach((name,i)=>{this.importAddresses[name]=this.stub+i*8;this.addressImports[this.stub+i*8]=name;});\n'
+        '  // Keep fast import stubs adjacent: Unicorn scans code-hook ranges linearly.\n'
+        "  const fastNames=['memcpy','memmove','memset','memcmp','strlen'];\n"
+        '  const orderedImports=fastNames.filter(name=>plan.imports.includes(name)).concat(plan.imports.filter(name=>!fastNames.includes(name)));\n'
+        '  this.importAddresses={};this.addressImports={};orderedImports.forEach((name,i)=>{this.importAddresses[name]=this.stub+i*8;this.addressImports[this.stub+i*8]=name;});\n'
         '  for(const r of plan.relocations) {\n'
         '   let value;\n'
         '   if(r.type===1027)value=this.base+r.addend;\n'
@@ -46,9 +49,9 @@ JS_SOURCES = {
         '  }\n'
         '  const excluded=this.installMemoryHooks();\n'
         '  const stopHook=(_u,address)=>{this.trap=Number(address);e.emu_stop();};\n'
-        '  let begin=this.stub;\n'
-        '  for(const address of excluded){if(begin<address)e.hook_add(uc.HOOK_CODE,stopHook,null,begin,address-1);begin=address+8;}\n'
-        '  e.hook_add(uc.HOOK_CODE,stopHook,null,begin,this.stub+0x1ffff);\n'
+        '  let begin=this.stub;this.genericHookCount=0;\n'
+        '  for(const address of excluded){if(begin<address){e.hook_add(uc.HOOK_CODE,stopHook,null,begin,address-1);this.genericHookCount++;}begin=address+8;}\n'
+        '  e.hook_add(uc.HOOK_CODE,stopHook,null,begin,this.stub+0x1ffff);this.genericHookCount++;\n'
         '  this.jniTable=this.allocate(0x1000,true);this.env=this.allocate(8,true);this.write64(this.env,this.jniTable);\n'
         '  this.jvmTable=this.allocate(0x100,true);this.jvm=this.allocate(8,true);this.write64(this.jvm,this.jvmTable);\n'
         "  for(let i=0;i<240;i++){const address=this.stub+0x4000+i*8;this.write64(this.jniTable+i*8,address);this.addressImports[address]='jni:'+i;}\n"
@@ -61,7 +64,7 @@ JS_SOURCES = {
         ' installBulkMemory(memory){\n'
         '  const m=this.uc,e=this.e;\n'
         "  if(!(memory instanceof WebAssembly.Memory)||typeof m.ccall!=='function'||typeof m._malloc!=='function'||typeof m._free!=='function'||typeof m.getValue!=='function')return;\n"
-        "  const handle=m.getValue(e.handle_ptr,'*');this.bulk={pointer:0,capacity:0};\n"
+        "  const handle=m.getValue(e.handle_ptr,'*');this.bulk={pointer:0,capacity:0,rawMemoryApi:typeof m._uc_mem_read==='function'&&typeof m._uc_mem_write==='function'};\n"
         '  const scratch=size=>{\n'
         "   if(!Number.isSafeInteger(size)||size<0||size>16*1024*1024)throw Error('bulk memory size limit');\n"
         '   if(size>this.bulk.capacity){\n'
@@ -103,7 +106,7 @@ JS_SOURCES = {
         '  // Independent WASM adapter: memory bytes stay in the existing emulator memory.\n'
         "  if(globalThis.__useWasmMemoryOps!==false&&typeof m._uc_mem_read==='function'&&typeof m._uc_mem_write==='function'){\n"
         '   try{\n'
-        "    const bytes=Uint8Array.from(atob('AGFzbQEAAAABTwxgBH9+f34Bf2AEf39/fwF/YAN/f38Bf2ABfwF/YAF/AGAFf35+f38Bf2AFf35/f38Bf2AFf39/f38Bf2ACf38AYAR/fn9/AGAAAGAAAX8CbggDZW52Bm1lbW9yeQIAAANlbnYEcmVhZAAAA2VudgV3cml0ZQAAA2Vudg5yZWdfcmVhZF9iYXRjaAABA2VudglyZWdfd3JpdGUAAgNlbnYEc3RvcAADA2VudgZtYWxsb2MAAwNlbnYEZnJlZQAEAwsKBQYHCAkKCwsLCgYkB38BQQALfwFBAAt/AUEAC38BQQALfwFBAAt/AUEAC38BQQALB1EJBGNvcHkABwRmaWxsAAgEaW5pdAAJBGhvb2sACwtjbGVhcl9lcnJvcgAMCmxhc3RfZXJyb3IADQZjb3BpZXMADgVmaWxscwAPBWNsb3NlABAKugMKLQEBfyADRQRAQQAPCyAAIAIgBCADrRAAIQUgBQRAIAUPCyAAIAEgBCADrRABCx8AIANFBEBBAA8LIAQgAiAD/AsAIAAgASAEIAOtEAELXABBwAAQBSQAIwBFBEBBAQ8LIAQkAyMAIAA2AgAjACABNgIEIwAgAjYCCCMAIAM2AgwjACMAQSBqNgIQIwAjAEEoajYCFCMAIwBBMGo2AhgjACMAQThqNgIcQQALCwAgASQEIAAQBBoLyQEBA38gACMAIwBBEGpBBBACIQQgBARAIAAgBBAKDwsjACkDMEKAgIAIVgRAIABBfxAKDwsjACkDMKchBSAFIwJLBEAgBRAFIQYgBkUEQCAAQX4QCg8LIwEEQCMBEAYLIAYkASAFJAILIAMEQCMGQQFqJAYgACMAKQMgIwApAyinIAUjARAIIQQFIwVBAWokBSAAIwApAyAjACkDKCAFIwEQByEECyAEBEAgACAEEAoPCyAAIwMjAEE4ahADIQQgBARAIAAgBBAKCwsGAEEAJAQLBAAjBAsEACMFCwQAIwYLIAAjAQRAIwEQBgsjAARAIwAQBgtBACQBQQAkAEEAJAIL'),c=>c.charCodeAt(0));\n"
+        "    const bytes=Uint8Array.from(atob('AGFzbQEAAAABYg9gBH9+f34Bf2AEf39/fwF/YAN/f38Bf2ABfwF/YAF/AGAFf35+f38Bf2AFf35/f38Bf2ADf35/AX9gBX9/f39/AX9gAn9/AGAEf35/fwBgAn5/AX9gAn9/AX9gAABgAAF/Am4IA2VudgZtZW1vcnkCAAADZW52BHJlYWQAAANlbnYFd3JpdGUAAANlbnYOcmVnX3JlYWRfYmF0Y2gAAQNlbnYJcmVnX3dyaXRlAAIDZW52BHN0b3AAAwNlbnYGbWFsbG9jAAMDZW52BGZyZWUABAMSEQUGBQcICQoLDAoNDg4ODg4NBj0MfgFCAAt/AUEAC38BQQALfwFBAAt/AUEAC38BQQALfwFBAAt/AUEAC38BQQALfwFBAAt/AUEAC38BQQALB4wBDgRjb3B5AAcEZmlsbAAIBGluaXQACwRob29rAA0Jc2V0X2dyb3VwAA4Ic2V0X2tpbmQADwxob29rX2dyb3VwZWQAEAtjbGVhcl9lcnJvcgARCmxhc3RfZXJyb3IAEghjb21wYXJlcwATB2xlbmd0aHMAFAZjb3BpZXMAFQVmaWxscwAWBWNsb3NlABcKiggRLQEBfyADRQRAQQAPCyAAIAIgBCADrRAAIQUgBQRAIAUPCyAAIAEgBCADrRABCx8AIANFBEBBAA8LIAQgAiAD/AsAIAAgASAEIAOtEAELcwEDf0EAJAggA0UEQEEADwsgACABIAQgA60QACEFIAUEQCAFDwsgACACIAQgA2ogA60QACEFIAUEQCAFDwsDQCAEIAZqLQAAIAQgA2ogBmotAABrIQcgBwRAIAckCEEADwsgBkEBaiEGIAYgA0kNAAtBAAugAQIEfwF+IAFQBEBBfQ8LA0AgASADrXwhB0GAICAHp0H/H3FrIQQgBEGAAUsEQEGAASEECyAEQYCAwAAgA2tLBEBBgIDAACADayEECyAAIAcgAiAErRAAIQYgBgRAIAYPC0EAIQUDQCACIAVqLQAARQRAIAMgBWokCEEADwsgBUEBaiEFIAUgBEkNAAsgAyAEaiEDIANBgIDAAEkNAAtBfAtcAEHgABAFJAIjAkUEQEEBDwsgBCQFIwIgADYCACMCIAE2AgQjAiACNgIIIwIgAzYCDCMCIwJBIGo2AhAjAiMCQShqNgIUIwIjAkEwajYCGCMCIwJBOGo2AhxBAAsLACABJAYgABAEGgvjAgEDfyAAIwIjAkEQakEEEAIhBCAEBEAgACAEEAwPCyADQQNGBEBBgAEhBQUjAikDMEKAgIAIVgRAIABBfxAMDwsjAikDMKchBQsgBSEGIANBAkYEQCAFQQJsIQYLIAYjBEsEQCAGJAQgBhAFIQYgBkUEQEEAJAQgAEF+EAwPCyMDBEAjAxAGCyAGJAMLIANBAEYEQCMHQQFqJAcgACMCKQMgIwIpAyggBSMDEAchBAsgA0EBRgRAIwtBAWokCyAAIwIpAyAjAikDKKcgBSMDEAghBAsgA0ECRgRAIwlBAWokCSAAIwIpAyAjAikDKCAFIwMQCSEECyADQQNGBEAjCkEBaiQKIAAjAikDICMDEAohBAsgBARAIAAgBBAMDwsgA0ECTwRAIwIjCKw3AyAgACMCKAIAIwJBIGoQAyEEIAQEQCAAIAQQDA8LCyAAIwUjAkE4ahADIQQgBARAIAAgBBAMCwsXACABQQVLBEBBAQ8LIAAkACABJAFBAAsrACAAIwFPBEBBAQ8LIAFBA0sEQEEBDwsjAkHAACAAQQRsamogATYCAEEAC1ECAX4BfyABIwB9IQQgBCMBQQhsrVoEQCAAQXsQDA8LIARCB4NCAFIEQCAAQXsQDA8LIARCA4inIQUgACABIAIjAkHAACAFQQRsamooAgAQDQsGAEEAJAYLBAAjBgsEACMJCwQAIwoLBAAjBwsEACMLCyAAIwMEQCMDEAYLIwIEQCMCEAYLQQAkA0EAJAJBACQECw=='),c=>c.charCodeAt(0));\n"
         '    const backend=new WebAssembly.Instance(new WebAssembly.Module(bytes),{env:{memory,read:m._uc_mem_read,write:m._uc_mem_write,reg_read_batch:m._uc_reg_read_batch,reg_write:m._uc_reg_write,stop:m._uc_emu_stop,malloc:m._malloc,free:m._free}}).exports;\n'
         '    const perform=(kind,dst,src,size)=>{\n'
         "     check(dst);if(kind==='copy')check(src);\n"
@@ -119,7 +122,7 @@ JS_SOURCES = {
         '  }\n'
         '  e.mem_read=(address,size)=>{\n'
         '   check(address);const pointer=scratch(size);if(!size)return new Uint8Array(0);\n'
-        "   const code=m.ccall('uc_mem_read','number',['pointer','number','pointer','number'],[handle,BigInt(address),pointer,BigInt(size)]);\n"
+        "   const code=this.bulk.rawMemoryApi?m._uc_mem_read(handle,BigInt(address),pointer,BigInt(size)):m.ccall('uc_mem_read','number',['pointer','number','pointer','number'],[handle,BigInt(address),pointer,BigInt(size)]);\n"
         "   if(code!==m.ERR_OK)throw Error('bulk uc_mem_read failed '+code);\n"
         '   return new Uint8Array(memory.buffer,pointer,size).slice();\n'
         '  };\n'
@@ -128,30 +131,41 @@ JS_SOURCES = {
         '   const pointer=scratch(bytes.length);if(!bytes.length)return;\n'
         '   // Always reacquire the view after malloc: WebAssembly memory may grow.\n'
         '   new Uint8Array(memory.buffer,pointer,bytes.length).set(bytes);\n'
-        "   const code=m.ccall('uc_mem_write','number',['pointer','number','pointer','number'],[handle,BigInt(address),pointer,BigInt(bytes.length)]);\n"
+        "   const code=this.bulk.rawMemoryApi?m._uc_mem_write(handle,BigInt(address),pointer,BigInt(bytes.length)):m.ccall('uc_mem_write','number',['pointer','number','pointer','number'],[handle,BigInt(address),pointer,BigInt(bytes.length)]);\n"
         "   if(code!==m.ERR_OK)throw Error('bulk uc_mem_write failed '+code);\n"
         '  };\n'
         ' }\n'
         ' installMemoryHooks(){\n'
-        "  const m=this.uc,b=this.memoryBackend,handle=m.getValue(this.e.handle_ptr,'*'),installed=[];\n"
-        "  if(!b||!this.bulk.directWasmImports||typeof m.addFunction!=='function')return [];\n"
+        '  const m=this.uc,b=this.memoryBackend,installed=[];\n'
+        "  if(!m||!b||!this.bulk||!this.bulk.directWasmImports||typeof m.getValue!=='function'||typeof m.addFunction!=='function'||typeof m.removeFunction!=='function'||typeof m._uc_hook_add!=='function'||typeof m._uc_hook_del!=='function')return [];\n"
+        "  const handle=m.getValue(this.e.handle_ptr,'*');\n"
         '  let callback=0;\n'
         '  try{\n'
         "   if(b.init(m.ARM64_REG_X0,m.ARM64_REG_X1,m.ARM64_REG_X2,m.ARM64_REG_LR,m.ARM64_REG_PC)!==0)throw Error('WASM hook init');\n"
-        "   callback=m.addFunction(b.hook,'vijii');\n"
-        "   for(const name of ['memcpy','memmove','memset']){\n"
-        '    const address=this.importAddresses[name];if(address===undefined)continue;\n'
+        '   const kinds={memcpy:0,memmove:0,memset:1,memcmp:2,strlen:3};\n'
+        '   const entries=Object.keys(kinds).filter(name=>this.importAddresses[name]!==undefined).map(name=>({name,address:this.importAddresses[name]})).sort((a,b)=>a.address-b.address);\n'
+        '   if(!entries.length){b.close();this.bulk.wasmMemoryHooks=false;return [];}\n'
+        "   const grouped=entries.length>0&&entries.every((x,i)=>x.address===entries[0].address+i*8)&&typeof b.hook_grouped==='function';\n"
+        '   if(grouped){\n'
+        "    if(b.set_group(BigInt(entries[0].address),entries.length)!==0)throw Error('WASM group setup');\n"
+        "    for(let i=0;i<entries.length;i++)if(b.set_kind(i,kinds[entries[i].name])!==0)throw Error('WASM group operation');\n"
+        '   }\n'
+        "   callback=m.addFunction(grouped?b.hook_grouped:b.hook,'vijii');\n"
+        "   const ranges=grouped?[{name:'fast_group',address:entries[0].address,end:entries[entries.length-1].address+7}]:entries;\n"
+        '   for(const entry of ranges){\n'
+        '    const {name,address}=entry;\n'
         "    const pointer=m._malloc(16);if(!pointer)throw Error('WASM hook storage');\n"
         '    try{\n'
-        "     const code=m._uc_hook_add(handle,pointer,m.HOOK_CODE,callback,name==='memset'?1:0,BigInt(address),BigInt(address),pointer+8);\n"
+        '     const code=m._uc_hook_add(handle,pointer,m.HOOK_CODE,callback,grouped?0:kinds[name],BigInt(address),BigInt(entry.end===undefined?address:entry.end),pointer+8);\n'
         "     if(code!==m.ERR_OK)throw Error('WASM hook installation '+code);\n"
-        "     installed.push({address,hook:m.getValue(pointer,'*')});\n"
+        "     installed.push({name,address,hook:m.getValue(pointer,'*')});\n"
         '    }finally{m._free(pointer);}\n'
         '   }\n'
-        '   this.fastMemoryHooks={installed,callback};this.bulk.wasmMemoryHooks=true;\n'
-        '   return installed.map(x=>x.address).sort((a,b)=>a-b);\n'
+        '   this.fastMemoryHooks={installed,callback,grouped};this.bulk.wasmMemoryHooks=true;\n'
+        "   this.bulk.wasmCompareHooks=entries.some(x=>x.name==='memcmp');this.bulk.wasmStrlenHooks=entries.some(x=>x.name==='strlen');this.bulk.groupedMemoryHooks=grouped;\n"
+        '   return entries.map(x=>x.address);\n'
         '  }catch(error){\n'
-        '   for(const item of installed)m._uc_hook_del(handle,item.hook);\n'
+        "   for(const item of installed){const code=m._uc_hook_del(handle,item.hook);if(code!==m.ERR_OK)throw Error('WASM hook rollback failed '+code);}\n"
         '   if(callback)m.removeFunction(callback);\n'
         '   b.close();this.bulk.wasmMemoryHooks=false;return [];\n'
         '  }\n'
@@ -386,7 +400,7 @@ JS_SOURCES = {
         '  globalThis.__mediaOutput=output;return {code:0};\n'
         ' }\n'
         ' reset(channel){const old=this.states.get(channel);if(old){this.free(old);this.states.delete(channel);}}\n'
-        " close(){if(this.fastMemoryHooks){const m=this.uc,h=m.getValue(this.e.handle_ptr,'*');for(const item of this.fastMemoryHooks.installed)m._uc_hook_del(h,item.hook);m.removeFunction(this.fastMemoryHooks.callback);this.fastMemoryHooks=null;}if(this.memoryBackend)this.memoryBackend.close();if(this.bulk&&this.bulk.registerPointer){this.uc._free(this.bulk.registerPointer);this.bulk.registerPointer=0;}if(this.bulk&&this.bulk.pointer){this.uc._free(this.bulk.pointer);this.bulk.pointer=0;}this.e.close();}\n"
+        " close(){if(this.fastMemoryHooks){const m=this.uc,h=m.getValue(this.e.handle_ptr,'*');for(const item of this.fastMemoryHooks.installed){const code=m._uc_hook_del(h,item.hook);if(code!==m.ERR_OK)throw Error('WASM hook removal failed '+code);}m.removeFunction(this.fastMemoryHooks.callback);this.fastMemoryHooks=null;}if(this.memoryBackend)this.memoryBackend.close();if(this.bulk&&this.bulk.registerPointer){this.uc._free(this.bulk.registerPointer);this.bulk.registerPointer=0;}if(this.bulk&&this.bulk.pointer){this.uc._free(this.bulk.pointer);this.bulk.pointer=0;}this.e.close();}\n"
         '}\n'
         'globalThis.KooVM=KooVM;\n'
     )
@@ -1004,8 +1018,8 @@ PYTHON_SOURCES = {
         '  return self.host.read_media_parts(sizes)\n'
         " def reset(self,channel):self.host.evaluate('__vm.reset('+json.dumps(channel)+')')\n"
         ' def features(self):\n'
-        "  return json.loads(self.host.evaluate('JSON.stringify({bulk_memory:!!__vm.bulk,wasm_memory_ops:!!(__vm.bulk&&__vm.bulk.wasmMemoryOps),wasm_memory_hooks:!!(__vm.bulk&&__vm.bulk.wasmMemoryHooks),direct_wasm_imports:!!(__vm.bulk&&__vm.bulk.directWasmImports),register_batch:!!__vm.readNativeArguments,register_scalar:!!(__vm.bulk&&__vm.bulk.scalarRegisters)})'))\n"
-        " def counts(self):return json.loads(self.host.evaluate('JSON.stringify(Object.assign({},__vm.counts,__vm.fastMemoryHooks?{wasm_memory_copies:__vm.memoryBackend.copies(),wasm_memory_fills:__vm.memoryBackend.fills()}:{}))'))\n"
+        '  return json.loads(self.host.evaluate(\'JSON.stringify({bulk_memory:!!__vm.bulk,code_hook_count:typeof __vm.genericHookCount==="number"?__vm.genericHookCount+(__vm.fastMemoryHooks?__vm.fastMemoryHooks.installed.length:0):null,grouped_memory_hooks:!!(__vm.bulk&&__vm.bulk.groupedMemoryHooks),raw_memory_api:!!(__vm.bulk&&__vm.bulk.rawMemoryApi),wasm_compare_hooks:!!(__vm.bulk&&__vm.bulk.wasmCompareHooks),wasm_strlen_hooks:!!(__vm.bulk&&__vm.bulk.wasmStrlenHooks),wasm_memory_ops:!!(__vm.bulk&&__vm.bulk.wasmMemoryOps),wasm_memory_hooks:!!(__vm.bulk&&__vm.bulk.wasmMemoryHooks),direct_wasm_imports:!!(__vm.bulk&&__vm.bulk.directWasmImports),register_batch:!!__vm.readNativeArguments,register_scalar:!!(__vm.bulk&&__vm.bulk.scalarRegisters)})\'))\n'
+        " def counts(self):return json.loads(self.host.evaluate('JSON.stringify(Object.assign({},__vm.counts,__vm.fastMemoryHooks?{wasm_memory_copies:__vm.memoryBackend.copies(),wasm_memory_fills:__vm.memoryBackend.fills(),wasm_memory_compares:__vm.memoryBackend.compares?__vm.memoryBackend.compares():0,wasm_string_lengths:__vm.memoryBackend.lengths?__vm.memoryBackend.lengths():0}:{}))'))\n"
         ' def close(self):\n'
         '  self.transport.close()\n'
         '  try:self.host.evaluate(\'if(typeof __vm!=="undefined")__vm.close()\')\n'
@@ -2135,7 +2149,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.3.6'\n"
+        "VERSION = '0.3.7'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'from route_catalog import CHANNEL_ROUTES,PROVIDER_LABELS,VERIFIED_AT_UTC\n'
         'from epg_store import EpgStore\n'

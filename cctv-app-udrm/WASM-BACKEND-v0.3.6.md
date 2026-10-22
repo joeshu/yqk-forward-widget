@@ -1,6 +1,6 @@
 # WASM内存后端与导入分派优化
 
-本轮已实现一个独立编译的780字节WASM适配后端，嵌入单文件；源码见 [memory_ops.wat](wasm-backend/memory_ops.wat)。它复用原模拟器的WebAssembly.Memory，直接导入原始WASM的公开C接口，不修改官方SDK、Unicorn原二进制、许可处理或高清设置。
+本轮已实现一个独立编译的780字节WASM适配后端，嵌入单文件；源码见 [memory_ops.wat](wasm-backend/memory_ops-v0.3.6.wat)。它复用原模拟器的WebAssembly.Memory，直接导入原始WASM的公开C接口，不修改官方SDK、Unicorn原二进制、许可处理或高清设置。
 
 ## 执行方式
 
@@ -8,7 +8,7 @@
 
 copy先完整读入可复用缓冲再写入，保持原适配的快照/重叠复制语义。零长度不访问源和目标；操作上限16MiB；API错误或越界停止模拟并向上抛错，不返回未经处理的媒体。回调和缓冲在关闭时删除和释放。
 
-后端不要求手机安装编译器、Node或JDK。开发使用WABT1.0.42的wat2wasm编译；`python wasm-backend/check_build.py --wat2wasm /path/to/wat2wasm` 验证WAT与嵌入二进制逐字节一致。此构建检查仅在开发机运行。
+后端不要求手机安装编译器、Node或JDK。开发使用WABT1.0.42的wat2wasm编译；`python wasm-backend/check_build.py --entry cctv-app-udrm-v0.3.6.py --source wasm-backend/memory_ops-v0.3.6.wat --wat2wasm /path/to/wat2wasm` 验证WAT与嵌入二进制逐字节一致。此构建检查仅在开发机运行。
 
 ## 正确性与故障回退
 

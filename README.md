@@ -1,6 +1,6 @@
 # joeshu 影视组件合集
 
-2026-10-22：[央视影音 App UDRM 单文件服务](./cctv-app-udrm/README.md)更新至 **v0.3.6 无JDK版**，实现WASM内存导入回调优化，新增可调缓存、防抖和后台工作池；保留高清、CDN自切及自动关联的XMLTV节目单、后台更新和失败缓存保留；53台、94条线路共用节目ID，官方数据本轮覆盖52台。APTV订阅 `http://127.0.0.1:8769/all.m3u`，节目单 `/epg.xml.gz`；保留高清与原61台目录，手机节目表界面待验收。
+2026-10-22：[央视影音 App UDRM 单文件服务](./cctv-app-udrm/README.md)更新至 **v0.3.7 无JDK版**，合并WASM内存/比较/字符串快路径，减少钩子检查及参数封装；保留高清、缓存防抖配置、CDN自切及自动关联的XMLTV节目单、后台更新和失败缓存保留；53台、94条线路共用节目ID，官方数据本轮覆盖52台。APTV订阅 `http://127.0.0.1:8769/all.m3u`，节目单 `/epg.xml.gz`；保留高清与原61台目录，手机节目表界面待验收。
 
 
 新增 [APTV 手机单文件实验版 cctv-aptv-v0.1.0.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-native/cctv-aptv-v0.1.0.py)：使用 iOS 系统 JavaScriptCore，无 Node、npm、浏览器、FFmpeg 或子进程。APTV 加载并启动后订阅 `http://127.0.0.1:18768/all.m3u`，刷新订阅现可获得 14 个官网频道；逐台真实分片严格解码通过，仍为指定央视网页来源。用户已确认 CCTV-2 在关闭 MitM 后可于 iPhone 播放，多频道换台待手机验收，详见 [APTV 使用与验证](./cctv-native/README.md)。

@@ -33,3 +33,21 @@ JSON.stringify({equal,originalUnchanged,rejected,bounded,grown:memory.buffer.byt
    for flag in ['equal','originalUnchanged','rejected','bounded','grown']:self.assertTrue(result[flag],flag)
    self.assertGreaterEqual(result['frees'],1)
   finally:host.close()
+
+ def test_raw_exports_are_used_without_ccall_when_available(self):
+  library=os.environ.get('CCTV_JSC_LIBRARY',APPLE)
+  if not Path(library).exists():self.skipTest('JavaScriptCore unavailable')
+  host=JSCHost(library)
+  try:
+   host.evaluate(entry.JS_SOURCES['koo_vm.js'])
+   row=json.loads(host.evaluate('''(()=>{
+    const memory=new WebAssembly.Memory({initial:2}),guest=new Uint8Array(1024);let next=32,calls=0;
+    const vm=Object.create(KooVM.prototype);vm.e={handle_ptr:8};vm.uc={ERR_OK:0,getValue:()=>123,_malloc:n=>{const p=next;next+=n;return p;},_free:()=>{},ccall:()=>{throw Error('unexpected marshalling');},
+     _uc_mem_read:(h,a,p,n)=>{calls++;a=Number(a);n=Number(n);if(a+n>guest.length)return 6;new Uint8Array(memory.buffer,p,n).set(guest.subarray(a,a+n));return 0;},
+     _uc_mem_write:(h,a,p,n)=>{calls++;a=Number(a);n=Number(n);if(a+n>guest.length)return 7;guest.set(new Uint8Array(memory.buffer,p,n),a);return 0;}};
+    vm.installBulkMemory(memory);vm.e.mem_write(0,new Uint8Array([0,255,13]));const bytes=Array.from(vm.e.mem_read(0,3));let failed=false;
+    try{vm.e.mem_read(1023,2);}catch(e){failed=true;}
+    return JSON.stringify({raw:vm.bulk.rawMemoryApi,bytes,calls,failed});
+   })()'''))
+   self.assertTrue(row['raw']);self.assertTrue(row['failed']);self.assertEqual(row['bytes'],[0,255,13]);self.assertEqual(row['calls'],3)
+  finally:host.close()
