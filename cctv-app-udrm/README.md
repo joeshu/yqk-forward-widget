@@ -2,7 +2,7 @@
 
 v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + WebAssembly 解释器**。运行只使用 Python 标准库和系统 JavaScriptCore，不再启动 Java、Node、编译器、FFmpeg 或外部 OpenSSL 命令。许可和视频处理继续由原样官方 SDK 完成。
 
-开发环境已通过真实官方许可、原错误样本和实时HLS解码测试。用户已在 APTV TestFlight 的 iPhone 12 实机运行 v0.3.7；**实测仍有播放卡顿**，每段约4秒视频的 SDK 处理耗时约4–10.5秒。当前版证明可运行，尚未达到持续实时处理；Linux JavaScriptCoreGTK 测速不能代替手机性能。
+开发环境已通过真实官方许可、原错误样本和实时HLS解码测试。用户已在 APTV TestFlight 9.9.9（548）的 iPhone 12 实机运行 v0.3.7；**实测仍有播放卡顿**，每段约4秒视频的 SDK 处理耗时约4–10.5秒。当前版证明可运行，尚未达到持续实时处理；Linux JavaScriptCoreGTK 测速不能代替手机性能。
 
 ## APTV 添加与订阅
 
