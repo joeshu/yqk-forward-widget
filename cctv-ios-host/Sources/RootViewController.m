@@ -16,6 +16,10 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) id currentPlayer;
 @property (nonatomic, strong) CicadaPlayer *cicadaPlayer;
+@property (nonatomic, copy) NSString *currentChannel;
+@property (nonatomic, strong) NSTimer *watchdog;
+@property (nonatomic, assign) NSInteger watchdogTicks;
+@property (nonatomic, assign) BOOL sawFirstRender;
 
 - (void)log:(NSString *)format, ...;
 - (void)setupSDK;
@@ -26,6 +30,63 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
 @end
 
 @implementation RootViewController
+
+#pragma mark - 视图尺寸与渲染监视
+
+- (void)layoutPlayerView {
+    id player = self.currentPlayer;
+    if (!player) return;
+    id view = nil;
+    @try { view = [player valueForKey:@"view"]; } @catch (NSException *e) { return; }
+    if (![view isKindOfClass:UIView.class]) return;
+    UIView *v = view;
+    if (v.superview != self.playerBox) [self.playerBox addSubview:v];
+    v.translatesAutoresizingMaskIntoConstraints = YES;
+    CGRect box = self.playerBox.bounds;
+    if (!CGRectEqualToRect(v.frame, box)) {
+        v.frame = box;
+        [self log:@"player.view 尺寸修正为 %@", NSStringFromCGRect(box)];
+    }
+}
+
+- (void)startWatchdog {
+    [self.watchdog invalidate];
+    self.watchdogTicks = 0;
+    self.watchdog = [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(tickWatchdog:) userInfo:nil repeats:YES];
+}
+
+- (void)stopWatchdog {
+    [self.watchdog invalidate];
+    self.watchdog = nil;
+}
+
+- (void)tickWatchdog:(NSTimer *)timer {
+    self.watchdogTicks += 1;
+    id player = self.currentPlayer;
+    if (!player) { [self stopWatchdog]; return; }
+    [self layoutPlayerView];
+
+    id view = nil;
+    @try { view = [player valueForKey:@"view"]; } @catch (NSException *e) {}
+    NSString *shape = @"-";
+    if ([view isKindOfClass:UIView.class]) {
+        UIView *v = view;
+        shape = [NSString stringWithFormat:@"%@ 子视图=%lu 可见=%d",
+                 NSStringFromCGRect(v.frame), (unsigned long)v.subviews.count, !v.hidden];
+    }
+    double pos = -1, dur = -1;
+    @try {
+        pos = [[player valueForKey:@"currentPosition"] doubleValue];
+        dur = [[player valueForKey:@"duration"] doubleValue];
+    } @catch (NSException *e) {}
+    BOOL playing = NO;
+    @try { playing = [[player valueForKey:@"isPlaying"] boolValue]; } @catch (NSException *e) {}
+
+    [self log:@"[t=%lds] view=%@ pos=%.2f dur=%.2f playing=%d firstRender=%d",
+          (long)self.watchdogTicks, shape, pos, dur, playing, self.sawFirstRender];
+
+    if (self.watchdogTicks >= 12) [self stopWatchdog];
+}
 
 #pragma mark - 日志
 
@@ -47,7 +108,7 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = UIColor.blackColor;
-    self.title = @"CCTVHost 0.1.2 诊断版";
+    self.title = @"CCTVHost 0.1.3";
 
     CGFloat w = self.view.bounds.size.width;
 
@@ -103,7 +164,7 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
     self.logView.editable = NO;
     [self.view addSubview:self.logView];
 
-    [self log:@"BUILD 0.1.2 — delegate / BOOL / option-key diagnostics"];
+    [self log:@"BUILD 0.1.3 — autoplay / render watchdog / stat events"];
     [self setupSDK];
 }
 
@@ -258,6 +319,10 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
         return;
     }
     [self log:@"CNPlayer 实例 = %@", inst];
+    self.currentChannel = cid;
+    self.sawFirstRender = NO;
+    @try { [inst setValue:@(YES) forKey:@"autoPlay"]; [self log:@"autoPlay 已置 YES"]; }
+    @catch (NSException *e) { [self log:@"设置 autoPlay 失败: %@", e.reason]; }
 
     SEL playSel = NSSelectorFromString(@"playLIVEWithChannelID:delegate:configOptions:");
     if (![inst respondsToSelector:playSel]) {
@@ -296,6 +361,7 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
     }
     [self callInstance:inst selector:NSSelectorFromString(@"prepareToPlay") args:@[]];
     self.statusLabel.text = [NSString stringWithFormat:@"请求起播 %@", cid];
+    [self startWatchdog];
 }
 
 - (void)tapCicada:(UIButton *)sender {
@@ -344,13 +410,38 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
     [self log:@"publicRequestFailed domain=%@ code=%ld description=%@", error.domain, (long)error.code, error.localizedDescription];
 }
 - (void)player:(id)player loadStateDidChanged:(NSUInteger)state {
-    [self log:@"loadState=%lu (not proof of first frame)", (unsigned long)state];
+    [self log:@"loadState=%lu", (unsigned long)state];
+    [self layoutPlayerView];
+    // 4 = CNPlayerLoadStatePrepareDone：手册说明默认 autoPlay=false，此时需显式 play
+    if (state == 4) {
+        [self log:@"PrepareDone -> 调用 play"];
+        [self callInstance:self.currentPlayer selector:NSSelectorFromString(@"play") args:@[]];
+        [self layoutPlayerView];
+    }
+    if (state == 5) { [self log:@"SeekSucceed"]; }
+    if (state == 13) { [self log:@"停止加载 / 取消"]; }
 }
 - (void)player:(id)player vdnRequestStateDidChanged:(NSUInteger)state {
     [self log:@"VDN state=%lu", (unsigned long)state];
 }
 - (void)player:(id)player playBackStateDidChanged:(NSUInteger)state {
     [self log:@"playback state=%lu", (unsigned long)state];
+}
+
+- (void)player:(id)player statEvent:(NSUInteger)event value:(id)value {
+    [self log:@"statEvent=%lu value=%@", (unsigned long)event, value];
+    if (event == 3) {           // CNPlayerStatEvent_FirstRenderDidStart
+        self.sawFirstRender = YES;
+        self.statusLabel.text = [NSString stringWithFormat:@"%@ 首帧已渲染", self.currentChannel];
+        [self layoutPlayerView];
+    }
+}
+
+- (void)playerPeriodicTimeEvent:(id)player {
+    if (self.watchdogTicks % 5 == 0) {
+        double pos = [[player valueForKey:@"currentPosition"] doubleValue];
+        [self log:@"周期事件 pos=%.2f (数据在流动)", pos];
+    }
 }
 
 @end
