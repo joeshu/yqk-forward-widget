@@ -2,11 +2,13 @@
 #import "CNPlayerSDK.h"
 #import "CicadaSDK.h"
 #import "EPGViewController.h"
+#import "M3UParser.h"
+#import <AVFoundation/AVFoundation.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.7.0";
+static NSString *const kBuildTag = @"0.8.0";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
@@ -27,6 +29,10 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, strong) UIButton *logBtn;
 @property (nonatomic, strong) id currentPlayer;
 @property (nonatomic, strong) id sdkPlayer;
+@property (nonatomic, strong) AVPlayer *avPlayer;
+@property (nonatomic, strong) AVPlayerLayer *avLayer;
+@property (nonatomic, strong) NSMutableArray<NSDictionary *> *subscriptions;
+@property (nonatomic, strong) NSMutableSet<NSString *> *subscriptionURLs;
 @property (nonatomic, strong) CicadaPlayer *cicadaPlayer;
 @property (nonatomic, copy) NSString *channelID;
 @property (nonatomic, copy) NSString *channelName;
@@ -69,6 +75,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self loadChannels];
     [self buildPlayer];
     [self buildList];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"订阅" style:UIBarButtonItemStylePlain target:self action:@selector(addSubscription)];
     [self activateAudioSession];
     [self registerCallbackProtocol];
     [self setupSDK];
@@ -198,7 +205,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
 - (void)buildList {
     CGFloat y = CGRectGetMaxY(self.playerBox.frame);
-    self.groupControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"央视", @"卫视", @"地方", @"教育"]];
+    self.groupControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"央视", @"卫视", @"地方", @"教育", @"订阅"]];
     self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 28);
     self.groupControl.selectedSegmentIndex = 0;
     self.groupControl.tintColor = [UIColor colorWithWhite:0.75 alpha:1];
@@ -242,13 +249,20 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     }
     self.allChannels = [arr isKindOfClass:NSArray.class] ? arr : @[];
     self.shownChannels = self.allChannels;
+    self.subscriptions = [NSMutableArray array];
+    self.subscriptionURLs = [NSMutableSet set];
+    NSArray *saved = [[NSUserDefaults standardUserDefaults] arrayForKey:@"subscriptions"];
+    for (NSString *u in saved) {
+        [self.subscriptionURLs addObject:u];
+        [self fetchSubscription:u silent:YES];
+    }
     [self log:@"频道 %lu 个 / 线路 %lu 条",
          (unsigned long)self.allChannels.count,
          (unsigned long)[[self.allChannels valueForKeyPath:@"@sum.routes.@count"] integerValue]];
 }
 
 - (void)onGroupChanged {
-    NSArray *groups = @[@"全部", @"央视", @"卫视", @"地方", @"教育"];
+    NSArray *groups = @[@"全部", @"央视", @"卫视", @"地方", @"教育", @"订阅"];
     NSInteger i = MAX(0, MIN((NSInteger)groups.count - 1, self.groupControl.selectedSegmentIndex));
     NSString *g = groups[i];
     if ([g isEqualToString:@"全部"]) {
@@ -289,6 +303,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [t deselectRowAtIndexPath:ip animated:YES];
     NSDictionary *ch = self.shownChannels[ip.row];
+    if (ch[@"remoteURL"]) { [self playRemote:ch]; return; }
     [self playChannel:ch route:nil];      // 单击 = 自动选线直接播放
 }
 
@@ -464,6 +479,13 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     if (self.cicadaPlayer) {
         [self call:self.cicadaPlayer sel:@"destroy"];
     }
+    if (self.avPlayer) {
+        [self.avPlayer pause];
+        @try { [self.avPlayer.currentItem removeObserver:self forKeyPath:@"status"]; } @catch (NSException *e) {}
+        self.avPlayer = nil;
+    }
+    [self.avLayer removeFromSuperlayer];
+    self.avLayer = nil;
     self.currentPlayer = nil;
     self.cicadaPlayer = nil;
     [self.watchdog invalidate];
@@ -490,6 +512,12 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 }
 
 - (void)togglePlayPause {
+    if (self.avPlayer) {
+        BOOL playing = self.avPlayer.rate > 0;
+        if (playing) [self.avPlayer pause]; else [self.avPlayer play];
+        [self.playPauseBtn setTitle:(playing ? @"继续" : @"暂停") forState:UIControlStateNormal];
+        return;
+    }
     if (!self.currentPlayer) return;
     BOOL playing = NO;
     @try { playing = [[self.currentPlayer valueForKey:@"isPlaying"] boolValue]; } @catch (NSException *e) {}
@@ -499,6 +527,12 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
 - (void)toggleMute {
     static BOOL muted = NO;
+    if (self.avPlayer) {
+        muted = !muted;
+        self.avPlayer.muted = muted;
+        [self.muteBtn setTitle:(muted ? @"发声" : @"静音") forState:UIControlStateNormal];
+        return;
+    }
     muted = !muted;
     @try { [self.currentPlayer setValue:@(muted) forKey:@"muted"]; } @catch (NSException *e) {}
     [self.muteBtn setTitle:(muted ? @"发声" : @"静音") forState:UIControlStateNormal];
@@ -522,6 +556,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     }
     [self relayoutPlayer];
     [self attachVideoView];
+    self.avLayer.frame = self.playerBox.bounds;
 }
 
 - (void)relayoutPlayer {
@@ -530,6 +565,120 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.titleLabel.frame = CGRectMake(12, 8, b.size.width - 24, 20);
     self.infoLabel.frame = CGRectMake(12, 26, b.size.width - 24, 16);
     self.spinner.center = CGPointMake(b.size.width / 2, b.size.height / 2);
+}
+
+#pragma mark - 订阅（m3u 源 / 本地插件）
+
+- (void)addSubscription {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"添加订阅"
+                                                              message:@"输入 m3u/m3u8 地址，例如插件输出的 http://127.0.0.1:8767/all.m3u"
+                                                       preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"http://127.0.0.1:8767/all.m3u";
+        tf.keyboardType = UIKeyboardTypeURL;
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    }];
+    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"添加" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        NSString *u = a.textFields.firstObject.text;
+        if (!u.length) return;
+        [self.subscriptionURLs addObject:u];
+        [[NSUserDefaults standardUserDefaults] setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
+        [self fetchSubscription:u silent:NO];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+- (void)fetchSubscription:(NSString *)urlString silent:(BOOL)silent {
+    NSURL *url = [NSURL URLWithString:urlString];
+    if (!url) return;
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.timeoutInterval = 12;
+    req.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    __weak typeof(self) weakSelf = self;
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+        NSString *text = data.length ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+        NSArray<M3UChannel *> *list = text.length ? [M3UParser parse:text baseURL:url] : nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!list.count) {
+                [weakSelf log:@"订阅失败 %@ %@", urlString, err.localizedDescription ?: @"无有效条目"];
+                return;
+            }
+            NSMutableArray *merged = [NSMutableArray arrayWithArray:weakSelf.allChannels ?: @[]];
+            NSMutableSet *names = [NSMutableSet set];
+            for (NSDictionary *c in merged) [names addObject:c[@"id"]];
+            NSUInteger added = 0;
+            for (M3UChannel *c in list) {
+                id key = c.url;
+                if ([names containsObject:key]) continue;
+                [names addObject:key];
+                [merged addObject:@{@"id": c.name ?: c.url,
+                                    @"name": c.name ?: c.url,
+                                    @"group": c.group ?: @"订阅",
+                                    @"verified": @NO,
+                                    @"remoteURL": c.url}];
+                added++;
+            }
+            weakSelf.allChannels = merged;
+            weakSelf.shownChannels = merged;
+            [weakSelf.table reloadData];
+            [weakSelf log:@"订阅 %@ 新增 %lu 个频道（共 %lu）", urlString, (unsigned long)added, (unsigned long)list.count];
+        });
+    }] resume];
+}
+
+- (void)playRemote:(NSDictionary *)ch {
+    NSString *u = ch[@"remoteURL"];
+    NSURL *url = [NSURL URLWithString:u];
+    if (!url) return;
+    [self stopPlayback];
+    self.channelID = ch[@"id"];
+    self.channelName = ch[@"name"];
+    self.routeName = @"订阅";
+    self.firstRender = NO;
+    self.titleLabel.text = [NSString stringWithFormat:@"%@ · 连接中", self.channelName];
+    [self.spinner startAnimating];
+    [self log:@"订阅起播 %@", u];
+    [self.table reloadData];
+
+    AVPlayerItem *item = [AVPlayerItem playerItemWithURL:url];
+    self.avPlayer = [AVPlayer playerWithPlayerItem:item];
+    self.avLayer = [AVPlayerLayer playerLayerWithPlayer:self.avPlayer];
+    self.avLayer.frame = self.playerBox.bounds;
+    self.avLayer.videoGravity = AVLayerVideoGravityResizeAspect;
+    [self.playerBox.layer insertSublayer:self.avLayer atIndex:0];
+    [self.avPlayer play];
+
+    __weak typeof(self) weakSelf = self;
+    [item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(avItemFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!weakSelf.firstRender) {
+            [weakSelf log:@"订阅 12 秒未出画面"];
+            weakSelf.titleLabel.text = [NSString stringWithFormat:@"%@ · 无画面", weakSelf.channelName];
+        }
+    });
+}
+
+- (void)avItemFailed:(NSNotification *)n {
+    NSError *e = n.userInfo[AVPlayerItemFailedToPlayToEndTimeErrorKey];
+    [self log:@"订阅播放失败 %@", e.localizedDescription];
+}
+
+- (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)obj change:(NSDictionary *)ch context:(void *)ctx {
+    if ([kp isEqualToString:@"status"]) {
+        AVPlayerItem *item = obj;
+        if (item.status == AVPlayerItemStatusReadyToPlay) {
+            self.firstRender = YES;
+            [self.spinner stopAnimating];
+            self.titleLabel.text = self.channelName;
+            [self log:@"订阅就绪，开始播放"];
+        } else if (item.status == AVPlayerItemStatusFailed) {
+            [self.spinner stopAnimating];
+            self.titleLabel.text = [NSString stringWithFormat:@"%@ · 失败", self.channelName];
+            [self log:@"订阅失败 %@", item.error.localizedDescription];
+        }
+    }
 }
 
 #pragma mark - CDN 偏好

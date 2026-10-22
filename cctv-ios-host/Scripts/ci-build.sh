@@ -19,7 +19,7 @@ for f in Frameworks/*.framework; do
   cp -R "$f" "$APP/Frameworks/"
 done
 
-SOURCES="Sources/main.m Sources/AppDelegate.m Sources/RootViewController.m Sources/EPGViewController.m"
+SOURCES="Sources/main.m Sources/AppDelegate.m Sources/RootViewController.m Sources/EPGViewController.m Sources/M3UParser.m"
 
 set -x
 clang -arch arm64 \
@@ -29,7 +29,7 @@ clang -arch arm64 \
   -I Sources/Include \
   -F Frameworks \
   -framework Foundation -framework UIKit \
-  -framework CNPlayerSDK -framework CicadaPlayerSDK -framework alivcffmpeg \
+  -framework CNPlayerSDK -framework CicadaPlayerSDK -framework alivcffmpeg -framework AVFoundation \
   -Wl,-rpath,@executable_path/Frameworks \
   -Wl,-undefined,dynamic_lookup \
   -ObjC -lresolv \
