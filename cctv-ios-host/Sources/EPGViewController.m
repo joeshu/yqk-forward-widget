@@ -38,12 +38,15 @@
     [self.spinner startAnimating];
 
     self.table = [[UITableView alloc] initWithFrame:CGRectMake(0, 40, self.view.bounds.size.width, self.view.bounds.size.height - 40)
-                                              style:UITableViewStylePlain];
+                                              style:UITableViewStyleInsetGrouped];
     self.table.dataSource = self;
     self.table.delegate = self;
-    self.table.rowHeight = 60;
-    self.table.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1];
+    self.table.rowHeight = 68;
+    self.table.backgroundColor = UIColor.blackColor;
     self.table.separatorColor = [UIColor colorWithWhite:0.2 alpha:1];
+    UIRefreshControl *refresh = [UIRefreshControl new];
+    [refresh addTarget:self action:@selector(fetch) forControlEvents:UIControlEventValueChanged];
+    self.table.refreshControl = refresh;
     [self.view addSubview:self.table];
 
     [self fetch];
@@ -76,6 +79,7 @@
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             [weakSelf.spinner stopAnimating];
+            [weakSelf.table.refreshControl endRefreshing];
             if (rows.count) {
                 weakSelf.rows = rows;
                 [weakSelf.table reloadData];
@@ -119,9 +123,11 @@
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellID];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cellID];
-        cell.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1];
+        cell.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
+        cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+        cell.detailTextLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightRegular];
         cell.textLabel.textColor = UIColor.whiteColor;
-        cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.6 alpha:1];
+        cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
     NSDictionary *row = self.rows[indexPath.row];

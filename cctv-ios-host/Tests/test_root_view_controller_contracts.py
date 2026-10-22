@@ -6,6 +6,9 @@ import unittest
 SOURCE = pathlib.Path(__file__).resolve().parents[1] / "Sources" / "RootViewController.m"
 TEXT = SOURCE.read_text(encoding="utf-8")
 PYHOST = (SOURCE.parent / "PyHost.m").read_text(encoding="utf-8")
+PLUGIN = (SOURCE.parent / "PluginViewController.m").read_text(encoding="utf-8")
+SETTINGS = (SOURCE.parent / "SettingsViewController.m").read_text(encoding="utf-8")
+EPG = (SOURCE.parent / "EPGViewController.m").read_text(encoding="utf-8")
 
 
 def method_body(signature):
@@ -89,6 +92,18 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('[self openPluginPage]', TEXT)
         self.assertIn('[self openSettingsPage]', TEXT)
         self.assertIn('SettingsViewController *page', TEXT)
+
+    def test_plugin_and_settings_pages_use_safe_area_cards_and_live_status(self):
+        self.assertIn('UIScrollView', PLUGIN)
+        self.assertIn('statusTimer', PLUGIN)
+        self.assertIn('updateRunning:PyHost.running', PLUGIN)
+        self.assertIn('UITableViewStyleInsetGrouped', SETTINGS)
+        self.assertIn('epg-cache.json', SETTINGS)
+
+    def test_epg_page_supports_pull_to_refresh_and_grouped_cards(self):
+        self.assertIn('UITableViewStyleInsetGrouped', EPG)
+        self.assertIn('UIRefreshControl', EPG)
+        self.assertIn('endRefreshing', EPG)
 
     def test_channel_list_is_single_column_and_routes_remain_long_press(self):
         self.assertIn('self.table.rowHeight = 48', TEXT)

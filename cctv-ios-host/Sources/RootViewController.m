@@ -547,10 +547,25 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 }
 
 - (void)onLongPress:(UILongPressGestureRecognizer *)g {
-    if(g.state!=UIGestureRecognizerStateBegan) return;
-    NSDictionary *ch=objc_getAssociatedObject(g.view,@selector(onChannelCardTap:)); if(!ch) return;
-    if([ch[@"remoteURL"] length]) { [self presentSubscriptionActions:ch sourceView:g.view]; return; }
-    [self presentRouteSheetForChannel:ch fromIndexPath:[self indexPathForChannelID:ch[@"id"]]];
+    if (g.state != UIGestureRecognizerStateBegan) return;
+    NSDictionary *ch = nil;
+    NSIndexPath *ip = nil;
+    UIView *source = g.view;
+    if (g.view == self.table) {
+        CGPoint point = [g locationInView:self.table];
+        ip = [self.table indexPathForRowAtPoint:point];
+        if (!ip) return;
+        NSArray<NSDictionary *> *rows = [self channelsForSection:ip.section tableView:self.table];
+        if (ip.row < 0 || ip.row >= (NSInteger)rows.count) return;
+        ch = rows[(NSUInteger)ip.row];
+        source = [self.table cellForRowAtIndexPath:ip] ?: self.table;
+    } else {
+        ch = objc_getAssociatedObject(g.view, @selector(onChannelCardTap:));
+        if (!ch) return;
+        ip = [self indexPathForChannelID:ch[@"id"]];
+    }
+    if ([ch[@"remoteURL"] length]) { [self presentSubscriptionActions:ch sourceView:source]; return; }
+    [self presentRouteSheetForChannel:ch fromIndexPath:ip];
 }
 
 #pragma mark - 线路
@@ -1045,11 +1060,12 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 }
 
 - (NSIndexPath *)indexPathForChannelID:(NSString *)cid {
-    NSUInteger row = [self.shownChannels indexOfObjectPassingTest:^BOOL(NSDictionary *o, NSUInteger i, BOOL *stop) {
-        return [o[@"id"] isEqualToString:cid ?: @""];
-    }];
+    BOOL twoSections = [self numberOfSectionsInTableView:self.table] == 2;
+    NSUInteger recentIndex = [self.recents indexOfObjectPassingTest:^BOOL(NSDictionary *item, NSUInteger idx, BOOL *stop) { return [item[@"id"] isEqualToString:cid ?: @""]; }];
+    if (twoSections && recentIndex != NSNotFound) return [NSIndexPath indexPathForRow:(NSInteger)recentIndex inSection:0];
+    NSUInteger row = [self.shownChannels indexOfObjectPassingTest:^BOOL(NSDictionary *item, NSUInteger idx, BOOL *stop) { return [item[@"id"] isEqualToString:cid ?: @""]; }];
     if (row == NSNotFound) return nil;
-    return [NSIndexPath indexPathForRow:(NSInteger)(row / 2) inSection:([self numberOfSectionsInTableView:self.table] == 2 ? 1 : 0)];
+    return [NSIndexPath indexPathForRow:(NSInteger)row inSection:(twoSections ? 1 : 0)];
 }
 
 #pragma mark - 台标
