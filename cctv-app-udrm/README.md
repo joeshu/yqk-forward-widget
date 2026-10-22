@@ -1,4 +1,4 @@
-# 央视影音 App UDRM 单文件 v0.2.9（无 JDK）
+# 央视影音 App UDRM 单文件 v0.3.0（无 JDK）
 
 v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + WebAssembly 解释器**。运行只使用 Python 标准库和系统 JavaScriptCore，不再启动 Java、Node、编译器、FFmpeg 或外部 OpenSSL 命令。许可和视频处理继续由原样官方 SDK 完成。
 
@@ -6,11 +6,11 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 
 ## APTV 添加与订阅
 
-1. 停止旧的 JDK 版服务，添加下面带版本号的 Python 文件。
-2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.2.9`。
+1. 停止旧脚本服务，添加下面带版本号的 Python 文件。
+2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.3.0`。
 3. 首次先检查宿主的 JavaScriptCore/WebAssembly 能力，再下载约3.55MiB（SDK压缩段约2.10MiB、解释器约1.45MiB）。看到“SDK 已取得许可并就绪”后刷新订阅；17ms之类的列表测速不表示SDK已经就绪。若服务器不支持分段下载，日志会说明回退约47MiB的完整安装包。
 
-[下载 cctv-app-udrm-v0.2.9.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.2.9.py)
+[下载 cctv-app-udrm-v0.3.0.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.3.0.py)
 
 手机同机订阅：
 
@@ -18,32 +18,54 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 http://127.0.0.1:8769/all.m3u
 ```
 
-状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.2.9`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
+状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.3.0`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
 
 脚本运行需要 Python 3.10+、`ctypes`、`ssl`，以及支持 WebAssembly、BigInt 的系统 JavaScriptCore。默认从 iOS 系统路径加载框架。没有手工安装 pip 包、JS文件、JAR或完整安卓虚拟机的步骤。当前默认文件 [cctv-app-udrm.py](cctv-app-udrm.py) 与带版本号文件完全相同。
 
 终端运行：
 
 ```bash
-python3 cctv-app-udrm-v0.2.9.py
+python3 cctv-app-udrm-v0.3.0.py
 # 指定端口、缓存或关闭预热
-python3 cctv-app-udrm-v0.2.9.py 8769 --cache-dir ./cbox-cache --no-warmup
+python3 cctv-app-udrm-v0.3.0.py 8769 --cache-dir ./cbox-cache --no-warmup
 # 能力检查，不访问节目源
-python3 cctv-app-udrm-v0.2.9.py --doctor
+python3 cctv-app-udrm-v0.3.0.py --doctor
 ```
 
 电脑/服务器供手机访问时，显式加 `--host 0.0.0.0`，订阅地址改为该电脑的局域网IP。Linux开发测试使用JavaScriptCoreGTK共享库，通过 `--jscore-library /path/to/libjavascriptcoregtk-4.1.so.0` 指定；它不是iPhone需下载的依赖。
 
 ## 已验证与保留范围
 
-默认目录为 **CCTV-1、CCTV-7、贵州卫视** 三个已验证的App实时来源。原 [cbox-live](../cbox-live/) 的61台目录继续保留；尚未把全部61台App源标成可播。CCTV-5/5+观察到403，未列入本版默认目录。
+本版扩展为 **53个频道、94条经过分片样本检查的App线路**，覆盖央视、卫视及地方频道。网宿17条、百度17条、腾讯36条、KS24条；不是每个频道都同时有四家CDN。逐台名称、线路及本次未通过的8台见 [完整61台目录与检查结果](CHANNELS-v0.3.0.json)。原 [cbox-live](../cbox-live/) 的61台目录继续保留；CCTV-5/5+、CCTV-16、CETV-1/2/3/4、BTV-4未通过本次检查，不在可用播放订阅中占位。
 
 - 五组离线样本经无JDK处理后，与之前官方SDK版的输出逐字节一致，音视频解码错误均为0。
 - 最终单文件在禁止 `subprocess.Popen` 的验证中仍完成正式许可和媒体处理，旧“95条”和“126条错误”样本恢复正常。
-- 三路并发各60秒音视频解码错误均为0；实时测试和本地HTTP响应记录见 [无JDK验证](NOJDK-VALIDATION.json)。服务响应时间不代表手机APTV首帧或切台时间。
+- v0.2.0历史测试中三路并发各60秒音视频解码错误均为0；当时的实时测试和本地HTTP响应记录见 [无JDK验证](NOJDK-VALIDATION.json)。服务响应时间不代表手机APTV首帧或切台时间。
 - 已人工查看处理后的央视画面，台标、字幕和画面正常。原SDK样本对照仍见 [SAMPLE-VALIDATION.json](SAMPLE-VALIDATION.json)。
 
 本入口尚未合并EPG，原61台服务的节目单继续保留。更多频道的实时调度签名、CDN权限与用户手机的内存/首帧表现仍需继续核对。
+
+## 0.3.0 扩台和多线路入口
+
+主订阅仍是 `http://127.0.0.1:8769/all.m3u`，每台只列一条默认线路，刷新后得到53台。多线路按需要选择：
+
+| 入口 | 内容 |
+|---|---|
+| `/lines.m3u` | 全部94条独立线路，名称标注备用提供方 |
+| `/lines/cctv7.m3u` | CCTV-7的网宿、百度、KS线路；其他频道可替换ID |
+| `/cctv7.m3u` | 保留原CCTV-7备用订阅兼容入口 |
+| `/providers/ws.m3u` | 网宿17条 |
+| `/providers/bd.m3u` | 百度17条 |
+| `/providers/tx.m3u` | 腾讯36条 |
+| `/providers/ks.m3u` | KS24条 |
+
+以上路径均加前缀 `http://127.0.0.1:8769` 使用。各路线保持独立URL、缓存、序列和SDK状态；别名线路的 `tvg-id` 使用同一节目ID，分组与台标一并提供。不会把不同CDN的TS混成一条流，不承诺播放器无缝自动故障切换。APTV可按频道或CDN选订阅，遇局部网络不可达时选择其他已列出的线路。
+
+扩台以原61台目录及已观察到的App流命名分支生成候选，然后真实请求主/子清单、相邻TS，交给原样官方SDK及FFmpeg验证。仅清单200不计为可用。本次163条候选里95条短样本通过，CCTV-7腾讯源在最终连续检查时反复503，剔除后发布94条。没有运行时HAR读取、抓包鉴权重放或私钥导出。
+
+默认优先保留较高清晰度的已验证路由，再使用网宿/百度/腾讯/KS的固定顺序；CCTV-1的百度、CCTV-7的网宿、贵州的腾讯保留此前选择。这不是手机网络实时测速结果，清晰度上限仍为2.5Mbps。目录请求不下载媒体；只预热一份SDK许可，真正打开某线路后才取流。后台回收只检查有数据的频道，继续沿用0.2.9缓存预算，避免94条线路同时预取或各自创建模拟器。
+
+新增 `program_count`、`route_count`、`active_channel` 和目录验证时间；各路线状态显示 `logical_id`、`provider`、`upstream_host`。47项回归检查通过；最终单文件分别通过网宿、百度、腾讯、KS代表线路各连续15秒音视频解码错误0，三组原错误样本600帧输出摘要不变。本次验证见 [0.3.0扩台验证](EXPANSION-VALIDATION-v0.3.0.json)。95条短样本和少量连续播放测试不等同于53台全部长时间稳定，也不等同于用户iPhone逐台实测。
 
 ## 0.2.9 切台等待与缓存驻留
 

@@ -14,8 +14,8 @@ class CCTV7RouteTests(unittest.TestCase):
   try:
    with urlopen(base+'/all.m3u') as r:main=r.read().decode()
    with urlopen(base+'/cctv7.m3u') as r:backup=r.read().decode()
-   self.assertEqual(main.count('#EXTINF'),3);self.assertNotIn('cctv7_bd.m3u8',main)
-   self.assertEqual(backup.count('#EXTINF'),3);self.assertNotIn('cctv1.m3u8',backup)
+   self.assertEqual(main.count('#EXTINF'),len(service.DEFAULTS));self.assertNotIn('cctv7_bd.m3u8',main)
+   self.assertEqual(backup.count('#EXTINF'),1+len(service.CCTV7_ALTERNATES));self.assertNotIn('cctv1.m3u8',backup)
    for ident in ['cctv7','cctv7_bd','cctv7_ks']:self.assertIn('/live/'+ident+'.m3u8',backup)
    self.assertEqual(live.sdk.sessions,0)
    entry=service.Entry(1,4,'https://example.test/1.ts')

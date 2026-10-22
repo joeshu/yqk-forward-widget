@@ -1,0 +1,3539 @@
+{
+  "version": "0.3.0",
+  "recorded_at_utc": "2026-10-22T00:12:30.251928+00:00",
+  "script_sha256": "572297f0ff910457ef06c50649078b88962470c5276648f2f29356e9e99061a8",
+  "iphone_aptv_device_tested": false,
+  "program_count": 53,
+  "route_count": 94,
+  "provider_counts": {
+    "ws": 17,
+    "bd": 17,
+    "ks": 24,
+    "tx": 36
+  },
+  "regressions_passed": 47,
+  "runtime_har_dependency": false,
+  "runtime_external_processes_required": false,
+  "source_audit": {
+    "environment": "Linux JavaScriptCoreGTK, one official SDK session, independent route samples; not iPhone",
+    "engine_script_sha256": "5d3fa3c62035157094596095556567cc391579efbd9970e0847b79338602e4e7",
+    "engine_modules_identical_to_final": {
+      "jsc_host": true,
+      "elf_image": true,
+      "local_tls": true,
+      "bootstrap_nojdk": true,
+      "wasm_sdk": true,
+      "license_relay": true,
+      "sdk_client": true,
+      "ts_validator": true,
+      "ts_mapper": true
+    },
+    "vm_source_identical": true,
+    "media_sdk_class_identical": true,
+    "attempted_routes": 163,
+    "short_sample_passes": 95,
+    "excluded_after_continuous_test": {
+      "cctv7:tx": {
+        "reason": "Repeated HTTP503 during final live delivery after a successful short sample",
+        "recorded_at_utc": "2026-10-22T00:10:15.170393+00:00"
+      }
+    },
+    "published_routes": [
+      {
+        "channel": "cctv1",
+        "provider": "ws",
+        "url": "https://ldncctvcpudcnc.v.wscdns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 426384,
+        "output_sha256": "055ee5c2ff5b4be040ab4d38326de687d0654f3837d8bcb40b503807b934c988",
+        "ok": true,
+        "seconds": 3.969
+      },
+      {
+        "channel": "cctv1",
+        "provider": "bd",
+        "url": "https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv1_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 436160,
+        "output_sha256": "0b067f2f87dbe3280085f16256dca622bfcf07be084839aefa5b73e3db60d8a3",
+        "ok": true,
+        "seconds": 6.609
+      },
+      {
+        "channel": "cctv1",
+        "provider": "ks",
+        "url": "https://ldncctvcpudks.v.kcdnvip.com/ldncctvcpud/udrmldcctv1_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 394236,
+        "output_sha256": "1174eacead979abdf682372a07ac4343c4264a62b8e1db39bdfbae8a0ca7649e",
+        "ok": true,
+        "seconds": 9.958
+      },
+      {
+        "channel": "cctv2",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv2_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 767792,
+        "output_sha256": "5e93f625724213bbd5d923a6c16439e9d886fc7490d9ca88d1e3a16d8afcfb45",
+        "ok": true,
+        "seconds": 4.634
+      },
+      {
+        "channel": "cctv2",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv2_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 95,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 846000,
+        "output_sha256": "f38e644d748bbfa2c3aca1671f63fc519e612c22bfbd698c3d5295cdd971f134",
+        "ok": true,
+        "seconds": 7.106
+      },
+      {
+        "channel": "cctv2",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv2_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 544072,
+        "output_sha256": "895fda382ce57cedd19cdbd2bd1fe983bc0cc6fe3d315aca1ac3afae2a68dec3",
+        "ok": true,
+        "seconds": 9.215
+      },
+      {
+        "channel": "cctv3",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv3_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 697292,
+        "output_sha256": "ceed5a60b1109ada65594709e17915e936eb094a2ed0efd525c802e6e1688f24",
+        "ok": true,
+        "seconds": 2.681
+      },
+      {
+        "channel": "cctv3",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv3_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 617392,
+        "output_sha256": "6b507cb6f4c18947048534edb15a3b48c44688f5b5adbda81d6b7d94c1a7e2b6",
+        "ok": true,
+        "seconds": 4.229
+      },
+      {
+        "channel": "cctv3",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv3_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 503464,
+        "output_sha256": "848d833c081746678ced7742cb9c7f47243051a8de323ea68afd8c288b76c40e",
+        "ok": true,
+        "seconds": 8.495
+      },
+      {
+        "channel": "cctv4",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv4_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1018584,
+        "output_sha256": "c817b60a31a522de065a6580875c198bf0e4f4fc08a101ccf592b75e197f6eb4",
+        "ok": true,
+        "seconds": 1.919
+      },
+      {
+        "channel": "cctv4",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv4_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1063516,
+        "output_sha256": "7d2a22bc3ad11d3c6f44466a05c1831fc1df5db4294a4c779122cc8200c61018",
+        "ok": true,
+        "seconds": 4.199
+      },
+      {
+        "channel": "cctv4",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv4_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1003356,
+        "output_sha256": "324f1f50979384ce7ef7a79115995d0405d7d236ed5b7f2dec26e0c807266e3e",
+        "ok": true,
+        "seconds": 6.968
+      },
+      {
+        "channel": "cctveurope",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctveurope_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1028360,
+        "output_sha256": "c031926c46f247db483ef57625afc3b57bb97ac8ebc3f1c4e4763784cc0b3927",
+        "ok": true,
+        "seconds": 2.206
+      },
+      {
+        "channel": "cctveurope",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctveurope_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1074044,
+        "output_sha256": "3e228b03b5af8514daee41eaaa095dcb9112fc83d7fce7daa4132d2d092f9feb",
+        "ok": true,
+        "seconds": 4.02
+      },
+      {
+        "channel": "cctveurope",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctveurope_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 924584,
+        "output_sha256": "2c6225da9597455b9968039a7039d321acfa1651ad4ff80ad7d0d3f421e47084",
+        "ok": true,
+        "seconds": 7.046
+      },
+      {
+        "channel": "cctvamerica",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctvamerica_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 101,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 966132,
+        "output_sha256": "212b5d11a940d89348f7193cbc06b3709fd8452af28d20cded5415ccc66f3657",
+        "ok": true,
+        "seconds": 2.851
+      },
+      {
+        "channel": "cctvamerica",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctvamerica_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 937932,
+        "output_sha256": "66b15d69543d3852f0fbc07967a96fc2f3123ec87d5a50c983c92b0f62348835",
+        "ok": true,
+        "seconds": 3.045
+      },
+      {
+        "channel": "cctvamerica",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctvamerica_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 889992,
+        "output_sha256": "5bd2485e8231291ce03e797ac9946bff76c5c208abdbfa8ab3c0fcf86e66301b",
+        "ok": true,
+        "seconds": 6.186
+      },
+      {
+        "channel": "cctv6",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv6_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 398748,
+        "output_sha256": "32a56f6b358895de830fae7fbd5df3bac8bcf31e59d65128e8d679bcfbbc77b8",
+        "ok": true,
+        "seconds": 1.715
+      },
+      {
+        "channel": "cctv6",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv6_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 407772,
+        "output_sha256": "15b53c156214202ca9356dce70a80bdf411f3684902c31f274ba8d1c97978cbb",
+        "ok": true,
+        "seconds": 2.475
+      },
+      {
+        "channel": "cctv6",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv6_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 392356,
+        "output_sha256": "61ff0409aa97c82a9b061a94711fa571ea1558356f33d6c9d6c952f2486a5b7b",
+        "ok": true,
+        "seconds": 4.475
+      },
+      {
+        "channel": "cctv7",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv7_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 446876,
+        "output_sha256": "c355e4fc681f36cba6fb34b4a04de2800b1e4477c93ea508c69f4f72e26d8655",
+        "ok": true,
+        "seconds": 1.796
+      },
+      {
+        "channel": "cctv7",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv7_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 453080,
+        "output_sha256": "70ab3ea8d3a7bcd7e9a869242a076d72952f24ac177fb24c0679db3c49bf0d88",
+        "ok": true,
+        "seconds": 2.069
+      },
+      {
+        "channel": "cctv7",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv7_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 457028,
+        "output_sha256": "a75c2d3f742582b3f32fe12cba4b6c43d111a8cf66af07d40cb9f12ce28c4531",
+        "ok": true,
+        "seconds": 5.105
+      },
+      {
+        "channel": "cctv8",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv8_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 256620,
+        "output_sha256": "f469194c5026f1fff9825a7f4ba62389f18a32b2f9b4b4556650ae6e577a7c2a",
+        "ok": true,
+        "seconds": 1.443
+      },
+      {
+        "channel": "cctv8",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv8_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 272412,
+        "output_sha256": "ea41029bf6225f1d1bb460fbdac80f164c62df5bb547b30595bb27a693f92585",
+        "ok": true,
+        "seconds": 1.78
+      },
+      {
+        "channel": "cctv8",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv8_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 285196,
+        "output_sha256": "0ef29637fdf7610a6ddc44235117b850119ad2e731876468734054e50d20ba23",
+        "ok": true,
+        "seconds": 4.414
+      },
+      {
+        "channel": "cctvjilu",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv9_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 878336,
+        "output_sha256": "6f484961a3dcfe296aef403b60d1c66dea7fa8332ef4a9c3907b4d2adcb40ff7",
+        "ok": true,
+        "seconds": 2.037
+      },
+      {
+        "channel": "cctvjilu",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv9_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 911800,
+        "output_sha256": "ef99635e7c5c5a666f7e218c56f7a4d54840cfcafd23e32f3cf1f34b1c219963",
+        "ok": true,
+        "seconds": 2.541
+      },
+      {
+        "channel": "cctvjilu",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv9_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 863672,
+        "output_sha256": "f7efeab245118df72800ef7ffecd1e2770c0d5afaa16cafc568334a645764dcc",
+        "ok": true,
+        "seconds": 4.777
+      },
+      {
+        "channel": "cctv10",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv10_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 98,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 982112,
+        "output_sha256": "84a9db919f8582202180307af2bfa5eca38c1493a84492888a7db1e3ffe7700f",
+        "ok": true,
+        "seconds": 2.013
+      },
+      {
+        "channel": "cctv10",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv10_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 98,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1021968,
+        "output_sha256": "ee863e21520dc0279148c99fb682f9567ce17f0d90be6ca17561f7e5efefb5c9",
+        "ok": true,
+        "seconds": 2.498
+      },
+      {
+        "channel": "cctv10",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv10_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 99,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 886984,
+        "output_sha256": "eb2dbd05c89bd118a62f26571c2236aedf56b431c48f50091d7de27cd8e70800",
+        "ok": true,
+        "seconds": 6.22
+      },
+      {
+        "channel": "cctv11",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv11_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 858596,
+        "output_sha256": "7e5de6f3d2af0931da4efbb781a519aff393f39d4077a15f26f5626a5084aec8",
+        "ok": true,
+        "seconds": 2.079
+      },
+      {
+        "channel": "cctv11",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv11_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 101,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 836224,
+        "output_sha256": "2a1f5ec620dc1600c2b322393c3622c90c46d72f5c50ff7b14864cc5a1916e28",
+        "ok": true,
+        "seconds": 3.173
+      },
+      {
+        "channel": "cctv11",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv11_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 875704,
+        "output_sha256": "604a0302ddfe4f833ec8cae378fecb525c62f11b8e45bd94078f8fca6251927d",
+        "ok": true,
+        "seconds": 6.18
+      },
+      {
+        "channel": "cctv12",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv12_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1028360,
+        "output_sha256": "339799416bb8f4efd413882523b4165fd29cadce1c12b1fdcf3f061547caefe0",
+        "ok": true,
+        "seconds": 2.293
+      },
+      {
+        "channel": "cctv12",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv12_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1071976,
+        "output_sha256": "3da9333cb0220a1610e3be66d407e8f98696015d9157adc4c423c4f24a819300",
+        "ok": true,
+        "seconds": 2.561
+      },
+      {
+        "channel": "cctv12",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv12_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1164848,
+        "output_sha256": "3cbf8ee43bf5959d5f680d4f199b73f8a772b5433219470bc25f95bb23a34c98",
+        "ok": true,
+        "seconds": 6.318
+      },
+      {
+        "channel": "cctv13",
+        "provider": "ws",
+        "url": "https://ldncctvcpudcnc.v.wscdns.com/ldncctvcpud/udrmldcctv13_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 895068,
+        "output_sha256": "ef14b64863e91a5f583858d3b9f1f498b26b6b11f18fe05f27860d1d94085eb5",
+        "ok": true,
+        "seconds": 2.857
+      },
+      {
+        "channel": "cctv13",
+        "provider": "bd",
+        "url": "https://ldncctvcpudbd.a.bdydns.com/ldncctvcpud/udrmldcctv13_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 967260,
+        "output_sha256": "cdeacb3f92487211a61309d88953dca4d94aa2a217509ef6064fcba9b683f2f0",
+        "ok": true,
+        "seconds": 3.901
+      },
+      {
+        "channel": "cctv13",
+        "provider": "ks",
+        "url": "https://ldncctvcpudks.v.kcdnvip.com/ldncctvcpud/udrmldcctv13_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 820620,
+        "output_sha256": "3c7f3a2657539a6f79c9a835f4bea40911b981b4180a20cfd16830d99814058a",
+        "ok": true,
+        "seconds": 7.3
+      },
+      {
+        "channel": "cctvchild",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv14_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 559300,
+        "output_sha256": "4120b880fcf3951d13b160e1327b56a58e221e5582e9082e04000c35ee884388",
+        "ok": true,
+        "seconds": 2.225
+      },
+      {
+        "channel": "cctvchild",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv14_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 577724,
+        "output_sha256": "2e8ab74ab3d4194a18cbf28db9b6a9d022d368cb0b153eacd3b459ec982d70db",
+        "ok": true,
+        "seconds": 2.72
+      },
+      {
+        "channel": "cctvchild",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv14_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 545764,
+        "output_sha256": "1f4e5ff8bca3824ed9a905661508612b82b746304fe57cb79be6f01a10c83caf",
+        "ok": true,
+        "seconds": 5.343
+      },
+      {
+        "channel": "cctv15",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv15_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 95,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1008996,
+        "output_sha256": "71d0c3f5415c48a21b9f9438cc8bb1b1a7e59c97867eace00d7614bff033d519",
+        "ok": true,
+        "seconds": 2.012
+      },
+      {
+        "channel": "cctv15",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv15_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 95,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1052988,
+        "output_sha256": "ad3b963c194c9dc8003885fcadf370ac7ee7eaf086fa22189f52fcf8b59d41cd",
+        "ok": true,
+        "seconds": 2.289
+      },
+      {
+        "channel": "cctv15",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv15_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1008996,
+        "output_sha256": "9f79150531300968cba48ebee010dd0c0cae9d54d4d9e70504ac248b604251f1",
+        "ok": true,
+        "seconds": 5.805
+      },
+      {
+        "channel": "cctv17",
+        "provider": "ws",
+        "url": "https://ldocctvcpudcnc.v.wscdns.com/ldocctvcpud/udrmldcctv17_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1078744,
+        "output_sha256": "ea2da3ac0b38e2a9e13818949ecb0740484a8a82c19aaf27e9ef4fea4b15268d",
+        "ok": true,
+        "seconds": 2.092
+      },
+      {
+        "channel": "cctv17",
+        "provider": "bd",
+        "url": "https://ldocctvcpudbd.a.bdydns.com/ldocctvcpud/udrmldcctv17_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1063328,
+        "output_sha256": "a6b151eca2869171dcd80eb0f3087acfb9b4dadd9c7ed030b165876ceece59af",
+        "ok": true,
+        "seconds": 3.264
+      },
+      {
+        "channel": "cctv17",
+        "provider": "ks",
+        "url": "https://ldocctvcpudks.v.kcdnvip.com/ldocctvcpud/udrmldcctv17_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1006740,
+        "output_sha256": "c7a23ff8f5e1d6b8f140b5ab794afe09e95b90b5a36ec05d83c8c9aadb21e20f",
+        "ok": true,
+        "seconds": 6.033
+      },
+      {
+        "channel": "guangdong",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmguangdong_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 427700,
+        "output_sha256": "5fee514ce3f0fbd20c6285d93f28be9a10d62d6e7ab76afde6d42802a7434321",
+        "ok": true,
+        "seconds": 5.512
+      },
+      {
+        "channel": "guangdong",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmguangdong_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 413224,
+        "output_sha256": "bf50e5eef79f26259142dc83f32b6f008cb6f609c0f42cdfd22376f23d61dd13",
+        "ok": true,
+        "seconds": 7.749
+      },
+      {
+        "channel": "btv1",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmbtv1_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 871944,
+        "output_sha256": "9c4843dd5d5c1c5460345fbdf68d1ee37652e4bb96897223ad85c632ae758467",
+        "ok": true,
+        "seconds": 4.98
+      },
+      {
+        "channel": "dongfang",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmdongfang_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1339500,
+        "output_sha256": "f3363f0132ceae3c6be042156ea1461e337dab86aa11051e56bb7fafce94bfc3",
+        "ok": true,
+        "seconds": 4.812
+      },
+      {
+        "channel": "neimenggu",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmneimenggu_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 914244,
+        "output_sha256": "a60dabb97382748902290fa4375b4b1e359751f5f3eba72aaae931e9501e610b",
+        "ok": true,
+        "seconds": 3.274
+      },
+      {
+        "channel": "dongnan",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmdongnan_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 997528,
+        "output_sha256": "d9ce7dbea40aede789defb1a09732fe8d71d5f754b0cccc0f112feda00a16eb7",
+        "ok": true,
+        "seconds": 1.989
+      },
+      {
+        "channel": "henan",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmhenan_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1286672,
+        "output_sha256": "e710bd766983c0be7a5f563a0b217453ce605ae1d26fc3f292cb4ce4ec66578f",
+        "ok": true,
+        "seconds": 1.951
+      },
+      {
+        "channel": "henan",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmhenan_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1272384,
+        "output_sha256": "5053ff2bbb774e2d98ad90d913d2944d9b35b27ca07575d273c7ef437e210877",
+        "ok": true,
+        "seconds": 5.585
+      },
+      {
+        "channel": "guangxi",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmguangxi_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1423536,
+        "output_sha256": "0a5b836bc46ecf2c5904e4626bc45a47492906636df40376ae4339a01505a470",
+        "ok": true,
+        "seconds": 1.919
+      },
+      {
+        "channel": "guizhou",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmguizhou_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 856528,
+        "output_sha256": "78f8067af186d7d6265c2b03861889c156e754b44cb240afb1e8bded69df94bf",
+        "ok": true,
+        "seconds": 2.122
+      },
+      {
+        "channel": "gansu",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmgansu_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1033436,
+        "output_sha256": "d40195f25548375a2370e954ed1aa395f02fc51821dca7a11389300c6562738d",
+        "ok": true,
+        "seconds": 1.87
+      },
+      {
+        "channel": "tianjin",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmtianjin_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1390636,
+        "output_sha256": "0d3fd63327a73ea3667e83a8b89df435237361d4ab1658eeac04822ed0cf5d8f",
+        "ok": true,
+        "seconds": 2.829
+      },
+      {
+        "channel": "tianjin",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmtianjin_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1348148,
+        "output_sha256": "ca3a8eab87df9497299c8b1f69f9f3b7ca269231e08eec991b1eca54959650bc",
+        "ok": true,
+        "seconds": 6.232
+      },
+      {
+        "channel": "liaoning",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmliaoning_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 718724,
+        "output_sha256": "0d2757a13a599664c2cd9b05b8de3d71384a59b44616e4b74243fa047e3aabeb",
+        "ok": true,
+        "seconds": 2.262
+      },
+      {
+        "channel": "jiangxi",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmjiangxi_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 837916,
+        "output_sha256": "14746f184d98a0f6d11517e00dd303f3882f66b9d40d32445ecb2fc9dc19d2d6",
+        "ok": true,
+        "seconds": 1.722
+      },
+      {
+        "channel": "hubei",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmhubei_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1158268,
+        "output_sha256": "2d7c40e82634fce26ef5550fb45d73b64e49149ff97b4df77e760d4802ad4765",
+        "ok": true,
+        "seconds": 1.717
+      },
+      {
+        "channel": "travel",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmtravel_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 867808,
+        "output_sha256": "6b0dcf96d42928fc5117e6a48dd3a9989c434c816e634d1c1cf59501632cfb7e",
+        "ok": true,
+        "seconds": 2.416
+      },
+      {
+        "channel": "travel",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmtravel_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 852768,
+        "output_sha256": "1142c4fc8bf9b851c0e6cacf937406cd5ab6a36ca64dcbc81c318573c1f852b2",
+        "ok": true,
+        "seconds": 6.997
+      },
+      {
+        "channel": "yunnan",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmyunnan_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 858220,
+        "output_sha256": "8dec26feb558a842fadc3de9a8becfaac97682f56581aeed2083dc4333b29bc8",
+        "ok": true,
+        "seconds": 2.285
+      },
+      {
+        "channel": "qinghai",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmqinghai_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1046408,
+        "output_sha256": "ef471a38d6266140242c3a0a6e6891f9541e8683d5d034939de8be9703701a3f",
+        "ok": true,
+        "seconds": 1.899
+      },
+      {
+        "channel": "hebei",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmhebei_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 872320,
+        "output_sha256": "07198dd7deedfcc167394ce3d21606adb1a5debf89ee22cadcc9e42620f2aab6",
+        "ok": true,
+        "seconds": 1.667
+      },
+      {
+        "channel": "jilin",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmjilin_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 840736,
+        "output_sha256": "73124fa2b1151eefd0642a8f092cd96671a5dde6e18029eb3dd8154b3496e2aa",
+        "ok": true,
+        "seconds": 1.802
+      },
+      {
+        "channel": "shandong",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmshandong_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 551780,
+        "output_sha256": "9b97c88713e656d435ba17bd141be25afac994af1b3da0471f11ddc176cb0f15",
+        "ok": true,
+        "seconds": 1.599
+      },
+      {
+        "channel": "shandong",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmshandong_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 534484,
+        "output_sha256": "68fa4c0eefe0f04dab8bf93823e929ba691b1e84d0af7781ce2be3d5bc30aba9",
+        "ok": true,
+        "seconds": 5.306
+      },
+      {
+        "channel": "chongqing",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmchongqing_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 450824,
+        "output_sha256": "9be9292b328681cdb6fd54803bccc1617cbf61b9e29c183137c0029aab50c022",
+        "ok": true,
+        "seconds": 1.633
+      },
+      {
+        "channel": "chongqing",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmchongqing_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 401944,
+        "output_sha256": "bbcea90498f73eb18ef469ac965e8261e491577b5420b05e7338570c71c12d92",
+        "ok": true,
+        "seconds": 3.447
+      },
+      {
+        "channel": "xizang",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmxizang_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 990384,
+        "output_sha256": "49960865ec96f798bb577e9e091c8f55178de3cad497b762ea92b70bf7e9f24c",
+        "ok": true,
+        "seconds": 1.817
+      },
+      {
+        "channel": "ningxia",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmningxia_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 931916,
+        "output_sha256": "f77b07fc270aca14e7bf543aaf100df2b347e4e745641fe88b92f66e75007d9b",
+        "ok": true,
+        "seconds": 1.958
+      },
+      {
+        "channel": "shan1xi",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmshan1xi_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 847316,
+        "output_sha256": "0e4985442f1bee714bb4675fe76d8041d6bac5c1269fff40ee842d38d038491d",
+        "ok": true,
+        "seconds": 1.988
+      },
+      {
+        "channel": "heilongjiang",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmheilongjiang_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 969516,
+        "output_sha256": "f1f95d0f9e789806e80a70dd1cf4fa44c14defbea9603e2d6ed5841820e2f6ae",
+        "ok": true,
+        "seconds": 1.81
+      },
+      {
+        "channel": "anhui",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmanhui_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 833404,
+        "output_sha256": "4e0d61c6761970b9a3c2e8664bf9194caf2371b37df9afb0d4e67a68bb169808",
+        "ok": true,
+        "seconds": 1.656
+      },
+      {
+        "channel": "sichuan",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmsichuan_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 942068,
+        "output_sha256": "85c06d6cb11aebbf69026ded32baffa3a6d44fd615e1dd4fec083550538a9efd",
+        "ok": true,
+        "seconds": 2.076
+      },
+      {
+        "channel": "sichuan",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmsichuan_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 925336,
+        "output_sha256": "ba8ad18283ca80d058c224dfd8e236316f63a772d513f42d378a50e6ae747893",
+        "ok": true,
+        "seconds": 4.348
+      },
+      {
+        "channel": "shan3xi",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmshan3xi_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 934924,
+        "output_sha256": "ca62fbd4e44725087cddcc7e61a1804eba76d52dfba7360f17dfd85fb4c5f551",
+        "ok": true,
+        "seconds": 1.988
+      },
+      {
+        "channel": "xinjiang",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmxinjiang_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 876456,
+        "output_sha256": "fbaeb3d9ad9bd2b83b46d66d53613ba74faaadc83537534df962637c4f7bb0d9",
+        "ok": true,
+        "seconds": 1.764
+      },
+      {
+        "channel": "xianggangweishi",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmxianggangweishi_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 949588,
+        "output_sha256": "7040d009073190fbaece2823f5786e827fde40b20b49d31d2a137f3f535e4b70",
+        "ok": true,
+        "seconds": 2.628
+      },
+      {
+        "channel": "shenzhen",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmshenzhen_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 963500,
+        "output_sha256": "e21a147f45608a3f69a562d425bc136a8757af79cc592b814f7b38e1ced77496",
+        "ok": true,
+        "seconds": 1.77
+      },
+      {
+        "channel": "btv5",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmbtv5_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 884352,
+        "output_sha256": "95dba47461aa4f6347016d25c56aaedfee8d6903c839006998b213cd00058747",
+        "ok": true,
+        "seconds": 2.008
+      },
+      {
+        "channel": "btv2",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmbtv2_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 804452,
+        "output_sha256": "de86a9c49c56115c03c0e62fcaad61cb405a7dbb2d3986b651d6adb2f41dce53",
+        "ok": true,
+        "seconds": 1.719
+      },
+      {
+        "channel": "btv3",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmbtv3_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 745044,
+        "output_sha256": "c2b8880dd3df83b824fb9e40133a476b5033442c8917e2f0d7c1733605356288",
+        "ok": true,
+        "seconds": 1.995
+      },
+      {
+        "channel": "btv7",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmbtv7_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 821372,
+        "output_sha256": "63bf326045ce89f97c3fe02aef1ec87d2256fb8ca5c135ff294b8eaab26a8872",
+        "ok": true,
+        "seconds": 1.948
+      },
+      {
+        "channel": "btv9",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmbtv9_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 908604,
+        "output_sha256": "03f3a5e2bc83fc1872036c417a536ea1fa924e7872778809051f969695522b66",
+        "ok": true,
+        "seconds": 2.144
+      },
+      {
+        "channel": "neimenggu2",
+        "provider": "tx",
+        "url": "https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmneimenggu2_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 0,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 578288,
+        "output_sha256": "60868bd6f5d15b56a8c83e7943983c5ad0d26bb0ff8740d960be03bda8f30dc7",
+        "ok": true,
+        "seconds": 1.653
+      }
+    ],
+    "failed_candidates": [
+      {
+        "channel": "cctv1",
+        "provider": "tx",
+        "url": "https://ldncctvcpudtxy.liveplay.myqcloud.com/ldncctvcpud/udrmldcctv1_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream HTTP 503",
+        "seconds": 8.366
+      },
+      {
+        "channel": "cctvamerica",
+        "provider": "tx",
+        "url": "https://ldocctvcpudtxy.liveplay.myqcloud.com/ldocctvcpud/udrmldcctvamerica_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport TimeoutError",
+        "seconds": 30.316
+      },
+      {
+        "channel": "cctv6",
+        "provider": "tx",
+        "url": "https://ldocctvcpudtxy.liveplay.myqcloud.com/ldocctvcpud/udrmldcctv6_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream HTTP 503",
+        "seconds": 7.323
+      },
+      {
+        "channel": "guangdong",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmguangdong_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.233
+      },
+      {
+        "channel": "btv1",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmbtv1_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.243
+      },
+      {
+        "channel": "btv1",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmbtv1_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 860664,
+        "output_sha256": "ad17b4bc26c9ca4b5ae7f36e593f09f49c09a5643d18499882841d74a0af53ca",
+        "ok": false,
+        "seconds": 7.995
+      },
+      {
+        "channel": "dongfang",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmdongfang_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.008
+      },
+      {
+        "channel": "dongfang",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmdongfang_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1118600,
+        "output_sha256": "1c0985f04965928aeb6d01e7a473f10542218c5a17d2689c2605b6126d60b699",
+        "ok": false,
+        "seconds": 6.624
+      },
+      {
+        "channel": "neimenggu",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmneimenggu_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.254
+      },
+      {
+        "channel": "neimenggu",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmneimenggu_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 871380,
+        "output_sha256": "61ecc98714a0a9e92dd25912e8ad190aca6a36412729f3fccc494551177c1d4f",
+        "ok": false,
+        "seconds": 5.814
+      },
+      {
+        "channel": "dongnan",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmdongnan_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.196
+      },
+      {
+        "channel": "dongnan",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmdongnan_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 988504,
+        "output_sha256": "d18be11abf1a40bf38b1740e9bf11bbe2bab3841924a70ae310d2210cd760ffd",
+        "ok": false,
+        "seconds": 5.54
+      },
+      {
+        "channel": "henan",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmhenan_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.009
+      },
+      {
+        "channel": "guangxi",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmguangxi_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.232
+      },
+      {
+        "channel": "guangxi",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmguangxi_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1140220,
+        "output_sha256": "3b4a14d670b52192dcc0441566e48509e258dd1b472d75589ac84551329065b8",
+        "ok": false,
+        "seconds": 6.746
+      },
+      {
+        "channel": "guizhou",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmguizhou_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.194
+      },
+      {
+        "channel": "guizhou",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmguizhou_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 673604,
+        "output_sha256": "a0b38a732b2f410a325e583ccb8df49082937bf89d482c2ec683dd4744f45764",
+        "ok": false,
+        "seconds": 5.447
+      },
+      {
+        "channel": "gansu",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmgansu_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.252
+      },
+      {
+        "channel": "gansu",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmgansu_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 846188,
+        "output_sha256": "704bdebb3971b303fff104ebb63d030237ee68b4e89df3992bdac349cd46e6b3",
+        "ok": false,
+        "seconds": 5.081
+      },
+      {
+        "channel": "tianjin",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmtianjin_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.192
+      },
+      {
+        "channel": "liaoning",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmliaoning_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.032
+      },
+      {
+        "channel": "liaoning",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmliaoning_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1047724,
+        "output_sha256": "dd9250320b1bf77c59c0c23e63569080ba371a1052922ec98aece3a772f741d4",
+        "ok": false,
+        "seconds": 5.473
+      },
+      {
+        "channel": "jiangxi",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmjiangxi_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.008
+      },
+      {
+        "channel": "jiangxi",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmjiangxi_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 828328,
+        "output_sha256": "65e727fe58f8092a7c75c6ac7ffc5f24bd8667227a0068478ba8aa1eb0348eee",
+        "ok": false,
+        "seconds": 4.712
+      },
+      {
+        "channel": "hubei",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmhubei_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.007
+      },
+      {
+        "channel": "hubei",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmhubei_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1086640,
+        "output_sha256": "c14126e470b9aba3afca64536e28b8fd26b46c11da5604f2dcc340004bf38831",
+        "ok": false,
+        "seconds": 5.618
+      },
+      {
+        "channel": "travel",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmtravel_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.007
+      },
+      {
+        "channel": "yunnan",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmyunnan_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.007
+      },
+      {
+        "channel": "yunnan",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmyunnan_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 847316,
+        "output_sha256": "ae9d84c74a041baec68ad37f6c414d7751fbfea2a332d5f8c1a318d7b940d586",
+        "ok": false,
+        "seconds": 4.359
+      },
+      {
+        "channel": "qinghai",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmqinghai_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.234
+      },
+      {
+        "channel": "qinghai",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmqinghai_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1037572,
+        "output_sha256": "4d32d2c83ea26fb1a12e3488cd9b5ec103cb09b61c88dd0282188a6a3c06aef5",
+        "ok": false,
+        "seconds": 5.23
+      },
+      {
+        "channel": "hebei",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmhebei_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.006
+      },
+      {
+        "channel": "hebei",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmhebei_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1171052,
+        "output_sha256": "36cdf918d0bd283f16413296287bcb3661463eea792501a66f13717c74f204e4",
+        "ok": false,
+        "seconds": 5.428
+      },
+      {
+        "channel": "jilin",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmjilin_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.008
+      },
+      {
+        "channel": "jilin",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmjilin_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1464520,
+        "output_sha256": "324980dca6def050e21066f960e09cf0cadf7b95ac71e82ec8a04b55b5ffc5e0",
+        "ok": false,
+        "seconds": 5.98
+      },
+      {
+        "channel": "shandong",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmshandong_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.196
+      },
+      {
+        "channel": "chongqing",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmchongqing_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.007
+      },
+      {
+        "channel": "xizang",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmxizang_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.008
+      },
+      {
+        "channel": "xizang",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmxizang_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 1464332,
+        "output_sha256": "a17e785e0db62c9e233c561cde62b7c6a6b0e1f4762b359b428c09a30df689aa",
+        "ok": false,
+        "seconds": 4.759
+      },
+      {
+        "channel": "ningxia",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmningxia_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.007
+      },
+      {
+        "channel": "ningxia",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmningxia_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 918944,
+        "output_sha256": "b6ef3359b297eb07d7052a54d00151d0b90c81c27ef92e57fe850729a247e4a6",
+        "ok": false,
+        "seconds": 4.22
+      },
+      {
+        "channel": "shan1xi",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmshan1xi_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.012
+      },
+      {
+        "channel": "shan1xi",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmshan1xi_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 934172,
+        "output_sha256": "3087aa85b4b42a1d59568973888e917439390b9d15908719aabdb379a7a705b1",
+        "ok": false,
+        "seconds": 4.229
+      },
+      {
+        "channel": "heilongjiang",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmheilongjiang_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.007
+      },
+      {
+        "channel": "heilongjiang",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmheilongjiang_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 958236,
+        "output_sha256": "2c7c4a8eed1abb47a8f01ba620e313878711416bede427b74fb4abd008e0e951",
+        "ok": false,
+        "seconds": 4.662
+      },
+      {
+        "channel": "anhui",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmanhui_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.022
+      },
+      {
+        "channel": "anhui",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmanhui_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 833592,
+        "output_sha256": "af9fe8cf0ca2f7b08ebdb6a649354b1a188c7158bb40aef3ae16bd33283c04ca",
+        "ok": false,
+        "seconds": 5.147
+      },
+      {
+        "channel": "sichuan",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmsichuan_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.017
+      },
+      {
+        "channel": "shan3xi",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmshan3xi_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.006
+      },
+      {
+        "channel": "shan3xi",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmshan3xi_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 927028,
+        "output_sha256": "bce33bf442c6866de1563663b07bf15c70b31c7c232e9523de204442027df685",
+        "ok": false,
+        "seconds": 4.321
+      },
+      {
+        "channel": "xinjiang",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmxinjiang_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.007
+      },
+      {
+        "channel": "xinjiang",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmxinjiang_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 865552,
+        "output_sha256": "114c0580eedc26757eaa84ef472a547628cbd4d7f3c60832149aa45f4d5d6737",
+        "ok": false,
+        "seconds": 4.895
+      },
+      {
+        "channel": "xianggangweishi",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmxianggangweishi_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.2
+      },
+      {
+        "channel": "xianggangweishi",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmxianggangweishi_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 939624,
+        "output_sha256": "a8e70bb6c5efa42883774eda80a59528bf0a3086eeac28c4875a9e77b0eb177b",
+        "ok": false,
+        "seconds": 4.506
+      },
+      {
+        "channel": "shenzhen",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmshenzhen_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.007
+      },
+      {
+        "channel": "shenzhen",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmshenzhen_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 1280,
+          "height": 720
+        },
+        "bytes": 941316,
+        "output_sha256": "8c17455fa4307fbfc2e675bd0fa8605f704d056fa92078f0fc2ebb637df18389",
+        "ok": false,
+        "seconds": 4.247
+      },
+      {
+        "channel": "btv5",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmbtv5_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.007
+      },
+      {
+        "channel": "btv5",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmbtv5_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 887172,
+        "output_sha256": "c659464bd7037a4f36997056e124a8436bdf2accf0fe367ed88cf426c5ea6c8c",
+        "ok": false,
+        "seconds": 4.603
+      },
+      {
+        "channel": "btv2",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmbtv2_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.008
+      },
+      {
+        "channel": "btv2",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmbtv2_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 838104,
+        "output_sha256": "1b419544a66ef7fcec9455da99d2a3baf155fbd3dc7febdd7fc3129329e53c40",
+        "ok": false,
+        "seconds": 4.65
+      },
+      {
+        "channel": "btv3",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmbtv3_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.005
+      },
+      {
+        "channel": "btv3",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmbtv3_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 1017644,
+        "output_sha256": "5f2d41c01d9bfdccfc51f9ca88d36b429b38dddbc37335c146d3044adb63a4d3",
+        "ok": false,
+        "seconds": 4.635
+      },
+      {
+        "channel": "btv7",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmbtv7_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.01
+      },
+      {
+        "channel": "btv7",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmbtv7_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 921012,
+        "output_sha256": "268bd729e4bbbd03cd18e15cb17fadd933dcd5494a3eab16fddefd1b54ce3b23",
+        "ok": false,
+        "seconds": 5.291
+      },
+      {
+        "channel": "btv9",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmbtv9_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.012
+      },
+      {
+        "channel": "btv9",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmbtv9_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 897324,
+        "output_sha256": "2e85d7e98a573e8ad2712e756dc9dab9ab92997c4a92ecef1329d64b3c12e4d9",
+        "ok": false,
+        "seconds": 3.865
+      },
+      {
+        "channel": "neimenggu2",
+        "provider": "bd",
+        "url": "https://wstvcpudbd.a.bdydns.com/wstvcpud/udrmneimenggu2_1/index.m3u8",
+        "ok": false,
+        "error": "Upstream transport URLError/OSError",
+        "seconds": 0.01
+      },
+      {
+        "channel": "neimenggu2",
+        "provider": "ks",
+        "url": "https://wstvcpudks.v.kcdnvip.com/wstvcpud/udrmneimenggu2_1/index.m3u8",
+        "decode_exit": 0,
+        "decode_errors": 2,
+        "frames": 100,
+        "resolution": {
+          "width": 960,
+          "height": 540
+        },
+        "bytes": 567760,
+        "output_sha256": "e95a01294ee7c001890502a9a794e21a4b7ff7e629c344a1a143299b1e0b019c",
+        "ok": false,
+        "seconds": 4.574
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ]
+  },
+  "final_artifact_samples": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 5.405
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.697
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.502
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "forced_native_usleep_probes": [
+      {
+        "microseconds": 20000,
+        "result": 0,
+        "elapsed_seconds": 0.0251
+      }
+    ],
+    "wall_seconds": 7.924,
+    "script_sha256": "572297f0ff910457ef06c50649078b88962470c5276648f2f29356e9e99061a8"
+  },
+  "final_artifact_four_provider_live_validation": {
+    "version": "0.3.0",
+    "environment": "Linux JavaScriptCoreGTK; single selected channel, sequential 15s audio/video decodes; not iPhone",
+    "script_sha256": "572297f0ff910457ef06c50649078b88962470c5276648f2f29356e9e99061a8",
+    "channels": [
+      {
+        "channel": "cctv2",
+        "first_playlist_seconds": 7.362,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "372",
+        "duration": "00:00:15.000000"
+      },
+      {
+        "channel": "cctv2_bd",
+        "first_playlist_seconds": 5.618,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "372",
+        "duration": "00:00:15.000000"
+      },
+      {
+        "channel": "guangdong",
+        "first_playlist_seconds": 3.879,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "375",
+        "duration": "00:00:15.000000"
+      },
+      {
+        "channel": "guangdong_ks",
+        "first_playlist_seconds": 7.201,
+        "initial_playlist_segments": 1,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "frames": "373",
+        "duration": "00:00:15.000000"
+      }
+    ],
+    "status": {
+      "version": "0.3.0",
+      "uptime_seconds": 62,
+      "engine": "javascriptcore-unicorn-wasm",
+      "jdk_required": false,
+      "sdk_phase": "ready",
+      "preparation_progress": "官方SDK和无JDK解释器已校验就绪",
+      "preparation_error": null,
+      "runtime_features": {
+        "bulk_memory": true,
+        "register_batch": true,
+        "register_scalar": true
+      },
+      "memory_cache": {
+        "processed_bytes": 5407820,
+        "raw_bytes_observed_idle": 0,
+        "raw_observation_skips_busy_channels": true,
+        "processed_budget_bytes": 33554432,
+        "active_window_budget_bytes": 25165824,
+        "note": "Cache bytes only; excludes in-flight downloads, Python, JavaScriptCore and WASM memory"
+      },
+      "media_timings": {
+        "cctv2": {
+          "parse_seconds": 0.006,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.33,
+          "map_verify_seconds": 0.006,
+          "video_pes": 104
+        },
+        "cctv2_bd": {
+          "parse_seconds": 0.009,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.257,
+          "map_verify_seconds": 0.004,
+          "video_pes": 100
+        },
+        "guangdong": {
+          "parse_seconds": 0.007,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.087,
+          "map_verify_seconds": 0.004,
+          "video_pes": 100
+        },
+        "guangdong_ks": {
+          "parse_seconds": 0.01,
+          "queue_seconds": 0.0,
+          "sdk_seconds": 0.147,
+          "map_verify_seconds": 0.007,
+          "video_pes": 100
+        }
+      },
+      "max_bitrate": 2500000,
+      "sdk_sessions": 1,
+      "processed_video_pes": 1906,
+      "license_exchanges": [
+        {
+          "request_bytes": 368,
+          "http_status": 200,
+          "response_bytes": 232,
+          "business_status": 0,
+          "protected_license_count": 1
+        }
+      ],
+      "active_channel": "guangdong_ks",
+      "program_count": 53,
+      "route_count": 94,
+      "catalog_verified_at_utc": "2026-10-22T00:10:15.253285+00:00",
+      "channels": {
+        "cctv1": {
+          "name": "CCTV-1 综合",
+          "logical_id": "cctv1",
+          "provider": "bd",
+          "upstream_host": "ldncctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv1_ws": {
+          "name": "CCTV-1 综合（网宿）",
+          "logical_id": "cctv1",
+          "provider": "ws",
+          "upstream_host": "ldncctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv1_ks": {
+          "name": "CCTV-1 综合（KS）",
+          "logical_id": "cctv1",
+          "provider": "ks",
+          "upstream_host": "ldncctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv2": {
+          "name": "CCTV-2 财经",
+          "logical_id": "cctv2",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": 47.33,
+          "last_refresh_seconds": 1.8,
+          "processing_to_video_ratio": 0.082,
+          "error": ""
+        },
+        "cctv2_bd": {
+          "name": "CCTV-2 财经（百度）",
+          "logical_id": "cctv2",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": 32.79,
+          "last_refresh_seconds": 3.313,
+          "processing_to_video_ratio": 0.068,
+          "error": ""
+        },
+        "cctv2_ks": {
+          "name": "CCTV-2 财经（KS）",
+          "logical_id": "cctv2",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv3": {
+          "name": "CCTV-3 综艺",
+          "logical_id": "cctv3",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv3_bd": {
+          "name": "CCTV-3 综艺（百度）",
+          "logical_id": "cctv3",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv3_ks": {
+          "name": "CCTV-3 综艺（KS）",
+          "logical_id": "cctv3",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv4": {
+          "name": "CCTV-4 (亚洲)",
+          "logical_id": "cctv4",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv4_bd": {
+          "name": "CCTV-4 (亚洲)（百度）",
+          "logical_id": "cctv4",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv4_ks": {
+          "name": "CCTV-4 (亚洲)（KS）",
+          "logical_id": "cctv4",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctveurope": {
+          "name": "CCTV-4 (欧洲)",
+          "logical_id": "cctveurope",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctveurope_bd": {
+          "name": "CCTV-4 (欧洲)（百度）",
+          "logical_id": "cctveurope",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctveurope_ks": {
+          "name": "CCTV-4 (欧洲)（KS）",
+          "logical_id": "cctveurope",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctvamerica": {
+          "name": "CCTV-4 (美洲)",
+          "logical_id": "cctvamerica",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctvamerica_bd": {
+          "name": "CCTV-4 (美洲)（百度）",
+          "logical_id": "cctvamerica",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctvamerica_ks": {
+          "name": "CCTV-4 (美洲)（KS）",
+          "logical_id": "cctvamerica",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv6": {
+          "name": "CCTV-6 电影",
+          "logical_id": "cctv6",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv6_bd": {
+          "name": "CCTV-6 电影（百度）",
+          "logical_id": "cctv6",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv6_ks": {
+          "name": "CCTV-6 电影（KS）",
+          "logical_id": "cctv6",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv7": {
+          "name": "CCTV-7 国防军事",
+          "logical_id": "cctv7",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv7_bd": {
+          "name": "CCTV-7 国防军事（百度）",
+          "logical_id": "cctv7",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv7_ks": {
+          "name": "CCTV-7 国防军事（KS）",
+          "logical_id": "cctv7",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv8": {
+          "name": "CCTV-8 电视剧",
+          "logical_id": "cctv8",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv8_bd": {
+          "name": "CCTV-8 电视剧（百度）",
+          "logical_id": "cctv8",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv8_ks": {
+          "name": "CCTV-8 电视剧（KS）",
+          "logical_id": "cctv8",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctvjilu": {
+          "name": "CCTV-9 纪录",
+          "logical_id": "cctvjilu",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctvjilu_bd": {
+          "name": "CCTV-9 纪录（百度）",
+          "logical_id": "cctvjilu",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctvjilu_ks": {
+          "name": "CCTV-9 纪录（KS）",
+          "logical_id": "cctvjilu",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv10": {
+          "name": "CCTV-10 科教",
+          "logical_id": "cctv10",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv10_bd": {
+          "name": "CCTV-10 科教（百度）",
+          "logical_id": "cctv10",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv10_ks": {
+          "name": "CCTV-10 科教（KS）",
+          "logical_id": "cctv10",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv11": {
+          "name": "CCTV-11 戏曲",
+          "logical_id": "cctv11",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv11_bd": {
+          "name": "CCTV-11 戏曲（百度）",
+          "logical_id": "cctv11",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv11_ks": {
+          "name": "CCTV-11 戏曲（KS）",
+          "logical_id": "cctv11",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv12": {
+          "name": "CCTV-12 社会与法",
+          "logical_id": "cctv12",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv12_bd": {
+          "name": "CCTV-12 社会与法（百度）",
+          "logical_id": "cctv12",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv12_ks": {
+          "name": "CCTV-12 社会与法（KS）",
+          "logical_id": "cctv12",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv13": {
+          "name": "CCTV-13 新闻",
+          "logical_id": "cctv13",
+          "provider": "ws",
+          "upstream_host": "ldncctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv13_bd": {
+          "name": "CCTV-13 新闻（百度）",
+          "logical_id": "cctv13",
+          "provider": "bd",
+          "upstream_host": "ldncctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv13_ks": {
+          "name": "CCTV-13 新闻（KS）",
+          "logical_id": "cctv13",
+          "provider": "ks",
+          "upstream_host": "ldncctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctvchild": {
+          "name": "CCTV-14 少儿",
+          "logical_id": "cctvchild",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctvchild_bd": {
+          "name": "CCTV-14 少儿（百度）",
+          "logical_id": "cctvchild",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctvchild_ks": {
+          "name": "CCTV-14 少儿（KS）",
+          "logical_id": "cctvchild",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv15": {
+          "name": "CCTV-15 音乐",
+          "logical_id": "cctv15",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv15_bd": {
+          "name": "CCTV-15 音乐（百度）",
+          "logical_id": "cctv15",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv15_ks": {
+          "name": "CCTV-15 音乐（KS）",
+          "logical_id": "cctv15",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv17": {
+          "name": "CCTV-17农业农村",
+          "logical_id": "cctv17",
+          "provider": "ws",
+          "upstream_host": "ldocctvcpudcnc.v.wscdns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv17_bd": {
+          "name": "CCTV-17农业农村（百度）",
+          "logical_id": "cctv17",
+          "provider": "bd",
+          "upstream_host": "ldocctvcpudbd.a.bdydns.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "cctv17_ks": {
+          "name": "CCTV-17农业农村（KS）",
+          "logical_id": "cctv17",
+          "provider": "ks",
+          "upstream_host": "ldocctvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "guangdong": {
+          "name": "广东卫视",
+          "logical_id": "guangdong",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 2,
+          "playlist_age_seconds": 20.46,
+          "last_refresh_seconds": 6.293,
+          "processing_to_video_ratio": 0.024,
+          "error": ""
+        },
+        "guangdong_ks": {
+          "name": "广东卫视（KS）",
+          "logical_id": "guangdong",
+          "provider": "ks",
+          "upstream_host": "wstvcpudks.v.kcdnvip.com",
+          "cached_segments": 5,
+          "playlist_age_seconds": 0.85,
+          "last_refresh_seconds": 9.868,
+          "processing_to_video_ratio": 0.041,
+          "error": ""
+        },
+        "btv1": {
+          "name": "北京卫视",
+          "logical_id": "btv1",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "dongfang": {
+          "name": "东方卫视",
+          "logical_id": "dongfang",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "neimenggu": {
+          "name": "内蒙古卫视",
+          "logical_id": "neimenggu",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "dongnan": {
+          "name": "东南卫视",
+          "logical_id": "dongnan",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "henan": {
+          "name": "河南卫视",
+          "logical_id": "henan",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "henan_ks": {
+          "name": "河南卫视（KS）",
+          "logical_id": "henan",
+          "provider": "ks",
+          "upstream_host": "wstvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "guangxi": {
+          "name": "广西卫视",
+          "logical_id": "guangxi",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "guizhou": {
+          "name": "贵州卫视",
+          "logical_id": "guizhou",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "gansu": {
+          "name": "甘肃卫视",
+          "logical_id": "gansu",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "tianjin": {
+          "name": "天津卫视",
+          "logical_id": "tianjin",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "tianjin_ks": {
+          "name": "天津卫视（KS）",
+          "logical_id": "tianjin",
+          "provider": "ks",
+          "upstream_host": "wstvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "liaoning": {
+          "name": "辽宁卫视",
+          "logical_id": "liaoning",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "jiangxi": {
+          "name": "江西卫视",
+          "logical_id": "jiangxi",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "hubei": {
+          "name": "湖北卫视",
+          "logical_id": "hubei",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "travel": {
+          "name": "海南卫视",
+          "logical_id": "travel",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "travel_ks": {
+          "name": "海南卫视（KS）",
+          "logical_id": "travel",
+          "provider": "ks",
+          "upstream_host": "wstvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "yunnan": {
+          "name": "云南卫视",
+          "logical_id": "yunnan",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "qinghai": {
+          "name": "青海卫视",
+          "logical_id": "qinghai",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "hebei": {
+          "name": "河北卫视",
+          "logical_id": "hebei",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "jilin": {
+          "name": "吉林卫视",
+          "logical_id": "jilin",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "shandong": {
+          "name": "山东卫视",
+          "logical_id": "shandong",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "shandong_ks": {
+          "name": "山东卫视（KS）",
+          "logical_id": "shandong",
+          "provider": "ks",
+          "upstream_host": "wstvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "chongqing": {
+          "name": "重庆卫视",
+          "logical_id": "chongqing",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "chongqing_ks": {
+          "name": "重庆卫视（KS）",
+          "logical_id": "chongqing",
+          "provider": "ks",
+          "upstream_host": "wstvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "xizang": {
+          "name": "西藏卫视",
+          "logical_id": "xizang",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "ningxia": {
+          "name": "宁夏卫视",
+          "logical_id": "ningxia",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "shan1xi": {
+          "name": "山西卫视",
+          "logical_id": "shan1xi",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "heilongjiang": {
+          "name": "黑龙江卫视",
+          "logical_id": "heilongjiang",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "anhui": {
+          "name": "安徽卫视",
+          "logical_id": "anhui",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "sichuan": {
+          "name": "四川卫视",
+          "logical_id": "sichuan",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "sichuan_ks": {
+          "name": "四川卫视（KS）",
+          "logical_id": "sichuan",
+          "provider": "ks",
+          "upstream_host": "wstvcpudks.v.kcdnvip.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "shan3xi": {
+          "name": "陕西卫视",
+          "logical_id": "shan3xi",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "xinjiang": {
+          "name": "新疆卫视",
+          "logical_id": "xinjiang",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "xianggangweishi": {
+          "name": "香港卫视",
+          "logical_id": "xianggangweishi",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "shenzhen": {
+          "name": "深圳卫视",
+          "logical_id": "shenzhen",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "btv5": {
+          "name": "BRTV财经",
+          "logical_id": "btv5",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "btv2": {
+          "name": "BRTV文艺",
+          "logical_id": "btv2",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "btv3": {
+          "name": "BRTV纪实科教",
+          "logical_id": "btv3",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "btv7": {
+          "name": "BRTV生活",
+          "logical_id": "btv7",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "btv9": {
+          "name": "BRTV新闻",
+          "logical_id": "btv9",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        },
+        "neimenggu2": {
+          "name": "蒙语台",
+          "logical_id": "neimenggu2",
+          "provider": "tx",
+          "upstream_host": "wstvcpudtxy.liveplay.myqcloud.com",
+          "cached_segments": 0,
+          "playlist_age_seconds": null,
+          "last_refresh_seconds": 0,
+          "processing_to_video_ratio": 0,
+          "error": ""
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Per-route short sample validation, not long-duration validation of all 53 programs.",
+    "Final single-file continuous checks cover four representative CDN routes, not all 94.",
+    "Default routes use measured-valid static preferences; no claim of seamless automatic CDN failover or device-side fastest-route selection.",
+    "Eight original directory entries failed this audit; preserved as unverified in CHANNELS-v0.3.0.json and prior 61-channel service.",
+    "Actual iPhone network reachability, first-frame latency and sustained performance remain unverified."
+  ]
+}
