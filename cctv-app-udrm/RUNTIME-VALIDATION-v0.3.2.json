@@ -1,0 +1,71 @@
+{
+  "version": "0.3.2",
+  "tests_passed": 54,
+  "bridge_benchmark": {
+    "script_sha256": "89b9bc0c8050be2c35a353d9b549143dac2280983082a95d0cd144243b6cb889",
+    "scope": "Linux JSC bridge synthetic 4x512KiB; includes JS slice; not SDK throughput or process RSS",
+    "results": {
+      "old": {
+        "rounds": 30,
+        "seconds": 0.0274,
+        "python_traced_peak_bytes": 8389226
+      },
+      "new": {
+        "rounds": 30,
+        "seconds": 0.0197,
+        "python_traced_peak_bytes": 4195196
+      }
+    }
+  },
+  "media_regression": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 5.13
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.622
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.512
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "forced_native_usleep_probes": [
+      {
+        "microseconds": 20000,
+        "result": 0,
+        "elapsed_seconds": 0.0248
+      }
+    ],
+    "wall_seconds": 7.653,
+    "script_sha256": "89b9bc0c8050be2c35a353d9b549143dac2280983082a95d0cd144243b6cb889"
+  },
+  "iphone_tested": false
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.3.1: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.3.2: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -385,20 +385,28 @@ PYTHON_SOURCES = {
         "   if error.value or not obj:raise RuntimeError('JSC media object failed')\n"
         '   return obj\n'
         '  finally:self.j.JSStringRelease(source)\n'
-        ' def put_media(self,data):\n'
-        "  if not 0<len(data)<=4*1024*1024:raise ValueError('Media buffer limit')\n"
-        '  # Only host-owned media buffers cross this API, never SDK heap/state pointers.\n'
-        '  obj=self._media_object(\'if(typeof __mediaInput==="undefined"||__mediaInput.length<\'+str(len(data))+\')__mediaInput=new Uint8Array(\'+str(max(65536,1<<(len(data)-1).bit_length()))+\');__mediaInput\')\n'
+        ' def put_media(self,data):return self.put_media_parts([data])\n'
+        ' def put_media_parts(self,parts):\n'
+        '  size=sum(map(len,parts))\n'
+        "  if not 0<size<=4*1024*1024:raise ValueError('Media buffer limit')\n"
+        '  # Resolve the backing store once; no JS calls while copying through its pointer.\n'
+        '  obj=self._media_object(\'if(typeof __mediaInput==="undefined"||__mediaInput.length<\'+str(size)+\')__mediaInput=new Uint8Array(\'+str(max(65536,1<<(size-1).bit_length()))+\');__mediaInput\')\n'
         '  error=c.c_void_p();pointer=self.j.JSObjectGetTypedArrayBytesPtr(self.context,obj,c.byref(error))\n'
         "  if error.value or not pointer:raise RuntimeError('JSC input buffer failed')\n"
-        '  c.memmove(pointer,data,len(data))\n'
-        ' def read_media(self,size):\n'
+        '  offset=0\n'
+        '  for part in parts:c.memmove(pointer+offset,part,len(part));offset+=len(part)\n'
+        ' def read_media(self,size):return self.read_media_parts([size])[0]\n'
+        ' def read_media_parts(self,sizes):\n'
+        '  size=sum(sizes)\n'
+        "  if not sizes or any(n<=0 for n in sizes) or size>4*1024*1024:raise ValueError('Media buffer limit')\n"
         "  obj=self._media_object('__mediaOutput');error=c.c_void_p()\n"
         '  actual=self.j.JSObjectGetTypedArrayByteLength(self.context,obj,c.byref(error))\n'
         "  if error.value or actual!=size:raise RuntimeError('JSC output buffer length failed')\n"
         '  pointer=self.j.JSObjectGetTypedArrayBytesPtr(self.context,obj,c.byref(error))\n'
         "  if error.value or not pointer:raise RuntimeError('JSC output buffer failed')\n"
-        '  return c.string_at(pointer,size)\n'
+        '  result=[];offset=0\n'
+        '  for length in sizes:result.append(c.string_at(pointer+offset,length));offset+=length\n'
+        '  return result\n'
         ' def collect(self):self.j.JSGarbageCollect(self.context)\n'
         ' def close(self):\n'
         '  if self.context:self.j.JSGlobalContextRelease(self.context);self.context=None\n'
@@ -921,14 +929,12 @@ PYTHON_SOURCES = {
         ' def process_batch(self,channel,frames):\n'
         "  if not self.licensed:raise RuntimeError('Official license required')\n"
         "  if not 1<=len(frames)<=4 or any(not isinstance(f,bytes) or len(f)<4 for f in frames):raise ValueError('Invalid media batch')\n"
-        "  data=b''.join(frames)\n"
-        "  if len(data)>4*1024*1024:raise ValueError('Media batch size limit')\n"
-        '  self.host.put_media(data)\n'
-        "  reply=self._call('__vm.batchBinary('+json.dumps(channel)+','+json.dumps([len(f) for f in frames])+')')\n"
+        '  sizes=[len(f) for f in frames]\n'
+        "  if sum(sizes)>4*1024*1024:raise ValueError('Media batch size limit')\n"
+        '  self.host.put_media_parts(frames)\n'
+        "  reply=self._call('__vm.batchBinary('+json.dumps(channel)+','+json.dumps(sizes)+')')\n"
         "  if reply['code']!=0:raise RuntimeError('SDK media rejected code='+str(reply['code']))\n"
-        '  output=self.host.read_media(len(data));result=[];offset=0\n'
-        '  for f in frames:result.append(output[offset:offset+len(f)]);offset+=len(f)\n'
-        '  return result\n'
+        '  return self.host.read_media_parts(sizes)\n'
         " def reset(self,channel):self.host.evaluate('__vm.reset('+json.dumps(channel)+')')\n"
         ' def features(self):\n'
         "  return json.loads(self.host.evaluate('JSON.stringify({bulk_memory:!!__vm.bulk,register_batch:!!__vm.readNativeArguments,register_scalar:!!(__vm.bulk&&__vm.bulk.scalarRegisters)})'))\n"
@@ -2060,7 +2066,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.3.1'\n"
+        "VERSION = '0.3.2'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'from route_catalog import CHANNEL_ROUTES,PROVIDER_LABELS,VERIFIED_AT_UTC\n'
         'from epg_store import EpgStore\n'
