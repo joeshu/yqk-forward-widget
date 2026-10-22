@@ -5,6 +5,7 @@
 #import <objc/message.h>
 #import <string.h>
 
+static NSString *const kBuildTag = @"0.3.1 (a68a947 + retry)";
 static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTVGetLicense";
 
 @interface RootViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate>
@@ -21,6 +22,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, strong) UIButton *muteBtn;
 @property (nonatomic, strong) UIButton *fullBtn;
 @property (nonatomic, strong) UIButton *logBtn;
+@property (nonatomic, strong) UIStackView *controlBar;
 // 频道列表
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UISegmentedControl *groupControl;
@@ -36,6 +38,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, strong) id sdkPlayer;
 @property (nonatomic, strong) CicadaPlayer *cicadaPlayer;
 @property (nonatomic, strong) UILabel *nowLabel;
+@property (nonatomic, strong) UILabel *buildLabel;
+@property (nonatomic, strong) UILabel *lastLogLabel;
 @property (nonatomic, strong) UIButton *epgBtn;
 @property (nonatomic, strong) NSURLSessionDataTask *epgTask;
 @property (nonatomic, strong) NSTimer *epgTimer;
@@ -60,6 +64,9 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
             self.logView.text = self.logBuffer;
             [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length, 0)];
         }
+        NSString *one = [msg componentsSeparatedByString:@"\n"].firstObject ?: @"";
+        if (one.length > 42) one = [[one substringToIndex:42] stringByAppendingString:@"…"];
+        self.lastLogLabel.text = one;
     });
 }
 
@@ -165,12 +172,30 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.spinner.hidesWhenStopped = YES;
     [self.playerBox addSubview:self.spinner];
 
-    CGFloat cy = w * 9.0 / 16.0 - 40;
-    self.playPauseBtn = [self controlButton:@"暂停" x:8 y:cy action:@selector(togglePlayPause)];
-    self.muteBtn = [self controlButton:@"静音" x:80 y:cy action:@selector(toggleMute)];
-    self.fullBtn = [self controlButton:@"全屏" x:152 y:cy action:@selector(toggleFullscreen)];
-    self.epgBtn = [self controlButton:@"节目单" x:w - 146 y:cy action:@selector(openEPG)];
-    self.logBtn = [self controlButton:@"日志" x:w - 74 y:cy action:@selector(toggleLog)];
+    self.controlBar = [[UIStackView alloc] initWithFrame:CGRectMake(8, w * 9.0 / 16.0 - 38, w - 16, 30)];
+    self.controlBar.axis = UILayoutConstraintAxisHorizontal;
+    self.controlBar.distribution = UIStackViewDistributionFillEqually;
+    self.controlBar.spacing = 6;
+    self.playPauseBtn = [self stackButton:@"暂停" action:@selector(togglePlayPause)];
+    self.muteBtn = [self stackButton:@"静音" action:@selector(toggleMute)];
+    self.fullBtn = [self stackButton:@"全屏" action:@selector(toggleFullscreen)];
+    self.epgBtn = [self stackButton:@"节目单" action:@selector(openEPG)];
+    self.logBtn = [self stackButton:@"日志" action:@selector(toggleLog)];
+    for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.fullBtn, self.epgBtn, self.logBtn]) {
+        [self.controlBar addArrangedSubview:b];
+    }
+    [self.playerBox addSubview:self.controlBar];
+}
+
+- (UIButton *)stackButton:(NSString *)title action:(SEL)action {
+    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+    [b setTitle:title forState:UIControlStateNormal];
+    [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    b.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45];
+    b.titleLabel.font = [UIFont systemFontOfSize:13];
+    b.layer.cornerRadius = 6;
+    [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return b;
 }
 
 - (UIButton *)controlButton:(NSString *)title x:(CGFloat)x y:(CGFloat)y action:(SEL)action {
@@ -192,6 +217,19 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
 - (void)buildList {
     CGFloat y = CGRectGetMaxY(self.playerBox.frame);
+
+    self.buildLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, y + 2, self.view.bounds.size.width - 16, 16)];
+    self.buildLabel.textColor = [UIColor colorWithWhite:0.55 alpha:1];
+    self.buildLabel.font = [UIFont systemFontOfSize:10];
+    self.buildLabel.text = [NSString stringWithFormat:@"版本 %@ · SDK %@", kBuildTag, @"3.23.28"];
+    [self.view addSubview:self.buildLabel];
+
+    self.lastLogLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, y + 18, self.view.bounds.size.width - 16, 16)];
+    self.lastLogLabel.textColor = [UIColor colorWithRed:0.55 green:0.85 blue:0.6 alpha:1];
+    self.lastLogLabel.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
+    self.lastLogLabel.text = @"等待操作…";
+    [self.view addSubview:self.lastLogLabel];
+    y += 38;
     self.groupControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"央视", @"卫视", @"地方", @"教育"]];
     self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 30);
     self.groupControl.selectedSegmentIndex = 0;
@@ -349,9 +387,21 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     }
     id accepted = [self callInstance:inst selector:playSel args:@[cid, self, @{}]];
     if ([accepted isKindOfClass:NSNumber.class] && ![accepted boolValue]) {
-        self.overlayTitle.text = @"起播被拒绝";
-        [self log:@"起播返回 0，等待错误回调"];
-        return;
+        [self log:@"复用实例起播返回 0，换新实例重试"];
+        id fresh = nil;
+        @try { fresh = [[CNPlayerCls alloc] init]; } @catch (NSException *e) {}
+        if (fresh) {
+            self.sdkPlayer = fresh;
+            self.currentPlayer = fresh;
+            @try { [fresh setValue:@(YES) forKey:@"autoPlay"]; } @catch (NSException *e) {}
+            accepted = [self callInstance:fresh selector:playSel args:@[cid, self, @{}]];
+            inst = fresh;
+        }
+        if ([accepted isKindOfClass:NSNumber.class] && ![accepted boolValue]) {
+            self.overlayTitle.text = @"起播被拒绝（已重试）";
+            [self log:@"新实例仍返回 0，停止"];
+            return;
+        }
     }
     [self attachPlayerViewAnimated:NO];
     [self callInstance:inst selector:NSSelectorFromString(@"prepareToPlay") args:@[]];
@@ -448,11 +498,15 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         self.playerBox.frame = CGRectMake(0, 0, w, h);
         self.table.hidden = YES;
         self.groupControl.hidden = YES;
+        self.buildLabel.hidden = YES;
+        self.lastLogLabel.hidden = YES;
         self.navigationController.navigationBarHidden = YES;
     } else {
         self.playerBox.frame = CGRectMake(0, 0, w, w * 9.0 / 16.0);
         self.table.hidden = NO;
         self.groupControl.hidden = NO;
+        self.buildLabel.hidden = NO;
+        self.lastLogLabel.hidden = NO;
         self.navigationController.navigationBarHidden = NO;
     }
     [self repositionControls];
@@ -461,12 +515,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
 - (void)repositionControls {
     CGRect box = self.playerBox.bounds;
-    CGFloat cy = box.size.height - 40;
-    self.playPauseBtn.frame = CGRectMake(8, cy, 68, 30);
-    self.muteBtn.frame = CGRectMake(80, cy, 70, 30);
-    self.fullBtn.frame = CGRectMake(152, cy, 70, 30);
-    self.epgBtn.frame = CGRectMake(box.size.width - 146, cy, 68, 30);
-    self.logBtn.frame = CGRectMake(box.size.width - 74, cy, 68, 30);
+    self.controlBar.frame = CGRectMake(8, box.size.height - 38, box.size.width - 16, 30);
     self.spinner.center = CGPointMake(box.size.width / 2, box.size.height / 2);
     self.overlayTitle.frame = CGRectMake(12, 8, box.size.width - 24, 20);
     self.nowLabel.frame = CGRectMake(12, 28, box.size.width - 24, 16);
@@ -560,6 +609,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         [self.spinner stopAnimating];
         if (!self.firstRender) {
             self.overlayTitle.text = [NSString stringWithFormat:@"%@ · 无画面", self.currentChannelName];
+            self.lastLogLabel.text = @"无画面，已自动打开日志";
+            self.logVisible = NO; [self toggleLog];
             [self log:@"监视结束仍未首帧"];
         }
     }
