@@ -60,7 +60,7 @@ clang -arch arm64 \
   -I Sources/Include \
   -F Frameworks \
   -framework Foundation -framework UIKit \
-  -framework CNPlayerSDK -framework CicadaPlayerSDK -framework alivcffmpeg -framework AVFoundation -framework MediaPlayer \
+  -framework CNPlayerSDK -framework CicadaPlayerSDK -framework alivcffmpeg -framework AVFoundation -framework MediaPlayer -framework AVKit \
   -F "$APP/Frameworks" -framework Python \
   -I "$PY_INC" \
   -lz -lsqlite3 -lbz2 -liconv -lc++ \

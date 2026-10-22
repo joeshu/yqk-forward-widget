@@ -6,11 +6,12 @@
 #import "PyHost.h"
 #import <AVFoundation/AVFoundation.h>
 #import <MediaPlayer/MediaPlayer.h>
+#import <AVKit/AVKit.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.12.0";
+static NSString *const kBuildTag = @"0.13.0";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
@@ -68,6 +69,10 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, strong) MPVolumeView *volumeView;
 @property (nonatomic, assign) NSTimeInterval playStartedAt;
 @property (nonatomic, assign) NSTimeInterval firstFrameSeconds;
+@property (nonatomic, strong) NSMutableArray<NSString *> *favorites;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *altSources;
+@property (nonatomic, strong) AVPictureInPictureController *pip;
+@property (nonatomic, strong) UIButton *pipBtn;
 @property (nonatomic, copy) NSString *epgChannel;
 @end
 
@@ -134,6 +139,15 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     });
 }
 
+- (void)togglePiP {
+    if (!AVPictureInPictureController.isPictureInPictureSupported) { [self log:@"设备不支持画中画"]; return; }
+    if (!self.avLayer) { [self log:@"画中画仅支持订阅源（AVPlayer）"]; return; }
+    if (self.pip && self.pip.isPictureInPictureActive) { [self.pip stopPictureInPicture]; return; }
+    self.pip = [[AVPictureInPictureController alloc] initWithPlayerLayer:self.avLayer];
+    [self.pip startPictureInPicture];
+    [self log:@"进入画中画"];
+}
+
 - (void)toggleLog {
     if (self.logVisible) {
         self.logView.hidden = YES;
@@ -186,7 +200,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.epgBtn = [self barButton:@"节目单" action:@selector(openEPG)];
     self.fullBtn = [self barButton:@"全屏" action:@selector(toggleFullscreen)];
     self.logBtn = [self barButton:@"日志" action:@selector(toggleLog)];
-    for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.routeBtn, self.epgBtn, self.fullBtn, self.logBtn]) {
+    self.pipBtn = [self barButton:@"画中画" action:@selector(togglePiP)];
+    for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.routeBtn, self.epgBtn, self.fullBtn, self.logBtn, self.pipBtn]) {
         [self.controlBar addArrangedSubview:b];
     }
     [self.playerBox addSubview:self.controlBar];
@@ -283,7 +298,10 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     }
     self.allChannels = [arr isKindOfClass:NSArray.class] ? arr : @[];
     self.shownChannels = self.allChannels;
+    self.favorites = [NSMutableArray arrayWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:@"favorites"] ?: @[]];
+    self.altSources = [NSMutableDictionary dictionary];
     self.epgCache = [NSMutableDictionary dictionary];
+    [self loadEPGCache];
     self.epgInflight = [NSMutableSet set];
     self.recents = [NSMutableArray arrayWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:@"recents"] ?: @[]];
     self.subscriptions = [NSMutableArray array];
@@ -296,6 +314,25 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self log:@"频道 %lu 个 / 线路 %lu 条",
          (unsigned long)self.allChannels.count,
          (unsigned long)[[self.allChannels valueForKeyPath:@"@sum.routes.@count"] integerValue]];
+}
+
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)t trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip {
+    NSArray *rows = [self channelsForSection:ip.section tableView:t];
+    if (ip.row >= rows.count) return nil;
+    NSDictionary *ch = rows[ip.row];
+    NSString *cid = ch[@"id"] ?: @"";
+    BOOL fav = [self.favorites containsObject:cid];
+    NSString *label = fav ? @"取消收藏" : @"收藏";
+    UIContextualAction *action = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:label
+                                                                       handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
+        if (fav) [self.favorites removeObject:cid];
+        else [self.favorites addObject:cid];
+        [[NSUserDefaults standardUserDefaults] setObject:self.favorites forKey:@"favorites"];
+        [self applyFilter];
+        done(YES);
+    }];
+    action.backgroundColor = fav ? [UIColor colorWithWhite:0.35 alpha:1] : [UIColor systemOrangeColor];
+    return [UISwipeActionsConfiguration configurationWithActions:@[action]];
 }
 
 - (void)onGroupChanged {
@@ -338,7 +375,10 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     NSDictionary *ch = rows[ip.row];
     BOOL playing = [ch[@"id"] isEqualToString:self.channelID];
     cell.textLabel.textColor = playing ? [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1] : UIColor.whiteColor;
-    cell.textLabel.text = playing ? [NSString stringWithFormat:@"● %@", ch[@"name"]] : ch[@"name"];
+    BOOL fav = [self.favorites containsObject:ch[@"id"] ?: @""];
+    NSString *title = ch[@"name"] ?: ch[@"id"];
+    if (fav) title = [@"★ " stringByAppendingString:title];
+    cell.textLabel.text = playing ? [NSString stringWithFormat:@"● %@", title] : title;
 
     if ([ch[@"logo"] length]) {
         [self loadLogo:ch[@"logo"] into:cell.imageView];
@@ -798,6 +838,39 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = info;
 }
 
+#pragma mark - EPG 缓存
+
+- (NSString *)epgCachePath {
+    NSString *dir = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject];
+    return [dir stringByAppendingPathComponent:@"epg-cache.json"];
+}
+
+- (void)loadEPGCache {
+    NSData *data = [NSData dataWithContentsOfFile:[self epgCachePath]];
+    if (!data) return;
+    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+    if (![json isKindOfClass:NSDictionary.class]) return;
+    double now = NSDate.date.timeIntervalSince1970;
+    [(NSDictionary *)json enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSDictionary *obj, BOOL *stop) {
+        double ts = [obj[@"ts"] doubleValue];
+        if (now - ts < 6 * 3600 && [obj[@"now"] isKindOfClass:NSString.class]) self.epgCache[key] = obj;
+    }];
+    [self log:@"EPG 缓存载入 %lu 条", (unsigned long)self.epgCache.count];
+}
+
+- (void)saveEPGCache {
+    NSData *data = [NSJSONSerialization dataWithJSONObject:self.epgCache options:0 error:NULL];
+    [data writeToFile:[self epgCachePath] atomically:YES];
+}
+
+- (NSIndexPath *)indexPathForChannelID:(NSString *)cid {
+    NSUInteger row = [self.shownChannels indexOfObjectPassingTest:^BOOL(NSDictionary *o, NSUInteger i, BOOL *stop) {
+        return [o[@"id"] isEqualToString:cid ?: @""];
+    }];
+    if (row == NSNotFound) return nil;
+    return [NSIndexPath indexPathForRow:(NSInteger)row inSection:([self numberOfSectionsInTableView:self.table] == 2 ? 1 : 0)];
+}
+
 #pragma mark - 台标
 
 static NSCache *LogoCache(void) {
@@ -847,7 +920,14 @@ static NSCache *LogoCache(void) {
             return [[o[@"name"] lowercaseString] containsString:q] || [[o[@"id"] lowercaseString] containsString:q];
         }]];
     }
-    self.shownChannels = base;
+    NSMutableArray *sorted = [base mutableCopy];
+    [sorted sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        BOOL fa = [self.favorites containsObject:a[@"id"] ?: @""];
+        BOOL fb = [self.favorites containsObject:b[@"id"] ?: @""];
+        if (fa != fb) return fa ? NSOrderedAscending : NSOrderedDescending;
+        return NSOrderedSame;
+    }];
+    self.shownChannels = sorted;
     [self.table reloadData];
 }
 
@@ -896,8 +976,10 @@ static NSCache *LogoCache(void) {
                 else if (s0 > now && !nxt) nxt = row[@"title"];
             }
             if (cur || nxt) {
-                weakSelf.epgCache[cid] = @{@"now": cur ?: @"", @"next": nxt ?: @""};
-                [weakSelf.table reloadData];
+                weakSelf.epgCache[cid] = @{@"now": cur ?: @"", @"next": nxt ?: @"", @"ts": @(now)};
+                [weakSelf saveEPGCache];
+                NSIndexPath *path = [weakSelf indexPathForChannelID:cid];
+                if (path) [weakSelf.table reloadRowsAtIndexPaths:@[path] withRowAnimation:UITableViewRowAnimationNone];
             }
         });
     }] resume];
@@ -948,6 +1030,11 @@ static NSCache *LogoCache(void) {
                 id key = c.url;
                 if ([names containsObject:key]) continue;
                 [names addObject:key];
+                if (c.name.length && c.url.length) {
+                    NSMutableArray *alts = self.altSources[c.name];
+                    if (!alts) { alts = [NSMutableArray array]; self.altSources[c.name] = alts; }
+                    if (![alts containsObject:c.url]) [alts addObject:c.url];
+                }
                 NSMutableDictionary *entry = [@{@"id": c.name ?: c.url,
                                                 @"name": c.name ?: c.url,
                                                 @"group": c.group ?: @"订阅",
@@ -1003,6 +1090,20 @@ static NSCache *LogoCache(void) {
 - (void)avItemFailed:(NSNotification *)n {
     NSError *e = n.userInfo[AVPlayerItemFailedToPlayToEndTimeErrorKey];
     [self log:@"订阅播放失败 %@", e.localizedDescription];
+    [self tryAlternateSource];
+}
+
+- (void)tryAlternateSource {
+    NSString *name = self.channelName;
+    NSMutableArray *alts = self.altSources[name];
+    if (alts.count < 2) return;
+    NSString *current = self.channelID;
+    for (NSString *u in alts) {
+        if ([u isEqualToString:current]) continue;
+        [self log:@"换源重试 %@", u];
+        [self playRemote:@{@"id": u, @"name": name ?: u, @"group": @"订阅", @"remoteURL": u}];
+        return;
+    }
 }
 
 - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)obj change:(NSDictionary *)ch context:(void *)ctx {
