@@ -12,6 +12,7 @@ APP="$OUT/CCTVHost.app"
 rm -rf "$OUT"
 mkdir -p "$APP"
 cp Resources/Info.plist "$APP/Info.plist"
+cp Resources/*.json "$APP/" 2>/dev/null || true
 printf 'APPL????' > "$APP/PkgInfo"
 mkdir -p "$APP/Frameworks"
 for f in Frameworks/*.framework; do
