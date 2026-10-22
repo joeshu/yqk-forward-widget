@@ -13,6 +13,21 @@ rm -rf "$OUT"
 mkdir -p "$APP"
 cp Resources/Info.plist "$APP/Info.plist"
 cp Resources/*.json "$APP/" 2>/dev/null || true
+ICON_PARTIAL="$OUT/assetcatalog-info.plist"
+xcrun --sdk iphoneos actool --output-format human-readable-text --notices --warnings \
+  --platform iphoneos --minimum-deployment-target 15.0 --target-device iphone --target-device ipad \
+  --app-icon AppIcon --compress-pngs --compile "$APP" \
+  --output-partial-info-plist "$ICON_PARTIAL" Resources/Assets.xcassets
+python3 - "$APP/Info.plist" "$ICON_PARTIAL" <<'PY'
+import plistlib,sys
+base_path,icon_path=sys.argv[1:]
+with open(base_path,'rb') as f: base=plistlib.load(f)
+with open(icon_path,'rb') as f: icon=plistlib.load(f)
+base.update(icon)
+with open(base_path,'wb') as f: plistlib.dump(base,f,sort_keys=False)
+assert 'CFBundleIcons' in base and 'CFBundlePrimaryIcon' in base['CFBundleIcons']
+PY
+[ -s "$APP/Assets.car" ] || { echo "::error::AppIcon asset catalog did not produce Assets.car"; exit 1; }
 cp Plugins/ysp-live.py "$APP/ysp-live.py"
 printf 'APPL????' > "$APP/PkgInfo"
 mkdir -p "$APP/Frameworks"
@@ -70,7 +85,7 @@ for f in Frameworks/*.framework; do
   cp -R "$f" "$APP/Frameworks/"
 done
 
-SOURCES="Sources/main.m Sources/AppDelegate.m Sources/RootViewController.m Sources/EPGViewController.m Sources/M3UParser.m Sources/PyHost.m Sources/PluginViewController.m Sources/SettingsViewController.m"
+SOURCES="Sources/main.m Sources/AppDelegate.m Sources/RootViewController.m Sources/EPGViewController.m Sources/M3UParser.m Sources/PyHost.m Sources/PluginViewController.m Sources/ServicesViewController.m Sources/SettingsViewController.m"
 
 set -x
 clang -arch arm64 \

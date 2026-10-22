@@ -6,6 +6,7 @@
 #import "PyHost.h"
 #import "PluginViewController.h"
 #import "SettingsViewController.h"
+#import "ServicesViewController.h"
 #import <AVFoundation/AVFoundation.h>
 #import <MediaPlayer/MediaPlayer.h>
 #import <AVKit/AVKit.h>
@@ -13,11 +14,15 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.14.2";
+static NSString *const kBuildTag = @"0.15.0";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
 static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTVGetLicense";
+static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
+    id value=[[NSUserDefaults standardUserDefaults] objectForKey:key];
+    return value ? [value boolValue] : fallback;
+}
 
 @interface RootViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
 // 播放
@@ -89,6 +94,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, assign) NSInteger activeTab;
 @property (nonatomic, assign) BOOL favoritesOnly;
 @property (nonatomic, strong) UIButton *pipBtn;
+@property (nonatomic, strong) UIButton *moreBtn;
 @property (nonatomic, copy) NSString *epgChannel;
 @end
 
@@ -134,6 +140,11 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
 - (void)onBackground {
     [self call:self.currentPlayer sel:@"resignActive"];
+    if (CCTVBoolPreference(@"autoPiP",NO) && self.avLayer && AVPictureInPictureController.isPictureInPictureSupported && !self.pip.isPictureInPictureActive) {
+        self.pip=[[AVPictureInPictureController alloc] initWithPlayerLayer:self.avLayer];
+        [self.pip startPictureInPicture];
+        [self log:@"后台自动进入画中画"];
+    }
     [self log:@"进入后台"];
 }
 
@@ -280,7 +291,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.fullBtn = [self barButton:@"全屏" action:@selector(toggleFullscreen)];
     self.logBtn = [self barButton:@"日志" action:@selector(toggleLog)];
     self.pipBtn = [self barButton:@"画中画" action:@selector(togglePiP)];
-    for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.routeBtn, self.epgBtn, self.fullBtn, self.logBtn, self.pipBtn]) {
+    self.moreBtn = [self barButton:@"更多" action:@selector(showMorePlaybackActions)];
+    for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.routeBtn, self.epgBtn, self.moreBtn]) {
         [self.controlBar addArrangedSubview:b];
     }
     [self.playerBox addSubview:self.controlBar];
@@ -459,21 +471,27 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
 - (void)onGroupChanged {
     self.favoritesOnly=NO; self.activeTab=0;
-    for(UIButton *b in self.bottomBar.arrangedSubviews) [b setTitleColor:b.tag==0?UIColor.systemPinkColor:UIColor.whiteColor forState:UIControlStateNormal];
+    for(UIButton *b in self.bottomBar.arrangedSubviews) { UIButtonConfiguration *cfg=b.configuration; cfg.baseForegroundColor=b.tag==0?UIColor.systemPinkColor:UIColor.whiteColor; b.configuration=cfg; }
     [self applyFilter];
 }
 
 - (void)buildBottomBar {
     self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=4; self.bottomBar.backgroundColor=[UIColor colorWithWhite:0.13 alpha:0.98]; self.bottomBar.layer.cornerRadius=24; self.bottomBar.clipsToBounds=YES;
-    NSArray *titles=@[@"◉\n频道",@"♥\n收藏",@"▣\n服务",@"⚙\n设置"];
-    for (NSInteger i=0;i<titles.count;i++) { UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i; b.titleLabel.numberOfLines=2; b.titleLabel.textAlignment=NSTextAlignmentCenter; b.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]; [b setTitle:titles[i] forState:UIControlStateNormal]; [b setTitleColor:i==0?UIColor.systemPinkColor:UIColor.whiteColor forState:UIControlStateNormal]; [b addTarget:self action:@selector(selectBottomTab:) forControlEvents:UIControlEventTouchUpInside]; [self.bottomBar addArrangedSubview:b]; }
+    NSArray *titles=@[@"频道",@"收藏",@"服务",@"设置"];
+    NSArray *icons=@[@"tv",@"heart",@"square.stack.3d.up",@"gearshape"];
+    for (NSInteger i=0;i<titles.count;i++) {
+        UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;
+        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.baseForegroundColor=(i==0?UIColor.systemPinkColor:UIColor.whiteColor); b.configuration=cfg;
+        b.titleLabel.font=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]; b.accessibilityLabel=titles[i];
+        [b addTarget:self action:@selector(selectBottomTab:) forControlEvents:UIControlEventTouchUpInside]; [self.bottomBar addArrangedSubview:b];
+    }
     [self.view addSubview:self.bottomBar];
 }
 
 - (void)selectBottomTab:(UIButton *)sender {
     self.activeTab=sender.tag;
-    for (UIButton *b in self.bottomBar.arrangedSubviews) [b setTitleColor:b.tag==sender.tag?UIColor.systemPinkColor:UIColor.whiteColor forState:UIControlStateNormal];
-    if (sender.tag==2) { [self openPluginPage]; return; }
+    for (UIButton *b in self.bottomBar.arrangedSubviews) { UIButtonConfiguration *cfg=b.configuration; cfg.baseForegroundColor=b.tag==sender.tag?UIColor.systemPinkColor:UIColor.whiteColor; b.configuration=cfg; }
+    if (sender.tag==2) { [self openServicesPage]; return; }
     if (sender.tag==3) { [self openSettingsPage]; return; }
     self.favoritesOnly=(sender.tag==1);
     if (!self.favoritesOnly) self.groupControl.selectedSegmentIndex=0;
@@ -541,7 +559,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     if (ip.row < 0 || ip.row >= (NSInteger)rows.count) return;
     NSDictionary *ch = rows[(NSUInteger)ip.row];
     [self rememberChannel:ch];
-    [[NSUserDefaults standardUserDefaults] setObject:ch forKey:@"lastChannel"];
+    if (CCTVBoolPreference(@"rememberLastChannel",YES)) [[NSUserDefaults standardUserDefaults] setObject:ch forKey:@"lastChannel"];
     if ([ch[@"remoteURL"] length]) [self playRemote:ch];
     else [self playChannel:ch route:nil];
 }
@@ -629,7 +647,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     if (!session) return;
     BOOL (*setCategory)(id, SEL, NSString *, NSError **) = (void *)objc_msgSend;
     BOOL (*setActive)(id, SEL, BOOL, NSError **) = (void *)objc_msgSend;
-    setCategory(session, NSSelectorFromString(@"setCategory:error:"), @"AVAudioSessionCategoryPlayback", NULL);
+    NSString *category=CCTVBoolPreference(@"allowBackgroundAudio",YES)?@"AVAudioSessionCategoryPlayback":@"AVAudioSessionCategoryAmbient";
+    setCategory(session, NSSelectorFromString(@"setCategory:error:"), category, NULL);
     setActive(session, NSSelectorFromString(@"setActive:error:"), YES, NULL);
 }
 
@@ -650,6 +669,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
     // 续播：启动 2.5 秒后恢复上次频道
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!CCTVBoolPreference(@"resumeLastChannel",YES)) { [self log:@"已关闭启动续播"]; return; }
         NSDictionary *last = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"lastChannel"];
         if (![last[@"id"] length] || self.channelID.length) return;
         [self log:@"续播上次频道 %@", last[@"name"] ?: last[@"id"]];
@@ -911,6 +931,13 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
 #pragma mark - 内置插件
 
+- (void)openServicesPage {
+    ServicesViewController *page=[ServicesViewController new];
+    __weak typeof(self) weakSelf=self;
+    page.onOpenYSP=^{ [weakSelf openPluginPage]; };
+    [self.navigationController pushViewController:page animated:YES];
+}
+
 - (void)openPluginPage {
     PluginViewController *page = [PluginViewController new];
     self.pluginPage = page;
@@ -928,7 +955,14 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 }
 
 - (void)openSettingsPage {
-    SettingsViewController *page=[SettingsViewController new]; [self.navigationController pushViewController:page animated:YES];
+    SettingsViewController *page=[SettingsViewController new];
+    __weak typeof(self) weakSelf=self;
+    page.onClearEPG=^{ [weakSelf.epgCache removeAllObjects]; [weakSelf saveEPGCache]; [weakSelf.table reloadData]; };
+    page.onPreferenceChanged=^(NSString *key, BOOL value){
+        if ([key isEqualToString:@"allowBackgroundAudio"]) [weakSelf activateAudioSession];
+        if ([key isEqualToString:@"autoLoadEPG"]) { [weakSelf.epgTimer invalidate]; weakSelf.epgTimer=nil; if(value) [weakSelf restartEPGTimer]; else weakSelf.infoLabel.text=@"节目单自动获取已关闭"; }
+    };
+    [self.navigationController pushViewController:page animated:YES];
 }
 
 - (void)presentSubscriptionActions:(NSDictionary *)channel sourceView:(UIView *)source {
@@ -1153,6 +1187,7 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)loadEPGForChannel:(NSString *)cid section:(NSIndexPath *)ip {
+    if (!CCTVBoolPreference(@"autoLoadEPG",YES)) return;
     if (!cid.length || self.epgCache[cid] || [self.epgInflight containsObject:cid]) return;
     if (self.epgInflight.count >= 3) return;
     [self.epgInflight addObject:cid];
@@ -1469,11 +1504,13 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)restartEPGTimer {
+    if (!CCTVBoolPreference(@"autoLoadEPG",YES)) { [self.epgTimer invalidate]; self.epgTimer=nil; return; }
     [self.epgTimer invalidate];
     self.epgTimer = [NSTimer scheduledTimerWithTimeInterval:60 target:self selector:@selector(refreshNowNext) userInfo:nil repeats:YES];
 }
 
 - (void)refreshNowNext {
+    if (!CCTVBoolPreference(@"autoLoadEPG",YES)) return;
     NSString *cid = self.channelID;
     if (!cid.length) return;
     self.epgChannel = cid;
@@ -1682,6 +1719,27 @@ static NSCache *LogoCache(void) {
     if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ [self authFailed:error]; }); return; }
     [self log:@"鉴权失败 %ld", (long)error.code];
     self.titleLabel.text = @"鉴权失败";
+}
+
+- (void)showPlaybackInfo {
+    NSString *engine=self.avPlayer?@"AVPlayer · HLS/系统解码":@"CNPlayerSDK · 官方调度与授权";
+    NSString *route=self.avPlayer?@"订阅源":(self.routeName.length?self.routeName:@"自动选线");
+    NSString *first=self.firstRender?[NSString stringWithFormat:@"%.2f 秒",self.firstFrameSeconds]:@"尚未出首帧";
+    NSString *message=[NSString stringWithFormat:@"频道：%@\nID：%@\n播放引擎：%@\n线路请求：%@\n首帧：%@\n版本：%@\n\n注：线路请求/偏好不代表 SDK 最终使用的 CDN。",self.channelName ?: @"—",self.channelID ?: @"—",engine,route,first,kBuildTag];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"播放信息" message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)showMorePlaybackActions {
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:self.channelName ?: @"播放操作" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:self.fullscreen?@"退出全屏":@"全屏" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self toggleFullscreen]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"播放信息" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self showPlaybackInfo]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"画中画" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self togglePiP]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"诊断日志" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self toggleLog]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    if (sheet.popoverPresentationController) { sheet.popoverPresentationController.sourceView=self.moreBtn; sheet.popoverPresentationController.sourceRect=self.moreBtn.bounds; }
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 @end

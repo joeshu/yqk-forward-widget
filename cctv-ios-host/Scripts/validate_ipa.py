@@ -39,8 +39,10 @@ def validate(path):
         assert z.testzip() is None, 'ZIP checksum failure'
         root = 'Payload/CCTVHost.app/'
         info = plistlib.loads(z.read(root + 'Info.plist'))
-        binary = info['CFBundleExecutable']
-        result = {'bundle_id': info['CFBundleIdentifier'], 'binaries': {}}
+        assert root + 'Assets.car' in z.namelist(), 'missing compiled AppIcon Assets.car'
+        primary_icon = info.get('CFBundleIcons', {}).get('CFBundlePrimaryIcon', {})
+        assert primary_icon, 'missing CFBundlePrimaryIcon in Info.plist'
+        result = {'bundle_id': info['CFBundleIdentifier'], 'app_icon': True, 'binaries': {}}
         result['binaries'][binary] = macho_info(z.read(root + binary))
         for name in ('CNPlayerSDK', 'CicadaPlayerSDK', 'alivcffmpeg'):
             member = f'{root}Frameworks/{name}.framework/{name}'

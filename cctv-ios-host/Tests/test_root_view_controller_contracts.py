@@ -8,6 +8,7 @@ TEXT = SOURCE.read_text(encoding="utf-8")
 PYHOST = (SOURCE.parent / "PyHost.m").read_text(encoding="utf-8")
 PLUGIN = (SOURCE.parent / "PluginViewController.m").read_text(encoding="utf-8")
 SETTINGS = (SOURCE.parent / "SettingsViewController.m").read_text(encoding="utf-8")
+SERVICES = (SOURCE.parent / "ServicesViewController.m").read_text(encoding="utf-8")
 EPG = (SOURCE.parent / "EPGViewController.m").read_text(encoding="utf-8")
 
 
@@ -87,11 +88,23 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("playViaSDK:cid title:name", body)
         self.assertIn("self.playbackGeneration += 1", method_body("- (void)playRemote:"))
 
-    def test_bottom_tabs_open_plugin_and_settings_pages(self):
+    def test_bottom_tabs_open_service_directory_and_settings_pages(self):
         self.assertIn('- (void)buildBottomBar', TEXT)
-        self.assertIn('[self openPluginPage]', TEXT)
+        self.assertIn('[self openServicesPage]', TEXT)
         self.assertIn('[self openSettingsPage]', TEXT)
+        self.assertIn('ServicesViewController *page', TEXT)
+        self.assertIn('[weakSelf openPluginPage]', TEXT)
         self.assertIn('SettingsViewController *page', TEXT)
+
+    def test_settings_preferences_are_wired_to_real_playback_behavior(self):
+        for key in ['resumeLastChannel','rememberLastChannel','autoLoadEPG','allowBackgroundAudio','autoPiP']:
+            self.assertIn('@"' + key + '"', TEXT)
+            self.assertIn('@"' + key + '"', SETTINGS)
+
+    def test_services_directory_shows_live_status_and_opens_detail(self):
+        self.assertIn('PyHost.running', SERVICES)
+        self.assertIn('onOpenYSP', SERVICES)
+        self.assertIn('127.0.0.1:8767', SERVICES)
 
     def test_plugin_and_settings_pages_use_safe_area_cards_and_live_status(self):
         self.assertIn('UIScrollView', PLUGIN)
