@@ -1,0 +1,89 @@
+{
+  "version": "0.3.1",
+  "script_sha256": "2478d8f4ad6740a56040ee668a32ba5e1668f45712c3286f71036feee62b84d7",
+  "unit_tests": {
+    "passed": 53,
+    "failed": 0
+  },
+  "epg_http": {
+    "version": "0.3.1",
+    "script_sha256": "2478d8f4ad6740a56040ee668a32ba5e1668f45712c3286f71036feee62b84d7",
+    "environment": "Linux local HTTP and official EPG responses; not iPhone",
+    "epg_status": {
+      "busy": false,
+      "channels_with_data": 52,
+      "total_channels": 53,
+      "programmes": 3174,
+      "updated": 1792628385.2360017,
+      "errors": {
+        "neimenggu2": "官方暂无有效节目单"
+      },
+      "disk_cache_enabled": true
+    },
+    "xmltv_channels": 53,
+    "xmltv_programmes": 3174,
+    "plain_bytes": 450342,
+    "gzip_bytes": 39524,
+    "gzip_matches_plain": true,
+    "all_m3u_ids_have_xmltv_channel": true,
+    "logical_m3u_ids": 53,
+    "now_channels": 52,
+    "next_channels": 52
+  },
+  "media_regression": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 4.525
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.636
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.525
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "forced_native_usleep_probes": [
+      {
+        "microseconds": 20000,
+        "result": 0,
+        "elapsed_seconds": 0.0246
+      }
+    ],
+    "wall_seconds": 7.123,
+    "script_sha256": "2478d8f4ad6740a56040ee668a32ba5e1668f45712c3286f71036feee62b84d7"
+  },
+  "limitations": [
+    "Linux validation; iPhone APTV EPG UI not tested",
+    "52 of 53 official programme guides available; neimenggu2 intentionally empty",
+    "Final HTTP validation loaded official data cached by the preceding cold refresh",
+    "Previous v0.3.0 route audit was not repeated for this EPG change"
+  ]
+}

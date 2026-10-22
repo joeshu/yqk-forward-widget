@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.3.0: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.3.1: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -1870,6 +1870,167 @@ PYTHON_SOURCES = {
         "                            'url': 'https://wstvcpudtxy.liveplay.myqcloud.com/wstvcpud/udrmneimenggu2_1/index.m3u8',\n"
         "                            'resolution': {'width': 960, 'height': 540}}]}}\n"
     ),
+    'epg_store': (
+        '"""Official CNTV schedules -> XMLTV, shared by all routes of each program."""\n'
+        'from concurrent.futures import ThreadPoolExecutor,as_completed\n'
+        'from datetime import datetime,timedelta,timezone\n'
+        'from pathlib import Path\n'
+        'from urllib.request import Request,urlopen\n'
+        'from urllib.parse import urlencode\n'
+        'import gzip,html,json,logging,os,re,tempfile,threading,time\n'
+        'import xml.etree.ElementTree as ET\n'
+        "TZ=timezone(timedelta(hours=8));LOG=logging.getLogger('cbox-app-udrm')\n"
+        "BAD=re.compile(r'[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\ud800-\\udfff\\ufffe\\uffff]')\n"
+        "ALIASES={'cctvjilu':{'cctvjilu','cctv9'},'cctvchild':{'cctvchild','cctv14'}}\n"
+        "def clean(value):return BAD.sub('',html.unescape(value)).strip()\n"
+        'def normalize(rows,channel,now=None):\n'
+        '    now=time.time() if now is None else now\n'
+        '    day=datetime.fromtimestamp(now,TZ).replace(hour=0,minute=0,second=0,microsecond=0)\n'
+        '    lower=(day-timedelta(days=1)).timestamp();upper=(day+timedelta(days=4)).timestamp();found={}\n'
+        "    if not isinstance(rows,list):raise ValueError('EPG rows are not a list')\n"
+        '    for row in rows[:2000]:\n'
+        '        try:\n'
+        "            start=int(row['startTime']);end=int(row['endTime']);title=row['title']\n"
+        '            if start>100000000000:start//=1000\n'
+        '            if end>100000000000:end//=1000\n'
+        '            if not 946684800<=start<end<=4102444800 or end<=lower or start>=upper:continue\n'
+        "            if row.get('channelId') and row['channelId'] not in ALIASES.get(channel,{channel}):continue\n"
+        '            if not isinstance(title,str):continue\n'
+        '            title=clean(title)[:512]\n'
+        "            if not title or title=='频道无节目':continue\n"
+        "            found.setdefault((start,end),{'start':start,'end':end,'title':title})\n"
+        '        except (KeyError,TypeError,ValueError):continue\n'
+        "    return sorted(found.values(),key=lambda row:(row['start'],row['end']))\n"
+        'def get_json(url):\n'
+        "    req=Request(url,headers={'User-Agent':'Mozilla/5.0','Referer':'https://tv.cctv.com/','Accept-Encoding':'identity'})\n"
+        '    with urlopen(req,timeout=8) as response:\n'
+        "        if response.status!=200:raise ValueError('EPG HTTP response rejected')\n"
+        '        body=response.read(2*1024*1024+1)\n'
+        "        if len(body)>2*1024*1024:raise ValueError('EPG body exceeds limit')\n"
+        "        size=response.headers.get('Content-Length')\n"
+        "        if size is not None and (not size.isdecimal() or int(size)!=len(body)):raise ValueError('Incomplete EPG body')\n"
+        '        return json.loads(body)\n'
+        'class EpgStore:\n'
+        '    def __init__(self,catalog,cache_dir=None):\n'
+        '        self.catalog=catalog;self.rows={};self.errors={};self.updated=0;self.full_updated=0;self.busy=False;self.next_retry=0\n'
+        '        self.lock=threading.RLock();self.done=threading.Event();self.closed=threading.Event();self.thread=None\n'
+        '        self.generation=0;self.rendered=None;self.disk=True;self.started=False\n'
+        "        self.path=(Path(cache_dir).expanduser() if cache_dir else Path(tempfile.gettempdir())/'cctv-app-udrm-v02')/'epg-v1.json'\n"
+        '        self._load()\n'
+        '    def _load(self):\n'
+        '        try:\n'
+        '            if not self.path.is_file():return\n'
+        '            if self.path.stat().st_size>8*1024*1024:return\n'
+        '            data=json.loads(self.path.read_text())\n'
+        '            if not isinstance(data,dict):return\n'
+        "            rows=data.get('rows',{})\n"
+        '            if not isinstance(rows,dict):return\n'
+        '            for ch in self.catalog:\n'
+        "                raw=[{'startTime':r['start'],'endTime':r['end'],'title':r['title']} for r in rows.get(ch,[]) if isinstance(r,dict)]\n"
+        '                normalized=normalize(raw,ch)\n'
+        '                if normalized:self.rows[ch]=normalized\n'
+        "            cached_errors=data.get('errors',{})\n"
+        '            if isinstance(cached_errors,dict):self.errors={ch:str(reason)[:100] for ch,reason in cached_errors.items() if ch in self.catalog}\n'
+        '            for ch in self.catalog:\n'
+        "                if ch not in self.rows:self.errors.setdefault(ch,'缓存暂无此频道')\n"
+        "            stamp=float(data.get('updated',0))\n"
+        "            if 0<stamp<=time.time()+60:self.updated=stamp;self.full_updated=float(data.get('full_updated',stamp))\n"
+        '        except (OSError,ValueError,TypeError,KeyError):\n'
+        "            self.disk=False;LOG.info('节目单磁盘缓存不可读；使用内存缓存')\n"
+        '    def _save(self):\n'
+        '        if not self.disk:return\n'
+        '        temp=None\n'
+        '        try:\n'
+        '            self.path.parent.mkdir(parents=True,exist_ok=True);self.path.parent.chmod(0o700)\n'
+        "            fd,name=tempfile.mkstemp(prefix='.epg-',dir=self.path.parent);temp=Path(name)\n"
+        "            with os.fdopen(fd,'w',encoding='utf-8') as stream:json.dump({'updated':self.updated,'full_updated':self.full_updated,'rows':self.rows,'errors':self.errors},stream,ensure_ascii=False)\n"
+        '            temp.chmod(0o600);os.replace(temp,self.path)\n'
+        '        except OSError:\n'
+        "            self.disk=False;LOG.info('节目单缓存目录不可写；继续使用内存，不影响取流')\n"
+        '        finally:\n'
+        '            if temp:\n'
+        '                try:temp.unlink(missing_ok=True)\n'
+        '                except OSError:pass\n'
+        '    def _fetch_one(self,ch):\n'
+        "        if self.closed.is_set():raise ValueError('EPG stopped')\n"
+        "        primary='https://api.cntv.cn/epg/get3D12HEPG?'+urlencode({'c':ch,'serviceId':'cbox'})\n"
+        '        try:\n'
+        '            data=get_json(primary)\n'
+        "            if data.get('code') not in (200,'200'):raise ValueError('EPG API rejected')\n"
+        "            rows=normalize(data.get('EPG'),ch)\n"
+        "            if any(row['end']>time.time() for row in rows):return rows\n"
+        '        except (OSError,ValueError,TypeError,AttributeError):pass\n'
+        '        rows=[];today=datetime.now(TZ).date()\n'
+        '        for offset in (0,1):\n'
+        '            if self.closed.is_set():break\n'
+        '            day=today+timedelta(days=offset)\n'
+        "            url='https://api.cntv.cn/epg/getEpgInfoByChannelNew?'+urlencode({'c':ch,'serviceId':'tvcctv','d':day.strftime('%Y%m%d')})\n"
+        '            try:\n'
+        "                data=get_json(url);container=data.get('data',{}).get(ch,{})\n"
+        "                if data.get('errcode'):continue\n"
+        "                rows.extend(normalize(container.get('list',[]),ch))\n"
+        '            except (OSError,ValueError,TypeError,AttributeError):continue\n'
+        "        unique={(row['start'],row['end']):row for row in rows}\n"
+        "        if unique and any(row['end']>time.time() for row in unique.values()):return sorted(unique.values(),key=lambda row:row['start'])\n"
+        "        raise ValueError('官方暂无有效节目单')\n"
+        '    def ensure(self):\n'
+        '        self.started=True\n'
+        '        with self.lock:\n'
+        '            if self.closed.is_set() or self.busy or time.time()<self.next_retry:return\n'
+        '            full=not self.rows or time.time()-self.full_updated>=3600\n'
+        '            targets=list(self.catalog) if full else list(self.errors)\n'
+        '            if not targets:return\n'
+        "            self.busy=True;self.done.clear();self.thread=threading.Thread(target=self._refresh,args=(targets,full),name='official-epg',daemon=True);self.thread.start()\n"
+        '    def _refresh(self,targets=None,full=True):\n'
+        '        successes=0\n'
+        '        try:\n'
+        "            with ThreadPoolExecutor(max_workers=2,thread_name_prefix='epg-net') as pool:\n"
+        '                futures={pool.submit(self._fetch_one,ch):ch for ch in (targets if targets is not None else self.catalog)}\n'
+        '                for future in as_completed(futures):\n'
+        '                    ch=futures[future]\n'
+        '                    if self.closed.is_set():\n'
+        '                        for pending in futures:pending.cancel()\n'
+        '                        break\n'
+        '                    try:\n'
+        '                        rows=future.result()\n'
+        '                        with self.lock:self.rows[ch]=rows;self.errors.pop(ch,None);self.generation+=1;self.rendered=None\n'
+        '                        successes+=1\n'
+        '                    except Exception as error:\n'
+        '                        with self.lock:self.errors[ch]=str(error)[:100] if isinstance(error,ValueError) else type(error).__name__\n'
+        '            with self.lock:\n'
+        '                if full:self.full_updated=time.time()\n'
+        '                if successes:self.updated=time.time();self._save()\n'
+        '                if self.errors:self.next_retry=time.time()+300\n'
+        "                LOG.info('节目单更新完成：%s/%s 台有数据，本轮成功 %s 台',len(self.rows),len(self.catalog),successes)\n"
+        '        finally:\n'
+        '            with self.lock:self.busy=False;self.done.set()\n'
+        '    def xml(self,compressed=False):\n'
+        '        self.ensure()\n'
+        '        with self.lock:empty=not self.rows\n'
+        '        if empty:self.done.wait(4)\n'
+        '        with self.lock:\n'
+        "            if not self.rows:raise ValueError('节目单首次准备中，请稍后刷新')\n"
+        '            if self.rendered is not None and self.rendered[0]==self.generation:return self.rendered[2 if compressed else 1]\n'
+        '            rows={ch:list(records) for ch,records in self.rows.items()};generation=self.generation\n'
+        "        tv=ET.Element('tv',{'generator-info-name':'CCTV App Python XMLTV'})\n"
+        '        for ch,meta in self.catalog.items():\n'
+        "            channel=ET.SubElement(tv,'channel',{'id':ch});ET.SubElement(channel,'display-name',{'lang':'zh'}).text=meta['name']\n"
+        "            if meta.get('logo'):ET.SubElement(channel,'icon',{'src':meta['logo']})\n"
+        '            for row in rows.get(ch,[]):\n'
+        "                programme=ET.SubElement(tv,'programme',{'channel':ch,'start':datetime.fromtimestamp(row['start'],TZ).strftime('%Y%m%d%H%M%S %z'),'stop':datetime.fromtimestamp(row['end'],TZ).strftime('%Y%m%d%H%M%S %z')})\n"
+        "                ET.SubElement(programme,'title',{'lang':'zh'}).text=row['title']\n"
+        "        plain=ET.tostring(tv,encoding='utf-8',xml_declaration=True);packed=gzip.compress(plain,compresslevel=5,mtime=0)\n"
+        '        with self.lock:\n'
+        '            if generation==self.generation:self.rendered=(generation,plain,packed)\n'
+        '        return packed if compressed else plain\n'
+        '    def now_next(self):\n'
+        '        self.ensure();now=time.time()\n'
+        '        with self.lock:\n'
+        "            return {ch:{'now':next((r for r in self.rows.get(ch,[]) if r['start']<=now<r['end']),None),'next':next((r for r in self.rows.get(ch,[]) if r['start']>now),None)} for ch in self.catalog}\n"
+        '    def status(self):\n'
+        "        with self.lock:return {'busy':self.busy,'channels_with_data':len(self.rows),'total_channels':len(self.catalog),'programmes':sum(map(len,self.rows.values())),'updated':self.updated,'errors':dict(self.errors),'disk_cache_enabled':self.disk}\n"
+        '    def close(self):self.closed.set()\n'
+    ),
     'service': (
         '"""Local HLS service for original App media, using the licensed official SDK."""\n'
         'from __future__ import annotations\n'
@@ -1899,9 +2060,10 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.3.0'\n"
+        "VERSION = '0.3.1'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'from route_catalog import CHANNEL_ROUTES,PROVIDER_LABELS,VERIFIED_AT_UTC\n'
+        'from epg_store import EpgStore\n'
         "DEFAULTS={ident:(meta['name'],meta['routes'][0]['url']) for ident,meta in CHANNEL_ROUTES.items()}\n"
         'CCTV7_ALTERNATES={\n'
         "    'cctv7_'+route['provider']:(CHANNEL_ROUTES['cctv7']['name']+'（'+PROVIDER_LABELS[route['provider']]+'）',route['url'])\n"
@@ -2154,6 +2316,7 @@ PYTHON_SOURCES = {
         '\n'
         'class LiveService:\n'
         '    def __init__(self,prepared,channels,max_bitrate=2500000):\n'
+        "        self.epg=EpgStore(CHANNEL_ROUTES,prepared.get('cache_dir'))\n"
         '        self.sdk=MediaSDK(prepared);self.channels=channels;self.max_bitrate=max_bitrate\n'
         "        self.pool=ThreadPoolExecutor(max_workers=4,thread_name_prefix='upstream')\n"
         "        self.refresh_pool=ThreadPoolExecutor(max_workers=min(4,len(channels)),thread_name_prefix='refresh')\n"
@@ -2343,12 +2506,13 @@ PYTHON_SOURCES = {
         '            finally:channel.lock.release()\n'
         '    def _background(self):\n'
         '        while not self.stopping.wait(0.5):\n'
+        '            if self.epg.started:self.epg.ensure()\n'
         '            self._trim_memory()\n'
         '            ch=self.channels.get(self.active_channel)\n'
         '            if ch and ch.last_active and time.monotonic()-ch.last_active<30:\n'
         '                if ch.playlist is None or time.monotonic()-ch.updated>=ch.playlist.target/2:self._schedule(ch)\n'
         '    def close(self):\n'
-        '        self.stopping.set();self.worker.join(timeout=2)\n'
+        '        self.epg.close();self.stopping.set();self.worker.join(timeout=2)\n'
         '        self.refresh_pool.shutdown(wait=True,cancel_futures=True)\n'
         '        self.pool.shutdown(wait=True,cancel_futures=True);self.sdk.close()\n'
         '    def _cache_stats(self):\n'
@@ -2368,7 +2532,7 @@ PYTHON_SOURCES = {
         "            'engine':'javascriptcore-unicorn-wasm','jdk_required':False,'sdk_phase':self.sdk.phase,\n"
         "            'preparation_progress':self.sdk.progress,'preparation_error':self.sdk.error,\n"
         "            'runtime_features':dict(getattr(self.sdk.client,'runtime_features',{})),\n"
-        "            'memory_cache':self._cache_stats(),\n"
+        "            'memory_cache':self._cache_stats(),'epg':self.epg.status(),\n"
         "            'media_timings':dict(self.sdk.timings),'max_bitrate':self.max_bitrate,\n"
         "            'sdk_sessions':self.sdk.sessions,'processed_video_pes':self.sdk.processed_frames,\n"
         "            'license_exchanges':self.sdk.license_records,\n"
@@ -2402,7 +2566,7 @@ PYTHON_SOURCES = {
         "                        return self.respond(400,b'Invalid Host','text/plain',head)\n"
         "                    if parent and parent not in CHANNEL_ROUTES:return self.respond(404,b'Unknown channel','text/plain',head)\n"
         "                    if provider_match and provider_match[1] not in PROVIDER_LABELS:return self.respond(404,b'Unknown provider','text/plain',head)\n"
-        "                    lines=['#EXTM3U']\n"
+        '                    lines=[f\'#EXTM3U x-tvg-url="http://{host}/epg.xml.gz" url-tvg="http://{host}/epg.xml.gz"\']\n'
         '                    for ch in service.channels.values():\n'
         "                        logical=ch.logical_id or ('cctv7' if ch.ident in CCTV7_ALTERNATES else ch.ident)\n"
         '                        if parent:\n'
@@ -2413,9 +2577,17 @@ PYTHON_SOURCES = {
         '                        group=ch.group\n'
         "                        if path=='/lines.m3u' or provider_match:group+=' · '+PROVIDER_LABELS.get(ch.provider,ch.provider)\n"
         '                        clean=lambda value:str(value).replace(\'"\',"\'").replace(\'\\n\',\' \').replace(\'\\r\',\' \')\n'
-        '                        lines.extend([f\'#EXTINF:-1 tvg-id="{clean(logical)}" tvg-logo="{clean(ch.logo)}" group-title="{clean(group)}",{clean(ch.name)}\',\n'
+        '                        lines.extend([f\'#EXTINF:-1 tvg-id="{clean(logical)}" tvg-name="{clean(CHANNEL_ROUTES.get(logical,{}).get(\'name\',ch.name))}" tvg-logo="{clean(ch.logo)}" group-title="{clean(group)}",{clean(ch.name)}\',\n'
         "                            f'http://{host}/live/{ch.ident}.m3u8'])\n"
         "                    return self.respond(200,('\\n'.join(lines)+'\\n').encode(),'audio/x-mpegurl',head)\n"
+        "                if path in ('/epg.xml','/epg.xml.gz'):\n"
+        '                    if head:\n'
+        "                        self.send_response(200);self.send_header('Content-Type','application/gzip' if path.endswith('.gz') else 'application/xml; charset=utf-8');self.end_headers();return\n"
+        "                    try:body=service.epg.xml(compressed=path.endswith('.gz'))\n"
+        "                    except ValueError as error:return self.respond(503,str(error).encode(),'text/plain; charset=utf-8',False,retry=True)\n"
+        "                    return self.respond(200,body,'application/gzip' if path.endswith('.gz') else 'application/xml; charset=utf-8',False)\n"
+        "                if path=='/epg.json':\n"
+        "                    return self.respond(200,json.dumps(service.epg.now_next() if not head else {},ensure_ascii=False).encode(),'application/json; charset=utf-8',head)\n"
         "                if path=='/status':\n"
         "                    return self.respond(200,json.dumps(service.status(),ensure_ascii=False).encode(),'application/json; charset=utf-8',head)\n"
         "                match=re.fullmatch(r'/live/([a-z0-9_-]+)\\.m3u8',path)\n"
@@ -2507,6 +2679,7 @@ PYTHON_SOURCES = {
         '            try:service.sdk.ensure_ready()\n'
         "            except Exception as error:LOG.warning('SDK预热暂不可用：%s',str(error)[:200])\n"
         '        service.refresh_pool.submit(warmup)\n'
+        '        service.epg.ensure()\n'
         "    LOG.info('原 App UDRM 无JDK版 %s；%s 台；订阅 http://127.0.0.1:%s/all.m3u',VERSION,sum(ch.catalog for ch in channels.values()),args.port)\n"
         "    LOG.info('节目 %s 台，独立线路 %s 条；多线路目录 http://127.0.0.1:%s/lines.m3u；按需处理，不预热全部线路',sum(ch.catalog for ch in channels.values()),len(channels),args.port)\n"
         "    LOG.info('首次会自动准备SDK；状态 /status；运行不读取HAR，不启动Java/Node/FFmpeg或外部命令')\n"

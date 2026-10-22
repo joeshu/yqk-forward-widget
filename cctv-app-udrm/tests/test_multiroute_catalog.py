@@ -24,6 +24,8 @@ class MultiRouteCatalogTests(unittest.TestCase):
     chosen=ids(read(path));self.assertGreaterEqual(len(chosen),2)
     self.assertTrue(all(channels[x].logical_id=='cctv7' for x in chosen))
    self.assertIn('tvg-id="cctv2"',read('/lines/cctv2.m3u'))
+   self.assertIn('tvg-name="CCTV-7 国防军事"',read('/lines/cctv7.m3u'))
+   self.assertIn('x-tvg-url="'+base+'/epg.xml.gz"',read('/all.m3u'))
    self.assertEqual(live.sdk.sessions,0);self.assertFalse(live.refresh_jobs)
    self.assertFalse(any(c.cache or c.raw for c in channels.values()))
    state=json.loads(read('/status'));self.assertEqual(state['program_count'],len(primary));self.assertEqual(state['route_count'],len(lines))

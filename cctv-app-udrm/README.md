@@ -1,4 +1,4 @@
-# 央视影音 App UDRM 单文件 v0.3.0（无 JDK）
+# 央视影音 App UDRM 单文件 v0.3.1（无 JDK）
 
 v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + WebAssembly 解释器**。运行只使用 Python 标准库和系统 JavaScriptCore，不再启动 Java、Node、编译器、FFmpeg 或外部 OpenSSL 命令。许可和视频处理继续由原样官方 SDK 完成。
 
@@ -7,10 +7,10 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 ## APTV 添加与订阅
 
 1. 停止旧脚本服务，添加下面带版本号的 Python 文件。
-2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.3.0`。
+2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.3.1`。
 3. 首次先检查宿主的 JavaScriptCore/WebAssembly 能力，再下载约3.55MiB（SDK压缩段约2.10MiB、解释器约1.45MiB）。看到“SDK 已取得许可并就绪”后刷新订阅；17ms之类的列表测速不表示SDK已经就绪。若服务器不支持分段下载，日志会说明回退约47MiB的完整安装包。
 
-[下载 cctv-app-udrm-v0.3.0.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.3.0.py)
+[下载 cctv-app-udrm-v0.3.1.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.3.1.py)
 
 手机同机订阅：
 
@@ -18,18 +18,18 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 http://127.0.0.1:8769/all.m3u
 ```
 
-状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.3.0`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
+状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.3.1`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
 
 脚本运行需要 Python 3.10+、`ctypes`、`ssl`，以及支持 WebAssembly、BigInt 的系统 JavaScriptCore。默认从 iOS 系统路径加载框架。没有手工安装 pip 包、JS文件、JAR或完整安卓虚拟机的步骤。当前默认文件 [cctv-app-udrm.py](cctv-app-udrm.py) 与带版本号文件完全相同。
 
 终端运行：
 
 ```bash
-python3 cctv-app-udrm-v0.3.0.py
+python3 cctv-app-udrm-v0.3.1.py
 # 指定端口、缓存或关闭预热
-python3 cctv-app-udrm-v0.3.0.py 8769 --cache-dir ./cbox-cache --no-warmup
+python3 cctv-app-udrm-v0.3.1.py 8769 --cache-dir ./cbox-cache --no-warmup
 # 能力检查，不访问节目源
-python3 cctv-app-udrm-v0.3.0.py --doctor
+python3 cctv-app-udrm-v0.3.1.py --doctor
 ```
 
 电脑/服务器供手机访问时，显式加 `--host 0.0.0.0`，订阅地址改为该电脑的局域网IP。Linux开发测试使用JavaScriptCoreGTK共享库，通过 `--jscore-library /path/to/libjavascriptcoregtk-4.1.so.0` 指定；它不是iPhone需下载的依赖。
@@ -43,7 +43,23 @@ python3 cctv-app-udrm-v0.3.0.py --doctor
 - v0.2.0历史测试中三路并发各60秒音视频解码错误均为0；当时的实时测试和本地HTTP响应记录见 [无JDK验证](NOJDK-VALIDATION.json)。服务响应时间不代表手机APTV首帧或切台时间。
 - 已人工查看处理后的央视画面，台标、字幕和画面正常。原SDK样本对照仍见 [SAMPLE-VALIDATION.json](SAMPLE-VALIDATION.json)。
 
-本入口尚未合并EPG，原61台服务的节目单继续保留。更多频道的实时调度签名、CDN权限与用户手机的内存/首帧表现仍需继续核对。
+节目单现已合并，详见下方0.3.1说明。原61台服务独立保留；用户手机的内存、首帧及节目单界面仍需实机核对。
+
+## 0.3.1 节目单与频道匹配
+
+主订阅和各线路订阅自动关联本地XMLTV。停止旧服务、启动新版并刷新APTV频道订阅；如果未自动取得节目表，在APTV手动填写：
+
+```text
+http://127.0.0.1:8769/epg.xml.gz
+```
+
+也提供未压缩的 `/epg.xml`。电脑供手机访问时，将127.0.0.1替换成服务设备的局域网IP。所有94条线路复用所属53个频道的 `tvg-id` 和 `tvg-name`，切换CDN仍匹配同一节目单。时间明确为北京时间 `+0800`；清理重复、空节目及跨频道数据，不生成不存在的节目。
+
+只读取官方CNTV节目单接口，后台最多2个并发请求，每小时完整更新，失败频道每5分钟重试；不占用媒体处理线程池。网络失败保留上次节目数据；缓存目录不可写时改用内存，提示一次。首次更新可能先返回部分频道，看到“节目单更新完成”后可在APTV刷新节目单；首次尚无任何数据时返回503及重试提示。`--no-warmup` 时，首次请求节目单才启动更新。
+
+本轮官方数据实测52/53台、3174条节目，内蒙古蒙语频道暂无有效数据，保持空缺。XML约450KB，gzip约39KB；官方接口实际提供的日期范围会变化，不承诺每台都有未来多日节目。`/epg.json` 提供各频道当前和下一节目，`/status` 中的 `epg` 显示覆盖、更新时间、失败频道和缓存状态。
+
+53项回归检查通过，最终单文件的XML/gzip、频道ID、北京时间和当前/下一节目接口实测通过；原三组媒体样本600帧解码错误0。见 [0.3.1节目单验证](EPG-VALIDATION-v0.3.1.json)。高清选择及媒体处理逻辑保持原配置，未通过降清晰度节省节目单开销；APTV实机节目表显示仍待验收。
 
 ## 0.3.0 扩台和多线路入口
 
