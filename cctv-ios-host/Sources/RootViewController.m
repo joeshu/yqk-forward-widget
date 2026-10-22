@@ -837,7 +837,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         if (!line.length) return;
         [self log:@"[py] %@", line];
     }];
-    NSString *dataDir = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"ysp"];
+    NSString *appSupport = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+    NSString *dataDir = [appSupport stringByAppendingPathComponent:@"ysp"];
     NSError *err = nil;
     BOOL ok = [PyHost startWithScript:@"ysp-live.py" port:8767 dataDir:dataDir error:&err];
     [self log:@"内置插件启动 %@ %@", ok ? @"成功" : @"失败", err.localizedDescription ?: @""];
