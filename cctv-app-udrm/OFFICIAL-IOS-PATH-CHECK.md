@@ -36,7 +36,7 @@ http://127.0.0.1:18771/status
 
 它能确认“此进程此刻观察到什么”，不能证明未加载的组件不在App里，也不能从组件名称或符号存在推导出授权、可桥接或可播放。界面框架不等于央视DRM SDK，加载候选SDK也仍需正式接口文档。探针在Linux本地的7项检查通过，包含合成iOS接口和真实本地HTTP；实机结果见下文。
 
-用户已在 APTV TestFlight 的 iPhone 12（`iPhone13,2`）运行探针。该进程观察到 Apple 视频框架和 JavaScriptCore，没有观察到匹配的央视 SDK/Unicorn API；`start(ctx)` 未收到宿主对象。实际播放日志显示 SDK 每处理约4秒视频需要约4–10.5秒，主要耗时在模拟执行，出现间歇卡顿符合该吞吐量。探针和播放日志的详析见[实机卡顿报告](IOS-PLAYBACK-STUTTER-2026-10-22.md)。这没有证明未加载组件不存在，也没有获得 iOS SDK 或插件 ABI；当前原生替换仍未解决。
+用户已在 APTV TestFlight 的 iPhone 12（`iPhone13,2`）运行探针。该进程观察到 Apple 视频框架和 JavaScriptCore，没有观察到匹配的央视 SDK/Unicorn API；`start(ctx)` 未收到宿主对象。实际播放日志显示 SDK 处理调用每处理约4秒视频需要约4–10.5秒，排队和映射耗时很小，出现间歇卡顿符合该吞吐量。现有计时没有再拆分 JSC/WASM 桥接与模拟器内部耗时。探针和播放日志的详析见[实机卡顿报告](IOS-PLAYBACK-STUTTER-2026-10-22.md)。这没有证明未加载组件不存在，也没有获得 iOS SDK 或插件 ABI；当前原生替换仍未解决。
 
 ## 本轮核对的公开来源
 
