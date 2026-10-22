@@ -17,6 +17,7 @@ NS_ASSUME_NONNULL_BEGIN
                 dataDir:(NSString *)dataDir
                   error:(NSError **)error;
 
++ (BOOL)stopWithError:(NSError **)error;
 + (void)stop;
 
 @end

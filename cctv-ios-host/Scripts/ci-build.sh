@@ -17,37 +17,55 @@ cp Plugins/ysp-live.py "$APP/ysp-live.py"
 printf 'APPL????' > "$APP/PkgInfo"
 mkdir -p "$APP/Frameworks"
 
-# --- 内置 CPython（Python-Apple-support） ---
+# --- 内置 CPython（Python-Apple-support device slice） ---
 PY_VER=3.13
 PY_TGZ=/tmp/python-ios.tar.gz
-if [ ! -f "$PY_TGZ" ]; then
-  curl -sSL -o "$PY_TGZ" "https://github.com/beeware/Python-Apple-support/releases/download/3.13-b16/Python-${PY_VER}-iOS-support.b16.tar.gz"
+if [ -z "${PY_DISABLE:-}" ]; then
+  if [ ! -s "$PY_TGZ" ]; then
+    curl --fail --location --silent --show-error -o "$PY_TGZ" "https://github.com/beeware/Python-Apple-support/releases/download/3.13-b16/Python-${PY_VER}-iOS-support.b16.tar.gz"
+  fi
+  rm -rf /tmp/pyroot && mkdir -p /tmp/pyroot
+  tar -xzf "$PY_TGZ" -C /tmp/pyroot
+  PY_ROOT=/tmp/pyroot/Python.xcframework
+  PY_INC="$PY_ROOT/ios-arm64/include/python3.13"
+  PY_LIB="$PY_ROOT/ios-arm64/Python.framework"
+  DEVICE_LIB="$PY_ROOT/ios-arm64/lib-arm64/python3.13"
+  STDLIB="$PY_ROOT/lib/python3.13"
+  DYNLOAD="$DEVICE_LIB/lib-dynload"
+  for required in "$PY_INC/Python.h" "$PY_LIB/Python" "$STDLIB" "$DYNLOAD"; do
+    if [ ! -e "$required" ]; then echo "::error::Required iOS CPython runtime item missing: $required"; exit 1; fi
+  done
+  for module in _ssl _socket _hashlib select _struct; do
+    if ! compgen -G "$DYNLOAD/${module}.*.so" >/dev/null; then echo "::error::Missing iOS device Python extension: $module"; exit 1; fi
+  done
+  mkdir -p "$APP/python/lib/python${PY_VER}" "$APP/python/ssl"
+  cp -R "$STDLIB/" "$APP/python/lib/python${PY_VER}/"
+  cp -R "$DEVICE_LIB/" "$APP/python/lib/python${PY_VER}/"
+  rm -rf "$APP/python/lib/python${PY_VER}/test" "$APP/python/lib/python${PY_VER}/idlelib" \
+         "$APP/python/lib/python${PY_VER}/tkinter" "$APP/python/lib/python${PY_VER}/ensurepip" \
+         "$APP/python/lib/python${PY_VER}/turtledemo" "$APP/python/lib/python${PY_VER}/distutils"
+  rm -rf "$APP/python/lib/python${PY_VER}/__pycache__"
+  find "$APP/python/lib/python${PY_VER}" -name '*.pyc' -delete
+  for extension in "$APP/python/lib/python${PY_VER}/lib-dynload"/*.so; do
+    [ -f "$extension" ] || continue
+    filename=$(basename "$extension"); module=${filename%%.*}; framework="$APP/Frameworks/${module}.framework"
+    mkdir -p "$framework"
+    cp "$extension" "$framework/$module"
+    cat > "$framework/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleExecutable</key><string>$module</string><key>CFBundleIdentifier</key><string>org.python.extension.$module</string><key>CFBundlePackageType</key><string>FMWK</string></dict></plist>
+PLIST
+    printf 'Frameworks/%s.framework/%s\n' "$module" "$module" > "${extension%.so}.fwork"
+    rm "$extension"
+  done
+  if [ ! -s /etc/ssl/cert.pem ]; then echo "::error::macOS CA bundle /etc/ssl/cert.pem missing; refusing to package TLS runtime"; exit 1; fi
+  cp /etc/ssl/cert.pem "$APP/python/ssl/cert.pem"
+  python3 Scripts/python_bootstrap.py --validate "$APP/python" --version "$PY_VER"
+  cp -R "$PY_LIB" "$APP/Frameworks/"
+else
+  echo "::warning::PY_DISABLE requested; producing runtime-disabled build (plugin start reports error)"
 fi
-rm -rf /tmp/pyroot && mkdir -p /tmp/pyroot && tar -xzf "$PY_TGZ" -C /tmp/pyroot
-echo "--- pyroot top ---"; ls /tmp/pyroot | head
-
-mkdir -p "$APP/python/lib"
-{ [ -n "${PY_DISABLE:-}" ] || cp -R /tmp/pyroot/Python.xcframework/lib/python3.13 "$APP/python/lib/"; }
-rm -rf "$APP/python/lib/python3.13/test" "$APP/python/lib/python3.13/idlelib" \
-       "$APP/python/lib/python3.13/tkinter" "$APP/python/lib/python3.13/ensurepip" \
-       "$APP/python/lib/python3.13/turtledemo" "$APP/python/lib/python3.13/distutils"
-find "$APP/python" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
-find "$APP/python" -name '*.pyc' -delete 2>/dev/null || true
-PY_INC="/tmp/pyroot/Python.xcframework/ios-arm64/include/python3.13"
-# Never fall back to an arbitrary arm64 slice: simulator arm64 is not device arm64.
-if [ ! -f "$PY_INC/Python.h" ]; then
-  echo "::warning title=pyinc::Python.h not found, building without embedded Python"
-  PY_DISABLE=1
-fi
-echo "::notice title=pyinc::${PY_INC:-none}"; 
-echo "PY_INC=$PY_INC"
-PY_LIB="/tmp/pyroot/Python.xcframework/ios-arm64/Python.framework"
-if [ ! -f "$PY_LIB/Python" ]; then
-  echo "::warning title=pylib::Python.framework not found, building without embedded Python"
-  PY_DISABLE=1
-fi
-echo "::notice title=pylib::${PY_LIB:-none}"
-{ [ -n "${PY_DISABLE:-}" ] || cp -R "$PY_LIB" "$APP/Frameworks/"; }
 for f in Frameworks/*.framework; do
   cp -R "$f" "$APP/Frameworks/"
 done

@@ -3408,7 +3408,28 @@ try :
     signal .signal (signal .SIGTERM ,_handle_sigterm )
 except Exception :
     pass 
+# HTTP server owned by this module; PyHost calls stop_host_server through runpy globals.
+active_http_server = None
+
+
+def stop_host_server():
+    """Stop serve_forever from another thread and close its listening socket."""
+    global active_http_server
+    server = active_http_server
+    if server is None:
+        return False
+    server.shutdown()  # ThreadingHTTPServer requires a different caller thread.
+    server.server_close()
+    active_http_server = None
+    stop_companion_engine()
+    log('[系统] HTTP 服务已真正停止')
+    return True
+
+import builtins as _host_builtins
+_host_builtins._ysp_stop_server = stop_host_server
+
 def main ():
+    global active_http_server
     global resolver ,server_port ,engine_port ,global_channel_dir ,global_ts_cache 
     if os.name == 'nt':
         os.system('') 
@@ -3477,6 +3498,9 @@ def main ():
         resolver .start_refresh_worker ()
         threading .Thread (target =init_resolver ,daemon =True ,name ='engine-init').start ()
     srv =ThreadingHTTPServer ((args .bind ,args .port ),Handler )
+    active_http_server = srv
+    srv .daemon_threads = True
+    srv .block_on_close = False
     channels_count =len (global_channel_dir .unique_channels ())
     c_yangshi =len ([c for c in global_channel_dir .unique_channels ()if c ['group']=='央视'])
     c_weishi =len ([c for c in global_channel_dir .unique_channels ()if c ['group']=='卫视'])

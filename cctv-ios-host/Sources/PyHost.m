@@ -1,149 +1,187 @@
 #import "PyHost.h"
+#import <pthread.h>
+#import <limits.h>
+
 #if __has_include(<Python.h>)
 #import <Python.h>
 #define PYHOST_AVAILABLE 1
 #else
 #define PYHOST_AVAILABLE 0
 #endif
-#import <unistd.h>
-#import <pthread.h>
 
+static pthread_mutex_t gLock = PTHREAD_MUTEX_INITIALIZER;
 static BOOL gRunning = NO;
+static BOOL gStartedOnce = NO;
+static BOOL gThreadExited = NO;
 static NSInteger gPort = 0;
-static int gPipeFD[2] = {-1, -1};
 static pthread_t gThread;
-static char gScriptPath[1024];
-static char gDataDir[1024];
-static char gArgvPort[16];
-
-@interface PyHost ()
-@end
+static NSString *gScriptPath;
+static NSString *gDataDir;
+static NSString *gPythonHome;
+static void (^gLogHandler)(NSString *) = nil;
+#if PYHOST_AVAILABLE
+static PyObject *gPluginNamespace = NULL;
+static PyObject *gWriteFunction = NULL;
+#endif
 
 @implementation PyHost
 
-+ (BOOL)running { return gRunning; }
-+ (NSInteger)port { return gPort; }
-static void (^gLogHandler)(NSString *) = nil;
-+ (void)setLogHandler:(void (^)(NSString *))h { gLogHandler = [h copy]; }
-+ (void (^)(NSString *))logHandler { return gLogHandler; }
-
-#pragma mark - stdout 转发
-
-static void *readerThread(void *ctx) {
-    char buf[1024];
-    ssize_t n;
-    while ((n = read(gPipeFD[0], buf, sizeof(buf) - 1)) > 0) {
-        buf[n] = '\0';
-        NSString *line = [[NSString alloc] initWithUTF8String:buf];
-        if (!line.length) continue;
-        void (^h)(NSString *) = gLogHandler;
-        if (h) h([line stringByTrimmingCharactersInSet:NSCharacterSet.newlineCharacterSet]);
-    }
-    return NULL;
++ (BOOL)running { pthread_mutex_lock(&gLock); BOOL v = gRunning; pthread_mutex_unlock(&gLock); return v; }
++ (NSInteger)port { pthread_mutex_lock(&gLock); NSInteger v = gPort; pthread_mutex_unlock(&gLock); return v; }
++ (void)setLogHandler:(void (^)(NSString *))handler {
+    pthread_mutex_lock(&gLock); gLogHandler = [handler copy]; pthread_mutex_unlock(&gLock);
 }
 
-#pragma mark - Python 线程
-
+static void emitLog(NSString *text) {
+    if (!text.length) return;
+    NSArray<NSString *> *lines = [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
+    pthread_mutex_lock(&gLock); void (^handler)(NSString *) = [gLogHandler copy]; pthread_mutex_unlock(&gLock);
+    if (handler) for (NSString *line in lines) if (line.length) handler(line);
+}
 #if PYHOST_AVAILABLE
-static void *pyThread(void *ctx) {
-    char home[1024];
+static PyObject *pyHostWrite(PyObject *self, PyObject *args) {
+    const char *s = NULL; Py_ssize_t n = 0;
+    if (!PyArg_ParseTuple(args, "y#", &s, &n)) return NULL;
+    NSString *text = [[NSString alloc] initWithBytes:s length:(NSUInteger)n encoding:NSUTF8StringEncoding];
+    if (text) emitLog(text);
+    return PyLong_FromSsize_t(n);
+}
+static PyMethodDef writeMethod = {"_pyhost_write", pyHostWrite, METH_VARARGS, "Forward Python output to the host log."};
+
+static void *pyThread(void *unused) {
     @autoreleasepool {
-        NSString *res = [[NSBundle mainBundle] resourcePath];
-        NSString *pyhome = [res stringByAppendingPathComponent:@"python"];
-        strncpy(home, pyhome.UTF8String, sizeof(home) - 1);
+        setenv("YSP_DATA_DIR", gDataDir.UTF8String, 1);
+        NSString *caFile = [gPythonHome stringByAppendingPathComponent:@"ssl/cert.pem"];
+        setenv("SSL_CERT_FILE", caFile.UTF8String, 1);
+        setenv("SSL_CERT_DIR", "", 1);
+        PyConfig config; PyConfig_InitPythonConfig(&config);
+        config.install_signal_handlers = 0;
+        PyStatus status = PyConfig_SetBytesString(&config, &config.home, gPythonHome.UTF8String);
+        NSString *lib = [gPythonHome stringByAppendingPathComponent:@"lib/python3.13"];
+        NSString *dyn = [lib stringByAppendingPathComponent:@"lib-dynload"];
+        if (!PyStatus_Exception(status)) {
+            config.module_search_paths_set = 1;
+            wchar_t *wLib = Py_DecodeLocale(lib.fileSystemRepresentation, NULL);
+            if (!wLib) status = PyStatus_NoMemory();
+            else { status = PyWideStringList_Append(&config.module_search_paths, wLib); PyMem_RawFree(wLib); }
+        }
+        if (!PyStatus_Exception(status)) {
+            wchar_t *wDyn = Py_DecodeLocale(dyn.fileSystemRepresentation, NULL);
+            if (!wDyn) status = PyStatus_NoMemory();
+            else { status = PyWideStringList_Append(&config.module_search_paths, wDyn); PyMem_RawFree(wDyn); }
+        }
+        if (!PyStatus_Exception(status)) status = Py_InitializeFromConfig(&config);
+        PyConfig_Clear(&config);
+        if (PyStatus_Exception(status)) {
+            emitLog([NSString stringWithFormat:@"Python 初始化失败: %s", status.err_msg ?: "unknown"]);
+            goto finished;
+        }
+        PyObject *sysPath = PySys_GetObject("path");
+        PyObject *scriptDir = PyUnicode_FromString(gScriptPath.stringByDeletingLastPathComponent.UTF8String);
+        if (sysPath && scriptDir) PyList_Insert(sysPath, 0, scriptDir);
+        Py_XDECREF(scriptDir);
+        PyObject *builtins = PyEval_GetBuiltins();
+        gWriteFunction = PyCFunction_New(&writeMethod, NULL);
+        PyDict_SetItemString(builtins, "_pyhost_write", gWriteFunction);
+        PyObject *mainDict = PyDict_New();
+        PyDict_SetItemString(mainDict, "__builtins__", builtins);
+        PyObject *bootstrap = PyRun_String(
+            "import sys, io\n"
+            "class _HostStream(io.TextIOBase):\n"
+            " def write(self, value):\n"
+            "  _pyhost_write(value.encode('utf-8', 'replace'))\n"
+            "  return len(value)\n"
+            " def flush(self): pass\n"
+            " def writable(self): return True\n"
+            "sys.stdout = sys.stderr = _HostStream()\n", Py_file_input, mainDict, mainDict);
+        Py_XDECREF(bootstrap);
+        PyObject *sys = PyImport_ImportModule("sys");
+        NSString *portString = [NSString stringWithFormat:@"%ld", (long)gPort];
+        PyObject *argv = Py_BuildValue("[sssssss]", gScriptPath.UTF8String, portString.UTF8String, "--bind", "127.0.0.1", "--no-engine", "--data-dir", gDataDir.UTF8String);
+        if (sys && argv) PyObject_SetAttrString(sys, "argv", argv);
+        Py_XDECREF(sys); Py_XDECREF(argv);
+        PyObject *runpy = PyImport_ImportModule("runpy");
+        PyObject *runPath = runpy ? PyObject_GetAttrString(runpy, "run_path") : NULL;
+        PyObject *path = PyUnicode_FromString(gScriptPath.UTF8String);
+        PyObject *kw = Py_BuildValue("{s:s}", "run_name", "__main__");
+        PyObject *ns = (runPath && path && kw) ? PyObject_Call(runPath, PyTuple_Pack(1, path), kw) : NULL;
+        Py_XDECREF(runpy); Py_XDECREF(runPath); Py_XDECREF(path); Py_XDECREF(kw);
+        if (ns) { gPluginNamespace = ns; emitLog(@"Python 插件服务已退出"); }
+        else { PyErr_Print(); emitLog(@"Python 插件异常退出（详见上方日志）"); }
     }
-    setenv("PYTHONHOME", home, 1);
-    setenv("PYTHONPATH", home, 1);
-    setenv("PYTHONUNBUFFERED", "1", 1);
-    setenv("YSP_DATA_DIR", gDataDir, 1);
-
-    NSString *bootstrap = [NSString stringWithFormat:
-        @"import sys, runpy\n"
-        @"sys.argv = [%s, '%s', '--bind', '127.0.0.1', '--no-engine', '--data-dir', '%s']\n",
-        gScriptPath, gArgvPort, gDataDir];
-    NSString *run = [NSString stringWithFormat:@"runpy.run_path('%s', run_name='__main__')\n", gScriptPath];
-
-    PyStatus status;
-    PyConfig config;
-    PyConfig_InitPythonConfig(&config);
-    config.install_signal_handlers = 0;
-    status = PyConfig_SetBytesString(&config, &config.home, home);
-    if (!PyStatus_Exception(status)) {
-        status = Py_InitializeFromConfig(&config);
-    }
-    PyConfig_Clear(&config);
-    if (PyStatus_Exception(status)) {
-        NSString *msg = [NSString stringWithFormat:@"Py_Initialize 失败: %s", status.err_msg ?: "unknown"];
-        void (^h)(NSString *) = gLogHandler;
-        if (h) h(msg);
-        gRunning = NO;
-        return NULL;
-    }
-    PyRun_SimpleString("import sys\nsys.path.insert(0, '.')\n");
-    int rc1 = PyRun_SimpleString(bootstrap.UTF8String);
-    int rc2 = rc1 == 0 ? PyRun_SimpleString(run.UTF8String) : rc1;
-    NSString *msg = [NSString stringWithFormat:@"插件进程退出，rc=%d", rc2];
-    void (^h)(NSString *) = gLogHandler;
-    if (h) h(msg);
-    gRunning = NO;
+finished:
+    pthread_mutex_lock(&gLock); gRunning = NO; gThreadExited = YES; pthread_mutex_unlock(&gLock);
     return NULL;
 }
+#endif
 
-#endif /* PYHOST_AVAILABLE */
-
-#pragma mark - 对外接口
-
-+ (BOOL)startWithScript:(NSString *)scriptName
-                   port:(NSInteger)port
-                dataDir:(NSString *)dataDir
-                  error:(NSError **)error {
-    if (gRunning) return YES;
-
-    NSString *res = [[NSBundle mainBundle] resourcePath];
++ (BOOL)startWithScript:(NSString *)scriptName port:(NSInteger)port dataDir:(NSString *)dataDir error:(NSError **)error {
+    pthread_mutex_lock(&gLock);
+    if (gRunning) { pthread_mutex_unlock(&gLock); return YES; }
+    if (gStartedOnce) {
+        pthread_mutex_unlock(&gLock);
+        if (error) *error = [NSError errorWithDomain:@"PyHost" code:4 userInfo:@{NSLocalizedDescriptionKey:@"CPython 进程内不可安全重启；本次启动已使用或停止，请重启 App。"}];
+        return NO;
+    }
+    NSString *res = NSBundle.mainBundle.resourcePath;
     NSString *script = [res stringByAppendingPathComponent:scriptName];
     NSString *home = [res stringByAppendingPathComponent:@"python"];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:script]) {
-        if (error) *error = [NSError errorWithDomain:@"PyHost" code:1 userInfo:@{NSLocalizedDescriptionKey: @"脚本未打包"}];
-        return NO;
-    }
-    if (![[NSFileManager defaultManager] fileExistsAtPath:home]) {
-        if (error) *error = [NSError errorWithDomain:@"PyHost" code:2 userInfo:@{NSLocalizedDescriptionKey: @"标准库未打包"}];
-        return NO;
-    }
-    NSError *e = nil;
-    [[NSFileManager defaultManager] createDirectoryAtPath:dataDir
-                              withIntermediateDirectories:YES attributes:nil error:&e];
-
-#if PYHOST_AVAILABLE
-    strncpy(gScriptPath, script.UTF8String, sizeof(gScriptPath) - 1);
-    strncpy(gDataDir, dataDir.UTF8String, sizeof(gDataDir) - 1);
-    snprintf(gArgvPort, sizeof(gArgvPort), "%ld", (long)port);
-    gPort = port;
-    gRunning = YES;
-
-    if (pipe(gPipeFD) == 0) {
-        dup2(gPipeFD[1], STDOUT_FILENO);
-        dup2(gPipeFD[1], STDERR_FILENO);
-        pthread_t r;
-        pthread_create(&r, NULL, readerThread, NULL);
-        pthread_detach(r);
-    }
-#if PYHOST_AVAILABLE
-    pthread_create(&gThread, NULL, pyThread, NULL);
-    return YES;
-#else
-    if (error) *error = [NSError errorWithDomain:@"PyHost" code:3
-                                        userInfo:@{NSLocalizedDescriptionKey: @"本次构建未包含 Python 运行时"}];
-    gRunning = NO;
+#if !PYHOST_AVAILABLE
+    pthread_mutex_unlock(&gLock);
+    if (error) *error = [NSError errorWithDomain:@"PyHost" code:3 userInfo:@{NSLocalizedDescriptionKey:@"此构建未包含 CPython 运行时；插件未启动。"}];
     return NO;
+#else
+    NSString *stdlib = [home stringByAppendingPathComponent:@"lib/python3.13"];
+    NSString *dynload = [stdlib stringByAppendingPathComponent:@"lib-dynload"];
+    NSString *caFile = [home stringByAppendingPathComponent:@"ssl/cert.pem"];
+    BOOL runtimeOK = [[NSFileManager defaultManager] fileExistsAtPath:script] &&
+        [[NSFileManager defaultManager] fileExistsAtPath:stdlib] &&
+        [[NSFileManager defaultManager] fileExistsAtPath:dynload] &&
+        [[NSFileManager defaultManager] fileExistsAtPath:caFile];
+    for (NSString *module in @[@"_ssl", @"_socket", @"_hashlib", @"select", @"_struct"]) {
+        NSString *extension = [dynload stringByAppendingPathComponent:[module stringByAppendingString:@".fwork"]];
+        NSString *plain = [dynload stringByAppendingPathComponent:[module stringByAppendingString:@".so"]];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:extension] && ![[NSFileManager defaultManager] fileExistsAtPath:plain]) runtimeOK = NO;
+    }
+    if (!runtimeOK) {
+        pthread_mutex_unlock(&gLock);
+        if (error) *error = [NSError errorWithDomain:@"PyHost" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Python 运行时不完整：需要插件、python/lib/python3.13/lib-dynload 中的 _ssl/_socket/_hashlib/select/_struct 设备扩展，以及 python/ssl/cert.pem。"}];
+        return NO;
+    }
+    NSError *dirError = nil;
+    if (![[NSFileManager defaultManager] createDirectoryAtPath:dataDir withIntermediateDirectories:YES attributes:nil error:&dirError]) {
+        pthread_mutex_unlock(&gLock); if (error) *error = dirError; return NO;
+    }
+    gScriptPath = script; gPythonHome = home; gDataDir = dataDir; gPort = port;
+    setenv("YSP_DATA_DIR", dataDir.UTF8String, 1);
+    gStartedOnce = YES; gRunning = YES; gThreadExited = NO;
+    int rc = pthread_create(&gThread, NULL, pyThread, NULL);
+    if (rc != 0) { gRunning = NO; pthread_mutex_unlock(&gLock); if (error) *error = [NSError errorWithDomain:@"PyHost" code:5 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"无法创建 Python 线程 (%d)", rc]}]; return NO; }
+    pthread_detach(gThread); pthread_mutex_unlock(&gLock); return YES;
 #endif
 }
 
-+ (void)stop {
-    // 插件的 HTTP 服务线程无法从外部安全终止；这里只标记状态并关闭管道
-    gRunning = NO;
-    if (gPipeFD[0] >= 0) { close(gPipeFD[0]); gPipeFD[0] = -1; }
-    if (gPipeFD[1] >= 0) { close(gPipeFD[1]); gPipeFD[1] = -1; }
++ (BOOL)stopWithError:(NSError **)error {
+#if !PYHOST_AVAILABLE
+    if (error) *error = [NSError errorWithDomain:@"PyHost" code:3 userInfo:@{NSLocalizedDescriptionKey:@"当前构建未包含 CPython。"}];
+    return NO;
+#else
+    pthread_mutex_lock(&gLock);
+    if (!gRunning) { BOOL exited = gThreadExited || !gStartedOnce; pthread_mutex_unlock(&gLock); return exited; }
+    pthread_mutex_unlock(&gLock);
+    PyGILState_STATE gil = PyGILState_Ensure();
+    PyObject *stop = PyDict_GetItemString(PyEval_GetBuiltins(), "_ysp_stop_server");
+    PyObject *result = stop ? PyObject_CallNoArgs(stop) : NULL;
+    int truth = result ? PyObject_IsTrue(result) : 0;
+    BOOL stopped = truth > 0;
+    if (!result || truth < 0) PyErr_Clear();
+    Py_XDECREF(result); PyGILState_Release(gil);
+    if (!stopped) {
+        if (error) *error = [NSError errorWithDomain:@"PyHost" code:6 userInfo:@{NSLocalizedDescriptionKey:@"插件停止回调缺失或停止失败；未伪报停止，Python 线程仍可能运行。"}];
+        return NO;
+    }
+    return YES;
+#endif
 }
-
++ (void)stop { NSError *error = nil; if (![self stopWithError:&error] && error) emitLog(error.localizedDescription); }
 @end

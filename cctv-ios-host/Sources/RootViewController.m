@@ -11,7 +11,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.13.0";
+static NSString *const kBuildTag = @"0.13.1";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
@@ -36,6 +36,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, strong) AVPlayerLayer *avLayer;
 @property (nonatomic, strong) NSMutableArray<NSDictionary *> *subscriptions;
 @property (nonatomic, strong) NSMutableSet<NSString *> *subscriptionURLs;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *subscriptionRequestVersions;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *epgCache;
 @property (nonatomic, strong) NSMutableSet<NSString *> *epgInflight;
 @property (nonatomic, strong) NSMutableArray<NSDictionary *> *recents;
@@ -44,6 +45,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, strong) CicadaPlayer *cicadaPlayer;
 @property (nonatomic, copy) NSString *channelID;
 @property (nonatomic, copy) NSString *channelName;
+@property (nonatomic, copy) NSString *currentRemoteURL;
 @property (nonatomic, copy) NSString *routeName;
 @property (nonatomic, assign) BOOL firstRender;
 @property (nonatomic, assign) BOOL fullscreen;
@@ -337,10 +339,12 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.recents = [NSMutableArray arrayWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:@"recents"] ?: @[]];
     self.subscriptions = [NSMutableArray array];
     self.subscriptionURLs = [NSMutableSet set];
+    self.subscriptionRequestVersions = [NSMutableDictionary dictionary];
     NSArray *saved = [[NSUserDefaults standardUserDefaults] arrayForKey:@"subscriptions"];
     for (NSString *u in saved) {
-        [self.subscriptionURLs addObject:u];
-        [self fetchSubscription:u silent:YES];
+        NSString *key = [self stableURLKey:u];
+        if (key.length) [self.subscriptionURLs addObject:key];
+        [self fetchSubscription:key ?: u silent:YES];
     }
     [self log:@"频道 %lu 个 / 线路 %lu 条",
          (unsigned long)self.allChannels.count,
@@ -567,6 +571,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
 - (void)playChannel:(NSDictionary *)ch route:(NSDictionary *)route {
     self.playbackGeneration += 1;
+    self.currentRemoteURL = nil;
     NSString *cid = ch[@"id"];
     if (!cid.length) return;
     self.channelID = cid;
@@ -780,7 +785,11 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
                 [self fetchSubscription:u silent:NO];
             }]];
             [op addAction:[UIAlertAction actionWithTitle:@"删除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *y) {
-                [self.subscriptionURLs removeObject:u];
+                NSString *sourceKey = [self stableURLKey:u];
+                [self.subscriptionURLs removeObject:sourceKey ?: u];
+                NSString *deletedKey = sourceKey ?: u;
+                self.subscriptionRequestVersions[deletedKey] = @([self.subscriptionRequestVersions[deletedKey] unsignedIntegerValue] + 1);
+                [self removeSubscriptionSource:deletedKey];
                 [[NSUserDefaults standardUserDefaults] setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
                 [self log:@"已删除订阅 %@", u];
             }]];
@@ -829,9 +838,11 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     if (!ok) return;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         NSString *u = [NSString stringWithFormat:@"http://127.0.0.1:%ld/all.m3u", (long)PyHost.port];
-        [self.subscriptionURLs addObject:u];
+        NSString *key = [self stableURLKey:u];
+        if (!key.length) return;
+        [self.subscriptionURLs addObject:key];
         [[NSUserDefaults standardUserDefaults] setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
-        [self fetchSubscription:u silent:NO];
+        [self fetchSubscription:key silent:NO];
     });
 }
 
@@ -912,9 +923,11 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
     if (![json isKindOfClass:NSDictionary.class]) return;
     double now = NSDate.date.timeIntervalSince1970;
-    [(NSDictionary *)json enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSDictionary *obj, BOOL *stop) {
+    [(NSDictionary *)json enumerateKeysAndObjectsUsingBlock:^(NSString *key, id obj, BOOL *stop) {
+        if (![obj isKindOfClass:NSDictionary.class]) return;
         double ts = [obj[@"ts"] doubleValue];
-        if (now - ts < 6 * 3600 && [obj[@"now"] isKindOfClass:NSString.class]) self.epgCache[key] = obj;
+        if (ts > 0 && ts <= now && now - ts < 6 * 3600 &&
+            [obj[@"now"] isKindOfClass:NSString.class]) self.epgCache[key] = obj;
     }];
     [self log:@"EPG 缓存载入 %lu 条", (unsigned long)self.epgCache.count];
 }
@@ -943,6 +956,7 @@ static NSCache *LogoCache(void) {
 
 - (void)loadLogo:(NSString *)url into:(UIImageView *)iv {
     iv.image = nil;
+    iv.accessibilityIdentifier = url;
     if (!url.length) return;
     UIImage *cached = [LogoCache() objectForKey:url];
     if (cached) { iv.image = cached; return; }
@@ -953,7 +967,7 @@ static NSCache *LogoCache(void) {
         if (!img) return;
         [LogoCache() setObject:img forKey:url];
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (weakIV) weakIV.image = img;
+            if (weakIV && [weakIV.accessibilityIdentifier isEqualToString:url]) weakIV.image = img;
         });
     }] resume];
 }
@@ -1061,14 +1075,50 @@ static NSCache *LogoCache(void) {
     [a addAction:[UIAlertAction actionWithTitle:@"添加" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
         NSString *u = a.textFields.firstObject.text;
         if (!u.length) return;
-        [self.subscriptionURLs addObject:u];
+        NSString *key = [self stableURLKey:u];
+        if (!key.length) return;
+        [self.subscriptionURLs addObject:key];
         [[NSUserDefaults standardUserDefaults] setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
-        [self fetchSubscription:u silent:NO];
+        [self fetchSubscription:key silent:NO];
     }]];
     [self presentViewController:a animated:YES completion:nil];
 }
 
+- (NSString *)stableURLKey:(NSString *)urlString {
+    NSURLComponents *components = [NSURLComponents componentsWithString:urlString];
+    if (!components.URL || !components.scheme.length || !components.host.length) return nil;
+    components.scheme = components.scheme.lowercaseString;
+    components.host = components.host.lowercaseString;
+    components.fragment = nil;
+    if (([components.scheme isEqualToString:@"http"] && components.port.integerValue == 80) ||
+        ([components.scheme isEqualToString:@"https"] && components.port.integerValue == 443)) components.port = nil;
+    return components.URL.absoluteString;
+}
+
+- (void)removeSubscriptionSource:(NSString *)sourceKey {
+    NSMutableArray *kept = [NSMutableArray array];
+    for (NSDictionary *channel in self.allChannels ?: @[]) {
+        NSMutableSet *sources = [NSMutableSet setWithArray:channel[@"subscriptionSources"] ?: @[]];
+        if ([sources containsObject:sourceKey]) {
+            [sources removeObject:sourceKey];
+            if (!sources.count) continue;
+            NSMutableDictionary *copy = [channel mutableCopy];
+            copy[@"subscriptionSources"] = sources.allObjects;
+            [kept addObject:copy];
+        } else {
+            [kept addObject:channel];
+        }
+    }
+    self.allChannels = kept;
+    self.shownChannels = kept;
+    [self applyFilter];
+}
+
 - (void)fetchSubscription:(NSString *)urlString silent:(BOOL)silent {
+    NSString *sourceKey = [self stableURLKey:urlString];
+    if (!sourceKey.length) return;
+    NSUInteger requestVersion = [self.subscriptionRequestVersions[sourceKey] unsignedIntegerValue] + 1;
+    self.subscriptionRequestVersions[sourceKey] = @(requestVersion);
     NSURL *url = [NSURL URLWithString:urlString];
     if (!url) return;
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
@@ -1079,31 +1129,60 @@ static NSCache *LogoCache(void) {
         NSString *text = data.length ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
         NSArray<M3UChannel *> *list = text.length ? [M3UParser parse:text baseURL:url] : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
+            if ([weakSelf.subscriptionRequestVersions[sourceKey] unsignedIntegerValue] != requestVersion) return;
             if (!list.count) {
                 [weakSelf log:@"订阅失败 %@ %@", urlString, err.localizedDescription ?: @"无有效条目"];
                 return;
             }
-            NSMutableArray *merged = [NSMutableArray arrayWithArray:weakSelf.allChannels ?: @[]];
-            NSMutableSet *names = [NSMutableSet set];
-            for (NSDictionary *c in merged) [names addObject:c[@"id"]];
+            NSMutableArray *merged = [NSMutableArray array];
+            for (NSDictionary *existing in weakSelf.allChannels ?: @[]) {
+                NSMutableSet *owners = [NSMutableSet setWithArray:existing[@"subscriptionSources"] ?: @[]];
+                if ([owners containsObject:sourceKey]) {
+                    [owners removeObject:sourceKey];
+                    if (!owners.count) continue;
+                    NSMutableDictionary *copy = [existing mutableCopy];
+                    copy[@"subscriptionSources"] = owners.allObjects;
+                    [merged addObject:copy];
+                } else {
+                    [merged addObject:existing];
+                }
+            }
+            NSMutableDictionary<NSString *, NSNumber *> *urlIndexes = [NSMutableDictionary dictionary];
+            for (NSUInteger i = 0; i < merged.count; i++) {
+                NSString *stable = [weakSelf stableURLKey:merged[i][@"remoteURL"]];
+                if (stable.length) urlIndexes[stable] = @(i);
+            }
             NSUInteger added = 0;
             for (M3UChannel *c in list) {
-                id key = c.url;
-                if ([names containsObject:key]) continue;
-                [names addObject:key];
-                if (c.name.length && c.url.length) {
-                    NSMutableArray *alts = self.altSources[c.name];
-                    if (!alts) { alts = [NSMutableArray array]; self.altSources[c.name] = alts; }
-                    if (![alts containsObject:c.url]) [alts addObject:c.url];
+                if (!c.name.length || !c.url.length) continue;
+                NSString *stable = [weakSelf stableURLKey:c.url];
+                if (!stable.length) continue;
+                NSMutableArray *alts = weakSelf.altSources[c.name];
+                if (!alts) { alts = [NSMutableArray array]; weakSelf.altSources[c.name] = alts; }
+                if (![alts containsObject:c.url]) [alts addObject:c.url];
+                NSNumber *existingIndex = urlIndexes[stable];
+                if (existingIndex) {
+                    NSMutableDictionary *entry = [merged[existingIndex.unsignedIntegerValue] mutableCopy];
+                    NSMutableSet *owners = [NSMutableSet setWithArray:entry[@"subscriptionSources"] ?: @[]];
+                    [owners addObject:sourceKey];
+                    entry[@"subscriptionSources"] = owners.allObjects;
+                    entry[@"name"] = c.name;
+                    entry[@"group"] = c.group ?: @"订阅";
+                    if (c.logo.length) entry[@"logo"] = c.logo; else [entry removeObjectForKey:@"logo"];
+                    entry[@"remoteURL"] = c.url;
+                    merged[existingIndex.unsignedIntegerValue] = entry;
+                } else {
+                    NSMutableDictionary *entry = [@{@"id": stable,
+                                                    @"name": c.name,
+                                                    @"group": c.group ?: @"订阅",
+                                                    @"verified": @NO,
+                                                    @"remoteURL": c.url,
+                                                    @"subscriptionSources": @[sourceKey]} mutableCopy];
+                    if (c.logo.length) entry[@"logo"] = c.logo;
+                    urlIndexes[stable] = @(merged.count);
+                    [merged addObject:entry];
+                    added++;
                 }
-                NSMutableDictionary *entry = [@{@"id": c.name ?: c.url,
-                                                @"name": c.name ?: c.url,
-                                                @"group": c.group ?: @"订阅",
-                                                @"verified": @NO,
-                                                @"remoteURL": c.url} mutableCopy];
-                if (c.logo.length) entry[@"logo"] = c.logo;
-                [merged addObject:entry];
-                added++;
             }
             weakSelf.allChannels = merged;
             weakSelf.shownChannels = merged;
@@ -1114,9 +1193,11 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)playRemote:(NSDictionary *)ch {
+    self.playbackGeneration += 1;
     NSString *u = ch[@"remoteURL"];
     NSURL *url = [NSURL URLWithString:u];
     if (!url) return;
+    self.currentRemoteURL = u;
     [self stopPlayback];
     self.channelID = ch[@"id"];
     self.channelName = ch[@"name"];
@@ -1253,6 +1334,15 @@ static NSCache *LogoCache(void) {
     NSString *cid = self.channelID;
     if (!cid.length) return;
     self.epgChannel = cid;
+    NSDictionary *cached = self.epgCache[cid];
+    if (cached && [cached[@"ts"] doubleValue] <= NSDate.date.timeIntervalSince1970 &&
+        NSDate.date.timeIntervalSince1970 - [cached[@"ts"] doubleValue] < 6 * 3600) {
+        NSMutableArray *cachedParts = [NSMutableArray array];
+        if ([cached[@"now"] length]) [cachedParts addObject:[NSString stringWithFormat:@"正在播：%@", cached[@"now"]]];
+        if ([cached[@"next"] length]) [cachedParts addObject:[NSString stringWithFormat:@"接下来：%@", cached[@"next"]]];
+        if (cachedParts.count) self.infoLabel.text = [cachedParts componentsJoinedByString:@"  "];
+    }
+    NSUInteger epgGeneration = self.playbackGeneration;
     NSString *url = [NSString stringWithFormat:@"https://api.cntv.cn/epg/get3D12HEPG?c=%@&serviceId=cbox",
                      [cid stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]];
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
@@ -1276,7 +1366,8 @@ static NSCache *LogoCache(void) {
             else if (s0 > now && !next) next = row[@"title"];
         }
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (![weakSelf.epgChannel isEqualToString:cid]) return;
+            if (![weakSelf.epgChannel isEqualToString:cid] || epgGeneration != weakSelf.playbackGeneration ||
+                ![weakSelf.channelID isEqualToString:cid]) return;
             NSMutableArray *parts = [NSMutableArray array];
             if (cur) [parts addObject:[NSString stringWithFormat:@"正在播：%@", cur]];
             if (next) [parts addObject:[NSString stringWithFormat:@"接下来：%@", next]];
@@ -1411,11 +1502,15 @@ static NSCache *LogoCache(void) {
         NSUInteger generation = self.playbackGeneration;
         NSString *cid = self.channelID;
         NSString *name = self.channelName;
-        NSDictionary *last = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"lastChannel"];
+        BOOL remotePlayback = self.avPlayer != nil;
+        NSString *remoteURL = remotePlayback ? self.currentRemoteURL : nil;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (generation != self.playbackGeneration || player != self.currentPlayer || ![cid isEqualToString:self.channelID]) return;
-            if ([last[@"remoteURL"] length]) [self playRemote:last];
-            else [self playViaSDK:cid title:name];
+            if (remotePlayback) {
+                if (remoteURL.length) [self playRemote:@{@"id": cid, @"name": name ?: cid, @"remoteURL": remoteURL}];
+            } else {
+                [self playViaSDK:cid title:name];
+            }
         });
     }
 }
