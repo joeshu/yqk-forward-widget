@@ -1,0 +1,79 @@
+name: Build CCTVHost unsigned IPA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cctv-ios-host/**'
+      - '.github/workflows/cctv-ios-host.yml'
+  pull_request:
+    paths:
+      - 'cctv-ios-host/**'
+      - '.github/workflows/cctv-ios-host.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cctv-ios-host-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check frameworks
+        run: |
+          for f in cctv-ios-host/Frameworks/*.framework; do
+            name="$(basename "$f" .framework)"
+            echo "== $name"
+            lipo -info "$f/$name"
+          done
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate project
+        working-directory: cctv-ios-host
+        run: |
+          xcodegen generate
+          xcodebuild -list -project CCTVHost.xcodeproj
+
+      - name: Build
+        working-directory: cctv-ios-host
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project CCTVHost.xcodeproj \
+            -scheme CCTVHost \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          APP="cctv-ios-host/build/Build/Products/Release-iphoneos/CCTVHost.app"
+          test -d "$APP"
+          mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          cd out
+          zip -qry CCTVHost-unsigned.ipa Payload
+          unzip -l CCTVHost-unsigned.ipa | head -20
+          shasum -a 256 CCTVHost-unsigned.ipa > CCTVHost-unsigned.ipa.sha256
+          cat CCTVHost-unsigned.ipa.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CCTVHost-unsigned-ipa
+          path: |
+            out/CCTVHost-unsigned.ipa
+            out/CCTVHost-unsigned.ipa.sha256
+          retention-days: 30

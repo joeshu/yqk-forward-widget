@@ -1,0 +1,9 @@
+{
+    "emconfig": {
+        "4001": {
+            "channelFilePath": "https://api.live.cntv.cn/livestatic/zs/livestatic_config/iosapp/4001/unity_iosapp.json",
+            "copyrightFilePath": "https://api.live.cntv.cn/livestatic/zs/livestatic_config/iosapp/4001/copyright_iosapp.json",
+            "encrypted": 1
+        }
+    }
+}

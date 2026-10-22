@@ -1,0 +1,4309 @@
+
+{
+    "channels": [
+                {
+            "audio_protect": 0,
+            "channel": "4kcctv16",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T3",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "aoyuncctv16",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "aoyuncctv5",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "aoyuncctv5plus",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "boji",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "btv1",
+            "channel_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788183480000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788181500000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788288360000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788286020000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 31,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788183480000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788181500000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788288360000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788286020000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T0",
+            "tip_num_y": "T0",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 0,
+            "channel": "btv2",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 0,
+            "self_copyright": 0,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T1",
+            "tip_num_y": "T1",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 0,
+            "channel": "btv3",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 0,
+            "self_copyright": 0,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T1",
+            "tip_num_y": "T1",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 0,
+            "channel": "btv4",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 0,
+            "self_copyright": 0,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T1",
+            "tip_num_y": "T1",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 0,
+            "channel": "btv5",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 0,
+            "self_copyright": 0,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T1",
+            "tip_num_y": "T1",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 0,
+            "channel": "btv6",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 0,
+            "self_copyright": 0,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T1",
+            "tip_num_y": "T1",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 0,
+            "channel": "btv7",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 0,
+            "self_copyright": 0,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T1",
+            "tip_num_y": "T1",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 0,
+            "channel": "btv9",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 0,
+            "self_copyright": 0,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T1",
+            "tip_num_y": "T1",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv1",
+            "channel_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787802420000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787793780000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787821620000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787807160000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787838720000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787832060000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787886060000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787880180000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787925180000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787918520000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787986655000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787983865000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787989535000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787986655000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787992325000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787989535000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787995100000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787992325000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787998120000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787995100000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788073260000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788070470000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788076050000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788073260000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788078935000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788076050000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788081710000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788078935000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788084640000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788081710000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788155640000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788152820000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788183960000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788177720000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788357000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788350520000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788437160000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788436945000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788440245000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788437160000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788440335000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788440245000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788443245000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788440335000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788512820000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788501240000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788523500000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788523290000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788526530000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788523500000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788526680000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788526530000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788530000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788526680000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788600720000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788586260000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788689640000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788675300000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 31,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787802420000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787793780000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787821620000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787807160000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787838720000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787832060000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787886060000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787880180000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787908020000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787893500000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787918575000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787917180000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787918760000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787918575000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787921805000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787918760000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787922060000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787921805000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787925120000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787922060000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787986655000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787983865000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787989535000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787986655000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787992325000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787989535000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787995100000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787992325000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787998120000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787995100000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788004980000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788003520000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788050145000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788040800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788073260000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788070470000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788076050000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788073260000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788078935000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788076050000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788081710000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788078935000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788084640000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788081710000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788089965000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788087600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788136545000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788127200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788155640000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788152820000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788167220000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788155640000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788183960000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788177720000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788253620000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788239220000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788263395000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788260400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788273345000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788271200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788339900000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788325620000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788357000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788350520000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788426360000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788412020000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788437160000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788436945000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788440245000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788437160000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788440335000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788440245000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788443245000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788440335000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788501240000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788498420000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788512820000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788501240000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788523500000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788523290000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788526530000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788523500000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788526680000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788526530000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788530000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788526680000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788600720000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788586260000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788689640000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788675300000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T0",
+            "tip_num_y": "T0",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv13",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 31,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787796000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787792400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787839200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787837400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787918400000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787917180000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788001200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787997600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788004800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788003520000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788051600000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788040800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788080400000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788076800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788089525000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788087600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788138000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788127200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788174000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788170400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788188400000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788186600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788235200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788231600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788256800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788253200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788260400000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788256800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788263000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788260400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788267600000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788264000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788270000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788267600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788278399000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788274800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788321600000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788318000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788378240000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788375600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T0",
+            "tip_num_y": "T0",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv15",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 31,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787837820000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787830200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787924220000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787916600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788010620000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788003000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788097020000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788089400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788155220000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788150480000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788183420000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788175800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788229020000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788224490000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788239700000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788233520000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788253140000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788247500000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788257670000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788253140000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788269820000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788262200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788356220000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788348600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788442620000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788435000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788511680000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788507180000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788531000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788526260000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788598740000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788594240000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788622740000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788616620000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T0",
+            "tip_num_y": "T0",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv16",
+            "channel_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787797800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787792400000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787814300000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787809200000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787884200000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787878800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787967000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787961600000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788057000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788051900000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788081900000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788076800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788143400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788138300000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788229800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788224400000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788259200000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788254100000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788316200000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788310800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788402600000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788397200000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788489000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788483600000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788497400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788495600000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788571800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788566400000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788707400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788699600000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                }
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787797800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787792400000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787814300000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787809200000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787884200000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787878800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787967000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787961600000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788057000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788051900000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788081900000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788076800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788143400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788138300000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788229800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788224400000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788259200000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788254100000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788316200000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788310800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788358200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788353100000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788402600000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788397200000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788489000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788483600000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788497400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788495600000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788502800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788497400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788571800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788566400000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788587400000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788582000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788598800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788594300000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788685800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788681480000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788707400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788699600000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                }
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T4",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv17",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 31,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787826975000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787824800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787913375000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787911200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787999775000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787997600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788172575000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788170400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T0",
+            "tip_num_y": "T0",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv2",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 31,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787806800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787803200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787815800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787814000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787833800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787832000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787878800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787871600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787909520000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787907600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788224400000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788217200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788228000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788224400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T0",
+            "tip_num_y": "T0",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv3",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 0,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788240190000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788238800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T4",
+            "tip_num_y": "T4",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv4",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 31,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787824800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787822100000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787833800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787832000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787839200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787837400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787866200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787864400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787887800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787885790000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787965200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787961600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788093000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788089400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788188400000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788186720000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T0",
+            "tip_num_y": "T0",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv5",
+            "channel_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787802900000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787797860000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787823000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787821200000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787942160000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787937000000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788019199000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788012000000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788019500000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788019200000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788102000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788094800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788201360000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788195960000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788287760000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788282360000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788374160000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788368760000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788429600000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788427800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788547500000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788542520000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788623999000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788616800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788624300000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788624000000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788720300000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788715080000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                }
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787781600000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787774400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787802900000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787797860000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787823000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787821200000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787846399000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787846100000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787853900000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787846400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787889300000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787884200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787913300000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787911200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787942160000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787937000000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788019199000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788012000000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788019500000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788019200000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788102000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788094800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788183000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788175800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788201360000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788195960000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788213600000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788206400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788256800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788251400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788287760000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788282360000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788300000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788292800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788345300000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788343200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788374160000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788368760000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788429600000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788427800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788442200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788436800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788531300000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788521400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788537599000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788535200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788542520000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788537600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788547500000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788542520000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788607800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788600600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788623999000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788616800000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788624300000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788624000000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788705000000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788696000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788720300000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788715080000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                }
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T4",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv5plus",
+            "channel_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787762160000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787760000000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787774400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787769360000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787817360000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787811960000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787860800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787855760000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787947200000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787942160000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788120000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788114960000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788148800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788143400000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788206400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788201360000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788253440000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788248040000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788292800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788287760000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788379200000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788374160000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788437280000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788435480000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788465600000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788460560000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788552000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788546960000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788638400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788633360000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788724800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788719760000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                }
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787762160000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787760000000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787774400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787769360000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787817360000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787811960000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787860800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787855760000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787947200000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1787942160000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787970600000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787965200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788120000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788114960000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788148800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788143400000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788188400000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788183000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788206400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788201360000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788253440000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788248040000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788272940000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788267540000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788292800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788287760000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788330960000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788325560000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788379200000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788374160000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788417360000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788411960000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788437280000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788435480000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788465600000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788460560000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788514200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788508800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788521700000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788514200000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788552000000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788546960000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788594600000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788589740000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788638400000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788633360000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788668700000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788663900000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788677880000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788672480000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788693600000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788687000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788724800000,
+                    "other_copyright": 16,
+                    "self_copyright": 16,
+                    "start_time": 1788719760000,
+                    "tip_num_n": "T7",
+                    "tip_num_y": "T3"
+                }
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T4",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv6",
+            "channel_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787821200000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1787815800000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787845800000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1787839200000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787907600000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1787902200000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787932200000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1787925600000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787994000000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1787988600000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788018600000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788012000000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788080400000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788075000000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788105000000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788098400000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788166800000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788161400000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788191400000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788184800000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788253200000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788247800000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788277800000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788271200000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788339600000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788334200000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788364200000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788357600000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788426000000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788420600000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788450600000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788444000000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                }
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 0,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787821200000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1787815800000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787845800000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1787839200000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787907600000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1787902200000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787932200000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1787925600000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787994000000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1787988600000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788018600000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788012000000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788080400000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788075000000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788105000000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788098400000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788166800000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788161400000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788191400000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788184800000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788253200000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788247800000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788277800000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788271200000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788339600000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788334200000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788364200000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788357600000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788426000000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788420600000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788450600000,
+                    "other_copyright": 0,
+                    "self_copyright": 31,
+                    "start_time": 1788444000000,
+                    "tip_num_n": "T0",
+                    "tip_num_y": "T0"
+                }
+            ],
+            "tip_num_n": "T4",
+            "tip_num_y": "T4",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctv7",
+            "channel_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787878980000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787877210000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 31,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787878980000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787877210000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788064590000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788062400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788089580000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788087600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788091380000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788089580000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788262980000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788260400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788265380000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788262980000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788307110000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788305400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788323790000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788321600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T0",
+            "tip_num_y": "T0",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctvamerica",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 31,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787761800000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787760000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787839200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787837400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787886120000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787884320000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787932799000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787931000000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787965200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787961600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788093120000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788089400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T0",
+            "tip_num_y": "T0",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctveurope",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 31,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787839200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787837400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787855400000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787853600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787871600000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787869800000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787884200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787882400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787902200000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787900400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1787965380000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1787961600000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788093090000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788089400000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788188400000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788186720000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T0",
+            "tip_num_y": "T0",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "cctvjilu",
+            "channel_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788447960000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788444240000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788471960000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788468360000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788534360000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788530640000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788558360000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788554760000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788620760000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788617040000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788644760000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788641160000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "is_vip": 0,
+            "other_copyright": 31,
+            "self_copyright": 31,
+            "timeshift_time_range": [
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788447960000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788444240000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788471960000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788468360000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788534360000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788530640000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788558360000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788554760000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788620760000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788617040000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                },
+                                {
+                    "audio_protect": 0,
+                    "end_time": 1788644760000,
+                    "other_copyright": 0,
+                    "self_copyright": 0,
+                    "start_time": 1788641160000,
+                    "tip_num_n": "T1",
+                    "tip_num_y": "T1"
+                }
+            ],
+            "tip_num_n": "T0",
+            "tip_num_y": "T0",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 0,
+            "channel": "ncpa",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 16,
+            "self_copyright": 16,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T3",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 0,
+            "channel": "ncpavip",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 16,
+            "self_copyright": 16,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T3",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip1",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip10",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip11",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip12",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip13",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip14",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip15",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip16",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T4",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip17",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T4",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip18",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T4",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip19",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip2",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip20",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip21",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip22",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip23",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip24",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip25",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip26",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip27",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip28",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip3",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip4",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip5",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip6",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip7",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip8",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "tiyuip9",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "vipcctv16",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "vipcctv5",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "vipcctv5plus",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip1",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip10",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip11",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip12",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip13",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip14",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip15",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip19",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip2",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip20",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip21",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip22",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip23",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip24",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip25",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip26",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip27",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip28",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip3",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip4",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip5",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip6",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip7",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip8",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        },
+                {
+            "audio_protect": 3,
+            "channel": "viptiyuip9",
+            "channel_time_range": [
+            ],
+            "is_vip": 0,
+            "other_copyright": 20,
+            "self_copyright": 20,
+            "timeshift_time_range": [
+            ],
+            "tip_num_n": "T7",
+            "tip_num_y": "T7",
+            "vip_data": 0,
+            "vip_time_range": [
+            ]
+        }
+    ],
+    "tip": {
+        "T1": "\u7531\u4e8e\u64ad\u51fa\u5b89\u6392\u53d8\u66f4\uff0c\u6682\u4e0d\u652f\u6301\u64ad\u653e\u8be5\u65f6\u6bb5\u5185\u5bb9",
+        "T10": "\u62b1\u6b49\uff0c\u8be5\u89c6\u9891\u6682\u65f6\u65e0\u6cd5\u64ad\u653e",
+        "T2": "\u7531\u4e8e\u64ad\u51fa\u5b89\u6392\u53d8\u66f4\uff0c\u6682\u4e0d\u652f\u6301\u64ad\u653e\u8be5\u65f6\u6bb5\u5185\u5bb9\uff0c   \u8bf7\u70b9\u51fb\u64ad\u653e\u6309\u94ae\u6536\u542c\u6b64\u8282\u76ee",
+        "T3": "\u672c\u65f6\u6bb5\u8282\u76ee\u6682\u65f6\u65e0\u6cd5\u64ad\u653e\uff0c\u8bf7\u79fb\u81f3\u7535\u8111\u7aef\u89c2\u770b",
+        "T4": "\u672c\u65f6\u6bb5\u8282\u76ee\u6682\u65f6\u65e0\u6cd5\u64ad\u653e\uff0c   \u8bf7\u70b9\u51fb\u64ad\u653e\u6309\u94ae\u6536\u542c\u6b64\u8282\u76ee\uff0c\u6216\u79fb\u81f3\u7535\u8111\u7aef\u89c2\u770b",
+        "T5": "\u672c\u65f6\u6bb5\u8282\u76ee\u6682\u65f6\u65e0\u6cd5\u64ad\u653e\uff0c\u8bf7\u79fb\u81f3\u79fb\u52a8\u7aef\u89c2\u770b",
+        "T6": "\u672c\u65f6\u6bb5\u8282\u76ee\u6682\u65f6\u65e0\u6cd5\u64ad\u653e\uff0c   \u8bf7\u70b9\u51fb\u64ad\u653e\u6309\u94ae\u6536\u542c\u6b64\u8282\u76ee\uff0c\u6216\u79fb\u81f3\u79fb\u52a8\u7aef\u89c2\u770b",
+        "T7": "\u60a8\u6240\u5728\u7684\u5730\u533a\uff0c\u6682\u4e0d\u652f\u6301\u64ad\u653e\u8be5\u89c6\u9891",
+        "T8": "\u8be5\u89c6\u9891\u4e0d\u5b58\u5728\uff0c\u8bf7\u89c2\u770b\u5176\u4ed6\u89c6\u9891",
+        "T9": "\u6682\u65e0\u6743\u9650\u89c2\u770b"
+    }
+}

@@ -1,0 +1,46 @@
+name: CCTVHost
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    ENABLE_BITCODE: NO
+    OTHER_LDFLAGS: "-ObjC -lresolv"
+    HEADER_SEARCH_PATHS: "$(SRCROOT)/Sources/Include"
+targets:
+  CCTVHost:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Resources
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        INFOPLIST_FILE: Resources/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.cctvhost
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - framework: Frameworks/CNPlayerSDK.framework
+        embed: true
+        codeSign: true
+      - framework: Frameworks/CicadaPlayerSDK.framework
+        embed: true
+        codeSign: true
+      - framework: Frameworks/alivcffmpeg.framework
+        embed: true
+        codeSign: true
+schemes:
+  CCTVHost:
+    build:
+      targets:
+        CCTVHost: all
+    run:
+      config: Debug
+    archive:
+      config: Release
