@@ -6,7 +6,10 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.4.0";
+static NSString *const kBuildTag = @"0.4.1";
+// 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
+static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
+static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
 static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTVGetLicense";
 
 @interface RootViewController () <UITableViewDataSource, UITableViewDelegate>
@@ -395,13 +398,13 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
     [self stopPlayback];
     if (route[@"url"]) [self playViaCicada:route[@"url"]];
-    else [self playViaSDK:cid];
+    else [self playViaSDK:cid title:self.channelName];
 
     [self refreshNowNext];
     [self restartEPGTimer];
 }
 
-- (void)playViaSDK:(NSString *)cid {
+- (void)playViaSDK:(NSString *)cid title:(NSString *)title {
     Class cls = NSClassFromString(@"CNPlayer");
     SEL playSel = NSSelectorFromString(@"playLIVEWithChannelID:delegate:configOptions:");
     id inst = self.sdkPlayer;
@@ -422,7 +425,9 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         self.titleLabel.text = @"接口不匹配";
         return;
     }
-    id ok = [self invokeTarget:inst selector:playSel args:@[cid, self, @{}]];
+    NSDictionary *options = @{kOptTitle: title ?: cid};
+    [self log:@"configOptions=%@", options];
+    id ok = [self invokeTarget:inst selector:playSel args:@[cid, self, options]];
     if ([ok isKindOfClass:NSNumber.class] && ![ok boolValue]) {
         [self log:@"起播返回 0，重建实例重试"];
         id fresh = nil;
@@ -431,7 +436,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
             self.sdkPlayer = fresh;
             self.currentPlayer = fresh;
             @try { [fresh setValue:@(YES) forKey:@"autoPlay"]; } @catch (NSException *e) {}
-            ok = [self invokeTarget:fresh selector:playSel args:@[cid, self, @{}]];
+            ok = [self invokeTarget:fresh selector:playSel args:@[cid, self, options]];
             inst = fresh;
         }
     }
@@ -705,7 +710,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         self.retryCount += 1;
         [self log:@"失败重试一次"];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (self.channelID.length) [self playViaSDK:self.channelID];
+            if (self.channelID.length) [self playViaSDK:self.channelID title:self.channelName];
         });
     }
 }
