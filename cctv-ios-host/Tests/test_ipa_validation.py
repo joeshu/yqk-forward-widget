@@ -12,6 +12,17 @@ def sample(platform=2, cpu=0x100000c, kind=6):
     return header + struct.pack('<6I', 0x32, 24, platform, 0xf0000, 0x120000, 0)
 
 class TestDevicePlatform(unittest.TestCase):
+    def test_fat_arm64_device_framework(self):
+        thin=sample()
+        offset=32
+        fat=bytes.fromhex('cafebabe')+struct.pack('>I',1)+struct.pack('>IIIII',0x0100000c,0,offset,len(thin),2)+bytes(4)+thin
+        info=v.macho_info(fat)
+        self.assertEqual(info['slices'][0]['platform'],'iOS device')
+    def test_fat_simulator_slice_rejected(self):
+        thin=sample(platform=7)
+        offset=32
+        fat=bytes.fromhex('cafebabe')+struct.pack('>I',1)+struct.pack('>IIIII',0x0100000c,0,offset,len(thin),2)+bytes(4)+thin
+        with self.assertRaisesRegex(AssertionError,'platform=2'): v.macho_info(fat)
     def test_device(self):
         self.assertEqual(v.macho_info(sample())['platform'], 'iOS device')
     def test_simulator_arm64_rejected(self):

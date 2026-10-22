@@ -3,9 +3,24 @@
 import argparse, hashlib, json, plistlib, struct, zipfile
 
 def macho_info(data):
+    if len(data) < 4:
+        raise ValueError('truncated Mach-O')
+    magic_be = struct.unpack_from('>I', data, 0)[0]
+    if magic_be == 0xCAFEBABE:  # FAT_MAGIC
+        nfat = struct.unpack_from('>I', data, 4)[0]
+        assert 0 < nfat <= 32, 'invalid FAT architecture count'
+        slices = []
+        pos = 8
+        for _ in range(nfat):
+            cpu, sub, off, size, align = struct.unpack_from('>IIIII', data, pos)
+            pos += 20
+            assert off + size <= len(data), 'FAT slice outside binary'
+            assert cpu == 0x0100000C, f'non-ARM64 FAT slice: {cpu:#x}'
+            slices.append(macho_info(data[off:off+size]))
+        return {'cpu': 'arm64', 'platform': 'iOS device', 'slices': slices}
     magic, cpu, sub, kind, count, size, flags, reserved = struct.unpack_from('<8I', data)
-    assert magic == 0xfeedfacf, 'expected thin 64-bit Mach-O'
-    assert cpu == 0x100000c, 'expected ARM64'
+    assert magic == 0xfeedfacf, f'unsupported Mach-O magic: {magic:#x}'
+    assert cpu == 0x100000c, f'expected ARM64, got {cpu:#x}'
     off = 32
     platform = None
     for _ in range(count):
@@ -14,7 +29,7 @@ def macho_info(data):
         if cmd == 0x32:
             platform = struct.unpack_from('<I', data, off + 8)[0]
         if cmd == 0x25 and platform is None:
-            platform = 2  # legacy LC_VERSION_MIN_IPHONEOS
+            platform = 2
         off += n
     assert platform == 2, f'expected iOS device platform=2, got {platform}'
     return {'cpu': 'arm64', 'platform': 'iOS device', 'kind': kind}
