@@ -17,10 +17,16 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-13
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache Python-Apple-support
+        uses: actions/cache@v4
+        with:
+          path: /tmp/python-ios.tar.gz
+          key: python-apple-support-3.13-b16
 
       - name: Toolchain info
         run: |
