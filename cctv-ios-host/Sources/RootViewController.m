@@ -3,12 +3,13 @@
 #import "CicadaSDK.h"
 #import "EPGViewController.h"
 #import "M3UParser.h"
+#import "PyHost.h"
 #import <AVFoundation/AVFoundation.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.9.0";
+static NSString *const kBuildTag = @"0.10.0";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
@@ -80,7 +81,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self loadChannels];
     [self buildPlayer];
     [self buildList];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"订阅" style:UIBarButtonItemStylePlain target:self action:@selector(addSubscription)];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"插件" style:UIBarButtonItemStylePlain target:self action:@selector(pluginMenu)];
     [self activateAudioSession];
     [self registerCallbackProtocol];
     [self setupSDK];
@@ -627,6 +628,44 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.titleLabel.frame = CGRectMake(12, 8, b.size.width - 24, 20);
     self.infoLabel.frame = CGRectMake(12, 26, b.size.width - 24, 16);
     self.spinner.center = CGPointMake(b.size.width / 2, b.size.height / 2);
+}
+
+#pragma mark - 内置插件
+
+- (void)pluginMenu {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"内置插件"
+                                                              message:PyHost.running ? @"运行中" : @"未运行"
+                                                       preferredStyle:UIAlertControllerStyleActionSheet];
+    [a addAction:[UIAlertAction actionWithTitle:@"启动内置插件（ysp-live, 端口 8767）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        [self startBuiltinPlugin];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"添加订阅地址" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        [self addSubscription];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"打开日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        if (!self.logVisible) [self toggleLog];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    a.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+- (void)startBuiltinPlugin {
+    [PyHost setLogHandler:^(NSString *line) {
+        if (!line.length) return;
+        [self log:@"[py] %@", line];
+    }];
+    NSString *dataDir = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"ysp"];
+    NSError *err = nil;
+    BOOL ok = [PyHost startWithScript:@"ysp-live.py" port:8767 dataDir:dataDir error:&err];
+    [self log:@"内置插件启动 %@ %@", ok ? @"成功" : @"失败", err.localizedDescription ?: @""];
+    if (!ok) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSString *u = [NSString stringWithFormat:@"http://127.0.0.1:%ld/all.m3u", (long)PyHost.port];
+        [self.subscriptionURLs addObject:u];
+        [[NSUserDefaults standardUserDefaults] setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
+        [self fetchSubscription:u silent:NO];
+    });
 }
 
 #pragma mark - 搜索 / 最近 / 节目单缓存

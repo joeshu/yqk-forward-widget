@@ -13,13 +13,31 @@ rm -rf "$OUT"
 mkdir -p "$APP"
 cp Resources/Info.plist "$APP/Info.plist"
 cp Resources/*.json "$APP/" 2>/dev/null || true
+cp Plugins/ysp-live.py "$APP/ysp-live.py"
 printf 'APPL????' > "$APP/PkgInfo"
 mkdir -p "$APP/Frameworks"
+
+# --- 内置 CPython（Python-Apple-support） ---
+PY_VER=3.13
+PY_TGZ=/tmp/python-ios.tar.gz
+if [ ! -f "$PY_TGZ" ]; then
+  curl -sSL -o "$PY_TGZ" "https://github.com/beeware/Python-Apple-support/releases/download/3.13-b16/Python-${PY_VER}-iOS-support.b16.tar.gz"
+fi
+rm -rf /tmp/pyroot && mkdir -p /tmp/pyroot && tar -xzf "$PY_TGZ" -C /tmp/pyroot
+cp -R "/tmp/pyroot/Python.xcframework/ios-arm64/Python.framework" "$APP/Frameworks/"
+mkdir -p "$APP/python/lib"
+cp -R /tmp/pyroot/Python.xcframework/lib/python3.13 "$APP/python/lib/"
+rm -rf "$APP/python/lib/python3.13/test" "$APP/python/lib/python3.13/idlelib" \
+       "$APP/python/lib/python3.13/tkinter" "$APP/python/lib/python3.13/ensurepip" \
+       "$APP/python/lib/python3.13/turtledemo" "$APP/python/lib/python3.13/distutils"
+find "$APP/python" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+find "$APP/python" -name '*.pyc' -delete 2>/dev/null || true
+PY_INC=/tmp/pyroot/Python.xcframework/ios-arm64/include/python3.13
 for f in Frameworks/*.framework; do
   cp -R "$f" "$APP/Frameworks/"
 done
 
-SOURCES="Sources/main.m Sources/AppDelegate.m Sources/RootViewController.m Sources/EPGViewController.m Sources/M3UParser.m"
+SOURCES="Sources/main.m Sources/AppDelegate.m Sources/RootViewController.m Sources/EPGViewController.m Sources/M3UParser.m Sources/PyHost.m"
 
 set -x
 clang -arch arm64 \
@@ -30,6 +48,9 @@ clang -arch arm64 \
   -F Frameworks \
   -framework Foundation -framework UIKit \
   -framework CNPlayerSDK -framework CicadaPlayerSDK -framework alivcffmpeg -framework AVFoundation \
+  -F "$APP/Frameworks" -framework Python \
+  -I "$PY_INC" \
+  -lz -lsqlite3 -lbz2 -liconv -lc++ \
   -Wl,-rpath,@executable_path/Frameworks \
   -Wl,-undefined,dynamic_lookup \
   -ObjC -lresolv \
