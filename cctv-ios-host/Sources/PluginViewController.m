@@ -16,7 +16,7 @@
     UILabel *title=[self label:@"YSP Live 插件" size:24 bold:YES]; [stack addArrangedSubview:title];
     self.statusLabel=[self label:@"状态：未运行" size:16 bold:NO]; [stack addArrangedSubview:self.statusLabel];
     UILabel *desc=[self label:@"在本机启动频道服务；启动后可将 M3U 订阅导入播放器。停止服务后，需重启 App 才能再次启动 Python。" size:14 bold:NO]; desc.numberOfLines=0; [stack addArrangedSubview:desc];
-    self.urlLabel=[self label:@"播放列表：http://127.0.0.1:8767/all.m3u" size:13 bold:NO]; self.urlLabel.numberOfLines=0; self.urlLabel.textColor=UIColor.systemGray; [stack addArrangedSubview:self.urlLabel];
+    self.urlLabel=[self label:@"播放列表：http://127.0.0.1:8767/all.m3u" size:13 bold:NO]; self.urlLabel.numberOfLines=0; self.urlLabel.textColor=UIColor.systemGrayColor; [stack addArrangedSubview:self.urlLabel];
     UIStackView *buttons=[[UIStackView alloc]init]; buttons.axis=UILayoutConstraintAxisHorizontal; buttons.spacing=12; buttons.distribution=UIStackViewDistributionFillEqually;
     self.startButton=[self button:@"启动插件" action:@selector(start)]; self.stopButton=[self button:@"停止插件" action:@selector(stop)]; [buttons addArrangedSubview:self.startButton]; [buttons addArrangedSubview:self.stopButton]; [stack addArrangedSubview:buttons];
     self.subscriptionsLabel=[self label:@"订阅源：0" size:16 bold:YES]; [stack addArrangedSubview:self.subscriptionsLabel];
