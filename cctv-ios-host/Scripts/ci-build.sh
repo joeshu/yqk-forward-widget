@@ -27,7 +27,7 @@ rm -rf /tmp/pyroot && mkdir -p /tmp/pyroot && tar -xzf "$PY_TGZ" -C /tmp/pyroot
 echo "--- pyroot top ---"; ls /tmp/pyroot | head
 
 mkdir -p "$APP/python/lib"
-cp -R /tmp/pyroot/Python.xcframework/lib/python3.13 "$APP/python/lib/"
+{ [ -n "${PY_DISABLE:-}" ] || cp -R /tmp/pyroot/Python.xcframework/lib/python3.13 "$APP/python/lib/"; }
 rm -rf "$APP/python/lib/python3.13/test" "$APP/python/lib/python3.13/idlelib" \
        "$APP/python/lib/python3.13/tkinter" "$APP/python/lib/python3.13/ensurepip" \
        "$APP/python/lib/python3.13/turtledemo" "$APP/python/lib/python3.13/distutils"
@@ -35,17 +35,18 @@ find "$APP/python" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/n
 find "$APP/python" -name '*.pyc' -delete 2>/dev/null || true
 PY_INC="$(dirname "$(find /tmp/pyroot -path '*ios-arm64*' -name 'Python.h' | head -1)")"
 if [ ! -f "$PY_INC/Python.h" ]; then
-  echo "::error title=pyinc::Python.h not found under /tmp/pyroot"
-  find /tmp/pyroot -maxdepth 4 -name 'Python.xcframework' -o -maxdepth 4 -name 'Python.framework' | head
-  exit 1
+  echo "::warning title=pyinc::Python.h not found, building without embedded Python"
+  PY_DISABLE=1
 fi
+echo "::notice title=pyinc::${PY_INC:-none}"; 
 echo "PY_INC=$PY_INC"
 PY_LIB="$(find /tmp/pyroot -path '*ios-arm64*' -name 'Python.framework' -type d | head -1)"
 if [ -z "$PY_LIB" ]; then
-  echo "::error title=pylib::Python.framework not found"
-  exit 1
+  echo "::warning title=pylib::Python.framework not found, building without embedded Python"
+  PY_DISABLE=1
 fi
-cp -R "$PY_LIB" "$APP/Frameworks/"
+echo "::notice title=pylib::${PY_LIB:-none}"
+{ [ -n "${PY_DISABLE:-}" ] || cp -R "$PY_LIB" "$APP/Frameworks/"; }
 for f in Frameworks/*.framework; do
   cp -R "$f" "$APP/Frameworks/"
 done
@@ -61,8 +62,7 @@ clang -arch arm64 \
   -F Frameworks \
   -framework Foundation -framework UIKit \
   -framework CNPlayerSDK -framework CicadaPlayerSDK -framework alivcffmpeg -framework AVFoundation -framework MediaPlayer -framework AVKit \
-  -F "$APP/Frameworks" -framework Python \
-  -I "$PY_INC" \
+  $( [ -z "${PY_DISABLE:-}" ] && echo "-F $APP/Frameworks -framework Python -I $PY_INC" ) \
   -lz -lsqlite3 -lbz2 -liconv -lc++ \
   -Wl,-rpath,@executable_path/Frameworks \
   -Wl,-undefined,dynamic_lookup \

@@ -1,5 +1,10 @@
 #import "PyHost.h"
+#if __has_include(<Python.h>)
 #import <Python.h>
+#define PYHOST_AVAILABLE 1
+#else
+#define PYHOST_AVAILABLE 0
+#endif
 #import <unistd.h>
 #import <pthread.h>
 
@@ -39,6 +44,7 @@ static void *readerThread(void *ctx) {
 
 #pragma mark - Python 线程
 
+#if PYHOST_AVAILABLE
 static void *pyThread(void *ctx) {
     char home[1024];
     @autoreleasepool {
@@ -83,6 +89,8 @@ static void *pyThread(void *ctx) {
     return NULL;
 }
 
+#endif /* PYHOST_AVAILABLE */
+
 #pragma mark - 对外接口
 
 + (BOOL)startWithScript:(NSString *)scriptName
@@ -106,6 +114,7 @@ static void *pyThread(void *ctx) {
     [[NSFileManager defaultManager] createDirectoryAtPath:dataDir
                               withIntermediateDirectories:YES attributes:nil error:&e];
 
+#if PYHOST_AVAILABLE
     strncpy(gScriptPath, script.UTF8String, sizeof(gScriptPath) - 1);
     strncpy(gDataDir, dataDir.UTF8String, sizeof(gDataDir) - 1);
     snprintf(gArgvPort, sizeof(gArgvPort), "%ld", (long)port);
@@ -119,8 +128,15 @@ static void *pyThread(void *ctx) {
         pthread_create(&r, NULL, readerThread, NULL);
         pthread_detach(r);
     }
+#if PYHOST_AVAILABLE
     pthread_create(&gThread, NULL, pyThread, NULL);
     return YES;
+#else
+    if (error) *error = [NSError errorWithDomain:@"PyHost" code:3
+                                        userInfo:@{NSLocalizedDescriptionKey: @"本次构建未包含 Python 运行时"}];
+    gRunning = NO;
+    return NO;
+#endif
 }
 
 + (void)stop {
