@@ -34,7 +34,7 @@ rm -rf "$APP/python/lib/python3.13/test" "$APP/python/lib/python3.13/idlelib" \
 find "$APP/python" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 find "$APP/python" -name '*.pyc' -delete 2>/dev/null || true
 PY_INC="/tmp/pyroot/Python.xcframework/ios-arm64/include/python3.13"
-[ -f "$PY_INC/Python.h" ] || PY_INC="$(find /tmp/pyroot -name 'Python.h' | grep -v simulator | head -1 | xargs -r dirname)"
+# Never fall back to an arbitrary arm64 slice: simulator arm64 is not device arm64.
 if [ ! -f "$PY_INC/Python.h" ]; then
   echo "::warning title=pyinc::Python.h not found, building without embedded Python"
   PY_DISABLE=1
@@ -42,8 +42,7 @@ fi
 echo "::notice title=pyinc::${PY_INC:-none}"; 
 echo "PY_INC=$PY_INC"
 PY_LIB="/tmp/pyroot/Python.xcframework/ios-arm64/Python.framework"
-[ -d "$PY_LIB" ] || PY_LIB="$(find /tmp/pyroot -name 'Python.framework' -type d | grep -v simulator | head -1)"
-if [ -z "$PY_LIB" ]; then
+if [ ! -f "$PY_LIB/Python" ]; then
   echo "::warning title=pylib::Python.framework not found, building without embedded Python"
   PY_DISABLE=1
 fi

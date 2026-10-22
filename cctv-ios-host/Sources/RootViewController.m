@@ -60,6 +60,9 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 // 日志
 @property (nonatomic, strong) NSMutableString *logBuffer;
 @property (nonatomic, strong) UITextView *logView;
+@property (nonatomic, assign) BOOL logRefreshPending;
+@property (nonatomic, assign) NSUInteger playbackGeneration;
+@property (nonatomic, strong) UIToolbar *logToolbar;
 @property (nonatomic, assign) BOOL logVisible;
 // 计时
 @property (nonatomic, strong) NSTimer *watchdog;
@@ -129,9 +132,14 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         if (self.logBuffer.length > 20000) {
             [self.logBuffer deleteCharactersInRange:NSMakeRange(0, self.logBuffer.length - 16000)];
         }
-        if (self.logVisible) {
-            self.logView.text = self.logBuffer;
-            [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length, 0)];
+        if (self.logVisible && !self.logRefreshPending) {
+            self.logRefreshPending = YES;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                self.logRefreshPending = NO;
+                if (!self.logVisible) return;
+                self.logView.text = self.logBuffer;
+                [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length, 0)];
+            });
         }
         NSString *one = [msg componentsSeparatedByString:@"\n"].firstObject ?: @"";
         if (one.length > 30) one = [[one substringToIndex:30] stringByAppendingString:@"…"];
@@ -151,6 +159,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 - (void)toggleLog {
     if (self.logVisible) {
         self.logView.hidden = YES;
+        self.logToolbar.hidden = YES;
         self.logVisible = NO;
         [self.logBtn setTitle:@"日志" forState:UIControlStateNormal];
         return;
@@ -159,6 +168,9 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.logView.text = self.logBuffer;
     self.logView.hidden = NO;
     [self.view bringSubviewToFront:self.logView];
+    self.logToolbar.hidden = NO;
+    [self.view bringSubviewToFront:self.logToolbar];
+    [self.view setNeedsLayout];
     [self.logBtn setTitle:@"关闭日志" forState:UIControlStateNormal];
     [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length, 0)];
 }
@@ -287,6 +299,25 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.logView.hidden = YES;
     self.logView.textContainerInset = UIEdgeInsetsMake(8, 8, 8, 8);
     [self.view addSubview:self.logView];
+    self.logToolbar = [[UIToolbar alloc] init];
+    self.logToolbar.barStyle = UIBarStyleBlack;
+    self.logToolbar.items = @[
+        [[UIBarButtonItem alloc] initWithTitle:@"关闭日志" style:UIBarButtonItemStyleDone target:self action:@selector(toggleLog)],
+        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil],
+        [[UIBarButtonItem alloc] initWithTitle:@"复制" style:UIBarButtonItemStylePlain target:self action:@selector(copyDiagnosticLog)],
+        [[UIBarButtonItem alloc] initWithTitle:@"清空" style:UIBarButtonItemStylePlain target:self action:@selector(clearDiagnosticLog)]
+    ];
+    self.logToolbar.hidden = YES;
+    [self.view addSubview:self.logToolbar];
+}
+
+- (void)copyDiagnosticLog {
+    UIPasteboard.generalPasteboard.string = self.logBuffer ?: @"";
+}
+
+- (void)clearDiagnosticLog {
+    [self.logBuffer setString:@""];
+    self.logView.text = @"";
 }
 
 - (void)loadChannels {
@@ -535,6 +566,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 #pragma mark - 播放
 
 - (void)playChannel:(NSDictionary *)ch route:(NSDictionary *)route {
+    self.playbackGeneration += 1;
     NSString *cid = ch[@"id"];
     if (!cid.length) return;
     self.channelID = cid;
@@ -673,6 +705,35 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     muted = !muted;
     @try { [self.currentPlayer setValue:@(muted) forKey:@"muted"]; } @catch (NSException *e) {}
     [self.muteBtn setTitle:(muted ? @"发声" : @"静音") forState:UIControlStateNormal];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    UIEdgeInsets safe = self.view.safeAreaInsets;
+    CGFloat w = CGRectGetWidth(self.view.bounds);
+    CGFloat height = CGRectGetHeight(self.view.bounds);
+    CGFloat top = safe.top;
+    if (self.fullscreen) {
+        self.playerBox.frame = self.view.bounds;
+    } else {
+        CGFloat ph = MIN(w * 9.0 / 16.0, MAX(120, (height - top - safe.bottom) * 0.55));
+        self.playerBox.frame = CGRectMake(0, top, w, ph);
+        CGFloat y = CGRectGetMaxY(self.playerBox.frame);
+        self.groupControl.frame = CGRectMake(8, y + 6, MAX(0, w - 16), 30);
+        self.versionLabel.frame = CGRectMake(12, y + 39, MAX(0, w - 24), 16);
+        self.table.frame = CGRectMake(0, y + 60, w, MAX(0, height - safe.bottom - y - 60));
+    }
+    [self relayoutPlayer];
+    CGFloat overlayTop = self.fullscreen ? safe.top : 0;
+    self.titleLabel.frame = CGRectMake(12 + safe.left, overlayTop + 8, MAX(0, w - safe.left - safe.right - 24), 20);
+    self.infoLabel.frame = CGRectMake(12 + safe.left, overlayTop + 30, MAX(0, w - safe.left - safe.right - 24), 16);
+    CGFloat bottom = self.fullscreen ? safe.bottom : 0;
+    self.controlBar.frame = CGRectMake(8 + safe.left, CGRectGetHeight(self.playerBox.bounds) - bottom - 48,
+                                      MAX(0, w - safe.left - safe.right - 16), 40);
+    self.avLayer.frame = self.playerBox.bounds;
+    self.logToolbar.frame = CGRectMake(safe.left, top, MAX(0, w - safe.left - safe.right), 44);
+    self.logView.frame = CGRectMake(safe.left, top + 44, MAX(0, w - safe.left - safe.right), MAX(0, height - top - safe.bottom - 44));
+    [self attachVideoView];
 }
 
 - (void)toggleFullscreen {
@@ -1295,6 +1356,8 @@ static NSCache *LogoCache(void) {
 #pragma mark - SDK 回调
 
 - (void)player:(id)player loadStateDidChanged:(NSUInteger)state {
+    if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ [self player:player loadStateDidChanged:state]; }); return; }
+    if (player != self.currentPlayer) return;
     [self attachVideoView];
     if (state == 4) {                     // PrepareDone
         [self log:@"PrepareDone → play"];
@@ -1305,11 +1368,15 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)player:(id)player vdnRequestStateDidChanged:(NSUInteger)state {
+    if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ [self player:player vdnRequestStateDidChanged:state]; }); return; }
+    if (player != self.currentPlayer) return;
     if (state == 3) [self log:@"VDN 成功"];
     else if (state == 2) [self log:@"VDN 失败"];
 }
 
 - (void)player:(id)player statEvent:(NSUInteger)event value:(id)value {
+    if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ [self player:player statEvent:event value:value]; }); return; }
+    if (player != self.currentPlayer) return;
     if (event == 3) {
         self.firstRender = YES;
         self.cicadaPending = NO;
@@ -1321,23 +1388,32 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)player:(id)player playBackStateDidChanged:(NSUInteger)state {
+    if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ [self player:player playBackStateDidChanged:state]; }); return; }
+    if (player != self.currentPlayer) return;
     if (state == 1) [self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
     if (state == 2) [self.playPauseBtn setTitle:@"继续" forState:UIControlStateNormal];
 }
 
 - (void)player:(id)player playbackFailed:(NSError *)error {
+    if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ [self player:player playbackFailed:error]; }); return; }
+    if (player != self.currentPlayer) return;
     [self log:@"播放失败 %ld %@", (long)error.code, error.localizedDescription];
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 播放失败", self.channelName];
     [self.spinner stopAnimating];
+    if (error.code >= 4000 && error.code < 5000) {
+        [self log:@"参数/调度错误不自动重试，请查看错误详情"];
+        return;
+    }
     if (self.retryCount < 2) {
         self.retryCount += 1;
         double delay = self.retryCount == 1 ? 1.0 : 3.0;
         [self log:@"断流重连 第 %ld 次（%.0fs 后）", (long)self.retryCount, delay];
+        NSUInteger generation = self.playbackGeneration;
         NSString *cid = self.channelID;
         NSString *name = self.channelName;
         NSDictionary *last = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"lastChannel"];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (![cid isEqualToString:self.channelID]) return;
+            if (generation != self.playbackGeneration || player != self.currentPlayer || ![cid isEqualToString:self.channelID]) return;
             if ([last[@"remoteURL"] length]) [self playRemote:last];
             else [self playViaSDK:cid title:name];
         });
@@ -1345,18 +1421,25 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)player:(id)player vdnRequestFailed:(NSError *)error {
+    if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ [self player:player vdnRequestFailed:error]; }); return; }
+    if (player != self.currentPlayer) return;
     [self log:@"VDN 请求失败 %ld", (long)error.code];
 }
 
 - (void)player:(id)player parameterError:(NSError *)error rate:(id)rate {
+    if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ [self player:player parameterError:error rate:rate]; }); return; }
+    if (player != self.currentPlayer) return;
     [self log:@"参数错误 %ld", (long)error.code];
 }
 
 - (void)player:(id)player publicRequestFailed:(NSError *)error {
+    if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ [self player:player publicRequestFailed:error]; }); return; }
+    if (player != self.currentPlayer) return;
     [self log:@"版权请求失败 %ld", (long)error.code];
 }
 
 - (void)authFailed:(NSError *)error {
+    if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ [self authFailed:error]; }); return; }
     [self log:@"鉴权失败 %ld", (long)error.code];
     self.titleLabel.text = @"鉴权失败";
 }
