@@ -5,6 +5,7 @@ import unittest
 
 SOURCE = pathlib.Path(__file__).resolve().parents[1] / "Sources" / "RootViewController.m"
 TEXT = SOURCE.read_text(encoding="utf-8")
+PYHOST = (SOURCE.parent / "PyHost.m").read_text(encoding="utf-8")
 
 
 def method_body(signature):
@@ -89,11 +90,22 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('[self openSettingsPage]', TEXT)
         self.assertIn('SettingsViewController *page', TEXT)
 
-    def test_channel_grid_uses_two_cards_per_row(self):
-        self.assertIn('(self.shownChannels.count + 1) / 2', TEXT)
-        self.assertIn('channel.grid', TEXT)
-        self.assertIn('onChannelCardTap:', TEXT)
-        self.assertNotIn('dequeueReusableCellWithIdentifier:cid', TEXT)
+    def test_channel_list_is_single_column_and_routes_remain_long_press(self):
+        self.assertIn('self.table.rowHeight = 48', TEXT)
+        self.assertIn('channel.list', TEXT)
+        self.assertIn('return (NSInteger)self.shownChannels.count;', TEXT)
+        self.assertNotIn('channel.grid', TEXT)
+        self.assertIn('onLongPress:', TEXT)
+
+    def test_video_text_overlays_hide_after_first_render(self):
+        body = method_body('- (void)player:(id)player statEvent:')
+        self.assertIn('self.titleLabel.hidden = YES', body)
+        self.assertIn('self.infoLabel.hidden = YES', body)
+
+    def test_ios_plugin_uses_bounded_startup_resources(self):
+        self.assertIn('"--cache-mb", "32"', PYHOST)
+        self.assertIn('"--links-per-device", "2"', PYHOST)
+        self.assertIn('iOS 插件安全模式', PYHOST)
 
     def test_favorites_tab_filters_catalog(self):
         self.assertIn('self.favoritesOnly', TEXT)

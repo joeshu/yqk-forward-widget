@@ -18,7 +18,7 @@
  if(!cell) cell=[[UITableViewCell alloc]initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"setting"];
  cell.textLabel.text=title; cell.backgroundColor=[UIColor colorWithWhite:0.11 alpha:1]; cell.textLabel.textColor=UIColor.whiteColor;
  if(ip.section==1){ UISwitch *sw=[UISwitch new]; NSString *key=@[@"allowBackgroundPlayback",@"autoPiP",@"rememberChannel"][ip.row]; sw.on=ip.row==2?[[NSUserDefaults standardUserDefaults] boolForKey:key]:[[NSUserDefaults standardUserDefaults] boolForKey:key]; sw.onTintColor=UIColor.systemPinkColor; sw.accessibilityIdentifier=key; [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView=sw; }
- else { cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator; cell.detailTextLabel.text=ip.row==2?@"0.14.0":@""; cell.detailTextLabel.textColor=UIColor.secondaryLabelColor; }
+ else { cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator; cell.detailTextLabel.text=ip.row==2?@"0.14.1":@""; cell.detailTextLabel.textColor=UIColor.secondaryLabelColor; }
  return cell;
 }
 - (void)toggle:(UISwitch *)sw { [[NSUserDefaults standardUserDefaults] setBool:sw.on forKey:sw.accessibilityIdentifier]; }

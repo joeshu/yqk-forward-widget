@@ -13,7 +13,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.14.0";
+static NSString *const kBuildTag = @"0.14.1";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
@@ -312,8 +312,13 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 }
 
 - (void)toggleOverlay {
-    self.titleLabel.hidden = !self.titleLabel.hidden;
-    self.infoLabel.hidden = !self.infoLabel.hidden;
+    if (self.firstRender) {
+        self.titleLabel.hidden = YES;
+        self.infoLabel.hidden = YES;
+    } else {
+        self.titleLabel.hidden = !self.titleLabel.hidden;
+        self.infoLabel.hidden = !self.infoLabel.hidden;
+    }
     self.controlBar.hidden = !self.controlBar.hidden;
 }
 
@@ -338,7 +343,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.table = [[UITableView alloc] initWithFrame:CGRectMake(0, ty, self.view.bounds.size.width, self.view.bounds.size.height - ty) style:UITableViewStylePlain];
     self.table.dataSource = self;
     self.table.delegate = self;
-    self.table.rowHeight = 158;
+    self.table.rowHeight = 48;
     self.table.backgroundColor = [UIColor colorWithWhite:0.07 alpha:1];
     self.table.separatorColor = [UIColor colorWithWhite:0.16 alpha:1];
     [self.view addSubview:self.table];
@@ -346,6 +351,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     UIRefreshControl *rc = [[UIRefreshControl alloc] init];
     [rc addTarget:self action:@selector(onPullRefresh) forControlEvents:UIControlEventValueChanged];
     self.table.refreshControl = rc;
+    UILongPressGestureRecognizer *routePress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onLongPress:)];
+    [self.table addGestureRecognizer:routePress];
     [self buildBottomBar];
 
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
@@ -483,8 +490,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 }
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
-    if ([self numberOfSectionsInTableView:t] == 2 && s == 0) return (NSInteger)((self.recents.count + 1) / 2);
-    return (NSInteger)((self.shownChannels.count + 1) / 2);
+    if ([self numberOfSectionsInTableView:t] == 2 && s == 0) return (NSInteger)self.recents.count;
+    return (NSInteger)self.shownChannels.count;
 }
 
 - (NSArray<NSDictionary *> *)channelsForSection:(NSInteger)section tableView:(UITableView *)t {
@@ -493,50 +500,51 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 }
 
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
-    static NSString *reuse=@"channel.grid";
-    UITableViewCell *cell=[t dequeueReusableCellWithIdentifier:reuse];
-    if(!cell){ cell=[[UITableViewCell alloc]initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuse]; cell.backgroundColor=UIColor.clearColor; cell.selectionStyle=UITableViewCellSelectionStyleNone; }
-    for(UIView *v in [cell.contentView.subviews copy]) [v removeFromSuperview];
-    NSArray *items=[self channelsForSection:ip.section tableView:t];
-    CGFloat gap=8, width=(CGRectGetWidth(t.bounds)-3*gap)/2, cardH=148;
-    for(NSInteger col=0;col<2;col++){
-        NSUInteger idx=(NSUInteger)ip.row*2+(NSUInteger)col; if(idx>=items.count) break;
-        NSDictionary *ch=items[idx];
-        UIButton *card=[UIButton buttonWithType:UIButtonTypeCustom]; card.frame=CGRectMake(gap+col*(width+gap),5,width,cardH); card.backgroundColor=[UIColor colorWithWhite:0.12 alpha:1]; card.layer.cornerRadius=12; card.clipsToBounds=YES; card.tag=500+col;
-        objc_setAssociatedObject(card, @selector(onChannelCardTap:), ch, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        UIImageView *cover=[[UIImageView alloc]initWithFrame:CGRectMake(5,5,width-10,88)]; cover.backgroundColor=[UIColor colorWithWhite:0.2 alpha:1]; cover.contentMode=UIViewContentModeScaleAspectFit; cover.layer.cornerRadius=8; cover.clipsToBounds=YES; [card addSubview:cover];
-        if([ch[@"logo"] length]) [self loadLogo:ch[@"logo"] into:cover];
-        else { UILabel *mark=[[UILabel alloc]initWithFrame:cover.bounds]; mark.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight; mark.text=[ch[@"name"] isKindOfClass:NSString.class] ? ch[@"name"] : ch[@"id"]; mark.textAlignment=NSTextAlignmentCenter; mark.textColor=UIColor.whiteColor; mark.font=[UIFont boldSystemFontOfSize:16]; mark.numberOfLines=2; [cover addSubview:mark]; }
-        NSString *channelTitle = [ch[@"name"] isKindOfClass:NSString.class] ? ch[@"name"] : ch[@"id"];
-        if ([self.favorites containsObject:ch[@"id"] ?: @""]) channelTitle = [@"★ " stringByAppendingString:channelTitle ?: @""];
-        BOOL isPlaying = [self.channelID isEqualToString:ch[@"id"] ?: @""];
-        if (isPlaying) channelTitle = [@"● " stringByAppendingString:channelTitle ?: @""];
-        UILabel *name = [[UILabel alloc] initWithFrame:CGRectMake(7, 98, width - 14, 21)];
-        name.text = channelTitle;
-        name.textColor = isPlaying ? UIColor.systemGreenColor : UIColor.whiteColor;
-        name.font = [UIFont boldSystemFontOfSize:13];
-        name.lineBreakMode = NSLineBreakByTruncatingTail;
-        [card addSubview:name];
-        NSDictionary *epg=self.epgCache[ch[@"id"]?:@""];
-        NSString *detail = nil;
-        if ([epg[@"now"] isKindOfClass:NSString.class]) detail = [NSString stringWithFormat:@"正在播：%@", epg[@"now"]];
-        else if ([ch[@"remoteURL"] length]) detail = @"M3U 订阅";
-        else detail = ch[@"group"] ?: @"直播";
-        UILabel *sub=[[UILabel alloc]initWithFrame:CGRectMake(7,121,width-14,18)]; sub.text=detail; sub.textColor=[UIColor colorWithWhite:0.68 alpha:1]; sub.font=[UIFont systemFontOfSize:10]; sub.lineBreakMode=NSLineBreakByTruncatingTail; [card addSubview:sub];
-        [card addTarget:self action:@selector(onChannelCardTap:) forControlEvents:UIControlEventTouchUpInside];
-        UILongPressGestureRecognizer *lp=[[UILongPressGestureRecognizer alloc]initWithTarget:self action:@selector(onLongPress:)]; [card addGestureRecognizer:lp];
-        [cell.contentView addSubview:card]; [self loadEPGForChannel:ch[@"id"] section:ip];
+    static NSString *reuse = @"channel.list";
+    UITableViewCell *cell = [t dequeueReusableCellWithIdentifier:reuse];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];
+        cell.backgroundColor = [UIColor colorWithWhite:0.09 alpha:1];
+        cell.textLabel.font = [UIFont systemFontOfSize:15];
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:11];
+        cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.55 alpha:1];
+        UIView *selected = [[UIView alloc] init];
+        selected.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1];
+        cell.selectedBackgroundView = selected;
     }
+    NSArray<NSDictionary *> *rows = [self channelsForSection:ip.section tableView:t];
+    if (ip.row < 0 || ip.row >= (NSInteger)rows.count) return cell;
+    NSDictionary *ch = rows[(NSUInteger)ip.row];
+    NSString *cid = [ch[@"id"] isKindOfClass:NSString.class] ? ch[@"id"] : @"";
+    BOOL playing = [cid isEqualToString:self.channelID];
+    NSString *title = [ch[@"name"] isKindOfClass:NSString.class] ? ch[@"name"] : cid;
+    if ([self.favorites containsObject:cid]) title = [@"★ " stringByAppendingString:title];
+    cell.textLabel.text = playing ? [NSString stringWithFormat:@"● %@", title] : title;
+    cell.textLabel.textColor = playing ? [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1] : UIColor.whiteColor;
+    NSString *logo = [ch[@"logo"] isKindOfClass:NSString.class] ? ch[@"logo"] : @"";
+    cell.imageView.image = nil;
+    if (logo.length) [self loadLogo:logo into:cell.imageView];
+    NSDictionary *epg = self.epgCache[cid];
+    if ([epg[@"now"] isKindOfClass:NSString.class]) cell.detailTextLabel.text = [NSString stringWithFormat:@"正在播：%@", epg[@"now"]];
+    else if ([ch[@"remoteURL"] length]) cell.detailTextLabel.text = @"订阅源";
+    else {
+        NSUInteger routes = [ch[@"routes"] isKindOfClass:NSArray.class] ? [ch[@"routes"] count] : 0;
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %lu 线路", ch[@"group"] ?: @"直播", (unsigned long)routes];
+    }
+    [self loadEPGForChannel:cid section:ip];
     return cell;
 }
 
-- (void)onChannelCardTap:(UIButton *)sender {
-    NSDictionary *ch=objc_getAssociatedObject(sender,@selector(onChannelCardTap:)); if(!ch) return;
-    [self rememberChannel:ch]; [[NSUserDefaults standardUserDefaults] setObject:ch forKey:@"lastChannel"];
-    if([ch[@"remoteURL"] length]) [self playRemote:ch]; else [self playChannel:ch route:nil];
+- (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
+    [t deselectRowAtIndexPath:ip animated:YES];
+    NSArray<NSDictionary *> *rows = [self channelsForSection:ip.section tableView:t];
+    if (ip.row < 0 || ip.row >= (NSInteger)rows.count) return;
+    NSDictionary *ch = rows[(NSUInteger)ip.row];
+    [self rememberChannel:ch];
+    [[NSUserDefaults standardUserDefaults] setObject:ch forKey:@"lastChannel"];
+    if ([ch[@"remoteURL"] length]) [self playRemote:ch];
+    else [self playChannel:ch route:nil];
 }
-
-- (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip { }
 
 - (void)onLongPress:(UILongPressGestureRecognizer *)g {
     if(g.state!=UIGestureRecognizerStateBegan) return;
@@ -660,6 +668,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.playStartedAt = NSDate.date.timeIntervalSince1970;
     self.firstFrameSeconds = 0;
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 连接中", self.channelName];
+    self.titleLabel.hidden = NO;
+    self.infoLabel.hidden = NO;
     [self.spinner startAnimating];
     [self.table reloadData];
     [self log:@"起播 %@ (%@) 线路=%@", self.channelName, cid, self.routeName];
@@ -1307,6 +1317,8 @@ static NSCache *LogoCache(void) {
     self.playStartedAt = NSDate.date.timeIntervalSince1970;
     self.firstFrameSeconds = 0;
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 连接中", self.channelName];
+    self.titleLabel.hidden = NO;
+    self.infoLabel.hidden = NO;
     [self.spinner startAnimating];
     [self log:@"订阅起播 %@", u];
     [self.table reloadData];
@@ -1357,7 +1369,8 @@ static NSCache *LogoCache(void) {
             [self.spinner stopAnimating];
             self.firstFrameSeconds = NSDate.date.timeIntervalSince1970 - self.playStartedAt;
             self.titleLabel.text = self.channelName;
-            [self.infoLabel setText:[NSString stringWithFormat:@"首帧 %.1fs · 版本 %@", self.firstFrameSeconds, kBuildTag]];
+            self.titleLabel.hidden = YES;
+            self.infoLabel.hidden = YES;
             [self updateNowPlaying];
             [self log:@"订阅就绪 %.2fs", self.firstFrameSeconds];
         } else if (item.status == AVPlayerItemStatusFailed) {
@@ -1575,6 +1588,8 @@ static NSCache *LogoCache(void) {
         [self.cicadaFallbackTimer invalidate];
         [self.spinner stopAnimating];
         self.titleLabel.text = self.channelName;
+        self.titleLabel.hidden = YES;
+        self.infoLabel.hidden = YES;
         [self log:@"首帧渲染"];
     }
 }

@@ -97,7 +97,10 @@ static void *pyThread(void *unused) {
         Py_XDECREF(bootstrap);
         PyObject *sys = PyImport_ImportModule("sys");
         NSString *portString = [NSString stringWithFormat:@"%ld", (long)gPort];
-        PyObject *argv = Py_BuildValue("[sssssss]", gScriptPath.UTF8String, portString.UTF8String, "--bind", "127.0.0.1", "--no-engine", "--data-dir", gDataDir.UTF8String);
+        setenv("YSP_LINKS_PER_DEVICE", "2", 1);
+        setenv("YSP_ZAP_DEBOUNCE", "15", 1);
+        emitLog(@"iOS 插件安全模式：TS 缓存 32MB / 高码率并发 2 / 换台防抖 15 秒");
+        PyObject *argv = Py_BuildValue("[sssssssssssss]", gScriptPath.UTF8String, portString.UTF8String, "--bind", "127.0.0.1", "--no-engine", "--data-dir", gDataDir.UTF8String, "--cache-mb", "32", "--links-per-device", "2", "--zap-debounce", "15");
         if (sys && argv) PyObject_SetAttrString(sys, "argv", argv);
         Py_XDECREF(sys); Py_XDECREF(argv);
         PyObject *runpy = PyImport_ImportModule("runpy");
