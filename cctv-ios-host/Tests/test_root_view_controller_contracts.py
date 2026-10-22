@@ -105,6 +105,20 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('UIRefreshControl', EPG)
         self.assertIn('endRefreshing', EPG)
 
+    def test_stable_url_key_rejects_bad_m3u_without_uncaught_exception(self):
+        body = method_body("- (NSString *)stableURLKey:")
+        self.assertIn('isKindOfClass:NSString.class', body)
+        self.assertIn('@catch (NSException *exception)', body)
+        self.assertIn('urlString.length > 8192', body)
+        self.assertIn('isEqualToString:@"http"', body)
+        self.assertIn('isEqualToString:@"https"', body)
+        self.assertIn('skippedInvalidURLs++', method_body('- (void)fetchSubscription:'))
+
+    def test_m3u_parser_catches_invalid_url_lines(self):
+        parser = (SOURCE.parent / "M3UParser.m").read_text(encoding="utf-8")
+        self.assertIn('@catch (NSException *exception)', parser)
+        self.assertIn('pendingLogo = nil; continue;', parser)
+
     def test_channel_list_is_single_column_and_routes_remain_long_press(self):
         self.assertIn('self.table.rowHeight = 48', TEXT)
         self.assertIn('channel.list', TEXT)

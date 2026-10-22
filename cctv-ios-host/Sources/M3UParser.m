@@ -29,9 +29,18 @@
 
         if (!pendingName) pendingName = line.lastPathComponent.stringByDeletingPathExtension;
 
-        NSURL *url = [NSURL URLWithString:line];
-        if (url.scheme.length == 0 && baseURL) url = [NSURL URLWithString:line relativeToURL:baseURL];
-        if (!url) { pendingName = nil; continue; }
+        NSURL *url = nil;
+        @try {
+            url = [NSURL URLWithString:line];
+            if (url.scheme.length == 0 && baseURL) url = [NSURL URLWithString:line relativeToURL:baseURL];
+            NSURLComponents *parts = url ? [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:YES] : nil;
+            NSString *scheme = parts.scheme.lowercaseString;
+            if ((! [scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"]) || !parts.host.length) url = nil;
+            else url = parts.URL;
+        } @catch (NSException *exception) {
+            url = nil;
+        }
+        if (!url) { pendingName = nil; pendingLogo = nil; continue; }
 
         M3UChannel *ch = [M3UChannel new];
         ch.name = pendingName;

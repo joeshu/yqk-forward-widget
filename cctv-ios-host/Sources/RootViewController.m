@@ -1211,15 +1211,26 @@ static NSCache *LogoCache(void) {
     [self presentViewController:a animated:YES completion:nil];
 }
 
-- (NSString *)stableURLKey:(NSString *)urlString {
-    NSURLComponents *components = [NSURLComponents componentsWithString:urlString];
-    if (!components.URL || !components.scheme.length || !components.host.length) return nil;
-    components.scheme = components.scheme.lowercaseString;
-    components.host = components.host.lowercaseString;
-    components.fragment = nil;
-    if (([components.scheme isEqualToString:@"http"] && components.port.integerValue == 80) ||
-        ([components.scheme isEqualToString:@"https"] && components.port.integerValue == 443)) components.port = nil;
-    return components.URL.absoluteString;
+- (NSString *)stableURLKey:(id)value {
+    if (![value isKindOfClass:NSString.class]) return nil;
+    NSString *urlString = [(NSString *)value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!urlString.length || urlString.length > 8192) return nil;
+    @try {
+        NSURLComponents *components = [NSURLComponents componentsWithString:urlString];
+        if (!components) return nil;
+        NSString *scheme = components.scheme.lowercaseString;
+        if (![scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"]) return nil;
+        if (!components.host.length || !components.URL) return nil;
+        components.scheme = scheme;
+        components.host = components.host.lowercaseString;
+        components.fragment = nil;
+        if (([scheme isEqualToString:@"http"] && components.port.integerValue == 80) ||
+            ([scheme isEqualToString:@"https"] && components.port.integerValue == 443)) components.port = nil;
+        return components.URL.absoluteString;
+    } @catch (NSException *exception) {
+        // M3U is untrusted input. One malformed percent escape must never abort the UI process.
+        return nil;
+    }
 }
 
 - (void)removeSubscriptionSource:(NSString *)sourceKey {
@@ -1280,10 +1291,11 @@ static NSCache *LogoCache(void) {
                 if (stable.length) urlIndexes[stable] = @(i);
             }
             NSUInteger added = 0;
+            NSUInteger skippedInvalidURLs = 0;
             for (M3UChannel *c in list) {
-                if (!c.name.length || !c.url.length) continue;
+                if (!c.name.length || !c.url.length) { skippedInvalidURLs++; continue; }
                 NSString *stable = [weakSelf stableURLKey:c.url];
-                if (!stable.length) continue;
+                if (!stable.length) { skippedInvalidURLs++; continue; }
                 NSMutableArray *alts = weakSelf.altSources[c.name];
                 if (!alts) { alts = [NSMutableArray array]; weakSelf.altSources[c.name] = alts; }
                 if (![alts containsObject:c.url]) [alts addObject:c.url];
@@ -1314,6 +1326,7 @@ static NSCache *LogoCache(void) {
             weakSelf.allChannels = merged;
             weakSelf.shownChannels = merged;
             [weakSelf.table reloadData];
+            if (skippedInvalidURLs) [weakSelf log:@"订阅跳过 %lu 条无效地址（仅允许有效 HTTP/HTTPS URL）", (unsigned long)skippedInvalidURLs];
             [weakSelf log:@"订阅 %@ 新增 %lu 个频道（共 %lu）", urlString, (unsigned long)added, (unsigned long)list.count];
         });
     }] resume];
