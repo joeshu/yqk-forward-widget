@@ -2,6 +2,8 @@
 
 这是研究接口清单，不是已经存在的APTV API，也不是让用户提取App二进制或许可密钥。
 
+用户随后提供的 IPA 已完成只读元数据核对：有独立 iOS ARM64 CNPlayerSDK，前端有 UIView/回调及直播生命周期；Cicada 依赖有官方公开头文件，CNPlayerSDK 正式合同仍未获得。具体证据与收窄后的需求见 [IOS-SDK-IPA-REVIEW.md](IOS-SDK-IPA-REVIEW.md)。此前探针的ctx缺失只描述一次调用，不能排除其他宿主模块/全局；iOS正确嵌入签名的framework可以设计加载接口，不能将运行时加载概括为一律不可用。
+
 ## 宿主能力
 
 - APTV是否提供官方原生插件/SDK集成入口，支持iOS ARM64、哪些最低系统版本、由谁编译签名与分发。

@@ -40,10 +40,27 @@
     "system_media_frameworks_observed": true,
     "vendor_sdk_image_observed": false,
     "unicorn_c_api_observed": false,
-    "host_context_received": false
+    "host_context_received": false,
+    "coverage_limit": "v0.1.0 original name filters; CNPlayer/Cicada and registered Objective-C classes not checked; ctx absence only describes this invocation"
   },
   "media_path_tested_this_round": true,
   "media_path_test_basis": "User-provided APTV service logs; per-segment processing exceeded the 4-second segment duration",
   "official_ios_sdk_obtained": false,
-  "aptv_native_plugin_interface_verified": false
+  "aptv_native_plugin_interface_verified": false,
+  "ios_sdk_sample_review": {
+    "summary": "IOS-SDK-IPA-REVIEW.md",
+    "metadata": "IOS-SDK-IPA-METADATA.json",
+    "ios_arm64_cnplayer_candidate_found": true,
+    "official_cnplayer_headers_obtained": false,
+    "public_cicada_headers_found": true,
+    "aptv_native_playback_verified": false
+  },
+  "latest_probe": {
+    "version": "0.1.1",
+    "sha256": "8a17dcdb984a4f20065b93eadaf3b9d9287573289acdd3f9cde6f5804985dce6",
+    "checks_passed": 12,
+    "new_version_specific_checks": 5,
+    "iphone_run": false,
+    "adds": "CNPlayer/Cicada image names and read-only registered Objective-C class lookup"
+  }
 }

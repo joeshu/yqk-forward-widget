@@ -1,0 +1,342 @@
+{
+  "scope": "read-only selected frontend Objective-C method/property metadata; no binary execution, method implementation, license/key or DRM logic analysis",
+  "official_interface_obtained": false,
+  "encoded_media_output_api_verified": false,
+  "conclusion": "Observed frontend is UIView/delegate/lifecycle oriented. No encoded-media output API has been evidenced in these frontend classes; this does not prove no such API exists elsewhere.",
+  "classes": [
+    {
+      "framework": "CNPlayerSDK",
+      "class_name": "CNPlayer",
+      "instance_method_count": 228,
+      "class_method_count": 179,
+      "property_count": 66,
+      "observed_lifecycle_media_methods": [
+        {
+          "kind": "instance",
+          "selector": "play",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "pause",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "prepareToPlay",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "restart",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "stop",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "seekToTime:",
+          "type_encoding": "v24@0:8d16"
+        },
+        {
+          "kind": "instance",
+          "selector": "seekToTime:completionHandler:",
+          "type_encoding": "v32@0:8d16@?24"
+        },
+        {
+          "kind": "instance",
+          "selector": "init",
+          "type_encoding": "@16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "initWithLIVEUrl:delegate:configOptions:",
+          "type_encoding": "@40@0:8@16@24@32"
+        },
+        {
+          "kind": "instance",
+          "selector": "initWithLIVEChannelID:delegate:configOptions:",
+          "type_encoding": "@40@0:8@16@24@32"
+        },
+        {
+          "kind": "instance",
+          "selector": "SDKVersion",
+          "type_encoding": "@16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "SDKBulidVersion",
+          "type_encoding": "@16@0:8"
+        },
+        {
+          "kind": "class",
+          "selector": "startPlayerSDK_Options:",
+          "type_encoding": "v24@0:8@16"
+        },
+        {
+          "kind": "class",
+          "selector": "SDKVersion",
+          "type_encoding": "@16@0:8"
+        },
+        {
+          "kind": "class",
+          "selector": "SDKBulidVersion",
+          "type_encoding": "@16@0:8"
+        },
+        {
+          "kind": "class",
+          "selector": "startSDK",
+          "type_encoding": "v16@0:8"
+        }
+      ],
+      "observed_lifecycle_media_properties": [
+        {
+          "name": "dataSource",
+          "attributes": "T@\"<CNPlayerRecordsDataSource>\",W,N,V_dataSource"
+        },
+        {
+          "name": "delegate",
+          "attributes": "T@\"<CNPlayerCallbackProtocol>\",W,N,V_delegate"
+        },
+        {
+          "name": "view",
+          "attributes": "T@\"UIView\",R,N,V_view"
+        },
+        {
+          "name": "duration",
+          "attributes": "Td,R,N,V_duration"
+        },
+        {
+          "name": "bufferDuration",
+          "attributes": "Td,R,N,V_bufferDuration"
+        },
+        {
+          "name": "currentPlayTime",
+          "attributes": "Td,R,N,V_currentPlayTime"
+        },
+        {
+          "name": "isFirstRenderDidStart",
+          "attributes": "TB,N,VisFirstRenderDidStart"
+        },
+        {
+          "name": "playbackRate",
+          "attributes": "Tf,N,V_playbackRate"
+        },
+        {
+          "name": "muted",
+          "attributes": "TB,N,V_muted"
+        }
+      ],
+      "limits": "Runtime metadata may include internal methods; names/type encodings are not official headers or an ABI/support contract."
+    },
+    {
+      "framework": "CNPlayerSDK",
+      "class_name": "CNPlayerConfig",
+      "instance_method_count": 12,
+      "class_method_count": 0,
+      "property_count": 6,
+      "observed_lifecycle_media_methods": [
+        {
+          "kind": "instance",
+          "selector": "bufferSize",
+          "type_encoding": "d16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "setBufferSize:",
+          "type_encoding": "v24@0:8d16"
+        }
+      ],
+      "observed_lifecycle_media_properties": [
+        {
+          "name": "bufferSize",
+          "attributes": "Td,N,V_bufferSize"
+        }
+      ],
+      "limits": "Runtime metadata may include internal methods; names/type encodings are not official headers or an ABI/support contract."
+    },
+    {
+      "framework": "CNPlayerSDK",
+      "class_name": "CNPlayerStartOptions",
+      "instance_method_count": 14,
+      "class_method_count": 0,
+      "property_count": 6,
+      "observed_lifecycle_media_methods": [
+        {
+          "kind": "instance",
+          "selector": "init",
+          "type_encoding": "@16@0:8"
+        }
+      ],
+      "observed_lifecycle_media_properties": [],
+      "limits": "Runtime metadata may include internal methods; names/type encodings are not official headers or an ABI/support contract."
+    },
+    {
+      "framework": "CNPlayerSDK",
+      "class_name": "CNPlayerPlayOptions",
+      "instance_method_count": 86,
+      "class_method_count": 1,
+      "property_count": 42,
+      "observed_lifecycle_media_methods": [
+        {
+          "kind": "instance",
+          "selector": "init",
+          "type_encoding": "@16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "rate",
+          "type_encoding": "@16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "setRate:",
+          "type_encoding": "v24@0:8@16"
+        },
+        {
+          "kind": "instance",
+          "selector": "rateBitrate",
+          "type_encoding": "Q16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "setRateBitrate:",
+          "type_encoding": "v24@0:8Q16"
+        },
+        {
+          "kind": "instance",
+          "selector": "rateNames",
+          "type_encoding": "@16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "setRateNames:",
+          "type_encoding": "v24@0:8@16"
+        }
+      ],
+      "observed_lifecycle_media_properties": [
+        {
+          "name": "rate",
+          "attributes": "T@\"NSString\",C,N,V_rate"
+        },
+        {
+          "name": "rateBitrate",
+          "attributes": "TQ,N,V_rateBitrate"
+        },
+        {
+          "name": "rateNames",
+          "attributes": "T@\"NSDictionary\",&,N,V_rateNames"
+        }
+      ],
+      "limits": "Runtime metadata may include internal methods; names/type encodings are not official headers or an ABI/support contract."
+    },
+    {
+      "framework": "CicadaPlayerSDK",
+      "class_name": "CicadaPlayer",
+      "instance_method_count": 85,
+      "class_method_count": 4,
+      "property_count": 24,
+      "observed_lifecycle_media_methods": [
+        {
+          "kind": "instance",
+          "selector": "init",
+          "type_encoding": "@16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "init:",
+          "type_encoding": "@24@0:8@16"
+        },
+        {
+          "kind": "instance",
+          "selector": "getMediaInfo",
+          "type_encoding": "@16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "setPlayerView:",
+          "type_encoding": "v24@0:8@16"
+        },
+        {
+          "kind": "instance",
+          "selector": "prepare",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "start",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "pause",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "stop",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "destroy",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "seekToTime:seekMode:",
+          "type_encoding": "v32@0:8q16Q24"
+        },
+        {
+          "kind": "instance",
+          "selector": "snapShot",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "instance",
+          "selector": "setUrlSource:",
+          "type_encoding": "v24@0:8@16"
+        },
+        {
+          "kind": "class",
+          "selector": "getSDKVersion",
+          "type_encoding": "@16@0:8"
+        }
+      ],
+      "observed_lifecycle_media_properties": [
+        {
+          "name": "muted",
+          "attributes": "TB,N,GisMuted"
+        },
+        {
+          "name": "rate",
+          "attributes": "Tf,N"
+        },
+        {
+          "name": "playerView",
+          "attributes": "T@\"UIView\",&,N,V_playerView"
+        },
+        {
+          "name": "volume",
+          "attributes": "Tf,N"
+        },
+        {
+          "name": "duration",
+          "attributes": "Tq,N,V_duration"
+        },
+        {
+          "name": "bufferedPosition",
+          "attributes": "Tq,N,V_bufferedPosition"
+        },
+        {
+          "name": "delegate",
+          "attributes": "T@\"<CicadaDelegate>\",W,N,V_delegate"
+        }
+      ],
+      "limits": "Runtime metadata may include internal methods; names/type encodings are not official headers or an ABI/support contract."
+    }
+  ]
+}

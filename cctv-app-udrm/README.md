@@ -47,9 +47,11 @@ python3 cctv-app-udrm-v0.3.7.py --doctor
 
 ## 官方iOS路径与宿主检测
 
-新增 [官方路径实测与手机检测](OFFICIAL-IOS-PATH-CHECK.md)：当前53台仍均为App受保护流，尚未取得可核验的iOS SDK或APTV原生桥接接口。独立 [只读检测脚本](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/diagnostics/cctv-ios-native-probe-v0.1.0.py)可在APTV运行，结果 `/status` 位于18771端口，启动日志也输出JSON。它只观察已加载组件、公开符号及宿主能力名称，不处理播放或许可；生产播放版本保持0.3.7。
+用户提供的 IPA 样本已定位到 **CNPlayerSDK.framework（iOS ARM64）**，依赖 CicadaPlayerSDK/xnet，暴露原生 UIView 播放前端。Alibaba Cicada 有正式公开头文件；央视 CNPlayerSDK 封装的正式配置/回调/授权合同和 APTV 原生接入仍未取得。详见 [IPA静态证据与正式接入要求](IOS-SDK-IPA-REVIEW.md)。这次未改生产引擎或宣称原生播放成功。
 
-用户已提供 iPhone 实机探针和卡顿日志；观察到系统媒体框架，但没有观察到当前进程中的央视原生 SDK/Unicorn API。播放卡顿与串行 SDK 模拟耗时高于直播片长一致。详见 [实机卡顿与原生后端调查](IOS-PLAYBACK-STUTTER-2026-10-22.md)。
+推荐使用独立 [只读探针v0.1.1](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/diagnostics/cctv-ios-native-probe-v0.1.1.py)：增加CNPlayer/Cicada名字及已注册Objective-C类查询。它不加载样本库、不调用播放器/许可方法；`http://127.0.0.1:18771/status`或启动日志输出结果。停止旧检测服务再加载此版本；新版尚未在用户iPhone执行。旧v0.1.0未覆盖这些名字，其ctx缺失也不能排除其他宿主接口。
+
+当前53台App来源仍为受保护流，覆盖与其他官方路径候选见 [官方路径复核](OFFICIAL-IOS-PATH-CHECK.md)。用户旧版探针观察到系统媒体框架与JSC；卡顿日志把主要耗时定位在SDK调用链，现有计时未再拆分桥接与内部执行。详见 [实机卡顿调查](IOS-PLAYBACK-STUTTER-2026-10-22.md)。生产播放版本保持0.3.7。
 
 ## 0.3.7 合并WASM快路径
 

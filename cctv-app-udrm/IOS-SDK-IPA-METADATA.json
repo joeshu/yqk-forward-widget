@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "checked_at_utc": "2026-10-22T09:51:34.897111+00:00",
+  "scope": "static IPA package, Mach-O metadata and selected Objective-C frontend interface observations; no binary execution or media/license/secret analysis",
+  "input": {
+    "file_name": "cn.vuclip.mobiletv-7.9.31-eeveedecrypter.ipa",
+    "bytes": 74093434,
+    "sha256": "e7b153ab80a17a646d7011ebedc17b786835ab27feba4959af07bcc7ec8c9315",
+    "git_blob_sha1": "0b85700ff9fa586cc558c262368afef8d16728b2",
+    "authenticity": "user-provided modified sample; original vendor distribution/signature not independently authenticated"
+  },
+  "app_metadata_claims": {
+    "CFBundleIdentifier": "cn.vuclip.mobiletv",
+    "CFBundleDisplayName": "央视影音",
+    "CFBundleExecutable": "央视影音",
+    "CFBundleShortVersionString": "7.9.31",
+    "CFBundleVersion": "1",
+    "MinimumOSVersion": "15",
+    "DTPlatformName": "iphoneos",
+    "DTSDKName": "iphoneos26.5",
+    "UIRequiredDeviceCapabilities": [
+      "arm64"
+    ]
+  },
+  "interface_file_count": 0,
+  "sdk_candidates": [
+    {
+      "name": "CNPlayerSDK",
+      "bundle": {
+        "name": "CNPlayerSDK",
+        "CFBundleIdentifier": "com.cctv.ysyy.CNPlayerSDK",
+        "CFBundleShortVersionString": "1.0",
+        "CFBundleVersion": "1",
+        "MinimumOSVersion": "10"
+      },
+      "binary_bytes": 14968320,
+      "sha256": "e8556692053692ef89b264105931f4eed979132d1d275fa937a1d41c3fe4a9fe",
+      "architecture": "arm64",
+      "file_type": "MH_DYLIB",
+      "platform_build": {
+        "cmd": "0x25",
+        "platform": "iOS",
+        "minos": "10.0.0",
+        "sdk": "26.2.0"
+      },
+      "framework_dependencies": [
+        "xnet",
+        "CicadaPlayerSDK"
+      ],
+      "selected_exported_classes": [
+        "CNPlayer",
+        "CNPlayerConfig",
+        "CNPlayerStartOptions",
+        "CNPlayerPlayOptions",
+        "CNLiveCicadaPlayer",
+        "CNLIVEUDrmPlayer"
+      ]
+    },
+    {
+      "name": "CicadaPlayerSDK",
+      "bundle": {
+        "name": "CicadaPlayerSDK",
+        "CFBundleIdentifier": "com.alibaba.CicadaPlayerSDK",
+        "CFBundleShortVersionString": "1.0",
+        "CFBundleVersion": "1",
+        "MinimumOSVersion": "11.0"
+      },
+      "binary_bytes": 6917760,
+      "sha256": "f4b178ecab3c29526ba22085bc928e3c009a2db672b1b23b78d5717ec0abca9c",
+      "architecture": "arm64",
+      "file_type": "MH_DYLIB",
+      "platform_build": {
+        "cmd": "0x25",
+        "platform": "iOS",
+        "minos": "11.0.0",
+        "sdk": "18.4.0"
+      },
+      "framework_dependencies": [
+        "alivcffmpeg"
+      ],
+      "selected_exported_classes": [
+        "CicadaPlayer",
+        "CicadaUrlSource"
+      ]
+    },
+    {
+      "name": "alivcffmpeg",
+      "bundle": {
+        "name": "alivcffmpeg",
+        "CFBundleIdentifier": "com.alibaba.AliyunPlayer.alivcffmpeg",
+        "CFBundleShortVersionString": "1.0",
+        "CFBundleVersion": "1",
+        "MinimumOSVersion": "9.0"
+      },
+      "binary_bytes": 12190144,
+      "sha256": "0d34b02309e8b99d81fe1ba0b936f8654f45d4ffbf7a7b57f3a1f3bf9ded4748",
+      "architecture": "arm64",
+      "file_type": "MH_DYLIB",
+      "platform_build": {
+        "cmd": "0x25",
+        "platform": "iOS",
+        "minos": "9.0.0",
+        "sdk": "14.0.0"
+      },
+      "framework_dependencies": [],
+      "selected_exported_classes": []
+    },
+    {
+      "name": "xnet",
+      "bundle": {
+        "name": "xnet",
+        "CFBundleIdentifier": "com.tencent.xnet",
+        "CFBundleShortVersionString": "1.6.0",
+        "CFBundleVersion": "1.6.0",
+        "MinimumOSVersion": "9.0"
+      },
+      "binary_bytes": 3004224,
+      "sha256": "e6b7253d6e3bc989f1708cbbf76a23c635fd54579966569af6136b31c93e8040",
+      "architecture": "arm64",
+      "file_type": "MH_DYLIB",
+      "platform_build": {
+        "cmd": "0x25",
+        "platform": "iOS",
+        "minos": "9.0.0",
+        "sdk": "14.1.0"
+      },
+      "framework_dependencies": [],
+      "selected_exported_classes": []
+    },
+    {
+      "name": "Tquic",
+      "bundle": {
+        "name": "Tquic",
+        "CFBundleIdentifier": "org.tencent.net.Tquic",
+        "CFBundleShortVersionString": "95.4624.0",
+        "CFBundleVersion": "95.0.4624.0",
+        "MinimumOSVersion": "10.0"
+      },
+      "binary_bytes": 2728048,
+      "sha256": "ea77c3bf0d26c658f4a40cee9df1e2297f7c181e270a5c633ad172f510ce6158",
+      "architecture": "arm64",
+      "file_type": "MH_DYLIB",
+      "platform_build": {
+        "cmd": "0x25",
+        "platform": "iOS",
+        "minos": "10.0.0",
+        "sdk": "15.0.0"
+      },
+      "framework_dependencies": [],
+      "selected_exported_classes": []
+    }
+  ],
+  "observed_native_player_view": true,
+  "official_cnplayer_headers_obtained": false,
+  "official_cicada_headers_available": true,
+  "cctv_udrm_compatibility_of_public_cicada_verified": false,
+  "encoded_media_output_api_verified": false,
+  "aptv_native_integration_verified": false,
+  "native_playback_tested": false,
+  "public_probe": {
+    "version": "0.1.1",
+    "sha256": "8a17dcdb984a4f20065b93eadaf3b9d9287573289acdd3f9cde6f5804985dce6",
+    "checks_passed": 12,
+    "new_version_specific_checks": 5,
+    "scope": "Linux synthetic iOS API objects; v0.1.0 also includes real local HTTP; not an iPhone v0.1.1 run",
+    "iphone_v011_run": false
+  },
+  "production": {
+    "version": "0.3.7",
+    "changed": false,
+    "sha256": "5e9ad31f92bd4dcc91ec90298d51902d046ea80742b752101636b02c7821b4b7"
+  }
+}
