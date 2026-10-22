@@ -9,7 +9,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.10.0";
+static NSString *const kBuildTag = @"0.11.0";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
@@ -188,6 +188,10 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleOverlay)];
     [self.playerBox addGestureRecognizer:tap];
+    UITapGestureRecognizer *doubleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleFullscreen)];
+    doubleTap.numberOfTapsRequired = 2;
+    [self.playerBox addGestureRecognizer:doubleTap];
+    [tap requireGestureRecognizerToFail:doubleTap];
 }
 
 - (UIButton *)barButton:(NSString *)title action:(SEL)action {
@@ -324,6 +328,12 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     cell.textLabel.textColor = playing ? [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1] : UIColor.whiteColor;
     cell.textLabel.text = playing ? [NSString stringWithFormat:@"● %@", ch[@"name"]] : ch[@"name"];
 
+    if ([ch[@"logo"] length]) {
+        [self loadLogo:ch[@"logo"] into:cell.imageView];
+    } else {
+        cell.imageView.image = nil;
+    }
+
     NSDictionary *epg = self.epgCache[ch[@"id"] ?: @""];
     if (epg[@"now"]) {
         cell.detailTextLabel.text = [NSString stringWithFormat:@"正在播：%@", epg[@"now"]];
@@ -342,6 +352,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     NSArray *rows = [self channelsForSection:ip.section tableView:t];
     NSDictionary *ch = rows[ip.row];
     [self rememberChannel:ch];
+    [[NSUserDefaults standardUserDefaults] setObject:ch forKey:@"lastChannel"];
     if ([ch[@"remoteURL"] length]) { [self playRemote:ch]; return; }
     [self playChannel:ch route:nil];      // 单击 = 自动选线直接播放
 }
@@ -449,6 +460,15 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     id ver = [self callClass:cls sel:@"SDKVersion" args:@[]];
     [self log:@"SDK 启动版本 %@", ver];
     [self callClass:cls sel:@"authed" args:@[]];
+
+    // 续播：启动 2.5 秒后恢复上次频道
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSDictionary *last = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"lastChannel"];
+        if (![last[@"id"] length] || self.channelID.length) return;
+        [self log:@"续播上次频道 %@", last[@"name"] ?: last[@"id"]];
+        if ([last[@"remoteURL"] length]) [self playRemote:last];
+        else [self playChannel:last route:nil];
+    });
 
     // 预热：提前建好播放器实例，缩短首次起播时间
     __weak typeof(self) weakSelf = self;
@@ -668,6 +688,32 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     });
 }
 
+#pragma mark - 台标
+
+static NSCache *LogoCache(void) {
+    static NSCache *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = [NSCache new]; cache.countLimit = 200; });
+    return cache;
+}
+
+- (void)loadLogo:(NSString *)url into:(UIImageView *)iv {
+    iv.image = nil;
+    if (!url.length) return;
+    UIImage *cached = [LogoCache() objectForKey:url];
+    if (cached) { iv.image = cached; return; }
+    __weak UIImageView *weakIV = iv;
+    [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:url] completionHandler:^(NSData *data, NSURLResponse *r, NSError *e) {
+        if (!data.length) return;
+        UIImage *img = [UIImage imageWithData:data];
+        if (!img) return;
+        [LogoCache() setObject:img forKey:url];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (weakIV) weakIV.image = img;
+        });
+    }] resume];
+}
+
 #pragma mark - 搜索 / 最近 / 节目单缓存
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)sc {
@@ -792,11 +838,13 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
                 id key = c.url;
                 if ([names containsObject:key]) continue;
                 [names addObject:key];
-                [merged addObject:@{@"id": c.name ?: c.url,
-                                    @"name": c.name ?: c.url,
-                                    @"group": c.group ?: @"订阅",
-                                    @"verified": @NO,
-                                    @"remoteURL": c.url}];
+                NSMutableDictionary *entry = [@{@"id": c.name ?: c.url,
+                                                @"name": c.name ?: c.url,
+                                                @"group": c.group ?: @"订阅",
+                                                @"verified": @NO,
+                                                @"remoteURL": c.url} mutableCopy];
+                if (c.logo.length) entry[@"logo"] = c.logo;
+                [merged addObject:entry];
                 added++;
             }
             weakSelf.allChannels = merged;
@@ -1065,11 +1113,17 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self log:@"播放失败 %ld %@", (long)error.code, error.localizedDescription];
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 播放失败", self.channelName];
     [self.spinner stopAnimating];
-    if (self.retryCount < 1 && !self.firstRender) {
+    if (self.retryCount < 2) {
         self.retryCount += 1;
-        [self log:@"失败重试一次"];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (self.channelID.length) [self playViaSDK:self.channelID title:self.channelName];
+        double delay = self.retryCount == 1 ? 1.0 : 3.0;
+        [self log:@"断流重连 第 %ld 次（%.0fs 后）", (long)self.retryCount, delay];
+        NSString *cid = self.channelID;
+        NSString *name = self.channelName;
+        NSDictionary *last = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"lastChannel"];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (![cid isEqualToString:self.channelID]) return;
+            if ([last[@"remoteURL"] length]) [self playRemote:last];
+            else [self playViaSDK:cid title:name];
         });
     }
 }

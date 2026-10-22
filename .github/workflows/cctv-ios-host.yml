@@ -40,6 +40,7 @@ jobs:
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           : > syntax.log
           for f in Sources/*.m; do
+            case "$f" in *PyHost.m) echo "skip $f (needs python headers, checked in build step)"; continue;; esac
             echo "== $f" >> syntax.log
             xcrun --sdk iphoneos clang -fsyntax-only -arch arm64 -isysroot "$SDK" \
               -miphoneos-version-min=15.0 -fobjc-arc -I Sources/Include \

@@ -4,6 +4,7 @@
 @property (nonatomic, copy) NSString *name;
 @property (nonatomic, copy) NSString *url;
 @property (nonatomic, copy) NSString *group;
+@property (nonatomic, copy, nullable) NSString *logo;
 @end
 
 @interface M3UParser : NSObject
