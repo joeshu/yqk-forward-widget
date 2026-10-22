@@ -3,6 +3,8 @@
 #import "CicadaSDK.h"
 #import <objc/message.h>
 #import <string.h>
+#import <objc/runtime.h>
+#import <dlfcn.h>
 
 static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTVGetLicense";
 static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTVGetLicense";
@@ -45,7 +47,7 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = UIColor.blackColor;
-    self.title = @"CCTV 原生宿主 M1";
+    self.title = @"CCTVHost 0.1.2 诊断版";
 
     CGFloat w = self.view.bounds.size.width;
 
@@ -101,6 +103,7 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
     self.logView.editable = NO;
     [self.view addSubview:self.logView];
 
+    [self log:@"BUILD 0.1.2 — delegate / BOOL / option-key diagnostics"];
     [self setupSDK];
 }
 
@@ -138,7 +141,7 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
     } @catch (NSException *e) {
         [self log:@"startPlayerSDK_Options 异常: %@", e];
     }
-    [self log:@"如果 10 秒内没有 auth/VDN 日志，说明需要显式 appKey/appSecret（见 README 第 5 节）"];
+    [self log:@"尚未验证授权；无回调不能推断缺少凭据，不提取或复用原 App 密钥。"];
 }
 
 #pragma mark - 通用调用（对未知签名容错）
@@ -157,7 +160,7 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
     for (NSUInteger i = 0; i < args.count && i + 2 < sig.numberOfArguments; i++) {
         const char *t = [sig getArgumentTypeAtIndex:i + 2];
         id v = args[i];
-        if (v == NSNull.null) continue;
+        if (v == NSNull.null) { id zero = nil; [inv setArgument:&zero atIndex:i + 2]; continue; }
         if (strcmp(t, "@") == 0 || strcmp(t, "@?") == 0) {
             id a = v;
             [inv setArgument:&a atIndex:i + 2];
@@ -205,7 +208,7 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
     for (NSUInteger i = 0; i < args.count && i + 2 < sig.numberOfArguments; i++) {
         id v = args[i];
         const char *t = [sig getArgumentTypeAtIndex:i + 2];
-        if (v == NSNull.null) continue;
+        if (v == NSNull.null) { id zero = nil; [inv setArgument:&zero atIndex:i + 2]; continue; }
         if (strcmp(t, "@") == 0 || strcmp(t, "@?") == 0) {
             id a = v;
             [inv setArgument:&a atIndex:i + 2];
@@ -229,6 +232,7 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
         char r = 0;
         [inv getReturnValue:&r];
         [self log:@"   返回 %d", r];
+        return @(r != 0);
     }
     return nil;
 }
@@ -241,6 +245,12 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
     Class CNPlayerCls = NSClassFromString(@"CNPlayer");
     [self log:@"—— 起播 %@ ——", cid];
 
+    if (self.currentPlayer) {
+        [self callInstance:self.currentPlayer selector:NSSelectorFromString(@"stop") args:@[]];
+        self.currentPlayer = nil;
+    }
+    for (UIView *v in self.playerBox.subviews.copy) [v removeFromSuperview];
+    [self callClass:CNPlayerCls selector:NSSelectorFromString(@"authed") args:@[]];
     id inst = nil;
     @try { inst = [[CNPlayerCls alloc] init]; } @catch (NSException *e) { [self log:@"init 异常: %@", e]; }
     if (!inst) {
@@ -254,9 +264,21 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
         [self log:@"实例也不响应 playLIVEWithChannelID:，SDK 版本可能不同"];
         return;
     }
-    [self callInstance:inst selector:playSel args:@[cid, NSNull.null, @{@"Title": cid}]];
-
-    self.currentPlayer = inst;
+    self.currentPlayer = inst; // retain before asynchronous callbacks
+    NSMutableDictionary *options = [NSMutableDictionary dictionary];
+    // Use only the named SDK config constant when publicly exported.
+    NSString * __unsafe_unretained *titleKey = (NSString * __unsafe_unretained *)dlsym(RTLD_DEFAULT, "CNPlayerConfigOptionKey_Title");
+    if (titleKey && *titleKey) options[*titleKey] = cid;
+    else [self log:@"Title option constant not exported; no guessed key injected"];
+    Protocol *proto = NSProtocolFromString(@"CNPlayerCallbackProtocol");
+    [self log:@"callback protocol visible=%d", proto != nil];
+    if (proto) class_addProtocol(self.class, proto);
+    id accepted = [self callInstance:inst selector:playSel args:@[cid, self, options]];
+    if (![accepted isKindOfClass:NSNumber.class] || ![accepted boolValue]) {
+        self.statusLabel.text = @"SDK 拒绝起播（BOOL 0），请查看错误回调";
+        [self log:@"起播未获接受，未调用 prepareToPlay。等待 authFailed / parameterError / VDN 回调。"];
+        return;
+    }
     id view = nil;
     @try {
         if ([inst respondsToSelector:NSSelectorFromString(@"view")]) {
@@ -302,6 +324,33 @@ static NSString *const kLicenseUrlAlt = @"https://cdrm.live.cntv.cn/udrm/udmCNTV
     [textField resignFirstResponder];
     [self tapCicada:nil];
     return YES;
+}
+
+
+#pragma mark - Documented SDK callbacks (no license or credential payload logging)
+- (void)authFailed:(NSError *)error {
+    [self log:@"authFailed domain=%@ code=%ld description=%@", error.domain, (long)error.code, error.localizedDescription];
+}
+- (void)player:(id)player parameterError:(NSError *)error rate:(id)rate {
+    [self log:@"parameterError domain=%@ code=%ld description=%@", error.domain, (long)error.code, error.localizedDescription];
+}
+- (void)player:(id)player vdnRequestFailed:(NSError *)error {
+    [self log:@"vdnRequestFailed domain=%@ code=%ld description=%@", error.domain, (long)error.code, error.localizedDescription];
+}
+- (void)player:(id)player playbackFailed:(NSError *)error {
+    [self log:@"playbackFailed domain=%@ code=%ld description=%@", error.domain, (long)error.code, error.localizedDescription];
+}
+- (void)player:(id)player publicRequestFailed:(NSError *)error {
+    [self log:@"publicRequestFailed domain=%@ code=%ld description=%@", error.domain, (long)error.code, error.localizedDescription];
+}
+- (void)player:(id)player loadStateDidChanged:(NSUInteger)state {
+    [self log:@"loadState=%lu (not proof of first frame)", (unsigned long)state];
+}
+- (void)player:(id)player vdnRequestStateDidChanged:(NSUInteger)state {
+    [self log:@"VDN state=%lu", (unsigned long)state];
+}
+- (void)player:(id)player playBackStateDidChanged:(NSUInteger)state {
+    [self log:@"playback state=%lu", (unsigned long)state];
 }
 
 @end
