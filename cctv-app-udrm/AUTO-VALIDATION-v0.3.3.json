@@ -1,0 +1,26 @@
+{
+  "unit_tests_passed": 59,
+  "unit_tests_failed": 0,
+  "live_fault_injection": {
+    "version": "0.3.3",
+    "script_sha256": "5548d0d793551518a50dc66e23db8b3fed0a82a781d712a95ef17102af0318b5",
+    "environment": "Linux JSC; not iPhone",
+    "injection": "CCTV7 default CDN replaced with unreachable loopback port after SDK ready",
+    "selected_route": "cctv7_bd",
+    "switches": 1,
+    "http_retry_statuses": [
+      503
+    ],
+    "seconds_to_backup_playlist": 10.841,
+    "segments": 1,
+    "decode_exit": 0,
+    "decode_error_lines": 0,
+    "quality_cap": 2500000
+  },
+  "limits": [
+    "Linux only; iPhone APTV retry/discontinuity behaviour not verified",
+    "Not seamless; HTTP 503 with Retry-After while backup prepares",
+    "Only same logical channel routes; fixed line subscriptions remain fixed",
+    "No quality reduction; no background media probing of all routes"
+  ]
+}

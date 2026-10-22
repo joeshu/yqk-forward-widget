@@ -1,4 +1,4 @@
-# 央视影音 App UDRM 单文件 v0.3.2（无 JDK）
+# 央视影音 App UDRM 单文件 v0.3.3（无 JDK）
 
 v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + WebAssembly 解释器**。运行只使用 Python 标准库和系统 JavaScriptCore，不再启动 Java、Node、编译器、FFmpeg 或外部 OpenSSL 命令。许可和视频处理继续由原样官方 SDK 完成。
 
@@ -7,10 +7,10 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 ## APTV 添加与订阅
 
 1. 停止旧脚本服务，添加下面带版本号的 Python 文件。
-2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.3.2`。
+2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.3.3`。
 3. 首次先检查宿主的 JavaScriptCore/WebAssembly 能力，再下载约3.55MiB（SDK压缩段约2.10MiB、解释器约1.45MiB）。看到“SDK 已取得许可并就绪”后刷新订阅；17ms之类的列表测速不表示SDK已经就绪。若服务器不支持分段下载，日志会说明回退约47MiB的完整安装包。
 
-[下载 cctv-app-udrm-v0.3.2.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.3.2.py)
+[下载 cctv-app-udrm-v0.3.3.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.3.3.py)
 
 手机同机订阅：
 
@@ -18,18 +18,18 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 http://127.0.0.1:8769/all.m3u
 ```
 
-状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.3.2`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
+状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.3.3`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
 
 脚本运行需要 Python 3.10+、`ctypes`、`ssl`，以及支持 WebAssembly、BigInt 的系统 JavaScriptCore。默认从 iOS 系统路径加载框架。没有手工安装 pip 包、JS文件、JAR或完整安卓虚拟机的步骤。当前默认文件 [cctv-app-udrm.py](cctv-app-udrm.py) 与带版本号文件完全相同。
 
 终端运行：
 
 ```bash
-python3 cctv-app-udrm-v0.3.2.py
+python3 cctv-app-udrm-v0.3.3.py
 # 指定端口、缓存或关闭预热
-python3 cctv-app-udrm-v0.3.2.py 8769 --cache-dir ./cbox-cache --no-warmup
+python3 cctv-app-udrm-v0.3.3.py 8769 --cache-dir ./cbox-cache --no-warmup
 # 能力检查，不访问节目源
-python3 cctv-app-udrm-v0.3.2.py --doctor
+python3 cctv-app-udrm-v0.3.3.py --doctor
 ```
 
 电脑/服务器供手机访问时，显式加 `--host 0.0.0.0`，订阅地址改为该电脑的局域网IP。Linux开发测试使用JavaScriptCoreGTK共享库，通过 `--jscore-library /path/to/libjavascriptcoregtk-4.1.so.0` 指定；它不是iPhone需下载的依赖。
@@ -44,6 +44,16 @@ python3 cctv-app-udrm-v0.3.2.py --doctor
 - 已人工查看处理后的央视画面，台标、字幕和画面正常。原SDK样本对照仍见 [SAMPLE-VALIDATION.json](SAMPLE-VALIDATION.json)。
 
 节目单现已合并，详见下方0.3.1说明。原61台服务独立保留；用户手机的内存、首帧及节目单界面仍需实机核对。
+
+## 0.3.3 同频道线路自愈与自动切换
+
+更新脚本后必须刷新APTV频道订阅。主订阅 `/all.m3u`、`/aptv.m3u` 使用 `/auto/<频道ID>.m3u8`，沿用当前健康线路。失败达到2次，或已报错且没有新鲜可用清单时，在后续播放器清单请求中按需选择同频道备用CDN；失败线路冷却30秒，叠加原有请求退避。备用仍失败时继续尝试下一条；全部冷却时返回503及Retry-After，后续请求再试。只有一条线路的频道无法跨CDN切换。
+
+切换时各路线SDK状态、原始序号和缓存独立，对外重新映射递增媒体序号与discontinuity计数；不把两家CDN分片当成同一原始序列。上游序号回退也会重新建立对外时间线。切换后的健康线路持续使用，不自动切回优先线路，避免来回抖动。`/status` 的 `auto_routes` 显示当前路线和切换尝试次数。
+
+保留手动固定入口：`/lines.m3u`、`/lines/<频道ID>.m3u`、`/providers/<CDN>.m3u`、`/live/<路线ID>.m3u8`；这些不会自动换线。CDN自动切换不修复公共SDK初始化或许可拒绝，也不根据SDK处理慢就轮换线路。不会同时预取所有备用，不降低清晰度；HEAD检查仍不启动SDK或取流。
+
+59项回归通过，包括序号差异、上游重启、discontinuity不回退、冷却边界、许可故障和订阅入口。最终脚本故障注入测试：将CCTV-7默认路线改为不可连接的本机端口，自动切至百度，约10.84秒取得备用清单，备用真实分片音视频解码错误0，码率选择上限仍2.5Mbps。见 [自动切换验证](AUTO-VALIDATION-v0.3.3.json)。这是Linux测试，不代表手机无缝切换；切换准备期间可能短暂停顿或503，需要播放器继续请求，APTV实际恢复行为仍待手机验收。
 
 ## 0.3.2 运行层复制与架构限制
 

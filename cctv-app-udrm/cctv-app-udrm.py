@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.3.2: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.3.3: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -2066,7 +2066,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.3.2'\n"
+        "VERSION = '0.3.3'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'from route_catalog import CHANNEL_ROUTES,PROVIDER_LABELS,VERIFIED_AT_UTC\n'
         'from epg_store import EpgStore\n'
@@ -2326,6 +2326,7 @@ PYTHON_SOURCES = {
         '        self.sdk=MediaSDK(prepared);self.channels=channels;self.max_bitrate=max_bitrate\n'
         "        self.pool=ThreadPoolExecutor(max_workers=4,thread_name_prefix='upstream')\n"
         "        self.refresh_pool=ThreadPoolExecutor(max_workers=min(4,len(channels)),thread_name_prefix='refresh')\n"
+        '        self.auto_states={};self.auto_lock=threading.RLock()\n'
         '        self.refresh_jobs={};self.jobs_lock=threading.Lock();self.active_channel=None\n'
         '        self.stopping=threading.Event();self.started=time.monotonic()\n'
         "        self.worker=threading.Thread(target=self._background,name='refresh',daemon=True)\n"
@@ -2471,6 +2472,52 @@ PYTHON_SOURCES = {
         "            lines.extend([f'#EXTINF:{entry.duration:.3f},',f'/segments/{ch.ident}/{self.token(ch,entry)}.ts'])\n"
         "        if p.end:lines.append('#EXT-X-ENDLIST')\n"
         "        return ('\\n'.join(lines)+'\\n').encode()\n"
+        '    def auto_playlist_bytes(self,logical):\n'
+        '        routes=[c for c in self.channels.values() if (c.logical_id or c.ident)==logical]\n'
+        "        if not routes:raise LiveError('Unknown logical channel')\n"
+        '        with self.auto_lock:\n'
+        "            state=self.auto_states.setdefault(logical,{'route':routes[0].ident,'previous':None,\n"
+        "                'offset':0,'last':-1,'source_last':-1,'disc_last':-1,'disc_offset':0,'switches':0,'cooldown':{},'lock':threading.RLock()})\n"
+        "        with state['lock']:\n"
+        "            ch=self.channels[state['route']]\n"
+        '            failed=ch.failures>=2 or (ch.error and (not ch.playlist or time.monotonic()-ch.updated>max(8,ch.playlist.target*2)))\n'
+        '            try:\n'
+        '                if failed:raise LiveError(ch.error)\n'
+        '                self.playlist_bytes(ch)\n'
+        '            except LiveError:\n'
+        '                # A common SDK/license failure is not repaired by changing CDN.\n'
+        "                if self.sdk.phase!='ready':raise\n"
+        "                now=time.monotonic();state['cooldown'][ch.ident]=now+30\n"
+        '                candidates=[c for c in routes if c.ident!=ch.ident and\n'
+        "                    state['cooldown'].get(c.ident,0)<=now and c.retry_at<=now]\n"
+        '                if not candidates:raise\n'
+        '                chosen=min(candidates,key=lambda c:(bool(c.error),c.failures,routes.index(c)))\n'
+        "                state['route']=chosen.ident;state['switches']+=1\n"
+        '                with self.jobs_lock:self.active_channel=chosen.ident\n'
+        '                self._schedule(chosen)\n'
+        "                LOG.warning('%s 自动换线：%s → %s；独立分片状态，等待备用就绪',logical,ch.ident,chosen.ident)\n"
+        "                raise LiveError('备用线路准备中，请重试；详情 /status') from None\n"
+        '            p=ch.playlist\n'
+        "            if not p:raise LiveError('Waiting for selected route')\n"
+        "            if state['previous']!=ch.ident or p.entries[-1].seq<state['source_last']:\n"
+        "                state['disc_offset']=max(0,state['disc_last']+1-p.discontinuity_sequence)\n"
+        "                state['offset']=max(0,state['last']+1-p.entries[0].seq)\n"
+        '                # Offset may be negative when CDN sequence numbers differ greatly.\n'
+        "                if state['last']>=0:state['offset']=state['last']+1-p.entries[0].seq\n"
+        "                state['previous']=ch.ident\n"
+        "            state['source_last']=p.entries[-1].seq\n"
+        "            disc=p.discontinuity_sequence+state['disc_offset']\n"
+        "            state['disc_last']=max(state['disc_last'],disc+sum(bool(e.discontinuity) for e in p.entries))\n"
+        "            state['last']=max(state['last'],p.entries[-1].seq+state['offset'])\n"
+        "            lines=['#EXTM3U','#EXT-X-VERSION:3',\n"
+        "                f'#EXT-X-TARGETDURATION:{max(p.target,math.ceil(max(e.duration for e in p.entries)))}',\n"
+        '                f\'#EXT-X-MEDIA-SEQUENCE:{p.entries[0].seq+state["offset"]}\',\n'
+        "                f'#EXT-X-DISCONTINUITY-SEQUENCE:{disc}']\n"
+        '            for entry in p.entries:\n'
+        "                if entry.discontinuity:lines.append('#EXT-X-DISCONTINUITY')\n"
+        "                lines.extend([f'#EXTINF:{entry.duration:.3f},',f'/segments/{ch.ident}/{self.token(ch,entry)}.ts'])\n"
+        "            if p.end:lines.append('#EXT-X-ENDLIST')\n"
+        "            return ('\\n'.join(lines)+'\\n').encode()\n"
         '    def _schedule(self,ch):\n'
         '        def refresh():\n'
         '            try:self.refresh(ch,background=True)\n'
@@ -2539,6 +2586,7 @@ PYTHON_SOURCES = {
         "            'preparation_progress':self.sdk.progress,'preparation_error':self.sdk.error,\n"
         "            'runtime_features':dict(getattr(self.sdk.client,'runtime_features',{})),\n"
         "            'memory_cache':self._cache_stats(),'epg':self.epg.status(),\n"
+        "            'auto_routes':{k:{'route':v['route'],'switches':v['switches']} for k,v in list(self.auto_states.items())},\n"
         "            'media_timings':dict(self.sdk.timings),'max_bitrate':self.max_bitrate,\n"
         "            'sdk_sessions':self.sdk.sessions,'processed_video_pes':self.sdk.processed_frames,\n"
         "            'license_exchanges':self.sdk.license_records,\n"
@@ -2584,7 +2632,7 @@ PYTHON_SOURCES = {
         "                        if path=='/lines.m3u' or provider_match:group+=' · '+PROVIDER_LABELS.get(ch.provider,ch.provider)\n"
         '                        clean=lambda value:str(value).replace(\'"\',"\'").replace(\'\\n\',\' \').replace(\'\\r\',\' \')\n'
         '                        lines.extend([f\'#EXTINF:-1 tvg-id="{clean(logical)}" tvg-name="{clean(CHANNEL_ROUTES.get(logical,{}).get(\'name\',ch.name))}" tvg-logo="{clean(ch.logo)}" group-title="{clean(group)}",{clean(ch.name)}\',\n'
-        "                            f'http://{host}/live/{ch.ident}.m3u8'])\n"
+        '                            f\'http://{host}/{"auto" if not parent and not provider_match and path!="/lines.m3u" else "live"}/{ch.ident}.m3u8\'])\n'
         "                    return self.respond(200,('\\n'.join(lines)+'\\n').encode(),'audio/x-mpegurl',head)\n"
         "                if path in ('/epg.xml','/epg.xml.gz'):\n"
         '                    if head:\n'
@@ -2596,6 +2644,10 @@ PYTHON_SOURCES = {
         "                    return self.respond(200,json.dumps(service.epg.now_next() if not head else {},ensure_ascii=False).encode(),'application/json; charset=utf-8',head)\n"
         "                if path=='/status':\n"
         "                    return self.respond(200,json.dumps(service.status(),ensure_ascii=False).encode(),'application/json; charset=utf-8',head)\n"
+        "                match=re.fullmatch(r'/auto/([a-z0-9_-]+)\\.m3u8',path)\n"
+        '                if match and match[1] in CHANNEL_ROUTES:\n'
+        "                    body=b'' if head else service.auto_playlist_bytes(match[1])\n"
+        "                    return self.respond(200,body,'application/vnd.apple.mpegurl',head)\n"
         "                match=re.fullmatch(r'/live/([a-z0-9_-]+)\\.m3u8',path)\n"
         '                if match and match[1] in service.channels:\n'
         '                    # HEAD is an existence check and never triggers network/SDK work.\n'
