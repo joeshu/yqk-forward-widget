@@ -2,7 +2,7 @@
 
 v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + WebAssembly 解释器**。运行只使用 Python 标准库和系统 JavaScriptCore，不再启动 Java、Node、编译器、FFmpeg 或外部 OpenSSL 命令。许可和视频处理继续由原样官方 SDK 完成。
 
-开发环境已通过真实官方许可、原错误样本和实时HLS解码测试；**用户 iPhone APTV 实机尚待验收**。这里不把 Linux JavaScriptCoreGTK 的测试当作手机实测。
+开发环境已通过真实官方许可、原错误样本和实时HLS解码测试。用户已在 APTV TestFlight 的 iPhone 12 实机运行 v0.3.7；**实测仍有播放卡顿**，每段约4秒视频的 SDK 处理耗时约4–10.5秒。当前版证明可运行，尚未达到持续实时处理；Linux JavaScriptCoreGTK 测速不能代替手机性能。
 
 ## APTV 添加与订阅
 
@@ -48,6 +48,8 @@ python3 cctv-app-udrm-v0.3.7.py --doctor
 ## 官方iOS路径与宿主检测
 
 新增 [官方路径实测与手机检测](OFFICIAL-IOS-PATH-CHECK.md)：当前53台仍均为App受保护流，尚未取得可核验的iOS SDK或APTV原生桥接接口。独立 [只读检测脚本](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/diagnostics/cctv-ios-native-probe-v0.1.0.py)可在APTV运行，结果 `/status` 位于18771端口，启动日志也输出JSON。它只观察已加载组件、公开符号及宿主能力名称，不处理播放或许可；生产播放版本保持0.3.7。
+
+用户已提供 iPhone 实机探针和卡顿日志；观察到系统媒体框架，但没有观察到当前进程中的央视原生 SDK/Unicorn API。播放卡顿与串行 SDK 模拟耗时高于直播片长一致。详见 [实机卡顿与原生后端调查](IOS-PLAYBACK-STUTTER-2026-10-22.md)。
 
 ## 0.3.7 合并WASM快路径
 

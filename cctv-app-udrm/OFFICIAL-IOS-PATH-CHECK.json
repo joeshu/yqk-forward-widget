@@ -29,8 +29,20 @@
   "probe_sha256": "2b19dd678d0b40a4d0229691b27b8ff8775675b1db39b00f74d231c90dfd6c87",
   "probe_tests_passed": 7,
   "probe_tests_environment": "Linux; Darwin/iOS observations tested with synthetic API objects, plus real local HTTP",
-  "iphone_probe_run": false,
-  "media_path_tested_this_round": false,
+  "iphone_probe_run": true,
+  "iphone_probe_observation": {
+    "platform": "ios",
+    "hardware_machine": "iPhone13,2",
+    "process_pointer_bits": 64,
+    "aptv_distribution": "TestFlight (user-reported)",
+    "aptv_build": "not reported",
+    "system_media_frameworks_observed": true,
+    "vendor_sdk_image_observed": false,
+    "unicorn_c_api_observed": false,
+    "host_context_received": false
+  },
+  "media_path_tested_this_round": true,
+  "media_path_test_basis": "User-provided APTV service logs; per-segment processing exceeded the 4-second segment duration",
   "official_ios_sdk_obtained": false,
   "aptv_native_plugin_interface_verified": false
 }
