@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.3.4: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.3.5: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -2045,6 +2045,8 @@ PYTHON_SOURCES = {
         'from concurrent.futures import ThreadPoolExecutor\n'
         'from dataclasses import dataclass, field\n'
         'import hashlib\n'
+        'from email.utils import parsedate_to_datetime\n'
+        'from datetime import datetime,timezone\n'
         'from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as _ThreadingHTTPServer\n'
         'import json\n'
         'import logging\n'
@@ -2066,7 +2068,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.3.4'\n"
+        "VERSION = '0.3.5'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'from route_catalog import CHANNEL_ROUTES,PROVIDER_LABELS,VERIFIED_AT_UTC\n'
         'from epg_store import EpgStore\n'
@@ -2079,6 +2081,22 @@ PYTHON_SOURCES = {
         '\n'
         'class LiveError(RuntimeError):\n'
         '    pass\n'
+        '\n'
+        'class UpstreamHTTPError(LiveError):\n'
+        '    def __init__(self,status,retry_after=0):\n'
+        "        super().__init__('Upstream HTTP '+str(status))\n"
+        '        self.status=status;self.retry_after=retry_after\n'
+        '\n'
+        '\n'
+        'def retry_after_seconds(value):\n'
+        '    if not value:return 0\n'
+        '    try:\n'
+        '        if value.strip().isdecimal():return min(120,int(value.strip()))\n'
+        '        date=parsedate_to_datetime(value)\n'
+        '        if date.tzinfo is None:date=date.replace(tzinfo=timezone.utc)\n'
+        '        return max(0,min(120,math.ceil((date-datetime.now(timezone.utc)).total_seconds())))\n'
+        '    except (ValueError,TypeError,OverflowError):return 0\n'
+        '\n'
         '\n'
         'class Superseded(LiveError):\n'
         '    pass\n'
@@ -2109,7 +2127,10 @@ PYTHON_SOURCES = {
         "                raise LiveError('Unsupported upstream redirect')\n"
         '            return body, final_url\n'
         '    except HTTPError as error:\n'
-        "        raise LiveError('Upstream HTTP ' + str(error.code)) from None\n"
+        "        delay=retry_after_seconds(error.headers.get('Retry-After')) if error.headers and error.code in (429,503) else 0\n"
+        '        status=error.code\n'
+        '        error.close()\n'
+        '        raise UpstreamHTTPError(status,delay) from None\n'
         '    except LiveError:\n'
         '        raise\n'
         '    except URLError as error:\n'
@@ -2147,7 +2168,16 @@ PYTHON_SOURCES = {
         '\n'
         '\n'
         'def read_playlist(url, max_bitrate):\n'
+        '    try:return _read_playlist(url,max_bitrate)\n'
+        '    except (ValueError,OverflowError):\n'
+        "        raise LiveError('Invalid HLS numeric field') from None\n"
+        '\n'
+        '\n'
+        'def _read_playlist(url, max_bitrate):\n'
+        '    visited=set()\n'
         '    for depth in range(4):\n'
+        "        if url in visited:raise LiveError('HLS master playlist loop')\n"
+        '        visited.add(url)\n'
         '        body, final = fetch(url, 1024 * 1024)\n'
         '        try:\n'
         "            lines = [line.strip() for line in body.decode('utf-8-sig').splitlines() if line.strip()]\n"
@@ -2193,7 +2223,7 @@ PYTHON_SOURCES = {
         "                    raise LiveError('Segment has no EXTINF')\n"
         '                entries.append(Entry(seq,duration,urljoin(final,line),disc))\n'
         '                seq+=1;duration=None;disc=False\n'
-        '        if duration is not None or not entries or len(entries)>12 or target<1 or seq<0:\n'
+        '        if duration is not None or not entries or len(entries)>12 or not 1<=target<=60 or seq-len(entries)<0 or disc_seq<0:\n'
         "            raise LiveError('Invalid or unsupported media playlist')\n"
         '        return Playlist(tuple(entries),target,disc_seq,end)\n'
         "    raise LiveError('Too many nested master playlists')\n"
@@ -2362,7 +2392,7 @@ PYTHON_SOURCES = {
         "        self.refresh_pool=ThreadPoolExecutor(max_workers=min(4,len(channels)),thread_name_prefix='refresh')\n"
         '        self.auto_states={};self.auto_lock=threading.RLock()\n'
         '        self.refresh_jobs={};self.jobs_lock=threading.Lock();self.active_channel=None\n'
-        '        self.refresh_cancelled=0;self.http_resources=None\n'
+        '        self.refresh_cancelled=0;self.refresh_cooldown_skips=0;self.http_resources=None\n'
         '        self.stopping=threading.Event();self.started=time.monotonic()\n'
         "        self.worker=threading.Thread(target=self._background,name='refresh',daemon=True)\n"
         '        self.worker.start()\n'
@@ -2452,7 +2482,7 @@ PYTHON_SOURCES = {
         "                for future in locals().get('futures',{}).values():future.cancel()\n"
         '                ch.error=str(error) if isinstance(error,(LiveError,TSFormatError,SDKError,BootstrapError)) else type(error).__name__\n'
         '                ch.failures+=1\n'
-        '                ch.retry_at=time.monotonic()+min(30,3*(2**min(ch.failures-1,4)))\n'
+        "                ch.retry_at=time.monotonic()+max(min(30,3*(2**min(ch.failures-1,4))),getattr(error,'retry_after',0))\n"
         "                LOG.warning('%s 暂不可用：%s',ch.ident,ch.error)\n"
         '                # A previously valid playlist can bridge one transient CDN failure.\n'
         '                if ch.playlist and time.monotonic()-ch.updated<ch.playlist.target*2:return\n'
@@ -2563,7 +2593,9 @@ PYTHON_SOURCES = {
         '                if job.done():self.refresh_jobs.pop(ident,None)\n'
         '                elif self.active_channel and ident!=self.active_channel and job.cancel():\n'
         '                    self.refresh_jobs.pop(ident,None);self.refresh_cancelled+=1\n'
-        '            if self.active_channel and ch.ident!=self.active_channel:return\n'
+        '            if self.stopping.is_set() or (self.active_channel and ch.ident!=self.active_channel):return\n'
+        '            if time.monotonic()<ch.retry_at:\n'
+        '                self.refresh_cooldown_skips+=1;return\n'
         '            job=self.refresh_jobs.get(ch.ident)\n'
         '            if job is None:self.refresh_jobs[ch.ident]=self.refresh_pool.submit(refresh)\n'
         '    def _trim_memory(self,keep=None):\n'
@@ -2627,7 +2659,7 @@ PYTHON_SOURCES = {
         "            'preparation_progress':self.sdk.progress,'preparation_error':self.sdk.error,\n"
         "            'runtime_features':dict(getattr(self.sdk.client,'runtime_features',{})),\n"
         "            'memory_cache':self._cache_stats(),'epg':self.epg.status(),\n"
-        "            'scheduling':{'obsolete_queued_cancelled':self.refresh_cancelled},\n"
+        "            'scheduling':{'obsolete_queued_cancelled':self.refresh_cancelled,'cooldown_submissions_skipped':self.refresh_cooldown_skips},\n"
         "            'http_resources':self.http_resources() if self.http_resources else None,\n"
         "            'auto_routes':{k:{'route':v['route'],'switches':v['switches']} for k,v in list(self.auto_states.items())},\n"
         "            'media_timings':dict(self.sdk.timings),'max_bitrate':self.max_bitrate,\n"

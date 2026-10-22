@@ -1,0 +1,80 @@
+{
+  "version": "0.3.5",
+  "script_sha256": "02a14b31f4632daca07a552077bdfbbbe9036a2cfe1b3ddff524d13f2ea1b0b7",
+  "attachment_sha256": "caf2a2221c6fc25e6f854e3c5a312b4c385a44b0b37698249c8bcf20794aacbb",
+  "unit_tests_passed": 65,
+  "unit_tests_failed": 0,
+  "media_regression": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 5.618
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.608
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.478
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "forced_native_usleep_probes": [
+      {
+        "microseconds": 20000,
+        "result": 0,
+        "elapsed_seconds": 0.0233
+      }
+    ],
+    "wall_seconds": 7.704,
+    "script_sha256": "02a14b31f4632daca07a552077bdfbbbe9036a2cfe1b3ddff524d13f2ea1b0b7"
+  },
+  "failover_regression": {
+    "version": "0.3.5",
+    "script_sha256": "02a14b31f4632daca07a552077bdfbbbe9036a2cfe1b3ddff524d13f2ea1b0b7",
+    "environment": "Linux JSC; not iPhone",
+    "injection": "CCTV7 default CDN replaced with unreachable loopback port after SDK ready",
+    "selected_route": "cctv7_bd",
+    "switches": 1,
+    "http_retry_statuses": [
+      503
+    ],
+    "seconds_to_backup_playlist": 13.992,
+    "segments": 1,
+    "decode_exit": 0,
+    "decode_error_lines": 0,
+    "quality_cap": 2500000
+  },
+  "iphone_tested": false,
+  "limits": [
+    "No new phone memory or latency measurement",
+    "No change to official SDK or emulator; ARM64 execution cost remains",
+    "Retry-After applied only to media fetch HTTP429/503, capped at120 seconds",
+    "Existing route/cache/EPG scope unchanged"
+  ]
+}

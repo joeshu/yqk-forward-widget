@@ -29,7 +29,7 @@ class ResourceLimitTests(unittest.TestCase):
   live=service.LiveService({},channels);live.stopping.set();live.worker.join()
   queued=Future();running=Future();running.set_running_or_notify_cancel();done=Future();done.set_result(None)
   try:
-   live.refresh_jobs={'a':queued,'finished':done};live.active_channel='b'
+   live.refresh_jobs={'a':queued,'finished':done};live.active_channel='b';live.stopping.clear()
    with patch.object(live.refresh_pool,'submit',return_value=running) as submit:
     live._schedule(channels['b']);live._schedule(channels['b']);live._schedule(channels['a'])
     self.assertTrue(queued.cancelled());self.assertEqual(live.refresh_cancelled,1);submit.assert_called_once();self.assertEqual(set(live.refresh_jobs),{'b'})

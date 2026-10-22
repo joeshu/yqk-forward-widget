@@ -1,4 +1,4 @@
-# 央视影音 App UDRM 单文件 v0.3.4（无 JDK）
+# 央视影音 App UDRM 单文件 v0.3.5（无 JDK）
 
 v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + WebAssembly 解释器**。运行只使用 Python 标准库和系统 JavaScriptCore，不再启动 Java、Node、编译器、FFmpeg 或外部 OpenSSL 命令。许可和视频处理继续由原样官方 SDK 完成。
 
@@ -7,10 +7,10 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 ## APTV 添加与订阅
 
 1. 停止旧脚本服务，添加下面带版本号的 Python 文件。
-2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.3.4`。
+2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.3.5`。
 3. 首次先检查宿主的 JavaScriptCore/WebAssembly 能力，再下载约3.55MiB（SDK压缩段约2.10MiB、解释器约1.45MiB）。看到“SDK 已取得许可并就绪”后刷新订阅；17ms之类的列表测速不表示SDK已经就绪。若服务器不支持分段下载，日志会说明回退约47MiB的完整安装包。
 
-[下载 cctv-app-udrm-v0.3.4.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.3.4.py)
+[下载 cctv-app-udrm-v0.3.5.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.3.5.py)
 
 手机同机订阅：
 
@@ -18,18 +18,18 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 http://127.0.0.1:8769/all.m3u
 ```
 
-状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.3.4`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
+状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.3.5`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
 
 脚本运行需要 Python 3.10+、`ctypes`、`ssl`，以及支持 WebAssembly、BigInt 的系统 JavaScriptCore。默认从 iOS 系统路径加载框架。没有手工安装 pip 包、JS文件、JAR或完整安卓虚拟机的步骤。当前默认文件 [cctv-app-udrm.py](cctv-app-udrm.py) 与带版本号文件完全相同。
 
 终端运行：
 
 ```bash
-python3 cctv-app-udrm-v0.3.4.py
+python3 cctv-app-udrm-v0.3.5.py
 # 指定端口、缓存或关闭预热
-python3 cctv-app-udrm-v0.3.4.py 8769 --cache-dir ./cbox-cache --no-warmup
+python3 cctv-app-udrm-v0.3.5.py 8769 --cache-dir ./cbox-cache --no-warmup
 # 能力检查，不访问节目源
-python3 cctv-app-udrm-v0.3.4.py --doctor
+python3 cctv-app-udrm-v0.3.5.py --doctor
 ```
 
 电脑/服务器供手机访问时，显式加 `--host 0.0.0.0`，订阅地址改为该电脑的局域网IP。Linux开发测试使用JavaScriptCoreGTK共享库，通过 `--jscore-library /path/to/libjavascriptcoregtk-4.1.so.0` 指定；它不是iPhone需下载的依赖。
@@ -47,7 +47,15 @@ python3 cctv-app-udrm-v0.3.4.py --doctor
 
 ## 运行层进一步减重研究
 
-已对UTM SE/TCTI、iSH线程化解释器、WASM AOT及官方iOS SDK路线开展公开资料核对和当前运行剖析。600帧样本中，媒体阶段JSC求值约1.407秒，输入/输出传输约0.020秒，支持优先研究执行与导入分派层；不能把JSC求值全部等同于ARM模拟时间。原生线程化解释器是可研究方向，但需要宿主编译签名集成，未在APTV实现。详见 [架构研究与实测](RUNTIME-ARCHITECTURE-RESEARCH.md) 和 [宿主集成要求](HOST-INTEGRATION-REQUIREMENTS.md)。生产脚本仍为0.3.4，未为未实现能力增加版本号。
+已对UTM SE/TCTI、iSH线程化解释器、WASM AOT及官方iOS SDK路线开展公开资料核对和当前运行剖析。600帧样本中，媒体阶段JSC求值约1.407秒，输入/输出传输约0.020秒，支持优先研究执行与导入分派层；不能把JSC求值全部等同于ARM模拟时间。原生线程化解释器是可研究方向，但需要宿主编译签名集成，未在APTV实现。详见 [架构研究与实测](RUNTIME-ARCHITECTURE-RESEARCH.md) 和 [宿主集成要求](HOST-INTEGRATION-REQUIREMENTS.md)。该研究未实现的原生能力不计入生产脚本功能。
+
+## 0.3.5 附件全模块对照与故障恢复
+
+全面盘点附件网络、会话、刷新、缓存、HLS、目录、回看、节目单和退出策略，本轮落实限流退避和HLS错误恢复。上游媒体返回429/503时读取Retry-After（秒数/HTTP日期，最多120秒），与原有指数退避取大值；及时关闭失败响应。冷却期间不再反复提交刷新Future，停止服务后不提交新刷新任务。状态新增 `scheduling.cooldown_submissions_skipped`。
+
+畸形数字字段、负媒体/不连续序号、异常target以及master循环统一报为HLS失败，进入原有退避和同频道自动换线流程，避免数字解析异常返回500。没有增加fetch内部限流重试；没有修改SDK许可、模拟器或高清设置。
+
+65项检查通过；最终单文件三组媒体样本600帧摘要一致、解码错误0，线路故障注入自动恢复通过。详见 [全面对照与取舍](ATTACHMENT-REVIEW-v0.3.5.md) 和 [验证记录](FULL-REVIEW-VALIDATION-v0.3.5.json)。未移植附件200MB缓存、逐台后台线程、默认约10秒切台防抖或其他来源冒充App线路；本轮也没有新的iPhone总内存/首帧测试。
 
 ## 0.3.4 参考附件优化资源调度
 
