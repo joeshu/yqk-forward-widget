@@ -430,10 +430,22 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         objc_setAssociatedObject(card, @selector(onChannelCardTap:), ch, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         UIImageView *cover=[[UIImageView alloc]initWithFrame:CGRectMake(5,5,width-10,88)]; cover.backgroundColor=[UIColor colorWithWhite:0.2 alpha:1]; cover.contentMode=UIViewContentModeScaleAspectFit; cover.layer.cornerRadius=8; cover.clipsToBounds=YES; [card addSubview:cover];
         if([ch[@"logo"] length]) [self loadLogo:ch[@"logo"] into:cover];
-        else { UILabel *mark=[[UILabel alloc]initWithFrame:cover.bounds]; mark.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight; mark.text=[ch[@"name"] isKindOfClass:NSString.class]?ch[@"name"]:ch[@"id"]; mark.textAlignment=NSTextAlignmentCenter; mark.textColor=UIColor.whiteColor; mark.font=[UIFont boldSystemFontOfSize:16]; mark.numberOfLines=2; [cover addSubview:mark]; }
-        UILabel *name=[[UILabel alloc]initWithFrame:CGRectMake(7,98,width-14,21)]; name.text=[NSString stringWithFormat:@"%@%@",[self.channelID isEqual:ch[@"id"]]?@"● ":@"",[self.favorites containsObject:ch[@"id"]?:@""]?[@"★ " stringByAppendingString:ch[@"name"]?:ch[@"id"]]:ch[@"name"]?:ch[@"id"]]; name.textColor=[self.channelID isEqual:ch[@"id"]]?UIColor.systemGreenColor:UIColor.whiteColor; name.font=[UIFont boldSystemFontOfSize:13]; name.lineBreakMode=NSLineBreakByTruncatingTail; [card addSubview:name];
+        else { UILabel *mark=[[UILabel alloc]initWithFrame:cover.bounds]; mark.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight; mark.text=[ch[@"name"] isKindOfClass:NSString.class] ? ch[@"name"] : ch[@"id"]; mark.textAlignment=NSTextAlignmentCenter; mark.textColor=UIColor.whiteColor; mark.font=[UIFont boldSystemFontOfSize:16]; mark.numberOfLines=2; [cover addSubview:mark]; }
+        NSString *channelTitle = [ch[@"name"] isKindOfClass:NSString.class] ? ch[@"name"] : ch[@"id"];
+        if ([self.favorites containsObject:ch[@"id"] ?: @""]) channelTitle = [@"★ " stringByAppendingString:channelTitle ?: @""];
+        BOOL isPlaying = [self.channelID isEqualToString:ch[@"id"] ?: @""];
+        if (isPlaying) channelTitle = [@"● " stringByAppendingString:channelTitle ?: @""];
+        UILabel *name = [[UILabel alloc] initWithFrame:CGRectMake(7, 98, width - 14, 21)];
+        name.text = channelTitle;
+        name.textColor = isPlaying ? UIColor.systemGreenColor : UIColor.whiteColor;
+        name.font = [UIFont boldSystemFontOfSize:13];
+        name.lineBreakMode = NSLineBreakByTruncatingTail;
+        [card addSubview:name];
         NSDictionary *epg=self.epgCache[ch[@"id"]?:@""];
-        NSString *detail=epg[@"now"]?[NSString stringWithFormat:@"正在播：%@",epg[@"now"]]:([ch[@"remoteURL"] length]?@"M3U 订阅":(ch[@"group"]?:@"直播"));
+        NSString *detail = nil;
+        if ([epg[@"now"] isKindOfClass:NSString.class]) detail = [NSString stringWithFormat:@"正在播：%@", epg[@"now"]];
+        else if ([ch[@"remoteURL"] length]) detail = @"M3U 订阅";
+        else detail = ch[@"group"] ?: @"直播";
         UILabel *sub=[[UILabel alloc]initWithFrame:CGRectMake(7,121,width-14,18)]; sub.text=detail; sub.textColor=[UIColor colorWithWhite:0.68 alpha:1]; sub.font=[UIFont systemFontOfSize:10]; sub.lineBreakMode=NSLineBreakByTruncatingTail; [card addSubview:sub];
         [card addTarget:self action:@selector(onChannelCardTap:) forControlEvents:UIControlEventTouchUpInside];
         UILongPressGestureRecognizer *lp=[[UILongPressGestureRecognizer alloc]initWithTarget:self action:@selector(onLongPress:)]; [card addGestureRecognizer:lp];
