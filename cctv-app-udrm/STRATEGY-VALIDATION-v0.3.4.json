@@ -1,0 +1,83 @@
+{
+  "version": "0.3.4",
+  "script_sha256": "0bee187e719bbe73b300d197ae0ca51d7d936214c0b5a4d1376b32638a649bca",
+  "tests_passed": 61,
+  "tests_failed": 0,
+  "resource_tests": [
+    "HTTP saturation returns503 without allocating another client thread; capacity recovers",
+    "queued obsolete refresh cancelled; duplicate current refresh coalesced"
+  ],
+  "media_regression": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 5.416
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.6
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.454
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "forced_native_usleep_probes": [
+      {
+        "microseconds": 20000,
+        "result": 0,
+        "elapsed_seconds": 0.0246
+      }
+    ],
+    "wall_seconds": 7.525,
+    "script_sha256": "0bee187e719bbe73b300d197ae0ca51d7d936214c0b5a4d1376b32638a649bca"
+  },
+  "auto_failover": {
+    "version": "0.3.4",
+    "script_sha256": "0bee187e719bbe73b300d197ae0ca51d7d936214c0b5a4d1376b32638a649bca",
+    "environment": "Linux JSC; not iPhone",
+    "injection": "CCTV7 default CDN replaced with unreachable loopback port after SDK ready",
+    "selected_route": "cctv7_bd",
+    "switches": 1,
+    "http_retry_statuses": [
+      503
+    ],
+    "seconds_to_backup_playlist": 14.725,
+    "segments": 1,
+    "decode_exit": 0,
+    "decode_error_lines": 0,
+    "quality_cap": 2500000
+  },
+  "iphone_tested": false,
+  "limitations": [
+    "No new whole-process RSS or phone latency measurement",
+    "Does not remove ARM64 emulation",
+    "Already-running network I/O still subject to timeout",
+    "No HTTP connection pooling added"
+  ]
+}

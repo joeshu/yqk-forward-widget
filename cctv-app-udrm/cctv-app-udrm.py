@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# CCTV App UDRM 0.3.3: Python + system JavaScriptCore, without a JVM or subprocess.
+# CCTV App UDRM 0.3.4: Python + system JavaScriptCore, without a JVM or subprocess.
 # Fixed official SDK / Unicorn WASM are downloaded and hash checked at first use.
 # This entry runs inside APTV; no runtime HAR import or captured credentials.
 import sys
@@ -2045,7 +2045,7 @@ PYTHON_SOURCES = {
         'from concurrent.futures import ThreadPoolExecutor\n'
         'from dataclasses import dataclass, field\n'
         'import hashlib\n'
-        'from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n'
+        'from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as _ThreadingHTTPServer\n'
         'import json\n'
         'import logging\n'
         'import math\n'
@@ -2066,7 +2066,7 @@ PYTHON_SOURCES = {
         'from ts_mapper import plan_ts, transform_plan, following_proves_complete\n'
         'from ts_validator import TSFormatError\n'
         '\n'
-        "VERSION = '0.3.3'\n"
+        "VERSION = '0.3.4'\n"
         "LOG = logging.getLogger('cbox-app-udrm')\n"
         'from route_catalog import CHANNEL_ROUTES,PROVIDER_LABELS,VERIFIED_AT_UTC\n'
         'from epg_store import EpgStore\n'
@@ -2320,6 +2320,40 @@ PYTHON_SOURCES = {
         '    return channels\n'
         '\n'
         '\n'
+        'class ThreadingHTTPServer(_ThreadingHTTPServer):\n'
+        '    """Bound accepted client threads instead of queuing unbounded local requests."""\n'
+        '    daemon_threads=True\n'
+        '    request_queue_size=16\n'
+        '    def __init__(self,*args,max_clients=12,**kwargs):\n'
+        '        self.client_limit=max_clients;self.client_slots=threading.BoundedSemaphore(max_clients)\n'
+        '        self.client_stats_lock=threading.Lock();self.client_active=0;self.client_rejected=0\n'
+        '        super().__init__(*args,**kwargs)\n'
+        '    def process_request(self,request,address):\n'
+        '        request.settimeout(15)\n'
+        '        if not self.client_slots.acquire(blocking=False):\n'
+        '            with self.client_stats_lock:self.client_rejected+=1\n'
+        '            try:\n'
+        '                request.settimeout(.25)\n'
+        "                request.sendall(b'HTTP/1.1 503 Service Unavailable\\r\\nContent-Length: 0\\r\\nRetry-After: 1\\r\\nConnection: close\\r\\n\\r\\n')\n"
+        '            except OSError:pass\n'
+        '            finally:self.shutdown_request(request)\n'
+        '            return\n'
+        '        with self.client_stats_lock:self.client_active+=1\n'
+        '        try:super().process_request(request,address)\n'
+        '        except BaseException:\n'
+        '            self._release_client();raise\n'
+        '    def _release_client(self):\n'
+        '        with self.client_stats_lock:self.client_active-=1\n'
+        '        self.client_slots.release()\n'
+        '    def process_request_thread(self,request,address):\n'
+        '        try:super().process_request_thread(request,address)\n'
+        '        finally:self._release_client()\n'
+        '    def resource_status(self):\n'
+        '        with self.client_stats_lock:\n'
+        "            return {'client_limit':self.client_limit,'active_clients':self.client_active,\n"
+        "                'rejected_total':self.client_rejected,'socket_timeout_seconds':15}\n"
+        '\n'
+        '\n'
         'class LiveService:\n'
         '    def __init__(self,prepared,channels,max_bitrate=2500000):\n'
         "        self.epg=EpgStore(CHANNEL_ROUTES,prepared.get('cache_dir'))\n"
@@ -2328,6 +2362,7 @@ PYTHON_SOURCES = {
         "        self.refresh_pool=ThreadPoolExecutor(max_workers=min(4,len(channels)),thread_name_prefix='refresh')\n"
         '        self.auto_states={};self.auto_lock=threading.RLock()\n'
         '        self.refresh_jobs={};self.jobs_lock=threading.Lock();self.active_channel=None\n'
+        '        self.refresh_cancelled=0;self.http_resources=None\n'
         '        self.stopping=threading.Event();self.started=time.monotonic()\n'
         "        self.worker=threading.Thread(target=self._background,name='refresh',daemon=True)\n"
         '        self.worker.start()\n'
@@ -2523,8 +2558,14 @@ PYTHON_SOURCES = {
         '            try:self.refresh(ch,background=True)\n'
         '            except LiveError:pass\n'
         '        with self.jobs_lock:\n'
+        '            # Coalesce one job per route, discard obsolete queued selections.\n'
+        '            for ident,job in list(self.refresh_jobs.items()):\n'
+        '                if job.done():self.refresh_jobs.pop(ident,None)\n'
+        '                elif self.active_channel and ident!=self.active_channel and job.cancel():\n'
+        '                    self.refresh_jobs.pop(ident,None);self.refresh_cancelled+=1\n'
+        '            if self.active_channel and ch.ident!=self.active_channel:return\n'
         '            job=self.refresh_jobs.get(ch.ident)\n'
-        '            if job is None or job.done():self.refresh_jobs[ch.ident]=self.refresh_pool.submit(refresh)\n'
+        '            if job is None:self.refresh_jobs[ch.ident]=self.refresh_pool.submit(refresh)\n'
         '    def _trim_memory(self,keep=None):\n'
         '        with self.jobs_lock:self._trim_memory_locked(keep)\n'
         '    def _trim_memory_locked(self,keep=None):\n'
@@ -2586,6 +2627,8 @@ PYTHON_SOURCES = {
         "            'preparation_progress':self.sdk.progress,'preparation_error':self.sdk.error,\n"
         "            'runtime_features':dict(getattr(self.sdk.client,'runtime_features',{})),\n"
         "            'memory_cache':self._cache_stats(),'epg':self.epg.status(),\n"
+        "            'scheduling':{'obsolete_queued_cancelled':self.refresh_cancelled},\n"
+        "            'http_resources':self.http_resources() if self.http_resources else None,\n"
         "            'auto_routes':{k:{'route':v['route'],'switches':v['switches']} for k,v in list(self.auto_states.items())},\n"
         "            'media_timings':dict(self.sdk.timings),'max_bitrate':self.max_bitrate,\n"
         "            'sdk_sessions':self.sdk.sessions,'processed_video_pes':self.sdk.processed_frames,\n"
@@ -2727,6 +2770,7 @@ PYTHON_SOURCES = {
         "        channels[ident]=Channel(ident,DEFAULTS.get(ident,(ident,''))[0],url)\n"
         '    service=LiveService(config,channels,args.max_bitrate)\n'
         '    server=ThreadingHTTPServer((args.host,args.port),make_handler(service));server.daemon_threads=True\n'
+        "    service.http_resources=getattr(server,'resource_status',None)\n"
         '    def stop(signum,frame):\n'
         '        threading.Thread(target=server.shutdown,daemon=True).start()\n'
         '    if threading.current_thread() is threading.main_thread():\n'

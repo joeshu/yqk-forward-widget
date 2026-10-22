@@ -1,4 +1,4 @@
-# 央视影音 App UDRM 单文件 v0.3.3（无 JDK）
+# 央视影音 App UDRM 单文件 v0.3.4（无 JDK）
 
 v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + WebAssembly 解释器**。运行只使用 Python 标准库和系统 JavaScriptCore，不再启动 Java、Node、编译器、FFmpeg 或外部 OpenSSL 命令。许可和视频处理继续由原样官方 SDK 完成。
 
@@ -7,10 +7,10 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 ## APTV 添加与订阅
 
 1. 停止旧脚本服务，添加下面带版本号的 Python 文件。
-2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.3.3`。
+2. 在 APTV 脚本服务中启动，日志应显示 `原 App UDRM 无JDK版 0.3.4`。
 3. 首次先检查宿主的 JavaScriptCore/WebAssembly 能力，再下载约3.55MiB（SDK压缩段约2.10MiB、解释器约1.45MiB）。看到“SDK 已取得许可并就绪”后刷新订阅；17ms之类的列表测速不表示SDK已经就绪。若服务器不支持分段下载，日志会说明回退约47MiB的完整安装包。
 
-[下载 cctv-app-udrm-v0.3.3.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.3.3.py)
+[下载 cctv-app-udrm-v0.3.4.py](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/cctv-app-udrm-v0.3.4.py)
 
 手机同机订阅：
 
@@ -18,18 +18,18 @@ v0.2.0 把原 App SDK 的 ARM64 运行层移植到 **系统 JavaScriptCore + Web
 http://127.0.0.1:8769/all.m3u
 ```
 
-状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.3.3`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
+状态：`http://127.0.0.1:8769/status`。正常应显示 `version: 0.3.4`、`jdk_required: false`、`sdk_phase: ready`。HTTP监听先启动，下载和授权在后台进行，准备期间可查看 `preparation_progress` 和 `preparation_error`。如果宿主不支持所需能力，会在下载前报错；这个错误需更换支持该能力的运行环境，不能靠继续等待解决。`start(ctx)` 和托管线程入口均保留，跳过托管环境不允许的进程信号注册。
 
 脚本运行需要 Python 3.10+、`ctypes`、`ssl`，以及支持 WebAssembly、BigInt 的系统 JavaScriptCore。默认从 iOS 系统路径加载框架。没有手工安装 pip 包、JS文件、JAR或完整安卓虚拟机的步骤。当前默认文件 [cctv-app-udrm.py](cctv-app-udrm.py) 与带版本号文件完全相同。
 
 终端运行：
 
 ```bash
-python3 cctv-app-udrm-v0.3.3.py
+python3 cctv-app-udrm-v0.3.4.py
 # 指定端口、缓存或关闭预热
-python3 cctv-app-udrm-v0.3.3.py 8769 --cache-dir ./cbox-cache --no-warmup
+python3 cctv-app-udrm-v0.3.4.py 8769 --cache-dir ./cbox-cache --no-warmup
 # 能力检查，不访问节目源
-python3 cctv-app-udrm-v0.3.3.py --doctor
+python3 cctv-app-udrm-v0.3.4.py --doctor
 ```
 
 电脑/服务器供手机访问时，显式加 `--host 0.0.0.0`，订阅地址改为该电脑的局域网IP。Linux开发测试使用JavaScriptCoreGTK共享库，通过 `--jscore-library /path/to/libjavascriptcoregtk-4.1.so.0` 指定；它不是iPhone需下载的依赖。
@@ -44,6 +44,16 @@ python3 cctv-app-udrm-v0.3.3.py --doctor
 - 已人工查看处理后的央视画面，台标、字幕和画面正常。原SDK样本对照仍见 [SAMPLE-VALIDATION.json](SAMPLE-VALIDATION.json)。
 
 节目单现已合并，详见下方0.3.1说明。原61台服务独立保留；用户手机的内存、首帧及节目单界面仍需实机核对。
+
+## 0.3.4 参考附件优化资源调度
+
+借鉴用户附件的刷新合并、有界工作、冷却与缓存策略，补充本地HTTP最多12个并发客户线程、连接读写15秒超时，超限立即返回503及Retry-After:1。快速切台时取消尚未开始的旧频道刷新任务，清理完成的Future，继续复用当前线路唯一刷新任务。正在执行的任务仍按已有取消检查及网络超时退出，不强杀线程。
+
+状态 `/status` 新增 `http_resources`（并发上限、活跃数、累计拒绝数）和 `scheduling.obsolete_queued_cancelled`。这些限制针对HTTP客户及刷新任务，不是进程总线程数或总内存上限。SDK、EPG及下载池仍独立，高清设置、线路自切和单会话保留。
+
+未引入Node依赖、第二套引擎或30秒旧直播清单缓存；当前约12秒直播窗口继续使用原新鲜度检查。本轮不包含HTTP连接池，不把JS附件keepAlive机制误报为已经实现。具体取舍见 [附件策略对照](STRATEGY-REVIEW-v0.3.4.md)。
+
+61项检查通过，包括真实socket超载拒绝及容量恢复、切台任务取消与请求合并；最终单文件原样本600帧摘要一致、解码错误0，CCTV-7故障注入自动切至百度并通过解码。见 [0.3.4验证](STRATEGY-VALIDATION-v0.3.4.json)。这是调度资源限制，没有新的手机总内存/首帧实测，也没有消除ARM64模拟开销。
 
 ## 0.3.3 同频道线路自愈与自动切换
 
