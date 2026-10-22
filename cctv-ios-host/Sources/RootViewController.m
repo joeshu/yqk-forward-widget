@@ -1,5 +1,7 @@
 #import "RootViewController.h"
 #import "CNPlayerSDK.h"
+#import "CicadaSDK.h"
+#import "EPGViewController.h"
 #import <objc/message.h>
 #import <string.h>
 
@@ -31,6 +33,13 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, assign) BOOL fullscreen;
 @property (nonatomic, strong) NSTimer *watchdog;
 @property (nonatomic, assign) NSInteger watchdogTicks;
+@property (nonatomic, strong) id sdkPlayer;
+@property (nonatomic, strong) CicadaPlayer *cicadaPlayer;
+@property (nonatomic, strong) UILabel *nowLabel;
+@property (nonatomic, strong) UIButton *epgBtn;
+@property (nonatomic, strong) NSURLSessionDataTask *epgTask;
+@property (nonatomic, strong) NSTimer *epgTimer;
+@property (nonatomic, copy) NSString *epgChannel;
 @end
 
 @implementation RootViewController
@@ -141,6 +150,12 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.overlayTitle.text = @"未选择频道";
     [self.playerBox addSubview:self.overlayTitle];
 
+    self.nowLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 28, w - 24, 16)];
+    self.nowLabel.textColor = [UIColor colorWithWhite:1 alpha:0.7];
+    self.nowLabel.font = [UIFont systemFontOfSize:11];
+    self.nowLabel.text = @"";
+    [self.playerBox addSubview:self.nowLabel];
+
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     self.spinner.center = CGPointMake(w / 2, w * 9 / 32);
     self.spinner.hidesWhenStopped = YES;
@@ -148,9 +163,10 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
     CGFloat cy = w * 9.0 / 16.0 - 40;
     self.playPauseBtn = [self controlButton:@"暂停" x:8 y:cy action:@selector(togglePlayPause)];
-    self.muteBtn = [self controlButton:@"静音" x:88 y:cy action:@selector(toggleMute)];
-    self.fullBtn = [self controlButton:@"全屏" x:168 y:cy action:@selector(toggleFullscreen)];
-    self.logBtn = [self controlButton:@"日志" x:w - 76 y:cy action:@selector(toggleLog)];
+    self.muteBtn = [self controlButton:@"静音" x:80 y:cy action:@selector(toggleMute)];
+    self.fullBtn = [self controlButton:@"全屏" x:152 y:cy action:@selector(toggleFullscreen)];
+    self.epgBtn = [self controlButton:@"节目单" x:w - 146 y:cy action:@selector(openEPG)];
+    self.logBtn = [self controlButton:@"日志" x:w - 74 y:cy action:@selector(toggleLog)];
 }
 
 - (UIButton *)controlButton:(NSString *)title x:(CGFloat)x y:(CGFloat)y action:(SEL)action {
@@ -232,7 +248,29 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *ch = self.shownChannels[indexPath.row];
-    [self playChannel:ch[@"id"] name:ch[@"name"]];
+    NSArray *routes = [ch[@"routes"] isKindOfClass:NSArray.class] ? ch[@"routes"] : @[];
+
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:ch[@"name"]
+                                                                  message:[NSString stringWithFormat:@"%@ · %lu 条线路",
+                                                                           ch[@"group"], (unsigned long)routes.count]
+                                                           preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"自动选线（SDK 调度）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self playChannel:ch[@"id"] name:ch[@"name"] route:nil];
+    }]];
+    for (NSDictionary *r in routes) {
+        NSString *res = [r[@"w"] intValue] > 0 ? [NSString stringWithFormat:@"%dx%d", [r[@"w"] intValue], [r[@"h"] intValue]] : @"";
+        NSString *title = [NSString stringWithFormat:@"节点 %@ %@", [r[@"provider"] uppercaseString], res];
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self playChannel:ch[@"id"] name:ch[@"name"] route:r];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"查看节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self openEPGforChannel:ch[@"id"] name:ch[@"name"]];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView = tableView;
+    sheet.popoverPresentationController.sourceRect = [tableView rectForRowAtIndexPath:indexPath];
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 #pragma mark - SDK
@@ -258,53 +296,104 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 
 #pragma mark - 播放控制
 
-- (void)playChannel:(NSString *)cid name:(NSString *)name {
+- (void)playChannel:(NSString *)cid name:(NSString *)name route:(NSDictionary *)route {
     if (!cid.length) return;
-    Class CNPlayerCls = NSClassFromString(@"CNPlayer");
-    [self log:@"—— 切换 %@ (%@) ——", name, cid];
+    NSString *routeDesc = route ? [NSString stringWithFormat:@"节点 %@", [route[@"provider"] uppercaseString]] : @"自动选线";
+    [self log:@"—— 切换 %@ (%@) · %@ ——", name, cid, routeDesc];
 
     [self stopCurrent];
     self.currentChannelID = cid;
     self.currentChannelName = name ?: cid;
     self.firstRender = NO;
     self.overlayTitle.text = [NSString stringWithFormat:@"%@ · 连接中", self.currentChannelName];
+    self.nowLabel.text = @"";
     [self.spinner startAnimating];
+    self.playPauseBtn.selected = NO;
+    [self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
 
-    id inst = nil;
-    @try { inst = [[CNPlayerCls alloc] init]; } @catch (NSException *e) { [self log:@"init 异常: %@", e.reason]; }
+    if (route[@"url"]) {
+        [self playViaCicada:route[@"url"]];
+    } else {
+        [self playViaSDK:cid];
+    }
+    [self refreshNowNext];
+    [self startEPGTimer];
+}
+
+- (void)playViaSDK:(NSString *)cid {
+    Class CNPlayerCls = NSClassFromString(@"CNPlayer");
+    id inst = self.sdkPlayer;
+    SEL playSel = NSSelectorFromString(@"playLIVEWithChannelID:delegate:configOptions:");
+
+    // 复用已有实例：省掉每次 alloc/init 与 SDK 内部重建
+    if (inst && [inst respondsToSelector:playSel]) {
+        [self log:@"复用播放器实例，跳过初始化"];
+        [self callInstance:inst selector:NSSelectorFromString(@"reset") args:@[]];
+    } else {
+        @try { inst = [[CNPlayerCls alloc] init]; } @catch (NSException *e) { [self log:@"init 异常: %@", e.reason]; }
+        self.sdkPlayer = inst;
+    }
     if (!inst) { self.overlayTitle.text = @"播放器创建失败"; return; }
     self.currentPlayer = inst;
+    self.cicadaPlayer = nil;
 
     @try { [inst setValue:@(YES) forKey:@"autoPlay"]; } @catch (NSException *e) {}
-    @try { [inst setValue:@(YES) forKey:@"muted"]; } @catch (NSException *e) {}
-
-    SEL playSel = NSSelectorFromString(@"playLIVEWithChannelID:delegate:configOptions:");
     if (![inst respondsToSelector:playSel]) {
-        [self log:@"SDK 不支持 playLIVEWithChannelID:"];
         self.overlayTitle.text = @"SDK 接口不匹配";
+        [self log:@"SDK 不支持 playLIVEWithChannelID:"];
         return;
     }
-    NSDictionary *opts = @{};
-    id accepted = [self callInstance:inst selector:playSel args:@[cid, self, opts]];
+    id accepted = [self callInstance:inst selector:playSel args:@[cid, self, @{}]];
     if ([accepted isKindOfClass:NSNumber.class] && ![accepted boolValue]) {
         self.overlayTitle.text = @"起播被拒绝";
         [self log:@"起播返回 0，等待错误回调"];
         return;
     }
-
     [self attachPlayerViewAnimated:NO];
     [self callInstance:inst selector:NSSelectorFromString(@"prepareToPlay") args:@[]];
     [self startWatchdog];
-    self.playPauseBtn.selected = NO;
-    [self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
+}
+
+- (void)playViaCicada:(NSString *)url {
+    Class cicadaCls = NSClassFromString(@"CicadaPlayer");
+    Class cfgCls = NSClassFromString(@"CicadaConfig");
+    Class srcCls = NSClassFromString(@"CicadaUrlSource");
+    if (!cicadaCls || !cfgCls || !srcCls) {
+        self.overlayTitle.text = @"Cicada 内核不可用";
+        return;
+    }
+    id cfg = [[cfgCls alloc] init];
+    [cfg setValue:@(YES) forKey:@"isNeedUDRMDecrypt_pvt"];
+    [cfg setValue:kLicenseUrl forKey:@"udrmLicenseUrl"];
+    [cfg setValue:@(15) forKey:@"networkTimeout"];
+
+    id player = [[cicadaCls alloc] init];
+    self.currentPlayer = player;
+    self.cicadaPlayer = player;
+    self.sdkPlayer = nil;
+
+    [self callInstance:player selector:NSSelectorFromString(@"setConfig:") args:@[cfg]];
+    [self callInstance:player selector:NSSelectorFromString(@"setEnableHardwareDecoder:") args:@[@(YES)]];
+    [self callInstance:player selector:NSSelectorFromString(@"setPlayerView:") args:@[self.playerBox]];
+    id source = [self callClass:srcCls selector:NSSelectorFromString(@"urlWithString:") args:@[url]];
+    if (source) [self callInstance:player selector:NSSelectorFromString(@"setUrlSource:") args:@[source]];
+    [self callInstance:player selector:NSSelectorFromString(@"prepare") args:@[]];
+    [self callInstance:player selector:NSSelectorFromString(@"start") args:@[]];
+    [self log:@"Cicada 直连已发起：%@", url];
+    [self startWatchdog];
 }
 
 - (void)stopCurrent {
     if (!self.currentPlayer) return;
     [self callInstance:self.currentPlayer selector:NSSelectorFromString(@"stop") args:@[]];
+    if (self.cicadaPlayer) {
+        [self callInstance:self.cicadaPlayer selector:NSSelectorFromString(@"destroy") args:@[]];
+        self.cicadaPlayer = nil;
+    }
     @try { [self.currentPlayer setValue:nil forKey:@"delegate"]; } @catch (NSException *e) {}
     self.currentPlayer = nil;
     [self.watchdog invalidate]; self.watchdog = nil;
+    [self.epgTask cancel]; [self.epgTimer invalidate];
     for (UIView *v in self.playerBox.subviews.copy) {
         if (v != self.overlayTitle && v != self.spinner && v != self.playPauseBtn &&
             v != self.muteBtn && v != self.fullBtn && v != self.logBtn) {
@@ -370,11 +459,13 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     CGRect box = self.playerBox.bounds;
     CGFloat cy = box.size.height - 40;
     self.playPauseBtn.frame = CGRectMake(8, cy, 68, 30);
-    self.muteBtn.frame = CGRectMake(84, cy, 78, 30);
-    self.fullBtn.frame = CGRectMake(170, cy, 78, 30);
-    self.logBtn.frame = CGRectMake(box.size.width - 76, cy, 68, 30);
+    self.muteBtn.frame = CGRectMake(80, cy, 70, 30);
+    self.fullBtn.frame = CGRectMake(152, cy, 70, 30);
+    self.epgBtn.frame = CGRectMake(box.size.width - 146, cy, 68, 30);
+    self.logBtn.frame = CGRectMake(box.size.width - 74, cy, 68, 30);
     self.spinner.center = CGPointMake(box.size.width / 2, box.size.height / 2);
     self.overlayTitle.frame = CGRectMake(12, 8, box.size.width - 24, 20);
+    self.nowLabel.frame = CGRectMake(12, 28, box.size.width - 24, 16);
 }
 
 - (void)toggleLog {
@@ -386,12 +477,67 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     }
 }
 
+#pragma mark - 节目单
+
+- (void)openEPG {
+    if (!self.currentChannelID.length) { [self log:@"请先选择频道"]; return; }
+    [self openEPGforChannel:self.currentChannelID name:self.currentChannelName];
+}
+
+- (void)openEPGforChannel:(NSString *)cid name:(NSString *)name {
+    EPGViewController *vc = [[EPGViewController alloc] initWithChannelID:cid name:name];
+    [self.navigationController pushViewController:vc animated:YES];
+}
+
+- (void)startEPGTimer {
+    [self.epgTimer invalidate];
+    self.epgTimer = [NSTimer scheduledTimerWithTimeInterval:60 target:self selector:@selector(refreshNowNext) userInfo:nil repeats:YES];
+}
+
+- (void)refreshNowNext {
+    NSString *cid = self.currentChannelID;
+    if (!cid.length) return;
+    self.epgChannel = cid;
+    NSString *encoded = [cid stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
+    NSString *url = [NSString stringWithFormat:@"https://api.cntv.cn/epg/get3D12HEPG?c=%@&serviceId=cbox", encoded];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
+    req.timeoutInterval = 10;
+
+    __weak typeof(self) weakSelf = self;
+    [self.epgTask cancel];
+    self.epgTask = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+        if (!data.length) return;
+        id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+        if (![json isKindOfClass:NSDictionary.class]) return;
+        NSArray *rows = [(NSDictionary *)json objectForKey:@"EPG"];
+        if (![rows isKindOfClass:NSArray.class]) return;
+        double now = NSDate.date.timeIntervalSince1970;
+        NSString *current = nil, *next = nil;
+        for (NSDictionary *row in rows) {
+            if (![row isKindOfClass:NSDictionary.class]) continue;
+            double s0 = [row[@"startTime"] doubleValue], e0 = [row[@"endTime"] doubleValue];
+            if (s0 > 1e11) s0 /= 1000.0;
+            if (e0 > 1e11) e0 /= 1000.0;
+            if (now >= s0 && now < e0) current = row[@"title"];
+            else if (s0 > now && !next) next = row[@"title"];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (![weakSelf.epgChannel isEqualToString:cid]) return;
+            NSMutableArray *parts = [NSMutableArray array];
+            if (current) [parts addObject:[NSString stringWithFormat:@"正在播出：%@", current]];
+            if (next) [parts addObject:[NSString stringWithFormat:@"接下来：%@", next]];
+            weakSelf.nowLabel.text = [parts componentsJoinedByString:@"    "];
+        });
+    }];
+    [self.epgTask resume];
+}
+
 #pragma mark - 监视
 
 - (void)startWatchdog {
     [self.watchdog invalidate];
     self.watchdogTicks = 0;
-    self.watchdog = [NSTimer scheduledTimerWithTimeInterval:2.0 target:self selector:@selector(tick:) userInfo:nil repeats:YES];
+    self.watchdog = [NSTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(tick:) userInfo:nil repeats:YES];
 }
 
 - (void)tick:(NSTimer *)timer {
@@ -401,16 +547,16 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     double pos = 0;
     @try { pos = [[self.currentPlayer valueForKey:@"currentPosition"] doubleValue]; } @catch (NSException *e) {}
     if (self.firstRender) {
-        if (self.watchdogTicks % 5 == 0) [self log:@"已渲染 pos=%.1f", pos];
-        if (self.watchdogTicks > 15) [timer invalidate];
+        [timer invalidate];          // 首帧后立即停止监视，减少主线程开销
+        [self log:@"已渲染，监视结束 pos=%.1f", pos];
         return;
     }
-    if (self.watchdogTicks > 15) {
+    if (self.watchdogTicks > 30) {
         [timer invalidate];
         [self.spinner stopAnimating];
         if (!self.firstRender) {
             self.overlayTitle.text = [NSString stringWithFormat:@"%@ · 无画面", self.currentChannelName];
-            [self log:@"15 次监视仍未首帧，停止等待"];
+            [self log:@"监视结束仍未首帧"];
         }
     }
 }
