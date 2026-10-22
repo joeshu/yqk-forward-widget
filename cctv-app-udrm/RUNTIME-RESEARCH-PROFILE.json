@@ -1,0 +1,145 @@
+{
+  "scope": "Linux JSC, three licensed media samples; aggregate timings overlap; not iPhone or RSS",
+  "stats": {
+    "startup/evaluate": {
+      "calls": 48,
+      "seconds": 2.168313054004102
+    },
+    "media/put_media_parts": {
+      "calls": 150,
+      "seconds": 0.013090969034237787
+    },
+    "media/evaluate": {
+      "calls": 150,
+      "seconds": 1.4068865579174599
+    },
+    "media/read_media_parts": {
+      "calls": 150,
+      "seconds": 0.0068850321404170245
+    }
+  },
+  "vm_host_call_counts": {
+    "usleep": 1,
+    "dladdr": 1,
+    "__android_log_print": 15,
+    "jvm:6": 2,
+    "pthread_mutex_init": 46,
+    "jni:6": 15,
+    "jni:228": 97,
+    "jni:21": 15,
+    "jni:23": 15,
+    "jni:215": 2,
+    "jni:144": 1,
+    "jni:113": 11,
+    "jni:33": 48,
+    "jni:150": 1,
+    "jni:94": 6,
+    "pthread_mutex_lock": 1775,
+    "vsnprintf": 3,
+    "snprintf": 3,
+    "isatty": 1,
+    "strcpy": 9,
+    "getenv": 6,
+    "fputs": 3,
+    "pthread_mutex_unlock": 1775,
+    "memcpy": 25281,
+    "strcmp": 495,
+    "posix_memalign": 2,
+    "malloc": 5616,
+    "realloc": 43,
+    "free": 2126,
+    "strlen": 699,
+    "strchr": 4,
+    "sprintf": 8,
+    "dlopen": 1,
+    "__errno": 147,
+    "memcmp": 2674,
+    "dlerror": 1,
+    "qsort": 3,
+    "strncasecmp": 5,
+    "strerror": 127,
+    "strncpy": 131,
+    "pthread_mutex_destroy": 1,
+    "pthread_create": 1,
+    "jni:169": 1,
+    "memset": 5021,
+    "strstr": 15,
+    "time": 7,
+    "srand": 1,
+    "rand": 1,
+    "gethostbyname": 1,
+    "inet_ntop": 1,
+    "inet_addr": 1,
+    "getpid": 9,
+    "open": 2,
+    "fstat": 2,
+    "poll": 2,
+    "read": 20,
+    "close": 4,
+    "memchr": 465,
+    "getuid": 2,
+    "gettimeofday": 4,
+    "socket": 1,
+    "setsockopt": 2,
+    "connect": 1,
+    "strncmp": 1098,
+    "isspace": 189,
+    "write": 4,
+    "memmove": 9,
+    "strtol": 1,
+    "pow": 1,
+    "jni:170": 1
+  },
+  "script_sha256": "0bee187e719bbe73b300d197ae0ca51d7d936214c0b5a4d1376b32638a649bca",
+  "vm_counts_scope": "Cumulative SDK startup, official license and three media samples; not media-only counts",
+  "media_validation": {
+    "runtime": "Single Python entry; JavaScriptCore and Unicorn WASM/TCI; subprocess.Popen blocked throughout authorization and media handling",
+    "samples": [
+      {
+        "sample": "cctv7",
+        "output_sha256": "51f4d03f80a20361b5617769ea4b2aef0c5e47c2afdc444f37c59959224ac91b",
+        "output_bytes": 854460,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "300",
+        "seconds_including_first_setup_if_any": 5.57
+      },
+      {
+        "sample": "old95",
+        "output_sha256": "29bb0599b5c0c65eb162d21a30e84c9dd1064efee706466688c06652e83a856b",
+        "output_bytes": 1307916,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "200",
+        "seconds_including_first_setup_if_any": 0.604
+      },
+      {
+        "sample": "app1500",
+        "output_sha256": "1efc81bcf8e1b07f456c907a9cc3cb431641a8cb9a2468455863e95a070a9494",
+        "output_bytes": 1049792,
+        "decode_exit": 0,
+        "decode_error_lines": 0,
+        "video_frames": "100",
+        "seconds_including_first_setup_if_any": 0.494
+      }
+    ],
+    "license_exchanges": [
+      {
+        "request_bytes": 368,
+        "http_status": 200,
+        "response_bytes": 232,
+        "business_status": 0,
+        "protected_license_count": 1
+      }
+    ],
+    "forced_native_usleep_probes": [
+      {
+        "microseconds": 20000,
+        "result": 0,
+        "elapsed_seconds": 0.0242
+      }
+    ],
+    "wall_seconds": 7.634,
+    "script_sha256": "0bee187e719bbe73b300d197ae0ca51d7d936214c0b5a4d1376b32638a649bca"
+  }
+}
