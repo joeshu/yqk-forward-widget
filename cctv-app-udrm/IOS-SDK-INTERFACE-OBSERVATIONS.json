@@ -1,6 +1,5 @@
 {
   "scope": "read-only selected frontend Objective-C method/property metadata; no binary execution, method implementation, license/key or DRM logic analysis",
-  "official_interface_obtained": false,
   "encoded_media_output_api_verified": false,
   "conclusion": "Observed frontend is UIView/delegate/lifecycle oriented. No encoded-media output API has been evidenced in these frontend classes; this does not prove no such API exists elsewhere.",
   "classes": [
@@ -337,6 +336,72 @@
         }
       ],
       "limits": "Runtime metadata may include internal methods; names/type encodings are not official headers or an ABI/support contract."
+    }
+  ],
+  "official_header_files_obtained": false,
+  "bundled_integration_manual_obtained": true,
+  "runtime_metadata_is_not_official_header": true,
+  "manual_review": "IOS-SDK-MANUAL-REVIEW.md",
+  "manual_sha256": "908d2581305dcfe5663cc3754c697345682f15efbaf1a6bda075d3a39407e797",
+  "additional_runtime_only_observations": [
+    {
+      "class_name": "CNPlayer",
+      "observed": [
+        {
+          "kind": "class",
+          "selector": "configSDK_IJK_DRMUrl:",
+          "type_encoding": "@24@0:8@16"
+        },
+        {
+          "kind": "class",
+          "selector": "configSDK_CICADA_UDRMUrl:",
+          "type_encoding": "@24@0:8@16"
+        },
+        {
+          "kind": "class",
+          "selector": "configSDK_LiveVDNUrl_V2th:",
+          "type_encoding": "@24@0:8@16"
+        },
+        {
+          "kind": "class",
+          "selector": "configSDK_HTTP_Origin:",
+          "type_encoding": "@24@0:8@16"
+        },
+        {
+          "kind": "class",
+          "selector": "configSDK_LiveConfig_V2th:",
+          "type_encoding": "@24@0:8@16"
+        }
+      ],
+      "not_observed_in_selected_class": [],
+      "source": "static runtime metadata only; not defined in supplied manual; no calls made"
+    },
+    {
+      "class_name": "CNCicadaDRMRightChecker",
+      "observed": [
+        {
+          "kind": "class",
+          "selector": "processUDRMLicesne_sourceUrl:completionBlock:",
+          "type_encoding": "v32@0:8@16@?24"
+        },
+        {
+          "kind": "class",
+          "selector": "startSDK",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "class",
+          "selector": "registerProtocol",
+          "type_encoding": "v16@0:8"
+        },
+        {
+          "kind": "class",
+          "selector": "checkValidate_AppKey:appSecret:completionBlock:",
+          "type_encoding": "v40@0:8@16@24@?32"
+        }
+      ],
+      "not_observed_in_selected_class": [],
+      "source": "static runtime metadata only; not defined in supplied manual; no calls made"
     }
   ]
 }

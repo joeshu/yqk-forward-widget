@@ -2,7 +2,7 @@
 
 本次检查未完成App UDRM原生替换。生产播放脚本仍为v0.3.7，不将检测工具当成新的播放器，也不把网页来源当作App来源。
 
-**IPA静态复核新增进展**：用户样本中已定位到独立 iOS ARM64 `CNPlayerSDK.framework`，其依赖 CicadaPlayerSDK/xnet，前端包含 UIView 播放视图与直播生命周期接口；已找到 Alibaba Cicada 的正式公开 iOS 头文件。央视 CNPlayerSDK 封装层的正式头文件和服务集成说明仍缺失。详见 [样本证据与接入要求](IOS-SDK-IPA-REVIEW.md)。旧 v0.1.0 手机探针未匹配 CNPlayer/Cicada 名称，故不能完整排除这些组件；新版 [v0.1.1](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/diagnostics/cctv-ios-native-probe-v0.1.1.py)补充名称及已注册类只读查询。
+**IPA与手册复核新增进展**：用户样本中已定位独立 iOS ARM64 CNPlayerSDK及其Cicada/xnet依赖，且核验用户附件与随包BV3.23.17集成手册逐字节一致。基础工程、VOD、视图、生命周期、回调与错误说明已取得；上轮漏查中文Markdown手册，“没有正式手册”的说法现予更正。完整头文件、LIVE/UDRM配置/授权合同与APTV接入仍未完成。见 [手册复核](IOS-SDK-MANUAL-REVIEW.md) 和 [IPA证据](IOS-SDK-IPA-REVIEW.md)。旧v0.1.0未匹配CNPlayer/Cicada；[v0.1.1](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/diagnostics/cctv-ios-native-probe-v0.1.1.py)补充名称及注册类只读查询。
 
 ## 最新实测
 
@@ -16,7 +16,7 @@
 
 ## 原生SDK调查结果
 
-APTV官方文档索引与公开仓库未提供原生插件或SDK桥接ABI；公告能确认Python脚本服务，不能据此推断第三方iOS SDK可注入。早期按kooplayer/libkooplayer搜索未得到iOS SDK交付与头文件。用户样本现已补充CNPlayerSDK二进制证据及Cicada公开接口，仍未取得CNPlayerSDK的正式配置/回调/服务兼容手册。
+APTV官方文档索引与公开仓库未提供原生插件或SDK桥接ABI；公告能确认Python脚本服务，不能据此推断第三方iOS SDK可注入。早期按kooplayer/libkooplayer搜索未得到iOS SDK交付与头文件。现已补充CNPlayerSDK二进制、随包基础手册及Cicada公开接口；未补齐的是版本匹配的头文件/协议/枚举、LIVE/UDRM配置和正式服务授权样例。
 
 找到广科院/TrustDTA的SDK正式合作申请渠道及UDRM服务端评估目录，可作为后续供应商线索；这些页面未确认iOS支持、libkooplayer归属或当前央视服务兼容性，不能把同名UDRM产品直接装进本项目。
 

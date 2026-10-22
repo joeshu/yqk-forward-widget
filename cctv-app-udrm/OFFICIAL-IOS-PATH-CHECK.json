@@ -53,7 +53,10 @@
     "ios_arm64_cnplayer_candidate_found": true,
     "official_cnplayer_headers_obtained": false,
     "public_cicada_headers_found": true,
-    "aptv_native_playback_verified": false
+    "aptv_native_playback_verified": false,
+    "bundled_integration_manual_obtained": true,
+    "manual_sha256": "908d2581305dcfe5663cc3754c697345682f15efbaf1a6bda075d3a39407e797",
+    "manual_review": "IOS-SDK-MANUAL-REVIEW.md"
   },
   "latest_probe": {
     "version": "0.1.1",
@@ -62,5 +65,6 @@
     "new_version_specific_checks": 5,
     "iphone_run": false,
     "adds": "CNPlayer/Cicada image names and read-only registered Objective-C class lookup"
-  }
+  },
+  "official_ios_sdk_obtained_scope": "complete supported provider distribution and headers/authorization; candidate binaries and bundled basic manual are separately recorded"
 }

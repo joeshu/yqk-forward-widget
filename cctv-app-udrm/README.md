@@ -47,7 +47,7 @@ python3 cctv-app-udrm-v0.3.7.py --doctor
 
 ## 官方iOS路径与宿主检测
 
-用户提供的 IPA 样本已定位到 **CNPlayerSDK.framework（iOS ARM64）**，依赖 CicadaPlayerSDK/xnet，暴露原生 UIView 播放前端。Alibaba Cicada 有正式公开头文件；央视 CNPlayerSDK 封装的正式配置/回调/授权合同和 APTV 原生接入仍未取得。详见 [IPA静态证据与正式接入要求](IOS-SDK-IPA-REVIEW.md)。这次未改生产引擎或宣称原生播放成功。
+用户提供的 IPA 样本已定位到 **CNPlayerSDK.framework（iOS ARM64）**，依赖 CicadaPlayerSDK/xnet，暴露原生 UIView 播放前端。用户附件与随包的**BV3.23.17集成手册已核验逐字节一致**，基础工程接入、VOD、视图、生命周期与回调文档已取得；完整SDK头文件、LIVE/UDRM配置与授权样例、APTV原生接入仍待补齐。上一轮漏查中文手册，相关结论已更正。详见 [手册复核与实施策略](IOS-SDK-MANUAL-REVIEW.md) 和 [IPA证据](IOS-SDK-IPA-REVIEW.md)。当前没有原生播放或提速验收结果。
 
 推荐使用独立 [只读探针v0.1.1](https://raw.githubusercontent.com/joeshu/yqk-forward-widget/main/cctv-app-udrm/diagnostics/cctv-ios-native-probe-v0.1.1.py)：增加CNPlayer/Cicada名字及已注册Objective-C类查询。它不加载样本库、不调用播放器/许可方法；`http://127.0.0.1:18771/status`或启动日志输出结果。停止旧检测服务再加载此版本；新版尚未在用户iPhone执行。旧v0.1.0未覆盖这些名字，其ctx缺失也不能排除其他宿主接口。
 

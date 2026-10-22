@@ -34,7 +34,7 @@ APTV 官方通知对 9.9.9（540）的公开说明是新增 Python/PHP 脚本服
 
 当前生产单文件保持 v0.3.7，不做可能增加直播延迟的缓冲默认值修改。APTV 版本/构建已确认是 9.9.9（548）；继续原生集成需要取得可核验的 iOS SDK、头文件、授权/兼容说明及宿主插件接口。
 
-后续已从用户 IPA 样本定位 CNPlayerSDK/CicadaPlayerSDK 的 iOS ARM64 动态组件和原生 UIView 前端接口，并找到 Cicada 的公开头文件；央视封装层的正式接口与 APTV 集成仍未完成。见 [IPA 样本与接入复核](IOS-SDK-IPA-REVIEW.md)。
+后续已定位CNPlayerSDK/CicadaPlayerSDK的iOS ARM64动态组件、UIView前端及Cicada公开头文件，并核验随包CNPlayer基础集成手册与用户附件逐字节一致。当前缺口为完整头文件、LIVE/UDRM配置授权样例和APTV原生宿主接入，详见 [手册复核](IOS-SDK-MANUAL-REVIEW.md)。手册另明确D-80001001为连接失败，旧通用“许可拒绝”标签不能据以推断服务授权拒绝。
 
 已有独立的官方网页来源服务可以作为另一条来源分别验证；它与央视影音 App UDRM 不是同一协议/来源，本报告没有把它切换成当前 App 订阅，也没有将网页路径说成已修复本问题。
 

@@ -54,7 +54,8 @@
         "CNPlayerPlayOptions",
         "CNLiveCicadaPlayer",
         "CNLIVEUDrmPlayer"
-      ]
+      ],
+      "framework_bytes": 16209375
     },
     {
       "name": "CicadaPlayerSDK",
@@ -81,7 +82,8 @@
       "selected_exported_classes": [
         "CicadaPlayer",
         "CicadaUrlSource"
-      ]
+      ],
+      "framework_bytes": 6921337
     },
     {
       "name": "alivcffmpeg",
@@ -103,7 +105,8 @@
         "sdk": "14.0.0"
       },
       "framework_dependencies": [],
-      "selected_exported_classes": []
+      "selected_exported_classes": [],
+      "framework_bytes": 12193654
     },
     {
       "name": "xnet",
@@ -125,7 +128,8 @@
         "sdk": "14.1.0"
       },
       "framework_dependencies": [],
-      "selected_exported_classes": []
+      "selected_exported_classes": [],
+      "framework_bytes": 3007662
     },
     {
       "name": "Tquic",
@@ -147,7 +151,8 @@
         "sdk": "15.0.0"
       },
       "framework_dependencies": [],
-      "selected_exported_classes": []
+      "selected_exported_classes": [],
+      "framework_bytes": 2731712
     }
   ],
   "observed_native_player_view": true,
@@ -169,5 +174,58 @@
     "version": "0.3.7",
     "changed": false,
     "sha256": "5e9ad31f92bd4dcc91ec90298d51902d046ea80742b752101636b02c7821b4b7"
-  }
+  },
+  "bundled_sdk_documents": [
+    {
+      "path": "Frameworks/CNPlayerSDK.framework/央视网iOS播放器集成手册.md",
+      "bytes": 19218,
+      "sha256": "908d2581305dcfe5663cc3754c697345682f15efbaf1a6bda075d3a39407e797"
+    }
+  ],
+  "cnplayer_integration_manual_obtained": true,
+  "manual_scope": "BV3.23.17 basic engineering/startup/VOD/view/lifecycle/callbacks/error codes; no full LIVE/UDRM configuration contract or SDK headers",
+  "sdk_header_files_obtained": false,
+  "sample_dependency_correction": "CNPlayerSDK also directly loads xnet; manual three-framework list is not a complete dependency manifest for this sample",
+  "minimum_os_correction": {
+    "manual_claim": "9.0",
+    "sample_cnplayer": "10.0",
+    "sample_cicada": "11.0",
+    "sample_app": "15.0"
+  },
+  "static_role_observations": {
+    "cicada_UDRM32_prefixed_external_definition_count": 9,
+    "cnplayer_exports_UDRM_DecryptSample": true,
+    "limit": "symbol ownership only; no method implementation or active playback route verified"
+  },
+  "manual_verification": {
+    "matches_user_attachment_byte_for_byte": true,
+    "bytes": 19218,
+    "sha256": "908d2581305dcfe5663cc3754c697345682f15efbaf1a6bda075d3a39407e797"
+  },
+  "cnplayer_resource_file_inventory": [
+    {
+      "file": "CNLiveConfig_V2th.json",
+      "bytes": 288075
+    },
+    {
+      "file": "cnplayer_live_fallback_copyrights.json",
+      "bytes": 151630
+    },
+    {
+      "file": "CNPlayerStartPlist.plist",
+      "bytes": 490
+    },
+    {
+      "file": "cnplayer_live_fallback_config.json",
+      "bytes": 330
+    },
+    {
+      "file": "cnplayer_live_fallback_channels.json",
+      "bytes": 387780
+    },
+    {
+      "file": "cnplayer_live_fallback_policy.json",
+      "bytes": 387780
+    }
+  ]
 }
