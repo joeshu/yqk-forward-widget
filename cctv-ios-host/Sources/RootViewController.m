@@ -6,7 +6,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.5.0";
+static NSString *const kBuildTag = @"0.6.0";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
@@ -328,7 +328,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     }]];
     for (NSDictionary *r in routes) {
         NSString *res = [r[@"w"] intValue] > 0 ? [NSString stringWithFormat:@"%dx%d", [r[@"w"] intValue], [r[@"h"] intValue]] : @"";
-        NSString *title = [NSString stringWithFormat:@"节点 %@ %@（实验）", [r[@"provider"] uppercaseString], res];
+        NSString *title = [NSString stringWithFormat:@"节点 %@ %@", [r[@"provider"] uppercaseString], res];
         [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             [self playChannel:ch route:r];
         }]];
@@ -401,7 +401,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self stopPlayback];
     if (route[@"url"]) {
         self.cicadaPending = YES;
-        [self playViaCicada:route[@"url"]];
+        [self playViaSDKURL:route[@"url"] cid:cid title:self.channelName];
         [self armCicadaFallback];
     } else {
         self.cicadaPending = NO;
@@ -458,30 +458,39 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self startWatchdog];
 }
 
-- (void)playViaCicada:(NSString *)url {
-    Class cicadaCls = NSClassFromString(@"CicadaPlayer");
-    Class cfgCls = NSClassFromString(@"CicadaConfig");
-    Class srcCls = NSClassFromString(@"CicadaUrlSource");
-    if (!cicadaCls || !cfgCls || !srcCls) { self.titleLabel.text = @"Cicada 不可用"; return; }
+- (void)playViaSDKURL:(NSString *)url cid:(NSString *)cid title:(NSString *)title {
+    Class cls = NSClassFromString(@"CNPlayer");
+    SEL sel = NSSelectorFromString(@"playLIVEWithUrl:delegate:configOptions:");
+    id inst = self.sdkPlayer;
+    if (!inst || ![inst respondsToSelector:sel]) {
+        @try { inst = [[cls alloc] init]; } @catch (NSException *e) { [self log:@"init 异常 %@", e.reason]; return; }
+        self.sdkPlayer = inst;
+        [self log:@"创建播放器实例（节点直连）"];
+    } else {
+        [self call:inst sel:@"reset"];
+        [self log:@"复用播放器实例（节点直连）"];
+    }
+    self.currentPlayer = inst;
+    @try { [inst setValue:@(YES) forKey:@"autoPlay"]; } @catch (NSException *e) {}
 
-    id cfg = [[cfgCls alloc] init];
-    [cfg setValue:@(YES) forKey:@"isNeedUDRMDecrypt_pvt"];
-    [cfg setValue:kLicenseUrl forKey:@"udrmLicenseUrl"];
-    [cfg setValue:@(15) forKey:@"networkTimeout"];
-
-    id player = [[cicadaCls alloc] init];
-    self.currentPlayer = player;
-    self.cicadaPlayer = player;
-    self.sdkPlayer = nil;
-
-    [self call:player sel:@"setConfig:" args:@[cfg]];
-    [self call:player sel:@"setEnableHardwareDecoder:" args:@[@(YES)]];
-    [self call:player sel:@"setPlayerView:" args:@[self.playerBox]];
-    id source = [self callClass:srcCls sel:@"urlWithString:" args:@[url]];
-    if (source) [self call:player sel:@"setUrlSource:" args:@[source]];
-    [self call:player sel:@"prepare"];
-    [self call:player sel:@"start"];
-    [self log:@"Cicada 直连 %@", url];
+    if (![inst respondsToSelector:sel]) {
+        // 老版本没有 URL 起播接口，直接回退
+        [self log:@"SDK 无 playLIVEWithUrl:，立即回退自动选线"];
+        self.cicadaPending = NO;
+        [self playViaSDK:cid title:title];
+        return;
+    }
+    NSDictionary *options = @{kOptTitle: title ?: cid};
+    [self log:@"节点起播 %@", url];
+    id ok = [self invokeTarget:inst selector:sel args:@[url, self, options]];
+    if ([ok isKindOfClass:NSNumber.class] && ![ok boolValue]) {
+        [self log:@"节点起播返回 0，回退自动选线"];
+        self.cicadaPending = NO;
+        [self playViaSDK:cid title:title];
+        return;
+    }
+    [self attachVideoView];
+    [self call:inst sel:@"prepareToPlay"];
     [self startWatchdog];
 }
 
@@ -573,8 +582,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
         if (self2.watchdogTicks < 7) return;      // 约 7 秒仍未出画面
         [t invalidate];
         self2.cicadaPending = NO;
-        [self2 log:@"节点未出画面，自动回退 SDK 选线"];
-        self2.titleLabel.text = [NSString stringWithFormat:@"%@ · 节点失败，切回自动", self2.channelName];
+        [self2 log:@"节点 7 秒无画面，回退自动选线"];
+        self2.titleLabel.text = [NSString stringWithFormat:@"%@ · 节点无画面，切回自动", self2.channelName];
         [self2 stopPlayback];
         [self2 playViaSDK:self2.channelID title:self2.channelName];
     }];
