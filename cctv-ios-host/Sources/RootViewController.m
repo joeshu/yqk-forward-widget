@@ -6,7 +6,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.4.1";
+static NSString *const kBuildTag = @"0.5.0";
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
 static NSString *const kOptTitle = @"CNPlayerConfigOptionKey_Title";
 static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
@@ -41,6 +41,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 @property (nonatomic, strong) NSArray<NSDictionary *> *allChannels;
 @property (nonatomic, strong) NSArray<NSDictionary *> *shownChannels;
 @property (nonatomic, assign) NSInteger retryCount;
+@property (nonatomic, assign) BOOL cicadaPending;
+@property (nonatomic, strong) NSTimer *cicadaFallbackTimer;
 // 日志
 @property (nonatomic, strong) NSMutableString *logBuffer;
 @property (nonatomic, strong) UITextView *logView;
@@ -326,7 +328,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     }]];
     for (NSDictionary *r in routes) {
         NSString *res = [r[@"w"] intValue] > 0 ? [NSString stringWithFormat:@"%dx%d", [r[@"w"] intValue], [r[@"h"] intValue]] : @"";
-        NSString *title = [NSString stringWithFormat:@"%@ %@", [r[@"provider"] uppercaseString], res];
+        NSString *title = [NSString stringWithFormat:@"节点 %@ %@（实验）", [r[@"provider"] uppercaseString], res];
         [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             [self playChannel:ch route:r];
         }]];
@@ -397,8 +399,14 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self log:@"起播 %@ (%@) 线路=%@", self.channelName, cid, self.routeName];
 
     [self stopPlayback];
-    if (route[@"url"]) [self playViaCicada:route[@"url"]];
-    else [self playViaSDK:cid title:self.channelName];
+    if (route[@"url"]) {
+        self.cicadaPending = YES;
+        [self playViaCicada:route[@"url"]];
+        [self armCicadaFallback];
+    } else {
+        self.cicadaPending = NO;
+        [self playViaSDK:cid title:self.channelName];
+    }
 
     [self refreshNowNext];
     [self restartEPGTimer];
@@ -489,6 +497,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.cicadaPlayer = nil;
     [self.watchdog invalidate];
     self.watchdog = nil;
+    [self.cicadaFallbackTimer invalidate];
+    self.cicadaFallbackTimer = nil;
     for (UIView *v in self.playerBox.subviews.copy) {
         if (v == self.titleLabel || v == self.infoLabel || v == self.spinner || v == self.controlBar) continue;
         [v removeFromSuperview];
@@ -549,6 +559,25 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.titleLabel.frame = CGRectMake(12, 8, b.size.width - 24, 20);
     self.infoLabel.frame = CGRectMake(12, 26, b.size.width - 24, 16);
     self.spinner.center = CGPointMake(b.size.width / 2, b.size.height / 2);
+}
+
+#pragma mark - 节点失败自动回退
+
+- (void)armCicadaFallback {
+    [self.cicadaFallbackTimer invalidate];
+    __weak typeof(self) weakSelf = self;
+    self.cicadaFallbackTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
+        __strong typeof(weakSelf) self2 = weakSelf;
+        if (!self2 || !self2.cicadaPending) { [t invalidate]; return; }
+        if (self2.firstRender) { [t invalidate]; return; }
+        if (self2.watchdogTicks < 7) return;      // 约 7 秒仍未出画面
+        [t invalidate];
+        self2.cicadaPending = NO;
+        [self2 log:@"节点未出画面，自动回退 SDK 选线"];
+        self2.titleLabel.text = [NSString stringWithFormat:@"%@ · 节点失败，切回自动", self2.channelName];
+        [self2 stopPlayback];
+        [self2 playViaSDK:self2.channelID title:self2.channelName];
+    }];
 }
 
 #pragma mark - 节目单
@@ -618,7 +647,7 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     [self attachVideoView];
     if (self.firstRender) { [timer invalidate]; return; }
     if (self.watchdogTicks == 20) {     // 10 秒
-        self.titleLabel.text = [NSString stringWithFormat:@"%@ · 仍在缓冲", self.channelName];
+        self.titleLabel.text = [NSString stringWithFormat:@"%@ · 缓冲中…", self.channelName];
         [self log:@"10 秒未首帧"];
     }
     if (self.watchdogTicks >= 40) {     // 20 秒
@@ -691,6 +720,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 - (void)player:(id)player statEvent:(NSUInteger)event value:(id)value {
     if (event == 3) {
         self.firstRender = YES;
+        self.cicadaPending = NO;
+        [self.cicadaFallbackTimer invalidate];
         [self.spinner stopAnimating];
         self.titleLabel.text = self.channelName;
         [self log:@"首帧渲染"];
