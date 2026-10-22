@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: cctv-ios-host-${{ github.ref }}
@@ -59,6 +59,19 @@ jobs:
             echo "::error title=build::$l"
           done
           exit $rc
+
+      - name: Publish release asset
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd cctv-ios-host/build
+          gh release delete cctv-ios-host-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create cctv-ios-host-latest \
+            CCTVHost-unsigned.ipa CCTVHost-unsigned.ipa.sha256 \
+            --title "CCTVHost unsigned IPA" \
+            --notes "Built from ${GITHUB_SHA:0:7} on $(date -u +%Y-%m-%dT%H:%MZ)"
+          echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/cctv-ios-host-latest"
 
       - uses: actions/upload-artifact@v4
         if: success()
