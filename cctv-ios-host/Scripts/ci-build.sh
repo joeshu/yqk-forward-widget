@@ -30,6 +30,7 @@ clang -arch arm64 \
   -framework Foundation -framework UIKit \
   -framework CNPlayerSDK -framework CicadaPlayerSDK -framework alivcffmpeg \
   -Wl,-rpath,@executable_path/Frameworks \
+  -Wl,-undefined,dynamic_lookup \
   -ObjC -lresolv \
   $SOURCES \
   -o "$APP/CCTVHost"

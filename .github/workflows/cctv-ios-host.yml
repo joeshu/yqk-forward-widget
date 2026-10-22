@@ -55,7 +55,7 @@ jobs:
           bash Scripts/ci-build.sh > build.log 2>&1
           rc=$?
           tail -60 build.log
-          grep -E "error:|fatal error:|ld: |undefined symbol|No such file" build.log | head -25 | sed 's/\r//' | while IFS= read -r l; do
+          grep -E "error:|fatal error:|ld: |Undefined symbols|referenced from|No such file" build.log | head -25 | sed 's/\r//' | while IFS= read -r l; do
             echo "::error title=build::$l"
           done
           exit $rc
