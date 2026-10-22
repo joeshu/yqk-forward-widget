@@ -24,7 +24,8 @@ if [ ! -f "$PY_TGZ" ]; then
   curl -sSL -o "$PY_TGZ" "https://github.com/beeware/Python-Apple-support/releases/download/3.13-b16/Python-${PY_VER}-iOS-support.b16.tar.gz"
 fi
 rm -rf /tmp/pyroot && mkdir -p /tmp/pyroot && tar -xzf "$PY_TGZ" -C /tmp/pyroot
-cp -R "/tmp/pyroot/Python.xcframework/ios-arm64/Python.framework" "$APP/Frameworks/"
+echo "--- pyroot top ---"; ls /tmp/pyroot | head
+
 mkdir -p "$APP/python/lib"
 cp -R /tmp/pyroot/Python.xcframework/lib/python3.13 "$APP/python/lib/"
 rm -rf "$APP/python/lib/python3.13/test" "$APP/python/lib/python3.13/idlelib" \
@@ -32,7 +33,19 @@ rm -rf "$APP/python/lib/python3.13/test" "$APP/python/lib/python3.13/idlelib" \
        "$APP/python/lib/python3.13/turtledemo" "$APP/python/lib/python3.13/distutils"
 find "$APP/python" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 find "$APP/python" -name '*.pyc' -delete 2>/dev/null || true
-PY_INC=/tmp/pyroot/Python.xcframework/ios-arm64/include/python3.13
+PY_INC="$(dirname "$(find /tmp/pyroot -path '*ios-arm64*' -name 'Python.h' | head -1)")"
+if [ ! -f "$PY_INC/Python.h" ]; then
+  echo "::error title=pyinc::Python.h not found under /tmp/pyroot"
+  find /tmp/pyroot -maxdepth 4 -name 'Python.xcframework' -o -maxdepth 4 -name 'Python.framework' | head
+  exit 1
+fi
+echo "PY_INC=$PY_INC"
+PY_LIB="$(find /tmp/pyroot -path '*ios-arm64*' -name 'Python.framework' -type d | head -1)"
+if [ -z "$PY_LIB" ]; then
+  echo "::error title=pylib::Python.framework not found"
+  exit 1
+fi
+cp -R "$PY_LIB" "$APP/Frameworks/"
 for f in Frameworks/*.framework; do
   cp -R "$f" "$APP/Frameworks/"
 done
