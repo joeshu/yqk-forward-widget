@@ -103,8 +103,12 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     Class sessionCls = NSClassFromString(@"AVAudioSession");
     if (!sessionCls) return;
     id session = ((id (*)(id, SEL))objc_msgSend)(sessionCls, NSSelectorFromString(@"sharedInstance"));
-    ((BOOL (*)(id, SEL, id, id *))objc_msgSend)(session, NSSelectorFromString(@"setCategory:error:"), @"AVAudioSessionCategoryPlayback", NULL);
-    ((BOOL (*)(id, SEL, id *))objc_msgSend)(session, NSSelectorFromString(@"setActive:error:"), (id)kCFBooleanTrue, NULL);
+    if (!session) return;
+    BOOL (*setCategory)(id, SEL, NSString *, NSError **) = (void *)objc_msgSend;
+    BOOL (*setActive)(id, SEL, BOOL, NSError **) = (void *)objc_msgSend;
+    setCategory(session, NSSelectorFromString(@"setCategory:error:"), @"AVAudioSessionCategoryPlayback", NULL);
+    setActive(session, NSSelectorFromString(@"setActive:error:"), YES, NULL);
+    [self log:@"音频会话已设为播放模式"];
 }
 
 #pragma mark - 频道数据
