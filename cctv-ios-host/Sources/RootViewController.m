@@ -3,50 +3,91 @@
 #import "CicadaSDK.h"
 #import "EPGViewController.h"
 #import <objc/message.h>
+#import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.3.1 (a68a947 + retry)";
+static NSString *const kBuildTag = @"0.4.0";
 static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTVGetLicense";
 
-@interface RootViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate>
+@interface RootViewController () <UITableViewDataSource, UITableViewDelegate>
 // 播放
 @property (nonatomic, strong) UIView *playerBox;
-@property (nonatomic, strong) UILabel *overlayTitle;
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UILabel *infoLabel;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
-@property (nonatomic, strong) id currentPlayer;
-@property (nonatomic, copy) NSString *currentChannelID;
-@property (nonatomic, copy) NSString *currentChannelName;
-@property (nonatomic, assign) BOOL firstRender;
-// 控制条
+@property (nonatomic, strong) UIStackView *controlBar;
 @property (nonatomic, strong) UIButton *playPauseBtn;
 @property (nonatomic, strong) UIButton *muteBtn;
+@property (nonatomic, strong) UIButton *routeBtn;
+@property (nonatomic, strong) UIButton *epgBtn;
 @property (nonatomic, strong) UIButton *fullBtn;
 @property (nonatomic, strong) UIButton *logBtn;
-@property (nonatomic, strong) UIStackView *controlBar;
-// 频道列表
-@property (nonatomic, strong) UITableView *table;
-@property (nonatomic, strong) UISegmentedControl *groupControl;
-@property (nonatomic, strong) NSArray<NSDictionary *> *allChannels;
-@property (nonatomic, strong) NSArray<NSDictionary *> *shownChannels;
-// 日志
-@property (nonatomic, strong) UITextView *logView;
-@property (nonatomic, strong) NSMutableString *logBuffer;
-@property (nonatomic, assign) BOOL logVisible;
-@property (nonatomic, assign) BOOL fullscreen;
-@property (nonatomic, strong) NSTimer *watchdog;
-@property (nonatomic, assign) NSInteger watchdogTicks;
+@property (nonatomic, strong) id currentPlayer;
 @property (nonatomic, strong) id sdkPlayer;
 @property (nonatomic, strong) CicadaPlayer *cicadaPlayer;
-@property (nonatomic, strong) UILabel *nowLabel;
-@property (nonatomic, strong) UILabel *buildLabel;
-@property (nonatomic, strong) UILabel *lastLogLabel;
-@property (nonatomic, strong) UIButton *epgBtn;
-@property (nonatomic, strong) NSURLSessionDataTask *epgTask;
+@property (nonatomic, copy) NSString *channelID;
+@property (nonatomic, copy) NSString *channelName;
+@property (nonatomic, copy) NSString *routeName;
+@property (nonatomic, assign) BOOL firstRender;
+@property (nonatomic, assign) BOOL fullscreen;
+@property (nonatomic, assign) BOOL stallReported;
+// 频道
+@property (nonatomic, strong) UITableView *table;
+@property (nonatomic, strong) UISegmentedControl *groupControl;
+@property (nonatomic, strong) UILabel *versionLabel;
+@property (nonatomic, strong) NSArray<NSDictionary *> *allChannels;
+@property (nonatomic, strong) NSArray<NSDictionary *> *shownChannels;
+@property (nonatomic, assign) NSInteger retryCount;
+// 日志
+@property (nonatomic, strong) NSMutableString *logBuffer;
+@property (nonatomic, strong) UITextView *logView;
+@property (nonatomic, assign) BOOL logVisible;
+// 计时
+@property (nonatomic, strong) NSTimer *watchdog;
+@property (nonatomic, assign) NSInteger watchdogTicks;
 @property (nonatomic, strong) NSTimer *epgTimer;
+@property (nonatomic, strong) NSURLSessionDataTask *epgTask;
 @property (nonatomic, copy) NSString *epgChannel;
 @end
 
 @implementation RootViewController
+
+#pragma mark - 生命周期
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = [UIColor colorWithWhite:0.05 alpha:1];
+    self.title = @"CCTVHost";
+    self.logBuffer = [NSMutableString string];
+    self.retryCount = 0;
+
+    [self loadChannels];
+    [self buildPlayer];
+    [self buildList];
+    [self activateAudioSession];
+    [self registerCallbackProtocol];
+    [self setupSDK];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [self.watchdog invalidate];
+    [self.epgTimer invalidate];
+    [self.epgTask cancel];
+}
+
+- (void)onBackground {
+    [self call:self.currentPlayer sel:@"resignActive"];
+    [self log:@"进入后台"];
+}
+
+- (void)onForeground {
+    [self call:self.currentPlayer sel:@"becomeActive"];
+    [self log:@"回到前台"];
+}
 
 #pragma mark - 日志
 
@@ -57,53 +98,256 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     NSLog(@"[CCTVHost] %@", msg);
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.logBuffer appendFormat:@"%@\n", msg];
-        if (self.logBuffer.length > 12000) {
-            [self.logBuffer deleteCharactersInRange:NSMakeRange(0, self.logBuffer.length - 10000)];
+        if (self.logBuffer.length > 20000) {
+            [self.logBuffer deleteCharactersInRange:NSMakeRange(0, self.logBuffer.length - 16000)];
         }
         if (self.logVisible) {
             self.logView.text = self.logBuffer;
             [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length, 0)];
         }
         NSString *one = [msg componentsSeparatedByString:@"\n"].firstObject ?: @"";
-        if (one.length > 42) one = [[one substringToIndex:42] stringByAppendingString:@"…"];
-        self.lastLogLabel.text = one;
+        if (one.length > 30) one = [[one substringToIndex:30] stringByAppendingString:@"…"];
+        self.infoLabel.text = one;
     });
 }
 
-#pragma mark - 生命周期
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.view.backgroundColor = [UIColor colorWithWhite:0.06 alpha:1];
-    self.title = @"CCTVHost";
-    self.logBuffer = [NSMutableString string];
-    self.firstRender = NO;
-    self.navigationController.navigationBar.barStyle = UIBarStyleBlack;
-    self.navigationController.navigationBar.tintColor = UIColor.whiteColor;
-
-    [self loadChannels];
-    [self buildPlayerArea];
-    [self buildList];
-    [self activateAudioSession];
-    [self setupSDK];
-
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
+- (void)toggleLog {
+    if (self.logVisible) {
+        self.logView.hidden = YES;
+        self.logVisible = NO;
+        [self.logBtn setTitle:@"日志" forState:UIControlStateNormal];
+        return;
+    }
+    self.logVisible = YES;
+    self.logView.text = self.logBuffer;
+    self.logView.hidden = NO;
+    [self.view bringSubviewToFront:self.logView];
+    [self.logBtn setTitle:@"关闭日志" forState:UIControlStateNormal];
+    [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length, 0)];
 }
 
-- (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [self.watchdog invalidate];
+#pragma mark - 播放区
+
+- (void)buildPlayer {
+    CGFloat w = self.view.bounds.size.width;
+    CGFloat h = w * 9.0 / 16.0;
+    self.playerBox = [[UIView alloc] initWithFrame:CGRectMake(0, 0, w, h)];
+    self.playerBox.backgroundColor = UIColor.blackColor;
+    self.playerBox.clipsToBounds = YES;
+    [self.view addSubview:self.playerBox];
+
+    self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 8, w - 24, 20)];
+    self.titleLabel.textColor = [UIColor colorWithWhite:1 alpha:0.9];
+    self.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    self.titleLabel.text = @"选择频道开始播放";
+    [self.playerBox addSubview:self.titleLabel];
+
+    self.infoLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 26, w - 24, 16)];
+    self.infoLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1];
+    self.infoLabel.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
+    self.infoLabel.text = [NSString stringWithFormat:@"版本 %@", kBuildTag];
+    [self.playerBox addSubview:self.infoLabel];
+
+    self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    self.spinner.center = CGPointMake(w / 2, h / 2);
+    self.spinner.hidesWhenStopped = YES;
+    [self.playerBox addSubview:self.spinner];
+
+    self.controlBar = [[UIStackView alloc] initWithFrame:CGRectMake(8, h - 36, w - 16, 28)];
+    self.controlBar.axis = UILayoutConstraintAxisHorizontal;
+    self.controlBar.distribution = UIStackViewDistributionFillEqually;
+    self.controlBar.spacing = 5;
+    self.playPauseBtn = [self barButton:@"暂停" action:@selector(togglePlayPause)];
+    self.muteBtn = [self barButton:@"静音" action:@selector(toggleMute)];
+    self.routeBtn = [self barButton:@"线路" action:@selector(showRoutes)];
+    self.epgBtn = [self barButton:@"节目单" action:@selector(openEPG)];
+    self.fullBtn = [self barButton:@"全屏" action:@selector(toggleFullscreen)];
+    self.logBtn = [self barButton:@"日志" action:@selector(toggleLog)];
+    for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.routeBtn, self.epgBtn, self.fullBtn, self.logBtn]) {
+        [self.controlBar addArrangedSubview:b];
+    }
+    [self.playerBox addSubview:self.controlBar];
+
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleOverlay)];
+    [self.playerBox addGestureRecognizer:tap];
 }
 
-- (void)onBackground {
-    [self callInstance:self.currentPlayer selector:NSSelectorFromString(@"resignActive") args:@[]];
-    [self log:@"进入后台"];
+- (UIButton *)barButton:(NSString *)title action:(SEL)action {
+    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+    [b setTitle:title forState:UIControlStateNormal];
+    [b.titleLabel setFont:[UIFont systemFontOfSize:11]];
+    [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    b.backgroundColor = [UIColor colorWithWhite:0 alpha:0.42];
+    b.layer.cornerRadius = 5;
+    [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return b;
 }
 
-- (void)onForeground {
-    [self callInstance:self.currentPlayer selector:NSSelectorFromString(@"becomeActive") args:@[]];
-    [self log:@"回到前台"];
+- (void)toggleOverlay {
+    self.titleLabel.hidden = !self.titleLabel.hidden;
+    self.infoLabel.hidden = !self.infoLabel.hidden;
+    self.controlBar.hidden = !self.controlBar.hidden;
+}
+
+#pragma mark - 列表
+
+- (void)buildList {
+    CGFloat y = CGRectGetMaxY(self.playerBox.frame);
+    self.groupControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"央视", @"卫视", @"地方", @"教育"]];
+    self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 28);
+    self.groupControl.selectedSegmentIndex = 0;
+    self.groupControl.tintColor = [UIColor colorWithWhite:0.75 alpha:1];
+    [self.groupControl addTarget:self action:@selector(onGroupChanged) forControlEvents:UIControlEventValueChanged];
+    [self.view addSubview:self.groupControl];
+
+    self.versionLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, y + 38, self.view.bounds.size.width - 16, 14)];
+    self.versionLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1];
+    self.versionLabel.font = [UIFont systemFontOfSize:9];
+    self.versionLabel.text = [NSString stringWithFormat:@"%@ · 点击自动播放 · 长按选线路", kBuildTag];
+    [self.view addSubview:self.versionLabel];
+
+    CGFloat ty = y + 54;
+    self.table = [[UITableView alloc] initWithFrame:CGRectMake(0, ty, self.view.bounds.size.width, self.view.bounds.size.height - ty) style:UITableViewStylePlain];
+    self.table.dataSource = self;
+    self.table.delegate = self;
+    self.table.rowHeight = 48;
+    self.table.backgroundColor = [UIColor colorWithWhite:0.07 alpha:1];
+    self.table.separatorColor = [UIColor colorWithWhite:0.16 alpha:1];
+    [self.view addSubview:self.table];
+
+    UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onLongPress:)];
+    [self.table addGestureRecognizer:lp];
+
+    self.logView = [[UITextView alloc] initWithFrame:self.view.bounds];
+    self.logView.backgroundColor = [UIColor colorWithWhite:0.03 alpha:0.98];
+    self.logView.textColor = [UIColor colorWithRed:0.62 green:0.9 blue:0.65 alpha:1];
+    self.logView.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
+    self.logView.editable = NO;
+    self.logView.hidden = YES;
+    self.logView.textContainerInset = UIEdgeInsetsMake(8, 8, 8, 8);
+    [self.view addSubview:self.logView];
+}
+
+- (void)loadChannels {
+    NSString *path = [[NSBundle mainBundle] pathForResource:@"channels" ofType:@"json"];
+    NSArray *arr = nil;
+    if (path) {
+        NSData *data = [NSData dataWithContentsOfFile:path];
+        if (data) arr = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+    }
+    self.allChannels = [arr isKindOfClass:NSArray.class] ? arr : @[];
+    self.shownChannels = self.allChannels;
+    [self log:@"频道 %lu 个 / 线路 %lu 条",
+         (unsigned long)self.allChannels.count,
+         (unsigned long)[[self.allChannels valueForKeyPath:@"@sum.routes.@count"] integerValue]];
+}
+
+- (void)onGroupChanged {
+    NSArray *groups = @[@"全部", @"央视", @"卫视", @"地方", @"教育"];
+    NSInteger i = MAX(0, MIN((NSInteger)groups.count - 1, self.groupControl.selectedSegmentIndex));
+    NSString *g = groups[i];
+    if ([g isEqualToString:@"全部"]) {
+        self.shownChannels = self.allChannels;
+    } else {
+        self.shownChannels = [self.allChannels filteredArrayUsingPredicate:
+                              [NSPredicate predicateWithBlock:^BOOL(NSDictionary *o, NSDictionary *b) {
+            return [o[@"group"] isEqualToString:g];
+        }]];
+    }
+    [self.table reloadData];
+}
+
+- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return (NSInteger)self.shownChannels.count; }
+
+- (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
+    static NSString *cid = @"ch";
+    UITableViewCell *cell = [t dequeueReusableCellWithIdentifier:cid];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cid];
+        cell.backgroundColor = [UIColor colorWithWhite:0.09 alpha:1];
+        cell.textLabel.font = [UIFont systemFontOfSize:15];
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:11];
+        cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.55 alpha:1];
+        UIView *bg = [[UIView alloc] init];
+        bg.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1];
+        cell.selectedBackgroundView = bg;
+    }
+    NSDictionary *ch = self.shownChannels[ip.row];
+    BOOL playing = [ch[@"id"] isEqualToString:self.channelID];
+    cell.textLabel.textColor = playing ? [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1] : UIColor.whiteColor;
+    cell.textLabel.text = playing ? [NSString stringWithFormat:@"● %@", ch[@"name"]] : ch[@"name"];
+    NSUInteger n = [ch[@"routes"] isKindOfClass:NSArray.class] ? [ch[@"routes"] count] : 0;
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %lu 线路", ch[@"group"], (unsigned long)n];
+    return cell;
+}
+
+- (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
+    [t deselectRowAtIndexPath:ip animated:YES];
+    NSDictionary *ch = self.shownChannels[ip.row];
+    [self playChannel:ch route:nil];      // 单击 = 自动选线直接播放
+}
+
+- (void)onLongPress:(UILongPressGestureRecognizer *)g {
+    if (g.state != UIGestureRecognizerStateBegan) return;
+    CGPoint pt = [g locationInView:self.table];
+    NSIndexPath *ip = [self.table indexPathForRowAtPoint:pt];
+    if (!ip) return;
+    NSDictionary *ch = self.shownChannels[ip.row];
+    [self presentRouteSheetForChannel:ch fromIndexPath:ip];
+}
+
+#pragma mark - 线路
+
+- (void)showRoutes {
+    if (!self.channelID.length) { [self log:@"请先选择频道"]; return; }
+    NSDictionary *ch = [self channelWithID:self.channelID];
+    if (!ch) return;
+    [self presentRouteSheetForChannel:ch fromIndexPath:nil];
+}
+
+- (NSDictionary *)channelWithID:(NSString *)cid {
+    for (NSDictionary *c in self.allChannels) {
+        if ([c[@"id"] isEqualToString:cid]) return c;
+    }
+    return nil;
+}
+
+- (void)presentRouteSheetForChannel:(NSDictionary *)ch fromIndexPath:(NSIndexPath *)ip {
+    NSArray *routes = [ch[@"routes"] isKindOfClass:NSArray.class] ? ch[@"routes"] : @[];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:ch[@"name"]
+                                                                  message:[NSString stringWithFormat:@"当前：%@ · %lu 条线路",
+                                                                           self.routeName ?: @"自动", (unsigned long)routes.count]
+                                                           preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"自动选线（推荐）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self playChannel:ch route:nil];
+    }]];
+    for (NSDictionary *r in routes) {
+        NSString *res = [r[@"w"] intValue] > 0 ? [NSString stringWithFormat:@"%dx%d", [r[@"w"] intValue], [r[@"h"] intValue]] : @"";
+        NSString *title = [NSString stringWithFormat:@"%@ %@", [r[@"provider"] uppercaseString], res];
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self playChannel:ch route:r];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self openEPGforChannel:ch[@"id"] name:ch[@"name"]];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    if (ip && self.table) {
+        sheet.popoverPresentationController.sourceView = self.table;
+        sheet.popoverPresentationController.sourceRect = [self.table rectForRowAtIndexPath:ip];
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+#pragma mark - SDK
+
+- (void)registerCallbackProtocol {
+    Protocol *proto = NSProtocolFromString(@"CNPlayerCallbackProtocol");
+    if (!proto) { [self log:@"回调协议不可见"]; return; }
+    if (!class_conformsToProtocol(self.class, proto)) {
+        class_addProtocol(self.class, proto);
+        [self log:@"已注册回调协议"];
+    }
 }
 
 - (void)activateAudioSession {
@@ -115,296 +359,89 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     BOOL (*setActive)(id, SEL, BOOL, NSError **) = (void *)objc_msgSend;
     setCategory(session, NSSelectorFromString(@"setCategory:error:"), @"AVAudioSessionCategoryPlayback", NULL);
     setActive(session, NSSelectorFromString(@"setActive:error:"), YES, NULL);
-    [self log:@"音频会话已设为播放模式"];
 }
-
-#pragma mark - 频道数据
-
-- (void)loadChannels {
-    NSString *path = [[NSBundle mainBundle] pathForResource:@"channels" ofType:@"json"];
-    NSData *data = path ? [NSData dataWithContentsOfFile:path] : nil;
-    NSArray *arr = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
-    self.allChannels = [arr isKindOfClass:NSArray.class] ? arr : @[];
-    self.shownChannels = self.allChannels;
-    [self log:@"频道目录载入 %lu 项", (unsigned long)self.allChannels.count];
-}
-
-- (void)filterChannels:(NSInteger)index {
-    NSArray *groups = @[@"全部", @"央视", @"卫视", @"地方", @"教育"];
-    NSString *g = groups[MAX(0, MIN((NSInteger)groups.count - 1, index))];
-    if ([g isEqualToString:@"全部"]) {
-        self.shownChannels = self.allChannels;
-    } else {
-        NSPredicate *p = [NSPredicate predicateWithBlock:^BOOL(NSDictionary *obj, NSDictionary *bindings) {
-            return [obj[@"group"] isEqualToString:g];
-        }];
-        self.shownChannels = [self.allChannels filteredArrayUsingPredicate:p];
-    }
-    [self.table reloadData];
-}
-
-#pragma mark - 播放区
-
-- (void)buildPlayerArea {
-    CGFloat w = self.view.bounds.size.width;
-    self.playerBox = [[UIView alloc] initWithFrame:CGRectMake(0, 0, w, w * 9.0 / 16.0)];
-    self.playerBox.backgroundColor = UIColor.blackColor;
-    self.playerBox.clipsToBounds = YES;
-    [self.view addSubview:self.playerBox];
-
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleControls)];
-    [self.playerBox addGestureRecognizer:tap];
-
-    self.overlayTitle = [[UILabel alloc] initWithFrame:CGRectMake(12, 8, w - 24, 20)];
-    self.overlayTitle.textColor = [UIColor colorWithWhite:1 alpha:0.85];
-    self.overlayTitle.font = [UIFont systemFontOfSize:12];
-    self.overlayTitle.text = @"未选择频道";
-    [self.playerBox addSubview:self.overlayTitle];
-
-    self.nowLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 28, w - 24, 16)];
-    self.nowLabel.textColor = [UIColor colorWithWhite:1 alpha:0.7];
-    self.nowLabel.font = [UIFont systemFontOfSize:11];
-    self.nowLabel.text = @"";
-    [self.playerBox addSubview:self.nowLabel];
-
-    self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    self.spinner.center = CGPointMake(w / 2, w * 9 / 32);
-    self.spinner.hidesWhenStopped = YES;
-    [self.playerBox addSubview:self.spinner];
-
-    self.controlBar = [[UIStackView alloc] initWithFrame:CGRectMake(8, w * 9.0 / 16.0 - 38, w - 16, 30)];
-    self.controlBar.axis = UILayoutConstraintAxisHorizontal;
-    self.controlBar.distribution = UIStackViewDistributionFillEqually;
-    self.controlBar.spacing = 6;
-    self.playPauseBtn = [self stackButton:@"暂停" action:@selector(togglePlayPause)];
-    self.muteBtn = [self stackButton:@"静音" action:@selector(toggleMute)];
-    self.fullBtn = [self stackButton:@"全屏" action:@selector(toggleFullscreen)];
-    self.epgBtn = [self stackButton:@"节目单" action:@selector(openEPG)];
-    self.logBtn = [self stackButton:@"日志" action:@selector(toggleLog)];
-    for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.fullBtn, self.epgBtn, self.logBtn]) {
-        [self.controlBar addArrangedSubview:b];
-    }
-    [self.playerBox addSubview:self.controlBar];
-}
-
-- (UIButton *)stackButton:(NSString *)title action:(SEL)action {
-    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-    [b setTitle:title forState:UIControlStateNormal];
-    [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    b.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45];
-    b.titleLabel.font = [UIFont systemFontOfSize:13];
-    b.layer.cornerRadius = 6;
-    [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
-    return b;
-}
-
-- (UIButton *)controlButton:(NSString *)title x:(CGFloat)x y:(CGFloat)y action:(SEL)action {
-    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-    b.frame = CGRectMake(x, y, 68, 30);
-    [b setTitle:title forState:UIControlStateNormal];
-    [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    b.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45];
-    b.titleLabel.font = [UIFont systemFontOfSize:13];
-    b.layer.cornerRadius = 6;
-    [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
-    [self.playerBox addSubview:b];
-    return b;
-}
-
-- (void)toggleControls {
-    self.overlayTitle.hidden = !self.overlayTitle.hidden;
-}
-
-- (void)buildList {
-    CGFloat y = CGRectGetMaxY(self.playerBox.frame);
-
-    self.buildLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, y + 2, self.view.bounds.size.width - 16, 16)];
-    self.buildLabel.textColor = [UIColor colorWithWhite:0.55 alpha:1];
-    self.buildLabel.font = [UIFont systemFontOfSize:10];
-    self.buildLabel.text = [NSString stringWithFormat:@"版本 %@ · SDK %@", kBuildTag, @"3.23.28"];
-    [self.view addSubview:self.buildLabel];
-
-    self.lastLogLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, y + 18, self.view.bounds.size.width - 16, 16)];
-    self.lastLogLabel.textColor = [UIColor colorWithRed:0.55 green:0.85 blue:0.6 alpha:1];
-    self.lastLogLabel.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
-    self.lastLogLabel.text = @"等待操作…";
-    [self.view addSubview:self.lastLogLabel];
-    y += 38;
-    self.groupControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"央视", @"卫视", @"地方", @"教育"]];
-    self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 30);
-    self.groupControl.selectedSegmentIndex = 0;
-    self.groupControl.tintColor = [UIColor colorWithWhite:0.7 alpha:1];
-    [self.groupControl addTarget:self action:@selector(onGroupChanged) forControlEvents:UIControlEventValueChanged];
-    [self.view addSubview:self.groupControl];
-
-    CGFloat ty = CGRectGetMaxY(self.groupControl.frame) + 6;
-    self.table = [[UITableView alloc] initWithFrame:CGRectMake(0, ty, self.view.bounds.size.width, self.view.bounds.size.height - ty) style:UITableViewStylePlain];
-    self.table.dataSource = self;
-    self.table.delegate = self;
-    self.table.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1];
-    self.table.separatorColor = [UIColor colorWithWhite:0.2 alpha:1];
-    self.table.rowHeight = 46;
-    [self.view addSubview:self.table];
-
-    self.logView = [[UITextView alloc] initWithFrame:CGRectMake(0, ty, self.view.bounds.size.width, self.view.bounds.size.height - ty)];
-    self.logView.backgroundColor = [UIColor colorWithWhite:0.04 alpha:0.97];
-    self.logView.textColor = [UIColor colorWithRed:0.6 green:0.9 blue:0.6 alpha:1];
-    self.logView.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
-    self.logView.editable = NO;
-    self.logView.hidden = YES;
-    [self.view addSubview:self.logView];
-}
-
-- (void)onGroupChanged {
-    [self filterChannels:self.groupControl.selectedSegmentIndex];
-}
-
-#pragma mark - 列表
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return (NSInteger)self.shownChannels.count;
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    static NSString *cellID = @"ch";
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellID];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cellID];
-        cell.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1];
-        cell.textLabel.textColor = UIColor.whiteColor;
-        cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.6 alpha:1];
-        cell.textLabel.font = [UIFont systemFontOfSize:15];
-        cell.detailTextLabel.font = [UIFont systemFontOfSize:11];
-        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-        UIView *bg = [[UIView alloc] init];
-        bg.backgroundColor = [UIColor colorWithWhite:0.22 alpha:1];
-        cell.selectedBackgroundView = bg;
-    }
-    NSDictionary *ch = self.shownChannels[indexPath.row];
-    cell.textLabel.text = ch[@"name"] ?: ch[@"id"];
-    BOOL verified = [ch[@"verified"] boolValue];
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@", ch[@"group"], verified ? @"已验证线路" : @"未验证线路"];
-    return cell;
-}
-
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    NSDictionary *ch = self.shownChannels[indexPath.row];
-    NSArray *routes = [ch[@"routes"] isKindOfClass:NSArray.class] ? ch[@"routes"] : @[];
-
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:ch[@"name"]
-                                                                  message:[NSString stringWithFormat:@"%@ · %lu 条线路",
-                                                                           ch[@"group"], (unsigned long)routes.count]
-                                                           preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"自动选线（SDK 调度）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [self playChannel:ch[@"id"] name:ch[@"name"] route:nil];
-    }]];
-    for (NSDictionary *r in routes) {
-        NSString *res = [r[@"w"] intValue] > 0 ? [NSString stringWithFormat:@"%dx%d", [r[@"w"] intValue], [r[@"h"] intValue]] : @"";
-        NSString *title = [NSString stringWithFormat:@"节点 %@ %@", [r[@"provider"] uppercaseString], res];
-        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self playChannel:ch[@"id"] name:ch[@"name"] route:r];
-        }]];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"查看节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [self openEPGforChannel:ch[@"id"] name:ch[@"name"]];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView = tableView;
-    sheet.popoverPresentationController.sourceRect = [tableView rectForRowAtIndexPath:indexPath];
-    [self presentViewController:sheet animated:YES completion:nil];
-}
-
-#pragma mark - SDK
 
 - (void)setupSDK {
-    Class CNPlayerCls = NSClassFromString(@"CNPlayer");
-    if (!CNPlayerCls) {
-        self.overlayTitle.text = @"SDK 未加载";
-        [self log:@"CNPlayer 未找到：framework 未嵌入或未签名"];
-        return;
-    }
-    @try { [CNPlayer logEnabled:YES]; } @catch (NSException *e) { [self log:@"logEnabled 异常: %@", e.reason]; }
-    [self callClass:CNPlayerCls selector:NSSelectorFromString(@"configSDK_CICADA_UDRMUrl:") args:@[kLicenseUrl]];
+    Class cls = NSClassFromString(@"CNPlayer");
+    if (!cls) { self.titleLabel.text = @"SDK 未加载"; return; }
+    @try { [CNPlayer logEnabled:YES]; } @catch (NSException *e) {}
+    [self callClass:cls sel:@"configSDK_CICADA_UDRMUrl:" args:@[kLicenseUrl]];
     @try {
         [CNPlayer startPlayerSDK_Options:[CNPlayer defaultOptions]];
-        id ver = [self callClass:CNPlayerCls selector:NSSelectorFromString(@"SDKVersion") args:@[]];
-        [self log:@"SDK 已启动 version=%@", ver];
-        [self callClass:CNPlayerCls selector:NSSelectorFromString(@"authed") args:@[]];
     } @catch (NSException *e) {
-        [self log:@"startPlayerSDK 异常: %@", e.reason];
+        [self log:@"启动异常 %@", e.reason];
+        return;
     }
+    id ver = [self callClass:cls sel:@"SDKVersion" args:@[]];
+    [self log:@"SDK 启动版本 %@", ver];
+    [self callClass:cls sel:@"authed" args:@[]];
 }
 
-#pragma mark - 播放控制
+#pragma mark - 播放
 
-- (void)playChannel:(NSString *)cid name:(NSString *)name route:(NSDictionary *)route {
+- (void)playChannel:(NSDictionary *)ch route:(NSDictionary *)route {
+    NSString *cid = ch[@"id"];
     if (!cid.length) return;
-    NSString *routeDesc = route ? [NSString stringWithFormat:@"节点 %@", [route[@"provider"] uppercaseString]] : @"自动选线";
-    [self log:@"—— 切换 %@ (%@) · %@ ——", name, cid, routeDesc];
-
-    [self stopCurrent];
-    self.currentChannelID = cid;
-    self.currentChannelName = name ?: cid;
+    self.channelID = cid;
+    self.channelName = ch[@"name"] ?: cid;
+    self.routeName = route ? [NSString stringWithFormat:@"%@", [route[@"provider"] uppercaseString]] : @"自动";
     self.firstRender = NO;
-    self.overlayTitle.text = [NSString stringWithFormat:@"%@ · 连接中", self.currentChannelName];
-    self.nowLabel.text = @"";
+    self.stallReported = NO;
+    self.retryCount = 0;
+    self.titleLabel.text = [NSString stringWithFormat:@"%@ · 连接中", self.channelName];
     [self.spinner startAnimating];
-    self.playPauseBtn.selected = NO;
-    [self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
+    [self.table reloadData];
+    [self log:@"起播 %@ (%@) 线路=%@", self.channelName, cid, self.routeName];
 
-    if (route[@"url"]) {
-        [self playViaCicada:route[@"url"]];
-    } else {
-        [self playViaSDK:cid];
-    }
+    [self stopPlayback];
+    if (route[@"url"]) [self playViaCicada:route[@"url"]];
+    else [self playViaSDK:cid];
+
     [self refreshNowNext];
-    [self startEPGTimer];
+    [self restartEPGTimer];
 }
 
 - (void)playViaSDK:(NSString *)cid {
-    Class CNPlayerCls = NSClassFromString(@"CNPlayer");
-    id inst = self.sdkPlayer;
+    Class cls = NSClassFromString(@"CNPlayer");
     SEL playSel = NSSelectorFromString(@"playLIVEWithChannelID:delegate:configOptions:");
-
-    // 复用已有实例：省掉每次 alloc/init 与 SDK 内部重建
-    if (inst && [inst respondsToSelector:playSel]) {
-        [self log:@"复用播放器实例，跳过初始化"];
-        [self callInstance:inst selector:NSSelectorFromString(@"reset") args:@[]];
-    } else {
-        @try { inst = [[CNPlayerCls alloc] init]; } @catch (NSException *e) { [self log:@"init 异常: %@", e.reason]; }
+    id inst = self.sdkPlayer;
+    if (!inst || ![inst respondsToSelector:playSel]) {
+        @try { inst = [[cls alloc] init]; } @catch (NSException *e) { [self log:@"init 异常 %@", e.reason]; return; }
         self.sdkPlayer = inst;
+        [self log:@"创建播放器实例"];
+    } else {
+        [self call:inst sel:@"reset"];
+        [self log:@"复用播放器实例"];
     }
-    if (!inst) { self.overlayTitle.text = @"播放器创建失败"; return; }
     self.currentPlayer = inst;
     self.cicadaPlayer = nil;
-
     @try { [inst setValue:@(YES) forKey:@"autoPlay"]; } @catch (NSException *e) {}
+
     if (![inst respondsToSelector:playSel]) {
-        self.overlayTitle.text = @"SDK 接口不匹配";
-        [self log:@"SDK 不支持 playLIVEWithChannelID:"];
+        [self log:@"SDK 无 playLIVEWithChannelID:"];
+        self.titleLabel.text = @"接口不匹配";
         return;
     }
-    id accepted = [self callInstance:inst selector:playSel args:@[cid, self, @{}]];
-    if ([accepted isKindOfClass:NSNumber.class] && ![accepted boolValue]) {
-        [self log:@"复用实例起播返回 0，换新实例重试"];
+    id ok = [self invokeTarget:inst selector:playSel args:@[cid, self, @{}]];
+    if ([ok isKindOfClass:NSNumber.class] && ![ok boolValue]) {
+        [self log:@"起播返回 0，重建实例重试"];
         id fresh = nil;
-        @try { fresh = [[CNPlayerCls alloc] init]; } @catch (NSException *e) {}
+        @try { fresh = [[cls alloc] init]; } @catch (NSException *e) {}
         if (fresh) {
             self.sdkPlayer = fresh;
             self.currentPlayer = fresh;
             @try { [fresh setValue:@(YES) forKey:@"autoPlay"]; } @catch (NSException *e) {}
-            accepted = [self callInstance:fresh selector:playSel args:@[cid, self, @{}]];
+            ok = [self invokeTarget:fresh selector:playSel args:@[cid, self, @{}]];
             inst = fresh;
         }
-        if ([accepted isKindOfClass:NSNumber.class] && ![accepted boolValue]) {
-            self.overlayTitle.text = @"起播被拒绝（已重试）";
-            [self log:@"新实例仍返回 0，停止"];
-            return;
-        }
     }
-    [self attachPlayerViewAnimated:NO];
-    [self callInstance:inst selector:NSSelectorFromString(@"prepareToPlay") args:@[]];
+    if ([ok isKindOfClass:NSNumber.class] && ![ok boolValue]) {
+        self.titleLabel.text = [NSString stringWithFormat:@"%@ · 起播被拒绝", self.channelName];
+        [self log:@"两次起播均返回 0"];
+        return;
+    }
+    [self attachVideoView];
+    [self call:inst sel:@"prepareToPlay"];
     [self startWatchdog];
 }
 
@@ -412,10 +449,8 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     Class cicadaCls = NSClassFromString(@"CicadaPlayer");
     Class cfgCls = NSClassFromString(@"CicadaConfig");
     Class srcCls = NSClassFromString(@"CicadaUrlSource");
-    if (!cicadaCls || !cfgCls || !srcCls) {
-        self.overlayTitle.text = @"Cicada 内核不可用";
-        return;
-    }
+    if (!cicadaCls || !cfgCls || !srcCls) { self.titleLabel.text = @"Cicada 不可用"; return; }
+
     id cfg = [[cfgCls alloc] init];
     [cfg setValue:@(YES) forKey:@"isNeedUDRMDecrypt_pvt"];
     [cfg setValue:kLicenseUrl forKey:@"udrmLicenseUrl"];
@@ -426,160 +461,139 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
     self.cicadaPlayer = player;
     self.sdkPlayer = nil;
 
-    [self callInstance:player selector:NSSelectorFromString(@"setConfig:") args:@[cfg]];
-    [self callInstance:player selector:NSSelectorFromString(@"setEnableHardwareDecoder:") args:@[@(YES)]];
-    [self callInstance:player selector:NSSelectorFromString(@"setPlayerView:") args:@[self.playerBox]];
-    id source = [self callClass:srcCls selector:NSSelectorFromString(@"urlWithString:") args:@[url]];
-    if (source) [self callInstance:player selector:NSSelectorFromString(@"setUrlSource:") args:@[source]];
-    [self callInstance:player selector:NSSelectorFromString(@"prepare") args:@[]];
-    [self callInstance:player selector:NSSelectorFromString(@"start") args:@[]];
-    [self log:@"Cicada 直连已发起：%@", url];
+    [self call:player sel:@"setConfig:" args:@[cfg]];
+    [self call:player sel:@"setEnableHardwareDecoder:" args:@[@(YES)]];
+    [self call:player sel:@"setPlayerView:" args:@[self.playerBox]];
+    id source = [self callClass:srcCls sel:@"urlWithString:" args:@[url]];
+    if (source) [self call:player sel:@"setUrlSource:" args:@[source]];
+    [self call:player sel:@"prepare"];
+    [self call:player sel:@"start"];
+    [self log:@"Cicada 直连 %@", url];
     [self startWatchdog];
 }
 
-- (void)stopCurrent {
-    if (!self.currentPlayer) return;
-    [self callInstance:self.currentPlayer selector:NSSelectorFromString(@"stop") args:@[]];
-    if (self.cicadaPlayer) {
-        [self callInstance:self.cicadaPlayer selector:NSSelectorFromString(@"destroy") args:@[]];
-        self.cicadaPlayer = nil;
+- (void)stopPlayback {
+    if (self.currentPlayer) {
+        [self call:self.currentPlayer sel:@"stop"];
+        @try { [self.currentPlayer setValue:nil forKey:@"delegate"]; } @catch (NSException *e) {}
     }
-    @try { [self.currentPlayer setValue:nil forKey:@"delegate"]; } @catch (NSException *e) {}
+    if (self.cicadaPlayer) {
+        [self call:self.cicadaPlayer sel:@"destroy"];
+    }
     self.currentPlayer = nil;
-    [self.watchdog invalidate]; self.watchdog = nil;
-    [self.epgTask cancel]; [self.epgTimer invalidate];
+    self.cicadaPlayer = nil;
+    [self.watchdog invalidate];
+    self.watchdog = nil;
     for (UIView *v in self.playerBox.subviews.copy) {
-        if (v != self.overlayTitle && v != self.spinner && v != self.playPauseBtn &&
-            v != self.muteBtn && v != self.fullBtn && v != self.logBtn) {
-            [v removeFromSuperview];
-        }
+        if (v == self.titleLabel || v == self.infoLabel || v == self.spinner || v == self.controlBar) continue;
+        [v removeFromSuperview];
     }
 }
 
-- (void)attachPlayerViewAnimated:(BOOL)animated {
+- (void)attachVideoView {
     id view = nil;
     @try { view = [self.currentPlayer valueForKey:@"view"]; } @catch (NSException *e) { return; }
     if (![view isKindOfClass:UIView.class]) return;
     UIView *v = view;
     if (v.superview != self.playerBox) {
         [self.playerBox insertSubview:v atIndex:0];
-        [self.playerBox sendSubviewToBack:v];
     }
     v.translatesAutoresizingMaskIntoConstraints = YES;
-    CGRect box = self.playerBox.bounds;
-    if (!CGRectEqualToRect(v.frame, box)) {
-        v.frame = box;
-    }
+    v.frame = self.playerBox.bounds;
+    [self.playerBox sendSubviewToBack:v];
 }
 
 - (void)togglePlayPause {
     if (!self.currentPlayer) return;
     BOOL playing = NO;
     @try { playing = [[self.currentPlayer valueForKey:@"isPlaying"] boolValue]; } @catch (NSException *e) {}
-    SEL sel = NSSelectorFromString(playing ? @"pause" : @"play");
-    [self callInstance:self.currentPlayer selector:sel args:@[]];
-    [self.playPauseBtn setTitle:playing ? @"继续" : @"暂停" forState:UIControlStateNormal];
-    [self log:@"%@", playing ? @"暂停" : @"继续"];
+    [self call:self.currentPlayer sel:(playing ? @"pause" : @"play")];
+    [self.playPauseBtn setTitle:(playing ? @"继续" : @"暂停") forState:UIControlStateNormal];
 }
 
 - (void)toggleMute {
-    static BOOL muted = YES;
+    static BOOL muted = NO;
     muted = !muted;
     @try { [self.currentPlayer setValue:@(muted) forKey:@"muted"]; } @catch (NSException *e) {}
-    [self.muteBtn setTitle:muted ? @"取消静音" : @"静音" forState:UIControlStateNormal];
+    [self.muteBtn setTitle:(muted ? @"发声" : @"静音") forState:UIControlStateNormal];
 }
 
 - (void)toggleFullscreen {
     self.fullscreen = !self.fullscreen;
-    [self.fullBtn setTitle:self.fullscreen ? @"退出全屏" : @"全屏" forState:UIControlStateNormal];
     CGFloat w = self.view.bounds.size.width;
-    CGFloat h = self.view.bounds.size.height;
     if (self.fullscreen) {
-        self.playerBox.frame = CGRectMake(0, 0, w, h);
+        self.playerBox.frame = CGRectMake(0, 0, w, self.view.bounds.size.height);
         self.table.hidden = YES;
         self.groupControl.hidden = YES;
-        self.buildLabel.hidden = YES;
-        self.lastLogLabel.hidden = YES;
+        self.versionLabel.hidden = YES;
         self.navigationController.navigationBarHidden = YES;
     } else {
         self.playerBox.frame = CGRectMake(0, 0, w, w * 9.0 / 16.0);
         self.table.hidden = NO;
         self.groupControl.hidden = NO;
-        self.buildLabel.hidden = NO;
-        self.lastLogLabel.hidden = NO;
+        self.versionLabel.hidden = NO;
         self.navigationController.navigationBarHidden = NO;
     }
-    [self repositionControls];
-    [self attachPlayerViewAnimated:NO];
+    [self relayoutPlayer];
+    [self attachVideoView];
 }
 
-- (void)repositionControls {
-    CGRect box = self.playerBox.bounds;
-    self.controlBar.frame = CGRectMake(8, box.size.height - 38, box.size.width - 16, 30);
-    self.spinner.center = CGPointMake(box.size.width / 2, box.size.height / 2);
-    self.overlayTitle.frame = CGRectMake(12, 8, box.size.width - 24, 20);
-    self.nowLabel.frame = CGRectMake(12, 28, box.size.width - 24, 16);
-}
-
-- (void)toggleLog {
-    self.logVisible = !self.logVisible;
-    self.logView.hidden = !self.logVisible;
-    if (self.logVisible) {
-        self.logView.text = self.logBuffer;
-        [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length, 0)];
-    }
+- (void)relayoutPlayer {
+    CGRect b = self.playerBox.bounds;
+    self.controlBar.frame = CGRectMake(8, b.size.height - 36, b.size.width - 16, 28);
+    self.titleLabel.frame = CGRectMake(12, 8, b.size.width - 24, 20);
+    self.infoLabel.frame = CGRectMake(12, 26, b.size.width - 24, 16);
+    self.spinner.center = CGPointMake(b.size.width / 2, b.size.height / 2);
 }
 
 #pragma mark - 节目单
 
 - (void)openEPG {
-    if (!self.currentChannelID.length) { [self log:@"请先选择频道"]; return; }
-    [self openEPGforChannel:self.currentChannelID name:self.currentChannelName];
+    if (!self.channelID.length) { [self log:@"请先选择频道"]; return; }
+    [self openEPGforChannel:self.channelID name:self.channelName];
 }
 
 - (void)openEPGforChannel:(NSString *)cid name:(NSString *)name {
-    EPGViewController *vc = [[EPGViewController alloc] initWithChannelID:cid name:name];
-    [self.navigationController pushViewController:vc animated:YES];
+    [self.navigationController pushViewController:[[EPGViewController alloc] initWithChannelID:cid name:name] animated:YES];
 }
 
-- (void)startEPGTimer {
+- (void)restartEPGTimer {
     [self.epgTimer invalidate];
     self.epgTimer = [NSTimer scheduledTimerWithTimeInterval:60 target:self selector:@selector(refreshNowNext) userInfo:nil repeats:YES];
 }
 
 - (void)refreshNowNext {
-    NSString *cid = self.currentChannelID;
+    NSString *cid = self.channelID;
     if (!cid.length) return;
     self.epgChannel = cid;
-    NSString *encoded = [cid stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
-    NSString *url = [NSString stringWithFormat:@"https://api.cntv.cn/epg/get3D12HEPG?c=%@&serviceId=cbox", encoded];
+    NSString *url = [NSString stringWithFormat:@"https://api.cntv.cn/epg/get3D12HEPG?c=%@&serviceId=cbox",
+                     [cid stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]];
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
-    req.timeoutInterval = 10;
+    req.timeoutInterval = 8;
 
     __weak typeof(self) weakSelf = self;
     [self.epgTask cancel];
-    self.epgTask = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+    self.epgTask = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *r, NSError *e) {
         if (!data.length) return;
         id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
         if (![json isKindOfClass:NSDictionary.class]) return;
         NSArray *rows = [(NSDictionary *)json objectForKey:@"EPG"];
         if (![rows isKindOfClass:NSArray.class]) return;
         double now = NSDate.date.timeIntervalSince1970;
-        NSString *current = nil, *next = nil;
+        NSString *cur = nil, *next = nil;
         for (NSDictionary *row in rows) {
             if (![row isKindOfClass:NSDictionary.class]) continue;
             double s0 = [row[@"startTime"] doubleValue], e0 = [row[@"endTime"] doubleValue];
-            if (s0 > 1e11) s0 /= 1000.0;
-            if (e0 > 1e11) e0 /= 1000.0;
-            if (now >= s0 && now < e0) current = row[@"title"];
+            if (s0 > 1e11) s0 /= 1000; if (e0 > 1e11) e0 /= 1000;
+            if (now >= s0 && now < e0) cur = row[@"title"];
             else if (s0 > now && !next) next = row[@"title"];
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             if (![weakSelf.epgChannel isEqualToString:cid]) return;
             NSMutableArray *parts = [NSMutableArray array];
-            if (current) [parts addObject:[NSString stringWithFormat:@"正在播出：%@", current]];
+            if (cur) [parts addObject:[NSString stringWithFormat:@"正在播：%@", cur]];
             if (next) [parts addObject:[NSString stringWithFormat:@"接下来：%@", next]];
-            weakSelf.nowLabel.text = [parts componentsJoinedByString:@"    "];
+            if (parts.count) weakSelf.infoLabel.text = [parts componentsJoinedByString:@"  "];
         });
     }];
     [self.epgTask resume];
@@ -596,59 +610,44 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
 - (void)tick:(NSTimer *)timer {
     self.watchdogTicks += 1;
     if (!self.currentPlayer) { [timer invalidate]; return; }
-    [self attachPlayerViewAnimated:NO];
-    double pos = 0;
-    @try { pos = [[self.currentPlayer valueForKey:@"currentPosition"] doubleValue]; } @catch (NSException *e) {}
-    if (self.firstRender) {
-        [timer invalidate];          // 首帧后立即停止监视，减少主线程开销
-        [self log:@"已渲染，监视结束 pos=%.1f", pos];
-        return;
+    [self attachVideoView];
+    if (self.firstRender) { [timer invalidate]; return; }
+    if (self.watchdogTicks == 20) {     // 10 秒
+        self.titleLabel.text = [NSString stringWithFormat:@"%@ · 仍在缓冲", self.channelName];
+        [self log:@"10 秒未首帧"];
     }
-    if (self.watchdogTicks > 30) {
+    if (self.watchdogTicks >= 40) {     // 20 秒
         [timer invalidate];
         [self.spinner stopAnimating];
-        if (!self.firstRender) {
-            self.overlayTitle.text = [NSString stringWithFormat:@"%@ · 无画面", self.currentChannelName];
-            self.lastLogLabel.text = @"无画面，已自动打开日志";
-            self.logVisible = NO; [self toggleLog];
-            [self log:@"监视结束仍未首帧"];
-        }
+        self.titleLabel.text = [NSString stringWithFormat:@"%@ · 无画面", self.channelName];
+        [self log:@"20 秒未首帧，停止等待"];
     }
 }
 
 #pragma mark - 通用调用
 
-- (id)callClass:(Class)cls selector:(SEL)sel args:(NSArray *)args {
-    if (!cls || ![cls respondsToSelector:sel]) return nil;
-    NSMethodSignature *sig = [cls methodSignatureForSelector:sel];
-    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-    inv.target = cls; inv.selector = sel;
-    [self fillInvocation:inv sig:sig args:args];
-    @try { [inv invoke]; } @catch (NSException *e) { [self log:@"调用异常 %@: %@", NSStringFromSelector(sel), e.reason]; return nil; }
-    const char *rt = sig.methodReturnType;
-    if (rt[0] == '@') { void *p = NULL; [inv getReturnValue:&p]; return (__bridge id)p; }
-    if (rt[0] == 'B' || rt[0] == 'c') { char r = 0; [inv getReturnValue:&r]; return @(r != 0); }
-    return nil;
+- (id)callClass:(Class)cls sel:(NSString *)name args:(NSArray *)args {
+    return [self invokeTarget:cls selector:NSSelectorFromString(name) args:args];
 }
 
-- (id)callInstance:(id)obj selector:(SEL)sel args:(NSArray *)args {
-    if (!obj || ![obj respondsToSelector:sel]) return nil;
-    NSMethodSignature *sig = [obj methodSignatureForSelector:sel];
-    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-    inv.target = obj; inv.selector = sel;
-    [self fillInvocation:inv sig:sig args:args];
-    @try { [inv invoke]; } @catch (NSException *e) { [self log:@"调用异常 %@: %@", NSStringFromSelector(sel), e.reason]; return nil; }
-    const char *rt = sig.methodReturnType;
-    if (rt[0] == '@') { void *p = NULL; [inv getReturnValue:&p]; return (__bridge id)p; }
-    if (rt[0] == 'B' || rt[0] == 'c') { char r = 0; [inv getReturnValue:&r]; return @(r != 0); }
-    return nil;
+- (id)call:(id)obj sel:(NSString *)name {
+    return [self invokeTarget:obj selector:NSSelectorFromString(name) args:@[]];
 }
 
-- (void)fillInvocation:(NSInvocation *)inv sig:(NSMethodSignature *)sig args:(NSArray *)args {
+- (id)call:(id)obj sel:(NSString *)name args:(NSArray *)args {
+    return [self invokeTarget:obj selector:NSSelectorFromString(name) args:args];
+}
+
+- (id)invokeTarget:(id)target selector:(SEL)sel args:(NSArray *)args {
+    if (!target || ![target respondsToSelector:sel]) return nil;
+    NSMethodSignature *sig = [target methodSignatureForSelector:sel];
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    inv.target = target;
+    inv.selector = sel;
     for (NSUInteger i = 0; i < args.count && i + 2 < sig.numberOfArguments; i++) {
         const char *t = [sig getArgumentTypeAtIndex:i + 2];
         id v = args[i];
-        if (v == NSNull.null) { id zero = nil; [inv setArgument:&zero atIndex:i + 2]; continue; }
+        if (v == NSNull.null) { id z = nil; [inv setArgument:&z atIndex:i + 2]; continue; }
         if (strcmp(t, "@") == 0 || strcmp(t, "@?") == 0) {
             id a = v; [inv setArgument:&a atIndex:i + 2];
         } else if (strcmp(t, "B") == 0 || strcmp(t, "c") == 0) {
@@ -657,60 +656,75 @@ static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTV
             long long a = [v longLongValue]; [inv setArgument:&a atIndex:i + 2];
         }
     }
+    @try { [inv invoke]; } @catch (NSException *e) {
+        [self log:@"调用 %@ 异常 %@", NSStringFromSelector(sel), e.reason];
+        return nil;
+    }
+    const char *rt = sig.methodReturnType;
+    if (rt[0] == '@') { void *p = NULL; [inv getReturnValue:&p]; return (__bridge id)p; }
+    if (rt[0] == 'B' || rt[0] == 'c') { char r = 0; [inv getReturnValue:&r]; return @(r != 0); }
+    return nil;
 }
 
 #pragma mark - SDK 回调
 
 - (void)player:(id)player loadStateDidChanged:(NSUInteger)state {
-    [self log:@"loadState=%lu", (unsigned long)state];
-    [self attachPlayerViewAnimated:NO];
-    if (state == 4) {
-        [self callInstance:self.currentPlayer selector:NSSelectorFromString(@"play") args:@[]];
+    [self attachVideoView];
+    if (state == 4) {                     // PrepareDone
+        [self log:@"PrepareDone → play"];
+        [self call:self.currentPlayer sel:@"play"];
+    } else if (state == 13) {
+        [self log:@"加载取消"];
     }
 }
 
 - (void)player:(id)player vdnRequestStateDidChanged:(NSUInteger)state {
-    [self log:@"VDN state=%lu", (unsigned long)state];
-    if (state == 3) { self.overlayTitle.text = [NSString stringWithFormat:@"%@ · 已取流", self.currentChannelName]; }
-    if (state == 2) { self.overlayTitle.text = [NSString stringWithFormat:@"%@ · 取流失败", self.currentChannelName]; }
+    if (state == 3) [self log:@"VDN 成功"];
+    else if (state == 2) [self log:@"VDN 失败"];
 }
 
 - (void)player:(id)player statEvent:(NSUInteger)event value:(id)value {
     if (event == 3) {
         self.firstRender = YES;
         [self.spinner stopAnimating];
-        self.overlayTitle.text = [NSString stringWithFormat:@"%@", self.currentChannelName];
-        [self log:@"首帧已渲染"];
+        self.titleLabel.text = self.channelName;
+        [self log:@"首帧渲染"];
     }
 }
 
 - (void)player:(id)player playBackStateDidChanged:(NSUInteger)state {
-    [self log:@"playback state=%lu", (unsigned long)state];
-    if (state == 2) { [self.playPauseBtn setTitle:@"继续" forState:UIControlStateNormal]; }
-    if (state == 1) { [self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal]; }
-}
-
-- (void)authFailed:(NSError *)error {
-    [self log:@"authFailed code=%ld %@", (long)error.code, error.localizedDescription];
-    self.overlayTitle.text = @"鉴权失败";
+    if (state == 1) [self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
+    if (state == 2) [self.playPauseBtn setTitle:@"继续" forState:UIControlStateNormal];
 }
 
 - (void)player:(id)player playbackFailed:(NSError *)error {
-    [self log:@"playbackFailed code=%ld %@", (long)error.code, error.localizedDescription];
-    self.overlayTitle.text = [NSString stringWithFormat:@"%@ · 播放失败", self.currentChannelName];
+    [self log:@"播放失败 %ld %@", (long)error.code, error.localizedDescription];
+    self.titleLabel.text = [NSString stringWithFormat:@"%@ · 播放失败", self.channelName];
     [self.spinner stopAnimating];
+    if (self.retryCount < 1 && !self.firstRender) {
+        self.retryCount += 1;
+        [self log:@"失败重试一次"];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (self.channelID.length) [self playViaSDK:self.channelID];
+        });
+    }
 }
 
 - (void)player:(id)player vdnRequestFailed:(NSError *)error {
-    [self log:@"vdnRequestFailed code=%ld %@", (long)error.code, error.localizedDescription];
+    [self log:@"VDN 请求失败 %ld", (long)error.code];
 }
 
 - (void)player:(id)player parameterError:(NSError *)error rate:(id)rate {
-    [self log:@"parameterError code=%ld %@", (long)error.code, error.localizedDescription];
+    [self log:@"参数错误 %ld", (long)error.code];
 }
 
 - (void)player:(id)player publicRequestFailed:(NSError *)error {
-    [self log:@"publicRequestFailed code=%ld", (long)error.code];
+    [self log:@"版权请求失败 %ld", (long)error.code];
+}
+
+- (void)authFailed:(NSError *)error {
+    [self log:@"鉴权失败 %ld", (long)error.code];
+    self.titleLabel.text = @"鉴权失败";
 }
 
 @end
