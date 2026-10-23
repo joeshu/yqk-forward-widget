@@ -26,6 +26,7 @@
 - (void)stopPreview;
 - (NSDictionary *)channelWithID:(NSString *)identifier;
 - (void)player:(id)player statEvent:(NSUInteger)event value:(id)value;
+- (void)player:(id)player playbackFailed:(NSError *)error;
 @end
 @interface EPGViewController (Smoke)
 - (void)rebuildDates;
@@ -229,6 +230,17 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[root valueForKey:@"activeTab"] integerValue]==0, @"native playback opens CCTV page");
             retainedWrapper = [root valueForKey:@"currentPlayer"];
             playCount = [CNPlayer smokePlayCount];
+            [root selectChannel:[root channelWithID:@"cctv1"]];
+          },
+          ^{
+            check([CNPlayer smokePlayCount]==playCount && [root valueForKey:@"currentPlayer"]==retainedWrapper,
+                  @"same-channel tap preserves active session");
+            [root player:retainedWrapper playbackFailed:[NSError errorWithDomain:@"fixture" code:4012 userInfo:nil]];
+            [root selectChannel:[root channelWithID:@"cctv1"]];
+          },
+          ^{
+            check([CNPlayer smokePlayCount]==playCount+1,@"failed channel can be selected again");
+            playCount=[CNPlayer smokePlayCount];
             [root playChannel:[root channelWithID:@"cctv2"] route:nil];
             check([root valueForKey:@"currentPlayer"] == retainedWrapper,
                   @"0.12 compatible mode reuses wrapper");

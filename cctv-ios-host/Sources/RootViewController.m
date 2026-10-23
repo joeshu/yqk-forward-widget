@@ -16,6 +16,7 @@
 #import "HostBackup.h"
 #import "LocalServiceReadiness.h"
 #import "PlaybackStartupTrace.h"
+#import "NativeStartupTuner.h"
 #import "PlaybackInfoViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <AVFoundation/AVFoundation.h>
@@ -26,7 +27,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.17.0";
+static NSString *const kBuildTag = @"0.17.1";
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -59,6 +60,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property (nonatomic, strong) NSMutableDictionary<NSString *,NSURLSessionDataTask *> *epgListTasks;
 @property (nonatomic, assign) NSUInteger epgListGeneration;
 @property (nonatomic, strong) PlaybackStartupTrace *startupTrace;
+@property (nonatomic, strong) NativeStartupTuner *nativeStartupTuner;
+@property (nonatomic) BOOL nativePlaybackFailed;
 @property (nonatomic, strong) LocalServiceReadiness *playbackReadiness;
 @property (nonatomic, strong) NSMutableDictionary<NSString *,LocalServiceReadiness *> *subscriptionReadiness;
 @property (nonatomic, strong) NSMutableDictionary<NSString *,NSNumber *> *readyLocalOrigins;
@@ -644,10 +647,17 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         return [UIMenu menuWithTitle:ch[@"name"] children:actions];}];
 }
 - (void)selectChannel:(NSDictionary *)ch {
-    // Immediately invalidate pending work; rapid taps commit only the final selection.
+    // Repeated taps on an active/connecting channel must not restart VDN/DRM.
+    BOOL sameChannel=[ch[@"id"] isEqualToString:self.channelID];
+    BOOL activeNative=self.currentPlayer && !self.nativePlaybackFailed && ![ch[@"remoteURL"] length] && (self.firstRender || self.watchdog.isValid);
+    BOOL activeRemote=([ch[@"remoteURL"] isEqualToString:self.currentRemoteURL]) && (self.avPlayer || self.playbackReadiness);
+    if(sameChannel && (activeNative || activeRemote)) {
+        self.selectionVersion++;self.playerTabs.selectedSegmentIndex=0;[self selectPlayerPanel];self.playerExpanded=YES;[self.view setNeedsLayout];return;
+    }
+    // Coalesce rapid taps without the previous fixed 80 ms delay.
     NSTimeInterval selectedAt=CACurrentMediaTime();NSUInteger selection=++self.selectionVersion;self.playbackIntentVersion++;[self.playbackReadiness cancel];[self stopPreview];
     self.playerTabs.selectedSegmentIndex=0;[self selectPlayerPanel];self.playerExpanded=YES;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,80*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
+    dispatch_async(dispatch_get_main_queue(),^{
         if(selection!=self.selectionVersion)return;
         [self rememberChannel:ch];if(CCTVBoolPreference(@"rememberLastChannel",YES))[NSUserDefaults.standardUserDefaults setObject:ch forKey:@"lastChannel"];
         self.selectionRequestedAt=selectedAt;[self routePlayback:ch];[self configureCatalogNavigation];[self.view setNeedsLayout];
@@ -825,8 +835,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.initialCDNPreference=[self callClass:cls sel:@"getVDNConfig_CDNLive_DefaultCDNInfo" args:@[]];
     [self callClass:cls sel:@"authed" args:@[]];
 
-    // 续播：启动 2.5 秒后恢复上次频道
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // SDK 初始化返回后即可续播，不再固定等待 2.5 秒。
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (!CCTVBoolPreference(@"resumeLastChannel",YES)) { [self log:@"已关闭启动续播"]; return; }
         NSDictionary *last = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"lastChannel"];
         if (![last[@"id"] length] || self.channelID.length) return;
@@ -837,7 +847,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
     // 预热：提前建好播放器实例，缩短首次起播时间
     __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (weakSelf.sdkPlayer) return;
         id inst = nil;
         @try { inst = [[cls alloc] init]; } @catch (NSException *e) {}
@@ -911,6 +921,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     if(!inst||![inst respondsToSelector:playSel]){self.titleLabel.text=@"SDK 接口不可用";[self.spinner stopAnimating];return;}
     self.currentPlayer=inst;self.cicadaPlayer=nil;self.sdkPlayer=legacy?inst:nil;self.sdkPlayerUsed=YES;
     @try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}
+    self.nativePlaybackFailed=NO;
+    self.nativeStartupTuner=CCTVBoolPreference(@"fastNativeStartup",YES)?[NativeStartupTuner new]:nil;
     NSDictionary *options=@{kOptTitle:title?:cid};
     [self log:@"原生起播 %@ · %@",cid,legacy?@"0.12 兼容复用":@"独立实例对比"];
     id accepted=[self invokeTarget:inst selector:playSel args:@[cid,self,options]];
@@ -934,6 +946,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)stopPlayback {
+    self.nativeStartupTuner=nil; // Pending tuning blocks also check the playback generation.
     [self.playbackReadiness cancel];self.playbackReadiness=nil;
     if(self.avLayerObserved){[self.avLayer removeObserver:self forKeyPath:@"readyForDisplay" context:kAVLayerFrameContext];self.avLayerObserved=NO;}
 
@@ -1995,10 +2008,22 @@ static NSCache *LogoCache(void) {
     if (![NSThread isMainThread]) { NSTimeInterval received=CACurrentMediaTime();NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self log:@"SDK stat callback %@ · raw +%.3fs · mainLag %.3fs",@(event),received-self.playStartedAt,CACurrentMediaTime()-received];[self player:player statEvent:event value:value]; }); return; }
     if (player != self.currentPlayer) return;
     if(event==1)[self recordStartupStage:@"sdkStartup"];
-    if(event==2)[self recordStartupStage:@"setup"];
+    if(event==2) {
+        [self recordStartupStage:@"setup"];
+        NSUInteger generation=self.playbackGeneration;NativeStartupTuner *tuner=self.nativeStartupTuner;
+        // Setup is emitted immediately after core creation, BEFORE the SDK installs
+        // its DRM config. Run next turn to preserve that completed config.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if(generation!=self.playbackGeneration || player!=self.currentPlayer || self.firstRender || !tuner || tuner!=self.nativeStartupTuner)return;
+            BOOL applied=[tuner applyToPlayer:player];
+            [self log:@"%@",tuner.summary];if(applied)[self recordStartupStage:@"bufferTuned"];
+        });
+    }
     if (event == 3 && !self.firstRender) {
         self.firstFrameSeconds = CACurrentMediaTime() - self.playStartedAt;
-        self.firstRender = YES;[self endPlaybackPriority];
+        self.firstRender = YES;self.nativePlaybackFailed=NO;
+        if([self.nativeStartupTuner restore])[self log:@"首帧后已恢复 SDK 稳态缓冲"];
+        [self endPlaybackPriority];
         self.cicadaPending = NO;
         [self.cicadaFallbackTimer invalidate];
         [self.spinner stopAnimating];
@@ -2023,6 +2048,7 @@ static NSCache *LogoCache(void) {
 - (void)player:(id)player playbackFailed:(NSError *)error {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player playbackFailed:error]; }); return; }
     if (player != self.currentPlayer) return;
+    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];
     [self log:@"播放失败 %ld %@", (long)error.code, error.localizedDescription];
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 播放失败", self.channelName];
     [self.spinner stopAnimating];
@@ -2055,18 +2081,21 @@ static NSCache *LogoCache(void) {
 - (void)player:(id)player vdnRequestFailed:(NSError *)error {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player vdnRequestFailed:error]; }); return; }
     if (player != self.currentPlayer) return;
+    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];
     [self log:@"VDN 请求失败 %ld", (long)error.code];
 }
 
 - (void)player:(id)player parameterError:(NSError *)error rate:(id)rate {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player parameterError:error rate:rate]; }); return; }
     if (player != self.currentPlayer) return;
+    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];
     [self log:@"参数错误 %ld", (long)error.code];
 }
 
 - (void)player:(id)player publicRequestFailed:(NSError *)error {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player publicRequestFailed:error]; }); return; }
     if (player != self.currentPlayer) return;
+    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];
     [self log:@"版权请求失败 %ld", (long)error.code];
 }
 

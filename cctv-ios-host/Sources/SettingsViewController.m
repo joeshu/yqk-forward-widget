@@ -9,8 +9,9 @@
 - (void)viewDidLoad {
     [super viewDidLoad]; self.title=@"设置"; self.view.backgroundColor=UIColor.blackColor; self.navigationController.navigationBar.tintColor=UIColor.systemPinkColor;
     self.sections=@[
-      @{ @"title":@"播放", @"footer":@"默认采用 0.12 原生播放兼容流程；关闭后使用独立实例，下次选台生效。网格和列表可在直播页切换。", @"rows":@[
-        @{ @"title":@"0.12 原生播放兼容模式", @"key":@"legacyNativePlayback", @"icon":@"backward.end", @"default":@YES },
+      @{ @"title":@"播放", @"footer":@"快速起播仅降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；关闭可恢复默认缓冲。播放选项下次选台生效。", @"rows":@[
+        @{ @"title":@"原生播放器快速起播", @"key":@"fastNativeStartup", @"icon":@"bolt", @"default":@YES },
+        @{ @"title":@"复用原生播放器", @"key":@"legacyNativePlayback", @"icon":@"backward.end", @"default":@YES },
         @{ @"title":@"启动时续播上次频道", @"key":@"resumeLastChannel", @"icon":@"arrow.counterclockwise", @"default":@YES },
         @{ @"title":@"记住上次观看频道", @"key":@"rememberLastChannel", @"icon":@"bookmark", @"default":@YES },
         @{ @"title":@"自动获取节目单", @"key":@"autoLoadEPG", @"icon":@"list.bullet.rectangle", @"default":@YES },

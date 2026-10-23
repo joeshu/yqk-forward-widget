@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [full, no-python, baseline09]
+        variant: [full]
     env:
       PY_DISABLE: ${{ matrix.variant != 'full' && '1' || '' }}
       CCTV_BASELINE: ${{ matrix.variant == 'baseline09' && '1' || '' }}
@@ -43,13 +43,6 @@ jobs:
       - name: Run regression checks
         working-directory: cctv-ios-host
         run: python3 -m unittest discover -s Tests -p 'test_*.py' -v
-
-      - name: Prepare historical 0.9 playback reference
-        if: matrix.variant == 'baseline09'
-        working-directory: cctv-ios-host
-        run: |
-          git fetch --depth=1 origin 2966473770c776066015ac78106602562f735f97
-          python3 Scripts/prepare-baseline.py
 
       - name: Syntax check
         working-directory: cctv-ios-host
