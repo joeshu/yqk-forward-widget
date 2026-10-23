@@ -6,7 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 SPEC = importlib.util.spec_from_file_location('host_service_runtime', Path(__file__).resolve().parents[1] / 'Scripts/host_service_runtime.py')
 runtime = importlib.util.module_from_spec(SPEC)
@@ -164,3 +164,11 @@ class ServiceRuntimeTests(unittest.TestCase):
         finally:
             client.close()
         worker.join(1)
+
+    def test_managed_http_startup_never_waits_for_reverse_dns(self):
+        with patch.object(socket, 'getfqdn', side_effect=RuntimeError('reverse DNS must not be used')):
+            worker = self.launch(self.server_source())
+            self.wait(lambda: bool(runtime._session and runtime._session.servers and runtime._session.servers[0]._host_serving.is_set()))
+            self.assertEqual(self.errors, [])
+            self.assertTrue(runtime.stop_session(1), runtime.last_error())
+            worker.join(1)

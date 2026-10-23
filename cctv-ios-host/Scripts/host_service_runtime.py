@@ -6,6 +6,7 @@ A replacement may run only after all tracked servers, workers and main have quit
 """
 import atexit
 import builtins
+import http.server
 import os
 import runpy
 import socket
@@ -24,6 +25,7 @@ _serve_forever = socketserver.BaseServer.serve_forever
 _server_close = socketserver.TCPServer.server_close
 _handle_error = socketserver.BaseServer.handle_error
 _tcp_init = socketserver.TCPServer.__init__
+_http_bind = http.server.HTTPServer.server_bind
 _get_request = socketserver.TCPServer.get_request
 _process_request = socketserver.ThreadingMixIn.process_request
 _process_thread = socketserver.ThreadingMixIn.process_request_thread
@@ -100,6 +102,16 @@ def _close(server):
             server._host_closed = True
 
 
+def _bind_http(server):
+    if getattr(server, '_host_owner', None) is None:
+        return _http_bind(server)
+    # HTTPServer normally reverse-resolves its own bind address with getfqdn.
+    # A local proxy needs no DNS name; macOS/iOS DNS stalls must not delay listen.
+    socketserver.TCPServer.server_bind(server)
+    server.server_name = server.server_address[0]
+    server.server_port = server.server_address[1]
+
+
 def _bound(server, *args, **kwargs):
     _tcp_init(server, *args, **kwargs)
     if getattr(server, '_host_owner', None) is not None:
@@ -162,6 +174,7 @@ socketserver.TCPServer.server_close = _close
 socketserver.TCPServer.get_request = _accept
 socketserver.TCPServer.__init__ = _bound
 socketserver.BaseServer.handle_error = _error
+http.server.HTTPServer.server_bind = _bind_http
 socketserver.ThreadingMixIn.process_request = _process
 socketserver.ThreadingMixIn.process_request_thread = _process_worker
 
