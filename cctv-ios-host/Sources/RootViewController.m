@@ -27,6 +27,7 @@
 #import "NativeChannelPreloader.h"
 #import "NativeTimeshiftSession.h"
 #import "PlaybackInfoViewController.h"
+#import "CNPlayerCrashGuard.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <AVFoundation/AVFoundation.h>
 #import <MediaPlayer/MediaPlayer.h>
@@ -893,6 +894,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 - (void)setupSDK {
     Class cls = NSClassFromString(@"CNPlayer");
     if (!cls) { self.titleLabel.text = @"SDK 未加载"; return; }
+    BOOL thumbnailGuardInstalled=[CNPlayerCrashGuard install];
     [self configureSDKLogging];
     [self callClass:cls sel:@"configSDK_CICADA_UDRMUrl:" args:@[kLicenseUrl]];
     @try {
@@ -901,6 +903,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         [self log:@"启动异常 %@", e.reason];
         return;
     }
+    thumbnailGuardInstalled=thumbnailGuardInstalled||[CNPlayerCrashGuard install];
+    if(thumbnailGuardInstalled)[self log:@"已启用央视播放器异常缩略图保护"];
     id ver = [self callClass:cls sel:@"SDKVersion" args:@[]];
     [self log:@"CCTVHost %@ · SDK %@ · 当前原生模式：%@ · Python %@",kBuildTag,ver,CCTVBoolPreference(@"legacyNativePlayback",YES)?@"兼容复用":@"独立实例",PyHost.running?@"运行中":@"未启动"];
     self.initialCDNPreference=[self callClass:cls sel:@"getVDNConfig_CDNLive_DefaultCDNInfo" args:@[]];
@@ -981,6 +985,9 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)playViaSDK:(NSString *)cid title:(NSString *)title {
+    // Some SDK builds load their IJK core lazily; install the guard again
+    // before prepareToPlay can enter its asynchronous decoder/error path.
+    [CNPlayerCrashGuard install];
     if([ProfileStore isHTTP:cid]){[self playRemote:@{@"id":cid,@"name":title?:cid,@"remoteURL":cid}];return;}
     [self beginPlaybackPriority];
     // Default matches v0.12: stop the old playback, reset the retained wrapper,
@@ -1020,6 +1027,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     if(!inst||([accepted isKindOfClass:NSNumber.class]&&![accepted boolValue])){
         self.titleLabel.text=[NSString stringWithFormat:@"%@ · 起播被拒绝",self.channelName];[self.spinner stopAnimating];[self log:@"SDK 拒绝起播，等待具体错误回调"];return;
     }
+    BOOL thumbnailGuardInstalled=[CNPlayerCrashGuard install];
+    if(!thumbnailGuardInstalled)[self log:@"未能安装播放器缩略图异常保护"];
     [self attachVideoView];[self call:inst sel:@"prepareToPlay"];[self recordStartupStage:@"prepareCall"];[self startWatchdog];
 }
 

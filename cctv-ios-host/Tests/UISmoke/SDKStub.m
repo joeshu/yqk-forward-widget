@@ -1,5 +1,6 @@
 // UI test target only: models the legacy wrapper lifecycle and callback ordering.
 #import "CNPlayerSDK.h"
+#import <UIKit/UIKit.h>
 @protocol CNPlayerCallbackProtocol <NSObject>
 @end
 @interface NSObject (SmokeCallbacks)
@@ -16,6 +17,16 @@
 @end
 static NSInteger resets, plays, configures;
 static id cdnPreference;
+@interface IJKFFMoviePlayerController : NSObject
+- (UIImage *)thumbnailImageAtCurrentTime;
+@end
+@implementation IJKFFMoviePlayerController
+- (UIImage *)thumbnailImageAtCurrentTime {
+    @throw [NSException exceptionWithName:NSInternalInconsistencyException
+                                   reason:@"UIGraphicsBeginImageContext failed for zero-sized frame"
+                                 userInfo:nil];
+}
+@end
 @implementation CNPlayer
 - (instancetype)init {
     if (self = [super init])

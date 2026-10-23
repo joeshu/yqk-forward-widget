@@ -13,6 +13,7 @@
 #import "HostImageLoader.h"
 #import "NodePluginRuntime.h"
 #import "MediaBrowserViewController.h"
+#import "CNPlayerCrashGuard.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
@@ -120,6 +121,10 @@ static void next(NSArray *steps, NSUInteger index) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [UIView setAnimationsEnabled:NO];
       failures = [NSMutableArray array];
+      check([CNPlayerCrashGuard install], @"CNPlayer thumbnail exception guard installs");
+      UIImage *guardedThumbnail=[[NSClassFromString(@"IJKFFMoviePlayerController") new]
+          performSelector:NSSelectorFromString(@"thumbnailImageAtCurrentTime")];
+      check(guardedThumbnail==nil, @"invalid SDK teardown thumbnail exception is contained");
       outputDir = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/ui-smoke"];
       [NSFileManager.defaultManager createDirectoryAtPath:outputDir
                               withIntermediateDirectories:YES
