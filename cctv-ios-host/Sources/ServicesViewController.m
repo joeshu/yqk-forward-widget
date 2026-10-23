@@ -13,6 +13,7 @@
 @property(nonatomic, copy) NSString *health;
 @property(nonatomic, strong) NSURLSessionDataTask *probeTask;
 @property(nonatomic, assign) BOOL probing;
+@property(nonatomic, assign) BOOL displayedRunning;
 @end
 @implementation ServiceDetailViewController
 - (instancetype)init {
@@ -38,11 +39,13 @@
             self.service = s;
     self.title = self.service[@"name"];
     [self.tableView reloadData];
+    self.displayedRunning=[self running];
     __weak typeof(self) w = self;
     self.timer = [NSTimer scheduledTimerWithTimeInterval:1
                                                  repeats:YES
                                                    block:^(NSTimer *t) {
-                                                     [w.tableView reloadData];
+                                                     BOOL running=[w running];
+                                                     if(running!=w.displayedRunning){w.displayedRunning=running;[w.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];}
                                                    }];
 }
 - (void)viewDidDisappear:(BOOL)animated {
@@ -239,6 +242,8 @@
 @property(nonatomic, strong) NSArray<NSDictionary *> *services;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) UISearchController *search;
+@property(nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *sections;
+@property(nonatomic, copy) NSString *displayedRunningID;
 @end
 @implementation ServicesViewController
 - (void)viewDidLoad {
@@ -289,12 +294,18 @@
 - (void)refresh {
     NSArray *all = [ServiceStore services];
     NSString *q = self.search.searchBar.text.lowercaseString;
-    self.services =
+    NSArray *filtered =
         q.length ? [all filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *s,
                                                                                           NSDictionary *b) {
                           return [[s[@"name"] lowercaseString] containsString:q];
                         }]]
                  : all;
+    NSString *runningID=PyHost.running?[ServiceStore activeIdentifier]:@"";
+    if([self.services isEqualToArray:filtered] && [self.displayedRunningID isEqualToString:runningID])return;
+    self.services=filtered;self.displayedRunningID=runningID;
+    NSMutableArray *running=[NSMutableArray array], *stopped=[NSMutableArray array];
+    for(NSDictionary *service in filtered){NSMutableArray *target=[service[@"id"] isEqualToString:runningID]?running:stopped;[target addObject:service];}
+    self.sections=@[running,stopped];
     [self.table reloadData];
 }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
@@ -308,11 +319,7 @@
     return 2;
 }
 - (NSArray *)rows:(NSInteger)section {
-    return [self.services
-        filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *s, NSDictionary *b) {
-          BOOL running = PyHost.running && [[ServiceStore activeIdentifier] isEqualToString:s[@"id"]];
-          return section == 0 ? running : !running;
-        }]];
+    return section<self.sections.count?self.sections[section]:@[];
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return [self rows:section].count;
@@ -352,6 +359,7 @@
                 self.onToggleService(s, sender.on);
             break;
         }
+    self.displayedRunningID=nil; // Restore the switch while asynchronous start/stop completes.
     [self refresh];
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {

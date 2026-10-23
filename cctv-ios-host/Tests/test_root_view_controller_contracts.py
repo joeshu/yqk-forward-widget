@@ -49,11 +49,6 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("requestVersion", body)
         self.assertIn("!= requestVersion", body)
 
-    def test_logo_completion_checks_reused_image_view_binding(self):
-        body = method_body("- (void)loadLogo:")
-        self.assertIn("iv.accessibilityIdentifier = url", body)
-        self.assertIn("weakIV.accessibilityIdentifier isEqualToString:url", body)
-
     def test_epg_cache_rejects_future_timestamps(self):
         body = method_body("- (void)loadEPGCache")
         self.assertRegex(body, r"ts\s*<=\s*now")
@@ -86,7 +81,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("BOOL remotePlayback = self.avPlayer != nil", body)
         self.assertIn("if (remotePlayback)", body)
         self.assertIn("playViaSDK:cid title:name", body)
-        self.assertIn("self.playbackGeneration += 1", method_body("- (void)playRemote:"))
+        self.assertIn("self.playbackGeneration += 1", method_body("- (void)startRemoteChannel:"))
 
     def test_bottom_tabs_open_service_directory_and_settings_pages(self):
         self.assertIn('- (void)buildBottomBar', TEXT)
@@ -152,7 +147,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('"--links-per-device", "2"', PYHOST)
         self.assertIn('iOS 插件安全模式', PYHOST)
 
-    def test_favorites_tab_filters_catalog(self):
+    def test_favorites_filter_remains_available(self):
         self.assertIn('self.favoritesOnly', TEXT)
         self.assertIn('if (self.favoritesOnly) {', TEXT)
 

@@ -8,6 +8,8 @@ import time
 import zipfile
 import pathlib
 import sys
+import struct
+import zlib
 
 VIDEO = base64.b64decode(pathlib.Path(__file__).with_name("video_fixture.b64").read_text())
 
@@ -15,11 +17,18 @@ VIDEO = base64.b64decode(pathlib.Path(__file__).with_name("video_fixture.b64").r
 HLS_ZIP = zipfile.ZipFile(io.BytesIO(base64.b64decode(pathlib.Path(__file__).with_name("hls_fixture.b64").read_text())))
 HLS_FILES = {name: HLS_ZIP.read(name) for name in HLS_ZIP.namelist()}
 
+def png_chunk(kind, data):
+    return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data) & 0xffffffff)
+
+LOGO = (b'\x89PNG\r\n\x1a\n' + png_chunk(b'IHDR', struct.pack('!2I5B', 1024, 1024, 8, 6, 0, 0, 0))
+        + png_chunk(b'IDAT', zlib.compress((b'\0' + b'\xff\x40\x80\xff' * 1024) * 1024)) + png_chunk(b'IEND', b''))
+
 
 class Handler(http.server.BaseHTTPRequestHandler):
     health_count = 0
     segment_lock = threading.Lock()
     segment_delayed = False
+    image_counts = {}
 
     def log_message(self, *_):
         pass
@@ -28,7 +37,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         print("GET", self.path, flush=True)
         status = 200
         content_type = "application/json"
-        if self.path == "/health":
+        if self.path == '/image-stats':
+            with type(self).segment_lock:
+                data = json.dumps(type(self).image_counts).encode()
+        elif self.path.endswith('.png'):
+            with type(self).segment_lock:
+                type(self).image_counts[self.path] = type(self).image_counts.get(self.path, 0) + 1
+            if self.path == '/oversize.png':
+                self.send_response(200)
+                self.send_header('Content-Length', str(3 * 1024 * 1024))
+                self.end_headers()
+                return
+            if self.path == '/slow-logo.png':
+                time.sleep(1.5)
+            content_type = 'image/png'
+            data = LOGO
+        elif self.path == "/health":
             type(self).health_count += 1
             data = json.dumps({"ok": type(self).health_count >= 3}).encode()
         elif self.path == "/all.m3u":

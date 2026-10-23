@@ -9,6 +9,7 @@
 #import "ServicesViewController.h"
 #import "ConfigCenterViewController.h"
 #import "HostTheme.h"
+#import "HostImageLoader.h"
 #import "HostToolbar.h"
 #import "ProfileStore.h"
 #import "XMLTVStore.h"
@@ -29,7 +30,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.17.7";
+static NSString *const kBuildTag = @"0.17.8";
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -146,7 +147,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property (nonatomic, strong) UIButton *moreBtn;
 @property (nonatomic, copy) NSString *epgChannel;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSURLSessionDataTask *> *subscriptionTasks;
-@property(nonatomic,strong) NSMutableArray<NSURLSessionDataTask *> *logoTasks;
+@property(nonatomic,strong) NSMutableSet<NSString *> *remoteAttemptedURLs;
 @property(nonatomic,strong) NSMutableDictionary *catalogStates;
 @property(nonatomic,strong) AVPlayer *previewPlayer;
 @property(nonatomic,strong) AVPlayerLayer *previewLayer;
@@ -185,7 +186,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.subscriptionReadiness=[NSMutableDictionary dictionary];
     self.readyLocalOrigins=[NSMutableDictionary dictionary];
     self.deferredLocalSubscriptions=[NSMutableSet set];
-    self.subscriptionTasks=[NSMutableDictionary dictionary];self.logoTasks=[NSMutableArray array];self.catalogStates=[NSMutableDictionary dictionary];
+    self.subscriptionTasks=[NSMutableDictionary dictionary];self.remoteAttemptedURLs=[NSMutableSet set];self.catalogStates=[NSMutableDictionary dictionary];
     [self loadChannels];
     [self buildPlayer];
     [self buildList];
@@ -214,6 +215,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (void)onBackground {
     [self.nativePreloader cancel];
+    [[HostImageLoader shared] cancelPending];
     [self stopPreview];
     [self call:self.currentPlayer sel:@"resignActive"];
     if (CCTVBoolPreference(@"autoPiP",NO) && self.avLayer && AVPictureInPictureController.isPictureInPictureSupported && !self.pip.isPictureInPictureActive) {
@@ -226,6 +228,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (void)onForeground {
     [self call:self.currentPlayer sel:@"becomeActive"];
+    if(self.activeTab<2 && CACurrentMediaTime()>=self.playbackPriorityUntil){[self.channelGrid reloadData];[self.table reloadData];}
     [self log:@"回到前台"];
 }
 
@@ -556,15 +559,14 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (void)onGroupChanged {
     self.favoritesOnly=NO;
-    if(self.activeTab==2)self.activeTab=self.subscriptionCatalog?1:0;
     for(UIButton *b in self.bottomBar.arrangedSubviews) { UIButtonConfiguration *cfg=b.configuration; cfg.baseForegroundColor=b.tag==self.activeTab?UIColor.systemPinkColor:UIColor.whiteColor; b.configuration=cfg; }
     [self configureCatalogNavigation];[self applyFilter];
 }
 
 - (void)buildBottomBar {
     self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=4; self.bottomBar.backgroundColor=[UIColor colorWithWhite:0.13 alpha:0.98]; self.bottomBar.layer.cornerRadius=24; self.bottomBar.clipsToBounds=YES;
-    NSArray *titles=@[@"CCTV",@"频道",@"收藏",@"配置",@"设置"];
-    NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"heart.fill",@"externaldrive.fill",@"gearshape"];
+    NSArray *titles=@[@"CCTV",@"频道",@"影视",@"资源",@"设置"];
+    NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"film",@"externaldrive.fill",@"gearshape"];
     for (NSInteger i=0;i<titles.count;i++) {
         UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;
         UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.baseForegroundColor=(i==0?UIColor.systemPinkColor:UIColor.whiteColor); b.configuration=cfg;
@@ -576,13 +578,14 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (void)selectBottomTab:(UIButton *)sender {
     [self stopPreview];
-    if(self.activeTab<3)self.catalogStates[@(self.activeTab)]=@{@"query":self.query?:@"",@"group":@(self.groupControl.selectedSegmentIndex),@"gridY":@(self.channelGrid.contentOffset.y),@"listY":@(self.table.contentOffset.y)};
+    if(self.activeTab<2)self.catalogStates[@(self.activeTab)]=@{@"query":self.query?:@"",@"group":@(self.groupControl.selectedSegmentIndex),@"gridY":@(self.channelGrid.contentOffset.y),@"listY":@(self.table.contentOffset.y)};
     self.activeTab=sender.tag;
     for (UIButton *b in self.bottomBar.arrangedSubviews) { UIButtonConfiguration *cfg=b.configuration; cfg.baseForegroundColor=b.tag==sender.tag?HostAccent():UIColor.whiteColor; b.configuration=cfg; }
     if(self.tabPage){[self.tabPage willMoveToParentViewController:nil];[self.tabPage.view removeFromSuperview];[self.tabPage removeFromParentViewController];self.tabPage=nil;}
-    if(sender.tag==3){ [self openConfigurationTab]; }
+    if(sender.tag==2){ [self openMediaTab]; }
+    else if(sender.tag==3){ [self openConfigurationTab]; }
     else if(sender.tag==4){ SettingsViewController *page=[self makeSettingsPage]; [self showTabPage:page title:@"设置"]; }
-    else {self.favoritesOnly=sender.tag==2;if(sender.tag<2)self.subscriptionCatalog=sender.tag==1;self.activeSource=nil;self.playerTabs.selectedSegmentIndex=0;[self selectPlayerPanel];NSDictionary *state=self.catalogStates[@(sender.tag)];self.query=state[@"query"]?:@"";self.searchController.searchBar.text=self.query;self.groupControl.selectedSegmentIndex=[state[@"group"] integerValue];[self configureCatalogNavigation];[self applyFilter];[self.view layoutIfNeeded];self.channelGrid.contentOffset=CGPointMake(0,[state[@"gridY"] doubleValue]);self.table.contentOffset=CGPointMake(0,[state[@"listY"] doubleValue]);
+    else {self.favoritesOnly=NO;if(sender.tag<2)self.subscriptionCatalog=sender.tag==1;self.activeSource=nil;self.playerTabs.selectedSegmentIndex=0;[self selectPlayerPanel];NSDictionary *state=self.catalogStates[@(sender.tag)];self.query=state[@"query"]?:@"";self.searchController.searchBar.text=self.query;self.groupControl.selectedSegmentIndex=[state[@"group"] integerValue];[self configureCatalogNavigation];[self applyFilter];[self.view layoutIfNeeded];self.channelGrid.contentOffset=CGPointMake(0,[state[@"gridY"] doubleValue]);self.table.contentOffset=CGPointMake(0,[state[@"listY"] doubleValue]);
         if(sender.tag==1&&!self.channelID.length)[self refreshSubscriptionsWhenIdle];}
     [self.view setNeedsLayout];
 }
@@ -608,7 +611,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     UIAction *history=[UIAction actionWithTitle:@"最近观看" image:[UIImage systemImageNamed:@"clock"] identifier:nil handler:^(UIAction *a){[w showHistory];}];
     UIAction *playing=[UIAction actionWithTitle:@"返回正在播放" image:[UIImage systemImageNamed:@"play.circle"] identifier:nil handler:^(UIAction *a){if(!w.channelID.length)return;[w selectBottomTab:(id)w.bottomBar.arrangedSubviews[w.currentRemoteURL.length?1:0]];w.playerExpanded=YES;[w.view setNeedsLayout];}];
     UIAction *manage=[UIAction actionWithTitle:@"整理收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[w showFavoriteManager];}];
-    return [UIMenu menuWithTitle:@"" children:self.subscriptionCatalog?@[grid,refresh,add,hide,playing,history,manage]:@[grid,hide,playing,history,manage]];
+    UIAction *favorites=[UIAction actionWithTitle:self.favoritesOnly?@"显示全部频道":@"查看收藏频道" image:[UIImage systemImageNamed:@"heart.fill"] identifier:nil handler:^(UIAction *a){w.favoritesOnly=!w.favoritesOnly;[w configureCatalogNavigation];[w applyFilter];}];
+    return [UIMenu menuWithTitle:@"" children:self.subscriptionCatalog?@[grid,refresh,add,hide,playing,history,favorites,manage]:@[grid,hide,playing,history,favorites,manage]];
 }
 - (void)showGroupMenu {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:nil preferredStyle:UIAlertControllerStyleActionSheet];NSArray *groups=@[@"全部",@"央视",@"卫视",@"地方",@"教育",@"熊猫",@"订阅"];
@@ -620,6 +624,15 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.tabPage=page;[self addChildViewController:page];[self.view addSubview:page.view];[page didMoveToParentViewController:self];self.title=title;self.navigationItem.searchController=page.navigationItem.searchController;self.navigationItem.leftBarButtonItem=nil;
     self.navigationItem.rightBarButtonItems=page.navigationItem.rightBarButtonItems;[self.view bringSubviewToFront:self.bottomBar];
 }
+- (void)openMediaTab {
+    UIViewController *page=[UIViewController new];page.view.backgroundColor=UIColor.blackColor;
+    UILabel *title=[UILabel new];title.text=@"暂无可浏览的影视资源";title.textColor=UIColor.labelColor;title.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];title.textAlignment=NSTextAlignmentCenter;
+    UILabel *detail=[UILabel new];detail.text=@"影视资源的分类、搜索和选集功能正在接入。\n直播订阅请前往频道页，资源管理请前往资源页。";detail.textColor=UIColor.secondaryLabelColor;detail.numberOfLines=0;detail.textAlignment=NSTextAlignmentCenter;detail.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];[button setTitle:@"管理资源" forState:UIControlStateNormal];button.tag=3;[button addTarget:self action:@selector(selectBottomTab:) forControlEvents:UIControlEventTouchUpInside];
+    UIStackView *stack=[[UIStackView alloc] initWithArrangedSubviews:@[title,detail,button]];stack.axis=UILayoutConstraintAxisVertical;stack.spacing=16;stack.translatesAutoresizingMaskIntoConstraints=NO;[page.view addSubview:stack];
+    [NSLayoutConstraint activateConstraints:@[[stack.leadingAnchor constraintEqualToAnchor:page.view.leadingAnchor constant:24],[stack.trailingAnchor constraintEqualToAnchor:page.view.trailingAnchor constant:-24],[stack.centerYAnchor constraintEqualToAnchor:page.view.centerYAnchor]]];
+    [self showTabPage:page title:@"影视"];
+}
 - (void)openConfigurationTab {
     ConfigCenterViewController *page=[ConfigCenterViewController new];__weak typeof(self) w=self;
     page.profilesProvider=^{return [w configurationProfiles];};page.onServices=^{[w openServicesPage];};page.onAdd=^{[w addSubscription];};page.onRefresh=^{[w onPullRefresh];};
@@ -627,13 +640,14 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     page.onSelectProfile=^(NSString *source){UIButton *b=(UIButton *)w.bottomBar.arrangedSubviews[source.length?1:0];[w selectBottomTab:b];w.activeSource=source;w.title=source.length?@"订阅直播":@"央视直播";[w applyFilter];};
     page.onEditProfile=^(NSString *source){[w editProfile:source];};
     page.onDeleteProfile=^(NSString *source){[w deleteSubscription:source];};
-    [self showTabPage:page title:@"配置中心"];
+    [self showTabPage:page title:@"资源"];
 }
 - (NSArray *)configurationProfiles {
-    NSMutableArray *rows=[NSMutableArray array];NSUInteger native=0;for(NSDictionary *c in self.allChannels)if(![c[@"remoteURL"] length])native++;
+    NSMutableArray *rows=[NSMutableArray array];NSMutableDictionary<NSString *,NSNumber *> *counts=[NSMutableDictionary dictionary];NSUInteger native=0;
+    for(NSDictionary *channel in self.allChannels){if(![channel[@"remoteURL"] length])native++;for(NSString *source in [NSSet setWithArray:channel[@"subscriptionSources"]?:@[]])counts[source]=@([counts[source] unsignedIntegerValue]+1);}
     [rows addObject:@{@"name":@"央视直播 · 官方频道",@"source":@"",@"epgStatus":@"官方",@"count":@(native),@"enabled":@(CCTVBoolPreference(@"nativeChannelsEnabled",YES))}];
     NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
-    for(NSString *u in [ProfileStore orderedSources:self.subscriptionURLs.allObjects]){NSUInteger count=0;for(NSDictionary *c in self.allChannels)if([c[@"subscriptionSources"] containsObject:u])count++;[rows addObject:@{@"name":[ProfileStore metadata:u][@"name"]?:[NSURL URLWithString:u].host?:@"本地播放列表",@"status":[ProfileStore metadata:u][@"status"]?:@"等待刷新",@"epgStatus":([ProfileStore metadata:u][@"epgURL"]?:[ProfileStore metadata:u][@"detectedEPGURL"])?@"已配置":@"自动匹配",@"source":u,@"count":@(count),@"enabled":@(![disabled containsObject:u])}];}return rows;
+    for(NSString *u in [ProfileStore orderedSources:self.subscriptionURLs.allObjects]){NSDictionary *metadata=[ProfileStore metadata:u];[rows addObject:@{@"name":metadata[@"name"]?:[NSURL URLWithString:u].host?:@"本地播放列表",@"status":metadata[@"status"]?:@"等待刷新",@"epgStatus":(metadata[@"epgURL"]?:metadata[@"detectedEPGURL"])?@"已配置":@"自动匹配",@"source":u,@"count":counts[u]?:@0,@"enabled":@(![disabled containsObject:u])}];}return rows;
 }
 - (void)deleteSubscription:(NSString *)source {
     [self.subscriptionTasks[source] cancel];[self.subscriptionTasks removeObjectForKey:source];[ProfileStore remove:source];
@@ -1081,7 +1095,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         self.playbackPanel.view.hidden=YES;
         self.tabPage.view.hidden=YES;
     } else {
-        BOOL catalog=self.activeTab<3;
+        BOOL catalog=self.activeTab<2;
         BOOL matchingPlayer=self.favoritesOnly||(self.subscriptionCatalog==([self.currentRemoteURL length]>0));
         BOOL expanded=self.playerExpanded&&matchingPlayer;
         CGFloat ph=expanded?MIN(w*9.0/16.0,MAX(120,(height-top-safe.bottom)*0.50)):0;
@@ -1223,7 +1237,21 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 - (void)importLocalConfiguration {self.importingPlaylist=NO;UIDocumentPickerViewController *v=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];v.delegate=self;[self presentViewController:v animated:YES completion:nil];}
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    NSURL *u=urls.firstObject;BOOL scoped=[u startAccessingSecurityScopedResource];NSData *data=[NSData dataWithContentsOfURL:u];if(scoped)[u stopAccessingSecurityScopedResource];if(self.importingPlaylist){self.importingPlaylist=NO;[self importPlaylistData:data name:u.lastPathComponent];return;}
+    NSURL *u=urls.firstObject;if(!u)return;
+    BOOL playlist=self.importingPlaylist;self.importingPlaylist=NO;
+    BOOL scoped=[u startAccessingSecurityScopedResource];__weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{@autoreleasepool {
+        NSUInteger limit=(playlist?10:32)*1024*1024;NSError *readError=nil;NSData *data=nil;
+        NSFileHandle *file=[NSFileHandle fileHandleForReadingFromURL:u error:&readError];
+        @try {if(file)data=[file readDataUpToLength:limit+1 error:&readError];}
+        @catch(NSException *exception){readError=[NSError errorWithDomain:@"CCTVHostImport" code:1 userInfo:@{NSLocalizedDescriptionKey:@"无法读取所选资源文件"}];}
+        @finally {[file closeAndReturnError:NULL];if(scoped)[u stopAccessingSecurityScopedResource];}
+        if(data.length>limit){data=nil;readError=[NSError errorWithDomain:@"CCTVHostImport" code:2 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"文件超过 %lu MB 导入上限",(unsigned long)(limit/1024/1024)]}];}
+        dispatch_async(dispatch_get_main_queue(), ^{if(readError){[weakSelf showServiceError:readError.localizedDescription];return;}[weakSelf finishResourceImport:data playlist:playlist name:u.lastPathComponent];});
+    }});
+}
+- (void)finishResourceImport:(NSData *)data playlist:(BOOL)playlist name:(NSString *)name {
+    if(playlist){[self importPlaylistData:data name:name];return;}
     NSError *error=nil;NSDictionary *backup=[HostBackup validatedBackup:data error:&error];if(!backup){[self showServiceError:error.localizedDescription];return;}
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"导入本机配置" message:@"将替换本机订阅、收藏和偏好。Python 服务代码单独导入，不受影响。" preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[a addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         for(NSString *source in self.subscriptionURLs.allObjects){self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);[self removeSubscriptionSource:source];}
@@ -1421,30 +1449,9 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 #pragma mark - 台标
 
-static NSCache *LogoCache(void) {
-    static NSCache *cache;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ cache = [NSCache new]; cache.countLimit = 200; });
-    return cache;
-}
-
 - (void)loadLogo:(NSString *)url into:(UIImageView *)iv {
-    iv.image = nil;
-    iv.accessibilityIdentifier = url;
-    if (!url.length) return;
-    UIImage *cached = [LogoCache() objectForKey:url];
-    if (cached) { iv.image = cached; return; }
-    if(CACurrentMediaTime()<self.playbackPriorityUntil)return;
-    __weak UIImageView *weakIV = iv;
-    NSURLSessionDataTask *logoTask=[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:url] completionHandler:^(NSData *data, NSURLResponse *r, NSError *e) {
-        if (!data.length) return;
-        UIImage *img = [UIImage imageWithData:data];
-        if (!img) return;
-        [LogoCache() setObject:img forKey:url];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (weakIV && [weakIV.accessibilityIdentifier isEqualToString:url]) weakIV.image = img;
-        });
-    }];[self.logoTasks addObject:logoTask];[logoTask resume];
+    if(CACurrentMediaTime()<self.playbackPriorityUntil){iv.image=nil;iv.accessibilityIdentifier=url;return;}
+    [[HostImageLoader shared] loadURL:url intoImageView:iv];
 }
 
 #pragma mark - 搜索 / 最近 / 节目单缓存
@@ -1566,9 +1573,10 @@ static NSCache *LogoCache(void) {
 #pragma mark - 订阅（m3u 源 / 本地插件）
 
 - (void)addSubscription {
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"添加配置" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"导入资源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"订阅链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self addSubscriptionURL];}]];
     [a addAction:[UIAlertAction actionWithTitle:@"导入 M3U 文件" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){self.importingPlaylist=YES;UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];picker.delegate=self;[self presentViewController:picker animated:YES completion:nil];}]];
+    [a addAction:[UIAlertAction actionWithTitle:@"管理脚本与服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self openServicesPage];}]];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.sourceView=self.bottomBar;a.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:a animated:YES completion:nil];
 }
 - (void)addSubscriptionURL {
@@ -1757,10 +1765,15 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)playRemote:(NSDictionary *)ch {
+    [self.remoteAttemptedURLs removeAllObjects];
+    [self startRemoteChannel:ch];
+}
+- (void)startRemoteChannel:(NSDictionary *)ch {
+    NSString *u=[self stableURLKey:ch[@"remoteURL"]];if(!u.length)return;
+    [self.remoteAttemptedURLs addObject:u];
     [self.nativePreloader cancel];
     [self beginPlaybackPriority];
     if(self.activeTab!=1)[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[1]];
-    NSString *u=[self stableURLKey:ch[@"remoteURL"]];if(!u.length)return;
     self.playbackGeneration += 1;self.selectionVersion++;NSUInteger generation=self.playbackGeneration;
     NSTimeInterval requestedAt=self.selectionRequestedAt?:CACurrentMediaTime();self.selectionRequestedAt=0;
     [self stopPlayback];self.playerExpanded=YES;[self.view setNeedsLayout];
@@ -1820,6 +1833,7 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)avItemFailed:(NSNotification *)n {
+    if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self avItemFailed:n];});return;}
     if (n.object != self.avPlayer.currentItem) return;
     NSError *e = n.userInfo[AVPlayerItemFailedToPlayToEndTimeErrorKey];
     [self endPlaybackPriority];
@@ -1828,14 +1842,16 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)tryAlternateSource {
-    NSString *name = self.channelName;
-    NSMutableArray *alts = self.altSources[name];
-    if (alts.count < 2) return;
-    NSString *current = self.channelID;
-    for (NSString *u in alts) {
-        if ([u isEqualToString:current]) continue;
-        [self log:@"换源重试 %@", u];
-        [self playRemote:@{@"id": u, @"name": name ?: u, @"group": @"订阅", @"remoteURL": u}];
+    if(!self.remotePlaybackWanted || self.remoteAttemptedURLs.count>=4)return;
+    NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
+    for (NSDictionary *channel in self.allChannels) {
+        if(![channel[@"name"] isEqualToString:self.channelName])continue;
+        NSString *url=[self stableURLKey:channel[@"remoteURL"]];
+        if(!url.length || [self.remoteAttemptedURLs containsObject:url])continue;
+        NSMutableSet *owners=[NSMutableSet setWithArray:channel[@"subscriptionSources"]?:@[]];[owners minusSet:disabled];
+        if(!owners.count)continue;
+        [self log:@"换源重试 %lu/4",(unsigned long)self.remoteAttemptedURLs.count+1];
+        [self startRemoteChannel:channel];
         return;
     }
 }
@@ -1853,7 +1869,7 @@ static NSCache *LogoCache(void) {
         if([kp isEqualToString:@"playbackLikelyToKeepUp"]){
             if(item.playbackLikelyToKeepUp && self.remotePlaybackWanted && self.avPlayer.rate==0){[self.avPlayer play];[self log:@"订阅分片恢复，继续原播放会话"];}return;
         }
-        if(item.status==AVPlayerItemStatusReadyToPlay){[self recordStartupStage:@"itemReady"];[self log:@"订阅播放器就绪，继续等待视频渲染"];}else if(item.status==AVPlayerItemStatusFailed){[self endPlaybackPriority];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 失败",self.channelName];[self log:@"订阅失败 %@",item.error.localizedDescription];}
+        if(item.status==AVPlayerItemStatusReadyToPlay){[self recordStartupStage:@"itemReady"];[self log:@"订阅播放器就绪，继续等待视频渲染"];}else if(item.status==AVPlayerItemStatusFailed){[self endPlaybackPriority];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 失败",self.channelName];[self log:@"订阅失败 %@",item.error.localizedDescription];NSUInteger failedGeneration=self.playbackGeneration;dispatch_async(dispatch_get_main_queue(),^{if(failedGeneration==self.playbackGeneration && item==self.avPlayer.currentItem)[self tryAlternateSource];});}
         return;
     }
     [super observeValueForKeyPath:kp ofObject:obj change:change context:context];
@@ -2279,11 +2295,11 @@ static NSCache *LogoCache(void) {
     for(NSString *source in self.subscriptionTasks.allKeys){[self.subscriptionTasks[source] cancel];[self.deferredLocalSubscriptions addObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);}
     [self.subscriptionTasks removeAllObjects];
     for(NSString *source in self.subscriptionReadiness.allKeys){[self.subscriptionReadiness[source] cancel];[self.deferredLocalSubscriptions addObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);}[self.subscriptionReadiness removeAllObjects];
-    for(NSURLSessionDataTask *t in self.logoTasks)[t cancel];[self.logoTasks removeAllObjects];
+    [[HostImageLoader shared] cancelPending];
 }
 - (void)endPlaybackPriority {
     self.playbackPriorityUntil=0;[[XMLTVStore shared] setPaused:NO];NSUInteger generation=self.playbackGeneration;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{if(generation==self.playbackGeneration&&CACurrentMediaTime()>=self.playbackPriorityUntil){[self refreshSubscriptionsWhenIdle];[self.channelGrid reloadData];}});
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{if(generation==self.playbackGeneration&&CACurrentMediaTime()>=self.playbackPriorityUntil){[self refreshSubscriptionsWhenIdle];if(self.activeTab<2){[self.channelGrid reloadData];[self.table reloadData];}}});
 }
 - (void)refreshSubscriptionsWhenIdle {
     if(CACurrentMediaTime()<self.playbackPriorityUntil)return;

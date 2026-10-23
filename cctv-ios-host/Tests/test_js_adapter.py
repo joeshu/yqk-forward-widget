@@ -5,6 +5,7 @@ from pathlib import Path
 import threading
 import time
 import unittest
+from unittest import mock
 
 PATH = Path(__file__).resolve().parents[1] / 'Plugins/yangshipin-js.py'
 SPEC = importlib.util.spec_from_file_location('yangshipin_js_adapter', PATH)
@@ -79,6 +80,19 @@ class JSAdapterTests(unittest.TestCase):
         self.assertEqual(status, 502)
         self.assertIn('官方暂不提供', body)
         self.assertEqual(self.request('/unknown.m3u8')[0], 404)
+
+    def test_optional_epg_failure_does_not_append_a_second_http_response(self):
+        with mock.patch.object(self.adapter, 'refresh_epg', side_effect=RuntimeError('thread unavailable')):
+            self.assertEqual(self.request('/cctv1.m3u8')[:2], (200, MANIFEST))
+
+    def test_partial_start_failure_attempts_cleanup_and_preserves_original_error(self):
+        operations = []
+        def broken(operation, payload):
+            operations.append(operation)
+            raise RuntimeError('start error' if operation == 'start' else 'stop error')
+        with self.assertRaisesRegex(RuntimeError, 'start error'):
+            adapter_module.JSAdapter(broken)
+        self.assertEqual(operations, ['start', 'stop'])
 
     def test_stop_closes_native_js_session_and_http_server(self):
         self.assertTrue(self.adapter.stop())

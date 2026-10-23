@@ -10,6 +10,7 @@
 #import "ProfileStore.h"
 #import "XMLTVStore.h"
 #import "ServicesViewController.h"
+#import "HostImageLoader.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
@@ -27,6 +28,8 @@
 - (void)togglePlayPause;
 - (void)avItemStalled:(NSNotification *)notification;
 - (void)playRemote:(NSDictionary *)channel;
+- (void)tryAlternateSource;
+- (void)stopPlayback;
 - (void)playChannel:(NSDictionary *)channel route:(NSDictionary *)route;
 - (void)importPlaylistData:(NSData *)data name:(NSString *)name;
 - (void)previewChannel:(NSDictionary *)channel;
@@ -118,6 +121,8 @@ static void next(NSArray *steps, NSUInteger index) {
       __block AVPlayer *hlsPlayer;
       __block NSInteger configuredBeforeHandoff;
       __block id preparedWrapper;
+      __block UIImageView *logoA, *logoB, *staleLogo, *oversizeLogo;
+      __block NSDictionary *imageStats;
       NSArray *steps = @[
           ^{
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
@@ -149,13 +154,21 @@ static void next(NSArray *steps, NSUInteger index) {
           },
           ^{
             [root setValue:[NSMutableArray arrayWithObject:@"cctv1"] forKey:@"favorites"];
-            [root selectBottomTab:(id)tabs.arrangedSubviews[2]];
+            [root setValue:@YES forKey:@"favoritesOnly"];
+            [root applyFilter];
           },
           ^{
             NSArray *shown = [root valueForKey:@"shownChannels"];
             check(shown.count == 1, @"favorite filter returns only saved channel");
             capture(self.window, @"02-favorites");
+            [root selectBottomTab:(id)tabs.arrangedSubviews[2]];
+            [root.view layoutIfNeeded];
+            check([root.title isEqualToString:@"影视"], @"media tab has separate title");
+            check([root valueForKey:@"tabPage"] != nil, @"media page embedded");
+            check([[root valueForKey:@"channelGrid"] isHidden], @"media page hides live channel grid");
+            capture(self.window, @"02-media");
             [root selectBottomTab:(id)tabs.arrangedSubviews[3]];
+            check([root.title isEqualToString:@"资源"], @"resources tab has resource title");
           },
           ^{
             check([[root valueForKey:@"tabPage"]
@@ -404,7 +417,52 @@ static void next(NSArray *steps, NSUInteger index) {
             check(replays==0,@"future EPG programme cannot replay");
             [(id<UITableViewDelegate>)page tableView:nil didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             check(replays==1,@"past EPG programme invokes replay callback");
-          }
+          },
+          ^{
+            NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];
+            NSString *base=[NSString stringWithFormat:@"http://127.0.0.1:%@",arguments[at+1]];
+            NSArray *original=[root valueForKey:@"allChannels"];NSMutableArray *channels=[original mutableCopy];
+            for(NSUInteger i=0;i<6;i++){NSString *url=[@"http://127.0.0.1:1" stringByAppendingFormat:@"/failure%lu.m3u8",(unsigned long)i];[channels addObject:@{@"id":url,@"remoteURL":url,@"name":@"Fallback fixture",@"subscriptionSources":@[i==1?@"disabled-fallback":@"enabled-fallback"]}];}
+            [NSUserDefaults.standardUserDefaults setObject:@[@"disabled-fallback"] forKey:@"disabledSubscriptions"];
+            [root setValue:channels forKey:@"allChannels"];
+            [root playRemote:channels[original.count]];
+            [root tryAlternateSource];
+            check([[root valueForKey:@"currentRemoteURL"] hasSuffix:@"failure2.m3u8"],@"fallback skips disabled subscriptions");
+            [root tryAlternateSource];[root tryAlternateSource];
+            check([[root valueForKey:@"remoteAttemptedURLs"] count]==4,@"fallback is bounded to four distinct URLs");
+            NSUInteger generation=[[root valueForKey:@"playbackGeneration"] unsignedIntegerValue];
+            [root tryAlternateSource];
+            check(generation==[[root valueForKey:@"playbackGeneration"] unsignedIntegerValue],@"failed URLs cannot ping-pong indefinitely");
+            [root playRemote:channels[original.count]];
+            check([[root valueForKey:@"remoteAttemptedURLs"] count]==1,@"manual selection resets retry budget");
+            [root stopPlayback];[root setValue:original forKey:@"allChannels"];
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:@"disabledSubscriptions"];
+            HostImageLoader *loader=HostImageLoader.shared;
+            [loader cancelPending];[loader clearCache];
+            logoA=[UIImageView new];logoB=[UIImageView new];staleLogo=[UIImageView new];oversizeLogo=[UIImageView new];
+            [loader loadURL:[base stringByAppendingString:@"/logo.png"] intoImageView:logoA];
+            [loader loadURL:[base stringByAppendingString:@"/logo.png"] intoImageView:logoB];
+            [loader loadURL:[base stringByAppendingString:@"/slow-logo.png"] intoImageView:staleLogo];
+            staleLogo.accessibilityIdentifier=@"reused-for-another-channel";
+            [loader loadURL:[base stringByAppendingString:@"/oversize.png"] intoImageView:oversizeLogo];
+          },
+          @{@"until":^BOOL{return logoA.image!=nil && logoB.image!=nil;},@"run":^{
+            check(logoA.image && logoB.image,@"coalesced logo request updates both views");
+            check(logoA.image.size.width<=192 && logoA.image.size.height<=192,@"large logo is downsampled off main thread");
+            check(staleLogo.image==nil,@"reused image view ignores stale logo completion");
+            check(oversizeLogo.image==nil,@"oversized logo response is rejected");
+            NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];
+            NSString *base=[NSString stringWithFormat:@"http://127.0.0.1:%@",arguments[at+1]];
+            [HostImageLoader.shared loadURL:[base stringByAppendingString:@"/logo.png"] intoImageView:logoA];
+            [HostImageLoader.shared loadURL:[base stringByAppendingString:@"/oversize.png"] intoImageView:oversizeLogo];
+            [[NSURLSession.sharedSession dataTaskWithURL:[NSURL URLWithString:[base stringByAppendingString:@"/image-stats"]] completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){NSDictionary *stats=data?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;dispatch_async(dispatch_get_main_queue(),^{imageStats=stats;});}] resume];
+          }},
+          @{@"until":^BOOL{return imageStats!=nil;},@"run":^{
+            check([imageStats[@"/logo.png"] integerValue]==1,@"duplicate and cached logos cause only one network request");
+            check([imageStats[@"/oversize.png"] integerValue]==1,@"failed logo is not immediately retried");
+            check(staleLogo.image==nil,@"late logo result cannot overwrite reused cell");
+            [HostImageLoader.shared cancelPending];
+          }}
       ];
       next(steps, 0);
     });

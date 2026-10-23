@@ -112,7 +112,7 @@ clang -arch arm64 \
   -fobjc-arc \
   -I Sources/Include \
   -F Frameworks \
-  -framework JavaScriptCore -framework Security -framework Foundation -framework UIKit -framework CoreGraphics -framework CoreMedia -framework UniformTypeIdentifiers -framework QuartzCore \
+  -framework JavaScriptCore -framework Security -framework Foundation -framework UIKit -framework ImageIO -framework CoreGraphics -framework CoreMedia -framework UniformTypeIdentifiers -framework QuartzCore \
   -framework CNPlayerSDK -framework CicadaPlayerSDK -framework alivcffmpeg -framework AVFoundation -framework MediaPlayer -framework AVKit \
   $( [ -z "${PY_DISABLE:-}" ] && echo "-F $APP/Frameworks -framework Python -I $PY_INC" ) \
   -lz -lsqlite3 -lbz2 -liconv -lc++ \

@@ -25,12 +25,15 @@ class JSAdapter:
         self.epg = {}
         self.epg_pending = set()
         self.epg_slots = threading.BoundedSemaphore(1)
-        self.call('start')
         try:
+            self.call('start')
             self.channels = self.call('catalog')
             self.by_id = {channel['id']: channel for channel in self.channels}
         except BaseException:
-            self.call('stop')
+            try:
+                self.call('stop')
+            except Exception:
+                pass  # Preserve the original initialization failure.
             raise
         self.server = None
 
@@ -199,9 +202,16 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_body(502, result.get('desc', 'JS 提取器未返回可用直播清单'))
                     return
                 self.send_body(200, result['manifestText'], 'application/vnd.apple.mpegurl')
-                adapter.refresh_epg(channel)
             except Exception as error:
                 self.send_body(502, str(error))
+                return
+            # Playback has already succeeded. Optional metadata failures must not
+            # append a second HTTP response or turn a healthy HLS load into 502.
+            try:
+                adapter.refresh_epg(channel)
+            except Exception as error:
+                if not adapter.stopping.is_set():
+                    print('[JS EPG] 后台更新未启动:', error)
         else:
             self.send_body(404, '没有此接口', head=head)
 

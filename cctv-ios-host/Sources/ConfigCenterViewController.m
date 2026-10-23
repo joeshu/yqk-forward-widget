@@ -13,23 +13,23 @@
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"配置中心";
+    self.title = @"资源";
     self.tableView.backgroundColor = UIColor.blackColor;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.rowHeight = 100;
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.search.searchResultsUpdater = self;
     self.search.obscuresBackgroundDuringPresentation = NO;
-    self.search.searchBar.placeholder = @"搜索配置";
+    self.search.searchBar.placeholder = @"搜索资源";
     self.navigationItem.searchController = self.search;
     UIRefreshControl *r = [UIRefreshControl new];
     [r addTarget:self action:@selector(refreshProfiles) forControlEvents:UIControlEventValueChanged];
     self.refreshControl = r;
     __weak typeof(self) w=self;
     self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
-        @{@"icon":@"arrow.clockwise",@"title":@"刷新配置",@"action":[UIAction actionWithHandler:^(UIAction *a){[w refreshProfiles];}]},
-        @{@"icon":@"plus",@"title":@"添加配置",@"action":[UIAction actionWithHandler:^(UIAction *a){[w add];}]},
-        @{@"icon":@"ellipsis",@"title":@"配置操作",@"menu":[UIMenu menuWithChildren:@[[UIAction actionWithTitle:@"服务管理" image:[UIImage systemImageNamed:@"hand.tap"] identifier:nil handler:^(UIAction *a){if(w.onServices)w.onServices();}]]]}])];
+        @{@"icon":@"arrow.clockwise",@"title":@"刷新资源",@"action":[UIAction actionWithHandler:^(UIAction *a){[w refreshProfiles];}]},
+        @{@"icon":@"plus",@"title":@"导入资源",@"action":[UIAction actionWithHandler:^(UIAction *a){[w add];}]},
+        @{@"icon":@"ellipsis",@"title":@"资源操作",@"menu":[UIMenu menuWithChildren:@[[UIAction actionWithTitle:@"脚本与服务" image:[UIImage systemImageNamed:@"hand.tap"] identifier:nil handler:^(UIAction *a){if(w.onServices)w.onServices();}]]]}])];
     [self reloadProfiles];
 }
 - (void)viewWillAppear:(BOOL)animated {
@@ -69,13 +69,13 @@
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0)
-        return @"本机";
+        return @"脚本资源";
     if(section>1)return nil;
     NSUInteger n = 0;
     for (NSDictionary *p in self.profiles)
         if ([p[@"enabled"] boolValue])
             n++;
-    return [NSString stringWithFormat:@"共 %lu 项配置 · 已启用 %lu 项", (unsigned long)self.profiles.count,
+    return [NSString stringWithFormat:@"共 %lu 项资源 · 已启用 %lu 项", (unsigned long)self.profiles.count,
                                       (unsigned long)n];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -94,7 +94,7 @@
     c.accessoryView = nil;
     c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     if (ip.section == 0) {
-        c.textLabel.text = @"服务";
+        c.textLabel.text = @"脚本与服务";
         c.detailTextLabel.text = PyHost.running ? @"Python 运行中 · 管理本机服务" : @"管理本机 Python 服务";
         c.imageView.image = [UIImage systemImageNamed:@"externaldrive"];
     } else {
@@ -153,7 +153,7 @@
     return [UIContextMenuConfiguration configurationWithIdentifier:source previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
         NSMutableArray *actions=[NSMutableArray arrayWithObject:[UIAction actionWithTitle:@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
         for(NSNumber *offset in @[@(-1),@1]){[actions addObject:[UIAction actionWithTitle:offset.integerValue<0?@"上移":@"下移" image:[UIImage systemImageNamed:offset.integerValue<0?@"arrow.up":@"arrow.down"] identifier:nil handler:^(UIAction *a){NSArray *sources=[w.profiles valueForKey:@"source"];sources=[sources filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *s,NSDictionary *b){return s.length>0;}]];[ProfileStore move:source offset:offset.integerValue sources:sources];[w reloadProfiles];}]];}
-        return [UIMenu menuWithTitle:@"配置操作" children:actions];
+        return [UIMenu menuWithTitle:@"资源操作" children:actions];
     }];
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {return section>1?12:UITableViewAutomaticDimension;}
