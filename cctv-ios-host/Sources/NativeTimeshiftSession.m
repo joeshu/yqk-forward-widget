@@ -14,7 +14,7 @@
 - (BOOL)seekStart:(NSTimeInterval)start end:(NSTimeInterval)end now:(NSTimeInterval)now completion:(void (^)(BOOL,NSError *))completion {
     if(!isfinite(start)||!isfinite(end)||!isfinite(now)||start<=0||start>=now||end<0||(end!=0&&(end<=start||end>now)))return NO;
     SEL sel=@selector(seekToStartTime:endTime:completionHandler:);
-    NSMethodSignature *signature=[self.player methodSignatureForSelector:sel];
+    NSMethodSignature *signature=[(NSObject *)self.player methodSignatureForSelector:sel];
     if(!signature || signature.numberOfArguments!=5 || signature.methodReturnType[0]!='v' || [signature getArgumentTypeAtIndex:2][0]!='d' || [signature getArgumentTypeAtIndex:3][0]!='d' || strcmp([signature getArgumentTypeAtIndex:4],"@?")!=0)return NO;
     NSUInteger generation=++self.generation;__weak typeof(self) weakSelf=self;__block BOOL delivered=NO;
     @try {
@@ -30,7 +30,7 @@
 }
 - (BOOL)backToLive {
     [self cancel];
-    NSMethodSignature *signature=[self.player methodSignatureForSelector:@selector(backToLive)];
+    NSMethodSignature *signature=[(NSObject *)self.player methodSignatureForSelector:@selector(backToLive)];
     if(!signature || signature.numberOfArguments!=2 || signature.methodReturnType[0]!='v')return NO;
     @try{[self.player backToLive];return YES;}@catch(NSException *exception){return NO;}
 }
