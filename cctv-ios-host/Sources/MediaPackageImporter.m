@@ -65,6 +65,30 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
 }
 
 @implementation MediaPackageImporter
++ (void)migrateLegacyRuntimeMetadata {
+    NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
+    NSMutableArray *services=[[defaults arrayForKey:@"pythonServices"] mutableCopy];
+    if(!services.count)return;
+    BOOL changed=NO;
+    for(NSUInteger index=0;index<services.count;index++){
+        NSDictionary *service=services[index];NSDictionary *manifest=service[@"manifest"];
+        NSString *root=service[@"packageRoot"];
+        if([service[@"builtin"] boolValue] || ![service[@"engine"] isEqual:@"javascript"] ||
+           ![manifest isKindOfClass:NSDictionary.class] || ![root isKindOfClass:NSString.class] || !root.length)continue;
+        NSDictionary *detected=[self inspectDirectory:root error:NULL];
+        if(![detected[@"runtime"] isEqual:@"node"])continue;
+        NSMutableDictionary *updatedManifest=[detected mutableCopy];
+        [updatedManifest removeObjectForKey:@"packageRoot"];
+        if(manifest[@"options"] && !updatedManifest[@"options"])updatedManifest[@"options"]=manifest[@"options"];
+        NSMutableDictionary *updatedService=[service mutableCopy];
+        updatedService[@"manifest"]=updatedManifest;
+        updatedService[@"engine"]=updatedManifest[@"runtime"];
+        updatedService[@"protocol"]=updatedManifest[@"protocol"];
+        services[index]=updatedService;changed=YES;
+    }
+    if(changed)[defaults setObject:services forKey:@"pythonServices"];
+}
+
 + (NSDictionary *)inspectDirectory:(NSString *)directory error:(NSError **)error {
     NSFileManager *fm=NSFileManager.defaultManager;NSString *root=directory;
     NSArray *visible=[[fm contentsOfDirectoryAtPath:root error:error] filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *name,NSDictionary *bindings){return ![name hasPrefix:@"."] && ![name isEqual:@"__MACOSX"];}]];
@@ -89,7 +113,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(!SafeRelative(entry) || ![fm fileExistsAtPath:[root stringByAppendingPathComponent:entry]]){PackageError(error,@"无法识别入口；请在 cctvhost.json 中指定 entry");return nil;}
     NSString *text=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:entry]],PackageFileLimit,error) encoding:NSUTF8StringEncoding];if(!text.length){PackageError(error,@"入口不是有效 UTF-8 文本或文件过大");return nil;}
     NSString *runtime=result[@"runtime"],*protocol=result[@"protocol"],*moduleType=result[@"moduleType"];
-    if(!runtime.length)runtime=[entry.pathExtension.lowercaseString isEqual:@"py"]?@"python":@"javascript";
+    if(!runtime.length && [entry.pathExtension.lowercaseString isEqual:@"py"])runtime=@"python";
     if(!protocol.length){
         if([runtime isEqual:@"python"]){protocol=[text rangeOfString:@"class Spider"].location!=NSNotFound?@"python-spider":@"python-http";}
         else if([text containsString:@"createService"] && [text containsString:@"/config"] && [text containsString:@"/spider/"]){runtime=@"node";protocol=@"catpaw-http";}
@@ -99,6 +123,12 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         else protocol=@"cctvhost.media/1";
     }
     if(!moduleType.length)moduleType=[entry.pathExtension isEqual:@"cjs"] || [text containsString:@"module.exports"]?@"commonjs":([package[@"type"] isEqual:@"module"] || [text rangeOfString:@"(?:^|\\n)\\s*(?:import|export)\\s" options:NSRegularExpressionSearch].location!=NSNotFound?@"esm":@"script");
+    if(!runtime.length){
+        NSDictionary *dependencies=[package[@"dependencies"] isKindOfClass:NSDictionary.class]?package[@"dependencies"]:@{};
+        BOOL hasCommonJSRequire=[text rangeOfString:@"\\brequire\\s*\\(\\s*['\\\"]" options:NSRegularExpressionSearch].location!=NSNotFound;
+        BOOL nodeProtocol=[@[@"drpy"] containsObject:protocol];
+        runtime=(dependencies.count || (hasCommonJSRequire && !nodeProtocol))?@"node":@"javascript";
+    }
     if(![@[@"esm",@"commonjs",@"script"] containsObject:moduleType] || ([runtime isEqual:@"python"] != [entry.pathExtension.lowercaseString isEqual:@"py"])){PackageError(error,@"入口类型与运行时声明不匹配");return nil;}
     if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"drpy",@"iptv-extractor",@"catpaw-http"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}
     // Keep a small, typed manifest: no arbitrary paths or host control fields.

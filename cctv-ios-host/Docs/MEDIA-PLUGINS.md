@@ -16,7 +16,7 @@
 
 | 类型 | 本机引擎 | 接口 |
 | --- | --- | --- |
-| 普通 JS | JavaScriptCore | home/category/search/detail/play，可选 channels/catalog/resolve |
+| 普通 JS | JavaScriptCore；CommonJS `require()` 或 npm dependencies 默认走 Node.js Mobile | home/category/search/detail/play，可选 channels/catalog/resolve |
 | CatVod JS | JavaScriptCore 或清单指定 Node | home/category/search/detail/play，亦支持 homeContent 等别名 |
 | drpy 规则 | JavaScriptCore + 固定版本 dr_py 引擎 | 声明 `var/let/const rule = {...}` 的规则文件 |
 | Python Spider | CPython 3.13 | Spider.init/homeContent/homeVideoContent/categoryContent/searchContent/detailContent/playerContent/destroy |
@@ -28,7 +28,7 @@ JS 原文件由 JS 引擎执行，Python 原文件由 CPython 执行，均在 iP
 
 ## ZIP 清单
 
-ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。存在清单时优先使用清单，否则尝试 package.json 和常见入口。无法确定入口时会明确报错。
+ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。存在清单时优先使用清单，否则尝试 package.json 和常见入口。CommonJS 代码使用静态 `require("...")` 或 `package.json` 声明 dependencies 时，未指定运行时时默认选择 Node.js Mobile；drpy 等专用协议仍使用 JavaScriptCore。旧版本已导入的无清单 Node/CommonJS 资源会在下次启动时重新识别。Node 包需要在 ZIP 内带齐它使用的 `node_modules`，应用不会联网安装 npm 依赖。无法确定入口时会明确报错。
 
 ```json
 {

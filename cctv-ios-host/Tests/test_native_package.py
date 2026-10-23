@@ -52,6 +52,25 @@ class NativePackageTests(unittest.TestCase):
         self.assertTrue(result['entryExists'])
         self.assertTrue(result['archiveExists'])
 
+    def test_commonjs_node_require_is_routed_to_node_unless_manifest_overrides(self):
+        source = "const fs=require('fs');module.exports={search(){return {list:[]}}}"
+        inferred = self.inspect(self.archive({'index.js': source}))
+        self.assertTrue(inferred['ok'], inferred)
+        self.assertEqual((inferred['engine'], inferred['manifest']['moduleType']), ('node', 'commonjs'))
+
+        explicit = self.inspect(self.archive({'index.js': source,
+            'cctvhost.json': json.dumps({'entry': 'index.js', 'runtime': 'javascript',
+                                         'protocol': 'cctvhost.media/1'})}))
+        self.assertTrue(explicit['ok'], explicit)
+        self.assertEqual(explicit['engine'], 'javascript')
+
+    def test_package_dependencies_default_to_node_for_esm(self):
+        result = self.inspect(self.archive({'package.json': json.dumps({'type': 'module',
+                                                                       'dependencies': {'example': '^1.0.0'}}),
+                                           'index.js': 'export default {search(){return {list:[]}}}'}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['manifest']['moduleType']), ('node', 'esm'))
+
     def test_python_spider_is_recognized_without_executing_user_code(self):
         marker = self.folder / 'must-not-run'
         file = self.folder / '看剧.py'

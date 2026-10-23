@@ -181,6 +181,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [MediaPackageImporter migrateLegacyRuntimeMetadata];
     self.view.backgroundColor = [UIColor colorWithWhite:0.05 alpha:1];
     self.title = @"CCTV";
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
