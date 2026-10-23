@@ -43,11 +43,13 @@ static void emitLog(NSString *text) {
 }
 #if PYHOST_AVAILABLE
 static PyObject *pyHostWrite(PyObject *self, PyObject *args) {
+    @autoreleasepool { // Python callbacks may arrive on long-lived threads without a pool.
     const char *s = NULL; Py_ssize_t n = 0;
     if (!PyArg_ParseTuple(args, "y#", &s, &n)) return NULL;
     NSString *text = [[NSString alloc] initWithBytes:s length:(NSUInteger)n encoding:NSUTF8StringEncoding];
     if (text) emitLog(text);
     return PyLong_FromSsize_t(n);
+    }
 }
 static PyMethodDef writeMethod = {"_pyhost_write", pyHostWrite, METH_VARARGS, "Forward Python output to the host log."};
 
