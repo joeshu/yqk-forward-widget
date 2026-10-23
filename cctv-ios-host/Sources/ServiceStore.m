@@ -1,9 +1,65 @@
 #import "ServiceStore.h"
 @implementation ServiceStore
-+ (NSString *)directory {NSString *d=[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"Services"];[NSFileManager.defaultManager createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:NULL];return d;}
-+ (NSArray<NSDictionary *> *)services {NSMutableArray *rows=[[NSUserDefaults.standardUserDefaults arrayForKey:@"pythonServices"]?:@[] mutableCopy];BOOL found=NO;for(NSDictionary *s in rows)if([s[@"id"] isEqualToString:@"builtin-ysp"])found=YES;if(!found)[rows insertObject:@{@"id":@"builtin-ysp",@"name":@"YSP Live",@"port":@8767,@"builtin":@YES,@"arguments":@"",@"lan":@NO} atIndex:0];return rows;}
-+ (NSString *)scriptPath:(NSDictionary *)service {if([service[@"builtin"] boolValue])return [NSBundle.mainBundle pathForResource:@"ysp-live" ofType:@"py"];return [[self directory] stringByAppendingPathComponent:[service[@"id"] stringByAppendingPathExtension:@"py"]];}
-+ (void)save:(NSDictionary *)service {NSMutableArray *rows=[[self services] mutableCopy];NSIndexSet *matches=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger index,BOOL *stop){return [row[@"id"] isEqualToString:service[@"id"]];}];[rows removeObjectsAtIndexes:matches];[rows addObject:service];[NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];}
-+ (void)remove:(NSString *)identifier {if([identifier isEqualToString:@"builtin-ysp"])return;NSMutableArray *rows=[[self services] mutableCopy];[rows removeObjectsAtIndexes:[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *s,NSUInteger i,BOOL *stop){return [s[@"id"] isEqualToString:identifier];}]];[NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];[NSFileManager.defaultManager removeItemAtPath:[[self directory] stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"py"]] error:NULL];}
-+ (NSString *)activeIdentifier {return [NSUserDefaults.standardUserDefaults stringForKey:@"activePythonService"]?:@"builtin-ysp";}
++ (NSString *)directory {
+    NSString *d =
+        [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+            stringByAppendingPathComponent:@"Services"];
+    [NSFileManager.defaultManager createDirectoryAtPath:d
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:NULL];
+    return d;
+}
++ (NSArray<NSDictionary *> *)services {
+    NSMutableArray *rows =
+        [[NSUserDefaults.standardUserDefaults arrayForKey:@"pythonServices"] ?: @[] mutableCopy];
+    BOOL found = NO;
+    for (NSDictionary *s in rows)
+        if ([s[@"id"] isEqualToString:@"builtin-ysp"])
+            found = YES;
+    if (!found)
+        [rows insertObject:@{
+            @"id" : @"builtin-ysp",
+            @"name" : @"YSP Live",
+            @"port" : @8767,
+            @"builtin" : @YES,
+            @"arguments" : @"",
+            @"lan" : @NO
+        }
+                   atIndex:0];
+    return rows;
+}
++ (NSString *)scriptPath:(NSDictionary *)service {
+    if ([service[@"builtin"] boolValue])
+        return [NSBundle.mainBundle pathForResource:@"ysp-live" ofType:@"py"];
+    return [[self directory]
+        stringByAppendingPathComponent:[service[@"id"] stringByAppendingPathExtension:@"py"]];
+}
++ (void)save:(NSDictionary *)service {
+    NSMutableArray *rows = [[self services] mutableCopy];
+    NSIndexSet *matches =
+        [rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row, NSUInteger index, BOOL *stop) {
+          return [row[@"id"] isEqualToString:service[@"id"]];
+        }];
+    [rows removeObjectsAtIndexes:matches];
+    [rows addObject:service];
+    [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];
+}
++ (void)remove:(NSString *)identifier {
+    if ([identifier isEqualToString:@"builtin-ysp"])
+        return;
+    NSMutableArray *rows = [[self services] mutableCopy];
+    [rows removeObjectsAtIndexes:[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *s, NSUInteger i,
+                                                                         BOOL *stop) {
+            return [s[@"id"] isEqualToString:identifier];
+          }]];
+    [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];
+    [NSFileManager.defaultManager
+        removeItemAtPath:[[self directory]
+                             stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"py"]]
+                   error:NULL];
+}
++ (NSString *)activeIdentifier {
+    return [NSUserDefaults.standardUserDefaults stringForKey:@"activePythonService"] ?: @"builtin-ysp";
+}
 @end

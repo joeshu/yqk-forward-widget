@@ -578,12 +578,14 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip { [self selectChannel:self.shownChannels[ip.item]]; }
 - (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
     NSDictionary *ch=self.shownChannels[ip.item];__weak typeof(self) w=self;
-    return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){BOOL favorite=[w.favorites containsObject:ch[@"id"]];UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w applyFilter];}];UIAction *route=[UIAction actionWithTitle:@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){[w presentRouteSheetForChannel:ch fromIndexPath:nil];}];return [UIMenu menuWithTitle:ch[@"name"] children:@[fav,route]];}];
+    return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){BOOL favorite=[w.favorites containsObject:ch[@"id"]];UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w applyFilter];}];UIAction *route=[UIAction actionWithTitle:@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];else[w presentRouteSheetForChannel:ch fromIndexPath:nil];}];return [UIMenu menuWithTitle:ch[@"name"] children:@[fav,route]];}];
 }
 - (void)selectChannel:(NSDictionary *)ch {self.playerTabs.selectedSegmentIndex=0;[self selectPlayerPanel];self.playerExpanded=YES;[self rememberChannel:ch];if(CCTVBoolPreference(@"rememberLastChannel",YES))[NSUserDefaults.standardUserDefaults setObject:ch forKey:@"lastChannel"];if([ch[@"remoteURL"] length])[self playRemote:ch];else[self playChannel:ch route:nil];[self configureCatalogNavigation];[self.view setNeedsLayout];}
 
+- (NSArray *)visibleRecents {NSSet *ids=[NSSet setWithArray:[self.shownChannels valueForKey:@"id"]?:@[]];return [self.recents filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *r,NSDictionary *b){return [ids containsObject:r[@"id"]];}]];}
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)t {
-    return self.recents.count && !self.favoritesOnly && !self.query.length && self.groupControl.selectedSegmentIndex == 0 ? 2 : 1;
+    return [self visibleRecents].count && !self.favoritesOnly && !self.query.length && self.groupControl.selectedSegmentIndex == 0 ? 2 : 1;
 }
 
 - (NSString *)tableView:(UITableView *)t titleForHeaderInSection:(NSInteger)s {
@@ -592,12 +594,12 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
-    if ([self numberOfSectionsInTableView:t] == 2 && s == 0) return (NSInteger)self.recents.count;
+    if ([self numberOfSectionsInTableView:t] == 2 && s == 0) return (NSInteger)[self visibleRecents].count;
     return (NSInteger)self.shownChannels.count;
 }
 
 - (NSArray<NSDictionary *> *)channelsForSection:(NSInteger)section tableView:(UITableView *)t {
-    if ([self numberOfSectionsInTableView:t] == 2 && section == 0) return self.recents;
+    if ([self numberOfSectionsInTableView:t] == 2 && section == 0) return [self visibleRecents];
     return self.shownChannels;
 }
 
@@ -1253,7 +1255,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (NSIndexPath *)indexPathForChannelID:(NSString *)cid {
     BOOL twoSections = [self numberOfSectionsInTableView:self.table] == 2;
-    NSUInteger recentIndex = [self.recents indexOfObjectPassingTest:^BOOL(NSDictionary *item, NSUInteger idx, BOOL *stop) { return [item[@"id"] isEqualToString:cid ?: @""]; }];
+    NSUInteger recentIndex = [[self visibleRecents] indexOfObjectPassingTest:^BOOL(NSDictionary *item, NSUInteger idx, BOOL *stop) { return [item[@"id"] isEqualToString:cid ?: @""]; }];
     if (twoSections && recentIndex != NSNotFound) return [NSIndexPath indexPathForRow:(NSInteger)recentIndex inSection:0];
     NSUInteger row = [self.shownChannels indexOfObjectPassingTest:^BOOL(NSDictionary *item, NSUInteger idx, BOOL *stop) { return [item[@"id"] isEqualToString:cid ?: @""]; }];
     if (row == NSNotFound) return nil;
@@ -1355,9 +1357,11 @@ static NSCache *LogoCache(void) {
     if (!CCTVBoolPreference(@"autoLoadEPG",YES)) return;
     if (!cid.length || self.epgCache[cid] || [self.epgInflight containsObject:cid]) return;
     if (self.epgInflight.count >= 3) return;
+    NSString *epgCID=[self epgIDForChannel:[self channelWithID:cid]];
+    if(!epgCID.length)return;
     [self.epgInflight addObject:cid];
     NSString *url = [NSString stringWithFormat:@"https://api.cntv.cn/epg/get3D12HEPG?c=%@&serviceId=cbox",
-                     [cid stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]];
+                     [epgCID stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]];
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
     req.timeoutInterval = 8;
     __weak typeof(self) weakSelf = self;
