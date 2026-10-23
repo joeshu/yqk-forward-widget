@@ -179,7 +179,7 @@
             [self edit];
         else if (ip.row == 2) {
             UIAlertController *a =
-                [UIAlertController alertControllerWithTitle:@"Python 代码"
+                [UIAlertController alertControllerWithTitle:([self.service[@"engine"] isEqual:@"javascript"]?@"JavaScript 代码":@"Python 代码")
                                                     message:nil
                                              preferredStyle:UIAlertControllerStyleActionSheet];
             [a addAction:[UIAlertAction
