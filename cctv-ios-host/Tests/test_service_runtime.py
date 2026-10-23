@@ -2,6 +2,7 @@ import builtins
 import importlib.util
 from pathlib import Path
 import socket
+import sys
 import tempfile
 import threading
 import time
@@ -84,8 +85,10 @@ class ServiceRuntimeTests(unittest.TestCase):
         worker.join(2)
         self.assertFalse(worker.is_alive())
         self.assertFalse(runtime.is_idle())
+        self.assertIn(self.temp.name, sys.path)  # Background handlers can still import local helpers.
         self.assertTrue(runtime.stop_session(2), runtime.last_error())
         self.assertTrue(runtime.is_idle())
+        self.assertNotIn(self.temp.name, sys.path)  # The next service cannot import stale helpers.
 
     def test_cooperative_stop_hook_accepts_none_and_waits_for_workers(self):
         worker = self.launch("import builtins, threading\n"

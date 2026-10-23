@@ -85,9 +85,7 @@ static void *pyThread(void *unused) {
         }
         pthread_mutex_lock(&gLock); gInterpreterReady = YES; pthread_mutex_unlock(&gLock);
         PyObject *sysPath = PySys_GetObject("path");
-        PyObject *scriptDir = PyUnicode_FromString(gScriptPath.stringByDeletingLastPathComponent.UTF8String);
-        if (sysPath && scriptDir) PyList_Insert(sysPath, 0, scriptDir);
-        Py_XDECREF(scriptDir);
+        // Per-service import paths are installed and restored by the session manager.
         PyObject *builtins = PyEval_GetBuiltins();
         gWriteFunction = PyCFunction_New(&writeMethod, NULL);
         PyDict_SetItemString(builtins, "_pyhost_write", gWriteFunction);
