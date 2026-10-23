@@ -30,6 +30,7 @@
 - (void)playRemote:(NSDictionary *)channel;
 - (void)tryAlternateSource;
 - (void)stopPlayback;
+- (void)updateSearchResultsForSearchController:(UISearchController *)controller;
 - (void)playChannel:(NSDictionary *)channel route:(NSDictionary *)route;
 - (void)importPlaylistData:(NSData *)data name:(NSString *)name;
 - (void)previewChannel:(NSDictionary *)channel;
@@ -312,6 +313,10 @@ static void next(NSArray *steps, NSUInteger index) {
                   @"real AVPlayerLayer video frame observed separately");
             check([trace.stages[@"frame"] doubleValue] > 0 && [trace.stages[@"itemReady"] doubleValue] > 0,
                   @"item and video callbacks are measured independently without assuming delivery order");
+            NSString *url=[root valueForKey:@"currentRemoteURL"];
+            [root playRemote:@{@"id":url,@"name":@"Warm local startup",@"remoteURL":url}];
+            check([root valueForKey:@"avPlayer"]!=nil,@"recent successful local health avoids another readiness wait");
+            check(((PlaybackStartupTrace *)[root valueForKey:@"startupTrace"]).stages[@"serviceCached"]!=nil,@"warm health reuse is recorded separately");
             id previous = [root valueForKey:@"avPlayer"];
             [root playChannel:[root channelWithID:@"cctv1"] route:nil];
             check([previous currentItem] == nil, @"switching to native detaches old subscription item");
@@ -462,6 +467,16 @@ static void next(NSArray *steps, NSUInteger index) {
             check([imageStats[@"/oversize.png"] integerValue]==1,@"failed logo is not immediately retried");
             check(staleLogo.image==nil,@"late logo result cannot overwrite reused cell");
             [HostImageLoader.shared cancelPending];
+            [root selectBottomTab:(id)tabs.arrangedSubviews[0]];
+            UISearchController *search=[root valueForKey:@"searchController"];
+            search.searchBar.text=@"CCTV";[root updateSearchResultsForSearchController:search];
+            search.searchBar.text=@"no-such-final-channel";[root updateSearchResultsForSearchController:search];
+          }},
+          @{@"until":^BOOL{return [[root valueForKey:@"shownChannels"] count]==0;},@"run":^{
+            check([[root valueForKey:@"query"] isEqualToString:@"no-such-final-channel"],@"debounced search keeps final input");
+            check([[root valueForKey:@"shownChannels"] count]==0,@"stale search cannot overwrite final results");
+            UISearchController *search=[root valueForKey:@"searchController"];search.searchBar.text=@"";[root updateSearchResultsForSearchController:search];
+            check([[root valueForKey:@"shownChannels"] count]>20,@"clearing search restores catalog immediately");
           }}
       ];
       next(steps, 0);

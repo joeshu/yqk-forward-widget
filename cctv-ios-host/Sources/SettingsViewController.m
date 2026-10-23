@@ -1,5 +1,6 @@
 #import "SettingsViewController.h"
 #import "HostTheme.h"
+#import "HostImageLoader.h"
 
 @interface SettingsViewController () <UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic,strong) UITableView *table;
@@ -23,13 +24,14 @@
       @{ @"title":@"服务", @"footer":@"内置 Python 插件仅在前台运行；高码率并发已限制以降低闪退风险。", @"rows":@[
         @{ @"title":@"央视直播", @"detail":@"官方 CNPlayerSDK · VDN 自动选线", @"icon":@"tv" },
         @{ @"title":@"M3U / HLS 订阅", @"detail":@"AVPlayer · iOS 系统解码", @"icon":@"play.rectangle" },
-        @{ @"title":@"内置插件", @"detail":@"CPython 3.13 · 本机服务", @"icon":@"curlybraces" }
+        @{ @"title":@"内置插件", @"detail":@"Python / JavaScriptCore · 本机运行", @"icon":@"curlybraces" }
       ]},
       @{ @"title":@"数据与关于", @"footer":@"iOS 可能在应用退到后台时挂起本地插件服务。", @"rows":@[
         @{ @"title":@"导出本机配置", @"action":@"export", @"icon":@"square.and.arrow.up" },
         @{ @"title":@"导入配置文件", @"action":@"import", @"icon":@"square.and.arrow.down" },
         @{ @"title":@"清理节目单缓存", @"detail":@"下次打开频道时重新获取", @"icon":@"trash", @"action":@"clearEPG" },
-        @{ @"title":@"CCTVHost", @"detail":[NSString stringWithFormat:@"0.17.0 · %@",[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"] isEqual:@"no-python"]?@"无 Python 诊断版":@"完整版"], @"icon":@"info.circle" },
+        @{ @"title":@"清理台标缓存", @"detail":@"清理内存中的缩略图", @"icon":@"photo", @"action":@"clearImages" },
+        @{ @"title":@"CCTVHost", @"detail":[NSString stringWithFormat:@"%@ · %@",[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"开发版",[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"] isEqual:@"no-python"]?@"无 Python 诊断版":@"完整版"], @"icon":@"info.circle" },
         @{ @"title":@"日志", @"action":@"logs", @"detail":@"播放器与插件运行日志可导出", @"icon":@"doc.text.magnifyingglass" }
       ]}
     ];
@@ -58,6 +60,7 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [tableView deselectRowAtIndexPath:ip animated:YES]; NSDictionary *row=self.sections[ip.section][@"rows"][ip.row];
     if([row[@"action"] isEqualToString:@"clearEPG"]) [self confirmClearEPG];
+    else if([row[@"action"] isEqualToString:@"clearImages"]){[HostImageLoader.shared clearCache];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"台标缓存已清理");UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];cell.detailTextLabel.text=@"已清理，下次加载时重新获取";}
     else if([row[@"action"] isEqualToString:@"export"]){if(self.onExportData)self.onExportData();}
     else if([row[@"action"] isEqualToString:@"import"]){if(self.onImportData)self.onImportData();}
     else if([row[@"action"] isEqualToString:@"logs"]){if(self.onOpenLog)self.onOpenLog();}

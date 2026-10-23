@@ -111,7 +111,7 @@
         [s addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
         c.accessoryView = s;
     }
-    if(ip.section==1&&[self.profiles[ip.section-1][@"status"] length])c.detailTextLabel.text=[NSString stringWithFormat:@"%@\n%@",c.detailTextLabel.text?:@"",self.profiles[ip.section-1][@"status"]];
+    if(ip.section>0&&[self.profiles[ip.section-1][@"status"] length])c.detailTextLabel.text=[NSString stringWithFormat:@"%@\n%@",c.detailTextLabel.text?:@"",self.profiles[ip.section-1][@"status"]];
     return c;
 }
 - (void)toggle:(UISwitch *)sender {
