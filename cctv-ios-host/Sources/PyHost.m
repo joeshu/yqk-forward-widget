@@ -18,6 +18,7 @@ static pthread_t gThread;
 static NSString *gScriptPath;
 static NSString *gDataDir;
 static NSString *gPythonHome;
+static NSArray<NSString *> *gArguments;
 static void (^gLogHandler)(NSString *) = nil;
 #if PYHOST_AVAILABLE
 static PyObject *gPluginNamespace = NULL;
@@ -101,6 +102,12 @@ static void *pyThread(void *unused) {
         setenv("YSP_ZAP_DEBOUNCE", "15", 1);
         emitLog(@"iOS 插件安全模式：TS 缓存 32MB / 高码率并发 2 / 换台防抖 15 秒");
         PyObject *argv = Py_BuildValue("[sssssssssssss]", gScriptPath.UTF8String, portString.UTF8String, "--bind", "127.0.0.1", "--no-engine", "--data-dir", gDataDir.UTF8String, "--cache-mb", "32", "--links-per-device", "2", "--zap-debounce", "15");
+        if (gArguments) {
+            Py_XDECREF(argv);
+            argv = PyList_New(gArguments.count + 1);
+            PyList_SetItem(argv, 0, PyUnicode_FromString(gScriptPath.UTF8String));
+            for (NSUInteger i=0;i<gArguments.count;i++) PyList_SetItem(argv,i+1,PyUnicode_FromString(gArguments[i].UTF8String));
+        }
         if (sys && argv) PyObject_SetAttrString(sys, "argv", argv);
         Py_XDECREF(sys); Py_XDECREF(argv);
         PyObject *runpy = PyImport_ImportModule("runpy");
@@ -119,6 +126,10 @@ finished:
 #endif
 
 + (BOOL)startWithScript:(NSString *)scriptName port:(NSInteger)port dataDir:(NSString *)dataDir error:(NSError **)error {
+    return [self startScriptAtPath:[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:scriptName] port:port dataDir:dataDir arguments:nil error:error];
+}
+
++ (BOOL)startScriptAtPath:(NSString *)path port:(NSInteger)port dataDir:(NSString *)dataDir arguments:(NSArray<NSString *> *)arguments error:(NSError **)error {
     pthread_mutex_lock(&gLock);
     if (gRunning) { pthread_mutex_unlock(&gLock); return YES; }
     if (gStartedOnce) {
@@ -127,7 +138,7 @@ finished:
         return NO;
     }
     NSString *res = NSBundle.mainBundle.resourcePath;
-    NSString *script = [res stringByAppendingPathComponent:scriptName];
+    NSString *script = path;
     NSString *home = [res stringByAppendingPathComponent:@"python"];
 #if !PYHOST_AVAILABLE
     pthread_mutex_unlock(&gLock);
@@ -160,7 +171,7 @@ finished:
     if (![[NSFileManager defaultManager] createDirectoryAtPath:dataDir withIntermediateDirectories:YES attributes:nil error:&dirError]) {
         pthread_mutex_unlock(&gLock); if (error) *error = dirError; return NO;
     }
-    gScriptPath = script; gPythonHome = home; gDataDir = dataDir; gPort = port;
+    gScriptPath = script; gPythonHome = home; gDataDir = dataDir; gPort = port; gArguments=[arguments copy];
     setenv("YSP_DATA_DIR", dataDir.UTF8String, 1);
     gStartedOnce = YES; gRunning = YES; gThreadExited = NO;
     int rc = pthread_create(&gThread, NULL, pyThread, NULL);
@@ -178,7 +189,8 @@ finished:
     if (!gRunning) { BOOL exited = gThreadExited || !gStartedOnce; pthread_mutex_unlock(&gLock); return exited; }
     pthread_mutex_unlock(&gLock);
     PyGILState_STATE gil = PyGILState_Ensure();
-    PyObject *stop = PyDict_GetItemString(PyEval_GetBuiltins(), "_ysp_stop_server");
+    PyObject *stop = PyDict_GetItemString(PyEval_GetBuiltins(), "_cctvhost_stop_service");
+    if (!stop) stop = PyDict_GetItemString(PyEval_GetBuiltins(), "_ysp_stop_server");
     PyObject *result = stop ? PyObject_CallNoArgs(stop) : NULL;
     int truth = result ? PyObject_IsTrue(result) : 0;
     BOOL stopped = truth > 0;

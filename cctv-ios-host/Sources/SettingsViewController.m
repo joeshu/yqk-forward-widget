@@ -1,4 +1,5 @@
 #import "SettingsViewController.h"
+#import "HostTheme.h"
 
 @interface SettingsViewController () <UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic,strong) UITableView *table;
@@ -8,7 +9,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad]; self.title=@"设置"; self.view.backgroundColor=UIColor.blackColor; self.navigationController.navigationBar.tintColor=UIColor.systemPinkColor;
     self.sections=@[
-      @{ @"title":@"播放", @"footer":@"频道列表保持单列；首次进入时不会自动预取全部直播流。", @"rows":@[
+      @{ @"title":@"播放", @"footer":@"网格和列表样式可在直播页右上角切换。", @"rows":@[
         @{ @"title":@"启动时续播上次频道", @"key":@"resumeLastChannel", @"icon":@"arrow.counterclockwise", @"default":@YES },
         @{ @"title":@"记住上次观看频道", @"key":@"rememberLastChannel", @"icon":@"bookmark", @"default":@YES },
         @{ @"title":@"自动获取节目单", @"key":@"autoLoadEPG", @"icon":@"list.bullet.rectangle", @"default":@YES },
@@ -21,9 +22,11 @@
         @{ @"title":@"内置插件", @"detail":@"CPython 3.13 · 本机服务", @"icon":@"curlybraces" }
       ]},
       @{ @"title":@"数据与关于", @"footer":@"iOS 可能在应用退到后台时挂起本地插件服务。", @"rows":@[
+        @{ @"title":@"导出本机配置", @"action":@"export", @"icon":@"square.and.arrow.up" },
+        @{ @"title":@"导入配置文件", @"action":@"import", @"icon":@"square.and.arrow.down" },
         @{ @"title":@"清理节目单缓存", @"detail":@"下次打开频道时重新获取", @"icon":@"trash", @"action":@"clearEPG" },
-        @{ @"title":@"CCTVHost", @"detail":@"0.15.0", @"icon":@"info.circle" },
-        @{ @"title":@"日志", @"detail":@"播放器与插件运行日志可导出", @"icon":@"doc.text.magnifyingglass" }
+        @{ @"title":@"CCTVHost", @"detail":@"0.16.0", @"icon":@"info.circle" },
+        @{ @"title":@"日志", @"action":@"logs", @"detail":@"播放器与插件运行日志可导出", @"icon":@"doc.text.magnifyingglass" }
       ]}
     ];
     self.table=[[UITableView alloc]initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped]; self.table.translatesAutoresizingMaskIntoConstraints=NO; self.table.backgroundColor=UIColor.blackColor; self.table.dataSource=self; self.table.delegate=self; self.table.rowHeight=58; self.table.tintColor=UIColor.systemPinkColor; [self.view addSubview:self.table];
@@ -51,7 +54,9 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [tableView deselectRowAtIndexPath:ip animated:YES]; NSDictionary *row=self.sections[ip.section][@"rows"][ip.row];
     if([row[@"action"] isEqualToString:@"clearEPG"]) [self confirmClearEPG];
-    else if([row[@"title"] isEqualToString:@"内置插件"]) { /* service page owns plugin controls */ }
+    else if([row[@"action"] isEqualToString:@"export"]){if(self.onExportData)self.onExportData();}
+    else if([row[@"action"] isEqualToString:@"import"]){if(self.onImportData)self.onImportData();}
+    else if([row[@"action"] isEqualToString:@"logs"]){if(self.onOpenLog)self.onOpenLog();}
     else if([row[@"title"] isEqualToString:@"日志"]) { UIAlertController *a=[UIAlertController alertControllerWithTitle:@"日志导出" message:@"请在播放器页打开日志面板，使用“导出”保存完整诊断日志。" preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]]; [self presentViewController:a animated:YES completion:nil]; }
 }
 - (void)confirmClearEPG {

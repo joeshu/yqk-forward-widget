@@ -85,7 +85,7 @@ for f in Frameworks/*.framework; do
   cp -R "$f" "$APP/Frameworks/"
 done
 
-SOURCES="Sources/main.m Sources/AppDelegate.m Sources/RootViewController.m Sources/EPGViewController.m Sources/M3UParser.m Sources/PyHost.m Sources/PluginViewController.m Sources/ServicesViewController.m Sources/SettingsViewController.m"
+SOURCES=$(find Sources -maxdepth 1 -name '*.m' -print | sort | tr '\n' ' ')
 
 set -x
 clang -arch arm64 \

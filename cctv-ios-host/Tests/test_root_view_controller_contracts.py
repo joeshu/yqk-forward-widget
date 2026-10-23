@@ -90,8 +90,8 @@ class RootViewControllerSourceContracts(unittest.TestCase):
 
     def test_bottom_tabs_open_service_directory_and_settings_pages(self):
         self.assertIn('- (void)buildBottomBar', TEXT)
-        self.assertIn('[self openServicesPage]', TEXT)
-        self.assertIn('[self openSettingsPage]', TEXT)
+        self.assertIn('[w openServicesPage]', TEXT)
+        self.assertIn('[self makeSettingsPage]', TEXT)
         self.assertIn('ServicesViewController *page', TEXT)
         self.assertIn('[weakSelf openPluginPage]', TEXT)
         self.assertIn('SettingsViewController *page', TEXT)
@@ -103,8 +103,9 @@ class RootViewControllerSourceContracts(unittest.TestCase):
 
     def test_services_directory_shows_live_status_and_opens_detail(self):
         self.assertIn('PyHost.running', SERVICES)
-        self.assertIn('onOpenYSP', SERVICES)
-        self.assertIn('127.0.0.1:8767', SERVICES)
+        self.assertIn('onToggleService', SERVICES)
+        self.assertIn('ServiceDetailViewController', SERVICES)
+        self.assertIn('ServiceStore', SERVICES)
 
     def test_plugin_and_settings_pages_use_safe_area_cards_and_live_status(self):
         self.assertIn('UIScrollView', PLUGIN)
@@ -132,11 +133,13 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('@catch (NSException *exception)', parser)
         self.assertIn('pendingLogo = nil; continue;', parser)
 
-    def test_channel_list_is_single_column_and_routes_remain_long_press(self):
+    def test_catalog_supports_grid_and_list_and_routes_remain_long_press(self):
         self.assertIn('self.table.rowHeight = 48', TEXT)
         self.assertIn('channel.list', TEXT)
         self.assertIn('return (NSInteger)self.shownChannels.count;', TEXT)
-        self.assertNotIn('channel.grid', TEXT)
+        self.assertIn('channel.grid', TEXT)
+        self.assertIn('channelGridMode', TEXT)
+        self.assertIn('contextMenuConfigurationForItemAtIndexPath', TEXT)
         self.assertIn('onLongPress:', TEXT)
 
     def test_video_text_overlays_hide_after_first_render(self):
