@@ -24,6 +24,8 @@ builtins._cctvhost_stop_service = stopping.set
 
 会话启动时同步 `YSP_DATA_DIR`、`CCTVHOST_DATA_DIR` 和 `CCTVHOST_PORT`。脚本仍须使用配置端口实际监听；宿主会记录真实监听地址，并对端口不一致给出日志提示。不会把旧端口订阅静默改写到其他服务。已完成会话会移除它注册的退出回调和专用停止回调，并恢复脚本搜索路径，避免保留旧模块命名空间。普通 import 的模块仍共享同一个解释器，这不是进程隔离。
 
+脚本的 sys.exit / argparse 参数错误只结束该服务。原生错误输出使用不会因 SystemExit 结束宿主进程的异常显示接口。直接调用 os._exit 或原生扩展主动终止进程无法由此机制隔离。
+
 ## 启动时的反向 DNS
 
 macOS 的真实内置插件集成测试捕获了启动停滞：HTTPServer.server_bind → socket.getfqdn。等待 8 秒时仍在解析自己的监听地址，并未进入服务循环。宿主管理的 HTTP 服务直接使用绑定地址设置 server_name 和 server_port，省去本地代理不需要的反向 DNS。

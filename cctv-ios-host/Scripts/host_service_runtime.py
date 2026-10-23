@@ -227,6 +227,10 @@ def run_script(path):
     sys.path.insert(0, os.path.dirname(path))
     try:
         return runpy.run_path(path, run_name='__main__')
+    except SystemExit as error:
+        # argparse/sys.exit belongs to this service, never the embedding App.
+        print('[宿主] Python 脚本已退出，退出码：%s' % error.code)
+        return {}
     finally:
         thread._host_session = None
         session.done.set()

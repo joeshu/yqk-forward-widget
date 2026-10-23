@@ -175,3 +175,14 @@ class ServiceRuntimeTests(unittest.TestCase):
             self.assertEqual(self.errors, [])
             self.assertTrue(runtime.stop_session(1), runtime.last_error())
             worker.join(1)
+
+    def test_script_system_exit_is_contained_and_next_service_can_run(self):
+        worker = self.launch('import sys\nsys.exit(2)\n')
+        worker.join(1)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(self.errors, [])
+        self.assertTrue(runtime.is_idle())
+        next_worker = self.launch('answer = 42\n')
+        next_worker.join(1)
+        self.assertEqual(self.errors, [])
+        self.assertTrue(runtime.is_idle())

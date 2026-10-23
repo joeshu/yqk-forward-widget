@@ -126,7 +126,13 @@ static void *pyThread(void *unused) {
         }
         PyObject *ns = gServiceRuntime ? PyObject_CallMethod(gServiceRuntime, "run_script", "s", gScriptPath.UTF8String) : NULL;
         if (ns) { Py_DECREF(ns); emitLog(@"Python 服务主脚本已返回，后台任务由宿主管理"); }
-        else { PyErr_Print(); emitLog(@"Python 插件异常退出（详见上方日志）"); }
+        else {
+            // PyErr_Print handles SystemExit by terminating the embedding process.
+            // Display the exception without allowing a plugin error to exit the App.
+            PyObject *raised = PyErr_GetRaisedException();
+            if (raised) { PyErr_DisplayException(raised); Py_DECREF(raised); }
+            emitLog(@"Python 插件异常退出（详见上方日志）");
+        }
         PyObject *idle = gServiceRuntime ? PyObject_CallMethod(gServiceRuntime, "is_idle", NULL) : NULL;
         BOOL clean = idle && PyObject_IsTrue(idle) > 0;
         Py_XDECREF(idle); PyErr_Clear();
