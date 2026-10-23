@@ -67,7 +67,7 @@
                           : ([self.service[@"builtin"] boolValue] ? 0 : 1);
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return @[ @"Python · 服务状态", @"本机访问", @"服务信息", @"操作", @"" ][section];
+    return @[ ([self.service[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore · 服务状态":@"Python · 服务状态"), @"本机访问", @"服务信息", @"操作", @"" ][section];
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0)
@@ -109,11 +109,11 @@
         NSDateFormatter *fmt = [NSDateFormatter new];
         fmt.dateFormat = @"yyyy-MM-dd HH:mm";
         NSArray *values = @[
-            @"Python",
+            [self.service[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore":@"Python",
             [self.service[@"builtin"] boolValue]
                 ? @"内置"
                 : ([self.service[@"url"] length] ? @"远程链接" : @"本地文件 / 代码"),
-            [ServiceStore scriptPath:self.service].lastPathComponent ?: @"—",
+            [ServiceStore codePath:self.service].lastPathComponent ?: @"—",
             [self.service[@"updated"] doubleValue] > 0 ? [fmt stringFromDate:updated] : @"随应用更新",
             self.service[@"url"] ?: @"随应用提供"
         ];
@@ -187,7 +187,7 @@
                                        style:UIAlertActionStyleDefault
                                      handler:^(UIAlertAction *action) {
                                        ServiceCodeViewController *v = [ServiceCodeViewController new];
-                                       v.path = [ServiceStore scriptPath:self.service];
+                                       v.path = [ServiceStore codePath:self.service];
                                        v.readOnly = YES;
                                        [self.navigationController pushViewController:v animated:YES];
                                      }]];
@@ -197,7 +197,7 @@
                                      handler:^(UIAlertAction *action) {
                                        UIActivityViewController *v =
                                            [[UIActivityViewController alloc] initWithActivityItems:@[
-                                               [NSURL fileURLWithPath:[ServiceStore scriptPath:self.service]]
+                                               [NSURL fileURLWithPath:[ServiceStore codePath:self.service]]
                                            ]
                                                                              applicationActivities:nil];
                                        v.popoverPresentationController.sourceView = self.view;
@@ -330,7 +330,7 @@
     c.textLabel.textColor = UIColor.whiteColor;
     c.textLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     c.detailTextLabel.text =
-        [NSString stringWithFormat:@"Python · %@\nhttp://127.0.0.1:%@",
+        [NSString stringWithFormat:@"%@ · %@\nhttp://127.0.0.1:%@",[s[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore":@"Python",
                                    [s[@"builtin"] boolValue] ? @"内置服务" : @"本机脚本", s[@"port"]];
     c.detailTextLabel.numberOfLines = 2;
     c.detailTextLabel.font = [UIFont systemFontOfSize:11];

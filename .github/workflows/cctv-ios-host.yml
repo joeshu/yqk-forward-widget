@@ -40,6 +40,13 @@ jobs:
             n="$(basename "$f" .framework)"; echo "== $n"; lipo -info "$f/$n"
           done
 
+      - name: Build and verify original JS plugin
+        working-directory: cctv-ios-host/JSPlugins
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npm test
+
       - name: Run regression checks
         working-directory: cctv-ios-host
         run: python3 -m unittest discover -s Tests -p 'test_*.py' -v

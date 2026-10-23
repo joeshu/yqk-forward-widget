@@ -73,6 +73,11 @@ def validate(path):
         elif variant == 'full':
             assert result['python_embedded'] and linked, 'full build missing embedded or linked Python'
             assert root + 'host_service_runtime.py' in z.namelist(), 'full build missing service lifecycle manager'
+            assert root + 'yangshipin-js.py' in z.namelist(), 'missing JS HTTP adapter'
+            assert len(z.read(root + 'yangshipin.bundle.js')) > 10000, 'missing original JS extractor bundle'
+            assert root + 'yangshipin-LICENSE.txt' in z.namelist(), 'missing JS plugin license'
+            assert root + 'JSPlugins/yangshipin/upstream/resolver.js' in z.namelist(), 'missing original JS sources'
+            assert any('JavaScriptCore.framework/' in name for name in result['binaries'][binary]['dependencies']), 'missing JavaScriptCore link'
         channels = json.loads(z.read(root + 'channels.json'))
         assert isinstance(channels, list) and channels, 'empty channel catalog'
         result['channel_count'] = len(channels)

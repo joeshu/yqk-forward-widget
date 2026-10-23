@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/joeshu/iptv",
+  "commit": "b121ed0291ae6751329f7a1b1b300605eaebc8f0",
+  "license": "GPL-3.0-only",
+  "files": {
+    "playlist-history.js": "6ed52061d35673b44561bc65c44579704efc7c44463885dd2c781149f1e1080e",
+    "ckey.js": "8e0957942c64660424e7e38aaf249830f14e072c1d914722d4de9e458875b1dd",
+    "channels.js": "82e17a8665c8a30e111443ad43a90b706231678177b9f6a298643e9150cf904a",
+    "resolver.js": "f1346543f910a5e9185886336ba0e725c7b23b9ba1141f144adc01edc254f418",
+    "libvlc-view.js": "53e0f454c43c2122fbc73649bab4165a006e7f13ae8fd8731491a41ac1d6c6b1",
+    "api.js": "ded0a0698a7afee8a429354d74e9dd67d64d522716f5438b8f82d82b29a7e8fb",
+    "index.js": "e835ac8cc553283dbcccda1b24f89ae07ad7763f25882c5e5d67d7303279a8e3",
+    "epg.js": "131b9ce7f2435589beef30b76eb63b5452b1ef4913a27541505f7244a1322fba"
+  },
+  "browserBranch": "Not available in JavaScriptCore; explicit capability adapter, original public JS modules unchanged"
+}

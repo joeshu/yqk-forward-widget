@@ -69,6 +69,13 @@ int main(void) {
             if ([s[@"id"] isEqual:@"builtin-ysp"])
                 builtin = YES;
         check(builtin, @"bundled service preserved");
+        [ServiceStore remove:@"builtin-yangshipin-js"];
+        NSDictionary *javascript=nil;
+        for(NSDictionary *s in [ServiceStore services])if([s[@"id"] isEqual:@"builtin-yangshipin-js"])javascript=s;
+        check(javascript && [javascript[@"engine"] isEqual:@"javascript"], @"JS service preserved with explicit engine");
+        check([javascript[@"port"] integerValue]==18770, @"JS service has separate subscription port");
+        NSString *jsData=[ServiceStore dataDirectoryForService:javascript error:NULL];
+        check([jsData.lastPathComponent isEqual:@"builtin-yangshipin-js"], @"JS data does not share legacy YSP directory");
         NSString *migrationID = NSUUID.UUID.UUIDString;
         NSString *prior = [[ServiceStore directory] stringByAppendingPathComponent:@"builtin-ysp"];
         NSString *historical =

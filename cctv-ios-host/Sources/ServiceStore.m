@@ -27,13 +27,21 @@
             @"lan" : @NO
         }
                    atIndex:0];
+    BOOL jsFound=NO;
+    for(NSDictionary *s in rows)if([s[@"id"] isEqual:@"builtin-yangshipin-js"])jsFound=YES;
+    if(!jsFound)[rows insertObject:@{@"id":@"builtin-yangshipin-js",@"name":@"央视频 JS",@"port":@18770,@"builtin":@YES,@"engine":@"javascript",@"arguments":@"",@"lan":@NO} atIndex:MIN((NSUInteger)1,rows.count)];
     return rows;
 }
 + (NSString *)scriptPath:(NSDictionary *)service {
+    if([service[@"id"] isEqual:@"builtin-yangshipin-js"])return [NSBundle.mainBundle pathForResource:@"yangshipin-js" ofType:@"py"];
     if ([service[@"builtin"] boolValue])
         return [NSBundle.mainBundle pathForResource:@"ysp-live" ofType:@"py"];
     return [[self directory]
         stringByAppendingPathComponent:[service[@"id"] stringByAppendingPathExtension:@"py"]];
+}
++ (NSString *)codePath:(NSDictionary *)service {
+    if([service[@"id"] isEqual:@"builtin-yangshipin-js"])return [NSBundle.mainBundle pathForResource:@"yangshipin.bundle" ofType:@"js"];
+    return [self scriptPath:service];
 }
 + (void)save:(NSDictionary *)service {
     NSMutableArray *rows = [[self services] mutableCopy];
@@ -46,7 +54,7 @@
     [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];
 }
 + (void)remove:(NSString *)identifier {
-    if ([identifier isEqualToString:@"builtin-ysp"])
+    if ([identifier isEqualToString:@"builtin-ysp"] || [identifier isEqualToString:@"builtin-yangshipin-js"])
         return;
     NSMutableArray *rows = [[self services] mutableCopy];
     [rows removeObjectsAtIndexes:[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *s, NSUInteger i,
@@ -63,7 +71,7 @@
     NSString *identifier=service[@"id"];
     NSString *target=[[self directory] stringByAppendingPathComponent:identifier];
     NSFileManager *fm=NSFileManager.defaultManager;
-    if([service[@"builtin"] boolValue]){
+    if([identifier isEqual:@"builtin-ysp"]){
         target=[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"ysp"];
         if(![fm createDirectoryAtPath:target withIntermediateDirectories:YES attributes:nil error:error])return nil;
         NSString *previous=[[self directory] stringByAppendingPathComponent:@"builtin-ysp"];

@@ -1,4 +1,5 @@
 #import "PyHost.h"
+#import "JSPluginRuntime.h"
 #import <pthread.h>
 #import <limits.h>
 
@@ -24,6 +25,7 @@ static void (^gLogHandler)(NSString *) = nil;
 #if PYHOST_AVAILABLE
 static PyObject *gServiceRuntime = NULL;
 static PyObject *gWriteFunction = NULL;
+static PyObject *gJSFunction = NULL;
 #endif
 
 @implementation PyHost
@@ -51,6 +53,20 @@ static PyObject *pyHostWrite(PyObject *self, PyObject *args) {
     return PyLong_FromSsize_t(n);
     }
 }
+static PyObject *pyHostJSCall(PyObject *self, PyObject *args) {
+    const char *operation=NULL,*json=NULL;
+    if(!PyArg_ParseTuple(args,"ss",&operation,&json))return NULL;
+    @autoreleasepool {
+        NSString *op=[NSString stringWithUTF8String:operation];NSString *payload=[NSString stringWithUTF8String:json];
+        NSString *reply=nil;NSError *error=nil;
+        Py_BEGIN_ALLOW_THREADS
+        reply=[[JSPluginRuntime shared] callOperation:op json:payload timeout:40 error:&error];
+        Py_END_ALLOW_THREADS
+        if(!reply){PyErr_SetString(PyExc_RuntimeError,error.localizedDescription.UTF8String?:"JS bridge failed");return NULL;}
+        return PyUnicode_FromString(reply.UTF8String);
+    }
+}
+static PyMethodDef jsMethod = {"_cctvhost_js_call", pyHostJSCall, METH_VARARGS, "Call the native JavaScriptCore plugin host."};
 static PyMethodDef writeMethod = {"_pyhost_write", pyHostWrite, METH_VARARGS, "Forward Python output to the host log."};
 
 static void *pyThread(void *unused) {
@@ -91,6 +107,9 @@ static void *pyThread(void *unused) {
         PyObject *builtins = PyEval_GetBuiltins();
         gWriteFunction = PyCFunction_New(&writeMethod, NULL);
         PyDict_SetItemString(builtins, "_pyhost_write", gWriteFunction);
+        gJSFunction=PyCFunction_New(&jsMethod,NULL);
+        PyDict_SetItemString(builtins,"_cctvhost_js_call",gJSFunction);
+        [JSPluginRuntime shared].logHandler=^(NSString *line){emitLog([@"[JS] " stringByAppendingString:line]);};
         PyObject *mainDict = PyDict_New();
         PyDict_SetItemString(mainDict, "__builtins__", builtins);
         PyObject *bootstrap = PyRun_String(

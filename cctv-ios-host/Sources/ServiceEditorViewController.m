@@ -100,7 +100,7 @@
                            action:@selector(sourceChanged)
                  forControlEvents:UIControlEventValueChanged];
     if (self.service)
-        self.code = [NSString stringWithContentsOfFile:[ServiceStore scriptPath:self.service]
+        self.code = [NSString stringWithContentsOfFile:[ServiceStore codePath:self.service]
                                               encoding:NSUTF8StringEncoding
                                                  error:NULL];
     self.fileLabel = [UILabel new];
@@ -131,14 +131,14 @@
                           : 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return @[ @"Python 服务", @"代码来源", @"网络与启动", @"" ][section];
+    return @[ ([self.service[@"engine"] isEqual:@"javascript"]?@"JavaScript 服务":@"Python 服务"), @"代码来源", @"网络与启动", @"" ][section];
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 1)
         return @"导入后可查看、编辑或导出代码。内置服务代码只读。";
     if (section == 2)
         return @"自定义脚本的参数用 | 分隔，支持 {port}、{bind}、{dataDir}。本机一次运行一个 Python "
-               @"服务；停止后需重新打开 App 才能再启动。";
+               @"服务；切换前须等待旧服务释放线程和端口。";
     return nil;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -335,7 +335,7 @@
     service[@"updated"] = @(NSDate.date.timeIntervalSince1970);
     if (![service[@"builtin"] boolValue]) {
         NSError *error = nil;
-        if (![self.code writeToFile:[ServiceStore scriptPath:service]
+        if (![self.code writeToFile:[ServiceStore codePath:service]
                          atomically:YES
                            encoding:NSUTF8StringEncoding
                               error:&error]) {

@@ -3,6 +3,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+if [ -z "${PY_DISABLE:-}" ] && [ ! -s GeneratedJS/yangshipin.bundle.js ]; then
+  npm ci --prefix JSPlugins --no-audit --no-fund
+  npm run build --prefix JSPlugins
+  npm test --prefix JSPlugins
+fi
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 echo "SDK: $SDK"
 xcrun --sdk iphoneos clang --version | head -2
@@ -41,7 +46,7 @@ with open(base_path,'wb') as f: plistlib.dump(base,f,sort_keys=False)
 assert 'CFBundleIcons' in base and 'CFBundlePrimaryIcon' in base['CFBundleIcons']
 PY
 [ -s "$APP/Assets.car" ] || { echo "::error::AppIcon asset catalog did not produce Assets.car"; exit 1; }
-if [ -z "${PY_DISABLE:-}" ]; then cp Plugins/ysp-live.py "$APP/ysp-live.py"; cp Scripts/host_service_runtime.py "$APP/host_service_runtime.py"; fi
+if [ -z "${PY_DISABLE:-}" ]; then cp Plugins/ysp-live.py "$APP/ysp-live.py"; cp Scripts/host_service_runtime.py "$APP/host_service_runtime.py"; cp Plugins/yangshipin-js.py "$APP/yangshipin-js.py"; cp GeneratedJS/* "$APP/"; mkdir -p "$APP/JSPlugins"; cp -R JSPlugins/yangshipin JSPlugins/compat "$APP/JSPlugins/"; cp JSPlugins/package.json JSPlugins/package-lock.json JSPlugins/build.mjs "$APP/JSPlugins/"; fi
 printf 'APPL????' > "$APP/PkgInfo"
 mkdir -p "$APP/Frameworks"
 
@@ -107,7 +112,7 @@ clang -arch arm64 \
   -fobjc-arc \
   -I Sources/Include \
   -F Frameworks \
-  -framework Foundation -framework UIKit -framework CoreGraphics -framework CoreMedia -framework UniformTypeIdentifiers -framework QuartzCore \
+  -framework JavaScriptCore -framework Security -framework Foundation -framework UIKit -framework CoreGraphics -framework CoreMedia -framework UniformTypeIdentifiers -framework QuartzCore \
   -framework CNPlayerSDK -framework CicadaPlayerSDK -framework alivcffmpeg -framework AVFoundation -framework MediaPlayer -framework AVKit \
   $( [ -z "${PY_DISABLE:-}" ] && echo "-F $APP/Frameworks -framework Python -I $PY_INC" ) \
   -lz -lsqlite3 -lbz2 -liconv -lc++ \
