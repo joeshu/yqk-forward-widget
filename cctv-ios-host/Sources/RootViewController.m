@@ -777,8 +777,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.playerExpanded=YES;
     [self.view setNeedsLayout];
     self.channelID = cid;
-    if(self.playerTabs.selectedSegmentIndex>0)[self selectPlayerPanel];
     self.channelName = ch[@"name"] ?: cid;
+    if(self.playerTabs.selectedSegmentIndex>0)[self selectPlayerPanel];
     self.routeName = route ? [NSString stringWithFormat:@"%@", [route[@"provider"] uppercaseString]] : @"自动";
     self.firstRender = NO;
     self.stallReported = NO;

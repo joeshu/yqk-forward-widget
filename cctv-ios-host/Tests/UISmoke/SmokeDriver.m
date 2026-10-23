@@ -43,7 +43,7 @@ static void next(NSArray *steps, NSUInteger index) {
         [data writeToFile:[outputDir stringByAppendingPathComponent:@"results.json"] atomically:YES];
         return;
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 400 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1200 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
       @try {
           ((dispatch_block_t)steps[index])();
       } @catch (NSException *e) {
@@ -63,6 +63,7 @@ static void next(NSArray *steps, NSUInteger index) {
 - (BOOL)smokeApplication:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
     BOOL ok = [self smokeApplication:app didFinishLaunchingWithOptions:options];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [UIView setAnimationsEnabled:NO];
       failures = [NSMutableArray array];
       outputDir = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/ui-smoke"];
       [NSFileManager.defaultManager createDirectoryAtPath:outputDir
