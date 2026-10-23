@@ -787,7 +787,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         if (weakSelf.sdkPlayer) return;
         id inst = nil;
         @try { inst = [[cls alloc] init]; } @catch (NSException *e) {}
-        if (inst) { weakSelf.sdkPlayer = inst; [weakSelf log:@"播放器实例已预热"]; }
+        if (inst) { weakSelf.sdkPlayer = inst; weakSelf.sdkPlayerUsed=NO; [weakSelf log:@"播放器实例已预热"]; }
     });
 }
 
@@ -876,6 +876,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (void)stopPlayback {
     [self.playbackReadiness cancel];self.playbackReadiness=nil;
+    if(self.avLayerObserved){[self.avLayer removeObserver:self forKeyPath:@"readyForDisplay" context:kAVLayerFrameContext];self.avLayerObserved=NO;}
+
     self.epgListGeneration++;
     for(NSURLSessionDataTask *task in self.epgListTasks.allValues)[task cancel];[self.epgListTasks removeAllObjects];[self.epgInflight removeAllObjects];
     if(self.pip.isPictureInPictureActive)[self.pip stopPictureInPicture];self.pip=nil;
@@ -901,7 +903,6 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         [previousItem cancelPendingSeeks];[previousItem.asset cancelLoading];[self.avPlayer replaceCurrentItemWithPlayerItem:nil];
         self.avPlayer = nil;
     }
-    if(self.avLayerObserved){[self.avLayer removeObserver:self forKeyPath:@"readyForDisplay" context:kAVLayerFrameContext];self.avLayerObserved=NO;}
     self.avLayer.player=nil;
     [self.avLayer removeFromSuperlayer];
     self.avLayer = nil;
