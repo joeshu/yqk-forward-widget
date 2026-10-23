@@ -17,6 +17,7 @@ const plugins = [{ name: 'cctvhost-native-bridges', setup(build) {
     build.onResolve({filter:/模板\.js$/},()=>({path:resolve(root,'drpy/upstream/template.js')}))
     build.onResolve({filter:/jsencrypt\.js$/},args=>args.importer.endsWith('/upstream/drpy2.js')?({path:resolve(root,'drpy/jsencrypt-bridge.mjs')}):null)
     build.onResolve({ filter: /^(?:node:)?crypto$/ }, () => ({ path: resolve(root, 'compat/crypto.mjs') }))
+    build.onResolve({ filter: /^node:stream$/ }, () => ({ path: resolve(root, 'compat/stream.mjs') }))
     build.onResolve({ filter: /^\.\/runtime\.js$/ }, () => ({ path: resolve(root, 'compat/browser-runtime.mjs') }))
     build.onResolve({ filter: /utils\/colorOut\.js$/ }, () => ({ path: resolve(root, 'compat/color.mjs') }))
 } }]
@@ -44,7 +45,7 @@ await build({entryPoints:[resolve(root,'node_modules/node-fetch/lib/index.js')],
 writeFileSync(resolve(output,'node-fetch-THIRD-PARTY-NOTICES.txt'),['node-fetch','whatwg-url','tr46','webidl-conversions'].map(name=>{
   const directory=resolve(root,'node_modules',name),license=readdirSync(directory).find(file=>/^licen[cs]e(?:[.\-_]|$)/i.test(file));return name+'\n'+readFileSync(license?resolve(directory,license):resolve(root,'../Resources/tr46-LICENSE.txt'),'utf8')
 }).join('\n\n'))
-const dependencyNames=['buffer','base64-js','ieee754','core-js','rollup','crypto-js','iconv-lite','safer-buffer','string_decoder','cheerio','cheerio-select','boolbase','css-select','css-what','nth-check','domhandler','domutils','dom-serializer','domelementtype','entities','htmlparser2','parse5','parse5-htmlparser2-tree-adapter']
+const dependencyNames=['buffer','base64-js','ieee754','core-js','rollup','crypto-js','iconv-lite','jpeg-js','safer-buffer','string_decoder','cheerio','cheerio-select','boolbase','css-select','css-what','nth-check','domhandler','domutils','dom-serializer','domelementtype','entities','htmlparser2','parse5','parse5-htmlparser2-tree-adapter']
 writeFileSync(resolve(output,'js-runtime-THIRD-PARTY-NOTICES.txt'),dependencyNames.map(name=>{
   const directory=resolve(root,'node_modules',name),files=readdirSync(directory),license=files.find(file=>/^licen[cs]e(?:\.|$)/i.test(file))
   return `${name}\n${license?readFileSync(resolve(directory,license),'utf8'):'License: '+JSON.parse(readFileSync(resolve(directory,'package.json'),'utf8')).license}`

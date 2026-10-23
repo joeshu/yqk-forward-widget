@@ -45,7 +45,7 @@ ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。
 
 `runtime` 支持 `javascript`、`python`、`node`。`protocol` 支持 `cctvhost.media/1`、`catvod-js`、`catvod-spider`、`drpy`、`python-spider`、`python-http`、`iptv-extractor`、`catpaw-http`。JS 的 moduleType 为 `esm`、`commonjs` 或普通规则使用的 `script`。手册里的 `export default function createSpider(name, config) { return { meta, api(fastify) } }` 和旧版 `export default { meta, api }` 均可被识别；CatPaw API 请求会按 CatVod 字段传递（搜索 `wd`、分类 `id/page/filters`、详情 `id[]`、播放 `flag/id`）。
 
-CatPaw Spider 的常用 `util/req.js`、`util/htmlParser.js`、缓存、并发、通用工具及运行时配置导入映射到本机兼容模块；`axios`、`cheerio`、`crypto-js`、`iconv-lite`、`qs` 等通过应用内的 JS 依赖注册表提供。ZIP 自带的其它 JS 依赖仍须保持在 ZIP 中。Fastify 标准 `get/post` 路由可在本机服务下调用；`/spider/<key>/3/...` 私有路由同样可从 AVPlayer 请求，适合返回重写后的 HLS 清单。`parse: 1` 会交给应用的网页播放页，`parse: 0` 则交给 AVPlayer；本机播放器不会把解析页面冒充媒体流。
+CatPaw Spider 的常用 `util/req.js`、`util/htmlParser.js`、缓存、并发、通用工具及运行时配置导入映射到本机兼容模块；`req.js` 提供域名隔离 Cookie、保存/恢复/清除接口。`axios`、`cheerio`、`crypto-js`、`iconv-lite`、`jpeg-js`、`http2`、`stream`、`qs` 等通过应用内的 JS 依赖注册表提供。`node:stream` 当前提供 `Readable.from`、`data/end` 事件和 `pipe` 常用能力；`fs` 只读 ZIP 文件，临时写入留在内存中，不会访问 iPhone 其它目录。ZIP 自带的其它 JS 依赖仍须保持在 ZIP 中。Fastify 标准 `get/post` 路由可在本机服务下调用；`/spider/<key>/3/...` 私有路由同样可从 AVPlayer 请求，适合返回重写后的 HLS 清单。`parse: 1` 会交给应用的网页播放页，`parse: 0` 则交给 AVPlayer；本机播放器不会把解析页面冒充媒体流。
 
 手动声明 CatPaw Spider 时使用：
 
