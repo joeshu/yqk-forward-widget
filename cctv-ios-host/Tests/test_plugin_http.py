@@ -109,3 +109,16 @@ class PluginHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("MEDIA-SEQUENCE:1", body)
         resolver.fetch_channel_playlist.assert_called_once()
+
+    def test_engine_proxy_keeps_independent_response_limit(self):
+        response = Mock()
+        response.status = 200
+        response.read.return_value = b"segment"
+        response.headers = {"Content-Type": "video/mp2t"}
+        context = Mock()
+        context.__enter__ = Mock(return_value=response)
+        context.__exit__ = Mock(return_value=False)
+        with patch.object(plugin, "_is_safe_engine_proxy_url", return_value=True), \
+             patch.object(plugin.urllib.request, "urlopen", return_value=context):
+            status, body, _ = self.request("/engine_proxy?url=http%3A%2F%2F127.0.0.1%3A8787%2Fa.ts")
+        self.assertEqual((status, body), (200, "segment"))

@@ -3267,8 +3267,8 @@ class Handler (BaseHTTPRequestHandler ):
             try :
                 req =urllib .request .Request (target ,headers ={'User-Agent':UA ,'Accept':'*/*'})
                 with urllib .request .urlopen (req ,timeout =10.0 )as resp :
-                    data =resp .read (cache_limit +1 )
-                    if len (data )>cache_limit :
+                    data =resp .read (35 *1024 *1024 +1 )
+                    if len (data )>35 *1024 *1024 :
                         self ._send (502 ,'upstream segment too large\n',head_only =head_only )
                         return 
                     self ._send (resp .status ,data ,resp .headers .get ('Content-Type','video/mp2t'),head_only =head_only )
