@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 @interface ConfigCenterViewController : UITableViewController
+- (void)reloadProfiles;
 @property(nonatomic, copy) NSArray<NSDictionary *> * (^profilesProvider)(void);
 @property(nonatomic, copy) dispatch_block_t onServices;
 @property(nonatomic, copy) dispatch_block_t onAdd;

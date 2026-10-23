@@ -624,7 +624,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     NSString *title = [ch[@"name"] isKindOfClass:NSString.class] ? ch[@"name"] : cid;
     if ([self.favorites containsObject:cid]) title = [@"★ " stringByAppendingString:title];
     cell.textLabel.text = playing ? [NSString stringWithFormat:@"● %@", title] : title;
-    cell.textLabel.textColor = playing ? [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1] : UIColor.whiteColor;
+    cell.textLabel.textColor = playing ? HostAccent() : UIColor.whiteColor;
     NSString *logo = [ch[@"logo"] isKindOfClass:NSString.class] ? ch[@"logo"] : @"";
     cell.imageView.image = nil;
     if (logo.length) [self loadLogo:logo into:cell.imageView];
@@ -1531,9 +1531,8 @@ static NSCache *LogoCache(void) {
                 }
             }
             weakSelf.allChannels = merged;
-            weakSelf.shownChannels = merged;
-            [weakSelf.table reloadData];
-            [weakSelf.channelGrid reloadData];
+            [weakSelf applyFilter];
+            if([weakSelf.tabPage isKindOfClass:ConfigCenterViewController.class])[(ConfigCenterViewController *)weakSelf.tabPage reloadProfiles];
             if (skippedInvalidURLs) [weakSelf log:@"订阅跳过 %lu 条无效地址（仅允许有效 HTTP/HTTPS URL）", (unsigned long)skippedInvalidURLs];
             [weakSelf log:@"订阅 %@ 新增 %lu 个频道（共 %lu）", urlString, (unsigned long)added, (unsigned long)list.count];
         });
