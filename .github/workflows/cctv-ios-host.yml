@@ -70,7 +70,9 @@ jobs:
 
       - name: Validate packaged IPA
         working-directory: cctv-ios-host
-        run: python3 Scripts/validate_ipa.py build/CCTVHost-unsigned.ipa | tee build/validation.json
+        run: |
+          set -o pipefail
+          python3 Scripts/validate_ipa.py build/CCTVHost-unsigned.ipa | tee build/validation.json
 
       - name: Preserve build artifacts
         uses: actions/upload-artifact@v4

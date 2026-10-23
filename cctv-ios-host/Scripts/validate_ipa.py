@@ -43,6 +43,10 @@ def validate(path):
         primary_icon = info.get('CFBundleIcons', {}).get('CFBundlePrimaryIcon', {})
         assert primary_icon, 'missing CFBundlePrimaryIcon in Info.plist'
         result = {'bundle_id': info['CFBundleIdentifier'], 'app_icon': True, 'binaries': {}}
+        binary = info.get('CFBundleExecutable')
+        assert binary == 'CCTVHost', 'unexpected or missing app executable'
+        result['version'] = info.get('CFBundleShortVersionString')
+        result['build'] = info.get('CFBundleVersion')
         result['binaries'][binary] = macho_info(z.read(root + binary))
         for name in ('CNPlayerSDK', 'CicadaPlayerSDK', 'alivcffmpeg'):
             member = f'{root}Frameworks/{name}.framework/{name}'
