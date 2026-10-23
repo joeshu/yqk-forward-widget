@@ -10,6 +10,18 @@
 @end
 static NSMutableArray *failures;
 static NSString *outputDir;
+static NSDictionary *lastOptions;
+@interface CNPlayer (ReferenceOptions)
+- (BOOL)referencePlayLIVE:(NSString *)cid delegate:(id)delegate configOptions:(NSDictionary *)options;
+@end
+@implementation CNPlayer (ReferenceOptions)
++ (void)load {method_exchangeImplementations(class_getInstanceMethod(self,NSSelectorFromString(@"playLIVEWithChannelID:delegate:configOptions:")),class_getInstanceMethod(self,@selector(referencePlayLIVE:delegate:configOptions:)));}
+- (BOOL)referencePlayLIVE:(NSString *)cid delegate:(id)delegate configOptions:(NSDictionary *)options {
+    lastOptions=options;
+    if(![options[@"CNPlayerConfigOptionKey_Title"] length])return NO;
+    return [self referencePlayLIVE:cid delegate:delegate configOptions:options];
+}
+@end
 static void check(BOOL ok,NSString *message){if(!ok)[failures addObject:message];}
 @implementation AppDelegate (ReferenceSmoke)
 + (void)load {method_exchangeImplementations(class_getInstanceMethod(self,@selector(application:didFinishLaunchingWithOptions:)),class_getInstanceMethod(self,@selector(referenceApplication:didFinishLaunchingWithOptions:)));}
@@ -22,6 +34,7 @@ static void check(BOOL ok,NSString *message){if(!ok)[failures addObject:message]
         check(NSClassFromString(@"EPGViewController")==Nil,@"EPG class excluded from reference executable");
         check(NSClassFromString(@"PyHost")==Nil,@"Python host excluded from reference executable");
         [root playChannel:@"cctv1" name:@"CCTV-1 综合"];
+        check([lastOptions[@"CNPlayerConfigOptionKey_Title"] isEqual:@"CCTV-1 综合"],@"required SDK title passed through runtime invocation");
         id previous=[root valueForKey:@"currentPlayer"];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{
             check([[root valueForKey:@"firstRender"] boolValue],@"first channel renders through SDK callback");
