@@ -23,7 +23,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.16.1";
+static NSString *const kBuildTag = @"0.16.2";
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -123,6 +123,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property (nonatomic, strong) PluginViewController *pluginPage;
 @property (nonatomic, strong) UIStackView *bottomBar;
 @property (nonatomic, assign) NSInteger activeTab;
+@property (nonatomic, assign) BOOL subscriptionCatalog;
 @property (nonatomic, assign) BOOL favoritesOnly;
 @property (nonatomic, strong) UIButton *pipBtn;
 @property (nonatomic, strong) UIButton *moreBtn;
@@ -136,7 +137,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithWhite:0.05 alpha:1];
-    self.title = @"CCTVHost 直播";
+    self.title = @"CCTV";
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     HostStyleNavigation(self.navigationController);
     self.view.tintColor=HostAccent();
@@ -517,15 +518,16 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)onGroupChanged {
-    self.favoritesOnly=NO; self.activeTab=0;
-    for(UIButton *b in self.bottomBar.arrangedSubviews) { UIButtonConfiguration *cfg=b.configuration; cfg.baseForegroundColor=b.tag==0?UIColor.systemPinkColor:UIColor.whiteColor; b.configuration=cfg; }
+    self.favoritesOnly=NO;
+    if(self.activeTab==2)self.activeTab=self.subscriptionCatalog?1:0;
+    for(UIButton *b in self.bottomBar.arrangedSubviews) { UIButtonConfiguration *cfg=b.configuration; cfg.baseForegroundColor=b.tag==self.activeTab?UIColor.systemPinkColor:UIColor.whiteColor; b.configuration=cfg; }
     [self applyFilter];
 }
 
 - (void)buildBottomBar {
     self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=4; self.bottomBar.backgroundColor=[UIColor colorWithWhite:0.13 alpha:0.98]; self.bottomBar.layer.cornerRadius=24; self.bottomBar.clipsToBounds=YES;
-    NSArray *titles=@[@"直播",@"收藏",@"配置",@"设置"];
-    NSArray *icons=@[@"globe.asia.australia",@"heart.fill",@"externaldrive.fill",@"gearshape"];
+    NSArray *titles=@[@"CCTV",@"频道",@"收藏",@"配置",@"设置"];
+    NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"heart.fill",@"externaldrive.fill",@"gearshape"];
     for (NSInteger i=0;i<titles.count;i++) {
         UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;
         UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.baseForegroundColor=(i==0?UIColor.systemPinkColor:UIColor.whiteColor); b.configuration=cfg;
@@ -539,15 +541,15 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.activeTab=sender.tag;
     for (UIButton *b in self.bottomBar.arrangedSubviews) { UIButtonConfiguration *cfg=b.configuration; cfg.baseForegroundColor=b.tag==sender.tag?HostAccent():UIColor.whiteColor; b.configuration=cfg; }
     if(self.tabPage){[self.tabPage willMoveToParentViewController:nil];[self.tabPage.view removeFromSuperview];[self.tabPage removeFromParentViewController];self.tabPage=nil;}
-    if(sender.tag==2){ [self openConfigurationTab]; }
-    else if(sender.tag==3){ SettingsViewController *page=[self makeSettingsPage]; [self showTabPage:page title:@"设置"]; }
-    else {self.favoritesOnly=sender.tag==1;self.activeSource=nil;self.groupControl.selectedSegmentIndex=0;[self configureCatalogNavigation];[self applyFilter];}
+    if(sender.tag==3){ [self openConfigurationTab]; }
+    else if(sender.tag==4){ SettingsViewController *page=[self makeSettingsPage]; [self showTabPage:page title:@"设置"]; }
+    else {self.favoritesOnly=sender.tag==2;if(sender.tag<2)self.subscriptionCatalog=sender.tag==1;self.activeSource=nil;self.playerTabs.selectedSegmentIndex=0;[self selectPlayerPanel];self.groupControl.selectedSegmentIndex=0;[self configureCatalogNavigation];[self applyFilter];}
     [self.view setNeedsLayout];
 }
 
 - (void)configureCatalogNavigation {
-    self.title=self.favoritesOnly?@"收藏频道":@"CCTVHost 直播";
-    self.navigationItem.largeTitleDisplayMode=self.playerExpanded?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
+    self.title=self.favoritesOnly?@"收藏频道":(self.subscriptionCatalog?@"频道":@"CCTV");
+    self.navigationItem.largeTitleDisplayMode=(self.playerExpanded&&(self.favoritesOnly||self.subscriptionCatalog==([self.currentRemoteURL length]>0)))?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationItem.searchController=self.searchController; self.navigationItem.hidesSearchBarWhenScrolling=NO;
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[self catalogMenu]];
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"全部频道" style:UIBarButtonItemStylePlain target:self action:@selector(showGroupMenu)];
@@ -558,7 +560,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     UIAction *refresh=[UIAction actionWithTitle:@"刷新播放列表" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){[w onPullRefresh];}];
     UIAction *add=[UIAction actionWithTitle:@"添加订阅" image:[UIImage systemImageNamed:@"plus"] identifier:nil handler:^(UIAction *a){[w addSubscription];}];
     UIAction *hide=[UIAction actionWithTitle:self.playerExpanded?@"收起播放器":@"展开播放器" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){w.playerExpanded=!w.playerExpanded;[w configureCatalogNavigation];[w.view setNeedsLayout];}];
-    return [UIMenu menuWithTitle:@"" children:@[grid,refresh,add,hide]];
+    return [UIMenu menuWithTitle:@"" children:self.subscriptionCatalog?@[grid,refresh,add,hide]:@[grid,hide]];
 }
 - (void)showGroupMenu {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:nil preferredStyle:UIAlertControllerStyleActionSheet];NSArray *groups=@[@"全部",@"央视",@"卫视",@"地方",@"教育",@"熊猫",@"订阅"];
@@ -573,7 +575,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     ConfigCenterViewController *page=[ConfigCenterViewController new];__weak typeof(self) w=self;
     page.profilesProvider=^{return [w configurationProfiles];};page.onServices=^{[w openServicesPage];};page.onAdd=^{[w addSubscription];};page.onRefresh=^{[w onPullRefresh];};
     page.onToggleProfile=^(NSString *source,BOOL enabled){if(!source.length)[NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"nativeChannelsEnabled"];else{NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabled removeObject:source];if(!enabled)[disabled addObject:source];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];}[w applyFilter];};
-    page.onSelectProfile=^(NSString *source){UIButton *b=(UIButton *)w.bottomBar.arrangedSubviews.firstObject;[w selectBottomTab:b];w.activeSource=source;w.title=source.length?@"订阅直播":@"央视直播";[w applyFilter];};
+    page.onSelectProfile=^(NSString *source){UIButton *b=(UIButton *)w.bottomBar.arrangedSubviews[source.length?1:0];[w selectBottomTab:b];w.activeSource=source;w.title=source.length?@"订阅直播":@"央视直播";[w applyFilter];};
     page.onDeleteProfile=^(NSString *source){[w deleteSubscription:source];};
     [self showTabPage:page title:@"配置中心"];
 }
@@ -796,6 +798,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 - (void)playChannel:(NSDictionary *)ch route:(NSDictionary *)route {
     NSString *cid = ch[@"id"];
     if (!cid.length) return;
+    if(self.activeTab!=0)[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[0]];
     self.playbackGeneration += 1;
     self.currentRemoteURL = nil;
     self.playerExpanded=YES;
@@ -972,10 +975,12 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         self.playbackPanel.view.hidden=YES;
         self.tabPage.view.hidden=YES;
     } else {
-        BOOL catalog=self.activeTab<2;
-        CGFloat ph=self.playerExpanded?MIN(w*9.0/16.0,MAX(120,(height-top-safe.bottom)*0.50)):0;
-        self.playerBox.frame=CGRectMake(0,top,w,ph);self.playerBox.hidden=!catalog||!self.playerExpanded;
-        CGFloat y=top+ph;self.groupControl.frame=CGRectMake(12,y+6,w-24,28);self.groupControl.hidden=!catalog||self.playerExpanded;self.playerTabs.frame=CGRectMake(12,y+6,w-24,28);self.playerTabs.hidden=!catalog||!self.playerExpanded;
+        BOOL catalog=self.activeTab<3;
+        BOOL matchingPlayer=self.favoritesOnly||(self.subscriptionCatalog==([self.currentRemoteURL length]>0));
+        BOOL expanded=self.playerExpanded&&matchingPlayer;
+        CGFloat ph=expanded?MIN(w*9.0/16.0,MAX(120,(height-top-safe.bottom)*0.50)):0;
+        self.playerBox.frame=CGRectMake(0,top,w,ph);self.playerBox.hidden=!catalog||!expanded;
+        CGFloat y=top+ph;self.groupControl.frame=CGRectMake(12,y+6,w-24,28);self.groupControl.hidden=!catalog||expanded;self.playerTabs.frame=CGRectMake(12,y+6,w-24,28);self.playerTabs.hidden=!catalog||!expanded;
         self.versionLabel.hidden=YES;
         CGFloat contentY=y+42;CGFloat tabY=height-safe.bottom-64;
         CGRect frame=CGRectMake(0,contentY,w,MAX(0,tabY-contentY));self.table.frame=frame;self.channelGrid.frame=frame;
@@ -1325,7 +1330,9 @@ static NSCache *LogoCache(void) {
 - (void)applyFilter {
     NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
     NSArray *base=[self.allChannels filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *c,NSDictionary *bindings){
-        if(![c[@"remoteURL"] length])return CCTVBoolPreference(@"nativeChannelsEnabled",YES) && (!self.activeSource || !self.activeSource.length);
+        BOOL remote=[c[@"remoteURL"] length]>0;
+        if(!self.favoritesOnly && remote!=self.subscriptionCatalog)return NO;
+        if(!remote)return CCTVBoolPreference(@"nativeChannelsEnabled",YES) && (!self.activeSource || !self.activeSource.length);
         NSSet *owners=[NSSet setWithArray:c[@"subscriptionSources"]?:@[]];NSMutableSet *enabled=[owners mutableCopy];[enabled minusSet:disabled];
         return enabled.count && (!self.activeSource || [enabled containsObject:self.activeSource]);
     }]];
@@ -1591,6 +1598,7 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)playRemote:(NSDictionary *)ch {
+    if(self.activeTab!=1)[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[1]];
     NSString *u=[self stableURLKey:ch[@"remoteURL"]];if(!u.length)return;
     self.playbackGeneration += 1;NSUInteger generation=self.playbackGeneration;
     NSTimeInterval requestedAt=CACurrentMediaTime();

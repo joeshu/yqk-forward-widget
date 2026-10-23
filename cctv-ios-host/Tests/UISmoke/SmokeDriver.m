@@ -97,16 +97,34 @@ static void next(NSArray *steps, NSUInteger index) {
             check([grid numberOfItemsInSection:0] > 20, @"home catalog populated");
             check(!grid.hidden, @"grid visible by default");
             capture(self.window, @"01-live-grid");
+            check(tabs.arrangedSubviews.count==5, @"five navigation pages");
+            NSString *source=@"https://example.com/smoke.m3u";
+            NSDictionary *remote=@{@"id":@"remote-smoke",@"name":@"CCTV-1 M3U8",@"group":@"央视",@"remoteURL":@"https://example.com/live.m3u8",@"subscriptionSources":@[source]};
+            NSArray *original=[root valueForKey:@"allChannels"];
+            [root setValue:[original arrayByAddingObject:remote] forKey:@"allChannels"];
+            [root applyFilter];
+            for(NSDictionary *c in [root valueForKey:@"shownChannels"])
+                check(![c[@"remoteURL"] length], @"CCTV page excludes subscription channels even with CCTV names");
+            [root selectBottomTab:(id)tabs.arrangedSubviews[1]];
+            NSArray *subscriptionRows=[root valueForKey:@"shownChannels"];
+            check(subscriptionRows.count==1&&[subscriptionRows.firstObject[@"id"] isEqualToString:@"remote-smoke"], @"channel page contains only subscription entries");
+            check([root.title isEqualToString:@"频道"], @"subscription page has its own navigation title");
+            capture(self.window, @"01b-subscription-channels");
+            [root setValue:original forKey:@"allChannels"];
+            [root applyFilter];
+            check([[root valueForKey:@"shownChannels"] count]==0, @"empty subscriptions never fall back to native SDK channels");
+            [root selectBottomTab:(id)tabs.arrangedSubviews[0]];
+
           },
           ^{
             [root setValue:[NSMutableArray arrayWithObject:@"cctv1"] forKey:@"favorites"];
-            [root selectBottomTab:(id)tabs.arrangedSubviews[1]];
+            [root selectBottomTab:(id)tabs.arrangedSubviews[2]];
           },
           ^{
             NSArray *shown = [root valueForKey:@"shownChannels"];
             check(shown.count == 1, @"favorite filter returns only saved channel");
             capture(self.window, @"02-favorites");
-            [root selectBottomTab:(id)tabs.arrangedSubviews[2]];
+            [root selectBottomTab:(id)tabs.arrangedSubviews[3]];
           },
           ^{
             check([[root valueForKey:@"tabPage"]
@@ -146,7 +164,7 @@ static void next(NSArray *steps, NSUInteger index) {
                     saved = YES;
             check(saved, @"custom service editor saves code and metadata");
             [nav popToRootViewControllerAnimated:NO];
-            [root selectBottomTab:(id)tabs.arrangedSubviews[3]];
+            [root selectBottomTab:(id)tabs.arrangedSubviews[4]];
           },
           ^{
             capture(self.window, @"07-settings");
@@ -190,6 +208,7 @@ static void next(NSArray *steps, NSUInteger index) {
           },
           ^{
             check([[root valueForKey:@"firstRender"] boolValue], @"legacy native first frame received");
+            check([[root valueForKey:@"activeTab"] integerValue]==0, @"native playback opens CCTV page");
             retainedWrapper = [root valueForKey:@"currentPlayer"];
             playCount = [CNPlayer smokePlayCount];
             [root selectChannel:[root channelWithID:@"cctv2"]];
@@ -223,6 +242,7 @@ static void next(NSArray *steps, NSUInteger index) {
             NSString *url = [NSString stringWithFormat:@"http://127.0.0.1:%@/video.mp4", port];
             [root playRemote:@{@"id" : url, @"name" : @"Local startup test", @"remoteURL" : url}];
             check([PyHost smokeStartCount] == 1, @"resume starts built-in service exactly once");
+            check([[root valueForKey:@"activeTab"] integerValue]==1, @"remote playback opens subscription page");
             check([root valueForKey:@"avPlayer"] == nil, @"AVPlayer waits until HTTP health is ready");
           },
           ^{
