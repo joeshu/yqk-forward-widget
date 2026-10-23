@@ -2115,7 +2115,7 @@ static NSCache *LogoCache(void) {
     [self log:@"播放失败 %ld %@", (long)error.code, error.localizedDescription];
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 播放失败", self.channelName];
     [self.spinner stopAnimating];
-    if(self.nativeTransitionKind.length){self.nativeTransitionKind=nil;[self.nativeTimeshift cancel];[self log:@"时移操作失败，请返回直播或重新选台"];return;}
+    if(self.nativeTransitionKind.length || self.nativeTimeShiftActive){self.nativeTransitionKind=nil;[self.nativeTimeshift cancel];[self log:@"时移操作失败，请返回直播或重新选台"];return;}
     if (error.code >= 4000 && error.code < 5000) {
         [self log:@"参数/调度错误不自动重试，请查看错误详情"];
         return;
@@ -2206,7 +2206,7 @@ static NSCache *LogoCache(void) {
     if(!self.currentPlayer || self.avPlayer || !self.firstRender){[self showServiceError:@"请等待 CCTV 原生频道起播完成后再操作。"];return;}
     if(!self.nativeTimeshift)self.nativeTimeshift=[[NativeTimeshiftSession alloc] initWithPlayer:self.currentPlayer];
     [self beginNativeTransition:end==0?@"时移":@"回看"];self.nativeTimeShiftActive=YES;
-    NSUInteger generation=self.playbackGeneration;id player=self.currentPlayer;__weak typeof(self) weakSelf=self;
+    NSUInteger generation=self.playbackGeneration;__weak id player=self.currentPlayer;__weak typeof(self) weakSelf=self;
     BOOL accepted=[self.nativeTimeshift seekStart:start end:end now:NSDate.date.timeIntervalSince1970 completion:^(BOOL allowed,NSError *error){
         if(generation!=weakSelf.playbackGeneration || player!=weakSelf.currentPlayer)return;
         if(!allowed || error){[weakSelf failNativeTransition:@"频道未允许该时间的时移/回看，请返回直播或重新选台。"];}else [weakSelf log:@"原生时移请求已完成，等待/确认首帧"];
