@@ -149,6 +149,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property (nonatomic, strong) AVPictureInPictureController *pip;
 @property (nonatomic, strong) PluginViewController *pluginPage;
 @property (nonatomic, strong) UIStackView *bottomBar;
+@property (nonatomic, strong) UIVisualEffectView *bottomBarBackdrop;
 @property (nonatomic, assign) NSInteger activeTab;
 @property (nonatomic, assign) BOOL subscriptionCatalog;
 @property (nonatomic, assign) BOOL favoritesOnly;
@@ -578,21 +579,38 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (void)onGroupChanged {
     self.favoritesOnly=NO;
-    for(UIButton *b in self.bottomBar.arrangedSubviews) { UIButtonConfiguration *cfg=b.configuration; cfg.baseForegroundColor=b.tag==self.activeTab?UIColor.systemPinkColor:UIColor.whiteColor; b.configuration=cfg; }
+    [self updateBottomBarSelection];
     [self configureCatalogNavigation];[self applyFilter];
 }
 
 - (void)buildBottomBar {
-    self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=4; self.bottomBar.backgroundColor=[UIColor colorWithWhite:0.13 alpha:0.98]; self.bottomBar.layer.cornerRadius=24; self.bottomBar.clipsToBounds=YES;
+    self.bottomBarBackdrop=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomBarBackdrop.userInteractionEnabled=NO;self.bottomBarBackdrop.layer.cornerRadius=29;self.bottomBarBackdrop.layer.cornerCurve=kCACornerCurveContinuous;self.bottomBarBackdrop.clipsToBounds=YES;self.bottomBarBackdrop.layer.borderWidth=0.7;self.bottomBarBackdrop.layer.borderColor=[UIColor colorWithWhite:1 alpha:0.14].CGColor;
+    UIView *glassTint=[[UIView alloc] initWithFrame:self.bottomBarBackdrop.contentView.bounds];glassTint.backgroundColor=HostGlassTint();glassTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.bottomBarBackdrop.contentView addSubview:glassTint];
+    [self.view addSubview:self.bottomBarBackdrop];
+    self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=3; self.bottomBar.backgroundColor=UIColor.clearColor; self.bottomBar.layer.cornerRadius=29; self.bottomBar.layer.cornerCurve=kCACornerCurveContinuous; self.bottomBar.clipsToBounds=YES;
     NSArray *titles=@[@"CCTV",@"频道",@"影视",@"资源",@"设置"];
     NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"film",@"externaldrive.fill",@"gearshape"];
     for (NSInteger i=0;i<titles.count;i++) {
         UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;
-        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.baseForegroundColor=(i==0?UIColor.systemPinkColor:UIColor.whiteColor); b.configuration=cfg;
-        b.titleLabel.font=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]; b.accessibilityLabel=titles[i];
+        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.baseForegroundColor=(i==0?HostAccent():HostMutedText()); cfg.background.backgroundColor=i==0?[HostAccent() colorWithAlphaComponent:0.20]:UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];return result;}; b.configuration=cfg;
+        b.accessibilityLabel=titles[i]; b.accessibilityIdentifier=[NSString stringWithFormat:@"tab.%@",titles[i]];
+        b.accessibilityHint=[NSString stringWithFormat:@"切换到%@页面",titles[i]];
         [b addTarget:self action:@selector(selectBottomTab:) forControlEvents:UIControlEventTouchUpInside]; [self.bottomBar addArrangedSubview:b];
     }
     [self.view addSubview:self.bottomBar];
+    [self updateBottomBarSelection];
+}
+
+- (void)updateBottomBarSelection {
+    for (UIButton *button in self.bottomBar.arrangedSubviews) {
+        UIButtonConfiguration *configuration=button.configuration;
+        BOOL selected=button.tag==self.activeTab;
+        configuration.baseForegroundColor=selected?HostAccent():HostMutedText();
+        configuration.background.backgroundColor=selected?[HostAccent() colorWithAlphaComponent:0.20]:UIColor.clearColor;
+        configuration.background.strokeColor=selected?[HostAccent() colorWithAlphaComponent:0.30]:UIColor.clearColor;
+        configuration.background.strokeWidth=selected?0.6:0;
+        button.configuration=configuration;
+    }
 }
 
 - (void)selectBottomTab:(UIButton *)sender {
@@ -600,7 +618,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     [self stopPreview];
     if(self.activeTab<2)self.catalogStates[@(self.activeTab)]=@{@"query":self.query?:@"",@"group":@(self.groupControl.selectedSegmentIndex),@"gridY":@(self.channelGrid.contentOffset.y),@"listY":@(self.table.contentOffset.y)};
     self.activeTab=sender.tag;
-    for (UIButton *b in self.bottomBar.arrangedSubviews) { UIButtonConfiguration *cfg=b.configuration; cfg.baseForegroundColor=b.tag==sender.tag?HostAccent():UIColor.whiteColor; b.configuration=cfg; }
+    [self updateBottomBarSelection];
     if(self.tabPage){[self.tabPage willMoveToParentViewController:nil];[self.tabPage.view removeFromSuperview];[self.tabPage removeFromParentViewController];self.tabPage=nil;}
     if(sender.tag==2){ [self openMediaTab]; }
     else if(sender.tag==3){ [self openConfigurationTab]; }
@@ -642,7 +660,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 - (void)showTabPage:(UIViewController *)page title:(NSString *)title {
     self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeAlways;
     self.tabPage=page;[self addChildViewController:page];[self.view addSubview:page.view];[page didMoveToParentViewController:self];self.title=title;self.navigationItem.searchController=page.navigationItem.searchController;self.navigationItem.leftBarButtonItem=nil;
-    self.navigationItem.rightBarButtonItems=page.navigationItem.rightBarButtonItems;[self.view bringSubviewToFront:self.bottomBar];
+    self.navigationItem.rightBarButtonItems=page.navigationItem.rightBarButtonItems;[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
 }
 - (void)openMediaTab {
     MediaBrowserViewController *page=[MediaBrowserViewController new];__weak typeof(self) weakSelf=self;
@@ -1140,6 +1158,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     if (self.fullscreen) {
         self.playerBox.frame = self.view.bounds;
         self.bottomBar.hidden = YES;
+        self.bottomBarBackdrop.hidden = YES;
         self.channelGrid.hidden=YES;
         self.playerTabs.hidden=YES;
         self.playbackPanel.view.hidden=YES;
@@ -1152,11 +1171,11 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         self.playerBox.frame=CGRectMake(0,top,w,ph);self.playerBox.hidden=!catalog||!expanded;
         CGFloat y=top+ph;self.groupControl.frame=CGRectMake(12,y+6,w-24,28);self.groupControl.hidden=!catalog||expanded;self.playerTabs.frame=CGRectMake(12,y+6,w-24,28);self.playerTabs.hidden=!catalog||!expanded;
         self.versionLabel.hidden=YES;
-        CGFloat contentY=y+42;CGFloat tabY=height-safe.bottom-64;
+        CGFloat contentY=y+42;CGFloat tabY=height-safe.bottom-72;
         CGRect frame=CGRectMake(0,contentY,w,MAX(0,tabY-contentY));self.table.frame=frame;self.channelGrid.frame=frame;
         self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=frame;self.playbackPanel.view.hidden=!catalog;
-        self.bottomBar.frame=CGRectMake(MAX(18,(w-420)/2),height-safe.bottom-60,MIN(w-36,420),52);self.bottomBar.hidden=NO;
-        self.tabPage.view.frame=CGRectMake(0,top,w,MAX(0,tabY-top));[self.view bringSubviewToFront:self.bottomBar];
+        self.bottomBar.frame=CGRectMake(MAX(18,(w-420)/2),height-safe.bottom-64,MIN(w-36,420),56);self.bottomBarBackdrop.frame=self.bottomBar.frame;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
+        self.tabPage.view.frame=CGRectMake(0,top,w,MAX(0,tabY-top));[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
     }
     [self relayoutPlayer];
     CGFloat overlayTop = self.fullscreen ? safe.top : 0;
@@ -1184,6 +1203,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     } else {
         self.playerBox.frame = CGRectMake(0, 0, w, w * 9.0 / 16.0);
         self.bottomBar.hidden = NO;
+        self.bottomBarBackdrop.hidden = NO;
         self.table.hidden = NO;
         self.groupControl.hidden = NO;
         self.versionLabel.hidden = NO;
