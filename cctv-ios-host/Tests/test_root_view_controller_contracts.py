@@ -28,7 +28,7 @@ def method_body(signature):
 
 class RootViewControllerSourceContracts(unittest.TestCase):
     def test_subscription_refresh_is_source_owned_and_replaces_stale_entries(self):
-        body = method_body("- (void)fetchSubscription:")
+        body = method_body("- (void)installPlaylist:")
         self.assertIn("stableURLKey:", body)
         self.assertIn('existing[@"subscriptionSources"]', body)
         self.assertIn("[owners removeObject:sourceKey]", body)
@@ -126,7 +126,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('urlString.length > 8192', body)
         self.assertIn('isEqualToString:@"http"', body)
         self.assertIn('isEqualToString:@"https"', body)
-        self.assertIn('skippedInvalidURLs++', method_body('- (void)fetchSubscription:'))
+        self.assertIn('skippedInvalidURLs++', method_body('- (void)installPlaylist:'))
 
     def test_m3u_parser_catches_invalid_url_lines(self):
         parser = (SOURCE.parent / "M3UParser.m").read_text(encoding="utf-8")

@@ -1,5 +1,7 @@
 #import "ConfigCenterViewController.h"
 #import "HostTheme.h"
+#import "HostToolbar.h"
+#import "ProfileStore.h"
 #import "PyHost.h"
 @interface ConfigCenterViewController () <UISearchResultsUpdating>
 @property(nonatomic, strong) NSArray<NSDictionary *> *profiles;
@@ -23,15 +25,11 @@
     UIRefreshControl *r = [UIRefreshControl new];
     [r addTarget:self action:@selector(refreshProfiles) forControlEvents:UIControlEventValueChanged];
     self.refreshControl = r;
-    self.navigationItem.rightBarButtonItems = @[
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd
-                                                      target:self
-                                                      action:@selector(add)],
-        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath"]
-                                         style:UIBarButtonItemStylePlain
-                                        target:self
-                                        action:@selector(refreshProfiles)]
-    ];
+    __weak typeof(self) w=self;
+    self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
+        @{@"icon":@"arrow.clockwise",@"title":@"刷新配置",@"action":[UIAction actionWithHandler:^(UIAction *a){[w refreshProfiles];}]},
+        @{@"icon":@"plus",@"title":@"添加配置",@"action":[UIAction actionWithHandler:^(UIAction *a){[w add];}]},
+        @{@"icon":@"ellipsis",@"title":@"配置操作",@"menu":[UIMenu menuWithChildren:@[[UIAction actionWithTitle:@"服务管理" image:[UIImage systemImageNamed:@"hand.tap"] identifier:nil handler:^(UIAction *a){if(w.onServices)w.onServices();}]]]}])];
     [self reloadProfiles];
 }
 - (void)viewWillAppear:(BOOL)animated {
@@ -112,6 +110,7 @@
         [s addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
         c.accessoryView = s;
     }
+    if(ip.section==1&&[self.profiles[ip.row][@"status"] length])c.detailTextLabel.text=[NSString stringWithFormat:@"%@\n%@",c.detailTextLabel.text?:@"",self.profiles[ip.row][@"status"]];
     return c;
 }
 - (void)toggle:(UISwitch *)sender {
@@ -144,6 +143,16 @@
                             [self reloadProfiles];
                             done(YES);
                           }];
-    return [UISwipeActionsConfiguration configurationWithActions:@[ a ]];
+    UIContextualAction *edit=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"编辑" handler:^(UIContextualAction *action,UIView *view,void (^done)(BOOL)){if(self.onEditProfile)self.onEditProfile(source);done(YES);}];
+    return [UISwipeActionsConfiguration configurationWithActions:@[a,edit]];
+}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
+    if(ip.section==0||![self.profiles[ip.row][@"source"] length])return nil;
+    NSString *source=self.profiles[ip.row][@"source"];__weak typeof(self) w=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:source previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
+        NSMutableArray *actions=[NSMutableArray arrayWithObject:[UIAction actionWithTitle:@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
+        for(NSNumber *offset in @[@(-1),@1]){[actions addObject:[UIAction actionWithTitle:offset.integerValue<0?@"上移":@"下移" image:[UIImage systemImageNamed:offset.integerValue<0?@"arrow.up":@"arrow.down"] identifier:nil handler:^(UIAction *a){NSArray *sources=[w.profiles valueForKey:@"source"];sources=[sources filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *s,NSDictionary *b){return s.length>0;}]];[ProfileStore move:source offset:offset.integerValue sources:sources];[w reloadProfiles];}]];}
+        return [UIMenu menuWithTitle:@"配置操作" children:actions];
+    }];
 }
 @end

@@ -7,7 +7,7 @@ options:
 settings:
   base:
     ENABLE_BITCODE: NO
-    OTHER_LDFLAGS: "-ObjC -lresolv"
+    OTHER_LDFLAGS: "-ObjC -lresolv -lz"
     HEADER_SEARCH_PATHS: "$(SRCROOT)/Sources/Include"
 targets:
   CCTVHost:

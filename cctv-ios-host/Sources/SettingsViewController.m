@@ -26,7 +26,7 @@
         @{ @"title":@"导出本机配置", @"action":@"export", @"icon":@"square.and.arrow.up" },
         @{ @"title":@"导入配置文件", @"action":@"import", @"icon":@"square.and.arrow.down" },
         @{ @"title":@"清理节目单缓存", @"detail":@"下次打开频道时重新获取", @"icon":@"trash", @"action":@"clearEPG" },
-        @{ @"title":@"CCTVHost", @"detail":@"0.16.2", @"icon":@"info.circle" },
+        @{ @"title":@"CCTVHost", @"detail":[NSString stringWithFormat:@"0.17.0 · %@",[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"] isEqual:@"no-python"]?@"无 Python 诊断版":@"完整版"], @"icon":@"info.circle" },
         @{ @"title":@"日志", @"action":@"logs", @"detail":@"播放器与插件运行日志可导出", @"icon":@"doc.text.magnifyingglass" }
       ]}
     ];

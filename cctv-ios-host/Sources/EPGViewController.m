@@ -1,8 +1,14 @@
 #import "EPGViewController.h"
 #import "HostTheme.h"
+#import "ProfileStore.h"
+#import "XMLTVStore.h"
 
 @interface EPGViewController () <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, copy) NSString *channelID;
+@property(nonatomic,strong) NSDictionary *channel;
+@property(nonatomic,copy) NSString *xmlSource;
+@property(nonatomic,assign) NSUInteger requestGeneration;
+@property(nonatomic,copy) NSString *sourceName;
 @property (nonatomic, copy) NSString *channelName;
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UILabel *hint;
@@ -17,6 +23,9 @@
 
 @implementation EPGViewController
 
+- (instancetype)initWithChannel:(NSDictionary *)channel officialID:(NSString *)officialID {
+    if(self=[self initWithChannelID:officialID name:channel[@"name"]?:@"节目单"]){self.channel=channel;self.xmlSource=[ProfileStore epgSourceForChannel:channel];}return self;
+}
 - (instancetype)initWithChannelID:(NSString *)channelID name:(NSString *)name {
     if (self = [super init]) {
         _channelID = [channelID copy];
@@ -61,7 +70,7 @@
 }
 
 - (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];[self.refreshTimer invalidate];__weak typeof(self) w=self;self.refreshTimer=[NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer *t){[w fetch];}];}
-- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[self.refreshTimer invalidate];self.refreshTimer=nil;[self.task cancel];}
+- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];self.requestGeneration++;[self.refreshTimer invalidate];self.refreshTimer=nil;[self.task cancel];}
 
 - (void)dealloc {
     [self.refreshTimer invalidate];
@@ -69,6 +78,15 @@
 }
 
 - (void)fetch {
+    if(self.xmlSource.length){NSUInteger request=++self.requestGeneration;BOOL force=self.table.refreshControl.refreshing;__weak typeof(self) w=self;
+        [[XMLTVStore shared] loadSource:self.xmlSource channel:[ProfileStore epgIDForChannel:self.channel] force:force completion:^(NSArray *rows,NSError *error){if(request!=w.requestGeneration)return;[w.spinner stopAnimating];[w.table.refreshControl endRefreshing];
+            if(rows.count){w.allRows=rows;w.sourceName=w.xmlSource;[w rebuildDates];w.hint.text=error?@"使用上次缓存，刷新暂不可用":[NSString stringWithFormat:@"XMLTV · %lu 个节目",(unsigned long)rows.count];}
+            else if(w.channelID.length){[w fetchOfficial];}
+            else w.hint.text=error.localizedDescription?:@"暂无匹配节目；请在频道菜单中设置 EPG ID";
+        }];return;}
+    [self fetchOfficial];
+}
+- (void)fetchOfficial {
     if(!self.channelID.length){self.hint.text=@"暂无匹配的官方节目单";[self.spinner stopAnimating];[self.table.refreshControl endRefreshing];return;}
     NSString *encoded = [self.channelID stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
     NSString *url = [NSString stringWithFormat:@"https://api.cntv.cn/epg/get3D12HEPG?c=%@&serviceId=cbox", encoded];
@@ -76,7 +94,7 @@
     req.timeoutInterval = 12;
     req.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
 
-    __weak typeof(self) weakSelf = self;
+    __weak typeof(self) weakSelf = self;NSUInteger generation=++self.requestGeneration;
     [self.task cancel];
     self.task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
         NSArray *rows = nil;
@@ -89,6 +107,7 @@
             }
         }
         dispatch_async(dispatch_get_main_queue(), ^{
+            if(generation!=weakSelf.requestGeneration)return;weakSelf.sourceName=@"央视官方 EPG";
             [weakSelf.spinner stopAnimating];
             [weakSelf.table.refreshControl endRefreshing];
             if (rows.count) {
@@ -119,7 +138,7 @@
     NSInteger idx=self.dates.selectedSegmentIndex;if(idx<0||idx>=self.dateKeys.count)return;NSString *key=self.dateKeys[idx];NSDateFormatter *f=[self dayFormatter];self.rows=[self.allRows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]] isEqualToString:key];}]];[self.table reloadData];
     NSTimeInterval now=NSDate.date.timeIntervalSince1970;for(NSUInteger i=0;i<self.rows.count;i++){NSDictionary *row=self.rows[i];if(now>=[row[@"start"] doubleValue]&&now<[row[@"end"] doubleValue]){[self.table scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:i inSection:0] atScrollPosition:UITableViewScrollPositionMiddle animated:NO];break;}}
 }
-- (void)showSourceInfo {NSString *message=[NSString stringWithFormat:@"频道：%@\n匹配 ID：%@\n数据来源：央视官方 EPG\n时区：北京时间\n\n日期仅展示接口实际返回的节目；暂无回看地址的节目不能回放。",self.channelName,self.channelID];UIAlertController *a=[UIAlertController alertControllerWithTitle:@"EPG 频道信息" message:message preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[self presentViewController:a animated:YES completion:nil];}
+- (void)showSourceInfo {NSString *message=[NSString stringWithFormat:@"频道：%@\n匹配 ID：%@\n数据来源：%@\n时区：北京时间\n\n日期仅展示接口实际返回的节目；暂无回看地址的节目不能回放。",self.channelName,self.xmlSource.length?[ProfileStore epgIDForChannel:self.channel]:self.channelID,self.sourceName?:self.xmlSource?:@"央视官方 EPG"];UIAlertController *a=[UIAlertController alertControllerWithTitle:@"EPG 频道信息" message:message preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[self presentViewController:a animated:YES completion:nil];}
 
 - (NSArray<NSDictionary *> *)normalize:(NSArray *)rows {
     NSMutableArray *out = [NSMutableArray array];

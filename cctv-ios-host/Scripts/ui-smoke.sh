@@ -21,7 +21,7 @@ ARCH=$(uname -m)
 xcrun --sdk iphonesimulator clang -fobjc-arc -target "$ARCH-apple-ios15.0-simulator" -isysroot "$SDK" \
   -I Sources/Include -I Sources Sources/*.m Tests/UISmoke/*.m \
   -framework Foundation -framework UIKit -framework CoreGraphics -framework CoreMedia -framework AVFoundation -framework AVKit \
-  -framework MediaPlayer -framework QuartzCore -framework UniformTypeIdentifiers \
+  -framework MediaPlayer -framework QuartzCore -framework UniformTypeIdentifiers -lz \
   -o "$APP/CCTVHost"
 cp Resources/channels.json "$APP/"
 python3 - "$APP/Info.plist" <<'PY'

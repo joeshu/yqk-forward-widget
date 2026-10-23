@@ -7,12 +7,19 @@ SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 echo "SDK: $SDK"
 xcrun --sdk iphoneos clang --version | head -2
 
-OUT=build
+OUT="${CCTV_OUT:-build}"
 APP="$OUT/CCTVHost.app"
 rm -rf "$OUT"
 mkdir -p "$APP"
 cp Resources/Info.plist "$APP/Info.plist"
 cp Resources/*.json "$APP/" 2>/dev/null || true
+if [ -n "${PY_DISABLE:-}" ]; then
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.example.cctvhost.nopy' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName CCTVHost 无PY' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Add :CCTVHostBuildVariant string no-python' "$APP/Info.plist"
+else
+  /usr/libexec/PlistBuddy -c 'Add :CCTVHostBuildVariant string full' "$APP/Info.plist"
+fi
 ICON_PARTIAL="$OUT/assetcatalog-info.plist"
 xcrun --sdk iphoneos actool --output-format human-readable-text --notices --warnings \
   --platform iphoneos --minimum-deployment-target 15.0 --target-device iphone --target-device ipad \
@@ -28,7 +35,7 @@ with open(base_path,'wb') as f: plistlib.dump(base,f,sort_keys=False)
 assert 'CFBundleIcons' in base and 'CFBundlePrimaryIcon' in base['CFBundleIcons']
 PY
 [ -s "$APP/Assets.car" ] || { echo "::error::AppIcon asset catalog did not produce Assets.car"; exit 1; }
-cp Plugins/ysp-live.py "$APP/ysp-live.py"
+if [ -z "${PY_DISABLE:-}" ]; then cp Plugins/ysp-live.py "$APP/ysp-live.py"; fi
 printf 'APPL????' > "$APP/PkgInfo"
 mkdir -p "$APP/Frameworks"
 

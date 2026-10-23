@@ -7,5 +7,6 @@
 @property(nonatomic, copy) dispatch_block_t onRefresh;
 @property(nonatomic, copy) void (^onSelectProfile)(NSString *source);
 @property(nonatomic, copy) void (^onToggleProfile)(NSString *source, BOOL enabled);
+@property(nonatomic, copy) void (^onEditProfile)(NSString *source);
 @property(nonatomic, copy) void (^onDeleteProfile)(NSString *source);
 @end
