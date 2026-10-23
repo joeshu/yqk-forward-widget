@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [ -z "${PY_DISABLE:-}" ] && { [ ! -s GeneratedJS/yangshipin.bundle.js ] || [ ! -s GeneratedJS/js-runtime.bundle.js ]; }; then
+if [ -z "${PY_DISABLE:-}" ] && { [ ! -s GeneratedJS/yangshipin.bundle.js ] || [ ! -s GeneratedJS/js-runtime.bundle.js ] || [ ! -s GeneratedJS/node-fetch.bundle.cjs ]; }; then
   npm ci --prefix JSPlugins --no-audit --no-fund
   npm run build --prefix JSPlugins
   npm test --prefix JSPlugins

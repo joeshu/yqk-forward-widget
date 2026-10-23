@@ -10,6 +10,7 @@
     "cheerio": "1.0.0-rc.12",
     "core-js": "3.38.1",
     "crypto-js": "4.2.0",
+    "node-fetch": "2.7.0",
     "rollup": "2.79.2"
   },
   "devDependencies": {

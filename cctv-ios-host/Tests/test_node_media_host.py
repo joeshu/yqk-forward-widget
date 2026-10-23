@@ -26,7 +26,8 @@ class NodeMediaHostTests(unittest.TestCase):
         self.token = 'test-token-' + os.urandom(8).hex()
         environment = {key: os.environ[key] for key in ('PATH', 'LANG', 'TMPDIR') if key in os.environ}
         node = os.environ.get('CCTVHOST_NODE_BINARY', shutil.which('node'))
-        self.process = subprocess.Popen([node, str(HOST), str(self.info), self.token, str(self.packages)], env=environment,
+        # Match iOS Mobile's disabled JIT/WebAssembly rather than desktop defaults.
+        self.process = subprocess.Popen([node, '--jitless', str(HOST), str(self.info), self.token, str(self.packages)], env=environment,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         deadline = time.monotonic() + 8
         while not self.info.exists() and time.monotonic() < deadline:

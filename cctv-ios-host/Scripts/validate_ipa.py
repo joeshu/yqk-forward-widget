@@ -80,7 +80,7 @@ def validate(path):
             assert any('JavaScriptCore.framework/' in name for name in result['binaries'][binary]['dependencies']), 'missing JavaScriptCore link'
             result['binaries']['NodeMobile'] = macho_info(z.read(root + 'Frameworks/NodeMobile.framework/NodeMobile'))
             assert not any('NodeMobile.framework/' in name for name in result['binaries'][binary]['dependencies']), 'Node must load on demand'
-            for member in ('media-service.py', 'host_media_runtime.py', 'host_media_relay.py', 'node-plugin-host.cjs', 'base/spider.py', 'NodeMobile-LICENSE.txt', 'drpy-LICENSE.txt'):
+            for member in ('media-service.py', 'host_media_runtime.py', 'host_media_relay.py', 'node-plugin-host.cjs', 'node-fetch.bundle.cjs', 'node-fetch-THIRD-PARTY-NOTICES.txt', 'base/spider.py', 'NodeMobile-LICENSE.txt', 'drpy-LICENSE.txt'):
                 assert root + member in z.namelist(), 'missing media component: ' + member
             assert len(z.read(root + 'js-runtime.bundle.js')) > 100000, 'missing generic JS and drpy engine'
             for package in ('requests', 'bs4', 'html5lib', 'urllib3'):

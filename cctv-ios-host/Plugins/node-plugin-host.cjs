@@ -4,6 +4,9 @@
 'use strict'
 const http=require('node:http'),https=require('node:https'),net=require('node:net')
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm')
+const bundledFetch=fs.existsSync(path.join(__dirname,'node-fetch.bundle.cjs'))?path.join(__dirname,'node-fetch.bundle.cjs'):path.join(__dirname,'../GeneratedJS/node-fetch.bundle.cjs')
+const nativeFetch=require(bundledFetch)
+global.fetch=nativeFetch;global.Headers=nativeFetch.Headers;global.Request=nativeFetch.Request;global.Response=nativeFetch.Response
 const {pathToFileURL}=require('node:url')
 const {AsyncLocalStorage}=require('node:async_hooks')
 const scope=new AsyncLocalStorage()

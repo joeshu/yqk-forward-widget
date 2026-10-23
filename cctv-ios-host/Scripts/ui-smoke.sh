@@ -25,6 +25,11 @@ xcrun --sdk iphonesimulator clang -fobjc-arc -target "$ARCH-apple-ios15.0-simula
   -o "$APP/CCTVHost"
 cp Resources/channels.json "$APP/"
 cp Plugins/node-plugin-host.cjs "$APP/"
+if [ ! -s GeneratedJS/node-fetch.bundle.cjs ]; then
+  npm ci --prefix JSPlugins --no-audit --no-fund
+  npm run build --prefix JSPlugins
+fi
+cp GeneratedJS/node-fetch.bundle.cjs "$APP/"
 python3 - "$APP/catpaw-ui.cjs" <<'PY'
 import hashlib,pathlib,sys,urllib.request
 url='https://joeshu.github.io/yqk-forward-widget/catpaw/index.js'
