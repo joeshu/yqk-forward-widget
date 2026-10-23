@@ -527,7 +527,8 @@ static void next(NSArray *steps, NSUInteger index) {
             [nav pushViewController:mediaPage animated:NO];
           }},
           @{@"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]>0;},@"run":^{
-            check([[mediaPage valueForKey:@"items"] count]==1,@"media home loads real JSON API into native poster grid");capture(self.window,@"16-media-home");
+            check([[mediaPage valueForKey:@"items"] count]==1,@"media home loads real JSON API into native poster grid");
+            UIScrollView *categories=[mediaPage valueForKey:@"categoryScroll"];check(CGRectGetMinY(categories.frame)>=mediaPage.view.safeAreaInsets.top,@"film categories stay below the navigation and search bars");capture(self.window,@"16-media-home");
             UISearchController *search=[mediaPage valueForKey:@"search"];search.searchBar.text=@"中文";[mediaPage updateSearchResultsForSearchController:search];
           }},
           @{@"until":^BOOL{return [[[mediaPage valueForKey:@"items"] firstObject][@"id"] isEqual:@"中文1"];},@"run":^{
