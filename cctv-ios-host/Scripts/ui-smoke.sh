@@ -26,7 +26,15 @@ SIM=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=js
 xcrun simctl boot "$SIM" || true
 xcrun simctl bootstatus "$SIM" -b
 xcrun simctl install "$SIM" "$APP"
-xcrun simctl launch "$SIM" com.example.cctvhost.uismoke
+python3 Tests/UISmoke/fixture_server.py "$OUT/fixture-port.txt" &
+FIXTURE_PID=$!
+trap 'kill "$FIXTURE_PID" 2>/dev/null || true' EXIT
+for attempt in $(seq 1 20); do
+  if [ -s "$OUT/fixture-port.txt" ]; then break; fi
+  sleep 0.2
+done
+FIXTURE_PORT=$(cat "$OUT/fixture-port.txt")
+xcrun simctl launch "$SIM" com.example.cctvhost.uismoke --smoke-port "$FIXTURE_PORT"
 CONTAINER=$(xcrun simctl get_app_container "$SIM" com.example.cctvhost.uismoke data)
 for attempt in $(seq 1 40); do
   if [ -f "$CONTAINER/Documents/ui-smoke/results.json" ]; then break; fi

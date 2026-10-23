@@ -6,4 +6,5 @@
 + (void)save:(NSDictionary *)service;
 + (void)remove:(NSString *)identifier;
 + (NSString *)activeIdentifier;
++ (NSString *)dataDirectoryForService:(NSDictionary *)service error:(NSError **)error;
 @end

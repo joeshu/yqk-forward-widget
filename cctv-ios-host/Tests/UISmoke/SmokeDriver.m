@@ -1,10 +1,14 @@
 #import "AppDelegate.h"
+#import "CNPlayerSDK.h"
 #import "EPGViewController.h"
+#import "PlaybackStartupTrace.h"
+#import "PyHost.h"
 #import "RootViewController.h"
 #import "ServiceEditorViewController.h"
 #import "ServiceStore.h"
 #import "ServicesViewController.h"
 #import <UIKit/UIKit.h>
+#import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 
 @interface RootViewController (Smoke)
@@ -12,9 +16,20 @@
 - (void)openServicesPage;
 - (void)toggleLog;
 - (void)applyFilter;
+- (void)selectChannel:(NSDictionary *)channel;
+- (void)playRemote:(NSDictionary *)channel;
+- (NSDictionary *)channelWithID:(NSString *)identifier;
+- (void)player:(id)player statEvent:(NSUInteger)event value:(id)value;
 @end
 @interface EPGViewController (Smoke)
 - (void)rebuildDates;
+@end
+@interface CNPlayer (SmokeMetrics)
++ (NSInteger)smokeResetCount;
++ (NSInteger)smokePlayCount;
+@end
+@interface PyHost (SmokeMetrics)
++ (NSInteger)smokeStartCount;
 @end
 static NSMutableArray *failures;
 static NSString *outputDir;
@@ -73,6 +88,9 @@ static void next(NSArray *steps, NSUInteger index) {
       UINavigationController *nav = (id)self.window.rootViewController;
       RootViewController *root = (id)nav.viewControllers.firstObject;
       UIStackView *tabs = [root valueForKey:@"bottomBar"];
+      __block id retainedWrapper = nil;
+      __block id oldWrapper = nil;
+      __block NSInteger playCount = 0;
       NSArray *steps = @[
           ^{
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
@@ -166,6 +184,63 @@ static void next(NSArray *steps, NSUInteger index) {
           },
           ^{
             capture(self.window, @"10-diagnostic-log");
+            [root toggleLog];
+            [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"legacyNativePlayback"];
+            [root selectChannel:[root channelWithID:@"cctv1"]];
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue], @"legacy native first frame received");
+            retainedWrapper = [root valueForKey:@"currentPlayer"];
+            playCount = [CNPlayer smokePlayCount];
+            [root selectChannel:[root channelWithID:@"cctv2"]];
+            check([root valueForKey:@"currentPlayer"] == retainedWrapper,
+                  @"0.12 compatible mode reuses wrapper");
+            check([CNPlayer smokeResetCount] > 0, @"legacy reset retained");
+          },
+          ^{
+            check([CNPlayer smokePlayCount] == playCount + 1,
+                  @"PrepareDone cannot play again after auto first frame");
+            [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"legacyNativePlayback"];
+            oldWrapper = [root valueForKey:@"currentPlayer"];
+            [root selectChannel:[root channelWithID:@"cctv3"]];
+            check([root valueForKey:@"currentPlayer"] != oldWrapper, @"fresh mode uses a distinct wrapper");
+            [root player:oldWrapper statEvent:3 value:nil];
+            check(![[root valueForKey:@"firstRender"] boolValue],
+                  @"stale old player cannot set new first frame");
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue], @"fresh-mode first frame received");
+            [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"legacyNativePlayback"];
+            NSArray *arguments = NSProcessInfo.processInfo.arguments;
+            NSUInteger at = [arguments indexOfObject:@"--smoke-port"];
+            NSString *port = at != NSNotFound && at + 1 < arguments.count ? arguments[at + 1] : @"0";
+            [ServiceStore save:@{
+                @"id" : @"builtin-ysp",
+                @"name" : @"YSP Live",
+                @"builtin" : @YES,
+                @"port" : @([port integerValue])
+            }];
+            NSString *url = [NSString stringWithFormat:@"http://127.0.0.1:%@/video.mp4", port];
+            [root playRemote:@{@"id" : url, @"name" : @"Local startup test", @"remoteURL" : url}];
+            check([PyHost smokeStartCount] == 1, @"resume starts built-in service exactly once");
+            check([root valueForKey:@"avPlayer"] == nil, @"AVPlayer waits until HTTP health is ready");
+          },
+          ^{
+            PlaybackStartupTrace *trace = [root valueForKey:@"startupTrace"];
+            check(trace.stages[@"service"] != nil, @"service readiness recorded before AVPlayer startup");
+            check([root valueForKey:@"avPlayer"] != nil, @"playback begins after successful readiness probe");
+          },
+          ^{
+            PlaybackStartupTrace *trace = [root valueForKey:@"startupTrace"];
+            check(trace.stages[@"itemReady"] != nil, @"real AVPlayer item readiness observed");
+            check(trace.stages[@"frame"] != nil && [[root valueForKey:@"firstRender"] boolValue],
+                  @"real AVPlayerLayer video frame observed separately");
+            check([trace.stages[@"frame"] doubleValue] >= [trace.stages[@"itemReady"] doubleValue],
+                  @"frame timing does not precede item readiness");
+            id previous = [root valueForKey:@"avPlayer"];
+            [root selectChannel:[root channelWithID:@"cctv1"]];
+            check([previous currentItem] == nil, @"switching to native detaches old subscription item");
+            check([root valueForKey:@"pip"] == nil, @"switching releases old picture-in-picture controller");
           }
       ];
       next(steps, 0);

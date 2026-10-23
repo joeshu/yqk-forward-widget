@@ -6,6 +6,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface PyHost : NSObject
 
 @property (class, nonatomic, readonly) BOOL running;
+@property (class, nonatomic, readonly) BOOL startedOnce;
 @property (class, nonatomic, readonly) NSInteger port;
 
 /// stdout/stderr 回调（后台线程调用）

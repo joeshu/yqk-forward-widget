@@ -2,7 +2,7 @@
 @implementation HostBackup
 + (NSArray<NSString *> *)preferenceKeys {
     return @[
-        @"resumeLastChannel", @"rememberLastChannel", @"autoLoadEPG", @"allowBackgroundAudio", @"autoPiP",
+        @"legacyNativePlayback", @"resumeLastChannel", @"rememberLastChannel", @"autoLoadEPG", @"allowBackgroundAudio", @"autoPiP",
         @"channelGridMode", @"nativeChannelsEnabled"
     ];
 }
