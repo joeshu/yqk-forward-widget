@@ -32,6 +32,11 @@ jobs:
           path: /tmp/python-ios.tar.gz
           key: python-apple-support-3.13-b16
 
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/cctvhost-node-mobile-ios.zip
+          key: cctvhost-node-mobile-ios-18.20.4-8c5ca3a0
+
       - name: Toolchain info
         run: |
           xcodebuild -version
@@ -138,6 +143,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/cctvhost-node-mobile-ios.zip
+          key: cctvhost-node-mobile-ios-18.20.4-8c5ca3a0
       - name: Run simulator UI smoke checks
         working-directory: cctv-ios-host
         run: bash Scripts/ui-smoke.sh
@@ -148,6 +157,6 @@ jobs:
           name: CCTVHost-UI-preview-${{ github.sha }}
           path: |
             cctv-ios-host/ui-preview/*.png
-            cctv-ios-host/ui-preview/results.json
+            cctv-ios-host/ui-preview/*.json
             cctv-ios-host/ui-preview/*.log
           if-no-files-found: error

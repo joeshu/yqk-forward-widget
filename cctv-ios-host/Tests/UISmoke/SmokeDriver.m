@@ -11,6 +11,7 @@
 #import "XMLTVStore.h"
 #import "ServicesViewController.h"
 #import "HostImageLoader.h"
+#import "NodePluginRuntime.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
@@ -51,6 +52,11 @@
 + (NSInteger)smokeStartCount;
 @end
 static NSMutableArray *failures;
+static NSDictionary *nodeCall(NSString *operation,NSDictionary *payload){
+    NSString *input=[[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL] encoding:NSUTF8StringEncoding];NSError *error=nil;
+    NSString *reply=[NodePluginRuntime.shared callOperation:operation json:input error:&error];
+    return reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:@{@"ok":@NO,@"error":error.localizedDescription?:@"Node bridge failed"};
+}
 static NSString *outputDir;
 static void check(BOOL value, NSString *message) {
     if (!value)
@@ -124,6 +130,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block id preparedWrapper;
       __block UIImageView *logoA, *logoB, *staleLogo, *oversizeLogo;
       __block NSDictionary *imageStats;
+      __block NSDictionary *nodeChecks;
       NSArray *steps = @[
           ^{
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
@@ -477,6 +484,26 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[root valueForKey:@"shownChannels"] count]==0,@"stale search cannot overwrite final results");
             UISearchController *search=[root valueForKey:@"searchController"];search.searchBar.text=@"";[root updateSearchResultsForSearchController:search];
             check([[root valueForKey:@"shownChannels"] count]>20,@"clearing search restores catalog immediately");
+            NSString *folder=[[ServiceStore directory] stringByAppendingPathComponent:[@"node-ui-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+            [NSFileManager.defaultManager createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:NULL];
+            NSString *script=@"const fs=require('fs');module.exports={init(){fs.writeFileSync('owned.txt','start');setInterval(()=>{},100)},home(){return {class:[{type_id:'movie',type_name:'Film'}]}},search(key){return {list:[{vod_id:key,vod_name:'Original Node JS'}]}},detail(ids){return {list:[{vod_id:ids[0]}]}},play(flag,id){return {parse:0,url:'https://fixture.test/'+id}},close(){fs.appendFileSync('owned.txt','-closed')}}";
+            [script writeToFile:[folder stringByAppendingPathComponent:@"index.cjs"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{
+                NSDictionary *start=nodeCall(@"start",@{@"session":@"node-ui",@"packageRoot":folder,@"dataDirectory":folder,@"entry":@"index.cjs",@"moduleType":@"commonjs",@"protocol":@"catvod-js"});
+                NSDictionary *search=[start[@"ok"] boolValue]?nodeCall(@"search",@{@"session":@"node-ui",@"keyword":@"opaque-node-id"}):@{};
+                NSDictionary *stop=nodeCall(@"stop",@{@"session":@"node-ui"});
+                NSString *saved=[NSString stringWithContentsOfFile:[folder stringByAppendingPathComponent:@"owned.txt"] encoding:NSUTF8StringEncoding error:NULL];
+                NSDictionary *checks=@{@"start":start,@"search":search,@"stop":stop,@"saved":saved?:@""};
+                [NSFileManager.defaultManager removeItemAtPath:folder error:NULL];dispatch_async(dispatch_get_main_queue(),^{nodeChecks=checks;});
+            }});
+          }},
+          @{@"until":^BOOL{return nodeChecks!=nil;},@"timeout":@45,@"run":^{
+            check([nodeChecks[@"start"][@"ok"] boolValue],@"actual Node.js Mobile framework starts on iOS simulator");
+            check([nodeChecks[@"start"][@"result"][@"version"] hasPrefix:@"18."],@"Node mobile version is measured from the embedded runtime");
+            check([nodeChecks[@"search"][@"result"][@"list"][0][@"vod_id"] isEqual:@"opaque-node-id"],@"original CommonJS executes through native Node bridge");
+            check([nodeChecks[@"stop"][@"ok"] boolValue] && !NodePluginRuntime.shared.hasActivePlugin,@"Node plugin closes without destroying the reusable engine");
+            check([nodeChecks[@"saved"] isEqual:@"start-closed"],@"plugin relative data path is isolated and close hook finishes");
+            NSData *diagnostic=[NSJSONSerialization dataWithJSONObject:nodeChecks options:NSJSONWritingPrettyPrinted error:NULL];[diagnostic writeToFile:[outputDir stringByAppendingPathComponent:@"node-runtime.json"] atomically:YES];
           }}
       ];
       next(steps, 0);

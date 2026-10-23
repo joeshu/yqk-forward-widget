@@ -6,6 +6,7 @@
 @interface ConfigCenterViewController () <UISearchResultsUpdating>
 @property(nonatomic, strong) NSArray<NSDictionary *> *profiles;
 @property(nonatomic, strong) UISearchController *search;
+@property(nonatomic, strong) NSTimer *statusTimer;
 @end
 @implementation ConfigCenterViewController
 - (instancetype)init {
@@ -35,17 +36,21 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self reloadProfiles];
+    [self.statusTimer invalidate];__weak typeof(self) weakSelf=self;self.statusTimer=[NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer){[weakSelf reloadProfiles];}];
 }
+- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[self.statusTimer invalidate];self.statusTimer=nil;}
+- (void)dealloc {[self.statusTimer invalidate];}
 - (void)reloadProfiles {
     NSArray *all = self.profilesProvider ? self.profilesProvider() : @[];
     NSString *q = self.search.searchBar.text.lowercaseString;
-    self.profiles =
+    NSArray *profiles =
         q.length
             ? [all filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *p,
                                                                                      NSDictionary *bindings) {
                      return [p[@"name"] lowercaseString] && [[p[@"name"] lowercaseString] containsString:q];
                    }]]
             : all;
+    if([self.profiles isEqualToArray:profiles])return;self.profiles=profiles;
     [self.tableView reloadData];
 }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
@@ -103,6 +108,7 @@
         c.detailTextLabel.text =
             [NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@", p[@"count"], p[@"epgStatus"]?:@"自动匹配", [p[@"source"] hasPrefix:@"local-playlist:"]?@"本机文件 · 长按可编辑、排序":([p[@"source"] length]?p[@"source"]:@"官方频道目录")];
         c.imageView.image = [UIImage systemImageNamed:@"list.bullet.rectangle"];
+        if([p[@"type"] isEqual:@"plugin"]){c.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",p[@"runtime"],p[@"protocol"]];c.imageView.image=[UIImage systemImageNamed:@"curlybraces"];}
         UISwitch *s = [UISwitch new];
         s.onTintColor = HostAccent();
         s.on = [p[@"enabled"] boolValue];
@@ -151,7 +157,8 @@
     if(ip.section==0||![self.profiles[ip.section-1][@"source"] length])return nil;
     NSString *source=self.profiles[ip.section-1][@"source"];__weak typeof(self) w=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:source previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
-        NSMutableArray *actions=[NSMutableArray arrayWithObject:[UIAction actionWithTitle:@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
+        NSMutableArray *actions=[NSMutableArray arrayWithObject:[UIAction actionWithTitle:[source hasPrefix:@"plugin:"]?@"编辑资源":@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
+        if([source hasPrefix:@"plugin:"])return [UIMenu menuWithTitle:@"资源操作" children:actions];
         for(NSNumber *offset in @[@(-1),@1]){[actions addObject:[UIAction actionWithTitle:offset.integerValue<0?@"上移":@"下移" image:[UIImage systemImageNamed:offset.integerValue<0?@"arrow.up":@"arrow.down"] identifier:nil handler:^(UIAction *a){NSArray *sources=[w.profiles valueForKey:@"source"];sources=[sources filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *s,NSDictionary *b){return s.length>0;}]];[ProfileStore move:source offset:offset.integerValue sources:sources];[w reloadProfiles];}]];}
         return [UIMenu menuWithTitle:@"资源操作" children:actions];
     }];

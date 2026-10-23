@@ -38,7 +38,12 @@ g.fetch = (input, options = {}) => new Promise((resolve, reject) => {
   let key, settled = false
   const abort = () => { if (key != null) g.__hostAbortFetch(key) }
   signal?.addEventListener('abort', abort)
-  key = g.__hostFetch(String(input), JSON.stringify({ method: options.method || 'GET', headers: options.headers || {} }), result => {
+  let headers=options.headers||{}
+  if(typeof headers.entries==='function')headers=Object.fromEntries(headers.entries())
+  const body=options.body
+  const request={method:String(options.method||'GET').toUpperCase(),headers}
+  if(body!=null){if(typeof body==='string')request.body=body;else if(body instanceof ArrayBuffer||ArrayBuffer.isView(body))request.bodyBase64=Buffer.from(body instanceof ArrayBuffer?new Uint8Array(body):new Uint8Array(body.buffer,body.byteOffset,body.byteLength)).toString('base64');else request.body=String(body)}
+  key = g.__hostFetch(String(input), JSON.stringify(request), result => {
     if (settled) return
     settled = true
     signal?.removeEventListener('abort', abort)

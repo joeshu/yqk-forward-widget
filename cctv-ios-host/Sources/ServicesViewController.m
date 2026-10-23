@@ -4,11 +4,13 @@
 #import "PyHost.h"
 #import "ServiceEditorViewController.h"
 #import "ServiceStore.h"
+static NSString *ServiceEngineName(NSDictionary *service){return [service[@"engine"] isEqual:@"node"]?@"Node.js Mobile":([service[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore":@"Python");}
 @interface ServiceDetailViewController : UITableViewController
 @property(nonatomic, copy) NSDictionary *service;
 @property(nonatomic, copy) void (^onToggle)(NSDictionary *, BOOL);
 @property(nonatomic, copy) dispatch_block_t onLog;
 @property(nonatomic, copy) void (^onSubscribe)(NSString *);
+@property(nonatomic, copy) void (^onBrowseService)(NSDictionary *);
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, copy) NSString *health;
 @property(nonatomic, strong) NSURLSessionDataTask *probeTask;
@@ -16,6 +18,7 @@
 @property(nonatomic, assign) BOOL displayedRunning;
 @end
 @implementation ServiceDetailViewController
+- (BOOL)opensMedia {NSArray *caps=self.service[@"capabilities"];return [ServiceStore isMediaService:self.service] && (![caps isKindOfClass:NSArray.class] || !caps.count || [caps containsObject:@"detail"] || [caps containsObject:@"play"]);}
 - (instancetype)init {
     return [super initWithStyle:UITableViewStyleInsetGrouped];
 }
@@ -70,7 +73,7 @@
                           : ([self.service[@"builtin"] boolValue] ? 0 : 1);
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return @[ ([self.service[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore · 服务状态":@"Python · 服务状态"), @"本机访问", @"服务信息", @"操作", @"" ][section];
+    return @[ [NSString stringWithFormat:@"%@ · 服务状态",ServiceEngineName(self.service)], @"本机访问", @"服务信息", @"操作", @"" ][section];
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0)
@@ -112,7 +115,7 @@
         NSDateFormatter *fmt = [NSDateFormatter new];
         fmt.dateFormat = @"yyyy-MM-dd HH:mm";
         NSArray *values = @[
-            [self.service[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore":@"Python",
+            ServiceEngineName(self.service),
             [self.service[@"builtin"] boolValue]
                 ? @"内置"
                 : ([self.service[@"url"] length] ? @"远程链接" : @"本地文件 / 代码"),
@@ -123,6 +126,7 @@
         c.detailTextLabel.text = values[ip.row];
     } else if (ip.section == 3) {
         c.textLabel.text = @[ @"查看日志", @"编辑服务", @"查看 / 导出代码", @"添加到直播订阅" ][ip.row];
+        if(ip.row==3 && [self opensMedia])c.textLabel.text=@"打开影视";
         c.imageView.image = [UIImage systemImageNamed:@[
             @"doc.text", @"square.and.pencil", @"square.and.arrow.up", @"plus.rectangle.on.rectangle"
         ][ip.row]];
@@ -182,7 +186,7 @@
             [self edit];
         else if (ip.row == 2) {
             UIAlertController *a =
-                [UIAlertController alertControllerWithTitle:([self.service[@"engine"] isEqual:@"javascript"]?@"JavaScript 代码":@"Python 代码")
+                [UIAlertController alertControllerWithTitle:@"资源代码"
                                                     message:nil
                                              preferredStyle:UIAlertControllerStyleActionSheet];
             [a addAction:[UIAlertAction
@@ -200,7 +204,7 @@
                                      handler:^(UIAlertAction *action) {
                                        UIActivityViewController *v =
                                            [[UIActivityViewController alloc] initWithActivityItems:@[
-                                               [NSURL fileURLWithPath:[ServiceStore codePath:self.service]]
+                                               [NSURL fileURLWithPath:[self.service[@"archivePath"] length]?self.service[@"archivePath"]:[ServiceStore codePath:self.service]]
                                            ]
                                                                              applicationActivities:nil];
                                        v.popoverPresentationController.sourceView = self.view;
@@ -214,6 +218,7 @@
             a.popoverPresentationController.sourceRect = [tableView cellForRowAtIndexPath:ip].bounds;
             [self presentViewController:a animated:YES completion:nil];
         } else {
+            if([self opensMedia]){if(self.onBrowseService)self.onBrowseService(self.service);return;}
             NSString *u = [[self baseURL] stringByAppendingString:@"/all.m3u"];
             if (self.onSubscribe)
                 self.onSubscribe(u);
@@ -312,6 +317,7 @@
     [self refresh];
 }
 - (void)add {
+    if(self.onImportResource){UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"添加资源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];[sheet addAction:[UIAlertAction actionWithTitle:@"导入影视包 · JS / Python / ZIP" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.onImportResource();}]];[sheet addAction:[UIAlertAction actionWithTitle:@"添加 Python HTTP 服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){ServiceEditorViewController *editor=[ServiceEditorViewController new];[self.navigationController pushViewController:editor animated:YES];}]];[sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];sheet.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItems.firstObject;[self presentViewController:sheet animated:YES completion:nil];return;}
     ServiceEditorViewController *v = [ServiceEditorViewController new];
     [self.navigationController pushViewController:v animated:YES];
 }
@@ -337,7 +343,7 @@
     c.textLabel.textColor = UIColor.whiteColor;
     c.textLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     c.detailTextLabel.text =
-        [NSString stringWithFormat:@"%@ · %@\nhttp://127.0.0.1:%@",[s[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore":@"Python",
+        [NSString stringWithFormat:@"%@ · %@\nhttp://127.0.0.1:%@",ServiceEngineName(s),
                                    [s[@"builtin"] boolValue] ? @"内置服务" : @"本机脚本", s[@"port"]];
     c.detailTextLabel.numberOfLines = 2;
     c.detailTextLabel.font = [UIFont systemFontOfSize:11];
@@ -369,6 +375,7 @@
     v.onToggle = self.onToggleService;
     v.onLog = self.onOpenLog;
     v.onSubscribe = self.onSubscribe;
+    v.onBrowseService=self.onBrowseService;
     [self.navigationController pushViewController:v animated:YES];
 }
 @end

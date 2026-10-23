@@ -16,7 +16,7 @@ class NativeJSTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             executable = str(pathlib.Path(tmp) / 'native-js-test')
             build = subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-framework', 'Foundation', '-framework', 'JavaScriptCore', '-framework', 'Security',
-                '-I', str(root / 'Sources'), str(root / 'Tests/native_js_tests.m'), str(root / 'Sources/JSPluginRuntime.m'), '-o', executable], capture_output=True, text=True)
+                '-I', str(root / 'Sources'), str(root / 'Tests/native_js_tests.m'), str(root / 'Sources/JSPluginRuntime.m'), str(root / 'Sources/HostSyncRequest.m'), '-o', executable], capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
-            result = subprocess.run([executable, str(bundle)], capture_output=True, text=True, timeout=40)
+            result = subprocess.run([executable, str(bundle), str(root / 'GeneratedJS/js-runtime.bundle.js')], capture_output=True, text=True, timeout=70)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

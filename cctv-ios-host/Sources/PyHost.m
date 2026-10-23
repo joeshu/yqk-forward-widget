@@ -1,5 +1,6 @@
 #import "PyHost.h"
 #import "JSPluginRuntime.h"
+#import "NodePluginRuntime.h"
 #import <pthread.h>
 #import <limits.h>
 
@@ -26,11 +27,12 @@ static void (^gLogHandler)(NSString *) = nil;
 static PyObject *gServiceRuntime = NULL;
 static PyObject *gWriteFunction = NULL;
 static PyObject *gJSFunction = NULL;
+static PyObject *gNodeFunction = NULL;
 #endif
 
 @implementation PyHost
 
-+ (BOOL)running { pthread_mutex_lock(&gLock); BOOL v = gRunning; pthread_mutex_unlock(&gLock); return v; }
++ (BOOL)running { pthread_mutex_lock(&gLock); BOOL v = gRunning; pthread_mutex_unlock(&gLock); return v || NodePluginRuntime.shared.hasActivePlugin; }
 + (BOOL)startedOnce { pthread_mutex_lock(&gLock); BOOL v = gStartedOnce; pthread_mutex_unlock(&gLock); return v; }
 + (NSInteger)port { pthread_mutex_lock(&gLock); NSInteger v = gPort; pthread_mutex_unlock(&gLock); return v; }
 + (void)setLogHandler:(void (^)(NSString *))handler {
@@ -67,6 +69,17 @@ static PyObject *pyHostJSCall(PyObject *self, PyObject *args) {
     }
 }
 static PyMethodDef jsMethod = {"_cctvhost_js_call", pyHostJSCall, METH_VARARGS, "Call the native JavaScriptCore plugin host."};
+static PyObject *pyHostNodeCall(PyObject *self,PyObject *args){
+    const char *operation=NULL,*json=NULL;if(!PyArg_ParseTuple(args,"ss",&operation,&json))return NULL;
+    @autoreleasepool {
+        NSString *op=[NSString stringWithUTF8String:operation],*payload=[NSString stringWithUTF8String:json];NSString *reply=nil;NSError *error=nil;
+        Py_BEGIN_ALLOW_THREADS
+        reply=[NodePluginRuntime.shared callOperation:op json:payload error:&error];
+        Py_END_ALLOW_THREADS
+        if(!reply){PyErr_SetString(PyExc_RuntimeError,error.localizedDescription.UTF8String?:"Node bridge failed");return NULL;}return PyUnicode_FromString(reply.UTF8String);
+    }
+}
+static PyMethodDef nodeMethod={"_cctvhost_node_call",pyHostNodeCall,METH_VARARGS,"Call the local Node.js Mobile host."};
 static PyMethodDef writeMethod = {"_pyhost_write", pyHostWrite, METH_VARARGS, "Forward Python output to the host log."};
 
 static void *pyThread(void *unused) {
@@ -103,13 +116,17 @@ static void *pyThread(void *unused) {
         }
         pthread_mutex_lock(&gLock); gInterpreterReady = YES; pthread_mutex_unlock(&gLock);
         PyObject *sysPath = PySys_GetObject("path");
+        NSString *vendor=[gPythonHome stringByAppendingPathComponent:@"lib/python3.13/site-packages"];
+        if([NSFileManager.defaultManager fileExistsAtPath:vendor]){PyObject *site=PyUnicode_FromString(vendor.UTF8String);if(site && sysPath)PyList_Insert(sysPath,0,site);Py_XDECREF(site);}
         // Per-service import paths are installed and restored by the session manager.
         PyObject *builtins = PyEval_GetBuiltins();
         gWriteFunction = PyCFunction_New(&writeMethod, NULL);
         PyDict_SetItemString(builtins, "_pyhost_write", gWriteFunction);
         gJSFunction=PyCFunction_New(&jsMethod,NULL);
         PyDict_SetItemString(builtins,"_cctvhost_js_call",gJSFunction);
+        gNodeFunction=PyCFunction_New(&nodeMethod,NULL);PyDict_SetItemString(builtins,"_cctvhost_node_call",gNodeFunction);
         [JSPluginRuntime shared].logHandler=^(NSString *line){emitLog([@"[JS] " stringByAppendingString:line]);};
+        NodePluginRuntime.shared.logHandler=^(NSString *line){emitLog([@"[Node] " stringByAppendingString:line]);};
         PyObject *mainDict = PyDict_New();
         PyDict_SetItemString(mainDict, "__builtins__", builtins);
         PyObject *bootstrap = PyRun_String(
@@ -175,6 +192,7 @@ finished:
 }
 
 + (BOOL)startScriptAtPath:(NSString *)path port:(NSInteger)port dataDir:(NSString *)dataDir arguments:(NSArray<NSString *> *)arguments error:(NSError **)error {
+    if(NodePluginRuntime.shared.hasActivePlugin){if(error)*error=[NSError errorWithDomain:@"PyHost" code:10 userInfo:@{NSLocalizedDescriptionKey:@"旧 Node 插件尚未停止，请先停止该资源再切换。"}];return NO;}
     pthread_mutex_lock(&gLock);
     if (gRunning || (gStartedOnce && !gThreadExited)) {
         pthread_mutex_unlock(&gLock);
@@ -231,6 +249,7 @@ finished:
 }
 
 + (BOOL)stopWithError:(NSError **)error {
+    if(NodePluginRuntime.shared.hasActivePlugin && ![NodePluginRuntime.shared stopWithError:error])return NO;
 #if !PYHOST_AVAILABLE
     if (error) *error = [NSError errorWithDomain:@"PyHost" code:3 userInfo:@{NSLocalizedDescriptionKey:@"当前构建未包含 CPython。"}];
     return NO;

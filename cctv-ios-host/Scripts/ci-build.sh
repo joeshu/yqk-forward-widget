@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [ -z "${PY_DISABLE:-}" ] && [ ! -s GeneratedJS/yangshipin.bundle.js ]; then
+if [ -z "${PY_DISABLE:-}" ] && { [ ! -s GeneratedJS/yangshipin.bundle.js ] || [ ! -s GeneratedJS/js-runtime.bundle.js ]; }; then
   npm ci --prefix JSPlugins --no-audit --no-fund
   npm run build --prefix JSPlugins
   npm test --prefix JSPlugins
@@ -47,6 +47,13 @@ assert 'CFBundleIcons' in base and 'CFBundlePrimaryIcon' in base['CFBundleIcons'
 PY
 [ -s "$APP/Assets.car" ] || { echo "::error::AppIcon asset catalog did not produce Assets.car"; exit 1; }
 if [ -z "${PY_DISABLE:-}" ]; then cp Plugins/ysp-live.py "$APP/ysp-live.py"; cp Scripts/host_service_runtime.py "$APP/host_service_runtime.py"; cp Plugins/yangshipin-js.py "$APP/yangshipin-js.py"; cp GeneratedJS/* "$APP/"; mkdir -p "$APP/JSPlugins"; cp -R JSPlugins/yangshipin JSPlugins/compat "$APP/JSPlugins/"; cp JSPlugins/package.json JSPlugins/package-lock.json JSPlugins/build.mjs "$APP/JSPlugins/"; fi
+if [ -z "${PY_DISABLE:-}" ]; then
+  cp Plugins/media-service.py Plugins/host_media_runtime.py Plugins/host_media_relay.py Plugins/node-plugin-host.cjs "$APP/"
+  cp -R Plugins/base "$APP/base"
+  cp -R JSPlugins/generic JSPlugins/drpy "$APP/JSPlugins/"
+  cp Resources/NodeMobile-LICENSE.txt "$APP/"
+  python3 Scripts/prepare_node_runtime.py "$APP"
+fi
 printf 'APPL????' > "$APP/PkgInfo"
 mkdir -p "$APP/Frameworks"
 
@@ -74,6 +81,8 @@ if [ -z "${PY_DISABLE:-}" ]; then
   mkdir -p "$APP/python/lib/python${PY_VER}" "$APP/python/ssl"
   cp -R "$STDLIB/" "$APP/python/lib/python${PY_VER}/"
   cp -R "$DEVICE_LIB/" "$APP/python/lib/python${PY_VER}/"
+  python3 -m pip install --disable-pip-version-check --no-compile --only-binary=:all: --platform any --implementation py --python-version 3.13 \
+    --target "$APP/python/lib/python${PY_VER}/site-packages" -r Scripts/media-python-requirements.txt
   rm -rf "$APP/python/lib/python${PY_VER}/test" "$APP/python/lib/python${PY_VER}/idlelib" \
          "$APP/python/lib/python${PY_VER}/tkinter" "$APP/python/lib/python${PY_VER}/ensurepip" \
          "$APP/python/lib/python${PY_VER}/turtledemo" "$APP/python/lib/python${PY_VER}/distutils"

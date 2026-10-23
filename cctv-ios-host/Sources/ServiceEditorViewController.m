@@ -21,8 +21,20 @@
     _editor.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _editor.smartQuotesType = UITextSmartQuotesTypeNo;
     _editor.smartDashesType = UITextSmartDashesTypeNo;
-    _editor.text =
-        [NSString stringWithContentsOfFile:self.path encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+    _editor.text=@"正在读取代码…";_editor.editable=NO;
+    NSString *path=self.path;NSUInteger limit=self.readOnly?64*1024:2*1024*1024;__weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{
+        NSError *error=nil;NSData *data=nil;NSFileHandle *file=path.length?[NSFileHandle fileHandleForReadingAtPath:path]:nil;
+        @try{if(file)data=[file readDataUpToLength:limit+1 error:&error];}@catch(NSException *exception){error=[NSError errorWithDomain:@"CCTVHostCode" code:1 userInfo:nil];}@finally{[file closeAndReturnError:NULL];}
+        BOOL truncated=data.length>limit;if(truncated)data=[data subdataWithRange:NSMakeRange(0,limit)];
+        NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
+        for(NSUInteger trim=1;!text && truncated && trim<=3;trim++)text=[[NSString alloc] initWithData:[data subdataWithRange:NSMakeRange(0,data.length-trim)] encoding:NSUTF8StringEncoding];
+        dispatch_async(dispatch_get_main_queue(),^{ServiceCodeViewController *owner=weakSelf;if(!owner)return;
+            if(!text || error){owner->_editor.text=@"无法读取 UTF-8 代码文件";owner.navigationItem.rightBarButtonItem=nil;return;}
+            owner->_editor.text=text;if(truncated){owner.readOnly=YES;owner.navigationItem.rightBarButtonItem=nil;owner.navigationItem.prompt=@"只读预览已截断，导出包含完整文件";}
+            owner->_editor.editable=!owner.readOnly;owner.navigationItem.rightBarButtonItem.enabled=YES;
+        });
+    }});
     [self.view addSubview:_editor];
     [NSLayoutConstraint activateConstraints:@[
         [_editor.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
@@ -37,6 +49,7 @@
                                                           action:@selector(save)];
 }
 - (void)save {
+    if(!_editor.editable)return;
     NSError *error = nil;
     BOOL ok = [_editor.text writeToFile:self.path atomically:YES encoding:NSUTF8StringEncoding error:&error];
     if (ok)
@@ -63,8 +76,10 @@
 @property(nonatomic, copy) NSString *code;
 @property(nonatomic, strong) NSURLSessionDataTask *downloadTask;
 @property(nonatomic, assign) BOOL downloading;
+@property(nonatomic, copy) NSString *optionsText;
 @end
 @implementation ServiceEditorViewController
+- (BOOL)managedCode {return [self.service[@"builtin"] boolValue] || [self.service[@"manifest"] isKindOfClass:NSDictionary.class];}
 - (instancetype)init {
     return [super initWithStyle:UITableViewStyleInsetGrouped];
 }
@@ -99,7 +114,7 @@
     [self.sourceControl addTarget:self
                            action:@selector(sourceChanged)
                  forControlEvents:UIControlEventValueChanged];
-    if (self.service)
+    if (self.service && ![self managedCode])
         self.code = [NSString stringWithContentsOfFile:[ServiceStore codePath:self.service]
                                               encoding:NSUTF8StringEncoding
                                                  error:NULL];
@@ -115,7 +130,7 @@
     [self.downloadTask cancel];
 }
 - (void)urlChanged {
-    if (![self.service[@"builtin"] boolValue])
+    if (![self managedCode])
         self.code = nil;
 }
 - (void)sourceChanged {
@@ -126,8 +141,8 @@
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return section == 0   ? 2
-           : section == 1 ? ([self.service[@"builtin"] boolValue] ? 1 : 3)
-           : section == 2 ? ([self.service[@"builtin"] boolValue] ? 1 : 2)
+           : section == 1 ? ([self managedCode] ? 1 : 3)
+           : section == 2 ? ([self.service[@"manifest"] isKindOfClass:NSDictionary.class]?2:([self managedCode]?1:2))
                           : 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
@@ -152,8 +167,8 @@
         c.textLabel.text = ip.row == 0 ? @"服务名称" : @"本机端口";
         input = ip.row == 0 ? self.nameField : self.portField;
     } else if (ip.section == 1) {
-        if ([self.service[@"builtin"] boolValue]) {
-            c.textLabel.text = @"查看内置代码";
+        if ([self managedCode]) {
+            c.textLabel.text = [self.service[@"manifest"] isKindOfClass:NSDictionary.class]?@"查看资源入口代码":@"查看内置代码";
             c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         } else if (ip.row == 0)
             input = self.sourceControl;
@@ -175,15 +190,16 @@
         }
     } else if (ip.section == 2) {
         if (ip.row == 0) {
-            if ([self.service[@"builtin"] boolValue]) {
+            if ([self managedCode]) {
                 c.textLabel.text = @"允许局域网访问";
                 c.accessoryView = self.lanSwitch;
             } else {
                 c.textLabel.text = @"网络绑定";
                 c.detailTextLabel.text = @"由脚本启动参数决定";
             }
-        } else
-            input = self.argsField;
+        } else if([self.service[@"manifest"] isKindOfClass:NSDictionary.class]){
+            c.textLabel.text=@"插件参数";c.detailTextLabel.text=@"编辑账号、画质等 JSON 配置";c.accessoryType=UITableViewCellAccessoryDisclosureIndicator;c.selectionStyle=UITableViewCellSelectionStyleDefault;
+        }else input = self.argsField;
     } else {
         c.textLabel.text = @"保存服务";
         c.textLabel.textColor = HostAccent();
@@ -209,9 +225,15 @@
         [self save];
         return;
     }
+    if(ip.section==2 && ip.row==1 && [self.service[@"manifest"] isKindOfClass:NSDictionary.class]){
+        NSString *path=[self optionsDraftPath];id options=self.service[@"manifest"][@"options"]?:@{};
+        NSData *data=[NSJSONSerialization dataWithJSONObject:options options:NSJSONWritingPrettyPrinted|NSJSONWritingFragmentsAllowed error:NULL];
+        if(![NSFileManager.defaultManager fileExistsAtPath:path])[data writeToFile:path atomically:YES];
+        ServiceCodeViewController *editor=[ServiceCodeViewController new];editor.path=path;[self.navigationController pushViewController:editor animated:YES];return;
+    }
     if (ip.section != 1)
         return;
-    if ([self.service[@"builtin"] boolValue]) {
+    if ([self managedCode]) {
         [self editManual];
         return;
     }
@@ -231,7 +253,7 @@
     }
 }
 - (void)message:(NSString *)message {
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Python 服务"
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"资源配置"
                                                                message:message
                                                         preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
@@ -289,7 +311,9 @@
     return [[ServiceStore directory]
         stringByAppendingPathComponent:[self.identifier stringByAppendingString:@"-draft.py"]];
 }
+- (NSString *)optionsDraftPath {return [[ServiceStore directory] stringByAppendingPathComponent:[self.identifier stringByAppendingString:@"-options.json"]];}
 - (void)editManual {
+    if([self managedCode]){ServiceCodeViewController *view=[ServiceCodeViewController new];view.path=[ServiceStore codePath:self.service];view.readOnly=YES;[self.navigationController pushViewController:view animated:YES];return;}
     NSString *path = [self draftPath];
     [self.code ?: @"# Python service\n" writeToFile:path
                                          atomically:YES
@@ -297,7 +321,7 @@
                                               error:NULL];
     ServiceCodeViewController *v = [ServiceCodeViewController new];
     v.path = path;
-    v.readOnly = [self.service[@"builtin"] boolValue];
+    v.readOnly = [self managedCode];
     [self.navigationController pushViewController:v animated:YES];
 }
 - (void)viewWillAppear:(BOOL)animated {
@@ -307,6 +331,7 @@
                                                   error:NULL];
     if (text)
         self.code = text;
+    self.optionsText=[NSString stringWithContentsOfFile:[self optionsDraftPath] encoding:NSUTF8StringEncoding error:NULL];
     [self.tableView reloadData];
 }
 - (void)save {
@@ -321,7 +346,7 @@
         [self message:@"请填写名称，以及 1024–65535 范围内的端口。"];
         return;
     }
-    if (![self.service[@"builtin"] boolValue] && !self.code.length) {
+    if (![self managedCode] && !self.code.length) {
         [self message:@"请先加载或输入 Python 代码。"];
         return;
     }
@@ -333,7 +358,12 @@
     service[@"arguments"] = self.argsField.text ?: @"";
     service[@"url"] = self.urlField.text ?: @"";
     service[@"updated"] = @(NSDate.date.timeIntervalSince1970);
-    if (![service[@"builtin"] boolValue]) {
+    if([service[@"manifest"] isKindOfClass:NSDictionary.class] && self.optionsText){
+        NSError *jsonError=nil;id options=[NSJSONSerialization JSONObjectWithData:[self.optionsText dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingFragmentsAllowed error:&jsonError];
+        if(![options isKindOfClass:NSDictionary.class] && ![options isKindOfClass:NSString.class]){[self message:jsonError.localizedDescription?:@"插件参数须为 JSON 对象或字符串"];return;}
+        NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy];manifest[@"options"]=options;service[@"manifest"]=manifest;
+    }
+    if (![service[@"builtin"] boolValue] && ![service[@"manifest"] isKindOfClass:NSDictionary.class]) {
         NSError *error = nil;
         if (![self.code writeToFile:[ServiceStore codePath:service]
                          atomically:YES
@@ -345,6 +375,7 @@
     }
     [ServiceStore save:service];
     [NSFileManager.defaultManager removeItemAtPath:[self draftPath] error:NULL];
+    [NSFileManager.defaultManager removeItemAtPath:[self optionsDraftPath] error:NULL];
     if (self.onSave)
         self.onSave();
     [self.navigationController popViewControllerAnimated:YES];

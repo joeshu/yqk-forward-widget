@@ -7,6 +7,10 @@
 #import "PluginViewController.h"
 #import "SettingsViewController.h"
 #import "ServicesViewController.h"
+#import "MediaBrowserViewController.h"
+#import "MediaPackageImporter.h"
+#import "MediaPackageDownloader.h"
+#import "ServiceEditorViewController.h"
 #import "ConfigCenterViewController.h"
 #import "HostTheme.h"
 #import "HostImageLoader.h"
@@ -43,7 +47,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     return value ? [value boolValue] : fallback;
 }
 
-@interface RootViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIDocumentPickerDelegate>
+@interface RootViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIDocumentPickerDelegate, AVPlayerViewControllerDelegate>
 // 播放
 @property (nonatomic, strong) UIView *playerBox;
 @property (nonatomic, strong) UILabel *titleLabel;
@@ -152,6 +156,11 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSURLSessionDataTask *> *subscriptionTasks;
 @property(nonatomic,strong) NSMutableSet<NSString *> *remoteAttemptedURLs;
 @property(nonatomic) NSUInteger catalogSearchGeneration;
+@property(nonatomic,strong) AVPlayer *moviePlayer;
+@property(nonatomic,strong) AVPlayerViewController *movieController;
+@property(nonatomic) BOOL importingMediaPackage;
+@property(nonatomic) BOOL moviePiPActive;
+@property(nonatomic,strong) MediaPackageDownloader *packageDownloader;
 @property(nonatomic,strong) NSMutableDictionary *catalogStates;
 @property(nonatomic,strong) AVPlayer *previewPlayer;
 @property(nonatomic,strong) AVPlayerLayer *previewLayer;
@@ -207,6 +216,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)dealloc {
+    [self.packageDownloader cancel];
     [self.nativePreloader cancel];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.playbackReadiness cancel];
@@ -632,29 +642,46 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.navigationItem.rightBarButtonItems=page.navigationItem.rightBarButtonItems;[self.view bringSubviewToFront:self.bottomBar];
 }
 - (void)openMediaTab {
-    UIViewController *page=[UIViewController new];page.view.backgroundColor=UIColor.blackColor;
-    UILabel *title=[UILabel new];title.text=@"暂无可浏览的影视资源";title.textColor=UIColor.labelColor;title.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];title.textAlignment=NSTextAlignmentCenter;
-    UILabel *detail=[UILabel new];detail.text=@"影视资源的分类、搜索和选集功能正在接入。\n直播订阅请前往频道页，资源管理请前往资源页。";detail.textColor=UIColor.secondaryLabelColor;detail.numberOfLines=0;detail.textAlignment=NSTextAlignmentCenter;detail.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-    UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];[button setTitle:@"管理资源" forState:UIControlStateNormal];button.tag=3;[button addTarget:self action:@selector(selectBottomTab:) forControlEvents:UIControlEventTouchUpInside];
-    UIStackView *stack=[[UIStackView alloc] initWithArrangedSubviews:@[title,detail,button]];stack.axis=UILayoutConstraintAxisVertical;stack.spacing=16;stack.translatesAutoresizingMaskIntoConstraints=NO;[page.view addSubview:stack];
-    [NSLayoutConstraint activateConstraints:@[[stack.leadingAnchor constraintEqualToAnchor:page.view.leadingAnchor constant:24],[stack.trailingAnchor constraintEqualToAnchor:page.view.trailingAnchor constant:-24],[stack.centerYAnchor constraintEqualToAnchor:page.view.centerYAnchor]]];
+    MediaBrowserViewController *page=[MediaBrowserViewController new];__weak typeof(self) weakSelf=self;
+    page.sourcesProvider=^{NSMutableArray *sources=[NSMutableArray array];for(NSDictionary *service in [ServiceStore services])if([ServiceStore isMediaService:service])[sources addObject:service];return sources;};
+    page.onActivateService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf changeService:service enabled:YES completion:completion];};
+    page.onResources=^{RootViewController *owner=weakSelf;if(owner)[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[3]];};
+    page.onPlay=^(NSDictionary *result,NSString *name){[weakSelf playMediaResult:result name:name];};
+    page.onSubscribeLive=^(NSDictionary *service){RootViewController *owner=weakSelf;if(!owner)return;NSString *url=[NSString stringWithFormat:@"http://127.0.0.1:%@/all.m3u",service[@"port"]];[owner.subscriptionURLs addObject:url];[NSUserDefaults.standardUserDefaults setObject:owner.subscriptionURLs.allObjects forKey:@"subscriptions"];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[1]];[owner fetchSubscription:url silent:NO];};
     [self showTabPage:page title:@"影视"];
 }
+- (void)playMediaResult:(NSDictionary *)result name:(NSString *)name {
+    NSString *url=[self stableURLKey:result[@"url"]];if(!url.length){[self showServiceError:@"资源没有返回可播放媒体地址"];return;}
+    self.playbackGeneration++;[self stopPlayback];[self.nativePreloader cancel];[self endPlaybackPriority];
+    self.currentRemoteURL=url;self.channelName=name;self.channelID=nil;
+    AVURLAsset *asset=[AVURLAsset URLAssetWithURL:[NSURL URLWithString:url] options:nil];AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];
+    AVMutableMetadataItem *title=[AVMutableMetadataItem metadataItem];title.identifier=AVMetadataCommonIdentifierTitle;title.value=name?:@"影视";title.extendedLanguageTag=@"und";item.externalMetadata=@[title];
+    self.moviePlayer=[AVPlayer playerWithPlayerItem:item];self.moviePlayer.automaticallyWaitsToMinimizeStalling=YES;
+    self.movieController=[AVPlayerViewController new];self.movieController.player=self.moviePlayer;self.movieController.delegate=self;self.movieController.allowsPictureInPicturePlayback=YES;
+    UIViewController *presenter=self.navigationController.topViewController?:self;[presenter presentViewController:self.movieController animated:YES completion:^{[self.moviePlayer play];}];
+}
+- (void)playerViewController:(AVPlayerViewController *)controller willEndFullScreenPresentationWithAnimationCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){if(controller==self.movieController && !self.moviePiPActive)[self.moviePlayer pause];}];
+}
+- (void)playerViewControllerWillStartPictureInPicture:(AVPlayerViewController *)controller {if(controller==self.movieController)self.moviePiPActive=YES;}
+- (void)playerViewControllerDidStopPictureInPicture:(AVPlayerViewController *)controller {if(controller==self.movieController){self.moviePiPActive=NO;if(!controller.presentingViewController)[self.moviePlayer pause];}}
 - (void)openConfigurationTab {
     ConfigCenterViewController *page=[ConfigCenterViewController new];__weak typeof(self) w=self;
     page.profilesProvider=^{return [w configurationProfiles];};page.onServices=^{[w openServicesPage];};page.onAdd=^{[w addSubscription];};page.onRefresh=^{[w onPullRefresh];};
-    page.onToggleProfile=^(NSString *source,BOOL enabled){if(!source.length)[NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"nativeChannelsEnabled"];else{NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabled removeObject:source];if(!enabled)[disabled addObject:source];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];}[w applyFilter];};
-    page.onSelectProfile=^(NSString *source){UIButton *b=(UIButton *)w.bottomBar.arrangedSubviews[source.length?1:0];[w selectBottomTab:b];w.activeSource=source;w.title=source.length?@"订阅直播":@"央视直播";[w applyFilter];};
-    page.onEditProfile=^(NSString *source){[w editProfile:source];};
-    page.onDeleteProfile=^(NSString *source){[w deleteSubscription:source];};
+    page.onToggleProfile=^(NSString *source,BOOL enabled){NSDictionary *service=[w resourceServiceForSource:source];if(service){[w toggleService:service enabled:enabled];return;}if(!source.length)[NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"nativeChannelsEnabled"];else{NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabled removeObject:source];if(!enabled)[disabled addObject:source];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];}[w applyFilter];};
+    page.onSelectProfile=^(NSString *source){NSDictionary *service=[w resourceServiceForSource:source];if(service){if([ServiceStore isMediaService:service]){[NSUserDefaults.standardUserDefaults setObject:service[@"id"] forKey:@"selectedMediaSource"];[w selectBottomTab:(id)w.bottomBar.arrangedSubviews[2]];}else[w openServicesPage];return;}UIButton *b=(UIButton *)w.bottomBar.arrangedSubviews[source.length?1:0];[w selectBottomTab:b];w.activeSource=source;w.title=source.length?@"订阅直播":@"央视直播";[w applyFilter];};
+    page.onEditProfile=^(NSString *source){NSDictionary *service=[w resourceServiceForSource:source];if(service){ServiceEditorViewController *editor=[ServiceEditorViewController new];editor.service=service;[w.navigationController pushViewController:editor animated:YES];}else[w editProfile:source];};
+    page.onDeleteProfile=^(NSString *source){NSDictionary *service=[w resourceServiceForSource:source];if(service){if(PyHost.running && [[ServiceStore activeIdentifier] isEqual:service[@"id"]]){[w showServiceError:@"请先停止该资源再删除"];return;}[ServiceStore remove:service[@"id"]];}else[w deleteSubscription:source];};
     [self showTabPage:page title:@"资源"];
 }
+- (NSDictionary *)resourceServiceForSource:(NSString *)source {if(![source hasPrefix:@"plugin:"])return nil;NSString *identifier=[source substringFromIndex:7];for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:identifier])return service;return nil;}
 - (NSArray *)configurationProfiles {
     NSMutableArray *rows=[NSMutableArray array];NSMutableDictionary<NSString *,NSNumber *> *counts=[NSMutableDictionary dictionary];NSUInteger native=0;
     for(NSDictionary *channel in self.allChannels){if(![channel[@"remoteURL"] length])native++;for(NSString *source in [NSSet setWithArray:channel[@"subscriptionSources"]?:@[]])counts[source]=@([counts[source] unsignedIntegerValue]+1);}
     [rows addObject:@{@"name":@"央视直播 · 官方频道",@"source":@"",@"epgStatus":@"官方",@"count":@(native),@"enabled":@(CCTVBoolPreference(@"nativeChannelsEnabled",YES))}];
     NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
-    for(NSString *u in [ProfileStore orderedSources:self.subscriptionURLs.allObjects]){NSDictionary *metadata=[ProfileStore metadata:u];[rows addObject:@{@"name":metadata[@"name"]?:[NSURL URLWithString:u].host?:@"本地播放列表",@"status":metadata[@"status"]?:@"等待刷新",@"epgStatus":(metadata[@"epgURL"]?:metadata[@"detectedEPGURL"])?@"已配置":@"自动匹配",@"source":u,@"count":counts[u]?:@0,@"enabled":@(![disabled containsObject:u])}];}return rows;
+    for(NSString *u in [ProfileStore orderedSources:self.subscriptionURLs.allObjects]){NSDictionary *metadata=[ProfileStore metadata:u];[rows addObject:@{@"name":metadata[@"name"]?:[NSURL URLWithString:u].host?:@"本地播放列表",@"status":metadata[@"status"]?:@"等待刷新",@"epgStatus":(metadata[@"epgURL"]?:metadata[@"detectedEPGURL"])?@"已配置":@"自动匹配",@"source":u,@"count":counts[u]?:@0,@"enabled":@(![disabled containsObject:u])}];}
+    for(NSDictionary *service in [ServiceStore services])if(![service[@"builtin"] boolValue]){BOOL running=PyHost.running && [[ServiceStore activeIdentifier] isEqual:service[@"id"]];[rows addObject:@{@"name":service[@"name"]?:@"本机脚本",@"type":@"plugin",@"runtime":service[@"engine"]?:@"python",@"protocol":service[@"protocol"]?:@"python-http",@"source":[@"plugin:" stringByAppendingString:service[@"id"]],@"count":@0,@"status":running?@"运行中":@"已停止",@"enabled":@(running)}];}return rows;
 }
 - (void)deleteSubscription:(NSString *)source {
     [self.subscriptionTasks[source] cancel];[self.subscriptionTasks removeObjectForKey:source];[ProfileStore remove:source];
@@ -999,6 +1026,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)stopPlayback {
+    self.moviePiPActive=NO;
+    [self.moviePlayer pause];self.movieController.player=nil;self.moviePlayer=nil;self.movieController=nil;
     [self.nativeTimeshift cancel];self.nativeTimeshift=nil;self.nativeTransitionKind=nil;self.nativeTimeShiftActive=NO;
     self.nativeStartupTuner=nil; // Pending tuning blocks also check the playback generation.
     self.remotePlaybackWanted=NO;
@@ -1061,6 +1090,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)togglePlayPause {
+    if(self.moviePlayer){if(self.moviePlayer.rate>0)[self.moviePlayer pause];else[self.moviePlayer play];return;}
     if (self.avPlayer) {
         BOOL playing=self.remotePlaybackWanted;
         self.remotePlaybackWanted=!playing;
@@ -1200,6 +1230,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     __weak typeof(self) weakSelf=self;
     page.onOpenYSP=^{ [weakSelf openPluginPage]; };
     page.onToggleService=^(NSDictionary *service,BOOL enabled){[weakSelf toggleService:service enabled:enabled];};
+    page.onBrowseService=^(NSDictionary *service){[NSUserDefaults.standardUserDefaults setObject:service[@"id"] forKey:@"selectedMediaSource"];[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[2]];};
+    page.onImportResource=^{[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[3]];dispatch_async(dispatch_get_main_queue(),^{[weakSelf importMediaPackage];});};
     page.onOpenLog=^{[weakSelf.navigationController popToViewController:weakSelf animated:YES];dispatch_async(dispatch_get_main_queue(), ^{if(!weakSelf.logVisible)[weakSelf toggleLog];});};
     page.onSubscribe=^(NSString *url){NSString *key=[weakSelf stableURLKey:url];if(!key)return;[weakSelf.subscriptionURLs addObject:key];[NSUserDefaults.standardUserDefaults setObject:weakSelf.subscriptionURLs.allObjects forKey:@"subscriptions"];[weakSelf fetchSubscription:key silent:NO];};
     [self.navigationController pushViewController:page animated:YES];
@@ -1242,9 +1274,32 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 - (void)exportLocalConfiguration {
     NSData *data=[NSJSONSerialization dataWithJSONObject:[HostBackup snapshot] options:NSJSONWritingPrettyPrinted error:NULL];NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:@"CCTVHost-configuration.json"];[data writeToFile:path atomically:YES];UIActivityViewController *v=[[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:path]] applicationActivities:nil];v.popoverPresentationController.sourceView=self.bottomBar;v.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:v animated:YES completion:nil];
 }
-- (void)importLocalConfiguration {self.importingPlaylist=NO;UIDocumentPickerViewController *v=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];v.delegate=self;[self presentViewController:v animated:YES completion:nil];}
+- (void)importLocalConfiguration {self.importingPlaylist=NO;self.importingMediaPackage=NO;UIDocumentPickerViewController *v=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];v.delegate=self;[self presentViewController:v animated:YES completion:nil];}
+- (void)importMediaPackage {
+    self.importingMediaPackage=YES;self.importingPlaylist=NO;
+    UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];picker.delegate=self;[self presentViewController:picker animated:YES completion:nil];
+}
+- (void)importMediaURL {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"导入影视资源链接" message:@"支持 JS、Python、ZIP，以及对应的 .md5 地址。导入后再启用运行。" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"https://…/index.js 或插件.zip";field.keyboardType=UIKeyboardTypeURL;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.autocorrectionType=UITextAutocorrectionTypeNo;}];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        NSString *text=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(text.length>8192){[self showServiceError:@"资源地址过长"];return;}
+        [self.packageDownloader cancel];self.packageDownloader=[MediaPackageDownloader new];self.navigationItem.prompt=@"正在下载并检查资源…";__weak typeof(self) weakSelf=self;
+        [self.packageDownloader importURL:[NSURL URLWithString:text] completion:^(NSDictionary *service,NSError *error){[weakSelf acceptImportedMedia:service error:error];}];
+    }]];[self presentViewController:alert animated:YES completion:nil];
+}
+- (void)acceptImportedMedia:(NSDictionary *)service error:(NSError *)error {
+    self.navigationItem.prompt=nil;if(error){if(error.code!=NSURLErrorCancelled)[self showServiceError:error.localizedDescription];return;}
+    if(!service){[self showServiceError:@"资源导入失败"];return;}[ServiceStore save:service];[self refreshConfigurationPage];
+    NSString *message=[NSString stringWithFormat:@"已导入 %@，可在资源列表启用",service[@"name"]];self.navigationItem.prompt=message;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{if([self.navigationItem.prompt isEqual:message])self.navigationItem.prompt=nil;});
+}
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {self.importingPlaylist=NO;self.importingMediaPackage=NO;}
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *u=urls.firstObject;if(!u)return;
+    if(self.importingMediaPackage){self.importingMediaPackage=NO;self.navigationItem.prompt=@"正在检查并导入资源…";BOOL scoped=[u startAccessingSecurityScopedResource];__weak typeof(self) weakSelf=self;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{NSError *error=nil;NSDictionary *service=nil;@try{service=[MediaPackageImporter importFile:u error:&error];}@finally{if(scoped)[u stopAccessingSecurityScopedResource];}dispatch_async(dispatch_get_main_queue(),^{[weakSelf acceptImportedMedia:service error:error];});}});return;}
     BOOL playlist=self.importingPlaylist;self.importingPlaylist=NO;
     BOOL scoped=[u startAccessingSecurityScopedResource];__weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{@autoreleasepool {
@@ -1294,8 +1349,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 - (LocalServiceReadiness *)readinessForURL:(NSURL *)url service:(NSDictionary *)service {
     NSURLComponents *c=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
-    c.path=[service[@"builtin"] boolValue]?@"/health":@"/";c.query=nil;c.fragment=nil;
-    return [[LocalServiceReadiness alloc] initWithURL:c.URL timeout:20 requiresHealthJSON:[service[@"builtin"] boolValue]];
+    BOOL health=[service[@"builtin"] boolValue] || [ServiceStore isMediaService:service];c.path=health?@"/health":@"/";c.query=nil;c.fragment=nil;
+    return [[LocalServiceReadiness alloc] initWithURL:c.URL timeout:20 requiresHealthJSON:health];
 }
 - (BOOL)startService:(NSDictionary *)service error:(NSError **)error {
     if(self.serviceOperationInProgress){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:4 userInfo:@{NSLocalizedDescriptionKey:@"服务正在切换，请等待旧服务退出。"}];return NO;}
@@ -1305,7 +1360,10 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     }
     NSString *dataDir=[ServiceStore dataDirectoryForService:service error:error];if(!dataDir.length)return NO;
     NSInteger port=[service[@"port"] integerValue];NSString *bind=[service[@"lan"] boolValue]?@"0.0.0.0":@"127.0.0.1";NSMutableArray *args=[NSMutableArray array];
-    if([service[@"builtin"] boolValue]){
+    if([ServiceStore isMediaService:service]){
+        NSData *data=[NSJSONSerialization dataWithJSONObject:service[@"manifest"] options:0 error:error];if(!data)return NO;
+        [args addObjectsFromArray:@[[NSString stringWithFormat:@"%ld",(long)port],@"--bind",bind,@"--package",service[@"packageRoot"],@"--manifest",[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding],@"--data-dir",dataDir]];
+    }else if([service[@"builtin"] boolValue]){
         [args addObjectsFromArray:@[[NSString stringWithFormat:@"%ld",(long)port],@"--bind",bind,@"--data-dir",dataDir]];
         if(![service[@"id"] isEqual:@"builtin-yangshipin-js"])[args addObjectsFromArray:@[@"--no-engine",@"--cache-mb",@"32",@"--links-per-device",@"2",@"--zap-debounce",@"15",@"--stable-playback"]];
     }else{
@@ -1323,20 +1381,20 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     [self.pluginPage updateRunning:PyHost.running subscriptionCount:self.subscriptionURLs.count];return YES;
 }
 - (void)toggleService:(NSDictionary *)service enabled:(BOOL)enabled {
-    if(self.serviceOperationInProgress){[self showServiceError:@"服务正在停止或切换，请稍候。"];return;}
+    [self changeService:service enabled:enabled completion:^(NSError *error){if(error)[self showServiceError:error.localizedDescription];}];
+}
+- (void)changeService:(NSDictionary *)service enabled:(BOOL)enabled completion:(void (^)(NSError *))completion {
+    if(self.serviceOperationInProgress){if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:4 userInfo:@{NSLocalizedDescriptionKey:@"服务正在停止或切换，请稍候。"}]);return;}
     if(enabled && (!PyHost.running || ([[ServiceStore activeIdentifier] isEqualToString:service[@"id"]] && PyHost.port==[service[@"port"] integerValue]))){
-        NSError *error=nil;if(![self startService:service error:&error])[self showServiceError:error.localizedDescription];return;
+        NSError *error=nil;[self startService:service error:&error];[self refreshConfigurationPage];if(completion)completion(error);return;
     }
     self.serviceOperationInProgress=YES;
     [self log:enabled?@"正在停止旧服务，随后切换到 %@":@"正在停止服务 %@",service[@"name"]];
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        NSError *stopError = nil;
-        BOOL stopped = [PyHost stopWithError:&stopError];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self.serviceOperationInProgress=NO;
-            if (!stopped) { [self showServiceError:stopError.localizedDescription]; return; }
-            [self completeServiceStop];
-            if(enabled){NSError *startError=nil;if(![self startService:service error:&startError])[self showServiceError:startError.localizedDescription];}
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        NSError *stopError=nil;BOOL stopped=[PyHost stopWithError:&stopError];
+        dispatch_async(dispatch_get_main_queue(),^{
+            self.serviceOperationInProgress=NO;if(!stopped){if(completion)completion(stopError);return;}
+            [self completeServiceStop];NSError *startError=nil;if(enabled)[self startService:service error:&startError];[self refreshConfigurationPage];if(completion)completion(startError);
         });
     });
 }
@@ -1590,6 +1648,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"导入资源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"订阅链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self addSubscriptionURL];}]];
     [a addAction:[UIAlertAction actionWithTitle:@"导入 M3U 文件" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){self.importingPlaylist=YES;UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];picker.delegate=self;[self presentViewController:picker animated:YES completion:nil];}]];
+    [a addAction:[UIAlertAction actionWithTitle:@"导入影视包 · JS / Python / ZIP" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self importMediaPackage];}]];
+    [a addAction:[UIAlertAction actionWithTitle:@"影视资源链接 / MD5" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self importMediaURL];}]];
     [a addAction:[UIAlertAction actionWithTitle:@"管理脚本与服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self openServicesPage];}]];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.sourceView=self.bottomBar;a.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:a animated:YES completion:nil];
 }

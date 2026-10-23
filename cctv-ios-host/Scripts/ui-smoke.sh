@@ -24,6 +24,9 @@ xcrun --sdk iphonesimulator clang -fobjc-arc -target "$ARCH-apple-ios15.0-simula
   -framework MediaPlayer -framework QuartzCore -framework UniformTypeIdentifiers -lz \
   -o "$APP/CCTVHost"
 cp Resources/channels.json "$APP/"
+cp Plugins/node-plugin-host.cjs "$APP/"
+python3 Scripts/prepare_node_runtime.py "$APP" --simulator
+codesign --force --sign - "$APP/Frameworks/NodeMobile.framework"
 python3 - "$APP/Info.plist" <<'PY'
 import plistlib,sys
 with open('Resources/Info.plist','rb') as f:p=plistlib.load(f)

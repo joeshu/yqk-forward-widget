@@ -33,6 +33,8 @@
     return rows;
 }
 + (NSString *)scriptPath:(NSDictionary *)service {
+    if([self isMediaService:service])return [NSBundle.mainBundle pathForResource:@"media-service" ofType:@"py"];
+    if([service[@"manifest"] isKindOfClass:NSDictionary.class])return [self codePath:service];
     if([service[@"id"] isEqual:@"builtin-yangshipin-js"])return [NSBundle.mainBundle pathForResource:@"yangshipin-js" ofType:@"py"];
     if ([service[@"builtin"] boolValue])
         return [NSBundle.mainBundle pathForResource:@"ysp-live" ofType:@"py"];
@@ -40,9 +42,11 @@
         stringByAppendingPathComponent:[service[@"id"] stringByAppendingPathExtension:@"py"]];
 }
 + (NSString *)codePath:(NSDictionary *)service {
+    if([service[@"manifest"] isKindOfClass:NSDictionary.class])return [service[@"packageRoot"] stringByAppendingPathComponent:service[@"manifest"][@"entry"]];
     if([service[@"id"] isEqual:@"builtin-yangshipin-js"])return [NSBundle.mainBundle pathForResource:@"yangshipin.bundle" ofType:@"js"];
     return [self scriptPath:service];
 }
++ (BOOL)isMediaService:(NSDictionary *)service {return [service[@"manifest"] isKindOfClass:NSDictionary.class] && ![service[@"protocol"] isEqual:@"python-http"];}
 + (void)save:(NSDictionary *)service {
     NSMutableArray *rows = [[self services] mutableCopy];
     NSIndexSet *matches =
@@ -66,6 +70,8 @@
         removeItemAtPath:[[self directory]
                              stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"py"]]
                    error:NULL];
+    [NSFileManager.defaultManager removeItemAtPath:[[self directory] stringByAppendingPathComponent:identifier] error:NULL];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:[@"CCTVJSStorage:" stringByAppendingString:identifier]];
 }
 + (NSString *)dataDirectoryForService:(NSDictionary *)service error:(NSError **)error {
     NSString *identifier=service[@"id"];
