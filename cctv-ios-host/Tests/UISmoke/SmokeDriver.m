@@ -53,6 +53,8 @@ static void capture(UIWindow *window, NSString *name) {
         writeToFile:[outputDir stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"png"]]
          atomically:YES];
 }
+static NSUInteger waitingIndex=NSNotFound;
+static NSDate *waitingDeadline;
 static void next(NSArray *steps, NSUInteger index) {
     if (index >= steps.count) {
         NSData *data = [NSJSONSerialization dataWithJSONObject:@{
@@ -66,7 +68,13 @@ static void next(NSArray *steps, NSUInteger index) {
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1200 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
       @try {
-          ((dispatch_block_t)steps[index])();
+          id step=steps[index];
+          if([step isKindOfClass:NSDictionary.class]){
+              BOOL (^ready)(void)=step[@"until"];
+              if(waitingIndex!=index){waitingIndex=index;waitingDeadline=[NSDate dateWithTimeIntervalSinceNow:12];}
+              if(!ready()&&[waitingDeadline timeIntervalSinceNow]>0){next(steps,index);return;}
+              ((dispatch_block_t)step[@"run"])();
+          }else ((dispatch_block_t)step)();
       } @catch (NSException *e) {
           [failures addObject:e.reason ?: e.name];
       }
@@ -255,12 +263,12 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[root valueForKey:@"activeTab"] integerValue]==1, @"remote playback opens subscription page");
             check([root valueForKey:@"avPlayer"] == nil, @"AVPlayer waits until HTTP health is ready");
           },
-          ^{
+          @{@"until":^BOOL{PlaybackStartupTrace *t=[root valueForKey:@"startupTrace"];return t.stages[@"service"]!=nil&&[root valueForKey:@"avPlayer"]!=nil;},@"run":^{
             PlaybackStartupTrace *trace = [root valueForKey:@"startupTrace"];
             check(trace.stages[@"service"] != nil, @"service readiness recorded before AVPlayer startup");
             check([root valueForKey:@"avPlayer"] != nil, @"playback begins after successful readiness probe");
-          },
-          ^{
+          }},
+          @{@"until":^BOOL{PlaybackStartupTrace *t=[root valueForKey:@"startupTrace"];return t.stages[@"itemReady"]!=nil&&t.stages[@"frame"]!=nil;},@"run":^{
             PlaybackStartupTrace *trace = [root valueForKey:@"startupTrace"];
             check(trace.stages[@"itemReady"] != nil, @"real AVPlayer item readiness observed");
             check(trace.stages[@"frame"] != nil && [[root valueForKey:@"firstRender"] boolValue],
@@ -271,7 +279,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [root playChannel:[root channelWithID:@"cctv1"] route:nil];
             check([previous currentItem] == nil, @"switching to native detaches old subscription item");
             check([root valueForKey:@"pip"] == nil, @"switching releases old picture-in-picture controller");
-          },
+          }},
           ^{
             playCount=[CNPlayer smokePlayCount];
             [root selectChannel:[root channelWithID:@"cctv1"]];

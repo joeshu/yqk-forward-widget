@@ -38,11 +38,15 @@ xcrun simctl bootstatus "$SIM" -b
 xcrun simctl install "$SIM" "$APP"
 xcrun simctl launch "$SIM" com.example.cctvhost.uismoke --smoke-port "$FIXTURE_PORT"
 CONTAINER=$(xcrun simctl get_app_container "$SIM" com.example.cctvhost.uismoke data)
-for attempt in $(seq 1 40); do
+for attempt in $(seq 1 120); do
   if [ -f "$CONTAINER/Documents/ui-smoke/results.json" ]; then break; fi
   sleep 2
 done
 cp -R "$CONTAINER/Documents/ui-smoke/." "$OUT/"
+if [ -f "$CONTAINER/Library/Application Support/ysp/cctvhost.log" ]; then
+  cp "$CONTAINER/Library/Application Support/ysp/cctvhost.log" "$OUT/diagnostic.log"
+fi
+cat "$OUT/fixture.log"
 python3 - "$OUT/results.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1])); print(json.dumps(r,ensure_ascii=False,indent=2)); assert r['passed'],r['failures']

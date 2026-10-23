@@ -15,6 +15,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        print("GET", self.path, flush=True)
         status = 200
         content_type = "application/json"
         if self.path == "/health":

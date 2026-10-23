@@ -149,4 +149,5 @@ jobs:
           path: |
             cctv-ios-host/ui-preview/*.png
             cctv-ios-host/ui-preview/results.json
+            cctv-ios-host/ui-preview/*.log
           if-no-files-found: error
