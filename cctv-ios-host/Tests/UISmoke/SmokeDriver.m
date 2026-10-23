@@ -2,6 +2,7 @@
 #import "CNPlayerSDK.h"
 #import "EPGViewController.h"
 #import "PlaybackStartupTrace.h"
+#import "NativeChannelPreloader.h"
 #import "PyHost.h"
 #import "RootViewController.h"
 #import "ServiceEditorViewController.h"
@@ -38,6 +39,7 @@
 @interface CNPlayer (SmokeMetrics)
 + (NSInteger)smokeResetCount;
 + (NSInteger)smokePlayCount;
++ (NSInteger)smokeConfigureCount;
 @end
 @interface PyHost (SmokeMetrics)
 + (NSInteger)smokeStartCount;
@@ -95,6 +97,7 @@ static void next(NSArray *steps, NSUInteger index) {
         class_getInstanceMethod(self, @selector(smokeApplication:didFinishLaunchingWithOptions:)));
 }
 - (BOOL)smokeApplication:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
+    [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];
     BOOL ok = [self smokeApplication:app didFinishLaunchingWithOptions:options];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [UIView setAnimationsEnabled:NO];
@@ -111,6 +114,8 @@ static void next(NSArray *steps, NSUInteger index) {
       __block id oldWrapper = nil;
       __block NSInteger playCount = 0;
       __block AVPlayer *hlsPlayer;
+      __block NSInteger configuredBeforeHandoff;
+      __block id preparedWrapper;
       NSArray *steps = @[
           ^{
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
@@ -363,6 +368,22 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[root valueForKey:@"previewPlayer"] isMuted],@"preview is muted");
             [root selectBottomTab:(id)tabs.arrangedSubviews[0]];
             check([root valueForKey:@"previewPlayer"]==nil,@"navigation releases preview player");
+            [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"preloadNativeChannel"];
+            NativeChannelPreloader *preloader=[root valueForKey:@"nativePreloader"];
+            [preloader prepareChannel:@"cctv2" title:@"CCTV-2"];
+            preparedWrapper=[preloader valueForKey:@"player"];
+            configuredBeforeHandoff=[CNPlayer smokeConfigureCount];
+          },
+          ^{
+            [root playChannel:[root channelWithID:@"cctv2"] route:nil];
+            check([root valueForKey:@"currentPlayer"]==preparedWrapper,@"selected channel adopts metadata-prepared wrapper");
+            check([CNPlayer smokeConfigureCount]==configuredBeforeHandoff,@"metadata handoff does not call playLIVE a second time");
+            PlaybackStartupTrace *trace=[root valueForKey:@"startupTrace"];
+            check(trace.stages[@"preloadedVDN"]!=nil,@"metadata hit is explicitly recorded");
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue],@"metadata handoff reaches first render");
+            [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];
           }
       ];
       next(steps, 0);

@@ -17,6 +17,7 @@
 #import "LocalServiceReadiness.h"
 #import "PlaybackStartupTrace.h"
 #import "NativeStartupTuner.h"
+#import "NativeChannelPreloader.h"
 #import "PlaybackInfoViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <AVFoundation/AVFoundation.h>
@@ -27,7 +28,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.17.2";
+static NSString *const kBuildTag = @"0.17.3";
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -61,6 +62,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property (nonatomic, assign) NSUInteger epgListGeneration;
 @property (nonatomic, strong) PlaybackStartupTrace *startupTrace;
 @property (nonatomic, strong) NativeStartupTuner *nativeStartupTuner;
+@property (nonatomic, strong) NativeChannelPreloader *nativePreloader;
 @property (nonatomic) BOOL nativePlaybackFailed;
 @property (nonatomic, strong) LocalServiceReadiness *playbackReadiness;
 @property (nonatomic, strong) NSMutableDictionary<NSString *,LocalServiceReadiness *> *subscriptionReadiness;
@@ -193,6 +195,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)dealloc {
+    [self.nativePreloader cancel];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.playbackReadiness cancel];
     for(LocalServiceReadiness *probe in self.subscriptionReadiness.allValues)[probe cancel];
@@ -204,6 +207,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)onBackground {
+    [self.nativePreloader cancel];
     [self stopPreview];
     [self call:self.currentPlayer sel:@"resignActive"];
     if (CCTVBoolPreference(@"autoPiP",NO) && self.avLayer && AVPictureInPictureController.isPictureInPictureSupported && !self.pip.isPictureInPictureActive) {
@@ -822,10 +826,17 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     setActive(session, NSSelectorFromString(@"setActive:error:"), YES, NULL);
 }
 
+- (void)configureSDKLogging {
+    BOOL verbose=CCTVBoolPreference(@"nativeSDKVerboseLogs",NO);
+    Class cls=NSClassFromString(@"CNPlayer");
+    for(NSString *selector in @[@"logEnabled:",@"logToStatEnabled:",@"playerCoreLogEnabled:",@"playerNetWorkLogEnabled:",@"statInfoLogEnabled:",@"statCoreInfoLogEnabled:"])
+        [self callClass:cls sel:selector args:@[@(verbose)]];
+}
+
 - (void)setupSDK {
     Class cls = NSClassFromString(@"CNPlayer");
     if (!cls) { self.titleLabel.text = @"SDK 未加载"; return; }
-    @try { [CNPlayer logEnabled:YES]; } @catch (NSException *e) {}
+    [self configureSDKLogging];
     [self callClass:cls sel:@"configSDK_CICADA_UDRMUrl:" args:@[kLicenseUrl]];
     @try {
         [CNPlayer startPlayerSDK_Options:[CNPlayer defaultOptions]];
@@ -837,6 +848,9 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     [self log:@"CCTVHost %@ · SDK %@ · 当前原生模式：%@ · Python %@",kBuildTag,ver,CCTVBoolPreference(@"legacyNativePlayback",YES)?@"兼容复用":@"独立实例",PyHost.running?@"运行中":@"未启动"];
     self.initialCDNPreference=[self callClass:cls sel:@"getVDNConfig_CDNLive_DefaultCDNInfo" args:@[]];
     [self callClass:cls sel:@"authed" args:@[]];
+    self.nativePreloader=[[NativeChannelPreloader alloc] initWithFactory:^id{ return [[NSClassFromString(@"CNPlayer") alloc] init]; } clock:^NSTimeInterval{return CACurrentMediaTime();}];
+    __weak typeof(self) preloaderOwner=self;
+    self.nativePreloader.onLog=^(NSString *message){[preloaderOwner log:@"%@",message];};
 
     // SDK 初始化返回后即可续播，不再固定等待 2.5 秒。
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -916,9 +930,12 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     if(self.currentPlayer){[self stopPlayback];[self recordStartupStage:@"teardown"];}
     Class cls=NSClassFromString(@"CNPlayer");SEL playSel=NSSelectorFromString(@"playLIVEWithChannelID:delegate:configOptions:");
     BOOL legacy=CCTVBoolPreference(@"legacyNativePlayback",YES);
-    id inst=self.sdkPlayer;
-    if(!legacy&&self.sdkPlayerUsed)inst=nil;
-    if(legacy&&inst&&self.sdkPlayerUsed)[self call:inst sel:@"reset"];
+    id prepared=(!self.customCDNPreference && CCTVBoolPreference(@"preloadNativeChannel",YES))?[self.nativePreloader takeChannel:cid]:nil;
+    [self.nativePreloader cancel];
+    id inst=prepared?:self.sdkPlayer;
+    if(prepared && self.sdkPlayer && prepared!=self.sdkPlayer)[self call:self.sdkPlayer sel:@"reset"];
+    if(!prepared && !legacy&&self.sdkPlayerUsed)inst=nil;
+    if(!prepared && legacy&&inst&&self.sdkPlayerUsed)[self call:inst sel:@"reset"];
     self.sdkPlayer=nil;
     if(!inst){@try{inst=[[cls alloc] init];}@catch(NSException *e){[self log:@"创建播放器异常 %@",e.reason];}}
     if(!inst||![inst respondsToSelector:playSel]){self.titleLabel.text=@"SDK 接口不可用";[self.spinner stopAnimating];return;}
@@ -928,7 +945,12 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.nativeStartupTuner=CCTVBoolPreference(@"fastNativeStartup",YES)?[NativeStartupTuner new]:nil;
     NSDictionary *options=@{kOptTitle:title?:cid};
     [self log:@"原生起播 %@ · %@",cid,legacy?@"0.12 兼容复用":@"独立实例对比"];
-    id accepted=[self invokeTarget:inst selector:playSel args:@[cid,self,options]];
+    id accepted=@YES;
+    if(prepared){
+        @try{[inst setValue:self forKey:@"delegate"];}@catch(NSException *e){prepared=nil;}
+        if(prepared){[self recordStartupStage:@"preloadedVDN"];[self log:@"命中原生预解析 %@，保留播放信息直接 prepare",cid];}
+    }
+    if(!prepared)accepted=[self invokeTarget:inst selector:playSel args:@[cid,self,options]];
     if([accepted isKindOfClass:NSNumber.class]&&![accepted boolValue]){
         id previous=inst;self.currentPlayer=nil;
         @try{[previous setValue:nil forKey:@"delegate"];}@catch(NSException *e){}
@@ -1180,6 +1202,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     page.onExportData=^{[weakSelf exportLocalConfiguration];};page.onImportData=^{[weakSelf importLocalConfiguration];};page.onOpenLog=^{if(!weakSelf.logVisible)[weakSelf toggleLog];};
     page.onClearEPG=^{ [[XMLTVStore shared] clear];[weakSelf.epgCache removeAllObjects]; [weakSelf saveEPGCache]; [weakSelf.table reloadData]; };
     page.onPreferenceChanged=^(NSString *key, BOOL value){
+        if ([key isEqualToString:@"nativeSDKVerboseLogs"]) [weakSelf configureSDKLogging];
+        if ([key isEqualToString:@"preloadNativeChannel"] && !value) [weakSelf.nativePreloader cancel];
         if ([key isEqualToString:@"allowBackgroundAudio"]) [weakSelf activateAudioSession];
         if ([key isEqualToString:@"autoLoadEPG"]) { [weakSelf.epgTimer invalidate]; weakSelf.epgTimer=nil; if(value) [weakSelf restartEPGTimer]; else weakSelf.infoLabel.text=@"节目单自动获取已关闭"; }
     };
@@ -1708,6 +1732,7 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)playRemote:(NSDictionary *)ch {
+    [self.nativePreloader cancel];
     [self beginPlaybackPriority];
     if(self.activeTab!=1)[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[1]];
     NSString *u=[self stableURLKey:ch[@"remoteURL"]];if(!u.length)return;
@@ -2057,7 +2082,18 @@ static NSCache *LogoCache(void) {
         [self updateNowPlaying];
         [self refreshNowNext];
         [self restartEPGTimer];
+        NSUInteger generation=self.playbackGeneration;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{[self prepareNextNativeChannelForGeneration:generation];});
     }
+}
+
+- (void)prepareNextNativeChannelForGeneration:(NSUInteger)generation {
+    if(generation!=self.playbackGeneration || !self.firstRender || !self.currentPlayer || self.avPlayer || self.customCDNPreference || !CCTVBoolPreference(@"preloadNativeChannel",YES) || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
+    NSMutableArray *native=[NSMutableArray array];
+    for(NSDictionary *channel in self.allChannels)if(![channel[@"remoteURL"] length] && ![ProfileStore isHTTP:channel[@"id"]])[native addObject:channel];
+    NSUInteger index=[native indexOfObjectPassingTest:^BOOL(NSDictionary *channel,NSUInteger i,BOOL *stop){return [channel[@"id"] isEqualToString:self.channelID];}];
+    if(index==NSNotFound || native.count<2)return;
+    NSDictionary *next=native[(index+1)%native.count];[self.nativePreloader prepareChannel:next[@"id"] title:next[@"name"]];
 }
 
 - (void)player:(id)player playBackStateDidChanged:(NSUInteger)state {

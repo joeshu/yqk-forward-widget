@@ -9,7 +9,9 @@
 - (void)viewDidLoad {
     [super viewDidLoad]; self.title=@"设置"; self.view.backgroundColor=UIColor.blackColor; self.navigationController.navigationBar.tintColor=UIColor.systemPinkColor;
     self.sections=@[
-      @{ @"title":@"播放", @"footer":@"快速起播仅降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；关闭可恢复默认缓冲。播放选项下次选台生效。", @"rows":@[
+      @{ @"title":@"播放", @"footer":@"快速起播仅降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；关闭可恢复默认缓冲。预解析只缓存一个相邻频道的信息，有效期 15 秒，会额外请求频道元数据。播放选项下次选台生效。", @"rows":@[
+        @{ @"title":@"预解析下一个 CCTV 频道", @"key":@"preloadNativeChannel", @"icon":@"forward.end", @"default":@YES },
+        @{ @"title":@"SDK 详细日志（诊断）", @"key":@"nativeSDKVerboseLogs", @"icon":@"doc.text", @"default":@NO },
         @{ @"title":@"原生播放器快速起播", @"key":@"fastNativeStartup", @"icon":@"bolt", @"default":@YES },
         @{ @"title":@"复用原生播放器", @"key":@"legacyNativePlayback", @"icon":@"backward.end", @"default":@YES },
         @{ @"title":@"启动时续播上次频道", @"key":@"resumeLastChannel", @"icon":@"arrow.counterclockwise", @"default":@YES },

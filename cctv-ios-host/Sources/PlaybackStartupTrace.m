@@ -23,7 +23,7 @@
 - (NSString *)summary {
     NSMutableArray *parts = [NSMutableArray array];
     for (NSString *key in @[
-             @"service", @"teardown", @"configure", @"prepareCall", @"vdn", @"setup", @"bufferTuned", @"itemReady",
+             @"service", @"teardown", @"preloadedVDN", @"configure", @"prepareCall", @"vdn", @"setup", @"bufferTuned", @"itemReady",
              @"prepared", @"frame"
          ]) {
         NSNumber *value = self.mutableStages[key];

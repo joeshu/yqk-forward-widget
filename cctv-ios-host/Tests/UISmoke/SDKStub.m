@@ -14,7 +14,7 @@
 @property(nonatomic, assign) BOOL isPlaying;
 @property(nonatomic, assign) NSUInteger preparation;
 @end
-static NSInteger resets, plays;
+static NSInteger resets, plays, configures;
 static id cdnPreference;
 @implementation CNPlayer
 - (instancetype)init {
@@ -54,6 +54,7 @@ static id cdnPreference;
 + (NSInteger)smokeResetCount {
     return resets;
 }
++ (NSInteger)smokeConfigureCount { return configures; }
 + (NSInteger)smokePlayCount {
     return plays;
 }
@@ -61,8 +62,12 @@ static id cdnPreference;
     return nil;
 }
 - (BOOL)playLIVEWithChannelID:(NSString *)cid delegate:(id)delegate configOptions:(NSDictionary *)options {
-    self.delegate = delegate;
+    configures++;self.delegate = delegate;
     return YES;
+}
+- (void)prepareRateItemToPlay_completionBlock:(void (^)(BOOL,NSError *))completion {
+    NSUInteger token=++self.preparation;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{if(token==self.preparation)completion(YES,nil);});
 }
 - (void)prepareToPlay {
     NSUInteger token = ++self.preparation;
