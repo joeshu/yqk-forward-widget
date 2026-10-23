@@ -60,7 +60,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertRegex(body, r"now\s*-\s*ts\s*<\s*6\s*\*\s*3600")
 
     def test_now_next_uses_cache_and_rejects_stale_playback_callback(self):
-        body = method_body("- (void)refreshNowNext")
+        body = method_body("- (void)refreshNowNext") + method_body("- (void)refreshOfficialNowNext")
         self.assertIn("NSDictionary *cached = self.epgCache[cid]", body)
         self.assertIn("epgGeneration != weakSelf.playbackGeneration", body)
         self.assertIn("![weakSelf.channelID isEqualToString:cid]", body)

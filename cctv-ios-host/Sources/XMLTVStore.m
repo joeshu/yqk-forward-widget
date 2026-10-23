@@ -59,9 +59,9 @@ invalid:
     for(NSURLSessionDataTask *task in self.tasks.allValues)[task cancel];[self.tasks removeAllObjects];
     NSDictionary *pending=[self.callbacks copy];[self.callbacks removeAllObjects];for(NSArray *blocks in pending.allValues)for(void (^block)(NSDictionary *,NSError *) in blocks)block(nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);
 }
-- (void)loadSource:(NSString *)source channel:(NSString *)identifier force:(BOOL)force completion:(void (^)(NSArray *,NSError *))completion {
+- (void)loadSource:(NSString *)source channel:(NSString *)identifier force:(BOOL)force completion:(void (^)(NSArray<NSDictionary *> *,NSError *))completion {
     if(![ProfileStore isHTTP:source]){completion(@[],[NSError errorWithDomain:@"XMLTV" code:2 userInfo:@{NSLocalizedDescriptionKey:@"请先配置有效的 XMLTV 地址。"}]);return;}
-    if(self.paused){completion([self cachedRowsForSource:source channel:identifier],nil);return;}
+    if(self.paused){NSArray *rows=[self cachedRowsForSource:source channel:identifier];completion(rows,rows.count?nil:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);return;}
     void (^finish)(NSDictionary *,NSError *)=^(NSDictionary *cache,NSError *error){completion(cache[@"rows"][identifier.lowercaseString]?:@[],error);};
     if(self.callbacks[source]){[self.callbacks[source] addObject:[finish copy]];return;}
     self.callbacks[source]=[NSMutableArray arrayWithObject:[finish copy]];NSUInteger generation=self.generation;NSString *path=[self pathForSource:source];NSDictionary *memory=self.cache[source];

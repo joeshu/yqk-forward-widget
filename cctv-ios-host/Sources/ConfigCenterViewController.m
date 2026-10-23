@@ -100,7 +100,7 @@
         NSDictionary *p = self.profiles[ip.row];
         c.textLabel.text = p[@"name"];
         c.detailTextLabel.text =
-            [NSString stringWithFormat:@"%@ 个频道   EPG\n%@", p[@"count"], p[@"source"] ?: @"官方频道目录"];
+            [NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@", p[@"count"], p[@"epgStatus"]?:@"自动匹配", [p[@"source"] length]?p[@"source"]:@"官方频道目录"];
         c.imageView.image = [UIImage systemImageNamed:@"list.bullet.rectangle"];
         UISwitch *s = [UISwitch new];
         s.onTintColor = HostAccent();

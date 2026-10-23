@@ -65,7 +65,7 @@ def validate(path):
         result['build_variant'] = variant or 'legacy'
         linked = any('/Python.framework/' in name for name in result['binaries'][binary].get('dependencies', []))
         result['python_linked'] = linked
-        if variant == 'no-python':
+        if variant in ('no-python', 'baseline09'):
             assert not result['python_embedded'] and not linked, 'no-python build contains or links Python'
             assert not any(name.startswith(root + 'python/') for name in z.namelist()), 'no-python build includes stdlib'
             assert root + 'ysp-live.py' not in z.namelist(), 'no-python build includes bundled Python service'

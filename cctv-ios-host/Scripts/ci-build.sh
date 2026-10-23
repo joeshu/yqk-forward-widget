@@ -20,6 +20,12 @@ if [ -n "${PY_DISABLE:-}" ]; then
 else
   /usr/libexec/PlistBuddy -c 'Add :CCTVHostBuildVariant string full' "$APP/Info.plist"
 fi
+if [ -n "${CCTV_BASELINE:-}" ]; then
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.example.cctvhost.baseline09.nopy' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName CCTVHost 0.9对照' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 0.9.0' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CCTVHostBuildVariant baseline09' "$APP/Info.plist"
+fi
 ICON_PARTIAL="$OUT/assetcatalog-info.plist"
 xcrun --sdk iphoneos actool --output-format human-readable-text --notices --warnings \
   --platform iphoneos --minimum-deployment-target 15.0 --target-device iphone --target-device ipad \
