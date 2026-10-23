@@ -62,14 +62,15 @@
     [self.refreshControl endRefreshing];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 2;
+    return self.profiles.count+1;
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return section == 0 ? 1 : self.profiles.count;
+    return 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0)
         return @"本机";
+    if(section>1)return nil;
     NSUInteger n = 0;
     for (NSDictionary *p in self.profiles)
         if ([p[@"enabled"] boolValue])
@@ -97,20 +98,20 @@
         c.detailTextLabel.text = PyHost.running ? @"Python 运行中 · 管理本机服务" : @"管理本机 Python 服务";
         c.imageView.image = [UIImage systemImageNamed:@"externaldrive"];
     } else {
-        NSDictionary *p = self.profiles[ip.row];
+        NSDictionary *p = self.profiles[ip.section-1];
         c.textLabel.text = p[@"name"];
         c.detailTextLabel.text =
-            [NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@", p[@"count"], p[@"epgStatus"]?:@"自动匹配", [p[@"source"] length]?p[@"source"]:@"官方频道目录"];
+            [NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@", p[@"count"], p[@"epgStatus"]?:@"自动匹配", [p[@"source"] hasPrefix:@"local-playlist:"]?@"本机文件 · 长按可编辑、排序":([p[@"source"] length]?p[@"source"]:@"官方频道目录")];
         c.imageView.image = [UIImage systemImageNamed:@"list.bullet.rectangle"];
         UISwitch *s = [UISwitch new];
         s.onTintColor = HostAccent();
         s.on = [p[@"enabled"] boolValue];
-        s.tag = ip.row;
+        s.tag = ip.section-1;
         s.accessibilityLabel = [NSString stringWithFormat:@"启用 %@", p[@"name"]];
         [s addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
         c.accessoryView = s;
     }
-    if(ip.section==1&&[self.profiles[ip.row][@"status"] length])c.detailTextLabel.text=[NSString stringWithFormat:@"%@\n%@",c.detailTextLabel.text?:@"",self.profiles[ip.row][@"status"]];
+    if(ip.section==1&&[self.profiles[ip.section-1][@"status"] length])c.detailTextLabel.text=[NSString stringWithFormat:@"%@\n%@",c.detailTextLabel.text?:@"",self.profiles[ip.section-1][@"status"]];
     return c;
 }
 - (void)toggle:(UISwitch *)sender {
@@ -127,13 +128,13 @@
         if (self.onServices)
             self.onServices();
     } else if (self.onSelectProfile)
-        self.onSelectProfile(self.profiles[ip.row][@"source"]);
+        self.onSelectProfile(self.profiles[ip.section-1][@"source"]);
 }
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
     trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip {
-    if (ip.section == 0 || ![self.profiles[ip.row][@"source"] length])
+    if (ip.section == 0 || ![self.profiles[ip.section-1][@"source"] length])
         return nil;
-    NSString *source = self.profiles[ip.row][@"source"];
+    NSString *source = self.profiles[ip.section-1][@"source"];
     UIContextualAction *a = [UIContextualAction
         contextualActionWithStyle:UIContextualActionStyleDestructive
                             title:@"删除"
@@ -147,12 +148,14 @@
     return [UISwipeActionsConfiguration configurationWithActions:@[a,edit]];
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
-    if(ip.section==0||![self.profiles[ip.row][@"source"] length])return nil;
-    NSString *source=self.profiles[ip.row][@"source"];__weak typeof(self) w=self;
+    if(ip.section==0||![self.profiles[ip.section-1][@"source"] length])return nil;
+    NSString *source=self.profiles[ip.section-1][@"source"];__weak typeof(self) w=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:source previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
         NSMutableArray *actions=[NSMutableArray arrayWithObject:[UIAction actionWithTitle:@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
         for(NSNumber *offset in @[@(-1),@1]){[actions addObject:[UIAction actionWithTitle:offset.integerValue<0?@"上移":@"下移" image:[UIImage systemImageNamed:offset.integerValue<0?@"arrow.up":@"arrow.down"] identifier:nil handler:^(UIAction *a){NSArray *sources=[w.profiles valueForKey:@"source"];sources=[sources filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *s,NSDictionary *b){return s.length>0;}]];[ProfileStore move:source offset:offset.integerValue sources:sources];[w reloadProfiles];}]];}
         return [UIMenu menuWithTitle:@"配置操作" children:actions];
     }];
 }
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {return section>1?12:UITableViewAutomaticDimension;}
+- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section {return 4;}
 @end

@@ -600,6 +600,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.barButtonItem=self.navigationItem.leftBarButtonItem;[self presentViewController:a animated:YES completion:nil];
 }
 - (void)showTabPage:(UIViewController *)page title:(NSString *)title {
+    self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeAlways;
     self.tabPage=page;[self addChildViewController:page];[self.view addSubview:page.view];[page didMoveToParentViewController:self];self.title=title;self.navigationItem.searchController=page.navigationItem.searchController;self.navigationItem.leftBarButtonItem=nil;
     self.navigationItem.rightBarButtonItems=page.navigationItem.rightBarButtonItems;[self.view bringSubviewToFront:self.bottomBar];
 }
