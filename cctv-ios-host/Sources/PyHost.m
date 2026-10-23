@@ -17,6 +17,7 @@ static BOOL gStartedOnce = NO;
 static BOOL gThreadExited = NO;
 static BOOL gInterpreterReady = NO;
 static NSInteger gPort = 0;
+static NSError *gStartupError;
 static pthread_t gThread;
 static NSString *gScriptPath;
 static NSString *gDataDir;
@@ -35,6 +36,7 @@ static PyObject *gNodeFunction = NULL;
 + (BOOL)running { pthread_mutex_lock(&gLock); BOOL v = gRunning; pthread_mutex_unlock(&gLock); return v || NodePluginRuntime.shared.hasActivePlugin; }
 + (BOOL)startedOnce { pthread_mutex_lock(&gLock); BOOL v = gStartedOnce; pthread_mutex_unlock(&gLock); return v; }
 + (NSInteger)port { pthread_mutex_lock(&gLock); NSInteger v = gPort; pthread_mutex_unlock(&gLock); return v; }
++ (NSError *)startupError {pthread_mutex_lock(&gLock);NSError *value=gStartupError;pthread_mutex_unlock(&gLock);return value;}
 + (void)setLogHandler:(void (^)(NSString *))handler {
     pthread_mutex_lock(&gLock); gLogHandler = [handler copy]; pthread_mutex_unlock(&gLock);
 }
@@ -111,6 +113,7 @@ static void *pyThread(void *unused) {
         if (!PyStatus_Exception(status)) status = Py_InitializeFromConfig(&config);
         PyConfig_Clear(&config);
         if (PyStatus_Exception(status)) {
+            pthread_mutex_lock(&gLock);gStartupError=[NSError errorWithDomain:@"PyHost" code:11 userInfo:@{NSLocalizedDescriptionKey:@"Python 初始化失败，请查看日志并重开 App。"}];pthread_mutex_unlock(&gLock);
             emitLog([NSString stringWithFormat:@"Python 初始化失败: %s", status.err_msg ?: "unknown"]);
             goto finished;
         }
@@ -168,7 +171,11 @@ static void *pyThread(void *unused) {
             // PyErr_Print handles SystemExit by terminating the embedding process.
             // Display the exception without allowing a plugin error to exit the App.
             PyObject *raised = PyErr_GetRaisedException();
-            if (raised) { PyErr_DisplayException(raised); Py_DECREF(raised); }
+            if (raised) {
+                PyObject *text=PyObject_Str(raised);const char *utf8=text?PyUnicode_AsUTF8(text):NULL;NSString *message=utf8?[NSString stringWithUTF8String:utf8]:@"插件启动失败";if(message.length>1024)message=[message substringToIndex:1024];
+                pthread_mutex_lock(&gLock);gStartupError=[NSError errorWithDomain:@"PyHost" code:12 userInfo:@{NSLocalizedDescriptionKey:message}];pthread_mutex_unlock(&gLock);
+                Py_XDECREF(text);PyErr_DisplayException(raised);Py_DECREF(raised);
+            }
             emitLog(@"Python 插件异常退出（详见上方日志）");
         }
         PyObject *idle = gServiceRuntime ? PyObject_CallMethod(gServiceRuntime, "is_idle", NULL) : NULL;
@@ -241,7 +248,7 @@ finished:
     }
     gScriptPath = script; gPythonHome = home; gDataDir = dataDir; gPort = port; gArguments=[arguments copy];
     setenv("YSP_DATA_DIR", dataDir.UTF8String, 1);
-    gStartedOnce = YES; gRunning = YES; gThreadExited = NO;
+    gStartedOnce = YES; gRunning = YES; gThreadExited = NO; gStartupError=nil;
     int rc = pthread_create(&gThread, NULL, pyThread, NULL);
     if (rc != 0) { gRunning = NO; gThreadExited = YES; gStartedOnce = gInterpreterReady; pthread_mutex_unlock(&gLock); if (error) *error = [NSError errorWithDomain:@"PyHost" code:5 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"无法创建 Python 线程 (%d)", rc]}]; return NO; }
     pthread_detach(gThread); pthread_mutex_unlock(&gLock); return YES;

@@ -46,6 +46,7 @@
 - (void)poll:(NSUInteger)generation {
     if (self.cancelled || generation != self.generation)
         return;
+    NSError *startupError=self.failureProvider?self.failureProvider():nil;if(startupError){[self finish:startupError];return;}
     NSTimeInterval remaining = self.timeout - (CACurrentMediaTime() - self.started);
     if (remaining <= 0) {
         [self finish:[NSError errorWithDomain:@"CCTVHostService"

@@ -1,4 +1,5 @@
 import http.client
+import http.server
 import importlib.util
 import json
 from pathlib import Path
@@ -6,6 +7,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.parse
 from unittest import mock
 
 PLUGINS = Path(__file__).resolve().parents[1] / 'Plugins'
@@ -144,6 +146,52 @@ class MediaTests(unittest.TestCase):
             relay.register('file:///etc/passwd', {})
         relay.close()
         self.assertFalse(relay.targets)
+
+    def test_real_hls_relay_preserves_headers_and_ranges_and_strips_redirect_credentials(self):
+        received = []
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                received.append((self.path, dict(self.headers)))
+                if self.path == '/redirect':
+                    self.send_response(302);self.send_header('Location', f'http://localhost:{self.server.server_port}/target');self.end_headers();return
+                body = b'#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:6,\nsegment.ts\n' if self.path == '/index.m3u8' else b'0123456789'
+                ranged = self.headers.get('Range') == 'bytes=2-5'
+                if ranged: body = body[2:6]
+                self.send_response(206 if ranged else 200)
+                self.send_header('Content-Type', 'application/vnd.apple.mpegurl' if self.path.endswith('.m3u8') else 'video/mp2t')
+                if ranged: self.send_header('Content-Range', 'bytes 2-5/10')
+                self.send_header('Content-Length', str(len(body)));self.end_headers();self.wfile.write(body)
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        threads = [threading.Thread(target=item.serve_forever, daemon=True) for item in (upstream, server)]
+        for thread in threads: thread.start()
+        def get(path, headers=None):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+            try:
+                client.request('GET', path, headers=headers or {});response=client.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally: client.close()
+        try:
+            base = f'http://127.0.0.1:{upstream.server_port}'
+            headers = {'Referer': 'https://source.test/', 'Cookie': 'fixture-cookie', 'Authorization': 'fixture-auth'}
+            token = server.relay.register(base + '/index.m3u8', headers)
+            status, _, body = get('/media/' + token)
+            self.assertEqual(status, 200)
+            segment = body.decode().strip().splitlines()[-1]
+            status, response_headers, body = get(urllib.parse.urlsplit(segment).path, {'Range': 'bytes=2-5'})
+            self.assertEqual((status, body, response_headers['Content-Range']), (206, b'2345', 'bytes 2-5/10'))
+            self.assertEqual(received[-1][1]['Cookie'], 'fixture-cookie')
+            self.assertEqual(received[-1][1]['Referer'], 'https://source.test/')
+            token = server.relay.register(base + '/redirect', headers)
+            self.assertEqual(get('/media/' + token)[0], 200)
+            self.assertNotIn('Cookie', received[-1][1]);self.assertNotIn('Authorization', received[-1][1])
+            self.assertEqual(get('/media/unknown')[0], 404)
+            server.relay.close()
+            self.assertEqual(get('/media/' + token)[0], 404)
+        finally:
+            for item in (upstream, server): item.shutdown();item.server_close()
+            for thread in threads: thread.join(2)
 
 
 if __name__ == '__main__':

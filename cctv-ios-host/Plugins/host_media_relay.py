@@ -34,9 +34,9 @@ class MediaRelay:
 
     def register(self, url, headers, origin=None):
         parsed = urllib.parse.urlsplit(url)
-        if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname:
+        if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('不支持的媒体地址')
-        origin = origin or parsed.hostname.lower()
+        origin = origin or (parsed.scheme.lower(), parsed.netloc.lower())
         key = (url, tuple(sorted(headers.items())), origin)
         with self.lock:
             if self.stopping.is_set():
@@ -73,7 +73,8 @@ class MediaRelay:
             (url, pairs, origin), _ = record
             self.targets.move_to_end(token)
         headers = dict(pairs)
-        if urllib.parse.urlsplit(url).hostname.lower() != origin:
+        parsed = urllib.parse.urlsplit(url)
+        if (parsed.scheme.lower(), parsed.netloc.lower()) != origin:
             headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie')}
         headers['Accept-Encoding'] = 'identity'
         if handler.headers.get('Range'):

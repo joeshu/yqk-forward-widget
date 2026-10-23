@@ -101,6 +101,19 @@ class NodeMediaHostTests(unittest.TestCase):
         self.assertIsNone(self.process.poll())
         self.assertTrue(self.call('stop')['ok'])
 
+    def test_original_esm_iptv_extractor_exposes_live_catalog_and_uses_account_options(self):
+        (self.package / 'index.mjs').write_text('''
+          export default {async fetch(){return {groups:[{name:'直播',dataList:[{pID:'opaque/live',deferredRef:'opaque/live',name:'频道',pics:{highResolution:'https://fixture.test/logo.png'}}]}]}},
+            async resolve(ref,{config,account}){return {url:'https://fixture.test/'+encodeURIComponent(ref),desc:account.userId+':'+config.rateType}}};''')
+        reply = self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.mjs', protocol='iptv-extractor', moduleType='esm', options={'userId': 'fixture-user', 'rateType': 3})
+        self.assertTrue(reply['ok'], reply)
+        self.assertIn('live', reply['result']['capabilities'])
+        item = self.call('catalog')['result'][0]
+        self.assertEqual((item['ref'], item['group']), ('opaque/live', '直播'))
+        resolved = self.call('resolve', ref=item['ref'])['result']
+        self.assertEqual((resolved['url'], resolved['desc']), ('https://fixture.test/opaque%2Flive', 'fixture-user:3'))
+        self.assertTrue(self.call('stop')['ok'])
+
 
 if __name__ == '__main__':
     unittest.main()

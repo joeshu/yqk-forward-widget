@@ -14,7 +14,7 @@ process.cwd=()=>scope.getStore()?.cwd||nativeCwd()
 process.chdir=directory=>{const owner=scope.getStore();if(!owner)throw Error('宿主不允许改变 App 的进程工作目录');const resolved=fs.realpathSync(path.resolve(owner.cwd,directory));if(resolved!==owner.data && !resolved.startsWith(owner.data+path.sep))throw Error('插件工作目录超出资源数据目录');owner.cwd=resolved}
 function fsPath(value){const owner=scope.getStore();return owner && typeof value==='string' && !path.isAbsolute(value)?path.resolve(owner.cwd,value):value}
 for(const name of ['access','appendFile','chmod','chown','exists','lstat','mkdir','open','opendir','readFile','readdir','readlink','realpath','rm','rmdir','stat','truncate','unlink','utimes','watch','watchFile','writeFile']){
-  for(const key of [name,name+'Sync'])if(typeof fs[key]==='function'){const operation=fs[key];fs[key]=function(file,...args){return operation.call(this,fsPath(file),...args)}}
+  for(const key of [name,name+'Sync'])if(typeof fs[key]==='function'){const operation=fs[key];fs[key]=Object.assign(function(file,...args){return operation.call(this,fsPath(file),...args)},operation)}
   if(typeof fs.promises[name]==='function'){const operation=fs.promises[name];fs.promises[name]=function(file,...args){return operation.call(this,fsPath(file),...args)}}
 }
 for(const name of ['copyFile','cp','link','rename','symlink']){
@@ -111,6 +111,7 @@ async function start(payload){
     }else{
       if(typeof owner.module==='function')owner.module=await owner.module(payload.options||{})
       if(!owner.module || typeof owner.module!=='object')throw Error('Node 入口未导出插件对象')
+      if(owner.protocol==='catvod-js')for(const [key,alias] of Object.entries({home:'homeContent',homeVod:'homeVideoContent',category:'categoryContent',search:'searchContent',detail:'detailContent',play:'playerContent'}))if(!owner.module[key] && typeof owner.module[alias]==='function')owner.module[key]=owner.module[alias]
       if(typeof owner.module.init==='function')await owner.module.init(payload.options||{})
       owner.metadata={engine:'Node.js Mobile',version:process.versions.node,protocol:owner.protocol,capabilities:['home','category','search','detail','play','providers','proxy'].filter(key=>typeof owner.module[key]==='function').concat((owner.module.channels||owner.module.catalog||(owner.protocol==='iptv-extractor'&&owner.module.fetch))&&owner.module.resolve?['live']:[])}
     }

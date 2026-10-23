@@ -1,9 +1,12 @@
 import json
+import hashlib
+import http.server
 from pathlib import Path
 import platform
 import stat
 import subprocess
 import tempfile
+import threading
 import unittest
 import zipfile
 
@@ -18,6 +21,7 @@ class NativePackageTests(unittest.TestCase):
         cls.executable = cls.folder / 'package-test'
         build = subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-framework', 'Foundation', '-lz', '-I', str(root / 'Sources'),
                                 str(root / 'Tests/native_package_tests.m'), str(root / 'Sources/MediaPackageImporter.m'),
+                                str(root / 'Sources/MediaPackageDownloader.m'),
                                 str(root / 'Sources/ServiceStore.m'), '-o', str(cls.executable)], capture_output=True, text=True)
         if build.returncode:
             raise AssertionError(build.stdout + build.stderr)
@@ -84,6 +88,31 @@ class NativePackageTests(unittest.TestCase):
     def test_single_file_size_and_expansion_limits(self):
         file = self.archive({'index.js': b'x' * (8 * 1024 * 1024 + 1)})
         self.assertFalse(self.inspect(file)['ok'])
+
+    def test_md5_pair_downloads_original_code_and_rejects_mismatch_and_limits(self):
+        source = b'module.exports={search(){return {list:[]}}}'
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                body = source
+                if self.path.endswith('.md5'):
+                    body = (hashlib.md5(source).hexdigest() if self.path == '/index.cjs.md5' else '0' * 32).encode()
+                self.send_response(200)
+                self.send_header('Content-Length', str(25 * 1024 * 1024 if self.path == '/oversize.js' else len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True);thread.start()
+        try:
+            base = f'http://127.0.0.1:{server.server_port}'
+            result = self.inspect(base + '/index.cjs.md5')
+            self.assertTrue(result['ok'], result)
+            self.assertEqual(result['manifest']['moduleType'], 'commonjs')
+            self.assertFalse(self.inspect(base + '/mismatch.js.md5')['ok'])
+            self.assertFalse(self.inspect(base + '/oversize.js')['ok'])
+            self.assertFalse(self.inspect(base + '/unsupported.txt')['ok'])
+        finally:
+            server.shutdown();server.server_close();thread.join(2)
 
 
 if __name__ == '__main__':

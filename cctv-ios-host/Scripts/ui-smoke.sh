@@ -25,6 +25,13 @@ xcrun --sdk iphonesimulator clang -fobjc-arc -target "$ARCH-apple-ios15.0-simula
   -o "$APP/CCTVHost"
 cp Resources/channels.json "$APP/"
 cp Plugins/node-plugin-host.cjs "$APP/"
+python3 - "$APP/catpaw-ui.cjs" <<'PY'
+import hashlib,pathlib,sys,urllib.request
+url='https://joeshu.github.io/yqk-forward-widget/catpaw/index.js'
+data=urllib.request.urlopen(url,timeout=30).read(8*1024*1024)
+assert hashlib.sha256(data).hexdigest()=='51f535c2bf5e7dfdd2b7a6b941a2d9475e4010ab94bf08488542246eeebe344a','Catpaw fixture changed'
+pathlib.Path(sys.argv[1]).write_bytes(data)
+PY
 python3 Scripts/prepare_node_runtime.py "$APP" --simulator
 codesign --force --sign - "$APP/Frameworks/NodeMobile.framework"
 python3 - "$APP/Info.plist" <<'PY'

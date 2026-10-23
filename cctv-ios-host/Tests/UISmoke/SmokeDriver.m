@@ -501,16 +501,23 @@ static void next(NSArray *steps, NSUInteger index) {
                 NSDictionary *search=[start[@"ok"] boolValue]?nodeCall(@"search",@{@"session":@"node-ui",@"keyword":@"opaque-node-id"}):@{};
                 NSDictionary *stop=nodeCall(@"stop",@{@"session":@"node-ui"});
                 NSString *saved=[NSString stringWithContentsOfFile:[folder stringByAppendingPathComponent:@"owned.txt"] encoding:NSUTF8StringEncoding error:NULL];
-                NSDictionary *checks=@{@"start":start,@"search":search,@"stop":stop,@"saved":saved?:@""};
+                [NSFileManager.defaultManager copyItemAtPath:[NSBundle.mainBundle pathForResource:@"catpaw-ui" ofType:@"cjs"] toPath:[folder stringByAppendingPathComponent:@"catpaw.cjs"] error:NULL];
+                NSDictionary *catpaw=nodeCall(@"start",@{@"session":@"catpaw-ui",@"packageRoot":folder,@"dataDirectory":folder,@"entry":@"catpaw.cjs",@"moduleType":@"commonjs",@"protocol":@"catpaw-http"});
+                NSDictionary *providers=[catpaw[@"ok"] boolValue]?nodeCall(@"providers",@{@"session":@"catpaw-ui"}):@{};
+                NSDictionary *catpawStop=nodeCall(@"stop",@{@"session":@"catpaw-ui"});
+                NSDictionary *checks=@{@"start":start,@"search":search,@"stop":stop,@"saved":saved?:@"",@"catpaw":catpaw,@"providers":providers,@"catpawStop":catpawStop};
                 [NSFileManager.defaultManager removeItemAtPath:folder error:NULL];dispatch_async(dispatch_get_main_queue(),^{nodeChecks=checks;});
             }});
           }},
-          @{@"until":^BOOL{return nodeChecks!=nil;},@"timeout":@45,@"run":^{
+          @{@"until":^BOOL{return nodeChecks!=nil;},@"timeout":@70,@"run":^{
             check([nodeChecks[@"start"][@"ok"] boolValue],@"actual Node.js Mobile framework starts on iOS simulator");
             check([nodeChecks[@"start"][@"result"][@"version"] hasPrefix:@"18."],@"Node mobile version is measured from the embedded runtime");
             check([nodeChecks[@"search"][@"result"][@"list"][0][@"vod_id"] isEqual:@"opaque-node-id"],@"original CommonJS executes through native Node bridge");
             check([nodeChecks[@"stop"][@"ok"] boolValue] && !NodePluginRuntime.shared.hasActivePlugin,@"Node plugin closes without destroying the reusable engine");
             check([nodeChecks[@"saved"] isEqual:@"start-closed"],@"plugin relative data path is isolated and close hook finishes");
+            check([nodeChecks[@"catpaw"][@"ok"] boolValue],@"original 4 MB Catpaw bundle starts inside actual iOS Node Mobile framework");
+            check([nodeChecks[@"providers"][@"result"] count]>50,@"original Catpaw configuration exposes its real film providers");
+            check([nodeChecks[@"catpawStop"][@"ok"] boolValue],@"original Catpaw HTTP listener and handles stop on iOS");
             NSData *diagnostic=[NSJSONSerialization dataWithJSONObject:nodeChecks options:NSJSONWritingPrettyPrinted error:NULL];[diagnostic writeToFile:[outputDir stringByAppendingPathComponent:@"node-runtime.json"] atomically:YES];
             mediaPage=[MediaBrowserViewController new];
             NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
@@ -534,7 +541,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([mediaDetail.tableView numberOfSections]==3,@"media detail displays two original playback lines");capture(self.window,@"18-media-detail");
             [mediaDetail.tableView.delegate tableView:mediaDetail.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
           }},
-          @{@"until":^BOOL{return [[root valueForKey:@"moviePlayer"] currentItem].status==AVPlayerItemStatusReadyToPlay;},@"run":^{
+          @{@"until":^BOOL{AVPlayer *player=[root valueForKey:@"moviePlayer"];return player.currentItem.status==AVPlayerItemStatusReadyToPlay;},@"run":^{
             AVPlayer *player=[root valueForKey:@"moviePlayer"];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"selected plugin episode reaches real AVPlayer ready state");capture(self.window,@"19-media-playback");[nav dismissViewControllerAnimated:NO completion:nil];[root stopPlayback];
           }}
       ];

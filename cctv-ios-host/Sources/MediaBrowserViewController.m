@@ -164,6 +164,7 @@
         if(error){owner.loading=NO;[owner showMessage:error.localizedDescription loading:NO];return;}
         NSURL *health=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%@/health",source[@"port"]]];
         owner.readiness=[[LocalServiceReadiness alloc] initWithURL:health timeout:25 requiresHealthJSON:YES];
+        owner.readiness.failureProvider=owner.startupErrorProvider;
         [owner.readiness start:^(NSError *failure,NSTimeInterval elapsed){
             MediaBrowserViewController *page=weakSelf;if(!page || page.generation!=generation)return;
             if(failure){page.loading=NO;[page showMessage:failure.localizedDescription loading:NO];return;}

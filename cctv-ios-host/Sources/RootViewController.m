@@ -36,7 +36,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.17.8";
+static NSString *const kBuildTag = @"0.18.0";
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -646,6 +646,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     MediaBrowserViewController *page=[MediaBrowserViewController new];__weak typeof(self) weakSelf=self;
     page.sourcesProvider=^{NSMutableArray *sources=[NSMutableArray array];for(NSDictionary *service in [ServiceStore services])if([ServiceStore isMediaService:service])[sources addObject:service];return sources;};
     page.onActivateService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf changeService:service enabled:YES completion:completion];};
+    page.startupErrorProvider=^NSError *{return PyHost.startupError;};
     page.onResources=^{RootViewController *owner=weakSelf;if(owner)[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[3]];};
     page.onPlay=^(NSDictionary *result,NSString *name){[weakSelf playMediaResult:result name:name];};
     page.onSubscribeLive=^(NSDictionary *service){RootViewController *owner=weakSelf;if(!owner)return;NSString *url=[NSString stringWithFormat:@"http://127.0.0.1:%@/all.m3u",service[@"port"]];[owner.subscriptionURLs addObject:url];[NSUserDefaults.standardUserDefaults setObject:owner.subscriptionURLs.allObjects forKey:@"subscriptions"];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[1]];[owner fetchSubscription:url silent:NO];};
@@ -1352,7 +1353,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 - (LocalServiceReadiness *)readinessForURL:(NSURL *)url service:(NSDictionary *)service {
     NSURLComponents *c=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
     BOOL health=[service[@"builtin"] boolValue] || [ServiceStore isMediaService:service];c.path=health?@"/health":@"/";c.query=nil;c.fragment=nil;
-    return [[LocalServiceReadiness alloc] initWithURL:c.URL timeout:20 requiresHealthJSON:health];
+    LocalServiceReadiness *readiness=[[LocalServiceReadiness alloc] initWithURL:c.URL timeout:20 requiresHealthJSON:health];if(service)readiness.failureProvider=^NSError *{return PyHost.startupError;};return readiness;
 }
 - (BOOL)startService:(NSDictionary *)service error:(NSError **)error {
     if(self.serviceOperationInProgress){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:4 userInfo:@{NSLocalizedDescriptionKey:@"服务正在切换，请等待旧服务退出。"}];return NO;}
