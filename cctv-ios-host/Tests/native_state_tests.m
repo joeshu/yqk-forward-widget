@@ -69,6 +69,45 @@ int main(void) {
             if ([s[@"id"] isEqual:@"builtin-ysp"])
                 builtin = YES;
         check(builtin, @"bundled service preserved");
+        NSString *migrationID = NSUUID.UUID.UUIDString;
+        NSString *prior = [[ServiceStore directory] stringByAppendingPathComponent:@"builtin-ysp"];
+        NSString *historical =
+            [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES)
+                    .firstObject stringByAppendingPathComponent:@"ysp"];
+        NSFileManager *fm = NSFileManager.defaultManager;
+        [fm createDirectoryAtPath:prior withIntermediateDirectories:YES attributes:nil error:NULL];
+        [fm createDirectoryAtPath:historical withIntermediateDirectories:YES attributes:nil error:NULL];
+        NSString *existing = [migrationID stringByAppendingString:@"-existing"],
+                 *missing = [migrationID stringByAppendingString:@"-missing"];
+        [@"keep-old-identity" writeToFile:[historical stringByAppendingPathComponent:existing]
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:NULL];
+        [@"do-not-overwrite" writeToFile:[prior stringByAppendingPathComponent:existing]
+                              atomically:YES
+                                encoding:NSUTF8StringEncoding
+                                   error:NULL];
+        [@"recover-new-state" writeToFile:[prior stringByAppendingPathComponent:missing]
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:NULL];
+        NSString *dataDir = [ServiceStore dataDirectoryForService:@{
+            @"id" : @"builtin-ysp",
+            @"builtin" : @YES
+        }
+                                                            error:NULL];
+        check([dataDir isEqualToString:historical], @"built-in service returns to historical data directory");
+        check([[NSString stringWithContentsOfFile:[dataDir stringByAppendingPathComponent:existing]
+                                         encoding:NSUTF8StringEncoding
+                                            error:NULL] isEqualToString:@"keep-old-identity"],
+              @"migration never overwrites old device identity");
+        check([[NSString stringWithContentsOfFile:[dataDir stringByAppendingPathComponent:missing]
+                                         encoding:NSUTF8StringEncoding
+                                            error:NULL] isEqualToString:@"recover-new-state"],
+              @"missing state recovered from v0.16 directory");
+        for (NSString *folder in @[ prior, historical ])
+            for (NSString *name in @[ existing, missing ])
+                [fm removeItemAtPath:[folder stringByAppendingPathComponent:name] error:NULL];
         NSLog(@"Native backup and service persistence checks passed");
     }
     return 0;

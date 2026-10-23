@@ -28,6 +28,7 @@ static PyObject *gWriteFunction = NULL;
 @implementation PyHost
 
 + (BOOL)running { pthread_mutex_lock(&gLock); BOOL v = gRunning; pthread_mutex_unlock(&gLock); return v; }
++ (BOOL)startedOnce { pthread_mutex_lock(&gLock); BOOL v = gStartedOnce; pthread_mutex_unlock(&gLock); return v; }
 + (NSInteger)port { pthread_mutex_lock(&gLock); NSInteger v = gPort; pthread_mutex_unlock(&gLock); return v; }
 + (void)setLogHandler:(void (^)(NSString *))handler {
     pthread_mutex_lock(&gLock); gLogHandler = [handler copy]; pthread_mutex_unlock(&gLock);

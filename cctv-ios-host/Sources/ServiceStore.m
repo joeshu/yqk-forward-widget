@@ -59,6 +59,21 @@
                              stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"py"]]
                    error:NULL];
 }
++ (NSString *)dataDirectoryForService:(NSDictionary *)service error:(NSError **)error {
+    NSString *identifier=service[@"id"];
+    NSString *target=[[self directory] stringByAppendingPathComponent:identifier];
+    NSFileManager *fm=NSFileManager.defaultManager;
+    if([service[@"builtin"] boolValue]){
+        target=[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"ysp"];
+        if(![fm createDirectoryAtPath:target withIntermediateDirectories:YES attributes:nil error:error])return nil;
+        NSString *previous=[[self directory] stringByAppendingPathComponent:@"builtin-ysp"];
+        for(NSString *name in [fm contentsOfDirectoryAtPath:previous error:NULL]){
+            NSString *dest=[target stringByAppendingPathComponent:name];
+            if(![fm fileExistsAtPath:dest]&&![fm copyItemAtPath:[previous stringByAppendingPathComponent:name] toPath:dest error:error])return nil;
+        }
+    }else if(![fm createDirectoryAtPath:target withIntermediateDirectories:YES attributes:nil error:error])return nil;
+    return target;
+}
 + (NSString *)activeIdentifier {
     return [NSUserDefaults.standardUserDefaults stringForKey:@"activePythonService"] ?: @"builtin-ysp";
 }

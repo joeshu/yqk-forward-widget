@@ -9,7 +9,8 @@
 - (void)viewDidLoad {
     [super viewDidLoad]; self.title=@"设置"; self.view.backgroundColor=UIColor.blackColor; self.navigationController.navigationBar.tintColor=UIColor.systemPinkColor;
     self.sections=@[
-      @{ @"title":@"播放", @"footer":@"网格和列表样式可在直播页右上角切换。", @"rows":@[
+      @{ @"title":@"播放", @"footer":@"默认采用 0.12 原生播放兼容流程；关闭后使用独立实例，下次选台生效。网格和列表可在直播页切换。", @"rows":@[
+        @{ @"title":@"0.12 原生播放兼容模式", @"key":@"legacyNativePlayback", @"icon":@"backward.end", @"default":@YES },
         @{ @"title":@"启动时续播上次频道", @"key":@"resumeLastChannel", @"icon":@"arrow.counterclockwise", @"default":@YES },
         @{ @"title":@"记住上次观看频道", @"key":@"rememberLastChannel", @"icon":@"bookmark", @"default":@YES },
         @{ @"title":@"自动获取节目单", @"key":@"autoLoadEPG", @"icon":@"list.bullet.rectangle", @"default":@YES },
@@ -25,7 +26,7 @@
         @{ @"title":@"导出本机配置", @"action":@"export", @"icon":@"square.and.arrow.up" },
         @{ @"title":@"导入配置文件", @"action":@"import", @"icon":@"square.and.arrow.down" },
         @{ @"title":@"清理节目单缓存", @"detail":@"下次打开频道时重新获取", @"icon":@"trash", @"action":@"clearEPG" },
-        @{ @"title":@"CCTVHost", @"detail":@"0.16.0", @"icon":@"info.circle" },
+        @{ @"title":@"CCTVHost", @"detail":@"0.16.2", @"icon":@"info.circle" },
         @{ @"title":@"日志", @"action":@"logs", @"detail":@"播放器与插件运行日志可导出", @"icon":@"doc.text.magnifyingglass" }
       ]}
     ];

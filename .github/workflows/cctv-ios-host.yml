@@ -2,7 +2,7 @@ name: Build CCTVHost unsigned IPA
 
 on:
   push:
-    branches: [main, codex/cctv-fast-switch, codex/cctv-aptv-ui]
+    branches: [main, codex/cctv-fast-switch, codex/cctv-aptv-ui, codex/cctv-startup-recovery]
     paths:
       - 'cctv-ios-host/**'
       - '.github/workflows/cctv-ios-host.yml'
@@ -70,7 +70,9 @@ jobs:
 
       - name: Validate packaged IPA
         working-directory: cctv-ios-host
-        run: python3 Scripts/validate_ipa.py build/CCTVHost-unsigned.ipa | tee build/validation.json
+        run: |
+          set -o pipefail
+          python3 Scripts/validate_ipa.py build/CCTVHost-unsigned.ipa | tee build/validation.json
 
       - name: Preserve build artifacts
         uses: actions/upload-artifact@v4

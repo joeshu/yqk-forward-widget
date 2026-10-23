@@ -6,6 +6,16 @@ cd "$(dirname "$0")/.."
 OUT=ui-preview
 APP="$OUT/CCTVHostUI.app"
 mkdir -p "$APP"
+python3 -u Tests/UISmoke/fixture_server.py "$OUT/fixture-port.txt" > "$OUT/fixture.log" 2>&1 &
+FIXTURE_PID=$!
+trap 'kill "$FIXTURE_PID" 2>/dev/null || true' EXIT
+for attempt in $(seq 1 150); do
+  if [ -s "$OUT/fixture-port.txt" ]; then break; fi
+  if ! kill -0 "$FIXTURE_PID" 2>/dev/null; then cat "$OUT/fixture.log"; exit 1; fi
+  sleep 0.2
+done
+if [ ! -s "$OUT/fixture-port.txt" ]; then cat "$OUT/fixture.log"; exit 1; fi
+FIXTURE_PORT=$(cat "$OUT/fixture-port.txt")
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 ARCH=$(uname -m)
 xcrun --sdk iphonesimulator clang -fobjc-arc -target "$ARCH-apple-ios15.0-simulator" -isysroot "$SDK" \
@@ -26,7 +36,7 @@ SIM=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=js
 xcrun simctl boot "$SIM" || true
 xcrun simctl bootstatus "$SIM" -b
 xcrun simctl install "$SIM" "$APP"
-xcrun simctl launch "$SIM" com.example.cctvhost.uismoke
+xcrun simctl launch "$SIM" com.example.cctvhost.uismoke --smoke-port "$FIXTURE_PORT"
 CONTAINER=$(xcrun simctl get_app_container "$SIM" com.example.cctvhost.uismoke data)
 for attempt in $(seq 1 40); do
   if [ -f "$CONTAINER/Documents/ui-smoke/results.json" ]; then break; fi
