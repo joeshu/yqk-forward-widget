@@ -20,10 +20,15 @@
     self.mutableStages[stage] = @(time - self.startedAt);
     return YES;
 }
+- (BOOL)shouldRecoverMissingSetupAtTime:(NSTimeInterval)time alreadyRetried:(BOOL)retried failed:(BOOL)failed {
+    NSNumber *vdn=self.mutableStages[@"vdn"];
+    return !retried && !failed && vdn && !self.mutableStages[@"setup"] && !self.mutableStages[@"frame"] &&
+        time-self.startedAt>=8.0 && time-self.startedAt-vdn.doubleValue>=6.0;
+}
 - (NSString *)summary {
     NSMutableArray *parts = [NSMutableArray array];
     for (NSString *key in @[
-             @"service", @"teardown", @"preloadedVDN", @"configure", @"prepareCall", @"vdn", @"setup", @"bufferTuned", @"itemReady",
+             @"service", @"recovery", @"teardown", @"preloadedVDN", @"configure", @"prepareCall", @"vdn", @"setup", @"bufferTuned", @"itemReady",
              @"prepared", @"frame"
          ]) {
         NSNumber *value = self.mutableStages[key];

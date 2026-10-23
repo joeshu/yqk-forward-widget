@@ -5,5 +5,7 @@
 - (instancetype)initWithStartTime:(NSTimeInterval)time;
 /// Returns YES only the first time a stage is recorded. Ignores backwards clocks.
 - (BOOL)record:(NSString *)stage atTime:(NSTimeInterval)time;
+/// Recover only a stalled VDN-to-core transition, never buffering/auth failures.
+- (BOOL)shouldRecoverMissingSetupAtTime:(NSTimeInterval)time alreadyRetried:(BOOL)retried failed:(BOOL)failed;
 - (NSString *)summary;
 @end

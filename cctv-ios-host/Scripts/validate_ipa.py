@@ -72,6 +72,7 @@ def validate(path):
             assert info['CFBundleIdentifier'].endswith('.nopy'), 'diagnostic bundle must install separately'
         elif variant == 'full':
             assert result['python_embedded'] and linked, 'full build missing embedded or linked Python'
+            assert root + 'host_service_runtime.py' in z.namelist(), 'full build missing service lifecycle manager'
         channels = json.loads(z.read(root + 'channels.json'))
         assert isinstance(channels, list) and channels, 'empty channel catalog'
         result['channel_count'] = len(channels)

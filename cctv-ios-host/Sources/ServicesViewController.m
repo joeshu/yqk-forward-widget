@@ -71,7 +71,7 @@
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0)
-        return @"本机一次运行一个服务。停止后需重新打开 App 再启动。";
+        return @"本机一次运行一个服务。切换时自动停止旧服务；须等待后台线程和端口释放。";
     return nil;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {

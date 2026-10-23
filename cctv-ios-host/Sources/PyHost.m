@@ -22,7 +22,7 @@ static NSString *gPythonHome;
 static NSArray<NSString *> *gArguments;
 static void (^gLogHandler)(NSString *) = nil;
 #if PYHOST_AVAILABLE
-static PyObject *gPluginNamespace = NULL;
+static PyObject *gServiceRuntime = NULL;
 static PyObject *gWriteFunction = NULL;
 #endif
 
@@ -53,6 +53,10 @@ static PyMethodDef writeMethod = {"_pyhost_write", pyHostWrite, METH_VARARGS, "F
 
 static void *pyThread(void *unused) {
     @autoreleasepool {
+        pthread_mutex_lock(&gLock); BOOL reused = gInterpreterReady; pthread_mutex_unlock(&gLock);
+        PyGILState_STATE gil = PyGILState_UNLOCKED;
+        if (reused) gil = PyGILState_Ensure();
+        else {
         setenv("YSP_DATA_DIR", gDataDir.UTF8String, 1);
         NSString *caFile = [gPythonHome stringByAppendingPathComponent:@"ssl/cert.pem"];
         setenv("SSL_CERT_FILE", caFile.UTF8String, 1);
@@ -98,7 +102,12 @@ static void *pyThread(void *unused) {
             " def flush(self): pass\n"
             " def writable(self): return True\n"
             "sys.stdout = sys.stderr = _HostStream()\n", Py_file_input, mainDict, mainDict);
-        Py_XDECREF(bootstrap);
+        Py_XDECREF(bootstrap); Py_XDECREF(mainDict);
+        PyObject *resourceDir = PyUnicode_FromString(NSBundle.mainBundle.resourcePath.UTF8String);
+        if (sysPath && resourceDir) PyList_Insert(sysPath, 0, resourceDir);
+        Py_XDECREF(resourceDir);
+        gServiceRuntime = PyImport_ImportModule("host_service_runtime");
+        }
         PyObject *sys = PyImport_ImportModule("sys");
         NSString *portString = [NSString stringWithFormat:@"%ld", (long)gPort];
         setenv("YSP_LINKS_PER_DEVICE", "2", 1);
@@ -113,17 +122,22 @@ static void *pyThread(void *unused) {
         }
         if (sys && argv) PyObject_SetAttrString(sys, "argv", argv);
         Py_XDECREF(sys); Py_XDECREF(argv);
-        PyObject *runpy = PyImport_ImportModule("runpy");
-        PyObject *runPath = runpy ? PyObject_GetAttrString(runpy, "run_path") : NULL;
-        PyObject *path = PyUnicode_FromString(gScriptPath.UTF8String);
-        PyObject *kw = Py_BuildValue("{s:s}", "run_name", "__main__");
-        PyObject *callArgs = path ? PyTuple_Pack(1, path) : NULL;
-        PyObject *ns = (runPath && callArgs && kw) ? PyObject_Call(runPath, callArgs, kw) : NULL;
-        Py_XDECREF(callArgs); Py_XDECREF(mainDict);
-        Py_XDECREF(runpy); Py_XDECREF(runPath); Py_XDECREF(path); Py_XDECREF(kw);
-        if (ns) { gPluginNamespace = ns; emitLog(@"Python 插件服务已退出"); }
+        if (gServiceRuntime) {
+            PyObject *configured = PyObject_CallMethod(gServiceRuntime, "configure_environment", "si", gDataDir.UTF8String, (int)gPort);
+            Py_XDECREF(configured);
+        }
+        PyObject *ns = gServiceRuntime ? PyObject_CallMethod(gServiceRuntime, "run_script", "s", gScriptPath.UTF8String) : NULL;
+        if (ns) { Py_DECREF(ns); emitLog(@"Python 服务主脚本已返回，后台任务由宿主管理"); }
         else { PyErr_Print(); emitLog(@"Python 插件异常退出（详见上方日志）"); }
-        PyEval_SaveThread(); // Background daemon threads may still need the GIL; never finalize here.
+        PyObject *idle = gServiceRuntime ? PyObject_CallMethod(gServiceRuntime, "is_idle", NULL) : NULL;
+        BOOL clean = idle && PyObject_IsTrue(idle) > 0;
+        Py_XDECREF(idle); PyErr_Clear();
+        // Publish exit while holding the GIL: a replacement cannot enter Python
+        // until this thread has finished every Python operation and released it.
+        pthread_mutex_lock(&gLock); gRunning = !clean; gThreadExited = YES; pthread_mutex_unlock(&gLock);
+        if (reused) PyGILState_Release(gil);
+        else PyEval_SaveThread(); // Retain one interpreter; never finalize live extension modules.
+        return NULL;
     }
 finished:
     pthread_mutex_lock(&gLock); gRunning = NO; gThreadExited = YES; pthread_mutex_unlock(&gLock);
@@ -137,10 +151,14 @@ finished:
 
 + (BOOL)startScriptAtPath:(NSString *)path port:(NSInteger)port dataDir:(NSString *)dataDir arguments:(NSArray<NSString *> *)arguments error:(NSError **)error {
     pthread_mutex_lock(&gLock);
-    if (gRunning) { pthread_mutex_unlock(&gLock); return YES; }
-    if (gStartedOnce) {
+    if (gRunning || (gStartedOnce && !gThreadExited)) {
         pthread_mutex_unlock(&gLock);
-        if (error) *error = [NSError errorWithDomain:@"PyHost" code:4 userInfo:@{NSLocalizedDescriptionKey:@"CPython 进程内不可安全重启；本次启动已使用或停止，请重启 App。"}];
+        if (error) *error = [NSError errorWithDomain:@"PyHost" code:4 userInfo:@{NSLocalizedDescriptionKey:@"旧服务仍在运行或停止中，请等待它释放线程和端口后再启动。"}];
+        return NO;
+    }
+    if (gStartedOnce && !gInterpreterReady) {
+        pthread_mutex_unlock(&gLock);
+        if (error) *error = [NSError errorWithDomain:@"PyHost" code:8 userInfo:@{NSLocalizedDescriptionKey:@"Python 初始化失败，请重开 App。"}];
         return NO;
     }
     NSString *res = NSBundle.mainBundle.resourcePath;
@@ -157,7 +175,8 @@ finished:
     BOOL runtimeOK = [[NSFileManager defaultManager] fileExistsAtPath:script] &&
         [[NSFileManager defaultManager] fileExistsAtPath:stdlib] &&
         [[NSFileManager defaultManager] fileExistsAtPath:dynload] &&
-        [[NSFileManager defaultManager] fileExistsAtPath:caFile];
+        [[NSFileManager defaultManager] fileExistsAtPath:caFile] &&
+        [[NSFileManager defaultManager] fileExistsAtPath:[res stringByAppendingPathComponent:@"host_service_runtime.py"]];
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray<NSString *> *extensionFiles = [fm contentsOfDirectoryAtPath:dynload error:nil] ?: @[];
     for (NSString *module in @[@"_ssl", @"_socket", @"_hashlib", @"select", @"_struct"]) {
@@ -181,7 +200,7 @@ finished:
     setenv("YSP_DATA_DIR", dataDir.UTF8String, 1);
     gStartedOnce = YES; gRunning = YES; gThreadExited = NO;
     int rc = pthread_create(&gThread, NULL, pyThread, NULL);
-    if (rc != 0) { gRunning = NO; pthread_mutex_unlock(&gLock); if (error) *error = [NSError errorWithDomain:@"PyHost" code:5 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"无法创建 Python 线程 (%d)", rc]}]; return NO; }
+    if (rc != 0) { gRunning = NO; gThreadExited = YES; gStartedOnce = gInterpreterReady; pthread_mutex_unlock(&gLock); if (error) *error = [NSError errorWithDomain:@"PyHost" code:5 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"无法创建 Python 线程 (%d)", rc]}]; return NO; }
     pthread_detach(gThread); pthread_mutex_unlock(&gLock); return YES;
 #endif
 }
@@ -200,18 +219,29 @@ finished:
     }
     pthread_mutex_unlock(&gLock);
     PyGILState_STATE gil = PyGILState_Ensure();
-    PyObject *stop = PyDict_GetItemString(PyEval_GetBuiltins(), "_cctvhost_stop_service");
-    if (!stop) stop = PyDict_GetItemString(PyEval_GetBuiltins(), "_ysp_stop_server");
-    PyObject *result = stop ? PyObject_CallNoArgs(stop) : NULL;
-    int truth = result ? PyObject_IsTrue(result) : 0;
-    BOOL stopped = truth > 0;
-    if (!result || truth < 0) PyErr_Clear();
-    Py_XDECREF(result); PyGILState_Release(gil);
+    PyObject *result = gServiceRuntime ? PyObject_CallMethod(gServiceRuntime, "stop_session", "d", 5.0) : NULL;
+    BOOL stopped = result && PyObject_IsTrue(result) > 0;
+    Py_XDECREF(result);
+    NSString *message = @"服务管理器尚未就绪，请稍后再试。";
+    if (!stopped && gServiceRuntime) {
+        PyObject *detail = PyObject_CallMethod(gServiceRuntime, "last_error", NULL);
+        const char *text = detail && PyUnicode_Check(detail) ? PyUnicode_AsUTF8(detail) : NULL;
+        if (text && *text) message = [NSString stringWithUTF8String:text];
+        Py_XDECREF(detail);
+    }
+    PyErr_Clear(); PyGILState_Release(gil);
     if (!stopped) {
-        if (error) *error = [NSError errorWithDomain:@"PyHost" code:6 userInfo:@{NSLocalizedDescriptionKey:@"插件停止回调缺失或停止失败；未伪报停止，Python 线程仍可能运行。"}];
+        if (error) *error = [NSError errorWithDomain:@"PyHost" code:6 userInfo:@{NSLocalizedDescriptionKey:message}];
         return NO;
     }
-    return YES;
+    // run_script has completed, but wait for the tiny native epilogue too.
+    for (NSUInteger attempt=0; attempt<100; attempt++) {
+        pthread_mutex_lock(&gLock); BOOL exited=gThreadExited; if(exited)gRunning=NO; pthread_mutex_unlock(&gLock);
+        if(exited)return YES;
+        [NSThread sleepForTimeInterval:0.01];
+    }
+    if (error) *error = [NSError errorWithDomain:@"PyHost" code:9 userInfo:@{NSLocalizedDescriptionKey:@"服务线程正在结束，请稍后重试。"}];
+    return NO;
 #endif
 }
 + (void)stop { NSError *error = nil; if (![self stopWithError:&error] && error) emitLog(error.localizedDescription); }

@@ -29,7 +29,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.17.5";
+static NSString *const kBuildTag = @"0.17.6";
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -96,6 +96,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property (nonatomic, assign) BOOL firstRender;
 @property (nonatomic, assign) BOOL fullscreen;
 @property (nonatomic, assign) BOOL stallReported;
+@property (nonatomic, assign) BOOL nativeStartupRecoveryUsed;
+@property (nonatomic, assign) BOOL serviceOperationInProgress;
 // 频道
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UICollectionView *channelGrid;
@@ -894,6 +896,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.routeName = route ? [NSString stringWithFormat:@"%@", [route[@"provider"] uppercaseString]] : @"自动";
     self.firstRender = NO;
     self.stallReported = NO;
+    self.nativeStartupRecoveryUsed = NO;
     self.retryCount = 0;
     self.playStartedAt = self.selectionRequestedAt?:CACurrentMediaTime();self.selectionRequestedAt=0;
     self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt];
@@ -1260,9 +1263,10 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     return [[LocalServiceReadiness alloc] initWithURL:c.URL timeout:20 requiresHealthJSON:[service[@"builtin"] boolValue]];
 }
 - (BOOL)startService:(NSDictionary *)service error:(NSError **)error {
+    if(self.serviceOperationInProgress){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:4 userInfo:@{NSLocalizedDescriptionKey:@"服务正在切换，请等待旧服务退出。"}];return NO;}
     if(PyHost.running){
         if([[ServiceStore activeIdentifier] isEqualToString:service[@"id"]]&&PyHost.port==[service[@"port"] integerValue])return YES;
-        if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:3 userInfo:@{NSLocalizedDescriptionKey:@"已有其他 Python 服务正在运行，请停止后重开 App 再切换服务。"}];return NO;
+        if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:3 userInfo:@{NSLocalizedDescriptionKey:@"已有其他 Python 服务正在运行，请在服务页切换到目标服务。"}];return NO;
     }
     NSString *dataDir=[ServiceStore dataDirectoryForService:service error:error];if(!dataDir.length)return NO;
     NSInteger port=[service[@"port"] integerValue];NSString *bind=[service[@"lan"] boolValue]?@"0.0.0.0":@"127.0.0.1";NSMutableArray *args=[NSMutableArray array];
@@ -1282,14 +1286,20 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     [self.pluginPage updateRunning:PyHost.running subscriptionCount:self.subscriptionURLs.count];return YES;
 }
 - (void)toggleService:(NSDictionary *)service enabled:(BOOL)enabled {
-    NSError *error=nil;
-    if(enabled){if(![self startService:service error:&error])[self showServiceError:error.localizedDescription];return;}
+    if(self.serviceOperationInProgress){[self showServiceError:@"服务正在停止或切换，请稍候。"];return;}
+    if(enabled && (!PyHost.running || ([[ServiceStore activeIdentifier] isEqualToString:service[@"id"]] && PyHost.port==[service[@"port"] integerValue]))){
+        NSError *error=nil;if(![self startService:service error:&error])[self showServiceError:error.localizedDescription];return;
+    }
+    self.serviceOperationInProgress=YES;
+    [self log:enabled?@"正在停止旧服务，随后切换到 %@":@"正在停止服务 %@",service[@"name"]];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSError *stopError = nil;
         BOOL stopped = [PyHost stopWithError:&stopError];
         dispatch_async(dispatch_get_main_queue(), ^{
+            self.serviceOperationInProgress=NO;
             if (!stopped) { [self showServiceError:stopError.localizedDescription]; return; }
             [self completeServiceStop];
+            if(enabled){NSError *startError=nil;if(![self startService:service error:&startError])[self showServiceError:startError.localizedDescription];}
         });
     });
 }
@@ -1301,7 +1311,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     }
     [self log:@"服务已请求停止，保留订阅供下次启动续播"];
 }
-- (void)showServiceError:(NSString *)message {UIAlertController *a=[UIAlertController alertControllerWithTitle:@"服务" message:message?:@"服务操作失败，请查看日志。" preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];UIViewController *top=self.navigationController.topViewController?:self;[top presentViewController:a animated:YES completion:nil];}
+- (void)showServiceError:(NSString *)message {[self log:@"服务操作失败：%@",message?:@"未知错误"];UIAlertController *a=[UIAlertController alertControllerWithTitle:@"服务" message:message?:@"服务操作失败，请查看日志。" preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];UIViewController *top=self.navigationController.topViewController?:self;[top presentViewController:a animated:YES completion:nil];}
 - (void)stopBuiltinPlugin {for(NSDictionary *service in [ServiceStore services])if([service[@"builtin"] boolValue]){[self toggleService:service enabled:NO];break;}}
 - (void)startBuiltinPlugin {for(NSDictionary *service in [ServiceStore services])if([service[@"builtin"] boolValue]){[self toggleService:service enabled:YES];break;}}
 
@@ -1763,8 +1773,8 @@ static NSCache *LogoCache(void) {
     if(!service){[self startRemoteURL:u generation:generation];return;}
     NSError *error=nil;
     if(!PyHost.running){
-        if([service[@"builtin"] boolValue]&&![PyHost startedOnce]){if(![self startService:service error:&error]){[self failRemoteReadiness:error generation:generation];return;}}
-        else{error=[NSError errorWithDomain:@"CCTVHostService" code:2 userInfo:@{NSLocalizedDescriptionKey:PyHost.startedOnce?@"本机服务已停止，本次进程不能再次启动，请重新打开 App。":@"请先在服务页启动此自定义 Python 服务。"}];[self failRemoteReadiness:error generation:generation];return;}
+        if([service[@"builtin"] boolValue]){if(![self startService:service error:&error]){[self failRemoteReadiness:error generation:generation];return;}}
+        else{error=[NSError errorWithDomain:@"CCTVHostService" code:2 userInfo:@{NSLocalizedDescriptionKey:@"请先在服务页启动此自定义 Python 服务。"}];[self failRemoteReadiness:error generation:generation];return;}
     }
     if(![[ServiceStore activeIdentifier] isEqualToString:service[@"id"]]||PyHost.port!=[service[@"port"] integerValue]){
         [self failRemoteReadiness:[NSError errorWithDomain:@"CCTVHostService" code:3 userInfo:@{NSLocalizedDescriptionKey:@"当前运行的服务与频道端口不一致，请检查服务配置。"}] generation:generation];return;
@@ -1992,6 +2002,15 @@ static NSCache *LogoCache(void) {
     [self attachVideoView];
     if (self.firstRender) { [timer invalidate]; return; }
     NSTimeInterval elapsed=CACurrentMediaTime()-self.playStartedAt;
+    if(!self.nativeTimeShiftActive && [self.startupTrace shouldRecoverMissingSetupAtTime:CACurrentMediaTime() alreadyRetried:self.nativeStartupRecoveryUsed failed:self.nativePlaybackFailed]){
+        self.nativeStartupRecoveryUsed=YES;
+        [self log:@"VDN 成功后持续未创建播放内核，使用全新实例恢复一次 · %@",self.startupTrace.summary];
+        self.playbackGeneration++;
+        [self stopPlayback];[self.nativePreloader cancel];self.sdkPlayer=nil;
+        self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt];
+        [self recordStartupStage:@"recovery"];self.stallReported=NO;
+        [self playViaSDK:self.channelID title:self.channelName];return;
+    }
     if(elapsed>=10&&!self.stallReported){
         self.stallReported=YES;BOOL vdnDone=self.startupTrace.stages[@"vdn"]!=nil;
         self.titleLabel.text=[NSString stringWithFormat:@"%@ · %@",self.channelName,vdnDone?@"等待视频数据":@"调度等待中"];
