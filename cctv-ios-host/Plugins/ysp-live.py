@@ -906,8 +906,7 @@ class Resolver :
         self .state .cache =load_cache (args .meta_json )
     def start_heartbeat (self ):
         def loop ():
-            while True :
-                time .sleep (max (self .args .heartbeat_interval ,1.0 ))
+            while not service_stop.wait(max(self.args.heartbeat_interval, 1.0)):
                 try :
                     self .send_heartbeat ()
                 except Exception :
@@ -940,10 +939,12 @@ class Resolver :
             return ('enqueued','')
     def refresh_worker_loop (self ):
         q =self .refresh_queue 
-        while True :
+        while not service_stop.is_set():
             with q .cond :
-                while not q .queued :
+                while not q .queued and not service_stop.is_set():
                     q .cond .wait ()
+                if service_stop.is_set():
+                    return
                 channel =q .queued .popleft ()
                 q .queued_channels .pop (channel ,None )
                 q .running_channel =channel 
@@ -2509,6 +2510,10 @@ def parse_catchup_query (query_str :str )->tuple [int ,int ]|None :
             end_ts =max (start_ts +60 ,min (start_ts +7200 ,now ))
         return start_ts ,end_ts 
     return None 
+service_stop = threading.Event()
+_cache_fill_slots = threading.BoundedSemaphore(1)
+_channel_refresh_slots = threading.BoundedSemaphore(4)
+
 _inflight_refresh :dict [str ,threading .Event ]={}
 _inflight_lock =threading .Lock ()
 def coalesce_refresh (slug :str ,refresh_fn ,timeout =None ):
@@ -2517,6 +2522,8 @@ def coalesce_refresh (slug :str ,refresh_fn ,timeout =None ):
             ev =_inflight_refresh [slug ]
             wait =True 
         else :
+            if service_stop.is_set() or len(_inflight_refresh) >= 4:
+                return
             ev =threading .Event ()
             _inflight_refresh [slug ]=ev 
             wait =False 
@@ -2553,7 +2560,7 @@ class ApiFlowLimiter :
 global_flow_limiter =ApiFlowLimiter ()
 class TsSegmentCache :
     def __init__ (self ,max_mb :int =100 ,max_age_sec :int =180 ):
-        self .max_bytes =max_mb *1024 *1024 
+        self .max_bytes =max(0, max_mb) *1024 *1024
         self .max_age =max_age_sec 
         self .lock =threading .Lock ()
         self .cache :dict [str ,tuple [bytes ,dict ,float ]]={}
@@ -2581,7 +2588,7 @@ class TsSegmentCache :
             return data ,headers 
     def set (self ,key :str ,data :bytes ,headers :dict ):
         with self .lock :
-            if len (data )>self .max_bytes :
+            if not data or not self.max_bytes or len (data )>self .max_bytes :
                 return 
             if key in self .cache :
                 old =self .cache .pop (key )
@@ -2591,7 +2598,7 @@ class TsSegmentCache :
                 except ValueError :
                     pass 
             now =time .time ()
-            while (self .curr_bytes +len (data )>self .max_bytes )and self .order :
+            while (self .curr_bytes +len (data )>self .max_bytes or len(self.cache) >= 512)and self .order :
                 old_key =self .order .popleft ()
                 old_val =self .cache .pop (old_key ,None )
                 if old_val :
@@ -2599,6 +2606,12 @@ class TsSegmentCache :
             self .cache [key ]=(data ,headers ,now +self .max_age )
             self .order .append (key )
             self .curr_bytes +=len (data )
+    def clear(self):
+        with self.lock:
+            self.cache.clear()
+            self.order.clear()
+            self.curr_bytes = 0
+
     def stats (self )->dict :
         with self .lock :
             total =max (1 ,self .hits +self .misses )
@@ -2609,7 +2622,7 @@ class TsSegmentCache :
             'misses':self .misses ,
             'hit_rate':f"{round (self .hits /total *100 ,1 )}%"
             }
-global_ts_cache =TsSegmentCache (max_mb =200 )
+global_ts_cache =TsSegmentCache (max_mb =32 )
 class ChannelDirectory :
     def __init__ (self ):
         self .lock =threading .Lock ()
@@ -2792,20 +2805,26 @@ def playlist_reload_interval(playlist):
         return 2.0
     return max(0.5, min(3.0, float(match.group(1)) / 2.0))
 
-def refresh_loop (ch ):
+def refresh_loop(ch):
+    try:
+        _refresh_loop(ch)
+    finally:
+        _channel_refresh_slots.release()
+
+def _refresh_loop (ch ):
     log (f'[{ch .slug }] {defn_label (ch .defn )} 后台拉取启动 [{ch .mode }]',min_interval =10.0 )
     fails =0 
     interval = playlist_reload_interval(ch.last_built_playlist or ch.bk_playlist)
     if time.time() - ch.last_ok < interval:
         build_playlist(ch, holdback=True)
-        time.sleep(interval)
-    while time .time ()-ch .last_access <IDLE_TIMEOUT :
+        service_stop.wait(interval)
+    while not service_stop.is_set() and time .time ()-ch .last_access <IDLE_TIMEOUT :
         ok =refresh_once (ch )
         if ok :
             build_playlist (ch ,holdback =True )
         fails =0 if ok else fails +1 
         interval = playlist_reload_interval(ch.last_built_playlist or ch.bk_playlist)
-        time.sleep(interval if fails < 3 else min(6.0, interval * 2))
+        service_stop.wait(interval if fails < 3 else min(6.0, interval * 2))
     log (f'[{ch .slug }] 空闲超时，已停止后台拉取',min_interval =10.0 )
 def ensure_channel (ch ):
     now =time .time ()
@@ -2836,9 +2855,13 @@ def ensure_channel (ch ):
     try :
         if need_fetch :
             coalesce_refresh (ch .slug ,lambda :refresh_once (ch ),timeout =5.0 )
-        if thread_dead :
-            ch .thread =threading .Thread (target =refresh_loop ,args =(ch ,),daemon =True )
-            ch .thread .start ()
+        if thread_dead and not service_stop.is_set() and _channel_refresh_slots.acquire(blocking=False):
+            try:
+                ch.thread = threading.Thread(target=refresh_loop, args=(ch,), daemon=True)
+                ch.thread.start()
+            except BaseException:
+                _channel_refresh_slots.release()
+                raise
     finally :
         with ch .lock :
             ch ._starting =False 
@@ -2877,7 +2900,7 @@ def trigger_background_refresh (ch ):
     def _do ():
         if refresh_once (ch ):
             build_playlist (ch ,holdback =True )
-    threading .Thread (target =coalesce_refresh ,args =(ch .slug ,_do ),daemon =True ).start ()
+    coalesce_refresh(ch.slug, _do, timeout=0)
 CHANNEL_MAP :dict [str ,Channel ]={c [0 ]:Channel (*c )for c in DEFAULT_CHANNELS }
 FORCE_BK ={'cctv11','cctv12','cctv14','cctv15','cctv16','cctv17','cctvfyjc','cctvdyjc','cctvhjjc'}
 for _s in FORCE_BK :
@@ -3171,6 +3194,8 @@ class Handler (BaseHTTPRequestHandler ):
                     conn =http .client .HTTPSConnection (host ,port ,timeout =30 ,context =ssl .create_default_context ())
                 else :
                     conn =http .client .HTTPConnection (host ,port ,timeout =30 )
+                cache_slot = False
+                response_started = False
                 try :
                     req_method ='HEAD'if head_only else 'GET'
                     conn .request (req_method ,target ,headers =headers )
@@ -3180,6 +3205,7 @@ class Handler (BaseHTTPRequestHandler ):
                         kl =k .lower ()
                         if kl in ('content-type','content-range','accept-ranges','content-length','location'):
                             resp_headers_to_pass [k ]=v 
+                    response_started = True
                     self .send_response (resp .status )
                     for k ,v in resp_headers_to_pass .items ():
                         self .send_header (k ,v )
@@ -3189,13 +3215,15 @@ class Handler (BaseHTTPRequestHandler ):
                     self .end_headers ()
                     if not head_only :
                         body_buffer =bytearray ()
-                        is_oversized =False 
+                        cache_limit = min(global_ts_cache.max_bytes, 4 * 1024 * 1024)
+                        cache_slot = bool(cache_limit and not range_header and resp.status == 200 and _cache_fill_slots.acquire(blocking=False))
+                        is_oversized = not cache_slot
                         expected_len =None 
                         cl_val =resp_headers_to_pass .get ('Content-Length')or resp_headers_to_pass .get ('content-length')
                         if cl_val :
                             try :
                                 expected_len =int (cl_val )
-                                if expected_len >35 *1024 *1024 :
+                                if expected_len >cache_limit :
                                     is_oversized =True 
                             except ValueError :
                                 pass 
@@ -3205,7 +3233,7 @@ class Handler (BaseHTTPRequestHandler ):
                                 break 
                             self .wfile .write (chunk )
                             if resp .status ==200 and not is_oversized :
-                                if len (body_buffer )+len (chunk )<=35 *1024 *1024 :
+                                if len (body_buffer )+len (chunk )<=cache_limit :
                                     body_buffer .extend (chunk )
                                 else :
                                     is_oversized =True 
@@ -3214,12 +3242,16 @@ class Handler (BaseHTTPRequestHandler ):
                             if expected_len is None or len (body_buffer )==expected_len :
                                 global_ts_cache .set (real_url ,bytes (body_buffer ),resp_headers_to_pass )
                 finally :
+                    if cache_slot:
+                        _cache_fill_slots.release()
                     conn .close ()
             except (BrokenPipeError ,ConnectionResetError ):
                 pass 
             except Exception as e :
                 try :
-                    self .send_error (502 ,f'Upstream CDN error: {e }')
+                    if not locals().get('response_started', False):
+                        self.send_error(502, f'Upstream CDN error: {e}')
+                    self.close_connection = True
                 except Exception :
                     pass 
             return 
@@ -3235,8 +3267,8 @@ class Handler (BaseHTTPRequestHandler ):
             try :
                 req =urllib .request .Request (target ,headers ={'User-Agent':UA ,'Accept':'*/*'})
                 with urllib .request .urlopen (req ,timeout =10.0 )as resp :
-                    data =resp .read (35 *1024 *1024 +1 )
-                    if len (data )>35 *1024 *1024 :
+                    data =resp .read (cache_limit +1 )
+                    if len (data )>cache_limit :
                         self ._send (502 ,'upstream segment too large\n',head_only =head_only )
                         return 
                     self ._send (resp .status ,data ,resp .headers .get ('Content-Type','video/mp2t'),head_only =head_only )
@@ -3339,7 +3371,7 @@ def init_resolver ():
         return 
     log ('[系统] 正在初始化设备协议并发池…')
     retry_count =0 
-    while True :
+    while not service_stop.is_set():
         try :
             resolver .ensure_slot_session (0 )
             set_resolver_ready (True )
@@ -3352,7 +3384,10 @@ def init_resolver ():
             if 'HTTP 400'in str (e ):
                 resolver .rotate_device_on_400 ('init:'+str (e )[:60 ])
             backoff =min (15.0 * (1.5 ** min (retry_count - 1 ,4 )),60.0 )
-            time .sleep (backoff )
+            if retry_count >= 3:
+                backoff = 300.0
+                log("[系统] 注册连续失败，冷却 300 秒；1080p 回退继续可用")
+            service_stop.wait(backoff)
 companion_proc =None 
 def is_port_listening (port :int ,host :str ='127.0.0.1')->bool :
     try :
@@ -3431,12 +3466,49 @@ active_http_server = None
 stable_playback = False
 
 
+class BoundedHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    block_on_close = False
+    max_workers = 12
+    client_timeout = 10.0
+
+    def __init__(self, *args, **kwargs):
+        self.worker_slots = threading.BoundedSemaphore(self.max_workers)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, address):
+        request.settimeout(self.client_timeout)
+        if not self.worker_slots.acquire(blocking=False):
+            try:
+                request.sendall(b"HTTP/1.0 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, address)
+        except BaseException:
+            self.worker_slots.release()
+            raise
+
+    def process_request_thread(self, request, address):
+        try:
+            super().process_request_thread(request, address)
+        finally:
+            self.worker_slots.release()
+
+
 def stop_host_server():
     """Stop serve_forever from another thread and close its listening socket."""
     global active_http_server
     server = active_http_server
     if server is None:
         return False
+    service_stop.set()
+    if resolver is not None:
+        with resolver.refresh_queue.cond:
+            resolver.refresh_queue.cond.notify_all()
+    global_ts_cache.clear()
     server.shutdown()  # ThreadingHTTPServer requires a different caller thread.
     server.server_close()
     active_http_server = None
@@ -3469,8 +3541,8 @@ def main ():
     stable_playback = args.stable_playback
     server_port =args .port 
     engine_port =args .engine_port 
-    if args .cache_mb >0 :
-        global_ts_cache =TsSegmentCache (max_mb =args .cache_mb )
+    service_stop.clear()
+    global_ts_cache =TsSegmentCache (max_mb =args .cache_mb )
     here =os .path .dirname (os .path .abspath (__file__ ))
     if not args .no_engine :
         start_companion_engine (here ,engine_port )
@@ -3518,7 +3590,7 @@ def main ():
         resolver .start_heartbeat ()
         resolver .start_refresh_worker ()
         threading .Thread (target =init_resolver ,daemon =True ,name ='engine-init').start ()
-    srv =ThreadingHTTPServer ((args .bind ,args .port ),Handler )
+    srv =BoundedHTTPServer ((args .bind ,args .port ),Handler )
     active_http_server = srv
     srv .daemon_threads = True
     srv .block_on_close = False
@@ -3544,6 +3616,11 @@ def main ():
     except KeyboardInterrupt :
         log ('[系统] 服务已停止')
     finally :
+        service_stop.set()
+        with resolver.refresh_queue.cond:
+            resolver.refresh_queue.cond.notify_all()
+        srv.server_close()
+        global_ts_cache.clear()
         stop_companion_engine ()
 if __name__ =='__main__':
     main ()

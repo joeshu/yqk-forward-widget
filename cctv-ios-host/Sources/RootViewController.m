@@ -29,7 +29,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.17.4";
+static NSString *const kBuildTag = @"0.17.5";
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -1284,7 +1284,16 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 - (void)toggleService:(NSDictionary *)service enabled:(BOOL)enabled {
     NSError *error=nil;
     if(enabled){if(![self startService:service error:&error])[self showServiceError:error.localizedDescription];return;}
-    if(![PyHost stopWithError:&error]){[self showServiceError:error.localizedDescription];return;}
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSError *stopError = nil;
+        BOOL stopped = [PyHost stopWithError:&stopError];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!stopped) { [self showServiceError:stopError.localizedDescription]; return; }
+            [self completeServiceStop];
+        });
+    });
+}
+- (void)completeServiceStop {
     [self.readyLocalOrigins removeAllObjects];
     for(LocalServiceReadiness *probe in self.subscriptionReadiness.allValues)[probe cancel];[self.subscriptionReadiness removeAllObjects];
     if([self localServiceForURL:[NSURL URLWithString:self.currentRemoteURL?:@""]]){

@@ -13,6 +13,7 @@ static pthread_mutex_t gLock = PTHREAD_MUTEX_INITIALIZER;
 static BOOL gRunning = NO;
 static BOOL gStartedOnce = NO;
 static BOOL gThreadExited = NO;
+static BOOL gInterpreterReady = NO;
 static NSInteger gPort = 0;
 static pthread_t gThread;
 static NSString *gScriptPath;
@@ -78,6 +79,7 @@ static void *pyThread(void *unused) {
             emitLog([NSString stringWithFormat:@"Python 初始化失败: %s", status.err_msg ?: "unknown"]);
             goto finished;
         }
+        pthread_mutex_lock(&gLock); gInterpreterReady = YES; pthread_mutex_unlock(&gLock);
         PyObject *sysPath = PySys_GetObject("path");
         PyObject *scriptDir = PyUnicode_FromString(gScriptPath.stringByDeletingLastPathComponent.UTF8String);
         if (sysPath && scriptDir) PyList_Insert(sysPath, 0, scriptDir);
@@ -115,10 +117,13 @@ static void *pyThread(void *unused) {
         PyObject *runPath = runpy ? PyObject_GetAttrString(runpy, "run_path") : NULL;
         PyObject *path = PyUnicode_FromString(gScriptPath.UTF8String);
         PyObject *kw = Py_BuildValue("{s:s}", "run_name", "__main__");
-        PyObject *ns = (runPath && path && kw) ? PyObject_Call(runPath, PyTuple_Pack(1, path), kw) : NULL;
+        PyObject *callArgs = path ? PyTuple_Pack(1, path) : NULL;
+        PyObject *ns = (runPath && callArgs && kw) ? PyObject_Call(runPath, callArgs, kw) : NULL;
+        Py_XDECREF(callArgs); Py_XDECREF(mainDict);
         Py_XDECREF(runpy); Py_XDECREF(runPath); Py_XDECREF(path); Py_XDECREF(kw);
         if (ns) { gPluginNamespace = ns; emitLog(@"Python 插件服务已退出"); }
         else { PyErr_Print(); emitLog(@"Python 插件异常退出（详见上方日志）"); }
+        PyEval_SaveThread(); // Background daemon threads may still need the GIL; never finalize here.
     }
 finished:
     pthread_mutex_lock(&gLock); gRunning = NO; gThreadExited = YES; pthread_mutex_unlock(&gLock);
@@ -188,6 +193,11 @@ finished:
 #else
     pthread_mutex_lock(&gLock);
     if (!gRunning) { BOOL exited = gThreadExited || !gStartedOnce; pthread_mutex_unlock(&gLock); return exited; }
+    if (!gInterpreterReady) {
+        pthread_mutex_unlock(&gLock);
+        if (error) *error = [NSError errorWithDomain:@"PyHost" code:7 userInfo:@{NSLocalizedDescriptionKey:@"Python 正在初始化，请稍后停止服务。"}];
+        return NO;
+    }
     pthread_mutex_unlock(&gLock);
     PyGILState_STATE gil = PyGILState_Ensure();
     PyObject *stop = PyDict_GetItemString(PyEval_GetBuiltins(), "_cctvhost_stop_service");
