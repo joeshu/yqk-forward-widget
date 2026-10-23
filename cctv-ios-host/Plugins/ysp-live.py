@@ -2785,18 +2785,27 @@ def refresh_once (ch ):
         ch .last_error =('%s: %s'%(type (e ).__name__ ,e ))[:120 ]
         log (f'[{ch .slug }] {defn_label (ch .defn )} 刷新异常: {ch .last_error }',min_interval =15.0 )
         return False 
+def playlist_reload_interval(playlist):
+    """Reload within half a target segment, rather than holding short live lists 15s."""
+    match = re.search(r'^#EXT-X-TARGETDURATION:([0-9.]+)', playlist or '', re.M)
+    if not match:
+        return 2.0
+    return max(0.5, min(3.0, float(match.group(1)) / 2.0))
+
 def refresh_loop (ch ):
     log (f'[{ch .slug }] {defn_label (ch .defn )} 后台拉取启动 [{ch .mode }]',min_interval =10.0 )
     fails =0 
-    if time .time ()-ch .last_ok <REFRESH_INTERVAL :
-        build_playlist (ch ,holdback =True )
-        time .sleep (REFRESH_INTERVAL )
+    interval = playlist_reload_interval(ch.last_built_playlist or ch.bk_playlist)
+    if time.time() - ch.last_ok < interval:
+        build_playlist(ch, holdback=True)
+        time.sleep(interval)
     while time .time ()-ch .last_access <IDLE_TIMEOUT :
         ok =refresh_once (ch )
         if ok :
             build_playlist (ch ,holdback =True )
         fails =0 if ok else fails +1 
-        time .sleep (REFRESH_INTERVAL if fails <3 else 30 )
+        interval = playlist_reload_interval(ch.last_built_playlist or ch.bk_playlist)
+        time.sleep(interval if fails < 3 else min(6.0, interval * 2))
     log (f'[{ch .slug }] 空闲超时，已停止后台拉取',min_interval =10.0 )
 def ensure_channel (ch ):
     now =time .time ()
@@ -3036,7 +3045,7 @@ class Handler (BaseHTTPRequestHandler ):
             }
             self ._send (200 ,json .dumps (health_data ,ensure_ascii =False ,indent =2 ),'application/json; charset=utf-8',head_only =head_only )
             return 
-        if path =='/all.m3u':
+        if path in ('/all.m3u', '/all.m3u8', '/m3u'):
             host =self .headers .get ('Host',f'localhost:{server_port }')
             proto =self .headers .get ('X-Forwarded-Proto','http').split (',')[0 ].strip ().lower ()or 'http'
             qs =urllib .parse .parse_qs (parts .query )
@@ -3252,7 +3261,16 @@ class Handler (BaseHTTPRequestHandler ):
                     return 
                 except Exception as e :
                     log (f'[{canonical }] 时移获取失败: {e }，回退直播',min_interval =10.0 )
-            if canonical in active_backend_channels and resolver_ready ()and (resolver is not None ):
+            # Switching from bk to device changes codecs and HLS sequence space.
+            # A one-off DISCONTINUITY tag cannot make those independent timelines
+            # continuous for AVPlayer. Pin an active fallback session on iOS.
+            now_access = time.time()
+            with ch.lock:
+                pinned_fallback = (stable_playback and getattr(ch, 'last_m3u8_source', None) == 'bk'
+                                   and now_access - ch.last_access < IDLE_TIMEOUT)
+                if stable_playback and now_access - ch.last_access >= IDLE_TIMEOUT:
+                    ch.last_m3u8_source = None
+            if not pinned_fallback and canonical in active_backend_channels and resolver_ready ()and (resolver is not None ):
                 if not resolver .is_channel_in_cooldown (canonical ):
                     try :
                         host =self .headers .get ('Host',f'localhost:{server_port }')
@@ -3289,14 +3307,14 @@ class Handler (BaseHTTPRequestHandler ):
             with ch .lock :
                 cached_pl =ch .last_built_playlist 
                 cached_age =now_ts -ch .last_built_time 
-            if cached_pl and cached_age <15.0 and ('#EXTM3U'in cached_pl ):
+            if cached_pl and cached_age <playlist_reload_interval(cached_pl) and ('#EXTM3U'in cached_pl ):
                 with ch .lock :
                     prev_src =getattr (ch ,'last_m3u8_source',None )
                     ch .last_m3u8_source ='bk'
                 if prev_src =='device':
                     cached_pl =inject_hls_discontinuity (cached_pl )
                 self ._send (200 ,cached_pl ,'application/vnd.apple.mpegurl',head_only =head_only ,extra_headers ={'X-SWR':'HIT'})
-                if cached_age >6.0 :
+                if cached_age >playlist_reload_interval(cached_pl) / 2 :
                     trigger_background_refresh (ch )
                 return 
             ensure_channel (ch )
@@ -3410,6 +3428,7 @@ except Exception :
     pass 
 # HTTP server owned by this module; PyHost calls stop_host_server through runpy globals.
 active_http_server = None
+stable_playback = False
 
 
 def stop_host_server():
@@ -3430,7 +3449,7 @@ _host_builtins._ysp_stop_server = stop_host_server
 
 def main ():
     global active_http_server
-    global resolver ,server_port ,engine_port ,global_channel_dir ,global_ts_cache 
+    global resolver ,server_port ,engine_port ,global_channel_dir ,global_ts_cache ,stable_playback
     if os.name == 'nt':
         os.system('') 
     ap =argparse .ArgumentParser (description ='央视频全频道直播代理（ysp-live v9.5）')
@@ -3445,7 +3464,9 @@ def main ():
     ap .add_argument ('--engine-port',type =int ,default =8787 ,help ='Web WASM 引擎端口 (默认 8787)')
     ap .add_argument ('--timeout',type =float ,default =10.0 ,help ='设备协议 HTTP 超时秒数 (默认 10, 注册失败时更快回退 1080p)')
     ap .add_argument ('--no-engine',action ='store_true',help ='不启动 Web WASM 伴生引擎')
+    ap.add_argument('--stable-playback', action='store_true', help='Keep the fallback source for an active viewing session; avoid mid-play codec/sequence changes')
     args =ap .parse_args ()
+    stable_playback = args.stable_playback
     server_port =args .port 
     engine_port =args .engine_port 
     if args .cache_mb >0 :

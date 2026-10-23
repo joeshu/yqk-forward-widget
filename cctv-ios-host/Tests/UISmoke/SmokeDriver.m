@@ -19,6 +19,10 @@
 - (void)toggleLog;
 - (void)applyFilter;
 - (void)selectChannel:(NSDictionary *)channel;
+- (void)fetchSubscription:(NSString *)url silent:(BOOL)silent;
+- (void)beginPlaybackPriority;
+- (void)togglePlayPause;
+- (void)avItemStalled:(NSNotification *)notification;
 - (void)playRemote:(NSDictionary *)channel;
 - (void)playChannel:(NSDictionary *)channel route:(NSDictionary *)route;
 - (void)importPlaylistData:(NSData *)data name:(NSString *)name;
@@ -72,7 +76,7 @@ static void next(NSArray *steps, NSUInteger index) {
           id step=steps[index];
           if([step isKindOfClass:NSDictionary.class]){
               BOOL (^ready)(void)=step[@"until"];
-              if(waitingIndex!=index){waitingIndex=index;waitingDeadline=[NSDate dateWithTimeIntervalSinceNow:12];}
+              if(waitingIndex!=index){waitingIndex=index;waitingDeadline=[NSDate dateWithTimeIntervalSinceNow:[step[@"timeout"] doubleValue]?:12];}
               if(!ready()&&[waitingDeadline timeIntervalSinceNow]>0){next(steps,index);return;}
               ((dispatch_block_t)step[@"run"])();
           }else ((dispatch_block_t)step)();
@@ -106,6 +110,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block id retainedWrapper = nil;
       __block id oldWrapper = nil;
       __block NSInteger playCount = 0;
+      __block AVPlayer *hlsPlayer;
       NSArray *steps = @[
           ^{
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
@@ -317,7 +322,41 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[root valueForKey:@"activeTab"] integerValue]==1,@"misrouted subscription returns to channel page");
           },
           ^{
+            NSArray *args=NSProcessInfo.processInfo.arguments;NSString *port=args[[args indexOfObject:@"--smoke-port"]+1];
+            NSString *feed=[NSString stringWithFormat:@"http://127.0.0.1:%@/all.m3u",port];
+            [ProfileStore update:feed values:@{@"cachedChannels":@[]}];
+            [root beginPlaybackPriority];[root setValue:@NO forKey:@"firstRender"];
+            [root fetchSubscription:feed silent:NO];
+            check([root valueForKey:@"subscriptionReadiness"]!=nil,@"manual refresh remains available during startup");
+          },
+          @{@"until":^BOOL{
+            NSArray *args=NSProcessInfo.processInfo.arguments;NSString *port=args[[args indexOfObject:@"--smoke-port"]+1];
+            return [[ProfileStore metadata:[NSString stringWithFormat:@"http://127.0.0.1:%@/all.m3u",port]][@"cachedChannels"] count]>0;
+          },@"run":^{
+            NSArray *args=NSProcessInfo.processInfo.arguments;NSString *port=args[[args indexOfObject:@"--smoke-port"]+1];
+            NSString *feed=[NSString stringWithFormat:@"http://127.0.0.1:%@/all.m3u",port];
+            check([[ProfileStore metadata:feed][@"cachedChannels"] count]>0,@"manual playlist refresh succeeds without a first frame");
+            NSString *url=[NSString stringWithFormat:@"http://127.0.0.1:%@/hls/live.m3u8",port];
+            [root playRemote:@{@"id":url,@"name":@"HLS delayed segment test",@"remoteURL":url}];
+          }},
+          @{@"timeout":@30,@"until":^BOOL{
+            AVPlayer *p=[root valueForKey:@"avPlayer"];
+            return [[root valueForKey:@"firstRender"] boolValue] && CMTimeGetSeconds(p.currentTime)>=8;
+          },@"run":^{
+            hlsPlayer=[root valueForKey:@"avPlayer"];
+            check(CMTimeGetSeconds(hlsPlayer.currentTime)>=8,@"HLS timeline advances past delayed segment after first frame");
+            check(hlsPlayer.automaticallyWaitsToMinimizeStalling,@"AVPlayer handles rebuffering automatically");
+            [root togglePlayPause];
+            [root avItemStalled:[NSNotification notificationWithName:AVPlayerItemPlaybackStalledNotification object:hlsPlayer.currentItem]];
+          }},
+          ^{
+            check(![[root valueForKey:@"remotePlaybackWanted"] boolValue] && hlsPlayer.rate==0,@"buffer recovery cannot undo user pause");
+            [root togglePlayPause];
+          },
+          ^{
+            check([[root valueForKey:@"remotePlaybackWanted"] boolValue],@"user can resume same item after buffering");
             [root performSelector:NSSelectorFromString(@"stopPlayback")];
+            check(hlsPlayer.currentItem==nil,@"switch/stop detaches HLS observers and item");
             NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];NSString *port=arguments[at+1];NSString *url=[NSString stringWithFormat:@"http://127.0.0.1:%@/video.mp4",port];
             [root previewChannel:@{@"remoteURL":url}];
             check([root valueForKey:@"previewPlayer"]!=nil,@"manual preview starts without a formal playback session");

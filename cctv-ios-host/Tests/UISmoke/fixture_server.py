@@ -2,14 +2,24 @@
 import base64
 import http.server
 import json
+import io
+import threading
+import time
+import zipfile
 import pathlib
 import sys
 
 VIDEO = base64.b64decode(pathlib.Path(__file__).with_name("video_fixture.b64").read_text())
 
 
+HLS_ZIP = zipfile.ZipFile(io.BytesIO(base64.b64decode(pathlib.Path(__file__).with_name("hls_fixture.b64").read_text())))
+HLS_FILES = {name: HLS_ZIP.read(name) for name in HLS_ZIP.namelist()}
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     health_count = 0
+    segment_lock = threading.Lock()
+    segment_delayed = False
 
     def log_message(self, *_):
         pass
@@ -25,6 +35,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             content_type = "audio/x-mpegurl"
             data = (f'#EXTM3U\n#EXTINF:-1 tvg-id="cctv1",Startup Test\n'
                     f'http://127.0.0.1:{self.server.server_port}/video.mp4\n').encode()
+        elif self.path.startswith("/hls/"):
+            name = self.path.removeprefix("/hls/")
+            if name not in HLS_FILES:
+                self.send_error(404)
+                return
+            content_type = "application/vnd.apple.mpegurl" if name.endswith(".m3u8") else "video/mp2t"
+            data = HLS_FILES[name]
+            with type(self).segment_lock:
+                delay = name == "seg06.ts" and not type(self).segment_delayed
+                if delay:
+                    type(self).segment_delayed = True
+            if delay:
+                print("HLS segment delay begin", flush=True)
+                time.sleep(8)
+                print("HLS segment delay complete", flush=True)
         elif self.path == "/video.mp4":
             content_type = "video/mp4"
             data = VIDEO

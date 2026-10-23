@@ -27,7 +27,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.17.1";
+static NSString *const kBuildTag = @"0.17.2";
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -69,6 +69,9 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property (nonatomic, strong) id initialCDNPreference;
 @property (nonatomic, assign) BOOL customCDNPreference;
 @property (nonatomic, assign) BOOL avLayerObserved;
+@property (nonatomic) BOOL avKeepUpObserved;
+@property (nonatomic) BOOL remotePlaybackWanted;
+@property (nonatomic) NSTimeInterval playbackPriorityUntil;
 @property (nonatomic, strong) AVPlayer *avPlayer;
 @property (nonatomic, strong) AVPlayerLayer *avLayer;
 @property (nonatomic, strong) NSMutableArray<NSDictionary *> *subscriptions;
@@ -947,6 +950,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (void)stopPlayback {
     self.nativeStartupTuner=nil; // Pending tuning blocks also check the playback generation.
+    self.remotePlaybackWanted=NO;
+    if(self.avKeepUpObserved){[self.avPlayer.currentItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp" context:kAVItemStatusContext];self.avKeepUpObserved=NO;}
     [self.playbackReadiness cancel];self.playbackReadiness=nil;
     if(self.avLayerObserved){[self.avLayer removeObserver:self forKeyPath:@"readyForDisplay" context:kAVLayerFrameContext];self.avLayerObserved=NO;}
 
@@ -969,6 +974,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     }
     if (self.avPlayer) {
         [NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemFailedToPlayToEndTimeNotification object:self.avPlayer.currentItem];
+        [NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemPlaybackStalledNotification object:self.avPlayer.currentItem];
         [self.avPlayer pause];
         AVPlayerItem *previousItem=self.avPlayer.currentItem;
         @try { [previousItem removeObserver:self forKeyPath:@"status" context:kAVItemStatusContext]; } @catch (NSException *e) {}
@@ -1005,7 +1011,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (void)togglePlayPause {
     if (self.avPlayer) {
-        BOOL playing = self.avPlayer.rate > 0;
+        BOOL playing=self.remotePlaybackWanted;
+        self.remotePlaybackWanted=!playing;
         if (playing) [self.avPlayer pause]; else [self.avPlayer play];
         [self.playPauseBtn setTitle:(playing ? @"继续" : @"暂停") forState:UIControlStateNormal];
         return;
@@ -1231,7 +1238,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     NSString *dataDir=[ServiceStore dataDirectoryForService:service error:error];if(!dataDir.length)return NO;
     NSInteger port=[service[@"port"] integerValue];NSString *bind=[service[@"lan"] boolValue]?@"0.0.0.0":@"127.0.0.1";NSMutableArray *args=[NSMutableArray array];
     if([service[@"builtin"] boolValue]){
-        [args addObjectsFromArray:@[[NSString stringWithFormat:@"%ld",(long)port],@"--bind",bind,@"--no-engine",@"--data-dir",dataDir,@"--cache-mb",@"32",@"--links-per-device",@"2",@"--zap-debounce",@"15"]];
+        [args addObjectsFromArray:@[[NSString stringWithFormat:@"%ld",(long)port],@"--bind",bind,@"--no-engine",@"--data-dir",dataDir,@"--cache-mb",@"32",@"--links-per-device",@"2",@"--zap-debounce",@"15",@"--stable-playback"]];
     }else{
         for(NSString *part in [service[@"arguments"]?:@"" componentsSeparatedByString:@"|"]){if(!part.length)continue;NSString *arg=[part stringByReplacingOccurrencesOfString:@"{port}" withString:[NSString stringWithFormat:@"%ld",(long)port]];arg=[arg stringByReplacingOccurrencesOfString:@"{bind}" withString:bind];[args addObject:[arg stringByReplacingOccurrencesOfString:@"{dataDir}" withString:dataDir]];}
     }
@@ -1378,7 +1385,7 @@ static NSCache *LogoCache(void) {
     if (!url.length) return;
     UIImage *cached = [LogoCache() objectForKey:url];
     if (cached) { iv.image = cached; return; }
-    if(self.channelID.length&&!self.firstRender)return;
+    if(CACurrentMediaTime()<self.playbackPriorityUntil)return;
     __weak UIImageView *weakIV = iv;
     NSURLSessionDataTask *logoTask=[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:url] completionHandler:^(NSData *data, NSURLResponse *r, NSError *e) {
         if (!data.length) return;
@@ -1457,14 +1464,14 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)onPullRefresh {
-    if(self.subscriptionCatalog||self.activeTab==3){for(NSString *u in self.subscriptionURLs.allObjects)[self fetchSubscription:u silent:YES];}
+    if(self.subscriptionCatalog||self.activeTab==3){for(NSString *u in self.subscriptionURLs.allObjects)[self fetchSubscription:u silent:NO];}
     else{[self.epgCache removeAllObjects];[self saveEPGCache];if(self.firstRender)[self refreshNowNext];[self applyFilter];}
     [self.table.refreshControl endRefreshing];[self.channelGrid.refreshControl endRefreshing];
 }
 
 - (void)loadEPGForChannel:(NSString *)cid section:(NSIndexPath *)ip {
     if (!CCTVBoolPreference(@"autoLoadEPG",YES)) return;
-    if(self.channelID.length&&!self.firstRender)return;
+    if(CACurrentMediaTime()<self.playbackPriorityUntil)return;
     if (!cid.length || self.epgCache[cid] || [self.epgInflight containsObject:cid]) return;
     NSDictionary *channel=[self channelWithID:cid];NSString *xmlSource=[ProfileStore epgSourceForChannel:channel];
     if(xmlSource.length){NSArray *rows=[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:channel]];[self cacheXMLRows:rows channel:cid];if(self.epgCache[cid])return;}
@@ -1582,7 +1589,7 @@ static NSCache *LogoCache(void) {
 - (void)fetchSubscription:(NSString *)urlString silent:(BOOL)silent {
     NSString *sourceKey=[ProfileStore isHTTP:urlString]?[self stableURLKey:urlString]:([ProfileStore isSource:urlString]?urlString:nil);
     if (!sourceKey.length) return;
-    if(self.channelID.length&&!self.firstRender){[self.deferredLocalSubscriptions addObject:sourceKey];return;}
+    if(silent && CACurrentMediaTime()<self.playbackPriorityUntil){[self.deferredLocalSubscriptions addObject:sourceKey];[ProfileStore update:sourceKey values:@{@"status":@"起播中，稍后自动刷新"}];return;}
     [ProfileStore update:sourceKey values:@{@"status":@"刷新中…"}];
     if(![ProfileStore isHTTP:sourceKey]){NSString *text=[ProfileStore metadata:sourceKey][@"text"];[self applyPlaylistText:text source:sourceKey];return;}
     NSURL *sourceURL=[NSURL URLWithString:sourceKey];NSDictionary *localService=[self localServiceForURL:sourceURL];
@@ -1622,7 +1629,7 @@ static NSCache *LogoCache(void) {
             if ([weakSelf.subscriptionRequestVersions[sourceKey] unsignedIntegerValue] != requestVersion) return;
             [weakSelf.subscriptionTasks removeObjectForKey:sourceKey];
             if (!list.count) {
-                [ProfileStore update:sourceKey values:@{@"status":err.localizedDescription?:@"刷新失败，保留上次频道"}];[weakSelf refreshConfigurationPage];
+                [ProfileStore update:sourceKey values:@{@"status":err.localizedDescription?:[NSString stringWithFormat:@"HTTP %ld / 无有效 M3U，保留上次频道",(long)status]}];[weakSelf refreshConfigurationPage];
                 [weakSelf log:@"订阅失败 %@ %@", urlString, err.localizedDescription ?: @"无有效条目"];
                 return;
             }
@@ -1733,17 +1740,20 @@ static NSCache *LogoCache(void) {
     }];
 }
 - (void)failRemoteReadiness:(NSError *)error generation:(NSUInteger)generation {
-    if(generation!=self.playbackGeneration)return;[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 服务未就绪",self.channelName];[self log:@"本机续播失败 %@",error.localizedDescription];
+    if(generation!=self.playbackGeneration)return;[self endPlaybackPriority];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 服务未就绪",self.channelName];[self log:@"本机续播失败 %@",error.localizedDescription];
 }
 - (void)startRemoteURL:(NSString *)url generation:(NSUInteger)generation {
     if(generation!=self.playbackGeneration)return;
-    AVPlayerItem *item=[AVPlayerItem playerItemWithURL:[NSURL URLWithString:url]];item.preferredForwardBufferDuration=1;
-    self.avPlayer=[AVPlayer playerWithPlayerItem:item];self.avPlayer.automaticallyWaitsToMinimizeStalling=NO;
+    AVPlayerItem *item=[AVPlayerItem playerItemWithURL:[NSURL URLWithString:url]];item.preferredForwardBufferDuration=0;
+    self.avPlayer=[AVPlayer playerWithPlayerItem:item];self.avPlayer.automaticallyWaitsToMinimizeStalling=YES;self.remotePlaybackWanted=YES;
     self.avLayer=[AVPlayerLayer playerLayerWithPlayer:self.avPlayer];self.avLayer.frame=self.playerBox.bounds;self.avLayer.videoGravity=AVLayerVideoGravityResizeAspect;[self.playerBox.layer insertSublayer:self.avLayer atIndex:0];
     [item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:kAVItemStatusContext];
+    self.avKeepUpObserved=YES;
+    [item addObserver:self forKeyPath:@"playbackLikelyToKeepUp" options:NSKeyValueObservingOptionNew context:kAVItemStatusContext];
     self.avLayerObserved=YES;
     [self.avLayer addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:kAVLayerFrameContext];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(avItemFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(avItemStalled:) name:AVPlayerItemPlaybackStalledNotification object:item];
     [self recordStartupStage:@"prepareCall"];[self.avPlayer play];__weak typeof(self) w=self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(), ^{
         if(generation!=w.playbackGeneration||item!=w.avPlayer.currentItem||w.firstRender)return;
@@ -1751,9 +1761,18 @@ static NSCache *LogoCache(void) {
     });
 }
 
+- (void)avItemStalled:(NSNotification *)n {
+    if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self avItemStalled:n];});return;}
+    if(n.object!=self.avPlayer.currentItem)return;
+    [self log:@"订阅缓冲不足 · 进度 %.2fs · %@",CMTimeGetSeconds(self.avPlayer.currentTime),self.remotePlaybackWanted?@"等待分片后续播":@"用户已暂停"];
+    // Keep the current item/session. Recreating it here repeats the first frame.
+    if(self.remotePlaybackWanted)[self.avPlayer play];
+}
+
 - (void)avItemFailed:(NSNotification *)n {
     if (n.object != self.avPlayer.currentItem) return;
     NSError *e = n.userInfo[AVPlayerItemFailedToPlayToEndTimeErrorKey];
+    [self endPlaybackPriority];
     [self log:@"订阅播放失败 %@", e.localizedDescription];
     [self tryAlternateSource];
 }
@@ -1781,7 +1800,10 @@ static NSCache *LogoCache(void) {
     }
     if(context==kAVItemStatusContext){
         AVPlayerItem *item=obj;if(item!=self.avPlayer.currentItem)return;
-        if(item.status==AVPlayerItemStatusReadyToPlay){[self recordStartupStage:@"itemReady"];[self log:@"订阅播放器就绪，继续等待视频渲染"];}else if(item.status==AVPlayerItemStatusFailed){[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 失败",self.channelName];[self log:@"订阅失败 %@",item.error.localizedDescription];}
+        if([kp isEqualToString:@"playbackLikelyToKeepUp"]){
+            if(item.playbackLikelyToKeepUp && self.remotePlaybackWanted && self.avPlayer.rate==0){[self.avPlayer play];[self log:@"订阅分片恢复，继续原播放会话"];}return;
+        }
+        if(item.status==AVPlayerItemStatusReadyToPlay){[self recordStartupStage:@"itemReady"];[self log:@"订阅播放器就绪，继续等待视频渲染"];}else if(item.status==AVPlayerItemStatusFailed){[self endPlaybackPriority];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 失败",self.channelName];[self log:@"订阅失败 %@",item.error.localizedDescription];}
         return;
     }
     [super observeValueForKeyPath:kp ofObject:obj change:change context:context];
@@ -2048,7 +2070,7 @@ static NSCache *LogoCache(void) {
 - (void)player:(id)player playbackFailed:(NSError *)error {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player playbackFailed:error]; }); return; }
     if (player != self.currentPlayer) return;
-    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];
+    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];
     [self log:@"播放失败 %ld %@", (long)error.code, error.localizedDescription];
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 播放失败", self.channelName];
     [self.spinner stopAnimating];
@@ -2081,21 +2103,21 @@ static NSCache *LogoCache(void) {
 - (void)player:(id)player vdnRequestFailed:(NSError *)error {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player vdnRequestFailed:error]; }); return; }
     if (player != self.currentPlayer) return;
-    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];
+    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];
     [self log:@"VDN 请求失败 %ld", (long)error.code];
 }
 
 - (void)player:(id)player parameterError:(NSError *)error rate:(id)rate {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player parameterError:error rate:rate]; }); return; }
     if (player != self.currentPlayer) return;
-    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];
+    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];
     [self log:@"参数错误 %ld", (long)error.code];
 }
 
 - (void)player:(id)player publicRequestFailed:(NSError *)error {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player publicRequestFailed:error]; }); return; }
     if (player != self.currentPlayer) return;
-    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];
+    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];
     [self log:@"版权请求失败 %ld", (long)error.code];
 }
 
@@ -2122,18 +2144,23 @@ static NSCache *LogoCache(void) {
 
 
 - (void)beginPlaybackPriority {
-    self.playbackIntentVersion++;[self stopPreview];[[XMLTVStore shared] setPaused:YES];self.subscriptionParseGeneration++;
+    self.playbackIntentVersion++;NSUInteger intent=self.playbackIntentVersion;
+    self.playbackPriorityUntil=CACurrentMediaTime()+12;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        if(intent==self.playbackIntentVersion && self.playbackPriorityUntil>0){[self log:@"起播优先窗口结束，恢复订阅刷新"];[self endPlaybackPriority];}
+    });
+    [self stopPreview];[[XMLTVStore shared] setPaused:YES];self.subscriptionParseGeneration++;
     for(NSString *source in self.subscriptionTasks.allKeys){[self.subscriptionTasks[source] cancel];[self.deferredLocalSubscriptions addObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);}
     [self.subscriptionTasks removeAllObjects];
     for(NSString *source in self.subscriptionReadiness.allKeys){[self.subscriptionReadiness[source] cancel];[self.deferredLocalSubscriptions addObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);}[self.subscriptionReadiness removeAllObjects];
     for(NSURLSessionDataTask *t in self.logoTasks)[t cancel];[self.logoTasks removeAllObjects];
 }
 - (void)endPlaybackPriority {
-    [[XMLTVStore shared] setPaused:NO];NSUInteger generation=self.playbackGeneration;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{if(generation==self.playbackGeneration&&self.firstRender){[self refreshSubscriptionsWhenIdle];[self.channelGrid reloadData];}});
+    self.playbackPriorityUntil=0;[[XMLTVStore shared] setPaused:NO];NSUInteger generation=self.playbackGeneration;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{if(generation==self.playbackGeneration&&CACurrentMediaTime()>=self.playbackPriorityUntil){[self refreshSubscriptionsWhenIdle];[self.channelGrid reloadData];}});
 }
 - (void)refreshSubscriptionsWhenIdle {
-    if(self.channelID.length&&!self.firstRender)return;
+    if(CACurrentMediaTime()<self.playbackPriorityUntil)return;
     NSArray *pending=self.deferredLocalSubscriptions.allObjects;[self.deferredLocalSubscriptions removeAllObjects];for(NSString *s in pending)[self fetchSubscription:s silent:YES];
 }
 - (void)refreshConfigurationPage {if([self.tabPage isKindOfClass:ConfigCenterViewController.class])[(ConfigCenterViewController *)self.tabPage reloadProfiles];}
