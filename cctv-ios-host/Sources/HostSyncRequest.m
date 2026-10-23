@@ -49,7 +49,7 @@
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error { [self finish:error.localizedDescription]; }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completion {
     BOOL allowed=[@[@"http",@"https"] containsObject:request.URL.scheme.lowercaseString] && !request.URL.user.length && !request.URL.password.length;
-    NSMutableURLRequest *redirect=[request mutableCopy];if(![request.URL.host.lowercaseString isEqualToString:response.URL.host.lowercaseString]){[redirect setValue:nil forHTTPHeaderField:@"Authorization"];[redirect setValue:nil forHTTPHeaderField:@"Cookie"];}
+    NSMutableURLRequest *redirect=[request mutableCopy];if(![request.URL.host.lowercaseString isEqualToString:response.URL.host.lowercaseString] || ![request.URL.scheme.lowercaseString isEqual:response.URL.scheme.lowercaseString] || ![(request.URL.port?:@0) isEqual:(response.URL.port?:@0)]){[redirect setValue:nil forHTTPHeaderField:@"Authorization"];[redirect setValue:nil forHTTPHeaderField:@"Cookie"];}
     completion(allowed?redirect:nil);
 }
 @end

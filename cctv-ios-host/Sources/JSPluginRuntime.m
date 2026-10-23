@@ -90,7 +90,9 @@ static NSUInteger const JSMaxBody = 1024 * 1024;
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completion {
     BOOL allowed=[self allowedURL:request.URL] && task.countOfBytesReceived<JSMaxBody;
-    completion(allowed?request:nil);
+    NSMutableURLRequest *redirect=[request mutableCopy];
+    if(![request.URL.host.lowercaseString isEqual:response.URL.host.lowercaseString] || ![request.URL.scheme.lowercaseString isEqual:response.URL.scheme.lowercaseString] || ![(request.URL.port?:@0) isEqual:(response.URL.port?:@0)]){[redirect setValue:nil forHTTPHeaderField:@"Authorization"];[redirect setValue:nil forHTTPHeaderField:@"Cookie"];}
+    completion(allowed?redirect:nil);
 }
 - (NSString *)initializeContext {
     self.generation++;

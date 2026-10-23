@@ -62,8 +62,18 @@ try{
   assert.equal(reply.ok,true,JSON.stringify(reply))
   const category=typeof reply.result==='string'?JSON.parse(reply.result):reply.result
   assert.ok(category.list.length>0,JSON.stringify(category))
+  reply=await invoke('search',{keyword:'rule',page:2})
+  assert.equal(reply.ok,true,JSON.stringify(reply))
+  const searched=typeof reply.result==='string'?JSON.parse(reply.result):reply.result
+  assert.ok(searched.list.length>0,JSON.stringify(searched))
+  reply=await invoke('detail',{id:'https://fixture.test/detail/1'})
+  assert.equal(reply.ok,true,JSON.stringify(reply))
+  const detailed=typeof reply.result==='string'?JSON.parse(reply.result):reply.result
+  assert.equal(detailed.list[0].vod_play_url,'First$https://fixture.test/movie.mp4')
   reply=await invoke('play',{lineId:'line',id:'https://fixture.test/movie.mp4'})
   assert.equal(reply.ok,true,JSON.stringify(reply))
+  const played=typeof reply.result==='string'?JSON.parse(reply.result):reply.result
+  assert.equal(played.url,'https://fixture.test/movie.mp4')
   await invoke('stop')
   console.log('PASS: original imported ESM/CommonJS, relative and JSON dependencies, CryptoJS hash, Cheerio, POST, CatVod methods, opaque IDs and package path boundary')
 }finally{for(const timer of timers.values())clearTimeout(timer)}
