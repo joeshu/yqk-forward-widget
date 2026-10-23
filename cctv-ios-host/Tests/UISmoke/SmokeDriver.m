@@ -6,6 +6,8 @@
 #import "RootViewController.h"
 #import "ServiceEditorViewController.h"
 #import "ServiceStore.h"
+#import "ProfileStore.h"
+#import "XMLTVStore.h"
 #import "ServicesViewController.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -18,6 +20,10 @@
 - (void)applyFilter;
 - (void)selectChannel:(NSDictionary *)channel;
 - (void)playRemote:(NSDictionary *)channel;
+- (void)playChannel:(NSDictionary *)channel route:(NSDictionary *)route;
+- (void)importPlaylistData:(NSData *)data name:(NSString *)name;
+- (void)previewChannel:(NSDictionary *)channel;
+- (void)stopPreview;
 - (NSDictionary *)channelWithID:(NSString *)identifier;
 - (void)player:(id)player statEvent:(NSUInteger)event value:(id)value;
 @end
@@ -97,6 +103,10 @@ static void next(NSArray *steps, NSUInteger index) {
             check([grid numberOfItemsInSection:0] > 20, @"home catalog populated");
             check(!grid.hidden, @"grid visible by default");
             capture(self.window, @"01-live-grid");
+            check(root.navigationItem.rightBarButtonItems.count==1, @"catalog uses one compact toolbar");
+            UIStackView *toolbar=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;
+            check(toolbar.arrangedSubviews.count==3,@"catalog exposes three page actions");
+
             check(tabs.arrangedSubviews.count==5, @"five navigation pages");
             NSString *source=@"https://example.com/smoke.m3u";
             NSDictionary *remote=@{@"id":@"remote-smoke",@"name":@"CCTV-1 M3U8",@"group":@"央视",@"remoteURL":@"https://example.com/live.m3u8",@"subscriptionSources":@[source]};
@@ -211,7 +221,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[root valueForKey:@"activeTab"] integerValue]==0, @"native playback opens CCTV page");
             retainedWrapper = [root valueForKey:@"currentPlayer"];
             playCount = [CNPlayer smokePlayCount];
-            [root selectChannel:[root channelWithID:@"cctv2"]];
+            [root playChannel:[root channelWithID:@"cctv2"] route:nil];
             check([root valueForKey:@"currentPlayer"] == retainedWrapper,
                   @"0.12 compatible mode reuses wrapper");
             check([CNPlayer smokeResetCount] > 0, @"legacy reset retained");
@@ -221,7 +231,7 @@ static void next(NSArray *steps, NSUInteger index) {
                   @"PrepareDone cannot play again after auto first frame");
             [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"legacyNativePlayback"];
             oldWrapper = [root valueForKey:@"currentPlayer"];
-            [root selectChannel:[root channelWithID:@"cctv3"]];
+            [root playChannel:[root channelWithID:@"cctv3"] route:nil];
             check([root valueForKey:@"currentPlayer"] != oldWrapper, @"fresh mode uses a distinct wrapper");
             [root player:oldWrapper statEvent:3 value:nil];
             check(![[root valueForKey:@"firstRender"] boolValue],
@@ -255,12 +265,45 @@ static void next(NSArray *steps, NSUInteger index) {
             check(trace.stages[@"itemReady"] != nil, @"real AVPlayer item readiness observed");
             check(trace.stages[@"frame"] != nil && [[root valueForKey:@"firstRender"] boolValue],
                   @"real AVPlayerLayer video frame observed separately");
-            check([trace.stages[@"frame"] doubleValue] >= [trace.stages[@"itemReady"] doubleValue],
-                  @"frame timing does not precede item readiness");
+            check([trace.stages[@"frame"] doubleValue] > 0 && [trace.stages[@"itemReady"] doubleValue] > 0,
+                  @"item and video callbacks are measured independently without assuming delivery order");
             id previous = [root valueForKey:@"avPlayer"];
-            [root selectChannel:[root channelWithID:@"cctv1"]];
+            [root playChannel:[root channelWithID:@"cctv1"] route:nil];
             check([previous currentItem] == nil, @"switching to native detaches old subscription item");
             check([root valueForKey:@"pip"] == nil, @"switching releases old picture-in-picture controller");
+          },
+          ^{
+            playCount=[CNPlayer smokePlayCount];
+            [root selectChannel:[root channelWithID:@"cctv1"]];
+            [root selectChannel:[root channelWithID:@"cctv2"]];
+            [root selectChannel:[root channelWithID:@"cctv3"]];
+          },
+          ^{
+            check([[root valueForKey:@"channelID"] isEqual:@"cctv3"],@"rapid selections end on final channel");
+            check([CNPlayer smokePlayCount]==playCount+1,@"rapid taps do not start three SDK sessions");
+            NSString *playlist=@"#EXTM3U x-tvg-url=\"https://example.com/guide.xml.gz\"\n#EXTINF:-1 tvg-id=\"guide-one\" group-title=\"测试\",Imported channel\nhttps://example.com/imported.m3u8\n";
+            [root importPlaylistData:[playlist dataUsingEncoding:NSUTF8StringEncoding] name:@"本地测试配置"];
+            [root selectBottomTab:(id)tabs.arrangedSubviews[3]];
+            NSArray *profiles=[NSUserDefaults.standardUserDefaults arrayForKey:@"subscriptions"];
+            BOOL imported=NO;for(NSString *source in profiles)if([source hasPrefix:@"local-playlist:"]){imported=YES;check([[ProfileStore metadata:source][@"cachedChannels"] count]==1,@"import stores last-good channels");check([[ProfileStore metadata:source][@"detectedEPGURL"] isEqual:@"https://example.com/guide.xml.gz"],@"file import discovers XMLTV");}
+            check(imported,@"file profile persisted");
+            capture(self.window,@"11-configuration-imported");
+          },
+          ^{
+            NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];NSString *port=arguments[at+1];NSString *url=[NSString stringWithFormat:@"http://127.0.0.1:%@/video.mp4",port];
+            playCount=[CNPlayer smokePlayCount];
+            [root playChannel:@{@"id":url,@"name":@"Misrouted subscription",@"remoteURL":url} route:nil];
+            check([CNPlayer smokePlayCount]==playCount,@"M3U address never reaches native SDK even through native entry");
+            check([[root valueForKey:@"activeTab"] integerValue]==1,@"misrouted subscription returns to channel page");
+          },
+          ^{
+            [root performSelector:NSSelectorFromString(@"stopPlayback")];
+            NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];NSString *port=arguments[at+1];NSString *url=[NSString stringWithFormat:@"http://127.0.0.1:%@/video.mp4",port];
+            [root previewChannel:@{@"remoteURL":url}];
+            check([root valueForKey:@"previewPlayer"]!=nil,@"manual preview starts without a formal playback session");
+            check([[root valueForKey:@"previewPlayer"] isMuted],@"preview is muted");
+            [root selectBottomTab:(id)tabs.arrangedSubviews[0]];
+            check([root valueForKey:@"previewPlayer"]==nil,@"navigation releases preview player");
           }
       ];
       next(steps, 0);

@@ -41,15 +41,18 @@ class TestDevicePlatform(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'load command'):v.macho_info(bad)
 
 class TestPackagedIPA(unittest.TestCase):
-    def make_ipa(self, path, *, executable="CCTVHost", app_platform=2):
+    def make_ipa(self, path, *, executable="CCTVHost", app_platform=2, variant=None, app_binary=None):
         root = "Payload/CCTVHost.app/"
         info = {"CFBundleIdentifier": "com.example.cctvhost", "CFBundleExecutable": executable,
                 "CFBundleShortVersionString": "0.16.1", "CFBundleVersion": "16.1",
                 "CFBundleIcons": {"CFBundlePrimaryIcon": {"CFBundleIconName": "AppIcon"}}}
+        if variant:
+            info['CCTVHostBuildVariant'] = variant
+            if variant == 'no-python': info['CFBundleIdentifier'] += '.nopy'
         with zipfile.ZipFile(path, "w") as z:
             z.writestr(root + "Info.plist", plistlib.dumps(info))
             z.writestr(root + "Assets.car", b"test fixture")
-            z.writestr(root + "CCTVHost", sample(platform=app_platform, kind=2))
+            z.writestr(root + "CCTVHost", app_binary or sample(platform=app_platform, kind=2))
             z.writestr(root + "channels.json", json.dumps([{"id": "cctv1"}]))
             for name in ("CNPlayerSDK", "CicadaPlayerSDK", "alivcffmpeg"):
                 z.writestr(f"{root}Frameworks/{name}.framework/{name}", sample())
@@ -63,6 +66,28 @@ class TestPackagedIPA(unittest.TestCase):
             self.assertEqual(result["version"], "0.16.1")
             self.assertEqual(result["channel_count"], 1)
             self.assertEqual(len(result["sha256"]), 64)
+
+    def test_no_python_package_is_separate_and_has_no_runtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'diagnostic.ipa'
+            self.make_ipa(path, variant='no-python')
+            result = v.validate(path)
+            self.assertEqual(result['build_variant'], 'no-python')
+            self.assertFalse(result['python_linked'])
+            self.assertFalse(result['python_embedded'])
+
+    def test_hidden_python_link_is_rejected_in_diagnostic(self):
+        name = b'@rpath/Python.framework/Python\0'
+        size = (24 + len(name) + 7) & ~7
+        base = sample(kind=2)
+        header = struct.pack('<8I', 0xfeedfacf, 0x100000c, 0, 2, 2, 24 + size, 0, 0)
+        load = struct.pack('<6I', 0xc, size, 24, 0, 0, 0) + name
+        binary = header + base[32:] + load + bytes(size - len(load))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'diagnostic.ipa'
+            self.make_ipa(path, variant='no-python', app_binary=binary)
+            with self.assertRaisesRegex(AssertionError, 'links Python'):
+                v.validate(path)
 
     def test_packaged_simulator_executable_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

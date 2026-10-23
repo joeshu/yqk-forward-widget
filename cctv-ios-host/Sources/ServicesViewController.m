@@ -1,5 +1,6 @@
 #import "ServicesViewController.h"
 #import "HostTheme.h"
+#import "HostToolbar.h"
 #import "PyHost.h"
 #import "ServiceEditorViewController.h"
 #import "ServiceStore.h"
@@ -22,11 +23,7 @@
     self.title = self.service[@"name"];
     self.tableView.backgroundColor = UIColor.blackColor;
     self.tableView.rowHeight = 56;
-    self.navigationItem.rightBarButtonItem =
-        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"]
-                                         style:UIBarButtonItemStylePlain
-                                        target:self
-                                        action:@selector(edit)];
+    __weak typeof(self) w=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[@{@"icon":@"pencil",@"title":@"编辑服务",@"action":[UIAction actionWithHandler:^(UIAction *a){[w edit];}]}])];
 }
 - (BOOL)running {
     return PyHost.running && [[ServiceStore activeIdentifier] isEqualToString:self.service[@"id"]];
@@ -261,10 +258,9 @@
         [self.table.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
     ]];
-    self.navigationItem.rightBarButtonItem =
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd
-                                                      target:self
-                                                      action:@selector(add)];
+    __weak typeof(self) w=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
+        @{@"icon":@"plus",@"title":@"添加服务",@"action":[UIAction actionWithHandler:^(UIAction *a){[w add];}]},
+        @{@"icon":@"doc.text",@"title":@"服务日志",@"action":[UIAction actionWithHandler:^(UIAction *a){if(w.onOpenLog)w.onOpenLog();}]}])];
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.search.searchResultsUpdater = self;
     self.search.obscuresBackgroundDuringPresentation = NO;

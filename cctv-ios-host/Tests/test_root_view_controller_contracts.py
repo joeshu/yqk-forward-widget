@@ -131,7 +131,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
     def test_m3u_parser_catches_invalid_url_lines(self):
         parser = (SOURCE.parent / "M3UParser.m").read_text(encoding="utf-8")
         self.assertIn('@catch (NSException *exception)', parser)
-        self.assertIn('pendingLogo = nil; continue;', parser)
+        self.assertIn('pendingLogo = nil; pendingEPGID = nil; continue;', parser)
 
     def test_catalog_supports_grid_and_list_and_routes_remain_long_press(self):
         self.assertIn('self.table.rowHeight = 48', TEXT)

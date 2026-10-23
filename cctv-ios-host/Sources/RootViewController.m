@@ -140,6 +140,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property(nonatomic,strong) NSTimer *previewTimer;
 @property(nonatomic,assign) BOOL importingPlaylist;
 @property(nonatomic,assign) NSUInteger selectionVersion;
+@property(nonatomic,assign) NSTimeInterval selectionRequestedAt;
 @property(nonatomic,assign) NSUInteger playbackIntentVersion;
 @property(nonatomic,assign) NSUInteger subscriptionParseGeneration;
 @end
@@ -511,6 +512,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         if([cache isKindOfClass:NSArray.class])self.allChannels=[self.allChannels arrayByAddingObjectsFromArray:cache];
         [self.deferredLocalSubscriptions addObject:key];
     }
+    NSMutableDictionary *unique=[NSMutableDictionary dictionary];NSMutableArray *dedup=[NSMutableArray array];for(NSDictionary *c in self.allChannels){NSString *cid=c[@"id"];NSNumber *index=unique[cid];if(index){NSMutableDictionary *existing=[dedup[index.unsignedIntegerValue] mutableCopy];NSMutableSet *owners=[NSMutableSet setWithArray:existing[@"subscriptionSources"]?:@[]];[owners addObjectsFromArray:c[@"subscriptionSources"]?:@[]];if(owners.count)existing[@"subscriptionSources"]=owners.allObjects;dedup[index.unsignedIntegerValue]=existing;}else{unique[cid]=@(dedup.count);[dedup addObject:c];}}self.allChannels=dedup;
     self.shownChannels=self.allChannels;
     [self log:@"频道 %lu 个 / 线路 %lu 条",
          (unsigned long)self.allChannels.count,
@@ -588,8 +590,9 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     UIAction *add=[UIAction actionWithTitle:@"添加订阅" image:[UIImage systemImageNamed:@"plus"] identifier:nil handler:^(UIAction *a){[w addSubscription];}];
     UIAction *hide=[UIAction actionWithTitle:self.playerExpanded?@"收起播放器":@"展开播放器" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){w.playerExpanded=!w.playerExpanded;[w configureCatalogNavigation];[w.view setNeedsLayout];}];
     UIAction *history=[UIAction actionWithTitle:@"最近观看" image:[UIImage systemImageNamed:@"clock"] identifier:nil handler:^(UIAction *a){[w showHistory];}];
+    UIAction *playing=[UIAction actionWithTitle:@"返回正在播放" image:[UIImage systemImageNamed:@"play.circle"] identifier:nil handler:^(UIAction *a){if(!w.channelID.length)return;[w selectBottomTab:(id)w.bottomBar.arrangedSubviews[w.currentRemoteURL.length?1:0]];w.playerExpanded=YES;[w.view setNeedsLayout];}];
     UIAction *manage=[UIAction actionWithTitle:@"整理收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[w showFavoriteManager];}];
-    return [UIMenu menuWithTitle:@"" children:self.subscriptionCatalog?@[grid,refresh,add,hide,history,manage]:@[grid,hide,history,manage]];
+    return [UIMenu menuWithTitle:@"" children:self.subscriptionCatalog?@[grid,refresh,add,hide,playing,history,manage]:@[grid,hide,playing,history,manage]];
 }
 - (void)showGroupMenu {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:nil preferredStyle:UIAlertControllerStyleActionSheet];NSArray *groups=@[@"全部",@"央视",@"卫视",@"地方",@"教育",@"熊猫",@"订阅"];
@@ -640,12 +643,12 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 - (void)selectChannel:(NSDictionary *)ch {
     // Immediately invalidate pending work; rapid taps commit only the final selection.
-    NSUInteger selection=++self.selectionVersion;self.playbackIntentVersion++;[self.playbackReadiness cancel];[self stopPreview];
+    NSTimeInterval selectedAt=CACurrentMediaTime();NSUInteger selection=++self.selectionVersion;self.playbackIntentVersion++;[self.playbackReadiness cancel];[self stopPreview];
     self.playerTabs.selectedSegmentIndex=0;[self selectPlayerPanel];self.playerExpanded=YES;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,80*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
         if(selection!=self.selectionVersion)return;
         [self rememberChannel:ch];if(CCTVBoolPreference(@"rememberLastChannel",YES))[NSUserDefaults.standardUserDefaults setObject:ch forKey:@"lastChannel"];
-        [self routePlayback:ch];[self configureCatalogNavigation];[self.view setNeedsLayout];
+        self.selectionRequestedAt=selectedAt;[self routePlayback:ch];[self configureCatalogNavigation];[self.view setNeedsLayout];
     });
 }
 - (void)routePlayback:(NSDictionary *)ch {
@@ -848,7 +851,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     NSString *cid = ch[@"id"];
     if (!cid.length) return;
     if(self.activeTab!=0)[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[0]];
-    self.playbackGeneration += 1;
+    self.playbackGeneration += 1;self.selectionVersion++;
     self.currentRemoteURL = nil;
     self.playerExpanded=YES;
     [self.view setNeedsLayout];
@@ -859,7 +862,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.firstRender = NO;
     self.stallReported = NO;
     self.retryCount = 0;
-    self.playStartedAt = CACurrentMediaTime();
+    self.playStartedAt = self.selectionRequestedAt?:CACurrentMediaTime();self.selectionRequestedAt=0;
     self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt];
     self.firstFrameSeconds = 0;
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 连接中", self.channelName];
@@ -1685,8 +1688,8 @@ static NSCache *LogoCache(void) {
     [self beginPlaybackPriority];
     if(self.activeTab!=1)[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[1]];
     NSString *u=[self stableURLKey:ch[@"remoteURL"]];if(!u.length)return;
-    self.playbackGeneration += 1;NSUInteger generation=self.playbackGeneration;
-    NSTimeInterval requestedAt=CACurrentMediaTime();
+    self.playbackGeneration += 1;self.selectionVersion++;NSUInteger generation=self.playbackGeneration;
+    NSTimeInterval requestedAt=self.selectionRequestedAt?:CACurrentMediaTime();self.selectionRequestedAt=0;
     [self stopPlayback];self.playerExpanded=YES;[self.view setNeedsLayout];
     self.currentRemoteURL=u;self.channelID=ch[@"id"]?:u;self.channelName=ch[@"name"]?:u;self.routeName=@"订阅";
     self.firstRender=NO;self.retryCount=0;self.playStartedAt=requestedAt;self.firstFrameSeconds=0;
@@ -2077,7 +2080,9 @@ static NSCache *LogoCache(void) {
 - (void)beginPlaybackPriority {
     self.playbackIntentVersion++;[self stopPreview];[[XMLTVStore shared] setPaused:YES];self.subscriptionParseGeneration++;
     for(NSString *source in self.subscriptionTasks.allKeys){[self.subscriptionTasks[source] cancel];[self.deferredLocalSubscriptions addObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);}
-    [self.subscriptionTasks removeAllObjects];for(NSURLSessionDataTask *t in self.logoTasks)[t cancel];[self.logoTasks removeAllObjects];
+    [self.subscriptionTasks removeAllObjects];
+    for(NSString *source in self.subscriptionReadiness.allKeys){[self.subscriptionReadiness[source] cancel];[self.deferredLocalSubscriptions addObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);}[self.subscriptionReadiness removeAllObjects];
+    for(NSURLSessionDataTask *t in self.logoTasks)[t cancel];[self.logoTasks removeAllObjects];
 }
 - (void)endPlaybackPriority {
     [[XMLTVStore shared] setPaused:NO];NSUInteger generation=self.playbackGeneration;
@@ -2102,7 +2107,7 @@ static NSCache *LogoCache(void) {
     [a addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){NSString *u=[ProfileStore isHTTP:source]?[self stableURLKey:a.textFields[1].text]:source;NSString *epg=[a.textFields[2].text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!u.length||(epg.length&&![ProfileStore isHTTP:epg])){[self showServiceError:@"订阅和 EPG 地址须为有效 HTTP/HTTPS 链接。"];return;}
         NSMutableDictionary *values=[p mutableCopy];values[@"name"]=a.textFields[0].text?:@"";values[@"epgURL"]=epg?:@"";
         if(![source isEqualToString:u]){[self deleteSubscription:source];[values removeObjectForKey:@"cachedChannels"];[self.subscriptionURLs addObject:u];[NSUserDefaults.standardUserDefaults setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];}
-        [ProfileStore update:u values:values];[self.epgCache removeAllObjects];[self fetchSubscription:u silent:NO];[self refreshConfigurationPage];
+        self.activeSource=nil;[ProfileStore update:u values:values];[self.epgCache removeAllObjects];[self fetchSubscription:u silent:NO];[self refreshConfigurationPage];
     }]];[self presentViewController:a animated:YES completion:nil];
 }
 - (void)editEPGMapping:(NSDictionary *)ch {

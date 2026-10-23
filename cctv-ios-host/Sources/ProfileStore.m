@@ -2,8 +2,7 @@
 @implementation ProfileStore
 + (BOOL)isHTTP:(id)source {
     if(![source isKindOfClass:NSString.class]||[source length]>8192)return NO;
-    NSURLComponents *c=[NSURLComponents componentsWithString:source];
-    return c.URL&&c.host.length&&[@[@"http",@"https"] containsObject:c.scheme.lowercaseString];
+    @try{NSURLComponents *c=[NSURLComponents componentsWithString:source];return c.URL&&c.host.length&&[@[@"http",@"https"] containsObject:c.scheme.lowercaseString];}@catch(NSException *e){return NO;}
 }
 + (BOOL)isSource:(id)source {
     if([self isHTTP:source])return YES;
@@ -18,6 +17,7 @@
 }
 + (void)remove:(NSString *)source {
     NSMutableDictionary *all=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{} mutableCopy];[all removeObjectForKey:source];[NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
+    for(NSString *key in @[@"profileOrder",@"disabledSubscriptions"]){NSMutableArray *a=[[NSUserDefaults.standardUserDefaults arrayForKey:key]?:@[] mutableCopy];[a removeObject:source];[NSUserDefaults.standardUserDefaults setObject:a forKey:key];}
 }
 + (NSArray<NSString *> *)orderedSources:(NSArray<NSString *> *)sources {
     NSArray *order=[NSUserDefaults.standardUserDefaults arrayForKey:@"profileOrder"]?:@[];

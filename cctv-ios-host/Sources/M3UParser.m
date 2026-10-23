@@ -5,6 +5,7 @@
 
 @implementation M3UParser
 + (NSString *)epgURL:(NSString *)text baseURL:(NSURL *)baseURL {
+    if(!text.length)return nil;
     NSString *header=[text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet].firstObject;
     NSString *value=[self attribute:@"x-tvg-url" in:header]?:[self attribute:@"url-tvg" in:header];
     value=[value componentsSeparatedByString:@","].firstObject;
@@ -49,7 +50,7 @@
         } @catch (NSException *exception) {
             url = nil;
         }
-        if (!url) { pendingName = nil; pendingLogo = nil; continue; }
+        if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; continue; }
 
         M3UChannel *ch = [M3UChannel new];
         ch.name = pendingName;
