@@ -26,6 +26,8 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
+      - sdk: UniformTypeIdentifiers.framework
+      - sdk: QuartzCore.framework
       - framework: Frameworks/CNPlayerSDK.framework
         embed: true
         codeSign: true

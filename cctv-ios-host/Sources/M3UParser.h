@@ -7,6 +7,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSString *url;
 @property (nonatomic, copy) NSString *group;
 @property (nonatomic, copy, nullable) NSString *logo;
+@property (nonatomic, copy, nullable) NSString *epgID;
 @end
 
 @interface M3UParser : NSObject

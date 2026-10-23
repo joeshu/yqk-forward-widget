@@ -1107,7 +1107,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 - (void)selectPlayerPanel {
     if(self.playbackPanel){[self.playbackPanel willMoveToParentViewController:nil];[self.playbackPanel.view removeFromSuperview];[self.playbackPanel removeFromParentViewController];self.playbackPanel=nil;}
-    NSInteger index=self.playerTabs.selectedSegmentIndex;if(index>0){UIViewController *v=index==1?[[EPGViewController alloc] initWithChannelID:self.channelID?:@"" name:self.channelName?:@"节目单"]:[self playbackInformationPage];self.playbackPanel=v;[self addChildViewController:v];[self.view addSubview:v.view];[v didMoveToParentViewController:self];}[self.view setNeedsLayout];
+    NSInteger index=self.playerTabs.selectedSegmentIndex;if(index>0){UIViewController *v=index==1?[[EPGViewController alloc] initWithChannelID:[self epgIDForChannel:[self channelWithID:self.channelID]]?:@"" name:self.channelName?:@"节目单"]:[self playbackInformationPage];self.playbackPanel=v;[self addChildViewController:v];[self.view addSubview:v.view];[v didMoveToParentViewController:self];}[self.view setNeedsLayout];
 }
 
 - (void)presentSubscriptionActions:(NSDictionary *)channel sourceView:(UIView *)source {
@@ -1508,8 +1508,10 @@ static NSCache *LogoCache(void) {
                     entry[@"subscriptionSources"] = owners.allObjects;
                     entry[@"name"] = c.name;
                     entry[@"group"] = c.group ?: @"订阅";
+                    if (c.epgID.length) entry[@"epgID"]=c.epgID;
                     if (c.logo.length) entry[@"logo"] = c.logo; else [entry removeObjectForKey:@"logo"];
                     entry[@"remoteURL"] = c.url;
+                    if(c.epgID.length)entry[@"epgID"]=c.epgID;else[entry removeObjectForKey:@"epgID"];
                     merged[existingIndex.unsignedIntegerValue] = entry;
                 } else {
                     NSMutableDictionary *entry = [@{@"id": stable,
@@ -1680,8 +1682,15 @@ static NSCache *LogoCache(void) {
     [self openEPGforChannel:self.channelID name:self.channelName];
 }
 
+- (NSString *)epgIDForChannel:(NSDictionary *)ch {
+    if(!ch)return nil;if(![ch[@"remoteURL"] length])return ch[@"id"];
+    NSString *key=[ch[@"epgID"] lowercaseString];NSDictionary *matched=key.length?[self channelWithID:key]:nil;if(matched&&![matched[@"remoteURL"] length])return key;
+    for(NSDictionary *native in self.allChannels){if([native[@"remoteURL"] length])continue;if([native[@"name"] isEqualToString:ch[@"name"]])return native[@"id"];}
+    return nil;
+}
 - (void)openEPGforChannel:(NSString *)cid name:(NSString *)name {
-    [self.navigationController pushViewController:[[EPGViewController alloc] initWithChannelID:cid name:name] animated:YES];
+    NSString *epgID=[self epgIDForChannel:[self channelWithID:cid]];
+    [self.navigationController pushViewController:[[EPGViewController alloc] initWithChannelID:epgID?:@"" name:name] animated:YES];
 }
 
 - (void)restartEPGTimer {

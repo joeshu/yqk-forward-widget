@@ -116,3 +116,21 @@ jobs:
             cctv-ios-host/build/CCTVHost-unsigned.ipa
             cctv-ios-host/build/CCTVHost-unsigned.ipa.sha256
           retention-days: 30
+
+  ui-preview:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run simulator UI smoke checks
+        working-directory: cctv-ios-host
+        run: bash Scripts/ui-smoke.sh
+      - name: Preserve UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCTVHost-UI-preview-${{ github.sha }}
+          path: |
+            cctv-ios-host/ui-preview/*.png
+            cctv-ios-host/ui-preview/results.json
+          if-no-files-found: error
