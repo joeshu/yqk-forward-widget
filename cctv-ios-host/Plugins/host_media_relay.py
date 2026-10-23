@@ -14,6 +14,16 @@ import urllib.request
 import uuid
 
 
+class ScopedRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        redirected = super().redirect_request(request, response, code, message, headers, new_url)
+        if redirected is not None and urllib.parse.urlsplit(request.full_url).netloc.lower() != urllib.parse.urlsplit(new_url).netloc.lower():
+            for name in list(redirected.headers):
+                if name.lower() in ('authorization', 'cookie'):
+                    redirected.remove_header(name)
+        return redirected
+
+
 class MediaRelay:
     def __init__(self, limit=256):
         self.limit = limit
@@ -72,7 +82,7 @@ class MediaRelay:
         response = None
         sent = False
         try:
-            response = urllib.request.urlopen(request, timeout=8)
+            response = urllib.request.build_opener(ScopedRedirect()).open(request, timeout=8)
             with self.lock:
                 if self.stopping.is_set():
                     response.close()

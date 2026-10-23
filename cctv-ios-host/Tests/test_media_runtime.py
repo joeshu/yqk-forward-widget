@@ -65,8 +65,9 @@ class MediaTests(unittest.TestCase):
             self.runtime.call('search', {'keyword': 'word', 'page': 1, 'provider': 'two'})
             self.assertEqual(call.call_count, 3)
 
-    def test_playback_rejects_parser_tasks_and_invalid_schemes(self):
-        for result in [{'parse': 1, 'url': 'https://a.test/'}, {'url': 'file:///private/data'}, {'url': ''}]:
+    def test_playback_marks_web_tasks_and_rejects_invalid_schemes(self):
+        self.assertEqual(media.playback({'parse': 1, 'url': 'https://a.test/'})['parse'], 1)
+        for result in [{'url': 'file:///private/data'}, {'url': ''}]:
             with self.assertRaises(media.MediaError):
                 media.playback(result)
         value = media.playback({'url': 'https://a.test/video', 'header': {'X-Foo': 'ok', 'Cookie': 'one\r\ntwo', 'Host': 'spoof'}})

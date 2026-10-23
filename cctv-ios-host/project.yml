@@ -28,6 +28,7 @@ targets:
     dependencies:
       - sdk: ImageIO.framework
       - sdk: JavaScriptCore.framework
+      - sdk: WebKit.framework
       - sdk: Security.framework
       - sdk: CoreGraphics.framework
       - sdk: CoreMedia.framework

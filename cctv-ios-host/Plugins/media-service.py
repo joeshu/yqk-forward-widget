@@ -143,6 +143,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(body)
                     return
                 result = playback(result)
+                if result['parse']:
+                    raise MediaError('PARSER_REQUIRED', '此频道返回网页，请通过影视页面打开')
                 url = result['url']
                 if result['headers']:
                     url = f'http://127.0.0.1:{self.server.server_port}/media/' + self.server.relay.register(url, result['headers'])
@@ -172,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(args.get('filters'), str):
                 args['filters'] = json.loads(args['filters'])
             result = runtime.call(operation, args)
-            if operation == 'play' and result.get('headers'):
+            if operation == 'play' and result.get('headers') and not result.get('parse'):
                 token = self.server.relay.register(result['url'], result['headers'])
                 result = dict(result, originalURL=result['url'],
                               url=f'http://127.0.0.1:{self.server.server_port}/media/{token}')

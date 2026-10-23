@@ -33,6 +33,32 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
+    def do_POST(self):
+        args = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
+        operation = self.path.rsplit('/', 1)[-1]
+        base = f'http://127.0.0.1:{self.server.server_port}'
+        card = lambda value: {'id': value, 'name': '测试电影 ' + value, 'poster': base + '/poster.png', 'remarks': 'HD'}
+        if operation == 'capabilities':
+            data = {'capabilities': ['home', 'category', 'search', 'detail', 'play']}
+        elif operation == 'home':
+            data = {'categories': [{'id': 'movies', 'name': '电影'}], 'items': [card('home')], 'filters': {}}
+        elif operation in ('category', 'search'):
+            page = int(args.get('page', 1))
+            data = {'page': page, 'pagecount': 2, 'hasMore': page < 2, 'items': [card(str(args.get('keyword', 'category')) + str(page))]}
+        elif operation == 'detail':
+            data = {'id': args['id'], 'name': '测试影片详情', 'description': '验证多线路和不透明播放 ID', 'lines': [{'id': 'line', 'name': '主线路', 'episodes': [{'id': 'opaque?$id', 'name': '第一集'}]}, {'id': 'backup', 'name': '备用', 'episodes': [{'id': 'second', 'name': '正片'}]}]}
+        elif operation == 'play':
+            data = {'url': base + '/video.mp4', 'headers': {}, 'parse': 0}
+        else:
+            self.send_error(404)
+            return
+        body = json.dumps({'ok': True, 'data': data}, ensure_ascii=False).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         print("GET", self.path, flush=True)
         status = 200

@@ -130,8 +130,7 @@ def playback(value):
         value = {'url': value}
     if not isinstance(value, dict):
         raise MediaError('NO_MEDIA', '来源未返回播放结果')
-    if int(value.get('parse') or 0) > 0:
-        raise MediaError('PARSER_REQUIRED', '来源返回网页解析任务，尚未获得可直接播放的媒体地址')
+    parse = 1 if int(value.get('parse') or 0) > 0 else 0
     url = value.get('url')
     alternates = value.get('alternates', [])
     if isinstance(url, list):
@@ -146,7 +145,7 @@ def playback(value):
                if '\r' not in str(k) + str(v) and '\n' not in str(k) + str(v)
                and len(str(v)) <= 16384
                and str(k).lower() not in ('host', 'content-length', 'connection', 'transfer-encoding')}
-    return {'url': url, 'headers': headers, 'alternates': alternates}
+    return {'url': url, 'headers': headers, 'alternates': alternates, 'parse': parse}
 
 
 class PythonSpider:

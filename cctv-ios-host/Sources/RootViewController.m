@@ -10,6 +10,7 @@
 #import "MediaBrowserViewController.h"
 #import "MediaPackageImporter.h"
 #import "MediaPackageDownloader.h"
+#import "MediaWebViewController.h"
 #import "ServiceEditorViewController.h"
 #import "ConfigCenterViewController.h"
 #import "HostTheme.h"
@@ -654,6 +655,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     NSString *url=[self stableURLKey:result[@"url"]];if(!url.length){[self showServiceError:@"资源没有返回可播放媒体地址"];return;}
     self.playbackGeneration++;[self stopPlayback];[self.nativePreloader cancel];[self endPlaybackPriority];
     self.currentRemoteURL=url;self.channelName=name;self.channelID=nil;
+    if([result[@"parse"] integerValue]>0){MediaWebViewController *page=[[MediaWebViewController alloc] initWithResult:result title:name];UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:page];UIViewController *presenter=self.navigationController.topViewController?:self;[presenter presentViewController:navigation animated:YES completion:nil];return;}
     AVURLAsset *asset=[AVURLAsset URLAssetWithURL:[NSURL URLWithString:url] options:nil];AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];
     AVMutableMetadataItem *title=[AVMutableMetadataItem metadataItem];title.identifier=AVMetadataCommonIdentifierTitle;title.value=name?:@"影视";title.extendedLanguageTag=@"und";item.externalMetadata=@[title];
     self.moviePlayer=[AVPlayer playerWithPlayerItem:item];self.moviePlayer.automaticallyWaitsToMinimizeStalling=YES;

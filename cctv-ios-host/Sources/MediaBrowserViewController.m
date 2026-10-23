@@ -6,6 +6,20 @@
 #import "LocalServiceReadiness.h"
 #import "ServiceStore.h"
 
+@interface MediaSourcePicker : UITableViewController <UISearchResultsUpdating>
+@property(nonatomic, copy) NSArray<NSDictionary *> *choices;
+@property(nonatomic, copy) NSArray<NSDictionary *> *shown;
+@property(nonatomic, copy) void (^onSelect)(NSDictionary *);
+@property(nonatomic, strong) UISearchController *search;
+@end
+@implementation MediaSourcePicker
+- (void)viewDidLoad {[super viewDidLoad];self.title=@"影视来源";self.shown=self.choices;self.tableView.backgroundColor=UIColor.blackColor;self.search=[[UISearchController alloc] initWithSearchResultsController:nil];self.search.obscuresBackgroundDuringPresentation=NO;self.search.searchResultsUpdater=self;self.search.searchBar.placeholder=@"搜索资源或来源";self.navigationItem.searchController=self.search;}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return self.shown.count;}
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)index {UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"source"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"source"];NSDictionary *choice=self.shown[index.row];cell.textLabel.text=choice[@"name"];cell.detailTextLabel.text=choice[@"subtitle"];cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;return cell;}
+- (void)updateSearchResultsForSearchController:(UISearchController *)controller {NSString *query=controller.searchBar.text?:@"";self.shown=query.length?[self.choices filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *choice,NSDictionary *bindings){return [choice[@"name"] rangeOfString:query options:NSCaseInsensitiveSearch|NSDiacriticInsensitiveSearch].location!=NSNotFound || [choice[@"subtitle"] rangeOfString:query options:NSCaseInsensitiveSearch|NSDiacriticInsensitiveSearch].location!=NSNotFound;}]]:self.choices;[self.tableView reloadData];}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)index {NSDictionary *choice=self.shown[index.row];[self.navigationController popViewControllerAnimated:YES];if(self.onSelect)self.onSelect(choice);}
+@end
+
 @interface MediaDetailViewController : UITableViewController
 @property(nonatomic, copy) NSDictionary *item;
 @property(nonatomic, copy) NSDictionary *source;
@@ -83,6 +97,8 @@
 @property(nonatomic) BOOL loading;
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) NSUInteger searchGeneration;
+@property(nonatomic, copy) NSDictionary *filters;
+@property(nonatomic, strong) NSMutableDictionary *selectedFilters;
 @end
 @implementation MediaBrowserViewController
 - (void)viewDidLoad {
@@ -91,6 +107,7 @@
     __weak typeof(self) weakSelf=self;
     self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
         @{@"icon":@"square.stack",@"title":@"选择影视来源",@"action":[UIAction actionWithHandler:^(UIAction *action){[weakSelf chooseSource];}]},
+        @{@"icon":@"line.3.horizontal.decrease.circle",@"title":@"分类筛选",@"action":[UIAction actionWithHandler:^(UIAction *action){[weakSelf chooseFilters];}]},
         @{@"icon":@"arrow.clockwise",@"title":@"刷新当前来源",@"action":[UIAction actionWithHandler:^(UIAction *action){if(weakSelf.source)[weakSelf activate:weakSelf.source];else[weakSelf loadSources];}]}])];
     self.categoryScroll=[UIScrollView new];self.categoryScroll.showsHorizontalScrollIndicator=NO;self.categoryScroll.translatesAutoresizingMaskIntoConstraints=NO;
     self.categories=[[UIStackView alloc] init];self.categories.axis=UILayoutConstraintAxisHorizontal;self.categories.spacing=10;self.categories.translatesAutoresizingMaskIntoConstraints=NO;[self.categoryScroll addSubview:self.categories];[self.view addSubview:self.categoryScroll];
@@ -124,11 +141,18 @@
 }
 - (void)chooseSource {
     if(!self.sources.count){[self openResources];return;}
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"影视来源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSDictionary *source in self.sources)[sheet addAction:[UIAlertAction actionWithTitle:source[@"name"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self activate:source];}]];
-    if(self.providers.count>1)for(NSDictionary *provider in self.providers)[sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ · %@",self.source[@"name"],provider[@"name"]] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.provider=provider[@"id"];[self loadHome];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"管理资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self openResources];}]];[sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItems.firstObject;[self presentViewController:sheet animated:YES completion:nil];
+    NSMutableArray *choices=[NSMutableArray array];for(NSDictionary *source in self.sources)[choices addObject:@{@"name":source[@"name"],@"subtitle":@"已导入资源",@"source":source}];
+    for(NSDictionary *provider in self.providers)[choices addObject:@{@"name":provider[@"name"],@"subtitle":self.source[@"name"]?:@"",@"provider":provider[@"id"]}];
+    MediaSourcePicker *picker=[[MediaSourcePicker alloc] initWithStyle:UITableViewStyleInsetGrouped];picker.choices=choices;__weak typeof(self) weakSelf=self;
+    picker.onSelect=^(NSDictionary *choice){MediaBrowserViewController *owner=weakSelf;if(choice[@"source"])[owner activate:choice[@"source"]];else{owner.provider=choice[@"provider"];[owner loadHome];}};[self.navigationController pushViewController:picker animated:YES];
+}
+- (void)chooseFilters {
+    NSArray *groups=[self.filters[self.category?:@""] isKindOfClass:NSArray.class]?self.filters[self.category?:@""]:@[];
+    MediaSourcePicker *picker=[[MediaSourcePicker alloc] initWithStyle:UITableViewStyleInsetGrouped];NSMutableArray *choices=[NSMutableArray array];
+    for(id raw in groups){if(![raw isKindOfClass:NSDictionary.class])continue;NSDictionary *group=raw;NSString *key=group[@"key"];if(![key isKindOfClass:NSString.class])continue;
+        for(id rawOption in [group[@"value"] isKindOfClass:NSArray.class]?group[@"value"]:@[]){if(![rawOption isKindOfClass:NSDictionary.class])continue;NSDictionary *option=rawOption;if(![option[@"v"] isKindOfClass:NSString.class] && ![option[@"v"] isKindOfClass:NSNumber.class])continue;[choices addObject:@{@"name":[NSString stringWithFormat:@"%@ · %@",group[@"name"]?:key,option[@"n"]?:option[@"v"]],@"subtitle":[self.selectedFilters[key] isEqual:option[@"v"]]?@"已选":@"",@"key":key,@"value":option[@"v"]}];}}
+    if(!choices.count){[self showMessage:@"当前分类没有筛选条件，请先选择分类" loading:NO];return;}
+    picker.choices=choices;__weak typeof(self) weakSelf=self;picker.onSelect=^(NSDictionary *choice){MediaBrowserViewController *owner=weakSelf;if(!owner.selectedFilters)owner.selectedFilters=[NSMutableDictionary dictionary];owner.selectedFilters[choice[@"key"]]=choice[@"value"];owner.page=1;if(!owner.loading)[owner loadListing:NO];};[self.navigationController pushViewController:picker animated:YES];
 }
 - (void)activate:(NSDictionary *)source {
     self.generation++;NSUInteger generation=self.generation;[self.readiness cancel];[self.client cancel];self.source=source;self.provider=nil;self.providers=@[];self.items=@[];self.category=nil;self.keyword=@"";self.page=1;self.loading=YES;self.moreButton.hidden=YES;[self.grid reloadData];
@@ -163,6 +187,7 @@
     }];
 }
 - (void)loadHome {
+    self.filters=@{};self.selectedFilters=[NSMutableDictionary dictionary];
     self.loading=YES;self.keyword=@"";self.category=nil;self.page=1;self.hasMore=NO;self.moreButton.hidden=YES;self.items=@[];[self.grid reloadData];[self showMessage:@"正在加载推荐与分类…" loading:YES];
     __weak typeof(self) weakSelf=self;
     [self.client call:@"home" arguments:[self arguments:@{}] completion:^(id result,NSError *error){
@@ -170,12 +195,13 @@
         if(error){[owner showMessage:error.localizedDescription loading:NO];return;}
         if(owner.keyword.length || owner.category.length){owner.page=1;[owner loadListing:NO];return;}
         owner.items=[result[@"items"] isKindOfClass:NSArray.class]?result[@"items"]:@[];[owner.grid reloadData];
+        owner.filters=[result[@"filters"] isKindOfClass:NSDictionary.class]?result[@"filters"]:@{};
         for(UIView *view in owner.categories.arrangedSubviews){[owner.categories removeArrangedSubview:view];[view removeFromSuperview];}
         for(NSDictionary *category in result[@"categories"]){UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];[button setTitle:category[@"name"] forState:UIControlStateNormal];button.accessibilityIdentifier=category[@"id"];[button addTarget:owner action:@selector(selectCategory:) forControlEvents:UIControlEventTouchUpInside];[owner.categories addArrangedSubview:button];}
         [owner showMessage:owner.items.count?@"":@"选择分类或输入关键词搜索" loading:NO];
     }];
 }
-- (void)selectCategory:(UIButton *)button {self.category=button.accessibilityIdentifier;self.keyword=@"";self.search.searchBar.text=@"";self.page=1;if(!self.loading)[self loadListing:NO];}
+- (void)selectCategory:(UIButton *)button {self.category=button.accessibilityIdentifier;self.selectedFilters=[NSMutableDictionary dictionary];self.keyword=@"";self.search.searchBar.text=@"";self.page=1;if(!self.loading)[self loadListing:NO];}
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     NSString *keyword=[searchController.searchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];self.keyword=keyword;
     NSUInteger generation=++self.searchGeneration;__weak typeof(self) weakSelf=self;
@@ -185,11 +211,12 @@
 - (void)loadListing:(BOOL)append {
     if(!self.source)return;if(!self.keyword.length && !self.category.length){[self loadHome];return;}self.loading=YES;NSString *operation=self.keyword.length?@"search":@"category";NSString *requestedKeyword=self.keyword?:@"",*requestedCategory=self.category?:@"";
     NSMutableDictionary *args=[[self arguments:@{@"page":@(self.page)}] mutableCopy];if(self.keyword.length)args[@"keyword"]=self.keyword;else args[@"categoryId"]=self.category?:@"";
+    args[@"filters"]=self.selectedFilters?:@{};NSDictionary *requestedFilters=[self.selectedFilters copy]?:@{};
     if(!append){self.items=@[];[self.grid reloadData];[self showMessage:@"正在加载…" loading:YES];}self.moreButton.enabled=NO;
     __weak typeof(self) weakSelf=self;
     [self.client call:operation arguments:args completion:^(id result,NSError *error){
         MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.loading=NO;owner.moreButton.enabled=YES;
-        if(![requestedKeyword isEqualToString:owner.keyword?:@""] || (!requestedKeyword.length && ![requestedCategory isEqualToString:owner.category?:@""])){owner.page=1;[owner loadListing:NO];return;}
+        if(![requestedKeyword isEqualToString:owner.keyword?:@""] || (!requestedKeyword.length && (![requestedCategory isEqualToString:owner.category?:@""] || ![requestedFilters isEqual:owner.selectedFilters?:@{}]))){owner.page=1;[owner loadListing:NO];return;}
         if(error){if(append)owner.page=MAX(1,owner.page-1);[owner showMessage:error.localizedDescription loading:NO];return;}
         NSArray *incoming=[result[@"items"] isKindOfClass:NSArray.class]?result[@"items"]:@[];
         NSMutableArray *all=append?[owner.items mutableCopy]:[NSMutableArray array];NSMutableSet *ids=[NSMutableSet set];for(NSDictionary *item in all)[ids addObject:item[@"id"]];for(NSDictionary *item in incoming)if(![ids containsObject:item[@"id"]]){[all addObject:item];[ids addObject:item[@"id"]];}

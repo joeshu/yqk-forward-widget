@@ -12,6 +12,7 @@
 #import "ServicesViewController.h"
 #import "HostImageLoader.h"
 #import "NodePluginRuntime.h"
+#import "MediaBrowserViewController.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
@@ -39,6 +40,11 @@
 - (NSDictionary *)channelWithID:(NSString *)identifier;
 - (void)player:(id)player statEvent:(NSUInteger)event value:(id)value;
 - (void)player:(id)player playbackFailed:(NSError *)error;
+- (void)playMediaResult:(NSDictionary *)result name:(NSString *)name;
+@end
+@interface MediaBrowserViewController (Smoke)
+- (void)loadMore;
+- (void)updateSearchResultsForSearchController:(UISearchController *)controller;
 @end
 @interface EPGViewController (Smoke)
 - (void)rebuildDates;
@@ -131,6 +137,8 @@ static void next(NSArray *steps, NSUInteger index) {
       __block UIImageView *logoA, *logoB, *staleLogo, *oversizeLogo;
       __block NSDictionary *imageStats;
       __block NSDictionary *nodeChecks;
+      __block MediaBrowserViewController *mediaPage;
+      __block UITableViewController *mediaDetail;
       NSArray *steps = @[
           ^{
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
@@ -504,6 +512,30 @@ static void next(NSArray *steps, NSUInteger index) {
             check([nodeChecks[@"stop"][@"ok"] boolValue] && !NodePluginRuntime.shared.hasActivePlugin,@"Node plugin closes without destroying the reusable engine");
             check([nodeChecks[@"saved"] isEqual:@"start-closed"],@"plugin relative data path is isolated and close hook finishes");
             NSData *diagnostic=[NSJSONSerialization dataWithJSONObject:nodeChecks options:NSJSONWritingPrettyPrinted error:NULL];[diagnostic writeToFile:[outputDir stringByAppendingPathComponent:@"node-runtime.json"] atomically:YES];
+            mediaPage=[MediaBrowserViewController new];
+            NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
+            mediaPage.sourcesProvider=^NSArray *{return @[@{@"id":@"media-ui",@"name":@"本机影视测试",@"port":@(port)}];};
+            mediaPage.onActivateService=^(NSDictionary *service,void (^done)(NSError *)){done(nil);};
+            mediaPage.onPlay=^(NSDictionary *result,NSString *title){[root playMediaResult:result name:title];};
+            [nav pushViewController:mediaPage animated:NO];
+          }},
+          @{@"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]>0;},@"run":^{
+            check([[mediaPage valueForKey:@"items"] count]==1,@"media home loads real JSON API into native poster grid");capture(self.window,@"16-media-home");
+            UISearchController *search=[mediaPage valueForKey:@"search"];search.searchBar.text=@"中文";[mediaPage updateSearchResultsForSearchController:search];
+          }},
+          @{@"until":^BOOL{return [[[mediaPage valueForKey:@"items"] firstObject][@"id"] isEqual:@"中文1"];},@"run":^{
+            check([[[mediaPage valueForKey:@"items"] firstObject][@"id"] isEqual:@"中文1"],@"media search keeps source IDs and unicode");[mediaPage loadMore];
+          }},
+          @{@"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]==2;},@"run":^{
+            check([[mediaPage valueForKey:@"items"] count]==2,@"media pagination appends without losing previous page");capture(self.window,@"17-media-search");
+            UICollectionView *grid=[mediaPage valueForKey:@"grid"];[grid.delegate collectionView:grid didSelectItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];mediaDetail=(id)nav.topViewController;
+          }},
+          @{@"until":^BOOL{return [mediaDetail.tableView numberOfSections]==3;},@"run":^{
+            check([mediaDetail.tableView numberOfSections]==3,@"media detail displays two original playback lines");capture(self.window,@"18-media-detail");
+            [mediaDetail.tableView.delegate tableView:mediaDetail.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
+          }},
+          @{@"until":^BOOL{return [[root valueForKey:@"moviePlayer"] currentItem].status==AVPlayerItemStatusReadyToPlay;},@"run":^{
+            AVPlayer *player=[root valueForKey:@"moviePlayer"];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"selected plugin episode reaches real AVPlayer ready state");capture(self.window,@"19-media-playback");[nav dismissViewControllerAnimated:NO completion:nil];[root stopPlayback];
           }}
       ];
       next(steps, 0);
