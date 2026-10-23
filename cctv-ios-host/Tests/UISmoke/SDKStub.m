@@ -82,6 +82,10 @@ static id cdnPreference;
       [self.delegate player:self loadStateDidChanged:4];
     });
 }
+- (void)seekToStartTime:(double)start endTime:(double)end completionHandler:(void (^)(BOOL))completion {
+    completion(YES);[self prepareToPlay];
+}
+- (void)backToLive {[self prepareToPlay];}
 - (void)reset {
     resets++;
     self.preparation++;

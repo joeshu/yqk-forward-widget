@@ -139,7 +139,7 @@
     NSInteger idx=self.dates.selectedSegmentIndex;if(idx<0||idx>=self.dateKeys.count)return;NSString *key=self.dateKeys[idx];NSDateFormatter *f=[self dayFormatter];self.rows=[self.allRows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]] isEqualToString:key];}]];[self.table reloadData];
     NSTimeInterval now=NSDate.date.timeIntervalSince1970;for(NSUInteger i=0;i<self.rows.count;i++){NSDictionary *row=self.rows[i];if(now>=[row[@"start"] doubleValue]&&now<[row[@"end"] doubleValue]){[self.table scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:i inSection:0] atScrollPosition:UITableViewScrollPositionMiddle animated:NO];break;}}
 }
-- (void)showSourceInfo {NSString *message=[NSString stringWithFormat:@"频道：%@\n匹配 ID：%@\n数据来源：%@\n时区：北京时间\n\n日期仅展示接口实际返回的节目；暂无回看地址的节目不能回放。",self.channelName,self.xmlSource.length?[ProfileStore epgIDForChannel:self.channel]:self.channelID,self.sourceName?:self.xmlSource?:@"央视官方 EPG"];UIAlertController *a=[UIAlertController alertControllerWithTitle:@"EPG 频道信息" message:message preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[self presentViewController:a animated:YES completion:nil];}
+- (void)showSourceInfo {NSString *message=[NSString stringWithFormat:@"频道：%@\n匹配 ID：%@\n数据来源：%@\n时区：北京时间\n\n日期仅展示接口实际返回的节目。CCTV 原生频道可点按已播节目请求回看；范围与版权由频道服务确认。",self.channelName,self.xmlSource.length?[ProfileStore epgIDForChannel:self.channel]:self.channelID,self.sourceName?:self.xmlSource?:@"央视官方 EPG"];UIAlertController *a=[UIAlertController alertControllerWithTitle:@"EPG 频道信息" message:message preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[self presentViewController:a animated:YES completion:nil];}
 
 - (NSArray<NSDictionary *> *)normalize:(NSArray *)rows {
     NSMutableArray *out = [NSMutableArray array];
@@ -191,16 +191,28 @@
     cell.textLabel.text = row[@"title"];
     cell.detailTextLabel.text = range;
 
+    BOOL replayable=self.onReplay && end<=now;
+    cell.accessoryType=replayable?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;
+    cell.selectionStyle=replayable?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;
     BOOL live = (now >= start && now < end);
     if (live) {
         cell.textLabel.textColor = HostAccent();
         cell.detailTextLabel.text = [range stringByAppendingString:@"  ● 正在播出"];
     } else if (end <= now) {
-        cell.textLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1];
+        cell.textLabel.textColor = replayable?UIColor.whiteColor:[UIColor colorWithWhite:0.45 alpha:1];
+        if(replayable)cell.detailTextLabel.text=[range stringByAppendingString:@"  点按回看"];
     } else {
         cell.textLabel.textColor = UIColor.whiteColor;
     }
     return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if(indexPath.row>=self.rows.count)return;
+    NSDictionary *program=self.rows[indexPath.row];NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+    if(!self.onReplay || [program[@"end"] doubleValue]>now)return;
+    self.onReplay(program);
 }
 
 @end

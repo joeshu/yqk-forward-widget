@@ -18,6 +18,7 @@
 #import "PlaybackStartupTrace.h"
 #import "NativeStartupTuner.h"
 #import "NativeChannelPreloader.h"
+#import "NativeTimeshiftSession.h"
 #import "PlaybackInfoViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <AVFoundation/AVFoundation.h>
@@ -28,7 +29,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.17.3";
+static NSString *const kBuildTag = @"0.17.4";
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -63,6 +64,9 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property (nonatomic, strong) PlaybackStartupTrace *startupTrace;
 @property (nonatomic, strong) NativeStartupTuner *nativeStartupTuner;
 @property (nonatomic, strong) NativeChannelPreloader *nativePreloader;
+@property(nonatomic,strong) NativeTimeshiftSession *nativeTimeshift;
+@property(nonatomic,copy) NSString *nativeTransitionKind;
+@property(nonatomic) BOOL nativeTimeShiftActive;
 @property (nonatomic) BOOL nativePlaybackFailed;
 @property (nonatomic, strong) LocalServiceReadiness *playbackReadiness;
 @property (nonatomic, strong) NSMutableDictionary<NSString *,LocalServiceReadiness *> *subscriptionReadiness;
@@ -971,6 +975,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)stopPlayback {
+    [self.nativeTimeshift cancel];self.nativeTimeshift=nil;self.nativeTransitionKind=nil;self.nativeTimeShiftActive=NO;
     self.nativeStartupTuner=nil; // Pending tuning blocks also check the playback generation.
     self.remotePlaybackWanted=NO;
     if(self.avKeepUpObserved){[self.avPlayer.currentItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp" context:kAVItemStatusContext];self.avKeepUpObserved=NO;}
@@ -1228,7 +1233,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 - (void)selectPlayerPanel {
     if(self.playbackPanel){[self.playbackPanel willMoveToParentViewController:nil];[self.playbackPanel.view removeFromSuperview];[self.playbackPanel removeFromParentViewController];self.playbackPanel=nil;}
-    NSInteger index=self.playerTabs.selectedSegmentIndex;if(index>0){UIViewController *v=index==1?[[EPGViewController alloc] initWithChannel:[self channelWithID:self.channelID]?:@{@"name":self.channelName?:@"节目单"} officialID:[self epgIDForChannel:[self channelWithID:self.channelID]]?:@""]:[self playbackInformationPage];self.playbackPanel=v;[self addChildViewController:v];[self.view addSubview:v.view];[v didMoveToParentViewController:self];}[self.view setNeedsLayout];
+    NSInteger index=self.playerTabs.selectedSegmentIndex;if(index>0){UIViewController *v=index==1?[self epgPageForChannel:self.channelID name:self.channelName]:[self playbackInformationPage];self.playbackPanel=v;[self addChildViewController:v];[self.view addSubview:v.view];[v didMoveToParentViewController:self];}[self.view setNeedsLayout];
 }
 
 - (void)presentSubscriptionActions:(NSDictionary *)channel sourceView:(UIView *)source {
@@ -1895,8 +1900,7 @@ static NSCache *LogoCache(void) {
     return nil;
 }
 - (void)openEPGforChannel:(NSString *)cid name:(NSString *)name {
-    NSString *epgID=[self epgIDForChannel:[self channelWithID:cid]];
-    [self.navigationController pushViewController:[[EPGViewController alloc] initWithChannel:[self channelWithID:cid]?:@{@"id":cid?:@"",@"name":name?:@"节目单"} officialID:epgID?:@""] animated:YES];
+    [self.navigationController pushViewController:[self epgPageForChannel:cid name:name] animated:YES];
 }
 
 - (void)restartEPGTimer {
@@ -2078,7 +2082,8 @@ static NSCache *LogoCache(void) {
         self.titleLabel.hidden = YES;
         self.infoLabel.hidden = YES;
         [self recordStartupStage:@"frame"];
-        [self log:@"首帧渲染 %.2fs · %@", self.firstFrameSeconds,self.startupTrace.summary];
+        if(self.nativeTransitionKind.length){[self log:@"原生%@首帧 %.2fs · %@",self.nativeTransitionKind,self.firstFrameSeconds,self.startupTrace.summary];self.nativeTransitionKind=nil;}
+        else [self log:@"首帧渲染 %.2fs · %@", self.firstFrameSeconds,self.startupTrace.summary];
         [self updateNowPlaying];
         [self refreshNowNext];
         [self restartEPGTimer];
@@ -2088,7 +2093,7 @@ static NSCache *LogoCache(void) {
 }
 
 - (void)prepareNextNativeChannelForGeneration:(NSUInteger)generation {
-    if(generation!=self.playbackGeneration || !self.firstRender || !self.currentPlayer || self.avPlayer || self.customCDNPreference || !CCTVBoolPreference(@"preloadNativeChannel",YES) || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
+    if(generation!=self.playbackGeneration || !self.firstRender || self.nativeTimeShiftActive || !self.currentPlayer || self.avPlayer || self.customCDNPreference || !CCTVBoolPreference(@"preloadNativeChannel",YES) || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
     NSMutableArray *native=[NSMutableArray array];
     for(NSDictionary *channel in self.allChannels)if(![channel[@"remoteURL"] length] && ![ProfileStore isHTTP:channel[@"id"]])[native addObject:channel];
     NSUInteger index=[native indexOfObjectPassingTest:^BOOL(NSDictionary *channel,NSUInteger i,BOOL *stop){return [channel[@"id"] isEqualToString:self.channelID];}];
@@ -2110,6 +2115,7 @@ static NSCache *LogoCache(void) {
     [self log:@"播放失败 %ld %@", (long)error.code, error.localizedDescription];
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 播放失败", self.channelName];
     [self.spinner stopAnimating];
+    if(self.nativeTransitionKind.length){self.nativeTransitionKind=nil;[self.nativeTimeshift cancel];[self log:@"时移操作失败，请返回直播或重新选台"];return;}
     if (error.code >= 4000 && error.code < 5000) {
         [self log:@"参数/调度错误不自动重试，请查看错误详情"];
         return;
@@ -2167,9 +2173,64 @@ static NSCache *LogoCache(void) {
     UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:[self playbackInformationPage]];HostStyleNavigation(nav);nav.navigationBar.prefersLargeTitles=NO;nav.modalPresentationStyle=UIModalPresentationPageSheet;nav.sheetPresentationController.detents=@[UISheetPresentationControllerDetent.mediumDetent,UISheetPresentationControllerDetent.largeDetent];nav.sheetPresentationController.prefersGrabberVisible=YES;[self presentViewController:nav animated:YES completion:nil];
 }
 
+- (EPGViewController *)epgPageForChannel:(NSString *)cid name:(NSString *)name {
+    NSDictionary *channel=[self channelWithID:cid]?:@{@"id":cid?:@"",@"name":name?:@"节目单"};
+    EPGViewController *page=[[EPGViewController alloc] initWithChannel:channel officialID:[self epgIDForChannel:channel]?:@""];
+    if(![channel[@"remoteURL"] length] && ![ProfileStore isHTTP:cid]){
+        __weak typeof(self) weakSelf=self;
+        page.onReplay=^(NSDictionary *program){
+            if(![weakSelf.channelID isEqualToString:cid] || !weakSelf.currentPlayer || weakSelf.avPlayer){[weakSelf showServiceError:@"请先播放这个 CCTV 频道，再选择已播节目。"];return;}
+            [weakSelf.navigationController popToViewController:weakSelf animated:YES];
+            weakSelf.playerTabs.selectedSegmentIndex=0;[weakSelf selectPlayerPanel];
+            [weakSelf seekNativeStart:[program[@"start"] doubleValue] end:[program[@"end"] doubleValue]];
+        };
+    }
+    return page;
+}
+- (void)showNativeTimeshiftActions {
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"时移 / 回看" message:@"由频道服务确认可用时间范围与版权；不支持的时间会返回失败。" preferredStyle:UIAlertControllerStyleActionSheet];
+    for(NSNumber *minutes in @[@1,@5,@30]){
+        [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"回退 %@ 分钟",minutes] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self seekNativeStart:NSDate.date.timeIntervalSince1970-minutes.doubleValue*60 end:0];}]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self returnToNativeLive];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView=self.moreBtn;sheet.popoverPresentationController.sourceRect=self.moreBtn.bounds;[self presentViewController:sheet animated:YES completion:nil];
+}
+- (void)beginNativeTransition:(NSString *)kind {
+    [self.nativePreloader cancel];[self beginPlaybackPriority];self.playbackGeneration++;
+    self.firstRender=NO;self.nativePlaybackFailed=NO;self.stallReported=NO;self.nativeTransitionKind=kind;
+    self.playStartedAt=CACurrentMediaTime();self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt];
+    self.titleLabel.text=[NSString stringWithFormat:@"%@ · %@中",self.channelName,kind];self.titleLabel.hidden=NO;[self.spinner startAnimating];[self startWatchdog];
+}
+- (void)seekNativeStart:(NSTimeInterval)start end:(NSTimeInterval)end {
+    if(!self.currentPlayer || self.avPlayer || !self.firstRender){[self showServiceError:@"请等待 CCTV 原生频道起播完成后再操作。"];return;}
+    if(!self.nativeTimeshift)self.nativeTimeshift=[[NativeTimeshiftSession alloc] initWithPlayer:self.currentPlayer];
+    [self beginNativeTransition:end==0?@"时移":@"回看"];self.nativeTimeShiftActive=YES;
+    NSUInteger generation=self.playbackGeneration;id player=self.currentPlayer;__weak typeof(self) weakSelf=self;
+    BOOL accepted=[self.nativeTimeshift seekStart:start end:end now:NSDate.date.timeIntervalSince1970 completion:^(BOOL allowed,NSError *error){
+        if(generation!=weakSelf.playbackGeneration || player!=weakSelf.currentPlayer)return;
+        if(!allowed || error){[weakSelf failNativeTransition:@"频道未允许该时间的时移/回看，请返回直播或重新选台。"];}else [weakSelf log:@"原生时移请求已完成，等待/确认首帧"];
+    }];
+    if(!accepted)[self failNativeTransition:@"当前 SDK 不支持此调用，或时间范围无效。"];
+}
+- (void)failNativeTransition:(NSString *)message {
+    [self.nativeTimeshift cancel];self.nativeTransitionKind=nil;self.nativePlaybackFailed=YES;[self.watchdog invalidate];[self.spinner stopAnimating];[self endPlaybackPriority];
+    self.titleLabel.text=[NSString stringWithFormat:@"%@ · 时移操作失败",self.channelName];[self log:@"%@",message];[self showServiceError:message];
+}
+- (void)returnToNativeLive {
+    if(!self.currentPlayer || self.avPlayer)return;
+    if(!self.nativeTimeshift)self.nativeTimeshift=[[NativeTimeshiftSession alloc] initWithPlayer:self.currentPlayer];
+    [self beginNativeTransition:@"返回直播"];self.nativeTimeShiftActive=NO;
+    if(![self.nativeTimeshift backToLive])[self failNativeTransition:@"当前 SDK 无法执行返回直播，请重新选台。"];
+}
+
 - (void)showMorePlaybackActions {
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:self.channelName ?: @"播放操作" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     [sheet addAction:[UIAlertAction actionWithTitle:self.fullscreen?@"退出全屏":@"全屏" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self toggleFullscreen]; }]];
+    if(self.currentPlayer && !self.avPlayer){
+        [sheet addAction:[UIAlertAction actionWithTitle:@"时移 / 回看" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self showNativeTimeshiftActions];}]];
+        if(self.nativeTimeShiftActive)[sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self returnToNativeLive];}]];
+    }
     [sheet addAction:[UIAlertAction actionWithTitle:@"播放信息" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self showPlaybackInfo]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"画中画" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self togglePiP]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"诊断日志" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self toggleLog]; }]];

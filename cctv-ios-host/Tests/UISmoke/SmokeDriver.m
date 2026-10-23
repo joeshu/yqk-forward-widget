@@ -20,6 +20,8 @@
 - (void)toggleLog;
 - (void)applyFilter;
 - (void)selectChannel:(NSDictionary *)channel;
+- (void)seekNativeStart:(NSTimeInterval)start end:(NSTimeInterval)end;
+- (void)returnToNativeLive;
 - (void)fetchSubscription:(NSString *)url silent:(BOOL)silent;
 - (void)beginPlaybackPriority;
 - (void)togglePlayPause;
@@ -384,6 +386,24 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             check([[root valueForKey:@"firstRender"] boolValue],@"metadata handoff reaches first render");
             [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];
+            preparedWrapper=[root valueForKey:@"currentPlayer"];configuredBeforeHandoff=[CNPlayer smokeConfigureCount];
+            [root seekNativeStart:NSDate.date.timeIntervalSince1970-60 end:0];
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue] && [[root valueForKey:@"nativeTimeShiftActive"] boolValue],@"native timeshift reaches a new frame");
+            check([root valueForKey:@"currentPlayer"]==preparedWrapper && [CNPlayer smokeConfigureCount]==configuredBeforeHandoff,@"timeshift keeps SDK session without playLIVE reconfiguration");
+            [root returnToNativeLive];
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue] && ![[root valueForKey:@"nativeTimeShiftActive"] boolValue],@"return-to-live reaches a new frame");
+            EPGViewController *page=[[EPGViewController alloc] initWithChannelID:@"cctv2" name:@"fixture"];
+            __block NSUInteger replays=0;page.onReplay=^(NSDictionary *program){replays++;};
+            NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+            [page setValue:@[@{@"start":@(now-120),@"end":@(now-60)},@{@"start":@(now+60),@"end":@(now+120)}] forKey:@"rows"];
+            [(id<UITableViewDelegate>)page tableView:nil didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]];
+            check(replays==0,@"future EPG programme cannot replay");
+            [(id<UITableViewDelegate>)page tableView:nil didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+            check(replays==1,@"past EPG programme invokes replay callback");
           }
       ];
       next(steps, 0);
