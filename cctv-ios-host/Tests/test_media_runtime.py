@@ -131,6 +131,48 @@ class MediaTests(unittest.TestCase):
             server.server_close()
             thread.join(2)
 
+    def test_catpaw_local_route_is_reachable_for_avplayer_and_head_probes(self):
+        class RouteEngine:
+            def __init__(self): self.requests = []
+            def capabilities(self): return {'capabilities': ['home', 'play', 'proxy']}
+            def call(self, operation, args):
+                self.requests.append((operation, args))
+                if operation == 'route':
+                    return {'statusCode': 200, 'headers': {'content-type': 'application/vnd.apple.mpegurl'},
+                            'body': '#EXTM3U\n#EXTINF:6,\nsegment.ts\n'}
+                return {}
+            def close(self): pass
+        engine = RouteEngine()
+        runtime = media.MediaRuntime(engine)
+        server = transport.Server(('127.0.0.1', 0), runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        def request(method, path):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+            try:
+                client.request(method, path, headers={'Range': 'bytes=0-10', 'User-Agent': 'fixture-agent'})
+                response = client.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally: client.close()
+        try:
+            path = '/spider/demo/3/proxy/index.m3u8?token=fixture'
+            status, headers, body = request('GET', path)
+            self.assertEqual((status, body), (200, b'#EXTM3U\n#EXTINF:6,\nsegment.ts\n'))
+            self.assertEqual(next(value for key, value in headers.items() if key.lower() == 'content-type'), 'application/vnd.apple.mpegurl')
+            args = engine.requests[-1][1]
+            self.assertEqual((args['method'], args['path'], args['query']['token'], args['headers']['Range']),
+                             ('GET', '/spider/demo/3/proxy/index.m3u8', 'fixture', 'bytes=0-10'))
+            self.assertEqual(args['host'], f'127.0.0.1:{server.server_port}')
+            status, _, body = request('HEAD', path)
+            self.assertEqual((status, body), (200, b''))
+            self.assertEqual(engine.requests[-1][1]['method'], 'HEAD')
+        finally:
+            server.relay.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+            runtime.close()
+
     def test_relay_rewrites_master_segments_keys_and_maps_without_open_proxy(self):
         relay = MediaRelay(limit=4)
         text = '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXT-X-MAP:URI="init.mp4"\nsegment.ts\n'

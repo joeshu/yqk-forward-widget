@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded loopback HTTP transport for local JS and Python media packages."""
 import argparse
+import base64
 import builtins
 import json
 import os
@@ -72,6 +73,12 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/media/'):
             self.server.relay.serve(self, path.rsplit('/', 1)[-1], True)
             return
+        if path.startswith('/spider/'):
+            try:
+                self.route_plugin_path('HEAD')
+            except Exception as error:
+                self.send(502, {'ok': False, 'error': str(error)}, True)
+            return
         if path.endswith(('.m3u', '.m3u8')) or path == '/m3u':
             self.send_response(200)
             self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
@@ -88,12 +95,48 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.route(True)
 
+    def route_plugin_path(self, method):
+        parts = urllib.parse.urlsplit(self.path)
+        headers = {key: self.headers.get(key, '') for key in ('User-Agent', 'Range', 'Accept', 'Referer') if self.headers.get(key)}
+        args = {'method': method, 'path': parts.path, 'query': {key: values[-1] for key, values in urllib.parse.parse_qs(parts.query).items()},
+                'headers': headers, 'host': f'127.0.0.1:{self.server.server_port}',
+                'userAgent': self.headers.get('User-Agent', '')}
+        if method not in ('GET', 'HEAD'):
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 <= length <= 65536:
+                raise MediaError('INVALID_INPUT', 'Spider 路由请求内容超过 64 KB')
+            args['body'] = json.loads(self.rfile.read(length) or b'{}')
+        result = self.server.runtime.call('route', args)
+        if not isinstance(result, dict):
+            raise MediaError('INVALID_PROXY', 'Spider 路由未返回有效响应')
+        status = max(100, min(599, int(result.get('statusCode') or 200)))
+        body = base64.b64decode(result['bodyBase64'], validate=True) if result.get('bodyBase64') else result.get('body', '')
+        if not isinstance(body, bytes):
+            body = body.encode('utf-8') if isinstance(body, str) else json.dumps(body, ensure_ascii=False).encode('utf-8')
+        if len(body) > 8 * 1024 * 1024:
+            raise MediaError('RESULT_TOO_LARGE', 'Spider 代理响应超过 8 MB')
+        self.send_response(status)
+        route_headers = result.get('headers') if isinstance(result.get('headers'), dict) else {}
+        for name, value in route_headers.items():
+            if str(name).lower() not in ('connection', 'content-length', 'transfer-encoding', 'host') and '\r' not in str(name) + str(value) and '\n' not in str(name) + str(value):
+                self.send_header(str(name), str(value))
+        if not any(str(name).lower() == 'content-type' for name in route_headers):
+            self.send_header('Content-Type', 'application/json; charset=utf-8' if isinstance(result.get('body'), dict) else 'application/octet-stream')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        if method != 'HEAD':
+            self.wfile.write(body)
+
     def route(self, post):
         runtime = self.server.runtime
         try:
             parts = urllib.parse.urlsplit(self.path)
             if parts.path.startswith('/media/'):
                 self.server.relay.serve(self, parts.path.rsplit('/', 1)[-1])
+                return
+            if parts.path.startswith('/spider/'):
+                self.route_plugin_path('POST' if post else 'GET')
                 return
             if parts.path == '/proxy':
                 args = {key: values[-1] for key, values in urllib.parse.parse_qs(parts.query).items()}
@@ -173,6 +216,7 @@ class Handler(BaseHTTPRequestHandler):
                 args['page'] = max(1, min(10000, int(args['page'])))
             if isinstance(args.get('filters'), str):
                 args['filters'] = json.loads(args['filters'])
+            args.setdefault('host', f'127.0.0.1:{self.server.server_port}')
             result = runtime.call(operation, args)
             if operation == 'play' and result.get('headers') and not result.get('parse'):
                 token = self.server.relay.register(result['url'], result['headers'])

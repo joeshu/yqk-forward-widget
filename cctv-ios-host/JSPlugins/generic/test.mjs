@@ -14,7 +14,7 @@ const host={
   __hostFetchSync(url,options){return {code:200,url,headers:{'Content-Type':'text/html'},content:'<div class="list"><a href="/detail/1"><img src="https://fixture.test/p.jpg"><span class="remark">HD</span>Rule movie</a></div>'}},
   __hostSetTimeout(fn,ms){const id=next++;timers.set(id,setTimeout(()=>{timers.delete(id);fn()},ms));return id},
   __hostClearTimeout(id){clearTimeout(timers.get(id));timers.delete(id)},__hostAbortFetch(){},
-  __hostFetch(url,options,callback){const request={url,...JSON.parse(options)};requests.push(request);setTimeout(()=>callback({status:200,url,headers:{'Content-Type':'application/json'},base64:Buffer.from(JSON.stringify({received:request.body})).toString('base64')}),0);return next++},
+  __hostFetch(url,options,callback){const request={url,...JSON.parse(options)};if(request.bodyBase64)request.body=Buffer.from(request.bodyBase64,'base64').toString();requests.push(request);setTimeout(()=>callback({status:200,url,headers:{'Content-Type':'application/json'},base64:Buffer.from(JSON.stringify({received:request.body})).toString('base64')}),0);return next++},
 }
 const context=vm.createContext(host)
 vm.runInContext(readFileSync(new URL('../../GeneratedJS/js-runtime.bundle.js',import.meta.url),'utf8'),context)
@@ -74,6 +74,27 @@ try{
   assert.equal(reply.ok,true,JSON.stringify(reply))
   const played=typeof reply.result==='string'?JSON.parse(reply.result):reply.result
   assert.equal(played.url,'https://fixture.test/movie.mp4')
+  await invoke('stop')
+  files={'spider/video/source.js':`import req from '../../util/req.js';import {jsoup} from '../../util/htmlParser.js';import {getHomeCache,setHomeCache,buildHomeCacheKey} from '../../util/home-cache.js';import iconv from 'iconv-lite';import http2 from 'http2';
+    export default function createSpider(name,config){const checkHttp2=()=>new Promise((resolve,reject)=>{const client=http2.connect('https://fixture.test'),stream=client.request({':path':'/h2',':method':'POST'});stream.setEncoding('utf8');let status=0,body='';stream.on('response',headers=>status=headers[':status']);stream.on('data',chunk=>body+=chunk);stream.on('error',error=>{client.close();reject(error)});stream.on('end',()=>{client.close();resolve(status===200&&body.includes('http2-fixture'))});stream.end('http2-fixture')});return {meta:{key:'catpaw_fixture',name:'CatPaw fixture',type:3},api:async fastify=>{
+      fastify.post('/init',async()=>{local.set('fixture','ready','yes');return {ready:true}});
+      fastify.post('/home',async request=>{const key=buildHomeCacheKey('fixture',{});setHomeCache(key,'cached');const gbk=iconv.decode(Buffer.from([0xd6,0xd0,0xce,0xc4]),'gbk'),h2=await checkHttp2();return {class:[{type_id:'movie',type_name:'电影'}],filters:{movie:[]},list:[{vod_id:'one',vod_name:req.get&&local.get('fixture','ready')==='yes'&&getHomeCache(key)==='cached'&&h2?jsoup().pq('<b>'+gbk+'片</b>')('b').text():'compat error'}]}});
+      fastify.post('/category',async request=>({page:Number(request.body.page),pagecount:2,filters:request.body.filters,list:[{vod_id:request.body.id,vod_name:'分类结果'}]}));
+      fastify.post('/search',async request=>({page:Number(request.body.page),pagecount:1,list:[{vod_id:request.body.wd,vod_name:request.body.wd}]}));
+      fastify.post('/detail',async request=>({list:[{vod_id:request.body.id[0],vod_name:'详情',vod_play_from:'线路A$$$线路B',vod_play_url:'第一集$opaque1$$$正片$opaque2'}]}));
+      fastify.post('/play',async request=>({parse:1,url:'https://fixture.test/watch/'+request.body.id,header:{Referer:request.server.prefix}}));
+      fastify.get('/proxy/:file',async(request,reply)=>reply.type('application/vnd.apple.mpegurl').send('#EXTM3U\\n'+request.params.file));
+    }}}`}
+  reply=await invoke('start',{entry:'spider/video/source.js',moduleType:'esm',protocol:'catvod-spider',name:'Spider fixture'})
+  assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.protocol,'catvod-spider')
+  assert.equal((await invoke('home')).result.list[0].vod_name,'中文片')
+  assert.ok(requests.some(request=>request.url==='https://fixture.test/h2'))
+  assert.equal((await invoke('category',{categoryId:'movie',page:2,filters:{area:'大陆'}})).result.page,2)
+  assert.equal((await invoke('search',{keyword:'关键词',page:1})).result.list[0].vod_id,'关键词')
+  assert.equal((await invoke('detail',{id:'movie/one'})).result.list[0].vod_play_url,'第一集$opaque1$$$正片$opaque2')
+  reply=await invoke('play',{lineId:'线路A',id:'opaque1'});assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.parse,1)
+  reply=await invoke('route',{method:'GET',path:'/spider/catpaw_fixture/3/proxy/index.m3u8',host:'127.0.0.1:18780'})
+  assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.body,'#EXTM3U\nindex.m3u8');assert.equal(reply.result.headers['content-type'],'application/vnd.apple.mpegurl')
   await invoke('stop')
   console.log('PASS: original imported ESM/CommonJS, relative and JSON dependencies, CryptoJS hash, Cheerio, POST, CatVod methods, opaque IDs and package path boundary')
 }finally{for(const timer of timers.values())clearTimeout(timer)}

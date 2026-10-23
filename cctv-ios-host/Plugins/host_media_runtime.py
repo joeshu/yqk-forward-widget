@@ -290,7 +290,7 @@ class MediaRuntime:
                 self.cache.move_to_end(key)
                 return json.loads(entry[1])
         raw = self.engine.call(operation, args)
-        if operation == 'proxy':
+        if operation in ('proxy', 'route'):
             return raw
         if operation == 'home':
             value = home(raw)

@@ -71,6 +71,20 @@ class NativePackageTests(unittest.TestCase):
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['engine'], result['manifest']['moduleType']), ('node', 'esm'))
 
+    def test_catpaw_fastify_spider_is_identified_as_native_esm_route_plugin(self):
+        source = '''export default function createSpider(name, config) {
+          return {meta:{key:'fixture',name:'Fixture',type:3},api:async fastify=>{
+            fastify.post('/init',async()=>({}));fastify.post('/home',async()=>({class:[],list:[]}));
+            fastify.post('/category',async()=>({list:[]}));fastify.post('/detail',async()=>({list:[]}));
+            fastify.post('/play',async()=>({parse:0,url:'https://fixture.test/video.m3u8'}));fastify.post('/search',async()=>({list:[]}));
+          }};
+        }'''
+        result = self.inspect(self.archive({'package.json': json.dumps({'type': 'module', 'dependencies': {'cheerio': '^1.0.0'}}),
+                                           'index.js': source}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol'], result['manifest']['moduleType']),
+                         ('javascript', 'catvod-spider', 'esm'))
+
     def test_python_spider_is_recognized_without_executing_user_code(self):
         marker = self.folder / 'must-not-run'
         file = self.folder / '看剧.py'

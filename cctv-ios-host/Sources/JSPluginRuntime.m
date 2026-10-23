@@ -5,6 +5,7 @@
 #include <math.h>
 
 static NSUInteger const JSMaxBody = 1024 * 1024;
+static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
 @interface JSPluginRuntime () <NSURLSessionDataDelegate, NSURLSessionTaskDelegate>
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic, strong) JSContext *context;
@@ -75,7 +76,8 @@ static NSUInteger const JSMaxBody = 1024 * 1024;
 - (NSNumber *)keyForTask:(NSURLSessionTask *)task { for(NSNumber *key in self.requests)if(self.requests[key][@"task"]==task)return key;return nil; }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {
     NSNumber *key=[self keyForTask:task];
-    if(!key || response.expectedContentLength>(long long)JSMaxBody || ![response isKindOfClass:NSHTTPURLResponse.class]){
+    NSUInteger limit=self.genericMode?JSMaxGenericResponse:JSMaxBody;
+    if(!key || response.expectedContentLength>(long long)limit || ![response isKindOfClass:NSHTTPURLResponse.class]){
         completion(NSURLSessionResponseCancel);if(key)[self fetchFinished:key error:@"JS 上游响应过大或无效"];return;
     }
     self.requests[key][@"response"]=response;completion(NSURLSessionResponseAllow);
@@ -83,7 +85,8 @@ static NSUInteger const JSMaxBody = 1024 * 1024;
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
     NSNumber *key=[self keyForTask:task];if(!key)return;
     NSMutableData *body=self.requests[key][@"data"];
-    if(body.length+data.length>JSMaxBody){[task cancel];[self fetchFinished:key error:@"JS 上游响应超过 1MB"];return;}[body appendData:data];
+    NSUInteger limit=self.genericMode?JSMaxGenericResponse:JSMaxBody;
+    if(body.length+data.length>limit){[task cancel];[self fetchFinished:key error:self.genericMode?@"JS 上游响应超过 4MB":@"JS 上游响应超过 1MB"];return;}[body appendData:data];
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
     NSNumber *key=[self keyForTask:task];if(key)[self fetchFinished:key error:error.localizedDescription];

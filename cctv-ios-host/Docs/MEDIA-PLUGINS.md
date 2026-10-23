@@ -16,7 +16,8 @@
 
 | 类型 | 本机引擎 | 接口 |
 | --- | --- | --- |
-| 普通 JS | JavaScriptCore；CommonJS `require()` 或 npm dependencies 默认走 Node.js Mobile | home/category/search/detail/play，可选 channels/catalog/resolve |
+| 普通 JS | JavaScriptCore；CommonJS `require()` 或非 Spider npm dependencies 默认走 Node.js Mobile | home/category/search/detail/play，可选 channels/catalog/resolve |
+| CatPaw JS Spider | JavaScriptCore 本机路由适配器 | ESM 默认导出的工厂函数或旧式对象；运行 `api(fastify)` 的 init/home/category/detail/play/search 路由 |
 | CatVod JS | JavaScriptCore 或清单指定 Node | home/category/search/detail/play，亦支持 homeContent 等别名 |
 | drpy 规则 | JavaScriptCore + 固定版本 dr_py 引擎 | 声明 `var/let/const rule = {...}` 的规则文件 |
 | Python Spider | CPython 3.13 | Spider.init/homeContent/homeVideoContent/categoryContent/searchContent/detailContent/playerContent/destroy |
@@ -42,7 +43,22 @@ ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。
 }
 ```
 
-`runtime` 支持 `javascript`、`python`、`node`。`protocol` 支持 `cctvhost.media/1`、`catvod-js`、`drpy`、`python-spider`、`python-http`、`iptv-extractor`、`catpaw-http`。JS 的 moduleType 为 `esm`、`commonjs` 或普通规则使用的 `script`。
+`runtime` 支持 `javascript`、`python`、`node`。`protocol` 支持 `cctvhost.media/1`、`catvod-js`、`catvod-spider`、`drpy`、`python-spider`、`python-http`、`iptv-extractor`、`catpaw-http`。JS 的 moduleType 为 `esm`、`commonjs` 或普通规则使用的 `script`。手册里的 `export default function createSpider(name, config) { return { meta, api(fastify) } }` 和旧版 `export default { meta, api }` 均可被识别；CatPaw API 请求会按 CatVod 字段传递（搜索 `wd`、分类 `id/page/filters`、详情 `id[]`、播放 `flag/id`）。
+
+CatPaw Spider 的常用 `util/req.js`、`util/htmlParser.js`、缓存、并发、通用工具及运行时配置导入映射到本机兼容模块；`axios`、`cheerio`、`crypto-js`、`iconv-lite`、`qs` 等通过应用内的 JS 依赖注册表提供。ZIP 自带的其它 JS 依赖仍须保持在 ZIP 中。Fastify 标准 `get/post` 路由可在本机服务下调用；`/spider/<key>/3/...` 私有路由同样可从 AVPlayer 请求，适合返回重写后的 HLS 清单。`parse: 1` 会交给应用的网页播放页，`parse: 0` 则交给 AVPlayer；本机播放器不会把解析页面冒充媒体流。
+
+手动声明 CatPaw Spider 时使用：
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "我的影视源",
+  "runtime": "javascript",
+  "protocol": "catvod-spider",
+  "moduleType": "esm",
+  "entry": "spider/video/source.js"
+}
+```
 
 Python Spider 示例只需将 runtime 改为 `python`、protocol 改为 `python-spider`、entry 指向原 `.py` 文件。单个包含 Spider 类的 Python 文件通常无需清单。内置提供 base.spider 兼容层，以及 requests、BeautifulSoup、html5lib 等纯 Python 依赖；包自身的其他依赖也需一并提供。
 
