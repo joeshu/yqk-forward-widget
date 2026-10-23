@@ -1,6 +1,6 @@
 # 央视影音 7.9.31 IPA 研究与 CCTVHost 0.17.4
 
-用户指定样本：`cctv-app-udrm/cn.vuclip.mobiletv-7.9.31-eeveedecrypter.ipa`，74,093,434 字节，SHA256 `e7b153ab80a17a646d7011ebedc17b786835ab27feba4959af07bcc7ec8c9315`。主程序声明 7.9.31、最低 iOS 15，主 Mach-O 的 cryptid=0。
+用户指定样本：`cctv-app-udrm/cn.vuclip.mobiletv-7.9.31-eeveedecrypter.ipa`，74,093,434 字节，SHA256 `e7b153ab80a17a646d7011ebedc17b786835ab27feba4959af07bcc7ec8c9315`。主程序声明 7.9.31、最低 iOS 15，主 Mach-O 的 cryptid=0。已核对 main 分支该文件最近提交的 Git blob 为 `0b85700ff9fa586cc558c262368afef8d16728b2`，与本地研究文件一致。
 
 本次检查包结构、前端 Objective-C 接口、配套框架依赖和时移调用 ABI；不执行原 App，不修改授权、许可或媒体加密流程。没有向业务服务器注册新设备。
 
@@ -11,7 +11,7 @@
 3. SDK 内部 endTime==0 进入时移，endTime 非零进入有结束时间的回看。版权、可用地址和服务支持范围仍由原 SDK 检查。
 4. 主程序的 `registerDeviceWithRetryTimes:`、`registerDeviceInternal:` 实际属于 **EBAppLogRegisterEngine**（统计组件）；不能把这些名字当成 ytpcloudws 注册。主程序及本次可见包内容没有找到 ytpcloudws/JCE 对应宿主接口的直接证据，不能据此实现另一个未知 SDK 协议。
 5. 包中另有 xnet.framework。CNPlayerSDK 对它使用 **LC_LOAD_WEAK_DYLIB**，解释了当前宿主没有嵌入 xnet 仍可原生播放。xnet 内存在 HlsServer、TS 处理、xdfs/cache 及 `xnet/live/hls/max_ts_buffer` 等实现/配置线索。
-6. xnet 的存在不等于当前直播实际启用该缓存。尚缺匹配版本的初始化、SDK 选路、配置生效、命中统计及上传行为合同。本次没有盲目嵌入或激活它。它也不等同于 CicadaCacheConfig；此前上游 Cicada 直接 URL HLS 的缓存限制不能用于断言 xnet 没有分片缓存。
+6. xnet 的存在不等于当前直播实际启用该缓存。进一步找到 CNXNetManager 的 `configXNetWithAppID:appKey:appSecret:isDebug:`、`startLiveP2PWithURL:xresid:`、`startVODP2PWithURL:xresid:` 等初始化/选路候选接口，但没有将其当作已获验证的缓存开关。尚缺匹配版本的有效初始化配置、SDK 选路、配置生效、命中统计及上传行为合同。本次没有盲目嵌入或激活它。它也不等同于 CicadaCacheConfig；此前上游 Cicada 直接 URL HLS 的缓存限制不能用于断言 xnet 没有分片缓存。
 7. App 里名为 TimeShiftHelper 的类还有 domain/appId/bizId 和腾讯直播 URL 格式，不能把所有名为 timeshift 的代码都认作 JCE。
 
 接口摘要见 [JSON 证据](ipa-7.9.31-interface-evidence.json)。`tools/ipa/objc-method-index.py` 是本样本使用的离线 Mach-O 元数据索引工具；只读本地解包后的可执行文件，输出类/方法/编码。支持本样本遇到的常规及相对方法表、offset chained 指针，不声明是任意 Mach-O 的通用解析器。
