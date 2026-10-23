@@ -10,6 +10,7 @@
 #import "ConfigCenterViewController.h"
 #import "HostTheme.h"
 #import "HostImageLoader.h"
+#import "HostLogBuffer.h"
 #import "HostToolbar.h"
 #import "ProfileStore.h"
 #import "XMLTVStore.h"
@@ -119,7 +120,9 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property (nonatomic, strong) NSMutableString *logBuffer;
 @property (nonatomic, copy) NSString *diagnosticLogPath;
 @property (nonatomic, strong) dispatch_queue_t diagnosticLogQueue;
-@property (nonatomic, strong) NSMutableString *pendingLogWrites;
+@property (nonatomic, strong) HostLogBuffer *pendingLogWrites;
+@property (nonatomic, strong) HostLogBuffer *pendingLogDisplay;
+@property (nonatomic) BOOL diagnosticWriteInProgress;
 @property (nonatomic, strong) NSTimer *logFlushTimer;
 @property (nonatomic, assign) NSUInteger diagnosticLogGeneration;
 @property (nonatomic, strong) UITextView *logView;
@@ -175,7 +178,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.gridMode = [[NSUserDefaults standardUserDefaults] objectForKey:@"channelGridMode"] ? [[NSUserDefaults standardUserDefaults] boolForKey:@"channelGridMode"] : YES;
     self.logBuffer = [NSMutableString string];
     self.diagnosticLogQueue = dispatch_queue_create("com.cctvhost.diagnostic-log", DISPATCH_QUEUE_SERIAL);
-    self.pendingLogWrites = [NSMutableString string];
+    self.pendingLogWrites = [[HostLogBuffer alloc] initWithMaximumCharacters:65536];
+    self.pendingLogDisplay = [[HostLogBuffer alloc] initWithMaximumCharacters:16000];
     self.logFlushTimer = [NSTimer scheduledTimerWithTimeInterval:1 target:self selector:@selector(flushDiagnosticLog) userInfo:nil repeats:YES];
     NSString *supportDir = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
     self.diagnosticLogPath = [[supportDir stringByAppendingPathComponent:@"ysp"] stringByAppendingPathComponent:@"cctvhost.log"];
@@ -247,61 +251,61 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     }
 }
 - (void)persistDiagnosticLine:(NSString *)line {
-    @synchronized (self.pendingLogWrites) {
-        [self.pendingLogWrites appendString:line];
-    }
+    [self.pendingLogWrites append:line];
 }
 - (void)flushDiagnosticLog {
-    __block NSString *batch=nil;
-    __block NSUInteger generation=0;
-    @synchronized (self.pendingLogWrites) {
-        if (!self.pendingLogWrites.length) return;
-        batch=[self.pendingLogWrites copy];
-        generation=self.diagnosticLogGeneration;
-        [self.pendingLogWrites setString:@""];
+    NSString *batch;NSUInteger generation;
+    @synchronized(self.pendingLogWrites) {
+        if(self.diagnosticWriteInProgress || !self.pendingLogWrites.length || !self.diagnosticLogPath.length)return;
+        self.diagnosticWriteInProgress=YES;generation=self.diagnosticLogGeneration;batch=[self.pendingLogWrites drain];
     }
-    if (!self.diagnosticLogPath.length) return;
-    dispatch_async(self.diagnosticLogQueue, ^{
-        @synchronized (self.pendingLogWrites) { if (generation != self.diagnosticLogGeneration) return; }
-        NSFileManager *fm=[NSFileManager defaultManager];
-        [fm createDirectoryAtPath:[self.diagnosticLogPath stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
-        NSFileHandle *fh=[NSFileHandle fileHandleForWritingAtPath:self.diagnosticLogPath];
-        if (!fh) { [batch writeToFile:self.diagnosticLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil]; return; }
-        [fh seekToEndOfFile]; [fh writeData:[batch dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile];
-        NSDictionary *a=[fm attributesOfItemAtPath:self.diagnosticLogPath error:nil];
-        if ([a fileSize] > 512*1024) {
-            NSData *d=[NSData dataWithContentsOfFile:self.diagnosticLogPath];
-            if (d.length > 256*1024) {
-                NSData *tail=[d subdataWithRange:NSMakeRange(d.length-256*1024,256*1024)];
-                [tail writeToFile:self.diagnosticLogPath atomically:YES];
+    dispatch_async(self.diagnosticLogQueue, ^{@autoreleasepool {
+        NSFileHandle *file=nil;
+        @try {
+            @synchronized(self.pendingLogWrites){if(generation!=self.diagnosticLogGeneration)return;}
+            NSFileManager *fm=NSFileManager.defaultManager;
+            [fm createDirectoryAtPath:self.diagnosticLogPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
+            if(![fm fileExistsAtPath:self.diagnosticLogPath])[fm createFileAtPath:self.diagnosticLogPath contents:nil attributes:nil];
+            file=[NSFileHandle fileHandleForWritingAtPath:self.diagnosticLogPath];
+            [file seekToEndOfFile];[file writeData:[batch dataUsingEncoding:NSUTF8StringEncoding]];[file closeFile];file=nil;
+            unsigned long long size=[[fm attributesOfItemAtPath:self.diagnosticLogPath error:NULL] fileSize];
+            if(size>512*1024){
+                file=[NSFileHandle fileHandleForReadingAtPath:self.diagnosticLogPath];[file seekToFileOffset:size-256*1024];
+                NSData *tail=[file readDataOfLength:256*1024];[file closeFile];file=nil;
+                NSData *newline=[@"\n" dataUsingEncoding:NSUTF8StringEncoding];
+                NSRange boundary=[tail rangeOfData:newline options:0 range:NSMakeRange(0,tail.length)];
+                if(boundary.location!=NSNotFound){NSUInteger start=NSMaxRange(boundary);[[tail subdataWithRange:NSMakeRange(start,tail.length-start)] writeToFile:self.diagnosticLogPath atomically:YES];}
             }
+        } @catch(NSException *exception){NSLog(@"[CCTVHost] diagnostic log write failed: %@",exception.name);}
+        @finally {
+            @try{[file closeFile];}@catch(NSException *exception){}
+            @synchronized(self.pendingLogWrites){self.diagnosticWriteInProgress=NO;}
         }
-    });
+    }});
 }
 - (void)log:(NSString *)format, ... {
-    va_list ap; va_start(ap, format);
-    NSString *msg = [[NSString alloc] initWithFormat:format arguments:ap];
-    va_end(ap);
-    NSString *line=[NSString stringWithFormat:@"[%@] %@\n",[[NSDate date] description],msg];
-    NSLog(@"[CCTVHost] %@", msg);
-    [self persistDiagnosticLine:line];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self.logBuffer appendFormat:@"%@\n", msg];
-        if (self.logBuffer.length > 20000) {
-            [self.logBuffer deleteCharactersInRange:NSMakeRange(0, self.logBuffer.length - 16000)];
-        }
-        if (self.logVisible && !self.logRefreshPending) {
-            self.logRefreshPending = YES;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                self.logRefreshPending = NO;
-                if (!self.logVisible) return;
-                self.logView.text = self.logBuffer;
-                [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length, 0)];
+    va_list ap;va_start(ap,format);NSString *msg=[[NSString alloc] initWithFormat:format arguments:ap];va_end(ap);
+    if(msg.length>4096){NSUInteger end=4096;unichar last=[msg characterAtIndex:end-1];if(last>=0xd800 && last<=0xdbff)end--;msg=[[msg substringToIndex:end] stringByAppendingString:@"… [日志已截断]"];}
+    [self persistDiagnosticLine:[NSString stringWithFormat:@"[%@] %@\n",NSDate.date.description,msg]];
+    // One pending UI delivery for all producers, rather than one main-queue
+    // block per Python print(). The bounded tail survives a blocked UI thread.
+    if(![self.pendingLogDisplay append:[msg stringByAppendingString:@"\n"]])return;
+    __weak typeof(self) weakSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,100*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
+        RootViewController *owner=weakSelf;if(!owner)return;
+        NSString *batch=[owner.pendingLogDisplay drain];if(!batch.length)return;
+        [owner.logBuffer appendString:batch];
+        if(owner.logBuffer.length>20000){NSUInteger remove=owner.logBuffer.length-16000;unichar next=[owner.logBuffer characterAtIndex:remove];if(next>=0xdc00 && next<=0xdfff)remove++;[owner.logBuffer deleteCharactersInRange:NSMakeRange(0,remove)];}
+        NSString *summary=[[batch stringByTrimmingCharactersInSet:NSCharacterSet.newlineCharacterSet] componentsSeparatedByString:@"\n"].lastObject?:@"";
+        NSLog(@"[CCTVHost] %@",summary);
+        if(owner.logVisible && !owner.logRefreshPending){
+            owner.logRefreshPending=YES;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
+                owner.logRefreshPending=NO;if(!owner.logVisible)return;owner.logView.text=owner.logBuffer;[owner.logView scrollRangeToVisible:NSMakeRange(owner.logView.text.length,0)];
             });
         }
-        NSString *one = [msg componentsSeparatedByString:@"\n"].firstObject ?: @"";
-        if (one.length > 30) one = [[one substringToIndex:30] stringByAppendingString:@"…"];
-        self.infoLabel.text = one;
+        if(summary.length>30)summary=[[summary substringToIndex:30] stringByAppendingString:@"…"];
+        owner.infoLabel.text=summary;
     });
 }
 
@@ -500,8 +504,9 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     });
 }
 - (void)clearDiagnosticLog {
+    [self.pendingLogDisplay clear];
     [self.logBuffer setString:@""];
-    @synchronized (self.pendingLogWrites) { self.diagnosticLogGeneration++; [self.pendingLogWrites setString:@""]; }
+    @synchronized (self.pendingLogWrites) { self.diagnosticLogGeneration++; [self.pendingLogWrites clear]; }
     dispatch_async(self.diagnosticLogQueue, ^{ [@"" writeToFile:self.diagnosticLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil]; });
     self.logView.text = @"";
 }

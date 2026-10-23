@@ -15,6 +15,6 @@ class PersistentLogTests(unittest.TestCase):
   self.assertIn('UIActivityViewController',S)
  def test_clear_removes_buffer_and_persistent_log(self):
   body=S.split('- (void)clearDiagnosticLog {',1)[1].split('\n}',1)[0]
-  self.assertIn('[self.pendingLogWrites setString:@""]',body)
+  self.assertIn('[self.pendingLogWrites clear]',body)
   self.assertIn('self.diagnosticLogPath atomically:YES',body)
 if __name__=='__main__':unittest.main()
