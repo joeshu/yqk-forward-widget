@@ -30,7 +30,7 @@ static inline void HostStyleNavigation(UINavigationController *nav) {
     nav.navigationBar.standardAppearance = a;
     nav.navigationBar.scrollEdgeAppearance = a;
     nav.navigationBar.compactAppearance = a;
-    nav.navigationBar.isTranslucent = YES;
+    nav.navigationBar.translucent = YES;
     nav.navigationBar.prefersLargeTitles = YES;
     nav.navigationBar.tintColor = HostAccent();
 }
