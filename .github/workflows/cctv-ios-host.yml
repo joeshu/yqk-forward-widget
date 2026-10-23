@@ -2,7 +2,7 @@ name: Build CCTVHost unsigned IPA
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/cctv-fast-switch]
     paths:
       - 'cctv-ios-host/**'
       - '.github/workflows/cctv-ios-host.yml'
