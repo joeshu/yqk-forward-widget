@@ -74,7 +74,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('mediumDetent', self.detail)
         self.assertIn('UITableViewCellAccessoryCheckmark', self.detail)
         self.assertIn('scopeStack', self.detail)
-        self.assertIn('@"url":source[@"url"]', self.detail)
+        self.assertIn('NSString *url=[source[@"url"] isKindOfClass:NSString.class]', self.detail)
+        self.assertIn('@"url":url', self.detail)
 
     def test_local_interface_probe_is_bounded_and_does_not_follow_redirects(self):
         self.assertIn('completionHandler(nil)', self.resource_detail)
