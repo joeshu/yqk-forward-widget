@@ -74,6 +74,12 @@ class MediaTests(unittest.TestCase):
                 media.playback(result)
         value = media.playback({'url': 'https://a.test/video', 'header': {'X-Foo': 'ok', 'Cookie': 'one\r\ntwo', 'Host': 'spoof'}})
         self.assertEqual(value['headers'], {'X-Foo': 'ok'})
+        choices = media.playback({'url': {'values': [{'name': '1080P', 'url': 'https://a.test/1080.m3u8'},
+                                                      {'name': '720P', 'url': 'https://a.test/720.m3u8'}],
+                                  'headers': {'Referer': 'https://a.test/'}}})
+        self.assertEqual(choices['url'], 'https://a.test/1080.m3u8')
+        self.assertEqual(choices['alternates'][1]['name'], '720P')
+        self.assertEqual(choices['headers']['Referer'], 'https://a.test/')
 
     def test_busy_spider_does_not_execute_concurrently(self):
         self.engine.lock.acquire()

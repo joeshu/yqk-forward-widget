@@ -85,6 +85,35 @@ class NativePackageTests(unittest.TestCase):
         self.assertEqual((result['engine'], result['protocol'], result['manifest']['moduleType']),
                          ('javascript', 'catvod-spider', 'esm'))
 
+    def test_catpaw_open_node_server_is_found_under_src(self):
+        package = {'type': 'module', 'dependencies': {'fastify': '^4.26.0'}}
+        index = "import router from './router.js';let server;export async function start(config){server=fastify();server.config=config;server.register(router);await server.listen({port:0,host:'127.0.0.1'})}export async function stop(){await server.close()}"
+        router = "const spiderPrefix='/spider';fastify.get('/config',async()=>({video:{sites:[]}}));fastify.register(spider.api,{prefix:spiderPrefix+'/'+spider.meta.key+'/'+spider.meta.type})"
+        result = self.inspect(self.archive({'package.json': json.dumps(package), 'src/index.js': index, 'src/router.js': router}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol'], result['manifest']['entry']),
+                         ('node', 'catpaw-http', 'src/index.js'))
+
+    def test_catpaw_server_with_inline_routes_is_recognized(self):
+        source = '''import fastify from 'fastify';let active;
+          export function createService(){const server=fastify();server.get('/config',async()=>({video:{sites:[]}}));
+          server.post('/spider/demo/3/home',async()=>({class:[]}));return server;}
+          export function start(input={}){active=createService();return active.listen({host:'127.0.0.1',port:0})}
+          export function stop(){return active?.close()}'''
+        result = self.inspect(self.archive({'index.js': source, 'package.json': json.dumps({'type': 'module', 'dependencies': {'fastify': '^4.0.0'}})}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol']), ('node', 'catpaw-http'))
+
+    def test_catvod_quickjs_methods_and_tvbox_manifest_alias_are_recognized(self):
+        source = "export default site=>({async init(ext){},async home(filter){return {class:[]}},async homeVod(){return {list:[]}},async category(tid,pg,filter,extend){return {list:[]}},async search(key,quick,pg){return {list:[]}},async detail(id){return {list:[]}},async play(flag,id,vipFlags){return {parse:0,url:id}}})"
+        inferred = self.inspect(self.archive({'index.mjs': source}))
+        self.assertTrue(inferred['ok'], inferred)
+        self.assertEqual((inferred['engine'], inferred['protocol']), ('javascript', 'catvod-js'))
+        for protocol in ('tvbox', 'tvbox-js'):
+            aliased = self.inspect(self.archive({'cctvhost.json': json.dumps({'entry': 'index.mjs', 'runtime': 'javascript', 'protocol': protocol, 'moduleType': 'esm'}), 'index.mjs': source}))
+            self.assertTrue(aliased['ok'], aliased)
+            self.assertEqual(aliased['protocol'], 'catvod-js')
+
     def test_python_spider_is_recognized_without_executing_user_code(self):
         marker = self.folder / 'must-not-run'
         file = self.folder / '看剧.py'

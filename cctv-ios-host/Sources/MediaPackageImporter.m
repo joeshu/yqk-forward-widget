@@ -107,20 +107,36 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(!entry.length){
         entry=package[@"module"]?:package[@"main"];
         if([entry hasPrefix:@"./"])entry=[entry substringFromIndex:2];
-        if(!entry.length)for(NSString *candidate in @[@"index.js",@"index.mjs",@"index.cjs",@"spider.py",@"main.py"]){if([fm fileExistsAtPath:[root stringByAppendingPathComponent:candidate]]){entry=candidate;break;}}
+        if(!entry.length)for(NSString *candidate in @[@"index.js",@"index.mjs",@"index.cjs",@"src/index.js",@"src/index.mjs",@"nodejs/src/index.js",@"spider.py",@"main.py"]){if([fm fileExistsAtPath:[root stringByAppendingPathComponent:candidate]]){entry=candidate;break;}}
         if(!entry.length){NSMutableArray *candidates=[NSMutableArray array];for(NSString *name in [fm contentsOfDirectoryAtPath:root error:NULL])if([@[@"py",@"js",@"mjs",@"cjs"] containsObject:name.pathExtension.lowercaseString])[candidates addObject:name];if(candidates.count==1)entry=candidates.firstObject;}
     }
     if(!SafeRelative(entry) || ![fm fileExistsAtPath:[root stringByAppendingPathComponent:entry]]){PackageError(error,@"无法识别入口；请在 cctvhost.json 中指定 entry");return nil;}
     NSString *text=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:entry]],PackageFileLimit,error) encoding:NSUTF8StringEncoding];if(!text.length){PackageError(error,@"入口不是有效 UTF-8 文本或文件过大");return nil;}
     NSString *runtime=result[@"runtime"],*protocol=result[@"protocol"],*moduleType=result[@"moduleType"];
+    NSString *routerPath=[entry.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"router.js"];
+    if([routerPath isEqual:@"./router.js"])routerPath=@"router.js";
+    NSData *routerData=ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:routerPath]],PackageFileLimit,NULL);
+    NSString *routerText=[[NSString alloc] initWithData:routerData encoding:NSUTF8StringEncoding]?:@"";
+    if(!routerText.length && [fm fileExistsAtPath:[root stringByAppendingPathComponent:@"src/router.js"]])routerText=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:@"src/router.js"]],PackageFileLimit,NULL) encoding:NSUTF8StringEncoding]?:@"";
     BOOL catSpider=[text rangeOfString:@"fastify\\s*\\.\\s*post\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound && [text containsString:@"/home"] && [text containsString:@"/detail"] && [text containsString:@"/play"] && [text containsString:@"meta"];
+    NSString *serviceText=[NSString stringWithFormat:@"%@\n%@",text,routerText];
+    BOOL catpawStart=[text rangeOfString:@"(?:export\\s+)?(?:async\\s+)?function\\s+start\\s*\\(|(?:const|let|var)\\s+start\\s*=|export\\s*\\{[^}]*\\bstart\\b" options:NSRegularExpressionSearch].location!=NSNotFound;
+    BOOL catpawEntry=catpawStart && ([text containsString:@"listen"] || [text containsString:@"serverFactory"]);
+    BOOL catpawRouter=[serviceText containsString:@"/config"] && [serviceText containsString:@"/spider"] && [serviceText containsString:@"video"] && [serviceText containsString:@"sites"];
+    BOOL catpawOpen=catpawEntry&&catpawRouter;
+    BOOL catVodMethods=[text rangeOfString:@"(?:async\\s+)?home\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:async\\s+)?category\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:async\\s+)?detail\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:async\\s+)?play\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
+    BOOL catVodQuickJS=catVodMethods && ([text containsString:@"export default"] || [text containsString:@"module.exports"]);
     if(!runtime.length && [entry.pathExtension.lowercaseString isEqual:@"py"])runtime=@"python";
+    if([protocol isEqual:@"tvbox"] || [protocol isEqual:@"tvbox-js"] || [protocol isEqual:@"catvod-quickjs"] || [protocol isEqual:@"catvod-open-js"])protocol=@"catvod-js";
+    if([protocol isEqual:@"catvod-open"])protocol=catpawOpen?@"catpaw-http":@"catvod-js";
     if(!protocol.length){
         if([runtime isEqual:@"python"]){protocol=[text rangeOfString:@"class Spider"].location!=NSNotFound?@"python-spider":@"python-http";}
+        else if(catpawOpen){runtime=@"node";protocol=@"catpaw-http";}
         else if([text containsString:@"createService"] && [text containsString:@"/config"] && [text containsString:@"/spider/"]){runtime=@"node";protocol=@"catpaw-http";}
         else if([text containsString:@"deferredRef"] && [text containsString:@"resolve"] && [text containsString:@"fetch"]){runtime=@"node";protocol=@"iptv-extractor";}
         else if([text rangeOfString:@"(?:var|let|const)\\s+rule\\s*=" options:NSRegularExpressionSearch].location!=NSNotFound)protocol=@"drpy";
         else if(catSpider)protocol=@"catvod-spider";
+        else if(catVodQuickJS)protocol=@"catvod-js";
         else if([text containsString:@"vod_play_from"] || [text containsString:@"vod_id"])protocol=@"catvod-js";
         else protocol=@"cctvhost.media/1";
     }
@@ -132,7 +148,8 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         // CatPaw Spider modules use the documented in-app import registry and
         // Fastify route contract.  Keep those on the bundled JSC engine even
         // when package.json lists dependencies already provided by that registry.
-        runtime=[protocol isEqual:@"catvod-spider"]?@"javascript":((dependencies.count || (hasCommonJSRequire && !nodeProtocol))?@"node":@"javascript");
+        BOOL catvodDependencies=YES;NSSet *jscPackages=[NSSet setWithArray:@[@"axios",@"cheerio",@"crypto-js",@"iconv-lite",@"jpeg-js",@"qs"]];for(NSString *name in dependencies)if(![jscPackages containsObject:name]){catvodDependencies=NO;break;}
+        runtime=([@[@"catvod-spider"] containsObject:protocol] || ([protocol isEqual:@"catvod-js"]&&catvodDependencies))?@"javascript":((dependencies.count || (hasCommonJSRequire && !nodeProtocol))?@"node":@"javascript");
     }
     if(![@[@"esm",@"commonjs",@"script"] containsObject:moduleType] || ([runtime isEqual:@"python"] != [entry.pathExtension.lowercaseString isEqual:@"py"])){PackageError(error,@"入口类型与运行时声明不匹配");return nil;}
     if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"catvod-spider",@"drpy",@"iptv-extractor",@"catpaw-http"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}

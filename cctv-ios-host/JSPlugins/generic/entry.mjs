@@ -9,7 +9,7 @@ import * as streamModule from 'node:stream'
 import { rollup } from 'rollup/dist/rollup.browser.js'
 
 const g=globalThis
-let plugin=null, config=null, files=new Set(), virtualFiles=new Map(), cache=new Map(), spiderRoutes=new Map(), spiderPrefix=''
+let plugin=null, config=null, files=new Set(), virtualFiles=new Map(), cache=new Map(), spiderRoutes=new Map(), spiderPrefix='', modernCatVod=false
 function normalize(path) {
   const parts=[]
   for(const piece of String(path).replaceAll('\\','/').split('/')){
@@ -45,6 +45,17 @@ async function axiosRequest(input={}){
 const axios=Object.assign(options=>axiosRequest(options),{request:axiosRequest,create(defaults={}){const run=options=>axiosRequest({...defaults,...(typeof options==='string'?{url:options}:options||{}),headers:{...(defaults.headers||{}),...((typeof options==='object'&&options?.headers)||{})}});for(const method of ['get','delete','head','options'])run[method]=(url,options={})=>run({...options,url,method});for(const method of ['post','put','patch'])run[method]=(url,data,options={})=>run({...options,url,data,method});return run}})
 for(const method of ['get','delete','head','options'])axios[method]=(url,options={})=>axiosRequest({...options,url,method})
 for(const method of ['post','put','patch'])axios[method]=(url,data,options={})=>axiosRequest({...options,url,data,method})
+function isCatVodProtocol(value){return ['catvod-js','tvbox-js','catvod-open-js','catvod-quickjs'].includes(String(value||''))}
+function tvboxSite(payload){const options=payload.options&&typeof payload.options==='object'?payload.options:{},site=options.site&&typeof options.site==='object'?{...options.site}:{...options};delete site.site;site.key||=String(payload.name||payload.entry||'local_source').replace(/[^A-Za-z0-9_-]/g,'_');site.name||=payload.name||'本机影视源';site.type||=3;if(options.api&&!site.api)site.api=options.api;if(site.ext===undefined)site.ext=options.ext??(typeof payload.options==='string'?payload.options:JSON.stringify(payload.options||{}));return site}
+function tvboxExt(payload,site){const options=payload.options;if(typeof options==='string')return options;if(options&&typeof options==='object')return options.ext??options.extend??site?.ext??JSON.stringify(options);return site?.ext||''}
+async function netHTTP(url,options={}){const request={...(options||{})};const method=String(request.method||'GET').toUpperCase(),headers={...(request.headers||{})};if(!Object.keys(headers).some(key=>key.toLowerCase()==='cookie')){const cookie=cookieHeader(String(url));if(cookie)headers.Cookie=cookie}let body=request.body??request.data;if(body&&typeof body==='object'&&!Buffer.isBuffer(body)&&!(body instanceof ArrayBuffer)&&!(body instanceof Uint8Array)){body=JSON.stringify(body);headers['Content-Type']??='application/json'}if(body instanceof Uint8Array||body instanceof ArrayBuffer)body=Buffer.from(body);const controller=new AbortController(),timeout=Math.min(Math.max(Number(request.timeout)||15000,100),30000),timer=setTimeout(()=>controller.abort(),timeout);try{const response=await fetch(String(url),{method,headers,body:['GET','HEAD'].includes(method)?undefined:body,signal:controller.signal,redirect:request.redirect===false?'manual':'follow'}),bytes=Buffer.from(await response.arrayBuffer()),responseHeaders=Object.fromEntries(response.headers);acceptCookies(response.url||String(url),responseHeaders);let content;if(request.buffer===1)content=bytes.toString('base64');else if(request.buffer===2)content=[...bytes];else content=bytes.toString(request.encoding||'utf8');const value={code:response.status,headers:responseHeaders,content,url:response.url||String(url)};if(typeof request.complete==='function')request.complete(value);return value}catch(error){const value={code:'',headers:{},content:'',error:error?.message||String(error)};if(typeof request.complete==='function')request.complete(value);return value}finally{clearTimeout(timer)}}
+async function netJSON(url,options={}){if(options?.buffer)throw new Error('JSON 请求不能使用 buffer');const value=await netHTTP(url,options);if(value.error)throw new Error(value.error);if(Number(value.code)<200||Number(value.code)>=300)throw new Error('HTTP '+value.code);return JSON.parse(value.content)}
+const netCache=new Map()
+const net={http:netHTTP,req:netHTTP,json:netJSON,sleep:ms=>new Promise(resolve=>setTimeout(resolve,Math.max(0,Number(ms)||0))),getUserAgent:()=>misc.IOS_UA,map:async(items,mapper,limit=4)=>{const output=new Array(items.length);let index=0;await Promise.all(Array.from({length:Math.min(Math.max(1,Number(limit)||1),items.length)},async()=>{while(index<items.length){const current=index++;output[current]=await mapper(items[current],current)}}));return output},batch:(items,limit=4)=>net.map(items,item=>net.http(item.url,item.options),limit),cached:async(key,options={},loader)=>{key=String(key);const row=netCache.get(key);if(row&&row.expires>Date.now())return row.value;const value=await loader();const ttl=Math.max(0,Number(options.ttl)||0);if(ttl)netCache.set(key,{value,expires:Date.now()+ttl*1000});while(netCache.size>128)netCache.delete(netCache.keys().next().value);return value},peek:key=>{const row=netCache.get(String(key));return row&&row.expires>Date.now()?row.value:null},clearCache:key=>key==null?netCache.clear():netCache.delete(String(key)),refresh:(key,options,loader)=>{net.cached(key,options,loader).catch(error=>g.__hostLog(error?.message||String(error)))},getCookie:url=>cookieHeader(url),setCookie:(url,cookie)=>{acceptCookies(url,{'set-cookie':cookie});return true}}
+net.openStream=async(url,options={})=>{const response=await netHTTP(url,{...options,buffer:2});if(response.error)throw new Error(response.error);const bytes=Uint8Array.from(response.content);let offset=0,closed=false;return {code:response.code,headers:response.headers,contentType:response.headers['content-type']||'',read:async size=>{if(closed||offset>=bytes.length)return null;const end=Math.min(bytes.length,offset+Math.max(1,Number(size)||65536));const chunk=bytes.slice(offset,end);offset=end;return chunk.buffer},close:()=>{closed=true;return true}}}
+net.stream=async(url,options={})=>{if(typeof url!=='string')return {code:200,headers:{},contentType:'application/octet-stream',stream:url};const response=await net.openStream(url,options);return {...response,stream:{async *[Symbol.asyncIterator](){let chunk;while((chunk=await response.read(65536))!==null)yield new Uint8Array(chunk)}}}}
+function proxyURL(params={}){const base=String(config?.proxyURL||'');if(!base)return '';const target=new URL(base);for(const [key,value] of Object.entries(params||{}))if(value!=null)target.searchParams.set(key,String(value));return target.toString()}
+net.getProxyUrl=proxyURL
 function emitter(){const listeners=new Map();return {on(name,fn){if(typeof fn==='function'){if(!listeners.has(name))listeners.set(name,[]);listeners.get(name).push(fn)}return this},once(name,fn){const wrapped=(...args)=>{this.off(name,wrapped);fn(...args)};return this.on(name,wrapped)},off(name,fn){listeners.set(name,(listeners.get(name)||[]).filter(item=>item!==fn));return this},emit(name,...args){for(const fn of [...(listeners.get(name)||[])])try{fn(...args)}catch(error){g.__hostLog(error?.message||String(error))}return this}}}
 const http2={connect(authority){const client=emitter();client.closed=false;client.request=(pseudo={})=>{const request=emitter();let chunks=[],encoding='',started=false;request.setEncoding=value=>{encoding=String(value||'');return request};request.write=value=>{if(started)throw new Error('HTTP/2 请求已发送');chunks.push(Buffer.isBuffer(value)?value:Buffer.from(String(value)));return true};request.setTimeout=(ms,callback)=>{request._timeout=setTimeout(()=>{request.emit('timeout');callback?.()},Math.max(0,Number(ms)||0));return request};request.end=value=>{if(started)return request;if(value!==undefined)request.write(value);started=true;if(client.closed){request.emit('error',new Error('HTTP/2 会话已关闭'));return request}const headers={...(pseudo||{})},path=headers[':path']||'/',method=String(headers[':method']||'GET').toUpperCase();for(const key of Object.keys(headers))if(key.startsWith(':'))delete headers[key];const body=chunks.length?Buffer.concat(chunks):undefined;const target=new URL(path,authority);fetch(target.toString(),{method,headers,body:method==='GET'||method==='HEAD'?undefined:body}).then(async response=>{clearTimeout(request._timeout);const replyHeaders=Object.fromEntries(response.headers);replyHeaders[':status']=response.status;request.emit('response',replyHeaders);const bytes=Buffer.from(await response.arrayBuffer());if(bytes.length)request.emit('data',encoding?bytes.toString(encoding):bytes);request.emit('end')}).catch(error=>{clearTimeout(request._timeout);request.emit('error',error)});return request};request.close=()=>request.emit('close');return request};client.close=()=>{client.closed=true;client.emit('close')};client.destroy=error=>{client.closed=true;if(error)client.emit('error',error);client.emit('close')};return client}}
 const cookieJar=new Map()
@@ -206,14 +217,15 @@ function items(value){value=result(value);return Array.isArray(value)?value:(val
 function videos(value){return items(value).map(row=>({id:String(row.id??row.vod_id??''),name:String(row.name??row.vod_name??''),poster:String(row.poster??row.vod_pic??''),remarks:String(row.remarks??row.vod_remarks??'')})).filter(row=>row.id&&row.name)}
 function media(value){value=result(value);if(typeof value==='string')return {url:value};if(!value||typeof value.url!=='string'||!value.url.trim())throw new Error(value?.message||'插件未返回可播放 URL');if(!/^https?:\/\//i.test(value.url))throw new Error('插件返回的播放地址不是 HTTP/HTTPS');return {...value,parse:Number(value.parse)>0?1:0,headers:value.headers||value.header||{}}}
 async function load(payload){
-  config={...payload,api:payload.api||(payload.protocol==='catvod-js'?'catvod':'standard')};files=new Set(g.__hostListPackageFiles());virtualFiles.clear();cookieJar.clear();cache.clear();cacheStore.clear();inflight.clear();concurrencyGroups.clear();spiderRoutes=new Map();spiderPrefix=''
+  config={...payload,api:payload.api||(isCatVodProtocol(payload.protocol)?'catvod':'standard')};files=new Set(g.__hostListPackageFiles());virtualFiles.clear();cookieJar.clear();netCache.clear();cache.clear();cacheStore.clear();inflight.clear();concurrencyGroups.clear();spiderRoutes=new Map();spiderPrefix='';modernCatVod=false
   g.__cctvBuiltins=builtins;g.__cctvRequire=requireFile
   g.Buffer=Buffer;g.CryptoJS=CryptoJS;g.cheerio=cheerio;g.global=g;g.window=g
   g.process={env:{},platform:'ios',nextTick:(fn,...args)=>Promise.resolve().then(()=>fn(...args))}
   g.req=async(url,options={})=>{const response=await fetch(url,options);return {content:await response.text(),code:response.status,headers:{get:response.headers.get}}}
   g.request=async(...args)=>(await g.req(...args)).content
-  g.local={get:(namespace,key)=>g.__hostStorage('get',String(namespace||'')+':'+String(key||''))||'',set:(namespace,key,value)=>g.__hostStorage('set',String(namespace||'')+':'+String(key||''),String(value??'')),delete:(namespace,key)=>g.__hostStorage('remove',String(namespace||'')+':'+String(key||''))}
-  g.getProxy=()=>payload.proxyURL||''
+  const localScope='catvod:'+String(payload.dataDirectory||payload.packageRoot||payload.name||'default')
+  g.local=isCatVodProtocol(payload.protocol)?{get:(key,fallback=null)=>g.__hostStorage('get',localScope+':'+String(key||''))??fallback,set:(key,value)=>g.__hostStorage('set',localScope+':'+String(key||''),String(value??'')),delete:key=>g.__hostStorage('remove',localScope+':'+String(key||''))}:{get:(namespace,key)=>g.__hostStorage('get',String(namespace||'')+':'+String(key||''))||'',set:(namespace,key,value)=>g.__hostStorage('set',String(namespace||'')+':'+String(key||''),String(value??'')),delete:(namespace,key)=>g.__hostStorage('remove',String(namespace||'')+':'+String(key||''))}
+  g.net=net;g.getProxy=()=>payload.proxyURL||'';g.getProxyUrl=proxyURL
   g.crypto={getRandomValues:array=>{const bytes=new Uint8Array(array.buffer,array.byteOffset,array.byteLength);bytes.set(crypto.randomBytes(bytes.length));return array},randomUUID:crypto.randomUUID}
   const entry=find(normalize(payload.entry||'index.js'))
   const type=payload.moduleType||'esm'
@@ -225,7 +237,8 @@ async function load(payload){
   plugin=module?.default||module
   if(payload.protocol==='catvod-spider'){
     if(typeof plugin==='function')plugin=await plugin(payload.name||payload.entry||'本地影视源',payload.options||{})
-  }else if(typeof plugin==='function')plugin=await plugin()
+  }else if(isCatVodProtocol(payload.protocol)&&typeof plugin==='function')plugin=await plugin(tvboxSite(payload))
+  else if(typeof plugin==='function')plugin=await plugin()
   if(!plugin||typeof plugin!=='object')throw new Error('JS 入口未导出插件对象')
   if(payload.protocol==='catvod-spider'){
     if(typeof plugin.api!=='function')throw new Error('CatPaw Spider 未导出 api(fastify) 路由注册器')
@@ -235,9 +248,13 @@ async function load(payload){
     if(typeof plugin.check==='function'&&await plugin.check()===false)throw new Error('CatPaw Spider check() 未通过')
     return {engine:'JavaScriptCore',protocol:'catvod-spider',name:plugin.meta?.name||payload.name||'CatPaw Spider',capabilities:['home','category','search','detail','play','proxy']}
   }
-  if(config.api==='catvod'){for(const [key,alias] of Object.entries({home:'homeContent',homeVod:'homeVideoContent',category:'categoryContent',search:'searchContent',detail:'detailContent',play:'playerContent'}))if(!plugin[key]&&plugin[alias])plugin[key]=plugin[alias]}
+  if(config.api==='catvod'){
+    modernCatVod=typeof plugin.home==='function'&&!plugin.homeContent&&typeof plugin.category==='function'&&typeof plugin.detail==='function'&&typeof plugin.play==='function'
+    if(!modernCatVod)for(const [key,alias] of Object.entries({home:'homeContent',homeVod:'homeVideoContent',category:'categoryContent',search:'searchContent',detail:'detailContent',play:'playerContent'}))if(!plugin[key]&&plugin[alias])plugin[key]=plugin[alias]
+    if(!plugin.homeVod&&plugin.homeVideoContent)plugin.homeVod=plugin.homeVideoContent
+  }
   if(plugin.rule || !['home','category','search','detail','play','channels','catalog','resolve'].some(key=>plugin[key]))throw new Error('此文件像是规则配置，需要随 ZIP 提供对应规则引擎/适配器；并非独立可运行插件')
-  if(typeof plugin.init==='function')await plugin.init(payload.options||{})
+  if(typeof plugin.init==='function')await plugin.init(config.api==='catvod'?tvboxExt(payload,tvboxSite(payload)):(payload.options||{}))
   return {engine:'JavaScriptCore',protocol:payload.protocol||'cctvhost.media/1',capabilities:['home','category','search','detail','play','providers','epg'].filter(key=>typeof plugin[key]==='function').concat((plugin.channels||plugin.catalog)&&plugin.resolve?['live']:[]),name:payload.name||plugin.name||'JS 插件'}
 }
 const api={
@@ -253,12 +270,12 @@ const api={
   catalog:async()=>{const fn=plugin.channels||plugin.catalog;const data=typeof fn==='function'?await fn.call(plugin):fn||[];return items(data).map(row=>({...row,id:String(row.id),ref:String(row.ref||row.id),name:String(row.name||row.id),logo:String(row.logo||'')}))},
   resolve:async({ref,...context})=>plugin.resolve({id:ref,ref,...context}),
   search:async(args)=>config.protocol==='catvod-spider'?invokeSpider('search',args):(config.api==='catvod'?plugin.search(args.keyword||'',false,String(args.page||1)):plugin.search(args)),
-  detail:async(args)=>config.protocol==='catvod-spider'?invokeSpider('detail',args):(config.api==='catvod'?plugin.detail([args.id]):plugin.detail(args)),
+  detail:async(args)=>config.protocol==='catvod-spider'?invokeSpider('detail',args):(config.api==='catvod'?(modernCatVod?plugin.detail(String(args.id||'')):plugin.detail([args.id])):plugin.detail(args)),
   play:async(args)=>config.protocol==='catvod-spider'?invokeSpider('play',args):(config.api==='catvod'?plugin.play(args.lineId||'',args.id,[]):plugin.play(args)),
   epg:async(payload)=>typeof plugin.epg==='function'?plugin.epg(payload):[],
-  proxy:async(payload)=>plugin.proxy(payload),
+  proxy:async(payload)=>{const value=await plugin.proxy(payload);if(Array.isArray(value))return value;if(value&&typeof value==='object'){const code=value.code??value.statusCode??value.status,body=value.content??value.body;if(code!=null&&body!=null)return [code,value.headers||{},body]}return value},
   route:async(args)=>config.protocol==='catvod-spider'?invokeSpider('route',args):{statusCode:404,body:'Not Found'},
-  stop:async()=>{const close=plugin?.close||plugin?.destroy;if(typeof close==='function')await close.call(plugin);plugin=null;spiderRoutes.clear();spiderPrefix='';cache.clear();cacheStore.clear();inflight.clear();concurrencyGroups.clear();return true},
+  stop:async()=>{const close=plugin?.close||plugin?.destroy;if(typeof close==='function')await close.call(plugin);plugin=null;modernCatVod=false;spiderRoutes.clear();spiderPrefix='';cookieJar.clear();netCache.clear();cache.clear();cacheStore.clear();inflight.clear();concurrencyGroups.clear();return true},
 }
 g.CCTVHostJS=api
 g.__cctvInvoke=(operation,payload,complete)=>Promise.resolve().then(()=>{if(!Object.hasOwn(api,operation))throw new Error('不支持的插件操作');return api[operation](payload||{})}).then(value=>complete(JSON.stringify({ok:true,result:value})),error=>complete(JSON.stringify({ok:false,error:String(error?.message||error)})))

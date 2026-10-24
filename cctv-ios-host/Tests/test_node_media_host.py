@@ -92,6 +92,26 @@ class NodeMediaHostTests(unittest.TestCase):
         self.assertEqual(self.call('search', provider='first', keyword='query', page=2)['result']['list'][0]['vod_id'], 'query')
         self.assertTrue(self.call('stop')['ok'])
 
+    def test_modern_catvod_factory_receives_site_ext_and_scalar_detail_ids(self):
+        (self.package / 'spider.mjs').write_text('''
+          export default site=>({async init(ext){local.set('fixture-ext',ext)},
+            async home(filter){return {class:[{type_id:'movie',type_name:'电影'}],list:[{vod_id:site.key,vod_name:site.name+':'+local.get('fixture-ext')+':'+local.get('missing','fallback')+':'+filter}]}},
+            async homeVod(){return {list:[]}},
+            async category(tid,pg,filter,extend){return {page:Number(pg),list:[{vod_id:tid,vod_name:JSON.stringify(extend)}]}},
+            async search(key,quick,pg){return {page:Number(pg),list:[{vod_id:key,vod_name:String(quick)+':'+pg}]}},
+            async detail(id){return {list:[{vod_id:id,vod_name:id,vod_play_from:'线路',vod_play_url:'第一集$'+id}]}},
+            async play(flag,id,vipFlags){return {parse:0,url:'https://fixture.test/'+id,header:{Referer:'https://fixture.test/'+flag}}}})
+        ''')
+        reply = self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data), entry='spider.mjs',
+                          protocol='catvod-js', moduleType='esm', name='CatVod Node fixture',
+                          options={'site': {'key': 'catvod_fixture', 'name': 'CatVod fixture'}, 'ext': 'extension-value'})
+        self.assertTrue(reply['ok'], reply)
+        self.assertEqual(self.call('home')['result']['list'][0]['vod_name'], 'CatVod fixture:extension-value:fallback:true')
+        self.assertEqual(self.call('category', categoryId='movie', page=2, filters={'area': '大陆'})['result']['list'][0]['vod_name'], '{"area":"大陆"}')
+        self.assertEqual(self.call('detail', id='opaque/id')['result']['list'][0]['vod_id'], 'opaque/id')
+        self.assertEqual(self.call('play', lineId='线路', id='opaque/id')['result']['header']['Referer'], 'https://fixture.test/线路')
+        self.assertTrue(self.call('stop')['ok'])
+
     def test_path_escape_and_plugin_process_exit_are_reported_without_killing_host(self):
         (self.package / 'index.cjs').write_text("module.exports={search(){process.exit(1)}}")
         reply = self.call('start', packageRoot=str(self.root), dataDirectory=str(self.data), entry='outside.cjs')

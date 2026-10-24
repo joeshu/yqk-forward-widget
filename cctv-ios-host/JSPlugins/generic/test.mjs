@@ -96,5 +96,14 @@ try{
   reply=await invoke('route',{method:'GET',path:'/spider/catpaw_fixture/3/proxy/index.m3u8',host:'127.0.0.1:18780'})
   assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.body,'#EXTM3U\nindex.m3u8');assert.equal(reply.result.headers['content-type'],'application/vnd.apple.mpegurl')
   await invoke('stop')
+  files={'quickjs/spider.mjs':`export default function createSpider(site){return {async init(ext){local.set('saved-ext',ext)},async home(filter){const remote=await net.json('https://fixture.test/qjs');return {class:[{type_id:'movie',type_name:'电影'}],list:[{vod_id:site.key,vod_name:site.name+':'+local.get('saved-ext')+':'+remote.cookie}]}},async homeVod(){return {list:[]}},async category(tid,pg,filter,extend){return {page:Number(pg),list:[{vod_id:tid,vod_name:JSON.stringify(extend)}]}},async search(key,quick,pg){return {page:Number(pg),list:[{vod_id:key,vod_name:key}]}},async detail(id){return {list:[{vod_id:id,vod_name:id,vod_play_from:'线路',vod_play_url:'第一集$'+id}]}},async play(flag,id,vipFlags){return {parse:0,url:'https://fixture.test/'+id,header:{Referer:'https://fixture.test/'}}}}}`}
+  reply=await invoke('start',{entry:'quickjs/spider.mjs',moduleType:'esm',protocol:'catvod-js',name:'QuickJS fixture',options:{key:'qjs_fixture',name:'QuickJS fixture',type:3,ext:'extension-value'}})
+  assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.protocol,'catvod-js')
+  reply=await invoke('home');assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.list[0].vod_name,'QuickJS fixture:extension-value:')
+  assert.equal((await invoke('category',{categoryId:'movie',page:2,filters:{area:'大陆'}})).result.list[0].vod_name,'{"area":"大陆"}')
+  assert.equal((await invoke('search',{keyword:'影视',page:3})).result.list[0].vod_id,'影视')
+  assert.equal((await invoke('detail',{id:'opaque/id'})).result.list[0].vod_id,'opaque/id')
+  assert.equal((await invoke('play',{lineId:'线路',id:'opaque/id'})).result.url,'https://fixture.test/opaque/id')
+  await invoke('stop')
   console.log('PASS: original imported ESM/CommonJS, relative and JSON dependencies, CryptoJS hash, Cheerio, POST, CatVod methods, opaque IDs and package path boundary')
 }finally{for(const timer of timers.values())clearTimeout(timer)}

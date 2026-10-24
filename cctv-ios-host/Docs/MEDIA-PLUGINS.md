@@ -4,10 +4,10 @@
 
 ## 导入和使用
 
-1. 打开「资源 → ＋」，选择 JS/Python/ZIP 文件，或输入资源文件下载地址。
+1. 打开「资源 → ＋」，选择 JS/Python/ZIP 文件，或输入资源文件下载地址。CatPaw 的 `.js.md5` 地址可以直接输入，宿主会下载配对脚本并校验。
 2. 直接导入 `.js`、`.mjs`、`.cjs`、`.py`，或者带依赖文件的 ZIP。导入只安装文件，不执行代码。
-3. 在资源列表启用资源，或者进入「影视」选择它。切换资源时先停止旧实例；停止失败会保留真实状态。
-4. 影视页面右上角选择资源/来源，支持搜索来源名称；输入关键词搜索影片，选择分类和筛选条件，加载更多，进入详情后选择线路和分集。
+3. 在「资源」列表启用资源；到「影视」页右上角打开来源选择器，选择刚导入的资源。启用只负责启动引擎，影视页才提供浏览和播放。切换资源时先停止旧实例；停止失败会保留真实状态。
+4. 在「影视」页选来源后，进入首页推荐或分类，使用搜索和筛选，打开影片详情，再选择线路与分集播放。CatPawOpen 服务可提供多个来源，来源选择器会列出其 `/config` 返回的站点。
 5. 直播提取包提供「添加直播订阅」，生成本机 `/all.m3u`，在「频道」播放。影视搜索结果不会混入直播列表。
 
 导入猫爪时可直接输入 `https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5`。宿主下载对应 JS，核对 MD5 后安装；MD5 文件本身不会作为 JS 执行。校验仅证明传输内容一致。
@@ -18,10 +18,10 @@
 | --- | --- | --- |
 | 普通 JS | JavaScriptCore；CommonJS `require()` 或非 Spider npm dependencies 默认走 Node.js Mobile | home/category/search/detail/play，可选 channels/catalog/resolve |
 | CatPaw JS Spider | JavaScriptCore 本机路由适配器 | ESM 默认导出的工厂函数或旧式对象；运行 `api(fastify)` 的 init/home/category/detail/play/search 路由 |
-| CatVod JS | JavaScriptCore 或清单指定 Node | home/category/search/detail/play，亦支持 homeContent 等别名 |
+| CatVod / TVBox 风格 JS | JavaScriptCore 或清单指定 Node | 新式 `home/category/search/detail/play` 与旧式 `homeContent/categoryContent/searchContent/detailContent/playerContent` |
 | drpy 规则 | JavaScriptCore + 固定版本 dr_py 引擎 | 声明 `var/let/const rule = {...}` 的规则文件 |
 | Python Spider | CPython 3.13 | Spider.init/homeContent/homeVideoContent/categoryContent/searchContent/detailContent/playerContent/destroy |
-| 原猫爪 Node bundle | Node.js Mobile 18.20.4 | start/stop + /config、/spider/... |
+| CatPawOpen / 猫爪 Node 服务 | Node.js Mobile 18.20.4 | `start/stop` + `/config`、`/spider/...` |
 | iptv 项目提取模块（如咪咕） | Node.js Mobile | fetch(options) 返回 groups；resolve(ref, context) 返回 URL |
 | 已有 Python HTTP 服务 | CPython | 原有服务启动参数与 HTTP 接口 |
 
@@ -43,7 +43,15 @@ ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。
 }
 ```
 
-`runtime` 支持 `javascript`、`python`、`node`。`protocol` 支持 `cctvhost.media/1`、`catvod-js`、`catvod-spider`、`drpy`、`python-spider`、`python-http`、`iptv-extractor`、`catpaw-http`。JS 的 moduleType 为 `esm`、`commonjs` 或普通规则使用的 `script`。手册里的 `export default function createSpider(name, config) { return { meta, api(fastify) } }` 和旧版 `export default { meta, api }` 均可被识别；CatPaw API 请求会按 CatVod 字段传递（搜索 `wd`、分类 `id/page/filters`、详情 `id[]`、播放 `flag/id`）。
+`runtime` 支持 `javascript`、`python`、`node`。`protocol` 支持 `cctvhost.media/1`、`catvod-js`、`catvod-spider`、`drpy`、`python-spider`、`python-http`、`iptv-extractor`、`catpaw-http`。清单中的 `tvbox`、`tvbox-js`、`catvod-quickjs`、`catvod-open-js` 会规范化为 `catvod-js`；`catvod-open` 根据入口识别为本机 CatPawOpen Node 服务或 CatVod JS。JS 的 moduleType 为 `esm`、`commonjs` 或普通规则使用的 `script`。
+
+CatPaw JS Spider 按附件中的本机 Spider 规范运行：ESM 默认导出工厂，返回 `{ meta, api(fastify) }`，并注册 `/init`、`/home`、`/category`、`/detail`、`/play`、`/search` 六个 POST 路由。兼容默认导出工厂与历史对象导出。请求会按 CatVod 字段传递：搜索 `wd/page/quick`、分类 `id/page/filters/extend`、详情 `id[]`、播放 `flag/id`。打包入口可为单文件，也可通过 ZIP 清单的 `entry` 指向包内入口。
+
+CatVod/TVBox 风格 JS 支持 `export default site => ({ init(ext), home(filter), homeVod(), category(tid, pg, filter, extend), search(key, quick, pg), detail(id), play(flag, id, vipFlags) })`，也兼容旧版 `homeContent/categoryContent/searchContent/detailContent/playerContent`。站点参数可放在 `options` 本身，或 `options.site`；`options.ext` 会传给 `init(ext)`。标准 `net.http/net.json`、`local.get/set/delete` 可在本机使用。没有清单时，导入器会按入口代码识别这类方法式 Spider。
+
+CatPawOpen 服务 ZIP 可将 `entry` 指向服务入口（例如 `src/index.js`），入口导出 `start()`/`stop()` 并在本机监听，服务须实现 `/config` 与 `/spider/<key>/3/...`。导入器会检查入口及 `router.js`，自动识别常见 Node 服务包；Node 依赖须一并放进 ZIP 的 `node_modules`。启用后，影视来源选择器按 `/config` 提供的站点显示与搜索。
+
+这里的 TVBox 支持范围是可在 iOS 执行的 JS/CatVod 方法式插件。传统 TVBox JSON 配置及依赖 Android Java/DEX 的 `csp_*.jar` Spider 不能由 iOS JavaScriptCore 或 Node.js Mobile 直接运行；需要移植为上述 JS/Python 契约或接入其 HTTP CMS 服务。导入成功只表示文件和入口已识别，插件仍需可执行并能返回符合格式的媒体 URL。
 
 CatPaw Spider 的常用 `util/req.js`、`util/htmlParser.js`、缓存、并发、通用工具及运行时配置导入映射到本机兼容模块；`req.js` 提供域名隔离 Cookie、保存/恢复/清除接口。`axios`、`cheerio`、`crypto-js`、`iconv-lite`、`jpeg-js`、`http2`、`stream`、`qs` 等通过应用内的 JS 依赖注册表提供。`node:stream` 当前提供 `Readable.from`、`data/end` 事件和 `pipe` 常用能力；`fs` 只读 ZIP 文件，临时写入留在内存中，不会访问 iPhone 其它目录。ZIP 自带的其它 JS 依赖仍须保持在 ZIP 中。Fastify 标准 `get/post` 路由可在本机服务下调用；`/spider/<key>/3/...` 私有路由同样可从 AVPlayer 请求，适合返回重写后的 HLS 清单。`parse: 1` 会交给应用的网页播放页，`parse: 0` 则交给 AVPlayer；本机播放器不会把解析页面冒充媒体流。
 
@@ -76,4 +84,4 @@ Node 提供本机网络、文件、加密等接口，但 iOS 不支持桌面子�
 
 ## 验证范围
 
-已验证原生 JavaScriptCore 中的 ESM、加密、drpy HTML/同步请求及取消；真实 Node.js Mobile 模拟器框架中的 CommonJS、读写、停止；Python Spider 协议、多线路和分页；ZIP 路径与校验；完整版 iOS arm64 IPA 结构。第三方网站的账号、网络与真机持续播放需要实际设备确认。CCTV SDK 的开台速度也需真机测量，不提供未经测量的提升百分比。
+已验证 JS 通用运行时的 ESM/CommonJS、CatPaw 路由、CatVod 新旧方法签名；Node 宿主中的 CatVod 方法、CatPawOpen HTTP 服务生命周期和多来源路由；Python Spider 协议、多线路和分页；媒体地址/请求头归一化、ZIP 路径与校验。Mac 上的 JavaScriptCore/Objective-C importer 测试由 macOS CI 执行；当前 Linux 环境跳过这些平台测试。第三方网站账号、网络与真机持续播放仍取决于上游服务和实际设备。CCTV SDK 的开台速度需真机测量，不提供未经测量的提升百分比。

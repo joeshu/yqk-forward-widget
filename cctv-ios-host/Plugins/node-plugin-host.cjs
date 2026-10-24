@@ -80,7 +80,8 @@ async function sourceJSON(url,body){
 function installCatvodGlobals(owner){
   const file=path.join(owner.data,'js-storage.json')
   let storage={};try{storage=JSON.parse(fs.readFileSync(file,'utf8'))}catch{}
-  global.local={get:(namespace,key)=>storage[namespace]?.[key]??'',set:(namespace,key,value)=>{storage[namespace]??={};storage[namespace][key]=value;const text=JSON.stringify(storage);if(text.length>1024*1024)throw Error('插件存储超过 1 MB');fs.writeFileSync(file+'.tmp',text);fs.renameSync(file+'.tmp',file)},delete:(namespace,key)=>{if(storage[namespace])delete storage[namespace][key]}}
+  const save=()=>{const text=JSON.stringify(storage);if(text.length>1024*1024)throw Error('插件存储超过 1 MB');fs.writeFileSync(file+'.tmp',text);fs.renameSync(file+'.tmp',file)}
+  global.local={get:function(namespace,key){if(isCatVodProtocol(owner.protocol))return (storage.__catvod||{})[namespace]??(arguments.length>1?key:'');return arguments.length===1?(storage.__catvod||{})[namespace]??'':storage[namespace]?.[key]??''},set:function(namespace,key,value){if(arguments.length===2){storage.__catvod??={};storage.__catvod[namespace]=key}else{storage[namespace]??={};storage[namespace][key]=value}save()},delete:function(namespace,key){if(arguments.length===1){if(storage.__catvod)delete storage.__catvod[namespace]}else if(storage[namespace])delete storage[namespace][key];save()}}
   global.req=async(url,options={})=>{
     let body=options.body??options.data,headers={...(options.headers||{})}
     if(body && typeof body==='object'){body=JSON.stringify(body);headers['Content-Type']??='application/json'}
@@ -90,7 +91,13 @@ function installCatvodGlobals(owner){
   }
   global.request=async(...args)=>(await global.req(...args)).content
   global.getProxy=()=>owner.payload.proxyURL||''
+  global.getProxyUrl=params=>{const base=owner.payload.proxyURL;if(!base)return '';const target=new URL(base);for(const [key,value] of Object.entries(params||{}))if(value!=null)target.searchParams.set(key,String(value));return target.toString()}
+  const netHTTP=async(url,options={})=>{const headers={...(options.headers||{})};let body=options.body??options.data;if(body&&typeof body==='object'&&!Buffer.isBuffer(body)){body=JSON.stringify(body);headers['Content-Type']??='application/json'}const response=await fetch(url,{method:options.method||'GET',headers,body:['GET','HEAD'].includes(String(options.method||'GET').toUpperCase())?undefined:body,signal:AbortSignal.timeout(Math.min(options.timeout||15000,20000))}),bytes=await readLimited(response),content=options.buffer===1?bytes.toString('base64'):options.buffer===2?[...bytes]:bytes.toString(options.encoding||'utf8'),value={code:response.status,headers:Object.fromEntries(response.headers),content,url:response.url||url};options.complete?.(value);return value}
+  global.net={http:netHTTP,req:netHTTP,json:async(url,options={})=>{if(options.buffer)throw Error('JSON 请求不能使用 buffer');const result=await netHTTP(url,options);if(result.code<200||result.code>=300)throw Error('HTTP '+result.code);return JSON.parse(result.content)},sleep:ms=>new Promise(resolve=>setTimeout(resolve,Math.max(0,Number(ms)||0))),getUserAgent:()=>global.navigator?.userAgent||'CCTVHost/1',cached:async(_key,_options,loader)=>loader(),map:async(items,mapper)=>Promise.all(items.map(mapper)),batch:async(items)=>Promise.all(items.map(item=>netHTTP(item.url,item.options)))}
 }
+function catVodSite(payload){const options=payload.options&&typeof payload.options==='object'?payload.options:{},site=options.site&&typeof options.site==='object'?{...options.site}:{...options};delete site.site;site.key||=String(payload.name||payload.entry||'local_source').replace(/[^A-Za-z0-9_-]/g,'_');site.name||=payload.name||'本机影视源';site.type||=3;if(options.api&&!site.api)site.api=options.api;if(site.ext===undefined)site.ext=options.ext??(typeof payload.options==='string'?payload.options:JSON.stringify(payload.options||{}));return site}
+function catVodExt(payload,site){const options=payload.options;if(typeof options==='string')return options;if(options&&typeof options==='object')return options.ext??options.extend??site?.ext??JSON.stringify(options);return site?.ext||''}
+const isCatVodProtocol=value=>['catvod-js','tvbox-js','catvod-open-js','catvod-quickjs'].includes(String(value||''))
 async function start(payload){
   if(active){if(active.session===payload.session)return active.metadata;throw Error('上一个 Node 插件尚未完全停止')}
   const root=readableRoot(payload.packageRoot),entry=entryPath(root,payload.entry)
@@ -112,10 +119,12 @@ async function start(payload){
       owner.providers=(config.video?.sites||[]).filter(site=>typeof site.api==='string'&&site.api.startsWith('/spider/')).map(site=>({id:String(site.key),name:String(site.name),api:site.api}))
       owner.metadata={engine:'Node.js Mobile',version:process.versions.node,protocol:'catpaw-http',capabilities:['providers','home','category','search','detail','play']}
     }else{
-      if(typeof owner.module==='function')owner.module=await owner.module(payload.options||{})
+      if(isCatVodProtocol(owner.protocol)&&typeof owner.module==='function')owner.module=await owner.module(catVodSite(payload))
+      else if(typeof owner.module==='function')owner.module=await owner.module(payload.options||{})
       if(!owner.module || typeof owner.module!=='object')throw Error('Node 入口未导出插件对象')
-      if(owner.protocol==='catvod-js')for(const [key,alias] of Object.entries({home:'homeContent',homeVod:'homeVideoContent',category:'categoryContent',search:'searchContent',detail:'detailContent',play:'playerContent'}))if(!owner.module[key] && typeof owner.module[alias]==='function')owner.module[key]=owner.module[alias]
-      if(typeof owner.module.init==='function')await owner.module.init(payload.options||{})
+      owner.modernCatVod=isCatVodProtocol(owner.protocol)&&typeof owner.module.home==='function'&&!owner.module.homeContent&&typeof owner.module.category==='function'&&typeof owner.module.detail==='function'&&typeof owner.module.play==='function'
+      if(isCatVodProtocol(owner.protocol)){if(!owner.modernCatVod)for(const [key,alias] of Object.entries({home:'homeContent',homeVod:'homeVideoContent',category:'categoryContent',search:'searchContent',detail:'detailContent',play:'playerContent'}))if(!owner.module[key]&&typeof owner.module[alias]==='function')owner.module[key]=owner.module[alias];if(!owner.module.homeVod&&owner.module.homeVideoContent)owner.module.homeVod=owner.module.homeVideoContent}
+      if(typeof owner.module.init==='function')await owner.module.init(isCatVodProtocol(owner.protocol)?catVodExt(payload,catVodSite(payload)):(payload.options||{}))
       owner.metadata={engine:'Node.js Mobile',version:process.versions.node,protocol:owner.protocol,capabilities:['home','category','search','detail','play','providers','proxy'].filter(key=>typeof owner.module[key]==='function').concat((owner.module.channels||owner.module.catalog||(owner.protocol==='iptv-extractor'&&owner.module.fetch))&&owner.module.resolve?['live']:[])}
     }
     return owner.metadata
@@ -136,7 +145,7 @@ async function invoke(operation,payload){
       value=await sourceJSON(owner.base+provider.api+'/'+operation,args)
       if(operation==='home' && !value.list?.length){const recommended=await sourceJSON(owner.base+provider.api+'/homeVod',{});value={...value,list:recommended.list||[]}}
     }else{
-      const module=owner.module,catvod=owner.protocol==='catvod-js'
+      const module=owner.module,catvod=isCatVodProtocol(owner.protocol)
       if(operation==='catalog'){
         if(owner.protocol==='iptv-extractor'){
           const raw=await module.fetch(owner.payload.options||{});value=[]
@@ -147,7 +156,7 @@ async function invoke(operation,payload){
       else if(operation==='providers')value=typeof module.providers==='function'?await module.providers():[]
       else if(operation==='home'){value=typeof module.home==='function'?await module.home(catvod?true:payload):{};if(!value.list?.length && module.homeVod)value={...value,list:(await module.homeVod()).list||[]}}
       else if(typeof module[operation]!=='function')throw Error('Node 模块不支持 '+operation)
-      else if(catvod){const args=operation==='category'?[String(payload.categoryId),String(payload.page||1),true,payload.filters||{}]:operation==='search'?[payload.keyword,false,String(payload.page||1)]:operation==='detail'?[[payload.id]]:operation==='play'?[payload.lineId||'',payload.id,[]]:[payload];value=await module[operation](...args)}
+      else if(catvod){const args=operation==='category'?[String(payload.categoryId),String(payload.page||1),true,payload.filters||{}]:operation==='search'?[payload.keyword,false,String(payload.page||1)]:operation==='detail'?[owner.modernCatVod?String(payload.id):[payload.id]]:operation==='play'?[payload.lineId||'',payload.id,[]]:[payload];value=await module[operation](...args)}
       else value=await module[operation](payload)
     }
     if(owner!==active || owner.closed)throw Error('旧 Node 会话结果已失效')

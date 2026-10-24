@@ -130,15 +130,32 @@ def playback(value):
         value = {'url': value}
     if not isinstance(value, dict):
         raise MediaError('NO_MEDIA', '来源未返回播放结果')
-    parse = 1 if int(value.get('parse') or 0) > 0 else 0
+    try:
+        parse = 1 if int(value.get('parse') or 0) > 0 else 0
+    except (ValueError, TypeError):
+        parse = 1 if value.get('parse') is True else 0
+    headers = value.get('headers', value.get('header', {})) or {}
     url = value.get('url')
     alternates = value.get('alternates', [])
+    if isinstance(url, dict):
+        headers = {**headers, **(url.get('headers') or url.get('header') or {})} if isinstance(headers, dict) else (url.get('headers') or url.get('header') or {})
+        choices = url.get('values') or url.get('list')
+        if isinstance(choices, list):
+            url = choices
+        else:
+            url = url.get('url') or url.get('value')
     if isinstance(url, list):
-        alternates = [{'name': str(url[i]), 'url': str(url[i + 1])} for i in range(0, len(url) - 1, 2)]
+        if url and all(isinstance(item, dict) for item in url):
+            alternates = [{'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}'),
+                           'url': str(item.get('url') or item.get('value') or item.get('v') or '')}
+                          for index, item in enumerate(url) if item.get('url') or item.get('value') or item.get('v')]
+        else:
+            alternates = [{'name': str(url[i]), 'url': str(url[i + 1])} for i in range(0, len(url) - 1, 2)]
         url = alternates[0]['url'] if alternates else ''
+    if not url and isinstance(value.get('playUrl'), str) and value['playUrl'].startswith(('http://', 'https://')):
+        url = value['playUrl']
     if not isinstance(url, str) or urllib.parse.urlsplit(url).scheme.lower() not in ('http', 'https'):
         raise MediaError('NO_MEDIA', '来源未返回有效 HTTP/HTTPS 媒体地址')
-    headers = value.get('headers', value.get('header', {})) or {}
     if not isinstance(headers, dict):
         headers = {}
     headers = {str(k): str(v) for k, v in headers.items()
