@@ -34,6 +34,7 @@
 static pthread_mutex_t gLock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t gCondition = PTHREAD_COND_INITIALIZER;
 static NSMutableDictionary<NSString *, PyHostTask *> *gTasks;
+static NSMutableDictionary<NSString *, NSError *> *gTaskFailures;
 static NSMutableDictionary<NSString *, void (^)(NSString *)> *gLogHandlers;
 static void (^gFallbackLogHandler)(NSString *);
 static BOOL gStartedOnce = NO;
@@ -51,7 +52,7 @@ NSNotificationName const PyHostRuntimeStateDidChangeNotification = @"PyHostRunti
 
 static void ensureMaps(void) {
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ gTasks = [NSMutableDictionary dictionary]; gLogHandlers = [NSMutableDictionary dictionary]; });
+    dispatch_once(&once, ^{ gTasks = [NSMutableDictionary dictionary]; gTaskFailures = [NSMutableDictionary dictionary]; gLogHandlers = [NSMutableDictionary dictionary]; });
 }
 static void notifyRuntimeStateChanged(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -89,7 +90,8 @@ static void emitLog(NSString *text) { emitLogForIdentifier(nil, text); }
 }
 + (BOOL)isStartingServiceIdentifier:(NSString *)identifier {
     if(!identifier.length)return NO;
-    return [NodePluginRuntime.shared isStartingServiceIdentifier:identifier]||([[JSPluginRuntime.shared managedServiceIdentifiers] containsObject:identifier]&&![JSPluginRuntime.shared.activeSessionIdentifiers containsObject:identifier]);
+    ensureMaps();pthread_mutex_lock(&gLock);PyHostTask *task=gTasks[identifier];BOOL pythonStarting=task&&!task.threadExited&&!task.sessionReady&&!task.stopping;pthread_mutex_unlock(&gLock);
+    return pythonStarting||[NodePluginRuntime.shared isStartingServiceIdentifier:identifier]||([[JSPluginRuntime.shared managedServiceIdentifiers] containsObject:identifier]&&![JSPluginRuntime.shared.activeSessionIdentifiers containsObject:identifier]);
 }
 + (BOOL)hasUncertainSessionForServiceIdentifier:(NSString *)identifier {
     return identifier.length&&[NodePluginRuntime.shared hasUncertainSessionForServiceIdentifier:identifier];
@@ -111,7 +113,7 @@ static void emitLog(NSString *text) { emitLogForIdentifier(nil, text); }
 + (NSError *)startupError {
     pthread_mutex_lock(&gLock); NSError *value = gInterpreterFailure; pthread_mutex_unlock(&gLock); return value;
 }
-+ (NSError *)startupErrorForServiceIdentifier:(NSString *)identifier {ensureMaps();pthread_mutex_lock(&gLock);NSError *value=gTasks[identifier].error?:gInterpreterFailure;pthread_mutex_unlock(&gLock);return value;}
++ (NSError *)startupErrorForServiceIdentifier:(NSString *)identifier {ensureMaps();pthread_mutex_lock(&gLock);NSError *value=gTasks[identifier].error?:gTaskFailures[identifier]?:gInterpreterFailure;pthread_mutex_unlock(&gLock);return value;}
 + (NSString *)runtimeStatusDescription {
     NSArray *identifiers = self.runningServiceIdentifiers;
     pthread_mutex_lock(&gLock); BOOL initializing = gInterpreterInitializing; BOOL ready = gInterpreterReady; NSError *failure = gInterpreterFailure; pthread_mutex_unlock(&gLock);
@@ -125,8 +127,10 @@ static void emitLog(NSString *text) { emitLogForIdentifier(nil, text); }
     if ([NodePluginRuntime.shared isStartingServiceIdentifier:identifier]) return @"Node 服务启动中 · HTTP 健康状态未知";
     if ([self hasUncertainSessionForServiceIdentifier:identifier]) return @"Node 启动结果未知 · 可尝试停止后重试";
     if ([[JSPluginRuntime.shared managedServiceIdentifiers] containsObject:identifier] && ![JSPluginRuntime.shared.activeSessionIdentifiers containsObject:identifier]) return @"JavaScriptCore 会话启动中或待回收";
+    ensureMaps();pthread_mutex_lock(&gLock);PyHostTask *task=gTasks[identifier];BOOL pythonStarting=task&&!task.threadExited&&!task.sessionReady&&!task.stopping;NSError *failure=task.error?:gTaskFailures[identifier];pthread_mutex_unlock(&gLock);
+    if(pythonStarting)return @"Python 服务启动中 · HTTP 健康状态未知";
     if ([self isRunningServiceIdentifier:identifier]) return @"该服务的运行会话活跃 · HTTP 健康状态未知";
-    ensureMaps();pthread_mutex_lock(&gLock);NSError *failure=gTasks[identifier].error;pthread_mutex_unlock(&gLock);
+    if(!failure){pthread_mutex_lock(&gLock);failure=gInterpreterFailure;pthread_mutex_unlock(&gLock);}
     if (failure) return [NSString stringWithFormat:@"启动异常 · %@", failure.localizedDescription ?: @"查看服务日志"];
     return @"已停止 · HTTP 健康状态未知";
 }
@@ -231,7 +235,8 @@ static BOOL initializeInterpreter(PyHostTask *task, NSError **failure) {
 }
 
 static void taskFinished(PyHostTask *task, BOOL active, NSError *error) {
-    pthread_mutex_lock(&gLock); task.running = active; task.error = error; task.threadExited = YES;
+    ensureMaps();pthread_mutex_lock(&gLock); task.running = active; task.error = error; task.threadExited = YES;
+    if(!active && gTasks[task.identifier]==task){[gTasks removeObjectForKey:task.identifier];if(error)gTaskFailures[task.identifier]=error;else [gTaskFailures removeObjectForKey:task.identifier];if(gTaskFailures.count>256)[gTaskFailures removeObjectForKey:gTaskFailures.allKeys.firstObject];}
     pthread_cond_broadcast(&gCondition); pthread_mutex_unlock(&gLock); notifyRuntimeStateChanged();
 }
 
@@ -258,13 +263,16 @@ static void *pyThread(void *rawTask) {
             taskFinished(task, NO, failure); return NULL;
         }
 
+        pthread_mutex_lock(&gLock);BOOL cancelled=task.stopping;if(!cancelled){task.sessionReady=YES;task.running=YES;}pthread_cond_broadcast(&gCondition);pthread_mutex_unlock(&gLock);
+        if(cancelled){if(initialize)PyEval_SaveThread();else PyGILState_Release(gil);taskFinished(task,NO,nil);return NULL;}
+        notifyRuntimeStateChanged();
+
         PyObject *path = PyUnicode_FromString(task.scriptPath.UTF8String);
         PyObject *identifier = PyUnicode_FromString(task.identifier.UTF8String);
         PyObject *dataDir = PyUnicode_FromString(task.dataDir.UTF8String);
         PyObject *port = PyLong_FromLong((long)task.port);
         PyObject *arguments = PyList_New((Py_ssize_t)task.arguments.count);
         for (NSUInteger index = 0; index < task.arguments.count; index++) PyList_SET_ITEM(arguments, (Py_ssize_t)index, PyUnicode_FromString(task.arguments[index].UTF8String));
-        pthread_mutex_lock(&gLock); task.sessionReady = YES; pthread_cond_broadcast(&gCondition); pthread_mutex_unlock(&gLock);
         emitLogForIdentifier(task.identifier, @"Python 服务启动请求已交给运行时");
         PyObject *run = PyObject_GetAttrString(gServiceRuntime, "run_script");
         PyObject *result = (run && path && identifier && dataDir && port && arguments)
@@ -310,11 +318,13 @@ static void *pyThread(void *rawTask) {
     if (!runtimeOK) { if (error) *error = [NSError errorWithDomain:@"PyHost" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Python 运行时不完整：需要插件脚本、python 标准库、设备扩展模块以及 SSL 证书。"}]; return NO; }
     NSError *directoryError = nil;
     if (![NSFileManager.defaultManager createDirectoryAtPath:dataDir withIntermediateDirectories:YES attributes:nil error:&directoryError]) { if (error) *error = directoryError; return NO; }
-    PyHostTask *task = [PyHostTask new]; task.identifier = identifier; task.scriptPath = path; task.pythonHome = home; task.dataDir = dataDir; task.port = port; task.arguments = arguments.copy ?: @[]; task.running = YES;
+    PyHostTask *task = [PyHostTask new]; task.identifier = identifier; task.scriptPath = path; task.pythonHome = home; task.dataDir = dataDir; task.port = port; task.arguments = arguments.copy ?: @[];
     pthread_mutex_lock(&gLock);
+    if(gInterpreterFailure){NSError *failure=gInterpreterFailure;pthread_mutex_unlock(&gLock);if(error)*error=failure;return NO;}
     PyHostTask *previous = gTasks[identifier];
     if (previous && (previous.running || !previous.threadExited)) { pthread_mutex_unlock(&gLock); if (error) *error = [NSError errorWithDomain:@"PyHost" code:4 userInfo:@{NSLocalizedDescriptionKey:@"该服务已经运行或正在启停。"}]; return NO; }
     if (previous) [gTasks removeObjectForKey:identifier];
+    [gTaskFailures removeObjectForKey:identifier];
     task.initializesInterpreter = !gInterpreterReady && !gInterpreterInitializing;
     if (task.initializesInterpreter) gInterpreterInitializing = YES;
     gStartedOnce = YES; gTasks[identifier] = task;
@@ -335,11 +345,11 @@ static void *pyThread(void *rawTask) {
     return [JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:error];
 #else
     pthread_mutex_lock(&gLock); PyHostTask *task = gTasks[identifier];
-    if (!task) { pthread_mutex_unlock(&gLock); if (![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:error]) return NO; return [JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:error]; }
+    if (!task) { pthread_mutex_unlock(&gLock); if (![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:error]) return NO;if(![JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:error])return NO;pthread_mutex_lock(&gLock);[gTaskFailures removeObjectForKey:identifier];pthread_mutex_unlock(&gLock);notifyRuntimeStateChanged();return YES; }
     task.stopping = YES;
     for (NSUInteger wait = 0; !task.sessionReady && !task.threadExited && wait < 500; wait++) { struct timespec deadline; clock_gettime(CLOCK_REALTIME, &deadline); deadline.tv_nsec += 10000000; if (deadline.tv_nsec >= 1000000000) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000; } pthread_cond_timedwait(&gCondition, &gLock, &deadline); }
     BOOL exited = task.threadExited, ready = task.sessionReady; pthread_mutex_unlock(&gLock);
-    if (exited && !task.running) { NSError *failure=nil;if(![JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]||![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]){if(error)*error=failure;return NO;}return YES; }
+    if (exited && !task.running) { NSError *failure=nil;if(![JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]||![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]){if(error)*error=failure;return NO;}pthread_mutex_lock(&gLock);[gTaskFailures removeObjectForKey:identifier];pthread_mutex_unlock(&gLock);notifyRuntimeStateChanged();return YES; }
     if (!ready) { if (error) *error = task.error ?: [NSError errorWithDomain:@"PyHost" code:7 userInfo:@{NSLocalizedDescriptionKey:@"Python 初始化尚未完成，请稍后停止。"}]; return NO; }
     PyGILState_STATE gil = PyGILState_Ensure();
     PyObject *result = gServiceRuntime ? PyObject_CallMethod(gServiceRuntime, "stop_session", "sd", identifier.UTF8String, 5.0) : NULL;

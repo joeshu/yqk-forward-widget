@@ -168,6 +168,15 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertNotIn('stopWithError', toggler)
         self.assertIn('端口 %ld 正由', starter)
 
+    def test_service_log_handlers_are_released_after_failed_start_or_confirmed_stop(self):
+        cleanup = method_body('- (void)clearServiceLogHandlers:')
+        for runtime in ('PyHost', 'NodePluginRuntime.shared', 'JSPluginRuntime.shared'):
+            self.assertIn(f'[{runtime} setLogHandler:nil forServiceIdentifier:identifier]', cleanup)
+        starter = method_body('- (BOOL)startService:')
+        stopped = method_body('- (void)completeServiceStopForIdentifier:')
+        self.assertIn('[self clearServiceLogHandlers:serviceID]', starter)
+        self.assertIn('[self clearServiceLogHandlers:serviceID]', stopped)
+
     def test_plugin_and_settings_pages_use_safe_area_cards_and_live_status(self):
         self.assertIn('UIScrollView', PLUGIN)
         self.assertIn('PyHostRuntimeStateDidChangeNotification', PLUGIN)

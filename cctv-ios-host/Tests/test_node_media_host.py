@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
@@ -158,6 +159,63 @@ class NodeMediaHostTests(unittest.TestCase):
             self.assertTrue(self.call('stop')['ok'])
         finally:
             upstream.shutdown(); upstream.server_close(); thread.join(timeout=2)
+
+    def test_head_response_without_body_is_supported_by_plugin_http_bridge(self):
+        class Fixture(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_HEAD(self):
+                self.send_response(204); self.end_headers()
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
+        thread = threading.Thread(target=upstream.serve_forever, daemon=True); thread.start()
+        try:
+            (self.package / 'index.cjs').write_text(f'''module.exports={{async search(){{
+              const response=await req('http://127.0.0.1:{upstream.server_port}/health',{{method:'HEAD',timeout:-1}});
+              return {{list:[{{vod_id:String(response.code),vod_name:String(response.content.length)}}]}};
+            }}}};''')
+            self.assertTrue(self.start()['ok'])
+            result = self.call('search')['result']['list'][0]
+            self.assertEqual((result['vod_id'], result['vod_name']), ('204', '0'))
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            upstream.shutdown(); upstream.server_close(); thread.join(timeout=2)
+
+    def test_unhandled_rejection_isolated_to_owning_plugin_session(self):
+        (self.package / 'index.cjs').write_text('''module.exports={init(ext){if(ext!=='healthy')
+          setTimeout(()=>Promise.reject(new Error('fixture rejection')),0)},
+          search(){return {list:[{vod_id:'still-healthy',vod_name:'healthy'}]}}};''')
+        self.assertTrue(self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data),
+                                  entry='index.cjs', protocol='catvod-js')['ok'])
+        deadline = time.monotonic() + 2
+        failed = None
+        while time.monotonic() < deadline:
+            failed = self.call('search')
+            if not failed['ok']:
+                break
+            time.sleep(.01)
+        self.assertIsNotNone(failed)
+        self.assertFalse(failed['ok'], failed)
+        self.assertIn('fixture rejection', failed['error'])
+        self.assertTrue(self.call('start', session='healthy', packageRoot=str(self.package),
+                                  dataDirectory=str(self.data), entry='index.cjs', protocol='catvod-js',
+                                  options={'ext': 'healthy'})['ok'])
+        self.assertEqual(self.call('search', session='healthy')['result']['list'][0]['vod_id'], 'still-healthy')
+        self.assertTrue(self.call('stop')['ok'])
+        self.assertTrue(self.call('stop', session='healthy')['ok'])
+
+    def test_throwing_stop_hook_force_closes_owned_listener_and_releases_session(self):
+        (self.package / 'index.cjs').write_text('''const http=require('node:http'),fs=require('node:fs');let server;
+          module.exports={async init(){server=http.createServer((_req,res)=>res.end('ok'));
+            await new Promise(resolve=>server.listen(0,'127.0.0.1',()=>{fs.writeFileSync('port.txt',String(server.address().port));resolve()}));},
+            search(){return {list:[{vod_id:fs.readFileSync('port.txt','utf8'),vod_name:'listener'}]}},
+            stop(){throw Error('fixture stop hook failed')}};''')
+        self.assertTrue(self.start()['ok'])
+        port = int((self.data / 'port.txt').read_text())
+        stopped = self.call('stop')
+        self.assertTrue(stopped['ok'], stopped)
+        self.assertIn('fixture stop hook failed', '\n'.join(stopped.get('logs', [])))
+        self.assertEqual(self.call('state')['result']['sessions'], [])
+        with self.assertRaises(OSError):
+            socket.create_connection(('127.0.0.1', port), timeout=.5)
 
     def test_modern_catvod_factory_receives_site_ext_and_scalar_detail_ids(self):
         (self.package / 'spider.mjs').write_text('''

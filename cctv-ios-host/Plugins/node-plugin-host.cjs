@@ -34,6 +34,7 @@ for(const name of ['copyFile','cp','link','rename','symlink']){
 for(const key of ['createReadStream','createWriteStream']){const operation=fs[key];fs[key]=function(file,...args){const stream=operation.call(this,fsPath(file),...args),owner=scope.getStore();if(owner){owner.streams.add(stream);stream.once('close',()=>owner.streams.delete(stream))}return stream}}
 let inflight=0
 function appendLog(owner,line){const lines=owner?.logs||hostLogs;lines.push(String(line).slice(0,1024));if(lines.length>64)lines.shift()}
+function failOwner(owner,context,error){const message=String(error?.message||error||'未知错误').slice(0,512);appendLog(owner,context+message);if(owner&&!owner.closed){owner.failure=message;cancelHandles(owner)}}
 function drainLogs(identifier){const owner=owners.get(identifier),lines=owner?.logs||closedLogs.get(identifier)||hostLogs,result=lines.splice(0,20);if(!lines.length)closedLogs.delete(identifier);return result}
 for(const key of ['log','info','warn','error','debug'])console[key]=(...args)=>{const owner=scope.getStore();appendLog(owner,args.map(value=>{try{return typeof value==='string'?value:JSON.stringify(value)}catch{return '[无法显示日志对象]'}}).join(' '))}
 process.exit=()=>{throw Error('插件不能退出 CCTVHost 进程')}
@@ -69,17 +70,19 @@ net.Server.prototype.listen=function(...args){
   return listen.apply(this,args)
 }
 function cancelHandles(owner,closeServers=true){
-  for(const [timer,clear] of owner.timers)original[clear](timer)
+  for(const [timer,clear] of owner.timers){try{original[clear](timer)}catch(error){appendLog(owner,'定时器清理失败：'+(error?.message||String(error)))}}
   owner.timers.clear()
-  for(const stream of owner.streams)stream.destroy()
-  for(const socket of owner.sockets)socket.destroy()
-  if(closeServers)for(const server of owner.servers){server.closeAllConnections?.();server.close()}
+  for(const stream of owner.streams){try{stream.destroy()}catch(error){appendLog(owner,'流清理失败：'+(error?.message||String(error)))}}
+  for(const socket of owner.sockets){try{socket.destroy()}catch(error){appendLog(owner,'连接清理失败：'+(error?.message||String(error)))}}
+  if(closeServers)for(const server of owner.servers){try{server.closeAllConnections?.();if(server.listening)server.close()}catch(error){appendLog(owner,'监听清理失败：'+(error?.message||String(error)))}}
 }
 function deadline(promise,ms,label){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=original.setTimeout(()=>reject(Error(label)),ms)})]).finally(()=>original.clearTimeout(timer))}
 function readableRoot(value){const root=fs.realpathSync(value);if(!root.startsWith(allowedRoot+path.sep))throw Error('Node 资源不在已安装目录中');return root}
 function entryPath(root,entry){const value=fs.realpathSync(path.resolve(root,entry));if(!value.startsWith(root+path.sep))throw Error('Node 入口超出资源目录');return value}
-async function readLimited(response){let length=0,chunks=[];for await(const chunk of response.body){length+=chunk.length;if(length>2*1024*1024)throw Error('Node 来源响应超过 2 MB');chunks.push(Buffer.from(chunk))}return Buffer.concat(chunks)}
+async function readLimited(response){if(!response?.body)return Buffer.alloc(0);let length=0,chunks=[];for await(const chunk of response.body){length+=chunk.length;if(length>2*1024*1024)throw Error('Node 来源响应超过 2 MB');chunks.push(Buffer.from(chunk))}return Buffer.concat(chunks)}
 function safeWidgetURL(value){try{const url=new URL(String(value||''));return ['http:','https:'].includes(url.protocol)&&url.hostname&&!url.username&&!url.password&&url.href.length<=8192?url.href:''}catch{return ''}}
+function pluginHTTPURL(value){const url=new URL(String(value||''));if(!['http:','https:'].includes(url.protocol)||!url.hostname||url.username||url.password||url.href.length>8192)throw Error('插件 HTTP 仅支持有效的 HTTP/HTTPS 地址');return url}
+function boundedTimeout(value,fallback,maximum=20000){const requested=Number(value);return Math.max(1000,Math.min(Number.isFinite(requested)&&requested>0?requested:fallback,maximum))}
 function widgetHeaders(input){const output={};if(!input||typeof input!=='object')return output;for(const [name,value] of Object.entries(input).slice(0,64)){const key=String(name),text=String(value);if(!/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(key)||text.length>8192||/[\r\n]/.test(text)||/^(host|content-length|connection|transfer-encoding|keep-alive|upgrade)$/i.test(key))continue;output[key]=text}return output}
 async function widgetHTTP(method,url,body,options={}){
   const target=safeWidgetURL(url);if(!target)throw Error('Widget HTTP 仅支持有效的 HTTP/HTTPS 地址')
@@ -122,14 +125,14 @@ function installCatvodGlobals(owner){
   global.req=async(url,options={})=>{
     let body=options.body??options.data,headers={...(options.headers||{})}
     if(body && typeof body==='object'){body=JSON.stringify(body);headers['Content-Type']??='application/json'}
-    const response=await fetch(url,{method:options.method||'GET',headers,body,signal:AbortSignal.timeout(Math.min(options.timeout||12000,20000))})
+    const response=await fetch(pluginHTTPURL(url),{method:options.method||'GET',headers,body,signal:AbortSignal.timeout(boundedTimeout(options.timeout,12000))})
     const bytes=await readLimited(response)
     return {code:response.status,headers:Object.fromEntries(response.headers),content:options.buffer===2?[...bytes]:options.buffer===1?bytes.toString('base64'):bytes.toString('utf8')}
   }
   global.request=async(...args)=>(await global.req(...args)).content
   global.getProxy=()=>owner.payload.proxyURL||''
   global.getProxyUrl=params=>{const base=owner.payload.proxyURL;if(!base)return '';const target=new URL(base);for(const [key,value] of Object.entries(params||{}))if(value!=null)target.searchParams.set(key,String(value));return target.toString()}
-  const netHTTP=async(url,options={})=>{const headers={...(options.headers||{})};let body=options.body??options.data;if(body&&typeof body==='object'&&!Buffer.isBuffer(body)){body=JSON.stringify(body);headers['Content-Type']??='application/json'}const response=await fetch(url,{method:options.method||'GET',headers,body:['GET','HEAD'].includes(String(options.method||'GET').toUpperCase())?undefined:body,signal:AbortSignal.timeout(Math.min(options.timeout||15000,20000))}),bytes=await readLimited(response),content=options.buffer===1?bytes.toString('base64'):options.buffer===2?[...bytes]:bytes.toString(options.encoding||'utf8'),value={code:response.status,headers:Object.fromEntries(response.headers),content,url:response.url||url};options.complete?.(value);return value}
+  const netHTTP=async(url,options={})=>{const headers={...(options.headers||{})};let body=options.body??options.data;if(body&&typeof body==='object'&&!Buffer.isBuffer(body)){body=JSON.stringify(body);headers['Content-Type']??='application/json'}const response=await fetch(pluginHTTPURL(url),{method:options.method||'GET',headers,body:['GET','HEAD'].includes(String(options.method||'GET').toUpperCase())?undefined:body,signal:AbortSignal.timeout(boundedTimeout(options.timeout,15000))}),bytes=await readLimited(response),content=options.buffer===1?bytes.toString('base64'):options.buffer===2?[...bytes]:bytes.toString(options.encoding||'utf8'),value={code:response.status,headers:Object.fromEntries(response.headers),content,url:response.url||url};options.complete?.(value);return value}
   global.net={http:netHTTP,req:netHTTP,json:async(url,options={})=>{if(options.buffer)throw Error('JSON 请求不能使用 buffer');const result=await netHTTP(url,options);if(result.code<200||result.code>=300)throw Error('HTTP '+result.code);return JSON.parse(result.content)},sleep:ms=>new Promise(resolve=>setTimeout(resolve,Math.max(0,Number(ms)||0))),getUserAgent:()=>global.navigator?.userAgent||'CCTVHost/1',cached:async(_key,_options,loader)=>loader(),map:async(items,mapper)=>Promise.all(items.map(mapper)),batch:async(items)=>Promise.all(items.map(item=>netHTTP(item.url,item.options)))}
 }
 function catVodSite(payload){const options=payload.options&&typeof payload.options==='object'?payload.options:{},site=options.site&&typeof options.site==='object'?{...options.site}:{...options};delete site.site;site.key||=String(payload.name||payload.entry||'local_source').replace(/[^A-Za-z0-9_-]/g,'_');site.name||=payload.name||'本机影视源';site.type||=3;if(options.api&&!site.api)site.api=options.api;if(site.ext===undefined)site.ext=options.ext??(typeof payload.options==='string'?payload.options:JSON.stringify(payload.options||{}));return site}
@@ -142,7 +145,7 @@ async function start(payload){
   let resolveReady,rejectReady
   const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject})
   ready.catch(()=>{})
-  const owner={session:payload.session,serviceID:payload.serviceID||payload.session,root,data,cwd:data,payload,protocol:payload.protocol,timers:new Map(),sockets:new Set(),servers:new Set(),streams:new Set(),closed:false,stopPromise:null,providers:[],globals:{},env:{...baseEnvironment},logs:[],ready,resolveReady,rejectReady,metadata:null}
+  const owner={session:payload.session,serviceID:payload.serviceID||payload.session,root,data,cwd:data,payload,protocol:payload.protocol,timers:new Map(),sockets:new Set(),servers:new Set(),streams:new Set(),closed:false,stopPromise:null,stopHookAttempted:false,providers:[],globals:{},env:{...baseEnvironment},logs:[],ready,resolveReady,rejectReady,metadata:null}
   owners.set(owner.session,owner)
   try{const metadata=await scope.run(owner,async()=>{
     process.env.CATPAW_DATA_DIR=data;process.env.NODE_PATH=data;process.env.DEV_HTTP_PORT='0'
@@ -246,14 +249,25 @@ async function stop(payload){
   const owner=owners.get(payload.session)
   if(!owner)return true
   if(!owner.stopPromise)owner.stopPromise=(async()=>{
+    await Promise.resolve()
     if(owner.ready&&!owner.metadata){try{await owner.ready}catch{return true}}
     if(owner.closed)return true
     // Let an owned Fastify/server close hook release its listener cleanly.
     // Timers and client work stop first; any listener left behind is force
     // closed in finally, including plugins with no cooperative close hook.
     cancelHandles(owner,false)
-    try{const close=owner.module?.stop||owner.module?.close||owner.module?.destroy;if(typeof close==='function')await scope.run(owner,()=>close.call(owner.module))}
+    let closeError=null
+    try{
+      const close=owner.stopHookAttempted?null:(owner.module?.stop||owner.module?.close||owner.module?.destroy)
+      owner.stopHookAttempted=true
+      if(typeof close==='function')await deadline(Promise.resolve(scope.run(owner,()=>close.call(owner.module))),2000,'Node 插件关闭回调超时')
+    }catch(error){closeError=error;appendLog(owner,'插件关闭回调失败，将强制清理：'+(error?.message||String(error)))}
     finally{cancelHandles(owner)}
+    if([...owner.servers].some(server=>server.listening)){
+      owner.stopPromise=null
+      throw Error('Node 插件仍有监听端口，强制关闭后可重试停止')
+    }
+    if(closeError)appendLog(owner,'插件已停止；关闭回调未完成，受宿主管理的句柄已清理')
     owner.closed=true
     closedLogs.set(owner.session,owner.logs.slice(-20))
     for(const name of Object.keys(require.cache))if(name.startsWith(owner.root+path.sep))delete require.cache[name]
@@ -262,8 +276,12 @@ async function stop(payload){
   })()
   return deadline(owner.stopPromise,2500,'Node 插件停止超时，仍保留真实运行状态')
 }
-process.on('unhandledRejection',error=>console.error('插件异步错误:',error?.message||String(error)))
-process.on('uncaughtException',error=>{const owner=scope.getStore();appendLog(owner,'插件回调异常: '+(error?.message||String(error)));if(owner){owner.failure=error?.message||String(error);cancelHandles(owner)}})
+process.on('unhandledRejection',error=>{
+  const owner=scope.getStore()
+  if(owner)failOwner(owner,'插件未处理的 Promise 异常：',error)
+  else appendLog(null,'Node 宿主未归属的 Promise 异常：'+String(error?.message||error||'未知错误').slice(0,512))
+})
+process.on('uncaughtException',error=>failOwner(scope.getStore(),'插件回调异常：',error))
 const server=http.createServer(async(req,res)=>{
   if(req.headers['x-cctvhost-token']!==token){res.writeHead(403);res.end();return}
   if(inflight>=8){res.writeHead(503);res.end();return}

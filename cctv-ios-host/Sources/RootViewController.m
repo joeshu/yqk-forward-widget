@@ -542,6 +542,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [PluginLogStore.shared appendLine:line forIdentifier:identifier];
     [self log:@"[%@] %@",name.length?name:@"插件",line];
 }
+- (void)clearServiceLogHandlers:(NSString *)identifier {
+    if(!identifier.length)return;
+    [PyHost setLogHandler:nil forServiceIdentifier:identifier];
+    [NodePluginRuntime.shared setLogHandler:nil forServiceIdentifier:identifier];
+    [JSPluginRuntime.shared setLogHandler:nil forServiceIdentifier:identifier];
+}
 - (void)openDiagnosticLogForIdentifier:(NSString *)identifier name:(NSString *)name {
     LogCenterViewController *page=[LogCenterViewController new];page.scopeName=name;
     __weak typeof(self) weakSelf=self;NSString *scope=[identifier copy];NSString *scopeName=[name copy];
@@ -1593,7 +1599,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     __weak typeof(self) w=self;serviceID=[serviceID copy];NSString *serviceName=[service[@"name"] copy];void(^serviceLogger)(NSString *)=^(NSString *line){if(line.length)[w logPluginLine:line identifier:serviceID name:serviceName];};[PyHost setLogHandler:serviceLogger forServiceIdentifier:serviceID];[NodePluginRuntime.shared setLogHandler:serviceLogger forServiceIdentifier:serviceID];[JSPluginRuntime.shared setLogHandler:serviceLogger forServiceIdentifier:serviceID];
     [self logPluginLine:@"插件启动请求" identifier:serviceID name:serviceName];
     for(NSString *origin in self.readyLocalOrigins.allKeys.copy)if([origin containsString:[NSString stringWithFormat:@":%ld",(long)port]])[self.readyLocalOrigins removeObjectForKey:origin]; // This service must prove readiness again.
-    if(![PyHost startScriptAtPath:[ServiceStore scriptPath:service] identifier:serviceID port:port dataDir:dataDir arguments:args error:error]){if(error&&*error)[self logPluginLine:(*error).localizedDescription identifier:serviceID name:serviceName];return NO;}
+    if(![PyHost startScriptAtPath:[ServiceStore scriptPath:service] identifier:serviceID port:port dataDir:dataDir arguments:args error:error]){if(error&&*error)[self logPluginLine:(*error).localizedDescription identifier:serviceID name:serviceName];[self clearServiceLogHandlers:serviceID];return NO;}
     [NSUserDefaults.standardUserDefaults setObject:service[@"id"] forKey:@"activePythonService"];
     [self log:@"服务进程启动 %@ · %ld，等待 HTTP 就绪",service[@"name"],(long)port];
     NSString *playlistPath=[service[@"builtin"] boolValue]?@"/all.m3u":service[@"playlistPath"];
@@ -1635,6 +1641,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         self.playbackGeneration++;[self stopPlayback];[self.spinner stopAnimating];self.titleLabel.hidden=NO;self.titleLabel.text=@"本机服务已停止";
     }
     [self log:@"服务 %@ 已停止，保留订阅供下次启动续播",stopped[@"name"]?:serviceID];
+    [self clearServiceLogHandlers:serviceID];
 }
 - (void)showServiceError:(NSString *)message {[self log:@"服务操作失败：%@",message?:@"未知错误"];UIAlertController *a=[UIAlertController alertControllerWithTitle:@"服务" message:message?:@"服务操作失败，请查看日志。" preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];UIViewController *top=self.navigationController.topViewController?:self;[top presentViewController:a animated:YES completion:nil];}
 - (void)stopBuiltinPlugin {for(NSDictionary *service in [ServiceStore services])if([service[@"builtin"] boolValue]){[self toggleService:service enabled:NO];break;}}

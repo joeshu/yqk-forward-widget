@@ -121,6 +121,50 @@ class ServiceRuntimeTests(unittest.TestCase):
         workers['service-b'].join(1)
         self.assertEqual(self.errors, [])
 
+    def test_stop_while_waiting_for_serialized_startup_prevents_late_service_start(self):
+        import builtins
+        gate = threading.Event()
+        builtins._host_test_startup_gate = gate
+        paths = {}
+        for identifier, source in (
+                ('startup-a', 'import builtins\nbuiltins._host_test_startup_gate.wait()\n'),
+                ('startup-b', "from http.server import HTTPServer, BaseHTTPRequestHandler\n"
+                              "class Handler(BaseHTTPRequestHandler): pass\n"
+                              "HTTPServer(('127.0.0.1', 0), Handler).serve_forever()\n")):
+            path = Path(self.temp.name) / (identifier + '.py')
+            path.write_text(source)
+            paths[identifier] = path
+
+        first = threading.Thread(target=lambda: runtime.run_script(str(paths['startup-a']), 'startup-a'), daemon=True)
+        second = threading.Thread(target=lambda: runtime.run_script(str(paths['startup-b']), 'startup-b'), daemon=True)
+        first.start()
+        self.wait(lambda: runtime._sessions.get('startup-a') is not None
+                  and runtime._sessions['startup-a'].script_started)
+        second.start()
+        self.wait(lambda: runtime._sessions.get('startup-b') is not None)
+        self.assertFalse(runtime.stop_session('startup-b', .1))
+        gate.set()
+        first.join(1)
+        second.join(1)
+        self.assertFalse(first.is_alive() or second.is_alive())
+        self.assertTrue(runtime.is_idle('startup-a'))
+        self.assertTrue(runtime.is_idle('startup-b'))
+        self.assertNotIn('startup-b', runtime._sessions)
+        vars(builtins).pop('_host_test_startup_gate', None)
+
+    def test_plugin_worker_threads_are_bounded(self):
+        worker = self.launch("import builtins, threading\n"
+                             "for _ in range(49):\n"
+                             " threading.Thread(target=builtins._host_test_release.wait, daemon=True).start()\n")
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(len(self.errors), 1)
+        self.assertRegex(str(self.errors[0]), 'worker thread limit')
+        self.assertLessEqual(sum(thread.is_alive() for thread in runtime._session.threads), 48)
+        self.release.set()
+        self.assertTrue(runtime.stop_session(2), runtime.last_error())
+        self.assertTrue(runtime.is_idle())
+
     def test_returned_main_with_background_server_is_still_running(self):
         worker = self.launch(self.server_source(background=True))
         worker.join(2)

@@ -34,6 +34,8 @@ _process_request = socketserver.ThreadingMixIn.process_request
 _process_thread = socketserver.ThreadingMixIn.process_request_thread
 _hooks = ('_cctvhost_stop_service', '_ysp_stop_server')
 _atexit_register = atexit.register
+_max_threads_per_service = 48
+_max_threads_for_host = 128
 _last_error = ''
 _last_errors = {}
 _base_environment = os.environ
@@ -64,6 +66,7 @@ class Session:
         self.done = threading.Event()
         self.stopping = threading.Event()
         self.callback_started = False
+        self.script_started = False
         self.exit_callbacks = []
         self.inserted_path = None
         self.restored = False
@@ -89,6 +92,14 @@ def _start(thread, *args, **kwargs):
         with _lock:
             if owner.stopping.is_set():
                 raise RuntimeError('service is stopping; new workers are disabled')
+            service_threads = sum(worker.is_alive() for worker in owner.threads)
+            host_threads = sum(worker.is_alive()
+                               for session in _sessions.values()
+                               for worker in session.threads)
+            if service_threads >= _max_threads_per_service:
+                raise RuntimeError('service worker thread limit (%d) reached' % _max_threads_per_service)
+            if host_threads >= _max_threads_for_host:
+                raise RuntimeError('host worker thread limit (%d) reached' % _max_threads_for_host)
             thread._host_session = owner
             owner.threads.add(thread)
             # Reserve and start atomically against stop/clean checks.
@@ -297,20 +308,27 @@ def run_script(path, identifier='default', data_dir=None, port=None, arguments=N
     # initialization so argv/environment and import-path setup cannot race.
     # A managed blocking HTTP server releases this gate as soon as it is serving.
     _startup_lock.acquire()
-    session.startup_lock_held = True
     thread = threading.current_thread()
-    thread._host_session = session
-    session.saved_argv = sys.argv
-    if data_dir is not None:
-        session.environment['YSP_DATA_DIR'] = str(data_dir)
-        session.environment['CCTVHOST_DATA_DIR'] = str(data_dir)
-    if port is not None:
-        session.environment['CCTVHOST_PORT'] = str(port)
-    if arguments is not None:
-        sys.argv = [path] + list(arguments)
-    session.inserted_path = os.path.dirname(path)
-    sys.path.insert(0, session.inserted_path)
+    with _lock:
+        session.startup_lock_held = True
+        thread._host_session = session
     try:
+        with _lock:
+            # A stop may arrive while this service waits behind another
+            # plugin's serialized import/startup. Never start it afterwards.
+            if session.stopping.is_set():
+                return {}
+            session.saved_argv = sys.argv
+            if data_dir is not None:
+                session.environment['YSP_DATA_DIR'] = str(data_dir)
+                session.environment['CCTVHOST_DATA_DIR'] = str(data_dir)
+            if port is not None:
+                session.environment['CCTVHOST_PORT'] = str(port)
+            if arguments is not None:
+                sys.argv = [path] + list(arguments)
+            session.inserted_path = os.path.dirname(path)
+            sys.path.insert(0, session.inserted_path)
+            session.script_started = True
         session.namespace = runpy.run_path(path, run_name='__main__')
         return session.namespace
     except SystemExit as error:
@@ -318,7 +336,8 @@ def run_script(path, identifier='default', data_dir=None, port=None, arguments=N
         print('[宿主] Python 脚本已退出，退出码：%s' % error.code)
         return {}
     finally:
-        _capture_stop_hook(session)
+        if session.script_started:
+            _capture_stop_hook(session)
         _release_startup(session)
         thread._host_session = None
         session.done.set()

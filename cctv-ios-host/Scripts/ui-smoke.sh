@@ -30,12 +30,15 @@ if [ ! -s GeneratedJS/node-fetch.bundle.cjs ]; then
   npm run build --prefix JSPlugins
 fi
 cp GeneratedJS/node-fetch.bundle.cjs "$APP/"
-python3 - "$APP/catpaw-ui.cjs" <<'PY'
-import hashlib,pathlib,sys,urllib.request
-url='https://joeshu.github.io/yqk-forward-widget/catpaw/index.js'
-data=urllib.request.urlopen(url,timeout=30).read(8*1024*1024)
-assert hashlib.sha256(data).hexdigest()=='51f535c2bf5e7dfdd2b7a6b941a2d9475e4010ab94bf08488542246eeebe344a','Catpaw fixture changed'
+npm ci --prefix ../catpaw --ignore-scripts --no-audit --no-fund
+npm run build --prefix ../catpaw
+python3 - "$APP/catpaw-ui.cjs" ../catpaw/dist/index.js ../catpaw/dist/index.js.md5 <<'PY'
+import hashlib,pathlib,sys
+source=pathlib.Path(sys.argv[2]);expected=pathlib.Path(sys.argv[3]).read_text().strip()
+data=source.read_bytes()
+assert hashlib.md5(data).hexdigest()==expected,'local CatPaw bundle checksum mismatch'
 pathlib.Path(sys.argv[1]).write_bytes(data)
+print('Using repository-pinned CatPaw bundle sha256='+hashlib.sha256(data).hexdigest())
 PY
 python3 Scripts/prepare_node_runtime.py "$APP" --simulator
 codesign --force --sign - "$APP/Frameworks/NodeMobile.framework"
