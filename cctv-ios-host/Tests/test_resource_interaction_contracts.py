@@ -67,7 +67,11 @@ class ResourceInteractionContracts(unittest.TestCase):
 
     def test_media_resource_and_site_pickers_are_separate(self):
         self.assertIn('选择影视资源', self.detail)
-        self.assertIn('选择影视站点', self.detail)
+        self.assertIn('影视站点：%@，点按切换', self.detail)
+        self.assertIn('media-source-selector', self.detail)
+        self.assertIn('media-provider-selector', self.detail)
+        self.assertIn('selectionRow.bottomAnchor', self.detail)
+        self.assertIn('[self updateSelectionControls]', self.detail)
         self.assertIn('- (void)chooseResource', self.detail)
         self.assertIn('- (void)chooseProvider', self.detail)
         self.assertIn('UIModalPresentationPageSheet', self.detail)

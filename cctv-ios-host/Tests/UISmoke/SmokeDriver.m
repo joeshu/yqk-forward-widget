@@ -586,15 +586,16 @@ static void next(NSArray *steps, NSUInteger index) {
           }},
           @{@"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]>0;},@"run":^{
             check([[mediaPage valueForKey:@"items"] count]==1,@"media home loads real JSON API into native poster grid");
-            UIScrollView *categories=[mediaPage valueForKey:@"categoryScroll"];check(CGRectGetMinY(categories.frame)>=mediaPage.view.safeAreaInsets.top,@"film categories stay below the navigation and search bars");capture(self.window,@"16-media-home");
-            [mediaPage chooseResource];
+            UIStackView *selectionRow=[mediaPage valueForKey:@"selectionRow"];UIButton *sourceSelector=[mediaPage valueForKey:@"sourceSelectButton"];UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];check(CGRectGetMinY(selectionRow.frame)>=mediaPage.view.safeAreaInsets.top,@"two-level resource selectors stay inside the media safe area");check([sourceSelector.currentTitle containsString:@"本机影视测试"]&&[providerSelector.currentTitle containsString:@"主平台"],@"top selectors show the active resource and its selected site");check(providerSelector.enabled,@"second-level selector becomes available after providers load");
+            UIScrollView *categories=[mediaPage valueForKey:@"categoryScroll"];check(CGRectGetMinY(categories.frame)>CGRectGetMaxY(selectionRow.frame),@"film categories appear below the two-level resource selectors");capture(self.window,@"16-media-home");
+            [sourceSelector sendActionsForControlEvents:UIControlEventTouchUpInside];
           }},
           @{ @"until":^BOOL{return root.presentedViewController!=nil;},@"run":^{
             UINavigationController *sheet=(id)root.presentedViewController;UITableViewController *picker=(id)sheet.topViewController;UITableViewCell *current=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             UIStackView *scopeStack=[picker valueForKey:@"scopeStack"];check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"resource selection uses a native bottom sheet");check([picker.tableView numberOfRowsInSection:0]==1&&current.accessoryType==UITableViewCellAccessoryCheckmark,@"resource sheet shows its current selection");check(scopeStack.arrangedSubviews.count==2,@"resource sheet groups resources by runtime and keeps all resources visible");capture(self.window,@"16b-media-resource-sheet");
             [picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
           }},
-          @{ @"until":^BOOL{return root.presentedViewController==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{[mediaPage chooseProvider];}},
+          @{ @"until":^BOOL{return root.presentedViewController==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];[providerSelector sendActionsForControlEvents:UIControlEventTouchUpInside];}},
           @{ @"until":^BOOL{return root.presentedViewController!=nil;},@"run":^{
             UINavigationController *sheet=(id)root.presentedViewController;UITableViewController *picker=(id)sheet.topViewController;NSIndexPath *current=nil;for(NSInteger row=0;row<[picker.tableView numberOfRowsInSection:0];row++){UITableViewCell *cell=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];if(cell.accessoryType==UITableViewCellAccessoryCheckmark){current=[NSIndexPath indexPathForRow:row inSection:0];break;}}
             check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"platform selection uses a separate bottom sheet");check([picker.tableView numberOfRowsInSection:0]==2&&current!=nil,@"platform sheet lists choices and marks the current platform");capture(self.window,@"16c-media-platform-sheet");
