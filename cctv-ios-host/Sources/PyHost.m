@@ -319,9 +319,11 @@ static void *pyThread(void *rawTask) {
     if (task.initializesInterpreter) gInterpreterInitializing = YES;
     gStartedOnce = YES; gTasks[identifier] = task;
     void *threadContext = (__bridge_retained void *)task;
-    int rc = pthread_create(&task.thread, NULL, pyThread, threadContext);
+    pthread_t thread;
+    int rc = pthread_create(&thread, NULL, pyThread, threadContext);
     if (rc != 0) { __unused id releasedContext = (__bridge_transfer id)threadContext; if (task.initializesInterpreter) { gInterpreterInitializing = NO; pthread_cond_broadcast(&gCondition); } [gTasks removeObjectForKey:identifier]; pthread_mutex_unlock(&gLock); if (error) *error = [NSError errorWithDomain:@"PyHost" code:5 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"无法创建 Python 线程 (%d)", rc]}]; return NO; }
-    pthread_detach(task.thread); pthread_mutex_unlock(&gLock); notifyRuntimeStateChanged(); return YES;
+    task.thread=thread;
+    pthread_detach(thread); pthread_mutex_unlock(&gLock); notifyRuntimeStateChanged(); return YES;
 #endif
 }
 
