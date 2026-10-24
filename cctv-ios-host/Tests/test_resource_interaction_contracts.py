@@ -125,9 +125,12 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('removeCatalog:', self.root)
         self.assertIn('@"tvboxCatalogs"', store)
 
-    def test_player_reports_item_load_failure_and_does_not_claim_first_frame(self):
+    def test_player_distinguishes_item_ready_from_decoded_video_frame(self):
         self.assertIn('AVPlayerItemStatusFailed', self.playback)
-        self.assertIn('首帧渲染状态未知', self.playback)
+        self.assertIn('AVPlayerItemVideoOutput', self.playback)
+        self.assertIn('playback_video_frame_decoded', self.playback)
+        self.assertIn('等待视频帧超时', self.playback)
+        self.assertNotIn('首帧渲染状态未知', self.playback)
 
     def test_rotation_is_limited_to_the_player_and_supported_by_the_app(self):
         with (ROOT / 'Resources/Info.plist').open('rb') as f:

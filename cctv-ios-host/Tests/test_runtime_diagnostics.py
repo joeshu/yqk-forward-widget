@@ -45,6 +45,8 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         self.assertIn('media_api_failed', MEDIA)
         self.assertIn('episode_resolve_failed', PLAYBACK)
         self.assertIn('player_waiting_to_play', PLAYBACK)
+        self.assertIn('playback_video_frame_decoded', PLAYBACK)
+        self.assertIn('playback_video_frame_timeout', PLAYBACK)
         self.assertIn('elapsed_ms', MEDIA)
 
     def test_media_diagnostics_do_not_include_request_arguments(self):
