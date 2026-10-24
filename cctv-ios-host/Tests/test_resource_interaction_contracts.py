@@ -35,6 +35,18 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('resolveAndPlay', self.playback)
         self.assertIn('self.playerController.player=self.player', self.playback)
 
+    def test_episode_switch_remains_available_during_resolution_and_discards_stale_results(self):
+        selector = self.playback[
+            self.playback.index('- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:'):
+            self.playback.index('- (void)resolveAndPlay')
+        ]
+        resolver = self.playback[self.playback.index('- (void)resolveAndPlay'):]
+        api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        self.assertNotIn('self.resolving', selector)
+        self.assertIn('NSUInteger gen=++self.generation', resolver)
+        self.assertIn('if(gen!=self.generation)return', resolver)
+        self.assertIn('[self cancel]', api_client)
+
     def test_local_interface_probe_is_bounded_and_does_not_follow_redirects(self):
         self.assertIn('completionHandler(nil)', self.resource_detail)
         self.assertIn('1024*1024', self.resource_detail)

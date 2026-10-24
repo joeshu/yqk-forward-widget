@@ -13,6 +13,7 @@
 #import "HostImageLoader.h"
 #import "NodePluginRuntime.h"
 #import "MediaBrowserViewController.h"
+#import "MediaPlaybackViewController.h"
 #import "CNPlayerCrashGuard.h"
 #import "ResourceImportSheetViewController.h"
 #import "LogCenterViewController.h"
@@ -151,6 +152,8 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSDictionary *nodeChecks;
       __block MediaBrowserViewController *mediaPage;
       __block UITableViewController *mediaDetail;
+      __block MediaPlaybackViewController *mediaPlayback;
+      __block NSDate *stalePlaybackDeadline;
       NSArray *steps = @[
           ^{
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
@@ -568,7 +571,7 @@ static void next(NSArray *steps, NSUInteger index) {
             NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
             mediaPage.sourcesProvider=^NSArray *{return @[@{@"id":@"media-ui",@"name":@"本机影视测试",@"port":@(port)}];};
             mediaPage.onActivateService=^(NSDictionary *service,void (^done)(NSError *)){done(nil);};
-            mediaPage.onPlay=^(NSDictionary *result,NSDictionary *context){NSString *title=[context[@"detail"][@"name"] isKindOfClass:NSString.class]?context[@"detail"][@"name"]:([context[@"item"][@"name"] isKindOfClass:NSString.class]?context[@"item"][@"name"]:@"影视");[root playMediaResult:result name:title];};
+            mediaPage.onPlay=^(NSDictionary *result,NSDictionary *context){mediaPlayback=[MediaPlaybackViewController new];mediaPlayback.result=result;mediaPlayback.context=context;[nav pushViewController:mediaPlayback animated:NO];};
             [nav pushViewController:mediaPage animated:NO];
           }},
           @{@"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]>0;},@"run":^{
@@ -587,8 +590,17 @@ static void next(NSArray *steps, NSUInteger index) {
             check([mediaDetail.tableView numberOfSections]==3,@"media detail displays two original playback lines");capture(self.window,@"18-media-detail");
             [mediaDetail.tableView.delegate tableView:mediaDetail.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
           }},
-          @{@"until":^BOOL{AVPlayer *player=[root valueForKey:@"moviePlayer"];return player.currentItem.status==AVPlayerItemStatusReadyToPlay;},@"run":^{
-            AVPlayer *player=[root valueForKey:@"moviePlayer"];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"selected plugin episode reaches real AVPlayer ready state");capture(self.window,@"19-media-playback");[nav dismissViewControllerAnimated:NO completion:nil];[root stopPlayback];
+          @{ @"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];return mediaPlayback&&player.currentItem.status==AVPlayerItemStatusReadyToPlay;},@"run":^{
+            AVPlayer *player=[mediaPlayback valueForKey:@"player"];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"selected plugin episode reaches AVPlayer ready state on the new playback page");check(nav.topViewController==mediaPlayback,@"plugin playback opens the dedicated playback screen");capture(self.window,@"19-media-playback");
+            UITableView *episodes=[mediaPlayback valueForKey:@"table"];
+            [episodes.delegate tableView:episodes didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]];
+            check([[mediaPlayback valueForKey:@"episodeIndex"] integerValue]==1,@"slow episode request starts");
+            [episodes.delegate tableView:episodes didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:0]];
+            check([[mediaPlayback valueForKey:@"episodeIndex"] integerValue]==2,@"episode selection stays responsive while parsing");
+            stalePlaybackDeadline=[NSDate dateWithTimeIntervalSinceNow:4.0];
+          }},
+          @{ @"timeout":@12,@"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;return player.currentItem.status==AVPlayerItemStatusReadyToPlay&&[asset.URL.absoluteString containsString:@"play=fast"]&&[stalePlaybackDeadline timeIntervalSinceNow]<=0;},@"run":^{
+            AVPlayer *player=[mediaPlayback valueForKey:@"player"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;check([asset.URL.absoluteString containsString:@"play=fast"],@"late slow parse cannot replace the latest selected episode");capture(self.window,@"20-media-fast-switch");[nav popViewControllerAnimated:NO];
           }}
       ];
       next(steps, 0);

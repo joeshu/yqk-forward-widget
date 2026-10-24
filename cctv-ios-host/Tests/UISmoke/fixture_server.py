@@ -46,9 +46,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             page = int(args.get('page', 1))
             data = {'page': page, 'pagecount': 2, 'hasMore': page < 2, 'items': [card(str(args.get('keyword', 'category')) + str(page))]}
         elif operation == 'detail':
-            data = {'id': args['id'], 'name': '测试影片详情', 'description': '验证多线路和不透明播放 ID', 'lines': [{'id': 'line', 'name': '主线路', 'episodes': [{'id': 'opaque?$id', 'name': '第一集'}]}, {'id': 'backup', 'name': '备用', 'episodes': [{'id': 'second', 'name': '正片'}]}]}
+            data = {'id': args['id'], 'name': '测试影片详情', 'description': '验证多线路和不透明播放 ID', 'lines': [{'id': 'line', 'name': '主线路', 'episodes': [{'id': 'opaque?$id', 'name': '第一集'}, {'id': 'slow-episode', 'name': '慢线路待切换'}, {'id': 'fast-episode', 'name': '快速切换'}]}, {'id': 'backup', 'name': '备用', 'episodes': [{'id': 'second', 'name': '正片'}]}]}
         elif operation == 'play':
-            data = {'url': base + '/video.mp4', 'headers': {}, 'parse': 0}
+            identifier = str(args.get('id', ''))
+            if identifier == 'slow-episode':
+                time.sleep(3.0)
+            data = {'url': base + '/video.mp4?play=' + ('slow' if identifier == 'slow-episode' else 'fast' if identifier == 'fast-episode' else 'initial'), 'headers': {}, 'parse': 0}
         else:
             self.send_error(404)
             return
@@ -57,7 +60,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def do_GET(self):
         print("GET", self.path, flush=True)
@@ -100,7 +106,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 print("HLS segment delay begin", flush=True)
                 time.sleep(8)
                 print("HLS segment delay complete", flush=True)
-        elif self.path == "/video.mp4":
+        elif self.path.split("?", 1)[0] == "/video.mp4":
             content_type = "video/mp4"
             data = VIDEO
             requested = self.headers.get("Range")
