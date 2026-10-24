@@ -54,12 +54,12 @@
     self.allProfiles=all;
     NSString *q = self.search.searchBar.text.lowercaseString;
     NSInteger kind=self.kindFilter.selectedSegmentIndex;
-    NSArray *profiles=[all filteredArrayUsingPredicate:^BOOL(NSDictionary *p,NSDictionary *bindings){
+    NSArray *profiles=[all filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *p,NSDictionary *bindings){
         NSString *name=[p[@"name"] isKindOfClass:NSString.class]?p[@"name"]:@"";NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";NSString *url=[p[@"url"] isKindOfClass:NSString.class]?p[@"url"]:@"";NSString *status=[p[@"status"] isKindOfClass:NSString.class]?p[@"status"]:@"";BOOL plugin=[p[@"type"] isEqual:@"plugin"],live=[p[@"resourceKind"] isEqual:@"live"],vod=[p[@"resourceKind"] isEqual:@"vod"],pending=[p[@"resourceKind"] isEqual:@"unknown"]||[status containsString:@"失败"]||[status containsString:@"异常"];
         if(kind==1 && !vod && ![p[@"resourceKind"] isEqual:@"both"])return NO;if(kind==2 && !live && ![p[@"resourceKind"] isEqual:@"both"])return NO;if(kind==3 && !pending)return NO;
         if(q.length && [name rangeOfString:q options:NSCaseInsensitiveSearch].location==NSNotFound && [source.lowercaseString rangeOfString:q].location==NSNotFound && [url.lowercaseString rangeOfString:q].location==NSNotFound)return NO;
         return plugin||source.length>0||[p[@"native"] boolValue];
-    }];
+    }]];
     if([self.profiles isEqualToArray:profiles]){self.emptyLabel.text=profiles.count?@"":(q.length?@"没有匹配的资源\n清除搜索或更换筛选条件":@"还没有导入资源\n点击右上角 + 添加影视脚本、直播服务或订阅列表");return;}self.profiles=profiles;self.emptyLabel.text=profiles.count?@"":(q.length?@"没有匹配的资源\n清除搜索或更换筛选条件":@"还没有导入资源\n点击右上角 + 添加影视脚本、直播服务或订阅列表");
     [self.tableView reloadData];
 }
