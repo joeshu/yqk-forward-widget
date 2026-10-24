@@ -130,6 +130,17 @@ class MediaTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertTrue(reply['data']['url'].startswith(f'http://127.0.0.1:{server.server_port}/media/'))
             self.assertEqual(reply['data']['originalURL'], 'https://a.test/one')
+            self.engine.spider.playerContent = lambda *_: {'parse': 1, 'url': 'https://a.test/direct.m3u8?token=x', 'header': {'Referer': 'https://a.test/'}}
+            status, reply = request('/api/v1/play', 'POST', {'id': 'direct'})
+            self.assertEqual(status, 200)
+            self.assertEqual(reply['data']['parse'], 1)
+            self.assertTrue(reply['data']['url'].startswith(f'http://127.0.0.1:{server.server_port}/media/'))
+            self.assertEqual(reply['data']['originalURL'], 'https://a.test/direct.m3u8?token=x')
+            self.engine.spider.playerContent = lambda *_: {'parse': 1, 'url': 'https://a.test/watch?id=direct', 'header': {'Referer': 'https://a.test/'}}
+            status, reply = request('/api/v1/play', 'POST', {'id': 'web'})
+            self.assertEqual(status, 200)
+            self.assertEqual(reply['data']['url'], 'https://a.test/watch?id=direct')
+            self.assertNotIn('originalURL', reply['data'])
             self.assertEqual(request('/missing')[0], 404)
         finally:
             server.relay.close()

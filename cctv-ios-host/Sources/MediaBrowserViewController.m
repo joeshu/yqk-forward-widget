@@ -135,6 +135,19 @@
     NSString *saved=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaSource"];NSDictionary *selected=self.sources.firstObject;for(NSDictionary *source in self.sources)if([source[@"id"] isEqual:saved])selected=source;
     [self activate:selected];
 }
+- (void)refreshSources {
+    NSArray<NSDictionary *> *updated=self.sourcesProvider?self.sourcesProvider():@[];
+    self.sources=updated;
+    if(!updated.count){
+        self.generation++;[self.readiness cancel];[self.client cancel];self.readiness=nil;self.client=nil;self.source=nil;self.provider=nil;self.providers=@[];self.items=@[];self.category=nil;self.keyword=@"";self.loading=NO;self.moreButton.hidden=YES;[self.grid reloadData];
+        for(UIView *view in self.categories.arrangedSubviews.copy){[self.categories removeArrangedSubview:view];[view removeFromSuperview];}
+        [self showMessage:@"尚未导入影视资源\n可在资源页导入 JS、Python 或 ZIP 影视包" loading:NO];return;
+    }
+    for(NSDictionary *candidate in updated)if([candidate[@"id"] isEqual:self.source[@"id"]]){self.source=candidate;return;}
+    NSString *saved=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaSource"];NSDictionary *selected=updated.firstObject;
+    for(NSDictionary *candidate in updated)if([candidate[@"id"] isEqual:saved]){selected=candidate;break;}
+    [self activate:selected];
+}
 - (void)showMessage:(NSString *)message loading:(BOOL)loading {
     self.status.text=message;self.status.hidden=!message.length;self.resourceButton.hidden=loading || self.items.count>0;
     if(loading)[self.spinner startAnimating];else[self.spinner stopAnimating];

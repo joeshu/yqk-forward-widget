@@ -84,6 +84,7 @@ try{
       fastify.post('/detail',async request=>({list:[{vod_id:request.body.id[0],vod_name:'详情',vod_play_from:'线路A$$$线路B',vod_play_url:'第一集$opaque1$$$正片$opaque2'}]}));
       fastify.post('/play',async request=>({parse:1,url:'https://fixture.test/watch/'+request.body.id,header:{Referer:request.server.prefix}}));
       fastify.get('/proxy/:file',async(request,reply)=>reply.type('application/vnd.apple.mpegurl').send('#EXTM3U\\n'+request.params.file));
+      fastify.get('/compat/post',async()=>{const catpaw=await req.post('https://fixture.test/post',{data:{value:'catpaw'},headers:{'X-Post-Style':'catpaw'}});const axiosStyle=await req.post('https://fixture.test/post',{value:'axios'},{headers:{'X-Post-Style':'axios'}});const form=await req.post('https://fixture.test/post',new URLSearchParams({word:'猫爪'}),{headers:{'Content-Type':'application/x-www-form-urlencoded','X-Post-Style':'form'}});return {catpaw:catpaw.data.received,axios:axiosStyle.data.received,form:form.data.received}});
     }}}`}
   reply=await invoke('start',{entry:'spider/video/source.js',moduleType:'esm',protocol:'catvod-spider',name:'Spider fixture'})
   assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.protocol,'catvod-spider')
@@ -95,6 +96,9 @@ try{
   reply=await invoke('play',{lineId:'线路A',id:'opaque1'});assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.parse,1)
   reply=await invoke('route',{method:'GET',path:'/spider/catpaw_fixture/3/proxy/index.m3u8',host:'127.0.0.1:18780'})
   assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.body,'#EXTM3U\nindex.m3u8');assert.equal(reply.result.headers['content-type'],'application/vnd.apple.mpegurl')
+  reply=await invoke('route',{method:'GET',path:'/spider/catpaw_fixture/3/compat/post',host:'127.0.0.1:18780'})
+  assert.equal(reply.ok,true,JSON.stringify(reply));assert.deepEqual(reply.result.body,{catpaw:'{"value":"catpaw"}',axios:'{"value":"axios"}',form:'word=%E7%8C%AB%E7%88%AA'})
+  assert.equal(requests.at(-3).headers['X-Post-Style'],'catpaw');assert.equal(requests.at(-2).headers['X-Post-Style'],'axios');assert.equal(requests.at(-1).headers['Content-Type'],'application/x-www-form-urlencoded')
   await invoke('stop')
   files={'quickjs/spider.mjs':`export default function createSpider(site){return {async init(ext){local.set('saved-ext',ext)},async home(filter){const remote=await net.json('https://fixture.test/qjs');return {class:[{type_id:'movie',type_name:'电影'}],list:[{vod_id:site.key,vod_name:site.name+':'+local.get('saved-ext')+':'+remote.cookie}]}},async homeVod(){return {list:[]}},async category(tid,pg,filter,extend){return {page:Number(pg),list:[{vod_id:tid,vod_name:JSON.stringify(extend)}]}},async search(key,quick,pg){return {page:Number(pg),list:[{vod_id:key,vod_name:key}]}},async detail(id){return {list:[{vod_id:id,vod_name:id,vod_play_from:'线路',vod_play_url:'第一集$'+id}]}},async play(flag,id,vipFlags){return {parse:0,url:'https://fixture.test/'+id,header:{Referer:'https://fixture.test/'}}}}}`}
   reply=await invoke('start',{entry:'quickjs/spider.mjs',moduleType:'esm',protocol:'catvod-js',name:'QuickJS fixture',options:{key:'qjs_fixture',name:'QuickJS fixture',type:3,ext:'extension-value'}})

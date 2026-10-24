@@ -12,6 +12,11 @@ from host_media_runtime import MediaRuntime, MediaError, NativeJS, PythonSpider,
 from host_media_relay import MediaRelay
 
 
+def is_direct_media_url(url):
+    path = urllib.parse.urlsplit(str(url or '')).path.lower()
+    return path.endswith(('.m3u8', '.m3u', '.mp4', '.m4v', '.mov', '.m4a', '.mp3'))
+
+
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
@@ -218,7 +223,7 @@ class Handler(BaseHTTPRequestHandler):
                 args['filters'] = json.loads(args['filters'])
             args.setdefault('host', f'127.0.0.1:{self.server.server_port}')
             result = runtime.call(operation, args)
-            if operation == 'play' and result.get('headers') and not result.get('parse'):
+            if operation == 'play' and result.get('headers') and (not result.get('parse') or is_direct_media_url(result.get('url'))):
                 token = self.server.relay.register(result['url'], result['headers'])
                 result = dict(result, originalURL=result['url'],
                               url=f'http://127.0.0.1:{self.server.server_port}/media/{token}')

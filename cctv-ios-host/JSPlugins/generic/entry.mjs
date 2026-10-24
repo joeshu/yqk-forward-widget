@@ -28,7 +28,8 @@ async function axiosRequest(input={}){
   let target=new URL(options.url||options.uri||'',options.baseURL||undefined)
   if(options.params&&typeof options.params==='object')for(const [key,value] of Object.entries(options.params))if(value!=null)target.searchParams.set(key,String(value))
   const headers={...(options.headers||{})};let body=options.data??options.body
-  if(body&&typeof body==='object'&&!Buffer.isBuffer(body)&&!(body instanceof ArrayBuffer)&&!(body instanceof Uint8Array)){body=JSON.stringify(body);headers['Content-Type']??='application/json'}
+  if(body instanceof URLSearchParams){body=body.toString();if(!Object.keys(headers).some(key=>key.toLowerCase()==='content-type'))headers['Content-Type']='application/x-www-form-urlencoded;charset=UTF-8'}
+  else if(body&&typeof body==='object'&&!Buffer.isBuffer(body)&&!(body instanceof ArrayBuffer)&&!(body instanceof Uint8Array)){const form=Object.entries(headers).some(([key,value])=>key.toLowerCase()==='content-type'&&/application\/x-www-form-urlencoded/i.test(String(value)));body=form?new URLSearchParams(body).toString():JSON.stringify(body);headers['Content-Type']??=form?'application/x-www-form-urlencoded;charset=UTF-8':'application/json'}
   if(body instanceof Uint8Array||body instanceof ArrayBuffer)body=Buffer.from(body)
   const controller=new AbortController(), timeout=Number(options.timeout)||12000,timer=setTimeout(()=>controller.abort(),Math.max(100,Math.min(timeout,30000)))
   try{
@@ -64,7 +65,15 @@ function acceptCookies(url,headers){const raw=headers?.['set-cookie']||headers?.
 function requestWithCookies(input={}){const options=typeof input==='string'?{url:input}:{...(input||{})},headers={...(options.headers||{})};if(!Object.keys(headers).some(key=>key.toLowerCase()==='cookie')){const cookie=cookieHeader(options.url||options.uri||'');if(cookie)headers.Cookie=cookie}options.headers=headers;return axiosRequest(options).then(response=>{acceptCookies(response.url||options.url||options.uri,response.headers);return response})}
 const req=Object.assign(options=>requestWithCookies(options),{request:requestWithCookies,create:axios.create})
 for(const method of ['get','delete','head','options'])req[method]=(url,options={})=>requestWithCookies({...options,url,method})
-for(const method of ['post','put','patch'])req[method]=(url,data,options={})=>requestWithCookies({...options,url,data,method})
+const requestOptionKeys=new Set(['baseURL','data','headers','maxRedirects','method','params','responseType','timeout','url','validateStatus'])
+function requestWithBody(url,data,options,method){
+  // CatPawOpen's req helper accepts req.post(url, {data, headers, timeout}).
+  // Keep the regular axios form req.post(url, data, options) as well.
+  const keys=data&&typeof data==='object'&&!Buffer.isBuffer(data)&&!(data instanceof ArrayBuffer)&&!(data instanceof Uint8Array)?Object.keys(data):[]
+  const helperOptions=keys.length>0&&keys.every(key=>requestOptionKeys.has(key))&&keys.some(key=>key!=='data'||Object.hasOwn(data,'headers')||Object.hasOwn(data,'timeout')||Object.hasOwn(data,'params')||Object.hasOwn(data,'responseType')||Object.hasOwn(data,'validateStatus')||Object.hasOwn(data,'maxRedirects'))
+  return helperOptions?requestWithCookies({...data,url,method}):requestWithCookies({...options,url,data,method})
+}
+for(const method of ['post','put','patch'])req[method]=(url,data,options={})=>requestWithBody(url,data,options,method.toUpperCase())
 req.saveCookies=()=>g.local?.set('catpaw-req',String(plugin?.meta?.key||config?.id||config?.name||'default'),JSON.stringify([...cookieJar]))
 req.loadCookies=()=>{try{const saved=g.local?.get('catpaw-req',String(plugin?.meta?.key||config?.id||config?.name||'default'));const rows=JSON.parse(saved||'[]');cookieJar.clear();for(const [key,value] of rows)if(typeof key==='string'&&value&&typeof value==='object')cookieJar.set(key,value);return cookieJar.size}catch{return 0}}
 req.clearCookies=domain=>{const suffix='|'+String(domain||'').toLowerCase().replace(/^\./,'')+'|';for(const [key,value] of cookieJar)if(value.domain===String(domain||'').toLowerCase().replace(/^\./,'')||key.includes(suffix))cookieJar.delete(key)}

@@ -118,13 +118,14 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     NSData *routerData=ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:routerPath]],PackageFileLimit,NULL);
     NSString *routerText=[[NSString alloc] initWithData:routerData encoding:NSUTF8StringEncoding]?:@"";
     if(!routerText.length && [fm fileExistsAtPath:[root stringByAppendingPathComponent:@"src/router.js"]])routerText=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:@"src/router.js"]],PackageFileLimit,NULL) encoding:NSUTF8StringEncoding]?:@"";
-    BOOL catSpider=[text rangeOfString:@"fastify\\s*\\.\\s*post\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound && [text containsString:@"/home"] && [text containsString:@"/detail"] && [text containsString:@"/play"] && [text containsString:@"meta"];
     NSString *serviceText=[NSString stringWithFormat:@"%@\n%@",text,routerText];
+    BOOL catSpiderRoute=[serviceText rangeOfString:@"fastify\\s*\\.\\s*(?:post|route)\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
+    BOOL catSpider=catSpiderRoute && [serviceText containsString:@"/home"] && [serviceText containsString:@"/detail"] && [serviceText containsString:@"/play"] && [serviceText rangeOfString:@"\\bmeta\\b" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catpawStart=[text rangeOfString:@"(?:export\\s+)?(?:async\\s+)?function\\s+start\\s*\\(|(?:const|let|var)\\s+start\\s*=|export\\s*\\{[^}]*\\bstart\\b" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catpawEntry=catpawStart && ([text containsString:@"listen"] || [text containsString:@"serverFactory"]);
     BOOL catpawRouter=[serviceText containsString:@"/config"] && [serviceText containsString:@"/spider"] && [serviceText containsString:@"video"] && [serviceText containsString:@"sites"];
     BOOL catpawOpen=catpawEntry&&catpawRouter;
-    BOOL catVodMethods=[text rangeOfString:@"(?:async\\s+)?home\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:async\\s+)?category\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:async\\s+)?detail\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:async\\s+)?play\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
+    BOOL catVodMethods=[text rangeOfString:@"(?:(?:async\\s+)?(?:home|homeContent)\\s*\\(|\\b(?:home|homeContent)\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?category\\s*\\(|\\bcategory\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?detail\\s*\\(|\\bdetail\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?play\\s*\\(|\\bplay\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catVodQuickJS=catVodMethods && ([text containsString:@"export default"] || [text containsString:@"module.exports"]);
     if(!runtime.length && [entry.pathExtension.lowercaseString isEqual:@"py"])runtime=@"python";
     if([protocol isEqual:@"tvbox"] || [protocol isEqual:@"tvbox-js"] || [protocol isEqual:@"catvod-quickjs"] || [protocol isEqual:@"catvod-open-js"])protocol=@"catvod-js";
@@ -148,7 +149,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         // CatPaw Spider modules use the documented in-app import registry and
         // Fastify route contract.  Keep those on the bundled JSC engine even
         // when package.json lists dependencies already provided by that registry.
-        BOOL catvodDependencies=YES;NSSet *jscPackages=[NSSet setWithArray:@[@"axios",@"cheerio",@"crypto-js",@"iconv-lite",@"jpeg-js",@"qs"]];for(NSString *name in dependencies)if(![jscPackages containsObject:name]){catvodDependencies=NO;break;}
+        BOOL catvodDependencies=YES;NSSet *jscPackages=[NSSet setWithArray:@[@"axios",@"buffer",@"cheerio",@"crypto",@"crypto-js",@"http2",@"iconv-lite",@"jpeg-js",@"qs",@"stream",@"url"]];for(NSString *name in dependencies)if(![jscPackages containsObject:name]){catvodDependencies=NO;break;}
         runtime=([@[@"catvod-spider"] containsObject:protocol] || ([protocol isEqual:@"catvod-js"]&&catvodDependencies))?@"javascript":((dependencies.count || (hasCommonJSRequire && !nodeProtocol))?@"node":@"javascript");
     }
     if(![@[@"esm",@"commonjs",@"script"] containsObject:moduleType] || ([runtime isEqual:@"python"] != [entry.pathExtension.lowercaseString isEqual:@"py"])){PackageError(error,@"入口类型与运行时声明不匹配");return nil;}

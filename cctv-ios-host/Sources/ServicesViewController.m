@@ -5,6 +5,15 @@
 #import "ServiceEditorViewController.h"
 #import "ServiceStore.h"
 static NSString *ServiceEngineName(NSDictionary *service){return [service[@"engine"] isEqual:@"node"]?@"Node.js Mobile":([service[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore":@"Python");}
+static NSString *ServiceProtocolName(NSDictionary *service){
+    NSString *protocol=service[@"protocol"]?:@"";
+    NSDictionary *names=@{@"catvod-spider":@"CatPaw JS Spider",@"catvod-js":@"CatVod / TVBox JS",@"drpy":@"drpy 规则",@"iptv-extractor":@"IPTV JS Extractor",@"catpaw-http":@"CatPaw Node 服务",@"cctvhost.media/1":@"CCTVHost JS API",@"python-spider":@"Python Spider",@"python-http":@"Python HTTP 服务"};
+    NSString *name=names[protocol]?: (protocol.length?protocol:@"未识别");
+    NSDictionary *manifest=[service[@"manifest"] isKindOfClass:NSDictionary.class]?service[@"manifest"]:@{};
+    NSString *moduleType=manifest[@"moduleType"];
+    if(moduleType.length)name=[name stringByAppendingFormat:@" · %@",[moduleType isEqual:@"esm"]?@"ESM":([moduleType isEqual:@"commonjs"]?@"CommonJS":@"脚本")];
+    return name;
+}
 @interface ServiceDetailViewController : UITableViewController
 @property(nonatomic, copy) NSDictionary *service;
 @property(nonatomic, copy) void (^onToggle)(NSDictionary *, BOOL);
@@ -68,7 +77,7 @@ static NSString *ServiceEngineName(NSDictionary *service){return [service[@"engi
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return section == 0   ? 2
            : section == 1 ? 3
-           : section == 2 ? 5
+           : section == 2 ? 6
            : section == 3 ? 4
                           : ([self.service[@"builtin"] boolValue] ? 0 : 1);
 }
@@ -110,12 +119,13 @@ static NSString *ServiceEngineName(NSDictionary *service){return [service[@"engi
         if (ip.row > 0)
             c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (ip.section == 2) {
-        c.textLabel.text = @[ @"服务类型", @"代码来源", @"文件名称", @"上次更新", @"源地址" ][ip.row];
+        c.textLabel.text = @[ @"运行引擎", @"资源协议识别", @"代码来源", @"入口文件", @"上次更新", @"源地址" ][ip.row];
         NSDate *updated = [NSDate dateWithTimeIntervalSince1970:[self.service[@"updated"] doubleValue]];
         NSDateFormatter *fmt = [NSDateFormatter new];
         fmt.dateFormat = @"yyyy-MM-dd HH:mm";
         NSArray *values = @[
             ServiceEngineName(self.service),
+            ServiceProtocolName(self.service),
             [self.service[@"builtin"] boolValue]
                 ? @"内置"
                 : ([self.service[@"url"] length] ? @"远程链接" : @"本地文件 / 代码"),

@@ -83,6 +83,27 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("playViaSDK:cid title:name", body)
         self.assertIn("self.playbackGeneration += 1", method_body("- (void)startRemoteChannel:"))
 
+    def test_remote_failure_recovery_is_bounded_and_deduplicates_player_callbacks(self):
+        body = method_body("- (void)recoverRemoteFailureForItem:")
+        self.assertIn("self.remoteRetryCount<1", body)
+        self.assertIn("self.remoteFailureRecoveryPending", body)
+        self.assertIn("generation!=self.playbackGeneration", body)
+        self.assertIn("item!=self.avPlayer.currentItem", body)
+        self.assertIn("[self recoverRemoteFailureForItem:n.object error:e]", method_body("- (void)avItemFailed:"))
+        self.assertIn("[self recoverRemoteFailureForItem:item error:item.error]", method_body("- (void)observeValueForKeyPath:"))
+
+    def test_remote_channel_reselection_restarts_after_failed_source(self):
+        body = method_body("- (void)selectChannel:")
+        self.assertIn("self.remotePlaybackWanted || self.playbackReadiness", body)
+        self.assertNotIn("(self.avPlayer || self.playbackReadiness)", body)
+
+    def test_media_and_resource_tabs_reuse_page_state(self):
+        self.assertIn("self.tabPages[@2]", TEXT)
+        self.assertIn("self.tabPages[@3]", TEXT)
+        self.assertIn("self.tabPages[@4]", TEXT)
+        self.assertIn("[page refreshSources]", TEXT)
+        self.assertIn("for(NSDictionary *candidate in updated)if([candidate[@\"id\"] isEqual:self.source[@\"id\"]])", (SOURCE.parent / "MediaBrowserViewController.m").read_text(encoding="utf-8"))
+
     def test_bottom_tabs_open_service_directory_and_settings_pages(self):
         self.assertIn('- (void)buildBottomBar', TEXT)
         self.assertIn('[w openServicesPage]', TEXT)

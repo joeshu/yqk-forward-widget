@@ -84,6 +84,21 @@ class NativePackageTests(unittest.TestCase):
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['engine'], result['protocol'], result['manifest']['moduleType']),
                          ('javascript', 'catvod-spider', 'esm'))
+        direct = self.folder / 'catpaw.js'
+        direct.write_text(source)
+        result = self.inspect(direct)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol']), ('javascript', 'catvod-spider'))
+
+    def test_catpaw_fastify_route_api_is_detected_even_when_routes_are_registered_with_route(self):
+        source = '''export default function createSpider() { return {meta:{key:'route_fixture'},api:async fastify=>{
+          const handler=async()=>({});fastify.route({method:'POST',url:'/init',handler});
+          fastify.route({method:'POST',url:'/home',handler});fastify.route({method:'POST',url:'/category',handler});
+          fastify.route({method:'POST',url:'/detail',handler});fastify.route({method:'POST',url:'/play',handler});fastify.route({method:'POST',url:'/search',handler});
+        }}; }'''
+        result = self.inspect(self.archive({'index.mjs': source}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol']), ('javascript', 'catvod-spider'))
 
     def test_catpaw_open_node_server_is_found_under_src(self):
         package = {'type': 'module', 'dependencies': {'fastify': '^4.26.0'}}
@@ -113,6 +128,12 @@ class NativePackageTests(unittest.TestCase):
             aliased = self.inspect(self.archive({'cctvhost.json': json.dumps({'entry': 'index.mjs', 'runtime': 'javascript', 'protocol': protocol, 'moduleType': 'esm'}), 'index.mjs': source}))
             self.assertTrue(aliased['ok'], aliased)
             self.assertEqual(aliased['protocol'], 'catvod-js')
+
+    def test_catvod_object_property_async_methods_are_recognized(self):
+        source = "export default site=>({home:async(filter)=>({class:[]}),category:async(tid,pg)=>({list:[]}),search:async(key)=>({list:[]}),detail:async(id)=>({list:[]}),play:async(flag,id)=>({parse:0,url:id})})"
+        result = self.inspect(self.archive({'index.mjs': source}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol']), ('javascript', 'catvod-js'))
 
     def test_python_spider_is_recognized_without_executing_user_code(self):
         marker = self.folder / 'must-not-run'
