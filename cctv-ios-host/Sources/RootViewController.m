@@ -8,6 +8,7 @@
 #import "JSPluginRuntime.h"
 #import "PluginViewController.h"
 #import "SettingsViewController.h"
+#import <dispatch/dispatch.h>
 #import "ServicesViewController.h"
 #import "MediaBrowserViewController.h"
 #import "MediaPackageImporter.h"
@@ -141,6 +142,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, strong) NSMutableDictionary<NSString *,NSNumber *> *readyLocalOrigins;
 @property (nonatomic, strong) NSMutableSet<NSString *> *deferredLocalSubscriptions;
 @property (nonatomic, strong) NativeCDNPreference *nativeCDNPreference;
+@property (nonatomic, strong) NSMutableDictionary<NSString *,NSNumber *> *plainRouteCache;
 @property (nonatomic, copy) NSDictionary *requestedNativeRoute;
 @property (nonatomic, assign) BOOL directNativeRouteActive;
 @property (nonatomic, assign) BOOL avLayerObserved;
@@ -1100,7 +1102,26 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
     [self stopPlayback];
     [self recordStartupStage:@"teardown"];
-    if(route){NSURL *source=[NSURL URLWithString:selectedURL];[self log:@"按地址请求 SDK 播放 %@ · %@",self.routeName,source.host?:@"未知主机"];[self playViaSDKURL:selectedURL channelID:cid title:self.channelName];}
+    if(route){NSURL *source=[NSURL URLWithString:selectedURL];
+        [self log:@"探测自选线路 %@ · %@",self.routeName,source.host?:@"未知主机"];
+        __weak typeof(self) weakSelf=self;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{
+            BOOL plain=[weakSelf routeIsPlaintextHLS:selectedURL];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if(!weakSelf||!weakSelf.channelID.length)return;
+                NSURL *src=[NSURL URLWithString:selectedURL];
+                if(plain){
+                    [weakSelf log:@"自选线路明文可直连，走 AVPlayer 播放（非 SDK）· %@",src.host?:@"未知主机"];
+                    NSMutableDictionary *remoteCh=[@{@"id":cid,@"name":weakSelf.channelName,@"remoteURL":selectedURL} mutableCopy];
+                    if([ch[@"group"] isKindOfClass:NSString.class])remoteCh[@"group"]=ch[@"group"];
+                    [weakSelf playRemote:remoteCh];
+                }else{
+                    [weakSelf log:@"按地址请求 SDK 播放 %@ · %@",weakSelf.routeName,src.host?:@"未知主机"];
+                    [weakSelf playViaSDKURL:selectedURL channelID:cid title:weakSelf.channelName];
+                }
+            });
+        });
+    }
     else {[self log:@"使用 SDK 按频道 ID 自动调度"];[self playViaSDK:cid title:self.channelName];}
 
     // Defer optional EPG traffic until the first video frame.
@@ -2087,6 +2108,52 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *detected=[M3UParser epgURL:text baseURL:nil];if(detected.length)[ProfileStore update:sourceKey values:@{@"detectedEPGURL":detected}];[self installPlaylist:list source:sourceKey];
 }
 
+#pragma mark - 自选线路明文探测
+- (NSData *)syncHTTPGET:(NSString *)url timeout:(NSTimeInterval)timeout {
+    if(!url.length)return nil;
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
+    req.timeoutInterval=timeout;[req setHTTPMethod:@"GET"];[req setValue:@"qqlive" forHTTPHeaderField:@"User-Agent"];[req setValue:@"https://live.cctv.cn/" forHTTPHeaderField:@"Referer"];
+    dispatch_semaphore_t sem=dispatch_semaphore_create(0);__block NSData *result=nil;
+    NSURLSessionDataTask *task=[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){if(!error&&data.length)result=data;dispatch_semaphore_signal(sem);}];
+    [task resume];
+    if(dispatch_semaphore_wait(sem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)((timeout+1.0)*NSEC_PER_SEC)))!=0)[task cancel];
+    return result;
+}
+- (NSString *)firstHLSChildOrSelf:(NSString *)text base:(NSString *)base {
+    if(!text.length)return nil;
+    NSArray *lines=[text componentsSeparatedByString:@"\n"];
+    for(NSString *raw in lines){
+        NSString *s=[raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if(!s.length||[s hasPrefix:@"#"])continue;
+        if([s hasPrefix:@"http://"]||[s hasPrefix:@"https://"])return s;
+        return [NSURL URLWithString:s relativeToURL:[NSURL URLWithString:base]].absoluteString;
+    }
+    return nil;
+}
+- (BOOL)routeIsPlaintextHLS:(NSString *)url {
+    if(!url.length)return NO;
+    NSNumber *cached=self.plainRouteCache[url];if(cached)return cached.boolValue;
+    BOOL plain=NO;
+    NSData *master=[self syncHTTPGET:url timeout:3.0];
+    if(master.length){
+        NSString *text=[[NSString alloc] initWithData:master encoding:NSUTF8StringEncoding];
+        if(text&&[text rangeOfString:@"#EXT-X-KEY"].location==NSNotFound){
+            NSString *child=[self firstHLSChildOrSelf:text base:url];
+            if(child.length){
+                NSData *c=[self syncHTTPGET:child timeout:3.0];
+                if(c.length){
+                    NSString *ct=[[NSString alloc] initWithData:c encoding:NSUTF8StringEncoding];
+                    plain=(ct&&[ct rangeOfString:@"#EXT-X-KEY"].location==NSNotFound);
+                }
+            }else{
+                plain=YES;
+            }
+        }
+    }
+    if(self.plainRouteCache.count>512)[self.plainRouteCache removeAllObjects];
+    self.plainRouteCache[url]=@(plain);
+    return plain;
+}
 - (void)playRemote:(NSDictionary *)ch {
     self.requestedNativeRoute=nil;self.directNativeRouteActive=NO;
     [self.remoteAttemptedURLs removeAllObjects];self.remoteRetryCount=0;self.remoteFailureRecoveryPending=NO;self.remotePlaybackFailed=NO;
