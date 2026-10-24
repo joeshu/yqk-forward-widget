@@ -180,7 +180,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if([runtime isEqual:@"python"])moduleType=@"script";
     if(!moduleType.length){
         BOOL bundledCommonJS=[text rangeOfString:@"(?:^|[;\\n}])\\s*module\\s*\\.\\s*exports\\s*=" options:NSRegularExpressionSearch].location!=NSNotFound;
-        BOOL staleGeneratedType=catpawAppBundle&&bundledCommonJS&&package.count==1&&[package[@"type"] isEqual:@"module"];
+        BOOL staleGeneratedType=catpawAppBundle&&bundledCommonJS&&[(NSDictionary *)package count]==1&&[package[@"type"] isEqual:@"module"];
         BOOL esmSource=[entry.pathExtension.lowercaseString isEqual:@"mjs"] || ([package[@"type"] isEqual:@"module"]&&!staleGeneratedType) || (catpawAppBundle && !bundledCommonJS) || [text rangeOfString:@"(?:^|\\n)\\s*(?:import|export)\\s" options:NSRegularExpressionSearch].location!=NSNotFound;
         BOOL commonJS=[entry.pathExtension.lowercaseString isEqual:@"cjs"] || [text rangeOfString:@"(?:^|[;\\n])\\s*(?:module\\s*\\.\\s*exports|exports\\s*\\.)" options:NSRegularExpressionSearch].location!=NSNotFound;
         moduleType=esmSource?@"esm":((commonJS||bundledCommonJS)?@"commonjs":@"script");
