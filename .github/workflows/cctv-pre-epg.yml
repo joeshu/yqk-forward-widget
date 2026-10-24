@@ -1,0 +1,58 @@
+name: Build pre-EPG playback reference
+on:
+  push:
+    branches: [codex/cctv-pre-epg-reference]
+    paths: ['cctv-ios-host/**', '.github/workflows/cctv-pre-epg.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  device:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pre-EPG controller
+        run: |
+          git fetch --depth=1 origin 2194ba4973ad3e1ed3ed1e9fc01b865f457809ad
+          python3 cctv-ios-host/Scripts/prepare-pre-epg.py
+      - name: Build reference IPA
+        working-directory: cctv-ios-host
+        env:
+          PY_DISABLE: '1'
+          CCTV_PRE_EPG: '1'
+        run: bash Scripts/ci-build.sh
+      - name: Verify device package and excluded features
+        working-directory: cctv-ios-host
+        run: |
+          set -o pipefail
+          python3 Scripts/validate_ipa.py build/CCTVHost-unsigned.ipa | tee build/validation.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CCTVHost-pre-EPG-${{ github.sha }}
+          path: |
+            cctv-ios-host/build/CCTVHost-unsigned.ipa
+            cctv-ios-host/build/CCTVHost-unsigned.ipa.sha256
+            cctv-ios-host/build/validation.json
+          if-no-files-found: error
+          retention-days: 30
+  reference-ui:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pre-EPG controller
+        run: |
+          git fetch --depth=1 origin 2194ba4973ad3e1ed3ed1e9fc01b865f457809ad
+          python3 cctv-ios-host/Scripts/prepare-pre-epg.py
+      - name: Verify reference switching and render callbacks
+        working-directory: cctv-ios-host
+        run: bash Scripts/pre-epg-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCTVHost-pre-EPG-preview-${{ github.sha }}
+          path: |
+            cctv-ios-host/pre-epg-preview/*.png
+            cctv-ios-host/pre-epg-preview/*.json
+            cctv-ios-host/pre-epg-preview/*.log
+          retention-days: 14

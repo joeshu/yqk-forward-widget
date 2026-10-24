@@ -31,6 +31,13 @@ if [ -n "${CCTV_BASELINE:-}" ]; then
   /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 0.9.0' "$APP/Info.plist"
   /usr/libexec/PlistBuddy -c 'Set :CCTVHostBuildVariant baseline09' "$APP/Info.plist"
 fi
+if [ -n "${CCTV_PRE_EPG:-}" ]; then
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.example.cctvhost.preepg.nopy' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName CCTVHost 节目单前' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 0.2.1' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 2.1' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CCTVHostBuildVariant pre-epg' "$APP/Info.plist"
+fi
 ICON_PARTIAL="$OUT/assetcatalog-info.plist"
 xcrun --sdk iphoneos actool --output-format human-readable-text --notices --warnings \
   --platform iphoneos --minimum-deployment-target 15.0 --target-device iphone --target-device ipad \
@@ -113,6 +120,10 @@ for f in Frameworks/*.framework; do
 done
 
 SOURCES=$(find Sources -maxdepth 1 -name '*.m' -print | sort | tr '\n' ' ')
+
+if [ -n "${CCTV_PRE_EPG:-}" ]; then
+  SOURCES="Sources/AppDelegate.m Sources/RootViewController.m Sources/main.m"
+fi
 
 set -x
 clang -arch arm64 \
