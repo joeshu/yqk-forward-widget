@@ -15,6 +15,8 @@
 #import "MediaBrowserViewController.h"
 #import "CNPlayerCrashGuard.h"
 #import "ResourceImportSheetViewController.h"
+#import "LogCenterViewController.h"
+#import "PluginLogStore.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
@@ -22,7 +24,8 @@
 @interface RootViewController (Smoke)
 - (void)selectBottomTab:(UIButton *)button;
 - (void)openServicesPage;
-- (void)toggleLog;
+- (void)openDiagnosticLogForIdentifier:(NSString *)identifier name:(NSString *)name;
+- (void)logPluginLine:(NSString *)line identifier:(NSString *)identifier name:(NSString *)name;
 - (void)applyFilter;
 - (void)selectChannel:(NSDictionary *)channel;
 - (void)seekNativeStart:(NSTimeInterval)start end:(NSTimeInterval)end;
@@ -67,6 +70,7 @@ static NSDictionary *nodeCall(NSString *operation,NSDictionary *payload){
     return reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:@{@"ok":@NO,@"error":error.localizedDescription?:@"Node bridge failed"};
 }
 static NSString *outputDir;
+static NSURL *pluginLogExportURL;
 static void check(BOOL value, NSString *message) {
     if (!value)
         [failures addObject:message];
@@ -275,11 +279,19 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             capture(self.window, @"09-epg-fixture");
             [nav popToRootViewControllerAnimated:NO];
-            [root toggleLog];
+            [root logPluginLine:@"独立插件日志测试" identifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
+            [root openDiagnosticLogForIdentifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
+            [PluginLogStore.shared prepareExportForIdentifier:@"ui-smoke-plugin" displayName:@"UI Smoke Plugin" completion:^(NSURL *url,NSError *error){pluginLogExportURL=url;}];
           },
           ^{
+            LogCenterViewController *logs=(id)nav.topViewController;
+            check([logs isKindOfClass:LogCenterViewController.class], @"diagnostics open in an independent navigation page");
+            check([logs.logSnapshotProvider() containsString:@"独立插件日志测试"], @"plugin log page is scoped to that script");
+            check(logs.onExportLog!=nil && logs.onClearLog!=nil, @"plugin log page exposes independent export and clear actions");
+            check([[logs valueForKey:@"categories"] numberOfSegments]==4, @"log center supports all, playback, plugin and error filters");
+            check(pluginLogExportURL && [[NSFileManager defaultManager] fileExistsAtPath:pluginLogExportURL.path], @"per-plugin log export creates a separate text file");
             capture(self.window, @"10-diagnostic-log");
-            [root toggleLog];
+            [nav popToRootViewControllerAnimated:NO];
             [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"legacyNativePlayback"];
             [root selectChannel:[root channelWithID:@"cctv1"]];
           },

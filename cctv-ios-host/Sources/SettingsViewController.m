@@ -32,7 +32,7 @@
         @{ @"title":@"清理节目单缓存", @"detail":@"下次打开频道时重新获取", @"icon":@"trash", @"action":@"clearEPG" },
         @{ @"title":@"清理台标缓存", @"detail":@"清理内存中的缩略图", @"icon":@"photo", @"action":@"clearImages" },
         @{ @"title":@"CCTVHost", @"detail":[NSString stringWithFormat:@"%@ · %@",[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"开发版",[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"] isEqual:@"no-python"]?@"无 Python 诊断版":@"完整版"], @"icon":@"info.circle" },
-        @{ @"title":@"日志", @"action":@"logs", @"detail":@"播放器与插件运行日志可导出", @"icon":@"doc.text.magnifyingglass" }
+        @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass" }
       ]}
     ];
     self.table=[[UITableView alloc]initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped]; self.table.translatesAutoresizingMaskIntoConstraints=NO; self.table.backgroundColor=UIColor.blackColor; self.table.dataSource=self; self.table.delegate=self; self.table.rowHeight=58; self.table.tintColor=UIColor.systemPinkColor; [self.view addSubview:self.table];
@@ -64,7 +64,6 @@
     else if([row[@"action"] isEqualToString:@"export"]){if(self.onExportData)self.onExportData();}
     else if([row[@"action"] isEqualToString:@"import"]){if(self.onImportData)self.onImportData();}
     else if([row[@"action"] isEqualToString:@"logs"]){if(self.onOpenLog)self.onOpenLog();}
-    else if([row[@"title"] isEqualToString:@"日志"]) { UIAlertController *a=[UIAlertController alertControllerWithTitle:@"日志导出" message:@"请在播放器页打开日志面板，使用“导出”保存完整诊断日志。" preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]]; [self presentViewController:a animated:YES completion:nil]; }
 }
 - (void)confirmClearEPG {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清理节目单缓存" message:@"缓存将在下次访问频道时重新获取。" preferredStyle:UIAlertControllerStyleAlert];

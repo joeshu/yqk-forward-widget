@@ -17,7 +17,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 @interface ServiceDetailViewController : UITableViewController
 @property(nonatomic, copy) NSDictionary *service;
 @property(nonatomic, copy) void (^onToggle)(NSDictionary *, BOOL);
-@property(nonatomic, copy) dispatch_block_t onLog;
+@property(nonatomic, copy) void (^onLog)(NSDictionary * _Nullable service);
 @property(nonatomic, copy) void (^onSubscribe)(NSString *);
 @property(nonatomic, copy) void (^onBrowseService)(NSDictionary *);
 @property(nonatomic, strong) NSTimer *timer;
@@ -191,7 +191,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     else if (ip.section == 3) {
         if (ip.row == 0) {
             if (self.onLog)
-                self.onLog();
+                self.onLog(self.service);
         } else if (ip.row == 1)
             [self edit];
         else if (ip.row == 2) {
@@ -280,7 +280,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     ]];
     __weak typeof(self) w=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
         @{@"icon":@"plus",@"title":@"添加服务",@"action":[UIAction actionWithHandler:^(UIAction *a){[w add];}]},
-        @{@"icon":@"doc.text",@"title":@"服务日志",@"action":[UIAction actionWithHandler:^(UIAction *a){if(w.onOpenLog)w.onOpenLog();}]}])];
+        @{@"icon":@"doc.text",@"title":@"总日志",@"action":[UIAction actionWithHandler:^(UIAction *a){if(w.onOpenLog)w.onOpenLog(nil);}]}])];
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.search.searchResultsUpdater = self;
     self.search.obscuresBackgroundDuringPresentation = NO;

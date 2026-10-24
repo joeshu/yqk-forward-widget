@@ -27,6 +27,8 @@
 #import "NativeChannelPreloader.h"
 #import "NativeTimeshiftSession.h"
 #import "PlaybackInfoViewController.h"
+#import "LogCenterViewController.h"
+#import "PluginLogStore.h"
 #import "CNPlayerCrashGuard.h"
 #import "ResourceImportSheetViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -62,7 +64,6 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property (nonatomic, strong) UIButton *routeBtn;
 @property (nonatomic, strong) UIButton *epgBtn;
 @property (nonatomic, strong) UIButton *fullBtn;
-@property (nonatomic, strong) UIButton *logBtn;
 @property (nonatomic, strong) id currentPlayer;
 @property (nonatomic, strong) id sdkPlayer;
 @property (nonatomic, assign) BOOL sdkPlayerUsed;
@@ -133,11 +134,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property (nonatomic) BOOL diagnosticWriteInProgress;
 @property (nonatomic, strong) NSTimer *logFlushTimer;
 @property (nonatomic, assign) NSUInteger diagnosticLogGeneration;
-@property (nonatomic, strong) UITextView *logView;
-@property (nonatomic, assign) BOOL logRefreshPending;
 @property (nonatomic, assign) NSUInteger playbackGeneration;
-@property (nonatomic, strong) UIToolbar *logToolbar;
-@property (nonatomic, assign) BOOL logVisible;
 // 计时
 @property (nonatomic, strong) NSTimer *watchdog;
 @property (nonatomic, assign) NSInteger watchdogTicks;
@@ -182,6 +179,10 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property(nonatomic,assign) NSUInteger subscriptionParseGeneration;
 - (void)displayNativePlaybackFailure:(NSString *)stage error:(nullable NSError *)error;
 - (void)toggleCurrentFavorite;
+- (void)openDiagnosticLog;
+- (void)openDiagnosticLogForIdentifier:(nullable NSString *)identifier name:(nullable NSString *)name;
+- (void)logPluginLine:(NSString *)line identifier:(NSString *)identifier name:(NSString *)name;
+- (void)shareDiagnosticLogAtURL:(NSURL *)source;
 @end
 
 @implementation RootViewController
@@ -320,14 +321,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         if(owner.logBuffer.length>20000){NSUInteger remove=owner.logBuffer.length-16000;unichar next=[owner.logBuffer characterAtIndex:remove];if(next>=0xdc00 && next<=0xdfff)remove++;[owner.logBuffer deleteCharactersInRange:NSMakeRange(0,remove)];}
         NSString *summary=[[batch stringByTrimmingCharactersInSet:NSCharacterSet.newlineCharacterSet] componentsSeparatedByString:@"\n"].lastObject?:@"";
         NSLog(@"[CCTVHost] %@",summary);
-        if(owner.logVisible && !owner.logRefreshPending){
-            owner.logRefreshPending=YES;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
-                owner.logRefreshPending=NO;if(!owner.logVisible)return;owner.logView.text=owner.logBuffer;[owner.logView scrollRangeToVisible:NSMakeRange(owner.logView.text.length,0)];
-            });
-        }
-        if(summary.length>30)summary=[[summary substringToIndex:30] stringByAppendingString:@"…"];
-        owner.infoLabel.text=summary;
+        [[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:nil];
     });
 }
 
@@ -338,25 +332,6 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.pip = [[AVPictureInPictureController alloc] initWithPlayerLayer:self.avLayer];
     [self.pip startPictureInPicture];
     [self log:@"进入画中画"];
-}
-
-- (void)toggleLog {
-    if (self.logVisible) {
-        self.logView.hidden = YES;
-        self.logToolbar.hidden = YES;
-        self.logVisible = NO;
-        [self.logBtn setTitle:@"日志" forState:UIControlStateNormal];
-        return;
-    }
-    self.logVisible = YES;
-    self.logView.text = self.logBuffer;
-    self.logView.hidden = NO;
-    [self.view bringSubviewToFront:self.logView];
-    self.logToolbar.hidden = NO;
-    [self.view bringSubviewToFront:self.logToolbar];
-    [self.view setNeedsLayout];
-    [self.logBtn setTitle:@"关闭日志" forState:UIControlStateNormal];
-    [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length, 0)];
 }
 
 #pragma mark - 播放区
@@ -395,7 +370,6 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.routeBtn = [self barButton:@"线路" action:@selector(showRoutes)];
     self.epgBtn = [self barButton:@"节目单" action:@selector(openEPG)];
     self.fullBtn = [self barButton:@"全屏" action:@selector(toggleFullscreen)];
-    self.logBtn = [self barButton:@"日志" action:@selector(toggleLog)];
     self.pipBtn = [self barButton:@"画中画" action:@selector(togglePiP)];
     self.moreBtn = [self barButton:@"更多" action:@selector(showMorePlaybackActions)];
     for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.routeBtn, self.epgBtn, self.moreBtn]) {
@@ -485,43 +459,47 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.navigationItem.searchController = self.searchController;
     self.definesPresentationContext = YES;
 
-    self.logView = [[UITextView alloc] initWithFrame:self.view.bounds];
-    self.logView.backgroundColor = [UIColor colorWithWhite:0.03 alpha:0.98];
-    self.logView.textColor = [UIColor colorWithRed:0.62 green:0.9 blue:0.65 alpha:1];
-    self.logView.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
-    self.logView.editable = NO;
-    self.logView.selectable = YES;
-    self.logView.hidden = YES;
-    self.logView.text = self.logBuffer ?: @"";
-    self.logView.textContainerInset = UIEdgeInsetsMake(8, 8, 8, 8);
-    [self.view addSubview:self.logView];
-    self.logToolbar = [[UIToolbar alloc] init];
-    self.logToolbar.barStyle = UIBarStyleBlack;
-    self.logToolbar.items = @[
-        [[UIBarButtonItem alloc] initWithTitle:@"关闭日志" style:UIBarButtonItemStyleDone target:self action:@selector(toggleLog)],
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil],
-        [[UIBarButtonItem alloc] initWithTitle:@"复制" style:UIBarButtonItemStylePlain target:self action:@selector(copyDiagnosticLog)],
-        [[UIBarButtonItem alloc] initWithTitle:@"导出" style:UIBarButtonItemStylePlain target:self action:@selector(exportDiagnosticLog)],
-        [[UIBarButtonItem alloc] initWithTitle:@"清空" style:UIBarButtonItemStylePlain target:self action:@selector(clearDiagnosticLog)]
-    ];
-    self.logToolbar.hidden = YES;
-    [self.view addSubview:self.logToolbar];
 }
 
-- (void)copyDiagnosticLog {
-    UIPasteboard.generalPasteboard.string = self.logBuffer ?: @"";
+- (void)openDiagnosticLog {
+    [self openDiagnosticLogForIdentifier:nil name:nil];
+}
+- (void)logPluginLine:(NSString *)line identifier:(NSString *)identifier name:(NSString *)name {
+    if(!line.length||!identifier.length)return;
+    [PluginLogStore.shared appendLine:line forIdentifier:identifier];
+    [self log:@"[%@] %@",name.length?name:@"插件",line];
+}
+- (void)openDiagnosticLogForIdentifier:(NSString *)identifier name:(NSString *)name {
+    LogCenterViewController *page=[LogCenterViewController new];page.scopeName=name;
+    __weak typeof(self) weakSelf=self;NSString *scope=[identifier copy];NSString *scopeName=[name copy];
+    page.logSnapshotProvider=^NSString *{return scope.length?[PluginLogStore.shared logForIdentifier:scope]:(weakSelf.logBuffer.copy?:@"");};
+    page.onExportLog=^{
+        if(!scope.length){[weakSelf exportDiagnosticLog];return;}
+        [PluginLogStore.shared prepareExportForIdentifier:scope displayName:scopeName?:@"插件" completion:^(NSURL *url,NSError *error){if(!url){[weakSelf showServiceError:error.localizedDescription?:@"该脚本没有可导出的日志。" ];return;}[weakSelf shareDiagnosticLogAtURL:url];}];
+    };
+    page.onClearLog=^{
+        if(!scope.length){[weakSelf clearDiagnosticLog];return;}
+        [PluginLogStore.shared clearLogForIdentifier:scope completion:^{[[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:nil];}];
+    };
+    UIViewController *presented=self.presentedViewController;
+    if(presented){[presented dismissViewControllerAnimated:YES completion:^{[weakSelf.navigationController pushViewController:page animated:YES];}];}
+    else [self.navigationController pushViewController:page animated:YES];
 }
 
+- (void)shareDiagnosticLogAtURL:(NSURL *)source {
+    UIViewController *top=self.navigationController.topViewController?:self;
+    UIActivityViewController *share=[[UIActivityViewController alloc] initWithActivityItems:@[source] applicationActivities:nil];
+    UIPopoverPresentationController *pop=share.popoverPresentationController;
+    if(pop){pop.barButtonItem=top.navigationItem.rightBarButtonItem;if(!pop.barButtonItem){pop.sourceView=top.view;pop.sourceRect=CGRectMake(CGRectGetMidX(top.view.bounds),CGRectGetMidY(top.view.bounds),1,1);}}
+    [top presentViewController:share animated:YES completion:nil];
+}
 - (void)exportDiagnosticLog {
     [self flushDiagnosticLog];
     dispatch_async(self.diagnosticLogQueue, ^{
         NSURL *source=[NSURL fileURLWithPath:self.diagnosticLogPath];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (![NSFileManager.defaultManager fileExistsAtPath:source.path]) { [self log:@"日志文件尚未生成"]; return; }
-            UIActivityViewController *share=[[UIActivityViewController alloc] initWithActivityItems:@[source] applicationActivities:nil];
-            UIPopoverPresentationController *pop=share.popoverPresentationController;
-            if(pop){ pop.barButtonItem=self.navigationItem.rightBarButtonItem; }
-            [self presentViewController:share animated:YES completion:nil];
+            [self shareDiagnosticLogAtURL:source];
         });
     });
 }
@@ -530,7 +508,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     [self.logBuffer setString:@""];
     @synchronized (self.pendingLogWrites) { self.diagnosticLogGeneration++; [self.pendingLogWrites clear]; }
     dispatch_async(self.diagnosticLogQueue, ^{ [@"" writeToFile:self.diagnosticLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil]; });
-    self.logView.text = @"";
+    [[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:nil];
 }
 
 - (void)loadChannels {
@@ -1226,10 +1204,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     self.controlBar.frame = CGRectMake(8 + safe.left, CGRectGetHeight(self.playerBox.bounds) - bottom - 48,
                                       MAX(0, w - safe.left - safe.right - 16), 40);
     self.avLayer.frame = self.playerBox.bounds;
-    self.logToolbar.frame = CGRectMake(safe.left, top, MAX(0, w - safe.left - safe.right), 44);
-    self.logView.frame = CGRectMake(safe.left, top + 44, MAX(0, w - safe.left - safe.right), MAX(0, height - top - safe.bottom - 44));
     [self attachVideoView];
-    if(self.logVisible){[self.view bringSubviewToFront:self.logView];[self.view bringSubviewToFront:self.logToolbar];}
 }
 
 - (void)toggleFullscreen {
@@ -1306,7 +1281,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     page.onToggleService=^(NSDictionary *service,BOOL enabled){[weakSelf toggleService:service enabled:enabled];};
     page.onBrowseService=^(NSDictionary *service){[NSUserDefaults.standardUserDefaults setObject:service[@"id"] forKey:@"selectedMediaSource"];[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[2]];};
     page.onImportResource=^{[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[3]];dispatch_async(dispatch_get_main_queue(),^{[weakSelf importMediaPackage];});};
-    page.onOpenLog=^{[weakSelf.navigationController popToViewController:weakSelf animated:YES];dispatch_async(dispatch_get_main_queue(), ^{if(!weakSelf.logVisible)[weakSelf toggleLog];});};
+    page.onOpenLog=^(NSDictionary *service){if(service)[weakSelf openDiagnosticLogForIdentifier:service[@"id"] name:service[@"name"]];else[weakSelf openDiagnosticLog];};
     page.onSubscribe=^(NSString *url){NSString *key=[weakSelf stableURLKey:url];if(!key)return;[weakSelf.subscriptionURLs addObject:key];[NSUserDefaults.standardUserDefaults setObject:weakSelf.subscriptionURLs.allObjects forKey:@"subscriptions"];[weakSelf fetchSubscription:key silent:NO];};
     [self.navigationController pushViewController:page animated:YES];
 }
@@ -1319,10 +1294,9 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     page.onStop = ^{ [weakSelf stopBuiltinPlugin]; };
     page.onAddSubscription = ^{ [weakSelf addSubscription]; };
     page.onManageSubscriptions = ^{ [weakSelf manageSubscriptions]; };
-    page.onOpenLog = ^{
-        [weakSelf.navigationController popViewControllerAnimated:YES];
-        dispatch_async(dispatch_get_main_queue(), ^{ if (!weakSelf.logVisible) [weakSelf toggleLog]; });
-    };
+    NSDictionary *builtinService=nil;for(NSDictionary *service in [ServiceStore services])if([service[@"builtin"] boolValue]){builtinService=service;break;}
+    NSString *builtinID=[builtinService[@"id"] copy],*builtinName=[builtinService[@"name"] copy];
+    page.onOpenLog = ^{[weakSelf openDiagnosticLogForIdentifier:builtinID name:builtinName];};
     [page updateRunning:PyHost.running subscriptionCount:self.subscriptionURLs.count];
     [self.navigationController pushViewController:page animated:YES];
 }
@@ -1334,7 +1308,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 - (SettingsViewController *)makeSettingsPage {
     SettingsViewController *page=[SettingsViewController new];
     __weak typeof(self) weakSelf=self;
-    page.onExportData=^{[weakSelf exportLocalConfiguration];};page.onImportData=^{[weakSelf importLocalConfiguration];};page.onOpenLog=^{if(!weakSelf.logVisible)[weakSelf toggleLog];};
+    page.onExportData=^{[weakSelf exportLocalConfiguration];};page.onImportData=^{[weakSelf importLocalConfiguration];};page.onOpenLog=^{[weakSelf openDiagnosticLog];};
     page.onClearEPG=^{ [[XMLTVStore shared] clear];[weakSelf.epgCache removeAllObjects]; [weakSelf saveEPGCache]; [weakSelf.table reloadData]; };
     page.onPreferenceChanged=^(NSString *key, BOOL value){
         if ([key isEqualToString:@"nativeSDKVerboseLogs"]) [weakSelf configureSDKLogging];
@@ -1443,9 +1417,10 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     }else{
         for(NSString *part in [service[@"arguments"]?:@"" componentsSeparatedByString:@"|"]){if(!part.length)continue;NSString *arg=[part stringByReplacingOccurrencesOfString:@"{port}" withString:[NSString stringWithFormat:@"%ld",(long)port]];arg=[arg stringByReplacingOccurrencesOfString:@"{bind}" withString:bind];[args addObject:[arg stringByReplacingOccurrencesOfString:@"{dataDir}" withString:dataDir]];}
     }
-    __weak typeof(self) w=self;[PyHost setLogHandler:^(NSString *line){if(line.length)[w log:@"[py] %@",line];}];
+    __weak typeof(self) w=self;NSString *serviceID=[service[@"id"] copy],*serviceName=[service[@"name"] copy];[PyHost setLogHandler:^(NSString *line){if(line.length)[w logPluginLine:line identifier:serviceID name:serviceName];}];
+    [self logPluginLine:@"插件启动请求" identifier:serviceID name:serviceName];
     [self.readyLocalOrigins removeAllObjects]; // A newly started interpreter session must prove readiness again.
-    if(![PyHost startScriptAtPath:[ServiceStore scriptPath:service] port:port dataDir:dataDir arguments:args error:error])return NO;
+    if(![PyHost startScriptAtPath:[ServiceStore scriptPath:service] port:port dataDir:dataDir arguments:args error:error]){if(error&&*error)[self logPluginLine:(*error).localizedDescription identifier:serviceID name:serviceName];return NO;}
     [NSUserDefaults.standardUserDefaults setObject:service[@"id"] forKey:@"activePythonService"];
     [self log:@"服务进程启动 %@ · %ld，等待 HTTP 就绪",service[@"name"],(long)port];
     if([service[@"builtin"] boolValue]){
@@ -1473,6 +1448,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     });
 }
 - (void)completeServiceStop {
+    NSString *serviceID=[ServiceStore activeIdentifier];NSDictionary *stopped=nil;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqualToString:serviceID]){stopped=service;break;}if(serviceID.length)[self logPluginLine:@"插件服务已停止" identifier:serviceID name:stopped[@"name"]?:@"插件"];
     [self.readyLocalOrigins removeAllObjects];
     for(LocalServiceReadiness *probe in self.subscriptionReadiness.allValues)[probe cancel];[self.subscriptionReadiness removeAllObjects];
     if([self localServiceForURL:[NSURL URLWithString:self.currentRemoteURL?:@""]]){
@@ -2480,7 +2456,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"播放信息" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self showPlaybackInfo]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"画中画" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self togglePiP]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"诊断日志" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self toggleLog]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"诊断日志" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self openDiagnosticLog]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     if (sheet.popoverPresentationController) { sheet.popoverPresentationController.sourceView=self.moreBtn; sheet.popoverPresentationController.sourceRect=self.moreBtn.bounds; }
     [self presentViewController:sheet animated:YES completion:nil];
