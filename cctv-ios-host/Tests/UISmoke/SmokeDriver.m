@@ -14,6 +14,7 @@
 #import "NodePluginRuntime.h"
 #import "MediaBrowserViewController.h"
 #import "CNPlayerCrashGuard.h"
+#import "ResourceImportSheetViewController.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
@@ -42,6 +43,7 @@
 - (void)player:(id)player statEvent:(NSUInteger)event value:(id)value;
 - (void)player:(id)player playbackFailed:(NSError *)error;
 - (void)playMediaResult:(NSDictionary *)result name:(NSString *)name;
+- (void)addSubscription;
 @end
 @interface MediaBrowserViewController (Smoke)
 - (void)loadMore;
@@ -196,6 +198,16 @@ static void next(NSArray *steps, NSUInteger index) {
                       isKindOfClass:NSClassFromString(@"ConfigCenterViewController")],
                   @"configuration tab embedded");
             capture(self.window, @"03-configuration");
+            [root addSubscription];
+          },
+          ^{
+            ResourceImportSheetViewController *sheet=(id)nav.presentedViewController;
+            check([sheet isKindOfClass:ResourceImportSheetViewController.class], @"resource add opens the grouped import sheet");
+            UITableView *options=[sheet valueForKey:@"tableView"];
+            check([options numberOfSections]==3 && [options numberOfRowsInSection:0]==2 && [options numberOfRowsInSection:1]==2,
+                  @"resource sheet exposes supported online, local and service actions");
+            capture(self.window, @"03b-add-resource");
+            [sheet dismissViewControllerAnimated:NO completion:nil];
             [root openServicesPage];
           },
           ^{

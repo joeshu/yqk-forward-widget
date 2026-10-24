@@ -28,6 +28,7 @@
 #import "NativeTimeshiftSession.h"
 #import "PlaybackInfoViewController.h"
 #import "CNPlayerCrashGuard.h"
+#import "ResourceImportSheetViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <AVFoundation/AVFoundation.h>
 #import <MediaPlayer/MediaPlayer.h>
@@ -1691,17 +1692,29 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 #pragma mark - 订阅（m3u 源 / 本地插件）
 
 - (void)addSubscription {
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"导入资源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    [a addAction:[UIAlertAction actionWithTitle:@"订阅链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self addSubscriptionURL];}]];
-    [a addAction:[UIAlertAction actionWithTitle:@"导入 M3U 文件" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){self.importingPlaylist=YES;UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];picker.delegate=self;[self presentViewController:picker animated:YES completion:nil];}]];
-    [a addAction:[UIAlertAction actionWithTitle:@"导入影视包 · JS / Python / ZIP" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self importMediaPackage];}]];
-    [a addAction:[UIAlertAction actionWithTitle:@"影视资源链接 / MD5" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self importMediaURL];}]];
-    [a addAction:[UIAlertAction actionWithTitle:@"管理脚本与服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self openServicesPage];}]];
-    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.sourceView=self.bottomBar;a.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:a animated:YES completion:nil];
+    ResourceImportSheetViewController *sheet=[ResourceImportSheetViewController new];
+    sheet.modalPresentationStyle=UIModalPresentationPageSheet;
+    __weak typeof(self) weakSelf=self;
+    sheet.onSelect=^(ResourceImportOption option){
+        RootViewController *owner=weakSelf;if(!owner)return;
+        switch(option){
+            case ResourceImportOptionLiveURL:[owner addSubscriptionURL];break;
+            case ResourceImportOptionMediaURL:[owner importMediaURL];break;
+            case ResourceImportOptionLiveFile:{
+                owner.importingPlaylist=YES;owner.importingMediaPackage=NO;
+                UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];
+                picker.delegate=owner;
+                [owner presentViewController:picker animated:YES completion:nil];
+            }break;
+            case ResourceImportOptionMediaFile:[owner importMediaPackage];break;
+            case ResourceImportOptionServices:[owner openServicesPage];break;
+        }
+    };
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 - (void)addSubscriptionURL {
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"添加订阅"
-                                                              message:@"输入 m3u/m3u8 地址，例如插件输出的 http://127.0.0.1:8767/all.m3u"
+                                                              message:@"输入 M3U / TXT 直播列表地址，例如插件输出的 http://127.0.0.1:8767/all.m3u"
                                                        preferredStyle:UIAlertControllerStyleAlert];
     [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.placeholder = @"http://127.0.0.1:8767/all.m3u";
