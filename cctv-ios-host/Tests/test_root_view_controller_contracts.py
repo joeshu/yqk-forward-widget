@@ -29,6 +29,12 @@ def method_body(signature):
 
 
 class RootViewControllerSourceContracts(unittest.TestCase):
+    def test_native_metadata_preload_survives_selection_until_channel_match(self):
+        selection = method_body("- (void)playChannel:")
+        startup = method_body("- (void)playViaSDK:")
+        self.assertNotIn("[self.nativePreloader cancel]", selection)
+        self.assertLess(startup.index("takeChannel:cid"), startup.index("[self.nativePreloader cancel]"))
+
     def test_subscription_refresh_is_source_owned_and_replaces_stale_entries(self):
         body = method_body("- (void)installPlaylist:")
         self.assertIn("stableURLKey:", body)

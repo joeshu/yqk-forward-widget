@@ -1068,7 +1068,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if(self.nativeCDNPreference.overrideMayBeActive&&![self.nativeCDNPreference restoreDefault:&routeError]){
         [self showNativeRouteError:routeError channel:ch];return;
     }
-    [self.nativePreloader cancel];
     self.requestedNativeRoute=route;
     self.directNativeRouteActive=(route!=nil);
     [self beginPlaybackPriority];
