@@ -2,14 +2,15 @@
 #import "MediaAPIClient.h"
 #import "MediaWebViewController.h"
 #import "MediaEpisodeSelectionViewController.h"
+#import "MediaPlaybackHeaders.h"
 #import "HostTheme.h"
 #import "RuntimeDiagnostics.h"
 #import <AVKit/AVKit.h>
-#import <CoreVideo/CoreVideo.h>
 #import <QuartzCore/QuartzCore.h>
 
 static void *CCTVPlayerItemStatusContext = &CCTVPlayerItemStatusContext;
 static void *CCTVPlayerTimeControlContext = &CCTVPlayerTimeControlContext;
+static void *CCTVPlayerLayerReadyContext = &CCTVPlayerLayerReadyContext;
 
 @interface MediaPlaybackViewController ()
 @property(nonatomic,strong) AVPlayer *player;
@@ -34,15 +35,18 @@ static void *CCTVPlayerTimeControlContext = &CCTVPlayerTimeControlContext;
 @property(nonatomic,strong) NSArray<NSLayoutConstraint *> *portraitConstraints;
 @property(nonatomic,strong) NSArray<NSLayoutConstraint *> *landscapeConstraints;
 @property(nonatomic,copy) NSDictionary *pendingEpisodeResult;
-@property(nonatomic,strong) AVPlayerItemVideoOutput *videoOutput;
-@property(nonatomic,strong) id videoTimeObserver;
+@property(nonatomic,strong) AVPlayerLayer *videoLayer;
+@property(nonatomic) BOOL observingVideoLayer;
 @property(nonatomic) CFTimeInterval playbackStartedAt;
 @property(nonatomic) NSUInteger playerGeneration;
 @property(nonatomic) BOOL hasVideoTrack;
-@property(nonatomic) BOOL videoFrameDecoded;
+@property(nonatomic) BOOL videoFrameReady;
 @property(nonatomic) NSInteger lastDiagnosticTimeControlStatus;
 @property(nonatomic) BOOL hasDiagnosticTimeControlStatus;
 - (void)stopObservingCurrentPlayback;
+- (void)observePlayerLayerIfAvailable;
+- (AVPlayerLayer *)playerLayerInLayerTree:(CALayer *)root;
+- (void)markFirstVideoFrameReadyForItem:(AVPlayerItem *)item;
 @end
 
 @implementation MediaPlaybackViewController
@@ -142,7 +146,7 @@ static void *CCTVPlayerTimeControlContext = &CCTVPlayerTimeControlContext;
     [self updatePlaybackLayoutForSize:self.view.bounds.size];
     [self buildLines];[self updateEpisodeTitle];self.pendingEpisodeResult=self.result;
 }
-- (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self updatePlaybackLayoutForSize:self.view.bounds.size];}
+- (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self updatePlaybackLayoutForSize:self.view.bounds.size];[self observePlayerLayerIfAvailable];}
 - (void)viewDidAppear:(BOOL)animated {[super viewDidAppear:animated];NSDictionary *pending=self.pendingEpisodeResult;self.pendingEpisodeResult=nil;if(pending)[self playResult:pending];}
 - (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];if(@available(iOS 16.0,*))[self setNeedsUpdateOfSupportedInterfaceOrientations];else [UIViewController attemptRotationToDeviceOrientation];}
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {[super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];[coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context){[self updatePlaybackLayoutForSize:size];} completion:nil];}
@@ -161,10 +165,30 @@ static void *CCTVPlayerTimeControlContext = &CCTVPlayerTimeControlContext;
     [NSNotificationCenter.defaultCenter removeObserver:self];[self.client cancel];[self.player pause];
 }
 - (void)stopObservingCurrentPlayback {
-    if(self.videoTimeObserver&&self.player){@try{[self.player removeTimeObserver:self.videoTimeObserver];}@catch(NSException *exception){}self.videoTimeObserver=nil;}
     AVPlayerItem *item=self.observedItem;
-    if(self.videoOutput&&item){@try{[item removeOutput:self.videoOutput];}@catch(NSException *exception){}self.videoOutput=nil;}
+    if(self.observingVideoLayer&&self.videoLayer){@try{[self.videoLayer removeObserver:self forKeyPath:@"readyForDisplay" context:CCTVPlayerLayerReadyContext];}@catch(NSException *exception){}self.observingVideoLayer=NO;}
+    self.videoLayer=nil;
     if(item){@try{[item removeObserver:self forKeyPath:@"status" context:CCTVPlayerItemStatusContext];}@catch(NSException *exception){}[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemPlaybackStalledNotification object:item];[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemDidPlayToEndTimeNotification object:item];self.observedItem=nil;}
+}
+- (AVPlayerLayer *)playerLayerInLayerTree:(CALayer *)root {
+    if([root isKindOfClass:AVPlayerLayer.class]&&((AVPlayerLayer *)root).player==self.player)return (AVPlayerLayer *)root;
+    for(CALayer *child in root.sublayers){AVPlayerLayer *found=[self playerLayerInLayerTree:child];if(found)return found;}
+    return nil;
+}
+- (void)observePlayerLayerIfAvailable {
+    AVPlayerLayer *layer=self.playerController.isViewLoaded?[self playerLayerInLayerTree:self.playerController.view.layer]:nil;
+    if(layer&&layer!=self.videoLayer){
+        if(self.observingVideoLayer){@try{[self.videoLayer removeObserver:self forKeyPath:@"readyForDisplay" context:CCTVPlayerLayerReadyContext];}@catch(NSException *exception){}}
+        self.videoLayer=layer;self.observingVideoLayer=YES;
+        [layer addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerLayerReadyContext];
+    }
+    if(layer.readyForDisplay)[self markFirstVideoFrameReadyForItem:self.observedItem];
+}
+- (void)markFirstVideoFrameReadyForItem:(AVPlayerItem *)item {
+    if(!item||item!=self.observedItem||item!=self.player.currentItem||self.videoFrameReady)return;
+    self.videoFrameReady=YES;[self.spinner stopAnimating];
+    self.status.text=self.player.timeControlStatus==AVPlayerTimeControlStatusPlaying?@"视频首帧已就绪 · AVPlayer 正在播放":@"视频首帧已就绪 · 等待播放";self.status.accessibilityLabel=self.status.text;
+    [RuntimeDiagnostics.shared recordEvent:@"playback_first_frame_ready" category:@"playback" fields:@{@"player":@"AVPlayer", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-self.playbackStartedAt)*1000))), @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];
 }
 - (void)buildLines {
     for(UIView *view in self.lineButtons.arrangedSubviews.copy){[self.lineButtons removeArrangedSubview:view];[view removeFromSuperview];}
@@ -186,25 +210,27 @@ static void *CCTVPlayerTimeControlContext = &CCTVPlayerTimeControlContext;
     [self.navigationController pushViewController:page animated:YES];
 }
 - (void)playResult:(NSDictionary *)result {
-    NSUInteger playerGeneration=++self.playerGeneration;[self.player pause];self.playerController.player=nil;[self stopObservingCurrentPlayback];self.hasVideoTrack=NO;self.videoFrameDecoded=NO;
+    NSUInteger playerGeneration=++self.playerGeneration;[self.player pause];self.playerController.player=nil;[self stopObservingCurrentPlayback];self.hasVideoTrack=NO;self.videoFrameReady=NO;
     NSString *raw=[result[@"url"] isKindOfClass:NSString.class]?result[@"url"]:@"";NSURL *url=[NSURL URLWithString:raw];
     if(!url||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||!url.host.length){[self.spinner stopAnimating];[RuntimeDiagnostics.shared recordEvent:@"episode_playback_rejected" category:@"playback" fields:@{@"reason":@"invalid_media_url", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];self.status.text=@"资源未返回有效的 HTTP/HTTPS 播放地址";self.status.accessibilityLabel=self.status.text;return;}
     NSURL *sourceURL=[NSURL URLWithString:[result[@"originalURL"] isKindOfClass:NSString.class]?result[@"originalURL"]:raw];NSString *extension=sourceURL.pathExtension.lowercaseString?:@"";NSSet *direct=[NSSet setWithArray:@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3"]];
     if([result[@"parse"] integerValue]>0 && ![direct containsObject:extension]){[self.spinner stopAnimating];[RuntimeDiagnostics.shared recordEvent:@"episode_player_handoff" category:@"playback" fields:@{@"player":@"webview", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];[self.player pause];MediaWebViewController *web=[[MediaWebViewController alloc] initWithResult:result title:self.title];UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:web];[self presentViewController:nav animated:YES completion:nil];return;}
     [RuntimeDiagnostics.shared recordEvent:@"episode_player_handoff" category:@"playback" fields:@{@"player":@"avplayer", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];
-    self.result=result;self.hasDiagnosticTimeControlStatus=NO;self.playbackStartedAt=CACurrentMediaTime();self.status.text=@"正在载入媒体…";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];AVPlayerItem *item=[AVPlayerItem playerItemWithURL:url];
+    self.result=result;self.hasDiagnosticTimeControlStatus=NO;self.playbackStartedAt=CACurrentMediaTime();self.status.text=@"正在载入媒体…";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];
+    NSDictionary *requestHeaders=MediaPlaybackHeadersFromResult(result);NSString *host=url.host.lowercaseString?:@"";BOOL localRelay=![sourceURL.absoluteString isEqualToString:raw]&&[@[@"127.0.0.1",@"localhost",@"::1"] containsObject:host];if(localRelay)requestHeaders=@{};
+    AVURLAsset *asset=[AVURLAsset URLAssetWithURL:url options:requestHeaders.count?@{@"AVURLAssetHTTPHeaderFieldsKey":requestHeaders}:nil];AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerItemFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerItemStalled:) name:AVPlayerItemPlaybackStalledNotification object:item];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerItemEnded:) name:AVPlayerItemDidPlayToEndTimeNotification object:item];
-    self.videoOutput=[[AVPlayerItemVideoOutput alloc] initWithPixelBufferAttributes:@{(id)kCVPixelBufferPixelFormatTypeKey:@(kCVPixelFormatType_32BGRA)}];[item addOutput:self.videoOutput];
     if(!self.player){self.player=[AVPlayer playerWithPlayerItem:item];[self.player addObserver:self forKeyPath:@"timeControlStatus" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerTimeControlContext];self.observingPlayer=YES;}else[self.player replaceCurrentItemWithPlayerItem:item];
     self.observedItem=item;[item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerItemStatusContext];self.player.automaticallyWaitsToMinimizeStalling=YES;self.playerController.player=self.player;[self.navigationItem setRightBarButtonItem:nil animated:YES];[self updateEpisodeTitle];
-    __weak typeof(self) weakSelf=self;self.videoTimeObserver=[self.player addPeriodicTimeObserverForInterval:CMTimeMakeWithSeconds(0.25,600) queue:dispatch_get_main_queue() usingBlock:^(CMTime time){MediaPlaybackViewController *owner=weakSelf;if(!owner||playerGeneration!=owner.playerGeneration||item!=owner.player.currentItem||owner.videoFrameDecoded||!owner.hasVideoTrack||!owner.videoOutput)return;if(!CMTIME_IS_NUMERIC(time))return;CMTime displayTime=kCMTimeInvalid;CVPixelBufferRef pixelBuffer=[owner.videoOutput copyPixelBufferForItemTime:time itemTimeForDisplay:&displayTime];if(!pixelBuffer)return;CVPixelBufferRelease(pixelBuffer);owner.videoFrameDecoded=YES;[owner.spinner stopAnimating];owner.status.text=owner.player.timeControlStatus==AVPlayerTimeControlStatusPlaying?@"视频帧已解码 · AVPlayer 正在播放":@"视频帧已解码 · 等待播放";owner.status.accessibilityLabel=owner.status.text;[RuntimeDiagnostics.shared recordEvent:@"playback_video_frame_decoded" category:@"playback" fields:@{@"player":@"AVPlayer", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-owner.playbackStartedAt)*1000))), @"line_index":@(owner.lineIndex), @"episode_index":@(owner.episodeIndex)}];if(owner.videoOutput){[item removeOutput:owner.videoOutput];owner.videoOutput=nil;}}];
-    [self.player play];dispatch_after(dispatch_time(DISPATCH_TIME_NOW,20*NSEC_PER_SEC),dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||playerGeneration!=owner.playerGeneration||item!=owner.player.currentItem||owner.videoFrameDecoded||item.status==AVPlayerItemStatusFailed||(!owner.hasVideoTrack&&item.status==AVPlayerItemStatusReadyToPlay))return;[owner.spinner stopAnimating];owner.status.text=@"等待视频帧超时 · 可重试或切换线路";owner.status.accessibilityLabel=owner.status.text;owner.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"重试" style:UIBarButtonItemStylePlain target:owner action:@selector(retryCurrentEpisode)];[RuntimeDiagnostics.shared recordEvent:@"playback_video_frame_timeout" category:@"playback" fields:@{@"player":@"AVPlayer", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-owner.playbackStartedAt)*1000))), @"line_index":@(owner.lineIndex), @"episode_index":@(owner.episodeIndex)}];});
+    __weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(owner&&playerGeneration==owner.playerGeneration)[owner observePlayerLayerIfAvailable];});
+    [self.player play];dispatch_after(dispatch_time(DISPATCH_TIME_NOW,20*NSEC_PER_SEC),dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||playerGeneration!=owner.playerGeneration||item!=owner.player.currentItem||owner.videoFrameReady||item.status==AVPlayerItemStatusFailed||(!owner.hasVideoTrack&&item.status==AVPlayerItemStatusReadyToPlay))return;[owner.spinner stopAnimating];owner.status.text=@"等待视频帧超时 · 可重试或切换线路";owner.status.accessibilityLabel=owner.status.text;owner.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"重试" style:UIBarButtonItemStylePlain target:owner action:@selector(retryCurrentEpisode)];[RuntimeDiagnostics.shared recordEvent:@"playback_video_frame_timeout" category:@"playback" fields:@{@"player":@"AVPlayer", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-owner.playbackStartedAt)*1000))), @"line_index":@(owner.lineIndex), @"episode_index":@(owner.episodeIndex)}];});
 }
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context {
-    if(context==CCTVPlayerItemStatusContext){AVPlayerItem *item=(AVPlayerItem *)object;if(item.status==AVPlayerItemStatusFailed){dispatch_async(dispatch_get_main_queue(),^{if(item!=self.observedItem||item!=self.player.currentItem)return;[self.spinner stopAnimating];[RuntimeDiagnostics.shared recordEvent:@"playback_failed" category:@"playback" fields:@{@"player":@"AVPlayer", @"stage":@"item_status_failed", @"error_domain":item.error.domain?:@"", @"error_code":@(item.error.code), @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];self.status.text=[NSString stringWithFormat:@"媒体载入失败 · %@",item.error.localizedDescription?:@"来源无法读取，请尝试其他线路"];self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"重试" style:UIBarButtonItemStylePlain target:self action:@selector(retryCurrentEpisode)];});}else if(item.status==AVPlayerItemStatusReadyToPlay){dispatch_async(dispatch_get_main_queue(),^{if(item!=self.observedItem||item!=self.player.currentItem)return;self.hasVideoTrack=NO;for(AVPlayerItemTrack *track in item.tracks)if(track.assetTrack.mediaType==AVMediaTypeVideo){self.hasVideoTrack=YES;break;}[RuntimeDiagnostics.shared recordEvent:@"media_item_ready" category:@"playback" fields:@{@"player":@"AVPlayer", @"video_track":@(self.hasVideoTrack), @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];if(self.hasVideoTrack){if(!self.videoFrameDecoded){self.status.text=@"媒体已准备 · 等待视频帧";self.status.accessibilityLabel=self.status.text;if(self.player.timeControlStatus==AVPlayerTimeControlStatusPaused)[self.spinner stopAnimating];else[self.spinner startAnimating];}}else{if(self.videoOutput){[item removeOutput:self.videoOutput];self.videoOutput=nil;}[self.spinner stopAnimating];self.status.text=@"媒体已准备 · 未检测到视频轨道";self.status.accessibilityLabel=self.status.text;}});}return;}
-    if(context==CCTVPlayerTimeControlContext){AVPlayerTimeControlStatus state=self.player.timeControlStatus;dispatch_async(dispatch_get_main_queue(),^{if(!self.observedItem)return;if(!self.hasDiagnosticTimeControlStatus||self.lastDiagnosticTimeControlStatus!=(NSInteger)state){self.hasDiagnosticTimeControlStatus=YES;self.lastDiagnosticTimeControlStatus=(NSInteger)state;if(state==AVPlayerTimeControlStatusPlaying)[RuntimeDiagnostics.shared recordEvent:@"player_reports_playing" category:@"playback" fields:@{@"player":@"AVPlayer", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];else if(state==AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate)[RuntimeDiagnostics.shared recordEvent:@"player_waiting_to_play" category:@"playback" fields:@{@"player":@"AVPlayer", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];}if(state==AVPlayerTimeControlStatusPlaying){if(self.videoFrameDecoded){self.status.text=@"视频帧已解码 · AVPlayer 正在播放";[self.spinner stopAnimating];}else if(self.hasVideoTrack){self.status.text=@"AVPlayer 正在播放 · 等待视频帧";[self.spinner startAnimating];}else{self.status.text=@"AVPlayer 报告播放中";[self.spinner stopAnimating];}}else if(state==AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate){self.status.text=@"正在缓冲 · 等待 AVPlayer";[self.spinner startAnimating];}else if(self.player.currentItem.status==AVPlayerItemStatusReadyToPlay){self.status.text=self.videoFrameDecoded?@"视频帧已解码 · 当前已暂停":(self.hasVideoTrack?@"媒体已准备 · 当前已暂停，等待视频帧":@"媒体已准备 · 当前暂停");if(!self.videoFrameDecoded)[self.spinner stopAnimating];}self.status.accessibilityLabel=self.status.text;});return;}
+    if(context==CCTVPlayerItemStatusContext){AVPlayerItem *item=(AVPlayerItem *)object;if(item.status==AVPlayerItemStatusFailed){dispatch_async(dispatch_get_main_queue(),^{if(item!=self.observedItem||item!=self.player.currentItem)return;[self.spinner stopAnimating];[RuntimeDiagnostics.shared recordEvent:@"playback_failed" category:@"playback" fields:@{@"player":@"AVPlayer", @"stage":@"item_status_failed", @"error_domain":item.error.domain?:@"", @"error_code":@(item.error.code), @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];self.status.text=[NSString stringWithFormat:@"媒体载入失败 · %@",item.error.localizedDescription?:@"来源无法读取，请尝试其他线路"];self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"重试" style:UIBarButtonItemStylePlain target:self action:@selector(retryCurrentEpisode)];});}else if(item.status==AVPlayerItemStatusReadyToPlay){dispatch_async(dispatch_get_main_queue(),^{if(item!=self.observedItem||item!=self.player.currentItem)return;self.hasVideoTrack=NO;for(AVPlayerItemTrack *track in item.tracks)if(track.assetTrack.mediaType==AVMediaTypeVideo){self.hasVideoTrack=YES;break;}[RuntimeDiagnostics.shared recordEvent:@"media_item_ready" category:@"playback" fields:@{@"player":@"AVPlayer", @"video_track":@(self.hasVideoTrack), @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];if(self.hasVideoTrack){if(!self.videoFrameReady){self.status.text=@"媒体已准备 · 等待视频首帧显示";self.status.accessibilityLabel=self.status.text;if(self.player.timeControlStatus==AVPlayerTimeControlStatusPaused)[self.spinner stopAnimating];else[self.spinner startAnimating];[self observePlayerLayerIfAvailable];}}else{[self.spinner stopAnimating];self.status.text=@"媒体已准备 · 未检测到视频轨道";self.status.accessibilityLabel=self.status.text;}});}return;}
+    if(context==CCTVPlayerLayerReadyContext){AVPlayerLayer *layer=(AVPlayerLayer *)object;if(layer==self.videoLayer&&layer.readyForDisplay){dispatch_async(dispatch_get_main_queue(),^{if(layer==self.videoLayer&&layer.readyForDisplay)[self markFirstVideoFrameReadyForItem:self.observedItem];});}return;}
+    if(context==CCTVPlayerTimeControlContext){AVPlayerTimeControlStatus state=self.player.timeControlStatus;dispatch_async(dispatch_get_main_queue(),^{if(!self.observedItem)return;if(!self.hasDiagnosticTimeControlStatus||self.lastDiagnosticTimeControlStatus!=(NSInteger)state){self.hasDiagnosticTimeControlStatus=YES;self.lastDiagnosticTimeControlStatus=(NSInteger)state;if(state==AVPlayerTimeControlStatusPlaying)[RuntimeDiagnostics.shared recordEvent:@"player_reports_playing" category:@"playback" fields:@{@"player":@"AVPlayer", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];else if(state==AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate)[RuntimeDiagnostics.shared recordEvent:@"player_waiting_to_play" category:@"playback" fields:@{@"player":@"AVPlayer", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];}if(state==AVPlayerTimeControlStatusPlaying){if(self.videoFrameReady){self.status.text=@"视频首帧已就绪 · AVPlayer 正在播放";[self.spinner stopAnimating];}else if(self.hasVideoTrack){self.status.text=@"AVPlayer 正在播放 · 等待视频首帧";[self.spinner startAnimating];}else{self.status.text=@"AVPlayer 报告播放中";[self.spinner stopAnimating];}}else if(state==AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate){self.status.text=@"正在缓冲 · 等待 AVPlayer";[self.spinner startAnimating];}else if(self.player.currentItem.status==AVPlayerItemStatusReadyToPlay){self.status.text=self.videoFrameReady?@"视频首帧已就绪 · 当前已暂停":(self.hasVideoTrack?@"媒体已准备 · 当前已暂停，等待视频首帧":@"媒体已准备 · 当前暂停");if(!self.videoFrameReady)[self.spinner stopAnimating];}self.status.accessibilityLabel=self.status.text;});return;}
     [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
 }
 - (void)playerItemStalled:(NSNotification *)notification {if(notification.object!=self.observedItem||notification.object!=self.player.currentItem)return;self.status.text=@"媒体缓冲中 · 等待网络数据";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];[RuntimeDiagnostics.shared recordEvent:@"playback_stalled" category:@"playback" fields:@{@"player":@"AVPlayer", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex)}];}

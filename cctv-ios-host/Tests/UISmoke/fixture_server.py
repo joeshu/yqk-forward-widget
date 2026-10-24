@@ -53,7 +53,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             identifier = str(args.get('id', ''))
             if identifier == 'slow-episode':
                 time.sleep(3.0)
-            data = {'url': base + '/video.mp4?play=' + ('slow' if identifier == 'slow-episode' else 'fast' if identifier == 'fast-episode' else 'initial'), 'headers': {}, 'parse': 0}
+            data = {'url': base + '/video.mp4?play=' + ('slow' if identifier == 'slow-episode' else 'fast' if identifier == 'fast-episode' else 'initial'), 'headers': {'Referer': 'https://fixture.test/watch', 'X-Fixture-Playback': 'required'}, 'parse': 0}
         else:
             self.send_error(404)
             return
@@ -109,6 +109,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 time.sleep(8)
                 print("HLS segment delay complete", flush=True)
         elif self.path.split("?", 1)[0] == "/video.mp4":
+            if "play=" in self.path and (self.headers.get("Referer") != "https://fixture.test/watch" or self.headers.get("X-Fixture-Playback") != "required"):
+                self.send_response(403)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             content_type = "video/mp4"
             data = VIDEO
             requested = self.headers.get("Range")

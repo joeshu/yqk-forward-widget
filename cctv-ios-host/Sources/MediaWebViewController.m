@@ -1,5 +1,6 @@
 #import "MediaWebViewController.h"
 #import "HostTheme.h"
+#import "MediaPlaybackHeaders.h"
 #import <WebKit/WebKit.h>
 @interface MediaWebViewController () <WKNavigationDelegate>
 @property(nonatomic, copy) NSDictionary *result;
@@ -15,11 +16,11 @@
     WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];configuration.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;configuration.allowsInlineMediaPlayback=YES;configuration.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;
     self.web=[[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration];self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;self.web.navigationDelegate=self;self.web.allowsBackForwardNavigationGestures=YES;[self.view addSubview:self.web];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.center=self.view.center;self.spinner.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin|UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin;[self.view addSubview:self.spinner];
-    NSDictionary *headers=self.result[@"headers"];for(NSString *key in headers)if([key.lowercaseString isEqual:@"user-agent"])self.web.customUserAgent=headers[key];
+    NSDictionary *headers=MediaPlaybackHeadersFromResult(self.result);for(NSString *key in headers)if([key.lowercaseString isEqual:@"user-agent"])self.web.customUserAgent=headers[key];
     [self refresh];
 }
 - (void)refresh {
-    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:self.result[@"url"]] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25];request.allHTTPHeaderFields=self.result[@"headers"];
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:self.result[@"url"]] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25];request.allHTTPHeaderFields=MediaPlaybackHeadersFromResult(self.result);
     self.navigationItem.prompt=@"网页播放 · 由当前来源提供";[self.spinner startAnimating];[self.web loadRequest:request];
 }
 - (void)close {[self.web stopLoading];[self dismissViewControllerAnimated:YES completion:nil];}

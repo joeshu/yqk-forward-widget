@@ -625,8 +625,8 @@ static void next(NSArray *steps, NSUInteger index) {
           @{ @"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];return mediaPlayback&&player.currentItem.status==AVPlayerItemStatusReadyToPlay;},@"run":^{
             AVPlayer *player=[mediaPlayback valueForKey:@"player"];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"selected plugin episode reaches AVPlayer ready state on the new playback page");check(nav.topViewController==mediaPlayback,@"plugin playback opens the dedicated playback screen");capture(self.window,@"19-media-playback");
           }},
-          @{ @"timeout":@12,@"until":^BOOL{UILabel *status=[mediaPlayback valueForKey:@"status"];return [status.text containsString:@"视频帧已解码"];},@"run":^{
-            UILabel *status=[mediaPlayback valueForKey:@"status"];check([status.text containsString:@"视频帧已解码"],@"AVPlayer decodes an actual video frame from the selected film resource");
+          @{ @"timeout":@12,@"until":^BOOL{UILabel *status=[mediaPlayback valueForKey:@"status"];return [status.text containsString:@"视频首帧已就绪"];},@"run":^{
+            UILabel *status=[mediaPlayback valueForKey:@"status"];check([status.text containsString:@"视频首帧已就绪"],@"AVPlayerLayer displays a header-protected frame from the selected film resource");
             [mediaPlayback openEpisodeSelection];mediaEpisodes=(id)nav.topViewController;
             check(mediaEpisodes.selectionUpdatesPlayer,@"player opens the shared episode selector without leaving playback context");
             [mediaEpisodes.tableView.delegate tableView:mediaEpisodes.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]];

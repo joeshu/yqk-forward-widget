@@ -32,7 +32,6 @@ targets:
       - sdk: Security.framework
       - sdk: CoreGraphics.framework
       - sdk: CoreMedia.framework
-      - sdk: CoreVideo.framework
       - sdk: UniformTypeIdentifiers.framework
       - sdk: QuartzCore.framework
       - framework: Frameworks/CNPlayerSDK.framework

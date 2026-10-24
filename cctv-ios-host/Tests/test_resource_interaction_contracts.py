@@ -125,10 +125,20 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('removeCatalog:', self.root)
         self.assertIn('@"tvboxCatalogs"', store)
 
-    def test_player_distinguishes_item_ready_from_decoded_video_frame(self):
+    def test_player_distinguishes_item_ready_from_first_frame_ready(self):
         self.assertIn('AVPlayerItemStatusFailed', self.playback)
-        self.assertIn('AVPlayerItemVideoOutput', self.playback)
-        self.assertIn('playback_video_frame_decoded', self.playback)
+        self.assertIn('AVPlayerLayer', self.playback)
+        self.assertIn('readyForDisplay', self.playback)
+        self.assertIn('playback_first_frame_ready', self.playback)
+        headers = (ROOT / 'Sources/MediaPlaybackHeaders.m').read_text()
+        self.assertIn('MediaPlaybackHeadersFromResult(result)', self.playback)
+        self.assertIn('AVURLAssetHTTPHeaderFieldsKey', self.playback)
+        self.assertIn('result[@"headers"]', headers)
+        self.assertIn('result[@"header"]', headers)
+        self.assertIn('@"host"', headers)
+        fixture = (ROOT / 'Tests/UISmoke/fixture_server.py').read_text()
+        self.assertIn('X-Fixture-Playback', fixture)
+        self.assertIn('self.headers.get("Referer")', fixture)
         self.assertIn('等待视频帧超时', self.playback)
         self.assertNotIn('首帧渲染状态未知', self.playback)
 
