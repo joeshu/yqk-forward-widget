@@ -650,6 +650,11 @@ static void next(NSArray *steps, NSUInteger index) {
             [nav popToRootViewControllerAnimated:NO];
             [root selectBottomTab:(id)tabs.arrangedSubviews[4]];
             [root.view layoutIfNeeded];
+          },
+          @{ @"until":^BOOL{
+                SettingsViewController *settings=(id)[root valueForKey:@"tabPage"];
+                return nav.topViewController==root&&settings&&settings.view.window==self.window;
+              }, @"run":^{
             SettingsViewController *settings=(id)[root valueForKey:@"tabPage"];
             UITableView *settingsTable=[settings valueForKey:@"table"];
             [settingsTable layoutIfNeeded];
@@ -673,7 +678,7 @@ static void next(NSArray *steps, NSUInteger index) {
             CGFloat dr=0,dg=0,db=0,da=0;[darkBackground getRed:&dr green:&dg blue:&db alpha:&da];
             check(dr<0.1&&dg<0.1&&db<0.1, @"black theme resolves a dark global page background");
             capture(self.window,@"23-global-black-theme");
-          }
+          }}
       ];
       next(steps, 0);
     });
