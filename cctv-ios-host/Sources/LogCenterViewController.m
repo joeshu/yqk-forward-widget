@@ -67,7 +67,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     __weak typeof(self) weakSelf=self;
     UIBarButtonItem *export=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"square.and.arrow.up"] style:UIBarButtonItemStylePlain target:self action:@selector(exportLog)];export.accessibilityLabel=@"导出日志";
     UIAction *copy=[UIAction actionWithTitle:@"复制当前结果" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *action){[weakSelf copyVisibleLog];}];
-    UIAction *clear=[UIAction actionWithTitle:@"清空日志" image:[UIImage systemImageNamed:@"trash"] identifier:nil attributes:UIMenuElementAttributesDestructive handler:^(__unused UIAction *action){[weakSelf confirmClearLog];}];
+    UIAction *clear=[UIAction actionWithTitle:@"清空日志" image:[UIImage systemImageNamed:@"trash"] identifier:nil discoverabilityTitle:nil attributes:UIMenuElementAttributesDestructive state:UIMenuElementStateOff handler:^(__unused UIAction *action){[weakSelf confirmClearLog];}];
     UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"日志操作" children:@[copy,clear]]];more.accessibilityLabel=@"更多日志操作";
     self.navigationItem.rightBarButtonItems=@[more,export];
 
