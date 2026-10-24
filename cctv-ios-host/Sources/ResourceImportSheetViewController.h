@@ -5,7 +5,8 @@ typedef NS_ENUM(NSInteger, ResourceImportOption) {
     ResourceImportOptionMediaURL,
     ResourceImportOptionLiveFile,
     ResourceImportOptionMediaFile,
-    ResourceImportOptionServices
+    ResourceImportOptionServices,
+    ResourceImportOptionTVBox
 };
 
 @interface ResourceImportSheetViewController : UIViewController

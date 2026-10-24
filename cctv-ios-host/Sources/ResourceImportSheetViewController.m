@@ -168,7 +168,7 @@
     }
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section==0?2:(section==1?2:1); }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section==0?3:(section==1?3:1); }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     return @[@"在线导入",@"从本地导入",@"资源管理"][section];
 }
@@ -187,11 +187,13 @@
         UIColor *(^rgb)(CGFloat,CGFloat,CGFloat)=^UIColor *(CGFloat r,CGFloat g,CGFloat b){return [UIColor colorWithRed:r/255.0 green:g/255.0 blue:b/255.0 alpha:1];};
         online=@[
             @{ @"title":@"直播频道",@"detail":@"M3U / TXT 直播列表地址",@"icon":@"dot.radiowaves.left.and.right",@"color":rgb(246,151,0),@"option":@(ResourceImportOptionLiveURL)},
-            @{ @"title":@"影视 / 插件资源链接",@"detail":@"脚本、ZIP、本机服务包或 .md5 校验地址",@"icon":@"link",@"color":rgb(35,132,238),@"option":@(ResourceImportOptionMediaURL)}
+            @{ @"title":@"影视 / 插件资源链接",@"detail":@"脚本、ZIP、本机服务包或 .md5 校验地址",@"icon":@"link",@"color":rgb(35,132,238),@"option":@(ResourceImportOptionMediaURL)},
+            @{ @"title":@"TVBox 配置",@"detail":@"导入 JSON 目录；支持站点脚本与直播列表",@"icon":@"square.stack.3d.up",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionTVBox)}
         ];
         local=@[
             @{ @"title":@"导入直播列表文件",@"detail":@"本地 M3U / M3U8 / TXT 频道列表",@"icon":@"dot.radiowaves.left.and.right",@"color":rgb(246,151,0),@"option":@(ResourceImportOptionLiveFile)},
-            @{ @"title":@"导入脚本或 ZIP 包",@"detail":@"导入后检查入口、运行环境和影视 / 直播能力",@"icon":@"doc.zipper",@"color":rgb(92,83,218),@"option":@(ResourceImportOptionMediaFile)}
+            @{ @"title":@"导入脚本或 ZIP 包",@"detail":@"导入后检查入口、运行环境和影视 / 直播能力",@"icon":@"doc.zipper",@"color":rgb(92,83,218),@"option":@(ResourceImportOptionMediaFile)},
+            @{ @"title":@"导入 TVBox JSON",@"detail":@"从本地导入配置文件，不会覆盖现有目录",@"icon":@"doc.text",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionTVBox)}
         ];
         manage=@[
             @{ @"title":@"脚本与服务",@"detail":@"查看、启用和管理已导入的影视插件",@"icon":@"slider.horizontal.3",@"color":rgb(229,43,105),@"option":@(ResourceImportOptionServices)}

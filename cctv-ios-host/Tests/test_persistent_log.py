@@ -23,7 +23,7 @@ class PersistentLogTests(unittest.TestCase):
   self.assertIn('diagnostic.logs.search',L)
   self.assertIn('@"全部",@"播放",@"插件",@"错误"',L)
   self.assertIn('CCTVHostDiagnosticLogDidUpdateNotification',L)
-  self.assertNotIn('logView',S)
+  self.assertNotIn('self.logView',S)
   self.assertNotIn('owner.infoLabel.text=summary',S)
  def test_each_plugin_has_its_own_persistent_exportable_log(self):
   P=Path(__file__).resolve().parents[1].joinpath('Sources/PluginLogStore.m').read_text()

@@ -14,6 +14,9 @@
 #import "NodePluginRuntime.h"
 #import "MediaBrowserViewController.h"
 #import "MediaPlaybackViewController.h"
+#import "MediaEpisodeSelectionViewController.h"
+#import "TVBoxCatalogStore.h"
+#import "TVBoxCatalogViewController.h"
 #import "CNPlayerCrashGuard.h"
 #import "ResourceImportSheetViewController.h"
 #import "LogCenterViewController.h"
@@ -49,6 +52,10 @@
 - (void)player:(id)player playbackFailed:(NSError *)error;
 - (void)playMediaResult:(NSDictionary *)result name:(NSString *)name;
 - (void)addSubscription;
+@end
+
+@interface MediaPlaybackViewController (SmokeEpisodePicker)
+- (void)openEpisodeSelection;
 @end
 @interface MediaBrowserViewController (Smoke)
 - (void)loadMore;
@@ -152,6 +159,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSDictionary *nodeChecks;
       __block MediaBrowserViewController *mediaPage;
       __block UITableViewController *mediaDetail;
+      __block MediaEpisodeSelectionViewController *mediaEpisodes;
       __block MediaPlaybackViewController *mediaPlayback;
       __block NSDate *stalePlaybackDeadline;
       NSArray *steps = @[
@@ -586,21 +594,38 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[mediaPage valueForKey:@"items"] count]==2,@"media pagination appends without losing previous page");capture(self.window,@"17-media-search");
             UICollectionView *grid=[mediaPage valueForKey:@"grid"];[grid.delegate collectionView:grid didSelectItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];mediaDetail=(id)nav.topViewController;
           }},
-          @{@"until":^BOOL{return [mediaDetail.tableView numberOfSections]==3;},@"run":^{
-            check([mediaDetail.tableView numberOfSections]==3,@"media detail displays two original playback lines");capture(self.window,@"18-media-detail");
+          @{@"until":^BOOL{return [mediaDetail.tableView numberOfSections]==2;},@"run":^{
+            check([mediaDetail.tableView numberOfSections]==2,@"media detail separates synopsis from episode selection");capture(self.window,@"18-media-detail");
             [mediaDetail.tableView.delegate tableView:mediaDetail.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
+            mediaEpisodes=(id)nav.topViewController;
+          }},
+          @{@"until":^BOOL{return mediaEpisodes&&[mediaEpisodes.tableView numberOfSections]==2;},@"run":^{
+            check([mediaEpisodes.tableView numberOfSections]==2,@"episode page groups episodes by playback line");capture(self.window,@"18-media-episodes");
+            [mediaEpisodes.tableView.delegate tableView:mediaEpisodes.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
           }},
           @{ @"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];return mediaPlayback&&player.currentItem.status==AVPlayerItemStatusReadyToPlay;},@"run":^{
             AVPlayer *player=[mediaPlayback valueForKey:@"player"];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"selected plugin episode reaches AVPlayer ready state on the new playback page");check(nav.topViewController==mediaPlayback,@"plugin playback opens the dedicated playback screen");capture(self.window,@"19-media-playback");
-            UITableView *episodes=[mediaPlayback valueForKey:@"table"];
-            [episodes.delegate tableView:episodes didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]];
+            [mediaPlayback openEpisodeSelection];mediaEpisodes=(id)nav.topViewController;
+            check(mediaEpisodes.selectionUpdatesPlayer,@"player opens the shared episode selector without leaving playback context");
+            [mediaEpisodes.tableView.delegate tableView:mediaEpisodes.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]];
             check([[mediaPlayback valueForKey:@"episodeIndex"] integerValue]==1,@"slow episode request starts");
-            [episodes.delegate tableView:episodes didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:0]];
-            check([[mediaPlayback valueForKey:@"episodeIndex"] integerValue]==2,@"episode selection stays responsive while parsing");
+            [mediaEpisodes.tableView.delegate tableView:mediaEpisodes.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:0]];
+            check(mediaEpisodes.selectedEpisodeIndex==2,@"episode selection stays responsive while parsing");
             stalePlaybackDeadline=[NSDate dateWithTimeIntervalSinceNow:4.0];
           }},
           @{ @"timeout":@12,@"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;return player.currentItem.status==AVPlayerItemStatusReadyToPlay&&[asset.URL.absoluteString containsString:@"play=fast"]&&[stalePlaybackDeadline timeIntervalSinceNow]<=0;},@"run":^{
-            AVPlayer *player=[mediaPlayback valueForKey:@"player"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;check([asset.URL.absoluteString containsString:@"play=fast"],@"late slow parse cannot replace the latest selected episode");capture(self.window,@"20-media-fast-switch");[nav popViewControllerAnimated:NO];
+            AVPlayer *player=[mediaPlayback valueForKey:@"player"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;check([asset.URL.absoluteString containsString:@"play=fast"],@"late slow parse cannot replace the latest selected episode");capture(self.window,@"20-media-fast-switch");[nav popToViewController:mediaPage animated:NO];
+            NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
+            NSDictionary *fixture=@{@"name":@"TVBox Fixture",@"sites":@[@{@"key":@"js-site",@"name":@"查询参数脚本",@"api":@"https://provider.test/index.js?token=kept",@"ext":@{@"home":@"fixture"}},@{@"key":@"jar-site",@"name":@"JAR API",@"api":@"https://provider.test/jar?type=3"}],@"lives":@[@{@"name":@"本机直播列表",@"url":[NSString stringWithFormat:@"http://127.0.0.1:%ld/all.m3u",(long)port]}]};
+            NSData *fixtureData=[NSJSONSerialization dataWithJSONObject:fixture options:0 error:NULL];NSError *catalogError=nil;NSDictionary *catalog=[TVBoxCatalogStore parseData:fixtureData sourceURL:@"https://provider.test/tvbox.json" error:&catalogError];
+            check(catalog!=nil&&catalogError==nil,@"TVBox JSON parses under bounded schema validation");
+            check([catalog[@"sites"][0][@"supported"] boolValue]&&[catalog[@"sites"][0][@"api"] isEqual:@"https://provider.test/index.js?token=kept"],@"TVBox direct script retains its complete source URL");
+            check(![catalog[@"sites"][1][@"supported"] boolValue],@"unsupported TVBox JAR API is shown as unavailable");
+            check([catalog[@"lives"] count]==1,@"TVBox live-list URL remains a separate subscription entry");
+            if(catalog)[TVBoxCatalogStore saveCatalog:catalog];
+            TVBoxCatalogViewController *catalogPage=[TVBoxCatalogViewController new];catalogPage.catalog=[TVBoxCatalogStore catalogForID:catalog[@"id"]]?:catalog;[nav pushViewController:catalogPage animated:NO];
+            check([catalogPage.tableView numberOfSections]==2&&[catalogPage.tableView numberOfRowsInSection:0]==2,@"TVBox catalog separates script sites from live lists");capture(self.window,@"21-tvbox-catalog");
+            if(catalog)[TVBoxCatalogStore removeCatalog:catalog[@"id"]];[nav popViewControllerAnimated:NO];
           }}
       ];
       next(steps, 0);

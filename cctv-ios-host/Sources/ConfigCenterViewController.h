@@ -11,4 +11,6 @@
 @property(nonatomic, copy) void (^onEditProfile)(NSString *source);
 @property(nonatomic, copy) void (^onDeleteProfile)(NSString *source);
 @property(nonatomic, copy) void (^onOpenResource)(NSString *source);
+@property(nonatomic, copy) void (^onUseResource)(NSString *source, NSString *kind);
+@property(nonatomic, copy) void (^onOpenTVBoxCatalog)(NSString *catalogID);
 @end
