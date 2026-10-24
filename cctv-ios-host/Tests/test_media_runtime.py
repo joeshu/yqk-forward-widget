@@ -158,7 +158,7 @@ class MediaTests(unittest.TestCase):
             media.PythonSpider(self.tmp.name, entry.name)
         self.assertNotIn('_fixture_import_helper', sys.modules)
         self.assertIn(self.engine.module_name, sys.modules)
-        self.assertIn(self.tmp.name, sys.path)  # The already-running Spider still owns this import path.
+        self.assertIn(os.path.realpath(self.tmp.name), [os.path.realpath(path) for path in sys.path])  # The running Spider owns this import path, regardless of macOS's /var symlink.
 
     def test_cache_entry_budget(self):
         for i in range(40):

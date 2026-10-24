@@ -93,7 +93,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("generation != self.playbackGeneration", body)
         self.assertIn("BOOL remotePlayback = self.avPlayer != nil", body)
         self.assertIn("if (remotePlayback)", body)
-        self.assertIn("playViaSDK:cid title:name", body)
+        self.assertIn("playSelectedNativeRouteOrChannel", body)
         self.assertIn("self.playbackGeneration += 1", method_body("- (void)startRemoteChannel:"))
 
     def test_remote_failure_recovery_is_bounded_and_deduplicates_player_callbacks(self):

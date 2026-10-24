@@ -181,7 +181,7 @@
 }
 - (void)confirmRemoveProfile:(NSString *)source {
     BOOL plugin=[source hasPrefix:@"plugin:"];
-    NSString *message=plugin?@"这会从本机移除该服务配置和对应的资源代码。":"这会移除订阅源及仅由它提供的频道；其他订阅源共同提供的频道会保留。";
+    NSString *message=plugin?@"这会从本机移除该服务配置和对应的资源代码。":@"这会移除订阅源及仅由它提供的频道；其他订阅源共同提供的频道会保留。";
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:plugin?@"移除资源？":@"移除订阅？" message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:plugin?@"移除资源":@"移除订阅" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){if(self.onDeleteProfile)self.onDeleteProfile(source);[self reloadProfiles];}]];

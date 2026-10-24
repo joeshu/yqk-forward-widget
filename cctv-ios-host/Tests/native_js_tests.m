@@ -73,7 +73,10 @@ int main(int argc,const char **argv){@autoreleasepool {
     check([call(router,@"start",parallelPayloadA)[@"ok"] boolValue]&&[call(router,@"start",parallelPayloadB)[@"ok"] boolValue],@"JavaScriptCore router starts two independent contexts");
     check([call(router,@"search",@{@"session":@"js-a"})[@"result"][@"list"][0][@"vod_id"] isEqual:@"1"]&&[call(router,@"search",@{@"session":@"js-b"})[@"result"][@"list"][0][@"vod_id"] isEqual:@"1"],@"parallel JavaScriptCore contexts keep independent module state");
     check([call(router,@"stop",@{@"session":@"js-a"})[@"ok"] boolValue]&&[call(router,@"search",@{@"session":@"js-b"})[@"result"][@"list"][0][@"vod_id"] isEqual:@"2"],@"stopping one JavaScriptCore context leaves the other usable");
-    check([router stopSessionsForServiceIdentifier:@"service-b" error:NULL],@"service-ID shutdown removes the matching JavaScriptCore context");
+    __block BOOL stoppedByServiceID=NO;dispatch_semaphore_t stopByServiceIDDone=dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{stoppedByServiceID=[router stopSessionsForServiceIdentifier:@"service-b" error:NULL];dispatch_semaphore_signal(stopByServiceIDDone);});
+    BOOL stopByServiceIDReturned=dispatch_semaphore_wait(stopByServiceIDDone,dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC))==0;
+    check(stopByServiceIDReturned&&stoppedByServiceID&&![[router managedServiceIdentifiers] containsObject:@"service-b"],@"service-ID shutdown stops and removes the matching JavaScriptCore context off the main thread");
     NSString *slowRoot=[folder stringByAppendingPathComponent:@"slow-start"];
     [NSFileManager.defaultManager createDirectoryAtPath:slowRoot withIntermediateDirectories:YES attributes:nil error:NULL];
     NSString *slowSource=@"export default {async init(){await new Promise(()=>{})},search(){return {list:[]}}}";
