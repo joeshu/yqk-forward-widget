@@ -96,7 +96,11 @@ static NSString *ServiceProtocolName(NSDictionary *service){
                           : ([self.service[@"builtin"] boolValue] ? 0 : 1);
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return @[ [NSString stringWithFormat:@"%@ · 服务状态",ServiceEngineName(self.service)], @"本机访问", @"服务信息", @"操作", @"" ][section];
+    NSArray<NSString *> *titles = @[
+        [NSString stringWithFormat:@"%@ · 服务状态", ServiceEngineName(self.service)],
+        @"本机访问", @"服务信息", @"操作"
+    ];
+    return section >= 0 && section < (NSInteger)titles.count ? titles[(NSUInteger)section] : nil;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0)
