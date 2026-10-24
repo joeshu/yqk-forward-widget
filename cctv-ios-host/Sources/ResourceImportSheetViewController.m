@@ -207,7 +207,8 @@
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    ResourceImportOption option=[self optionsForSection:indexPath.section][indexPath.row][@"option"].integerValue;
+    NSNumber *storedOption=[self optionsForSection:indexPath.section][indexPath.row][@"option"];
+    ResourceImportOption option=(ResourceImportOption)storedOption.integerValue;
     void (^selection)(ResourceImportOption)=self.onSelect;
     [self dismissViewControllerAnimated:YES completion:^{if(selection)selection(option);}];
 }
