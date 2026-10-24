@@ -12,7 +12,7 @@ PLAYBACK = (ROOT / "Sources/MediaPlaybackViewController.m").read_text()
 class RuntimeDiagnosticsContractTests(unittest.TestCase):
     def test_mode_is_opt_in_and_persisted(self):
         self.assertIn('RuntimeDiagnosticsPreferenceKey = @"runtimeDiagnosticsEnabled"', DIAGNOSTICS)
-        self.assertIn('_enabled = [NSUserDefaults.standardUserDefaults boolForKey:RuntimeDiagnosticsPreferenceKey]', DIAGNOSTICS)
+        self.assertIn('_diagnosticModeEnabled = [NSUserDefaults.standardUserDefaults boolForKey:RuntimeDiagnosticsPreferenceKey]', DIAGNOSTICS)
         self.assertIn('@"default":@NO', SETTINGS)
         self.assertIn('[RuntimeDiagnostics.shared setEnabled:value]', HOST)
 

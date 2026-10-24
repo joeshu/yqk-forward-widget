@@ -8,7 +8,7 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
 @interface RuntimeDiagnostics ()
 @property(nonatomic, copy) NSString *logPath;
 @property(nonatomic, strong) dispatch_queue_t queue;
-@property(nonatomic, readwrite, getter=isEnabled) BOOL enabled;
+@property(nonatomic) BOOL diagnosticModeEnabled;
 - (id)safeValue:(id)value key:(NSString *)key depth:(NSUInteger)depth;
 - (NSString *)safeText:(NSString *)text;
 @end
@@ -27,22 +27,22 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
         NSString *support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
         self.logPath = [[[[support stringByAppendingPathComponent:@"ysp"] stringByAppendingPathComponent:@"diagnostics"] stringByAppendingPathComponent:@"runtime-debug"] stringByAppendingPathExtension:@"jsonl"];
         self.queue = dispatch_queue_create("com.cctvhost.runtime-diagnostics", DISPATCH_QUEUE_SERIAL);
-        _enabled = [NSUserDefaults.standardUserDefaults boolForKey:RuntimeDiagnosticsPreferenceKey];
+        _diagnosticModeEnabled = [NSUserDefaults.standardUserDefaults boolForKey:RuntimeDiagnosticsPreferenceKey];
     }
     return self;
 }
 
 - (BOOL)isEnabled {
-    @synchronized (self) { return _enabled; }
+    @synchronized (self) { return _diagnosticModeEnabled; }
 }
 
 - (void)setEnabled:(BOOL)enabled {
     @synchronized (self) {
-        if (_enabled == enabled) return;
+        if (_diagnosticModeEnabled == enabled) return;
         if (!enabled) {
             [self recordEvent:@"diagnostics_disabled" category:@"diagnostics" fields:nil];
         }
-        _enabled = enabled;
+        _diagnosticModeEnabled = enabled;
         [NSUserDefaults.standardUserDefaults setBool:enabled forKey:RuntimeDiagnosticsPreferenceKey];
     }
     if (enabled) {
