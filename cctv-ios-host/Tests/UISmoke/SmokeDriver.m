@@ -59,6 +59,8 @@
 @end
 @interface MediaBrowserViewController (Smoke)
 - (void)loadMore;
+- (void)chooseResource;
+- (void)chooseProvider;
 - (void)updateSearchResultsForSearchController:(UISearchController *)controller;
 @end
 @interface EPGViewController (Smoke)
@@ -220,7 +222,7 @@ static void next(NSArray *steps, NSUInteger index) {
             ResourceImportSheetViewController *sheet=(id)nav.presentedViewController;
             check([sheet isKindOfClass:ResourceImportSheetViewController.class], @"resource add opens the grouped import sheet");
             UITableView *options=[sheet valueForKey:@"tableView"];
-            check([options numberOfSections]==3 && [options numberOfRowsInSection:0]==2 && [options numberOfRowsInSection:1]==2,
+            check([options numberOfSections]==3 && [options numberOfRowsInSection:0]==3 && [options numberOfRowsInSection:1]==3,
                   @"resource sheet exposes supported online, local and service actions");
             capture(self.window, @"03b-add-resource");
             [sheet dismissViewControllerAnimated:NO completion:nil];
@@ -577,7 +579,7 @@ static void next(NSArray *steps, NSUInteger index) {
             NSData *diagnostic=[NSJSONSerialization dataWithJSONObject:nodeChecks options:NSJSONWritingPrettyPrinted error:NULL];[diagnostic writeToFile:[outputDir stringByAppendingPathComponent:@"node-runtime.json"] atomically:YES];
             mediaPage=[MediaBrowserViewController new];
             NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
-            mediaPage.sourcesProvider=^NSArray *{return @[@{@"id":@"media-ui",@"name":@"本机影视测试",@"port":@(port)}];};
+            mediaPage.sourcesProvider=^NSArray *{return @[@{@"id":@"media-ui",@"name":@"本机影视测试",@"port":@(port),@"engine":@"node",@"url":[NSString stringWithFormat:@"http://127.0.0.1:%ld/media.js?token=visible",(long)port]}];};
             mediaPage.onActivateService=^(NSDictionary *service,void (^done)(NSError *)){done(nil);};
             mediaPage.onPlay=^(NSDictionary *result,NSDictionary *context){mediaPlayback=[MediaPlaybackViewController new];mediaPlayback.result=result;mediaPlayback.context=context;[nav pushViewController:mediaPlayback animated:NO];};
             [nav pushViewController:mediaPage animated:NO];
@@ -585,7 +587,22 @@ static void next(NSArray *steps, NSUInteger index) {
           @{@"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]>0;},@"run":^{
             check([[mediaPage valueForKey:@"items"] count]==1,@"media home loads real JSON API into native poster grid");
             UIScrollView *categories=[mediaPage valueForKey:@"categoryScroll"];check(CGRectGetMinY(categories.frame)>=mediaPage.view.safeAreaInsets.top,@"film categories stay below the navigation and search bars");capture(self.window,@"16-media-home");
+            [mediaPage chooseResource];
+          }},
+          @{ @"until":^BOOL{return root.presentedViewController!=nil;},@"run":^{
+            UINavigationController *sheet=(id)root.presentedViewController;UITableViewController *picker=(id)sheet.topViewController;UITableViewCell *current=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+            UIStackView *scopeStack=[picker valueForKey:@"scopeStack"];check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"resource selection uses a native bottom sheet");check([picker.tableView numberOfRowsInSection:0]==1&&current.accessoryType==UITableViewCellAccessoryCheckmark,@"resource sheet shows its current selection");check(scopeStack.arrangedSubviews.count==2,@"resource sheet groups resources by runtime and keeps all resources visible");capture(self.window,@"16b-media-resource-sheet");
+            [picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+          }},
+          @{ @"until":^BOOL{return root.presentedViewController==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{[mediaPage chooseProvider];}},
+          @{ @"until":^BOOL{return root.presentedViewController!=nil;},@"run":^{
+            UINavigationController *sheet=(id)root.presentedViewController;UITableViewController *picker=(id)sheet.topViewController;UITableViewCell *current=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+            check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"platform selection uses a separate bottom sheet");check([picker.tableView numberOfRowsInSection:0]==2&&current.accessoryType==UITableViewCellAccessoryCheckmark,@"platform sheet lists choices and marks the current platform");capture(self.window,@"16c-media-platform-sheet");
+            [picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]];
+          }},
+          @{ @"until":^BOOL{return root.presentedViewController==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{
             UISearchController *search=[mediaPage valueForKey:@"search"];search.searchBar.text=@"中文";[mediaPage updateSearchResultsForSearchController:search];
+          }},
           }},
           @{@"until":^BOOL{return [[[mediaPage valueForKey:@"items"] firstObject][@"id"] isEqual:@"中文1"];},@"run":^{
             check([[[mediaPage valueForKey:@"items"] firstObject][@"id"] isEqual:@"中文1"],@"media search keeps source IDs and unicode");[mediaPage loadMore];
@@ -608,7 +625,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [mediaPlayback openEpisodeSelection];mediaEpisodes=(id)nav.topViewController;
             check(mediaEpisodes.selectionUpdatesPlayer,@"player opens the shared episode selector without leaving playback context");
             [mediaEpisodes.tableView.delegate tableView:mediaEpisodes.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]];
-            check([[mediaPlayback valueForKey:@"episodeIndex"] integerValue]==1,@"slow episode request starts");
+            check(mediaEpisodes.selectedEpisodeIndex==1,@"slow episode request starts without blocking the selector");
             [mediaEpisodes.tableView.delegate tableView:mediaEpisodes.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:0]];
             check(mediaEpisodes.selectedEpisodeIndex==2,@"episode selection stays responsive while parsing");
             stalePlaybackDeadline=[NSDate dateWithTimeIntervalSinceNow:4.0];

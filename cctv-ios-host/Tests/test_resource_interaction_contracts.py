@@ -70,6 +70,11 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('选择影视站点', self.detail)
         self.assertIn('- (void)chooseResource', self.detail)
         self.assertIn('- (void)chooseProvider', self.detail)
+        self.assertIn('UIModalPresentationPageSheet', self.detail)
+        self.assertIn('mediumDetent', self.detail)
+        self.assertIn('UITableViewCellAccessoryCheckmark', self.detail)
+        self.assertIn('scopeStack', self.detail)
+        self.assertIn('@"url":source[@"url"]', self.detail)
 
     def test_local_interface_probe_is_bounded_and_does_not_follow_redirects(self):
         self.assertIn('completionHandler(nil)', self.resource_detail)

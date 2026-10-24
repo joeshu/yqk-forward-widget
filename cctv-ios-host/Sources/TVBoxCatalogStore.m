@@ -38,7 +38,7 @@ static BOOL TVBoxWebURL(NSString *value) {
         NSURLComponents *apiParts=[NSURLComponents componentsWithString:api];
         NSString *path=apiParts.path.lowercaseString;
         if ([path hasSuffix:@".md5"]) path=[path stringByDeletingPathExtension];
-        BOOL direct=TVBoxWebURL(api) && [@[@".js",@".mjs",@".cjs",@".py",@".zip"] containsObject:path.pathExtension.lowercaseString];
+        BOOL direct=TVBoxWebURL(api) && [@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];
         NSString *reason=direct?@"可导入 · 将由现有脚本适配器检查":([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"]?@"此站点 API 不是可直接导入的 JS/Python/ZIP 文件（常见为 JAR 类接口）":@"站点地址无效");
         [cleanSites addObject:@{@"key":key,@"name":name,@"api":api,@"ext":ext?:@"",@"type":TVBoxString(value[@"type"],32)?:@"",@"supported":@(direct),@"status":reason}];
     }

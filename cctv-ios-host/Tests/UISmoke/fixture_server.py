@@ -39,7 +39,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         base = f'http://127.0.0.1:{self.server.server_port}'
         card = lambda value: {'id': value, 'name': '测试电影 ' + value, 'poster': base + '/poster.png', 'remarks': 'HD'}
         if operation == 'capabilities':
-            data = {'capabilities': ['home', 'category', 'search', 'detail', 'play']}
+            data = {'capabilities': ['home', 'category', 'search', 'detail', 'play', 'providers']}
+        elif operation == 'providers':
+            data = [{'id': 'primary', 'name': '主平台'}, {'id': 'secondary', 'name': '备用平台'}]
         elif operation == 'home':
             data = {'categories': [{'id': 'movies', 'name': '电影'}], 'items': [card('home')], 'filters': {}}
         elif operation in ('category', 'search'):
