@@ -34,7 +34,7 @@ for(const name of ['copyFile','cp','link','rename','symlink']){
 for(const key of ['createReadStream','createWriteStream']){const operation=fs[key];fs[key]=function(file,...args){const stream=operation.call(this,fsPath(file),...args),owner=scope.getStore();if(owner){owner.streams.add(stream);stream.once('close',()=>owner.streams.delete(stream))}return stream}}
 let inflight=0
 function appendLog(owner,line){const lines=owner?.logs||hostLogs;lines.push(String(line).slice(0,1024));if(lines.length>64)lines.shift()}
-function failOwner(owner,context,error){const message=String(error?.message||error||'未知错误').slice(0,512);appendLog(owner,context+message);if(owner&&!owner.closed){owner.failure=message;cancelHandles(owner)}}
+function failOwner(owner,context,error){const message=String(error?.message||error||'未知错误').slice(0,512),diagnostic=baseEnvironment.CCTVHOST_TEST_DIAGNOSTICS==='1'&&error?.stack?'\n'+String(error.stack).slice(0,2048):'';appendLog(owner,context+message+diagnostic);if(owner&&!owner.closed){owner.failure=message;cancelHandles(owner)}}
 function drainLogs(identifier){const owner=owners.get(identifier),lines=owner?.logs||closedLogs.get(identifier)||hostLogs,result=lines.splice(0,20);if(!lines.length)closedLogs.delete(identifier);return result}
 for(const key of ['log','info','warn','error','debug'])console[key]=(...args)=>{const owner=scope.getStore();appendLog(owner,args.map(value=>{try{return typeof value==='string'?value:JSON.stringify(value)}catch{return '[无法显示日志对象]'}}).join(' '))}
 process.exit=()=>{throw Error('插件不能退出 CCTVHost 进程')}

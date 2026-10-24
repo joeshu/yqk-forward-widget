@@ -28,7 +28,11 @@ class NodeMediaHostTests(unittest.TestCase):
         self.info = self.root / 'control.json'
         self.token = 'test-token-' + os.urandom(8).hex()
         environment = {key: os.environ[key] for key in ('PATH', 'LANG', 'TMPDIR') if key in os.environ}
+        environment['CCTVHOST_TEST_DIAGNOSTICS'] = '1'
         node = os.environ.get('CCTVHOST_NODE_BINARY', shutil.which('node'))
+        version = subprocess.check_output([node, '--version'], text=True).strip()
+        if environment.get('CCTVHOST_TEST_DIAGNOSTICS') == '1':
+            print(f'[Node host test] {version}; WebAssembly={subprocess.check_output([node, "--jitless", "-p", "typeof WebAssembly"], text=True).strip()}')
         # Match iOS Mobile's disabled JIT/WebAssembly rather than desktop defaults.
         self.process = subprocess.Popen([node, '--jitless', str(HOST), str(self.info), self.token, str(self.packages)], env=environment,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
