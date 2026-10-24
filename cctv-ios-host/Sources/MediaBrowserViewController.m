@@ -26,7 +26,7 @@
 @property(nonatomic, copy) NSString *provider;
 @property(nonatomic, copy) NSDictionary *detail;
 @property(nonatomic, strong) MediaAPIClient *client;
-@property(nonatomic, copy) void (^onPlay)(NSDictionary *,NSString *);
+@property(nonatomic, copy) void (^onPlay)(NSDictionary *,NSDictionary *);
 @property(nonatomic, strong) UILabel *status;
 @property(nonatomic) BOOL resolving;
 @end
@@ -69,7 +69,7 @@
     [self.client call:@"play" arguments:[self arguments:@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@""}] completion:^(id result,NSError *error){
         MediaDetailViewController *owner=weakSelf;if(!owner)return;owner.resolving=NO;owner.navigationItem.prompt=nil;
         if(error){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"播放失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:alert animated:YES completion:nil];return;}
-        if(owner.onPlay)owner.onPlay(result,[NSString stringWithFormat:@"%@ · %@",owner.detail[@"name"]?:owner.title,episode[@"name"]?:@""]);
+        if(owner.onPlay){NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"lineIndex":@(ip.section-1),@"episodeIndex":@(ip.row)};owner.onPlay(result,context);}
     }];
 }
 @end
@@ -99,6 +99,10 @@
 @property(nonatomic) BOOL loading;
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) NSUInteger searchGeneration;
+@property(nonatomic,strong) NSMutableDictionary<NSString *,NSDictionary *> *browseStates;
+@property(nonatomic,copy) NSDictionary *pendingBrowseState;
+@property(nonatomic,strong) NSNumber *pendingRestoreOffset;
+@property(nonatomic) NSInteger pendingRestorePage;
 @property(nonatomic, copy) NSDictionary *filters;
 @property(nonatomic, strong) NSMutableDictionary *selectedFilters;
 @end
@@ -130,6 +134,9 @@
     [self loadSources];
 }
 - (void)dealloc {[self.readiness cancel];[self.client cancel];}
+- (NSString *)stateKeyForSource:(NSDictionary *)source provider:(NSString *)provider {return [NSString stringWithFormat:@"%@|%@",source[@"id"]?:@"",provider?:@""];}
+- (void)saveCurrentBrowseState {if(!self.source)return;if(!self.browseStates)self.browseStates=[NSMutableDictionary dictionary];NSString *key=[self stateKeyForSource:self.source provider:self.provider];self.browseStates[key]=@{@"keyword":self.keyword?:@"",@"category":self.category?:@"",@"filters":self.selectedFilters?:@{},@"provider":self.provider?:@"",@"page":@(MAX(1,self.page)),@"season":@(MAX(1,self.widgetSeason)),@"episode":@(MAX(1,self.widgetEpisode)),@"offset":@(MAX(0,self.grid.contentOffset.y))};}
+- (void)restorePendingBrowseState {NSDictionary *state=self.pendingBrowseState;self.pendingBrowseState=nil;if(!state)return;self.keyword=state[@"keyword"]?:@"";self.category=state[@"category"];self.selectedFilters=[state[@"filters"] isKindOfClass:NSDictionary.class]?[state[@"filters"] mutableCopy]:[NSMutableDictionary dictionary];self.pendingRestorePage=MAX(1,MIN(100,[state[@"page"] integerValue]));self.page=self.pendingRestorePage;self.widgetSeason=MAX(1,[state[@"season"] integerValue]);self.widgetEpisode=MAX(1,[state[@"episode"] integerValue]);self.pendingRestoreOffset=@([state[@"offset"] doubleValue]);self.search.searchBar.text=self.keyword;self.navigationItem.prompt=[self.source[@"protocol"] isEqual:@"widget-extractor"]?[NSString stringWithFormat:@"第 %ld 季 · 第 %ld 集",(long)self.widgetSeason,(long)self.widgetEpisode]:nil;for(UIButton *button in self.categories.arrangedSubviews){BOOL selected=[button.accessibilityIdentifier isEqual:self.category];button.backgroundColor=selected?[HostAccent() colorWithAlphaComponent:0.23]:[UIColor colorWithWhite:1 alpha:0.09];button.layer.borderColor=selected?[HostAccent() colorWithAlphaComponent:0.42].CGColor:[UIColor colorWithWhite:1 alpha:0.10].CGColor;[button setTitleColor:selected?HostAccent():UIColor.whiteColor forState:UIControlStateNormal];}if(self.keyword.length||self.category.length){self.page=1;[self loadListing:NO];return;}self.pendingRestorePage=0;CGFloat offset=self.pendingRestoreOffset.doubleValue;self.pendingRestoreOffset=nil;dispatch_async(dispatch_get_main_queue(),^{[self.grid setContentOffset:CGPointMake(0,offset) animated:NO];});}
 - (void)openResources {if(self.onResources)self.onResources();}
 - (void)loadSources {
     self.sources=self.sourcesProvider?self.sourcesProvider():@[];
@@ -159,7 +166,7 @@
     NSMutableArray *choices=[NSMutableArray array];for(NSDictionary *source in self.sources)[choices addObject:@{@"name":source[@"name"],@"subtitle":@"已导入资源",@"source":source}];
     for(NSDictionary *provider in self.providers)[choices addObject:@{@"name":provider[@"name"],@"subtitle":self.source[@"name"]?:@"",@"provider":provider[@"id"]}];
     MediaSourcePicker *picker=[[MediaSourcePicker alloc] initWithStyle:UITableViewStyleInsetGrouped];picker.choices=choices;__weak typeof(self) weakSelf=self;
-    picker.onSelect=^(NSDictionary *choice){MediaBrowserViewController *owner=weakSelf;if(choice[@"source"])[owner activate:choice[@"source"]];else{owner.provider=choice[@"provider"];[owner loadHome];}};[self.navigationController pushViewController:picker animated:YES];
+    picker.onSelect=^(NSDictionary *choice){MediaBrowserViewController *owner=weakSelf;if(choice[@"source"])[owner activate:choice[@"source"]];else{[owner saveCurrentBrowseState];owner.provider=choice[@"provider"];if(owner.provider.length)[NSUserDefaults.standardUserDefaults setObject:owner.provider forKey:[NSString stringWithFormat:@"mediaProvider.%@",owner.source[@"id"]]];owner.pendingBrowseState=owner.browseStates[[owner stateKeyForSource:owner.source provider:owner.provider]];[owner loadHome];}};[self.navigationController pushViewController:picker animated:YES];
 }
 - (void)chooseFilters {
     if([self.source[@"protocol"] isEqual:@"widget-extractor"]){[self chooseWidgetEpisode];return;}
@@ -180,7 +187,7 @@
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)activate:(NSDictionary *)source {
-    self.generation++;NSUInteger generation=self.generation;[self.readiness cancel];[self.client cancel];self.source=source;self.provider=nil;self.providers=@[];self.items=@[];self.category=nil;self.keyword=@"";self.page=1;self.loading=YES;self.moreButton.hidden=YES;[self.grid reloadData];
+    [self saveCurrentBrowseState];self.generation++;NSUInteger generation=self.generation;[self.readiness cancel];[self.client cancel];self.source=source;NSString *preferredProvider=[NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"mediaProvider.%@",source[@"id"]]];self.provider=nil;self.pendingBrowseState=self.browseStates[[self stateKeyForSource:source provider:preferredProvider]]?:self.browseStates[[self stateKeyForSource:source provider:nil]];self.providers=@[];self.items=@[];self.category=nil;self.keyword=@"";self.page=1;self.loading=YES;self.moreButton.hidden=YES;[self.grid reloadData];
     self.widgetSeason=1;self.widgetEpisode=1;BOOL widget=[source[@"protocol"] isEqual:@"widget-extractor"];self.navigationItem.prompt=widget?@"第 1 季 · 第 1 集 · 工具栏筛选可修改":nil;self.search.searchBar.placeholder=widget?@"输入完整剧名，筛选中选择季 / 集":@"搜索当前影视来源";
     for(UIView *view in self.categories.arrangedSubviews){[self.categories removeArrangedSubview:view];[view removeFromSuperview];}
     [NSUserDefaults.standardUserDefaults setObject:source[@"id"] forKey:@"selectedMediaSource"];[self showMessage:[NSString stringWithFormat:@"正在启动 %@…",source[@"name"]] loading:YES];
@@ -208,9 +215,9 @@
         NSArray *caps=[result isKindOfClass:NSDictionary.class] && [result[@"capabilities"] isKindOfClass:NSArray.class]?result[@"capabilities"]:@[];
         NSMutableDictionary *saved=[owner.source mutableCopy];saved[@"capabilities"]=caps;[ServiceStore save:saved];owner.source=saved;
         if([caps containsObject:@"live"] && ![caps containsObject:@"detail"] && ![caps containsObject:@"play"]){owner.loading=NO;if(owner.onSubscribeLive)owner.onSubscribeLive(owner.source);else[owner showMessage:@"此资源提供直播频道，可添加到频道订阅" loading:NO];return;}
-        if([caps containsObject:@"providers"]){[owner.client call:@"providers" arguments:@{} completion:^(id providers,NSError *failure){MediaBrowserViewController *page=weakSelf;if(!page)return;page.providers=[providers isKindOfClass:NSArray.class]?providers:@[];page.provider=page.providers.firstObject[@"id"];[page loadHome];}];}
+        if([caps containsObject:@"providers"]){[owner.client call:@"providers" arguments:@{} completion:^(id providers,NSError *failure){MediaBrowserViewController *page=weakSelf;if(!page)return;page.providers=[providers isKindOfClass:NSArray.class]?providers:@[];NSString *savedProvider=page.pendingBrowseState[@"provider"];NSString *preferredProvider=[NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"mediaProvider.%@",page.source[@"id"]]];NSString *chosen=savedProvider.length?savedProvider:preferredProvider;BOOL found=NO;for(NSDictionary *candidate in page.providers)if([candidate[@"id"] isEqual:chosen]){found=YES;break;}page.provider=found?chosen:page.providers.firstObject[@"id"];if(page.provider)[NSUserDefaults.standardUserDefaults setObject:page.provider forKey:[NSString stringWithFormat:@"mediaProvider.%@",page.source[@"id"]]];if(page.pendingBrowseState.count){NSMutableDictionary *state=[page.pendingBrowseState mutableCopy];state[@"provider"]=page.provider?:@"";page.pendingBrowseState=state;}[page loadHome];}];}
         else if([caps containsObject:@"home"])[owner loadHome];
-        else{owner.loading=NO;[owner showMessage:[caps containsObject:@"search"]?@"输入关键词搜索此影视来源":@"此资源未提供影视首页，请在资源页查看能力与配置" loading:NO];}
+        else{owner.loading=NO;if(owner.pendingBrowseState){NSDictionary *pending=owner.pendingBrowseState;[owner restorePendingBrowseState];if(![pending[@"keyword"] length])[owner showMessage:[caps containsObject:@"search"]?@"输入关键词搜索此影视来源":@"此资源未提供影视首页，请在资源页查看能力与配置" loading:NO];}else[owner showMessage:[caps containsObject:@"search"]?@"输入关键词搜索此影视来源":@"此资源未提供影视首页，请在资源页查看能力与配置" loading:NO];}
     }];
 }
 - (void)loadHome {
@@ -225,6 +232,7 @@
         owner.filters=[result[@"filters"] isKindOfClass:NSDictionary.class]?result[@"filters"]:@{};
         for(UIView *view in owner.categories.arrangedSubviews){[owner.categories removeArrangedSubview:view];[view removeFromSuperview];}
         for(NSDictionary *category in result[@"categories"]){UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];[button setTitle:category[@"name"] forState:UIControlStateNormal];HostStylePillButton(button,NO);button.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightMedium];button.accessibilityIdentifier=category[@"id"];[button addTarget:owner action:@selector(selectCategory:) forControlEvents:UIControlEventTouchUpInside];[owner.categories addArrangedSubview:button];}
+        if(owner.pendingBrowseState){[owner restorePendingBrowseState];return;}
         [owner showMessage:owner.items.count?@"":@"选择分类或输入关键词搜索" loading:NO];
     }];
 }
@@ -237,6 +245,7 @@
 - (void)loadMore {if(!self.loading && self.hasMore){self.page++;[self loadListing:YES];}}
 - (void)loadListing:(BOOL)append {
     if(!self.source)return;if(!self.keyword.length && !self.category.length){[self loadHome];return;}self.loading=YES;NSString *operation=self.keyword.length?@"search":@"category";NSString *requestedKeyword=self.keyword?:@"",*requestedCategory=self.category?:@"";
+    NSInteger requestedPage=self.page;
     NSMutableDictionary *args=[[self arguments:@{@"page":@(self.page)}] mutableCopy];if(self.keyword.length)args[@"keyword"]=self.keyword;else args[@"categoryId"]=self.category?:@"";
     NSInteger episode=self.widgetEpisode,season=self.widgetSeason;if([self.source[@"protocol"] isEqual:@"widget-extractor"]){args[@"episode"]=@(MAX(1,episode));args[@"season"]=@(MAX(1,season));}
     args[@"filters"]=self.selectedFilters?:@{};NSDictionary *requestedFilters=[self.selectedFilters copy]?:@{};
@@ -248,7 +257,8 @@
         if(error){if(append)owner.page=MAX(1,owner.page-1);[owner showMessage:error.localizedDescription loading:NO];return;}
         NSArray *incoming=[result[@"items"] isKindOfClass:NSArray.class]?result[@"items"]:@[];
         NSMutableArray *all=append?[owner.items mutableCopy]:[NSMutableArray array];NSMutableSet *ids=[NSMutableSet set];for(NSDictionary *item in all)[ids addObject:item[@"id"]];for(NSDictionary *item in incoming)if(![ids containsObject:item[@"id"]]){[all addObject:item];[ids addObject:item[@"id"]];}
-        owner.items=all;owner.hasMore=[result[@"hasMore"] boolValue];owner.moreButton.hidden=!owner.hasMore;[owner.grid reloadData];[owner showMessage:all.count?@"":@"没有找到影片，请更换关键词或分类" loading:NO];
+        owner.items=all;if(owner.pendingRestorePage>requestedPage && [result[@"hasMore"] boolValue] && incoming.count && requestedPage<owner.pendingRestorePage){owner.page=requestedPage+1;[owner loadListing:YES];return;}if(owner.pendingRestorePage){owner.page=requestedPage;owner.pendingRestorePage=0;}owner.hasMore=[result[@"hasMore"] boolValue];owner.moreButton.hidden=!owner.hasMore;[owner.grid reloadData];[owner showMessage:all.count?@"":@"没有找到影片，请更换关键词或分类" loading:NO];
+        if(owner.pendingRestoreOffset){CGFloat offset=owner.pendingRestoreOffset.doubleValue;owner.pendingRestoreOffset=nil;dispatch_async(dispatch_get_main_queue(),^{[owner.grid setContentOffset:CGPointMake(0,offset) animated:NO];});}
     }];
 }
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {return self.items.count;}

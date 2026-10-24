@@ -10,4 +10,5 @@
 @property(nonatomic, copy) void (^onToggleProfile)(NSString *source, BOOL enabled);
 @property(nonatomic, copy) void (^onEditProfile)(NSString *source);
 @property(nonatomic, copy) void (^onDeleteProfile)(NSString *source);
+@property(nonatomic, copy) void (^onOpenResource)(NSString *source);
 @end

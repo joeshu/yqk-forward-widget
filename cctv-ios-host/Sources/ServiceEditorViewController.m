@@ -67,6 +67,7 @@
 @interface ServiceEditorViewController () <UIDocumentPickerDelegate>
 @property(nonatomic, strong) UITextField *nameField;
 @property(nonatomic, strong) UITextField *portField;
+@property(nonatomic, strong) UITextField *playlistPathField;
 @property(nonatomic, strong) UITextField *urlField;
 @property(nonatomic, strong) UITextField *argsField;
 @property(nonatomic, strong) UISwitch *lanSwitch;
@@ -102,6 +103,7 @@
     self.nameField = [self field:@"服务名称" value:self.service[@"name"]];
     self.portField = [self field:@"端口 1024–65535" value:[self.service[@"port"] description] ?: @"18768"];
     self.portField.keyboardType = UIKeyboardTypeNumberPad;
+    self.playlistPathField=[self field:@"可选，如 /all.m3u" value:self.service[@"playlistPath"]];self.playlistPathField.autocapitalizationType=UITextAutocapitalizationTypeNone;
     self.urlField = [self field:@"https://…/service.py" value:self.service[@"url"]];
     self.urlField.keyboardType = UIKeyboardTypeURL;
     [self.urlField addTarget:self action:@selector(urlChanged) forControlEvents:UIControlEventEditingChanged];
@@ -142,7 +144,7 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return section == 0   ? 2
            : section == 1 ? ([self managedCode] ? 1 : 3)
-           : section == 2 ? ([self.service[@"manifest"] isKindOfClass:NSDictionary.class]?2:([self managedCode]?1:2))
+           : section == 2 ? ([self.service[@"builtin"] boolValue] ? 1 : 3)
                           : 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
@@ -152,7 +154,7 @@
     if (section == 1)
         return @"导入后可查看、编辑或导出代码。内置服务代码只读。";
     if (section == 2)
-        return @"自定义脚本的参数用 | 分隔，支持 {port}、{bind}、{dataDir}。服务可按 ID 分别启停；"
+        return @"自定义脚本的参数用 | 分隔，支持 {port}、{bind}、{dataDir}。直播列表路径可留空自动识别；手动填写时只接受本机绝对路径，例如 /all.m3u。服务可按 ID 分别启停；"
                @"并行运行时每个 HTTP 服务必须使用不同端口。";
     return nil;
 }
@@ -197,9 +199,10 @@
                 c.textLabel.text = @"网络绑定";
                 c.detailTextLabel.text = @"由脚本启动参数决定";
             }
-        } else if([self.service[@"manifest"] isKindOfClass:NSDictionary.class]){
+        } else if(ip.row == 1 && [self.service[@"manifest"] isKindOfClass:NSDictionary.class]){
             c.textLabel.text=@"插件参数";c.detailTextLabel.text=@"编辑账号、画质等 JSON 配置";c.accessoryType=UITableViewCellAccessoryDisclosureIndicator;c.selectionStyle=UITableViewCellSelectionStyleDefault;
-        }else input = self.argsField;
+        }else if(ip.row==1)input=self.argsField;
+        else{c.textLabel.text=@"直播列表路径";input=self.playlistPathField;}
     } else {
         c.textLabel.text = @"保存服务";
         c.textLabel.textColor = HostAccent();
@@ -357,6 +360,8 @@
     service[@"lan"] = @(self.lanSwitch.on);
     service[@"arguments"] = self.argsField.text ?: @"";
     service[@"url"] = self.urlField.text ?: @"";
+    NSString *playlistPath=[self.playlistPathField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(playlistPath.length){if(![playlistPath hasPrefix:@"/"]||[playlistPath hasPrefix:@"//"]||playlistPath.length>=128||[playlistPath containsString:@".."]||[playlistPath containsString:@"?"]||[playlistPath containsString:@"#"]||[playlistPath containsString:@"\\"]||[playlistPath containsString:@":"]||[playlistPath rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[self message:@"直播列表路径须以单个 / 开头，且不能包含 ..、查询参数、片段或控制字符。例：/all.m3u"];return;}service[@"playlistPath"]=playlistPath;}else[service removeObjectForKey:@"playlistPath"];
     service[@"updated"] = @(NSDate.date.timeIntervalSince1970);
     if([service[@"manifest"] isKindOfClass:NSDictionary.class] && self.optionsText){
         NSError *jsonError=nil;id options=[NSJSONSerialization JSONObjectWithData:[self.optionsText dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingFragmentsAllowed error:&jsonError];
