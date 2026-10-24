@@ -647,6 +647,7 @@ static void next(NSArray *steps, NSUInteger index) {
             if(catalog)[TVBoxCatalogStore removeCatalog:catalog[@"id"]];[nav popViewControllerAnimated:NO];
           }},
           ^{
+            [nav popToRootViewControllerAnimated:NO];
             [root selectBottomTab:(id)tabs.arrangedSubviews[4]];
             [root.view layoutIfNeeded];
             SettingsViewController *settings=(id)[root valueForKey:@"tabPage"];
@@ -654,6 +655,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [settingsTable layoutIfNeeded];
             UITableViewCell *themeCell=[settingsTable cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             UISegmentedControl *theme=(id)themeCell.accessoryView;
+            check(settings.view.window==self.window, @"settings selector is attached to the visible app window");
             check(theme!=nil&&[theme.accessibilityIdentifier isEqualToString:HostDarkThemePreferenceKey], @"settings exposes the persisted global theme selector");
             if(theme){
                 theme.selectedSegmentIndex=1;
