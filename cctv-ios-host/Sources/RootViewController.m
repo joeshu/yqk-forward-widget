@@ -34,6 +34,7 @@
 #import "NativeTimeshiftSession.h"
 #import "PlaybackInfoViewController.h"
 #import "LogCenterViewController.h"
+#import "RuntimeDiagnostics.h"
 #import "PluginLogStore.h"
 #import "CNPlayerCrashGuard.h"
 #import "ResourceImportSheetViewController.h"
@@ -312,6 +313,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self registerCallbackProtocol];
     [self setupSDK];
     [self log:@"日志持久化已启用（每秒批量保存）"];
+    [RuntimeDiagnostics.shared recordEvent:@"app_started" category:@"lifecycle" fields:@{@"app_version":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"unknown", @"app_build":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"]?:@"unknown", @"ios_version":UIDevice.currentDevice.systemVersion?:@"unknown"}];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
@@ -332,6 +334,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)onBackground {
+    [RuntimeDiagnostics.shared recordEvent:@"entered_background" category:@"lifecycle" fields:nil];
     [self.nativePreloader cancel];
     [[HostImageLoader shared] cancelPending];
     [self stopPreview];
@@ -348,6 +351,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)onForeground {
+    [RuntimeDiagnostics.shared recordEvent:@"entered_foreground" category:@"lifecycle" fields:nil];
     BOOL playbackPriority=CACurrentMediaTime()<self.playbackPriorityUntil;
     [[XMLTVStore shared] setPaused:playbackPriority];
     [self call:self.currentPlayer sel:@"becomeActive"];
@@ -802,6 +806,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.currentRemoteURL=url;self.channelName=name;self.channelID=nil;
     NSString *sourceURL=[self stableURLKey:result[@"originalURL"]?:result[@"url"]];NSString *extension=[NSURL URLWithString:sourceURL].pathExtension.lowercaseString;
     BOOL directMedia=[[NSSet setWithArray:@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3"]] containsObject:(extension?:@"")];
+    [RuntimeDiagnostics.shared recordEvent:@"media_playback_handoff" category:@"playback" fields:@{@"player":([result[@"parse"] integerValue]>0&&!directMedia)?@"webview":@"avplayer", @"parsed":@([result[@"parse"] integerValue]>0)}];
     if([result[@"parse"] integerValue]>0 && !directMedia){MediaWebViewController *page=[[MediaWebViewController alloc] initWithResult:result title:name];UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:page];UIViewController *presenter=self.navigationController.topViewController?:self;[presenter presentViewController:navigation animated:YES completion:nil];return;}
     AVURLAsset *asset=[AVURLAsset URLAssetWithURL:[NSURL URLWithString:url] options:nil];AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];
     AVMutableMetadataItem *title=[AVMutableMetadataItem metadataItem];title.identifier=AVMetadataCommonIdentifierTitle;title.value=name?:@"影视";title.extendedLanguageTag=@"und";item.externalMetadata=@[title];
@@ -900,6 +905,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     }
     // Coalesce rapid taps without the previous fixed 80 ms delay.
     NSTimeInterval selectedAt=CACurrentMediaTime();NSUInteger selection=++self.selectionVersion;self.playbackIntentVersion++;[self.playbackReadiness cancel];[self stopPreview];
+    BOOL remote=[ch[@"remoteURL"] length]||[ProfileStore isHTTP:ch[@"id"]];
+    [RuntimeDiagnostics.shared recordEvent:@"channel_selected" category:@"playback" fields:@{@"input_type":remote?@"subscription":@"cctv", @"selection_generation":@(selection)}];
     self.playerTabs.selectedSegmentIndex=1;[self selectPlayerPanel];self.playerExpanded=YES;
     dispatch_async(dispatch_get_main_queue(),^{
         if(selection!=self.selectionVersion)return;
@@ -1199,6 +1206,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)playViaSDKURL:(NSString *)url channelID:(NSString *)cid title:(NSString *)title {
     [CNPlayerCrashGuard install];
     if(!url.length||!cid.length){[self displayNativePlaybackFailure:@"所选线路参数缺失" error:nil];return;}
+    [RuntimeDiagnostics.shared recordEvent:@"native_playback_start_requested" category:@"playback" fields:@{@"route_type":@"user_selected", @"playback_generation":@(self.playbackGeneration)}];
     [self beginPlaybackPriority];
     self.nativeRetryPending=NO;self.nativePlaybackFailed=NO;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
     self.titleLabel.text=[NSString stringWithFormat:@"%@ · 连接中",title?:cid];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;self.infoLabel.text=@"所选地址交给央视 SDK 播放";[self.spinner startAnimating];
@@ -1232,6 +1240,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     // Some SDK builds load their IJK core lazily; install the guard again
     // before prepareToPlay can enter its asynchronous decoder/error path.
     [CNPlayerCrashGuard install];
+    [RuntimeDiagnostics.shared recordEvent:@"native_playback_start_requested" category:@"playback" fields:@{@"route_type":@"sdk_auto", @"playback_generation":@(self.playbackGeneration)}];
     if([ProfileStore isHTTP:cid]){[self playRemote:@{@"id":cid,@"name":title?:cid,@"remoteURL":cid}];return;}
     [self beginPlaybackPriority];
     self.nativeRetryPending=NO;self.nativePlaybackFailed=NO;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 连接中",title?:cid];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;self.infoLabel.text=@"";[self.spinner startAnimating];
@@ -1521,8 +1530,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     SettingsViewController *page=[SettingsViewController new];
     __weak typeof(self) weakSelf=self;
     page.onExportData=^{[weakSelf exportLocalConfiguration];};page.onImportData=^{[weakSelf importLocalConfiguration];};page.onOpenLog=^{[weakSelf openDiagnosticLog];};
+    page.onExportDebugLog=^{[RuntimeDiagnostics.shared prepareExportWithCompletion:^(NSURL *url,NSError *error){if(!url){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"运行诊断" message:error.localizedDescription?:@"导出诊断日志失败" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[(weakSelf.navigationController.topViewController?:weakSelf) presentViewController:alert animated:YES completion:nil];return;}[weakSelf shareDiagnosticLogAtURL:url];}];};
     page.onClearEPG=^{ [[XMLTVStore shared] clear];[weakSelf.epgCache removeAllObjects]; [weakSelf saveEPGCache]; [weakSelf.table reloadData]; };
     page.onPreferenceChanged=^(NSString *key, BOOL value){
+        if ([key isEqualToString:@"runtimeDiagnosticsEnabled"]) [RuntimeDiagnostics.shared setEnabled:value];
         if ([key isEqualToString:@"nativeSDKVerboseLogs"]) [weakSelf configureSDKLogging];
         if ([key isEqualToString:@"preloadNativeChannel"] && !value) [weakSelf.nativePreloader cancel];
         if ([key isEqualToString:@"allowBackgroundAudio"]) [weakSelf activateAudioSession];
@@ -1749,14 +1760,17 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         [self refreshConfigurationPage];if(completion)completion(nil);return;
     }
     if(enabled){
-        NSError *error=nil;[self startService:service error:&error];[self refreshConfigurationPage];if(completion)completion(error);return;
+        NSError *error=nil;BOOL started=[self startService:service error:&error];
+        [RuntimeDiagnostics.shared recordEvent:started?@"service_process_started":@"service_start_failed" category:@"service" fields:@{@"engine":service[@"engine"]?:@"python", @"port":service[@"port"]?:@0, @"error_domain":error.domain?:@"", @"error_code":@(error.code)}];
+        [self refreshConfigurationPage];if(completion)completion(error);return;
     }
     [self.serviceOperations addObject:serviceID];
+    [RuntimeDiagnostics.shared recordEvent:@"service_stop_requested" category:@"service" fields:@{@"engine":service[@"engine"]?:@"python", @"port":service[@"port"]?:@0}];
     [self log:@"正在停止服务 %@",service[@"name"]];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
         NSError *stopError=nil;BOOL stopped=[PyHost stopServiceIdentifier:serviceID error:&stopError];
         dispatch_async(dispatch_get_main_queue(),^{
-            [self.serviceOperations removeObject:serviceID];if(!stopped){if(completion)completion(stopError);[self refreshConfigurationPage];return;}
+            [self.serviceOperations removeObject:serviceID];[RuntimeDiagnostics.shared recordEvent:stopped?@"service_stopped":@"service_stop_failed" category:@"service" fields:@{@"error_domain":stopError.domain?:@"", @"error_code":@(stopError.code)}];if(!stopped){if(completion)completion(stopError);[self refreshConfigurationPage];return;}
             [self completeServiceStopForIdentifier:serviceID];[self refreshConfigurationPage];if(completion)completion(nil);
         });
     });
@@ -2099,10 +2113,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)fetchSubscription:(NSString *)urlString silent:(BOOL)silent {
     NSString *sourceKey=[ProfileStore isHTTP:urlString]?[self stableURLKey:urlString]:([ProfileStore isSource:urlString]?urlString:nil);
     if (!sourceKey.length) return;
+    BOOL isHTTPSource=[ProfileStore isHTTP:sourceKey];
     if(silent && CACurrentMediaTime()<self.playbackPriorityUntil){[self.deferredLocalSubscriptions addObject:sourceKey];[ProfileStore update:sourceKey values:@{@"status":@"起播中，稍后自动刷新"}];return;}
     // Exact normalized source URLs, including query parameters, are independent
     // request identities. A repeat of the same URL joins the work already in flight.
-    if(self.subscriptionTasks[sourceKey]){[ProfileStore update:sourceKey values:@{@"status":@"刷新已合并 · 当前请求仍在进行"}];[self refreshConfigurationPage];return;}
+    if(self.subscriptionTasks[sourceKey]){[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_joined_existing" category:@"subscription" fields:@{@"source_type":isHTTPSource?@"http":@"imported_text"}];[ProfileStore update:sourceKey values:@{@"status":@"刷新已合并 · 当前请求仍在进行"}];[self refreshConfigurationPage];return;}
     [ProfileStore update:sourceKey values:@{@"status":@"刷新中…"}];[self refreshConfigurationPage];
     if(![ProfileStore isHTTP:sourceKey]){NSString *text=[ProfileStore metadata:sourceKey][@"text"];[self applyPlaylistText:text source:sourceKey];return;}
     NSURL *sourceURL=[NSURL URLWithString:sourceKey];NSDictionary *localService=[self localServiceForURL:sourceURL];
@@ -2119,7 +2134,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             [probe start:^(NSError *error,NSTimeInterval elapsed){
                 if(w.subscriptionReadiness[sourceKey]!=probe)return;[w.subscriptionReadiness removeObjectForKey:sourceKey];
                 if([w.subscriptionRequestVersions[sourceKey] unsignedIntegerValue]!=readinessVersion||![w.subscriptionURLs containsObject:sourceKey])return;
-                if(error){[ProfileStore update:sourceKey values:@{@"status":error.localizedDescription?:@"服务未就绪"}];[w refreshConfigurationPage];[w log:@"本机订阅等待服务失败 %@",error.localizedDescription];return;}
+                if(error){[RuntimeDiagnostics.shared recordEvent:@"local_service_health_failed" category:@"service" fields:@{@"engine":localService[@"engine"]?:@"python", @"port":localService[@"port"]?:@0, @"elapsed_ms":@((NSInteger)(elapsed*1000)), @"error_domain":error.domain?:@"", @"error_code":@(error.code)}];[ProfileStore update:sourceKey values:@{@"status":error.localizedDescription?:@"服务未就绪"}];[w refreshConfigurationPage];[w log:@"本机订阅等待服务失败 %@",error.localizedDescription];return;}
+                [RuntimeDiagnostics.shared recordEvent:@"local_service_health_ready" category:@"service" fields:@{@"engine":localService[@"engine"]?:@"python", @"port":localService[@"port"]?:@0, @"elapsed_ms":@((NSInteger)(elapsed*1000))}];
                 w.readyLocalOrigins[origin]=@(CACurrentMediaTime());[w.deferredLocalSubscriptions removeObject:sourceKey];[w fetchSubscription:sourceKey silent:silent];
             }];return;
         }
@@ -2131,7 +2147,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     req.timeoutInterval = 12;
     req.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
-    __weak typeof(self) weakSelf = self;
+    __weak typeof(self) weakSelf = self;NSTimeInterval requestStartedAt=CACurrentMediaTime();
+    [RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_started" category:@"subscription" fields:@{@"source_type":isHTTPSource?@"http":@"imported_text", @"trigger":silent?@"automatic":@"user"}];
     NSURLSessionDataTask *subscriptionTask=[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
         NSInteger status=[resp isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)resp statusCode]:0;
         if(status<200||status>=300||data.length>10*1024*1024)data=nil;
@@ -2141,10 +2158,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             if ([weakSelf.subscriptionRequestVersions[sourceKey] unsignedIntegerValue] != requestVersion) return;
             [weakSelf.subscriptionTasks removeObjectForKey:sourceKey];
             if (!list.count) {
+                [RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":isHTTPSource?@"http":@"imported_text", @"trigger":silent?@"automatic":@"user", @"http_status":@(status), @"elapsed_ms":@((NSInteger)((CACurrentMediaTime()-requestStartedAt)*1000)), @"error_domain":err.domain?:@"", @"error_code":@(err.code), @"bytes":@(data.length)}];
                 [ProfileStore update:sourceKey values:@{@"status":err.localizedDescription?:[NSString stringWithFormat:@"HTTP %ld / 无有效 M3U，保留上次频道",(long)status]}];[weakSelf refreshConfigurationPage];
                 [weakSelf log:@"订阅失败 %@ %@", urlString, err.localizedDescription ?: @"无有效条目"];
                 return;
             }
+            [RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_succeeded" category:@"subscription" fields:@{@"source_type":isHTTPSource?@"http":@"imported_text", @"trigger":silent?@"automatic":@"user", @"http_status":@(status), @"elapsed_ms":@((NSInteger)((CACurrentMediaTime()-requestStartedAt)*1000)), @"channel_count":@(list.count), @"bytes":@(data.length)}];
             NSString *detected=[M3UParser epgURL:text baseURL:url];if(detected.length)[ProfileStore update:sourceKey values:@{@"detectedEPGURL":detected}];
             [weakSelf installPlaylist:list source:sourceKey];
         });
@@ -2214,7 +2233,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             [self log:@"订阅 %@ 新增 %lu 个频道（共 %lu）", sourceKey, (unsigned long)added, (unsigned long)list.count];
 }
 - (void)applyPlaylistText:(NSString *)text source:(NSString *)sourceKey {
-    NSArray *list=[M3UParser parse:text baseURL:nil];if(!list.count){[ProfileStore update:sourceKey values:@{@"status":@"无有效 HTTP/HTTPS 频道，保留上次频道"}];[self refreshConfigurationPage];return;}
+    NSArray *list=[M3UParser parse:text baseURL:nil];if(!list.count){[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"imported_text", @"channel_count":@0}];[ProfileStore update:sourceKey values:@{@"status":@"无有效 HTTP/HTTPS 频道，保留上次频道"}];[self refreshConfigurationPage];return;}
+    [RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_succeeded" category:@"subscription" fields:@{@"source_type":@"imported_text", @"channel_count":@(list.count)}];
     NSString *detected=[M3UParser epgURL:text baseURL:nil];if(detected.length)[ProfileStore update:sourceKey values:@{@"detectedEPGURL":detected}];[self installPlaylist:list source:sourceKey];
 }
 
@@ -2231,6 +2251,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.nativePlainRouteActive=[ch[@"nativePlainRoute"] boolValue];
     NSInteger playbackTab=self.nativePlainRouteActive?0:1;if(self.activeTab!=playbackTab)[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[playbackTab]];
     self.playbackGeneration += 1;self.selectionVersion++;NSUInteger generation=self.playbackGeneration;self.remotePlaybackFailed=NO;self.nativePlaybackFailed=NO;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
+    [RuntimeDiagnostics.shared recordEvent:@"remote_playback_start_requested" category:@"playback" fields:@{@"route_type":self.nativePlainRouteActive?@"user_selected":@"subscription", @"playback_generation":@(generation)}];
     NSTimeInterval requestedAt=self.selectionRequestedAt?:CACurrentMediaTime();self.selectionRequestedAt=0;
     [self stopPlayback];self.remoteFailureRecoveryPending=NO;self.playerExpanded=YES;[self.view setNeedsLayout];
     self.currentRemoteURL=u;self.channelID=ch[@"id"]?:u;self.channelName=ch[@"name"]?:u;self.routeName=self.nativePlainRouteActive?[NSString stringWithFormat:@"%@ · AVPlayer 明文线路",self.requestedNativeRoute[@"provider"]?:@"自选"]:@"订阅";
@@ -2282,6 +2303,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self recordStartupStage:@"prepareCall"];[self.avPlayer play];__weak typeof(self) w=self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(), ^{
         if(generation!=w.playbackGeneration||item!=w.avPlayer.currentItem||w.firstRender)return;
+        [RuntimeDiagnostics.shared recordEvent:@"playback_first_frame_timeout" category:@"playback" fields:@{@"player":@"AVPlayer", @"timeout_seconds":@12, @"playback_generation":@(generation)}];
         [w.spinner stopAnimating];w.remotePlaybackFailed=YES;w.titleLabel.hidden=NO;w.titleLabel.text=[NSString stringWithFormat:@"%@ · 等待视频首帧",w.channelName];w.infoLabel.hidden=NO;w.infoLabel.text=@"仍可等待，或点按“重试”重新连接";[w.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];w.playPauseBtn.enabled=YES;[w log:@"订阅 12 秒未渲染首帧（并非播放器就绪时间）"];
     });
 }
@@ -2296,6 +2318,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
 - (void)recoverRemoteFailureForItem:(AVPlayerItem *)item error:(NSError *)error {
     if(!item || item!=self.avPlayer.currentItem || !self.remotePlaybackWanted || self.remoteFailureRecoveryPending)return;
+    [RuntimeDiagnostics.shared recordEvent:@"playback_failed" category:@"playback" fields:@{@"player":@"AVPlayer", @"stage":@"item_failure", @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"retry_count":@(self.remoteRetryCount)}];
     self.remoteFailureRecoveryPending=YES;
     [self.readyLocalOrigins removeObjectForKey:[self originForURL:[NSURL URLWithString:self.currentRemoteURL]]];
     [self endPlaybackPriority];[self.spinner stopAnimating];
@@ -2348,6 +2371,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         NSURL *playingURL=[NSURL URLWithString:self.currentRemoteURL];NSDictionary *service=[self localServiceForURL:playingURL];
         if(service && [PyHost isRunningServiceIdentifier:service[@"id"]])self.readyLocalOrigins[[self originForURL:playingURL]]=@(CACurrentMediaTime());
         self.firstRender=YES;self.remotePlaybackFailed=NO;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;[self endPlaybackPriority];self.firstFrameSeconds=CACurrentMediaTime()-self.playStartedAt;[self recordStartupStage:@"frame"];
+        [RuntimeDiagnostics.shared recordEvent:@"playback_first_frame" category:@"playback" fields:@{@"player":@"AVPlayer", @"elapsed_ms":@((NSInteger)(self.firstFrameSeconds*1000)), @"playback_generation":@(self.playbackGeneration)}];
         [self.spinner stopAnimating];self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;[self loadPlayerChannelLogoAfterFirstFrame];[self updateNowPlaying];[self refreshNowNext];[self restartEPGTimer];
         [self log:@"订阅视频首帧 %.2fs · %@",self.firstFrameSeconds,self.startupTrace.summary];return;
     }
@@ -2578,6 +2602,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         self.infoLabel.hidden = YES;
         [self loadPlayerChannelLogoAfterFirstFrame];
         [self recordStartupStage:@"frame"];
+        [RuntimeDiagnostics.shared recordEvent:@"playback_first_frame" category:@"playback" fields:@{@"player":@"CNPlayerSDK", @"elapsed_ms":@((NSInteger)(self.firstFrameSeconds*1000)), @"playback_generation":@(self.playbackGeneration)}];
         if(self.nativeTransitionKind.length){[self log:@"原生%@首帧 %.2fs · %@",self.nativeTransitionKind,self.firstFrameSeconds,self.startupTrace.summary];self.nativeTransitionKind=nil;}
         else [self log:@"首帧渲染 %.2fs · %@", self.firstFrameSeconds,self.startupTrace.summary];
         [self log:@"SDK 报告节点 %@ · 请求线路 %@",[NativeCDNPreference observedCDNDescriptionForPlayer:self.currentPlayer],self.routeName?:@"自动"];
@@ -2645,6 +2670,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)displayNativePlaybackFailure:(NSString *)stage error:(NSError *)error {
+    NSString *player=self.avPlayer?@"AVPlayer":(self.cicadaPlayer?@"CicadaPlayer":@"CNPlayerSDK");
+    [RuntimeDiagnostics.shared recordEvent:@"playback_failed" category:@"playback" fields:@{@"player":player, @"stage":stage?:@"unknown", @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"playback_generation":@(self.playbackGeneration)}];
     self.nativePlaybackFailed=YES;self.nativeRetryPending=NO;[self.watchdog invalidate];self.watchdog=nil;[self.nativeStartupTuner restore];[self endPlaybackPriority];[self.spinner stopAnimating];
     NSString *channel=self.channelName.length?self.channelName:@"频道";
     self.titleLabel.text=error.code?[NSString stringWithFormat:@"%@ · %@ (%ld)",channel,stage,(long)error.code]:[NSString stringWithFormat:@"%@ · %@",channel,stage];

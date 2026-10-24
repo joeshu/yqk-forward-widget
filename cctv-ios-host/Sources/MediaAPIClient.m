@@ -1,4 +1,6 @@
 #import "MediaAPIClient.h"
+#import "RuntimeDiagnostics.h"
+#import <QuartzCore/QuartzCore.h>
 @interface MediaAPIClient ()
 @property(nonatomic, strong) NSURLSession *session;
 @property(nonatomic, strong) NSURLSessionDataTask *task;
@@ -12,7 +14,7 @@
 - (void)cancel { self.generation++;[self.task cancel];self.task=nil; }
 - (void)dealloc { [self.task cancel];[self.session invalidateAndCancel]; }
 - (void)call:(NSString *)operation arguments:(NSDictionary *)arguments completion:(void (^)(id,NSError *))completion {
-    NSAssert(NSThread.isMainThread,@"Media client UI operations run on main thread");[self cancel];NSUInteger generation=self.generation;
+    NSAssert(NSThread.isMainThread,@"Media client UI operations run on main thread");[self cancel];NSUInteger generation=self.generation;NSTimeInterval startedAt=CACurrentMediaTime();
     NSURL *url=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/api/v1/%@",(long)self.port,operation]];
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url];request.HTTPMethod=@"POST";request.HTTPBody=[NSJSONSerialization dataWithJSONObject:arguments?:@{} options:0 error:NULL];[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     __weak typeof(self) weakSelf=self;
@@ -24,6 +26,11 @@
             failure=[NSError errorWithDomain:@"CCTVHostMedia" code:2 userInfo:@{NSLocalizedDescriptionKey:message?:@"资源未返回有效结果，请查看插件日志"}];
         }
         id result=[reply isKindOfClass:NSDictionary.class]?reply[@"data"]:nil;
+        if(![failure.domain isEqualToString:NSURLErrorDomain]||failure.code!=NSURLErrorCancelled){
+            NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
+            NSMutableDictionary *fields=[@{@"operation":operation?:@"unknown", @"elapsed_ms":@((NSInteger)((CACurrentMediaTime()-startedAt)*1000)), @"http_status":@(status), @"response_bytes":@(data.length), @"result_type":result?NSStringFromClass([result class]):@"none", @"error_domain":failure.domain?:@"", @"error_code":@(failure.code)} mutableCopy];
+            [RuntimeDiagnostics.shared recordEvent:failure?@"media_api_failed":@"media_api_succeeded" category:@"media_api" fields:fields];
+        }
         dispatch_async(dispatch_get_main_queue(),^{MediaAPIClient *client=weakSelf;if(!client || client.generation!=generation)return;client.task=nil;if(completion)completion(result==NSNull.null?nil:result,failure);});
     }];[self.task resume];
 }

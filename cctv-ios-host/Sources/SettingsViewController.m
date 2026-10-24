@@ -26,6 +26,10 @@
         @{ @"title":@"M3U / HLS 订阅", @"detail":@"AVPlayer · iOS 系统解码", @"icon":@"play.rectangle" },
         @{ @"title":@"内置插件", @"detail":@"Python / JavaScriptCore · 本机运行", @"icon":@"curlybraces" }
       ]},
+      @{ @"title":@"运行诊断", @"footer":@"开启后记录应用生命周期、服务启停、订阅刷新、媒体接口与播放状态，最多保留约 1 MB。日志默认脱敏，不记录播放地址、查询参数、Cookie 或脚本内容。关闭后停止新增诊断记录，已有记录仍可导出。", @"rows":@[
+        @{ @"title":@"运行诊断模式", @"detail":@"问题复现前开启", @"key":@"runtimeDiagnosticsEnabled", @"icon":@"waveform.path.ecg", @"default":@NO },
+        @{ @"title":@"导出运行诊断日志", @"detail":@"JSONL · 可分享给开发者定位问题", @"action":@"exportRuntimeDiagnostics", @"icon":@"square.and.arrow.up" }
+      ]},
       @{ @"title":@"数据与关于", @"footer":@"iOS 可能在应用退到后台时挂起本地插件服务。", @"rows":@[
         @{ @"title":@"导出本机配置", @"action":@"export", @"icon":@"square.and.arrow.up" },
         @{ @"title":@"导入配置文件", @"action":@"import", @"icon":@"square.and.arrow.down" },
@@ -62,6 +66,7 @@
     if([row[@"action"] isEqualToString:@"clearEPG"]) [self confirmClearEPG];
     else if([row[@"action"] isEqualToString:@"clearImages"]){[HostImageLoader.shared clearCache];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"台标缓存已清理");UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];cell.detailTextLabel.text=@"已清理，下次加载时重新获取";}
     else if([row[@"action"] isEqualToString:@"export"]){if(self.onExportData)self.onExportData();}
+    else if([row[@"action"] isEqualToString:@"exportRuntimeDiagnostics"]){if(self.onExportDebugLog)self.onExportDebugLog();}
     else if([row[@"action"] isEqualToString:@"import"]){if(self.onImportData)self.onImportData();}
     else if([row[@"action"] isEqualToString:@"logs"]){if(self.onOpenLog)self.onOpenLog();}
 }
