@@ -568,7 +568,7 @@ static void next(NSArray *steps, NSUInteger index) {
             NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
             mediaPage.sourcesProvider=^NSArray *{return @[@{@"id":@"media-ui",@"name":@"本机影视测试",@"port":@(port)}];};
             mediaPage.onActivateService=^(NSDictionary *service,void (^done)(NSError *)){done(nil);};
-            mediaPage.onPlay=^(NSDictionary *result,NSString *title){[root playMediaResult:result name:title];};
+            mediaPage.onPlay=^(NSDictionary *result,NSDictionary *context){NSString *title=[context[@"detail"][@"name"] isKindOfClass:NSString.class]?context[@"detail"][@"name"]:([context[@"item"][@"name"] isKindOfClass:NSString.class]?context[@"item"][@"name"]:@"影视");[root playMediaResult:result name:title];};
             [nav pushViewController:mediaPage animated:NO];
           }},
           @{@"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]>0;},@"run":^{
