@@ -659,7 +659,8 @@ static void next(NSArray *steps, NSUInteger index) {
                 theme.selectedSegmentIndex=1;
                 [theme sendActionsForControlEvents:UIControlEventValueChanged];
             }
-            check(self.window.overrideUserInterfaceStyle==UIUserInterfaceStyleLight&&!HostIsDarkThemeSelected(), @"selecting white theme updates and persists the window appearance");
+            check(!HostIsDarkThemeSelected(), @"white theme selection persists in user preferences");
+            check(self.window.overrideUserInterfaceStyle==UIUserInterfaceStyleLight, @"white theme selection changes the app window style");
             UIColor *lightBackground=[HostBackground() resolvedColorWithTraitCollection:self.window.traitCollection];
             CGFloat lr=0,lg=0,lb=0,la=0;[lightBackground getRed:&lr green:&lg blue:&lb alpha:&la];
             check(lr>0.8&&lg>0.8&&lb>0.8, @"white theme resolves a light global page background");

@@ -17,6 +17,7 @@ class GlobalThemeContracts(unittest.TestCase):
         self.assertIn("UIUserInterfaceStyleLight", theme)
         self.assertIn('initWithItems:@[@"黑色",@"白色"]', settings)
         self.assertIn("setBool:dark forKey:HostDarkThemePreferenceKey", settings)
+        self.assertIn("window.overrideUserInterfaceStyle=dark?UIUserInterfaceStyleDark:UIUserInterfaceStyleLight", settings)
         self.assertIn("HostSelectedInterfaceStyle()", app)
         self.assertIn("window.overrideUserInterfaceStyle=value?UIUserInterfaceStyleDark:UIUserInterfaceStyleLight", root)
 

@@ -76,6 +76,8 @@
 }
 - (void)appearanceChanged:(UISegmentedControl *)sender {
     BOOL dark=sender.selectedSegmentIndex==0;[NSUserDefaults.standardUserDefaults setBool:dark forKey:HostDarkThemePreferenceKey];
+    UIWindow *window=self.view.window;
+    if(window){window.overrideUserInterfaceStyle=dark?UIUserInterfaceStyleDark:UIUserInterfaceStyleLight;HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);});}
     if(self.onPreferenceChanged)self.onPreferenceChanged(HostDarkThemePreferenceKey,dark);
 }
 - (void)confirmClearEPG {
