@@ -8,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (class, nonatomic, readonly) BOOL running;
 @property (class, nonatomic, readonly) BOOL startedOnce;
 @property (class, nonatomic, readonly) NSInteger port;
+@property (class, nonatomic, readonly, nullable) NSError *startupError;
 
 /// stdout/stderr 回调（后台线程调用）
 + (void)setLogHandler:(nullable void (^)(NSString *line))handler;

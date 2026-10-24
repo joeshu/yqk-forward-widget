@@ -1,19 +1,33 @@
 #import "ServicesViewController.h"
 #import "HostTheme.h"
+#import "HostToolbar.h"
 #import "PyHost.h"
 #import "ServiceEditorViewController.h"
 #import "ServiceStore.h"
+static NSString *ServiceEngineName(NSDictionary *service){return [service[@"engine"] isEqual:@"node"]?@"Node.js Mobile":([service[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore":@"Python");}
+static NSString *ServiceProtocolName(NSDictionary *service){
+    NSString *protocol=service[@"protocol"]?:@"";
+    NSDictionary *names=@{@"catvod-spider":@"CatPaw JS Spider",@"catvod-js":@"CatVod / TVBox JS",@"drpy":@"drpy 规则",@"iptv-extractor":@"IPTV JS Extractor",@"catpaw-http":@"CatPaw Node 服务",@"cctvhost.media/1":@"CCTVHost JS API",@"python-spider":@"Python Spider",@"python-http":@"Python HTTP 服务"};
+    NSString *name=names[protocol]?: (protocol.length?protocol:@"未识别");
+    NSDictionary *manifest=[service[@"manifest"] isKindOfClass:NSDictionary.class]?service[@"manifest"]:@{};
+    NSString *moduleType=manifest[@"moduleType"];
+    if(moduleType.length)name=[name stringByAppendingFormat:@" · %@",[moduleType isEqual:@"esm"]?@"ESM":([moduleType isEqual:@"commonjs"]?@"CommonJS":@"脚本")];
+    return name;
+}
 @interface ServiceDetailViewController : UITableViewController
 @property(nonatomic, copy) NSDictionary *service;
 @property(nonatomic, copy) void (^onToggle)(NSDictionary *, BOOL);
-@property(nonatomic, copy) dispatch_block_t onLog;
+@property(nonatomic, copy) void (^onLog)(NSDictionary * _Nullable service);
 @property(nonatomic, copy) void (^onSubscribe)(NSString *);
+@property(nonatomic, copy) void (^onBrowseService)(NSDictionary *);
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, copy) NSString *health;
 @property(nonatomic, strong) NSURLSessionDataTask *probeTask;
 @property(nonatomic, assign) BOOL probing;
+@property(nonatomic, assign) BOOL displayedRunning;
 @end
 @implementation ServiceDetailViewController
+- (BOOL)opensMedia {NSArray *caps=self.service[@"capabilities"];return [ServiceStore isMediaService:self.service] && (![caps isKindOfClass:NSArray.class] || !caps.count || [caps containsObject:@"detail"] || [caps containsObject:@"play"]);}
 - (instancetype)init {
     return [super initWithStyle:UITableViewStyleInsetGrouped];
 }
@@ -22,11 +36,7 @@
     self.title = self.service[@"name"];
     self.tableView.backgroundColor = UIColor.blackColor;
     self.tableView.rowHeight = 56;
-    self.navigationItem.rightBarButtonItem =
-        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"]
-                                         style:UIBarButtonItemStylePlain
-                                        target:self
-                                        action:@selector(edit)];
+    __weak typeof(self) w=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[@{@"icon":@"pencil",@"title":@"编辑服务",@"action":[UIAction actionWithHandler:^(UIAction *a){[w edit];}]}])];
 }
 - (BOOL)running {
     return PyHost.running && [[ServiceStore activeIdentifier] isEqualToString:self.service[@"id"]];
@@ -41,11 +51,13 @@
             self.service = s;
     self.title = self.service[@"name"];
     [self.tableView reloadData];
+    self.displayedRunning=[self running];
     __weak typeof(self) w = self;
     self.timer = [NSTimer scheduledTimerWithTimeInterval:1
                                                  repeats:YES
                                                    block:^(NSTimer *t) {
-                                                     [w.tableView reloadData];
+                                                     BOOL running=[w running];
+                                                     if(running!=w.displayedRunning){w.displayedRunning=running;[w.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];}
                                                    }];
 }
 - (void)viewDidDisappear:(BOOL)animated {
@@ -65,16 +77,16 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return section == 0   ? 2
            : section == 1 ? 3
-           : section == 2 ? 5
+           : section == 2 ? 6
            : section == 3 ? 4
                           : ([self.service[@"builtin"] boolValue] ? 0 : 1);
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return @[ @"Python · 服务状态", @"本机访问", @"服务信息", @"操作", @"" ][section];
+    return @[ [NSString stringWithFormat:@"%@ · 服务状态",ServiceEngineName(self.service)], @"本机访问", @"服务信息", @"操作", @"" ][section];
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0)
-        return @"本机一次运行一个服务。停止后需重新打开 App 再启动。";
+        return @"本机一次运行一个服务。切换时自动停止旧服务；须等待后台线程和端口释放。";
     return nil;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -107,22 +119,24 @@
         if (ip.row > 0)
             c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (ip.section == 2) {
-        c.textLabel.text = @[ @"服务类型", @"代码来源", @"文件名称", @"上次更新", @"源地址" ][ip.row];
+        c.textLabel.text = @[ @"运行引擎", @"资源协议识别", @"代码来源", @"入口文件", @"上次更新", @"源地址" ][ip.row];
         NSDate *updated = [NSDate dateWithTimeIntervalSince1970:[self.service[@"updated"] doubleValue]];
         NSDateFormatter *fmt = [NSDateFormatter new];
         fmt.dateFormat = @"yyyy-MM-dd HH:mm";
         NSArray *values = @[
-            @"Python",
+            ServiceEngineName(self.service),
+            ServiceProtocolName(self.service),
             [self.service[@"builtin"] boolValue]
                 ? @"内置"
                 : ([self.service[@"url"] length] ? @"远程链接" : @"本地文件 / 代码"),
-            [ServiceStore scriptPath:self.service].lastPathComponent ?: @"—",
+            [ServiceStore codePath:self.service].lastPathComponent ?: @"—",
             [self.service[@"updated"] doubleValue] > 0 ? [fmt stringFromDate:updated] : @"随应用更新",
             self.service[@"url"] ?: @"随应用提供"
         ];
         c.detailTextLabel.text = values[ip.row];
     } else if (ip.section == 3) {
         c.textLabel.text = @[ @"查看日志", @"编辑服务", @"查看 / 导出代码", @"添加到直播订阅" ][ip.row];
+        if(ip.row==3 && [self opensMedia])c.textLabel.text=@"打开影视";
         c.imageView.image = [UIImage systemImageNamed:@[
             @"doc.text", @"square.and.pencil", @"square.and.arrow.up", @"plus.rectangle.on.rectangle"
         ][ip.row]];
@@ -177,12 +191,12 @@
     else if (ip.section == 3) {
         if (ip.row == 0) {
             if (self.onLog)
-                self.onLog();
+                self.onLog(self.service);
         } else if (ip.row == 1)
             [self edit];
         else if (ip.row == 2) {
             UIAlertController *a =
-                [UIAlertController alertControllerWithTitle:@"Python 代码"
+                [UIAlertController alertControllerWithTitle:@"资源代码"
                                                     message:nil
                                              preferredStyle:UIAlertControllerStyleActionSheet];
             [a addAction:[UIAlertAction
@@ -190,7 +204,7 @@
                                        style:UIAlertActionStyleDefault
                                      handler:^(UIAlertAction *action) {
                                        ServiceCodeViewController *v = [ServiceCodeViewController new];
-                                       v.path = [ServiceStore scriptPath:self.service];
+                                       v.path = [ServiceStore codePath:self.service];
                                        v.readOnly = YES;
                                        [self.navigationController pushViewController:v animated:YES];
                                      }]];
@@ -200,7 +214,7 @@
                                      handler:^(UIAlertAction *action) {
                                        UIActivityViewController *v =
                                            [[UIActivityViewController alloc] initWithActivityItems:@[
-                                               [NSURL fileURLWithPath:[ServiceStore scriptPath:self.service]]
+                                               [NSURL fileURLWithPath:[self.service[@"archivePath"] length]?self.service[@"archivePath"]:[ServiceStore codePath:self.service]]
                                            ]
                                                                              applicationActivities:nil];
                                        v.popoverPresentationController.sourceView = self.view;
@@ -214,6 +228,7 @@
             a.popoverPresentationController.sourceRect = [tableView cellForRowAtIndexPath:ip].bounds;
             [self presentViewController:a animated:YES completion:nil];
         } else {
+            if([self opensMedia]){if(self.onBrowseService)self.onBrowseService(self.service);return;}
             NSString *u = [[self baseURL] stringByAppendingString:@"/all.m3u"];
             if (self.onSubscribe)
                 self.onSubscribe(u);
@@ -242,6 +257,8 @@
 @property(nonatomic, strong) NSArray<NSDictionary *> *services;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) UISearchController *search;
+@property(nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *sections;
+@property(nonatomic, copy) NSString *displayedRunningID;
 @end
 @implementation ServicesViewController
 - (void)viewDidLoad {
@@ -261,10 +278,9 @@
         [self.table.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
     ]];
-    self.navigationItem.rightBarButtonItem =
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd
-                                                      target:self
-                                                      action:@selector(add)];
+    __weak typeof(self) w=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
+        @{@"icon":@"plus",@"title":@"添加服务",@"action":[UIAction actionWithHandler:^(UIAction *a){[w add];}]},
+        @{@"icon":@"doc.text",@"title":@"总日志",@"action":[UIAction actionWithHandler:^(UIAction *a){if(w.onOpenLog)w.onOpenLog(nil);}]}])];
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.search.searchResultsUpdater = self;
     self.search.obscuresBackgroundDuringPresentation = NO;
@@ -293,18 +309,25 @@
 - (void)refresh {
     NSArray *all = [ServiceStore services];
     NSString *q = self.search.searchBar.text.lowercaseString;
-    self.services =
+    NSArray *filtered =
         q.length ? [all filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *s,
                                                                                           NSDictionary *b) {
                           return [[s[@"name"] lowercaseString] containsString:q];
                         }]]
                  : all;
+    NSString *runningID=PyHost.running?[ServiceStore activeIdentifier]:@"";
+    if([self.services isEqualToArray:filtered] && [self.displayedRunningID isEqualToString:runningID])return;
+    self.services=filtered;self.displayedRunningID=runningID;
+    NSMutableArray *running=[NSMutableArray array], *stopped=[NSMutableArray array];
+    for(NSDictionary *service in filtered){NSMutableArray *target=[service[@"id"] isEqualToString:runningID]?running:stopped;[target addObject:service];}
+    self.sections=@[running,stopped];
     [self.table reloadData];
 }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     [self refresh];
 }
 - (void)add {
+    if(self.onImportResource){UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"添加资源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];[sheet addAction:[UIAlertAction actionWithTitle:@"导入影视包 · JS / Python / ZIP" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.onImportResource();}]];[sheet addAction:[UIAlertAction actionWithTitle:@"添加 Python HTTP 服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){ServiceEditorViewController *editor=[ServiceEditorViewController new];[self.navigationController pushViewController:editor animated:YES];}]];[sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];sheet.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItems.firstObject;[self presentViewController:sheet animated:YES completion:nil];return;}
     ServiceEditorViewController *v = [ServiceEditorViewController new];
     [self.navigationController pushViewController:v animated:YES];
 }
@@ -312,11 +335,7 @@
     return 2;
 }
 - (NSArray *)rows:(NSInteger)section {
-    return [self.services
-        filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *s, NSDictionary *b) {
-          BOOL running = PyHost.running && [[ServiceStore activeIdentifier] isEqualToString:s[@"id"]];
-          return section == 0 ? running : !running;
-        }]];
+    return section<self.sections.count?self.sections[section]:@[];
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return [self rows:section].count;
@@ -334,7 +353,7 @@
     c.textLabel.textColor = UIColor.whiteColor;
     c.textLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     c.detailTextLabel.text =
-        [NSString stringWithFormat:@"Python · %@\nhttp://127.0.0.1:%@",
+        [NSString stringWithFormat:@"%@ · %@\nhttp://127.0.0.1:%@",ServiceEngineName(s),
                                    [s[@"builtin"] boolValue] ? @"内置服务" : @"本机脚本", s[@"port"]];
     c.detailTextLabel.numberOfLines = 2;
     c.detailTextLabel.font = [UIFont systemFontOfSize:11];
@@ -356,6 +375,7 @@
                 self.onToggleService(s, sender.on);
             break;
         }
+    self.displayedRunningID=nil; // Restore the switch while asynchronous start/stop completes.
     [self refresh];
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
@@ -365,6 +385,7 @@
     v.onToggle = self.onToggleService;
     v.onLog = self.onOpenLog;
     v.onSubscribe = self.onSubscribe;
+    v.onBrowseService=self.onBrowseService;
     [self.navigationController pushViewController:v animated:YES];
 }
 @end

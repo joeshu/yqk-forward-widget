@@ -3,16 +3,34 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+if [ -z "${PY_DISABLE:-}" ] && { [ ! -s GeneratedJS/yangshipin.bundle.js ] || [ ! -s GeneratedJS/js-runtime.bundle.js ] || [ ! -s GeneratedJS/node-fetch.bundle.cjs ]; }; then
+  npm ci --prefix JSPlugins --no-audit --no-fund
+  npm run build --prefix JSPlugins
+  npm test --prefix JSPlugins
+fi
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 echo "SDK: $SDK"
 xcrun --sdk iphoneos clang --version | head -2
 
-OUT=build
+OUT="${CCTV_OUT:-build}"
 APP="$OUT/CCTVHost.app"
 rm -rf "$OUT"
 mkdir -p "$APP"
 cp Resources/Info.plist "$APP/Info.plist"
 cp Resources/*.json "$APP/" 2>/dev/null || true
+if [ -n "${PY_DISABLE:-}" ]; then
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.example.cctvhost.nopy' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName CCTVHost 无PY' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Add :CCTVHostBuildVariant string no-python' "$APP/Info.plist"
+else
+  /usr/libexec/PlistBuddy -c 'Add :CCTVHostBuildVariant string full' "$APP/Info.plist"
+fi
+if [ -n "${CCTV_BASELINE:-}" ]; then
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.example.cctvhost.baseline09.nopy' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName CCTVHost 0.9对照' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 0.9.0' "$APP/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CCTVHostBuildVariant baseline09' "$APP/Info.plist"
+fi
 ICON_PARTIAL="$OUT/assetcatalog-info.plist"
 xcrun --sdk iphoneos actool --output-format human-readable-text --notices --warnings \
   --platform iphoneos --minimum-deployment-target 15.0 --target-device iphone --target-device ipad \
@@ -28,7 +46,14 @@ with open(base_path,'wb') as f: plistlib.dump(base,f,sort_keys=False)
 assert 'CFBundleIcons' in base and 'CFBundlePrimaryIcon' in base['CFBundleIcons']
 PY
 [ -s "$APP/Assets.car" ] || { echo "::error::AppIcon asset catalog did not produce Assets.car"; exit 1; }
-cp Plugins/ysp-live.py "$APP/ysp-live.py"
+if [ -z "${PY_DISABLE:-}" ]; then cp Plugins/ysp-live.py "$APP/ysp-live.py"; cp Scripts/host_service_runtime.py "$APP/host_service_runtime.py"; cp Plugins/yangshipin-js.py "$APP/yangshipin-js.py"; cp GeneratedJS/* "$APP/"; mkdir -p "$APP/JSPlugins"; cp -R JSPlugins/yangshipin JSPlugins/compat "$APP/JSPlugins/"; cp JSPlugins/package.json JSPlugins/package-lock.json JSPlugins/build.mjs "$APP/JSPlugins/"; fi
+if [ -z "${PY_DISABLE:-}" ]; then
+  cp Plugins/media-service.py Plugins/host_media_runtime.py Plugins/host_media_relay.py Plugins/node-plugin-host.cjs "$APP/"
+  cp -R Plugins/base "$APP/base"
+  cp -R JSPlugins/generic JSPlugins/drpy "$APP/JSPlugins/"
+  cp Resources/NodeMobile-LICENSE.txt "$APP/"
+  python3 Scripts/prepare_node_runtime.py "$APP"
+fi
 printf 'APPL????' > "$APP/PkgInfo"
 mkdir -p "$APP/Frameworks"
 
@@ -56,6 +81,8 @@ if [ -z "${PY_DISABLE:-}" ]; then
   mkdir -p "$APP/python/lib/python${PY_VER}" "$APP/python/ssl"
   cp -R "$STDLIB/" "$APP/python/lib/python${PY_VER}/"
   cp -R "$DEVICE_LIB/" "$APP/python/lib/python${PY_VER}/"
+  python3 -m pip install --disable-pip-version-check --no-compile --only-binary=:all: --platform any --implementation py --python-version 3.13 \
+    --target "$APP/python/lib/python${PY_VER}/site-packages" -r Scripts/media-python-requirements.txt
   rm -rf "$APP/python/lib/python${PY_VER}/test" "$APP/python/lib/python${PY_VER}/idlelib" \
          "$APP/python/lib/python${PY_VER}/tkinter" "$APP/python/lib/python${PY_VER}/ensurepip" \
          "$APP/python/lib/python${PY_VER}/turtledemo" "$APP/python/lib/python${PY_VER}/distutils"
@@ -94,7 +121,7 @@ clang -arch arm64 \
   -fobjc-arc \
   -I Sources/Include \
   -F Frameworks \
-  -framework Foundation -framework UIKit -framework CoreGraphics -framework CoreMedia -framework UniformTypeIdentifiers -framework QuartzCore \
+  -framework WebKit -framework JavaScriptCore -framework Security -framework Foundation -framework UIKit -framework ImageIO -framework CoreGraphics -framework CoreMedia -framework UniformTypeIdentifiers -framework QuartzCore \
   -framework CNPlayerSDK -framework CicadaPlayerSDK -framework alivcffmpeg -framework AVFoundation -framework MediaPlayer -framework AVKit \
   $( [ -z "${PY_DISABLE:-}" ] && echo "-F $APP/Frameworks -framework Python -I $PY_INC" ) \
   -lz -lsqlite3 -lbz2 -liconv -lc++ \

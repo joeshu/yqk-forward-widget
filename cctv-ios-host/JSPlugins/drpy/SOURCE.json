@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/hjdhnx/dr_py",
+  "commit": "ca23ffdbf5e429c5893ac60158668fc5af7af192",
+  "license": "LGPL-3.0-only",
+  "files": {
+    "jsencrypt.js": "b3b0d8d95302e405b0dd63609bc2d513844d1426c3612518e732d19f2eaa1be8",
+    "LICENSE": "97628afebc60f026f5c2b25d7491c46a5c4ee61f693e7cfa07fbd2c03605979b",
+    "drpy2.js": "ead0e6a07dd366d16865366ec8464c94158bc9889411365d53653ed23cac4be0",
+    "template.js": "42ee2b22570e94599284e330146e840e86d7bd95ab46531cafac89bebf526d29",
+    "gbk.js": "f9bc954666f74bcbeae9650ceb00ed87347fdff8a65366aefa19047a5f92ba2e",
+    "cheerio.min.js": "1241a8601e86de7603c93f2f3ca78b124fc9b94dc0b8260fe9279569ec07f338"
+  },
+  "note": "Original module code; trailing file newline normalized during vendoring. Native adapter supplies req/local/parser APIs."
+}

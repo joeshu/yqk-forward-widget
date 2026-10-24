@@ -1,9 +1,12 @@
 #import "ConfigCenterViewController.h"
 #import "HostTheme.h"
+#import "HostToolbar.h"
+#import "ProfileStore.h"
 #import "PyHost.h"
 @interface ConfigCenterViewController () <UISearchResultsUpdating>
 @property(nonatomic, strong) NSArray<NSDictionary *> *profiles;
 @property(nonatomic, strong) UISearchController *search;
+@property(nonatomic, strong) NSTimer *statusTimer;
 @end
 @implementation ConfigCenterViewController
 - (instancetype)init {
@@ -11,43 +14,43 @@
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"配置中心";
+    self.title = @"资源";
     self.tableView.backgroundColor = UIColor.blackColor;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.rowHeight = 100;
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.search.searchResultsUpdater = self;
     self.search.obscuresBackgroundDuringPresentation = NO;
-    self.search.searchBar.placeholder = @"搜索配置";
+    self.search.searchBar.placeholder = @"搜索资源";
     self.navigationItem.searchController = self.search;
     UIRefreshControl *r = [UIRefreshControl new];
     [r addTarget:self action:@selector(refreshProfiles) forControlEvents:UIControlEventValueChanged];
     self.refreshControl = r;
-    self.navigationItem.rightBarButtonItems = @[
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd
-                                                      target:self
-                                                      action:@selector(add)],
-        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath"]
-                                         style:UIBarButtonItemStylePlain
-                                        target:self
-                                        action:@selector(refreshProfiles)]
-    ];
+    __weak typeof(self) w=self;
+    self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
+        @{@"icon":@"arrow.clockwise",@"title":@"刷新资源",@"action":[UIAction actionWithHandler:^(UIAction *a){[w refreshProfiles];}]},
+        @{@"icon":@"plus",@"title":@"导入资源",@"action":[UIAction actionWithHandler:^(UIAction *a){[w add];}]},
+        @{@"icon":@"ellipsis",@"title":@"资源操作",@"menu":[UIMenu menuWithChildren:@[[UIAction actionWithTitle:@"脚本与服务" image:[UIImage systemImageNamed:@"hand.tap"] identifier:nil handler:^(UIAction *a){if(w.onServices)w.onServices();}]]]}])];
     [self reloadProfiles];
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self reloadProfiles];
+    [self.statusTimer invalidate];__weak typeof(self) weakSelf=self;self.statusTimer=[NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer){[weakSelf reloadProfiles];}];
 }
+- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[self.statusTimer invalidate];self.statusTimer=nil;}
+- (void)dealloc {[self.statusTimer invalidate];}
 - (void)reloadProfiles {
     NSArray *all = self.profilesProvider ? self.profilesProvider() : @[];
     NSString *q = self.search.searchBar.text.lowercaseString;
-    self.profiles =
+    NSArray *profiles =
         q.length
             ? [all filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *p,
                                                                                      NSDictionary *bindings) {
                      return [p[@"name"] lowercaseString] && [[p[@"name"] lowercaseString] containsString:q];
                    }]]
             : all;
+    if([self.profiles isEqualToArray:profiles])return;self.profiles=profiles;
     [self.tableView reloadData];
 }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
@@ -64,19 +67,20 @@
     [self.refreshControl endRefreshing];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 2;
+    return self.profiles.count+1;
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return section == 0 ? 1 : self.profiles.count;
+    return 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0)
-        return @"本机";
+        return @"脚本资源";
+    if(section>1)return nil;
     NSUInteger n = 0;
     for (NSDictionary *p in self.profiles)
         if ([p[@"enabled"] boolValue])
             n++;
-    return [NSString stringWithFormat:@"共 %lu 项配置 · 已启用 %lu 项", (unsigned long)self.profiles.count,
+    return [NSString stringWithFormat:@"共 %lu 项资源 · 已启用 %lu 项", (unsigned long)self.profiles.count,
                                       (unsigned long)n];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -95,23 +99,25 @@
     c.accessoryView = nil;
     c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     if (ip.section == 0) {
-        c.textLabel.text = @"服务";
+        c.textLabel.text = @"脚本与服务";
         c.detailTextLabel.text = PyHost.running ? @"Python 运行中 · 管理本机服务" : @"管理本机 Python 服务";
         c.imageView.image = [UIImage systemImageNamed:@"externaldrive"];
     } else {
-        NSDictionary *p = self.profiles[ip.row];
+        NSDictionary *p = self.profiles[ip.section-1];
         c.textLabel.text = p[@"name"];
         c.detailTextLabel.text =
-            [NSString stringWithFormat:@"%@ 个频道   EPG\n%@", p[@"count"], p[@"source"] ?: @"官方频道目录"];
+            [NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@", p[@"count"], p[@"epgStatus"]?:@"自动匹配", [p[@"source"] hasPrefix:@"local-playlist:"]?@"本机文件 · 长按可编辑、排序":([p[@"source"] length]?p[@"source"]:@"官方频道目录")];
         c.imageView.image = [UIImage systemImageNamed:@"list.bullet.rectangle"];
+        if([p[@"type"] isEqual:@"plugin"]){c.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",p[@"runtime"],p[@"protocol"]];c.imageView.image=[UIImage systemImageNamed:@"curlybraces"];}
         UISwitch *s = [UISwitch new];
         s.onTintColor = HostAccent();
         s.on = [p[@"enabled"] boolValue];
-        s.tag = ip.row;
+        s.tag = ip.section-1;
         s.accessibilityLabel = [NSString stringWithFormat:@"启用 %@", p[@"name"]];
         [s addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
         c.accessoryView = s;
     }
+    if(ip.section>0&&[self.profiles[ip.section-1][@"status"] length])c.detailTextLabel.text=[NSString stringWithFormat:@"%@\n%@",c.detailTextLabel.text?:@"",self.profiles[ip.section-1][@"status"]];
     return c;
 }
 - (void)toggle:(UISwitch *)sender {
@@ -128,13 +134,13 @@
         if (self.onServices)
             self.onServices();
     } else if (self.onSelectProfile)
-        self.onSelectProfile(self.profiles[ip.row][@"source"]);
+        self.onSelectProfile(self.profiles[ip.section-1][@"source"]);
 }
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
     trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip {
-    if (ip.section == 0 || ![self.profiles[ip.row][@"source"] length])
+    if (ip.section == 0 || ![self.profiles[ip.section-1][@"source"] length])
         return nil;
-    NSString *source = self.profiles[ip.row][@"source"];
+    NSString *source = self.profiles[ip.section-1][@"source"];
     UIContextualAction *a = [UIContextualAction
         contextualActionWithStyle:UIContextualActionStyleDestructive
                             title:@"删除"
@@ -144,6 +150,19 @@
                             [self reloadProfiles];
                             done(YES);
                           }];
-    return [UISwipeActionsConfiguration configurationWithActions:@[ a ]];
+    UIContextualAction *edit=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"编辑" handler:^(UIContextualAction *action,UIView *view,void (^done)(BOOL)){if(self.onEditProfile)self.onEditProfile(source);done(YES);}];
+    return [UISwipeActionsConfiguration configurationWithActions:@[a,edit]];
 }
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
+    if(ip.section==0||![self.profiles[ip.section-1][@"source"] length])return nil;
+    NSString *source=self.profiles[ip.section-1][@"source"];__weak typeof(self) w=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:source previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
+        NSMutableArray *actions=[NSMutableArray arrayWithObject:[UIAction actionWithTitle:[source hasPrefix:@"plugin:"]?@"编辑资源":@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
+        if([source hasPrefix:@"plugin:"])return [UIMenu menuWithTitle:@"资源操作" children:actions];
+        for(NSNumber *offset in @[@(-1),@1]){[actions addObject:[UIAction actionWithTitle:offset.integerValue<0?@"上移":@"下移" image:[UIImage systemImageNamed:offset.integerValue<0?@"arrow.up":@"arrow.down"] identifier:nil handler:^(UIAction *a){NSArray *sources=[w.profiles valueForKey:@"source"];sources=[sources filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *s,NSDictionary *b){return s.length>0;}]];[ProfileStore move:source offset:offset.integerValue sources:sources];[w reloadProfiles];}]];}
+        return [UIMenu menuWithTitle:@"资源操作" children:actions];
+    }];
+}
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {return section>1?12:UITableViewAutomaticDimension;}
+- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section {return 4;}
 @end

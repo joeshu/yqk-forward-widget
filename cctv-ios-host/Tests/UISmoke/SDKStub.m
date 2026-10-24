@@ -1,5 +1,6 @@
 // UI test target only: models the legacy wrapper lifecycle and callback ordering.
 #import "CNPlayerSDK.h"
+#import <UIKit/UIKit.h>
 @protocol CNPlayerCallbackProtocol <NSObject>
 @end
 @interface NSObject (SmokeCallbacks)
@@ -14,8 +15,18 @@
 @property(nonatomic, assign) BOOL isPlaying;
 @property(nonatomic, assign) NSUInteger preparation;
 @end
-static NSInteger resets, plays;
+static NSInteger resets, plays, configures;
 static id cdnPreference;
+@interface IJKFFMoviePlayerController : NSObject
+- (UIImage *)thumbnailImageAtCurrentTime;
+@end
+@implementation IJKFFMoviePlayerController
+- (UIImage *)thumbnailImageAtCurrentTime {
+    @throw [NSException exceptionWithName:NSInternalInconsistencyException
+                                   reason:@"UIGraphicsBeginImageContext failed for zero-sized frame"
+                                 userInfo:nil];
+}
+@end
 @implementation CNPlayer
 - (instancetype)init {
     if (self = [super init])
@@ -54,6 +65,7 @@ static id cdnPreference;
 + (NSInteger)smokeResetCount {
     return resets;
 }
++ (NSInteger)smokeConfigureCount { return configures; }
 + (NSInteger)smokePlayCount {
     return plays;
 }
@@ -61,8 +73,12 @@ static id cdnPreference;
     return nil;
 }
 - (BOOL)playLIVEWithChannelID:(NSString *)cid delegate:(id)delegate configOptions:(NSDictionary *)options {
-    self.delegate = delegate;
+    configures++;self.delegate = delegate;
     return YES;
+}
+- (void)prepareRateItemToPlay_completionBlock:(void (^)(BOOL,NSError *))completion {
+    NSUInteger token=++self.preparation;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{if(token==self.preparation)completion(YES,nil);});
 }
 - (void)prepareToPlay {
     NSUInteger token = ++self.preparation;
@@ -77,6 +93,10 @@ static id cdnPreference;
       [self.delegate player:self loadStateDidChanged:4];
     });
 }
+- (void)seekToStartTime:(double)start endTime:(double)end completionHandler:(void (^)(BOOL))completion {
+    completion(YES);[self prepareToPlay];
+}
+- (void)backToLive {[self prepareToPlay];}
 - (void)reset {
     resets++;
     self.preparation++;

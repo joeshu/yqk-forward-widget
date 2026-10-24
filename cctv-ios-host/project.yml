@@ -7,7 +7,7 @@ options:
 settings:
   base:
     ENABLE_BITCODE: NO
-    OTHER_LDFLAGS: "-ObjC -lresolv"
+    OTHER_LDFLAGS: "-ObjC -lresolv -lz"
     HEADER_SEARCH_PATHS: "$(SRCROOT)/Sources/Include"
 targets:
   CCTVHost:
@@ -26,6 +26,10 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
+      - sdk: ImageIO.framework
+      - sdk: JavaScriptCore.framework
+      - sdk: WebKit.framework
+      - sdk: Security.framework
       - sdk: CoreGraphics.framework
       - sdk: CoreMedia.framework
       - sdk: UniformTypeIdentifiers.framework

@@ -2,7 +2,7 @@ name: Build CCTVHost unsigned IPA
 
 on:
   push:
-    branches: [main, codex/cctv-fast-switch, codex/cctv-aptv-ui, codex/cctv-startup-recovery]
+    branches: [main, codex/cctv-fast-switch, codex/cctv-aptv-ui, codex/cctv-startup-recovery, codex/cctv-aptv-core-017]
     paths:
       - 'cctv-ios-host/**'
       - '.github/workflows/cctv-ios-host.yml'
@@ -14,6 +14,13 @@ permissions:
 
 jobs:
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [full]
+    env:
+      PY_DISABLE: ${{ matrix.variant != 'full' && '1' || '' }}
+      CCTV_BASELINE: ${{ matrix.variant == 'baseline09' && '1' || '' }}
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -25,6 +32,11 @@ jobs:
           path: /tmp/python-ios.tar.gz
           key: python-apple-support-3.13-b16
 
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/cctvhost-node-mobile-ios.zip
+          key: cctvhost-node-mobile-ios-18.20.4-8c5ca3a0
+
       - name: Toolchain info
         run: |
           xcodebuild -version
@@ -32,6 +44,13 @@ jobs:
           for f in cctv-ios-host/Frameworks/*.framework; do
             n="$(basename "$f" .framework)"; echo "== $n"; lipo -info "$f/$n"
           done
+
+      - name: Build and verify original JS plugin
+        working-directory: cctv-ios-host/JSPlugins
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npm test
 
       - name: Run regression checks
         working-directory: cctv-ios-host
@@ -51,10 +70,10 @@ jobs:
               -F Frameworks "$f" >> syntax.log 2>&1 || true
           done
           cat syntax.log
-          grep -E "error:|fatal error:" syntax.log | head -20 | sed 's/\r//' | while IFS= read -r l; do
+          grep -E ":[0-9]+:[0-9]+: (fatal )?error:|clang: error:" syntax.log | head -20 | sed 's/\r//' | while IFS= read -r l; do
             echo "::error title=syntax::$l"
           done
-          if grep -qE "error:|fatal error:" syntax.log; then exit 1; fi
+          if grep -qE ":[0-9]+:[0-9]+: (fatal )?error:|clang: error:" syntax.log; then exit 1; fi
 
       - name: Build app
         working-directory: cctv-ios-host
@@ -77,7 +96,7 @@ jobs:
       - name: Preserve build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: CCTVHost-${{ github.sha }}
+          name: CCTVHost-${{ matrix.variant }}-${{ github.sha }}
           path: |
             cctv-ios-host/build/CCTVHost-unsigned.ipa
             cctv-ios-host/build/CCTVHost-unsigned.ipa.sha256
@@ -89,7 +108,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CCTVHost-logs-${{ github.run_id }}
+          name: CCTVHost-logs-${{ matrix.variant }}-${{ github.run_id }}
           path: |
             cctv-ios-host/build.log
             cctv-ios-host/syntax.log
@@ -97,7 +116,7 @@ jobs:
           retention-days: 14
 
       - name: Publish release asset
-        if: success() && github.ref == 'refs/heads/main'
+        if: success() && github.ref == 'refs/heads/main' && matrix.variant == 'full'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -113,7 +132,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: CCTVHost-unsigned-ipa
+          name: CCTVHost-${{ matrix.variant }}-unsigned-ipa
           path: |
             cctv-ios-host/build/CCTVHost-unsigned.ipa
             cctv-ios-host/build/CCTVHost-unsigned.ipa.sha256
@@ -124,6 +143,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/cctvhost-node-mobile-ios.zip
+          key: cctvhost-node-mobile-ios-18.20.4-8c5ca3a0
       - name: Run simulator UI smoke checks
         working-directory: cctv-ios-host
         run: bash Scripts/ui-smoke.sh
@@ -134,5 +157,6 @@ jobs:
           name: CCTVHost-UI-preview-${{ github.sha }}
           path: |
             cctv-ios-host/ui-preview/*.png
-            cctv-ios-host/ui-preview/results.json
+            cctv-ios-host/ui-preview/*.json
+            cctv-ios-host/ui-preview/*.log
           if-no-files-found: error

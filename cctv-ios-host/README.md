@@ -11,11 +11,19 @@ CCTVHost/
 ├── Resources/Info.plist  # ATS 放开、arm64、竖屏
 ├── Sources/
 │   ├── main.m / AppDelegate.[hm]
-│   ├── RootViewController.[hm]   # 频道按钮 + 日志 + Cicada 直连调试
+│   ├── RootViewController.[hm]   # 频道/播放器业务与宿主总日志
+│   ├── LogCenterViewController  # 独立日志浏览、筛选和导出界面
+│   ├── PluginLogStore           # 按脚本 ID 隔离的插件日志存储
 │   └── Include/                  # 手写的最小头文件（官方 framework 不带 Headers）
 ├── Scripts/resign-check.sh
 └── project.yml           # XcodeGen 工程描述
 ```
+
+## 日志分层
+
+- 设置里的“日志中心”查看宿主总日志；播放、Python、JavaScriptCore 和 Node 运行输出在这里汇总，便于排查跨模块问题。
+- 服务详情里的“查看日志”只显示该服务脚本的输出，并可单独搜索、复制、导出或清空。每份日志按稳定的服务 ID 写入 `Application Support/ysp/plugin-logs/`，更换脚本不会覆盖其他插件日志。
+- 日志浏览页与播放器分开，通过设置、服务详情或播放器“更多”进入，不遮住正在播放的视频。
 
 ## 一、生成工程并编译
 

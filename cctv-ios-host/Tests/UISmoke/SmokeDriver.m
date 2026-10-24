@@ -2,11 +2,21 @@
 #import "CNPlayerSDK.h"
 #import "EPGViewController.h"
 #import "PlaybackStartupTrace.h"
+#import "NativeChannelPreloader.h"
 #import "PyHost.h"
 #import "RootViewController.h"
 #import "ServiceEditorViewController.h"
 #import "ServiceStore.h"
+#import "ProfileStore.h"
+#import "XMLTVStore.h"
 #import "ServicesViewController.h"
+#import "HostImageLoader.h"
+#import "NodePluginRuntime.h"
+#import "MediaBrowserViewController.h"
+#import "CNPlayerCrashGuard.h"
+#import "ResourceImportSheetViewController.h"
+#import "LogCenterViewController.h"
+#import "PluginLogStore.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
@@ -14,12 +24,33 @@
 @interface RootViewController (Smoke)
 - (void)selectBottomTab:(UIButton *)button;
 - (void)openServicesPage;
-- (void)toggleLog;
+- (void)openDiagnosticLogForIdentifier:(NSString *)identifier name:(NSString *)name;
+- (void)logPluginLine:(NSString *)line identifier:(NSString *)identifier name:(NSString *)name;
 - (void)applyFilter;
 - (void)selectChannel:(NSDictionary *)channel;
+- (void)seekNativeStart:(NSTimeInterval)start end:(NSTimeInterval)end;
+- (void)returnToNativeLive;
+- (void)fetchSubscription:(NSString *)url silent:(BOOL)silent;
+- (void)beginPlaybackPriority;
+- (void)togglePlayPause;
+- (void)avItemStalled:(NSNotification *)notification;
 - (void)playRemote:(NSDictionary *)channel;
+- (void)tryAlternateSource;
+- (void)stopPlayback;
+- (void)updateSearchResultsForSearchController:(UISearchController *)controller;
+- (void)playChannel:(NSDictionary *)channel route:(NSDictionary *)route;
+- (void)importPlaylistData:(NSData *)data name:(NSString *)name;
+- (void)previewChannel:(NSDictionary *)channel;
+- (void)stopPreview;
 - (NSDictionary *)channelWithID:(NSString *)identifier;
 - (void)player:(id)player statEvent:(NSUInteger)event value:(id)value;
+- (void)player:(id)player playbackFailed:(NSError *)error;
+- (void)playMediaResult:(NSDictionary *)result name:(NSString *)name;
+- (void)addSubscription;
+@end
+@interface MediaBrowserViewController (Smoke)
+- (void)loadMore;
+- (void)updateSearchResultsForSearchController:(UISearchController *)controller;
 @end
 @interface EPGViewController (Smoke)
 - (void)rebuildDates;
@@ -27,12 +58,19 @@
 @interface CNPlayer (SmokeMetrics)
 + (NSInteger)smokeResetCount;
 + (NSInteger)smokePlayCount;
++ (NSInteger)smokeConfigureCount;
 @end
 @interface PyHost (SmokeMetrics)
 + (NSInteger)smokeStartCount;
 @end
 static NSMutableArray *failures;
+static NSDictionary *nodeCall(NSString *operation,NSDictionary *payload){
+    NSString *input=[[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL] encoding:NSUTF8StringEncoding];NSError *error=nil;
+    NSString *reply=[NodePluginRuntime.shared callOperation:operation json:input error:&error];
+    return reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:@{@"ok":@NO,@"error":error.localizedDescription?:@"Node bridge failed"};
+}
 static NSString *outputDir;
+static NSURL *pluginLogExportURL;
 static void check(BOOL value, NSString *message) {
     if (!value)
         [failures addObject:message];
@@ -47,6 +85,8 @@ static void capture(UIWindow *window, NSString *name) {
         writeToFile:[outputDir stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"png"]]
          atomically:YES];
 }
+static NSUInteger waitingIndex=NSNotFound;
+static NSDate *waitingDeadline;
 static void next(NSArray *steps, NSUInteger index) {
     if (index >= steps.count) {
         NSData *data = [NSJSONSerialization dataWithJSONObject:@{
@@ -60,7 +100,13 @@ static void next(NSArray *steps, NSUInteger index) {
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1200 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
       @try {
-          ((dispatch_block_t)steps[index])();
+          id step=steps[index];
+          if([step isKindOfClass:NSDictionary.class]){
+              BOOL (^ready)(void)=step[@"until"];
+              if(waitingIndex!=index){waitingIndex=index;waitingDeadline=[NSDate dateWithTimeIntervalSinceNow:[step[@"timeout"] doubleValue]?:12];}
+              if(!ready()&&[waitingDeadline timeIntervalSinceNow]>0){next(steps,index);return;}
+              ((dispatch_block_t)step[@"run"])();
+          }else ((dispatch_block_t)step)();
       } @catch (NSException *e) {
           [failures addObject:e.reason ?: e.name];
       }
@@ -76,10 +122,15 @@ static void next(NSArray *steps, NSUInteger index) {
         class_getInstanceMethod(self, @selector(smokeApplication:didFinishLaunchingWithOptions:)));
 }
 - (BOOL)smokeApplication:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
+    [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];
     BOOL ok = [self smokeApplication:app didFinishLaunchingWithOptions:options];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [UIView setAnimationsEnabled:NO];
       failures = [NSMutableArray array];
+      check([CNPlayerCrashGuard install], @"CNPlayer thumbnail exception guard installs");
+      UIImage *guardedThumbnail=[[NSClassFromString(@"IJKFFMoviePlayerController") new]
+          performSelector:NSSelectorFromString(@"thumbnailImageAtCurrentTime")];
+      check(guardedThumbnail==nil, @"invalid SDK teardown thumbnail exception is contained");
       outputDir = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/ui-smoke"];
       [NSFileManager.defaultManager createDirectoryAtPath:outputDir
                               withIntermediateDirectories:YES
@@ -91,12 +142,24 @@ static void next(NSArray *steps, NSUInteger index) {
       __block id retainedWrapper = nil;
       __block id oldWrapper = nil;
       __block NSInteger playCount = 0;
+      __block AVPlayer *hlsPlayer;
+      __block NSInteger configuredBeforeHandoff;
+      __block id preparedWrapper;
+      __block UIImageView *logoA, *logoB, *staleLogo, *oversizeLogo;
+      __block NSDictionary *imageStats;
+      __block NSDictionary *nodeChecks;
+      __block MediaBrowserViewController *mediaPage;
+      __block UITableViewController *mediaDetail;
       NSArray *steps = @[
           ^{
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
             check([grid numberOfItemsInSection:0] > 20, @"home catalog populated");
             check(!grid.hidden, @"grid visible by default");
             capture(self.window, @"01-live-grid");
+            check(root.navigationItem.rightBarButtonItems.count==1, @"catalog uses one compact toolbar");
+            UIStackView *toolbar=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;
+            check(toolbar.arrangedSubviews.count==3,@"catalog exposes three page actions");
+
             check(tabs.arrangedSubviews.count==5, @"five navigation pages");
             NSString *source=@"https://example.com/smoke.m3u";
             NSDictionary *remote=@{@"id":@"remote-smoke",@"name":@"CCTV-1 M3U8",@"group":@"央视",@"remoteURL":@"https://example.com/live.m3u8",@"subscriptionSources":@[source]};
@@ -118,19 +181,37 @@ static void next(NSArray *steps, NSUInteger index) {
           },
           ^{
             [root setValue:[NSMutableArray arrayWithObject:@"cctv1"] forKey:@"favorites"];
-            [root selectBottomTab:(id)tabs.arrangedSubviews[2]];
+            [root setValue:@YES forKey:@"favoritesOnly"];
+            [root applyFilter];
           },
           ^{
             NSArray *shown = [root valueForKey:@"shownChannels"];
             check(shown.count == 1, @"favorite filter returns only saved channel");
             capture(self.window, @"02-favorites");
+            [root selectBottomTab:(id)tabs.arrangedSubviews[2]];
+            [root.view layoutIfNeeded];
+            check([root.title isEqualToString:@"影视"], @"media tab has separate title");
+            check([root valueForKey:@"tabPage"] != nil, @"media page embedded");
+            check([[root valueForKey:@"channelGrid"] isHidden], @"media page hides live channel grid");
+            capture(self.window, @"02-media");
             [root selectBottomTab:(id)tabs.arrangedSubviews[3]];
+            check([root.title isEqualToString:@"资源"], @"resources tab has resource title");
           },
           ^{
             check([[root valueForKey:@"tabPage"]
                       isKindOfClass:NSClassFromString(@"ConfigCenterViewController")],
                   @"configuration tab embedded");
             capture(self.window, @"03-configuration");
+            [root addSubscription];
+          },
+          ^{
+            ResourceImportSheetViewController *sheet=(id)nav.presentedViewController;
+            check([sheet isKindOfClass:ResourceImportSheetViewController.class], @"resource add opens the grouped import sheet");
+            UITableView *options=[sheet valueForKey:@"tableView"];
+            check([options numberOfSections]==3 && [options numberOfRowsInSection:0]==2 && [options numberOfRowsInSection:1]==2,
+                  @"resource sheet exposes supported online, local and service actions");
+            capture(self.window, @"03b-add-resource");
+            [sheet dismissViewControllerAnimated:NO completion:nil];
             [root openServicesPage];
           },
           ^{
@@ -198,20 +279,44 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             capture(self.window, @"09-epg-fixture");
             [nav popToRootViewControllerAnimated:NO];
-            [root toggleLog];
+            [root logPluginLine:@"独立插件日志测试" identifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
+            [root openDiagnosticLogForIdentifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
+            [PluginLogStore.shared prepareExportForIdentifier:@"ui-smoke-plugin" displayName:@"UI Smoke Plugin" completion:^(NSURL *url,NSError *error){pluginLogExportURL=url;}];
           },
           ^{
+            LogCenterViewController *logs=(id)nav.topViewController;
+            check([logs isKindOfClass:LogCenterViewController.class], @"diagnostics open in an independent navigation page");
+            check([logs.logSnapshotProvider() containsString:@"独立插件日志测试"], @"plugin log page is scoped to that script");
+            check(logs.onExportLog!=nil && logs.onClearLog!=nil, @"plugin log page exposes independent export and clear actions");
+            check([[logs valueForKey:@"categories"] numberOfSegments]==4, @"log center supports all, playback, plugin and error filters");
+            check(pluginLogExportURL && [[NSFileManager defaultManager] fileExistsAtPath:pluginLogExportURL.path], @"per-plugin log export creates a separate text file");
             capture(self.window, @"10-diagnostic-log");
-            [root toggleLog];
+            [nav popToRootViewControllerAnimated:NO];
             [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"legacyNativePlayback"];
             [root selectChannel:[root channelWithID:@"cctv1"]];
           },
           ^{
             check([[root valueForKey:@"firstRender"] boolValue], @"legacy native first frame received");
             check([[root valueForKey:@"activeTab"] integerValue]==0, @"native playback opens CCTV page");
+            check([root.title isEqual:@"CCTV-1 综合"], @"expanded live player promotes the playing channel into the navigation title");
+            UIStackView *liveActions=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;
+            check(liveActions.arrangedSubviews.count==3, @"expanded live player exposes favorite, route and playback info actions");
             retainedWrapper = [root valueForKey:@"currentPlayer"];
             playCount = [CNPlayer smokePlayCount];
-            [root selectChannel:[root channelWithID:@"cctv2"]];
+            [root selectChannel:[root channelWithID:@"cctv1"]];
+          },
+          ^{
+            check([CNPlayer smokePlayCount]==playCount && [root valueForKey:@"currentPlayer"]==retainedWrapper,
+                  @"same-channel tap preserves active session");
+            [root player:retainedWrapper playbackFailed:[NSError errorWithDomain:@"fixture" code:4012 userInfo:nil]];
+            check([[[root valueForKey:@"playPauseBtn"] titleForState:UIControlStateNormal] isEqual:@"重试"],
+                  @"terminal playback error exposes an explicit retry action");
+            [root togglePlayPause];
+          },
+          ^{
+            check([CNPlayer smokePlayCount]==playCount+1,@"failed channel can be selected again");
+            playCount=[CNPlayer smokePlayCount];
+            [root playChannel:[root channelWithID:@"cctv2"] route:nil];
             check([root valueForKey:@"currentPlayer"] == retainedWrapper,
                   @"0.12 compatible mode reuses wrapper");
             check([CNPlayer smokeResetCount] > 0, @"legacy reset retained");
@@ -221,7 +326,7 @@ static void next(NSArray *steps, NSUInteger index) {
                   @"PrepareDone cannot play again after auto first frame");
             [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"legacyNativePlayback"];
             oldWrapper = [root valueForKey:@"currentPlayer"];
-            [root selectChannel:[root channelWithID:@"cctv3"]];
+            [root playChannel:[root channelWithID:@"cctv3"] route:nil];
             check([root valueForKey:@"currentPlayer"] != oldWrapper, @"fresh mode uses a distinct wrapper");
             [root player:oldWrapper statEvent:3 value:nil];
             check(![[root valueForKey:@"firstRender"] boolValue],
@@ -245,23 +350,235 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[root valueForKey:@"activeTab"] integerValue]==1, @"remote playback opens subscription page");
             check([root valueForKey:@"avPlayer"] == nil, @"AVPlayer waits until HTTP health is ready");
           },
-          ^{
+          @{@"until":^BOOL{PlaybackStartupTrace *t=[root valueForKey:@"startupTrace"];return t.stages[@"service"]!=nil&&[root valueForKey:@"avPlayer"]!=nil;},@"run":^{
             PlaybackStartupTrace *trace = [root valueForKey:@"startupTrace"];
             check(trace.stages[@"service"] != nil, @"service readiness recorded before AVPlayer startup");
             check([root valueForKey:@"avPlayer"] != nil, @"playback begins after successful readiness probe");
-          },
-          ^{
+          }},
+          @{@"until":^BOOL{PlaybackStartupTrace *t=[root valueForKey:@"startupTrace"];return t.stages[@"itemReady"]!=nil&&t.stages[@"frame"]!=nil;},@"run":^{
             PlaybackStartupTrace *trace = [root valueForKey:@"startupTrace"];
             check(trace.stages[@"itemReady"] != nil, @"real AVPlayer item readiness observed");
             check(trace.stages[@"frame"] != nil && [[root valueForKey:@"firstRender"] boolValue],
                   @"real AVPlayerLayer video frame observed separately");
-            check([trace.stages[@"frame"] doubleValue] >= [trace.stages[@"itemReady"] doubleValue],
-                  @"frame timing does not precede item readiness");
+            check([trace.stages[@"frame"] doubleValue] > 0 && [trace.stages[@"itemReady"] doubleValue] > 0,
+                  @"item and video callbacks are measured independently without assuming delivery order");
+            NSString *url=[root valueForKey:@"currentRemoteURL"];
+            [root playRemote:@{@"id":url,@"name":@"Warm local startup",@"remoteURL":url}];
+            check([root valueForKey:@"avPlayer"]!=nil,@"recent successful local health avoids another readiness wait");
+            check(((PlaybackStartupTrace *)[root valueForKey:@"startupTrace"]).stages[@"serviceCached"]!=nil,@"warm health reuse is recorded separately");
             id previous = [root valueForKey:@"avPlayer"];
-            [root selectChannel:[root channelWithID:@"cctv1"]];
+            [root playChannel:[root channelWithID:@"cctv1"] route:nil];
             check([previous currentItem] == nil, @"switching to native detaches old subscription item");
             check([root valueForKey:@"pip"] == nil, @"switching releases old picture-in-picture controller");
-          }
+          }},
+          ^{
+            playCount=[CNPlayer smokePlayCount];
+            [root selectChannel:[root channelWithID:@"cctv1"]];
+            [root selectChannel:[root channelWithID:@"cctv2"]];
+            [root selectChannel:[root channelWithID:@"cctv3"]];
+          },
+          ^{
+            check([[root valueForKey:@"channelID"] isEqual:@"cctv3"],@"rapid selections end on final channel");
+            check([CNPlayer smokePlayCount]==playCount+1,@"rapid taps do not start three SDK sessions");
+            NSString *playlist=@"#EXTM3U x-tvg-url=\"https://example.com/guide.xml.gz\"\n#EXTINF:-1 tvg-id=\"guide-one\" group-title=\"测试\",Imported channel\nhttps://example.com/imported.m3u8\n";
+            [root importPlaylistData:[playlist dataUsingEncoding:NSUTF8StringEncoding] name:@"本地测试配置"];
+            [root selectBottomTab:(id)tabs.arrangedSubviews[3]];
+            NSArray *profiles=[NSUserDefaults.standardUserDefaults arrayForKey:@"subscriptions"];
+            BOOL imported=NO;for(NSString *source in profiles)if([source hasPrefix:@"local-playlist:"]){imported=YES;check([[ProfileStore metadata:source][@"cachedChannels"] count]==1,@"import stores last-good channels");check([[ProfileStore metadata:source][@"detectedEPGURL"] isEqual:@"https://example.com/guide.xml.gz"],@"file import discovers XMLTV");}
+            check(imported,@"file profile persisted");
+            capture(self.window,@"11-configuration-imported");
+          },
+          ^{
+            NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];NSString *port=arguments[at+1];NSString *url=[NSString stringWithFormat:@"http://127.0.0.1:%@/video.mp4",port];
+            playCount=[CNPlayer smokePlayCount];
+            [root playChannel:@{@"id":url,@"name":@"Misrouted subscription",@"remoteURL":url} route:nil];
+            check([CNPlayer smokePlayCount]==playCount,@"M3U address never reaches native SDK even through native entry");
+            check([[root valueForKey:@"activeTab"] integerValue]==1,@"misrouted subscription returns to channel page");
+          },
+          ^{
+            NSArray *args=NSProcessInfo.processInfo.arguments;NSString *port=args[[args indexOfObject:@"--smoke-port"]+1];
+            NSString *feed=[NSString stringWithFormat:@"http://127.0.0.1:%@/all.m3u",port];
+            [ProfileStore update:feed values:@{@"cachedChannels":@[]}];
+            [root beginPlaybackPriority];[root setValue:@NO forKey:@"firstRender"];
+            [root fetchSubscription:feed silent:NO];
+            check([root valueForKey:@"subscriptionReadiness"]!=nil,@"manual refresh remains available during startup");
+          },
+          @{@"until":^BOOL{
+            NSArray *args=NSProcessInfo.processInfo.arguments;NSString *port=args[[args indexOfObject:@"--smoke-port"]+1];
+            return [[ProfileStore metadata:[NSString stringWithFormat:@"http://127.0.0.1:%@/all.m3u",port]][@"cachedChannels"] count]>0;
+          },@"run":^{
+            NSArray *args=NSProcessInfo.processInfo.arguments;NSString *port=args[[args indexOfObject:@"--smoke-port"]+1];
+            NSString *feed=[NSString stringWithFormat:@"http://127.0.0.1:%@/all.m3u",port];
+            check([[ProfileStore metadata:feed][@"cachedChannels"] count]>0,@"manual playlist refresh succeeds without a first frame");
+            NSString *url=[NSString stringWithFormat:@"http://127.0.0.1:%@/hls/live.m3u8",port];
+            [root playRemote:@{@"id":url,@"name":@"HLS delayed segment test",@"remoteURL":url}];
+          }},
+          @{@"timeout":@30,@"until":^BOOL{
+            AVPlayer *p=[root valueForKey:@"avPlayer"];
+            return [[root valueForKey:@"firstRender"] boolValue] && CMTimeGetSeconds(p.currentTime)>=8;
+          },@"run":^{
+            hlsPlayer=[root valueForKey:@"avPlayer"];
+            check(CMTimeGetSeconds(hlsPlayer.currentTime)>=8,@"HLS timeline advances past delayed segment after first frame");
+            check(hlsPlayer.automaticallyWaitsToMinimizeStalling,@"AVPlayer handles rebuffering automatically");
+            [root togglePlayPause];
+            [root avItemStalled:[NSNotification notificationWithName:AVPlayerItemPlaybackStalledNotification object:hlsPlayer.currentItem]];
+          }},
+          ^{
+            check(![[root valueForKey:@"remotePlaybackWanted"] boolValue] && hlsPlayer.rate==0,@"buffer recovery cannot undo user pause");
+            [root togglePlayPause];
+          },
+          ^{
+            check([[root valueForKey:@"remotePlaybackWanted"] boolValue],@"user can resume same item after buffering");
+            [root performSelector:NSSelectorFromString(@"stopPlayback")];
+            check(hlsPlayer.currentItem==nil,@"switch/stop detaches HLS observers and item");
+            NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];NSString *port=arguments[at+1];NSString *url=[NSString stringWithFormat:@"http://127.0.0.1:%@/video.mp4",port];
+            [root previewChannel:@{@"remoteURL":url}];
+            check([root valueForKey:@"previewPlayer"]!=nil,@"manual preview starts without a formal playback session");
+            check([[root valueForKey:@"previewPlayer"] isMuted],@"preview is muted");
+            [root selectBottomTab:(id)tabs.arrangedSubviews[0]];
+            check([root valueForKey:@"previewPlayer"]==nil,@"navigation releases preview player");
+            [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"preloadNativeChannel"];
+            NativeChannelPreloader *preloader=[root valueForKey:@"nativePreloader"];
+            [preloader prepareChannel:@"cctv2" title:@"CCTV-2"];
+            preparedWrapper=[preloader valueForKey:@"player"];
+            configuredBeforeHandoff=[CNPlayer smokeConfigureCount];
+          },
+          ^{
+            [root playChannel:[root channelWithID:@"cctv2"] route:nil];
+            check([root valueForKey:@"currentPlayer"]==preparedWrapper,@"selected channel adopts metadata-prepared wrapper");
+            check([CNPlayer smokeConfigureCount]==configuredBeforeHandoff,@"metadata handoff does not call playLIVE a second time");
+            PlaybackStartupTrace *trace=[root valueForKey:@"startupTrace"];
+            check(trace.stages[@"preloadedVDN"]!=nil,@"metadata hit is explicitly recorded");
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue],@"metadata handoff reaches first render");
+            [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];
+            preparedWrapper=[root valueForKey:@"currentPlayer"];configuredBeforeHandoff=[CNPlayer smokeConfigureCount];
+            [root seekNativeStart:NSDate.date.timeIntervalSince1970-60 end:0];
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue] && [[root valueForKey:@"nativeTimeShiftActive"] boolValue],@"native timeshift reaches a new frame");
+            check([root valueForKey:@"currentPlayer"]==preparedWrapper && [CNPlayer smokeConfigureCount]==configuredBeforeHandoff,@"timeshift keeps SDK session without playLIVE reconfiguration");
+            [root returnToNativeLive];
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue] && ![[root valueForKey:@"nativeTimeShiftActive"] boolValue],@"return-to-live reaches a new frame");
+            EPGViewController *page=[[EPGViewController alloc] initWithChannelID:@"cctv2" name:@"fixture"];
+            __block NSUInteger replays=0;page.onReplay=^(NSDictionary *program){replays++;};
+            NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+            [page setValue:@[@{@"start":@(now-120),@"end":@(now-60)},@{@"start":@(now+60),@"end":@(now+120)}] forKey:@"rows"];
+            [(id<UITableViewDelegate>)page tableView:nil didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]];
+            check(replays==0,@"future EPG programme cannot replay");
+            [(id<UITableViewDelegate>)page tableView:nil didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+            check(replays==1,@"past EPG programme invokes replay callback");
+          },
+          ^{
+            NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];
+            NSString *base=[NSString stringWithFormat:@"http://127.0.0.1:%@",arguments[at+1]];
+            NSArray *original=[root valueForKey:@"allChannels"];NSMutableArray *channels=[original mutableCopy];
+            for(NSUInteger i=0;i<6;i++){NSString *url=[@"http://127.0.0.1:1" stringByAppendingFormat:@"/failure%lu.m3u8",(unsigned long)i];[channels addObject:@{@"id":url,@"remoteURL":url,@"name":@"Fallback fixture",@"subscriptionSources":@[i==1?@"disabled-fallback":@"enabled-fallback"]}];}
+            [NSUserDefaults.standardUserDefaults setObject:@[@"disabled-fallback"] forKey:@"disabledSubscriptions"];
+            [root setValue:channels forKey:@"allChannels"];
+            [root playRemote:channels[original.count]];
+            [root tryAlternateSource];
+            check([[root valueForKey:@"currentRemoteURL"] hasSuffix:@"failure2.m3u8"],@"fallback skips disabled subscriptions");
+            [root tryAlternateSource];[root tryAlternateSource];
+            check([[root valueForKey:@"remoteAttemptedURLs"] count]==4,@"fallback is bounded to four distinct URLs");
+            NSUInteger generation=[[root valueForKey:@"playbackGeneration"] unsignedIntegerValue];
+            [root tryAlternateSource];
+            check(generation==[[root valueForKey:@"playbackGeneration"] unsignedIntegerValue],@"failed URLs cannot ping-pong indefinitely");
+            [root playRemote:channels[original.count]];
+            check([[root valueForKey:@"remoteAttemptedURLs"] count]==1,@"manual selection resets retry budget");
+            [root stopPlayback];[root setValue:original forKey:@"allChannels"];
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:@"disabledSubscriptions"];
+            HostImageLoader *loader=HostImageLoader.shared;
+            [loader cancelPending];[loader clearCache];
+            logoA=[UIImageView new];logoB=[UIImageView new];staleLogo=[UIImageView new];oversizeLogo=[UIImageView new];
+            [loader loadURL:[base stringByAppendingString:@"/logo.png"] intoImageView:logoA];
+            [loader loadURL:[base stringByAppendingString:@"/logo.png"] intoImageView:logoB];
+            [loader loadURL:[base stringByAppendingString:@"/slow-logo.png"] intoImageView:staleLogo];
+            staleLogo.accessibilityIdentifier=@"reused-for-another-channel";
+            [loader loadURL:[base stringByAppendingString:@"/oversize.png"] intoImageView:oversizeLogo];
+          },
+          @{@"until":^BOOL{return logoA.image!=nil && logoB.image!=nil;},@"run":^{
+            check(logoA.image && logoB.image,@"coalesced logo request updates both views");
+            check(logoA.image.size.width<=192 && logoA.image.size.height<=192,@"large logo is downsampled off main thread");
+            check(staleLogo.image==nil,@"reused image view ignores stale logo completion");
+            check(oversizeLogo.image==nil,@"oversized logo response is rejected");
+            NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];
+            NSString *base=[NSString stringWithFormat:@"http://127.0.0.1:%@",arguments[at+1]];
+            [HostImageLoader.shared loadURL:[base stringByAppendingString:@"/logo.png"] intoImageView:logoA];
+            [HostImageLoader.shared loadURL:[base stringByAppendingString:@"/oversize.png"] intoImageView:oversizeLogo];
+            [[NSURLSession.sharedSession dataTaskWithURL:[NSURL URLWithString:[base stringByAppendingString:@"/image-stats"]] completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){NSDictionary *stats=data?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;dispatch_async(dispatch_get_main_queue(),^{imageStats=stats;});}] resume];
+          }},
+          @{@"until":^BOOL{return imageStats!=nil;},@"run":^{
+            check([imageStats[@"/logo.png"] integerValue]==1,@"duplicate and cached logos cause only one network request");
+            check([imageStats[@"/oversize.png"] integerValue]==1,@"failed logo is not immediately retried");
+            check(staleLogo.image==nil,@"late logo result cannot overwrite reused cell");
+            [HostImageLoader.shared cancelPending];
+            [root selectBottomTab:(id)tabs.arrangedSubviews[0]];
+            UISearchController *search=[root valueForKey:@"searchController"];
+            search.searchBar.text=@"CCTV";[root updateSearchResultsForSearchController:search];
+            search.searchBar.text=@"no-such-final-channel";[root updateSearchResultsForSearchController:search];
+          }},
+          @{@"until":^BOOL{return [[root valueForKey:@"shownChannels"] count]==0;},@"run":^{
+            check([[root valueForKey:@"query"] isEqualToString:@"no-such-final-channel"],@"debounced search keeps final input");
+            check([[root valueForKey:@"shownChannels"] count]==0,@"stale search cannot overwrite final results");
+            UISearchController *search=[root valueForKey:@"searchController"];search.searchBar.text=@"";[root updateSearchResultsForSearchController:search];
+            check([[root valueForKey:@"shownChannels"] count]>20,@"clearing search restores catalog immediately");
+            NSString *folder=[[ServiceStore directory] stringByAppendingPathComponent:[@"node-ui-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+            [NSFileManager.defaultManager createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:NULL];
+            NSString *script=@"const fs=require('fs');module.exports={init(){fs.writeFileSync('owned.txt','start');setInterval(()=>{},100)},home(){return {class:[{type_id:'movie',type_name:'Film'}]}},search(key){return {list:[{vod_id:key,vod_name:'Original Node JS'}]}},detail(ids){return {list:[{vod_id:ids[0]}]}},play(flag,id){return {parse:0,url:'https://fixture.test/'+id}},close(){fs.appendFileSync('owned.txt','-closed')}}";
+            [script writeToFile:[folder stringByAppendingPathComponent:@"index.cjs"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{
+                NSDictionary *start=nodeCall(@"start",@{@"session":@"node-ui",@"packageRoot":folder,@"dataDirectory":folder,@"entry":@"index.cjs",@"moduleType":@"commonjs",@"protocol":@"catvod-js"});
+                NSDictionary *search=[start[@"ok"] boolValue]?nodeCall(@"search",@{@"session":@"node-ui",@"keyword":@"opaque-node-id"}):@{};
+                NSDictionary *stop=nodeCall(@"stop",@{@"session":@"node-ui"});
+                NSString *saved=[NSString stringWithContentsOfFile:[folder stringByAppendingPathComponent:@"owned.txt"] encoding:NSUTF8StringEncoding error:NULL];
+                [NSFileManager.defaultManager copyItemAtPath:[NSBundle.mainBundle pathForResource:@"catpaw-ui" ofType:@"cjs"] toPath:[folder stringByAppendingPathComponent:@"catpaw.cjs"] error:NULL];
+                NSDictionary *catpaw=nodeCall(@"start",@{@"session":@"catpaw-ui",@"packageRoot":folder,@"dataDirectory":folder,@"entry":@"catpaw.cjs",@"moduleType":@"commonjs",@"protocol":@"catpaw-http"});
+                NSDictionary *providers=[catpaw[@"ok"] boolValue]?nodeCall(@"providers",@{@"session":@"catpaw-ui"}):@{};
+                NSDictionary *catpawStop=nodeCall(@"stop",@{@"session":@"catpaw-ui"});
+                NSDictionary *checks=@{@"start":start,@"search":search,@"stop":stop,@"saved":saved?:@"",@"catpaw":catpaw,@"providers":providers,@"catpawStop":catpawStop};
+                [NSFileManager.defaultManager removeItemAtPath:folder error:NULL];dispatch_async(dispatch_get_main_queue(),^{nodeChecks=checks;});
+            }});
+          }},
+          @{@"until":^BOOL{return nodeChecks!=nil;},@"timeout":@70,@"run":^{
+            check([nodeChecks[@"start"][@"ok"] boolValue],@"actual Node.js Mobile framework starts on iOS simulator");
+            check([nodeChecks[@"start"][@"result"][@"version"] hasPrefix:@"18."],@"Node mobile version is measured from the embedded runtime");
+            check([nodeChecks[@"search"][@"result"][@"list"][0][@"vod_id"] isEqual:@"opaque-node-id"],@"original CommonJS executes through native Node bridge");
+            check([nodeChecks[@"stop"][@"ok"] boolValue] && !NodePluginRuntime.shared.hasActivePlugin,@"Node plugin closes without destroying the reusable engine");
+            check([nodeChecks[@"saved"] isEqual:@"start-closed"],@"plugin relative data path is isolated and close hook finishes");
+            check([nodeChecks[@"catpaw"][@"ok"] boolValue],@"original 4 MB Catpaw bundle starts inside actual iOS Node Mobile framework");
+            check([nodeChecks[@"providers"][@"result"] count]>50,@"original Catpaw configuration exposes its real film providers");
+            check([nodeChecks[@"catpawStop"][@"ok"] boolValue],@"original Catpaw HTTP listener and handles stop on iOS");
+            NSData *diagnostic=[NSJSONSerialization dataWithJSONObject:nodeChecks options:NSJSONWritingPrettyPrinted error:NULL];[diagnostic writeToFile:[outputDir stringByAppendingPathComponent:@"node-runtime.json"] atomically:YES];
+            mediaPage=[MediaBrowserViewController new];
+            NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
+            mediaPage.sourcesProvider=^NSArray *{return @[@{@"id":@"media-ui",@"name":@"本机影视测试",@"port":@(port)}];};
+            mediaPage.onActivateService=^(NSDictionary *service,void (^done)(NSError *)){done(nil);};
+            mediaPage.onPlay=^(NSDictionary *result,NSString *title){[root playMediaResult:result name:title];};
+            [nav pushViewController:mediaPage animated:NO];
+          }},
+          @{@"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]>0;},@"run":^{
+            check([[mediaPage valueForKey:@"items"] count]==1,@"media home loads real JSON API into native poster grid");
+            UIScrollView *categories=[mediaPage valueForKey:@"categoryScroll"];check(CGRectGetMinY(categories.frame)>=mediaPage.view.safeAreaInsets.top,@"film categories stay below the navigation and search bars");capture(self.window,@"16-media-home");
+            UISearchController *search=[mediaPage valueForKey:@"search"];search.searchBar.text=@"中文";[mediaPage updateSearchResultsForSearchController:search];
+          }},
+          @{@"until":^BOOL{return [[[mediaPage valueForKey:@"items"] firstObject][@"id"] isEqual:@"中文1"];},@"run":^{
+            check([[[mediaPage valueForKey:@"items"] firstObject][@"id"] isEqual:@"中文1"],@"media search keeps source IDs and unicode");[mediaPage loadMore];
+          }},
+          @{@"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]==2;},@"run":^{
+            check([[mediaPage valueForKey:@"items"] count]==2,@"media pagination appends without losing previous page");capture(self.window,@"17-media-search");
+            UICollectionView *grid=[mediaPage valueForKey:@"grid"];[grid.delegate collectionView:grid didSelectItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];mediaDetail=(id)nav.topViewController;
+          }},
+          @{@"until":^BOOL{return [mediaDetail.tableView numberOfSections]==3;},@"run":^{
+            check([mediaDetail.tableView numberOfSections]==3,@"media detail displays two original playback lines");capture(self.window,@"18-media-detail");
+            [mediaDetail.tableView.delegate tableView:mediaDetail.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
+          }},
+          @{@"until":^BOOL{AVPlayer *player=[root valueForKey:@"moviePlayer"];return player.currentItem.status==AVPlayerItemStatusReadyToPlay;},@"run":^{
+            AVPlayer *player=[root valueForKey:@"moviePlayer"];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"selected plugin episode reaches real AVPlayer ready state");capture(self.window,@"19-media-playback");[nav dismissViewControllerAnimated:NO completion:nil];[root stopPlayback];
+          }}
       ];
       next(steps, 0);
     });

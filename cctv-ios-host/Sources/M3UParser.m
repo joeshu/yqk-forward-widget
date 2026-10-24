@@ -4,6 +4,14 @@
 @end
 
 @implementation M3UParser
++ (NSString *)epgURL:(NSString *)text baseURL:(NSURL *)baseURL {
+    if(!text.length)return nil;
+    NSString *header=[text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet].firstObject;
+    NSString *value=[self attribute:@"x-tvg-url" in:header]?:[self attribute:@"url-tvg" in:header];
+    value=[value componentsSeparatedByString:@","].firstObject;
+    NSURL *u=value.length?[NSURL URLWithString:value relativeToURL:baseURL]:nil;
+    if(![@[@"http",@"https"] containsObject:u.scheme.lowercaseString]||!u.host.length)return nil;return u.absoluteURL.absoluteString;
+}
 
 + (NSArray<M3UChannel *> *)parse:(NSString *)text baseURL:(NSURL *)baseURL {
     NSMutableArray<M3UChannel *> *out = [NSMutableArray array];
@@ -42,7 +50,7 @@
         } @catch (NSException *exception) {
             url = nil;
         }
-        if (!url) { pendingName = nil; pendingLogo = nil; continue; }
+        if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; continue; }
 
         M3UChannel *ch = [M3UChannel new];
         ch.name = pendingName;

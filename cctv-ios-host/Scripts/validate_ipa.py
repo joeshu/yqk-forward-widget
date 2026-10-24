@@ -23,16 +23,21 @@ def macho_info(data):
     assert cpu == 0x100000c, f'expected ARM64, got {cpu:#x}'
     off = 32
     platform = None
+    dependencies = []
     for _ in range(count):
         cmd, n = struct.unpack_from('<II', data, off)
         assert n >= 8 and off + n <= len(data), 'invalid load command'
         if cmd == 0x32:
             platform = struct.unpack_from('<I', data, off + 8)[0]
+        if cmd in (0xc, 0x80000018, 0x8000001f):
+            name_offset = struct.unpack_from('<I', data, off + 8)[0]
+            assert 24 <= name_offset < n, 'invalid dylib name offset'
+            dependencies.append(data[off + name_offset:off + n].split(b'\0', 1)[0].decode('utf-8'))
         if cmd == 0x25 and platform is None:
             platform = 2
         off += n
     assert platform == 2, f'expected iOS device platform=2, got {platform}'
-    return {'cpu': 'arm64', 'platform': 'iOS device', 'kind': kind}
+    return {'cpu': 'arm64', 'platform': 'iOS device', 'kind': kind, 'dependencies': dependencies}
 
 def validate(path):
     with zipfile.ZipFile(path) as z:
@@ -56,6 +61,31 @@ def validate(path):
         if result['python_embedded']:
             result['binaries']['Python'] = macho_info(z.read(py))
             assert root + 'python/lib/python3.13/encodings/__init__.py' in z.namelist(), 'missing Python encodings'
+        variant = info.get('CCTVHostBuildVariant')
+        result['build_variant'] = variant or 'legacy'
+        linked = any('/Python.framework/' in name for name in result['binaries'][binary].get('dependencies', []))
+        result['python_linked'] = linked
+        if variant in ('no-python', 'baseline09'):
+            assert not result['python_embedded'] and not linked, 'no-python build contains or links Python'
+            assert not any(name.startswith(root + 'python/') for name in z.namelist()), 'no-python build includes stdlib'
+            assert root + 'ysp-live.py' not in z.namelist(), 'no-python build includes bundled Python service'
+            assert info['CFBundleIdentifier'].endswith('.nopy'), 'diagnostic bundle must install separately'
+        elif variant == 'full':
+            assert result['python_embedded'] and linked, 'full build missing embedded or linked Python'
+            assert root + 'host_service_runtime.py' in z.namelist(), 'full build missing service lifecycle manager'
+            assert root + 'yangshipin-js.py' in z.namelist(), 'missing JS HTTP adapter'
+            assert len(z.read(root + 'yangshipin.bundle.js')) > 10000, 'missing original JS extractor bundle'
+            assert root + 'yangshipin-LICENSE.txt' in z.namelist(), 'missing JS plugin license'
+            assert root + 'JSPlugins/yangshipin/upstream/resolver.js' in z.namelist(), 'missing original JS sources'
+            assert any('JavaScriptCore.framework/' in name for name in result['binaries'][binary]['dependencies']), 'missing JavaScriptCore link'
+            result['binaries']['NodeMobile'] = macho_info(z.read(root + 'Frameworks/NodeMobile.framework/NodeMobile'))
+            assert not any('NodeMobile.framework/' in name for name in result['binaries'][binary]['dependencies']), 'Node must load on demand'
+            for member in ('media-service.py', 'host_media_runtime.py', 'host_media_relay.py', 'node-plugin-host.cjs', 'node-fetch.bundle.cjs', 'node-fetch-THIRD-PARTY-NOTICES.txt', 'base/spider.py', 'NodeMobile-LICENSE.txt', 'drpy-LICENSE.txt'):
+                assert root + member in z.namelist(), 'missing media component: ' + member
+            assert len(z.read(root + 'js-runtime.bundle.js')) > 100000, 'missing generic JS and drpy engine'
+            for package in ('requests', 'bs4', 'html5lib', 'urllib3'):
+                assert root + 'python/lib/python3.13/site-packages/' + package + '/__init__.py' in z.namelist(), 'missing Python dependency: ' + package
+            result['local_media_runtimes'] = ['Python Spider', 'JavaScriptCore', 'drpy', 'Node.js Mobile']
         channels = json.loads(z.read(root + 'channels.json'))
         assert isinstance(channels, list) and channels, 'empty channel catalog'
         result['channel_count'] = len(channels)

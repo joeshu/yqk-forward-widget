@@ -20,10 +20,25 @@ SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 ARCH=$(uname -m)
 xcrun --sdk iphonesimulator clang -fobjc-arc -target "$ARCH-apple-ios15.0-simulator" -isysroot "$SDK" \
   -I Sources/Include -I Sources Sources/*.m Tests/UISmoke/*.m \
-  -framework Foundation -framework UIKit -framework CoreGraphics -framework CoreMedia -framework AVFoundation -framework AVKit \
-  -framework MediaPlayer -framework QuartzCore -framework UniformTypeIdentifiers \
+  -framework WebKit -framework JavaScriptCore -framework Security -framework Foundation -framework UIKit -framework ImageIO -framework CoreGraphics -framework CoreMedia -framework AVFoundation -framework AVKit \
+  -framework MediaPlayer -framework QuartzCore -framework UniformTypeIdentifiers -lz \
   -o "$APP/CCTVHost"
 cp Resources/channels.json "$APP/"
+cp Plugins/node-plugin-host.cjs "$APP/"
+if [ ! -s GeneratedJS/node-fetch.bundle.cjs ]; then
+  npm ci --prefix JSPlugins --no-audit --no-fund
+  npm run build --prefix JSPlugins
+fi
+cp GeneratedJS/node-fetch.bundle.cjs "$APP/"
+python3 - "$APP/catpaw-ui.cjs" <<'PY'
+import hashlib,pathlib,sys,urllib.request
+url='https://joeshu.github.io/yqk-forward-widget/catpaw/index.js'
+data=urllib.request.urlopen(url,timeout=30).read(8*1024*1024)
+assert hashlib.sha256(data).hexdigest()=='51f535c2bf5e7dfdd2b7a6b941a2d9475e4010ab94bf08488542246eeebe344a','Catpaw fixture changed'
+pathlib.Path(sys.argv[1]).write_bytes(data)
+PY
+python3 Scripts/prepare_node_runtime.py "$APP" --simulator
+codesign --force --sign - "$APP/Frameworks/NodeMobile.framework"
 python3 - "$APP/Info.plist" <<'PY'
 import plistlib,sys
 with open('Resources/Info.plist','rb') as f:p=plistlib.load(f)
@@ -38,11 +53,15 @@ xcrun simctl bootstatus "$SIM" -b
 xcrun simctl install "$SIM" "$APP"
 xcrun simctl launch "$SIM" com.example.cctvhost.uismoke --smoke-port "$FIXTURE_PORT"
 CONTAINER=$(xcrun simctl get_app_container "$SIM" com.example.cctvhost.uismoke data)
-for attempt in $(seq 1 40); do
+for attempt in $(seq 1 120); do
   if [ -f "$CONTAINER/Documents/ui-smoke/results.json" ]; then break; fi
   sleep 2
 done
 cp -R "$CONTAINER/Documents/ui-smoke/." "$OUT/"
+if [ -f "$CONTAINER/Library/Application Support/ysp/cctvhost.log" ]; then
+  cp "$CONTAINER/Library/Application Support/ysp/cctvhost.log" "$OUT/diagnostic.log"
+fi
+cat "$OUT/fixture.log"
 python3 - "$OUT/results.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1])); print(json.dumps(r,ensure_ascii=False,indent=2)); assert r['passed'],r['failures']

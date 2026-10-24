@@ -26,6 +26,15 @@ int main(int argc, const char **argv) {
         check([trace.summary containsString:@"itemReady=1.00s"] &&
                   [trace.summary containsString:@"frame=3.50s"],
               @"summary keeps distinct stages");
+        PlaybackStartupTrace *stalled=[[PlaybackStartupTrace alloc] initWithStartTime:100];
+        check(![stalled shouldRecoverMissingSetupAtTime:120 alreadyRetried:NO failed:NO], @"no retry before VDN success");
+        [stalled record:@"vdn" atTime:102];
+        check(![stalled shouldRecoverMissingSetupAtTime:107.9 alreadyRetried:NO failed:NO], @"allow VDN to finish creating core");
+        check([stalled shouldRecoverMissingSetupAtTime:108 alreadyRetried:NO failed:NO], @"recover missing setup after grace period");
+        check(![stalled shouldRecoverMissingSetupAtTime:120 alreadyRetried:YES failed:NO], @"at most one startup recovery");
+        check(![stalled shouldRecoverMissingSetupAtTime:120 alreadyRetried:NO failed:YES], @"do not bypass failure or authentication rejection");
+        [stalled record:@"setup" atTime:103];
+        check(![stalled shouldRecoverMissingSetupAtTime:120 alreadyRetried:NO failed:NO], @"buffering after setup is not missing core");
         __block BOOL done = NO;
         __block NSInteger calls = 0;
         LocalServiceReadiness *ready = [[LocalServiceReadiness alloc]

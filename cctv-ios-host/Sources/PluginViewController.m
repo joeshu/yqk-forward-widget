@@ -1,5 +1,6 @@
 #import "PluginViewController.h"
 #import "PyHost.h"
+#import "ServiceStore.h"
 
 @interface PluginViewController ()
 @property(nonatomic,strong) UILabel *statusLabel;
@@ -145,7 +146,8 @@
 - (void)updateRunning:(BOOL)running subscriptionCount:(NSUInteger)count {
     self.subscriptionCount = count;
     self.statusDot.backgroundColor = running ? UIColor.systemGreenColor : UIColor.systemGrayColor;
-    self.statusLabel.text = running ? @"运行中 · 端口 8767" : @"未运行";
+    self.statusLabel.text = running ? [NSString stringWithFormat:@"运行中 · 端口 %ld",(long)PyHost.port] : @"未运行";
+    self.urlLabel.text=[self subscriptionURL];
     self.countLabel.text = [NSString stringWithFormat:@"订阅源 · %lu", (unsigned long)count];
     self.startButton.enabled = !running;
     self.stopButton.enabled = running;
@@ -157,5 +159,10 @@
 - (void)add { if (self.onAddSubscription) self.onAddSubscription(); }
 - (void)manage { if (self.onManageSubscriptions) self.onManageSubscriptions(); }
 - (void)openLog { if (self.onOpenLog) self.onOpenLog(); }
-- (void)copyURL { UIPasteboard.generalPasteboard.string = @"http://127.0.0.1:8767/all.m3u"; self.urlLabel.text = @"已复制 · http://127.0.0.1:8767/all.m3u"; }
+- (NSString *)subscriptionURL {
+    NSInteger port=8767;
+    for(NSDictionary *s in [ServiceStore services])if([s[@"builtin"] boolValue]){port=[s[@"port"] integerValue];break;}
+    return [NSString stringWithFormat:@"http://127.0.0.1:%ld/all.m3u",(long)port];
+}
+- (void)copyURL { UIPasteboard.generalPasteboard.string=[self subscriptionURL];self.urlLabel.text=[@"已复制 · " stringByAppendingString:[self subscriptionURL]]; }
 @end

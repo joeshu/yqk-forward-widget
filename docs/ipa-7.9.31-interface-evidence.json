@@ -1,0 +1,126 @@
+{
+  "ipa_sha256": "e7b153ab80a17a646d7011ebedc17b786835ab27feba4959af07bcc7ec8c9315",
+  "app_version": "7.9.31",
+  "main_executable_cryptid": 0,
+  "objc_classes_indexed": 5314,
+  "selected_interfaces": [
+    {
+      "class": "CNPlayerView",
+      "methods": [
+        {
+          "name": "backToLive",
+          "types": "v16@0:8",
+          "imp": "0x1002839d4"
+        },
+        {
+          "name": "seekToStartTime:endTime:completionHandler:",
+          "types": "v40@0:8d16d24@?32",
+          "imp": "0x100284d1c"
+        }
+      ]
+    },
+    {
+      "class": "CNPlayerSimpleLiveView",
+      "methods": [
+        {
+          "name": "backToLive",
+          "types": "v16@0:8",
+          "imp": "0x100303768"
+        },
+        {
+          "name": "seekToStartTime:endTime:completionHandler:",
+          "types": "v40@0:8d16d24@?32",
+          "imp": "0x100303b1c"
+        }
+      ]
+    },
+    {
+      "class": "CNPlayerPortraitLiveView",
+      "methods": [
+        {
+          "name": "backToLive",
+          "types": "v16@0:8",
+          "imp": "0x10056fe30"
+        },
+        {
+          "name": "backToLiveSwitchRate",
+          "types": "v16@0:8",
+          "imp": "0x100570ca0"
+        },
+        {
+          "name": "seekToStartTime:endTime:completionHandler:",
+          "types": "v40@0:8d16d24@?32",
+          "imp": "0x100571b0c"
+        }
+      ]
+    },
+    {
+      "class": "CNPlayerLiveView",
+      "methods": [
+        {
+          "name": "backToLive",
+          "types": "v16@0:8",
+          "imp": "0x100e42b78"
+        },
+        {
+          "name": "backToLiveSwitchRate",
+          "types": "v16@0:8",
+          "imp": "0x100e43150"
+        },
+        {
+          "name": "seekToStartTime:endTime:completionHandler:",
+          "types": "v40@0:8d16d24@?32",
+          "imp": "0x100e437bc"
+        }
+      ]
+    },
+    {
+      "class": "CNLiveTimeShiftView",
+      "methods": [
+        {
+          "name": "backToLiveUpdateTimeShiftView",
+          "types": "v16@0:8",
+          "imp": "0x100ed0248"
+        }
+      ]
+    },
+    {
+      "class": "TimeShiftHelper",
+      "methods": [
+        {
+          "name": "initWithUrl:domain:appId:bizId:",
+          "types": "@48@0:8@16@24q32q40",
+          "imp": "0x101ac0b28"
+        },
+        {
+          "name": "getDuration:",
+          "types": "v24@0:8@?16",
+          "imp": "0x101ac0e84"
+        },
+        {
+          "name": "seekUrl:",
+          "types": "@24@0:8q16",
+          "imp": "0x101ac137c"
+        }
+      ]
+    },
+    {
+      "class": "EBAppLogRegisterEngine",
+      "methods": [
+        {
+          "name": "registerDeviceWithRetryTimes:",
+          "types": "v24@0:8q16",
+          "imp": "0x102400838"
+        },
+        {
+          "name": "registerDeviceInternal:",
+          "types": "v24@0:8q16",
+          "imp": "0x102400e00"
+        }
+      ]
+    }
+  ],
+  "sdk_timeshift_completion_block_signature": "v12@?0B8",
+  "sdk_seek_method_encoding": "v40@0:8d16d24@?32",
+  "xnet_dependency_load_command": "LC_LOAD_WEAK_DYLIB"
+}

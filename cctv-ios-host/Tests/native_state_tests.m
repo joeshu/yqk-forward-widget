@@ -1,5 +1,7 @@
 #import "HostBackup.h"
 #import "ServiceStore.h"
+#import "HostLogBuffer.h"
+#import <dispatch/dispatch.h>
 #import <Foundation/Foundation.h>
 static void check(BOOL ok, NSString *message) {
     if (!ok) {
@@ -12,6 +14,20 @@ static NSData *encode(id object) {
 }
 int main(void) {
     @autoreleasepool {
+        HostLogBuffer *logs=[[HostLogBuffer alloc] initWithMaximumCharacters:64];
+        check([logs append:@"first"], @"first log schedules a notification");
+        check(![logs append:@"second"], @"pending log delivery is coalesced");
+        check([[logs drain] isEqual:@"firstsecond"], @"drain preserves unsaturated log order");
+        check([logs append:[[@"😀" stringByPaddingToLength:100000 withString:@"😀" startingAtIndex:0] stringByAppendingString:@"x"]], @"new batch schedules again");
+        NSString *tail=[logs drain];check(tail.length<=64 && [tail dataUsingEncoding:NSUTF8StringEncoding]!=nil,@"oversized unicode log is bounded without splitting surrogate pairs");
+        __block NSUInteger notifications=0;
+        dispatch_apply(2000,dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^(size_t index){@autoreleasepool {
+            if([logs append:[NSString stringWithFormat:@"线程 %zu 😀\\n",index]]){@synchronized(logs){notifications++;}}
+        }});
+        check(notifications==1 && logs.length<=64,@"concurrent log flood has one pending notification and bounded memory");
+        tail=[logs drain];check([tail dataUsingEncoding:NSUTF8StringEncoding]!=nil,@"concurrent log tail remains valid UTF-8");
+        [logs append:@"old"];[logs clear];check([[logs drain] isEqual:@""],@"clear drops pending output");
+        check([logs append:@"new"],@"clear permits a fresh notification");
         NSDictionary *valid = @{
             @"format" : @"CCTVHost",
             @"version" : @1,
@@ -69,6 +85,13 @@ int main(void) {
             if ([s[@"id"] isEqual:@"builtin-ysp"])
                 builtin = YES;
         check(builtin, @"bundled service preserved");
+        [ServiceStore remove:@"builtin-yangshipin-js"];
+        NSDictionary *javascript=nil;
+        for(NSDictionary *s in [ServiceStore services])if([s[@"id"] isEqual:@"builtin-yangshipin-js"])javascript=s;
+        check(javascript && [javascript[@"engine"] isEqual:@"javascript"], @"JS service preserved with explicit engine");
+        check([javascript[@"port"] integerValue]==18770, @"JS service has separate subscription port");
+        NSString *jsData=[ServiceStore dataDirectoryForService:javascript error:NULL];
+        check([jsData.lastPathComponent isEqual:@"builtin-yangshipin-js"], @"JS data does not share legacy YSP directory");
         NSString *migrationID = NSUUID.UUID.UUIDString;
         NSString *prior = [[ServiceStore directory] stringByAppendingPathComponent:@"builtin-ysp"];
         NSString *historical =

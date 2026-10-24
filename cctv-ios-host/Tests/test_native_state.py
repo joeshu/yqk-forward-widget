@@ -16,6 +16,8 @@ class NativeStateTests(unittest.TestCase):
                 "-I", str(root / "Sources"),
                 str(root / "Tests" / "native_state_tests.m"),
                 str(root / "Sources" / "HostBackup.m"),
+                str(root / "Sources" / "ProfileStore.m"),
                 str(root / "Sources" / "ServiceStore.m"), "-o", executable,
+                str(root / "Sources" / "HostLogBuffer.m"),
             ], check=True, capture_output=True, text=True)
-            subprocess.run([executable], check=True, capture_output=True, text=True)
+            subprocess.run([executable], check=True, capture_output=True, text=True, timeout=30)

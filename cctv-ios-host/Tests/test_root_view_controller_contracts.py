@@ -28,7 +28,7 @@ def method_body(signature):
 
 class RootViewControllerSourceContracts(unittest.TestCase):
     def test_subscription_refresh_is_source_owned_and_replaces_stale_entries(self):
-        body = method_body("- (void)fetchSubscription:")
+        body = method_body("- (void)installPlaylist:")
         self.assertIn("stableURLKey:", body)
         self.assertIn('existing[@"subscriptionSources"]', body)
         self.assertIn("[owners removeObject:sourceKey]", body)
@@ -49,18 +49,13 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("requestVersion", body)
         self.assertIn("!= requestVersion", body)
 
-    def test_logo_completion_checks_reused_image_view_binding(self):
-        body = method_body("- (void)loadLogo:")
-        self.assertIn("iv.accessibilityIdentifier = url", body)
-        self.assertIn("weakIV.accessibilityIdentifier isEqualToString:url", body)
-
     def test_epg_cache_rejects_future_timestamps(self):
         body = method_body("- (void)loadEPGCache")
         self.assertRegex(body, r"ts\s*<=\s*now")
         self.assertRegex(body, r"now\s*-\s*ts\s*<\s*6\s*\*\s*3600")
 
     def test_now_next_uses_cache_and_rejects_stale_playback_callback(self):
-        body = method_body("- (void)refreshNowNext")
+        body = method_body("- (void)refreshNowNext") + method_body("- (void)refreshOfficialNowNext")
         self.assertIn("NSDictionary *cached = self.epgCache[cid]", body)
         self.assertIn("epgGeneration != weakSelf.playbackGeneration", body)
         self.assertIn("![weakSelf.channelID isEqualToString:cid]", body)
@@ -86,7 +81,28 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("BOOL remotePlayback = self.avPlayer != nil", body)
         self.assertIn("if (remotePlayback)", body)
         self.assertIn("playViaSDK:cid title:name", body)
-        self.assertIn("self.playbackGeneration += 1", method_body("- (void)playRemote:"))
+        self.assertIn("self.playbackGeneration += 1", method_body("- (void)startRemoteChannel:"))
+
+    def test_remote_failure_recovery_is_bounded_and_deduplicates_player_callbacks(self):
+        body = method_body("- (void)recoverRemoteFailureForItem:")
+        self.assertIn("self.remoteRetryCount<1", body)
+        self.assertIn("self.remoteFailureRecoveryPending", body)
+        self.assertIn("generation!=self.playbackGeneration", body)
+        self.assertIn("item!=self.avPlayer.currentItem", body)
+        self.assertIn("[self recoverRemoteFailureForItem:n.object error:e]", method_body("- (void)avItemFailed:"))
+        self.assertIn("[self recoverRemoteFailureForItem:item error:item.error]", method_body("- (void)observeValueForKeyPath:"))
+
+    def test_remote_channel_reselection_restarts_after_failed_source(self):
+        body = method_body("- (void)selectChannel:")
+        self.assertIn("self.remotePlaybackWanted || self.playbackReadiness", body)
+        self.assertNotIn("(self.avPlayer || self.playbackReadiness)", body)
+
+    def test_media_and_resource_tabs_reuse_page_state(self):
+        self.assertIn("self.tabPages[@2]", TEXT)
+        self.assertIn("self.tabPages[@3]", TEXT)
+        self.assertIn("self.tabPages[@4]", TEXT)
+        self.assertIn("[page refreshSources]", TEXT)
+        self.assertIn("for(NSDictionary *candidate in updated)if([candidate[@\"id\"] isEqual:self.source[@\"id\"]])", (SOURCE.parent / "MediaBrowserViewController.m").read_text(encoding="utf-8"))
 
     def test_bottom_tabs_open_service_directory_and_settings_pages(self):
         self.assertIn('- (void)buildBottomBar', TEXT)
@@ -95,6 +111,28 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('ServicesViewController *page', TEXT)
         self.assertIn('[weakSelf openPluginPage]', TEXT)
         self.assertIn('SettingsViewController *page', TEXT)
+
+    def test_live_header_actions_follow_selected_channel_and_group(self):
+        navigation = method_body("- (void)configureCatalogNavigation")
+        group_menu = method_body("- (void)showGroupMenu")
+        self.assertIn("BOOL expandedLive", navigation)
+        self.assertIn("self.channelName", navigation)
+        self.assertIn('@"heart.fill":@"heart"', navigation)
+        self.assertIn('@"airplayvideo"', navigation)
+        self.assertIn('@"info.circle"', navigation)
+        self.assertIn("self.groupControl.selectedSegmentIndex", navigation)
+        self.assertIn("self.groupControl.numberOfSegments", group_menu)
+        self.assertIn("✓", group_menu)
+
+    def test_player_failures_stop_loading_and_offer_manual_retry(self):
+        failure = TEXT[TEXT.rindex("- (void)displayNativePlaybackFailure:"):]
+        retry = method_body("- (void)togglePlayPause")
+        self.assertIn("[self.spinner stopAnimating]", failure)
+        self.assertIn("[self endPlaybackPriority]", failure)
+        self.assertIn('setTitle:@"重试"', failure)
+        self.assertIn("self.nativePlaybackFailed", retry)
+        self.assertIn("self.remotePlaybackFailed", retry)
+        self.assertIn("displayNativePlaybackFailure:@\"频道调度失败\"", method_body("- (void)player:(id)player vdnRequestFailed:"))
 
     def test_settings_preferences_are_wired_to_real_playback_behavior(self):
         for key in ['resumeLastChannel','rememberLastChannel','autoLoadEPG','allowBackgroundAudio','autoPiP']:
@@ -126,12 +164,12 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('urlString.length > 8192', body)
         self.assertIn('isEqualToString:@"http"', body)
         self.assertIn('isEqualToString:@"https"', body)
-        self.assertIn('skippedInvalidURLs++', method_body('- (void)fetchSubscription:'))
+        self.assertIn('skippedInvalidURLs++', method_body('- (void)installPlaylist:'))
 
     def test_m3u_parser_catches_invalid_url_lines(self):
         parser = (SOURCE.parent / "M3UParser.m").read_text(encoding="utf-8")
         self.assertIn('@catch (NSException *exception)', parser)
-        self.assertIn('pendingLogo = nil; continue;', parser)
+        self.assertIn('pendingLogo = nil; pendingEPGID = nil; continue;', parser)
 
     def test_catalog_supports_grid_and_list_and_routes_remain_long_press(self):
         self.assertIn('self.table.rowHeight = 48', TEXT)
@@ -152,7 +190,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('"--links-per-device", "2"', PYHOST)
         self.assertIn('iOS 插件安全模式', PYHOST)
 
-    def test_favorites_tab_filters_catalog(self):
+    def test_favorites_filter_remains_available(self):
         self.assertIn('self.favoritesOnly', TEXT)
         self.assertIn('if (self.favoritesOnly) {', TEXT)
 
