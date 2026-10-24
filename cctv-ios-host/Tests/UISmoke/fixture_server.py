@@ -11,6 +11,8 @@ import sys
 import struct
 import zlib
 
+# Four-second H.264 Baseline color bars with a magenta block, so a successful
+# first-frame check cannot pass on a deliberately all-black movie.
 VIDEO = base64.b64decode(pathlib.Path(__file__).with_name("video_fixture.b64").read_text())
 
 
