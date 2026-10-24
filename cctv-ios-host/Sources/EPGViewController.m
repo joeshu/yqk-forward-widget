@@ -19,6 +19,8 @@
 @property (nonatomic, strong) UISegmentedControl *dates;
 @property (nonatomic, strong) NSArray<NSString *> *dateKeys;
 @property (nonatomic, strong) NSTimer *refreshTimer;
+@property(nonatomic,assign) BOOL pageVisible;
+@property(nonatomic,assign) BOOL needsRefreshOnAppear;
 @end
 
 @implementation EPGViewController
@@ -56,7 +58,8 @@
                                               style:UITableViewStyleInsetGrouped];
     self.table.dataSource = self;
     self.table.delegate = self;
-    self.table.rowHeight = 68;
+    self.table.rowHeight = UITableViewAutomaticDimension;
+    self.table.estimatedRowHeight = 68;
     self.table.backgroundColor = UIColor.blackColor;
     self.table.separatorColor = [UIColor colorWithWhite:0.2 alpha:1];
     UIRefreshControl *refresh = [UIRefreshControl new];
@@ -65,14 +68,40 @@
     [self.view addSubview:self.table];
 
     self.dates=[[UISegmentedControl alloc] initWithItems:@[]];self.dates.selectedSegmentTintColor=HostAccent();[self.dates addTarget:self action:@selector(filterDate) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.dates];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationDidEnterBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationWillEnterForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
     [self fetch];
 
 }
 
-- (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];[self.refreshTimer invalidate];__weak typeof(self) w=self;self.refreshTimer=[NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer *t){[w fetch];}];}
-- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];self.requestGeneration++;[self.refreshTimer invalidate];self.refreshTimer=nil;[self.task cancel];}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];self.pageVisible=YES;
+    if(self.needsRefreshOnAppear){self.needsRefreshOnAppear=NO;[self fetch];}
+    [self scheduleRefreshTimer];
+}
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];self.pageVisible=NO;self.needsRefreshOnAppear=YES;
+    [self cancelPageRequest];[self.refreshTimer invalidate];self.refreshTimer=nil;
+}
+- (void)scheduleRefreshTimer {
+    [self.refreshTimer invalidate];self.refreshTimer=nil;
+    if(!self.pageVisible||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
+    __weak typeof(self) w=self;self.refreshTimer=[NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer *t){[w fetch];}];
+}
+- (void)cancelPageRequest {
+    self.requestGeneration++;[self.task cancel];self.task=nil;
+    [self.spinner stopAnimating];[self.table.refreshControl endRefreshing];
+}
+- (void)applicationDidEnterBackground {
+    self.needsRefreshOnAppear=YES;[self.refreshTimer invalidate];self.refreshTimer=nil;[self cancelPageRequest];
+}
+- (void)applicationWillEnterForeground {
+    if(!self.pageVisible)return;
+    self.needsRefreshOnAppear=NO;[self fetch];[self scheduleRefreshTimer];
+}
 
 - (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
     [self.refreshTimer invalidate];
     [self.task cancel];
 }
@@ -131,15 +160,33 @@
 }
 - (NSDateFormatter *)dayFormatter {NSDateFormatter *f=[NSDateFormatter new];f.timeZone=[NSTimeZone timeZoneWithName:@"Asia/Shanghai"];f.dateFormat=@"yyyy-MM-dd";return f;}
 - (void)rebuildDates {
-    NSDateFormatter *f=[self dayFormatter];NSMutableOrderedSet *days=[NSMutableOrderedSet orderedSet];for(NSDictionary *row in self.allRows)[days addObject:[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]]];self.dateKeys=days.array;
-    [self.dates removeAllSegments];NSString *today=[f stringFromDate:NSDate.date];NSInteger selected=NSNotFound;for(NSUInteger i=0;i<self.dateKeys.count;i++){NSString *key=self.dateKeys[i];NSString *title=[key isEqualToString:today]?@"今天":[key substringFromIndex:5];[self.dates insertSegmentWithTitle:title atIndex:i animated:NO];if([key isEqualToString:today])selected=i;}
-    self.dates.selectedSegmentIndex=selected==NSNotFound?MAX(0,(NSInteger)self.dateKeys.count-1):selected;[self filterDate];
+    NSDateFormatter *f=[self dayFormatter];NSString *previous=(self.dates.selectedSegmentIndex>=0&&self.dates.selectedSegmentIndex<self.dateKeys.count)?self.dateKeys[self.dates.selectedSegmentIndex]:nil;NSMutableOrderedSet *days=[NSMutableOrderedSet orderedSet];for(NSDictionary *row in self.allRows)[days addObject:[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]]];self.dateKeys=days.array;
+    [self.dates removeAllSegments];NSString *today=[f stringFromDate:NSDate.date];NSInteger selected=NSNotFound;for(NSUInteger i=0;i<self.dateKeys.count;i++){NSString *key=self.dateKeys[i];NSString *title=[key isEqualToString:today]?@"今天":[key substringFromIndex:5];[self.dates insertSegmentWithTitle:title atIndex:i animated:NO];if([key isEqualToString:previous])selected=i;}
+    if(selected==NSNotFound)for(NSUInteger i=0;i<self.dateKeys.count;i++)if([self.dateKeys[i] isEqualToString:today]){selected=i;break;}
+    self.dates.selectedSegmentIndex=self.dateKeys.count?(selected==NSNotFound?(NSInteger)self.dateKeys.count-1:selected):UISegmentedControlNoSegment;[self filterDate];
 }
 - (void)filterDate {
     NSInteger idx=self.dates.selectedSegmentIndex;if(idx<0||idx>=self.dateKeys.count)return;NSString *key=self.dateKeys[idx];NSDateFormatter *f=[self dayFormatter];self.rows=[self.allRows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]] isEqualToString:key];}]];[self.table reloadData];
     NSTimeInterval now=NSDate.date.timeIntervalSince1970;for(NSUInteger i=0;i<self.rows.count;i++){NSDictionary *row=self.rows[i];if(now>=[row[@"start"] doubleValue]&&now<[row[@"end"] doubleValue]){[self.table scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:i inSection:0] atScrollPosition:UITableViewScrollPositionMiddle animated:NO];break;}}
 }
-- (void)showSourceInfo {NSString *message=[NSString stringWithFormat:@"频道：%@\n匹配 ID：%@\n数据来源：%@\n时区：北京时间\n\n日期仅展示接口实际返回的节目。CCTV 原生频道可点按已播节目请求回看；范围与版权由频道服务确认。",self.channelName,self.xmlSource.length?[ProfileStore epgIDForChannel:self.channel]:self.channelID,self.sourceName?:self.xmlSource?:@"央视官方 EPG"];UIAlertController *a=[UIAlertController alertControllerWithTitle:@"EPG 频道信息" message:message preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[self presentViewController:a animated:YES completion:nil];}
+- (NSString *)safeSourceDescription {
+    NSString *raw=self.xmlSource?:@"";NSURLComponents *components=[NSURLComponents componentsWithString:raw];
+    if(!components.host.length)return self.sourceName?:@"央视官方 EPG";
+    BOOL hidden=components.user.length||components.password.length;
+    components.user=nil;components.password=nil;components.fragment=nil;
+    NSString *value=components.string?:@"XMLTV";return hidden?[value stringByAppendingString:@"（凭据已隐藏）"]:value;
+}
+- (void)showSourceInfo {
+    NSDictionary *mappings=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"epgMappings"]?:@{};
+    NSString *manual=mappings[self.channel[@"id"]?:@""];
+    NSString *tvgID=self.channel[@"epgID"]?:@"";NSString *tvgName=self.channel[@"tvgName"]?:@"";
+    NSString *match=manual.length?@"手动 EPG 映射":(tvgID.length?@"M3U tvg-id":(tvgName.length?@"M3U tvg-name / 频道名称":@"频道 ID / 名称"));
+    NSString *matchID=self.xmlSource.length?[ProfileStore epgIDForChannel:self.channel]:self.channelID;
+    NSString *date=self.dates.selectedSegmentIndex>=0&&self.dates.selectedSegmentIndex<self.dateKeys.count?self.dateKeys[self.dates.selectedSegmentIndex]:@"未选择日期";
+    NSString *status=self.allRows.count?[NSString stringWithFormat:@"已读取 %lu 个节目",(unsigned long)self.allRows.count]:(self.hint.text?:@"等待数据");
+    NSString *message=[NSString stringWithFormat:@"频道：%@\nM3U tvg-id：%@\nM3U tvg-name：%@\n实际匹配 ID：%@\n匹配依据：%@\n数据来源：%@\n所选日期：%@\n数据状态：%@\n时区：北京时间\n\n节目仅展示数据源实际返回的内容。CCTV 原生频道可点按已播节目请求回看，范围与版权由频道服务确认。",self.channelName,self.channel[@"epgID"]?:@"—",self.channel[@"tvgName"]?:@"—",matchID?:@"—",match,[self safeSourceDescription],date,status];
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"EPG 频道信息" message:message preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[self presentViewController:a animated:YES completion:nil];
+}
 
 - (NSArray<NSDictionary *> *)normalize:(NSArray *)rows {
     NSMutableArray *out = [NSMutableArray array];
@@ -171,8 +218,10 @@
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cellID];
         cell.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
-        cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
-        cell.detailTextLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightRegular];
+        cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+        cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+        cell.textLabel.adjustsFontForContentSizeCategory=YES;
+        cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;
         cell.textLabel.textColor = UIColor.whiteColor;
         cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;

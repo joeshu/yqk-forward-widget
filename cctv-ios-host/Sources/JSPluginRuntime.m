@@ -22,11 +22,25 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
 @property(nonatomic, strong) NSMutableSet<HostSyncRequest *> *syncRequests;
 @property(nonatomic) NSUInteger sequence;
 @property(nonatomic) NSUInteger generation;
+@property(nonatomic) BOOL router;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, JSPluginRuntime *> *sessionRuntimes;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, void (^)(NSString *)> *sessionLogHandlers;
+@property(nonatomic, copy) NSString *serviceIdentifier;
 @end
 @implementation JSPluginRuntime
-+ (instancetype)shared { static JSPluginRuntime *r; static dispatch_once_t once; dispatch_once(&once, ^{ r=[self new]; }); return r; }
++ (instancetype)shared { static JSPluginRuntime *r; static dispatch_once_t once; dispatch_once(&once, ^{ r=[self routerWithScriptURL:nil configuration:nil]; }); return r; }
++ (instancetype)routerWithScriptURL:(NSURL *)url configuration:(NSURLSessionConfiguration *)configuration { JSPluginRuntime *r=[[self alloc] initWithScriptURL:url configuration:configuration];r.router=YES;r.sessionRuntimes=[NSMutableDictionary dictionary];r.sessionLogHandlers=[NSMutableDictionary dictionary];return r; }
 - (instancetype)init { return [self initWithScriptURL:nil configuration:nil]; }
-- (instancetype)initWithScriptURL:(NSURL *)url configuration:(NSURLSessionConfiguration *)configuration { if((self=[super init])) { _scriptURL=url;_networkConfiguration=configuration; _queue=dispatch_queue_create("cctvhost.javascript", DISPATCH_QUEUE_SERIAL);_requests=[NSMutableDictionary dictionary];_syncRequests=[NSMutableSet set];_timers=[NSMutableDictionary dictionary];_calls=[NSMutableDictionary dictionary]; } return self; }
+- (instancetype)initWithScriptURL:(NSURL *)url configuration:(NSURLSessionConfiguration *)configuration { if((self=[super init])) { _scriptURL=url;_networkConfiguration=configuration; _queue=dispatch_queue_create("cctvhost.javascript", DISPATCH_QUEUE_SERIAL);_requests=[NSMutableDictionary dictionary];_syncRequests=[NSMutableSet set];_timers=[NSMutableDictionary dictionary];_calls=[NSMutableDictionary dictionary];_sessionLogHandlers=[NSMutableDictionary dictionary]; } return self; }
+- (NSArray<NSString *> *)activeSessionIdentifiers { if(!self.router)return self.activeSession.length?@[(self.serviceIdentifier.length?self.serviceIdentifier:self.activeSession)]:@[];@synchronized(self){NSMutableOrderedSet *ids=[NSMutableOrderedSet orderedSet];for(JSPluginRuntime *runtime in self.sessionRuntimes.allValues)if(runtime.activeSession.length)[ids addObject:runtime.serviceIdentifier.length?runtime.serviceIdentifier:runtime.activeSession];return ids.array.copy?:@[];} }
+- (NSArray<NSString *> *)managedServiceIdentifiers {if(!self.router)return self.serviceIdentifier.length?@[self.serviceIdentifier]:@[];@synchronized(self){NSMutableOrderedSet *ids=[NSMutableOrderedSet orderedSet];for(JSPluginRuntime *runtime in self.sessionRuntimes.allValues)if(runtime.serviceIdentifier.length)[ids addObject:runtime.serviceIdentifier];return ids.array.copy?:@[];}}
+- (void)setLogHandler:(void (^)(NSString *))handler forServiceIdentifier:(NSString *)identifier {@synchronized(self){if(identifier.length&&handler)self.sessionLogHandlers[identifier]=[handler copy];else if(identifier.length)[self.sessionLogHandlers removeObjectForKey:identifier];}}
+- (BOOL)stopSessionsForServiceIdentifier:(NSString *)identifier error:(NSError **)error {
+    if(!self.router){if(!self.activeSession.length||![self.serviceIdentifier isEqual:identifier])return YES;NSDictionary *payload=@{@"session":self.activeSession,@"serviceID":identifier?:@""};NSData *data=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];NSString *reply=[self callOperation:@"stop" json:[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] timeout:10 error:error];id value=reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:nil;return [value isKindOfClass:NSDictionary.class]&&[value[@"ok"] boolValue];}
+    NSArray<NSString *> *sessions=nil;@synchronized(self){NSMutableArray *values=[NSMutableArray array];for(NSString *session in self.sessionRuntimes)if([self.sessionRuntimes[session].serviceIdentifier isEqual:identifier])[values addObject:session];sessions=values.copy;}
+    for(NSString *session in sessions){NSDictionary *payload=@{@"session":session,@"serviceID":identifier?:@""};NSData *data=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];NSString *reply=[self callOperation:@"stop" json:[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] timeout:10 error:error];id value=reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:nil;if(![value isKindOfClass:NSDictionary.class]||![value[@"ok"] boolValue])return NO;}
+    return YES;
+}
 - (void)log:(NSString *)text { @autoreleasepool { if(text.length>4096)text=[text substringToIndex:4096];if(self.logHandler)self.logHandler(text); } }
 - (BOOL)allowedURL:(NSURL *)url {
     if(self.genericMode)return [@[@"http",@"https"] containsObject:url.scheme.lowercaseString] && url.host.length && !url.user.length && !url.password.length;
@@ -179,6 +193,29 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     for(NSString *key in self.calls.allKeys)[self finishCall:key answer:@"{\"ok\":false,\"error\":\"JS 服务已停止\"}"];
 }
 - (NSString *)callOperation:(NSString *)operation json:(NSString *)json timeout:(NSTimeInterval)timeout error:(NSError **)error {
+    if(self.router){
+        NSData *input=[json dataUsingEncoding:NSUTF8StringEncoding];id payload=input?[NSJSONSerialization JSONObjectWithData:input options:0 error:NULL]:nil;
+        NSString *session=[payload isKindOfClass:NSDictionary.class]&&[payload[@"session"] isKindOfClass:NSString.class]?payload[@"session"]:@"";
+        if(!session.length){if(error)*error=[NSError errorWithDomain:@"JSPlugin" code:3 userInfo:@{NSLocalizedDescriptionKey:@"JS 会话标识无效"}];return nil;}
+        JSPluginRuntime *runtime=nil;
+        @synchronized(self){runtime=self.sessionRuntimes[session];if([operation isEqual:@"start"]&&!runtime){runtime=[[JSPluginRuntime alloc] initWithScriptURL:self.scriptURL configuration:self.networkConfiguration];runtime.serviceIdentifier=[payload[@"serviceID"] isKindOfClass:NSString.class]?payload[@"serviceID"]:session;void(^logger)(NSString *)=[self.sessionLogHandlers[runtime.serviceIdentifier] copy]?:[self.logHandler copy];runtime.logHandler=^(NSString *line){if(logger)logger(line);};self.sessionRuntimes[session]=runtime;}}
+        if(!runtime && [operation isEqual:@"stop"])return @"{\"ok\":true,\"result\":true}";
+        if(!runtime){if(error)*error=[NSError errorWithDomain:@"JSPlugin" code:4 userInfo:@{NSLocalizedDescriptionKey:@"JS 会话尚未启动"}];return nil;}
+        NSString *answer=[runtime callOperation:operation json:json timeout:timeout error:error];
+        id result=answer?[NSJSONSerialization JSONObjectWithData:[answer dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:nil;
+        BOOL failedStart=[operation isEqual:@"start"]&&(!answer||([result isKindOfClass:NSDictionary.class]&&![result[@"ok"] boolValue]));
+        if(failedStart){
+            // A bridge timeout does not cancel the queued JSC work. Keep the session owner
+            // reachable and queue an ordered stop; only release it after stop is confirmed.
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+                NSDictionary *stopPayload=@{@"session":session,@"serviceID":runtime.serviceIdentifier?:@""};NSData *stopData=[NSJSONSerialization dataWithJSONObject:stopPayload options:0 error:NULL];NSError *stopError=nil;
+                NSString *stopAnswer=[runtime callOperation:@"stop" json:[[NSString alloc] initWithData:stopData encoding:NSUTF8StringEncoding] timeout:15 error:&stopError];id stopReply=stopAnswer?[NSJSONSerialization JSONObjectWithData:[stopAnswer dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:nil;
+                if([stopReply isKindOfClass:NSDictionary.class]&&[stopReply[@"ok"] boolValue]){@synchronized(self){if(self.sessionRuntimes[session]==runtime)[self.sessionRuntimes removeObjectForKey:session];}}
+            });
+        }
+        if([operation isEqual:@"stop"] && answer){id reply=[NSJSONSerialization JSONObjectWithData:[answer dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];if([reply isKindOfClass:NSDictionary.class]&&[reply[@"ok"] boolValue])@synchronized(self){if(self.sessionRuntimes[session]==runtime)[self.sessionRuntimes removeObjectForKey:session];}}
+        return answer;
+    }
     if(NSThread.isMainThread){if(error)*error=[NSError errorWithDomain:@"JSPlugin" code:1 userInfo:@{NSLocalizedDescriptionKey:@"JS 服务须从后台调用"}];return nil;}
     if([operation isEqual:@"stop"]){
         id payload=[NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];

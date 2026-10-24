@@ -1,0 +1,70 @@
+{
+  "static_audit_only": true,
+  "native_playback_verified": false,
+  "sample": {
+    "filename": "cn.vuclip.mobiletv-7.9.31-eeveedecrypter.ipa",
+    "sha256": "e7b153ab80a17a646d7011ebedc17b786835ab27feba4959af07bcc7ec8c9315",
+    "bundle_id": "cn.vuclip.mobiletv",
+    "version": "7.9.31",
+    "executable_sha256": "73e3162df1a7a7831179842b0ce912d537c8ca31138cfd74385b907b86f208e1"
+  },
+  "sdk": {
+    "sha256": "e8556692053692ef89b264105931f4eed979132d1d275fa937a1d41c3fe4a9fe",
+    "matches_host_sdk": true,
+    "url_play_instance_method": {
+      "name": "playLIVEWithUrl:delegate:configOptions:",
+      "types": "B40@0:8@16@24@32",
+      "imp": "0x80c4c"
+    }
+  },
+  "app_url_frontends": [
+    {
+      "class": "CNPlayerSimpleLiveView",
+      "method": {
+        "name": "playLiveVideoWithUrl:configOptions:",
+        "types": "v32@0:8@16@24",
+        "imp": "0x100300e4c"
+      },
+      "url_play_calls": [
+        {
+          "address": "0x100300f80",
+          "selector": "playLIVEWithUrl:delegate:configOptions:"
+        }
+      ]
+    },
+    {
+      "class": "CNPlayerLiveView",
+      "method": {
+        "name": "playLiveVideoWithUrl:configOptions:",
+        "types": "v32@0:8@16@24",
+        "imp": "0x100e34138"
+      },
+      "url_play_calls": [
+        {
+          "address": "0x100e34250",
+          "selector": "playLIVEWithUrl:delegate:configOptions:"
+        }
+      ]
+    },
+    {
+      "class": "CNPlayerPortraitLiveView",
+      "method": {
+        "name": "playLiveVideoWithUrl:configOptions:",
+        "types": "v32@0:8@16@24",
+        "imp": "0x1005645e4"
+      },
+      "url_play_calls": [
+        {
+          "address": "0x100564708",
+          "selector": "playLIVEWithUrl:delegate:configOptions:"
+        }
+      ]
+    }
+  ],
+  "sample_channel_drm_metadata": {
+    "cctv1": "1",
+    "cctv13": "1",
+    "cctv7": "1"
+  },
+  "interpretation": "Observed URL frontends call CNPlayer; this does not establish a standalone AVPlayer/Cicada route, a complete DRM configuration contract, or successful decoding."
+}

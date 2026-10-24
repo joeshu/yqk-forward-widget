@@ -8,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSString *group;
 @property (nonatomic, copy, nullable) NSString *logo;
 @property (nonatomic, copy, nullable) NSString *epgID;
+@property (nonatomic, copy, nullable) NSString *tvgName;
 @end
 
 @interface M3UParser : NSObject

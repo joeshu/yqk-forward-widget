@@ -5,15 +5,30 @@
 @interface NodePluginRuntime ()
 @property(nonatomic) BOOL launched;
 @property(atomic, copy) NSString *bootError;
-@property(atomic, copy) NSString *activeSession;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *activeSessions;
+@property(nonatomic, strong) NSMutableSet<NSString *> *startingSessions;
+@property(nonatomic, strong) NSMutableSet<NSString *> *confirmedSessions;
+@property(nonatomic, strong) NSMutableSet<NSString *> *uncertainSessions;
 @property(nonatomic, copy) NSString *infoPath;
 @property(nonatomic, copy) NSString *token;
 @property(atomic) NSInteger controlPort;
 @property(nonatomic, strong) NSURLSession *session;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, void (^)(NSString *)> *sessionLogHandlers;
 @end
 @implementation NodePluginRuntime
 + (instancetype)shared {static NodePluginRuntime *runtime;static dispatch_once_t once;dispatch_once(&once,^{runtime=[self new];});return runtime;}
-- (BOOL)hasActivePlugin {return self.activeSession.length>0;}
+- (instancetype)init {if((self=[super init])){_activeSessions=[NSMutableDictionary dictionary];_startingSessions=[NSMutableSet set];_confirmedSessions=[NSMutableSet set];_uncertainSessions=[NSMutableSet set];_sessionLogHandlers=[NSMutableDictionary dictionary];}return self;}
+- (void)setLogHandler:(void (^)(NSString *))handler forServiceIdentifier:(NSString *)identifier {@synchronized(self){if(identifier.length&&handler)self.sessionLogHandlers[identifier]=[handler copy];else if(identifier.length)[self.sessionLogHandlers removeObjectForKey:identifier];}}
+- (NSArray<NSString *> *)activeSessionIdentifiers {@synchronized(self){NSMutableOrderedSet *ids=[NSMutableOrderedSet orderedSet];for(NSString *session in self.confirmedSessions){NSString *serviceID=self.activeSessions[session];if(serviceID.length)[ids addObject:serviceID];}return ids.array.copy?:@[];}}
+- (NSArray<NSString *> *)managedServiceIdentifiers {@synchronized(self){return [NSSet setWithArray:self.activeSessions.allValues].allObjects;}}
+- (BOOL)hasActivePlugin {@synchronized(self){return self.confirmedSessions.count>0;}}
+- (BOOL)isRunningSession:(NSString *)identifier {@synchronized(self){return identifier.length&&[self.confirmedSessions containsObject:identifier];}}
+- (BOOL)isManagedSession:(NSString *)identifier {@synchronized(self){return identifier.length&&self.activeSessions[identifier]!=nil;}}
+- (BOOL)isRunningServiceIdentifier:(NSString *)identifier {@synchronized(self){if(!identifier.length)return NO;for(NSString *session in self.confirmedSessions)if([self.activeSessions[session] isEqual:identifier])return YES;return NO;}}
+- (BOOL)isStartingServiceIdentifier:(NSString *)identifier {@synchronized(self){if(!identifier.length)return NO;for(NSString *session in self.startingSessions)if([self.activeSessions[session] isEqual:identifier])return YES;return NO;}}
+- (BOOL)hasUncertainSessionForServiceIdentifier:(NSString *)identifier {@synchronized(self){if(!identifier.length)return NO;for(NSString *session in self.uncertainSessions)if([self.activeSessions[session] isEqual:identifier])return YES;return NO;}}
+- (void)markStartUncertain:(NSString *)session {@synchronized(self){if(self.activeSessions[session]){[self.startingSessions removeObject:session];[self.uncertainSessions addObject:session];}}}
+- (void)removeManagedSession:(NSString *)session {@synchronized(self){[self.activeSessions removeObjectForKey:session];[self.startingSessions removeObject:session];[self.confirmedSessions removeObject:session];[self.uncertainSessions removeObject:session];}}
 - (BOOL)boot:(NSError **)error {
     NSAssert(!NSThread.isMainThread,@"Node boots on a background worker");
     @synchronized(self){
@@ -58,28 +73,43 @@
         NSString *root=[payload[@"packageRoot"] isKindOfClass:NSString.class]?payload[@"packageRoot"]:nil;
         NSString *allowed=[[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"Services"] stringByAppendingString:@"/"];
         if(!root.length || ![[NSURL fileURLWithPath:root].URLByResolvingSymlinksInPath.path hasPrefix:allowed]){if(error)*error=[self error:@"Node 入口不在已安装资源目录中"];return nil;}
-        if(self.activeSession.length && ![self.activeSession isEqual:session]){if(error)*error=[self error:@"旧 Node 插件仍在运行或停止中"];return nil;}
-        self.activeSession=session; // Reserve before I/O; a timed-out start must still be cleaned up.
-    }else if([operation isEqual:@"stop"] && ![self.activeSession isEqual:session])return @"{\"ok\":true,\"result\":true}";
+        NSString *serviceID=[payload[@"serviceID"] isKindOfClass:NSString.class]?payload[@"serviceID"]:session;
+        @synchronized(self){if(self.activeSessions[session]){if(error)*error=[self error:@"该 Node 会话已运行或启动结果待确认，请先停止后重试"];return nil;}self.activeSessions[session]=serviceID;[self.startingSessions addObject:session];} // Reserve before I/O so a timed-out start remains stoppable.
+    }else if([operation isEqual:@"stop"] && ![self isManagedSession:session])return @"{\"ok\":true,\"result\":true}";
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/control",(long)self.controlPort]]];request.HTTPMethod=@"POST";[request setValue:self.token forHTTPHeaderField:@"X-CCTVHost-Token"];[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    request.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"operation":operation,@"payload":payload} options:0 error:error];if(!request.HTTPBody)return nil;
+    request.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"operation":operation,@"payload":payload} options:0 error:error];if(!request.HTTPBody){if([operation isEqual:@"start"])[self removeManagedSession:session];return nil;}
     dispatch_semaphore_t done=dispatch_semaphore_create(0);__block NSData *body;__block NSError *failure;
     NSURLSessionDataTask *task=[self.session dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *networkError){body=data;failure=networkError;dispatch_semaphore_signal(done);}];[task resume];
-    if(dispatch_semaphore_wait(done,dispatch_time(DISPATCH_TIME_NOW,36*NSEC_PER_SEC))!=0){[task cancel];if(error)*error=[self error:@"Node 插件调用超时，未假报停止"];return nil;}
-    if(failure || body.length>2*1024*1024 || !body.length){if(error)*error=failure?:[self error:@"Node 返回结果无效或过大"];return nil;}
-    id reply=[NSJSONSerialization JSONObjectWithData:body options:0 error:error];if(![reply isKindOfClass:NSDictionary.class])return nil;
-    if([reply[@"ok"] boolValue]){if([operation isEqual:@"start"])self.activeSession=session;else if([operation isEqual:@"stop"] && [session isEqual:self.activeSession])self.activeSession=nil;}
-    if([reply[@"logs"] isKindOfClass:NSArray.class] && self.logHandler)for(id line in reply[@"logs"])if([line isKindOfClass:NSString.class])self.logHandler(line);
+    if(dispatch_semaphore_wait(done,dispatch_time(DISPATCH_TIME_NOW,36*NSEC_PER_SEC))!=0){[task cancel];if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];if(error)*error=[self error:@"Node 操作超时；会话结果未知，可尝试停止后重试"];return nil;}
+    if(failure || body.length>2*1024*1024 || !body.length){if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];if(error)*error=failure?:[self error:@"Node 返回结果无效或过大"];return nil;}
+    id reply=[NSJSONSerialization JSONObjectWithData:body options:0 error:error];if(![reply isKindOfClass:NSDictionary.class]){if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];return nil;}
+    if([operation isEqual:@"start"]){if([reply[@"ok"] boolValue]){@synchronized(self){[self.startingSessions removeObject:session];[self.uncertainSessions removeObject:session];[self.confirmedSessions addObject:session];}}else [self removeManagedSession:session];}
+    else if([operation isEqual:@"stop"]&&[reply[@"ok"] boolValue])[self removeManagedSession:session];
+    NSString *logIdentifier=[payload[@"serviceID"] isKindOfClass:NSString.class]?payload[@"serviceID"]:session;void(^logger)(NSString *)=nil;@synchronized(self){logger=[self.sessionLogHandlers[logIdentifier] copy]?:[self.logHandler copy];}
+    if([reply[@"logs"] isKindOfClass:NSArray.class] && logger)for(id line in reply[@"logs"])if([line isKindOfClass:NSString.class])logger(line);
     return [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
 }
 - (BOOL)stopWithError:(NSError **)error {
-    NSString *session=self.activeSession;if(!session.length)return YES;
-    NSData *payload=[NSJSONSerialization dataWithJSONObject:@{@"session":session} options:0 error:NULL];
+    NSArray *sessions=nil;@synchronized(self){sessions=self.activeSessions.allKeys.copy;}BOOL result=YES;NSError *first=nil;
+    for(NSString *session in sessions){NSError *failure=nil;if(![self stopSession:session error:&failure]){result=NO;if(!first)first=failure;}}
+    if(!result&&error)*error=first;return result;
+}
+- (BOOL)stopSession:(NSString *)session error:(NSError **)error {
+    if(!session.length)return YES;
+    if(![self isManagedSession:session])return YES;
+    NSString *serviceID=nil;@synchronized(self){serviceID=self.activeSessions[session];}
+    NSMutableDictionary *body=[@{@"session":session} mutableCopy];if(serviceID.length)body[@"serviceID"]=serviceID;
+    NSData *payload=[NSJSONSerialization dataWithJSONObject:body options:0 error:NULL];
     NSError *failure=nil;NSString *reply=[self callOperation:@"stop" json:[[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding] error:&failure];
     id value=reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:nil;
     BOOL stopped=[value isKindOfClass:NSDictionary.class] && [value[@"ok"] boolValue];
     if(!stopped && error){NSString *message=[value isKindOfClass:NSDictionary.class] && [value[@"error"] isKindOfClass:NSString.class]?value[@"error"]:@"Node 插件尚未停止";*error=failure?:[self error:message];}
     return stopped;
+}
+- (BOOL)stopSessionsForServiceIdentifier:(NSString *)identifier error:(NSError **)error {
+    NSArray *sessions=nil;@synchronized(self){NSMutableArray *values=[NSMutableArray array];for(NSString *session in self.activeSessions)if([self.activeSessions[session] isEqual:identifier])[values addObject:session];sessions=values.copy;}
+    BOOL success=YES;NSError *first=nil;for(NSString *session in sessions){NSError *failure=nil;if(![self stopSession:session error:&failure]){success=NO;if(!first)first=failure;}}
+    if(!success&&error)*error=first;return success;
 }
 - (NSError *)error:(NSString *)message {return [NSError errorWithDomain:@"CCTVHostNode" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];}
 @end

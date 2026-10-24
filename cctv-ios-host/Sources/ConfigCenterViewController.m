@@ -6,7 +6,7 @@
 @interface ConfigCenterViewController () <UISearchResultsUpdating>
 @property(nonatomic, strong) NSArray<NSDictionary *> *profiles;
 @property(nonatomic, strong) UISearchController *search;
-@property(nonatomic, strong) NSTimer *statusTimer;
+- (void)confirmRemoveProfile:(NSString *)source;
 @end
 @implementation ConfigCenterViewController
 - (instancetype)init {
@@ -17,7 +17,8 @@
     self.title = @"资源";
     self.tableView.backgroundColor = UIColor.blackColor;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    self.tableView.rowHeight = 100;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 116;
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.search.searchResultsUpdater = self;
     self.search.obscuresBackgroundDuringPresentation = NO;
@@ -36,10 +37,11 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self reloadProfiles];
-    [self.statusTimer invalidate];__weak typeof(self) weakSelf=self;self.statusTimer=[NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer){[weakSelf reloadProfiles];}];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(runtimeStateDidChange) name:PyHostRuntimeStateDidChangeNotification object:nil];
 }
-- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[self.statusTimer invalidate];self.statusTimer=nil;}
-- (void)dealloc {[self.statusTimer invalidate];}
+- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];}
+- (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];}
+- (void)runtimeStateDidChange {[self reloadProfiles];}
 - (void)reloadProfiles {
     NSArray *all = self.profilesProvider ? self.profilesProvider() : @[];
     NSString *q = self.search.searchBar.text.lowercaseString;
@@ -91,10 +93,13 @@
     c.layer.cornerRadius = 18;
     c.clipsToBounds = YES;
     c.textLabel.textColor = UIColor.whiteColor;
-    c.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    c.detailTextLabel.font = [UIFont systemFontOfSize:11];
+    c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+    c.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+    c.textLabel.adjustsFontForContentSizeCategory=YES;
+    c.detailTextLabel.adjustsFontForContentSizeCategory=YES;
+    c.textLabel.numberOfLines=0;
     c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    c.detailTextLabel.numberOfLines = 3;
+    c.detailTextLabel.numberOfLines = 4;
     c.imageView.tintColor = HostAccent();
     c.accessoryView = nil;
     c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -105,8 +110,11 @@
     } else {
         NSDictionary *p = self.profiles[ip.section-1];
         c.textLabel.text = p[@"name"];
+        NSTimeInterval updated=[p[@"updatedAt"] doubleValue];
+        NSString *refreshInfo=@"尚无成功刷新记录";
+        if(updated>0){NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"MM-dd HH:mm";refreshInfo=[NSString stringWithFormat:@"最近成功 %@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]];}
         c.detailTextLabel.text =
-            [NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@", p[@"count"], p[@"epgStatus"]?:@"自动匹配", [p[@"source"] hasPrefix:@"local-playlist:"]?@"本机文件 · 长按可编辑、排序":([p[@"source"] length]?p[@"source"]:@"官方频道目录")];
+            [NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@ · %@", p[@"count"], p[@"epgStatus"]?:@"自动匹配", [p[@"source"] hasPrefix:@"local-playlist:"]?@"本机文件 · 长按可编辑、排序":([p[@"source"] length]?p[@"source"]:@"官方频道目录"),refreshInfo];
         c.imageView.image = [UIImage systemImageNamed:@"list.bullet.rectangle"];
         if([p[@"type"] isEqual:@"plugin"]){c.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",p[@"runtime"],p[@"protocol"]];c.imageView.image=[UIImage systemImageNamed:@"curlybraces"];}
         UISwitch *s = [UISwitch new];
@@ -145,23 +153,39 @@
         contextualActionWithStyle:UIContextualActionStyleDestructive
                             title:@"删除"
                           handler:^(UIContextualAction *action, UIView *view, void (^done)(BOOL)) {
-                            if (self.onDeleteProfile)
-                                self.onDeleteProfile(source);
-                            [self reloadProfiles];
-                            done(YES);
+                            done(NO);
+                            [self confirmRemoveProfile:source];
                           }];
     UIContextualAction *edit=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"编辑" handler:^(UIContextualAction *action,UIView *view,void (^done)(BOOL)){if(self.onEditProfile)self.onEditProfile(source);done(YES);}];
     return [UISwipeActionsConfiguration configurationWithActions:@[a,edit]];
+}
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
+    leadingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip {
+    if(ip.section==0||![self.profiles[ip.section-1][@"source"] length]||[self.profiles[ip.section-1][@"source"] hasPrefix:@"plugin:"])return nil;
+    NSString *source=self.profiles[ip.section-1][@"source"];
+    UIContextualAction *refresh=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"刷新" handler:^(UIContextualAction *action,UIView *view,void (^done)(BOOL)){if(self.onRefreshProfile)self.onRefreshProfile(source);done(YES);}];
+    refresh.backgroundColor=HostAccent();
+    return [UISwipeActionsConfiguration configurationWithActions:@[refresh]];
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
     if(ip.section==0||![self.profiles[ip.section-1][@"source"] length])return nil;
     NSString *source=self.profiles[ip.section-1][@"source"];__weak typeof(self) w=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:source previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
         NSMutableArray *actions=[NSMutableArray arrayWithObject:[UIAction actionWithTitle:[source hasPrefix:@"plugin:"]?@"编辑资源":@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
-        if([source hasPrefix:@"plugin:"])return [UIMenu menuWithTitle:@"资源操作" children:actions];
+        if([source hasPrefix:@"plugin:"]){[actions addObject:[UIAction actionWithTitle:@"移除资源" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[w confirmRemoveProfile:source];}]];return [UIMenu menuWithTitle:@"资源操作" children:actions];}
+        [actions addObject:[UIAction actionWithTitle:@"刷新此订阅" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){if(w.onRefreshProfile)w.onRefreshProfile(source);}]];
         for(NSNumber *offset in @[@(-1),@1]){[actions addObject:[UIAction actionWithTitle:offset.integerValue<0?@"上移":@"下移" image:[UIImage systemImageNamed:offset.integerValue<0?@"arrow.up":@"arrow.down"] identifier:nil handler:^(UIAction *a){NSArray *sources=[w.profiles valueForKey:@"source"];sources=[sources filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *s,NSDictionary *b){return s.length>0;}]];[ProfileStore move:source offset:offset.integerValue sources:sources];[w reloadProfiles];}]];}
-        return [UIMenu menuWithTitle:@"资源操作" children:actions];
+        [actions addObject:[UIAction actionWithTitle:@"移除订阅" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[w confirmRemoveProfile:source];}]];
+        return [UIMenu menuWithTitle:@"订阅操作" children:actions];
     }];
+}
+- (void)confirmRemoveProfile:(NSString *)source {
+    BOOL plugin=[source hasPrefix:@"plugin:"];
+    NSString *message=plugin?@"这会从本机移除该服务配置和对应的资源代码。":"这会移除订阅源及仅由它提供的频道；其他订阅源共同提供的频道会保留。";
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:plugin?@"移除资源？":@"移除订阅？" message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:plugin?@"移除资源":@"移除订阅" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){if(self.onDeleteProfile)self.onDeleteProfile(source);[self reloadProfiles];}]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {return section>1?12:UITableViewAutomaticDimension;}
 - (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section {return 4;}

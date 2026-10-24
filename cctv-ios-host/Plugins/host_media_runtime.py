@@ -9,6 +9,7 @@ import importlib.util
 import inspect
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -124,6 +125,47 @@ def detail(value, identifier):
             'year': str(item.get('year', item.get('vod_year', '')) or ''), 'lines': lines}
 
 
+def valid_media_url(value):
+    if (not isinstance(value, str) or len(value) > 8192 or
+            any(ord(char) <= 32 or ord(char) == 127 for char in value)):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        parsed.port  # Reject malformed or out-of-range ports before handing the URL to AVPlayer.
+        return (parsed.scheme.lower() in ('http', 'https') and bool(parsed.hostname)
+                and not parsed.username and not parsed.password)
+    except ValueError:
+        return False
+
+
+def media_headers(value):
+    if isinstance(value, str):
+        parsed = {}
+        if len(value) > 65536:
+            return parsed
+        for part in re.split(r'[\r\n#]+', value):
+            name, separator, content = part.partition('$')
+            if not separator:
+                name, separator, content = part.partition(':')
+            if separator and name.strip():
+                parsed[name.strip()] = content.strip()
+        value = parsed
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for index, (key, content) in enumerate(value.items()):
+        if index >= 256:
+            break
+        name, text = str(key), str(content)
+        if (len(result) >= 64 or len(name) > 128 or len(text) > 16384 or
+                not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) or
+                '\r' in text or '\n' in text or name.lower() in
+                ('host', 'content-length', 'connection', 'transfer-encoding', 'keep-alive', 'upgrade')):
+            continue
+        result[name] = text
+    return result
+
+
 def playback(value):
     value = decoded(value)
     if isinstance(value, str):
@@ -138,7 +180,8 @@ def playback(value):
     url = value.get('url')
     alternates = value.get('alternates', [])
     if isinstance(url, dict):
-        headers = {**headers, **(url.get('headers') or url.get('header') or {})} if isinstance(headers, dict) else (url.get('headers') or url.get('header') or {})
+        nested_headers = url.get('headers') or url.get('header') or {}
+        headers = {**media_headers(headers), **media_headers(nested_headers)}
         choices = url.get('values') or url.get('list')
         if isinstance(choices, list):
             url = choices
@@ -154,15 +197,17 @@ def playback(value):
         url = alternates[0]['url'] if alternates else ''
     if not url and isinstance(value.get('playUrl'), str) and value['playUrl'].startswith(('http://', 'https://')):
         url = value['playUrl']
-    if not isinstance(url, str) or urllib.parse.urlsplit(url).scheme.lower() not in ('http', 'https'):
+    if not valid_media_url(url):
         raise MediaError('NO_MEDIA', '来源未返回有效 HTTP/HTTPS 媒体地址')
-    if not isinstance(headers, dict):
-        headers = {}
-    headers = {str(k): str(v) for k, v in headers.items()
-               if '\r' not in str(k) + str(v) and '\n' not in str(k) + str(v)
-               and len(str(v)) <= 16384
-               and str(k).lower() not in ('host', 'content-length', 'connection', 'transfer-encoding')}
-    return {'url': url, 'headers': headers, 'alternates': alternates, 'parse': parse}
+    safe_alternates = []
+    if isinstance(alternates, list):
+        for index, item in enumerate(alternates[:32]):
+            if not isinstance(item, dict):
+                continue
+            candidate = item.get('url', item.get('value', item.get('v', '')))
+            if valid_media_url(candidate):
+                safe_alternates.append({'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}')[:128], 'url': candidate})
+    return {'url': url, 'headers': media_headers(headers), 'alternates': safe_alternates, 'parse': parse}
 
 
 class PythonSpider:
@@ -174,6 +219,7 @@ class PythonSpider:
         self.added_path = self.root not in sys.path
         if self.added_path:
             sys.path.insert(0, self.root)
+        self.preexisting_modules = set(sys.modules)
         self.namespace = '_cctvhost_spider_' + uuid.uuid4().hex
         namespace = types.ModuleType(self.namespace)
         namespace.__path__ = [self.root]
@@ -197,11 +243,19 @@ class PythonSpider:
             if callable(getattr(self.spider, 'init', None)):
                 self.spider.init(options if isinstance(options, str) else json.dumps(options or {}, ensure_ascii=False))
         except BaseException:
-            sys.modules.pop(name, None)
-            sys.modules.pop(self.namespace, None)
+            self._remove_package_modules()
             if self.added_path and self.root in sys.path:
                 sys.path.remove(self.root)
             raise
+
+    def _remove_package_modules(self):
+        for module_name, loaded in list(sys.modules.items()):
+            if module_name in self.preexisting_modules:
+                continue
+            module_path = getattr(loaded, '__file__', '') or ''
+            if (module_name == self.namespace or module_name.startswith(self.namespace + '.') or
+                    (module_path and os.path.realpath(module_path).startswith(self.root + os.sep))):
+                sys.modules.pop(module_name, None)
 
     def capabilities(self):
         methods = {'home': 'homeContent', 'category': 'categoryContent', 'search': 'searchContent',
@@ -245,10 +299,7 @@ class PythonSpider:
                 if callable(callback):
                     callback()
             finally:
-                for name, module in list(sys.modules.items()):
-                    path = getattr(module, '__file__', '') or ''
-                    if name == self.namespace or name.startswith(self.namespace + '.') or (path and os.path.realpath(path).startswith(self.root + os.sep)):
-                        sys.modules.pop(name, None)
+                self._remove_package_modules()
                 if self.added_path and self.root in sys.path:
                     sys.path.remove(self.root)
 
@@ -259,6 +310,8 @@ class NativeJS:
         if not self.bridge:
             raise MediaError('RUNTIME_MISSING', '此版本未包含所需的本机 JS 运行时')
         self.session = uuid.uuid4().hex
+        owner = getattr(threading.current_thread(), '_host_session', None)
+        self.service_identifier = getattr(owner, 'identifier', '')
         try:
             self.metadata = self._call('start', packageRoot=os.path.realpath(root), **manifest)
         except BaseException:
@@ -269,7 +322,10 @@ class NativeJS:
             raise
 
     def _call(self, operation, **args):
-        reply = decoded(self.bridge(operation, json.dumps(dict(args, session=self.session), ensure_ascii=False)))
+        payload = dict(args, session=self.session)
+        if self.service_identifier:
+            payload['serviceID'] = self.service_identifier
+        reply = decoded(self.bridge(operation, json.dumps(payload, ensure_ascii=False)))
         if not isinstance(reply, dict) or not reply.get('ok'):
             raise MediaError('PLUGIN_ERROR', str(reply.get('error', 'JS 执行失败')) if isinstance(reply, dict) else '无效 JS 桥接结果')
         return reply.get('result')
@@ -284,12 +340,20 @@ class NativeJS:
         return self._call('stop')
 
 
+class _MediaFlight:
+    def __init__(self):
+        self.ready = threading.Event()
+        self.value = None
+        self.error = None
+
+
 class MediaRuntime:
     def __init__(self, engine):
         self.engine = engine
         self.stopping = threading.Event()
         self.cache = collections.OrderedDict()
         self.cache_lock = threading.Lock()
+        self.inflight = {}
         self.cache_bytes = 0
         self.closed = False
 
@@ -301,50 +365,85 @@ class MediaRuntime:
             return self.engine.capabilities()
         key = json.dumps([operation, args], sort_keys=True, ensure_ascii=False)
         ttl = {'home': 120, 'category': 30, 'search': 20, 'detail': 120, 'catalog': 60}.get(operation, 0)
-        with self.cache_lock:
-            entry = self.cache.get(key)
-            if entry and entry[0] > time.monotonic():
-                self.cache.move_to_end(key)
-                return json.loads(entry[1])
-        raw = self.engine.call(operation, args)
-        if operation in ('proxy', 'route'):
-            return raw
-        if operation == 'home':
-            value = home(raw)
-        elif operation in ('search', 'category'):
-            value = listing(raw, args.get('page', 1))
-        elif operation == 'detail':
-            value = detail(raw, args.get('id', ''))
-        elif operation == 'play':
-            value = playback(raw)
-        elif operation == 'providers':
-            value = [{'id': str(row.get('id', row.get('key', ''))), 'name': str(row.get('name', row.get('title', '')))}
-                     for row in rows(raw) if isinstance(row, dict) and row.get('id', row.get('key')) is not None]
-        elif operation == 'catalog':
-            value = []
-            for row in rows(raw):
-                if not isinstance(row, dict):
-                    continue
-                identifier = row.get('id', row.get('ref'))
-                if identifier is None:
-                    continue
-                value.append(dict(row, id=str(identifier), ref=str(row.get('ref', identifier)),
-                                  name=str(row.get('name', identifier)), logo=str(row.get('logo') or ''), group=str(row.get('group') or '本机插件')))
-        else:
-            value = raw
-        encoded = json.dumps(value, ensure_ascii=False).encode()
-        if len(encoded) > 2 * 1024 * 1024:
-            raise MediaError('RESULT_TOO_LARGE', '来源响应超过 2 MB')
-        if ttl and not self.stopping.is_set():
+        flight = None
+        owner = False
+        if ttl:
             with self.cache_lock:
-                old = self.cache.pop(key, None)
-                if old:
-                    self.cache_bytes -= len(old[1])
-                self.cache[key] = (time.monotonic() + ttl, encoded)
-                self.cache_bytes += len(encoded)
-                while len(self.cache) > 32 or self.cache_bytes > 8 * 1024 * 1024:
-                    _, old = self.cache.popitem(last=False)
-                    self.cache_bytes -= len(old[1])
+                entry = self.cache.get(key)
+                if entry and entry[0] > time.monotonic():
+                    self.cache.move_to_end(key)
+                    return json.loads(entry[1])
+                flight = self.inflight.get(key)
+                if flight is None:
+                    flight = _MediaFlight()
+                    self.inflight[key] = flight
+                    owner = True
+            if not owner:
+                if not flight.ready.wait(45):
+                    raise MediaError('BUSY', '相同资源请求仍在处理中，请稍后重试', True)
+                if flight.error:
+                    code, message, retryable = flight.error
+                    raise MediaError(code, message, retryable)
+                if flight.value is None:
+                    raise MediaError('STOPPING', '资源正在停止')
+                return json.loads(flight.value)
+        try:
+            raw = self.engine.call(operation, args)
+            if operation in ('proxy', 'route'):
+                return raw
+            if operation == 'home':
+                value = home(raw)
+            elif operation in ('search', 'category'):
+                value = listing(raw, args.get('page', 1))
+            elif operation == 'detail':
+                value = detail(raw, args.get('id', ''))
+            elif operation == 'play':
+                value = playback(raw)
+            elif operation == 'providers':
+                value = [{'id': str(row.get('id', row.get('key', ''))), 'name': str(row.get('name', row.get('title', '')))}
+                         for row in rows(raw) if isinstance(row, dict) and row.get('id', row.get('key')) is not None]
+            elif operation == 'catalog':
+                value = []
+                for row in rows(raw):
+                    if not isinstance(row, dict):
+                        continue
+                    identifier = row.get('id', row.get('ref'))
+                    if identifier is None:
+                        continue
+                    value.append(dict(row, id=str(identifier), ref=str(row.get('ref', identifier)),
+                                      name=str(row.get('name', identifier)), logo=str(row.get('logo') or ''), group=str(row.get('group') or '本机插件')))
+            else:
+                value = raw
+            encoded = json.dumps(value, ensure_ascii=False).encode()
+            if len(encoded) > 2 * 1024 * 1024:
+                raise MediaError('RESULT_TOO_LARGE', '来源响应超过 2 MB')
+            if self.stopping.is_set():
+                raise MediaError('STOPPING', '资源正在停止')
+        except BaseException as error:
+            if owner:
+                with self.cache_lock:
+                    if self.inflight.get(key) is flight:
+                        self.inflight.pop(key, None)
+                    if not flight.ready.is_set():
+                        flight.error = (error.code, str(error), error.retryable) if isinstance(error, MediaError) else ('PLUGIN_ERROR', str(error), False)
+                        flight.ready.set()
+            raise
+        if ttl:
+            with self.cache_lock:
+                if not self.stopping.is_set():
+                    old = self.cache.pop(key, None)
+                    if old:
+                        self.cache_bytes -= len(old[1])
+                    self.cache[key] = (time.monotonic() + ttl, encoded)
+                    self.cache_bytes += len(encoded)
+                    while len(self.cache) > 32 or self.cache_bytes > 8 * 1024 * 1024:
+                        _, old = self.cache.popitem(last=False)
+                        self.cache_bytes -= len(old[1])
+                if self.inflight.get(key) is flight:
+                    self.inflight.pop(key, None)
+                if not flight.ready.is_set():
+                    flight.value = encoded
+                    flight.ready.set()
         return value
 
     def close(self):
@@ -352,6 +451,12 @@ class MediaRuntime:
         with self.cache_lock:
             self.cache.clear()
             self.cache_bytes = 0
+            flights = list(self.inflight.values())
+            self.inflight.clear()
+            for flight in flights:
+                if not flight.ready.is_set():
+                    flight.error = ('STOPPING', '资源正在停止', True)
+                    flight.ready.set()
         if not self.closed:
             self.closed = True
             self.engine.close()

@@ -2,6 +2,7 @@ import http.client
 import http.server
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -67,13 +68,63 @@ class MediaTests(unittest.TestCase):
             self.runtime.call('search', {'keyword': 'word', 'page': 1, 'provider': 'two'})
             self.assertEqual(call.call_count, 3)
 
+    def test_identical_inflight_catalog_requests_merge_but_parameters_stay_isolated(self):
+        original = self.engine.call
+        entered = threading.Event()
+        waiter_entered = threading.Event()
+        release = threading.Event()
+        calls = []
+        results = []
+        class ObservedWait:
+            def __init__(self): self.event = threading.Event()
+            def wait(self, timeout=None):
+                waiter_entered.set()
+                return self.event.wait(timeout)
+            def set(self): self.event.set()
+            def is_set(self): return self.event.is_set()
+        class ObservedFlight:
+            def __init__(self):
+                self.ready = ObservedWait()
+                self.value = None
+                self.error = None
+        def delayed(operation, args):
+            calls.append((operation, dict(args)))
+            if args.get('keyword') == 'same':
+                entered.set()
+                self.assertTrue(release.wait(2))
+            return original(operation, args)
+        with mock.patch.object(self.engine, 'call', side_effect=delayed), mock.patch.object(media, '_MediaFlight', ObservedFlight):
+            first = threading.Thread(target=lambda: results.append(self.runtime.call('search', {'keyword': 'same', 'page': 1})))
+            second = threading.Thread(target=lambda: results.append(self.runtime.call('search', {'keyword': 'same', 'page': 1})))
+            try:
+                first.start()
+                self.assertTrue(entered.wait(2))
+                second.start()
+                self.assertTrue(waiter_entered.wait(2))
+            finally:
+                release.set()
+                first.join(2)
+                if second.ident is not None:
+                    second.join(2)
+            self.assertFalse(first.is_alive())
+            self.assertFalse(second.is_alive())
+            self.assertEqual(len(results), 2)
+            self.assertEqual(len(calls), 1)
+            different = self.runtime.call('search', {'keyword': 'different', 'page': 1})
+            self.assertEqual(different['items'][0]['name'], 'different')
+            self.assertEqual(len(calls), 2)
+
     def test_playback_marks_web_tasks_and_rejects_invalid_schemes(self):
         self.assertEqual(media.playback({'parse': 1, 'url': 'https://a.test/'})['parse'], 1)
         for result in [{'url': 'file:///private/data'}, {'url': ''}]:
             with self.assertRaises(media.MediaError):
                 media.playback(result)
+        with self.assertRaises(media.MediaError):
+            media.playback({'url': 'https://user:pass@example.test/video'})
         value = media.playback({'url': 'https://a.test/video', 'header': {'X-Foo': 'ok', 'Cookie': 'one\r\ntwo', 'Host': 'spoof'}})
         self.assertEqual(value['headers'], {'X-Foo': 'ok'})
+        text_headers = media.playback({'url': 'https://a.test/video', 'header': 'User-Agent$fixture#Referer$https://a.test/'})
+        self.assertEqual(text_headers['headers'], {'User-Agent': 'fixture', 'Referer': 'https://a.test/'})
         choices = media.playback({'url': {'values': [{'name': '1080P', 'url': 'https://a.test/1080.m3u8'},
                                                       {'name': '720P', 'url': 'https://a.test/720.m3u8'}],
                                   'headers': {'Referer': 'https://a.test/'}}})
@@ -97,6 +148,17 @@ class MediaTests(unittest.TestCase):
         self.assertTrue(self.engine.spider.destroyed)
         with self.assertRaisesRegex(media.MediaError, '停止'):
             self.runtime.call('home')
+
+    def test_failed_spider_import_does_not_leave_package_modules_loaded(self):
+        helper = Path(self.tmp.name, '_fixture_import_helper.py')
+        entry = Path(self.tmp.name, 'broken_spider.py')
+        helper.write_text('VALUE = 1')
+        entry.write_text('import _fixture_import_helper\nraise RuntimeError("fixture init failed")')
+        with self.assertRaisesRegex(RuntimeError, 'fixture init failed'):
+            media.PythonSpider(self.tmp.name, entry.name)
+        self.assertNotIn('_fixture_import_helper', sys.modules)
+        self.assertIn(self.engine.module_name, sys.modules)
+        self.assertIn(self.tmp.name, sys.path)  # The already-running Spider still owns this import path.
 
     def test_cache_entry_budget(self):
         for i in range(40):
@@ -190,6 +252,48 @@ class MediaTests(unittest.TestCase):
             thread.join(2)
             runtime.close()
 
+    def test_python_spider_proxy_preserves_http_headers_ranges_and_head(self):
+        calls = []
+        def local_proxy(args):
+            calls.append(args)
+            headers = {'Content-Type': 'video/mp2t', 'Content-Range': 'bytes 2-5/10',
+                       'Accept-Ranges': 'bytes', 'Content-Length': '999', 'Connection': 'keep-alive',
+                       'X-Fixture': 'ok'}
+            if args['method'] == 'HEAD':
+                headers['Content-Length'] = '4'
+            return [206, headers, b'' if args['method'] == 'HEAD' else b'2345']
+        self.engine.spider.localProxy = local_proxy
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        def request(method):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+            try:
+                client.request(method, '/proxy?url=https%3A%2F%2Ffixture.test%2Fsegment.ts',
+                               headers={'Range': 'bytes=2-5', 'User-Agent': 'fixture-agent'})
+                response = client.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally:
+                client.close()
+        try:
+            status, headers, body = request('GET')
+            lower = {key.lower(): value for key, value in headers.items()}
+            self.assertEqual((status, body, lower['content-type'], lower['content-range']),
+                             (206, b'2345', 'video/mp2t', 'bytes 2-5/10'))
+            self.assertEqual(lower['content-length'], '4')
+            self.assertEqual(lower['x-fixture'], 'ok')
+            self.assertEqual(lower['connection'], 'close')
+            self.assertEqual(calls[-1]['method'], 'GET')
+            self.assertEqual(calls[-1]['headers']['Range'], 'bytes=2-5')
+            status, headers, body = request('HEAD')
+            self.assertEqual((status, body), (206, b''))
+            self.assertEqual({key.lower(): value for key, value in headers.items()}['content-length'], '4')
+            self.assertEqual(calls[-1]['method'], 'HEAD')
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+
     def test_relay_rewrites_master_segments_keys_and_maps_without_open_proxy(self):
         relay = MediaRelay(limit=4)
         text = '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXT-X-MAP:URI="init.mp4"\nsegment.ts\n'
@@ -251,6 +355,79 @@ class MediaTests(unittest.TestCase):
         finally:
             for item in (upstream, server): item.shutdown();item.server_close()
             for thread in threads: thread.join(2)
+
+    def test_python_spider_play_reaches_hls_segment_through_local_relay(self):
+        received = []
+        segment_data = b'0123456789'
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                received.append((self.path, dict(self.headers)))
+                if self.path == '/index.m3u8':
+                    body = b'#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nsegment.ts\n#EXT-X-ENDLIST\n'
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
+                elif self.path == '/segment.ts':
+                    range_value = self.headers.get('Range')
+                    if range_value == 'bytes=2-5':
+                        body = segment_data[2:6]
+                        self.send_response(206)
+                        self.send_header('Content-Range', 'bytes 2-5/10')
+                    else:
+                        body = segment_data
+                        self.send_response(200)
+                    self.send_header('Content-Type', 'video/mp2t')
+                    self.send_header('Accept-Ranges', 'bytes')
+                else:
+                    self.send_error(404)
+                    return
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        upstream_thread.start()
+        self.engine.spider.playerContent = lambda *_: {
+            'parse': 0, 'url': f'http://127.0.0.1:{upstream.server_port}/index.m3u8',
+            'header': {'Referer': f'http://127.0.0.1:{upstream.server_port}/',
+                       'User-Agent': 'fixture-player', 'Cookie': 'fixture-cookie'}}
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        service_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        service_thread.start()
+        def request(method, path, headers=None, data=None):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=4)
+            try:
+                body = json.dumps(data).encode() if data is not None else None
+                client.request(method, path, body, headers or {})
+                response = client.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally:
+                client.close()
+        try:
+            status, _, response = request('POST', '/api/v1/play', {'Content-Type': 'application/json'}, {'id': 'episode-1'})
+            self.assertEqual(status, 200)
+            proxy = json.loads(response)['data']['url']
+            status, _, playlist = request('GET', urllib.parse.urlsplit(proxy).path)
+            self.assertEqual(status, 200)
+            lines = playlist.decode().splitlines()
+            segment_url = next(line for line in lines if line and not line.startswith('#'))
+            self.assertTrue(segment_url.startswith(f'http://127.0.0.1:{server.server_port}/media/'))
+            status, response_headers, body = request('GET', urllib.parse.urlsplit(segment_url).path,
+                                                     {'Range': 'bytes=2-5'})
+            lower = {key.lower(): value for key, value in response_headers.items()}
+            self.assertEqual((status, body, lower['content-range']), (206, b'2345', 'bytes 2-5/10'))
+            self.assertEqual(received[-1][1]['Range'], 'bytes=2-5')
+            self.assertEqual(received[-1][1]['Cookie'], 'fixture-cookie')
+            self.assertEqual(received[-1][1]['Referer'], f'http://127.0.0.1:{upstream.server_port}/')
+            self.assertEqual(received[-1][1]['User-Agent'], 'fixture-player')
+        finally:
+            server.relay.close()
+            server.shutdown()
+            server.server_close()
+            service_thread.join(2)
+            upstream.shutdown()
+            upstream.server_close()
+            upstream_thread.join(2)
 
 
 if __name__ == '__main__':

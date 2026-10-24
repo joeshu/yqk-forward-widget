@@ -1,5 +1,6 @@
 #import "PluginLogStore.h"
 #import "HostLogBuffer.h"
+#import "HostLogRedactor.h"
 #import <CommonCrypto/CommonDigest.h>
 
 @interface PluginLogStore ()
@@ -28,7 +29,7 @@
 }
 - (void)appendLine:(NSString *)line forIdentifier:(NSString *)identifier {
     if(!line.length||!identifier.length)return;
-    NSString *safeLine=line;if(safeLine.length>4096){NSUInteger end=4096;unichar last=[safeLine characterAtIndex:end-1];if(last>=0xd800&&last<=0xdbff)end--;safeLine=[[safeLine substringToIndex:end] stringByAppendingString:@"… [日志已截断]"];}
+    NSString *safeLine=[HostLogRedactor redactText:line];if(safeLine.length>4096){NSUInteger end=4096;unichar last=[safeLine characterAtIndex:end-1];if(last>=0xd800&&last<=0xdbff)end--;safeLine=[[safeLine substringToIndex:end] stringByAppendingString:@"… [日志已截断]"];}
     NSString *entry=[NSString stringWithFormat:@"[%@] %@\n",NSDate.date.description,safeLine];NSUInteger generation=0;BOOL schedule=NO;
     [self.lock lock];HostLogBuffer *buffer=self.pending[identifier];if(!buffer){buffer=[[HostLogBuffer alloc] initWithMaximumCharacters:65536];self.pending[identifier]=buffer;}[buffer append:entry];generation=[self.generations[identifier] unsignedIntegerValue];if(![self.scheduled containsObject:identifier]){[self.scheduled addObject:identifier];schedule=YES;}[self.lock unlock];
     if(schedule)dispatch_after(dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),self.queue,^{[self flushIdentifier:identifier generation:generation];});
@@ -41,13 +42,13 @@
 }
 - (NSString *)logForIdentifier:(NSString *)identifier {
     if(!identifier.length)return @"";__block NSString *text=@"";NSString *path=[self pathForIdentifier:identifier];
-    dispatch_sync(self.queue,^{[self.lock lock];NSUInteger generation=[self.generations[identifier] unsignedIntegerValue];[self.lock unlock];[self flushIdentifier:identifier generation:generation];text=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL]?:@"";});return text;
+    dispatch_sync(self.queue,^{[self.lock lock];NSUInteger generation=[self.generations[identifier] unsignedIntegerValue];[self.lock unlock];[self flushIdentifier:identifier generation:generation];text=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL]?:@"";text=[HostLogRedactor redactText:text];});return text;
 }
 - (void)clearLogForIdentifier:(NSString *)identifier completion:(dispatch_block_t)completion {
     if(!identifier.length){if(completion)completion();return;}NSString *path=[self pathForIdentifier:identifier];dispatch_async(self.queue,^{[self.lock lock];self.generations[identifier]=@([self.generations[identifier] unsignedIntegerValue]+1);[self.pending[identifier] clear];[self.scheduled removeObject:identifier];[self.lock unlock];[@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];if(completion)dispatch_async(dispatch_get_main_queue(),completion);});
 }
 - (void)prepareExportForIdentifier:(NSString *)identifier displayName:(NSString *)displayName completion:(void (^)(NSURL *,NSError *))completion {
     NSString *source=identifier.length?[self pathForIdentifier:identifier]:nil;NSString *safe=[displayName stringByReplacingOccurrencesOfString:@"/" withString:@"-"]?:@"插件";NSString *digest=source.lastPathComponent.stringByDeletingPathExtension;NSString *suffix=digest.length>=8?[digest substringToIndex:8]:@"plugin";NSString *destination=[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"CCTVHost-%@-%@-日志.txt",safe,suffix]];
-    dispatch_async(self.queue,^{if(identifier.length){[self.lock lock];NSUInteger generation=[self.generations[identifier] unsignedIntegerValue];[self.lock unlock];[self flushIdentifier:identifier generation:generation];}NSError *error=nil;NSData *data=source?[NSData dataWithContentsOfFile:source options:0 error:&error]:nil;if(!data&&!error)error=[NSError errorWithDomain:@"PluginLogStore" code:1 userInfo:@{NSLocalizedDescriptionKey:@"该脚本还没有日志记录。"}];if(data&&![data writeToFile:destination options:NSDataWritingAtomic error:&error])data=nil;dispatch_async(dispatch_get_main_queue(),^{completion(data?[NSURL fileURLWithPath:destination]:nil,error);});});
+    dispatch_async(self.queue,^{if(identifier.length){[self.lock lock];NSUInteger generation=[self.generations[identifier] unsignedIntegerValue];[self.lock unlock];[self flushIdentifier:identifier generation:generation];}NSError *error=nil;NSString *content=source?[NSString stringWithContentsOfFile:source encoding:NSUTF8StringEncoding error:&error]:nil;if(!content&&!error)error=[NSError errorWithDomain:@"PluginLogStore" code:1 userInfo:@{NSLocalizedDescriptionKey:@"该脚本还没有日志记录。"}];NSData *data=content?[[HostLogRedactor redactText:content] dataUsingEncoding:NSUTF8StringEncoding]:nil;if(data&&![data writeToFile:destination options:NSDataWritingAtomic error:&error])data=nil;dispatch_async(dispatch_get_main_queue(),^{completion(data?[NSURL fileURLWithPath:destination]:nil,error);});});
 }
 @end

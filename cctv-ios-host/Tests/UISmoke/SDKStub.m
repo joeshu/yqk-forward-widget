@@ -16,7 +16,13 @@
 @property(nonatomic, assign) NSUInteger preparation;
 @end
 static NSInteger resets, plays, configures;
-static id cdnPreference;
+static NSDictionary *cdnPreference;
+@interface CNVDNManager : NSObject
++ (NSDictionary *)getVDNConfig_CDNLive_DefaultCDNInfo;
+@end
+@implementation CNVDNManager
++ (NSDictionary *)getVDNConfig_CDNLive_DefaultCDNInfo {return cdnPreference?:@{@"cdn_code":@"fixture",@"cdn_name":@"Fixture",@"cdn_vip":@"fixture.test"};}
+@end
 @interface IJKFFMoviePlayerController : NSObject
 - (UIImage *)thumbnailImageAtCurrentTime;
 @end
@@ -50,11 +56,9 @@ static id cdnPreference;
 }
 + (void)configSDK_HTTP_Refer:(NSString *)refer {
 }
-+ (void)configSDK_CDN_LIVEDefaultCDNInfo:(id)value {
-    cdnPreference = value;
-}
-+ (id)getVDNConfig_CDNLive_DefaultCDNInfo {
-    return cdnPreference;
++ (id)configSDK_CDN_LIVEDefaultCDNInfo:(id)value {
+    if(![value isKindOfClass:NSDictionary.class]||![value count])return [NSError errorWithDomain:@"SDKStub" code:1 userInfo:nil];
+    cdnPreference = [value copy];return nil;
 }
 + (BOOL)authed {
     return YES;

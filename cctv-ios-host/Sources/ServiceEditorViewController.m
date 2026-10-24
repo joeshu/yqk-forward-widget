@@ -152,8 +152,8 @@
     if (section == 1)
         return @"导入后可查看、编辑或导出代码。内置服务代码只读。";
     if (section == 2)
-        return @"自定义脚本的参数用 | 分隔，支持 {port}、{bind}、{dataDir}。本机一次运行一个 Python "
-               @"服务；切换前须等待旧服务释放线程和端口。";
+        return @"自定义脚本的参数用 | 分隔，支持 {port}、{bind}、{dataDir}。服务可按 ID 分别启停；"
+               @"并行运行时每个 HTTP 服务必须使用不同端口。";
     return nil;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -335,7 +335,7 @@
     [self.tableView reloadData];
 }
 - (void)save {
-    if (PyHost.running && [[ServiceStore activeIdentifier] isEqualToString:self.identifier]) {
+    if ([PyHost isManagedServiceIdentifier:self.identifier]) {
         [self message:@"请先停止此服务，再修改端口或代码。"];
         return;
     }

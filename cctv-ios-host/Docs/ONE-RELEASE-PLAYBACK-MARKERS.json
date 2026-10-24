@@ -1,0 +1,22 @@
+{
+  "release_tag": "v1.6.2-11",
+  "release_url": "https://github.com/ios151/One-releases/releases/tag/v1.6.2-11",
+  "asset_size": 1517270,
+  "sha256": "e8be94377f988696632866a826d7907de208b1f32e7249adc67d6305a803495f",
+  "bundle_id": "com.ios151.one",
+  "version": "1.6.2",
+  "build": "11",
+  "embedded_frameworks": [],
+  "selected_main_binary_markers": {
+    "CNPlayer": false,
+    "CNCicadaDRMRightChecker": false,
+    "udrmldcctv": false,
+    "udrmCNTVGetLicense": false,
+    "CicadaPlayer": false,
+    "AVPlayer": true,
+    "VLCMediaPlayer": false,
+    "IJKFFMoviePlayerController": false
+  },
+  "execution_performed": false,
+  "interpretation": "Selected static markers only; not an exhaustive feature audit or playback validation."
+}

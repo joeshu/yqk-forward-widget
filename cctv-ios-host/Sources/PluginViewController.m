@@ -9,7 +9,6 @@
 @property(nonatomic,strong) UIButton *startButton;
 @property(nonatomic,strong) UIButton *stopButton;
 @property(nonatomic,strong) UIView *statusDot;
-@property(nonatomic,strong) NSTimer *statusTimer;
 @property(nonatomic,assign) NSUInteger subscriptionCount;
 @end
 
@@ -137,16 +136,16 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self refreshStatus];
-    [self.statusTimer invalidate];
-    self.statusTimer = [NSTimer scheduledTimerWithTimeInterval:1 target:self selector:@selector(refreshStatus) userInfo:nil repeats:YES];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refreshStatus) name:PyHostRuntimeStateDidChangeNotification object:nil];
 }
-- (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated]; [self.statusTimer invalidate]; self.statusTimer = nil; }
-- (void)dealloc { [self.statusTimer invalidate]; }
-- (void)refreshStatus { [self updateRunning:PyHost.running subscriptionCount:self.subscriptionCount]; }
+- (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated]; [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil]; }
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
+- (void)refreshStatus { [self updateRunning:[PyHost isRunningServiceIdentifier:@"builtin-ysp"] subscriptionCount:self.subscriptionCount]; }
 - (void)updateRunning:(BOOL)running subscriptionCount:(NSUInteger)count {
+    NSInteger port=8767;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:@"builtin-ysp"]){port=[service[@"port"] integerValue];break;}
     self.subscriptionCount = count;
     self.statusDot.backgroundColor = running ? UIColor.systemGreenColor : UIColor.systemGrayColor;
-    self.statusLabel.text = running ? [NSString stringWithFormat:@"运行中 · 端口 %ld",(long)PyHost.port] : @"未运行";
+    self.statusLabel.text = running ? [NSString stringWithFormat:@"YSP Live 运行时活跃 · 端口 %ld · HTTP 未检测",(long)port] : @"未运行";
     self.urlLabel.text=[self subscriptionURL];
     self.countLabel.text = [NSString stringWithFormat:@"订阅源 · %lu", (unsigned long)count];
     self.startButton.enabled = !running;

@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.request
 from unittest.mock import Mock, patch
 
 SPEC = importlib.util.spec_from_file_location('host_service_runtime', Path(__file__).resolve().parents[1] / 'Scripts/host_service_runtime.py')
@@ -74,10 +75,50 @@ class ServiceRuntimeTests(unittest.TestCase):
         self.assertTrue(runtime.stop_session(2), runtime.last_error())
         first.join(1)
         self.assertTrue(runtime.is_idle())
+        with self.assertRaises(OSError):
+            socket.create_connection(('127.0.0.1', port), timeout=.25)
         second = self.launch(self.server_source(port))
         self.wait(lambda: bool(runtime._session.servers and runtime._session.servers[0]._host_serving.is_set()))
         self.assertTrue(runtime.stop_session(2), runtime.last_error())
         second.join(1)
+        self.assertEqual(self.errors, [])
+
+    def test_two_service_ids_run_concurrently_and_stop_independently(self):
+        def source(label):
+            return ("from http.server import HTTPServer, BaseHTTPRequestHandler\nimport os\n"
+                    "class Handler(BaseHTTPRequestHandler):\n"
+                    " def do_GET(self):\n"
+                    "  self.send_response(200); self.end_headers(); self.wfile.write((" + repr(label + '|') + "+os.environ['CCTVHOST_DATA_DIR']).encode())\n"
+                    " def log_message(self, *args): pass\n"
+                    "server = HTTPServer(('127.0.0.1', 0), Handler)\n"
+                    "server.serve_forever()\n")
+        paths = {}
+        workers = {}
+        for identifier in ('service-a', 'service-b'):
+            path = Path(self.temp.name) / (identifier + '.py')
+            path.write_text(source(identifier))
+            paths[identifier] = path
+            def run(service_id=identifier, script=path):
+                try:
+                    runtime.run_script(str(script), service_id, str(Path(self.temp.name) / service_id), 0, [])
+                except BaseException as error:
+                    self.errors.append(error)
+            workers[identifier] = threading.Thread(target=run, daemon=True)
+            workers[identifier].start()
+            self.wait(lambda service_id=identifier: bool(runtime._sessions.get(service_id) and runtime._sessions[service_id].servers and runtime._sessions[service_id].servers[0]._host_serving.is_set()))
+        ports = {identifier: runtime._sessions[identifier].servers[0].server_address[1] for identifier in workers}
+        self.assertNotEqual(ports['service-a'], ports['service-b'])
+        for identifier, port in ports.items():
+            with urllib.request.urlopen('http://127.0.0.1:%d/' % port, timeout=1) as response:
+                self.assertEqual(response.read(), (identifier + '|' + str(Path(self.temp.name) / identifier)).encode())
+        self.assertTrue(runtime.stop_session('service-a', 2), runtime.last_error('service-a'))
+        workers['service-a'].join(1)
+        with self.assertRaises(OSError):
+            socket.create_connection(('127.0.0.1', ports['service-a']), timeout=.25)
+        with urllib.request.urlopen('http://127.0.0.1:%d/' % ports['service-b'], timeout=1) as response:
+            self.assertEqual(response.read(), ('service-b|' + str(Path(self.temp.name) / 'service-b')).encode())
+        self.assertTrue(runtime.stop_session('service-b', 2), runtime.last_error('service-b'))
+        workers['service-b'].join(1)
         self.assertEqual(self.errors, [])
 
     def test_returned_main_with_background_server_is_still_running(self):

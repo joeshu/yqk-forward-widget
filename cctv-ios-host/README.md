@@ -1,105 +1,56 @@
-# CCTVHost —— 央视影音 iOS SDK 原生宿主（M1）
+# CCTVHost — iOS 频道与本机资源宿主
 
-目标：用 IPA 里的官方 iOS 三件套在自有 App 内原生播放，彻底去掉 Android 模拟器、Unicorn、WASM。
-本工程是 **M1 最小验证宿主**：只做「启动 SDK → 起播一个频道 → 打印内部状态」，不追求 UI 完成度。
+本目录包含 Objective-C/UIKit iOS App，最低系统版本 iOS 15。当前代码包括频道与订阅浏览、原生及 AVPlayer 播放入口、EPG、资源导入、Python/JavaScript/Node 插件服务和独立日志中心。
 
-## 目录
+实现状态、测试证据、性能测量限制和真机验收清单见 [QUALITY-REVIEW-v0.18.0.md](QUALITY-REVIEW-v0.18.0.md)。代码存在不代表央视 SDK 真机起播、插件端口释放或媒体解码已经在设备上验证。
 
-```
-CCTVHost/
-├── Frameworks/           # 已放入：CNPlayerSDK / CicadaPlayerSDK / alivcffmpeg（已删旧签名）
-├── Resources/Info.plist  # ATS 放开、arm64、竖屏
-├── Sources/
-│   ├── main.m / AppDelegate.[hm]
-│   ├── RootViewController.[hm]   # 频道/播放器业务与宿主总日志
-│   ├── LogCenterViewController  # 独立日志浏览、筛选和导出界面
-│   ├── PluginLogStore           # 按脚本 ID 隔离的插件日志存储
-│   └── Include/                  # 手写的最小头文件（官方 framework 不带 Headers）
-├── Scripts/resign-check.sh
-└── project.yml           # XcodeGen 工程描述
-```
+## 构建
 
-## 日志分层
+用 macOS 和 Xcode 打开本目录中的 XcodeGen 工程描述：
 
-- 设置里的“日志中心”查看宿主总日志；播放、Python、JavaScriptCore 和 Node 运行输出在这里汇总，便于排查跨模块问题。
-- 服务详情里的“查看日志”只显示该服务脚本的输出，并可单独搜索、复制、导出或清空。每份日志按稳定的服务 ID 写入 `Application Support/ysp/plugin-logs/`，更换脚本不会覆盖其他插件日志。
-- 日志浏览页与播放器分开，通过设置、服务详情或播放器“更多”进入，不遮住正在播放的视频。
+    brew install xcodegen
+    cd cctv-ios-host
+    xcodegen generate
+    open CCTVHost.xcodeproj
 
-## 一、生成工程并编译
+为真机选择自己的签名 Team，并确认嵌入式 framework 的签名设置。仓库 CI 另用 Scripts/ci-build.sh 生成 unsigned IPA。
 
-```bash
-brew install xcodegen          # 一次性
-cd CCTVHost
-xcodegen generate              # 生成 CCTVHost.xcodeproj
-open CCTVHost.xcodeproj
-```
+央视播放 framework 仅包含设备 arm64 架构，原生播放须在真机验证。仓库另有使用 SDK 替身的模拟器 UI smoke；该测试只覆盖宿主界面和部分 AVPlayer 流程，不代表央视 SDK 解码通过。
 
-Xcode 里只需要改两处：
+## 导航与日志
 
-1. **Signing & Capabilities** → 选自己的 Team，Bundle Identifier 改成自己的（如 `com.yourname.cctvhost`）。
-2. 确认三个 framework 在 *Frameworks, Libraries, and Embedded Content* 里是 **Embed & Sign**；
-   Build Settings 里 `Other Linker Flags` 为 `-ObjC -lresolv`（project.yml 已设置）。
+主入口为 CCTV、频道、影视、资源、设置。资源与服务管理、订阅、EPG 和播放诊断沿用 CCTVHost 自身的数据模型和视觉风格。
 
-真机运行（模拟器无法跑：framework 只有 arm64，且需要 VideoToolbox）。
+设置中的日志中心显示宿主总日志；服务详情中的日志页仅显示对应服务脚本输出。每个插件日志可单独搜索、复制、导出和清空。日志进入存储、展示或导出前会对常见凭据字段脱敏。
 
-## 二、M1 判读标准
+服务开关按服务 ID 管理。不同端口的 Python HTTP 服务、Node 插件及 JavaScriptCore 插件可以同时启动；关闭一个服务只请求停止该服务及其关联的媒体运行时。相同端口不能同时监听，启动时会检查已运行服务并给出端口冲突提示。服务卡片显示各自运行会话，HTTP 检测仍需在详情页单独执行。
 
-启动后日志区应依次出现：
+## 播放器诊断边界
 
-1. `CNPlayer class = CNPlayer, CicadaPlayer class = CicadaPlayer` —— 说明三件套已加载
-2. `defaultOptions = …` —— SDK 配置对象成功构造
-3. 点击 `cctv1` 后：`调用 +[CNPlayer playLIVEWithChannelID:delegate:configOptions:] 返回类型 …`
-4. SDK 内部应出现 auth / VDN / license 相关日志，随后首帧出现
+日志中 SDK 类可加载、配置对象构造、播放调用返回，只能说明对应初始化步骤已执行，不能证明鉴权通过或视频已解码。只有 SDK/AVPlayer 实际回调和画面可用于确认对应播放状态。
 
-**前 3 条出现、第 4 条没有** → SDK 启动成功但没有鉴权，按下面第 5 节处理。
-**第 1 条就没出现** → framework 没嵌入/没签名，检查 Embed & Sign 与 `-ObjC`。
+CNPlayerSDK 是原生央视直播入口。CCTV 页支持按频道 ID 交给 SDK 自动调度，也支持将 WS/BD/KS/TX 所选完整地址交给 `playLIVEWithUrl:delegate:configOptions:`。自选路径继续通过 CNPlayer，并传入当前可取得的 SDK 用户 ID、频道统计 ID和播放器回调；宿主没有关闭或改写授权配置。SDK 是否接受及完成特定地址的授权和解码，仍需真机确认。请求被拒或播放失败时会保留所选线路，不静默切回自动。播放信息展示所选完整来源地址（保留查询参数）和 SDK 返回节点（取不到时显示未知）。[节点故障调查](Docs/CCTV-NODE-ROUTING-DIAGNOSIS.md)与[IPA 自选线路落地记录](Docs/CCTV-IPA-SELF-ROUTES-RESEARCH.md)说明了现有路径、SDK 接口证据及验证边界。
 
-## 三、两条代码路径
+[原 IPA 自选线路核实](Docs/CCTV-IPA-SELF-ROUTES-RESEARCH.md)记录了三个直播 URL 前端实际调用 CNPlayer 的证据，以及两组原始媒体普通解码异常。可运行 `python3 Scripts/audit_ipa_live_routes.py` 只读复核；这是静态审计，不是原生播放验收。
 
-| 路径 | 代码位置 | 用途 |
-| --- | --- | --- |
-| A. CNPlayerSDK 业务层 | `tapChannel:` | 主路径：VDN、版权、清晰度、EPG 全由 SDK 负责 |
-| B. Cicada 内核直连 | `tapCicada:` | 调试：输入一条受保护 m3u8，直接验证 UDRM 解密是否工作（不依赖 VDN 鉴权） |
+Python Spider 的 `localProxy` 支持常见 `[状态码, 响应头, 内容]` 返回值；本机代理保留媒体类型、Range 与 Content-Range，GET/HEAD 分开传递，并对带请求头的 HLS 分片使用有界本机转发。相同参数的目录/详情请求会合并进行中的调用。协议测试只验证本机桥接行为，不能替代 iPhone 上的上游可达性和视频解码验收。
 
-B 路径的价值：**它能在不知道任何 appKey 的情况下验证「内置客户端证书 + 许可服务」是否放行**。
-如果 B 能出画面，说明许可链路通，问题只在与 VDN 鉴权相关的 A 路径。
+本地导入还识别 `WidgetMetadata` / `Widget.http` / `loadResource(params)` 影视解析脚本，并将搜索结果接入影视页详情和 AVPlayer 播放流程；Widget HTTP 响应限时、限大小。CatPaw 的 `globalThis.Pans` ESM Fastify 包由 Node 宿主绑定本机服务并在停止时关闭。带有明确 argparse `--port`、`--bind` 声明的 Python HTTP 包会使用 CCTVHost 分配的端口；检测到 `/all.m3u` 生成器与路由时，启用服务后自动添加本机订阅。原始 ZIP 会保留，运行时补充的 ESM `package.json` 只写入应用沙盒中的解包副本。
 
-## 四、已验证的事实（来自 IPA 静态分析与实测）
+## 本地验证
 
-- 许可服务：`https://drm.live.cntv.cn:444/udrm/udmCNTVGetLicense`，无需 TLS 客户端证书，
-  请求体为 `version/platform/cdn/deviceID/drmServerID/udrmTerminalLibVersion/nonce/timestamp/contentIDs[]/certificateChain[]/signature`，
-  我们构造的请求被服务端解析并返回 `status:-72 signature error` —— 即**只缺签名，字段全对**。
-- 签名由 SDK 内置私钥 `m_udrm_cli_prikey` + 证书链 `g_udrm_cli_cerchain` 完成，不可离线伪造，也不需要伪造。
-- VDN `https://vdn.live.cntv.cn/api2/live.do?channel=cctv1` 不带鉴权恒为 `play=0`（T8）。
+    cd cctv-ios-host
+    python3 -m unittest discover -s Tests -p 'test_*.py' -v
+    (cd JSPlugins && npm test)
 
-## 五、如果 A 路径没有鉴权（appKey 缺失）
+完整 iOS 设备构建和替身 UI smoke 由仓库 .github/workflows/cctv-ios-host.yml 在 macOS runner 执行。具体真机验收项和当前未验证项目见质量审查记录。
 
-`CNPlayer` 提供两个启动入口：`startPlayerSDK_Options:`（默认配置）与 `startPlayerSDK_AppKey:appSecret:`。
-若默认入口发起 auth 失败，需要补 appKey/appSecret。三种取法，按优先级：
+## 已知边界
 
-1. **反汇编主二进制调用点**：`+[CNPlayer startPlayerSDK_AppKey:appSecret:options:]` 的调用方会把两个 NSString 常量
-   经 `adrp/add` 指向 `__cfstring` 载入；找到调用点即可读出字面量。
-2. **运行期日志**：在真机上开 `logEnabled:YES`，auth 失败日志通常会带被拒的 appkey 前缀。
-3. **接入抓包**：iPhone 上配代理抓 `open.app.cctv.com/sdk/api/auth` 的 query（`appkey / sdkId / timestamp / sign`），
-   `sign` 为 md5 组合，有 appkey + appSecret 即可复现。
-
-拿到后把 `setupSDK` 里的 `startPlayerSDK_Options:` 换成：
-
-```objc
-[CNPlayer startPlayerSDK_AppKey:@"<appKey>" appSecret:@"<appSecret>"];
-```
-
-## 六、已知风险
-
-- **许可绑定 deviceID**：许可请求里的 deviceID 由 SDK 生成，重装/换机可能需重新取；本工程未做设备注册。
-- **清晰度**：配置中 `login_bitrate` 含 HSD/SD，未登录可能只能拿到较低码率（先按 AD 自动跑通再调）。
-- **重签名合法性**：三件套来自 App Store 包，仅限个人自用；不得分发。
-- **不可代理给 APTV**：解密在 demuxer 内完成，无官方明文 TS 输出接口（B 路线已排除）。
-
-## 七、下一步（M2 起）
-
-1. 频道目录接入现有 `CHANNELS-v0.3.0.json`（53 台/94 线）替换硬编码的 6 个按钮。
-2. 播放器视图换成 `CicadaPlayerView` 或 CNPlayer 自带视图，补全全屏/手势。
-3. 记录首帧耗时、CPU、内存，与 v0.3.7 模拟器版本对比（目标：首帧 < 1.5s，连续播放不掉帧）。
-
-<!-- build trigger: 2026-10-22T16:38:34Z -->
+- Python 插件共用一个嵌入式 CPython 解释器和 GIL；宿主会隔离每个会话的 Python `os.environ` 视图、启动参数、日志、监听器、工作线程和停止回调，并串行化脚本初始化，但这不是进程级沙箱。插件若依赖同名全局模块、直接修改进程级状态或创建宿主无法跟踪的线程，仍可能互相影响；此类插件无法承诺同时稳定运行。
+- Node 插件各自跟踪定时器、请求、Socket、监听器、存储目录、常见插件全局对象和环境视图，但仍共用一个 Node 进程；任意第三方原生模块或未纳入会话作用域的全局副作用仍可能共享。
+- JavaScriptCore 为每个会话分配独立 context、串行队列和网络请求集合；同一 App 进程仍受系统内存及后台执行限制。
+- Python、JavaScriptCore 与 Node.js Mobile 服务运行受 iOS 后台执行策略限制；系统终止 App 后，不能保证插件继续运行。
+- 通用 Python HTTP 服务没有统一健康协议时只能显示 HTTP 可达与状态码，不能证明频道清单正确或媒体成功解码。
+- 央视 SDK 的线路、首帧、实际分辨率和错误语义需要真机及授权服务验证。本工程不绕过登录、版权、地域或来源访问控制。
+- 历史磁盘日志不会被静默改写；其 UI 和导出会先应用日志脱敏。

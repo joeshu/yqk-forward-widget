@@ -10,6 +10,8 @@ PLUGIN = (SOURCE.parent / "PluginViewController.m").read_text(encoding="utf-8")
 SETTINGS = (SOURCE.parent / "SettingsViewController.m").read_text(encoding="utf-8")
 SERVICES = (SOURCE.parent / "ServicesViewController.m").read_text(encoding="utf-8")
 EPG = (SOURCE.parent / "EPGViewController.m").read_text(encoding="utf-8")
+CONFIG = (SOURCE.parent / "ConfigCenterViewController.m").read_text(encoding="utf-8")
+REDACTOR = (SOURCE.parent / "HostLogRedactor.m").read_text(encoding="utf-8")
 
 
 def method_body(signature):
@@ -48,6 +50,17 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         body = method_body("- (void)fetchSubscription:")
         self.assertIn("requestVersion", body)
         self.assertIn("!= requestVersion", body)
+        self.assertIn("if(self.subscriptionTasks[sourceKey])", body)
+        self.assertNotIn("[self.subscriptionTasks[sourceKey] cancel]", body)
+        self.assertNotIn("components.query=nil", method_body("- (NSString *)stableURLKey:"))
+
+    def test_subscription_page_supports_per_source_refresh_and_real_last_success(self):
+        self.assertIn("onRefreshProfile", CONFIG)
+        self.assertIn("刷新此订阅", CONFIG)
+        self.assertIn("updatedAt", method_body("- (NSArray *)configurationProfiles"))
+        self.assertIn("最近成功", CONFIG)
+        self.assertIn("confirmRemoveProfile", CONFIG)
+        self.assertIn("其他订阅源共同提供的频道会保留", CONFIG)
 
     def test_epg_cache_rejects_future_timestamps(self):
         body = method_body("- (void)loadEPGCache")
@@ -118,7 +131,8 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("BOOL expandedLive", navigation)
         self.assertIn("self.channelName", navigation)
         self.assertIn('@"heart.fill":@"heart"', navigation)
-        self.assertIn('@"airplayvideo"', navigation)
+        self.assertIn('AVRoutePickerView *airPlayPicker', navigation)
+        self.assertIn('@"customView":airPlayPicker', navigation)
         self.assertIn('@"info.circle"', navigation)
         self.assertIn("self.groupControl.selectedSegmentIndex", navigation)
         self.assertIn("self.groupControl.numberOfSegments", group_menu)
@@ -140,22 +154,73 @@ class RootViewControllerSourceContracts(unittest.TestCase):
             self.assertIn('@"' + key + '"', SETTINGS)
 
     def test_services_directory_shows_live_status_and_opens_detail(self):
-        self.assertIn('PyHost.running', SERVICES)
+        self.assertIn('isRunningServiceIdentifier', SERVICES)
+        self.assertIn('每个服务可独立启停', SERVICES)
         self.assertIn('onToggleService', SERVICES)
         self.assertIn('ServiceDetailViewController', SERVICES)
         self.assertIn('ServiceStore', SERVICES)
 
+    def test_service_lifecycle_is_scoped_to_service_identifier(self):
+        starter = method_body('- (BOOL)startService:')
+        toggler = method_body('- (void)changeService:')
+        self.assertIn('startScriptAtPath:[ServiceStore scriptPath:service] identifier:serviceID', starter)
+        self.assertIn('stopServiceIdentifier:serviceID', toggler)
+        self.assertNotIn('stopWithError', toggler)
+        self.assertIn('端口 %ld 正由', starter)
+
     def test_plugin_and_settings_pages_use_safe_area_cards_and_live_status(self):
         self.assertIn('UIScrollView', PLUGIN)
-        self.assertIn('statusTimer', PLUGIN)
-        self.assertIn('updateRunning:PyHost.running', PLUGIN)
+        self.assertIn('PyHostRuntimeStateDidChangeNotification', PLUGIN)
+        self.assertNotIn('NSTimer', PLUGIN)
+        self.assertIn('isRunningServiceIdentifier:@"builtin-ysp"', PLUGIN)
         self.assertIn('UITableViewStyleInsetGrouped', SETTINGS)
         self.assertIn('epg-cache.json', SETTINGS)
+
+    def test_service_views_use_change_notifications_and_separate_runtime_from_health(self):
+        config=(SOURCE.parent / "ConfigCenterViewController.m").read_text(encoding="utf-8")
+        self.assertIn("PyHostRuntimeStateDidChangeNotification", SERVICES)
+        self.assertIn("PyHostRuntimeStateDidChangeNotification", config)
+        self.assertNotIn("NSTimer", SERVICES)
+        self.assertNotIn("NSTimer", config)
+        self.assertIn("runtimeStatusDescription", PYHOST)
+        self.assertIn("HTTP 健康状态未知", SERVICES)
+        self.assertIn("健康检查通过", SERVICES)
+        self.assertIn("ServiceProbeRedirectGuard", SERVICES)
+        self.assertIn("completionHandler(nil)", SERVICES)
+        self.assertIn("invalidateAndCancel", SERVICES)
+
+    def test_epg_refresh_pauses_for_background_and_rejects_old_completion(self):
+        self.assertIn("UIApplicationDidEnterBackgroundNotification", EPG)
+        self.assertIn("UIApplicationWillEnterForegroundNotification", EPG)
+        self.assertIn("[self cancelPageRequest]", EPG)
+        self.assertIn("self.requestGeneration++", EPG)
+        self.assertIn("applicationState!=UIApplicationStateActive", EPG)
+        background=method_body("- (void)onBackground")
+        foreground=method_body("- (void)onForeground")
+        self.assertIn("setPaused:YES", background)
+        self.assertIn("officialEPGRequestGeneration++", background)
+        self.assertIn("[self.epgTask cancel]", background)
+        self.assertIn("setPaused:playbackPriority", foreground)
+        self.assertIn("playbackPriority", foreground)
+        self.assertIn("requestGeneration!=weakSelf.officialEPGRequestGeneration", method_body("- (void)refreshOfficialNowNext"))
 
     def test_epg_page_supports_pull_to_refresh_and_grouped_cards(self):
         self.assertIn('UITableViewStyleInsetGrouped', EPG)
         self.assertIn('UIRefreshControl', EPG)
         self.assertIn('endRefreshing', EPG)
+
+    def test_logs_redact_secrets_before_persistence(self):
+        self.assertIn("HostLogRedactor redactText:msg", TEXT)
+        plugin=(SOURCE.parent / "PluginLogStore.m").read_text(encoding="utf-8")
+        self.assertIn("HostLogRedactor redactText:line", plugin)
+        self.assertIn("HostLogRedactor redactText:text", plugin)
+        self.assertIn("HostLogRedactor redactText:content", plugin)
+        self.assertIn("HostLogRedactor redactText:stored", TEXT)
+        self.assertIn("HostLogRedactor redactText:text?:@\"\"", TEXT)
+        for secret in ("authorization", "cookie", "access[_-]?token", "password", "Bearer"):
+            self.assertIn(secret, REDACTOR)
+        smoke=(SOURCE.parents[1] / "Tests" / "UISmoke" / "SmokeDriver.m").read_text(encoding="utf-8")
+        self.assertIn("diagnostic logs redact URL credentials", smoke)
 
     def test_stable_url_key_rejects_bad_m3u_without_uncaught_exception(self):
         body = method_body("- (NSString *)stableURLKey:")
@@ -166,10 +231,101 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('isEqualToString:@"https"', body)
         self.assertIn('skippedInvalidURLs++', method_body('- (void)installPlaylist:'))
 
+    def test_channel_search_and_route_fallback_use_safe_identity(self):
+        self.assertIn('containsString:query', TEXT)
+        self.assertNotIn('![[[channel[@"name"]', TEXT)
+        self.assertIn('CCTVRouteGroupKey(channel)', TEXT)
+        self.assertIn('tvg-id:', TEXT)
+        self.assertNotIn('self.altSources[c.name]', TEXT)
+
+    def test_service_profiles_report_per_service_runtime_state(self):
+        self.assertIn('runtimeStatusDescriptionForServiceIdentifier:service[@"id"]', TEXT)
+        self.assertIn('runtimeStatusDescriptionForServiceIdentifier:', PYHOST)
+
+    def test_playback_diagnostics_snapshot_and_epg_date_selection_are_stable(self):
+        playback=(SOURCE.parent / "PlaybackInfoViewController.m").read_text(encoding="utf-8")
+        self.assertIn('snapshotRows', playback)
+        self.assertNotIn('self.rowsProvider()[ip.row]', playback)
+        self.assertIn('NSString *previous=', EPG)
+
+    def test_javascript_start_timeout_keeps_owner_until_ordered_stop(self):
+        runtime=(SOURCE.parent / "JSPluginRuntime.m").read_text(encoding="utf-8")
+        self.assertIn('if(failedStart)', runtime)
+        self.assertIn('ordered stop', runtime)
+        self.assertIn('self.sessionRuntimes[session]==runtime', runtime)
+
+    def test_node_session_status_distinguishes_confirmed_from_unresolved(self):
+        node=(SOURCE.parent / "NodePluginRuntime.m").read_text(encoding="utf-8")
+        self.assertIn('confirmedSessions', node)
+        self.assertIn('uncertainSessions', node)
+        self.assertIn('Reserve before I/O', node)
+        self.assertIn('isManagedServiceIdentifier', PYHOST)
+        self.assertIn('Node 操作超时；会话结果未知', node)
+        self.assertIn('managedServiceIdentifiers', PYHOST)
+        self.assertIn('启停结果待确认', SERVICES)
+        self.assertIn('isManagedServiceIdentifier:self.service', SERVICES)
+
+    def test_global_stop_includes_sessions_with_unconfirmed_start_replies(self):
+        self.assertIn('NodePluginRuntime.shared.managedServiceIdentifiers', PYHOST)
+        self.assertIn('JSPluginRuntime.shared.managedServiceIdentifiers', PYHOST)
+
     def test_m3u_parser_catches_invalid_url_lines(self):
         parser = (SOURCE.parent / "M3UParser.m").read_text(encoding="utf-8")
         self.assertIn('@catch (NSException *exception)', parser)
-        self.assertIn('pendingLogo = nil; pendingEPGID = nil; continue;', parser)
+        self.assertIn('pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; continue;', parser)
+        self.assertIn('ch.tvgName = pendingTVGName', parser)
+
+    def test_live_player_has_category_channel_program_and_route_panels(self):
+        self.assertIn('initWithItems:@[@"分类",@"频道",@"节目",@"线路"]', TEXT)
+        self.assertIn('if(index==0)v=[self categoryPanel]', TEXT)
+        self.assertIn('else if(index==2)v=[self epgPageForChannel:', TEXT)
+        self.assertIn('else if(index==3)v=[self routesPanel]', TEXT)
+        routes = method_body('- (CCTVPlaybackListPanelController *)routesPanel')
+        self.assertIn('自动选择', routes)
+        self.assertIn('displaySafeSourceURL:', routes)
+        self.assertIn('点按切换', routes)
+
+    def test_cctv_selected_route_uses_sdk_url_entry_and_stays_selected_on_retry(self):
+        body=method_body('- (void)playChannel:')
+        self.assertLess(body.index('URLForRoute:route error:'), body.index('[self stopPlayback]'))
+        self.assertLess(body.index('showNativeRouteError:'), body.index('self.playbackGeneration += 1'))
+        self.assertIn('restoreDefault:', body)
+        self.assertNotIn('getVDNConfig_CDNLive_DefaultCDNInfo', body)
+        self.assertIn('playViaSDKURL:selectedURL channelID:cid', body)
+        self.assertIn('playViaSDK:cid title:self.channelName', body)
+        retry=method_body('- (void)togglePlayPause')
+        self.assertIn('route:self.requestedNativeRoute', retry)
+        direct=method_body('- (void)playViaSDKURL:')
+        self.assertIn('playLIVEWithUrl:delegate:configOptions:', direct)
+        self.assertIn('kOptURLChannelIDForStats:cid', direct)
+        self.assertIn('kOptUserID', direct)
+        self.assertIn('保留线路选择，不回退自动', direct)
+        self.assertIn('CNPlayer 自选地址', TEXT)
+        self.assertIn('SDK 报告节点', TEXT)
+        self.assertIn('playSelectedNativeRouteOrChannel', method_body('- (void)player:(id)player playbackFailed:'))
+        self.assertNotIn('armCicadaFallback', TEXT)
+
+    def test_player_toolbar_uses_real_airplay_picker_and_delays_logo_io_until_first_frame(self):
+        self.assertIn('AVRoutePickerView *airPlayPicker', TEXT)
+        self.assertIn('@"customView":airPlayPicker', TEXT)
+        self.assertIn('loadPlayerChannelLogoAfterFirstFrame', TEXT)
+        body = method_body('- (void)loadLogo:')
+        self.assertIn('playbackPriorityUntil', body)
+
+    def test_epg_debug_info_reports_subscription_match_fields_and_preserves_source_query(self):
+        epg=(SOURCE.parent / "EPGViewController.m").read_text(encoding="utf-8")
+        profile=(SOURCE.parent / "ProfileStore.m").read_text(encoding="utf-8")
+        self.assertIn('M3U tvg-id', epg)
+        self.assertIn('M3U tvg-name', epg)
+        self.assertIn('channel[@"tvgName"]', profile)
+        self.assertIn('匹配依据', epg)
+        self.assertIn('所选日期', epg)
+        safe = epg[epg.index('- (NSString *)safeSourceDescription'):epg.index('- (void)showSourceInfo')]
+        self.assertNotIn('components.query=nil', safe)
+        self.assertIn('components.password=nil', safe)
+        route_url = method_body('- (NSString *)displaySafeSourceURL:')
+        self.assertNotIn('components.query=nil', route_url)
+        self.assertIn('components.password=nil', route_url)
 
     def test_catalog_supports_grid_and_list_and_routes_remain_long_press(self):
         self.assertIn('self.table.rowHeight = 48', TEXT)
@@ -186,9 +342,9 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('self.infoLabel.hidden = YES', body)
 
     def test_ios_plugin_uses_bounded_startup_resources(self):
-        self.assertIn('"--cache-mb", "32"', PYHOST)
-        self.assertIn('"--links-per-device", "2"', PYHOST)
-        self.assertIn('iOS 插件安全模式', PYHOST)
+        self.assertIn('@"--cache-mb",@"32"', TEXT)
+        self.assertIn('@"--links-per-device",@"2"', TEXT)
+        self.assertIn('stable-playback', TEXT)
 
     def test_favorites_filter_remains_available(self):
         self.assertIn('self.favoritesOnly', TEXT)

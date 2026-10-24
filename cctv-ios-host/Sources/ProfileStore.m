@@ -30,5 +30,5 @@
     for(NSString *s in [self orderedSources:channel[@"subscriptionSources"]?:@[]]){NSDictionary *p=[self metadata:s];NSString *u=p[@"epgURL"];if(!u.length)u=p[@"detectedEPGURL"];if([self isHTTP:u])return u;}
     return nil;
 }
-+ (NSString *)epgIDForChannel:(NSDictionary *)channel {return [NSUserDefaults.standardUserDefaults dictionaryForKey:@"epgMappings"][channel[@"id"]?:@""]?:channel[@"epgID"]?:channel[@"name"]?:@"";}
++ (NSString *)epgIDForChannel:(NSDictionary *)channel {return [NSUserDefaults.standardUserDefaults dictionaryForKey:@"epgMappings"][channel[@"id"]?:@""]?:channel[@"epgID"]?:channel[@"tvgName"]?:channel[@"name"]?:@"";}
 @end

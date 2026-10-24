@@ -1,10 +1,12 @@
 import http.client
+import http.server
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 
@@ -56,7 +58,7 @@ class NodeMediaHostTests(unittest.TestCase):
         return self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.cjs',
                          protocol='catvod-js', moduleType='commonjs', **extra)
 
-    def test_original_commonjs_runs_and_timers_are_disposed_before_replacement(self):
+    def test_commonjs_sessions_run_and_stop_independently(self):
         (self.package / 'index.cjs').write_text('''
             let counter=0;module.exports={init(){setInterval(()=>counter++,5)},home(){return {class:[{type_id:'movie',type_name:'电影'}]}},
             search(key,quick,pg){return {page:pg,list:[{vod_id:key,vod_name:'Node original '+counter}]}},
@@ -67,13 +69,26 @@ class NodeMediaHostTests(unittest.TestCase):
         self.assertIn('search', reply['result']['capabilities'])
         self.assertEqual(self.call('search', keyword='中文', page=2)['result']['list'][0]['vod_id'], '中文')
         self.assertEqual(self.call('play', lineId='main', id='opaque-id')['result']['url'], 'https://fixture.test/main/opaque-id')
-        self.assertFalse(self.call('start', session='two', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.cjs')['ok'])
+        second = self.call('start', session='two', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.cjs', protocol='catvod-js')
+        self.assertTrue(second['ok'], second)
         self.assertTrue(self.call('stop')['ok'])
         self.assertFalse(self.call('search', keyword='late')['ok'])
-        self.assertTrue(self.call('start', session='two', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.cjs', protocol='catvod-js')['ok'])
-        self.assertTrue(self.call('stop', session='one')['ok'])
         self.assertTrue(self.call('search', session='two', keyword='still-running')['ok'])
         self.assertTrue(self.call('stop', session='two')['ok'])
+
+    def test_commonjs_global_state_and_environment_are_scoped_by_session(self):
+        (self.package / 'index.cjs').write_text('''
+          module.exports={init(){global.__fixtureCounter=(global.__fixtureCounter||0)+1;const marker='session-'+global.__fixtureCounter;global.local={marker};process.env.CCTV_FIXTURE_MARKER=marker;this.marker=marker},
+            search(){return {module:this.marker,local:global.local.marker,env:process.env.CCTV_FIXTURE_MARKER}}};''')
+        self.assertTrue(self.start()['ok'])
+        self.assertTrue(self.call('start', session='two', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.cjs', protocol='catvod-js')['ok'])
+        first=self.call('search')['result'];second=self.call('search',session='two')['result']
+        self.assertEqual((first['module'],first['local'],first['env']),(first['module'],first['module'],first['module']))
+        self.assertEqual((second['module'],second['local'],second['env']),(second['module'],second['module'],second['module']))
+        self.assertNotEqual(first['module'],second['module'])
+        self.assertTrue(self.call('stop')['ok'])
+        self.assertTrue(self.call('search',session='two')['ok'])
+        self.assertTrue(self.call('stop',session='two')['ok'])
 
     def test_catpaw_http_protocol_providers_and_lifecycle_with_real_local_server(self):
         (self.package / 'index.cjs').write_text('''
@@ -91,6 +106,58 @@ class NodeMediaHostTests(unittest.TestCase):
         self.assertEqual(self.call('home', provider='first')['result']['list'][0]['vod_name'], '推荐')
         self.assertEqual(self.call('search', provider='first', keyword='query', page=2)['result']['list'][0]['vod_id'], 'query')
         self.assertTrue(self.call('stop')['ok'])
+
+    def test_catpaw_bundle_app_instance_is_bound_by_host_and_stopped(self):
+        (self.package / 'index.mjs').write_text('''
+          import http from 'node:http';
+          let server;
+          globalThis.Pans={listen:async({host,port})=>{server=http.createServer(async(req,res)=>{
+            let body='';for await(const chunk of req)body+=chunk;const data=JSON.parse(body||'{}');
+            const value=req.url==='/config'?{video:{sites:[{key:'pans',name:'本地源',api:'/spider/pans/3'}]}}:
+              req.url.endsWith('/search')?{list:[{vod_id:data.wd,vod_name:'Pans app'}]}:{class:[]};
+            res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));
+          });await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve)})},
+          close:async()=>{if(!server?.listening)throw Error('host closed before app cleanup');await new Promise(resolve=>server.close(resolve))}};
+        ''')
+        reply = self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.mjs',
+                          protocol='catpaw-http', moduleType='esm')
+        self.assertTrue(reply['ok'], reply)
+        self.assertEqual(self.call('providers')['result'][0]['id'], 'pans')
+        self.assertEqual(self.call('search', keyword='catpaw')['result']['list'][0]['vod_id'], 'catpaw')
+        self.assertTrue(self.call('stop')['ok'])
+        self.assertFalse(self.call('providers')['ok'])
+
+    def test_widget_extractor_uses_bounded_http_bridge_and_returns_playable_item(self):
+        class Fixture(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                body = json.dumps({'url': 'https://fixture.test/video.m3u8'}).encode()
+                self.send_response(200); self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
+        thread = threading.Thread(target=upstream.serve_forever, daemon=True); thread.start()
+        try:
+            (self.package / 'index.js').write_text(f'''WidgetMetadata={{name:'fixture'}};
+              async function loadResource(params){{
+                const response=await Widget.http.get('http://127.0.0.1:{upstream.server_port}/resource',{{base64Data:false}});
+                const media=JSON.parse(response.data);
+                return [{{name:params.seriesName,url:media.url,description:'fixture source',headers:{{Referer:'https://fixture.test/'}}}}];
+              }}''')
+            reply = self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.js',
+                              protocol='widget-extractor', moduleType='script')
+            self.assertTrue(reply['ok'], reply)
+            self.assertIn('search', reply['result']['capabilities'])
+            results = self.call('search', keyword='测试剧')['result']
+            self.assertEqual(results['list'][0]['name'], '测试剧')
+            identifier = results['list'][0]['id']
+            details = self.call('detail', id=identifier)['result']
+            self.assertEqual(details['lines'][0]['episodes'][0]['id'], identifier)
+            playback = self.call('play', id=identifier)['result']
+            self.assertEqual((playback['url'], playback['headers']['Referer']),
+                             ('https://fixture.test/video.m3u8', 'https://fixture.test/'))
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            upstream.shutdown(); upstream.server_close(); thread.join(timeout=2)
 
     def test_modern_catvod_factory_receives_site_ext_and_scalar_detail_ids(self):
         (self.package / 'spider.mjs').write_text('''

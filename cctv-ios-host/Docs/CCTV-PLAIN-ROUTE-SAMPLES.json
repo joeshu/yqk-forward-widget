@@ -1,0 +1,116 @@
+{
+  "checked_utc": "2026-10-24T04:58:47.878103+00:00",
+  "environment": "Linux; ordinary ffmpeg decoder; no media transformation, license or key request",
+  "ffmpeg_version": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers",
+  "ios_playback_verified": false,
+  "samples": [
+    {
+      "channel": "cctv1",
+      "provider": "ws",
+      "segment_count": 3,
+      "statuses": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "segment_bytes": 1025728,
+      "probe": {
+        "programs": [
+          {
+            "streams": [
+              {
+                "codec_name": "aac",
+                "codec_type": "audio"
+              },
+              {
+                "codec_name": "h264",
+                "codec_type": "video",
+                "width": 640,
+                "height": 360
+              }
+            ]
+          }
+        ],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "aac",
+            "codec_type": "audio"
+          },
+          {
+            "codec_name": "h264",
+            "codec_type": "video",
+            "width": 640,
+            "height": 360
+          }
+        ]
+      },
+      "decoder_returncode": 0,
+      "decoded_frame_count": 146,
+      "decoder_error_lines": 742,
+      "decoder_error_excerpt": [
+        "[h264 @ <decoder>] top block unavailable for requested intra mode",
+        "[h264 @ <decoder>] error while decoding MB 25 0, bytestream 16185",
+        "[h264 @ <decoder>] top block unavailable for requested intra mode",
+        "[h264 @ <decoder>] error while decoding MB 25 0, bytestream 16185",
+        "[vist#0:1/h264 @ <decoder>] [dec:h264 @ <decoder>] Error submitting packet to decoder: Invalid data found when processing input"
+      ]
+    },
+    {
+      "channel": "guangdong",
+      "provider": "tx",
+      "segment_count": 3,
+      "statuses": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "segment_bytes": 2517884,
+      "probe": {
+        "programs": [
+          {
+            "streams": [
+              {
+                "codec_name": "aac",
+                "codec_type": "audio"
+              },
+              {
+                "codec_name": "h264",
+                "codec_type": "video",
+                "width": 1280,
+                "height": 720
+              }
+            ]
+          }
+        ],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "aac",
+            "codec_type": "audio"
+          },
+          {
+            "codec_name": "h264",
+            "codec_type": "video",
+            "width": 1280,
+            "height": 720
+          }
+        ]
+      },
+      "decoder_returncode": 0,
+      "decoded_frame_count": 9,
+      "decoder_error_lines": 1105,
+      "decoder_error_excerpt": [
+        "[h264 @ <decoder>] top block unavailable for requested intra mode -1",
+        "[h264 @ <decoder>] error while decoding MB 12 0, bytestream 40842",
+        "[h264 @ <decoder>] Missing reference picture, default is 0",
+        "[h264 @ <decoder>] decode_slice_header error",
+        "[h264 @ <decoder>] Missing reference picture, default is 2"
+      ]
+    }
+  ]
+}

@@ -119,6 +119,18 @@ class NativePackageTests(unittest.TestCase):
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['engine'], result['protocol']), ('node', 'catpaw-http'))
 
+    def test_catpaw_bundled_fastify_app_is_esm_and_gets_node_package_metadata(self):
+        source = '''globalThis.Pans = await createApplication();
+          // The bundle contains a nested CJS loader string but its entry is ESM.
+          const loader = "module.exports = value";
+          const route = '/config'; const prefix = '/spider/demo';
+          const video = {sites: []};'''
+        result = self.inspect(self.archive({'index.js': source}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol'], result['manifest']['moduleType']),
+                         ('node', 'catpaw-http', 'esm'))
+        self.assertEqual(result['nodePackageType'], 'module')
+
     def test_catvod_quickjs_methods_and_tvbox_manifest_alias_are_recognized(self):
         source = "export default site=>({async init(ext){},async home(filter){return {class:[]}},async homeVod(){return {list:[]}},async category(tid,pg,filter,extend){return {list:[]}},async search(key,quick,pg){return {list:[]}},async detail(id){return {list:[]}},async play(flag,id,vipFlags){return {parse:0,url:id}}})"
         inferred = self.inspect(self.archive({'index.mjs': source}))
@@ -143,6 +155,39 @@ class NativePackageTests(unittest.TestCase):
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['engine'], result['protocol']), ('python', 'python-spider'))
         self.assertFalse(marker.exists())
+
+    def test_widget_metadata_loader_is_recognized_as_widget_extractor(self):
+        file = self.folder / 'cheyong-rex.js'
+        file.write_text("WidgetMetadata={name:'fixture'}; async function loadResource(params){return await Widget.http.get(params.url)}")
+        result = self.inspect(file)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol']), ('node', 'widget-extractor'))
+
+    def test_standalone_python_http_import_uses_declared_host_port_flags(self):
+        ysp = '''import argparse
+from http.server import ThreadingHTTPServer
+ap = argparse.ArgumentParser()
+ap.add_argument('--serve', action='store_true')
+ap.add_argument('--port', dest='port_opt', type=int, default=None)
+ap.add_argument('--bind', default='127.0.0.1')
+def m3u(origin, data): return '#EXTM3U'
+route = '/all.m3u'
+'''
+        result = self.inspect(self.archive({'ysp_live_plugin.py': ysp}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol'], result['arguments']),
+                         ('python', 'python-http', '--port|{port}|--bind|{bind}|--serve'))
+        self.assertEqual(result['playlistPath'], '/all.m3u')
+
+        cbox = "import argparse\nap=argparse.ArgumentParser()\nap.add_argument('--port', dest='port_opt')\nap.add_argument('--bind', default='127.0.0.1')\n"
+        result = self.inspect(self.archive({'cbox_live_plugin.py': cbox}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['arguments'], '--port|{port}|--bind|{bind}')
+
+        generic = "import argparse\nap=argparse.ArgumentParser()\nap.add_argument('--serve', action='store_true')\n"
+        result = self.inspect(self.archive({'generic.py': generic}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['arguments'], '')
 
     def test_traversal_symlink_duplicate_and_bad_crc_are_rejected(self):
         for path in ('../escaped.py', '/absolute.py', 'directory/../../escaped.py', 'C:/escaped.py'):

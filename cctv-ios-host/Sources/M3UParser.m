@@ -21,18 +21,19 @@
     NSString *pendingName = nil;
     NSString *pendingLogo = nil;
     NSString *pendingEPGID = nil;
+    NSString *pendingTVGName = nil;
     for (NSString *raw in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
         NSString *line = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         if (!line.length) continue;
 
         if ([line hasPrefix:@"#EXTINF"]) {
             group = [self attribute:@"group-title" in:line];
-            NSString *tvg = [self attribute:@"tvg-name" in:line];
+            pendingTVGName = [self attribute:@"tvg-name" in:line];
             pendingLogo = [self attribute:@"tvg-logo" in:line];
             pendingEPGID = [self attribute:@"tvg-id" in:line];
             NSRange comma = [line rangeOfString:@","];
             NSString *display = comma.location != NSNotFound ? [line substringFromIndex:comma.location + 1] : nil;
-            pendingName = display.length ? display : (tvg.length ? tvg : @"未命名频道");
+            pendingName = display.length ? display : (pendingTVGName.length ? pendingTVGName : @"未命名频道");
             continue;
         }
         if ([line hasPrefix:@"#"]) continue;
@@ -50,7 +51,7 @@
         } @catch (NSException *exception) {
             url = nil;
         }
-        if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; continue; }
+        if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; continue; }
 
         M3UChannel *ch = [M3UChannel new];
         ch.name = pendingName;
@@ -58,10 +59,12 @@
         ch.group = group.length ? group : @"订阅";
         ch.logo = pendingLogo;
         ch.epgID = pendingEPGID;
+        ch.tvgName = pendingTVGName;
         [out addObject:ch];
         pendingName = nil;
         pendingLogo = nil;
         pendingEPGID = nil;
+        pendingTVGName = nil;
     }
     return out;
 }

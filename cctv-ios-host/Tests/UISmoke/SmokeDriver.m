@@ -17,6 +17,7 @@
 #import "ResourceImportSheetViewController.h"
 #import "LogCenterViewController.h"
 #import "PluginLogStore.h"
+#import "HostLogRedactor.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
@@ -279,7 +280,9 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             capture(self.window, @"09-epg-fixture");
             [nav popToRootViewControllerAnimated:NO];
-            [root logPluginLine:@"独立插件日志测试" identifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
+            NSString *redacted=[HostLogRedactor redactText:@"GET https://example.test/live.m3u8?access_token=abc123&channel=1\nAuthorization: Bearer header-secret\nCookie: sid=cookie-secret"];
+            check(![redacted containsString:@"abc123"] && ![redacted containsString:@"header-secret"] && ![redacted containsString:@"cookie-secret"], @"diagnostic logs redact URL credentials, authorization and cookies");
+            [root logPluginLine:@"独立插件日志测试 access_token=plugin-secret" identifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
             [root openDiagnosticLogForIdentifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
             [PluginLogStore.shared prepareExportForIdentifier:@"ui-smoke-plugin" displayName:@"UI Smoke Plugin" completion:^(NSURL *url,NSError *error){pluginLogExportURL=url;}];
           },
@@ -287,9 +290,11 @@ static void next(NSArray *steps, NSUInteger index) {
             LogCenterViewController *logs=(id)nav.topViewController;
             check([logs isKindOfClass:LogCenterViewController.class], @"diagnostics open in an independent navigation page");
             check([logs.logSnapshotProvider() containsString:@"独立插件日志测试"], @"plugin log page is scoped to that script");
+            check(![logs.logSnapshotProvider() containsString:@"plugin-secret"], @"plugin log view redacts sensitive values before display");
             check(logs.onExportLog!=nil && logs.onClearLog!=nil, @"plugin log page exposes independent export and clear actions");
             check([[logs valueForKey:@"categories"] numberOfSegments]==4, @"log center supports all, playback, plugin and error filters");
-            check(pluginLogExportURL && [[NSFileManager defaultManager] fileExistsAtPath:pluginLogExportURL.path], @"per-plugin log export creates a separate text file");
+            NSString *pluginExport=pluginLogExportURL?[NSString stringWithContentsOfURL:pluginLogExportURL encoding:NSUTF8StringEncoding error:NULL]:nil;
+            check(pluginLogExportURL && [[NSFileManager defaultManager] fileExistsAtPath:pluginLogExportURL.path] && ![pluginExport containsString:@"plugin-secret"], @"per-plugin log export creates a separate redacted text file");
             capture(self.window, @"10-diagnostic-log");
             [nav popToRootViewControllerAnimated:NO];
             [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"legacyNativePlayback"];
@@ -532,6 +537,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [script writeToFile:[folder stringByAppendingPathComponent:@"index.cjs"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{
                 NSDictionary *start=nodeCall(@"start",@{@"session":@"node-ui",@"packageRoot":folder,@"dataDirectory":folder,@"entry":@"index.cjs",@"moduleType":@"commonjs",@"protocol":@"catvod-js"});
+                NSArray *confirmedNodeSessions=NodePluginRuntime.shared.activeSessionIdentifiers.copy;
                 NSDictionary *search=[start[@"ok"] boolValue]?nodeCall(@"search",@{@"session":@"node-ui",@"keyword":@"opaque-node-id"}):@{};
                 NSDictionary *stop=nodeCall(@"stop",@{@"session":@"node-ui"});
                 NSString *saved=[NSString stringWithContentsOfFile:[folder stringByAppendingPathComponent:@"owned.txt"] encoding:NSUTF8StringEncoding error:NULL];
@@ -539,7 +545,7 @@ static void next(NSArray *steps, NSUInteger index) {
                 NSDictionary *catpaw=nodeCall(@"start",@{@"session":@"catpaw-ui",@"packageRoot":folder,@"dataDirectory":folder,@"entry":@"catpaw.cjs",@"moduleType":@"commonjs",@"protocol":@"catpaw-http"});
                 NSDictionary *providers=[catpaw[@"ok"] boolValue]?nodeCall(@"providers",@{@"session":@"catpaw-ui"}):@{};
                 NSDictionary *catpawStop=nodeCall(@"stop",@{@"session":@"catpaw-ui"});
-                NSDictionary *checks=@{@"start":start,@"search":search,@"stop":stop,@"saved":saved?:@"",@"catpaw":catpaw,@"providers":providers,@"catpawStop":catpawStop};
+                NSDictionary *checks=@{@"start":start,@"confirmedNodeSessions":confirmedNodeSessions?:@[],@"search":search,@"stop":stop,@"saved":saved?:@"",@"catpaw":catpaw,@"providers":providers,@"catpawStop":catpawStop};
                 [NSFileManager.defaultManager removeItemAtPath:folder error:NULL];dispatch_async(dispatch_get_main_queue(),^{nodeChecks=checks;});
             }});
           }},

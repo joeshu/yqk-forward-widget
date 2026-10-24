@@ -5,6 +5,7 @@ import base64
 import builtins
 import json
 import os
+import re
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -73,6 +74,69 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             pass
 
+    def send_proxy(self, result, head=False):
+        if not isinstance(result, (list, tuple)) or len(result) < 3:
+            raise MediaError('INVALID_PROXY', '来源未返回有效代理响应')
+        try:
+            status = int(result[0])
+        except (ValueError, TypeError):
+            raise MediaError('INVALID_PROXY', '代理状态码无效')
+        if not 100 <= status <= 599:
+            raise MediaError('INVALID_PROXY', '代理状态码超出范围')
+        raw_headers = result[1]
+        if isinstance(raw_headers, str):
+            raw_headers = {'Content-Type': raw_headers}
+        if isinstance(raw_headers, dict):
+            raw_headers = {name: value for index, (name, value) in enumerate(raw_headers.items()) if index < 64}
+        else:
+            raw_headers = {}
+        value = result[2]
+        if isinstance(value, bytes):
+            body = value
+        elif isinstance(value, (bytearray, memoryview)):
+            body = bytes(value)
+        elif isinstance(value, str):
+            body = value.encode('utf-8')
+        elif isinstance(value, (dict, list)):
+            body = json.dumps(value, ensure_ascii=False).encode('utf-8')
+            if not any(str(name).lower() == 'content-type' for name in raw_headers):
+                raw_headers['Content-Type'] = 'application/json; charset=utf-8'
+        elif value is None:
+            body = b''
+        else:
+            raise MediaError('INVALID_PROXY', '代理响应内容类型不受支持')
+        if len(body) > 8 * 1024 * 1024:
+            raise MediaError('RESULT_TOO_LARGE', '来源代理响应超过 8 MB')
+        no_body_status = 100 <= status < 200 or status in (204, 304)
+        if no_body_status:
+            body = b''
+        self.send_response(status)
+        has_type = False
+        source_length = None
+        blocked = {'connection', 'content-length', 'transfer-encoding', 'host', 'keep-alive', 'trailer', 'upgrade'}
+        for name, value in raw_headers.items():
+            name, value = str(name), str(value)
+            if name.lower() == 'content-length' and len(value) <= 20 and value.isdigit():
+                candidate_length = int(value)
+                if candidate_length <= 9223372036854775807:
+                    source_length = candidate_length
+                continue
+            if (len(name) > 128 or len(value) > 16384 or
+                    not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) or
+                    name.lower() in blocked or '\r' in value or '\n' in value):
+                continue
+            if name.lower() == 'content-type':
+                has_type = True
+            self.send_header(name, value)
+        if not has_type:
+            self.send_header('Content-Type', 'application/octet-stream')
+        if not no_body_status:
+            self.send_header('Content-Length', str(source_length if head and source_length is not None else len(body)))
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        if not head:
+            self.wfile.write(body)
+
     def do_HEAD(self):
         path = urllib.parse.urlsplit(self.path).path
         if path.startswith('/media/'):
@@ -81,6 +145,14 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/spider/'):
             try:
                 self.route_plugin_path('HEAD')
+            except Exception as error:
+                self.send(502, {'ok': False, 'error': str(error)}, True)
+            return
+        if path == '/proxy':
+            try:
+                args = {key: values[-1] for key, values in urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).items()}
+                args.update({'method': 'HEAD', 'headers': {key: self.headers.get(key, '') for key in ('User-Agent', 'Range', 'Accept', 'Referer') if self.headers.get(key)}})
+                self.send_proxy(self.server.runtime.call('proxy', args), True)
             except Exception as error:
                 self.send(502, {'ok': False, 'error': str(error)}, True)
             return
@@ -145,18 +217,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parts.path == '/proxy':
                 args = {key: values[-1] for key, values in urllib.parse.parse_qs(parts.query).items()}
-                result = runtime.call('proxy', args)
-                if not isinstance(result, (list, tuple)) or len(result) < 3:
-                    raise MediaError('INVALID_PROXY', '来源未返回有效代理响应')
-                body = result[2].encode() if isinstance(result[2], str) else result[2]
-                if not isinstance(body, bytes) or len(body) > 8 * 1024 * 1024:
-                    raise MediaError('RESULT_TOO_LARGE', '来源代理响应超过 8 MB')
-                self.send_response(int(result[0]))
-                self.send_header('Content-Type', str(result[1]))
-                self.send_header('Content-Length', str(len(body)))
-                self.send_header('Connection', 'close')
-                self.end_headers()
-                self.wfile.write(body)
+                args.update({'method': 'GET', 'headers': {key: self.headers.get(key, '') for key in ('User-Agent', 'Range', 'Accept', 'Referer') if self.headers.get(key)}})
+                self.send_proxy(runtime.call('proxy', args))
                 return
             if parts.path in ('/all.m3u', '/all.m3u8', '/m3u'):
                 channels = runtime.call('catalog')

@@ -15,10 +15,13 @@ import sys
 import threading
 import time
 import weakref
+from collections.abc import MutableMapping
 
-_session = None
+_session = None  # Backwards-compatible alias used by older diagnostics/tests.
+_sessions = {}
 _lock = threading.RLock()
-_stop_lock = threading.Lock()
+_stop_locks = {}
+_startup_lock = threading.Lock()
 _thread_start = threading.Thread.start
 _server_init = socketserver.BaseServer.__init__
 _serve_forever = socketserver.BaseServer.serve_forever
@@ -32,10 +35,29 @@ _process_thread = socketserver.ThreadingMixIn.process_request_thread
 _hooks = ('_cctvhost_stop_service', '_ysp_stop_server')
 _atexit_register = atexit.register
 _last_error = ''
+_last_errors = {}
+_base_environment = os.environ
+
+
+class _SessionEnvironment(MutableMapping):
+    """Give plugin threads a session-local os.environ view."""
+    def _mapping(self):
+        owner = getattr(threading.current_thread(), '_host_session', None)
+        return owner.environment if owner is not None else _base_environment
+
+    def __getitem__(self, key): return self._mapping()[key]
+    def __setitem__(self, key, value): self._mapping()[key] = str(value)
+    def __delitem__(self, key): del self._mapping()[key]
+    def __iter__(self): return iter(self._mapping())
+    def __len__(self): return len(self._mapping())
+
+
+os.environ = _SessionEnvironment()
 
 
 class Session:
-    def __init__(self):
+    def __init__(self, identifier):
+        self.identifier = str(identifier)
         self.threads = weakref.WeakSet()
         self.servers = []
         self.helpers = []
@@ -43,8 +65,15 @@ class Session:
         self.stopping = threading.Event()
         self.callback_started = False
         self.exit_callbacks = []
-        self.saved_path = list(sys.path)
+        self.inserted_path = None
         self.restored = False
+        self.startup_lock_held = False
+        self.saved_argv = None
+        self.saved_environment = None
+        self.stop_hook = None
+        self.namespace = None
+        self.previous_hooks = {}
+        self.environment = dict(_base_environment)
 
     def clean(self):
         with _lock:
@@ -88,6 +117,8 @@ def _serve(server, poll_interval=.5):
         if owner.stopping.is_set() or server._host_closed:
             return
         server._host_serving.set()
+    _capture_stop_hook(owner)
+    _release_startup(owner)
     try:
         return _serve_forever(server, min(poll_interval, .1))
     finally:
@@ -191,60 +222,130 @@ atexit.register = _register_exit
 
 
 def configure_environment(data_dir, port):
-    # os.environ is a Python mapping; C setenv alone does not update it on reuse.
-    os.environ['YSP_DATA_DIR'] = data_dir
-    os.environ['CCTVHOST_DATA_DIR'] = data_dir
-    os.environ['CCTVHOST_PORT'] = str(port)
+    # Legacy callers configure the host's base environment. Per-service values
+    # are passed directly to run_script and stay in that session's mapping.
+    _base_environment['YSP_DATA_DIR'] = data_dir
+    _base_environment['CCTVHOST_DATA_DIR'] = data_dir
+    _base_environment['CCTVHOST_PORT'] = str(port)
+
+
+def _release_startup(session):
+    """Restore interpreter-wide startup values before another script enters."""
+    if not session.startup_lock_held:
+        return
+    with _lock:
+        if not session.startup_lock_held:
+            return
+        if session.saved_argv is not None:
+            sys.argv = session.saved_argv
+            session.saved_argv = None
+        session.startup_lock_held = False
+        _startup_lock.release()
+
+
+def _capture_stop_hook(session):
+    """Capture this script's hook without overwriting another live plugin."""
+    with _lock:
+        for hook in _hooks:
+            current = vars(builtins).get(hook)
+            previous = session.previous_hooks.get(hook)
+            if callable(current) and current is not previous:
+                session.stop_hook = current
+                if previous is None:
+                    vars(builtins).pop(hook, None)
+                else:
+                    vars(builtins)[hook] = previous
 
 
 def _restore(session):
     with _lock:
         if session.restored:
             return
-        sys.path[:] = session.saved_path
+        _release_startup(session)
+        if session.inserted_path and session.inserted_path in sys.path:
+            sys.path.remove(session.inserted_path)
         for callback in session.exit_callbacks:
             atexit.unregister(callback)
         session.exit_callbacks.clear()
-        for hook in _hooks:
-            vars(builtins).pop(hook, None)
+        session.namespace = None
+        session.threads.clear()
+        session.helpers.clear()
+        session.servers.clear()
+        session.environment.clear()
+        session.inserted_path = None
         session.restored = True
+        if _sessions.get(session.identifier) is session:
+            del _sessions[session.identifier]
 
 
-def run_script(path):
+def run_script(path, identifier='default', data_dir=None, port=None, arguments=None):
     global _session, _last_error
+    identifier = str(identifier or 'default')
     with _lock:
-        if _session is not None and not _session.clean():
-            raise RuntimeError('previous service still owns live resources')
-        if _session is not None:
-            _restore(_session)
-        session = Session()
+        previous = _sessions.get(identifier)
+        if previous is not None and not previous.clean():
+            raise RuntimeError('previous service %s still owns live resources' % identifier)
+        if previous is not None:
+            _restore(previous)
+        session = Session(identifier)
+        _sessions[identifier] = session
         _session = session
         _last_error = ''
-        for hook in _hooks:
-            vars(builtins).pop(hook, None)
+        _last_errors[identifier] = ''
+        session.previous_hooks = {hook: vars(builtins).get(hook) for hook in _hooks}
+    # Python plugins share one interpreter. Serialize only their top-level
+    # initialization so argv/environment and import-path setup cannot race.
+    # A managed blocking HTTP server releases this gate as soon as it is serving.
+    _startup_lock.acquire()
+    session.startup_lock_held = True
     thread = threading.current_thread()
     thread._host_session = session
-    sys.path.insert(0, os.path.dirname(path))
+    session.saved_argv = sys.argv
+    if data_dir is not None:
+        session.environment['YSP_DATA_DIR'] = str(data_dir)
+        session.environment['CCTVHOST_DATA_DIR'] = str(data_dir)
+    if port is not None:
+        session.environment['CCTVHOST_PORT'] = str(port)
+    if arguments is not None:
+        sys.argv = [path] + list(arguments)
+    session.inserted_path = os.path.dirname(path)
+    sys.path.insert(0, session.inserted_path)
     try:
-        return runpy.run_path(path, run_name='__main__')
+        session.namespace = runpy.run_path(path, run_name='__main__')
+        return session.namespace
     except SystemExit as error:
         # argparse/sys.exit belongs to this service, never the embedding App.
         print('[宿主] Python 脚本已退出，退出码：%s' % error.code)
         return {}
     finally:
+        _capture_stop_hook(session)
+        _release_startup(session)
         thread._host_session = None
         session.done.set()
         if session.clean():
             _restore(session)
 
 
-def is_idle():
+def is_idle(identifier=None):
     with _lock:
-        return _session is None or _session.clean()
+        if identifier is not None:
+            session = _sessions.get(str(identifier))
+            return session is None or session.clean()
+        return all(session.clean() for session in _sessions.values())
 
 
-def last_error():
-    return _last_error
+def last_error(identifier=None):
+    return _last_errors.get(str(identifier), _last_error) if identifier is not None else _last_error
+
+
+def session_status(identifier):
+    with _lock:
+        session = _sessions.get(str(identifier))
+        if session is None:
+            return {'running': False, 'stopping': False, 'threads': [], 'servers': []}
+        return {'running': not session.clean(), 'stopping': session.stopping.is_set(),
+                'threads': [t.name for t in list(session.threads) + session.helpers if t.is_alive()],
+                'servers': [str(s.server_address) for s in session.servers if not s._host_closed]}
 
 
 def _helper(session, target, name):
@@ -261,13 +362,20 @@ def _helper(session, target, name):
     return worker
 
 
-def stop_session(timeout=5.0):
+def stop_session(identifier='default', timeout=5.0):
     global _last_error
-    if not _stop_lock.acquire(blocking=False):
-        _last_error = '服务正在停止，请稍后再试。'
+    # Preserve the original stop_session(timeout) calling convention.
+    if isinstance(identifier, (int, float)):
+        timeout, identifier = identifier, 'default'
+    identifier = str(identifier or 'default')
+    with _lock:
+        stop_lock = _stop_locks.setdefault(identifier, threading.Lock())
+    if not stop_lock.acquire(blocking=False):
+        _last_errors[identifier] = _last_error = '服务正在停止，请稍后再试。'
         return False
     try:
-        session = _session
+        with _lock:
+            session = _sessions.get(identifier)
         if session is None:
             return True
         if session.clean():
@@ -278,8 +386,13 @@ def stop_session(timeout=5.0):
             session.stopping.set()
             if not session.callback_started:
                 session.callback_started = True
-                callback = next((getattr(builtins, h, None) for h in _hooks
-                                 if callable(getattr(builtins, h, None))), None)
+                callback = session.stop_hook
+                # A script that is still executing top-level code owns the
+                # startup gate, so no second plugin can have replaced this
+                # callback yet.
+                if callback is None and session.startup_lock_held:
+                    callback = next((getattr(builtins, h, None) for h in _hooks
+                                     if callable(getattr(builtins, h, None))), None)
                 if callback:
                     _helper(session, callback, 'plugin-stop-callback')
         # Shutdown only servers currently in serve_forever; shutdown() on an
@@ -304,13 +417,13 @@ def stop_session(timeout=5.0):
         while time.monotonic() < deadline:
             if session.clean():
                 _restore(session)
-                _last_error = ''
+                _last_errors[identifier] = _last_error = ''
                 return True
             time.sleep(.02)
         with _lock:
             names = [t.name for t in list(session.threads) + session.helpers if t.is_alive()]
-        _last_error = ('服务尚有任务未退出（%s）。已阻止新任务；稍后可再次停止。'
+        _last_errors[identifier] = _last_error = ('服务尚有任务未退出（%s）。已阻止新任务；稍后可再次停止。'
                        '不支持协作停止的脚本仍需重开 App。') % (', '.join(names[:4]) or '服务主线程/监听端口')
         return False
     finally:
-        _stop_lock.release()
+        stop_lock.release()
