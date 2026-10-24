@@ -221,8 +221,13 @@ static void next(NSArray *steps, NSUInteger index) {
             capture(self.window, @"04-services");
             ServicesViewController *v = (id)nav.topViewController;
             UITableView *table = [v valueForKey:@"table"];
-            [table.delegate tableView:table
-                didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
+            NSIndexPath *firstService = nil;
+            for (NSInteger section = 0; section < table.numberOfSections && !firstService; section++)
+                if ([table numberOfRowsInSection:section] > 0)
+                    firstService = [NSIndexPath indexPathForRow:0 inSection:section];
+            check(firstService != nil, @"service directory contains a selectable service row");
+            if (firstService)
+                [table.delegate tableView:table didSelectRowAtIndexPath:firstService];
           },
           ^{
             check([NSStringFromClass(nav.topViewController.class)

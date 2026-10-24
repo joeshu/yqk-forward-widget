@@ -112,10 +112,26 @@ function widgetRows(owner,value){
   return {page:1,pagecount:1,list:items}
 }
 async function sourceJSON(url,body){
-  const response=await fetch(url,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(20000)})
-  const text=(await readLimited(response)).toString('utf8')
-  if(!response.ok)throw Error('Node 来源 HTTP '+response.status)
-  return JSON.parse(text)
+  const target=new URL(url)
+  if(!['http:','https:'].includes(target.protocol)||!['127.0.0.1','localhost','[::1]'].includes(target.hostname)||target.username||target.password)throw Error('Node 本机服务地址无效')
+  const transport=target.protocol==='https:'?https:http,payload=body===undefined?null:Buffer.from(JSON.stringify(body))
+  return new Promise((resolve,reject)=>{
+    let settled=false,length=0;const chunks=[];let request
+    const finish=(error,value)=>{if(settled)return;settled=true;original.clearTimeout(timer);if(error)reject(error);else resolve(value)}
+    const timer=original.setTimeout(()=>request?.destroy(Error('Node 本机服务响应超时')),20000)
+    const headers=payload?{'Content-Type':'application/json','Content-Length':String(payload.length)}:{}
+    request=transport.request(target,{method:payload?'POST':'GET',headers},response=>{
+      response.on('data',chunk=>{length+=chunk.length;if(length>2*1024*1024){response.destroy(Error('Node 来源响应超过 2 MB'));return}chunks.push(Buffer.from(chunk))})
+      response.on('error',error=>finish(error))
+      response.on('end',()=>{
+        if(response.statusCode<200||response.statusCode>=300){finish(Error('Node 来源 HTTP '+response.statusCode));return}
+        try{finish(null,JSON.parse(Buffer.concat(chunks).toString('utf8')))}catch(error){finish(Error('Node 来源返回无效 JSON：'+error.message))}
+      })
+    })
+    request.on('error',error=>finish(error))
+    if(payload)request.write(payload)
+    request.end()
+  })
 }
 function installCatvodGlobals(owner){
   const file=path.join(owner.data,'js-storage.json')
