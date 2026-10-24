@@ -169,6 +169,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property(nonatomic,strong) NSMutableDictionary *catalogStates;
 @property(nonatomic) NSUInteger remoteRetryCount;
 @property(nonatomic) BOOL remoteFailureRecoveryPending;
+@property(nonatomic) BOOL remotePlaybackFailed;
+@property(nonatomic) BOOL nativeRetryPending;
 @property(nonatomic,strong) AVPlayer *previewPlayer;
 @property(nonatomic,strong) AVPlayerLayer *previewLayer;
 @property(nonatomic,strong) UIView *previewBox;
@@ -178,6 +180,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 @property(nonatomic,assign) NSTimeInterval selectionRequestedAt;
 @property(nonatomic,assign) NSUInteger playbackIntentVersion;
 @property(nonatomic,assign) NSUInteger subscriptionParseGeneration;
+- (void)displayNativePlaybackFailure:(NSString *)stage error:(nullable NSError *)error;
+- (void)toggleCurrentFavorite;
 @end
 
 @implementation RootViewController
@@ -633,16 +637,35 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)configureCatalogNavigation {
-    self.title=self.favoritesOnly?@"收藏频道":(self.subscriptionCatalog?@"频道":@"CCTV");
-    self.navigationItem.largeTitleDisplayMode=(self.playerExpanded&&(self.favoritesOnly||self.subscriptionCatalog==([self.currentRemoteURL length]>0)))?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
+    BOOL expandedLive=self.playerExpanded&&self.activeTab<2&&!self.favoritesOnly&&self.channelID.length&&((self.activeTab==0&&!self.currentRemoteURL.length)||(self.activeTab==1&&self.currentRemoteURL.length));
+    self.title=expandedLive?(self.channelName?:@"直播"):(self.favoritesOnly?@"收藏频道":(self.subscriptionCatalog?@"频道":@"CCTV"));
+    self.navigationItem.largeTitleDisplayMode=expandedLive?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationItem.searchController=self.searchController; self.navigationItem.hidesSearchBarWhenScrolling=NO;
     __weak typeof(self) w=self;
-    self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
-        @{@"icon":@"square.grid.2x2",@"title":@"列表与网格",@"action":[UIAction actionWithHandler:^(UIAction *a){w.gridMode=!w.gridMode;[NSUserDefaults.standardUserDefaults setBool:w.gridMode forKey:@"channelGridMode"];[w.view setNeedsLayout];}]},
-        @{@"icon":@"arrow.clockwise",@"title":@"刷新当前页面",@"action":[UIAction actionWithHandler:^(UIAction *a){[w onPullRefresh];}]},
-        @{@"icon":@"ellipsis",@"title":@"更多",@"menu":[self catalogMenu]}
-    ])];
-    self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"全部频道" style:UIBarButtonItemStylePlain target:self action:@selector(showGroupMenu)];
+    if(expandedLive){
+        BOOL favorite=[self.favorites containsObject:self.channelID];
+        self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
+            @{@"icon":favorite?@"heart.fill":@"heart",@"title":favorite?@"取消收藏当前频道":@"收藏当前频道",@"action":[UIAction actionWithHandler:^(UIAction *a){[w toggleCurrentFavorite];}]},
+            @{@"icon":@"airplayvideo",@"title":@"线路与播放源",@"action":[UIAction actionWithHandler:^(UIAction *a){[w showRoutes];}]},
+            @{@"icon":@"info.circle",@"title":@"播放信息",@"action":[UIAction actionWithHandler:^(UIAction *a){[w showPlaybackInfo];}]}
+        ])];
+    }else{
+        self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
+            @{@"icon":@"square.grid.2x2",@"title":@"列表与网格",@"action":[UIAction actionWithHandler:^(UIAction *a){w.gridMode=!w.gridMode;[NSUserDefaults.standardUserDefaults setBool:w.gridMode forKey:@"channelGridMode"];[w.view setNeedsLayout];}]},
+            @{@"icon":@"arrow.clockwise",@"title":@"刷新当前页面",@"action":[UIAction actionWithHandler:^(UIAction *a){[w onPullRefresh];}]},
+            @{@"icon":@"ellipsis",@"title":@"更多",@"menu":[self catalogMenu]}
+        ])];
+    }
+    NSInteger groupIndex=self.groupControl.selectedSegmentIndex;
+    NSString *groupTitle=groupIndex>=0&&groupIndex<self.groupControl.numberOfSegments?[self.groupControl titleForSegmentAtIndex:groupIndex]:@"全部";
+    self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:[NSString stringWithFormat:@"%@ ▾",groupTitle] style:UIBarButtonItemStylePlain target:self action:@selector(showGroupMenu)];
+}
+- (void)toggleCurrentFavorite {
+    if(!self.channelID.length)return;
+    if([self.favorites containsObject:self.channelID])[self.favorites removeObject:self.channelID];
+    else [self.favorites addObject:self.channelID];
+    [NSUserDefaults.standardUserDefaults setObject:self.favorites forKey:@"favorites"];
+    [self configureCatalogNavigation];[self applyFilter];
 }
 - (UIMenu *)catalogMenu {
     __weak typeof(self) w=self;
@@ -657,8 +680,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     return [UIMenu menuWithTitle:@"" children:self.subscriptionCatalog?@[grid,refresh,add,hide,playing,history,favorites,manage]:@[grid,hide,playing,history,favorites,manage]];
 }
 - (void)showGroupMenu {
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:nil preferredStyle:UIAlertControllerStyleActionSheet];NSArray *groups=@[@"全部",@"央视",@"卫视",@"地方",@"教育",@"熊猫",@"订阅"];
-    for(NSUInteger i=0;i<groups.count;i++){[a addAction:[UIAlertAction actionWithTitle:groups[i] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.groupControl.selectedSegmentIndex=i;[self onGroupChanged];}]];}
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:@"按频道类型筛选当前列表" preferredStyle:UIAlertControllerStyleActionSheet];NSInteger selected=self.groupControl.selectedSegmentIndex;
+    for(NSUInteger i=0;i<self.groupControl.numberOfSegments;i++){NSString *group=[self.groupControl titleForSegmentAtIndex:i]?:@"全部";NSString *title=(NSInteger)i==selected?[NSString stringWithFormat:@"✓  %@",group]:group;[a addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.groupControl.selectedSegmentIndex=i;[self onGroupChanged];}]];}
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.barButtonItem=self.navigationItem.leftBarButtonItem;[self presentViewController:a animated:YES completion:nil];
 }
 - (void)showTabPage:(UIViewController *)page title:(NSString *)title {
@@ -739,7 +762,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip { [self selectChannel:self.shownChannels[ip.item]]; }
 - (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
     NSDictionary *ch=self.shownChannels[ip.item];__weak typeof(self) w=self;
-    return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){BOOL favorite=[w.favorites containsObject:ch[@"id"]];UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w applyFilter];}];UIAction *route=[UIAction actionWithTitle:@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];else[w presentRouteSheetForChannel:ch fromIndexPath:nil];}];NSMutableArray *actions=[NSMutableArray arrayWithObjects:fav,route,nil];
+    return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){BOOL favorite=[w.favorites containsObject:ch[@"id"]];UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w configureCatalogNavigation];[w applyFilter];}];UIAction *route=[UIAction actionWithTitle:@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];else[w presentRouteSheetForChannel:ch fromIndexPath:nil];}];NSMutableArray *actions=[NSMutableArray arrayWithObjects:fav,route,nil];
         if([ch[@"remoteURL"] length]){[actions addObject:[UIAction actionWithTitle:@"静音预览（30 秒）" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){[w previewChannel:ch];}]];[actions addObject:[UIAction actionWithTitle:@"EPG 手动匹配" image:[UIImage systemImageNamed:@"calendar"] identifier:nil handler:^(UIAction *a){[w editEPGMapping:ch];}]];}
         return [UIMenu menuWithTitle:ch[@"name"] children:actions];}];
 }
@@ -1022,6 +1045,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     [CNPlayerCrashGuard install];
     if([ProfileStore isHTTP:cid]){[self playRemote:@{@"id":cid,@"name":title?:cid,@"remoteURL":cid}];return;}
     [self beginPlaybackPriority];
+    self.nativeRetryPending=NO;self.nativePlaybackFailed=NO;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 连接中",title?:cid];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;self.infoLabel.text=@"";[self.spinner startAnimating];
     // Default matches v0.12: stop the old playback, reset the retained wrapper,
     // then playLIVEWithChannelID + prepareToPlay. Fresh wrappers remain an A/B option.
     if(self.currentPlayer){[self stopPlayback];[self recordStartupStage:@"teardown"];}
@@ -1035,7 +1059,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     if(!prepared && legacy&&inst&&self.sdkPlayerUsed)[self call:inst sel:@"reset"];
     self.sdkPlayer=nil;
     if(!inst){@try{inst=[[cls alloc] init];}@catch(NSException *e){[self log:@"创建播放器异常 %@",e.reason];}}
-    if(!inst||![inst respondsToSelector:playSel]){self.titleLabel.text=@"SDK 接口不可用";[self.spinner stopAnimating];return;}
+    if(!inst||![inst respondsToSelector:playSel]){[self displayNativePlaybackFailure:@"SDK 接口不可用" error:nil];return;}
     self.currentPlayer=inst;self.cicadaPlayer=nil;self.sdkPlayer=legacy?inst:nil;self.sdkPlayerUsed=YES;
     @try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}
     self.nativePlaybackFailed=NO;
@@ -1057,7 +1081,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     }
     [self recordStartupStage:@"configure"];
     if(!inst||([accepted isKindOfClass:NSNumber.class]&&![accepted boolValue])){
-        self.titleLabel.text=[NSString stringWithFormat:@"%@ · 起播被拒绝",self.channelName];[self.spinner stopAnimating];[self log:@"SDK 拒绝起播，等待具体错误回调"];return;
+        [self log:@"SDK 拒绝起播，等待具体错误回调"];[self displayNativePlaybackFailure:@"起播被拒绝" error:nil];return;
     }
     BOOL thumbnailGuardInstalled=[CNPlayerCrashGuard install];
     if(!thumbnailGuardInstalled)[self log:@"未能安装播放器缩略图异常保护"];
@@ -1070,6 +1094,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)stopPlayback {
+    self.nativeRetryPending=NO;
     self.moviePiPActive=NO;
     [self.moviePlayer pause];self.movieController.player=nil;self.moviePlayer=nil;self.movieController=nil;
     [self.nativeTimeshift cancel];self.nativeTimeshift=nil;self.nativeTransitionKind=nil;self.nativeTimeShiftActive=NO;
@@ -1136,6 +1161,8 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (void)togglePlayPause {
     if(self.moviePlayer){if(self.moviePlayer.rate>0)[self.moviePlayer pause];else[self.moviePlayer play];return;}
+    if(self.remotePlaybackFailed && self.currentRemoteURL.length){[self playRemote:@{@"id":self.channelID?:self.currentRemoteURL,@"name":self.channelName?:self.currentRemoteURL,@"remoteURL":self.currentRemoteURL}];return;}
+    if(self.nativePlaybackFailed){NSDictionary *channel=[self channelWithID:self.channelID];if(!channel && self.channelID.length)channel=@{@"id":self.channelID,@"name":self.channelName?:self.channelID};if(channel)[self selectChannel:channel];return;}
     if (self.avPlayer) {
         BOOL playing=self.remotePlaybackWanted;
         self.remotePlaybackWanted=!playing;
@@ -1898,7 +1925,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 }
 
 - (void)playRemote:(NSDictionary *)ch {
-    [self.remoteAttemptedURLs removeAllObjects];self.remoteRetryCount=0;self.remoteFailureRecoveryPending=NO;
+    [self.remoteAttemptedURLs removeAllObjects];self.remoteRetryCount=0;self.remoteFailureRecoveryPending=NO;self.remotePlaybackFailed=NO;
     [self startRemoteChannel:ch];
 }
 - (void)startRemoteChannel:(NSDictionary *)ch {
@@ -1907,7 +1934,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     [self.nativePreloader cancel];
     [self beginPlaybackPriority];
     if(self.activeTab!=1)[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[1]];
-    self.playbackGeneration += 1;self.selectionVersion++;NSUInteger generation=self.playbackGeneration;
+    self.playbackGeneration += 1;self.selectionVersion++;NSUInteger generation=self.playbackGeneration;self.remotePlaybackFailed=NO;self.nativePlaybackFailed=NO;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
     NSTimeInterval requestedAt=self.selectionRequestedAt?:CACurrentMediaTime();self.selectionRequestedAt=0;
     [self stopPlayback];self.remoteFailureRecoveryPending=NO;self.playerExpanded=YES;[self.view setNeedsLayout];
     self.currentRemoteURL=u;self.channelID=ch[@"id"]?:u;self.channelName=ch[@"name"]?:u;self.routeName=@"订阅";
@@ -1941,7 +1968,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     }];
 }
 - (void)failRemoteReadiness:(NSError *)error generation:(NSUInteger)generation {
-    if(generation!=self.playbackGeneration)return;[self endPlaybackPriority];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 服务未就绪",self.channelName];[self log:@"本机续播失败 %@",error.localizedDescription];
+    if(generation!=self.playbackGeneration)return;self.remotePlaybackFailed=YES;[self endPlaybackPriority];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 服务未就绪",self.channelName];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;[self log:@"本机续播失败 %@",error.localizedDescription];self.infoLabel.text=@"点按“重试”重新连接本机服务";
 }
 - (void)startRemoteURL:(NSString *)url generation:(NSUInteger)generation {
     if(generation!=self.playbackGeneration)return;
@@ -1958,7 +1985,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     [self recordStartupStage:@"prepareCall"];[self.avPlayer play];__weak typeof(self) w=self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(), ^{
         if(generation!=w.playbackGeneration||item!=w.avPlayer.currentItem||w.firstRender)return;
-        [w.spinner stopAnimating];w.titleLabel.text=[NSString stringWithFormat:@"%@ · 等待视频首帧",w.channelName];[w log:@"订阅 12 秒未渲染首帧（并非播放器就绪时间）"];
+        [w.spinner stopAnimating];w.remotePlaybackFailed=YES;w.titleLabel.hidden=NO;w.titleLabel.text=[NSString stringWithFormat:@"%@ · 等待视频首帧",w.channelName];w.infoLabel.hidden=NO;w.infoLabel.text=@"仍可等待，或点按“重试”重新连接";[w.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];w.playPauseBtn.enabled=YES;[w log:@"订阅 12 秒未渲染首帧（并非播放器就绪时间）"];
     });
 }
 
@@ -2011,10 +2038,10 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         [self startRemoteChannel:channel];
         return;
     }
-    self.remotePlaybackWanted=NO;[self.avPlayer pause];[self.spinner stopAnimating];
+    self.remotePlaybackWanted=NO;self.remotePlaybackFailed=YES;[self.avPlayer pause];[self.spinner stopAnimating];[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;
     self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;
     self.titleLabel.text=[NSString stringWithFormat:@"%@ · 播放失败",self.channelName?:@"频道"];
-    self.infoLabel.text=@"已停止自动换源，请重试或选择其他频道";
+    self.infoLabel.text=@"自动换源已结束 · 点按“重试”再试一次";
 }
 
 - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)obj change:(NSDictionary *)change context:(void *)context {
@@ -2023,7 +2050,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         if(obj!=self.avLayer||!self.avLayer.readyForDisplay||self.firstRender)return;
         NSURL *playingURL=[NSURL URLWithString:self.currentRemoteURL];NSDictionary *service=[self localServiceForURL:playingURL];
         if(service && PyHost.running && [[ServiceStore activeIdentifier] isEqualToString:service[@"id"]] && PyHost.port==[service[@"port"] integerValue])self.readyLocalOrigins[[self originForURL:playingURL]]=@(CACurrentMediaTime());
-        self.firstRender=YES;[self endPlaybackPriority];self.firstFrameSeconds=CACurrentMediaTime()-self.playStartedAt;[self recordStartupStage:@"frame"];
+        self.firstRender=YES;self.remotePlaybackFailed=NO;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;[self endPlaybackPriority];self.firstFrameSeconds=CACurrentMediaTime()-self.playStartedAt;[self recordStartupStage:@"frame"];
         [self.spinner stopAnimating];self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;[self updateNowPlaying];[self refreshNowNext];[self restartEPGTimer];
         [self log:@"订阅视频首帧 %.2fs · %@",self.firstFrameSeconds,self.startupTrace.summary];return;
     }
@@ -2196,7 +2223,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         self.titleLabel.text=[NSString stringWithFormat:@"%@ · %@",self.channelName,vdnDone?@"等待视频数据":@"调度等待中"];
         [self log:@"原生起播等待 %.2fs · %@，不重复重启请求 · %@",elapsed,vdnDone?@"VDN 已完成":@"VDN 尚未完成",self.startupTrace.summary];
     }
-    if(elapsed>=25){[timer invalidate];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 等待较久，可重新选台",self.channelName];[self log:@"25 秒未首帧 · %@",self.startupTrace.summary];}
+    if(elapsed>=25){[timer invalidate];[self log:@"25 秒未首帧 · %@",self.startupTrace.summary];[self displayNativePlaybackFailure:@"起播超时" error:nil];}
 
 }
 
@@ -2311,7 +2338,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 
 - (void)player:(id)player playBackStateDidChanged:(NSUInteger)state {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player playBackStateDidChanged:state]; }); return; }
-    if (player != self.currentPlayer) return;
+    if (player != self.currentPlayer || self.nativePlaybackFailed) return;
     if (state == 1) [self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
     if (state == 2) [self.playPauseBtn setTitle:@"继续" forState:UIControlStateNormal];
 }
@@ -2319,19 +2346,21 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
 - (void)player:(id)player playbackFailed:(NSError *)error {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player playbackFailed:error]; }); return; }
     if (player != self.currentPlayer) return;
+    if(self.nativeRetryPending){[self log:@"忽略自动重连期间重复的播放器错误回调"];return;}
     self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];
     [self log:@"播放失败 %ld %@", (long)error.code, error.localizedDescription];
-    self.titleLabel.text = [NSString stringWithFormat:@"%@ · 播放失败", self.channelName];
-    [self.spinner stopAnimating];
-    if(self.nativeTransitionKind.length || self.nativeTimeShiftActive){self.nativeTransitionKind=nil;[self.nativeTimeshift cancel];[self log:@"时移操作失败，请返回直播或重新选台"];return;}
+    if(self.nativeTransitionKind.length || self.nativeTimeShiftActive){self.nativeTransitionKind=nil;[self.nativeTimeshift cancel];[self log:@"时移操作失败，请返回直播或重新选台"];[self displayNativePlaybackFailure:@"时移 / 回看失败" error:error];return;}
     if (error.code >= 4000 && error.code < 5000) {
         [self log:@"参数/调度错误不自动重试，请查看错误详情"];
+        [self displayNativePlaybackFailure:@"播放被拒绝" error:error];
         return;
     }
     if (self.retryCount < 2) {
         self.retryCount += 1;
+        self.nativeRetryPending=YES;
         double delay = self.retryCount == 1 ? 1.0 : 3.0;
         [self log:@"断流重连 第 %ld 次（%.0fs 后）", (long)self.retryCount, delay];
+        self.titleLabel.text=[NSString stringWithFormat:@"%@ · 正在重连",self.channelName?:@"频道"];self.titleLabel.hidden=NO;self.infoLabel.text=[NSString stringWithFormat:@"第 %ld / 2 次自动恢复",(long)self.retryCount];self.infoLabel.hidden=NO;[self.spinner startAnimating];[self.playPauseBtn setTitle:@"重连中" forState:UIControlStateNormal];self.playPauseBtn.enabled=NO;
         NSUInteger generation = self.playbackGeneration;
         NSString *cid = self.channelID;
         NSString *name = self.channelName;
@@ -2340,6 +2369,7 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (generation != self.playbackGeneration || player != self.currentPlayer || ![cid isEqualToString:self.channelID]) return;
             if (remotePlayback) {
+                self.nativeRetryPending=NO;
                 if (remoteURL.length) [self playRemote:@{@"id": cid, @"name": name ?: cid, @"remoteURL": remoteURL}];
             } else {
                 self.playbackGeneration+=1;self.stallReported=NO;
@@ -2347,34 +2377,43 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
                 [self playViaSDK:cid title:name];
             }
         });
+    }else{
+        [self displayNativePlaybackFailure:@"播放失败" error:error];
     }
+}
+
+- (void)displayNativePlaybackFailure:(NSString *)stage error:(NSError *)error {
+    self.nativePlaybackFailed=YES;self.nativeRetryPending=NO;[self.watchdog invalidate];self.watchdog=nil;[self.nativeStartupTuner restore];[self endPlaybackPriority];[self.spinner stopAnimating];
+    NSString *channel=self.channelName.length?self.channelName:@"频道";
+    self.titleLabel.text=error.code?[NSString stringWithFormat:@"%@ · %@ (%ld)",channel,stage,(long)error.code]:[NSString stringWithFormat:@"%@ · %@",channel,stage];
+    self.titleLabel.hidden=NO;self.infoLabel.text=@"点按“重试”或重新选择频道";self.infoLabel.hidden=NO;
+    [self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;
 }
 
 - (void)player:(id)player vdnRequestFailed:(NSError *)error {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player vdnRequestFailed:error]; }); return; }
     if (player != self.currentPlayer) return;
     self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];
-    [self log:@"VDN 请求失败 %ld", (long)error.code];
+    [self log:@"VDN 请求失败 %ld", (long)error.code];[self displayNativePlaybackFailure:@"频道调度失败" error:error];
 }
 
 - (void)player:(id)player parameterError:(NSError *)error rate:(id)rate {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player parameterError:error rate:rate]; }); return; }
     if (player != self.currentPlayer) return;
     self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];
-    [self log:@"参数错误 %ld", (long)error.code];
+    [self log:@"参数错误 %ld", (long)error.code];[self displayNativePlaybackFailure:@"参数错误" error:error];
 }
 
 - (void)player:(id)player publicRequestFailed:(NSError *)error {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player publicRequestFailed:error]; }); return; }
     if (player != self.currentPlayer) return;
     self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];
-    [self log:@"版权请求失败 %ld", (long)error.code];
+    [self log:@"版权请求失败 %ld", (long)error.code];[self displayNativePlaybackFailure:@"版权请求失败" error:error];
 }
 
 - (void)authFailed:(NSError *)error {
-    if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ [self authFailed:error]; }); return; }
-    [self log:@"鉴权失败 %ld", (long)error.code];
-    self.titleLabel.text = @"鉴权失败";
+    if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration;dispatch_async(dispatch_get_main_queue(), ^{if(generation!=self.playbackGeneration)return;[self authFailed:error];}); return; }
+    self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];[self log:@"鉴权失败 %ld", (long)error.code];[self displayNativePlaybackFailure:@"鉴权失败" error:error];
 }
 
 - (void)showPlaybackInfo {

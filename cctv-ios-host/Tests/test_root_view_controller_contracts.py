@@ -112,6 +112,28 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('[weakSelf openPluginPage]', TEXT)
         self.assertIn('SettingsViewController *page', TEXT)
 
+    def test_live_header_actions_follow_selected_channel_and_group(self):
+        navigation = method_body("- (void)configureCatalogNavigation")
+        group_menu = method_body("- (void)showGroupMenu")
+        self.assertIn("BOOL expandedLive", navigation)
+        self.assertIn("self.channelName", navigation)
+        self.assertIn('@"heart.fill":@"heart"', navigation)
+        self.assertIn('@"airplayvideo"', navigation)
+        self.assertIn('@"info.circle"', navigation)
+        self.assertIn("self.groupControl.selectedSegmentIndex", navigation)
+        self.assertIn("self.groupControl.numberOfSegments", group_menu)
+        self.assertIn("✓", group_menu)
+
+    def test_player_failures_stop_loading_and_offer_manual_retry(self):
+        failure = TEXT[TEXT.rindex("- (void)displayNativePlaybackFailure:"):]
+        retry = method_body("- (void)togglePlayPause")
+        self.assertIn("[self.spinner stopAnimating]", failure)
+        self.assertIn("[self endPlaybackPriority]", failure)
+        self.assertIn('setTitle:@"重试"', failure)
+        self.assertIn("self.nativePlaybackFailed", retry)
+        self.assertIn("self.remotePlaybackFailed", retry)
+        self.assertIn("displayNativePlaybackFailure:@\"频道调度失败\"", method_body("- (void)player:(id)player vdnRequestFailed:"))
+
     def test_settings_preferences_are_wired_to_real_playback_behavior(self):
         for key in ['resumeLastChannel','rememberLastChannel','autoLoadEPG','allowBackgroundAudio','autoPiP']:
             self.assertIn('@"' + key + '"', TEXT)

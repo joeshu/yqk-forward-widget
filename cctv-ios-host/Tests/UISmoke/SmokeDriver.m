@@ -286,6 +286,9 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             check([[root valueForKey:@"firstRender"] boolValue], @"legacy native first frame received");
             check([[root valueForKey:@"activeTab"] integerValue]==0, @"native playback opens CCTV page");
+            check([root.title isEqual:@"CCTV-1 综合"], @"expanded live player promotes the playing channel into the navigation title");
+            UIStackView *liveActions=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;
+            check(liveActions.arrangedSubviews.count==3, @"expanded live player exposes favorite, route and playback info actions");
             retainedWrapper = [root valueForKey:@"currentPlayer"];
             playCount = [CNPlayer smokePlayCount];
             [root selectChannel:[root channelWithID:@"cctv1"]];
@@ -294,7 +297,9 @@ static void next(NSArray *steps, NSUInteger index) {
             check([CNPlayer smokePlayCount]==playCount && [root valueForKey:@"currentPlayer"]==retainedWrapper,
                   @"same-channel tap preserves active session");
             [root player:retainedWrapper playbackFailed:[NSError errorWithDomain:@"fixture" code:4012 userInfo:nil]];
-            [root selectChannel:[root channelWithID:@"cctv1"]];
+            check([[[root valueForKey:@"playPauseBtn"] titleForState:UIControlStateNormal] isEqual:@"重试"],
+                  @"terminal playback error exposes an explicit retry action");
+            [root togglePlayPause];
           },
           ^{
             check([CNPlayer smokePlayCount]==playCount+1,@"failed channel can be selected again");
