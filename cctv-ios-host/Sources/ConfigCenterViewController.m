@@ -19,7 +19,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"资源";
-    self.tableView.backgroundColor = UIColor.blackColor;
+    self.tableView.backgroundColor = HostBackground();
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 116;
@@ -95,7 +95,7 @@
     c.backgroundColor = HostCard();
     c.layer.cornerRadius = 18;
     c.clipsToBounds = YES;
-    c.textLabel.textColor = UIColor.whiteColor;
+    c.textLabel.textColor = HostText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
     c.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
     c.textLabel.adjustsFontForContentSizeCategory=YES;

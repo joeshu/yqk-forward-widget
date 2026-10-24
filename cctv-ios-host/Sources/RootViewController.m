@@ -91,13 +91,13 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @implementation CCTVPlaybackListPanelController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor=UIColor.blackColor;
+    self.view.backgroundColor=HostBackground();
     self.tableView=[[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
     self.tableView.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
-    self.tableView.backgroundColor=UIColor.blackColor;
+    self.tableView.backgroundColor=HostBackground();
     self.tableView.dataSource=self;self.tableView.delegate=self;
     self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=66;
-    self.tableView.separatorColor=[UIColor colorWithWhite:1 alpha:0.10];
+    self.tableView.separatorColor=HostSeparator();
     self.emptyLabel=[UILabel new];self.emptyLabel.text=self.emptyMessage?:@"暂无可显示内容";self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.numberOfLines=0;self.emptyLabel.textAlignment=NSTextAlignmentCenter;
     self.tableView.backgroundView=self.emptyLabel;
     [self.view addSubview:self.tableView];
@@ -106,7 +106,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     static NSString *reuse=@"cctv.playback.panel";
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:reuse];
-    if(!cell){cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];cell.backgroundColor=HostCard();cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=3;cell.textLabel.textColor=UIColor.whiteColor;cell.detailTextLabel.textColor=UIColor.secondaryLabelColor;}
+    if(!cell){cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];cell.backgroundColor=HostCard();cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=3;cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=UIColor.secondaryLabelColor;}
     NSDictionary *item=self.items[indexPath.row];cell.textLabel.text=item[@"title"]?:@"";cell.detailTextLabel.text=item[@"detail"]?:@"";
     cell.accessoryType=[item[@"selected"] boolValue]?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDisclosureIndicator;
     cell.tintColor=HostAccent();cell.selectionStyle=UITableViewCellSelectionStyleDefault;
@@ -282,9 +282,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     [MediaPackageImporter migrateLegacyRuntimeMetadata];
-    self.view.backgroundColor = [UIColor colorWithWhite:0.05 alpha:1];
+    self.view.backgroundColor = HostBackground();
     self.title = @"CCTV";
-    self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     HostStyleNavigation(self.navigationController);
     self.view.tintColor=HostAccent();
     self.gridMode = [[NSUserDefaults standardUserDefaults] objectForKey:@"channelGridMode"] ? [[NSUserDefaults standardUserDefaults] boolForKey:@"channelGridMode"] : YES;
@@ -529,13 +528,13 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.groupControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"央视", @"卫视", @"地方", @"教育", @"熊猫", @"订阅"]];
     self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 28);
     self.groupControl.selectedSegmentIndex = 0;
-    self.groupControl.tintColor = [UIColor colorWithWhite:0.75 alpha:1];
+    self.groupControl.tintColor = HostAccent();
     [self.groupControl addTarget:self action:@selector(onGroupChanged) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:self.groupControl];
     self.playerTabs=[[UISegmentedControl alloc] initWithItems:@[@"分类",@"频道",@"节目",@"线路"]];self.playerTabs.selectedSegmentIndex=1;self.playerTabs.selectedSegmentTintColor=HostAccent();[self.playerTabs addTarget:self action:@selector(selectPlayerPanel) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.playerTabs];
 
     self.versionLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, y + 38, self.view.bounds.size.width - 16, 14)];
-    self.versionLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1];
+    self.versionLabel.textColor = HostSecondaryText();
     self.versionLabel.font = [UIFont systemFontOfSize:9];
     self.versionLabel.text = [NSString stringWithFormat:@"%@ · 点击自动播放 · 长按选线路", kBuildTag];
     [self.view addSubview:self.versionLabel];
@@ -545,8 +544,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.table.dataSource = self;
     self.table.delegate = self;
     self.table.rowHeight = 48;
-    self.table.backgroundColor = [UIColor colorWithWhite:0.07 alpha:1];
-    self.table.separatorColor = [UIColor colorWithWhite:0.16 alpha:1];
+    self.table.backgroundColor = HostBackground();
+    self.table.separatorColor = HostSeparator();
     [self.view addSubview:self.table];
 
     UIRefreshControl *rc = [[UIRefreshControl alloc] init];
@@ -555,7 +554,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     UILongPressGestureRecognizer *routePress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onLongPress:)];
     [self.table addGestureRecognizer:routePress];
     UICollectionViewFlowLayout *flow=[UICollectionViewFlowLayout new]; flow.minimumInteritemSpacing=8; flow.minimumLineSpacing=10; flow.sectionInset=UIEdgeInsetsMake(8,12,16,12);
-    self.channelGrid=[[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:flow]; self.channelGrid.backgroundColor=UIColor.blackColor; self.channelGrid.dataSource=self; self.channelGrid.delegate=self; self.channelGrid.accessibilityIdentifier=@"channel.grid";
+    self.channelGrid=[[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:flow]; self.channelGrid.backgroundColor=HostBackground(); self.channelGrid.dataSource=self; self.channelGrid.delegate=self; self.channelGrid.accessibilityIdentifier=@"channel.grid";
     [self.channelGrid registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"channel.card"]; [self.view addSubview:self.channelGrid];
     UIRefreshControl *gridRefresh=[UIRefreshControl new];[gridRefresh addTarget:self action:@selector(onPullRefresh) forControlEvents:UIControlEventValueChanged];self.channelGrid.refreshControl=gridRefresh;
     [self buildBottomBar];
@@ -677,7 +676,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         [self applyFilter];
         done(YES);
     }];
-    action.backgroundColor = fav ? [UIColor colorWithWhite:0.35 alpha:1] : [UIColor systemOrangeColor];
+    action.backgroundColor = fav ? HostRaisedSurface() : [UIColor systemOrangeColor];
     return [UISwipeActionsConfiguration configurationWithActions:@[action]];
 }
 
@@ -688,7 +687,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)buildBottomBar {
-    self.bottomBarBackdrop=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomBarBackdrop.userInteractionEnabled=NO;self.bottomBarBackdrop.layer.cornerRadius=29;self.bottomBarBackdrop.layer.cornerCurve=kCACornerCurveContinuous;self.bottomBarBackdrop.clipsToBounds=YES;self.bottomBarBackdrop.layer.borderWidth=0.7;self.bottomBarBackdrop.layer.borderColor=[UIColor colorWithWhite:1 alpha:0.14].CGColor;
+    self.bottomBarBackdrop=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomBarBackdrop.userInteractionEnabled=NO;self.bottomBarBackdrop.layer.cornerRadius=29;self.bottomBarBackdrop.layer.cornerCurve=kCACornerCurveContinuous;self.bottomBarBackdrop.clipsToBounds=YES;self.bottomBarBackdrop.layer.borderWidth=0.7;HostSetLayerBorderColor(self.bottomBarBackdrop,HostBorder());
     UIView *glassTint=[[UIView alloc] initWithFrame:self.bottomBarBackdrop.contentView.bounds];glassTint.backgroundColor=HostGlassTint();glassTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.bottomBarBackdrop.contentView addSubview:glassTint];
     [self.view addSubview:self.bottomBarBackdrop];
     self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=3; self.bottomBar.backgroundColor=UIColor.clearColor; self.bottomBar.layer.cornerRadius=29; self.bottomBar.layer.cornerCurve=kCACornerCurveContinuous; self.bottomBar.clipsToBounds=YES;
@@ -740,7 +739,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     __weak typeof(self) w=self;
     if(expandedLive){
         BOOL favorite=[self.favorites containsObject:self.channelID];
-        AVRoutePickerView *airPlayPicker=[AVRoutePickerView new];airPlayPicker.tintColor=UIColor.whiteColor;airPlayPicker.activeTintColor=HostAccent();airPlayPicker.prioritizesVideoDevices=YES;
+        AVRoutePickerView *airPlayPicker=[AVRoutePickerView new];airPlayPicker.tintColor=HostText();airPlayPicker.activeTintColor=HostAccent();airPlayPicker.prioritizesVideoDevices=YES;
         self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
             @{@"icon":favorite?@"heart.fill":@"heart",@"title":favorite?@"取消收藏当前频道":@"收藏当前频道",@"action":[UIAction actionWithHandler:^(UIAction *a){[w toggleCurrentFavorite];}]},
             @{@"customView":airPlayPicker,@"title":@"投屏到 AirPlay 设备",@"identifier":@"playback.airplay"},
@@ -874,18 +873,18 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {CGFloat width=collectionView.bounds.size.width;NSInteger columns=width>700?4:2;return CGSizeMake(floor((width-24-(columns-1)*8)/columns),126);}
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)ip {
     UICollectionViewCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"channel.card" forIndexPath:ip];NSDictionary *ch=self.shownChannels[ip.item];
-    cell.contentView.backgroundColor=UIColor.blackColor;cell.contentView.layer.cornerRadius=9;cell.contentView.clipsToBounds=YES;
+    cell.contentView.backgroundColor=HostCard();cell.contentView.layer.cornerRadius=9;cell.contentView.clipsToBounds=YES;
     const NSInteger posterTag=4101,logoTag=4102,brandTag=4103,numberTag=4104,titleTag=4105,subtitleTag=4106;
     UIView *poster=[cell.contentView viewWithTag:posterTag];UIImageView *logo=(UIImageView *)[cell.contentView viewWithTag:logoTag];UILabel *brand=(UILabel *)[cell.contentView viewWithTag:brandTag];UILabel *number=(UILabel *)[cell.contentView viewWithTag:numberTag];UILabel *title=(UILabel *)[cell.contentView viewWithTag:titleTag];UILabel *subtitle=(UILabel *)[cell.contentView viewWithTag:subtitleTag];
     if(!poster){poster=[[UIView alloc] initWithFrame:CGRectZero];poster.tag=posterTag;poster.autoresizingMask=UIViewAutoresizingFlexibleWidth;poster.backgroundColor=HostCard();poster.layer.cornerRadius=8;[cell.contentView addSubview:poster];
         logo=[UIImageView new];logo.tag=logoTag;logo.autoresizingMask=UIViewAutoresizingFlexibleWidth;logo.contentMode=UIViewContentModeScaleAspectFit;[poster addSubview:logo];
-        brand=[UILabel new];brand.tag=brandTag;brand.textAlignment=NSTextAlignmentCenter;brand.font=[UIFont italicSystemFontOfSize:19];brand.textColor=UIColor.whiteColor;brand.autoresizingMask=UIViewAutoresizingFlexibleWidth;[poster addSubview:brand];
+        brand=[UILabel new];brand.tag=brandTag;brand.textAlignment=NSTextAlignmentCenter;brand.font=[UIFont italicSystemFontOfSize:19];brand.textColor=HostText();brand.autoresizingMask=UIViewAutoresizingFlexibleWidth;[poster addSubview:brand];
         number=[UILabel new];number.tag=numberTag;number.font=[UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightMedium];number.textColor=UIColor.secondaryLabelColor;[poster addSubview:number];
         title=[UILabel new];title.tag=titleTag;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;title.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];[cell.contentView addSubview:title];
         subtitle=[UILabel new];subtitle.tag=subtitleTag;subtitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;subtitle.font=[UIFont systemFontOfSize:9];subtitle.textColor=UIColor.secondaryLabelColor;[cell.contentView addSubview:subtitle];}
     poster.frame=CGRectMake(0,0,cell.bounds.size.width,90);logo.frame=CGRectMake(16,20,cell.bounds.size.width-32,48);brand.frame=logo.frame;number.frame=CGRectMake(7,72,70,12);title.frame=CGRectMake(2,94,cell.bounds.size.width-4,16);subtitle.frame=CGRectMake(2,111,cell.bounds.size.width-4,12);
     NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";logo.hidden=!logoURL.length;brand.hidden=logoURL.length>0;brand.text=ch[@"name"]?:@"";logo.image=nil;logo.accessibilityIdentifier=logoURL;if(logoURL.length)[self loadLogo:logoURL into:logo];
-    number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=[ch[@"id"] isEqualToString:self.channelID]?HostAccent():UIColor.whiteColor;title.text=[NSString stringWithFormat:@"%@%@",[self.favorites containsObject:ch[@"id"]]?@"♥ ":@"",ch[@"name"]?:ch[@"id"]];
+    number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=[ch[@"id"] isEqualToString:self.channelID]?HostAccent():HostText();title.text=[NSString stringWithFormat:@"%@%@",[self.favorites containsObject:ch[@"id"]]?@"♥ ":@"",ch[@"name"]?:ch[@"id"]];
     NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[ch[@"id"]])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:ch[@"id"]];subtitle.text=self.epgCache[ch[@"id"]][@"now"]?:ch[@"group"];return cell;
 }
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip { [self selectChannel:self.shownChannels[ip.item]]; }
@@ -945,12 +944,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     UITableViewCell *cell = [t dequeueReusableCellWithIdentifier:reuse];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];
-        cell.backgroundColor = [UIColor colorWithWhite:0.09 alpha:1];
+        cell.backgroundColor = HostCard();
         cell.textLabel.font = [UIFont systemFontOfSize:15];
         cell.detailTextLabel.font = [UIFont systemFontOfSize:11];
-        cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.55 alpha:1];
+        cell.detailTextLabel.textColor = HostSecondaryText();
         UIView *selected = [[UIView alloc] init];
-        selected.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1];
+        selected.backgroundColor = HostSelectedSurface();
         cell.selectedBackgroundView = selected;
     }
     NSArray<NSDictionary *> *rows = [self channelsForSection:ip.section tableView:t];
@@ -961,7 +960,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *title = [ch[@"name"] isKindOfClass:NSString.class] ? ch[@"name"] : cid;
     if ([self.favorites containsObject:cid]) title = [@"★ " stringByAppendingString:title];
     cell.textLabel.text = playing ? [NSString stringWithFormat:@"● %@", title] : title;
-    cell.textLabel.textColor = playing ? HostAccent() : UIColor.whiteColor;
+    cell.textLabel.textColor = playing ? HostAccent() : HostText();
     NSString *logo = [ch[@"logo"] isKindOfClass:NSString.class] ? ch[@"logo"] : @"";
     cell.imageView.image = nil;
     if (logo.length) [self loadLogo:logo into:cell.imageView];
@@ -1533,6 +1532,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     page.onExportDebugLog=^{[RuntimeDiagnostics.shared prepareExportWithCompletion:^(NSURL *url,NSError *error){if(!url){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"运行诊断" message:error.localizedDescription?:@"导出诊断日志失败" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[(weakSelf.navigationController.topViewController?:weakSelf) presentViewController:alert animated:YES completion:nil];return;}[weakSelf shareDiagnosticLogAtURL:url];}];};
     page.onClearEPG=^{ [[XMLTVStore shared] clear];[weakSelf.epgCache removeAllObjects]; [weakSelf saveEPGCache]; [weakSelf.table reloadData]; };
     page.onPreferenceChanged=^(NSString *key, BOOL value){
+        if([key isEqualToString:HostDarkThemePreferenceKey]){UIWindow *window=weakSelf.view.window;window.overrideUserInterfaceStyle=value?UIUserInterfaceStyleDark:UIUserInterfaceStyleLight;dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostStyleNavigation(weakSelf.navigationController);HostRefreshAppearanceLayers(window);});}
         if ([key isEqualToString:@"runtimeDiagnosticsEnabled"]) [RuntimeDiagnostics.shared setEnabled:value];
         if ([key isEqualToString:@"nativeSDKVerboseLogs"]) [weakSelf configureSDKLogging];
         if ([key isEqualToString:@"preloadNativeChannel"] && !value) [weakSelf.nativePreloader cancel];

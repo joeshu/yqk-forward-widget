@@ -39,12 +39,12 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = self.channelName.length ? self.channelName : self.channelID;
-    self.view.backgroundColor = UIColor.blackColor;
+    self.view.backgroundColor = HostBackground();
     self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"info.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(showSourceInfo)];
 
     self.hint = [[UILabel alloc] initWithFrame:CGRectMake(16, 12, self.view.bounds.size.width - 32, 20)];
-    self.hint.textColor = [UIColor colorWithWhite:0.6 alpha:1];
+    self.hint.textColor = HostSecondaryText();
     self.hint.font = [UIFont systemFontOfSize:12];
     self.hint.text = @"正在获取节目单…";
     [self.view addSubview:self.hint];
@@ -60,8 +60,8 @@
     self.table.delegate = self;
     self.table.rowHeight = UITableViewAutomaticDimension;
     self.table.estimatedRowHeight = 68;
-    self.table.backgroundColor = UIColor.blackColor;
-    self.table.separatorColor = [UIColor colorWithWhite:0.2 alpha:1];
+    self.table.backgroundColor = HostBackground();
+    self.table.separatorColor = HostSeparator();
     UIRefreshControl *refresh = [UIRefreshControl new];
     [refresh addTarget:self action:@selector(fetch) forControlEvents:UIControlEventValueChanged];
     self.table.refreshControl = refresh;
@@ -217,12 +217,12 @@
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellID];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cellID];
-        cell.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
+        cell.backgroundColor = HostCard();
         cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
         cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
         cell.textLabel.adjustsFontForContentSizeCategory=YES;
         cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;
-        cell.textLabel.textColor = UIColor.whiteColor;
+        cell.textLabel.textColor = HostText();
         cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
@@ -248,10 +248,10 @@
         cell.textLabel.textColor = HostAccent();
         cell.detailTextLabel.text = [range stringByAppendingString:@"  ● 正在播出"];
     } else if (end <= now) {
-        cell.textLabel.textColor = replayable?UIColor.whiteColor:[UIColor colorWithWhite:0.45 alpha:1];
+        cell.textLabel.textColor = replayable?HostText():HostSecondaryText();
         if(replayable)cell.detailTextLabel.text=[range stringByAppendingString:@"  点按回看"];
     } else {
-        cell.textLabel.textColor = UIColor.whiteColor;
+        cell.textLabel.textColor = HostText();
     }
     return cell;
 }

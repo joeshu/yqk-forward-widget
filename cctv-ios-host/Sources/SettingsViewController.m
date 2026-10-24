@@ -8,8 +8,11 @@
 @end
 @implementation SettingsViewController
 - (void)viewDidLoad {
-    [super viewDidLoad]; self.title=@"设置"; self.view.backgroundColor=UIColor.blackColor; self.navigationController.navigationBar.tintColor=UIColor.systemPinkColor;
+    [super viewDidLoad]; self.title=@"设置"; self.view.backgroundColor=HostBackground(); self.navigationController.navigationBar.tintColor=HostAccent();
     self.sections=@[
+      @{ @"title":@"外观", @"footer":@"黑色和白色主题会应用到频道、影视、资源、服务、播放器与设置页面。", @"rows":@[
+        @{ @"title":@"全局主题", @"detail":@"黑色 / 白色", @"key":HostDarkThemePreferenceKey, @"appearance":@YES, @"icon":@"circle.lefthalf.filled" }
+      ]},
       @{ @"title":@"播放", @"footer":@"快速起播仅降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；关闭可恢复默认缓冲。预解析只缓存一个相邻频道的信息，有效期 15 秒，会额外请求频道元数据。播放选项下次选台生效。", @"rows":@[
         @{ @"title":@"预解析下一个 CCTV 频道", @"key":@"preloadNativeChannel", @"icon":@"forward.end", @"default":@YES },
         @{ @"title":@"SDK 详细日志（诊断）", @"key":@"nativeSDKVerboseLogs", @"icon":@"doc.text", @"default":@NO },
@@ -39,7 +42,7 @@
         @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass" }
       ]}
     ];
-    self.table=[[UITableView alloc]initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped]; self.table.translatesAutoresizingMaskIntoConstraints=NO; self.table.backgroundColor=UIColor.blackColor; self.table.dataSource=self; self.table.delegate=self; self.table.rowHeight=58; self.table.tintColor=UIColor.systemPinkColor; [self.view addSubview:self.table];
+    self.table=[[UITableView alloc]initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped]; self.table.translatesAutoresizingMaskIntoConstraints=NO; self.table.backgroundColor=HostBackground(); self.table.dataSource=self; self.table.delegate=self; self.table.rowHeight=58; self.table.tintColor=HostAccent(); [self.view addSubview:self.table];
     [NSLayoutConstraint activateConstraints:@[[self.table.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],[self.table.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.table.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView{return self.sections.count;}
@@ -48,9 +51,10 @@
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section{return self.sections[section][@"footer"];}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"setting.row"]; if(!cell)cell=[[UITableViewCell alloc]initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"setting.row"];
-    NSDictionary *row=self.sections[ip.section][@"rows"][ip.row]; cell.textLabel.text=row[@"title"]; cell.textLabel.textColor=UIColor.whiteColor; cell.textLabel.font=[UIFont systemFontOfSize:15 weight:UIFontWeightMedium]; cell.detailTextLabel.text=row[@"detail"]; cell.detailTextLabel.textColor=UIColor.secondaryLabelColor; cell.imageView.image=[UIImage systemImageNamed:row[@"icon"]]; cell.imageView.tintColor=UIColor.systemPinkColor; cell.backgroundColor=[UIColor colorWithWhite:0.12 alpha:1]; cell.accessoryView=nil; cell.accessoryType=UITableViewCellAccessoryNone;
+    NSDictionary *row=self.sections[ip.section][@"rows"][ip.row]; cell.textLabel.text=row[@"title"]; cell.textLabel.textColor=HostText(); cell.textLabel.font=[UIFont systemFontOfSize:15 weight:UIFontWeightMedium]; cell.detailTextLabel.text=row[@"detail"]; cell.detailTextLabel.textColor=HostSecondaryText(); cell.imageView.image=[UIImage systemImageNamed:row[@"icon"]]; cell.imageView.tintColor=HostAccent(); cell.backgroundColor=HostCard(); cell.accessoryView=nil; cell.accessoryType=UITableViewCellAccessoryNone;
     NSString *key=row[@"key"];
-    if(key){ UISwitch *sw=[UISwitch new]; sw.onTintColor=UIColor.systemPinkColor; id saved=[[NSUserDefaults standardUserDefaults] objectForKey:key]; sw.on=saved? [saved boolValue]:[row[@"default"] boolValue]; sw.accessibilityIdentifier=key; [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView=sw; cell.selectionStyle=UITableViewCellSelectionStyleNone; }
+    if([row[@"appearance"] boolValue]){UISegmentedControl *style=[[UISegmentedControl alloc] initWithItems:@[@"黑色",@"白色"]];style.selectedSegmentIndex=HostIsDarkThemeSelected()?0:1;style.selectedSegmentTintColor=HostAccent();[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];style.accessibilityIdentifier=HostDarkThemePreferenceKey;[style addTarget:self action:@selector(appearanceChanged:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=style;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
+    else if(key){ UISwitch *sw=[UISwitch new]; sw.onTintColor=HostAccent(); id saved=[[NSUserDefaults standardUserDefaults] objectForKey:key]; sw.on=saved? [saved boolValue]:[row[@"default"] boolValue]; sw.accessibilityIdentifier=key; [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView=sw; cell.selectionStyle=UITableViewCellSelectionStyleNone; }
     else if(row[@"action"]){ cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator; cell.selectionStyle=UITableViewCellSelectionStyleDefault; }
     else cell.selectionStyle=UITableViewCellSelectionStyleNone;
     return cell;
@@ -69,6 +73,10 @@
     else if([row[@"action"] isEqualToString:@"exportRuntimeDiagnostics"]){if(self.onExportDebugLog)self.onExportDebugLog();}
     else if([row[@"action"] isEqualToString:@"import"]){if(self.onImportData)self.onImportData();}
     else if([row[@"action"] isEqualToString:@"logs"]){if(self.onOpenLog)self.onOpenLog();}
+}
+- (void)appearanceChanged:(UISegmentedControl *)sender {
+    BOOL dark=sender.selectedSegmentIndex==0;[NSUserDefaults.standardUserDefaults setBool:dark forKey:HostDarkThemePreferenceKey];
+    if(self.onPreferenceChanged)self.onPreferenceChanged(HostDarkThemePreferenceKey,dark);
 }
 - (void)confirmClearEPG {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清理节目单缓存" message:@"缓存将在下次访问频道时重新获取。" preferredStyle:UIAlertControllerStyleAlert];

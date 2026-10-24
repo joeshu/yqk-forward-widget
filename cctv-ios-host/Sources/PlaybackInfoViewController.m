@@ -7,7 +7,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"播放信息";
-    self.tableView.backgroundColor = UIColor.blackColor;
+    self.tableView.backgroundColor = HostBackground();
     self.tableView.rowHeight = 54;
     [self refreshSnapshot];
 }
@@ -23,7 +23,7 @@
     c.backgroundColor = HostCard();
     c.textLabel.text = row[@"title"];
     c.detailTextLabel.text = row[@"value"];
-    c.textLabel.textColor = UIColor.whiteColor;
+    c.textLabel.textColor = HostText();
     c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     c.textLabel.font = [UIFont systemFontOfSize:13];
     c.detailTextLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightRegular];

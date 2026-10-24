@@ -45,7 +45,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = self.service[@"name"];
-    self.tableView.backgroundColor = UIColor.blackColor;
+    self.tableView.backgroundColor = HostBackground();
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 56;
     __weak typeof(self) w=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[@{@"icon":@"pencil",@"title":@"编辑服务",@"action":[UIAction actionWithHandler:^(UIAction *a){[w edit];}]}])];
@@ -111,7 +111,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1
                                                 reuseIdentifier:nil];
     c.backgroundColor = HostCard();
-    c.textLabel.textColor = UIColor.whiteColor;
+    c.textLabel.textColor = HostText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
     c.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
     c.textLabel.adjustsFontForContentSizeCategory=YES;
@@ -306,10 +306,10 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"服务";
-    self.view.backgroundColor = UIColor.blackColor;
+    self.view.backgroundColor = HostBackground();
     self.table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.table.translatesAutoresizingMaskIntoConstraints = NO;
-    self.table.backgroundColor = UIColor.blackColor;
+    self.table.backgroundColor = HostBackground();
     self.table.rowHeight = UITableViewAutomaticDimension;
     self.table.estimatedRowHeight=88;
     self.table.dataSource = self;
@@ -386,9 +386,9 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     NSDictionary *s = [self rows:ip.section][ip.row];
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                                 reuseIdentifier:nil];
-    c.backgroundColor = ip.section == 0 ? [UIColor colorWithRed:0.07 green:0.18 blue:0.13 alpha:1] : HostCard();
+    c.backgroundColor = ip.section == 0 ? HostSuccessSurface() : HostCard();
     c.textLabel.text = s[@"name"];
-    c.textLabel.textColor = UIColor.whiteColor;
+    c.textLabel.textColor = HostText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
     c.textLabel.adjustsFontForContentSizeCategory=YES;
     c.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@\n%@\nhttp://127.0.0.1:%@",

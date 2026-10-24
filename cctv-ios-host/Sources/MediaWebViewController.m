@@ -1,4 +1,5 @@
 #import "MediaWebViewController.h"
+#import "HostTheme.h"
 #import <WebKit/WebKit.h>
 @interface MediaWebViewController () <WKNavigationDelegate>
 @property(nonatomic, copy) NSDictionary *result;
@@ -8,7 +9,7 @@
 @implementation MediaWebViewController
 - (instancetype)initWithResult:(NSDictionary *)result title:(NSString *)title {if((self=[super init])){_result=result;self.title=title;}return self;}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.view.backgroundColor=UIColor.blackColor;
+    [super viewDidLoad];self.view.backgroundColor=HostBackground();
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refresh)];
     WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];configuration.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;configuration.allowsInlineMediaPlayback=YES;configuration.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;

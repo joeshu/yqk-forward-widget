@@ -10,7 +10,7 @@
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {return UIInterfaceOrientationMaskPortrait;}
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
 - (NSArray *)lines {return [self.detail[@"lines"] isKindOfClass:NSArray.class]?self.detail[@"lines"]:@[];}
-- (void)viewDidLoad {[super viewDidLoad];self.title=@"选择线路和剧集";self.view.backgroundColor=UIColor.blackColor;self.tableView.backgroundColor=UIColor.blackColor;self.tableView.rowHeight=58;self.tableView.estimatedRowHeight=58;self.selectedLineIndex=MAX(0,self.selectedLineIndex);self.navigationItem.prompt=self.lines.count?[NSString stringWithFormat:@"%@ · 选择要播放的分集",self.detail[@"name"]?:self.item[@"name"]?:@"影片"]:@"此影片没有可用分集";}
+- (void)viewDidLoad {[super viewDidLoad];self.title=@"选择线路和剧集";self.view.backgroundColor=HostBackground();self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=58;self.tableView.estimatedRowHeight=58;self.selectedLineIndex=MAX(0,self.selectedLineIndex);self.navigationItem.prompt=self.lines.count?[NSString stringWithFormat:@"%@ · 选择要播放的分集",self.detail[@"name"]?:self.item[@"name"]?:@"影片"]:@"此影片没有可用分集";}
 - (void)dealloc {[self.client cancel];}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return self.lines.count;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {NSArray *episodes=[self.lines[section][@"episodes"] isKindOfClass:NSArray.class]?self.lines[section][@"episodes"]:@[];return episodes.count;}

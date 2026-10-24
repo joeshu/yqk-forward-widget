@@ -43,7 +43,7 @@ static void *CCTVPlayerTimeControlContext = &CCTVPlayerTimeControlContext;
 - (NSArray *)episodes {NSArray *lines=self.lines;return self.lineIndex>=0&&self.lineIndex<lines.count&&[lines[self.lineIndex][@"episodes"] isKindOfClass:NSArray.class]?lines[self.lineIndex][@"episodes"]:@[];}
 - (instancetype)init {if((self=[super init])){_lineIndex=0;_episodeIndex=0;}return self;}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.view.backgroundColor=UIColor.blackColor;
+    [super viewDidLoad];self.view.backgroundColor=HostBackground();
     self.lineIndex=[self.context[@"lineIndex"] integerValue];self.episodeIndex=[self.context[@"episodeIndex"] integerValue];
     if(self.lineIndex<0||self.lineIndex>=self.lines.count)self.lineIndex=0;
     if(self.episodeIndex<0||self.episodeIndex>=self.episodes.count)self.episodeIndex=0;

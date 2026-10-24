@@ -60,7 +60,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     [super viewDidLoad];
     self.title=self.scopeName.length?[NSString stringWithFormat:@"%@日志",self.scopeName]:@"运行日志";
     self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
-    self.view.backgroundColor=UIColor.blackColor;
+    self.view.backgroundColor=HostBackground();
     self.view.tintColor=HostAccent();
     self.allLines=@[];self.visibleLines=@[];
 
@@ -74,7 +74,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     self.categories=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"播放",@"插件",@"错误"]];self.categories.translatesAutoresizingMaskIntoConstraints=NO;self.categories.selectedSegmentIndex=0;self.categories.selectedSegmentTintColor=HostAccent();[self.categories addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
     self.searchBar=[UISearchBar new];self.searchBar.translatesAutoresizingMaskIntoConstraints=NO;self.searchBar.delegate=self;self.searchBar.placeholder=@"搜索日志内容";self.searchBar.searchBarStyle=UISearchBarStyleMinimal;self.searchBar.barStyle=UIBarStyleBlack;self.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchBar.accessibilityIdentifier=@"diagnostic.logs.search";
     self.summaryLabel=[UILabel new];self.summaryLabel.translatesAutoresizingMaskIntoConstraints=NO;self.summaryLabel.font=[UIFont systemFontOfSize:11 weight:UIFontWeightMedium];self.summaryLabel.textColor=UIColor.secondaryLabelColor;
-    self.tableView=[[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];self.tableView.translatesAutoresizingMaskIntoConstraints=NO;self.tableView.backgroundColor=UIColor.blackColor;self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;self.tableView.dataSource=self;self.tableView.delegate=self;self.tableView.estimatedRowHeight=54;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.accessibilityIdentifier=@"diagnostic.logs.list";[self.tableView registerClass:DiagnosticLogLineCell.class forCellReuseIdentifier:@"diagnostic.line"];
+    self.tableView=[[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];self.tableView.translatesAutoresizingMaskIntoConstraints=NO;self.tableView.backgroundColor=HostBackground();self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;self.tableView.dataSource=self;self.tableView.delegate=self;self.tableView.estimatedRowHeight=54;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.accessibilityIdentifier=@"diagnostic.logs.list";[self.tableView registerClass:DiagnosticLogLineCell.class forCellReuseIdentifier:@"diagnostic.line"];
     self.emptyLabel=[UILabel new];self.emptyLabel.translatesAutoresizingMaskIntoConstraints=NO;self.emptyLabel.text=@"暂无日志";self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.font=[UIFont systemFontOfSize:15];self.emptyLabel.textAlignment=NSTextAlignmentCenter;
     [self.view addSubview:self.categories];[self.view addSubview:self.searchBar];[self.view addSubview:self.summaryLabel];[self.view addSubview:self.tableView];[self.view addSubview:self.emptyLabel];
     UILayoutGuide *safe=self.view.safeAreaLayoutGuide;

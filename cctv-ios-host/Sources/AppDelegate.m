@@ -1,5 +1,6 @@
 #import "AppDelegate.h"
 #import "RootViewController.h"
+#import "HostTheme.h"
 
 @interface HostNavigationController : UINavigationController
 @end
@@ -13,7 +14,7 @@
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-    self.window.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;
+    self.window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     RootViewController *vc = [RootViewController new];
     UINavigationController *nav = [[HostNavigationController alloc] initWithRootViewController:vc];
     self.window.rootViewController = nav;

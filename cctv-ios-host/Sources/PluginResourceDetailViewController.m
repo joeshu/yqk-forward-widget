@@ -30,7 +30,7 @@
 - (BOOL)running {return [PyHost isRunningServiceIdentifier:self.service[@"id"]];}
 - (NSString *)baseURL {NSInteger port=[self.service[@"port"] integerValue];return [NSString stringWithFormat:@"http://127.0.0.1:%ld",(long)port];}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.title=self.service[@"name"]?:@"资源详情";self.tableView.backgroundColor=UIColor.blackColor;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=58;
+    [super viewDidLoad];self.title=self.service[@"name"]?:@"资源详情";self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=58;
     self.notice=[UILabel new];self.notice.textColor=UIColor.secondaryLabelColor;self.notice.numberOfLines=0;self.notice.textAlignment=NSTextAlignmentCenter;self.tableView.backgroundView=self.notice;
     __weak typeof(self) w=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[@{@"icon":@"square.and.pencil",@"title":@"编辑配置",@"action":[UIAction actionWithHandler:^(UIAction *a){if(w.onEdit)w.onEdit(w.service);}]}])];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(stateChanged) name:PyHostRuntimeStateDidChangeNotification object:nil];

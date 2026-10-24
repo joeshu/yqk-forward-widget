@@ -1,18 +1,98 @@
 #import <UIKit/UIKit.h>
-static inline UIColor *HostAccent(void) { return [UIColor colorWithRed:1 green:0.16 blue:0.43 alpha:1]; }
-static inline UIColor *HostCard(void) { return [UIColor colorWithWhite:0.115 alpha:1]; }
-static inline UIColor *HostGlassTint(void) { return [UIColor colorWithWhite:0.12 alpha:0.38]; }
-static inline UIColor *HostMutedText(void) { return [UIColor colorWithWhite:1 alpha:0.68]; }
-static inline UIBlurEffect *HostGlassBlur(void) { return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterialDark]; }
+#import <objc/runtime.h>
+
+static NSString * const HostDarkThemePreferenceKey = @"hostDarkTheme";
+static char HostLayerBorderColorAssociationKey;
+
+static inline BOOL HostIsDarkThemeSelected(void) {
+    NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
+    return [defaults objectForKey:HostDarkThemePreferenceKey] ? [defaults boolForKey:HostDarkThemePreferenceKey] : YES;
+}
+
+static inline UIUserInterfaceStyle HostSelectedInterfaceStyle(void) {
+    return HostIsDarkThemeSelected() ? UIUserInterfaceStyleDark : UIUserInterfaceStyleLight;
+}
+
+static inline UIColor *HostBackground(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.015 green:0.016 blue:0.02 alpha:1]:[UIColor colorWithRed:0.95 green:0.957 blue:0.94 alpha:1];}];});return color;
+}
+static inline UIColor *HostCard(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:0.115 alpha:1]:UIColor.whiteColor;}];});return color;
+}
+static inline UIColor *HostRaisedSurface(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:0.17 alpha:1]:[UIColor colorWithWhite:0.975 alpha:1];}];});return color;
+}
+static inline UIColor *HostText(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?UIColor.whiteColor:[UIColor colorWithWhite:0.075 alpha:1];}];});return color;
+}
+static inline UIColor *HostSecondaryText(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.68]:[UIColor colorWithWhite:0.27 alpha:1];}];});return color;
+}
+static inline UIColor *HostAccent(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:1 green:0.16 blue:0.43 alpha:1]:[UIColor colorWithRed:0.78 green:0.04 blue:0.25 alpha:1];}];});return color;
+}
+static inline UIColor *HostOnAccent(void) { return UIColor.whiteColor; }
+static inline UIColor *HostMutedText(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.68]:[UIColor colorWithWhite:0.28 alpha:0.82];}];});return color;
+}
+static inline UIColor *HostGlassTint(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:0.12 alpha:0.38]:[UIColor colorWithWhite:1 alpha:0.76];}];});return color;
+}
+static inline UIColor *HostBorder(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.11]:[UIColor colorWithWhite:0 alpha:0.09];}];});return color;
+}
+static inline UIColor *HostSeparator(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.11]:[UIColor colorWithWhite:0 alpha:0.10];}];});return color;
+}
+static inline UIColor *HostNeutralSurface(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.09]:[UIColor colorWithWhite:0 alpha:0.055];}];});return color;
+}
+static inline UIColor *HostSelectedSurface(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.16]:[UIColor colorWithWhite:0 alpha:0.07];}];});return color;
+}
+static inline UIColor *HostHighlightedSurface(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.2]:[UIColor colorWithWhite:0 alpha:0.06];}];});return color;
+}
+static inline UIColor *HostSuccessSurface(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.07 green:0.18 blue:0.13 alpha:1]:[UIColor colorWithRed:0.88 green:0.96 blue:0.91 alpha:1];}];});return color;
+}
+static inline UIBlurEffect *HostGlassBlur(void) { return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]; }
+
+static inline void HostSetLayerBorderColor(UIView *view, UIColor *color) {
+    if(!view||!color)return;
+    objc_setAssociatedObject(view,&HostLayerBorderColorAssociationKey,color,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    view.layer.borderColor=[[color resolvedColorWithTraitCollection:view.traitCollection] CGColor];
+}
+static inline void HostRefreshAppearanceLayers(UIView *view) {
+    if(!view)return;
+    UIColor *border=objc_getAssociatedObject(view,&HostLayerBorderColorAssociationKey);
+    if(border)view.layer.borderColor=[[border resolvedColorWithTraitCollection:view.traitCollection] CGColor];
+    for(UIView *child in view.subviews)HostRefreshAppearanceLayers(child);
+}
+
 static inline void HostStylePillButton(UIButton *button, BOOL primary) {
     button.contentEdgeInsets = UIEdgeInsetsMake(10, 16, 10, 16);
     button.layer.cornerRadius = 18;
     button.layer.cornerCurve = kCACornerCurveContinuous;
     button.layer.borderWidth = primary ? 0 : 0.7;
-    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
-    button.backgroundColor = primary ? HostAccent() : [UIColor colorWithWhite:1 alpha:0.09];
-    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    [button setTitleColor:[UIColor colorWithWhite:1 alpha:0.65] forState:UIControlStateHighlighted];
+    HostSetLayerBorderColor(button,HostBorder());
+    button.backgroundColor = primary ? HostAccent() : HostNeutralSurface();
+    [button setTitleColor:primary?HostOnAccent():HostText() forState:UIControlStateNormal];
+    [button setTitleColor:HostSecondaryText() forState:UIControlStateHighlighted];
     button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
     button.accessibilityTraits |= UIAccessibilityTraitButton;
 }
@@ -21,10 +101,10 @@ static inline void HostStyleNavigation(UINavigationController *nav) {
     UINavigationBarAppearance *a = [UINavigationBarAppearance new];
     [a configureWithDefaultBackground];
     a.backgroundEffect = HostGlassBlur();
-    a.backgroundColor = [UIColor colorWithWhite:0.02 alpha:0.72];
-    a.titleTextAttributes = @{NSForegroundColorAttributeName : UIColor.whiteColor,
+    a.backgroundColor = HostGlassTint();
+    a.titleTextAttributes = @{NSForegroundColorAttributeName : HostText(),
                               NSFontAttributeName : [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]};
-    a.largeTitleTextAttributes = @{NSForegroundColorAttributeName : UIColor.whiteColor,
+    a.largeTitleTextAttributes = @{NSForegroundColorAttributeName : HostText(),
                                    NSFontAttributeName : [UIFont systemFontOfSize:32 weight:UIFontWeightBold]};
     a.shadowColor = UIColor.clearColor;
     nav.navigationBar.standardAppearance = a;

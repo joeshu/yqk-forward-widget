@@ -10,11 +10,11 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = self.readOnly ? @"查看代码" : @"编辑代码";
-    self.view.backgroundColor = UIColor.blackColor;
+    self.view.backgroundColor = HostBackground();
     _editor = [UITextView new];
     _editor.translatesAutoresizingMaskIntoConstraints = NO;
     _editor.backgroundColor = HostCard();
-    _editor.textColor = UIColor.whiteColor;
+    _editor.textColor = HostText();
     _editor.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
     _editor.editable = !self.readOnly;
     _editor.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -88,7 +88,7 @@
     UITextField *f = [UITextField new];
     f.placeholder = placeholder;
     f.text = value;
-    f.textColor = UIColor.whiteColor;
+    f.textColor = HostText();
     f.autocorrectionType = UITextAutocorrectionTypeNo;
     f.autocapitalizationType = UITextAutocapitalizationTypeNone;
     return f;
@@ -96,7 +96,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = self.service ? @"编辑服务" : @"添加服务";
-    self.tableView.backgroundColor = UIColor.blackColor;
+    self.tableView.backgroundColor = HostBackground();
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
     self.tableView.rowHeight = 54;
     self.identifier = self.service[@"id"] ?: NSUUID.UUID.UUIDString;
@@ -162,7 +162,7 @@
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1
                                                 reuseIdentifier:nil];
     c.backgroundColor = HostCard();
-    c.textLabel.textColor = UIColor.whiteColor;
+    c.textLabel.textColor = HostText();
     c.selectionStyle = UITableViewCellSelectionStyleNone;
     UIView *input = nil;
     if (ip.section == 0) {

@@ -1,4 +1,5 @@
 #import "ResourceImportSheetViewController.h"
+#import "HostTheme.h"
 
 @interface ResourceImportSheetCell : UITableViewCell
 - (void)configureWithTitle:(NSString *)title detail:(NSString *)detail icon:(NSString *)icon color:(UIColor *)color;
@@ -13,8 +14,8 @@
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
     self=[super initWithStyle:style reuseIdentifier:reuseIdentifier];
     if(!self)return nil;
-    self.backgroundColor=UIColor.whiteColor;
-    self.contentView.backgroundColor=UIColor.whiteColor;
+    self.backgroundColor=HostCard();
+    self.contentView.backgroundColor=HostCard();
     self.selectionStyle=UITableViewCellSelectionStyleDefault;
 
     _iconBackground=[UIView new];
@@ -29,11 +30,11 @@
 
     _titleLabel=[UILabel new];
     _titleLabel.font=[UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
-    _titleLabel.textColor=[UIColor colorWithWhite:0.08 alpha:1];
+    _titleLabel.textColor=HostText();
     _titleLabel.translatesAutoresizingMaskIntoConstraints=NO;
     _detailLabel=[UILabel new];
     _detailLabel.font=[UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-    _detailLabel.textColor=[UIColor colorWithWhite:0.48 alpha:1];
+    _detailLabel.textColor=HostSecondaryText();
     _detailLabel.numberOfLines=2;
     _detailLabel.translatesAutoresizingMaskIntoConstraints=NO;
     UIStackView *labels=[[UIStackView alloc] initWithArrangedSubviews:@[_titleLabel,_detailLabel]];
@@ -43,7 +44,7 @@
     [self.contentView addSubview:labels];
 
     UIImageView *chevron=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
-    chevron.tintColor=[UIColor colorWithWhite:0.72 alpha:1];
+    chevron.tintColor=HostSecondaryText();
     chevron.contentMode=UIViewContentModeScaleAspectFit;
     chevron.translatesAutoresizingMaskIntoConstraints=NO;
     [self.contentView addSubview:chevron];
@@ -66,7 +67,7 @@
         [chevron.heightAnchor constraintEqualToConstant:18]
     ]];
     UIView *separator=[UIView new];
-    separator.backgroundColor=[UIColor colorWithWhite:0.91 alpha:1];
+    separator.backgroundColor=HostSeparator();
     separator.translatesAutoresizingMaskIntoConstraints=NO;
     [self.contentView addSubview:separator];
     [NSLayoutConstraint activateConstraints:@[
@@ -86,7 +87,7 @@
 }
 - (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
     [super setHighlighted:highlighted animated:animated];
-    self.contentView.backgroundColor=highlighted?[UIColor colorWithWhite:0.94 alpha:1]:UIColor.whiteColor;
+    self.contentView.backgroundColor=highlighted?HostHighlightedSurface():HostCard();
 }
 @end
 
@@ -97,27 +98,26 @@
 @implementation ResourceImportSheetViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.overrideUserInterfaceStyle=UIUserInterfaceStyleLight;
-    self.view.backgroundColor=[UIColor colorWithRed:0.95 green:0.96 blue:0.93 alpha:1];
+    self.view.backgroundColor=HostBackground();
 
     UIView *header=[UIView new];
     header.translatesAutoresizingMaskIntoConstraints=NO;
     [self.view addSubview:header];
     UIView *grabber=[UIView new];
-    grabber.backgroundColor=[UIColor colorWithWhite:0.80 alpha:1];
+    grabber.backgroundColor=HostBorder();
     grabber.layer.cornerRadius=3;
     grabber.translatesAutoresizingMaskIntoConstraints=NO;
     [header addSubview:grabber];
     UILabel *title=[UILabel new];
     title.text=@"添加资源";
     title.font=[UIFont systemFontOfSize:28 weight:UIFontWeightBold];
-    title.textColor=[UIColor colorWithWhite:0.07 alpha:1];
+    title.textColor=HostText();
     title.translatesAutoresizingMaskIntoConstraints=NO;
     [header addSubview:title];
     UIButton *close=[UIButton buttonWithType:UIButtonTypeSystem];
     [close setImage:[UIImage systemImageNamed:@"xmark"] forState:UIControlStateNormal];
-    close.tintColor=[UIColor colorWithWhite:0.48 alpha:1];
-    close.backgroundColor=[UIColor colorWithWhite:0.91 alpha:1];
+    close.tintColor=HostSecondaryText();
+    close.backgroundColor=HostRaisedSurface();
     close.layer.cornerRadius=22;
     close.accessibilityLabel=@"关闭添加资源";
     [close addTarget:self action:@selector(closeSheet) forControlEvents:UIControlEventTouchUpInside];
@@ -176,7 +176,7 @@
     UILabel *label=[UILabel new];
     label.text=[self tableView:tableView titleForHeaderInSection:section];
     label.font=[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    label.textColor=[UIColor colorWithWhite:0.43 alpha:1];
+    label.textColor=HostSecondaryText();
     label.frame=CGRectMake(28,0,tableView.bounds.size.width-56,34);
     return label;
 }

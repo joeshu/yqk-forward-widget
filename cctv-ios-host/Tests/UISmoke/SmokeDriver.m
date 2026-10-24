@@ -22,6 +22,8 @@
 #import "LogCenterViewController.h"
 #import "PluginLogStore.h"
 #import "HostLogRedactor.h"
+#import "HostTheme.h"
+#import "SettingsViewController.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
@@ -643,7 +645,32 @@ static void next(NSArray *steps, NSUInteger index) {
             TVBoxCatalogViewController *catalogPage=[TVBoxCatalogViewController new];catalogPage.catalog=[TVBoxCatalogStore catalogForID:catalog[@"id"]]?:catalog;[nav pushViewController:catalogPage animated:NO];
             check([catalogPage.tableView numberOfSections]==2&&[catalogPage.tableView numberOfRowsInSection:0]==2,@"TVBox catalog separates script sites from live lists");capture(self.window,@"21-tvbox-catalog");
             if(catalog)[TVBoxCatalogStore removeCatalog:catalog[@"id"]];[nav popViewControllerAnimated:NO];
-          }}
+          }},
+          ^{
+            [root selectBottomTab:(id)tabs.arrangedSubviews[4]];
+            [root.view layoutIfNeeded];
+            SettingsViewController *settings=(id)[root valueForKey:@"tabPage"];
+            UITableView *settingsTable=[settings valueForKey:@"table"];
+            [settingsTable layoutIfNeeded];
+            UITableViewCell *themeCell=[settingsTable cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+            UISegmentedControl *theme=(id)themeCell.accessoryView;
+            check(theme!=nil&&[theme.accessibilityIdentifier isEqualToString:HostDarkThemePreferenceKey], @"settings exposes the persisted global theme selector");
+            if(theme){
+                theme.selectedSegmentIndex=1;
+                [theme sendActionsForControlEvents:UIControlEventValueChanged];
+            }
+            check(self.window.overrideUserInterfaceStyle==UIUserInterfaceStyleLight&&!HostIsDarkThemeSelected(), @"selecting white theme updates and persists the window appearance");
+            UIColor *lightBackground=[HostBackground() resolvedColorWithTraitCollection:self.window.traitCollection];
+            CGFloat lr=0,lg=0,lb=0,la=0;[lightBackground getRed:&lr green:&lg blue:&lb alpha:&la];
+            check(lr>0.8&&lg>0.8&&lb>0.8, @"white theme resolves a light global page background");
+            capture(self.window,@"22-global-white-theme");
+            if(theme){theme.selectedSegmentIndex=0;[theme sendActionsForControlEvents:UIControlEventValueChanged];}
+            check(self.window.overrideUserInterfaceStyle==UIUserInterfaceStyleDark&&HostIsDarkThemeSelected(), @"selecting black theme restores and persists the dark appearance");
+            UIColor *darkBackground=[HostBackground() resolvedColorWithTraitCollection:self.window.traitCollection];
+            CGFloat dr=0,dg=0,db=0,da=0;[darkBackground getRed:&dr green:&dg blue:&db alpha:&da];
+            check(dr<0.1&&dg<0.1&&db<0.1, @"black theme resolves a dark global page background");
+            capture(self.window,@"23-global-black-theme");
+          }
       ];
       next(steps, 0);
     });
