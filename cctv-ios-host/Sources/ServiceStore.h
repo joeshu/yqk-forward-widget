@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 @interface ServiceStore : NSObject
 + (NSArray<NSDictionary *> *)services;
++ (NSDictionary *)resolvedService:(NSDictionary *)service;
 + (NSString *)directory;
 + (NSString *)scriptPath:(NSDictionary *)service;
 + (NSString *)codePath:(NSDictionary *)service;

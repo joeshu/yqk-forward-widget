@@ -1,4 +1,9 @@
 #import "ServiceStore.h"
+static BOOL ServiceRelativePath(NSString *path){
+    if(![path isKindOfClass:NSString.class]||!path.length||[path hasPrefix:@"/"]||[path containsString:@"\\"]||[path containsString:@":"])return NO;
+    for(NSString *part in path.pathComponents)if([part isEqual:@".."]||[part isEqual:@"."])return NO;
+    return [path rangeOfString:[NSString stringWithFormat:@"%C",(unichar)0]].location==NSNotFound;
+}
 @implementation ServiceStore
 + (NSString *)directory {
     NSString *d =
@@ -10,9 +15,37 @@
                                                   error:NULL];
     return d;
 }
++ (NSDictionary *)resolvedService:(NSDictionary *)service {
+    NSString *identifier=service[@"id"];
+    if(!ServiceRelativePath(identifier)||identifier.pathComponents.count!=1||[service[@"builtin"] boolValue])return service;
+    NSString *base=[[self directory] stringByAppendingPathComponent:identifier];
+    NSMutableDictionary *resolved=[service mutableCopy];
+    NSDictionary *manifest=service[@"manifest"];
+    if([manifest isKindOfClass:NSDictionary.class]&&[manifest[@"runtime"] isEqual:@"python"]&&![manifest[@"moduleType"] isEqual:@"script"]){NSMutableDictionary *updated=[manifest mutableCopy];updated[@"moduleType"]=@"script";resolved[@"manifest"]=updated;}
+    for(NSString *key in @[@"packageRoot",@"archivePath"]){
+        NSString *relativeKey=[key isEqual:@"packageRoot"]?@"packageRelativePath":@"archiveRelativePath";
+        NSString *relative=service[relativeKey],*stored=service[key];
+        if(!ServiceRelativePath(relative)){
+            relative=nil;
+            if([stored isKindOfClass:NSString.class]&&[stored hasPrefix:[base stringByAppendingString:@"/"]])relative=[stored substringFromIndex:base.length+1];
+            else if([stored isKindOfClass:NSString.class]){
+                // Rebase only this service's imported files, never arbitrary
+                // paths supplied by a package or another service's ID.
+                NSString *marker=[NSString stringWithFormat:@"/Library/Application Support/Services/%@/",identifier];
+                NSRange range=[stored rangeOfString:marker options:NSBackwardsSearch];
+                if(range.location!=NSNotFound)relative=[stored substringFromIndex:NSMaxRange(range)];
+            }
+        }
+        if(ServiceRelativePath(relative)){resolved[relativeKey]=relative;resolved[key]=[base stringByAppendingPathComponent:relative];}
+    }
+    return resolved;
+}
 + (NSArray<NSDictionary *> *)services {
     NSMutableArray *rows =
         [[NSUserDefaults.standardUserDefaults arrayForKey:@"pythonServices"] ?: @[] mutableCopy];
+    BOOL pathsChanged=NO;
+    for(NSUInteger index=0;index<rows.count;index++){NSDictionary *row=rows[index];if(![row isKindOfClass:NSDictionary.class])continue;NSDictionary *resolved=[self resolvedService:row];if(![resolved isEqual:row]){rows[index]=resolved;pathsChanged=YES;}}
+    if(pathsChanged)[NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];
     BOOL found = NO;
     for (NSDictionary *s in rows)
         if ([s[@"id"] isEqualToString:@"builtin-ysp"])
@@ -42,12 +75,14 @@
         stringByAppendingPathComponent:[service[@"id"] stringByAppendingPathExtension:@"py"]];
 }
 + (NSString *)codePath:(NSDictionary *)service {
-    if([service[@"manifest"] isKindOfClass:NSDictionary.class])return [service[@"packageRoot"] stringByAppendingPathComponent:service[@"manifest"][@"entry"]];
+    service=[self resolvedService:service];
+    if([service[@"manifest"] isKindOfClass:NSDictionary.class]){NSString *entry=service[@"manifest"][@"entry"];if(!ServiceRelativePath(entry))return nil;return [service[@"packageRoot"] stringByAppendingPathComponent:entry];}
     if([service[@"id"] isEqual:@"builtin-yangshipin-js"])return [NSBundle.mainBundle pathForResource:@"yangshipin.bundle" ofType:@"js"];
     return [self scriptPath:service];
 }
 + (BOOL)isMediaService:(NSDictionary *)service {return [service[@"manifest"] isKindOfClass:NSDictionary.class] && ![service[@"protocol"] isEqual:@"python-http"];}
 + (void)save:(NSDictionary *)service {
+    service=[self resolvedService:service];
     NSMutableArray *rows = [[self services] mutableCopy];
     NSIndexSet *matches =
         [rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row, NSUInteger index, BOOL *stop) {

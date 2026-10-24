@@ -81,6 +81,57 @@ class NodeMediaHostTests(unittest.TestCase):
         self.assertTrue(self.call('search', session='two', keyword='still-running')['ok'])
         self.assertTrue(self.call('stop', session='two')['ok'])
 
+    def test_native_formdata_uses_js_transport_without_wasm(self):
+        (self.package/'index.cjs').write_text('''module.exports={search(){const form=new FormData();form.append('fixture','value');return {list:[{vod_id:form.get('fixture'),vod_name:new File(['data'],'fixture.txt').name}]}}}''')
+        self.assertTrue(self.start()['ok'])
+        result=self.call('search')['result']['list'][0]
+        self.assertEqual(result,{'vod_id':'value','vod_name':'fixture.txt'})
+
+    def test_catpaw_factory_selects_application_listener_and_uses_normal_local_auth(self):
+        (self.package/'index.config.js').write_text("module.exports={marker:'local-config'}")
+        (self.package/'index.cjs').write_text('''const fs=require('fs'),http=require('http');let app,helper;
+          exports.start=async config=>{if(config.marker!=='local-config')throw Error('configuration missing');
+            helper=http.createServer((req,res)=>{res.writeHead(401);res.end()});await new Promise(r=>helper.listen(0,'127.0.0.1',r));
+            app=catServerFactory(async(req,res)=>{let body='';for await(const c of req)body+=c;const args=JSON.parse(body||'{}');let value;
+              if(req.url==='/website/auth/status')value={code:0,data:{hasPassword:fs.existsSync('password')}};
+              else if(req.url==='/website/auth/setup'){fs.writeFileSync('password',args.password);value={code:0,data:{token:'fixture-token'}}}
+              else if(req.url==='/website/auth/login')value={code:args.password===fs.readFileSync('password','utf8')?0:-1,data:{token:'fixture-token'}};
+              else if(req.headers.cookie!=='web_token=fixture-token'){res.writeHead(401);res.end();return}
+              else if(req.url==='/config')value={video:{sites:[{key:'local',name:'fixture',api:'/spider/local/3'}]}};
+              else value={class:[],list:[]};res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));});
+            app.listen({host:'0.0.0.0',port:0})};
+          exports.stop=async()=>{await Promise.all([app,helper].map(s=>new Promise(r=>s.close(r))))};''')
+        for _ in range(2):
+            result=self.call('start',packageRoot=str(self.package),dataDirectory=str(self.data),entry='index.cjs',configEntry='index.config.js',protocol='catpaw-http',moduleType='commonjs')
+            self.assertTrue(result['ok'],result)
+            self.assertEqual(self.call('providers')['result'][0]['id'],'local')
+            self.assertTrue(self.call('home')['ok'])
+            self.assertTrue(self.call('stop')['ok'])
+        self.assertEqual((self.data/'catpaw-auth.json').stat().st_mode&0o777,0o600)
+
+    def test_widget_has_secure_randomness_and_preserves_season_episode_and_headers(self):
+        (self.package/'index.js').write_text('''WidgetMetadata={name:'fixture'};
+          async function loadResource(p){const nonce=crypto.getRandomValues(new Uint32Array(4));return [{name:p.title+'/'+p.season+'/'+p.episode,url:'https://fixture.test/live.m3u8?episode='+p.episode,customHeaders:{Referer:'https://fixture.test/'}}]}''')
+        result=self.call('start',packageRoot=str(self.package),dataDirectory=str(self.data),entry='index.js',protocol='widget-extractor',moduleType='script')
+        self.assertTrue(result['ok'],result)
+        row=self.call('search',keyword='节目',season=2,episode=7)['result']['list'][0]
+        self.assertEqual(row['name'],'节目/2/7')
+        playback=self.call('play',id=row['id'])['result']
+        self.assertEqual(playback['headers']['Referer'],'https://fixture.test/')
+        self.assertTrue(playback['url'].endswith('episode=7'))
+
+    def test_process_listeners_are_released_on_failed_start_and_independent_stop(self):
+        (self.package/'index.cjs').write_text("process.on('cctv-fixture',()=>{});module.exports={search(){return {count:process.listenerCount('cctv-fixture')}}}")
+        self.assertTrue(self.start()['ok'])
+        self.assertTrue(self.call('start',session='two',packageRoot=str(self.package),dataDirectory=str(self.data),entry='index.cjs',protocol='catvod-js')['ok'])
+        self.assertEqual(self.call('search',session='two')['result']['count'],2)
+        self.assertTrue(self.call('stop')['ok'])
+        self.assertEqual(self.call('search',session='two')['result']['count'],1)
+        (self.package/'broken.cjs').write_text("process.on('cctv-fixture',()=>{});process.removeAllListeners('unhandledRejection');throw Error('fixture startup error')")
+        self.assertFalse(self.call('start',session='broken',packageRoot=str(self.package),dataDirectory=str(self.data),entry='broken.cjs',protocol='catvod-js')['ok'])
+        self.assertEqual(self.call('search',session='two')['result']['count'],1)
+        self.assertTrue(self.call('stop',session='two')['ok'])
+
     def test_commonjs_global_state_and_environment_are_scoped_by_session(self):
         (self.package / 'index.cjs').write_text('''
           module.exports={init(){global.__fixtureCounter=(global.__fixtureCounter||0)+1;const marker='session-'+global.__fixtureCounter;global.local={marker};process.env.CCTV_FIXTURE_MARKER=marker;this.marker=marker},

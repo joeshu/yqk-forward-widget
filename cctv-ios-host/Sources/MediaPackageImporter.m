@@ -31,9 +31,18 @@ static NSString *SuggestedPythonHTTPArguments(NSString *source){
     // Only pass launch flags when the imported script explicitly declares the
     // compatible argparse options. Generic Python HTTP services keep their
     // original argv so unknown flags cannot prevent them from starting.
-    if(!PythonDeclaresArgument(source,@"--port") || !PythonDeclaresArgument(source,@"--bind"))return @"";
-    NSMutableArray<NSString *> *arguments=[NSMutableArray arrayWithArray:@[@"--port",@"{port}",@"--bind",@"{bind}"]];
+    BOOL positional=!PythonDeclaresArgument(source,@"--port") && PythonDeclaresArgument(source,@"port");
+    if((!PythonDeclaresArgument(source,@"--port") && !positional) || !PythonDeclaresArgument(source,@"--bind"))return @"";
+    NSMutableArray<NSString *> *arguments=[NSMutableArray array];
+    if(!positional)[arguments addObject:@"--port"];
+    [arguments addObjectsFromArray:@[@"{port}",@"--bind",@"{bind}"]];
     if(PythonDeclaresArgument(source,@"--serve"))[arguments addObject:@"--serve"];
+    if(PythonDeclaresArgument(source,@"--data-dir"))[arguments addObjectsFromArray:@[@"--data-dir",@"{dataDir}"]];
+    if(PythonDeclaresArgument(source,@"--cache-mb"))[arguments addObjectsFromArray:@[@"--cache-mb",@"32"]];
+    if(PythonDeclaresArgument(source,@"--no-engine"))[arguments addObject:@"--no-engine"];
+    // This desktop variant has perpetual heartbeat/refresh/retry loops and no
+    // cooperative stop hook. Its declared 1080p mode keeps those loops dormant.
+    if(PythonDeclaresArgument(source,@"--no-4k") && [source containsString:@"heartbeat-keeper"] && ![source containsString:@"_cctvhost_stop_service"])[arguments addObject:@"--no-4k"];
     return [arguments componentsJoinedByString:@"|"];
 }
 static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
@@ -79,6 +88,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
 
 @implementation MediaPackageImporter
 + (void)migrateLegacyRuntimeMetadata {
+    [ServiceStore services]; // Resolve sandbox-relative package paths first.
     NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
     NSMutableArray *services=[[defaults arrayForKey:@"pythonServices"] mutableCopy];
     if(!services.count)return;
@@ -86,11 +96,19 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     for(NSUInteger index=0;index<services.count;index++){
         NSDictionary *service=services[index];NSDictionary *manifest=service[@"manifest"];
         NSString *root=service[@"packageRoot"];
-        if([service[@"builtin"] boolValue] || ![service[@"engine"] isEqual:@"javascript"] ||
+        BOOL catpaw=[service[@"protocol"] isEqual:@"catpaw-http"];
+        if([service[@"builtin"] boolValue] || (![service[@"engine"] isEqual:@"javascript"] && !catpaw) ||
            ![manifest isKindOfClass:NSDictionary.class] || ![root isKindOfClass:NSString.class] || !root.length)continue;
         NSDictionary *detected=[self inspectDirectory:root error:NULL];
         if(![detected[@"runtime"] isEqual:@"node"])continue;
+        if(catpaw && [manifest[@"moduleType"] isEqual:detected[@"moduleType"]] && [(manifest[@"configEntry"]?:@"") isEqual:(detected[@"configEntry"]?:@"")])continue;
         NSMutableDictionary *updatedManifest=[detected mutableCopy];
+        if([detected[@"moduleType"] isEqual:@"commonjs"]){
+            NSString *path=[root stringByAppendingPathComponent:@"package.json"];
+            NSData *bytes=ReadBounded([NSURL fileURLWithPath:path],65536,NULL);
+            NSDictionary *metadata=bytes?[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL]:nil;
+            if([metadata isKindOfClass:NSDictionary.class]&&metadata.count==1&&[metadata[@"type"] isEqual:@"module"]){NSData *corrected=[NSJSONSerialization dataWithJSONObject:@{@"type":@"commonjs"} options:0 error:NULL];if(![corrected writeToFile:path options:NSDataWritingAtomic error:NULL])continue;}
+        }
         [updatedManifest removeObjectForKey:@"packageRoot"];
         if(manifest[@"options"] && !updatedManifest[@"options"])updatedManifest[@"options"]=manifest[@"options"];
         NSMutableDictionary *updatedService=[service mutableCopy];
@@ -121,7 +139,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         entry=package[@"module"]?:package[@"main"];
         if([entry hasPrefix:@"./"])entry=[entry substringFromIndex:2];
         if(!entry.length)for(NSString *candidate in @[@"index.js",@"index.mjs",@"index.cjs",@"src/index.js",@"src/index.mjs",@"nodejs/src/index.js",@"spider.py",@"main.py"]){if([fm fileExistsAtPath:[root stringByAppendingPathComponent:candidate]]){entry=candidate;break;}}
-        if(!entry.length){NSMutableArray *candidates=[NSMutableArray array];for(NSString *name in [fm contentsOfDirectoryAtPath:root error:NULL])if([@[@"py",@"js",@"mjs",@"cjs"] containsObject:name.pathExtension.lowercaseString])[candidates addObject:name];if(candidates.count==1)entry=candidates.firstObject;}
+        if(!entry.length){NSMutableArray *candidates=[NSMutableArray array],*pythonServers=[NSMutableArray array];for(NSString *name in [fm contentsOfDirectoryAtPath:root error:NULL])if([@[@"py",@"js",@"mjs",@"cjs"] containsObject:name.pathExtension.lowercaseString]){[candidates addObject:name];if([name.pathExtension.lowercaseString isEqual:@"py"]){NSString *source=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:name]],PackageFileLimit,NULL) encoding:NSUTF8StringEncoding];if([source containsString:@"ThreadingHTTPServer"] && PythonDeclaresArgument(source,@"--bind") && (PythonDeclaresArgument(source,@"port") || PythonDeclaresArgument(source,@"--port")))[pythonServers addObject:name];}}if(candidates.count==1)entry=candidates.firstObject;else if(pythonServers.count==1)entry=pythonServers.firstObject;}
     }
     if(!SafeRelative(entry) || ![fm fileExistsAtPath:[root stringByAppendingPathComponent:entry]]){PackageError(error,@"无法识别入口；请在 cctvhost.json 中指定 entry");return nil;}
     NSString *text=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:entry]],PackageFileLimit,error) encoding:NSUTF8StringEncoding];if(!text.length){PackageError(error,@"入口不是有效 UTF-8 文本或文件过大");return nil;}
@@ -159,10 +177,13 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         else if([text containsString:@"vod_play_from"] || [text containsString:@"vod_id"])protocol=@"catvod-js";
         else protocol=@"cctvhost.media/1";
     }
+    if([runtime isEqual:@"python"])moduleType=@"script";
     if(!moduleType.length){
-        BOOL esmSource=[entry.pathExtension.lowercaseString isEqual:@"mjs"] || [package[@"type"] isEqual:@"module"] || catpawAppBundle || [text rangeOfString:@"(?:^|\\n)\\s*(?:import|export)\\s" options:NSRegularExpressionSearch].location!=NSNotFound;
+        BOOL bundledCommonJS=[text rangeOfString:@"(?:^|[;\\n}])\\s*module\\s*\\.\\s*exports\\s*=" options:NSRegularExpressionSearch].location!=NSNotFound;
+        BOOL staleGeneratedType=catpawAppBundle&&bundledCommonJS&&package.count==1&&[package[@"type"] isEqual:@"module"];
+        BOOL esmSource=[entry.pathExtension.lowercaseString isEqual:@"mjs"] || ([package[@"type"] isEqual:@"module"]&&!staleGeneratedType) || (catpawAppBundle && !bundledCommonJS) || [text rangeOfString:@"(?:^|\\n)\\s*(?:import|export)\\s" options:NSRegularExpressionSearch].location!=NSNotFound;
         BOOL commonJS=[entry.pathExtension.lowercaseString isEqual:@"cjs"] || [text rangeOfString:@"(?:^|[;\\n])\\s*(?:module\\s*\\.\\s*exports|exports\\s*\\.)" options:NSRegularExpressionSearch].location!=NSNotFound;
-        moduleType=esmSource?@"esm":(commonJS?@"commonjs":@"script");
+        moduleType=esmSource?@"esm":((commonJS||bundledCommonJS)?@"commonjs":@"script");
     }
     if(!runtime.length){
         NSDictionary *dependencies=[package[@"dependencies"] isKindOfClass:NSDictionary.class]?package[@"dependencies"]:@{};
@@ -182,6 +203,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(result[@"capabilities"]){if(![result[@"capabilities"] isKindOfClass:NSArray.class]){PackageError(error,@"capabilities 必须是字符串数组");return nil;}for(id value in result[@"capabilities"])if(![value isKindOfClass:NSString.class]){PackageError(error,@"capabilities 包含无效类型");return nil;}clean[@"capabilities"]=result[@"capabilities"];}
     if([result[@"options"] isKindOfClass:NSDictionary.class] || [result[@"options"] isKindOfClass:NSString.class])clean[@"options"]=result[@"options"];
     clean[@"packageRoot"]=root;
+    if([protocol isEqual:@"catpaw-http"] && [fm fileExistsAtPath:[root stringByAppendingPathComponent:@"index.config.js"]])clean[@"configEntry"]=@"index.config.js";
     return clean;
 }
 + (NSDictionary *)importFile:(NSURL *)file error:(NSError **)error {
@@ -206,12 +228,18 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             NSString *entryText=entryData?[[NSString alloc] initWithData:entryData encoding:NSUTF8StringEncoding]:nil;
             if(entryText){
                 launchArguments=SuggestedPythonHTTPArguments(entryText);
-                BOOL hasPlaylistBuilder=[entryText rangeOfString:@"(?:^|\\n)\\s*def\\s+m3u\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
+                BOOL hasPlaylistBuilder=[entryText rangeOfString:@"(?:^|\\n)\\s*def\\s+(?:m3u|build_m3u)\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
                 BOOL hasPlaylistRoute=[entryText containsString:@"/all.m3u"];
-                if(hasPlaylistBuilder && hasPlaylistRoute)playlistPath=@"/all.m3u";
+                if((hasPlaylistBuilder || [entryText containsString:@"#EXTM3U"]) && hasPlaylistRoute)playlistPath=@"/all.m3u";
+                if([launchArguments containsString:@"--no-4k"])manifest[@"compatibilityNote"]=@"此包的设备协议线程没有停止接口。默认启用可独立关闭的 1080p 模式；iPhone 内不启动 Node/WASM 子进程，TS 缓存限 32 MB。";
             }
         }
         NSString *entryExtension=[manifest[@"entry"] pathExtension].lowercaseString;
+        if([manifest[@"runtime"] isEqual:@"node"]&&[manifest[@"moduleType"] isEqual:@"commonjs"]){
+            NSString *path=[manifest[@"packageRoot"] stringByAppendingPathComponent:@"package.json"];
+            NSData *bytes=ReadBounded([NSURL fileURLWithPath:path],65536,NULL);NSDictionary *metadata=bytes?[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL]:nil;
+            if([metadata isKindOfClass:NSDictionary.class]&&metadata.count==1&&[metadata[@"type"] isEqual:@"module"]){NSData *corrected=[NSJSONSerialization dataWithJSONObject:@{@"type":@"commonjs"} options:0 error:error];if(![corrected writeToFile:path options:NSDataWritingAtomic error:error])return nil;}
+        }
         if([manifest[@"runtime"] isEqual:@"node"] && [manifest[@"moduleType"] isEqual:@"esm"] && [entryExtension isEqual:@"js"]){
             NSString *nodePackage=[manifest[@"packageRoot"] stringByAppendingPathComponent:@"package.json"];
             if(![fm fileExistsAtPath:nodePackage]){

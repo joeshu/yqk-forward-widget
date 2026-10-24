@@ -5,8 +5,11 @@
 const http=require('node:http'),https=require('node:https'),net=require('node:net')
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm')
 const bundledFetch=fs.existsSync(path.join(__dirname,'node-fetch.bundle.cjs'))?path.join(__dirname,'node-fetch.bundle.cjs'):path.join(__dirname,'../GeneratedJS/node-fetch.bundle.cjs')
-const nativeFetch=require(bundledFetch)
-global.fetch=nativeFetch;global.Headers=nativeFetch.Headers;global.Request=nativeFetch.Request;global.Response=nativeFetch.Response
+const fetchExports=require(bundledFetch),nativeFetch=fetchExports.default||fetchExports
+// Accessing Node's lazy native FormData/File getters can initialize undici's
+// WASM parser even when fetch itself has been replaced. Install the complete
+// pure JS web transport family without invoking those native getters.
+for(const [name,value] of Object.entries({fetch:nativeFetch,Headers:fetchExports.Headers,Request:fetchExports.Request,Response:fetchExports.Response,FormData:fetchExports.FormData,Blob:fetchExports.Blob,File:fetchExports.File}))if(value)Object.defineProperty(global,name,{value,writable:true,configurable:true,enumerable:true})
 const {pathToFileURL}=require('node:url')
 const {AsyncLocalStorage}=require('node:async_hooks')
 const scope=new AsyncLocalStorage()
@@ -14,7 +17,7 @@ const owners=new Map()
 const closedLogs=new Map()
 const hostLogs=[]
 function scopedGlobal(name){let fallback=global[name];Object.defineProperty(global,name,{configurable:true,enumerable:true,get(){const owner=scope.getStore();return owner&&Object.prototype.hasOwnProperty.call(owner.globals,name)?owner.globals[name]:fallback},set(value){const owner=scope.getStore();if(owner)owner.globals[name]=value;else fallback=value}})}
-for(const name of ['Pans','local','req','request','net','getProxy','getProxyUrl'])scopedGlobal(name)
+for(const name of ['Pans','local','req','request','net','getProxy','getProxyUrl','catServerFactory','catDartServerPort','getPanName','getPanEnabled','messageToDart','websiteBundle','danmuBundle','webBundle','webHtml','webStyle','__CAT_JS_UTIL','__EXPORTED_SPIDER__','lastDanmuProxyName'])scopedGlobal(name)
 let baseEnvironment=process.env
 try{Object.defineProperty(process,'env',{configurable:true,enumerable:true,get(){return scope.getStore()?.env||baseEnvironment},set(value){const owner=scope.getStore();if(owner)owner.env=value;else baseEnvironment=value}})}catch{}
 const original={setTimeout,clearTimeout,setInterval,clearInterval,setImmediate,clearImmediate}
@@ -32,6 +35,8 @@ for(const name of ['copyFile','cp','link','rename','symlink']){
   if(typeof fs.promises[name]==='function'){const operation=fs.promises[name];fs.promises[name]=function(from,to,...args){return operation.call(this,fsPath(from),fsPath(to),...args)}}
 }
 for(const key of ['createReadStream','createWriteStream']){const operation=fs[key];fs[key]=function(file,...args){const stream=operation.call(this,fsPath(file),...args),owner=scope.getStore();if(owner){owner.streams.add(stream);stream.once('close',()=>owner.streams.delete(stream))}return stream}}
+const watch=fs.watch
+fs.watch=function(...args){const owner=scope.getStore();if(owner&&(owner.closed||owner.watchers.size>=32))throw Error('插件文件监听超过限制或已停止');const watcher=watch.apply(this,args);if(owner){owner.watchers.add(watcher);watcher.once('close',()=>owner.watchers.delete(watcher))}return watcher}
 let inflight=0
 function appendLog(owner,line){const lines=owner?.logs||hostLogs;lines.push(String(line).slice(0,1024));if(lines.length>64)lines.shift()}
 function failOwner(owner,context,error){const message=String(error?.message||error||'未知错误').slice(0,512),diagnostic=baseEnvironment.CCTVHOST_TEST_DIAGNOSTICS==='1'&&error?.stack?'\n'+String(error.stack).slice(0,2048):'';appendLog(owner,context+message+diagnostic);if(owner&&!owner.closed){owner.failure=message;cancelHandles(owner)}}
@@ -40,6 +45,10 @@ for(const key of ['log','info','warn','error','debug'])console[key]=(...args)=>{
 process.exit=()=>{throw Error('插件不能退出 CCTVHost 进程')}
 process.kill=()=>{throw Error('插件不能终止 CCTVHost 进程')}
 process.abort=()=>{throw Error('插件不能中止 CCTVHost 进程')}
+const processOn=process.on,processOnce=process.once,processRemove=process.removeListener,processRemoveAll=process.removeAllListeners
+for(const name of ['on','addListener','once'])process[name]=function(event,listener){const owner=scope.getStore();if(!owner)return (name==='once'?processOnce:processOn).call(this,event,listener);if(owner.closed||owner.listeners.length>=64)throw Error('插件进程监听超过限制或已停止');const wrapped=(...args)=>{if(name==='once'){processRemove.call(this,event,wrapped);owner.listeners=owner.listeners.filter(item=>item.wrapped!==wrapped)}if(!owner.closed)return scope.run(owner,()=>listener(...args))};owner.listeners.push({event,listener,wrapped});return processOn.call(this,event,wrapped)}
+process.removeListener=process.off=function(event,listener){const owner=scope.getStore(),entry=owner?.listeners.find(item=>item.event===event&&item.listener===listener);if(entry)owner.listeners=owner.listeners.filter(item=>item!==entry);return processRemove.call(this,event,entry?.wrapped||listener)}
+process.removeAllListeners=function(event){const owner=scope.getStore();if(!owner)return processRemoveAll.apply(this,arguments);for(const entry of owner.listeners.filter(item=>event===undefined||item.event===event)){processRemove.call(this,entry.event,entry.wrapped);owner.listeners=owner.listeners.filter(item=>item!==entry)}return this}
 for(const name of ['spawn','spawnSync','fork','exec','execSync','execFile','execFileSync'])require('node:child_process')[name]=()=>{throw Error('iPhone 插件不支持创建外部进程')}
 require('node:worker_threads').Worker=class{constructor(){throw Error('当前本机插件宿主不支持独立 Worker 线程')}}
 
@@ -66,10 +75,12 @@ net.Socket.prototype.connect=function(...args){
 const listen=net.Server.prototype.listen
 net.Server.prototype.listen=function(...args){
   const owner=scope.getStore()
+  if(owner?.protocol==='catpaw-http'&&args[0]&&typeof args[0]==='object')args[0]={...args[0],host:'127.0.0.1'}
   if(owner){if(owner.closed)throw Error('插件已停止');if(owner.servers.size>=4)throw Error('插件监听服务超过 4 个');owner.servers.add(this);this.on('connection',socket=>{owner.sockets.add(socket);socket.once('close',()=>owner.sockets.delete(socket))});this.once('close',()=>owner.servers.delete(this))}
   return listen.apply(this,args)
 }
 function cancelHandles(owner,closeServers=true){
+  if(closeServers){for(const {event,wrapped} of owner.listeners)processRemove.call(process,event,wrapped);owner.listeners.length=0;for(const watcher of owner.watchers){try{watcher.close()}catch{}}owner.watchers.clear()}
   for(const [timer,clear] of owner.timers){try{original[clear](timer)}catch(error){appendLog(owner,'定时器清理失败：'+(error?.message||String(error)))}}
   owner.timers.clear()
   for(const stream of owner.streams){try{stream.destroy()}catch(error){appendLog(owner,'流清理失败：'+(error?.message||String(error)))}}
@@ -111,7 +122,7 @@ function widgetRows(owner,value){
   }
   return {page:1,pagecount:1,list:items}
 }
-async function sourceJSON(url,body){
+async function sourceJSON(url,body,requestHeaders={}){
   const target=new URL(url)
   if(!['http:','https:'].includes(target.protocol)||!['127.0.0.1','localhost','[::1]'].includes(target.hostname)||target.username||target.password)throw Error('Node 本机服务地址无效')
   const transport=target.protocol==='https:'?https:http,payload=body===undefined?null:Buffer.from(JSON.stringify(body))
@@ -119,12 +130,12 @@ async function sourceJSON(url,body){
     let settled=false,length=0;const chunks=[];let request
     const finish=(error,value)=>{if(settled)return;settled=true;original.clearTimeout(timer);if(error)reject(error);else resolve(value)}
     const timer=original.setTimeout(()=>request?.destroy(Error('Node 本机服务响应超时')),20000)
-    const headers=payload?{'Content-Type':'application/json','Content-Length':String(payload.length)}:{}
+    const headers={...requestHeaders,...(payload?{'Content-Type':'application/json','Content-Length':String(payload.length)}:{})}
     request=transport.request(target,{method:payload?'POST':'GET',headers},response=>{
       response.on('data',chunk=>{length+=chunk.length;if(length>2*1024*1024){response.destroy(Error('Node 来源响应超过 2 MB'));return}chunks.push(Buffer.from(chunk))})
       response.on('error',error=>finish(error))
       response.on('end',()=>{
-        if(response.statusCode<200||response.statusCode>=300){finish(Error('Node 来源 HTTP '+response.statusCode));return}
+        if(response.statusCode<200||response.statusCode>=300){const error=Error('Node 来源 HTTP '+response.statusCode);error.statusCode=response.statusCode;finish(error);return}
         try{finish(null,JSON.parse(Buffer.concat(chunks).toString('utf8')))}catch(error){finish(Error('Node 来源返回无效 JSON：'+error.message))}
       })
     })
@@ -132,6 +143,23 @@ async function sourceJSON(url,body){
     if(payload)request.write(payload)
     request.end()
   })
+}
+async function catpawConfig(owner,options){
+  try{return await sourceJSON(owner.base+'/config')}catch(error){if(error.statusCode!==401)throw error}
+  const status=await sourceJSON(owner.base+'/website/auth/status')
+  if(status.code!==0||typeof status.data?.hasPassword!=='boolean')throw Error('猫源要求本机登录；此包未提供兼容的登录接口')
+  const secretFile=path.join(owner.data,'catpaw-auth.json')
+  let password=typeof options.password==='string'?options.password:''
+  if(!password){try{password=JSON.parse(fs.readFileSync(secretFile,'utf8')).password||''}catch{}}
+  const setup=!status.data.hasPassword
+  if(setup&&!password)password=require('node:crypto').randomBytes(24).toString('base64url')
+  if(!password)throw Error('猫源已有本机密码，请在资源的“插件参数”中填写 password 后重新启用')
+  if(setup){fs.writeFileSync(secretFile+'.tmp',JSON.stringify({password}),{mode:0o600});fs.renameSync(secretFile+'.tmp',secretFile)}
+  const auth=await sourceJSON(owner.base+'/website/auth/'+(setup?'setup':'login'),{password})
+  const token=auth?.data?.token
+  if(auth.code!==0||typeof token!=='string'||!token.length||token.length>4096||/[\r\n;]/.test(token))throw Error('猫源本机登录失败，请检查插件参数中的 password；未自动重试')
+  owner.authHeaders={Cookie:'web_token='+token}
+  return sourceJSON(owner.base+'/config',undefined,owner.authHeaders)
 }
 function installCatvodGlobals(owner){
   const file=path.join(owner.data,'js-storage.json')
@@ -161,15 +189,20 @@ async function start(payload){
   let resolveReady,rejectReady
   const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject})
   ready.catch(()=>{})
-  const owner={session:payload.session,serviceID:payload.serviceID||payload.session,root,data,cwd:data,payload,protocol:payload.protocol,timers:new Map(),sockets:new Set(),servers:new Set(),streams:new Set(),closed:false,stopPromise:null,stopHookAttempted:false,providers:[],globals:{},env:{...baseEnvironment},logs:[],ready,resolveReady,rejectReady,metadata:null}
+  const owner={session:payload.session,serviceID:payload.serviceID||payload.session,root,data,cwd:data,payload,protocol:payload.protocol,timers:new Map(),sockets:new Set(),servers:new Set(),streams:new Set(),watchers:new Set(),listeners:[],closed:false,stopPromise:null,stopHookAttempted:false,providers:[],globals:{},env:{...baseEnvironment},logs:[],ready,resolveReady,rejectReady,metadata:null}
   owners.set(owner.session,owner)
   try{const metadata=await scope.run(owner,async()=>{
     process.env.CATPAW_DATA_DIR=data;process.env.NODE_PATH=data;process.env.DEV_HTTP_PORT='0'
+    if(owner.protocol==='catpaw-http'){
+      process.env.NODE_ENV='development' // Bundled pino workers cannot run in iOS.
+      global.catServerFactory=handler=>{const server=http.createServer(handler);owner.applicationServer=server;return server}
+      global.catDartServerPort=()=>0 // There is no Dart UI companion in CCTVHost.
+    }
     installCatvodGlobals(owner)
     if(owner.protocol==='widget-extractor'){
       const source=fs.readFileSync(entry,'utf8')
       if(Buffer.byteLength(source,'utf8')>8*1024*1024)throw Error('Widget 脚本超过 8 MB')
-      const sandbox={URL,URLSearchParams,TextEncoder,TextDecoder,console,Widget:{http:{
+      const sandbox={URL,URLSearchParams,TextEncoder,TextDecoder,console,crypto:require('node:crypto').webcrypto,Widget:{http:{
         get:(url,options={})=>widgetHTTP('GET',url,undefined,options),
         post:(url,body,options={})=>widgetHTTP('POST',url,body,options)
       }}}
@@ -183,7 +216,9 @@ async function start(payload){
     else{for(const name of Object.keys(require.cache))if(name===entry||name.startsWith(root+path.sep))delete require.cache[name];module=require(entry)}
     owner.module=module.default||module
     if(owner.protocol==='catpaw-http'){
-      if(typeof owner.module.start==='function')await owner.module.start(payload.options||{})
+      let options=payload.options||{}
+      if(payload.configEntry){const config=entryPath(root,payload.configEntry);const value=require(config);options={...(value.default||value),...options}}
+      if(typeof owner.module.start==='function'){const {password,...serviceOptions}=options;await owner.module.start(serviceOptions)}
       else {
         // CatPaw's bundled local application exposes its configured Fastify
         // instance as globalThis.Pans; the host owns binding its loopback port.
@@ -192,11 +227,14 @@ async function start(payload){
         owner.module=app
         if(!owner.servers.size && !app.server?.listening)await app.listen({host:'127.0.0.1',port:0})
       }
-      const server=[...owner.servers].find(server=>server.listening && server.address()?.port)
-      if(!server && !owner.module.server?.listening)throw Error('Node 服务未开启可用的本机 HTTP 监听')
-      const listening=server||owner.module.server
+      // Fastify start() may return before its callback-based listen completes.
+      const listeningDeadline=Date.now()+10000
+      const applicationServer=()=>owner.applicationServer||owner.module.server||[...owner.servers].find(server=>server.listening&&server.address()?.port)
+      while(!applicationServer()?.listening&&Date.now()<listeningDeadline&&!owner.failure)await new Promise(resolve=>original.setTimeout(resolve,20))
+      const listening=applicationServer()
+      if(!listening?.listening||!listening.address()?.port)throw Error('Node 服务未开启可用的本机 HTTP 监听')
       owner.base='http://127.0.0.1:'+listening.address().port
-      const config=await sourceJSON(owner.base+'/config')
+      const config=await catpawConfig(owner,options)
       owner.providers=(config.video?.sites||[]).filter(site=>typeof site.api==='string'&&site.api.startsWith('/spider/')).map(site=>({id:String(site.key),name:String(site.name),api:site.api}))
       owner.metadata={engine:'Node.js Mobile',version:process.versions.node,protocol:'catpaw-http',capabilities:['providers','home','category','search','detail','play']}
     }else{
@@ -224,14 +262,15 @@ async function invoke(operation,payload){
       const provider=owner.providers.find(item=>item.id===payload.provider)||owner.providers[0]
       if(!provider)throw Error('Node 服务未提供影视来源')
       const args=operation==='search'?{wd:payload.keyword,quick:false,pg:payload.page||1}:operation==='category'?{tid:payload.categoryId,pg:payload.page||1,filter:true,extend:payload.filters||{}}:operation==='detail'?{ids:[payload.id]}:operation==='play'?{flag:payload.lineId||'',id:payload.id,flags:[]}:{}
-      value=await sourceJSON(owner.base+provider.api+'/'+operation,args)
-      if(operation==='home' && !value.list?.length){const recommended=await sourceJSON(owner.base+provider.api+'/homeVod',{});value={...value,list:recommended.list||[]}}
+      value=await sourceJSON(owner.base+provider.api+'/'+operation,args,owner.authHeaders)
+      if(operation==='home' && !value.list?.length){const recommended=await sourceJSON(owner.base+provider.api+'/homeVod',{},owner.authHeaders);value={...value,list:recommended.list||[]}}
+      if(operation==='play'&&value&&typeof value==='object'&&typeof value.url==='string'&&new URL(value.url,owner.base).origin===owner.base&&owner.authHeaders)value={...value,header:{...(value.header||{}),...owner.authHeaders},headers:{...(value.headers||{}),...owner.authHeaders}}
     }else if(owner.protocol==='widget-extractor'){
       if(operation==='home')value={class:[],list:[]}
       else if(operation==='search'){
         if(typeof owner.module.loadResource!=='function')throw Error('Widget 脚本已失效')
         const searchToken=++owner.widgetSearchToken
-        const result=await owner.module.loadResource({seriesName:String(payload.keyword||payload.seriesName||''),title:String(payload.keyword||payload.title||''),episode:Number(payload.episode)||1})
+        const result=await owner.module.loadResource({seriesName:String(payload.keyword||payload.seriesName||''),title:String(payload.keyword||payload.title||''),episode:Math.max(1,Math.min(9999,Math.floor(Number(payload.episode)||1))),season:Math.max(1,Math.min(999,Math.floor(Number(payload.season)||1))),year:payload.year||'',mediaType:payload.mediaType||''})
         if(owner!==owners.get(payload.session) || owner.closed)throw Error('旧 Widget 搜索已失效')
         if(searchToken!==owner.widgetSearchToken)throw Error('搜索结果已过期，请重新搜索')
         value=widgetRows(owner,result)

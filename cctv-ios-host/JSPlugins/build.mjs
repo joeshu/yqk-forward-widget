@@ -41,8 +41,8 @@ copyFileSync(resolve(root,'drpy/upstream/LICENSE'),resolve(output,'drpy-LICENSE.
 copyFileSync(resolve(root,'drpy/SOURCE.json'),resolve(output,'drpy-SOURCE.json'))
 // Node.js Mobile disables WebAssembly. Node 18's built-in fetch uses a WASM
 // HTTP parser, so install a pure-JS HTTP/HTTPS implementation in the host.
-await build({entryPoints:[resolve(root,'node_modules/node-fetch/lib/index.js')],outfile:resolve(output,'node-fetch.bundle.cjs'),platform:'node',target:'node18',bundle:true,format:'cjs',external:['encoding'],legalComments:'eof'})
-writeFileSync(resolve(output,'node-fetch-THIRD-PARTY-NOTICES.txt'),['node-fetch','whatwg-url','tr46','webidl-conversions'].map(name=>{
+await build({entryPoints:[resolve(root,'node_modules/node-fetch/src/index.js')],outfile:resolve(output,'node-fetch.bundle.cjs'),platform:'node',target:'node18',bundle:true,format:'cjs',legalComments:'eof'})
+writeFileSync(resolve(output,'node-fetch-THIRD-PARTY-NOTICES.txt'),['node-fetch','data-uri-to-buffer','fetch-blob','formdata-polyfill','node-domexception','web-streams-polyfill'].map(name=>{
   const directory=resolve(root,'node_modules',name),license=readdirSync(directory).find(file=>/^licen[cs]e(?:[.\-_]|$)/i.test(file));return name+'\n'+readFileSync(license?resolve(directory,license):resolve(root,'../Resources/tr46-LICENSE.txt'),'utf8')
 }).join('\n\n'))
 const dependencyNames=['buffer','base64-js','ieee754','core-js','rollup','crypto-js','iconv-lite','jpeg-js','safer-buffer','string_decoder','cheerio','cheerio-select','boolbase','css-select','css-what','nth-check','domhandler','domutils','dom-serializer','domelementtype','entities','htmlparser2','parse5','parse5-htmlparser2-tree-adapter']

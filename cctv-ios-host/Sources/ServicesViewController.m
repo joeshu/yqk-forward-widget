@@ -104,7 +104,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0)
-        return @"每个服务可独立启停。运行时活跃不代表 HTTP 健康或视频已完成解码；可在服务详情中分别检测接口。";
+        return [@[ @"每个服务可独立启停。运行时活跃不代表 HTTP 健康或视频已完成解码；可在服务详情中分别检测接口。", self.service[@"manifest"][@"compatibilityNote"]?:@"" ] componentsJoinedByString:@"\n"];
     return nil;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {

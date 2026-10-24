@@ -131,6 +131,38 @@ class NativePackageTests(unittest.TestCase):
                          ('node', 'catpaw-http', 'esm'))
         self.assertEqual(result['nodePackageType'], 'module')
 
+    def test_catpaw_minified_commonjs_keeps_config_and_is_not_inferred_as_esm(self):
+        source = '''var exports={};module.exports=exports;
+          exports.start=async()=>{globalThis.Pans=await listPans();};
+          const config='/config',prefix='/spider/',video={sites:[]};'''
+        result = self.inspect(self.archive({'index.js': source, 'index.config.js': 'module.exports={video:{}}'}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['manifest']['moduleType']), ('node', 'commonjs'))
+        self.assertEqual(result['manifest']['configEntry'], 'index.config.js')
+        repaired=self.inspect(self.archive({'index.js':source,'index.config.js':'module.exports={}', 'package.json':'{"type":"module"}'}))
+        self.assertTrue(repaired['ok'],repaired)
+        self.assertEqual((repaired['manifest']['moduleType'],repaired['nodePackageType']),('commonjs','commonjs'))
+
+    def test_python_http_zip_with_companion_engine_uses_positional_port_and_mobile_defaults(self):
+        source = '''import argparse
+from http.server import ThreadingHTTPServer
+ap=argparse.ArgumentParser()
+ap.add_argument('port',nargs='?',type=int,default=8767)
+ap.add_argument('--bind')
+ap.add_argument('--data-dir')
+ap.add_argument('--cache-mb')
+ap.add_argument('--no-engine',action='store_true')
+ap.add_argument('--no-4k',action='store_true')
+worker='heartbeat-keeper'
+route='/all.m3u';body='#EXTM3U'
+'''
+        result=self.inspect(self.archive({'wrapped/ysp-live-v9.5.py':source,'wrapped/ysp-engine.js':'const engine=1','wrapped/README.md':'docs'}))
+        self.assertTrue(result['ok'],result)
+        self.assertEqual(result['manifest']['entry'],'ysp-live-v9.5.py')
+        self.assertEqual(result['playlistPath'],'/all.m3u')
+        self.assertEqual(result['arguments'],'{port}|--bind|{bind}|--data-dir|{dataDir}|--cache-mb|32|--no-engine|--no-4k')
+        self.assertIn('1080p',result['manifest']['compatibilityNote'])
+
     def test_catvod_quickjs_methods_and_tvbox_manifest_alias_are_recognized(self):
         source = "export default site=>({async init(ext){},async home(filter){return {class:[]}},async homeVod(){return {list:[]}},async category(tid,pg,filter,extend){return {list:[]}},async search(key,quick,pg){return {list:[]}},async detail(id){return {list:[]}},async play(flag,id,vipFlags){return {parse:0,url:id}}})"
         inferred = self.inspect(self.archive({'index.mjs': source}))

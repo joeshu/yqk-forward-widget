@@ -79,6 +79,21 @@ int main(void) {
         [ServiceStore remove:sid];
         for (NSDictionary *s in [ServiceStore services])
             check(![s[@"id"] isEqual:sid], @"service removed");
+        NSString *portableID=NSUUID.UUID.UUIDString;
+        NSString *portableBase=[[ServiceStore directory] stringByAppendingPathComponent:portableID];
+        NSString *package=[portableBase stringByAppendingPathComponent:@"package/中文目录"];
+        [NSFileManager.defaultManager createDirectoryAtPath:package withIntermediateDirectories:YES attributes:nil error:NULL];
+        [@"class Spider: pass" writeToFile:[package stringByAppendingPathComponent:@"看剧 AI.py"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+        NSDictionary *legacy=@{@"id":portableID,@"name":@"看剧AI",@"port":@18781,@"engine":@"python",@"protocol":@"python-spider",@"packageRoot":[NSString stringWithFormat:@"/private/var/mobile/Containers/Data/Application/OLD/Library/Application Support/Services/%@/package/中文目录",portableID],@"archivePath":[NSString stringWithFormat:@"/private/var/mobile/Containers/Data/Application/OLD/Library/Application Support/Services/%@/source.zip",portableID],@"manifest":@{@"runtime":@"python",@"moduleType":@"esm",@"entry":@"看剧 AI.py",@"options":@{@"fixture":@YES}}};
+        NSMutableArray *seed=[[NSUserDefaults.standardUserDefaults arrayForKey:@"pythonServices"] mutableCopy];if(!seed)seed=[NSMutableArray array];[seed addObject:legacy];[NSUserDefaults.standardUserDefaults setObject:seed forKey:@"pythonServices"];
+        NSDictionary *portable=nil;for(NSDictionary *row in [ServiceStore services])if([row[@"id"] isEqual:portableID])portable=row;
+        check([portable[@"packageRoot"] isEqual:package],@"sandbox UUID changes rebase only the same service's package");
+        check([NSFileManager.defaultManager fileExistsAtPath:[ServiceStore codePath:legacy]],@"stale in-memory snapshots also resolve the Chinese entry filename");
+        check([portable[@"packageRelativePath"] isEqual:@"package/中文目录"]&&[portable[@"archiveRelativePath"] isEqual:@"source.zip"],@"portable relative paths are persisted for future container moves");
+        check([portable[@"manifest"][@"options"] isEqual:legacy[@"manifest"][@"options"]]&&[portable[@"manifest"][@"moduleType"] isEqual:@"script"],@"migration preserves options and corrects the Python display type");
+        NSMutableDictionary *invalid=[legacy mutableCopy];invalid[@"packageRoot"]=@"/unrelated/package";invalid[@"packageRelativePath"]=@"../another-service/package";
+        check([[ServiceStore resolvedService:invalid][@"packageRoot"] isEqual:@"/unrelated/package"],@"relative traversal is never rebased into another service");
+        [ServiceStore remove:portableID];
         [ServiceStore remove:@"builtin-ysp"];
         BOOL builtin = NO;
         for (NSDictionary *s in [ServiceStore services])

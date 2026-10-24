@@ -315,10 +315,15 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('kOptURLChannelIDForStats:cid', direct)
         self.assertIn('kOptUserID', direct)
         self.assertIn('保留线路选择，不回退自动', direct)
-        self.assertIn('CNPlayer 自选地址', TEXT)
+        self.assertIn('自选地址 %@', TEXT)
         self.assertIn('SDK 报告节点', TEXT)
         self.assertIn('playSelectedNativeRouteOrChannel', method_body('- (void)player:(id)player playbackFailed:'))
         self.assertNotIn('armCicadaFallback', TEXT)
+        self.assertIn('generation!=owner.playbackGeneration',body)
+        self.assertIn('HLSRouteProbe',body)
+        self.assertIn('nativePlainRoute',body)
+        self.assertIn('[self.nativeRouteProbe cancel]',method_body('- (void)stopPlayback'))
+        self.assertIn('self.nativePlainRouteActive?0:1',method_body('- (void)startRemoteChannel:'))
 
     def test_player_toolbar_uses_real_airplay_picker_and_delays_logo_io_until_first_frame(self):
         self.assertIn('AVRoutePickerView *airPlayPicker', TEXT)

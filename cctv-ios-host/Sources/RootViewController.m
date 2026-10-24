@@ -12,6 +12,7 @@
 #import "ServicesViewController.h"
 #import "MediaBrowserViewController.h"
 #import "MediaPackageImporter.h"
+#import "HLSRouteProbe.h"
 #import "MediaPackageDownloader.h"
 #import "MediaWebViewController.h"
 #import "ServiceEditorViewController.h"
@@ -45,7 +46,7 @@
 #import <objc/runtime.h>
 #import <string.h>
 
-static NSString *const kBuildTag = @"0.18.0";
+static NSString *const kBuildTag = @"0.18.1";
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -142,7 +143,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, strong) NSMutableDictionary<NSString *,NSNumber *> *readyLocalOrigins;
 @property (nonatomic, strong) NSMutableSet<NSString *> *deferredLocalSubscriptions;
 @property (nonatomic, strong) NativeCDNPreference *nativeCDNPreference;
-@property (nonatomic, strong) NSMutableDictionary<NSString *,NSNumber *> *plainRouteCache;
+@property (nonatomic, strong) NSMutableDictionary<NSString *,NSDictionary *> *plainRouteCache;
+@property(nonatomic,strong) HLSRouteProbe *nativeRouteProbe;
+@property(nonatomic) BOOL nativePlainRouteActive;
 @property (nonatomic, copy) NSDictionary *requestedNativeRoute;
 @property (nonatomic, assign) BOOL directNativeRouteActive;
 @property (nonatomic, assign) BOOL avLayerObserved;
@@ -1070,6 +1073,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if(self.nativeCDNPreference.overrideMayBeActive&&![self.nativeCDNPreference restoreDefault:&routeError]){
         [self showNativeRouteError:routeError channel:ch];return;
     }
+    self.nativePlainRouteActive=NO;
     self.requestedNativeRoute=route;
     self.directNativeRouteActive=(route!=nil);
     [self beginPlaybackPriority];
@@ -1102,25 +1106,29 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
     [self stopPlayback];
     [self recordStartupStage:@"teardown"];
-    if(route){NSURL *source=[NSURL URLWithString:selectedURL];
-        [self log:@"探测自选线路 %@ · %@",self.routeName,source.host?:@"未知主机"];
+    if(route){
+        NSUInteger generation=self.playbackGeneration;
         __weak typeof(self) weakSelf=self;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{
-            BOOL plain=[weakSelf routeIsPlaintextHLS:selectedURL];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if(!weakSelf||!weakSelf.channelID.length)return;
-                NSURL *src=[NSURL URLWithString:selectedURL];
-                if(plain){
-                    [weakSelf log:@"自选线路明文可直连，走 AVPlayer 播放（非 SDK）· %@",src.host?:@"未知主机"];
-                    NSMutableDictionary *remoteCh=[@{@"id":cid,@"name":weakSelf.channelName,@"remoteURL":selectedURL} mutableCopy];
-                    if([ch[@"group"] isKindOfClass:NSString.class])remoteCh[@"group"]=ch[@"group"];
-                    [weakSelf playRemote:remoteCh];
-                }else{
-                    [weakSelf log:@"按地址请求 SDK 播放 %@ · %@",weakSelf.routeName,src.host?:@"未知主机"];
-                    [weakSelf playViaSDKURL:selectedURL channelID:cid title:weakSelf.channelName];
-                }
-            });
-        });
+        void(^resolved)(BOOL)=^(BOOL plain){
+            RootViewController *owner=weakSelf;
+            if(!owner || generation!=owner.playbackGeneration || ![owner.channelID isEqual:cid] || ![owner.requestedNativeRoute isEqual:route])return;
+            owner.nativeRouteProbe=nil;
+            if(!owner.plainRouteCache)owner.plainRouteCache=[NSMutableDictionary dictionary];
+            if(owner.plainRouteCache.count>=64)[owner.plainRouteCache removeAllObjects];
+            owner.plainRouteCache[selectedURL]=@{@"plain":@(plain),@"at":@(CACurrentMediaTime())};
+            if(plain){
+                [owner log:@"自选线路明文 HLS 清单可读，使用 AVPlayer；等待实际视频首帧"];
+                [owner.remoteAttemptedURLs removeAllObjects];owner.remoteRetryCount=0;
+                [owner startRemoteChannel:@{@"id":cid,@"name":ch[@"name"]?:cid,@"remoteURL":selectedURL,@"nativePlainRoute":@YES}];
+            }else{
+                [owner log:@"自选线路未确认明文 HLS，保留所选地址交给 SDK"];
+                [owner playViaSDKURL:selectedURL channelID:cid title:owner.channelName];
+            }
+        };
+        NSDictionary *cached=self.plainRouteCache[selectedURL];
+        NSTimeInterval age=CACurrentMediaTime()-[cached[@"at"] doubleValue];
+        if(cached && age>=0 && age<([cached[@"plain"] boolValue]?30:3))resolved([cached[@"plain"] boolValue]);
+        else{self.nativeRouteProbe=[HLSRouteProbe new];[self.nativeRouteProbe startURL:[NSURL URLWithString:selectedURL] completion:resolved];}
     }
     else {[self log:@"使用 SDK 按频道 ID 自动调度"];[self playViaSDK:cid title:self.channelName];}
 
@@ -1223,6 +1231,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)stopPlayback {
+    [self.nativeRouteProbe cancel];self.nativeRouteProbe=nil;
     self.nativeRetryPending=NO;
     self.moviePiPActive=NO;
     [self.moviePlayer pause];self.movieController.player=nil;self.moviePlayer=nil;self.movieController=nil;
@@ -1288,6 +1297,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
 - (void)togglePlayPause {
     if(self.moviePlayer){if(self.moviePlayer.rate>0)[self.moviePlayer pause];else[self.moviePlayer play];return;}
+    if(self.nativePlainRouteActive && self.remotePlaybackFailed){NSDictionary *channel=[self channelWithID:self.channelID];if(channel)[self playChannel:channel route:self.requestedNativeRoute];return;}
     if(self.remotePlaybackFailed && self.currentRemoteURL.length){[self playRemote:@{@"id":self.channelID?:self.currentRemoteURL,@"name":self.channelName?:self.currentRemoteURL,@"remoteURL":self.currentRemoteURL}];return;}
     if(self.nativePlaybackFailed){NSDictionary *channel=[self channelWithID:self.channelID];if(!channel && self.channelID.length)channel=@{@"id":self.channelID,@"name":self.channelName?:self.channelID};if(channel){self.selectionRequestedAt=CACurrentMediaTime();[self playChannel:channel route:self.requestedNativeRoute];}return;}
     if (self.avPlayer) {
@@ -1557,7 +1567,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     }else if(channel){
         NSArray *routes=[channel[@"routes"] isKindOfClass:NSArray.class]?channel[@"routes"]:@[];BOOL automatic=self.requestedNativeRoute==nil;
         [rows addObject:@{@"kind":@"automatic",@"title":@"SDK 自动选择",@"detail":@"由央视 SDK 调度并处理版权；节点未主动探测",@"selected":@(automatic),@"symbol":@"sparkles"}];
-        for(NSDictionary *route in routes){NSString *provider=[route[@"provider"] isKindOfClass:NSString.class]?route[@"provider"]:@"线路";NSInteger width=[route[@"w"] integerValue],height=[route[@"h"] integerValue];NSString *resolution=width>0&&height>0?[NSString stringWithFormat:@"源标注 %ld × %ld",(long)width,(long)height]:@"源标注分辨率未知";NSString *url=[route[@"url"] isKindOfClass:NSString.class]?route[@"url"]:@"";BOOL selected=[provider caseInsensitiveCompare:self.requestedNativeRoute[@"provider"]?:@""]==NSOrderedSame;[rows addObject:@{@"kind":@"native",@"route":route,@"title":[NSString stringWithFormat:@"CNPlayer 自选地址 %@",provider.uppercaseString],@"detail":[NSString stringWithFormat:@"%@ · 交给央视 SDK 播放\n%@",resolution,[self displaySafeSourceURL:url]],@"selected":@(selected),@"symbol":@"antenna.radiowaves.left.and.right"}];}
+        for(NSDictionary *route in routes){NSString *provider=[route[@"provider"] isKindOfClass:NSString.class]?route[@"provider"]:@"线路";NSInteger width=[route[@"w"] integerValue],height=[route[@"h"] integerValue];NSString *resolution=width>0&&height>0?[NSString stringWithFormat:@"源标注 %ld × %ld",(long)width,(long)height]:@"源标注分辨率未知";NSString *url=[route[@"url"] isKindOfClass:NSString.class]?route[@"url"]:@"";BOOL selected=[provider caseInsensitiveCompare:self.requestedNativeRoute[@"provider"]?:@""]==NSOrderedSame;[rows addObject:@{@"kind":@"native",@"route":route,@"title":[NSString stringWithFormat:@"自选地址 %@",provider.uppercaseString],@"detail":[NSString stringWithFormat:@"%@ · 明文用 AVPlayer，其余交给央视 SDK\n%@",resolution,[self displaySafeSourceURL:url]],@"selected":@(selected),@"symbol":@"antenna.radiowaves.left.and.right"}];}
     }
     panel.items=rows;panel.emptyMessage=self.channelID.length?@"此频道没有可用的线路信息。可以使用顶部线路菜单或检查频道来源。":@"请先选择频道";__weak typeof(self) weakSelf=self;
     NSString *panelChannelID=self.channelID.copy;
@@ -1600,6 +1610,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     LocalServiceReadiness *readiness=[[LocalServiceReadiness alloc] initWithURL:c.URL timeout:20 requiresHealthJSON:health];NSString *engine=[service[@"engine"] isKindOfClass:NSString.class]?service[@"engine"]:@"python";if(service && [engine isEqualToString:@"python"]){NSString *identifier=[service[@"id"] copy];readiness.failureProvider=^NSError *{return [PyHost startupErrorForServiceIdentifier:identifier];};}return readiness;
 }
 - (BOOL)startService:(NSDictionary *)service error:(NSError **)error {
+    service=[ServiceStore resolvedService:service];
+    NSString *entryPath=[ServiceStore codePath:service];
+    if([service[@"manifest"] isKindOfClass:NSDictionary.class] && (!entryPath.length || ![NSFileManager.defaultManager fileExistsAtPath:entryPath])){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:8 userInfo:@{NSLocalizedDescriptionKey:@"资源入口文件不存在。已检查当前 App 沙盒中的同一服务目录；请从“资源”重新导入原文件。原服务配置和日志会保留。"}];return NO;}
     NSString *serviceID=service[@"id"];
     if([PyHost isRunningServiceIdentifier:serviceID])return YES;
     if([PyHost isManagedServiceIdentifier:serviceID]){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:7 userInfo:@{NSLocalizedDescriptionKey:@"该服务仍有启动中或状态待确认的会话，请先停止并确认清理后重试。"}];return NO;}
@@ -2108,52 +2121,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *detected=[M3UParser epgURL:text baseURL:nil];if(detected.length)[ProfileStore update:sourceKey values:@{@"detectedEPGURL":detected}];[self installPlaylist:list source:sourceKey];
 }
 
-#pragma mark - 自选线路明文探测
-- (NSData *)syncHTTPGET:(NSString *)url timeout:(NSTimeInterval)timeout {
-    if(!url.length)return nil;
-    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
-    req.timeoutInterval=timeout;[req setHTTPMethod:@"GET"];[req setValue:@"qqlive" forHTTPHeaderField:@"User-Agent"];[req setValue:@"https://live.cctv.cn/" forHTTPHeaderField:@"Referer"];
-    dispatch_semaphore_t sem=dispatch_semaphore_create(0);__block NSData *result=nil;
-    NSURLSessionDataTask *task=[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){if(!error&&data.length)result=data;dispatch_semaphore_signal(sem);}];
-    [task resume];
-    if(dispatch_semaphore_wait(sem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)((timeout+1.0)*NSEC_PER_SEC)))!=0)[task cancel];
-    return result;
-}
-- (NSString *)firstHLSChildOrSelf:(NSString *)text base:(NSString *)base {
-    if(!text.length)return nil;
-    NSArray *lines=[text componentsSeparatedByString:@"\n"];
-    for(NSString *raw in lines){
-        NSString *s=[raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-        if(!s.length||[s hasPrefix:@"#"])continue;
-        if([s hasPrefix:@"http://"]||[s hasPrefix:@"https://"])return s;
-        return [NSURL URLWithString:s relativeToURL:[NSURL URLWithString:base]].absoluteString;
-    }
-    return nil;
-}
-- (BOOL)routeIsPlaintextHLS:(NSString *)url {
-    if(!url.length)return NO;
-    NSNumber *cached=self.plainRouteCache[url];if(cached)return cached.boolValue;
-    BOOL plain=NO;
-    NSData *master=[self syncHTTPGET:url timeout:3.0];
-    if(master.length){
-        NSString *text=[[NSString alloc] initWithData:master encoding:NSUTF8StringEncoding];
-        if(text&&[text rangeOfString:@"#EXT-X-KEY"].location==NSNotFound){
-            NSString *child=[self firstHLSChildOrSelf:text base:url];
-            if(child.length){
-                NSData *c=[self syncHTTPGET:child timeout:3.0];
-                if(c.length){
-                    NSString *ct=[[NSString alloc] initWithData:c encoding:NSUTF8StringEncoding];
-                    plain=(ct&&[ct rangeOfString:@"#EXT-X-KEY"].location==NSNotFound);
-                }
-            }else{
-                plain=YES;
-            }
-        }
-    }
-    if(self.plainRouteCache.count>512)[self.plainRouteCache removeAllObjects];
-    self.plainRouteCache[url]=@(plain);
-    return plain;
-}
 - (void)playRemote:(NSDictionary *)ch {
     self.requestedNativeRoute=nil;self.directNativeRouteActive=NO;
     [self.remoteAttemptedURLs removeAllObjects];self.remoteRetryCount=0;self.remoteFailureRecoveryPending=NO;self.remotePlaybackFailed=NO;
@@ -2164,11 +2131,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self.remoteAttemptedURLs addObject:u];
     [self.nativePreloader cancel];
     [self beginPlaybackPriority];
-    if(self.activeTab!=1)[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[1]];
+    self.nativePlainRouteActive=[ch[@"nativePlainRoute"] boolValue];
+    NSInteger playbackTab=self.nativePlainRouteActive?0:1;if(self.activeTab!=playbackTab)[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[playbackTab]];
     self.playbackGeneration += 1;self.selectionVersion++;NSUInteger generation=self.playbackGeneration;self.remotePlaybackFailed=NO;self.nativePlaybackFailed=NO;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
     NSTimeInterval requestedAt=self.selectionRequestedAt?:CACurrentMediaTime();self.selectionRequestedAt=0;
     [self stopPlayback];self.remoteFailureRecoveryPending=NO;self.playerExpanded=YES;[self.view setNeedsLayout];
-    self.currentRemoteURL=u;self.channelID=ch[@"id"]?:u;self.channelName=ch[@"name"]?:u;self.routeName=@"订阅";
+    self.currentRemoteURL=u;self.channelID=ch[@"id"]?:u;self.channelName=ch[@"name"]?:u;self.routeName=self.nativePlainRouteActive?[NSString stringWithFormat:@"%@ · AVPlayer 明文线路",self.requestedNativeRoute[@"provider"]?:@"自选"]:@"订阅";
     if(self.playerTabs.selectedSegmentIndex!=3)self.playerTabs.selectedSegmentIndex=1;[self updatePlayerChannelLogoForChannel:ch];[self selectPlayerPanel];
     self.firstRender=NO;self.retryCount=0;self.playStartedAt=requestedAt;self.firstFrameSeconds=0;
     self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt];
@@ -2204,7 +2172,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 - (void)startRemoteURL:(NSString *)url generation:(NSUInteger)generation {
     if(generation!=self.playbackGeneration)return;
-    AVPlayerItem *item=[AVPlayerItem playerItemWithURL:[NSURL URLWithString:url]];item.preferredForwardBufferDuration=0;
+    AVPlayerItem *item=self.nativePlainRouteActive?[AVPlayerItem playerItemWithAsset:[AVURLAsset URLAssetWithURL:[NSURL URLWithString:url] options:@{@"AVURLAssetHTTPHeaderFieldsKey":@{@"User-Agent":@"qqlive",@"Referer":@"https://live.cctv.cn/"}}]]:[AVPlayerItem playerItemWithURL:[NSURL URLWithString:url]];item.preferredForwardBufferDuration=0;
     self.avPlayer=[AVPlayer playerWithPlayerItem:item];self.avPlayer.automaticallyWaitsToMinimizeStalling=YES;self.remotePlaybackWanted=YES;
     self.avLayer=[AVPlayerLayer playerLayerWithPlayer:self.avPlayer];self.avLayer.frame=self.playerBox.bounds;self.avLayer.videoGravity=AVLayerVideoGravityResizeAspect;[self.playerBox.layer insertSublayer:self.avLayer atIndex:0];
     [item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:kAVItemStatusContext];
@@ -2237,7 +2205,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self log:@"订阅播放失败 %@",error.localizedDescription?:@"未知错误"];
     if(self.remoteRetryCount<1){
         self.remoteRetryCount++;NSUInteger generation=self.playbackGeneration;NSString *url=self.currentRemoteURL?:@"";
-        NSDictionary *retry=@{@"id":self.channelID?:url,@"name":self.channelName?:url,@"remoteURL":url};
+        NSDictionary *retry=@{@"id":self.channelID?:url,@"name":self.channelName?:url,@"remoteURL":url,@"nativePlainRoute":@(self.nativePlainRouteActive)};
         [self log:@"同源自动恢复 1/1，保留一次短重试"];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
             if(generation!=self.playbackGeneration || item!=self.avPlayer.currentItem || !self.remotePlaybackWanted || ![url isEqualToString:self.currentRemoteURL])return;
@@ -2259,7 +2227,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if(!self.remotePlaybackWanted)return;
     NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
     for (NSDictionary *channel in self.allChannels) {
-        if(self.remoteAttemptedURLs.count>=4)break;
+        if(self.nativePlainRouteActive || self.remoteAttemptedURLs.count>=4)break;
         if(![channel[@"name"] isEqualToString:self.channelName])continue;
         NSString *url=[self stableURLKey:channel[@"remoteURL"]];
         if(!url.length || [self.remoteAttemptedURLs containsObject:url])continue;
@@ -2273,7 +2241,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.remotePlaybackWanted=NO;self.remotePlaybackFailed=YES;[self.avPlayer pause];[self.spinner stopAnimating];[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;
     self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;
     self.titleLabel.text=[NSString stringWithFormat:@"%@ · 播放失败",self.channelName?:@"频道"];
-    self.infoLabel.text=@"自动换源已结束 · 点按“重试”再试一次";
+    self.infoLabel.text=self.nativePlainRouteActive?@"所选线路播放失败 · 点按“重试”或在线路面板换线":@"自动换源已结束 · 点按“重试”再试一次";
 }
 
 - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)obj change:(NSDictionary *)change context:(void *)context {
