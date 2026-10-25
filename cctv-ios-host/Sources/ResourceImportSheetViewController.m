@@ -29,13 +29,16 @@
     [_iconBackground addSubview:_iconView];
 
     _titleLabel=[UILabel new];
-    _titleLabel.font=[UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+    _titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline] scaledFontForFont:[UIFont systemFontOfSize:18 weight:UIFontWeightSemibold]];
+    _titleLabel.adjustsFontForContentSizeCategory=YES;
     _titleLabel.textColor=HostText();
+    _titleLabel.numberOfLines=0;
     _titleLabel.translatesAutoresizingMaskIntoConstraints=NO;
     _detailLabel=[UILabel new];
-    _detailLabel.font=[UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    _detailLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightMedium]];
+    _detailLabel.adjustsFontForContentSizeCategory=YES;
     _detailLabel.textColor=HostSecondaryText();
-    _detailLabel.numberOfLines=2;
+    _detailLabel.numberOfLines=0;
     _detailLabel.translatesAutoresizingMaskIntoConstraints=NO;
     UIStackView *labels=[[UIStackView alloc] initWithArrangedSubviews:@[_titleLabel,_detailLabel]];
     labels.axis=UILayoutConstraintAxisVertical;
@@ -60,6 +63,8 @@
         [_iconView.heightAnchor constraintEqualToConstant:24],
         [labels.leadingAnchor constraintEqualToAnchor:_iconBackground.trailingAnchor constant:16],
         [labels.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+        [labels.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
+        [labels.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-14],
         [labels.trailingAnchor constraintLessThanOrEqualToAnchor:chevron.leadingAnchor constant:-12],
         [chevron.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-18],
         [chevron.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
@@ -110,7 +115,8 @@
     [header addSubview:grabber];
     UILabel *title=[UILabel new];
     title.text=@"添加资源";
-    title.font=[UIFont systemFontOfSize:28 weight:UIFontWeightBold];
+    title.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleLargeTitle] scaledFontForFont:[UIFont systemFontOfSize:28 weight:UIFontWeightBold]];
+    title.adjustsFontForContentSizeCategory=YES;
     title.textColor=HostText();
     title.translatesAutoresizingMaskIntoConstraints=NO;
     [header addSubview:title];
@@ -129,8 +135,10 @@
     self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;
     self.tableView.dataSource=self;
     self.tableView.delegate=self;
-    self.tableView.rowHeight=98;
-    self.tableView.sectionHeaderHeight=34;
+    self.tableView.rowHeight=UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight=98;
+    self.tableView.sectionHeaderHeight=UITableViewAutomaticDimension;
+    self.tableView.estimatedSectionHeaderHeight=34;
     self.tableView.sectionFooterHeight=14;
     self.tableView.contentInset=UIEdgeInsetsMake(0,0,20,0);
     self.tableView.translatesAutoresizingMaskIntoConstraints=NO;
@@ -142,13 +150,15 @@
         [header.topAnchor constraintEqualToAnchor:safe.topAnchor],
         [header.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [header.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [header.heightAnchor constraintEqualToConstant:100],
+        [header.heightAnchor constraintGreaterThanOrEqualToConstant:100],
         [grabber.topAnchor constraintEqualToAnchor:header.topAnchor constant:8],
         [grabber.centerXAnchor constraintEqualToAnchor:header.centerXAnchor],
         [grabber.widthAnchor constraintEqualToConstant:58],
         [grabber.heightAnchor constraintEqualToConstant:6],
         [title.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:24],
+        [title.topAnchor constraintEqualToAnchor:grabber.bottomAnchor constant:18],
         [title.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-10],
+        [title.trailingAnchor constraintLessThanOrEqualToAnchor:close.leadingAnchor constant:-12],
         [close.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-22],
         [close.centerYAnchor constraintEqualToAnchor:title.centerYAnchor constant:-1],
         [close.widthAnchor constraintEqualToConstant:44],
@@ -175,10 +185,13 @@
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
     UILabel *label=[UILabel new];
     label.text=[self tableView:tableView titleForHeaderInSection:section];
-    label.font=[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    label.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]];
+    label.adjustsFontForContentSizeCategory=YES;
     label.textColor=HostSecondaryText();
-    label.frame=CGRectMake(28,0,tableView.bounds.size.width-56,34);
-    return label;
+    label.numberOfLines=0;label.translatesAutoresizingMaskIntoConstraints=NO;
+    UIView *container=[UIView new];[container addSubview:label];
+    [NSLayoutConstraint activateConstraints:@[[label.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:28],[label.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-24],[label.topAnchor constraintEqualToAnchor:container.topAnchor constant:8],[label.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-4]]];
+    return container;
 }
 - (NSArray<NSDictionary *> *)optionsForSection:(NSInteger)section {
     static NSArray *online,*local,*manage;

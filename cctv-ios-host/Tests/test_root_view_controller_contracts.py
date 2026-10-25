@@ -348,7 +348,8 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('components.password=nil', route_url)
 
     def test_catalog_supports_grid_and_list_and_routes_remain_long_press(self):
-        self.assertIn('self.table.rowHeight = 48', TEXT)
+        self.assertIn('self.table.rowHeight = UITableViewAutomaticDimension', TEXT)
+        self.assertIn('self.table.estimatedRowHeight = 58', TEXT)
         self.assertIn('channel.list', TEXT)
         self.assertIn('return (NSInteger)self.shownChannels.count;', TEXT)
         self.assertIn('channel.grid', TEXT)

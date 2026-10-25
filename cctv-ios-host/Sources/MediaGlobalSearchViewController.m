@@ -79,6 +79,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     self.historyButton.translatesAutoresizingMaskIntoConstraints=NO;
     [self.historyButton setTitle:@"历史" forState:UIControlStateNormal];
     self.historyButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+    self.historyButton.titleLabel.adjustsFontForContentSizeCategory=YES;
     self.historyButton.accessibilityLabel=@"搜索历史设置";
     [self.historyButton addTarget:self action:@selector(showSearchHistory) forControlEvents:UIControlEventTouchUpInside];
     [header addSubview:self.historyButton];
@@ -112,8 +113,12 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     UIView *header = self.tableView.tableHeaderView;
     if (!header) return;
     CGFloat width = self.tableView.bounds.size.width;
-    if (fabs(header.frame.size.width - width) > 0.5) {
-        header.frame = CGRectMake(0, 0, width, 104);
+    CGSize fitting=[header systemLayoutSizeFittingSize:CGSizeMake(MAX(1,width),UILayoutFittingCompressedSize.height)
+                      withHorizontalFittingPriority:UILayoutPriorityRequired
+                            verticalFittingPriority:UILayoutPriorityFittingSizeLevel];
+    CGFloat height=MAX(104,ceil(fitting.height));
+    if (fabs(header.frame.size.width - width) > 0.5 || fabs(header.frame.size.height-height)>0.5) {
+        header.frame = CGRectMake(0, 0, width, height);
         self.tableView.tableHeaderView = header;
     }
 }

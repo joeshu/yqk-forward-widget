@@ -3,9 +3,17 @@ from pathlib import Path
 S=Path(__file__).resolve().parents[1].joinpath('Sources/RootViewController.m').read_text()
 L=Path(__file__).resolve().parents[1].joinpath('Sources/LogCenterViewController.m').read_text()
 class PersistentLogTests(unittest.TestCase):
- def test_log_is_buffered_and_flushed_once_per_second(self):
-  self.assertIn('scheduledTimerWithTimeInterval:1 target:self selector:@selector(flushDiagnosticLog)',S)
+ def test_log_persistence_is_event_driven_and_batches_writes(self):
+  persist=S.split('- (void)persistDiagnosticLine:',1)[1].split('\n}',1)[0]
+  flush=S.split('- (void)flushDiagnosticLog {',1)[1].split('\n}',1)[0]
+  self.assertIn('[self scheduleDiagnosticLogFlush]',persist)
+  self.assertIn('350*NSEC_PER_MSEC',S)
+  self.assertNotIn('scheduledTimerWithTimeInterval:1 target:self selector:@selector(flushDiagnosticLog)',S)
+  self.assertIn('hasPending=self.pendingLogWrites.length>0',flush)
   self.assertIn('@synchronized (self.pendingLogWrites)',S)
+ def test_background_flushes_pending_diagnostics(self):
+  body=S.split('- (void)onBackground {',1)[1].split('\n}',1)[0]
+  self.assertIn('[self flushDiagnosticLog]',body)
  def test_log_is_restored_on_relaunch(self):
   self.assertIn('[self restoreDiagnosticLog];',S)
   self.assertIn('上次运行日志（崩溃/强制退出前）',S)

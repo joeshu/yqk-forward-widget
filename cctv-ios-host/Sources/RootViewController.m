@@ -245,7 +245,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, strong) HostLogBuffer *pendingLogWrites;
 @property (nonatomic, strong) HostLogBuffer *pendingLogDisplay;
 @property (nonatomic) BOOL diagnosticWriteInProgress;
-@property (nonatomic, strong) NSTimer *logFlushTimer;
+@property (nonatomic, assign) BOOL diagnosticFlushScheduled;
 @property (nonatomic, assign) NSUInteger diagnosticLogGeneration;
 @property (nonatomic, assign) NSUInteger playbackGeneration;
 @property (nonatomic, copy) NSString *currentPlaybackTraceID;
@@ -332,7 +332,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.diagnosticLogQueue = dispatch_queue_create("com.cctvhost.diagnostic-log", DISPATCH_QUEUE_SERIAL);
     self.pendingLogWrites = [[HostLogBuffer alloc] initWithMaximumCharacters:65536];
     self.pendingLogDisplay = [[HostLogBuffer alloc] initWithMaximumCharacters:16000];
-    self.logFlushTimer = [NSTimer scheduledTimerWithTimeInterval:1 target:self selector:@selector(flushDiagnosticLog) userInfo:nil repeats:YES];
     NSString *supportDir = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
     self.diagnosticLogPath = [[supportDir stringByAppendingPathComponent:@"ysp"] stringByAppendingPathComponent:@"cctvhost.log"];
     [self restoreDiagnosticLog];
@@ -352,7 +351,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self setupRemoteCommands];
     [self registerCallbackProtocol];
     [self setupSDK];
-    [self log:@"日志持久化已启用（每秒批量保存）"];
+    [self log:@"日志持久化已启用（按需批量保存）"];
     [RuntimeDiagnostics.shared recordEvent:@"app_started" category:@"lifecycle" fields:@{@"app_version":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"unknown", @"app_build":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"]?:@"unknown", @"ios_version":UIDevice.currentDevice.systemVersion?:@"unknown"}];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
@@ -369,7 +368,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self.watchdog invalidate];
     [self.epgTimer invalidate];
     [self.epgTask cancel];
-    [self.logFlushTimer invalidate];
     [self flushDiagnosticLog];
 }
 
@@ -388,6 +386,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         [self log:@"后台自动进入画中画"];
     }
     [self log:@"进入后台"];
+    [self flushDiagnosticLog];
 }
 
 - (void)onForeground {
@@ -416,10 +415,18 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 - (void)persistDiagnosticLine:(NSString *)line {
     [self.pendingLogWrites append:line];
+    [self scheduleDiagnosticLogFlush];
+}
+- (void)scheduleDiagnosticLogFlush {
+    if(!self.pendingLogWrites||!self.diagnosticLogPath.length)return;
+    @synchronized(self.pendingLogWrites){if(self.diagnosticFlushScheduled)return;self.diagnosticFlushScheduled=YES;}
+    __weak typeof(self) weakSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{RootViewController *owner=weakSelf;if(owner)[owner flushDiagnosticLog];});
 }
 - (void)flushDiagnosticLog {
     NSString *batch;NSUInteger generation;
     @synchronized(self.pendingLogWrites) {
+        self.diagnosticFlushScheduled=NO;
         if(self.diagnosticWriteInProgress || !self.pendingLogWrites.length || !self.diagnosticLogPath.length)return;
         self.diagnosticWriteInProgress=YES;generation=self.diagnosticLogGeneration;batch=[self.pendingLogWrites drain];
     }
@@ -443,7 +450,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         } @catch(NSException *exception){NSLog(@"[CCTVHost] diagnostic log write failed: %@",exception.name);}
         @finally {
             @try{[file closeFile];}@catch(NSException *exception){}
-            @synchronized(self.pendingLogWrites){self.diagnosticWriteInProgress=NO;}
+            BOOL hasPending=NO;
+            @synchronized(self.pendingLogWrites){self.diagnosticWriteInProgress=NO;hasPending=self.pendingLogWrites.length>0;}
+            if(hasPending)[self scheduleDiagnosticLogFlush];
         }
     }});
 }
@@ -584,7 +593,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.table = [[UITableView alloc] initWithFrame:CGRectMake(0, ty, self.view.bounds.size.width, self.view.bounds.size.height - ty) style:UITableViewStylePlain];
     self.table.dataSource = self;
     self.table.delegate = self;
-    self.table.rowHeight = 48;
+    self.table.rowHeight = UITableViewAutomaticDimension;
+    self.table.estimatedRowHeight = 58;
     self.table.backgroundColor = HostBackground();
     self.table.separatorColor = HostSeparator();
     [self.view addSubview:self.table];
@@ -933,7 +943,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self.subscriptionURLs removeObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);[self removeSubscriptionSource:source];[NSUserDefaults.standardUserDefaults setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
 }
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {return self.shownChannels.count;}
-- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {CGFloat width=collectionView.bounds.size.width;NSInteger columns=width>700?4:2;return CGSizeMake(floor((width-24-(columns-1)*8)/columns),126);}
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {CGFloat width=collectionView.bounds.size.width;NSInteger columns=width>700?4:2;CGFloat itemWidth=floor((width-24-(columns-1)*8)/columns);UIFont *title=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection],*subtitle=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];CGFloat height=90+4+ceil(title.lineHeight)+1+ceil(subtitle.lineHeight)+4;return CGSizeMake(itemWidth,height);}
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)ip {
     UICollectionViewCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"channel.card" forIndexPath:ip];NSDictionary *ch=self.shownChannels[ip.item];
     cell.contentView.backgroundColor=HostCard();cell.contentView.layer.cornerRadius=9;cell.contentView.clipsToBounds=YES;
@@ -941,11 +951,13 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     UIView *poster=[cell.contentView viewWithTag:posterTag];UIImageView *logo=(UIImageView *)[cell.contentView viewWithTag:logoTag];UILabel *brand=(UILabel *)[cell.contentView viewWithTag:brandTag];UILabel *number=(UILabel *)[cell.contentView viewWithTag:numberTag];UILabel *title=(UILabel *)[cell.contentView viewWithTag:titleTag];UILabel *subtitle=(UILabel *)[cell.contentView viewWithTag:subtitleTag];
     if(!poster){poster=[[UIView alloc] initWithFrame:CGRectZero];poster.tag=posterTag;poster.autoresizingMask=UIViewAutoresizingFlexibleWidth;poster.backgroundColor=HostCard();poster.layer.cornerRadius=8;[cell.contentView addSubview:poster];
         logo=[UIImageView new];logo.tag=logoTag;logo.autoresizingMask=UIViewAutoresizingFlexibleWidth;logo.contentMode=UIViewContentModeScaleAspectFit;[poster addSubview:logo];
-        brand=[UILabel new];brand.tag=brandTag;brand.textAlignment=NSTextAlignmentCenter;brand.font=[UIFont italicSystemFontOfSize:19];brand.textColor=HostText();brand.autoresizingMask=UIViewAutoresizingFlexibleWidth;[poster addSubview:brand];
+        brand=[UILabel new];brand.tag=brandTag;brand.textAlignment=NSTextAlignmentCenter;brand.font=[UIFont italicSystemFontOfSize:19];brand.adjustsFontForContentSizeCategory=YES;brand.textColor=HostText();brand.autoresizingMask=UIViewAutoresizingFlexibleWidth;[poster addSubview:brand];
         number=[UILabel new];number.tag=numberTag;number.font=[UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightMedium];number.textColor=UIColor.secondaryLabelColor;[poster addSubview:number];
-        title=[UILabel new];title.tag=titleTag;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;title.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];[cell.contentView addSubview:title];
-        subtitle=[UILabel new];subtitle.tag=subtitleTag;subtitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;subtitle.font=[UIFont systemFontOfSize:9];subtitle.textColor=UIColor.secondaryLabelColor;[cell.contentView addSubview:subtitle];}
-    poster.frame=CGRectMake(0,0,cell.bounds.size.width,90);logo.frame=CGRectMake(16,20,cell.bounds.size.width-32,48);brand.frame=logo.frame;number.frame=CGRectMake(7,72,70,12);title.frame=CGRectMake(2,94,cell.bounds.size.width-4,16);subtitle.frame=CGRectMake(2,111,cell.bounds.size.width-4,12);
+        title=[UILabel new];title.tag=titleTag;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;title.adjustsFontForContentSizeCategory=YES;title.numberOfLines=1;title.lineBreakMode=NSLineBreakByTruncatingTail;[cell.contentView addSubview:title];
+        subtitle=[UILabel new];subtitle.tag=subtitleTag;subtitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;subtitle.adjustsFontForContentSizeCategory=YES;subtitle.numberOfLines=1;subtitle.lineBreakMode=NSLineBreakByTruncatingTail;subtitle.textColor=UIColor.secondaryLabelColor;[cell.contentView addSubview:subtitle];}
+    title.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];subtitle.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];
+    CGFloat titleHeight=ceil(title.font.lineHeight),subtitleHeight=ceil(subtitle.font.lineHeight),titleTop=94,subtitleTop=titleTop+titleHeight+1;
+    poster.frame=CGRectMake(0,0,cell.bounds.size.width,90);logo.frame=CGRectMake(16,20,cell.bounds.size.width-32,48);brand.frame=logo.frame;number.frame=CGRectMake(7,72,70,12);title.frame=CGRectMake(2,titleTop,cell.bounds.size.width-4,titleHeight);subtitle.frame=CGRectMake(2,subtitleTop,cell.bounds.size.width-4,subtitleHeight);
     NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";logo.hidden=!logoURL.length;brand.hidden=logoURL.length>0;brand.text=ch[@"name"]?:@"";logo.image=nil;logo.accessibilityIdentifier=logoURL;if(logoURL.length)[self loadLogo:logoURL into:logo];
     number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=[ch[@"id"] isEqualToString:self.channelID]?HostAccent():HostText();title.text=[NSString stringWithFormat:@"%@%@",[self.favorites containsObject:ch[@"id"]]?@"♥ ":@"",ch[@"name"]?:ch[@"id"]];
     NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[ch[@"id"]])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:ch[@"id"]];subtitle.text=self.epgCache[ch[@"id"]][@"now"]?:ch[@"group"];return cell;
@@ -1017,8 +1029,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];
         cell.backgroundColor = HostCard();
-        cell.textLabel.font = [UIFont systemFontOfSize:15];
-        cell.detailTextLabel.font = [UIFont systemFontOfSize:11];
+        cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+        cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.textLabel.numberOfLines=0;
+        cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+        cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=0;
         cell.detailTextLabel.textColor = HostSecondaryText();
         UIView *selected = [[UIView alloc] init];
         selected.backgroundColor = HostSelectedSurface();
@@ -1498,6 +1512,16 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
                                       MAX(0, w - safe.left - safe.right - 16), 40);
     self.avLayer.frame = self.playerBox.bounds;
     [self attachVideoView];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if(previousTraitCollection && ![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]){
+        [self.channelGrid.collectionViewLayout invalidateLayout];
+        [self.channelGrid reloadData];
+        [self.table reloadData];
+        [self.view setNeedsLayout];
+    }
 }
 
 - (void)toggleFullscreen {

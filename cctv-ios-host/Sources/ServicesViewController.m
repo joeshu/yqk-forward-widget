@@ -108,8 +108,8 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     return nil;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1
-                                                reuseIdentifier:nil];
+    UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:@"service.detail.row"];
+    if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"service.detail.row"];
     c.backgroundColor = HostCard();
     c.textLabel.textColor = HostText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
@@ -119,6 +119,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     c.textLabel.numberOfLines = 0;
     c.detailTextLabel.numberOfLines = 3;
     c.selectionStyle = UITableViewCellSelectionStyleNone;
+    c.accessoryView=nil;c.accessoryType=UITableViewCellAccessoryNone;c.imageView.image=nil;c.detailTextLabel.text=@"";c.textLabel.textAlignment=NSTextAlignmentNatural;
     if (ip.section == 0) {
         if (ip.row == 0) {
             c.textLabel.text = [self currentRuntimeStatus];
@@ -384,9 +385,10 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     NSDictionary *s = [self rows:ip.section][ip.row];
-    UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
-                                                reuseIdentifier:nil];
+    UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:@"service.session"];
+    if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"service.session"];
     c.backgroundColor = ip.section == 0 ? HostSuccessSurface() : HostCard();
+    c.accessoryView=nil;c.accessoryType=UITableViewCellAccessoryNone;c.imageView.image=nil;c.selectionStyle=UITableViewCellSelectionStyleDefault;
     c.textLabel.text = s[@"name"];
     c.textLabel.textColor = HostText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];

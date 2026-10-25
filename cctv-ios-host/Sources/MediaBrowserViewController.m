@@ -16,6 +16,46 @@
 #import <float.h>
 #import <math.h>
 
+@interface MediaPosterCell : UICollectionViewCell
+@property(nonatomic,strong) UIImageView *posterView;
+@property(nonatomic,strong) UILabel *nameLabel;
+@property(nonatomic,strong) UILabel *remarksLabel;
+- (void)configureWithItem:(NSDictionary *)item;
+@end
+
+@implementation MediaPosterCell
+- (instancetype)initWithFrame:(CGRect)frame {
+    if((self=[super initWithFrame:frame])){
+        self.contentView.backgroundColor=HostCard();
+        self.contentView.layer.cornerRadius=10;
+        self.contentView.clipsToBounds=YES;
+        self.posterView=[UIImageView new];self.posterView.contentMode=UIViewContentModeScaleAspectFill;self.posterView.clipsToBounds=YES;[self.contentView addSubview:self.posterView];
+        self.nameLabel=[UILabel new];self.nameLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]];self.nameLabel.adjustsFontForContentSizeCategory=YES;self.nameLabel.textColor=HostText();self.nameLabel.lineBreakMode=NSLineBreakByTruncatingTail;[self.contentView addSubview:self.nameLabel];
+        self.remarksLabel=[UILabel new];self.remarksLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11]];self.remarksLabel.adjustsFontForContentSizeCategory=YES;self.remarksLabel.textColor=HostSecondaryText();self.remarksLabel.lineBreakMode=NSLineBreakByTruncatingTail;[self.contentView addSubview:self.remarksLabel];
+    }
+    return self;
+}
+- (void)prepareForReuse {
+    [super prepareForReuse];
+    self.posterView.image=nil;self.posterView.accessibilityIdentifier=nil;self.nameLabel.text=@"";self.remarksLabel.text=@"";self.accessibilityLabel=nil;
+}
+- (void)configureWithItem:(NSDictionary *)item {
+    NSString *poster=[item[@"poster"] isKindOfClass:NSString.class]?item[@"poster"]:@"";
+    if(poster.length)[HostImageLoader.shared loadURL:poster intoImageView:self.posterView];else{self.posterView.image=nil;self.posterView.accessibilityIdentifier=nil;}
+    self.nameLabel.text=[item[@"name"] isKindOfClass:NSString.class]?item[@"name"]:@"";
+    self.remarksLabel.text=[item[@"remarks"] isKindOfClass:NSString.class]?item[@"remarks"]:@"";
+    self.accessibilityLabel=[NSString stringWithFormat:@"%@，%@",self.nameLabel.text,self.remarksLabel.text];
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat width=CGRectGetWidth(self.contentView.bounds),posterHeight=width*1.4;
+    CGFloat nameHeight=ceil(self.nameLabel.font.lineHeight),remarksHeight=ceil(self.remarksLabel.font.lineHeight);
+    self.posterView.frame=CGRectMake(0,0,width,posterHeight);
+    self.nameLabel.frame=CGRectMake(8,posterHeight+4,MAX(0,width-16),nameHeight);
+    self.remarksLabel.frame=CGRectMake(8,CGRectGetMaxY(self.nameLabel.frame)+2,MAX(0,width-16),remarksHeight);
+}
+@end
+
 @interface MediaSourcePicker : UITableViewController <UISearchResultsUpdating>
 @property(nonatomic, copy) NSArray<NSDictionary *> *choices;
 @property(nonatomic, copy) NSArray<NSDictionary *> *shown;
@@ -425,6 +465,13 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (BOOL)shouldAutorotate {return YES;}
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {return UIInterfaceOrientationMaskPortrait;}
 - (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];if(self.homeMode)[self refreshHomeModules];}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if(previousTraitCollection && ![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]){
+        [self.grid.collectionViewLayout invalidateLayout];
+        [self.grid reloadData];
+    }
+}
 - (void)viewDidLoad {
     [super viewDidLoad];self.title=@"首页";self.view.backgroundColor=HostBackground();self.items=@[];self.keyword=@"";self.homeMode=YES;NSDictionary *savedBrowse=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"media.browseStates.v1"];self.browseStates=[savedBrowse isKindOfClass:NSDictionary.class]?[savedBrowse mutableCopy]:[NSMutableDictionary dictionary];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(searchHistorySettingChanged:) name:@"MediaGlobalSearchHistoryDidChange" object:nil];self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeAlways;
     self.search=[[UISearchController alloc] initWithSearchResultsController:nil];self.search.searchResultsUpdater=self;self.search.obscuresBackgroundDuringPresentation=NO;self.search.searchBar.placeholder=@"搜索当前影视来源";self.search.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.definesPresentationContext=YES;
@@ -451,7 +498,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     self.categories=[[UIStackView alloc] init];self.categories.axis=UILayoutConstraintAxisHorizontal;self.categories.spacing=10;self.categories.translatesAutoresizingMaskIntoConstraints=NO;[self.categoryScroll addSubview:self.categories];[self.view addSubview:self.categoryScroll];
     self.readinessStageLabel=[UILabel new];self.readinessStageLabel.translatesAutoresizingMaskIntoConstraints=NO;self.readinessStageLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.readinessStageLabel.adjustsFontForContentSizeCategory=YES;self.readinessStageLabel.textColor=HostSecondaryText();self.readinessStageLabel.numberOfLines=1;self.readinessStageLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.readinessStageLabel.accessibilityIdentifier=@"media-readiness-stage";[self.view addSubview:self.readinessStageLabel];
     UICollectionViewFlowLayout *layout=[UICollectionViewFlowLayout new];layout.minimumInteritemSpacing=10;layout.minimumLineSpacing=16;layout.sectionInset=UIEdgeInsetsMake(12,14,16,14);
-    self.grid=[[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:layout];self.grid.translatesAutoresizingMaskIntoConstraints=NO;self.grid.backgroundColor=HostBackground();self.grid.dataSource=self;self.grid.delegate=self;self.grid.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;[self.grid registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"movie"];[self.view addSubview:self.grid];
+    self.grid=[[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:layout];self.grid.translatesAutoresizingMaskIntoConstraints=NO;self.grid.backgroundColor=HostBackground();self.grid.dataSource=self;self.grid.delegate=self;self.grid.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;[self.grid registerClass:MediaPosterCell.class forCellWithReuseIdentifier:@"movie"];[self.view addSubview:self.grid];
     self.moreButton=[UIButton buttonWithType:UIButtonTypeSystem];self.moreButton.translatesAutoresizingMaskIntoConstraints=NO;[self.moreButton setTitle:@"加载更多" forState:UIControlStateNormal];HostStylePillButton(self.moreButton,YES);[self.moreButton addTarget:self action:@selector(loadMore) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:self.moreButton];self.moreButton.hidden=YES;
     self.status=[UILabel new];self.status.textColor=UIColor.secondaryLabelColor;self.status.numberOfLines=0;self.status.textAlignment=NSTextAlignmentCenter;self.status.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:self.status];
     self.resourceButton=[UIButton buttonWithType:UIButtonTypeSystem];self.resourceButton.translatesAutoresizingMaskIntoConstraints=NO;[self.resourceButton setTitle:@"管理资源" forState:UIControlStateNormal];HostStylePillButton(self.resourceButton,NO);[self.resourceButton addTarget:self action:@selector(openResources) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:self.resourceButton];
@@ -782,13 +829,11 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     }];
 }
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {return self.items.count;}
-- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {NSInteger columns=collectionView.bounds.size.width>700?4:2;CGFloat width=floor((collectionView.bounds.size.width-28-(columns-1)*10)/columns);return CGSizeMake(width,width*1.4+44);}
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {NSInteger columns=collectionView.bounds.size.width>700?4:2;CGFloat width=floor((collectionView.bounds.size.width-28-(columns-1)*10)/columns);UIFont *name=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection],*remarks=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11] compatibleWithTraitCollection:self.traitCollection];return CGSizeMake(width,width*1.4+10+ceil(name.lineHeight)+ceil(remarks.lineHeight));}
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)ip {
-    UICollectionViewCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"movie" forIndexPath:ip];for(UIView *view in cell.contentView.subviews.copy)[view removeFromSuperview];NSDictionary *item=self.items[ip.item];CGFloat width=cell.bounds.size.width,posterHeight=width*1.4;
-    cell.contentView.backgroundColor=HostCard();cell.contentView.layer.cornerRadius=10;cell.contentView.clipsToBounds=YES;
-    UIImageView *poster=[[UIImageView alloc] initWithFrame:CGRectMake(0,0,width,posterHeight)];poster.contentMode=UIViewContentModeScaleAspectFill;poster.clipsToBounds=YES;[cell.contentView addSubview:poster];if([item[@"poster"] length])[HostImageLoader.shared loadURL:item[@"poster"] intoImageView:poster];
-    UILabel *name=[[UILabel alloc] initWithFrame:CGRectMake(8,posterHeight+3,width-16,20)];name.font=[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];name.textColor=UIColor.labelColor;name.text=item[@"name"];[cell.contentView addSubview:name];
-    UILabel *remarks=[[UILabel alloc] initWithFrame:CGRectMake(8,posterHeight+23,width-16,16)];remarks.font=[UIFont systemFontOfSize:11];remarks.textColor=UIColor.secondaryLabelColor;remarks.text=item[@"remarks"];[cell.contentView addSubview:remarks];cell.accessibilityLabel=[NSString stringWithFormat:@"%@，%@",item[@"name"],item[@"remarks"]?:@""];return cell;
+    MediaPosterCell *cell=(MediaPosterCell *)[collectionView dequeueReusableCellWithReuseIdentifier:@"movie" forIndexPath:ip];
+    [cell configureWithItem:self.items[ip.item]];
+    return cell;
 }
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip {
     MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=self.items[ip.item];detail.source=self.source;detail.provider=self.provider;detail.onPlay=self.onPlay;[self.navigationController pushViewController:detail animated:YES];
