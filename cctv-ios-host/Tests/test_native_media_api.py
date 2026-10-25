@@ -51,11 +51,12 @@ class NativeMediaAPITests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 executable = str(pathlib.Path(tmp) / "native-media-api-tests")
-                subprocess.run([
+                build = subprocess.run([
                     "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-framework", "QuartzCore",
                     "-I", str(root / "Sources"), str(root / "Tests" / "native_media_api_tests.m"),
                     str(root / "Sources" / "MediaAPIClient.m"), "-o", executable,
-                ], check=True, capture_output=True, text=True)
+                ], capture_output=True, text=True)
+                self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
                 result = subprocess.run([executable, str(server.server_port)], check=True, capture_output=True, text=True, timeout=30)
                 self.assertIn("Native TVBox JSON API adapter tests passed", result.stderr + result.stdout)
             self.assertTrue(any(query.get("filter") == ["true"] for query, _, _ in requests), "type 4 home asks for filters")

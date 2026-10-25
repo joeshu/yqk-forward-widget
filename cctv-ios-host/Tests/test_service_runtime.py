@@ -1,5 +1,6 @@
 import builtins
 import importlib.util
+import os
 from pathlib import Path
 import socket
 import sys
@@ -170,10 +171,11 @@ class ServiceRuntimeTests(unittest.TestCase):
         worker.join(2)
         self.assertFalse(worker.is_alive())
         self.assertFalse(runtime.is_idle())
-        self.assertIn(self.temp.name, sys.path)  # Background handlers can still import local helpers.
+        script_path = os.path.realpath(self.temp.name)  # macOS exposes /var paths as /private/var in sys.path.
+        self.assertIn(script_path, sys.path)  # Background handlers can still import local helpers.
         self.assertTrue(runtime.stop_session(2), runtime.last_error())
         self.assertTrue(runtime.is_idle())
-        self.assertNotIn(self.temp.name, sys.path)  # The next service cannot import stale helpers.
+        self.assertNotIn(script_path, sys.path)  # The next service cannot import stale helpers.
 
     def test_cooperative_stop_hook_accepts_none_and_waits_for_workers(self):
         worker = self.launch("import builtins, threading\n"

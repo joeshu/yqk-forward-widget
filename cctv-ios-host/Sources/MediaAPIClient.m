@@ -53,7 +53,7 @@ static NSDictionary *MediaCMSVideo(MediaCMSXMLNode *node) {
     return row;
 }
 static NSDictionary *MediaCMSXMLObject(NSData *data,NSError **error) {
-    MediaCMSXMLReader *reader=[MediaCMSXMLReader new];NSXMLParser *parser=[[NSXMLParser alloc] initWithData:data];parser.delegate=reader;parser.shouldResolveExternalEntities=NO;parser.externalEntityResolvingPolicy=NSXMLParserNeverResolveExternalEntities;
+    MediaCMSXMLReader *reader=[MediaCMSXMLReader new];NSXMLParser *parser=[[NSXMLParser alloc] initWithData:data];parser.delegate=reader;parser.shouldResolveExternalEntities=NO;parser.externalEntityResolvingPolicy=NSXMLParserResolveExternalEntitiesNever;
     if(![parser parse]||!reader.root){if(error)*error=reader.exceededLimit?[NSError errorWithDomain:@"CCTVHostMacCMS" code:2 userInfo:@{NSLocalizedDescriptionKey:@"MacCMS XML 节点或文本超过安全上限"}]:(parser.parserError?:[NSError errorWithDomain:@"CCTVHostMacCMS" code:1 userInfo:@{NSLocalizedDescriptionKey:@"MacCMS XML 内容无法解析"}]);return nil;}
     MediaCMSXMLNode *rss=[reader.root.name isEqual:@"rss"]?reader.root:MediaCMSChild(reader.root,@"rss");if(!rss){if(error)*error=[NSError errorWithDomain:@"CCTVHostMacCMS" code:3 userInfo:@{NSLocalizedDescriptionKey:@"XML 可以解析，但根节点不是 MacCMS rss 格式"}];return nil;}
     MediaCMSXMLNode *list=MediaCMSChild(rss,@"list");NSMutableDictionary *result=[NSMutableDictionary dictionary];NSMutableArray *items=[NSMutableArray array];

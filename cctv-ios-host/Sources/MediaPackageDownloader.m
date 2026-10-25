@@ -43,7 +43,9 @@ static NSString *PackageMD5(NSData *data) {
     if(![self validURL:url]){[self finish:nil error:[self error:@"请输入有效的 HTTP/HTTPS 资源文件地址"]];return;}
     self.phase=[url.pathExtension.lowercaseString isEqual:@"md5"]?PackageChecksum:PackageScript;
     if(self.phase==PackageChecksum){NSURLComponents *c=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];c.path=c.path.stringByDeletingPathExtension;self.targetURL=c.URL;}
-    if(![@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"链接须指向 JS、Python、ZIP 或对应的 .md5 校验文件"]];return;}
+    // A short checksum URL may redirect to the conventional index.js.md5 form;
+    // validate the resolved script extension after reading the final checksum.
+    if(self.phase!=PackageChecksum && ![@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"链接须指向 JS、Python、ZIP 或对应的 .md5 校验文件"]];return;}
     NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.ephemeralSessionConfiguration;configuration.URLCache=nil;configuration.HTTPCookieStorage=nil;configuration.timeoutIntervalForRequest=20;configuration.timeoutIntervalForResource=60;
     NSOperationQueue *queue=[NSOperationQueue new];queue.maxConcurrentOperationCount=1;
     self.session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:queue];[self begin:url];
@@ -93,7 +95,7 @@ static NSString *PackageMD5(NSData *data) {
         BOOL config=self.phase==PackageConfigChecksum;NSString *hash=self.responseStatus==404?nil:[self readChecksum];
         if(self.responseStatus!=404&&!hash){[self finish:nil error:[self error:config?@"配套配置 MD5 格式无效":@"资源 MD5 校验文件格式无效"]];return;}
         if(config){self.configChecksum=hash;self.phase=PackageConfig;[self begin:[self configURL:NO]];}
-        else{self.checksum=hash;self.phase=PackageScript;[self begin:self.targetURL];}return;
+        else{self.checksum=hash;if(![@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"MD5 地址最终没有指向受支持的 JS、Python 或 ZIP 文件"]];return;}self.phase=PackageScript;[self begin:self.targetURL];}return;
     }
     if(self.phase==PackageConfig){
         if(self.responseStatus==404){if(self.configChecksum){[self finish:nil error:[self error:@"配置校验文件存在，但对应配置文件缺失，未安装"]];return;}self.configurationState=@"missing_using_defaults";[self install:@{}];return;}

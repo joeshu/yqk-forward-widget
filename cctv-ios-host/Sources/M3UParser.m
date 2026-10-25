@@ -28,11 +28,11 @@ static NSError *M3ULimitError(NSString *message) {
     NSMutableArray<M3UChannel *> *out = [NSMutableArray array];
     if (!text.length) return out;
 
-    NSString *group = nil;
-    NSString *pendingName = nil;
-    NSString *pendingLogo = nil;
-    NSString *pendingEPGID = nil;
-    NSString *pendingTVGName = nil;
+    __block NSString *group = nil;
+    __block NSString *pendingName = nil;
+    __block NSString *pendingLogo = nil;
+    __block NSString *pendingEPGID = nil;
+    __block NSString *pendingTVGName = nil;
     __block NSUInteger lineCount=0;
     __block NSError *limitError=nil;
     [text enumerateLinesUsingBlock:^(NSString *raw, BOOL *stop) {
