@@ -26,6 +26,8 @@ class GlobalThemeContracts(unittest.TestCase):
 
     def test_global_glass_surfaces_and_reduced_motion_are_shared(self):
         theme = (ROOT / "Sources/HostTheme.h").read_text(encoding="utf-8")
+        theme_impl = (ROOT / "Sources/HostTheme.m").read_text(encoding="utf-8")
+        backdrop = (ROOT / "Sources/HostGlassBackdropView.m").read_text(encoding="utf-8")
         app = (ROOT / "Sources/AppDelegate.m").read_text(encoding="utf-8")
         root = (ROOT / "Sources/RootViewController.m").read_text(encoding="utf-8")
         media = (ROOT / "Sources/MediaBrowserViewController.m").read_text(encoding="utf-8")
@@ -37,6 +39,11 @@ class GlobalThemeContracts(unittest.TestCase):
         self.assertIn("UIAccessibilityIsReduceMotionEnabled()", theme)
         self.assertIn("hasDifferentColorAppearanceComparedToTraitCollection", root)
         self.assertIn("HostRefreshAppearanceLayers(self.view.window)", root)
+        self.assertIn("- (void)layoutSubviews", backdrop)
+        self.assertIn("self.baseGradient.frame=bounds", backdrop)
+        self.assertNotIn("CAConstraint", theme)
+        self.assertIn("extern char HostAppearanceRefreshAssociationKey", theme)
+        self.assertIn("char HostAppearanceRefreshAssociationKey", theme_impl)
 
     def test_primary_pages_use_shared_dynamic_palette(self):
         pages = (

@@ -1,10 +1,11 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import "HostGlassBackdropView.h"
 
 static NSString * const HostDarkThemePreferenceKey = @"hostDarkTheme";
 static NSString * const HostThemeModePreferenceKey = @"hostThemeMode";
-static char HostLayerBorderColorAssociationKey;
-static char HostAppearanceRefreshAssociationKey;
+extern char HostLayerBorderColorAssociationKey;
+extern char HostAppearanceRefreshAssociationKey;
 
 static inline NSString *HostThemeMode(void) {
     NSString *mode=[NSUserDefaults.standardUserDefaults stringForKey:HostThemeModePreferenceKey];
@@ -98,52 +99,17 @@ static inline UIColor *HostSuccessSurface(void) {
 static inline UIBlurEffect *HostGlassBlur(void) { return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]; }
 static inline void HostSetLayerBorderColor(UIView *view, UIColor *color);
 
-static inline void HostPinGradientLayer(CAGradientLayer *layer) {
-    NSArray<CAConstraint *> *constraints=@[
-        [CAConstraint constraintWithAttribute:kCAConstraintMinX relativeTo:@"superlayer" attribute:kCAConstraintMinX offset:0],
-        [CAConstraint constraintWithAttribute:kCAConstraintMaxX relativeTo:@"superlayer" attribute:kCAConstraintMaxX offset:0],
-        [CAConstraint constraintWithAttribute:kCAConstraintMinY relativeTo:@"superlayer" attribute:kCAConstraintMinY offset:0],
-        [CAConstraint constraintWithAttribute:kCAConstraintMaxY relativeTo:@"superlayer" attribute:kCAConstraintMaxY offset:0]
-    ];
-    [layer setConstraints:constraints];
-}
-
 static inline void HostInstallGlassBackdrop(UIView *target) {
     if(!target||objc_getAssociatedObject(target,&HostAppearanceRefreshAssociationKey))return;
-    UIView *backdrop=[UIView new];
+    HostGlassBackdropView *backdrop=[HostGlassBackdropView new];
     backdrop.frame=target.bounds;
     backdrop.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     backdrop.userInteractionEnabled=NO;
     backdrop.backgroundColor=HostBackground();
-    backdrop.layer.layoutManager=[CAConstraintLayoutManager layoutManager];
-    CAGradientLayer *base=[CAGradientLayer layer];
-    base.frame=backdrop.bounds;
-    base.startPoint=CGPointMake(0,0);base.endPoint=CGPointMake(1,1);
-    HostPinGradientLayer(base);
-    [backdrop.layer addSublayer:base];
-    CAGradientLayer *rose=[CAGradientLayer layer];
-    rose.type=kCAGradientLayerRadial;rose.frame=backdrop.bounds;
-    rose.startPoint=CGPointMake(.88,.08);rose.endPoint=CGPointMake(.48,.48);
-    rose.locations=@[@0,@1];HostPinGradientLayer(rose);[backdrop.layer addSublayer:rose];
-    CAGradientLayer *blue=[CAGradientLayer layer];
-    blue.type=kCAGradientLayerRadial;blue.frame=backdrop.bounds;
-    blue.startPoint=CGPointMake(.08,.78);blue.endPoint=CGPointMake(.58,.38);
-    blue.locations=@[@0,@1];HostPinGradientLayer(blue);[backdrop.layer addSublayer:blue];
     if([target isKindOfClass:UITableView.class])((UITableView *)target).backgroundView=backdrop;
     else [target insertSubview:backdrop atIndex:0];
-    __weak UIView *weakBackdrop=backdrop;
-    __weak CAGradientLayer *weakBase=base,*weakRose=rose,*weakBlue=blue;
-    void(^refresh)(void)=^{
-        UIView *view=weakBackdrop;if(!view)return;UITraitCollection *traits=view.traitCollection;
-        UIColor *(^resolved)(UIColor *)=^UIColor *(UIColor *value){return [value resolvedColorWithTraitCollection:traits];};
-        weakBase.colors=@[(id)resolved(HostBackground()).CGColor,(id)resolved(HostRaisedSurface()).CGColor];
-        UIColor *roseTint=traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:1 green:.16 blue:.43 alpha:.13]:[UIColor colorWithRed:.93 green:.24 blue:.48 alpha:.16];
-        UIColor *blueTint=traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:.20 green:.43 blue:.92 alpha:.10]:[UIColor colorWithRed:.20 green:.50 blue:.96 alpha:.13];
-        weakRose.colors=@[(id)resolved(roseTint).CGColor,(id)UIColor.clearColor.CGColor];
-        weakBlue.colors=@[(id)resolved(blueTint).CGColor,(id)UIColor.clearColor.CGColor];
-    };
-    objc_setAssociatedObject(target,&HostAppearanceRefreshAssociationKey,[refresh copy],OBJC_ASSOCIATION_COPY_NONATOMIC);
-    refresh();
+    [backdrop refreshAppearance];
+    objc_setAssociatedObject(target,&HostAppearanceRefreshAssociationKey,backdrop,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 static inline void HostStyleGlassCard(UIView *view, CGFloat radius) {
@@ -169,7 +135,7 @@ static inline void HostSetLayerBorderColor(UIView *view, UIColor *color) {
 }
 static inline void HostRefreshAppearanceLayers(UIView *view) {
     if(!view)return;
-    void(^refresh)(void)=objc_getAssociatedObject(view,&HostAppearanceRefreshAssociationKey);if(refresh)refresh();
+    HostGlassBackdropView *backdrop=objc_getAssociatedObject(view,&HostAppearanceRefreshAssociationKey);if(backdrop)[backdrop refreshAppearance];
     UIColor *border=objc_getAssociatedObject(view,&HostLayerBorderColorAssociationKey);
     if(border)view.layer.borderColor=[[border resolvedColorWithTraitCollection:view.traitCollection] CGColor];
     for(UIView *child in view.subviews)HostRefreshAppearanceLayers(child);
