@@ -35,7 +35,7 @@ class NativeProfiles(unittest.TestCase):
                 exe = str(pathlib.Path(tmp) / "native-profiles")
                 command = ["xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-lz", "-I", str(root / "Sources")]
                 command += [str(root / "Tests/native_profile_tests.m")]
-                command += [str(root / "Sources" / f) for f in ("M3UParser.m", "ProfileStore.m", "HostBackup.m", "XMLTVStore.m")]
+                command += [str(root / "Sources" / f) for f in ("M3UParser.m", "ProfileStore.m", "HostBackup.m", "XMLTVStore.m", "TVBoxCatalogStore.m")]
                 command += ["-o", exe]
                 result = subprocess.run(command, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

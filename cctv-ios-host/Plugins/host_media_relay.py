@@ -17,7 +17,7 @@ import uuid
 class ScopedRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, new_url):
         redirected = super().redirect_request(request, response, code, message, headers, new_url)
-        if redirected is not None and urllib.parse.urlsplit(request.full_url).netloc.lower() != urllib.parse.urlsplit(new_url).netloc.lower():
+        if redirected is not None and (urllib.parse.urlsplit(request.full_url).scheme.lower(), urllib.parse.urlsplit(request.full_url).netloc.lower()) != (urllib.parse.urlsplit(new_url).scheme.lower(), urllib.parse.urlsplit(new_url).netloc.lower()):
             for name in list(redirected.headers):
                 if name.lower() in ('authorization', 'cookie'):
                     redirected.remove_header(name)

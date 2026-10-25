@@ -6,6 +6,7 @@ A replacement may run only after all tracked servers, workers and main have quit
 """
 import atexit
 import builtins
+import importlib.util
 import http.server
 import os
 import runpy
@@ -75,8 +76,52 @@ class Session:
         self.saved_environment = None
         self.stop_hook = None
         self.namespace = None
+        self.package_prefix = None
+        self.package_root = None
+        self.plugin_builtins = None
         self.previous_hooks = {}
         self.environment = dict(_base_environment)
+
+    def load_local_module(self, name):
+        qualified = self.package_prefix + '.' + name
+        if qualified in sys.modules:
+            return qualified
+        parent_name = name.rpartition('.')[0]
+        if parent_name and not self.load_local_module(parent_name):
+            parent_dir = os.path.realpath(os.path.join(self.package_root, parent_name.replace('.', os.sep)))
+            if os.path.commonpath([self.package_root, parent_dir]) != self.package_root or not os.path.isdir(parent_dir):
+                return None
+            parent_qualified = self.package_prefix + '.' + parent_name
+            parent = type(sys)(parent_qualified)
+            parent.__path__ = [parent_dir]
+            parent.__package__ = parent_qualified
+            parent.__builtins__ = self.plugin_builtins
+            sys.modules[parent_qualified] = parent
+        relative = name.replace('.', os.sep)
+        source = os.path.realpath(os.path.join(self.package_root, relative + '.py'))
+        init = os.path.realpath(os.path.join(self.package_root, relative, '__init__.py'))
+        if os.path.commonpath([self.package_root, source]) == self.package_root and os.path.isfile(source):
+            selected, is_package = source, False
+        elif os.path.commonpath([self.package_root, init]) == self.package_root and os.path.isfile(init):
+            selected, is_package = init, True
+        else:
+            return None
+        spec = importlib.util.spec_from_file_location(qualified, selected,
+                    submodule_search_locations=[os.path.dirname(selected)] if is_package else None)
+        if not spec or not spec.loader:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        module.__dict__['__builtins__'] = self.plugin_builtins
+        sys.modules[qualified] = module
+        parent = sys.modules.get(qualified.rpartition('.')[0])
+        if parent is not None:
+            setattr(parent, qualified.rpartition('.')[2], module)
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(qualified, None)
+            raise
+        return qualified
 
     def clean(self):
         with _lock:
@@ -278,7 +323,14 @@ def _restore(session):
         for callback in session.exit_callbacks:
             atexit.unregister(callback)
         session.exit_callbacks.clear()
+        if session.package_prefix:
+            for module_name in list(sys.modules):
+                if module_name == session.package_prefix or module_name.startswith(session.package_prefix + '.'):
+                    sys.modules.pop(module_name, None)
         session.namespace = None
+        session.package_prefix = None
+        session.package_root = None
+        session.plugin_builtins = None
         session.threads.clear()
         session.helpers.clear()
         session.servers.clear()
@@ -326,10 +378,33 @@ def run_script(path, identifier='default', data_dir=None, port=None, arguments=N
                 session.environment['CCTVHOST_PORT'] = str(port)
             if arguments is not None:
                 sys.argv = [path] + list(arguments)
-            session.inserted_path = os.path.dirname(path)
+            session.package_root = os.path.realpath(os.path.dirname(path))
+            session.inserted_path = session.package_root
             sys.path.insert(0, session.inserted_path)
+            session.package_prefix = '_cctvhost_service_%x' % id(session)
+            package = type(sys)(session.package_prefix)
+            package.__path__ = [session.package_root]
+            package.__package__ = session.package_prefix
+            sys.modules[session.package_prefix] = package
+            session.plugin_builtins = dict(vars(builtins))
+            original_import = builtins.__import__
+
+            def import_local(name, globals=None, locals=None, fromlist=(), level=0):
+                if level == 0 and isinstance(name, str) and name:
+                    local_name = session.load_local_module(name)
+                    if local_name:
+                        module = sys.modules[local_name]
+                        if fromlist:
+                            for child in fromlist:
+                                if child != '*' and not hasattr(module, child):
+                                    session.load_local_module(name + '.' + child)
+                            return module
+                        return sys.modules[session.package_prefix]
+                return original_import(name, globals, locals, fromlist, level)
+
+            session.plugin_builtins['__import__'] = import_local
             session.script_started = True
-        session.namespace = runpy.run_path(path, run_name='__main__')
+        session.namespace = runpy.run_path(path, run_name='__main__', init_globals={'__builtins__': session.plugin_builtins})
         return session.namespace
     except SystemExit as error:
         # argparse/sys.exit belongs to this service, never the embedding App.

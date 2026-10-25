@@ -26,8 +26,14 @@ class Server(ThreadingHTTPServer):
     def __init__(self, address, runtime):
         self.runtime = runtime
         self.relay = MediaRelay()
+        self.artwork_relay = MediaRelay()
         self.slots = threading.BoundedSemaphore(6)
         super().__init__(address, Handler)
+
+    def server_close(self):
+        self.artwork_relay.close()
+        self.relay.close()
+        super().server_close()
 
     def server_bind(self):
         import socketserver
@@ -139,6 +145,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         path = urllib.parse.urlsplit(self.path).path
+        if path.startswith('/artwork/'):
+            self.server.artwork_relay.serve(self, path.rsplit('/', 1)[-1], True)
+            return
         if path.startswith('/media/'):
             self.server.relay.serve(self, path.rsplit('/', 1)[-1], True)
             return
@@ -205,10 +214,25 @@ class Handler(BaseHTTPRequestHandler):
         if method != 'HEAD':
             self.wfile.write(body)
 
+    def relay_artwork(self, result):
+        if not isinstance(result, dict):
+            return result
+        result = dict(result)
+        headers = result.pop('posterHeaders', None)
+        if headers and result.get('poster'):
+            token = self.server.artwork_relay.register(result['poster'], headers)
+            result['poster'] = f'http://127.0.0.1:{self.server.server_port}/artwork/{token}'
+        if isinstance(result.get('items'), list):
+            result['items'] = [self.relay_artwork(item) for item in result['items']]
+        return result
+
     def route(self, post):
         runtime = self.server.runtime
         try:
             parts = urllib.parse.urlsplit(self.path)
+            if parts.path.startswith('/artwork/'):
+                self.server.artwork_relay.serve(self, parts.path.rsplit('/', 1)[-1])
+                return
             if parts.path.startswith('/media/'):
                 self.server.relay.serve(self, parts.path.rsplit('/', 1)[-1])
                 return
@@ -271,8 +295,10 @@ class Handler(BaseHTTPRequestHandler):
             if not parts.path.startswith('/api/v1/'):
                 raise MediaError('NOT_FOUND', '没有此接口')
             operation = parts.path.rsplit('/', 1)[-1]
-            if operation not in ('capabilities', 'home', 'category', 'search', 'detail', 'play', 'providers', 'catalog', 'resolve', 'epg'):
+            if operation not in ('capabilities', 'home', 'category', 'search', 'detail', 'play', 'providers', 'catalog', 'resolve', 'epg', 'configuration', 'invalidate'):
                 raise MediaError('NOT_FOUND', '没有此接口')
+            if operation == 'invalidate' and not post:
+                raise MediaError('NOT_FOUND', '刷新配置缓存需要 POST 请求')
             args = {key: values[-1] for key, values in urllib.parse.parse_qs(parts.query).items()}
             if post:
                 length = int(self.headers.get('Content-Length', '0'))
@@ -285,6 +311,8 @@ class Handler(BaseHTTPRequestHandler):
                 args['filters'] = json.loads(args['filters'])
             args.setdefault('host', f'127.0.0.1:{self.server.server_port}')
             result = runtime.call(operation, args)
+            if operation in ('home', 'category', 'search', 'detail'):
+                result = self.relay_artwork(result)
             if operation == 'play' and result.get('headers') and (not result.get('parse') or is_direct_media_url(result.get('url'))):
                 token = self.server.relay.register(result['url'], result['headers'])
                 result = dict(result, originalURL=result['url'],

@@ -158,7 +158,8 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     // The bundled CatPaw local package is an ESM Fastify application that
     // publishes its app as globalThis.Pans for the caller to listen on.
     BOOL catpawAppBundle=catpawRouter && [text rangeOfString:@"globalThis\\s*\\.\\s*Pans\\s*=\\s*await" options:NSRegularExpressionSearch].location!=NSNotFound;
-    BOOL catpawOpen=(catpawEntry||catpawAppBundle)&&catpawRouter;
+    BOOL catpawNativeHooks=[text containsString:@"catServerFactory"] && [text containsString:@"catDartServerPort"] && [text containsString:@"module.exports"];
+    BOOL catpawOpen=(catpawEntry||catpawAppBundle||catpawNativeHooks)&&catpawRouter;
     BOOL widgetExtractor=[text containsString:@"WidgetMetadata"] && [text containsString:@"Widget.http"] && [text rangeOfString:@"(?:async\\s+)?function\\s+loadResource\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catVodMethods=[text rangeOfString:@"(?:(?:async\\s+)?(?:home|homeContent)\\s*\\(|\\b(?:home|homeContent)\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?category\\s*\\(|\\bcategory\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?detail\\s*\\(|\\bdetail\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?play\\s*\\(|\\bplay\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catVodQuickJS=catVodMethods && ([text containsString:@"export default"] || [text containsString:@"module.exports"]);
@@ -207,6 +208,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     return clean;
 }
 + (NSDictionary *)importFile:(NSURL *)file error:(NSError **)error {
+    return [self importFile:file companionFiles:@{} error:error];
+}
++ (NSDictionary *)importFile:(NSURL *)file companionFiles:(NSDictionary<NSString *,NSData *> *)files error:(NSError **)error {
     NSData *bytes=ReadBounded(file,PackageArchiveLimit,error);if(!bytes)return nil;
     NSString *identifier=NSUUID.UUID.UUIDString,*stage=[[ServiceStore directory] stringByAppendingPathComponent:[@".import-" stringByAppendingString:identifier]];
     NSString *package=[stage stringByAppendingPathComponent:@"package"];NSFileManager *fm=NSFileManager.defaultManager;
@@ -218,6 +222,12 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             NSString *name=file.lastPathComponent;
             if(![@[@"js",@"mjs",@"cjs",@"py"] containsObject:file.pathExtension.lowercaseString] || !SafeRelative(name) || bytes.length>PackageFileLimit){PackageError(error,@"请选择 JS、Python 或 ZIP 资源文件");return nil;}
             if(![bytes writeToFile:[package stringByAppendingPathComponent:name] options:NSDataWritingAtomic error:error])return nil;
+        }
+        if(files.count>8){PackageError(error,@"配套配置文件过多");return nil;}
+        for(NSString *name in files){
+            NSData *data=files[name];
+            if(![name isEqual:@"index.config.js"] || ![data isKindOfClass:NSData.class] || !data.length || data.length>65536 || [fm fileExistsAtPath:[package stringByAppendingPathComponent:name]]){PackageError(error,@"配套配置文件无效或与包内文件冲突");return nil;}
+            if(![data writeToFile:[package stringByAppendingPathComponent:name] options:NSDataWritingAtomic error:error])return nil;
         }
         NSMutableDictionary *manifest=[[self inspectDirectory:package error:error] mutableCopy];if(!manifest)return nil;
         NSString *launchArguments=@"";

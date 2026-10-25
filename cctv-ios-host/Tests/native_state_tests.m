@@ -1,6 +1,9 @@
 #import "HostBackup.h"
 #import "ServiceStore.h"
 #import "HostLogBuffer.h"
+#import "MediaMetadataCache.h"
+#import "MediaPlaybackStateStore.h"
+#import "MediaSourceHealthStore.h"
 #import <dispatch/dispatch.h>
 #import <Foundation/Foundation.h>
 static void check(BOOL ok, NSString *message) {
@@ -60,6 +63,43 @@ int main(void) {
         check(![NSUserDefaults.standardUserDefaults boolForKey:@"autoLoadEPG"], @"false preference restored");
         check([HostBackup validatedBackup:encode([HostBackup snapshot]) error:NULL] != nil,
               @"export round-trip");
+        MediaMetadataCache *metadata=[MediaMetadataCache shared];[metadata clear];
+        NSDictionary *mediaSource=@{@"id":@"source-a",@"port":@18781,@"protocol":@"python-spider",@"packageRoot":@"/package/a"};
+        NSDictionary *searchArgs=@{@"keyword":@"news",@"page":@1,@"provider":@"site-a"};
+        NSDictionary *searchResult=@{@"items":@[@{@"id":@"title-1",@"name":@"News"}],@"hasMore":@NO};
+        [metadata storeResult:searchResult forSource:mediaSource operation:@"search" arguments:searchArgs];
+        BOOL stale=YES;
+        check([[metadata resultForSource:mediaSource operation:@"search" arguments:searchArgs maximumAge:3600 isStale:&stale][@"items"] count]==1&&!stale,@"fresh metadata cache returns an exact source and query match");
+        check([metadata resultForSource:mediaSource operation:@"search" arguments:@{@"keyword":@"other",@"page":@1,@"provider":@"site-a"} maximumAge:3600 isStale:NULL]==nil,@"metadata cache isolates different search arguments");
+        NSMutableDictionary *otherSource=[mediaSource mutableCopy];otherSource[@"id"]=@"source-b";
+        check([metadata resultForSource:otherSource operation:@"search" arguments:searchArgs maximumAge:3600 isStale:NULL]==nil,@"metadata cache isolates different plugin sources");
+        [metadata storeResult:@{@"url":@"https://media.example/video.m3u8"} forSource:mediaSource operation:@"play" arguments:searchArgs];
+        check([metadata resultForSource:mediaSource operation:@"play" arguments:searchArgs maximumAge:3600 isStale:NULL]==nil,@"resolved playback URLs are never cached");
+        NSDictionary *detailWithSignedEpisode=@{@"lines":@[@{@"episodes":@[@{@"id":@"https://cdn.example/video.m3u8?token=secret"}]}]};
+        NSDictionary *detailArguments=@{@"id":@"film-1"};
+        [metadata storeResult:detailWithSignedEpisode forSource:mediaSource operation:@"detail" arguments:detailArguments];
+        check([metadata resultForSource:mediaSource operation:@"detail" arguments:detailArguments maximumAge:3600 isStale:NULL]==nil,@"episode identifiers that may contain signed URLs are never cached");
+        [metadata storeResult:@{@"value":[@"x" stringByPaddingToLength:1024*1024+1 withString:@"x" startingAtIndex:0]} forSource:mediaSource operation:@"detail" arguments:@{@"id":@"large"}];
+        check([metadata resultForSource:mediaSource operation:@"detail" arguments:@{@"id":@"large"} maximumAge:3600 isStale:NULL]==nil,@"oversized metadata entries are rejected");
+        [metadata removeResultsForSourceID:@"source-a"];
+        check([metadata resultForSource:mediaSource operation:@"search" arguments:searchArgs maximumAge:3600 isStale:NULL]==nil,@"source cache invalidation removes its metadata");
+        [metadata clear];
+        [MediaPlaybackStateStore clearWatchHistory];
+        NSDictionary *historyContext=@{@"source":@{@"id":@"history-source",@"name":@"Fixture source"},@"provider":@"site-a",@"item":@{@"id":@"film-1",@"name":@"Fixture film"},@"detail":@{@"name":@"Fixture film",@"lines":@[@{@"id":@"line-a",@"episodes":@[@{@"id":@"episode-1",@"name":@"第1集"},@{@"id":@"episode-2",@"name":@"第2集"}]}]}};
+        [MediaPlaybackStateStore recordContext:historyContext lineIndex:0 episodeIndex:0 position:45 duration:120 completed:NO];
+        [MediaPlaybackStateStore recordContext:historyContext lineIndex:0 episodeIndex:1 position:0 duration:120 completed:NO];
+        check([MediaPlaybackStateStore.watchHistory count]==2,@"watch history stores distinct episodes");
+        NSString *removedHistoryKey=MediaPlaybackStateStore.watchHistory.firstObject[@"key"];
+        [MediaPlaybackStateStore removeHistoryEntryWithKey:removedHistoryKey];
+        check([MediaPlaybackStateStore.watchHistory count]==1&&![[MediaPlaybackStateStore.watchHistory.firstObject objectForKey:@"key"] isEqual:removedHistoryKey],@"single history removal preserves other entries");
+        [MediaPlaybackStateStore clearWatchHistory];
+        check(MediaPlaybackStateStore.watchHistory.count==0,@"clear watch history removes all entries");
+        MediaSourceHealthStore *health=MediaSourceHealthStore.shared;NSString *healthID=@"health-fixture";
+        [health recordSourceID:healthID success:NO elapsed:1.0];check([health isDeprioritizedSourceID:healthID],@"failed source receives bounded retry cooldown");
+        [health recordSourceID:healthID success:YES elapsed:0.2];check(![health isDeprioritizedSourceID:healthID],@"successful source clears its retry cooldown");
+        [NSUserDefaults.standardUserDefaults setObject:@{@"expired-fixture":@{@"updated":@(NSDate.date.timeIntervalSince1970-8*24*60*60),@"cooldownUntil":@(NSDate.date.timeIntervalSince1970+300)}} forKey:@"cctv.mediaSourceHealth.v1"];
+        check(![health isDeprioritizedSourceID:@"expired-fixture"],@"expired source health state no longer affects scheduling");
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"cctv.mediaSourceHealth.v1"];
         NSString *sid = NSUUID.UUID.UUIDString;
         NSDictionary *service = @{@"id" : sid, @"name" : @"Test service", @"port" : @18768};
         [ServiceStore save:service];

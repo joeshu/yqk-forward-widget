@@ -41,7 +41,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         base = f'http://127.0.0.1:{self.server.server_port}'
         card = lambda value: {'id': value, 'name': '测试电影 ' + value, 'poster': base + '/poster.png', 'remarks': 'HD'}
         if operation == 'capabilities':
-            data = {'capabilities': ['home', 'category', 'search', 'detail', 'play', 'providers']}
+            data = {'capabilities': ['home', 'category', 'search', 'detail', 'play', 'providers', 'configuration']}
+        elif operation == 'invalidate':
+            data={'invalidated':True}
+        elif operation == 'configuration':
+            data={'url':base+'/source-config','configurationPage':True,'headers':{'Cookie':'web_token=fixture-ui'}}
         elif operation == 'providers':
             data = [{'id': 'primary', 'name': '主平台'}, {'id': 'secondary', 'name': '备用平台'}]
         elif operation == 'home':
@@ -55,7 +59,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             identifier = str(args.get('id', ''))
             if identifier == 'slow-episode':
                 time.sleep(3.0)
-            data = {'url': base + '/video.mp4?play=' + ('slow' if identifier == 'slow-episode' else 'fast' if identifier == 'fast-episode' else 'initial'), 'headers': {'Referer': 'https://fixture.test/watch', 'X-Fixture-Playback': 'required'}, 'parse': 0}
+            play_url = base + '/video.mp4?play=' + ('slow' if identifier == 'slow-episode' else 'fast' if identifier == 'fast-episode' else 'initial')
+            data = {'url': play_url, 'alternates': [{'name': '当前清晰度', 'url': play_url}, {'name': '流畅', 'url': base + '/video.mp4?quality=low'}], 'headers': {'Referer': 'https://fixture.test/watch', 'X-Fixture-Playback': 'required'}, 'parse': 0}
         else:
             self.send_error(404)
             return
@@ -73,7 +78,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         print("GET", self.path, flush=True)
         status = 200
         content_type = "application/json"
-        if self.path == '/image-stats':
+        if self.path == '/source-config':
+            content_type='text/html; charset=utf-8'
+            data=b'<html><head><title>Source configuration fixture</title></head><body>Account settings</body></html>'
+        elif self.path == '/image-stats':
             with type(self).segment_lock:
                 data = json.dumps(type(self).image_counts).encode()
         elif self.path.endswith('.png'):
@@ -111,7 +119,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 time.sleep(8)
                 print("HLS segment delay complete", flush=True)
         elif self.path.split("?", 1)[0] == "/video.mp4":
-            if "play=" in self.path and (self.headers.get("Referer") != "https://fixture.test/watch" or self.headers.get("X-Fixture-Playback") != "required"):
+            if "?" in self.path and (self.headers.get("Referer") != "https://fixture.test/watch" or self.headers.get("X-Fixture-Playback") != "required"):
                 self.send_response(403)
                 self.send_header("Content-Length", "0")
                 self.end_headers()

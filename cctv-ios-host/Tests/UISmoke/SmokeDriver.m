@@ -14,6 +14,8 @@
 #import "NodePluginRuntime.h"
 #import "MediaBrowserViewController.h"
 #import "MediaPlaybackViewController.h"
+#import "MediaWebViewController.h"
+#import <WebKit/WebKit.h>
 #import "MediaEpisodeSelectionViewController.h"
 #import "TVBoxCatalogStore.h"
 #import "TVBoxCatalogViewController.h"
@@ -59,10 +61,14 @@
 @interface MediaPlaybackViewController (SmokeEpisodePicker)
 - (void)openEpisodeSelection;
 @end
+@interface MediaWebViewController (SmokeConfiguration)
+- (void)close;
+@end
 @interface MediaBrowserViewController (Smoke)
 - (void)loadMore;
 - (void)chooseResource;
 - (void)chooseProvider;
+- (void)openSourceConfiguration;
 - (void)updateSearchResultsForSearchController:(UISearchController *)controller;
 @end
 @interface EPGViewController (Smoke)
@@ -162,7 +168,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSDictionary *imageStats;
       __block NSDictionary *nodeChecks;
       __block MediaBrowserViewController *mediaPage;
-      __block UITableViewController *mediaDetail;
+      __block UIViewController *mediaDetail;
       __block MediaEpisodeSelectionViewController *mediaEpisodes;
       __block MediaPlaybackViewController *mediaPlayback;
       __block NSDate *stalePlaybackDeadline;
@@ -592,18 +598,23 @@ static void next(NSArray *steps, NSUInteger index) {
             UIScrollView *categories=[mediaPage valueForKey:@"categoryScroll"];check(CGRectGetMinY(categories.frame)>CGRectGetMaxY(selectionRow.frame),@"film categories appear below the two-level resource selectors");capture(self.window,@"16-media-home");
             [sourceSelector sendActionsForControlEvents:UIControlEventTouchUpInside];
           }},
-          @{ @"until":^BOOL{return root.presentedViewController!=nil;},@"run":^{
+          @{@"until":^BOOL{return root.presentedViewController!=nil;},@"run":^{
             UINavigationController *sheet=(id)root.presentedViewController;UITableViewController *picker=(id)sheet.topViewController;UITableViewCell *current=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             UIStackView *scopeStack=[picker valueForKey:@"scopeStack"];check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"resource selection uses a native bottom sheet");check([picker.tableView numberOfRowsInSection:0]==1&&current.accessoryType==UITableViewCellAccessoryCheckmark,@"resource sheet shows its current selection");check(scopeStack.arrangedSubviews.count==2,@"resource sheet groups resources by runtime and keeps all resources visible");capture(self.window,@"16b-media-resource-sheet");
             [picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
           }},
-          @{ @"until":^BOOL{return root.presentedViewController==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];[providerSelector sendActionsForControlEvents:UIControlEventTouchUpInside];}},
-          @{ @"until":^BOOL{return root.presentedViewController!=nil;},@"run":^{
+          @{@"until":^BOOL{return root.presentedViewController==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];[providerSelector sendActionsForControlEvents:UIControlEventTouchUpInside];}},
+          @{@"until":^BOOL{return root.presentedViewController!=nil;},@"run":^{
             UINavigationController *sheet=(id)root.presentedViewController;UITableViewController *picker=(id)sheet.topViewController;NSIndexPath *current=nil;for(NSInteger row=0;row<[picker.tableView numberOfRowsInSection:0];row++){UITableViewCell *cell=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];if(cell.accessoryType==UITableViewCellAccessoryCheckmark){current=[NSIndexPath indexPathForRow:row inSection:0];break;}}
             check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"platform selection uses a separate bottom sheet");check([picker.tableView numberOfRowsInSection:0]==2&&current!=nil,@"platform sheet lists choices and marks the current platform");capture(self.window,@"16c-media-platform-sheet");
             NSInteger nextRow=current.row==0?1:0;[picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:nextRow inSection:0]];
           }},
-          @{ @"until":^BOOL{return root.presentedViewController==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{
+          @{@"until":^BOOL{return root.presentedViewController==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{[mediaPage openSourceConfiguration];}},
+          @{@"until":^BOOL{UINavigationController *sheet=(id)root.presentedViewController;return [sheet isKindOfClass:UINavigationController.class]&&[sheet.topViewController isKindOfClass:MediaWebViewController.class]&&[[sheet.topViewController valueForKey:@"web"] URL]!=nil;},@"run":^{
+            UINavigationController *sheet=(id)root.presentedViewController;MediaWebViewController *page=(id)sheet.topViewController;WKWebView *web=[page valueForKey:@"web"];
+            check([web.URL.path isEqual:@"/source-config"],@"source configuration opens the real local service page");check(!web.configuration.websiteDataStore.persistent,@"source configuration uses an isolated ephemeral cookie store");check(sheet.modalInPresentation,@"configuration has an explicit close-and-refresh action");capture(self.window,@"16d-media-source-configuration");[page close];
+          }},
+          @{@"until":^BOOL{return root.presentedViewController==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{
             UISearchController *search=[mediaPage valueForKey:@"search"];search.searchBar.text=@"中文";[mediaPage updateSearchResultsForSearchController:search];
           }},
           @{@"until":^BOOL{return [[[mediaPage valueForKey:@"items"] firstObject][@"id"] isEqual:@"中文1"];},@"run":^{
@@ -613,27 +624,29 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[mediaPage valueForKey:@"items"] count]==2,@"media pagination appends without losing previous page");capture(self.window,@"17-media-search");
             UICollectionView *grid=[mediaPage valueForKey:@"grid"];[grid.delegate collectionView:grid didSelectItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];mediaDetail=(id)nav.topViewController;
           }},
-          @{@"until":^BOOL{return [mediaDetail.tableView numberOfSections]==2;},@"run":^{
-            check([mediaDetail.tableView numberOfSections]==2,@"media detail separates synopsis from episode selection");capture(self.window,@"18-media-detail");
-            [mediaDetail.tableView.delegate tableView:mediaDetail.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
-            mediaEpisodes=(id)nav.topViewController;
+          @{@"until":^BOOL{return mediaDetail&&[[mediaDetail valueForKey:@"episodeButtons"] count]==3;},@"run":^{
+            UIStackView *routes=[mediaDetail valueForKey:@"routeButtons"];UIStackView *episodeGrid=[mediaDetail valueForKey:@"episodeGrid"];NSArray *episodeButtons=[mediaDetail valueForKey:@"episodeButtons"];
+            check(routes.arrangedSubviews.count==2,@"film detail exposes each real playback route as a chip");check(episodeGrid.arrangedSubviews.count==4&&episodeButtons.count==3,@"film detail renders episodes in a paged three-column grid");
+            check([mediaDetail valueForKey:@"titleLabel"] && [mediaDetail valueForKey:@"playButton"] && [mediaDetail valueForKey:@"favoriteButton"],@"film detail shows metadata and direct play/favorite actions");capture(self.window,@"18-media-detail");
+            UIButton *favorite=[mediaDetail valueForKey:@"favoriteButton"];[favorite sendActionsForControlEvents:UIControlEventTouchUpInside];check([favorite.currentTitle containsString:@"已收藏"],@"film favorite is persisted under its source and provider identity");[favorite sendActionsForControlEvents:UIControlEventTouchUpInside];
+            [(UIButton *)episodeButtons[0] sendActionsForControlEvents:UIControlEventTouchUpInside];
           }},
-          @{@"until":^BOOL{return mediaEpisodes&&[mediaEpisodes.tableView numberOfSections]==2;},@"run":^{
-            check([mediaEpisodes.tableView numberOfSections]==2,@"episode page groups episodes by playback line");capture(self.window,@"18-media-episodes");
-            [mediaEpisodes.tableView.delegate tableView:mediaEpisodes.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+          @{@"until":^BOOL{return mediaEpisodes&&[[mediaEpisodes valueForKey:@"episodeButtons"] count]==3;},@"run":^{
+            UIStackView *routes=[mediaEpisodes valueForKey:@"routeButtons"];NSArray *episodeButtons=[mediaEpisodes valueForKey:@"episodeButtons"];
+            check(routes.arrangedSubviews.count==2&&episodeButtons.count==3,@"playback episode picker reuses route chips and the three-column episode grid");capture(self.window,@"18-media-episodes");
+            [(UIButton *)episodeButtons[1] sendActionsForControlEvents:UIControlEventTouchUpInside];check(mediaEpisodes.selectedEpisodeIndex==1,@"slow episode selection starts without blocking the picker");
+            episodeButtons=[mediaEpisodes valueForKey:@"episodeButtons"];[(UIButton *)episodeButtons[2] sendActionsForControlEvents:UIControlEventTouchUpInside];check(mediaEpisodes.selectedEpisodeIndex==2,@"episode selection stays responsive while parsing");stalePlaybackDeadline=[NSDate dateWithTimeIntervalSinceNow:4.0];
           }},
-          @{ @"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];return mediaPlayback&&player.currentItem.status==AVPlayerItemStatusReadyToPlay;},@"run":^{
-            AVPlayer *player=[mediaPlayback valueForKey:@"player"];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"selected plugin episode reaches AVPlayer ready state on the new playback page");check(nav.topViewController==mediaPlayback,@"plugin playback opens the dedicated playback screen");capture(self.window,@"19-media-playback");
+          @{@"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];return mediaPlayback&&player.currentItem.status==AVPlayerItemStatusReadyToPlay;},@"run":^{
+            AVPlayer *player=[mediaPlayback valueForKey:@"player"];NSArray *qualityButtons=[mediaPlayback valueForKey:@"qualityButtons"];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"selected plugin episode reaches AVPlayer ready state on the new playback page");check(nav.topViewController==mediaPlayback,@"plugin playback opens the dedicated playback screen");check(qualityButtons.count==2,@"playback page exposes the source's actual alternate quality choices");capture(self.window,@"19-media-playback");[(UIButton *)qualityButtons[1] sendActionsForControlEvents:UIControlEventTouchUpInside];
           }},
           @{ @"timeout":@12,@"until":^BOOL{UILabel *status=[mediaPlayback valueForKey:@"status"];return [status.text containsString:@"视频首帧已就绪"];},@"run":^{
-            UILabel *status=[mediaPlayback valueForKey:@"status"];check([status.text containsString:@"视频首帧已就绪"],@"AVPlayerLayer displays a header-protected frame from the selected film resource");
+            UILabel *status=[mediaPlayback valueForKey:@"status"];AVPlayer *qualityPlayer=[mediaPlayback valueForKey:@"player"];AVURLAsset *qualityAsset=(AVURLAsset *)qualityPlayer.currentItem.asset;check([status.text containsString:@"视频首帧已就绪"],@"AVPlayerLayer displays a header-protected frame from the selected film resource");check([qualityAsset.URL.absoluteString containsString:@"quality=low"],@"choosing a quality option replaces the active AVPlayer item with that stream");
             [mediaPlayback openEpisodeSelection];mediaEpisodes=(id)nav.topViewController;
             check(mediaEpisodes.selectionUpdatesPlayer,@"player opens the shared episode selector without leaving playback context");
-            [mediaEpisodes.tableView.delegate tableView:mediaEpisodes.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]];
-            check(mediaEpisodes.selectedEpisodeIndex==1,@"slow episode request starts without blocking the selector");
-            [mediaEpisodes.tableView.delegate tableView:mediaEpisodes.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:0]];
-            check(mediaEpisodes.selectedEpisodeIndex==2,@"episode selection stays responsive while parsing");
-            stalePlaybackDeadline=[NSDate dateWithTimeIntervalSinceNow:4.0];
+            NSArray *episodeButtons=[mediaEpisodes valueForKey:@"episodeButtons"];[(UIButton *)episodeButtons[1] sendActionsForControlEvents:UIControlEventTouchUpInside];
+            check(mediaEpisodes.selectedEpisodeIndex==1,@"slow episode request starts without blocking the selector");episodeButtons=[mediaEpisodes valueForKey:@"episodeButtons"];[(UIButton *)episodeButtons[2] sendActionsForControlEvents:UIControlEventTouchUpInside];
+            check(mediaEpisodes.selectedEpisodeIndex==2,@"episode selection stays responsive while parsing");stalePlaybackDeadline=[NSDate dateWithTimeIntervalSinceNow:4.0];
           }},
           @{ @"timeout":@12,@"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;return player.currentItem.status==AVPlayerItemStatusReadyToPlay&&[asset.URL.absoluteString containsString:@"play=fast"]&&[stalePlaybackDeadline timeIntervalSinceNow]<=0;},@"run":^{
             AVPlayer *player=[mediaPlayback valueForKey:@"player"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;check([asset.URL.absoluteString containsString:@"play=fast"],@"late slow parse cannot replace the latest selected episode");capture(self.window,@"20-media-fast-switch");[nav popToViewController:mediaPage animated:NO];
@@ -654,7 +667,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [root selectBottomTab:(id)tabs.arrangedSubviews[4]];
             [root.view layoutIfNeeded];
           },
-          @{ @"until":^BOOL{
+          @{@"until":^BOOL{
                 SettingsViewController *settings=(id)[root valueForKey:@"tabPage"];
                 return nav.topViewController==root&&settings&&settings.view.window==self.window;
               }, @"run":^{

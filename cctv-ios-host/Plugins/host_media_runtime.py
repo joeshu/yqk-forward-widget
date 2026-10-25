@@ -5,6 +5,7 @@ by executing a plugin during import/inspection of an archive.
 """
 import builtins
 import collections
+import importlib
 import importlib.util
 import inspect
 import json
@@ -53,7 +54,8 @@ def cards(value):
             continue
         result.append({'id': str(identifier), 'name': str(name),
                        'poster': str(row.get('poster', row.get('vod_pic', '')) or ''),
-                       'remarks': str(row.get('remarks', row.get('vod_remarks', '')) or '')})
+                       'remarks': str(row.get('remarks', row.get('vod_remarks', '')) or ''),
+                       **({'posterHeaders': media_headers(row['posterHeaders'])} if isinstance(row.get('posterHeaders'), dict) else {})})
     return result
 
 
@@ -90,6 +92,8 @@ def home(value):
 def detail(value, identifier):
     value = decoded(value)
     raw = rows(value)
+    if isinstance(value, dict) and ('list' in value or 'items' in value) and not raw:
+        raise MediaError('NO_DETAIL', '此站点没有返回影片详情，请重试或更换站点')
     item = raw[0] if raw else value
     if not isinstance(item, dict):
         raise MediaError('NO_DETAIL', '来源未返回影片详情')
@@ -117,12 +121,25 @@ def detail(value, identifier):
                 lines.append({'id': flag, 'name': flag or f'线路 {line_index + 1}', 'episodes': episodes})
     elif isinstance(item.get('episodes'), list):
         lines = [{'id': '', 'name': '播放', 'episodes': item['episodes']}]
-    return {'id': str(item.get('id', item.get('vod_id', identifier))),
-            'name': str(item.get('name', item.get('vod_name', identifier))),
-            'poster': str(item.get('poster', item.get('vod_pic', '')) or ''),
-            'description': str(item.get('description', item.get('vod_content', '')) or ''),
-            'actor': str(item.get('actor', item.get('vod_actor', '')) or ''),
-            'year': str(item.get('year', item.get('vod_year', '')) or ''), 'lines': lines}
+    result = {'id': str(item.get('id', item.get('vod_id', identifier))),
+              'name': str(item.get('name', item.get('vod_name', identifier))),
+              'poster': str(item.get('poster', item.get('vod_pic', '')) or ''),
+              'description': str(item.get('description', item.get('vod_content', '')) or ''),
+              'actor': str(item.get('actor', item.get('vod_actor', '')) or ''),
+              'year': str(item.get('year', item.get('vod_year', '')) or ''), 'lines': lines}
+    if isinstance(item.get('posterHeaders'), dict):
+        result['posterHeaders'] = media_headers(item['posterHeaders'])
+    # Preserve optional provider metadata when present so the native detail page
+    # can show accurate credits and classification without inventing values.
+    for key, aliases in {
+        'area': ('area', 'vod_area'), 'lang': ('lang', 'vod_lang'),
+        'type': ('type', 'vod_class'), 'director': ('director', 'vod_director'),
+        'remarks': ('remarks', 'vod_remarks'), 'banner': ('banner', 'backdrop'),
+    }.items():
+        value = next((item[name] for name in aliases if item.get(name)), None)
+        if value is not None:
+            result[key] = str(value)[:4096]
+    return result
 
 
 def valid_media_url(value):
@@ -176,6 +193,10 @@ def playback(value):
         parse = 1 if int(value.get('parse') or 0) > 0 else 0
     except (ValueError, TypeError):
         parse = 1 if value.get('parse') is True else 0
+    try:
+        jx = 1 if int(value.get('jx') or 0) > 0 else 0
+    except (ValueError, TypeError):
+        jx = 1 if value.get('jx') is True else 0
     headers = value.get('headers', value.get('header', {})) or {}
     url = value.get('url')
     alternates = value.get('alternates', [])
@@ -207,7 +228,8 @@ def playback(value):
             candidate = item.get('url', item.get('value', item.get('v', '')))
             if valid_media_url(candidate):
                 safe_alternates.append({'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}')[:128], 'url': candidate})
-    return {'url': url, 'headers': media_headers(headers), 'alternates': safe_alternates, 'parse': parse}
+    return {'url': url, 'headers': media_headers(headers), 'alternates': safe_alternates,
+            'parse': parse, 'jx': jx, 'playUrl': value.get('playUrl', '') if isinstance(value.get('playUrl', ''), str) else ''}
 
 
 class PythonSpider:
@@ -219,18 +241,56 @@ class PythonSpider:
         self.added_path = self.root not in sys.path
         if self.added_path:
             sys.path.insert(0, self.root)
-        self.preexisting_modules = set(sys.modules)
         self.namespace = '_cctvhost_spider_' + uuid.uuid4().hex
         namespace = types.ModuleType(self.namespace)
         namespace.__path__ = [self.root]
         sys.modules[self.namespace] = namespace
+        self._plugin_builtins = dict(vars(builtins))
+        original_import = builtins.__import__
+
+        def import_local(name, globals=None, locals=None, fromlist=(), level=0):
+            if level == 0 and isinstance(name, str) and name:
+                local_name = self._load_local_module(name)
+                if local_name:
+                    module = sys.modules[local_name]
+                    if fromlist:
+                        for child in fromlist:
+                            if child == '*' or hasattr(module, child):
+                                continue
+                            self._load_local_module(name + '.' + child)
+                        return module
+                    return sys.modules[self.namespace]
+            return original_import(name, globals, locals, fromlist, level)
+
+        self._plugin_builtins['__import__'] = import_local
         relative = os.path.relpath(path, self.root)[:-3].replace(os.sep, '.')
+        parent_relative = relative.rpartition('.')[0]
+        if parent_relative:
+            parent_parts = parent_relative.split('.')
+            for index in range(1, len(parent_parts) + 1):
+                package_name = '.'.join(parent_parts[:index])
+                qualified_package = self.namespace + '.' + package_name
+                if qualified_package in sys.modules:
+                    continue
+                self._load_local_module(package_name)
+                if qualified_package not in sys.modules:
+                    package_path = os.path.realpath(os.path.join(self.root, package_name.replace('.', os.sep)))
+                    if os.path.commonpath([self.root, package_path]) == self.root and os.path.isdir(package_path):
+                        package = types.ModuleType(qualified_package)
+                        package.__path__ = [package_path]
+                        package.__package__ = qualified_package
+                        package.__builtins__ = self._plugin_builtins
+                        sys.modules[qualified_package] = package
+                        parent = sys.modules.get(qualified_package.rpartition('.')[0])
+                        if parent:
+                            setattr(parent, package_name.rpartition('.')[2], package)
         name = self.namespace + '.' + relative
         spec = importlib.util.spec_from_file_location(name, path)
         if not spec or not spec.loader:
             raise MediaError('INVALID_ENTRY', '无法加载 Python Spider')
         self.module_name = name
         module = importlib.util.module_from_spec(spec)
+        module.__dict__['__builtins__'] = self._plugin_builtins
         sys.modules[name] = module
         try:
             spec.loader.exec_module(module)
@@ -248,13 +308,53 @@ class PythonSpider:
                 sys.path.remove(self.root)
             raise
 
+    def _load_local_module(self, name):
+        qualified = self.namespace + '.' + name
+        if qualified in sys.modules:
+            return qualified
+        parent_name, _, child_name = name.rpartition('.')
+        if parent_name and not self._load_local_module(parent_name):
+            parent_dir = os.path.realpath(os.path.join(self.root, parent_name.replace('.', os.sep)))
+            if os.path.commonpath([self.root, parent_dir]) != self.root or not os.path.isdir(parent_dir):
+                return None
+            parent_qualified = self.namespace + '.' + parent_name
+            parent_module = types.ModuleType(parent_qualified)
+            parent_module.__path__ = [parent_dir]
+            parent_module.__package__ = parent_qualified
+            parent_module.__builtins__ = self._plugin_builtins
+            sys.modules[parent_qualified] = parent_module
+        relative = name.replace('.', os.sep)
+        module_path = os.path.realpath(os.path.join(self.root, relative + '.py'))
+        package_path = os.path.realpath(os.path.join(self.root, relative, '__init__.py'))
+        is_package = False
+        if os.path.commonpath([self.root, module_path]) == self.root and os.path.isfile(module_path):
+            selected_path = module_path
+        elif os.path.commonpath([self.root, package_path]) == self.root and os.path.isfile(package_path):
+            selected_path = package_path
+            is_package = True
+        else:
+            return None
+        spec = importlib.util.spec_from_file_location(qualified, selected_path,
+                    submodule_search_locations=[os.path.dirname(selected_path)] if is_package else None)
+        if not spec or not spec.loader:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        module.__dict__['__builtins__'] = self._plugin_builtins
+        sys.modules[qualified] = module
+        qualified_parent, _, qualified_child = qualified.rpartition('.')
+        parent = sys.modules.get(qualified_parent)
+        if parent is not None and qualified_child:
+            setattr(parent, qualified_child, module)
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(qualified, None)
+            raise
+        return qualified
+
     def _remove_package_modules(self):
         for module_name, loaded in list(sys.modules.items()):
-            if module_name in self.preexisting_modules:
-                continue
-            module_path = getattr(loaded, '__file__', '') or ''
-            if (module_name == self.namespace or module_name.startswith(self.namespace + '.') or
-                    (module_path and os.path.realpath(module_path).startswith(self.root + os.sep))):
+            if module_name == self.namespace or module_name.startswith(self.namespace + '.'):
                 sys.modules.pop(module_name, None)
 
     def capabilities(self):
@@ -355,12 +455,24 @@ class MediaRuntime:
         self.cache_lock = threading.Lock()
         self.inflight = {}
         self.cache_bytes = 0
+        self.cache_generation = 0
         self.closed = False
 
     def call(self, operation, args=None):
         if self.stopping.is_set():
             raise MediaError('STOPPING', '资源正在停止')
         args = args or {}
+        if operation == 'invalidate':
+            with self.cache_lock:
+                self.cache_generation += 1
+                self.cache.clear()
+                self.cache_bytes = 0
+                flights = list(self.inflight.values())
+                self.inflight.clear()
+                for pending in flights:
+                    pending.error = ('REFRESHED', '资源配置已变更，请重新加载', True)
+                    pending.ready.set()
+            return {'invalidated': True}
         if operation == 'capabilities':
             return self.engine.capabilities()
         key = json.dumps([operation, args], sort_keys=True, ensure_ascii=False)
@@ -369,6 +481,7 @@ class MediaRuntime:
         owner = False
         if ttl:
             with self.cache_lock:
+                cache_generation = self.cache_generation
                 entry = self.cache.get(key)
                 if entry and entry[0] > time.monotonic():
                     self.cache.move_to_end(key)
@@ -430,6 +543,8 @@ class MediaRuntime:
             raise
         if ttl:
             with self.cache_lock:
+                if self.cache_generation != cache_generation:
+                    raise MediaError('REFRESHED', '资源配置已变更，请重新加载', True)
                 if not self.stopping.is_set():
                     old = self.cache.pop(key, None)
                     if old:

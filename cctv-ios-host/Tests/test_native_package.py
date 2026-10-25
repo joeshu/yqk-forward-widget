@@ -9,6 +9,7 @@ import tempfile
 import threading
 import unittest
 import zipfile
+import urllib.parse
 
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires macOS Foundation')
@@ -248,6 +249,45 @@ route = '/all.m3u'
     def test_single_file_size_and_expansion_limits(self):
         file = self.archive({'index.js': b'x' * (8 * 1024 * 1024 + 1)})
         self.assertFalse(self.inspect(file)['ok'])
+
+    def test_remote_catpaw_import_fetches_configuration_and_preserves_queries(self):
+        source=b"const r='/config',s='/spider/',v={video:{sites:[]}};const a=catServerFactory,b=catDartServerPort;module.exports={start:async()=>{},stop(){}};"
+        configuration=b'module.exports={default:{video:{sites:[]}}}'
+        observed=[]
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self,*args):pass
+            def do_GET(self):
+                observed.append(self.path);path=urllib.parse.urlsplit(self.path).path
+                if path=='/redirect.md5':
+                    self.send_response(302);self.send_header('Location','/cat/index.js.md5?variant=one');self.end_headers();return
+                if path.endswith('/index.js.md5'):body=(hashlib.md5(source).hexdigest()+' *index.js').encode()
+                elif path.endswith('/index.js'):body=source
+                elif '/missing/' in path:self.send_response(404);self.end_headers();return
+                elif path.endswith('/index.config.js.md5'):body=('0'*32 if '/bad/' in path else hashlib.md5(configuration).hexdigest()).encode()
+                elif path.endswith('/index.config.js'):body=configuration
+                else:self.send_response(404);self.end_headers();return
+                self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+        server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            origin=f'http://127.0.0.1:{server.server_port}'
+            result=self.inspect(origin+'/redirect.md5')
+            self.assertTrue(result['ok'],result);self.assertEqual(result['protocol'],'catpaw-http');self.assertEqual(result['engine'],'node')
+            self.assertEqual(result['configurationState'],'verified');self.assertTrue(result['configurationExists'])
+            for name in ('index.js','index.config.js','index.config.js.md5'):self.assertIn('/cat/'+name+'?variant=one',observed)
+            result=self.inspect(origin+'/missing/index.js.md5');self.assertTrue(result['ok'],result);self.assertEqual(result['configurationState'],'missing_using_defaults')
+            self.assertFalse(self.inspect(origin+'/bad/index.js.md5')['ok'])
+            canceled=subprocess.run([str(self.executable),'--cancel-download',origin+'/cat/index.js.md5'],capture_output=True,text=True,timeout=10)
+            self.assertEqual(canceled.returncode,0,canceled.stderr);self.assertFalse(json.loads(canceled.stdout)['ok'])
+        finally:server.shutdown();server.server_close();thread.join(2)
+
+    def test_imported_update_preserves_identity_options_account_data_and_rollback(self):
+        old=self.folder/'old.cjs';new=self.folder/'new.cjs'
+        old.write_text('module.exports={search(){return {list:[],version:1}}}')
+        new.write_text('module.exports={search(){return {list:[],version:2}}}')
+        result=subprocess.run([str(self.executable),'--update',str(old),str(new)],capture_output=True,text=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stderr)
+        value=json.loads(result.stdout)
+        for key in ('ok','sameID','portKept','optionsKept','accountKept','rollbackRestoredCode'):self.assertTrue(value[key],value)
 
     def test_md5_pair_downloads_original_code_and_rejects_mismatch_and_limits(self):
         source = b'module.exports={search(){return {list:[]}}}'

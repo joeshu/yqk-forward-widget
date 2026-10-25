@@ -16,6 +16,18 @@ static BOOL TVBoxWebURL(NSString *value) {
 }
 
 @implementation TVBoxCatalogStore
++ (NSDictionary *)catalogWithMacCMSAPIURL:(NSString *)apiURL name:(NSString *)name error:(NSError **)error {
+    NSString *trimmed=[apiURL stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(!TVBoxWebURL(trimmed)){if(error)*error=TVBoxError(@"MacCMS 接口必须是有效的 HTTP/HTTPS 地址，且不能包含用户名或密码");return nil;}
+    NSURLComponents *parts=[NSURLComponents componentsWithString:trimmed];
+    if(parts.fragment.length){if(error)*error=TVBoxError(@"接口 URL 不能包含片段标记 #");return nil;}
+    NSString *displayName=[name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(!displayName.length)displayName=parts.host?:@"MacCMS 影视源";
+    if(displayName.length>256){if(error)*error=TVBoxError(@"来源名称不能超过 256 个字符");return nil;}
+    NSString *siteKey=[NSString stringWithFormat:@"maccms-%@",NSUUID.UUID.UUIDString.lowercaseString];
+    NSDictionary *site=@{@"key":siteKey,@"name":displayName,@"api":trimmed,@"type":@"maccms",@"apiKind":@"maccms-api",@"supported":@YES,@"status":@"尚未验证 · 选中后读取",@"maccmsFormat":@"auto"};
+    return @{@"id":NSUUID.UUID.UUIDString.lowercaseString,@"name":displayName,@"sites":@[site],@"lives":@[],@"url":trimmed,@"updatedAt":@(NSDate.date.timeIntervalSince1970),@"catalogKind":@"maccms"};
+}
 + (NSDictionary *)parseData:(NSData *)data sourceURL:(NSString *)sourceURL error:(NSError **)error {
     if (!data.length || data.length > 2*1024*1024) { if(error)*error=TVBoxError(@"TVBox 配置为空或超过 2 MiB"); return nil; }
     NSError *jsonError=nil;id json=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:&jsonError];
@@ -28,6 +40,7 @@ static BOOL TVBoxWebURL(NSString *value) {
     for(id value in sites) {
         if (![value isKindOfClass:NSDictionary.class]) continue;
         NSString *key=TVBoxString(value[@"key"] ?: value[@"id"],256), *name=TVBoxString(value[@"name"],256), *api=TVBoxString(value[@"api"],8192);
+        if(api.length&&!TVBoxWebURL(api)&&TVBoxWebURL(sourceURL)){NSURL *base=[NSURL URLWithString:sourceURL];NSURL *resolved=[NSURL URLWithString:api relativeToURL:base].absoluteURL;if(TVBoxWebURL(resolved.absoluteString))api=resolved.absoluteString;}
         if (!key.length || !name.length || !api.length || [keys containsObject:key]) continue;
         [keys addObject:key];
         NSString *ext=TVBoxString(value[@"ext"],8192); id extObject=value[@"ext"];
@@ -38,9 +51,14 @@ static BOOL TVBoxWebURL(NSString *value) {
         NSURLComponents *apiParts=[NSURLComponents componentsWithString:api];
         NSString *path=apiParts.path.lowercaseString;
         if ([path hasSuffix:@".md5"]) path=[path stringByDeletingPathExtension];
-        BOOL direct=TVBoxWebURL(api) && [@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];
-        NSString *reason=direct?@"可导入 · 将由现有脚本适配器检查":([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"]?@"此站点 API 不是可直接导入的 JS/Python/ZIP 文件（常见为 JAR 类接口）":@"站点地址无效");
-        [cleanSites addObject:@{@"key":key,@"name":name,@"api":api,@"ext":ext?:@"",@"type":TVBoxString(value[@"type"],32)?:@"",@"supported":@(direct),@"status":reason}];
+        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];
+        BOOL apiKindTVBox=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&([siteType isEqual:@"1"]||[siteType isEqual:@"4"]);
+        BOOL direct=TVBoxWebURL(api)&&scriptFile;
+        NSString *reason=apiKindTVBox?[NSString stringWithFormat:@"TVBox type %@ JSON API · 选中后请求，尚未验证",siteType]:(direct?@"可导入 · 将由现有脚本适配器检查":([siteType isEqual:@"3"]?@"需要 Android/JAR 运行时；iOS 不支持":([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"]?@"此脚本类型需 Android/JAR 运行时；iOS 不支持":@"站点地址无效")));
+        NSMutableDictionary *site=[@{@"key":key,@"name":name,@"api":api,@"ext":ext?:@"",@"type":siteType,@"supported":@((direct||apiKindTVBox)),@"status":reason,@"apiKind":apiKindTVBox?@"tvbox-api":(direct?@"script":@"unsupported")} mutableCopy];
+        if([value[@"header"] isKindOfClass:NSDictionary.class]){NSMutableDictionary *safe=[NSMutableDictionary dictionary];NSUInteger headerCount=0;for(id headerKey in value[@"header"]){id headerValue=value[@"header"][headerKey];if(headerCount++>=24)break;if([headerKey isKindOfClass:NSString.class]&&[headerValue isKindOfClass:NSString.class]&&[headerKey length]<=128&&[headerValue length]<=4096)safe[headerKey]=headerValue;}if(safe.count)site[@"header"]=safe;}
+        if([value[@"playUrl"] isKindOfClass:NSString.class]&&[value[@"playUrl"] length]<=4096)site[@"playUrl"]=value[@"playUrl"];
+        [cleanSites addObject:site];
     }
     NSMutableArray *cleanLives=[NSMutableArray array]; NSMutableSet *urls=[NSMutableSet set];
     for(id value in lives) {

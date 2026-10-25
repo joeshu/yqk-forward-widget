@@ -5,6 +5,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) NSDictionary *item;
 @property(nonatomic,copy) NSDictionary *source;
 @property(nonatomic,copy) NSString *provider;
+@property(nonatomic,copy) NSString *correlationID;
 @property(nonatomic,copy) NSDictionary *detail;
 @property(nonatomic,strong) MediaAPIClient *client;
 @property(nonatomic,copy) void (^onSelectEpisode)(NSDictionary *result,NSDictionary *context);

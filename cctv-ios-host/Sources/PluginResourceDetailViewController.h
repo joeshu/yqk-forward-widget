@@ -6,6 +6,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) void (^onUse)(NSDictionary *service,NSString *kind);
 @property(nonatomic,copy) void (^onLog)(NSDictionary *service);
 @property(nonatomic,copy) void (^onEdit)(NSDictionary *service);
+@property(nonatomic,copy) void (^onUpdate)(NSDictionary *service);
+@property(nonatomic,copy) void (^onRollback)(NSDictionary *service);
 @property(nonatomic,copy) void (^onRemove)(NSDictionary *service);
 @end
 NS_ASSUME_NONNULL_END

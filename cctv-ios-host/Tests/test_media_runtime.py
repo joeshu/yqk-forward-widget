@@ -57,6 +57,21 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(play['headers']['Referer'], 'https://a.test/')
         self.assertEqual(play['url'], 'https://a.test/three')
 
+    def test_detail_preserves_optional_metadata_for_native_film_page(self):
+        detail = media.detail({'vod_id': 'film-1', 'vod_name': '影片',
+                               'vod_content': '简介', 'vod_actor': '演员',
+                               'vod_year': '2026', 'vod_area': '中国大陆',
+                               'vod_lang': '普通话', 'vod_class': '剧集',
+                               'vod_director': '导演', 'vod_remarks': '更新中',
+                               'backdrop': 'https://example.test/banner.jpg',
+                               'vod_play_from': '主线', 'vod_play_url': '第1集$opaque'},
+                              'film-1')
+        self.assertEqual((detail['year'], detail['area'], detail['lang'], detail['type']),
+                         ('2026', '中国大陆', '普通话', '剧集'))
+        self.assertEqual((detail['director'], detail['remarks'], detail['banner']),
+                         ('导演', '更新中', 'https://example.test/banner.jpg'))
+        self.assertEqual(detail['description'], '简介')
+
     def test_search_cache_is_provider_and_page_scoped_and_returns_copies(self):
         with mock.patch.object(self.engine, 'call', wraps=self.engine.call) as call:
             a = self.runtime.call('search', {'keyword': 'word', 'page': 1, 'provider': 'one'})
@@ -116,6 +131,7 @@ class MediaTests(unittest.TestCase):
 
     def test_playback_marks_web_tasks_and_rejects_invalid_schemes(self):
         self.assertEqual(media.playback({'parse': 1, 'url': 'https://a.test/'})['parse'], 1)
+        self.assertEqual(media.playback({'jx': 1, 'url': 'https://a.test/watch'})['jx'], 1)
         for result in [{'url': 'file:///private/data'}, {'url': ''}]:
             with self.assertRaises(media.MediaError):
                 media.playback(result)
@@ -209,6 +225,75 @@ class MediaTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(2)
+
+    def test_configuration_refresh_discards_old_inflight_result_and_cache(self):
+        entered=threading.Event();release=threading.Event();errors=[]
+        class Engine:
+            count=0
+            def capabilities(self):return {}
+            def call(self,operation,args):
+                self.count+=1;current=self.count
+                if current==1:entered.set();release.wait(3)
+                return {'list':[{'vod_id':str(current),'vod_name':'version '+str(current)}]}
+            def close(self):pass
+        engine=Engine();runtime=media.MediaRuntime(engine)
+        def old_request():
+            try:runtime.call('home')
+            except media.MediaError as error:errors.append(error.code)
+        thread=threading.Thread(target=old_request);thread.start();self.assertTrue(entered.wait(1))
+        try:
+            self.assertTrue(runtime.call('invalidate')['invalidated'])
+            self.assertEqual(runtime.call('home')['items'][0]['id'],'2')
+            release.set();thread.join(2)
+            self.assertEqual(errors,['REFRESHED'])
+            self.assertEqual(runtime.call('home')['items'][0]['id'],'2')
+            self.assertEqual(engine.count,2)
+        finally:release.set();thread.join(2);runtime.close()
+
+    def test_empty_detail_result_is_not_reported_as_a_loaded_movie(self):
+        with self.assertRaises(media.MediaError) as failure:
+            media.detail({'list': []}, 'missing')
+        self.assertEqual(failure.exception.code,'NO_DETAIL')
+
+    def test_protected_artwork_uses_separate_relay_and_configuration_is_reachable(self):
+        observed=[]
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self,*args): pass
+            def do_GET(self):
+                observed.append((self.path,self.headers.get('Cookie')))
+                body=b'fixture-image'
+                self.send_response(200 if self.headers.get('Cookie')=='web_token=fixture' else 401)
+                self.send_header('Content-Type','image/png');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+        upstream=http.server.ThreadingHTTPServer(('127.0.0.1',0),Upstream)
+        threading.Thread(target=upstream.serve_forever,daemon=True).start()
+        poster=f'http://127.0.0.1:{upstream.server_port}/image.png?ticket=fixture'
+        class Engine:
+            def capabilities(self):return {'capabilities':['home','configuration']}
+            def call(self,operation,args):
+                if operation=='configuration':return {'url':f'http://127.0.0.1:{upstream.server_port}/website','configurationPage':True}
+                return {'list':[{'vod_id':'id','vod_name':'Movie','vod_pic':poster,'posterHeaders':{'Cookie':'web_token=fixture'}}]}
+            def close(self):pass
+        runtime=media.MediaRuntime(Engine());server=transport.Server(('127.0.0.1',0),runtime)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        def request(path):
+            client=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=3)
+            try:
+                client.request('GET',path);response=client.getresponse();return response.status,response.read()
+            finally:client.close()
+        try:
+            status,body=request('/api/v1/home');self.assertEqual(status,200)
+            self.assertNotIn(b'web_token',body);self.assertNotIn(b'posterHeaders',body)
+            item=json.loads(body)['data']['items'][0];self.assertIn('/artwork/',item['poster'])
+            token=server.relay.register('https://fixture.test/active.m3u8',{})
+            for index in range(300):server.artwork_relay.register(f'https://fixture.test/{index}.png',{})
+            self.assertIn(token,server.relay.targets)
+            # Re-register after deliberately overflowing only the artwork budget.
+            _,body=request('/api/v1/home');item=json.loads(body)['data']['items'][0]
+            self.assertEqual(request(urllib.parse.urlsplit(item['poster']).path),(200,b'fixture-image'))
+            self.assertEqual(observed[-1],('/image.png?ticket=fixture','web_token=fixture'))
+            _,body=request('/api/v1/configuration');self.assertTrue(json.loads(body)['data']['configurationPage'])
+        finally:
+            server.shutdown();server.server_close();runtime.close();upstream.shutdown();upstream.server_close()
 
     def test_catpaw_local_route_is_reachable_for_avplayer_and_head_probes(self):
         class RouteEngine:

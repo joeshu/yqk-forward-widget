@@ -1,5 +1,12 @@
 #import "M3UParser.h"
 
+static const NSUInteger M3UMaximumChannels = 5000;
+static const NSUInteger M3UMaximumLines = 100000;
+static const NSUInteger M3UMaximumLineCharacters = 16384;
+static NSError *M3ULimitError(NSString *message) {
+    return [NSError errorWithDomain:@"CCTVHostM3UParser" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];
+}
+
 @implementation M3UChannel
 @end
 
@@ -14,6 +21,10 @@
 }
 
 + (NSArray<M3UChannel *> *)parse:(NSString *)text baseURL:(NSURL *)baseURL {
+    return [self parse:text baseURL:baseURL error:NULL] ?: @[];
+}
+
++ (NSArray<M3UChannel *> *)parse:(NSString *)text baseURL:(NSURL *)baseURL error:(NSError **)error {
     NSMutableArray<M3UChannel *> *out = [NSMutableArray array];
     if (!text.length) return out;
 
@@ -22,9 +33,14 @@
     NSString *pendingLogo = nil;
     NSString *pendingEPGID = nil;
     NSString *pendingTVGName = nil;
-    for (NSString *raw in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+    __block NSUInteger lineCount=0;
+    __block NSError *limitError=nil;
+    [text enumerateLinesUsingBlock:^(NSString *raw, BOOL *stop) {
+        lineCount++;
+        if(lineCount>M3UMaximumLines){limitError=M3ULimitError(@"M3U 行数超过 100000 行安全上限");*stop=YES;return;}
+        if(raw.length>M3UMaximumLineCharacters){limitError=M3ULimitError(@"M3U 单行超过 16384 字符安全上限");*stop=YES;return;}
         NSString *line = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-        if (!line.length) continue;
+        if (!line.length) return;
 
         if ([line hasPrefix:@"#EXTINF"]) {
             group = [self attribute:@"group-title" in:line];
@@ -34,9 +50,9 @@
             NSRange comma = [line rangeOfString:@","];
             NSString *display = comma.location != NSNotFound ? [line substringFromIndex:comma.location + 1] : nil;
             pendingName = display.length ? display : (pendingTVGName.length ? pendingTVGName : @"未命名频道");
-            continue;
+            return;
         }
-        if ([line hasPrefix:@"#"]) continue;
+        if ([line hasPrefix:@"#"]) return;
 
         if (!pendingName) pendingName = line.lastPathComponent.stringByDeletingPathExtension;
 
@@ -51,7 +67,8 @@
         } @catch (NSException *exception) {
             url = nil;
         }
-        if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; continue; }
+        if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; return; }
+        if(out.count>=M3UMaximumChannels){limitError=M3ULimitError(@"频道数量超过 5000 条安全上限；已保留上次有效订阅");*stop=YES;return;}
 
         M3UChannel *ch = [M3UChannel new];
         ch.name = pendingName;
@@ -65,7 +82,8 @@
         pendingLogo = nil;
         pendingEPGID = nil;
         pendingTVGName = nil;
-    }
+    }];
+    if(limitError){if(error)*error=limitError;return nil;}
     return out;
 }
 

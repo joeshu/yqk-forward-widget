@@ -1,4 +1,5 @@
 #import "RuntimeDiagnostics.h"
+#import "HostLogRedactor.h"
 #import <UIKit/UIKit.h>
 
 static NSString * const RuntimeDiagnosticsPreferenceKey = @"runtimeDiagnosticsEnabled";
@@ -7,6 +8,7 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
 
 @interface RuntimeDiagnostics ()
 @property(nonatomic, copy) NSString *logPath;
+@property(nonatomic, copy) NSString *sessionID;
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic) BOOL diagnosticModeEnabled;
 - (id)safeValue:(id)value key:(NSString *)key depth:(NSUInteger)depth;
@@ -26,6 +28,7 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
     if ((self = [super init])) {
         NSString *support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
         self.logPath = [[[[support stringByAppendingPathComponent:@"ysp"] stringByAppendingPathComponent:@"diagnostics"] stringByAppendingPathComponent:@"runtime-debug"] stringByAppendingPathExtension:@"jsonl"];
+        self.sessionID = NSUUID.UUID.UUIDString.lowercaseString;
         self.queue = dispatch_queue_create("com.cctvhost.runtime-diagnostics", DISPATCH_QUEUE_SERIAL);
         _diagnosticModeEnabled = [NSUserDefaults.standardUserDefaults boolForKey:RuntimeDiagnosticsPreferenceKey];
     }
@@ -59,6 +62,8 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
     @synchronized (self) { if (!self.enabled) return; }
     NSMutableDictionary *record = [NSMutableDictionary dictionary];
     record[@"time"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
+    record[@"session_id"] = self.sessionID ?: @"unknown";
+    record[@"event_id"] = NSUUID.UUID.UUIDString.lowercaseString;
     record[@"category"] = [self safeText:category];
     record[@"event"] = [self safeText:event];
     if ([fields isKindOfClass:NSDictionary.class] && fields.count) {
@@ -126,7 +131,8 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
 
 - (NSString *)safeText:(NSString *)text {
     if (![text isKindOfClass:NSString.class]) return @"";
-    NSString *safe = [text stringByReplacingOccurrencesOfString:@"\r" withString:@" "];
+    NSString *safe = [HostLogRedactor redactText:text];
+    safe = [safe stringByReplacingOccurrencesOfString:@"\r" withString:@" "];
     safe = [safe stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
     NSError *regexError = nil;
     NSRegularExpression *urlPattern = [NSRegularExpression regularExpressionWithPattern:@"(?i)(https?|file)://[^\\s\\\"'<>]+" options:0 error:&regexError];

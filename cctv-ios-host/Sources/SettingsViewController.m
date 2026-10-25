@@ -1,6 +1,13 @@
 #import "SettingsViewController.h"
 #import "HostTheme.h"
 #import "HostImageLoader.h"
+#import "MediaMetadataCache.h"
+
+static NSString *MediaMetadataCacheSummaryText(void) {
+    NSDictionary *summary=MediaMetadataCache.shared.summary;
+    NSString *size=[NSByteCountFormatter stringFromByteCount:[summary[@"bytes"] longLongValue] countStyle:NSByteCountFormatterCountStyleMemory];
+    return [NSString stringWithFormat:@"%lu 项 · %@",(unsigned long)[summary[@"entries"] unsignedIntegerValue],size];
+}
 
 @interface SettingsViewController () <UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic,strong) UITableView *table;
@@ -33,11 +40,12 @@
         @{ @"title":@"运行诊断模式", @"detail":@"问题复现前开启", @"key":@"runtimeDiagnosticsEnabled", @"icon":@"waveform.path.ecg", @"default":@NO },
         @{ @"title":@"导出运行诊断日志", @"detail":@"JSONL · 可分享给开发者定位问题", @"action":@"exportRuntimeDiagnostics", @"icon":@"square.and.arrow.up" }
       ]},
-      @{ @"title":@"数据与关于", @"footer":@"iOS 可能在应用退到后台时挂起本地插件服务。", @"rows":@[
+      @{ @"title":@"数据与关于", @"footer":@"影视元数据缓存只保存目录、分类和搜索结果；影片详情与播放线路不缓存。", @"rows":@[
         @{ @"title":@"导出本机配置", @"action":@"export", @"icon":@"square.and.arrow.up" },
         @{ @"title":@"导入配置文件", @"action":@"import", @"icon":@"square.and.arrow.down" },
         @{ @"title":@"清理节目单缓存", @"detail":@"下次打开频道时重新获取", @"icon":@"trash", @"action":@"clearEPG" },
         @{ @"title":@"清理台标缓存", @"detail":@"清理内存中的缩略图", @"icon":@"photo", @"action":@"clearImages" },
+        @{ @"title":@"清理影视元数据缓存", @"detail":MediaMetadataCacheSummaryText(), @"icon":@"film", @"action":@"clearMediaMetadata" },
         @{ @"title":@"CCTVHost", @"detail":[NSString stringWithFormat:@"%@ · %@",[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"开发版",[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"] isEqual:@"no-python"]?@"无 Python 诊断版":@"完整版"], @"icon":@"info.circle" },
         @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass" }
       ]}
@@ -69,10 +77,18 @@
     [tableView deselectRowAtIndexPath:ip animated:YES]; NSDictionary *row=self.sections[ip.section][@"rows"][ip.row];
     if([row[@"action"] isEqualToString:@"clearEPG"]) [self confirmClearEPG];
     else if([row[@"action"] isEqualToString:@"clearImages"]){[HostImageLoader.shared clearCache];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"台标缓存已清理");UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];cell.detailTextLabel.text=@"已清理，下次加载时重新获取";}
+    else if([row[@"action"] isEqualToString:@"clearMediaMetadata"]) [self confirmClearMediaMetadata:ip];
     else if([row[@"action"] isEqualToString:@"export"]){if(self.onExportData)self.onExportData();}
     else if([row[@"action"] isEqualToString:@"exportRuntimeDiagnostics"]){if(self.onExportDebugLog)self.onExportDebugLog();}
     else if([row[@"action"] isEqualToString:@"import"]){if(self.onImportData)self.onImportData();}
     else if([row[@"action"] isEqualToString:@"logs"]){if(self.onOpenLog)self.onOpenLog();}
+}
+- (void)confirmClearMediaMetadata:(NSIndexPath *)indexPath {
+    NSDictionary *summary=[MediaMetadataCache.shared summary];NSString *size=[NSByteCountFormatter stringFromByteCount:[summary[@"bytes"] longLongValue] countStyle:NSByteCountFormatterCountStyleMemory];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清理影视元数据缓存？" message:[NSString stringWithFormat:@"将清理 %lu 项影视目录、分类和搜索缓存（%@）。影片详情与播放线路不写入此缓存；收藏、观看历史、订阅和插件数据会保留。",(unsigned long)[summary[@"entries"] unsignedIntegerValue],size] preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"清理缓存" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[MediaMetadataCache.shared clear];UITableViewCell *cell=[self.table cellForRowAtIndexPath:indexPath];cell.detailTextLabel.text=@"0 项 · 0 字节";UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"影视元数据缓存已清理");}]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)appearanceChanged:(UISegmentedControl *)sender {
     BOOL dark=sender.selectedSegmentIndex==0;[NSUserDefaults.standardUserDefaults setBool:dark forKey:HostDarkThemePreferenceKey];

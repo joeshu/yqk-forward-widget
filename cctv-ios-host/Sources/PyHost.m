@@ -1,9 +1,11 @@
 #import "PyHost.h"
 #import "JSPluginRuntime.h"
 #import "NodePluginRuntime.h"
+#import "RuntimeDiagnostics.h"
 #import <pthread.h>
 #import <stdlib.h>
 #import <time.h>
+#import <QuartzCore/QuartzCore.h>
 
 #if __has_include(<Python.h>)
 #define PY_SSIZE_T_CLEAN
@@ -143,6 +145,37 @@ static void emitLog(NSString *text) { emitLogForIdentifier(nil, text); }
 }
 
 #if PYHOST_AVAILABLE
+static NSString *CCTVPluginBridgeServiceID(NSString *json) {
+    NSData *data=[json dataUsingEncoding:NSUTF8StringEncoding];
+    id payload=data?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+    if(![payload isKindOfClass:NSDictionary.class])return @"unknown";
+    NSString *serviceID=[payload[@"serviceID"] isKindOfClass:NSString.class]?payload[@"serviceID"]:nil;
+    if(!serviceID.length)serviceID=[payload[@"session"] isKindOfClass:NSString.class]?payload[@"session"]:nil;
+    return serviceID.length?serviceID:@"unknown";
+}
+static void CCTVRecordPluginBridgeResult(NSString *engine, NSString *operation, NSString *serviceID, NSString *requestID, NSTimeInterval startedAt, NSString *reply, NSError *bridgeError) {
+    if(!RuntimeDiagnostics.shared.enabled)return;
+    id result=nil;
+    if(reply.length)result=[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingFragmentsAllowed error:NULL];
+    BOOL resultIsDictionary=[result isKindOfClass:NSDictionary.class];
+    BOOL operationOK=resultIsDictionary&&[result[@"ok"] isKindOfClass:NSNumber.class]&&[result[@"ok"] boolValue];
+    NSString *failureStage=bridgeError?@"bridge_runtime_error":(!reply.length?@"empty_bridge_response":(!resultIsDictionary?@"invalid_bridge_response":(!operationOK?@"plugin_operation_error":@"none")));
+    NSMutableDictionary *fields=[@{@"engine":engine?:@"unknown",
+                                    @"operation":operation?:@"unknown",
+                                    @"service_id":serviceID?:@"unknown",
+                                    @"request_id":requestID?:@"",
+                                    @"elapsed_ms":@((NSInteger)((CACurrentMediaTime()-startedAt)*1000)),
+                                    @"response_bytes":@([reply lengthOfBytesUsingEncoding:NSUTF8StringEncoding]),
+                                    @"failure_stage":failureStage,
+                                    @"response_ok":@(operationOK),
+                                    @"error_domain":bridgeError.domain?:@"",
+                                    @"error_code":@(bridgeError.code)} mutableCopy];
+    id pluginError=resultIsDictionary?result[@"error"]:nil;
+    NSString *message=[pluginError isKindOfClass:NSString.class]?pluginError:([pluginError isKindOfClass:NSDictionary.class]&&[pluginError[@"message"] isKindOfClass:NSString.class]?pluginError[@"message"]:nil);
+    if(!message.length)message=bridgeError.localizedDescription;
+    if(message.length)fields[@"error_message"]=message;
+    [RuntimeDiagnostics.shared recordEvent:operationOK?@"plugin_bridge_succeeded":@"plugin_bridge_failed" category:@"plugin" fields:fields];
+}
 static PyObject *pyHostWrite(PyObject *self, PyObject *args) {
     @autoreleasepool {
         const char *bytes = NULL, *session = NULL; Py_ssize_t length = 0;
@@ -156,10 +189,18 @@ static PyObject *pyHostJSCall(PyObject *self, PyObject *args) {
     const char *operation = NULL, *json = NULL;
     if (!PyArg_ParseTuple(args, "ss", &operation, &json)) return NULL;
     @autoreleasepool {
+        BOOL diagnosticsEnabled=RuntimeDiagnostics.shared.enabled;
+        NSString *operationName=[NSString stringWithUTF8String:operation];
+        NSString *requestJSON=[NSString stringWithUTF8String:json];
+        NSString *serviceID=diagnosticsEnabled?CCTVPluginBridgeServiceID(requestJSON):@"";
+        NSString *requestID=diagnosticsEnabled?NSUUID.UUID.UUIDString.lowercaseString:@"";
+        NSTimeInterval startedAt=diagnosticsEnabled?CACurrentMediaTime():0;
+        if(diagnosticsEnabled)[RuntimeDiagnostics.shared recordEvent:@"plugin_bridge_started" category:@"plugin" fields:@{@"engine":@"javascriptcore", @"operation":operationName?:@"unknown", @"service_id":serviceID, @"request_id":requestID}];
         NSString *reply = nil; NSError *error = nil;
         Py_BEGIN_ALLOW_THREADS
-        reply = [[JSPluginRuntime shared] callOperation:[NSString stringWithUTF8String:operation] json:[NSString stringWithUTF8String:json] timeout:40 error:&error];
+        reply = [[JSPluginRuntime shared] callOperation:operationName json:requestJSON timeout:40 error:&error];
         Py_END_ALLOW_THREADS
+        if(diagnosticsEnabled)CCTVRecordPluginBridgeResult(@"javascriptcore",operationName,serviceID,requestID,startedAt,reply,error);
         if (!reply) { PyErr_SetString(PyExc_RuntimeError, error.localizedDescription.UTF8String ?: "JS bridge failed"); return NULL; }
         return PyUnicode_FromString(reply.UTF8String);
     }
@@ -168,10 +209,18 @@ static PyObject *pyHostNodeCall(PyObject *self, PyObject *args) {
     const char *operation = NULL, *json = NULL;
     if (!PyArg_ParseTuple(args, "ss", &operation, &json)) return NULL;
     @autoreleasepool {
+        BOOL diagnosticsEnabled=RuntimeDiagnostics.shared.enabled;
+        NSString *operationName=[NSString stringWithUTF8String:operation];
+        NSString *requestJSON=[NSString stringWithUTF8String:json];
+        NSString *serviceID=diagnosticsEnabled?CCTVPluginBridgeServiceID(requestJSON):@"";
+        NSString *requestID=diagnosticsEnabled?NSUUID.UUID.UUIDString.lowercaseString:@"";
+        NSTimeInterval startedAt=diagnosticsEnabled?CACurrentMediaTime():0;
+        if(diagnosticsEnabled)[RuntimeDiagnostics.shared recordEvent:@"plugin_bridge_started" category:@"plugin" fields:@{@"engine":@"node", @"operation":operationName?:@"unknown", @"service_id":serviceID, @"request_id":requestID}];
         NSString *reply = nil; NSError *error = nil;
         Py_BEGIN_ALLOW_THREADS
-        reply = [NodePluginRuntime.shared callOperation:[NSString stringWithUTF8String:operation] json:[NSString stringWithUTF8String:json] error:&error];
+        reply = [NodePluginRuntime.shared callOperation:operationName json:requestJSON error:&error];
         Py_END_ALLOW_THREADS
+        if(diagnosticsEnabled)CCTVRecordPluginBridgeResult(@"node",operationName,serviceID,requestID,startedAt,reply,error);
         if (!reply) { PyErr_SetString(PyExc_RuntimeError, error.localizedDescription.UTF8String ?: "Node bridge failed"); return NULL; }
         return PyUnicode_FromString(reply.UTF8String);
     }
@@ -235,9 +284,15 @@ static BOOL initializeInterpreter(PyHostTask *task, NSError **failure) {
 }
 
 static void taskFinished(PyHostTask *task, BOOL active, NSError *error) {
-    ensureMaps();pthread_mutex_lock(&gLock); task.running = active; task.error = error; task.threadExited = YES;
+    ensureMaps();pthread_mutex_lock(&gLock); task.running = active; task.error = error; task.threadExited = YES;BOOL stopRequested=task.stopping;
     if(!active && gTasks[task.identifier]==task){[gTasks removeObjectForKey:task.identifier];if(error)gTaskFailures[task.identifier]=error;else [gTaskFailures removeObjectForKey:task.identifier];if(gTaskFailures.count>256)[gTaskFailures removeObjectForKey:gTaskFailures.allKeys.firstObject];}
-    pthread_cond_broadcast(&gCondition); pthread_mutex_unlock(&gLock); notifyRuntimeStateChanged();
+    pthread_cond_broadcast(&gCondition); pthread_mutex_unlock(&gLock);
+    NSString *event=error?@"python_runtime_failed":(active?@"python_runtime_background_work_active":(stopRequested?@"python_runtime_stopped":@"python_runtime_exited_unexpectedly"));
+    NSMutableDictionary *fields=[@{@"engine":@"python", @"service_id":task.identifier?:@"unknown", @"port":@(task.port), @"background_work_active":@(active), @"stop_requested":@(stopRequested), @"unexpected_exit":@(!active&&!stopRequested&&!error), @"error_domain":error.domain?:@"", @"error_code":@(error.code)} mutableCopy];
+    if(error.localizedDescription.length)fields[@"error_message"]=error.localizedDescription;
+    if(error)fields[@"failure_stage"]=error.code==11?@"interpreter_initialization":(error.code==12?@"script_entry":@"runtime_task");
+    [RuntimeDiagnostics.shared recordEvent:event category:@"plugin" fields:fields];
+    notifyRuntimeStateChanged();
 }
 
 static void *pyThread(void *rawTask) {
@@ -265,6 +320,7 @@ static void *pyThread(void *rawTask) {
 
         pthread_mutex_lock(&gLock);BOOL cancelled=task.stopping;if(!cancelled){task.sessionReady=YES;task.running=YES;}pthread_cond_broadcast(&gCondition);pthread_mutex_unlock(&gLock);
         if(cancelled){if(initialize)PyEval_SaveThread();else PyGILState_Release(gil);taskFinished(task,NO,nil);return NULL;}
+        [RuntimeDiagnostics.shared recordEvent:@"python_script_entry_started" category:@"plugin" fields:@{@"engine":@"python", @"service_id":task.identifier?:@"unknown", @"port":@(task.port)}];
         notifyRuntimeStateChanged();
 
         PyObject *path = PyUnicode_FromString(task.scriptPath.UTF8String);

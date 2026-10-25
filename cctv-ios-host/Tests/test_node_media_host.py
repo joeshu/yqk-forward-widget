@@ -63,6 +63,63 @@ class NodeMediaHostTests(unittest.TestCase):
         return self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.cjs',
                          protocol='catvod-js', moduleType='commonjs', **extra)
 
+    def test_catpaw_defaults_config_exports_provider_identity_and_relative_media(self):
+        source = """const http=require('http');let server,switched=false;
+          exports.start=async function(config={marker:'defaults'}){
+            if(!['defaults','sidecar'].includes(config.marker))throw Error('default configuration was overwritten');
+            if(config.marker==='sidecar'&&(config.nested.keep!=='value'||config.nested.override!==2))throw Error('partial override discarded source configuration');
+            server=catServerFactory((req,res)=>{let value;
+              if(req.url==='/website'){res.setHeader('Content-Type','text/html');res.end('<html>configuration</html>');return}
+              if(req.url==='/switch'){switched=true;value={ok:true}}
+              else if(req.url==='/config')value={video:{sites:[{key:switched?'second':'first',name:config.marker,api:'/spider/demo/3'},{key:'unsafe',api:'//elsewhere.test/spider/x'}]}};
+              else if(req.url.endsWith('/home'))value={class:[{type_id:'movie',type_name:'Movie'}]};
+              else if(req.url.endsWith('/homeVod')){res.writeHead(404);res.end();return}
+              else if(req.url.endsWith('/detail')){let data='';req.on('data',chunk=>data+=chunk);req.on('end',()=>{const input=JSON.parse(data);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({list:input.id?[{vod_id:input.id,vod_name:'detail'}]:[]}))});return}
+              else if(req.url.endsWith('/search'))value={list:[{vod_id:'id',vod_name:'Movie',vod_pic:'/poster.png?signature=fixture'}]};
+              else if(req.url.endsWith('/play'))value={parse:0,url:'/spider/demo/3/proxy/live.m3u8?ticket=fixture'};
+              else value={};res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));});
+            await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+          };exports.stop=()=>new Promise(resolve=>server.close(resolve));"""
+        (self.package/'index.cjs').write_text(source)
+        for config_entry in (None, 'index.config.js'):
+            with self.subTest(configuration=config_entry):
+                if config_entry:
+                    (self.package/config_entry).write_text("module.exports={__esModule:true,default:{marker:'sidecar',nested:{keep:'value',override:1}}}")
+                extra={'configEntry':config_entry,'options':{'nested':{'override':2}}} if config_entry else {}
+                started=self.call('start',packageRoot=str(self.package),dataDirectory=str(self.data),entry='index.cjs',moduleType='commonjs',protocol='catpaw-http',**extra)
+                self.assertTrue(started['ok'],started)
+                self.assertIn('configuration',started['result']['capabilities'])
+                providers=self.call('providers')['result'];self.assertEqual(len(providers),1)
+                self.assertEqual(providers[0]['name'],'sidecar' if config_entry else 'defaults')
+                self.assertFalse(self.call('home',provider='removed')['ok'])
+                self.assertTrue(self.call('home',provider='first')['ok'])
+                self.assertEqual(self.call('detail',provider='first',id='opaque-id')['result']['list'][0]['vod_id'],'opaque-id')
+                poster=self.call('search',provider='first',keyword='demo')['result']['list'][0]['vod_pic']
+                self.assertRegex(poster,r'^http://127\.0\.0\.1:\d+/poster\.png\?signature=fixture$')
+                media=self.call('play',provider='first',id='id')['result']['url']
+                self.assertIn('/proxy/live.m3u8?ticket=fixture',media)
+                configuration=self.call('configuration')['result'];self.assertTrue(configuration['configurationPage'])
+                port=int(configuration['url'].split(':')[2].split('/')[0])
+                client=http.client.HTTPConnection('127.0.0.1',port);client.request('GET','/switch');client.getresponse().read();client.close()
+                self.assertEqual(self.call('providers')['result'][0]['id'],'second')
+                self.assertFalse(self.call('home',provider='first')['ok'])
+                self.assertTrue(self.call('stop')['ok'])
+                with self.assertRaises(OSError):
+                    probe=socket.create_connection(('127.0.0.1',port),timeout=.5);probe.close()
+
+    def test_catpaw_esm_configuration_exports_are_loaded(self):
+        (self.package/'package.json').write_text('{"type":"module"}')
+        (self.package/'index.config.js').write_text('export default {marker:"esm-config"}')
+        (self.package/'index.mjs').write_text("""let server;export async function start(config){
+          if(config.marker!=='esm-config')throw Error('ESM configuration not loaded');
+          server=catServerFactory((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({video:{sites:[]}}))});
+          await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+        }export async function stop(){await new Promise(resolve=>server.close(resolve))}""")
+        reply=self.call('start',packageRoot=str(self.package),dataDirectory=str(self.data),entry='index.mjs',configEntry='index.config.js',moduleType='esm',protocol='catpaw-http')
+        self.assertTrue(reply['ok'],reply)
+        self.assertEqual(self.call('providers')['result'],[])
+        self.assertTrue(self.call('stop')['ok'])
+
     def test_commonjs_sessions_run_and_stop_independently(self):
         (self.package / 'index.cjs').write_text('''
             let counter=0;module.exports={init(){setInterval(()=>counter++,5)},home(){return {class:[{type_id:'movie',type_name:'电影'}]}},

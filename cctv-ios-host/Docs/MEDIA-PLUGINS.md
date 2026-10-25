@@ -1,13 +1,13 @@
 # 本机影视资源使用说明（0.18）
 
-底部导航为 **CCTV｜频道｜影视｜资源｜设置**。CCTV 使用原生 SDK；频道播放 M3U；影视负责影视来源、分类、搜索、详情、线路和选集；资源负责导入、启停、配置、日志、导出和删除。没有 iCloud 功能。
+底部导航为 **CCTV｜频道｜首页｜资源｜设置**。CCTV 使用原生 SDK；频道播放 M3U；首页汇总继续观看、收藏和固定来源，并进入影视库；资源负责导入、启停、配置、日志、导出和删除。没有 iCloud 功能。
 
 ## 导入和使用
 
 1. 打开「资源 → ＋」，选择 JS/Python/ZIP 文件，或输入资源文件下载地址。CatPaw 的 `.js.md5` 地址可以直接输入，宿主会下载配对脚本并校验。
 2. 直接导入 `.js`、`.mjs`、`.cjs`、`.py`，或者带依赖文件的 ZIP。导入只安装文件，不执行代码。
-3. 在「资源」列表启用资源；到「影视」页右上角打开来源选择器，选择刚导入的资源。启用只负责启动引擎，影视页才提供浏览和播放。切换资源时先停止旧实例；停止失败会保留真实状态。
-4. 在「影视」页选来源后，进入首页推荐或分类，使用搜索和筛选，打开影片详情，再选择线路与分集播放。CatPawOpen 服务可提供多个来源，来源选择器会列出其 `/config` 返回的站点。
+3. 在「资源」列表启用资源；到「首页」选择固定来源卡片或点按「影视库」选择已导入的资源。服务型资源只在用户打开时启动，TVBox JSON API 则直接请求，不启动插件运行时。
+4. 选定来源后，进入推荐或分类，使用搜索和筛选，打开影片详情，再选择线路与分集播放。CatPawOpen 服务可提供多个来源，站点选择器会列出其 `/config` 返回的站点；首页「全站搜索」会逐来源显示运行、进度、结果和错误，不自动启动其余插件。
 5. 直播提取包提供「添加直播订阅」，生成本机 `/all.m3u`，在「频道」播放。影视搜索结果不会混入直播列表。
 
 导入猫爪时可直接输入 `https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5`。宿主下载对应 JS，核对 MD5 后安装；MD5 文件本身不会作为 JS 执行。校验仅证明传输内容一致。
@@ -51,7 +51,11 @@ CatVod/TVBox 风格 JS 支持 `export default site => ({ init(ext), home(filter)
 
 CatPawOpen 服务 ZIP 可将 `entry` 指向服务入口（例如 `src/index.js`），入口导出 `start()`/`stop()` 并在本机监听，服务须实现 `/config` 与 `/spider/<key>/3/...`。导入器会检查入口及 `router.js`，自动识别常见 Node 服务包；Node 依赖须一并放进 ZIP 的 `node_modules`。启用后，影视来源选择器按 `/config` 提供的站点显示与搜索。
 
-这里的 TVBox 支持范围是可在 iOS 执行的 JS/CatVod 方法式插件。传统 TVBox JSON 配置及依赖 Android Java/DEX 的 `csp_*.jar` Spider 不能由 iOS JavaScriptCore 或 Node.js Mobile 直接运行；需要移植为上述 JS/Python 契约或接入其 HTTP CMS 服务。导入成功只表示文件和入口已识别，插件仍需可执行并能返回符合格式的媒体 URL。
+TVBox 配置支持两种可直接使用的 HTTP JSON CMS 来源：type 1 和 type 4。type 1/4 作为影视来源加入首页；CCTVHost 按 `filter=true`、`wd/quick/pg`、`ac=detail/t/pg`、`ac=detail/ids` 与 `play/flag` 发送请求，保留源 URL 查询参数，并传递 `ext` 与请求头。列表、分类、影片详情、多线路、多分集、type 1 直出地址和 type 4 播放解析响应会映射到现有影视页与 AVPlayer/Web 播放链路。请求和响应受超时、URL、请求头、2 MiB 响应体限制；上游响应或解码失败会显示为来源错误。type 3/JAR 明确不支持，iOS 不会下载或运行 JAR；TVBox 的 JS/Python/ZIP 脚本仍走上面的现有脚本导入适配器。导入成功只表示文件和入口已识别，不能证明视频已播放，播放需以 AVPlayer 首帧为准。
+
+MacCMS JSON/XML 接口可在「资源 → ＋ → MacCMS 影视接口」单独添加。保存时不会请求或执行接口；选中该影视来源后，宿主用 `ac=videolist` 请求分类、列表和搜索，用 `ac=detail&ids=…` 请求详情，并自动接受 JSON 或 `<rss><list><video>`、`<rss><class><ty>` 格式的 XML。播放线路中的分集 URL、源请求头和完整查询参数会传入现有播放器分流。XML 输入上限 2 MiB、节点 50,000、文本 1 MiB；外部实体不解析。XML 只覆盖上述常见结构，站点私有 XML 扩展、需要网页登录的来源仍需实际端点样本确认。
+
+跨来源搜索每次最多并行检查 3 个独立来源；同一个 Python、Node.js 或 JavaScriptCore 服务中的站点仍按顺序请求，避免争用它自己的会话。结果按来源即时追加，显示当前站点、失败信息和进度。搜索不会自动启动停用的插件；用户点按某个来源后才会启动该服务，其他插件不受影响。搜索结果最多保留 100 条，失败来源可单独重试。
 
 CatPaw Spider 的常用 `util/req.js`、`util/htmlParser.js`、缓存、并发、通用工具及运行时配置导入映射到本机兼容模块；`req.js` 提供域名隔离 Cookie、保存/恢复/清除接口。`axios`、`cheerio`、`crypto-js`、`iconv-lite`、`jpeg-js`、`http2`、`stream`、`qs` 等通过应用内的 JS 依赖注册表提供。`node:stream` 当前提供 `Readable.from`、`data/end` 事件和 `pipe` 常用能力；`fs` 只读 ZIP 文件，临时写入留在内存中，不会访问 iPhone 其它目录。ZIP 自带的其它 JS 依赖仍须保持在 ZIP 中。Fastify 标准 `get/post` 路由可在本机服务下调用；`/spider/<key>/3/...` 私有路由同样可从 AVPlayer 请求，适合返回重写后的 HLS 清单。`parse: 1` 会交给应用的网页播放页，`parse: 0` 则交给 AVPlayer；本机播放器不会把解析页面冒充媒体流。
 

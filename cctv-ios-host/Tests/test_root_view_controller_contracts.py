@@ -287,7 +287,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
     def test_m3u_parser_catches_invalid_url_lines(self):
         parser = (SOURCE.parent / "M3UParser.m").read_text(encoding="utf-8")
         self.assertIn('@catch (NSException *exception)', parser)
-        self.assertIn('pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; continue;', parser)
+        self.assertIn('pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; return;', parser)
         self.assertIn('ch.tvgName = pendingTVGName', parser)
 
     def test_live_player_has_category_channel_program_and_route_panels(self):

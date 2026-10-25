@@ -135,7 +135,10 @@ async function sourceJSON(url,body,requestHeaders={}){
       response.on('data',chunk=>{length+=chunk.length;if(length>2*1024*1024){response.destroy(Error('Node 来源响应超过 2 MB'));return}chunks.push(Buffer.from(chunk))})
       response.on('error',error=>finish(error))
       response.on('end',()=>{
-        if(response.statusCode<200||response.statusCode>=300){const error=Error('Node 来源 HTTP '+response.statusCode);error.statusCode=response.statusCode;finish(error);return}
+        if(response.statusCode<200||response.statusCode>=300){
+          let detail='';try{const parsed=JSON.parse(Buffer.concat(chunks).toString('utf8'));detail=typeof parsed.message==='string'?parsed.message:typeof parsed.error==='string'?parsed.error:typeof parsed.error?.message==='string'?parsed.error.message:''}catch{}
+          const error=Error('Node 来源 HTTP '+response.statusCode+' · '+target.pathname.split('/').pop()+(detail?' · '+detail.slice(0,512):''));error.statusCode=response.statusCode;finish(error);return
+        }
         try{finish(null,JSON.parse(Buffer.concat(chunks).toString('utf8')))}catch(error){finish(Error('Node 来源返回无效 JSON：'+error.message))}
       })
     })
@@ -182,6 +185,48 @@ function installCatvodGlobals(owner){
 function catVodSite(payload){const options=payload.options&&typeof payload.options==='object'?payload.options:{},site=options.site&&typeof options.site==='object'?{...options.site}:{...options};delete site.site;site.key||=String(payload.name||payload.entry||'local_source').replace(/[^A-Za-z0-9_-]/g,'_');site.name||=payload.name||'本机影视源';site.type||=3;if(options.api&&!site.api)site.api=options.api;if(site.ext===undefined)site.ext=options.ext??(typeof payload.options==='string'?payload.options:JSON.stringify(payload.options||{}));return site}
 function catVodExt(payload,site){const options=payload.options;if(typeof options==='string')return options;if(options&&typeof options==='object')return options.ext??options.extend??site?.ext??JSON.stringify(options);return site?.ext||''}
 const isCatVodProtocol=value=>['catvod-js','tvbox-js','catvod-open-js','catvod-quickjs'].includes(String(value||''))
+function mergeCatpawConfiguration(base,overrides,depth=0){
+  if(depth>16)throw Error('猫源配置嵌套超过限制')
+  const plain=value=>value&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value))
+  const result={}
+  for(const [key,value] of Object.entries(base||{}))if(!['__proto__','prototype','constructor'].includes(key))result[key]=value
+  for(const [key,value] of Object.entries(overrides||{})){
+    if(['__proto__','prototype','constructor'].includes(key))throw Error('猫源配置包含无效字段')
+    result[key]=plain(result[key])&&plain(value)?mergeCatpawConfiguration(result[key],value,depth+1):value
+  }
+  return result
+}
+async function catpawConfigurationPage(owner){
+  const url=owner.base+'/website'
+  const probe=method=>new Promise(resolve=>{
+    let done=false,length=0,request
+    const finish=value=>{if(done)return;done=true;original.clearTimeout(timer);resolve(value)}
+    const timer=original.setTimeout(()=>{request?.destroy();finish(false)},3000)
+    request=http.request(url,{method,headers:owner.authHeaders||{}},response=>{
+      const html=response.statusCode===200&&String(response.headers['content-type']||'').toLowerCase().includes('text/html')
+      if(method==='HEAD'&&[404,405].includes(response.statusCode)){response.resume();finish('get');return}
+      response.on('data',chunk=>{length+=chunk.length;if(length>256*1024){response.destroy();finish(false)}})
+      response.on('error',()=>finish(false));response.on('end',()=>finish(html));response.resume()
+    });request.on('error',()=>finish(false));request.end()
+  })
+  let valid=await probe('HEAD');if(valid==='get')valid=await probe('GET')
+  return valid===true?url:null
+}
+function catpawProviders(config,base){
+  const sites=Array.isArray(config?.video?.sites)?config.video.sites:[]
+  return sites.filter(site=>{if(!site||typeof site.api!=='string'||!site.api.startsWith('/spider/')||site.api.includes('..'))return false;try{const url=new URL(site.api,base);return url.origin===base&&!url.search&&!url.hash&&site.key!=null}catch{return false}}).map(site=>({id:String(site.key),name:String(site.name||site.key),api:site.api.replace(/\/$/,'')}))
+}
+function catpawMediaAddresses(value,base,authHeaders={},depth=0){
+  if(depth>16||!value||typeof value!=='object')return value
+  if(Array.isArray(value))return value.map(item=>catpawMediaAddresses(item,base,authHeaders,depth+1))
+  const out={...value}
+  for(const [key,item] of Object.entries(out)){
+    if(['url','vod_pic','poster','image'].includes(key)&&typeof item==='string'&&/^(?:\/|\.\.?\/)/.test(item))out[key]=new URL(item,base).href
+    else if(item&&typeof item==='object')out[key]=catpawMediaAddresses(item,base,authHeaders,depth+1)
+    if(['vod_pic','poster'].includes(key)&&typeof out[key]==='string'){try{if(new URL(out[key]).origin===base&&Object.keys(authHeaders).length)out.posterHeaders={...authHeaders}}catch{}}
+  }
+  return out
+}
 async function start(payload){
   const existing=owners.get(payload.session);if(existing){if(existing.stopPromise)throw Error('Node 插件正在停止');if(!existing.closed)return existing.ready?await existing.ready:existing.metadata;owners.delete(payload.session)}
   const root=readableRoot(payload.packageRoot),entry=entryPath(root,payload.entry)
@@ -194,6 +239,7 @@ async function start(payload){
   try{const metadata=await scope.run(owner,async()=>{
     process.env.CATPAW_DATA_DIR=data;process.env.NODE_PATH=data;process.env.DEV_HTTP_PORT='0'
     if(owner.protocol==='catpaw-http'){
+      process.env.CATVOD_DISABLE_AUTOSTART='1'
       process.env.NODE_ENV='development' // Bundled pino workers cannot run in iOS.
       global.catServerFactory=handler=>{const server=http.createServer(handler);owner.applicationServer=server;return server}
       global.catDartServerPort=()=>0 // There is no Dart UI companion in CCTVHost.
@@ -216,9 +262,21 @@ async function start(payload){
     else{for(const name of Object.keys(require.cache))if(name===entry||name.startsWith(root+path.sep))delete require.cache[name];module=require(entry)}
     owner.module=module.default||module
     if(owner.protocol==='catpaw-http'){
-      let options=payload.options||{}
-      if(payload.configEntry){const config=entryPath(root,payload.configEntry);const value=require(config);options={...(value.default||value),...options}}
-      if(typeof owner.module.start==='function'){const {password,...serviceOptions}=options;await owner.module.start(serviceOptions)}
+      let options=payload.options&&typeof payload.options==='object'&&!Array.isArray(payload.options)?payload.options:{}
+      let hasConfiguration=Object.keys(options).some(key=>key!=='password')
+      if(payload.configEntry){
+        const config=entryPath(root,payload.configEntry)
+        const source=fs.readFileSync(config,'utf8')
+        let loaded
+        if(/\bmodule\s*\.\s*exports\s*=|\bexports\s*\./.test(source)){
+          const Module=require('node:module'),configurationModule=new Module(config)
+          configurationModule.filename=config;configurationModule.paths=Module._nodeModulePaths(path.dirname(config));configurationModule._compile(source,config);loaded=configurationModule.exports
+        }else loaded=await import(pathToFileURL(config).href+'?session='+encodeURIComponent(payload.session))
+        const value=loaded.default||loaded
+        if(!value||typeof value!=='object'||Array.isArray(value))throw Error('猫源配套配置必须导出配置对象')
+        options=mergeCatpawConfiguration(value,options);hasConfiguration=true
+      }
+      if(typeof owner.module.start==='function'){const {password,...serviceOptions}=options;await owner.module.start(hasConfiguration?serviceOptions:undefined)}
       else {
         // CatPaw's bundled local application exposes its configured Fastify
         // instance as globalThis.Pans; the host owns binding its loopback port.
@@ -235,8 +293,9 @@ async function start(payload){
       if(!listening?.listening||!listening.address()?.port)throw Error('Node 服务未开启可用的本机 HTTP 监听')
       owner.base='http://127.0.0.1:'+listening.address().port
       const config=await catpawConfig(owner,options)
-      owner.providers=(config.video?.sites||[]).filter(site=>typeof site.api==='string'&&site.api.startsWith('/spider/')).map(site=>({id:String(site.key),name:String(site.name),api:site.api}))
-      owner.metadata={engine:'Node.js Mobile',version:process.versions.node,protocol:'catpaw-http',capabilities:['providers','home','category','search','detail','play']}
+      owner.providers=catpawProviders(config,owner.base)
+      owner.configurationURL=await catpawConfigurationPage(owner)
+      owner.metadata={engine:'Node.js Mobile',version:process.versions.node,protocol:'catpaw-http',capabilities:['providers','home','category','search','detail','play',...(owner.configurationURL?['configuration']:[])]}
     }else{
       if(isCatVodProtocol(owner.protocol)&&typeof owner.module==='function')owner.module=await owner.module(catVodSite(payload))
       else if(typeof owner.module==='function')owner.module=await owner.module(payload.options||{})
@@ -258,12 +317,15 @@ async function invoke(operation,payload){
   return scope.run(owner,async()=>{
     let value
     if(owner.protocol==='catpaw-http'){
-      if(operation==='providers')return owner.providers.map(({id,name})=>({id,name}))
-      const provider=owner.providers.find(item=>item.id===payload.provider)||owner.providers[0]
+      if(operation==='configuration'){if(!owner.configurationURL)throw Error('此猫源未提供可用的本机配置页面');return {url:owner.configurationURL,headers:owner.authHeaders||{},configurationPage:true}}
+      if(operation==='providers'){owner.providers=catpawProviders(await sourceJSON(owner.base+'/config',undefined,owner.authHeaders),owner.base);return owner.providers.map(({id,name})=>({id,name}))}
+      const provider=payload.provider?owner.providers.find(item=>item.id===payload.provider):owner.providers[0]
+      if(payload.provider&&!provider)throw Error('所选站点已失效，请刷新站点列表后重新选择')
       if(!provider)throw Error('Node 服务未提供影视来源')
-      const args=operation==='search'?{wd:payload.keyword,quick:false,pg:payload.page||1}:operation==='category'?{tid:payload.categoryId,pg:payload.page||1,filter:true,extend:payload.filters||{}}:operation==='detail'?{ids:[payload.id]}:operation==='play'?{flag:payload.lineId||'',id:payload.id,flags:[]}:{}
+      const args=operation==='search'?{wd:payload.keyword,key:payload.keyword,quick:false,pg:payload.page||1,page:payload.page||1}:operation==='category'?{id:payload.categoryId,tid:payload.categoryId,pg:payload.page||1,page:payload.page||1,filter:true,filters:payload.filters||{},extend:payload.filters||{}}:operation==='detail'?{id:payload.id,ids:[payload.id]}:operation==='play'?{flag:payload.lineId||'',id:payload.id,flags:[]}:{filter:true}
       value=await sourceJSON(owner.base+provider.api+'/'+operation,args,owner.authHeaders)
-      if(operation==='home' && !value.list?.length){const recommended=await sourceJSON(owner.base+provider.api+'/homeVod',{},owner.authHeaders);value={...value,list:recommended.list||[]}}
+      if(operation==='home' && !value.list?.length){try{const recommended=await sourceJSON(owner.base+provider.api+'/homeVod',{},owner.authHeaders);value={...value,list:recommended.list||[]}}catch(error){if(![404,405].includes(error.statusCode))throw error}}
+      value=catpawMediaAddresses(value,owner.base,owner.authHeaders||{})
       if(operation==='play'&&value&&typeof value==='object'&&typeof value.url==='string'&&new URL(value.url,owner.base).origin===owner.base&&owner.authHeaders)value={...value,header:{...(value.header||{}),...owner.authHeaders},headers:{...(value.headers||{}),...owner.authHeaders}}
     }else if(owner.protocol==='widget-extractor'){
       if(operation==='home')value={class:[],list:[]}

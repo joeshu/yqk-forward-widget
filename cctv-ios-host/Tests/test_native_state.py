@@ -19,5 +19,8 @@ class NativeStateTests(unittest.TestCase):
                 str(root / "Sources" / "ProfileStore.m"),
                 str(root / "Sources" / "ServiceStore.m"), "-o", executable,
                 str(root / "Sources" / "HostLogBuffer.m"),
+                str(root / "Sources" / "MediaMetadataCache.m"),
+                str(root / "Sources" / "MediaPlaybackStateStore.m"),
+                str(root / "Sources" / "MediaSourceHealthStore.m"),
             ], check=True, capture_output=True, text=True)
             subprocess.run([executable], check=True, capture_output=True, text=True, timeout=30)

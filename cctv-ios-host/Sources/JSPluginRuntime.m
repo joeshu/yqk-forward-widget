@@ -13,6 +13,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSMutableDictionary *> *requests;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, JSValue *> *timers;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, void (^)(NSString *)> *calls;
+@property(nonatomic) BOOL unresponsive;
 @property(nonatomic, strong) NSURL *scriptURL;
 @property(nonatomic, strong) NSURLSessionConfiguration *networkConfiguration;
 @property(atomic, copy) NSString *activeSession;
@@ -218,6 +219,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
         return answer;
     }
     if(NSThread.isMainThread){if(error)*error=[NSError errorWithDomain:@"JSPlugin" code:1 userInfo:@{NSLocalizedDescriptionKey:@"JS 服务须从后台调用"}];return nil;}
+    if(self.unresponsive&&![operation isEqual:@"stop"]){if(error)*error=[NSError errorWithDomain:@"JSPlugin" code:7 userInfo:@{NSLocalizedDescriptionKey:@"此 JavaScript 会话有调用超时且仍占用运行队列；请先停止会话，其他服务不受影响。"}];return nil;}
     if([operation isEqual:@"stop"]){
         id payload=[NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
         if([payload isKindOfClass:NSDictionary.class] && [self.activeSession isEqualToString:payload[@"session"]]){self.stopRequested=YES;@synchronized(self.syncRequests){for(HostSyncRequest *request in self.syncRequests)[request cancel];}}
@@ -251,6 +253,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
         if(self.context.exception){[self finishCall:identifier answer:[self encodedError:self.context.exception.toString]];self.context.exception=nil;}
     }});
     if(dispatch_semaphore_wait(done,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(timeout*NSEC_PER_SEC)))!=0){
+        self.unresponsive=YES;
         dispatch_async(self.queue,^{[self.calls removeObjectForKey:identifier];});
         if(error)*error=[NSError errorWithDomain:@"JSPlugin" code:2 userInfo:@{NSLocalizedDescriptionKey:@"JS 插件调用超时"}];return nil;
     }

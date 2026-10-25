@@ -40,30 +40,49 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('MediaEpisodeSelectionViewController', self.playback)
 
     def test_episode_switch_remains_available_during_resolution_and_discards_stale_results(self):
-        selector = self.episodes[
-            self.episodes.index('- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:'):
-            self.episodes.index('\n}')
-        ]
+        selector_start = self.episodes.index('- (void)selectEpisode:(UIButton *)sender {')
+        selector = self.episodes[selector_start:self.episodes.index('\n@end', selector_start)]
         resolver = self.playback[self.playback.index('- (void)resolveAndPlay'):]
         api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
         self.assertIn('NSUInteger generation=++self.generation', selector)
         self.assertIn('owner.generation!=generation', selector)
         self.assertIn('NSUInteger generation=++self.generation', resolver)
         self.assertIn('generation!=owner.generation', resolver)
-        self.assertIn('[self cancel]', api_client)
+        self.assertIn('[self cancelWithReason:@"superseded_by_new_request"]', api_client)
+        self.assertIn('- (void)cancel { [self cancelWithReason:@"caller_cancelled"]; }', api_client)
+        self.assertIn('self.generation++;', api_client)
 
-    def test_detail_episode_and_player_are_separate_but_share_play_context(self):
+    def test_detail_embeds_route_and_paged_episode_grid_and_resolves_playback(self):
         detail = self.detail[self.detail.index('@interface MediaDetailViewController'):
                              self.detail.index('@interface MediaBrowserViewController')]
-        self.assertNotIn('call:@"play"', detail)
-        self.assertIn('选择线路和分集', detail)
-        self.assertIn('onSelectEpisode=self.onPlay', detail)
+        self.assertIn('media-detail-episode-grid', detail)
+        self.assertIn('media-detail-route-', detail)
+        self.assertIn('constraintGreaterThanOrEqualToConstant:44', detail)
+        self.assertIn('call:@"play"', detail)
+        self.assertIn('toggleFavorite', detail)
+        self.assertIn('cctv.mediaFavorites.v1', detail)
+        self.assertIn('MediaFavoritesViewController', self.detail)
+        self.assertIn('openFavorites', self.detail)
         self.assertIn('@"lineIndex"', self.episodes)
         self.assertIn('@"episodeIndex"', self.episodes)
         self.assertIn('viewWillTransitionToSize', self.playback)
         self.assertIn('landscapeConstraints', self.playback)
         self.assertIn('viewDidAppear:(BOOL)animated', self.playback)
         self.assertIn('pendingEpisodeResult', self.playback)
+
+    def test_player_exposes_quality_choices_and_keeps_parse_and_resolution_states_clear(self):
+        smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
+        self.assertIn('self.result[@"alternates"]', self.playback)
+        self.assertIn('playback_quality_selected', self.playback)
+        self.assertIn('awaitingWebPlaybackReturn', self.playback)
+        self.assertIn('if(self.resolving)return', self.playback)
+        self.assertIn('resolvedExtension', self.playback)
+        self.assertIn('url.user.length||url.password.length', self.playback)
+        self.assertIn('[self setRetryAvailable:NO]', self.playback)
+        self.assertIn('playback page exposes the source\'s actual alternate quality choices', smoke)
+        self.assertIn('quality=low', smoke)
+        fixture = (ROOT / 'Tests/UISmoke/fixture_server.py').read_text()
+        self.assertIn("if \"?\" in self.path and (self.headers.get(\"Referer\")", fixture)
 
     def test_media_resource_and_site_pickers_are_separate(self):
         self.assertIn('选择影视资源', self.detail)
@@ -118,12 +137,64 @@ class ResourceInteractionContracts(unittest.TestCase):
 
     def test_tvbox_catalog_import_is_additive_and_adapter_bounded(self):
         store = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
+        catalog_view = (ROOT / 'Sources/TVBoxCatalogViewController.m').read_text()
+        api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
         self.assertIn('ResourceImportOptionTVBox', (ROOT / 'Sources/ResourceImportSheetViewController.m').read_text())
         self.assertIn('TVBoxCatalogStore parseData:data sourceURL:nil', self.root)
         self.assertIn('保留独立副本', self.root)
-        self.assertIn('直接指向 JS、Python 或 ZIP', (ROOT / 'Sources/TVBoxCatalogViewController.m').read_text())
+        self.assertIn('TVBox type 1/4 JSON API', catalog_view)
+        self.assertIn('apiKindTVBox', store)
+        self.assertIn('TVBox API 请求地址无效或过长', api_client)
+        self.assertIn('vod_play_from', api_client)
+        self.assertIn('values[@"wd"]', api_client)
+        self.assertIn('values[@"ac"]=@"detail"', api_client)
+        self.assertIn('values[@"filter"]=@"true"', api_client)
+        self.assertIn('values[@"quick"]=@"false"', api_client)
+        self.assertIn('MediaTVBoxReservedFilterKeys()', api_client)
+        self.assertIn('values[@"play"]', api_client)
+        self.assertIn('MediaTVBoxPlaybackHeaders', api_client)
+        self.assertIn('result[@"alternates"]=alternates', api_client)
+        self.assertIn('apiCode==0', api_client)
+        self.assertIn('hasUsablePayload', api_client)
+        self.assertIn('initWithTVBoxSource', self.detail)
+        self.assertIn('onUseNativeSite', self.root)
         self.assertIn('removeCatalog:', self.root)
         self.assertIn('@"tvboxCatalogs"', store)
+        catalog_test = (ROOT / 'Tests/native_profile_tests.m').read_text()
+        self.assertIn('type 3 JAR stays unsupported', catalog_test)
+        self.assertIn('type 1 direct playback', (ROOT / 'Tests/native_media_api_tests.m').read_text())
+
+    def test_media_home_reuses_existing_history_favorites_and_services(self):
+        self.assertIn('MediaPlaybackStateStore.watchHistory', self.detail)
+        self.assertIn('trailingSwipeActionsConfigurationForRowAtIndexPath', self.detail)
+        self.assertIn('removeHistoryEntryWithKey', self.detail)
+        self.assertIn('performsFirstActionWithFullSwipe=NO', self.detail)
+        self.assertIn('cctv.mediaFavorites.v1', self.detail)
+        self.assertIn('MediaHomePinnedSourcesDefaultsKey', self.detail)
+        self.assertIn('sourcesProvider', self.detail)
+        self.assertIn('onActivateService', self.detail)
+        self.assertIn('media-home-browse-mode', self.detail)
+        self.assertIn('openHomeConfiguration', self.detail)
+        self.assertIn('@"首页"', self.root)
+        self.assertIn('CCTV",@"频道",@"首页",@"资源",@"设置', self.root)
+        self.assertIn('@"频道"', self.root)
+
+    def test_global_search_reports_each_source_and_retries_failures(self):
+        search = (ROOT / 'Sources/MediaGlobalSearchViewController.m').read_text()
+        self.assertIn('已完成 %lu / %lu 个资源', search)
+        self.assertIn('重试失败', search)
+        self.assertIn('retryFailedSources', search)
+        self.assertIn('部分完成', search)
+        self.assertIn('failedProviders', search)
+        self.assertIn('retryProviders', search)
+        self.assertIn('sourceAvailableForSearch', search)
+        self.assertIn('不会自动启动其他插件', search)
+        self.assertIn('MediaGlobalSearchMaximumConcurrentSources = 3', search)
+        self.assertIn('MediaGlobalSearchJob', search)
+        self.assertIn('searchNextProviderForJob', search)
+        self.assertIn('cancelJobsAndAdvanceGeneration', search)
+        self.assertIn('enqueueStartedSection', search)
+        self.assertIn('initWithTVBoxSource:source', search)
 
     def test_player_distinguishes_item_ready_from_first_frame_ready(self):
         self.assertIn('AVPlayerItemStatusFailed', self.playback)
@@ -141,6 +212,57 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('self.headers.get("Referer")', fixture)
         self.assertIn('等待视频帧超时', self.playback)
         self.assertNotIn('首帧渲染状态未知', self.playback)
+
+    def test_tvbox_playback_keeps_native_api_client_across_episode_switches_and_auto_next(self):
+        self.assertIn('MediaPlaybackClientForSource', self.playback)
+        self.assertIn('MediaSourceUsesNativeCatalogAPI(source)', self.playback)
+        api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        self.assertIn('[protocol isEqual:@"tvbox-api"]', api_client)
+        self.assertIn('[protocol isEqual:@"maccms-api"]', api_client)
+        self.assertIn('self.client=MediaPlaybackClientForSource(source)', self.playback)
+        self.assertIn('page.client=MediaPlaybackClientForSource(page.source)', self.playback)
+        self.assertIn('cctv.mediaAutoPlayNext', self.playback)
+        self.assertIn('playback_auto_advance', self.playback)
+        self.assertIn('self.episodeIndex+1<self.episodes.count', self.playback)
+        self.assertIn('关闭自动连播下一集', self.playback)
+        self.assertIn('开启自动连播下一集', self.playback)
+
+    def test_tvbox_filters_and_playback_flags_survive_native_adaptation(self):
+        client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        self.assertIn('MediaTVBoxFilters(root)', client)
+        self.assertIn('arguments[@"filters"]', client)
+        self.assertIn('clearFilters', self.detail)
+        self.assertIn('result[@"jx"]', self.playback)
+        self.assertIn('result[@"requiresWebPlayback"]', self.playback)
+        self.assertNotIn('@"filters":@{}', client)
+        self.assertIn('MediaTVBoxResolvedPoster', client)
+        self.assertIn('TVBoxWebURL(resolved.absoluteString)', (ROOT / 'Sources/TVBoxCatalogStore.m').read_text())
+
+    def test_global_search_uses_bounded_source_health_cooldowns(self):
+        search = (ROOT / 'Sources/MediaGlobalSearchViewController.m').read_text()
+        health = (ROOT / 'Sources/MediaSourceHealthStore.m').read_text()
+        self.assertIn('sortPendingSectionsByHealth', search)
+        self.assertIn('recordSourceID:job.source', search)
+        self.assertIn('MediaSourceHealthLimit = 128', health)
+        self.assertIn('MediaSourceHealthExpiry = 7 * 24 * 60 * 60', health)
+        self.assertIn('MIN(600,30*pow', health)
+
+    def test_playback_recovery_is_generation_scoped_and_quality_restores_pause_state(self):
+        self.assertIn('owner.stallRecoveryAttempts>=1', self.playback)
+        self.assertIn('playback_stall_recovery_started', self.playback)
+        self.assertIn('generation!=owner.playerGeneration', self.playback)
+        self.assertIn('pendingQualityWasPlaying', self.playback)
+        self.assertIn('未能按名称确认分集', self.playback)
+
+    def test_settings_expose_bounded_movie_metadata_cache_cleanup(self):
+        settings = (ROOT / 'Sources/SettingsViewController.m').read_text()
+        cache = (ROOT / 'Sources/MediaMetadataCache.m').read_text()
+        self.assertIn('clearMediaMetadata', settings)
+        self.assertIn('收藏、观看历史、订阅和插件数据会保留', settings)
+        self.assertIn('MediaMetadataCacheEntryLimit = 64', cache)
+        self.assertIn('MediaMetadataCacheByteLimit = 8 * 1024 * 1024', cache)
+        self.assertNotIn('@"detail"', cache)
+        self.assertIn('影片详情与播放线路不缓存', settings)
 
     def test_rotation_is_limited_to_the_player_and_supported_by_the_app(self):
         with (ROOT / 'Resources/Info.plist').open('rb') as f:
