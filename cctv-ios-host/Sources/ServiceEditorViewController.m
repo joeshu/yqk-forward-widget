@@ -15,7 +15,9 @@
     _editor.translatesAutoresizingMaskIntoConstraints = NO;
     _editor.backgroundColor = HostCard();
     _editor.textColor = HostText();
-    _editor.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+    UIFont *baseCodeFont=[UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular];
+    _editor.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:baseCodeFont];
+    _editor.adjustsFontForContentSizeCategory=YES;
     _editor.editable = !self.readOnly;
     _editor.autocorrectionType = UITextAutocorrectionTypeNo;
     _editor.autocapitalizationType = UITextAutocapitalizationTypeNone;
@@ -89,6 +91,8 @@
     f.placeholder = placeholder;
     f.text = value;
     f.textColor = HostText();
+    f.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    f.adjustsFontForContentSizeCategory=YES;
     f.autocorrectionType = UITextAutocorrectionTypeNo;
     f.autocapitalizationType = UITextAutocapitalizationTypeNone;
     return f;
@@ -98,7 +102,8 @@
     self.title = self.service ? @"编辑服务" : @"添加服务";
     self.tableView.backgroundColor = HostBackground();
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
-    self.tableView.rowHeight = 54;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 76;
     self.identifier = self.service[@"id"] ?: NSUUID.UUID.UUIDString;
     self.nameField = [self field:@"服务名称" value:self.service[@"name"]];
     self.portField = [self field:@"端口 1024–65535" value:[self.service[@"port"] description] ?: @"18768"];
@@ -111,7 +116,8 @@
     self.lanSwitch = [UISwitch new];
     self.lanSwitch.onTintColor = HostAccent();
     self.lanSwitch.on = [self.service[@"lan"] boolValue];
-    self.sourceControl = [[UISegmentedControl alloc] initWithItems:@[ @"文件", @"远程链接", @"手动代码" ]];
+    self.sourceControl = [[UISegmentedControl alloc] initWithItems:@[ @"文件", @"链接", @"代码" ]];
+    self.sourceControl.accessibilityLabel=@"服务代码来源";
     self.sourceControl.selectedSegmentIndex = 1;
     [self.sourceControl addTarget:self
                            action:@selector(sourceChanged)
@@ -163,6 +169,9 @@
                                                 reuseIdentifier:nil];
     c.backgroundColor = HostCard();
     c.textLabel.textColor = HostText();
+    c.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    c.textLabel.adjustsFontForContentSizeCategory=YES;
+    c.textLabel.numberOfLines=0;
     c.selectionStyle = UITableViewCellSelectionStyleNone;
     UIView *input = nil;
     if (ip.section == 0) {
@@ -175,9 +184,10 @@
         } else if (ip.row == 0)
             input = self.sourceControl;
         else if (ip.row == 1) {
-            if (self.sourceControl.selectedSegmentIndex == 1)
+            if (self.sourceControl.selectedSegmentIndex == 1) {
+                c.textLabel.text=@"远程代码 URL";
                 input = self.urlField;
-            else {
+            } else {
                 c.textLabel.text =
                     self.sourceControl.selectedSegmentIndex == 0 ? @"选择 Python 文件" : @"输入 / 编辑代码";
                 c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -201,7 +211,7 @@
             }
         } else if(ip.row == 1 && [self.service[@"manifest"] isKindOfClass:NSDictionary.class]){
             c.textLabel.text=@"插件参数";c.detailTextLabel.text=@"编辑账号、画质等 JSON 配置";c.accessoryType=UITableViewCellAccessoryDisclosureIndicator;c.selectionStyle=UITableViewCellSelectionStyleDefault;
-        }else if(ip.row==1)input=self.argsField;
+        }else if(ip.row==1){c.textLabel.text=@"启动参数";input=self.argsField;}
         else{c.textLabel.text=@"直播列表路径";input=self.playlistPathField;}
     } else {
         c.textLabel.text = @"保存服务";
@@ -210,15 +220,39 @@
         c.selectionStyle = UITableViewCellSelectionStyleDefault;
     }
     if (input) {
-        input.translatesAutoresizingMaskIntoConstraints = NO;
-        [c.contentView addSubview:input];
+        NSString *rowTitle=[c.textLabel.text copy];
+        c.textLabel.text=nil;
+        c.detailTextLabel.text=nil;
+        c.accessoryType=UITableViewCellAccessoryNone;
+        UIStackView *stack=[[UIStackView alloc] init];
+        stack.translatesAutoresizingMaskIntoConstraints=NO;
+        stack.axis=UILayoutConstraintAxisVertical;
+        stack.alignment=UIStackViewAlignmentFill;
+        stack.spacing=rowTitle.length?6:0;
+        if(rowTitle.length){
+            UILabel *title=[UILabel new];
+            title.text=rowTitle;
+            title.textColor=HostSecondaryText();
+            title.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+            title.adjustsFontForContentSizeCategory=YES;
+            title.numberOfLines=0;
+            [stack addArrangedSubview:title];
+            input.accessibilityLabel=rowTitle;
+        }
+        input.translatesAutoresizingMaskIntoConstraints=NO;
+        [stack addArrangedSubview:input];
+        [input.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
+        [c.contentView addSubview:stack];
         [NSLayoutConstraint activateConstraints:@[
-            [input.leadingAnchor constraintEqualToAnchor:c.contentView.leadingAnchor
-                                                constant:(ip.section == 0 ? 115 : 16)],
-            [input.trailingAnchor constraintEqualToAnchor:c.contentView.trailingAnchor constant:-16],
-            [input.centerYAnchor constraintEqualToAnchor:c.contentView.centerYAnchor],
-            [input.heightAnchor constraintEqualToConstant:40]
+            [stack.leadingAnchor constraintEqualToAnchor:c.contentView.leadingAnchor constant:16],
+            [stack.trailingAnchor constraintEqualToAnchor:c.contentView.trailingAnchor constant:-16],
+            [stack.topAnchor constraintEqualToAnchor:c.contentView.topAnchor constant:10],
+            [stack.bottomAnchor constraintEqualToAnchor:c.contentView.bottomAnchor constant:-10]
         ]];
+    } else {
+        c.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+        c.detailTextLabel.adjustsFontForContentSizeCategory=YES;
+        c.detailTextLabel.numberOfLines=0;
     }
     return c;
 }

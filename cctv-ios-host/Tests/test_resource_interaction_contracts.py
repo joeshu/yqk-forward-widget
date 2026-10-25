@@ -30,6 +30,16 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('playlistPath hasPrefix:@"/"', self.editor)
         self.assertIn('@"http://127.0.0.1:%@%@",item[@"port"],playlist', self.root)
 
+    def test_service_editor_uses_dynamic_type_and_vertical_input_rows(self):
+        smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
+        self.assertIn('self.tableView.rowHeight = UITableViewAutomaticDimension', self.editor)
+        self.assertIn('adjustsFontForContentSizeCategory=YES', self.editor)
+        self.assertIn('stack.axis=UILayoutConstraintAxisVertical', self.editor)
+        self.assertIn('stack.bottomAnchor constraintEqualToAnchor:c.contentView.bottomAnchor', self.editor)
+        self.assertIn('UIContentSizeCategoryAccessibilityExtraExtraExtraLarge', smoke)
+        self.assertIn('label does not overlap its input at large text size', smoke)
+        self.assertIn('stays inside its large-type editor row', smoke)
+
     def test_episode_selection_carries_source_provider_line_and_episode_to_player(self):
         for key in ('@"source"', '@"provider"', '@"detail"', '@"lineIndex"', '@"episodeIndex"'):
             self.assertIn(key, self.episodes)

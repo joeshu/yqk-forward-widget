@@ -264,11 +264,34 @@ static void next(NSArray *steps, NSUInteger index) {
                   @"service detail opened");
             capture(self.window, @"05-service-detail");
             ServiceEditorViewController *edit = [ServiceEditorViewController new];
+            UITraitCollection *largeType=[UITraitCollection traitCollectionWithPreferredContentSizeCategory:UIContentSizeCategoryAccessibilityExtraExtraExtraLarge];
             [nav pushViewController:edit animated:NO];
+            [nav setOverrideTraitCollection:largeType forChildViewController:edit];
+            [edit.view setNeedsLayout];
           },
           ^{
-            capture(self.window, @"06-service-editor");
             ServiceEditorViewController *edit = (id)nav.topViewController;
+            [edit.tableView layoutIfNeeded];
+            NSDictionary *fieldRows=@{@"nameField":[NSIndexPath indexPathForRow:0 inSection:0],
+                                      @"portField":[NSIndexPath indexPathForRow:1 inSection:0],
+                                      @"urlField":[NSIndexPath indexPathForRow:1 inSection:1],
+                                      @"argsField":[NSIndexPath indexPathForRow:1 inSection:2],
+                                      @"playlistPathField":[NSIndexPath indexPathForRow:2 inSection:2]};
+            for(NSString *key in fieldRows){
+                NSIndexPath *path=fieldRows[key];
+                [edit.tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
+                [edit.tableView layoutIfNeeded];
+                UITableViewCell *cell=[edit.tableView cellForRowAtIndexPath:path];
+                UITextField *field=[edit valueForKey:key];
+                if(!cell){check(NO,[NSString stringWithFormat:@"%@ editor row is available at large text size",key]);continue;}
+                CGRect fieldFrame=[field convertRect:field.bounds toView:cell.contentView];
+                check(CGRectGetMinX(fieldFrame)>=-1&&CGRectGetMaxX(fieldFrame)<=CGRectGetWidth(cell.contentView.bounds)+1,
+                      [NSString stringWithFormat:@"%@ stays inside its large-type editor row",key]);
+                UIStackView *stack=nil;for(UIView *subview in cell.contentView.subviews)if([subview isKindOfClass:UIStackView.class]){stack=(id)subview;break;}
+                if(stack.arrangedSubviews.count>1){UILabel *label=(id)stack.arrangedSubviews.firstObject;CGRect labelFrame=[label convertRect:label.bounds toView:cell.contentView];check(CGRectGetMaxY(labelFrame)<=CGRectGetMinY(fieldFrame)+1,[NSString stringWithFormat:@"%@ label does not overlap its input at large text size",key]);}
+            }
+            [edit.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0] atScrollPosition:UITableViewScrollPositionTop animated:NO];
+            [edit.tableView layoutIfNeeded];capture(self.window, @"06-service-editor-large-type");
             [(UITextField *)[edit valueForKey:@"nameField"] setText:@"UI Smoke Service"];
             [edit setValue:@"print('service smoke test')\n" forKey:@"code"];
             [edit performSelector:NSSelectorFromString(@"save")];
