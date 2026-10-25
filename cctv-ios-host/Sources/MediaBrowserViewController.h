@@ -13,4 +13,6 @@
 @property(nonatomic, copy) NSError *(^startupErrorProvider)(void);
 @property(nonatomic, copy) NSError *(^startupErrorForService)(NSDictionary *service);
 @property(nonatomic, copy) void (^onSubscribeLive)(NSDictionary *service);
+@property(nonatomic, readonly, getter=isHomeMode) BOOL homeMode;
+@property(nonatomic, copy) void (^onDisplayModeChanged)(BOOL homeMode);
 @end

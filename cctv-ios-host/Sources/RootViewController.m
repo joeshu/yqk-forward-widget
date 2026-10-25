@@ -842,8 +842,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.barButtonItem=self.navigationItem.leftBarButtonItem;[self presentViewController:a animated:YES completion:nil];
 }
 - (void)showTabPage:(UIViewController *)page title:(NSString *)title {
-    self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeAlways;
-    self.tabPage=page;if(page.parentViewController!=self){[self addChildViewController:page];[self.view addSubview:page.view];[page didMoveToParentViewController:self];}else if(page.view.superview!=self.view)[self.view addSubview:page.view];self.title=title;self.navigationItem.searchController=page.navigationItem.searchController;self.navigationItem.leftBarButtonItem=nil;
+    BOOL media=[page isKindOfClass:MediaBrowserViewController.class];self.navigationItem.largeTitleDisplayMode=media?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
+    self.tabPage=page;if(page.parentViewController!=self){[self addChildViewController:page];[self.view addSubview:page.view];[page didMoveToParentViewController:self];}else if(page.view.superview!=self.view)[self.view addSubview:page.view];self.title=media?(((MediaBrowserViewController *)page).isHomeMode?@"":@"影视库"):title;self.navigationItem.searchController=page.navigationItem.searchController;self.navigationItem.leftBarButtonItem=nil;
     self.navigationItem.rightBarButtonItems=page.navigationItem.rightBarButtonItems;[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
 }
 - (void)openMediaTab {
@@ -867,6 +867,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             }
             return sources;
         };
+        __weak MediaBrowserViewController *weakPage=page;page.onDisplayModeChanged=^(BOOL homeMode){RootViewController *owner=weakSelf;MediaBrowserViewController *mediaPage=weakPage;if(!owner||!mediaPage)return;owner.title=homeMode?@"":@"影视库";owner.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;owner.navigationItem.searchController=mediaPage.navigationItem.searchController;owner.navigationItem.leftBarButtonItem=mediaPage.navigationItem.leftBarButtonItem;owner.navigationItem.rightBarButtonItems=mediaPage.navigationItem.rightBarButtonItems;};
         page.onActivateService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf changeService:service enabled:YES completion:completion];};
         page.startupErrorProvider=^NSError *{return PyHost.startupError;};
         page.startupErrorForService=^NSError *(NSDictionary *service){return [PyHost startupErrorForServiceIdentifier:service[@"id"]];};
@@ -875,7 +876,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         page.onSubscribeLive=^(NSDictionary *service){RootViewController *owner=weakSelf;if(!owner)return;NSString *url=nil,*path=service[@"playlistPath"];if(CCTVValidLocalPlaylistPath(path))url=[NSString stringWithFormat:@"http://127.0.0.1:%@%@",service[@"port"],path];if(!url.length)for(NSString *candidate in owner.subscriptionURLs){NSDictionary *provider=[owner localServiceForURL:[NSURL URLWithString:candidate]];if([provider[@"id"] isEqual:service[@"id"]]){url=candidate;break;}}if(!url.length){dispatch_block_t edit=^{ServiceEditorViewController *editor=[ServiceEditorViewController new];editor.service=service;[owner.navigationController pushViewController:editor animated:YES];};if([PyHost isManagedServiceIdentifier:service[@"id"]]){[owner changeService:service enabled:NO completion:^(NSError *error){if(error){[owner showServiceError:error.localizedDescription];return;}edit();}];}else edit();return;}if(![owner.subscriptionURLs containsObject:url]){[owner.subscriptionURLs addObject:url];[NSUserDefaults.standardUserDefaults setObject:owner.subscriptionURLs.allObjects forKey:@"subscriptions"];}[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[1]];owner.activeSource=url;owner.title=@"订阅直播";[owner fetchSubscription:url silent:NO];};
         self.tabPages[@2]=page;
     }
-    [self showTabPage:page title:@"首页"];
+    [self showTabPage:page title:page.isHomeMode?@"":@"影视库"];
+    if(page.onDisplayModeChanged)page.onDisplayModeChanged(page.isHomeMode);
     [page refreshSources];
 }
 - (void)playMediaResult:(NSDictionary *)result name:(NSString *)name {
