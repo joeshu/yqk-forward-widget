@@ -7,15 +7,21 @@ import json
 import os
 import re
 import threading
+import uuid
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from host_media_runtime import MediaRuntime, MediaError, NativeJS, PythonSpider, playback
-from host_media_relay import MediaRelay
+from host_media_relay import MediaRelay, safe_error_summary
 
 
 def is_direct_media_url(url):
     path = urllib.parse.urlsplit(str(url or '')).path.lower()
     return path.endswith(('.m3u8', '.m3u', '.mp4', '.m4v', '.mov', '.m4a', '.mp3'))
+
+
+def is_hls_url(url):
+    path = urllib.parse.urlsplit(str(url or '')).path.lower()
+    return path.endswith(('.m3u8', '.m3u'))
 
 
 class Server(ThreadingHTTPServer):
@@ -228,6 +234,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def route(self, post):
         runtime = self.server.runtime
+        request_id = self.headers.get('X-CCTVHost-Request-ID', '')[:96]
+        if not re.fullmatch(r'[A-Za-z0-9._-]{1,96}', request_id):
+            request_id = uuid.uuid4().hex
+        correlation_id = self.headers.get('X-CCTVHost-Correlation-ID', '')[:96]
+        if not re.fullmatch(r'[A-Za-z0-9._-]{1,96}', correlation_id):
+            correlation_id = ''
+        operation = 'route'
         try:
             parts = urllib.parse.urlsplit(self.path)
             if parts.path.startswith('/artwork/'):
@@ -280,8 +293,9 @@ class Handler(BaseHTTPRequestHandler):
                 if result['parse']:
                     raise MediaError('PARSER_REQUIRED', '此频道返回网页，请通过影视页面打开')
                 url = result['url']
-                if result['headers']:
-                    url = f'http://127.0.0.1:{self.server.server_port}/media/' + self.server.relay.register(url, result['headers'])
+                if result['headers'] or is_hls_url(url):
+                    url = f'http://127.0.0.1:{self.server.server_port}/media/' + self.server.relay.register(
+                        url, result['headers'], diagnostic_id=correlation_id or request_id)
                 self.send_response(302)
                 self.send_header('Location', url)
                 self.send_header('Content-Length', '0')
@@ -314,16 +328,42 @@ class Handler(BaseHTTPRequestHandler):
             result = runtime.call(operation, args)
             if operation in ('home', 'category', 'search', 'detail'):
                 result = self.relay_artwork(result)
-            if operation == 'play' and result.get('headers') and (not result.get('parse') or is_direct_media_url(result.get('url'))):
-                token = self.server.relay.register(result['url'], result['headers'])
-                result = dict(result, originalURL=result['url'],
-                              url=f'http://127.0.0.1:{self.server.server_port}/media/{token}')
+            if (operation == 'play' and (result.get('headers') or is_hls_url(result.get('url')))
+                    and (not result.get('parse') or is_direct_media_url(result.get('url')))):
+                headers = result.get('headers') or {}
+                diagnostic_id = correlation_id or request_id
+                def relay_media_url(address):
+                    token = self.server.relay.register(address, headers, diagnostic_id=diagnostic_id)
+                    return f'http://127.0.0.1:{self.server.server_port}/media/{token}'
+                result = dict(result, originalURL=result['url'], url=relay_media_url(result['url']))
+                alternates = result.get('alternates')
+                if isinstance(alternates, list):
+                    relayed = []
+                    for alternate in alternates:
+                        if not isinstance(alternate, dict) or not isinstance(alternate.get('url'), str):
+                            continue
+                        alternate = dict(alternate)
+                        address = alternate['url']
+                        if headers or is_hls_url(address):
+                            alternate['originalURL'] = address
+                            alternate['url'] = relay_media_url(address)
+                        relayed.append(alternate)
+                    result['alternates'] = relayed
             self.send(200, {'ok': True, 'data': result})
         except (Exception, SystemExit) as error:
             code = getattr(error, 'code', 'PLUGIN_ERROR')
             status = 404 if code == 'NOT_FOUND' else 503 if code in ('BUSY', 'STOPPING') else 502
+            retryable = bool(getattr(error, 'retryable', False))
+            print('[CCTVHostMediaAPI] ' + json.dumps({
+                'event': 'media_api_failed', 'request_id': request_id,
+                'correlation_id': correlation_id, 'operation': operation,
+                'failure_stage': str(code).lower()[:64], 'error_type': type(error).__name__,
+                'error_summary': safe_error_summary(error),
+                'retryable': retryable,
+            }, ensure_ascii=False, separators=(',', ':')))
             self.send(status, {'ok': False, 'error': {'code': code, 'message': str(error),
-                                                    'retryable': bool(getattr(error, 'retryable', False))}})
+                                                    'retryable': retryable, 'request_id': request_id,
+                                                    'stage': str(code).lower()[:64]}})
 
 
 def main():

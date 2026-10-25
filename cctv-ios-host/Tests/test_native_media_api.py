@@ -28,7 +28,7 @@ class NativeMediaAPITests(unittest.TestCase):
                 elif query.get("play"):
                     payload = {"code": 1, "playUrl": "https://cdn.example/", "url": ["标清", "low.m3u8", "高清", "high.m3u8"], "parse": 0, "header": {"X-Playback": "fixture"}, "UA": "FixtureUA/1"}
                 elif query.get("ids"):
-                    payload = {"code": 1, "list": [{"vod_id": "film-1", "vod_name": "Fixture film", "vod_play_from": "线路一$$$线路二", "vod_play_url": "第1集$episode-1$$$正片$feature.m3u8"}]}
+                    payload = {"code": 1, "list": [{"vod_id": "film-1", "vod_name": "Fixture film", "vod_play_from": "线路一$$$线路二", "vod_play_url": "第1集$episode-1#签名流$https://cdn.example/live.m3u8?token=abc%2Bdef&expires=123$$$正片$feature.m3u8"}]}
                 elif query.get("wd"):
                     payload = {"code": 1, "page": 2, "pagecount": 2, "list": [{"vod_id": "search-1", "vod_name": "Search fixture"}]}
                 elif query.get("t"):

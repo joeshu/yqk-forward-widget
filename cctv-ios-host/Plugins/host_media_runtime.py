@@ -120,7 +120,24 @@ def detail(value, identifier):
             if episodes:
                 lines.append({'id': flag, 'name': flag or f'线路 {line_index + 1}', 'episodes': episodes})
     elif isinstance(item.get('episodes'), list):
-        lines = [{'id': '', 'name': '播放', 'episodes': item['episodes']}]
+        episodes = []
+        for index, row in enumerate(item['episodes']):
+            if isinstance(row, dict):
+                identifier = next((row[key] for key in ('id', 'url', 'playUrl', 'value', 'link')
+                                    if row.get(key) is not None), None)
+                name = next((row[key] for key in ('name', 'title', 'episode', 'label')
+                             if row.get(key)), None)
+            elif isinstance(row, (str, int, float)):
+                identifier, name = row, None
+            else:
+                continue
+            if identifier is None or not str(identifier).strip():
+                continue
+            identifier = str(identifier).strip()
+            episodes.append({'id': identifier,
+                             'name': str(name or f'第 {index + 1} 集').strip()})
+        if episodes:
+            lines = [{'id': '', 'name': '播放', 'episodes': episodes}]
     result = {'id': str(item.get('id', item.get('vod_id', identifier))),
               'name': str(item.get('name', item.get('vod_name', identifier))),
               'poster': str(item.get('poster', item.get('vod_pic', '')) or ''),

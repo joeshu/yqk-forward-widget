@@ -175,7 +175,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
     if([operation isEqual:@"detail"])return MediaTVBoxDetail(root,arguments,source);
     if([operation isEqual:@"play"]){
         NSDictionary *headers=MediaTVBoxPlaybackHeaders(source,root);
-        if(macCMS){NSString *url=MediaTVBoxString(arguments[@"id"]);NSURL *media=[NSURL URLWithString:url];NSString *extension=media.pathExtension.lowercaseString?:@"";static NSSet *directExtensions;static dispatch_once_t once;dispatch_once(&once,^{directExtensions=[NSSet setWithArray:@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3"]];});BOOL direct=[directExtensions containsObject:extension];if(!url.length)return @{@"error":@"MacCMS 分集没有播放地址"};return @{@"url":url,@"originalURL":url,@"parse":@(!direct),@"jx":@0,@"requiresWebPlayback":@(!direct),@"headers":headers};}
+        if(macCMS){NSString *url=MediaTVBoxString(arguments[@"id"]);NSURL *media=[NSURL URLWithString:url];NSString *extension=media.pathExtension.lowercaseString?:@"";static NSSet *webExtensions;static dispatch_once_t once;dispatch_once(&once,^{webExtensions=[NSSet setWithArray:@[@"html",@"htm",@"xhtml"]];});BOOL webPage=[webExtensions containsObject:extension];if(!url.length)return @{@"error":@"MacCMS 分集没有播放地址"};/* Signed and extensionless media endpoints should be tried by AVPlayer; only explicit HTML pages use the web player by default. */return @{@"url":url,@"originalURL":url,@"parse":@(webPage),@"jx":@0,@"requiresWebPlayback":@(webPage),@"headers":headers};}
         if([source[@"tvboxType"] integerValue]==1){NSString *url=MediaTVBoxString(arguments[@"id"]);NSString *prefix=MediaTVBoxString(source[@"playUrl"]);if(!url.length)return @{@"error":@"TVBox type 1 没有返回分集地址"};return @{@"url":[prefix stringByAppendingString:url],@"parse":@(prefix.length>0),@"headers":headers};}
         id rawURL=root[@"url"];NSString *prefix=MediaTVBoxFirstString(root,@[@"playUrl"]);
         NSMutableArray<NSDictionary *> *alternates=[NSMutableArray array];NSString *url=@"";
@@ -283,7 +283,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
     NSUInteger generation=self.generation;
     NSTimeInterval startedAt=CACurrentMediaTime();
     BOOL diagnosticsEnabled=RuntimeDiagnostics.shared.enabled;
-    NSString *requestID=diagnosticsEnabled?NSUUID.UUID.UUIDString.lowercaseString:@"";
+    NSString *requestID=NSUUID.UUID.UUIDString.lowercaseString;
     self.activeRequestID=diagnosticsEnabled?requestID:nil;
     self.activeCorrelationID=diagnosticsEnabled&&correlationID.length?[correlationID copy]:nil;
     self.activeOperation=diagnosticsEnabled?([operation copy]?:@"unknown"):nil;
@@ -313,7 +313,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
 
     NSError *requestError=nil;NSURL *url=nil;NSMutableURLRequest *request=nil;
     if(self.tvboxSource){request=[[self tvboxRequestForOperation:operation arguments:arguments?:@{} error:&requestError] mutableCopy];url=request.URL;}
-    else{url=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/api/v1/%@",(long)self.port,operation]];request=[NSMutableURLRequest requestWithURL:url];request.HTTPMethod=@"POST";request.HTTPBody=[NSJSONSerialization dataWithJSONObject:arguments?:@{} options:0 error:NULL];[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];}
+    else{url=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/api/v1/%@",(long)self.port,operation]];request=[NSMutableURLRequest requestWithURL:url];request.HTTPMethod=@"POST";request.HTTPBody=[NSJSONSerialization dataWithJSONObject:arguments?:@{} options:0 error:NULL];[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];[request setValue:requestID forHTTPHeaderField:@"X-CCTVHost-Request-ID"];if(correlationID.length)[request setValue:correlationID forHTTPHeaderField:@"X-CCTVHost-Correlation-ID"];}
     if(!request){NSError *failure=requestError?:[NSError errorWithDomain:@"CCTVHostMedia" code:5 userInfo:@{NSLocalizedDescriptionKey:@"无法创建资源请求"}];if(diagnosticsEnabled){NSMutableDictionary *fields=[@{@"request_id":requestID,@"operation":operation?:@"unknown",@"protocol":self.tvboxSource[@"protocol"]?:@"plugin",@"failure_stage":@"invalid_request",@"error_domain":failure.domain?:@"",@"error_code":@(failure.code),@"error_message":failure.localizedDescription?:@""} mutableCopy];if(correlationID.length)fields[@"correlation_id"]=correlationID;[RuntimeDiagnostics.shared recordEvent:@"media_api_failed" category:@"media_api" fields:fields];}self.activeRequestID=nil;self.activeCorrelationID=nil;self.activeOperation=nil;if(completion)completion(nil,failure);return;}
     __weak typeof(self) weakSelf=self;
     void (^processor)(NSData *,NSURLResponse *,NSError *)=^(NSData *data,NSURLResponse *response,NSError *networkError){
@@ -343,6 +343,8 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
         if(!networkError && (status<200||status>=300)){
             NSMutableDictionary *httpInfo=[@{NSLocalizedDescriptionKey:pluginMessage.length?pluginMessage:[NSString stringWithFormat:@"资源服务返回 HTTP %ld",(long)status],@"plugin_retryable":@(pluginRetryable)} mutableCopy];
             if(pluginCode.length)httpInfo[@"plugin_error_code"]=pluginCode;
+            if([errorPayload[@"request_id"] isKindOfClass:NSString.class])httpInfo[@"service_request_id"]=errorPayload[@"request_id"];
+            if([errorPayload[@"stage"] isKindOfClass:NSString.class])httpInfo[@"service_failure_stage"]=errorPayload[@"stage"];
             failure=[NSError errorWithDomain:@"CCTVHostMediaHTTP" code:status userInfo:httpInfo];
             failureStage=@"http_status";
         }
@@ -359,6 +361,8 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
             NSMutableDictionary *info=[@{NSLocalizedDescriptionKey:message} mutableCopy];
             if(pluginCode.length)info[@"plugin_error_code"]=pluginCode;
             info[@"plugin_retryable"]=@(pluginRetryable);
+            if([errorPayload[@"request_id"] isKindOfClass:NSString.class])info[@"service_request_id"]=errorPayload[@"request_id"];
+            if([errorPayload[@"stage"] isKindOfClass:NSString.class])info[@"service_failure_stage"]=errorPayload[@"stage"];
             failure=[NSError errorWithDomain:@"CCTVHostMedia" code:2 userInfo:info];
             failureStage=errorPayload.count?@"plugin_error":@"invalid_response_shape";
         }
@@ -392,6 +396,8 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
         if(correlationID.length)fields[@"correlation_id"]=correlationID;
         if(pluginCode.length)fields[@"plugin_error_code"]=pluginCode;
         if(pluginMessage.length)fields[@"plugin_error_message"]=pluginMessage;
+        if([failure.userInfo[@"service_request_id"] isKindOfClass:NSString.class])fields[@"service_request_id"]=failure.userInfo[@"service_request_id"];
+        if([failure.userInfo[@"service_failure_stage"] isKindOfClass:NSString.class])fields[@"service_failure_stage"]=failure.userInfo[@"service_failure_stage"];
         if(errorPayload.count)fields[@"plugin_retryable"]=@(pluginRetryable);
         if(failure.localizedDescription.length)fields[@"error_message"]=failure.localizedDescription;
         if(![failure.domain isEqualToString:NSURLErrorDomain]||failure.code!=NSURLErrorCancelled){

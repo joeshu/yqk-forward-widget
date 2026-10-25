@@ -14,7 +14,7 @@ from unittest import mock
 PLUGINS = Path(__file__).resolve().parents[1] / 'Plugins'
 sys.path.insert(0, str(PLUGINS))
 import host_media_runtime as media
-from host_media_relay import MediaRelay
+from host_media_relay import MediaRelay, safe_error_summary
 SPEC = importlib.util.spec_from_file_location('media_service', PLUGINS / 'media-service.py')
 transport = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(transport)
@@ -71,6 +71,16 @@ class MediaTests(unittest.TestCase):
         self.assertEqual((detail['director'], detail['remarks'], detail['banner']),
                          ('导演', '更新中', 'https://example.test/banner.jpg'))
         self.assertEqual(detail['description'], '简介')
+
+    def test_detail_normalizes_url_episodes_for_native_picker(self):
+        value = media.detail({'vod_id': 'film-2', 'vod_name': 'URL 分集',
+                              'episodes': [{'title': '第 1 集', 'url': 'https://cdn.test/one?token=a%2Bb'},
+                                           {'name': '第 2 集', 'id': 'opaque-2'},
+                                           {'name': '缺少地址'}]}, 'film-2')
+        self.assertEqual(value['lines'][0]['episodes'], [
+            {'id': 'https://cdn.test/one?token=a%2Bb', 'name': '第 1 集'},
+            {'id': 'opaque-2', 'name': '第 2 集'},
+        ])
 
     def test_search_cache_is_provider_and_page_scoped_and_returns_copies(self):
         with mock.patch.object(self.engine, 'call', wraps=self.engine.call) as call:
@@ -147,6 +157,13 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(choices['url'], 'https://a.test/1080.m3u8')
         self.assertEqual(choices['alternates'][1]['name'], '720P')
         self.assertEqual(choices['headers']['Referer'], 'https://a.test/')
+
+    def test_plugin_error_summary_keeps_reason_but_redacts_signed_urls(self):
+        value = safe_error_summary('source timeout at https://cdn.test/session?access_token=private-value')
+        self.assertIn('source timeout', value)
+        self.assertNotIn('cdn.test', value)
+        self.assertNotIn('private-value', value)
+        self.assertLessEqual(len(safe_error_summary('x' * 500)), 180)
 
     def test_busy_spider_does_not_execute_concurrently(self):
         self.engine.lock.acquire()
@@ -513,6 +530,32 @@ class MediaTests(unittest.TestCase):
         relay.close()
         self.assertFalse(relay.targets)
 
+    def test_relay_inherits_signed_query_for_same_origin_children_only(self):
+        relay = MediaRelay(limit=8)
+        source = 'https://a.test/path/master.m3u8?token=shared%2Bvalue&expires=123'
+        text = ('#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="keys/key.bin"\n'
+                'segments/one.ts\n/root/two.ts\nhttps://b.test/three.ts\n'
+                'https://a.test/absolute.ts\nhttps://a.test/own.ts?part_signature=own-value\n'
+                '#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://asset-id"\n')
+        rewritten = relay.rewrite(text, source, {}, ('https', 'a.test'),
+                                  'http://127.0.0.1:18780', 'play-correlation')
+        self.assertIn('URI="skd://asset-id"', rewritten)
+        self.assertNotIn('segments/one.ts', rewritten)
+        self.assertNotIn('/root/two.ts', rewritten)
+        targets = {record[0][0]: record for record in relay.targets.values()}
+        self.assertIn('https://a.test/path/segments/one.ts?token=shared%2Bvalue&expires=123', targets)
+        self.assertIn('https://a.test/root/two.ts?token=shared%2Bvalue&expires=123', targets)
+        self.assertIn('https://a.test/path/keys/key.bin?token=shared%2Bvalue&expires=123', targets)
+        self.assertIn('https://b.test/three.ts', targets)
+        self.assertIn('https://a.test/absolute.ts?token=shared%2Bvalue&expires=123', targets)
+        self.assertIn('https://a.test/own.ts?part_signature=own-value', targets)
+        self.assertNotIn('token=shared%2Bvalue', targets['https://b.test/three.ts'][0][0])
+        self.assertNotIn('token=shared%2Bvalue', targets['https://a.test/own.ts?part_signature=own-value'][0][0])
+        self.assertEqual(targets['https://a.test/path/segments/one.ts?token=shared%2Bvalue&expires=123'][2], 'play-correlation')
+        fallback = targets['https://a.test/path/segments/one.ts?token=shared%2Bvalue&expires=123'][0][3]
+        self.assertEqual(fallback, 'https://a.test/path/segments/one.ts')
+        relay.close()
+
     def test_real_hls_relay_preserves_headers_and_ranges_and_strips_redirect_credentials(self):
         received = []
         class Upstream(http.server.BaseHTTPRequestHandler):
@@ -559,6 +602,89 @@ class MediaTests(unittest.TestCase):
             for item in (upstream, server): item.shutdown();item.server_close()
             for thread in threads: thread.join(2)
 
+    def test_relay_surfaces_upstream_status_and_logs_correlated_redacted_failure(self):
+        received = []
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                received.append(self.path)
+                self.send_response(403)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        threads = [threading.Thread(target=item.serve_forever, daemon=True) for item in (upstream, server)]
+        for thread in threads: thread.start()
+        client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+        try:
+            target = f'http://127.0.0.1:{upstream.server_port}/denied.m3u8?signature=do-not-log'
+            token = server.relay.register(target, {}, diagnostic_id='playback-trace-7')
+            with mock.patch('builtins.print') as log:
+                client.request('GET', '/media/' + token)
+                response = client.getresponse()
+                body = response.read()
+                record = ''.join(str(call.args[0]) for call in log.call_args_list)
+            self.assertEqual(response.status, 403)
+            self.assertEqual(response.getheader('X-CCTVHost-Relay-Stage'), 'upstream_http_error')
+            self.assertEqual(response.getheader('X-CCTVHost-Request-ID'), 'playback-trace-7')
+            self.assertIn(b'upstream_http_error', body)
+            self.assertEqual(received, ['/denied.m3u8?signature=do-not-log'])
+            self.assertIn('playback-trace-7', record)
+            self.assertNotIn('do-not-log', record)
+        finally:
+            client.close()
+            for item in (upstream, server): item.shutdown();item.server_close()
+            for thread in threads: thread.join(2)
+
+    def test_relay_falls_back_when_inherited_signature_is_scoped_to_manifest_path(self):
+        received = []
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                received.append(self.path)
+                parsed = urllib.parse.urlsplit(self.path)
+                if parsed.path == '/master.m3u8':
+                    body = b'#EXTM3U\n#EXTINF:6,\nsegment.ts\n'
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
+                elif parsed.path == '/segment.ts' and parsed.query:
+                    body = b''
+                    self.send_response(403)
+                elif parsed.path == '/segment.ts':
+                    body = b'segment-data'
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'video/mp2t')
+                else:
+                    self.send_error(404)
+                    return
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        threads = [threading.Thread(target=item.serve_forever, daemon=True) for item in (upstream, server)]
+        for thread in threads: thread.start()
+        def get(path):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+            try:
+                client.request('GET', path)
+                response = client.getresponse()
+                return response.status, response.read()
+            finally:
+                client.close()
+        try:
+            master = f'http://127.0.0.1:{upstream.server_port}/master.m3u8?signature=master-only'
+            token = server.relay.register(master, {}, diagnostic_id='manifest-scoped-signature')
+            status, playlist = get('/media/' + token)
+            self.assertEqual(status, 200)
+            child = next(line for line in playlist.decode().splitlines() if line and not line.startswith('#'))
+            status, segment = get(urllib.parse.urlsplit(child).path)
+            self.assertEqual((status, segment), (200, b'segment-data'))
+            self.assertEqual(received[-2:], ['/segment.ts?signature=master-only', '/segment.ts'])
+        finally:
+            for item in (upstream, server): item.shutdown();item.server_close()
+            for thread in threads: thread.join(2)
+
     def test_python_spider_play_reaches_hls_segment_through_local_relay(self):
         received = []
         segment_data = b'0123456789'
@@ -566,11 +692,12 @@ class MediaTests(unittest.TestCase):
             def log_message(self, *_): pass
             def do_GET(self):
                 received.append((self.path, dict(self.headers)))
-                if self.path == '/index.m3u8':
+                request_path = urllib.parse.urlsplit(self.path)
+                if request_path.path == '/index.m3u8':
                     body = b'#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nsegment.ts\n#EXT-X-ENDLIST\n'
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
-                elif self.path == '/segment.ts':
+                elif request_path.path == '/segment.ts' and request_path.query == 'access_token=fixture-signature':
                     range_value = self.headers.get('Range')
                     if range_value == 'bytes=2-5':
                         body = segment_data[2:6]
@@ -591,7 +718,7 @@ class MediaTests(unittest.TestCase):
         upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
         upstream_thread.start()
         self.engine.spider.playerContent = lambda *_: {
-            'parse': 0, 'url': f'http://127.0.0.1:{upstream.server_port}/index.m3u8',
+            'parse': 0, 'url': f'http://127.0.0.1:{upstream.server_port}/index.m3u8?access_token=fixture-signature',
             'header': {'Referer': f'http://127.0.0.1:{upstream.server_port}/',
                        'User-Agent': 'fixture-player', 'Cookie': 'fixture-cookie'}}
         server = transport.Server(('127.0.0.1', 0), self.runtime)
@@ -607,9 +734,11 @@ class MediaTests(unittest.TestCase):
             finally:
                 client.close()
         try:
-            status, _, response = request('POST', '/api/v1/play', {'Content-Type': 'application/json'}, {'id': 'episode-1'})
+            status, _, response = request('POST', '/api/v1/play', {'Content-Type': 'application/json', 'X-CCTVHost-Correlation-ID': 'play-correlation'}, {'id': 'episode-1'})
             self.assertEqual(status, 200)
-            proxy = json.loads(response)['data']['url']
+            play_result = json.loads(response)['data']
+            self.assertEqual(play_result['originalURL'], f'http://127.0.0.1:{upstream.server_port}/index.m3u8?access_token=fixture-signature')
+            proxy = play_result['url']
             status, _, playlist = request('GET', urllib.parse.urlsplit(proxy).path)
             self.assertEqual(status, 200)
             lines = playlist.decode().splitlines()
@@ -623,6 +752,7 @@ class MediaTests(unittest.TestCase):
             self.assertEqual(received[-1][1]['Cookie'], 'fixture-cookie')
             self.assertEqual(received[-1][1]['Referer'], f'http://127.0.0.1:{upstream.server_port}/')
             self.assertEqual(received[-1][1]['User-Agent'], 'fixture-player')
+            self.assertEqual(urllib.parse.urlsplit(received[-1][0]).query, 'access_token=fixture-signature')
         finally:
             server.relay.close()
             server.shutdown()
@@ -631,6 +761,35 @@ class MediaTests(unittest.TestCase):
             upstream.shutdown()
             upstream.server_close()
             upstream_thread.join(2)
+
+    def test_hls_is_relayed_even_when_source_does_not_require_headers(self):
+        source_url = 'https://cdn.example/live.m3u8?token=signature'
+        alternate_url = 'https://cdn.example/alternate.m3u8?token=alternate-signature'
+        self.engine.spider.playerContent = lambda *_: {
+            'parse': 0, 'url': source_url,
+            'alternates': [{'name': '备用清晰度', 'url': alternate_url}],
+        }
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+        try:
+            body = json.dumps({'id': 'episode-1'}).encode()
+            client.request('POST', '/api/v1/play', body,
+                           {'Content-Type': 'application/json', 'Content-Length': str(len(body))})
+            response = client.getresponse()
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload['data']['originalURL'], source_url)
+            self.assertTrue(payload['data']['url'].startswith(f'http://127.0.0.1:{server.server_port}/media/'))
+            alternate = payload['data']['alternates'][0]
+            self.assertEqual(alternate['originalURL'], alternate_url)
+            self.assertTrue(alternate['url'].startswith(f'http://127.0.0.1:{server.server_port}/media/'))
+        finally:
+            client.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
 
 
 if __name__ == '__main__':

@@ -52,6 +52,9 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
             'playback_host', 'playback_extension',
         ):
             self.assertIn(f'@"{field}"', MEDIA)
+        for field in ('X-CCTVHost-Request-ID', 'X-CCTVHost-Correlation-ID',
+                      'service_request_id', 'service_failure_stage'):
+            self.assertIn(field, MEDIA)
         for stage in (
             'network_or_timeout', 'response_too_large', 'empty_response',
             'invalid_json', 'http_status', 'plugin_error', 'invalid_response_shape',
@@ -132,6 +135,14 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         diagnostic_call = MEDIA.split('[RuntimeDiagnostics.shared recordEvent:', 1)[1].split('];', 1)[0]
         self.assertNotIn('arguments', diagnostic_call)
         self.assertNotIn('HTTPBody', diagnostic_call)
+
+    def test_playback_diagnostics_classify_signed_endpoint_without_logging_values(self):
+        for field in ('playback_parameter_count', 'playback_parameter_names',
+                      'playback_has_signed_parameter', 'network_error_status_code'):
+            self.assertIn(f'@"{field}"', PLAYBACK)
+        self.assertIn('NSURLQueryItem *item', PLAYBACK)
+        self.assertIn('self.observedItem.errorLog.events.lastObject', PLAYBACK)
+        self.assertNotIn('fields[@"source_url"]', PLAYBACK)
 
 
 if __name__ == "__main__":

@@ -206,6 +206,25 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('enqueueStartedSection', search)
         self.assertIn('initWithTVBoxSource:source', search)
 
+    def test_signed_media_urls_keep_parameters_and_relay_failures_are_stage_specific(self):
+        relay = (ROOT / 'Plugins/host_media_relay.py').read_text()
+        service = (ROOT / 'Plugins/media-service.py').read_text()
+        api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        native_tests = (ROOT / 'Tests/native_media_api_tests.m').read_text()
+        for stage in ('upstream_http_error', 'upstream_timeout', 'upstream_network_error',
+                      'upstream_dns_error', 'upstream_tls_error', 'upstream_connect_error',
+                      'manifest_invalid', 'manifest_encoding_invalid', 'manifest_too_large'):
+            self.assertIn(stage, relay)
+        self.assertIn('parent.query', relay)
+        self.assertIn('fallback_url', relay)
+        self.assertIn('X-CCTVHost-Relay-Stage', relay)
+        self.assertIn('diagnostic_id=correlation_id or request_id', service)
+        self.assertIn('alternate[\'originalURL\'] = address', service)
+        self.assertIn('alternate[@"originalURL"]', self.playback)
+        self.assertIn('X-CCTVHost-Correlation-ID', api_client)
+        self.assertIn('extensionless signed media URL stays intact', native_tests)
+        self.assertIn('detail preserves signed episode URLs byte-for-byte', native_tests)
+
     def test_player_distinguishes_item_ready_from_first_frame_ready(self):
         self.assertIn('AVPlayerItemStatusFailed', self.playback)
         self.assertIn('AVPlayerLayer', self.playback)
