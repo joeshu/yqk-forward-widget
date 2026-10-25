@@ -140,6 +140,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.tableView.backgroundView=self.emptyLabel;
     [self.view addSubview:self.tableView];
 }
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])
+        HostRefreshAppearanceLayers(self.view.window);
+}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.items.count; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     static NSString *reuse=@"cctv.playback.panel";
@@ -768,6 +774,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)selectBottomTab:(UIButton *)sender {
+    HostAnimateSelection(sender);
     self.catalogSearchGeneration++;
     [self stopPreview];
     if(self.activeTab<2)self.catalogStates[@(self.activeTab)]=@{@"query":self.query?:@"",@"group":@(self.groupControl.selectedSegmentIndex),@"gridY":@(self.channelGrid.contentOffset.y),@"listY":@(self.table.contentOffset.y)};
@@ -946,7 +953,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {CGFloat width=collectionView.bounds.size.width;NSInteger columns=width>700?4:2;CGFloat itemWidth=floor((width-24-(columns-1)*8)/columns);UIFont *title=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection],*subtitle=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];CGFloat height=90+4+ceil(title.lineHeight)+1+ceil(subtitle.lineHeight)+4;return CGSizeMake(itemWidth,height);}
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)ip {
     UICollectionViewCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"channel.card" forIndexPath:ip];NSDictionary *ch=self.shownChannels[ip.item];
-    cell.contentView.backgroundColor=HostCard();cell.contentView.layer.cornerRadius=9;cell.contentView.clipsToBounds=YES;
+    HostStyleGlassCard(cell.contentView,9);
     const NSInteger posterTag=4101,logoTag=4102,brandTag=4103,numberTag=4104,titleTag=4105,subtitleTag=4106;
     UIView *poster=[cell.contentView viewWithTag:posterTag];UIImageView *logo=(UIImageView *)[cell.contentView viewWithTag:logoTag];UILabel *brand=(UILabel *)[cell.contentView viewWithTag:brandTag];UILabel *number=(UILabel *)[cell.contentView viewWithTag:numberTag];UILabel *title=(UILabel *)[cell.contentView viewWithTag:titleTag];UILabel *subtitle=(UILabel *)[cell.contentView viewWithTag:subtitleTag];
     if(!poster){poster=[[UIView alloc] initWithFrame:CGRectZero];poster.tag=posterTag;poster.autoresizingMask=UIViewAutoresizingFlexibleWidth;poster.backgroundColor=HostCard();poster.layer.cornerRadius=8;[cell.contentView addSubview:poster];
@@ -962,7 +969,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=[ch[@"id"] isEqualToString:self.channelID]?HostAccent():HostText();title.text=[NSString stringWithFormat:@"%@%@",[self.favorites containsObject:ch[@"id"]]?@"♥ ":@"",ch[@"name"]?:ch[@"id"]];
     NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[ch[@"id"]])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:ch[@"id"]];subtitle.text=self.epgCache[ch[@"id"]][@"now"]?:ch[@"group"];return cell;
 }
-- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip { [self selectChannel:self.shownChannels[ip.item]]; }
+- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip { HostAnimateSelection([collectionView cellForItemAtIndexPath:ip]);[self selectChannel:self.shownChannels[ip.item]]; }
 - (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
     NSDictionary *ch=self.shownChannels[ip.item];__weak typeof(self) w=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){BOOL favorite=[w.favorites containsObject:ch[@"id"]];UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w configureCatalogNavigation];[w applyFilter];}];UIAction *route=[UIAction actionWithTitle:@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];else[w presentRouteSheetForChannel:ch fromIndexPath:nil];}];NSMutableArray *actions=[NSMutableArray arrayWithObjects:fav,route,nil];
@@ -1516,6 +1523,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
+    if(previousTraitCollection && [self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]){
+        HostStyleNavigation(self.navigationController);
+        HostRefreshAppearanceLayers(self.view.window);
+    }
     if(previousTraitCollection && ![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]){
         [self.channelGrid.collectionViewLayout invalidateLayout];
         [self.channelGrid reloadData];
@@ -1649,7 +1660,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     page.onExportDebugLog=^{[RuntimeDiagnostics.shared prepareExportWithCompletion:^(NSURL *url,NSError *error){if(!url){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"运行诊断" message:error.localizedDescription?:@"导出诊断日志失败" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[(weakSelf.navigationController.topViewController?:weakSelf) presentViewController:alert animated:YES completion:nil];return;}[weakSelf shareDiagnosticLogAtURL:url];}];};
     page.onClearEPG=^{ [[XMLTVStore shared] clear];[weakSelf.epgCache removeAllObjects]; [weakSelf saveEPGCache]; [weakSelf.table reloadData]; };
     page.onPreferenceChanged=^(NSString *key, BOOL value){
-        if([key isEqualToString:HostDarkThemePreferenceKey]){UIWindow *window=weakSelf.view.window;window.overrideUserInterfaceStyle=value?UIUserInterfaceStyleDark:UIUserInterfaceStyleLight;dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostStyleNavigation(weakSelf.navigationController);HostRefreshAppearanceLayers(window);});}
+        if([key isEqualToString:HostDarkThemePreferenceKey]||[key isEqualToString:HostThemeModePreferenceKey]){UIWindow *window=weakSelf.view.window;window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostStyleNavigation(weakSelf.navigationController);HostRefreshAppearanceLayers(window);});}
         if ([key isEqualToString:@"runtimeDiagnosticsEnabled"]) [RuntimeDiagnostics.shared setEnabled:value];
         if ([key isEqualToString:@"nativeSDKVerboseLogs"]) [weakSelf configureSDKLogging];
         if ([key isEqualToString:@"preloadNativeChannel"] && !value) [weakSelf.nativePreloader cancel];

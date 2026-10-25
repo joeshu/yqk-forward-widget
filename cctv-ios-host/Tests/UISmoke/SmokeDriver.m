@@ -709,23 +709,26 @@ static void next(NSArray *steps, NSUInteger index) {
             UITableViewCell *themeCell=[settingsTable cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             UISegmentedControl *theme=(id)themeCell.accessoryView;
             check(settings.view.window==self.window, @"settings selector is attached to the visible app window");
-            check(theme!=nil&&[theme.accessibilityIdentifier isEqualToString:HostDarkThemePreferenceKey], @"settings exposes the persisted global theme selector");
+            check(theme!=nil&&[theme.accessibilityIdentifier isEqualToString:HostThemeModePreferenceKey], @"settings exposes the persisted system/light/dark theme selector");
             if(theme){
                 theme.selectedSegmentIndex=1;
                 [theme sendActionsForControlEvents:UIControlEventValueChanged];
             }
-            check(!HostIsDarkThemeSelected(), @"white theme selection persists in user preferences");
-            check(self.window.overrideUserInterfaceStyle==UIUserInterfaceStyleLight, @"white theme selection changes the app window style");
+            check([HostThemeMode() isEqual:@"light"]&&!HostIsDarkThemeSelected(), @"light theme selection persists in user preferences");
+            check(self.window.overrideUserInterfaceStyle==UIUserInterfaceStyleLight, @"light theme selection changes the app window style");
             UIColor *lightBackground=[HostBackground() resolvedColorWithTraitCollection:self.window.traitCollection];
             CGFloat lr=0,lg=0,lb=0,la=0;[lightBackground getRed:&lr green:&lg blue:&lb alpha:&la];
-            check(lr>0.8&&lg>0.8&&lb>0.8, @"white theme resolves a light global page background");
-            capture(self.window,@"22-global-white-theme");
+            check(lr>0.8&&lg>0.8&&lb>0.8, @"light theme resolves a light global page background");
+            capture(self.window,@"22-global-light-theme");
             if(theme){theme.selectedSegmentIndex=0;[theme sendActionsForControlEvents:UIControlEventValueChanged];}
-            check(self.window.overrideUserInterfaceStyle==UIUserInterfaceStyleDark&&HostIsDarkThemeSelected(), @"selecting black theme restores and persists the dark appearance");
+            check([HostThemeMode() isEqual:@"system"]&&self.window.overrideUserInterfaceStyle==UIUserInterfaceStyleUnspecified, @"system appearance is persisted and leaves appearance control to iOS");
+            check(HostIsDarkThemeSelected()==(HostSystemInterfaceStyle()==UIUserInterfaceStyleDark), @"system theme follows the active iOS window appearance");
+            if(theme){theme.selectedSegmentIndex=2;[theme sendActionsForControlEvents:UIControlEventValueChanged];}
+            check(self.window.overrideUserInterfaceStyle==UIUserInterfaceStyleDark&&[HostThemeMode() isEqual:@"dark"]&&HostIsDarkThemeSelected(), @"dark theme selection restores and persists the dark appearance");
             UIColor *darkBackground=[HostBackground() resolvedColorWithTraitCollection:self.window.traitCollection];
             CGFloat dr=0,dg=0,db=0,da=0;[darkBackground getRed:&dr green:&dg blue:&db alpha:&da];
-            check(dr<0.1&&dg<0.1&&db<0.1, @"black theme resolves a dark global page background");
-            capture(self.window,@"23-global-black-theme");
+            check(dr<0.1&&dg<0.1&&db<0.1, @"dark theme resolves a dark global page background");
+            capture(self.window,@"23-global-dark-theme");
           }}
       ];
       next(steps, 0);

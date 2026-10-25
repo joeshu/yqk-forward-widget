@@ -17,8 +17,8 @@ static NSString *MediaMetadataCacheSummaryText(void) {
 - (void)viewDidLoad {
     [super viewDidLoad]; self.title=@"设置"; self.view.backgroundColor=HostBackground(); self.navigationController.navigationBar.tintColor=HostAccent();
     self.sections=@[
-      @{ @"title":@"外观", @"footer":@"黑色和白色主题会应用到频道、影视、资源、服务、播放器与设置页面。", @"rows":@[
-        @{ @"title":@"全局主题", @"detail":@"黑色 / 白色", @"key":HostDarkThemePreferenceKey, @"appearance":@YES, @"icon":@"circle.lefthalf.filled" }
+      @{ @"title":@"外观", @"footer":@"主题会应用到全部页面。可跟随 iPhone 外观，也可固定使用浅色或深色。", @"rows":@[
+        @{ @"title":@"全局主题", @"detail":@"系统 / 浅色 / 深色", @"key":HostThemeModePreferenceKey, @"appearance":@YES, @"icon":@"circle.lefthalf.filled" }
       ]},
       @{ @"title":@"播放", @"footer":@"快速起播仅降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；关闭可恢复默认缓冲。预解析只缓存一个相邻频道的信息，有效期 15 秒，会额外请求频道元数据。播放选项下次选台生效。", @"rows":@[
         @{ @"title":@"预解析下一个 CCTV 频道", @"key":@"preloadNativeChannel", @"icon":@"forward.end", @"default":@YES },
@@ -61,7 +61,7 @@ static NSString *MediaMetadataCacheSummaryText(void) {
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"setting.row"]; if(!cell)cell=[[UITableViewCell alloc]initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"setting.row"];
     NSDictionary *row=self.sections[ip.section][@"rows"][ip.row]; cell.textLabel.text=row[@"title"]; cell.textLabel.textColor=HostText(); cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.textLabel.numberOfLines=0; cell.detailTextLabel.text=row[@"detail"]; cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=0; cell.imageView.image=[UIImage systemImageNamed:row[@"icon"]]; cell.imageView.tintColor=HostAccent(); cell.backgroundColor=HostCard(); cell.accessoryView=nil; cell.accessoryType=UITableViewCellAccessoryNone;cell.selectionStyle=UITableViewCellSelectionStyleNone;
     NSString *key=row[@"key"];
-    if([row[@"appearance"] boolValue]){UISegmentedControl *style=[[UISegmentedControl alloc] initWithItems:@[@"黑色",@"白色"]];style.selectedSegmentIndex=HostIsDarkThemeSelected()?0:1;style.selectedSegmentTintColor=HostAccent();[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];style.accessibilityIdentifier=HostDarkThemePreferenceKey;[style addTarget:self action:@selector(appearanceChanged:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=style;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
+    if([row[@"appearance"] boolValue]){UISegmentedControl *style=[[UISegmentedControl alloc] initWithItems:@[@"系统",@"浅色",@"深色"]];NSString *mode=HostThemeMode();style.selectedSegmentIndex=[mode isEqual:@"system"]?0:([mode isEqual:@"light"]?1:2);style.selectedSegmentTintColor=HostAccent();[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];style.accessibilityIdentifier=HostThemeModePreferenceKey;[style addTarget:self action:@selector(appearanceChanged:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=style;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
     else if(key){ UISwitch *sw=[UISwitch new]; sw.onTintColor=HostAccent(); id saved=[[NSUserDefaults standardUserDefaults] objectForKey:key]; sw.on=saved? [saved boolValue]:[row[@"default"] boolValue]; sw.accessibilityIdentifier=key; [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView=sw; cell.selectionStyle=UITableViewCellSelectionStyleNone; }
     else if(row[@"action"]){ cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator; cell.selectionStyle=UITableViewCellSelectionStyleDefault; }
     else cell.selectionStyle=UITableViewCellSelectionStyleNone;
@@ -91,10 +91,13 @@ static NSString *MediaMetadataCacheSummaryText(void) {
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)appearanceChanged:(UISegmentedControl *)sender {
-    BOOL dark=sender.selectedSegmentIndex==0;[NSUserDefaults.standardUserDefaults setBool:dark forKey:HostDarkThemePreferenceKey];
+    NSString *mode=sender.selectedSegmentIndex==0?@"system":(sender.selectedSegmentIndex==1?@"light":@"dark");
+    BOOL dark=[mode isEqual:@"dark"];
+    [NSUserDefaults.standardUserDefaults setObject:mode forKey:HostThemeModePreferenceKey];
+    if(![mode isEqual:@"system"])[NSUserDefaults.standardUserDefaults setBool:dark forKey:HostDarkThemePreferenceKey];
     UIWindow *window=self.view.window;
-    if(window){window.overrideUserInterfaceStyle=dark?UIUserInterfaceStyleDark:UIUserInterfaceStyleLight;HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);});}
-    if(self.onPreferenceChanged)self.onPreferenceChanged(HostDarkThemePreferenceKey,dark);
+    if(window){window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);});}
+    if(self.onPreferenceChanged)self.onPreferenceChanged(HostThemeModePreferenceKey,HostIsDarkThemeSelected());
 }
 - (void)confirmClearEPG {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清理节目单缓存" message:@"缓存将在下次访问频道时重新获取。" preferredStyle:UIAlertControllerStyleAlert];

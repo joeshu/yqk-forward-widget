@@ -26,9 +26,7 @@
 @implementation MediaPosterCell
 - (instancetype)initWithFrame:(CGRect)frame {
     if((self=[super initWithFrame:frame])){
-        self.contentView.backgroundColor=HostCard();
-        self.contentView.layer.cornerRadius=10;
-        self.contentView.clipsToBounds=YES;
+        HostStyleGlassCard(self.contentView,10);
         self.posterView=[UIImageView new];self.posterView.contentMode=UIViewContentModeScaleAspectFill;self.posterView.clipsToBounds=YES;[self.contentView addSubview:self.posterView];
         self.nameLabel=[UILabel new];self.nameLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]];self.nameLabel.adjustsFontForContentSizeCategory=YES;self.nameLabel.textColor=HostText();self.nameLabel.lineBreakMode=NSLineBreakByTruncatingTail;[self.contentView addSubview:self.nameLabel];
         self.remarksLabel=[UILabel new];self.remarksLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11]];self.remarksLabel.adjustsFontForContentSizeCategory=YES;self.remarksLabel.textColor=HostSecondaryText();self.remarksLabel.lineBreakMode=NSLineBreakByTruncatingTail;[self.contentView addSubview:self.remarksLabel];
@@ -86,7 +84,7 @@
     self.tableView.tableHeaderView=header;
 }
 - (void)addScopeButton:(NSString *)key title:(NSString *)title {UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.accessibilityIdentifier=key;button.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];HostStylePillButton(button,[key isEqual:self.selectedScope]);[button setTitle:title forState:UIControlStateNormal];[button addTarget:self action:@selector(selectScope:) forControlEvents:UIControlEventTouchUpInside];[self.scopeStack addArrangedSubview:button];}
-- (void)selectScope:(UIButton *)sender {self.selectedScope=sender.accessibilityIdentifier?:@"*";for(UIButton *button in self.scopeStack.arrangedSubviews){BOOL selected=[button.accessibilityIdentifier isEqual:self.selectedScope];HostStylePillButton(button,selected);}[self updateSearchResultsForSearchController:self.search];}
+- (void)selectScope:(UIButton *)sender {HostAnimateSelection(sender);self.selectedScope=sender.accessibilityIdentifier?:@"*";for(UIButton *button in self.scopeStack.arrangedSubviews){BOOL selected=[button.accessibilityIdentifier isEqual:self.selectedScope];HostStylePillButton(button,selected);}[self updateSearchResultsForSearchController:self.search];}
 - (void)closePicker { [self.navigationController dismissViewControllerAnimated:YES completion:nil]; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return self.shown.count;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)index {UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"source"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"source"];NSDictionary *choice=self.shown[index.row];cell.backgroundColor=HostCard();cell.textLabel.text=choice[@"name"];cell.textLabel.textColor=UIColor.labelColor;cell.textLabel.numberOfLines=0;NSMutableArray *details=[NSMutableArray array];if([choice[@"subtitle"] length])[details addObject:choice[@"subtitle"]];if([choice[@"url"] length])[details addObject:choice[@"url"]];cell.detailTextLabel.text=[details componentsJoinedByString:@"\n"];cell.detailTextLabel.textColor=UIColor.secondaryLabelColor;cell.detailTextLabel.numberOfLines=0;BOOL selected=[choice[@"selected"] boolValue];cell.accessoryType=selected?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDisclosureIndicator;return cell;}
@@ -169,7 +167,7 @@
     self.status.numberOfLines=0;self.status.textAlignment=NSTextAlignmentCenter;self.status.hidden=YES;[self.contentStack addArrangedSubview:self.status];
     self.bannerView=[UIImageView new];self.bannerView.translatesAutoresizingMaskIntoConstraints=NO;self.bannerView.contentMode=UIViewContentModeScaleAspectFill;self.bannerView.clipsToBounds=YES;self.bannerView.layer.cornerRadius=18;self.bannerView.hidden=YES;
     [self.contentStack addArrangedSubview:self.bannerView];[self.bannerView.heightAnchor constraintEqualToConstant:180].active=YES;
-    UIView *hero=[UIView new];hero.translatesAutoresizingMaskIntoConstraints=NO;hero.backgroundColor=HostCard();hero.layer.cornerRadius=20;hero.clipsToBounds=YES;
+    UIView *hero=[UIView new];hero.translatesAutoresizingMaskIntoConstraints=NO;HostStyleGlassCard(hero,20);
     self.posterView=[UIImageView new];self.posterView.translatesAutoresizingMaskIntoConstraints=NO;self.posterView.contentMode=UIViewContentModeScaleAspectFill;self.posterView.clipsToBounds=YES;[hero addSubview:self.posterView];
     UIView *shade=[UIView new];shade.translatesAutoresizingMaskIntoConstraints=NO;shade.backgroundColor=[UIColor colorWithWhite:0 alpha:0.38];[hero addSubview:shade];
     self.heroTitle=[UILabel new];self.heroTitle.translatesAutoresizingMaskIntoConstraints=NO;self.heroTitle.font=[UIFont systemFontOfSize:24 weight:UIFontWeightBold];self.heroTitle.adjustsFontForContentSizeCategory=YES;self.heroTitle.textColor=UIColor.whiteColor;self.heroTitle.numberOfLines=2;
@@ -468,6 +466,10 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];if(self.homeMode)[self refreshHomeModules];}
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
+    if(previousTraitCollection && [self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]){
+        HostStyleNavigation(self.navigationController);
+        HostRefreshAppearanceLayers(self.view.window);
+    }
     if(previousTraitCollection && ![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]){
         [self.grid.collectionViewLayout invalidateLayout];
         [self.grid reloadData];
@@ -851,6 +853,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     return cell;
 }
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip {
+    HostAnimateSelection([collectionView cellForItemAtIndexPath:ip]);
     MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=self.items[ip.item];detail.source=self.source;detail.provider=self.provider;detail.onPlay=self.onPlay;[self.navigationController pushViewController:detail animated:YES];
 }
 @end

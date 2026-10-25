@@ -6,20 +6,37 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class GlobalThemeContracts(unittest.TestCase):
-    def test_theme_palette_has_persisted_dark_and_light_styles(self):
+    def test_theme_palette_has_persisted_system_light_and_dark_styles(self):
         theme = (ROOT / "Sources/HostTheme.h").read_text(encoding="utf-8")
         settings = (ROOT / "Sources/SettingsViewController.m").read_text(encoding="utf-8")
         app = (ROOT / "Sources/AppDelegate.m").read_text(encoding="utf-8")
         root = (ROOT / "Sources/RootViewController.m").read_text(encoding="utf-8")
 
         self.assertIn('HostDarkThemePreferenceKey = @"hostDarkTheme"', theme)
+        self.assertIn('HostThemeModePreferenceKey = @"hostThemeMode"', theme)
+        self.assertIn('@[@"system",@"light",@"dark"]', theme)
+        self.assertIn("HostSystemInterfaceStyle()==UIUserInterfaceStyleDark", theme)
         self.assertIn("UIUserInterfaceStyleDark", theme)
         self.assertIn("UIUserInterfaceStyleLight", theme)
-        self.assertIn('initWithItems:@[@"黑色",@"白色"]', settings)
+        self.assertIn('initWithItems:@[@"系统",@"浅色",@"深色"]', settings)
         self.assertIn("setBool:dark forKey:HostDarkThemePreferenceKey", settings)
-        self.assertIn("window.overrideUserInterfaceStyle=dark?UIUserInterfaceStyleDark:UIUserInterfaceStyleLight", settings)
+        self.assertIn("window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle()", settings)
         self.assertIn("HostSelectedInterfaceStyle()", app)
-        self.assertIn("window.overrideUserInterfaceStyle=value?UIUserInterfaceStyleDark:UIUserInterfaceStyleLight", root)
+        self.assertIn("HostThemeModePreferenceKey", root)
+
+    def test_global_glass_surfaces_and_reduced_motion_are_shared(self):
+        theme = (ROOT / "Sources/HostTheme.h").read_text(encoding="utf-8")
+        app = (ROOT / "Sources/AppDelegate.m").read_text(encoding="utf-8")
+        root = (ROOT / "Sources/RootViewController.m").read_text(encoding="utf-8")
+        media = (ROOT / "Sources/MediaBrowserViewController.m").read_text(encoding="utf-8")
+
+        self.assertIn("HostInstallGlassBackdrop(self.window)", app)
+        self.assertIn("HostStyleGlassCard(cell.contentView,9)", root)
+        self.assertIn("HostStyleGlassCard(self.contentView,10)", media)
+        self.assertIn("HostAnimateSelection", theme)
+        self.assertIn("UIAccessibilityIsReduceMotionEnabled()", theme)
+        self.assertIn("hasDifferentColorAppearanceComparedToTraitCollection", root)
+        self.assertIn("HostRefreshAppearanceLayers(self.view.window)", root)
 
     def test_primary_pages_use_shared_dynamic_palette(self):
         pages = (
