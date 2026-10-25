@@ -57,7 +57,8 @@ class NativeMediaAPITests(unittest.TestCase):
                     str(root / "Sources" / "MediaAPIClient.m"), "-o", executable,
                 ], capture_output=True, text=True)
                 self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
-                result = subprocess.run([executable, str(server.server_port)], check=True, capture_output=True, text=True, timeout=30)
+                result = subprocess.run([executable, str(server.server_port)], capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("Native TVBox JSON API adapter tests passed", result.stderr + result.stdout)
             self.assertTrue(any(query.get("filter") == ["true"] for query, _, _ in requests), "type 4 home asks for filters")
             self.assertTrue(any(query.get("wd") == ["fixture"] and query.get("quick") == ["false"] and query.get("pg") == ["2"] for query, _, _ in requests))

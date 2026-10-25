@@ -829,7 +829,24 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)openMediaTab {
     MediaBrowserViewController *page=(MediaBrowserViewController *)self.tabPages[@2];
     if(!page){page=[MediaBrowserViewController new];__weak typeof(self) weakSelf=self;
-        page.sourcesProvider=^{NSMutableArray *sources=[NSMutableArray array];for(NSDictionary *service in [ServiceStore services])if([ServiceStore isMediaService:service])[sources addObject:service];for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){NSString *catalogID=catalog[@"id"]?:@"";for(NSDictionary *site in [catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[]]){NSString *apiKind=[site[@"apiKind"] isKindOfClass:NSString.class]?site[@"apiKind"]:@"";if(!([apiKind isEqual:@"tvbox-api"]||[apiKind isEqual:@"maccms-api"])||![site[@"supported"] boolValue])continue;NSString *protocol=apiKind;NSString *siteID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalogID,site[@"key"]?:@""];NSString *type=site[@"type"]?:@"1";NSString *engine=[apiKind isEqual:@"maccms-api"]?@"MacCMS JSON/XML API":[NSString stringWithFormat:@"TVBox type %@ JSON API",type];NSMutableDictionary *source=[@{@"id":siteID,@"name":site[@"name"]?:@"影视来源",@"engine":engine,@"protocol":protocol,@"tvboxType":@([type integerValue]),@"api":site[@"api"]?:@"",@"url":site[@"api"]?:@"",@"options":site[@"ext"]?:@"",@"header":site[@"header"]?:@{},@"playUrl":site[@"playUrl"]?:@"",@"status":site[@"status"]?:@"可直接访问",@"catalogID":catalogID,@"catalogName":catalog[@"name"]?:@"资源目录",@"capabilities":@[@"home",@"category",@"search",@"detail",@"play"]} mutableCopy];[sources addObject:source];}}return sources;};
+        page.sourcesProvider=^{
+            NSMutableArray *sources=[NSMutableArray array];
+            for(NSDictionary *service in [ServiceStore services])if([ServiceStore isMediaService:service])[sources addObject:service];
+            for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){
+                NSString *catalogID=catalog[@"id"]?:@"";
+                NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];
+                for(NSDictionary *site in sites){
+                    NSString *apiKind=[site[@"apiKind"] isKindOfClass:NSString.class]?site[@"apiKind"]:@"";
+                    if(!([apiKind isEqual:@"tvbox-api"]||[apiKind isEqual:@"maccms-api"])||![site[@"supported"] boolValue])continue;
+                    NSString *protocol=apiKind,*siteID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalogID,site[@"key"]?:@""];
+                    NSString *type=site[@"type"]?:@"1";
+                    NSString *engine=[apiKind isEqual:@"maccms-api"]?@"MacCMS JSON/XML API":[NSString stringWithFormat:@"TVBox type %@ JSON API",type];
+                    NSMutableDictionary *source=[@{@"id":siteID,@"name":site[@"name"]?:@"影视来源",@"engine":engine,@"protocol":protocol,@"tvboxType":@([type integerValue]),@"api":site[@"api"]?:@"",@"url":site[@"api"]?:@"",@"options":site[@"ext"]?:@"",@"header":site[@"header"]?:@{},@"playUrl":site[@"playUrl"]?:@"",@"status":site[@"status"]?:@"可直接访问",@"catalogID":catalogID,@"catalogName":catalog[@"name"]?:@"资源目录",@"capabilities":@[@"home",@"category",@"search",@"detail",@"play"]} mutableCopy];
+                    [sources addObject:source];
+                }
+            }
+            return sources;
+        };
         page.onActivateService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf changeService:service enabled:YES completion:completion];};
         page.startupErrorProvider=^NSError *{return PyHost.startupError;};
         page.startupErrorForService=^NSError *(NSDictionary *service){return [PyHost startupErrorForServiceIdentifier:service[@"id"]];};
@@ -2266,7 +2283,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
                 [fields addEntriesFromDictionary:CCTVDiagnosticURLFields(url)];
                 [RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:fields];
                 [weakSelf.subscriptionTraceIDs removeObjectForKey:sourceKey];
-                NSUInteger retainedCount=[[ProfileStore metadata:sourceKey][@"cachedChannels"] isKindOfClass:NSArray.class]?[ProfileStore metadata:sourceKey][@"cachedChannels"].count:0;
+                NSDictionary *sourceMetadata=[ProfileStore metadata:sourceKey];id cachedChannels=sourceMetadata[@"cachedChannels"];
+                NSUInteger retainedCount=[cachedChannels isKindOfClass:NSArray.class]?[(NSArray *)cachedChannels count]:0;
                 if(!retainedCount)for(NSDictionary *channel in weakSelf.allChannels)if([channel[@"subscriptionSources"] containsObject:sourceKey])retainedCount++;
                 NSString *reason=err.localizedDescription?:parseError.localizedDescription?:[NSString stringWithFormat:@"HTTP %ld / 无有效 M3U",(long)status];
                 NSString *statusText=retainedCount?[NSString stringWithFormat:@"刷新失败 · 保留上次 %lu 个频道 · %@",(unsigned long)retainedCount,reason]:[NSString stringWithFormat:@"刷新失败 · %@",reason];
