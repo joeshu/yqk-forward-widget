@@ -17,7 +17,7 @@
     if(!query.length)return rows;
     return [rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){
         NSArray *keys=section==0?@[@"name",@"status",@"api"]:@[@"name",@"url"];
-        for(NSString *key in keys){id value=row[key];if([value isKindOfClass:NSString.class]&&[value.lowercaseString containsString:query])return YES;}
+        for(NSString *key in keys){id value=row[key];if([value isKindOfClass:NSString.class]&&[[(NSString *)value lowercaseString] containsString:query])return YES;}
         return NO;
     }]];
 }
