@@ -117,6 +117,15 @@ static NSString *MediaTVBoxResolvedPoster(NSString *value,NSDictionary *source) 
     NSURL *base=api.URL;if(![api.path hasSuffix:@"/"])base=[base URLByDeletingLastPathComponent];NSURL *resolved=[NSURL URLWithString:value relativeToURL:base].absoluteURL;NSURLComponents *parts=[NSURLComponents componentsWithURL:resolved resolvingAgainstBaseURL:NO];
     if(![@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]||!parts.host.length||parts.user.length||parts.password.length||resolved.absoluteString.length>8192)return value;return resolved.absoluteString;
 }
+static BOOL MediaTVBoxEpisodeAddressIsRelativeURL(NSString *value) {
+    if(!value.length)return NO;
+    NSString *lower=value.lowercaseString;
+    if([lower hasPrefix:@"/"]||[lower hasPrefix:@"./"]||[lower hasPrefix:@"../"]||[lower hasPrefix:@"//"])return YES;
+    NSString *extension=[NSURL URLWithString:value].pathExtension.lowercaseString;
+    static NSSet<NSString *> *extensions;static dispatch_once_t onceToken;
+    dispatch_once(&onceToken,^{extensions=[NSSet setWithArray:@[@"m3u8",@"mp4",@"m4v",@"mov",@"ts",@"flv",@"mpd",@"mp3",@"m4a"]];});
+    return [extensions containsObject:extension];
+}
 static NSArray<NSDictionary *> *MediaTVBoxCategories(NSDictionary *root) {
     NSArray *raw=MediaTVBoxArray(root[@"class"]?:root[@"categories"]);NSMutableArray *categories=[NSMutableArray array];
     for(id value in raw){NSDictionary *row=MediaTVBoxObject(value);NSString *identifier=MediaTVBoxFirstString(row,@[@"type_id",@"id",@"tid"]),*name=MediaTVBoxFirstString(row,@[@"type_name",@"name",@"title"]);if(identifier.length&&name.length)[categories addObject:@{@"id":identifier,@"name":name}];}
@@ -140,7 +149,7 @@ static NSDictionary *MediaTVBoxFilters(NSDictionary *root) {
 static NSArray<NSDictionary *> *MediaTVBoxEpisodes(NSString *playList,NSString *flag,NSDictionary *source) {
     NSMutableArray *episodes=[NSMutableArray array];NSUInteger index=0;
     for(NSString *entry in [playList componentsSeparatedByString:@"#"]){if(!entry.length)continue;NSRange split=[entry rangeOfString:@"$"];NSString *name=nil,*address=nil;if(split.location==NSNotFound||[[entry substringToIndex:split.location] containsString:@"://"]){name=[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1];address=entry;}else{name=[entry substringToIndex:split.location];address=[entry substringFromIndex:split.location+1];}
-        name=[name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];address=[address stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!address.length)continue;NSURLComponents *parts=[NSURLComponents componentsWithString:address];if(![@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]||!parts.host.length)address=MediaTVBoxResolvedPoster(address,source);
+        name=[name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];address=[address stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!address.length)continue;NSURLComponents *parts=[NSURLComponents componentsWithString:address];BOOL absoluteURL=[@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]&&parts.host.length;if(!absoluteURL&&MediaTVBoxEpisodeAddressIsRelativeURL(address))address=MediaTVBoxResolvedPoster(address,source);
         [episodes addObject:@{@"id":address,@"name":name.length?name:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1],@"lineId":flag?:@""}];index++;
     }
     return episodes;
