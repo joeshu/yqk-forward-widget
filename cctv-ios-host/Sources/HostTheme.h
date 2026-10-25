@@ -7,7 +7,7 @@ static char HostLayerBorderColorAssociationKey;
 static char HostAppearanceRefreshAssociationKey;
 
 static inline NSString *HostThemeMode(void) {
-    NSString *mode=NSUserDefaults.standardUserDefaults.stringForKey(HostThemeModePreferenceKey);
+    NSString *mode=[NSUserDefaults.standardUserDefaults stringForKey:HostThemeModePreferenceKey];
     if([@[@"system",@"light",@"dark"] containsObject:mode?:@""])return mode;
     if([NSUserDefaults.standardUserDefaults objectForKey:HostDarkThemePreferenceKey])
         return [NSUserDefaults.standardUserDefaults boolForKey:HostDarkThemePreferenceKey]?@"dark":@"light";
@@ -98,6 +98,16 @@ static inline UIColor *HostSuccessSurface(void) {
 static inline UIBlurEffect *HostGlassBlur(void) { return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]; }
 static inline void HostSetLayerBorderColor(UIView *view, UIColor *color);
 
+static inline void HostPinGradientLayer(CAGradientLayer *layer) {
+    NSArray<CAConstraint *> *constraints=@[
+        [CAConstraint constraintWithAttribute:kCAConstraintMinX relativeTo:@"superlayer" attribute:kCAConstraintMinX offset:0],
+        [CAConstraint constraintWithAttribute:kCAConstraintMaxX relativeTo:@"superlayer" attribute:kCAConstraintMaxX offset:0],
+        [CAConstraint constraintWithAttribute:kCAConstraintMinY relativeTo:@"superlayer" attribute:kCAConstraintMinY offset:0],
+        [CAConstraint constraintWithAttribute:kCAConstraintMaxY relativeTo:@"superlayer" attribute:kCAConstraintMaxY offset:0]
+    ];
+    [layer setConstraints:constraints];
+}
+
 static inline void HostInstallGlassBackdrop(UIView *target) {
     if(!target||objc_getAssociatedObject(target,&HostAppearanceRefreshAssociationKey))return;
     UIView *backdrop=[UIView new];
@@ -105,21 +115,20 @@ static inline void HostInstallGlassBackdrop(UIView *target) {
     backdrop.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     backdrop.userInteractionEnabled=NO;
     backdrop.backgroundColor=HostBackground();
+    backdrop.layer.layoutManager=[CAConstraintLayoutManager layoutManager];
     CAGradientLayer *base=[CAGradientLayer layer];
     base.frame=backdrop.bounds;
-    base.autoresizingMask=kCALayerWidthSizable|kCALayerHeightSizable;
     base.startPoint=CGPointMake(0,0);base.endPoint=CGPointMake(1,1);
+    HostPinGradientLayer(base);
     [backdrop.layer addSublayer:base];
     CAGradientLayer *rose=[CAGradientLayer layer];
-    rose.type=kCAGradientLayerTypeRadial;rose.frame=backdrop.bounds;
-    rose.autoresizingMask=kCALayerWidthSizable|kCALayerHeightSizable;
+    rose.type=kCAGradientLayerRadial;rose.frame=backdrop.bounds;
     rose.startPoint=CGPointMake(.88,.08);rose.endPoint=CGPointMake(.48,.48);
-    rose.locations=@[@0,@1];[backdrop.layer addSublayer:rose];
+    rose.locations=@[@0,@1];HostPinGradientLayer(rose);[backdrop.layer addSublayer:rose];
     CAGradientLayer *blue=[CAGradientLayer layer];
-    blue.type=kCAGradientLayerTypeRadial;blue.frame=backdrop.bounds;
-    blue.autoresizingMask=kCALayerWidthSizable|kCALayerHeightSizable;
+    blue.type=kCAGradientLayerRadial;blue.frame=backdrop.bounds;
     blue.startPoint=CGPointMake(.08,.78);blue.endPoint=CGPointMake(.58,.38);
-    blue.locations=@[@0,@1];[backdrop.layer addSublayer:blue];
+    blue.locations=@[@0,@1];HostPinGradientLayer(blue);[backdrop.layer addSublayer:blue];
     if([target isKindOfClass:UITableView.class])((UITableView *)target).backgroundView=backdrop;
     else [target insertSubview:backdrop atIndex:0];
     __weak UIView *weakBackdrop=backdrop;

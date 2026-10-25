@@ -232,6 +232,8 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[root valueForKey:@"tabPage"]
                       isKindOfClass:NSClassFromString(@"ConfigCenterViewController")],
                   @"configuration tab embedded");
+            UIStackView *resourceFilters=[[root valueForKey:@"tabPage"] valueForKey:@"kindStack"];
+            check(resourceFilters.arrangedSubviews.count==6, @"resources page exposes counted filters for all, VOD, live, catalogs, scripts and attention");
             capture(self.window, @"03-configuration");
             [root addSubscription];
           },
@@ -628,7 +630,8 @@ static void next(NSArray *steps, NSUInteger index) {
           }},
           @{ @"until":^BOOL{return mediaPage!=nil&&[[mediaPage valueForKey:@"homeMode"] boolValue];},@"run":^{
             UISegmentedControl *mode=[mediaPage valueForKey:@"modeControl"];UIScrollView *home=[mediaPage valueForKey:@"homeScroll"];UIStackView *homeStack=[mediaPage valueForKey:@"homeStack"];
-            check([mediaPage.title isEqual:@"首页"]&&mode.selectedSegmentIndex==0&&!home.hidden,@"media tab presents its configurable home before source browsing");check(homeStack.arrangedSubviews.count>0,@"media home renders configured modules and entry actions");capture(self.window,@"16-media-home");mode.selectedSegmentIndex=1;[mode sendActionsForControlEvents:UIControlEventValueChanged];
+            UIStackView *homeSelectors=[mediaPage valueForKey:@"selectionRow"];
+            check([mediaPage.title isEqual:@"首页"]&&mode.selectedSegmentIndex==0&&!home.hidden,@"media tab presents its configurable home before source browsing");check(homeStack.arrangedSubviews.count>0,@"media home renders configured modules and entry actions");check(!homeSelectors.hidden&&[[mediaPage valueForKey:@"sourceSelectButton"] accessibilityIdentifier]!=nil,@"home keeps the resource and platform selectors distinct and visible");capture(self.window,@"16-media-home");mode.selectedSegmentIndex=1;[mode sendActionsForControlEvents:UIControlEventValueChanged];
           }},
           @{ @"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]>0;},@"run":^{
             check([[mediaPage valueForKey:@"items"] count]==1,@"media library loads real JSON API into native poster grid");

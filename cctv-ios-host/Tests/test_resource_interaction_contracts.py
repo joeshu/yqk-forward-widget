@@ -17,11 +17,24 @@ class ResourceInteractionContracts(unittest.TestCase):
         cls.resource_detail = (ROOT / 'Sources/PluginResourceDetailViewController.m').read_text()
 
     def test_resource_filters_and_service_detail_use_distinct_controls(self):
-        self.assertIn('@[@"全部",@"影视",@"直播",@"待处理"]', self.catalog)
+        for kind in ('all', 'vod', 'live', 'catalog', 'script', 'attention'):
+            self.assertIn(f'@"id":@"{kind}"', self.catalog)
+        self.assertIn('resource-filter-', self.catalog)
+        self.assertIn('profile:profile matchesKind:identifier', self.catalog)
+        self.assertIn('initWithArrangedSubviews:@[running,more]', self.catalog)
         self.assertIn('onOpenResource', self.catalog)
         self.assertIn('onToggleProfile(p[@"source"], sender.on)', self.catalog)
         self.assertIn('onToggle=^', self.root)
         self.assertIn('isRunningServiceIdentifier', self.root)
+
+    def test_home_separates_source_and_platform_and_uses_bounded_recommendation_cache(self):
+        self.assertIn('MediaHomeModulesSchemaKey', self.detail)
+        self.assertIn('@"id":@"recommendations"', self.detail)
+        self.assertIn('homeFeatureCardForItem:', self.detail)
+        self.assertIn('operation:@"home" arguments:arguments maximumAge:24*60*60', self.detail)
+        self.assertIn('selectionRow.hidden=NO', self.detail)
+        self.assertIn('media-home-feature', self.detail)
+        self.assertIn('owner.generation!=generation', self.detail)
 
     def test_live_resource_uses_declared_route_and_can_configure_missing_route(self):
         self.assertIn('item[@"playlistPath"]', self.root)
