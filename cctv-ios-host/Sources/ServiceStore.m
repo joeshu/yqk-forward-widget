@@ -81,6 +81,16 @@ static BOOL ServiceRelativePath(NSString *path){
     return [self scriptPath:service];
 }
 + (BOOL)isMediaService:(NSDictionary *)service {return [service[@"manifest"] isKindOfClass:NSDictionary.class] && ![service[@"protocol"] isEqual:@"python-http"];}
++ (BOOL)isVODMediaService:(NSDictionary *)service {
+    if(![self isMediaService:service])return NO;
+    NSArray *capabilities=[service[@"capabilities"] isKindOfClass:NSArray.class]?service[@"capabilities"]:nil;
+    if(!capabilities.count)capabilities=[service[@"manifest"][@"capabilities"] isKindOfClass:NSArray.class]?service[@"manifest"][@"capabilities"]:@[];
+    // Preserve legacy generic media packages that predate capability metadata.
+    if(!capabilities.count)return YES;
+    NSSet *vodCapabilities=[NSSet setWithArray:@[@"vod",@"home",@"category",@"search",@"detail",@"play"]];
+    for(id capability in capabilities)if([capability isKindOfClass:NSString.class]&&[vodCapabilities containsObject:capability])return YES;
+    return NO;
+}
 + (void)save:(NSDictionary *)service {
     service=[self resolvedService:service];
     NSMutableArray *rows = [[self services] mutableCopy];

@@ -371,6 +371,73 @@ class NodeMediaHostTests(unittest.TestCase):
         resolved = self.call('resolve', ref=item['ref'])['result']
         self.assertEqual((resolved['url'], resolved['desc']), ('https://fixture.test/opaque%2Flive', 'fixture-user:3'))
         self.assertTrue(self.call('stop')['ok'])
+    def test_nanotv_v2_service_bridges_http_crypto_storage_channels_and_hls(self):
+        class Fixture(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                body=b'{\"ok\":true}'
+                self.send_response(200);self.send_header('Content-Type','application/json')
+                self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+        upstream=http.server.ThreadingHTTPServer(('127.0.0.1',0),Fixture)
+        thread=threading.Thread(target=upstream.serve_forever,daemon=True);thread.start()
+        try:
+            manifest={'id':'fixture-live','name':'Fixture Live','version':'2.0','apiVersion':2,
+                      'networkHosts':['127.0.0.1'],'mediaHosts':['127.0.0.1'],
+                      'mediaCredentialHosts':['127.0.0.1'],'capabilities':['http','crypto','storage','scheduler','media.hls']}
+            declaration=json.dumps({'declarationVersion':1,'manifest':manifest},separators=(',',':'))
+            source='''/* nanoTV-declaration
+__DECLARATION__
+*/
+(function(g){
+  g.nanoService={
+    manifest:{\"id\":\"fixture-live\",\"version\":\"2.0\",\"apiVersion\":2},
+    async start(host){
+      this.host=host;
+      const key=host.bytes.convert('00'.repeat(32),'hex','base64');
+      const plain=host.bytes.convert('round-trip','utf8','base64');
+      const sealed=host.crypto.seal({key,data:plain});
+      if(host.bytes.convert(host.crypto.open({key,data:sealed}),'base64','utf8')!=='round-trip')throw Error('AES-GCM bridge failed');
+      const rsa=host.crypto.rsaEncrypt({publicKey:'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkKeLy4ywWLSnBkwRyqYgF3HMIj05V5uuh5HjyEsZOWnu1NHu3jPQv3sr32wwQNYv5qapsNXmNgLUDHtgHZxqPQAYXltjSRc0qhcD286t62wOIHId8zXS3s1Jy4rgU4qjQWzI9rp/1sE0pMsmwTaJa4zuJ5iz8VwF8Av5oJ1k+HxY+/HLnjNlW1hmWLpuDYmkZYuAoTHa1VGeHQh9FEKI8ZcL3GTQphShUoC+Kg3P1hGUVTtCYapmzPS5lkAdwebuzwvTCfGiTErYZCnPBUSeV7BVlgjtLYIi29KvF0a8FHsJMfe/UdHcyW/RihsIYOtDQcRRpFGXyPXbVrzFJse24QIDAQAB',data:host.bytes.convert('test-device','utf8','base64')});
+      if(host.bytes.convert(rsa,'base64','bytes').length!==256)throw Error('RSA bridge failed');
+      if(host.crypto.gunzip(host.crypto.gzip(host.bytes.convert('gzip','utf8','base64')))!==host.bytes.convert('gzip','utf8','base64'))throw Error('gzip bridge failed');
+      host.storage.set('started',(host.storage.get('started')||0)+1);
+      if(host.crypto.digest('sha256','test').length!==64)throw Error('digest bridge failed');
+      const response=await host.http.request({url:'http://127.0.0.1:__PORT__/health',timeoutSeconds:3});
+      const native=await new Promise((resolve,reject)=>host.native.http(JSON.stringify({url:'http://127.0.0.1:__PORT__/health'}),value=>{const result=JSON.parse(value);result.ok?resolve(result):reject(Error(result.error))}));
+      if(response.status!==200||native.status!==200)throw Error('HTTP bridge failed');
+      host.scheduler.every('fixture-heartbeat',1000,()=>{});
+    },
+    channels(){return [{id:'cctv1',name:'CCTV-1',group:'央视',logo:''}]},
+    async resolve({channelID,query},host){
+      const media=host.media.openHLS({channelID,manifestURL:'http://127.0.0.1:__PORT__/live.m3u8',headers:{'User-Agent':'fixture'},expiresAt:Date.now()/1000+60,liveWindow:{minPollSeconds:5},refresh:async()=>({url:'http://127.0.0.1:__PORT__/fresh.m3u8',headers:{'User-Agent':'fixture'},expiresAt:Date.now()/1000+60})});
+      return {...media,channel:{id:channelID,name:'CCTV-1'},query,source:'fixture',resolutionVerified:false};
+    },
+    status(){return {started:this.host.storage.get('started')||0}},
+    stop(){this.stopped=true}
+  };
+})(globalThis);'''
+            source=source.replace('__DECLARATION__',declaration).replace('__PORT__',str(upstream.server_port))
+            (self.package/'nano.js').write_text(source)
+            started=self.call('start',packageRoot=str(self.package),dataDirectory=str(self.data),entry='nano.js',
+                              protocol='nanotv-service-v2',moduleType='script',pluginID='app-generated-service-id')
+            self.assertTrue(started['ok'],started)
+            self.assertEqual(started['result']['protocol'],'nanotv-service-v2')
+            self.assertIn('live',started['result']['capabilities'])
+            capabilities=self.call('capabilities')
+            self.assertTrue(capabilities['ok'],capabilities)
+            self.assertIn('live',capabilities['result']['capabilities'])
+            self.assertEqual(self.call('catalog')['result'][0]['id'],'cctv1')
+            resolved=self.call('resolve',ref='cctv1',query={'source':'bk'})
+            self.assertTrue(resolved['ok'],resolved)
+            self.assertEqual(resolved['result']['query']['source'],'bk')
+            self.assertTrue(resolved['result']['url'].endswith('/live.m3u8'))
+            refreshed=self.call('refreshMedia',sessionID=resolved['result']['sessionID'])
+            self.assertTrue(refreshed['ok'],refreshed)
+            self.assertTrue(refreshed['result']['url'].endswith('/fresh.m3u8'))
+            self.assertEqual(self.call('status')['result']['started'],1)
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            upstream.shutdown();upstream.server_close();thread.join(timeout=2)
 
 
 if __name__ == '__main__':

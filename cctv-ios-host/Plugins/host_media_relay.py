@@ -46,10 +46,13 @@ class MediaRelay:
         self.limit = limit
         self.targets = collections.OrderedDict()
         self.lock = threading.Lock()
+        self.refreshing = {}
+        self.refreshFailures = {}
         self.responses = set()
         self.stopping = threading.Event()
 
-    def register(self, url, headers, origin=None, diagnostic_id=None, fallback_url=None):
+    def register(self, url, headers, origin=None, diagnostic_id=None, fallback_url=None,
+                 refresh=None, refresh_after=0, refresh_interval=0, refresh_relative=None):
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('不支持的媒体地址')
@@ -65,17 +68,26 @@ class MediaRelay:
             diagnostic_id = ''
         origin = origin or (parsed.scheme.lower(), parsed.netloc.lower())
         key = (url, tuple(sorted(headers.items())), origin, fallback_url, diagnostic_id)
+        refresh = refresh if callable(refresh) else None
+        refresh_after = float(refresh_after or 0)
+        refresh_interval = max(0.0, min(float(refresh_interval or 0), 3600.0))
+        refresh_relative = str(refresh_relative)[:2048] if isinstance(refresh_relative, str) else None
         with self.lock:
             if self.stopping.is_set():
                 raise RuntimeError('媒体代理正在停止')
             for token, record in self.targets.items():
                 if record[0] == key:
+                    self.targets[token] = (key, record[1], diagnostic_id,
+                        refresh or record[3], refresh_after or record[4],
+                        refresh_interval or record[5], refresh_relative or record[6])
                     self.targets.move_to_end(token)
                     return token
             token = uuid.uuid4().hex
-            self.targets[token] = (key, time.monotonic(), diagnostic_id)
+            self.targets[token] = (key, time.monotonic(), diagnostic_id, refresh,
+                                   refresh_after, refresh_interval, refresh_relative)
             while len(self.targets) > self.limit:
-                self.targets.popitem(last=False)
+                removed, _ = self.targets.popitem(last=False)
+                self.refreshFailures.pop(removed, None)
             return token
 
     @staticmethod
@@ -87,7 +99,9 @@ class MediaRelay:
         parts = urllib.parse.urlsplit(url)
         return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
-    def rewrite(self, text, url, headers, origin, base, diagnostic_id=None):
+    def rewrite(self, text, url, headers, origin, base, diagnostic_id=None,
+                refresh=None, refresh_after=0, refresh_interval=0,
+                refresh_relative_base=None):
         parent = urllib.parse.urlsplit(url)
 
         def local(value):
@@ -102,7 +116,15 @@ class MediaRelay:
                 target = self._with_query(target, parent.query)
             if resolved.scheme.lower() not in ('http', 'https') or not resolved.hostname:
                 return value
-            token = self.register(target, headers, origin, diagnostic_id, fallback_url)
+            is_manifest=resolved.path.lower().endswith(('.m3u8','.m3u'))
+            relative=value if is_manifest and not urllib.parse.urlsplit(value).scheme and not value.startswith('//') else None
+            if relative and refresh_relative_base:
+                relative=urllib.parse.urljoin(refresh_relative_base,relative)
+            token = self.register(target, headers, origin, diagnostic_id, fallback_url,
+                refresh=refresh if is_manifest else None,
+                refresh_after=refresh_after if is_manifest else 0,
+                refresh_interval=refresh_interval if is_manifest else 0,
+                refresh_relative=relative)
             return base + '/media/' + token
         lines = []
         for line in text.splitlines():
@@ -112,6 +134,94 @@ class MediaRelay:
                 line = local(line.strip())
             lines.append(line)
         return '\n'.join(lines) + '\n'
+
+    @staticmethod
+    def _safe_refresh_headers(values):
+        if not isinstance(values,dict):
+            return {}
+        output={}
+        banned={'host','content-length','connection','transfer-encoding','keep-alive','upgrade'}
+        for name,value in list(values.items())[:64]:
+            key,text=str(name),str(value)
+            if (not re.fullmatch(r"[A-Za-z0-9!#$%&'*+.^_|~-]{1,128}",key) or len(text)>8192 or
+                    '\r' in text or '\n' in text or key.lower() in banned):
+                continue
+            output[key]=text
+        return output
+
+    def _refresh_record(self, token, force=False):
+        with self.lock:
+            record=self.targets.get(token)
+            if not record or not record[3] or self.stopping.is_set():
+                return record
+            failure=self.refreshFailures.get(token)
+            if failure and time.monotonic()<failure[1]:
+                raise RelayFailure('media_refresh_backoff')
+            if not force and (not record[4] or time.time()<record[4]):
+                return record
+            flight=self.refreshing.get(token)
+            owner=flight is None
+            if owner:
+                flight={'event':threading.Event(),'error':None}
+                self.refreshing[token]=flight
+        if not owner:
+            if not flight['event'].wait(15):
+                raise RelayFailure('media_refresh_timeout')
+            if flight['error'] is not None:
+                raise flight['error']
+            with self.lock:
+                return self.targets.get(token)
+        try:
+            value=record[3]()
+            if not isinstance(value,dict) or not isinstance(value.get('url'),str):
+                raise RelayFailure('media_refresh_invalid')
+            base_url=value['url']
+            base=urllib.parse.urlsplit(base_url)
+            if base.scheme.lower() not in ('http','https') or not base.hostname or base.username or base.password:
+                raise RelayFailure('media_refresh_invalid')
+            refreshed_url=base_url
+            relative=record[6]
+            if relative:
+                refreshed_url=urllib.parse.urljoin(base_url,relative)
+                child=urllib.parse.urlsplit(refreshed_url)
+                if self._same_origin(base,child) and base.query and not child.query:
+                    refreshed_url=self._with_query(refreshed_url,base.query)
+            target=urllib.parse.urlsplit(refreshed_url)
+            if target.scheme.lower() not in ('http','https') or not target.hostname or target.username or target.password:
+                raise RelayFailure('media_refresh_invalid')
+            headers=self._safe_refresh_headers(value.get('headers',{}))
+            origin=(base.scheme.lower(),base.netloc.lower())
+            key=(refreshed_url,tuple(sorted(headers.items())),origin,None,record[2])
+            interval=max(0.0,min(float(value.get('refreshInterval') or record[5] or 0),3600.0))
+            next_refresh=float(value.get('refreshAfter') or (time.time()+interval if interval else 0))
+            updated=(key,record[1],record[2],record[3],next_refresh,interval,relative)
+            with self.lock:
+                if token in self.targets and not self.stopping.is_set():
+                    self.targets[token]=updated
+                    self.targets.move_to_end(token)
+                    self.refreshFailures.pop(token,None)
+                    return updated
+                return None
+        except RelayFailure as error:
+            flight['error']=RelayFailure(error.stage)
+            with self.lock:
+                if token in self.targets and not self.stopping.is_set():
+                    attempts=self.refreshFailures.get(token,(0,0))[0]+1
+                    self.refreshFailures[token]=(attempts,time.monotonic()+min(60.0,2.0**min(attempts,6)))
+            raise
+        except Exception as error:
+            failure=RelayFailure('media_refresh_failed')
+            flight['error']=failure
+            with self.lock:
+                if token in self.targets and not self.stopping.is_set():
+                    attempts=self.refreshFailures.get(token,(0,0))[0]+1
+                    self.refreshFailures[token]=(attempts,time.monotonic()+min(60.0,2.0**min(attempts,6)))
+            raise failure from error
+        finally:
+            with self.lock:
+                event=self.refreshing.pop(token,None)
+                if event:
+                    event['event'].set()
 
     def _failed(self, handler, stage, diagnostic_id, url, status=502, error=None, upstream_status=0, sent=False):
         parsed = urllib.parse.urlsplit(url)
@@ -149,20 +259,27 @@ class MediaRelay:
             if not record or self.stopping.is_set():
                 handler.send_error(404, 'Expired media session')
                 return
-            key, _, diagnostic_id = record
-            url, pairs, origin, fallback_url, _ = key
             self.targets.move_to_end(token)
-        headers = dict(pairs)
-        parsed = urllib.parse.urlsplit(url)
-        if (parsed.scheme.lower(), parsed.netloc.lower()) != origin:
-            headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie')}
-        headers['Accept-Encoding'] = 'identity'
-        if handler.headers.get('Range'):
-            headers['Range'] = handler.headers['Range']
-        request = urllib.request.Request(url, headers=headers, method='HEAD' if head else 'GET')
+        key=record[0];url=key[0];diagnostic_id=record[2]
         response = None
         sent = False
         try:
+            refreshed=self._refresh_record(token)
+            if refreshed is None:
+                if self.stopping.is_set():
+                    return
+                raise RelayFailure('media_session_expired')
+            record=refreshed
+            key, _, diagnostic_id = record[:3]
+            url, pairs, origin, fallback_url, _ = key
+            headers = dict(pairs)
+            parsed = urllib.parse.urlsplit(url)
+            if (parsed.scheme.lower(), parsed.netloc.lower()) != origin:
+                headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie')}
+            headers['Accept-Encoding'] = 'identity'
+            if handler.headers.get('Range'):
+                headers['Range'] = handler.headers['Range']
+            request = urllib.request.Request(url, headers=headers, method='HEAD' if head else 'GET')
             try:
                 response = urllib.request.build_opener(ScopedRedirect()).open(request, timeout=8)
             except urllib.error.HTTPError as upstream_error:
@@ -171,6 +288,20 @@ class MediaRelay:
                     fallback_request = urllib.request.Request(fallback_url, headers=headers,
                         method='HEAD' if head else 'GET')
                     response = urllib.request.build_opener(ScopedRedirect()).open(fallback_request, timeout=8)
+                elif upstream_error.code in (401,403) and record[3]:
+                    upstream_error.close()
+                    record=self._refresh_record(token,force=True)
+                    if not record:raise RelayFailure('media_refresh_invalid')
+                    key, _, diagnostic_id = record[:3]
+                    url, pairs, origin, fallback_url, _ = key
+                    headers=dict(pairs)
+                    parsed=urllib.parse.urlsplit(url)
+                    if (parsed.scheme.lower(),parsed.netloc.lower())!=origin:
+                        headers={k:v for k,v in headers.items() if k.lower() not in ('authorization','cookie')}
+                    headers['Accept-Encoding']='identity'
+                    if handler.headers.get('Range'):headers['Range']=handler.headers['Range']
+                    refreshed_request=urllib.request.Request(url,headers=headers,method='HEAD' if head else 'GET')
+                    response=urllib.request.build_opener(ScopedRedirect()).open(refreshed_request,timeout=8)
                 else:
                     raise
             with self.lock:
@@ -194,7 +325,10 @@ class MediaRelay:
                     if original.query and self._same_origin(original, final):
                         final_url = self._with_query(final_url, original.query)
                 body = self.rewrite(text, final_url, dict(pairs), origin,
-                                    f'http://127.0.0.1:{handler.server.server_port}', diagnostic_id).encode()
+                                    f'http://127.0.0.1:{handler.server.server_port}', diagnostic_id,
+                                    refresh=record[3],refresh_after=record[4],
+                                    refresh_interval=record[5],
+                                    refresh_relative_base=record[6]).encode()
                 handler.send_response(200)
                 handler.send_header('Content-Type', 'application/vnd.apple.mpegurl')
                 handler.send_header('Content-Length', str(len(body)))
@@ -259,7 +393,12 @@ class MediaRelay:
         self.stopping.set()
         with self.lock:
             responses = list(self.responses)
+            flights = list(self.refreshing.values())
+            self.refreshing.clear()
             self.targets.clear()
+            self.refreshFailures.clear()
+        for event in flights:
+            event['event'].set()
         for response in responses:
             try:
                 response.close()

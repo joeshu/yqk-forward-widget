@@ -8,7 +8,7 @@
 static NSString *ServiceEngineName(NSDictionary *service){return [service[@"engine"] isEqual:@"node"]?@"Node.js Mobile":([service[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore":@"Python");}
 static NSString *ServiceProtocolName(NSDictionary *service){
     NSString *protocol=service[@"protocol"]?:@"";
-    NSDictionary *names=@{@"catvod-spider":@"CatPaw JS Spider",@"catvod-js":@"CatVod / TVBox JS",@"drpy":@"drpy 规则",@"iptv-extractor":@"IPTV JS Extractor",@"catpaw-http":@"CatPaw Node 服务",@"widget-extractor":@"Widget 影视解析脚本",@"cctvhost.media/1":@"CCTVHost JS API",@"python-spider":@"Python Spider",@"python-http":@"Python HTTP 服务"};
+    NSDictionary *names=@{@"catvod-spider":@"CatPaw JS Spider",@"catvod-js":@"CatVod / TVBox JS",@"drpy":@"drpy 规则",@"iptv-extractor":@"IPTV JS Extractor",@"catpaw-http":@"CatPaw Node 服务",@"widget-extractor":@"Widget 影视解析脚本",@"nanotv-service-v2":@"NanoTV 实时频道服务",@"cctvhost.media/1":@"CCTVHost JS API",@"python-spider":@"Python Spider",@"python-http":@"Python HTTP 服务"};
     NSString *name=names[protocol]?: (protocol.length?protocol:@"未识别");
     NSDictionary *manifest=[service[@"manifest"] isKindOfClass:NSDictionary.class]?service[@"manifest"]:@{};
     NSString *moduleType=manifest[@"moduleType"];
@@ -39,7 +39,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 @property(nonatomic,strong) NSDate *lastProbeResponseAt;
 @end
 @implementation ServiceDetailViewController
-- (BOOL)opensMedia {NSArray *caps=self.service[@"capabilities"];return [ServiceStore isMediaService:self.service] && (![caps isKindOfClass:NSArray.class] || !caps.count || [caps containsObject:@"detail"] || [caps containsObject:@"play"]);}
+- (BOOL)opensMedia {return [ServiceStore isVODMediaService:self.service];}
 - (instancetype)init {
     return [super initWithStyle:UITableViewStyleInsetGrouped];
 }
@@ -148,7 +148,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
         NSDateFormatter *fmt = [NSDateFormatter new];
         fmt.dateFormat = @"yyyy-MM-dd HH:mm";
         NSDictionary *manifest=[self.service[@"manifest"] isKindOfClass:NSDictionary.class]?self.service[@"manifest"]:@{};
-        id rawVersion=manifest[@"version"]?:self.service[@"version"];
+        id rawVersion=manifest[@"version"]?:manifest[@"pluginVersion"]?:self.service[@"version"];
         NSString *version=[rawVersion isKindOfClass:NSString.class]&&[rawVersion length]?rawVersion:@"未知";
         NSArray *values = @[
             ServiceEngineName(self.service),

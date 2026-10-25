@@ -25,7 +25,7 @@
 
 @implementation PluginResourceDetailViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
-- (BOOL)mediaCapable {return [ServiceStore isMediaService:self.service];}
+- (BOOL)mediaCapable {return [ServiceStore isVODMediaService:self.service];}
 - (BOOL)liveCapable {NSArray *caps=[self.service[@"capabilities"] isKindOfClass:NSArray.class]?self.service[@"capabilities"]:@[];return [self.service[@"playlistPath"] length]>0||[caps containsObject:@"live"]||[self.service[@"protocol"] isEqual:@"python-http"];}
 - (BOOL)running {return [PyHost isRunningServiceIdentifier:self.service[@"id"]];}
 - (NSString *)baseURL {NSInteger port=[self.service[@"port"] integerValue];return [NSString stringWithFormat:@"http://127.0.0.1:%ld",(long)port];}
@@ -52,7 +52,9 @@
     if([self.service[@"protocol"] isEqual:@"catpaw-http"]){[rows addObject:@{@"title":@"源配置与账号",@"value":@"管理此源的站点、网盘与登录信息",@"action":@"configuration"}];
         NSDictionary *states=@{@"verified":@"已下载并通过 MD5 校验",@"downloaded_without_checksum":@"已下载 · 来源未提供配置校验",@"missing_using_defaults":@"未提供配套配置 · 启动时使用脚本默认值"};
         [rows addObject:@{@"title":@"配套配置",@"value":states[self.service[@"configurationState"]?:@""]?:([self.service[@"manifest"][@"configEntry"] length]?@"包内配置":@"未知 · 可检查更新补齐")}];}
-    if([self.service[@"url"] length]){[rows addObject:@{@"title":@"文件校验",@"value":[self.service[@"downloadChecksum"] length]?@"MD5 校验已通过（不代表内容已播放）":@"未提供文件校验"}];[rows addObject:@{@"title":@"资源来源",@"value":self.service[@"url"],@"action":@"copySource"}];}
+    NSArray *verifiedLocalChecksums=[self.service[@"manifest"][@"verifiedLocalChecksums"] isKindOfClass:NSArray.class]?self.service[@"manifest"][@"verifiedLocalChecksums"]:@[];
+    if([self.service[@"url"] length]){NSString *status=[self.service[@"downloadChecksum"] length]?@"下载时 MD5 校验已通过（不代表内容已播放）":@"未提供文件校验";if(verifiedLocalChecksums.count)status=[status stringByAppendingFormat:@"；ZIP 内 %@ 已校验",[verifiedLocalChecksums componentsJoinedByString:@"、"]];[rows addObject:@{@"title":@"文件校验",@"value":status}];[rows addObject:@{@"title":@"资源来源",@"value":self.service[@"url"],@"action":@"copySource"}];}
+    else if(verifiedLocalChecksums.count)[rows addObject:@{@"title":@"文件校验",@"value":[NSString stringWithFormat:@"ZIP 内 MD5 已通过：%@",[verifiedLocalChecksums componentsJoinedByString:@"、"]]}];
     return rows;
 }
 - (NSArray *)managementRows {

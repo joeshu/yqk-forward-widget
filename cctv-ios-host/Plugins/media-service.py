@@ -278,7 +278,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parts.path.startswith('/live/') and parts.path.endswith('.m3u8'):
                 ref = urllib.parse.unquote(parts.path[len('/live/'):-len('.m3u8')])
-                result = runtime.call('resolve', {'ref': ref, 'id': ref, 'selfBase': f'http://127.0.0.1:{self.server.server_port}', 'userAgent': self.headers.get('User-Agent', '')})
+                query = {key: values[-1] for key, values in urllib.parse.parse_qs(parts.query).items()}
+                result = runtime.call('resolve', {'ref': ref, 'id': ref, 'query': query,
+                    'selfBase': f'http://127.0.0.1:{self.server.server_port}', 'userAgent': self.headers.get('User-Agent', '')})
                 manifest = result.get('manifestText') if isinstance(result, dict) else None
                 if isinstance(manifest, str) and manifest.lstrip().startswith('#EXTM3U'):
                     body = manifest.encode()
@@ -289,13 +291,29 @@ class Handler(BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(body)
                     return
+                session_id = result.get('sessionID') if isinstance(result, dict) else None
+                refresh_interval = float(result.get('refreshInterval') or 0) if isinstance(result, dict) else 0
+                refresh_after = float(result.get('refreshAfter') or 0) if isinstance(result, dict) else 0
+                expires_at = float(result.get('expiresAt') or 0) if isinstance(result, dict) else 0
+                refresh = None
+                if isinstance(session_id, str) and session_id:
+                    def refresh_media():
+                        value = runtime.call('refreshMedia', {'sessionID': session_id})
+                        if not isinstance(value, dict) or not isinstance(value.get('url'), str):
+                            raise MediaError('MEDIA_REFRESH_FAILED', '插件没有返回有效的媒体刷新结果', True)
+                        return {'url': value['url'], 'headers': value.get('headers') or {},
+                                'expiresAt': value.get('expiresAt') or expires_at,
+                                'refreshInterval': value.get('refreshInterval') or refresh_interval,
+                                'refreshAfter': value.get('refreshAfter') or 0}
+                    refresh = refresh_media
                 result = playback(result)
                 if result['parse']:
                     raise MediaError('PARSER_REQUIRED', '此频道返回网页，请通过影视页面打开')
                 url = result['url']
                 if result['headers'] or is_hls_url(url):
                     url = f'http://127.0.0.1:{self.server.server_port}/media/' + self.server.relay.register(
-                        url, result['headers'], diagnostic_id=correlation_id or request_id)
+                        url, result['headers'], diagnostic_id=correlation_id or request_id,
+                        refresh=refresh,refresh_after=refresh_after,refresh_interval=refresh_interval)
                 self.send_response(302)
                 self.send_header('Location', url)
                 self.send_header('Content-Length', '0')

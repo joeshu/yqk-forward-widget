@@ -6,6 +6,10 @@
 + (NSString *)scriptPath:(NSDictionary *)service;
 + (NSString *)codePath:(NSDictionary *)service;
 + (BOOL)isMediaService:(NSDictionary *)service;
+/// Whether an imported service exposes a VOD browsing/playback flow. Manifest
+/// services can also be live-only; keep this separate from isMediaService,
+/// which selects the local media-service runtime.
++ (BOOL)isVODMediaService:(NSDictionary *)service;
 + (void)save:(NSDictionary *)service;
 /// Caller must first confirm that this service is stopped. Retains code for rollback and all user data.
 + (NSDictionary *)replaceImportedService:(NSDictionary *)existing withService:(NSDictionary *)incoming error:(NSError **)error;

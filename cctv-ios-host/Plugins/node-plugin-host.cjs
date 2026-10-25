@@ -2,7 +2,7 @@
  * This host is a lifecycle boundary, not an OS security/process sandbox.
  */
 'use strict'
-const http=require('node:http'),https=require('node:https'),net=require('node:net')
+const http=require('node:http'),https=require('node:https'),net=require('node:net'),nodeCrypto=require('node:crypto'),zlib=require('node:zlib')
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm')
 const bundledFetch=fs.existsSync(path.join(__dirname,'node-fetch.bundle.cjs'))?path.join(__dirname,'node-fetch.bundle.cjs'):path.join(__dirname,'../GeneratedJS/node-fetch.bundle.cjs')
 const fetchExports=require(bundledFetch),nativeFetch=fetchExports.default||fetchExports
@@ -81,6 +81,7 @@ net.Server.prototype.listen=function(...args){
 }
 function cancelHandles(owner,closeServers=true){
   if(closeServers){for(const {event,wrapped} of owner.listeners)processRemove.call(process,event,wrapped);owner.listeners.length=0;for(const watcher of owner.watchers){try{watcher.close()}catch{}}owner.watchers.clear()}
+  for(const controller of owner.nanoControllers||[]){try{controller.abort()}catch{}}owner.nanoControllers?.clear();owner.nanoMediaSessions?.clear()
   for(const [timer,clear] of owner.timers){try{original[clear](timer)}catch(error){appendLog(owner,'定时器清理失败：'+(error?.message||String(error)))}}
   owner.timers.clear()
   for(const stream of owner.streams){try{stream.destroy()}catch(error){appendLog(owner,'流清理失败：'+(error?.message||String(error)))}}
@@ -90,9 +91,147 @@ function cancelHandles(owner,closeServers=true){
 function deadline(promise,ms,label){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=original.setTimeout(()=>reject(Error(label)),ms)})]).finally(()=>original.clearTimeout(timer))}
 function readableRoot(value){const root=fs.realpathSync(value);if(!root.startsWith(allowedRoot+path.sep))throw Error('Node 资源不在已安装目录中');return root}
 function entryPath(root,entry){const value=fs.realpathSync(path.resolve(root,entry));if(!value.startsWith(root+path.sep))throw Error('Node 入口超出资源目录');return value}
-async function readLimited(response){if(!response?.body)return Buffer.alloc(0);let length=0,chunks=[];for await(const chunk of response.body){length+=chunk.length;if(length>2*1024*1024)throw Error('Node 来源响应超过 2 MB');chunks.push(Buffer.from(chunk))}return Buffer.concat(chunks)}
+async function readLimited(response,limit=2*1024*1024){if(!response?.body)return Buffer.alloc(0);let length=0,chunks=[];for await(const chunk of response.body){length+=chunk.length;if(length>limit)throw Error('Node 来源响应超过大小限制');chunks.push(Buffer.from(chunk))}return Buffer.concat(chunks)}
 function safeWidgetURL(value){try{const url=new URL(String(value||''));return ['http:','https:'].includes(url.protocol)&&url.hostname&&!url.username&&!url.password&&url.href.length<=8192?url.href:''}catch{return ''}}
 function pluginHTTPURL(value){const url=new URL(String(value||''));if(!['http:','https:'].includes(url.protocol)||!url.hostname||url.username||url.password||url.href.length>8192)throw Error('插件 HTTP 仅支持有效的 HTTP/HTTPS 地址');return url}
+function nanoDeclaration(source){
+  const match=/\/\*\s*nanoTV-declaration\s*([\s\S]*?)\s*\*\//.exec(source)
+  if(!match)return null
+  let declaration
+  try{declaration=JSON.parse(match[1])}catch{throw Error('NanoTV 声明头不是有效 JSON')}
+  const manifest=declaration?.manifest
+  const validHosts=value=>Array.isArray(value)&&value.length>0&&value.length<=64&&value.every(host=>typeof host==='string'&&host.length<=255&&/^\.?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$/.test(host))
+  if(declaration?.declarationVersion!==1||manifest?.apiVersion!==2||typeof manifest.id!=='string'||!manifest.id.length||manifest.id.length>128||!Array.isArray(manifest.capabilities)||!manifest.capabilities.length||manifest.capabilities.length>32||!manifest.capabilities.every(value=>typeof value==='string'&&value.length<=64)||!manifest.capabilities.includes('http')||!validHosts(manifest.networkHosts)||(['mediaHosts','mediaCredentialHosts'].some(key=>manifest[key]!==undefined&&!validHosts(manifest[key]))))throw Error('NanoTV 服务声明版本或字段不受支持')
+  return {declaration,manifest}
+}
+function nanoHost(owner,manifest){
+  const hostAllowed=(value,field='networkHosts')=>{
+    let target
+    try{target=pluginHTTPURL(value)}catch{return false}
+    const roots=manifest[field]||manifest.networkHosts||[]
+    return roots.some(root=>{const suffix=String(root||'').replace(/^\./,'').toLowerCase();return suffix&&((target.hostname.toLowerCase()===suffix)||target.hostname.toLowerCase().endsWith('.'+suffix))})
+  }
+  const safeLog=value=>String(value??'').replace(/https?:\/\/[^\s"'<>]+/gi,url=>{try{const parsed=new URL(url);return parsed.origin+'/[redacted]'}catch{return '[URL redacted]'}}).replace(/\b(cKey|flowid|APPSIGN|token|sig|signature|cookie|authorization|fingerprint)\s*[=:]\s*[^\s,;]+/gi,'$1=[redacted]').replace(/[\u0000-\u001f\u007f]+/g,' ').slice(0,512)
+  const statePath=path.join(owner.data,'nanotv-storage.json')
+  let state={};try{state=JSON.parse(fs.readFileSync(statePath,'utf8'))}catch{}
+  if(!state||typeof state!=='object'||Array.isArray(state))state={}
+  const save=()=>{const text=JSON.stringify(state);if(Buffer.byteLength(text)>512*1024)throw Error('NanoTV 插件存储超过 512 KB');const temp=statePath+'.tmp';fs.writeFileSync(temp,text,{mode:0o600});fs.renameSync(temp,statePath)}
+  const mediaHeaders=input=>widgetHeaders(input)
+  const mediaSessions=owner.nanoMediaSessions=new Map(),controllers=owner.nanoControllers=new Set(),schedulers=owner.nanoSchedulers=new Map()
+  const request=async options=>{
+    if(!options||typeof options!=='object')throw Error('NanoTV HTTP 请求参数无效')
+    let url=pluginHTTPURL(options.url),method=String(options.method||'GET').toUpperCase()
+    if(!['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].includes(method))throw Error('NanoTV HTTP 方法不受支持')
+    let headers=widgetHeaders(options.headers),body=options.body
+    if(options.bodyEncoding==='base64'&&typeof body==='string')body=Buffer.from(body,'base64')
+    else if(options.bodyEncoding==='hex'&&typeof body==='string'){if(body.length%2||!/^[0-9a-f]*$/i.test(body))throw Error('NanoTV 请求体不是有效十六进制');body=Buffer.from(body,'hex')}
+    else if(body!=null&&!Buffer.isBuffer(body)&&!(body instanceof Uint8Array))body=Buffer.from(String(body),'utf8')
+    if(body&&body.length>2*1024*1024)throw Error('NanoTV HTTP 请求体超过 2 MB')
+    const timeout=Math.max(1000,Math.min(Number(options.timeoutSeconds)*1000||15000,30000))
+    let response,bytes
+    for(let redirects=0;redirects<=5;redirects++){
+      if(!hostAllowed(url.href))throw Error('NanoTV 网络地址不在声明的 networkHosts 中')
+      const controller=new AbortController();controllers.add(controller)
+      const timer=original.setTimeout(()=>controller.abort(),timeout)
+      let redirected=false
+      try{
+        response=await fetch(url.href,{method,headers,body:['GET','HEAD'].includes(method)?undefined:body,redirect:'manual',signal:controller.signal})
+        if([301,302,303,307,308].includes(response.status)){
+          const location=response.headers.get('location')
+          if(!location||redirects===5)throw Error('NanoTV HTTP 重定向无效或次数过多')
+          const next=new URL(location,url)
+          if(!hostAllowed(next.href))throw Error('NanoTV 重定向目标不在声明的 networkHosts 中')
+          if(next.origin!==url.origin){delete headers.authorization;delete headers.Authorization;delete headers.cookie;delete headers.Cookie}
+          if(response.status===303||((response.status===301||response.status===302)&&method==='POST')){method='GET';body=undefined}
+          url=next;redirected=true
+        }else bytes=await readLimited(response,8*1024*1024)
+      }catch(error){if(error?.name==='AbortError')throw Error('NanoTV 网络请求超时');throw Error(safeLog(error?.message||error))}
+      finally{original.clearTimeout(timer);controllers.delete(controller)}
+      if(redirected)continue
+      break
+    }
+    const encoding=String(options.responseEncoding||'utf8').toLowerCase()
+    const content=encoding==='base64'?bytes.toString('base64'):encoding==='hex'?bytes.toString('hex'):bytes.toString('utf8')
+    return {status:response.status,ok:response.status>=200&&response.status<300,body:content,headers:Object.fromEntries(response.headers),url:url.href}
+  }
+  const convert=(value,from,to)=>{
+    const source=String(from||'utf8').toLowerCase(),target=String(to||'utf8').toLowerCase()
+    let bytes
+    if(Array.isArray(value)||value instanceof Uint8Array)bytes=Buffer.from(value)
+    else if(source==='base64')bytes=Buffer.from(String(value||''),'base64')
+    else if(source==='hex'){const text=String(value||'');if(text.length%2||!/^[0-9a-f]*$/i.test(text))throw Error('NanoTV 字节转换输入无效');bytes=Buffer.from(text,'hex')}
+    else bytes=Buffer.from(String(value??''),'utf8')
+    if(target==='base64')return bytes.toString('base64')
+    if(target==='hex')return bytes.toString('hex')
+    if(target==='bytes'||target==='uint8array')return [...bytes]
+    if(target==='utf8'||target==='utf-8')return bytes.toString('utf8')
+    throw Error('NanoTV 字节转换编码不支持')
+  }
+  const crypto={
+    digest:(algorithm,value)=>nodeCrypto.createHash(String(algorithm).toLowerCase()).update(Buffer.from(String(value??''),'utf8')).digest('hex'),
+    seal:({key,data})=>{const secret=Buffer.from(String(key||''),'base64'),plain=Buffer.from(String(data||''),'base64');if(secret.length!==32||plain.length>1024*1024)throw Error('NanoTV AES-GCM 参数无效');const nonce=nodeCrypto.randomBytes(12),cipher=nodeCrypto.createCipheriv('aes-256-gcm',secret,nonce),encrypted=Buffer.concat([cipher.update(plain),cipher.final()]);return Buffer.concat([nonce,encrypted,cipher.getAuthTag()]).toString('base64')},
+    open:({key,data})=>{const secret=Buffer.from(String(key||''),'base64'),combined=Buffer.from(String(data||''),'base64');if(secret.length!==32||combined.length<28||combined.length>1024*1024)throw Error('NanoTV AES-GCM 参数无效');const decipher=nodeCrypto.createDecipheriv('aes-256-gcm',secret,combined.subarray(0,12));decipher.setAuthTag(combined.subarray(-16));return Buffer.concat([decipher.update(combined.subarray(12,-16)),decipher.final()]).toString('base64')},
+    rsaEncrypt:({publicKey,data})=>{const der=Buffer.from(String(publicKey||''),'base64'),pem='-----BEGIN PUBLIC KEY-----\n'+der.toString('base64').match(/.{1,64}/g).join('\n')+'\n-----END PUBLIC KEY-----';return nodeCrypto.publicEncrypt({key:pem,padding:nodeCrypto.constants.RSA_PKCS1_PADDING},Buffer.from(String(data||''),'base64')).toString('base64')},
+    gzip:value=>zlib.gzipSync(Buffer.from(String(value||''),'base64'),{level:6}).toString('base64'),
+    gunzip:value=>zlib.gunzipSync(Buffer.from(String(value||''),'base64'),{maxOutputLength:8*1024*1024}).toString('base64')
+  }
+  const scheduler={
+    every:(name,interval,callback)=>{const key=String(name||'timer');const prior=schedulers.get(key);if(prior)clearInterval(prior);if(schedulers.size>=16&&!prior)throw Error('NanoTV 定时任务超过 16 个');const timer=setInterval(()=>{if(owner.closed)return;try{const result=callback();if(result&&typeof result.catch==='function')result.catch(error=>appendLog(owner,'NanoTV 定时任务失败：'+safeLog(error?.message||error)))}catch(error){appendLog(owner,'NanoTV 定时任务失败：'+safeLog(error?.message||error))}},Math.max(1000,Math.min(Number(interval)||1000,3600000)));schedulers.set(key,timer);return key},
+    sleep:milliseconds=>new Promise(resolve=>setTimeout(resolve,Math.max(0,Math.min(Number(milliseconds)||0,120000))))
+  }
+  const refreshHLS=async id=>{
+    const session=mediaSessions.get(String(id||''))
+    if(!session||typeof session.refresh!=='function')throw Error('NanoTV HLS 会话没有可用的刷新回调')
+    if(!session.refreshPromise)session.refreshPromise=(async()=>{
+      const value=await session.refresh()
+      const url=String(value?.manifestURL||value?.url||'')
+      if(!hostAllowed(url,'mediaHosts'))throw Error('NanoTV HLS 刷新地址不在声明的 mediaHosts 中')
+      const headers=mediaHeaders(value.headers||session.headers)
+      if(Object.keys(headers).length&&!hostAllowed(url,'mediaCredentialHosts'))throw Error('NanoTV 媒体凭据地址不在声明的 mediaCredentialHosts 中')
+      const expiresAt=Number(value.expiresAt)||session.expiresAt||0
+      const now=Date.now()/1000
+      const interval=session.liveWindow?Math.max(5,Math.min(Number(session.liveWindow.minPollSeconds)||5,300)):
+        (expiresAt?Math.max(5,Math.min(300,expiresAt-now-8)):0)
+      Object.assign(session,{url,headers,expiresAt,refreshInterval:interval})
+      return {url,headers,expiresAt,refreshInterval:interval,refreshAfter:interval?now+interval:0}
+    })()
+    try{return await session.refreshPromise}finally{session.refreshPromise=null}
+  }
+  return {
+    http:{request},
+    crypto,
+    bytes:{convert},
+    storage:{get:key=>state[String(key)]===undefined?null:JSON.parse(JSON.stringify(state[String(key)])),set:(key,value)=>{const text=JSON.stringify(value);if(text===undefined||text.length>65536)throw Error('NanoTV 单项存储超过 64 KB');state[String(key)]=JSON.parse(text);save()},remove:key=>{delete state[String(key)];save()}},
+    scheduler,
+    media:{
+      isOpen:id=>mediaSessions.has(String(id)),
+      openHLS:options=>{
+        const url=String(options?.manifestURL||'')
+        if(!hostAllowed(url,'mediaHosts'))throw Error('NanoTV HLS 地址不在声明的 mediaHosts 中')
+        const headers=mediaHeaders(options?.headers)
+        if(Object.keys(headers).length&&!hostAllowed(url,'mediaCredentialHosts'))throw Error('NanoTV 媒体凭据地址不在声明的 mediaCredentialHosts 中')
+        const expiresAt=Number(options.expiresAt)||0,now=Date.now()/1000
+        const liveWindow=options.liveWindow&&typeof options.liveWindow==='object'?options.liveWindow:null
+        const refreshInterval=liveWindow?Math.max(5,Math.min(Number(liveWindow.minPollSeconds)||5,300)):(expiresAt?Math.max(5,Math.min(300,expiresAt-now-8)):0)
+        const sessionID=nodeCrypto.randomUUID()
+        mediaSessions.set(sessionID,{url,headers,expiresAt,liveWindow,channelID:String(options.channelID||''),refreshInterval,refresh:typeof options.refresh==='function'?options.refresh:null})
+        while(mediaSessions.size>64)mediaSessions.delete(mediaSessions.keys().next().value)
+        return {sessionID,url,headers,expiresAt,refreshInterval,refreshAfter:refreshInterval?now+refreshInterval:0}
+      },
+      refreshHLS,
+      info:id=>{const value=mediaSessions.get(String(id||''));return value?{sessionID:String(id),channelID:String(value.channelID||'')}:null}
+    },
+    now:()=>Date.now(),
+    randomHex:bytes=>nodeCrypto.randomBytes(Math.max(0,Math.min(4096,Number(bytes)||0))).toString('hex'),
+    log:value=>appendLog(owner,safeLog(value)),
+    native:{
+      randomHex:bytes=>nodeCrypto.randomBytes(Math.max(0,Math.min(4096,Number(bytes)||0))).toString('hex'),
+      log:value=>appendLog(owner,safeLog(value)),
+      http:(raw,callback)=>{let options;try{options=JSON.parse(raw)}catch{callback(JSON.stringify({ok:false,error:'NanoTV native.http 参数不是 JSON'}));return}request(options).then(value=>callback(JSON.stringify(value)),error=>callback(JSON.stringify({ok:false,error:safeLog(error?.message||error)})))}
+    },
+    status:()=>({mediaSessions:mediaSessions.size,scheduledTasks:schedulers.size})
+  }
+}
 function boundedTimeout(value,fallback,maximum=20000){const requested=Number(value);return Math.max(1000,Math.min(Number.isFinite(requested)&&requested>0?requested:fallback,maximum))}
 function widgetHeaders(input){const output={};if(!input||typeof input!=='object')return output;for(const [name,value] of Object.entries(input).slice(0,64)){const key=String(name),text=String(value);if(!/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(key)||text.length>8192||/[\r\n]/.test(text)||/^(host|content-length|connection|transfer-encoding|keep-alive|upgrade)$/i.test(key))continue;output[key]=text}return output}
 async function widgetHTTP(method,url,body,options={}){
@@ -257,6 +396,34 @@ async function start(payload){
       owner.metadata={engine:'Node.js Mobile',protocol:'widget-extractor',capabilities:['search','detail','play']}
       return owner.metadata
     }
+    if(owner.protocol==='nanotv-service-v2'){
+      const source=fs.readFileSync(entry,'utf8')
+      if(Buffer.byteLength(source,'utf8')>8*1024*1024)throw Error('NanoTV 服务脚本超过 8 MB')
+      const declared=nanoDeclaration(source),host=nanoHost(owner,declared.manifest)
+      const sandbox={URL,URLSearchParams,TextEncoder,TextDecoder,Buffer,native:host.native,console:{
+        log:(...values)=>host.log(values.join(' ')),info:(...values)=>host.log(values.join(' ')),
+        warn:(...values)=>host.log(values.join(' ')),error:(...values)=>host.log(values.join(' '))
+      }}
+      sandbox.globalThis=sandbox
+      vm.createContext(sandbox)
+      vm.runInContext(source,sandbox,{timeout:5000,displayErrors:true,filename:payload.entry||'nanotv-service.js'})
+      const service=sandbox.nanoService
+      if(!service||service.manifest?.apiVersion!==2||typeof service.start!=='function'||typeof service.channels!=='function'||typeof service.resolve!=='function'||typeof service.stop!=='function')throw Error('NanoTV 入口未提供 apiVersion 2 的 start/channels/resolve/stop 接口')
+      if(service.manifest.id!==declared.manifest.id)throw Error('NanoTV 代码声明与头部 manifest 不一致')
+      owner.nanoService=service;owner.nanoHost=host
+      await service.start(host)
+      owner.module={
+        channels:()=>service.channels(),
+        resolve:request=>service.resolve({channelID:String(request.ref||request.id||request.channelID||''),query:request.query&&typeof request.query==='object'?request.query:{},rate:String(request.rate||request.query?.rate||'36p')},host),
+        refreshMedia:payload=>{const info=host.media.info(payload.sessionID);if(info&&typeof service.mediaActivity==='function')service.mediaActivity({kind:'activity',...info});return host.media.refreshHLS(payload.sessionID)},
+        status:()=>typeof service.status==='function'?service.status():{},
+        stop:()=>service.stop(host)
+      }
+      const channels=await service.channels()
+      if(!Array.isArray(channels)||channels.length>512||channels.some(row=>!row||typeof row.id!=='string'||!row.id||typeof row.name!=='string'))throw Error('NanoTV channels() 返回格式无效或超过 512 个频道')
+      owner.metadata={engine:'Node.js Mobile',version:process.versions.node,protocol:'nanotv-service-v2',pluginVersion:String(service.manifest.version||declared.manifest.version||''),capabilities:['live','resolve','device-registration','hls',...(channels.some(row=>row.catchup)?['catchup']:[])]}
+      return owner.metadata
+    }
     let module
     if(payload.moduleType==='esm')module=await import(pathToFileURL(entry).href+'?session='+encodeURIComponent(payload.session))
     else{for(const name of Object.keys(require.cache))if(name===entry||name.startsWith(root+path.sep))delete require.cache[name];module=require(entry)}
@@ -316,7 +483,8 @@ async function invoke(operation,payload){
   if(owner.stopPromise)throw Error('Node 插件正在停止')
   return scope.run(owner,async()=>{
     let value
-    if(owner.protocol==='catpaw-http'){
+    if(operation==='capabilities')value=owner.metadata
+    else if(owner.protocol==='catpaw-http'){
       if(operation==='configuration'){if(!owner.configurationURL)throw Error('此猫源未提供可用的本机配置页面');return {url:owner.configurationURL,headers:owner.authHeaders||{},configurationPage:true}}
       if(operation==='providers'){owner.providers=catpawProviders(await sourceJSON(owner.base+'/config',undefined,owner.authHeaders),owner.base);return owner.providers.map(({id,name})=>({id,name}))}
       const provider=payload.provider?owner.providers.find(item=>item.id===payload.provider):owner.providers[0]
@@ -327,6 +495,12 @@ async function invoke(operation,payload){
       if(operation==='home' && !value.list?.length){try{const recommended=await sourceJSON(owner.base+provider.api+'/homeVod',{},owner.authHeaders);value={...value,list:recommended.list||[]}}catch(error){if(![404,405].includes(error.statusCode))throw error}}
       value=catpawMediaAddresses(value,owner.base,owner.authHeaders||{})
       if(operation==='play'&&value&&typeof value==='object'&&typeof value.url==='string'&&new URL(value.url,owner.base).origin===owner.base&&owner.authHeaders)value={...value,header:{...(value.header||{}),...owner.authHeaders},headers:{...(value.headers||{}),...owner.authHeaders}}
+    }else if(owner.protocol==='nanotv-service-v2'){
+      if(operation==='catalog')value=await owner.module.channels()
+      else if(operation==='resolve')value=await owner.module.resolve(payload)
+      else if(operation==='status')value=owner.module.status()
+      else if(operation==='refreshMedia')value=await owner.module.refreshMedia(payload)
+      else throw Error('NanoTV 服务不支持 '+operation)
     }else if(owner.protocol==='widget-extractor'){
       if(operation==='home')value={class:[],list:[]}
       else if(operation==='search'){

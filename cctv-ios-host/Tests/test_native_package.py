@@ -50,6 +50,7 @@ class NativePackageTests(unittest.TestCase):
         result = self.inspect(file)
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['name'], result['engine'], result['manifest']['moduleType']), ('中文影视', 'javascript', 'esm'))
+        self.assertTrue(result['vodCapable'])
         self.assertTrue(result['entryExists'])
         self.assertTrue(result['archiveExists'])
 
@@ -143,6 +144,34 @@ class NativePackageTests(unittest.TestCase):
         repaired=self.inspect(self.archive({'index.js':source,'index.config.js':'module.exports={}', 'package.json':'{"type":"module"}'}))
         self.assertTrue(repaired['ok'],repaired)
         self.assertEqual((repaired['manifest']['moduleType'],repaired['nodePackageType']),('commonjs','commonjs'))
+
+    def test_nanotv_v2_declaration_is_classified_as_native_service_contract(self):
+        source='''/* nanoTV-declaration
+        {\"declarationVersion\":1,\"manifest\":{\"id\":\"fixture-live\",\"name\":\"Fixture Live\",\"version\":\"2.0\",\"apiVersion\":2,\"networkHosts\":[\".example.test\"],\"capabilities\":[\"http\",\"crypto\",\"storage\",\"scheduler\",\"media.hls\"]}}
+        */
+        (function(g){g.nanoService=createYSPService({})})(globalThis);function createYSPService(){return {start(){},channels(){return []},resolve(){},stop(){}}}'''
+        file=self.folder/'nano.js';file.write_text(source)
+        result=self.inspect(file)
+        self.assertTrue(result['ok'],result)
+        self.assertEqual((result['engine'],result['protocol'],result['manifest']['moduleType']),
+                         ('node','nanotv-service-v2','script'))
+        self.assertEqual(result['manifest']['name'],'Fixture Live')
+        self.assertEqual(result['manifest']['pluginVersion'],'2.0')
+        self.assertFalse(result['vodCapable'])
+        self.assertEqual(result['playlistPath'],'/all.m3u')
+
+    def test_local_zip_md5_pairs_are_verified_before_install(self):
+        source=b"module.exports={search(){return {list:[]}}}"
+        configuration=b"module.exports={video:{sites:[]}}"
+        entries={'index.js':source,'index.js.md5':hashlib.md5(source).hexdigest(),
+                 'index.config.js':configuration,'index.config.js.md5':hashlib.md5(configuration).hexdigest()}
+        result=self.inspect(self.archive(entries))
+        self.assertTrue(result['ok'],result)
+        self.assertEqual(result['verifiedLocalChecksums'],['index.js','index.config.js'])
+        entries['index.config.js.md5']='0'*32
+        result=self.inspect(self.archive(entries))
+        self.assertFalse(result['ok'],result)
+        self.assertIn('MD5',result['error'])
 
     def test_python_http_zip_with_companion_engine_uses_positional_port_and_mobile_defaults(self):
         source = '''import argparse

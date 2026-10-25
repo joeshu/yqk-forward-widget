@@ -22,6 +22,7 @@
 | drpy 规则 | JavaScriptCore + 固定版本 dr_py 引擎 | 声明 `var/let/const rule = {...}` 的规则文件 |
 | Python Spider | CPython 3.13 | Spider.init/homeContent/homeVideoContent/categoryContent/searchContent/detailContent/playerContent/destroy |
 | CatPawOpen / 猫爪 Node 服务 | Node.js Mobile 18.20.4 | `start/stop` + `/config`、`/spider/...` |
+| NanoTV v2 直播服务 | Node.js Mobile 18.20.4 | `nanoService.start/channels/resolve/stop`；本机 `/all.m3u`、`/live/<频道>.m3u8` 与 HLS 会话续期 |
 | iptv 项目提取模块（如咪咕） | Node.js Mobile | fetch(options) 返回 groups；resolve(ref, context) 返回 URL |
 | 已有 Python HTTP 服务 | CPython | 原有服务启动参数与 HTTP 接口 |
 
@@ -50,6 +51,12 @@ CatPaw JS Spider 按附件中的本机 Spider 规范运行：ESM 默认导出工
 CatVod/TVBox 风格 JS 支持 `export default site => ({ init(ext), home(filter), homeVod(), category(tid, pg, filter, extend), search(key, quick, pg), detail(id), play(flag, id, vipFlags) })`，也兼容旧版 `homeContent/categoryContent/searchContent/detailContent/playerContent`。站点参数可放在 `options` 本身，或 `options.site`；`options.ext` 会传给 `init(ext)`。标准 `net.http/net.json`、`local.get/set/delete` 可在本机使用。没有清单时，导入器会按入口代码识别这类方法式 Spider。
 
 CatPawOpen 服务 ZIP 可将 `entry` 指向服务入口（例如 `src/index.js`），入口导出 `start()`/`stop()` 并在本机监听，服务须实现 `/config` 与 `/spider/<key>/3/...`。导入器会检查入口及 `router.js`，自动识别常见 Node 服务包；Node 依赖须一并放进 ZIP 的 `node_modules`。启用后，影视来源选择器按 `/config` 提供的站点显示与搜索。
+
+NanoTV v2 的单文件 JS 带 `nanoTV-declaration` JSON 头并导出 `globalThis.nanoService`。CCTVHost 检查声明版本、入口、能力及网络主机后，将其识别为 Node.js Mobile 的直播服务。服务详情显示 NanoTV 协议版本和直播能力，不会把它误列为影视站点。选择“打开直播频道”会启动服务、读取 `/all.m3u` 并加入“频道”订阅；每个 M3U 项会把 `source`、`rate`、`start`、`end` 等查询参数传回 `resolve`，可用于来源选择、码率和 JCE 时移。HLS 子清单、分片和密钥经本机流式代理，请求播放清单时按服务回调刷新签名地址；多个并发刷新合并，刷新失败采用有界退避。服务停止会清理对应会话和定时器。
+
+NanoTV 首次打开频道才按脚本逻辑尝试设备会话注册；服务启动、`/health` 成功和 64 项静态频道表可读，都不能证明上游注册成功或 AVPlayer 已解码首帧。遇到黑屏时查看该服务独立日志中的设备注册、`resolve`、HTTP 状态和媒体代理阶段；校验通过只说明导入文件一致，不代表上游账号、地域、签名或视频流可用。当前附件脚本在 Node `--jitless` 下已离线验证启动、能力查询、64 项频道表、加密桥接和停止；未在此环境触发真实 ytpcloudws 注册或真机播放。
+
+`.js.md5` 可以直接作为链接导入。宿主先读取校验文件，再从最终校验响应的同目录下载脚本；若脚本声明猫源配置，会在同源下载 `index.config.js.md5` 与 `index.config.js`。本地 ZIP 中若带 `index.js.md5`、`index.config.js.md5`，导入前逐个核对并在详情显示已校验的文件名；不匹配时拒绝安装，原有服务和用户数据保留。MD5 是一致性校验，不是来源签名。
 
 TVBox 配置支持两种可直接使用的 HTTP JSON CMS 来源：type 1 和 type 4。type 1/4 作为影视来源加入首页；CCTVHost 按 `filter=true`、`wd/quick/pg`、`ac=detail/t/pg`、`ac=detail/ids` 与 `play/flag` 发送请求，保留源 URL 查询参数，并传递 `ext` 与请求头。列表、分类、影片详情、多线路、多分集、type 1 直出地址和 type 4 播放解析响应会映射到现有影视页与 AVPlayer/Web 播放链路。请求和响应受超时、URL、请求头、2 MiB 响应体限制；上游响应或解码失败会显示为来源错误。type 3/JAR 明确不支持，iOS 不会下载或运行 JAR；TVBox 的 JS/Python/ZIP 脚本仍走上面的现有脚本导入适配器。导入成功只表示文件和入口已识别，不能证明视频已播放，播放需以 AVPlayer 首帧为准。
 
@@ -88,4 +95,4 @@ Node 提供本机网络、文件、加密等接口，但 iOS 不支持桌面子�
 
 ## 验证范围
 
-已验证 JS 通用运行时的 ESM/CommonJS、CatPaw 路由、CatVod 新旧方法签名；Node 宿主中的 CatVod 方法、CatPawOpen HTTP 服务生命周期和多来源路由；Python Spider 协议、多线路和分页；媒体地址/请求头归一化、ZIP 路径与校验。Mac 上的 JavaScriptCore/Objective-C importer 测试由 macOS CI 执行；当前 Linux 环境跳过这些平台测试。第三方网站账号、网络与真机持续播放仍取决于上游服务和实际设备。CCTV SDK 的开台速度需真机测量，不提供未经测量的提升百分比。
+已验证 JS 通用运行时的 ESM/CommonJS、CatPaw 路由、CatVod 新旧方法签名；Node 宿主中的 CatPawOpen HTTP 服务、NanoTV v2 服务桥接和多个服务独立停止；Python Spider 协议、多线路和分页；媒体地址/请求头归一化、HLS 刷新、ZIP 路径与 MD5 校验。Mac 上的 JavaScriptCore/Objective-C importer 测试由 macOS CI 执行；当前 Linux 环境跳过这些平台测试。第三方网站账号、网络与真机持续播放仍取决于上游服务和实际设备。CCTV SDK 的开台速度需真机测量，不提供未经测量的提升百分比。

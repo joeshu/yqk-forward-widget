@@ -1,6 +1,7 @@
 #import "MediaPackageImporter.h"
 #import "ServiceStore.h"
 #include <zlib.h>
+#import <CommonCrypto/CommonDigest.h>
 
 static NSUInteger const PackageArchiveLimit=24*1024*1024;
 static NSUInteger const PackageFileLimit=8*1024*1024;
@@ -26,6 +27,24 @@ static NSData *ReadBounded(NSURL *url,NSUInteger limit,NSError **error){
 static BOOL PythonDeclaresArgument(NSString *source,NSString *argument){
     NSString *pattern=[NSString stringWithFormat:@"add_argument\\s*\\(\\s*['\"]%@['\"]",[NSRegularExpression escapedPatternForString:argument]];
     return [source rangeOfString:pattern options:NSRegularExpressionSearch].location!=NSNotFound;
+}
+static NSString *PackageMD5(NSData *data){
+    unsigned char digest[CC_MD5_DIGEST_LENGTH];CC_MD5(data.bytes,(CC_LONG)data.length,digest);
+    NSMutableString *value=[NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH*2];for(NSUInteger i=0;i<CC_MD5_DIGEST_LENGTH;i++)[value appendFormat:@"%02x",digest[i]];return value;
+}
+static BOOL VerifyPackageChecksum(NSString *root,NSString *filename,NSError **error){
+    NSString *checksumPath=[root stringByAppendingPathComponent:[filename stringByAppendingString:@".md5"]];
+    if(![NSFileManager.defaultManager fileExistsAtPath:checksumPath])return YES;
+    NSData *checksumData=ReadBounded([NSURL fileURLWithPath:checksumPath],512,error);
+    NSString *text=checksumData?[[NSString alloc] initWithData:checksumData encoding:NSUTF8StringEncoding]:nil;
+    NSString *token=[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    token=[[token componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] firstObject];
+    if(token.length!=32||[token rangeOfString:@"^[0-9a-fA-F]{32}$" options:NSRegularExpressionSearch].location==NSNotFound)return PackageError(error,[NSString stringWithFormat:@"%@ 的 MD5 文件格式无效",filename]);
+    NSString *targetPath=[root stringByAppendingPathComponent:filename];
+    NSData *target=ReadBounded([NSURL fileURLWithPath:targetPath],PackageFileLimit,error);
+    if(!target)return PackageError(error,[NSString stringWithFormat:@"%@ 的 MD5 校验文件存在，但内容文件缺失或超出大小限制",filename]);
+    if(![[PackageMD5(target) lowercaseString] isEqual:token.lowercaseString])return PackageError(error,[NSString stringWithFormat:@"%@ 与 ZIP 内 MD5 校验值不一致，未导入",filename]);
+    return YES;
 }
 static NSString *SuggestedPythonHTTPArguments(NSString *source){
     // Only pass launch flags when the imported script explicitly declares the
@@ -124,6 +143,10 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     NSFileManager *fm=NSFileManager.defaultManager;NSString *root=directory;
     NSArray *visible=[[fm contentsOfDirectoryAtPath:root error:error] filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *name,NSDictionary *bindings){return ![name hasPrefix:@"."] && ![name isEqual:@"__MACOSX"];}]];
     if(visible.count==1){BOOL isDirectory=NO;NSString *nested=[root stringByAppendingPathComponent:visible.firstObject];if([fm fileExistsAtPath:nested isDirectory:&isDirectory] && isDirectory)root=nested;}
+    // Local CatPaw ZIPs commonly ship index.js.md5 and index.config.js.md5.
+    // Verify those claims before the package is installed or its code is run.
+    NSMutableArray *verifiedLocalChecksums=[NSMutableArray array];
+    for(NSString *filename in @[@"index.js",@"index.config.js"]){NSString *sidecar=[root stringByAppendingPathComponent:[filename stringByAppendingString:@".md5"]];if([fm fileExistsAtPath:sidecar]){if(!VerifyPackageChecksum(root,filename,error))return nil;[verifiedLocalChecksums addObject:filename];}}
     NSData *manifestData=ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:@"cctvhost.json"]],65536,NULL);
     if(!manifestData && [fm fileExistsAtPath:[root stringByAppendingPathComponent:@"cctvhost.json"]]){PackageError(error,@"cctvhost.json 无法读取或超过 64 KB");return nil;}
     id manifest=manifestData?[NSJSONSerialization JSONObjectWithData:manifestData options:0 error:NULL]:nil;
@@ -150,6 +173,19 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     NSString *routerText=[[NSString alloc] initWithData:routerData encoding:NSUTF8StringEncoding]?:@"";
     if(!routerText.length && [fm fileExistsAtPath:[root stringByAppendingPathComponent:@"src/router.js"]])routerText=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:@"src/router.js"]],PackageFileLimit,NULL) encoding:NSUTF8StringEncoding]?:@"";
     NSString *serviceText=[NSString stringWithFormat:@"%@\n%@",text,routerText];
+    NSDictionary *nanoDeclaration=nil;
+    NSTextCheckingResult *nanoMatch=[[NSRegularExpression regularExpressionWithPattern:@"/\\*\\s*nanoTV-declaration\\s*([\\s\\S]*?)\\s*\\*/" options:0 error:NULL] firstMatchInString:text options:0 range:NSMakeRange(0,text.length)];
+    if(nanoMatch){NSString *json=[text substringWithRange:[nanoMatch rangeAtIndex:1]];NSData *jsonData=[json dataUsingEncoding:NSUTF8StringEncoding];id parsed=jsonData?[NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL]:nil;if([parsed isKindOfClass:NSDictionary.class])nanoDeclaration=parsed;else{PackageError(error,@"NanoTV 声明头不是有效 JSON");return nil;}}
+    NSDictionary *nanoManifest=[nanoDeclaration[@"manifest"] isKindOfClass:NSDictionary.class]?nanoDeclaration[@"manifest"]:@{};
+    NSArray *nanoCapabilities=[nanoManifest[@"capabilities"] isKindOfClass:NSArray.class]?nanoManifest[@"capabilities"]:@[];
+    NSArray *nanoHosts=[nanoManifest[@"networkHosts"] isKindOfClass:NSArray.class]?nanoManifest[@"networkHosts"]:@[];
+    BOOL nanoMetadataValid=nanoCapabilities.count>0&&nanoCapabilities.count<=32&&nanoHosts.count>0&&nanoHosts.count<=64;
+    for(id value in nanoCapabilities)if(![value isKindOfClass:NSString.class]||[value length]>64)nanoMetadataValid=NO;
+    NSString *hostPattern=@"^\\.?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$";
+    for(NSString *field in @[@"networkHosts",@"mediaHosts",@"mediaCredentialHosts"]){id values=nanoManifest[field];if(!values)continue;if(![values isKindOfClass:NSArray.class]||![values count]||[values count]>64){nanoMetadataValid=NO;continue;}for(id value in values)if(![value isKindOfClass:NSString.class]||[value length]>255||[value rangeOfString:hostPattern options:NSRegularExpressionSearch].location==NSNotFound)nanoMetadataValid=NO;}
+    BOOL nanoEntry=[text rangeOfString:@"(?:globalThis|g)\\s*\\.\\s*nanoService\\s*=" options:NSRegularExpressionSearch].location!=NSNotFound;
+    BOOL nanoServiceV2=[nanoDeclaration[@"declarationVersion"] isKindOfClass:NSNumber.class]&&[nanoDeclaration[@"declarationVersion"] integerValue]==1&&[nanoManifest[@"apiVersion"] isKindOfClass:NSNumber.class]&&[nanoManifest[@"apiVersion"] integerValue]==2&&[nanoManifest[@"id"] isKindOfClass:NSString.class]&&[nanoManifest[@"id"] length]>0&&nanoMetadataValid&&[nanoCapabilities containsObject:@"http"]&&nanoEntry;
+    if(nanoDeclaration && !nanoServiceV2){PackageError(error,@"NanoTV 声明不完整或版本不受支持");return nil;}
     BOOL catSpiderRoute=[serviceText rangeOfString:@"fastify\\s*\\.\\s*(?:post|route)\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catSpider=catSpiderRoute && [serviceText containsString:@"/home"] && [serviceText containsString:@"/detail"] && [serviceText containsString:@"/play"] && [serviceText rangeOfString:@"\\bmeta\\b" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catpawStart=[text rangeOfString:@"(?:export\\s+)?(?:async\\s+)?function\\s+start\\s*\\(|(?:const|let|var)\\s+start\\s*=|export\\s*\\{[^}]*\\bstart\\b" options:NSRegularExpressionSearch].location!=NSNotFound;
@@ -163,6 +199,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     BOOL widgetExtractor=[text containsString:@"WidgetMetadata"] && [text containsString:@"Widget.http"] && [text rangeOfString:@"(?:async\\s+)?function\\s+loadResource\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catVodMethods=[text rangeOfString:@"(?:(?:async\\s+)?(?:home|homeContent)\\s*\\(|\\b(?:home|homeContent)\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?category\\s*\\(|\\bcategory\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?detail\\s*\\(|\\bdetail\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?play\\s*\\(|\\bplay\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catVodQuickJS=catVodMethods && ([text containsString:@"export default"] || [text containsString:@"module.exports"]);
+    if(nanoServiceV2){runtime=@"node";protocol=@"nanotv-service-v2";moduleType=@"script";}
     if(!runtime.length && [entry.pathExtension.lowercaseString isEqual:@"py"])runtime=@"python";
     if([protocol isEqual:@"tvbox"] || [protocol isEqual:@"tvbox-js"] || [protocol isEqual:@"catvod-quickjs"] || [protocol isEqual:@"catvod-open-js"])protocol=@"catvod-js";
     if([protocol isEqual:@"catvod-open"])protocol=catpawOpen?@"catpaw-http":@"catvod-js";
@@ -197,11 +234,13 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         runtime=([@[@"catvod-spider"] containsObject:protocol] || ([protocol isEqual:@"catvod-js"]&&catvodDependencies))?@"javascript":((dependencies.count || (hasCommonJSRequire && !nodeProtocol))?@"node":@"javascript");
     }
     if(![@[@"esm",@"commonjs",@"script"] containsObject:moduleType] || ([runtime isEqual:@"python"] != [entry.pathExtension.lowercaseString isEqual:@"py"])){PackageError(error,@"入口类型与运行时声明不匹配");return nil;}
-    if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"catvod-spider",@"drpy",@"iptv-extractor",@"catpaw-http",@"widget-extractor"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}
+    if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"catvod-spider",@"drpy",@"iptv-extractor",@"catpaw-http",@"widget-extractor",@"nanotv-service-v2"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}
     if([protocol isEqual:@"catvod-spider"] && ![runtime isEqual:@"javascript"]){PackageError(error,@"CatPaw JS Spider 必须使用 JavaScriptCore 运行时（runtime: javascript）");return nil;}
     // Keep a small, typed manifest: no arbitrary paths or host control fields.
     NSMutableDictionary *clean=[@{@"schemaVersion":@1,@"entry":entry,@"runtime":runtime,@"protocol":protocol,@"moduleType":moduleType,@"name":([result[@"name"] isKindOfClass:NSString.class]?result[@"name"]:(package[@"name"]?:entry.stringByDeletingPathExtension))} mutableCopy];
     if(result[@"capabilities"]){if(![result[@"capabilities"] isKindOfClass:NSArray.class]){PackageError(error,@"capabilities 必须是字符串数组");return nil;}for(id value in result[@"capabilities"])if(![value isKindOfClass:NSString.class]){PackageError(error,@"capabilities 包含无效类型");return nil;}clean[@"capabilities"]=result[@"capabilities"];}
+    if(nanoServiceV2){clean[@"name"]=[nanoManifest[@"name"] isKindOfClass:NSString.class]?nanoManifest[@"name"]:clean[@"name"];clean[@"capabilities"]=nanoCapabilities;clean[@"pluginVersion"]=[nanoManifest[@"version"] isKindOfClass:NSString.class]?nanoManifest[@"version"]:@"";clean[@"apiVersion"]=@2;}
+    if(verifiedLocalChecksums.count)clean[@"verifiedLocalChecksums"]=verifiedLocalChecksums;
     if([result[@"options"] isKindOfClass:NSDictionary.class] || [result[@"options"] isKindOfClass:NSString.class])clean[@"options"]=result[@"options"];
     clean[@"packageRoot"]=root;
     if([protocol isEqual:@"catpaw-http"] && [fm fileExistsAtPath:[root stringByAppendingPathComponent:@"index.config.js"]])clean[@"configEntry"]=@"index.config.js";
@@ -264,6 +303,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         if(![fm moveItemAtPath:stage toPath:target error:error])return nil;
         NSMutableSet *ports=[NSMutableSet set];for(NSDictionary *existing in [ServiceStore services])[ports addObject:existing[@"port"]?:@0];NSInteger port=18780;while([ports containsObject:@(port)] && port<65535)port++;
         NSMutableDictionary *importedService=[@{@"id":identifier,@"name":manifest[@"name"],@"port":@(port),@"engine":manifest[@"runtime"],@"protocol":manifest[@"protocol"],@"manifest":manifest,@"packageRoot":[target stringByAppendingPathComponent:relative],@"archivePath":zip?[target stringByAppendingPathComponent:@"source.zip"]:@"",@"lan":@NO,@"updated":@(NSDate.date.timeIntervalSince1970),@"arguments":launchArguments} mutableCopy];
+        if([manifest[@"protocol"] isEqual:@"nanotv-service-v2"]){importedService[@"capabilities"]=@[@"live"];importedService[@"playlistPath"]=@"/all.m3u";}
         if(playlistPath.length)importedService[@"playlistPath"]=playlistPath;
         service=importedService;
     } @catch(NSException *exception){PackageError(error,@"资源包结构或清单无效，未执行代码");return nil;}

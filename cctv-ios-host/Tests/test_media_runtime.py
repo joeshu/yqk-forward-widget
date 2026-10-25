@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.parse
 from unittest import mock
@@ -530,6 +531,52 @@ class MediaTests(unittest.TestCase):
         relay.close()
         self.assertFalse(relay.targets)
 
+    def test_relay_refresh_updates_expiring_manifest_and_rebases_child_playlist(self):
+        relay=MediaRelay(limit=8)
+        refreshes=[]
+        def refresh():
+            refreshes.append(1)
+            return {'url':'https://new.test/live/master.m3u8?token=new',
+                    'headers':{'Referer':'https://new.test/'},
+                    'refreshInterval':30,'refreshAfter':time.time()+30}
+        root=relay.register('https://old.test/live/master.m3u8?token=old',{},refresh=refresh,
+                            refresh_after=time.time()-1,refresh_interval=30)
+        updated=relay._refresh_record(root)
+        self.assertEqual(updated[0][0],'https://new.test/live/master.m3u8?token=new')
+        self.assertEqual(dict(updated[0][1])['Referer'],'https://new.test/')
+        self.assertEqual(len(refreshes),1)
+        rewritten=relay.rewrite('#EXTM3U\nvariants/720/index.m3u8\n',
+            'https://old.test/live/master.m3u8?token=old',{},('https','old.test'),
+            'http://127.0.0.1:18780','refresh-child',refresh=refresh,
+            refresh_after=time.time()-1,refresh_interval=30)
+        token=rewritten.splitlines()[-1].rsplit('/',1)[-1]
+        child=relay._refresh_record(token)
+        self.assertEqual(child[0][0],'https://new.test/live/variants/720/index.m3u8?token=new')
+        self.assertEqual(len(refreshes),2)
+        nested=relay.rewrite('#EXTM3U\navc1/index.m3u8\n',child[0][0],dict(child[0][1]),child[0][2],
+            'http://127.0.0.1:18780','nested-child',refresh=refresh,
+            refresh_after=time.time()-1,refresh_interval=30,refresh_relative_base=child[6])
+        nested_token=nested.splitlines()[-1].rsplit('/',1)[-1]
+        grandchild=relay._refresh_record(nested_token)
+        self.assertEqual(grandchild[0][0],'https://new.test/live/variants/720/avc1/index.m3u8?token=new')
+        self.assertEqual(len(refreshes),3)
+        relay.close()
+
+    def test_failed_refresh_is_coalesced_and_uses_bounded_backoff(self):
+        relay=MediaRelay(limit=8)
+        calls=[]
+        def refresh():
+            calls.append(1)
+            raise OSError('upstream unavailable')
+        token=relay.register('https://old.test/live/master.m3u8',{},refresh=refresh,
+                             refresh_after=time.time()-1,refresh_interval=5)
+        with self.assertRaisesRegex(Exception,'media_refresh_failed'):
+            relay._refresh_record(token)
+        with self.assertRaisesRegex(Exception,'media_refresh_backoff'):
+            relay._refresh_record(token,force=True)
+        self.assertEqual(len(calls),1)
+        relay.close()
+
     def test_relay_inherits_signed_query_for_same_origin_children_only(self):
         relay = MediaRelay(limit=8)
         source = 'https://a.test/path/master.m3u8?token=shared%2Bvalue&expires=123'
@@ -635,6 +682,78 @@ class MediaTests(unittest.TestCase):
             client.close()
             for item in (upstream, server): item.shutdown();item.server_close()
             for thread in threads: thread.join(2)
+
+    def test_live_playlist_route_preserves_source_query_and_refreshes_host_media_session(self):
+        received=[]
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self,*_):pass
+            def do_GET(self):
+                received.append(self.path)
+                if urllib.parse.urlsplit(self.path).path=='/fresh.m3u8':
+                    body=b'#EXTM3U\n#EXTINF:6,\nsegment.ts\n'
+                    self.send_response(200);self.send_header('Content-Type','application/vnd.apple.mpegurl')
+                elif urllib.parse.urlsplit(self.path).path=='/segment.ts':
+                    body=b'segment-data';self.send_response(200);self.send_header('Content-Type','video/mp2t')
+                else:
+                    self.send_error(404);return
+                self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+        upstream=http.server.ThreadingHTTPServer(('127.0.0.1',0),Upstream)
+        base='http://127.0.0.1:'+str(upstream.server_port)
+        class Engine:
+            def __init__(self):self.calls=[]
+            def capabilities(self):return {'capabilities':['live']}
+            def call(self,operation,args):
+                self.calls.append((operation,dict(args)))
+                if operation=='resolve':
+                    return {'url':base+'/old.m3u8?token=old','headers':{},'sessionID':'session-ysp',
+                            'expiresAt':time.time()+60,'refreshInterval':5,'refreshAfter':time.time()-1}
+                if operation=='refreshMedia':
+                    return {'url':base+'/fresh.m3u8?token=fresh','headers':{},
+                            'expiresAt':time.time()+60,'refreshInterval':30,'refreshAfter':time.time()+30}
+                raise AssertionError(operation)
+            def close(self):pass
+        engine=Engine();runtime=media.MediaRuntime(engine)
+        server=transport.Server(('127.0.0.1',0),runtime)
+        threads=[threading.Thread(target=item.serve_forever,daemon=True) for item in (upstream,server)]
+        for thread in threads:thread.start()
+        client=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=4)
+        try:
+            client.request('GET','/live/cctv1.m3u8?source=bk&rate=fhd')
+            response=client.getresponse();response.read();self.assertEqual(response.status,302)
+            media_path=urllib.parse.urlsplit(response.getheader('Location')).path
+            client.request('GET',media_path);response=client.getresponse();playlist=response.read()
+            self.assertEqual(response.status,200);self.assertIn(b'/media/',playlist)
+            self.assertIn(('resolve',{'ref':'cctv1','id':'cctv1','query':{'source':'bk','rate':'fhd'},
+                'selfBase':'http://127.0.0.1:'+str(server.server_port),'userAgent':''}),engine.calls)
+            self.assertTrue(any(operation=='refreshMedia' and args['sessionID']=='session-ysp' for operation,args in engine.calls))
+            self.assertIn('/fresh.m3u8?token=fresh',received)
+            child=next(line for line in playlist.decode().splitlines() if line.startswith('http://127.0.0.1:'))
+            client.request('GET',urllib.parse.urlsplit(child).path);response=client.getresponse()
+            self.assertEqual((response.status,response.read()),(200,b'segment-data'))
+            self.assertIn('/segment.ts?token=fresh',received)
+        finally:
+            client.close();runtime.close()
+            for item in (upstream,server):item.shutdown();item.server_close()
+            for thread in threads:thread.join(2)
+
+    def test_live_catalog_becomes_channel_page_m3u_entries(self):
+        class Engine:
+            def capabilities(self):return {'capabilities':['live']}
+            def call(self,operation,args):
+                if operation=='catalog':return [{'id':'cctv1','name':'CCTV-1 综合','group':'央视','logo':'https://logo.test/cctv1.png'}]
+                raise AssertionError(operation)
+            def close(self):pass
+        runtime=media.MediaRuntime(Engine());server=transport.Server(('127.0.0.1',0),runtime)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        client=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=3)
+        try:
+            client.request('GET','/all.m3u');response=client.getresponse();playlist=response.read().decode()
+            self.assertEqual(response.status,200)
+            self.assertIn('#EXTM3U',playlist)
+            self.assertIn('group-title="央视",CCTV-1 综合',playlist)
+            self.assertIn(f'http://127.0.0.1:{server.server_port}/live/cctv1.m3u8',playlist)
+        finally:
+            client.close();runtime.close();server.shutdown();server.server_close();thread.join(2)
 
     def test_relay_falls_back_when_inherited_signature_is_scoped_to_manifest_path(self):
         received = []
