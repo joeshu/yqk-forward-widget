@@ -710,6 +710,15 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     if(self.homeMode){self.source=selected;self.provider=nil;self.providers=@[];self.client=nil;[self updateSelectionControls];[self refreshHomeModules];}
     else [self activate:selected];
 }
+- (void)openSourceIdentifier:(NSString *)identifier {
+    NSString *targetID=[identifier isKindOfClass:NSString.class]?[identifier stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";
+    if(!targetID.length){[self showMessage:@"没有指定影视来源" loading:NO];return;}
+    self.sources=self.sourcesProvider?self.sourcesProvider():@[];
+    NSDictionary *target=nil;for(NSDictionary *candidate in self.sources)if([candidate[@"id"] isEqual:targetID]){target=candidate;break;}
+    if(!target){[self updateSelectionControls];[self showMessage:@"此来源已从资源合集移除，请回到资源页重新选择" loading:NO];return;}
+    [NSUserDefaults.standardUserDefaults setObject:targetID forKey:@"selectedMediaSource"];
+    [self activate:target];
+}
 - (void)showMessage:(NSString *)message loading:(BOOL)loading {
     self.status.text=message;self.status.hidden=!message.length;self.resourceButton.hidden=loading || self.items.count>0;
     if(loading)[self.spinner startAnimating];else[self.spinner stopAnimating];

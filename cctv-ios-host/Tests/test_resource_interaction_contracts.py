@@ -36,6 +36,32 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('media-home-feature', self.detail)
         self.assertIn('owner.generation!=generation', self.detail)
 
+    def test_resource_collection_script_and_native_sources_open_the_film_library(self):
+        collection = (ROOT / 'Sources/TVBoxCatalogViewController.m').read_text()
+        collection_store = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
+        browser_header = (ROOT / 'Sources/MediaBrowserViewController.h').read_text()
+        browser = self.detail
+        self.assertIn('searchBar.placeholder=@"搜索合集中的站点、协议或 URL"', collection)
+        self.assertIn('filteredRowsForSection:', collection)
+        self.assertIn('serviceForSite(row)', collection)
+        self.assertIn('启动并打开资源', collection)
+        self.assertIn('导入并打开资源', collection)
+        self.assertIn('仅导入到资源页', collection)
+        self.assertIn('onImportSite(row,YES)', collection)
+        self.assertIn('onImportSite(row,NO)', collection)
+        self.assertIn('资源合集', collection_store)
+        self.assertIn('- (void)openSourceIdentifier:(NSString *)identifier', browser_header)
+        open_source = browser[browser.index('- (void)openSourceIdentifier:'):
+                              browser.index('- (void)showMessage:', browser.index('- (void)openSourceIdentifier:'))]
+        self.assertIn('self.sourcesProvider?self.sourcesProvider():@[]', open_source)
+        self.assertIn('[self activate:target]', open_source)
+        self.assertNotIn('[self refreshSources]', open_source)
+        self.assertIn('[browser openSourceIdentifier:item[@"id"]', self.root)
+        self.assertIn('[browser openSourceIdentifier:sourceID]', self.root)
+        self.assertIn('[service[@"url"] isEqual:api]', self.root)
+        self.assertIn('siteCount', self.root)
+        self.assertIn('个站点 · %lu 个可用', self.catalog)
+
     def test_live_resource_uses_declared_route_and_can_configure_missing_route(self):
         self.assertIn('item[@"playlistPath"]', self.root)
         self.assertIn('editor.service=item', self.root)

@@ -3,6 +3,7 @@
 @interface MediaBrowserViewController : UIViewController
 /// Refresh installed sources while preserving the current browser state when possible.
 - (void)refreshSources;
+- (void)openSourceIdentifier:(NSString *)identifier;
 - (void)invalidateServiceIdentifier:(NSString *)identifier;
 - (void)showConfigurationForSource:(NSDictionary *)source;
 @property(nonatomic, copy) NSArray<NSDictionary *> *(^sourcesProvider)(void);

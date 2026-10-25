@@ -69,7 +69,7 @@ static BOOL TVBoxWebURL(NSString *value) {
         if (!TVBoxWebURL(url) || [urls containsObject:url]) continue;
         [urls addObject:url]; [cleanLives addObject:@{@"name":name,@"url":url}];
     }
-    NSString *name=TVBoxString(json[@"name"],256) ?: TVBoxString(json[@"title"],256) ?: @"TVBox 资源目录";
+    NSString *name=TVBoxString(json[@"name"],256) ?: TVBoxString(json[@"title"],256) ?: @"资源合集";
     NSMutableDictionary *catalog=[@{@"id":NSUUID.UUID.UUIDString,@"name":name,@"sites":cleanSites.copy,@"lives":cleanLives.copy,@"updatedAt":@(NSDate.date.timeIntervalSince1970)} mutableCopy];
     if (TVBoxWebURL(sourceURL)) catalog[@"url"]=sourceURL;
     return catalog;
