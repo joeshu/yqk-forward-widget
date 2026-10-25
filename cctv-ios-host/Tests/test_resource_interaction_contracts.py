@@ -36,6 +36,39 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('media-home-feature', self.detail)
         self.assertIn('owner.generation!=generation', self.detail)
 
+    def test_home_status_is_inline_actionable_and_does_not_rebuild_content_on_each_progress_update(self):
+        show_message = self.detail[self.detail.index('- (void)showMessage:'):
+                                   self.detail.index('- (void)chooseResource', self.detail.index('- (void)showMessage:'))]
+        status = self.detail[self.detail.index('- (void)updateHomeStatusCard {'):
+                             self.detail.index('- (void)performHomeStatusAction', self.detail.index('- (void)updateHomeStatusCard {'))]
+        self.assertIn('media-home-status-card', status)
+        self.assertIn('media-home-status-action', status)
+        self.assertIn('启动并加载', status)
+        self.assertIn('self.homeMode', show_message)
+        self.assertIn('[self updateHomeStatusCard]', show_message)
+        self.assertNotIn('[self refreshHomeModules]', show_message)
+        self.assertIn('self.homeScroll.contentOffset=CGPointMake', self.detail)
+
+    def test_home_plugin_deep_links_wait_for_health_and_capabilities_before_detail(self):
+        implementation = self.detail.index('@implementation MediaBrowserViewController')
+        recommendation_start = self.detail.index('- (void)openHomeRecommendation:', implementation)
+        recommendation = self.detail[recommendation_start:
+                                     self.detail.index('- (void)browsePinnedSource:', recommendation_start)]
+        favorite_start = self.detail.index('- (void)openHomeFavorite:', implementation)
+        favorite = self.detail[favorite_start:
+                               self.detail.index('- (void)openPendingHomeDetailForSource:', favorite_start)]
+        self.assertIn('self.pendingHomeDetail=', recommendation)
+        self.assertIn('[self activate:source keepingHome:YES]', recommendation)
+        self.assertNotIn('self.onActivateService(source,', recommendation)
+        self.assertIn('self.pendingHomeDetail=', favorite)
+        self.assertIn('[self activate:source keepingHome:YES]', favorite)
+        capabilities_start = self.detail.index('- (void)loadCapabilities {', implementation)
+        capabilities = self.detail[capabilities_start:
+                                   self.detail.index('- (void)loadHome {', capabilities_start)]
+        self.assertIn('owner.generation!=generation', capabilities)
+        self.assertIn('[page openPendingHomeDetailForSource:page.source', capabilities)
+        self.assertIn('openPendingHomeDetailForSource:owner.source', capabilities)
+
     def test_resource_collection_script_and_native_sources_open_the_film_library(self):
         collection = (ROOT / 'Sources/TVBoxCatalogViewController.m').read_text()
         collection_store = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
