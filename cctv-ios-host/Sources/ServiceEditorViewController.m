@@ -67,6 +67,11 @@
 @end
 
 @interface ServiceEditorViewController () <UIDocumentPickerDelegate>
+- (BOOL)customCodeMatchesSavedVersion;
+- (BOOL)writeCodeForService:(NSDictionary *)service;
+- (void)applyPortChange:(NSDictionary *)service;
+- (void)persistService:(NSDictionary *)service;
+- (void)finishSavingService:(NSDictionary *)service;
 @property(nonatomic, strong) UITextField *nameField;
 @property(nonatomic, strong) UITextField *portField;
 @property(nonatomic, strong) UITextField *playlistPathField;
@@ -80,6 +85,7 @@
 @property(nonatomic, strong) NSURLSessionDataTask *downloadTask;
 @property(nonatomic, assign) BOOL downloading;
 @property(nonatomic, copy) NSString *optionsText;
+@property(nonatomic, assign) BOOL applyingPortChange;
 @end
 @implementation ServiceEditorViewController
 - (BOOL)managedCode {return [self.service[@"builtin"] boolValue] || [self.service[@"manifest"] isKindOfClass:NSDictionary.class];}
@@ -161,7 +167,7 @@
         return @"导入后可查看、编辑或导出代码。内置服务代码只读。";
     if (section == 2)
         return @"自定义脚本的参数用 | 分隔，支持 {port}、{bind}、{dataDir}。直播列表路径可留空自动识别；手动填写时只接受本机绝对路径，例如 /all.m3u。服务可按 ID 分别启停；"
-               @"并行运行时每个 HTTP 服务必须使用不同端口。";
+               @"并行运行时每个 HTTP 服务必须使用不同端口。常见 Python HTTPServer 会采用这里设置的端口；其他框架请将启动参数设为 {port} 或读取 CCTVHOST_PORT。";
     return nil;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -372,10 +378,7 @@
     [self.tableView reloadData];
 }
 - (void)save {
-    if ([PyHost isManagedServiceIdentifier:self.identifier]) {
-        [self message:@"请先停止此服务，再修改端口或代码。"];
-        return;
-    }
+    if(self.applyingPortChange)return;
     NSInteger port = self.portField.text.integerValue;
     NSString *name =
         [self.nameField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -402,6 +405,30 @@
         if(![options isKindOfClass:NSDictionary.class] && ![options isKindOfClass:NSString.class]){[self message:jsonError.localizedDescription?:@"插件参数须为 JSON 对象或字符串"];return;}
         NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy];manifest[@"options"]=options;service[@"manifest"]=manifest;
     }
+    if([PyHost isManagedServiceIdentifier:self.identifier]){
+        NSInteger oldPort=[self.service[@"port"] integerValue];
+        if(oldPort==port){[self message:@"此服务仍在运行。停止服务后才能保存其他配置。"];return;}
+        if(!self.onApplyService){[self message:@"端口尚未保存。请先停止服务，再保存新端口并重新启动。"] ;return;}
+        if(![self customCodeMatchesSavedVersion]){[self message:@"当前脚本也有未保存修改。运行中的服务不能同时改代码和端口；请先停止服务后再保存。"];return;}
+        UIAlertController *confirmation=[UIAlertController alertControllerWithTitle:@"应用新端口？"
+                                                                              message:[NSString stringWithFormat:@"将停止 %@，把 HTTP 监听端口从 %ld 改为 %ld，再重新启动。重启失败时新端口仍会保存，并显示失败原因。",self.service[@"name"]?:@"此服务",(long)oldPort,(long)port]
+                                                                       preferredStyle:UIAlertControllerStyleAlert];
+        [confirmation addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+        __weak typeof(self) weakSelf=self;
+        [confirmation addAction:[UIAlertAction actionWithTitle:@"停止并重启" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf applyPortChange:service];}]];
+        [self presentViewController:confirmation animated:YES completion:nil];
+        return;
+    }
+    [self persistService:service];
+}
+- (BOOL)customCodeMatchesSavedVersion {
+    if([self managedCode]||[self.service[@"builtin"] boolValue])return YES;
+    NSString *saved=[NSString stringWithContentsOfFile:[ServiceStore codePath:self.service]
+                                               encoding:NSUTF8StringEncoding
+                                                  error:NULL];
+    return [saved isEqualToString:self.code?:@""];
+}
+- (BOOL)writeCodeForService:(NSDictionary *)service {
     if (![service[@"builtin"] boolValue] && ![service[@"manifest"] isKindOfClass:NSDictionary.class]) {
         NSError *error = nil;
         if (![self.code writeToFile:[ServiceStore codePath:service]
@@ -409,10 +436,41 @@
                            encoding:NSUTF8StringEncoding
                               error:&error]) {
             [self message:error.localizedDescription];
-            return;
+            return NO;
         }
     }
+    return YES;
+}
+- (void)applyPortChange:(NSDictionary *)service {
+    if(self.applyingPortChange)return;
+    if(![self writeCodeForService:service])return;
+    self.applyingPortChange=YES;
+    self.navigationItem.rightBarButtonItem.enabled=NO;
+    __weak typeof(self) weakSelf=self;
+    self.onApplyService(self.service,service,^(NSError *error){
+        dispatch_async(dispatch_get_main_queue(),^{
+            ServiceEditorViewController *owner=weakSelf;if(!owner)return;
+            owner.applyingPortChange=NO;
+            owner.navigationItem.rightBarButtonItem.enabled=YES;
+            if(error){
+                BOOL saved=[error.userInfo[@"CCTVHostServiceConfigurationSaved"] boolValue];
+                UIAlertController *alert=[UIAlertController alertControllerWithTitle:saved?@"端口已保存，服务未启动":@"端口更新失败"
+                                                                                message:error.localizedDescription?:@"请查看此服务的独立日志。"
+                                                                         preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:saved?@"返回服务详情":@"好" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){if(saved)[owner.navigationController popViewControllerAnimated:YES];}]];
+                [owner presentViewController:alert animated:YES completion:nil];
+                return;
+            }
+            [owner finishSavingService:service];
+        });
+    });
+}
+- (void)persistService:(NSDictionary *)service {
+    if(![self writeCodeForService:service])return;
     [ServiceStore save:service];
+    [self finishSavingService:service];
+}
+- (void)finishSavingService:(NSDictionary *)service {
     [NSFileManager.defaultManager removeItemAtPath:[self draftPath] error:NULL];
     [NSFileManager.defaultManager removeItemAtPath:[self optionsDraftPath] error:NULL];
     if (self.onSave)

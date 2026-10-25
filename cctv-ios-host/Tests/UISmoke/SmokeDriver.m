@@ -172,6 +172,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block AVPlayer *hlsPlayer;
       __block NSInteger configuredBeforeHandoff;
       __block id preparedWrapper;
+      __block NativeChannelPreloader *nativePreloader;
       __block UIImageView *logoA, *logoB, *staleLogo, *oversizeLogo;
       __block NSDictionary *imageStats;
       __block NSDictionary *nodeChecks;
@@ -500,18 +501,20 @@ static void next(NSArray *steps, NSUInteger index) {
             [root selectBottomTab:(id)tabs.arrangedSubviews[0]];
             check([root valueForKey:@"previewPlayer"]==nil,@"navigation releases preview player");
             [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"preloadNativeChannel"];
-            NativeChannelPreloader *preloader=[root valueForKey:@"nativePreloader"];
-            [preloader prepareChannel:@"cctv2" title:@"CCTV-2"];
-            preparedWrapper=[preloader valueForKey:@"player"];
+            nativePreloader=[root valueForKey:@"nativePreloader"];
+            [nativePreloader prepareChannel:@"cctv2" title:@"CCTV-2"];
+            preparedWrapper=[nativePreloader valueForKey:@"player"];
             configuredBeforeHandoff=[CNPlayer smokeConfigureCount];
           },
-          ^{
+          @{ @"timeout":@20, @"until":^BOOL{
+              return nativePreloader && [[nativePreloader valueForKey:@"ready"] boolValue];
+            }, @"run":^{
             [root playChannel:[root channelWithID:@"cctv2"] route:nil];
             check([root valueForKey:@"currentPlayer"]==preparedWrapper,@"selected channel adopts metadata-prepared wrapper");
             check([CNPlayer smokeConfigureCount]==configuredBeforeHandoff,@"metadata handoff does not call playLIVE a second time");
             PlaybackStartupTrace *trace=[root valueForKey:@"startupTrace"];
             check(trace.stages[@"preloadedVDN"]!=nil,@"metadata hit is explicitly recorded");
-          },
+          }},
           ^{
             check([[root valueForKey:@"firstRender"] boolValue],@"metadata handoff reaches first render");
             [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];

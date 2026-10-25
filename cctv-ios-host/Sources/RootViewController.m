@@ -1596,6 +1596,26 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     __weak typeof(self) weakSelf=self;
     page.onOpenYSP=^{ [weakSelf openPluginPage]; };
     page.onToggleService=^(NSDictionary *service,BOOL enabled){[weakSelf toggleService:service enabled:enabled];};
+    page.onApplyService=^(NSDictionary *previousService,NSDictionary *updatedService,void (^completion)(NSError * _Nullable)){
+        RootViewController *owner=weakSelf;
+        if(!owner){if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:10 userInfo:@{NSLocalizedDescriptionKey:@"服务页面已关闭，端口更改未应用。"}]);return;}
+        NSInteger requestedPort=[updatedService[@"port"] integerValue];
+        for(NSDictionary *other in [ServiceStore services])if(![other[@"id"] isEqual:updatedService[@"id"]]&&[other[@"port"] integerValue]==requestedPort&&[PyHost isManagedServiceIdentifier:other[@"id"]]){
+            NSString *message=[NSString stringWithFormat:@"端口 %ld 正由“%@”使用。已保留当前服务运行状态；请选择其他端口。",(long)requestedPort,other[@"name"]?:other[@"id"]];
+            if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:6 userInfo:@{NSLocalizedDescriptionKey:message}]);
+            return;
+        }
+        [owner changeService:previousService enabled:NO completion:^(NSError *stopError){
+            if(stopError){if(completion)completion(stopError);return;}
+            [ServiceStore save:updatedService];
+            [owner refreshConfigurationPage];
+            [owner changeService:updatedService enabled:YES completion:^(NSError *startError){
+                NSError *reportedError=startError;
+                if(startError){NSMutableDictionary *info=[startError.userInfo mutableCopy]?:[NSMutableDictionary dictionary];info[@"CCTVHostServiceConfigurationSaved"]=@YES;reportedError=[NSError errorWithDomain:startError.domain code:startError.code userInfo:info];}
+                if(completion)completion(reportedError);
+            }];
+        }];
+    };
     page.onBrowseService=^(NSDictionary *service){[NSUserDefaults.standardUserDefaults setObject:service[@"id"] forKey:@"selectedMediaSource"];[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[2]];};
     page.onImportResource=^{[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[3]];dispatch_async(dispatch_get_main_queue(),^{[weakSelf importMediaPackage];});};
     page.onOpenLog=^(NSDictionary *service){if(service)[weakSelf openDiagnosticLogForIdentifier:service[@"id"] name:service[@"name"]];else[weakSelf openDiagnosticLog];};

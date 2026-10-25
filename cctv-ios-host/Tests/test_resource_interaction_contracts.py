@@ -40,6 +40,17 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('label does not overlap its input at large text size', smoke)
         self.assertIn('stays inside its large-type editor row', smoke)
 
+    def test_running_http_service_port_edit_stops_saves_and_restarts(self):
+        services = (ROOT / 'Sources/ServicesViewController.m').read_text()
+        self.assertIn('v.onApplyService = self.onApplyService', services)
+        self.assertIn('停止并重启', self.editor)
+        self.assertIn('CCTVHostServiceConfigurationSaved', self.editor)
+        apply_handler = self.root[self.root.index('page.onApplyService='):self.root.index('page.onBrowseService=', self.root.index('page.onApplyService='))]
+        self.assertLess(apply_handler.index('enabled:NO'), apply_handler.index('[ServiceStore save:updatedService]'))
+        self.assertLess(apply_handler.index('[ServiceStore save:updatedService]'), apply_handler.index('enabled:YES'))
+        self.assertIn('def test_configured_service_port_overrides_hardcoded_primary_http_port',
+                      (ROOT / 'Tests/test_service_runtime.py').read_text())
+
     def test_episode_selection_carries_source_provider_line_and_episode_to_player(self):
         for key in ('@"source"', '@"provider"', '@"detail"', '@"lineIndex"', '@"episodeIndex"'):
             self.assertIn(key, self.episodes)

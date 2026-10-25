@@ -75,6 +75,7 @@ class Session:
         self.saved_argv = None
         self.saved_environment = None
         self.stop_hook = None
+        self.primary_http_server_claimed = False
         self.namespace = None
         self.package_prefix = None
         self.package_root = None
@@ -200,14 +201,62 @@ def _bind_http(server):
 
 
 def _bound(server, *args, **kwargs):
+    owner = getattr(threading.current_thread(), '_host_session', None)
+    expected_text = owner.environment.get('CCTVHOST_PORT', '') if owner is not None else ''
+    try:
+        expected = int(expected_text)
+    except (TypeError, ValueError):
+        expected = 0
+
+    requested = None
+    if args:
+        requested = args[0]
+    elif 'server_address' in kwargs:
+        requested = kwargs['server_address']
+    redirected = False
+    # The service editor's port is authoritative for the main HTTP listener.
+    # Many imported Python services hard-code their original default port and
+    # do not read CCTVHOST_PORT. Redirect only the first fixed-port HTTPServer
+    # in this session; preserve ephemeral listeners and any auxiliary servers.
+    if (owner is not None and isinstance(server, http.server.HTTPServer)
+            and not owner.primary_http_server_claimed
+            and 1 <= expected <= 65535
+            and isinstance(requested, tuple) and len(requested) >= 2):
+        try:
+            requested_port = int(requested[1])
+        except (TypeError, ValueError):
+            requested_port = 0
+        if requested_port > 0 and requested_port != expected:
+            address = list(requested)
+            address[1] = expected
+            replacement = tuple(address)
+            if args:
+                args = (replacement,) + tuple(args[1:])
+            else:
+                kwargs['server_address'] = replacement
+            redirected = True
+
     _tcp_init(server, *args, **kwargs)
-    if getattr(server, '_host_owner', None) is not None:
+    bound_owner = getattr(server, '_host_owner', None)
+    if bound_owner is not None:
         address = server.server_address
-        expected = os.environ.get('CCTVHOST_PORT', '')
         actual = str(address[1]) if isinstance(address, tuple) and len(address) > 1 else ''
-        print('[宿主] 已接管服务监听 %s%s' % (address,
-              '；与配置端口 %s 不一致，请检查脚本参数' % expected
-              if expected and actual and expected != actual else ''))
+        was_primary_http_server = (isinstance(server, http.server.HTTPServer)
+                                   and not bound_owner.primary_http_server_claimed)
+        if was_primary_http_server and actual and actual != '0':
+            bound_owner.primary_http_server_claimed = True
+        if redirected:
+            print('[宿主] 服务设置端口已应用：脚本请求 %s，实际监听 %s' % (requested, address))
+        else:
+            expected_mismatch = (1 <= expected <= 65535 and actual
+                                 and actual != str(expected))
+            auxiliary_http_listener = (isinstance(server, http.server.HTTPServer)
+                                       and not was_primary_http_server and expected_mismatch)
+            note = ('；辅助 HTTP 监听保留脚本端口 %s' % actual
+                    if auxiliary_http_listener else
+                    ('；与配置端口 %s 不一致，请检查脚本参数' % expected
+                     if expected_mismatch else ''))
+            print('[宿主] 已接管服务监听 %s%s' % (address, note))
 
 
 def _error(server, request, address):

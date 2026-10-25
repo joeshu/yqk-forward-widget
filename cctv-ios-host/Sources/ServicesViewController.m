@@ -25,6 +25,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 @interface ServiceDetailViewController : UITableViewController
 @property(nonatomic, copy) NSDictionary *service;
 @property(nonatomic, copy) void (^onToggle)(NSDictionary *, BOOL);
+@property(nonatomic, copy) void (^onApplyService)(NSDictionary *, NSDictionary *, void (^)(NSError * _Nullable));
 @property(nonatomic, copy) void (^onLog)(NSDictionary * _Nullable service);
 @property(nonatomic, copy) void (^onSubscribe)(NSString *);
 @property(nonatomic, copy) void (^onBrowseService)(NSDictionary *);
@@ -183,6 +184,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 - (void)edit {
     ServiceEditorViewController *v = [ServiceEditorViewController new];
     v.service = self.service;
+    v.onApplyService = self.onApplyService;
     [self.navigationController pushViewController:v animated:YES];
 }
 - (void)probe {
@@ -427,6 +429,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     ServiceDetailViewController *v = [ServiceDetailViewController new];
     v.service = [self rows:ip.section][ip.row];
     v.onToggle = self.onToggleService;
+    v.onApplyService = self.onApplyService;
     v.onLog = self.onOpenLog;
     v.onSubscribe = self.onSubscribe;
     v.onBrowseService=self.onBrowseService;

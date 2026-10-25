@@ -84,6 +84,59 @@ class ServiceRuntimeTests(unittest.TestCase):
         second.join(1)
         self.assertEqual(self.errors, [])
 
+    def test_configured_service_port_overrides_hardcoded_primary_http_port(self):
+        def free_port():
+            probe = socket.socket()
+            try:
+                probe.bind(('127.0.0.1', 0))
+                return probe.getsockname()[1]
+            finally:
+                probe.close()
+
+        legacy_port = free_port()
+        configured_port = free_port()
+        while configured_port == legacy_port:
+            configured_port = free_port()
+        auxiliary_port = free_port()
+        while auxiliary_port in (legacy_port, configured_port):
+            auxiliary_port = free_port()
+        path = Path(self.temp.name) / 'legacy_port_service.py'
+        source = self.server_source(legacy_port).replace(
+            'server.serve_forever()\n',
+            "auxiliary = HTTPServer(('127.0.0.1', %d), Handler)\n" % auxiliary_port
+            + "threading.Thread(target=auxiliary.serve_forever, daemon=True).start()\n"
+            + 'server.serve_forever()\n')
+        path.write_text(source)
+
+        def run():
+            try:
+                runtime.run_script(str(path), 'port-override', self.temp.name,
+                                   configured_port, [])
+            except BaseException as error:
+                self.errors.append(error)
+
+        worker = threading.Thread(target=run, daemon=True)
+        self.workers.append(worker)
+        worker.start()
+        try:
+            self.wait(lambda: bool(runtime._sessions.get('port-override')
+                                   and runtime._sessions['port-override'].servers
+                                   and runtime._sessions['port-override'].servers[0]._host_serving.is_set()))
+            servers = runtime._sessions['port-override'].servers
+            server = servers[0]
+            self.assertEqual(server.server_address[1], configured_port)
+            self.assertEqual(servers[1].server_address[1], auxiliary_port,
+                             'port override must leave auxiliary listeners unchanged')
+            with urllib.request.urlopen('http://127.0.0.1:%d/' % configured_port, timeout=1) as response:
+                self.assertEqual(response.read(), b'ok')
+            with self.assertRaises(OSError):
+                socket.create_connection(('127.0.0.1', legacy_port), timeout=.25)
+        finally:
+            self.assertTrue(runtime.stop_session('port-override', 2),
+                            runtime.last_error('port-override'))
+            worker.join(1)
+        self.assertEqual(self.errors, [])
+
     def test_two_service_ids_run_concurrently_and_stop_independently(self):
         def source(label):
             return ("from http.server import HTTPServer, BaseHTTPRequestHandler\nimport os\n"
