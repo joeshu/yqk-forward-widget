@@ -78,6 +78,15 @@ static NSArray *MediaTVBoxArray(id value) {return [value isKindOfClass:NSArray.c
 static NSString *MediaTVBoxFirstString(NSDictionary *row,NSArray<NSString *> *keys) {
     for(NSString *key in keys){NSString *value=MediaTVBoxString(row[key]);if(value.length)return value;}return @"";
 }
+static BOOL MediaTVBoxURLLooksLikeWebPage(NSString *value) {
+    NSURLComponents *parts=[NSURLComponents componentsWithString:value?:@""];NSString *extension=parts.path.pathExtension.lowercaseString?:@"";
+    static NSSet<NSString *> *webExtensions,*directExtensions,*signatureNames;static dispatch_once_t once;dispatch_once(&once,^{webExtensions=[NSSet setWithArray:@[@"html",@"htm",@"xhtml",@"php",@"asp",@"aspx",@"jsp",@"shtml"]];directExtensions=[NSSet setWithArray:@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"ts"]];signatureNames=[NSSet setWithArray:@[@"token",@"access_token",@"auth",@"auth_key",@"sign",@"signature",@"expires",@"expire",@"wssecret",@"wstime",@"ws_time",@"ticket",@"key",@"policy",@"credential",@"hdnea",@"deadline",@"hash",@"st",@"e"]];});
+    if([webExtensions containsObject:extension])return YES;
+    if([directExtensions containsObject:extension])return NO;
+    for(NSURLQueryItem *item in parts.queryItems?:@[]){NSString *name=item.name.lowercaseString?:@"";if([signatureNames containsObject:name]||[name hasPrefix:@"x-amz-"]||[name hasPrefix:@"x-oss-"])return NO;}
+    // Retain the legacy web handoff for unknown URLs without signed-media hints.
+    return YES;
+}
 static BOOL MediaTVBoxHeaderAllowed(NSString *name,NSString *value) {
     if(!name.length||name.length>128||value.length>4096)return NO;
     NSCharacterSet *controls=NSCharacterSet.controlCharacterSet;
@@ -175,7 +184,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
     if([operation isEqual:@"detail"])return MediaTVBoxDetail(root,arguments,source);
     if([operation isEqual:@"play"]){
         NSDictionary *headers=MediaTVBoxPlaybackHeaders(source,root);
-        if(macCMS){NSString *url=MediaTVBoxString(arguments[@"id"]);NSURL *media=[NSURL URLWithString:url];NSString *extension=media.pathExtension.lowercaseString?:@"";static NSSet *webExtensions;static dispatch_once_t once;dispatch_once(&once,^{webExtensions=[NSSet setWithArray:@[@"html",@"htm",@"xhtml"]];});BOOL webPage=[webExtensions containsObject:extension];if(!url.length)return @{@"error":@"MacCMS 分集没有播放地址"};/* Signed and extensionless media endpoints should be tried by AVPlayer; only explicit HTML pages use the web player by default. */return @{@"url":url,@"originalURL":url,@"parse":@(webPage),@"jx":@0,@"requiresWebPlayback":@(webPage),@"headers":headers};}
+        if(macCMS){NSString *url=MediaTVBoxString(arguments[@"id"]);BOOL webPage=MediaTVBoxURLLooksLikeWebPage(url);if(!url.length)return @{@"error":@"MacCMS 分集没有播放地址"};/* Signed and extensionless media endpoints should be tried by AVPlayer; only explicit page endpoints use the web player by default. */return @{@"url":url,@"originalURL":url,@"parse":@(webPage),@"jx":@0,@"requiresWebPlayback":@(webPage),@"headers":headers};}
         if([source[@"tvboxType"] integerValue]==1){NSString *url=MediaTVBoxString(arguments[@"id"]);NSString *prefix=MediaTVBoxString(source[@"playUrl"]);if(!url.length)return @{@"error":@"TVBox type 1 没有返回分集地址"};return @{@"url":[prefix stringByAppendingString:url],@"parse":@(prefix.length>0),@"headers":headers};}
         id rawURL=root[@"url"];NSString *prefix=MediaTVBoxFirstString(root,@[@"playUrl"]);
         NSMutableArray<NSDictionary *> *alternates=[NSMutableArray array];NSString *url=@"";
