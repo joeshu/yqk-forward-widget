@@ -341,7 +341,9 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
         if([errorPayload[@"message"] isKindOfClass:NSString.class])pluginMessage=errorPayload[@"message"];
         pluginRetryable=[errorPayload[@"retryable"] isKindOfClass:NSNumber.class]?[errorPayload[@"retryable"] boolValue]:NO;
         if(!networkError && (status<200||status>=300)){
-            failure=[NSError errorWithDomain:@"CCTVHostMediaHTTP" code:status userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"资源服务返回 HTTP %ld",(long)status]}];
+            NSMutableDictionary *httpInfo=[@{NSLocalizedDescriptionKey:pluginMessage.length?pluginMessage:[NSString stringWithFormat:@"资源服务返回 HTTP %ld",(long)status],@"plugin_retryable":@(pluginRetryable)} mutableCopy];
+            if(pluginCode.length)httpInfo[@"plugin_error_code"]=pluginCode;
+            failure=[NSError errorWithDomain:@"CCTVHostMediaHTTP" code:status userInfo:httpInfo];
             failureStage=@"http_status";
         }
         BOOL responseOK=[reply isKindOfClass:NSDictionary.class]&&[reply[@"ok"] isKindOfClass:NSNumber.class]&&[reply[@"ok"] boolValue];

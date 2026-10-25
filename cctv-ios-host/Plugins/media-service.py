@@ -289,8 +289,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             if parts.path in ('/', '/health'):
+                health = runtime.health_status()
                 self.send(200 if not runtime.stopping.is_set() else 503,
-                          {'ok': not runtime.stopping.is_set(), 'media': True})
+                          {'ok': not runtime.stopping.is_set(), 'media': True, **health})
                 return
             if not parts.path.startswith('/api/v1/'):
                 raise MediaError('NOT_FOUND', '没有此接口')
@@ -335,13 +336,19 @@ def main():
     args = parser.parse_args()
     manifest = json.loads(args.manifest)
     os.makedirs(args.data_dir, exist_ok=True)
-    if manifest['runtime'] == 'python':
-        engine = PythonSpider(args.package, manifest['entry'], manifest.get('options'),
-                              f'http://127.0.0.1:{args.port}/proxy')
-    else:
-        engine = NativeJS(args.package, dict(manifest, dataDirectory=args.data_dir, proxyURL=f'http://127.0.0.1:{args.port}/proxy'), node=manifest['runtime'] == 'node')
-    runtime = MediaRuntime(engine)
+    runtime = MediaRuntime()
     server = Server((args.bind, args.port), runtime)
+    def create_engine():
+        if manifest['runtime'] == 'python':
+            return PythonSpider(args.package, manifest['entry'], manifest.get('options'),
+                                f'http://127.0.0.1:{args.port}/proxy')
+        return NativeJS(args.package, dict(manifest, dataDirectory=args.data_dir,
+                                           proxyURL=f'http://127.0.0.1:{args.port}/proxy'),
+                        node=manifest['runtime'] == 'node')
+    def initialization_failed(error):
+        print('[影视] 资源初始化失败：%s: %s' % (type(error).__name__, error))
+    runtime.start_initialization(create_engine, initialization_failed)
+    print('[影视] 本机 HTTP 服务已监听，正在准备资源：', manifest.get('name', manifest['entry']))
     def stop():
         runtime.stopping.set()
         server.relay.close()
@@ -351,7 +358,6 @@ def main():
         return True
     builtins._cctvhost_stop_service = stop
     try:
-        print('[影视] 本机资源已就绪:', manifest.get('name', manifest['entry']))
         server.serve_forever(poll_interval=.1)
     finally:
         server.relay.close()

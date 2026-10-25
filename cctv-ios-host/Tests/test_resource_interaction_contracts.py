@@ -247,6 +247,21 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('MediaSourceHealthExpiry = 7 * 24 * 60 * 60', health)
         self.assertIn('MIN(600,30*pow', health)
 
+    def test_media_http_health_precedes_slow_spider_init_and_capabilities_retry_busy(self):
+        service = (ROOT / 'Plugins/media-service.py').read_text()
+        runtime = (ROOT / 'Plugins/host_media_runtime.py').read_text()
+        api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        load_capabilities = self.detail[self.detail.index('- (void)loadCapabilities {'):
+                                        self.detail.index('- (void)loadHome {', self.detail.index('- (void)loadCapabilities {'))]
+        self.assertLess(service.index('server = Server((args.bind, args.port), runtime)'),
+                        service.index('runtime.start_initialization(create_engine, initialization_failed)'))
+        self.assertIn("'runtime_state': self._state", runtime)
+        self.assertIn("MediaError('BUSY', '影视资源脚本正在准备", runtime)
+        self.assertIn('@"plugin_retryable":@(pluginRetryable)', api_client)
+        self.assertIn('error.userInfo[@"plugin_retryable"]', load_capabilities)
+        self.assertIn('capabilityReadinessRetryCount<45', load_capabilities)
+        self.assertIn('资源脚本正在准备', load_capabilities)
+
     def test_playback_recovery_is_generation_scoped_and_quality_restores_pause_state(self):
         self.assertIn('owner.stallRecoveryAttempts>=1', self.playback)
         self.assertIn('playback_stall_recovery_started', self.playback)

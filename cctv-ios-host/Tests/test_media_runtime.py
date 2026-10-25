@@ -226,6 +226,124 @@ class MediaTests(unittest.TestCase):
             server.server_close()
             thread.join(2)
 
+    def test_health_listener_is_available_while_spider_initializes(self):
+        entered = threading.Event()
+        release = threading.Event()
+        class Engine:
+            def capabilities(self): return {'capabilities': ['home']}
+            def call(self, operation, args): return {}
+            def close(self): pass
+        runtime = media.MediaRuntime()
+        def initialize():
+            entered.set()
+            release.wait(2)
+            return Engine()
+        runtime.start_initialization(initialize)
+        server = transport.Server(('127.0.0.1', 0), runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        def request(path):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=2)
+            try:
+                client.request('GET' if path == '/health' else 'POST', path,
+                               None if path == '/health' else b'{}',
+                               {} if path == '/health' else {'Content-Type': 'application/json'})
+                response = client.getresponse()
+                return response.status, json.loads(response.read())
+            finally:
+                client.close()
+        try:
+            self.assertTrue(entered.wait(1))
+            status, health = request('/health')
+            self.assertEqual(status, 200)
+            self.assertTrue(health['ok'])
+            self.assertFalse(health['runtime_ready'])
+            self.assertEqual(health['runtime_state'], 'starting')
+            status, pending = request('/api/v1/capabilities')
+            self.assertEqual(status, 503)
+            self.assertEqual(pending['error']['code'], 'BUSY')
+            self.assertTrue(pending['error']['retryable'])
+            release.set()
+            for _ in range(30):
+                status, ready = request('/api/v1/capabilities')
+                if status == 200:
+                    break
+                threading.Event().wait(.02)
+            self.assertEqual(status, 200)
+            self.assertEqual(ready['data']['capabilities'], ['home'])
+            self.assertTrue(request('/health')[1]['runtime_ready'])
+        finally:
+            release.set()
+            runtime.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+
+    def test_failed_async_spider_initialization_is_reported_not_left_busy(self):
+        runtime = media.MediaRuntime()
+        def initialize(): raise RuntimeError('fixture init failure')
+        runtime.start_initialization(initialize)
+        try:
+            for _ in range(50):
+                if runtime.health_status()['runtime_state'] == 'failed':
+                    break
+                threading.Event().wait(.02)
+            self.assertEqual(runtime.health_status()['runtime_state'], 'failed')
+            with self.assertRaises(media.MediaError) as failure:
+                runtime.call('capabilities')
+            self.assertEqual(failure.exception.code, 'STARTUP_FAILED')
+            self.assertFalse(failure.exception.retryable)
+        finally:
+            runtime.close()
+
+    def test_async_initialization_preserves_host_service_context(self):
+        class Owner:
+            def __init__(self):
+                self.stopping = threading.Event()
+                self.threads = set()
+        owner = Owner()
+        runtime = media.MediaRuntime()
+        observed = []
+        class Engine:
+            def capabilities(self): return {'capabilities': []}
+            def call(self, operation, args): return {}
+            def close(self): pass
+        previous = getattr(threading.current_thread(), '_host_session', None)
+        threading.current_thread()._host_session = owner
+        try:
+            runtime.start_initialization(lambda: observed.append(
+                getattr(threading.current_thread(), '_host_session', None)) or Engine())
+            runtime._startup_thread.join(2)
+            self.assertFalse(runtime._startup_thread.is_alive())
+            self.assertEqual(observed, [owner])
+            self.assertEqual(runtime.health_status()['runtime_state'], 'ready')
+        finally:
+            if previous is None:
+                del threading.current_thread()._host_session
+            else:
+                threading.current_thread()._host_session = previous
+            runtime.close()
+
+    def test_engine_created_after_stop_is_closed_without_becoming_ready(self):
+        entered = threading.Event()
+        release = threading.Event()
+        closed = threading.Event()
+        class Engine:
+            def close(self): closed.set()
+        runtime = media.MediaRuntime()
+        def initialize():
+            entered.set()
+            release.wait(2)
+            return Engine()
+        runtime.start_initialization(initialize)
+        self.assertTrue(entered.wait(1))
+        runtime.close()
+        release.set()
+        runtime._startup_thread.join(2)
+        self.assertFalse(runtime._startup_thread.is_alive())
+        self.assertTrue(closed.is_set())
+        self.assertEqual(runtime.health_status()['runtime_state'], 'stopping')
+
     def test_configuration_refresh_discards_old_inflight_result_and_cache(self):
         entered=threading.Event();release=threading.Event();errors=[]
         class Engine:

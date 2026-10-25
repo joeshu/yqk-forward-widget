@@ -448,9 +448,13 @@ class _MediaFlight:
 
 
 class MediaRuntime:
-    def __init__(self, engine):
+    def __init__(self, engine=None):
         self.engine = engine
         self.stopping = threading.Event()
+        self._state_lock = threading.RLock()
+        self._state = 'ready' if engine is not None else 'starting'
+        self._startup_error = ''
+        self._startup_thread = None
         self.cache = collections.OrderedDict()
         self.cache_lock = threading.Lock()
         self.inflight = {}
@@ -458,9 +462,70 @@ class MediaRuntime:
         self.cache_generation = 0
         self.closed = False
 
+    def start_initialization(self, factory, on_failure=None):
+        """Prepare a plugin away from the listener thread so health stays responsive."""
+        with self._state_lock:
+            if self._state != 'starting' or self._startup_thread is not None:
+                raise RuntimeError('media runtime initialization already started')
+            # The embedded host associates threads with a service session. Keep
+            # that association so nested plugin workers and JS bridge logs remain
+            # scoped to the service that owns this media listener.
+            owner = getattr(threading.current_thread(), '_host_session', None)
+
+            def prepare():
+                worker = threading.current_thread()
+                if owner is not None:
+                    worker._host_session = owner
+                try:
+                    try:
+                        engine = factory()
+                    except BaseException as error:
+                        with self._state_lock:
+                            stopped = self.stopping.is_set()
+                            if not stopped:
+                                self._state = 'failed'
+                                self._startup_error = type(error).__name__
+                        if not stopped and on_failure:
+                            try:
+                                on_failure(error)
+                            except Exception:
+                                pass
+                        return
+                    with self._state_lock:
+                        if self.stopping.is_set():
+                            close_engine = True
+                        else:
+                            self.engine = engine
+                            self._state = 'ready'
+                            close_engine = False
+                    if close_engine:
+                        try:
+                            engine.close()
+                        except Exception:
+                            pass
+                finally:
+                    if owner is not None:
+                        worker._host_session = None
+
+            self._startup_thread = threading.Thread(target=prepare, name='media-runtime-prepare', daemon=True)
+            self._startup_thread.start()
+
+    def health_status(self):
+        with self._state_lock:
+            return {'runtime_ready': self._state == 'ready',
+                    'runtime_state': self._state,
+                    'startup_error': self._startup_error}
+
     def call(self, operation, args=None):
         if self.stopping.is_set():
             raise MediaError('STOPPING', '资源正在停止')
+        with self._state_lock:
+            state, engine, startup_error = self._state, self.engine, self._startup_error
+        if state == 'failed':
+            raise MediaError('STARTUP_FAILED',
+                             '影视资源初始化失败（%s），请查看此资源日志' % (startup_error or '未知错误'))
+        if state == 'starting' or engine is None:
+            raise MediaError('BUSY', '影视资源脚本正在准备，请稍候', True)
         args = args or {}
         if operation == 'invalidate':
             with self.cache_lock:
@@ -474,7 +539,7 @@ class MediaRuntime:
                     pending.ready.set()
             return {'invalidated': True}
         if operation == 'capabilities':
-            return self.engine.capabilities()
+            return engine.capabilities()
         key = json.dumps([operation, args], sort_keys=True, ensure_ascii=False)
         ttl = {'home': 120, 'category': 30, 'search': 20, 'detail': 120, 'catalog': 60}.get(operation, 0)
         flight = None
@@ -501,7 +566,7 @@ class MediaRuntime:
                     raise MediaError('STOPPING', '资源正在停止')
                 return json.loads(flight.value)
         try:
-            raw = self.engine.call(operation, args)
+            raw = engine.call(operation, args)
             if operation in ('proxy', 'route'):
                 return raw
             if operation == 'home':
@@ -563,6 +628,10 @@ class MediaRuntime:
 
     def close(self):
         self.stopping.set()
+        with self._state_lock:
+            if self._state != 'failed':
+                self._state = 'stopping'
+            engine = self.engine
         with self.cache_lock:
             self.cache.clear()
             self.cache_bytes = 0
@@ -574,4 +643,5 @@ class MediaRuntime:
                     flight.ready.set()
         if not self.closed:
             self.closed = True
-            self.engine.close()
+            if engine is not None:
+                engine.close()
