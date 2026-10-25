@@ -221,8 +221,9 @@ static void next(NSArray *steps, NSUInteger index) {
             capture(self.window, @"02-favorites");
             [root selectBottomTab:(id)tabs.arrangedSubviews[2]];
             [root.view layoutIfNeeded];
-            check([root.title isEqualToString:@"首页"], @"media tab opens the configured media home");
-            check([root valueForKey:@"tabPage"] != nil, @"media page embedded");
+            MediaBrowserViewController *mediaHome=(id)[root valueForKey:@"tabPage"];
+            check([mediaHome isKindOfClass:MediaBrowserViewController.class]&&mediaHome.isHomeMode&&root.title.length==0, @"media tab opens the compact untitled home");
+            check(mediaHome!=nil, @"media page embedded");
             check([[root valueForKey:@"channelGrid"] isHidden], @"media page hides live channel grid");
             capture(self.window, @"02-media");
             [root selectBottomTab:(id)tabs.arrangedSubviews[3]];
