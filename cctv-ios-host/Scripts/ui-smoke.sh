@@ -65,6 +65,9 @@ if [ -f "$CONTAINER/Library/Application Support/ysp/cctvhost.log" ]; then
   cp "$CONTAINER/Library/Application Support/ysp/cctvhost.log" "$OUT/diagnostic.log"
 fi
 cat "$OUT/fixture.log"
+if [ -f "$OUT/diagnostic.log" ]; then
+  rg '"event":"(media_home_request_started|media_home_response_received|media_home_response_discarded|media_api_failed|media_api_succeeded|media_service_health_failed|media_capabilities_readable)"' "$OUT/diagnostic.log" | tail -100 || true
+fi
 python3 - "$OUT/results.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1])); print(json.dumps(r,ensure_ascii=False,indent=2)); assert r['passed'],r['failures']

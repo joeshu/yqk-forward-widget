@@ -14,6 +14,7 @@
 #import "NodePluginRuntime.h"
 #import "MediaBrowserViewController.h"
 #import "LocalServiceReadiness.h"
+#import "RuntimeDiagnostics.h"
 #import "MediaPlaybackViewController.h"
 #import "MediaWebViewController.h"
 #import <WebKit/WebKit.h>
@@ -168,6 +169,7 @@ static void next(NSArray *steps, NSUInteger index) {
     [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];
     [NSUserDefaults.standardUserDefaults setObject:@[@"recommendations",@"catalog",@"continue",@"favorites",@"sources"] forKey:@"cctv.mediaHome.modules.v1"];
     [NSUserDefaults.standardUserDefaults setInteger:3 forKey:@"cctv.mediaHome.modules.schemaVersion"];
+    [RuntimeDiagnostics.shared setEnabled:YES];
     BOOL ok = [self smokeApplication:app didFinishLaunchingWithOptions:options];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [UIView setAnimationsEnabled:NO];
