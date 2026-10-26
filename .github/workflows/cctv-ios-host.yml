@@ -127,11 +127,13 @@ jobs:
         run: |
           cd cctv-ios-host/build
           tag="cctv-ios-host-${GITHUB_SHA:0:12}-${GITHUB_RUN_ID}"
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' CCTVHost.app/Info.plist)
+          build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' CCTVHost.app/Info.plist)
           gh release create "$tag" \
             CCTVHost-unsigned.ipa CCTVHost-unsigned.ipa.sha256 \
             --target "$GITHUB_SHA" \
-            --title "CCTVHost ${GITHUB_SHA:0:7}" \
-            --notes "Built from $GITHUB_SHA on $(date -u +%Y-%m-%dT%H:%MZ). Device playback remains unverified."
+            --title "CCTVHost ${version} (${build})" \
+            --notes "Version ${version}, build ${build}. Built from $GITHUB_SHA on $(date -u +%Y-%m-%dT%H:%MZ). Device playback remains unverified."
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/$tag"
 
   ui-preview:

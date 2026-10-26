@@ -54,7 +54,9 @@
 #import <string.h>
 #import <CommonCrypto/CommonDigest.h>
 
-static NSString *const kBuildTag = @"0.20.0";
+static NSString *CCTVBuildTag(void) {
+    return [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"未知";
+}
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -522,7 +524,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.infoLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 26, w - 24, 16)];
     self.infoLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1];
     self.infoLabel.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
-    self.infoLabel.text = [NSString stringWithFormat:@"版本 %@", kBuildTag];
+    self.infoLabel.text = [NSString stringWithFormat:@"版本 %@", CCTVBuildTag()];
     [self.playerBox addSubview:self.infoLabel];
 
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
@@ -604,7 +606,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.versionLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, y + 38, self.view.bounds.size.width - 16, 14)];
     self.versionLabel.textColor = HostSecondaryText();
     self.versionLabel.font = [UIFont systemFontOfSize:9];
-    self.versionLabel.text = [NSString stringWithFormat:@"%@ · 点击自动播放 · 长按选线路", kBuildTag];
+    self.versionLabel.text = [NSString stringWithFormat:@"%@ · 点击自动播放 · 长按选线路", CCTVBuildTag()];
     [self.view addSubview:self.versionLabel];
 
     CGFloat ty = y + 54;
@@ -1245,7 +1247,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     thumbnailGuardInstalled=thumbnailGuardInstalled||[CNPlayerCrashGuard install];
     if(thumbnailGuardInstalled)[self log:@"已启用央视播放器异常缩略图保护"];
     id ver = [self callClass:cls sel:@"SDKVersion" args:@[]];
-    [self log:@"CCTVHost %@ · SDK %@ · 当前原生模式：%@ · Python %@",kBuildTag,ver,CCTVBoolPreference(@"legacyNativePlayback",YES)?@"兼容复用":@"独立实例",PyHost.running?@"运行中":@"未启动"];
+    [self log:@"CCTVHost %@ · SDK %@ · 当前原生模式：%@ · Python %@",CCTVBuildTag(),ver,CCTVBoolPreference(@"legacyNativePlayback",YES)?@"兼容复用":@"独立实例",PyHost.running?@"运行中":@"未启动"];
     self.nativeCDNPreference=[NativeCDNPreference new];
     [self callClass:cls sel:@"authed" args:@[]];
     self.nativePreloader=[[NativeChannelPreloader alloc] initWithFactory:^id{ return [[NSClassFromString(@"CNPlayer") alloc] init]; } clock:^NSTimeInterval{return CACurrentMediaTime();}];
@@ -1863,7 +1865,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     }]];[self presentViewController:a animated:YES completion:nil];
 }
 - (PlaybackInfoViewController *)playbackInformationPage {
-    PlaybackInfoViewController *v=[PlaybackInfoViewController new];__weak typeof(self) w=self;v.rowsProvider=^{NSString *engine=w.avPlayer?@"AVPlayer":(w.cicadaPlayer?@"CicadaPlayer":(w.currentPlayer?NSStringFromClass([w.currentPlayer class]):@"等待播放"));NSMutableArray *r=[NSMutableArray arrayWithArray:@[@{@"title":@"频道名称",@"value":w.channelName?:@"未选台"},@{@"title":@"频道 ID",@"value":w.channelID?:@"—"},@{@"title":@"播放引擎",@"value":engine},@{@"title":@"线路方式",@"value":w.routeName?:@"自动"},@{@"title":@"首帧耗时",@"value":w.firstRender?[NSString stringWithFormat:@"%.2f 秒",w.firstFrameSeconds]:@"等待画面"},@{@"title":@"应用版本",@"value":kBuildTag}]];
+    PlaybackInfoViewController *v=[PlaybackInfoViewController new];__weak typeof(self) w=self;v.rowsProvider=^{NSString *engine=w.avPlayer?@"AVPlayer":(w.cicadaPlayer?@"CicadaPlayer":(w.currentPlayer?NSStringFromClass([w.currentPlayer class]):@"等待播放"));NSMutableArray *r=[NSMutableArray arrayWithArray:@[@{@"title":@"频道名称",@"value":w.channelName?:@"未选台"},@{@"title":@"频道 ID",@"value":w.channelID?:@"—"},@{@"title":@"播放引擎",@"value":engine},@{@"title":@"线路方式",@"value":w.routeName?:@"自动"},@{@"title":@"首帧耗时",@"value":w.firstRender?[NSString stringWithFormat:@"%.2f 秒",w.firstFrameSeconds]:@"等待画面"},@{@"title":@"应用版本",@"value":CCTVBuildTag()}]];
         if(w.requestedNativeRoute[@"url"])[r addObject:@{@"title":@"所选线路完整地址",@"value":[w displaySafeSourceURL:w.requestedNativeRoute[@"url"]]}];AVPlayerItem *item=w.avPlayer.currentItem;if(item){CGSize size=item.presentationSize;[r addObject:@{@"title":@"视频分辨率",@"value":size.width>0?[NSString stringWithFormat:@"%.0f × %.0f",size.width,size.height]:@"等待视频信息"}];AVPlayerItemAccessLogEvent *event=item.accessLog.events.lastObject;if(event)[r addObject:@{@"title":@"观测带宽",@"value":[NSString stringWithFormat:@"%.2f Mbps",event.observedBitrate/1000000.0]}];}else if(w.currentPlayer)[r addObject:@{@"title":@"SDK 报告节点",@"value":[NativeCDNPreference observedCDNDescriptionForPlayer:w.currentPlayer]}];return r;};return v;
 }
 - (NSString *)displaySafeSourceURL:(NSString *)raw {
