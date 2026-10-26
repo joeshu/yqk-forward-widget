@@ -89,6 +89,26 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         for field in ('service_id', 'operation', 'request_id', 'elapsed_ms', 'failure_stage'):
             self.assertIn(f'@"{field}"', PYHOST)
 
+    def test_python_crash_breadcrumbs_are_durable_and_recovered_per_script(self):
+        for token in (
+            'recordEventSynchronously:', 'python-active-sessions',
+            'python_runtime_breadcrumb', 'python_session_interrupted',
+            'process_phys_footprint_bytes', 'script_name', 'last_runtime_stage',
+            'PluginLogStore.shared appendLine:',
+        ):
+            self.assertIn(token, PYHOST)
+        self.assertIn('recoverInterruptedPythonSessions', PYHOST)
+        self.assertIn('[PyHost recoverInterruptedPythonSessions]', HOST)
+
+    def test_unhandled_python_worker_failures_have_service_and_line_context(self):
+        runtime = (ROOT / 'Scripts/host_service_runtime.py').read_text()
+        for token in (
+            'threading.excepthook = _thread_excepthook',
+            '_cctvhost_python_exception', 'thread_name', 'source_file',
+            'line_number', 'python_background_thread_exception',
+        ):
+            self.assertIn(token, runtime + PYHOST)
+
     def test_subscription_diagnostics_classify_parse_and_transport_failures(self):
         for event in (
             'subscription_refresh_started', 'subscription_refresh_failed',

@@ -8,6 +8,9 @@ NS_ASSUME_NONNULL_BEGIN
 + (instancetype)shared;
 - (void)setEnabled:(BOOL)enabled;
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(nullable NSDictionary<NSString *, id> *)fields;
+/// Writes and flushes a small critical breadcrumb before returning. Use sparingly for
+/// transitions whose context would otherwise be lost if the process exits abruptly.
+- (void)recordEventSynchronously:(NSString *)event category:(NSString *)category fields:(nullable NSDictionary<NSString *, id> *)fields;
 - (void)prepareExportWithCompletion:(void (^)(NSURL * _Nullable url, NSError * _Nullable error))completion;
 
 @end

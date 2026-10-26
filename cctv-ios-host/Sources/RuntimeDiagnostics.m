@@ -5,6 +5,7 @@
 static NSString * const RuntimeDiagnosticsPreferenceKey = @"runtimeDiagnosticsEnabled";
 static unsigned long long const RuntimeDiagnosticsMaximumBytes = 1024 * 1024;
 static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
+static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
 
 @interface RuntimeDiagnostics ()
 @property(nonatomic, copy) NSString *logPath;
@@ -13,6 +14,7 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
 @property(nonatomic) BOOL diagnosticModeEnabled;
 - (id)safeValue:(id)value key:(NSString *)key depth:(NSUInteger)depth;
 - (NSString *)safeText:(NSString *)text;
+- (void)recordEvent:(NSString *)event category:(NSString *)category fields:(nullable NSDictionary<NSString *, id> *)fields synchronously:(BOOL)synchronously;
 @end
 
 @implementation RuntimeDiagnostics
@@ -30,6 +32,7 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
         self.logPath = [[[[support stringByAppendingPathComponent:@"ysp"] stringByAppendingPathComponent:@"diagnostics"] stringByAppendingPathComponent:@"runtime-debug"] stringByAppendingPathExtension:@"jsonl"];
         self.sessionID = NSUUID.UUID.UUIDString.lowercaseString;
         self.queue = dispatch_queue_create("com.cctvhost.runtime-diagnostics", DISPATCH_QUEUE_SERIAL);
+        dispatch_queue_set_specific(self.queue, RuntimeDiagnosticsQueueKey, (__bridge void *)self, NULL);
         _diagnosticModeEnabled = [NSUserDefaults.standardUserDefaults boolForKey:RuntimeDiagnosticsPreferenceKey];
     }
     return self;
@@ -58,6 +61,14 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
 }
 
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(NSDictionary<NSString *,id> *)fields {
+    [self recordEvent:event category:category fields:fields synchronously:NO];
+}
+
+- (void)recordEventSynchronously:(NSString *)event category:(NSString *)category fields:(NSDictionary<NSString *,id> *)fields {
+    [self recordEvent:event category:category fields:fields synchronously:YES];
+}
+
+- (void)recordEvent:(NSString *)event category:(NSString *)category fields:(NSDictionary<NSString *,id> *)fields synchronously:(BOOL)synchronously {
     if (!event.length || !category.length) return;
     @synchronized (self) { if (!self.enabled) return; }
     NSMutableDictionary *record = [NSMutableDictionary dictionary];
@@ -74,7 +85,7 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
     NSMutableData *line = [json mutableCopy];
     [line appendBytes:"\n" length:1];
     if (line.length > 8192) return;
-    dispatch_async(self.queue, ^{
+    dispatch_block_t write = ^{
         @autoreleasepool {
             NSFileManager *fm = NSFileManager.defaultManager;
             [fm createDirectoryAtPath:self.logPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
@@ -82,10 +93,18 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
             unsigned long long size = [[fm attributesOfItemAtPath:self.logPath error:NULL] fileSize];
             if (size + line.length > RuntimeDiagnosticsMaximumBytes) [self trimLogToTail];
             NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:self.logPath];
-            @try { [file seekToEndOfFile]; [file writeData:line]; [file closeFile]; }
+            @try {
+                [file seekToEndOfFile];
+                [file writeData:line];
+                if (synchronously) [file synchronizeFile];
+                [file closeFile];
+            }
             @catch (__unused NSException *exception) { @try { [file closeFile]; } @catch (__unused NSException *ignored) {} }
         }
-    });
+    };
+    if (!synchronously) dispatch_async(self.queue, write);
+    else if (dispatch_get_specific(RuntimeDiagnosticsQueueKey) == (__bridge void *)self) write();
+    else dispatch_sync(self.queue, write);
 }
 
 - (void)trimLogToTail {

@@ -15,6 +15,7 @@ import socketserver
 import sys
 import threading
 import time
+import traceback
 import weakref
 from collections.abc import MutableMapping
 
@@ -40,6 +41,33 @@ _max_threads_for_host = 128
 _last_error = ''
 _last_errors = {}
 _base_environment = os.environ
+_original_thread_excepthook = threading.excepthook
+
+
+def _thread_excepthook(args):
+    """Keep unhandled plugin worker failures tied to the owning service."""
+    owner = getattr(threading.current_thread(), '_host_session', None)
+    if owner is None or issubclass(args.exc_type, SystemExit):
+        return _original_thread_excepthook(args)
+    cursor = args.exc_traceback
+    last = None
+    while cursor is not None:
+        last = cursor
+        cursor = cursor.tb_next
+    source_file = os.path.basename(last.tb_frame.f_code.co_filename) if last else 'unknown'
+    line_number = last.tb_lineno if last else 0
+    try:
+        formatted = ''.join(traceback.format_exception(args.exc_type, args.exc_value,
+                                                       args.exc_traceback))[-16000:]
+        callback = vars(builtins).get('_cctvhost_python_exception')
+        if callable(callback):
+            callback(owner.identifier, threading.current_thread().name,
+                     args.exc_type.__name__, source_file, line_number,
+                     str(args.exc_value), formatted)
+            return
+    except BaseException:
+        pass
+    return _original_thread_excepthook(args)
 
 
 class _SessionEnvironment(MutableMapping):
@@ -304,6 +332,7 @@ def _process_worker(server, request, address):
 
 
 threading.Thread.start = _start
+threading.excepthook = _thread_excepthook
 socketserver.BaseServer.__init__ = _init
 socketserver.BaseServer.serve_forever = _serve
 socketserver.TCPServer.server_close = _close

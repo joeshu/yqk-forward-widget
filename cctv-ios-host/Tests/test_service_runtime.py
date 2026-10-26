@@ -219,6 +219,32 @@ class ServiceRuntimeTests(unittest.TestCase):
         self.assertTrue(runtime.stop_session(2), runtime.last_error())
         self.assertTrue(runtime.is_idle())
 
+    def test_uncaught_worker_exception_is_reported_with_service_and_source_context(self):
+        reports = []
+        previous = vars(builtins).get('_cctvhost_python_exception')
+        builtins._cctvhost_python_exception = lambda *args: reports.append(args)
+        try:
+            worker = self.launch("import threading, time\n"
+                                 "def fail():\n"
+                                 " raise ValueError('worker diagnostic fixture')\n"
+                                 "threading.Thread(target=fail, name='fixture-worker', daemon=True).start()\n"
+                                 "time.sleep(.05)\n")
+            worker.join(1)
+            self.wait(lambda: bool(reports))
+            service_id, thread_name, exception_type, source_file, line, message, formatted = reports[0]
+            self.assertEqual(service_id, 'default')
+            self.assertEqual(thread_name, 'fixture-worker')
+            self.assertEqual(exception_type, 'ValueError')
+            self.assertEqual(source_file, 'plugin0.py')
+            self.assertGreater(line, 0)
+            self.assertEqual(message, 'worker diagnostic fixture')
+            self.assertIn('ValueError: worker diagnostic fixture', formatted)
+        finally:
+            if previous is None:
+                vars(builtins).pop('_cctvhost_python_exception', None)
+            else:
+                builtins._cctvhost_python_exception = previous
+
     def test_returned_main_with_background_server_is_still_running(self):
         worker = self.launch(self.server_source(background=True))
         worker.join(2)

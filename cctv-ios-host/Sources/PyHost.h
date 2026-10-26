@@ -12,6 +12,9 @@ FOUNDATION_EXPORT NSNotificationName const PyHostRuntimeStateDidChangeNotificati
 @property (class, nonatomic, readonly) NSInteger port;
 @property (class, nonatomic, readonly, nullable) NSError *startupError;
 + (nullable NSError *)startupErrorForServiceIdentifier:(NSString *)identifier;
+/// Recovers prior-process Python breadcrumbs into diagnostics without claiming that
+/// every interrupted process was a crash (iOS may also terminate background apps).
++ (void)recoverInterruptedPythonSessions;
 /// Describes interpreter/process activity only. HTTP health must be checked separately.
 @property (class, nonatomic, readonly) NSString *runtimeStatusDescription;
 /// Describes only this service's runtime session; it never infers HTTP or playback health.

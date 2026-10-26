@@ -2,9 +2,12 @@
 #import "JSPluginRuntime.h"
 #import "NodePluginRuntime.h"
 #import "RuntimeDiagnostics.h"
+#import "PluginLogStore.h"
 #import <pthread.h>
 #import <stdlib.h>
 #import <time.h>
+#import <mach/mach.h>
+#import <mach/task_info.h>
 #import <QuartzCore/QuartzCore.h>
 
 #if __has_include(<Python.h>)
@@ -30,10 +33,12 @@
 @property(nonatomic) BOOL threadExited;
 @property(nonatomic) BOOL sessionReady;
 @property(nonatomic, strong) NSError *error;
+@property(nonatomic, copy) NSString *diagnosticStage;
 @end
 @implementation PyHostTask @end
 
 static pthread_mutex_t gLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t gBreadcrumbLock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t gCondition = PTHREAD_COND_INITIALIZER;
 static NSMutableDictionary<NSString *, PyHostTask *> *gTasks;
 static NSMutableDictionary<NSString *, NSError *> *gTaskFailures;
@@ -43,6 +48,7 @@ static BOOL gStartedOnce = NO;
 static BOOL gInterpreterReady = NO;
 static BOOL gInterpreterInitializing = NO;
 static NSError *gInterpreterFailure;
+static NSString *gProcessSessionID;
 #if PYHOST_AVAILABLE
 static PyObject *gServiceRuntime = NULL;
 static PyObject *gWriteFunction = NULL;
@@ -56,6 +62,110 @@ static void ensureMaps(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{ gTasks = [NSMutableDictionary dictionary]; gTaskFailures = [NSMutableDictionary dictionary]; gLogHandlers = [NSMutableDictionary dictionary]; });
 }
+
+static NSString *pythonBreadcrumbPath(void) {
+    NSString *support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+    return [[[[support stringByAppendingPathComponent:@"ysp"] stringByAppendingPathComponent:@"diagnostics"] stringByAppendingPathComponent:@"python-active-sessions"] stringByAppendingPathExtension:@"json"];
+}
+
+static NSString *pythonProcessSessionID(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ gProcessSessionID = NSUUID.UUID.UUIDString.lowercaseString; });
+    return gProcessSessionID;
+}
+
+static NSMutableDictionary<NSString *, NSDictionary *> *readPythonBreadcrumbsLocked(void) {
+    NSData *data = [NSData dataWithContentsOfFile:pythonBreadcrumbPath() options:0 error:NULL];
+    id root = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+    id rows = [root isKindOfClass:NSDictionary.class] ? root[@"sessions"] : nil;
+    return [rows isKindOfClass:NSDictionary.class] ? [rows mutableCopy] : [NSMutableDictionary dictionary];
+}
+
+static void writePythonBreadcrumbsLocked(NSDictionary<NSString *, NSDictionary *> *rows) {
+    NSString *path = pythonBreadcrumbPath();
+    NSFileManager *manager = NSFileManager.defaultManager;
+    [manager createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
+    if (!rows.count) {
+        [manager removeItemAtPath:path error:NULL];
+        return;
+    }
+    NSData *data = [NSJSONSerialization dataWithJSONObject:@{@"version":@1, @"sessions":rows} options:0 error:NULL];
+    if (!data.length || ![data writeToFile:path options:NSDataWritingAtomic error:NULL]) return;
+    NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:path];
+    @try { [file synchronizeFile]; [file closeFile]; }
+    @catch (__unused NSException *exception) { @try { [file closeFile]; } @catch (__unused NSException *ignored) {} }
+}
+
+static NSDictionary *pythonProcessMemoryFields(void) {
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    kern_return_t result = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count);
+    if (result != KERN_SUCCESS) return @{};
+    return @{@"process_resident_bytes":@(info.resident_size), @"process_phys_footprint_bytes":@(info.phys_footprint)};
+}
+
+static NSDictionary *pythonBreadcrumbRecord(PyHostTask *task, NSString *stage) {
+    NSString *scriptName = task.scriptPath.lastPathComponent.length ? task.scriptPath.lastPathComponent : @"unknown.py";
+    NSMutableDictionary *record = [@{@"process_session_id":pythonProcessSessionID(),
+                                    @"process_id":@(NSProcessInfo.processInfo.processIdentifier),
+                                    @"service_id":task.identifier ?: @"unknown",
+                                    @"script_name":scriptName,
+                                    @"stage":stage ?: @"unknown",
+                                    @"port":@(task.port),
+                                    @"updated_at":[[NSISO8601DateFormatter new] stringFromDate:NSDate.date]} mutableCopy];
+    [record addEntriesFromDictionary:pythonProcessMemoryFields()];
+    return record;
+}
+
+static void recordPythonBreadcrumb(PyHostTask *task, NSString *stage) {
+    if (!task.identifier.length) return;
+    task.diagnosticStage = stage ?: @"unknown";
+    if (!RuntimeDiagnostics.shared.enabled) return;
+    NSDictionary *record = pythonBreadcrumbRecord(task, task.diagnosticStage);
+    pthread_mutex_lock(&gBreadcrumbLock);
+    NSMutableDictionary *rows = readPythonBreadcrumbsLocked();
+    rows[task.identifier] = record;
+    writePythonBreadcrumbsLocked(rows);
+    pthread_mutex_unlock(&gBreadcrumbLock);
+    [RuntimeDiagnostics.shared recordEventSynchronously:@"python_runtime_breadcrumb" category:@"plugin" fields:record];
+}
+
+static void clearPythonBreadcrumb(PyHostTask *task) {
+    if (!task.identifier.length) return;
+    pthread_mutex_lock(&gBreadcrumbLock);
+    NSMutableDictionary *rows = readPythonBreadcrumbsLocked();
+    NSDictionary *record = rows[task.identifier];
+    if ([record[@"process_session_id"] isEqual:pythonProcessSessionID()]) [rows removeObjectForKey:task.identifier];
+    writePythonBreadcrumbsLocked(rows);
+    pthread_mutex_unlock(&gBreadcrumbLock);
+}
+
+static void recoverPythonBreadcrumbs(void) {
+    NSMutableArray<NSDictionary *> *interrupted = [NSMutableArray array];
+    pthread_mutex_lock(&gBreadcrumbLock);
+    NSMutableDictionary *rows = readPythonBreadcrumbsLocked();
+    NSString *sessionID = pythonProcessSessionID();
+    for (NSString *identifier in rows.allKeys.copy) {
+        NSDictionary *record = rows[identifier];
+        if (![record[@"process_session_id"] isEqual:sessionID]) {
+            if (![record[@"stage"] isEqual:@"terminal"]) [interrupted addObject:record];
+            [rows removeObjectForKey:identifier];
+        }
+    }
+    writePythonBreadcrumbsLocked(rows);
+    pthread_mutex_unlock(&gBreadcrumbLock);
+    for (NSDictionary *record in interrupted) {
+        NSString *serviceID = [record[@"service_id"] isKindOfClass:NSString.class] ? record[@"service_id"] : @"";
+        NSString *scriptName = [record[@"script_name"] isKindOfClass:NSString.class] ? record[@"script_name"] : @"Python 脚本";
+        NSString *stage = [record[@"stage"] isKindOfClass:NSString.class] ? record[@"stage"] : @"未知阶段";
+        if (serviceID.length) [PluginLogStore.shared appendLine:[NSString stringWithFormat:@"上次进程结束时 %@ 仍在运行（阶段：%@）。这可能是崩溃或系统回收；请结合运行诊断与系统崩溃报告判断。", scriptName, stage] forIdentifier:serviceID];
+        if (!RuntimeDiagnostics.shared.enabled) continue;
+        NSMutableDictionary *fields = [record mutableCopy];
+        fields[@"recovery_class"] = @"previous_process_ended_without_clean_python_shutdown";
+        [RuntimeDiagnostics.shared recordEventSynchronously:@"python_session_interrupted" category:@"plugin" fields:fields];
+    }
+}
+
 static void notifyRuntimeStateChanged(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         [NSNotificationCenter.defaultCenter postNotificationName:PyHostRuntimeStateDidChangeNotification object:nil];
@@ -73,6 +183,10 @@ static void emitLogForIdentifier(NSString *identifier, NSString *text) {
 static void emitLog(NSString *text) { emitLogForIdentifier(nil, text); }
 
 @implementation PyHost
+
++ (void)recoverInterruptedPythonSessions {
+    recoverPythonBreadcrumbs();
+}
 
 + (BOOL)running {
     ensureMaps(); pthread_mutex_lock(&gLock);
@@ -185,6 +299,28 @@ static PyObject *pyHostWrite(PyObject *self, PyObject *args) {
         return PyLong_FromSsize_t(length);
     }
 }
+static PyObject *pyHostPythonException(PyObject *self, PyObject *args) {
+    const char *service = NULL, *thread = NULL, *type = NULL, *file = NULL, *message = NULL, *traceback = NULL;
+    int line = 0;
+    if (!PyArg_ParseTuple(args, "ssssiss", &service, &thread, &type, &file, &line, &message, &traceback)) return NULL;
+    @autoreleasepool {
+        NSString *serviceID = [NSString stringWithUTF8String:service] ?: @"unknown";
+        NSString *trace = [NSString stringWithUTF8String:traceback] ?: @"Python 后台线程发生未捕获异常";
+        ensureMaps();
+        pthread_mutex_lock(&gLock); PyHostTask *task = gTasks[serviceID]; pthread_mutex_unlock(&gLock);
+        if (task) recordPythonBreadcrumb(task, @"background_thread_exception");
+        NSDictionary *fields = @{@"engine":@"python",
+                                 @"service_id":serviceID,
+                                 @"thread_name":[NSString stringWithUTF8String:thread] ?: @"unknown",
+                                 @"exception_type":[NSString stringWithUTF8String:type] ?: @"Exception",
+                                 @"source_file":[NSString stringWithUTF8String:file] ?: @"unknown",
+                                 @"line_number":@(line),
+                                 @"error_message":[NSString stringWithUTF8String:message] ?: @""};
+        [RuntimeDiagnostics.shared recordEventSynchronously:@"python_background_thread_exception" category:@"plugin" fields:fields];
+        emitLogForIdentifier(serviceID, trace);
+    }
+    Py_RETURN_NONE;
+}
 static PyObject *pyHostJSCall(PyObject *self, PyObject *args) {
     const char *operation = NULL, *json = NULL;
     if (!PyArg_ParseTuple(args, "ss", &operation, &json)) return NULL;
@@ -226,6 +362,7 @@ static PyObject *pyHostNodeCall(PyObject *self, PyObject *args) {
     }
 }
 static PyMethodDef writeMethod = {"_pyhost_write", pyHostWrite, METH_VARARGS, "Forward Python output to its service log."};
+static PyMethodDef pythonExceptionMethod = {"_cctvhost_python_exception", pyHostPythonException, METH_VARARGS, "Persist and log an uncaught Python worker-thread exception."};
 static PyMethodDef jsMethod = {"_cctvhost_js_call", pyHostJSCall, METH_VARARGS, "Call the native JavaScriptCore plugin host."};
 static PyMethodDef nodeMethod = {"_cctvhost_node_call", pyHostNodeCall, METH_VARARGS, "Call the Node.js Mobile plugin host."};
 
@@ -258,6 +395,7 @@ static BOOL initializeInterpreter(PyHostTask *task, NSError **failure) {
     if ([NSFileManager.defaultManager fileExistsAtPath:vendor]) { PyObject *site = PyUnicode_FromString(vendor.UTF8String); if (site && sysPath) PyList_Insert(sysPath, 0, site); Py_XDECREF(site); }
     PyObject *builtins = PyEval_GetBuiltins();
     gWriteFunction = PyCFunction_New(&writeMethod, NULL); PyDict_SetItemString(builtins, "_pyhost_write", gWriteFunction);
+    PyObject *pythonExceptionFunction = PyCFunction_New(&pythonExceptionMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_python_exception", pythonExceptionFunction); Py_XDECREF(pythonExceptionFunction);
     gJSFunction = PyCFunction_New(&jsMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_js_call", gJSFunction);
     gNodeFunction = PyCFunction_New(&nodeMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_node_call", gNodeFunction);
     [JSPluginRuntime shared].logHandler = ^(NSString *line) { emitLog([@"[JS] " stringByAppendingString:line]); };
@@ -288,16 +426,22 @@ static void taskFinished(PyHostTask *task, BOOL active, NSError *error) {
     if(!active && gTasks[task.identifier]==task){[gTasks removeObjectForKey:task.identifier];if(error)gTaskFailures[task.identifier]=error;else [gTaskFailures removeObjectForKey:task.identifier];if(gTaskFailures.count>256)[gTaskFailures removeObjectForKey:gTaskFailures.allKeys.firstObject];}
     pthread_cond_broadcast(&gCondition); pthread_mutex_unlock(&gLock);
     NSString *event=error?@"python_runtime_failed":(active?@"python_runtime_background_work_active":(stopRequested?@"python_runtime_stopped":@"python_runtime_exited_unexpectedly"));
-    NSMutableDictionary *fields=[@{@"engine":@"python", @"service_id":task.identifier?:@"unknown", @"port":@(task.port), @"background_work_active":@(active), @"stop_requested":@(stopRequested), @"unexpected_exit":@(!active&&!stopRequested&&!error), @"error_domain":error.domain?:@"", @"error_code":@(error.code)} mutableCopy];
+    NSString *previousStage = task.diagnosticStage ?: @"unknown";
+    NSString *finalStage = active ? @"background_work_active" : (error ? @"failed" : (stopRequested ? @"stopped" : @"returned_without_background_work"));
+    recordPythonBreadcrumb(task, active ? @"background_work_active" : @"terminal");
+    NSMutableDictionary *fields=[@{@"engine":@"python", @"service_id":task.identifier?:@"unknown", @"script_name":task.scriptPath.lastPathComponent?:@"unknown.py", @"last_runtime_stage":previousStage, @"final_stage":finalStage, @"port":@(task.port), @"background_work_active":@(active), @"stop_requested":@(stopRequested), @"unexpected_exit":@(!active&&!stopRequested&&!error), @"error_domain":error.domain?:@"", @"error_code":@(error.code)} mutableCopy];
     if(error.localizedDescription.length)fields[@"error_message"]=error.localizedDescription;
     if(error)fields[@"failure_stage"]=error.code==11?@"interpreter_initialization":(error.code==12?@"script_entry":@"runtime_task");
-    [RuntimeDiagnostics.shared recordEvent:event category:@"plugin" fields:fields];
+    [fields addEntriesFromDictionary:pythonProcessMemoryFields()];
+    [RuntimeDiagnostics.shared recordEventSynchronously:event category:@"plugin" fields:fields];
+    if (!active) clearPythonBreadcrumb(task);
     notifyRuntimeStateChanged();
 }
 
 static void *pyThread(void *rawTask) {
     @autoreleasepool {
         PyHostTask *task = (__bridge_transfer PyHostTask *)rawTask;
+        recordPythonBreadcrumb(task, @"thread_started");
         BOOL initialize = NO;
         pthread_mutex_lock(&gLock);
         if (task.initializesInterpreter) initialize = YES;
@@ -306,6 +450,7 @@ static void *pyThread(void *rawTask) {
         pthread_mutex_unlock(&gLock);
         PyGILState_STATE gil = PyGILState_UNLOCKED;
         if (initialize) {
+            recordPythonBreadcrumb(task, @"interpreter_initializing");
             NSError *failure = nil;
             if (!initializeInterpreter(task, &failure)) {
                 pthread_mutex_lock(&gLock); gInterpreterFailure = failure; gInterpreterInitializing = NO; pthread_cond_broadcast(&gCondition); pthread_mutex_unlock(&gLock);
@@ -320,7 +465,8 @@ static void *pyThread(void *rawTask) {
 
         pthread_mutex_lock(&gLock);BOOL cancelled=task.stopping;if(!cancelled){task.sessionReady=YES;task.running=YES;}pthread_cond_broadcast(&gCondition);pthread_mutex_unlock(&gLock);
         if(cancelled){if(initialize)PyEval_SaveThread();else PyGILState_Release(gil);taskFinished(task,NO,nil);return NULL;}
-        [RuntimeDiagnostics.shared recordEvent:@"python_script_entry_started" category:@"plugin" fields:@{@"engine":@"python", @"service_id":task.identifier?:@"unknown", @"port":@(task.port)}];
+        recordPythonBreadcrumb(task, @"script_entry_starting");
+        [RuntimeDiagnostics.shared recordEventSynchronously:@"python_script_entry_started" category:@"plugin" fields:@{@"engine":@"python", @"service_id":task.identifier?:@"unknown", @"script_name":task.scriptPath.lastPathComponent?:@"unknown.py", @"port":@(task.port)}];
         notifyRuntimeStateChanged();
 
         PyObject *path = PyUnicode_FromString(task.scriptPath.UTF8String);
@@ -347,6 +493,7 @@ static void *pyThread(void *rawTask) {
         PyObject *idle = idleFunction && serviceID ? PyObject_CallFunctionObjArgs(idleFunction, serviceID, NULL) : NULL;
         BOOL clean = idle && PyObject_IsTrue(idle) > 0;
         Py_XDECREF(idleFunction); Py_XDECREF(serviceID); Py_XDECREF(idle); PyErr_Clear();
+        recordPythonBreadcrumb(task, clean ? @"script_returned_idle" : @"background_work_active");
         taskFinished(task, !clean, failure);
         if (initialize) PyEval_SaveThread(); else PyGILState_Release(gil);
         return NULL;

@@ -367,6 +367,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self registerCallbackProtocol];
     [self setupSDK];
     [self log:@"日志持久化已启用（按需批量保存）"];
+    [PyHost recoverInterruptedPythonSessions];
     [RuntimeDiagnostics.shared recordEvent:@"app_started" category:@"lifecycle" fields:@{@"app_version":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"unknown", @"app_build":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"]?:@"unknown", @"ios_version":UIDevice.currentDevice.systemVersion?:@"unknown"}];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
