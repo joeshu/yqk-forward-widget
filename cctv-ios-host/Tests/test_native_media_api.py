@@ -61,7 +61,8 @@ class NativeMediaAPITests(unittest.TestCase):
                 build = subprocess.run([
                     "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-framework", "QuartzCore",
                     "-I", str(root / "Sources"), str(root / "Tests" / "native_media_api_tests.m"),
-                    str(root / "Sources" / "MediaAPIClient.m"), "-o", executable,
+                    str(root / "Sources" / "MediaAPIClient.m"),
+                    str(root / "Sources" / "MediaPlaybackHeaders.m"), "-o", executable,
                 ], capture_output=True, text=True)
                 self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
                 result = subprocess.run([executable, str(server.server_port)], capture_output=True, text=True, timeout=30)
