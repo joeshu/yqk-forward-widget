@@ -23,6 +23,7 @@ class NativePackageTests(unittest.TestCase):
         build = subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-framework', 'Foundation', '-lz', '-I', str(root / 'Sources'),
                                 str(root / 'Tests/native_package_tests.m'), str(root / 'Sources/MediaPackageImporter.m'),
                                 str(root / 'Sources/MediaPackageDownloader.m'),
+                                str(root / 'Sources/ProfileStore.m'),
                                 str(root / 'Sources/ServiceStore.m'), '-o', str(cls.executable)], capture_output=True, text=True)
         if build.returncode:
             raise AssertionError(build.stdout + build.stderr)

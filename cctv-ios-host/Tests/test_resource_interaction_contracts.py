@@ -319,7 +319,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('if ((alternate_headers or is_hls_url(address) or is_extensionless_url(address))', service)
         self.assertIn('def is_extensionless_url(url):', service)
         self.assertIn('or is_extensionless_url(result.get(\'url\'))', service)
-        self.assertIn('MediaTVBoxPlaybackHeaders(source,choice)', api)
+        self.assertIn('MediaTVBoxPlaybackHeaders(source,root)', api)
+        self.assertIn('MediaTVBoxPlaybackHeaders(@{},choice)', api)
+        self.assertIn('choiceHeaders=[headers mutableCopy]', api)
         self.assertIn('MediaPlaybackHeadersFromResult(alternate)', self.playback)
         self.assertIn('test_quality_specific_headers_reach_hls_alternate',
                       (ROOT / 'Tests/test_media_runtime.py').read_text())

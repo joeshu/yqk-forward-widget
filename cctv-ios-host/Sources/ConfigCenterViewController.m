@@ -84,7 +84,16 @@
     [self updateKindFilters];
     NSString *q = self.search.searchBar.text.lowercaseString;
     NSArray *profiles=[all filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *p,NSDictionary *bindings){
-        NSString *name=[p[@"name"] isKindOfClass:NSString.class]?p[@"name"]:@"";NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";NSString *searchable=[@[[p[@"url"] isKindOfClass:NSString.class]?p[@"url"]:@"",[p[@"subscriptionURL"] isKindOfClass:NSString.class]?p[@"subscriptionURL"]:@"",[p[@"epgURL"] isKindOfClass:NSString.class]?p[@"epgURL"]:@"",[p[@"protocol"] isKindOfClass:NSString.class]?p[@"protocol"]:@"",[p[@"status"] isKindOfClass:NSString.class]?p[@"status"]:@"",[p[@"subscriptionStatus"] isKindOfClass:NSString.class]?p[@"subscriptionStatus"]:@""] ] componentsJoinedByString:@" "].lowercaseString;
+        NSString *name=[p[@"name"] isKindOfClass:NSString.class]?p[@"name"]:@"";NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";
+        NSArray *searchParts=@[
+            [p[@"url"] isKindOfClass:NSString.class]?p[@"url"]:@"",
+            [p[@"subscriptionURL"] isKindOfClass:NSString.class]?p[@"subscriptionURL"]:@"",
+            [p[@"epgURL"] isKindOfClass:NSString.class]?p[@"epgURL"]:@"",
+            [p[@"protocol"] isKindOfClass:NSString.class]?p[@"protocol"]:@"",
+            [p[@"status"] isKindOfClass:NSString.class]?p[@"status"]:@"",
+            [p[@"subscriptionStatus"] isKindOfClass:NSString.class]?p[@"subscriptionStatus"]:@""
+        ];
+        NSString *searchable=[[searchParts componentsJoinedByString:@" "] lowercaseString];
         if(![self profile:p matchesKind:self.selectedKind?:@"all"])return NO;
         if(q.length && [name rangeOfString:q options:NSCaseInsensitiveSearch].location==NSNotFound && [source.lowercaseString rangeOfString:q].location==NSNotFound && [searchable rangeOfString:q].location==NSNotFound)return NO;
         return [p[@"type"] isEqual:@"plugin"]||[p[@"type"] isEqual:@"tvbox"]||source.length>0||[p[@"native"] boolValue];
