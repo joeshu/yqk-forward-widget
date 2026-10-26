@@ -2460,7 +2460,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
                     copy[@"subscriptionSources"] = owners.allObjects;
                     [merged addObject:copy];
                 } else if(!owners.count) {
-                    continue;
+                    // Built-in SDK channels have no subscription owner. Keep them
+                    // when replacing a playlist; only discard channels that were
+                    // owned by a subscription and became orphaned above.
+                    if (!originalOwners.count) [merged addObject:existing];
                 } else if(owners.count!=originalOwners.count) {
                     NSMutableDictionary *copy=[existing mutableCopy];copy[@"subscriptionSources"]=owners.allObjects;[merged addObject:copy];
                 } else {
