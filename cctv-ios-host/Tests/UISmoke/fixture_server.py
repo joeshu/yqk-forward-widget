@@ -38,6 +38,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         args = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
         operation = self.path.rsplit('/', 1)[-1]
+        print("POST", operation, flush=True)
         base = f'http://127.0.0.1:{self.server.server_port}'
         card = lambda value: {'id': value, 'name': '测试电影 ' + value, 'poster': base + '/poster.png', 'remarks': 'HD'}
         if operation == 'capabilities':
