@@ -13,6 +13,7 @@
 #import "HostImageLoader.h"
 #import "NodePluginRuntime.h"
 #import "MediaBrowserViewController.h"
+#import "LocalServiceReadiness.h"
 #import "MediaPlaybackViewController.h"
 #import "MediaWebViewController.h"
 #import <WebKit/WebKit.h>
