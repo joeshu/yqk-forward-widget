@@ -446,7 +446,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [root playRemote:@{@"id":url,@"name":@"Warm local startup",@"remoteURL":url}];
             check([root valueForKey:@"avPlayer"]!=nil,@"recent successful local health avoids another readiness wait");
             check(((PlaybackStartupTrace *)[root valueForKey:@"startupTrace"]).stages[@"serviceCached"]!=nil,@"warm health reuse is recorded separately");
-            id previous = [root valueForKey:@"avPlayer"];
+            AVPlayer *previous = [root valueForKey:@"avPlayer"];
             NSDictionary *native=[root channelWithID:@"cctv1"];
             check(native!=nil,@"native channel lookup succeeds after subscription playback");
             [root playChannel:native route:nil];
