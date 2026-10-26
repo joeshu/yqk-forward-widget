@@ -18,7 +18,7 @@
     NSString *stateName = state == UIApplicationStateActive ? @"active" : (state == UIApplicationStateBackground ? @"background" : @"inactive");
     return @{
         @"application_state":stateName,
-        @"process_uptime_seconds":@(ProcessInfo.processInfo.systemUptime),
+        @"process_uptime_seconds":@(NSProcessInfo.processInfo.systemUptime),
         @"app_version":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"unknown",
         @"app_build":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"unknown",
         @"ios_version":UIDevice.currentDevice.systemVersion ?: @"unknown"
