@@ -476,6 +476,8 @@ class PythonSpider:
     def __init__(self, root, entry, options=None, proxy_url=''):
         prepare_started_at = time.perf_counter()
         prepare_stage = 'module_import'
+        owner = getattr(threading.current_thread(), '_host_session', None)
+        self.service_identifier = str(getattr(owner, 'identifier', ''))
         self.root = os.path.realpath(root)
         path = os.path.realpath(os.path.join(self.root, entry))
         if os.path.commonpath([self.root, path]) != self.root or not path.endswith('.py'):
@@ -545,6 +547,11 @@ class PythonSpider:
             self.spider = cls()
             self.spider._cctvhost_proxy_url = proxy_url
             self.lock = threading.Lock()
+            # Python Spider implementations are not generally thread-safe, so
+            # calls stay serialized. Give a request already in progress time to
+            # finish instead of turning ordinary home -> detail navigation into
+            # an almost immediate HTTP 503 BUSY response.
+            self.lock_timeout = 12.0
             if callable(getattr(self.spider, 'init', None)):
                 prepare_stage = 'spider_init'
                 init_started_at = time.perf_counter()
@@ -616,8 +623,27 @@ class PythonSpider:
                 'capabilities': [key for key, method in methods.items() if callable(getattr(self.spider, method, None))]}
 
     def call(self, operation, args):
-        if not self.lock.acquire(timeout=.1):
-            raise MediaError('BUSY', '来源正在处理其他请求，请稍后重试', True)
+        wait_started = time.perf_counter()
+        lock_timeout = max(.1, float(getattr(self, 'lock_timeout', 12.0)))
+        acquired = self.lock.acquire(timeout=lock_timeout)
+        wait_ms = max(0, int((time.perf_counter() - wait_started) * 1000))
+        request = getattr(threading.current_thread(), '_host_media_request_context', {})
+        if wait_ms >= 100 or not acquired:
+            record = {'event': 'python_spider_request_busy' if not acquired else 'python_spider_request_queued',
+                      'operation': str(operation or 'unknown')[:48], 'wait_ms': wait_ms,
+                      'service_id': self.service_identifier}
+            if not acquired:
+                record['wait_timeout_ms'] = int(lock_timeout * 1000)
+            for key in ('request_id', 'correlation_id'):
+                value = request.get(key) if isinstance(request, dict) else None
+                if isinstance(value, str) and value:
+                    record[key] = value[:96]
+            try:
+                print('[CCTVHostMediaAPI] ' + json.dumps(record, ensure_ascii=False, separators=(',', ':')))
+            except Exception:
+                pass
+        if not acquired:
+            raise MediaError('BUSY', '影视来源请求排队超时（%g 秒），请重试' % lock_timeout, True)
         try:
             spider = self.spider
             if operation == 'home':

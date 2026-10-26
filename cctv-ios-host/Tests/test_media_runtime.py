@@ -296,12 +296,104 @@ class Spider:
         self.assertLessEqual(len(safe_error_summary('x' * 500)), 180)
 
     def test_busy_spider_does_not_execute_concurrently(self):
+        self.engine.lock_timeout = .01
         self.engine.lock.acquire()
         try:
-            with self.assertRaisesRegex(media.MediaError, '其他请求'):
+            with self.assertRaisesRegex(media.MediaError, '排队超时'):
                 self.runtime.call('search', {'keyword': 'busy'})
         finally:
             self.engine.lock.release()
+
+    def test_spider_serializes_overlapping_requests_instead_of_immediate_busy(self):
+        self.engine.lock_timeout = 1.0
+        active = 0
+        maximum_active = 0
+        guard = threading.Lock()
+
+        def enter():
+            nonlocal active, maximum_active
+            with guard:
+                active += 1
+                maximum_active = max(maximum_active, active)
+            time.sleep(.08)
+            with guard:
+                active -= 1
+
+        self.engine.spider.homeContent = lambda _filter: (enter() or {'list': []})
+        self.engine.spider.searchContent = lambda _key, _quick, _page='1': (enter() or {'list': []})
+        results = []
+        failures = []
+
+        def invoke(operation):
+            try:
+                results.append(self.engine.call(operation, {'keyword': 'fixture'}))
+            except Exception as error:
+                failures.append(error)
+
+        first = threading.Thread(target=invoke, args=('home',))
+        second = threading.Thread(target=invoke, args=('search',))
+        first.start()
+        time.sleep(.01)
+        second.start()
+        first.join(1)
+        second.join(1)
+        self.assertFalse(first.is_alive() or second.is_alive())
+        self.assertEqual(failures, [])
+        self.assertEqual(len(results), 2)
+        self.assertEqual(maximum_active, 1)
+
+    def test_http_handler_propagates_request_ids_to_spider_queue_diagnostics(self):
+        handler = object.__new__(transport.Handler)
+        observed = {}
+
+        class Runtime:
+            def call(self, operation, args):
+                observed['operation'] = operation
+                observed['args'] = args
+                observed['context'] = getattr(threading.current_thread(), '_host_media_request_context', None)
+                return {'ok': True}
+
+        result = handler.call_runtime(Runtime(), 'detail', {'id': 'fixture'}, 'request-fixture', 'trace-fixture')
+        self.assertEqual(result, {'ok': True})
+        self.assertEqual(observed['context'], {
+            'request_id': 'request-fixture', 'correlation_id': 'trace-fixture', 'operation': 'detail'})
+        self.assertFalse(hasattr(threading.current_thread(), '_host_media_request_context'))
+
+    def test_queued_spider_log_joins_service_request_and_correlation_ids(self):
+        self.engine.lock_timeout = 1.0
+        self.engine.service_identifier = 'service-fixture'
+        self.engine.lock.acquire()
+        output = io.StringIO()
+        failures = []
+
+        def invoke():
+            thread = threading.current_thread()
+            thread._host_media_request_context = {
+                'request_id': 'request-fixture', 'correlation_id': 'trace-fixture'}
+            try:
+                self.engine.call('search', {'keyword': 'queued'})
+            except Exception as error:
+                failures.append(error)
+            finally:
+                del thread._host_media_request_context
+
+        worker = threading.Thread(target=invoke)
+        try:
+            with redirect_stdout(output):
+                worker.start()
+                time.sleep(.12)
+                self.engine.lock.release()
+                worker.join(1)
+        finally:
+            if self.engine.lock.locked():
+                self.engine.lock.release()
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(failures, [])
+        record = json.loads(output.getvalue().split(' ', 1)[1])
+        self.assertEqual(record['event'], 'python_spider_request_queued')
+        self.assertEqual(record['service_id'], 'service-fixture')
+        self.assertEqual(record['request_id'], 'request-fixture')
+        self.assertEqual(record['correlation_id'], 'trace-fixture')
 
     def test_close_releases_module_and_rejects_new_requests(self):
         name = self.engine.module_name

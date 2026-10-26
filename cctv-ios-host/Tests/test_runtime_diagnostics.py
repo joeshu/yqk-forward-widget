@@ -27,8 +27,8 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         self.assertIn('page.onExportDebugLog=', HOST)
 
     def test_diagnostic_file_has_a_hard_size_limit(self):
-        self.assertIn('RuntimeDiagnosticsMaximumBytes = 1024 * 1024', DIAGNOSTICS)
-        self.assertIn('RuntimeDiagnosticsRetainedBytes = 768 * 1024', DIAGNOSTICS)
+        self.assertIn('RuntimeDiagnosticsMaximumBytes = 4 * 1024 * 1024', DIAGNOSTICS)
+        self.assertIn('RuntimeDiagnosticsRetainedBytes = 3 * 1024 * 1024', DIAGNOSTICS)
         self.assertIn('[self trimLogToTail]', DIAGNOSTICS)
 
     def test_sensitive_fields_and_urls_are_redacted(self):
@@ -55,10 +55,38 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         self.assertIn('runtime-session.json', DIAGNOSTICS)
         self.assertIn('last_checkpoint_at', DIAGNOSTICS)
         self.assertIn('termination_reason', DIAGNOSTICS)
+        self.assertIn('process_phys_footprint_bytes', DIAGNOSTICS)
+        self.assertIn('process_phys_footprint_sample_checkpoint', DIAGNOSTICS)
+        self.assertIn('process_phys_footprint_bytes', APP_DELEGATE)
         self.assertIn('@"unknown"', DIAGNOSTICS)
         self.assertIn('session_marker_saved', DIAGNOSTICS)
         self.assertIn('beginAppSessionWithFields:', APP_DELEGATE)
         self.assertIn('applicationDidReceiveMemoryWarning:', APP_DELEGATE)
+
+    def test_unclosed_session_preserves_only_the_active_playback_breadcrumb(self):
+        for field in (
+            'active_playback_attempt_id', 'active_playback_service_id',
+            'active_playback_source_host', 'active_playback_outcome',
+            'last_playback_attempt_id', 'last_playback_outcome',
+            'last_playback_failure_kind', 'last_playback_http_status',
+        ):
+            self.assertIn(f'@"{field}"', DIAGNOSTICS)
+        self.assertIn('@"active_playback_outcome":@"in_progress"', PLAYBACK)
+        self.assertIn('terminal?@"":self.playbackAttemptID', PLAYBACK)
+        self.assertIn('terminal?@"":outcome', PLAYBACK)
+        self.assertIn('terminal?@"playback_attempt_finished":@"playback_attempt_progressed"', PLAYBACK)
+        self.assertIn('@"playback_screen_closed"', PLAYBACK)
+        self.assertIn('@"completed" failureKind:nil httpStatus:0 terminal:YES', PLAYBACK)
+        self.assertIn('@"first_frame_ready" failureKind:nil httpStatus:0 terminal:NO', PLAYBACK)
+        self.assertIn('@"webview_handoff" failureKind:nil httpStatus:0 terminal:NO', PLAYBACK)
+        self.assertIn('@"webview_returned" failureKind:nil httpStatus:0 terminal:YES', PLAYBACK)
+        self.assertIn('@"first_frame_timeout" failureKind:@"first_frame_timeout" httpStatus:0 terminal:NO', PLAYBACK)
+
+    def test_process_footprint_is_omitted_when_diagnostics_or_task_info_is_unavailable(self):
+        self.assertIn('fields[@"process_phys_footprint_bytes"] = @(memoryInfo.phys_footprint)', APP_DELEGATE)
+        self.assertNotIn('@"process_phys_footprint_bytes":physicalFootprint', APP_DELEGATE)
+        self.assertIn('checkpointFields[@"process_phys_footprint_bytes"] = @(memoryInfo.phys_footprint)', DIAGNOSTICS)
+        self.assertIn('[marker removeObjectForKey:@"process_phys_footprint_bytes"]', DIAGNOSTICS)
 
     def test_media_api_records_failure_stage_and_safe_playable_result_shape(self):
         for field in (
@@ -191,8 +219,15 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
                       'playback_has_signed_parameter', 'network_error_status_code'):
             self.assertIn(f'@"{field}"', PLAYBACK)
         self.assertIn('NSURLQueryItem *item', PLAYBACK)
-        self.assertIn('self.observedItem.errorLog.events.lastObject', PLAYBACK)
+        self.assertIn('item.errorLog.events.lastObject', PLAYBACK)
+        self.assertIn('recordPlaybackFailureForItem:', PLAYBACK)
+        self.assertIn('playback_attempt_id', PLAYBACK)
+        self.assertIn('playback_attempt_started', DIAGNOSTICS + PLAYBACK)
         self.assertNotIn('fields[@"source_url"]', PLAYBACK)
+
+    def test_media_address_presence_boolean_survives_secret_redaction(self):
+        self.assertIn('lower isEqualToString:@"result_has_media_url"', DIAGNOSTICS)
+        self.assertIn('[value isKindOfClass:NSNumber.class]) return value;', DIAGNOSTICS)
 
 
 if __name__ == "__main__":

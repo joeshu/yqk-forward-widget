@@ -1,10 +1,11 @@
 #import "RuntimeDiagnostics.h"
 #import "HostLogRedactor.h"
 #import <UIKit/UIKit.h>
+#import <mach/mach.h>
 
 static NSString * const RuntimeDiagnosticsPreferenceKey = @"runtimeDiagnosticsEnabled";
-static unsigned long long const RuntimeDiagnosticsMaximumBytes = 1024 * 1024;
-static unsigned long long const RuntimeDiagnosticsRetainedBytes = 768 * 1024;
+static unsigned long long const RuntimeDiagnosticsMaximumBytes = 4 * 1024 * 1024;
+static unsigned long long const RuntimeDiagnosticsRetainedBytes = 3 * 1024 * 1024;
 static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
 
 @interface RuntimeDiagnostics ()
@@ -88,7 +89,7 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     NSDictionary *previous = [self readSessionMarker];
     if ([previous[@"open"] boolValue]) {
         NSMutableDictionary *recovery = [NSMutableDictionary dictionary];
-        for (NSString *key in @[@"session_id", @"started_at", @"last_checkpoint", @"last_checkpoint_at", @"app_version", @"app_build", @"ios_version", @"application_state", @"process_uptime_seconds"])
+        for (NSString *key in @[@"session_id", @"started_at", @"last_checkpoint", @"last_checkpoint_at", @"app_version", @"app_build", @"ios_version", @"application_state", @"process_uptime_seconds", @"process_phys_footprint_bytes", @"process_phys_footprint_sample_checkpoint", @"active_playback_attempt_id", @"active_playback_service_id", @"active_playback_source_host", @"active_playback_outcome", @"last_playback_attempt_id", @"last_playback_outcome", @"last_playback_source_host", @"last_playback_failure_kind", @"last_playback_http_status", @"last_playback_line_index", @"last_playback_episode_index"])
             if (previous[key]) recovery[key] = previous[key];
         recovery[@"termination_reason"] = @"unknown";
         recovery[@"interpretation"] = @"上次会话未记录到正常结束；可能是崩溃、系统回收、强制关闭或设备重启，不能仅据此判定原因";
@@ -111,16 +112,27 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     if (!checkpoint.length || !self.enabled) return;
     NSDictionary *previous = [self readSessionMarker];
     NSMutableDictionary *marker = [NSMutableDictionary dictionaryWithDictionary:previous ?: @{}];
+    NSMutableDictionary *checkpointFields = [fields mutableCopy] ?: [NSMutableDictionary dictionary];
+    task_vm_info_data_t memoryInfo = {0};
+    mach_msg_type_number_t memoryInfoCount = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&memoryInfo, &memoryInfoCount) == KERN_SUCCESS) {
+        checkpointFields[@"process_phys_footprint_bytes"] = @(memoryInfo.phys_footprint);
+        checkpointFields[@"process_phys_footprint_sample_checkpoint"] = checkpoint;
+    }
     marker[@"open"] = @YES;
     marker[@"session_id"] = self.sessionID ?: @"unknown";
     marker[@"last_checkpoint"] = checkpoint;
     marker[@"last_checkpoint_at"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
-    if (fields.count) {
-        for (NSString *key in @[@"app_version", @"app_build", @"ios_version", @"application_state", @"process_uptime_seconds"])
-            if (fields[key]) marker[key] = fields[key];
+    if (checkpointFields.count) {
+        for (NSString *key in @[@"app_version", @"app_build", @"ios_version", @"application_state", @"process_uptime_seconds", @"process_phys_footprint_bytes", @"process_phys_footprint_sample_checkpoint", @"active_playback_attempt_id", @"active_playback_service_id", @"active_playback_source_host", @"active_playback_outcome", @"last_playback_attempt_id", @"last_playback_outcome", @"last_playback_source_host", @"last_playback_failure_kind", @"last_playback_http_status", @"last_playback_line_index", @"last_playback_episode_index"])
+            if (checkpointFields[key]) marker[key] = checkpointFields[key];
+    }
+    if (!checkpointFields[@"process_phys_footprint_bytes"]) {
+        [marker removeObjectForKey:@"process_phys_footprint_bytes"];
+        [marker removeObjectForKey:@"process_phys_footprint_sample_checkpoint"];
     }
     BOOL markerSaved = [self writeSessionMarker:marker];
-    NSMutableDictionary *eventFields = [NSMutableDictionary dictionaryWithDictionary:fields ?: @{}];
+    NSMutableDictionary *eventFields = [checkpointFields mutableCopy];
     eventFields[@"session_marker_saved"] = @(markerSaved);
     [self recordEventSynchronously:checkpoint category:@"lifecycle" fields:eventFields];
 }
@@ -201,6 +213,9 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     if (!value || value == NSNull.null) return NSNull.null;
     if (depth > 3) return @"[truncated]";
     NSString *lower = key.lowercaseString;
+    // This field is a boolean about URL presence, not a URL value. Keeping it
+    // makes media-resolution failures diagnosable without exposing an address.
+    if ([lower isEqualToString:@"result_has_media_url"] && [value isKindOfClass:NSNumber.class]) return value;
     for (NSString *sensitive in @[@"url", @"token", @"cookie", @"auth", @"secret", @"password", @"signature", @"credential", @"header", @"path", @"query", @"body", @"argument"])
         if ([lower containsString:sensitive]) return @"[redacted]";
     if ([value isKindOfClass:NSString.class]) return [self safeText:value];

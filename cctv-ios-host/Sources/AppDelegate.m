@@ -2,6 +2,7 @@
 #import "RootViewController.h"
 #import "HostTheme.h"
 #import "RuntimeDiagnostics.h"
+#import <mach/mach.h>
 
 @interface HostNavigationController : UINavigationController
 @end
@@ -16,13 +17,18 @@
 - (NSDictionary *)diagnosticLifecycleFields {
     UIApplicationState state = UIApplication.sharedApplication.applicationState;
     NSString *stateName = state == UIApplicationStateActive ? @"active" : (state == UIApplicationStateBackground ? @"background" : @"inactive");
-    return @{
+    task_vm_info_data_t memoryInfo = {0};
+    mach_msg_type_number_t memoryInfoCount = TASK_VM_INFO_COUNT;
+    NSMutableDictionary *fields = [@{
         @"application_state":stateName,
         @"process_uptime_seconds":@(NSProcessInfo.processInfo.systemUptime),
         @"app_version":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"unknown",
         @"app_build":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"unknown",
         @"ios_version":UIDevice.currentDevice.systemVersion ?: @"unknown"
-    };
+    } mutableCopy];
+    if (RuntimeDiagnostics.shared.enabled && task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&memoryInfo, &memoryInfoCount) == KERN_SUCCESS)
+        fields[@"process_phys_footprint_bytes"] = @(memoryInfo.phys_footprint);
+    return fields;
 }
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {

@@ -149,6 +149,15 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('self.castTitle.hidden=names.count==0', detail)
         self.assertIn('multiplier:0.94', detail)
 
+    def test_media_browser_cancels_parent_requests_and_resumes_after_child_navigation(self):
+        self.assertIn('media_request_cancelled_on_page_exit', self.detail)
+        self.assertIn('self.generation++;self.homeShelfGeneration=0', self.detail)
+        self.assertIn('[self.client cancel]', self.detail)
+        self.assertIn('resumeCancelledMediaRequestOnAppear', self.detail)
+        self.assertIn('homeShelfRequestInFlight', self.detail)
+        self.assertIn('if([operation isEqualToString:@"home_shelf"])', self.detail)
+        self.assertIn('self.activeMediaOperation=@"home_shelf"', self.detail)
+
     def test_home_status_is_inline_actionable_and_does_not_rebuild_content_on_each_progress_update(self):
         show_message = self.detail[self.detail.index('- (void)showMessage:'):
                                    self.detail.index('- (void)chooseResource', self.detail.index('- (void)showMessage:'))]

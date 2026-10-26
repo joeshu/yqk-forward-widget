@@ -92,6 +92,31 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
+    def call_runtime(self, runtime, operation, args, request_id=None, correlation_id=None):
+        """Attach request IDs to safe Python Spider queue diagnostics."""
+        request_id = request_id or self.headers.get('X-CCTVHost-Request-ID', '')[:96]
+        correlation_id = correlation_id or self.headers.get('X-CCTVHost-Correlation-ID', '')[:96]
+        if not re.fullmatch(r'[A-Za-z0-9._-]{1,96}', request_id):
+            request_id = uuid.uuid4().hex
+        if not re.fullmatch(r'[A-Za-z0-9._-]{1,96}', correlation_id):
+            correlation_id = ''
+        thread = threading.current_thread()
+        previous = getattr(thread, '_host_media_request_context', None)
+        thread._host_media_request_context = {
+            'request_id': request_id, 'correlation_id': correlation_id,
+            'operation': str(operation or 'unknown')[:48],
+        }
+        try:
+            return runtime.call(operation, args)
+        finally:
+            if previous is None:
+                try:
+                    del thread._host_media_request_context
+                except AttributeError:
+                    pass
+            else:
+                thread._host_media_request_context = previous
+
     def send(self, status, value, head=False):
         body = json.dumps(value, ensure_ascii=False).encode()
         try:
@@ -187,7 +212,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 args = {key: values[-1] for key, values in urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).items()}
                 args.update({'method': 'HEAD', 'headers': {key: self.headers.get(key, '') for key in ('User-Agent', 'Range', 'Accept', 'Referer') if self.headers.get(key)}})
-                self.send_proxy(self.server.runtime.call('proxy', args), True)
+                self.send_proxy(self.call_runtime(self.server.runtime, 'proxy', args), True)
             except Exception as error:
                 self.send(502, {'ok': False, 'error': str(error)}, True)
             return
@@ -218,7 +243,7 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 <= length <= 65536:
                 raise MediaError('INVALID_INPUT', 'Spider 路由请求内容超过 64 KB')
             args['body'] = json.loads(self.rfile.read(length) or b'{}')
-        result = self.server.runtime.call('route', args)
+        result = self.call_runtime(self.server.runtime, 'route', args)
         if not isinstance(result, dict):
             raise MediaError('INVALID_PROXY', 'Spider 路由未返回有效响应')
         status = max(100, min(599, int(result.get('statusCode') or 200)))
@@ -275,10 +300,10 @@ class Handler(BaseHTTPRequestHandler):
             if parts.path == '/proxy':
                 args = {key: values[-1] for key, values in urllib.parse.parse_qs(parts.query).items()}
                 args.update({'method': 'GET', 'headers': {key: self.headers.get(key, '') for key in ('User-Agent', 'Range', 'Accept', 'Referer') if self.headers.get(key)}})
-                self.send_proxy(runtime.call('proxy', args))
+                self.send_proxy(self.call_runtime(runtime, 'proxy', args, request_id, correlation_id))
                 return
             if parts.path in ('/all.m3u', '/all.m3u8', '/m3u'):
-                channels = runtime.call('catalog')
+                channels = self.call_runtime(runtime, 'catalog', {}, request_id, correlation_id)
                 def clean(value):
                     return str(value or '').replace('\r', ' ').replace('\n', ' ').replace('"', "'")
                 lines = ['#EXTM3U']
@@ -299,7 +324,7 @@ class Handler(BaseHTTPRequestHandler):
             if parts.path.startswith('/live/') and parts.path.endswith('.m3u8'):
                 ref = urllib.parse.unquote(parts.path[len('/live/'):-len('.m3u8')])
                 query = {key: values[-1] for key, values in urllib.parse.parse_qs(parts.query).items()}
-                result = runtime.call('resolve', {'ref': ref, 'id': ref, 'query': query,
+                result = self.call_runtime(runtime, 'resolve', {'ref': ref, 'id': ref, 'query': query,
                     'selfBase': f'http://127.0.0.1:{self.server.server_port}', 'userAgent': self.headers.get('User-Agent', '')})
                 manifest = result.get('manifestText') if isinstance(result, dict) else None
                 if isinstance(manifest, str) and manifest.lstrip().startswith('#EXTM3U'):
@@ -318,7 +343,7 @@ class Handler(BaseHTTPRequestHandler):
                 refresh = None
                 if isinstance(session_id, str) and session_id:
                     def refresh_media():
-                        value = runtime.call('refreshMedia', {'sessionID': session_id})
+                        value = self.call_runtime(runtime, 'refreshMedia', {'sessionID': session_id}, request_id, correlation_id)
                         if not isinstance(value, dict) or not isinstance(value.get('url'), str):
                             raise MediaError('MEDIA_REFRESH_FAILED', '插件没有返回有效的媒体刷新结果', True)
                         return {'url': value['url'], 'headers': value.get('headers') or {},
@@ -363,7 +388,7 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(args.get('filters'), str):
                 args['filters'] = json.loads(args['filters'])
             args.setdefault('host', f'127.0.0.1:{self.server.server_port}')
-            result = runtime.call(operation, args)
+            result = self.call_runtime(runtime, operation, args, request_id, correlation_id)
             if operation in ('home', 'category', 'search', 'detail'):
                 result = self.relay_artwork(result)
             if operation == 'play':
