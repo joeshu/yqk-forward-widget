@@ -94,6 +94,17 @@ class MediaTests(unittest.TestCase):
             {'id': 'opaque-2', 'name': '第 2 集'},
         ])
 
+    def test_detail_falls_back_to_raw_maccms_episodes_when_normalized_lines_are_empty(self):
+        value = media.detail({'vod_id': 'mixed-film', 'vod_name': '混合格式',
+                              'lines': [{'id': 'empty', 'name': '空线路', 'episodes': []}],
+                              'vod_play_from': '主线',
+                              'vod_play_url': '第 1 集$https://cdn.test/one.m3u8?token=a%2Fb'},
+                             'mixed-film')
+        self.assertEqual(value['lines'], [{
+            'id': '主线', 'name': '主线',
+            'episodes': [{'id': 'https://cdn.test/one.m3u8?token=a%2Fb', 'name': '第 1 集'}],
+        }])
+
     def test_search_cache_is_provider_and_page_scoped_and_returns_copies(self):
         with mock.patch.object(self.engine, 'call', wraps=self.engine.call) as call:
             a = self.runtime.call('search', {'keyword': 'word', 'page': 1, 'provider': 'one'})

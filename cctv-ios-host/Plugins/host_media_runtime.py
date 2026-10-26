@@ -142,8 +142,12 @@ def detail(value, identifier):
                     continue
                 episodes.append({'id': str(episode_id).strip(),
                                  'name': str(episode_name or f'第 {episode_index + 1} 集').strip()})
-            lines.append({'id': str(line.get('id', index)), 'name': str(line.get('name') or f'线路 {index + 1}'), 'episodes': episodes})
-    elif 'vod_play_url' in item:
+            if episodes:
+                lines.append({'id': str(line.get('id', index)), 'name': str(line.get('name') or f'线路 {index + 1}'), 'episodes': episodes})
+    # Some providers return an empty or partially populated normalized `lines`
+    # array alongside the original MacCMS fields. Prefer usable normalized
+    # lines, then fall back to the source's raw playback declaration.
+    if not lines and 'vod_play_url' in item:
         flags = str(item.get('vod_play_from') or '').split('$$$')
         groups = str(item.get('vod_play_url') or '').split('$$$')
         for line_index, group in enumerate(groups):
@@ -160,7 +164,7 @@ def detail(value, identifier):
                                      'name': episode_name.strip() or f'第 {index + 1} 集'})
             if episodes:
                 lines.append({'id': flag, 'name': flag or f'线路 {line_index + 1}', 'episodes': episodes})
-    elif isinstance(item.get('episodes'), list):
+    if not lines and isinstance(item.get('episodes'), list):
         episodes = []
         for index, row in enumerate(item['episodes']):
             if isinstance(row, dict):
