@@ -52,7 +52,8 @@ class MediaRelay:
         self.stopping = threading.Event()
 
     def register(self, url, headers, origin=None, diagnostic_id=None, fallback_url=None,
-                 refresh=None, refresh_after=0, refresh_interval=0, refresh_relative=None):
+                 refresh=None, refresh_after=0, refresh_interval=0, refresh_relative=None,
+                 expected_hls=False):
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('不支持的媒体地址')
@@ -67,7 +68,8 @@ class MediaRelay:
         if not re.fullmatch(r'[A-Za-z0-9._-]{1,96}', diagnostic_id):
             diagnostic_id = ''
         origin = origin or (parsed.scheme.lower(), parsed.netloc.lower())
-        key = (url, tuple(sorted(headers.items())), origin, fallback_url, diagnostic_id)
+        key = (url, tuple(sorted(headers.items())), origin, fallback_url, diagnostic_id,
+               bool(expected_hls))
         refresh = refresh if callable(refresh) else None
         refresh_after = float(refresh_after or 0)
         refresh_interval = max(0.0, min(float(refresh_interval or 0), 3600.0))
@@ -124,7 +126,7 @@ class MediaRelay:
                 refresh=refresh if is_manifest else None,
                 refresh_after=refresh_after if is_manifest else 0,
                 refresh_interval=refresh_interval if is_manifest else 0,
-                refresh_relative=relative)
+                refresh_relative=relative, expected_hls=is_manifest)
             return base + '/media/' + token
         lines = []
         for line in text.splitlines():
@@ -191,7 +193,8 @@ class MediaRelay:
                 raise RelayFailure('media_refresh_invalid')
             headers=self._safe_refresh_headers(value.get('headers',{}))
             origin=(base.scheme.lower(),base.netloc.lower())
-            key=(refreshed_url,tuple(sorted(headers.items())),origin,None,record[2])
+            key=(refreshed_url,tuple(sorted(headers.items())),origin,None,record[2],
+                 record[0][5] if len(record[0]) > 5 else False)
             interval=max(0.0,min(float(value.get('refreshInterval') or record[5] or 0),3600.0))
             next_refresh=float(value.get('refreshAfter') or (time.time()+interval if interval else 0))
             updated=(key,record[1],record[2],record[3],next_refresh,interval,relative)
@@ -271,7 +274,8 @@ class MediaRelay:
                 raise RelayFailure('media_session_expired')
             record=refreshed
             key, _, diagnostic_id = record[:3]
-            url, pairs, origin, fallback_url, _ = key
+            url, pairs, origin, fallback_url, _ = key[:5]
+            expected_hls = bool(key[5]) if len(key) > 5 else False
             headers = dict(pairs)
             parsed = urllib.parse.urlsplit(url)
             if (parsed.scheme.lower(), parsed.netloc.lower()) != origin:
@@ -293,7 +297,8 @@ class MediaRelay:
                     record=self._refresh_record(token,force=True)
                     if not record:raise RelayFailure('media_refresh_invalid')
                     key, _, diagnostic_id = record[:3]
-                    url, pairs, origin, fallback_url, _ = key
+                    url, pairs, origin, fallback_url, _ = key[:5]
+                    expected_hls = bool(key[5]) if len(key) > 5 else False
                     headers=dict(pairs)
                     parsed=urllib.parse.urlsplit(url)
                     if (parsed.scheme.lower(),parsed.netloc.lower())!=origin:
@@ -312,8 +317,18 @@ class MediaRelay:
             mime = response.headers.get('Content-Type', 'application/octet-stream')
             final_url = response.geturl()
             is_hls = 'mpegurl' in mime.lower() or urllib.parse.urlsplit(final_url).path.lower().endswith(('.m3u8', '.m3u'))
+            prefix = b''
+            # Some providers serve HLS from extensionless/PHP endpoints or
+            # return a generic MIME type. Honor declared HLS and sniff those
+            # responses before returning opaque bytes to AVPlayer.
+            mime_type = mime.split(';', 1)[0].strip().lower()
+            generic_mime = mime_type in ('', 'application/octet-stream', 'binary/octet-stream', 'text/plain')
+            extensionless = not urllib.parse.urlsplit(final_url).path.rsplit('/', 1)[-1].count('.')
+            if not head and not is_hls and (expected_hls or generic_mime or extensionless):
+                prefix = response.read(64)
+                is_hls = prefix.lstrip(b'\xef\xbb\xbf \t\r\n').startswith(b'#EXTM3U')
             if is_hls and not head:
-                body = response.read(2 * 1024 * 1024 + 1)
+                body = prefix + response.read(2 * 1024 * 1024 + 1 - len(prefix))
                 if len(body) > 2 * 1024 * 1024:
                     raise RelayFailure('manifest_too_large')
                 text = body.decode('utf-8-sig')
@@ -346,6 +361,8 @@ class MediaRelay:
             handler.end_headers()
             sent = True
             if not head:
+                if prefix:
+                    handler.wfile.write(prefix)
                 while not self.stopping.is_set():
                     chunk = response.read(65536)
                     if not chunk:

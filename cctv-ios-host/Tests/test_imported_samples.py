@@ -41,7 +41,7 @@ class ImportedSamples(unittest.TestCase):
         class Fixture(http.server.BaseHTTPRequestHandler):
             def log_message(self,*args): pass
             def do_GET(self):
-                observed.append(dict(self.headers))
+                observed.append((self.path,dict(self.headers)))
                 body=b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg.ts\n#EXT-X-ENDLIST\n' if '.m3u8' in self.path else b'\x47'+b'\0'*187
                 self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
         upstream=http.server.ThreadingHTTPServer(('127.0.0.1',0),Fixture)
@@ -66,13 +66,24 @@ class ImportedSamples(unittest.TestCase):
                         finally:c.close()
                     try:
                         origin='http://127.0.0.1:%d'%server.server_port
-                        reply=json.loads(request(origin+'/api/v1/play',{'id':'http://127.0.0.1:%d/live.m3u8'%upstream.server_port,'lineId':''}))
+                        media_id='http://127.0.0.1:%d/live.m3u8'%upstream.server_port
+                        if '蝴蝶' in suffix:
+                            media_id+='?token=a%2Fb&expires=123'
+                        reply=json.loads(request(origin+'/api/v1/play',{'id':media_id,'lineId':''}))
                         self.assertTrue(reply['ok'],reply)
+                        if '蝴蝶' in suffix:
+                            self.assertEqual(reply['data']['originalURL'],media_id)
+                            self.assertTrue(reply['data']['nativePlayable'])
+                            self.assertFalse(reply['data']['requiresWebPlayback'])
                         manifest=request(reply['data']['url']).decode()
                         segment=next(line for line in manifest.splitlines() if line and not line.startswith('#'))
                         self.assertEqual(request(urllib.parse.urljoin(reply['data']['url'],segment))[0],0x47)
-                        self.assertTrue(observed[-1].get('User-Agent'))
-                        if '蝴蝶' in suffix:self.assertTrue(observed[-1].get('Referer'))
+                        self.assertTrue(observed[-1][1].get('User-Agent'))
+                        if '蝴蝶' in suffix:
+                            self.assertTrue(observed[-1][1].get('Referer'))
+                            self.assertIn('token=a%2Fb&expires=123',observed[-2][0])
+                            self.assertNotIn('format=.m3u8',observed[-2][0])
+                            self.assertIn('token=a%2Fb&expires=123',observed[-1][0])
                     finally:server.shutdown();server.server_close();runtime.close()
         finally:upstream.shutdown();upstream.server_close()
 

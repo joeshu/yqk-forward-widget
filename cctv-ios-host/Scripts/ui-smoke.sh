@@ -69,7 +69,7 @@ if [ -f "$CONTAINER/Library/Application Support/ysp/diagnostics/runtime-debug.js
 fi
 cat "$OUT/fixture.log"
 if [ -f "$OUT/runtime-debug.jsonl" ]; then
-  rg '"event":"(media_home_request_started|media_home_response_received|media_home_response_discarded|media_api_failed|media_api_succeeded|media_service_health_failed|media_capabilities_readable)"' "$OUT/runtime-debug.jsonl" | tail -100 || true
+  grep -E '"event":"(media_home_request_started|media_home_response_received|media_home_response_discarded|media_api_failed|media_api_succeeded|media_service_health_failed|media_capabilities_readable)"' "$OUT/runtime-debug.jsonl" | tail -100 || true
 fi
 python3 - "$OUT/results.json" <<'PY'
 import json,sys

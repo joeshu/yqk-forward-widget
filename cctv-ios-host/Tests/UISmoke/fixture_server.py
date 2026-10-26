@@ -61,6 +61,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             identifier = str(args.get('id', ''))
             if identifier == 'slow-episode':
                 time.sleep(3.0)
+            if identifier == 'second':
+                play_url = base + '/hls/live.m3u8'
+                data = {'url': play_url, 'originalURL': play_url, 'parse': 1, 'jx': 0,
+                        'format': 'hls', 'contentType': 'application/vnd.apple.mpegurl',
+                        'headers': {'Referer': 'https://fixture.test/watch',
+                                    'X-Fixture-Playback': 'required'}}
+                body = json.dumps({'ok': True, 'data': data}, ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             play_url = base + '/video.mp4?play=' + ('slow' if identifier == 'slow-episode' else 'fast' if identifier == 'fast-episode' else 'initial')
             data = {'url': play_url, 'alternates': [{'name': '当前清晰度', 'url': play_url}, {'name': '流畅', 'url': base + '/video.mp4?quality=low'}], 'headers': {'Referer': 'https://fixture.test/watch', 'X-Fixture-Playback': 'required'}, 'parse': 0}
         else:
@@ -106,7 +122,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data = (f'#EXTM3U\n#EXTINF:-1 tvg-id="cctv1",Startup Test\n'
                     f'http://127.0.0.1:{self.server.server_port}/video.mp4\n').encode()
         elif self.path.startswith("/hls/"):
-            name = self.path.removeprefix("/hls/")
+            name = self.path.split("?", 1)[0].removeprefix("/hls/")
             if name not in HLS_FILES:
                 self.send_error(404)
                 return

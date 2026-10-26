@@ -41,6 +41,7 @@
 #import "ResourceImportSheetViewController.h"
 #import "PluginResourceDetailViewController.h"
 #import "MediaPlaybackViewController.h"
+#import "MediaPlaybackHeaders.h"
 #import "TVBoxCatalogStore.h"
 #import "TVBoxCatalogDownloader.h"
 #import "TVBoxCatalogViewController.h"
@@ -901,11 +902,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *url=[self stableURLKey:result[@"url"]];if(!url.length){[self showServiceError:@"资源没有返回可播放媒体地址"];return;}
     self.playbackGeneration++;[self stopPlayback];[self.nativePreloader cancel];[self endPlaybackPriority];
     self.currentRemoteURL=url;self.channelName=name;self.channelID=nil;
-    NSString *sourceURL=[self stableURLKey:result[@"originalURL"]?:result[@"url"]];NSString *extension=[NSURL URLWithString:sourceURL].pathExtension.lowercaseString;
-    BOOL directMedia=[[NSSet setWithArray:@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3"]] containsObject:(extension?:@"")];
+    NSString *sourceURL=[self stableURLKey:result[@"originalURL"]?:result[@"url"]];
+    BOOL directMedia=MediaPlaybackResultSupportsAVPlayer(result)||MediaPlaybackResultSupportsAVPlayer(@{@"url":sourceURL?:@""});
     [RuntimeDiagnostics.shared recordEvent:@"media_playback_handoff" category:@"playback" fields:@{@"player":([result[@"parse"] integerValue]>0&&!directMedia)?@"webview":@"avplayer", @"parsed":@([result[@"parse"] integerValue]>0)}];
-    if([result[@"parse"] integerValue]>0 && !directMedia){MediaWebViewController *page=[[MediaWebViewController alloc] initWithResult:result title:name];UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:page];UIViewController *presenter=self.navigationController.topViewController?:self;[presenter presentViewController:navigation animated:YES completion:nil];return;}
-    AVURLAsset *asset=[AVURLAsset URLAssetWithURL:[NSURL URLWithString:url] options:nil];AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];
+    BOOL requiresWebPlayback=[result[@"requiresWebPlayback"] boolValue]||[result[@"parse"] integerValue]>0||[result[@"jx"] integerValue]>0;if(requiresWebPlayback&&!directMedia){MediaWebViewController *page=[[MediaWebViewController alloc] initWithResult:result title:name];UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:page];UIViewController *presenter=self.navigationController.topViewController?:self;[presenter presentViewController:navigation animated:YES completion:nil];return;}
+    NSDictionary *headers=MediaPlaybackHeadersFromResult(result);NSURL *resolvedURL=[NSURL URLWithString:url];NSString *resolvedHost=resolvedURL.host.lowercaseString?:@"";BOOL localRelay=![sourceURL isEqualToString:url]&&[@[@"127.0.0.1",@"localhost",@"::1"] containsObject:resolvedHost];if(localRelay)headers=@{};
+    AVURLAsset *asset=[AVURLAsset URLAssetWithURL:resolvedURL options:headers.count?@{@"AVURLAssetHTTPHeaderFieldsKey":headers}:nil];AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];
     AVMutableMetadataItem *title=[AVMutableMetadataItem metadataItem];title.identifier=AVMetadataCommonIdentifierTitle;title.value=name?:@"影视";title.extendedLanguageTag=@"und";item.externalMetadata=@[title];
     self.moviePlayer=[AVPlayer playerWithPlayerItem:item];self.moviePlayer.automaticallyWaitsToMinimizeStalling=YES;
     self.movieController=[AVPlayerViewController new];self.movieController.player=self.moviePlayer;self.movieController.delegate=self;self.movieController.allowsPictureInPicturePlayback=YES;

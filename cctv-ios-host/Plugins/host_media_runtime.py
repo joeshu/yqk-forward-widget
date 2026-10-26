@@ -34,12 +34,30 @@ def decoded(value):
     return value
 
 
+def unwrap_envelope(value, fields):
+    """Unwrap common HTTP/API envelopes without changing source-native rows."""
+    for _ in range(6):
+        value = decoded(value)
+        if not isinstance(value, dict) or any(key in value for key in fields):
+            return value
+        nested = next((value[key] for key in ('data', 'result', 'payload', 'response')
+                       if key in value and value[key] is not None), None)
+        if nested is None or nested is value:
+            return value
+        value = nested
+    return decoded(value)
+
+
 def rows(value):
-    value = decoded(value)
+    value = unwrap_envelope(value, {'list', 'items'})
     if isinstance(value, list):
         return value
     if isinstance(value, dict):
-        return value.get('list', value.get('items', [])) or []
+        result = decoded(value.get('list', value.get('items', [])))
+        if isinstance(result, list):
+            return result
+        if isinstance(result, dict):
+            return [result]
     return []
 
 
@@ -60,7 +78,7 @@ def cards(value):
 
 
 def listing(value, page=1):
-    value = decoded(value)
+    value = unwrap_envelope(value, {'list', 'items'})
     data = value if isinstance(value, dict) else {}
     result = {'items': cards(value), 'page': int(data.get('page') or page)}
     for name in ('pagecount', 'total', 'limit'):
@@ -80,7 +98,7 @@ def listing(value, page=1):
 
 
 def home(value):
-    value = decoded(value)
+    value = unwrap_envelope(value, {'list', 'items', 'class', 'categories', 'filters'})
     value = value if isinstance(value, dict) else {}
     categories = value.get('categories', value.get('class', [])) or []
     return {'categories': [{'id': str(row.get('id', row.get('type_id', ''))),
@@ -90,11 +108,18 @@ def home(value):
 
 
 def detail(value, identifier):
-    value = decoded(value)
+    value = unwrap_envelope(value, {'list', 'items', 'lines', 'episodes',
+                                    'vod_play_url', 'play_url', 'playUrl', 'vod_info',
+                                    'vodInfo', 'video', 'detail'})
     raw = rows(value)
     if isinstance(value, dict) and ('list' in value or 'items' in value) and not raw:
         raise MediaError('NO_DETAIL', '此站点没有返回影片详情，请重试或更换站点')
     item = raw[0] if raw else value
+    if isinstance(item, dict):
+        nested = next((item[key] for key in ('vod_info', 'vodInfo', 'video', 'detail')
+                       if isinstance(item.get(key), dict)), None)
+        if nested is not None:
+            item = nested
     if not isinstance(item, dict):
         raise MediaError('NO_DETAIL', '来源未返回影片详情')
     lines = []
@@ -102,8 +127,21 @@ def detail(value, identifier):
         for index, line in enumerate(item['lines']):
             if not isinstance(line, dict) or not isinstance(line.get('episodes'), list):
                 continue
-            episodes = [{'id': str(row['id']), 'name': str(row.get('name', row['id']))}
-                        for row in line['episodes'] if isinstance(row, dict) and row.get('id') is not None]
+            episodes = []
+            for episode_index, row in enumerate(line['episodes']):
+                if isinstance(row, dict):
+                    episode_id = next((row[key] for key in ('id', 'url', 'playUrl', 'play_url', 'value', 'link')
+                                       if row.get(key) not in (None, '')), None)
+                    episode_name = next((row[key] for key in ('name', 'title', 'episode', 'label')
+                                         if row.get(key)), None)
+                elif isinstance(row, (str, int, float)):
+                    episode_id, episode_name = row, None
+                else:
+                    continue
+                if episode_id is None or not str(episode_id).strip():
+                    continue
+                episodes.append({'id': str(episode_id).strip(),
+                                 'name': str(episode_name or f'第 {episode_index + 1} 集').strip()})
             lines.append({'id': str(line.get('id', index)), 'name': str(line.get('name') or f'线路 {index + 1}'), 'episodes': episodes})
     elif 'vod_play_url' in item:
         flags = str(item.get('vod_play_from') or '').split('$$$')
@@ -115,17 +153,20 @@ def detail(value, identifier):
                 if not episode:
                     continue
                 label, separator, play_id = episode.partition('$')
-                episodes.append({'id': play_id if separator else label,
-                                 'name': label if separator else str(index + 1)})
+                episode_id = play_id if separator else label
+                episode_name = label if separator else ''
+                if episode_id.strip():
+                    episodes.append({'id': episode_id,
+                                     'name': episode_name.strip() or f'第 {index + 1} 集'})
             if episodes:
                 lines.append({'id': flag, 'name': flag or f'线路 {line_index + 1}', 'episodes': episodes})
     elif isinstance(item.get('episodes'), list):
         episodes = []
         for index, row in enumerate(item['episodes']):
             if isinstance(row, dict):
-                identifier = next((row[key] for key in ('id', 'url', 'playUrl', 'value', 'link')
+                identifier = next((row[key] for key in ('id', 'url', 'playUrl', 'play_url', 'value', 'link')
                                     if row.get(key) is not None), None)
-                name = next((row[key] for key in ('name', 'title', 'episode', 'label')
+                name = next((row[key] for key in ('name', 'title', 'episode', 'label', 'vod_name')
                              if row.get(key)), None)
             elif isinstance(row, (str, int, float)):
                 identifier, name = row, None
@@ -172,6 +213,23 @@ def valid_media_url(value):
         return False
 
 
+def normalize_media_address(value):
+    if not isinstance(value, str):
+        return value
+    address = re.sub(r'(?i)&(?:amp|#0*38|#x0*26);', '&', value.strip())
+    if address.startswith('//'):
+        address = 'https:' + address
+    return address
+
+
+def enabled(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value > 0
+    return str(value or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
 def media_headers(value):
     if isinstance(value, str):
         parsed = {}
@@ -201,89 +259,197 @@ def media_headers(value):
 
 
 def playback(value):
-    value = decoded(value)
+    value = unwrap_envelope(value, {'url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
+                                    'video_url', 'mediaUrl', 'src', 'alternates',
+                                    'parse', 'jx', 'headers', 'header', 'error', 'message'})
     if isinstance(value, str):
         value = {'url': value}
     if not isinstance(value, dict):
         raise MediaError('NO_MEDIA', '来源未返回播放结果')
-    try:
-        parse = 1 if int(value.get('parse') or 0) > 0 else 0
-    except (ValueError, TypeError):
-        parse = 1 if value.get('parse') is True else 0
-    try:
-        jx = 1 if int(value.get('jx') or 0) > 0 else 0
-    except (ValueError, TypeError):
-        jx = 1 if value.get('jx') is True else 0
-    headers = value.get('headers', value.get('header', {})) or {}
-    url = value.get('url')
+    if not any(value.get(key) not in (None, '') for key in
+               ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl', 'video_url', 'mediaUrl', 'src')):
+        nested = next((value[key] for key in ('data', 'result', 'payload', 'response')
+                       if key in value and value[key] is not None), None)
+        if nested is not None:
+            nested = decoded(nested)
+            if isinstance(nested, dict):
+                merged = dict(value)
+                merged.update(nested)
+                return playback(merged)
+            if isinstance(nested, str):
+                merged = dict(value, url=nested)
+                return playback(merged)
+            if isinstance(nested, list):
+                merged = dict(value, url=nested)
+                return playback(merged)
+    headers = media_headers(value.get('header', {}))
+    headers.update(media_headers(value.get('headers', {})))
+    url = next((value.get(key) for key in
+                ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl', 'video_url', 'mediaUrl', 'src')
+                if value.get(key) not in (None, '')), None)
     alternates = value.get('alternates', [])
+    primary_choice_headers = {}
     if isinstance(url, dict):
         nested_headers = url.get('headers') or url.get('header') or {}
-        headers = {**media_headers(headers), **media_headers(nested_headers)}
+        headers.update(media_headers(nested_headers))
+        # Some spiders put transport metadata beside the nested media URL.
+        # Keep it before replacing the object with its URL string.
+        for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
+                    'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
+            if key not in value and key in url:
+                value[key] = url[key]
         choices = url.get('values') or url.get('list')
         if isinstance(choices, list):
+            first = next((item for item in choices if isinstance(item, dict)), None)
+            if first:
+                for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
+                            'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
+                    if key not in value and key in first:
+                        value[key] = first[key]
+                first_headers = media_headers(first.get('header', {}))
+                first_headers.update(media_headers(first.get('headers', {})))
+                primary_choice_headers.update(first_headers)
             url = choices
         else:
             url = url.get('url') or url.get('value')
     if isinstance(url, list):
         if url and all(isinstance(item, dict) for item in url):
             alternates = []
+            first = url[0]
+            for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
+                        'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
+                if key not in value and key in first:
+                    value[key] = first[key]
+            first_headers = media_headers(first.get('header', {}))
+            first_headers.update(media_headers(first.get('headers', {})))
+            primary_choice_headers.update(first_headers)
             for index, item in enumerate(url):
                 address = item.get('url') or item.get('value') or item.get('v')
                 if not address:
                     continue
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}'),
                           'url': str(address)}
-                choice_headers = media_headers(item.get('headers', item.get('header', {})))
+                choice_headers = media_headers(item.get('header', {}))
+                choice_headers.update(media_headers(item.get('headers', {})))
                 if choice_headers:
                     choice['headers'] = choice_headers
+                for key in ('format', 'mediaType', 'playbackType', 'contentType', 'mimeType',
+                            'mime', 'parse', 'jx', 'requiresWebPlayback'):
+                    if item.get(key) is not None:
+                        choice[key] = item[key]
                 alternates.append(choice)
         else:
-            alternates = [{'name': str(url[i]), 'url': str(url[i + 1])} for i in range(0, len(url) - 1, 2)]
+            strings = [normalize_media_address(str(item)) for item in url if item not in (None, '')]
+            if len(strings) == 1 and valid_media_url(strings[0]):
+                alternates = [{'name': '线路 1', 'url': strings[0]}]
+            elif strings and all(valid_media_url(item) for item in strings):
+                alternates = [{'name': f'线路 {index + 1}', 'url': address}
+                              for index, address in enumerate(strings)]
+            elif strings and all('$' in item for item in strings):
+                alternates = []
+                for index, item in enumerate(strings):
+                    name, _, address = item.partition('$')
+                    if valid_media_url(address):
+                        alternates.append({'name': name or f'线路 {index + 1}', 'url': address})
+            else:
+                alternates = [{'name': str(url[i]), 'url': str(url[i + 1])}
+                              for i in range(0, len(url) - 1, 2)]
         url = alternates[0]['url'] if alternates else ''
-    if not url and isinstance(value.get('playUrl'), str) and value['playUrl'].startswith(('http://', 'https://')):
-        url = value['playUrl']
+    base_headers = dict(headers)
+    headers.update(primary_choice_headers)
+    parse = 1 if enabled(value.get('parse')) else 0
+    jx = 1 if enabled(value.get('jx')) else 0
     # Player pages commonly HTML-escape separators inside an m3u8 URL.
     # Decode only ampersand entities so signed query values and ordering stay intact.
-    if isinstance(url, str):
-        url = re.sub(r'(?i)&(?:amp|#0*38|#x0*26);', '&', url)
+    url = normalize_media_address(url)
     # A number of older Python spiders append ``format=.m3u8`` whenever the
     # full URL contains the text ``.m3u8`` but does not literally end with it.
     # For signed playlists this turns ``...?token=...`` into
     # ``...?token=...&format=.m3u8`` and can invalidate the source signature.
     # Repair only the unambiguous case: the URL path itself already ends in
     # .m3u8 and the spider explicitly identified the result as HLS.
-    declared_format = str(value.get('format') or '').strip().lower()
-    declared_type = str(value.get('contentType') or '').strip().lower()
-    is_declared_hls = (declared_format in ('hls', 'm3u8') or
-                       declared_type in ('application/vnd.apple.mpegurl',
-                                         'application/x-mpegurl', 'audio/mpegurl'))
-    if is_declared_hls and isinstance(url, str):
+    declared_format = str(value.get('format') or value.get('mediaType') or
+                          value.get('playbackType') or '').strip().lower()
+    declared_type = str(value.get('contentType') or value.get('content_type') or
+                        value.get('mimeType') or value.get('mime') or '').strip().lower()
+    declared_mime = declared_type.split(';', 1)[0].strip()
+    hls_formats = {'hls', 'm3u8', 'm3u', 'mpegurl', 'application/vnd.apple.mpegurl',
+                   'application/x-mpegurl', 'audio/mpegurl'}
+    native_formats = hls_formats | {'mp4', 'm4v', 'mov', 'quicktime', 'mp3', 'm4a',
+                                    'aac', 'ts', 'mpeg-ts', 'mpegts'}
+    native_mimes = {'application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/mpegurl',
+                    'video/mp4', 'application/mp4', 'video/quicktime', 'audio/mp4',
+                    'audio/mpeg', 'audio/aac', 'video/mp2t'}
+
+    def repair_url(address):
+        if not isinstance(address, str):
+            return address
+        address = normalize_media_address(address)
+        if declared_format not in hls_formats and declared_mime not in hls_formats:
+            return address
         try:
-            parts = urllib.parse.urlsplit(url)
+            parts = urllib.parse.urlsplit(address)
             if parts.path.lower().endswith('.m3u8'):
                 query = re.sub(r'(?i)(?:^|&)format=\.m3u8$', '', parts.query)
                 if query != parts.query:
-                    url = urllib.parse.urlunsplit((parts.scheme, parts.netloc,
-                                                   parts.path, query, parts.fragment))
+                    address = urllib.parse.urlunsplit((parts.scheme, parts.netloc,
+                                                       parts.path, query, parts.fragment))
         except ValueError:
             pass
+        return address
+
+    url = repair_url(url)
     if not valid_media_url(url):
-        raise MediaError('NO_MEDIA', '来源未返回有效 HTTP/HTTPS 媒体地址')
+        message = value.get('error') or value.get('message') or value.get('msg')
+        raise MediaError('NO_MEDIA', str(message or '来源未返回有效 HTTP/HTTPS 媒体地址')[:512])
     safe_alternates = []
     if isinstance(alternates, list):
         for index, item in enumerate(alternates[:32]):
             if not isinstance(item, dict):
                 continue
-            candidate = item.get('url', item.get('value', item.get('v', '')))
+            candidate = normalize_media_address(item.get('url', item.get('value', item.get('v', ''))))
+            candidate = repair_url(candidate)
             if valid_media_url(candidate):
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}')[:128], 'url': candidate}
-                choice_headers = media_headers(item.get('headers', item.get('header', {})))
+                choice_headers = media_headers(item.get('header', {}))
+                choice_headers.update(media_headers(item.get('headers', {})))
                 if choice_headers:
                     choice['headers'] = choice_headers
+                for key in ('format', 'mediaType', 'playbackType', 'contentType', 'mimeType',
+                            'mime', 'parse', 'jx', 'requiresWebPlayback'):
+                    if item.get(key) is not None:
+                        choice[key] = item[key]
                 safe_alternates.append(choice)
-    return {'url': url, 'headers': media_headers(headers), 'alternates': safe_alternates,
-            'parse': parse, 'jx': jx, 'playUrl': value.get('playUrl', '') if isinstance(value.get('playUrl', ''), str) else ''}
+    try:
+        extension = urllib.parse.urlsplit(url).path.rsplit('.', 1)[-1].lower() if '.' in urllib.parse.urlsplit(url).path else ''
+    except ValueError:
+        extension = ''
+    native_extensions = {'m3u8', 'm3u', 'mp4', 'm4v', 'mov', 'mp3', 'm4a', 'aac', 'ts'}
+    stream_extensions = native_extensions | {'mpd', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'rmvb'}
+    native_media = (extension in native_extensions or declared_format in native_formats or
+                    declared_mime in native_mimes)
+    direct_media = (native_media or extension in stream_extensions or
+                    declared_format in native_formats | {'mpd', 'dash', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'rmvb'} or
+                    declared_mime.startswith(('video/', 'audio/')))
+    requires_web = bool(enabled(value.get('requiresWebPlayback')) or
+                        enabled(value.get('webPlayback')) or parse or jx)
+    if native_media:
+        # A parser flag is common in legacy spiders even when the returned URL
+        # is already a playable HLS/MP4 stream. Explicit media type wins.
+        requires_web = False
+    result = {'url': url, 'headers': media_headers(headers), 'baseHeaders': media_headers(base_headers),
+              'alternates': safe_alternates,
+              'parse': parse, 'jx': jx, 'playUrl': value.get('playUrl', '') if isinstance(value.get('playUrl', ''), str) else '',
+              'directMedia': direct_media, 'nativePlayable': native_media,
+              'requiresWebPlayback': requires_web}
+    if declared_format:
+        result['format'] = declared_format[:64]
+    if declared_type:
+        result['contentType'] = declared_type[:128]
+    for key in ('sessionID', 'expiresAt', 'refreshAfter', 'refreshInterval', 'isLive'):
+        if key in value and isinstance(value[key], (str, int, float, bool)):
+            result[key] = value[key]
+    return result
 
 
 class PythonSpider:

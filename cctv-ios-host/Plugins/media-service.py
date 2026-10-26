@@ -16,12 +16,26 @@ from host_media_relay import MediaRelay, safe_error_summary
 
 def is_direct_media_url(url):
     path = urllib.parse.urlsplit(str(url or '')).path.lower()
-    return path.endswith(('.m3u8', '.m3u', '.mp4', '.m4v', '.mov', '.m4a', '.mp3'))
+    return path.endswith(('.m3u8', '.m3u', '.mp4', '.m4v', '.mov', '.m4a', '.mp3',
+                          '.aac', '.ts', '.mpd', '.flv', '.mkv', '.avi', '.webm', '.wmv', '.rmvb'))
 
 
 def is_hls_url(url):
     path = urllib.parse.urlsplit(str(url or '')).path.lower()
     return path.endswith(('.m3u8', '.m3u'))
+
+
+def is_declared_hls(result, url):
+    if is_hls_url(url):
+        return True
+    if not isinstance(result, dict):
+        return False
+    media_format = str(result.get('format') or result.get('mediaType') or
+                       result.get('playbackType') or '').strip().lower()
+    content_type = str(result.get('contentType') or result.get('content_type') or
+                       result.get('mimeType') or result.get('mime') or '').split(';', 1)[0].strip().lower()
+    return media_format in {'hls', 'm3u8', 'm3u', 'mpegurl'} or content_type in {
+        'application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/mpegurl'}
 
 
 def is_extensionless_url(url):
@@ -316,7 +330,7 @@ class Handler(BaseHTTPRequestHandler):
                 if result['parse']:
                     raise MediaError('PARSER_REQUIRED', '此频道返回网页，请通过影视页面打开')
                 url = result['url']
-                if result['headers'] or is_hls_url(url):
+                if result['headers'] or is_hls_url(url) or is_extensionless_url(url):
                     url = f'http://127.0.0.1:{self.server.server_port}/media/' + self.server.relay.register(
                         url, result['headers'], diagnostic_id=correlation_id or request_id,
                         refresh=refresh,refresh_after=refresh_after,refresh_interval=refresh_interval)
@@ -354,17 +368,21 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.relay_artwork(result)
             if operation == 'play':
                 headers = result.get('headers') or {}
+                base_headers = result.get('baseHeaders') if isinstance(result.get('baseHeaders'), dict) else headers
                 diagnostic_id = correlation_id or request_id
-                def relay_media_url(address, request_headers):
-                    token = self.server.relay.register(address, request_headers, diagnostic_id=diagnostic_id)
+                def relay_media_url(address, request_headers, expected_hls=False):
+                    token = self.server.relay.register(address, request_headers,
+                        diagnostic_id=diagnostic_id, expected_hls=expected_hls)
                     return f'http://127.0.0.1:{self.server.server_port}/media/{token}'
                 result = dict(result)
-                can_relay_primary = ((headers or is_hls_url(result.get('url'))
+                direct_media = bool(result.get('directMedia') or is_direct_media_url(result.get('url')))
+                can_relay_primary = ((headers or is_declared_hls(result, result.get('url'))
                                      or is_extensionless_url(result.get('url')))
-                                     and (not result.get('parse') or is_direct_media_url(result.get('url'))))
+                                     and (not result.get('parse') or direct_media))
                 if can_relay_primary:
                     result['originalURL'] = result['url']
-                    result['url'] = relay_media_url(result['url'], headers)
+                    result['url'] = relay_media_url(result['url'], headers,
+                                                    expected_hls=is_declared_hls(result, result.get('url')))
                 alternates = result.get('alternates')
                 if isinstance(alternates, list):
                     relayed = []
@@ -373,12 +391,19 @@ class Handler(BaseHTTPRequestHandler):
                             continue
                         alternate = dict(alternate)
                         address = alternate['url']
-                        alternate_headers = dict(headers)
+                        alternate_headers = dict(base_headers)
                         alternate_headers.update(alternate.get('headers') or {})
-                        if ((alternate_headers or is_hls_url(address) or is_extensionless_url(address))
-                                and (not result.get('parse') or is_direct_media_url(address))):
+                        alternate_media = dict(result)
+                        alternate_media.update(alternate)
+                        alternate_direct = bool(alternate_media.get('directMedia') or
+                                                is_direct_media_url(address) or
+                                                is_declared_hls(alternate_media, address))
+                        if ((alternate_headers or is_declared_hls(alternate_media, address)
+                             or is_extensionless_url(address))
+                                and (not result.get('parse') or alternate_direct)):
                             alternate['originalURL'] = address
-                            alternate['url'] = relay_media_url(address, alternate_headers)
+                            alternate['url'] = relay_media_url(address, alternate_headers,
+                                expected_hls=is_declared_hls(alternate_media, address))
                         relayed.append(alternate)
                     result['alternates'] = relayed
             self.send(200, {'ok': True, 'data': result})

@@ -1,4 +1,5 @@
 #import "MediaAPIClient.h"
+#import "MediaPlaybackHeaders.h"
 #import "RuntimeDiagnostics.h"
 #import <QuartzCore/QuartzCore.h>
 
@@ -196,8 +197,8 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
     if([operation isEqual:@"detail"])return MediaTVBoxDetail(root,arguments,source);
     if([operation isEqual:@"play"]){
         NSDictionary *headers=MediaTVBoxPlaybackHeaders(source,root);
-        if(macCMS){NSString *url=MediaTVBoxString(arguments[@"id"]);BOOL webPage=MediaTVBoxURLLooksLikeWebPage(url);if(!url.length)return @{@"error":@"MacCMS 分集没有播放地址"};/* Signed and extensionless media endpoints should be tried by AVPlayer; only explicit page endpoints use the web player by default. */return @{@"url":url,@"originalURL":url,@"parse":@(webPage),@"jx":@0,@"requiresWebPlayback":@(webPage),@"headers":headers};}
-        if([source[@"tvboxType"] integerValue]==1){NSString *url=MediaTVBoxString(arguments[@"id"]);NSString *prefix=MediaTVBoxString(source[@"playUrl"]);if(!url.length)return @{@"error":@"TVBox type 1 没有返回分集地址"};return @{@"url":[prefix stringByAppendingString:url],@"parse":@(prefix.length>0),@"headers":headers};}
+        if(macCMS){NSString *url=MediaTVBoxString(arguments[@"id"]);if(!url.length)return @{@"error":@"MacCMS 分集没有播放地址"};BOOL webPage=MediaTVBoxURLLooksLikeWebPage(url);NSMutableDictionary *result=[@{@"url":url,@"originalURL":url,@"parse":@(webPage),@"jx":@0,@"headers":headers} mutableCopy];for(NSString *key in @[@"format",@"contentType",@"mimeType",@"mediaType"])if([root[key] isKindOfClass:NSString.class])result[key]=root[key];BOOL native=MediaPlaybackResultSupportsAVPlayer(result);result[@"nativePlayable"]=@(native);result[@"directMedia"]=@(MediaPlaybackResultIsDirectMedia(result));result[@"requiresWebPlayback"]=@(webPage&&!native);return result;}
+        if([source[@"tvboxType"] integerValue]==1){NSString *url=MediaTVBoxString(arguments[@"id"]);NSString *prefix=MediaTVBoxString(source[@"playUrl"]);if(!url.length)return @{@"error":@"TVBox type 1 没有返回分集地址"};NSMutableDictionary *result=[@{@"url":[prefix stringByAppendingString:url],@"parse":@(prefix.length>0),@"headers":headers} mutableCopy];BOOL native=MediaPlaybackResultSupportsAVPlayer(result);result[@"nativePlayable"]=@(native);result[@"directMedia"]=@(MediaPlaybackResultIsDirectMedia(result));result[@"requiresWebPlayback"]=@(prefix.length>0&&!native);return result;}
         id rawURL=root[@"url"];NSString *prefix=MediaTVBoxFirstString(root,@[@"playUrl"]);
         NSMutableArray<NSDictionary *> *alternates=[NSMutableArray array];NSString *url=@"";
         if([rawURL isKindOfClass:NSString.class]){url=[prefix stringByAppendingString:[rawURL stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]];}
@@ -208,7 +209,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
             url=alternates.firstObject[@"url"]?:@"";}
         if(!url.length){NSString *message=MediaTVBoxFirstString(root,@[@"msg",@"message",@"errMsg"]);return @{ @"error":message.length?message:@"TVBox API 没有返回播放地址" };}
         NSInteger parse=[root[@"parse"] respondsToSelector:@selector(integerValue)]?[root[@"parse"] integerValue]:0,jx=[root[@"jx"] respondsToSelector:@selector(integerValue)]?[root[@"jx"] integerValue]:0;
-        NSMutableDictionary *result=[@{@"url":url,@"parse":@(parse),@"jx":@(jx),@"playUrl":prefix,@"requiresWebPlayback":@((parse>0||jx>0||prefix.length>0)&&![@[@"m3u8",@"mp4",@"m4v",@"mov",@"m4a",@"mp3"] containsObject:[NSURL URLWithString:url].pathExtension.lowercaseString?:@""]),@"headers":headers} mutableCopy];if(alternates.count>1)result[@"alternates"]=alternates;
+        NSMutableDictionary *result=[@{@"url":url,@"parse":@(parse),@"jx":@(jx),@"playUrl":prefix,@"headers":headers} mutableCopy];for(NSString *key in @[@"format",@"contentType",@"mimeType",@"mediaType"])if([root[key] isKindOfClass:NSString.class])result[key]=root[key];BOOL native=MediaPlaybackResultSupportsAVPlayer(result);result[@"nativePlayable"]=@(native);result[@"directMedia"]=@(MediaPlaybackResultIsDirectMedia(result));result[@"requiresWebPlayback"]=@((parse>0||jx>0||prefix.length>0)&&!native);if(alternates.count>1)result[@"alternates"]=alternates;
         return result;
     }
     return root;
