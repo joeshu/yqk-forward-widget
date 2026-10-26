@@ -10,6 +10,11 @@
 /// services can also be live-only; keep this separate from isMediaService,
 /// which selects the local media-service runtime.
 + (BOOL)isVODMediaService:(NSDictionary *)service;
++ (nullable NSString *)inferredPlaylistPathInCode:(NSString *)source;
++ (nullable NSString *)playlistPathForService:(NSDictionary *)service;
++ (nullable NSString *)subscriptionURLForService:(NSDictionary *)service;
++ (nullable NSString *)epgURLForService:(NSDictionary *)service;
++ (void)associateLegacyLoopbackSubscriptionsForService:(NSDictionary *)service;
 + (void)save:(NSDictionary *)service;
 /// Caller must first confirm that this service is stopped. Retains code for rollback and all user data.
 + (NSDictionary *)replaceImportedService:(NSDictionary *)existing withService:(NSDictionary *)incoming error:(NSError **)error;

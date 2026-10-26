@@ -227,9 +227,17 @@ def playback(value):
             url = url.get('url') or url.get('value')
     if isinstance(url, list):
         if url and all(isinstance(item, dict) for item in url):
-            alternates = [{'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}'),
-                           'url': str(item.get('url') or item.get('value') or item.get('v') or '')}
-                          for index, item in enumerate(url) if item.get('url') or item.get('value') or item.get('v')]
+            alternates = []
+            for index, item in enumerate(url):
+                address = item.get('url') or item.get('value') or item.get('v')
+                if not address:
+                    continue
+                choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}'),
+                          'url': str(address)}
+                choice_headers = media_headers(item.get('headers', item.get('header', {})))
+                if choice_headers:
+                    choice['headers'] = choice_headers
+                alternates.append(choice)
         else:
             alternates = [{'name': str(url[i]), 'url': str(url[i + 1])} for i in range(0, len(url) - 1, 2)]
         url = alternates[0]['url'] if alternates else ''
@@ -244,7 +252,11 @@ def playback(value):
                 continue
             candidate = item.get('url', item.get('value', item.get('v', '')))
             if valid_media_url(candidate):
-                safe_alternates.append({'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}')[:128], 'url': candidate})
+                choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}')[:128], 'url': candidate}
+                choice_headers = media_headers(item.get('headers', item.get('header', {})))
+                if choice_headers:
+                    choice['headers'] = choice_headers
+                safe_alternates.append(choice)
     return {'url': url, 'headers': media_headers(headers), 'alternates': safe_alternates,
             'parse': parse, 'jx': jx, 'playUrl': value.get('playUrl', '') if isinstance(value.get('playUrl', ''), str) else ''}
 

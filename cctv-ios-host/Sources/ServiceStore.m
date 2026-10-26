@@ -1,8 +1,13 @@
 #import "ServiceStore.h"
+#import "ProfileStore.h"
 static BOOL ServiceRelativePath(NSString *path){
     if(![path isKindOfClass:NSString.class]||!path.length||[path hasPrefix:@"/"]||[path containsString:@"\\"]||[path containsString:@":"])return NO;
     for(NSString *part in path.pathComponents)if([part isEqual:@".."]||[part isEqual:@"."])return NO;
     return [path rangeOfString:[NSString stringWithFormat:@"%C",(unichar)0]].location==NSNotFound;
+}
+static BOOL ServiceValidPlaylistPath(id value){
+    if(![value isKindOfClass:NSString.class])return NO;NSString *path=[value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return [path isEqual:value]&&path.length>0&&path.length<128&&[path hasPrefix:@"/"]&&![path hasPrefix:@"//"]&&![path containsString:@".."]&&![path containsString:@"?"]&&![path containsString:@"#"]&&![path containsString:@"\\"]&&![path containsString:@":"]&&![path containsString:@"{"]&&![path containsString:@"}"]&&![path containsString:@"<"]&&![path containsString:@">"]&&[path rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound&&[path rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].location==NSNotFound;
 }
 @implementation ServiceStore
 + (NSString *)directory {
@@ -91,6 +96,69 @@ static BOOL ServiceRelativePath(NSString *path){
     for(id capability in capabilities)if([capability isKindOfClass:NSString.class]&&[vodCapabilities containsObject:capability])return YES;
     return NO;
 }
++ (NSString *)inferredPlaylistPathInCode:(NSString *)source {
+    if(![source isKindOfClass:NSString.class]||source.length>2*1024*1024)return nil;
+    // Only infer a URL when it appears in an actual route declaration or a
+    // request-path comparison. A mention in help text or an example is not a
+    // reliable endpoint and must not silently become a subscription.
+    NSMutableString *routeSource=[NSMutableString string];
+    for(NSString *line in [source componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]){NSString *trimmed=[line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];if(![trimmed hasPrefix:@"#"])[routeSource appendString:line];[routeSource appendString:@"\n"];}
+    NSString *lower=routeSource.lowercaseString;
+    BOOL m3uEvidence=[lower containsString:@"#extm3u"]||[lower containsString:@"#extinf"]||[lower containsString:@"m3u"]||[lower containsString:@"playlist"];
+    if(!m3uEvidence)return nil;
+    NSString *routePattern=@"(?is)(?:@[a-z_][a-z0-9_.]*\\.(?:route|get|post|put)\\s*\\(|(?:add_url_rule|add_get|add_route)\\s*\\(|(?:(?:self|request)\\.)?path\\s*(?:==|in)\\s*)\\s*['\\\"](/[^'\\\"?#\\\\\\s]{1,126})['\\\"]";
+    NSError *error=nil;NSRegularExpression *routes=[NSRegularExpression regularExpressionWithPattern:routePattern options:0 error:&error];if(!routes||error)return nil;
+    NSArray<NSTextCheckingResult *> *matches=[routes matchesInString:routeSource options:0 range:NSMakeRange(0,routeSource.length)];
+    NSSet *tokens=[NSSet setWithArray:@[@"m3u",@"playlist",@"live",@"channel",@"iptv",@"tv"]];
+    NSArray *preferred=@[@"/all.m3u",@"/m3u",@"/playlist.m3u",@"/live.m3u",@"/channels.m3u"];
+    NSMutableArray<NSString *> *candidates=[NSMutableArray array];
+    for(NSTextCheckingResult *match in matches){NSString *path=[routeSource substringWithRange:[match rangeAtIndex:1]];if(ServiceValidPlaylistPath(path)&&![candidates containsObject:path])[candidates addObject:path];}
+    for(NSString *preferredPath in preferred)if([candidates containsObject:preferredPath])return preferredPath;
+    for(NSString *path in candidates){NSString *candidate=path.lowercaseString;BOOL likely=NO;for(NSString *token in tokens)if([candidate containsString:token]){likely=YES;break;}if(likely)return path;}
+    return nil;
+}
++ (NSString *)playlistPathForService:(NSDictionary *)service {
+    if(![service isKindOfClass:NSDictionary.class])return nil;
+    if([service[@"builtin"] boolValue]&&[service[@"id"] isEqual:@"builtin-ysp"])return @"/all.m3u";
+    BOOL nanoTVLive=[service[@"protocol"] isEqual:@"nanotv-service-v2"];
+    BOOL pythonHTTP=[service[@"protocol"] isEqual:@"python-http"];
+    BOOL legacyPythonHTTP=![service[@"manifest"] isKindOfClass:NSDictionary.class]&&[service[@"engine"] isEqual:@"python"];
+    if(!nanoTVLive&&!pythonHTTP&&!legacyPythonHTTP)return nil;
+    NSString *declared=service[@"playlistPath"];
+    if(ServiceValidPlaylistPath(declared))return nanoTVLive&&![declared isEqual:@"/all.m3u"]?nil:declared;
+    if(nanoTVLive)return @"/all.m3u";
+    // A Python Spider is hosted by the media API, but that API does not expose
+    // the script's own Flask/FastAPI routes. Inferring one of those routes as
+    // a live subscription would create a broken loopback M3U source. Only
+    // Python HTTP services (and legacy unmanifested Python services) can have
+    // their entry file interpreted as a local HTTP server declaration.
+    if(![service[@"engine"] isEqual:@"python"])return nil;
+    NSString *entry=[self codePath:service];NSDictionary *attributes=entry.length?[NSFileManager.defaultManager attributesOfItemAtPath:entry error:NULL]:nil;
+    if(!entry.length||[attributes[NSFileSize] unsignedLongLongValue]>2*1024*1024)return nil;
+    NSData *data=[NSData dataWithContentsOfFile:entry options:NSDataReadingMappedIfSafe error:NULL];NSString *source=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
+    return [self inferredPlaylistPathInCode:source];
+}
++ (NSString *)subscriptionURLForService:(NSDictionary *)service {
+    NSInteger port=[service[@"port"] integerValue];NSString *path=[self playlistPathForService:service];if(port<1||port>65535||!path.length)return nil;
+    return [NSString stringWithFormat:@"http://127.0.0.1:%ld%@",(long)port,path];
+}
++ (void)associateLegacyLoopbackSubscriptionsForService:(NSDictionary *)service {
+    NSString *identifier=[service[@"id"] isKindOfClass:NSString.class]?service[@"id"]:@"";NSInteger port=[service[@"port"] integerValue];if(!identifier.length||port<1||port>65535)return;
+    NSSet *loopback=[NSSet setWithArray:@[@"127.0.0.1",@"localhost",@"::1"]];
+    for(id rawSource in [NSUserDefaults.standardUserDefaults arrayForKey:@"subscriptions"]?:@[]){if(![ProfileStore isHTTP:rawSource])continue;NSString *source=rawSource;NSURLComponents *components=[NSURLComponents componentsWithString:source];NSString *host=components.host.lowercaseString;if(!components.URL||![loopback containsObject:host]||components.port.integerValue!=port)continue;NSDictionary *metadata=[ProfileStore metadata:source];if([metadata[@"managedServiceID"] isEqual:identifier])continue;if(metadata[@"managedServiceID"]&&![metadata[@"managedServiceID"] isEqual:identifier])continue;[ProfileStore update:source values:@{@"managedServiceID":identifier}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:source];}
+}
++ (NSString *)epgURLForService:(NSDictionary *)service {
+    NSString *explicit=service[@"epgURL"];if([ProfileStore isHTTP:explicit])return explicit;NSInteger port=[service[@"port"] integerValue];if(port<1||port>65535)return nil;
+    NSString *expected=[self subscriptionURLForService:service];
+    NSArray *sources=[NSUserDefaults.standardUserDefaults arrayForKey:@"subscriptions"]?:@[];
+    for(NSString *source in sources){if(!expected.length||![source isEqual:expected])continue;NSDictionary *metadata=[ProfileStore metadata:source];NSString *candidate=[metadata[@"epgURL"] isKindOfClass:NSString.class]?metadata[@"epgURL"]:metadata[@"detectedEPGURL"];if([ProfileStore isHTTP:candidate])return candidate;}
+    // A manually configured XMLTV URL belongs to the service, not to its old
+    // loopback port. Keep it available while the replacement playlist is being
+    // checked, but never reuse an automatically detected URL from an old route.
+    NSString *identifier=service[@"id"];
+    for(NSString *source in sources){NSDictionary *metadata=[ProfileStore metadata:source];if([metadata[@"managedServiceID"] isEqual:identifier]&&[ProfileStore isHTTP:metadata[@"epgURL"]])return metadata[@"epgURL"];}
+    return nil;
+}
 + (void)save:(NSDictionary *)service {
     service=[self resolvedService:service];
     NSMutableArray *rows = [[self services] mutableCopy];
@@ -115,6 +183,13 @@ static BOOL ServiceRelativePath(NSString *path){
     if(existing[@"manifest"][@"options"])manifest[@"options"]=existing[@"manifest"][@"options"];
     NSMutableDictionary *previous=[existing mutableCopy];[previous removeObjectForKey:@"previousImport"];updated[@"previousImport"]=previous;
     for(NSString *key in @[@"engine",@"protocol",@"downloadChecksum",@"configDownloadChecksum",@"configContentChecksum",@"configurationState",@"updated"])if(incoming[key])updated[key]=incoming[key];
+    BOOL runtimeChanged=![existing[@"engine"] isEqual:incoming[@"engine"]];
+    BOOL inferredArguments=[existing[@"argumentsSource"] isEqual:@"inferred"];
+    // A changed runtime cannot safely reuse flags from the old engine. On the
+    // same runtime, refresh detected defaults but retain explicit user edits.
+    if(runtimeChanged||inferredArguments){updated[@"arguments"]=incoming[@"arguments"]?:@"";updated[@"argumentsSource"]=incoming[@"argumentsSource"]?:@"inferred";}
+    BOOL hasManualPlaylist=[existing[@"playlistPath"] isKindOfClass:NSString.class]&&[existing[@"playlistPath"] length]&&![existing[@"playlistPathSource"] isEqual:@"inferred"];
+    if(!hasManualPlaylist){[updated removeObjectForKey:@"playlistPath"];[updated removeObjectForKey:@"playlistPathSource"];if([incoming[@"playlistPath"] isKindOfClass:NSString.class]&&[incoming[@"playlistPath"] length]){updated[@"playlistPath"]=incoming[@"playlistPath"];updated[@"playlistPathSource"]=incoming[@"playlistPathSource"]?:@"inferred";}}
     updated[@"manifest"]=manifest;[updated removeObjectForKey:@"capabilities"];
     updated[@"packageRelativePath"]=[relative stringByAppendingPathComponent:[package substringFromIndex:source.length+1]];updated[@"packageRoot"]=[base stringByAppendingPathComponent:updated[@"packageRelativePath"]];
     updated[@"archivePath"]=@"";[updated removeObjectForKey:@"archiveRelativePath"];
@@ -125,8 +200,11 @@ static BOOL ServiceRelativePath(NSString *path){
     NSDictionary *previous=service[@"previousImport"];
     if(![previous isKindOfClass:NSDictionary.class]||![previous[@"id"] isEqual:service[@"id"]]||![NSFileManager.defaultManager fileExistsAtPath:[self codePath:previous]]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:4 userInfo:@{NSLocalizedDescriptionKey:@"没有可恢复的旧版代码，当前版本已保留"}];return nil;}
     NSMutableDictionary *restored=[[self resolvedService:previous] mutableCopy],*current=[service mutableCopy];[current removeObjectForKey:@"previousImport"];
-    // Keep user changes made after updating; only switch imported code metadata.
-    for(NSString *key in @[@"name",@"port",@"lan",@"arguments",@"url"])if(service[key])restored[key]=service[key];
+    // Keep user changes made after updating; detected values belong to the
+    // imported version and must roll back together with its code.
+    for(NSString *key in @[@"name",@"port",@"lan",@"url"])if(service[key])restored[key]=service[key];
+    if(![service[@"argumentsSource"] isEqual:@"inferred"]){if(service[@"arguments"])restored[@"arguments"]=service[@"arguments"];if(service[@"argumentsSource"])restored[@"argumentsSource"]=service[@"argumentsSource"];}
+    if([service[@"playlistPath"] isKindOfClass:NSString.class]&&[service[@"playlistPath"] length]&&![service[@"playlistPathSource"] isEqual:@"inferred"]){restored[@"playlistPath"]=service[@"playlistPath"];restored[@"playlistPathSource"]=service[@"playlistPathSource"]?:@"manual";}
     if(service[@"manifest"][@"options"]){NSMutableDictionary *manifest=[restored[@"manifest"] mutableCopy];manifest[@"options"]=service[@"manifest"][@"options"];restored[@"manifest"]=manifest;}
     restored[@"previousImport"]=current;restored[@"status"]=@"已切回上一版 · 待启动验证";[self save:restored];return restored;
 }

@@ -152,11 +152,12 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     id manifest=manifestData?[NSJSONSerialization JSONObjectWithData:manifestData options:0 error:NULL]:nil;
     if(manifestData && ![manifest isKindOfClass:NSDictionary.class]){PackageError(error,@"cctvhost.json 不是有效 JSON 对象");return nil;}
     NSMutableDictionary *result=[manifest?:@{} mutableCopy];
-    for(NSString *key in @[@"entry",@"runtime",@"protocol",@"moduleType",@"name"])if(result[key] && ![result[key] isKindOfClass:NSString.class]){PackageError(error,@"资源清单字段类型错误");return nil;}
+    for(NSString *key in @[@"entry",@"runtime",@"protocol",@"moduleType",@"name",@"version",@"pluginVersion"])if(result[key] && ![result[key] isKindOfClass:NSString.class]){PackageError(error,@"资源清单字段类型错误");return nil;}
     if(result[@"schemaVersion"] && (![result[@"schemaVersion"] isKindOfClass:NSNumber.class] || [result[@"schemaVersion"] integerValue]!=1)){PackageError(error,@"不支持此资源清单版本");return nil;}
     NSData *packageData=ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:@"package.json"]],65536,NULL);
     id package=packageData?[NSJSONSerialization JSONObjectWithData:packageData options:0 error:NULL]:nil;if(![package isKindOfClass:NSDictionary.class])package=@{};
-    for(NSString *key in @[@"module",@"main",@"name",@"type"])if(package[key] && ![package[key] isKindOfClass:NSString.class]){PackageError(error,@"package.json 字段类型错误");return nil;}
+    for(NSString *key in @[@"module",@"main",@"name",@"type",@"version"])if(package[key] && ![package[key] isKindOfClass:NSString.class]){PackageError(error,@"package.json 字段类型错误");return nil;}
+    for(NSString *key in @[@"version",@"pluginVersion"])if([result[key] length]>128 || [package[@"version"] length]>128){PackageError(error,@"资源版本标识超过 128 个字符");return nil;}
     NSString *entry=result[@"entry"];
     if(!entry.length){
         entry=package[@"module"]?:package[@"main"];
@@ -238,6 +239,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if([protocol isEqual:@"catvod-spider"] && ![runtime isEqual:@"javascript"]){PackageError(error,@"CatPaw JS Spider 必须使用 JavaScriptCore 运行时（runtime: javascript）");return nil;}
     // Keep a small, typed manifest: no arbitrary paths or host control fields.
     NSMutableDictionary *clean=[@{@"schemaVersion":@1,@"entry":entry,@"runtime":runtime,@"protocol":protocol,@"moduleType":moduleType,@"name":([result[@"name"] isKindOfClass:NSString.class]?result[@"name"]:(package[@"name"]?:entry.stringByDeletingPathExtension))} mutableCopy];
+    NSString *pluginVersion=[result[@"pluginVersion"] isKindOfClass:NSString.class]?result[@"pluginVersion"]:([result[@"version"] isKindOfClass:NSString.class]?result[@"version"]:([package[@"version"] isKindOfClass:NSString.class]?package[@"version"]:@""));if(pluginVersion.length)clean[@"pluginVersion"]=pluginVersion;
     if(result[@"capabilities"]){if(![result[@"capabilities"] isKindOfClass:NSArray.class]){PackageError(error,@"capabilities 必须是字符串数组");return nil;}for(id value in result[@"capabilities"])if(![value isKindOfClass:NSString.class]){PackageError(error,@"capabilities 包含无效类型");return nil;}clean[@"capabilities"]=result[@"capabilities"];}
     if(nanoServiceV2){clean[@"name"]=[nanoManifest[@"name"] isKindOfClass:NSString.class]?nanoManifest[@"name"]:clean[@"name"];clean[@"capabilities"]=nanoCapabilities;clean[@"pluginVersion"]=[nanoManifest[@"version"] isKindOfClass:NSString.class]?nanoManifest[@"version"]:@"";clean[@"apiVersion"]=@2;}
     if(verifiedLocalChecksums.count)clean[@"verifiedLocalChecksums"]=verifiedLocalChecksums;
@@ -277,9 +279,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             NSString *entryText=entryData?[[NSString alloc] initWithData:entryData encoding:NSUTF8StringEncoding]:nil;
             if(entryText){
                 launchArguments=SuggestedPythonHTTPArguments(entryText);
-                BOOL hasPlaylistBuilder=[entryText rangeOfString:@"(?:^|\\n)\\s*def\\s+(?:m3u|build_m3u)\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
-                BOOL hasPlaylistRoute=[entryText containsString:@"/all.m3u"];
-                if((hasPlaylistBuilder || [entryText containsString:@"#EXTM3U"]) && hasPlaylistRoute)playlistPath=@"/all.m3u";
+                playlistPath=[ServiceStore inferredPlaylistPathInCode:entryText]?:@"";
                 if([launchArguments containsString:@"--no-4k"])manifest[@"compatibilityNote"]=@"此包的设备协议线程没有停止接口。默认启用可独立关闭的 1080p 模式；iPhone 内不启动 Node/WASM 子进程，TS 缓存限 32 MB。";
             }
         }
@@ -302,9 +302,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         NSString *target=[[ServiceStore directory] stringByAppendingPathComponent:identifier];
         if(![fm moveItemAtPath:stage toPath:target error:error])return nil;
         NSMutableSet *ports=[NSMutableSet set];for(NSDictionary *existing in [ServiceStore services])[ports addObject:existing[@"port"]?:@0];NSInteger port=18780;while([ports containsObject:@(port)] && port<65535)port++;
-        NSMutableDictionary *importedService=[@{@"id":identifier,@"name":manifest[@"name"],@"port":@(port),@"engine":manifest[@"runtime"],@"protocol":manifest[@"protocol"],@"manifest":manifest,@"packageRoot":[target stringByAppendingPathComponent:relative],@"archivePath":zip?[target stringByAppendingPathComponent:@"source.zip"]:@"",@"lan":@NO,@"updated":@(NSDate.date.timeIntervalSince1970),@"arguments":launchArguments} mutableCopy];
-        if([manifest[@"protocol"] isEqual:@"nanotv-service-v2"]){importedService[@"capabilities"]=@[@"live"];importedService[@"playlistPath"]=@"/all.m3u";}
-        if(playlistPath.length)importedService[@"playlistPath"]=playlistPath;
+        NSMutableDictionary *importedService=[@{@"id":identifier,@"name":manifest[@"name"],@"port":@(port),@"engine":manifest[@"runtime"],@"protocol":manifest[@"protocol"],@"manifest":manifest,@"packageRoot":[target stringByAppendingPathComponent:relative],@"archivePath":zip?[target stringByAppendingPathComponent:@"source.zip"]:@"",@"lan":@NO,@"updated":@(NSDate.date.timeIntervalSince1970),@"arguments":launchArguments,@"argumentsSource":@"inferred"} mutableCopy];
+        if([manifest[@"protocol"] isEqual:@"nanotv-service-v2"]){importedService[@"capabilities"]=@[@"live"];importedService[@"playlistPath"]=@"/all.m3u";importedService[@"playlistPathSource"]=@"inferred";}
+        if(playlistPath.length){importedService[@"playlistPath"]=playlistPath;importedService[@"playlistPathSource"]=@"inferred";}
         service=importedService;
     } @catch(NSException *exception){PackageError(error,@"资源包结构或清单无效，未执行代码");return nil;}
     @finally {if([fm fileExistsAtPath:stage])[fm removeItemAtPath:stage error:NULL];}

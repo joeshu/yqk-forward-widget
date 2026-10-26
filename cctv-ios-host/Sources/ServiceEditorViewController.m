@@ -114,7 +114,8 @@
     self.nameField = [self field:@"服务名称" value:self.service[@"name"]];
     self.portField = [self field:@"端口 1024–65535" value:[self.service[@"port"] description] ?: @"18768"];
     self.portField.keyboardType = UIKeyboardTypeNumberPad;
-    self.playlistPathField=[self field:@"可选，如 /all.m3u" value:self.service[@"playlistPath"]];self.playlistPathField.autocapitalizationType=UITextAutocapitalizationTypeNone;
+    NSString *configuredPlaylistPath=[self.service[@"playlistPathSource"] isEqual:@"inferred"]?@"":[ServiceStore playlistPathForService:self.service];
+    self.playlistPathField=[self field:@"留空自动识别，或填 /all.m3u" value:configuredPlaylistPath];self.playlistPathField.autocapitalizationType=UITextAutocapitalizationTypeNone;
     self.urlField = [self field:@"https://…/service.py" value:self.service[@"url"]];
     self.urlField.keyboardType = UIKeyboardTypeURL;
     [self.urlField addTarget:self action:@selector(urlChanged) forControlEvents:UIControlEventEditingChanged];
@@ -395,16 +396,19 @@
     service[@"name"] = name;
     service[@"port"] = @(port);
     service[@"lan"] = @(self.lanSwitch.on);
-    service[@"arguments"] = self.argsField.text ?: @"";
+    NSString *arguments=self.argsField.text?:@"";
+    if(![arguments isEqual:(self.service[@"arguments"]?:@"")])service[@"argumentsSource"]=@"manual";
+    service[@"arguments"] = arguments;
     service[@"url"] = self.urlField.text ?: @"";
     NSString *playlistPath=[self.playlistPathField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if(playlistPath.length){if(![playlistPath hasPrefix:@"/"]||[playlistPath hasPrefix:@"//"]||playlistPath.length>=128||[playlistPath containsString:@".."]||[playlistPath containsString:@"?"]||[playlistPath containsString:@"#"]||[playlistPath containsString:@"\\"]||[playlistPath containsString:@":"]||[playlistPath rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[self message:@"直播列表路径须以单个 / 开头，且不能包含 ..、查询参数、片段或控制字符。例：/all.m3u"];return;}service[@"playlistPath"]=playlistPath;}else[service removeObjectForKey:@"playlistPath"];
+    if(playlistPath.length){if(![playlistPath hasPrefix:@"/"]||[playlistPath hasPrefix:@"//"]||playlistPath.length>=128||[playlistPath containsString:@".."]||[playlistPath containsString:@"?"]||[playlistPath containsString:@"#"]||[playlistPath containsString:@"\\"]||[playlistPath containsString:@":"]||[playlistPath rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[self message:@"直播列表路径须以单个 / 开头，且不能包含 ..、查询参数、片段或控制字符。例：/all.m3u"];return;}service[@"playlistPath"]=playlistPath;service[@"playlistPathSource"]=@"manual";}else{[service removeObjectForKey:@"playlistPath"];[service removeObjectForKey:@"playlistPathSource"];}
     service[@"updated"] = @(NSDate.date.timeIntervalSince1970);
     if([service[@"manifest"] isKindOfClass:NSDictionary.class] && self.optionsText){
         NSError *jsonError=nil;id options=[NSJSONSerialization JSONObjectWithData:[self.optionsText dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingFragmentsAllowed error:&jsonError];
         if(![options isKindOfClass:NSDictionary.class] && ![options isKindOfClass:NSString.class]){[self message:jsonError.localizedDescription?:@"插件参数须为 JSON 对象或字符串"];return;}
         NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy];manifest[@"options"]=options;service[@"manifest"]=manifest;
     }
+    [ServiceStore associateLegacyLoopbackSubscriptionsForService:self.service];
     if([PyHost isManagedServiceIdentifier:self.identifier]){
         NSInteger oldPort=[self.service[@"port"] integerValue];
         if(oldPort==port){[self message:@"此服务仍在运行。停止服务后才能保存其他配置。"];return;}

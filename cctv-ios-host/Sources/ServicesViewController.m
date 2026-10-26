@@ -5,6 +5,7 @@
 #import "ServiceEditorViewController.h"
 #import "ServiceStore.h"
 #import "M3UParser.h"
+#import "ProfileStore.h"
 static NSString *ServiceEngineName(NSDictionary *service){return [service[@"engine"] isEqual:@"node"]?@"Node.js Mobile":([service[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore":@"Python");}
 static NSString *ServiceProtocolName(NSDictionary *service){
     NSString *protocol=service[@"protocol"]?:@"";
@@ -67,10 +68,12 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     self.displayedRunning=[self running];
     self.displayedRuntimeStatus=[self currentRuntimeStatus];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(runtimeStateDidChange) name:PyHostRuntimeStateDidChangeNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(subscriptionMetadataDidChange) name:ProfileStoreMetadataDidChangeNotification object:nil];
 }
 - (void)viewDidDisappear:(BOOL)animated {
     [super viewDidDisappear:animated];
     [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];
+    [NSNotificationCenter.defaultCenter removeObserver:self name:ProfileStoreMetadataDidChangeNotification object:nil];
     self.probeGeneration++;
     [self.probeTask cancel];
     self.probeTask=nil;
@@ -79,6 +82,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 }
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];[self.probeTask cancel];[self.probeSession invalidateAndCancel];}
 - (NSString *)currentRuntimeStatus {return [PyHost runtimeStatusDescriptionForServiceIdentifier:self.service[@"id"]];}
+- (void)subscriptionMetadataDidChange {if(self.isViewLoaded&&self.view.window)[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];}
 - (void)runtimeStateDidChange {
     BOOL running=[self running];NSString *status=[self currentRuntimeStatus];
     BOOL changed=running!=self.displayedRunning||![status isEqualToString:self.displayedRuntimeStatus];
@@ -92,7 +96,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return section == 0   ? 2
            : section == 1 ? 3
-           : section == 2 ? 7
+           : section == 2 ? 12
            : section == 3 ? 4
                           : ([self.service[@"builtin"] boolValue] ? 0 : 1);
 }
@@ -109,8 +113,9 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     return nil;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:@"service.detail.row"];
-    if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"service.detail.row"];
+    BOOL addressRow=ip.section==2&&(ip.row==7||ip.row==8);NSString *reuse=addressRow?@"service.detail.address":@"service.detail.row";
+    UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:reuse];
+    if(!c)c=[[UITableViewCell alloc] initWithStyle:addressRow?UITableViewCellStyleSubtitle:UITableViewCellStyleValue1 reuseIdentifier:reuse];
     c.backgroundColor = HostCard();
     c.textLabel.textColor = HostText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
@@ -118,7 +123,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     c.textLabel.adjustsFontForContentSizeCategory=YES;
     c.detailTextLabel.adjustsFontForContentSizeCategory=YES;
     c.textLabel.numberOfLines = 0;
-    c.detailTextLabel.numberOfLines = 3;
+    c.detailTextLabel.numberOfLines = 0;
     c.selectionStyle = UITableViewCellSelectionStyleNone;
     c.accessoryView=nil;c.accessoryType=UITableViewCellAccessoryNone;c.imageView.image=nil;c.detailTextLabel.text=@"";c.textLabel.textAlignment=NSTextAlignmentNatural;
     if (ip.section == 0) {
@@ -136,20 +141,25 @@ static NSString *ServiceProtocolName(NSDictionary *service){
             c.detailTextLabel.text = [self.service[@"lan"] boolValue] ? @"已开启" : @"仅本机";
         }
     } else if (ip.section == 1) {
+        NSString *playlistPath=[ServiceStore playlistPathForService:self.service];
+        NSString *probePath=[ServiceStore isMediaService:self.service]?@"/health":([self.service[@"builtin"] boolValue]?@"/all.m3u":(playlistPath?:@"/"));
         c.textLabel.text = @[ @"本机端口", @"复制访问地址", @"检测服务接口" ][ip.row];
         c.detailTextLabel.text = ip.row == 0   ? [self.service[@"port"] description]
                                  : ip.row == 1 ? [self baseURL]
-                                               : (self.health ?: @"GET / · 点击检测");
+                                               : (self.health ?: [NSString stringWithFormat:@"GET %@ · 点击检测",probePath]);
         if (ip.row > 0)
             c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (ip.section == 2) {
-        c.textLabel.text = @[ @"运行引擎", @"资源协议识别", @"版本", @"代码来源", @"入口文件", @"上次更新", @"源地址" ][ip.row];
+        c.textLabel.text = @[ @"运行引擎", @"资源协议识别", @"版本", @"代码来源", @"入口文件", @"上次更新", @"源地址", @"服务订阅地址", @"节目单地址", @"订阅清单状态", @"频道数量", @"最近成功刷新" ][ip.row];
         NSDate *updated = [NSDate dateWithTimeIntervalSince1970:[self.service[@"updated"] doubleValue]];
         NSDateFormatter *fmt = [NSDateFormatter new];
         fmt.dateFormat = @"yyyy-MM-dd HH:mm";
         NSDictionary *manifest=[self.service[@"manifest"] isKindOfClass:NSDictionary.class]?self.service[@"manifest"]:@{};
         id rawVersion=manifest[@"version"]?:manifest[@"pluginVersion"]?:self.service[@"version"];
         NSString *version=[rawVersion isKindOfClass:NSString.class]&&[rawVersion length]?rawVersion:@"未知";
+        NSString *playlistURL=[ServiceStore subscriptionURLForService:self.service];NSDictionary *playlistMetadata=playlistURL.length?[ProfileStore metadata:playlistURL]:@{};NSArray *cachedChannels=[playlistMetadata[@"cachedChannels"] isKindOfClass:NSArray.class]?playlistMetadata[@"cachedChannels"]:@[];
+        NSString *playlistStatus=[playlistMetadata[@"status"] isKindOfClass:NSString.class]?playlistMetadata[@"status"]:(playlistURL.length?([self running]?@"等待读取订阅清单":@"服务已停止 · 保留最近频道"):@"未配置播放列表路径");
+        NSString *lastRefresh=[playlistMetadata[@"updatedAt"] doubleValue]>0?[fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:[playlistMetadata[@"updatedAt"] doubleValue]]]:@"尚无成功记录";
         NSArray *values = @[
             ServiceEngineName(self.service),
             ServiceProtocolName(self.service),
@@ -159,12 +169,19 @@ static NSString *ServiceProtocolName(NSDictionary *service){
                 : ([self.service[@"url"] length] ? @"远程链接" : @"本地文件 / 代码"),
             [ServiceStore codePath:self.service].lastPathComponent ?: @"—",
             [self.service[@"updated"] doubleValue] > 0 ? [fmt stringFromDate:updated] : @"随应用更新",
-            self.service[@"url"] ?: @"随应用提供"
+            self.service[@"url"] ?: @"随应用提供",
+            playlistURL ?: @"未声明或未识别播放列表路径",
+            [ServiceStore epgURLForService:self.service] ?: @"尚未从订阅清单中识别",
+            playlistStatus,
+            cachedChannels.count? [NSString stringWithFormat:@"%lu 个缓存频道",(unsigned long)cachedChannels.count]:(self.probePlaylistChecked?[NSString stringWithFormat:@"%ld 个 · 接口探测",(long)self.probeChannelCount]:@"未知 · 尚未读取有效清单"),
+            lastRefresh
         ];
         c.detailTextLabel.text = values[ip.row];
+        NSString *address=ip.row==7?values[7]:(ip.row==8?values[8]:nil);
+        if(address){c.detailTextLabel.textAlignment=NSTextAlignmentLeft;if([address hasPrefix:@"http://"]||[address.lowercaseString hasPrefix:@"https://"]){c.accessoryType=UITableViewCellAccessoryDisclosureIndicator;c.selectionStyle=UITableViewCellSelectionStyleDefault;}}
     } else if (ip.section == 3) {
         c.textLabel.text = @[ @"查看日志", @"编辑服务", @"查看 / 导出代码", @"添加到直播订阅" ][ip.row];
-        if(ip.row==3 && [self opensMedia])c.textLabel.text=@"打开影视";
+        if(ip.row==3){if([self opensMedia])c.textLabel.text=@"打开影视";else if([ServiceStore subscriptionURLForService:self.service].length)c.textLabel.text=@"打开直播频道";else c.textLabel.text=@"配置直播列表路径";}
         c.imageView.image = [UIImage systemImageNamed:@[
             @"doc.text", @"square.and.pencil", @"square.and.arrow.up", @"plus.rectangle.on.rectangle"
         ][ip.row]];
@@ -194,8 +211,9 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     self.probing = YES;
     self.health = @"检测中…";
     [self.tableView reloadData];
-    BOOL manifestService=[ServiceStore isMediaService:self.service];BOOL builtin=[self.service[@"builtin"] boolValue];
-    NSString *path=manifestService?@"/health":(builtin?@"/all.m3u":@"/");
+    BOOL manifestService=[ServiceStore isMediaService:self.service];
+    NSString *playlistPath=[ServiceStore playlistPathForService:self.service];
+    NSString *path=manifestService?@"/health":(playlistPath?:@"/");
     NSURL *probeURL=[NSURL URLWithString:[[self baseURL] stringByAppendingString:path]];
     NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:probeURL];
     r.timeoutInterval = 5;
@@ -218,8 +236,8 @@ static NSString *ServiceProtocolName(NSDictionary *service){
               if(error)w.health=[NSString stringWithFormat:@"连接失败：%@",error.localizedDescription?:@"未知错误"];
               else if(status<200||status>=300)w.health=[NSString stringWithFormat:@"HTTP 可达 · 返回 %ld · 服务状态未知%@",(long)status,time];
               else if(manifestService){id json=data.length?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;BOOL healthy=[json isKindOfClass:NSDictionary.class]&&[json[@"ok"] isKindOfClass:NSNumber.class]&&[json[@"ok"] boolValue];w.health=[(healthy?@"健康检查通过 · GET /health":@"HTTP 可访问 · /health 未确认健康字段") stringByAppendingString:time];}
-              else if(builtin){NSString *text=data.length<=10*1024*1024?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;NSArray *channels=text.length?[M3UParser parse:text baseURL:probeURL]:@[];w.health=[(channels.count?[NSString stringWithFormat:@"频道清单可读取 · %lu 个频道",(unsigned long)channels.count]:@"HTTP 可访问 · 没有有效频道清单") stringByAppendingString:time];}
-              else w.health=[[NSString stringWithFormat:@"HTTP 可访问 · GET / 返回 %ld · 健康状态未知",(long)status] stringByAppendingString:time];
+              else if(playlistPath.length){NSString *text=data.length<=10*1024*1024?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;NSArray *channels=text.length?[M3UParser parse:text baseURL:probeURL]:@[];BOOL format=[text containsString:@"#EXTM3U"]||[text containsString:@"#EXTINF"]||channels.count>0;w.health=[(format?[NSString stringWithFormat:@"频道清单可读取 · %lu 个频道",(unsigned long)channels.count]:[NSString stringWithFormat:@"HTTP %ld · 响应不是有效频道清单",(long)status]) stringByAppendingString:time];}
+              else w.health=[[NSString stringWithFormat:@"HTTP 可访问 · GET %@ 返回 %ld · 健康状态未知",path,(long)status] stringByAppendingString:time];
               [w.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];
             });
           }];
@@ -233,6 +251,11 @@ static NSString *ServiceProtocolName(NSDictionary *service){
         [tableView reloadData];
     } else if (ip.section == 1 && ip.row == 2)
         [self probe];
+    else if(ip.section==2 && (ip.row==7||ip.row==8)) {
+        NSString *value=[ServiceStore subscriptionURLForService:self.service];
+        if(ip.row==8)value=[ServiceStore epgURLForService:self.service];
+        if(value.length){UIPasteboard.generalPasteboard.string=value;NSString *message=ip.row==7?@"服务订阅地址已复制":@"节目单地址已复制";self.navigationItem.prompt=message;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{if([self.navigationItem.prompt isEqual:message])self.navigationItem.prompt=nil;});}
+    }
     else if (ip.section == 3) {
         if (ip.row == 0) {
             if (self.onLog)
@@ -274,9 +297,9 @@ static NSString *ServiceProtocolName(NSDictionary *service){
             [self presentViewController:a animated:YES completion:nil];
         } else {
             if([self opensMedia]){if(self.onBrowseService)self.onBrowseService(self.service);return;}
-            NSString *u = [[self baseURL] stringByAppendingString:@"/all.m3u"];
+            NSString *u = [ServiceStore subscriptionURLForService:self.service];
             if (self.onSubscribe)
-                self.onSubscribe(u);
+                if(u.length)self.onSubscribe(u);else{UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"未配置直播列表" message:@"请编辑服务，填写或修复播放列表路径后再添加频道。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"编辑服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self edit];}]];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:alert animated:YES completion:nil];}
         }
     } else if (ip.section == 4) {
         if ([PyHost isManagedServiceIdentifier:self.service[@"id"]])

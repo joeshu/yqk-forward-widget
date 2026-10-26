@@ -61,7 +61,8 @@
 - (BOOL)profile:(NSDictionary *)profile matchesKind:(NSString *)kind {
     NSString *resourceKind=[profile[@"resourceKind"] isKindOfClass:NSString.class]?profile[@"resourceKind"]:@"unknown";
     NSString *status=[profile[@"status"] isKindOfClass:NSString.class]?profile[@"status"]:@"";
-    BOOL pending=[resourceKind isEqual:@"unknown"]||[status containsString:@"失败"]||[status containsString:@"异常"]||[status containsString:@"错误"];
+    NSString *playlistStatus=[profile[@"subscriptionStatus"] isKindOfClass:NSString.class]?profile[@"subscriptionStatus"]:@"";
+    BOOL pending=[resourceKind isEqual:@"unknown"]||[status containsString:@"失败"]||[status containsString:@"异常"]||[status containsString:@"错误"]||[playlistStatus containsString:@"失败"]||[playlistStatus containsString:@"异常"]||[playlistStatus containsString:@"错误"];
     if([kind isEqual:@"all"])return YES;
     if([kind isEqual:@"vod"])return [resourceKind isEqual:@"vod"]||[resourceKind isEqual:@"both"];
     if([kind isEqual:@"live"])return [resourceKind isEqual:@"live"]||[resourceKind isEqual:@"both"];
@@ -83,9 +84,9 @@
     [self updateKindFilters];
     NSString *q = self.search.searchBar.text.lowercaseString;
     NSArray *profiles=[all filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *p,NSDictionary *bindings){
-        NSString *name=[p[@"name"] isKindOfClass:NSString.class]?p[@"name"]:@"";NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";NSString *url=[p[@"url"] isKindOfClass:NSString.class]?p[@"url"]:@"";
+        NSString *name=[p[@"name"] isKindOfClass:NSString.class]?p[@"name"]:@"";NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";NSString *searchable=[@[[p[@"url"] isKindOfClass:NSString.class]?p[@"url"]:@"",[p[@"subscriptionURL"] isKindOfClass:NSString.class]?p[@"subscriptionURL"]:@"",[p[@"epgURL"] isKindOfClass:NSString.class]?p[@"epgURL"]:@"",[p[@"protocol"] isKindOfClass:NSString.class]?p[@"protocol"]:@"",[p[@"status"] isKindOfClass:NSString.class]?p[@"status"]:@"",[p[@"subscriptionStatus"] isKindOfClass:NSString.class]?p[@"subscriptionStatus"]:@""] ] componentsJoinedByString:@" "].lowercaseString;
         if(![self profile:p matchesKind:self.selectedKind?:@"all"])return NO;
-        if(q.length && [name rangeOfString:q options:NSCaseInsensitiveSearch].location==NSNotFound && [source.lowercaseString rangeOfString:q].location==NSNotFound && [url.lowercaseString rangeOfString:q].location==NSNotFound)return NO;
+        if(q.length && [name rangeOfString:q options:NSCaseInsensitiveSearch].location==NSNotFound && [source.lowercaseString rangeOfString:q].location==NSNotFound && [searchable rangeOfString:q].location==NSNotFound)return NO;
         return [p[@"type"] isEqual:@"plugin"]||[p[@"type"] isEqual:@"tvbox"]||source.length>0||[p[@"native"] boolValue];
     }]];
     if([self.profiles isEqualToArray:profiles]){self.emptyLabel.text=profiles.count?@"":(q.length?@"没有匹配的资源\n清除搜索或更换筛选条件":@"还没有导入资源\n点击右上角 + 添加影视脚本、直播服务或订阅列表");return;}self.profiles=profiles;self.emptyLabel.text=profiles.count?@"":(q.length?@"没有匹配的资源\n清除搜索或更换筛选条件":@"还没有导入资源\n点击右上角 + 添加影视脚本、直播服务或订阅列表");
@@ -145,8 +146,34 @@
         c.imageView.image = [UIImage systemImageNamed:@"list.bullet.rectangle"];
         BOOL plugin=[p[@"type"] isEqual:@"plugin"],tvbox=[p[@"type"] isEqual:@"tvbox"];
         NSString *current=[p[@"current"] boolValue]?@"当前使用 · ":@"";
-        if(plugin){NSString *kind=[p[@"resourceKind"] isEqual:@"live"]?@"直播服务":([p[@"resourceKind"] isEqual:@"vod"]?@"影视服务":([p[@"resourceKind"] isEqual:@"both"]?@"影视 / 直播服务":@"待识别能力"));c.detailTextLabel.text=[NSString stringWithFormat:@"%@%@ · %@ · %@",current,kind,p[@"runtime"]?:@"引擎未知",p[@"status"]?:@"未启动"];c.imageView.image=[UIImage systemImageNamed:[p[@"resourceKind"] isEqual:@"live"]?@"dot.radiowaves.left.and.right":@"play.rectangle"];}else if(tvbox){BOOL macCMS=[p[@"catalogKind"] isEqual:@"maccms"];NSString *catalogTitle=macCMS?@"MacCMS 影视接口":@"资源合集";c.detailTextLabel.text=macCMS?[NSString stringWithFormat:@"%@%@ · 选中后浏览 · 仅请求当前接口",current,catalogTitle]:[NSString stringWithFormat:@"%@%@ · %lu 个站点 · %lu 个可用 · %lu 个直播列表",current,catalogTitle,(unsigned long)[p[@"siteCount"] unsignedIntegerValue],(unsigned long)[p[@"supportedCount"] unsignedIntegerValue],(unsigned long)[p[@"liveCount"] unsignedIntegerValue]];c.imageView.image=[UIImage systemImageNamed:macCMS?@"film":@"square.stack.3d.up"];}else{c.detailTextLabel.text=[NSString stringWithFormat:@"%@%@",current,c.detailTextLabel.text?:@""];UISwitch *s=[UISwitch new];s.onTintColor=HostAccent();s.on=[p[@"enabled"] boolValue];s.tag=ip.row;s.accessibilityLabel=[NSString stringWithFormat:@"加入频道 %@",p[@"name"]];[s addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];c.accessoryView=s;}
-        if(plugin||tvbox){__weak typeof(self) weakSelf=self;NSString *source=p[@"source"]?:@"";BOOL macCMS=[p[@"catalogKind"] isEqual:@"maccms"];UIAction *manage=[UIAction actionWithTitle:tvbox?(macCMS?@"打开影视接口":@"打开资源合集"):@"资源能力与设置" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(UIAction *a){if(tvbox){if(weakSelf.onOpenTVBoxCatalog)weakSelf.onOpenTVBoxCatalog([source substringFromIndex:6]);}else if(weakSelf.onOpenResource)weakSelf.onOpenResource(source);}];UIAction *remove=[UIAction actionWithTitle:tvbox?(macCMS?@"移除影视接口":@"移除资源合集"):@"移除资源" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[weakSelf confirmRemoveProfile:source];}];UIButton *more=[UIButton buttonWithType:UIButtonTypeSystem];more.frame=CGRectMake(0,0,36,36);[more setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];more.menu=[UIMenu menuWithChildren:@[manage,remove]];more.showsMenuAsPrimaryAction=YES;more.accessibilityLabel=@"更多资源操作";if(plugin){UISwitch *running=[UISwitch new];running.onTintColor=HostAccent();running.on=[p[@"enabled"] boolValue];running.tag=ip.row;running.accessibilityLabel=[NSString stringWithFormat:@"%@服务",running.isOn?@"停止":@"启动"];[running addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];UIStackView *actions=[[UIStackView alloc] initWithArrangedSubviews:@[running,more]];actions.axis=UILayoutConstraintAxisHorizontal;actions.alignment=UIStackViewAlignmentCenter;actions.spacing=4;c.accessoryView=actions;}else c.accessoryView=more;}
+        if(plugin){
+            NSString *kind=[p[@"resourceKind"] isEqual:@"live"]?@"直播服务":([p[@"resourceKind"] isEqual:@"vod"]?@"影视服务":([p[@"resourceKind"] isEqual:@"both"]?@"影视 / 直播服务":@"待识别能力"));
+            NSMutableArray *lines=[NSMutableArray arrayWithObject:[NSString stringWithFormat:@"%@%@ · %@ · %@",current,kind,p[@"runtime"]?:@"引擎未知",p[@"status"]?:@"未启动"]];
+            if([p[@"subscriptionURL"] length]){
+                [lines addObject:[NSString stringWithFormat:@"清单：%@ · %@ 个频道",p[@"subscriptionStatus"]?:@"待检测",p[@"channelCount"]?:@0]];
+                NSTimeInterval last=[p[@"playlistUpdatedAt"] doubleValue];if(last>0){NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"MM-dd HH:mm";[lines addObject:[NSString stringWithFormat:@"最近成功：%@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:last]]]];}
+                [lines addObject:[NSString stringWithFormat:@"订阅：%@",p[@"subscriptionURL"]]];
+            }
+            if([p[@"epgURL"] length])[lines addObject:[NSString stringWithFormat:@"节目单：%@",p[@"epgURL"]]];
+            c.detailTextLabel.text=[lines componentsJoinedByString:@"\n"];
+            c.imageView.image=[UIImage systemImageNamed:[p[@"resourceKind"] isEqual:@"live"]?@"dot.radiowaves.left.and.right":@"play.rectangle"];
+        }else if(tvbox){
+            BOOL macCMS=[p[@"catalogKind"] isEqual:@"maccms"];NSString *catalogTitle=macCMS?@"MacCMS 影视接口":@"资源合集";
+            c.detailTextLabel.text=macCMS?[NSString stringWithFormat:@"%@%@ · 选中后浏览 · 仅请求当前接口",current,catalogTitle]:[NSString stringWithFormat:@"%@%@ · %lu 个站点 · %lu 个可用 · %lu 个直播列表",current,catalogTitle,(unsigned long)[p[@"siteCount"] unsignedIntegerValue],(unsigned long)[p[@"supportedCount"] unsignedIntegerValue],(unsigned long)[p[@"liveCount"] unsignedIntegerValue]];
+            c.imageView.image=[UIImage systemImageNamed:macCMS?@"film":@"square.stack.3d.up"];
+        }else{
+            c.detailTextLabel.text=[NSString stringWithFormat:@"%@%@",current,c.detailTextLabel.text?:@""];
+            UISwitch *s=[UISwitch new];s.onTintColor=HostAccent();s.on=[p[@"enabled"] boolValue];s.tag=ip.row;s.accessibilityLabel=[NSString stringWithFormat:@"加入频道 %@",p[@"name"]];[s addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];c.accessoryView=s;
+        }
+        if(plugin||tvbox){
+            __weak typeof(self) weakSelf=self;NSString *source=p[@"source"]?:@"";BOOL macCMS=[p[@"catalogKind"] isEqual:@"maccms"];
+            UIAction *manage=[UIAction actionWithTitle:tvbox?(macCMS?@"打开影视接口":@"打开资源合集"): @"资源能力与设置" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(UIAction *a){if(tvbox){if(weakSelf.onOpenTVBoxCatalog)weakSelf.onOpenTVBoxCatalog([source substringFromIndex:6]);}else if(weakSelf.onOpenResource)weakSelf.onOpenResource(source);}];
+            NSMutableArray<UIAction *> *menuActions=[NSMutableArray arrayWithObject:manage];
+            if(plugin&&self.onUseResource){NSString *resourceKind=p[@"resourceKind"];if([resourceKind isEqual:@"live"]||[resourceKind isEqual:@"both"])[menuActions addObject:[UIAction actionWithTitle:@"添加直播频道" image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:nil handler:^(UIAction *a){if(weakSelf.onUseResource)weakSelf.onUseResource(source,@"live");}]];if([resourceKind isEqual:@"vod"]||[resourceKind isEqual:@"both"])[menuActions addObject:[UIAction actionWithTitle:@"进入影视" image:[UIImage systemImageNamed:@"film"] identifier:nil handler:^(UIAction *a){if(weakSelf.onUseResource)weakSelf.onUseResource(source,@"vod");}]];}
+            UIAction *remove=[UIAction actionWithTitle:tvbox?(macCMS?@"移除影视接口":@"移除资源合集"): @"移除资源" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[weakSelf confirmRemoveProfile:source];}];[menuActions addObject:remove];
+            UIButton *more=[UIButton buttonWithType:UIButtonTypeSystem];more.frame=CGRectMake(0,0,36,36);[more setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];more.menu=[UIMenu menuWithChildren:menuActions];more.showsMenuAsPrimaryAction=YES;more.accessibilityLabel=@"更多资源操作";
+            if(plugin){UISwitch *running=[UISwitch new];running.onTintColor=HostAccent();running.on=[p[@"enabled"] boolValue];running.tag=ip.row;running.accessibilityLabel=[NSString stringWithFormat:@"%@服务",running.isOn?@"停止":@"启动"];[running addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];UIStackView *actions=[[UIStackView alloc] initWithArrangedSubviews:@[running,more]];actions.axis=UILayoutConstraintAxisHorizontal;actions.alignment=UIStackViewAlignmentCenter;actions.spacing=4;c.accessoryView=actions;}else c.accessoryView=more;
+        }
     }
     if([self.profiles[ip.row][@"status"] length] && ![self.profiles[ip.row][@"type"] isEqual:@"plugin"] && ![self.profiles[ip.row][@"type"] isEqual:@"tvbox"])c.detailTextLabel.text=[NSString stringWithFormat:@"%@\n%@",c.detailTextLabel.text?:@"",self.profiles[ip.row][@"status"]];
     return c;
@@ -162,9 +189,16 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [tableView deselectRowAtIndexPath:ip animated:YES];
     NSDictionary *profile=self.profiles[ip.row];NSString *source=profile[@"source"]?:@"";
-    if([profile[@"type"] isEqual:@"plugin"]){NSString *kind=profile[@"resourceKind"];if(self.onUseResource && ![kind isEqual:@"unknown"])self.onUseResource(source,[kind isEqual:@"both"]?@"choose":kind);else if(self.onOpenResource)self.onOpenResource(source);}
+    if([profile[@"type"] isEqual:@"plugin"]){if(self.onOpenResource)self.onOpenResource(source);}
     else if([profile[@"type"] isEqual:@"tvbox"]){if(self.onOpenTVBoxCatalog)self.onOpenTVBoxCatalog([source substringFromIndex:6]);}
-    else if(self.onSelectProfile)self.onSelectProfile(source);
+    else {
+        UIAlertController *actions=[UIAlertController alertControllerWithTitle:profile[@"name"]?:@"订阅" message:source.length?source:nil preferredStyle:UIAlertControllerStyleActionSheet];
+        if(self.onSelectProfile)[actions addAction:[UIAlertAction actionWithTitle:@"打开频道" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onSelectProfile(source);}]];
+        if(source.length&&self.onEditProfile)[actions addAction:[UIAlertAction actionWithTitle:@"编辑订阅与节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onEditProfile(source);}]];
+        if(source.length&&self.onRefreshProfile)[actions addAction:[UIAlertAction actionWithTitle:@"刷新此订阅" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onRefreshProfile(source);}]];
+        [actions addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+        UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];actions.popoverPresentationController.sourceView=cell?:self.view;actions.popoverPresentationController.sourceRect=cell?cell.bounds:CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);[self presentViewController:actions animated:YES completion:nil];
+    }
 }
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
     trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip {

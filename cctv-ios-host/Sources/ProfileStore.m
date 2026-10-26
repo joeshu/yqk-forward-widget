@@ -1,4 +1,5 @@
 #import "ProfileStore.h"
+NSNotificationName const ProfileStoreMetadataDidChangeNotification = @"CCTVHostProfileStoreMetadataDidChange";
 @implementation ProfileStore
 + (BOOL)isHTTP:(id)source {
     if(![source isKindOfClass:NSString.class]||[source length]>8192)return NO;

@@ -159,6 +159,24 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(choices['alternates'][1]['name'], '720P')
         self.assertEqual(choices['headers']['Referer'], 'https://a.test/')
 
+    def test_playback_preserves_safe_headers_per_quality_choice(self):
+        choices = media.playback({'url': {'values': [
+            {'name': '1080P', 'url': 'https://a.test/1080.m3u8',
+             'headers': {'X-Quality': 'high', 'Host': 'spoof'}},
+            {'name': '720P', 'url': 'https://a.test/720.m3u8',
+             'header': 'X-Quality$low#Referer$https://a.test/watch'}],
+            'headers': {'X-Shared': 'source'}}})
+        self.assertEqual(choices['headers'], {'X-Shared': 'source'})
+        self.assertEqual(choices['alternates'][0]['headers'], {'X-Quality': 'high'})
+        self.assertEqual(choices['alternates'][1]['headers'], {
+            'X-Quality': 'low', 'Referer': 'https://a.test/watch'})
+
+    def test_top_level_alternates_keep_quality_specific_headers(self):
+        value = media.playback({'url': 'https://a.test/default.m3u8',
+                                'alternates': [{'name': '专用线路', 'url': 'https://a.test/specific.m3u8',
+                                                'header': {'X-Quality': 'specific'}}]})
+        self.assertEqual(value['alternates'][0]['headers'], {'X-Quality': 'specific'})
+
     def test_plugin_error_summary_keeps_reason_but_redacts_signed_urls(self):
         value = safe_error_summary('source timeout at https://cdn.test/session?access_token=private-value')
         self.assertIn('source timeout', value)
@@ -909,6 +927,137 @@ class MediaTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(2)
+
+    def test_extensionless_signed_hls_is_mime_sniffed_and_preserves_child_signature(self):
+        received = []
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                received.append(self.path)
+                if self.path == '/manifest?access_token=fixture':
+                    body = b'#EXTM3U\n#EXTINF:6,\nsegments/one.ts\n#EXT-X-ENDLIST\n'
+                    content_type = 'application/vnd.apple.mpegurl'
+                elif self.path == '/segments/one.ts?access_token=fixture':
+                    body = b'signed-segment'
+                    content_type = 'video/mp2t'
+                else:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type', content_type)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        upstream_thread.start()
+        source_url = f'http://127.0.0.1:{upstream.server_port}/manifest?access_token=fixture'
+        self.engine.spider.playerContent = lambda *_: {'parse': 0, 'url': source_url}
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        service_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        service_thread.start()
+        def request(path):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=4)
+            try:
+                client.request('GET', path)
+                response = client.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally:
+                client.close()
+        try:
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=4)
+            try:
+                body = json.dumps({'id': 'episode-1'}).encode()
+                client.request('POST', '/api/v1/play', body, {'Content-Type': 'application/json'})
+                response = client.getresponse()
+                payload = json.loads(response.read())['data']
+            finally:
+                client.close()
+            self.assertEqual(payload['originalURL'], source_url)
+            self.assertIn('/media/', payload['url'])
+            status, _, playlist = request(urllib.parse.urlsplit(payload['url']).path)
+            self.assertEqual(status, 200)
+            segment = next(line for line in playlist.decode().splitlines()
+                           if line and not line.startswith('#'))
+            status, _, data = request(urllib.parse.urlsplit(segment).path)
+            self.assertEqual((status, data), (200, b'signed-segment'))
+            self.assertEqual(received, ['/manifest?access_token=fixture',
+                                        '/segments/one.ts?access_token=fixture'])
+        finally:
+            server.relay.close()
+            server.shutdown()
+            server.server_close()
+            service_thread.join(2)
+            upstream.shutdown()
+            upstream.server_close()
+            upstream_thread.join(2)
+
+    def test_quality_specific_headers_reach_hls_alternate_and_its_segments(self):
+        received = []
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                received.append((self.path, dict(self.headers)))
+                if self.headers.get('X-Shared') != 'source' or self.headers.get('X-Quality') != 'high':
+                    self.send_error(403)
+                    return
+                if self.path == '/alternate.m3u8':
+                    body = b'#EXTM3U\n#EXTINF:6,\nsegment.ts\n#EXT-X-ENDLIST\n'
+                    content_type = 'application/vnd.apple.mpegurl'
+                elif self.path == '/segment.ts':
+                    body = b'fixture-segment'
+                    content_type = 'video/mp2t'
+                else:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type', content_type)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        upstream_thread.start()
+        base = f'http://127.0.0.1:{upstream.server_port}'
+        self.engine.spider.playerContent = lambda *_: {
+            'url': base + '/primary.mp4', 'headers': {'X-Shared': 'source'},
+            'alternates': [{'name': '高清', 'url': base + '/alternate.m3u8',
+                            'headers': {'X-Quality': 'high'}}]}
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        service_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        service_thread.start()
+        def request(method, path, data=None):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=4)
+            try:
+                body = json.dumps(data).encode() if data is not None else None
+                client.request(method, path, body,
+                               {'Content-Type': 'application/json'} if body is not None else {})
+                response = client.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally:
+                client.close()
+        try:
+            status, _, body = request('POST', '/api/v1/play', {'id': 'episode-1'})
+            self.assertEqual(status, 200)
+            result = json.loads(body)['data']
+            alternate = result['alternates'][0]
+            self.assertEqual(alternate['headers']['X-Quality'], 'high')
+            status, _, playlist = request('GET', urllib.parse.urlsplit(alternate['url']).path)
+            self.assertEqual(status, 200)
+            segment = next(line for line in playlist.decode().splitlines()
+                           if line and not line.startswith('#'))
+            status, _, segment_body = request('GET', urllib.parse.urlsplit(segment).path)
+            self.assertEqual((status, segment_body), (200, b'fixture-segment'))
+            self.assertEqual([headers['X-Quality'] for _, headers in received], ['high', 'high'])
+            self.assertEqual([headers['X-Shared'] for _, headers in received], ['source', 'source'])
+        finally:
+            server.relay.close()
+            server.shutdown()
+            server.server_close()
+            service_thread.join(2)
+            upstream.shutdown()
+            upstream.server_close()
+            upstream_thread.join(2)
 
 
 if __name__ == '__main__':

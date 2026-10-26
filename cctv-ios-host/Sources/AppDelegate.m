@@ -15,7 +15,7 @@
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     self.window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
-    self.window.backgroundColor=HostBackground();
+    self.window.backgroundColor=UIColor.clearColor;
     HostInstallGlassBackdrop(self.window);
     RootViewController *vc = [RootViewController new];
     UINavigationController *nav = [[HostNavigationController alloc] initWithRootViewController:vc];

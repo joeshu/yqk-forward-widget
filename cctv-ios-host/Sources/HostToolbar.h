@@ -20,7 +20,7 @@ static inline UIBarButtonItem *HostToolbar(NSArray<NSDictionary *> *actions) {
             [stack addArrangedSubview:custom];
             continue;
         }
-        UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem];[b setImage:[UIImage systemImageNamed:a[@"icon"]] forState:UIControlStateNormal];b.tintColor=HostText();b.accessibilityLabel=a[@"title"];b.accessibilityIdentifier=a[@"identifier"]?:a[@"title"];b.frame=CGRectMake(0,0,44,44);b.layer.cornerRadius=16;b.layer.cornerCurve=kCACornerCurveContinuous;b.imageView.contentMode=UIViewContentModeScaleAspectFit;
+        UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem];HostInstallPressFeedback(b);[b setImage:[UIImage systemImageNamed:a[@"icon"]] forState:UIControlStateNormal];b.tintColor=HostText();b.accessibilityLabel=a[@"title"];b.accessibilityIdentifier=a[@"identifier"]?:a[@"title"];b.frame=CGRectMake(0,0,44,44);b.layer.cornerRadius=16;b.layer.cornerCurve=kCACornerCurveContinuous;b.imageView.contentMode=UIViewContentModeScaleAspectFit;
         if(a[@"menu"]){b.menu=a[@"menu"];b.showsMenuAsPrimaryAction=YES;}else if(a[@"action"])[b addAction:a[@"action"] forControlEvents:UIControlEventTouchUpInside];
         [b.widthAnchor constraintEqualToConstant:44].active=YES;[b.heightAnchor constraintEqualToConstant:44].active=YES;[stack addArrangedSubview:b];
     }

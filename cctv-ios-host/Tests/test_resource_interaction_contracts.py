@@ -15,6 +15,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         cls.playback = (ROOT / 'Sources/MediaPlaybackViewController.m').read_text()
         cls.episodes = (ROOT / 'Sources/MediaEpisodeSelectionViewController.m').read_text()
         cls.resource_detail = (ROOT / 'Sources/PluginResourceDetailViewController.m').read_text()
+        cls.service_store = (ROOT / 'Sources/ServiceStore.m').read_text()
 
     def test_resource_filters_and_service_detail_use_distinct_controls(self):
         for kind in ('all', 'vod', 'live', 'catalog', 'script', 'attention'):
@@ -26,6 +27,85 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('onToggleProfile(p[@"source"], sender.on)', self.catalog)
         self.assertIn('onToggle=^', self.root)
         self.assertIn('isRunningServiceIdentifier', self.root)
+
+    def test_resource_single_taps_show_details_or_choices_instead_of_implicitly_switching_pages(self):
+        selection = self.catalog[self.catalog.index('- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:'):]
+        self.assertIn('self.onOpenResource(source)', selection)
+        self.assertNotIn('self.onUseResource(source', selection)
+        self.assertIn('打开频道', selection)
+        self.assertIn('编辑订阅与节目单', selection)
+        self.assertIn('添加直播频道', self.catalog)
+        self.assertIn('进入影视', self.catalog)
+
+    def test_python_http_playlist_addresses_are_displayed_and_auto_subscribed_on_start(self):
+        start = self.root[self.root.index('- (BOOL)startService:'):
+                          self.root.index('- (void)toggleService:', self.root.index('- (BOOL)startService:'))]
+        self.assertIn('[ServiceStore subscriptionURLForService:service]', start)
+        self.assertIn('服务订阅地址：%@', start)
+        self.assertIn('节目单地址：', start)
+        self.assertIn('[self.subscriptionURLs addObject:playlistURL]', start)
+        self.assertIn('@"managedServiceID":serviceID', start)
+        self.assertIn('if(health)c.path=@"/health"', self.root)
+        self.assertIn('playlistPathForService:service', self.root)
+        self.assertIn('节目单地址', (ROOT / 'Sources/ServicesViewController.m').read_text())
+        self.assertIn('服务订阅地址', self.resource_detail)
+        self.assertIn('节目单地址', self.resource_detail)
+        self.assertIn('节目单地址：%@', self.root)
+
+    def test_playing_a_stopped_managed_channel_starts_its_own_service_then_checks_readiness(self):
+        start = self.root[self.root.index('- (void)startRemoteChannel:'):
+                          self.root.index('- (void)failRemoteReadiness:', self.root.index('- (void)startRemoteChannel:'))]
+        self.assertIn('[self changeService:service enabled:YES completion:', start)
+        self.assertIn('continueRemotePlaybackForURL:u service:service generation:generation', start)
+        self.assertIn('generation!=owner.playbackGeneration', start)
+        self.assertIn('local_service_start_for_playback_requested', start)
+        self.assertIn('正在启动本机服务', start)
+        self.assertNotIn('请先在服务页启动此自定义 Python 服务', start)
+
+    def test_local_channel_service_resolution_uses_subscription_owner_and_rejects_ambiguous_ports(self):
+        lookup_start = self.root.index('- (NSDictionary *)localServiceForURL:')
+        lookup_end = self.root.index('- (NSArray<NSString *> *)managedSubscriptionSourcesForService:', lookup_start)
+        lookup = self.root[lookup_start:lookup_end]
+        self.assertIn('managedServiceID', lookup)
+        self.assertIn('matches.count==1', lookup)
+        self.assertIn('if(running)return nil', lookup)
+        self.assertIn('localServiceForChannel:ch URL:', self.root)
+        self.assertIn('channel[@"subscriptionSources"]', lookup)
+
+    def test_service_status_and_successful_port_migration_reach_all_resource_views(self):
+        install = self.root[self.root.index('- (void)installPlaylist:'):
+                            self.root.index('- (void)applyPlaylistText:', self.root.index('- (void)installPlaylist:'))]
+        self.assertIn('managedSubscriptionSourcesForService', install)
+        self.assertIn('retiredSourceSet', install)
+        self.assertLess(install.index('snapshot.length>4*1024*1024'), install.index('[ProfileStore remove:retiredSource]'))
+        self.assertIn('migratedDisabled', install)
+        self.assertIn('replacementOrderIndex', install)
+        self.assertLess(install.index('snapshot.length>4*1024*1024'), install.index('replacementOrderIndex'))
+        self.assertIn('ProfileStoreMetadataDidChangeNotification', install)
+        services = (ROOT / 'Sources/ServicesViewController.m').read_text()
+        self.assertIn('订阅清单状态', services)
+        self.assertIn('最近成功刷新', services)
+        self.assertIn('section == 2 ? 12', services)
+        self.assertIn('channelCount', self.root)
+        self.assertIn('subscriptionStatus', self.catalog)
+        self.assertIn('openServiceEditorForService', self.root)
+        self.assertIn('editor.onApplyService=', self.root)
+
+    def test_playlist_errors_are_searchable_and_visible_in_attention_filter(self):
+        self.assertIn('profile[@"subscriptionStatus"]', self.catalog)
+        self.assertIn('[playlistStatus containsString:@"失败"]', self.catalog)
+        self.assertIn('subscriptionStatus', self.catalog)
+        self.assertIn('刷新中…', self.root)
+        self.assertIn('ProfileStoreMetadataDidChangeNotification object:sourceKey', self.root)
+
+    def test_resource_ui_keeps_full_source_query_while_logs_redact_query_values(self):
+        address = self.root[self.root.index('static NSString *CCTVServiceLogAddress'):
+                            self.root.index('static NSString *CCTVRouteGroupKey')]
+        self.assertIn('value:item.value.length?@"[已脱敏]":item.value', address)
+        self.assertIn('CCTVServiceLogAddress(sourceKey)', self.root)
+        self.assertIn('CCTVServiceLogAddress(u)', self.root)
+        self.assertIn('"value":subscription', self.resource_detail)
+        self.assertIn('p[@"subscriptionURL"]', self.catalog)
 
     def test_home_separates_source_and_platform_and_uses_bounded_recommendation_cache(self):
         self.assertIn('MediaHomeModulesSchemaKey', self.detail)
@@ -96,11 +176,63 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('个站点 · %lu 个可用', self.catalog)
 
     def test_live_resource_uses_declared_route_and_can_configure_missing_route(self):
-        self.assertIn('item[@"playlistPath"]', self.root)
-        self.assertIn('editor.service=item', self.root)
+        self.assertIn('[ServiceStore subscriptionURLForService:item]', self.root)
+        self.assertIn('[self openServiceEditorForService:item]', self.root)
+        self.assertIn('editor.onApplyService=', self.root)
         self.assertIn('self.playlistPathField', self.editor)
+        self.assertIn('[ServiceStore playlistPathForService:self.service]', self.editor)
         self.assertIn('playlistPath hasPrefix:@"/"', self.editor)
-        self.assertIn('@"http://127.0.0.1:%@%@",item[@"port"],playlist', self.root)
+        self.assertIn('未配置直播列表', self.root + (ROOT / 'Sources/ServicesViewController.m').read_text())
+
+    def test_playlist_route_inference_requires_route_evidence(self):
+        self.assertIn('Only infer a URL when it appears in an actual route declaration', self.service_store)
+        self.assertIn('legacyPythonHTTP', self.service_store)
+        self.assertIn('if(!nanoTVLive&&!pythonHTTP&&!legacyPythonHTTP)return nil', self.service_store)
+        self.assertIn('add_url_rule|add_get|add_route', self.service_store)
+        self.assertIn('inferredPlaylistPathInCode:entryText', (ROOT / 'Sources/MediaPackageImporter.m').read_text())
+        native=(ROOT / 'Tests/native_package_tests.m').read_text()
+        self.assertIn('@"resolvedPlaylistPath":[ServiceStore playlistPathForService:service]',native)
+        self.assertIn('--playlist-check',native)
+        fixture=(ROOT / 'Tests/test_native_package.py').read_text()
+        self.assertIn('test_python_spider_routes_are_not_misidentified_as_local_live_subscriptions',fixture)
+        self.assertIn('test_only_live_service_protocols_expose_declared_playlist_paths',fixture)
+
+    def test_resource_updates_refresh_detected_runtime_defaults_but_preserve_manual_overrides(self):
+        importer=(ROOT / 'Sources/MediaPackageImporter.m').read_text()
+        editor=(ROOT / 'Sources/ServiceEditorViewController.m').read_text()
+        self.assertIn('@"argumentsSource":@"inferred"', importer)
+        self.assertIn('importedService[@"playlistPathSource"]=@"inferred"', importer)
+        self.assertIn('runtimeChanged||inferredArguments', self.service_store)
+        self.assertIn('hasManualPlaylist', self.service_store)
+        self.assertIn('argumentsSource"] isEqual:@"inferred"', self.service_store)
+        self.assertIn('playlistPathSource"] isEqual:@"inferred"', self.service_store)
+        self.assertIn('service[@"argumentsSource"]=@"manual"', editor)
+        self.assertIn('service[@"playlistPathSource"]=@"manual"', editor)
+        self.assertIn('留空自动识别，或填 /all.m3u', editor)
+        native=(ROOT / 'Tests/native_package_tests.m').read_text()
+        self.assertIn('--update-manual', native)
+        self.assertIn('rollbackRestoredPlaylist', native)
+
+    def test_resource_detail_exposes_import_metadata_and_explains_md5_boundary(self):
+        importer=(ROOT / 'Sources/MediaPackageImporter.m').read_text()
+        self.assertIn('clean[@"pluginVersion"]=pluginVersion', importer)
+        self.assertIn('package[@"version"]', importer)
+        self.assertIn('@"title":@"资源版本"', (ROOT / 'Sources/PluginResourceDetailViewController.m').read_text())
+        self.assertIn('@"title":@"入口文件"', (ROOT / 'Sources/PluginResourceDetailViewController.m').read_text())
+        self.assertIn('完整性校验，不是数字签名', (ROOT / 'Sources/PluginResourceDetailViewController.m').read_text())
+
+    def test_import_progress_distinguishes_checksum_runtime_inspection_and_persistence(self):
+        downloader=(ROOT / 'Sources/MediaPackageDownloader.m').read_text()
+        for stage in ('MD5 校验值已读取','MD5 校验通过','未验证来源完整性',
+                      '检查资源入口、运行时与协议','识别完成 · 保存到本机资源库'):
+            self.assertIn(stage,downloader)
+        progress=downloader[downloader.index('- (void)progress:'):downloader.index('- (void)importURL:')]
+        self.assertIn('lastProgressStage',progress)
+        self.assertIn('stageChanged',progress)
+        native=(ROOT / 'Tests/native_package_tests.m').read_text()
+        self.assertIn('@"progressStages":progressStages',native)
+        remote=(ROOT / 'Tests/test_native_package.py').read_text()
+        self.assertIn("stages=result['progressStages']",remote)
 
     def test_service_editor_uses_dynamic_type_and_vertical_input_rows(self):
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
@@ -117,9 +249,12 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('v.onApplyService = self.onApplyService', services)
         self.assertIn('停止并重启', self.editor)
         self.assertIn('CCTVHostServiceConfigurationSaved', self.editor)
-        apply_handler = self.root[self.root.index('page.onApplyService='):self.root.index('page.onBrowseService=', self.root.index('page.onApplyService='))]
-        self.assertLess(apply_handler.index('enabled:NO'), apply_handler.index('[ServiceStore save:updatedService]'))
-        self.assertLess(apply_handler.index('[ServiceStore save:updatedService]'), apply_handler.index('enabled:YES'))
+        implementation = self.root.index('@implementation RootViewController')
+        apply_start = self.root.index('- (void)applyServiceConfigurationFrom:', implementation)
+        apply_handler = self.root[apply_start:self.root.index('- (void)usePluginService:', apply_start)]
+        self.assertLess(apply_handler.index('enabled:NO'), apply_handler.index('[ServiceStore save:updated]'))
+        self.assertLess(apply_handler.index('[ServiceStore save:updated]'), apply_handler.index('enabled:YES'))
+        self.assertIn('associateLegacyLoopbackSubscriptionsForService:previous', apply_handler)
         self.assertIn('def test_configured_service_port_overrides_hardcoded_primary_http_port',
                       (ROOT / 'Tests/test_service_runtime.py').read_text())
 
@@ -174,6 +309,22 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[self setRetryAvailable:NO]', self.playback)
         self.assertIn('playback page exposes the source\'s actual alternate quality choices', smoke)
         self.assertIn('quality=low', smoke)
+
+    def test_quality_specific_headers_survive_source_normalization_relay_and_selection(self):
+        runtime = (ROOT / 'Plugins/host_media_runtime.py').read_text()
+        service = (ROOT / 'Plugins/media-service.py').read_text()
+        api = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        self.assertIn("item.get('headers', item.get('header', {}))", runtime)
+        self.assertIn("alternate_headers.update(alternate.get('headers') or {})", service)
+        self.assertIn('if ((alternate_headers or is_hls_url(address) or is_extensionless_url(address))', service)
+        self.assertIn('def is_extensionless_url(url):', service)
+        self.assertIn('or is_extensionless_url(result.get(\'url\'))', service)
+        self.assertIn('MediaTVBoxPlaybackHeaders(source,choice)', api)
+        self.assertIn('MediaPlaybackHeadersFromResult(alternate)', self.playback)
+        self.assertIn('test_quality_specific_headers_reach_hls_alternate',
+                      (ROOT / 'Tests/test_media_runtime.py').read_text())
+        self.assertIn('per-quality request headers survive TVBox normalization',
+                      (ROOT / 'Tests/native_media_api_tests.m').read_text())
         fixture = (ROOT / 'Tests/UISmoke/fixture_server.py').read_text()
         self.assertIn("if \"?\" in self.path and (self.headers.get(\"Referer\")", fixture)
 
@@ -199,11 +350,13 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('timeoutIntervalForResource=7', self.resource_detail)
         self.assertIn('M3UParser parse:text baseURL:url', self.resource_detail)
 
-    def test_starting_imported_service_does_not_implicitly_subscribe_its_playlist(self):
-        start = self.root[self.root.index('NSString *playlistPath=[service[@"builtin"]'):
-                                          self.root.index('for(NSString *source in self.subscriptionURLs.allObjects)',
-                                                          self.root.index('NSString *playlistPath=[service[@"builtin"]'))]
-        self.assertIn('if([service[@"builtin"] boolValue]', start)
+    def test_starting_python_http_adds_the_configured_subscription_without_inventing_missing_routes(self):
+        start = self.root[self.root.index('- (BOOL)startService:'):
+                          self.root.index('- (void)toggleService:', self.root.index('- (BOOL)startService:'))]
+        self.assertIn('NSString *playlistURL=[ServiceStore subscriptionURLForService:service]', start)
+        self.assertIn('if(playlistURL.length)', start)
+        self.assertIn('else if([service[@"protocol"] isEqual:@"python-http"])', start)
+        self.assertIn('不会添加猜测地址', start)
         use = self.root[self.root.index('page.onUse=^'):
                         self.root.index('page.onLog=^', self.root.index('page.onUse=^'))]
         service_start = self.root.index('- (void)usePluginService:', self.root.index('@implementation RootViewController'))
@@ -328,6 +481,32 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('self.headers.get("Referer")', fixture)
         self.assertIn('等待视频帧超时', self.playback)
         self.assertNotIn('首帧渲染状态未知', self.playback)
+
+    def test_web_playback_close_keeps_native_fallback_action_available(self):
+        appeared = self.playback[self.playback.index('- (void)viewDidAppear:'):
+                                 self.playback.index('- (void)viewWillDisappear:')]
+        fallback = self.playback[self.playback.index('- (void)tryNativePlayback {'):
+                                 self.playback.index('- (void)selectLine:')]
+        webview = (ROOT / 'Sources/MediaWebViewController.m').read_text()
+        self.assertIn('网页播放已关闭 · 可尝试原生播放', appeared)
+        self.assertIn('[self setRetryAvailable:YES]', appeared)
+        self.assertNotIn('self.awaitingWebPlaybackReturn=NO', appeared)
+        self.assertIn('candidate[@"playbackMethodOverride"]=@"avplayer"', fallback)
+        self.assertIn('web.onTryNativePlayback=^{[weakSelf tryNativePlayback];}', self.playback)
+        self.assertIn('@"原生播放"', webview)
+        self.assertIn('installCookieHeader:cookie forURL:configurationURL', webview)
+        self.assertIn('httpCookieStore setCookie:item', webview)
+        self.assertIn('WKWebsiteDataStore.nonPersistentDataStore', webview)
+
+    def test_extensionless_signed_media_endpoints_use_native_playback_classification(self):
+        client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        playback = (ROOT / 'Sources/MediaPlaybackViewController.m').read_text()
+        native_tests = (ROOT / 'Tests/native_media_api_tests.m').read_text()
+        self.assertIn('MediaTVBoxQueryNameLooksSigned', client)
+        self.assertIn('@"token",@"sign",@"auth"', client)
+        self.assertIn('[compact hasSuffix:@"key"]', client)
+        self.assertIn('camel-case auth and session tokens uses native playback', native_tests)
+        self.assertIn('playback_has_signed_parameter', playback)
 
     def test_tvbox_playback_keeps_native_api_client_across_episode_switches_and_auto_next(self):
         self.assertIn('MediaPlaybackClientForSource', self.playback)

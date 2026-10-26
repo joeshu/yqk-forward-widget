@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+FOUNDATION_EXPORT NSNotificationName const ProfileStoreMetadataDidChangeNotification;
 @interface ProfileStore : NSObject
 + (BOOL)isSource:(id)source;
 + (BOOL)isHTTP:(id)source;

@@ -78,12 +78,20 @@ static NSArray *MediaTVBoxArray(id value) {return [value isKindOfClass:NSArray.c
 static NSString *MediaTVBoxFirstString(NSDictionary *row,NSArray<NSString *> *keys) {
     for(NSString *key in keys){NSString *value=MediaTVBoxString(row[key]);if(value.length)return value;}return @"";
 }
+static BOOL MediaTVBoxQueryNameLooksSigned(NSString *rawName) {
+    NSString *name=rawName.lowercaseString?:@"";
+    NSString *compact=[[name stringByReplacingOccurrencesOfString:@"_" withString:@""] stringByReplacingOccurrencesOfString:@"-" withString:@""];
+    if([name hasPrefix:@"x-amz-"]||[name hasPrefix:@"x-oss-"])return YES;
+    for(NSString *marker in @[@"token",@"sign",@"auth",@"ticket",@"secret",@"credential",@"policy",@"expires",@"expire",@"deadline",@"hdnea"])
+        if([compact containsString:marker])return YES;
+    return [compact hasSuffix:@"key"]||[@[@"key",@"keyid",@"apikey",@"hash",@"st",@"e"] containsObject:compact];
+}
 static BOOL MediaTVBoxURLLooksLikeWebPage(NSString *value) {
     NSURLComponents *parts=[NSURLComponents componentsWithString:value?:@""];NSString *extension=parts.path.pathExtension.lowercaseString?:@"";
-    static NSSet<NSString *> *webExtensions,*directExtensions,*signatureNames;static dispatch_once_t once;dispatch_once(&once,^{webExtensions=[NSSet setWithArray:@[@"html",@"htm",@"xhtml",@"php",@"asp",@"aspx",@"jsp",@"shtml"]];directExtensions=[NSSet setWithArray:@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"ts"]];signatureNames=[NSSet setWithArray:@[@"token",@"access_token",@"auth",@"auth_key",@"sign",@"signature",@"expires",@"expire",@"wssecret",@"wstime",@"ws_time",@"ticket",@"key",@"policy",@"credential",@"hdnea",@"deadline",@"hash",@"st",@"e"]];});
+    static NSSet<NSString *> *webExtensions,*directExtensions;static dispatch_once_t once;dispatch_once(&once,^{webExtensions=[NSSet setWithArray:@[@"html",@"htm",@"xhtml",@"php",@"asp",@"aspx",@"jsp",@"shtml"]];directExtensions=[NSSet setWithArray:@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"ts"]];});
     if([webExtensions containsObject:extension])return YES;
     if([directExtensions containsObject:extension])return NO;
-    for(NSURLQueryItem *item in parts.queryItems?:@[]){NSString *name=item.name.lowercaseString?:@"";if([signatureNames containsObject:name]||[name hasPrefix:@"x-amz-"]||[name hasPrefix:@"x-oss-"])return NO;}
+    for(NSURLQueryItem *item in parts.queryItems?:@[])if(MediaTVBoxQueryNameLooksSigned(item.name))return NO;
     // Retain the legacy web handoff for unknown URLs without signed-media hints.
     return YES;
 }
@@ -189,7 +197,11 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
         id rawURL=root[@"url"];NSString *prefix=MediaTVBoxFirstString(root,@[@"playUrl"]);
         NSMutableArray<NSDictionary *> *alternates=[NSMutableArray array];NSString *url=@"";
         if([rawURL isKindOfClass:NSString.class]){url=[prefix stringByAppendingString:[rawURL stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]];}
-        else if([rawURL isKindOfClass:NSArray.class]){NSArray *values=rawURL;NSUInteger count=MIN(values.count-(values.count%2),32);for(NSUInteger index=0;index<count;index+=2){NSString *name=MediaTVBoxString(values[index]),*address=MediaTVBoxString(values[index+1]);address=[address stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!address.length)continue;[alternates addObject:@{@"name":name.length?name:[NSString stringWithFormat:@"清晰度 %lu",(unsigned long)(index/2+1)],@"url":[prefix stringByAppendingString:address]}];}url=alternates.firstObject[@"url"]?:@"";}
+        else if([rawURL isKindOfClass:NSArray.class]){NSArray *values=rawURL;
+            if(values.count&&[values.firstObject isKindOfClass:NSDictionary.class]){
+                NSUInteger count=MIN(values.count,32);for(NSUInteger index=0;index<count;index++){NSDictionary *choice=MediaTVBoxObject(values[index]);NSString *name=MediaTVBoxFirstString(choice,@[@"name",@"n",@"quality"]),*address=MediaTVBoxFirstString(choice,@[@"url",@"value",@"v"]);address=[address stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!address.length)continue;NSMutableDictionary *alternate=[@{@"name":name.length?name:[NSString stringWithFormat:@"清晰度 %lu",(unsigned long)index+1],@"url":[prefix stringByAppendingString:address]} mutableCopy];NSDictionary *choiceHeaders=MediaTVBoxPlaybackHeaders(source,choice);if(choiceHeaders.count)alternate[@"headers"]=choiceHeaders;[alternates addObject:alternate];}
+            }else{NSUInteger count=MIN(values.count-(values.count%2),32);for(NSUInteger index=0;index<count;index+=2){NSString *name=MediaTVBoxString(values[index]),*address=MediaTVBoxString(values[index+1]);address=[address stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!address.length)continue;[alternates addObject:@{@"name":name.length?name:[NSString stringWithFormat:@"清晰度 %lu",(unsigned long)(index/2+1)],@"url":[prefix stringByAppendingString:address]}];}}
+            url=alternates.firstObject[@"url"]?:@"";}
         if(!url.length){NSString *message=MediaTVBoxFirstString(root,@[@"msg",@"message",@"errMsg"]);return @{ @"error":message.length?message:@"TVBox API 没有返回播放地址" };}
         NSInteger parse=[root[@"parse"] respondsToSelector:@selector(integerValue)]?[root[@"parse"] integerValue]:0,jx=[root[@"jx"] respondsToSelector:@selector(integerValue)]?[root[@"jx"] integerValue]:0;
         NSMutableDictionary *result=[@{@"url":url,@"parse":@(parse),@"jx":@(jx),@"playUrl":prefix,@"requiresWebPlayback":@((parse>0||jx>0||prefix.length>0)&&![@[@"m3u8",@"mp4",@"m4v",@"mov",@"m4a",@"mp3"] containsObject:[NSURL URLWithString:url].pathExtension.lowercaseString?:@""]),@"headers":headers} mutableCopy];if(alternates.count>1)result[@"alternates"]=alternates;

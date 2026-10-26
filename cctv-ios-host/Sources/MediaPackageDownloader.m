@@ -27,6 +27,7 @@ static NSString *PackageMD5(NSData *data) {
 @property(nonatomic) NSInteger redirects;
 @property(nonatomic) int64_t expectedBytes;
 @property(nonatomic) NSTimeInterval lastProgressTime;
+@property(nonatomic,copy) NSString *lastProgressStage;
 @end
 @implementation MediaPackageDownloader
 - (NSError *)error:(NSString *)message {return [NSError errorWithDomain:@"CCTVHostImport" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];}
@@ -34,7 +35,7 @@ static NSString *PackageMD5(NSData *data) {
 - (NSUInteger)limit {return (self.phase==PackageChecksum||self.phase==PackageConfigChecksum)?4096:(self.phase==PackageConfig?65536:([self.targetURL.pathExtension.lowercaseString isEqual:@"zip"]?24:8)*1024*1024);}
 - (NSString *)stage {return @[@"读取资源校验值",@"下载主脚本 / 资源包",@"检查配套配置校验值",@"下载配套配置"][(NSUInteger)self.phase];}
 - (void)progress:(NSString *)stage {
-    NSTimeInterval now=NSDate.timeIntervalSinceReferenceDate;if(self.lastProgressTime>0&&now-self.lastProgressTime<0.12)return;self.lastProgressTime=now;
+    NSTimeInterval now=NSDate.timeIntervalSinceReferenceDate;BOOL stageChanged=![self.lastProgressStage isEqual:stage];if(!stageChanged&&self.lastProgressTime>0&&now-self.lastProgressTime<0.12)return;self.lastProgressTime=now;self.lastProgressStage=[stage copy];
     void(^callback)(NSString *,int64_t,int64_t)=[self.onProgress copy];int64_t received=self.body.length,expected=self.expectedBytes;
     if(callback)dispatch_async(dispatch_get_main_queue(),^{callback(stage,received,expected);});
 }
@@ -51,7 +52,7 @@ static NSString *PackageMD5(NSData *data) {
     self.session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:queue];[self begin:url];
 }
 - (void)begin:(NSURL *)url {
-    if(self.finished)return;self.body=[NSMutableData data];self.responseStatus=0;self.redirects=0;self.expectedBytes=-1;self.lastProgressTime=0;
+    if(self.finished)return;self.body=[NSMutableData data];self.responseStatus=0;self.redirects=0;self.expectedBytes=-1;self.lastProgressTime=0;self.lastProgressStage=nil;
     self.task=[self.session dataTaskWithURL:url];[self progress:self.stage];[self.task resume];
 }
 - (NSURL *)configURL:(BOOL)checksum {
@@ -94,18 +95,20 @@ static NSString *PackageMD5(NSData *data) {
     if(self.phase==PackageChecksum||self.phase==PackageConfigChecksum){
         BOOL config=self.phase==PackageConfigChecksum;NSString *hash=self.responseStatus==404?nil:[self readChecksum];
         if(self.responseStatus!=404&&!hash){[self finish:nil error:[self error:config?@"配套配置 MD5 格式无效":@"资源 MD5 校验文件格式无效"]];return;}
-        if(config){self.configChecksum=hash;self.phase=PackageConfig;[self begin:[self configURL:NO]];}
-        else{self.checksum=hash;if(![@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"MD5 地址最终没有指向受支持的 JS、Python 或 ZIP 文件"]];return;}self.phase=PackageScript;[self begin:self.targetURL];}return;
+        if(config){self.configChecksum=hash;if(hash)[self progress:@"配套配置 MD5 校验值已读取"];self.phase=PackageConfig;[self begin:[self configURL:NO]];}
+        else{self.checksum=hash;if(![@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"MD5 地址最终没有指向受支持的 JS、Python 或 ZIP 文件"]];return;}if(hash)[self progress:@"资源 MD5 校验值已读取"];self.phase=PackageScript;[self begin:self.targetURL];}return;
     }
     if(self.phase==PackageConfig){
         if(self.responseStatus==404){if(self.configChecksum){[self finish:nil error:[self error:@"配置校验文件存在，但对应配置文件缺失，未安装"]];return;}self.configurationState=@"missing_using_defaults";[self install:@{}];return;}
         if(!self.body.length||![[NSString alloc] initWithData:self.body encoding:NSUTF8StringEncoding]){[self finish:nil error:[self error:@"配套配置不是有效 UTF-8 文件"]];return;}
         if(self.configChecksum&&![PackageMD5(self.body) isEqual:self.configChecksum]){[self finish:nil error:[self error:@"配套配置与 MD5 校验值不一致，未安装"]];return;}
+        [self progress:self.configChecksum?@"配套配置 MD5 校验通过":@"配套配置没有 MD5 · 未验证来源完整性"];
         self.configContentChecksum=PackageMD5(self.body);
         self.configurationState=self.configChecksum?@"verified":@"downloaded_without_checksum";
         [self install:@{@"index.config.js":[self.body copy]}];return;
     }
     if(self.checksum&&![PackageMD5(self.body) isEqual:self.checksum]){[self finish:nil error:[self error:@"资源与 MD5 校验值不一致，未安装"]];return;}
+    [self progress:self.checksum?@"主资源 MD5 校验通过":@"来源没有 MD5 · 未验证来源完整性"];
     self.scriptData=[self.body copy];
     NSString *text=[@[@"js",@"mjs",@"cjs"] containsObject:self.targetURL.pathExtension.lowercaseString]?[[NSString alloc] initWithData:self.scriptData encoding:NSUTF8StringEncoding]:nil;
     BOOL catpaw=[text containsString:@"/config"]&&[text containsString:@"/spider"]&&([text containsString:@"catServerFactory"]||[text containsString:@"createService"]||[text containsString:@"serverFactory"]);
@@ -113,13 +116,13 @@ static NSString *PackageMD5(NSData *data) {
     [self install:@{}];
 }
 - (void)install:(NSDictionary<NSString *,NSData *> *)companions {
-    if(self.finished)return;self.lastProgressTime=0;[self progress:@"识别并登记资源"];
+    if(self.finished)return;self.lastProgressTime=0;[self progress:@"检查资源入口、运行时与协议"];
     NSError *error=nil;NSString *directory=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];NSFileManager *fm=NSFileManager.defaultManager;
     [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&error];NSString *path=[directory stringByAppendingPathComponent:self.targetURL.lastPathComponent];NSDictionary *service=nil;
     if(!error&&[self.scriptData writeToFile:path options:NSDataWritingAtomic error:&error])service=[MediaPackageImporter importFile:[NSURL fileURLWithPath:path] companionFiles:companions error:&error];
     [fm removeItemAtPath:directory error:NULL];
     if(self.finished){if(service)[ServiceStore remove:service[@"id"]];return;}
-    if(service){NSMutableDictionary *saved=[service mutableCopy];saved[@"url"]=self.originalURL.absoluteString;
+    if(service){[self progress:@"识别完成 · 保存到本机资源库"];NSMutableDictionary *saved=[service mutableCopy];saved[@"url"]=self.originalURL.absoluteString;
         if([@[@"index",@"main"] containsObject:[service[@"name"] lowercaseString]])saved[@"name"]=[NSString stringWithFormat:@"%@ · %@",self.originalURL.host,[service[@"protocol"] isEqual:@"catpaw-http"]?@"猫源":service[@"name"]];saved[@"downloadChecksum"]=self.checksum?:@"";saved[@"configDownloadChecksum"]=self.configChecksum?:@"";saved[@"configContentChecksum"]=self.configContentChecksum?:@"";saved[@"configurationState"]=self.configurationState;service=saved;}
     [self finish:service error:error];
 }

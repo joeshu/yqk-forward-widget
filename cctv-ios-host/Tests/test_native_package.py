@@ -73,6 +73,17 @@ class NativePackageTests(unittest.TestCase):
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['engine'], result['manifest']['moduleType']), ('node', 'esm'))
 
+    def test_package_and_manifest_versions_are_persisted_as_resource_metadata(self):
+        package=self.inspect(self.archive({'package.json': json.dumps({'name':'fixture','version':'2.4.1'}),
+                                           'index.js':'module.exports={search(){return {list:[]}}}'}))
+        self.assertTrue(package['ok'],package)
+        self.assertEqual(package['manifest']['pluginVersion'],'2.4.1')
+        declared=self.inspect(self.archive({'package.json': json.dumps({'version':'2.4.1'}),
+                                            'cctvhost.json':json.dumps({'entry':'index.js','version':'3.0.0'}),
+                                            'index.js':'module.exports={search(){return {list:[]}}}'}))
+        self.assertTrue(declared['ok'],declared)
+        self.assertEqual(declared['manifest']['pluginVersion'],'3.0.0')
+
     def test_catpaw_fastify_spider_is_identified_as_native_esm_route_plugin(self):
         source = '''export default function createSpider(name, config) {
           return {meta:{key:'fixture',name:'Fixture',type:3},api:async fastify=>{
@@ -190,6 +201,7 @@ route='/all.m3u';body='#EXTM3U'
         self.assertTrue(result['ok'],result)
         self.assertEqual(result['manifest']['entry'],'ysp-live-v9.5.py')
         self.assertEqual(result['playlistPath'],'/all.m3u')
+        self.assertEqual(result['resolvedPlaylistPath'],'/all.m3u')
         self.assertEqual(result['arguments'],'{port}|--bind|{bind}|--data-dir|{dataDir}|--cache-mb|32|--no-engine|--no-4k')
         self.assertIn('1080p',result['manifest']['compatibilityNote'])
 
@@ -217,6 +229,22 @@ route='/all.m3u';body='#EXTM3U'
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['engine'], result['protocol']), ('python', 'python-spider'))
         self.assertFalse(marker.exists())
+
+    def test_python_spider_routes_are_not_misidentified_as_local_live_subscriptions(self):
+        file=self.folder/'spider_with_web_route.py'
+        file.write_text("from flask import Flask\napp=Flask(__name__)\n@app.get('/all.m3u')\ndef playlist(): return '#EXTM3U'\nclass Spider: pass\n")
+        result=self.inspect(file)
+        self.assertTrue(result['ok'],result)
+        self.assertEqual(result['protocol'],'python-spider')
+        self.assertEqual(result['resolvedPlaylistPath'],'')
+
+    def test_only_live_service_protocols_expose_declared_playlist_paths(self):
+        expected={'python-http':'/all.m3u','nanotv-service-v2':'/all.m3u',
+                  'python-spider':'','catpaw-http':''}
+        for protocol,path in expected.items():
+            result=subprocess.run([str(self.executable),'--playlist-check',protocol],capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(json.loads(result.stdout)['playlistPath'],path,protocol)
 
     def test_widget_metadata_loader_is_recognized_as_widget_extractor(self):
         file = self.folder / 'cheyong-rex.js'
@@ -302,6 +330,11 @@ route = '/all.m3u'
             result=self.inspect(origin+'/redirect.md5')
             self.assertTrue(result['ok'],result);self.assertEqual(result['protocol'],'catpaw-http');self.assertEqual(result['engine'],'node')
             self.assertEqual(result['configurationState'],'verified');self.assertTrue(result['configurationExists'])
+            stages=result['progressStages']
+            for stage in ('资源 MD5 校验值已读取','主资源 MD5 校验通过','配套配置 MD5 校验值已读取','配套配置 MD5 校验通过','检查资源入口、运行时与协议','识别完成 · 保存到本机资源库'):
+                self.assertIn(stage,stages)
+            self.assertLess(stages.index('主资源 MD5 校验通过'),stages.index('配套配置 MD5 校验值已读取'))
+            self.assertLess(stages.index('配套配置 MD5 校验通过'),stages.index('识别完成 · 保存到本机资源库'))
             for name in ('index.js','index.config.js','index.config.js.md5'):self.assertIn('/cat/'+name+'?variant=one',observed)
             result=self.inspect(origin+'/missing/index.js.md5');self.assertTrue(result['ok'],result);self.assertEqual(result['configurationState'],'missing_using_defaults')
             self.assertFalse(self.inspect(origin+'/bad/index.js.md5')['ok'])
@@ -316,7 +349,16 @@ route = '/all.m3u'
         result=subprocess.run([str(self.executable),'--update',str(old),str(new)],capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stderr)
         value=json.loads(result.stdout)
-        for key in ('ok','sameID','portKept','optionsKept','accountKept','rollbackRestoredCode'):self.assertTrue(value[key],value)
+        for key in ('ok','sameID','portKept','optionsKept','accountKept','argumentsUpdatedCorrectly','playlistUpdatedCorrectly','rollbackRestoredCode','rollbackRestoredArguments','rollbackRestoredPlaylist'):self.assertTrue(value[key],value)
+
+    def test_imported_update_keeps_manual_arguments_and_playlist_override(self):
+        old=self.folder/'old-manual.cjs';new=self.folder/'new-manual.cjs'
+        old.write_text('module.exports={search(){return {list:[],version:1}}}')
+        new.write_text('module.exports={search(){return {list:[],version:2}}}')
+        result=subprocess.run([str(self.executable),'--update-manual',str(old),str(new)],capture_output=True,text=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stderr)
+        value=json.loads(result.stdout)
+        for key in ('ok','sameID','portKept','optionsKept','accountKept','argumentsUpdatedCorrectly','playlistUpdatedCorrectly','rollbackRestoredCode','rollbackRestoredArguments','rollbackRestoredPlaylist'):self.assertTrue(value[key],value)
 
     def test_md5_pair_downloads_original_code_and_rejects_mismatch_and_limits(self):
         source = b'module.exports={search(){return {list:[]}}}'
@@ -337,6 +379,11 @@ route = '/all.m3u'
             result = self.inspect(base + '/index.cjs.md5')
             self.assertTrue(result['ok'], result)
             self.assertEqual(result['manifest']['moduleType'], 'commonjs')
+            stages=result['progressStages']
+            for stage in ('读取资源校验值','资源 MD5 校验值已读取','主资源 MD5 校验通过','检查资源入口、运行时与协议','识别完成 · 保存到本机资源库'):
+                self.assertIn(stage,stages)
+            self.assertLess(stages.index('资源 MD5 校验值已读取'),stages.index('主资源 MD5 校验通过'))
+            self.assertLess(stages.index('主资源 MD5 校验通过'),stages.index('检查资源入口、运行时与协议'))
             self.assertFalse(self.inspect(base + '/mismatch.js.md5')['ok'])
             self.assertFalse(self.inspect(base + '/oversize.js')['ok'])
             self.assertFalse(self.inspect(base + '/unsupported.txt')['ok'])

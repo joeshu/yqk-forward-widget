@@ -103,11 +103,12 @@ static BOOL CCTVBoolPreference(NSString *key, BOOL fallback) {
     id value=[[NSUserDefaults standardUserDefaults] objectForKey:key];
     return value ? [value boolValue] : fallback;
 }
-static BOOL CCTVValidLocalPlaylistPath(id value) {
-    if (![value isKindOfClass:NSString.class]) return NO;
-    NSString *path=[value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if(![path isEqualToString:value]||!path.length||path.length>=128||![path hasPrefix:@"/"]||[path hasPrefix:@"//"]||[path containsString:@".."]||[path containsString:@"?"]||[path containsString:@"#"]||[path containsString:@"\\"]||[path containsString:@":"]||[path rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound)return NO;
-    return YES;
+static NSString *CCTVServiceLogAddress(NSString *raw) {
+    NSURLComponents *components=[NSURLComponents componentsWithString:raw?:@""];
+    if(!components.URL)return [HostLogRedactor redactText:raw?:@""];
+    NSArray<NSURLQueryItem *> *items=components.queryItems;
+    if(items.count){NSMutableArray *safe=[NSMutableArray arrayWithCapacity:items.count];for(NSURLQueryItem *item in items)[safe addObject:[NSURLQueryItem queryItemWithName:item.name value:item.value.length?@"[已脱敏]":item.value]];components.queryItems=safe;}
+    return components.URL.absoluteString?:[HostLogRedactor redactText:raw?:@""];
 }
 static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *rawEPGID=[channel[@"epgID"] isKindOfClass:NSString.class]?channel[@"epgID"]:@"";
@@ -318,6 +319,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)acceptImportedMedia:(NSDictionary *)service error:(NSError *)error autoBrowse:(BOOL)autoBrowse;
 - (void)saveImportedMedia:(NSDictionary *)service autoBrowse:(BOOL)autoBrowse;
 - (void)usePluginService:(NSDictionary *)service kind:(NSString *)kind;
+- (void)continueRemotePlaybackForURL:(NSString *)url service:(NSDictionary *)service generation:(NSUInteger)generation;
+- (NSDictionary *)localServiceForChannel:(NSDictionary *)channel URL:(NSURL *)url;
+- (NSArray<NSString *> *)managedSubscriptionSourcesForService:(NSDictionary *)service excludingURL:(NSString *)url;
+- (void)openServiceEditorForService:(NSDictionary *)service;
+- (void)applyServiceConfigurationFrom:(NSDictionary *)previous to:(NSDictionary *)updated completion:(void (^)(NSError * _Nullable error))completion;
 - (void)saveImportedMedia:(NSDictionary *)service;
 - (void)shareDiagnosticLogAtURL:(NSURL *)source;
 @end
@@ -754,7 +760,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSArray *titles=@[@"CCTV",@"频道",@"首页",@"资源",@"设置"];
     NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"house.fill",@"externaldrive.fill",@"gearshape"];
     for (NSInteger i=0;i<titles.count;i++) {
-        UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;
+        UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;HostInstallPressFeedback(b);
         UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.baseForegroundColor=(i==0?HostAccent():HostMutedText()); cfg.background.backgroundColor=i==0?[HostAccent() colorWithAlphaComponent:0.20]:UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];return result;}; b.configuration=cfg;
         b.accessibilityLabel=titles[i]; b.accessibilityIdentifier=[NSString stringWithFormat:@"tab.%@",titles[i]];
         b.accessibilityHint=[NSString stringWithFormat:@"切换到%@页面",titles[i]];
@@ -777,7 +783,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)selectBottomTab:(UIButton *)sender {
-    HostAnimateSelection(sender);
     self.catalogSearchGeneration++;
     [self stopPreview];
     if(self.activeTab<2)self.catalogStates[@(self.activeTab)]=@{@"query":self.query?:@"",@"group":@(self.groupControl.selectedSegmentIndex),@"gridY":@(self.channelGrid.contentOffset.y),@"listY":@(self.table.contentOffset.y)};
@@ -873,7 +878,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         page.startupErrorForService=^NSError *(NSDictionary *service){return [PyHost startupErrorForServiceIdentifier:service[@"id"]];};
         page.onResources=^{RootViewController *owner=weakSelf;if(owner)[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[3]];};
         page.onPlay=^(NSDictionary *result,NSDictionary *context){RootViewController *owner=weakSelf;if(!owner)return;MediaPlaybackViewController *player=[MediaPlaybackViewController new];player.result=result;player.context=context;[owner.navigationController pushViewController:player animated:YES];};
-        page.onSubscribeLive=^(NSDictionary *service){RootViewController *owner=weakSelf;if(!owner)return;NSString *url=nil,*path=service[@"playlistPath"];if(CCTVValidLocalPlaylistPath(path))url=[NSString stringWithFormat:@"http://127.0.0.1:%@%@",service[@"port"],path];if(!url.length)for(NSString *candidate in owner.subscriptionURLs){NSDictionary *provider=[owner localServiceForURL:[NSURL URLWithString:candidate]];if([provider[@"id"] isEqual:service[@"id"]]){url=candidate;break;}}if(!url.length){dispatch_block_t edit=^{ServiceEditorViewController *editor=[ServiceEditorViewController new];editor.service=service;[owner.navigationController pushViewController:editor animated:YES];};if([PyHost isManagedServiceIdentifier:service[@"id"]]){[owner changeService:service enabled:NO completion:^(NSError *error){if(error){[owner showServiceError:error.localizedDescription];return;}edit();}];}else edit();return;}if(![owner.subscriptionURLs containsObject:url]){[owner.subscriptionURLs addObject:url];[NSUserDefaults.standardUserDefaults setObject:owner.subscriptionURLs.allObjects forKey:@"subscriptions"];}[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[1]];owner.activeSource=url;owner.title=@"订阅直播";[owner fetchSubscription:url silent:NO];};
+        page.onSubscribeLive=^(NSDictionary *service){RootViewController *owner=weakSelf;if(!owner)return;NSString *url=[ServiceStore subscriptionURLForService:service];if(!url.length)for(NSString *candidate in owner.subscriptionURLs){NSDictionary *provider=[owner localServiceForURL:[NSURL URLWithString:candidate]];if([provider[@"id"] isEqual:service[@"id"]]){url=candidate;break;}}if(!url.length){[owner openServiceEditorForService:service];return;}NSMutableDictionary *metadata=[@{@"managedServiceID":service[@"id"]?:@""} mutableCopy];if(![ProfileStore metadata:url][@"name"])[metadata addEntriesFromDictionary:@{@"name":service[@"name"]?:@"本机直播服务"}];[ProfileStore update:url values:metadata];if(![owner.subscriptionURLs containsObject:url]){[owner.subscriptionURLs addObject:url];[NSUserDefaults.standardUserDefaults setObject:owner.subscriptionURLs.allObjects forKey:@"subscriptions"];}[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[1]];owner.activeSource=url;owner.title=@"订阅直播";[owner fetchSubscription:url silent:NO];};
         self.tabPages[@2]=page;
     }
     [self showTabPage:page title:page.isHomeMode?@"":@"影视库"];
@@ -908,7 +913,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         page.onUseResource=^(NSString *source,NSString *kind){NSDictionary *service=[w resourceServiceForSource:source];if(!service)return;if([kind isEqual:@"choose"]){UIAlertController *choice=[UIAlertController alertControllerWithTitle:service[@"name"]?:@"选择资源用途" message:@"这个资源同时提供影视与直播能力。" preferredStyle:UIAlertControllerStyleActionSheet];[choice addAction:[UIAlertAction actionWithTitle:@"进入影视" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"vod"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"添加直播频道" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"live"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"资源详情与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w openPluginResource:source];}]];[choice addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];choice.popoverPresentationController.sourceView=w.view;choice.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(w.view.bounds),CGRectGetMidY(w.view.bounds),1,1);[w presentViewController:choice animated:YES completion:nil];return;}[w usePluginService:service kind:kind];};
         page.onOpenTVBoxCatalog=^(NSString *identifier){[w openTVBoxCatalog:identifier];};
         page.onSelectProfile=^(NSString *source){UIButton *b=(UIButton *)w.bottomBar.arrangedSubviews[source.length?1:0];[w selectBottomTab:b];w.activeSource=source;w.title=source.length?@"订阅直播":@"央视直播";[w applyFilter];};
-        page.onEditProfile=^(NSString *source){NSDictionary *service=[w resourceServiceForSource:source];if(service){ServiceEditorViewController *editor=[ServiceEditorViewController new];editor.service=service;[w.navigationController pushViewController:editor animated:YES];}else[w editProfile:source];};
+        page.onEditProfile=^(NSString *source){NSDictionary *service=[w resourceServiceForSource:source];if(service)[w openServiceEditorForService:service];else[w editProfile:source];};
         page.onDeleteProfile=^(NSString *source){if([source hasPrefix:@"tvbox:"]){[TVBoxCatalogStore removeCatalog:[source substringFromIndex:6]];[w refreshConfigurationPage];return;}NSDictionary *service=[w resourceServiceForSource:source];if(service){if([PyHost isManagedServiceIdentifier:service[@"id"]]){[w showServiceError:@"该资源仍有运行或待清理会话，请先停止"];return;}[ServiceStore remove:service[@"id"]];}else[w deleteSubscription:source];};
         self.tabPages[@3]=page;
     }
@@ -921,7 +926,15 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [rows addObject:@{@"name":@"央视直播 · 官方频道",@"source":@"",@"resourceKind":@"live",@"native":@YES,@"current":@(!self.activeSource.length),@"epgStatus":@"官方",@"count":@(native),@"enabled":@(CCTVBoolPreference(@"nativeChannelsEnabled",YES))}];
     NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
     for(NSString *u in [ProfileStore orderedSources:self.subscriptionURLs.allObjects]){NSDictionary *metadata=[ProfileStore metadata:u];NSMutableDictionary *row=[@{@"name":metadata[@"name"]?:[NSURL URLWithString:u].host?:@"本地播放列表",@"status":metadata[@"status"]?:@"等待刷新",@"resourceKind":@"live",@"current":@([self.activeSource isEqual:u]),@"epgStatus":(metadata[@"epgURL"]?:metadata[@"detectedEPGURL"])?@"已配置":@"自动匹配",@"source":u,@"count":counts[u]?:@0,@"enabled":@(![disabled containsObject:u])} mutableCopy];if(metadata[@"updatedAt"])row[@"updatedAt"]=metadata[@"updatedAt"];[rows addObject:row];}
-    NSString *selectedMedia=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaSource"]?:@"";for(NSDictionary *service in [ServiceStore services])if(![service[@"builtin"] boolValue]){BOOL enabled=[PyHost isRunningServiceIdentifier:service[@"id"]];NSArray *caps=[service[@"capabilities"] isKindOfClass:NSArray.class]?service[@"capabilities"]:@[];BOOL live=[service[@"playlistPath"] length]>0||[caps containsObject:@"live"]||[service[@"protocol"] isEqual:@"python-http"];BOOL vod=[ServiceStore isVODMediaService:service];NSString *kind=live&&vod?@"both":(live?@"live":(vod?@"vod":@"unknown"));[rows addObject:@{@"name":service[@"name"]?:@"本机脚本",@"type":@"plugin",@"resourceKind":kind,@"capabilities":caps,@"engine":service[@"engine"]?:@"python",@"runtime":service[@"engine"]?:@"python",@"protocol":service[@"protocol"]?:@"未知协议",@"playlistPath":service[@"playlistPath"]?:@"",@"port":service[@"port"]?:@0,@"url":service[@"url"]?:@"",@"current":@([service[@"id"] isEqual:selectedMedia]),@"source":[@"plugin:" stringByAppendingString:service[@"id"]],@"status":[PyHost runtimeStatusDescriptionForServiceIdentifier:service[@"id"]],@"enabled":@(enabled)}];}
+    NSString *selectedMedia=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaSource"]?:@"";
+    for(NSDictionary *service in [ServiceStore services])if(![service[@"builtin"] boolValue]){
+        BOOL enabled=[PyHost isRunningServiceIdentifier:service[@"id"]];NSArray *caps=[service[@"capabilities"] isKindOfClass:NSArray.class]?service[@"capabilities"]:@[];
+        NSString *subscriptionURL=[ServiceStore subscriptionURLForService:service]?:@"",*epgURL=[ServiceStore epgURLForService:service]?:@"";
+        NSDictionary *playlistMetadata=subscriptionURL.length?[ProfileStore metadata:subscriptionURL]:@{};NSArray *cachedChannels=[playlistMetadata[@"cachedChannels"] isKindOfClass:NSArray.class]?playlistMetadata[@"cachedChannels"]:@[];
+        BOOL live=subscriptionURL.length>0||[caps containsObject:@"live"];BOOL vod=[ServiceStore isVODMediaService:service];NSString *kind=live&&vod?@"both":(live?@"live":(vod?@"vod":@"unknown"));
+        NSString *playlistStatus=[playlistMetadata[@"status"] isKindOfClass:NSString.class]?playlistMetadata[@"status"]:(subscriptionURL.length?(enabled?@"等待读取订阅清单":@"服务已停止 · 保留最近频道"):@"未配置播放列表");
+        [rows addObject:@{@"name":service[@"name"]?:@"本机脚本",@"type":@"plugin",@"resourceKind":kind,@"capabilities":caps,@"engine":service[@"engine"]?:@"python",@"runtime":service[@"engine"]?:@"python",@"protocol":service[@"protocol"]?:@"未知协议",@"playlistPath":[ServiceStore playlistPathForService:service]?:@"",@"subscriptionURL":subscriptionURL,@"epgURL":epgURL,@"subscriptionStatus":playlistStatus,@"channelCount":@(cachedChannels.count),@"playlistUpdatedAt":playlistMetadata[@"updatedAt"]?:@0,@"port":service[@"port"]?:@0,@"url":service[@"url"]?:@"",@"current":@([service[@"id"] isEqual:selectedMedia]),@"source":[@"plugin:" stringByAppendingString:service[@"id"]],@"status":[PyHost runtimeStatusDescriptionForServiceIdentifier:service[@"id"]],@"enabled":@(enabled)}];
+    }
     for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){
         NSString *identifier=catalog[@"id"]?:@"";NSString *catalogName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"";if(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])catalogName=@"资源合集";NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];NSUInteger supported=0;for(NSDictionary *site in sites)if([site[@"supported"] boolValue])supported++;
         NSUInteger liveCount=[catalog[@"lives"] count];NSString *kind=supported&&liveCount?@"both":(supported?@"vod":(liveCount?@"live":@"unknown"));NSString *catalogKind=[catalog[@"catalogKind"] isKindOfClass:NSString.class]?catalog[@"catalogKind"]:@"tvbox";
@@ -934,22 +947,48 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSDictionary *service=[self resourceServiceForSource:source];if(!service)return;PluginResourceDetailViewController *page=[PluginResourceDetailViewController new];page.service=service;__weak typeof(self) weakSelf=self;
     page.onToggle=^(NSDictionary *item,BOOL enabled,void(^completion)(NSError *)){[weakSelf changeService:item enabled:enabled completion:completion];};
     page.onUse=^(NSDictionary *item,NSString *kind){[weakSelf usePluginService:item kind:kind];};
-    page.onLog=^(NSDictionary *item){[weakSelf openDiagnosticLogForIdentifier:item[@"id"] name:item[@"name"]];};page.onEdit=^(NSDictionary *item){ServiceEditorViewController *editor=[ServiceEditorViewController new];editor.service=item;[weakSelf.navigationController pushViewController:editor animated:YES];};page.onRemove=^(NSDictionary *item){RootViewController *owner=weakSelf;if([PyHost isManagedServiceIdentifier:item[@"id"]]){[owner showServiceError:@"请先停止此资源服务，再移除代码和配置。"];return;}[ServiceStore remove:item[@"id"]];[owner.navigationController popViewControllerAnimated:YES];[owner refreshConfigurationPage];};
+    page.onLog=^(NSDictionary *item){[weakSelf openDiagnosticLogForIdentifier:item[@"id"] name:item[@"name"]];};page.onEdit=^(NSDictionary *item){[weakSelf openServiceEditorForService:item];};page.onRemove=^(NSDictionary *item){RootViewController *owner=weakSelf;if([PyHost isManagedServiceIdentifier:item[@"id"]]){[owner showServiceError:@"请先停止此资源服务，再移除代码和配置。"];return;}[ServiceStore remove:item[@"id"]];[owner.navigationController popViewControllerAnimated:YES];[owner refreshConfigurationPage];};
     page.onUpdate=^(NSDictionary *item){RootViewController *owner=weakSelf;[owner downloadPackageURL:[NSURL URLWithString:item[@"url"]] completion:^(NSDictionary *value,NSError *error){[weakSelf acceptImportedMedia:value error:error];}];};
     __weak PluginResourceDetailViewController *weakPage=page;
     page.onRollback=^(NSDictionary *item){RootViewController *owner=weakSelf;dispatch_block_t rollback=^{NSError *error=nil;NSDictionary *restored=[ServiceStore rollbackImportedService:item error:&error];if(!restored){[owner showServiceError:error.localizedDescription];return;}weakPage.service=restored;[weakPage.tableView reloadData];[owner refreshConfigurationPage];};if([PyHost isManagedServiceIdentifier:item[@"id"]])[owner changeService:item enabled:NO completion:^(NSError *error){if(error)[owner showServiceError:error.localizedDescription];else rollback();}];else rollback();};
     [self.navigationController pushViewController:page animated:YES];
 }
+- (void)openServiceEditorForService:(NSDictionary *)service {
+    ServiceEditorViewController *editor=[ServiceEditorViewController new];editor.service=service;__weak typeof(self) weakSelf=self;
+    editor.onApplyService=^(NSDictionary *previous,NSDictionary *updated,void(^completion)(NSError *)){RootViewController *owner=weakSelf;if(owner)[owner applyServiceConfigurationFrom:previous to:updated completion:completion];else if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:10 userInfo:@{@"NSLocalizedDescriptionKey":@"服务页面已关闭，端口更改未应用。"}]);};
+    editor.onSave=^{[weakSelf refreshConfigurationPage];};
+    [self.navigationController pushViewController:editor animated:YES];
+}
+- (void)applyServiceConfigurationFrom:(NSDictionary *)previous to:(NSDictionary *)updated completion:(void (^)(NSError * _Nullable))completion {
+    NSInteger requestedPort=[updated[@"port"] integerValue];
+    for(NSDictionary *other in [ServiceStore services])if(![other[@"id"] isEqual:updated[@"id"]]&&[other[@"port"] integerValue]==requestedPort&&[PyHost isManagedServiceIdentifier:other[@"id"]]){
+        NSString *message=[NSString stringWithFormat:@"端口 %ld 正由“%@”使用。已保留当前服务运行状态；请选择其他端口。",(long)requestedPort,other[@"name"]?:other[@"id"]];
+        if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:6 userInfo:@{@"NSLocalizedDescriptionKey":message}]);return;
+    }
+    [ServiceStore associateLegacyLoopbackSubscriptionsForService:previous];
+    __weak typeof(self) weakSelf=self;
+    [self changeService:previous enabled:NO completion:^(NSError *stopError){
+        RootViewController *owner=weakSelf;if(!owner){if(completion)completion(stopError?:[NSError errorWithDomain:@"CCTVHostService" code:10 userInfo:@{@"NSLocalizedDescriptionKey":@"服务页面已关闭，端口更改未应用。"}]);return;}
+        if(stopError){if(completion)completion(stopError);return;}
+        [ServiceStore save:updated];[owner refreshConfigurationPage];
+        [owner changeService:updated enabled:YES completion:^(NSError *startError){
+            NSError *reportedError=startError;
+            if(startError){NSMutableDictionary *info=[startError.userInfo mutableCopy]?:[NSMutableDictionary dictionary];info[@"CCTVHostServiceConfigurationSaved"]=@YES;reportedError=[NSError errorWithDomain:startError.domain code:startError.code userInfo:info];}
+            if(completion)completion(reportedError);
+        }];
+    }];
+}
 - (void)usePluginService:(NSDictionary *)item kind:(NSString *)kind {
     if(!item||!kind.length)return;
-    if([kind isEqual:@"live"]){NSString *route=item[@"playlistPath"];BOOL hasURL=CCTVValidLocalPlaylistPath(route);if(!hasURL)for(NSString *candidate in self.subscriptionURLs){NSDictionary *provider=[self localServiceForURL:[NSURL URLWithString:candidate]];if([provider[@"id"] isEqual:item[@"id"]]){hasURL=YES;break;}}if(!hasURL){ServiceEditorViewController *editor=[ServiceEditorViewController new];editor.service=item;[self.navigationController pushViewController:editor animated:YES];return;}}
-    [self changeService:item enabled:YES completion:^(NSError *error){if(error){[self showServiceError:error.localizedDescription];return;}if([kind isEqual:@"vod"]||[kind isEqual:@"configuration"]){[NSUserDefaults.standardUserDefaults setObject:item[@"id"] forKey:@"selectedMediaSource"];[self.navigationController popToViewController:self animated:NO];[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)self.tabPages[@2];if([kind isEqual:@"configuration"])[browser showConfigurationForSource:item];else [browser openSourceIdentifier:item[@"id"]?:@""];return;}NSString *url=nil,*playlist=item[@"playlistPath"];if(CCTVValidLocalPlaylistPath(playlist))url=[NSString stringWithFormat:@"http://127.0.0.1:%@%@",item[@"port"],playlist];if(!url.length)for(NSString *candidate in self.subscriptionURLs){NSDictionary *provider=[self localServiceForURL:[NSURL URLWithString:candidate]];if([provider[@"id"] isEqual:item[@"id"]]){url=candidate;break;}}if(!url.length){[self showServiceError:@"服务已启动，但尚未发现可读取的直播列表路径。请编辑此资源的直播列表路径后重试。"];return;}if(![self.subscriptionURLs containsObject:url]){[self.subscriptionURLs addObject:url];[NSUserDefaults.standardUserDefaults setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];}[self.navigationController popToViewController:self animated:NO];[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[1]];self.activeSource=url;self.title=@"订阅直播";[self fetchSubscription:url silent:NO];}];
+    NSString *liveURL=[ServiceStore subscriptionURLForService:item];
+    if([kind isEqual:@"live"]&&!liveURL.length){for(NSString *candidate in self.subscriptionURLs){NSDictionary *provider=[self localServiceForURL:[NSURL URLWithString:candidate]];if([provider[@"id"] isEqual:item[@"id"]]){liveURL=candidate;break;}}if(!liveURL.length){[self openServiceEditorForService:item];return;}}
+    [self changeService:item enabled:YES completion:^(NSError *error){if(error){[self showServiceError:error.localizedDescription];return;}if([kind isEqual:@"vod"]||[kind isEqual:@"configuration"]){[NSUserDefaults.standardUserDefaults setObject:item[@"id"] forKey:@"selectedMediaSource"];[self.navigationController popToViewController:self animated:NO];[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)self.tabPages[@2];if([kind isEqual:@"configuration"])[browser showConfigurationForSource:item];else [browser openSourceIdentifier:item[@"id"]?:@""];return;}NSString *url=[ServiceStore subscriptionURLForService:item]?:liveURL;if(!url.length){[self showServiceError:@"服务已启动，但尚未发现可读取的直播列表路径。请编辑此资源的直播列表路径后重试。"];return;}NSMutableDictionary *metadata=[@{@"managedServiceID":item[@"id"]?:@""} mutableCopy];if(![ProfileStore metadata:url][@"name"])[metadata addEntriesFromDictionary:@{@"name":item[@"name"]?:@"本机直播服务"}];[ProfileStore update:url values:metadata];if(![self.subscriptionURLs containsObject:url]){[self.subscriptionURLs addObject:url];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];}[self.navigationController popToViewController:self animated:NO];[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[1]];self.activeSource=url;self.title=@"订阅直播";[self fetchSubscription:url silent:NO];}];
 }
 - (void)openTVBoxCatalog:(NSString *)identifier {
     NSDictionary *catalog=[TVBoxCatalogStore catalogForID:identifier];if(!catalog){[self showServiceError:@"找不到此资源合集，请重新导入"];return;}
     TVBoxCatalogViewController *page=[TVBoxCatalogViewController new];page.catalog=catalog;__weak typeof(self) weakSelf=self;
     page.serviceForSite=^NSDictionary *(NSDictionary *site){NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";for(NSDictionary *service in [ServiceStore services])if(api.length&&[service[@"url"] isEqual:api])return service;return nil;};
-    page.onUseImportedService=^(NSDictionary *service){RootViewController *owner=weakSelf;if(!owner)return;NSString *kind=[ServiceStore isVODMediaService:service]?@"vod":([service[@"playlistPath"] length]?@"live":@"configuration");[owner usePluginService:service kind:kind];};
+    page.onUseImportedService=^(NSDictionary *service){RootViewController *owner=weakSelf;if(!owner)return;NSString *kind=[ServiceStore isVODMediaService:service]?@"vod":([ServiceStore subscriptionURLForService:service].length?@"live":@"configuration");[owner usePluginService:service kind:kind];};
     page.onOpenImportedService=^(NSDictionary *service){RootViewController *owner=weakSelf;if(owner)[owner openPluginResource:[@"plugin:" stringByAppendingString:service[@"id"]?:@""]];};
     page.onImportSite=^(NSDictionary *site,BOOL browseAfterImport){[weakSelf importTVBoxSite:site browseAfterImport:browseAfterImport];};
     page.onUseNativeSite=^(NSDictionary *site){RootViewController *owner=weakSelf;if(!owner)return;NSString *protocol=[site[@"apiKind"] isEqual:@"maccms-api"]?@"maccms-api":@"tvbox-api";NSString *sourceID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalog[@"id"]?:@"",site[@"key"]?:@""];[NSUserDefaults.standardUserDefaults setObject:sourceID forKey:@"selectedMediaSource"];[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)owner.tabPages[@2];[browser openSourceIdentifier:sourceID];};
@@ -1601,7 +1640,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
                 self.subscriptionRequestVersions[deletedKey] = @([self.subscriptionRequestVersions[deletedKey] unsignedIntegerValue] + 1);
                 [self removeSubscriptionSource:deletedKey];
                 [[NSUserDefaults standardUserDefaults] setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
-                [self log:@"已删除订阅 %@", u];
+                [self log:@"已删除订阅 %@", CCTVServiceLogAddress(u)];
             }]];
             [op addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
             [self presentViewController:op animated:YES completion:nil];
@@ -1619,30 +1658,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     __weak typeof(self) weakSelf=self;
     page.onOpenYSP=^{ [weakSelf openPluginPage]; };
     page.onToggleService=^(NSDictionary *service,BOOL enabled){[weakSelf toggleService:service enabled:enabled];};
-    page.onApplyService=^(NSDictionary *previousService,NSDictionary *updatedService,void (^completion)(NSError * _Nullable)){
-        RootViewController *owner=weakSelf;
-        if(!owner){if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:10 userInfo:@{NSLocalizedDescriptionKey:@"服务页面已关闭，端口更改未应用。"}]);return;}
-        NSInteger requestedPort=[updatedService[@"port"] integerValue];
-        for(NSDictionary *other in [ServiceStore services])if(![other[@"id"] isEqual:updatedService[@"id"]]&&[other[@"port"] integerValue]==requestedPort&&[PyHost isManagedServiceIdentifier:other[@"id"]]){
-            NSString *message=[NSString stringWithFormat:@"端口 %ld 正由“%@”使用。已保留当前服务运行状态；请选择其他端口。",(long)requestedPort,other[@"name"]?:other[@"id"]];
-            if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:6 userInfo:@{NSLocalizedDescriptionKey:message}]);
-            return;
-        }
-        [owner changeService:previousService enabled:NO completion:^(NSError *stopError){
-            if(stopError){if(completion)completion(stopError);return;}
-            [ServiceStore save:updatedService];
-            [owner refreshConfigurationPage];
-            [owner changeService:updatedService enabled:YES completion:^(NSError *startError){
-                NSError *reportedError=startError;
-                if(startError){NSMutableDictionary *info=[startError.userInfo mutableCopy]?:[NSMutableDictionary dictionary];info[@"CCTVHostServiceConfigurationSaved"]=@YES;reportedError=[NSError errorWithDomain:startError.domain code:startError.code userInfo:info];}
-                if(completion)completion(reportedError);
-            }];
-        }];
-    };
+    page.onApplyService=^(NSDictionary *previousService,NSDictionary *updatedService,void (^completion)(NSError * _Nullable)){RootViewController *owner=weakSelf;if(owner)[owner applyServiceConfigurationFrom:previousService to:updatedService completion:completion];else if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:10 userInfo:@{@"NSLocalizedDescriptionKey":@"服务页面已关闭，端口更改未应用。"}]);};
     page.onBrowseService=^(NSDictionary *service){[NSUserDefaults.standardUserDefaults setObject:service[@"id"] forKey:@"selectedMediaSource"];[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[2]];};
     page.onImportResource=^{[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[3]];dispatch_async(dispatch_get_main_queue(),^{[weakSelf importMediaPackage];});};
     page.onOpenLog=^(NSDictionary *service){if(service)[weakSelf openDiagnosticLogForIdentifier:service[@"id"] name:service[@"name"]];else[weakSelf openDiagnosticLog];};
-    page.onSubscribe=^(NSString *url){NSString *key=[weakSelf stableURLKey:url];if(!key)return;[weakSelf.subscriptionURLs addObject:key];[NSUserDefaults.standardUserDefaults setObject:weakSelf.subscriptionURLs.allObjects forKey:@"subscriptions"];[weakSelf fetchSubscription:key silent:NO];};
+    page.onSubscribe=^(NSString *url){RootViewController *owner=weakSelf;NSString *key=[owner stableURLKey:url];if(!owner||!key.length)return;NSDictionary *service=[owner localServiceForURL:[NSURL URLWithString:key]];if(service){NSMutableDictionary *metadata=[@{@"managedServiceID":service[@"id"]?:@""} mutableCopy];if(![ProfileStore metadata:key][@"name"])[metadata addEntriesFromDictionary:@{@"name":service[@"name"]?:@"本机直播服务"}];[ProfileStore update:key values:metadata];}if(![owner.subscriptionURLs containsObject:key]){[owner.subscriptionURLs addObject:key];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:owner.subscriptionURLs.allObjects] forKey:@"subscriptions"];}if(service&&![PyHost isRunningServiceIdentifier:service[@"id"]]){[owner changeService:service enabled:YES completion:^(NSError *error){if(error){[owner showServiceError:error.localizedDescription];return;}[owner fetchSubscription:key silent:NO];}];}else[owner fetchSubscription:key silent:NO];};
     [self.navigationController pushViewController:page animated:YES];
 }
 
@@ -1775,18 +1795,18 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         if(unchanged){
             [ServiceStore remove:service[@"id"]];UIAlertController *notice=[UIAlertController alertControllerWithTitle:@"未发现资源更新" message:@"本次主脚本、配套配置校验和运行类型与已有资源一致。" preferredStyle:UIAlertControllerStyleAlert];
             [notice addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];
-            [notice addAction:[UIAlertAction actionWithTitle:autoBrowse?@"启动并浏览资源":@"打开已有资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){if(autoBrowse){NSString *kind=[ServiceStore isVODMediaService:existing]?@"vod":([existing[@"playlistPath"] length]?@"live":@"configuration");[self usePluginService:existing kind:kind];}else [self openPluginResource:[@"plugin:" stringByAppendingString:existing[@"id"]]];}]];
+            [notice addAction:[UIAlertAction actionWithTitle:autoBrowse?@"启动并浏览资源":@"打开已有资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){if(autoBrowse){NSString *kind=[ServiceStore isVODMediaService:existing]?@"vod":([ServiceStore subscriptionURLForService:existing].length?@"live":@"configuration");[self usePluginService:existing kind:kind];}else [self openPluginResource:[@"plugin:" stringByAppendingString:existing[@"id"]]];}]];
             [self presentViewController:notice animated:YES completion:nil];return;
         }
         NSString *identifier=[service[@"id"] copy];NSString *existingID=[existing[@"id"] copy];
         UIAlertController *duplicate=[UIAlertController alertControllerWithTitle:@"发现相同来源" message:@"检测到已导入过这个完整资源地址（含查询参数）。更新会先停止该服务，保留服务 ID、账号数据、端口、配置和日志，并保留上一版代码供切回。也可打开原资源或另存副本。" preferredStyle:UIAlertControllerStyleAlert];
         [duplicate addAction:[UIAlertAction actionWithTitle:@"更新已有资源（保留配置）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-            dispatch_block_t update=^{NSError *error=nil;NSDictionary *updated=[ServiceStore replaceImportedService:existing withService:service error:&error];if(!updated){[ServiceStore remove:identifier];[self showServiceError:error.localizedDescription];return;}[self refreshConfigurationPage];if(autoBrowse){NSString *kind=[ServiceStore isVODMediaService:updated]?@"vod":([updated[@"playlistPath"] length]?@"live":@"configuration");[self usePluginService:updated kind:kind];}else [self openPluginResource:[@"plugin:" stringByAppendingString:existingID]];};
+            dispatch_block_t update=^{NSError *error=nil;NSDictionary *updated=[ServiceStore replaceImportedService:existing withService:service error:&error];if(!updated){[ServiceStore remove:identifier];[self showServiceError:error.localizedDescription];return;}[self refreshConfigurationPage];if(autoBrowse){NSString *kind=[ServiceStore isVODMediaService:updated]?@"vod":([ServiceStore subscriptionURLForService:updated].length?@"live":@"configuration");[self usePluginService:updated kind:kind];}else [self openPluginResource:[@"plugin:" stringByAppendingString:existingID]];};
             if([PyHost isManagedServiceIdentifier:existingID])[self changeService:existing enabled:NO completion:^(NSError *error){if(error){[ServiceStore remove:identifier];[self showServiceError:error.localizedDescription];}else update();}];else update();
         }]];
         [duplicate addAction:[UIAlertAction actionWithTitle:@"取消本次导入" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){[ServiceStore remove:identifier];}]];
         [duplicate addAction:[UIAlertAction actionWithTitle:@"保留为独立副本" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self saveImportedMedia:service autoBrowse:autoBrowse];}]];
-        [duplicate addAction:[UIAlertAction actionWithTitle:autoBrowse?@"启动并浏览已有资源":@"打开已有资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[ServiceStore remove:identifier];if(autoBrowse){NSString *kind=[ServiceStore isVODMediaService:existing]?@"vod":([existing[@"playlistPath"] length]?@"live":@"configuration");[self usePluginService:existing kind:kind];}else [self openPluginResource:[@"plugin:" stringByAppendingString:existingID]];}]];
+        [duplicate addAction:[UIAlertAction actionWithTitle:autoBrowse?@"启动并浏览已有资源":@"打开已有资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[ServiceStore remove:identifier];if(autoBrowse){NSString *kind=[ServiceStore isVODMediaService:existing]?@"vod":([ServiceStore subscriptionURLForService:existing].length?@"live":@"configuration");[self usePluginService:existing kind:kind];}else [self openPluginResource:[@"plugin:" stringByAppendingString:existingID]];}]];
         [self presentViewController:duplicate animated:YES completion:nil];return;
     }
     [self saveImportedMedia:service autoBrowse:autoBrowse];
@@ -1798,11 +1818,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [ServiceStore save:service];[self refreshConfigurationPage];
     NSArray *verifiedLocal=[service[@"manifest"][@"verifiedLocalChecksums"] isKindOfClass:NSArray.class]?service[@"manifest"][@"verifiedLocalChecksums"]:@[];
     NSString *verification=([service[@"downloadChecksum"] length]&&[service[@"configurationState"] isEqual:@"verified"])?@"主脚本与配套配置均已通过 MD5 校验。":(verifiedLocal.count?([service[@"downloadChecksum"] length]?[NSString stringWithFormat:@"下载资源及 ZIP 内 %@ 的 MD5 均已通过校验。",[verifiedLocal componentsJoinedByString:@"、"]]:[NSString stringWithFormat:@"ZIP 内已校验：%@。",[verifiedLocal componentsJoinedByString:@"、"]]):([service[@"downloadChecksum"] length]?@"下载资源 MD5 校验已通过。":@"可在资源详情查看校验与配套配置状态。"));
-    if(autoBrowse){NSString *kind=[ServiceStore isVODMediaService:service]?@"vod":([service[@"playlistPath"] length]?@"live":@"configuration");[self usePluginService:service kind:kind];return;}
+    if(autoBrowse){NSString *kind=[ServiceStore isVODMediaService:service]?@"vod":([ServiceStore subscriptionURLForService:service].length?@"live":@"configuration");[self usePluginService:service kind:kind];return;}
     NSString *message=[NSString stringWithFormat:@"已检查并导入 %@。%@",service[@"name"],verification];
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"资源已导入" message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"稍后" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"启动并浏览" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self usePluginService:service kind:[ServiceStore isVODMediaService:service]?@"vod":@"live"];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"启动并浏览" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){NSString *kind=[ServiceStore isVODMediaService:service]?@"vod":([ServiceStore subscriptionURLForService:service].length?@"live":@"configuration");[self usePluginService:service kind:kind];}]];
     [alert addAction:[UIAlertAction actionWithTitle:@"查看能力与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self openPluginResource:[@"plugin:" stringByAppendingString:service[@"id"]]];}]];
     [self presentViewController:alert animated:YES completion:nil];
 }
@@ -1905,12 +1925,36 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *host=url.host.lowercaseString;
     if(![@[@"127.0.0.1",@"localhost",@"::1",@"[::1]"] containsObject:host])return nil;
     NSInteger port=url.port?url.port.integerValue:([url.scheme.lowercaseString isEqualToString:@"https"]?443:80);
-    for(NSDictionary *service in [ServiceStore services])if([service[@"port"] integerValue]==port)return service;
-    return nil;
+    NSString *sourceKey=url.absoluteString?:@"";NSString *managedID=[ProfileStore metadata:sourceKey][@"managedServiceID"];
+    NSArray<NSDictionary *> *services=[ServiceStore services];
+    if([managedID isKindOfClass:NSString.class]&&managedID.length)for(NSDictionary *service in services)if([service[@"id"] isEqual:managedID]&&[service[@"port"] integerValue]==port)return service;
+    NSMutableArray<NSDictionary *> *matches=[NSMutableArray array];for(NSDictionary *service in services)if([service[@"port"] integerValue]==port)[matches addObject:service];
+    if(matches.count==1)return matches.firstObject;
+    // A duplicated port is ambiguous. Prefer the only live owner; never start
+    // whichever service happens to appear first in persisted configuration.
+    NSDictionary *running=nil;for(NSDictionary *service in matches)if([PyHost isRunningServiceIdentifier:service[@"id"]]){if(running)return nil;running=service;}
+    return running;
+}
+- (NSDictionary *)localServiceForChannel:(NSDictionary *)channel URL:(NSURL *)url {
+    NSString *host=url.host.lowercaseString;if(![@[@"127.0.0.1",@"localhost",@"::1",@"[::1]"] containsObject:host])return nil;
+    NSInteger port=url.port?url.port.integerValue:([url.scheme.lowercaseString isEqualToString:@"https"]?443:80);
+    NSMutableDictionary<NSString *,NSDictionary *> *owners=[NSMutableDictionary dictionary];
+    for(NSString *source in [ProfileStore orderedSources:channel[@"subscriptionSources"]?:@[]]){NSString *identifier=[ProfileStore metadata:source][@"managedServiceID"];if(![identifier isKindOfClass:NSString.class]||!identifier.length)continue;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:identifier]&&[service[@"port"] integerValue]==port)owners[identifier]=service;}
+    if(owners.count==1)return owners.allValues.firstObject;
+    if(owners.count>1){NSDictionary *running=nil;for(NSDictionary *service in owners.allValues)if([PyHost isRunningServiceIdentifier:service[@"id"]]){if(running)return nil;running=service;}if(running)return running;return nil;}
+    return [self localServiceForURL:url];
+}
+- (NSArray<NSString *> *)managedSubscriptionSourcesForService:(NSDictionary *)service excludingURL:(NSString *)url {
+    NSString *identifier=[service[@"id"] isKindOfClass:NSString.class]?service[@"id"]:@"";if(!identifier.length)return @[];
+    NSMutableArray<NSString *> *matches=[NSMutableArray array];
+    for(NSString *source in self.subscriptionURLs){if([source isEqual:url])continue;if([[ProfileStore metadata:source][@"managedServiceID"] isEqual:identifier])[matches addObject:source];}
+    return matches;
 }
 - (LocalServiceReadiness *)readinessForURL:(NSURL *)url service:(NSDictionary *)service {
     NSURLComponents *c=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
-    BOOL health=[service[@"builtin"] boolValue] || [ServiceStore isMediaService:service];c.path=health?@"/health":@"/";c.query=nil;c.fragment=nil;
+    BOOL health=[service[@"builtin"] boolValue] || [ServiceStore isMediaService:service];
+    if(health)c.path=@"/health";else if(!c.path.length)c.path=[ServiceStore playlistPathForService:service]?:@"/";
+    c.query=nil;c.fragment=nil;
     LocalServiceReadiness *readiness=[[LocalServiceReadiness alloc] initWithURL:c.URL timeout:20 requiresHealthJSON:health];NSString *engine=[service[@"engine"] isKindOfClass:NSString.class]?service[@"engine"]:@"python";if(service && [engine isEqualToString:@"python"]){NSString *identifier=[service[@"id"] copy];readiness.failureProvider=^NSError *{return [PyHost startupErrorForServiceIdentifier:identifier];};}return readiness;
 }
 - (BOOL)startService:(NSDictionary *)service error:(NSError **)error {
@@ -1918,6 +1962,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *entryPath=[ServiceStore codePath:service];
     if([service[@"manifest"] isKindOfClass:NSDictionary.class] && (!entryPath.length || ![NSFileManager.defaultManager fileExistsAtPath:entryPath])){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:8 userInfo:@{NSLocalizedDescriptionKey:@"资源入口文件不存在。已检查当前 App 沙盒中的同一服务目录；请从“资源”重新导入原文件。原服务配置和日志会保留。"}];return NO;}
     NSString *serviceID=service[@"id"];
+    [ServiceStore associateLegacyLoopbackSubscriptionsForService:service];
     if([PyHost isRunningServiceIdentifier:serviceID])return YES;
     if([PyHost isManagedServiceIdentifier:serviceID]){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:7 userInfo:@{NSLocalizedDescriptionKey:@"该服务仍有启动中或状态待确认的会话，请先停止并确认清理后重试。"}];return NO;}
     NSInteger port=[service[@"port"] integerValue];if(port<1||port>65535){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:5 userInfo:@{NSLocalizedDescriptionKey:@"服务端口必须是 1 到 65535 之间的有效端口。"}];return NO;}
@@ -1935,19 +1980,31 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     }
     __weak typeof(self) w=self;serviceID=[serviceID copy];NSString *serviceName=[service[@"name"] copy];void(^serviceLogger)(NSString *)=^(NSString *line){if(line.length)[w logPluginLine:line identifier:serviceID name:serviceName];};[PyHost setLogHandler:serviceLogger forServiceIdentifier:serviceID];[NodePluginRuntime.shared setLogHandler:serviceLogger forServiceIdentifier:serviceID];[JSPluginRuntime.shared setLogHandler:serviceLogger forServiceIdentifier:serviceID];
     [self logPluginLine:@"插件启动请求" identifier:serviceID name:serviceName];
-    for(NSString *origin in self.readyLocalOrigins.allKeys.copy)if([origin containsString:[NSString stringWithFormat:@":%ld",(long)port]])[self.readyLocalOrigins removeObjectForKey:origin]; // This service must prove readiness again.
+    for(NSString *origin in self.readyLocalOrigins.allKeys.copy){NSURL *known=[NSURL URLWithString:origin];if(known.port.integerValue==port)[self.readyLocalOrigins removeObjectForKey:origin];} // This service must prove readiness again.
     if(![PyHost startScriptAtPath:[ServiceStore scriptPath:service] identifier:serviceID port:port dataDir:dataDir arguments:args error:error]){if(error&&*error)[self logPluginLine:(*error).localizedDescription identifier:serviceID name:serviceName];[self clearServiceLogHandlers:serviceID];return NO;}
     [NSUserDefaults.standardUserDefaults setObject:service[@"id"] forKey:@"activePythonService"];
     [self log:@"服务进程启动 %@ · %ld，等待 HTTP 就绪",service[@"name"],(long)port];
-    NSString *playlistPath=[service[@"builtin"] boolValue]?@"/all.m3u":service[@"playlistPath"];
-    // Built-in live services retain their established one-tap subscription flow.
-    // Imported resources are only subscribed after the user explicitly chooses
-    // “Open live channels”; starting a service must not alter channel settings.
-    if([service[@"builtin"] boolValue] && [playlistPath isKindOfClass:NSString.class] && [playlistPath hasPrefix:@"/"] && playlistPath.length<128 && ![playlistPath containsString:@".."] && ![playlistPath containsString:@"?"] && ![playlistPath containsString:@"#"]){
-        NSString *url=[NSString stringWithFormat:@"http://127.0.0.1:%ld%@",(long)port,playlistPath];
-        if(![self.subscriptionURLs containsObject:url]){[self.subscriptionURLs addObject:url];[NSUserDefaults.standardUserDefaults setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];}
+    NSString *playlistURL=[ServiceStore subscriptionURLForService:service];
+    if(playlistURL.length){
+        NSArray<NSString *> *previousSources=[self managedSubscriptionSourcesForService:service excludingURL:playlistURL];
+        NSDictionary *newMetadata=[ProfileStore metadata:playlistURL];
+        BOOL alreadySubscribed=[self.subscriptionURLs containsObject:playlistURL];
+        if(!alreadySubscribed){[self.subscriptionURLs addObject:playlistURL];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];}
+        NSMutableDictionary *sourceMetadata=[@{@"managedServiceID":serviceID} mutableCopy];
+        if(![newMetadata[@"name"] isKindOfClass:NSString.class]||![newMetadata[@"name"] length]){NSString *previousName=nil;for(NSString *oldSource in previousSources){id candidate=[ProfileStore metadata:oldSource][@"name"];if([candidate isKindOfClass:NSString.class]&&[candidate length]){previousName=candidate;break;}}sourceMetadata[@"name"]=previousName?:serviceName?:@"本机直播服务";}
+        if(![newMetadata[@"epgURL"] isKindOfClass:NSString.class]||![newMetadata[@"epgURL"] length])for(NSString *oldSource in previousSources){id configured=[ProfileStore metadata:oldSource][@"epgURL"];if([ProfileStore isHTTP:configured]){sourceMetadata[@"epgURL"]=configured;break;}}
+        [ProfileStore update:playlistURL values:sourceMetadata];
+        for(NSString *oldSource in previousSources)[ProfileStore update:oldSource values:@{@"status":@"服务端口或列表路径已变更 · 等待新订阅验证，保留旧频道"}];
+        [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:playlistURL];
+        for(NSString *oldSource in previousSources)[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:oldSource];
+        [self logPluginLine:[NSString stringWithFormat:@"服务订阅地址：%@",playlistURL] identifier:serviceID name:serviceName];
+        NSString *epg=[ServiceStore epgURLForService:service];
+        [self logPluginLine:epg.length?[NSString stringWithFormat:@"节目单地址：%@",CCTVServiceLogAddress(epg)]:@"节目单地址：等待读取订阅清单后识别" identifier:serviceID name:serviceName];
+    }else if([service[@"protocol"] isEqual:@"python-http"]){
+        [self logPluginLine:@"未发现可用的服务订阅地址：请在服务编辑页配置播放列表路径，启动不会添加猜测地址。" identifier:serviceID name:serviceName];
     }
     for(NSString *source in self.subscriptionURLs.allObjects){NSDictionary *owner=[self localServiceForURL:[NSURL URLWithString:source]];if([owner[@"id"] isEqualToString:service[@"id"]])[self fetchSubscription:source silent:YES];}
+    [self refreshConfigurationPage];
     [self.pluginPage updateRunning:[PyHost isRunningServiceIdentifier:@"builtin-ysp"] subscriptionCount:self.subscriptionURLs.count];return YES;
 }
 - (void)toggleService:(NSDictionary *)service enabled:(BOOL)enabled {
@@ -1978,8 +2035,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)completeServiceStopForIdentifier:(NSString *)serviceID {
     [(MediaBrowserViewController *)self.tabPages[@2] invalidateServiceIdentifier:serviceID];
     NSDictionary *stopped=nil;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqualToString:serviceID]){stopped=service;break;}if(serviceID.length)[self logPluginLine:@"插件服务已停止" identifier:serviceID name:stopped[@"name"]?:@"插件"];
+    for(NSString *source in self.subscriptionURLs.allObjects){NSDictionary *owner=[self localServiceForURL:[NSURL URLWithString:source]];if([owner[@"id"] isEqual:serviceID]){[ProfileStore update:source values:@{@"status":@"服务已停止 · 保留最近一次频道清单"}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:source];}}
     for(NSString *origin in self.readyLocalOrigins.allKeys.copy){for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqualToString:serviceID] && [origin containsString:[NSString stringWithFormat:@":%@",service[@"port"]]])[self.readyLocalOrigins removeObjectForKey:origin];}
-    if(stopped[@"port"]){for(NSString *key in self.subscriptionReadiness.allKeys.copy){NSDictionary *owner=[self localServiceForURL:[NSURL URLWithString:key]];if([owner[@"id"] isEqualToString:serviceID]){[self.subscriptionReadiness[key] cancel];[self.subscriptionReadiness removeObjectForKey:key];}}}
+    if(stopped[@"port"]){NSInteger stoppedPort=[stopped[@"port"] integerValue];for(NSString *origin in self.readyLocalOrigins.allKeys.copy)if([NSURL URLWithString:origin].port.integerValue==stoppedPort)[self.readyLocalOrigins removeObjectForKey:origin];for(NSString *key in self.subscriptionReadiness.allKeys.copy){NSDictionary *owner=[self localServiceForURL:[NSURL URLWithString:key]];if([owner[@"id"] isEqualToString:serviceID]){[self.subscriptionReadiness[key] cancel];[self.subscriptionReadiness removeObjectForKey:key];}}}
     NSDictionary *currentService=[self localServiceForURL:[NSURL URLWithString:self.currentRemoteURL?:@""]];
     if([currentService[@"id"] isEqualToString:serviceID]){
         self.playbackGeneration++;[self stopPlayback];[self.spinner stopAnimating];self.titleLabel.hidden=NO;self.titleLabel.text=@"本机服务已停止";
@@ -2316,18 +2374,18 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *sourceKey=[ProfileStore isHTTP:urlString]?[self stableURLKey:urlString]:([ProfileStore isSource:urlString]?urlString:nil);
     if (!sourceKey.length) return;
     BOOL isHTTPSource=[ProfileStore isHTTP:sourceKey];
-    if(silent && CACurrentMediaTime()<self.playbackPriorityUntil){[self.deferredLocalSubscriptions addObject:sourceKey];[ProfileStore update:sourceKey values:@{@"status":@"起播中，稍后自动刷新"}];return;}
+    if(silent && CACurrentMediaTime()<self.playbackPriorityUntil){[self.deferredLocalSubscriptions addObject:sourceKey];[ProfileStore update:sourceKey values:@{@"status":@"起播中，稍后自动刷新"}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];return;}
     NSString *traceID=nil;if(isHTTPSource){traceID=self.subscriptionTraceIDs[sourceKey];if(!traceID.length){traceID=NSUUID.UUID.UUIDString.lowercaseString;self.subscriptionTraceIDs[sourceKey]=traceID;}}
     // Exact normalized source URLs, including query parameters, are independent
     // request identities. A repeat of the same URL joins the work already in flight.
-    if(self.subscriptionTasks[sourceKey]){NSMutableDictionary *fields=[@{@"source_type":isHTTPSource?@"http":@"imported_text", @"correlation_id":traceID?:@""} mutableCopy];[fields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:sourceKey])];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_joined_existing" category:@"subscription" fields:fields];[ProfileStore update:sourceKey values:@{@"status":@"刷新已合并 · 当前请求仍在进行"}];[self refreshConfigurationPage];return;}
-    [ProfileStore update:sourceKey values:@{@"status":@"刷新中…"}];[self refreshConfigurationPage];
+    if(self.subscriptionTasks[sourceKey]){NSMutableDictionary *fields=[@{@"source_type":isHTTPSource?@"http":@"imported_text", @"correlation_id":traceID?:@""} mutableCopy];[fields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:sourceKey])];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_joined_existing" category:@"subscription" fields:fields];[ProfileStore update:sourceKey values:@{@"status":@"刷新已合并 · 当前请求仍在进行"}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[self refreshConfigurationPage];return;}
+    [ProfileStore update:sourceKey values:@{@"status":@"刷新中…"}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[self refreshConfigurationPage];
     if(![ProfileStore isHTTP:sourceKey]){NSString *text=[ProfileStore metadata:sourceKey][@"text"];[self applyPlaylistText:text source:sourceKey];return;}
     NSURL *sourceURL=[NSURL URLWithString:sourceKey];NSDictionary *localService=[self localServiceForURL:sourceURL];
     if(localService){
         if(![PyHost isRunningServiceIdentifier:localService[@"id"]]){
-            if(![self.deferredLocalSubscriptions containsObject:sourceKey])[self log:@"本机订阅暂缓加载，等待服务启动 %@",sourceKey];
-            [self.deferredLocalSubscriptions addObject:sourceKey];[ProfileStore update:sourceKey values:@{@"status":@"等待本机服务启动"}];[self refreshConfigurationPage];return;
+            if(![self.deferredLocalSubscriptions containsObject:sourceKey])[self log:@"本机订阅暂缓加载，等待服务启动 %@",CCTVServiceLogAddress(sourceKey)];
+            [self.deferredLocalSubscriptions addObject:sourceKey];[ProfileStore update:sourceKey values:@{@"status":@"等待本机服务启动"}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[self refreshConfigurationPage];return;
         }
         NSString *origin=[self originForURL:sourceURL];NSNumber *readyAt=self.readyLocalOrigins[origin];
         if(!readyAt||CACurrentMediaTime()-readyAt.doubleValue>2){
@@ -2338,8 +2396,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
                 if(w.subscriptionReadiness[sourceKey]!=probe)return;[w.subscriptionReadiness removeObjectForKey:sourceKey];
                 if([w.subscriptionRequestVersions[sourceKey] unsignedIntegerValue]!=readinessVersion||![w.subscriptionURLs containsObject:sourceKey])return;
                 NSMutableDictionary *probeFields=[@{@"correlation_id":traceID?:@"", @"service_id":localService[@"id"]?:@"", @"service_name":localService[@"name"]?:@"", @"engine":localService[@"engine"]?:@"python", @"port":localService[@"port"]?:@0, @"elapsed_ms":@((NSInteger)(elapsed*1000))} mutableCopy];[probeFields addEntriesFromDictionary:probe.diagnosticSummary];[probeFields addEntriesFromDictionary:CCTVDiagnosticURLFields(sourceURL)];
-                if(error){probeFields[@"error_domain"]=error.domain?:@"";probeFields[@"error_code"]=@(error.code);probeFields[@"error_message"]=error.localizedDescription?:@"";[RuntimeDiagnostics.shared recordEvent:@"local_service_health_failed" category:@"service" fields:probeFields];[ProfileStore update:sourceKey values:@{@"status":error.localizedDescription?:@"服务未就绪"}];[w refreshConfigurationPage];[w log:@"本机订阅等待服务失败 %@",error.localizedDescription];return;}
-                [RuntimeDiagnostics.shared recordEvent:@"local_service_health_ready" category:@"service" fields:probeFields];
+                if(error){probeFields[@"error_domain"]=error.domain?:@"";probeFields[@"error_code"]=@(error.code);probeFields[@"error_message"]=error.localizedDescription?:@"";[RuntimeDiagnostics.shared recordEvent:@"local_service_health_failed" category:@"service" fields:probeFields];[ProfileStore update:sourceKey values:@{@"status":error.localizedDescription?:@"服务未就绪"}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[w refreshConfigurationPage];[w logPluginLine:[NSString stringWithFormat:@"订阅接口健康检查失败 · %@",[HostLogRedactor redactText:error.localizedDescription?:@"未知错误"]] identifier:localService[@"id"] name:localService[@"name"]];[w log:@"本机订阅等待服务失败 %@",error.localizedDescription];return;}
+                [RuntimeDiagnostics.shared recordEvent:@"local_service_health_ready" category:@"service" fields:probeFields];[w logPluginLine:[NSString stringWithFormat:@"订阅接口健康检查通过 · %.2f 秒",elapsed] identifier:localService[@"id"] name:localService[@"name"]];
                 w.readyLocalOrigins[origin]=@(CACurrentMediaTime());[w.deferredLocalSubscriptions removeObject:sourceKey];[w fetchSubscription:sourceKey silent:silent];
             }];return;
         }
@@ -2375,26 +2433,36 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
                 if(!retainedCount)for(NSDictionary *channel in weakSelf.allChannels)if([channel[@"subscriptionSources"] containsObject:sourceKey])retainedCount++;
                 NSString *reason=err.localizedDescription?:parseError.localizedDescription?:[NSString stringWithFormat:@"HTTP %ld / 无有效 M3U",(long)status];
                 NSString *statusText=retainedCount?[NSString stringWithFormat:@"刷新失败 · 保留上次 %lu 个频道 · %@",(unsigned long)retainedCount,reason]:[NSString stringWithFormat:@"刷新失败 · %@",reason];
-                [ProfileStore update:sourceKey values:@{@"status":statusText}];[weakSelf refreshConfigurationPage];
-                [weakSelf log:@"订阅失败 %@ %@", urlString, err.localizedDescription ?: @"无有效条目"];
+                [ProfileStore update:sourceKey values:@{@"status":statusText}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[weakSelf refreshConfigurationPage];
+                if(localService)[weakSelf logPluginLine:[NSString stringWithFormat:@"订阅地址读取失败 · %@",[HostLogRedactor redactText:reason]] identifier:localService[@"id"] name:localService[@"name"]];
+                [weakSelf log:@"订阅失败 %@ %@", CCTVServiceLogAddress(urlString), [HostLogRedactor redactText:err.localizedDescription ?: @"无有效条目"]];
                 return;
             }
             NSMutableDictionary *fields=[@{@"source_type":@"http", @"correlation_id":traceID?:@"", @"trigger":silent?@"automatic":@"user", @"http_status":@(status), @"response_mime_type":mimeType, @"elapsed_ms":@((NSInteger)((CACurrentMediaTime()-requestStartedAt)*1000)), @"channel_count":@(list.count), @"received_bytes":@(receivedBytes)} mutableCopy];[fields addEntriesFromDictionary:CCTVDiagnosticURLFields(url)];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_succeeded" category:@"subscription" fields:fields];[weakSelf.subscriptionTraceIDs removeObjectForKey:sourceKey];
-            NSString *detected=[M3UParser epgURL:text baseURL:url];if(detected.length)[ProfileStore update:sourceKey values:@{@"detectedEPGURL":detected}];
+            NSString *detected=[M3UParser epgURL:text baseURL:url];if(detected.length){NSString *prior=[ProfileStore metadata:sourceKey][@"detectedEPGURL"]?:[ProfileStore metadata:sourceKey][@"epgURL"];[ProfileStore update:sourceKey values:@{@"detectedEPGURL":detected}];if(![prior isEqual:detected])[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];if(localService&&![prior isEqual:detected])[weakSelf logPluginLine:[NSString stringWithFormat:@"节目单地址：%@",CCTVServiceLogAddress(detected)] identifier:localService[@"id"] name:localService[@"name"]];}
+            if(localService)[weakSelf logPluginLine:[NSString stringWithFormat:@"订阅清单可读取 · %lu 个频道",(unsigned long)list.count] identifier:localService[@"id"] name:localService[@"name"]];
             [weakSelf installPlaylist:list source:sourceKey];
         });
     }];self.subscriptionTasks[sourceKey]=subscriptionTask;[subscriptionTask resume];
 }
 - (void)installPlaylist:(NSArray<M3UChannel *> *)list source:(NSString *)sourceKey {
+            NSDictionary *managedService=[self localServiceForURL:[NSURL URLWithString:sourceKey]];
+            NSArray<NSString *> *retiredManagedSources=managedService?[self managedSubscriptionSourcesForService:managedService excludingURL:sourceKey]:@[];
+            NSSet<NSString *> *retiredSourceSet=[NSSet setWithArray:retiredManagedSources];
             NSMutableArray *merged = [NSMutableArray array];
             for (NSDictionary *existing in self.allChannels ?: @[]) {
-                NSMutableSet *owners = [NSMutableSet setWithArray:existing[@"subscriptionSources"] ?: @[]];
+                NSArray *originalOwners=existing[@"subscriptionSources"]?:@[];NSMutableSet *owners = [NSMutableSet setWithArray:originalOwners];
+                [owners minusSet:retiredSourceSet];
                 if ([owners containsObject:sourceKey]) {
                     [owners removeObject:sourceKey];
                     if (!owners.count) continue;
                     NSMutableDictionary *copy = [existing mutableCopy];
                     copy[@"subscriptionSources"] = owners.allObjects;
                     [merged addObject:copy];
+                } else if(!owners.count) {
+                    continue;
+                } else if(owners.count!=originalOwners.count) {
+                    NSMutableDictionary *copy=[existing mutableCopy];copy[@"subscriptionSources"]=owners.allObjects;[merged addObject:copy];
                 } else {
                     [merged addObject:existing];
                 }
@@ -2439,17 +2507,30 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
                     added++;
                 }
             }
-            if(merged.count>20000){NSString *message=@"合并后频道数量超过 20000 条安全上限，已保留上次有效订阅";[ProfileStore update:sourceKey values:@{@"status":message}];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"playlist",@"failure_stage":@"merged_channel_limit",@"channel_count":@(merged.count)}];[self refreshConfigurationPage];[self log:@"%@",message];return;}
+            if(merged.count>20000){NSString *message=@"合并后频道数量超过 20000 条安全上限，已保留上次有效订阅";[ProfileStore update:sourceKey values:@{@"status":message}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"playlist",@"failure_stage":@"merged_channel_limit",@"channel_count":@(merged.count)}];[self refreshConfigurationPage];[self log:@"%@",message];return;}
             NSArray *owned=[merged filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *c,NSDictionary *b){return [c[@"subscriptionSources"] containsObject:sourceKey];}]];
             NSData *snapshot=[NSJSONSerialization dataWithJSONObject:owned options:0 error:NULL];
-            if(!snapshot.length||snapshot.length>4*1024*1024){NSString *message=@"频道快照超过 4 MiB 安全上限，已保留上次有效订阅";[ProfileStore update:sourceKey values:@{@"status":message}];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"playlist",@"failure_stage":@"snapshot_size_limit",@"snapshot_bytes":@(snapshot.length)}];[self refreshConfigurationPage];[self log:@"%@",message];return;}
+            if(!snapshot.length||snapshot.length>4*1024*1024){NSString *message=@"频道快照超过 4 MiB 安全上限，已保留上次有效订阅";[ProfileStore update:sourceKey values:@{@"status":message}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"playlist",@"failure_stage":@"snapshot_size_limit",@"snapshot_bytes":@(snapshot.length)}];[self refreshConfigurationPage];[self log:@"%@",message];return;}
+            NSArray *disabledBefore=[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[];BOOL migratedDisabled=NO;NSMutableArray *profileOrder=[[NSUserDefaults.standardUserDefaults arrayForKey:@"profileOrder"]?:@[] mutableCopy];NSUInteger replacementOrderIndex=NSNotFound;
+            for(NSString *retiredSource in retiredManagedSources){if([disabledBefore containsObject:retiredSource])migratedDisabled=YES;NSUInteger position=[profileOrder indexOfObject:retiredSource];if(position!=NSNotFound&&position<replacementOrderIndex)replacementOrderIndex=position;[profileOrder removeObject:retiredSource];}
+            if(replacementOrderIndex!=NSNotFound){[profileOrder removeObject:sourceKey];[profileOrder insertObject:sourceKey atIndex:MIN(replacementOrderIndex,profileOrder.count)];[NSUserDefaults.standardUserDefaults setObject:profileOrder forKey:@"profileOrder"];}
+            for(NSString *retiredSource in retiredManagedSources){
+                self.subscriptionRequestVersions[retiredSource]=@([self.subscriptionRequestVersions[retiredSource] unsignedIntegerValue]+1);
+                [self.subscriptionTasks[retiredSource] cancel];[self.subscriptionTasks removeObjectForKey:retiredSource];
+                [self.subscriptionReadiness[retiredSource] cancel];[self.subscriptionReadiness removeObjectForKey:retiredSource];[self.deferredLocalSubscriptions removeObject:retiredSource];
+                NSString *oldOrigin=[self originForURL:[NSURL URLWithString:retiredSource]];if(oldOrigin.length)[self.readyLocalOrigins removeObjectForKey:oldOrigin];
+                [self.subscriptionTraceIDs removeObjectForKey:retiredSource];[self.subscriptionURLs removeObject:retiredSource];[ProfileStore remove:retiredSource];
+            }
+            if(migratedDisabled){NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];if(![disabled containsObject:sourceKey])[disabled addObject:sourceKey];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];}
+            if(retiredManagedSources.count){[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];[self logPluginLine:[NSString stringWithFormat:@"新订阅地址已验证，已替换 %lu 个旧服务地址",(unsigned long)retiredManagedSources.count] identifier:managedService[@"id"] name:managedService[@"name"]];}
             self.allChannels = merged;
             [self.altSources removeAllObjects];for(NSDictionary *c in merged){NSString *url=c[@"remoteURL"],*groupKey=CCTVRouteGroupKey(c);if(!url.length||!groupKey.length)continue;if(!self.altSources[groupKey])self.altSources[groupKey]=[NSMutableArray array];if(![self.altSources[groupKey] containsObject:url])[self.altSources[groupKey] addObject:url];}
             [ProfileStore update:sourceKey values:@{@"cachedChannels":owned,@"status":@"已更新",@"updatedAt":@(NSDate.date.timeIntervalSince1970)}];
+            [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];
             [self applyFilter];
             if([self.tabPage isKindOfClass:ConfigCenterViewController.class])[(ConfigCenterViewController *)self.tabPage reloadProfiles];
             if (skippedInvalidURLs) [self log:@"订阅跳过 %lu 条无效地址（仅允许有效 HTTP/HTTPS URL）", (unsigned long)skippedInvalidURLs];
-            [self log:@"订阅 %@ 新增 %lu 个频道（共 %lu）", sourceKey, (unsigned long)added, (unsigned long)list.count];
+            [self log:@"订阅 %@ 新增 %lu 个频道（共 %lu）", CCTVServiceLogAddress(sourceKey), (unsigned long)added, (unsigned long)list.count];
 }
 - (void)applyPlaylistText:(NSString *)text source:(NSString *)sourceKey {
     NSString *traceID=NSUUID.UUID.UUIDString.lowercaseString;
@@ -2459,6 +2540,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if(!list.count){
         [RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"imported_text", @"correlation_id":traceID, @"input_bytes":@(byteCount), @"channel_count":@0, @"failure_stage":text.length?@"no_valid_channels":@"empty_input"}];
         [ProfileStore update:sourceKey values:@{@"status":@"无有效 HTTP/HTTPS 频道，保留上次频道"}];
+        [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];
         [self refreshConfigurationPage];
         return;
     }
@@ -2490,16 +2572,30 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt];
     [self recordStartupStage:@"teardown"];
     self.titleLabel.text=[NSString stringWithFormat:@"%@ · 连接中",self.channelName];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;self.infoLabel.text=@"";[self.spinner startAnimating];
-    [self.table reloadData];[self.channelGrid reloadData];[self log:@"订阅起播 %@ [%lu]",u,(unsigned long)generation];
-    NSDictionary *service=[self localServiceForURL:[NSURL URLWithString:u]];
+    [self.table reloadData];[self.channelGrid reloadData];[self log:@"订阅起播 %@ [%lu]",CCTVServiceLogAddress(u),(unsigned long)generation];
+    NSDictionary *service=[self localServiceForChannel:ch URL:[NSURL URLWithString:u]];
     if(!service){[self startRemoteURL:u generation:generation];return;}
-    NSError *error=nil;
     if(![PyHost isRunningServiceIdentifier:service[@"id"]]){
-        if([service[@"builtin"] boolValue]){BOOL started=[self startService:service error:&error];[RuntimeDiagnostics.shared recordEvent:started?@"service_start_accepted":@"service_start_failed" category:@"service" fields:@{@"correlation_id":self.currentPlaybackTraceID?:@"", @"trigger":@"playback", @"service_id":service[@"id"]?:@"", @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"python", @"port":service[@"port"]?:@0, @"start_phase":started?@"request_accepted":@"rejected", @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@""}];if(!started){[self failRemoteReadiness:error generation:generation];return;}}
-        else{error=[NSError errorWithDomain:@"CCTVHostService" code:2 userInfo:@{NSLocalizedDescriptionKey:@"请先在服务页启动此自定义 Python 服务。"}];[self failRemoteReadiness:error generation:generation];return;}
+        self.titleLabel.text=[NSString stringWithFormat:@"%@ · 正在启动本机服务",self.channelName];
+        self.infoLabel.text=@"频道请求会启动其所属服务，并在接口就绪后继续播放。";
+        NSMutableDictionary *fields=[@{@"correlation_id":self.currentPlaybackTraceID?:@"", @"playback_generation":@(generation), @"service_id":service[@"id"]?:@"", @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"unknown", @"port":service[@"port"]?:@0, @"trigger":@"channel_playback"} mutableCopy];[fields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:u])];[RuntimeDiagnostics.shared recordEvent:@"local_service_start_for_playback_requested" category:@"service" fields:fields];
+        [self logPluginLine:@"收到频道播放请求，正在启动本机服务" identifier:service[@"id"] name:service[@"name"]];
+        __weak typeof(self) weakSelf=self;
+        [self changeService:service enabled:YES completion:^(NSError *startError){
+            RootViewController *owner=weakSelf;if(!owner||generation!=owner.playbackGeneration)return;
+            NSMutableDictionary *result=[fields mutableCopy];result[@"result"]=startError?@"failed":@"accepted";if(startError){result[@"error_domain"]=startError.domain?:@"";result[@"error_code"]=@(startError.code);result[@"error_message"]=startError.localizedDescription?:@"";}[RuntimeDiagnostics.shared recordEvent:@"local_service_start_for_playback_result" category:@"service" fields:result];
+            if(startError){[owner failRemoteReadiness:startError generation:generation];return;}
+            if(![PyHost isRunningServiceIdentifier:service[@"id"]]){NSError *stateError=[NSError errorWithDomain:@"CCTVHostService" code:3 userInfo:@{@"NSLocalizedDescriptionKey":@"服务启动请求已接受，但运行状态尚未确认。请查看服务日志后重试。"}];[owner failRemoteReadiness:stateError generation:generation];return;}
+            [owner continueRemotePlaybackForURL:u service:service generation:generation];
+        }];
+        return;
     }
+    [self continueRemotePlaybackForURL:u service:service generation:generation];
+}
+- (void)continueRemotePlaybackForURL:(NSString *)u service:(NSDictionary *)service generation:(NSUInteger)generation {
+    if(generation!=self.playbackGeneration)return;
     if(![PyHost isRunningServiceIdentifier:service[@"id"]]){
-        [self failRemoteReadiness:[NSError errorWithDomain:@"CCTVHostService" code:3 userInfo:@{NSLocalizedDescriptionKey:@"当前运行的服务与频道端口不一致，请检查服务配置。"}] generation:generation];return;
+        [self failRemoteReadiness:[NSError errorWithDomain:@"CCTVHostService" code:3 userInfo:@{@"NSLocalizedDescriptionKey":@"当前运行的服务与频道端口不一致，请检查服务配置。"}] generation:generation];return;
     }
     NSNumber *readyAt=self.readyLocalOrigins[[self originForURL:[NSURL URLWithString:u]]];
     if(readyAt && CACurrentMediaTime()-readyAt.doubleValue<5){
@@ -2508,18 +2604,19 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         [self startRemoteURL:u generation:generation];return;
     }
     self.titleLabel.text=[NSString stringWithFormat:@"%@ · 等待本机服务",self.channelName];
+    self.infoLabel.text=@"正在检查此频道的本机接口，成功后开始请求视频。";
     LocalServiceReadiness *probe=[self readinessForURL:[NSURL URLWithString:u] service:service];self.playbackReadiness=probe;__weak typeof(self) w=self;
     [probe start:^(NSError *error,NSTimeInterval elapsed){
         if(generation!=w.playbackGeneration||w.playbackReadiness!=probe)return;
         w.playbackReadiness=nil;NSMutableDictionary *probeFields=[@{@"correlation_id":w.currentPlaybackTraceID?:@"", @"playback_generation":@(generation), @"service_id":service[@"id"]?:@"", @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"unknown", @"port":service[@"port"]?:@0, @"elapsed_ms":@((NSInteger)(elapsed*1000))} mutableCopy];[probeFields addEntriesFromDictionary:probe.diagnosticSummary];[probeFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:u])];
         probeFields[@"probe_result"]=error?@"failed":@"ready";if(error){probeFields[@"error_domain"]=error.domain?:@"";probeFields[@"error_code"]=@(error.code);probeFields[@"error_message"]=error.localizedDescription?:@"";}[RuntimeDiagnostics.shared recordEvent:@"playback_readiness_probe_result" category:@"service" fields:probeFields];
-        if(error){[w failRemoteReadiness:error generation:generation];return;}
+        if(error){[w logPluginLine:[NSString stringWithFormat:@"播放接口健康检查失败 · %@",[HostLogRedactor redactText:error.localizedDescription?:@"未知错误"]] identifier:service[@"id"] name:service[@"name"]];[w failRemoteReadiness:error generation:generation];return;}
         w.readyLocalOrigins[[w originForURL:[NSURL URLWithString:u]]]=@(CACurrentMediaTime());[w recordStartupStage:@"service"];
-        [w log:@"本机服务 HTTP 就绪 %.2fs",elapsed];[w startRemoteURL:u generation:generation];
+        [w logPluginLine:[NSString stringWithFormat:@"播放接口健康检查通过 · %.2f 秒",elapsed] identifier:service[@"id"] name:service[@"name"]];[w log:@"本机服务 HTTP 就绪 %.2fs",elapsed];[w startRemoteURL:u generation:generation];
     }];
 }
 - (void)failRemoteReadiness:(NSError *)error generation:(NSUInteger)generation {
-    if(generation!=self.playbackGeneration)return;NSDictionary *service=[self localServiceForURL:[NSURL URLWithString:self.currentRemoteURL?:@""]];NSMutableDictionary *fields=[@{@"correlation_id":self.currentPlaybackTraceID?:@"", @"playback_generation":@(generation), @"failure_stage":error.code==1?@"health_probe_timeout":@"service_start_or_state", @"service_id":service[@"id"]?:@"", @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"unknown", @"port":service[@"port"]?:@0, @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@""} mutableCopy];[fields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:self.currentRemoteURL?:@""])];[RuntimeDiagnostics.shared recordEvent:@"playback_readiness_failed" category:@"service" fields:fields];self.remotePlaybackFailed=YES;[self endPlaybackPriority];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 服务未就绪",self.channelName];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;[self log:@"本机续播失败 %@",error.localizedDescription];self.infoLabel.text=@"点按“重试”重新连接本机服务";
+    if(generation!=self.playbackGeneration)return;NSDictionary *service=[self localServiceForURL:[NSURL URLWithString:self.currentRemoteURL?:@""]];NSMutableDictionary *fields=[@{@"correlation_id":self.currentPlaybackTraceID?:@"", @"playback_generation":@(generation), @"failure_stage":error.code==1?@"health_probe_timeout":@"service_start_or_state", @"service_id":service[@"id"]?:@"", @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"unknown", @"port":service[@"port"]?:@0, @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@""} mutableCopy];[fields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:self.currentRemoteURL?:@""])];[RuntimeDiagnostics.shared recordEvent:@"playback_readiness_failed" category:@"service" fields:fields];self.remotePlaybackFailed=YES;[self endPlaybackPriority];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 服务未就绪",self.channelName];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;NSString *reason=[HostLogRedactor redactText:error.localizedDescription?:@""];if(service)[self logPluginLine:[NSString stringWithFormat:@"播放接口未就绪 · %@",reason.length?reason:@"无可用错误详情"] identifier:service[@"id"] name:service[@"name"]];[self log:@"本机续播失败 %@",reason];self.infoLabel.text=reason.length?[NSString stringWithFormat:@"%@\n查看该服务日志后重试。",reason]:@"服务未就绪。查看该服务日志后重试。";
 }
 - (void)startRemoteURL:(NSString *)url generation:(NSUInteger)generation {
     if(generation!=self.playbackGeneration)return;
@@ -2537,7 +2634,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(), ^{
         if(generation!=w.playbackGeneration||item!=w.avPlayer.currentItem||w.firstRender)return;
         NSMutableDictionary *timeoutFields=[@{@"player":@"AVPlayer", @"timeout_seconds":@12, @"playback_generation":@(generation), @"correlation_id":w.currentPlaybackTraceID?:@""} mutableCopy];[timeoutFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:w.currentRemoteURL])];[RuntimeDiagnostics.shared recordEvent:@"playback_first_frame_timeout" category:@"playback" fields:timeoutFields];
-        [w.spinner stopAnimating];w.remotePlaybackFailed=YES;w.titleLabel.hidden=NO;w.titleLabel.text=[NSString stringWithFormat:@"%@ · 等待视频首帧",w.channelName];w.infoLabel.hidden=NO;w.infoLabel.text=@"仍可等待，或点按“重试”重新连接";[w.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];w.playPauseBtn.enabled=YES;[w log:@"订阅 12 秒未渲染首帧（并非播放器就绪时间）"];
+        [w.spinner stopAnimating];w.remotePlaybackFailed=YES;w.titleLabel.hidden=NO;w.titleLabel.text=[NSString stringWithFormat:@"%@ · 等待视频首帧",w.channelName];w.infoLabel.hidden=NO;w.infoLabel.text=@"仍可等待，或点按“重试”重新连接";[w.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];w.playPauseBtn.enabled=YES;NSDictionary *service=[w localServiceForURL:[NSURL URLWithString:w.currentRemoteURL?:@""]];if(service)[w logPluginLine:@"接口已请求，但 12 秒内未收到视频首帧" identifier:service[@"id"] name:service[@"name"]];[w log:@"订阅 12 秒未渲染首帧（并非播放器就绪时间）"];
     });
 }
 
@@ -2558,7 +2655,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.remoteFailureRecoveryPending=YES;
     [self.readyLocalOrigins removeObjectForKey:[self originForURL:[NSURL URLWithString:self.currentRemoteURL]]];
     [self endPlaybackPriority];[self.spinner stopAnimating];
-    [self log:@"订阅播放失败 %@",error.localizedDescription?:@"未知错误"];
+    NSString *safeReason=[HostLogRedactor redactText:error.localizedDescription?:@"未知错误"];NSDictionary *failedService=[self localServiceForURL:[NSURL URLWithString:self.currentRemoteURL?:@""]];if(failedService)[self logPluginLine:[NSString stringWithFormat:@"播放器请求失败 · %@",safeReason] identifier:failedService[@"id"] name:failedService[@"name"]];[self log:@"订阅播放失败 %@",safeReason];
     if(retrySameURL){
         self.remoteRetryCount++;NSUInteger generation=self.playbackGeneration;NSString *url=self.currentRemoteURL?:@"";
         NSDictionary *retry=@{@"id":self.channelID?:url,@"name":self.channelName?:url,@"remoteURL":url,@"nativePlainRoute":@(self.nativePlainRouteActive)};
@@ -2607,7 +2704,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         NSURL *playingURL=[NSURL URLWithString:self.currentRemoteURL];NSDictionary *service=[self localServiceForURL:playingURL];
         if(service && [PyHost isRunningServiceIdentifier:service[@"id"]])self.readyLocalOrigins[[self originForURL:playingURL]]=@(CACurrentMediaTime());
         self.firstRender=YES;self.remotePlaybackFailed=NO;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;[self endPlaybackPriority];self.firstFrameSeconds=CACurrentMediaTime()-self.playStartedAt;[self recordStartupStage:@"frame"];
-        NSMutableDictionary *frameFields=[@{@"player":@"AVPlayer", @"elapsed_ms":@((NSInteger)(self.firstFrameSeconds*1000)), @"playback_generation":@(self.playbackGeneration), @"correlation_id":self.currentPlaybackTraceID?:@""} mutableCopy];[frameFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:self.currentRemoteURL])];[RuntimeDiagnostics.shared recordEvent:@"playback_first_frame" category:@"playback" fields:frameFields];
+        NSMutableDictionary *frameFields=[@{@"player":@"AVPlayer", @"elapsed_ms":@((NSInteger)(self.firstFrameSeconds*1000)), @"playback_generation":@(self.playbackGeneration), @"correlation_id":self.currentPlaybackTraceID?:@""} mutableCopy];[frameFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:self.currentRemoteURL])];[RuntimeDiagnostics.shared recordEvent:@"playback_first_frame" category:@"playback" fields:frameFields];if(service)[self logPluginLine:[NSString stringWithFormat:@"视频首帧已渲染 · %.2f 秒 · %@",self.firstFrameSeconds,self.startupTrace.summary] identifier:service[@"id"] name:service[@"name"]];
         [self.spinner stopAnimating];self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;[self loadPlayerChannelLogoAfterFirstFrame];[self updateNowPlaying];[self refreshNowNext];[self restartEPGTimer];
         [self log:@"订阅视频首帧 %.2fs · %@",self.firstFrameSeconds,self.startupTrace.summary];return;
     }
@@ -3068,7 +3165,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)previewChannel:(NSDictionary *)ch {
     if(self.currentPlayer||self.avPlayer||self.playbackReadiness){[self showServiceError:@"为保证正式播放，预览仅在没有频道播放时启动。"];return;}
     NSString *url=[self stableURLKey:ch[@"remoteURL"]];if(!url.length)return;
-    NSDictionary *localService=[self localServiceForURL:[NSURL URLWithString:url]];if(localService&&![PyHost isRunningServiceIdentifier:localService[@"id"]]){[self showServiceError:@"请先启动该频道的本机服务。"];return;}
+    NSDictionary *localService=[self localServiceForChannel:ch URL:[NSURL URLWithString:url]];if(localService&&![PyHost isRunningServiceIdentifier:localService[@"id"]]){[self showServiceError:@"请先启动该频道的本机服务。"];return;}
     [self stopPreview];self.previewPlayer=[AVPlayer playerWithURL:[NSURL URLWithString:url]];self.previewPlayer.muted=YES;self.previewLayer=[AVPlayerLayer playerLayerWithPlayer:self.previewPlayer];
     UIView *box=[[UIView alloc] initWithFrame:CGRectMake(16,self.view.safeAreaInsets.top+12,MIN(280,self.view.bounds.size.width-32),158)];box.backgroundColor=UIColor.blackColor;box.layer.cornerRadius=14;box.clipsToBounds=YES;self.previewBox=box;[self.view addSubview:box];self.previewLayer.frame=box.bounds;self.previewLayer.videoGravity=AVLayerVideoGravityResizeAspect;[box.layer addSublayer:self.previewLayer];
     UIButton *close=[UIButton buttonWithType:UIButtonTypeSystem];[close setTitle:@"关闭预览" forState:UIControlStateNormal];close.backgroundColor=[UIColor colorWithWhite:0 alpha:0.6];close.frame=CGRectMake(180,0,100,44);[close addTarget:self action:@selector(stopPreview) forControlEvents:UIControlEventTouchUpInside];[box addSubview:close];[self.previewPlayer play];__weak typeof(self) w=self;self.previewTimer=[NSTimer scheduledTimerWithTimeInterval:30 repeats:NO block:^(NSTimer *t){[w stopPreview];}];

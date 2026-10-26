@@ -25,6 +25,13 @@ class NativeMediaAPITests(unittest.TestCase):
                     payload = {"code": 0, "msg": "ok", "page": 1, "list": []}
                 elif query.get("play") == ["web-episode"]:
                     payload = {"code": 1, "url": "https://resolver.example/watch?id=fixture", "parse": 1, "jx": 1}
+                elif query.get("play") == ["quality-specific"]:
+                    payload = {"code": 1, "url": [
+                        {"name": "高清", "url": "https://cdn.example/high.m3u8",
+                         "headers": {"X-Quality": "high"}},
+                        {"name": "流畅", "url": "https://cdn.example/low.m3u8",
+                         "header": "X-Quality$low"}],
+                        "header": {"X-Playback": "shared"}}
                 elif query.get("play"):
                     payload = {"code": 1, "playUrl": "https://cdn.example/", "url": ["标清", "low.m3u8", "高清", "high.m3u8"], "parse": 0, "header": {"X-Playback": "fixture"}, "UA": "FixtureUA/1"}
                 elif query.get("ids"):
@@ -69,7 +76,7 @@ class NativeMediaAPITests(unittest.TestCase):
             self.assertTrue(all(header == "header" for _, header, _ in requests), "source headers reach each API request")
             self.assertTrue(all(host.startswith("127.0.0.1:") for _, _, host in requests), "untrusted Host headers cannot override the API host")
             self.assertTrue(all(query.get("token") == ["fixture"] and query.get("extend") == ['{"region":"cn"}'] for query, _, _ in requests))
-            self.assertEqual(len(requests), 8, "type 1 play is resolved locally and does not make an API request")
+            self.assertEqual(len(requests), 9, "type 1 play is resolved locally and does not make an API request")
         finally:
             server.shutdown()
             server.server_close()

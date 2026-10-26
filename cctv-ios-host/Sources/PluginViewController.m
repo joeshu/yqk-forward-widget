@@ -109,9 +109,7 @@
 
 - (UIView *)card {
     UIView *v = [UIView new];
-    v.backgroundColor = HostCard();
-    v.layer.cornerRadius = 18;
-    v.clipsToBounds = YES;
+    HostStyleGlassCard(v,18);
     return v;
 }
 - (UIStackView *)verticalStack {
@@ -125,6 +123,7 @@
 }
 - (UIButton *)button:(NSString *)title action:(SEL)action {
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+    HostInstallPressFeedback(b);
     [b setTitle:title forState:UIControlStateNormal];
     b.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     [b setTitleColor:HostText() forState:UIControlStateNormal];

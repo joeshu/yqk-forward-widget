@@ -1,5 +1,6 @@
 #import "HostBackup.h"
 #import "ServiceStore.h"
+#import "ProfileStore.h"
 #import "HostLogBuffer.h"
 #import "MediaMetadataCache.h"
 #import "MediaPlaybackStateStore.h"
@@ -17,6 +18,26 @@ static NSData *encode(id object) {
 }
 int main(void) {
     @autoreleasepool {
+        NSString *pythonPlaylist=@"from flask import Flask\napp = Flask(__name__)\n@app.route('/all.m3u')\ndef playlist():\n    return '#EXTM3U\\n#EXTINF:-1,测试频道\\nhttps://example.com/live.m3u8'\n";
+        check([[ServiceStore inferredPlaylistPathInCode:pythonPlaylist] isEqual:@"/all.m3u"],@"Python HTTP M3U route is inferred from its actual route declaration");
+        NSString *commentOnly=@"# @app.route('/all.m3u')\n# return '#EXTM3U'\n";
+        check([ServiceStore inferredPlaylistPathInCode:commentOnly]==nil,@"commented examples never become automatic service subscriptions");
+        check([[ServiceStore subscriptionURLForService:@{@"id":@"python-http-fixture",@"port":@18769,@"protocol":@"python-http",@"playlistPath":@"/all.m3u"}] isEqual:@"http://127.0.0.1:18769/all.m3u"],@"Python HTTP service creates its exact loopback subscription address");
+        NSString *managedURL=@"http://127.0.0.1:18769/all.m3u",*unrelatedURL=@"https://other.example/live.m3u",*guideURL=@"https://guide.example/xmltv.xml";
+        [NSUserDefaults.standardUserDefaults setObject:@[unrelatedURL,managedURL] forKey:@"subscriptions"];
+        [ProfileStore update:unrelatedURL values:@{@"managedServiceID":@"another-service",@"epgURL":@"https://other.example/epg.xml"}];
+        [ProfileStore update:managedURL values:@{@"managedServiceID":@"python-http-fixture",@"detectedEPGURL":guideURL}];
+        NSDictionary *managedService=@{@"id":@"python-http-fixture",@"port":@18769,@"protocol":@"python-http",@"playlistPath":@"/all.m3u"};
+        check([[ServiceStore epgURLForService:managedService] isEqual:guideURL],@"service EPG resolves from its exact managed playlist instead of another source");
+        [NSUserDefaults.standardUserDefaults setObject:@[unrelatedURL] forKey:@"subscriptions"];
+        check([ServiceStore epgURLForService:@{@"id":@"python-http-fixture",@"port":@18770,@"protocol":@"python-http"}]==nil,@"service without a route never inherits another subscription EPG");
+        [ProfileStore update:unrelatedURL values:@{@"managedServiceID":@"python-http-fixture",@"epgURL":guideURL}];
+        check([[ServiceStore epgURLForService:@{@"id":@"python-http-fixture",@"port":@18770,@"protocol":@"python-http"}] isEqual:guideURL],@"explicit service EPG remains available during local port migration");
+        NSString *legacyURL=@"http://127.0.0.1:18768/custom.m3u";[NSUserDefaults.standardUserDefaults setObject:@[legacyURL,unrelatedURL] forKey:@"subscriptions"];[ProfileStore update:legacyURL values:@{@"name":@"旧服务频道"}];
+        [ServiceStore associateLegacyLoopbackSubscriptionsForService:@{@"id":@"legacy-http-fixture",@"port":@18768}];
+        check([[ProfileStore metadata:legacyURL][@"managedServiceID"] isEqual:@"legacy-http-fixture"],@"legacy loopback playlist is linked to its matching service port");
+        check([[ProfileStore metadata:legacyURL][@"name"] isEqual:@"旧服务频道"],@"linking legacy playlist preserves its user label");
+        check(![ProfileStore metadata:unrelatedURL][@"managedServiceID"]||[[ProfileStore metadata:unrelatedURL][@"managedServiceID"] isEqual:@"python-http-fixture"],@"legacy association never claims a remote or differently managed source");
         HostLogBuffer *logs=[[HostLogBuffer alloc] initWithMaximumCharacters:64];
         check([logs append:@"first"], @"first log schedules a notification");
         check(![logs append:@"second"], @"pending log delivery is coalesced");

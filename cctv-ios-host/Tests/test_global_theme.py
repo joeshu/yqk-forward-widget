@@ -36,6 +36,10 @@ class GlobalThemeContracts(unittest.TestCase):
         self.assertIn("HostStyleGlassCard(cell.contentView,9)", root)
         self.assertIn("HostStyleGlassCard(self.contentView,10)", media)
         self.assertIn("HostAnimateSelection", theme)
+        self.assertIn("UIVisualEffectView *glass=objc_getAssociatedObject", theme)
+        self.assertIn("HostInstallPressFeedback(button)", theme)
+        self.assertIn("UIControlEventTouchDown", theme)
+        self.assertIn("HostInstallPressFeedback(b)", (ROOT / "Sources/HostToolbar.h").read_text(encoding="utf-8"))
         self.assertIn("UIAccessibilityIsReduceMotionEnabled()", theme)
         self.assertIn("hasDifferentColorAppearanceComparedToTraitCollection", root)
         self.assertIn("HostRefreshAppearanceLayers(self.view.window)", root)
@@ -44,6 +48,7 @@ class GlobalThemeContracts(unittest.TestCase):
         self.assertNotIn("CAConstraint", theme)
         self.assertIn("extern char HostAppearanceRefreshAssociationKey", theme)
         self.assertIn("char HostAppearanceRefreshAssociationKey", theme_impl)
+        self.assertIn("char HostGlassEffectAssociationKey", theme_impl)
 
     def test_primary_pages_use_shared_dynamic_palette(self):
         pages = (
@@ -71,6 +76,7 @@ class GlobalThemeContracts(unittest.TestCase):
     def test_video_canvas_remains_black_in_both_themes(self):
         playback = (ROOT / "Sources/MediaPlaybackViewController.m").read_text(encoding="utf-8")
         self.assertIn("self.videoView.backgroundColor=UIColor.blackColor", playback)
+        self.assertIn("HostStyleGlassCard(self.controlPanel,18)", playback)
 
 
 if __name__ == "__main__":

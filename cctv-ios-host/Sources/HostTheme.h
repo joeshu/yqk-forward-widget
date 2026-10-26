@@ -6,6 +6,8 @@ static NSString * const HostDarkThemePreferenceKey = @"hostDarkTheme";
 static NSString * const HostThemeModePreferenceKey = @"hostThemeMode";
 extern char HostLayerBorderColorAssociationKey;
 extern char HostAppearanceRefreshAssociationKey;
+extern char HostGlassEffectAssociationKey;
+extern char HostPressFeedbackAssociationKey;
 
 static inline NSString *HostThemeMode(void) {
     NSString *mode=[NSUserDefaults.standardUserDefaults stringForKey:HostThemeModePreferenceKey];
@@ -41,7 +43,7 @@ static inline UIUserInterfaceStyle HostSelectedInterfaceStyle(void) {
 
 static inline UIColor *HostBackground(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.018 green:0.021 blue:0.032 alpha:0.94]:[UIColor colorWithRed:0.925 green:0.938 blue:0.965 alpha:0.92];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.018 green:0.021 blue:0.032 alpha:0.90]:[UIColor colorWithRed:0.925 green:0.938 blue:0.965 alpha:0.87];}];});return color;
 }
 static inline UIColor *HostCard(void) {
     static UIColor *color;static dispatch_once_t once;
@@ -114,12 +116,46 @@ static inline void HostInstallGlassBackdrop(UIView *target) {
 
 static inline void HostStyleGlassCard(UIView *view, CGFloat radius) {
     if(!view)return;
-    view.backgroundColor=HostCard();
+    UIVisualEffectView *glass=objc_getAssociatedObject(view,&HostGlassEffectAssociationKey);
+    if(!glass){
+        glass=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];
+        glass.frame=view.bounds;
+        glass.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+        glass.userInteractionEnabled=NO;
+        glass.clipsToBounds=YES;
+        UIView *tint=[[UIView alloc] initWithFrame:glass.contentView.bounds];
+        tint.backgroundColor=HostGlassTint();
+        tint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+        tint.userInteractionEnabled=NO;
+        [glass.contentView addSubview:tint];
+        [view insertSubview:glass atIndex:0];
+        objc_setAssociatedObject(view,&HostGlassEffectAssociationKey,glass,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    glass.layer.cornerRadius=radius;
+    view.backgroundColor=UIColor.clearColor;
     view.layer.cornerRadius=radius;
     view.layer.cornerCurve=kCACornerCurveContinuous;
     view.layer.borderWidth=.7;
     HostSetLayerBorderColor(view,HostBorder());
     view.clipsToBounds=YES;
+}
+
+static inline void HostInstallPressFeedback(UIButton *button) {
+    if(!button||objc_getAssociatedObject(button,&HostPressFeedbackAssociationKey))return;
+    __weak UIButton *weakButton=button;
+    UIAction *press=[UIAction actionWithHandler:^(UIAction *action){
+        UIButton *target=weakButton;
+        if(!target||UIAccessibilityIsReduceMotionEnabled())return;
+        [UIView animateWithDuration:.10 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{target.transform=CGAffineTransformMakeScale(.97,.97);} completion:nil];
+    }];
+    UIAction *releaseAction=[UIAction actionWithHandler:^(UIAction *action){
+        UIButton *target=weakButton;
+        if(!target||UIAccessibilityIsReduceMotionEnabled())return;
+        [UIView animateWithDuration:.22 delay:0 usingSpringWithDamping:.78 initialSpringVelocity:.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{target.transform=CGAffineTransformIdentity;} completion:nil];
+    }];
+    [button addAction:press forControlEvents:UIControlEventTouchDown|UIControlEventTouchDragEnter];
+    [button addAction:releaseAction forControlEvents:UIControlEventTouchDragExit|UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
+    objc_setAssociatedObject(button,&HostPressFeedbackAssociationKey,@[press,releaseAction],OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 static inline void HostAnimateSelection(UIView *view) {
@@ -142,6 +178,7 @@ static inline void HostRefreshAppearanceLayers(UIView *view) {
 }
 
 static inline void HostStylePillButton(UIButton *button, BOOL primary) {
+    HostInstallPressFeedback(button);
     button.contentEdgeInsets = UIEdgeInsetsMake(10, 16, 10, 16);
     button.layer.cornerRadius = 18;
     button.layer.cornerCurve = kCACornerCurveContinuous;

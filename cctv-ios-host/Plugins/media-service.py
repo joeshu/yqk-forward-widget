@@ -24,6 +24,12 @@ def is_hls_url(url):
     return path.endswith(('.m3u8', '.m3u'))
 
 
+def is_extensionless_url(url):
+    path = urllib.parse.urlsplit(str(url or '')).path
+    name = path.rsplit('/', 1)[-1]
+    return bool(name) and '.' not in name
+
+
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
@@ -346,14 +352,19 @@ class Handler(BaseHTTPRequestHandler):
             result = runtime.call(operation, args)
             if operation in ('home', 'category', 'search', 'detail'):
                 result = self.relay_artwork(result)
-            if (operation == 'play' and (result.get('headers') or is_hls_url(result.get('url')))
-                    and (not result.get('parse') or is_direct_media_url(result.get('url')))):
+            if operation == 'play':
                 headers = result.get('headers') or {}
                 diagnostic_id = correlation_id or request_id
-                def relay_media_url(address):
-                    token = self.server.relay.register(address, headers, diagnostic_id=diagnostic_id)
+                def relay_media_url(address, request_headers):
+                    token = self.server.relay.register(address, request_headers, diagnostic_id=diagnostic_id)
                     return f'http://127.0.0.1:{self.server.server_port}/media/{token}'
-                result = dict(result, originalURL=result['url'], url=relay_media_url(result['url']))
+                result = dict(result)
+                can_relay_primary = ((headers or is_hls_url(result.get('url'))
+                                     or is_extensionless_url(result.get('url')))
+                                     and (not result.get('parse') or is_direct_media_url(result.get('url'))))
+                if can_relay_primary:
+                    result['originalURL'] = result['url']
+                    result['url'] = relay_media_url(result['url'], headers)
                 alternates = result.get('alternates')
                 if isinstance(alternates, list):
                     relayed = []
@@ -362,9 +373,12 @@ class Handler(BaseHTTPRequestHandler):
                             continue
                         alternate = dict(alternate)
                         address = alternate['url']
-                        if headers or is_hls_url(address):
+                        alternate_headers = dict(headers)
+                        alternate_headers.update(alternate.get('headers') or {})
+                        if ((alternate_headers or is_hls_url(address) or is_extensionless_url(address))
+                                and (not result.get('parse') or is_direct_media_url(address))):
                             alternate['originalURL'] = address
-                            alternate['url'] = relay_media_url(address)
+                            alternate['url'] = relay_media_url(address, alternate_headers)
                         relayed.append(alternate)
                     result['alternates'] = relayed
             self.send(200, {'ok': True, 'data': result})
