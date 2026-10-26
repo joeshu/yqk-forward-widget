@@ -23,7 +23,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
         UIView *card=[UIView new];card.translatesAutoresizingMaskIntoConstraints=NO;card.backgroundColor=HostCard();card.layer.cornerRadius=13;card.layer.cornerCurve=kCACornerCurveContinuous;
         [self.contentView addSubview:card];
         self.categoryDot=[UIView new];self.categoryDot.translatesAutoresizingMaskIntoConstraints=NO;self.categoryDot.layer.cornerRadius=3;
-        self.messageLabel=[UILabel new];self.messageLabel.translatesAutoresizingMaskIntoConstraints=NO;self.messageLabel.numberOfLines=0;self.messageLabel.font=[UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];self.messageLabel.textColor=HostMutedText();self.messageLabel.lineBreakMode=NSLineBreakByCharWrapping;
+        self.messageLabel=[UILabel new];self.messageLabel.translatesAutoresizingMaskIntoConstraints=NO;self.messageLabel.numberOfLines=0;self.messageLabel.font=[[UIFontMetrics defaultMetrics] scaledFontForFont:[UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular]];self.messageLabel.adjustsFontForContentSizeCategory=YES;self.messageLabel.textColor=HostMutedText();self.messageLabel.lineBreakMode=NSLineBreakByCharWrapping;
         [card addSubview:self.categoryDot];[card addSubview:self.messageLabel];
         [NSLayoutConstraint activateConstraints:@[
             [card.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
@@ -53,6 +53,10 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 @property(nonatomic,copy) NSArray<NSString *> *allLines;
 @property(nonatomic,copy) NSArray<NSString *> *visibleLines;
 @property(nonatomic) BOOL refreshScheduled;
+@property(nonatomic) BOOL pageVisible;
+@property(nonatomic) BOOL observingLogUpdates;
+@property(nonatomic) BOOL hasLoadedSnapshot;
+- (void)applyFilterFollowingTail:(BOOL)followsTail;
 @end
 
 @implementation LogCenterViewController
@@ -96,21 +100,44 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
         [self.emptyLabel.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
         [self.emptyLabel.centerYAnchor constraintEqualToAnchor:self.tableView.centerYAnchor]
     ]];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(scheduleRefresh) name:CCTVHostDiagnosticLogDidUpdateNotification object:nil];
-    [self refreshLog];
 }
 - (void)dealloc {[[NSNotificationCenter defaultCenter] removeObserver:self];}
-- (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];[self refreshLog];}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    self.pageVisible=YES;
+    if(!self.observingLogUpdates){
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(scheduleRefresh) name:CCTVHostDiagnosticLogDidUpdateNotification object:nil];
+        self.observingLogUpdates=YES;
+    }
+    [self refreshLog];
+}
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+    self.pageVisible=NO;
+    if(self.observingLogUpdates){
+        [[NSNotificationCenter defaultCenter] removeObserver:self name:CCTVHostDiagnosticLogDidUpdateNotification object:nil];
+        self.observingLogUpdates=NO;
+    }
+    self.refreshScheduled=NO;
+}
 - (void)scheduleRefresh {
-    if(self.refreshScheduled)return;self.refreshScheduled=YES;__weak typeof(self) weakSelf=self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),dispatch_get_main_queue(),^{weakSelf.refreshScheduled=NO;[weakSelf refreshLog];});
+    if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf scheduleRefresh];});return;}
+    if(!self.pageVisible||self.refreshScheduled)return;self.refreshScheduled=YES;__weak typeof(self) weakSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),dispatch_get_main_queue(),^{LogCenterViewController *owner=weakSelf;if(!owner)return;owner.refreshScheduled=NO;if(owner.pageVisible)[owner refreshLog];});
 }
 - (void)refreshLog {
+    if(!self.pageVisible)return;
     NSString *text=self.logSnapshotProvider?self.logSnapshotProvider():@"";
     NSMutableArray *lines=[NSMutableArray array];for(NSString *line in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet])if(line.length)[lines addObject:line];
-    self.allLines=lines;[self applyFilter];
+    if(self.hasLoadedSnapshot&&[self.allLines isEqualToArray:lines])return;
+    BOOL followsTail=!self.hasLoadedSnapshot||(self.tableView.window&&self.visibleLines.count>0&&
+        self.tableView.contentSize.height-(self.tableView.contentOffset.y+self.tableView.bounds.size.height-self.tableView.adjustedContentInset.bottom)<=48);
+    self.allLines=lines;self.hasLoadedSnapshot=YES;[self applyFilterFollowingTail:followsTail];
 }
 - (void)applyFilter {
+    [self applyFilterFollowingTail:NO];
+}
+- (void)applyFilterFollowingTail:(BOOL)followsTail {
     NSString *query=self.searchBar.text?:@"";NSInteger selected=self.categories.selectedSegmentIndex;NSMutableArray *filtered=[NSMutableArray array];
     for(NSString *line in self.allLines){
         DiagnosticLogCategory category=[self categoryForLine:line];
@@ -121,7 +148,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
         [filtered addObject:line];
     }
     self.visibleLines=filtered;self.summaryLabel.text=[NSString stringWithFormat:@"共 %lu 条 · 实时刷新",(unsigned long)filtered.count];self.emptyLabel.hidden=filtered.count>0;self.tableView.hidden=filtered.count==0;[self.tableView reloadData];
-    if(filtered.count&&query.length==0&&selected==0)[self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:filtered.count-1 inSection:0] atScrollPosition:UITableViewScrollPositionBottom animated:NO];
+    if(followsTail&&filtered.count&&query.length==0&&selected==0)[self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:filtered.count-1 inSection:0] atScrollPosition:UITableViewScrollPositionBottom animated:NO];
 }
 - (DiagnosticLogCategory)categoryForLine:(NSString *)line {
     NSString *lower=line.lowercaseString;
@@ -137,12 +164,12 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     DiagnosticLogLineCell *cell=[tableView dequeueReusableCellWithIdentifier:@"diagnostic.line" forIndexPath:indexPath];NSString *line=self.visibleLines[indexPath.row];UIColor *color=[self colorForLine:line];cell.messageLabel.text=line;cell.messageLabel.textColor=color;cell.categoryDot.backgroundColor=color;return cell;
 }
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {UIPasteboard.generalPasteboard.string=self.visibleLines[indexPath.row];[tableView deselectRowAtIndexPath:indexPath animated:YES];}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {if(indexPath.row<self.visibleLines.count){UIPasteboard.generalPasteboard.string=self.visibleLines[indexPath.row];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"日志内容已复制");}[tableView deselectRowAtIndexPath:indexPath animated:YES];}
 - (void)filterChanged {[self applyFilter];}
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {[self applyFilter];}
 - (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar {[searchBar resignFirstResponder];}
 - (void)exportLog {if(self.onExportLog)self.onExportLog();}
-- (void)copyVisibleLog {UIPasteboard.generalPasteboard.string=[self.visibleLines componentsJoinedByString:@"\n"]?:@"";}
+- (void)copyVisibleLog {UIPasteboard.generalPasteboard.string=[self.visibleLines componentsJoinedByString:@"\n"]?:@"";UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"当前筛选的日志已复制");}
 - (void)confirmClearLog {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:self.clearActionTitle.length?self.clearActionTitle:@"清空日志" message:self.clearConfirmationMessage.length?self.clearConfirmationMessage:@"将清除当前日志文件和内存中的日志记录。此操作无法撤销。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
