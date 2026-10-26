@@ -8,6 +8,15 @@ static NSString *PackageMD5(NSData *data) {
     unsigned char digest[CC_MD5_DIGEST_LENGTH];CC_MD5(data.bytes,(CC_LONG)data.length,digest);
     NSMutableString *hash=[NSMutableString string];for(NSUInteger i=0;i<sizeof(digest);i++)[hash appendFormat:@"%02x",digest[i]];return hash;
 }
+static BOOL PackageLooksLikeHTML(NSData *data) {
+    if(!data.length)return NO;
+    NSUInteger length=MIN(data.length,(NSUInteger)2048);
+    NSString *text=[[NSString alloc] initWithData:[data subdataWithRange:NSMakeRange(0,length)] encoding:NSUTF8StringEncoding];
+    if(!text)return NO;
+    if([text hasPrefix:@"\uFEFF"])text=[text substringFromIndex:1];
+    NSString *prefix=[[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    return [prefix hasPrefix:@"<!doctype html"]||[prefix hasPrefix:@"<html"]||[prefix hasPrefix:@"<head"]||[prefix hasPrefix:@"<body"];
+}
 @interface MediaPackageDownloader () <NSURLSessionDataDelegate>
 @property(nonatomic,strong) NSURLSession *session;
 @property(nonatomic,strong) NSURLSessionDataTask *task;
@@ -94,12 +103,14 @@ static NSString *PackageMD5(NSData *data) {
     if(error&&!(missing&&error.code==NSURLErrorCancelled)){[self finish:nil error:error];return;}
     if(self.phase==PackageChecksum||self.phase==PackageConfigChecksum){
         BOOL config=self.phase==PackageConfigChecksum;NSString *hash=self.responseStatus==404?nil:[self readChecksum];
+        if(self.responseStatus!=404&&PackageLooksLikeHTML(self.body)){[self finish:nil error:[self error:config?@"配套配置校验地址返回了 HTML 网页，请检查资源权限或登录状态":@"资源校验地址返回了 HTML 网页，不是 MD5 校验文件"]];return;}
         if(self.responseStatus!=404&&!hash){[self finish:nil error:[self error:config?@"配套配置 MD5 格式无效":@"资源 MD5 校验文件格式无效"]];return;}
         if(config){self.configChecksum=hash;if(hash)[self progress:@"配套配置 MD5 校验值已读取"];self.phase=PackageConfig;[self begin:[self configURL:NO]];}
         else{self.checksum=hash;if(![@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"MD5 地址最终没有指向受支持的 JS、Python 或 ZIP 文件"]];return;}if(hash)[self progress:@"资源 MD5 校验值已读取"];self.phase=PackageScript;[self begin:self.targetURL];}return;
     }
     if(self.phase==PackageConfig){
         if(self.responseStatus==404){if(self.configChecksum){[self finish:nil error:[self error:@"配置校验文件存在，但对应配置文件缺失，未安装"]];return;}self.configurationState=@"missing_using_defaults";[self install:@{}];return;}
+        if(PackageLooksLikeHTML(self.body)){[self finish:nil error:[self error:@"配套配置地址返回了 HTML 网页，不是配置文件；请检查权限或登录状态"]];return;}
         if(!self.body.length||![[NSString alloc] initWithData:self.body encoding:NSUTF8StringEncoding]){[self finish:nil error:[self error:@"配套配置不是有效 UTF-8 文件"]];return;}
         if(self.configChecksum&&![PackageMD5(self.body) isEqual:self.configChecksum]){[self finish:nil error:[self error:@"配套配置与 MD5 校验值不一致，未安装"]];return;}
         [self progress:self.configChecksum?@"配套配置 MD5 校验通过":@"配套配置没有 MD5 · 未验证来源完整性"];
@@ -107,6 +118,7 @@ static NSString *PackageMD5(NSData *data) {
         self.configurationState=self.configChecksum?@"verified":@"downloaded_without_checksum";
         [self install:@{@"index.config.js":[self.body copy]}];return;
     }
+    if(PackageLooksLikeHTML(self.body)){[self finish:nil error:[self error:@"资源地址返回了 HTML 网页而非脚本或 ZIP；请检查直链、访问权限或登录状态"]];return;}
     if(self.checksum&&![PackageMD5(self.body) isEqual:self.checksum]){[self finish:nil error:[self error:@"资源与 MD5 校验值不一致，未安装"]];return;}
     [self progress:self.checksum?@"主资源 MD5 校验通过":@"来源没有 MD5 · 未验证来源完整性"];
     self.scriptData=[self.body copy];

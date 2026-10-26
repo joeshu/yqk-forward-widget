@@ -366,6 +366,13 @@ route = '/all.m3u'
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_): pass
             def do_GET(self):
+                if self.path == '/html.js':
+                    body = b'<!doctype html><html><body>Sign in to download this resource</body></html>'
+                    self.send_response(200)
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 body = source
                 if self.path.endswith('.md5'):
                     body = (hashlib.md5(source).hexdigest() if self.path == '/index.cjs.md5' else '0' * 32).encode()
@@ -386,6 +393,9 @@ route = '/all.m3u'
             self.assertLess(stages.index('资源 MD5 校验值已读取'),stages.index('主资源 MD5 校验通过'))
             self.assertLess(stages.index('主资源 MD5 校验通过'),stages.index('检查资源入口、运行时与协议'))
             self.assertFalse(self.inspect(base + '/mismatch.js.md5')['ok'])
+            html = self.inspect(base + '/html.js')
+            self.assertFalse(html['ok'])
+            self.assertIn('HTML 网页', html['error'])
             self.assertFalse(self.inspect(base + '/oversize.js')['ok'])
             self.assertFalse(self.inspect(base + '/unsupported.txt')['ok'])
         finally:
