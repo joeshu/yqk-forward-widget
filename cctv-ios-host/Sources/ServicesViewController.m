@@ -38,6 +38,8 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 @property(nonatomic, copy) NSString *displayedRuntimeStatus;
 @property(nonatomic, assign) NSUInteger probeGeneration;
 @property(nonatomic,strong) NSDate *lastProbeResponseAt;
+@property(nonatomic,assign) BOOL probePlaylistChecked;
+@property(nonatomic,assign) NSUInteger probeChannelCount;
 @end
 @implementation ServiceDetailViewController
 - (BOOL)opensMedia {return [ServiceStore isVODMediaService:self.service];}
@@ -236,7 +238,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
               if(error)w.health=[NSString stringWithFormat:@"连接失败：%@",error.localizedDescription?:@"未知错误"];
               else if(status<200||status>=300)w.health=[NSString stringWithFormat:@"HTTP 可达 · 返回 %ld · 服务状态未知%@",(long)status,time];
               else if(manifestService){id json=data.length?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;BOOL healthy=[json isKindOfClass:NSDictionary.class]&&[json[@"ok"] isKindOfClass:NSNumber.class]&&[json[@"ok"] boolValue];w.health=[(healthy?@"健康检查通过 · GET /health":@"HTTP 可访问 · /health 未确认健康字段") stringByAppendingString:time];}
-              else if(playlistPath.length){NSString *text=data.length<=10*1024*1024?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;NSArray *channels=text.length?[M3UParser parse:text baseURL:probeURL]:@[];BOOL format=[text containsString:@"#EXTM3U"]||[text containsString:@"#EXTINF"]||channels.count>0;w.health=[(format?[NSString stringWithFormat:@"频道清单可读取 · %lu 个频道",(unsigned long)channels.count]:[NSString stringWithFormat:@"HTTP %ld · 响应不是有效频道清单",(long)status]) stringByAppendingString:time];}
+              else if(playlistPath.length){NSString *text=data.length<=10*1024*1024?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;NSArray *channels=text.length?[M3UParser parse:text baseURL:probeURL]:@[];BOOL format=[text containsString:@"#EXTM3U"]||[text containsString:@"#EXTINF"]||channels.count>0;if(format){w.probePlaylistChecked=YES;w.probeChannelCount=channels.count;}w.health=[(format?[NSString stringWithFormat:@"频道清单可读取 · %lu 个频道",(unsigned long)channels.count]:[NSString stringWithFormat:@"HTTP %ld · 响应不是有效频道清单",(long)status]) stringByAppendingString:time];}
               else w.health=[[NSString stringWithFormat:@"HTTP 可访问 · GET %@ 返回 %ld · 健康状态未知",path,(long)status] stringByAppendingString:time];
               [w.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];
             });

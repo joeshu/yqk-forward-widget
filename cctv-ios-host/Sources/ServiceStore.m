@@ -106,7 +106,7 @@ static BOOL ServiceValidPlaylistPath(id value){
     NSString *lower=routeSource.lowercaseString;
     BOOL m3uEvidence=[lower containsString:@"#extm3u"]||[lower containsString:@"#extinf"]||[lower containsString:@"m3u"]||[lower containsString:@"playlist"];
     if(!m3uEvidence)return nil;
-    NSString *routePattern=@"(?is)(?:@[a-z_][a-z0-9_.]*\\.(?:route|get|post|put)\\s*\\(|(?:add_url_rule|add_get|add_route)\\s*\\(|(?:(?:self|request)\\.)?path\\s*(?:==|in)\\s*)\\s*['\\\"](/[^'\\\"?#\\\\\\s]{1,126})['\\\"]";
+    NSString *routePattern=@"(?is)(?:@[a-z_][a-z0-9_.]*\\.(?:route|get|post|put)\\s*\\(|(?:add_url_rule|add_get|add_route)\\s*\\(|(?:(?:self|request)\\.)?path\\s*(?:==|in)\\s*|(?:route|playlist(?:_path)?|m3u_path)\\s*=\\s*)['\\\"](/[^'\\\"?#\\\\\\s]{1,126})['\\\"]";
     NSError *error=nil;NSRegularExpression *routes=[NSRegularExpression regularExpressionWithPattern:routePattern options:0 error:&error];if(!routes||error)return nil;
     NSArray<NSTextCheckingResult *> *matches=[routes matchesInString:routeSource options:0 range:NSMakeRange(0,routeSource.length)];
     NSSet *tokens=[NSSet setWithArray:@[@"m3u",@"playlist",@"live",@"channel",@"iptv",@"tv"]];
