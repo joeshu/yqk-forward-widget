@@ -227,7 +227,9 @@ class RootViewControllerSourceContracts(unittest.TestCase):
     def test_logs_redact_secrets_before_persistence(self):
         self.assertIn("HostLogRedactor redactText:msg", TEXT)
         plugin=(SOURCE.parent / "PluginLogStore.m").read_text(encoding="utf-8")
-        self.assertIn("HostLogRedactor redactText:line", plugin)
+        self.assertIn('HostLogRedactor redactText:text?:@""', plugin)
+        self.assertIn('appendText:line toPath:path', plugin)
+        self.assertIn('safeText:text', plugin)
         self.assertIn("HostLogRedactor redactText:text", plugin)
         self.assertIn("HostLogRedactor redactText:content", plugin)
         self.assertIn("HostLogRedactor redactText:stored", TEXT)

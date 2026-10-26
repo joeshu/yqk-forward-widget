@@ -22,6 +22,7 @@
 #import "CNPlayerCrashGuard.h"
 #import "ResourceImportSheetViewController.h"
 #import "LogCenterViewController.h"
+#import "PluginRunHistoryViewController.h"
 #import "PluginLogStore.h"
 #import "HostLogRedactor.h"
 #import "HostTheme.h"
@@ -357,14 +358,24 @@ static void next(NSArray *steps, NSUInteger index) {
             [nav popToRootViewControllerAnimated:NO];
             NSString *redacted=[HostLogRedactor redactText:@"GET https://example.test/live.m3u8?access_token=abc123&channel=1\nAuthorization: Bearer header-secret\nCookie: sid=cookie-secret"];
             check(![redacted containsString:@"abc123"] && ![redacted containsString:@"header-secret"] && ![redacted containsString:@"cookie-secret"], @"diagnostic logs redact URL credentials, authorization and cookies");
-            [root logPluginLine:@"独立插件日志测试 access_token=plugin-secret" identifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
+            [PluginLogStore.shared beginRunForIdentifier:@"ui-smoke-plugin"];
+            [root logPluginLine:@"第一次运行日志" identifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
+            [PluginLogStore.shared finishRunForIdentifier:@"ui-smoke-plugin" status:@"已停止"];
+            [PluginLogStore.shared beginRunForIdentifier:@"ui-smoke-plugin"];
+            [root logPluginLine:@"第二次独立运行日志 access_token=plugin-secret" identifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
+            [PluginLogStore.shared finishRunForIdentifier:@"ui-smoke-plugin" status:@"已停止"];
             [root openDiagnosticLogForIdentifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
             [PluginLogStore.shared prepareExportForIdentifier:@"ui-smoke-plugin" displayName:@"UI Smoke Plugin" completion:^(NSURL *url,NSError *error){pluginLogExportURL=url;}];
           },
           ^{
+            PluginRunHistoryViewController *history=(id)nav.topViewController;
+            check([history isKindOfClass:PluginRunHistoryViewController.class], @"service logs first show independent run records");
+            NSArray *runs=history.runRecordsProvider();
+            check(runs.count==2, @"two service starts appear as two separate log entries");
+            [history tableView:history.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             LogCenterViewController *logs=(id)nav.topViewController;
-            check([logs isKindOfClass:LogCenterViewController.class], @"diagnostics open in an independent navigation page");
-            check([logs.logSnapshotProvider() containsString:@"独立插件日志测试"], @"plugin log page is scoped to that script");
+            check([logs isKindOfClass:LogCenterViewController.class], @"selecting a run opens its own searchable log page");
+            check([logs.logSnapshotProvider() containsString:@"第二次独立运行日志"] && ![logs.logSnapshotProvider() containsString:@"第一次运行日志"], @"a run log contains only the selected invocation");
             check(![logs.logSnapshotProvider() containsString:@"plugin-secret"], @"plugin log view redacts sensitive values before display");
             check(logs.onExportLog!=nil && logs.onClearLog!=nil, @"plugin log page exposes independent export and clear actions");
             check([[logs valueForKey:@"categories"] numberOfSegments]==4, @"log center supports all, playback, plugin and error filters");

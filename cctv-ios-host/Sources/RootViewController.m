@@ -34,6 +34,7 @@
 #import "NativeTimeshiftSession.h"
 #import "PlaybackInfoViewController.h"
 #import "LogCenterViewController.h"
+#import "PluginRunHistoryViewController.h"
 #import "RuntimeDiagnostics.h"
 #import "PluginLogStore.h"
 #import "CNPlayerCrashGuard.h"
@@ -308,6 +309,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)toggleCurrentFavorite;
 - (void)openDiagnosticLog;
 - (void)openDiagnosticLogForIdentifier:(nullable NSString *)identifier name:(nullable NSString *)name;
+- (void)openPluginRunLogForIdentifier:(NSString *)identifier name:(NSString *)name run:(NSDictionary *)run;
 - (void)logPluginLine:(NSString *)line identifier:(NSString *)identifier name:(NSString *)name;
 - (void)openPluginResource:(NSString *)source;
 - (void)openTVBoxCatalog:(NSString *)identifier;
@@ -641,6 +643,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)logPluginLine:(NSString *)line identifier:(NSString *)identifier name:(NSString *)name {
     if(!line.length||!identifier.length)return;
     [PluginLogStore.shared appendLine:line forIdentifier:identifier];
+    dispatch_async(dispatch_get_main_queue(),^{[[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:identifier];});
     [self log:@"[%@] %@",name.length?name:@"插件",line];
 }
 - (void)clearServiceLogHandlers:(NSString *)identifier {
@@ -650,20 +653,26 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [JSPluginRuntime.shared setLogHandler:nil forServiceIdentifier:identifier];
 }
 - (void)openDiagnosticLogForIdentifier:(NSString *)identifier name:(NSString *)name {
+    if(identifier.length){
+        PluginRunHistoryViewController *history=[PluginRunHistoryViewController new];history.serviceName=name;__weak typeof(self) weakSelf=self;NSString *scope=[identifier copy];NSString *scopeName=[name copy];
+        history.runRecordsProvider=^NSArray<NSDictionary *> *{if(![weakSelf.serviceOperations containsObject:scope]&&![PyHost isManagedServiceIdentifier:scope])[PluginLogStore.shared markUnmanagedRunsInterruptedForIdentifier:scope];return [PluginLogStore.shared runsForIdentifier:scope];};
+        history.onSelectRun=^(NSDictionary *run){[weakSelf openPluginRunLogForIdentifier:scope name:scopeName?:@"服务" run:run];};
+        history.onExportAll=^{[PluginLogStore.shared prepareExportForIdentifier:scope displayName:scopeName?:@"插件" completion:^(NSURL *url,NSError *error){if(!url){[weakSelf showServiceError:error.localizedDescription?:@"该脚本还没有可导出的日志。"];return;}[weakSelf shareDiagnosticLogAtURL:url];}];};
+        history.onClearAll=^{[PluginLogStore.shared clearLogForIdentifier:scope completion:^{[[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:scope];}];};
+        UIViewController *presented=self.presentedViewController;if(presented)[presented dismissViewControllerAnimated:YES completion:^{[weakSelf.navigationController pushViewController:history animated:YES];}];else[self.navigationController pushViewController:history animated:YES];return;
+    }
     LogCenterViewController *page=[LogCenterViewController new];page.scopeName=name;
-    __weak typeof(self) weakSelf=self;NSString *scope=[identifier copy];NSString *scopeName=[name copy];
-    page.logSnapshotProvider=^NSString *{return scope.length?[PluginLogStore.shared logForIdentifier:scope]:(weakSelf.logBuffer.copy?:@"");};
-    page.onExportLog=^{
-        if(!scope.length){[weakSelf exportDiagnosticLog];return;}
-        [PluginLogStore.shared prepareExportForIdentifier:scope displayName:scopeName?:@"插件" completion:^(NSURL *url,NSError *error){if(!url){[weakSelf showServiceError:error.localizedDescription?:@"该脚本没有可导出的日志。" ];return;}[weakSelf shareDiagnosticLogAtURL:url];}];
-    };
-    page.onClearLog=^{
-        if(!scope.length){[weakSelf clearDiagnosticLog];return;}
-        [PluginLogStore.shared clearLogForIdentifier:scope completion:^{[[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:nil];}];
-    };
+    __weak typeof(self) weakSelf=self;
+    page.logSnapshotProvider=^{return weakSelf.logBuffer.copy?:@"";};
+    page.onExportLog=^{[weakSelf exportDiagnosticLog];};
+    page.onClearLog=^{[weakSelf clearDiagnosticLog];};
     UIViewController *presented=self.presentedViewController;
     if(presented){[presented dismissViewControllerAnimated:YES completion:^{[weakSelf.navigationController pushViewController:page animated:YES];}];}
     else [self.navigationController pushViewController:page animated:YES];
+}
+- (void)openPluginRunLogForIdentifier:(NSString *)identifier name:(NSString *)name run:(NSDictionary *)run {
+    NSString *runID=[run[@"runID"] isKindOfClass:NSString.class]?run[@"runID"]:@"";if(!identifier.length||!runID.length)return;LogCenterViewController *page=[LogCenterViewController new];page.scopeName=name;NSString *runTitle=[run[@"legacy"] boolValue]?@"历史日志":[NSDateFormatter localizedStringFromDate:[NSDate dateWithTimeIntervalSince1970:[run[@"startedAt"] doubleValue]] dateStyle:NSDateFormatterShortStyle timeStyle:NSDateFormatterShortStyle];page.titleOverride=[NSString stringWithFormat:@"%@ · %@",name.length?name:@"服务",runTitle];page.clearActionTitle=@"清空本次日志";page.clearConfirmationMessage=@"只清理这一次运行的日志，不影响其他运行记录、服务代码或配置。服务仍在运行时，后续日志会继续写入本次记录。";
+    __weak typeof(self) weakSelf=self;NSString *scope=[identifier copy];NSString *selectedRun=[runID copy];NSString *scopeName=[name copy];page.logSnapshotProvider=^NSString *{return [PluginLogStore.shared logForIdentifier:scope runID:selectedRun];};page.onExportLog=^{[PluginLogStore.shared prepareExportForIdentifier:scope runID:selectedRun displayName:scopeName?:@"插件" completion:^(NSURL *url,NSError *error){if(!url){[weakSelf showServiceError:error.localizedDescription?:@"该次运行还没有可导出的日志。"];return;}[weakSelf shareDiagnosticLogAtURL:url];}];};page.onClearLog=^{[PluginLogStore.shared clearRunForIdentifier:scope runID:selectedRun completion:^{[[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:scope];}];};[self.navigationController pushViewController:page animated:YES];
 }
 
 - (void)shareDiagnosticLogAtURL:(NSURL *)source {
@@ -1979,10 +1988,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     }else{
         for(NSString *part in [service[@"arguments"]?:@"" componentsSeparatedByString:@"|"]){if(!part.length)continue;NSString *arg=[part stringByReplacingOccurrencesOfString:@"{port}" withString:[NSString stringWithFormat:@"%ld",(long)port]];arg=[arg stringByReplacingOccurrencesOfString:@"{bind}" withString:bind];[args addObject:[arg stringByReplacingOccurrencesOfString:@"{dataDir}" withString:dataDir]];}
     }
-    __weak typeof(self) w=self;serviceID=[serviceID copy];NSString *serviceName=[service[@"name"] copy];void(^serviceLogger)(NSString *)=^(NSString *line){if(line.length)[w logPluginLine:line identifier:serviceID name:serviceName];};[PyHost setLogHandler:serviceLogger forServiceIdentifier:serviceID];[NodePluginRuntime.shared setLogHandler:serviceLogger forServiceIdentifier:serviceID];[JSPluginRuntime.shared setLogHandler:serviceLogger forServiceIdentifier:serviceID];
+    __weak typeof(self) w=self;serviceID=[serviceID copy];NSString *serviceName=[service[@"name"] copy];[PluginLogStore.shared beginRunForIdentifier:serviceID];void(^serviceLogger)(NSString *)=^(NSString *line){if(line.length)[w logPluginLine:line identifier:serviceID name:serviceName];};[PyHost setLogHandler:serviceLogger forServiceIdentifier:serviceID];[NodePluginRuntime.shared setLogHandler:serviceLogger forServiceIdentifier:serviceID];[JSPluginRuntime.shared setLogHandler:serviceLogger forServiceIdentifier:serviceID];
     [self logPluginLine:@"插件启动请求" identifier:serviceID name:serviceName];
     for(NSString *origin in self.readyLocalOrigins.allKeys.copy){NSURL *known=[NSURL URLWithString:origin];if(known.port.integerValue==port)[self.readyLocalOrigins removeObjectForKey:origin];} // This service must prove readiness again.
-    if(![PyHost startScriptAtPath:[ServiceStore scriptPath:service] identifier:serviceID port:port dataDir:dataDir arguments:args error:error]){if(error&&*error)[self logPluginLine:(*error).localizedDescription identifier:serviceID name:serviceName];[self clearServiceLogHandlers:serviceID];return NO;}
+    if(![PyHost startScriptAtPath:[ServiceStore scriptPath:service] identifier:serviceID port:port dataDir:dataDir arguments:args error:error]){if(error&&*error)[self logPluginLine:(*error).localizedDescription identifier:serviceID name:serviceName];[PluginLogStore.shared finishRunForIdentifier:serviceID status:@"启动失败"];[self clearServiceLogHandlers:serviceID];return NO;}
+    [PluginLogStore.shared markRunRunningForIdentifier:serviceID];
     [NSUserDefaults.standardUserDefaults setObject:service[@"id"] forKey:@"activePythonService"];
     [self log:@"服务进程启动 %@ · %ld，等待 HTTP 就绪",service[@"name"],(long)port];
     NSString *playlistURL=[ServiceStore subscriptionURLForService:service];
@@ -2035,7 +2045,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 - (void)completeServiceStopForIdentifier:(NSString *)serviceID {
     [(MediaBrowserViewController *)self.tabPages[@2] invalidateServiceIdentifier:serviceID];
-    NSDictionary *stopped=nil;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqualToString:serviceID]){stopped=service;break;}if(serviceID.length)[self logPluginLine:@"插件服务已停止" identifier:serviceID name:stopped[@"name"]?:@"插件"];
+    NSDictionary *stopped=nil;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqualToString:serviceID]){stopped=service;break;}if(serviceID.length){[self logPluginLine:@"插件服务已停止" identifier:serviceID name:stopped[@"name"]?:@"插件"];[PluginLogStore.shared finishRunForIdentifier:serviceID status:@"已停止"];}
     for(NSString *source in self.subscriptionURLs.allObjects){NSDictionary *owner=[self localServiceForURL:[NSURL URLWithString:source]];if([owner[@"id"] isEqual:serviceID]){[ProfileStore update:source values:@{@"status":@"服务已停止 · 保留最近一次频道清单"}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:source];}}
     for(NSString *origin in self.readyLocalOrigins.allKeys.copy){for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqualToString:serviceID] && [origin containsString:[NSString stringWithFormat:@":%@",service[@"port"]]])[self.readyLocalOrigins removeObjectForKey:origin];}
     if(stopped[@"port"]){NSInteger stoppedPort=[stopped[@"port"] integerValue];for(NSString *origin in self.readyLocalOrigins.allKeys.copy)if([NSURL URLWithString:origin].port.integerValue==stoppedPort)[self.readyLocalOrigins removeObjectForKey:origin];for(NSString *key in self.subscriptionReadiness.allKeys.copy){NSDictionary *owner=[self localServiceForURL:[NSURL URLWithString:key]];if([owner[@"id"] isEqualToString:serviceID]){[self.subscriptionReadiness[key] cancel];[self.subscriptionReadiness removeObjectForKey:key];}}}

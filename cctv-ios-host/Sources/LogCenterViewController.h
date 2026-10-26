@@ -6,6 +6,9 @@ FOUNDATION_EXPORT NSNotificationName const CCTVHostDiagnosticLogDidUpdateNotific
 
 @interface LogCenterViewController : UIViewController
 @property(nonatomic,copy,nullable) NSString *scopeName;
+@property(nonatomic,copy,nullable) NSString *titleOverride;
+@property(nonatomic,copy,nullable) NSString *clearActionTitle;
+@property(nonatomic,copy,nullable) NSString *clearConfirmationMessage;
 @property(nonatomic,copy,nullable) NSString *(^logSnapshotProvider)(void);
 @property(nonatomic,copy,nullable) dispatch_block_t onExportLog;
 @property(nonatomic,copy,nullable) dispatch_block_t onClearLog;

@@ -58,7 +58,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 @implementation LogCenterViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title=self.scopeName.length?[NSString stringWithFormat:@"%@日志",self.scopeName]:@"运行日志";
+    self.title=self.titleOverride.length?self.titleOverride:(self.scopeName.length?[NSString stringWithFormat:@"%@日志",self.scopeName]:@"运行日志");
     self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
     self.view.backgroundColor=HostBackground();
     self.view.tintColor=HostAccent();
@@ -67,7 +67,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     __weak typeof(self) weakSelf=self;
     UIBarButtonItem *export=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"square.and.arrow.up"] style:UIBarButtonItemStylePlain target:self action:@selector(exportLog)];export.accessibilityLabel=@"导出日志";
     UIAction *copy=[UIAction actionWithTitle:@"复制当前结果" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *action){[weakSelf copyVisibleLog];}];
-    UIAction *clear=[UIAction actionWithTitle:@"清空日志" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *action){[weakSelf confirmClearLog];}];
+    UIAction *clear=[UIAction actionWithTitle:self.clearActionTitle.length?self.clearActionTitle:@"清空日志" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *action){[weakSelf confirmClearLog];}];
     UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"日志操作" children:@[copy,clear]]];more.accessibilityLabel=@"更多日志操作";
     self.navigationItem.rightBarButtonItems=@[more,export];
 
@@ -144,8 +144,8 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 - (void)exportLog {if(self.onExportLog)self.onExportLog();}
 - (void)copyVisibleLog {UIPasteboard.generalPasteboard.string=[self.visibleLines componentsJoinedByString:@"\n"]?:@"";}
 - (void)confirmClearLog {
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清空日志" message:@"将清除当前日志文件和内存中的日志记录。此操作无法撤销。" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:self.clearActionTitle.length?self.clearActionTitle:@"清空日志" message:self.clearConfirmationMessage.length?self.clearConfirmationMessage:@"将清除当前日志文件和内存中的日志记录。此操作无法撤销。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    __weak typeof(self) weakSelf=self;[alert addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action){if(weakSelf.onClearLog)weakSelf.onClearLog();[weakSelf refreshLog];}]];[self presentViewController:alert animated:YES completion:nil];
+    __weak typeof(self) weakSelf=self;[alert addAction:[UIAlertAction actionWithTitle:self.clearActionTitle.length?self.clearActionTitle:@"清空" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action){if(weakSelf.onClearLog)weakSelf.onClearLog();[weakSelf refreshLog];}]];[self presentViewController:alert animated:YES completion:nil];
 }
 @end
