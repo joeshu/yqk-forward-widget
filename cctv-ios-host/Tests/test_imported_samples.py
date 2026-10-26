@@ -87,6 +87,93 @@ class ImportedSamples(unittest.TestCase):
                     finally:server.shutdown();server.server_close();runtime.close()
         finally:upstream.shutdown();upstream.server_close()
 
+    def test_original_film_spiders_roundtrip_detail_episode_and_hls_playback(self):
+        """Exercise each supplied Spider through CCTVHost detail/play and relay."""
+        bridge=sys.modules.get('test_media_runtime') or importlib.import_module('Tests.test_media_runtime')
+        observed=[]
+        class Fixture(http.server.BaseHTTPRequestHandler):
+            def log_message(self,*args): pass
+            def do_GET(self):
+                observed.append((self.path,dict(self.headers)))
+                if self.path.split('?',1)[0]=='/hls/live.m3u8':
+                    body=b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg.ts\n#EXT-X-ENDLIST\n'
+                    self.send_response(200);self.send_header('Content-Type','application/vnd.apple.mpegurl')
+                elif self.path.split('?',1)[0]=='/hls/seg.ts':
+                    body=b'\x47'+b'\0'*187
+                    self.send_response(200);self.send_header('Content-Type','video/mp2t')
+                else:
+                    self.send_error(404);return
+                self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+        upstream=http.server.ThreadingHTTPServer(('127.0.0.1',0),Fixture)
+        threading.Thread(target=upstream.serve_forever,daemon=True).start()
+        try:
+            for suffix in ('看剧AI.py','蝴蝶影院-广告去不干净-iOS版本.py'):
+                with self.subTest(source=suffix),tempfile.TemporaryDirectory() as root:
+                    shutil.copyfile(self.sample(suffix),Path(root)/'source.py')
+                    with contextlib.redirect_stdout(io.StringIO()),patch('urllib.request.OpenerDirector.open',side_effect=urllib.error.URLError('offline fixture')):
+                        engine=bridge.media.PythonSpider(root,'source.py')
+                        for worker in threading.enumerate():
+                            if worker.name.endswith('(_warm)'):worker.join(1)
+                    media_url='http://127.0.0.1:%d/hls/live.m3u8?token=a%%2Fb'%upstream.server_port
+                    if '看剧AI' in suffix:
+                        module=sys.modules[engine.spider.__class__.__module__]
+                        payload={'title':'影视回归片','available_episode_count':1,
+                                 'episodes':[{'token':'episode-token','title':'第 1 集','number':1}],
+                                 'variants':[{'variant_id':'av_fixture','selected':True}]}
+                        patches=[patch.object(module,'_get_detail',return_value=payload),
+                                 patch.object(module,'_play_url',return_value=media_url)]
+                    else:
+                        def fake_fetch(target_url,referer='',check_host=True):
+                            path=urllib.parse.urlsplit(target_url).path if '://' in target_url else target_url
+                            if path=='/123':
+                                html='<a class="seq" href="/123/1/7">第1集</a><ul class="nav-tabs"><a href="/123/1/7">主线路</a></ul>'
+                            elif path=='/v/123':
+                                html='<html><head><title>本地夹具影片</title></head><body></body></html>'
+                            elif path=='/123/1/7':
+                                html='<video><source src="%s&amp;format=.m3u8"></video>'%media_url
+                            else:
+                                raise AssertionError('unexpected offline fixture path: '+path)
+                            return {'text':html,'url':'https://ptt01.com'+path,'status':200,'headers':{}}
+                        engine.spider._fetch=fake_fetch
+                        patches=[]
+                    for patcher in patches:patcher.start()
+                    runtime=bridge.media.MediaRuntime(engine)
+                    server=bridge.transport.Server(('127.0.0.1',0),runtime)
+                    threading.Thread(target=server.serve_forever,daemon=True).start()
+                    def request(url,body=None):
+                        parts=urllib.parse.urlsplit(url);c=http.client.HTTPConnection(parts.hostname,parts.port,timeout=4)
+                        try:
+                            c.request('POST' if body is not None else 'GET',parts.path+('?' + parts.query if parts.query else ''),
+                                      json.dumps(body).encode() if body is not None else None,
+                                      {'Content-Type':'application/json'} if body is not None else {})
+                            response=c.getresponse();data=response.read();self.assertEqual(response.status,200,data[:300]);return data
+                        finally:c.close()
+                    try:
+                        origin='http://127.0.0.1:%d'%server.server_port
+                        film_id='av_fixture' if '看剧AI' in suffix else '/123'
+                        detail_reply=json.loads(request(origin+'/api/v1/detail',{'id':film_id}))
+                        self.assertTrue(detail_reply['ok'],detail_reply)
+                        detail=detail_reply['data'];self.assertTrue(detail['lines'],detail)
+                        episode=detail['lines'][0]['episodes'][0]
+                        self.assertTrue(episode['id'],episode)
+                        play_reply=json.loads(request(origin+'/api/v1/play',{'id':episode['id'],'lineId':detail['lines'][0]['id']}))
+                        self.assertTrue(play_reply['ok'],play_reply)
+                        play=play_reply['data'];self.assertTrue(play['nativePlayable'],play)
+                        self.assertIn('token=a%2Fb',play['originalURL'])
+                        manifest=request(play['url']).decode()
+                        segment=next(line for line in manifest.splitlines() if line and not line.startswith('#'))
+                        segment_body=request(urllib.parse.urljoin(play['url'],segment))
+                        self.assertEqual(segment_body[0],0x47)
+                        observed_paths=[path for path,_ in observed]
+                        self.assertTrue(any(path.startswith('/hls/live.m3u8?token=a%2Fb') for path in observed_paths),observed_paths)
+                        self.assertTrue(any(path.startswith('/hls/seg.ts?token=a%2Fb') for path in observed_paths),observed_paths)
+                        last_headers=observed[-1][1];self.assertTrue(last_headers.get('User-Agent'))
+                        if '蝴蝶' in suffix:self.assertIn('Referer',last_headers)
+                    finally:
+                        for patcher in patches:patcher.stop()
+                        server.shutdown();server.server_close();runtime.close()
+        finally:upstream.shutdown();upstream.server_close()
+
     def test_original_widget_crypto_episode_and_hls_probe(self):
         script=r'''const fs=require('fs'),vm=require('vm'),assert=require('assert');let posts=0,segments=0;
           const title='CCTVHost测试',url='https://fixture.test/second.m3u8';
