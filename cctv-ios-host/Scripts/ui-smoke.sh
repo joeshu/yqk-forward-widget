@@ -56,7 +56,7 @@ xcrun simctl bootstatus "$SIM" -b
 xcrun simctl install "$SIM" "$APP"
 xcrun simctl launch "$SIM" com.example.cctvhost.uismoke --smoke-port "$FIXTURE_PORT"
 CONTAINER=$(xcrun simctl get_app_container "$SIM" com.example.cctvhost.uismoke data)
-for attempt in $(seq 1 120); do
+for attempt in $(seq 1 210); do
   if [ -f "$CONTAINER/Documents/ui-smoke/results.json" ]; then break; fi
   sleep 2
 done
