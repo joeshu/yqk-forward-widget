@@ -243,6 +243,31 @@ def playback(value):
         url = alternates[0]['url'] if alternates else ''
     if not url and isinstance(value.get('playUrl'), str) and value['playUrl'].startswith(('http://', 'https://')):
         url = value['playUrl']
+    # Player pages commonly HTML-escape separators inside an m3u8 URL.
+    # Decode only ampersand entities so signed query values and ordering stay intact.
+    if isinstance(url, str):
+        url = re.sub(r'(?i)&(?:amp|#0*38|#x0*26);', '&', url)
+    # A number of older Python spiders append ``format=.m3u8`` whenever the
+    # full URL contains the text ``.m3u8`` but does not literally end with it.
+    # For signed playlists this turns ``...?token=...`` into
+    # ``...?token=...&format=.m3u8`` and can invalidate the source signature.
+    # Repair only the unambiguous case: the URL path itself already ends in
+    # .m3u8 and the spider explicitly identified the result as HLS.
+    declared_format = str(value.get('format') or '').strip().lower()
+    declared_type = str(value.get('contentType') or '').strip().lower()
+    is_declared_hls = (declared_format in ('hls', 'm3u8') or
+                       declared_type in ('application/vnd.apple.mpegurl',
+                                         'application/x-mpegurl', 'audio/mpegurl'))
+    if is_declared_hls and isinstance(url, str):
+        try:
+            parts = urllib.parse.urlsplit(url)
+            if parts.path.lower().endswith('.m3u8'):
+                query = re.sub(r'(?i)(?:^|&)format=\.m3u8$', '', parts.query)
+                if query != parts.query:
+                    url = urllib.parse.urlunsplit((parts.scheme, parts.netloc,
+                                                   parts.path, query, parts.fragment))
+        except ValueError:
+            pass
     if not valid_media_url(url):
         raise MediaError('NO_MEDIA', '来源未返回有效 HTTP/HTTPS 媒体地址')
     safe_alternates = []

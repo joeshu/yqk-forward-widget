@@ -117,7 +117,37 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('operation:@"home" arguments:arguments maximumAge:24*60*60', self.detail)
         self.assertIn('selectionRow.hidden=NO', self.detail)
         self.assertIn('media-home-feature', self.detail)
+        self.assertIn('- (void)addHomeFeatureCarousel:', self.detail)
+        self.assertIn('pagingEnabled=YES', self.detail)
+        self.assertIn('UIPageControl', self.detail)
+        self.assertIn('MIN((NSUInteger)5,items.count)', self.detail)
         self.assertIn('owner.generation!=generation', self.detail)
+
+    def test_home_uses_reference_style_category_rails_from_real_source_results(self):
+        self.assertIn('@"id":@"catalog"', self.detail)
+        self.assertIn('- (void)loadHomeShelves:', self.detail)
+        self.assertIn('operation:@"category" arguments:arguments maximumAge:6*3600', self.detail)
+        self.assertIn('MIN((NSUInteger)3,categories.count)', self.detail)
+        self.assertIn('@"media_home_shelf_readable"', self.detail)
+        self.assertIn('@"media_home_shelf_failed"', self.detail)
+        self.assertIn('- (BOOL)isHomePageVisible', self.detail)
+        self.assertIn('top==self||top==self.parentViewController', self.detail)
+        self.assertIn('homeCardWithTitle:item[@"name"]', self.detail)
+        self.assertIn('homeStack addArrangedSubview:[self homeSectionHeader:name', self.detail)
+        self.assertIn('setInteger:3 forKey:MediaHomeModulesSchemaKey', self.detail)
+
+    def test_movie_detail_uses_soft_backdrop_real_cast_and_actionable_controls(self):
+        detail = self.detail[self.detail.index('@interface MediaDetailViewController'):
+                             self.detail.index('@interface MediaFavoritesViewController')]
+        self.assertIn('media-detail-backdrop', detail)
+        self.assertIn('UIBlurEffectStyleSystemMaterial', detail)
+        self.assertIn('media-detail-share', detail)
+        self.assertIn('media-detail-copy-title', detail)
+        self.assertIn('media-detail-jump-episodes', detail)
+        self.assertIn('- (void)refreshCastRow', detail)
+        self.assertIn('person.crop.circle.fill', detail)
+        self.assertIn('self.castTitle.hidden=names.count==0', detail)
+        self.assertIn('multiplier:0.94', detail)
 
     def test_home_status_is_inline_actionable_and_does_not_rebuild_content_on_each_progress_update(self):
         show_message = self.detail[self.detail.index('- (void)showMessage:'):

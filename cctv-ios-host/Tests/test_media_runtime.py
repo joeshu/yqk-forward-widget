@@ -159,6 +159,25 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(choices['alternates'][1]['name'], '720P')
         self.assertEqual(choices['headers']['Referer'], 'https://a.test/')
 
+    def test_playback_removes_only_redundant_hls_format_suffix(self):
+        signed = 'https://a.test/master.m3u8?token=a%2Fb&expires=123&format=.m3u8'
+        repaired = media.playback({'url': signed, 'parse': 0, 'format': 'hls',
+                                   'contentType': 'application/vnd.apple.mpegurl',
+                                   'header': {'Referer': 'https://a.test/'}})
+        self.assertEqual(repaired['url'], 'https://a.test/master.m3u8?token=a%2Fb&expires=123')
+        self.assertEqual(repaired['headers']['Referer'], 'https://a.test/')
+        # Do not rewrite an extensionless endpoint, a non-HLS response, or a
+        # playlist whose path has no .m3u8 extension.
+        extensionless = 'https://a.test/media?token=x&format=.m3u8'
+        self.assertEqual(media.playback({'url': extensionless, 'format': 'hls'})['url'], extensionless)
+        explicit = 'https://a.test/master.m3u8?format=.m3u8'
+        self.assertEqual(media.playback({'url': explicit, 'format': 'mp4'})['url'], explicit)
+
+    def test_playback_decodes_html_escaped_hls_query_separators(self):
+        encoded = 'https://a.test/master.m3u8?token=a%2Fb&amp;expires=123&amp;format=.m3u8'
+        repaired = media.playback({'url': encoded, 'format': 'hls'})
+        self.assertEqual(repaired['url'], 'https://a.test/master.m3u8?token=a%2Fb&expires=123')
+
     def test_playback_preserves_safe_headers_per_quality_choice(self):
         choices = media.playback({'url': {'values': [
             {'name': '1080P', 'url': 'https://a.test/1080.m3u8',
