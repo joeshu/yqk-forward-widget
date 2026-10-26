@@ -112,6 +112,20 @@ static UIViewController *SmokePresentedController(NSArray<UIViewController *> *o
     }
     return nil;
 }
+static UINavigationController *SmokePresentedNavigation(NSArray<UIViewController *> *owners, NSString *context) {
+    UIViewController *presented=SmokePresentedController(owners);
+    if([presented isKindOfClass:UINavigationController.class])return (UINavigationController *)presented;
+    if([presented isKindOfClass:UIAlertController.class]){
+        UIAlertController *alert=(UIAlertController *)presented;
+        check(NO,[NSString stringWithFormat:@"%@ expected a navigation sheet but found alert %@ · %@",context,alert.title?:@"(no title)",alert.message?:@""]);
+        [alert dismissViewControllerAnimated:NO completion:nil];
+    }else if(presented){
+        check(NO,[NSString stringWithFormat:@"%@ expected a navigation sheet but found %@",context,NSStringFromClass(presented.class)]);
+    }else{
+        check(NO,[NSString stringWithFormat:@"%@ expected a presented navigation sheet but found none",context]);
+    }
+    return nil;
+}
 static NSUInteger waitingIndex=NSNotFound;
 static NSDate *waitingDeadline;
 static void next(NSArray *steps, NSUInteger index) {
@@ -433,8 +447,10 @@ static void next(NSArray *steps, NSUInteger index) {
             check([root valueForKey:@"avPlayer"]!=nil,@"recent successful local health avoids another readiness wait");
             check(((PlaybackStartupTrace *)[root valueForKey:@"startupTrace"]).stages[@"serviceCached"]!=nil,@"warm health reuse is recorded separately");
             id previous = [root valueForKey:@"avPlayer"];
-            [root playChannel:[root channelWithID:@"cctv1"] route:nil];
-            check([previous currentItem] == nil, @"switching to native detaches old subscription item");
+            NSDictionary *native=[root channelWithID:@"cctv1"];
+            check(native!=nil,@"native channel lookup succeeds after subscription playback");
+            [root playChannel:native route:nil];
+            check([previous currentItem] == nil, [NSString stringWithFormat:@"switching to native detaches old subscription item (item=%@ selected=%@ player=%@)",previous.currentItem?@"attached":@"nil",[root valueForKey:@"channelID"]?:@"nil",NSStringFromClass([[root valueForKey:@"currentPlayer"] class]?:NSObject.class)]);
             check([root valueForKey:@"pip"] == nil, @"switching releases old picture-in-picture controller");
           }},
           ^{
@@ -444,8 +460,8 @@ static void next(NSArray *steps, NSUInteger index) {
             [root selectChannel:[root channelWithID:@"cctv3"]];
           },
           ^{
-            check([[root valueForKey:@"channelID"] isEqual:@"cctv3"],@"rapid selections end on final channel");
-            check([CNPlayer smokePlayCount]==playCount+1,@"rapid taps do not start three SDK sessions");
+            check([[root valueForKey:@"channelID"] isEqual:@"cctv3"],[NSString stringWithFormat:@"rapid selections end on final channel (actual %@)",[root valueForKey:@"channelID"]?:@"nil"]);
+            check([CNPlayer smokePlayCount]==playCount+1,[NSString stringWithFormat:@"rapid taps start only the final SDK session (before %ld after %ld)",(long)playCount,(long)[CNPlayer smokePlayCount]]);
             NSString *playlist=@"#EXTM3U x-tvg-url=\"https://example.com/guide.xml.gz\"\n#EXTINF:-1 tvg-id=\"guide-one\" group-title=\"测试\",Imported channel\nhttps://example.com/imported.m3u8\n";
             [root importPlaylistData:[playlist dataUsingEncoding:NSUTF8StringEncoding] name:@"本地测试配置"];
             [root selectBottomTab:(id)tabs.arrangedSubviews[3]];
@@ -513,7 +529,7 @@ static void next(NSArray *steps, NSUInteger index) {
               return nativePreloader && [[nativePreloader valueForKey:@"ready"] boolValue];
             }, @"run":^{
             [root playChannel:[root channelWithID:@"cctv2"] route:nil];
-            check([root valueForKey:@"currentPlayer"]==preparedWrapper,@"selected channel adopts metadata-prepared wrapper");
+            check([root valueForKey:@"currentPlayer"]==preparedWrapper,[NSString stringWithFormat:@"selected channel adopts metadata-prepared wrapper (ready=%d channel=%@ wrapper=%@ current=%@)",[[nativePreloader valueForKey:@"ready"] boolValue],[nativePreloader valueForKey:@"channel"]?:@"nil",preparedWrapper?:@"nil",[root valueForKey:@"currentPlayer"]?:@"nil"]);
             check([CNPlayer smokeConfigureCount]==configuredBeforeHandoff,@"metadata handoff does not call playLIVE a second time");
             PlaybackStartupTrace *trace=[root valueForKey:@"startupTrace"];
             check(trace.stages[@"preloadedVDN"]!=nil,@"metadata hit is explicitly recorded");
@@ -525,7 +541,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [root seekNativeStart:NSDate.date.timeIntervalSince1970-60 end:0];
           },
           ^{
-            check([[root valueForKey:@"firstRender"] boolValue] && [[root valueForKey:@"nativeTimeShiftActive"] boolValue],@"native timeshift reaches a new frame");
+            check([[root valueForKey:@"firstRender"] boolValue] && [[root valueForKey:@"nativeTimeShiftActive"] boolValue],[NSString stringWithFormat:@"native timeshift reaches a new frame (frame=%d active=%d failed=%d transition=%@)",[[root valueForKey:@"firstRender"] boolValue],[[root valueForKey:@"nativeTimeShiftActive"] boolValue],[[root valueForKey:@"nativePlaybackFailed"] boolValue],[root valueForKey:@"nativeTransitionKind"]?:@"none"]);
             check([root valueForKey:@"currentPlayer"]==preparedWrapper && [CNPlayer smokeConfigureCount]==configuredBeforeHandoff,@"timeshift keeps SDK session without playLIVE reconfiguration");
             [root returnToNativeLive];
           },
@@ -646,19 +662,19 @@ static void next(NSArray *steps, NSUInteger index) {
             UIScrollView *categories=[mediaPage valueForKey:@"categoryScroll"];check([mediaPage.title isEqual:@"影视库"]&&!mediaPage.isHomeMode&&!selectionRow.hidden,@"opening a selected source from home enters the separate resource library");check(CGRectGetMinY(categories.frame)>CGRectGetMaxY(selectionRow.frame),@"film categories appear below the two-level resource selectors");capture(self.window,@"16-media-library");[sourceSelector sendActionsForControlEvents:UIControlEventTouchUpInside];
           }},
           @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])!=nil;},@"run":^{
-            UINavigationController *sheet=(id)SmokePresentedController(@[mediaPage,nav,root]);UITableViewController *picker=(id)sheet.topViewController;[picker.tableView layoutIfNeeded];UITableViewCell *current=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+            UINavigationController *sheet=SmokePresentedNavigation(@[mediaPage,nav,root],@"resource selector");if(!sheet)return;UITableViewController *picker=(id)sheet.topViewController;[picker.tableView layoutIfNeeded];UITableViewCell *current=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             UIStackView *scopeStack=[picker valueForKey:@"scopeStack"];check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"resource selection uses a native bottom sheet");check([picker.tableView numberOfRowsInSection:0]==1&&current.accessoryType==UITableViewCellAccessoryCheckmark,@"resource sheet shows its current selection");check(scopeStack.arrangedSubviews.count==2,@"resource sheet groups resources by runtime and keeps all resources visible");capture(self.window,@"16b-media-resource-sheet");
             [picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
           }},
           @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];[providerSelector sendActionsForControlEvents:UIControlEventTouchUpInside];}},
           @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])!=nil;},@"run":^{
-            UINavigationController *sheet=(id)SmokePresentedController(@[mediaPage,nav,root]);UITableViewController *picker=(id)sheet.topViewController;[picker.tableView layoutIfNeeded];NSIndexPath *current=nil;for(NSInteger row=0;row<[picker.tableView numberOfRowsInSection:0];row++){UITableViewCell *cell=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];if(cell.accessoryType==UITableViewCellAccessoryCheckmark){current=[NSIndexPath indexPathForRow:row inSection:0];break;}}
+            UINavigationController *sheet=SmokePresentedNavigation(@[mediaPage,nav,root],@"provider selector");if(!sheet)return;UITableViewController *picker=(id)sheet.topViewController;[picker.tableView layoutIfNeeded];NSIndexPath *current=nil;for(NSInteger row=0;row<[picker.tableView numberOfRowsInSection:0];row++){UITableViewCell *cell=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];if(cell.accessoryType==UITableViewCellAccessoryCheckmark){current=[NSIndexPath indexPathForRow:row inSection:0];break;}}
             check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"platform selection uses a separate bottom sheet");check([picker.tableView numberOfRowsInSection:0]==2&&current!=nil,@"platform sheet lists choices and marks the current platform");capture(self.window,@"16c-media-platform-sheet");
             NSInteger nextRow=current.row==0?1:0;[picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:nextRow inSection:0]];
           }},
           @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{[mediaPage openSourceConfiguration];}},
-          @{@"until":^BOOL{UINavigationController *sheet=(id)SmokePresentedController(@[mediaPage,nav,root]);WKWebView *web=[sheet.topViewController isKindOfClass:MediaWebViewController.class]?[sheet.topViewController valueForKey:@"web"]:nil;return [sheet isKindOfClass:UINavigationController.class]&&[sheet.topViewController isKindOfClass:MediaWebViewController.class]&&[web.URL.path isEqual:@"/source-config"];},@"run":^{
-            UINavigationController *sheet=(id)SmokePresentedController(@[mediaPage,nav,root]);MediaWebViewController *page=(id)sheet.topViewController;WKWebView *web=[page valueForKey:@"web"];
+          @{@"until":^BOOL{UIViewController *presented=SmokePresentedController(@[mediaPage,nav,root]);if(![presented isKindOfClass:UINavigationController.class])return NO;UINavigationController *sheet=(UINavigationController *)presented;WKWebView *web=[sheet.topViewController isKindOfClass:MediaWebViewController.class]?[sheet.topViewController valueForKey:@"web"]:nil;return [sheet isKindOfClass:UINavigationController.class]&&[sheet.topViewController isKindOfClass:MediaWebViewController.class]&&[web.URL.path isEqual:@"/source-config"];},@"run":^{
+            UINavigationController *sheet=SmokePresentedNavigation(@[mediaPage,nav,root],@"source configuration");if(!sheet)return;MediaWebViewController *page=(id)sheet.topViewController;WKWebView *web=[page valueForKey:@"web"];
             check([web.URL.path isEqual:@"/source-config"],[NSString stringWithFormat:@"source configuration opens the real local service page (url=%@)",web.URL.absoluteString?:@"nil"]);check(!web.configuration.websiteDataStore.persistent,@"source configuration uses an isolated ephemeral cookie store");check(sheet.modalInPresentation,@"configuration has an explicit close-and-refresh action");capture(self.window,@"16d-media-source-configuration");[page close];
           }},
           @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==1;},@"run":^{
@@ -705,7 +721,7 @@ static void next(NSArray *steps, NSUInteger index) {
             UISearchController *catalogSearch=[catalogPage valueForKey:@"searchController"];catalogSearch.searchBar.text=@"index.js";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];check([catalogPage.tableView numberOfRowsInSection:0]==1,@"large resource collections can find one script by URL");catalogSearch.searchBar.text=@"";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];
             catalogPage.serviceForSite=^NSDictionary *(NSDictionary *site){return [site[@"key"] isEqual:@"js-site"]?@{@"id":@"fixture-js",@"name":@"Fixture JS",@"enabled":@YES}:nil;};
             NSIndexPath *siteIndex=[NSIndexPath indexPathForRow:0 inSection:0];UITableViewCell *siteCell=[catalogPage tableView:catalogPage.tableView cellForRowAtIndexPath:siteIndex];check([siteCell.detailTextLabel.text containsString:@"服务运行中"]&&[siteCell.detailTextLabel.text containsString:@"点按打开资源"],@"collection reflects an already imported script runtime");check([siteCell.detailTextLabel.text containsString:@"?token=kept"],@"collection keeps source query parameters visible");
-            [catalogPage.tableView.delegate tableView:catalogPage.tableView didSelectRowAtIndexPath:siteIndex];UIAlertController *existingActions=(id)SmokePresentedController(@[catalogPage,nav,root]);NSArray *existingTitles=[existingActions.actions valueForKey:@"title"];check([existingTitles containsObject:@"启动并打开资源"],@"an imported collection script offers direct browse");[catalogPage dismissViewControllerAnimated:NO completion:nil];capture(self.window,@"21-tvbox-catalog");
+            [catalogPage.tableView.delegate tableView:catalogPage.tableView didSelectRowAtIndexPath:siteIndex];UIViewController *presented=SmokePresentedController(@[catalogPage,nav,root]);UIAlertController *existingActions=[presented isKindOfClass:UIAlertController.class]?(UIAlertController *)presented:nil;NSArray *existingTitles=[existingActions.actions valueForKey:@"title"]?:@[];check([existingTitles containsObject:@"启动并打开资源"],[NSString stringWithFormat:@"an imported collection script offers direct browse (presented=%@ actions=%@)",presented?NSStringFromClass(presented.class):@"none",existingTitles]);[catalogPage dismissViewControllerAnimated:NO completion:nil];capture(self.window,@"21-tvbox-catalog");
           }},
           @{ @"until":^BOOL{return SmokePresentedController(@[(UIViewController *)nav.topViewController,nav,root])==nil;}, @"run":^{
             TVBoxCatalogViewController *catalogPage=(id)nav.topViewController;catalogPage.serviceForSite=nil;NSIndexPath *siteIndex=[NSIndexPath indexPathForRow:0 inSection:0];[catalogPage.tableView.delegate tableView:catalogPage.tableView didSelectRowAtIndexPath:siteIndex];
