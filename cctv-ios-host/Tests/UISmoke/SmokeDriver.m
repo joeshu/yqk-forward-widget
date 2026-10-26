@@ -375,6 +375,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [history tableView:history.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             LogCenterViewController *logs=(id)nav.topViewController;
             check([logs isKindOfClass:LogCenterViewController.class], @"selecting a run opens its own searchable log page");
+            [logs loadViewIfNeeded];
             check([logs.logSnapshotProvider() containsString:@"第二次独立运行日志"] && ![logs.logSnapshotProvider() containsString:@"第一次运行日志"], @"a run log contains only the selected invocation");
             check(![logs.logSnapshotProvider() containsString:@"plugin-secret"], @"plugin log view redacts sensitive values before display");
             check(logs.onExportLog!=nil && logs.onClearLog!=nil, @"plugin log page exposes independent export and clear actions");
