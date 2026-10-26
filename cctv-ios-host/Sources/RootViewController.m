@@ -2614,7 +2614,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     BOOL serviceRunning=[PyHost isRunningServiceIdentifier:service[@"id"]];
     BOOL serviceStarting=[PyHost isStartingServiceIdentifier:service[@"id"]];
     if(!serviceRunning&&!serviceStarting){
-        NSError *startupError=[PyHost startupErrorForServiceIdentifier:service[@"id"]];
+        NSString *engine=[service[@"engine"] isKindOfClass:NSString.class]?service[@"engine"]:@"python";
+        NSError *startupError=[engine isEqualToString:@"python"]?[PyHost startupErrorForServiceIdentifier:service[@"id"]]:nil;
         if(!startupError)startupError=[NSError errorWithDomain:@"CCTVHostService" code:3 userInfo:@{@"NSLocalizedDescriptionKey":@"服务既未运行也未处于启动状态，请检查服务日志后重试。"}];
         [self failRemoteReadiness:startupError generation:generation];return;
     }

@@ -67,6 +67,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         readiness = method_body("- (void)continueRemotePlaybackForURL:(NSString *)u service:(NSDictionary *)service generation:(NSUInteger)generation {")
         self.assertIn("isStartingServiceIdentifier:service[@\"id\"]", readiness)
         self.assertIn("readinessForURL:[NSURL URLWithString:u] service:service", readiness)
+        self.assertIn('isEqualToString:@"python"]?[PyHost startupErrorForServiceIdentifier:', readiness)
         self.assertIn("startupErrorForServiceIdentifier:service[@\"id\"]", readiness)
 
     def test_subscription_page_supports_per_source_refresh_and_real_last_success(self):
