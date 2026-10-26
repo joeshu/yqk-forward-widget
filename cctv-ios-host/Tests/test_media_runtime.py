@@ -1,6 +1,7 @@
 import http.client
 import http.server
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import threading
 import time
 import unittest
 import urllib.parse
+from contextlib import redirect_stdout
 from unittest import mock
 
 PLUGINS = Path(__file__).resolve().parents[1] / 'Plugins'
@@ -43,6 +45,43 @@ class MediaTests(unittest.TestCase):
     def tearDown(self):
         self.runtime.close()
         self.tmp.cleanup()
+
+    def test_python_spider_prepare_logs_module_and_init_phase_timings(self):
+        source = Path(self.tmp.name, 'slow.py')
+        source.write_text('''import time
+class Spider:
+    def init(self, extend=''):
+        time.sleep(0.05)
+    def homeContent(self, filter): return {'list': []}
+''')
+        output = io.StringIO()
+        owner = type('Owner', (), {'identifier': 'timing-fixture'})()
+        current_thread = threading.current_thread()
+        previous_owner = getattr(current_thread, '_host_session', None)
+        current_thread._host_session = owner
+        try:
+            with redirect_stdout(output):
+                engine = media.PythonSpider(self.tmp.name, 'slow.py')
+        finally:
+            if previous_owner is None:
+                del current_thread._host_session
+            else:
+                current_thread._host_session = previous_owner
+        try:
+            events = [json.loads(line.split(' ', 1)[1])
+                      for line in output.getvalue().splitlines()
+                      if line.startswith('[CCTVHostMediaAPI] ')]
+            names = [event['event'] for event in events]
+            self.assertEqual(names, ['python_spider_prepare_started',
+                                     'python_spider_module_loaded',
+                                     'python_spider_init_started',
+                                     'python_spider_init_succeeded',
+                                     'python_spider_ready'])
+            init = next(event for event in events if event['event'] == 'python_spider_init_succeeded')
+            self.assertGreaterEqual(init['elapsed_ms'], 40)
+            self.assertTrue(all(event['entry'] == 'slow.py' for event in events))
+        finally:
+            engine.close()
 
     def test_spider_home_pagination_multiline_and_play_headers(self):
         home = self.runtime.call('home')

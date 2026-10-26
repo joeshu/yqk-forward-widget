@@ -1,13 +1,42 @@
 """Small host base for conventional Python Spider packages.
 
 Requests and BeautifulSoup are optional adapters; imported modules continue to
-use their original Python code. Cache state belongs to each Spider instance.
+use their original Python code. Cache state is service-scoped and bounded.
 """
 import json
+import os
 import threading
 import time
 import urllib.parse
 import urllib.request
+
+
+_CACHE_LIMIT = 128
+_PERSISTENT_CACHE_LIMIT = 32
+_PERSISTENT_CACHE_BYTES = 64 * 1024
+_PERSISTENT_CACHE_NAME = 'spider-cache.json'
+
+
+def _persistent_url_key(key):
+    """Persist only conventional, non-secret site base URL cache entries."""
+    name = str(key or '').strip().lower()
+    return (len(name) <= 128 and
+            name.endswith(('_site_url', '_base_url', '_home_url', '_host_url')))
+
+
+def _safe_base_url(value):
+    if not isinstance(value, str) or not value or len(value) > 2048:
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(value.strip())
+        parsed.port
+        return (parsed.scheme.lower() in ('http', 'https') and bool(parsed.hostname)
+                and not parsed.username and not parsed.password
+                and not parsed.query and not parsed.fragment
+                and '?' not in value and '#' not in value
+                and not any(ord(char) <= 32 or ord(char) == 127 for char in value))
+    except ValueError:
+        return False
 
 
 class _Response:
@@ -32,6 +61,92 @@ class Spider:
     def __init__(self):
         self._host_cache = {}
         self._host_cache_lock = threading.Lock()
+        self._host_persistent_cache = {}
+        self._host_persistent_cache_loaded = False
+
+    def _persistent_cache_path(self):
+        data_dir = os.environ.get('CCTVHOST_DATA_DIR') or os.environ.get('YSP_DATA_DIR')
+        if not data_dir:
+            return None
+        root = os.path.realpath(data_dir)
+        if not os.path.isdir(root):
+            return None
+        return os.path.join(root, _PERSISTENT_CACHE_NAME)
+
+    def _load_persistent_cache(self):
+        if self._host_persistent_cache_loaded:
+            return
+        self._host_persistent_cache_loaded = True
+        path = self._persistent_cache_path()
+        if not path:
+            return
+        try:
+            if os.path.getsize(path) > _PERSISTENT_CACHE_BYTES:
+                return
+            with open(path, 'r', encoding='utf-8') as handle:
+                payload = json.load(handle)
+            if not isinstance(payload, dict) or payload.get('version') != 1:
+                return
+            entries = payload.get('entries')
+            if not isinstance(entries, dict):
+                return
+            now = time.time()
+            monotonic_now = time.monotonic()
+            for key, row in list(entries.items())[:_PERSISTENT_CACHE_LIMIT]:
+                if not _persistent_url_key(key) or not isinstance(row, dict):
+                    continue
+                value = row.get('value')
+                try:
+                    expires_at = float(row.get('expires_at', 0))
+                    remaining = expires_at - now
+                except (TypeError, ValueError):
+                    continue
+                if remaining <= 0 or not _safe_base_url(value):
+                    continue
+                self._host_persistent_cache[key] = (expires_at, value)
+                self._host_cache[key] = (monotonic_now + remaining, value)
+        except (OSError, UnicodeError, ValueError, TypeError):
+            return
+
+    def _save_persistent_cache(self):
+        path = self._persistent_cache_path()
+        if not path:
+            return
+        now = time.time()
+        self._host_persistent_cache = {
+            key: row for key, row in self._host_persistent_cache.items()
+            if (now < row[0] and _persistent_url_key(key)
+                and _safe_base_url(row[1]))
+        }
+        if not self._host_persistent_cache:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return
+        while len(self._host_persistent_cache) > _PERSISTENT_CACHE_LIMIT:
+            self._host_persistent_cache.pop(next(iter(self._host_persistent_cache)))
+        entries = dict(list(self._host_persistent_cache.items())[-_PERSISTENT_CACHE_LIMIT:])
+        payload = {'version': 1, 'entries': {
+            key: {'expires_at': expiry, 'value': value}
+            for key, (expiry, value) in entries.items()
+        }}
+        try:
+            encoded = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+            if len(encoded) > _PERSISTENT_CACHE_BYTES:
+                return
+            temporary = path + '.tmp'
+            with open(temporary, 'wb') as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, path)
+        except (OSError, TypeError, ValueError):
+            try:
+                os.remove(path + '.tmp')
+            except OSError:
+                pass
 
     def init(self, extend=''):
         pass
@@ -46,23 +161,43 @@ class Spider:
         return getattr(self, '_cctvhost_proxy_url', '')
 
     def getCache(self, key):
-        cache = getattr(self, '_host_cache', {})
-        value = cache.get(key)
-        if value and value[0] > time.monotonic():
-            return value[1]
-        cache.pop(key, None)
-        return None
+        key = str(key)
+        with self._host_cache_lock:
+            self._load_persistent_cache()
+            cache = getattr(self, '_host_cache', {})
+            value = cache.get(key)
+            if value and value[0] > time.monotonic():
+                return value[1]
+            cache.pop(key, None)
+            if key in self._host_persistent_cache:
+                self._host_persistent_cache.pop(key, None)
+                self._save_persistent_cache()
+            return None
 
     def setCache(self, key, value, expire=3600):
-        if not hasattr(self, '_host_cache'):
-            self._host_cache = {}
-        if len(self._host_cache) >= 128:
-            self._host_cache.pop(next(iter(self._host_cache)))
-        self._host_cache[key] = (time.monotonic() + max(0, float(expire)), value)
+        key = str(key)
+        duration = max(0, float(expire))
+        with self._host_cache_lock:
+            self._load_persistent_cache()
+            if key not in self._host_cache and len(self._host_cache) >= _CACHE_LIMIT:
+                self._host_cache.pop(next(iter(self._host_cache)))
+            if duration:
+                self._host_cache[key] = (time.monotonic() + duration, value)
+            else:
+                self._host_cache.pop(key, None)
+            if _persistent_url_key(key) and duration and _safe_base_url(value):
+                self._host_persistent_cache[key] = (time.time() + duration, value)
+            else:
+                self._host_persistent_cache.pop(key, None)
+            self._save_persistent_cache()
         return 'ok'
 
     def delCache(self, key):
-        getattr(self, '_host_cache', {}).pop(key, None)
+        key = str(key)
+        with self._host_cache_lock:
+            getattr(self, '_host_cache', {}).pop(key, None)
+            self._host_persistent_cache.pop(key, None)
+            self._save_persistent_cache()
         return 'ok'
 
     def fetch(self, url, headers=None, cookies=None, timeout=12, **kwargs):

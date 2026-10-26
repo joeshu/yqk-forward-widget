@@ -25,6 +25,22 @@ class MediaError(Exception):
         self.code, self.retryable = code, retryable
 
 
+def _python_spider_log_stage(event, entry, started_at, **fields):
+    """Record safe phase timings in the owning service's isolated log."""
+    owner = getattr(threading.current_thread(), '_host_session', None)
+    if owner is None:
+        return
+    record = {'event': event, 'entry': os.path.basename(str(entry or '')),
+              'elapsed_ms': max(0, int((time.perf_counter() - started_at) * 1000))}
+    record['service_id'] = str(getattr(owner, 'identifier', ''))
+    record.update(fields)
+    try:
+        print('[CCTVHostMediaAPI] ' + json.dumps(record, ensure_ascii=False,
+                                                   separators=(',', ':')))
+    except Exception:
+        pass
+
+
 def decoded(value):
     if isinstance(value, str):
         try:
@@ -458,6 +474,8 @@ def playback(value):
 
 class PythonSpider:
     def __init__(self, root, entry, options=None, proxy_url=''):
+        prepare_started_at = time.perf_counter()
+        prepare_stage = 'module_import'
         self.root = os.path.realpath(root)
         path = os.path.realpath(os.path.join(self.root, entry))
         if os.path.commonpath([self.root, path]) != self.root or not path.endswith('.py'):
@@ -516,17 +534,27 @@ class PythonSpider:
         module = importlib.util.module_from_spec(spec)
         module.__dict__['__builtins__'] = self._plugin_builtins
         sys.modules[name] = module
+        _python_spider_log_stage('python_spider_prepare_started', entry, prepare_started_at)
         try:
             spec.loader.exec_module(module)
+            _python_spider_log_stage('python_spider_module_loaded', entry, prepare_started_at)
             cls = getattr(module, 'Spider', None)
             if not callable(cls):
                 raise MediaError('INVALID_PROTOCOL', '文件未提供 Spider 类；HTTP 服务脚本请按服务方式运行')
+            prepare_stage = 'spider_constructor'
             self.spider = cls()
             self.spider._cctvhost_proxy_url = proxy_url
             self.lock = threading.Lock()
             if callable(getattr(self.spider, 'init', None)):
+                prepare_stage = 'spider_init'
+                init_started_at = time.perf_counter()
+                _python_spider_log_stage('python_spider_init_started', entry, init_started_at)
                 self.spider.init(options if isinstance(options, str) else json.dumps(options or {}, ensure_ascii=False))
-        except BaseException:
+                _python_spider_log_stage('python_spider_init_succeeded', entry, init_started_at)
+            _python_spider_log_stage('python_spider_ready', entry, prepare_started_at)
+        except BaseException as error:
+            _python_spider_log_stage('python_spider_prepare_failed', entry, prepare_started_at,
+                                     stage=prepare_stage, error_type=type(error).__name__)
             self._remove_package_modules()
             if self.added_path and self.root in sys.path:
                 sys.path.remove(self.root)

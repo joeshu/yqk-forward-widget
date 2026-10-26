@@ -109,12 +109,37 @@
               BOOL ready = !error && self.lastHTTPStatus == 200;
               if(error)self.lastFailureKind=@"network_error";
               else if(self.lastHTTPStatus!=200)self.lastFailureKind=@"http_status";
+              NSDictionary *healthJSON = nil;
               if (ready && self.requiresHealthJSON) {
-                  id json =
-                      data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
-                  ready = [json isKindOfClass:NSDictionary.class] &&
-                          [json[@"ok"] isKindOfClass:NSNumber.class] && [json[@"ok"] boolValue];
+                  id json = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+                  if ([json isKindOfClass:NSDictionary.class]) healthJSON = json;
+                  ready = [healthJSON isKindOfClass:NSDictionary.class] &&
+                          [healthJSON[@"ok"] isKindOfClass:NSNumber.class] && [healthJSON[@"ok"] boolValue];
                   if(!ready)self.lastFailureKind=@"invalid_health_response";
+              }
+              // The in-app media server intentionally listens before a Spider
+              // finishes its remote init(). Wait on its cheap health endpoint
+              // instead of hammering /capabilities with repeated 503 BUSY calls.
+              if (ready && [healthJSON[@"media"] respondsToSelector:@selector(boolValue)] &&
+                  [healthJSON[@"media"] boolValue] &&
+                  [healthJSON[@"runtime_ready"] isKindOfClass:NSNumber.class] &&
+                  ![healthJSON[@"runtime_ready"] boolValue]) {
+                  NSString *runtimeState = [healthJSON[@"runtime_state"] isKindOfClass:NSString.class]
+                      ? healthJSON[@"runtime_state"] : @"starting";
+                  if ([runtimeState isEqualToString:@"failed"] || [runtimeState isEqualToString:@"stopping"]) {
+                      NSString *detail = [healthJSON[@"startup_error"] isKindOfClass:NSString.class]
+                          ? healthJSON[@"startup_error"] : @"未知错误";
+                      self.lastFailureKind = [runtimeState isEqualToString:@"failed"] ? @"runtime_failed" : @"runtime_stopping";
+                      [self finish:[NSError errorWithDomain:@"CCTVHostMediaRuntime"
+                                                       code:[runtimeState isEqualToString:@"failed"] ? 2 : 3
+                                                   userInfo:@{NSLocalizedDescriptionKey:
+                                                       [runtimeState isEqualToString:@"failed"]
+                                                           ? [NSString stringWithFormat:@"影视脚本初始化失败（%@），请查看该插件日志。", detail]
+                                                           : @"影视资源正在停止，请重新打开后重试。"}]];
+                      return;
+                  }
+                  ready = NO;
+                  self.lastFailureKind = @"runtime_preparing";
               }
               if (ready) {
                   self.lastFailureKind=@"none";
@@ -123,7 +148,8 @@
                   [self finish:nil];
                   return;
               }
-              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+              NSTimeInterval pollInterval = [self.lastFailureKind isEqualToString:@"runtime_preparing"] ? 0.75 : 0.3;
+              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(pollInterval * NSEC_PER_SEC)),
                              dispatch_get_main_queue(), ^{
                                [weakSelf poll:generation];
                              });

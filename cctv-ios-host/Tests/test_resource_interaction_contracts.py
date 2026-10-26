@@ -595,6 +595,15 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('capabilityReadinessRetryCount<45', load_capabilities)
         self.assertIn('资源脚本正在准备', load_capabilities)
 
+    def test_media_health_waits_for_spider_ready_without_repeating_busy_api_calls(self):
+        readiness = (ROOT / 'Sources/LocalServiceReadiness.m').read_text()
+        browser = (ROOT / 'Sources/MediaBrowserViewController.m').read_text()
+        self.assertIn('healthJSON[@"runtime_ready"]', readiness)
+        self.assertIn('@"runtime_preparing"', readiness)
+        self.assertIn('@"runtime_failed"', readiness)
+        self.assertIn('pollInterval = [self.lastFailureKind isEqualToString:@"runtime_preparing"] ? 0.75 : 0.3', readiness)
+        self.assertIn('initWithURL:health timeout:45 requiresHealthJSON:YES', browser)
+
     def test_playback_recovery_is_generation_scoped_and_quality_restores_pause_state(self):
         self.assertIn('owner.stallRecoveryAttempts>=1', self.playback)
         self.assertIn('playback_stall_recovery_started', self.playback)

@@ -85,3 +85,13 @@
 
 相关验证：`Tests.test_persistent_log` 新增日志页面生命周期、跟随底部条件、重复快照与辅助字体合同；`Tests.test_global_theme`、`Tests.test_resource_interaction_contracts`、`Tests.test_root_view_controller_contracts` 覆盖其余页面的主题、状态和异步交互。
 
+## 2026-10-26 补充：Python 影视源慢启动与异常退出诊断
+
+诊断 JSONL 中，蝴蝶影院 Python Spider 从服务启动到能力接口可读分别约 15 秒、10 秒和 11 秒；本地 HTTP 监听较快，等待发生在资源脚本准备阶段。所附界面进一步显示初始化期间 `/api/v1/capabilities` 连续返回 503 `BUSY`。蝴蝶脚本的 `init()` 会同步请求动态导航站并验证候选域名；宿主原有 `getCache/setCache` 只保存在当前 Spider 实例内，App/服务重启后丢失成功站点地址，导致再次探测。
+
+修复在 `Plugins/base/spider.py` 增加按服务数据目录隔离的持久缓存：只保存键名为常见站点基础 URL、值为无账号/无查询参数的 HTTP(S) URL，沿用脚本设定的 TTL，限制条目和文件大小，并原子写入。影视本机服务健康接口已能报告脚本运行时是否真正 ready；`LocalServiceReadiness` 现在等该状态就绪后才读取能力，初始化中改为低频健康轮询，失败时直接显示初始化失败，不再重复请求能力接口。Python Spider 还会在独立服务日志中分别记录导入、`init()` 和总准备耗时，不记录请求 URL 或凭据。
+
+崩溃判断边界：JSONL 在 20:53:15 记录了旧 Python 会话未清洁退出后 App 再次启动，但未附 iOS `.ips` 崩溃栈；记录的物理内存 footprint 约 44 MiB，无法据此确认内存回收，也无法定位退出原因。该事件只能说明进程重启/会话中断，不能证明是蝴蝶脚本导致的崩溃。要定因仍需同一时间段的系统 `.ips` 报告。此次为下一次复现补充了 Spider 准备阶段耗时日志。
+
+验证：Python 单元回归 293 项通过、45 项因本机缺少 Apple SDK/JavaScriptCore、附件样本或 IPA 而跳过；另用提供的蝴蝶脚本在无网络夹具下验证：缓存命中时 `init()` 不调用动态站点联网探测。iOS 构建、UI smoke 和真机首次冷启动/崩溃复现需由后续 CI 与设备检查确认。
+
