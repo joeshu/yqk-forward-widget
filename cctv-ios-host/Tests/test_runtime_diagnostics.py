@@ -109,6 +109,20 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         ):
             self.assertIn(token, runtime + PYHOST)
 
+    def test_python_network_reads_are_bounded_and_explain_rejections(self):
+        runtime = (ROOT / 'Scripts/host_service_runtime.py').read_text()
+        for token in (
+            '_max_http_response_bytes = 16 * 1024 * 1024',
+            '_http_workers_per_service = 4',
+            '_global_http_workers = threading.BoundedSemaphore(12)',
+            '_global_response_reads = threading.BoundedSemaphore(8)',
+            'http.client.HTTPResponse.read = _bounded_http_response_read',
+            'owner.http_worker_slots',
+            '_cctvhost_python_resource_limit', 'python_http_response_rejected',
+            '_cctvhost_python_http_worker_rejected', 'python_http_worker_rejected',
+        ):
+            self.assertIn(token, runtime + PYHOST)
+
     def test_subscription_diagnostics_classify_parse_and_transport_failures(self):
         for event in (
             'subscription_refresh_started', 'subscription_refresh_failed',

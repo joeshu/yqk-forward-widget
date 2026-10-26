@@ -16,6 +16,8 @@
 
 Python 还会在每个关键执行阶段同步写入最近运行标记，包含服务 ID、脚本文件名、阶段、端口和进程内存快照。若下次启动发现上次进程仍留有活动标记，会记录 `python_session_interrupted`，并在对应脚本的独立日志中追加中断提示，据此定位当时运行的是哪个脚本、停在哪一阶段。该事件只说明上个进程没有完成服务清理；iOS 也可能因后台回收而结束 App，不能单凭它判定为崩溃。未捕获的 Python 后台线程异常会记录 `python_background_thread_exception`，包含服务 ID、线程名、异常类型、源文件行号和脱敏错误文本，完整 traceback 会写入该服务独立日志。
 
+Python 插件的 HTTP 响应体受每响应 16 MiB 上限保护；每个服务最多 4 个 HTTP handler，全宿主最多 12 个 handler，同时最多 2 个/服务、8 个/宿主执行大响应读取。超限或读取并发预算耗尽会在插件日志和诊断文件中记录 `python_http_response_rejected`，并让该 HTTP 请求失败，避免多个完整媒体分片同时无限占用内存。低于上限的普通响应可继续读取；读取并发预算耗尽时该次请求会快速失败并记录原因。HTTP handler 并发预算耗尽会记录 `python_http_worker_rejected`，便于区分响应体超限与请求处理能力耗尽。
+
 Node 与 JavaScriptCore 的调用会以 `plugin_bridge_started` 及 `plugin_bridge_succeeded` / `plugin_bridge_failed` 成对记录，包含服务 ID、引擎、操作名、耗时、响应大小和失败阶段，不包含脚本源码或请求正文。`failure_stage` 能区分桥接异常、空/非法响应和插件返回业务错误。
 
 服务健康检查事件包含 `probe_id`、尝试次数、最后 HTTP 状态、响应字节数、内容类型、错误域/代码及失败类型。`process_failed` 表示宿主发现进程退出；`network_error` / `http_status` 表示探测请求没有通过；`invalid_health_response` 表示 HTTP 200 但健康 JSON 不符合约定；`probe_timeout` 表示在截止时间内没有就绪。

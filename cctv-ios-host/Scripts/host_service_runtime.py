@@ -6,6 +6,7 @@ A replacement may run only after all tracked servers, workers and main have quit
 """
 import atexit
 import builtins
+import http.client
 import importlib.util
 import http.server
 import os
@@ -34,10 +35,15 @@ _http_bind = http.server.HTTPServer.server_bind
 _get_request = socketserver.TCPServer.get_request
 _process_request = socketserver.ThreadingMixIn.process_request
 _process_thread = socketserver.ThreadingMixIn.process_request_thread
+_http_response_read = http.client.HTTPResponse.read
 _hooks = ('_cctvhost_stop_service', '_ysp_stop_server')
 _atexit_register = atexit.register
 _max_threads_per_service = 48
 _max_threads_for_host = 128
+_http_workers_per_service = 4
+_max_http_response_bytes = 16 * 1024 * 1024
+_global_http_workers = threading.BoundedSemaphore(12)
+_global_response_reads = threading.BoundedSemaphore(8)
 _last_error = ''
 _last_errors = {}
 _base_environment = os.environ
@@ -108,6 +114,8 @@ class Session:
         self.package_prefix = None
         self.package_root = None
         self.plugin_builtins = None
+        self.http_worker_slots = threading.BoundedSemaphore(_http_workers_per_service)
+        self.response_read_slots = threading.BoundedSemaphore(2)
         self.previous_hooks = {}
         self.environment = dict(_base_environment)
 
@@ -190,7 +198,7 @@ def _init(server, *args, **kwargs):
             server._host_serving = threading.Event()
             server._host_closed = False
             server._host_clients = weakref.WeakSet()
-            server._host_workers = threading.BoundedSemaphore(12)
+            server._host_workers = owner.http_worker_slots
             owner.servers.append(server)
 
 
@@ -313,11 +321,18 @@ def _process(server, request, address):
     if slots is None:
         return _process_request(server, request, address)
     if not slots.acquire(blocking=False):
+        _report_http_worker_limit(getattr(server, '_host_owner', None), 'per_service_handler_limit')
+        server.shutdown_request(request)
+        return
+    if not _global_http_workers.acquire(blocking=False):
+        slots.release()
+        _report_http_worker_limit(getattr(server, '_host_owner', None), 'host_handler_limit')
         server.shutdown_request(request)
         return
     try:
         return _process_request(server, request, address)
     except BaseException:
+        _global_http_workers.release()
         slots.release()
         raise
 
@@ -329,10 +344,85 @@ def _process_worker(server, request, address):
         slots = getattr(server, '_host_workers', None)
         if slots is not None:
             slots.release()
+            _global_http_workers.release()
+
+
+class HTTPResponseTooLarge(RuntimeError):
+    pass
+
+
+def _report_http_worker_limit(owner, reason):
+    if owner is None:
+        return
+    callback = vars(builtins).get('_cctvhost_python_http_worker_rejected')
+    if callable(callback):
+        try:
+            callback(owner.identifier, reason)
+            return
+        except BaseException:
+            pass
+    print('[宿主] HTTP 请求受到并发上限保护：%s' % reason)
+
+
+def _report_response_limit(owner, reason, observed):
+    callback = vars(builtins).get('_cctvhost_python_resource_limit')
+    if callable(callback):
+        try:
+            callback(owner.identifier, reason, int(observed), int(_max_http_response_bytes))
+            return
+        except BaseException:
+            pass
+    print('[宿主] HTTP 响应受到资源保护：%s，观测 %s bytes，上限 %s bytes' %
+          (reason, observed, _max_http_response_bytes))
+
+
+def _bounded_http_response_read(response, amt=None):
+    owner = getattr(threading.current_thread(), '_host_session', None)
+    if owner is None:
+        return _http_response_read(response, amt)
+
+    limit = max(1, int(_max_http_response_bytes))
+    already_read = int(getattr(response, '_cctvhost_bytes_read', 0))
+    remaining = max(0, limit - already_read)
+    whole_body = amt is None or amt < 0
+    declared = getattr(response, 'length', None)
+    if whole_body and declared is not None and declared > remaining:
+        _report_response_limit(owner, 'declared_body_too_large', declared + already_read)
+        raise HTTPResponseTooLarge('HTTP response exceeds CCTVHost per-response limit (%d bytes)' % limit)
+
+    requested = remaining + 1 if whole_body else min(max(0, int(amt)), remaining + 1)
+    use_read_slots = whole_body or requested > 1024 * 1024
+    per_service_acquired = False
+    global_acquired = False
+    if use_read_slots:
+        per_service_acquired = owner.response_read_slots.acquire(blocking=False)
+        if not per_service_acquired:
+            _report_response_limit(owner, 'per_service_read_concurrency', already_read)
+            raise HTTPResponseTooLarge('Python service has reached its concurrent response-read budget')
+        global_acquired = _global_response_reads.acquire(blocking=False)
+        if not global_acquired:
+            owner.response_read_slots.release()
+            _report_response_limit(owner, 'host_read_concurrency', already_read)
+            raise HTTPResponseTooLarge('CCTVHost has reached its concurrent response-read budget')
+    try:
+        data = _http_response_read(response, requested)
+    finally:
+        if global_acquired:
+            _global_response_reads.release()
+        if per_service_acquired:
+            owner.response_read_slots.release()
+
+    total = already_read + len(data)
+    response._cctvhost_bytes_read = total
+    if total > limit:
+        _report_response_limit(owner, 'body_limit_exceeded', total)
+        raise HTTPResponseTooLarge('HTTP response exceeds CCTVHost per-response limit (%d bytes)' % limit)
+    return data
 
 
 threading.Thread.start = _start
 threading.excepthook = _thread_excepthook
+http.client.HTTPResponse.read = _bounded_http_response_read
 socketserver.BaseServer.__init__ = _init
 socketserver.BaseServer.serve_forever = _serve
 socketserver.TCPServer.server_close = _close

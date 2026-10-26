@@ -1,4 +1,5 @@
 import builtins
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import os
 from pathlib import Path
@@ -244,6 +245,103 @@ class ServiceRuntimeTests(unittest.TestCase):
                 vars(builtins).pop('_cctvhost_python_exception', None)
             else:
                 builtins._cctvhost_python_exception = previous
+
+    def test_urllib_response_body_limit_rejects_large_payload_with_service_context(self):
+        payload = b'012345678'
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        serving = threading.Thread(target=server.serve_forever, daemon=True)
+        serving.start()
+        reports = []
+        previous_callback = vars(builtins).get('_cctvhost_python_resource_limit')
+        previous_limit = runtime._max_http_response_bytes
+        runtime._max_http_response_bytes = 8
+        builtins._cctvhost_python_resource_limit = lambda *args: reports.append(args)
+        try:
+            url = 'http://127.0.0.1:%d/large' % server.server_port
+            worker = self.launch("import builtins, urllib.request\n"
+                                 "try:\n"
+                                 " with urllib.request.urlopen(%r, timeout=2) as response:\n"
+                                 "  response.read()\n"
+                                 "except Exception as error:\n"
+                                 " builtins._host_test_response_error = (type(error).__name__, str(error))\n" % url)
+            worker.join(2)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(builtins._host_test_response_error[0], 'HTTPResponseTooLarge')
+            self.assertIn('per-response limit (8 bytes)', builtins._host_test_response_error[1])
+            self.assertEqual(reports[0], ('default', 'declared_body_too_large', 9, 8))
+        finally:
+            runtime._max_http_response_bytes = previous_limit
+            if previous_callback is None:
+                vars(builtins).pop('_cctvhost_python_resource_limit', None)
+            else:
+                builtins._cctvhost_python_resource_limit = previous_callback
+            vars(builtins).pop('_host_test_response_error', None)
+            server.shutdown()
+            serving.join(1)
+            server.server_close()
+
+    def test_python_http_handlers_are_bounded_per_service_and_host(self):
+        worker = self.launch(self.server_source(background=True))
+        self.wait(lambda: bool(runtime._session and runtime._session.servers
+                               and runtime._session.servers[0]._host_serving.is_set()))
+        server = runtime._session.servers[0]
+        self.assertIs(server._host_workers, runtime._session.http_worker_slots)
+        self.assertEqual(server._host_workers._initial_value, 4)
+        self.assertEqual(runtime._global_http_workers._initial_value, 12)
+        self.assertTrue(runtime.stop_session(2), runtime.last_error())
+        worker.join(1)
+
+    def test_http_handler_limit_rejections_are_logged_without_leaking_slots(self):
+        reports = []
+        previous_callback = vars(builtins).get('_cctvhost_python_http_worker_rejected')
+        previous_global_slots = runtime._global_http_workers
+
+        class Request:
+            closed = False
+
+        class Server:
+            _host_owner = type('Owner', (), {'identifier': 'worker-test'})()
+
+            def __init__(self, slots):
+                self._host_workers = slots
+
+            def shutdown_request(self, request):
+                request.closed = True
+
+        builtins._cctvhost_python_http_worker_rejected = lambda *args: reports.append(args)
+        try:
+            service_slots = threading.BoundedSemaphore(1)
+            service_slots.acquire()
+            service_request = Request()
+            runtime._process(Server(service_slots), service_request, ('127.0.0.1', 1))
+            self.assertTrue(service_request.closed)
+            self.assertEqual(reports.pop(), ('worker-test', 'per_service_handler_limit'))
+            service_slots.release()
+
+            runtime._global_http_workers = threading.BoundedSemaphore(0)
+            host_request = Request()
+            host_slots = threading.BoundedSemaphore(1)
+            runtime._process(Server(host_slots), host_request, ('127.0.0.1', 1))
+            self.assertTrue(host_request.closed)
+            self.assertEqual(reports, [('worker-test', 'host_handler_limit')])
+            self.assertEqual(host_slots._value, 1)
+        finally:
+            runtime._global_http_workers = previous_global_slots
+            if previous_callback is None:
+                vars(builtins).pop('_cctvhost_python_http_worker_rejected', None)
+            else:
+                builtins._cctvhost_python_http_worker_rejected = previous_callback
 
     def test_returned_main_with_background_server_is_still_running(self):
         worker = self.launch(self.server_source(background=True))

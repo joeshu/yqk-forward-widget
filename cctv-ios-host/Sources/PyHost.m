@@ -321,6 +321,42 @@ static PyObject *pyHostPythonException(PyObject *self, PyObject *args) {
     }
     Py_RETURN_NONE;
 }
+static PyObject *pyHostPythonResourceLimit(PyObject *self, PyObject *args) {
+    const char *service = NULL, *reason = NULL;
+    long long observedBytes = 0, limitBytes = 0;
+    if (!PyArg_ParseTuple(args, "ssLL", &service, &reason, &observedBytes, &limitBytes)) return NULL;
+    @autoreleasepool {
+        NSString *serviceID = [NSString stringWithUTF8String:service] ?: @"unknown";
+        NSString *reasonText = [NSString stringWithUTF8String:reason] ?: @"resource_budget";
+        ensureMaps();
+        pthread_mutex_lock(&gLock); PyHostTask *task = gTasks[serviceID]; pthread_mutex_unlock(&gLock);
+        if (task) recordPythonBreadcrumb(task, @"http_response_rejected");
+        NSDictionary *fields = @{@"engine":@"python",
+                                 @"service_id":serviceID,
+                                 @"resource":@"http_response_body",
+                                 @"rejection_reason":reasonText,
+                                 @"observed_bytes":@(observedBytes),
+                                 @"limit_bytes":@(limitBytes)};
+        [RuntimeDiagnostics.shared recordEventSynchronously:@"python_http_response_rejected" category:@"plugin" fields:fields];
+        emitLogForIdentifier(serviceID, [NSString stringWithFormat:@"[宿主] HTTP 响应被资源上限拦截 · %@ · %lld / %lld bytes", reasonText, observedBytes, limitBytes]);
+    }
+    Py_RETURN_NONE;
+}
+static PyObject *pyHostPythonHTTPWorkerRejected(PyObject *self, PyObject *args) {
+    const char *service = NULL, *reason = NULL;
+    if (!PyArg_ParseTuple(args, "ss", &service, &reason)) return NULL;
+    @autoreleasepool {
+        NSString *serviceID = [NSString stringWithUTF8String:service] ?: @"unknown";
+        NSString *reasonText = [NSString stringWithUTF8String:reason] ?: @"handler_limit";
+        NSDictionary *fields = @{@"engine":@"python",
+                                 @"service_id":serviceID,
+                                 @"resource":@"http_handler",
+                                 @"rejection_reason":reasonText};
+        [RuntimeDiagnostics.shared recordEventSynchronously:@"python_http_worker_rejected" category:@"plugin" fields:fields];
+        emitLogForIdentifier(serviceID, [NSString stringWithFormat:@"[宿主] HTTP 请求因并发保护被拒绝 · %@", reasonText]);
+    }
+    Py_RETURN_NONE;
+}
 static PyObject *pyHostJSCall(PyObject *self, PyObject *args) {
     const char *operation = NULL, *json = NULL;
     if (!PyArg_ParseTuple(args, "ss", &operation, &json)) return NULL;
@@ -363,6 +399,8 @@ static PyObject *pyHostNodeCall(PyObject *self, PyObject *args) {
 }
 static PyMethodDef writeMethod = {"_pyhost_write", pyHostWrite, METH_VARARGS, "Forward Python output to its service log."};
 static PyMethodDef pythonExceptionMethod = {"_cctvhost_python_exception", pyHostPythonException, METH_VARARGS, "Persist and log an uncaught Python worker-thread exception."};
+static PyMethodDef pythonResourceLimitMethod = {"_cctvhost_python_resource_limit", pyHostPythonResourceLimit, METH_VARARGS, "Persist and log a Python service resource-limit rejection."};
+static PyMethodDef pythonHTTPWorkerRejectedMethod = {"_cctvhost_python_http_worker_rejected", pyHostPythonHTTPWorkerRejected, METH_VARARGS, "Persist and log a Python HTTP handler concurrency rejection."};
 static PyMethodDef jsMethod = {"_cctvhost_js_call", pyHostJSCall, METH_VARARGS, "Call the native JavaScriptCore plugin host."};
 static PyMethodDef nodeMethod = {"_cctvhost_node_call", pyHostNodeCall, METH_VARARGS, "Call the Node.js Mobile plugin host."};
 
@@ -396,6 +434,8 @@ static BOOL initializeInterpreter(PyHostTask *task, NSError **failure) {
     PyObject *builtins = PyEval_GetBuiltins();
     gWriteFunction = PyCFunction_New(&writeMethod, NULL); PyDict_SetItemString(builtins, "_pyhost_write", gWriteFunction);
     PyObject *pythonExceptionFunction = PyCFunction_New(&pythonExceptionMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_python_exception", pythonExceptionFunction); Py_XDECREF(pythonExceptionFunction);
+    PyObject *pythonResourceLimitFunction = PyCFunction_New(&pythonResourceLimitMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_python_resource_limit", pythonResourceLimitFunction); Py_XDECREF(pythonResourceLimitFunction);
+    PyObject *pythonHTTPWorkerRejectedFunction = PyCFunction_New(&pythonHTTPWorkerRejectedMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_python_http_worker_rejected", pythonHTTPWorkerRejectedFunction); Py_XDECREF(pythonHTTPWorkerRejectedFunction);
     gJSFunction = PyCFunction_New(&jsMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_js_call", gJSFunction);
     gNodeFunction = PyCFunction_New(&nodeMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_node_call", gNodeFunction);
     [JSPluginRuntime shared].logHandler = ^(NSString *line) { emitLog([@"[JS] " stringByAppendingString:line]); };
