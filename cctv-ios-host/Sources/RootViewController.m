@@ -2599,7 +2599,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             RootViewController *owner=weakSelf;if(!owner||generation!=owner.playbackGeneration)return;
             NSMutableDictionary *result=[fields mutableCopy];result[@"result"]=startError?@"failed":@"accepted";if(startError){result[@"error_domain"]=startError.domain?:@"";result[@"error_code"]=@(startError.code);result[@"error_message"]=startError.localizedDescription?:@"";}[RuntimeDiagnostics.shared recordEvent:@"local_service_start_for_playback_result" category:@"service" fields:result];
             if(startError){[owner failRemoteReadiness:startError generation:generation];return;}
-            if(![PyHost isRunningServiceIdentifier:service[@"id"]]){NSError *stateError=[NSError errorWithDomain:@"CCTVHostService" code:3 userInfo:@{@"NSLocalizedDescriptionKey":@"服务启动请求已接受，但运行状态尚未确认。请查看服务日志后重试。"}];[owner failRemoteReadiness:stateError generation:generation];return;}
+            // startService accepts the worker-thread request before CPython has
+            // necessarily finished initializing. Let the cancellable HTTP
+            // readiness probe wait for that transition instead of treating the
+            // brief "starting" state as a failed service.
             [owner continueRemotePlaybackForURL:u service:service generation:generation];
         }];
         return;
@@ -2608,8 +2611,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 - (void)continueRemotePlaybackForURL:(NSString *)u service:(NSDictionary *)service generation:(NSUInteger)generation {
     if(generation!=self.playbackGeneration)return;
-    if(![PyHost isRunningServiceIdentifier:service[@"id"]]){
-        [self failRemoteReadiness:[NSError errorWithDomain:@"CCTVHostService" code:3 userInfo:@{@"NSLocalizedDescriptionKey":@"当前运行的服务与频道端口不一致，请检查服务配置。"}] generation:generation];return;
+    BOOL serviceRunning=[PyHost isRunningServiceIdentifier:service[@"id"]];
+    BOOL serviceStarting=[PyHost isStartingServiceIdentifier:service[@"id"]];
+    if(!serviceRunning&&!serviceStarting){
+        NSError *startupError=[PyHost startupErrorForServiceIdentifier:service[@"id"]];
+        if(!startupError)startupError=[NSError errorWithDomain:@"CCTVHostService" code:3 userInfo:@{@"NSLocalizedDescriptionKey":@"服务既未运行也未处于启动状态，请检查服务日志后重试。"}];
+        [self failRemoteReadiness:startupError generation:generation];return;
     }
     NSNumber *readyAt=self.readyLocalOrigins[[self originForURL:[NSURL URLWithString:u]]];
     if(readyAt && CACurrentMediaTime()-readyAt.doubleValue<5){

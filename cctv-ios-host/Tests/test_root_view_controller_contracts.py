@@ -60,6 +60,15 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertNotIn("[self.subscriptionTasks[sourceKey] cancel]", body)
         self.assertNotIn("components.query=nil", method_body("- (NSString *)stableURLKey:"))
 
+    def test_playback_waits_for_starting_service_http_readiness(self):
+        start = method_body("- (void)startRemoteChannel:")
+        self.assertIn("continueRemotePlaybackForURL:u service:service generation:generation", start)
+        self.assertNotIn("stateError=[NSError errorWithDomain:@\"CCTVHostService\" code:3", start)
+        readiness = method_body("- (void)continueRemotePlaybackForURL:(NSString *)u service:(NSDictionary *)service generation:(NSUInteger)generation {")
+        self.assertIn("isStartingServiceIdentifier:service[@\"id\"]", readiness)
+        self.assertIn("readinessForURL:[NSURL URLWithString:u] service:service", readiness)
+        self.assertIn("startupErrorForServiceIdentifier:service[@\"id\"]", readiness)
+
     def test_subscription_page_supports_per_source_refresh_and_real_last_success(self):
         self.assertIn("onRefreshProfile", CONFIG)
         self.assertIn("刷新此订阅", CONFIG)
