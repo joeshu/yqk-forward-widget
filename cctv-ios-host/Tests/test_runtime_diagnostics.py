@@ -10,6 +10,7 @@ PLAYBACK = (ROOT / "Sources/MediaPlaybackViewController.m").read_text()
 READINESS = (ROOT / "Sources/LocalServiceReadiness.m").read_text()
 BROWSER = (ROOT / "Sources/MediaBrowserViewController.m").read_text()
 PYHOST = (ROOT / "Sources/PyHost.m").read_text()
+APP_DELEGATE = (ROOT / "Sources/AppDelegate.m").read_text()
 
 
 class RuntimeDiagnosticsContractTests(unittest.TestCase):
@@ -43,6 +44,21 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         self.assertIn('@"correlation_id"', HOST)
         self.assertIn('correlationID:self.diagnosticTraceID', BROWSER)
         self.assertIn('correlationID:self.diagnosticTraceID', PLAYBACK)
+
+    def test_lifecycle_diagnostics_capture_unclean_exit_without_claiming_crash_cause(self):
+        for event in (
+            'previous_session_unclosed', 'app_started', 'app_will_resign_active',
+            'entered_background', 'entered_foreground', 'app_became_active',
+            'memory_warning_received', 'app_will_terminate',
+        ):
+            self.assertIn(f'@"{event}"', DIAGNOSTICS + APP_DELEGATE)
+        self.assertIn('runtime-session.json', DIAGNOSTICS)
+        self.assertIn('last_checkpoint_at', DIAGNOSTICS)
+        self.assertIn('termination_reason', DIAGNOSTICS)
+        self.assertIn('@"unknown"', DIAGNOSTICS)
+        self.assertIn('session_marker_saved', DIAGNOSTICS)
+        self.assertIn('beginAppSessionWithFields:', APP_DELEGATE)
+        self.assertIn('applicationDidReceiveMemoryWarning:', APP_DELEGATE)
 
     def test_media_api_records_failure_stage_and_safe_playable_result_shape(self):
         for field in (

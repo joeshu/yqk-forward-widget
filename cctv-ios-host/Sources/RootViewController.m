@@ -373,8 +373,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self setupSDK];
     [self log:@"日志持久化已启用（按需批量保存）"];
     [PyHost recoverInterruptedPythonSessions];
-    [RuntimeDiagnostics.shared recordEvent:@"app_started" category:@"lifecycle" fields:@{@"app_version":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"unknown", @"app_build":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"]?:@"unknown", @"ios_version":UIDevice.currentDevice.systemVersion?:@"unknown"}];
-
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
 }
@@ -393,7 +391,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)onBackground {
-    [RuntimeDiagnostics.shared recordEvent:@"entered_background" category:@"lifecycle" fields:nil];
     [self.nativePreloader cancel];
     [[HostImageLoader shared] cancelPending];
     [self stopPreview];
@@ -411,7 +408,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)onForeground {
-    [RuntimeDiagnostics.shared recordEvent:@"entered_foreground" category:@"lifecycle" fields:nil];
     BOOL playbackPriority=CACurrentMediaTime()<self.playbackPriorityUntil;
     [[XMLTVStore shared] setPaused:playbackPriority];
     [self call:self.currentPlayer sel:@"becomeActive"];

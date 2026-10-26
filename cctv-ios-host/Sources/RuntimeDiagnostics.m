@@ -9,11 +9,14 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
 
 @interface RuntimeDiagnostics ()
 @property(nonatomic, copy) NSString *logPath;
+@property(nonatomic, copy) NSString *sessionMarkerPath;
 @property(nonatomic, copy) NSString *sessionID;
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic) BOOL diagnosticModeEnabled;
 - (id)safeValue:(id)value key:(NSString *)key depth:(NSUInteger)depth;
 - (NSString *)safeText:(NSString *)text;
+- (NSDictionary * _Nullable)readSessionMarker;
+- (BOOL)writeSessionMarker:(NSDictionary *)marker;
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(nullable NSDictionary<NSString *, id> *)fields synchronously:(BOOL)synchronously;
 @end
 
@@ -29,7 +32,9 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
 - (instancetype)init {
     if ((self = [super init])) {
         NSString *support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-        self.logPath = [[[[support stringByAppendingPathComponent:@"ysp"] stringByAppendingPathComponent:@"diagnostics"] stringByAppendingPathComponent:@"runtime-debug"] stringByAppendingPathExtension:@"jsonl"];
+        NSString *directory = [[support stringByAppendingPathComponent:@"ysp"] stringByAppendingPathComponent:@"diagnostics"];
+        self.logPath = [[directory stringByAppendingPathComponent:@"runtime-debug"] stringByAppendingPathExtension:@"jsonl"];
+        self.sessionMarkerPath = [directory stringByAppendingPathComponent:@"runtime-session.json"];
         self.sessionID = NSUUID.UUID.UUIDString.lowercaseString;
         self.queue = dispatch_queue_create("com.cctvhost.runtime-diagnostics", DISPATCH_QUEUE_SERIAL);
         dispatch_queue_set_specific(self.queue, RuntimeDiagnosticsQueueKey, (__bridge void *)self, NULL);
@@ -46,7 +51,8 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     @synchronized (self) {
         if (_diagnosticModeEnabled == enabled) return;
         if (!enabled) {
-            [self recordEvent:@"diagnostics_disabled" category:@"diagnostics" fields:nil];
+            [self recordEventSynchronously:@"diagnostics_disabled" category:@"diagnostics" fields:nil];
+            [self writeSessionMarker:@{@"open":@NO, @"session_id":self.sessionID ?: @"unknown", @"last_checkpoint":@"diagnostics_disabled", @"last_checkpoint_at":[[NSISO8601DateFormatter new] stringFromDate:NSDate.date]}];
         }
         _diagnosticModeEnabled = enabled;
         [NSUserDefaults.standardUserDefaults setBool:enabled forKey:RuntimeDiagnosticsPreferenceKey];
@@ -54,10 +60,80 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     if (enabled) {
         NSString *version = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"unknown";
         NSString *build = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"unknown";
-        [self recordEvent:@"diagnostics_enabled" category:@"diagnostics" fields:@{
+        NSDictionary *fields = @{
             @"app_version":version, @"app_build":build, @"ios_version":UIDevice.currentDevice.systemVersion ?: @"unknown"
-        }];
+        };
+        [self recordEventSynchronously:@"diagnostics_enabled" category:@"diagnostics" fields:fields];
+        [self recordLifecycleCheckpoint:@"diagnostics_session_opened" fields:fields];
     }
+}
+
+- (NSDictionary *)readSessionMarker {
+    NSData *data = [NSData dataWithContentsOfFile:self.sessionMarkerPath options:0 error:NULL];
+    id value = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+    return [value isKindOfClass:NSDictionary.class] ? value : nil;
+}
+
+- (BOOL)writeSessionMarker:(NSDictionary *)marker {
+    if (![marker isKindOfClass:NSDictionary.class]) return NO;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:marker options:0 error:NULL];
+    if (!data.length) return NO;
+    NSFileManager *fm = NSFileManager.defaultManager;
+    [fm createDirectoryAtPath:self.sessionMarkerPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
+    return [data writeToFile:self.sessionMarkerPath options:NSDataWritingAtomic error:NULL];
+}
+
+- (void)beginAppSessionWithFields:(NSDictionary<NSString *,id> *)fields {
+    if (!self.enabled) return;
+    NSDictionary *previous = [self readSessionMarker];
+    if ([previous[@"open"] boolValue]) {
+        NSMutableDictionary *recovery = [NSMutableDictionary dictionary];
+        for (NSString *key in @[@"session_id", @"started_at", @"last_checkpoint", @"last_checkpoint_at", @"app_version", @"app_build", @"ios_version", @"application_state", @"process_uptime_seconds"])
+            if (previous[key]) recovery[key] = previous[key];
+        recovery[@"termination_reason"] = @"unknown";
+        recovery[@"interpretation"] = @"上次会话未记录到正常结束；可能是崩溃、系统回收、强制关闭或设备重启，不能仅据此判定原因";
+        [self recordEventSynchronously:@"previous_session_unclosed" category:@"lifecycle" fields:recovery];
+    }
+    NSString *now = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
+    NSMutableDictionary *marker = [NSMutableDictionary dictionaryWithDictionary:fields ?: @{}];
+    marker[@"open"] = @YES;
+    marker[@"session_id"] = self.sessionID ?: @"unknown";
+    marker[@"started_at"] = now;
+    marker[@"last_checkpoint"] = @"process_launch";
+    marker[@"last_checkpoint_at"] = now;
+    BOOL markerSaved = [self writeSessionMarker:marker];
+    NSMutableDictionary *startupFields = [NSMutableDictionary dictionaryWithDictionary:fields ?: @{}];
+    startupFields[@"session_marker_saved"] = @(markerSaved);
+    [self recordEventSynchronously:@"app_started" category:@"lifecycle" fields:startupFields];
+}
+
+- (void)recordLifecycleCheckpoint:(NSString *)checkpoint fields:(NSDictionary<NSString *,id> *)fields {
+    if (!checkpoint.length || !self.enabled) return;
+    NSDictionary *previous = [self readSessionMarker];
+    NSMutableDictionary *marker = [NSMutableDictionary dictionaryWithDictionary:previous ?: @{}];
+    marker[@"open"] = @YES;
+    marker[@"session_id"] = self.sessionID ?: @"unknown";
+    marker[@"last_checkpoint"] = checkpoint;
+    marker[@"last_checkpoint_at"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
+    if (fields.count) {
+        for (NSString *key in @[@"app_version", @"app_build", @"ios_version", @"application_state", @"process_uptime_seconds"])
+            if (fields[key]) marker[key] = fields[key];
+    }
+    BOOL markerSaved = [self writeSessionMarker:marker];
+    NSMutableDictionary *eventFields = [NSMutableDictionary dictionaryWithDictionary:fields ?: @{}];
+    eventFields[@"session_marker_saved"] = @(markerSaved);
+    [self recordEventSynchronously:checkpoint category:@"lifecycle" fields:eventFields];
+}
+
+- (void)endAppSession {
+    if (!self.enabled) return;
+    [self recordLifecycleCheckpoint:@"app_will_terminate" fields:nil];
+    NSDictionary *previous = [self readSessionMarker];
+    NSMutableDictionary *marker = [NSMutableDictionary dictionaryWithDictionary:previous ?: @{}];
+    marker[@"open"] = @NO;
+    marker[@"last_checkpoint"] = @"app_will_terminate";
+    marker[@"last_checkpoint_at"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
+    [self writeSessionMarker:marker];
 }
 
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(NSDictionary<NSString *,id> *)fields {

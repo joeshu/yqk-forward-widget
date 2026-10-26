@@ -7,6 +7,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly, getter=isEnabled) BOOL enabled;
 + (instancetype)shared;
 - (void)setEnabled:(BOOL)enabled;
+- (void)beginAppSessionWithFields:(nullable NSDictionary<NSString *, id> *)fields;
+- (void)recordLifecycleCheckpoint:(NSString *)checkpoint fields:(nullable NSDictionary<NSString *, id> *)fields;
+- (void)endAppSession;
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(nullable NSDictionary<NSString *, id> *)fields;
 /// Writes and flushes a small critical breadcrumb before returning. Use sparingly for
 /// transitions whose context would otherwise be lost if the process exits abruptly.
