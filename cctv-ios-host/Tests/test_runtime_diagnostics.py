@@ -103,6 +103,7 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, BROWSER)
         self.assertIn('MetricKit.framework', (ROOT / 'project.yml').read_text())
+        self.assertIn('-framework MetricKit', (ROOT / 'Scripts/ui-smoke.sh').read_text())
 
     def test_unclosed_session_preserves_only_the_active_playback_breadcrumb(self):
         for field in (

@@ -21,7 +21,7 @@ ARCH=$(uname -m)
 xcrun --sdk iphonesimulator clang -fobjc-arc -target "$ARCH-apple-ios15.0-simulator" -isysroot "$SDK" \
   -I Sources/Include -I Sources Sources/*.m Tests/UISmoke/*.m \
   -framework WebKit -framework JavaScriptCore -framework Security -framework Foundation -framework UIKit -framework ImageIO -framework CoreGraphics -framework CoreMedia -framework AVFoundation -framework AVKit \
-  -framework MediaPlayer -framework QuartzCore -framework UniformTypeIdentifiers -lz \
+  -framework MediaPlayer -framework QuartzCore -framework UniformTypeIdentifiers -framework MetricKit -lz \
   -o "$APP/CCTVHost"
 cp Resources/channels.json "$APP/"
 cp Plugins/node-plugin-host.cjs "$APP/"
