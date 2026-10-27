@@ -240,7 +240,11 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];self.resultsVisible=YES;
-    if(self.restoringSearch){[self updateFilters];[self.tableView reloadData];[self.tableView layoutIfNeeded];[self restoreReadingPosition:self.savedReadingPosition];self.restoringSearch=NO;}
+    if(self.restoringSearch){[self updateFilters];[self.tableView reloadData];}
+}
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if(self.restoringSearch){[self.tableView layoutIfNeeded];[self restoreReadingPosition:self.savedReadingPosition];self.restoringSearch=NO;}
 }
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];self.savedSearchOffset=self.tableView.contentOffset;self.savedReadingPosition=[self readingPosition];self.resultsVisible=NO;self.restoringSearch=YES;
@@ -696,8 +700,8 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         resultCell.metadataLabel.text=parts.count?[parts componentsJoinedByString:@" · "]:@"暂无影片信息";
         resultCell.sourceLabel.text=[NSString stringWithFormat:@"%@ · %@",MediaSearchText(source[@"name"]),MediaSearchText(entry[@"providerName"])];
         resultCell.nameLabel.textColor=HostText();resultCell.metadataLabel.textColor=HostSecondaryText();resultCell.sourceLabel.textColor=HostAccent();resultCell.poster.backgroundColor=HostNeutralSurface();
-        resultCell.poster.image=[UIImage systemImageNamed:@"film"];resultCell.poster.accessibilityIdentifier=nil;
-        NSString *poster=MediaSearchText(item[@"poster"]);if(poster.length)[HostImageLoader.shared loadURL:poster intoImageView:resultCell.poster];
+        resultCell.poster.image=[UIImage systemImageNamed:@"film" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:24 weight:UIImageSymbolWeightRegular]];resultCell.poster.tintColor=HostSecondaryText();resultCell.poster.accessibilityIdentifier=nil;
+        NSString *poster=MediaSearchText(item[@"poster"]);resultCell.poster.contentMode=poster.length?UIViewContentModeScaleAspectFill:UIViewContentModeCenter;if(poster.length)[HostImageLoader.shared loadURL:poster intoImageView:resultCell.poster];
         cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;cell.selectionStyle=UITableViewCellSelectionStyleDefault;
         cell.accessibilityLabel=[NSString stringWithFormat:@"%@，%@，%@",resultCell.nameLabel.text,resultCell.metadataLabel.text,resultCell.sourceLabel.text];
     }
