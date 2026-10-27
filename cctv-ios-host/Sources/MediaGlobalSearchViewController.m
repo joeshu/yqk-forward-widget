@@ -294,6 +294,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
             NSMutableArray *valid = [NSMutableArray array];
             if ([providers isKindOfClass:NSArray.class]) for (id candidate in providers) {
                 if (![candidate isKindOfClass:NSDictionary.class]) continue;
+                if([candidate[@"searchable"] isKindOfClass:NSNumber.class]&&![candidate[@"searchable"] boolValue])continue;
                 NSString *identifier = [candidate[@"id"] isKindOfClass:NSString.class] ? candidate[@"id"] : @"";
                 NSString *name = [candidate[@"name"] isKindOfClass:NSString.class] ? candidate[@"name"] : identifier;
                 if (name.length) [valid addObject:@{@"id":identifier, @"name":name}];
@@ -349,6 +350,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         for (id candidate in items) {
             if (owner.resultCount >= MediaGlobalSearchMaximumResults) break;
             if (![candidate isKindOfClass:NSDictionary.class]) continue;
+                if([candidate[@"searchable"] isKindOfClass:NSNumber.class]&&![candidate[@"searchable"] boolValue])continue;
             NSDictionary *item = candidate;
             NSString *name = [item[@"name"] isKindOfClass:NSString.class] ? item[@"name"] : @"";
             if (!name.length) continue;

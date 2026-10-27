@@ -893,7 +893,8 @@ class MediaRuntime:
             elif operation == 'play':
                 value = playback(raw)
             elif operation == 'providers':
-                value = [{'id': str(row.get('id', row.get('key', ''))), 'name': str(row.get('name', row.get('title', '')))}
+                value = [{'id': str(row.get('id', row.get('key', ''))), 'name': str(row.get('name', row.get('title', ''))),
+                          **({'searchable': row['searchable']} if isinstance(row.get('searchable'), bool) else {})}
                          for row in rows(raw) if isinstance(row, dict) and row.get('id', row.get('key')) is not None]
             elif operation == 'catalog':
                 value = []

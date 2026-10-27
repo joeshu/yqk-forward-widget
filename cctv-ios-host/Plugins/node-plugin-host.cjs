@@ -353,7 +353,7 @@ async function catpawConfigurationPage(owner){
 }
 function catpawProviders(config,base){
   const sites=Array.isArray(config?.video?.sites)?config.video.sites:[]
-  return sites.filter(site=>{if(!site||typeof site.api!=='string'||!site.api.startsWith('/spider/')||site.api.includes('..'))return false;try{const url=new URL(site.api,base);return url.origin===base&&!url.search&&!url.hash&&site.key!=null}catch{return false}}).map(site=>({id:String(site.key),name:String(site.name||site.key),api:site.api.replace(/\/$/,'')}))
+  return sites.filter(site=>{if(!site||typeof site.api!=='string'||!site.api.startsWith('/spider/')||site.api.includes('..'))return false;try{const url=new URL(site.api,base);return url.origin===base&&!url.search&&!url.hash&&site.key!=null}catch{return false}}).map(site=>({id:String(site.key),name:String(site.name||site.key),api:site.api.replace(/\/$/,''),...(site.searchable!=null?{searchable:![false,0,'0'].includes(site.searchable)}:{})}))
 }
 function catpawMediaAddresses(value,base,authHeaders={},depth=0){
   if(depth>16||!value||typeof value!=='object')return value
@@ -486,10 +486,11 @@ async function invoke(operation,payload){
     if(operation==='capabilities')value=owner.metadata
     else if(owner.protocol==='catpaw-http'){
       if(operation==='configuration'){if(!owner.configurationURL)throw Error('此猫源未提供可用的本机配置页面');return {url:owner.configurationURL,headers:owner.authHeaders||{},configurationPage:true}}
-      if(operation==='providers'){owner.providers=catpawProviders(await sourceJSON(owner.base+'/config',undefined,owner.authHeaders),owner.base);return owner.providers.map(({id,name})=>({id,name}))}
+      if(operation==='providers'){owner.providers=catpawProviders(await sourceJSON(owner.base+'/config',undefined,owner.authHeaders),owner.base);return owner.providers.map(({id,name,searchable})=>({id,name,...(searchable!=null?{searchable}:{})}))}
       const provider=payload.provider?owner.providers.find(item=>item.id===payload.provider):owner.providers[0]
       if(payload.provider&&!provider)throw Error('所选站点已失效，请刷新站点列表后重新选择')
       if(!provider)throw Error('Node 服务未提供影视来源')
+      if(operation==='search'&&provider.searchable===false)throw Error('此站点声明不支持搜索，请使用分类浏览')
       const args=operation==='search'?{wd:payload.keyword,key:payload.keyword,quick:false,pg:payload.page||1,page:payload.page||1}:operation==='category'?{id:payload.categoryId,tid:payload.categoryId,pg:payload.page||1,page:payload.page||1,filter:true,filters:payload.filters||{},extend:payload.filters||{}}:operation==='detail'?{id:payload.id,ids:[payload.id]}:operation==='play'?{flag:payload.lineId||'',id:payload.id,flags:[]}:{filter:true}
       value=await sourceJSON(owner.base+provider.api+'/'+operation,args,owner.authHeaders)
       if(operation==='home' && !value.list?.length){try{const recommended=await sourceJSON(owner.base+provider.api+'/homeVod',{},owner.authHeaders);value={...value,list:recommended.list||[]}}catch(error){if(![404,405].includes(error.statusCode))throw error}}

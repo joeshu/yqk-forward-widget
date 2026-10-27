@@ -71,7 +71,7 @@ class NodeMediaHostTests(unittest.TestCase):
             server=catServerFactory((req,res)=>{let value;
               if(req.url==='/website'){res.setHeader('Content-Type','text/html');res.end('<html>configuration</html>');return}
               if(req.url==='/switch'){switched=true;value={ok:true}}
-              else if(req.url==='/config')value={video:{sites:[{key:switched?'second':'first',name:config.marker,api:'/spider/demo/3'},{key:'unsafe',api:'//elsewhere.test/spider/x'}]}};
+              else if(req.url==='/config')value={video:{sites:[{key:switched?'second':'first',name:config.marker,api:'/spider/demo/3',searchable:switched?0:1},{key:'unsafe',api:'//elsewhere.test/spider/x'}]}};
               else if(req.url.endsWith('/home'))value={class:[{type_id:'movie',type_name:'Movie'}]};
               else if(req.url.endsWith('/homeVod')){res.writeHead(404);res.end();return}
               else if(req.url.endsWith('/detail')){let data='';req.on('data',chunk=>data+=chunk);req.on('end',()=>{const input=JSON.parse(data);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({list:input.id?[{vod_id:input.id,vod_name:'detail'}]:[]}))});return}
@@ -102,6 +102,9 @@ class NodeMediaHostTests(unittest.TestCase):
                 port=int(configuration['url'].split(':')[2].split('/')[0])
                 client=http.client.HTTPConnection('127.0.0.1',port);client.request('GET','/switch');client.getresponse().read();client.close()
                 self.assertEqual(self.call('providers')['result'][0]['id'],'second')
+                self.assertFalse(self.call('providers')['result'][0]['searchable'])
+                unsupported=self.call('search',provider='second',keyword='fixture')
+                self.assertFalse(unsupported['ok'])
                 self.assertFalse(self.call('home',provider='first')['ok'])
                 self.assertTrue(self.call('stop')['ok'])
                 with self.assertRaises(OSError):
