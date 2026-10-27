@@ -6,6 +6,9 @@
 @property(nonatomic, copy) NSDictionary *result;
 @property(nonatomic) BOOL configurationPage;
 @property(nonatomic) BOOL didClose;
+@property(nonatomic) BOOL resolvingMedia;
+@property(nonatomic) NSUInteger mediaGeneration;
+@property(nonatomic,strong) UIBarButtonItem *nativeButton;
 @property(nonatomic, strong) WKWebView *web;
 @property(nonatomic, strong) UIActivityIndicatorView *spinner;
 - (void)installCookieHeader:(NSString *)cookie forURL:(NSURL *)url completion:(dispatch_block_t)completion;
@@ -16,7 +19,7 @@
     [super viewDidLoad];self.view.backgroundColor=HostBackground();
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];
     UIBarButtonItem *refresh=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refresh)];
-    if(self.onTryNativePlayback){UIBarButtonItem *native=[[UIBarButtonItem alloc] initWithTitle:@"原生播放" style:UIBarButtonItemStylePlain target:self action:@selector(tryNativePlayback)];self.navigationItem.rightBarButtonItems=@[native,refresh];}else self.navigationItem.rightBarButtonItem=refresh;
+    if(self.onTryNativePlayback||self.onResolvedMedia){UIBarButtonItem *native=[[UIBarButtonItem alloc] initWithTitle:@"原生播放" style:UIBarButtonItemStylePlain target:self action:@selector(tryNativePlayback)];self.nativeButton=native;self.navigationItem.rightBarButtonItems=@[native,refresh];}else self.navigationItem.rightBarButtonItem=refresh;
     WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];configuration.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;configuration.allowsInlineMediaPlayback=YES;configuration.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;
     self.web=[[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration];self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;self.web.navigationDelegate=self;self.web.allowsBackForwardNavigationGestures=YES;[self.view addSubview:self.web];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.center=self.view.center;self.spinner.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin|UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin;[self.view addSubview:self.spinner];
@@ -42,25 +45,29 @@
         if(item){dispatch_group_enter(group);[self.web.configuration.websiteDataStore.httpCookieStore setCookie:item completionHandler:^{dispatch_group_leave(group);}];}}
     dispatch_group_notify(group,dispatch_get_main_queue(),^{if(completion)completion();});
 }
+- (void)invalidateMediaResolution {self.mediaGeneration++;self.resolvingMedia=NO;self.nativeButton.enabled=YES;}
+- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];if(self.isBeingDismissed||self.navigationController.isBeingDismissed){self.didClose=YES;[self invalidateMediaResolution];[self.web stopLoading];self.onResolvedMedia=nil;self.onTryNativePlayback=nil;}}
 - (void)refresh {
+    if(self.didClose)return;[self invalidateMediaResolution];
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:self.result[@"url"]] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25];request.allHTTPHeaderFields=MediaPlaybackHeadersFromResult(self.result);
     self.navigationItem.prompt=self.configurationPage?@"源配置 · 账号数据由此资源管理":@"网页播放 · 由当前来源提供";[self.spinner startAnimating];[self.web loadRequest:request];
 }
 - (void)tryNativePlayback {
-    if(self.didClose)return;
-    if(!self.onResolvedMedia){if(self.onTryNativePlayback)self.onTryNativePlayback();return;}
+    if(self.didClose||self.resolvingMedia)return;
+    if(!self.onResolvedMedia){if(self.onTryNativePlayback){self.didClose=YES;[self.web stopLoading];dispatch_block_t callback=self.onTryNativePlayback;self.onTryNativePlayback=nil;self.onClose=nil;[self dismissViewControllerAnimated:YES completion:callback];}return;}
+    self.resolvingMedia=YES;self.nativeButton.enabled=NO;NSUInteger generation=++self.mediaGeneration;self.navigationItem.prompt=@"正在读取网页媒体地址…";
     NSString *script=@"(function scan(w){try{for(const v of w.document.querySelectorAll('video,audio')){const s=v.currentSrc||v.src;if(/^https?:/i.test(s))return s;}for(const f of w.frames){const s=scan(f);if(s)return s;}}catch(e){}return ''; })(window)";
     __weak typeof(self) weakSelf=self;
     [self.web evaluateJavaScript:script completionHandler:^(id value,NSError *error){
-        MediaWebViewController *owner=weakSelf;if(!owner||owner.didClose)return;
+        MediaWebViewController *owner=weakSelf;if(!owner||owner.didClose||owner.mediaGeneration!=generation)return;
         NSString *raw=[value isKindOfClass:NSString.class]?value:@"";NSURL *url=[NSURL URLWithString:raw];
-        if(error||raw.length>8192||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||!url.host.length||url.user.length||url.password.length||[raw rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){owner.navigationItem.prompt=@"尚未取得可交给原生播放器的地址，请先在网页内开始播放";return;}
+        if(error||raw.length>8192||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||!url.host.length||url.user.length||url.password.length||[raw rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){owner.resolvingMedia=NO;owner.nativeButton.enabled=YES;owner.navigationItem.prompt=@"尚未取得可交给原生播放器的地址，请先在网页内开始播放";return;}
         NSMutableDictionary *headers=[MediaPlaybackHeadersFromResult(owner.result) mutableCopy];
         // Page credentials must not be forwarded to a different media origin.
         for(NSString *key in headers.allKeys.copy)if([@[@"cookie",@"authorization",@"proxy-authorization"] containsObject:key.lowercaseString])[headers removeObjectForKey:key];
         if(owner.web.URL.absoluteString.length)headers[@"Referer"]=owner.web.URL.absoluteString;
         [owner.web.configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies){dispatch_async(dispatch_get_main_queue(),^{
-            MediaWebViewController *page=weakSelf;if(!page||page.didClose)return;
+            MediaWebViewController *page=weakSelf;if(!page||page.didClose||page.mediaGeneration!=generation)return;
             NSMutableArray *matching=[NSMutableArray array];for(NSHTTPCookie *cookie in cookies){NSString *domain=cookie.domain.lowercaseString;BOOL subdomains=[domain hasPrefix:@"."];if(subdomains)domain=[domain substringFromIndex:1];BOOL host=[url.host.lowercaseString isEqual:domain]||(subdomains&&[url.host.lowercaseString hasSuffix:[@"." stringByAppendingString:domain]]);NSString *path=url.path.length?url.path:@"/";NSString *cp=cookie.path.length?cookie.path:@"/";BOOL pathMatch=[path isEqual:cp]||([path hasPrefix:cp]&&([cp hasSuffix:@"/"]||[path hasPrefix:[cp stringByAppendingString:@"/"]]));if(host&&pathMatch&&(!cookie.secure||[url.scheme.lowercaseString isEqual:@"https"])&&(!cookie.expiresDate||[cookie.expiresDate timeIntervalSinceNow]>0))[matching addObject:cookie];}
             [headers addEntriesFromDictionary:[NSHTTPCookie requestHeaderFieldsWithCookies:matching]];
             NSDictionary *resolved=@{@"url":raw,@"headers":headers,@"parse":@0,@"jx":@0,@"requiresWebPlayback":@NO};
@@ -75,6 +82,7 @@
     decisionHandler(allowed?WKNavigationActionPolicyAllow:WKNavigationActionPolicyCancel);
     if(allowed && !action.targetFrame)[webView loadRequest:action.request];
 }
+- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {[self invalidateMediaResolution];}
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {[self.spinner stopAnimating];self.navigationItem.prompt=nil;}
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self failed:error];}
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self failed:error];}

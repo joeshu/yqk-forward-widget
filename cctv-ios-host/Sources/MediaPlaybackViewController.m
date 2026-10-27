@@ -512,7 +512,7 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
     [RuntimeDiagnostics.shared recordEvent:@"playback_web_fallback_selected" category:@"playback" fields:@{@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"correlation_id":self.diagnosticTraceID?:@""}];
     [self recordPlaybackAttemptOutcome:@"webview_handoff" failureKind:nil httpStatus:0 terminal:NO];
     self.status.text=@"正在尝试网页播放…";self.status.accessibilityLabel=self.status.text;
-    MediaWebViewController *web=[[MediaWebViewController alloc] initWithResult:self.result title:self.title];__weak typeof(self) weakSelf=self;
+    NSUInteger playerGeneration=self.playerGeneration;MediaWebViewController *web=[[MediaWebViewController alloc] initWithResult:self.result title:self.title];__weak typeof(self) weakSelf=self;
     web.onTryNativePlayback=^{[weakSelf tryNativePlayback];};web.onResolvedMedia=^(NSDictionary *resolved){MediaPlaybackViewController *owner=weakSelf;if(!owner||owner.playerGeneration!=playerGeneration)return;owner.basePlaybackHeaders=nil;[owner playResult:resolved];};
     web.onClose=^{MediaPlaybackViewController *owner=weakSelf;if(!owner)return;owner.status.text=@"网页播放已关闭 · 可尝试原生播放或切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];};
     UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:web];[self presentViewController:nav animated:YES completion:nil];
