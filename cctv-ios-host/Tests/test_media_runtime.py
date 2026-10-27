@@ -1062,7 +1062,7 @@ class Spider:
                 self.send_response(206 if ranged else 200)
                 self.send_header('Content-Type', 'application/vnd.apple.mpegurl' if self.path.endswith('.m3u8') else 'video/mp2t')
                 if ranged: self.send_header('Content-Range', 'bytes 2-5/10')
-                self.send_header('Content-Length', str(len(body)));self.end_headers();self.wfile.write(body)
+                self.send_header('Content-Length', str(len(body) + (99 if self.path == '/truncated.ts' else 0)));self.end_headers();self.wfile.write(body)
         upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
         server = transport.Server(('127.0.0.1', 0), self.runtime)
         threads = [threading.Thread(target=item.serve_forever, daemon=True) for item in (upstream, server)]
@@ -1093,6 +1093,13 @@ class Spider:
             self.assertTrue(body.startswith(b'#EXTM3U'))
             self.assertNotIn('Range', received[-1][1])
             self.assertNotIn('segment.ts', body.decode())
+            truncated = server.relay.register(base + '/truncated.ts', {}, diagnostic_id='truncated-http')
+            with mock.patch('builtins.print') as log:
+                with self.assertRaises(http.client.IncompleteRead):
+                    get('/media/' + truncated)
+            failures = [json.loads(c.args[0].split('] ', 1)[1]) for c in log.call_args_list]
+            self.assertTrue(any(r.get('stage') == 'upstream_body_truncated' and
+                                r.get('request_id') == 'truncated-http' for r in failures))
             token = server.relay.register(base + '/redirect', headers)
             self.assertEqual(get('/media/' + token)[0], 200)
             self.assertNotIn('Cookie', received[-1][1]);self.assertNotIn('Authorization', received[-1][1])
@@ -1130,6 +1137,38 @@ class Spider:
         self.assertEqual(record['stage'], 'media_service_stopping')
         handler.send_response.assert_called_once_with(404)
         handler.wfile.write.assert_not_called()
+
+    def test_relay_rejects_html_for_declared_hls_and_diagnoses_truncated_bodies(self):
+        cases = [
+            ('html', True, 'text/html', '100', [b'<html>private-cookie-error</html>'], 'manifest_invalid', 502),
+            ('manifest', True, 'application/vnd.apple.mpegurl', '1000', [b'#EXTM3U\n'], 'upstream_body_truncated', 502),
+            ('segment', False, 'video/mp2t', '1000', [b'partial', b''], 'upstream_body_truncated', 200),
+            ('chunked', False, 'video/mp2t', '', [http.client.IncompleteRead(b'private-payload', 99)], 'upstream_body_truncated', 200),
+        ]
+        for name, hls, mime, length, reads, stage, status in cases:
+            with self.subTest(name=name):
+                relay = MediaRelay()
+                token = relay.register('https://fixture.test/resource.php?token=private', {},
+                                       diagnostic_id='body-trace', expected_hls=hls)
+                response = mock.Mock(status=200)
+                response.headers = {'Content-Type': mime, 'Content-Length': length}
+                response.geturl.return_value = 'https://fixture.test/resource.php'
+                response.read.side_effect = reads
+                handler = mock.Mock(command='GET')
+                handler.headers = {}
+                with mock.patch('urllib.request.build_opener') as opener, mock.patch('builtins.print') as log:
+                    opener.return_value.open.return_value = response
+                    relay.serve(handler, token)
+                records = [json.loads(c.args[0].split('] ', 1)[1]) for c in log.call_args_list]
+                failures = [r for r in records if r['event'] == 'media_relay_failed']
+                self.assertEqual(len(failures), 1)
+                self.assertEqual(failures[0]['stage'], stage)
+                self.assertEqual(failures[0]['request_id'], 'body-trace')
+                self.assertNotIn('private', json.dumps(records))
+                handler.send_response.assert_called_once_with(status)
+                response.close.assert_called_once()
+                self.assertFalse(relay.responses)
+                relay.close()
 
     def test_relay_client_disconnect_is_not_upstream_failure(self):
         relay = MediaRelay()

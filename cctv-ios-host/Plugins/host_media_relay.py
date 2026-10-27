@@ -5,6 +5,7 @@ in full, no TS cache is created, and arbitrary client-provided target URLs are n
 accepted: every target must have been registered by a playback/manifest result.
 """
 import collections
+import http.client
 import json
 import re
 import socket
@@ -380,6 +381,8 @@ class MediaRelay:
                     return
                 self.responses.add(response)
             mime = response.headers.get('Content-Type', 'application/octet-stream')
+            raw_length = response.headers.get('Content-Length', '')
+            expected_bytes = int(raw_length) if re.fullmatch(r'[0-9]{1,18}', raw_length) else None
             final_url = response.geturl()
             is_hls = 'mpegurl' in mime.lower() or urllib.parse.urlsplit(final_url).path.lower().endswith(('.m3u8', '.m3u'))
             prefix = b''
@@ -392,10 +395,14 @@ class MediaRelay:
             if not head and not is_hls and (expected_hls or generic_mime or extensionless):
                 prefix = response.read(64)
                 is_hls = prefix.lstrip(b'\xef\xbb\xbf \t\r\n').startswith(b'#EXTM3U')
+                if expected_hls and not is_hls:
+                    raise RelayFailure('manifest_invalid')
             if is_hls and not head:
                 body = prefix + response.read(2 * 1024 * 1024 + 1 - len(prefix))
                 if len(body) > 2 * 1024 * 1024:
                     raise RelayFailure('manifest_too_large')
+                if expected_bytes is not None and len(body) < expected_bytes:
+                    raise RelayFailure('upstream_body_truncated')
                 text = body.decode('utf-8-sig')
                 if not text.lstrip().startswith('#EXTM3U'):
                     raise RelayFailure('manifest_invalid')
@@ -430,13 +437,17 @@ class MediaRelay:
             handler.end_headers()
             sent = True
             if not head:
+                received_bytes = len(prefix)
                 if prefix:
                     self._write_client(handler, prefix)
                 while not self.stopping.is_set():
                     chunk = response.read(65536)
                     if not chunk:
                         break
+                    received_bytes += len(chunk)
                     self._write_client(handler, chunk)
+                if not self.stopping.is_set() and expected_bytes is not None and received_bytes < expected_bytes:
+                    raise RelayFailure('upstream_body_truncated')
         except RelayClientDisconnected as error:
             # Disconnection does not prove playback success or upstream failure.
             print('[CCTVHostMediaRelay] ' + json.dumps({
@@ -449,6 +460,10 @@ class MediaRelay:
             self._failed(handler, 'upstream_http_error', diagnostic_id, url, status=status,
                          error=error, upstream_status=error.code, sent=sent)
             error.close()
+        except http.client.IncompleteRead:
+            # Partial bytes may contain media or credentials. Record only the
+            # failure stage; never serialize the exception's partial payload.
+            self._failed(handler, 'upstream_body_truncated', diagnostic_id, url, sent=sent)
         except (TimeoutError, socket.timeout) as error:
             self._failed(handler, 'upstream_timeout', diagnostic_id, url, status=504, error=error, sent=sent)
         except urllib.error.URLError as error:
