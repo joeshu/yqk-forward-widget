@@ -46,9 +46,12 @@ def safe_error_summary(error):
 
 
 class MediaRelay:
-    def __init__(self, limit=256):
+    def __init__(self, limit=256, segment_limit=16384):
         self.limit = limit
         self.targets = collections.OrderedDict()
+        self.segments = collections.OrderedDict()
+        self.segment_index = {}
+        self.segment_limit = max(1, min(int(segment_limit), 16384))
         self.lock = threading.Lock()
         self.refreshing = {}
         self.refreshFailures = {}
@@ -58,7 +61,7 @@ class MediaRelay:
 
     def register(self, url, headers, origin=None, diagnostic_id=None, fallback_url=None,
                  refresh=None, refresh_after=0, refresh_interval=0, refresh_relative=None,
-                 expected_hls=False):
+                 expected_hls=False, segment=False):
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('不支持的媒体地址')
@@ -82,6 +85,18 @@ class MediaRelay:
         with self.lock:
             if self.stopping.is_set():
                 raise RuntimeError('媒体代理正在停止')
+            if segment:
+                existing = self.segment_index.get(key)
+                if existing in self.segments:
+                    self.segments.move_to_end(existing)
+                    return existing
+                token = uuid.uuid4().hex
+                self.segments[token] = (key, time.monotonic(), diagnostic_id, None, 0, 0, None)
+                self.segment_index[key] = token
+                while len(self.segments) > self.segment_limit:
+                    removed, old = self.segments.popitem(last=False)
+                    self.segment_index.pop(old[0], None)
+                return token
             for token, record in self.targets.items():
                 if record[0] == key:
                     self.targets[token] = (key, record[1], diagnostic_id,
@@ -111,8 +126,10 @@ class MediaRelay:
                 refresh=None, refresh_after=0, refresh_interval=0,
                 refresh_relative_base=None):
         parent = urllib.parse.urlsplit(url)
+        segment_count = 0
 
         def local(value):
+            nonlocal segment_count
             target = urllib.parse.urljoin(url, value)
             resolved = urllib.parse.urlsplit(target)
             # Preserve signed query parameters for same-origin HLS children.
@@ -125,6 +142,10 @@ class MediaRelay:
             if resolved.scheme.lower() not in ('http', 'https') or not resolved.hostname:
                 return value
             is_manifest=resolved.path.lower().endswith(('.m3u8','.m3u'))
+            if not is_manifest:
+                segment_count += 1
+                if segment_count > self.segment_limit:
+                    raise RelayFailure('manifest_entries_exceeded')
             relative=value if is_manifest and not urllib.parse.urlsplit(value).scheme and not value.startswith('//') else None
             if relative and refresh_relative_base:
                 relative=urllib.parse.urljoin(refresh_relative_base,relative)
@@ -132,7 +153,7 @@ class MediaRelay:
                 refresh=refresh if is_manifest else None,
                 refresh_after=refresh_after if is_manifest else 0,
                 refresh_interval=refresh_interval if is_manifest else 0,
-                refresh_relative=relative, expected_hls=is_manifest)
+                refresh_relative=relative, expected_hls=is_manifest, segment=not is_manifest)
             return base + '/media/' + token
         lines = []
         for line in text.splitlines():
@@ -159,7 +180,7 @@ class MediaRelay:
 
     def _refresh_record(self, token, force=False):
         with self.lock:
-            record=self.targets.get(token)
+            record=self.targets.get(token) or self.segments.get(token)
             if not record or not record[3] or self.stopping.is_set():
                 return record
             failure=self.refreshFailures.get(token)
@@ -271,11 +292,12 @@ class MediaRelay:
 
     def serve(self, handler, token, head=False):
         with self.lock:
-            record = self.targets.get(token)
+            pool = self.targets if token in self.targets else self.segments
+            record = pool.get(token)
             if not record or self.stopping.is_set():
                 handler.send_error(404, 'Expired media session')
                 return
-            self.targets.move_to_end(token)
+            pool.move_to_end(token)
         key=record[0];url=key[0];diagnostic_id=record[2]
         response = None
         sent = False
@@ -452,6 +474,8 @@ class MediaRelay:
             flights = list(self.refreshing.values())
             self.refreshing.clear()
             self.targets.clear()
+            self.segments.clear()
+            self.segment_index.clear()
             self.diagnosed_manifests.clear()
             self.refreshFailures.clear()
         for event in flights:

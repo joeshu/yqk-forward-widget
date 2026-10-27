@@ -869,13 +869,81 @@ class Spider:
             server.server_close()
             thread.join(2)
 
+    def test_long_hls_playlist_keeps_first_segment_key_and_manifest_reachable(self):
+        seen = []
+        manifest = ('#EXTM3U\n#EXT-X-TARGETDURATION:4\n'
+                    '#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n' +
+                    ''.join('#EXTINF:4,\ns%d.ts\n' % index for index in range(1000)) +
+                    '#EXT-X-ENDLIST\n').encode()
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append((self.path, self.headers.get('Range')))
+                body = manifest if self.path == '/index.m3u8' else (b'0123456789abcdef' if self.path == '/key.bin' else b'segment-fixture')
+                ranged = self.headers.get('Range') == 'bytes=2-4'
+                total = len(body)
+                if ranged: body = body[2:5]
+                self.send_response(206 if ranged else 200)
+                self.send_header('Content-Type', 'application/vnd.apple.mpegurl' if self.path == '/index.m3u8' else 'application/octet-stream')
+                if ranged: self.send_header('Content-Range', 'bytes 2-4/%d' % total)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers(); self.wfile.write(body)
+            def log_message(self, *_): pass
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        threads = [threading.Thread(target=item.serve_forever, daemon=True) for item in (upstream, server)]
+        for thread in threads: thread.start()
+        token = server.relay.register('http://127.0.0.1:%d/index.m3u8' % upstream.server_port,
+                                      {}, diagnostic_id='long-manifest-fixture', expected_hls=True)
+        def get(path, headers=None):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=6)
+            try:
+                client.request('GET', path, headers=headers or {})
+                response = client.getresponse()
+                return response.status, response.read()
+            finally: client.close()
+        try:
+            status, body = get('/media/' + token, {'Range': 'bytes=0-1'})
+            self.assertEqual(status, 200)
+            self.assertEqual(seen[0], ('/index.m3u8', None))
+            lines = body.decode().splitlines()
+            segments = [line for line in lines if line.startswith('http')]
+            self.assertEqual(len(segments), 1000)
+            self.assertEqual(get(urllib.parse.urlsplit(segments[0]).path), (200, b'segment-fixture'))
+            self.assertEqual(get(urllib.parse.urlsplit(segments[-1]).path, {'Range': 'bytes=2-4'}), (206, b'gme'))
+            key_url = next(line.split('URI="', 1)[1].split('"')[0] for line in lines if line.startswith('#EXT-X-KEY'))
+            self.assertEqual(get(urllib.parse.urlsplit(key_url).path), (200, b'0123456789abcdef'))
+            self.assertIn(token, server.relay.targets)
+            self.assertEqual(len(server.relay.segments), 1001)
+            self.assertEqual(get('/media/' + token)[0], 200)
+            self.assertEqual(len(server.relay.segments), 1001)
+        finally:
+            for item in (server, upstream): item.shutdown(); item.server_close()
+            for thread in threads: thread.join(2)
+
+    def test_segment_registry_is_bounded_and_rejects_overbudget_manifest_explicitly(self):
+        relay = MediaRelay(limit=1, segment_limit=4)
+        parent = relay.register('https://fixture.test/index.m3u8', {})
+        first = relay.register('https://fixture.test/s.ts', {'X-Quality': 'a'}, segment=True)
+        other = relay.register('https://fixture.test/s.ts', {'X-Quality': 'b'}, segment=True)
+        self.assertNotEqual(first, other)
+        self.assertEqual(relay.register('https://fixture.test/s.ts', {'X-Quality': 'a'}, segment=True), first)
+        with self.assertRaisesRegex(Exception, 'manifest_entries_exceeded'):
+            relay.rewrite('#EXTM3U\n' + ''.join('s%d.ts\n' % i for i in range(5)),
+                          'https://fixture.test/index.m3u8', {}, ('https', 'fixture.test'), 'http://127.0.0.1:1')
+        self.assertIn(parent, relay.targets)
+        self.assertLessEqual(len(relay.segments), 4)
+        self.assertLessEqual(len(relay.segment_index), 4)
+        relay.close()
+        self.assertFalse(relay.segments)
+        self.assertFalse(relay.segment_index)
+
     def test_relay_rewrites_master_segments_keys_and_maps_without_open_proxy(self):
         relay = MediaRelay(limit=4)
         text = '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXT-X-MAP:URI="init.mp4"\nsegment.ts\n'
         rewritten = relay.rewrite(text, 'https://a.test/path/index.m3u8', {'Referer': 'https://a.test/'}, 'a.test', 'http://127.0.0.1:18780')
         self.assertNotIn('URI="key.bin"', rewritten)
         self.assertNotIn('\nsegment.ts', rewritten)
-        targets = [value[0][0] for value in relay.targets.values()]
+        targets = [value[0][0] for value in list(relay.targets.values()) + list(relay.segments.values())]
         self.assertEqual(targets, ['https://a.test/path/key.bin', 'https://a.test/path/init.mp4', 'https://a.test/path/segment.ts'])
         for i in range(8):
             relay.register(f'https://a.test/{i}.ts', {})
@@ -943,7 +1011,7 @@ class Spider:
         self.assertIn('URI="skd://asset-id"', rewritten)
         self.assertNotIn('segments/one.ts', rewritten)
         self.assertNotIn('/root/two.ts', rewritten)
-        targets = {record[0][0]: record for record in relay.targets.values()}
+        targets = {record[0][0]: record for record in list(relay.targets.values()) + list(relay.segments.values())}
         self.assertIn('https://a.test/path/segments/one.ts?token=shared%2Bvalue&expires=123', targets)
         self.assertIn('https://a.test/root/two.ts?token=shared%2Bvalue&expires=123', targets)
         self.assertIn('https://a.test/path/keys/key.bin?token=shared%2Bvalue&expires=123', targets)
