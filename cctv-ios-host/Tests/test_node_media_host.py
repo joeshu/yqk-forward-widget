@@ -110,6 +110,20 @@ class NodeMediaHostTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     probe=socket.create_connection(('127.0.0.1',port),timeout=.5);probe.close()
 
+    def test_catpaw_http_error_preserves_source_msg_summary(self):
+        (self.package/'index.cjs').write_text("""let server;exports.start=async()=>{
+          server=catServerFactory((req,res)=>{res.setHeader('Content-Type','application/json');
+            if(req.url==='/config')res.end(JSON.stringify({video:{sites:[{key:'public',api:'/spider/public/3'}]}}));
+            else if(req.url==='/website'){res.writeHead(404);res.end('{}');}
+            else{res.writeHead(500);res.end(JSON.stringify({msg:'source fixture missing required configuration'}));}});
+          await new Promise(r=>server.listen(0,'127.0.0.1',r));};exports.stop=()=>new Promise(r=>server.close(r));""")
+        started=self.call('start',packageRoot=str(self.package),dataDirectory=str(self.data),entry='index.cjs',moduleType='commonjs',protocol='catpaw-http')
+        self.assertTrue(started['ok'],started)
+        result=self.call('home',provider='public')
+        self.assertFalse(result['ok'])
+        self.assertIn('source fixture missing required configuration',result['error'])
+        self.assertTrue(self.call('stop')['ok'])
+
     def test_catpaw_esm_configuration_exports_are_loaded(self):
         (self.package/'package.json').write_text('{"type":"module"}')
         (self.package/'index.config.js').write_text('export default {marker:"esm-config"}')

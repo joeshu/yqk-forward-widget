@@ -275,7 +275,7 @@ async function sourceJSON(url,body,requestHeaders={}){
       response.on('error',error=>finish(error))
       response.on('end',()=>{
         if(response.statusCode<200||response.statusCode>=300){
-          let detail='';try{const parsed=JSON.parse(Buffer.concat(chunks).toString('utf8'));detail=typeof parsed.message==='string'?parsed.message:typeof parsed.error==='string'?parsed.error:typeof parsed.error?.message==='string'?parsed.error.message:''}catch{}
+          let detail='';try{const parsed=JSON.parse(Buffer.concat(chunks).toString('utf8'));detail=[parsed.message,parsed.msg,parsed.error,parsed.error?.message,parsed.data?.message].find(value=>typeof value==='string')||''}catch{}
           const error=Error('Node 来源 HTTP '+response.statusCode+' · '+target.pathname.split('/').pop()+(detail?' · '+detail.slice(0,512):''));error.statusCode=response.statusCode;finish(error);return
         }
         try{finish(null,JSON.parse(Buffer.concat(chunks).toString('utf8')))}catch(error){finish(Error('Node 来源返回无效 JSON：'+error.message))}
