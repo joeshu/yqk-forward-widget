@@ -86,6 +86,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic) BOOL diagnosticModeEnabled;
 @property(nonatomic, copy) NSString *previousUnclosedSessionID;
+@property(nonatomic, copy, readwrite) NSString *previousSessionTerminationState;
 - (id)safeValue:(id)value key:(NSString *)key depth:(NSUInteger)depth;
 - (NSString *)safeText:(NSString *)text;
 - (NSDictionary * _Nullable)readSessionMarker;
@@ -116,6 +117,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
         self.logPath = [self pathForSessionID:self.sessionID];
         self.queue = dispatch_queue_create("com.cctvhost.runtime-diagnostics", DISPATCH_QUEUE_SERIAL);
         dispatch_queue_set_specific(self.queue, RuntimeDiagnosticsQueueKey, (__bridge void *)self, NULL);
+        _previousSessionTerminationState = @"unknown";
         _diagnosticModeEnabled = [NSUserDefaults.standardUserDefaults boolForKey:RuntimeDiagnosticsPreferenceKey];
         RuntimeDiagnosticsExceptionTarget = self;
         if (!RuntimeDiagnosticsExceptionHandlerInstalled) {
@@ -247,6 +249,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
 - (void)beginAppSessionWithFields:(NSDictionary<NSString *,id> *)fields {
     if (!self.enabled) return;
     NSDictionary *previous = [self readSessionMarker];
+    self.previousSessionTerminationState = !previous ? @"unknown" : ([previous[@"open"] boolValue] ? @"unclosed" : @"closed");
     if ([previous[@"open"] boolValue]) {
         self.previousUnclosedSessionID = [previous[@"session_id"] isKindOfClass:NSString.class] ? previous[@"session_id"] : @"";
         NSMutableDictionary *recovery = [NSMutableDictionary dictionary];
@@ -273,7 +276,50 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
 }
 
 - (void)didReceiveMetricPayloads:(NSArray<MXMetricPayload *> *)payloads {
-    // Metrics are intentionally omitted: this subscriber is only for crash diagnostics.
+    if (!self.enabled) return;
+    for (MXMetricPayload *payload in payloads ?: @[]) {
+        if (@available(iOS 14.0, *)) {
+            MXAppExitMetric *exitMetric = payload.applicationExitMetrics;
+            if (exitMetric) {
+                NSMutableDictionary<NSString *, id> *fields = [NSMutableDictionary dictionaryWithDictionary:@{
+                    @"report_is_aggregate":@YES,
+                    @"includes_multiple_application_versions":@(payload.includesMultipleApplicationVersions)
+                }];
+                if (payload.timeStampBegin)
+                    fields[@"metric_period_start"] = [[NSISO8601DateFormatter new] stringFromDate:payload.timeStampBegin];
+                if (payload.timeStampEnd)
+                    fields[@"metric_period_end"] = [[NSISO8601DateFormatter new] stringFromDate:payload.timeStampEnd];
+
+                MXForegroundExitData *foreground = exitMetric.foregroundExitData;
+                if (foreground) {
+                    fields[@"foreground_normal_exit_count"] = @(foreground.cumulativeNormalAppExitCount);
+                    fields[@"foreground_abnormal_exit_count"] = @(foreground.cumulativeAbnormalExitCount);
+                    fields[@"foreground_watchdog_exit_count"] = @(foreground.cumulativeAppWatchdogExitCount);
+                    fields[@"foreground_memory_limit_exit_count"] = @(foreground.cumulativeMemoryResourceLimitExitCount);
+                    fields[@"foreground_bad_access_exit_count"] = @(foreground.cumulativeBadAccessExitCount);
+                    fields[@"foreground_illegal_instruction_exit_count"] = @(foreground.cumulativeIllegalInstructionExitCount);
+                }
+
+                MXBackgroundExitData *background = exitMetric.backgroundExitData;
+                if (background) {
+                    fields[@"background_normal_exit_count"] = @(background.cumulativeNormalAppExitCount);
+                    fields[@"background_abnormal_exit_count"] = @(background.cumulativeAbnormalExitCount);
+                    fields[@"background_watchdog_exit_count"] = @(background.cumulativeAppWatchdogExitCount);
+                    fields[@"background_memory_limit_exit_count"] = @(background.cumulativeMemoryResourceLimitExitCount);
+                    fields[@"background_memory_pressure_exit_count"] = @(background.cumulativeMemoryPressureExitCount);
+                    fields[@"background_cpu_limit_exit_count"] = @(background.cumulativeCPUResourceLimitExitCount);
+                    fields[@"background_bad_access_exit_count"] = @(background.cumulativeBadAccessExitCount);
+                    fields[@"background_illegal_instruction_exit_count"] = @(background.cumulativeIllegalInstructionExitCount);
+                    fields[@"background_task_timeout_exit_count"] = @(background.cumulativeBackgroundTaskAssertionTimeoutExitCount);
+                    fields[@"background_locked_file_exit_count"] = @(background.cumulativeSuspendedWithLockedFileExitCount);
+                }
+
+                // MetricKit reports counts aggregated over a reporting interval, not
+                // the exact exit time or session. Keep that distinction explicit.
+                [self recordEventSynchronously:@"metrickit_app_exit_metrics_received" category:@"crash" fields:fields];
+            }
+        }
+    }
 }
 
 - (void)didReceiveDiagnosticPayloads:(NSArray<MXDiagnosticPayload *> *)payloads API_AVAILABLE(ios(14.0)) {

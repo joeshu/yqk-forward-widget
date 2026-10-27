@@ -74,6 +74,8 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         ):
             self.assertIn(f'@"{event}"', DIAGNOSTICS + APP_DELEGATE)
         self.assertIn('runtime-session.json', DIAGNOSTICS)
+        self.assertIn('previousSessionTerminationState', DIAGNOSTICS)
+        self.assertIn('previousSessionTerminationState', (ROOT / "Sources/RuntimeDiagnostics.h").read_text())
         self.assertIn('last_checkpoint_at', DIAGNOSTICS)
         self.assertIn('termination_reason', DIAGNOSTICS)
         self.assertIn('process_phys_footprint_bytes', DIAGNOSTICS)
@@ -90,6 +92,10 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
             'NSSetUncaughtExceptionHandler', 'uncaught_objc_exception',
             'MXMetricManager', 'didReceiveDiagnosticPayloads:',
             'metrickit_crash_diagnostic_received', 'related_session_id',
+            'didReceiveMetricPayloads:', 'applicationExitMetrics',
+            'metrickit_app_exit_metrics_received', 'report_is_aggregate',
+            'foreground_memory_limit_exit_count', 'background_memory_pressure_exit_count',
+            'background_cpu_limit_exit_count', 'background_watchdog_exit_count',
             'JSONRepresentation', 'call_stack_frame_summaries',
             'offsetIntoBinaryTextSegment',
         ):
@@ -206,6 +212,10 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
             self.assertIn(phase, media_runtime)
         self.assertIn('recoverInterruptedPythonSessions', PYHOST)
         self.assertIn('[PyHost recoverInterruptedPythonSessions]', HOST)
+        self.assertIn('previous_app_session_state', PYHOST)
+        self.assertIn('previous_python_session_active_after_clean_app_exit', PYHOST)
+        self.assertIn('previous_python_session_active_after_unclosed_app_session', PYHOST)
+        self.assertIn('不能单独判定为 App 崩溃', PYHOST)
 
     def test_unhandled_python_worker_failures_have_service_and_line_context(self):
         runtime = (ROOT / 'Scripts/host_service_runtime.py').read_text()

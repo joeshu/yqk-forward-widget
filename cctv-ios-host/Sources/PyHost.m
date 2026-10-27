@@ -154,14 +154,25 @@ static void recoverPythonBreadcrumbs(void) {
     }
     writePythonBreadcrumbsLocked(rows);
     pthread_mutex_unlock(&gBreadcrumbLock);
+    NSString *previousAppState = RuntimeDiagnostics.shared.previousSessionTerminationState ?: @"unknown";
     for (NSDictionary *record in interrupted) {
         NSString *serviceID = [record[@"service_id"] isKindOfClass:NSString.class] ? record[@"service_id"] : @"";
         NSString *scriptName = [record[@"script_name"] isKindOfClass:NSString.class] ? record[@"script_name"] : @"Python 脚本";
         NSString *stage = [record[@"stage"] isKindOfClass:NSString.class] ? record[@"stage"] : @"未知阶段";
-        if (serviceID.length) [PluginLogStore.shared appendLine:[NSString stringWithFormat:@"上次进程结束时 %@ 仍在运行（阶段：%@）。这可能是崩溃或系统回收；请结合运行诊断与系统崩溃报告判断。", scriptName, stage] forIdentifier:serviceID];
+        NSString *recoveryClass = @"previous_python_session_active_with_unknown_app_exit";
+        NSString *appExitDescription = @"上次应用结束状态未知";
+        if ([previousAppState isEqualToString:@"closed"]) {
+            recoveryClass = @"previous_python_session_active_after_clean_app_exit";
+            appExitDescription = @"上次应用结束标记已关闭";
+        } else if ([previousAppState isEqualToString:@"unclosed"]) {
+            recoveryClass = @"previous_python_session_active_after_unclosed_app_session";
+            appExitDescription = @"上次应用没有写入正常结束标记";
+        }
+        if (serviceID.length) [PluginLogStore.shared appendLine:[NSString stringWithFormat:@"%@；Python 服务 %@ 上次处于 %@ 阶段。此记录说明服务未完成清理，不能单独判定为 App 崩溃。", appExitDescription, scriptName, stage] forIdentifier:serviceID];
         if (!RuntimeDiagnostics.shared.enabled) continue;
         NSMutableDictionary *fields = [record mutableCopy];
-        fields[@"recovery_class"] = @"previous_process_ended_without_clean_python_shutdown";
+        fields[@"previous_app_session_state"] = previousAppState;
+        fields[@"recovery_class"] = recoveryClass;
         [RuntimeDiagnostics.shared recordEventSynchronously:@"python_session_interrupted" category:@"plugin" fields:fields];
     }
 }

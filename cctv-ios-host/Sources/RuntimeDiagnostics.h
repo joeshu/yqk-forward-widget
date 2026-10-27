@@ -5,6 +5,8 @@ NS_ASSUME_NONNULL_BEGIN
 @interface RuntimeDiagnostics : NSObject
 
 @property(nonatomic, readonly, getter=isEnabled) BOOL enabled;
+/// State from the persisted app marker seen at this launch: closed, unclosed, or unknown.
+@property(nonatomic, copy, readonly) NSString *previousSessionTerminationState;
 + (instancetype)shared;
 - (void)setEnabled:(BOOL)enabled;
 - (void)beginAppSessionWithFields:(nullable NSDictionary<NSString *, id> *)fields;

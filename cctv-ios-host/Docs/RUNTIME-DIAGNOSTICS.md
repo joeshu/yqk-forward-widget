@@ -20,11 +20,11 @@ AVPlayer 提供访问日志时，首帧、等待、卡顿和失败事件会附�
 
 服务状态按阶段区分：`service_start_accepted` 只表示宿主接受了启动请求；`python_script_entry_started` 表示 Python 线程已进入脚本；`python_runtime_background_work_active` 表示脚本返回时仍有后台工作；HTTP 健康检查通过才会出现 `local_service_health_ready` / `playback_readiness_probe_result`。Python 运行异常、意外退出和确认停止分别记录为 `python_runtime_failed`、`python_runtime_exited_unexpectedly` 和 `python_runtime_stopped`。
 
-Python 还会在每个关键执行阶段同步写入最近运行标记，包含服务 ID、脚本文件名、阶段、端口和进程内存快照。若下次启动发现上次进程仍留有活动标记，会记录 `python_session_interrupted`，并在对应脚本的独立日志中追加中断提示，据此定位当时运行的是哪个脚本、停在哪一阶段。该事件只说明上个进程没有完成服务清理；iOS 也可能因后台回收而结束 App，不能单凭它判定为崩溃。未捕获的 Python 后台线程异常会记录 `python_background_thread_exception`，包含服务 ID、线程名、异常类型、源文件行号和脱敏错误文本，完整 traceback 会写入该服务独立日志。
+Python 还会在每个关键执行阶段同步写入最近运行标记，包含服务 ID、脚本文件名、阶段、端口和进程内存快照。若下次启动发现上次进程仍留有活动标记，会记录 `python_session_interrupted`，并在对应脚本的独立日志中追加中断提示。事件同时带有 `previous_app_session_state`：`closed` 表示上次 App 的关闭标记已写入、但 Python 服务仍被标为活动；`unclosed` 表示上次 App 没有正常关闭标记；`unknown` 表示无法判断。三种情况都只说明 Python 服务没有完成清理，只有 `unclosed` 才进一步支持“进程非正常结束”的判断，仍不能单凭它判定为崩溃。未捕获的 Python 后台线程异常会记录 `python_background_thread_exception`，包含服务 ID、线程名、异常类型、源文件行号和脱敏错误文本，完整 traceback 会写入该服务独立日志。
 
 `previous_session_unclosed` 表示上次应用没有留下关闭标记，可能由崩溃、系统回收、强制关闭或设备重启造成，不是崩溃报告。`app_will_terminate` 表示系统调用了终止回调；其后的 `app_session_closed.session_marker_closed` 确认关闭标记是否成功落盘。会话记录同时保留最后检查点和进程物理内存快照。即使这些记录能表明会话异常结束，也不能代替 iOS `.ips` 报告中的崩溃线程和调用栈。
 
-开启诊断时，未捕获的 Objective-C 异常会在进程退出前尝试同步记录异常名、脱敏后的原因和最多 12 条栈帧。MetricKit 如果稍后向 App 投递系统崩溃诊断，会另记 `metrickit_crash_diagnostic_received`，包含信号、异常类型/代码、终止原因、关联的上次未正常结束会话 ID，以及最多 16 条可用于 dSYM 符号化的二进制 UUID/偏移摘要。MetricKit 投递可能延迟，也可能没有报告；`SIGKILL`、系统回收、设备重启以及原生崩溃期间的内存破坏仍可能没有可读取的诊断内容。应用不会在致命信号处理函数里执行 Objective-C 或同步写文件，避免崩溃处理本身再次触发崩溃。
+开启诊断时，未捕获的 Objective-C 异常会在进程退出前尝试同步记录异常名、脱敏后的原因和最多 12 条栈帧。MetricKit 如果稍后向 App 投递系统崩溃诊断，会另记 `metrickit_crash_diagnostic_received`，包含信号、异常类型/代码、终止原因、关联的上次未正常结束会话 ID，以及最多 16 条可用于 dSYM 符号化的二进制 UUID/偏移摘要。若没有崩溃栈，MetricKit 也可能延迟提供 `metrickit_app_exit_metrics_received`：它按报告周期汇总前台/后台正常退出、异常退出、看门狗、内存/CPU 限额、内存压力和非法访问等计数，可帮助判断系统是否记录过资源限额终止；这些累计值没有单次退出时间，不能直接对应到某个会话。MetricKit 投递可能延迟，也可能没有报告；`SIGKILL`、系统回收、设备重启以及原生崩溃期间的内存破坏仍可能没有可读取的诊断内容。应用不会在致命信号处理函数里执行 Objective-C 或同步写文件，避免崩溃处理本身再次触发崩溃。
 
 影视首页另外持久化记录 `media_home_data_apply_started/completed`、`media_home_modules_rebuild_started/completed`、`media_grid_cell_configuration_started/completed` 和 `media_grid_first_cell_will_display`。检查点文件会保留白名单中的频道数、分类数、首页模式、渲染序号和卡片索引，并随下一次启动的 `previous_session_unclosed` 一起导出。它们可以把“接口返回”继续拆到数据应用、模块重建、首张卡片配置和首次进入显示队列；若事件在某个 `started` 后中断，可把最后检查点与上下文对齐。它们能缩小原生页面故障窗口，不能代替 `.ips` 调用栈。
 
