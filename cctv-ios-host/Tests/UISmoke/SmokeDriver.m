@@ -80,8 +80,12 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{completion(@{@"items":@[@{@"id":keyword?:@"",@"name":keyword?:@""}]},nil);});
 }
 @end
+@interface RuntimeDiagnostics (SmokeMarker)
+- (NSDictionary *)readSessionMarker;
+@end
 @interface MediaPlaybackViewController (SmokeEpisodePicker)
 - (void)openEpisodeSelection;
+- (void)recordPlaybackAttemptOutcome:(NSString *)outcome failureKind:(NSString *)kind httpStatus:(NSInteger)status terminal:(BOOL)terminal;
 @end
 @interface MediaWebViewController (SmokeConfiguration)
 - (void)close;
@@ -823,6 +827,9 @@ static void next(NSArray *steps, NSUInteger index) {
             UISearchBar *bar=[searchPage valueForKey:@"searchBar"];bar.text=@"";[bar.delegate searchBar:bar textDidChange:bar.text];check([[searchPage valueForKey:@"rows"] count]==0&&[[searchPage valueForKey:@"resultCount"] unsignedIntegerValue]==0,@"clearing the keyword clears old results and counts");[nav popViewControllerAnimated:NO];
           }},
           ^{
+            MediaPlaybackViewController *outcomeProbe=[MediaPlaybackViewController new];outcomeProbe.result=@{@"url":@"https://fixture.test/video.m3u8"};outcomeProbe.context=@{@"source":@{@"id":@"diagnostic-fixture"}};[outcomeProbe setValue:NSUUID.UUID.UUIDString forKey:@"playbackAttemptID"];
+            [outcomeProbe recordPlaybackAttemptOutcome:@"failed" failureKind:@"media_not_found" httpStatus:404 terminal:YES];[outcomeProbe recordPlaybackAttemptOutcome:@"screen_closed" failureKind:nil httpStatus:0 terminal:YES];
+            NSDictionary *marker=[RuntimeDiagnostics.shared readSessionMarker];check([marker[@"last_playback_outcome"] isEqual:@"failed"]&&[marker[@"last_playback_failure_kind"] isEqual:@"media_not_found"]&&[marker[@"last_playback_http_status"] integerValue]==404,@"closing a failed playback preserves its terminal failure evidence");
             [nav popToRootViewControllerAnimated:NO];
             [root selectBottomTab:(id)tabs.arrangedSubviews[4]];
             [root.view layoutIfNeeded];

@@ -432,6 +432,47 @@ class Spider:
         self.assertEqual(len(results), 2)
         self.assertEqual(maximum_active, 1)
 
+    def test_runtime_call_checkpoints_distinguish_success_and_failure(self):
+        handler = object.__new__(transport.Handler)
+        runtime = mock.Mock()
+        runtime.call.return_value = {'items': []}
+        with mock.patch.object(transport, 'report_runtime_stage') as stage:
+            handler.call_runtime(runtime, 'category', {}, 'request-fixture', 'trace-fixture')
+        self.assertEqual([x.args[0] for x in stage.call_args_list],
+                         ['media_call_category_started', 'media_call_category_succeeded'])
+        runtime.call.side_effect = RuntimeError('fixture')
+        with mock.patch.object(transport, 'report_runtime_stage') as stage:
+            with self.assertRaises(RuntimeError):
+                handler.call_runtime(runtime, 'category', {}, 'request-fixture', 'trace-fixture')
+        self.assertEqual([x.args[0] for x in stage.call_args_list],
+                         ['media_call_category_started', 'media_call_category_failed'])
+        self.assertFalse(hasattr(threading.current_thread(), '_host_media_request_context'))
+
+    def test_relay_manifest_diagnostics_are_bounded_and_do_not_include_signed_url(self):
+        relay = MediaRelay(limit=1)
+        token = relay.register('https://fixture.test/index.m3u8?token=private', {}, diagnostic_id='manifest-trace')
+        response = mock.Mock(status=200)
+        response.headers = {'Content-Type': 'application/vnd.apple.mpegurl'}
+        response.geturl.return_value = 'https://fixture.test/index.m3u8?token=private'
+        response.read.return_value = b'#EXTM3U\n#EXT-X-ENDLIST\n'
+        handler = mock.Mock()
+        handler.headers = {}
+        handler.server.server_port = 18799
+        with mock.patch('urllib.request.build_opener') as opener, mock.patch('builtins.print') as log:
+            opener.return_value.open.return_value = response
+            relay.serve(handler, token, head=True)
+            relay.serve(handler, token)
+            relay.serve(handler, token)
+        records = [json.loads(x.args[0].split('] ', 1)[1]) for x in log.call_args_list]
+        self.assertEqual([x['event'] for x in records],
+                         ['media_relay_manifest_requested', 'media_relay_manifest_readable'])
+        self.assertEqual(records[1]['upstream_status'], 200)
+        self.assertNotIn('private', json.dumps(records))
+        relay.register('https://fixture.test/second.m3u8', {})
+        self.assertNotIn(token, relay.diagnosed_manifests)
+        relay.close()
+        self.assertFalse(relay.diagnosed_manifests)
+
     def test_http_handler_propagates_request_ids_to_spider_queue_diagnostics(self):
         handler = object.__new__(transport.Handler)
         observed = {}

@@ -1,3 +1,4 @@
+#import "MediaRelayDiagnostics.h"
 #import "RootViewController.h"
 #import "CNPlayerSDK.h"
 #import "CicadaSDK.h"
@@ -688,6 +689,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)logPluginLine:(NSString *)line identifier:(NSString *)identifier name:(NSString *)name {
     if(!line.length||!identifier.length)return;
     [PluginLogStore.shared appendLine:line forIdentifier:identifier];
+    NSDictionary *relayRecord=MediaRelayDiagnosticRecord(line);
+    if(relayRecord){NSMutableDictionary *fields=[relayRecord mutableCopy];NSString *event=fields[@"event"];[fields removeObjectForKey:@"event"];fields[@"service_id"]=identifier;if(fields[@"request_id"])fields[@"correlation_id"]=fields[@"request_id"];[RuntimeDiagnostics.shared recordEvent:event category:@"media_relay" fields:fields];}
+
     dispatch_async(dispatch_get_main_queue(),^{[[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:identifier];});
     [self log:@"[%@] %@",name.length?name:@"插件",line];
 }

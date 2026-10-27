@@ -106,8 +106,19 @@ class Handler(BaseHTTPRequestHandler):
             'request_id': request_id, 'correlation_id': correlation_id,
             'operation': str(operation or 'unknown')[:48],
         }
+        phase = operation if operation in ('home', 'category', 'search', 'detail', 'play',
+                    'capabilities', 'providers', 'configuration') else None
+        if phase:
+            report_runtime_stage('media_call_' + phase + '_started')
         try:
-            return runtime.call(operation, args)
+            result = runtime.call(operation, args)
+            if phase:
+                report_runtime_stage('media_call_' + phase + '_succeeded')
+            return result
+        except BaseException:
+            if phase:
+                report_runtime_stage('media_call_' + phase + '_failed')
+            raise
         finally:
             if previous is None:
                 try:

@@ -119,6 +119,7 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
 @property(nonatomic) BOOL observingVideoLayer;
 @property(nonatomic) CFTimeInterval playbackStartedAt;
 @property(nonatomic) NSUInteger playerGeneration;
+@property(nonatomic) BOOL terminalPlaybackOutcomeRecorded;
 @property(nonatomic) BOOL pendingScreenExit;
 @property(nonatomic) BOOL hasVideoTrack;
 @property(nonatomic) BOOL videoFrameReady;
@@ -384,6 +385,8 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
 }
 - (void)recordPlaybackAttemptOutcome:(NSString *)outcome failureKind:(NSString *)failureKind httpStatus:(NSInteger)httpStatus terminal:(BOOL)terminal {
     if(!self.playbackAttemptID.length||!outcome.length)return;
+    if(self.terminalPlaybackOutcomeRecorded)return;
+    if(terminal)self.terminalPlaybackOutcomeRecorded=YES;
     NSURL *sourceURL=MediaPlaybackOriginalSourceURL(self.result);NSString *serviceID=[self.context[@"source"][@"id"] isKindOfClass:NSString.class]?self.context[@"source"][@"id"]:@"";
     NSMutableDictionary *fields=[@{@"active_playback_attempt_id":terminal?@"":self.playbackAttemptID, @"active_playback_service_id":terminal?@"":serviceID, @"active_playback_source_host":terminal?@"":(sourceURL.host.lowercaseString?:@""), @"active_playback_outcome":terminal?@"":outcome, @"last_playback_attempt_id":self.playbackAttemptID, @"last_playback_outcome":outcome, @"last_playback_source_host":sourceURL.host.lowercaseString?:@"", @"last_playback_failure_kind":failureKind?:@"", @"last_playback_line_index":@(self.lineIndex), @"last_playback_episode_index":@(self.episodeIndex), @"last_playback_http_status":@(MAX(0,httpStatus))} mutableCopy];
     [RuntimeDiagnostics.shared recordLifecycleCheckpoint:(terminal?@"playback_attempt_finished":@"playback_attempt_progressed") fields:fields];
@@ -494,7 +497,7 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
 }
 - (void)playResult:(NSDictionary *)result {
     self.resolving=NO;self.awaitingWebPlaybackReturn=NO;NSUInteger playerGeneration=++self.playerGeneration;[self.player pause];self.playerController.player=nil;[self stopObservingCurrentPlayback];self.hasVideoTrack=NO;self.videoFrameReady=NO;self.lastPersistedPosition=0;
-    self.playbackAttemptID=NSUUID.UUID.UUIDString.lowercaseString;self.playbackFailureRecorded=NO;self.result=result;
+    self.playbackAttemptID=NSUUID.UUID.UUIDString.lowercaseString;self.terminalPlaybackOutcomeRecorded=NO;self.playbackFailureRecorded=NO;self.result=result;
     NSString *raw=[result[@"url"] isKindOfClass:NSString.class]?result[@"url"]:@"";NSURL *url=[NSURL URLWithString:raw];NSURL *sourceURL=MediaPlaybackOriginalSourceURL(result);NSString *serviceID=[self.context[@"source"][@"id"] isKindOfClass:NSString.class]?self.context[@"source"][@"id"]:@"";
     NSMutableDictionary *attemptFields=[@{@"playback_attempt_id":self.playbackAttemptID, @"active_playback_attempt_id":self.playbackAttemptID, @"active_playback_service_id":serviceID, @"active_playback_source_host":sourceURL.host.lowercaseString?:@"", @"active_playback_outcome":@"in_progress", @"last_playback_attempt_id":self.playbackAttemptID, @"last_playback_outcome":@"in_progress", @"last_playback_source_host":sourceURL.host.lowercaseString?:@"", @"last_playback_failure_kind":@"", @"last_playback_http_status":@0, @"last_playback_line_index":@(self.lineIndex), @"last_playback_episode_index":@(self.episodeIndex)} mutableCopy];
     [RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"playback_attempt_started" fields:attemptFields];

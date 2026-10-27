@@ -52,6 +52,7 @@ class MediaRelay:
         self.lock = threading.Lock()
         self.refreshing = {}
         self.refreshFailures = {}
+        self.diagnosed_manifests = set()
         self.responses = set()
         self.stopping = threading.Event()
 
@@ -94,6 +95,7 @@ class MediaRelay:
             while len(self.targets) > self.limit:
                 removed, _ = self.targets.popitem(last=False)
                 self.refreshFailures.pop(removed, None)
+                self.diagnosed_manifests.discard(removed)
             return token
 
     @staticmethod
@@ -289,6 +291,14 @@ class MediaRelay:
             expected_hls = bool(key[5]) if len(key) > 5 else False
             headers = dict(pairs)
             parsed = urllib.parse.urlsplit(url)
+            with self.lock:
+                first_manifest = not head and (expected_hls or parsed.path.lower().endswith(('.m3u8', '.m3u'))) and token not in self.diagnosed_manifests
+                if first_manifest:
+                    self.diagnosed_manifests.add(token)
+            if first_manifest:
+                print('[CCTVHostMediaRelay] ' + json.dumps({'event': 'media_relay_manifest_requested',
+                    'request_id': diagnostic_id, 'upstream_host': parsed.hostname or '',
+                    'scheme': parsed.scheme.lower()}, separators=(',', ':')))
             if (parsed.scheme.lower(), parsed.netloc.lower()) != origin:
                 headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie')}
             headers['Accept-Encoding'] = 'identity'
@@ -350,6 +360,10 @@ class MediaRelay:
                     final = urllib.parse.urlsplit(final_url)
                     if original.query and self._same_origin(original, final):
                         final_url = self._with_query(final_url, original.query)
+                if first_manifest:
+                    print('[CCTVHostMediaRelay] ' + json.dumps({'event': 'media_relay_manifest_readable',
+                        'request_id': diagnostic_id, 'upstream_host': urllib.parse.urlsplit(final_url).hostname or '',
+                        'upstream_status': response.status, 'manifest_bytes': len(body)}, separators=(',', ':')))
                 body = self.rewrite(text, final_url, dict(pairs), origin,
                                     f'http://127.0.0.1:{handler.server.server_port}', diagnostic_id,
                                     refresh=record[3],refresh_after=record[4],
@@ -431,6 +445,7 @@ class MediaRelay:
             flights = list(self.refreshing.values())
             self.refreshing.clear()
             self.targets.clear()
+            self.diagnosed_manifests.clear()
             self.refreshFailures.clear()
         for event in flights:
             event['event'].set()
