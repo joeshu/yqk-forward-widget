@@ -294,10 +294,16 @@ class MediaRelay:
         with self.lock:
             pool = self.targets if token in self.targets else self.segments
             record = pool.get(token)
-            if not record or self.stopping.is_set():
-                handler.send_error(404, 'Expired media session')
-                return
-            pool.move_to_end(token)
+            stopping = self.stopping.is_set()
+            if record and not stopping:
+                pool.move_to_end(token)
+        # A slow/disconnected client must not hold the registry lock while
+        # reporting an expired session. Distinguish this local 404 from an
+        # upstream media-not-found response without exposing the opaque token.
+        if stopping or not record:
+            self._failed(handler, 'media_service_stopping' if stopping else 'media_session_expired',
+                         record[2] if record else None, record[0][0] if record else '', status=404)
+            return
         key=record[0];url=key[0];diagnostic_id=record[2]
         response = None
         sent = False

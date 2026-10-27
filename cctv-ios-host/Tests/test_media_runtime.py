@@ -1071,6 +1071,34 @@ class Spider:
             for item in (upstream, server): item.shutdown();item.server_close()
             for thread in threads: thread.join(2)
 
+    def test_expired_relay_response_is_diagnosed_without_holding_registry_lock(self):
+        relay = MediaRelay()
+        handler = mock.Mock()
+        handler.command = 'GET'
+        def check_unlocked(*_):
+            acquired = relay.lock.acquire(blocking=False)
+            self.assertTrue(acquired, 'response writes must not hold the registry lock')
+            if acquired: relay.lock.release()
+        handler.send_response.side_effect = check_unlocked
+        with mock.patch('builtins.print') as log:
+            relay.serve(handler, 'private-token-not-registered')
+        record = json.loads(log.call_args.args[0].split('] ', 1)[1])
+        self.assertEqual(record['stage'], 'media_session_expired')
+        self.assertEqual(record['upstream_status'], 0)
+        self.assertNotIn('private-token', json.dumps(record))
+        handler.send_response.assert_called_once_with(404)
+        body = json.loads(handler.wfile.write.call_args.args[0])
+        self.assertEqual(body['request_id'], record['request_id'])
+        handler.reset_mock()
+        handler.command = 'HEAD'
+        relay.close()
+        with mock.patch('builtins.print') as log:
+            relay.serve(handler, 'private-token-not-registered', head=True)
+        record = json.loads(log.call_args.args[0].split('] ', 1)[1])
+        self.assertEqual(record['stage'], 'media_service_stopping')
+        handler.send_response.assert_called_once_with(404)
+        handler.wfile.write.assert_not_called()
+
     def test_relay_client_disconnect_is_not_upstream_failure(self):
         relay = MediaRelay()
         token = relay.register('https://fixture.test/video.mp4?signature=private', {}, diagnostic_id='disconnect-trace')
