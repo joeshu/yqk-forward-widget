@@ -576,6 +576,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 @property(nonatomic) BOOL restartInProgress;
 @property(nonatomic) BOOL foregroundCheckNeeded;
 @property(nonatomic) BOOL homeRebuildScheduled;
+@property(nonatomic) NSUInteger pendingHomeRefreshCount;
 @property(nonatomic) NSUInteger searchGeneration;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSDictionary *> *browseStates;
 @property(nonatomic,copy) NSDictionary *pendingBrowseState;
@@ -884,11 +885,13 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     for(NSDictionary *category in categories){if(shown>=8)break;NSString *identifier=[category[@"id"] isKindOfClass:NSString.class]?category[@"id"]:@"";NSString *name=[category[@"name"] isKindOfClass:NSString.class]?category[@"name"]:@"";if(!identifier.length||!name.length)continue;NSDictionary *arguments=[self arguments:@{@"categoryId":identifier,@"page":@1,@"filters":@{}}];id result=[[MediaMetadataCache shared] resultForSource:self.source operation:@"category" arguments:arguments maximumAge:24*3600 isStale:NULL];NSArray *items=[result[@"items"] isKindOfClass:NSArray.class]?result[@"items"]:@[];if(!items.count)continue;NSMutableArray *cards=[NSMutableArray array];for(NSUInteger itemIndex=0;itemIndex<items.count&&cards.count<8;itemIndex++){NSDictionary *item=items[itemIndex];[cards addObject:[self homeCardWithTitle:item[@"name"]?:@"影视内容" subtitle:item[@"remarks"]?:name imageURL:item[@"poster"] symbol:nil action:^{[weakSelf openHomeRecommendation:item source:weakSelf.source provider:provider];}]];}UIStackView *heading=(UIStackView *)[self homeSectionHeader:name actionTitle:@"" selector:nil];UIButton *all=[UIButton buttonWithType:UIButtonTypeSystem];[all setTitle:@"全部 ›" forState:UIControlStateNormal];[all addAction:[UIAction actionWithHandler:^(UIAction *action){MediaBrowserViewController *owner=weakSelf;if(!owner)return;[owner showBrowse:YES];owner.category=identifier;owner.keyword=@"";owner.page=1;[owner loadListing:NO];}] forControlEvents:UIControlEventTouchUpInside];[heading addArrangedSubview:all];[self.homeStack addArrangedSubview:heading];[self addHomeCards:cards emptyText:@""];shown++;}
 }
 - (void)refreshHomeModules {
+    self.pendingHomeRefreshCount=MIN((NSUInteger)1000000,self.pendingHomeRefreshCount+1);
     if(!self.homeStack.arrangedSubviews.count){[self rebuildHomeModulesNow];return;}
     if(self.homeRebuildScheduled)return;self.homeRebuildScheduled=YES;
     __weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.homeRebuildScheduled=NO;[owner rebuildHomeModulesNow];});
 }
 - (void)rebuildHomeModulesNow {
+    CFTimeInterval rebuildStarted=CACurrentMediaTime();NSUInteger coalesced=self.pendingHomeRefreshCount;self.pendingHomeRefreshCount=0;
     if(!self.homeStack)return;[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_home_modules_rebuild_started" fields:@{@"service_id":self.source[@"id"]?:@"",@"source_generation":@(self.generation),@"home_mode":@(self.homeMode),@"source_item_count":@(self.items.count),@"category_count":@(self.homeCategories.count)}];CGPoint previousOffset=self.homeScroll.contentOffset;BOOL preserveOffset=self.homeScroll.bounds.size.height>0;__weak typeof(self) weakSelf=self;self.homeCarousel.delegate=nil;self.homeCarousel=nil;self.homeCarouselPageControl=nil;for(UIView *view in self.homeStack.arrangedSubviews.copy){if(view==self.homeStatusCard)continue;[self.homeStack removeArrangedSubview:view];[view removeFromSuperview];}[self updateHomeStatusCard];
     NSSet *enabled=MediaHomeEnabledModules();
     if([enabled containsObject:@"recommendations"]){NSString *featuredProvider=@"";NSDictionary *home=[self cachedHomeResultForSelectedProvider:&featuredProvider];NSArray *featured=[home[@"items"] isKindOfClass:NSArray.class]?home[@"items"]:@[];if(featured.count)[self addHomeFeatureCarousel:featured source:self.source provider:featuredProvider];}
@@ -907,7 +910,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     }
     if(!enabled.count){UILabel *empty=[UILabel new];empty.text=@"首页模块已全部隐藏。使用“配置首页”选择要显示的内容。";empty.textColor=HostSecondaryText();empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];[self.homeStack addArrangedSubview:empty];}
     if(!self.sources.count){UIButton *import=[self homeActionButton:@"导入影视资源" symbol:@"plus" action:@selector(openResources) primary:NO];[self.homeStack addArrangedSubview:import];}
-    if(preserveOffset){[self.homeScroll layoutIfNeeded];CGFloat minimum=-self.homeScroll.adjustedContentInset.top;CGFloat maximum=MAX(minimum,self.homeScroll.contentSize.height-self.homeScroll.bounds.size.height+self.homeScroll.adjustedContentInset.bottom);self.homeScroll.contentOffset=CGPointMake(previousOffset.x,MIN(MAX(previousOffset.y,minimum),maximum));}[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_home_modules_rebuild_completed" fields:@{@"service_id":self.source[@"id"]?:@"",@"source_generation":@(self.generation),@"home_mode":@(self.homeMode),@"module_view_count":@(self.homeStack.arrangedSubviews.count),@"source_item_count":@(self.items.count)}];
+    if(preserveOffset){[self.homeScroll layoutIfNeeded];CGFloat minimum=-self.homeScroll.adjustedContentInset.top;CGFloat maximum=MAX(minimum,self.homeScroll.contentSize.height-self.homeScroll.bounds.size.height+self.homeScroll.adjustedContentInset.bottom);self.homeScroll.contentOffset=CGPointMake(previousOffset.x,MIN(MAX(previousOffset.y,minimum),maximum));}[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_home_modules_rebuild_completed" fields:@{@"service_id":self.source[@"id"]?:@"",@"source_generation":@(self.generation),@"home_mode":@(self.homeMode),@"module_view_count":@(self.homeStack.arrangedSubviews.count),@"source_item_count":@(self.items.count),@"elapsed_us":@((NSInteger)(MAX(0,CACurrentMediaTime()-rebuildStarted)*1000000)),@"coalesced_requests":@(coalesced)}];
 }
 - (void)openGlobalSearchFromHome {[self openGlobalSearch];}
 - (void)browseRecommendations {[self showBrowse:YES];}
@@ -1046,7 +1049,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     self.foregroundCheckNeeded=NO;
     if(MediaSourceUsesNativeCatalogAPI(self.source)){if(self.client)[self loadHome];return;}
     if(![PyHost isRunningServiceIdentifier:self.source[@"id"]]){[self activate:self.source keepingHome:self.homeMode];return;}
-    [self.readiness cancelWithReason:@"new_connection_check"];NSUInteger generation=++self.generation;
+    [self.readiness cancelWithReason:@"new_connection_check"];[self.client cancel];self.homeShelfRequestInFlight=NO;self.activeMediaOperation=nil;NSUInteger generation=++self.generation;
     self.loading=YES;self.readinessStageLabel.text=@"运行会话活跃 · 正在重新检查 HTTP";
     [self showMessage:@"正在检查本机服务连接 · 保留当前内容" loading:YES];
     NSURL *url=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%@/health",self.source[@"port"]]];

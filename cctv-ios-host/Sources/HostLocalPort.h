@@ -14,6 +14,9 @@ static inline int HostLocalPortState(int port) {
     int flags=fcntl(fd,F_GETFL,0);
     if(flags<0||fcntl(fd,F_SETFL,flags|O_NONBLOCK)<0){close(fd);return -1;}
     struct sockaddr_in address={0};address.sin_family=AF_INET;
+#ifdef __APPLE__
+    address.sin_len=sizeof(address);
+#endif
     address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);address.sin_port=htons((unsigned short)port);
     int result=connect(fd,(struct sockaddr *)&address,sizeof(address)),error=errno;
     if(result<0&&(error==EINPROGRESS||error==EWOULDBLOCK)){

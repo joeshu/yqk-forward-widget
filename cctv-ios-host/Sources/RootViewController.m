@@ -951,6 +951,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self showTabPage:page title:page.isHomeMode?@"":@"影视库"];
     if(page.onDisplayModeChanged)page.onDisplayModeChanged(page.isHomeMode);
     [page refreshSources];
+    [page resumeAfterForeground];
 }
 - (void)playMediaResult:(NSDictionary *)result name:(NSString *)name {
     NSString *url=[self stableURLKey:result[@"url"]];if(!url.length){[self showServiceError:@"资源没有返回可播放媒体地址"];return;}
@@ -2096,10 +2097,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         if(!stopped&&!error)error=failure(@"服务停止未确认，已取消重新启动。请查看该服务日志。 ");
         dispatch_async(dispatch_get_main_queue(),^{
             BOOL unchanged=NO;for(NSDictionary *candidate in ServiceStore.services)if([candidate[@"id"] isEqual:identifier]){unchanged=[candidate isEqualToDictionary:snapshot];break;}
+            if(stopped){[self logPluginLine:@"重启前旧服务已停止" identifier:identifier name:snapshot[@"name"]?:identifier];[PluginLogStore.shared finishRunForIdentifier:identifier status:@"重启前已停止"];}
             if(!error&&!unchanged)error=failure(@"重启期间资源配置已变更，已取消启动。请重新选择来源。 ");
             if(!error){[self clearServiceLogHandlers:identifier];NSError *startError=nil;if(![self startService:snapshot error:&startError])error=startError?:failure(@"重新启动请求失败，请查看服务日志。 ");}
             [self.serviceOperations removeObject:identifier];
-            [RuntimeDiagnostics.shared recordEvent:@"service_recovery_finished" category:@"service" fields:@{@"service_id":identifier,@"stop_confirmed":@(stopped),@"port_released":@(stopped&&portState==0),@"start_accepted":@(!error),@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@""}];
+            [RuntimeDiagnostics.shared recordEvent:@"service_recovery_finished" category:@"service" fields:@{@"service_id":identifier,@"phase":@"start_request_finished",@"http_health_verified":@NO,@"stop_confirmed":@(stopped),@"port_released":@(stopped&&portState==0),@"start_accepted":@(!error),@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@""}];
             [self refreshConfigurationPage];if(completion)completion(error);
         });
     });

@@ -7,6 +7,7 @@
 @property(nonatomic, assign) NSTimeInterval started;
 @property(nonatomic, assign) BOOL requiresHealthJSON;
 @property(nonatomic, assign) BOOL cancelled;
+@property(nonatomic, assign) BOOL probeActive;
 @property(nonatomic, assign) NSUInteger generation;
 @property(nonatomic, copy) NSString *probeID;
 @property(nonatomic, assign, readwrite) NSUInteger attemptCount;
@@ -49,6 +50,7 @@
     self.lastObservedFailureKind = @"none";
     self.started = CACurrentMediaTime();
     self.completion = completion;
+    self.probeActive = YES;
     [self recordProbe:@"local_service_probe_started" reason:@"requested"];
     NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
     config.URLCache = nil;
@@ -71,8 +73,9 @@
              @"last_failure_kind":self.lastFailureKind?:@"unknown"};
 }
 - (void)finish:(NSError *)error {
-    if(!self.completion)return;
+    if(!self.probeActive)return;
     [self recordProbe:@"local_service_probe_finished" reason:error?@"failed":@"ready"];
+    self.probeActive=NO;
     void (^done)(NSError *, NSTimeInterval) = self.completion;
     self.completion = nil;
     [self.task cancel];
@@ -177,7 +180,8 @@
     [RuntimeDiagnostics.shared recordEvent:event category:@"service" fields:fields];
 }
 - (void)cancelWithReason:(NSString *)reason {
-    if(self.completion)[self recordProbe:@"local_service_probe_cancelled" reason:reason];
+    if(self.probeActive)[self recordProbe:@"local_service_probe_cancelled" reason:reason];
+    self.probeActive=NO;
     self.generation++;
     self.cancelled = YES;
     self.completion = nil;
@@ -187,6 +191,7 @@
     self.session = nil;
 }
 - (void)dealloc {
+    if(self.probeActive)[self recordProbe:@"local_service_probe_cancelled" reason:@"owner_deallocated"];
     [self.task cancel];
     [self.session invalidateAndCancel];
 }
