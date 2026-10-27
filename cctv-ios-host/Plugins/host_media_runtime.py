@@ -687,7 +687,20 @@ class PythonSpider:
             if operation == 'detail':
                 return spider.detailContent([str(args.get('id', ''))])
             if operation == 'play':
-                return spider.playerContent(str(args.get('lineId', '')), str(args.get('id', '')), [])
+                result = decoded(spider.playerContent(str(args.get('lineId', '')), str(args.get('id', '')), []))
+                # Some spiders return the episode HTML page with parse=0 when
+                # extraction fails. Never label that page as decoded media.
+                if isinstance(result, dict):
+                    address = result.get('url')
+                    path = urllib.parse.urlsplit(address).path.lower() if isinstance(address, str) else ''
+                    episode_page = (address == str(args.get('id', '')) and
+                                    re.fullmatch(r'/[0-9]+/[0-9]+/[0-9]+/?', path) is not None and
+                                    str(result.get('format', '')).lower() == 'mp4')
+                    if path.endswith(('.html', '.htm')) or episode_page:
+                        result = dict(result, parse=1, requiresWebPlayback=True)
+                        result.pop('format', None)
+                        result.pop('contentType', None)
+                return result
             if operation == 'proxy':
                 return spider.localProxy(args)
             raise MediaError('UNSUPPORTED', '此来源不支持该操作')

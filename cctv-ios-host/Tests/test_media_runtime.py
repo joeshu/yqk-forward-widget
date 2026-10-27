@@ -37,6 +37,24 @@ class Spider:
 
 
 class MediaTests(unittest.TestCase):
+    def test_html_playback_fallback_requests_web_resolution(self):
+        with mock.patch.object(self.engine.spider, 'playerContent', return_value={
+                'url': 'https://fixture.test/play/one.html', 'parse': 0,
+                'format': 'mp4', 'contentType': 'video/mp4'}):
+            result = self.engine.call('play', {'id': 'one'})
+        self.assertEqual(result['parse'], 1)
+        self.assertTrue(result['requiresWebPlayback'])
+        self.assertNotIn('format', result)
+        with mock.patch.object(self.engine.spider, 'playerContent', return_value={
+                'url': 'https://fixture.test/123/1/7', 'parse': 0, 'format': 'mp4'}):
+            result = self.engine.call('play', {'id': 'https://fixture.test/123/1/7'})
+        self.assertEqual(result['parse'], 1)
+        with mock.patch.object(self.engine.spider, 'playerContent', return_value={
+                'url': 'https://fixture.test/video.m3u8?signature=a%2Bb', 'parse': 0}):
+            result = self.engine.call('play', {'id': 'one'})
+        self.assertEqual(result['url'], 'https://fixture.test/video.m3u8?signature=a%2Bb')
+        self.assertEqual(result['parse'], 0)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         Path(self.tmp.name, '影视.py').write_text(SPIDER)

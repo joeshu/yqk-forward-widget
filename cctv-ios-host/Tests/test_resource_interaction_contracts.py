@@ -127,13 +127,14 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('@"id":@"catalog"', self.detail)
         self.assertIn('- (void)loadHomeShelves:', self.detail)
         self.assertIn('operation:@"category" arguments:arguments maximumAge:6*3600', self.detail)
-        self.assertIn('MIN((NSUInteger)3,categories.count)', self.detail)
+        self.assertIn('MIN((NSUInteger)8,categories.count)', self.detail)
         self.assertIn('@"media_home_shelf_readable"', self.detail)
         self.assertIn('@"media_home_shelf_failed"', self.detail)
         self.assertIn('- (BOOL)isHomePageVisible', self.detail)
         self.assertIn('top==self||top==self.parentViewController', self.detail)
         self.assertIn('homeCardWithTitle:item[@"name"]', self.detail)
-        self.assertIn('homeStack addArrangedSubview:[self homeSectionHeader:name', self.detail)
+        self.assertIn('homeSectionHeader:name', self.detail)
+        self.assertIn('[heading addArrangedSubview:all]', self.detail)
         self.assertIn('setInteger:3 forKey:MediaHomeModulesSchemaKey', self.detail)
 
     def test_movie_detail_uses_soft_backdrop_real_cast_and_actionable_controls(self):
