@@ -34,6 +34,7 @@ targets:
       - sdk: CoreMedia.framework
       - sdk: UniformTypeIdentifiers.framework
       - sdk: QuartzCore.framework
+      - sdk: MetricKit.framework
       - framework: Frameworks/CNPlayerSDK.framework
         embed: true
         codeSign: true

@@ -85,6 +85,25 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         self.assertIn('beginAppSessionWithFields:', APP_DELEGATE)
         self.assertIn('applicationDidReceiveMemoryWarning:', APP_DELEGATE)
 
+    def test_no_ips_fallback_captures_objc_exceptions_metrickit_and_media_render_stages(self):
+        for marker in (
+            'NSSetUncaughtExceptionHandler', 'uncaught_objc_exception',
+            'MXMetricManager', 'didReceiveDiagnosticPayloads:',
+            'metrickit_crash_diagnostic_received', 'related_session_id',
+            'JSONRepresentation', 'call_stack_frame_summaries',
+            'offsetIntoBinaryTextSegment',
+        ):
+            self.assertIn(marker, DIAGNOSTICS)
+        self.assertIn('last_checkpoint_context', DIAGNOSTICS)
+        for marker in (
+            'media_home_data_apply_started', 'media_home_data_apply_completed',
+            'media_home_modules_rebuild_started', 'media_home_modules_rebuild_completed',
+            'media_grid_cell_configuration_started', 'media_grid_cell_configuration_completed',
+            'media_grid_first_cell_will_display',
+        ):
+            self.assertIn(marker, BROWSER)
+        self.assertIn('MetricKit.framework', (ROOT / 'project.yml').read_text())
+
     def test_unclosed_session_preserves_only_the_active_playback_breadcrumb(self):
         for field in (
             'active_playback_attempt_id', 'active_playback_service_id',

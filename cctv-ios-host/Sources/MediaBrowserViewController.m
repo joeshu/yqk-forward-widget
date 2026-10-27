@@ -547,6 +547,9 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 @property(nonatomic) BOOL loading;
 @property(nonatomic) BOOL homeStatusLoading;
 @property(nonatomic) NSUInteger generation;
+@property(nonatomic) NSUInteger diagnosticGridApplySerial;
+@property(nonatomic) NSUInteger diagnosticGridConfiguredSerial;
+@property(nonatomic) NSUInteger diagnosticGridVisibleSerial;
 @property(nonatomic) NSUInteger capabilityReadinessRetryCount;
 @property(nonatomic,copy) NSString *diagnosticTraceID;
 @property(nonatomic,strong) MediaAPIClient *configurationClient;
@@ -847,7 +850,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     for(NSDictionary *category in categories){if(shown>=3)break;NSString *identifier=[category[@"id"] isKindOfClass:NSString.class]?category[@"id"]:@"";NSString *name=[category[@"name"] isKindOfClass:NSString.class]?category[@"name"]:@"";if(!identifier.length||!name.length)continue;NSDictionary *arguments=[self arguments:@{@"categoryId":identifier,@"page":@1,@"filters":@{}}];id result=[[MediaMetadataCache shared] resultForSource:self.source operation:@"category" arguments:arguments maximumAge:24*3600 isStale:NULL];NSArray *items=[result[@"items"] isKindOfClass:NSArray.class]?result[@"items"]:@[];if(!items.count)continue;NSMutableArray *cards=[NSMutableArray array];for(NSUInteger itemIndex=0;itemIndex<items.count&&cards.count<8;itemIndex++){NSDictionary *item=items[itemIndex];[cards addObject:[self homeCardWithTitle:item[@"name"]?:@"影视内容" subtitle:item[@"remarks"]?:name imageURL:item[@"poster"] symbol:nil action:^{[weakSelf openHomeRecommendation:item source:weakSelf.source provider:provider];}]];}[self.homeStack addArrangedSubview:[self homeSectionHeader:name actionTitle:@"" selector:nil]];[self addHomeCards:cards emptyText:@""];shown++;}
 }
 - (void)refreshHomeModules {
-    if(!self.homeStack)return;CGPoint previousOffset=self.homeScroll.contentOffset;BOOL preserveOffset=self.homeScroll.bounds.size.height>0;__weak typeof(self) weakSelf=self;self.homeCarousel.delegate=nil;self.homeCarousel=nil;self.homeCarouselPageControl=nil;for(UIView *view in self.homeStack.arrangedSubviews.copy){if(view==self.homeStatusCard)continue;[self.homeStack removeArrangedSubview:view];[view removeFromSuperview];}[self updateHomeStatusCard];
+    if(!self.homeStack)return;[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_home_modules_rebuild_started" fields:@{@"service_id":self.source[@"id"]?:@"",@"source_generation":@(self.generation),@"home_mode":@(self.homeMode),@"source_item_count":@(self.items.count),@"category_count":@(self.homeCategories.count)}];CGPoint previousOffset=self.homeScroll.contentOffset;BOOL preserveOffset=self.homeScroll.bounds.size.height>0;__weak typeof(self) weakSelf=self;self.homeCarousel.delegate=nil;self.homeCarousel=nil;self.homeCarouselPageControl=nil;for(UIView *view in self.homeStack.arrangedSubviews.copy){if(view==self.homeStatusCard)continue;[self.homeStack removeArrangedSubview:view];[view removeFromSuperview];}[self updateHomeStatusCard];
     NSSet *enabled=MediaHomeEnabledModules();
     if([enabled containsObject:@"recommendations"]){NSString *featuredProvider=@"";NSDictionary *home=[self cachedHomeResultForSelectedProvider:&featuredProvider];NSArray *featured=[home[@"items"] isKindOfClass:NSArray.class]?home[@"items"]:@[];if(featured.count)[self addHomeFeatureCarousel:featured source:self.source provider:featuredProvider];}
     [self addHomeCategoryShelves:enabled];
@@ -865,7 +868,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     }
     if(!enabled.count){UILabel *empty=[UILabel new];empty.text=@"首页模块已全部隐藏。使用“配置首页”选择要显示的内容。";empty.textColor=HostSecondaryText();empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];[self.homeStack addArrangedSubview:empty];}
     if(!self.sources.count){UIButton *import=[self homeActionButton:@"导入影视资源" symbol:@"plus" action:@selector(openResources) primary:NO];[self.homeStack addArrangedSubview:import];}
-    if(preserveOffset){[self.homeScroll layoutIfNeeded];CGFloat minimum=-self.homeScroll.adjustedContentInset.top;CGFloat maximum=MAX(minimum,self.homeScroll.contentSize.height-self.homeScroll.bounds.size.height+self.homeScroll.adjustedContentInset.bottom);self.homeScroll.contentOffset=CGPointMake(previousOffset.x,MIN(MAX(previousOffset.y,minimum),maximum));}
+    if(preserveOffset){[self.homeScroll layoutIfNeeded];CGFloat minimum=-self.homeScroll.adjustedContentInset.top;CGFloat maximum=MAX(minimum,self.homeScroll.contentSize.height-self.homeScroll.bounds.size.height+self.homeScroll.adjustedContentInset.bottom);self.homeScroll.contentOffset=CGPointMake(previousOffset.x,MIN(MAX(previousOffset.y,minimum),maximum));}[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_home_modules_rebuild_completed" fields:@{@"service_id":self.source[@"id"]?:@"",@"source_generation":@(self.generation),@"home_mode":@(self.homeMode),@"module_view_count":@(self.homeStack.arrangedSubviews.count),@"source_item_count":@(self.items.count)}];
 }
 - (void)openGlobalSearchFromHome {[self openGlobalSearch];}
 - (void)browseRecommendations {[self showBrowse:YES];}
@@ -1121,12 +1124,14 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     }];
 }
 - (void)applyHomeResult:(NSDictionary *)result {
+    NSUInteger renderSerial=++self.diagnosticGridApplySerial;self.diagnosticGridConfiguredSerial=0;self.diagnosticGridVisibleSerial=0;NSArray *incoming=[result[@"items"] isKindOfClass:NSArray.class]?result[@"items"]:@[];NSArray *incomingCategories=[result[@"categories"] isKindOfClass:NSArray.class]?result[@"categories"]:@[];[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_home_data_apply_started" fields:@{@"service_id":self.source[@"id"]?:@"",@"source_generation":@(self.generation),@"render_serial":@(renderSerial),@"item_count":@(incoming.count),@"category_count":@(incomingCategories.count),@"home_mode":@(self.homeMode)}];
     self.homeResult=[result isKindOfClass:NSDictionary.class]?[result copy]:nil;self.homeResultSourceID=[self.source[@"id"] isKindOfClass:NSString.class]?self.source[@"id"]:@"";self.homeResultProvider=self.provider?:@"";
     self.items=[result[@"items"] isKindOfClass:NSArray.class]?result[@"items"]:@[];[self.grid reloadData];
     self.homeCategories=[result[@"categories"] isKindOfClass:NSArray.class]?result[@"categories"]:@[];
     self.filters=[result[@"filters"] isKindOfClass:NSDictionary.class]?result[@"filters"]:@{};
     for(UIView *view in self.categories.arrangedSubviews){[self.categories removeArrangedSubview:view];[view removeFromSuperview];}
-    for(NSDictionary *category in [result[@"categories"] isKindOfClass:NSArray.class]?result[@"categories"]:@[]){if(![category isKindOfClass:NSDictionary.class])continue;UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];[button setTitle:category[@"name"] forState:UIControlStateNormal];HostStylePillButton(button,NO);button.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightMedium];button.accessibilityIdentifier=category[@"id"];[button addTarget:self action:@selector(selectCategory:) forControlEvents:UIControlEventTouchUpInside];[self.categories addArrangedSubview:button];}
+    for(NSDictionary *category in incomingCategories){if(![category isKindOfClass:NSDictionary.class])continue;UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];[button setTitle:category[@"name"] forState:UIControlStateNormal];HostStylePillButton(button,NO);button.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightMedium];button.accessibilityIdentifier=category[@"id"];[button addTarget:self action:@selector(selectCategory:) forControlEvents:UIControlEventTouchUpInside];[self.categories addArrangedSubview:button];}
+    [RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_home_data_apply_completed" fields:@{@"service_id":self.source[@"id"]?:@"",@"source_generation":@(self.generation),@"render_serial":@(renderSerial),@"item_count":@(self.items.count),@"category_count":@(self.homeCategories.count),@"home_mode":@(self.homeMode)}];
 }
 - (void)selectCategory:(UIButton *)button {self.category=button.accessibilityIdentifier;self.selectedFilters=[NSMutableDictionary dictionary];self.keyword=@"";self.search.searchBar.text=@"";for(UIButton *item in self.categories.arrangedSubviews){BOOL selected=item==button;item.backgroundColor=selected?[HostAccent() colorWithAlphaComponent:0.23]:HostNeutralSurface();HostSetLayerBorderColor(item,selected?[HostAccent() colorWithAlphaComponent:0.42]:HostBorder());[item setTitleColor:selected?HostAccent():HostText() forState:UIControlStateNormal];}self.page=1;if(!self.loading)[self loadListing:NO];}
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
@@ -1162,8 +1167,13 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {NSInteger columns=collectionView.bounds.size.width>700?4:2;CGFloat width=floor((collectionView.bounds.size.width-28-(columns-1)*10)/columns);UIFont *name=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection],*remarks=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11] compatibleWithTraitCollection:self.traitCollection];return CGSizeMake(width,width*1.4+10+ceil(name.lineHeight)+ceil(remarks.lineHeight));}
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)ip {
     MediaPosterCell *cell=(MediaPosterCell *)[collectionView dequeueReusableCellWithReuseIdentifier:@"movie" forIndexPath:ip];
+    BOOL firstCellForRender=self.diagnosticGridConfiguredSerial!=self.diagnosticGridApplySerial;if(firstCellForRender){self.diagnosticGridConfiguredSerial=self.diagnosticGridApplySerial;[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_grid_cell_configuration_started" fields:@{@"service_id":self.source[@"id"]?:@"",@"render_serial":@(self.diagnosticGridApplySerial),@"item_index":@(ip.item),@"item_count":@(self.items.count)}];}
     [cell configureWithItem:self.items[ip.item]];
+    if(firstCellForRender)[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_grid_cell_configuration_completed" fields:@{@"service_id":self.source[@"id"]?:@"",@"render_serial":@(self.diagnosticGridApplySerial),@"item_index":@(ip.item),@"item_count":@(self.items.count)}];
     return cell;
+}
+- (void)collectionView:(UICollectionView *)collectionView willDisplayCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)indexPath {
+    if(self.diagnosticGridVisibleSerial==self.diagnosticGridApplySerial)return;self.diagnosticGridVisibleSerial=self.diagnosticGridApplySerial;[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_grid_first_cell_will_display" fields:@{@"service_id":self.source[@"id"]?:@"",@"render_serial":@(self.diagnosticGridApplySerial),@"item_index":@(indexPath.item),@"item_count":@(self.items.count),@"home_mode":@(self.homeMode)}];
 }
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip {
     HostAnimateSelection([collectionView cellForItemAtIndexPath:ip]);

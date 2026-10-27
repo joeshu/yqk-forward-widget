@@ -24,6 +24,12 @@ Python 还会在每个关键执行阶段同步写入最近运行标记，包含�
 
 `previous_session_unclosed` 表示上次应用没有留下关闭标记，可能由崩溃、系统回收、强制关闭或设备重启造成，不是崩溃报告。`app_will_terminate` 表示系统调用了终止回调；其后的 `app_session_closed.session_marker_closed` 确认关闭标记是否成功落盘。会话记录同时保留最后检查点和进程物理内存快照。即使这些记录能表明会话异常结束，也不能代替 iOS `.ips` 报告中的崩溃线程和调用栈。
 
+开启诊断时，未捕获的 Objective-C 异常会在进程退出前尝试同步记录异常名、脱敏后的原因和最多 12 条栈帧。MetricKit 如果稍后向 App 投递系统崩溃诊断，会另记 `metrickit_crash_diagnostic_received`，包含信号、异常类型/代码、终止原因、关联的上次未正常结束会话 ID，以及最多 16 条可用于 dSYM 符号化的二进制 UUID/偏移摘要。MetricKit 投递可能延迟，也可能没有报告；`SIGKILL`、系统回收、设备重启以及原生崩溃期间的内存破坏仍可能没有可读取的诊断内容。应用不会在致命信号处理函数里执行 Objective-C 或同步写文件，避免崩溃处理本身再次触发崩溃。
+
+影视首页另外持久化记录 `media_home_data_apply_started/completed`、`media_home_modules_rebuild_started/completed`、`media_grid_cell_configuration_started/completed` 和 `media_grid_first_cell_will_display`。检查点文件会保留白名单中的频道数、分类数、首页模式、渲染序号和卡片索引，并随下一次启动的 `previous_session_unclosed` 一起导出。它们可以把“接口返回”继续拆到数据应用、模块重建、首张卡片配置和首次进入显示队列；若事件在某个 `started` 后中断，可把最后检查点与上下文对齐。它们能缩小原生页面故障窗口，不能代替 `.ips` 调用栈。
+
+如果没有 `.ips`，可以先查看 iPhone“设置 → 隐私与安全性 → 分析与改进 → 分析数据”中是否有 `JetsamEvent` 或 CCTVHost 的系统诊断；内存回收常表现为 `JetsamEvent`，不会有普通应用崩溃栈。需要即时捕获时，将 iPhone 连接 Mac，在“控制台”选择设备并开始实时串流，按 `CCTVHost` 过滤，复现后保存相关日志。App 内 MetricKit 诊断可能在之后的启动周期才送达，需打开 App 并导出对应会话。以上途径拿不到系统栈时，导出诊断中的“最后检查点 + 上下文 + 内存占用”仍可区分页面阶段、内存压力和强制终止等线索，但不能单独证明具体崩溃指令。
+
 服务详情里的“查看日志”先列出该脚本的每次运行；点开一条只看本次启动到停止/失败的日志，可单独导出或清理。每个脚本最多保留最近 20 次运行，每次日志最多 256 KiB；升级前原有的连续日志作为“更新前历史日志”保留。若应用在运行期间退出，下次查看时会把未结束记录标成“未正常结束”，不会把它和新一轮运行合并。
 
 Python 插件的 HTTP 响应体受每响应 16 MiB 上限保护；每个服务最多 4 个 HTTP handler，全宿主最多 12 个 handler，同时最多 2 个/服务、8 个/宿主执行大响应读取。超限或读取并发预算耗尽会在插件日志和诊断文件中记录 `python_http_response_rejected`，并让该 HTTP 请求失败，避免多个完整媒体分片同时无限占用内存。低于上限的普通响应可继续读取；读取并发预算耗尽时该次请求会快速失败并记录原因。HTTP handler 并发预算耗尽会记录 `python_http_worker_rejected`，便于区分响应体超限与请求处理能力耗尽。

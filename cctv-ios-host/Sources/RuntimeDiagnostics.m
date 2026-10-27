@@ -1,6 +1,7 @@
 #import "RuntimeDiagnostics.h"
 #import "HostLogRedactor.h"
 #import <UIKit/UIKit.h>
+#import <MetricKit/MetricKit.h>
 #import <mach/mach.h>
 
 static NSString * const RuntimeDiagnosticsPreferenceKey = @"runtimeDiagnosticsEnabled";
@@ -9,8 +10,74 @@ static unsigned long long const RuntimeDiagnosticsRetainedBytes = 3 * 1024 * 102
 static NSUInteger const RuntimeDiagnosticsMaximumSessions = 24;
 static unsigned long long const RuntimeDiagnosticsMaximumTotalBytes = 32 * 1024 * 1024;
 static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
+static RuntimeDiagnostics *RuntimeDiagnosticsExceptionTarget;
+static NSUncaughtExceptionHandler *RuntimeDiagnosticsPreviousExceptionHandler;
+static BOOL RuntimeDiagnosticsExceptionHandlerInstalled;
+static BOOL RuntimeDiagnosticsHandlingException;
 
-@interface RuntimeDiagnostics ()
+static NSString *RuntimeDiagnosticsStringValue(id value) {
+    if ([value isKindOfClass:NSString.class]) return value;
+    if ([value isKindOfClass:NSNumber.class]) return [value stringValue];
+    return nil;
+}
+
+static void RuntimeDiagnosticsCollectCallStackFrames(id value, NSMutableArray<NSString *> *frames, NSUInteger depth) {
+    if (depth > 16 || frames.count >= 16) return;
+    if ([value isKindOfClass:NSArray.class]) {
+        for (id item in (NSArray *)value) {
+            RuntimeDiagnosticsCollectCallStackFrames(item, frames, depth + 1);
+            if (frames.count >= 16) break;
+        }
+        return;
+    }
+    if (![value isKindOfClass:NSDictionary.class]) return;
+    NSDictionary *dictionary = value;
+    NSString *binaryUUID = RuntimeDiagnosticsStringValue(dictionary[@"binaryUUID"] ?: dictionary[@"binaryUuid"]);
+    NSString *binaryName = RuntimeDiagnosticsStringValue(dictionary[@"binaryName"] ?: dictionary[@"imageName"]);
+    NSString *offset = RuntimeDiagnosticsStringValue(dictionary[@"offsetIntoBinaryTextSegment"] ?: dictionary[@"offset"]);
+    NSString *sampleCount = RuntimeDiagnosticsStringValue(dictionary[@"sampleCount"]);
+    if (offset.length) {
+        NSMutableArray<NSString *> *parts = [NSMutableArray array];
+        if (binaryName.length) [parts addObject:[NSString stringWithFormat:@"image=%@", binaryName]];
+        if (binaryUUID.length) [parts addObject:[NSString stringWithFormat:@"uuid=%@", binaryUUID]];
+        if (offset.length) [parts addObject:[NSString stringWithFormat:@"offset=%@", offset]];
+        // Addresses are intentionally omitted; UUID plus image offset is enough
+        // to locate a frame against the matching dSYM and is more stable.
+        if (sampleCount.length) [parts addObject:[NSString stringWithFormat:@"samples=%@", sampleCount]];
+        [frames addObject:[parts componentsJoinedByString:@" "]];
+    }
+    for (id key in dictionary) {
+        if (![key isKindOfClass:NSString.class]) continue;
+        if ([key isEqualToString:@"binaryImages"] || [key isEqualToString:@"binaryImageList"]) continue;
+        RuntimeDiagnosticsCollectCallStackFrames(dictionary[key], frames, depth + 1);
+        if (frames.count >= 16) break;
+    }
+}
+
+static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
+    if (!RuntimeDiagnosticsHandlingException) {
+        RuntimeDiagnosticsHandlingException = YES;
+        @autoreleasepool {
+            RuntimeDiagnostics *diagnostics = RuntimeDiagnosticsExceptionTarget;
+            if (diagnostics.enabled) {
+                NSArray<NSString *> *stack = exception.callStackSymbols ?: @[];
+                NSArray<NSString *> *topFrames = [stack subarrayWithRange:NSMakeRange(0, MIN((NSUInteger)12, stack.count))];
+                NSDictionary *fields = @{
+                    @"exception_name":exception.name ?: @"NSException",
+                    @"exception_reason":exception.reason ?: @"",
+                    @"stack_frame_count":@(stack.count),
+                    @"top_stack_frames":topFrames
+                };
+                [diagnostics recordEventSynchronously:@"uncaught_objc_exception" category:@"crash" fields:fields];
+            }
+        }
+        RuntimeDiagnosticsHandlingException = NO;
+    }
+    NSUncaughtExceptionHandler *previous = RuntimeDiagnosticsPreviousExceptionHandler;
+    if (previous && previous != RuntimeDiagnosticsHandleUncaughtException) previous(exception);
+}
+
+@interface RuntimeDiagnostics () <MXMetricManagerSubscriber>
 @property(nonatomic, copy) NSString *logPath;
 @property(nonatomic, copy) NSString *sessionsDirectoryPath;
 @property(nonatomic, copy) NSString *legacyLogPath;
@@ -18,6 +85,7 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
 @property(nonatomic, copy) NSString *sessionID;
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic) BOOL diagnosticModeEnabled;
+@property(nonatomic, copy) NSString *previousUnclosedSessionID;
 - (id)safeValue:(id)value key:(NSString *)key depth:(NSUInteger)depth;
 - (NSString *)safeText:(NSString *)text;
 - (NSDictionary * _Nullable)readSessionMarker;
@@ -49,6 +117,13 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
         self.queue = dispatch_queue_create("com.cctvhost.runtime-diagnostics", DISPATCH_QUEUE_SERIAL);
         dispatch_queue_set_specific(self.queue, RuntimeDiagnosticsQueueKey, (__bridge void *)self, NULL);
         _diagnosticModeEnabled = [NSUserDefaults.standardUserDefaults boolForKey:RuntimeDiagnosticsPreferenceKey];
+        RuntimeDiagnosticsExceptionTarget = self;
+        if (!RuntimeDiagnosticsExceptionHandlerInstalled) {
+            RuntimeDiagnosticsPreviousExceptionHandler = NSGetUncaughtExceptionHandler();
+            NSSetUncaughtExceptionHandler(RuntimeDiagnosticsHandleUncaughtException);
+            RuntimeDiagnosticsExceptionHandlerInstalled = YES;
+        }
+        if (@available(iOS 13.0, *)) [[MXMetricManager sharedManager] addSubscriber:self];
         dispatch_async(self.queue, ^{ [self migrateLegacyLogIfNeeded]; [self pruneOldSessions]; });
     }
     return self;
@@ -173,8 +248,9 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     if (!self.enabled) return;
     NSDictionary *previous = [self readSessionMarker];
     if ([previous[@"open"] boolValue]) {
+        self.previousUnclosedSessionID = [previous[@"session_id"] isKindOfClass:NSString.class] ? previous[@"session_id"] : @"";
         NSMutableDictionary *recovery = [NSMutableDictionary dictionary];
-        for (NSString *key in @[@"session_id", @"started_at", @"last_checkpoint", @"last_checkpoint_at", @"app_version", @"app_build", @"ios_version", @"application_state", @"system_uptime_seconds", @"process_phys_footprint_bytes", @"process_phys_footprint_sample_checkpoint", @"active_playback_attempt_id", @"active_playback_service_id", @"active_playback_source_host", @"active_playback_outcome", @"last_playback_attempt_id", @"last_playback_outcome", @"last_playback_source_host", @"last_playback_failure_kind", @"last_playback_http_status", @"last_playback_line_index", @"last_playback_episode_index"])
+        for (NSString *key in @[@"session_id", @"started_at", @"last_checkpoint", @"last_checkpoint_at", @"last_checkpoint_context", @"app_version", @"app_build", @"ios_version", @"application_state", @"system_uptime_seconds", @"process_phys_footprint_bytes", @"process_phys_footprint_sample_checkpoint", @"active_playback_attempt_id", @"active_playback_service_id", @"active_playback_source_host", @"active_playback_outcome", @"last_playback_attempt_id", @"last_playback_outcome", @"last_playback_source_host", @"last_playback_failure_kind", @"last_playback_http_status", @"last_playback_line_index", @"last_playback_episode_index"])
             if (previous[key]) recovery[key] = previous[key];
         // Older builds mislabeled NSProcessInfo.systemUptime as process uptime.
         if (!recovery[@"system_uptime_seconds"] && previous[@"process_uptime_seconds"])
@@ -196,6 +272,43 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     [self recordEventSynchronously:@"app_started" category:@"lifecycle" fields:startupFields];
 }
 
+- (void)didReceiveMetricPayloads:(NSArray<MXMetricPayload *> *)payloads {
+    // Metrics are intentionally omitted: this subscriber is only for crash diagnostics.
+}
+
+- (void)didReceiveDiagnosticPayloads:(NSArray<MXDiagnosticPayload *> *)payloads API_AVAILABLE(ios(14.0)) {
+    if (!self.enabled) return;
+    for (MXDiagnosticPayload *payload in payloads ?: @[]) {
+        for (MXCrashDiagnostic *crash in payload.crashDiagnostics ?: @[]) {
+            NSMutableDictionary *fields = [@{
+                @"related_session_id":self.previousUnclosedSessionID.length ? self.previousUnclosedSessionID : @"unknown",
+                @"exception_type":crash.exceptionType.stringValue ?: @"unknown",
+                @"exception_code":crash.exceptionCode.stringValue ?: @"unknown",
+                @"signal":crash.signal ?: @"",
+                @"termination_reason":crash.terminationReason ?: @"",
+                @"call_stack_available":@(crash.callStackTree != nil)
+            } mutableCopy];
+            if (crash.callStackTree) {
+                NSData *stackJSON = [crash.callStackTree JSONRepresentation];
+                fields[@"call_stack_tree_json_bytes"] = @(stackJSON.length);
+                id stackObject = stackJSON.length ? [NSJSONSerialization JSONObjectWithData:stackJSON options:NSJSONReadingFragmentsAllowed error:NULL] : nil;
+                NSMutableArray<NSString *> *frames = [NSMutableArray array];
+                RuntimeDiagnosticsCollectCallStackFrames(stackObject, frames, 0);
+                fields[@"call_stack_frame_summary_count"] = @(frames.count);
+                fields[@"call_stack_summary_parsed"] = @(stackObject != nil);
+                if (frames.count) fields[@"call_stack_frame_summaries"] = frames;
+            }
+            if (@available(iOS 17.0, *)) {
+                MXCrashDiagnosticObjectiveCExceptionReason *reason = crash.exceptionReason;
+                if (reason.composedMessage.length) fields[@"exception_reason"] = reason.composedMessage;
+                if (reason.exceptionType.length) fields[@"exception_reason_type"] = reason.exceptionType;
+                if (reason.exceptionName.length) fields[@"exception_reason_name"] = reason.exceptionName;
+            }
+            [self recordEventSynchronously:@"metrickit_crash_diagnostic_received" category:@"crash" fields:fields];
+        }
+    }
+}
+
 - (void)recordLifecycleCheckpoint:(NSString *)checkpoint fields:(NSDictionary<NSString *,id> *)fields {
     if (!checkpoint.length || !self.enabled) return;
     NSDictionary *previous = [self readSessionMarker];
@@ -211,6 +324,14 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     marker[@"session_id"] = self.sessionID ?: @"unknown";
     marker[@"last_checkpoint"] = checkpoint;
     marker[@"last_checkpoint_at"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
+    NSSet<NSString *> *contextKeys = [NSSet setWithArray:@[@"service_id", @"source_generation", @"render_serial", @"item_count", @"category_count", @"home_mode", @"module_view_count", @"item_index", @"episode_index", @"page", @"provider_count", @"request_id"]];
+    NSMutableDictionary *checkpointContext = [NSMutableDictionary dictionary];
+    for (NSString *key in contextKeys) {
+        id value = checkpointFields[key];
+        if ([value isKindOfClass:NSNumber.class] || ([key isEqualToString:@"service_id"] && [value isKindOfClass:NSString.class] && [(NSString *)value length] <= 80)) checkpointContext[key] = value;
+    }
+    if (checkpointContext.count) marker[@"last_checkpoint_context"] = checkpointContext;
+    else [marker removeObjectForKey:@"last_checkpoint_context"];
     if (checkpointFields.count) {
         for (NSString *key in @[@"app_version", @"app_build", @"ios_version", @"application_state", @"system_uptime_seconds", @"process_phys_footprint_bytes", @"process_phys_footprint_sample_checkpoint", @"active_playback_attempt_id", @"active_playback_service_id", @"active_playback_source_host", @"active_playback_outcome", @"last_playback_attempt_id", @"last_playback_outcome", @"last_playback_source_host", @"last_playback_failure_kind", @"last_playback_http_status", @"last_playback_line_index", @"last_playback_episode_index"])
             if (checkpointFields[key]) marker[key] = checkpointFields[key];
