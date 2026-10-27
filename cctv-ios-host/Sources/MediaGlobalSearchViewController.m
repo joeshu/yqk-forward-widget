@@ -227,7 +227,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         BOOL selected=[choice[@"section"] integerValue]==self.selectedSourceSection&&((!choice[@"provider"]&&!self.selectedProvider)||[choice[@"provider"] isEqual:self.selectedProvider]);
         button.backgroundColor=selected?[HostAccent() colorWithAlphaComponent:0.15]:HostNeutralSurface();[button setTitleColor:selected?HostAccent():HostText() forState:UIControlStateNormal];button.accessibilityTraits=UIAccessibilityTraitButton|(selected?UIAccessibilityTraitSelected:0);button.accessibilityLabel=[NSString stringWithFormat:@"%@，%@ 条结果，%@",choice[@"name"],choice[@"count"],choice[@"state"]?:@"来源筛选"];button.accessibilityIdentifier=[NSString stringWithFormat:@"media-search-filter-%lu",(unsigned long)index];button.tag=index;
     }
-    [self.filterScroll layoutIfNeeded];self.filterScroll.contentOffset=offset;
+    [self.filterScroll layoutIfNeeded];CGFloat maximum=MAX(0,self.filterScroll.contentSize.width-self.filterScroll.bounds.size.width);self.filterScroll.contentOffset=CGPointMake(MIN(MAX(0,offset.x),maximum),0);
 }
 - (void)selectSearchFilter:(UIButton *)sender {
     if(sender.tag<0||(NSUInteger)sender.tag>=self.filterChoices.count)return;
