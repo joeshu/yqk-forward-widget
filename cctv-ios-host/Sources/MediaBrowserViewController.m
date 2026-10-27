@@ -591,11 +591,6 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)activate:(NSDictionary *)source keepingHome:(BOOL)keepingHome;
 - (void)notifyDisplayModeChanged;
 - (UIButton *)floatingButtonWithSymbol:(NSString *)symbol identifier:(NSString *)identifier action:(SEL)action;
-- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
-    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
-    __weak typeof(self) weakSelf=self;
-    [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){MediaBrowserViewController *owner=weakSelf;if(owner.homeMode)[owner refreshHomeModules];}];
-}
 - (UIButton *)selectionButtonWithSymbol:(NSString *)symbol identifier:(NSString *)identifier action:(SEL)action;
 - (void)updateHomeStatusCard;
 - (void)clearHomeResult;
@@ -607,6 +602,12 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)addHomeFeatureCarousel:(NSArray<NSDictionary *> *)items source:(NSDictionary *)source provider:(NSString *)provider;
 @end
 @implementation MediaBrowserViewController
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    __weak typeof(self) weakSelf=self;
+    [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){MediaBrowserViewController *owner=weakSelf;if(owner.homeMode)[owner refreshHomeModules];}];
+}
+
 - (void)searchHistorySettingChanged:(NSNotification *)notification {if([notification.userInfo[@"enabled"] boolValue])return;for(NSString *key in self.browseStates.allKeys.copy){NSMutableDictionary *state=[self.browseStates[key] mutableCopy];if(state){state[@"keyword"]=@"";self.browseStates[key]=state;}}if(self.pendingBrowseState){NSMutableDictionary *pending=[self.pendingBrowseState mutableCopy];pending[@"keyword"]=@"";self.pendingBrowseState=pending;}}
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];if(!self.homeMode)[self saveCurrentBrowseState];

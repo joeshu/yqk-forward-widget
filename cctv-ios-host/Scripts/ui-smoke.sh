@@ -11,20 +11,10 @@ FIXTURE_PID=$!
 trap 'kill "$FIXTURE_PID" 2>/dev/null || true' EXIT
 for attempt in $(seq 1 150); do
   if [ -s "$OUT/fixture-port.txt" ]; then break; fi
-  if ! kill -0 "$FIXTURE_PID" 2>/dev/null; then cat "$OUT/fixture.log"
-if [ ! -f "$OUT/results.json" ]; then
-  echo "::error::UI smoke did not finish; last checkpoint follows"
-  if [ -f "$OUT/smoke-progress.json" ]; then cat "$OUT/smoke-progress.json"; fi
-  exit 1
-fi; exit 1; fi
+  if ! kill -0 "$FIXTURE_PID" 2>/dev/null; then cat "$OUT/fixture.log"; exit 1; fi
   sleep 0.2
 done
-if [ ! -s "$OUT/fixture-port.txt" ]; then cat "$OUT/fixture.log"
-if [ ! -f "$OUT/results.json" ]; then
-  echo "::error::UI smoke did not finish; last checkpoint follows"
-  if [ -f "$OUT/smoke-progress.json" ]; then cat "$OUT/smoke-progress.json"; fi
-  exit 1
-fi; exit 1; fi
+if [ ! -s "$OUT/fixture-port.txt" ]; then cat "$OUT/fixture.log"; exit 1; fi
 FIXTURE_PORT=$(cat "$OUT/fixture-port.txt")
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 ARCH=$(uname -m)
