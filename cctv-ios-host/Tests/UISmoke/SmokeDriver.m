@@ -144,6 +144,8 @@ static void next(NSArray *steps, NSUInteger index) {
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1200 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
       @try {
+          NSData *progress=[NSJSONSerialization dataWithJSONObject:@{@"step":@(index),@"total_steps":@(steps.count),@"failures":failures.copy?:@[]} options:NSJSONWritingPrettyPrinted error:NULL];
+          [progress writeToFile:[outputDir stringByAppendingPathComponent:@"smoke-progress.json"] atomically:YES];
           id step=steps[index];
           if([step isKindOfClass:NSDictionary.class]){
               BOOL (^ready)(void)=step[@"until"];
