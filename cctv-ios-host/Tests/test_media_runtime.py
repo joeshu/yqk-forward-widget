@@ -68,6 +68,20 @@ class MediaTests(unittest.TestCase):
         with self.assertRaises(media.MediaError):
             media.playback({'url': [{'url': 'javascript:invalid'}]})
 
+    def test_quality_choices_have_independent_web_and_native_routing(self):
+        result = media.playback({'url': [
+            {'url': 'https://site.test/watch.html', 'parse': 1, 'requiresWebPlayback': True},
+            {'url': 'https://cdn.test/movie.m3u8?sig=a%2Bb', 'parse': 0},
+            {'url': 'https://cdn.test/stream', 'format': 'hls', 'parse': 0}]})
+        web, hls, extensionless = result['alternates']
+        self.assertTrue(web['requiresWebPlayback'])
+        self.assertFalse(web['nativePlayable'])
+        self.assertFalse(hls['requiresWebPlayback'])
+        self.assertTrue(hls['nativePlayable'])
+        self.assertEqual(hls['parse'], 0)
+        self.assertTrue(extensionless['nativePlayable'])
+        self.assertEqual(extensionless['format'], 'hls')
+
     def test_home_preserves_only_structured_recommendation_failure(self):
         for flag, expected in ((True, True), (False, False), ('true', False), (None, False)):
             with self.subTest(flag=flag):
@@ -1213,7 +1227,9 @@ class Spider:
         alternate_url = 'https://cdn.example/alternate.m3u8?token=alternate-signature'
         self.engine.spider.playerContent = lambda *_: {
             'parse': 0, 'url': source_url,
-            'alternates': [{'name': '备用清晰度', 'url': alternate_url}],
+            'alternates': [{'name': '备用清晰度', 'url': alternate_url},
+                           {'name': '网页线路', 'url': 'https://site.test/watch.html',
+                            'parse': 1, 'headers': {'Referer': 'https://site.test/'}}],
         }
         server = transport.Server(('127.0.0.1', 0), self.runtime)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -1231,6 +1247,10 @@ class Spider:
             alternate = payload['data']['alternates'][0]
             self.assertEqual(alternate['originalURL'], alternate_url)
             self.assertTrue(alternate['url'].startswith(f'http://127.0.0.1:{server.server_port}/media/'))
+            webpage = payload['data']['alternates'][1]
+            self.assertEqual(webpage['url'], 'https://site.test/watch.html')
+            self.assertTrue(webpage['requiresWebPlayback'])
+            self.assertNotIn('originalURL', webpage)
         finally:
             client.close()
             server.shutdown()

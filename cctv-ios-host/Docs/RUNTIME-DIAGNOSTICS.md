@@ -80,3 +80,13 @@ metadata/credentials. This is format validation only; no network probe or decode
 success is implied. Top-level `alternates` accept these aliases too. Regression
 coverage includes invalid first entries, signed query preservation, header
 isolation and a wholly invalid list.
+
+### Mixed web/native quality choices
+
+Each alternate now carries its own normalized parse, web fallback and native
+format eligibility flags. Relay decisions use the alternate's metadata, not the
+primary video's flags. The player removes previous transport flags before
+applying the selected alternate. `playback_quality_selected` records parse mode,
+web requirement and declared native eligibility; none proves actual decoding.
+The mixed HLS/HTML relay regression verifies HTML remains a web route even when
+the primary HLS stream is relayed and the HTML choice has request headers.

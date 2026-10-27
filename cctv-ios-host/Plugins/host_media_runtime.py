@@ -335,6 +335,9 @@ def playback(value):
             if isinstance(nested, list):
                 merged = dict(value, url=nested)
                 return playback(merged)
+    transport_keys = ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
+                      'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback')
+    source_transport = {key: value[key] for key in transport_keys if key in value}
     headers = media_headers(value.get('header', {}))
     headers.update(media_headers(value.get('headers', {})))
     url = next((value.get(key) for key in
@@ -478,6 +481,14 @@ def playback(value):
                             'mime', 'parse', 'jx', 'requiresWebPlayback'):
                     if item.get(key) is not None:
                         choice[key] = item[key]
+                transport = dict(source_transport)
+                transport.update({key: item[key] for key in transport_keys if key in item})
+                transport['url'] = candidate
+                normalized = playback(transport)
+                for key in ('format', 'contentType', 'parse', 'jx', 'requiresWebPlayback',
+                            'directMedia', 'nativePlayable'):
+                    if key in normalized:
+                        choice[key] = normalized[key]
                 safe_alternates.append(choice)
     try:
         extension = urllib.parse.urlsplit(url).path.rsplit('.', 1)[-1].lower() if '.' in urllib.parse.urlsplit(url).path else ''

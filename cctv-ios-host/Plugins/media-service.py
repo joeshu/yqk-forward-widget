@@ -418,14 +418,13 @@ class Handler(BaseHTTPRequestHandler):
                         address = alternate['url']
                         alternate_headers = dict(base_headers)
                         alternate_headers.update(alternate.get('headers') or {})
-                        alternate_media = dict(result)
-                        alternate_media.update(alternate)
+                        alternate_media = dict(alternate)
                         alternate_direct = bool(alternate_media.get('directMedia') or
                                                 is_direct_media_url(address) or
                                                 is_declared_hls(alternate_media, address))
                         if ((alternate_headers or is_declared_hls(alternate_media, address)
                              or is_extensionless_url(address))
-                                and (not result.get('parse') or alternate_direct)):
+                                and (not alternate_media.get('parse') or alternate_direct)):
                             alternate['originalURL'] = address
                             alternate['url'] = relay_media_url(address, alternate_headers,
                                 expected_hls=is_declared_hls(alternate_media, address))
