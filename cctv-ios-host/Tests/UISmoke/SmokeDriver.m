@@ -14,6 +14,7 @@
 #import "NodePluginRuntime.h"
 #import "MediaBrowserViewController.h"
 #import "MediaGlobalSearchViewController.h"
+#import "MediaAPIClient.h"
 #import "MediaSearchResults.h"
 #import "LocalServiceReadiness.h"
 #import "RuntimeDiagnostics.h"
@@ -68,6 +69,16 @@
 - (void)selectSearchFilter:(UIButton *)sender;
 - (void)reloadSection:(NSUInteger)section;
 - (BOOL)isCurrentJob:(id)job;
+- (void)searchNextProviderForJob:(id)job;
+@end
+// Deliberately delivers even after cancellation: an already-enqueued completion
+// must still be rejected by the controller generation/job guards.
+@interface SmokeDelayedSearchClient : MediaAPIClient @end
+@implementation SmokeDelayedSearchClient
+- (void)call:(NSString *)operation arguments:(NSDictionary *)arguments completion:(void (^)(id,NSError *))completion {
+    NSString *keyword=[arguments[@"keyword"] copy];NSTimeInterval delay=[keyword isEqual:@"旧关键词"]?0.7:0.02;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{completion(@{@"items":@[@{@"id":keyword?:@"",@"name":keyword?:@""}]},nil);});
+}
 @end
 @interface MediaPlaybackViewController (SmokeEpisodePicker)
 - (void)openEpisodeSelection;
@@ -211,6 +222,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block CGPoint searchReturnOffset;
       __block id staleSearchJob;
       __block NSString *selectedSearchID;
+      __block NSDate *staleSearchDeadline;
       __block UIViewController *mediaDetail;
       __block MediaEpisodeSelectionViewController *mediaEpisodes;
       __block MediaPlaybackViewController *mediaPlayback;
@@ -793,7 +805,22 @@ static void next(NSArray *steps, NSUInteger index) {
             check(fabs(searchPage.tableView.contentOffset.y-searchReturnOffset.y)<2,@"returning from detail preserves the reading offset");check([searchPage.tableView numberOfRowsInSection:0]==12,@"results received while reading detail are available on return");capture(self.window,@"21b-global-search-station");
             staleSearchJob=[NSClassFromString(@"MediaGlobalSearchJob") new];[staleSearchJob setValue:@0 forKey:@"section"];[staleSearchJob setValue:[searchPage valueForKey:@"generation"] forKey:@"generation"];NSMutableDictionary *jobs=[searchPage valueForKey:@"jobs"];jobs[@0]=staleSearchJob;[searchPage setValue:@YES forKey:@"searching"];check([searchPage isCurrentJob:staleSearchJob],@"current search job is recognized before editing");
             UISearchBar *bar=[searchPage valueForKey:@"searchBar"];bar.text=@"新关键词";[bar.delegate searchBar:bar textDidChange:bar.text];check(![searchPage isCurrentJob:staleSearchJob]&&jobs.count==0,@"editing a keyword invalidates and cancels all previous jobs");
-            bar.text=@"";[bar.delegate searchBar:bar textDidChange:bar.text];check([[searchPage valueForKey:@"rows"] count]==0&&[[searchPage valueForKey:@"resultCount"] unsignedIntegerValue]==0,@"clearing the keyword clears old results and counts");[nav popViewControllerAnimated:NO];
+            // Exercise the actual controller completion path with out-of-order
+            // old/new responses, not just the isCurrentJob predicate.
+            NSMutableArray *rows=[searchPage valueForKey:@"rows"];[rows[0][@"results"] removeAllObjects];[searchPage setValue:@0 forKey:@"resultCount"];
+            for(NSString *term in @[@"旧关键词",@"新关键词"]){
+                if([term isEqual:@"新关键词"]){bar.text=term;[bar.delegate searchBar:bar textDidChange:term];}
+                [searchPage setValue:term forKey:@"keyword"];bar.text=term;[searchPage setValue:@YES forKey:@"searching"];
+                id job=[NSClassFromString(@"MediaGlobalSearchJob") new];[job setValue:@0 forKey:@"section"];[job setValue:[searchPage valueForKey:@"generation"] forKey:@"generation"];[job setValue:@(CACurrentMediaTime()) forKey:@"startedAt"];[job setValue:searchPage.sources[0] forKey:@"source"];[job setValue:@[@{@"id":@"a",@"name":@"站点甲"}] forKey:@"providers"];[job setValue:[[SmokeDelayedSearchClient alloc] initWithPort:1 requestTimeout:1] forKey:@"client"];
+                jobs[@0]=job;[searchPage searchNextProviderForJob:job];
+            }
+            staleSearchDeadline=[NSDate dateWithTimeIntervalSinceNow:1.0];
+          }},
+          @{ @"until":^BOOL{return [staleSearchDeadline timeIntervalSinceNow]<=0;},@"run":^{
+            NSArray *rows=[searchPage valueForKey:@"rows"];NSArray *results=rows[0][@"results"];
+            check(results.count==1&&[results.firstObject[@"item"][@"id"] isEqual:@"新关键词"],@"a late old-query completion cannot overwrite or append to the new query");
+            check([[searchPage valueForKey:@"resultCount"] unsignedIntegerValue]==1,@"late callbacks cannot inflate station result counts");
+            UISearchBar *bar=[searchPage valueForKey:@"searchBar"];bar.text=@"";[bar.delegate searchBar:bar textDidChange:bar.text];check([[searchPage valueForKey:@"rows"] count]==0&&[[searchPage valueForKey:@"resultCount"] unsignedIntegerValue]==0,@"clearing the keyword clears old results and counts");[nav popViewControllerAnimated:NO];
           }},
           ^{
             [nav popToRootViewControllerAnimated:NO];
