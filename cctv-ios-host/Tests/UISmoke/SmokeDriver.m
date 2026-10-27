@@ -793,7 +793,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check(filter!=NSNotFound,@"global search exposes a station filter");if(filter!=NSNotFound){UIStackView *stack=[searchPage valueForKey:@"filterStack"];[searchPage selectSearchFilter:(UIButton *)stack.arrangedSubviews[filter]];check((((UIButton *)stack.arrangedSubviews[filter]).accessibilityTraits&UIAccessibilityTraitSelected)!=0,@"station selection updates the visible chip selected state");}
             check([searchPage.tableView numberOfRowsInSection:0]==11&&[searchPage.tableView numberOfRowsInSection:1]==0,@"station filter shows only its ten real fixture results");
             searchPage.onSelectResult=^(NSDictionary *item,NSDictionary *source,NSString *provider){selectedSearchID=MediaSearchText(item[@"id"]);check([provider isEqual:@"a"],@"filtered tap keeps the correct provider");UIViewController *detail=[UIViewController new];detail.view.backgroundColor=HostBackground();detail.title=@"搜索返回测试";[nav pushViewController:detail animated:NO];};
-            [searchPage.tableView setContentOffset:CGPointMake(0,320) animated:NO];searchReturnOffset=searchPage.tableView.contentOffset;
+            [searchPage.tableView setContentOffset:CGPointMake(0,320) animated:NO];[searchPage.tableView layoutIfNeeded];searchReturnOffset=searchPage.tableView.contentOffset;
             [searchPage tableView:searchPage.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:0]];
             check([selectedSearchID isEqual:@"film-1"],@"filtered result opens its own film");
           },

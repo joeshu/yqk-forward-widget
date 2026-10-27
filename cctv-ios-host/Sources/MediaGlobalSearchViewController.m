@@ -183,6 +183,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     [self.tableView setContentOffset:CGPointMake(0,MIN(MAX(offset.y,minimum),maximum)) animated:NO];
 }
 - (NSDictionary *)readingPosition {
+    [self.tableView layoutIfNeeded];
     CGPoint offset=self.tableView.contentOffset;
     for(NSIndexPath *path in [self.tableView.indexPathsForVisibleRows sortedArrayUsingSelector:@selector(compare:)]){
         UITableViewCell *cell=[self.tableView cellForRowAtIndexPath:path];
@@ -198,7 +199,13 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     if(position[@"identity"]&&(self.selectedSourceSection<0||self.selectedSourceSection==section)){
         for(NSUInteger index=0;index<entries.count;index++){
             NSDictionary *entry=entries[index];NSString *identity=MediaSearchIdentity(MediaSearchText(entry[@"provider"]),entry[@"item"][@"id"]?:entry[@"item"][@"name"]);
-            if([identity isEqual:position[@"identity"]]){CGFloat y=[self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:index+1 inSection:section]].origin.y-[position[@"delta"] doubleValue];[self restoreOffset:CGPointMake(0,y)];return;}
+            if([identity isEqual:position[@"identity"]]){
+                NSIndexPath *path=[NSIndexPath indexPathForRow:index+1 inSection:section];
+                // Resolve automatic row-height estimates around the actual film
+                // before calculating its pixel position after a data reload.
+                [self.tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionTop animated:NO];[self.tableView layoutIfNeeded];
+                CGFloat y=[self.tableView rectForRowAtIndexPath:path].origin.y-[position[@"delta"] doubleValue];[self restoreOffset:CGPointMake(0,y)];[self.tableView layoutIfNeeded];return;
+            }
         }
     }
     [self restoreOffset:CGPointMake(0,[position[@"offset"] doubleValue])];
