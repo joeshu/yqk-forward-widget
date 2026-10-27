@@ -129,6 +129,11 @@ class Session:
         self.plugin_builtins = None
         self.http_worker_slots = threading.BoundedSemaphore(_http_workers_per_service)
         self.response_read_slots = threading.BoundedSemaphore(2)
+        self.http_worker_rejection_counts = {}
+        self.http_worker_rejection_reported = {}
+        self.response_rejection_counts = {}
+        self.response_rejection_reported = {}
+        self.response_rejection_details = {}
         self.previous_hooks = {}
         self.environment = dict(_base_environment)
 
@@ -367,26 +372,108 @@ class HTTPResponseTooLarge(RuntimeError):
 def _report_http_worker_limit(owner, reason):
     if owner is None:
         return
+    count, suppressed, should_report = _advance_rejection_summary(owner, 'http_worker', reason)
+    if not should_report:
+        return
     callback = vars(builtins).get('_cctvhost_python_http_worker_rejected')
     if callable(callback):
         try:
-            callback(owner.identifier, reason)
+            callback(owner.identifier, reason, count, suppressed)
             return
         except BaseException:
             pass
-    print('[宿主] HTTP 请求受到并发上限保护：%s' % reason)
+    print('[宿主] HTTP 请求受到并发上限保护：%s，累计拒绝 %d 次（省略重复 %d 次）' %
+          (reason, count, suppressed))
 
 
 def _report_response_limit(owner, reason, observed):
     callback = vars(builtins).get('_cctvhost_python_resource_limit')
+    limit = max(1, int(_max_http_response_bytes))
+    count, suppressed, should_report = _advance_rejection_summary(
+        owner, 'response_read', reason, (int(observed), limit))
+    if not should_report:
+        return
     if callable(callback):
         try:
-            callback(owner.identifier, reason, int(observed), int(_max_http_response_bytes))
+            callback(owner.identifier, reason, int(observed), limit, count, suppressed)
             return
         except BaseException:
             pass
-    print('[宿主] HTTP 响应受到资源保护：%s，观测 %s bytes，上限 %s bytes' %
-          (reason, observed, _max_http_response_bytes))
+    print('[宿主] HTTP 响应受到资源保护：%s，累计拒绝 %d 次（省略重复 %d 次），观测 %s bytes，上限 %s bytes' %
+          (reason, count, suppressed, observed, limit))
+
+
+def _advance_rejection_summary(owner, kind, reason, details=None):
+    """Report powers-of-two and retain the final exact count for stop-time flush."""
+    reason = str(reason or 'resource_limit')
+    if kind == 'http_worker':
+        counts_name, reported_name = 'http_worker_rejection_counts', 'http_worker_rejection_reported'
+    else:
+        counts_name, reported_name = 'response_rejection_counts', 'response_rejection_reported'
+    with _lock:
+        counts = getattr(owner, counts_name, None)
+        if counts is None:
+            counts = {}
+            setattr(owner, counts_name, counts)
+        reported = getattr(owner, reported_name, None)
+        if reported is None:
+            reported = {}
+            setattr(owner, reported_name, reported)
+        count = counts.get(reason, 0) + 1
+        counts[reason] = count
+        if details is not None:
+            detail_map = getattr(owner, 'response_rejection_details', None)
+            if detail_map is None:
+                detail_map = {}
+                setattr(owner, 'response_rejection_details', detail_map)
+            detail_map[reason] = details
+        previous = reported.get(reason, 0)
+        should_report = count == 1 or (count & (count - 1)) == 0
+        suppressed = max(0, count - previous - 1)
+        if should_report:
+            reported[reason] = count
+        return count, suppressed, should_report
+
+
+def _flush_http_rejection_summaries(owner):
+    """Persist any counts accumulated since the last sampled event."""
+    reports = []
+    with _lock:
+        for kind, counts_name, reported_name in (
+                ('http_worker', 'http_worker_rejection_counts', 'http_worker_rejection_reported'),
+                ('response_read', 'response_rejection_counts', 'response_rejection_reported')):
+            counts = getattr(owner, counts_name, {}) or {}
+            reported = getattr(owner, reported_name, {}) or {}
+            for reason, count in counts.items():
+                previous = reported.get(reason, 0)
+                if count <= previous:
+                    continue
+                suppressed = max(0, count - previous - 1)
+                reported[reason] = count
+                details = getattr(owner, 'response_rejection_details', {}).get(reason, (0, _max_http_response_bytes))
+                reports.append((kind, reason, count, suppressed, details))
+    for kind, reason, count, suppressed, details in reports:
+        if kind == 'http_worker':
+            callback = vars(builtins).get('_cctvhost_python_http_worker_rejected')
+            try:
+                if callable(callback):
+                    callback(owner.identifier, reason, count, suppressed)
+                else:
+                    print('[宿主] HTTP 请求并发保护汇总：%s，累计拒绝 %d 次（省略重复 %d 次）' %
+                          (reason, count, suppressed))
+            except BaseException:
+                print('[宿主] HTTP 请求并发保护汇总：%s，累计拒绝 %d 次' % (reason, count))
+        else:
+            observed, limit = details
+            callback = vars(builtins).get('_cctvhost_python_resource_limit')
+            try:
+                if callable(callback):
+                    callback(owner.identifier, reason, observed, limit, count, suppressed)
+                else:
+                    print('[宿主] HTTP 响应保护汇总：%s，累计拒绝 %d 次（省略重复 %d 次），观测 %s / %s bytes' %
+                          (reason, count, suppressed, observed, limit))
+            except BaseException:
+                print('[宿主] HTTP 响应保护汇总：%s，累计拒绝 %d 次' % (reason, count))
 
 
 def _bounded_http_response_read(response, amt=None):
@@ -655,6 +742,7 @@ def stop_session(identifier='default', timeout=5.0):
             session = _sessions.get(identifier)
         if session is None:
             return True
+        _flush_http_rejection_summaries(session)
         if session.clean():
             _restore(session)
             return True

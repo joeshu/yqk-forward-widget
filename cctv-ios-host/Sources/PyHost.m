@@ -351,8 +351,8 @@ static PyObject *pyHostPythonException(PyObject *self, PyObject *args) {
 }
 static PyObject *pyHostPythonResourceLimit(PyObject *self, PyObject *args) {
     const char *service = NULL, *reason = NULL;
-    long long observedBytes = 0, limitBytes = 0;
-    if (!PyArg_ParseTuple(args, "ssLL", &service, &reason, &observedBytes, &limitBytes)) return NULL;
+    long long observedBytes = 0, limitBytes = 0, rejectionCount = 1, suppressedCount = 0;
+    if (!PyArg_ParseTuple(args, "ssLLLL", &service, &reason, &observedBytes, &limitBytes, &rejectionCount, &suppressedCount)) return NULL;
     @autoreleasepool {
         NSString *serviceID = [NSString stringWithUTF8String:service] ?: @"unknown";
         NSString *reasonText = [NSString stringWithUTF8String:reason] ?: @"resource_budget";
@@ -364,24 +364,29 @@ static PyObject *pyHostPythonResourceLimit(PyObject *self, PyObject *args) {
                                  @"resource":@"http_response_body",
                                  @"rejection_reason":reasonText,
                                  @"observed_bytes":@(observedBytes),
-                                 @"limit_bytes":@(limitBytes)};
+                                 @"limit_bytes":@(limitBytes),
+                                 @"rejection_count":@(rejectionCount),
+                                 @"suppressed_rejection_count":@(suppressedCount)};
         [RuntimeDiagnostics.shared recordEventSynchronously:@"python_http_response_rejected" category:@"plugin" fields:fields];
-        emitLogForIdentifier(serviceID, [NSString stringWithFormat:@"[宿主] HTTP 响应被资源上限拦截 · %@ · %lld / %lld bytes", reasonText, observedBytes, limitBytes]);
+        emitLogForIdentifier(serviceID, [NSString stringWithFormat:@"[宿主] HTTP 响应被资源上限拦截 · %@ · 累计 %lld 次（省略重复 %lld 次）· %lld / %lld bytes", reasonText, rejectionCount, suppressedCount, observedBytes, limitBytes]);
     }
     Py_RETURN_NONE;
 }
 static PyObject *pyHostPythonHTTPWorkerRejected(PyObject *self, PyObject *args) {
     const char *service = NULL, *reason = NULL;
-    if (!PyArg_ParseTuple(args, "ss", &service, &reason)) return NULL;
+    long long rejectionCount = 1, suppressedCount = 0;
+    if (!PyArg_ParseTuple(args, "ssLL", &service, &reason, &rejectionCount, &suppressedCount)) return NULL;
     @autoreleasepool {
         NSString *serviceID = [NSString stringWithUTF8String:service] ?: @"unknown";
         NSString *reasonText = [NSString stringWithUTF8String:reason] ?: @"handler_limit";
         NSDictionary *fields = @{@"engine":@"python",
                                  @"service_id":serviceID,
                                  @"resource":@"http_handler",
-                                 @"rejection_reason":reasonText};
+                                 @"rejection_reason":reasonText,
+                                 @"rejection_count":@(rejectionCount),
+                                 @"suppressed_rejection_count":@(suppressedCount)};
         [RuntimeDiagnostics.shared recordEventSynchronously:@"python_http_worker_rejected" category:@"plugin" fields:fields];
-        emitLogForIdentifier(serviceID, [NSString stringWithFormat:@"[宿主] HTTP 请求因并发保护被拒绝 · %@", reasonText]);
+        emitLogForIdentifier(serviceID, [NSString stringWithFormat:@"[宿主] HTTP 请求因并发保护被拒绝 · %@ · 累计 %lld 次（省略重复 %lld 次）", reasonText, rejectionCount, suppressedCount]);
     }
     Py_RETURN_NONE;
 }

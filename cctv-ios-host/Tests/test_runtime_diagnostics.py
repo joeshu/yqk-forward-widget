@@ -227,6 +227,8 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
             'owner.http_worker_slots',
             '_cctvhost_python_resource_limit', 'python_http_response_rejected',
             '_cctvhost_python_http_worker_rejected', 'python_http_worker_rejected',
+            '_flush_http_rejection_summaries', 'rejection_count',
+            'suppressed_rejection_count',
         ):
             self.assertIn(token, runtime + PYHOST)
 

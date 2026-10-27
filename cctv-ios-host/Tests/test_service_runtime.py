@@ -296,7 +296,7 @@ class ServiceRuntimeTests(unittest.TestCase):
             self.assertFalse(worker.is_alive())
             self.assertEqual(builtins._host_test_response_error[0], 'HTTPResponseTooLarge')
             self.assertIn('per-response limit (8 bytes)', builtins._host_test_response_error[1])
-            self.assertEqual(reports[0], ('default', 'declared_body_too_large', 9, 8))
+            self.assertEqual(reports[0], ('default', 'declared_body_too_large', 9, 8, 1, 0))
         finally:
             runtime._max_http_response_bytes = previous_limit
             if previous_callback is None:
@@ -343,7 +343,7 @@ class ServiceRuntimeTests(unittest.TestCase):
             service_request = Request()
             runtime._process(Server(service_slots), service_request, ('127.0.0.1', 1))
             self.assertTrue(service_request.closed)
-            self.assertEqual(reports.pop(), ('worker-test', 'per_service_handler_limit'))
+            self.assertEqual(reports.pop(), ('worker-test', 'per_service_handler_limit', 1, 0))
             service_slots.release()
 
             runtime._global_http_workers = threading.BoundedSemaphore(0)
@@ -351,7 +351,7 @@ class ServiceRuntimeTests(unittest.TestCase):
             host_slots = threading.BoundedSemaphore(1)
             runtime._process(Server(host_slots), host_request, ('127.0.0.1', 1))
             self.assertTrue(host_request.closed)
-            self.assertEqual(reports, [('worker-test', 'host_handler_limit')])
+            self.assertEqual(reports, [('worker-test', 'host_handler_limit', 1, 0)])
             self.assertEqual(host_slots._value, 1)
         finally:
             runtime._global_http_workers = previous_global_slots
@@ -359,6 +359,36 @@ class ServiceRuntimeTests(unittest.TestCase):
                 vars(builtins).pop('_cctvhost_python_http_worker_rejected', None)
             else:
                 builtins._cctvhost_python_http_worker_rejected = previous_callback
+
+    def test_http_rejection_diagnostics_sample_bursts_and_flush_exact_totals_on_stop(self):
+        worker_reports, response_reports = [], []
+        old_worker = vars(builtins).get('_cctvhost_python_http_worker_rejected')
+        old_response = vars(builtins).get('_cctvhost_python_resource_limit')
+        owner = type('Owner', (), {'identifier':'summary-test'})()
+        builtins._cctvhost_python_http_worker_rejected = lambda *args: worker_reports.append(args)
+        builtins._cctvhost_python_resource_limit = lambda *args: response_reports.append(args)
+        try:
+            for _ in range(10):
+                runtime._report_http_worker_limit(owner, 'per_service_handler_limit')
+            for _ in range(14):
+                runtime._report_response_limit(owner, 'per_service_read_concurrency', 0)
+            self.assertEqual([entry[2] for entry in worker_reports], [1, 2, 4, 8])
+            self.assertEqual([entry[4] for entry in response_reports], [1, 2, 4, 8])
+            runtime._flush_http_rejection_summaries(owner)
+            self.assertEqual(worker_reports[-1], ('summary-test', 'per_service_handler_limit', 10, 1))
+            self.assertEqual(response_reports[-1], ('summary-test', 'per_service_read_concurrency', 0, 16 * 1024 * 1024, 14, 5))
+            count = len(worker_reports), len(response_reports)
+            runtime._flush_http_rejection_summaries(owner)
+            self.assertEqual((len(worker_reports), len(response_reports)), count)
+        finally:
+            if old_worker is None:
+                vars(builtins).pop('_cctvhost_python_http_worker_rejected', None)
+            else:
+                builtins._cctvhost_python_http_worker_rejected = old_worker
+            if old_response is None:
+                vars(builtins).pop('_cctvhost_python_resource_limit', None)
+            else:
+                builtins._cctvhost_python_resource_limit = old_response
 
     def test_returned_main_with_background_server_is_still_running(self):
         worker = self.launch(self.server_source(background=True))
