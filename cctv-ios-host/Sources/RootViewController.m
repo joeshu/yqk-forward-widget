@@ -29,6 +29,7 @@
 #import "ServiceStore.h"
 #import "HostBackup.h"
 #import "LocalServiceReadiness.h"
+#import "HostLocalPort.h"
 #import "PlaybackStartupTrace.h"
 #import "NativeStartupTuner.h"
 #import "NativeCDNPreference.h"
@@ -378,6 +379,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)applyServiceConfigurationFrom:(NSDictionary *)previous to:(NSDictionary *)updated completion:(void (^)(NSError * _Nullable error))completion;
 - (void)saveImportedMedia:(NSDictionary *)service;
 - (void)shareDiagnosticLogAtURL:(NSURL *)source;
+- (void)restartMediaService:(NSDictionary *)source completion:(void (^)(NSError *))completion;
 @end
 
 @implementation RootViewController
@@ -422,6 +424,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [PyHost recoverInterruptedPythonSessions];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(checkVisibleMediaAfterActivation) name:UIApplicationDidBecomeActiveNotification object:nil];
 }
 
 - (void)dealloc {
@@ -438,6 +441,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)onBackground {
+    [(MediaBrowserViewController *)self.tabPages[@2] pauseForBackground];
     [self.nativePreloader cancel];
     [[HostImageLoader shared] cancelPending];
     [self stopPreview];
@@ -461,6 +465,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if(self.epgRefreshDesired&&!playbackPriority){[self restartEPGTimer];[self refreshNowNext];}
     if(self.activeTab<2 && CACurrentMediaTime()>=self.playbackPriorityUntil){[self.channelGrid reloadData];[self.table reloadData];}
     [self log:@"回到前台"];
+}
+- (void)checkVisibleMediaAfterActivation {
+    if(self.activeTab==2&&self.navigationController.topViewController==self)[(MediaBrowserViewController *)self.tabPages[@2] resumeAfterForeground];
 }
 
 #pragma mark - 日志
@@ -933,6 +940,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         };
         __weak MediaBrowserViewController *weakPage=page;page.onDisplayModeChanged=^(BOOL homeMode){RootViewController *owner=weakSelf;MediaBrowserViewController *mediaPage=weakPage;if(!owner||!mediaPage)return;owner.title=homeMode?@"":@"影视库";owner.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;owner.navigationItem.searchController=mediaPage.navigationItem.searchController;owner.navigationItem.leftBarButtonItem=mediaPage.navigationItem.leftBarButtonItem;owner.navigationItem.rightBarButtonItems=mediaPage.navigationItem.rightBarButtonItems;};
         page.onActivateService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf changeService:service enabled:YES completion:completion];};
+        page.onRestartService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf restartMediaService:service completion:completion];};
         page.startupErrorProvider=^NSError *{return PyHost.startupError;};
         page.startupErrorForService=^NSError *(NSDictionary *service){return [PyHost startupErrorForServiceIdentifier:service[@"id"]];};
         page.onResources=^{RootViewController *owner=weakSelf;if(owner)[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[3]];};
@@ -2071,6 +2079,30 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 - (void)toggleService:(NSDictionary *)service enabled:(BOOL)enabled {
     [self changeService:service enabled:enabled completion:^(NSError *error){if(error)[self showServiceError:error.localizedDescription];}];
+}
+- (void)restartMediaService:(NSDictionary *)source completion:(void (^)(NSError *))completion {
+    NSString *identifier=source[@"id"]?:@"";NSDictionary *snapshot=nil;
+    for(NSDictionary *candidate in ServiceStore.services)if([candidate[@"id"] isEqual:identifier]){snapshot=candidate;break;}
+    NSError *(^failure)(NSString *)=^NSError *(NSString *message){return [NSError errorWithDomain:@"CCTVHostServiceRecovery" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];};
+    if(!snapshot||![snapshot[@"port"] isEqual:source[@"port"]]){if(completion)completion(failure(@"资源已移除或端口已修改，请重新选择来源。"));return;}
+    if(!self.serviceOperations)self.serviceOperations=[NSMutableSet set];
+    if([self.serviceOperations containsObject:identifier]){if(completion)completion(failure(@"该服务已有启停操作，请等待当前操作完成。"));return;}
+    [self.serviceOperations addObject:identifier];
+    [RuntimeDiagnostics.shared recordEvent:@"service_recovery_started" category:@"service" fields:@{@"service_id":identifier,@"port":snapshot[@"port"]?:@0,@"trigger":@"user_restart"}];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        __block NSError *error=nil;BOOL stopped=[PyHost stopServiceIdentifier:identifier error:&error];
+        int portState=stopped?HostLocalPortState([snapshot[@"port"] intValue]):-1;
+        if(stopped&&portState!=0)error=failure(portState==1?@"旧服务停止后端口仍可访问，已阻止重复启动。请检查是否有其他服务占用该端口。":@"无法确认旧端口已释放，已阻止重复启动。请稍后重试。 ");
+        if(!stopped&&!error)error=failure(@"服务停止未确认，已取消重新启动。请查看该服务日志。 ");
+        dispatch_async(dispatch_get_main_queue(),^{
+            BOOL unchanged=NO;for(NSDictionary *candidate in ServiceStore.services)if([candidate[@"id"] isEqual:identifier]){unchanged=[candidate isEqualToDictionary:snapshot];break;}
+            if(!error&&!unchanged)error=failure(@"重启期间资源配置已变更，已取消启动。请重新选择来源。 ");
+            if(!error){[self clearServiceLogHandlers:identifier];NSError *startError=nil;if(![self startService:snapshot error:&startError])error=startError?:failure(@"重新启动请求失败，请查看服务日志。 ");}
+            [self.serviceOperations removeObject:identifier];
+            [RuntimeDiagnostics.shared recordEvent:@"service_recovery_finished" category:@"service" fields:@{@"service_id":identifier,@"stop_confirmed":@(stopped),@"port_released":@(stopped&&portState==0),@"start_accepted":@(!error),@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@""}];
+            [self refreshConfigurationPage];if(completion)completion(error);
+        });
+    });
 }
 - (void)changeService:(NSDictionary *)service enabled:(BOOL)enabled completion:(void (^)(NSError *))completion {
     NSString *serviceID=service[@"id"]?:@"";if(!self.serviceOperations)self.serviceOperations=[NSMutableSet set];

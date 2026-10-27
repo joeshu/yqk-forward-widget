@@ -572,6 +572,10 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 @property(nonatomic,strong) MediaAPIClient *configurationClient;
 @property(nonatomic) BOOL openConfigurationWhenReady;
 @property(nonatomic) BOOL sourceInvalidated;
+@property(nonatomic) BOOL serviceUnavailable;
+@property(nonatomic) BOOL restartInProgress;
+@property(nonatomic) BOOL foregroundCheckNeeded;
+@property(nonatomic) BOOL homeRebuildScheduled;
 @property(nonatomic) NSUInteger searchGeneration;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSDictionary *> *browseStates;
 @property(nonatomic,copy) NSDictionary *pendingBrowseState;
@@ -593,6 +597,8 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)showHome:(BOOL)animated;
 - (void)showBrowse:(BOOL)animated;
 - (void)refreshHomeModules;
+- (void)rebuildHomeModulesNow;
+- (void)restartCurrentService;
 - (void)openHomeConfiguration;
 - (void)openHomeFavorite:(NSDictionary *)entry;
 - (void)openHomeRecommendation:(NSDictionary *)item source:(NSDictionary *)source provider:(NSString *)provider;
@@ -639,6 +645,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {return UIInterfaceOrientationMaskPortrait;}
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    if(self.foregroundCheckNeeded){[self resumeAfterForeground];return;}
     if(self.resumeCancelledMediaRequestOnAppear){self.resumeCancelledMediaRequestOnAppear=NO;NSString *operation=self.cancelledMediaOperation?:@"";BOOL wasAppend=self.cancelledMediaRequestWasAppend;self.cancelledMediaOperation=nil;[RuntimeDiagnostics.shared recordEvent:@"media_request_resumed_after_page_return" category:@"media_api" fields:@{@"service_id":self.source[@"id"]?:@"", @"operation":operation, @"append":@(wasAppend), @"correlation_id":self.diagnosticTraceID?:@""}];
         if([operation isEqualToString:@"capabilities"]||[operation isEqualToString:@"providers"]){[self loadCapabilities];return;}
         if([operation isEqualToString:@"home"]){[self loadHome];return;}
@@ -673,6 +680,8 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
             [UIAction actionWithTitle:@"观看历史" image:[UIImage systemImageNamed:@"clock.arrow.circlepath"] identifier:nil handler:^(UIAction *action){[weakSelf openHistory];}],
             [UIAction actionWithTitle:@"分类筛选" image:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] identifier:nil handler:^(UIAction *action){[weakSelf chooseFilters];}],
             [UIAction actionWithTitle:@"刷新当前来源" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *action){[weakSelf refreshCurrentSource];}]
+            ,[UIAction actionWithTitle:@"检查当前服务连接" image:[UIImage systemImageNamed:@"network"] identifier:nil handler:^(UIAction *action){[weakSelf checkCurrentService];}]
+            ,[UIAction actionWithTitle:@"重启当前资源服务" image:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath"] identifier:nil handler:^(UIAction *action){[weakSelf restartCurrentService];}]
         ]]}
     ])];
     self.homeScroll=[UIScrollView new];self.homeScroll.translatesAutoresizingMaskIntoConstraints=NO;self.homeScroll.alwaysBounceVertical=YES;self.homeScroll.accessibilityIdentifier=@"media-home-scroll";[self.view addSubview:self.homeScroll];
@@ -860,9 +869,11 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     else if(!sourceActive&&self.source){NSString *engine=[self.source[@"engine"] isKindOfClass:NSString.class]?self.source[@"engine"]:@"影视服务";detail=[NSString stringWithFormat:@"%@ · 点按后启动并检查本机接口",engine];}
     self.homeStatusTitleLabel.text=title;self.homeStatusDetailLabel.text=detail;self.homeStatusDetailLabel.hidden=!detail.length;self.homeStatusIndicator.hidden=!self.homeStatusLoading;if(self.homeStatusLoading)[self.homeStatusIndicator startAnimating];else[self.homeStatusIndicator stopAnimating];
     NSString *actionTitle=self.homeStatusLoading?@"":(self.source?(sourceActive?(failed?@"重试":@"打开影视库"):(failed||self.sourceInvalidated?@"重试启动":@"启动并加载")):@"导入影视资源");[self.homeStatusActionButton setTitle:actionTitle forState:UIControlStateNormal];self.homeStatusActionButton.hidden=!actionTitle.length;
+    if(self.serviceUnavailable&&!self.homeStatusLoading){[self.homeStatusActionButton setTitle:@"重启此服务并重新检查" forState:UIControlStateNormal];self.homeStatusActionButton.hidden=NO;}
 }
 - (void)performHomeStatusAction {
     if(!self.source){[self openResources];return;}
+    if(self.serviceUnavailable){[self restartCurrentService];return;}
     NSString *diagnostics=[NSString stringWithFormat:@"%@ %@",self.status.text?:@"",self.readinessStageLabel.text?:@""];BOOL failed=NO;for(NSString *marker in @[@"失败",@"超时",@"错误",@"无法",@"无效",@"不可用",@"移除",@"failed",@"timeout",@"error",@"refused",@"not found"]){if([diagnostics localizedCaseInsensitiveContainsString:marker]){failed=YES;break;}}
     BOOL active=MediaSourceUsesNativeCatalogAPI(self.source)||[PyHost isRunningServiceIdentifier:self.source[@"id"]?:@""];
     if(!active||self.sourceInvalidated||failed){[self activate:self.source keepingHome:YES];return;}
@@ -873,6 +884,11 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     for(NSDictionary *category in categories){if(shown>=8)break;NSString *identifier=[category[@"id"] isKindOfClass:NSString.class]?category[@"id"]:@"";NSString *name=[category[@"name"] isKindOfClass:NSString.class]?category[@"name"]:@"";if(!identifier.length||!name.length)continue;NSDictionary *arguments=[self arguments:@{@"categoryId":identifier,@"page":@1,@"filters":@{}}];id result=[[MediaMetadataCache shared] resultForSource:self.source operation:@"category" arguments:arguments maximumAge:24*3600 isStale:NULL];NSArray *items=[result[@"items"] isKindOfClass:NSArray.class]?result[@"items"]:@[];if(!items.count)continue;NSMutableArray *cards=[NSMutableArray array];for(NSUInteger itemIndex=0;itemIndex<items.count&&cards.count<8;itemIndex++){NSDictionary *item=items[itemIndex];[cards addObject:[self homeCardWithTitle:item[@"name"]?:@"影视内容" subtitle:item[@"remarks"]?:name imageURL:item[@"poster"] symbol:nil action:^{[weakSelf openHomeRecommendation:item source:weakSelf.source provider:provider];}]];}UIStackView *heading=(UIStackView *)[self homeSectionHeader:name actionTitle:@"" selector:nil];UIButton *all=[UIButton buttonWithType:UIButtonTypeSystem];[all setTitle:@"全部 ›" forState:UIControlStateNormal];[all addAction:[UIAction actionWithHandler:^(UIAction *action){MediaBrowserViewController *owner=weakSelf;if(!owner)return;[owner showBrowse:YES];owner.category=identifier;owner.keyword=@"";owner.page=1;[owner loadListing:NO];}] forControlEvents:UIControlEventTouchUpInside];[heading addArrangedSubview:all];[self.homeStack addArrangedSubview:heading];[self addHomeCards:cards emptyText:@""];shown++;}
 }
 - (void)refreshHomeModules {
+    if(!self.homeStack.arrangedSubviews.count){[self rebuildHomeModulesNow];return;}
+    if(self.homeRebuildScheduled)return;self.homeRebuildScheduled=YES;
+    __weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.homeRebuildScheduled=NO;[owner rebuildHomeModulesNow];});
+}
+- (void)rebuildHomeModulesNow {
     if(!self.homeStack)return;[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_home_modules_rebuild_started" fields:@{@"service_id":self.source[@"id"]?:@"",@"source_generation":@(self.generation),@"home_mode":@(self.homeMode),@"source_item_count":@(self.items.count),@"category_count":@(self.homeCategories.count)}];CGPoint previousOffset=self.homeScroll.contentOffset;BOOL preserveOffset=self.homeScroll.bounds.size.height>0;__weak typeof(self) weakSelf=self;self.homeCarousel.delegate=nil;self.homeCarousel=nil;self.homeCarouselPageControl=nil;for(UIView *view in self.homeStack.arrangedSubviews.copy){if(view==self.homeStatusCard)continue;[self.homeStack removeArrangedSubview:view];[view removeFromSuperview];}[self updateHomeStatusCard];
     NSSet *enabled=MediaHomeEnabledModules();
     if([enabled containsObject:@"recommendations"]){NSString *featuredProvider=@"";NSDictionary *home=[self cachedHomeResultForSelectedProvider:&featuredProvider];NSArray *featured=[home[@"items"] isKindOfClass:NSArray.class]?home[@"items"]:@[];if(featured.count)[self addHomeFeatureCarousel:featured source:self.source provider:featuredProvider];}
@@ -1006,12 +1022,62 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)refreshCurrentSource {
     if(!self.source){[self loadSources];return;}
+    if(self.serviceUnavailable){[self checkCurrentService];return;}
     if(self.sourceInvalidated||(!MediaSourceUsesNativeCatalogAPI(self.source)&&![PyHost isRunningServiceIdentifier:self.source[@"id"]])){[self activate:self.source keepingHome:self.homeMode];return;}
     [self.client cancel];[self.configurationClient cancel];self.configurationClient=[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue]];
     NSString *sourceID=[self.source[@"id"] copy];self.loading=YES;[self showMessage:@"正在刷新资源配置与缓存…" loading:YES];__weak typeof(self) weakSelf=self;
     [self.configurationClient call:@"invalidate" arguments:@{} correlationID:self.diagnosticTraceID completion:^(id result,NSError *error){MediaBrowserViewController *owner=weakSelf;if(!owner||![owner.source[@"id"] isEqual:sourceID])return;if(error){owner.loading=NO;[owner showMessage:error.localizedDescription loading:NO];[owner updateSelectionControls];return;}[owner activate:owner.source keepingHome:owner.homeMode];}];
 }
 - (void)showConfigurationForSource:(NSDictionary *)source {self.openConfigurationWhenReady=YES;[self activate:source];}
+- (void)pauseForBackground {
+    if(!self.source)return;self.foregroundCheckNeeded=YES;self.generation++;
+    [self.readiness cancelWithReason:@"app_backgrounded"];[self.client cancel];[self.configurationClient cancel];
+    self.loading=NO;self.homeStatusLoading=NO;self.homeShelfRequestInFlight=NO;self.activeMediaOperation=nil;
+    self.resumeCancelledMediaRequestOnAppear=NO;
+}
+- (void)resumeAfterForeground {
+    if(!self.foregroundCheckNeeded)return;
+    if(self.sourceInvalidated||!self.client){self.foregroundCheckNeeded=NO;return;}
+    [self checkCurrentService];
+}
+- (void)checkCurrentService {
+    if(self.restartInProgress||self.loading||!self.source)return;
+    if(UIApplication.sharedApplication.applicationState==UIApplicationStateBackground){self.foregroundCheckNeeded=YES;return;}
+    self.foregroundCheckNeeded=NO;
+    if(MediaSourceUsesNativeCatalogAPI(self.source)){if(self.client)[self loadHome];return;}
+    if(![PyHost isRunningServiceIdentifier:self.source[@"id"]]){[self activate:self.source keepingHome:self.homeMode];return;}
+    [self.readiness cancelWithReason:@"new_connection_check"];NSUInteger generation=++self.generation;
+    self.loading=YES;self.readinessStageLabel.text=@"运行会话活跃 · 正在重新检查 HTTP";
+    [self showMessage:@"正在检查本机服务连接 · 保留当前内容" loading:YES];
+    NSURL *url=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%@/health",self.source[@"port"]]];
+    self.readiness=[[LocalServiceReadiness alloc] initWithURL:url timeout:4 requiresHealthJSON:YES];
+    self.readiness.diagnosticContext=@{@"service_id":self.source[@"id"]?:@"",@"correlation_id":self.diagnosticTraceID?:@"",@"trigger":@"recheck"};
+    __weak typeof(self) weakSelf=self;
+    [self.readiness start:^(NSError *error,NSTimeInterval elapsed){MediaBrowserViewController *owner=weakSelf;if(!owner||owner.generation!=generation)return;
+        owner.loading=NO;NSDictionary *probe=owner.readiness.diagnosticSummary;
+        if(error&&[probe[@"last_observed_failure_kind"] isEqual:@"runtime_preparing"]){[owner activate:owner.source keepingHome:owner.homeMode];return;}
+        owner.serviceUnavailable=error!=nil;
+        owner.readinessStageLabel.text=error?@"运行会话活跃 · HTTP 健康检查未通过":@"HTTP 健康检查通过";
+        NSString *reason=[probe[@"last_error_code"] integerValue]==NSURLErrorCannotConnectToHost?@"本机端口拒绝连接":([probe[@"last_http_status"] integerValue]>0?[NSString stringWithFormat:@"服务返回 HTTP %@，健康检查未通过",probe[@"last_http_status"]]:@"本机服务连接超时或响应无效");
+        [owner showMessage:error?[reason stringByAppendingString:@"。当前内容已保留，可重新检查或重启此服务。"]:@"" loading:NO];
+        if(!error){
+            if(![owner.source[@"capabilities"] count])[owner loadCapabilities];
+            else if(owner.homeMode)[owner loadHome];
+            else{[owner saveCurrentBrowseState];owner.pendingBrowseState=owner.browseStates[[owner stateKeyForSource:owner.source provider:owner.provider]];[owner restorePendingBrowseState];}
+        }
+    }];
+}
+- (void)restartCurrentService {
+    if(!self.source||self.restartInProgress)return;
+    if(MediaSourceUsesNativeCatalogAPI(self.source)||!self.onRestartService){[self showMessage:@"此来源无需本机服务重启，请刷新内容或查看资源配置。" loading:NO];return;}
+    [self saveCurrentBrowseState];[self.readiness cancelWithReason:@"user_restart"];[self.client cancel];[self.configurationClient cancel];
+    NSUInteger generation=++self.generation;NSDictionary *source=self.source;BOOL home=self.homeMode;self.restartInProgress=YES;self.loading=YES;
+    [self showMessage:@"正在停止此服务并验证端口释放…" loading:YES];__weak typeof(self) weakSelf=self;
+    self.onRestartService(source,^(NSError *error){MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.restartInProgress=NO;if(owner.generation!=generation)return;
+        owner.loading=NO;if(error){owner.serviceUnavailable=YES;[owner showMessage:error.localizedDescription loading:NO];return;}
+        owner.serviceUnavailable=NO;[owner activate:source keepingHome:home];
+    });
+}
 - (void)openSourceConfiguration {
     if(!self.source){[self openResources];return;}
     if(![self.source[@"capabilities"] containsObject:@"configuration"]){self.navigationItem.prompt=@"当前资源尚未提供源配置接口，请先启动并加载资源";return;}
@@ -1058,7 +1124,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)activate:(NSDictionary *)source keepingHome:(BOOL)keepingHome {
     self.homeMode=keepingHome;self.title=keepingHome?@"":@"影视库";self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;self.navigationItem.searchController=keepingHome?nil:self.search;self.navigationItem.hidesSearchBarWhenScrolling=NO;[self setBrowseControlsHidden:keepingHome];[self notifyDisplayModeChanged];
     if(self.pendingHomeDetail&&![self.pendingHomeDetail[@"source"][@"id"] isEqual:source[@"id"]])self.pendingHomeDetail=nil;
-    self.sourceInvalidated=NO;self.capabilityReadinessRetryCount=0;[self saveCurrentBrowseState];self.generation++;NSUInteger generation=self.generation;self.diagnosticTraceID=NSUUID.UUID.UUIDString.lowercaseString;[self.readiness cancel];[self.client cancel];[self.configurationClient cancel];self.activeMediaOperation=nil;self.homeShelfRequestInFlight=NO;self.activeMediaRequestAppend=NO;self.resumeCancelledMediaRequestOnAppear=NO;self.cancelledMediaOperation=nil;self.cancelledMediaRequestWasAppend=NO;self.source=source;[self clearHomeResult];self.homeCategories=@[];self.homeShelfGeneration=0;NSString *preferredProvider=[NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"mediaProvider.%@",source[@"id"]]];self.provider=nil;self.pendingBrowseState=self.browseStates[[self stateKeyForSource:source provider:preferredProvider]]?:self.browseStates[[self stateKeyForSource:source provider:nil]];self.providers=@[];self.items=@[];self.category=nil;self.keyword=@"";self.page=1;self.loading=YES;self.moreButton.hidden=YES;[self.grid reloadData];
+    self.sourceInvalidated=NO;self.serviceUnavailable=NO;self.capabilityReadinessRetryCount=0;[self saveCurrentBrowseState];self.generation++;NSUInteger generation=self.generation;self.diagnosticTraceID=NSUUID.UUID.UUIDString.lowercaseString;[self.readiness cancel];[self.client cancel];[self.configurationClient cancel];self.activeMediaOperation=nil;self.homeShelfRequestInFlight=NO;self.activeMediaRequestAppend=NO;self.resumeCancelledMediaRequestOnAppear=NO;self.cancelledMediaOperation=nil;self.cancelledMediaRequestWasAppend=NO;self.source=source;[self clearHomeResult];self.homeCategories=@[];self.homeShelfGeneration=0;NSString *preferredProvider=[NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"mediaProvider.%@",source[@"id"]]];self.provider=nil;self.pendingBrowseState=self.browseStates[[self stateKeyForSource:source provider:preferredProvider]]?:self.browseStates[[self stateKeyForSource:source provider:nil]];self.providers=@[];self.items=@[];self.category=nil;self.keyword=@"";self.page=1;self.loading=YES;self.moreButton.hidden=YES;[self.grid reloadData];
     [self updateSelectionControls];
     self.widgetSeason=1;self.widgetEpisode=1;BOOL widget=[source[@"protocol"] isEqual:@"widget-extractor"];self.navigationItem.prompt=widget?@"第 1 季 · 第 1 集 · 工具栏筛选可修改":nil;self.search.searchBar.placeholder=widget?@"输入完整剧名，筛选中选择季 / 集":@"搜索当前影视来源";
     for(UIView *view in self.categories.arrangedSubviews){[self.categories removeArrangedSubview:view];[view removeFromSuperview];}
@@ -1074,12 +1140,13 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
         owner.readinessStageLabel.text=@"启动请求已接受 · 等待 HTTP 健康检查";[owner showMessage:@"启动请求已接受 · 等待本机服务响应" loading:YES];[RuntimeDiagnostics.shared recordEvent:@"media_runtime_start_request_accepted" category:@"service" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.source[@"id"]?:@"",@"engine":owner.source[@"engine"]?:@"unknown"}];
         NSURL *health=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%@/health",source[@"port"]]];
         owner.readiness=[[LocalServiceReadiness alloc] initWithURL:health timeout:45 requiresHealthJSON:YES];
+        owner.readiness.diagnosticContext=@{@"service_id":source[@"id"]?:@"",@"correlation_id":owner.diagnosticTraceID?:@"",@"trigger":@"activate"};
         NSError *(^startupProvider)(NSDictionary *)=[owner.startupErrorForService copy];
         owner.readiness.failureProvider=startupProvider?^NSError *{return startupProvider(source);}:owner.startupErrorProvider;
         [owner.readiness start:^(NSError *failure,NSTimeInterval elapsed){
             MediaBrowserViewController *page=weakSelf;if(!page || page.generation!=generation)return;
             NSMutableDictionary *probeFields=[@{@"correlation_id":page.diagnosticTraceID?:@"", @"port":page.source[@"port"]?:@0, @"engine":page.source[@"engine"]?:@"unknown", @"elapsed_ms":@((NSInteger)(elapsed*1000))} mutableCopy];[probeFields addEntriesFromDictionary:page.readiness.diagnosticSummary];
-            if(failure){page.readinessStageLabel.text=@"HTTP 健康检查失败 · 内容接口未读取";probeFields[@"error_domain"]=failure.domain?:@"";probeFields[@"error_code"]=@(failure.code);probeFields[@"error_message"]=failure.localizedDescription?:@"";[RuntimeDiagnostics.shared recordEvent:@"media_service_health_failed" category:@"service" fields:probeFields];page.loading=NO;[page showMessage:failure.localizedDescription loading:NO];return;}
+            if(failure){page.serviceUnavailable=YES;page.readinessStageLabel.text=@"HTTP 健康检查失败 · 内容接口未读取";probeFields[@"error_domain"]=failure.domain?:@"";probeFields[@"error_code"]=@(failure.code);probeFields[@"error_message"]=failure.localizedDescription?:@"";[RuntimeDiagnostics.shared recordEvent:@"media_service_health_failed" category:@"service" fields:probeFields];page.loading=NO;[page showMessage:failure.localizedDescription loading:NO];return;}
             [RuntimeDiagnostics.shared recordEvent:@"media_service_health_ready" category:@"service" fields:probeFields];
             page.readinessStageLabel.text=@"HTTP 健康检查通过 · 正在读取资源能力";[page showMessage:@"本机服务已响应 · 正在读取资源能力" loading:YES];
             [page loadCapabilities];

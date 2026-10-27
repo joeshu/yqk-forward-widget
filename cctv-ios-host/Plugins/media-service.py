@@ -485,6 +485,7 @@ def main():
     runtime.start_initialization(create_engine, initialization_failed)
     print('[影视] 本机 HTTP 服务已监听，正在准备资源：', manifest.get('name', manifest['entry']))
     def stop():
+        report_runtime_stage('media_service_stop_requested')
         runtime.stopping.set()
         server.relay.close()
         server.shutdown()
@@ -496,8 +497,10 @@ def main():
         report_runtime_stage('media_server_loop_started')
         server.serve_forever(poll_interval=.1)
     finally:
+        report_runtime_stage('media_server_loop_exited')
         server.relay.close()
         server.server_close()
+        report_runtime_stage('media_service_listener_closed')
         runtime.close()
 
 

@@ -1,5 +1,6 @@
 #import "HostImageLoader.h"
 #import "HostImageDecodePolicy.h"
+#import "HostImageFailurePolicy.h"
 #import "RuntimeDiagnostics.h"
 #import <ImageIO/ImageIO.h>
 
@@ -75,7 +76,7 @@ static NSUInteger const ImageQueueLimit = 96;
     NSUInteger generation=self.generation;__weak UIImageView *view=imageView;
     dispatch_async(self.queue, ^{@autoreleasepool {
         if(generation!=self.generation || !view)return;
-        NSDate *failed=[self.failures objectForKey:cacheKey];if(failed && -failed.timeIntervalSinceNow<30)return;
+        NSDate *failed=[self.failures objectForKey:cacheKey];if(failed && failed.timeIntervalSinceNow>0)return;
         HostImageRequest *request=self.requests[cacheKey];
         if(!request) {
             if(self.requests.count>=ImageQueueLimit)return;
@@ -117,7 +118,7 @@ static NSUInteger const ImageQueueLimit = 96;
         }
     }
     if(!image && record.generation==self.generation && (error.code!=NSURLErrorCancelled||record.failureStage.length)){
-        [self.failures setObject:NSDate.date forKey:record.cacheKey];
+        [self.failures setObject:[NSDate dateWithTimeIntervalSinceNow:HostImageFailureBackoff(record.httpStatus)] forKey:record.cacheKey];
         NSString *failureStage=record.failureStage;
         if(!failureStage.length)failureStage=error?@"network_error":(record.data.length?@"image_decode_failed":@"empty_body");
         if(RuntimeDiagnostics.shared.enabled){
@@ -130,6 +131,8 @@ static NSUInteger const ImageQueueLimit = 96;
                 @"response_length_matches_expected":@(record.expectedContentLength>=0&&(long long)record.data.length==record.expectedContentLength),
                 @"image_pixel_width":@(isfinite(record.pixelWidth)?record.pixelWidth:0),@"image_pixel_height":@(isfinite(record.pixelHeight)?record.pixelHeight:0),
                 @"elapsed_ms":@((NSInteger)(MAX(0,CACurrentMediaTime()-record.startedAt)*1000)),
+                @"transport_cancelled_for_validation":@(error.code==NSURLErrorCancelled&&record.failureStage.length>0),
+                @"negative_cache_seconds":@(HostImageFailureBackoff(record.httpStatus)),
                 @"error_domain":error.domain?:@"",@"error_code":@(error.code)
             }];
         }
@@ -148,11 +151,11 @@ static NSUInteger const ImageQueueLimit = 96;
     if(record){record.httpStatus=status;record.expectedContentLength=response.expectedContentLength;NSString *contentType=response.MIMEType.lowercaseString?:@"";record.responseContentType=[contentType substringToIndex:MIN((NSUInteger)96,contentType.length)];if(status!=200)record.failureStage=@"http_status";else if(response.expectedContentLength>(long long)ImageBodyLimit)record.failureStage=@"response_too_large";}
     BOOL valid=record && status==200 && response.expectedContentLength<=(long long)ImageBodyLimit;
     completion(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);
-    if(!valid && record){[self.failures setObject:NSDate.date forKey:record.cacheKey];}
+    if(!valid && record){[self.failures setObject:[NSDate dateWithTimeIntervalSinceNow:HostImageFailureBackoff(record.httpStatus)] forKey:record.cacheKey];}
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
     HostImageRequest *record=self.tasks[@(task.taskIdentifier)];if(!record)return;
-    if(record.data.length+data.length>ImageBodyLimit){record.failureStage=@"response_too_large";[self.failures setObject:NSDate.date forKey:record.cacheKey];[task cancel];return;}
+    if(record.data.length+data.length>ImageBodyLimit){record.failureStage=@"response_too_large";[self.failures setObject:[NSDate dateWithTimeIntervalSinceNow:HostImageFailureBackoff(record.httpStatus)] forKey:record.cacheKey];[task cancel];return;}
     [record.data appendData:data];
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error { [self finish:task error:error]; }

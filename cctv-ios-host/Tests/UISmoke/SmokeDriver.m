@@ -83,6 +83,10 @@
 @interface RuntimeDiagnostics (SmokeMarker)
 - (NSDictionary *)readSessionMarker;
 @end
+@interface MediaBrowserViewController (SmokeRecovery)
+- (void)restartCurrentService;
+- (void)refreshHomeModules;
+@end
 @interface MediaPlaybackViewController (SmokeEpisodePicker)
 - (void)openEpisodeSelection;
 - (void)recordPlaybackAttemptOutcome:(NSString *)outcome failureKind:(NSString *)kind httpStatus:(NSInteger)status terminal:(BOOL)terminal;
@@ -827,6 +831,16 @@ static void next(NSArray *steps, NSUInteger index) {
             UISearchBar *bar=[searchPage valueForKey:@"searchBar"];bar.text=@"";[bar.delegate searchBar:bar textDidChange:bar.text];check([[searchPage valueForKey:@"rows"] count]==0&&[[searchPage valueForKey:@"resultCount"] unsignedIntegerValue]==0,@"clearing the keyword clears old results and counts");[nav popViewControllerAnimated:NO];
           }},
           ^{
+            MediaBrowserViewController *recoveryProbe=[MediaBrowserViewController new];[recoveryProbe loadViewIfNeeded];
+            NSDictionary *recoverySource=@{@"id":@"recover-only-this-id",@"port":@18788,@"engine":@"python"};[recoveryProbe setValue:recoverySource forKey:@"source"];
+            __block NSUInteger restarts=0,activations=0;__block void (^finishRestart)(NSError *);
+            recoveryProbe.onRestartService=^(NSDictionary *source,void (^done)(NSError *)){restarts++;check([source[@"id"] isEqual:@"recover-only-this-id"],@"restart targets only the selected service ID");finishRestart=[done copy];};
+            recoveryProbe.onActivateService=^(NSDictionary *source,void (^done)(NSError *)){activations++;done(nil);};
+            [recoveryProbe restartCurrentService];[recoveryProbe restartCurrentService];check(restarts==1,@"repeated restart taps cannot create duplicate recovery operations");
+            [recoveryProbe invalidateServiceIdentifier:@"recover-only-this-id"];finishRestart(nil);finishRestart=nil;
+            check(activations==0&&![[recoveryProbe valueForKey:@"restartInProgress"] boolValue],@"a cancelled recovery completion cannot reactivate an invalidated source");
+            LocalServiceReadiness *cancelledProbe=[[LocalServiceReadiness alloc] initWithURL:[NSURL URLWithString:@"http://127.0.0.1:1/health"] timeout:1 requiresHealthJSON:YES];
+            [cancelledProbe start:^(NSError *error,NSTimeInterval elapsed){check(NO,@"cancelled health probe must not deliver a completion");}];[cancelledProbe cancelWithReason:@"smoke_backgrounded"];check(cancelledProbe.attemptCount==1,@"health cancellation retains its actual attempt count");
             MediaPlaybackViewController *outcomeProbe=[MediaPlaybackViewController new];outcomeProbe.result=@{@"url":@"https://fixture.test/video.m3u8"};outcomeProbe.context=@{@"source":@{@"id":@"diagnostic-fixture"}};[outcomeProbe setValue:NSUUID.UUID.UUIDString forKey:@"playbackAttemptID"];
             [outcomeProbe recordPlaybackAttemptOutcome:@"failed" failureKind:@"media_not_found" httpStatus:404 terminal:YES];[outcomeProbe recordPlaybackAttemptOutcome:@"screen_closed" failureKind:nil httpStatus:0 terminal:YES];
             NSDictionary *marker=[RuntimeDiagnostics.shared readSessionMarker];check([marker[@"last_playback_outcome"] isEqual:@"failed"]&&[marker[@"last_playback_failure_kind"] isEqual:@"media_not_found"]&&[marker[@"last_playback_http_status"] integerValue]==404,@"closing a failed playback preserves its terminal failure evidence");

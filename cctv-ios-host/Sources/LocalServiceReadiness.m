@@ -1,5 +1,6 @@
 #import "LocalServiceReadiness.h"
 #import <QuartzCore/QuartzCore.h>
+#import "RuntimeDiagnostics.h"
 @interface LocalServiceReadiness ()
 @property(nonatomic, strong) NSURL *url;
 @property(nonatomic, assign) NSTimeInterval timeout;
@@ -15,9 +16,11 @@
 @property(nonatomic, copy) NSString *lastErrorDomain;
 @property(nonatomic, assign) NSInteger lastErrorCode;
 @property(nonatomic, copy) NSString *lastFailureKind;
+@property(nonatomic, copy) NSString *lastObservedFailureKind;
 @property(nonatomic, strong) NSURLSession *session;
 @property(nonatomic, strong) NSURLSessionDataTask *task;
 @property(nonatomic, copy) void (^completion)(NSError *, NSTimeInterval);
+- (void)recordProbe:(NSString *)event reason:(NSString *)reason;
 @end
 @implementation LocalServiceReadiness
 - (instancetype)initWithURL:(NSURL *)url timeout:(NSTimeInterval)timeout requiresHealthJSON:(BOOL)health {
@@ -43,8 +46,10 @@
     self.lastErrorDomain = @"";
     self.lastErrorCode = 0;
     self.lastFailureKind = @"none";
+    self.lastObservedFailureKind = @"none";
     self.started = CACurrentMediaTime();
     self.completion = completion;
+    [self recordProbe:@"local_service_probe_started" reason:@"requested"];
     NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
     config.URLCache = nil;
     config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
@@ -62,9 +67,12 @@
              @"requires_health_json":@(self.requiresHealthJSON),
              @"last_error_domain":self.lastErrorDomain?:@"",
              @"last_error_code":@(self.lastErrorCode),
+             @"last_observed_failure_kind":self.lastObservedFailureKind?:@"unknown",
              @"last_failure_kind":self.lastFailureKind?:@"unknown"};
 }
 - (void)finish:(NSError *)error {
+    if(!self.completion)return;
+    [self recordProbe:@"local_service_probe_finished" reason:error?@"failed":@"ready"];
     void (^done)(NSError *, NSTimeInterval) = self.completion;
     self.completion = nil;
     [self.task cancel];
@@ -141,8 +149,9 @@
                   ready = NO;
                   self.lastFailureKind = @"runtime_preparing";
               }
+              self.lastObservedFailureKind=self.lastFailureKind;
               if (ready) {
-                  self.lastFailureKind=@"none";
+                  self.lastFailureKind=@"none";self.lastObservedFailureKind=@"none";
                   self.lastErrorDomain=@"";
                   self.lastErrorCode=0;
                   [self finish:nil];
@@ -158,6 +167,17 @@
     [self.task resume];
 }
 - (void)cancel {
+    [self cancelWithReason:@"superseded_or_page_exit"];
+}
+- (void)recordProbe:(NSString *)event reason:(NSString *)reason {
+    NSMutableDictionary *fields=[[self diagnosticSummary] mutableCopy];
+    for(NSString *key in @[@"service_id",@"correlation_id",@"trigger",@"engine"]){id value=self.diagnosticContext[key];if([value isKindOfClass:NSString.class]&&[value length]<=128)fields[key]=value;}
+    fields[@"port"]=self.url.port?:@0;fields[@"reason"]=reason?:@"unknown";
+    fields[@"elapsed_ms"]=@((NSInteger)(MAX(0,CACurrentMediaTime()-self.started)*1000));
+    [RuntimeDiagnostics.shared recordEvent:event category:@"service" fields:fields];
+}
+- (void)cancelWithReason:(NSString *)reason {
+    if(self.completion)[self recordProbe:@"local_service_probe_cancelled" reason:reason];
     self.generation++;
     self.cancelled = YES;
     self.completion = nil;
