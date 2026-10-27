@@ -23,11 +23,29 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         self.assertIn('@"default":@NO', SETTINGS)
         self.assertIn('[RuntimeDiagnostics.shared setEnabled:value]', HOST)
 
-    def test_export_is_explicit_and_reports_empty_log(self):
-        self.assertIn('@"exportRuntimeDiagnostics"', SETTINGS)
-        self.assertIn('prepareExportWithCompletion:', DIAGNOSTICS)
-        self.assertIn('暂无调试记录', DIAGNOSTICS)
-        self.assertIn('page.onExportDebugLog=', HOST)
+    def test_diagnostics_are_browsed_and_exported_per_app_session(self):
+        self.assertIn('@"runtimeDiagnostics"', SETTINGS)
+        self.assertIn('loadSessionsWithCompletion:', DIAGNOSTICS)
+        self.assertIn('loadEventsForSessionID:', DIAGNOSTICS)
+        self.assertIn('prepareExportForSessionID:', DIAGNOSTICS)
+        self.assertIn('initWithSessionID:nil', HOST)
+        self.assertIn('暂无运行记录', (ROOT / "Sources/RuntimeDiagnosticsViewController.m").read_text())
+
+    def test_diagnostic_records_can_be_deleted_individually_or_cleared(self):
+        self.assertIn('deleteSessionID:', DIAGNOSTICS)
+        self.assertIn('clearAllSessionsWithCompletion:', DIAGNOSTICS)
+        page = (ROOT / "Sources/RuntimeDiagnosticsViewController.m").read_text()
+        self.assertIn('confirmClearAll', page)
+        self.assertIn('confirmDeleteCurrentSession', page)
+
+    def test_current_run_has_its_own_file_and_legacy_log_is_split_by_session(self):
+        self.assertIn('self.logPath = [self pathForSessionID:self.sessionID]', DIAGNOSTICS)
+        self.assertIn('sessionsDirectoryPath', DIAGNOSTICS)
+        self.assertIn('migrateLegacyLogIfNeeded', DIAGNOSTICS)
+        self.assertIn('object[@"session_id"]', DIAGNOSTICS)
+        self.assertIn('Remove the old aggregate only after all per-session files were written', DIAGNOSTICS)
+        self.assertIn('RuntimeDiagnosticsMaximumSessions = 24', DIAGNOSTICS)
+        self.assertIn('RuntimeDiagnosticsMaximumTotalBytes = 32 * 1024 * 1024', DIAGNOSTICS)
 
     def test_diagnostic_file_has_a_hard_size_limit(self):
         self.assertIn('RuntimeDiagnosticsMaximumBytes = 4 * 1024 * 1024', DIAGNOSTICS)

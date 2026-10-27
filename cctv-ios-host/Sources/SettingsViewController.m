@@ -36,9 +36,9 @@ static NSString *MediaMetadataCacheSummaryText(void) {
         @{ @"title":@"M3U / HLS 订阅", @"detail":@"AVPlayer · iOS 系统解码", @"icon":@"play.rectangle" },
         @{ @"title":@"内置插件", @"detail":@"Python / JavaScriptCore · 本机运行", @"icon":@"curlybraces" }
       ]},
-      @{ @"title":@"运行诊断", @"footer":@"开启后记录应用启动、影视加载与播放阶段、海报失败、服务启停和系统内存警告。日志最多 4 MiB，超限后保留最近约 3 MiB。重启后会标出上次未正常收尾及最后记录的状态；这不能单独证明崩溃原因，也不能替代 iOS .ips / JetsamEvent 报告。日志默认脱敏，不记录完整播放地址、查询参数值、Cookie 或脚本内容。", @"rows":@[
+      @{ @"title":@"运行诊断", @"footer":@"开启后记录应用启动、影视加载与播放阶段、海报失败、服务启停和系统内存警告。每次 App 运行单独存档，单次最多 4 MiB；最多保留 24 次或 32 MiB，较旧记录会自动清理。重启后会标出上次未正常收尾及最后记录的状态；这不能单独证明崩溃原因，也不能替代 iOS .ips / JetsamEvent 报告。日志默认脱敏，不记录完整播放地址、查询参数值、Cookie 或脚本内容。", @"rows":@[
         @{ @"title":@"运行诊断模式", @"detail":@"先开启再复现；若闪退，重开 App 后导出", @"key":@"runtimeDiagnosticsEnabled", @"icon":@"waveform.path.ecg", @"default":@NO },
-        @{ @"title":@"导出运行诊断日志", @"detail":@"JSONL · 无 .ips 时查看上次会话检查点", @"action":@"exportRuntimeDiagnostics", @"icon":@"square.and.arrow.up" }
+        @{ @"title":@"运行诊断记录", @"detail":@"按 App 运行分开查看 · 可单次导出、删除或清空", @"action":@"runtimeDiagnostics", @"icon":@"list.bullet.rectangle" }
       ]},
       @{ @"title":@"数据与关于", @"footer":@"影视元数据缓存只保存目录、分类和搜索结果；影片详情与播放线路不缓存。", @"rows":@[
         @{ @"title":@"导出本机配置", @"action":@"export", @"icon":@"square.and.arrow.up" },
@@ -79,7 +79,7 @@ static NSString *MediaMetadataCacheSummaryText(void) {
     else if([row[@"action"] isEqualToString:@"clearImages"]){[HostImageLoader.shared clearCache];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"台标缓存已清理");UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];cell.detailTextLabel.text=@"已清理，下次加载时重新获取";}
     else if([row[@"action"] isEqualToString:@"clearMediaMetadata"]) [self confirmClearMediaMetadata:ip];
     else if([row[@"action"] isEqualToString:@"export"]){if(self.onExportData)self.onExportData();}
-    else if([row[@"action"] isEqualToString:@"exportRuntimeDiagnostics"]){if(self.onExportDebugLog)self.onExportDebugLog();}
+    else if([row[@"action"] isEqualToString:@"runtimeDiagnostics"]){if(self.onOpenDiagnostics)self.onOpenDiagnostics();}
     else if([row[@"action"] isEqualToString:@"import"]){if(self.onImportData)self.onImportData();}
     else if([row[@"action"] isEqualToString:@"logs"]){if(self.onOpenLog)self.onOpenLog();}
 }

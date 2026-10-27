@@ -8,6 +8,7 @@
 #import "JSPluginRuntime.h"
 #import "PluginViewController.h"
 #import "SettingsViewController.h"
+#import "RuntimeDiagnosticsViewController.h"
 #import <dispatch/dispatch.h>
 #import "ServicesViewController.h"
 #import "MediaBrowserViewController.h"
@@ -1745,7 +1746,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     SettingsViewController *page=[SettingsViewController new];
     __weak typeof(self) weakSelf=self;
     page.onExportData=^{[weakSelf exportLocalConfiguration];};page.onImportData=^{[weakSelf importLocalConfiguration];};page.onOpenLog=^{[weakSelf openDiagnosticLog];};
-    page.onExportDebugLog=^{[RuntimeDiagnostics.shared prepareExportWithCompletion:^(NSURL *url,NSError *error){if(!url){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"运行诊断" message:error.localizedDescription?:@"导出诊断日志失败" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[(weakSelf.navigationController.topViewController?:weakSelf) presentViewController:alert animated:YES completion:nil];return;}[weakSelf shareDiagnosticLogAtURL:url];}];};
+    page.onOpenDiagnostics=^{[weakSelf.navigationController pushViewController:[[RuntimeDiagnosticsViewController alloc] initWithSessionID:nil] animated:YES];};
     page.onClearEPG=^{ [[XMLTVStore shared] clear];[weakSelf.epgCache removeAllObjects]; [weakSelf saveEPGCache]; [weakSelf.table reloadData]; };
     page.onPreferenceChanged=^(NSString *key, BOOL value){
         if([key isEqualToString:HostDarkThemePreferenceKey]||[key isEqualToString:HostThemeModePreferenceKey]){UIWindow *window=weakSelf.view.window;window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostStyleNavigation(weakSelf.navigationController);HostRefreshAppearanceLayers(window);});}

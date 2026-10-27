@@ -6,10 +6,14 @@
 static NSString * const RuntimeDiagnosticsPreferenceKey = @"runtimeDiagnosticsEnabled";
 static unsigned long long const RuntimeDiagnosticsMaximumBytes = 4 * 1024 * 1024;
 static unsigned long long const RuntimeDiagnosticsRetainedBytes = 3 * 1024 * 1024;
+static NSUInteger const RuntimeDiagnosticsMaximumSessions = 24;
+static unsigned long long const RuntimeDiagnosticsMaximumTotalBytes = 32 * 1024 * 1024;
 static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
 
 @interface RuntimeDiagnostics ()
 @property(nonatomic, copy) NSString *logPath;
+@property(nonatomic, copy) NSString *sessionsDirectoryPath;
+@property(nonatomic, copy) NSString *legacyLogPath;
 @property(nonatomic, copy) NSString *sessionMarkerPath;
 @property(nonatomic, copy) NSString *sessionID;
 @property(nonatomic, strong) dispatch_queue_t queue;
@@ -18,6 +22,9 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
 - (NSString *)safeText:(NSString *)text;
 - (NSDictionary * _Nullable)readSessionMarker;
 - (BOOL)writeSessionMarker:(NSDictionary *)marker;
+- (void)migrateLegacyLogIfNeeded;
+- (NSString * _Nullable)pathForSessionID:(NSString *)sessionID;
+- (void)pruneOldSessions;
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(nullable NSDictionary<NSString *, id> *)fields synchronously:(BOOL)synchronously;
 @end
 
@@ -34,14 +41,92 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     if ((self = [super init])) {
         NSString *support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
         NSString *directory = [[support stringByAppendingPathComponent:@"ysp"] stringByAppendingPathComponent:@"diagnostics"];
-        self.logPath = [[directory stringByAppendingPathComponent:@"runtime-debug"] stringByAppendingPathExtension:@"jsonl"];
+        self.sessionsDirectoryPath = [directory stringByAppendingPathComponent:@"sessions"];
+        self.legacyLogPath = [[directory stringByAppendingPathComponent:@"runtime-debug"] stringByAppendingPathExtension:@"jsonl"];
         self.sessionMarkerPath = [directory stringByAppendingPathComponent:@"runtime-session.json"];
         self.sessionID = NSUUID.UUID.UUIDString.lowercaseString;
+        self.logPath = [self pathForSessionID:self.sessionID];
         self.queue = dispatch_queue_create("com.cctvhost.runtime-diagnostics", DISPATCH_QUEUE_SERIAL);
         dispatch_queue_set_specific(self.queue, RuntimeDiagnosticsQueueKey, (__bridge void *)self, NULL);
         _diagnosticModeEnabled = [NSUserDefaults.standardUserDefaults boolForKey:RuntimeDiagnosticsPreferenceKey];
+        dispatch_async(self.queue, ^{ [self migrateLegacyLogIfNeeded]; [self pruneOldSessions]; });
     }
     return self;
+}
+
+- (NSString *)pathForSessionID:(NSString *)sessionID {
+    if (![sessionID isKindOfClass:NSString.class] || !sessionID.length || sessionID.length > 80) return nil;
+    NSString *lower = sessionID.lowercaseString;
+    BOOL isUUID = [[NSUUID alloc] initWithUUIDString:lower] != nil;
+    BOOL isLegacy = [lower hasPrefix:@"legacy-"];
+    if (!isUUID && !isLegacy) return nil;
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyz0123456789-"];
+    if ([lower rangeOfCharacterFromSet:allowed.invertedSet].location != NSNotFound) return nil;
+    return [[self.sessionsDirectoryPath stringByAppendingPathComponent:lower] stringByAppendingPathExtension:@"jsonl"];
+}
+
+- (void)migrateLegacyLogIfNeeded {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSData *legacy = [NSData dataWithContentsOfFile:self.legacyLogPath options:0 error:NULL];
+    if (!legacy.length) return;
+    if (legacy.length > RuntimeDiagnosticsMaximumBytes) legacy = [legacy subdataWithRange:NSMakeRange(legacy.length - RuntimeDiagnosticsMaximumBytes, RuntimeDiagnosticsMaximumBytes)];
+    NSString *text = [[NSString alloc] initWithData:legacy encoding:NSUTF8StringEncoding];
+    if (!text.length) return;
+    NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *groups = [NSMutableDictionary dictionary];
+    for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
+        if (!line.length) continue;
+        NSData *lineData = [line dataUsingEncoding:NSUTF8StringEncoding];
+        id object = [NSJSONSerialization JSONObjectWithData:lineData options:NSJSONReadingFragmentsAllowed error:NULL];
+        NSString *sessionID = [object isKindOfClass:NSDictionary.class] ? object[@"session_id"] : nil;
+        if (![self pathForSessionID:sessionID]) sessionID = @"legacy-unknown";
+        if (!groups[sessionID]) groups[sessionID] = [NSMutableArray array];
+        [groups[sessionID] addObject:line];
+    }
+    if (!groups.count) return;
+    [fm createDirectoryAtPath:self.sessionsDirectoryPath withIntermediateDirectories:YES attributes:nil error:NULL];
+    for (NSString *sessionID in groups) {
+        NSString *path = [self pathForSessionID:sessionID];
+        NSData *existingData = [NSData dataWithContentsOfFile:path options:0 error:NULL];
+        NSString *existingText = existingData.length ? [[NSString alloc] initWithData:existingData encoding:NSUTF8StringEncoding] : @"";
+        NSMutableArray<NSString *> *merged = [NSMutableArray array];
+        NSMutableSet<NSString *> *seen = [NSMutableSet set];
+        for (NSString *line in [existingText componentsSeparatedByString:@"\n"]) if (line.length && ![seen containsObject:line]) { [seen addObject:line]; [merged addObject:line]; }
+        for (NSString *line in groups[sessionID]) if (![seen containsObject:line]) { [seen addObject:line]; [merged addObject:line]; }
+        NSString *combined = [[merged componentsJoinedByString:@"\n"] stringByAppendingString:@"\n"];
+        if (![combined writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL]) return;
+    }
+    // Remove the old aggregate only after all per-session files were written.
+    [fm removeItemAtPath:self.legacyLogPath error:NULL];
+}
+
+- (void)pruneOldSessions {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSArray<NSString *> *files = [fm contentsOfDirectoryAtPath:self.sessionsDirectoryPath error:NULL];
+    NSMutableArray<NSDictionary *> *items = [NSMutableArray array];
+    unsigned long long total = 0;
+    for (NSString *name in files) {
+        if (![name.pathExtension.lowercaseString isEqualToString:@"jsonl"]) continue;
+        NSString *path = [self.sessionsDirectoryPath stringByAppendingPathComponent:name];
+        NSDictionary *attributes = [fm attributesOfItemAtPath:path error:NULL];
+        unsigned long long size = [attributes fileSize];
+        total += size;
+        [items addObject:@{@"path":path, @"name":name, @"size":@(size), @"date":attributes[NSFileModificationDate] ?: NSDate.distantPast}];
+    }
+    [items sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [a[@"date"] compare:b[@"date"]]; }];
+    // Reserve one maximum-sized file for the active app run. This keeps the
+    // combined directory within its advertised 32 MiB cap as that file grows.
+    unsigned long long retainedBytesBudget = RuntimeDiagnosticsMaximumTotalBytes - RuntimeDiagnosticsMaximumBytes;
+    while (items.count > 1 && (items.count > RuntimeDiagnosticsMaximumSessions || total > retainedBytesBudget)) {
+        NSDictionary *oldest = items.firstObject;
+        if ([oldest[@"name"] isEqualToString:[self.logPath lastPathComponent]]) {
+            [items removeObjectAtIndex:0];
+            [items addObject:oldest];
+            if (items.count == 1) break;
+            continue;
+        }
+        if ([fm removeItemAtPath:oldest[@"path"] error:NULL]) total -= [oldest[@"size"] unsignedLongLongValue];
+        [items removeObjectAtIndex:0];
+    }
 }
 
 - (BOOL)isEnabled {
@@ -181,7 +266,8 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
         @autoreleasepool {
             NSFileManager *fm = NSFileManager.defaultManager;
             [fm createDirectoryAtPath:self.logPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
-            if (![fm fileExistsAtPath:self.logPath]) [fm createFileAtPath:self.logPath contents:nil attributes:nil];
+            BOOL newSessionFile = ![fm fileExistsAtPath:self.logPath];
+            if (newSessionFile) [fm createFileAtPath:self.logPath contents:nil attributes:nil];
             unsigned long long size = [[fm attributesOfItemAtPath:self.logPath error:NULL] fileSize];
             if (size + line.length > RuntimeDiagnosticsMaximumBytes) [self trimLogToTail];
             NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:self.logPath];
@@ -190,6 +276,7 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
                 [file writeData:line];
                 if (synchronously) [file synchronizeFile];
                 [file closeFile];
+                if (newSessionFile) [self pruneOldSessions];
             }
             @catch (__unused NSException *exception) { @try { [file closeFile]; } @catch (__unused NSException *ignored) {} }
         }
@@ -211,6 +298,152 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     NSRange boundary = [tail rangeOfData:newline options:0 range:NSMakeRange(0, tail.length)];
     NSData *retained = boundary.location == NSNotFound ? tail : [tail subdataWithRange:NSMakeRange(NSMaxRange(boundary), tail.length - NSMaxRange(boundary))];
     [retained writeToFile:self.logPath atomically:YES];
+}
+
+- (NSArray<NSDictionary *> *)readEventsAtPath:(NSString *)path {
+    NSData *data = [NSData dataWithContentsOfFile:path options:0 error:NULL];
+    NSString *text = data.length ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+    if (!text.length) return @[];
+    NSMutableArray *events = [NSMutableArray array];
+    for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
+        if (!line.length) continue;
+        id item = [NSJSONSerialization JSONObjectWithData:[line dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingFragmentsAllowed error:NULL];
+        if ([item isKindOfClass:NSDictionary.class]) [events addObject:item];
+    }
+    return events;
+}
+
+- (NSDictionary *)summaryForSessionID:(NSString *)sessionID path:(NSString *)path marker:(NSDictionary *)marker {
+    NSFileHandle *reader = [NSFileHandle fileHandleForReadingAtPath:path];
+    if (!reader) return nil;
+    __block NSUInteger eventCount = 0;
+    __block NSString *firstTime = nil, *lastTime = nil, *lastEvent = nil, *version = nil, *build = nil;
+    __block BOOL cleanlyEnded = NO;
+    void (^consumeLine)(NSData *) = ^(NSData *lineData) {
+        if (!lineData.length || lineData.length > 8192) return;
+        id event = [NSJSONSerialization JSONObjectWithData:lineData options:NSJSONReadingFragmentsAllowed error:NULL];
+        if (![event isKindOfClass:NSDictionary.class]) return;
+        eventCount++;
+        NSString *time = [event[@"time"] isKindOfClass:NSString.class] ? event[@"time"] : nil;
+        if (!firstTime) firstTime = time;
+        if (time) lastTime = time;
+        if ([event[@"event"] isKindOfClass:NSString.class]) lastEvent = event[@"event"];
+        NSDictionary *fields = [event[@"fields"] isKindOfClass:NSDictionary.class] ? event[@"fields"] : nil;
+        if ([fields[@"app_version"] isKindOfClass:NSString.class]) version = fields[@"app_version"];
+        if ([fields[@"app_build"] isKindOfClass:NSString.class]) build = fields[@"app_build"];
+        if ([event[@"event"] isEqualToString:@"app_session_closed"] || [event[@"event"] isEqualToString:@"diagnostics_disabled"]) cleanlyEnded = YES;
+    };
+    NSMutableData *pending = [NSMutableData data];
+    NSData *newline = [@"\n" dataUsingEncoding:NSUTF8StringEncoding];
+    @try {
+        while (YES) {
+            NSData *chunk = [reader readDataOfLength:64 * 1024];
+            if (!chunk.length) break;
+            [pending appendData:chunk];
+            NSRange boundary;
+            while ((boundary = [pending rangeOfData:newline options:0 range:NSMakeRange(0, pending.length)]).location != NSNotFound) {
+                NSData *line = [pending subdataWithRange:NSMakeRange(0, boundary.location)];
+                consumeLine(line);
+                NSUInteger consumed = NSMaxRange(boundary);
+                [pending replaceBytesInRange:NSMakeRange(0, consumed) withBytes:NULL length:0];
+            }
+            // Malformed/oversized legacy records are skipped without allowing a
+            // newline-free corrupt file to grow the temporary buffer without bound.
+            if (pending.length > 8192) [pending setLength:0];
+        }
+        consumeLine(pending);
+    } @catch (__unused NSException *exception) {
+        @try { [reader closeFile]; } @catch (__unused NSException *ignored) {}
+        return nil;
+    }
+    [reader closeFile];
+    if (!eventCount) return nil;
+    NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL];
+    return @{@"session_id":sessionID, @"event_count":@(eventCount), @"bytes":@([attributes fileSize]), @"started_at":firstTime ?: @"", @"ended_at":lastTime ?: firstTime ?: @"", @"last_event":lastEvent ?: @"", @"is_current":@([sessionID isEqualToString:self.sessionID]), @"is_open":@([marker[@"open"] boolValue] && [marker[@"session_id"] isEqualToString:sessionID]), @"cleanly_ended":@(cleanlyEnded), @"app_version":version ?: @"", @"app_build":build ?: @""};
+}
+
+- (void)loadSessionsWithCompletion:(void (^)(NSArray<NSDictionary *> *, NSError *))completion {
+    if (!completion) return;
+    dispatch_async(self.queue, ^{
+        [self migrateLegacyLogIfNeeded];
+        NSFileManager *fm = NSFileManager.defaultManager;
+        NSArray<NSString *> *files = [fm contentsOfDirectoryAtPath:self.sessionsDirectoryPath error:NULL] ?: @[];
+        NSMutableArray<NSDictionary *> *sessions = [NSMutableArray array];
+        NSDictionary *marker = [self readSessionMarker];
+        for (NSString *name in files) {
+            if (![name.pathExtension.lowercaseString isEqualToString:@"jsonl"]) continue;
+            NSString *sessionID = [name stringByDeletingPathExtension].lowercaseString;
+            NSString *path = [self pathForSessionID:sessionID];
+            if (!path) continue;
+            NSDictionary *summary = [self summaryForSessionID:sessionID path:path marker:marker];
+            if (summary) [sessions addObject:summary];
+        }
+        [sessions sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [b[@"started_at"] compare:a[@"started_at"]]; }];
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(sessions, nil); });
+    });
+}
+
+- (void)loadEventsForSessionID:(NSString *)sessionID completion:(void (^)(NSArray<NSDictionary *> *, NSError *))completion {
+    if (!completion) return;
+    dispatch_async(self.queue, ^{
+        NSString *path = [self pathForSessionID:sessionID];
+        NSError *error = nil;
+        NSArray *events = path ? [self readEventsAtPath:path] : @[];
+        if (!path || !events.count) error = [NSError errorWithDomain:@"CCTVHostDiagnostics" code:2 userInfo:@{NSLocalizedDescriptionKey:@"这次运行没有可读取的诊断记录，记录可能已清理或过期。"}];
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(events, error); });
+    });
+}
+
+- (void)prepareExportForSessionID:(NSString *)sessionID completion:(void (^)(NSURL *, NSError *))completion {
+    if (!completion) return;
+    dispatch_async(self.queue, ^{
+        NSString *sourcePath = [self pathForSessionID:sessionID];
+        NSData *data = sourcePath ? [NSData dataWithContentsOfFile:sourcePath options:0 error:NULL] : nil;
+        NSError *error = nil;
+        NSURL *url = nil;
+        if (!data.length) error = [NSError errorWithDomain:@"CCTVHostDiagnostics" code:1 userInfo:@{NSLocalizedDescriptionKey:@"这次运行暂无诊断记录。请先开启运行诊断并复现问题。"}];
+        else {
+            NSString *timestamp = [[[NSISO8601DateFormatter new] stringFromDate:NSDate.date] stringByReplacingOccurrencesOfString:@":" withString:@"-"];
+            NSString *shortID = sessionID.length > 8 ? [sessionID substringToIndex:8] : sessionID;
+            NSString *name = [NSString stringWithFormat:@"CCTVHost-运行诊断-%@-%@.jsonl", timestamp, shortID];
+            NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:name];
+            if ([data writeToFile:path options:NSDataWritingAtomic error:&error]) url = [NSURL fileURLWithPath:path];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(url, error); });
+    });
+}
+
+- (void)deleteSessionID:(NSString *)sessionID completion:(void (^)(NSError *))completion {
+    dispatch_async(self.queue, ^{
+        NSString *path = [self pathForSessionID:sessionID];
+        NSError *error = nil;
+        if (!path) error = [NSError errorWithDomain:@"CCTVHostDiagnostics" code:3 userInfo:@{NSLocalizedDescriptionKey:@"无效的运行记录编号。"}];
+        else if ([NSFileManager.defaultManager fileExistsAtPath:path] && ![NSFileManager.defaultManager removeItemAtPath:path error:&error]) { }
+        dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(error); });
+    });
+}
+
+- (void)clearAllSessionsWithCompletion:(void (^)(NSError *))completion {
+    dispatch_async(self.queue, ^{
+        NSError *error = nil;
+        NSFileManager *fm = NSFileManager.defaultManager;
+        if ([fm fileExistsAtPath:self.sessionsDirectoryPath] && ![fm removeItemAtPath:self.sessionsDirectoryPath error:&error]) { }
+        if (!error && [fm fileExistsAtPath:self.legacyLogPath]) [fm removeItemAtPath:self.legacyLogPath error:&error];
+        if (!error && self.enabled) {
+            [fm createDirectoryAtPath:self.sessionsDirectoryPath withIntermediateDirectories:YES attributes:nil error:&error];
+        }
+        if (!error) {
+            if (self.enabled) {
+                NSDictionary *previous = [self readSessionMarker] ?: @{};
+                NSMutableDictionary *marker = [NSMutableDictionary dictionary];
+                for (NSString *key in @[@"started_at", @"app_version", @"app_build", @"ios_version", @"application_state", @"process_uptime_seconds"]) if (previous[key]) marker[key] = previous[key];
+                marker[@"open"] = @YES; marker[@"session_id"] = self.sessionID ?: @"unknown"; marker[@"last_checkpoint"] = @"diagnostics_cleared"; marker[@"last_checkpoint_at"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
+                [self writeSessionMarker:marker];
+            }
+            else [fm removeItemAtPath:self.sessionMarkerPath error:NULL];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(error); });
+    });
 }
 
 - (id)safeValue:(id)value key:(NSString *)key depth:(NSUInteger)depth {
@@ -259,21 +492,7 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
 }
 
 - (void)prepareExportWithCompletion:(void (^)(NSURL *, NSError *))completion {
-    if (!completion) return;
-    dispatch_async(self.queue, ^{
-        NSData *data = [NSData dataWithContentsOfFile:self.logPath options:0 error:NULL];
-        NSError *error = nil;
-        NSURL *url = nil;
-        if (!data.length) {
-            error = [NSError errorWithDomain:@"CCTVHostDiagnostics" code:1 userInfo:@{NSLocalizedDescriptionKey:@"暂无调试记录。请先开启运行诊断模式、复现问题后再导出。"}];
-        } else {
-            NSString *timestamp = [[[NSISO8601DateFormatter new] stringFromDate:NSDate.date] stringByReplacingOccurrencesOfString:@":" withString:@"-"];
-            NSString *name = [NSString stringWithFormat:@"CCTVHost-运行诊断-%@.jsonl", timestamp];
-            NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:name];
-            if ([data writeToFile:path options:NSDataWritingAtomic error:&error]) url = [NSURL fileURLWithPath:path];
-        }
-        dispatch_async(dispatch_get_main_queue(), ^{ completion(url, error); });
-    });
+    [self prepareExportForSessionID:self.sessionID completion:completion];
 }
 
 @end
