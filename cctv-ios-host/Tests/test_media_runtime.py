@@ -450,19 +450,21 @@ class Spider:
 
     def test_relay_manifest_diagnostics_are_bounded_and_do_not_include_signed_url(self):
         relay = MediaRelay(limit=1)
-        token = relay.register('https://fixture.test/index.m3u8?token=private', {}, diagnostic_id='manifest-trace')
+        token = relay.register('https://fixture.test/index.m3u8?token=private', {'Range': 'bytes=4-8'}, diagnostic_id='manifest-trace')
         response = mock.Mock(status=200)
         response.headers = {'Content-Type': 'application/vnd.apple.mpegurl'}
         response.geturl.return_value = 'https://fixture.test/index.m3u8?token=private'
         response.read.return_value = b'#EXTM3U\n#EXT-X-ENDLIST\n'
         handler = mock.Mock()
-        handler.headers = {}
+        handler.headers = {'Range': 'bytes=0-1'}
         handler.server.server_port = 18799
         with mock.patch('urllib.request.build_opener') as opener, mock.patch('builtins.print') as log:
             opener.return_value.open.return_value = response
             relay.serve(handler, token, head=True)
             relay.serve(handler, token)
             relay.serve(handler, token)
+        for opened in opener.return_value.open.call_args_list:
+            self.assertIsNone(opened.args[0].get_header('Range'))
         records = [json.loads(x.args[0].split('] ', 1)[1]) for x in log.call_args_list]
         self.assertEqual([x['event'] for x in records],
                          ['media_relay_manifest_requested', 'media_relay_manifest_readable'])

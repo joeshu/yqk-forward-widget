@@ -1,4 +1,5 @@
 #import "HostImageLoader.h"
+#import "HostImageDecodePolicy.h"
 #import "RuntimeDiagnostics.h"
 #import <ImageIO/ImageIO.h>
 
@@ -16,6 +17,8 @@ static NSUInteger const ImageQueueLimit = 96;
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) CFTimeInterval startedAt;
 @property(nonatomic) NSInteger httpStatus;
+@property(nonatomic) double pixelWidth;
+@property(nonatomic) double pixelHeight;
 @property(nonatomic) long long expectedContentLength;
 @property(nonatomic, copy) NSString *responseContentType;
 @property(nonatomic, copy) NSString *failureStage;
@@ -97,13 +100,18 @@ static NSUInteger const ImageQueueLimit = 96;
     [self.tasks removeObjectForKey:@(task.taskIdentifier)];[self.requests removeObjectForKey:record.cacheKey];
     UIImage *image=nil;
     if(!error && record.generation==self.generation && record.data.length) {
-        CGImageSourceRef source=CGImageSourceCreateWithData((__bridge CFDataRef)record.data, NULL);
+        CGImageSourceRef source=CGImageSourceCreateWithData((__bridge CFDataRef)record.data, (__bridge CFDictionaryRef)@{(__bridge NSString *)kCGImageSourceShouldCache:@NO});
         if(source) {
+            NSDictionary *properties=CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source,0,NULL));
+            id width=properties[(__bridge NSString *)kCGImagePropertyPixelWidth],height=properties[(__bridge NSString *)kCGImagePropertyPixelHeight];
+            record.pixelWidth=[width isKindOfClass:NSNumber.class]?[width doubleValue]:0;record.pixelHeight=[height isKindOfClass:NSNumber.class]?[height doubleValue]:0;
+            if(!isfinite(record.pixelWidth)||!isfinite(record.pixelHeight)||record.pixelWidth<=0||record.pixelHeight<=0)record.failureStage=@"image_metadata_invalid";
+            else if(!HostImageDimensionsAllowed(record.pixelWidth,record.pixelHeight))record.failureStage=@"image_dimensions_exceeded";
             NSDictionary *options=@{(__bridge NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
                 (__bridge NSString *)kCGImageSourceCreateThumbnailWithTransform:@YES,
                 (__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@(record.maximumPixelSize),
                 (__bridge NSString *)kCGImageSourceShouldCacheImmediately:@YES};
-            CGImageRef thumbnail=CGImageSourceCreateThumbnailAtIndex(source,0,(__bridge CFDictionaryRef)options);
+            CGImageRef thumbnail=record.failureStage.length?NULL:CGImageSourceCreateThumbnailAtIndex(source,0,(__bridge CFDictionaryRef)options);
             if(thumbnail){image=[UIImage imageWithCGImage:thumbnail];[self.cache setObject:image forKey:record.cacheKey cost:CGImageGetBytesPerRow(thumbnail)*CGImageGetHeight(thumbnail)];CGImageRelease(thumbnail);}
             CFRelease(source);
         }
@@ -120,6 +128,7 @@ static NSUInteger const ImageQueueLimit = 96;
                 @"content_type":record.responseContentType?:@"",@"response_bytes":@(record.data.length),
                 @"expected_content_length_known":@(record.expectedContentLength>=0),@"expected_response_bytes":@(MAX(0,record.expectedContentLength)),
                 @"response_length_matches_expected":@(record.expectedContentLength>=0&&(long long)record.data.length==record.expectedContentLength),
+                @"image_pixel_width":@(isfinite(record.pixelWidth)?record.pixelWidth:0),@"image_pixel_height":@(isfinite(record.pixelHeight)?record.pixelHeight:0),
                 @"elapsed_ms":@((NSInteger)(MAX(0,CACurrentMediaTime()-record.startedAt)*1000)),
                 @"error_domain":error.domain?:@"",@"error_code":@(error.code)
             }];

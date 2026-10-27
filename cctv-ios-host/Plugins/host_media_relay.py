@@ -302,7 +302,12 @@ class MediaRelay:
             if (parsed.scheme.lower(), parsed.netloc.lower()) != origin:
                 headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie')}
             headers['Accept-Encoding'] = 'identity'
-            if handler.headers.get('Range'):
+            manifest_request = expected_hls or parsed.path.lower().endswith(('.m3u8', '.m3u'))
+            if manifest_request:
+                # Rewritten playlists have different byte offsets. Fetch the
+                # full source manifest; range requests still apply to media.
+                headers = {k: v for k, v in headers.items() if k.lower() != 'range'}
+            elif handler.headers.get('Range'):
                 headers['Range'] = handler.headers['Range']
             request = urllib.request.Request(url, headers=headers, method='HEAD' if head else 'GET')
             try:
@@ -325,7 +330,9 @@ class MediaRelay:
                     if (parsed.scheme.lower(),parsed.netloc.lower())!=origin:
                         headers={k:v for k,v in headers.items() if k.lower() not in ('authorization','cookie')}
                     headers['Accept-Encoding']='identity'
-                    if handler.headers.get('Range'):headers['Range']=handler.headers['Range']
+                    manifest_request = expected_hls or parsed.path.lower().endswith(('.m3u8', '.m3u'))
+                    if manifest_request:headers={k:v for k,v in headers.items() if k.lower()!='range'}
+                    elif handler.headers.get('Range'):headers['Range']=handler.headers['Range']
                     refreshed_request=urllib.request.Request(url,headers=headers,method='HEAD' if head else 'GET')
                     response=urllib.request.build_opener(ScopedRedirect()).open(refreshed_request,timeout=8)
                 else:
