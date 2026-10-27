@@ -51,6 +51,23 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(result['alternates'][1]['headers']['Cookie'], 'fixture-local-auth')
         self.assertNotIn('Cookie', result['alternates'][2].get('headers', {}))
 
+    def test_invalid_first_quality_does_not_hide_valid_media_or_leak_its_headers(self):
+        rows = [{'url': '', 'format': 'invalid', 'headers': {'Cookie': 'invalid-choice'}},
+                {'playUrl': 'https://cdn.test/video.m3u8?sig=a%2Bb',
+                 'format': 'hls', 'headers': {'X-Quality': 'valid'}}]
+        for shape in (rows, {'values': rows}):
+            with self.subTest(shape=type(shape).__name__):
+                result = media.playback({'url': shape})
+                self.assertEqual(result['url'], rows[1]['playUrl'])
+                self.assertEqual(result['headers'], {'X-Quality': 'valid'})
+                self.assertEqual(result['format'], 'hls')
+                self.assertEqual(len(result['alternates']), 1)
+        result = media.playback({'url': 'https://cdn.test/main.m3u8',
+                                 'alternates': [{'playUrl': rows[1]['playUrl']}]})
+        self.assertEqual(result['alternates'][0]['url'], rows[1]['playUrl'])
+        with self.assertRaises(media.MediaError):
+            media.playback({'url': [{'url': 'javascript:invalid'}]})
+
     def test_home_preserves_only_structured_recommendation_failure(self):
         for flag, expected in ((True, True), (False, False), ('true', False), (None, False)):
             with self.subTest(flag=flag):

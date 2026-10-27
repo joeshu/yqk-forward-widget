@@ -70,3 +70,13 @@ reported. No upstream response body or playback credentials enter this event.
 Regression: `test_catpaw_optional_recommendation_failure_preserves_categories`
 uses a local HTTP 503 fixture and verifies category navigation and independent
 service shutdown. It does not test an external movie or AVPlayer decoding.
+
+### Quality list normalization
+
+Object-based quality lists select the first syntactically valid HTTP/HTTPS
+address, accepting the same URL aliases as the primary result. An empty or
+unsupported first entry no longer hides later entries or supplies their transport
+metadata/credentials. This is format validation only; no network probe or decoder
+success is implied. Top-level `alternates` accept these aliases too. Regression
+coverage includes invalid first entries, signed query preservation, header
+isolation and a wholly invalid list.

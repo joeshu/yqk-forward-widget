@@ -302,6 +302,15 @@ def media_headers(value):
     return result
 
 
+def media_choice_address(value):
+    if not isinstance(value, dict):
+        return ''
+    return next((value.get(key) for key in
+                 ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
+                  'video_url', 'mediaUrl', 'src', 'value', 'v')
+                 if value.get(key)), '')
+
+
 def playback(value):
     value = unwrap_envelope(value, {'url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
                                     'video_url', 'mediaUrl', 'src', 'alternates',
@@ -344,7 +353,9 @@ def playback(value):
                 value[key] = url[key]
         choices = url.get('values') or url.get('list')
         if isinstance(choices, list):
-            first = next((item for item in choices if isinstance(item, dict)), None)
+            choices = [item for item in choices if isinstance(item, dict) and
+                       valid_media_url(normalize_media_address(media_choice_address(item)))]
+            first = choices[0] if choices else None
             if first:
                 for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
                             'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
@@ -355,9 +366,13 @@ def playback(value):
                 primary_choice_headers.update(first_headers)
             url = choices
         else:
-            url = url.get('url') or url.get('value')
+            url = media_choice_address(url)
     if isinstance(url, list):
         if url and all(isinstance(item, dict) for item in url):
+            url = [item for item in url if valid_media_url(
+                normalize_media_address(media_choice_address(item)))]
+            if not url:
+                raise MediaError('NO_MEDIA', '来源的播放线路均未返回有效 HTTP/HTTPS 地址')
             alternates = []
             first = url[0]
             for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
@@ -368,10 +383,7 @@ def playback(value):
             first_headers.update(media_headers(first.get('headers', {})))
             primary_choice_headers.update(first_headers)
             for index, item in enumerate(url):
-                address = next((item.get(key) for key in
-                                ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
-                                 'video_url', 'mediaUrl', 'src', 'value', 'v')
-                                if item.get(key)), None)
+                address = media_choice_address(item)
                 if not address:
                     continue
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}'),
@@ -454,7 +466,7 @@ def playback(value):
         for index, item in enumerate(alternates[:32]):
             if not isinstance(item, dict):
                 continue
-            candidate = normalize_media_address(item.get('url', item.get('value', item.get('v', ''))))
+            candidate = normalize_media_address(media_choice_address(item))
             candidate = repair_url(candidate)
             if valid_media_url(candidate):
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}')[:128], 'url': candidate}
