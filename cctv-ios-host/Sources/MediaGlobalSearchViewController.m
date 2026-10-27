@@ -56,6 +56,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 @property(nonatomic,strong) UIScrollView *filterScroll;
 @property(nonatomic,strong) UIStackView *filterStack;
 @property(nonatomic,copy) NSArray<NSDictionary *> *filterChoices;
+@property(nonatomic,copy) NSString *renderedFilterKey;
 @property(nonatomic) NSInteger selectedSourceSection;
 @property(nonatomic,copy) NSString *selectedProvider;
 @property(nonatomic) BOOL resultsVisible;
@@ -169,7 +170,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 }
 
 - (NSString *)filterPositionKey {
-    return [NSString stringWithFormat:@"%ld:%@",(long)self.selectedSourceSection,self.selectedProvider?:@"*"];
+    return [NSString stringWithFormat:@"%ld:%@:%@",(long)self.selectedSourceSection,self.selectedProvider?@"provider":@"source",self.selectedProvider?:@""];
 }
 - (NSArray *)visibleEntriesForSection:(NSInteger)section {
     if(section<0||(NSUInteger)section>=self.rows.count)return @[];
@@ -215,8 +216,8 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
             [choices addObject:@{@"section":@(section),@"provider":provider,@"name":MediaSearchText(station[@"name"]),@"count":@(MediaSearchEntries(entries,provider).count),@"state":station[@"state"]?:@""}];
         }
     }
-    if([self.filterChoices isEqual:choices])return;
-    self.filterChoices=choices;
+    if([self.filterChoices isEqual:choices]&&[self.renderedFilterKey isEqual:self.filterPositionKey])return;
+    self.renderedFilterKey=self.filterPositionKey;self.filterChoices=choices;
     while(self.filterStack.arrangedSubviews.count>choices.count){UIView *view=self.filterStack.arrangedSubviews.lastObject;[self.filterStack removeArrangedSubview:view];[view removeFromSuperview];}
     for(NSUInteger index=0;index<choices.count;index++){
         NSDictionary *choice=choices[index];UIButton *button;

@@ -492,6 +492,7 @@ class ResourceInteractionContracts(unittest.TestCase):
     def test_global_search_filters_restore_state_and_cancel_changed_queries(self):
         search = (ROOT / 'Sources/MediaGlobalSearchViewController.m').read_text()
         self.assertIn('media-search-station-filters', search)
+        self.assertIn('[self.renderedFilterKey isEqual:self.filterPositionKey]', search)
         self.assertIn('MediaSearchEntries(entries,provider).count', search)
         self.assertIn('MediaSearchAppend(stored,items,providerID,providerName,remaining)', search)
         self.assertIn('HostImageLoader.shared loadURL:', search)
