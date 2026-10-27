@@ -59,6 +59,23 @@ class ServiceRuntimeTests(unittest.TestCase):
             time.sleep(.005)
         self.assertTrue(check(), self.errors)
 
+    def test_run_script_reports_durable_entry_and_plugin_loading_stages(self):
+        previous = vars(builtins).get('_cctvhost_python_stage')
+        stages = []
+        builtins._cctvhost_python_stage = lambda identifier, stage: stages.append((identifier, stage))
+        try:
+            worker = self.launch("import builtins, threading\n"
+                                 "threading.Thread(target=builtins._host_test_release.wait, daemon=True).start()\n")
+            self.wait(lambda: ('default', 'python_plugin_script_loading') in stages)
+            self.assertIn(('default', 'python_runner_entered'), stages)
+            self.release.set()
+            worker.join(1)
+            self.assertFalse(worker.is_alive())
+        finally:
+            vars(builtins).pop('_cctvhost_python_stage', None)
+            if previous is not None:
+                builtins._cctvhost_python_stage = previous
+
     def server_source(self, port=0, background=False):
         return ("from http.server import HTTPServer, BaseHTTPRequestHandler\n"
                 "import builtins, threading\n"

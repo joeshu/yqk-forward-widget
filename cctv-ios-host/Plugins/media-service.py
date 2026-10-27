@@ -10,7 +10,7 @@ import threading
 import uuid
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from host_media_runtime import MediaRuntime, MediaError, NativeJS, PythonSpider, playback
+from host_media_runtime import MediaRuntime, MediaError, NativeJS, PythonSpider, playback, report_runtime_stage
 from host_media_relay import MediaRelay, safe_error_summary
 
 
@@ -449,6 +449,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    report_runtime_stage('media_service_main_started')
     parser = argparse.ArgumentParser()
     parser.add_argument('port', type=int)
     parser.add_argument('--bind', default='127.0.0.1')
@@ -460,6 +461,7 @@ def main():
     os.makedirs(args.data_dir, exist_ok=True)
     runtime = MediaRuntime()
     server = Server((args.bind, args.port), runtime)
+    report_runtime_stage('media_service_listener_bound')
     def create_engine():
         if manifest['runtime'] == 'python':
             return PythonSpider(args.package, manifest['entry'], manifest.get('options'),
@@ -469,6 +471,7 @@ def main():
                         node=manifest['runtime'] == 'node')
     def initialization_failed(error):
         print('[影视] 资源初始化失败：%s: %s' % (type(error).__name__, error))
+    report_runtime_stage('media_engine_prepare_started')
     runtime.start_initialization(create_engine, initialization_failed)
     print('[影视] 本机 HTTP 服务已监听，正在准备资源：', manifest.get('name', manifest['entry']))
     def stop():
@@ -480,6 +483,7 @@ def main():
         return True
     builtins._cctvhost_stop_service = stop
     try:
+        report_runtime_stage('media_server_loop_started')
         server.serve_forever(poll_interval=.1)
     finally:
         server.relay.close()

@@ -1,3 +1,4 @@
+import builtins
 import http.client
 import http.server
 import importlib.util
@@ -55,6 +56,9 @@ class Spider:
     def homeContent(self, filter): return {'list': []}
 ''')
         output = io.StringIO()
+        phases = []
+        previous_callback = vars(builtins).get('_cctvhost_python_stage')
+        builtins._cctvhost_python_stage = lambda identifier, phase: phases.append((identifier, phase))
         owner = type('Owner', (), {'identifier': 'timing-fixture'})()
         current_thread = threading.current_thread()
         previous_owner = getattr(current_thread, '_host_session', None)
@@ -67,6 +71,9 @@ class Spider:
                 del current_thread._host_session
             else:
                 current_thread._host_session = previous_owner
+            vars(builtins).pop('_cctvhost_python_stage', None)
+            if previous_callback is not None:
+                builtins._cctvhost_python_stage = previous_callback
         try:
             events = [json.loads(line.split(' ', 1)[1])
                       for line in output.getvalue().splitlines()
@@ -74,12 +81,21 @@ class Spider:
             names = [event['event'] for event in events]
             self.assertEqual(names, ['python_spider_prepare_started',
                                      'python_spider_module_loaded',
+                                     'python_spider_constructor_started',
                                      'python_spider_init_started',
                                      'python_spider_init_succeeded',
                                      'python_spider_ready'])
             init = next(event for event in events if event['event'] == 'python_spider_init_succeeded')
             self.assertGreaterEqual(init['elapsed_ms'], 40)
             self.assertTrue(all(event['entry'] == 'slow.py' for event in events))
+            self.assertEqual(phases, [
+                ('timing-fixture', 'spider_module_import_started'),
+                ('timing-fixture', 'spider_module_loaded'),
+                ('timing-fixture', 'spider_constructor_started'),
+                ('timing-fixture', 'spider_init_started'),
+                ('timing-fixture', 'spider_init_succeeded'),
+                ('timing-fixture', 'spider_ready'),
+            ])
         finally:
             engine.close()
 

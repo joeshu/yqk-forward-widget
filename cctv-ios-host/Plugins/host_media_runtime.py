@@ -25,11 +25,34 @@ class MediaError(Exception):
         self.code, self.retryable = code, retryable
 
 
+def report_runtime_stage(stage):
+    """Persist an allow-listed Python stage through the embedding host."""
+    owner = getattr(threading.current_thread(), '_host_session', None)
+    callback = vars(builtins).get('_cctvhost_python_stage')
+    if owner is None or not callable(callback):
+        return
+    try:
+        callback(str(getattr(owner, 'identifier', '')), str(stage))
+    except BaseException:
+        pass
+
+
 def _python_spider_log_stage(event, entry, started_at, **fields):
     """Record safe phase timings in the owning service's isolated log."""
     owner = getattr(threading.current_thread(), '_host_session', None)
     if owner is None:
         return
+    phase = {
+        'python_spider_prepare_started': 'spider_module_import_started',
+        'python_spider_module_loaded': 'spider_module_loaded',
+        'python_spider_constructor_started': 'spider_constructor_started',
+        'python_spider_init_started': 'spider_init_started',
+        'python_spider_init_succeeded': 'spider_init_succeeded',
+        'python_spider_ready': 'spider_ready',
+        'python_spider_prepare_failed': 'spider_prepare_failed',
+    }.get(event)
+    if phase:
+        report_runtime_stage(phase)
     record = {'event': event, 'entry': os.path.basename(str(entry or '')),
               'elapsed_ms': max(0, int((time.perf_counter() - started_at) * 1000))}
     record['service_id'] = str(getattr(owner, 'identifier', ''))
@@ -544,6 +567,7 @@ class PythonSpider:
             if not callable(cls):
                 raise MediaError('INVALID_PROTOCOL', '文件未提供 Spider 类；HTTP 服务脚本请按服务方式运行')
             prepare_stage = 'spider_constructor'
+            _python_spider_log_stage('python_spider_constructor_started', entry, prepare_started_at)
             self.spider = cls()
             self.spider._cctvhost_proxy_url = proxy_url
             self.lock = threading.Lock()

@@ -50,6 +50,19 @@ _base_environment = os.environ
 _original_thread_excepthook = threading.excepthook
 
 
+def report_runtime_stage(stage):
+    """Save an allow-listed host phase so recovery can locate a hard exit."""
+    owner = getattr(threading.current_thread(), '_host_session', None)
+    callback = vars(builtins).get('_cctvhost_python_stage')
+    if owner is None or not callable(callback):
+        return
+    try:
+        callback(owner.identifier, str(stage))
+    except BaseException:
+        # Diagnostics must never prevent a service from starting or stopping.
+        pass
+
+
 def _thread_excepthook(args):
     """Keep unhandled plugin worker failures tied to the owning service."""
     owner = getattr(threading.current_thread(), '_host_session', None)
@@ -532,6 +545,7 @@ def run_script(path, identifier='default', data_dir=None, port=None, arguments=N
     with _lock:
         session.startup_lock_held = True
         thread._host_session = session
+    report_runtime_stage('python_runner_entered')
     try:
         with _lock:
             # A stop may arrive while this service waits behind another
@@ -572,6 +586,7 @@ def run_script(path, identifier='default', data_dir=None, port=None, arguments=N
 
             session.plugin_builtins['__import__'] = import_local
             session.script_started = True
+        report_runtime_stage('python_plugin_script_loading')
         session.namespace = runpy.run_path(path, run_name='__main__', init_globals={'__builtins__': session.plugin_builtins})
         return session.namespace
     except SystemExit as error:

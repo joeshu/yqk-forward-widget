@@ -299,6 +299,34 @@ static PyObject *pyHostWrite(PyObject *self, PyObject *args) {
         return PyLong_FromSsize_t(length);
     }
 }
+static PyObject *pyHostRuntimeStage(PyObject *self, PyObject *args) {
+    const char *service = NULL, *stage = NULL;
+    if (!PyArg_ParseTuple(args, "ss", &service, &stage)) return NULL;
+    @autoreleasepool {
+        NSString *serviceID = [NSString stringWithUTF8String:service] ?: @"";
+        NSString *stageName = [NSString stringWithUTF8String:stage] ?: @"";
+        static NSSet<NSString *> *allowedStages;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            allowedStages = [NSSet setWithArray:@[
+                @"python_runner_entered", @"python_plugin_script_loading",
+                @"media_service_main_started", @"media_service_listener_bound",
+                @"media_engine_prepare_started", @"media_server_loop_started",
+                @"spider_module_import_started", @"spider_module_loaded",
+                @"spider_constructor_started", @"spider_init_started",
+                @"spider_init_succeeded", @"spider_ready", @"spider_prepare_failed"
+            ]];
+        });
+        if (!serviceID.length || ![allowedStages containsObject:stageName] || !RuntimeDiagnostics.shared.enabled)
+            Py_RETURN_NONE;
+        ensureMaps();
+        pthread_mutex_lock(&gLock);
+        PyHostTask *task = gTasks[serviceID];
+        pthread_mutex_unlock(&gLock);
+        if (task && !task.threadExited) recordPythonBreadcrumb(task, stageName);
+    }
+    Py_RETURN_NONE;
+}
 static PyObject *pyHostPythonException(PyObject *self, PyObject *args) {
     const char *service = NULL, *thread = NULL, *type = NULL, *file = NULL, *message = NULL, *traceback = NULL;
     int line = 0;
@@ -398,6 +426,7 @@ static PyObject *pyHostNodeCall(PyObject *self, PyObject *args) {
     }
 }
 static PyMethodDef writeMethod = {"_pyhost_write", pyHostWrite, METH_VARARGS, "Forward Python output to its service log."};
+static PyMethodDef pythonRuntimeStageMethod = {"_cctvhost_python_stage", pyHostRuntimeStage, METH_VARARGS, "Persist a bounded Python runtime phase for crash recovery diagnostics."};
 static PyMethodDef pythonExceptionMethod = {"_cctvhost_python_exception", pyHostPythonException, METH_VARARGS, "Persist and log an uncaught Python worker-thread exception."};
 static PyMethodDef pythonResourceLimitMethod = {"_cctvhost_python_resource_limit", pyHostPythonResourceLimit, METH_VARARGS, "Persist and log a Python service resource-limit rejection."};
 static PyMethodDef pythonHTTPWorkerRejectedMethod = {"_cctvhost_python_http_worker_rejected", pyHostPythonHTTPWorkerRejected, METH_VARARGS, "Persist and log a Python HTTP handler concurrency rejection."};
@@ -433,6 +462,7 @@ static BOOL initializeInterpreter(PyHostTask *task, NSError **failure) {
     if ([NSFileManager.defaultManager fileExistsAtPath:vendor]) { PyObject *site = PyUnicode_FromString(vendor.UTF8String); if (site && sysPath) PyList_Insert(sysPath, 0, site); Py_XDECREF(site); }
     PyObject *builtins = PyEval_GetBuiltins();
     gWriteFunction = PyCFunction_New(&writeMethod, NULL); PyDict_SetItemString(builtins, "_pyhost_write", gWriteFunction);
+    PyObject *pythonRuntimeStageFunction = PyCFunction_New(&pythonRuntimeStageMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_python_stage", pythonRuntimeStageFunction); Py_XDECREF(pythonRuntimeStageFunction);
     PyObject *pythonExceptionFunction = PyCFunction_New(&pythonExceptionMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_python_exception", pythonExceptionFunction); Py_XDECREF(pythonExceptionFunction);
     PyObject *pythonResourceLimitFunction = PyCFunction_New(&pythonResourceLimitMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_python_resource_limit", pythonResourceLimitFunction); Py_XDECREF(pythonResourceLimitFunction);
     PyObject *pythonHTTPWorkerRejectedFunction = PyCFunction_New(&pythonHTTPWorkerRejectedMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_python_http_worker_rejected", pythonHTTPWorkerRejectedFunction); Py_XDECREF(pythonHTTPWorkerRejectedFunction);

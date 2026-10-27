@@ -110,6 +110,11 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         self.assertIn('checkpointFields[@"process_phys_footprint_bytes"] = @(memoryInfo.phys_footprint)', DIAGNOSTICS)
         self.assertIn('[marker removeObjectForKey:@"process_phys_footprint_bytes"]', DIAGNOSTICS)
 
+    def test_lifecycle_labels_system_uptime_accurately_and_migrates_legacy_field(self):
+        self.assertIn('@"system_uptime_seconds":@(NSProcessInfo.processInfo.systemUptime)', APP_DELEGATE)
+        self.assertNotIn('@"process_uptime_seconds":@(NSProcessInfo.processInfo.systemUptime)', APP_DELEGATE)
+        self.assertIn('Older builds mislabeled NSProcessInfo.systemUptime', DIAGNOSTICS)
+
     def test_media_api_records_failure_stage_and_safe_playable_result_shape(self):
         for field in (
             'request_id', 'argument_count', 'failure_stage', 'http_status',
@@ -160,9 +165,24 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
             'recordEventSynchronously:', 'python-active-sessions',
             'python_runtime_breadcrumb', 'python_session_interrupted',
             'process_phys_footprint_bytes', 'script_name', 'last_runtime_stage',
-            'PluginLogStore.shared appendLine:',
+            'PluginLogStore.shared appendLine:', '_cctvhost_python_stage',
+            'python_runner_entered', 'python_plugin_script_loading',
+            'media_service_listener_bound', 'media_engine_prepare_started',
+            'media_server_loop_started', 'spider_module_import_started',
+            'spider_init_started', 'spider_ready',
         ):
             self.assertIn(token, PYHOST)
+        runtime = (ROOT / 'Scripts/host_service_runtime.py').read_text()
+        media_service = (ROOT / 'Plugins/media-service.py').read_text()
+        media_runtime = (ROOT / 'Plugins/host_media_runtime.py').read_text()
+        self.assertIn('report_runtime_stage(\'python_runner_entered\')', runtime)
+        self.assertIn('report_runtime_stage(\'python_plugin_script_loading\')', runtime)
+        for phase in ('media_service_listener_bound', 'media_engine_prepare_started',
+                      'media_server_loop_started'):
+            self.assertIn(phase, media_service)
+        for phase in ('spider_module_import_started', 'spider_module_loaded',
+                      'spider_constructor_started', 'spider_init_started', 'spider_ready'):
+            self.assertIn(phase, media_runtime)
         self.assertIn('recoverInterruptedPythonSessions', PYHOST)
         self.assertIn('[PyHost recoverInterruptedPythonSessions]', HOST)
 

@@ -174,8 +174,11 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     NSDictionary *previous = [self readSessionMarker];
     if ([previous[@"open"] boolValue]) {
         NSMutableDictionary *recovery = [NSMutableDictionary dictionary];
-        for (NSString *key in @[@"session_id", @"started_at", @"last_checkpoint", @"last_checkpoint_at", @"app_version", @"app_build", @"ios_version", @"application_state", @"process_uptime_seconds", @"process_phys_footprint_bytes", @"process_phys_footprint_sample_checkpoint", @"active_playback_attempt_id", @"active_playback_service_id", @"active_playback_source_host", @"active_playback_outcome", @"last_playback_attempt_id", @"last_playback_outcome", @"last_playback_source_host", @"last_playback_failure_kind", @"last_playback_http_status", @"last_playback_line_index", @"last_playback_episode_index"])
+        for (NSString *key in @[@"session_id", @"started_at", @"last_checkpoint", @"last_checkpoint_at", @"app_version", @"app_build", @"ios_version", @"application_state", @"system_uptime_seconds", @"process_phys_footprint_bytes", @"process_phys_footprint_sample_checkpoint", @"active_playback_attempt_id", @"active_playback_service_id", @"active_playback_source_host", @"active_playback_outcome", @"last_playback_attempt_id", @"last_playback_outcome", @"last_playback_source_host", @"last_playback_failure_kind", @"last_playback_http_status", @"last_playback_line_index", @"last_playback_episode_index"])
             if (previous[key]) recovery[key] = previous[key];
+        // Older builds mislabeled NSProcessInfo.systemUptime as process uptime.
+        if (!recovery[@"system_uptime_seconds"] && previous[@"process_uptime_seconds"])
+            recovery[@"system_uptime_seconds"] = previous[@"process_uptime_seconds"];
         recovery[@"termination_reason"] = @"unknown";
         recovery[@"interpretation"] = @"上次会话未记录到正常结束；可能是崩溃、系统回收、强制关闭或设备重启，不能仅据此判定原因";
         [self recordEventSynchronously:@"previous_session_unclosed" category:@"lifecycle" fields:recovery];
@@ -209,7 +212,7 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     marker[@"last_checkpoint"] = checkpoint;
     marker[@"last_checkpoint_at"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
     if (checkpointFields.count) {
-        for (NSString *key in @[@"app_version", @"app_build", @"ios_version", @"application_state", @"process_uptime_seconds", @"process_phys_footprint_bytes", @"process_phys_footprint_sample_checkpoint", @"active_playback_attempt_id", @"active_playback_service_id", @"active_playback_source_host", @"active_playback_outcome", @"last_playback_attempt_id", @"last_playback_outcome", @"last_playback_source_host", @"last_playback_failure_kind", @"last_playback_http_status", @"last_playback_line_index", @"last_playback_episode_index"])
+        for (NSString *key in @[@"app_version", @"app_build", @"ios_version", @"application_state", @"system_uptime_seconds", @"process_phys_footprint_bytes", @"process_phys_footprint_sample_checkpoint", @"active_playback_attempt_id", @"active_playback_service_id", @"active_playback_source_host", @"active_playback_outcome", @"last_playback_attempt_id", @"last_playback_outcome", @"last_playback_source_host", @"last_playback_failure_kind", @"last_playback_http_status", @"last_playback_line_index", @"last_playback_episode_index"])
             if (checkpointFields[key]) marker[key] = checkpointFields[key];
     }
     if (!checkpointFields[@"process_phys_footprint_bytes"]) {
@@ -436,7 +439,9 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
             if (self.enabled) {
                 NSDictionary *previous = [self readSessionMarker] ?: @{};
                 NSMutableDictionary *marker = [NSMutableDictionary dictionary];
-                for (NSString *key in @[@"started_at", @"app_version", @"app_build", @"ios_version", @"application_state", @"process_uptime_seconds"]) if (previous[key]) marker[key] = previous[key];
+                for (NSString *key in @[@"started_at", @"app_version", @"app_build", @"ios_version", @"application_state", @"system_uptime_seconds"]) if (previous[key]) marker[key] = previous[key];
+                if (!marker[@"system_uptime_seconds"] && previous[@"process_uptime_seconds"])
+                    marker[@"system_uptime_seconds"] = previous[@"process_uptime_seconds"];
                 marker[@"open"] = @YES; marker[@"session_id"] = self.sessionID ?: @"unknown"; marker[@"last_checkpoint"] = @"diagnostics_cleared"; marker[@"last_checkpoint_at"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
                 [self writeSessionMarker:marker];
             }
