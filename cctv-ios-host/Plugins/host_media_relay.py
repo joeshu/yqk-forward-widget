@@ -27,6 +27,10 @@ class ScopedRedirect(urllib.request.HTTPRedirectHandler):
         return redirected
 
 
+class RelayClientDisconnected(Exception):
+    pass
+
+
 class RelayFailure(Exception):
     def __init__(self, stage):
         super().__init__(stage)
@@ -256,6 +260,13 @@ class MediaRelay:
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
 
+    @staticmethod
+    def _write_client(handler, data):
+        try:
+            handler.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError) as error:
+            raise RelayClientDisconnected(type(error).__name__) from error
+
     def serve(self, handler, token, head=False):
         with self.lock:
             record = self.targets.get(token)
@@ -351,7 +362,7 @@ class MediaRelay:
                 handler.send_header('Connection', 'close')
                 handler.end_headers()
                 sent = True
-                handler.wfile.write(body)
+                self._write_client(handler, body)
                 return
             handler.send_response(response.status)
             for key in ('Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges'):
@@ -362,12 +373,19 @@ class MediaRelay:
             sent = True
             if not head:
                 if prefix:
-                    handler.wfile.write(prefix)
+                    self._write_client(handler, prefix)
                 while not self.stopping.is_set():
                     chunk = response.read(65536)
                     if not chunk:
                         break
-                    handler.wfile.write(chunk)
+                    self._write_client(handler, chunk)
+        except RelayClientDisconnected as error:
+            # Disconnection does not prove playback success or upstream failure.
+            print('[CCTVHostMediaRelay] ' + json.dumps({
+                'event': 'media_relay_client_disconnected',
+                'request_id': diagnostic_id or uuid.uuid4().hex,
+                'stage': 'client_write', 'error_type': str(error),
+            }, separators=(',', ':')))
         except urllib.error.HTTPError as error:
             status = error.code if 400 <= error.code <= 599 else 502
             self._failed(handler, 'upstream_http_error', diagnostic_id, url, status=status,

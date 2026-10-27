@@ -904,6 +904,36 @@ class Spider:
             for item in (upstream, server): item.shutdown();item.server_close()
             for thread in threads: thread.join(2)
 
+    def test_relay_client_disconnect_is_not_upstream_failure(self):
+        relay = MediaRelay()
+        token = relay.register('https://fixture.test/video.mp4?signature=private', {}, diagnostic_id='disconnect-trace')
+        response = mock.Mock(status=200)
+        response.headers = {'Content-Type': 'video/mp4'}
+        response.geturl.return_value = 'https://fixture.test/video.mp4'
+        response.read.side_effect = [b'data', b'']
+        handler = mock.Mock()
+        handler.headers = {}
+        handler.wfile.write.side_effect = BrokenPipeError('closed')
+        with mock.patch('urllib.request.build_opener') as opener, mock.patch('builtins.print') as log:
+            opener.return_value.open.return_value = response
+            relay.serve(handler, token)
+        records = [json.loads(c.args[0].split('] ', 1)[1]) for c in log.call_args_list]
+        self.assertEqual([r['event'] for r in records], ['media_relay_client_disconnected'])
+        self.assertEqual(records[0]['request_id'], 'disconnect-trace')
+        self.assertNotIn('private', json.dumps(records))
+        response.close.assert_called_once()
+        self.assertFalse(relay.responses)
+        response.reset_mock()
+        response.read.side_effect = ConnectionResetError('upstream reset')
+        handler.wfile.write.side_effect = None
+        with mock.patch('urllib.request.build_opener') as opener, mock.patch('builtins.print') as log:
+            opener.return_value.open.return_value = response
+            relay.serve(handler, token)
+        records = [json.loads(c.args[0].split('] ', 1)[1]) for c in log.call_args_list]
+        self.assertEqual(records[0]['event'], 'media_relay_failed')
+        response.close.assert_called_once()
+        relay.close()
+
     def test_relay_surfaces_upstream_status_and_logs_correlated_redacted_failure(self):
         received = []
         class Upstream(http.server.BaseHTTPRequestHandler):

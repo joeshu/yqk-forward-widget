@@ -47,3 +47,11 @@ HTTP 订阅事件使用相同的 `correlation_id` 串起开始、健康检查与
 Python 脚本与 CCTVHost 共享 App 进程。Python 级异常能被记录，但原生扩展触发的进程级崩溃无法由同一进程安全捕获；遇到此类情况，应将 `python_session_interrupted` 的阶段与系统生成的 `.ips` 崩溃栈对照。
 
 这些事件说明应用代码观察到的网络响应、服务状态和播放器回调，不代表服务内容一定可播，也不代表 AVPlayer 报告播放中就已经解码。真机复现时应开启诊断、记录问题发生时间、只复现一次并尽快导出日志，避免日志滚动覆盖关联事件。
+
+## 网页回退与实际解码证据
+
+网页回退沿用原播放的 `correlation_id`、`service_id` 和 `playback_attempt_id`。`web_media_extraction_started` 表示用户请求读取页面媒体；`web_media_extraction_failed` 区分 JavaScript 执行失败与没有有效 HTTP/HTTPS 媒体地址；`web_media_native_handoff` 只表示已取得地址并准备交回原生播放器，不能当成已出首帧。网页加载失败另记 `web_media_navigation_failed`。这些事件不记录页面正文、媒体完整地址、签名值或凭据。
+
+`media_relay_client_disconnected` 表示宿主向客户端写响应时收到断连，不再误报为 `media_relay_failed`。停止、拖动进度、播放器故障都可能产生断连，因此它既不证明播放成功，也不证明上游失败。上游读取时发生连接中断仍记为失败。
+
+FFmpeg 软件解码测试和 iPhone AVPlayer 验收分别记录。清单可读、分片可读、网页取得媒体地址、播放器报告 playing 都不能代替视频首帧；持续播放至少 5 秒还需要对应播放器的帧与进度证据，不能从中继传输耗时推断。

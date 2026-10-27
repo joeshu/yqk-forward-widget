@@ -1,5 +1,6 @@
 #import "MediaWebViewController.h"
 #import "HostTheme.h"
+#import "RuntimeDiagnostics.h"
 #import "MediaPlaybackHeaders.h"
 #import <WebKit/WebKit.h>
 @interface MediaWebViewController () <WKNavigationDelegate>
@@ -52,16 +53,23 @@
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:self.result[@"url"]] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25];request.allHTTPHeaderFields=MediaPlaybackHeadersFromResult(self.result);
     self.navigationItem.prompt=self.configurationPage?@"源配置 · 账号数据由此资源管理":@"网页播放 · 由当前来源提供";[self.spinner startAnimating];[self.web loadRequest:request];
 }
+- (void)recordMediaEvent:(NSString *)event fields:(NSDictionary *)extra {
+    if(self.configurationPage)return;
+    NSMutableDictionary *fields=[@{@"correlation_id":self.correlationID?:@"",@"service_id":self.serviceID?:@"",@"playback_attempt_id":self.playbackAttemptID?:@"",@"request_generation":@(self.mediaGeneration)} mutableCopy];
+    if(extra)[fields addEntriesFromDictionary:extra];
+    [RuntimeDiagnostics.shared recordEvent:event category:@"playback" fields:fields];
+}
 - (void)tryNativePlayback {
     if(self.didClose||self.resolvingMedia)return;
     if(!self.onResolvedMedia){if(self.onTryNativePlayback){self.didClose=YES;[self.web stopLoading];dispatch_block_t callback=self.onTryNativePlayback;self.onTryNativePlayback=nil;self.onClose=nil;[self dismissViewControllerAnimated:YES completion:callback];}return;}
     self.resolvingMedia=YES;self.nativeButton.enabled=NO;NSUInteger generation=++self.mediaGeneration;self.navigationItem.prompt=@"正在读取网页媒体地址…";
+    [self recordMediaEvent:@"web_media_extraction_started" fields:nil];
     NSString *script=@"(function scan(w){try{for(const v of w.document.querySelectorAll('video,audio')){const s=v.currentSrc||v.src;if(/^https?:/i.test(s))return s;}for(const f of w.frames){const s=scan(f);if(s)return s;}}catch(e){}return ''; })(window)";
     __weak typeof(self) weakSelf=self;
     [self.web evaluateJavaScript:script completionHandler:^(id value,NSError *error){
         MediaWebViewController *owner=weakSelf;if(!owner||owner.didClose||owner.mediaGeneration!=generation)return;
         NSString *raw=[value isKindOfClass:NSString.class]?value:@"";NSURL *url=[NSURL URLWithString:raw];
-        if(error||raw.length>8192||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||!url.host.length||url.user.length||url.password.length||[raw rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){owner.resolvingMedia=NO;owner.nativeButton.enabled=YES;owner.navigationItem.prompt=@"尚未取得可交给原生播放器的地址，请先在网页内开始播放";return;}
+        if(error||raw.length>8192||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||!url.host.length||url.user.length||url.password.length||[raw rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[owner recordMediaEvent:@"web_media_extraction_failed" fields:@{@"failure_stage":error?@"javascript_evaluation":@"no_valid_http_media",@"result_has_media_url":@(raw.length>0),@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];owner.resolvingMedia=NO;owner.nativeButton.enabled=YES;owner.navigationItem.prompt=@"尚未取得可交给原生播放器的地址，请先在网页内开始播放";return;}
         NSMutableDictionary *headers=[MediaPlaybackHeadersFromResult(owner.result) mutableCopy];
         // Page credentials must not be forwarded to a different media origin.
         for(NSString *key in headers.allKeys.copy)if([@[@"cookie",@"authorization",@"proxy-authorization"] containsObject:key.lowercaseString])[headers removeObjectForKey:key];
@@ -71,7 +79,7 @@
             NSMutableArray *matching=[NSMutableArray array];for(NSHTTPCookie *cookie in cookies){NSString *domain=cookie.domain.lowercaseString;BOOL subdomains=[domain hasPrefix:@"."];if(subdomains)domain=[domain substringFromIndex:1];BOOL host=[url.host.lowercaseString isEqual:domain]||(subdomains&&[url.host.lowercaseString hasSuffix:[@"." stringByAppendingString:domain]]);NSString *path=url.path.length?url.path:@"/";NSString *cp=cookie.path.length?cookie.path:@"/";BOOL pathMatch=[path isEqual:cp]||([path hasPrefix:cp]&&([cp hasSuffix:@"/"]||[path hasPrefix:[cp stringByAppendingString:@"/"]]));if(host&&pathMatch&&(!cookie.secure||[url.scheme.lowercaseString isEqual:@"https"])&&(!cookie.expiresDate||[cookie.expiresDate timeIntervalSinceNow]>0))[matching addObject:cookie];}
             [headers addEntriesFromDictionary:[NSHTTPCookie requestHeaderFieldsWithCookies:matching]];
             NSDictionary *resolved=@{@"url":raw,@"headers":headers,@"parse":@0,@"jx":@0,@"requiresWebPlayback":@NO};
-            page.didClose=YES;[page.web stopLoading];void (^callback)(NSDictionary *)=page.onResolvedMedia;page.onResolvedMedia=nil;page.onClose=nil;[page dismissViewControllerAnimated:YES completion:^{if(callback)callback(resolved);}];
+            [page recordMediaEvent:@"web_media_native_handoff" fields:@{@"result_has_media_url":@YES,@"transport_host":url.host.lowercaseString?:@"",@"request_header_count":@(headers.count),@"matched_cookie_count":@(matching.count)}];page.didClose=YES;[page.web stopLoading];void (^callback)(NSDictionary *)=page.onResolvedMedia;page.onResolvedMedia=nil;page.onClose=nil;[page dismissViewControllerAnimated:YES completion:^{if(callback)callback(resolved);}];
         });}];
     }];
 }
@@ -86,5 +94,5 @@
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {[self.spinner stopAnimating];self.navigationItem.prompt=nil;}
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self failed:error];}
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self failed:error];}
-- (void)failed:(NSError *)error {if(error.code==NSURLErrorCancelled)return;[self.spinner stopAnimating];self.navigationItem.prompt=error.localizedDescription;}
+- (void)failed:(NSError *)error {if(error.code==NSURLErrorCancelled)return;[self.spinner stopAnimating];[self recordMediaEvent:@"web_media_navigation_failed" fields:@{@"failure_stage":@"web_navigation",@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];self.navigationItem.prompt=error.localizedDescription;}
 @end
