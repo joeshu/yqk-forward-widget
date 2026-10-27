@@ -1140,10 +1140,11 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
         [owner applyHomeResult:result];
         if(owner.homeMode)[owner refreshHomeModules];
         if(owner.homeMode&&owner.homeCategories.count){owner.homeShelfGeneration=generation;[owner loadHomeShelves:owner.homeCategories index:0 generation:generation sourceID:requestedSourceID provider:requestedProvider];}
-        owner.readinessStageLabel.text=@"影视内容接口已读取 · 实际播放需以视频首帧确认";
+        BOOL recommendationsUnavailable=[result[@"recommendationsUnavailable"] isEqual:@YES];
+        owner.readinessStageLabel.text=recommendationsUnavailable?@"分类已读取 · 推荐加载失败，可选择分类继续浏览":@"影视内容接口已读取 · 实际播放需以视频首帧确认";
         [RuntimeDiagnostics.shared recordEvent:@"media_content_readable" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.source[@"id"]?:@"",@"content_count":@(owner.items.count),@"operation":@"home"}];
         if(owner.pendingBrowseState){[owner restorePendingBrowseState];return;}
-        [owner showMessage:owner.items.count?@"":@"选择分类或输入关键词搜索" loading:NO];
+        [owner showMessage:owner.items.count?@"":(recommendationsUnavailable?@"推荐暂不可用，请选择分类或输入关键词搜索":@"选择分类或输入关键词搜索") loading:NO];
     }];
 }
 - (void)applyHomeResult:(NSDictionary *)result {

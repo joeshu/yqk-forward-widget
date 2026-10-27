@@ -37,6 +37,17 @@ class Spider:
 
 
 class MediaTests(unittest.TestCase):
+    def test_home_preserves_only_structured_recommendation_failure(self):
+        for flag, expected in ((True, True), (False, False), ('true', False), (None, False)):
+            with self.subTest(flag=flag):
+                result = media.home({'class': [{'type_id': 'movie', 'type_name': 'Movies'}],
+                                     'recommendationsUnavailable': flag,
+                                     'warning': 'untrusted upstream message'})
+                self.assertIs(result['recommendationsUnavailable'], expected)
+                self.assertEqual(result['categories'][0]['id'], 'movie')
+                self.assertNotIn('warning', result)
+
+
     def test_html_playback_fallback_requests_web_resolution(self):
         with mock.patch.object(self.engine.spider, 'playerContent', return_value={
                 'url': 'https://fixture.test/play/one.html', 'parse': 0,

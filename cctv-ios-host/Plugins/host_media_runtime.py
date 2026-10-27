@@ -143,7 +143,8 @@ def home(value):
     return {'categories': [{'id': str(row.get('id', row.get('type_id', ''))),
                             'name': str(row.get('name', row.get('type_name', '')))}
                            for row in categories if isinstance(row, dict)],
-            'filters': value.get('filters', {}), 'items': cards(value)}
+            'filters': value.get('filters', {}), 'items': cards(value),
+            'recommendationsUnavailable': value.get('recommendationsUnavailable') is True}
 
 
 def detail(value, identifier):

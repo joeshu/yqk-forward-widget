@@ -124,7 +124,7 @@ class NodeMediaHostTests(unittest.TestCase):
         home=self.call('home',provider='demo')
         self.assertTrue(home['ok'],home)
         self.assertEqual(home['result']['class'][0]['type_id'],'movie')
-        self.assertIn('warning',home['result'])
+        self.assertIs(home['result']['recommendationsUnavailable'],True)
         self.assertNotIn('private upstream detail',json.dumps(home))
         category=self.call('category',provider='demo',categoryId='movie')
         self.assertEqual(category['result']['list'][0]['vod_id'],'one')
