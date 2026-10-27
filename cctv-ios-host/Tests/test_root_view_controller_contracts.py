@@ -118,6 +118,12 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("self.remoteFailureRecoveryPending", body)
         self.assertIn("generation!=self.playbackGeneration", body)
         self.assertIn("item!=self.avPlayer.currentItem", body)
+
+    def test_first_frame_watchdog_ignores_terminal_playback_failures(self):
+        body = method_body("- (void)startRemoteURL:")
+        guard = body.index("item.status==AVPlayerItemStatusFailed")
+        self.assertLess(guard, body.index('recordEvent:@"playback_first_frame_timeout"'))
+        self.assertIn("!w.remotePlaybackWanted", body)
         self.assertIn("[self recoverRemoteFailureForItem:n.object error:e]", method_body("- (void)avItemFailed:"))
         self.assertIn("[self recoverRemoteFailureForItem:item error:item.error]", method_body("- (void)observeValueForKeyPath:"))
 
