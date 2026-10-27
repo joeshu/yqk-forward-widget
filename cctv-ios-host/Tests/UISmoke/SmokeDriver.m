@@ -13,6 +13,8 @@
 #import "HostImageLoader.h"
 #import "NodePluginRuntime.h"
 #import "MediaBrowserViewController.h"
+#import "MediaGlobalSearchViewController.h"
+#import "MediaSearchResults.h"
 #import "LocalServiceReadiness.h"
 #import "RuntimeDiagnostics.h"
 #import "MediaPlaybackViewController.h"
@@ -61,6 +63,12 @@
 - (void)addSubscription;
 @end
 
+@interface MediaGlobalSearchViewController (SmokeSearch)
+- (void)updateFilters;
+- (void)selectSearchFilter:(UIButton *)sender;
+- (void)reloadSection:(NSUInteger)section;
+- (BOOL)isCurrentJob:(id)job;
+@end
 @interface MediaPlaybackViewController (SmokeEpisodePicker)
 - (void)openEpisodeSelection;
 @end
@@ -199,6 +207,10 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSDictionary *imageStats;
       __block NSDictionary *nodeChecks;
       __block MediaBrowserViewController *mediaPage;
+      __block MediaGlobalSearchViewController *searchPage;
+      __block CGPoint searchReturnOffset;
+      __block id staleSearchJob;
+      __block NSString *selectedSearchID;
       __block UIViewController *mediaDetail;
       __block MediaEpisodeSelectionViewController *mediaEpisodes;
       __block MediaPlaybackViewController *mediaPlayback;
@@ -756,6 +768,32 @@ static void next(NSArray *steps, NSUInteger index) {
           }},
           @{ @"until":^BOOL{return [SmokePresentedController(@[(UIViewController *)nav.topViewController,nav,root]) isKindOfClass:UIAlertController.class];}, @"run":^{
             TVBoxCatalogViewController *catalogPage=(id)nav.topViewController;UIAlertController *newActions=(id)SmokePresentedController(@[catalogPage,nav,root]);NSArray *newTitles=[newActions.actions valueForKey:@"title"];check([newTitles containsObject:@"导入并打开资源"]&&[newTitles containsObject:@"仅导入到资源页"],@"an unimported script offers explicit import-and-browse or import-only flow");[catalogPage dismissViewControllerAnimated:NO completion:nil];[TVBoxCatalogStore removeCatalog:catalogPage.catalog[@"id"]];[nav popViewControllerAnimated:NO];
+          }},
+          ^{
+            searchPage=[MediaGlobalSearchViewController new];searchPage.sources=@[@{@"id":@"search-a",@"name":@"影视合集"},@{@"id":@"search-stopped",@"name":@"未启动插件"},@{@"id":@"search-failed",@"name":@"失败来源"},@{@"id":@"search-empty",@"name":@"空结果来源"}];
+            [nav pushViewController:searchPage animated:NO];[searchPage loadViewIfNeeded];
+            NSMutableArray *entries=[NSMutableArray array];NSMutableArray *items=[NSMutableArray array];for(NSUInteger i=0;i<10;i++)[items addObject:@{@"id":[NSString stringWithFormat:@"film-%lu",(unsigned long)i],@"name":[NSString stringWithFormat:@"测试影片 %lu",(unsigned long)i+1],@"year":@2026,@"remarks":@"本机交互测试"}];
+            MediaSearchAppend(entries,items,@"a",@"站点甲",100);MediaSearchAppend(entries,items,@"b",@"站点乙",100);
+            NSMutableArray *rows=[NSMutableArray arrayWithArray:@[[ @{@"state":@"搜索中",@"results":entries,@"error":@"",@"providerStates":[@{@"a":@{@"name":@"站点甲",@"state":@"搜索中"},@"b":@{@"name":@"站点乙",@"state":@"搜索完成"}} mutableCopy]} mutableCopy],[@{@"state":@"服务未运行 · 点按启动",@"results":[NSMutableArray array],@"providerStates":[NSMutableDictionary dictionary]} mutableCopy],[@{@"state":@"搜索失败",@"error":@"测试健康检查失败",@"results":[NSMutableArray array],@"providerStates":[NSMutableDictionary dictionary]} mutableCopy],[@{@"state":@"无结果",@"results":[NSMutableArray array],@"providerStates":[NSMutableDictionary dictionary]} mutableCopy]]];
+            [searchPage setValue:rows forKey:@"rows"];[searchPage setValue:@20 forKey:@"resultCount"];[searchPage setValue:@"测试" forKey:@"keyword"];UISearchBar *bar=[searchPage valueForKey:@"searchBar"];bar.text=@"测试";
+            [searchPage updateFilters];[searchPage.tableView reloadData];[searchPage.view layoutIfNeeded];capture(self.window,@"21a-global-search-all");
+            NSArray *choices=[searchPage valueForKey:@"filterChoices"];NSUInteger filter=[choices indexOfObjectPassingTest:^BOOL(NSDictionary *choice,NSUInteger index,BOOL *stop){return [choice[@"provider"] isEqual:@"a"];}];
+            check(filter!=NSNotFound,@"global search exposes a station filter");if(filter!=NSNotFound){UIStackView *stack=[searchPage valueForKey:@"filterStack"];[searchPage selectSearchFilter:(UIButton *)stack.arrangedSubviews[filter]];}
+            check([searchPage.tableView numberOfRowsInSection:0]==11&&[searchPage.tableView numberOfRowsInSection:1]==0,@"station filter shows only its ten real fixture results");
+            searchPage.onSelectResult=^(NSDictionary *item,NSDictionary *source,NSString *provider){selectedSearchID=MediaSearchText(item[@"id"]);check([provider isEqual:@"a"],@"filtered tap keeps the correct provider");UIViewController *detail=[UIViewController new];detail.view.backgroundColor=HostBackground();detail.title=@"搜索返回测试";[nav pushViewController:detail animated:NO];};
+            [searchPage.tableView setContentOffset:CGPointMake(0,320) animated:NO];searchReturnOffset=searchPage.tableView.contentOffset;
+            [searchPage tableView:searchPage.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:0]];
+            check([selectedSearchID isEqual:@"film-1"],@"filtered result opens its own film");
+          },
+          ^{
+            NSMutableArray *rows=[searchPage valueForKey:@"rows"];MediaSearchAppend(rows[0][@"results"],@[@{@"id":@"late",@"name":@"稍后返回的测试结果"}],@"a",@"站点甲",100);[searchPage setValue:@21 forKey:@"resultCount"];[searchPage reloadSection:0];[nav popViewControllerAnimated:NO];
+          },
+          @{ @"until":^BOOL{return nav.topViewController==searchPage&&searchPage.view.window!=nil;},@"run":^{
+            check([[[searchPage valueForKey:@"searchBar"] text] isEqual:@"测试"]&&[[searchPage valueForKey:@"selectedProvider"] isEqual:@"a"],@"returning from detail preserves keyword and station filter");
+            check(fabs(searchPage.tableView.contentOffset.y-searchReturnOffset.y)<2,@"returning from detail preserves the reading offset");check([searchPage.tableView numberOfRowsInSection:0]==12,@"results received while reading detail are available on return");capture(self.window,@"21b-global-search-station");
+            staleSearchJob=[NSClassFromString(@"MediaGlobalSearchJob") new];[staleSearchJob setValue:@0 forKey:@"section"];[staleSearchJob setValue:[searchPage valueForKey:@"generation"] forKey:@"generation"];NSMutableDictionary *jobs=[searchPage valueForKey:@"jobs"];jobs[@0]=staleSearchJob;[searchPage setValue:@YES forKey:@"searching"];check([searchPage isCurrentJob:staleSearchJob],@"current search job is recognized before editing");
+            UISearchBar *bar=[searchPage valueForKey:@"searchBar"];bar.text=@"新关键词";[bar.delegate searchBar:bar textDidChange:bar.text];check(![searchPage isCurrentJob:staleSearchJob]&&jobs.count==0,@"editing a keyword invalidates and cancels all previous jobs");
+            bar.text=@"";[bar.delegate searchBar:bar textDidChange:bar.text];check([[searchPage valueForKey:@"rows"] count]==0&&[[searchPage valueForKey:@"resultCount"] unsignedIntegerValue]==0,@"clearing the keyword clears old results and counts");[nav popViewControllerAnimated:NO];
           }},
           ^{
             [nav popToRootViewControllerAnimated:NO];

@@ -489,6 +489,25 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('CCTV",@"频道",@"首页",@"资源",@"设置', self.root)
         self.assertIn('@"频道"', self.root)
 
+    def test_global_search_filters_restore_state_and_cancel_changed_queries(self):
+        search = (ROOT / 'Sources/MediaGlobalSearchViewController.m').read_text()
+        self.assertIn('media-search-station-filters', search)
+        self.assertIn('MediaSearchEntries(entries,provider).count', search)
+        self.assertIn('MediaSearchAppend(stored,items,providerID,providerName,remaining)', search)
+        self.assertIn('HostImageLoader.shared loadURL:', search)
+        self.assertIn('暂无影片信息', search)
+        self.assertIn('@"无结果"', search)
+        self.assertIn('@"来源失败"', search)
+        changed = search.split('textDidChange:(NSString *)searchText', 1)[1].split('- (BOOL)sourceAvailableForSearch:', 1)[0]
+        self.assertIn('[self cancelSearch]', changed)
+        self.assertIn('[self cancelJobsAndAdvanceGeneration]', changed)
+        self.assertIn('self.keyword=@""', changed)
+        self.assertIn('self.savedSearchOffset=self.tableView.contentOffset', search)
+        self.assertIn('[self restoreReadingPosition:self.savedReadingPosition]', search)
+        self.assertIn('if(!self.resultsVisible){return;}', search)
+        self.assertIn('job.generation == self.generation', search)
+        self.assertIn('self.jobs[@(job.section)] == job', search)
+
     def test_global_search_reports_each_source_and_retries_failures(self):
         search = (ROOT / 'Sources/MediaGlobalSearchViewController.m').read_text()
         self.assertIn('已完成 %lu / %lu 个资源', search)

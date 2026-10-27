@@ -4,6 +4,8 @@
 #import "HostTheme.h"
 #import "PyHost.h"
 #import "MediaSourceHealthStore.h"
+#import "HostImageLoader.h"
+#import "MediaSearchResults.h"
 #import <math.h>
 
 static const NSUInteger MediaGlobalSearchMaximumResults = 100;
@@ -24,10 +26,44 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 @end
 @implementation MediaGlobalSearchJob @end
 
+@interface MediaSearchResultCell : UITableViewCell
+@property(nonatomic,strong) UIImageView *poster;
+@property(nonatomic,strong) UILabel *nameLabel;
+@property(nonatomic,strong) UILabel *metadataLabel;
+@property(nonatomic,strong) UILabel *sourceLabel;
+@property(nonatomic,copy) NSDictionary *searchEntry;
+@end
+@implementation MediaSearchResultCell
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)identifier {
+    if((self=[super initWithStyle:style reuseIdentifier:identifier])){
+        self.poster=[UIImageView new];self.poster.translatesAutoresizingMaskIntoConstraints=NO;self.poster.contentMode=UIViewContentModeScaleAspectFill;self.poster.clipsToBounds=YES;self.poster.layer.cornerRadius=10;
+        self.nameLabel=[UILabel new];self.nameLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];self.nameLabel.numberOfLines=2;
+        self.metadataLabel=[UILabel new];self.metadataLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.metadataLabel.numberOfLines=2;
+        self.sourceLabel=[UILabel new];self.sourceLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];self.sourceLabel.numberOfLines=2;
+        for(UILabel *label in @[self.nameLabel,self.metadataLabel,self.sourceLabel])label.adjustsFontForContentSizeCategory=YES;
+        UIStackView *text=[[UIStackView alloc] initWithArrangedSubviews:@[self.nameLabel,self.metadataLabel,self.sourceLabel]];text.axis=UILayoutConstraintAxisVertical;text.spacing=6;text.translatesAutoresizingMaskIntoConstraints=NO;
+        [self.contentView addSubview:self.poster];[self.contentView addSubview:text];
+        [NSLayoutConstraint activateConstraints:@[[self.poster.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],[self.poster.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],[self.poster.widthAnchor constraintEqualToConstant:66],[self.poster.heightAnchor constraintEqualToConstant:96],[self.poster.bottomAnchor constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor constant:-12],[text.leadingAnchor constraintEqualToAnchor:self.poster.trailingAnchor constant:14],[text.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],[text.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],[text.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-12]]];
+    }return self;
+}
+- (void)prepareForReuse {[super prepareForReuse];self.poster.image=nil;self.poster.accessibilityIdentifier=nil;self.searchEntry=nil;}
+@end
+
 @interface MediaGlobalSearchViewController () <UISearchBarDelegate>
 @property(nonatomic,strong) UISearchBar *searchBar;
 @property(nonatomic,strong) UIButton *historyButton;
 @property(nonatomic,strong) UILabel *progressLabel;
+@property(nonatomic,strong) UIScrollView *filterScroll;
+@property(nonatomic,strong) UIStackView *filterStack;
+@property(nonatomic,copy) NSArray<NSDictionary *> *filterChoices;
+@property(nonatomic) NSInteger selectedSourceSection;
+@property(nonatomic,copy) NSString *selectedProvider;
+@property(nonatomic) BOOL resultsVisible;
+@property(nonatomic) BOOL restoringSearch;
+@property(nonatomic) CGPoint savedSearchOffset;
+@property(nonatomic,copy) NSDictionary *savedReadingPosition;
+@property(nonatomic,strong) NSMutableDictionary<NSString *,NSDictionary *> *filterOffsets;
+
 @property(nonatomic,strong) NSMutableArray<NSMutableDictionary *> *rows;
 @property(nonatomic,strong) NSMutableDictionary<NSNumber *,MediaGlobalSearchJob *> *jobs;
 @property(nonatomic,strong) NSMutableArray<NSNumber *> *pendingSections;
@@ -40,6 +76,11 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 @property(nonatomic) BOOL resultLimitReached;
 @property(nonatomic,copy) NSString *keyword;
 @property(nonatomic,copy) NSArray<NSString *> *searchHistory;
+- (void)updateFilters;
+- (NSArray *)visibleEntriesForSection:(NSInteger)section;
+- (void)restoreOffset:(CGPoint)offset;
+- (NSDictionary *)readingPosition;
+- (void)restoreReadingPosition:(NSDictionary *)position;
 - (void)sortPendingSectionsByHealth;
 - (void)showSearchHistory;
 - (void)rememberSearchKeyword:(NSString *)keyword;
@@ -61,7 +102,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     self.jobs = [NSMutableDictionary dictionary];
     self.pendingSections = [NSMutableArray array];
     self.retrySections = [NSMutableSet set];
-    self.keyword = @"";
+    self.keyword = @"";self.selectedSourceSection=-1;self.filterOffsets=[NSMutableDictionary dictionary];
     NSArray *history=[NSUserDefaults.standardUserDefaults arrayForKey:@"media.globalSearchHistory.v1"];
     self.searchHistory=[history isKindOfClass:NSArray.class]?history:@[];
 
@@ -91,6 +132,10 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     self.progressLabel.numberOfLines = 0;
     self.progressLabel.text = @"各来源独立显示搜索进度；未运行的插件不会自动启动。";
     [header addSubview:self.progressLabel];
+    self.filterScroll=[UIScrollView new];self.filterScroll.translatesAutoresizingMaskIntoConstraints=NO;self.filterScroll.showsHorizontalScrollIndicator=NO;self.filterScroll.accessibilityIdentifier=@"media-search-station-filters";
+    self.filterStack=[[UIStackView alloc] initWithFrame:CGRectZero];self.filterStack.translatesAutoresizingMaskIntoConstraints=NO;self.filterStack.axis=UILayoutConstraintAxisHorizontal;self.filterStack.spacing=8;
+    [header addSubview:self.filterScroll];[self.filterScroll addSubview:self.filterStack];
+    [NSLayoutConstraint activateConstraints:@[[self.filterScroll.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16],[self.filterScroll.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16],[self.filterScroll.topAnchor constraintEqualToAnchor:self.progressLabel.bottomAnchor constant:10],[self.filterScroll.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-10],[self.filterScroll.heightAnchor constraintEqualToAnchor:self.filterStack.heightAnchor],[self.filterStack.leadingAnchor constraintEqualToAnchor:self.filterScroll.contentLayoutGuide.leadingAnchor],[self.filterStack.trailingAnchor constraintEqualToAnchor:self.filterScroll.contentLayoutGuide.trailingAnchor],[self.filterStack.topAnchor constraintEqualToAnchor:self.filterScroll.contentLayoutGuide.topAnchor],[self.filterStack.bottomAnchor constraintEqualToAnchor:self.filterScroll.contentLayoutGuide.bottomAnchor]]];
     [NSLayoutConstraint activateConstraints:@[
         [self.searchBar.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:8],
         [self.searchBar.trailingAnchor constraintEqualToAnchor:self.historyButton.leadingAnchor constant:-4],
@@ -101,11 +146,11 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         [self.progressLabel.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:20],
         [self.progressLabel.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-20],
         [self.progressLabel.topAnchor constraintEqualToAnchor:self.searchBar.bottomAnchor constant:2],
-        [self.progressLabel.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-8]
+        [self.progressLabel.heightAnchor constraintGreaterThanOrEqualToConstant:18]
     ]];
     self.tableView.tableHeaderView = header;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"搜索" style:UIBarButtonItemStyleDone target:self action:@selector(submitSearch)];
-    [self.tableView reloadData];
+    [self updateFilters];[self.tableView reloadData];
 }
 
 - (void)viewDidLayoutSubviews {
@@ -123,6 +168,97 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     }
 }
 
+- (NSString *)filterPositionKey {
+    return [NSString stringWithFormat:@"%ld:%@",(long)self.selectedSourceSection,self.selectedProvider?:@"*"];
+}
+- (NSArray *)visibleEntriesForSection:(NSInteger)section {
+    if(section<0||(NSUInteger)section>=self.rows.count)return @[];
+    NSArray *entries=self.rows[section][@"results"];
+    return MediaSearchEntries(entries,self.selectedProvider);
+}
+- (void)restoreOffset:(CGPoint)offset {
+    CGFloat minimum=-self.tableView.adjustedContentInset.top;
+    CGFloat maximum=MAX(minimum,self.tableView.contentSize.height-self.tableView.bounds.size.height+self.tableView.adjustedContentInset.bottom);
+    [self.tableView setContentOffset:CGPointMake(0,MIN(MAX(offset.y,minimum),maximum)) animated:NO];
+}
+- (NSDictionary *)readingPosition {
+    CGPoint offset=self.tableView.contentOffset;
+    for(NSIndexPath *path in [self.tableView.indexPathsForVisibleRows sortedArrayUsingSelector:@selector(compare:)]){
+        UITableViewCell *cell=[self.tableView cellForRowAtIndexPath:path];
+        if(![cell isKindOfClass:MediaSearchResultCell.class])continue;
+        NSDictionary *entry=((MediaSearchResultCell *)cell).searchEntry;if(!entry)continue;
+        return @{@"section":@(path.section),@"identity":MediaSearchIdentity(MediaSearchText(entry[@"provider"]),entry[@"item"][@"id"]?:entry[@"item"][@"name"]),@"delta":@([self.tableView rectForRowAtIndexPath:path].origin.y-offset.y),@"offset":@(offset.y)};
+    }
+    return @{@"offset":@(offset.y)};
+}
+- (void)restoreReadingPosition:(NSDictionary *)position {
+    if(!position){[self restoreOffset:CGPointMake(0,-self.tableView.adjustedContentInset.top)];return;}
+    NSInteger section=[position[@"section"] integerValue];NSArray *entries=[self visibleEntriesForSection:section];
+    if(position[@"identity"]&&(self.selectedSourceSection<0||self.selectedSourceSection==section)){
+        for(NSUInteger index=0;index<entries.count;index++){
+            NSDictionary *entry=entries[index];NSString *identity=MediaSearchIdentity(MediaSearchText(entry[@"provider"]),entry[@"item"][@"id"]?:entry[@"item"][@"name"]);
+            if([identity isEqual:position[@"identity"]]){CGFloat y=[self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:index+1 inSection:section]].origin.y-[position[@"delta"] doubleValue];[self restoreOffset:CGPointMake(0,y)];return;}
+        }
+    }
+    [self restoreOffset:CGPointMake(0,[position[@"offset"] doubleValue])];
+}
+- (void)updateFilters {
+    if(!self.filterStack)return;
+    CGPoint offset=self.filterScroll.contentOffset;
+    NSMutableArray *choices=[NSMutableArray arrayWithObject:@{@"section":@(-1),@"name":@"全部",@"count":@(self.resultCount)}];
+    for(NSUInteger section=0;section<self.rows.count;section++){
+        NSDictionary *row=self.rows[section];NSArray *entries=row[@"results"];
+        [choices addObject:@{@"section":@(section),@"name":MediaSearchText(self.sources[section][@"name"]),@"count":@(entries.count)}];
+        NSDictionary *states=row[@"providerStates"];
+        for(NSString *provider in [states.allKeys sortedArrayUsingSelector:@selector(compare:)]){
+            NSDictionary *station=states[provider];
+            [choices addObject:@{@"section":@(section),@"provider":provider,@"name":MediaSearchText(station[@"name"]),@"count":@(MediaSearchEntries(entries,provider).count),@"state":station[@"state"]?:@""}];
+        }
+    }
+    if([self.filterChoices isEqual:choices])return;
+    self.filterChoices=choices;
+    while(self.filterStack.arrangedSubviews.count>choices.count){UIView *view=self.filterStack.arrangedSubviews.lastObject;[self.filterStack removeArrangedSubview:view];[view removeFromSuperview];}
+    for(NSUInteger index=0;index<choices.count;index++){
+        NSDictionary *choice=choices[index];UIButton *button;
+        if(index<self.filterStack.arrangedSubviews.count)button=(UIButton *)self.filterStack.arrangedSubviews[index];
+        else{button=[UIButton buttonWithType:UIButtonTypeSystem];[button addTarget:self action:@selector(selectSearchFilter:) forControlEvents:UIControlEventTouchUpInside];[button.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;[self.filterStack addArrangedSubview:button];}
+        NSString *title=[NSString stringWithFormat:@"%@ %@",choice[@"name"],choice[@"count"]];
+        [button setTitle:title forState:UIControlStateNormal];button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.contentEdgeInsets=UIEdgeInsetsMake(10,14,10,14);button.layer.cornerRadius=20;
+        BOOL selected=[choice[@"section"] integerValue]==self.selectedSourceSection&&((!choice[@"provider"]&&!self.selectedProvider)||[choice[@"provider"] isEqual:self.selectedProvider]);
+        button.backgroundColor=selected?[HostAccent() colorWithAlphaComponent:0.15]:HostNeutralSurface();[button setTitleColor:selected?HostAccent():HostText() forState:UIControlStateNormal];button.accessibilityTraits=UIAccessibilityTraitButton|(selected?UIAccessibilityTraitSelected:0);button.accessibilityLabel=[NSString stringWithFormat:@"%@，%@ 条结果，%@",choice[@"name"],choice[@"count"],choice[@"state"]?:@"来源筛选"];button.accessibilityIdentifier=[NSString stringWithFormat:@"media-search-filter-%lu",(unsigned long)index];button.tag=index;
+    }
+    [self.filterScroll layoutIfNeeded];self.filterScroll.contentOffset=offset;
+}
+- (void)selectSearchFilter:(UIButton *)sender {
+    if(sender.tag<0||(NSUInteger)sender.tag>=self.filterChoices.count)return;
+    self.filterOffsets[self.filterPositionKey]=[self readingPosition];
+    NSDictionary *choice=self.filterChoices[sender.tag];self.selectedSourceSection=[choice[@"section"] integerValue];self.selectedProvider=choice[@"provider"];
+    [self updateFilters];[self.tableView reloadData];[self.tableView layoutIfNeeded];
+    [self restoreReadingPosition:self.filterOffsets[self.filterPositionKey]];
+    UIAccessibilityPostNotification(UIAccessibilityLayoutChangedNotification,self.filterScroll);
+}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];self.resultsVisible=YES;
+    if(self.restoringSearch){[self updateFilters];[self.tableView reloadData];[self.tableView layoutIfNeeded];[self restoreReadingPosition:self.savedReadingPosition];self.restoringSearch=NO;}
+}
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];self.savedSearchOffset=self.tableView.contentOffset;self.savedReadingPosition=[self readingPosition];self.resultsVisible=NO;self.restoringSearch=YES;
+}
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+    // Pushing a film detail keeps this controller in the stack and preserves the
+    // ongoing bounded search. An actual pop/dismiss invalidates its callbacks.
+    if(![self.navigationController.viewControllers containsObject:self]&&!self.presentingViewController){[self cancelJobsAndAdvanceGeneration];self.searching=NO;}
+}
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
+    NSString *query=[searchText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if([query isEqual:self.keyword])return;
+    if(self.searching)[self cancelSearch];else [self cancelJobsAndAdvanceGeneration];
+    self.navigationItem.rightBarButtonItem.title=@"搜索";self.navigationItem.rightBarButtonItem.action=@selector(submitSearch);
+    if(!query.length){self.keyword=@"";self.resultCount=0;[self.rows removeAllObjects];self.selectedSourceSection=-1;self.selectedProvider=nil;[self.filterOffsets removeAllObjects];[self updateFilters];[self.tableView reloadData];}
+    self.progressLabel.text=query.length?@"关键词已修改 · 按搜索开始；当前保留上次结果":@"请输入影片名称搜索";
+}
+
 - (BOOL)sourceAvailableForSearch:(NSDictionary *)source {
     if (MediaSourceUsesNativeCatalogAPI(source)) return YES;
     NSString *identifier = [source[@"id"] isKindOfClass:NSString.class] ? source[@"id"] : @"";
@@ -133,9 +269,11 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     [self.searchBar resignFirstResponder];
     NSString *query = [self.searchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (!query.length) {
+        [self searchBar:self.searchBar textDidChange:@""];
         self.progressLabel.text = @"请输入关键词。各来源将分别显示进度和结果。";
         return;
     }
+    self.selectedSourceSection=-1;self.selectedProvider=nil;[self.filterOffsets removeAllObjects];
     self.keyword = query;
     [self rememberSearchKeyword:query];
     [self cancelJobsAndAdvanceGeneration];
@@ -143,7 +281,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     for (NSUInteger index = 0; index < self.sources.count; index++) {
         NSDictionary *source = self.sources[index];
         BOOL available = [self sourceAvailableForSearch:source];
-        [self.rows addObject:[@{@"state":available?@"等待搜索":@"服务未运行 · 点按启动", @"results":[NSMutableArray array], @"error":@"", @"provider":@"", @"providerError":@"", @"failedProviders":@[]} mutableCopy]];
+        [self.rows addObject:[@{@"state":available?@"等待搜索":@"服务未运行 · 点按启动", @"results":[NSMutableArray array], @"error":@"", @"provider":@"", @"providerError":@"", @"failedProviders":@[], @"providerStates":[NSMutableDictionary dictionary]} mutableCopy]];
         if (available) [self.pendingSections addObject:@(index)];
     }
     [self sortPendingSectionsByHealth];
@@ -156,7 +294,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     self.navigationItem.rightBarButtonItem.title = self.searching ? @"停止" : @"重试失败";
     self.navigationItem.rightBarButtonItem.action = self.searching ? @selector(cancelSearch) : @selector(retryFailedSources);
     [self updateProgress];
-    [self.tableView reloadData];
+    [self updateFilters];[self.tableView reloadData];
     [self scheduleSources];
 }
 
@@ -202,14 +340,15 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     if (!self.searching) return;
     [self cancelJobsAndAdvanceGeneration];
     for (NSMutableDictionary *row in self.rows) {
-        if ([row[@"state"] isEqual:@"搜索中"] || [row[@"state"] isEqual:@"等待搜索"]) row[@"state"] = @"已取消";
+        NSMutableDictionary *states=row[@"providerStates"];for(NSString *key in states.allKeys){NSDictionary *state=states[key];if([@[@"搜索中",@"等待搜索"] containsObject:state[@"state"]])states[key]=@{@"name":state[@"name"],@"state":@"已取消"};}
+        if ([@[@"搜索中",@"等待搜索",@"等待重试",@"等待健康检查"] containsObject:row[@"state"]]) row[@"state"] = @"已取消";
         else if ([[row[@"state"] description] containsString:@"正在请求启动"]) row[@"state"] = @"启动请求仍在处理 · 点按此来源继续检查";
     }
     self.searching = NO;
     self.navigationItem.rightBarButtonItem.title = @"重试失败";
     self.navigationItem.rightBarButtonItem.action = @selector(retryFailedSources);
     self.progressLabel.text = [NSString stringWithFormat:@"搜索已停止 · 已保留 %lu 条已读取结果。", (unsigned long)self.resultCount];
-    [self.tableView reloadData];
+    [self updateFilters];[self.tableView reloadData];
 }
 
 - (void)scheduleSources {
@@ -302,7 +441,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
             if (!valid.count) { [page finishJob:job error:[NSError errorWithDomain:@"CCTVHostSearch" code:3 userInfo:@{NSLocalizedDescriptionKey:@"资源没有可搜索的影视站点。"}]]; return; }
             NSArray *retryTargets=[page.rows[job.section][@"retryProviders"] isKindOfClass:NSArray.class]?page.rows[job.section][@"retryProviders"]:@[];
             if(retryTargets.count){NSMutableArray *retry=[NSMutableArray array];for(NSDictionary *target in retryTargets)for(NSDictionary *candidate in valid)if([candidate[@"id"] isEqual:target[@"id"]]){[retry addObject:candidate];break;}job.providers=retry.count?retry:valid;}else job.providers=valid;
-            job.failedProviders=@[];page.rows[job.section][@"retryProviders"]=@[];
+            job.failedProviders=@[];page.rows[job.section][@"retryProviders"]=@[];for(NSDictionary *station in job.providers){NSMutableDictionary *states=page.rows[job.section][@"providerStates"];states[station[@"id"]]=@{@"name":station[@"name"],@"state":@"等待搜索"};}[page updateFilters];
             [page searchNextProviderForJob:job];
         }];
     }];
@@ -320,6 +459,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     NSString *providerID = [provider[@"id"] isKindOfClass:NSString.class] ? provider[@"id"] : @"";
     NSString *providerName = [provider[@"name"] isKindOfClass:NSString.class] ? provider[@"name"] : @"影视站点";
     self.rows[job.section][@"provider"] = providerName;
+    self.rows[job.section][@"providerStates"][providerID]=@{@"name":providerName,@"state":@"搜索中"};
     [self reloadSection:job.section];
     NSMutableDictionary *arguments = [@{@"keyword":self.keyword?:@"", @"page":@1} mutableCopy];
     if (providerID.length) arguments[@"provider"] = providerID;
@@ -332,6 +472,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
             NSMutableDictionary *row = owner.rows[job.section];
             NSDictionary *failedProvider=@{@"id":providerID,@"name":providerName};NSMutableArray *failed=[job.failedProviders mutableCopy]?:[NSMutableArray array];[failed addObject:failedProvider];job.failedProviders=failed;
             NSMutableArray *rowFailures=[row[@"failedProviders"] mutableCopy]?:[NSMutableArray array];[rowFailures addObject:failedProvider];row[@"failedProviders"]=rowFailures;
+            row[@"providerStates"][providerID]=@{@"name":providerName,@"state":@"来源失败",@"error":message};
             row[@"providerError"] = [NSString stringWithFormat:@"%@：%@", providerName, message];
             if (!job.providerFailure.length) job.providerFailure = row[@"providerError"];
             [owner reloadSection:job.section];
@@ -342,25 +483,9 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         NSDictionary *searchPayload = [result isKindOfClass:NSDictionary.class] ? result : @{};
         NSArray *items = [searchPayload[@"items"] isKindOfClass:NSArray.class] ? searchPayload[@"items"] : @[];
         NSMutableArray *stored = owner.rows[job.section][@"results"];
-        NSMutableSet *existing = [NSMutableSet set];
-        for (NSDictionary *entry in stored) {
-            id identifier = entry[@"item"][@"id"];
-            if (identifier) [existing addObject:[NSString stringWithFormat:@"%@|%@", providerID, identifier]];
-        }
-        for (id candidate in items) {
-            if (owner.resultCount >= MediaGlobalSearchMaximumResults) break;
-            if (![candidate isKindOfClass:NSDictionary.class]) continue;
-                if([candidate[@"searchable"] isKindOfClass:NSNumber.class]&&![candidate[@"searchable"] boolValue])continue;
-            NSDictionary *item = candidate;
-            NSString *name = [item[@"name"] isKindOfClass:NSString.class] ? item[@"name"] : @"";
-            if (!name.length) continue;
-            id identifier = item[@"id"] ?: name;
-            NSString *dedupeKey = [NSString stringWithFormat:@"%@|%@", providerID, identifier];
-            if ([existing containsObject:dedupeKey]) continue;
-            [existing addObject:dedupeKey];
-            [stored addObject:@{@"item":item, @"provider":providerID, @"providerName":providerName}];
-            owner.resultCount++;
-        }
+        NSUInteger remaining=owner.resultCount<MediaGlobalSearchMaximumResults?MediaGlobalSearchMaximumResults-owner.resultCount:0;
+        owner.resultCount+=MediaSearchAppend(stored,items,providerID,providerName,remaining);
+        owner.rows[job.section][@"providerStates"][providerID]=@{@"name":providerName,@"state":MediaSearchEntries(stored,providerID).count?@"搜索完成":@"无结果"};
         [owner reloadSection:job.section];
         [owner updateProgress];
         if (owner.resultCount >= MediaGlobalSearchMaximumResults) { [owner stopAtResultLimit]; return; }
@@ -383,7 +508,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         self.rows[job.section][@"error"] = [NSString stringWithFormat:@"%lu 个影视站点失败：%@ · 点按只重试失败站点",(unsigned long)job.failedProviders.count,[names componentsJoinedByString:@"、"]];
         self.rows[job.section][@"failedProviders"] = job.failedProviders;
     } else {
-        self.rows[job.section][@"state"] = @"搜索完成";
+        self.rows[job.section][@"state"] = [self.rows[job.section][@"results"] count]?@"搜索完成":@"无结果";
         self.rows[job.section][@"error"] = @"";
         self.rows[job.section][@"failedProviders"] = @[];
     }
@@ -396,6 +521,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 - (void)stopAtResultLimit {
     if (self.resultLimitReached) return;
     self.resultLimitReached = YES;
+    for(NSMutableDictionary *row in self.rows){NSMutableDictionary *states=row[@"providerStates"];for(NSString *key in states.allKeys){NSDictionary *state=states[key];if([@[@"等待搜索",@"搜索中"] containsObject:state[@"state"]])states[key]=@{@"name":state[@"name"],@"state":@"已达结果上限"};}}
     self.searching = NO;
     self.generation++;
     for (MediaGlobalSearchJob *job in self.jobs.allValues) {
@@ -409,7 +535,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     self.navigationItem.rightBarButtonItem.title = @"重试失败";
     self.navigationItem.rightBarButtonItem.action = @selector(retryFailedSources);
     self.progressLabel.text = [NSString stringWithFormat:@"结果达到 %lu 条上限 · 可滚动查看已找到的结果。", (unsigned long)MediaGlobalSearchMaximumResults];
-    [self.tableView reloadData];
+    if(self.resultsVisible){[self updateFilters];[self.tableView reloadData];}
 }
 
 - (void)retryFailedSources {
@@ -442,7 +568,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     self.navigationItem.rightBarButtonItem.title = @"停止";
     self.navigationItem.rightBarButtonItem.action = @selector(cancelSearch);
     self.progressLabel.text = [NSString stringWithFormat:@"正在重试 %lu 个失败来源。", (unsigned long)failed.count];
-    [self.tableView reloadData];
+    [self updateFilters];[self.tableView reloadData];
     [self scheduleSources];
 }
 
@@ -503,30 +629,42 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     }
     NSUInteger active = self.jobs.count;
     NSUInteger queued = self.pendingSections.count;
+    NSUInteger stations=0,finishedStations=0;
+    for(NSDictionary *row in self.rows)for(NSDictionary *station in [row[@"providerStates"] allValues]){stations++;if([@[@"搜索完成",@"无结果",@"来源失败"] containsObject:station[@"state"]])finishedStations++;}
     NSString *mode = self.retrySections.count ? @"重试失败来源 · " : @"";
     self.progressLabel.text = [NSString stringWithFormat:@"%@已完成 %lu / %lu 个资源 · 同时搜索 %lu 个 · 排队 %lu 个 · 找到 %lu 条", mode, (unsigned long)self.completedCount, (unsigned long)denominator, (unsigned long)active, (unsigned long)queued, (unsigned long)self.resultCount];
+    if(stations)self.progressLabel.text=[self.progressLabel.text stringByAppendingFormat:@" · 站点 %lu / %lu",(unsigned long)finishedStations,(unsigned long)stations];
 }
 
 - (void)reloadSection:(NSUInteger)section {
     if (section >= self.rows.count || section >= [self numberOfSectionsInTableView:self.tableView]) return;
+    if(!self.resultsVisible){return;}
+    [self updateFilters];
+    NSDictionary *position=[self readingPosition];
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:section] withRowAnimation:UITableViewRowAnimationNone];
+    [self.tableView layoutIfNeeded];[self restoreReadingPosition:position];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.sources.count; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if(self.selectedSourceSection>=0&&section!=self.selectedSourceSection)return 0;
     if (section >= self.rows.count) return 1;
-    return 1 + [self.rows[section][@"results"] count];
+    return 1 + [self visibleEntriesForSection:section].count;
 }
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
+    return self.selectedSourceSection>=0&&section!=self.selectedSourceSection?CGFLOAT_MIN:UITableViewAutomaticDimension;
+}
+- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section {return CGFLOAT_MIN;}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if (section >= self.sources.count) return nil;
-    return self.sources[section][@"name"] ?: @"影视来源";
+    if (section >= self.sources.count||(self.selectedSourceSection>=0&&section!=self.selectedSourceSection)) return nil;
+    return [NSString stringWithFormat:@"%@ · %lu",self.sources[section][@"name"]?:@"影视来源",(unsigned long)[self visibleEntriesForSection:section].count];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     static NSString *statusReuse = @"media-search-status";
     static NSString *resultReuse = @"media-search-result";
     BOOL statusRow = indexPath.row == 0;
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:statusRow ? statusReuse : resultReuse];
-    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:statusRow ? statusReuse : resultReuse];
+    if (!cell) cell = statusRow?[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:statusReuse]:[[MediaSearchResultCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:resultReuse];
     cell.backgroundColor = HostCard();
     cell.textLabel.textColor = HostText();
     cell.detailTextLabel.textColor = HostSecondaryText();
@@ -537,9 +675,10 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     if (statusRow) {
         cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
         cell.textLabel.adjustsFontForContentSizeCategory = YES;
-        cell.textLabel.text = row[@"state"] ?: @"待搜索";
-        NSString *error = [row[@"error"] isKindOfClass:NSString.class] ? row[@"error"] : @"";
-        NSString *providerError = [row[@"providerError"] isKindOfClass:NSString.class] ? row[@"providerError"] : @"";
+        NSDictionary *station=self.selectedProvider?row[@"providerStates"][self.selectedProvider]:nil;
+        cell.textLabel.text = station?station[@"state"]:(row[@"state"] ?: @"待搜索");
+        NSString *error = station?MediaSearchText(station[@"error"]):([row[@"error"] isKindOfClass:NSString.class] ? row[@"error"] : @"");
+        NSString *providerError = station?@"":([row[@"providerError"] isKindOfClass:NSString.class] ? row[@"providerError"] : @"");
         cell.detailTextLabel.text = error.length&&providerError.length?[NSString stringWithFormat:@"%@\n最近失败：%@",error,providerError]:(error.length?error:(providerError.length?providerError:([row[@"provider"] length]?[NSString stringWithFormat:@"当前站点：%@",row[@"provider"]]:@"")));
         BOOL stopped = [[row[@"state"] description] containsString:@"未运行"];
         BOOL failed = [row[@"state"] isEqual:@"搜索失败"] || [row[@"state"] isEqual:@"部分完成"] || [row[@"state"] isEqual:@"启动失败"];
@@ -547,19 +686,19 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         cell.selectionStyle = (stopped || failed) ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
         cell.accessibilityHint = stopped ? @"点按后只启动此插件，然后检查健康状态和影视接口" : (failed ? ([row[@"state"] isEqual:@"部分完成"]?@"点按只重试失败站点":@"点按重试此来源") : nil);
     } else {
-        NSDictionary *entry = row[@"results"][indexPath.row - 1];
-        NSDictionary *item = entry[@"item"];
-        cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-        cell.textLabel.adjustsFontForContentSizeCategory = YES;
-        cell.textLabel.text = item[@"name"] ?: @"未命名影片";
-        NSMutableArray *parts = [NSMutableArray array];
-        if ([entry[@"providerName"] length]) [parts addObject:entry[@"providerName"]];
-        if ([item[@"remarks"] length]) [parts addObject:item[@"remarks"]];
-        if ([item[@"year"] length]) [parts addObject:item[@"year"]];
-        cell.detailTextLabel.text = [parts componentsJoinedByString:@" · "];
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-        cell.accessibilityLabel = [NSString stringWithFormat:@"%@，%@", item[@"name"] ?: @"影片", entry[@"providerName"] ?: @"影视来源"];
+        NSArray *entries=[self visibleEntriesForSection:indexPath.section];
+        if((NSUInteger)(indexPath.row-1)>=entries.count)return cell;
+        NSDictionary *entry=entries[indexPath.row-1],*item=entry[@"item"];
+        MediaSearchResultCell *resultCell=(MediaSearchResultCell *)cell;resultCell.searchEntry=entry;
+        resultCell.nameLabel.text=MediaSearchText(item[@"name"]);
+        NSMutableArray *parts=[NSMutableArray array];for(NSString *key in @[@"year",@"area",@"type",@"remarks"]){NSString *text=MediaSearchText(item[key]);if(text.length)[parts addObject:text];}
+        resultCell.metadataLabel.text=parts.count?[parts componentsJoinedByString:@" · "]:@"暂无影片信息";
+        resultCell.sourceLabel.text=[NSString stringWithFormat:@"%@ · %@",MediaSearchText(source[@"name"]),MediaSearchText(entry[@"providerName"])];
+        resultCell.nameLabel.textColor=HostText();resultCell.metadataLabel.textColor=HostSecondaryText();resultCell.sourceLabel.textColor=HostAccent();resultCell.poster.backgroundColor=HostNeutralSurface();
+        resultCell.poster.image=[UIImage systemImageNamed:@"film"];resultCell.poster.accessibilityIdentifier=nil;
+        NSString *poster=MediaSearchText(item[@"poster"]);if(poster.length)[HostImageLoader.shared loadURL:poster intoImageView:resultCell.poster];
+        cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;cell.selectionStyle=UITableViewCellSelectionStyleDefault;
+        cell.accessibilityLabel=[NSString stringWithFormat:@"%@，%@，%@",resultCell.nameLabel.text,resultCell.metadataLabel.text,resultCell.sourceLabel.text];
     }
     return cell;
 }
@@ -583,7 +722,10 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         }
         return;
     }
-    NSDictionary *entry = self.rows[indexPath.section][@"results"][indexPath.row - 1];
+    NSArray *entries=[self visibleEntriesForSection:indexPath.section];
+    if((NSUInteger)(indexPath.row-1)>=entries.count)return;
+    NSDictionary *entry=entries[indexPath.row-1];
+    self.savedSearchOffset=self.tableView.contentOffset;
     if (self.onSelectResult) self.onSelectResult(entry[@"item"] ?: @{}, self.sources[indexPath.section], entry[@"provider"] ?: @"");
 }
 
