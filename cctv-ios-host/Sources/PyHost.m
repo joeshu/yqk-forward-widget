@@ -1,3 +1,4 @@
+#import "HostBrokenPipeProtection.h"
 #import "PyHost.h"
 #import "JSPluginRuntime.h"
 #import "NodePluginRuntime.h"
@@ -450,6 +451,9 @@ static PyMethodDef jsMethod = {"_cctvhost_js_call", pyHostJSCall, METH_VARARGS, 
 static PyMethodDef nodeMethod = {"_cctvhost_node_call", pyHostNodeCall, METH_VARARGS, "Call the Node.js Mobile plugin host."};
 
 static BOOL initializeInterpreter(PyHostTask *task, NSError **failure) {
+    int pipePolicy=HostProtectDefaultBrokenPipe();
+    [RuntimeDiagnostics.shared recordEvent:@"python_sigpipe_policy" category:@"plugin" fields:@{@"service_id":task.identifier?:@"",@"policy_result":@(pipePolicy),@"existing_custom_handler_preserved":@(pipePolicy==2)}];
+    if(pipePolicy<0){if(failure)*failure=[NSError errorWithDomain:@"CCTVHostPython" code:16 userInfo:@{NSLocalizedDescriptionKey:@"无法配置 Python HTTP 断开连接保护"}];return NO;}
     NSString *home = task.pythonHome;
     setenv("SSL_CERT_FILE", [[home stringByAppendingPathComponent:@"ssl/cert.pem"] UTF8String], 1);
     setenv("SSL_CERT_DIR", "", 1);
