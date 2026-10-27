@@ -110,6 +110,26 @@ class NodeMediaHostTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     probe=socket.create_connection(('127.0.0.1',port),timeout=.5);probe.close()
 
+    def test_catpaw_optional_recommendation_failure_preserves_categories(self):
+        (self.package/'index.cjs').write_text("""let server;exports.start=async()=>{
+          server=catServerFactory((req,res)=>{res.setHeader('Content-Type','application/json');
+            if(req.url==='/config')res.end(JSON.stringify({video:{sites:[{key:'demo',name:'Demo',api:'/spider/demo'}]}}));
+            else if(req.url.endsWith('/home'))res.end(JSON.stringify({class:[{type_id:'movie',type_name:'Movies'}]}));
+            else if(req.url.endsWith('/homeVod')){res.statusCode=503;res.end(JSON.stringify({msg:'private upstream detail'}))}
+            else if(req.url.endsWith('/category'))res.end(JSON.stringify({list:[{vod_id:'one',vod_name:'Movie'}]}));
+            else res.end('{}');});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+          };exports.stop=()=>new Promise(resolve=>server.close(resolve));""")
+        started=self.call('start',packageRoot=str(self.package),dataDirectory=str(self.data),entry='index.cjs',moduleType='commonjs',protocol='catpaw-http')
+        self.assertTrue(started['ok'],started)
+        home=self.call('home',provider='demo')
+        self.assertTrue(home['ok'],home)
+        self.assertEqual(home['result']['class'][0]['type_id'],'movie')
+        self.assertIn('warning',home['result'])
+        self.assertNotIn('private upstream detail',json.dumps(home))
+        category=self.call('category',provider='demo',categoryId='movie')
+        self.assertEqual(category['result']['list'][0]['vod_id'],'one')
+        self.assertTrue(self.call('stop')['ok'])
+
     def test_catpaw_http_error_preserves_source_msg_summary(self):
         (self.package/'index.cjs').write_text("""let server;exports.start=async()=>{
           server=catServerFactory((req,res)=>{res.setHeader('Content-Type','application/json');

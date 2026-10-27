@@ -55,3 +55,18 @@ Python 脚本与 CCTVHost 共享 App 进程。Python 级异常能被记录，但
 `media_relay_client_disconnected` 表示宿主向客户端写响应时收到断连，不再误报为 `media_relay_failed`。停止、拖动进度、播放器故障都可能产生断连，因此它既不证明播放成功，也不证明上游失败。上游读取时发生连接中断仍记为失败。
 
 FFmpeg 软件解码测试和 iPhone AVPlayer 验收分别记录。清单可读、分片可读、网页取得媒体地址、播放器报告 playing 都不能代替视频首帧；持续播放至少 5 秒还需要对应播放器的帧与进度证据，不能从中继传输耗时推断。
+
+### CatPaw optional recommendations
+
+A successful `home` response with a nonempty `class` array remains usable if the
+optional `homeVod` request fails. Categories are retained so a user can browse
+instead of receiving a whole-page failure. Missing recommendation routes (404/405)
+remain compatible; other failures emit `catpaw_recommendations_failed` with the
+provider ID, HTTP status (or null for transport errors), and
+`categories_available: true`. This event does not establish video availability.
+When neither recommendations nor categories are available, the failure is still
+reported. No upstream response body or playback credentials enter this event.
+
+Regression: `test_catpaw_optional_recommendation_failure_preserves_categories`
+uses a local HTTP 503 fixture and verifies category navigation and independent
+service shutdown. It does not test an external movie or AVPlayer decoding.
