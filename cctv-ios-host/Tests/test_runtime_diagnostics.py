@@ -11,6 +11,7 @@ READINESS = (ROOT / "Sources/LocalServiceReadiness.m").read_text()
 BROWSER = (ROOT / "Sources/MediaBrowserViewController.m").read_text()
 PYHOST = (ROOT / "Sources/PyHost.m").read_text()
 APP_DELEGATE = (ROOT / "Sources/AppDelegate.m").read_text()
+IMAGE_LOADER = (ROOT / "Sources/HostImageLoader.m").read_text()
 
 
 class RuntimeDiagnosticsContractTests(unittest.TestCase):
@@ -228,6 +229,59 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
     def test_media_address_presence_boolean_survives_secret_redaction(self):
         self.assertIn('lower isEqualToString:@"result_has_media_url"', DIAGNOSTICS)
         self.assertIn('[value isKindOfClass:NSNumber.class]) return value;', DIAGNOSTICS)
+
+    def test_media_browser_diagnostics_cover_detail_route_episode_cache_and_stale_responses(self):
+        for event in (
+            'media_detail_request_started', 'media_detail_readable', 'media_detail_failed',
+            'media_detail_response_discarded', 'media_detail_no_episodes',
+            'media_route_selected', 'media_episode_selected', 'episode_resolve_requested',
+            'episode_resolve_succeeded', 'episode_resolve_failed',
+            'episode_resolve_response_discarded', 'media_listing_request_started',
+            'media_listing_result_applied', 'media_listing_failed',
+            'media_listing_response_discarded', 'media_home_shelf_cache_decision',
+            'media_home_shelf_response_discarded',
+        ):
+            self.assertIn(f'@"{event}"', BROWSER)
+        for field in ('line_count', 'episode_count', 'result_has_media_url',
+                      'result_parse_mode', 'result_alternate_count', 'cache_hit',
+                      'cache_stale', 'cached_item_count', 'search_term_length',
+                      'request_generation', 'elapsed_ms'):
+            self.assertIn(f'@"{field}"', BROWSER)
+        self.assertIn('@"search_term_length":@(requestedKeyword.length)', BROWSER)
+        self.assertNotIn('@"keyword":requestedKeyword', BROWSER)
+
+    def test_player_diagnostics_capture_transport_and_recovery_without_media_urls(self):
+        for field in (
+            'media_segments_downloaded', 'media_bytes_transferred', 'media_stall_count',
+            'media_dropped_video_frames', 'media_transfer_duration_seconds',
+            'media_observed_bitrate_bps', 'media_indicated_bitrate_bps',
+            'media_reported_startup_seconds', 'video_presentation_width',
+            'video_presentation_height',
+        ):
+            self.assertIn(f'@"{field}"', PLAYBACK)
+        for event in (
+            'playback_retry_requested', 'playback_line_selected',
+            'playback_stall_recovery_started', 'playback_stall_recovery_skipped',
+            'episode_resolve_unavailable', 'episode_resolve_response_discarded',
+        ):
+            self.assertIn(f'@"{event}"', PLAYBACK)
+        self.assertIn('MediaPlaybackAddAccessLogFields(fields,item)', PLAYBACK)
+        self.assertIn('MediaPlaybackAddAccessLogFields(fields,self.observedItem)', PLAYBACK)
+        self.assertNotIn('fields[@"media_url"]', PLAYBACK)
+        self.assertNotIn('fields[@"source_url"]', PLAYBACK)
+
+    def test_poster_failures_are_classified_without_logging_image_addresses(self):
+        self.assertIn('recordEvent:@"poster_image_failed"', IMAGE_LOADER)
+        for stage in ('http_status', 'response_too_large', 'network_error',
+                      'image_decode_failed', 'empty_body'):
+            self.assertIn(f'@"{stage}"', IMAGE_LOADER)
+        for field in ('image_host', 'image_extension', 'http_status',
+                      'content_type', 'response_bytes', 'elapsed_ms',
+                      'expected_content_length_known', 'expected_response_bytes',
+                      'response_length_matches_expected', 'error_domain', 'error_code'):
+            self.assertIn(f'@"{field}"', IMAGE_LOADER)
+        self.assertNotIn('@"image_url"', IMAGE_LOADER)
+        self.assertNotIn('@"source_url"', IMAGE_LOADER)
 
 
 if __name__ == "__main__":

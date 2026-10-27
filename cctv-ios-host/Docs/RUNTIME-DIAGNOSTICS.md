@@ -8,6 +8,12 @@
 
 `player_reports_playing` 只代表 AVPlayer 报告播放状态；`media_item_ready` 代表媒体项已就绪；只有 `playback_first_frame` 或 `playback_first_frame_ready` 才表示检测到视频帧。若停在解析阶段，看对应 `media_api_failed` 的 `failure_stage`、`http_status`、错误域/代码和插件错误字段；若媒体已就绪但没有首帧，查看 `playback_video_frame_timeout`、`player_waiting_to_play` 或 `playback_stalled`，并与同一个操作 ID 下的播放器事件对照。
 
+影视浏览会把首页、分类/搜索、详情、线路/选集和播放地址解析分阶段记录。`media_home_request_started`、`media_listing_request_started` 和 `media_detail_request_started` 可用来判断请求有没有发出；对应的 `*_readable` / `media_listing_result_applied` 表示真实内容已交给页面；`*_failed` 和 `*_response_discarded` 用来区分请求失败与过期回调被丢弃。缓存事件记录命中、是否过期和项目数量；搜索只记关键词长度，不记录搜索文本。详情和选集事件记录线路/集数、所选索引及结果结构，不记录影片名称或内容 ID。
+
+播放地址解析事件额外记录 `result_has_media_url` 布尔值、解析模式和备选线路数。`episode_resolve_succeeded` 只表示插件返回了可交给播放器的结果；不能据此认定 AVPlayer 已收到媒体数据。用户重试、切线路和卡顿恢复会记录来源、匹配到同一集的结果及恢复决策。`playback_stall_recovery_skipped` 中的原因能区分播放已自行恢复、播放器已不再等待、恢复次数到限或已有解析正在执行。
+
+AVPlayer 提供访问日志时，首帧、等待、卡顿和失败事件会附带已下载分段数、传输字节、卡顿数、丢帧数、可用码率/启动时间和视频呈现尺寸；iOS 未提供的字段会省略。它们描述系统报告的播放会话，不能替代实际画面检查。海报加载失败会单独记录 HTTP 状态、MIME 类型、已收/预期字节、耗时和失败阶段（HTTP、体积超限、网络、空响应或图像解码），便于区分图片源故障与影片目录/播放故障。
+
 影视服务 API 事件包含 `operation`、`request_id`、服务端口、耗时、响应状态/大小、结果类型和播放结果形态（是否有地址、解析模式、备选线路数、播放主机及扩展名）。`arguments` 和响应正文不会写入诊断文件。插件返回结构化错误时会记录 `plugin_error_code`、脱敏后的 `plugin_error_message` 和可重试标志。
 
 ## 服务与订阅问题
@@ -28,7 +34,7 @@ HTTP 订阅事件使用相同的 `correlation_id` 串起开始、健康检查与
 
 ## 隐私与解释限制
 
-日志不记录原始播放地址、绝对路径、查询参数、Cookie、令牌、请求参数或响应正文；Python 崩溃标记只保留脚本文件名，不保存脚本路径或源码。来源只保留协议、主机、端口、扩展名和路径指纹，用于区分/关联来源。错误文本经过脱敏并截断；日志文件有 1 MiB 上限。关闭诊断后停止新增记录，已有日志仍可导出。
+日志不记录原始播放地址、绝对路径、查询参数值、Cookie、令牌、请求参数或响应正文；播放诊断最多记录查询参数名、签名字段是否存在及媒体主机/扩展名，用于判断地址类型而不暴露签名。Python 崩溃标记只保留脚本文件名，不保存脚本路径或源码。错误文本经过脱敏并截断；日志文件上限为 4 MiB，超限后滚动保留最近约 3 MiB。关闭诊断后停止新增记录，已有日志仍可导出。
 
 Python 脚本与 CCTVHost 共享 App 进程。Python 级异常能被记录，但原生扩展触发的进程级崩溃无法由同一进程安全捕获；遇到此类情况，应将 `python_session_interrupted` 的阶段与系统生成的 `.ips` 崩溃栈对照。
 

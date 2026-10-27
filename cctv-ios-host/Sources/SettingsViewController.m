@@ -36,8 +36,8 @@ static NSString *MediaMetadataCacheSummaryText(void) {
         @{ @"title":@"M3U / HLS 订阅", @"detail":@"AVPlayer · iOS 系统解码", @"icon":@"play.rectangle" },
         @{ @"title":@"内置插件", @"detail":@"Python / JavaScriptCore · 本机运行", @"icon":@"curlybraces" }
       ]},
-      @{ @"title":@"运行诊断", @"footer":@"开启后记录应用启动、前后台切换、系统内存警告、服务启停与播放流程，最多保留约 1 MB。重启后会标出上次未正常收尾及最后记录的状态；这不能单独证明崩溃原因，也不能替代 iOS .ips / JetsamEvent 报告。日志默认脱敏，不记录播放地址、查询参数、Cookie 或脚本内容。", @"rows":@[
-        @{ @"title":@"运行诊断模式", @"detail":@"复现问题前开启，然后重启并导出", @"key":@"runtimeDiagnosticsEnabled", @"icon":@"waveform.path.ecg", @"default":@NO },
+      @{ @"title":@"运行诊断", @"footer":@"开启后记录应用启动、影视加载与播放阶段、海报失败、服务启停和系统内存警告。日志最多 4 MiB，超限后保留最近约 3 MiB。重启后会标出上次未正常收尾及最后记录的状态；这不能单独证明崩溃原因，也不能替代 iOS .ips / JetsamEvent 报告。日志默认脱敏，不记录完整播放地址、查询参数值、Cookie 或脚本内容。", @"rows":@[
+        @{ @"title":@"运行诊断模式", @"detail":@"先开启再复现；若闪退，重开 App 后导出", @"key":@"runtimeDiagnosticsEnabled", @"icon":@"waveform.path.ecg", @"default":@NO },
         @{ @"title":@"导出运行诊断日志", @"detail":@"JSONL · 无 .ips 时查看上次会话检查点", @"action":@"exportRuntimeDiagnostics", @"icon":@"square.and.arrow.up" }
       ]},
       @{ @"title":@"数据与关于", @"footer":@"影视元数据缓存只保存目录、分类和搜索结果；影片详情与播放线路不缓存。", @"rows":@[
