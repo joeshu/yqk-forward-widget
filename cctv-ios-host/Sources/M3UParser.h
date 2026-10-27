@@ -9,6 +9,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *logo;
 @property (nonatomic, copy, nullable) NSString *epgID;
 @property (nonatomic, copy, nullable) NSString *tvgName;
+/// HTTP request headers declared for this playlist entry (never written to diagnostics).
+@property (nonatomic, copy) NSDictionary<NSString *, NSString *> *headers;
 @end
 
 @interface M3UParser : NSObject

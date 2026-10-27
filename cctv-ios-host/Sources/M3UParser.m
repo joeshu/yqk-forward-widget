@@ -7,6 +7,43 @@ static NSError *M3ULimitError(NSString *message) {
     return [NSError errorWithDomain:@"CCTVHostM3UParser" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];
 }
 
+static BOOL M3UHeaderNameAllowed(NSString *name) {
+    if (!name.length || name.length > 128) return NO;
+    NSCharacterSet *invalid = [[NSCharacterSet characterSetWithCharactersInString:@"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"] invertedSet];
+    if ([name rangeOfCharacterFromSet:invalid].location != NSNotFound) return NO;
+    return ![@[@"host", @"content-length", @"connection", @"transfer-encoding", @"keep-alive", @"upgrade", @"proxy-authorization", @"proxy-authenticate"] containsObject:name.lowercaseString];
+}
+
+static void M3UAddHeader(NSMutableDictionary<NSString *, NSString *> *headers, id rawName, id rawValue) {
+    if (![rawName isKindOfClass:NSString.class] || ![rawValue isKindOfClass:NSString.class] || headers.count >= 32) return;
+    NSString *name = [rawName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *value = [rawValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!M3UHeaderNameAllowed(name) || value.length > 8192 || [value rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location != NSNotFound) return;
+    headers[name] = value;
+}
+
+static void M3UAddVLCOption(NSMutableDictionary<NSString *, NSString *> *headers, NSString *option) {
+    NSRange split = [option rangeOfString:@"="];
+    if (split.location == NSNotFound || split.location == 0) return;
+    NSString *key = [[option substringToIndex:split.location] lowercaseString];
+    NSString *value = [option substringFromIndex:NSMaxRange(split)];
+    NSDictionary *mapped = @{@"http-user-agent": @"User-Agent", @"http-referrer": @"Referer", @"http-referer": @"Referer", @"http-origin": @"Origin", @"http-cookie": @"Cookie", @"http-authorization": @"Authorization", @"http-accept": @"Accept"};
+    NSString *name = mapped[key];
+    if (!name.length && [key hasPrefix:@"http-header-"]) name = [key substringFromIndex:[@"http-header-" length]];
+    if (name.length) M3UAddHeader(headers, name, value);
+}
+
+static void M3UAddHTTPDirective(NSMutableDictionary<NSString *, NSString *> *headers, NSString *directive) {
+    if (directive.length > 16384) return;
+    NSData *data = [directive dataUsingEncoding:NSUTF8StringEncoding];
+    id json = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+    if ([json isKindOfClass:NSDictionary.class]) {
+        for (id key in json) M3UAddHeader(headers, key, json[key]);
+        return;
+    }
+    M3UAddVLCOption(headers, directive);
+}
+
 @implementation M3UChannel
 @end
 
@@ -33,6 +70,7 @@ static NSError *M3ULimitError(NSString *message) {
     __block NSString *pendingLogo = nil;
     __block NSString *pendingEPGID = nil;
     __block NSString *pendingTVGName = nil;
+    __block NSMutableDictionary<NSString *, NSString *> *pendingHeaders = [NSMutableDictionary dictionary];
     __block NSUInteger lineCount=0;
     __block NSError *limitError=nil;
     [text enumerateLinesUsingBlock:^(NSString *raw, BOOL *stop) {
@@ -42,7 +80,20 @@ static NSError *M3ULimitError(NSString *message) {
         NSString *line = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         if (!line.length) return;
 
+        if ([line hasPrefix:@"#EXTVLCOPT:"]) {
+            M3UAddVLCOption(pendingHeaders, [line substringFromIndex:[@"#EXTVLCOPT:" length]]);
+            return;
+        }
+        if ([line hasPrefix:@"#EXTHTTP:"]) {
+            M3UAddHTTPDirective(pendingHeaders, [line substringFromIndex:[@"#EXTHTTP:" length]]);
+            return;
+        }
+
         if ([line hasPrefix:@"#EXTINF"]) {
+            // Header directives belong to the next URL. Drop any directives
+            // left behind by a malformed entry so they cannot leak to another
+            // channel after a missing URL line.
+            [pendingHeaders removeAllObjects];
             group = [self attribute:@"group-title" in:line];
             pendingTVGName = [self attribute:@"tvg-name" in:line];
             pendingLogo = [self attribute:@"tvg-logo" in:line];
@@ -67,7 +118,7 @@ static NSError *M3ULimitError(NSString *message) {
         } @catch (NSException *exception) {
             url = nil;
         }
-        if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; return; }
+        if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; [pendingHeaders removeAllObjects]; return; }
         if(out.count>=M3UMaximumChannels){limitError=M3ULimitError(@"频道数量超过 5000 条安全上限；已保留上次有效订阅");*stop=YES;return;}
 
         M3UChannel *ch = [M3UChannel new];
@@ -77,11 +128,13 @@ static NSError *M3ULimitError(NSString *message) {
         ch.logo = pendingLogo;
         ch.epgID = pendingEPGID;
         ch.tvgName = pendingTVGName;
+        ch.headers = pendingHeaders.copy ?: @{};
         [out addObject:ch];
         pendingName = nil;
         pendingLogo = nil;
         pendingEPGID = nil;
         pendingTVGName = nil;
+        [pendingHeaders removeAllObjects];
     }];
     if(limitError){if(error)*error=limitError;return nil;}
     return out;

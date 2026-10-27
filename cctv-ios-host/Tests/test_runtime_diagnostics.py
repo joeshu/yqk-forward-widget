@@ -12,6 +12,8 @@ BROWSER = (ROOT / "Sources/MediaBrowserViewController.m").read_text()
 PYHOST = (ROOT / "Sources/PyHost.m").read_text()
 APP_DELEGATE = (ROOT / "Sources/AppDelegate.m").read_text()
 IMAGE_LOADER = (ROOT / "Sources/HostImageLoader.m").read_text()
+M3U = (ROOT / "Sources/M3UParser.m").read_text()
+PLAYBACK_HEADERS = (ROOT / "Sources/MediaPlaybackHeaders.m").read_text()
 
 
 class RuntimeDiagnosticsContractTests(unittest.TestCase):
@@ -50,7 +52,7 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         for event in (
             'previous_session_unclosed', 'app_started', 'app_will_resign_active',
             'entered_background', 'entered_foreground', 'app_became_active',
-            'memory_warning_received', 'app_will_terminate',
+            'memory_warning_received', 'app_will_terminate', 'app_session_closed',
         ):
             self.assertIn(f'@"{event}"', DIAGNOSTICS + APP_DELEGATE)
         self.assertIn('runtime-session.json', DIAGNOSTICS)
@@ -61,6 +63,7 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         self.assertIn('process_phys_footprint_bytes', APP_DELEGATE)
         self.assertIn('@"unknown"', DIAGNOSTICS)
         self.assertIn('session_marker_saved', DIAGNOSTICS)
+        self.assertIn('session_marker_closed', DIAGNOSTICS)
         self.assertIn('beginAppSessionWithFields:', APP_DELEGATE)
         self.assertIn('applicationDidReceiveMemoryWarning:', APP_DELEGATE)
 
@@ -228,7 +231,25 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
 
     def test_media_address_presence_boolean_survives_secret_redaction(self):
         self.assertIn('lower isEqualToString:@"result_has_media_url"', DIAGNOSTICS)
+
+    def test_remote_playback_preserves_playlist_headers_and_logs_only_safe_metadata(self):
+        for token in ('#EXTVLCOPT:', '#EXTHTTP:', 'http-user-agent', 'http-referrer', 'http-cookie'):
+            self.assertIn(token, M3U)
+        self.assertIn('entry[@"headers"] = c.headers', HOST)
+        self.assertIn('self.currentRemoteHeaders', HOST)
+        self.assertIn('@"AVURLAssetHTTPHeaderFieldsKey":headers', HOST)
+        for field in ('request_header_count', 'request_user_agent_present',
+                      'request_referrer_present', 'request_origin_present',
+                      'request_auth_material_present'):
+            self.assertIn(f'@"{field}"', PLAYBACK_HEADERS)
+            self.assertIn(f'@"{field}"', DIAGNOSTICS)
+        self.assertIn('network_error_status_code', HOST)
+        self.assertIn('network.errorStatusCode)', HOST)
+        self.assertNotIn('MAX(0, network.errorStatusCode)', HOST)
+        self.assertIn('underlying_error_chain', HOST)
+        self.assertIn('numberOfBytesTransferred', HOST)
         self.assertIn('[value isKindOfClass:NSNumber.class]) return value;', DIAGNOSTICS)
+        self.assertIn('[pendingHeaders removeAllObjects];', M3U)
 
     def test_media_browser_diagnostics_cover_detail_route_episode_cache_and_stale_responses(self):
         for event in (

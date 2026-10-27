@@ -36,6 +36,22 @@ NSDictionary<NSString *,NSString *> *MediaPlaybackHeadersFromResult(NSDictionary
     return headers.copy;
 }
 
+NSDictionary<NSString *,id> *MediaPlaybackDiagnosticHeaderFields(NSDictionary *headers) {
+    NSDictionary *safeHeaders = [headers isKindOfClass:NSDictionary.class] ? headers : @{};
+    BOOL userAgent = NO, referer = NO, origin = NO, authMaterial = NO;
+    NSUInteger count = 0;
+    for (id rawName in safeHeaders) {
+        if (![rawName isKindOfClass:NSString.class] || ![safeHeaders[rawName] isKindOfClass:NSString.class]) continue;
+        count++;
+        NSString *name = [rawName lowercaseString];
+        if ([name isEqual:@"user-agent"]) userAgent = YES;
+        else if ([name isEqual:@"referer"] || [name isEqual:@"referrer"]) referer = YES;
+        else if ([name isEqual:@"origin"]) origin = YES;
+        else if ([name isEqual:@"cookie"] || [name isEqual:@"authorization"]) authMaterial = YES;
+    }
+    return @{@"request_header_count":@(count), @"request_user_agent_present":@(userAgent), @"request_referrer_present":@(referer), @"request_origin_present":@(origin), @"request_auth_material_present":@(authMaterial)};
+}
+
 static NSString *MediaPlaybackString(id value) {
     return [value isKindOfClass:NSString.class] ? [(NSString *)value lowercaseString] : @"";
 }

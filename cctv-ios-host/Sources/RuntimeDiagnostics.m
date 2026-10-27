@@ -145,7 +145,11 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     marker[@"open"] = @NO;
     marker[@"last_checkpoint"] = @"app_will_terminate";
     marker[@"last_checkpoint_at"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
-    [self writeSessionMarker:marker];
+    BOOL closed = [self writeSessionMarker:marker];
+    [self recordEventSynchronously:@"app_session_closed" category:@"lifecycle" fields:@{
+        @"session_marker_closed":@(closed),
+        @"last_checkpoint":@"app_will_terminate"
+    }];
 }
 
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(NSDictionary<NSString *,id> *)fields {
@@ -213,6 +217,7 @@ static void *RuntimeDiagnosticsQueueKey = &RuntimeDiagnosticsQueueKey;
     if (!value || value == NSNull.null) return NSNull.null;
     if (depth > 3) return @"[truncated]";
     NSString *lower = key.lowercaseString;
+    if (([lower isEqualToString:@"request_header_count"] || [lower isEqualToString:@"request_user_agent_present"] || [lower isEqualToString:@"request_referrer_present"] || [lower isEqualToString:@"request_origin_present"] || [lower isEqualToString:@"request_auth_material_present"]) && [value isKindOfClass:NSNumber.class]) return value;
     // This field is a boolean about URL presence, not a URL value. Keeping it
     // makes media-resolution failures diagnosable without exposing an address.
     if ([lower isEqualToString:@"result_has_media_url"] && [value isKindOfClass:NSNumber.class]) return value;
