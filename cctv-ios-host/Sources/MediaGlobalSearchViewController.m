@@ -408,6 +408,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         return;
     }
     job.readiness = [[LocalServiceReadiness alloc] initWithURL:healthURL timeout:12 requiresHealthJSON:YES];
+    job.readiness.diagnosticContext=@{@"service_id":job.source[@"id"]?:@"",@"trigger":@"global_search"};
     __weak typeof(self) weakSelf = self;
     [job.readiness start:^(NSError *error, NSTimeInterval elapsed) {
         MediaGlobalSearchViewController *owner = weakSelf;

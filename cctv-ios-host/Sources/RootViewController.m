@@ -2025,7 +2025,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     BOOL health=[service[@"builtin"] boolValue] || [ServiceStore isMediaService:service];
     if(health)c.path=@"/health";else if(!c.path.length)c.path=[ServiceStore playlistPathForService:service]?:@"/";
     c.query=nil;c.fragment=nil;
-    LocalServiceReadiness *readiness=[[LocalServiceReadiness alloc] initWithURL:c.URL timeout:20 requiresHealthJSON:health];NSString *engine=[service[@"engine"] isKindOfClass:NSString.class]?service[@"engine"]:@"python";if(service && [engine isEqualToString:@"python"]){NSString *identifier=[service[@"id"] copy];readiness.failureProvider=^NSError *{return [PyHost startupErrorForServiceIdentifier:identifier];};}return readiness;
+    LocalServiceReadiness *readiness=[[LocalServiceReadiness alloc] initWithURL:c.URL timeout:20 requiresHealthJSON:health];readiness.diagnosticContext=@{@"service_id":service[@"id"]?:@"",@"trigger":@"local_channel_playback"};NSString *engine=[service[@"engine"] isKindOfClass:NSString.class]?service[@"engine"]:@"python";if(service && [engine isEqualToString:@"python"]){NSString *identifier=[service[@"id"] copy];readiness.failureProvider=^NSError *{return [PyHost startupErrorForServiceIdentifier:identifier];};}return readiness;
 }
 - (BOOL)startService:(NSDictionary *)service error:(NSError **)error {
     service=[ServiceStore resolvedService:service];
