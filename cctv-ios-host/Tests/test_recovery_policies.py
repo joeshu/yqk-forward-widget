@@ -47,7 +47,6 @@ int main(int argc,char **argv) {
             with socket.socket() as listener:
                 listener.bind(('127.0.0.1', 0))
                 port = listener.getsockname()[1]
-                run(port, 0)
                 listener.listen(4)
                 run(port, 1)
             run(port, 0)

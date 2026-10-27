@@ -42,13 +42,14 @@ class NativeStartupTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 exe = str(pathlib.Path(tmp) / "cctv-startup-tests")
-                subprocess.run([
+                compiled = subprocess.run([
                     "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation",
                     "-framework", "QuartzCore", "-I", str(root / "Sources"),
                     str(root / "Tests" / "native_startup_tests.m"),
                     str(root / "Sources" / "LocalServiceReadiness.m"),
                     str(root / "Sources" / "PlaybackStartupTrace.m"), "-o", exe,
-                ], check=True, capture_output=True, text=True)
+                ], capture_output=True, text=True)
+                self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
                 subprocess.run([exe, str(server.server_port)], check=True,
                                capture_output=True, text=True, timeout=15)
                 self.assertGreaterEqual(ReadinessFixture.attempts, 3)

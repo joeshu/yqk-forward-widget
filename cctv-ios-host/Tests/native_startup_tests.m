@@ -1,6 +1,17 @@
 #import "LocalServiceReadiness.h"
 #import "PlaybackStartupTrace.h"
 #import <Foundation/Foundation.h>
+// The production recorder depends on UIKit/MetricKit. This standalone macOS
+// harness supplies a diagnostic sink while exercising the real readiness code.
+static NSMutableArray *probeEvents;
+@interface RuntimeDiagnostics : NSObject
++ (instancetype)shared;
+- (void)recordEvent:(NSString *)event category:(NSString *)category fields:(NSDictionary *)fields;
+@end
+@implementation RuntimeDiagnostics
++ (instancetype)shared {static RuntimeDiagnostics *sink;static dispatch_once_t once;dispatch_once(&once,^{sink=[self new];probeEvents=[NSMutableArray array];});return sink;}
+- (void)recordEvent:(NSString *)event category:(NSString *)category fields:(NSDictionary *)fields {[probeEvents addObject:@{@"event":event,@"fields":fields?:@{}}];}
+@end
 static void check(BOOL ok, NSString *why) {
     if (!ok) {
         NSLog(@"FAILED: %@", why);
@@ -87,6 +98,10 @@ int main(int argc, const char **argv) {
             },
             0.5);
         check(!cancelledCalled, @"cancelled attempt cannot resume playback");
+        check(probeEvents.count==6,@"each readiness start has exactly one success, failure or cancellation");
+        check([probeEvents[0][@"event"] isEqual:@"local_service_probe_started"]&&[probeEvents[1][@"event"] isEqual:@"local_service_probe_finished"],@"ready probe has complete lifecycle");
+        check([probeEvents[3][@"fields"][@"reason"] isEqual:@"failed"]&&[probeEvents[5][@"event"] isEqual:@"local_service_probe_cancelled"],@"timeout and cancellation remain distinct");
+        for(NSUInteger index=0;index<6;index+=2)check([probeEvents[index][@"fields"][@"probe_id"] isEqual:probeEvents[index+1][@"fields"][@"probe_id"]],@"probe lifecycle retains its ID");
         NSLog(@"Startup readiness, cancellation and timing checks passed");
     }
     return 0;
