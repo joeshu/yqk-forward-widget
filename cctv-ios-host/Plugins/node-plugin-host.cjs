@@ -355,14 +355,17 @@ function catpawProviders(config,base){
   const sites=Array.isArray(config?.video?.sites)?config.video.sites:[]
   return sites.filter(site=>{if(!site||typeof site.api!=='string'||!site.api.startsWith('/spider/')||site.api.includes('..'))return false;try{const url=new URL(site.api,base);return url.origin===base&&!url.search&&!url.hash&&site.key!=null}catch{return false}}).map(site=>({id:String(site.key),name:String(site.name||site.key),api:site.api.replace(/\/$/,''),...(site.searchable!=null?{searchable:![false,0,'0'].includes(site.searchable)}:{})}))
 }
-function catpawMediaAddresses(value,base,authHeaders={},depth=0){
+function catpawMediaAddresses(value,base,authHeaders={},depth=0,playback=false){
   if(depth>16||!value||typeof value!=='object')return value
-  if(Array.isArray(value))return value.map(item=>catpawMediaAddresses(item,base,authHeaders,depth+1))
+  if(Array.isArray(value))return value.map(item=>catpawMediaAddresses(item,base,authHeaders,depth+1,playback))
   const out={...value}
   for(const [key,item] of Object.entries(out)){
-    if(['url','vod_pic','poster','image'].includes(key)&&typeof item==='string'&&/^(?:\/|\.\.?\/)/.test(item))out[key]=new URL(item,base).href
-    else if(item&&typeof item==='object')out[key]=catpawMediaAddresses(item,base,authHeaders,depth+1)
+    if(['url','vod_pic','poster','image',...(playback?['playUrl','playurl','play_url','videoUrl','video_url','mediaUrl','src','value']:[])].includes(key)&&typeof item==='string'&&/^(?:\/|\.\.?\/)/.test(item))out[key]=new URL(item,base).href
+    else if(item&&typeof item==='object')out[key]=catpawMediaAddresses(item,base,authHeaders,depth+1,playback)
     if(['vod_pic','poster'].includes(key)&&typeof out[key]==='string'){try{if(new URL(out[key]).origin===base&&Object.keys(authHeaders).length)out.posterHeaders={...authHeaders}}catch{}}
+  }
+  for(const key of ['url','playUrl','playurl','play_url','videoUrl','video_url','mediaUrl','src','value']) {
+    if(playback&&['url','playUrl','playurl','play_url','videoUrl','video_url','mediaUrl','src','value'].includes(key)&&typeof out[key]==='string'){try{if(new URL(out[key]).origin===base&&Object.keys(authHeaders).length){out.header={...(out.header||{}),...authHeaders};out.headers={...(out.headers||{}),...authHeaders}}}catch{}}
   }
   return out
 }
@@ -494,8 +497,7 @@ async function invoke(operation,payload){
       const args=operation==='search'?{wd:payload.keyword,key:payload.keyword,quick:false,pg:payload.page||1,page:payload.page||1}:operation==='category'?{id:payload.categoryId,tid:payload.categoryId,pg:payload.page||1,page:payload.page||1,filter:true,filters:payload.filters||{},extend:payload.filters||{}}:operation==='detail'?{id:payload.id,ids:[payload.id]}:operation==='play'?{flag:payload.lineId||'',id:payload.id,flags:[]}:{filter:true}
       value=await sourceJSON(owner.base+provider.api+'/'+operation,args,owner.authHeaders)
       if(operation==='home' && !value.list?.length){try{const recommended=await sourceJSON(owner.base+provider.api+'/homeVod',{},owner.authHeaders);value={...value,list:recommended.list||[]}}catch(error){if(![404,405].includes(error.statusCode)){if(!Array.isArray(value.class)||!value.class.length)throw error;appendLog(owner,JSON.stringify({event:'catpaw_recommendations_failed',provider_id:provider.id,http_status:error.statusCode||null,categories_available:true}));value={...value,recommendationsUnavailable:true}}}}
-      value=catpawMediaAddresses(value,owner.base,owner.authHeaders||{})
-      if(operation==='play'&&value&&typeof value==='object'&&typeof value.url==='string'&&new URL(value.url,owner.base).origin===owner.base&&owner.authHeaders)value={...value,header:{...(value.header||{}),...owner.authHeaders},headers:{...(value.headers||{}),...owner.authHeaders}}
+      value=catpawMediaAddresses(value,owner.base,owner.authHeaders||{},0,operation==='play')
     }else if(owner.protocol==='nanotv-service-v2'){
       if(operation==='catalog')value=await owner.module.channels()
       else if(operation==='resolve')value=await owner.module.resolve(payload)

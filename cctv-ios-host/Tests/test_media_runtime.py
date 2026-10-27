@@ -37,6 +37,20 @@ class Spider:
 
 
 class MediaTests(unittest.TestCase):
+    def test_nested_playback_aliases_keep_signed_addresses_and_per_choice_headers(self):
+        result = media.playback({'url': {'values': [
+            {'url': 'http://127.0.0.1:18700/one.m3u8?sig=a%2Bb',
+             'headers': {'Cookie': 'fixture-local-auth'}},
+            {'playUrl': 'http://127.0.0.1:18700/two.m3u8?sig=c%2Fd',
+             'headers': {'Cookie': 'fixture-local-auth'}},
+            {'url': 'https://external.test/video.m3u8',
+             'headers': {'Referer': 'https://external.test/'}}]}})
+        self.assertTrue(result['url'].endswith('?sig=a%2Bb'))
+        self.assertEqual(len(result['alternates']), 3)
+        self.assertTrue(result['alternates'][1]['url'].endswith('?sig=c%2Fd'))
+        self.assertEqual(result['alternates'][1]['headers']['Cookie'], 'fixture-local-auth')
+        self.assertNotIn('Cookie', result['alternates'][2].get('headers', {}))
+
     def test_home_preserves_only_structured_recommendation_failure(self):
         for flag, expected in ((True, True), (False, False), ('true', False), (None, False)):
             with self.subTest(flag=flag):

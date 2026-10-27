@@ -368,7 +368,10 @@ def playback(value):
             first_headers.update(media_headers(first.get('headers', {})))
             primary_choice_headers.update(first_headers)
             for index, item in enumerate(url):
-                address = item.get('url') or item.get('value') or item.get('v')
+                address = next((item.get(key) for key in
+                                ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
+                                 'video_url', 'mediaUrl', 'src', 'value', 'v')
+                                if item.get(key)), None)
                 if not address:
                     continue
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}'),

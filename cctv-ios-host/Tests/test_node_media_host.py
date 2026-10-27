@@ -192,6 +192,7 @@ class NodeMediaHostTests(unittest.TestCase):
               else if(req.url==='/website/auth/login')value={code:args.password===fs.readFileSync('password','utf8')?0:-1,data:{token:'fixture-token'}};
               else if(req.headers.cookie!=='web_token=fixture-token'){res.writeHead(401);res.end();return}
               else if(req.url==='/config')value={video:{sites:[{key:'local',name:'fixture',api:'/spider/local/3'}]}};
+              else if(req.url.endsWith('/play'))value={url:{values:[{url:'/proxy/one.m3u8?sig=a%2Bb',headers:{Referer:'https://fixture.test/'}},{playUrl:'/proxy/two.m3u8?sig=c%2Fd'},{url:'https://external.test/video.m3u8',headers:{Referer:'https://external.test/'}}]}};
               else value={class:[],list:[]};res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));});
             app.listen({host:'0.0.0.0',port:0})};
           exports.stop=async()=>{await Promise.all([app,helper].map(s=>new Promise(r=>s.close(r))))};''')
@@ -200,6 +201,13 @@ class NodeMediaHostTests(unittest.TestCase):
             self.assertTrue(result['ok'],result)
             self.assertEqual(self.call('providers')['result'][0]['id'],'local')
             self.assertTrue(self.call('home')['ok'])
+            choices=self.call('play',id='fixture')['result']['url']['values']
+            self.assertRegex(choices[0]['url'],r'^http://127\.0\.0\.1:\d+/proxy/one\.m3u8\?sig=a%2Bb$')
+            self.assertEqual(choices[0]['headers']['Cookie'],'web_token=fixture-token')
+            self.assertEqual(choices[0]['headers']['Referer'],'https://fixture.test/')
+            self.assertIn('/proxy/two.m3u8?sig=c%2Fd',choices[1]['playUrl'])
+            self.assertEqual(choices[1]['headers']['Cookie'],'web_token=fixture-token')
+            self.assertNotIn('Cookie',choices[2]['headers'])
             self.assertTrue(self.call('stop')['ok'])
         self.assertEqual((self.data/'catpaw-auth.json').stat().st_mode&0o777,0o600)
 
