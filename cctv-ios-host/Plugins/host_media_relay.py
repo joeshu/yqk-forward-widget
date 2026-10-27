@@ -128,7 +128,7 @@ class MediaRelay:
         parent = urllib.parse.urlsplit(url)
         segment_count = 0
 
-        def local(value):
+        def local(value, manifest=False):
             nonlocal segment_count
             target = urllib.parse.urljoin(url, value)
             resolved = urllib.parse.urlsplit(target)
@@ -141,7 +141,7 @@ class MediaRelay:
                 target = self._with_query(target, parent.query)
             if resolved.scheme.lower() not in ('http', 'https') or not resolved.hostname:
                 return value
-            is_manifest=resolved.path.lower().endswith(('.m3u8','.m3u'))
+            is_manifest=manifest or resolved.path.lower().endswith(('.m3u8','.m3u'))
             if not is_manifest:
                 segment_count += 1
                 if segment_count > self.segment_limit:
@@ -156,11 +156,20 @@ class MediaRelay:
                 refresh_relative=relative, expected_hls=is_manifest, segment=not is_manifest)
             return base + '/media/' + token
         lines = []
+        variant_pending = False
         for line in text.splitlines():
             if line.startswith('#'):
-                line = re.sub(r'\bURI="([^"]+)"', lambda match: 'URI="' + local(match[1]) + '"', line)
+                # HLS identifies playlists by tag semantics, not URL suffix.
+                # Keys/maps/parts remain byte resources even on PHP endpoints.
+                tag = line.split(':', 1)[0]
+                uri_manifest = tag in ('#EXT-X-MEDIA', '#EXT-X-I-FRAME-STREAM-INF',
+                                       '#EXT-X-IMAGE-STREAM-INF', '#EXT-X-RENDITION-REPORT')
+                line = re.sub(r'\bURI="([^"]+)"', lambda match: 'URI="' + local(match[1], uri_manifest) + '"', line)
+                if tag == '#EXT-X-STREAM-INF':
+                    variant_pending = True
             elif line.strip():
-                line = local(line.strip())
+                line = local(line.strip(), variant_pending)
+                variant_pending = False
             lines.append(line)
         return '\n'.join(lines) + '\n'
 

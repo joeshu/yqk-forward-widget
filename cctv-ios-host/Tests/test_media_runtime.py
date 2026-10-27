@@ -937,6 +937,27 @@ class Spider:
         self.assertFalse(relay.segments)
         self.assertFalse(relay.segment_index)
 
+    def test_extensionless_hls_children_use_playlist_semantics_and_refresh(self):
+        relay = MediaRelay()
+        refresh = lambda: None
+        text = ('#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,URI="audio.php?id=1"\n'
+                '#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=100,URI="iframe"\n'
+                '#EXT-X-STREAM-INF:BANDWIDTH=1000\n\n#comment\nvariant.php?id=2\n'
+                '#EXT-X-KEY:METHOD=AES-128,URI="key.php"\n'
+                '#EXT-X-MAP:URI="init.php"\n#EXTINF:4,\nsegment.php\n')
+        relay.rewrite(text, 'https://fixture.test/master', {}, ('https', 'fixture.test'),
+                      'http://127.0.0.1:18780', refresh=refresh, refresh_interval=30)
+        self.assertEqual(len(relay.targets), 3)
+        self.assertEqual(len(relay.segments), 3)
+        for record in relay.targets.values():
+            self.assertTrue(record[0][5])
+            self.assertIs(record[3], refresh)
+            self.assertIsNotNone(record[6])
+        for record in relay.segments.values():
+            self.assertFalse(record[0][5])
+            self.assertIsNone(record[3])
+        relay.close()
+
     def test_relay_rewrites_master_segments_keys_and_maps_without_open_proxy(self):
         relay = MediaRelay(limit=4)
         text = '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXT-X-MAP:URI="init.mp4"\nsegment.ts\n'
@@ -1033,7 +1054,9 @@ class Spider:
                 received.append((self.path, dict(self.headers)))
                 if self.path == '/redirect':
                     self.send_response(302);self.send_header('Location', f'http://localhost:{self.server.server_port}/target');self.end_headers();return
-                body = b'#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:6,\nsegment.ts\n' if self.path == '/index.m3u8' else b'0123456789'
+                body = b'#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:6,\nsegment.ts\n' if self.path in ('/index.m3u8', '/variant.php') else b'0123456789'
+                if self.path == '/master.m3u8':
+                    body = b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nvariant.php\n'
                 ranged = self.headers.get('Range') == 'bytes=2-5'
                 if ranged: body = body[2:6]
                 self.send_response(206 if ranged else 200)
@@ -1061,6 +1084,15 @@ class Spider:
             self.assertEqual((status, body, response_headers['Content-Range']), (206, b'2345', 'bytes 2-5/10'))
             self.assertEqual(received[-1][1]['Cookie'], 'fixture-cookie')
             self.assertEqual(received[-1][1]['Referer'], 'https://source.test/')
+            master = server.relay.register(base + '/master.m3u8', headers)
+            status, _, body = get('/media/' + master)
+            self.assertEqual(status, 200)
+            variant = body.decode().strip().splitlines()[-1]
+            status, _, body = get(urllib.parse.urlsplit(variant).path, {'Range': 'bytes=2-5'})
+            self.assertEqual(status, 200)
+            self.assertTrue(body.startswith(b'#EXTM3U'))
+            self.assertNotIn('Range', received[-1][1])
+            self.assertNotIn('segment.ts', body.decode())
             token = server.relay.register(base + '/redirect', headers)
             self.assertEqual(get('/media/' + token)[0], 200)
             self.assertNotIn('Cookie', received[-1][1]);self.assertNotIn('Authorization', received[-1][1])
