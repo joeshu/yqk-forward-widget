@@ -17,6 +17,18 @@ class ResourceInteractionContracts(unittest.TestCase):
         cls.resource_detail = (ROOT / 'Sources/PluginResourceDetailViewController.m').read_text()
         cls.service_store = (ROOT / 'Sources/ServiceStore.m').read_text()
 
+    def test_player_exit_cancels_work_after_confirmed_transition(self):
+        will = self.playback.split('- (void)viewWillDisappear:', 1)[1].split('- (void)viewDidDisappear:', 1)[0]
+        did = self.playback.split('- (void)viewDidDisappear:', 1)[1].split('- (void)viewWillAppear:', 1)[0]
+        self.assertIn('self.navigationController.isBeingDismissed', will)
+        self.assertNotIn('[self.client cancel]', will)
+        self.assertIn('if(!self.pendingScreenExit)return;', did)
+        self.assertLess(did.index('self.generation++'), did.index('[self.client cancel]'))
+        self.assertIn('[self clearCurrentPlayerItem]', did)
+        self.assertIn('replaceCurrentItemWithPlayerItem:nil', did)
+        appeared = self.playback.split('- (void)viewDidAppear:', 1)[1].split('- (void)viewWillDisappear:', 1)[0]
+        self.assertIn('self.pendingScreenExit=NO', appeared)
+
     def test_resource_filters_and_service_detail_use_distinct_controls(self):
         for kind in ('all', 'vod', 'live', 'catalog', 'script', 'attention'):
             self.assertIn(f'@"id":@"{kind}"', self.catalog)

@@ -90,3 +90,14 @@ applying the selected alternate. `playback_quality_selected` records parse mode,
 web requirement and declared native eligibility; none proves actual decoding.
 The mixed HLS/HTML relay regression verifies HTML remains a web route even when
 the primary HLS stream is relayed and the HTML choice has request headers.
+
+### Playback page exit
+
+A completed pop or dismissal (including dismissal of the containing navigation
+controller) cancels the media request, invalidates request/player generations,
+clears pending episode/web handoffs and detaches the current AVPlayerItem.
+`playback_screen_requests_cancelled` marks this cleanup. Closing a web sheet or
+entering full screen does not select this exit path. Cleanup runs after the
+transition; a cancelled interactive back gesture resets the pending exit in
+`viewDidAppear`. Source contract tests check this ordering; gesture/full-screen
+behavior still requires simulator or device validation.

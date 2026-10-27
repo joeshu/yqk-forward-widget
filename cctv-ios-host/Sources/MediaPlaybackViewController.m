@@ -119,6 +119,7 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
 @property(nonatomic) BOOL observingVideoLayer;
 @property(nonatomic) CFTimeInterval playbackStartedAt;
 @property(nonatomic) NSUInteger playerGeneration;
+@property(nonatomic) BOOL pendingScreenExit;
 @property(nonatomic) BOOL hasVideoTrack;
 @property(nonatomic) BOOL videoFrameReady;
 @property(nonatomic,copy) NSString *playbackAttemptID;
@@ -280,7 +281,7 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
 }
 - (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self updatePlaybackLayoutForSize:self.view.bounds.size];[self observePlayerLayerIfAvailable];}
 - (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];NSDictionary *pending=self.pendingEpisodeResult;self.pendingEpisodeResult=nil;
+    [super viewDidAppear:animated];self.pendingScreenExit=NO;NSDictionary *pending=self.pendingEpisodeResult;self.pendingEpisodeResult=nil;
     if(!self.idleTimerOverrideActive){self.previousIdleTimerDisabled=UIApplication.sharedApplication.idleTimerDisabled;self.idleTimerOverrideActive=YES;}
     BOOL keepAwake=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaKeepScreenAwake"]?[NSUserDefaults.standardUserDefaults boolForKey:@"cctv.mediaKeepScreenAwake"]:YES;UIApplication.sharedApplication.idleTimerDisabled=keepAwake;
     if(pending){[self playResult:pending];return;}
@@ -288,12 +289,23 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
 }
 - (void)viewWillDisappear:(BOOL)animated {
     [self persistPlaybackProgress];
-    if((self.isMovingFromParentViewController||self.isBeingDismissed)&&self.playbackAttemptID.length){
+    self.pendingScreenExit=self.isMovingFromParentViewController||self.isBeingDismissed||self.navigationController.isBeingDismissed;
+    if(self.idleTimerOverrideActive){UIApplication.sharedApplication.idleTimerDisabled=self.previousIdleTimerDisabled;self.idleTimerOverrideActive=NO;}
+    [super viewWillDisappear:animated];
+}
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+    if(!self.pendingScreenExit)return;
+    self.pendingScreenExit=NO;
+    self.generation++;[self.client cancel];self.resolving=NO;
+    self.awaitingWebPlaybackReturn=NO;self.pendingEpisodeResult=nil;
+    [self.spinner stopAnimating];[self clearCurrentPlayerItem];
+    [self.player replaceCurrentItemWithPlayerItem:nil];
+    [RuntimeDiagnostics.shared recordEvent:@"playback_screen_requests_cancelled" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"playback_attempt_id":self.playbackAttemptID?:@"",@"request_generation":@(self.generation),@"player_generation":@(self.playerGeneration)}];
+    if(self.playbackAttemptID.length){
         [RuntimeDiagnostics.shared recordEvent:@"playback_screen_closed" category:@"playback" fields:@{@"playback_attempt_id":self.playbackAttemptID, @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""}];
         [self recordPlaybackAttemptOutcome:@"screen_closed" failureKind:nil httpStatus:0 terminal:YES];
     }
-    if(self.idleTimerOverrideActive){UIApplication.sharedApplication.idleTimerDisabled=self.previousIdleTimerDisabled;self.idleTimerOverrideActive=NO;}
-    [super viewWillDisappear:animated];
 }
 - (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];if(@available(iOS 16.0,*))[self setNeedsUpdateOfSupportedInterfaceOrientations];else [UIViewController attemptRotationToDeviceOrientation];}
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {[super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];[coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context){[self updatePlaybackLayoutForSize:size];} completion:nil];}
