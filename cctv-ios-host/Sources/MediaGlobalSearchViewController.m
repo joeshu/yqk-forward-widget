@@ -550,7 +550,12 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     if(self.resultsVisible){[self updateFilters];[self.tableView reloadData];}
 }
 
+- (BOOL)hasSubmittedSearchInput {
+    NSString *query=[self.searchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return query.length&&[query isEqual:self.keyword];
+}
 - (void)retryFailedSources {
+    if(![self hasSubmittedSearchInput]){self.progressLabel.text=@"请先搜索当前关键词，再重试来源";return;}
     NSMutableArray<NSNumber *> *failed = [NSMutableArray array];
     for (NSUInteger section = 0; section < self.rows.count; section++) {
         NSDictionary *row = self.rows[section];
@@ -687,7 +692,8 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     if (statusRow) {
         cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
         cell.textLabel.adjustsFontForContentSizeCategory = YES;
-        NSDictionary *station=self.selectedProvider?row[@"providerStates"][self.selectedProvider]:nil;
+        BOOL sourceFailed=[@[@"搜索失败",@"启动失败"] containsObject:row[@"state"]?:@""];
+        NSDictionary *station=self.selectedProvider&&!sourceFailed?row[@"providerStates"][self.selectedProvider]:nil;
         cell.textLabel.text = station?station[@"state"]:(row[@"state"] ?: @"待搜索");
         NSString *error = station?MediaSearchText(station[@"error"]):([row[@"error"] isKindOfClass:NSString.class] ? row[@"error"] : @"");
         NSString *providerError = station?@"":([row[@"providerError"] isKindOfClass:NSString.class] ? row[@"providerError"] : @"");
@@ -719,6 +725,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section >= self.sources.count || indexPath.section >= self.rows.count) return;
     if (indexPath.row == 0) {
+        if(![self hasSubmittedSearchInput]){self.progressLabel.text=@"请先搜索当前关键词，再启动或重试来源";return;}
         NSDictionary *row = self.rows[indexPath.section];
         if ([[row[@"state"] description] containsString:@"未运行"]) { [self startStoppedSourceAtSection:indexPath.section]; return; }
         if ([row[@"state"] isEqual:@"搜索失败"] || [row[@"state"] isEqual:@"部分完成"] || [row[@"state"] isEqual:@"启动失败"]) {

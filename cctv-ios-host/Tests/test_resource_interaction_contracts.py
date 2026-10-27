@@ -506,6 +506,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('self.savedSearchOffset=self.tableView.contentOffset', search)
         self.assertIn('[self restoreReadingPosition:self.savedReadingPosition]', search)
         self.assertIn('if(!self.resultsVisible){return;}', search)
+        self.assertIn('hasSubmittedSearchInput', search)
+        self.assertIn('self.selectedProvider&&!sourceFailed', search)
         self.assertIn('job.generation == self.generation', search)
         self.assertIn('self.jobs[@(job.section)] == job', search)
 
