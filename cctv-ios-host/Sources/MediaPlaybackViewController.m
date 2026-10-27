@@ -61,7 +61,7 @@ static void MediaPlaybackAddAccessLogFields(NSMutableDictionary *fields, AVPlaye
     fields[@"access_log_event_count"] = @(events.count);
     AVPlayerItemAccessLogEvent *event = events.lastObject;
     if (event) {
-        fields[@"media_segments_downloaded"] = @(MAX(0, event.segmentsDownloaded));
+        fields[@"media_requests"] = @(MAX(0, event.numberOfMediaRequests));
         fields[@"media_bytes_transferred"] = @(MAX(0, event.numberOfBytesTransferred));
         fields[@"media_stall_count"] = @(MAX(0, event.numberOfStalls));
         fields[@"media_dropped_video_frames"] = @(MAX(0, event.numberOfDroppedVideoFrames));

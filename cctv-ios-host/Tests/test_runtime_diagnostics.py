@@ -252,7 +252,7 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
 
     def test_player_diagnostics_capture_transport_and_recovery_without_media_urls(self):
         for field in (
-            'media_segments_downloaded', 'media_bytes_transferred', 'media_stall_count',
+            'media_requests', 'media_bytes_transferred', 'media_stall_count',
             'media_dropped_video_frames', 'media_transfer_duration_seconds',
             'media_observed_bitrate_bps', 'media_indicated_bitrate_bps',
             'media_reported_startup_seconds', 'video_presentation_width',
