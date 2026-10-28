@@ -108,7 +108,11 @@ static NSUInteger const ImageQueueLimit = 96;
     HostImageRequest *record=self.tasks[@(task.taskIdentifier)];if(!record)return;
     [self.tasks removeObjectForKey:@(task.taskIdentifier)];[self.requests removeObjectForKey:record.cacheKey];
     NSMutableData *domain=[self domainStateForURL:record.url];
-    if(record.generation==self.generation)HostImageDomainFinish(domain.mutableBytes,CACurrentMediaTime(),[error.domain isEqual:NSURLErrorDomain]&&error.code==NSURLErrorTimedOut,error.code==NSURLErrorCancelled&&!record.failureStage.length);
+    if(record.generation==self.generation){
+        HostImageDomainState *state=domain.mutableBytes;unsigned previous=state->timeouts;BOOL probe=state->probe;
+        HostImageDomainFinish(state,CACurrentMediaTime(),[error.domain isEqual:NSURLErrorDomain]&&error.code==NSURLErrorTimedOut,error.code==NSURLErrorCancelled&&!record.failureStage.length);
+        if((previous<3&&state->timeouts>=3)||probe)[RuntimeDiagnostics.shared recordEvent:probe?@"image_domain_probe_finished":@"image_domain_backoff_started" category:@"media_api" fields:@{@"image_host":[NSURL URLWithString:record.url].host?:@"",@"http_status":@(record.httpStatus),@"error_code":@(error.code),@"remaining_backoff_seconds":@(MAX(0,state->until-CACurrentMediaTime())),@"timeout_streak":@(state->timeouts)}];
+    }
     UIImage *image=nil;
     if(!error && record.generation==self.generation && record.data.length) {
         CGImageSourceRef source=CGImageSourceCreateWithData((__bridge CFDataRef)record.data, (__bridge CFDictionaryRef)@{(__bridge NSString *)kCGImageSourceShouldCache:@NO});
