@@ -171,6 +171,31 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('if([operation isEqualToString:@"home_shelf"])', self.detail)
         self.assertIn('self.activeMediaOperation=@"home_shelf"', self.detail)
 
+    def test_restored_home_uses_cached_content_and_waits_for_explicit_load(self):
+        load_sources = self.detail[self.detail.index('- (void)loadSources {'):
+                                   self.detail.index('- (void)invalidateServiceIdentifier:', self.detail.index('- (void)loadSources {'))]
+        demand = self.detail[self.detail.index('- (void)loadHomeOnDemand {'):
+                             self.detail.index('- (void)invalidateServiceIdentifier:', self.detail.index('- (void)loadHomeOnDemand {'))]
+        foreground = self.detail[self.detail.index('- (void)resumeAfterForeground {'):
+                                 self.detail.index('- (void)checkCurrentService {', self.detail.index('- (void)resumeAfterForeground {'))]
+        self.assertIn('if(self.deferAutomaticLoading)', load_sources)
+        self.assertIn('cachedHomeResultForSelectedProvider:', load_sources)
+        self.assertIn('[self applyHomeResult:cached]', load_sources)
+        self.assertIn('return;', load_sources)
+        self.assertIn('self.homeLoadDeferred', demand)
+        self.assertIn('[self activate:self.source keepingHome:YES]', demand)
+        self.assertIn('[self loadHome]', demand)
+        self.assertNotIn('[self checkCurrentService]', foreground)
+        self.assertNotIn('[self loadHome]', foreground)
+
+    def test_home_reappearance_and_cancelled_home_requests_do_not_refetch(self):
+        appeared = self.detail[self.detail.index('- (void)viewWillAppear:'):
+                               self.detail.index('- (void)traitCollectionDidChange:', self.detail.index('- (void)viewWillAppear:'))]
+        self.assertIn('media_request_resume_skipped', appeared)
+        home_appearance = appeared[appeared.index('if(self.homeMode)[self refreshHomeModules]'):]
+        self.assertNotIn('loadHomeShelves:', home_appearance)
+        self.assertNotIn('[self loadHome]', home_appearance)
+
     def test_home_status_is_inline_actionable_and_does_not_rebuild_content_on_each_progress_update(self):
         show_message = self.detail[self.detail.index('- (void)showMessage:'):
                                    self.detail.index('- (void)chooseResource', self.detail.index('- (void)showMessage:'))]

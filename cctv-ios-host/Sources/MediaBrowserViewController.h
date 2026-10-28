@@ -12,6 +12,7 @@
 - (void)checkCurrentService;
 - (void)pauseForBackground;
 - (void)resumeAfterForeground;
+- (void)saveSessionState;
 @property(nonatomic, copy) void (^onPlay)(NSDictionary *result,NSDictionary *context);
 @property(nonatomic, copy) dispatch_block_t onResources;
 @property(nonatomic, copy) NSError *(^startupErrorProvider)(void);
@@ -19,4 +20,8 @@
 @property(nonatomic, copy) void (^onSubscribeLive)(NSDictionary *service);
 @property(nonatomic, readonly, getter=isHomeMode) BOOL homeMode;
 @property(nonatomic, copy) void (^onDisplayModeChanged)(BOOL homeMode);
+/// Set before the view is loaded when restoring the app session. Cached content is shown, but no service or media request is started.
+@property(nonatomic) BOOL deferAutomaticLoading;
+/// Starts or refreshes the selected source only after an explicit user action.
+- (void)loadHomeOnDemand;
 @end

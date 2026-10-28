@@ -197,6 +197,8 @@ static void next(NSArray *steps, NSUInteger index) {
 }
 - (BOOL)smokeApplication:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
     [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];
+    [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"resumeLastChannel"];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"cctv.lastBottomTab.v1"];
     [NSUserDefaults.standardUserDefaults setObject:@[@"recommendations",@"catalog",@"continue",@"favorites",@"sources"] forKey:@"cctv.mediaHome.modules.v1"];
     [NSUserDefaults.standardUserDefaults setInteger:3 forKey:@"cctv.mediaHome.modules.schemaVersion"];
     [RuntimeDiagnostics.shared setEnabled:YES];

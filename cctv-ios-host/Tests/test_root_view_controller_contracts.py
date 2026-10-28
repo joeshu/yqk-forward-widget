@@ -139,6 +139,19 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("[page refreshSources]", TEXT)
         self.assertIn("for(NSDictionary *candidate in updated)if([candidate[@\"id\"] isEqual:self.source[@\"id\"]])", (SOURCE.parent / "MediaBrowserViewController.m").read_text(encoding="utf-8"))
 
+    def test_last_bottom_tab_is_restored_without_automatic_channel_refresh(self):
+        startup = method_body("- (void)viewDidAppear:")
+        select = method_body("- (void)selectBottomTab:")
+        tap = method_body("- (void)bottomTabTapped:")
+        self.assertIn('cctv.lastBottomTab.v1', TEXT)
+        self.assertIn('cctv.manualStartupLoadingMigration.v1', TEXT)
+        self.assertIn('[preferences setBool:NO forKey:@"resumeLastChannel"]', TEXT)
+        self.assertIn('self.initialTabRestorePending', startup)
+        self.assertIn('self.restoringLastTab=YES', startup)
+        self.assertIn('setInteger:self.activeTab forKey:@"cctv.lastBottomTab.v1"', select)
+        self.assertIn('self.userInitiatedTabSelection&&!self.restoringLastTab', select)
+        self.assertIn('self.userInitiatedTabSelection=YES', tap)
+
     def test_bottom_tabs_open_service_directory_and_settings_pages(self):
         self.assertIn('- (void)buildBottomBar', TEXT)
         self.assertIn('[w openServicesPage]', TEXT)
@@ -174,6 +187,8 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         for key in ['resumeLastChannel','rememberLastChannel','autoLoadEPG','allowBackgroundAudio','autoPiP']:
             self.assertIn('@"' + key + '"', TEXT)
             self.assertIn('@"' + key + '"', SETTINGS)
+        self.assertIn('CCTVBoolPreference(@"resumeLastChannel",NO)', TEXT)
+        self.assertIn('@"key":@"resumeLastChannel", @"icon":@"arrow.counterclockwise", @"default":@NO', SETTINGS)
 
     def test_services_directory_shows_live_status_and_opens_detail(self):
         self.assertIn('isRunningServiceIdentifier', SERVICES)

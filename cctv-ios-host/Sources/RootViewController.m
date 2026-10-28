@@ -325,6 +325,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, strong) UIStackView *bottomBar;
 @property (nonatomic, strong) UIVisualEffectView *bottomBarBackdrop;
 @property (nonatomic, assign) NSInteger activeTab;
+@property (nonatomic, assign) BOOL initialTabRestorePending;
+@property (nonatomic, assign) BOOL restoringLastTab;
+@property (nonatomic, assign) BOOL userInitiatedTabSelection;
 @property (nonatomic, assign) BOOL subscriptionCatalog;
 @property (nonatomic, assign) BOOL favoritesOnly;
 @property (nonatomic, strong) UIButton *pipBtn;
@@ -396,6 +399,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.title = @"CCTV";
     HostStyleNavigation(self.navigationController);
     self.view.tintColor=HostAccent();
+    NSUserDefaults *preferences=NSUserDefaults.standardUserDefaults;
+    if(![preferences boolForKey:@"cctv.manualStartupLoadingMigration.v1"]){[preferences setBool:NO forKey:@"resumeLastChannel"];[preferences setBool:YES forKey:@"cctv.manualStartupLoadingMigration.v1"];}
+    id savedTab=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.lastBottomTab.v1"];
+    if([savedTab respondsToSelector:@selector(integerValue)]&&[savedTab integerValue]>=0&&[savedTab integerValue]<=4){self.activeTab=[savedTab integerValue];self.initialTabRestorePending=self.activeTab!=0;}
     self.gridMode = [[NSUserDefaults standardUserDefaults] objectForKey:@"channelGridMode"] ? [[NSUserDefaults standardUserDefaults] boolForKey:@"channelGridMode"] : YES;
     self.logBuffer = [NSMutableString string];
     self.diagnosticLogQueue = dispatch_queue_create("com.cctvhost.diagnostic-log", DISPATCH_QUEUE_SERIAL);
@@ -411,7 +418,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.subscriptionReadiness=[NSMutableDictionary dictionary];
     self.readyLocalOrigins=[NSMutableDictionary dictionary];
     self.deferredLocalSubscriptions=[NSMutableSet set];
-    self.subscriptionTasks=[NSMutableDictionary dictionary];self.subscriptionTraceIDs=[NSMutableDictionary dictionary];self.remoteAttemptedURLs=[NSMutableSet set];self.catalogStates=[NSMutableDictionary dictionary];self.tabPages=[NSMutableDictionary dictionary];
+    self.subscriptionTasks=[NSMutableDictionary dictionary];self.subscriptionTraceIDs=[NSMutableDictionary dictionary];self.remoteAttemptedURLs=[NSMutableSet set];self.catalogStates=[NSMutableDictionary dictionary];for(NSInteger tab=0;tab<2;tab++){NSDictionary *savedState=[[NSUserDefaults standardUserDefaults] dictionaryForKey:[NSString stringWithFormat:@"cctv.catalogState.%ld",(long)tab]];if(savedState)self.catalogStates[@(tab)]=savedState;}self.tabPages=[NSMutableDictionary dictionary];
     [self loadChannels];
     [self buildPlayer];
     [self buildList];
@@ -425,6 +432,17 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(checkVisibleMediaAfterActivation) name:UIApplicationDidBecomeActiveNotification object:nil];
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if(!self.initialTabRestorePending)return;
+    self.initialTabRestorePending=NO;
+    NSInteger savedTab=self.activeTab;
+    if(savedTab<0||savedTab>=self.bottomBar.arrangedSubviews.count)return;
+    self.restoringLastTab=YES;
+    [self selectBottomTab:(UIButton *)self.bottomBar.arrangedSubviews[savedTab]];
+    self.restoringLastTab=NO;
 }
 
 - (void)dealloc {
@@ -830,10 +848,16 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.baseForegroundColor=(i==0?HostAccent():HostMutedText()); cfg.background.backgroundColor=i==0?[HostAccent() colorWithAlphaComponent:0.20]:UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];return result;}; b.configuration=cfg;
         b.accessibilityLabel=titles[i]; b.accessibilityIdentifier=[NSString stringWithFormat:@"tab.%@",titles[i]];
         b.accessibilityHint=[NSString stringWithFormat:@"切换到%@页面",titles[i]];
-        [b addTarget:self action:@selector(selectBottomTab:) forControlEvents:UIControlEventTouchUpInside]; [self.bottomBar addArrangedSubview:b];
+        [b addTarget:self action:@selector(bottomTabTapped:) forControlEvents:UIControlEventTouchUpInside]; [self.bottomBar addArrangedSubview:b];
     }
     [self.view addSubview:self.bottomBar];
     [self updateBottomBarSelection];
+}
+
+- (void)bottomTabTapped:(UIButton *)sender {
+    self.userInitiatedTabSelection=YES;
+    [self selectBottomTab:sender];
+    self.userInitiatedTabSelection=NO;
 }
 
 - (void)updateBottomBarSelection {
@@ -851,15 +875,18 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)selectBottomTab:(UIButton *)sender {
     self.catalogSearchGeneration++;
     [self stopPreview];
-    if(self.activeTab<2)self.catalogStates[@(self.activeTab)]=@{@"query":self.query?:@"",@"group":@(self.groupControl.selectedSegmentIndex),@"gridY":@(self.channelGrid.contentOffset.y),@"listY":@(self.table.contentOffset.y)};
+    if(!self.restoringLastTab&&self.activeTab<2){NSDictionary *state=@{@"query":self.query?:@"",@"group":@(self.groupControl.selectedSegmentIndex),@"gridY":@(self.channelGrid.contentOffset.y),@"listY":@(self.table.contentOffset.y)};self.catalogStates[@(self.activeTab)]=state;[[NSUserDefaults standardUserDefaults] setObject:state forKey:[NSString stringWithFormat:@"cctv.catalogState.%ld",(long)self.activeTab]];}
+    if(self.restoringLastTab)[RuntimeDiagnostics.shared recordEvent:@"ui_session_tab_restored" category:@"lifecycle" fields:@{@"tab_index":@(sender.tag),@"automatic_content_load":@NO}];
     self.activeTab=sender.tag;
+    [[NSUserDefaults standardUserDefaults] setInteger:self.activeTab forKey:@"cctv.lastBottomTab.v1"];
     [self updateBottomBarSelection];
+    if([self.tabPage isKindOfClass:MediaBrowserViewController.class])[(MediaBrowserViewController *)self.tabPage saveSessionState];
     if(self.tabPage){[self.tabPage willMoveToParentViewController:nil];[self.tabPage.view removeFromSuperview];[self.tabPage removeFromParentViewController];self.tabPage=nil;}
     if(sender.tag==2){ [self openMediaTab]; }
     else if(sender.tag==3){ [self openConfigurationTab]; }
     else if(sender.tag==4){ SettingsViewController *page=(SettingsViewController *)self.tabPages[@4];if(!page){page=[self makeSettingsPage];self.tabPages[@4]=page;}[self showTabPage:page title:@"设置"]; }
     else {self.favoritesOnly=NO;if(sender.tag<2)self.subscriptionCatalog=sender.tag==1;self.activeSource=nil;self.playerTabs.selectedSegmentIndex=1;[self selectPlayerPanel];NSDictionary *state=self.catalogStates[@(sender.tag)];self.query=state[@"query"]?:@"";self.searchController.searchBar.text=self.query;self.groupControl.selectedSegmentIndex=[state[@"group"] integerValue];[self configureCatalogNavigation];[self applyFilter];[self.view layoutIfNeeded];self.channelGrid.contentOffset=CGPointMake(0,[state[@"gridY"] doubleValue]);self.table.contentOffset=CGPointMake(0,[state[@"listY"] doubleValue]);
-        if(sender.tag==1&&!self.channelID.length)[self refreshSubscriptionsWhenIdle];}
+        if(sender.tag==1&&!self.channelID.length&&self.userInitiatedTabSelection&&!self.restoringLastTab)[self refreshSubscriptionsWhenIdle];}
     [self.view setNeedsLayout];
 }
 
@@ -919,7 +946,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 - (void)openMediaTab {
     MediaBrowserViewController *page=(MediaBrowserViewController *)self.tabPages[@2];
-    if(!page){page=[MediaBrowserViewController new];__weak typeof(self) weakSelf=self;
+    BOOL created=page==nil;
+    if(!page){page=[MediaBrowserViewController new];page.deferAutomaticLoading=self.restoringLastTab||!self.userInitiatedTabSelection;__weak typeof(self) weakSelf=self;
         page.sourcesProvider=^{
             NSMutableArray *sources=[NSMutableArray array];
             for(NSDictionary *service in [ServiceStore services])if([ServiceStore isVODMediaService:service])[sources addObject:service];
@@ -950,8 +978,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     }
     [self showTabPage:page title:page.isHomeMode?@"":@"影视库"];
     if(page.onDisplayModeChanged)page.onDisplayModeChanged(page.isHomeMode);
-    [page refreshSources];
-    [page resumeAfterForeground];
+    if(!created){[page refreshSources];if(self.userInitiatedTabSelection)[page loadHomeOnDemand];}
 }
 - (void)playMediaResult:(NSDictionary *)result name:(NSString *)name {
     NSString *url=[self stableURLKey:result[@"url"]];if(!url.length){[self showServiceError:@"资源没有返回可播放媒体地址"];return;}
@@ -1313,7 +1340,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
     // SDK 初始化返回后即可续播，不再固定等待 2.5 秒。
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!CCTVBoolPreference(@"resumeLastChannel",YES)) { [self log:@"已关闭启动续播"]; return; }
+        if (!CCTVBoolPreference(@"resumeLastChannel",NO)) { [self log:@"启动时自动续播已关闭，等待用户点选频道"]; return; }
         NSDictionary *last = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"lastChannel"];
         if (![last[@"id"] length] || self.channelID.length) return;
         [self log:@"续播上次频道 %@", last[@"name"] ?: last[@"id"]];
