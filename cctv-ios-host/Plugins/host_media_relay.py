@@ -38,6 +38,48 @@ class RelayFailure(Exception):
         self.stage = stage
 
 
+def _transient_open_timeout(error):
+    if isinstance(error, urllib.error.HTTPError):
+        return False
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return True
+    return isinstance(reason, ssl.SSLError) and 'timed out' in str(reason).lower()
+
+
+def _retry_request(request):
+    headers = dict(request.header_items())
+    headers.update(getattr(request, 'unredirected_hdrs', {}))
+    return urllib.request.Request(
+        request.full_url, data=request.data, headers=headers,
+        origin_req_host=request.origin_req_host, unverifiable=request.unverifiable,
+        method=request.get_method())
+
+
+def _open_with_timeout_retry(request, diagnostic_id=''):
+    """Retry one idempotent request once when the connection handshake times out."""
+    method = request.get_method().upper()
+    opener = urllib.request.build_opener(ScopedRedirect())
+    try:
+        return opener.open(request, timeout=8)
+    except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
+        if method not in ('GET', 'HEAD') or not _transient_open_timeout(error):
+            raise
+        parsed = urllib.parse.urlsplit(request.full_url)
+        print('[CCTVHostMediaRelay] ' + json.dumps({
+            'event': 'media_relay_retry',
+            'request_id': diagnostic_id or uuid.uuid4().hex,
+            'stage': 'upstream_timeout',
+            'attempt': 2,
+            'retry_timeout_ms': 2000,
+            'method': method,
+            'upstream_host': parsed.hostname or '',
+        }, separators=(',', ':')))
+        time.sleep(0.15)
+        retry_opener = urllib.request.build_opener(ScopedRedirect())
+        return retry_opener.open(_retry_request(request), timeout=2)
+
+
 def safe_error_summary(error):
     text = str(error or '')
     text = re.sub(r'(?i)https?://[^\s\"\'<>]+', '[URL redacted]', text)
@@ -374,13 +416,13 @@ class MediaRelay:
                 headers['Range'] = handler.headers['Range']
             request = urllib.request.Request(url, headers=headers, method='HEAD' if head else 'GET')
             try:
-                response = urllib.request.build_opener(ScopedRedirect()).open(request, timeout=8)
+                response = _open_with_timeout_retry(request, diagnostic_id)
             except urllib.error.HTTPError as upstream_error:
                 if fallback_url and upstream_error.code in (401, 403):
                     upstream_error.close()
                     fallback_request = urllib.request.Request(fallback_url, headers=headers,
                         method='HEAD' if head else 'GET')
-                    response = urllib.request.build_opener(ScopedRedirect()).open(fallback_request, timeout=8)
+                    response = _open_with_timeout_retry(fallback_request, diagnostic_id)
                 elif upstream_error.code in (401,403) and record[3]:
                     upstream_error.close()
                     record=self._refresh_record(token,force=True)
@@ -397,7 +439,7 @@ class MediaRelay:
                     if manifest_request:headers={k:v for k,v in headers.items() if k.lower()!='range'}
                     elif handler.headers.get('Range'):headers['Range']=handler.headers['Range']
                     refreshed_request=urllib.request.Request(url,headers=headers,method='HEAD' if head else 'GET')
-                    response=urllib.request.build_opener(ScopedRedirect()).open(refreshed_request,timeout=8)
+                    response=_open_with_timeout_retry(refreshed_request, diagnostic_id)
                 else:
                     raise
             with self.lock:

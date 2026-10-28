@@ -6,11 +6,13 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import sys
 import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.parse
 from contextlib import redirect_stdout
 from unittest import mock
@@ -1304,6 +1306,67 @@ class Spider:
         records = [json.loads(c.args[0].split('] ', 1)[1]) for c in log.call_args_list]
         self.assertEqual(records[0]['event'], 'media_relay_failed')
         response.close.assert_called_once()
+        relay.close()
+
+    def test_relay_retries_one_transient_handshake_timeout_without_logging_credentials(self):
+        relay = MediaRelay()
+        token = relay.register('https://fixture.test/video.mp4?signature=private-signature',
+                               {'Cookie': 'private-cookie'}, diagnostic_id='retry-trace')
+        response = mock.Mock(status=200)
+        response.headers = {'Content-Type': 'video/mp4', 'Content-Length': '4'}
+        response.geturl.return_value = 'https://fixture.test/video.mp4'
+        response.read.side_effect = [b'data', b'']
+        handler = mock.Mock(command='GET')
+        handler.headers = {}
+        first = mock.Mock()
+        first.open.side_effect = urllib.error.URLError(socket.timeout('TLS handshake timed out'))
+        second = mock.Mock()
+        second.open.return_value = response
+        with mock.patch('urllib.request.build_opener', side_effect=[first, second]), \
+             mock.patch('host_media_relay.time.sleep') as sleep, \
+             mock.patch('builtins.print') as log:
+            relay.serve(handler, token)
+        first_request = first.open.call_args.args[0]
+        retry_call = second.open.call_args
+        retry_request = retry_call.args[0]
+        self.assertEqual(first.open.call_args.kwargs['timeout'], 8)
+        self.assertEqual(retry_call.kwargs['timeout'], 2)
+        self.assertEqual(retry_request.full_url, first_request.full_url)
+        self.assertEqual(retry_request.get_header('Cookie'), 'private-cookie')
+        self.assertEqual(handler.send_response.call_args.args, (200,))
+        self.assertEqual(handler.wfile.write.call_args.args, (b'data',))
+        self.assertEqual(sleep.call_args.args, (.15,))
+        records = [json.loads(call.args[0].split('] ', 1)[1]) for call in log.call_args_list]
+        self.assertEqual([record['event'] for record in records], ['media_relay_retry'])
+        self.assertEqual(records[0]['request_id'], 'retry-trace')
+        self.assertEqual(records[0]['stage'], 'upstream_timeout')
+        self.assertNotIn('private', json.dumps(records))
+        response.close.assert_called_once()
+        self.assertFalse(relay.responses)
+        relay.close()
+
+    def test_relay_timeout_retry_is_bounded_and_reports_final_failure(self):
+        relay = MediaRelay()
+        token = relay.register('https://fixture.test/master.m3u8?token=private', {},
+                               diagnostic_id='retry-failed-trace')
+        opener = mock.Mock()
+        opener.open.side_effect = [urllib.error.URLError(socket.timeout('handshake timed out')),
+                                   urllib.error.URLError(socket.timeout('handshake timed out'))]
+        handler = mock.Mock(command='GET')
+        handler.headers = {}
+        with mock.patch('urllib.request.build_opener', return_value=opener), \
+             mock.patch('host_media_relay.time.sleep'), \
+             mock.patch('builtins.print') as log:
+            relay.serve(handler, token)
+        self.assertEqual(opener.open.call_count, 2)
+        self.assertEqual([call.kwargs['timeout'] for call in opener.open.call_args_list], [8, 2])
+        self.assertEqual(handler.send_response.call_args.args, (504,))
+        records = [json.loads(call.args[0].split('] ', 1)[1]) for call in log.call_args_list]
+        self.assertEqual([record['event'] for record in records],
+                         ['media_relay_manifest_requested', 'media_relay_retry', 'media_relay_failed'])
+        self.assertEqual(records[-1]['stage'], 'upstream_timeout')
+        self.assertEqual(records[-1]['request_id'], 'retry-failed-trace')
+        self.assertNotIn('private', json.dumps(records))
         relay.close()
 
     def test_relay_surfaces_upstream_status_and_logs_correlated_redacted_failure(self):
