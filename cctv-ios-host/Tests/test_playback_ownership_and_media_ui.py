@@ -10,6 +10,7 @@ PLAYBACK_SOURCE = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding
 EPISODE_SOURCE = (SOURCES / "MediaEpisodeSelectionViewController.m").read_text(encoding="utf-8")
 IMAGE_SOURCE = (SOURCES / "HostImageLoader.m").read_text(encoding="utf-8")
 RESOURCE_SOURCE = (SOURCES / "ConfigCenterViewController.m").read_text(encoding="utf-8")
+RESOURCE_HEADER = (SOURCES / "ConfigCenterViewController.h").read_text(encoding="utf-8")
 
 
 def method_body(source, signature):
@@ -115,6 +116,7 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('self.resourceActionsButton.showsMenuAsPrimaryAction=NO', ROOT_SOURCE)
         self.assertIn('action:@selector(openServicesPage) forControlEvents:UIControlEventTouchUpInside', ROOT_SOURCE)
         self.assertIn('actionWithTitle:@"脚本与服务"', ROOT_SOURCE)
+        self.assertIn('- (void)refreshProfiles;', RESOURCE_HEADER)
         self.assertIn('self.resourceActionsButton.frame=CGRectMake', ROOT_SOURCE)
         self.assertIn('||self.activeTab==3', ROOT_SOURCE)
         self.assertNotIn('搜索资源', RESOURCE_SOURCE)
