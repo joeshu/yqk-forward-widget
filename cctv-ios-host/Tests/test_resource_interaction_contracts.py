@@ -145,6 +145,27 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('MIN((NSUInteger)5,items.count)', self.detail)
         self.assertIn('owner.generation!=generation', self.detail)
 
+    def test_home_top_controls_floating_menu_and_navigation_transition_recovery(self):
+        self.assertIn('selectionRow.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4', self.detail)
+        self.assertIn('selectionRow.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:14', self.detail)
+        self.assertIn('selectionRow.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-14', self.detail)
+        self.assertIn('self.selectionRow.spacing=10', self.detail)
+        self.assertIn('button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail', self.detail)
+        self.assertIn('self.sourceSelectButton.accessibilityLabel=', self.detail)
+        self.assertIn('self.providerSelectButton.accessibilityLabel=', self.detail)
+        self.assertIn('self.homeMenuButton=[self floatingButtonWithSymbol:@"line.3.horizontal"', self.detail)
+        self.assertIn('self.homeMenuButton.menu=[self homeActionsMenu]', self.detail)
+        self.assertIn('self.homeMenuButton.accessibilityLabel=@"更多影视操作"', self.detail)
+        self.assertIn('homeSearchButton.topAnchor constant:-12', self.detail)
+        self.assertIn('homeModeButton.topAnchor constant:-12', self.detail)
+        self.assertIn('self.homeScroll.contentInset=UIEdgeInsetsMake(0,0,204,0)', self.detail)
+        self.assertNotIn('setNavigationBarHidden:self.homeMode', self.detail)
+        self.assertIn('UINavigationControllerDelegate', self.root)
+        self.assertIn('self.navigationController.delegate=self', self.root)
+        self.assertIn('didShowViewController:(UIViewController *)viewController animated:(BOOL)animated', self.root)
+        self.assertIn('shouldHideNavigationBarForVisibleController:', self.root)
+        self.assertIn('navigationController.topViewController!=viewController', self.root)
+
     def test_home_uses_reference_style_category_rails_from_real_source_results(self):
         self.assertIn('@"id":@"catalog"', self.detail)
         self.assertIn('- (void)loadHomeShelves:', self.detail)

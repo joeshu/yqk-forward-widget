@@ -218,7 +218,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 @end
 
-@interface RootViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIDocumentPickerDelegate, AVPlayerViewControllerDelegate>
+@interface RootViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIDocumentPickerDelegate, AVPlayerViewControllerDelegate, UINavigationControllerDelegate>
 // 播放
 @property (nonatomic, strong) UIView *playerBox;
 @property (nonatomic, strong) UILabel *titleLabel;
@@ -397,6 +397,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [MediaPackageImporter migrateLegacyRuntimeMetadata];
     self.view.backgroundColor = HostBackground();
     self.title = @"CCTV";
+    self.navigationController.delegate=self;
     HostStyleNavigation(self.navigationController);
     self.view.tintColor=HostAccent();
     NSUserDefaults *preferences=NSUserDefaults.standardUserDefaults;
@@ -436,6 +437,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
+    if(self.navigationController.delegate!=self)self.navigationController.delegate=self;
     if(!self.initialTabRestorePending)return;
     self.initialTabRestorePending=NO;
     NSInteger savedTab=self.activeTab;
@@ -443,6 +445,21 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.restoringLastTab=YES;
     [self selectBottomTab:(UIButton *)self.bottomBar.arrangedSubviews[savedTab]];
     self.restoringLastTab=NO;
+}
+
+- (BOOL)shouldHideNavigationBarForVisibleController:(UIViewController *)visibleController {
+    if(visibleController!=self)return NO;
+    MediaBrowserViewController *mediaPage=[self.tabPages[@2] isKindOfClass:MediaBrowserViewController.class]?self.tabPages[@2]:nil;
+    return self.fullscreen||(self.activeTab==2&&mediaPage.isHomeMode);
+}
+
+- (void)navigationController:(UINavigationController *)navigationController didShowViewController:(UIViewController *)viewController animated:(BOOL)animated {
+    if(navigationController!=self.navigationController||navigationController.topViewController!=viewController)return;
+    // Reconcile after the transition completes. During an interactive-pop that is
+    // cancelled, UIKit reports the detail/player as the shown controller here, so
+    // the home page cannot leave the navigation bar hidden underneath it.
+    BOOL shouldHide=[self shouldHideNavigationBarForVisibleController:viewController];
+    if(navigationController.navigationBarHidden!=shouldHide)[navigationController setNavigationBarHidden:shouldHide animated:NO];
 }
 
 - (void)dealloc {
