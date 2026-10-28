@@ -893,6 +893,17 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     if(self.homeRebuildScheduled)return;self.homeRebuildScheduled=YES;
     __weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,200*NSEC_PER_MSEC),dispatch_get_main_queue(),^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.homeRebuildScheduled=NO;if(UIApplication.sharedApplication.applicationState!=UIApplicationStateBackground)[owner rebuildHomeModulesNow];});
 }
+- (NSArray *)homeCategoryModuleSignature {
+    NSString *provider=@"";NSDictionary *home=[self cachedHomeResultForSelectedProvider:&provider];
+    NSArray *categories=self.homeCategories.count?self.homeCategories:([home[@"categories"] isKindOfClass:NSArray.class]?home[@"categories"]:@[]);
+    NSMutableArray *signature=[NSMutableArray arrayWithObject:provider?:@""];NSUInteger count=0;
+    for(NSDictionary *category in categories){if(count>=8)break;NSString *identifier=[category[@"id"] isKindOfClass:NSString.class]?category[@"id"]:@"";NSString *name=[category[@"name"] isKindOfClass:NSString.class]?category[@"name"]:@"";if(!identifier.length||!name.length)continue;
+        NSDictionary *args=[self arguments:@{@"categoryId":identifier,@"page":@1,@"filters":@{}}];
+        NSDictionary *result=[[MediaMetadataCache shared] resultForSource:self.source operation:@"category" arguments:args maximumAge:24*3600 isStale:NULL];NSArray *items=[result[@"items"] isKindOfClass:NSArray.class]?result[@"items"]:@[];
+        if(!items.count)continue;[signature addObject:@[identifier,name,[items subarrayWithRange:NSMakeRange(0,MIN((NSUInteger)8,items.count))]]];count++;
+    }
+    return signature;
+}
 - (void)appendHomeModule:(NSString *)key signature:(id)signature build:(dispatch_block_t)build {
     if(!self.homeModuleCache)self.homeModuleCache=[NSMutableDictionary dictionary];
     NSArray *context=@[signature?:@[],self.source[@"id"]?:@"",self.provider?:@"",@(self.view.bounds.size.width),@(self.traitCollection.userInterfaceStyle),self.traitCollection.preferredContentSizeCategory?:@""];
@@ -913,7 +924,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     NSSet *enabled=MediaHomeEnabledModules();
     if(![enabled isEqual:self.cachedHomeModules]){[self.homeModuleCache removeAllObjects];self.cachedHomeModules=enabled;}
     if([enabled containsObject:@"recommendations"]){NSString *featuredProvider=@"";NSDictionary *home=[self cachedHomeResultForSelectedProvider:&featuredProvider];NSArray *featured=[home[@"items"] isKindOfClass:NSArray.class]?home[@"items"]:@[];[self appendHomeModule:@"feature" signature:@[featured,featuredProvider?:@"",self.source?:@{}] build:^{if(featured.count)[self addHomeFeatureCarousel:featured source:self.source provider:featuredProvider];}];}
-    [self addHomeCategoryShelves:enabled];
+    if([enabled containsObject:@"catalog"])[self appendHomeModule:@"catalog" signature:[self homeCategoryModuleSignature] build:^{[self addHomeCategoryShelves:enabled];}];
     if([enabled containsObject:@"recommendations"]){NSString *cachedProvider=@"";NSDictionary *home=[self cachedHomeResultForSelectedProvider:&cachedProvider];NSArray *recommendations=[home[@"items"] isKindOfClass:NSArray.class]?home[@"items"]:@[];NSString *sourceName=[self.source[@"name"] isKindOfClass:NSString.class]?self.source[@"name"]:@"影视来源";
         if(!recommendations.count){[self.homeStack addArrangedSubview:[self homeSectionHeader:@"影视推荐" actionTitle:self.source?@"打开影视库":@"导入资源" selector:self.source?@selector(browseRecommendations):@selector(openResources)]];UIButton *empty=[self homeActionButton:self.source?([NSString stringWithFormat:@"%@ · 进入影视库加载推荐",sourceName]):@"添加影视资源后浏览推荐" symbol:self.source?@"sparkles.tv":@"plus" action:self.source?@selector(browseRecommendations):@selector(openResources) primary:NO];empty.accessibilityIdentifier=@"media-home-recommendations-empty";[self.homeStack addArrangedSubview:empty];}}
     if([enabled containsObject:@"continue"]){[self appendHomeModule:@"continue" signature:MediaPlaybackStateStore.watchHistory build:^{NSMutableArray *cards=[NSMutableArray array];for(NSDictionary *entry in MediaPlaybackStateStore.watchHistory){if([entry[@"completed"] boolValue]||[entry[@"position"] doubleValue]<=0)continue;NSDictionary *item=entry[@"item"]?:@{};NSString *subtitle=[NSString stringWithFormat:@"%@ · %@",entry[@"episodeName"]?:@"继续观看",entry[@"sourceName"]?:@"本机记录"];[cards addObject:[self homeCardWithTitle:item[@"name"]?:@"继续观看" subtitle:subtitle imageURL:item[@"poster"] symbol:nil action:^{[weakSelf openHistoryEntry:entry];}]];if(cards.count>=10)break;}
