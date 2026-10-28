@@ -128,9 +128,14 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('homeFeatureCardForItem:', self.detail)
         self.assertIn('operation:@"home" arguments:arguments maximumAge:DBL_MAX', self.detail)
         self.assertIn('operation:@"category" arguments:arguments maximumAge:DBL_MAX', self.detail)
-        self.assertIn('self.selectionRow.hidden=hidden', self.detail)
-        self.assertIn('media-home-source-picker', self.detail)
-        self.assertIn('homeScroll.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor', self.detail)
+        self.assertIn('self.selectionRow.hidden=NO', self.detail)
+        self.assertIn('self.homeScroll.topAnchor constraintEqualToAnchor:self.selectionRow.bottomAnchor', self.detail)
+        self.assertIn('media-source-selector', self.detail)
+        self.assertIn('media-provider-selector', self.detail)
+        self.assertNotIn('media-home-source-picker', self.detail)
+        self.assertIn('pendingProviderPickerAfterLoad', self.detail)
+        self.assertIn('站点列表已就绪，请选择影视站点', self.detail)
+        self.assertIn('selectionRow.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor', self.detail)
         self.assertIn('media-home-feature', self.detail)
         self.assertIn('- (void)addHomeFeatureCarousel:', self.detail)
         self.assertIn('pagingEnabled=YES', self.detail)
@@ -197,6 +202,21 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[self loadHome]', demand)
         self.assertNotIn('[self checkCurrentService]', foreground)
         self.assertNotIn('[self loadHome]', foreground)
+
+    def test_home_restores_the_selected_site_cache_and_label_without_starting_a_service(self):
+        load_sources = self.detail[self.detail.index('- (void)loadSources {'):
+                                   self.detail.index('- (void)invalidateServiceIdentifier:', self.detail.index('- (void)loadSources {'))]
+        deferred = load_sources[load_sources.index('if(self.deferAutomaticLoading)'):
+                                load_sources.index('self.homeLoadDeferred=NO;')]
+        selector = self.detail[self.detail.index('- (void)updateSelectionControls {'):
+                               self.detail.index('- (void)setBrowseControlsHidden:', self.detail.index('- (void)updateSelectionControls {'))]
+        self.assertIn('self.provider=cachedProvider', deferred)
+        self.assertIn('media_home_cache_restored', deferred)
+        self.assertIn('network_load_deferred', deferred)
+        self.assertNotIn('[self activate:', deferred)
+        self.assertIn('mediaProviderName.%@', selector)
+        self.assertIn('if(!providerID.length)providerID=savedProviderID', selector)
+        self.assertIn('[self updateSelectionControls]', deferred)
 
     def test_home_reappearance_and_cancelled_home_requests_do_not_refetch(self):
         appeared = self.detail[self.detail.index('- (void)viewWillAppear:'):
@@ -464,6 +484,39 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('scopeStack', self.detail)
         self.assertIn('NSString *url=[source[@"url"] isKindOfClass:NSString.class]', self.detail)
         self.assertIn('@"url":url', self.detail)
+
+    def test_home_exposes_separate_top_resource_and_site_pickers_and_prepares_sites_on_demand(self):
+        self.assertIn('selectionRow.hidden=NO', self.detail)
+        self.assertIn('self.homeScroll.topAnchor constraintEqualToAnchor:self.selectionRow.bottomAnchor', self.detail)
+        self.assertIn('action:@selector(chooseResource)', self.detail)
+        self.assertIn('action:@selector(chooseProvider)', self.detail)
+        self.assertIn('self.pendingProviderPickerAfterLoad=YES', self.detail)
+        self.assertIn('[self activate:self.source keepingHome:self.homeMode]', self.detail)
+        self.assertIn('[page chooseProvider]', self.detail)
+        self.assertIn('此资源使用单站点接口', self.detail)
+        smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
+        self.assertIn('home keeps independent resource and site selectors side by side at the top', smoke)
+        self.assertIn('home content starts below the top resource and site selector row', smoke)
+
+    def test_home_request_diagnostics_record_the_action_trigger_and_deferred_state(self):
+        request = self.detail[self.detail.index('- (void)loadHome {'):
+                              self.detail.index('- (void)applyHomeResult:', self.detail.index('- (void)loadHome {'))]
+        self.assertIn('self.nextHomeLoadTrigger', request)
+        self.assertIn('@"trigger":trigger', request)
+        self.assertIn('@"automatic_load_deferred":@(self.deferAutomaticLoading||self.homeLoadDeferred)', request)
+        self.assertIn('resource_page_refresh', self.detail)
+        self.assertIn('site_selector_prepare', self.detail)
+
+    def test_home_duplicate_requests_are_suppressed_and_stale_responses_cannot_replace_new_operations(self):
+        request = self.detail[self.detail.index('- (void)loadHome {'):
+                              self.detail.index('- (void)applyHomeResult:', self.detail.index('- (void)loadHome {'))]
+        self.assertIn('activeHomeRequestSourceID', request)
+        self.assertIn('activeHomeRequestProviderID', request)
+        self.assertIn('sameRequestInFlight', request)
+        self.assertIn('media_home_duplicate_request_suppressed', request)
+        self.assertIn('same_resource_site_request_in_flight', request)
+        self.assertIn('stillCurrentOperation', request)
+        self.assertIn('superseded_operation', request)
 
     def test_local_interface_probe_is_bounded_and_does_not_follow_redirects(self):
         self.assertIn('completionHandler(nil)', self.resource_detail)
