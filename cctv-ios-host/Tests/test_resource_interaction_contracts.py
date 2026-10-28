@@ -580,6 +580,15 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('httpCookieStore setCookie:item', webview)
         self.assertIn('WKWebsiteDataStore.nonPersistentDataStore', webview)
 
+    def test_no_media_error_offers_the_original_episode_page_without_exposing_its_url(self):
+        self.assertIn('MediaPlaybackEpisodePageFallbackURL', self.playback)
+        self.assertIn('pluginCode isEqualToString:@"NO_MEDIA"', self.playback)
+        self.assertIn('owner.episodeWebFallbackAvailable=pageURL!=nil', self.playback)
+        self.assertIn('@selector(openEpisodePageWebFallback)', self.playback)
+        self.assertIn('episode_web_fallback_available', self.playback)
+        self.assertIn('打开分集网页尝试播放', self.playback)
+        self.assertNotIn('fields[@"episode_url"]', self.playback)
+
     def test_extensionless_signed_media_endpoints_use_native_playback_classification(self):
         client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
         playback = (ROOT / 'Sources/MediaPlaybackViewController.m').read_text()

@@ -111,6 +111,42 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(result['url'], 'https://fixture.test/video.m3u8?signature=a%2Bb')
         self.assertEqual(result['parse'], 0)
 
+    def test_empty_spider_play_result_uses_direct_episode_media_url(self):
+        address = 'https://cdn.fixture.test/episode.m3u8?token=a%2Fb&expires=123'
+        self.engine.spider.playerContent = lambda *_: None
+        with mock.patch('builtins.print') as log:
+            result = self.runtime.call('play', {'lineId': '主线', 'id': address})
+        self.assertEqual(result['url'], address)
+        self.assertTrue(result['nativePlayable'])
+        self.assertFalse(result['requiresWebPlayback'])
+        events = [json.loads(call.args[0].split('] ', 1)[1]) for call in log.call_args_list
+                  if str(call.args[0]).startswith('[CCTVHostMediaResult] ')]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['event'], 'media_play_direct_episode_fallback')
+        self.assertNotIn('token', json.dumps(events))
+        self.assertNotIn('cdn.fixture.test', json.dumps(events))
+
+    def test_direct_episode_fallback_does_not_override_explicit_errors_or_pages(self):
+        address = 'https://cdn.fixture.test/episode.m3u8?token=private'
+        for raw in ({'error': 'source denied'},
+                    {'message': 'temporarily unavailable'},
+                    {'data': {'status': 'empty'}}):
+            with self.subTest(raw=raw):
+                self.engine.spider.playerContent = lambda *_args, value=raw: value
+                with self.assertRaises(media.MediaError) as raised:
+                    self.runtime.call('play', {'id': address})
+                self.assertEqual(raised.exception.code, 'NO_MEDIA')
+        self.engine.spider.playerContent = lambda *_: {'url': 'https://site.fixture.test/watch.html'}
+        page_result = self.runtime.call('play', {'id': address})
+        self.assertEqual(page_result['url'], 'https://site.fixture.test/watch.html')
+        self.assertTrue(page_result['requiresWebPlayback'])
+        self.engine.spider.playerContent = lambda *_: None
+        for address in ('opaque-episode-id', 'https://site.fixture.test/watch.html',
+                        'javascript:alert(1)', 'https://user:password@cdn.fixture.test/movie.mp4'):
+            with self.subTest(address=address):
+                with self.assertRaises(media.MediaError):
+                    self.runtime.call('play', {'id': address})
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         Path(self.tmp.name, '影视.py').write_text(SPIDER)
@@ -1501,6 +1537,61 @@ class Spider:
             upstream.shutdown()
             upstream.server_close()
             upstream_thread.join(2)
+
+    def test_empty_spider_result_direct_episode_url_reaches_hls_segment(self):
+        received = []
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                received.append(self.path)
+                if self.path.startswith('/index.m3u8'):
+                    body = b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nsegment.ts\n#EXT-X-ENDLIST\n'
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
+                elif urllib.parse.urlsplit(self.path).path == '/segment.ts':
+                    body = b'\x47' + b'\x00' * 187
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'video/mp2t')
+                else:
+                    self.send_error(404)
+                    return
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        upstream_thread.start()
+        self.engine.spider.playerContent = lambda *_: None
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        service_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        service_thread.start()
+        def request(method, path, data=None):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=4)
+            try:
+                body = json.dumps(data).encode() if data is not None else None
+                client.request(method, path, body, {'Content-Type': 'application/json'} if body is not None else {})
+                response = client.getresponse()
+                return response.status, response.read()
+            finally:
+                client.close()
+        try:
+            address = f'http://127.0.0.1:{upstream.server_port}/index.m3u8?token=a%2Fb'
+            status, payload = request('POST', '/api/v1/play', {'id': address})
+            self.assertEqual(status, 200, payload)
+            result = json.loads(payload)['data']
+            self.assertEqual(result['originalURL'], address)
+            status, manifest = request('GET', urllib.parse.urlsplit(result['url']).path)
+            self.assertEqual(status, 200)
+            segment_url = next(line for line in manifest.decode().splitlines()
+                               if line and not line.startswith('#'))
+            status, segment = request('GET', urllib.parse.urlsplit(segment_url).path)
+            self.assertEqual((status, segment), (200, b'\x47' + b'\x00' * 187))
+            self.assertTrue(any(path.startswith('/index.m3u8?token=a%2Fb') for path in received))
+            self.assertTrue(any(urllib.parse.urlsplit(path).path == '/segment.ts'
+                                for path in received))
+        finally:
+            server.shutdown(); server.server_close(); service_thread.join(2)
+            upstream.shutdown(); upstream.server_close(); upstream_thread.join(2)
 
     def test_hls_is_relayed_even_when_source_does_not_require_headers(self):
         source_url = 'https://cdn.example/live.m3u8?token=signature'

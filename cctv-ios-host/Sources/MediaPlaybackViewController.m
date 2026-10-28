@@ -86,6 +86,14 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
     if(!raw.length)raw=[result[@"url"] isKindOfClass:NSString.class]?result[@"url"]:@"";
     return [NSURL URLWithString:raw];
 }
+static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
+    NSString *raw=[episode[@"id"] isKindOfClass:NSString.class]?episode[@"id"]:@"";
+    if(!raw.length||raw.length>8192||[raw rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound)return nil;
+    NSURLComponents *parts=[NSURLComponents componentsWithString:raw];
+    if(!parts||![@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]||!parts.host.length||parts.user.length||parts.password.length)return nil;
+    if([@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"aac",@"ts"] containsObject:parts.pathExtension.lowercaseString?:@""])return nil;
+    return parts.URL;
+}
 
 @interface MediaPlaybackViewController ()
 @property(nonatomic,strong) AVPlayer *player;
@@ -134,6 +142,7 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
 @property(nonatomic) BOOL hasDiagnosticTimeControlStatus;
 @property(nonatomic) NSInteger selectedAlternateIndex;
 @property(nonatomic) BOOL awaitingWebPlaybackReturn;
+@property(nonatomic) BOOL episodeWebFallbackAvailable;
 @property(nonatomic,copy) NSString *diagnosticTraceID;
 @property(nonatomic,copy) NSString *pendingResolutionReason;
 @property(nonatomic,strong) UIBarButtonItem *playbackOptionsItem;
@@ -488,7 +497,7 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
     if([action isEqual:@"outro"]&&self.episodeIndex+1<self.episodes.count){[self persistPlaybackProgress];self.episodeIndex++;self.pendingResolutionReason=@"skip_outro";[self updateEpisodeTitle];[self resolveAndPlay];}
 }
 - (void)setRetryAvailable:(BOOL)available {
-    if(available){BOOL nativeFallback=self.awaitingWebPlaybackReturn&&[self.result[@"url"] isKindOfClass:NSString.class];if(!self.retryItem)self.retryItem=[[UIBarButtonItem alloc] initWithTitle:nativeFallback?@"尝试原生":@"重试" style:UIBarButtonItemStylePlain target:self action:nativeFallback?@selector(tryNativePlayback):@selector(retryCurrentEpisode)];self.retryItem.title=nativeFallback?@"尝试原生":@"重试";self.retryItem.target=self;self.retryItem.action=nativeFallback?@selector(tryNativePlayback):@selector(retryCurrentEpisode);NSMutableArray *items=[NSMutableArray arrayWithObject:self.retryItem];if(!nativeFallback&&[self.result[@"url"] isKindOfClass:NSString.class]){if(!self.webFallbackItem){self.webFallbackItem=[[UIBarButtonItem alloc] initWithTitle:@"网页" style:UIBarButtonItemStylePlain target:self action:@selector(openWebPlaybackFallback)];self.webFallbackItem.accessibilityLabel=@"尝试网页播放";}[items addObject:self.webFallbackItem];}if(self.playbackOptionsItem)[items addObject:self.playbackOptionsItem];self.navigationItem.rightBarButtonItems=items;}
+    if(available){BOOL nativeFallback=self.awaitingWebPlaybackReturn&&[self.result[@"url"] isKindOfClass:NSString.class];if(!self.retryItem)self.retryItem=[[UIBarButtonItem alloc] initWithTitle:nativeFallback?@"尝试原生":@"重试" style:UIBarButtonItemStylePlain target:self action:nativeFallback?@selector(tryNativePlayback):@selector(retryCurrentEpisode)];self.retryItem.title=nativeFallback?@"尝试原生":@"重试";self.retryItem.target=self;self.retryItem.action=nativeFallback?@selector(tryNativePlayback):@selector(retryCurrentEpisode);NSMutableArray *items=[NSMutableArray arrayWithObject:self.retryItem];BOOL hasResolvedPage=[self.result[@"url"] isKindOfClass:NSString.class]&&[self.result[@"url"] length];if(!nativeFallback&&(hasResolvedPage||self.episodeWebFallbackAvailable)){if(!self.webFallbackItem){self.webFallbackItem=[[UIBarButtonItem alloc] initWithTitle:@"网页" style:UIBarButtonItemStylePlain target:self action:@selector(openWebPlaybackFallback)];self.webFallbackItem.accessibilityLabel=@"尝试网页播放";}if(!hasResolvedPage){self.webFallbackItem.title=@"网页尝试";self.webFallbackItem.accessibilityLabel=@"打开分集网页尝试播放";self.webFallbackItem.target=self;self.webFallbackItem.action=@selector(openEpisodePageWebFallback);}else{self.webFallbackItem.title=@"网页";self.webFallbackItem.accessibilityLabel=@"尝试网页播放";self.webFallbackItem.target=self;self.webFallbackItem.action=@selector(openWebPlaybackFallback);}[items addObject:self.webFallbackItem];}if(self.playbackOptionsItem)[items addObject:self.playbackOptionsItem];self.navigationItem.rightBarButtonItems=items;}
     else self.navigationItem.rightBarButtonItems=self.playbackOptionsItem?@[self.playbackOptionsItem]:@[];
 }
 - (void)clearCurrentPlayerItem {
@@ -543,6 +552,21 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
     NSUInteger playerGeneration=self.playerGeneration;MediaWebViewController *web=[[MediaWebViewController alloc] initWithResult:self.result title:self.title];__weak typeof(self) weakSelf=self;
     web.correlationID=self.diagnosticTraceID;web.serviceID=self.context[@"source"][@"id"];web.playbackAttemptID=self.playbackAttemptID;web.onTryNativePlayback=^{[weakSelf tryNativePlayback];};web.onResolvedMedia=^(NSDictionary *resolved){MediaPlaybackViewController *owner=weakSelf;if(!owner||owner.playerGeneration!=playerGeneration)return;owner.basePlaybackHeaders=nil;[owner playResult:resolved];};
     web.onClose=^{MediaPlaybackViewController *owner=weakSelf;if(!owner)return;owner.status.text=@"网页播放已关闭 · 可尝试原生播放或切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];};
+    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:web];[self presentViewController:nav animated:YES completion:nil];
+}
+- (void)openEpisodePageWebFallback {
+    NSArray *episodes=self.episodes;NSDictionary *episode=self.episodeIndex>=0&&self.episodeIndex<episodes.count?episodes[self.episodeIndex]:nil;NSURL *url=MediaPlaybackEpisodePageFallbackURL(episode);
+    if(!self.episodeWebFallbackAvailable||!url)return;
+    [self persistPlaybackProgress];[self.player pause];self.awaitingWebPlaybackReturn=YES;
+    NSString *episodeName=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:@"当前分集";
+    NSMutableDictionary *webResult=[@{@"url":url.absoluteString,@"originalURL":url.absoluteString,@"parse":@1,@"requiresWebPlayback":@YES} mutableCopy];
+    [RuntimeDiagnostics.shared recordEvent:@"playback_episode_page_fallback_selected" category:@"playback" fields:@{@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"fallback_kind":@"episode_page_after_no_media",@"correlation_id":self.diagnosticTraceID?:@"",@"source_host":url.host.lowercaseString?:@""}];
+    self.status.text=@"正在打开分集网页…";self.status.accessibilityLabel=self.status.text;
+    NSUInteger playerGeneration=self.playerGeneration;MediaWebViewController *web=[[MediaWebViewController alloc] initWithResult:webResult title:[NSString stringWithFormat:@"%@ · %@",self.title?:@"影视",episodeName]];__weak typeof(self) weakSelf=self;
+    web.correlationID=self.diagnosticTraceID;web.serviceID=self.context[@"source"][@"id"];web.playbackAttemptID=self.playbackAttemptID;
+    web.onTryNativePlayback=^{MediaPlaybackViewController *owner=weakSelf;if(owner){owner.awaitingWebPlaybackReturn=NO;owner.status.text=@"网页页面没有返回可供原生播放器使用的地址";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];}};
+    web.onResolvedMedia=^(NSDictionary *resolved){MediaPlaybackViewController *owner=weakSelf;if(!owner||owner.playerGeneration!=playerGeneration)return;owner.awaitingWebPlaybackReturn=NO;owner.basePlaybackHeaders=nil;[owner playResult:resolved];};
+    web.onClose=^{MediaPlaybackViewController *owner=weakSelf;if(!owner)return;owner.awaitingWebPlaybackReturn=NO;owner.status.text=@"分集网页已关闭 · 可重试解析或切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];};
     UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:web];[self presentViewController:nav animated:YES completion:nil];
 }
 - (void)recordPlaybackFailureForItem:(AVPlayerItem *)item error:(NSError *)error stage:(NSString *)stage {
@@ -610,9 +634,77 @@ static NSURL *MediaPlaybackOriginalSourceURL(NSDictionary *result) {
     self.stallRecoveryAttempts=0;self.pendingResolutionReason=@"line_switch";[self buildLines];[self updateEpisodeTitle];if(!exactMatch&&newEpisodes.count)self.status.text=@"线路已切换 · 未能按名称确认分集，已按集数位置选择";[self resolveAndPlay];
 }
 - (void)resolveAndPlay {
-    NSArray *lines=self.lines,*episodes=self.episodes;if(self.lineIndex>=lines.count||self.episodeIndex>=episodes.count){[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_unavailable" category:@"media_api" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"service_id":self.context[@"source"][@"id"]?:@"",@"provider_id":self.context[@"provider"]?:@"",@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"line_count":@(lines.count),@"episode_count":@(episodes.count),@"reason":@"selected_index_out_of_range"}];return;}
-    NSDictionary *line=lines[self.lineIndex],*episode=episodes[self.episodeIndex];self.resolving=YES;NSUInteger generation=++self.generation;NSString *reason=self.pendingResolutionReason.length?self.pendingResolutionReason:@"playback_start";self.pendingResolutionReason=nil;[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_requested" category:@"media_api" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"service_id":self.context[@"source"][@"id"]?:@"",@"provider_id":self.context[@"provider"]?:@"",@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"request_generation":@(generation),@"line_count":@(lines.count),@"episode_count":@(episodes.count),@"episode_has_id":@([[episode[@"id"] description] length]>0),@"line_has_id":@([[line[@"id"] description] length]>0),@"resolve_reason":reason}];self.result=nil;self.basePlaybackHeaders=nil;self.selectedAlternateIndex=-1;[self buildQualityButtons];[self setRetryAvailable:NO];[self clearCurrentPlayerItem];[self.spinner startAnimating];self.status.text=[NSString stringWithFormat:@"正在解析 %@…",episode[@"name"]?:@"当前分集"];self.status.accessibilityLabel=self.status.text;
-    NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@""} mutableCopy];NSString *provider=self.context[@"provider"];if(provider.length)args[@"provider"]=provider;
-    __weak typeof(self) weakSelf=self;[self.client call:@"play" arguments:args correlationID:self.diagnosticTraceID completion:^(id result,NSError *error){MediaPlaybackViewController *owner=weakSelf;if(!owner)return;if(generation!=owner.generation){[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_response_discarded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.context[@"source"][@"id"]?:@"",@"request_generation":@(generation),@"current_generation":@(owner.generation),@"reason":@"superseded_selection"}];return;}owner.resolving=NO;[owner.spinner stopAnimating];if(error||![result isKindOfClass:NSDictionary.class]){NSMutableDictionary *fields=[@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.context[@"source"][@"id"]?:@"",@"provider_id":owner.context[@"provider"]?:@"",@"line_index":@(owner.lineIndex),@"episode_index":@(owner.episodeIndex),@"request_generation":@(generation),@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@"",@"result_received":@([result isKindOfClass:NSDictionary.class])} mutableCopy];if([error.userInfo[@"service_request_id"] isKindOfClass:NSString.class])fields[@"service_request_id"]=error.userInfo[@"service_request_id"];if([error.userInfo[@"service_failure_stage"] isKindOfClass:NSString.class])fields[@"service_failure_stage"]=error.userInfo[@"service_failure_stage"];[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_failed" category:@"media_api" fields:fields];owner.status.text=error.localizedDescription?:@"来源没有返回可播放结果";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];return;}[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.context[@"source"][@"id"]?:@"",@"provider_id":owner.context[@"provider"]?:@"",@"line_index":@(owner.lineIndex),@"episode_index":@(owner.episodeIndex),@"request_generation":@(generation),@"result_has_media_url":@([result[@"url"] isKindOfClass:NSString.class]&&[result[@"url"] length]>0),@"result_parse_mode":@([result[@"parse"] respondsToSelector:@selector(integerValue)]?[result[@"parse"] integerValue]:0),@"result_alternate_count":@([result[@"alternates"] isKindOfClass:NSArray.class]?[result[@"alternates"] count]:0)}];owner.status.text=@"";[owner playResult:result];}];
+    NSArray *lines=self.lines,*episodes=self.episodes;
+    if(self.lineIndex>=lines.count||self.episodeIndex>=episodes.count){
+        [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_unavailable" category:@"media_api" fields:@{
+            @"correlation_id":self.diagnosticTraceID?:@"",@"service_id":self.context[@"source"][@"id"]?:@"",
+            @"provider_id":self.context[@"provider"]?:@"",@"line_index":@(self.lineIndex),
+            @"episode_index":@(self.episodeIndex),@"line_count":@(lines.count),@"episode_count":@(episodes.count),
+            @"reason":@"selected_index_out_of_range"}];
+        return;
+    }
+    NSDictionary *line=lines[self.lineIndex],*episode=episodes[self.episodeIndex];
+    self.resolving=YES;self.episodeWebFallbackAvailable=NO;
+    NSUInteger generation=++self.generation;
+    NSString *reason=self.pendingResolutionReason.length?self.pendingResolutionReason:@"playback_start";
+    self.pendingResolutionReason=nil;
+    [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_requested" category:@"media_api" fields:@{
+        @"correlation_id":self.diagnosticTraceID?:@"",@"service_id":self.context[@"source"][@"id"]?:@"",
+        @"provider_id":self.context[@"provider"]?:@"",@"line_index":@(self.lineIndex),
+        @"episode_index":@(self.episodeIndex),@"request_generation":@(generation),
+        @"line_count":@(lines.count),@"episode_count":@(episodes.count),
+        @"episode_has_id":@([[episode[@"id"] description] length]>0),
+        @"line_has_id":@([[line[@"id"] description] length]>0),@"resolve_reason":reason}];
+    self.result=nil;self.basePlaybackHeaders=nil;self.selectedAlternateIndex=-1;
+    [self buildQualityButtons];[self setRetryAvailable:NO];[self clearCurrentPlayerItem];
+    [self.spinner startAnimating];self.status.text=[NSString stringWithFormat:@"正在解析 %@…",episode[@"name"]?:@"当前分集"];
+    self.status.accessibilityLabel=self.status.text;
+    NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@""} mutableCopy];
+    NSString *provider=self.context[@"provider"];if(provider.length)args[@"provider"]=provider;
+    __weak typeof(self) weakSelf=self;
+    [self.client call:@"play" arguments:args correlationID:self.diagnosticTraceID completion:^(id result,NSError *error){
+        MediaPlaybackViewController *owner=weakSelf;if(!owner)return;
+        if(generation!=owner.generation){
+            [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_response_discarded" category:@"media_api" fields:@{
+                @"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.context[@"source"][@"id"]?:@"",
+                @"request_generation":@(generation),@"current_generation":@(owner.generation),@"reason":@"superseded_selection"}];
+            return;
+        }
+        owner.resolving=NO;[owner.spinner stopAnimating];
+        if(error||![result isKindOfClass:NSDictionary.class]){
+            NSMutableDictionary *fields=[@{
+                @"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.context[@"source"][@"id"]?:@"",
+                @"provider_id":owner.context[@"provider"]?:@"",@"line_index":@(owner.lineIndex),
+                @"episode_index":@(owner.episodeIndex),@"request_generation":@(generation),
+                @"error_domain":error.domain?:@"",@"error_code":@(error.code),
+                @"error_message":error.localizedDescription?:@"",@"result_received":@([result isKindOfClass:NSDictionary.class])} mutableCopy];
+            if([error.userInfo[@"service_request_id"] isKindOfClass:NSString.class])fields[@"service_request_id"]=error.userInfo[@"service_request_id"];
+            if([error.userInfo[@"service_failure_stage"] isKindOfClass:NSString.class])fields[@"service_failure_stage"]=error.userInfo[@"service_failure_stage"];
+            NSArray *currentEpisodes=owner.episodes;
+            NSDictionary *currentEpisode=owner.episodeIndex>=0&&owner.episodeIndex<currentEpisodes.count?currentEpisodes[owner.episodeIndex]:nil;
+            NSString *pluginCode=[error.userInfo[@"plugin_error_code"] isKindOfClass:NSString.class]?error.userInfo[@"plugin_error_code"]:@"";
+            BOOL noMediaFailure=[pluginCode isEqualToString:@"NO_MEDIA"]||[error.userInfo[@"service_failure_stage"] isEqual:@"no_media"];
+            NSURL *pageURL=noMediaFailure?MediaPlaybackEpisodePageFallbackURL(currentEpisode):nil;
+            owner.episodeWebFallbackAvailable=pageURL!=nil;
+            if(pageURL){
+                [RuntimeDiagnostics.shared recordEvent:@"episode_web_fallback_available" category:@"playback" fields:@{
+                    @"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.context[@"source"][@"id"]?:@"",
+                    @"line_index":@(owner.lineIndex),@"episode_index":@(owner.episodeIndex),
+                    @"failure_code":@"NO_MEDIA",@"fallback_kind":@"episode_page",@"source_host":pageURL.host.lowercaseString?:@""}];
+            }
+            [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_failed" category:@"media_api" fields:fields];
+            owner.status.text=owner.episodeWebFallbackAvailable?@"来源未解析出媒体地址 · 可点右上角“网页尝试”打开分集页":(error.localizedDescription?:@"来源没有返回可播放结果");
+            owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];
+            return;
+        }
+        [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{
+            @"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.context[@"source"][@"id"]?:@"",
+            @"provider_id":owner.context[@"provider"]?:@"",@"line_index":@(owner.lineIndex),
+            @"episode_index":@(owner.episodeIndex),@"request_generation":@(generation),
+            @"result_has_media_url":@([result[@"url"] isKindOfClass:NSString.class]&&[result[@"url"] length]>0),
+            @"result_parse_mode":@([result[@"parse"] respondsToSelector:@selector(integerValue)]?[result[@"parse"] integerValue]:0),
+            @"result_alternate_count":@([result[@"alternates"] isKindOfClass:NSArray.class]?[result[@"alternates"] count]:0)}];
+        owner.status.text=@"";[owner playResult:result];
+    }];
 }
 @end

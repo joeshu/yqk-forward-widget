@@ -332,6 +332,39 @@ def media_result_shape(value):
     return fields
 
 
+def direct_episode_media_fallback(value, episode_id):
+    """Use an episode ID directly only when the spider returned no result.
+
+    Some Python Spider packages list an already playable media URL as the
+    episode ID, then return None from playerContent. Do not override an
+    explicit plugin error or a non-empty extraction result.
+    """
+    value = decoded(value)
+    empty_result = value is None or value == ''
+    if isinstance(value, dict):
+        address_keys = ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
+                        'video_url', 'mediaUrl', 'src')
+        nested_keys = ('data', 'result', 'payload', 'response')
+        has_address = any(value.get(key) not in (None, '') for key in address_keys)
+        has_nested = any(key in value for key in nested_keys)
+        has_error = any(str(value.get(key) or '').strip()
+                        for key in ('error', 'message', 'msg'))
+        empty_result = not has_address and not has_nested and not has_error
+    if not empty_result:
+        return None
+    address = normalize_media_address(episode_id if isinstance(episode_id, str) else '')
+    if not valid_media_url(address):
+        return None
+    try:
+        path = urllib.parse.urlsplit(address).path.lower()
+    except ValueError:
+        return None
+    if not path.endswith(('.m3u8', '.m3u', '.mp4', '.m4v', '.mov',
+                          '.m4a', '.mp3', '.aac', '.ts')):
+        return None
+    return playback({'url': address})
+
+
 def playback(value):
     value = unwrap_envelope(value, {'url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
                                     'video_url', 'mediaUrl', 'src', 'alternates',
@@ -943,13 +976,34 @@ class MediaRuntime:
                     value = playback(raw)
                 except MediaError as error:
                     if error.code == 'NO_MEDIA':
-                        context = getattr(threading.current_thread(), '_host_media_request_context', {})
-                        trace = str(context.get('correlation_id') or context.get('request_id') or '')
-                        if not re.fullmatch(r'[A-Za-z0-9._-]{1,96}', trace): trace = uuid.uuid4().hex
-                        print('[CCTVHostMediaResult] ' + json.dumps(dict(
-                            media_result_shape(raw), event='media_play_result_rejected',
-                            request_id=trace, stage='play_result_validation'), separators=(',', ':')))
-                    raise
+                        fallback = direct_episode_media_fallback(raw, args.get('id', ''))
+                        if fallback is not None:
+                            context = getattr(threading.current_thread(), '_host_media_request_context', {})
+                            trace = str(context.get('correlation_id') or context.get('request_id') or '')
+                            if not re.fullmatch(r'[A-Za-z0-9._-]{1,96}', trace): trace = uuid.uuid4().hex
+                            try:
+                                print('[CCTVHostMediaResult] ' + json.dumps({
+                                    'event': 'media_play_direct_episode_fallback',
+                                    'request_id': trace,
+                                    'stage': 'play_result_validation',
+                                    'result_type': media_result_shape(raw)['result_type'],
+                                    'address_type': 'direct_media_episode_id',
+                                    'validation_reason': 'empty_spider_result',
+                                    'media_extension': urllib.parse.urlsplit(fallback['url']).path.rsplit('.', 1)[-1].lower()[:8],
+                                }, separators=(',', ':')))
+                            except Exception:
+                                pass
+                            value = fallback
+                        else:
+                            context = getattr(threading.current_thread(), '_host_media_request_context', {})
+                            trace = str(context.get('correlation_id') or context.get('request_id') or '')
+                            if not re.fullmatch(r'[A-Za-z0-9._-]{1,96}', trace): trace = uuid.uuid4().hex
+                            print('[CCTVHostMediaResult] ' + json.dumps(dict(
+                                media_result_shape(raw), event='media_play_result_rejected',
+                                request_id=trace, stage='play_result_validation'), separators=(',', ':')))
+                            raise
+                    else:
+                        raise
             elif operation == 'providers':
                 value = [{'id': str(row.get('id', row.get('key', ''))), 'name': str(row.get('name', row.get('title', ''))),
                           **({'searchable': row['searchable']} if isinstance(row.get('searchable'), bool) else {})}
