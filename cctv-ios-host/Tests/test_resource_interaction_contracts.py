@@ -181,18 +181,29 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[heading addArrangedSubview:all]', self.detail)
         self.assertIn('setInteger:3 forKey:MediaHomeModulesSchemaKey', self.detail)
 
-    def test_movie_detail_uses_soft_backdrop_real_cast_and_actionable_controls(self):
+    def test_movie_detail_is_compact_has_poster_fallback_and_removes_cast_strip(self):
         detail = self.detail[self.detail.index('@interface MediaDetailViewController'):
                              self.detail.index('@interface MediaFavoritesViewController')]
         self.assertIn('media-detail-backdrop', detail)
-        self.assertIn('UIBlurEffectStyleSystemMaterial', detail)
+        self.assertIn('systemImageNamed:@"film"', detail)
         self.assertIn('media-detail-share', detail)
         self.assertIn('media-detail-copy-title', detail)
         self.assertIn('media-detail-jump-episodes', detail)
-        self.assertIn('- (void)refreshCastRow', detail)
-        self.assertIn('person.crop.circle.fill', detail)
-        self.assertIn('self.castTitle.hidden=names.count==0', detail)
-        self.assertIn('multiplier:0.94', detail)
+        self.assertNotIn('演职阵容', detail)
+        self.assertNotIn('person.crop.circle.fill', detail)
+        self.assertIn('multiplier:0.5625', detail)
+        self.assertIn('@"vod_pic_slide"', detail)
+        self.assertIn('@"coverUrl"', detail)
+        self.assertIn('暂无海报，显示影片占位图', detail)
+        self.assertIn('posterURL.length>0', detail)
+        self.assertIn('cover_url', detail)
+        self.assertIn('posterUrl', detail)
+        self.assertIn('HostStyleGlassCard(infoCard,17)', detail)
+        self.assertIn('HostStyleGlassCard(sourceCard,17)', detail)
+        self.assertIn('self.contentStack.spacing=9', detail)
+        self.assertIn('NSUInteger rowCount=(visibleCount+3)/4', detail)
+        self.assertIn('UIView *spacer=[UIView new]', detail)
+        self.assertIn('media-detail-page-status', detail)
 
     def test_media_browser_cancels_parent_requests_and_resumes_after_child_navigation(self):
         self.assertIn('media_request_cancelled_on_page_exit', self.detail)
@@ -478,6 +489,21 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('viewWillTransitionToSize', self.playback)
         self.assertIn('landscapeConstraints', self.playback)
         self.assertIn('viewDidAppear:(BOOL)animated', self.playback)
+
+    def test_detail_starts_player_inline_without_push_and_preserves_player_diagnostics(self):
+        detail = self.detail[self.detail.index('@implementation MediaDetailViewController'):
+                             self.detail.index('@interface MediaFavoritesViewController')]
+        push = self.detail[self.detail.index('- (void)pushMediaDetail:', self.detail.index('@implementation MediaBrowserViewController')):
+                           self.detail.index('- (void)openHomeRecommendation:', self.detail.index('- (void)pushMediaDetail:', self.detail.index('@implementation MediaBrowserViewController')))]
+        self.assertIn('showInlinePlaybackResult:result context:context', push)
+        self.assertIn('insertArrangedSubview:player.view atIndex:0', detail)
+        self.assertIn('playInlineResult:result context:context', detail)
+        self.assertIn('embeddedMode=YES', detail)
+        self.assertIn('inline_playback_attached', detail)
+        self.assertIn('@property(nonatomic) BOOL embeddedMode', (ROOT / 'Sources/MediaPlaybackViewController.h').read_text())
+        self.assertIn('episode_resolve_succeeded', detail)
+        self.assertIn('previousEpisodeID', detail)
+        self.assertIn('if(self.inlinePlaybackController&&episodes.count)[self resolveAndPlaySelectedEpisode]', detail)
         self.assertIn('pendingEpisodeResult', self.playback)
 
     def test_player_exposes_quality_choices_and_keeps_parse_and_resolution_states_clear(self):
@@ -489,7 +515,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('MediaPlaybackResultSupportsAVPlayer(result)', self.playback)
         self.assertIn('url.user.length||url.password.length', self.playback)
         self.assertIn('[self setRetryAvailable:NO]', self.playback)
-        self.assertIn('playback page exposes the source\'s actual alternate quality choices', smoke)
+        self.assertIn('inline player exposes the source\'s actual alternate quality choices', smoke)
         self.assertIn('quality=low', smoke)
 
     def test_quality_specific_headers_survive_source_normalization_relay_and_selection(self):

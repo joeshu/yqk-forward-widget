@@ -9,6 +9,7 @@
 #import "RuntimeDiagnostics.h"
 #import "MediaWebViewController.h"
 #import "MediaPlaybackStateStore.h"
+#import "MediaPlaybackViewController.h"
 #import "MediaMetadataCache.h"
 #import "MediaGlobalSearchViewController.h"
 #import "MediaSourceHealthStore.h"
@@ -123,6 +124,8 @@
 @property(nonatomic,strong) UIStackView *contentStack;
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) UIImageView *posterView;
+@property(nonatomic,strong) UIView *posterPlaceholder;
+@property(nonatomic,strong) UIView *heroView;
 @property(nonatomic,strong) UILabel *heroTitle;
 @property(nonatomic,strong) UILabel *heroMetadata;
 @property(nonatomic,strong) UILabel *metadataLabel;
@@ -137,9 +140,7 @@
 @property(nonatomic,strong) UILabel *pageLabel;
 @property(nonatomic,strong) UIButton *previousPageButton;
 @property(nonatomic,strong) UIButton *nextPageButton;
-@property(nonatomic,strong) UILabel *castTitle;
-@property(nonatomic,strong) UIScrollView *castScroll;
-@property(nonatomic,strong) UIStackView *castStack;
+@property(nonatomic,strong) MediaPlaybackViewController *inlinePlaybackController;
 @property(nonatomic,strong) UIActivityIndicatorView *spinner;
 @property(nonatomic) NSInteger selectedLineIndex;
 @property(nonatomic) NSInteger selectedEpisodeIndex;
@@ -153,6 +154,8 @@
 - (void)shareTitle;
 - (void)copyTitle;
 - (void)scrollToEpisodes;
+- (NSString *)posterURL;
+- (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context;
 @end
 @implementation MediaDetailViewController
 - (BOOL)shouldAutorotate {return YES;}
@@ -167,24 +170,23 @@
     self.client=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue]];[self buildDetailLayout];[self loadDetail];
 }
 - (UILabel *)sectionLabel:(NSString *)text {
-    UILabel *label=[UILabel new];label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleTitle3];label.adjustsFontForContentSizeCategory=YES;label.textColor=HostText();label.text=text;return label;
+    UILabel *label=[UILabel new];label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];label.adjustsFontForContentSizeCategory=YES;label.textColor=HostText();label.text=text;return label;
 }
 - (UIButton *)actionButton:(NSString *)title identifier:(NSString *)identifier action:(SEL)action {
     UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.accessibilityIdentifier=identifier;
     button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;
-    HostStyleGlassCard(button,16);HostInstallPressFeedback(button);[button setTitleColor:HostText() forState:UIControlStateNormal];button.layer.cornerCurve=kCACornerCurveContinuous;
-    button.layer.borderWidth=0.6;HostSetLayerBorderColor(button,HostBorder());button.contentEdgeInsets=UIEdgeInsetsMake(13,16,13,16);
+    HostStylePillButton(button,YES);button.layer.cornerRadius=17;button.contentEdgeInsets=UIEdgeInsetsMake(11,16,11,16);
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];[button setTitle:title forState:UIControlStateNormal];return button;
 }
 - (UIButton *)detailIconButton:(NSString *)symbol label:(NSString *)label identifier:(NSString *)identifier action:(SEL)action {
     UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.accessibilityIdentifier=identifier;button.accessibilityLabel=label;button.accessibilityTraits|=UIAccessibilityTraitButton;
     HostStyleGlassCard(button,22);HostInstallPressFeedback(button);button.layer.borderWidth=0.6;HostSetLayerBorderColor(button,HostBorder());[button setImage:[UIImage systemImageNamed:symbol] forState:UIControlStateNormal];button.tintColor=HostAccent();
-    [button.widthAnchor constraintEqualToConstant:46].active=YES;[button.heightAnchor constraintEqualToConstant:46].active=YES;[button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];return button;
+    [button.widthAnchor constraintEqualToConstant:44].active=YES;[button.heightAnchor constraintEqualToConstant:44].active=YES;[button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];return button;
 }
 - (void)buildDetailLayout {
     self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.accessibilityIdentifier=@"media-detail-scroll";[self.view addSubview:self.scrollView];
-    self.contentStack=[UIStackView new];self.contentStack.translatesAutoresizingMaskIntoConstraints=NO;self.contentStack.axis=UILayoutConstraintAxisVertical;self.contentStack.spacing=13;
-    self.contentStack.layoutMargins=UIEdgeInsetsMake(4,14,24,14);self.contentStack.layoutMarginsRelativeArrangement=YES;[self.scrollView addSubview:self.contentStack];
+    self.contentStack=[UIStackView new];self.contentStack.translatesAutoresizingMaskIntoConstraints=NO;self.contentStack.axis=UILayoutConstraintAxisVertical;self.contentStack.spacing=9;
+    self.contentStack.layoutMargins=UIEdgeInsetsMake(4,14,20,14);self.contentStack.layoutMarginsRelativeArrangement=YES;[self.scrollView addSubview:self.contentStack];
     [NSLayoutConstraint activateConstraints:@[[self.scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
         [self.scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [self.scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],[self.contentStack.leadingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.leadingAnchor],
@@ -192,43 +194,51 @@
         [self.contentStack.bottomAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.bottomAnchor],[self.contentStack.widthAnchor constraintEqualToAnchor:self.scrollView.frameLayoutGuide.widthAnchor]]];
     self.status=[UILabel new];self.status.textColor=HostSecondaryText();self.status.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.status.adjustsFontForContentSizeCategory=YES;
     self.status.numberOfLines=0;self.status.textAlignment=NSTextAlignmentCenter;self.status.hidden=YES;[self.contentStack addArrangedSubview:self.status];
-    UIView *hero=[UIView new];hero.translatesAutoresizingMaskIntoConstraints=NO;HostStyleGlassCard(hero,24);hero.clipsToBounds=YES;hero.accessibilityIdentifier=@"media-detail-backdrop";
-    self.posterView=[UIImageView new];self.posterView.translatesAutoresizingMaskIntoConstraints=NO;self.posterView.contentMode=UIViewContentModeScaleAspectFill;self.posterView.clipsToBounds=YES;[hero addSubview:self.posterView];
-    UIVisualEffectView *blur=[[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];blur.translatesAutoresizingMaskIntoConstraints=NO;blur.userInteractionEnabled=NO;[hero addSubview:blur];
-    UIView *shade=[UIView new];shade.translatesAutoresizingMaskIntoConstraints=NO;shade.backgroundColor=[UIColor colorWithWhite:0 alpha:0.12];[hero addSubview:shade];
-    self.heroTitle=[UILabel new];self.heroTitle.translatesAutoresizingMaskIntoConstraints=NO;self.heroTitle.font=[UIFont systemFontOfSize:27 weight:UIFontWeightBold];self.heroTitle.adjustsFontForContentSizeCategory=YES;self.heroTitle.textColor=HostText();self.heroTitle.textAlignment=NSTextAlignmentCenter;self.heroTitle.numberOfLines=2;
-    self.heroMetadata=[UILabel new];self.heroMetadata.translatesAutoresizingMaskIntoConstraints=NO;self.heroMetadata.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.heroMetadata.adjustsFontForContentSizeCategory=YES;self.heroMetadata.textColor=HostSecondaryText();self.heroMetadata.textAlignment=NSTextAlignmentCenter;self.heroMetadata.numberOfLines=2;
+    UIView *hero=[UIView new];self.heroView=hero;hero.translatesAutoresizingMaskIntoConstraints=NO;HostStyleGlassCard(hero,20);hero.clipsToBounds=YES;hero.accessibilityIdentifier=@"media-detail-backdrop";
+    self.posterPlaceholder=[UIView new];self.posterPlaceholder.translatesAutoresizingMaskIntoConstraints=NO;self.posterPlaceholder.backgroundColor=HostNeutralSurface();[hero addSubview:self.posterPlaceholder];
+    UIImageView *placeholderIcon=[UIImageView new];placeholderIcon.translatesAutoresizingMaskIntoConstraints=NO;placeholderIcon.image=[UIImage systemImageNamed:@"film"];placeholderIcon.contentMode=UIViewContentModeScaleAspectFit;placeholderIcon.tintColor=[UIColor.secondaryLabelColor colorWithAlphaComponent:0.7];[self.posterPlaceholder addSubview:placeholderIcon];
+    self.posterView=[UIImageView new];self.posterView.translatesAutoresizingMaskIntoConstraints=NO;self.posterView.contentMode=UIViewContentModeScaleAspectFill;self.posterView.clipsToBounds=YES;self.posterView.opaque=NO;self.posterView.backgroundColor=UIColor.clearColor;[hero addSubview:self.posterView];
+    UIView *shade=[UIView new];shade.translatesAutoresizingMaskIntoConstraints=NO;shade.backgroundColor=[UIColor colorWithWhite:0 alpha:0.25];[hero addSubview:shade];
+    self.heroTitle=[UILabel new];self.heroTitle.translatesAutoresizingMaskIntoConstraints=NO;self.heroTitle.font=[UIFont systemFontOfSize:21 weight:UIFontWeightBold];self.heroTitle.adjustsFontForContentSizeCategory=YES;self.heroTitle.textColor=UIColor.whiteColor;self.heroTitle.numberOfLines=2;
+    self.heroMetadata=[UILabel new];self.heroMetadata.translatesAutoresizingMaskIntoConstraints=NO;self.heroMetadata.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.heroMetadata.adjustsFontForContentSizeCategory=YES;self.heroMetadata.textColor=[UIColor.whiteColor colorWithAlphaComponent:0.85];self.heroMetadata.numberOfLines=1;self.heroMetadata.lineBreakMode=NSLineBreakByTruncatingTail;
     [hero addSubview:self.heroTitle];[hero addSubview:self.heroMetadata];[self.contentStack addArrangedSubview:hero];
-    [NSLayoutConstraint activateConstraints:@[[hero.heightAnchor constraintEqualToAnchor:hero.widthAnchor multiplier:0.94],
+    [NSLayoutConstraint activateConstraints:@[[hero.heightAnchor constraintEqualToAnchor:hero.widthAnchor multiplier:0.5625],
+        [self.posterPlaceholder.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor],[self.posterPlaceholder.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor],[self.posterPlaceholder.topAnchor constraintEqualToAnchor:hero.topAnchor],[self.posterPlaceholder.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor],
+        [placeholderIcon.centerXAnchor constraintEqualToAnchor:self.posterPlaceholder.centerXAnchor],[placeholderIcon.centerYAnchor constraintEqualToAnchor:self.posterPlaceholder.centerYAnchor],[placeholderIcon.widthAnchor constraintEqualToConstant:42],[placeholderIcon.heightAnchor constraintEqualToConstant:42],
         [self.posterView.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor],[self.posterView.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor],[self.posterView.topAnchor constraintEqualToAnchor:hero.topAnchor],[self.posterView.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor],
-        [blur.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor],[blur.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor],[blur.topAnchor constraintEqualToAnchor:hero.topAnchor],[blur.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor],
         [shade.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor],[shade.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor],[shade.topAnchor constraintEqualToAnchor:hero.topAnchor],[shade.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor],
-        [self.heroTitle.leadingAnchor constraintGreaterThanOrEqualToAnchor:hero.leadingAnchor constant:20],[self.heroTitle.trailingAnchor constraintLessThanOrEqualToAnchor:hero.trailingAnchor constant:-20],
-        [self.heroTitle.centerXAnchor constraintEqualToAnchor:hero.centerXAnchor],[self.heroTitle.centerYAnchor constraintEqualToAnchor:hero.centerYAnchor constant:-10],
-        [self.heroMetadata.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor constant:20],[self.heroMetadata.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor constant:-20],
-        [self.heroMetadata.topAnchor constraintEqualToAnchor:self.heroTitle.bottomAnchor constant:6]]];
-    self.metadataLabel=[UILabel new];self.metadataLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.metadataLabel.adjustsFontForContentSizeCategory=YES;self.metadataLabel.textColor=HostSecondaryText();self.metadataLabel.numberOfLines=0;[self.contentStack addArrangedSubview:self.metadataLabel];
-    self.descriptionLabel=[UILabel new];self.descriptionLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.descriptionLabel.adjustsFontForContentSizeCategory=YES;self.descriptionLabel.textColor=HostSecondaryText();self.descriptionLabel.numberOfLines=5;[self.contentStack addArrangedSubview:self.descriptionLabel];
-    self.descriptionToggle=[UIButton buttonWithType:UIButtonTypeSystem];self.descriptionToggle.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeading;[self.descriptionToggle setTitle:@"展开简介" forState:UIControlStateNormal];[self.descriptionToggle setTitleColor:HostAccent() forState:UIControlStateNormal];self.descriptionToggle.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];[self.descriptionToggle addTarget:self action:@selector(toggleDescription) forControlEvents:UIControlEventTouchUpInside];self.descriptionToggle.hidden=YES;[self.contentStack addArrangedSubview:self.descriptionToggle];
-    self.playButton=[self actionButton:@"▶︎  播放" identifier:@"media-detail-play" action:@selector(playCurrentEpisode)];[self.contentStack addArrangedSubview:self.playButton];[self.playButton.heightAnchor constraintGreaterThanOrEqualToConstant:52].active=YES;
-    UIStackView *actions=[UIStackView new];actions.axis=UILayoutConstraintAxisHorizontal;actions.alignment=UIStackViewAlignmentCenter;actions.distribution=UIStackViewDistributionEqualSpacing;actions.layoutMargins=UIEdgeInsetsMake(2,18,2,18);actions.layoutMarginsRelativeArrangement=YES;
+        [self.heroTitle.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor constant:16],[self.heroTitle.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor constant:-16],
+        [self.heroTitle.bottomAnchor constraintEqualToAnchor:self.heroMetadata.topAnchor constant:-3],
+        [self.heroMetadata.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor constant:16],[self.heroMetadata.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor constant:-16],
+        [self.heroMetadata.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor constant:-12]]];
+    UIView *infoCard=[UIView new];infoCard.translatesAutoresizingMaskIntoConstraints=NO;HostStyleGlassCard(infoCard,17);
+    UIStackView *infoStack=[UIStackView new];infoStack.translatesAutoresizingMaskIntoConstraints=NO;infoStack.axis=UILayoutConstraintAxisVertical;infoStack.spacing=4;infoStack.layoutMargins=UIEdgeInsetsMake(10,12,10,12);infoStack.layoutMarginsRelativeArrangement=YES;[infoCard addSubview:infoStack];
+    [NSLayoutConstraint activateConstraints:@[[infoStack.leadingAnchor constraintEqualToAnchor:infoCard.leadingAnchor],[infoStack.trailingAnchor constraintEqualToAnchor:infoCard.trailingAnchor],[infoStack.topAnchor constraintEqualToAnchor:infoCard.topAnchor],[infoStack.bottomAnchor constraintEqualToAnchor:infoCard.bottomAnchor]]];
+    self.metadataLabel=[UILabel new];self.metadataLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.metadataLabel.adjustsFontForContentSizeCategory=YES;self.metadataLabel.textColor=HostSecondaryText();self.metadataLabel.numberOfLines=2;[infoStack addArrangedSubview:self.metadataLabel];
+    self.descriptionLabel=[UILabel new];self.descriptionLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.descriptionLabel.adjustsFontForContentSizeCategory=YES;self.descriptionLabel.textColor=HostSecondaryText();self.descriptionLabel.numberOfLines=3;[infoStack addArrangedSubview:self.descriptionLabel];
+    self.descriptionToggle=[UIButton buttonWithType:UIButtonTypeSystem];self.descriptionToggle.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeading;[self.descriptionToggle setTitle:@"展开简介" forState:UIControlStateNormal];[self.descriptionToggle setTitleColor:HostAccent() forState:UIControlStateNormal];self.descriptionToggle.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.descriptionToggle.titleLabel.adjustsFontForContentSizeCategory=YES;[self.descriptionToggle addTarget:self action:@selector(toggleDescription) forControlEvents:UIControlEventTouchUpInside];self.descriptionToggle.hidden=YES;[infoStack addArrangedSubview:self.descriptionToggle];
+    [self.contentStack addArrangedSubview:infoCard];
+    self.playButton=[self actionButton:@"▶︎  播放" identifier:@"media-detail-play" action:@selector(playCurrentEpisode)];[self.contentStack addArrangedSubview:self.playButton];[self.playButton.heightAnchor constraintGreaterThanOrEqualToConstant:48].active=YES;
+    UIStackView *actions=[UIStackView new];actions.axis=UILayoutConstraintAxisHorizontal;actions.alignment=UIStackViewAlignmentCenter;actions.distribution=UIStackViewDistributionEqualSpacing;actions.layoutMargins=UIEdgeInsetsMake(0,12,0,12);actions.layoutMarginsRelativeArrangement=YES;
     UIButton *copyButton=[self detailIconButton:@"doc.on.doc" label:@"复制片名" identifier:@"media-detail-copy-title" action:@selector(copyTitle)];UIButton *shareButton=[self detailIconButton:@"square.and.arrow.up" label:@"分享影片信息" identifier:@"media-detail-share" action:@selector(shareTitle)];self.favoriteButton=[self detailIconButton:@"heart" label:@"收藏影片" identifier:@"media-detail-favorite" action:@selector(toggleFavorite)];UIButton *episodesButton=[self detailIconButton:@"list.number" label:@"查看选集" identifier:@"media-detail-jump-episodes" action:@selector(scrollToEpisodes)];
     [actions addArrangedSubview:copyButton];[actions addArrangedSubview:shareButton];[actions addArrangedSubview:self.favoriteButton];[actions addArrangedSubview:episodesButton];[self.contentStack addArrangedSubview:actions];
-    [self.contentStack addArrangedSubview:[self sectionLabel:@"播放线路"]];
-    UIScrollView *routeScroll=[UIScrollView new];routeScroll.translatesAutoresizingMaskIntoConstraints=NO;routeScroll.showsHorizontalScrollIndicator=NO;[self.contentStack addArrangedSubview:routeScroll];
+    UIView *sourceCard=[UIView new];sourceCard.translatesAutoresizingMaskIntoConstraints=NO;HostStyleGlassCard(sourceCard,17);
+    UIStackView *sourceStack=[UIStackView new];sourceStack.translatesAutoresizingMaskIntoConstraints=NO;sourceStack.axis=UILayoutConstraintAxisVertical;sourceStack.spacing=7;sourceStack.layoutMargins=UIEdgeInsetsMake(11,11,11,11);sourceStack.layoutMarginsRelativeArrangement=YES;[sourceCard addSubview:sourceStack];
+    [NSLayoutConstraint activateConstraints:@[[sourceStack.leadingAnchor constraintEqualToAnchor:sourceCard.leadingAnchor],[sourceStack.trailingAnchor constraintEqualToAnchor:sourceCard.trailingAnchor],[sourceStack.topAnchor constraintEqualToAnchor:sourceCard.topAnchor],[sourceStack.bottomAnchor constraintEqualToAnchor:sourceCard.bottomAnchor]]];
+    [sourceStack addArrangedSubview:[self sectionLabel:@"播放线路"]];
+    UIScrollView *routeScroll=[UIScrollView new];routeScroll.translatesAutoresizingMaskIntoConstraints=NO;routeScroll.showsHorizontalScrollIndicator=NO;[sourceStack addArrangedSubview:routeScroll];
     self.routeButtons=[UIStackView new];self.routeButtons.translatesAutoresizingMaskIntoConstraints=NO;self.routeButtons.axis=UILayoutConstraintAxisHorizontal;self.routeButtons.spacing=8;[routeScroll addSubview:self.routeButtons];
     [NSLayoutConstraint activateConstraints:@[[routeScroll.heightAnchor constraintGreaterThanOrEqualToConstant:44],[self.routeButtons.leadingAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.leadingAnchor],
         [self.routeButtons.trailingAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.trailingAnchor],[self.routeButtons.topAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.topAnchor],
         [self.routeButtons.bottomAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.bottomAnchor],[self.routeButtons.heightAnchor constraintEqualToAnchor:routeScroll.frameLayoutGuide.heightAnchor]]];
-    self.episodeTitle=[self sectionLabel:@"选集"];[self.contentStack addArrangedSubview:self.episodeTitle];
-    self.pageLabel=[UILabel new];self.pageLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.pageLabel.adjustsFontForContentSizeCategory=YES;self.pageLabel.textColor=HostSecondaryText();[self.contentStack addArrangedSubview:self.pageLabel];
-    UIStackView *paging=[UIStackView new];paging.axis=UILayoutConstraintAxisHorizontal;paging.spacing=10;self.previousPageButton=[UIButton buttonWithType:UIButtonTypeSystem];self.nextPageButton=[UIButton buttonWithType:UIButtonTypeSystem];
-    [self.previousPageButton setTitle:@"上一页" forState:UIControlStateNormal];[self.nextPageButton setTitle:@"下一页" forState:UIControlStateNormal];HostStylePillButton(self.previousPageButton,NO);HostStylePillButton(self.nextPageButton,NO);
+    self.episodeTitle=[self sectionLabel:@"选集"];[sourceStack addArrangedSubview:self.episodeTitle];
+    UIStackView *paging=[UIStackView new];paging.axis=UILayoutConstraintAxisHorizontal;paging.alignment=UIStackViewAlignmentCenter;paging.spacing=6;self.pageLabel=[UILabel new];self.pageLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.pageLabel.adjustsFontForContentSizeCategory=YES;self.pageLabel.textColor=HostSecondaryText();self.pageLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.pageLabel.accessibilityIdentifier=@"media-detail-page-status";[self.pageLabel setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];[self.pageLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];[paging addArrangedSubview:self.pageLabel];
+    self.previousPageButton=[UIButton buttonWithType:UIButtonTypeSystem];self.nextPageButton=[UIButton buttonWithType:UIButtonTypeSystem];
+    [self.previousPageButton setImage:[UIImage systemImageNamed:@"chevron.left"] forState:UIControlStateNormal];[self.nextPageButton setImage:[UIImage systemImageNamed:@"chevron.right"] forState:UIControlStateNormal];self.previousPageButton.accessibilityLabel=@"上一页";self.nextPageButton.accessibilityLabel=@"下一页";HostStylePillButton(self.previousPageButton,NO);HostStylePillButton(self.nextPageButton,NO);self.previousPageButton.contentEdgeInsets=UIEdgeInsetsMake(4,9,4,9);self.nextPageButton.contentEdgeInsets=UIEdgeInsetsMake(4,9,4,9);self.previousPageButton.tintColor=HostText();self.nextPageButton.tintColor=HostText();
     [self.previousPageButton addTarget:self action:@selector(previousEpisodePage) forControlEvents:UIControlEventTouchUpInside];[self.nextPageButton addTarget:self action:@selector(nextEpisodePage) forControlEvents:UIControlEventTouchUpInside];
-    [paging addArrangedSubview:self.previousPageButton];[paging addArrangedSubview:self.nextPageButton];self.previousPageButton.hidden=YES;self.nextPageButton.hidden=YES;[self.contentStack addArrangedSubview:paging];
-    self.episodeGrid=[UIStackView new];self.episodeGrid.axis=UILayoutConstraintAxisVertical;self.episodeGrid.spacing=8;self.episodeGrid.distribution=UIStackViewDistributionFillEqually;self.episodeGrid.accessibilityIdentifier=@"media-detail-episode-grid";[self.contentStack addArrangedSubview:self.episodeGrid];
-    self.castTitle=[self sectionLabel:@"演职阵容"];[self.contentStack addArrangedSubview:self.castTitle];self.castScroll=[UIScrollView new];self.castScroll.translatesAutoresizingMaskIntoConstraints=NO;self.castScroll.showsHorizontalScrollIndicator=NO;self.castScroll.alwaysBounceHorizontal=YES;[self.contentStack addArrangedSubview:self.castScroll];self.castStack=[UIStackView new];self.castStack.translatesAutoresizingMaskIntoConstraints=NO;self.castStack.axis=UILayoutConstraintAxisHorizontal;self.castStack.alignment=UIStackViewAlignmentTop;self.castStack.spacing=14;[self.castScroll addSubview:self.castStack];
-    [NSLayoutConstraint activateConstraints:@[[self.castScroll.heightAnchor constraintEqualToConstant:94],[self.castStack.leadingAnchor constraintEqualToAnchor:self.castScroll.contentLayoutGuide.leadingAnchor],[self.castStack.trailingAnchor constraintEqualToAnchor:self.castScroll.contentLayoutGuide.trailingAnchor],[self.castStack.topAnchor constraintEqualToAnchor:self.castScroll.contentLayoutGuide.topAnchor],[self.castStack.bottomAnchor constraintEqualToAnchor:self.castScroll.contentLayoutGuide.bottomAnchor],[self.castStack.heightAnchor constraintEqualToAnchor:self.castScroll.frameLayoutGuide.heightAnchor]]];self.castTitle.hidden=YES;self.castScroll.hidden=YES;
+    [paging addArrangedSubview:self.previousPageButton];[paging addArrangedSubview:self.nextPageButton];self.previousPageButton.hidden=YES;self.nextPageButton.hidden=YES;[self.previousPageButton.heightAnchor constraintGreaterThanOrEqualToConstant:34].active=YES;[self.nextPageButton.heightAnchor constraintGreaterThanOrEqualToConstant:34].active=YES;[sourceStack addArrangedSubview:paging];
+    self.episodeGrid=[UIStackView new];self.episodeGrid.axis=UILayoutConstraintAxisVertical;self.episodeGrid.spacing=5;self.episodeGrid.distribution=UIStackViewDistributionFillEqually;self.episodeGrid.accessibilityIdentifier=@"media-detail-episode-grid";[sourceStack addArrangedSubview:self.episodeGrid];
+    [self.contentStack addArrangedSubview:sourceCard];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.hidesWhenStopped=YES;self.spinner.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:self.spinner];
     [NSLayoutConstraint activateConstraints:@[[self.spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],[self.spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor]]];
 }
@@ -238,11 +248,25 @@
 - (void)scrollToEpisodes {CGRect rect=[self.episodeTitle convertRect:self.episodeTitle.bounds toView:self.scrollView];CGFloat y=MAX(-self.scrollView.adjustedContentInset.top,rect.origin.y-12);[self.scrollView setContentOffset:CGPointMake(0,y) animated:YES];}
 - (void)copyTitle {NSString *name=[self.detail[@"name"] isKindOfClass:NSString.class]?self.detail[@"name"]:([self.item[@"name"] isKindOfClass:NSString.class]?self.item[@"name"]:@"");if(!name.length)return;UIPasteboard.generalPasteboard.string=name;self.status.text=@"片名已复制";self.status.hidden=NO;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{if([self.status.text isEqualToString:@"片名已复制"])self.status.hidden=YES;});}
 - (void)shareTitle {NSString *name=[self.detail[@"name"] isKindOfClass:NSString.class]?self.detail[@"name"]:([self.item[@"name"] isKindOfClass:NSString.class]?self.item[@"name"]:@"影片");NSMutableArray *parts=[NSMutableArray arrayWithObject:name];NSString *metadata=[self metadataSummary];if(metadata.length)[parts addObject:metadata];NSString *text=[parts componentsJoinedByString:@" · "];UIActivityViewController *share=[[UIActivityViewController alloc] initWithActivityItems:@[text] applicationActivities:nil];UIPopoverPresentationController *popover=share.popoverPresentationController;if(popover){popover.sourceView=self.view;popover.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);} [self presentViewController:share animated:YES completion:nil];}
-- (void)refreshCastRow {
-    for(UIView *view in self.castStack.arrangedSubviews.copy){[self.castStack removeArrangedSubview:view];[view removeFromSuperview];}
-    NSString *raw=[self.detail[@"actor"] isKindOfClass:NSString.class]?self.detail[@"actor"]:@"";NSCharacterSet *separators=[NSCharacterSet characterSetWithCharactersInString:@"/／,，、;；|\n\r#"];NSMutableOrderedSet<NSString *> *names=[NSMutableOrderedSet orderedSet];for(NSString *part in [raw componentsSeparatedByCharactersInSet:separators]){NSString *name=[part stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(name.length&&name.length<=64)[names addObject:name];if(names.count>=12)break;}
-    self.castTitle.hidden=names.count==0;self.castScroll.hidden=names.count==0;
-    for(NSString *name in names){UIView *entry=[UIView new];entry.translatesAutoresizingMaskIntoConstraints=NO;entry.accessibilityLabel=name;entry.isAccessibilityElement=YES;UIImageView *avatar=[UIImageView new];avatar.translatesAutoresizingMaskIntoConstraints=NO;avatar.image=[UIImage systemImageNamed:@"person.crop.circle.fill"];avatar.contentMode=UIViewContentModeScaleAspectFit;avatar.tintColor=HostSecondaryText();avatar.backgroundColor=HostNeutralSurface();avatar.layer.cornerRadius=24;avatar.clipsToBounds=YES;UILabel *label=[UILabel new];label.translatesAutoresizingMaskIntoConstraints=NO;label.text=name;label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];label.adjustsFontForContentSizeCategory=YES;label.textColor=HostSecondaryText();label.textAlignment=NSTextAlignmentCenter;label.numberOfLines=2;label.lineBreakMode=NSLineBreakByTruncatingTail;[entry addSubview:avatar];[entry addSubview:label];[NSLayoutConstraint activateConstraints:@[[entry.widthAnchor constraintEqualToConstant:68],[avatar.widthAnchor constraintEqualToConstant:48],[avatar.heightAnchor constraintEqualToConstant:48],[avatar.centerXAnchor constraintEqualToAnchor:entry.centerXAnchor],[avatar.topAnchor constraintEqualToAnchor:entry.topAnchor],[label.topAnchor constraintEqualToAnchor:avatar.bottomAnchor constant:3],[label.leadingAnchor constraintEqualToAnchor:entry.leadingAnchor],[label.trailingAnchor constraintEqualToAnchor:entry.trailingAnchor],[label.bottomAnchor constraintLessThanOrEqualToAnchor:entry.bottomAnchor]]];[self.castStack addArrangedSubview:entry];}
+- (NSString *)posterURL {
+    NSArray *keys=@[@"banner",@"vod_pic_slide",@"poster",@"pic",@"vod_pic",@"cover",@"cover_url",@"coverUrl",@"image",@"img",@"thumbnail",@"thumb",@"poster_url",@"posterUrl"];
+    NSURL *base=nil;NSString *api=[self.source[@"api"] isKindOfClass:NSString.class]?self.source[@"api"]:@"";NSURLComponents *apiParts=[NSURLComponents componentsWithString:api];if([@[@"http",@"https"] containsObject:apiParts.scheme.lowercaseString]&&apiParts.host.length&&!apiParts.user.length&&!apiParts.password.length)base=apiParts.URL;
+    if(!base){NSInteger port=[self.source[@"port"] integerValue];if(port>0&&port<=65535)base=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/",(long)port]];}
+    for(NSDictionary *candidate in @[self.detail?:@{},self.item?:@{}])for(NSString *key in keys){id value=candidate[key];if(![value isKindOfClass:NSString.class])continue;NSString *raw=[(NSString *)value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!raw.length||raw.length>8192)continue;
+        NSURLComponents *parts=[NSURLComponents componentsWithString:raw];if([@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]&&parts.host.length&&!parts.user.length&&!parts.password.length)return raw;
+        NSString *candidateURL=[raw hasPrefix:@"//"]?[NSString stringWithFormat:@"%@:%@",base.scheme.length?base.scheme:@"https",raw]:raw;NSURL *resolved=[NSURL URLWithString:candidateURL relativeToURL:base].absoluteURL;if(!resolved)continue;NSURLComponents *resolvedParts=[NSURLComponents componentsWithURL:resolved resolvingAgainstBaseURL:NO];if([@[@"http",@"https"] containsObject:resolvedParts.scheme.lowercaseString]&&resolvedParts.host.length&&!resolvedParts.user.length&&!resolvedParts.password.length&&resolved.absoluteString.length<=8192)return resolved.absoluteString;
+    }
+    return @"";
+}
+- (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context {
+    if(![result isKindOfClass:NSDictionary.class]||![context isKindOfClass:NSDictionary.class])return;
+    if(self.inlinePlaybackController){[self.inlinePlaybackController playInlineResult:result context:context];self.heroView.hidden=YES;return;}
+    MediaPlaybackViewController *player=[MediaPlaybackViewController new];player.embeddedMode=YES;player.result=result;player.context=context;self.inlinePlaybackController=player;
+    [self addChildViewController:player];player.view.translatesAutoresizingMaskIntoConstraints=NO;
+    [self.contentStack insertArrangedSubview:player.view atIndex:0];
+    [NSLayoutConstraint activateConstraints:@[[player.view.heightAnchor constraintEqualToAnchor:player.view.widthAnchor multiplier:0.5625 constant:158]]];
+    [player didMoveToParentViewController:self];self.heroView.hidden=YES;[player playInlineResult:result context:context];[self.scrollView setContentOffset:CGPointMake(0,-self.scrollView.adjustedContentInset.top) animated:YES];
+    [RuntimeDiagnostics.shared recordEvent:@"inline_playback_attached" category:@"playback" fields:@{@"correlation_id":context[@"correlationID"]?:@"",@"service_id":context[@"source"][@"id"]?:@"",@"line_index":context[@"lineIndex"]?:@0,@"episode_index":context[@"episodeIndex"]?:@0}];
 }
 - (void)loadDetail {
     NSUInteger generation=++self.generation;
@@ -291,7 +315,7 @@
             @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"elapsed_ms":@(elapsedMS),
             @"line_count":@(owner.lines.count), @"episode_count":@(episodeCount),
             @"has_description":@([owner.detail[@"description"] isKindOfClass:NSString.class]&&[owner.detail[@"description"] length]>0),
-            @"has_poster":@(([owner.detail[@"banner"] isKindOfClass:NSString.class]&&[owner.detail[@"banner"] length]>0)||([owner.detail[@"poster"] isKindOfClass:NSString.class]&&[owner.detail[@"poster"] length]>0))
+            @"has_poster":@(owner.posterURL.length>0)
         }];
         owner.status.text=@"";
         owner.status.hidden=YES;
@@ -325,11 +349,11 @@
     return parts.count?[parts componentsJoinedByString:@" · "]:@"";
 }
 - (void)refreshDetailHeader {
-    NSString *poster=[self.detail[@"banner"] isKindOfClass:NSString.class]&&[self.detail[@"banner"] length]?self.detail[@"banner"]:([self.item[@"banner"] isKindOfClass:NSString.class]&&[self.item[@"banner"] length]?self.item[@"banner"]:([self.detail[@"poster"] isKindOfClass:NSString.class]&&[self.detail[@"poster"] length]?self.detail[@"poster"]:([self.item[@"poster"] isKindOfClass:NSString.class]?self.item[@"poster"]:@"")));self.posterView.image=nil;if(poster.length)[HostImageLoader.shared loadPosterURL:poster intoImageView:self.posterView];
-    NSString *name=[self.detail[@"name"] length]?self.detail[@"name"]:(self.item[@"name"]?:@"影片详情");self.heroTitle.text=name;self.heroMetadata.text=[self metadataSummary];
-    NSMutableArray *info=[NSMutableArray array];NSString *metadata=[self metadataSummary];if(metadata.length)[info addObject:metadata];NSString *actors=[self.detail[@"actor"] isKindOfClass:NSString.class]?self.detail[@"actor"]:@"";NSString *director=[self.detail[@"director"] isKindOfClass:NSString.class]?self.detail[@"director"]:@"";
-    if(director.length)[info addObject:[NSString stringWithFormat:@"导演：%@",director]];if(actors.length)[info addObject:[NSString stringWithFormat:@"主演：%@",actors]];self.metadataLabel.text=[info componentsJoinedByString:@"\n"];[self refreshCastRow];
-    NSString *synopsis=[self.detail[@"description"] isKindOfClass:NSString.class]?self.detail[@"description"]:@"";if(synopsis.length>1200)synopsis=[[synopsis substringToIndex:1200] stringByAppendingString:@"…"];self.descriptionLabel.text=synopsis.length?synopsis:@"暂无简介";self.descriptionToggle.hidden=synopsis.length<220;self.descriptionLabel.numberOfLines=self.descriptionExpanded?0:5;[self updateFavoriteButton];
+    NSString *poster=[self posterURL];self.posterView.image=nil;self.posterView.accessibilityLabel=poster.length?@"影片海报":@"暂无海报，显示影片占位图";if(poster.length)[HostImageLoader.shared loadPosterURL:poster intoImageView:self.posterView];
+    NSString *name=[self.detail[@"name"] length]?self.detail[@"name"]:(self.item[@"name"]?:@"影片详情");self.title=name;self.heroTitle.text=name;self.heroMetadata.text=[self metadataSummary];
+    NSMutableArray *info=[NSMutableArray array];NSString *metadata=[self metadataSummary];if(metadata.length)[info addObject:metadata];NSString *director=[self.detail[@"director"] isKindOfClass:NSString.class]?self.detail[@"director"]:@"";
+    if(director.length)[info addObject:[NSString stringWithFormat:@"导演：%@",director]];self.metadataLabel.text=[info componentsJoinedByString:@"\n"];
+    NSString *synopsis=[self.detail[@"description"] isKindOfClass:NSString.class]?self.detail[@"description"]:@"";if(synopsis.length>1200)synopsis=[[synopsis substringToIndex:1200] stringByAppendingString:@"…"];self.descriptionLabel.text=synopsis.length?synopsis:@"暂无简介";self.descriptionToggle.hidden=synopsis.length<220;self.descriptionLabel.numberOfLines=self.descriptionExpanded?0:3;[self updateFavoriteButton];
 }
 - (NSString *)favoriteKey {NSString *sourceID=self.source[@"id"]?:@"",*provider=self.provider?:@"",*itemID=self.item[@"id"]?:@"";return [NSString stringWithFormat:@"%lu:%@%lu:%@%lu:%@",(unsigned long)sourceID.length,sourceID,(unsigned long)provider.length,provider,(unsigned long)itemID.length,itemID];}
 - (void)updateFavoriteButton {
@@ -340,7 +364,7 @@
     if(favorites[key]) [favorites removeObjectForKey:key];else favorites[key]=@{@"sourceID":self.source[@"id"]?:@"",@"sourceName":self.source[@"name"]?:@"",@"provider":self.provider?:@"",@"item":self.item?:@{}};
     [NSUserDefaults.standardUserDefaults setObject:favorites forKey:@"cctv.mediaFavorites.v1"];[self updateFavoriteButton];
 }
-- (void)toggleDescription {self.descriptionExpanded=!self.descriptionExpanded;self.descriptionLabel.numberOfLines=self.descriptionExpanded?0:5;[self.descriptionToggle setTitle:self.descriptionExpanded?@"收起简介":@"展开简介" forState:UIControlStateNormal];}
+- (void)toggleDescription {self.descriptionExpanded=!self.descriptionExpanded;self.descriptionLabel.numberOfLines=self.descriptionExpanded?0:3;[self.descriptionToggle setTitle:self.descriptionExpanded?@"收起简介":@"展开简介" forState:UIControlStateNormal];}
 - (void)updateRouteAndEpisodeViews {
     for(UIView *view in self.routeButtons.arrangedSubviews.copy){[self.routeButtons removeArrangedSubview:view];[view removeFromSuperview];}if(self.selectedLineIndex>=self.lines.count)self.selectedLineIndex=0;
     for(NSUInteger index=0;index<self.lines.count;index++){NSDictionary *line=self.lines[index];UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.tag=index;NSString *name=[line[@"name"] isKindOfClass:NSString.class]?line[@"name"]:[NSString stringWithFormat:@"线路 %lu",(unsigned long)index+1];
@@ -352,16 +376,15 @@
     NSDictionary *selectedLine=self.selectedLineIndex<self.lines.count?self.lines[self.selectedLineIndex]:@{};NSDictionary *selectedEpisode=self.selectedEpisodeIndex<episodes.count?episodes[self.selectedEpisodeIndex]:@{};NSString *resumeLineID=self.resumeEntry[@"lineID"]?:@"",*resumeEpisodeID=self.resumeEntry[@"episodeID"]?:@"";BOOL lineMatches=resumeLineID.length?[[selectedLine[@"id"] description] isEqual:resumeLineID]:self.selectedLineIndex==[self.resumeEntry[@"lineIndex"] integerValue];BOOL episodeMatches=resumeEpisodeID.length?[[selectedEpisode[@"id"] description] isEqual:resumeEpisodeID]:self.selectedEpisodeIndex==[self.resumeEntry[@"episodeIndex"] integerValue];BOOL resumeSelected=self.resumeEntry&&lineMatches&&episodeMatches;
     if(resumeSelected){NSString *verb=[self.resumeEntry[@"completed"] boolValue]?@"重新播放":@"继续观看";[self.playButton setTitle:[NSString stringWithFormat:@"▶︎  %@ · %@",verb,self.resumeEntry[@"episodeName"]?:@"上次分集"] forState:UIControlStateNormal];}else [self.playButton setTitle:@"▶︎  播放" forState:UIControlStateNormal];
     for(UIView *row in self.episodeGrid.arrangedSubviews.copy){[self.episodeGrid removeArrangedSubview:row];[row removeFromSuperview];}[self.episodeButtons removeAllObjects];if(!episodes.count)return;
-    for(NSUInteger rowIndex=0;rowIndex<3;rowIndex++){UIStackView *row=[UIStackView new];row.axis=UILayoutConstraintAxisHorizontal;row.spacing=8;row.distribution=UIStackViewDistributionFillEqually;
-        for(NSUInteger col=0;col<4;col++){NSUInteger index=start+rowIndex*4+col;UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.layer.cornerRadius=15;button.layer.cornerCurve=kCACornerCurveContinuous;button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;
-            if(index<end){NSDictionary *episode=episodes[index];NSString *name=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1];[button setTitle:name forState:UIControlStateNormal];button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-detail-episode-%lu",(unsigned long)index];HostStylePillButton(button,(NSInteger)index==self.selectedEpisodeIndex);[button addTarget:self action:@selector(selectEpisode:) forControlEvents:UIControlEventTouchUpInside];[self.episodeButtons addObject:button];}
-            else button.hidden=YES;[row addArrangedSubview:button];}
+    NSUInteger visibleCount=end>start?end-start:0;NSUInteger rowCount=(visibleCount+3)/4;for(NSUInteger rowIndex=0;rowIndex<rowCount;rowIndex++){UIStackView *row=[UIStackView new];row.axis=UILayoutConstraintAxisHorizontal;row.spacing=6;row.distribution=UIStackViewDistributionFillEqually;
+        for(NSUInteger col=0;col<4;col++){NSUInteger index=start+rowIndex*4+col;if(index<end){UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.layer.cornerRadius=15;button.layer.cornerCurve=kCACornerCurveContinuous;button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;NSDictionary *episode=episodes[index];NSString *name=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1];[button setTitle:name forState:UIControlStateNormal];button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-detail-episode-%lu",(unsigned long)index];HostStylePillButton(button,(NSInteger)index==self.selectedEpisodeIndex);button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;[button addTarget:self action:@selector(selectEpisode:) forControlEvents:UIControlEventTouchUpInside];[self.episodeButtons addObject:button];[row addArrangedSubview:button];}else{UIView *spacer=[UIView new];spacer.isAccessibilityElement=NO;[row addArrangedSubview:spacer];}}
         [self.episodeGrid addArrangedSubview:row];[row.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
     }
 }
 - (void)selectRoute:(UIButton *)sender {
     if(sender.tag>=self.lines.count||sender.tag==self.selectedLineIndex)return;
     NSUInteger previousLine=self.selectedLineIndex;
+    NSArray *previousEpisodes=previousLine<self.lines.count&&[self.lines[previousLine][@"episodes"] isKindOfClass:NSArray.class]?self.lines[previousLine][@"episodes"]:@[];NSDictionary *previousEpisode=self.selectedEpisodeIndex<previousEpisodes.count?previousEpisodes[self.selectedEpisodeIndex]:@{};NSString *previousEpisodeID=[previousEpisode[@"id"] description]?:@"",*previousEpisodeName=[previousEpisode[@"name"] description]?:@"";
     NSDictionary *line=self.lines[sender.tag];
     NSArray *episodes=[line[@"episodes"] isKindOfClass:NSArray.class]?line[@"episodes"]:@[];
     [RuntimeDiagnostics.shared recordEvent:@"media_route_selected" category:@"media_api" fields:@{
@@ -374,9 +397,9 @@
     self.status.hidden=YES;
     self.resumeEntry=nil;
     self.selectedLineIndex=sender.tag;
-    self.selectedEpisodeIndex=0;
-    self.episodePage=0;
+    NSInteger matchedEpisode=-1;if(previousEpisodeID.length)for(NSUInteger index=0;index<episodes.count;index++)if([[episodes[index][@"id"] description] isEqual:previousEpisodeID]){matchedEpisode=(NSInteger)index;break;}if(matchedEpisode<0&&previousEpisodeName.length)for(NSUInteger index=0;index<episodes.count;index++)if([[episodes[index][@"name"] description] localizedCaseInsensitiveCompare:previousEpisodeName]==NSOrderedSame){matchedEpisode=(NSInteger)index;break;}self.selectedEpisodeIndex=matchedEpisode>=0?matchedEpisode:0;self.episodePage=self.selectedEpisodeIndex/12;
     [self updateRouteAndEpisodeViews];
+    if(self.inlinePlaybackController&&episodes.count)[self resolveAndPlaySelectedEpisode];
 }
 - (void)previousEpisodePage {if(self.episodePage>0){self.episodePage--;[self updateRouteAndEpisodeViews];}}
 - (void)nextEpisodePage {NSArray *episodes=self.selectedLineIndex<self.lines.count?self.lines[self.selectedLineIndex][@"episodes"]:@[];if(self.episodePage+1<(NSInteger)(episodes.count+11)/12){self.episodePage++;[self updateRouteAndEpisodeViews];}}
@@ -997,6 +1020,8 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)pushMediaDetail:(MediaDetailViewController *)detail {
     if(!detail)return;
     __weak typeof(self) weakSelf=self;
+    __weak MediaDetailViewController *weakDetail=detail;
+    detail.onPlay=^(NSDictionary *result,NSDictionary *context){MediaDetailViewController *owner=weakDetail;if(owner)[owner showInlinePlaybackResult:result context:context];};
     detail.onReturnHome=^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;[owner returnToHomeFromNavigation];[owner.navigationController popToViewController:owner animated:YES];};
     [self pushMediaPage:detail];
 }

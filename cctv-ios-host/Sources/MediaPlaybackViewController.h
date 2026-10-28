@@ -3,5 +3,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface MediaPlaybackViewController : UIViewController
 @property(nonatomic,copy) NSDictionary *result;
 @property(nonatomic,copy) NSDictionary *context;
+@property(nonatomic) BOOL embeddedMode;
+- (void)playInlineResult:(NSDictionary *)result context:(NSDictionary *)context;
 @end
 NS_ASSUME_NONNULL_END
