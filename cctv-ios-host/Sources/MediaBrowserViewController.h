@@ -13,6 +13,8 @@
 - (void)pauseForBackground;
 - (void)resumeAfterForeground;
 - (void)saveSessionState;
+- (void)returnToHomeFromNavigation;
+- (BOOL)refreshHomeContentFromResourcePage;
 @property(nonatomic, copy) void (^onPlay)(NSDictionary *result,NSDictionary *context);
 @property(nonatomic, copy) dispatch_block_t onResources;
 @property(nonatomic, copy) NSError *(^startupErrorProvider)(void);

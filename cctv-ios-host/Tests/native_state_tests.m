@@ -102,6 +102,15 @@ int main(void) {
         check([metadata resultForSource:mediaSource operation:@"detail" arguments:detailArguments maximumAge:3600 isStale:NULL]==nil,@"episode identifiers that may contain signed URLs are never cached");
         [metadata storeResult:@{@"value":[@"x" stringByPaddingToLength:1024*1024+1 withString:@"x" startingAtIndex:0]} forSource:mediaSource operation:@"detail" arguments:@{@"id":@"large"}];
         check([metadata resultForSource:mediaSource operation:@"detail" arguments:@{@"id":@"large"} maximumAge:3600 isStale:NULL]==nil,@"oversized metadata entries are rejected");
+        NSMutableDictionary *persistentSource=[mediaSource mutableCopy];persistentSource[@"id"]=[NSString stringWithFormat:@"persistent-%@",NSUUID.UUID.UUIDString];
+        NSDictionary *homeArguments=@{@"provider":@"site-a"};
+        NSDictionary *homeResult=@{@"items":@[@{@"id":@"film-1",@"name":@"Cached Film",@"poster":@"https://images.example/poster.jpg",@"playURL":@"https://cdn.example/video.m3u8?token=private-secret"}],@"categories":@[@{@"id":@"1",@"name":@"剧集"}]};
+        [metadata storeResult:homeResult forSource:persistentSource operation:@"home" arguments:homeArguments];
+        __block NSDictionary *restoredHome=nil;
+        for(NSUInteger attempt=0;attempt<40&&!restoredHome;attempt++){@autoreleasepool{[NSThread sleepForTimeInterval:0.05];MediaMetadataCache *reopened=[MediaMetadataCache new];restoredHome=[reopened resultForSource:persistentSource operation:@"home" arguments:homeArguments maximumAge:3600 isStale:NULL];}}
+        NSDictionary *restoredItem=[restoredHome[@"items"] isKindOfClass:NSArray.class]?[restoredHome[@"items"] firstObject]:nil;
+        check([restoredItem[@"name"] isEqual:@"Cached Film"]&&[restoredItem[@"poster"] isEqual:@"https://images.example/poster.jpg"],@"home metadata survives a fresh cache instance and retains poster content");
+        check(restoredItem[@"playURL"]==nil,@"persistent home cache excludes playback URLs and credentials");
         [metadata removeResultsForSourceID:@"source-a"];
         check([metadata resultForSource:mediaSource operation:@"search" arguments:searchArgs maximumAge:3600 isStale:NULL]==nil,@"source cache invalidation removes its metadata");
         [metadata clear];

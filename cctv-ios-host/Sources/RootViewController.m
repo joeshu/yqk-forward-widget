@@ -947,7 +947,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)openMediaTab {
     MediaBrowserViewController *page=(MediaBrowserViewController *)self.tabPages[@2];
     BOOL created=page==nil;
-    if(!page){page=[MediaBrowserViewController new];page.deferAutomaticLoading=self.restoringLastTab||!self.userInitiatedTabSelection;__weak typeof(self) weakSelf=self;
+    if(!page){page=[MediaBrowserViewController new];page.deferAutomaticLoading=YES;__weak typeof(self) weakSelf=self;
         page.sourcesProvider=^{
             NSMutableArray *sources=[NSMutableArray array];
             for(NSDictionary *service in [ServiceStore services])if([ServiceStore isVODMediaService:service])[sources addObject:service];
@@ -978,7 +978,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     }
     [self showTabPage:page title:page.isHomeMode?@"":@"影视库"];
     if(page.onDisplayModeChanged)page.onDisplayModeChanged(page.isHomeMode);
-    if(!created){[page refreshSources];if(self.userInitiatedTabSelection)[page loadHomeOnDemand];}
+    if(!created){if(self.userInitiatedTabSelection)[page returnToHomeFromNavigation];[page refreshSources];}
 }
 - (void)playMediaResult:(NSDictionary *)result name:(NSString *)name {
     NSString *url=[self stableURLKey:result[@"url"]];if(!url.length){[self showServiceError:@"资源没有返回可播放媒体地址"];return;}
@@ -1004,6 +1004,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     ConfigCenterViewController *page=(ConfigCenterViewController *)self.tabPages[@3];
     if(!page){page=[ConfigCenterViewController new];__weak typeof(self) w=self;
         page.profilesProvider=^{return [(id)w configurationProfiles];};page.onServices=^{[w openServicesPage];};page.onAdd=^{[w addSubscription];};page.onRefresh=^{[w onPullRefresh];};page.onRefreshProfile=^(NSString *source){[w fetchSubscription:source silent:NO];};
+        page.onRefreshMediaHome=^{RootViewController *owner=w;if(!owner)return;[owner selectBottomTab:(UIButton *)owner.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)owner.tabPages[@2];[browser returnToHomeFromNavigation];dispatch_async(dispatch_get_main_queue(),^{if(![browser refreshHomeContentFromResourcePage])[owner showServiceError:@"没有可加载的影视资源。请先导入并启用一个影视来源。"] ;});};
         page.onToggleProfile=^(NSString *source,BOOL enabled){NSDictionary *service=[w resourceServiceForSource:source];if(service){[w toggleService:service enabled:enabled];return;}if(!source.length)[NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"nativeChannelsEnabled"];else{NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabled removeObject:source];if(!enabled)[disabled addObject:source];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];}[w applyFilter];};
         page.onOpenResource=^(NSString *source){[w openPluginResource:source];};
         page.onUseResource=^(NSString *source,NSString *kind){NSDictionary *service=[w resourceServiceForSource:source];if(!service)return;if([kind isEqual:@"choose"]){UIAlertController *choice=[UIAlertController alertControllerWithTitle:service[@"name"]?:@"选择资源用途" message:@"这个资源同时提供影视与直播能力。" preferredStyle:UIAlertControllerStyleActionSheet];[choice addAction:[UIAlertAction actionWithTitle:@"进入影视" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"vod"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"添加直播频道" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"live"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"资源详情与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w openPluginResource:source];}]];[choice addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];choice.popoverPresentationController.sourceView=w.view;choice.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(w.view.bounds),CGRectGetMidY(w.view.bounds),1,1);[w presentViewController:choice animated:YES completion:nil];return;}[w usePluginService:service kind:kind];};

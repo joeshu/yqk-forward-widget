@@ -160,7 +160,9 @@
                   [self finish:nil];
                   return;
               }
-              NSTimeInterval pollInterval = [self.lastFailureKind isEqualToString:@"runtime_preparing"] ? 0.75 : 0.3;
+              NSTimeInterval pollInterval = 0.4;
+              for(NSUInteger step=1;step<MIN(self.attemptCount,(NSUInteger)6);step++)pollInterval=MIN(2.0,pollInterval*1.6);
+              if([self.lastFailureKind isEqualToString:@"runtime_preparing"])pollInterval=MAX(0.75,pollInterval);
               dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(pollInterval * NSEC_PER_SEC)),
                              dispatch_get_main_queue(), ^{
                                [weakSelf poll:generation];

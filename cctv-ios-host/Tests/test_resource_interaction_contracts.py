@@ -126,8 +126,11 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('MediaHomeModulesSchemaKey', self.detail)
         self.assertIn('@"id":@"recommendations"', self.detail)
         self.assertIn('homeFeatureCardForItem:', self.detail)
-        self.assertIn('operation:@"home" arguments:arguments maximumAge:24*60*60', self.detail)
-        self.assertIn('selectionRow.hidden=NO', self.detail)
+        self.assertIn('operation:@"home" arguments:arguments maximumAge:DBL_MAX', self.detail)
+        self.assertIn('operation:@"category" arguments:arguments maximumAge:DBL_MAX', self.detail)
+        self.assertIn('self.selectionRow.hidden=hidden', self.detail)
+        self.assertIn('media-home-source-picker', self.detail)
+        self.assertIn('homeScroll.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor', self.detail)
         self.assertIn('media-home-feature', self.detail)
         self.assertIn('- (void)addHomeFeatureCarousel:', self.detail)
         self.assertIn('pagingEnabled=YES', self.detail)
@@ -168,8 +171,15 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[self.client cancel]', self.detail)
         self.assertIn('resumeCancelledMediaRequestOnAppear', self.detail)
         self.assertIn('homeShelfRequestInFlight', self.detail)
-        self.assertIn('if([operation isEqualToString:@"home_shelf"])', self.detail)
         self.assertIn('self.activeMediaOperation=@"home_shelf"', self.detail)
+        appearance = self.detail[self.detail.index('- (void)viewWillAppear:'):
+                                 self.detail.index('- (void)traitCollectionDidChange:', self.detail.index('- (void)viewWillAppear:'))]
+        self.assertIn('if(self.homeMode)', appearance)
+        home_return = appearance[appearance.index('if(self.homeMode)'):
+                                  appearance.index('media_request_resumed_after_page_return')]
+        self.assertIn('home_content_requires_explicit_resource_refresh', home_return)
+        self.assertIn('return;', home_return)
+        self.assertNotIn('[self loadHome]', home_return)
 
     def test_restored_home_uses_cached_content_and_waits_for_explicit_load(self):
         load_sources = self.detail[self.detail.index('- (void)loadSources {'):
@@ -195,6 +205,32 @@ class ResourceInteractionContracts(unittest.TestCase):
         home_appearance = appeared[appeared.index('if(self.homeMode)[self refreshHomeModules]'):]
         self.assertNotIn('loadHomeShelves:', home_appearance)
         self.assertNotIn('[self loadHome]', home_appearance)
+
+    def test_home_refresh_is_explicitly_started_from_resources_and_home_tab_returns_home(self):
+        browser_header = (ROOT / 'Sources/MediaBrowserViewController.h').read_text()
+        resources_header = (ROOT / 'Sources/ConfigCenterViewController.h').read_text()
+        self.assertIn('onRefreshMediaHome', resources_header)
+        self.assertIn('更新影视首页内容', self.catalog)
+        self.assertIn('media_home_refresh_requested_from_resources', self.detail)
+        self.assertIn('refreshHomeContentFromResourcePage', browser_header)
+        self.assertIn('[page returnToHomeFromNavigation]', self.root)
+        media_tab = self.root[self.root.index('- (void)openMediaTab {'):
+                              self.root.index('- (void)playMediaResult:', self.root.index('- (void)openMediaTab {'))]
+        self.assertIn('page.deferAutomaticLoading=YES', media_tab)
+        self.assertNotIn('[page loadHomeOnDemand]', media_tab)
+
+    def test_media_detail_has_a_direct_return_to_home_route(self):
+        detail = self.detail[self.detail.index('@interface MediaDetailViewController'):
+                             self.detail.index('@interface MediaFavoritesViewController')]
+        implementation = self.detail.index('@implementation MediaBrowserViewController')
+        start = self.detail.index('- (void)pushMediaDetail:', implementation)
+        browser = self.detail[start:self.detail.index('- (void)openHomeRecommendation:', start)]
+        self.assertIn('返回影视首页', detail)
+        self.assertIn('onReturnHome', detail)
+        self.assertIn('[owner returnToHomeFromNavigation]', browser)
+        self.assertIn('popToViewController:owner animated:YES', browser)
+        self.assertEqual(self.detail.count('[self.navigationController pushViewController:detail animated:YES]'), 1)
+        self.assertNotIn('[owner.navigationController pushViewController:detail animated:YES]', self.detail)
 
     def test_home_status_is_inline_actionable_and_does_not_rebuild_content_on_each_progress_update(self):
         show_message = self.detail[self.detail.index('- (void)showMessage:'):
@@ -679,7 +715,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('healthJSON[@"runtime_ready"]', readiness)
         self.assertIn('@"runtime_preparing"', readiness)
         self.assertIn('@"runtime_failed"', readiness)
-        self.assertIn('pollInterval = [self.lastFailureKind isEqualToString:@"runtime_preparing"] ? 0.75 : 0.3', readiness)
+        self.assertIn('NSTimeInterval pollInterval = 0.4', readiness)
+        self.assertIn('MIN(2.0,pollInterval*1.6)', readiness)
+        self.assertIn('MAX(0.75,pollInterval)', readiness)
         self.assertIn('initWithURL:health timeout:45 requiresHealthJSON:YES', browser)
 
     def test_playback_recovery_is_generation_scoped_and_quality_restores_pause_state(self):
@@ -696,6 +734,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('收藏、观看历史、订阅和插件数据会保留', settings)
         self.assertIn('MediaMetadataCacheEntryLimit = 64', cache)
         self.assertIn('MediaMetadataCacheByteLimit = 8 * 1024 * 1024', cache)
+        self.assertIn('MediaMetadataPersistentEntryLimit = 32', cache)
+        self.assertIn('MediaMetadataPersistentByteLimit = 4 * 1024 * 1024', cache)
+        self.assertIn('MediaMetadataPersistentSafeValue', cache)
         self.assertNotIn('@"detail"', cache)
         self.assertIn('影片详情与播放线路不缓存', settings)
 

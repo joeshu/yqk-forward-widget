@@ -46,7 +46,10 @@
     self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
         @{@"icon":@"arrow.clockwise",@"title":@"刷新资源",@"action":[UIAction actionWithHandler:^(UIAction *a){[w refreshProfiles];}]},
         @{@"icon":@"plus",@"title":@"导入资源",@"action":[UIAction actionWithHandler:^(UIAction *a){[w add];}]},
-        @{@"icon":@"ellipsis",@"title":@"资源操作",@"menu":[UIMenu menuWithChildren:@[[UIAction actionWithTitle:@"脚本与服务" image:[UIImage systemImageNamed:@"hand.tap"] identifier:nil handler:^(UIAction *a){if(w.onServices)w.onServices();}]]]}])];
+        @{@"icon":@"play.rectangle",@"title":@"更新影视首页内容",@"action":[UIAction actionWithHandler:^(UIAction *a){if(w.onRefreshMediaHome)w.onRefreshMediaHome();}]},
+        @{@"icon":@"ellipsis",@"title":@"资源操作",@"menu":[UIMenu menuWithChildren:@[
+            [UIAction actionWithTitle:@"脚本与服务" image:[UIImage systemImageNamed:@"hand.tap"] identifier:nil handler:^(UIAction *a){if(w.onServices)w.onServices();}]
+        ]]}])];
     [self reloadProfiles];
 }
 - (void)viewWillAppear:(BOOL)animated {
