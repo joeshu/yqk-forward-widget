@@ -16,6 +16,8 @@
 - (void)returnToHomeFromNavigation;
 - (BOOL)refreshHomeContentFromResourcePage;
 @property(nonatomic, copy) void (^onPlay)(NSDictionary *result,NSDictionary *context);
+/// Gives the app playback owner a chance to suspend live playback before VOD starts.
+@property(nonatomic, copy) dispatch_block_t onPlaybackWillStart;
 @property(nonatomic, copy) dispatch_block_t onResources;
 @property(nonatomic, copy) NSError *(^startupErrorProvider)(void);
 @property(nonatomic, copy) NSError *(^startupErrorForService)(NSDictionary *service);

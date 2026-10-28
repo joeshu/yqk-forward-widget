@@ -4,6 +4,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) NSDictionary *result;
 @property(nonatomic,copy) NSDictionary *context;
 @property(nonatomic) BOOL embeddedMode;
+@property(nonatomic,copy) dispatch_block_t onPlaybackWillStart;
 - (void)playInlineResult:(NSDictionary *)result context:(NSDictionary *)context;
 @end
 NS_ASSUME_NONNULL_END

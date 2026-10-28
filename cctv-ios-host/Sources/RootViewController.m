@@ -350,6 +350,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property(nonatomic) BOOL remoteFailureRecoveryPending;
 @property(nonatomic) BOOL remotePlaybackFailed;
 @property(nonatomic) BOOL nativeRetryPending;
+@property(nonatomic) BOOL livePlaybackSuspendedForNavigation;
 @property(nonatomic,strong) AVPlayer *previewPlayer;
 @property(nonatomic,strong) AVPlayerLayer *previewLayer;
 @property(nonatomic,strong) UIView *previewBox;
@@ -360,6 +361,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property(nonatomic,assign) NSUInteger playbackIntentVersion;
 @property(nonatomic,assign) NSUInteger subscriptionParseGeneration;
 - (void)displayNativePlaybackFailure:(NSString *)stage error:(nullable NSError *)error;
+- (void)suspendLivePlaybackForReason:(NSString *)reason;
 - (void)toggleCurrentFavorite;
 - (void)openDiagnosticLog;
 - (void)openDiagnosticLogForIdentifier:(nullable NSString *)identifier name:(nullable NSString *)name;
@@ -453,6 +455,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     return self.fullscreen||(self.activeTab==2&&mediaPage.isHomeMode);
 }
 
+- (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)viewController animated:(BOOL)animated {
+    if(navigationController!=self.navigationController||viewController==self)return;
+    if(self.activeTab<2)[self suspendLivePlaybackForReason:@"left_live_navigation_page"];
+}
+
 - (void)navigationController:(UINavigationController *)navigationController didShowViewController:(UIViewController *)viewController animated:(BOOL)animated {
     if(navigationController!=self.navigationController||navigationController.topViewController!=viewController)return;
     // Reconcile after the transition completes. During an interactive-pop that is
@@ -477,13 +484,19 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
 - (void)onBackground {
     [(MediaBrowserViewController *)self.tabPages[@2] pauseForBackground];
+    BOOL livePageRemainsVisible=self.activeTab<2&&self.navigationController.topViewController==self&&self.presentedViewController==nil;
+    [RuntimeDiagnostics.shared recordEvent:@"background_playback_policy" category:@"playback" fields:@{@"active_tab":@(self.activeTab),@"live_page_visible":@(livePageRemainsVisible),@"live_player_present":@(self.currentPlayer!=nil||self.avPlayer!=nil||self.cicadaPlayer!=nil),@"policy":livePageRemainsVisible?@"keep_live_playback":@"suspend_when_outside_live_page"}];
+    if(!livePageRemainsVisible)[self suspendLivePlaybackForReason:@"app_background_outside_live_page"];
     [self.nativePreloader cancel];
     [[HostImageLoader shared] cancelPending];
     [self stopPreview];
     [self.epgTimer invalidate];self.epgTimer=nil;
     self.officialEPGRequestGeneration++;[self.epgTask cancel];self.epgTask=nil;
     [[XMLTVStore shared] setPaused:YES];
-    [self call:self.currentPlayer sel:@"resignActive"];
+    // Some native player SDKs pause their stream on resignActive. Keep the
+    // active live page eligible for background audio; pages covered by a
+    // navigation push or modal were already suspended above.
+    if(!livePageRemainsVisible)[self call:self.currentPlayer sel:@"resignActive"];
     if (CCTVBoolPreference(@"autoPiP",NO) && self.avLayer && AVPictureInPictureController.isPictureInPictureSupported && !self.pip.isPictureInPictureActive) {
         self.pip=[[AVPictureInPictureController alloc] initWithPlayerLayer:self.avLayer];
         [self.pip startPictureInPicture];
@@ -877,6 +890,27 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.userInitiatedTabSelection=NO;
 }
 
+- (void)suspendLivePlaybackForReason:(NSString *)reason {
+    BOOL hasLivePlayback=self.currentPlayer!=nil||self.avPlayer!=nil||self.cicadaPlayer!=nil||self.playbackReadiness!=nil||self.remotePlaybackWanted;
+    BOOL hasActivePlayback=hasLivePlayback||self.moviePlayer!=nil;
+    if(!hasActivePlayback)return;
+    NSString *engine=self.avPlayer?@"avplayer":(self.cicadaPlayer?@"cicada":(self.currentPlayer?@"cnplayersdk":(self.moviePlayer?@"avplayer_controller":@"pending")));
+    self.playbackGeneration++;
+    self.livePlaybackSuspendedForNavigation=hasLivePlayback;
+    NSString *previousOwner=hasLivePlayback?@"live":@"vod";
+    [RuntimeDiagnostics.shared recordEvent:hasLivePlayback?@"live_playback_suspended":@"playback_owner_released" category:@"playback" fields:@{@"reason":reason?:@"navigation",@"previous_owner":previousOwner,@"next_owner":@"none",@"engine":engine,@"previous_tab":@(self.activeTab),@"playback_generation":@(self.playbackGeneration),@"correlation_id":self.currentPlaybackTraceID?:@"",@"background_live_exception":@NO}];
+    [self log:hasLivePlayback?@"离开直播页面，已暂停直播播放（%@）":@"已停止上一段视频播放（%@）",reason?:@"navigation"];
+    [self stopPlayback];
+    if(!hasLivePlayback)return;
+    [self.spinner stopAnimating];
+    self.titleLabel.hidden=NO;
+    self.titleLabel.text=@"直播已暂停 · 返回后点继续播放";
+    self.infoLabel.hidden=NO;
+    self.infoLabel.text=@"直播与点播不会同时播放";
+    self.playPauseBtn.enabled=YES;
+    [self.playPauseBtn setTitle:@"继续播放" forState:UIControlStateNormal];
+}
+
 - (void)updateBottomBarSelection {
     for (UIButton *button in self.bottomBar.arrangedSubviews) {
         UIButtonConfiguration *configuration=button.configuration;
@@ -892,6 +926,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)selectBottomTab:(UIButton *)sender {
     self.catalogSearchGeneration++;
     [self stopPreview];
+    if(self.activeTab!=sender.tag&&self.activeTab<2&&sender.tag>=2)[self suspendLivePlaybackForReason:@"left_live_interface"];
     if(!self.restoringLastTab&&self.activeTab<2){NSDictionary *state=@{@"query":self.query?:@"",@"group":@(self.groupControl.selectedSegmentIndex),@"gridY":@(self.channelGrid.contentOffset.y),@"listY":@(self.table.contentOffset.y)};self.catalogStates[@(self.activeTab)]=state;[[NSUserDefaults standardUserDefaults] setObject:state forKey:[NSString stringWithFormat:@"cctv.catalogState.%ld",(long)self.activeTab]];}
     if(self.restoringLastTab)[RuntimeDiagnostics.shared recordEvent:@"ui_session_tab_restored" category:@"lifecycle" fields:@{@"tab_index":@(sender.tag),@"automatic_content_load":@NO}];
     self.activeTab=sender.tag;
@@ -987,10 +1022,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         __weak MediaBrowserViewController *weakPage=page;page.onDisplayModeChanged=^(BOOL homeMode){RootViewController *owner=weakSelf;MediaBrowserViewController *mediaPage=weakPage;if(!owner||!mediaPage)return;owner.title=homeMode?@"":@"影视库";owner.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;owner.navigationItem.searchController=mediaPage.navigationItem.searchController;owner.navigationItem.leftBarButtonItem=mediaPage.navigationItem.leftBarButtonItem;owner.navigationItem.rightBarButtonItems=mediaPage.navigationItem.rightBarButtonItems;if(owner.navigationController.topViewController==owner&&owner.navigationController.navigationBarHidden!=homeMode)[owner.navigationController setNavigationBarHidden:homeMode animated:YES];};
         page.onActivateService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf changeService:service enabled:YES completion:completion];};
         page.onRestartService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf restartMediaService:service completion:completion];};
+        page.onPlaybackWillStart=^{RootViewController *owner=weakSelf;if(owner)[owner suspendLivePlaybackForReason:@"vod_playback_starting"];};
         page.startupErrorProvider=^NSError *{return PyHost.startupError;};
         page.startupErrorForService=^NSError *(NSDictionary *service){return [PyHost startupErrorForServiceIdentifier:service[@"id"]];};
         page.onResources=^{RootViewController *owner=weakSelf;if(owner)[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[3]];};
-        page.onPlay=^(NSDictionary *result,NSDictionary *context){RootViewController *owner=weakSelf;if(!owner)return;MediaPlaybackViewController *player=[MediaPlaybackViewController new];player.result=result;player.context=context;[owner.navigationController pushViewController:player animated:YES];};
+        page.onPlay=^(NSDictionary *result,NSDictionary *context){RootViewController *owner=weakSelf;if(!owner)return;MediaPlaybackViewController *player=[MediaPlaybackViewController new];player.onPlaybackWillStart=^{RootViewController *strongOwner=weakSelf;if(strongOwner)[strongOwner suspendLivePlaybackForReason:@"vod_playback_starting"];};player.result=result;player.context=context;[owner.navigationController pushViewController:player animated:YES];};
         page.onSubscribeLive=^(NSDictionary *service){RootViewController *owner=weakSelf;if(!owner)return;NSString *url=[ServiceStore subscriptionURLForService:service];if(!url.length)for(NSString *candidate in owner.subscriptionURLs){NSDictionary *provider=[owner localServiceForURL:[NSURL URLWithString:candidate]];if([provider[@"id"] isEqual:service[@"id"]]){url=candidate;break;}}if(!url.length){[owner openServiceEditorForService:service];return;}NSMutableDictionary *metadata=[@{@"managedServiceID":service[@"id"]?:@""} mutableCopy];if(![ProfileStore metadata:url][@"name"])[metadata addEntriesFromDictionary:@{@"name":service[@"name"]?:@"本机直播服务"}];[ProfileStore update:url values:metadata];if(![owner.subscriptionURLs containsObject:url]){[owner.subscriptionURLs addObject:url];[NSUserDefaults.standardUserDefaults setObject:owner.subscriptionURLs.allObjects forKey:@"subscriptions"];}[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[1]];owner.activeSource=url;owner.title=@"订阅直播";[owner fetchSubscription:url silent:NO];};
         self.tabPages[@2]=page;
     }
@@ -1000,6 +1036,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 - (void)playMediaResult:(NSDictionary *)result name:(NSString *)name {
     NSString *url=[self stableURLKey:result[@"url"]];if(!url.length){[self showServiceError:@"资源没有返回可播放媒体地址"];return;}
+    [self suspendLivePlaybackForReason:@"vod_playback_starting"];
     self.playbackGeneration++;[self stopPlayback];[self.nativePreloader cancel];[self endPlaybackPriority];
     self.currentRemoteURL=url;self.channelName=name;self.channelID=nil;
     NSString *sourceURL=[self stableURLKey:result[@"originalURL"]?:result[@"url"]];
@@ -1395,6 +1432,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 #pragma mark - 播放
 
 - (void)playChannel:(NSDictionary *)ch route:(NSDictionary *)route {
+    self.livePlaybackSuspendedForNavigation=NO;
     if([ch[@"remoteURL"] length]||[ProfileStore isHTTP:ch[@"id"]]){[self routePlayback:ch];return;}
     NSString *cid = ch[@"id"];
     if (!cid.length) return;
@@ -1632,6 +1670,14 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)togglePlayPause {
+    if(self.livePlaybackSuspendedForNavigation){
+        self.livePlaybackSuspendedForNavigation=NO;
+        if(self.activeTab==1&&self.currentRemoteURL.length){[self playRemote:@{@"id":self.channelID?:self.currentRemoteURL,@"name":self.channelName?:@"直播",@"remoteURL":self.currentRemoteURL,@"headers":self.currentRemoteHeaders?:@{}}];return;}
+        NSDictionary *channel=[self channelWithID:self.channelID];
+        if(!channel&&self.channelID.length)channel=@{@"id":self.channelID,@"name":self.channelName?:self.channelID};
+        if(channel){self.selectionRequestedAt=CACurrentMediaTime();[self playChannel:channel route:self.requestedNativeRoute];}
+        return;
+    }
     if(self.moviePlayer){if(self.moviePlayer.rate>0)[self.moviePlayer pause];else[self.moviePlayer play];return;}
     if(self.nativePlainRouteActive && self.remotePlaybackFailed){NSDictionary *channel=[self channelWithID:self.channelID];if(channel)[self playChannel:channel route:self.requestedNativeRoute];return;}
     if(self.remotePlaybackFailed && self.currentRemoteURL.length){[self playRemote:@{@"id":self.channelID?:self.currentRemoteURL,@"name":self.channelName?:self.currentRemoteURL,@"remoteURL":self.currentRemoteURL,@"headers":self.currentRemoteHeaders?:@{}}];return;}
@@ -2712,6 +2758,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self installPlaylist:list source:sourceKey];
 }
 - (void)playRemote:(NSDictionary *)ch {
+    self.livePlaybackSuspendedForNavigation=NO;
     if(!self.currentPlaybackTraceID.length||self.selectionRequestedAt<=0)self.currentPlaybackTraceID=NSUUID.UUID.UUIDString.lowercaseString;
     self.requestedNativeRoute=nil;self.directNativeRouteActive=NO;
     [self.remoteAttemptedURLs removeAllObjects];self.remoteRetryCount=0;self.remoteFailureRecoveryPending=NO;self.remotePlaybackFailed=NO;

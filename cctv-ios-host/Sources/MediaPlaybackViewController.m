@@ -26,7 +26,9 @@ static NSString *MediaPlaybackFailureKind(NSError *error, AVPlayerItemErrorLogEv
             default: return @"network_error";
         }
     }
-    return [error.domain containsString:@"CoreMedia"] ? @"media_stream_error" : @"player_error";
+    if([error.domain containsString:@"CoreMedia"])return @"media_stream_error";
+    if([error.domain containsString:@"AVFoundation"]&&error.code==-11828)return @"media_open_failed";
+    return @"player_error";
 }
 static NSString *MediaPlaybackFailureMessage(NSError *error, AVPlayerItemErrorLogEvent *networkError) {
     if (networkError.errorStatusCode >= 400)
@@ -41,6 +43,8 @@ static NSString *MediaPlaybackFailureMessage(NSError *error, AVPlayerItemErrorLo
             default: break;
         }
     }
+    if([error.domain containsString:@"AVFoundation"]&&error.code==-11828)
+        return @"iOS 无法打开这条媒体流 · 来源可能返回了不可解码内容或失效的清单/分片，请重试解析或切换线路";
     return [NSString stringWithFormat:@"媒体载入失败 · %@", error.localizedDescription.length ? error.localizedDescription : @"请重试或切换线路"];
 }
 static MediaAPIClient *MediaPlaybackClientForSource(NSDictionary *source) {
@@ -299,6 +303,11 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
     ];
     if(self.embeddedMode){
         self.view.backgroundColor=UIColor.clearColor;self.videoView.layer.cornerRadius=14;self.episodeTitle.hidden=YES;self.lineScroll.hidden=YES;self.episodeButton.hidden=YES;self.controlPanel.layer.cornerRadius=15;
+        // The detail page gives this controller a compact preferred height.
+        // Keep status at its real one/two-line height so Auto Layout does not
+        // stretch it into a large blank panel while alternatives are absent.
+        [self.status setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical];
+        [self.status setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical];
         self.embeddedConstraints=@[
             [self.videoView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
             [self.videoView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
@@ -575,6 +584,8 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
     if(!qualityPosition&&hasResume){self.pendingPlaybackResumeEntry=self.resumeEntry;self.resumePromptPending=YES;self.pendingPlaybackSeekTime=nil;}
     BOOL directMedia=MediaPlaybackResultSupportsAVPlayer(result)||MediaPlaybackResultSupportsAVPlayer(@{@"url":raw});
     BOOL requiresWebPlayback=([result[@"requiresWebPlayback"] boolValue]||[result[@"parse"] integerValue]>0||[result[@"jx"] integerValue]>0)&&!directMedia;
+    if(self.onPlaybackWillStart)self.onPlaybackWillStart();
+    [RuntimeDiagnostics.shared recordEvent:@"playback_owner_acquired" category:@"playback" fields:@{@"owner":@"vod",@"engine":requiresWebPlayback?@"webview":@"avplayer",@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"service_id":serviceID,@"correlation_id":self.diagnosticTraceID?:@""}];
     if(requiresWebPlayback && !directMedia){[self.spinner stopAnimating];self.status.text=@"正在打开来源网页播放器…";self.status.accessibilityLabel=self.status.text;self.awaitingWebPlaybackReturn=YES;[self setRetryAvailable:YES];NSMutableDictionary *fields=[@{@"player":@"webview", @"playback_attempt_id":self.playbackAttemptID?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(sourceURL)];[RuntimeDiagnostics.shared recordEvent:@"episode_player_handoff" category:@"playback" fields:fields];[self recordPlaybackAttemptOutcome:@"webview_handoff" failureKind:nil httpStatus:0 terminal:NO];MediaWebViewController *web=[[MediaWebViewController alloc] initWithResult:result title:self.title];__weak typeof(self) weakSelf=self;web.correlationID=self.diagnosticTraceID;web.serviceID=self.context[@"source"][@"id"];web.playbackAttemptID=self.playbackAttemptID;web.onTryNativePlayback=^{[weakSelf tryNativePlayback];};web.onResolvedMedia=^(NSDictionary *resolved){MediaPlaybackViewController *owner=weakSelf;if(!owner||owner.playerGeneration!=playerGeneration)return;owner.basePlaybackHeaders=nil;[owner playResult:resolved];};UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:web];[self presentViewController:nav animated:YES completion:nil];return;}
     NSMutableDictionary *handoffFields=[@{@"player":@"avplayer", @"playback_attempt_id":self.playbackAttemptID?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];[handoffFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(MediaPlaybackHeadersFromResult(result))];[handoffFields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(sourceURL)];[RuntimeDiagnostics.shared recordEvent:@"episode_player_handoff" category:@"playback" fields:handoffFields];
     self.hasDiagnosticTimeControlStatus=NO;self.playbackStartedAt=CACurrentMediaTime();self.status.text=@"正在载入媒体…";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];[self setRetryAvailable:NO];
