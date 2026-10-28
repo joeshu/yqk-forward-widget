@@ -4,12 +4,13 @@
 #import "ProfileStore.h"
 #import "PyHost.h"
 #import <math.h>
-@interface ConfigCenterViewController () <UISearchResultsUpdating>
+@interface ConfigCenterViewController ()
 @property(nonatomic, strong) NSArray<NSDictionary *> *profiles;
 @property(nonatomic, strong) NSArray<NSDictionary *> *allProfiles;
-@property(nonatomic, strong) UISearchController *search;
 @property(nonatomic, strong) UIScrollView *kindScroll;
 @property(nonatomic, strong) UIStackView *kindStack;
+@property(nonatomic, strong) UIView *resourceHeader;
+@property(nonatomic, strong) NSLayoutConstraint *kindScrollHeightConstraint;
 @property(nonatomic, copy) NSString *selectedKind;
 @property(nonatomic, strong) UILabel *emptyLabel;
 - (void)confirmRemoveProfile:(NSString *)source;
@@ -24,22 +25,19 @@
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"资源";
+    self.title = @"";
     self.tableView.backgroundColor = HostBackground();
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 116;
-    self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
-    self.search.searchResultsUpdater = self;
-    self.search.obscuresBackgroundDuringPresentation = NO;
-    self.search.searchBar.placeholder = @"搜索资源";
-    self.navigationItem.searchController = self.search;
     self.selectedKind=@"all";
-    UIView *filterHeader=[[UIView alloc] initWithFrame:CGRectMake(0,0,MAX(1,self.tableView.bounds.size.width),48)];
+    self.resourceHeader=[[UIView alloc] initWithFrame:CGRectMake(0,0,MAX(1,self.tableView.bounds.size.width),48)];
     self.kindScroll=[UIScrollView new];self.kindScroll.translatesAutoresizingMaskIntoConstraints=NO;self.kindScroll.showsHorizontalScrollIndicator=NO;self.kindScroll.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;
-    self.kindStack=[UIStackView new];self.kindStack.translatesAutoresizingMaskIntoConstraints=NO;self.kindStack.axis=UILayoutConstraintAxisHorizontal;self.kindStack.spacing=8;[self.kindScroll addSubview:self.kindStack];[filterHeader addSubview:self.kindScroll];
-    [NSLayoutConstraint activateConstraints:@[[self.kindScroll.leadingAnchor constraintEqualToAnchor:filterHeader.leadingAnchor constant:10],[self.kindScroll.trailingAnchor constraintEqualToAnchor:filterHeader.trailingAnchor],[self.kindScroll.topAnchor constraintEqualToAnchor:filterHeader.topAnchor constant:3],[self.kindScroll.bottomAnchor constraintEqualToAnchor:filterHeader.bottomAnchor constant:-3],[self.kindStack.leadingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.leadingAnchor],[self.kindStack.trailingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.trailingAnchor constant:-10],[self.kindStack.topAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.topAnchor],[self.kindStack.bottomAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.bottomAnchor],[self.kindStack.heightAnchor constraintEqualToAnchor:self.kindScroll.frameLayoutGuide.heightAnchor]]];
-    self.tableView.tableHeaderView=filterHeader;
+    self.kindStack=[UIStackView new];self.kindStack.translatesAutoresizingMaskIntoConstraints=NO;self.kindStack.axis=UILayoutConstraintAxisHorizontal;self.kindStack.spacing=8;[self.kindScroll addSubview:self.kindStack];[self.resourceHeader addSubview:self.kindScroll];
+    self.kindScrollHeightConstraint=[self.kindScroll.heightAnchor constraintEqualToConstant:48];
+    [NSLayoutConstraint activateConstraints:@[[self.kindScroll.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:10],[self.kindScroll.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor],[self.kindScroll.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor constant:3],[self.kindScroll.bottomAnchor constraintEqualToAnchor:self.resourceHeader.bottomAnchor constant:-3],self.kindScrollHeightConstraint,[self.kindStack.leadingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.leadingAnchor],[self.kindStack.trailingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.trailingAnchor constant:-10],[self.kindStack.topAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.topAnchor],[self.kindStack.bottomAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.bottomAnchor],[self.kindStack.heightAnchor constraintEqualToAnchor:self.kindScroll.frameLayoutGuide.heightAnchor]]];
+    self.tableView.tableHeaderView=self.resourceHeader;
+    self.tableView.contentInset=UIEdgeInsetsMake(0,0,78,0);self.tableView.scrollIndicatorInsets=UIEdgeInsetsMake(0,0,78,0);
     self.emptyLabel=[UILabel new];self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.tableView.backgroundView=self.emptyLabel;
     UIRefreshControl *r = [UIRefreshControl new];
     [r addTarget:self action:@selector(refreshProfiles) forControlEvents:UIControlEventValueChanged];
@@ -48,10 +46,8 @@
     self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
         @{@"icon":@"arrow.clockwise",@"title":@"刷新资源",@"action":[UIAction actionWithHandler:^(UIAction *a){[w refreshProfiles];}]},
         @{@"icon":@"plus",@"title":@"导入资源",@"action":[UIAction actionWithHandler:^(UIAction *a){[w add];}]},
-        @{@"icon":@"play.rectangle",@"title":@"更新影视首页内容",@"action":[UIAction actionWithHandler:^(UIAction *a){if(w.onRefreshMediaHome)w.onRefreshMediaHome();}]},
-        @{@"icon":@"ellipsis",@"title":@"资源操作",@"menu":[UIMenu menuWithChildren:@[
-            [UIAction actionWithTitle:@"脚本与服务" image:[UIImage systemImageNamed:@"hand.tap"] identifier:nil handler:^(UIAction *a){if(w.onServices)w.onServices();}]
-        ]]}])];
+        @{@"icon":@"play.rectangle",@"title":@"更新影视首页内容",@"action":[UIAction actionWithHandler:^(UIAction *a){if(w.onRefreshMediaHome)w.onRefreshMediaHome();}]}
+    ])];
     [self reloadProfiles];
 }
 - (void)viewWillAppear:(BOOL)animated {
@@ -81,7 +77,7 @@
     NSArray *definitions=@[@{@"id":@"all",@"name":@"全部"},@{@"id":@"vod",@"name":@"影视"},@{@"id":@"live",@"name":@"直播"},@{@"id":@"catalog",@"name":@"合集"},@{@"id":@"script",@"name":@"脚本"},@{@"id":@"attention",@"name":@"待检查"}];
     for(UIView *view in self.kindStack.arrangedSubviews.copy){[self.kindStack removeArrangedSubview:view];[view removeFromSuperview];}
     for(NSDictionary *definition in definitions){NSString *identifier=definition[@"id"];NSUInteger count=[[self.allProfiles filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *profile,NSDictionary *bindings){return [self profile:profile matchesKind:identifier];}]] count];UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.accessibilityIdentifier=[@"resource-filter-" stringByAppendingString:identifier];button.accessibilityLabel=[NSString stringWithFormat:@"%@，%lu 项",definition[@"name"],(unsigned long)count];button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;HostStylePillButton(button,[identifier isEqual:self.selectedKind]);button.contentEdgeInsets=UIEdgeInsetsMake(7,12,7,12);button.layer.cornerRadius=16;[button setTitle:[NSString stringWithFormat:@"%@ %lu",definition[@"name"],(unsigned long)count] forState:UIControlStateNormal];[button addTarget:self action:@selector(selectKind:) forControlEvents:UIControlEventTouchUpInside];[self.kindStack addArrangedSubview:button];}
-    UIButton *firstFilter=(UIButton *)self.kindStack.arrangedSubviews.firstObject;CGFloat pillHeight=MAX(42,ceil(firstFilter.titleLabel.font.lineHeight+14));UIView *header=self.tableView.tableHeaderView;CGFloat headerHeight=pillHeight+6;if(header&&fabs(header.frame.size.height-headerHeight)>0.5){CGRect frame=header.frame;frame.size.height=headerHeight;header.frame=frame;self.tableView.tableHeaderView=header;}
+    UIButton *firstFilter=(UIButton *)self.kindStack.arrangedSubviews.firstObject;CGFloat pillHeight=MAX(42,ceil(firstFilter.titleLabel.font.lineHeight+14));CGFloat headerHeight=pillHeight+6;self.kindScrollHeightConstraint.constant=headerHeight-6;UIView *header=self.tableView.tableHeaderView;if(header&&fabs(header.frame.size.height-headerHeight)>0.5){CGRect frame=header.frame;frame.size.height=headerHeight;header.frame=frame;self.tableView.tableHeaderView=header;}
 }
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
@@ -92,29 +88,15 @@
     NSArray *all = self.profilesProvider ? self.profilesProvider() : @[];
     self.allProfiles=all;
     [self updateKindFilters];
-    NSString *q = self.search.searchBar.text.lowercaseString;
     NSArray *profiles=[all filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *p,NSDictionary *bindings){
-        NSString *name=[p[@"name"] isKindOfClass:NSString.class]?p[@"name"]:@"";NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";
-        NSArray *searchParts=@[
-            [p[@"url"] isKindOfClass:NSString.class]?p[@"url"]:@"",
-            [p[@"subscriptionURL"] isKindOfClass:NSString.class]?p[@"subscriptionURL"]:@"",
-            [p[@"epgURL"] isKindOfClass:NSString.class]?p[@"epgURL"]:@"",
-            [p[@"protocol"] isKindOfClass:NSString.class]?p[@"protocol"]:@"",
-            [p[@"status"] isKindOfClass:NSString.class]?p[@"status"]:@"",
-            [p[@"subscriptionStatus"] isKindOfClass:NSString.class]?p[@"subscriptionStatus"]:@""
-        ];
-        NSString *searchable=[[searchParts componentsJoinedByString:@" "] lowercaseString];
+        NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";
         if(![self profile:p matchesKind:self.selectedKind?:@"all"])return NO;
-        if(q.length && [name rangeOfString:q options:NSCaseInsensitiveSearch].location==NSNotFound && [source.lowercaseString rangeOfString:q].location==NSNotFound && [searchable rangeOfString:q].location==NSNotFound)return NO;
         return [p[@"type"] isEqual:@"plugin"]||[p[@"type"] isEqual:@"tvbox"]||source.length>0||[p[@"native"] boolValue];
     }]];
-    if([self.profiles isEqualToArray:profiles]){self.emptyLabel.text=profiles.count?@"":(q.length?@"没有匹配的资源\n清除搜索或更换筛选条件":@"还没有导入资源\n点击右上角 + 添加影视脚本、直播服务或订阅列表");return;}self.profiles=profiles;self.emptyLabel.text=profiles.count?@"":(q.length?@"没有匹配的资源\n清除搜索或更换筛选条件":@"还没有导入资源\n点击右上角 + 添加影视脚本、直播服务或订阅列表");
+    if([self.profiles isEqualToArray:profiles]){self.emptyLabel.text=profiles.count?@"":@"还没有导入资源\n点击右下角资源操作按钮添加影视脚本、直播服务或订阅列表";return;}self.profiles=profiles;self.emptyLabel.text=profiles.count?@"":@"还没有导入资源\n点击右下角资源操作按钮添加影视脚本、直播服务或订阅列表";
     [self.tableView reloadData];
 }
 - (void)kindChanged {[self reloadProfiles];}
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
-    [self reloadProfiles];
-}
 - (void)add {
     if (self.onAdd)
         self.onAdd();

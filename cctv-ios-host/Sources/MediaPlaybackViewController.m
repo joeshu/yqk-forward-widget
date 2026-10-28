@@ -302,7 +302,7 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
         [self.skipButton.heightAnchor constraintGreaterThanOrEqualToConstant:44]
     ];
     if(self.embeddedMode){
-        self.view.backgroundColor=UIColor.clearColor;self.videoView.layer.cornerRadius=14;self.episodeTitle.hidden=YES;self.lineScroll.hidden=YES;self.episodeButton.hidden=YES;self.controlPanel.layer.cornerRadius=15;
+        self.view.backgroundColor=UIColor.clearColor;self.videoView.layer.cornerRadius=14;self.episodeTitle.hidden=NO;self.episodeTitle.numberOfLines=1;self.episodeTitle.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.lineScroll.hidden=YES;self.episodeButton.hidden=YES;self.controlPanel.layer.cornerRadius=15;
         // The detail page gives this controller a compact preferred height.
         // Keep status at its real one/two-line height so Auto Layout does not
         // stretch it into a large blank panel while alternatives are absent.
@@ -319,7 +319,10 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
             [self.qualityGroup.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:8],
             [self.qualityGroup.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:14],
             [self.qualityGroup.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-14],
-            [self.status.topAnchor constraintEqualToAnchor:self.qualityGroup.bottomAnchor constant:6],
+            [self.episodeTitle.topAnchor constraintEqualToAnchor:self.qualityGroup.bottomAnchor constant:3],
+            [self.episodeTitle.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:14],
+            [self.episodeTitle.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-14],
+            [self.status.topAnchor constraintEqualToAnchor:self.episodeTitle.bottomAnchor constant:2],
             [self.status.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:14],
             [self.status.trailingAnchor constraintEqualToAnchor:self.spinner.leadingAnchor constant:-6],
             [self.spinner.centerYAnchor constraintEqualToAnchor:self.status.centerYAnchor],
@@ -559,7 +562,10 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
 }
 - (void)updateEpisodeTitle {
     NSArray *episodes=self.episodes;NSDictionary *episode=self.episodeIndex>=0&&self.episodeIndex<episodes.count?episodes[self.episodeIndex]:nil;
-    NSString *name=episode[@"name"]?:self.context[@"item"][@"name"]?:@"当前分集";self.episodeTitle.text=name;
+    NSString *name=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:@"";name=[name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *number=episodes.count?[NSString stringWithFormat:@"第 %ld 集",(long)self.episodeIndex+1]:@"当前分集";
+    NSString *title=name.length&&[name localizedCaseInsensitiveCompare:number]!=NSOrderedSame?[NSString stringWithFormat:@"%@ · %@",number,name]:number;
+    self.episodeTitle.text=title;self.episodeTitle.accessibilityLabel=title;
     NSString *line=self.lineIndex>=0&&self.lineIndex<self.lines.count?self.lines[self.lineIndex][@"name"]:@"";
     NSString *label=line.length?[NSString stringWithFormat:@"选集 · %@ · %lu 集",line,(unsigned long)episodes.count]:@"选集";
     [self.episodeButton setTitle:label forState:UIControlStateNormal];self.episodeButton.enabled=episodes.count>0;self.episodeButton.alpha=episodes.count?1.0:0.55;[self updateSkipButtonForCurrentPosition];

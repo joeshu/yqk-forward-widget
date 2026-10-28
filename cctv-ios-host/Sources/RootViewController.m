@@ -289,6 +289,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, strong) UIViewController *playbackPanel;
 @property (nonatomic, strong) UIViewController *tabPage;
 @property (nonatomic, strong) NSMutableDictionary<NSNumber *, UIViewController *> *tabPages;
+@property (nonatomic, strong) UIButton *resourceActionsButton;
 @property (nonatomic, assign) BOOL gridMode;
 @property (nonatomic, assign) BOOL playerExpanded;
 @property (nonatomic, copy) NSString *activeSource;
@@ -452,7 +453,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (BOOL)shouldHideNavigationBarForVisibleController:(UIViewController *)visibleController {
     if(visibleController!=self)return NO;
     MediaBrowserViewController *mediaPage=[self.tabPages[@2] isKindOfClass:MediaBrowserViewController.class]?self.tabPages[@2]:nil;
-    return self.fullscreen||(self.activeTab==2&&mediaPage.isHomeMode);
+    return self.fullscreen||(self.activeTab==2&&mediaPage.isHomeMode)||self.activeTab==3;
 }
 
 - (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)viewController animated:(BOOL)animated {
@@ -881,6 +882,14 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         [b addTarget:self action:@selector(bottomTabTapped:) forControlEvents:UIControlEventTouchUpInside]; [self.bottomBar addArrangedSubview:b];
     }
     [self.view addSubview:self.bottomBar];
+    __weak typeof(self) weakSelf=self;
+    self.resourceActionsButton=[UIButton buttonWithType:UIButtonTypeSystem];self.resourceActionsButton.accessibilityIdentifier=@"resource-floating-actions";self.resourceActionsButton.accessibilityLabel=@"脚本与服务及资源操作";
+    UIButtonConfiguration *resourceButtonConfig=[UIButtonConfiguration plainButtonConfiguration];resourceButtonConfig.image=[UIImage systemImageNamed:@"slider.horizontal.3"];resourceButtonConfig.baseForegroundColor=HostText();resourceButtonConfig.background.backgroundColor=HostRaisedSurface();resourceButtonConfig.background.strokeColor=HostBorder();resourceButtonConfig.background.strokeWidth=.7;resourceButtonConfig.background.cornerRadius=29;resourceButtonConfig.contentInsets=NSDirectionalEdgeInsetsMake(12,12,12,12);self.resourceActionsButton.configuration=resourceButtonConfig;self.resourceActionsButton.hidden=YES;HostInstallPressFeedback(self.resourceActionsButton);
+    UIAction *services=[UIAction actionWithTitle:@"脚本与服务" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(UIAction *a){[weakSelf openServicesPage];}];
+    UIAction *import=[UIAction actionWithTitle:@"导入资源" image:[UIImage systemImageNamed:@"plus"] identifier:nil handler:^(UIAction *a){[weakSelf importMediaPackage];}];
+    UIAction *refresh=[UIAction actionWithTitle:@"刷新资源" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){[(ConfigCenterViewController *)weakSelf.tabPages[@3] refreshProfiles];}];
+    UIAction *home=[UIAction actionWithTitle:@"更新影视首页内容" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){ConfigCenterViewController *page=(ConfigCenterViewController *)weakSelf.tabPages[@3];if(page.onRefreshMediaHome)page.onRefreshMediaHome();}];
+    self.resourceActionsButton.menu=[UIMenu menuWithChildren:@[services,import,refresh,home]];self.resourceActionsButton.showsMenuAsPrimaryAction=NO;[self.resourceActionsButton addTarget:self action:@selector(openServicesPage) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:self.resourceActionsButton];
     [self updateBottomBarSelection];
 }
 
@@ -992,10 +1001,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.barButtonItem=self.navigationItem.leftBarButtonItem;[self presentViewController:a animated:YES completion:nil];
 }
 - (void)showTabPage:(UIViewController *)page title:(NSString *)title {
-    BOOL media=[page isKindOfClass:MediaBrowserViewController.class];BOOL mediaHome=media&&((MediaBrowserViewController *)page).isHomeMode;self.navigationItem.largeTitleDisplayMode=media?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
-    if(self.navigationController.topViewController==self&&self.navigationController.navigationBarHidden!=mediaHome)[self.navigationController setNavigationBarHidden:mediaHome animated:NO];
-    self.tabPage=page;if(page.parentViewController!=self){[self addChildViewController:page];[self.view addSubview:page.view];[page didMoveToParentViewController:self];}else if(page.view.superview!=self.view)[self.view addSubview:page.view];self.title=media?(((MediaBrowserViewController *)page).isHomeMode?@"":@"影视库"):title;self.navigationItem.searchController=page.navigationItem.searchController;self.navigationItem.leftBarButtonItem=nil;
-    self.navigationItem.rightBarButtonItems=page.navigationItem.rightBarButtonItems;[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
+    BOOL media=[page isKindOfClass:MediaBrowserViewController.class];BOOL resource=[page isKindOfClass:ConfigCenterViewController.class];BOOL mediaHome=media&&((MediaBrowserViewController *)page).isHomeMode;BOOL hideNavigation=mediaHome||resource;self.navigationItem.largeTitleDisplayMode=media?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
+    if(self.navigationController.topViewController==self&&self.navigationController.navigationBarHidden!=hideNavigation)[self.navigationController setNavigationBarHidden:hideNavigation animated:NO];
+    self.tabPage=page;if(page.parentViewController!=self){[self addChildViewController:page];[self.view addSubview:page.view];[page didMoveToParentViewController:self];}else if(page.view.superview!=self.view)[self.view addSubview:page.view];self.title=(mediaHome||resource)?@"":(media?@"影视库":title);self.navigationItem.searchController=resource?nil:page.navigationItem.searchController;self.navigationItem.leftBarButtonItem=nil;
+    self.navigationItem.rightBarButtonItems=resource?nil:page.navigationItem.rightBarButtonItems;self.resourceActionsButton.hidden=!resource;[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];if(resource)[self.view bringSubviewToFront:self.resourceActionsButton];
 }
 - (void)openMediaTab {
     MediaBrowserViewController *page=(MediaBrowserViewController *)self.tabPages[@2];
@@ -1719,6 +1728,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         self.playerBox.frame = self.view.bounds;
         self.bottomBar.hidden = YES;
         self.bottomBarBackdrop.hidden = YES;
+        self.resourceActionsButton.hidden=YES;
         self.channelGrid.hidden=YES;
         self.playerTabs.hidden=YES;
         self.playbackPanel.view.hidden=YES;
@@ -1736,6 +1746,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=frame;self.playbackPanel.view.hidden=!catalog;
         self.bottomBar.frame=CGRectMake(MAX(18,(w-420)/2),height-safe.bottom-64,MIN(w-36,420),56);self.bottomBarBackdrop.frame=self.bottomBar.frame;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
         self.tabPage.view.frame=CGRectMake(0,top,w,MAX(0,tabY-top));[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
+        self.resourceActionsButton.hidden=self.activeTab!=3;self.resourceActionsButton.frame=CGRectMake(w-safe.right-18-58,CGRectGetMinY(self.bottomBar.frame)-12-58,58,58);if(!self.resourceActionsButton.hidden)[self.view bringSubviewToFront:self.resourceActionsButton];
     }
     [self relayoutPlayer];
     CGFloat overlayTop = self.fullscreen ? safe.top : 0;

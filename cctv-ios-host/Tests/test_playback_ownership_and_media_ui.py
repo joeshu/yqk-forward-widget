@@ -9,6 +9,7 @@ BROWSER_SOURCE = (SOURCES / "MediaBrowserViewController.m").read_text(encoding="
 PLAYBACK_SOURCE = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
 EPISODE_SOURCE = (SOURCES / "MediaEpisodeSelectionViewController.m").read_text(encoding="utf-8")
 IMAGE_SOURCE = (SOURCES / "HostImageLoader.m").read_text(encoding="utf-8")
+RESOURCE_SOURCE = (SOURCES / "ConfigCenterViewController.m").read_text(encoding="utf-8")
 
 
 def method_body(source, signature):
@@ -100,6 +101,24 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
     def test_avfoundation_cannot_open_error_is_actionable(self):
         self.assertIn('error.code==-11828)return @"media_open_failed"', PLAYBACK_SOURCE)
         self.assertIn("iOS 无法打开这条媒体流", PLAYBACK_SOURCE)
+
+    def test_current_episode_number_stays_visible_during_playback(self):
+        body = method_body(PLAYBACK_SOURCE, "- (void)updateEpisodeTitle")
+        self.assertIn('第 %ld 集', body)
+        self.assertIn('self.episodeTitle.accessibilityLabel=title', body)
+        embedded = PLAYBACK_SOURCE[PLAYBACK_SOURCE.index('if(self.embeddedMode){'):PLAYBACK_SOURCE.index('[NSNotificationCenter.defaultCenter addObserver:self')]
+        self.assertIn('self.episodeTitle.hidden=NO', embedded)
+        self.assertIn('constraintEqualToAnchor:self.episodeTitle.bottomAnchor', embedded)
+
+    def test_scripts_and_services_is_a_primary_resource_page_button(self):
+        self.assertIn('accessibilityIdentifier=@"resource-floating-actions"', ROOT_SOURCE)
+        self.assertIn('self.resourceActionsButton.showsMenuAsPrimaryAction=NO', ROOT_SOURCE)
+        self.assertIn('action:@selector(openServicesPage) forControlEvents:UIControlEventTouchUpInside', ROOT_SOURCE)
+        self.assertIn('actionWithTitle:@"脚本与服务"', ROOT_SOURCE)
+        self.assertIn('self.resourceActionsButton.frame=CGRectMake', ROOT_SOURCE)
+        self.assertIn('||self.activeTab==3', ROOT_SOURCE)
+        self.assertNotIn('搜索资源', RESOURCE_SOURCE)
+        self.assertNotIn('self.navigationItem.searchController=self.search', RESOURCE_SOURCE)
 
 
 if __name__ == "__main__":
