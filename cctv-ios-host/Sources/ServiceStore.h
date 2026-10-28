@@ -10,7 +10,9 @@
 /// services can also be live-only; keep this separate from isMediaService,
 /// which selects the local media-service runtime.
 + (BOOL)isVODMediaService:(NSDictionary *)service;
++ (BOOL)isLiveMediaService:(NSDictionary *)service;
 + (nullable NSString *)inferredPlaylistPathInCode:(NSString *)source;
++ (NSArray<NSString *> *)playlistPathCandidatesForService:(NSDictionary *)service;
 + (nullable NSString *)playlistPathForService:(NSDictionary *)service;
 + (nullable NSString *)subscriptionURLForService:(NSDictionary *)service;
 + (nullable NSString *)epgURLForService:(NSDictionary *)service;

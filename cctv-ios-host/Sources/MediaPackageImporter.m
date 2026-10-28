@@ -303,7 +303,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         if(![fm moveItemAtPath:stage toPath:target error:error])return nil;
         NSMutableSet *ports=[NSMutableSet set];for(NSDictionary *existing in [ServiceStore services])[ports addObject:existing[@"port"]?:@0];NSInteger port=18780;while([ports containsObject:@(port)] && port<65535)port++;
         NSMutableDictionary *importedService=[@{@"id":identifier,@"name":manifest[@"name"],@"port":@(port),@"engine":manifest[@"runtime"],@"protocol":manifest[@"protocol"],@"manifest":manifest,@"packageRoot":[target stringByAppendingPathComponent:relative],@"archivePath":zip?[target stringByAppendingPathComponent:@"source.zip"]:@"",@"lan":@NO,@"updated":@(NSDate.date.timeIntervalSince1970),@"arguments":launchArguments,@"argumentsSource":@"inferred"} mutableCopy];
+        if([manifest[@"capabilities"] isKindOfClass:NSArray.class]&&[manifest[@"capabilities"] count])importedService[@"capabilities"]=manifest[@"capabilities"];
         if([manifest[@"protocol"] isEqual:@"nanotv-service-v2"]){importedService[@"capabilities"]=@[@"live"];importedService[@"playlistPath"]=@"/all.m3u";importedService[@"playlistPathSource"]=@"inferred";}
+        else if([ServiceStore isMediaService:importedService]&&[ServiceStore isLiveMediaService:importedService]){importedService[@"playlistPath"]=@"/all.m3u";importedService[@"playlistPathSource"]=@"inferred";}
         if(playlistPath.length){importedService[@"playlistPath"]=playlistPath;importedService[@"playlistPathSource"]=@"inferred";}
         service=importedService;
     } @catch(NSException *exception){PackageError(error,@"资源包结构或清单无效，未执行代码");return nil;}

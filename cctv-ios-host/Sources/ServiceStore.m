@@ -96,17 +96,30 @@ static BOOL ServiceValidPlaylistPath(id value){
     for(id capability in capabilities)if([capability isKindOfClass:NSString.class]&&[vodCapabilities containsObject:capability])return YES;
     return NO;
 }
++ (BOOL)isLiveMediaService:(NSDictionary *)service {
+    if([service[@"protocol"] isEqual:@"nanotv-service-v2"])return YES;
+    NSArray *capabilities=[service[@"capabilities"] isKindOfClass:NSArray.class]?service[@"capabilities"]:([service[@"manifest"][@"capabilities"] isKindOfClass:NSArray.class]?service[@"manifest"][@"capabilities"]:@[]);
+    return [capabilities containsObject:@"live"];
+}
 + (NSString *)inferredPlaylistPathInCode:(NSString *)source {
     if(![source isKindOfClass:NSString.class]||source.length>2*1024*1024)return nil;
     // Only infer a URL when it appears in an actual route declaration or a
     // request-path comparison. A mention in help text or an example is not a
     // reliable endpoint and must not silently become a subscription.
-    NSMutableString *routeSource=[NSMutableString string];
-    for(NSString *line in [source componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]){NSString *trimmed=[line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];if(![trimmed hasPrefix:@"#"])[routeSource appendString:line];[routeSource appendString:@"\n"];}
+    NSMutableString *routeSource=[NSMutableString string];BOOL inBlockComment=NO;
+    for(NSString *line in [source componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]){
+        NSString *code=line;
+        if(inBlockComment){NSRange close=[code rangeOfString:@"*/"];if(close.location==NSNotFound)continue;code=[code substringFromIndex:NSMaxRange(close)];inBlockComment=NO;}
+        NSRange open=[code rangeOfString:@"/*"];
+        if(open.location!=NSNotFound){NSRange close=[code rangeOfString:@"*/" options:0 range:NSMakeRange(NSMaxRange(open),code.length-NSMaxRange(open))];if(close.location==NSNotFound){code=[code substringToIndex:open.location];inBlockComment=YES;}else code=[[code substringToIndex:open.location]stringByAppendingString:[code substringFromIndex:NSMaxRange(close)]];}
+        NSString *trimmed=[code stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if([trimmed hasPrefix:@"#"]||[trimmed hasPrefix:@"//"])continue;
+        [routeSource appendString:code];[routeSource appendString:@"\n"];
+    }
     NSString *lower=routeSource.lowercaseString;
     BOOL m3uEvidence=[lower containsString:@"#extm3u"]||[lower containsString:@"#extinf"]||[lower containsString:@"m3u"]||[lower containsString:@"playlist"];
     if(!m3uEvidence)return nil;
-    NSString *routePattern=@"(?is)(?:@[a-z_][a-z0-9_.]*\\.(?:route|get|post|put)\\s*\\(|(?:add_url_rule|add_get|add_route)\\s*\\(|(?:(?:self|request)\\.)?path\\s*(?:==|in)\\s*|(?:route|playlist(?:_path)?|m3u_path)\\s*=\\s*)['\\\"](/[^'\\\"?#\\\\\\s]{1,126})['\\\"]";
+    NSString *routePattern=@"(?is)(?:@[a-z_][a-z0-9_.]*\\.(?:route|get|post|put)\\s*\\(|(?:[a-z_$][a-z0-9_$]*(?:\\.[a-z_$][a-z0-9_$]*)*)\\.(?:route|get|post|put|addroute|add_route|addget|add_get)\\s*\\(|(?:add_url_rule|add_get|add_route)\\s*\\(|(?:(?:self|request)\\.)?path\\s*(?:==|in)\\s*|(?:route|playlist(?:_path)?|m3u_path)\\s*=\\s*)['\\\"](/[^'\\\"?#\\\\\\s]{1,126})['\\\"]";
     NSError *error=nil;NSRegularExpression *routes=[NSRegularExpression regularExpressionWithPattern:routePattern options:0 error:&error];if(!routes||error)return nil;
     NSArray<NSTextCheckingResult *> *matches=[routes matchesInString:routeSource options:0 range:NSMakeRange(0,routeSource.length)];
     NSSet *tokens=[NSSet setWithArray:@[@"m3u",@"playlist",@"live",@"channel",@"iptv",@"tv"]];
@@ -121,12 +134,16 @@ static BOOL ServiceValidPlaylistPath(id value){
     if(![service isKindOfClass:NSDictionary.class])return nil;
     if([service[@"builtin"] boolValue]&&[service[@"id"] isEqual:@"builtin-ysp"])return @"/all.m3u";
     BOOL nanoTVLive=[service[@"protocol"] isEqual:@"nanotv-service-v2"];
+    if(nanoTVLive)return @"/all.m3u";
+    BOOL mediaHost=[self isMediaService:service];
     BOOL pythonHTTP=[service[@"protocol"] isEqual:@"python-http"];
     BOOL legacyPythonHTTP=![service[@"manifest"] isKindOfClass:NSDictionary.class]&&[service[@"engine"] isEqual:@"python"];
-    if(!nanoTVLive&&!pythonHTTP&&!legacyPythonHTTP)return nil;
-    NSString *declared=service[@"playlistPath"];
-    if(ServiceValidPlaylistPath(declared))return nanoTVLive&&![declared isEqual:@"/all.m3u"]?nil:declared;
-    if(nanoTVLive)return @"/all.m3u";
+    if(!mediaHost&&!pythonHTTP&&!legacyPythonHTTP)return nil;
+    NSString *configured=service[@"playlistPath"];
+    BOOL configuredPath=ServiceValidPlaylistPath(configured);
+    BOOL explicitPath=configuredPath&&([service[@"playlistPathSource"] isEqual:@"manual"]||[service[@"playlistPathSource"] isEqual:@"detected"]||![service[@"playlistPathSource"] isEqual:@"inferred"]);
+    if(mediaHost){if(explicitPath)return configured;if([self isLiveMediaService:service])return @"/all.m3u";return nil;}
+    if(configuredPath)return configured;
     // A Python Spider is hosted by the media API, but that API does not expose
     // the script's own Flask/FastAPI routes. Inferring one of those routes as
     // a live subscription would create a broken loopback M3U source. Only
@@ -137,6 +154,26 @@ static BOOL ServiceValidPlaylistPath(id value){
     if(!entry.length||[attributes[NSFileSize] unsignedLongLongValue]>2*1024*1024)return nil;
     NSData *data=[NSData dataWithContentsOfFile:entry options:NSDataReadingMappedIfSafe error:NULL];NSString *source=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
     return [self inferredPlaylistPathInCode:source];
+}
++ (NSArray<NSString *> *)playlistPathCandidatesForService:(NSDictionary *)service {
+    if(![service isKindOfClass:NSDictionary.class])return @[];
+    BOOL mediaHost=[self isMediaService:service];
+    BOOL pythonHTTP=[service[@"protocol"] isEqual:@"python-http"]||(![service[@"manifest"] isKindOfClass:NSDictionary.class]&&[service[@"engine"] isEqual:@"python"]);
+    if(!mediaHost&&!pythonHTTP&&![service[@"protocol"] isEqual:@"nanotv-service-v2"])return @[];
+    NSString *path=[self playlistPathForService:service];NSMutableOrderedSet<NSString *> *candidates=[NSMutableOrderedSet orderedSet];
+    if(path.length)[candidates addObject:path];
+    BOOL explicitPath=path.length&&![service[@"playlistPathSource"] isEqual:@"inferred"]&&![service[@"playlistPathSource"] isEqual:@"detected"];
+    if(explicitPath)return candidates.array.copy?:@[];
+    // Manifest based Python/Node/JSC resources are served by the same
+    // media-service host, whose live playlist route is fixed. Probe that
+    // route even if an older package manifest forgot to declare "live";
+    // only a non-empty parsed M3U will be saved or subscribed.
+    if(mediaHost){if(!candidates.count)[candidates addObject:@"/all.m3u"];return candidates.array.copy?:@[];}
+    for(NSString *candidate in @[@"/all.m3u",@"/all.m3u8",@"/m3u",@"/playlist.m3u",@"/live.m3u",@"/channels.m3u"]){
+        if(ServiceValidPlaylistPath(candidate))[candidates addObject:candidate];
+    }
+    if(candidates.count>6)return [[candidates.array subarrayWithRange:NSMakeRange(0,6)] copy];
+    return candidates.array.copy?:@[];
 }
 + (NSString *)subscriptionURLForService:(NSDictionary *)service {
     NSInteger port=[service[@"port"] integerValue];NSString *path=[self playlistPathForService:service];if(port<1||port>65535||!path.length)return nil;
@@ -188,7 +225,7 @@ static BOOL ServiceValidPlaylistPath(id value){
     // A changed runtime cannot safely reuse flags from the old engine. On the
     // same runtime, refresh detected defaults but retain explicit user edits.
     if(runtimeChanged||inferredArguments){updated[@"arguments"]=incoming[@"arguments"]?:@"";updated[@"argumentsSource"]=incoming[@"argumentsSource"]?:@"inferred";}
-    BOOL hasManualPlaylist=[existing[@"playlistPath"] isKindOfClass:NSString.class]&&[existing[@"playlistPath"] length]&&![existing[@"playlistPathSource"] isEqual:@"inferred"];
+    BOOL hasManualPlaylist=[existing[@"playlistPath"] isKindOfClass:NSString.class]&&[existing[@"playlistPath"] length]&&![existing[@"playlistPathSource"] isEqual:@"inferred"]&&![existing[@"playlistPathSource"] isEqual:@"detected"];
     if(!hasManualPlaylist){[updated removeObjectForKey:@"playlistPath"];[updated removeObjectForKey:@"playlistPathSource"];if([incoming[@"playlistPath"] isKindOfClass:NSString.class]&&[incoming[@"playlistPath"] length]){updated[@"playlistPath"]=incoming[@"playlistPath"];updated[@"playlistPathSource"]=incoming[@"playlistPathSource"]?:@"inferred";}}
     updated[@"manifest"]=manifest;[updated removeObjectForKey:@"capabilities"];
     updated[@"packageRelativePath"]=[relative stringByAppendingPathComponent:[package substringFromIndex:source.length+1]];updated[@"packageRoot"]=[base stringByAppendingPathComponent:updated[@"packageRelativePath"]];
@@ -204,7 +241,7 @@ static BOOL ServiceValidPlaylistPath(id value){
     // imported version and must roll back together with its code.
     for(NSString *key in @[@"name",@"port",@"lan",@"url"])if(service[key])restored[key]=service[key];
     if(![service[@"argumentsSource"] isEqual:@"inferred"]){if(service[@"arguments"])restored[@"arguments"]=service[@"arguments"];if(service[@"argumentsSource"])restored[@"argumentsSource"]=service[@"argumentsSource"];}
-    if([service[@"playlistPath"] isKindOfClass:NSString.class]&&[service[@"playlistPath"] length]&&![service[@"playlistPathSource"] isEqual:@"inferred"]){restored[@"playlistPath"]=service[@"playlistPath"];restored[@"playlistPathSource"]=service[@"playlistPathSource"]?:@"manual";}
+    if([service[@"playlistPath"] isKindOfClass:NSString.class]&&[service[@"playlistPath"] length]&&![service[@"playlistPathSource"] isEqual:@"inferred"]&&![service[@"playlistPathSource"] isEqual:@"detected"]){restored[@"playlistPath"]=service[@"playlistPath"];restored[@"playlistPathSource"]=service[@"playlistPathSource"]?:@"manual";}
     if(service[@"manifest"][@"options"]){NSMutableDictionary *manifest=[restored[@"manifest"] mutableCopy];manifest[@"options"]=service[@"manifest"][@"options"];restored[@"manifest"]=manifest;}
     restored[@"previousImport"]=current;restored[@"status"]=@"已切回上一版 · 待启动验证";[self save:restored];return restored;
 }

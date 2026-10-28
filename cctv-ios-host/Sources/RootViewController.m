@@ -940,7 +940,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.barButtonItem=self.navigationItem.leftBarButtonItem;[self presentViewController:a animated:YES completion:nil];
 }
 - (void)showTabPage:(UIViewController *)page title:(NSString *)title {
-    BOOL media=[page isKindOfClass:MediaBrowserViewController.class];self.navigationItem.largeTitleDisplayMode=media?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
+    BOOL media=[page isKindOfClass:MediaBrowserViewController.class];BOOL mediaHome=media&&((MediaBrowserViewController *)page).isHomeMode;self.navigationItem.largeTitleDisplayMode=media?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
+    if(self.navigationController.topViewController==self&&self.navigationController.navigationBarHidden!=mediaHome)[self.navigationController setNavigationBarHidden:mediaHome animated:NO];
     self.tabPage=page;if(page.parentViewController!=self){[self addChildViewController:page];[self.view addSubview:page.view];[page didMoveToParentViewController:self];}else if(page.view.superview!=self.view)[self.view addSubview:page.view];self.title=media?(((MediaBrowserViewController *)page).isHomeMode?@"":@"影视库"):title;self.navigationItem.searchController=page.navigationItem.searchController;self.navigationItem.leftBarButtonItem=nil;
     self.navigationItem.rightBarButtonItems=page.navigationItem.rightBarButtonItems;[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
 }
@@ -966,7 +967,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             }
             return sources;
         };
-        __weak MediaBrowserViewController *weakPage=page;page.onDisplayModeChanged=^(BOOL homeMode){RootViewController *owner=weakSelf;MediaBrowserViewController *mediaPage=weakPage;if(!owner||!mediaPage)return;owner.title=homeMode?@"":@"影视库";owner.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;owner.navigationItem.searchController=mediaPage.navigationItem.searchController;owner.navigationItem.leftBarButtonItem=mediaPage.navigationItem.leftBarButtonItem;owner.navigationItem.rightBarButtonItems=mediaPage.navigationItem.rightBarButtonItems;};
+        __weak MediaBrowserViewController *weakPage=page;page.onDisplayModeChanged=^(BOOL homeMode){RootViewController *owner=weakSelf;MediaBrowserViewController *mediaPage=weakPage;if(!owner||!mediaPage)return;owner.title=homeMode?@"":@"影视库";owner.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;owner.navigationItem.searchController=mediaPage.navigationItem.searchController;owner.navigationItem.leftBarButtonItem=mediaPage.navigationItem.leftBarButtonItem;owner.navigationItem.rightBarButtonItems=mediaPage.navigationItem.rightBarButtonItems;if(owner.navigationController.topViewController==owner&&owner.navigationController.navigationBarHidden!=homeMode)[owner.navigationController setNavigationBarHidden:homeMode animated:YES];};
         page.onActivateService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf changeService:service enabled:YES completion:completion];};
         page.onRestartService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf restartMediaService:service completion:completion];};
         page.startupErrorProvider=^NSError *{return PyHost.startupError;};
@@ -1043,6 +1044,21 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if([source hasPrefix:@"tvbox:"]){[self openTVBoxCatalog:[source substringFromIndex:6]];return;}
     NSDictionary *service=[self resourceServiceForSource:source];if(!service)return;PluginResourceDetailViewController *page=[PluginResourceDetailViewController new];page.service=service;__weak typeof(self) weakSelf=self;
     page.onToggle=^(NSDictionary *item,BOOL enabled,void(^completion)(NSError *)){[weakSelf changeService:item enabled:enabled completion:completion];};
+    page.onPlaylistDiscovered=^(NSDictionary *item,NSString *url,NSUInteger channelCount){
+        RootViewController *owner=weakSelf;if(!owner||![ProfileStore isHTTP:url])return;
+        NSURLComponents *parts=[NSURLComponents componentsWithString:url];
+        if(![parts.host.lowercaseString isEqual:@"127.0.0.1"]||parts.port.integerValue!=[item[@"port"] integerValue]||parts.query.length||parts.fragment.length)return;
+        NSMutableDictionary *metadata=[@{@"managedServiceID":item[@"id"]?:@""} mutableCopy];
+        if(![ProfileStore metadata:url][@"name"])metadata[@"name"]=item[@"name"]?:@"本机直播服务";
+        [ProfileStore update:url values:metadata];
+        if(!owner.subscriptionURLs)owner.subscriptionURLs=[NSMutableSet set];
+        [owner.subscriptionURLs addObject:url];
+        [NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:owner.subscriptionURLs.allObjects] forKey:@"subscriptions"];
+        [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:url];
+        [owner logPluginLine:[NSString stringWithFormat:@"已验证节目单并加入订阅 · %@ · %lu 个频道",parts.path?:@"/",(unsigned long)channelCount] identifier:item[@"id"] name:item[@"name"]];
+        [owner refreshConfigurationPage];
+        [owner fetchSubscription:url silent:YES];
+    };
     page.onUse=^(NSDictionary *item,NSString *kind){[weakSelf usePluginService:item kind:kind];};
     page.onLog=^(NSDictionary *item){[weakSelf openDiagnosticLogForIdentifier:item[@"id"] name:item[@"name"]];};page.onEdit=^(NSDictionary *item){[weakSelf openServiceEditorForService:item];};page.onRemove=^(NSDictionary *item){RootViewController *owner=weakSelf;if([PyHost isManagedServiceIdentifier:item[@"id"]]){[owner showServiceError:@"请先停止此资源服务，再移除代码和配置。"];return;}[ServiceStore remove:item[@"id"]];[owner.navigationController popViewControllerAnimated:YES];[owner refreshConfigurationPage];};
     page.onUpdate=^(NSDictionary *item){RootViewController *owner=weakSelf;[owner downloadPackageURL:[NSURL URLWithString:item[@"url"]] completion:^(NSDictionary *value,NSError *error){[weakSelf acceptImportedMedia:value error:error];}];};

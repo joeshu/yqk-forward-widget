@@ -20,9 +20,18 @@ int main(void) {
     @autoreleasepool {
         NSString *pythonPlaylist=@"from flask import Flask\napp = Flask(__name__)\n@app.route('/all.m3u')\ndef playlist():\n    return '#EXTM3U\\n#EXTINF:-1,测试频道\\nhttps://example.com/live.m3u8'\n";
         check([[ServiceStore inferredPlaylistPathInCode:pythonPlaylist] isEqual:@"/all.m3u"],@"Python HTTP M3U route is inferred from its actual route declaration");
+        NSString *javascriptPlaylist=@"app.get('/channels.m3u', (req, res) => res.send('#EXTM3U\\n#EXTINF:-1,频道'))";
+        check([[ServiceStore inferredPlaylistPathInCode:javascriptPlaylist] isEqual:@"/channels.m3u"],@"JavaScript HTTP M3U route is inferred from its actual route declaration");
+        NSString *commentedJavascript=@"// app.get('/channels.m3u', (req, res) => res.send('#EXTM3U'))";
+        check([ServiceStore inferredPlaylistPathInCode:commentedJavascript]==nil,@"commented JavaScript examples are not inferred as live playlist routes");
         NSString *commentOnly=@"# @app.route('/all.m3u')\n# return '#EXTM3U'\n";
         check([ServiceStore inferredPlaylistPathInCode:commentOnly]==nil,@"commented examples never become automatic service subscriptions");
         check([[ServiceStore subscriptionURLForService:@{@"id":@"python-http-fixture",@"port":@18769,@"protocol":@"python-http",@"playlistPath":@"/all.m3u"}] isEqual:@"http://127.0.0.1:18769/all.m3u"],@"Python HTTP service creates its exact loopback subscription address");
+        NSDictionary *jsMediaService=@{@"id":@"js-media-fixture",@"engine":@"node",@"protocol":@"cctvhost.media/1",@"port":@18771,@"manifest":@{@"schemaVersion":@1}};
+        check([ServiceStore playlistPathForService:jsMediaService]==nil,@"unverified JavaScript media host is not advertised as an active subscription");
+        check([[ServiceStore playlistPathCandidatesForService:jsMediaService] isEqual:@[@"/all.m3u"]],@"JavaScript media host exposes its real M3U route as a detection candidate");
+        NSMutableDictionary *verifiedJSService=[jsMediaService mutableCopy];verifiedJSService[@"playlistPath"]=@"/all.m3u";verifiedJSService[@"playlistPathSource"]=@"detected";
+        check([[ServiceStore subscriptionURLForService:verifiedJSService] isEqual:@"http://127.0.0.1:18771/all.m3u"],@"verified JavaScript M3U path becomes a local subscription URL");
         NSString *managedURL=@"http://127.0.0.1:18769/all.m3u",*unrelatedURL=@"https://other.example/live.m3u",*guideURL=@"https://guide.example/xmltv.xml";
         [NSUserDefaults.standardUserDefaults setObject:@[unrelatedURL,managedURL] forKey:@"subscriptions"];
         [ProfileStore update:unrelatedURL values:@{@"managedServiceID":@"another-service",@"epgURL":@"https://other.example/epg.xml"}];

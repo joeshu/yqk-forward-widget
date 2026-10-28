@@ -114,7 +114,7 @@
     self.nameField = [self field:@"服务名称" value:self.service[@"name"]];
     self.portField = [self field:@"端口 1024–65535" value:[self.service[@"port"] description] ?: @"18768"];
     self.portField.keyboardType = UIKeyboardTypeNumberPad;
-    NSString *configuredPlaylistPath=[self.service[@"playlistPathSource"] isEqual:@"inferred"]?@"":[ServiceStore playlistPathForService:self.service];
+    NSString *configuredPlaylistPath=([self.service[@"playlistPathSource"] isEqual:@"inferred"]||[self.service[@"playlistPathSource"] isEqual:@"detected"])?@"":[ServiceStore playlistPathForService:self.service];
     self.playlistPathField=[self field:@"留空自动识别，或填 /all.m3u" value:configuredPlaylistPath];self.playlistPathField.autocapitalizationType=UITextAutocapitalizationTypeNone;
     self.urlField = [self field:@"https://…/service.py" value:self.service[@"url"]];
     self.urlField.keyboardType = UIKeyboardTypeURL;
@@ -401,7 +401,7 @@
     service[@"arguments"] = arguments;
     service[@"url"] = self.urlField.text ?: @"";
     NSString *playlistPath=[self.playlistPathField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if(playlistPath.length){if(![playlistPath hasPrefix:@"/"]||[playlistPath hasPrefix:@"//"]||playlistPath.length>=128||[playlistPath containsString:@".."]||[playlistPath containsString:@"?"]||[playlistPath containsString:@"#"]||[playlistPath containsString:@"\\"]||[playlistPath containsString:@":"]||[playlistPath rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[self message:@"直播列表路径须以单个 / 开头，且不能包含 ..、查询参数、片段或控制字符。例：/all.m3u"];return;}service[@"playlistPath"]=playlistPath;service[@"playlistPathSource"]=@"manual";}else{[service removeObjectForKey:@"playlistPath"];[service removeObjectForKey:@"playlistPathSource"];}
+    if(playlistPath.length){if(![playlistPath hasPrefix:@"/"]||[playlistPath hasPrefix:@"//"]||playlistPath.length>=128||[playlistPath containsString:@".."]||[playlistPath containsString:@"?"]||[playlistPath containsString:@"#"]||[playlistPath containsString:@"\\"]||[playlistPath containsString:@":"]||[playlistPath rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[self message:@"直播列表路径须以单个 / 开头，且不能包含 ..、查询参数、片段或控制字符。例：/all.m3u"];return;}service[@"playlistPath"]=playlistPath;service[@"playlistPathSource"]=@"manual";}else if(![service[@"playlistPathSource"] isEqual:@"detected"]){[service removeObjectForKey:@"playlistPath"];[service removeObjectForKey:@"playlistPathSource"];} // Keep a verified path when users save unrelated settings.
     service[@"updated"] = @(NSDate.date.timeIntervalSince1970);
     if([service[@"manifest"] isKindOfClass:NSDictionary.class] && self.optionsText){
         NSError *jsonError=nil;id options=[NSJSONSerialization JSONObjectWithData:[self.optionsText dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingFragmentsAllowed error:&jsonError];

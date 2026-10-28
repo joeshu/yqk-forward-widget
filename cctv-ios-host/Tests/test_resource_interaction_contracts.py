@@ -34,7 +34,9 @@ class ResourceInteractionContracts(unittest.TestCase):
             self.assertIn(f'@"id":@"{kind}"', self.catalog)
         self.assertIn('resource-filter-', self.catalog)
         self.assertIn('profile:profile matchesKind:identifier', self.catalog)
-        self.assertIn('initWithArrangedSubviews:@[running,more]', self.catalog)
+        self.assertIn('initWithFrame:CGRectMake(0,0,96,44)', self.catalog)
+        self.assertIn('running.transform=CGAffineTransformMakeScale(.88,.88)', self.catalog)
+        self.assertIn('more.frame=CGRectMake(58,4,36,36)', self.catalog)
         self.assertIn('onOpenResource', self.catalog)
         self.assertIn('onToggleProfile(p[@"source"], sender.on)', self.catalog)
         self.assertIn('onToggle=^', self.root)
@@ -249,7 +251,13 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('onReturnHome', detail)
         self.assertIn('[owner returnToHomeFromNavigation]', browser)
         self.assertIn('popToViewController:owner animated:YES', browser)
-        self.assertEqual(self.detail.count('[self.navigationController pushViewController:detail animated:YES]'), 1)
+        self.assertIn('[self pushMediaPage:detail]', browser)
+        implementation = self.detail.index('@implementation MediaBrowserViewController')
+        helper_start = self.detail.index('- (void)pushMediaPage:', implementation)
+        push_helper = self.detail[helper_start:self.detail.index('- (void)updateSelectionControls', helper_start)]
+        self.assertIn('setNavigationBarHidden:NO', push_helper)
+        self.assertIn('pushViewController:page animated:YES', push_helper)
+        self.assertEqual(self.detail.count('[self.navigationController pushViewController:detail animated:YES]'), 0)
         self.assertNotIn('[owner.navigationController pushViewController:detail animated:YES]', self.detail)
 
     def test_home_status_is_inline_actionable_and_does_not_rebuild_content_on_each_progress_update(self):
@@ -323,16 +331,30 @@ class ResourceInteractionContracts(unittest.TestCase):
     def test_playlist_route_inference_requires_route_evidence(self):
         self.assertIn('Only infer a URL when it appears in an actual route declaration', self.service_store)
         self.assertIn('legacyPythonHTTP', self.service_store)
-        self.assertIn('if(!nanoTVLive&&!pythonHTTP&&!legacyPythonHTTP)return nil', self.service_store)
+        self.assertIn('if(!mediaHost&&!pythonHTTP&&![service[@"protocol"] isEqual:@"nanotv-service-v2"])return @[]', self.service_store)
         self.assertIn('add_url_rule|add_get|add_route', self.service_store)
         self.assertIn('route|playlist(?:_path)?|m3u_path', self.service_store)
         self.assertIn('inferredPlaylistPathInCode:entryText', (ROOT / 'Sources/MediaPackageImporter.m').read_text())
+        self.assertIn('get|post|put|addroute|add_route|addget|add_get', self.service_store)
         native=(ROOT / 'Tests/native_package_tests.m').read_text()
         self.assertIn('@"resolvedPlaylistPath":[ServiceStore playlistPathForService:service]',native)
         self.assertIn('--playlist-check',native)
         fixture=(ROOT / 'Tests/test_native_package.py').read_text()
         self.assertIn('test_python_spider_routes_are_not_misidentified_as_local_live_subscriptions',fixture)
         self.assertIn('test_only_live_service_protocols_expose_declared_playlist_paths',fixture)
+
+    def test_playlist_discovery_requires_a_readable_nonempty_m3u_then_subscribes_it(self):
+        self.assertIn('playlistPathCandidatesForService:self.service', self.resource_detail)
+        self.assertIn('playlistFormat&&channels.count>0', self.resource_detail)
+        self.assertIn('playlistPathSource"]=@"detected"', self.resource_detail)
+        self.assertIn('onPlaylistDiscovered', self.resource_detail)
+        self.assertIn('待验证 · http://127.0.0.1:', self.resource_detail)
+        start=self.root.index('page.onPlaylistDiscovered=')
+        callback=self.root[start:self.root.index('page.onUse=^',start)]
+        self.assertIn('[owner.subscriptionURLs addObject:url]', callback)
+        self.assertIn('[owner fetchSubscription:url silent:YES]', callback)
+        self.assertIn('managedServiceID', callback)
+        self.assertIn('parts.query.length', callback)
 
     def test_resource_updates_refresh_detected_runtime_defaults_but_preserve_manual_overrides(self):
         importer=(ROOT / 'Sources/MediaPackageImporter.m').read_text()
@@ -346,6 +368,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('service[@"argumentsSource"]=@"manual"', editor)
         self.assertIn('service[@"playlistPathSource"]=@"manual"', editor)
         self.assertIn('留空自动识别，或填 /all.m3u', editor)
+        self.assertIn('else if(![service[@"playlistPathSource"] isEqual:@"detected"])', editor)
         native=(ROOT / 'Tests/native_package_tests.m').read_text()
         self.assertIn('--update-manual', native)
         self.assertIn('rollbackRestoredPlaylist', native)
@@ -521,7 +544,8 @@ class ResourceInteractionContracts(unittest.TestCase):
     def test_local_interface_probe_is_bounded_and_does_not_follow_redirects(self):
         self.assertIn('completionHandler(nil)', self.resource_detail)
         self.assertIn('1024*1024', self.resource_detail)
-        self.assertIn('timeoutIntervalForResource=7', self.resource_detail)
+        self.assertIn('timeoutIntervalForRequest=1.5', self.resource_detail)
+        self.assertIn('timeoutIntervalForResource=2', self.resource_detail)
         self.assertIn('M3UParser parse:text baseURL:url', self.resource_detail)
 
     def test_starting_python_http_adds_the_configured_subscription_without_inventing_missing_routes(self):
