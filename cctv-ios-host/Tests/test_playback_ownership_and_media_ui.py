@@ -64,6 +64,8 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         show_inline = method_body(BROWSER_SOURCE, "- (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context")
         play_result = method_body(PLAYBACK_SOURCE, "- (void)playResult:(NSDictionary *)result")
         root_media = method_body(ROOT_SOURCE, "- (void)openMediaTab")
+        self.assertIn("@property(nonatomic,copy) dispatch_block_t onPlaybackWillStart", BROWSER_SOURCE)
+        self.assertIn("detail.onPlaybackWillStart=self.onPlaybackWillStart", BROWSER_SOURCE)
         self.assertIn("player.onPlaybackWillStart=self.onPlaybackWillStart", show_inline)
         self.assertIn("if(self.onPlaybackWillStart)self.onPlaybackWillStart()", play_result)
         self.assertIn("page.onPlaybackWillStart=", root_media)

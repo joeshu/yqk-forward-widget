@@ -119,6 +119,7 @@
 @property(nonatomic,copy) NSDictionary *resumeEntry;
 @property(nonatomic,strong) MediaAPIClient *client;
 @property(nonatomic,copy) void (^onPlay)(NSDictionary *,NSDictionary *);
+@property(nonatomic,copy) dispatch_block_t onPlaybackWillStart;
 @property(nonatomic,copy) dispatch_block_t onReturnHome;
 @property(nonatomic,strong) UIScrollView *scrollView;
 @property(nonatomic,strong) UIStackView *contentStack;
@@ -1028,7 +1029,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)openHomeRecommendation:(NSDictionary *)item source:(NSDictionary *)source provider:(NSString *)provider {
     if(![item isKindOfClass:NSDictionary.class]||![source isKindOfClass:NSDictionary.class])return;
-    if(MediaSourceUsesNativeCatalogAPI(source)){MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlay=self.onPlay;[self pushMediaDetail:detail];return;}
+    if(MediaSourceUsesNativeCatalogAPI(source)){MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;[self pushMediaDetail:detail];return;}
     self.pendingHomeDetail=@{@"item":item,@"source":source,@"provider":provider?:@""};self.pendingBrowseState=nil;[self activate:source keepingHome:YES];
 }
 - (void)browsePinnedSource:(NSDictionary *)source {self.pendingBrowseState=nil;self.provider=nil;self.nextHomeLoadTrigger=@"home_pinned_source";[self activate:source];}
@@ -1038,12 +1039,12 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)openHomeFavorite:(NSDictionary *)entry {
     NSString *sourceID=entry[@"sourceID"]?:@"";NSDictionary *source=nil;for(NSDictionary *candidate in self.sources)if([candidate[@"id"] isEqual:sourceID]){source=candidate;break;}
     if(!source){[self showMessage:@"该收藏对应的影视资源已移除，请重新导入后打开" loading:NO];return;}NSDictionary *item=[entry[@"item"] isKindOfClass:NSDictionary.class]?entry[@"item"]:@{};NSString *provider=[entry[@"provider"] isKindOfClass:NSString.class]?entry[@"provider"]:@"";
-    if(MediaSourceUsesNativeCatalogAPI(source)){MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider;detail.onPlay=self.onPlay;[self pushMediaDetail:detail];return;}
+    if(MediaSourceUsesNativeCatalogAPI(source)){MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider;detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;[self pushMediaDetail:detail];return;}
     self.pendingHomeDetail=@{@"item":item,@"source":source,@"provider":provider};self.pendingBrowseState=nil;[self activate:source keepingHome:YES];
 }
 - (void)openPendingHomeDetailForSource:(NSDictionary *)source provider:(NSString *)provider {
     NSDictionary *pending=self.pendingHomeDetail;if(![pending isKindOfClass:NSDictionary.class]||![[pending[@"source"][@"id"] description] isEqual:[source[@"id"] description]])return;
-    NSDictionary *item=[pending[@"item"] isKindOfClass:NSDictionary.class]?pending[@"item"]:@{};MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlay=self.onPlay;self.pendingHomeDetail=nil;[self pushMediaDetail:detail];
+    NSDictionary *item=[pending[@"item"] isKindOfClass:NSDictionary.class]?pending[@"item"]:@{};MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;self.pendingHomeDetail=nil;[self pushMediaDetail:detail];
 }
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];[self.readiness cancel];[self.client cancel];[self.configurationClient cancel];}
 - (NSString *)stateKeyForSource:(NSDictionary *)source provider:(NSString *)provider {return [NSString stringWithFormat:@"%@|%@",source[@"id"]?:@"",provider?:@""];}
@@ -1054,7 +1055,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     page.onSelect=^(NSDictionary *entry){MediaBrowserViewController *owner=weakSelf;if(!owner)return;NSArray *available=owner.sourcesProvider?owner.sourcesProvider():owner.sources?:@[];NSString *sourceID=entry[@"sourceID"]?:@"";NSDictionary *source=nil;
         for(NSDictionary *candidate in available)if([candidate[@"id"] isEqual:sourceID]){source=candidate;break;}
         if(!source){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"影视资源不可用" message:@"该收藏对应的资源未启用或已移除。重新启用资源后即可继续播放。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:alert animated:YES completion:nil];return;}
-        MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=entry[@"item"]?:@{};detail.source=source;detail.provider=entry[@"provider"]?:@"";detail.onPlay=owner.onPlay;[owner pushMediaDetail:detail];
+        MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=entry[@"item"]?:@{};detail.source=source;detail.provider=entry[@"provider"]?:@"";detail.onPlay=owner.onPlay;detail.onPlaybackWillStart=owner.onPlaybackWillStart;[owner pushMediaDetail:detail];
     };
     [self pushMediaPage:page];
 }
@@ -1076,12 +1077,12 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)openHistoryDetail:(NSDictionary *)entry source:(NSDictionary *)source provider:(NSString *)provider {
     NSDictionary *item=[entry[@"item"] isKindOfClass:NSDictionary.class]?entry[@"item"]:@{};
     id itemID=item[@"id"];if(![itemID isKindOfClass:NSString.class]&&![itemID isKindOfClass:NSNumber.class]){[self showMessage:@"观看记录缺少影片标识，无法重新打开详情" loading:NO];return;}
-    MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.resumeEntry=entry;detail.onPlay=self.onPlay;[self pushMediaDetail:detail];
+    MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.resumeEntry=entry;detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;[self pushMediaDetail:detail];
 }
 - (void)openResources {if(self.onResources)self.onResources();}
 - (void)openGlobalSearch {
     MediaGlobalSearchViewController *page=[MediaGlobalSearchViewController new];page.sources=self.sourcesProvider?self.sourcesProvider():self.sources?:@[];page.onActivateService=self.onActivateService;__weak typeof(self) weakSelf=self;
-    page.onSelectResult=^(NSDictionary *item,NSDictionary *source,NSString *provider){MediaBrowserViewController *owner=weakSelf;if(!owner)return;MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlay=owner.onPlay;[owner pushMediaDetail:detail];};
+    page.onSelectResult=^(NSDictionary *item,NSDictionary *source,NSString *provider){MediaBrowserViewController *owner=weakSelf;if(!owner)return;MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlay=owner.onPlay;detail.onPlaybackWillStart=owner.onPlaybackWillStart;[owner pushMediaDetail:detail];};
     [self pushMediaPage:page];
 }
 - (void)presentPicker:(MediaSourcePicker *)picker {
@@ -1445,6 +1446,6 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip {
     HostAnimateSelection([collectionView cellForItemAtIndexPath:ip]);
-    MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=self.items[ip.item];detail.source=self.source;detail.provider=self.provider;detail.onPlay=self.onPlay;[self pushMediaDetail:detail];
+    MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=self.items[ip.item];detail.source=self.source;detail.provider=self.provider;detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;[self pushMediaDetail:detail];
 }
 @end
