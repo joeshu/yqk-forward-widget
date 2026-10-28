@@ -57,12 +57,13 @@ class MediaRelay:
         self.refreshing = {}
         self.refreshFailures = {}
         self.diagnosed_manifests = set()
+        self.diagnosed_resources = collections.OrderedDict()
         self.responses = set()
         self.stopping = threading.Event()
 
     def register(self, url, headers, origin=None, diagnostic_id=None, fallback_url=None,
                  refresh=None, refresh_after=0, refresh_interval=0, refresh_relative=None,
-                 expected_hls=False, segment=False):
+                 expected_hls=False, segment=False, resource_kind="media"):
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('不支持的媒体地址')
@@ -78,7 +79,7 @@ class MediaRelay:
             diagnostic_id = ''
         origin = origin or (parsed.scheme.lower(), parsed.netloc.lower())
         key = (url, tuple(sorted(headers.items())), origin, fallback_url, diagnostic_id,
-               bool(expected_hls))
+               bool(expected_hls), resource_kind if resource_kind in ("key", "map", "media") else "media")
         refresh = refresh if callable(refresh) else None
         refresh_after = float(refresh_after or 0)
         refresh_interval = max(0.0, min(float(refresh_interval or 0), 3600.0))
@@ -129,7 +130,7 @@ class MediaRelay:
         parent = urllib.parse.urlsplit(url)
         segment_count = 0
 
-        def local(value, manifest=False):
+        def local(value, manifest=False, resource_kind="media"):
             nonlocal segment_count
             target = urllib.parse.urljoin(url, value)
             resolved = urllib.parse.urlsplit(target)
@@ -154,7 +155,7 @@ class MediaRelay:
                 refresh=refresh if is_manifest else None,
                 refresh_after=refresh_after if is_manifest else 0,
                 refresh_interval=refresh_interval if is_manifest else 0,
-                refresh_relative=relative, expected_hls=is_manifest, segment=not is_manifest)
+                refresh_relative=relative, expected_hls=is_manifest, segment=not is_manifest, resource_kind=resource_kind)
             return base + '/media/' + token
         lines = []
         variant_pending = False
@@ -165,7 +166,7 @@ class MediaRelay:
                 tag = line.split(':', 1)[0]
                 uri_manifest = tag in ('#EXT-X-MEDIA', '#EXT-X-I-FRAME-STREAM-INF',
                                        '#EXT-X-IMAGE-STREAM-INF', '#EXT-X-RENDITION-REPORT')
-                line = re.sub(r'\bURI="([^"]+)"', lambda match: 'URI="' + local(match[1], uri_manifest) + '"', line)
+                line = re.sub(r'\bURI="([^"]+)"', lambda match: 'URI="' + local(match[1], uri_manifest, "key" if tag in ("#EXT-X-KEY", "#EXT-X-SESSION-KEY") else "map" if tag == "#EXT-X-MAP" else "media") + '"', line)
                 if tag == '#EXT-X-STREAM-INF':
                     variant_pending = True
             elif line.strip():
@@ -231,7 +232,7 @@ class MediaRelay:
             headers=self._safe_refresh_headers(value.get('headers',{}))
             origin=(base.scheme.lower(),base.netloc.lower())
             key=(refreshed_url,tuple(sorted(headers.items())),origin,None,record[2],
-                 record[0][5] if len(record[0]) > 5 else False)
+                 record[0][5] if len(record[0]) > 5 else False, record[0][6] if len(record[0]) > 6 else "media")
             interval=max(0.0,min(float(value.get('refreshInterval') or record[5] or 0),3600.0))
             next_refresh=float(value.get('refreshAfter') or (time.time()+interval if interval else 0))
             updated=(key,record[1],record[2],record[3],next_refresh,interval,relative)
@@ -317,6 +318,26 @@ class MediaRelay:
         key=record[0];url=key[0];diagnostic_id=record[2]
         response = None
         sent = False
+        resource_started = time.perf_counter()
+        resource_kind = key[6] if len(key) > 6 else 'media'
+        monitor = False
+        with self.lock:
+            identity = (diagnostic_id or token, resource_kind)
+            if not head and token in self.segments and identity not in self.diagnosed_resources:
+                self.diagnosed_resources[identity] = True
+                while len(self.diagnosed_resources) > 256: self.diagnosed_resources.popitem(last=False)
+                monitor = True
+        def resource_event(suffix, count=0):
+            if monitor:
+                print('[CCTVHostMediaRelay] ' + json.dumps({
+                    'event': 'media_relay_first_resource_' + suffix,
+                    'request_id': diagnostic_id, 'resource_kind': resource_kind,
+                    'upstream_host': urllib.parse.urlsplit(url).hostname or '',
+                    'elapsed_ms': max(0, int((time.perf_counter()-resource_started)*1000)),
+                    'response_bytes': count,
+                    'upstream_status': getattr(response, 'status', 0) if response is not None else 0,
+                }, separators=(',', ':')))
+        resource_event('requested')
         try:
             refreshed=self._refresh_record(token)
             if refreshed is None:
@@ -380,6 +401,7 @@ class MediaRelay:
                     response.close()
                     return
                 self.responses.add(response)
+            resource_event('headers')
             mime = response.headers.get('Content-Type', 'application/octet-stream')
             raw_length = response.headers.get('Content-Length', '')
             expected_bytes = int(raw_length) if re.fullmatch(r'[0-9]{1,18}', raw_length) else None
@@ -438,16 +460,23 @@ class MediaRelay:
             sent = True
             if not head:
                 received_bytes = len(prefix)
+                first_byte = bool(prefix)
                 if prefix:
+                    resource_event('byte', len(prefix))
                     self._write_client(handler, prefix)
                 while not self.stopping.is_set():
-                    chunk = response.read(65536)
+                    reader = response.read1 if callable(getattr(type(response), 'read1', None)) else response.read
+                    chunk = reader(65536)
                     if not chunk:
                         break
                     received_bytes += len(chunk)
+                    if not first_byte:
+                        first_byte = True
+                        resource_event('byte', received_bytes)
                     self._write_client(handler, chunk)
                 if not self.stopping.is_set() and expected_bytes is not None and received_bytes < expected_bytes:
                     raise RelayFailure('upstream_body_truncated')
+                if not self.stopping.is_set(): resource_event('completed', received_bytes)
         except RelayClientDisconnected as error:
             # Disconnection does not prove playback success or upstream failure.
             print('[CCTVHostMediaRelay] ' + json.dumps({
@@ -507,6 +536,7 @@ class MediaRelay:
             self.segments.clear()
             self.segment_index.clear()
             self.diagnosed_manifests.clear()
+            self.diagnosed_resources.clear()
             self.refreshFailures.clear()
         for event in flights:
             event['event'].set()

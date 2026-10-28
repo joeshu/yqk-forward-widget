@@ -576,6 +576,8 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 @property(nonatomic) BOOL restartInProgress;
 @property(nonatomic) BOOL foregroundCheckNeeded;
 @property(nonatomic) BOOL homeRebuildScheduled;
+@property(nonatomic,strong) NSMutableDictionary *homeModuleCache;
+@property(nonatomic,copy) NSSet *cachedHomeModules;
 @property(nonatomic) NSUInteger pendingHomeRefreshCount;
 @property(nonatomic) NSUInteger searchGeneration;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSDictionary *> *browseStates;
@@ -886,24 +888,40 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)refreshHomeModules {
     self.pendingHomeRefreshCount=MIN((NSUInteger)1000000,self.pendingHomeRefreshCount+1);
+    if(UIApplication.sharedApplication.applicationState==UIApplicationStateBackground)return;
     if(!self.homeStack.arrangedSubviews.count){[self rebuildHomeModulesNow];return;}
     if(self.homeRebuildScheduled)return;self.homeRebuildScheduled=YES;
-    __weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.homeRebuildScheduled=NO;[owner rebuildHomeModulesNow];});
+    __weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,200*NSEC_PER_MSEC),dispatch_get_main_queue(),^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.homeRebuildScheduled=NO;if(UIApplication.sharedApplication.applicationState!=UIApplicationStateBackground)[owner rebuildHomeModulesNow];});
+}
+- (void)appendHomeModule:(NSString *)key signature:(id)signature build:(dispatch_block_t)build {
+    if(!self.homeModuleCache)self.homeModuleCache=[NSMutableDictionary dictionary];
+    NSArray *context=@[signature?:@[],self.source[@"id"]?:@"",self.provider?:@"",@(self.view.bounds.size.width),@(self.traitCollection.userInterfaceStyle),self.traitCollection.preferredContentSizeCategory?:@""];
+    NSData *identity=[NSJSONSerialization isValidJSONObject:context]?[NSJSONSerialization dataWithJSONObject:context options:NSJSONWritingSortedKeys error:NULL]:nil;
+    NSDictionary *cached=self.homeModuleCache[key];
+    if(identity&&[cached[@"identity"] isEqual:identity]){
+        for(UIView *view in cached[@"views"])[self.homeStack addArrangedSubview:view];
+        if([key isEqual:@"feature"]){self.homeCarousel=cached[@"carousel"];self.homeCarouselPageControl=cached[@"pages"];self.homeCarousel.delegate=self;}
+        return;
+    }
+    NSUInteger start=self.homeStack.arrangedSubviews.count;build();
+    if(identity){NSMutableDictionary *record=[@{@"identity":identity,@"views":[self.homeStack.arrangedSubviews subarrayWithRange:NSMakeRange(start,self.homeStack.arrangedSubviews.count-start)]} mutableCopy];if([key isEqual:@"feature"]&&self.homeCarousel){record[@"carousel"]=self.homeCarousel;if(self.homeCarouselPageControl)record[@"pages"]=self.homeCarouselPageControl;}self.homeModuleCache[key]=record;}
+    else[self.homeModuleCache removeObjectForKey:key];
 }
 - (void)rebuildHomeModulesNow {
     CFTimeInterval rebuildStarted=CACurrentMediaTime();NSUInteger coalesced=self.pendingHomeRefreshCount;self.pendingHomeRefreshCount=0;
     if(!self.homeStack)return;[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_home_modules_rebuild_started" fields:@{@"service_id":self.source[@"id"]?:@"",@"source_generation":@(self.generation),@"home_mode":@(self.homeMode),@"source_item_count":@(self.items.count),@"category_count":@(self.homeCategories.count)}];CGPoint previousOffset=self.homeScroll.contentOffset;BOOL preserveOffset=self.homeScroll.bounds.size.height>0;__weak typeof(self) weakSelf=self;self.homeCarousel.delegate=nil;self.homeCarousel=nil;self.homeCarouselPageControl=nil;for(UIView *view in self.homeStack.arrangedSubviews.copy){if(view==self.homeStatusCard)continue;[self.homeStack removeArrangedSubview:view];[view removeFromSuperview];}[self updateHomeStatusCard];
     NSSet *enabled=MediaHomeEnabledModules();
-    if([enabled containsObject:@"recommendations"]){NSString *featuredProvider=@"";NSDictionary *home=[self cachedHomeResultForSelectedProvider:&featuredProvider];NSArray *featured=[home[@"items"] isKindOfClass:NSArray.class]?home[@"items"]:@[];if(featured.count)[self addHomeFeatureCarousel:featured source:self.source provider:featuredProvider];}
+    if(![enabled isEqual:self.cachedHomeModules]){[self.homeModuleCache removeAllObjects];self.cachedHomeModules=enabled;}
+    if([enabled containsObject:@"recommendations"]){NSString *featuredProvider=@"";NSDictionary *home=[self cachedHomeResultForSelectedProvider:&featuredProvider];NSArray *featured=[home[@"items"] isKindOfClass:NSArray.class]?home[@"items"]:@[];[self appendHomeModule:@"feature" signature:@[featured,featuredProvider?:@"",self.source?:@{}] build:^{if(featured.count)[self addHomeFeatureCarousel:featured source:self.source provider:featuredProvider];}];}
     [self addHomeCategoryShelves:enabled];
     if([enabled containsObject:@"recommendations"]){NSString *cachedProvider=@"";NSDictionary *home=[self cachedHomeResultForSelectedProvider:&cachedProvider];NSArray *recommendations=[home[@"items"] isKindOfClass:NSArray.class]?home[@"items"]:@[];NSString *sourceName=[self.source[@"name"] isKindOfClass:NSString.class]?self.source[@"name"]:@"影视来源";
         if(!recommendations.count){[self.homeStack addArrangedSubview:[self homeSectionHeader:@"影视推荐" actionTitle:self.source?@"打开影视库":@"导入资源" selector:self.source?@selector(browseRecommendations):@selector(openResources)]];UIButton *empty=[self homeActionButton:self.source?([NSString stringWithFormat:@"%@ · 进入影视库加载推荐",sourceName]):@"添加影视资源后浏览推荐" symbol:self.source?@"sparkles.tv":@"plus" action:self.source?@selector(browseRecommendations):@selector(openResources) primary:NO];empty.accessibilityIdentifier=@"media-home-recommendations-empty";[self.homeStack addArrangedSubview:empty];}}
-    if([enabled containsObject:@"continue"]){NSMutableArray *cards=[NSMutableArray array];for(NSDictionary *entry in MediaPlaybackStateStore.watchHistory){if([entry[@"completed"] boolValue]||[entry[@"position"] doubleValue]<=0)continue;NSDictionary *item=entry[@"item"]?:@{};NSString *subtitle=[NSString stringWithFormat:@"%@ · %@",entry[@"episodeName"]?:@"继续观看",entry[@"sourceName"]?:@"本机记录"];[cards addObject:[self homeCardWithTitle:item[@"name"]?:@"继续观看" subtitle:subtitle imageURL:item[@"poster"] symbol:nil action:^{[weakSelf openHistoryEntry:entry];}]];if(cards.count>=10)break;}
+    if([enabled containsObject:@"continue"]){[self appendHomeModule:@"continue" signature:MediaPlaybackStateStore.watchHistory build:^{NSMutableArray *cards=[NSMutableArray array];for(NSDictionary *entry in MediaPlaybackStateStore.watchHistory){if([entry[@"completed"] boolValue]||[entry[@"position"] doubleValue]<=0)continue;NSDictionary *item=entry[@"item"]?:@{};NSString *subtitle=[NSString stringWithFormat:@"%@ · %@",entry[@"episodeName"]?:@"继续观看",entry[@"sourceName"]?:@"本机记录"];[cards addObject:[self homeCardWithTitle:item[@"name"]?:@"继续观看" subtitle:subtitle imageURL:item[@"poster"] symbol:nil action:^{[weakSelf openHistoryEntry:entry];}]];if(cards.count>=10)break;}
         [self.homeStack addArrangedSubview:[self homeSectionHeader:@"继续观看" actionTitle:@"全部" selector:@selector(openHistory)]];[self addHomeCards:cards emptyText:@"还没有未看完的影片，开始播放后会显示在这里"];
-    }
-    if([enabled containsObject:@"favorites"]){NSDictionary *saved=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"]?:@{};NSArray *entries=[saved.allValues sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [[a[@"item"][@"name"] description] localizedStandardCompare:[b[@"item"][@"name"] description]];}];NSMutableArray *cards=[NSMutableArray array];for(NSDictionary *entry in entries){NSDictionary *item=entry[@"item"]?:@{};NSString *subtitle=[NSString stringWithFormat:@"%@ · %@",entry[@"sourceName"]?:@"影视资源",entry[@"provider"]?:@"站点"];[cards addObject:[self homeCardWithTitle:item[@"name"]?:@"已收藏影片" subtitle:subtitle imageURL:item[@"poster"] symbol:nil action:^{[weakSelf openHomeFavorite:entry];}]];if(cards.count>=10)break;}
+    }];}
+    if([enabled containsObject:@"favorites"]){[self appendHomeModule:@"favorites" signature:[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"]?:@{} build:^{NSDictionary *saved=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"]?:@{};NSArray *entries=[saved.allValues sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [[a[@"item"][@"name"] description] localizedStandardCompare:[b[@"item"][@"name"] description]];}];NSMutableArray *cards=[NSMutableArray array];for(NSDictionary *entry in entries){NSDictionary *item=entry[@"item"]?:@{};NSString *subtitle=[NSString stringWithFormat:@"%@ · %@",entry[@"sourceName"]?:@"影视资源",entry[@"provider"]?:@"站点"];[cards addObject:[self homeCardWithTitle:item[@"name"]?:@"已收藏影片" subtitle:subtitle imageURL:item[@"poster"] symbol:nil action:^{[weakSelf openHomeFavorite:entry];}]];if(cards.count>=10)break;}
         [self.homeStack addArrangedSubview:[self homeSectionHeader:@"影视收藏" actionTitle:@"全部" selector:@selector(openFavorites)]];[self addHomeCards:cards emptyText:@"还没有收藏影片，打开影片详情后点按收藏"];
-    }
+    }];}
     if([enabled containsObject:@"sources"]){NSMutableSet *pins=[MediaHomePinnedSources() mutableCopy];if(![NSUserDefaults.standardUserDefaults objectForKey:MediaHomePinnedSourcesDefaultsKey]&&self.sources.count){NSString *saved=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaSource"];if(saved.length)[pins addObject:saved];else for(NSDictionary *source in [self.sources subarrayWithRange:NSMakeRange(0,MIN((NSUInteger)3,self.sources.count))])[pins addObject:source[@"id"]?:@""];[NSUserDefaults.standardUserDefaults setObject:pins.allObjects forKey:MediaHomePinnedSourcesDefaultsKey];}
         NSMutableArray *cards=[NSMutableArray array];for(NSDictionary *source in self.sources){NSString *sourceID=source[@"id"]?:@"";if(![pins containsObject:sourceID])continue;BOOL running=MediaSourceUsesNativeCatalogAPI(source)||[PyHost isRunningServiceIdentifier:sourceID];NSString *engine=source[@"engine"]?:@"影视资源";NSString *subtitle=running?([source[@"status"] isKindOfClass:NSString.class]?source[@"status"]:@"可直接访问"):engine;[cards addObject:[self homeCardWithTitle:source[@"name"]?:@"影视来源" subtitle:subtitle imageURL:nil symbol:@"square.stack.3d.up" action:^{[weakSelf browsePinnedSource:source];}]];if(cards.count>=12)break;}
         [self.homeStack addArrangedSubview:[self homeSectionHeader:@"固定来源" actionTitle:@"管理" selector:@selector(openHomeConfiguration)]];[self addHomeCards:cards emptyText:self.sources.count?@"还没有固定来源，点按右上角配置首页添加":@"尚未导入影视资源。可先到资源页导入 Python、JavaScript 或 ZIP 影视包"];
@@ -1024,6 +1042,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     picker.onSelect=^(NSDictionary *choice){MediaBrowserViewController *owner=weakSelf;NSDictionary *source=choice[@"source"];if(owner&&source){if(owner.homeMode)[owner activate:source keepingHome:YES];else[owner activate:source];}};[self presentPicker:picker];
 }
 - (void)refreshCurrentSource {
+    [self.homeModuleCache removeAllObjects];
     if(!self.source){[self loadSources];return;}
     if(self.serviceUnavailable){[self checkCurrentService];return;}
     if(self.sourceInvalidated||(!MediaSourceUsesNativeCatalogAPI(self.source)&&![PyHost isRunningServiceIdentifier:self.source[@"id"]])){[self activate:self.source keepingHome:self.homeMode];return;}

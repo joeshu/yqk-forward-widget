@@ -1170,6 +1170,63 @@ class Spider:
                 self.assertFalse(relay.responses)
                 relay.close()
 
+    def test_invalid_play_result_shape_does_not_record_values_or_arbitrary_keys(self):
+        raw = {'url': '', 'header': {'Cookie': 'private-cookie'}, 'private-token-key': 'private-value'}
+        shape = media.media_result_shape(raw)
+        self.assertEqual(shape['validation_reason'], 'missing_or_empty_address')
+        self.assertEqual(shape['recognized_fields'], 'url')
+        self.assertNotIn('private', json.dumps(shape))
+        self.assertEqual(media.media_result_shape({'url': {'src': 'private'}})['address_type'], 'object')
+        self.assertEqual(media.media_result_shape({'url': ['private'] * 100})['candidate_count'], 32)
+        self.engine.spider.playerContent = lambda *_: raw
+        with mock.patch('builtins.print') as log:
+            with self.assertRaises(media.MediaError): self.runtime.call('play', {'id': 'episode'})
+        records = [json.loads(c.args[0].split('] ', 1)[1]) for c in log.call_args_list
+                   if str(c.args[0]).startswith('[CCTVHostMediaResult] ')]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['stage'], 'play_result_validation')
+        self.assertNotIn('private', json.dumps(records))
+
+    def test_relay_streams_first_available_bytes_before_upstream_finishes(self):
+        release = threading.Event()
+        sent_all = threading.Event()
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Type', 'video/mp2t')
+                self.send_header('Content-Length', '1088')
+                self.end_headers()
+                self.wfile.write(b'a' * 64);self.wfile.flush()
+                release.wait(4)
+                self.wfile.write(b'b' * 1024);sent_all.set()
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        threads = [threading.Thread(target=x.serve_forever, daemon=True) for x in (upstream, server)]
+        for thread in threads: thread.start()
+        client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+        try:
+            token = server.relay.register(f'http://127.0.0.1:{upstream.server_port}/segment.ts', {},
+                                          diagnostic_id='stream-fixture', segment=True)
+            with mock.patch('builtins.print') as log:
+                client.request('GET', '/media/' + token)
+                response = client.getresponse()
+                self.assertEqual(response.read1(64), b'a' * 64)
+                self.assertFalse(sent_all.is_set(), 'first bytes must not wait for the rest of the segment')
+                release.set()
+                self.assertEqual(response.read(), b'b' * 1024)
+                deadline = time.monotonic() + 1
+                while len(log.call_args_list) < 4 and time.monotonic() < deadline: time.sleep(.01)
+                records = [json.loads(c.args[0].split('] ', 1)[1]) for c in log.call_args_list]
+                self.assertEqual([r['event'] for r in records], [
+                    'media_relay_first_resource_' + phase for phase in ('requested', 'headers', 'byte', 'completed')])
+                self.assertEqual(records[-1]['response_bytes'], 1088)
+                self.assertTrue(all(r['request_id'] == 'stream-fixture' for r in records))
+        finally:
+            release.set();client.close();server.relay.close()
+            for item in (upstream, server): item.shutdown();item.server_close()
+            for thread in threads: thread.join(2)
+
     def test_relay_client_disconnect_is_not_upstream_failure(self):
         relay = MediaRelay()
         token = relay.register('https://fixture.test/video.mp4?signature=private', {}, diagnostic_id='disconnect-trace')

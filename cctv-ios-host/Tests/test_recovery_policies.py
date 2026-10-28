@@ -18,6 +18,17 @@ class RecoveryPolicies(unittest.TestCase):
 int main(int argc,char **argv) {
  if(argc==3)return HostLocalPortState(atoi(argv[1]))==atoi(argv[2])?0:1;
  if(HostLocalPortState(0)!=-1||HostLocalPortState(65536)!=-1)return 2;
+ HostImageDomainState domain={0};
+ for(int i=0;i<3;i++)HostImageDomainFinish(&domain,i,1,0);
+ if(HostImageDomainAllows(&domain,61))return 20;
+ if(!HostImageDomainAllows(&domain,62)||HostImageDomainAllows(&domain,62))return 21;
+ HostImageDomainFinish(&domain,63,0,1);
+ if(!HostImageDomainAllows(&domain,63))return 22;
+ HostImageDomainFinish(&domain,64,1,0);
+ if(HostImageDomainAllows(&domain,100))return 23;
+ if(!HostImageDomainAllows(&domain,124))return 24;
+ HostImageDomainFinish(&domain,125,0,0);
+ if(domain.timeouts||!HostImageDomainAllows(&domain,125))return 25;
  if(HostImageFailureBackoff(404)!=120||HostImageFailureBackoff(429)!=60||HostImageFailureBackoff(492)!=60||HostImageFailureBackoff(500)!=30)return 3;
  HostPlaybackProgress p={0};HostPlaybackProgressSample(&p,0,0,1,0);
  for(int i=1;i<=8;i++)HostPlaybackProgressSample(&p,i,i,1,1);

@@ -311,6 +311,27 @@ def media_choice_address(value):
                  if value.get(key)), '')
 
 
+def media_result_shape(value):
+    """Describe protocol structure, never provider values or arbitrary keys."""
+    def kind(item):
+        return ('null' if item is None else 'object' if isinstance(item, dict) else
+                'array' if isinstance(item, (list, tuple)) else 'string' if isinstance(item, str) else 'scalar')
+    keys = ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl', 'video_url',
+            'mediaUrl', 'src', 'data', 'result', 'payload', 'response', 'alternates', 'parse', 'jx')
+    fields = {'result_type': kind(value)}
+    if not isinstance(value, dict):
+        fields['validation_reason'] = 'unexpected_result_type'
+        return fields
+    fields['recognized_fields'] = ','.join(key for key in keys if key in value)
+    address = next((value[key] for key in keys[:8] if value.get(key) not in (None, '')), None)
+    fields['address_type'] = kind(address)
+    fields['candidate_count'] = min(len(address), 32) if isinstance(address, (list, tuple)) else 0
+    fields['validation_reason'] = ('missing_or_empty_address' if address is None else
+                                   'unsupported_address_structure' if not isinstance(address, str) else
+                                   'invalid_or_unsupported_address')
+    return fields
+
+
 def playback(value):
     value = unwrap_envelope(value, {'url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
                                     'video_url', 'mediaUrl', 'src', 'alternates',
@@ -918,7 +939,17 @@ class MediaRuntime:
             elif operation == 'detail':
                 value = detail(raw, args.get('id', ''))
             elif operation == 'play':
-                value = playback(raw)
+                try:
+                    value = playback(raw)
+                except MediaError as error:
+                    if error.code == 'NO_MEDIA':
+                        context = getattr(threading.current_thread(), '_host_media_request_context', {})
+                        trace = str(context.get('correlation_id') or context.get('request_id') or '')
+                        if not re.fullmatch(r'[A-Za-z0-9._-]{1,96}', trace): trace = uuid.uuid4().hex
+                        print('[CCTVHostMediaResult] ' + json.dumps(dict(
+                            media_result_shape(raw), event='media_play_result_rejected',
+                            request_id=trace, stage='play_result_validation'), separators=(',', ':')))
+                    raise
             elif operation == 'providers':
                 value = [{'id': str(row.get('id', row.get('key', ''))), 'name': str(row.get('name', row.get('title', ''))),
                           **({'searchable': row['searchable']} if isinstance(row.get('searchable'), bool) else {})}

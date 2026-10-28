@@ -697,7 +697,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if(!line.length||!identifier.length)return;
     [PluginLogStore.shared appendLine:line forIdentifier:identifier];
     NSDictionary *relayRecord=MediaRelayDiagnosticRecord(line);
-    if(relayRecord){NSMutableDictionary *fields=[relayRecord mutableCopy];NSString *event=fields[@"event"];[fields removeObjectForKey:@"event"];fields[@"service_id"]=identifier;if(fields[@"request_id"])fields[@"correlation_id"]=fields[@"request_id"];[RuntimeDiagnostics.shared recordEvent:event category:@"media_relay" fields:fields];}
+    if(relayRecord){NSMutableDictionary *fields=[relayRecord mutableCopy];NSString *event=fields[@"event"];[fields removeObjectForKey:@"event"];fields[@"service_id"]=identifier;if(fields[@"request_id"])fields[@"correlation_id"]=fields[@"request_id"];[RuntimeDiagnostics.shared recordEvent:event category:[event hasPrefix:@"media_play_"]?@"media_api":@"media_relay" fields:fields];}
 
     dispatch_async(dispatch_get_main_queue(),^{[[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:identifier];});
     [self log:@"[%@] %@",name.length?name:@"插件",line];

@@ -32,6 +32,7 @@ static NSUInteger const ImageQueueLimit = 96;
 @property(nonatomic, strong) NSURLSession *session;
 @property(nonatomic, strong) NSCache<NSString *, UIImage *> *cache;
 @property(nonatomic, strong) NSCache<NSString *, NSDate *> *failures;
+@property(nonatomic,strong) NSCache<NSString *,NSMutableData *> *domainFailures;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, HostImageRequest *> *requests;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, HostImageRequest *> *tasks;
 @property(nonatomic, strong) NSMutableArray<HostImageRequest *> *pending;
@@ -50,6 +51,7 @@ static NSUInteger const ImageQueueLimit = 96;
         _queue=dispatch_queue_create("cctvhost.images", DISPATCH_QUEUE_SERIAL);
         _cache=[NSCache new];_cache.countLimit=200;_cache.totalCostLimit=16*1024*1024;
         _failures=[NSCache new];_failures.countLimit=200;
+        _domainFailures=[NSCache new];_domainFailures.countLimit=64;
         _requests=[NSMutableDictionary dictionary];_tasks=[NSMutableDictionary dictionary];_pending=[NSMutableArray array];
         NSURLSessionConfiguration *config=configuration.copy;config.URLCache=nil;config.HTTPCookieStorage=nil;
         config.timeoutIntervalForRequest=6;config.timeoutIntervalForResource=10;config.HTTPMaximumConnectionsPerHost=4;
@@ -86,10 +88,16 @@ static NSUInteger const ImageQueueLimit = 96;
         [request.views addObject:view];[self startPending];
     }});
 }
+- (NSMutableData *)domainStateForURL:(NSString *)url {
+    NSURL *target=[NSURL URLWithString:url];NSString *key=[NSString stringWithFormat:@"%@://%@:%@",target.scheme.lowercaseString,target.host.lowercaseString,target.port?:([target.scheme.lowercaseString isEqual:@"https"]?@443:@80)];
+    NSMutableData *state=[self.domainFailures objectForKey:key];if(!state){state=[NSMutableData dataWithLength:sizeof(HostImageDomainState)];[self.domainFailures setObject:state forKey:key];}return state;
+}
 - (void)startPending {
     while(self.tasks.count<ImageConcurrentLimit && self.pending.count) {
         HostImageRequest *record=self.pending.firstObject;[self.pending removeObjectAtIndex:0];
         if(record.generation!=self.generation || !record.views.allObjects.count){[self.requests removeObjectForKey:record.cacheKey];continue;}
+        NSMutableData *domain=[self domainStateForURL:record.url];
+        if(!HostImageDomainAllows(domain.mutableBytes,CACurrentMediaTime())){[self.requests removeObjectForKey:record.cacheKey];continue;}
         NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:record.url]];
         [request setValue:@"image/*" forHTTPHeaderField:@"Accept"];
         record.data=[NSMutableData data];record.startedAt=CACurrentMediaTime();record.httpStatus=0;record.expectedContentLength=-1;record.responseContentType=@"";record.failureStage=nil;record.task=[self.session dataTaskWithRequest:request];
@@ -99,6 +107,8 @@ static NSUInteger const ImageQueueLimit = 96;
 - (void)finish:(NSURLSessionTask *)task error:(NSError *)error {
     HostImageRequest *record=self.tasks[@(task.taskIdentifier)];if(!record)return;
     [self.tasks removeObjectForKey:@(task.taskIdentifier)];[self.requests removeObjectForKey:record.cacheKey];
+    NSMutableData *domain=[self domainStateForURL:record.url];
+    if(record.generation==self.generation)HostImageDomainFinish(domain.mutableBytes,CACurrentMediaTime(),[error.domain isEqual:NSURLErrorDomain]&&error.code==NSURLErrorTimedOut,error.code==NSURLErrorCancelled&&!record.failureStage.length);
     UIImage *image=nil;
     if(!error && record.generation==self.generation && record.data.length) {
         CGImageSourceRef source=CGImageSourceCreateWithData((__bridge CFDataRef)record.data, (__bridge CFDictionaryRef)@{(__bridge NSString *)kCGImageSourceShouldCache:@NO});
@@ -162,7 +172,7 @@ static NSUInteger const ImageQueueLimit = 96;
 - (void)cancelPending {
     NSAssert(NSThread.isMainThread, @"Cancel on main thread");self.generation++;
     dispatch_async(self.queue, ^{
-        for(HostImageRequest *record in self.tasks.allValues)[record.task cancel];
+        for(HostImageRequest *record in self.tasks.allValues){NSMutableData *domain=[self domainStateForURL:record.url];HostImageDomainFinish(domain.mutableBytes,CACurrentMediaTime(),0,1);[record.task cancel];}
         [self.tasks removeAllObjects];[self.requests removeAllObjects];[self.pending removeAllObjects];
     });
 }

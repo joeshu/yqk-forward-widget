@@ -85,6 +85,7 @@
 @end
 @interface MediaBrowserViewController (SmokeRecovery)
 - (void)restartCurrentService;
+- (void)appendHomeModule:(NSString *)key signature:(id)signature build:(dispatch_block_t)build;
 - (void)refreshHomeModules;
 @end
 @interface MediaPlaybackViewController (SmokeEpisodePicker)
@@ -832,6 +833,13 @@ static void next(NSArray *steps, NSUInteger index) {
           }},
           ^{
             MediaBrowserViewController *recoveryProbe=[MediaBrowserViewController new];[recoveryProbe loadViewIfNeeded];
+            __block NSUInteger moduleBuilds=0;__block UIView *moduleView=nil;
+            dispatch_block_t buildModule=^{moduleBuilds++;moduleView=[UILabel new];[(UIStackView *)[recoveryProbe valueForKey:@"homeStack"] addArrangedSubview:moduleView];};
+            [recoveryProbe appendHomeModule:@"fixture" signature:@[@"same"] build:buildModule];UIView *firstModule=moduleView;
+            UIStackView *moduleStack=[recoveryProbe valueForKey:@"homeStack"];[moduleStack removeArrangedSubview:firstModule];[firstModule removeFromSuperview];
+            [recoveryProbe appendHomeModule:@"fixture" signature:@[@"same"] build:buildModule];check(moduleBuilds==1&&moduleStack.arrangedSubviews.lastObject==firstModule,@"unchanged home modules reuse their actual views");
+            [moduleStack removeArrangedSubview:firstModule];[firstModule removeFromSuperview];
+            [recoveryProbe appendHomeModule:@"fixture" signature:@[@"changed"] build:buildModule];check(moduleBuilds==2&&moduleView!=firstModule,@"changed home module content invalidates its cached views");
             NSDictionary *recoverySource=@{@"id":@"recover-only-this-id",@"port":@18788,@"engine":@"python"};[recoveryProbe setValue:recoverySource forKey:@"source"];
             __block NSUInteger restarts=0,activations=0;__block void (^finishRestart)(NSError *);
             recoveryProbe.onRestartService=^(NSDictionary *source,void (^done)(NSError *)){restarts++;check([source[@"id"] isEqual:@"recover-only-this-id"],@"restart targets only the selected service ID");finishRestart=[done copy];};
