@@ -91,7 +91,7 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
     if(!raw.length||raw.length>8192||[raw rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound)return nil;
     NSURLComponents *parts=[NSURLComponents componentsWithString:raw];
     if(!parts||![@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]||!parts.host.length||parts.user.length||parts.password.length)return nil;
-    if([@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"aac",@"ts"] containsObject:parts.pathExtension.lowercaseString?:@""])return nil;
+    if([@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"aac",@"ts"] containsObject:parts.path.pathExtension.lowercaseString?:@""])return nil;
     return parts.URL;
 }
 
