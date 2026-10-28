@@ -1187,6 +1187,17 @@ class Spider:
         self.assertEqual(records[0]['stage'], 'play_result_validation')
         self.assertNotIn('private', json.dumps(records))
 
+    def test_resource_trace_scope_isolated_between_plays_with_shared_correlation(self):
+        relay = MediaRelay()
+        a = relay.register('https://fixture.test/segment.ts', {}, diagnostic_id='shared', segment=True, resource_scope='play-a')
+        b = relay.register('https://fixture.test/segment.ts', {}, diagnostic_id='shared', segment=True, resource_scope='play-b')
+        self.assertNotEqual(a, b)
+        self.assertEqual(relay.segments[a][0][7], 'play-a')
+        relay.rewrite('#EXTM3U\n#EXTINF:4,\nsegment.ts\n', 'https://fixture.test/index.m3u8', {},
+                      ('https', 'fixture.test'), 'http://127.0.0.1:1', 'shared', resource_scope='play-a')
+        self.assertEqual(len(relay.segments), 2)
+        relay.close()
+
     def test_relay_streams_first_available_bytes_before_upstream_finishes(self):
         release = threading.Event()
         sent_all = threading.Event()

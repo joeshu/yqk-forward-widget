@@ -408,7 +408,7 @@ class Handler(BaseHTTPRequestHandler):
                 diagnostic_id = correlation_id or request_id
                 def relay_media_url(address, request_headers, expected_hls=False):
                     token = self.server.relay.register(address, request_headers,
-                        diagnostic_id=diagnostic_id, expected_hls=expected_hls)
+                        diagnostic_id=diagnostic_id, expected_hls=expected_hls, resource_scope=request_id)
                     return f'http://127.0.0.1:{self.server.server_port}/media/{token}'
                 result = dict(result)
                 direct_media = bool(result.get('directMedia') or is_direct_media_url(result.get('url')))

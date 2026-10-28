@@ -63,7 +63,7 @@ class MediaRelay:
 
     def register(self, url, headers, origin=None, diagnostic_id=None, fallback_url=None,
                  refresh=None, refresh_after=0, refresh_interval=0, refresh_relative=None,
-                 expected_hls=False, segment=False, resource_kind="media"):
+                 expected_hls=False, segment=False, resource_kind="media", resource_scope=None):
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('不支持的媒体地址')
@@ -77,9 +77,11 @@ class MediaRelay:
         diagnostic_id = str(diagnostic_id or '')[:96]
         if not re.fullmatch(r'[A-Za-z0-9._-]{1,96}', diagnostic_id):
             diagnostic_id = ''
+        resource_scope = str(resource_scope or diagnostic_id)[:96]
+        if resource_scope and not re.fullmatch(r"[A-Za-z0-9._-]{1,96}", resource_scope): resource_scope = ""
         origin = origin or (parsed.scheme.lower(), parsed.netloc.lower())
         key = (url, tuple(sorted(headers.items())), origin, fallback_url, diagnostic_id,
-               bool(expected_hls), resource_kind if resource_kind in ("key", "map", "media") else "media")
+               bool(expected_hls), resource_kind if resource_kind in ("key", "map", "media") else "media", resource_scope)
         refresh = refresh if callable(refresh) else None
         refresh_after = float(refresh_after or 0)
         refresh_interval = max(0.0, min(float(refresh_interval or 0), 3600.0))
@@ -126,7 +128,7 @@ class MediaRelay:
 
     def rewrite(self, text, url, headers, origin, base, diagnostic_id=None,
                 refresh=None, refresh_after=0, refresh_interval=0,
-                refresh_relative_base=None):
+                refresh_relative_base=None, resource_scope=None):
         parent = urllib.parse.urlsplit(url)
         segment_count = 0
 
@@ -155,7 +157,7 @@ class MediaRelay:
                 refresh=refresh if is_manifest else None,
                 refresh_after=refresh_after if is_manifest else 0,
                 refresh_interval=refresh_interval if is_manifest else 0,
-                refresh_relative=relative, expected_hls=is_manifest, segment=not is_manifest, resource_kind=resource_kind)
+                refresh_relative=relative, expected_hls=is_manifest, segment=not is_manifest, resource_kind=resource_kind, resource_scope=resource_scope)
             return base + '/media/' + token
         lines = []
         variant_pending = False
@@ -232,7 +234,7 @@ class MediaRelay:
             headers=self._safe_refresh_headers(value.get('headers',{}))
             origin=(base.scheme.lower(),base.netloc.lower())
             key=(refreshed_url,tuple(sorted(headers.items())),origin,None,record[2],
-                 record[0][5] if len(record[0]) > 5 else False, record[0][6] if len(record[0]) > 6 else "media")
+                 record[0][5] if len(record[0]) > 5 else False, record[0][6] if len(record[0]) > 6 else "media", record[0][7] if len(record[0]) > 7 else record[2])
             interval=max(0.0,min(float(value.get('refreshInterval') or record[5] or 0),3600.0))
             next_refresh=float(value.get('refreshAfter') or (time.time()+interval if interval else 0))
             updated=(key,record[1],record[2],record[3],next_refresh,interval,relative)
@@ -320,9 +322,10 @@ class MediaRelay:
         sent = False
         resource_started = time.perf_counter()
         resource_kind = key[6] if len(key) > 6 else 'media'
+        resource_scope = key[7] if len(key) > 7 else diagnostic_id
         monitor = False
         with self.lock:
-            identity = (diagnostic_id or token, resource_kind)
+            identity = (resource_scope or token, resource_kind)
             if not head and token in self.segments and identity not in self.diagnosed_resources:
                 self.diagnosed_resources[identity] = True
                 while len(self.diagnosed_resources) > 256: self.diagnosed_resources.popitem(last=False)
@@ -331,7 +334,7 @@ class MediaRelay:
             if monitor:
                 print('[CCTVHostMediaRelay] ' + json.dumps({
                     'event': 'media_relay_first_resource_' + suffix,
-                    'request_id': diagnostic_id, 'resource_kind': resource_kind,
+                    'request_id': diagnostic_id, 'play_request_id': resource_scope, 'resource_kind': resource_kind,
                     'upstream_host': urllib.parse.urlsplit(url).hostname or '',
                     'elapsed_ms': max(0, int((time.perf_counter()-resource_started)*1000)),
                     'response_bytes': count,
@@ -441,7 +444,7 @@ class MediaRelay:
                                     f'http://127.0.0.1:{handler.server.server_port}', diagnostic_id,
                                     refresh=record[3],refresh_after=record[4],
                                     refresh_interval=record[5],
-                                    refresh_relative_base=record[6]).encode()
+                                    refresh_relative_base=record[6],resource_scope=resource_scope).encode()
                 handler.send_response(200)
                 handler.send_header('Content-Type', 'application/vnd.apple.mpegurl')
                 handler.send_header('Content-Length', str(len(body)))
