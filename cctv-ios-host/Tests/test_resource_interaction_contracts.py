@@ -153,6 +153,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail', self.detail)
         self.assertIn('self.sourceSelectButton.accessibilityLabel=', self.detail)
         self.assertIn('self.providerSelectButton.accessibilityLabel=', self.detail)
+        self.assertIn('button.isAccessibilityElement=YES', self.detail)
         self.assertIn('self.homeMenuButton=[self floatingButtonWithSymbol:@"line.3.horizontal"', self.detail)
         self.assertIn('self.homeMenuButton.menu=[self homeActionsMenu]', self.detail)
         self.assertIn('self.homeMenuButton.accessibilityLabel=@"更多影视操作"', self.detail)
