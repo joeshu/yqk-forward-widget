@@ -263,6 +263,33 @@ class ServiceRuntimeTests(unittest.TestCase):
             else:
                 builtins._cctvhost_python_exception = previous
 
+    def test_incremental_and_regular_reads_share_the_response_budget(self):
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                self.send_response(200);self.send_header('Content-Length', '9');self.end_headers()
+                self.wfile.write(b'123456789')
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        serving = threading.Thread(target=server.serve_forever, daemon=True);serving.start()
+        previous = runtime._max_http_response_bytes
+        runtime._max_http_response_bytes = 8
+        try:
+            worker = self.launch("import builtins, urllib.request\n"
+                "try:\n"
+                " with urllib.request.urlopen('http://127.0.0.1:%d/', timeout=2) as response:\n"
+                "  builtins._host_mixed_read = (response.read1(4), response.read(4))\n"
+                "  response.read1(4)\n"
+                "except Exception as error:\n"
+                " builtins._host_mixed_error = type(error).__name__\n" % server.server_port)
+            worker.join(2)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(builtins._host_mixed_read, (b'1234', b'5678'))
+            self.assertEqual(builtins._host_mixed_error, 'HTTPResponseTooLarge')
+        finally:
+            runtime._max_http_response_bytes = previous
+            server.shutdown();server.server_close();serving.join(2)
+            vars(builtins).pop('_host_mixed_read', None);vars(builtins).pop('_host_mixed_error', None)
+
     def test_urllib_response_body_limit_rejects_large_payload_with_service_context(self):
         payload = b'012345678'
 

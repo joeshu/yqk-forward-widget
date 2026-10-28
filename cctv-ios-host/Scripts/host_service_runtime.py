@@ -36,6 +36,7 @@ _get_request = socketserver.TCPServer.get_request
 _process_request = socketserver.ThreadingMixIn.process_request
 _process_thread = socketserver.ThreadingMixIn.process_request_thread
 _http_response_read = http.client.HTTPResponse.read
+_http_response_read1 = http.client.HTTPResponse.read1
 _hooks = ('_cctvhost_stop_service', '_ysp_stop_server')
 _atexit_register = atexit.register
 _max_threads_per_service = 48
@@ -476,10 +477,10 @@ def _flush_http_rejection_summaries(owner):
                 print('[宿主] HTTP 响应保护汇总：%s，累计拒绝 %d 次' % (reason, count))
 
 
-def _bounded_http_response_read(response, amt=None):
+def _bounded_http_response_read_using(response, amt, reader):
     owner = getattr(threading.current_thread(), '_host_session', None)
     if owner is None:
-        return _http_response_read(response, amt)
+        return reader(response, amt)
 
     limit = max(1, int(_max_http_response_bytes))
     already_read = int(getattr(response, '_cctvhost_bytes_read', 0))
@@ -505,7 +506,7 @@ def _bounded_http_response_read(response, amt=None):
             _report_response_limit(owner, 'host_read_concurrency', already_read)
             raise HTTPResponseTooLarge('CCTVHost has reached its concurrent response-read budget')
     try:
-        data = _http_response_read(response, requested)
+        data = reader(response, requested)
     finally:
         if global_acquired:
             _global_response_reads.release()
@@ -520,9 +521,23 @@ def _bounded_http_response_read(response, amt=None):
     return data
 
 
+def _bounded_http_response_read(response, amt=None):
+    return _bounded_http_response_read_using(response, amt, _http_response_read)
+
+
+def _bounded_http_response_read1(response, amt=-1):
+    if getattr(threading.current_thread(), '_host_session', None) is None:
+        return _http_response_read1(response, amt)
+    # read1 is incremental even when its default amount is negative. It shares
+    # the same counter with read, without treating it as a full-body read.
+    amount = 65536 if amt is None or amt < 0 else amt
+    return _bounded_http_response_read_using(response, amount, _http_response_read1)
+
+
 threading.Thread.start = _start
 threading.excepthook = _thread_excepthook
 http.client.HTTPResponse.read = _bounded_http_response_read
+http.client.HTTPResponse.read1 = _bounded_http_response_read1
 socketserver.BaseServer.__init__ = _init
 socketserver.BaseServer.serve_forever = _serve
 socketserver.TCPServer.server_close = _close
