@@ -1213,6 +1213,8 @@ class Spider:
                 self.wfile.write(b'b' * 1024);sent_all.set()
         upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
         server = transport.Server(('127.0.0.1', 0), self.runtime)
+        self.assertTrue(server.relay.stream_media)
+        self.assertFalse(server.artwork_relay.stream_media)
         threads = [threading.Thread(target=x.serve_forever, daemon=True) for x in (upstream, server)]
         for thread in threads: thread.start()
         client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)

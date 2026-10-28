@@ -290,6 +290,31 @@ class ServiceRuntimeTests(unittest.TestCase):
             server.shutdown();server.server_close();serving.join(2)
             vars(builtins).pop('_host_mixed_read', None);vars(builtins).pop('_host_mixed_error', None)
 
+    def test_registered_media_stream_reads_keep_chunk_bound_without_cumulative_download_cap(self):
+        thread = threading.current_thread()
+        previous_limit = runtime._max_http_response_bytes
+        previous_reader = runtime._http_response_read1
+        previous_owner = vars(thread).get('_host_session')
+        previous_stream = vars(thread).get('_host_media_stream_read')
+        calls = []
+        response = type('Response', (), {'_cctvhost_bytes_read': 8, 'length': 1024})()
+        runtime._max_http_response_bytes = 8
+        runtime._http_response_read1 = lambda current, amount: calls.append(amount) or b'x' * amount
+        thread._host_session = object()
+        thread._host_media_stream_read = True
+        try:
+            chunk = runtime._bounded_http_response_read1(response, 100000)
+            self.assertEqual(len(chunk), 65536)
+            self.assertEqual(calls, [65536])
+            self.assertEqual(response._cctvhost_bytes_read, 8)
+        finally:
+            runtime._max_http_response_bytes = previous_limit
+            runtime._http_response_read1 = previous_reader
+            if previous_owner is None: vars(thread).pop('_host_session', None)
+            else: thread._host_session = previous_owner
+            if previous_stream is None: vars(thread).pop('_host_media_stream_read', None)
+            else: thread._host_media_stream_read = previous_stream
+
     def test_urllib_response_body_limit_rejects_large_payload_with_service_context(self):
         payload = b'012345678'
 

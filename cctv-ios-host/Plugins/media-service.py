@@ -51,7 +51,7 @@ class Server(ThreadingHTTPServer):
 
     def __init__(self, address, runtime):
         self.runtime = runtime
-        self.relay = MediaRelay()
+        self.relay = MediaRelay(stream_media=True)
         self.artwork_relay = MediaRelay()
         self.slots = threading.BoundedSemaphore(6)
         super().__init__(address, Handler)

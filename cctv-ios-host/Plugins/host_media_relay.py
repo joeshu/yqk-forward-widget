@@ -47,8 +47,9 @@ def safe_error_summary(error):
 
 
 class MediaRelay:
-    def __init__(self, limit=256, segment_limit=16384):
+    def __init__(self, limit=256, segment_limit=16384, stream_media=False):
         self.limit = limit
+        self.stream_media = bool(stream_media)
         self.targets = collections.OrderedDict()
         self.segments = collections.OrderedDict()
         self.segment_index = {}
@@ -469,7 +470,18 @@ class MediaRelay:
                     self._write_client(handler, prefix)
                 while not self.stopping.is_set():
                     reader = response.read1 if callable(getattr(type(response), 'read1', None)) else response.read
-                    chunk = reader(65536)
+                    thread = threading.current_thread()
+                    previous_stream_read = getattr(thread, '_host_media_stream_read', None)
+                    if self.stream_media: thread._host_media_stream_read = True
+                    try:
+                        chunk = reader(65536)
+                    finally:
+                        if self.stream_media:
+                            if previous_stream_read is None:
+                                try: del thread._host_media_stream_read
+                                except AttributeError: pass
+                            else:
+                                thread._host_media_stream_read = previous_stream_read
                     if not chunk:
                         break
                     received_bytes += len(chunk)

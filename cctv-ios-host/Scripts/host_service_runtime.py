@@ -478,9 +478,18 @@ def _flush_http_rejection_summaries(owner):
 
 
 def _bounded_http_response_read_using(response, amt, reader):
-    owner = getattr(threading.current_thread(), '_host_session', None)
+    thread = threading.current_thread()
+    owner = getattr(thread, '_host_session', None)
     if owner is None:
         return reader(response, amt)
+
+    # Registered media is copied to AVPlayer in bounded chunks by the relay.
+    # Its byte lifetime can exceed the plugin's ordinary response budget; do
+    # not mistake a long stream for an in-memory plugin download. The relay
+    # opts in only around each <=64 KiB streaming read.
+    if getattr(thread, '_host_media_stream_read', False):
+        amount = 65536 if amt is None or amt < 0 else min(max(0, int(amt)), 65536)
+        return reader(response, amount)
 
     limit = max(1, int(_max_http_response_bytes))
     already_read = int(getattr(response, '_cctvhost_bytes_read', 0))
