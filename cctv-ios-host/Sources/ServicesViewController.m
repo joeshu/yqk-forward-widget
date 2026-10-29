@@ -327,6 +327,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 @property(nonatomic, strong) NSArray<NSDictionary *> *services;
 @property(nonatomic, strong) UISearchController *search;
 @property(nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *sections;
+@property(nonatomic, copy) NSArray<NSString *> *sectionTitles;
 @property(nonatomic, copy) NSString *displayedRunningID;
 @property(nonatomic, copy) NSString *displayedRuntimeStatus;
 @end
@@ -387,7 +388,11 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     self.services=filtered;self.displayedRunningID=runningID;self.displayedRuntimeStatus=runtimeStatus;
     NSMutableArray *running=[NSMutableArray array], *pending=[NSMutableArray array], *stopped=[NSMutableArray array];
     for(NSDictionary *service in filtered){NSString *identifier=service[@"id"];NSMutableArray *target=([PyHost isStartingServiceIdentifier:identifier]||[PyHost hasUncertainSessionForServiceIdentifier:identifier])?pending:([PyHost isRunningServiceIdentifier:identifier]?running:([PyHost isManagedServiceIdentifier:identifier]?pending:stopped));[target addObject:service];}
-    self.sections=@[running,pending,stopped];
+    NSMutableArray *visibleSections=[NSMutableArray array];NSMutableArray *titles=[NSMutableArray array];
+    if(running.count){[visibleSections addObject:running];[titles addObject:@"运行时活跃 · HTTP 状态单独检测"];}
+    if(pending.count){[visibleSections addObject:pending];[titles addObject:@"启停结果待确认 · 可关闭后清理"];}
+    if(stopped.count){[visibleSections addObject:stopped];[titles addObject:@"已停止"];}
+    self.sections=visibleSections;self.sectionTitles=titles;
     [self.table reloadData];
 }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
@@ -399,7 +404,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     [self.navigationController pushViewController:v animated:YES];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 3;
+    return self.sections.count;
 }
 - (NSArray *)rows:(NSInteger)section {
     return section<self.sections.count?self.sections[section]:@[];
@@ -408,7 +413,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     return [self rows:section].count;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return section==0?@"运行时活跃 · HTTP 状态单独检测":(section==1?@"启停结果待确认 · 可关闭后清理":@"已停止");
+    return section<self.sectionTitles.count?self.sectionTitles[section]:nil;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     NSDictionary *s = [self rows:ip.section][ip.row];

@@ -42,6 +42,20 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('onToggle=^', self.root)
         self.assertIn('isRunningServiceIdentifier', self.root)
 
+    def test_service_directory_omits_empty_runtime_groups(self):
+        services = (ROOT / 'Sources/ServicesViewController.m').read_text()
+        self.assertIn('if(running.count){[visibleSections addObject:running]', services)
+        self.assertIn('if(pending.count){[visibleSections addObject:pending]', services)
+        self.assertIn('if(stopped.count){[visibleSections addObject:stopped]', services)
+        self.assertIn('return self.sections.count;', services)
+        self.assertIn('return section<self.sectionTitles.count?self.sectionTitles[section]:nil;', services)
+
+    def test_import_sheet_uses_an_opaque_theme_surface(self):
+        sheet = (ROOT / 'Sources/ResourceImportSheetViewController.m').read_text()
+        self.assertIn('alpha:1]:[UIColor colorWithRed:0.94 green:0.949 blue:0.969 alpha:1]', sheet)
+        self.assertIn('self.view.backgroundColor=sheetSurface', sheet)
+        self.assertIn('self.tableView.backgroundColor=sheetSurface', sheet)
+
     def test_resource_single_taps_show_details_or_choices_instead_of_implicitly_switching_pages(self):
         selection = self.catalog[self.catalog.index('- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:'):]
         self.assertIn('self.onOpenResource(source)', selection)

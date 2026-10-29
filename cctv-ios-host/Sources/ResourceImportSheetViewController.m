@@ -103,7 +103,8 @@
 @implementation ResourceImportSheetViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor=HostBackground();
+    UIColor *sheetSurface=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.055 green:0.059 blue:0.075 alpha:1]:[UIColor colorWithRed:0.94 green:0.949 blue:0.969 alpha:1];}];
+    self.view.backgroundColor=sheetSurface;
 
     UIView *header=[UIView new];
     header.translatesAutoresizingMaskIntoConstraints=NO;
@@ -131,7 +132,7 @@
     [header addSubview:close];
 
     self.tableView=[[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
-    self.tableView.backgroundColor=self.view.backgroundColor;
+    self.tableView.backgroundColor=sheetSurface;
     self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;
     self.tableView.dataSource=self;
     self.tableView.delegate=self;
