@@ -762,7 +762,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         fixture = (ROOT / 'Tests/UISmoke/fixture_server.py').read_text()
         self.assertIn('X-Fixture-Playback', fixture)
         self.assertIn('self.headers.get("Referer")', fixture)
-        self.assertIn('等待视频帧超时', self.playback)
+        self.assertIn('播放器尚未显示画面', self.playback)
         self.assertNotIn('首帧渲染状态未知', self.playback)
 
     def test_web_playback_close_keeps_native_fallback_action_available(self):

@@ -273,6 +273,10 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         self.assertIn('player_waiting_to_play', PLAYBACK)
         self.assertIn('playback_first_frame_ready', PLAYBACK)
         self.assertIn('playback_video_frame_timeout', PLAYBACK)
+        self.assertIn('playback_video_track_inspected', PLAYBACK)
+        self.assertIn('asset_video_track_count', PLAYBACK)
+        self.assertIn('video_codec_fourcc', PLAYBACK)
+        self.assertIn('video_layer_ready_for_display', PLAYBACK)
         self.assertIn('playback_first_frame_ready', PLAYBACK)
         self.assertIn('elapsed_ms', MEDIA)
 
