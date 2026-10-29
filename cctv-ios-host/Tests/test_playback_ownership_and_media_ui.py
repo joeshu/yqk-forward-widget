@@ -122,6 +122,13 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertNotIn('搜索资源', RESOURCE_SOURCE)
         self.assertNotIn('self.navigationItem.searchController=self.search', RESOURCE_SOURCE)
 
+    def test_resource_page_has_visible_services_and_add_buttons_above_filters(self):
+        self.assertIn('accessibilityIdentifier=@"resource-services-primary"', RESOURCE_SOURCE)
+        self.assertIn('accessibilityIdentifier=@"resource-add-primary"', RESOURCE_SOURCE)
+        self.assertIn('addTarget:self action:@selector(openServices)', RESOURCE_SOURCE)
+        self.assertIn('addTarget:self action:@selector(add)', RESOURCE_SOURCE)
+        self.assertIn('self.kindScroll.topAnchor constraintEqualToAnchor:self.servicesButton.bottomAnchor', RESOURCE_SOURCE)
+
 
 if __name__ == "__main__":
     unittest.main()

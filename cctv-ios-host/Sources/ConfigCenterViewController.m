@@ -10,6 +10,8 @@
 @property(nonatomic, strong) UIScrollView *kindScroll;
 @property(nonatomic, strong) UIStackView *kindStack;
 @property(nonatomic, strong) UIView *resourceHeader;
+@property(nonatomic, strong) UIButton *servicesButton;
+@property(nonatomic, strong) UIButton *addResourceButton;
 @property(nonatomic, strong) NSLayoutConstraint *kindScrollHeightConstraint;
 @property(nonatomic, copy) NSString *selectedKind;
 @property(nonatomic, strong) UILabel *emptyLabel;
@@ -31,11 +33,13 @@
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 116;
     self.selectedKind=@"all";
-    self.resourceHeader=[[UIView alloc] initWithFrame:CGRectMake(0,0,MAX(1,self.tableView.bounds.size.width),48)];
+    self.resourceHeader=[[UIView alloc] initWithFrame:CGRectMake(0,0,MAX(1,self.tableView.bounds.size.width),104)];
+    self.servicesButton=[UIButton buttonWithType:UIButtonTypeSystem];self.servicesButton.translatesAutoresizingMaskIntoConstraints=NO;self.servicesButton.accessibilityIdentifier=@"resource-services-primary";self.servicesButton.accessibilityLabel=@"脚本与服务";UIButtonConfiguration *servicesConfig=[UIButtonConfiguration filledButtonConfiguration];servicesConfig.title=@"脚本与服务";servicesConfig.image=[UIImage systemImageNamed:@"slider.horizontal.3"];servicesConfig.imagePlacement=NSDirectionalRectEdgeLeading;servicesConfig.imagePadding=9;servicesConfig.contentInsets=NSDirectionalEdgeInsetsMake(12,16,12,16);servicesConfig.cornerStyle=UIButtonConfigurationCornerStyleCapsule;servicesConfig.baseBackgroundColor=HostRaisedSurface();servicesConfig.baseForegroundColor=HostText();self.servicesButton.configuration=servicesConfig;self.servicesButton.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeading;self.servicesButton.layer.borderWidth=.7;HostSetLayerBorderColor(self.servicesButton,HostBorder());HostInstallPressFeedback(self.servicesButton);[self.servicesButton addTarget:self action:@selector(openServices) forControlEvents:UIControlEventTouchUpInside];[self.resourceHeader addSubview:self.servicesButton];
+    self.addResourceButton=[UIButton buttonWithType:UIButtonTypeSystem];self.addResourceButton.translatesAutoresizingMaskIntoConstraints=NO;self.addResourceButton.accessibilityIdentifier=@"resource-add-primary";self.addResourceButton.accessibilityLabel=@"添加资源";UIButtonConfiguration *addConfig=[UIButtonConfiguration plainButtonConfiguration];addConfig.title=@"添加";addConfig.image=[UIImage systemImageNamed:@"plus"];addConfig.imagePlacement=NSDirectionalRectEdgeLeading;addConfig.imagePadding=4;addConfig.contentInsets=NSDirectionalEdgeInsetsMake(8,12,8,12);addConfig.cornerStyle=UIButtonConfigurationCornerStyleCapsule;addConfig.baseForegroundColor=HostAccent();addConfig.background.backgroundColor=HostRaisedSurface();addConfig.background.strokeColor=HostBorder();addConfig.background.strokeWidth=.7;self.addResourceButton.configuration=addConfig;self.addResourceButton.titleLabel.adjustsFontForContentSizeCategory=YES;HostInstallPressFeedback(self.addResourceButton);[self.addResourceButton addTarget:self action:@selector(add) forControlEvents:UIControlEventTouchUpInside];[self.resourceHeader addSubview:self.addResourceButton];
     self.kindScroll=[UIScrollView new];self.kindScroll.translatesAutoresizingMaskIntoConstraints=NO;self.kindScroll.showsHorizontalScrollIndicator=NO;self.kindScroll.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;
     self.kindStack=[UIStackView new];self.kindStack.translatesAutoresizingMaskIntoConstraints=NO;self.kindStack.axis=UILayoutConstraintAxisHorizontal;self.kindStack.spacing=8;[self.kindScroll addSubview:self.kindStack];[self.resourceHeader addSubview:self.kindScroll];
     self.kindScrollHeightConstraint=[self.kindScroll.heightAnchor constraintEqualToConstant:48];
-    [NSLayoutConstraint activateConstraints:@[[self.kindScroll.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:10],[self.kindScroll.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor],[self.kindScroll.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor constant:3],[self.kindScroll.bottomAnchor constraintEqualToAnchor:self.resourceHeader.bottomAnchor constant:-3],self.kindScrollHeightConstraint,[self.kindStack.leadingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.leadingAnchor],[self.kindStack.trailingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.trailingAnchor constant:-10],[self.kindStack.topAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.topAnchor],[self.kindStack.bottomAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.bottomAnchor],[self.kindStack.heightAnchor constraintEqualToAnchor:self.kindScroll.frameLayoutGuide.heightAnchor]]];
+    [NSLayoutConstraint activateConstraints:@[[self.servicesButton.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:16],[self.servicesButton.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor constant:10],[self.servicesButton.heightAnchor constraintGreaterThanOrEqualToConstant:48],[self.addResourceButton.leadingAnchor constraintEqualToAnchor:self.servicesButton.trailingAnchor constant:10],[self.addResourceButton.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-16],[self.addResourceButton.centerYAnchor constraintEqualToAnchor:self.servicesButton.centerYAnchor],[self.addResourceButton.heightAnchor constraintGreaterThanOrEqualToConstant:44],[self.addResourceButton.widthAnchor constraintGreaterThanOrEqualToConstant:76],[self.servicesButton.trailingAnchor constraintEqualToAnchor:self.addResourceButton.leadingAnchor constant:-10],[self.kindScroll.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:10],[self.kindScroll.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor],[self.kindScroll.topAnchor constraintEqualToAnchor:self.servicesButton.bottomAnchor constant:4],[self.kindScroll.bottomAnchor constraintEqualToAnchor:self.resourceHeader.bottomAnchor constant:-3],self.kindScrollHeightConstraint,[self.kindStack.leadingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.leadingAnchor],[self.kindStack.trailingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.trailingAnchor constant:-10],[self.kindStack.topAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.topAnchor],[self.kindStack.bottomAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.bottomAnchor],[self.kindStack.heightAnchor constraintEqualToAnchor:self.kindScroll.frameLayoutGuide.heightAnchor]]];
     self.tableView.tableHeaderView=self.resourceHeader;
     self.tableView.contentInset=UIEdgeInsetsMake(0,0,78,0);self.tableView.scrollIndicatorInsets=UIEdgeInsetsMake(0,0,78,0);
     self.emptyLabel=[UILabel new];self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.tableView.backgroundView=self.emptyLabel;
@@ -77,7 +81,7 @@
     NSArray *definitions=@[@{@"id":@"all",@"name":@"全部"},@{@"id":@"vod",@"name":@"影视"},@{@"id":@"live",@"name":@"直播"},@{@"id":@"catalog",@"name":@"合集"},@{@"id":@"script",@"name":@"脚本"},@{@"id":@"attention",@"name":@"待检查"}];
     for(UIView *view in self.kindStack.arrangedSubviews.copy){[self.kindStack removeArrangedSubview:view];[view removeFromSuperview];}
     for(NSDictionary *definition in definitions){NSString *identifier=definition[@"id"];NSUInteger count=[[self.allProfiles filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *profile,NSDictionary *bindings){return [self profile:profile matchesKind:identifier];}]] count];UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.accessibilityIdentifier=[@"resource-filter-" stringByAppendingString:identifier];button.accessibilityLabel=[NSString stringWithFormat:@"%@，%lu 项",definition[@"name"],(unsigned long)count];button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;HostStylePillButton(button,[identifier isEqual:self.selectedKind]);button.contentEdgeInsets=UIEdgeInsetsMake(7,12,7,12);button.layer.cornerRadius=16;[button setTitle:[NSString stringWithFormat:@"%@ %lu",definition[@"name"],(unsigned long)count] forState:UIControlStateNormal];[button addTarget:self action:@selector(selectKind:) forControlEvents:UIControlEventTouchUpInside];[self.kindStack addArrangedSubview:button];}
-    UIButton *firstFilter=(UIButton *)self.kindStack.arrangedSubviews.firstObject;CGFloat pillHeight=MAX(42,ceil(firstFilter.titleLabel.font.lineHeight+14));CGFloat headerHeight=pillHeight+6;self.kindScrollHeightConstraint.constant=headerHeight-6;UIView *header=self.tableView.tableHeaderView;if(header&&fabs(header.frame.size.height-headerHeight)>0.5){CGRect frame=header.frame;frame.size.height=headerHeight;header.frame=frame;self.tableView.tableHeaderView=header;}
+    UIButton *firstFilter=(UIButton *)self.kindStack.arrangedSubviews.firstObject;CGFloat pillHeight=MAX(42,ceil(firstFilter.titleLabel.font.lineHeight+14));CGFloat headerHeight=58+pillHeight+6;self.kindScrollHeightConstraint.constant=headerHeight-58;UIView *header=self.tableView.tableHeaderView;if(header&&fabs(header.frame.size.height-headerHeight)>0.5){CGRect frame=header.frame;frame.size.height=headerHeight;header.frame=frame;self.tableView.tableHeaderView=header;}
 }
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
@@ -93,7 +97,7 @@
         if(![self profile:p matchesKind:self.selectedKind?:@"all"])return NO;
         return [p[@"type"] isEqual:@"plugin"]||[p[@"type"] isEqual:@"tvbox"]||source.length>0||[p[@"native"] boolValue];
     }]];
-    if([self.profiles isEqualToArray:profiles]){self.emptyLabel.text=profiles.count?@"":@"还没有导入资源\n点击右下角资源操作按钮添加影视脚本、直播服务或订阅列表";return;}self.profiles=profiles;self.emptyLabel.text=profiles.count?@"":@"还没有导入资源\n点击右下角资源操作按钮添加影视脚本、直播服务或订阅列表";
+    if([self.profiles isEqualToArray:profiles]){self.emptyLabel.text=profiles.count?@"":@"还没有导入资源\n点顶部“添加”导入影视脚本、直播服务或订阅列表";return;}self.profiles=profiles;self.emptyLabel.text=profiles.count?@"":@"还没有导入资源\n点顶部“添加”导入影视脚本、直播服务或订阅列表";
     [self.tableView reloadData];
 }
 - (void)kindChanged {[self reloadProfiles];}
@@ -101,6 +105,7 @@
     if (self.onAdd)
         self.onAdd();
 }
+- (void)openServices { if(self.onServices)self.onServices(); }
 - (void)refreshProfiles {
     if (self.onRefresh)
         self.onRefresh();
@@ -122,7 +127,7 @@
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     NSUInteger enabledSubscriptions=0,runningServices=0,catalogs=0;
     for(NSDictionary *p in self.profiles){if([p[@"type"] isEqual:@"plugin"]){if([p[@"enabled"] boolValue])runningServices++;}else if([p[@"type"] isEqual:@"tvbox"])catalogs++;else if([p[@"enabled"] boolValue])enabledSubscriptions++;}
-    return [NSString stringWithFormat:@"显示 %lu / %lu 项 · %lu 个合集 · %lu 个订阅启用 · %lu 个服务运行中",(unsigned long)self.profiles.count,(unsigned long)self.allProfiles.count,(unsigned long)catalogs,(unsigned long)enabledSubscriptions,(unsigned long)runningServices];
+    return [NSString stringWithFormat:@"%lu 项 · %lu 个合集 · %lu 个订阅启用 · %lu 个服务运行中",(unsigned long)self.profiles.count,(unsigned long)catalogs,(unsigned long)enabledSubscriptions,(unsigned long)runningServices];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:@"profile"];
