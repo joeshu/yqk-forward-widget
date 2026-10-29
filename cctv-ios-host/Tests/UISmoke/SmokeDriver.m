@@ -5,6 +5,7 @@
 #import "NativeChannelPreloader.h"
 #import "PyHost.h"
 #import "RootViewController.h"
+#import "ConfigCenterViewController.h"
 #import "ServiceEditorViewController.h"
 #import "ServiceStore.h"
 #import "ProfileStore.h"
