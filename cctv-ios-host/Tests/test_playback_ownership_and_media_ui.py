@@ -127,6 +127,9 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('accessibilityIdentifier=@"resource-add-primary"', RESOURCE_SOURCE)
         self.assertIn('addTarget:self action:@selector(openServices)', RESOURCE_SOURCE)
         self.assertIn('addTarget:self action:@selector(add)', RESOURCE_SOURCE)
+        self.assertIn('[self.servicesButton.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor]', RESOURCE_SOURCE)
+        self.assertNotIn('self.servicesButton.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor constant:10', RESOURCE_SOURCE)
+        self.assertIn('CGFloat headerHeight=servicesHeight+4+pillHeight+3', RESOURCE_SOURCE)
         self.assertIn('self.kindScroll.topAnchor constraintEqualToAnchor:self.servicesButton.bottomAnchor', RESOURCE_SOURCE)
 
 
