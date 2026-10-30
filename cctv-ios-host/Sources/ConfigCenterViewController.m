@@ -15,6 +15,7 @@
 @property(nonatomic, strong) UITextField *resourceSearchField;
 @property(nonatomic, copy) NSString *searchQuery;
 @property(nonatomic, strong) NSLayoutConstraint *kindScrollHeightConstraint;
+@property(nonatomic, strong) NSLayoutConstraint *resourceHeaderTopConstraint;
 @property(nonatomic, copy) NSString *selectedKind;
 @property(nonatomic, strong) UILabel *emptyLabel;
 - (void)confirmRemoveProfile:(NSString *)source;
@@ -53,7 +54,8 @@
     self.kindScroll=[UIScrollView new];self.kindScroll.translatesAutoresizingMaskIntoConstraints=NO;self.kindScroll.showsHorizontalScrollIndicator=NO;self.kindScroll.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;
     self.kindStack=[UIStackView new];self.kindStack.translatesAutoresizingMaskIntoConstraints=NO;self.kindStack.axis=UILayoutConstraintAxisHorizontal;self.kindStack.spacing=8;[self.kindScroll addSubview:self.kindStack];[self.resourceHeader addSubview:self.kindScroll];
     self.kindScrollHeightConstraint=[self.kindScroll.heightAnchor constraintEqualToConstant:48];
-    [NSLayoutConstraint activateConstraints:@[[self.topActionsStack.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor constant:8],[self.topActionsStack.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-16],[self.topActionsStack.widthAnchor constraintEqualToConstant:176],[self.topActionsStack.heightAnchor constraintEqualToConstant:44],[self.resourceTitleLabel.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:20],[self.resourceTitleLabel.topAnchor constraintEqualToAnchor:self.topActionsStack.bottomAnchor constant:8],[self.resourceTitleLabel.heightAnchor constraintGreaterThanOrEqualToConstant:42],[self.resourceSearchField.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:20],[self.resourceSearchField.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-20],[self.resourceSearchField.topAnchor constraintEqualToAnchor:self.resourceTitleLabel.bottomAnchor constant:6],[self.resourceSearchField.heightAnchor constraintEqualToConstant:44],[self.kindScroll.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:10],[self.kindScroll.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor],[self.kindScroll.topAnchor constraintEqualToAnchor:self.resourceSearchField.bottomAnchor constant:12],[self.kindScroll.bottomAnchor constraintEqualToAnchor:self.resourceHeader.bottomAnchor constant:-6],self.kindScrollHeightConstraint,[self.kindStack.leadingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.leadingAnchor],[self.kindStack.trailingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.trailingAnchor constant:-10],[self.kindStack.topAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.topAnchor],[self.kindStack.bottomAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.bottomAnchor],[self.kindStack.heightAnchor constraintEqualToAnchor:self.kindScroll.frameLayoutGuide.heightAnchor]]];
+    self.resourceHeaderTopConstraint=[self.topActionsStack.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor constant:8];
+    [NSLayoutConstraint activateConstraints:@[self.resourceHeaderTopConstraint,[self.topActionsStack.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-16],[self.topActionsStack.widthAnchor constraintEqualToConstant:176],[self.topActionsStack.heightAnchor constraintEqualToConstant:44],[self.resourceTitleLabel.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:20],[self.resourceTitleLabel.topAnchor constraintEqualToAnchor:self.topActionsStack.bottomAnchor constant:8],[self.resourceTitleLabel.heightAnchor constraintGreaterThanOrEqualToConstant:42],[self.resourceSearchField.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:20],[self.resourceSearchField.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-20],[self.resourceSearchField.topAnchor constraintEqualToAnchor:self.resourceTitleLabel.bottomAnchor constant:6],[self.resourceSearchField.heightAnchor constraintEqualToConstant:44],[self.kindScroll.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:10],[self.kindScroll.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor],[self.kindScroll.topAnchor constraintEqualToAnchor:self.resourceSearchField.bottomAnchor constant:12],[self.kindScroll.bottomAnchor constraintEqualToAnchor:self.resourceHeader.bottomAnchor constant:-6],self.kindScrollHeightConstraint,[self.kindStack.leadingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.leadingAnchor],[self.kindStack.trailingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.trailingAnchor constant:-10],[self.kindStack.topAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.topAnchor],[self.kindStack.bottomAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.bottomAnchor],[self.kindStack.heightAnchor constraintEqualToAnchor:self.kindScroll.frameLayoutGuide.heightAnchor]]];
     self.tableView.tableHeaderView=self.resourceHeader;
     self.tableView.contentInset=UIEdgeInsetsMake(0,0,78,0);self.tableView.scrollIndicatorInsets=UIEdgeInsetsMake(0,0,78,0);
     self.emptyLabel=[UILabel new];self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.tableView.backgroundView=self.emptyLabel;
@@ -71,12 +73,37 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self reloadProfiles];
+    [self.view setNeedsLayout];
+    [self.view layoutIfNeeded];
+    [self updateResourceHeaderLayout];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(runtimeStateDidChange) name:PyHostRuntimeStateDidChangeNotification object:nil];
 }
 - (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];}
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (void)runtimeStateDidChange {[self reloadProfiles];}
-- (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];UIView *header=self.tableView.tableHeaderView;if(header&&fabs(header.frame.size.width-self.tableView.bounds.size.width)>0.5){CGRect frame=header.frame;frame.size.width=self.tableView.bounds.size.width;header.frame=frame;self.tableView.tableHeaderView=header;}}
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    [self updateResourceHeaderLayout];
+}
+- (void)updateResourceHeaderLayout {
+    UIView *header=self.resourceHeader;
+    CGFloat width=CGRectGetWidth(self.tableView.bounds);
+    if(!header||width<=0)return;
+    self.resourceHeaderTopConstraint.constant=MAX(0,self.view.safeAreaInsets.top)+8;
+    // UITableView caches tableHeaderView's frame independently from its Auto
+    // Layout subtree. Re-measure after every width/safe-area change and assign
+    // the header back even when its width is unchanged, so returning from a
+    // pushed page cannot keep a stale clipped header height.
+    header.frame=CGRectMake(0,0,width,MAX(1,CGRectGetHeight(header.frame)));
+    [header setNeedsLayout];
+    [header layoutIfNeeded];
+    CGSize fitting=[header systemLayoutSizeFittingSize:CGSizeMake(width,UIViewNoIntrinsicMetric)
+                         withHorizontalFittingPriority:UILayoutPriorityRequired
+                               verticalFittingPriority:UILayoutPriorityFittingSizeLevel];
+    CGFloat measured=ceil(fitting.height);
+    if(measured>0&&fabs(CGRectGetHeight(header.frame)-measured)>0.5){CGRect frame=header.frame;frame.size.height=measured;header.frame=frame;}
+    if(self.tableView.tableHeaderView!=header||fabs(CGRectGetWidth(self.tableView.tableHeaderView.frame)-width)>0.5||fabs(CGRectGetHeight(self.tableView.tableHeaderView.frame)-CGRectGetHeight(header.frame))>0.5)self.tableView.tableHeaderView=header;
+}
 - (BOOL)profile:(NSDictionary *)profile matchesKind:(NSString *)kind {
     NSString *resourceKind=[profile[@"resourceKind"] isKindOfClass:NSString.class]?profile[@"resourceKind"]:@"unknown";
     NSString *status=[profile[@"status"] isKindOfClass:NSString.class]?profile[@"status"]:@"";
@@ -95,7 +122,7 @@
     NSArray *definitions=@[@{@"id":@"all",@"name":@"全部"},@{@"id":@"vod",@"name":@"影视"},@{@"id":@"live",@"name":@"直播"},@{@"id":@"catalog",@"name":@"合集"},@{@"id":@"script",@"name":@"脚本"},@{@"id":@"attention",@"name":@"待检查"}];
     for(UIView *view in self.kindStack.arrangedSubviews.copy){[self.kindStack removeArrangedSubview:view];[view removeFromSuperview];}
     for(NSDictionary *definition in definitions){NSString *identifier=definition[@"id"];NSUInteger count=[[self.allProfiles filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *profile,NSDictionary *bindings){return [self profile:profile matchesKind:identifier];}]] count];UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.accessibilityIdentifier=[@"resource-filter-" stringByAppendingString:identifier];button.accessibilityLabel=[NSString stringWithFormat:@"%@，%lu 项",definition[@"name"],(unsigned long)count];button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;HostStylePillButton(button,[identifier isEqual:self.selectedKind]);button.contentEdgeInsets=UIEdgeInsetsMake(7,12,7,12);button.layer.cornerRadius=16;[button setTitle:[NSString stringWithFormat:@"%@ %lu",definition[@"name"],(unsigned long)count] forState:UIControlStateNormal];[button addTarget:self action:@selector(selectKind:) forControlEvents:UIControlEventTouchUpInside];[self.kindStack addArrangedSubview:button];}
-    UIButton *firstFilter=(UIButton *)self.kindStack.arrangedSubviews.firstObject;CGFloat pillHeight=MAX(42,ceil(firstFilter.titleLabel.font.lineHeight+14));CGFloat titleHeight=MAX(42,ceil(self.resourceTitleLabel.font.lineHeight));CGFloat headerHeight=8+44+8+titleHeight+6+44+12+pillHeight+6;self.kindScrollHeightConstraint.constant=pillHeight;UIView *header=self.tableView.tableHeaderView;if(header&&fabs(header.frame.size.height-headerHeight)>0.5){CGRect frame=header.frame;frame.size.height=headerHeight;header.frame=frame;self.tableView.tableHeaderView=header;}
+    UIButton *firstFilter=(UIButton *)self.kindStack.arrangedSubviews.firstObject;CGFloat pillHeight=MAX(42,ceil(firstFilter.titleLabel.font.lineHeight+14));self.kindScrollHeightConstraint.constant=pillHeight;[self.resourceHeader setNeedsLayout];[self updateResourceHeaderLayout];
 }
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];

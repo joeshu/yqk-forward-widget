@@ -339,6 +339,10 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     self.table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.table.translatesAutoresizingMaskIntoConstraints = NO;
     self.table.backgroundColor = HostBackground();
+    // The table is already constrained inside the safe area. Disable UIKit's
+    // automatic scroll-view inset as well, otherwise the navigation/status
+    // inset may be applied a second time and leave a blank band above services.
+    self.table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;
     self.table.rowHeight = UITableViewAutomaticDimension;
     self.table.estimatedRowHeight=88;
     self.table.dataSource = self;
@@ -348,7 +352,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
         [self.table.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
         [self.table.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.table.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+        [self.table.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor]
     ]];
     __weak typeof(self) w=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
         @{@"icon":@"plus",@"title":@"添加服务",@"action":[UIAction actionWithHandler:^(UIAction *a){[w add];}]},

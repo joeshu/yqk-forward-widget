@@ -11,6 +11,7 @@ SETTINGS = (SOURCE.parent / "SettingsViewController.m").read_text(encoding="utf-
 SERVICES = (SOURCE.parent / "ServicesViewController.m").read_text(encoding="utf-8")
 EPG = (SOURCE.parent / "EPGViewController.m").read_text(encoding="utf-8")
 CONFIG = (SOURCE.parent / "ConfigCenterViewController.m").read_text(encoding="utf-8")
+SERVICE_UI = (SOURCE.parent / "ServicesViewController.m").read_text(encoding="utf-8")
 REDACTOR = (SOURCE.parent / "HostLogRedactor.m").read_text(encoding="utf-8")
 
 
@@ -159,6 +160,11 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('ServicesViewController *page', TEXT)
         self.assertIn('[weakSelf openPluginPage]', TEXT)
         self.assertIn('SettingsViewController *page', TEXT)
+
+    def test_service_directory_applies_safe_area_only_once(self):
+        self.assertIn('self.table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever', SERVICE_UI)
+        self.assertIn('[self.table.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor]', SERVICE_UI)
+        self.assertIn('[self.table.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor]', SERVICE_UI)
 
     def test_live_header_actions_follow_selected_channel_and_group(self):
         navigation = method_body("- (void)configureCatalogNavigation")
