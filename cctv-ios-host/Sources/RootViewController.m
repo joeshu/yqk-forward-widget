@@ -1750,7 +1750,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         // navigation bar's changing safe-area top to the entire child view;
         // UIKit can otherwise move the complete page when returning from a
         // pushed page while the bar visibility is being reconciled.
-        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat pageTop=resourcePage?0:top;self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,tabY-pageTop));[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
+        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];if(resourcePage)[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:top];CGFloat pageTop=resourcePage?0:top;self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,tabY-pageTop));[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
         self.resourceActionsButton.hidden=YES;self.resourceActionsButton.frame=CGRectMake(w-safe.right-18-58,CGRectGetMinY(self.bottomBar.frame)-12-58,58,58);
     }
     [self relayoutPlayer];

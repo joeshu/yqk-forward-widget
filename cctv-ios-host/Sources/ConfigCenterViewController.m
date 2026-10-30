@@ -16,6 +16,7 @@
 @property(nonatomic, copy) NSString *searchQuery;
 @property(nonatomic, strong) NSLayoutConstraint *kindScrollHeightConstraint;
 @property(nonatomic, strong) NSLayoutConstraint *resourceHeaderTopConstraint;
+@property(nonatomic) CGFloat statusBarSafeInset;
 @property(nonatomic, copy) NSString *selectedKind;
 @property(nonatomic, strong) UILabel *emptyLabel;
 - (void)confirmRemoveProfile:(NSString *)source;
@@ -89,7 +90,7 @@
     UIView *header=self.resourceHeader;
     CGFloat width=CGRectGetWidth(self.tableView.bounds);
     if(!header||width<=0)return;
-    self.resourceHeaderTopConstraint.constant=MAX(0,self.view.safeAreaInsets.top)+8;
+    self.resourceHeaderTopConstraint.constant=MAX(0,self.statusBarSafeInset)+8;
     // UITableView caches tableHeaderView's frame independently from its Auto
     // Layout subtree. Re-measure after every width/safe-area change and assign
     // the header back even when its width is unchanged, so returning from a
@@ -104,6 +105,7 @@
     if(measured>0&&fabs(CGRectGetHeight(header.frame)-measured)>0.5){CGRect frame=header.frame;frame.size.height=measured;header.frame=frame;}
     if(self.tableView.tableHeaderView!=header||fabs(CGRectGetWidth(self.tableView.tableHeaderView.frame)-width)>0.5||fabs(CGRectGetHeight(self.tableView.tableHeaderView.frame)-CGRectGetHeight(header.frame))>0.5)self.tableView.tableHeaderView=header;
 }
+- (void)setTopSafeAreaInset:(CGFloat)inset {if(!isfinite(inset))inset=0;inset=MAX(0,inset);if(fabs(self.statusBarSafeInset-inset)<0.5)return;self.statusBarSafeInset=inset;if(self.isViewLoaded)[self updateResourceHeaderLayout];}
 - (BOOL)profile:(NSDictionary *)profile matchesKind:(NSString *)kind {
     NSString *resourceKind=[profile[@"resourceKind"] isKindOfClass:NSString.class]?profile[@"resourceKind"]:@"unknown";
     NSString *status=[profile[@"status"] isKindOfClass:NSString.class]?profile[@"status"]:@"";
