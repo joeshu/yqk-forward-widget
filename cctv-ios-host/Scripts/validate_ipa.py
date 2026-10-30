@@ -65,11 +65,16 @@ def validate(path):
         result['build_variant'] = variant or 'legacy'
         linked = any('/Python.framework/' in name for name in result['binaries'][binary].get('dependencies', []))
         result['python_linked'] = linked
-        if variant in ('no-python', 'baseline09'):
+        if variant in ('no-python', 'baseline09', 'pre-epg'):
             assert not result['python_embedded'] and not linked, 'no-python build contains or links Python'
             assert not any(name.startswith(root + 'python/') for name in z.namelist()), 'no-python build includes stdlib'
             assert root + 'ysp-live.py' not in z.namelist(), 'no-python build includes bundled Python service'
             assert info['CFBundleIdentifier'].endswith('.nopy'), 'diagnostic bundle must install separately'
+            if variant == 'pre-epg':
+                executable_data = z.read(root + binary)
+                assert b'EPGViewController' not in executable_data, 'pre-epg build includes EPG class'
+                assert b'api.cntv.cn/epg/' not in executable_data, 'pre-epg build includes app EPG requests'
+                assert b'PyHost' not in executable_data, 'pre-epg build includes Python host'
         elif variant == 'full':
             assert result['python_embedded'] and linked, 'full build missing embedded or linked Python'
             assert root + 'host_service_runtime.py' in z.namelist(), 'full build missing service lifecycle manager'
