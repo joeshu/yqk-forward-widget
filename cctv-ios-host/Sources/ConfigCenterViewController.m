@@ -29,6 +29,10 @@
     [super viewDidLoad];
     self.title = @"";
     self.tableView.backgroundColor = HostBackground();
+    // RootViewController positions this embedded page at the safe-area top.
+    // Do not let UITableViewController apply that inset a second time when
+    // returning from a pushed page after the navigation bar was visible.
+    self.tableView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 116;

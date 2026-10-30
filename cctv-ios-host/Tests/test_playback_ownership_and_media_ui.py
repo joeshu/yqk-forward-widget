@@ -130,6 +130,7 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('[self.servicesButton.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor]', RESOURCE_SOURCE)
         self.assertNotIn('self.servicesButton.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor constant:10', RESOURCE_SOURCE)
         self.assertIn('CGFloat headerHeight=servicesHeight+4+pillHeight+3', RESOURCE_SOURCE)
+        self.assertIn('self.tableView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever', RESOURCE_SOURCE)
         self.assertIn('self.kindScroll.topAnchor constraintEqualToAnchor:self.servicesButton.bottomAnchor', RESOURCE_SOURCE)
 
 
