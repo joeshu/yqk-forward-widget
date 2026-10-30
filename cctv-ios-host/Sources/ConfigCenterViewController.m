@@ -9,6 +9,7 @@
 @property(nonatomic, strong) NSArray<NSDictionary *> *allProfiles;
 @property(nonatomic, strong) UIScrollView *kindScroll;
 @property(nonatomic, strong) UIStackView *kindStack;
+@property(nonatomic, copy) NSArray<UIButton *> *kindFilterButtons;
 @property(nonatomic, strong) UIView *resourceHeader;
 @property(nonatomic, strong) UIStackView *topActionsStack;
 @property(nonatomic, strong) UILabel *resourceTitleLabel;
@@ -39,7 +40,13 @@
     self.tableView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedRowHeight = 116;
+    // Resource rows vary greatly in height (native lists, scripts and service
+    // endpoints). Estimating them creates visible scroll jumps when returning
+    // to this page and UITableView replaces estimates with measured heights.
+    self.tableView.estimatedRowHeight = 0;
+    self.tableView.estimatedSectionHeaderHeight = 0;
+    self.tableView.estimatedSectionFooterHeight = 0;
+    self.tableView.sectionHeaderTopPadding = 0;
     self.selectedKind=@"all";
     self.resourceHeader=[[UIView alloc] initWithFrame:CGRectMake(0,0,MAX(1,self.tableView.bounds.size.width),220)];
     self.resourceHeader.backgroundColor=HostBackground();
@@ -122,9 +129,43 @@
 - (void)updateKindFilters {
     if(!self.kindStack)return;
     NSArray *definitions=@[@{@"id":@"all",@"name":@"全部"},@{@"id":@"vod",@"name":@"影视"},@{@"id":@"live",@"name":@"直播"},@{@"id":@"catalog",@"name":@"合集"},@{@"id":@"script",@"name":@"脚本"},@{@"id":@"attention",@"name":@"待检查"}];
-    for(UIView *view in self.kindStack.arrangedSubviews.copy){[self.kindStack removeArrangedSubview:view];[view removeFromSuperview];}
-    for(NSDictionary *definition in definitions){NSString *identifier=definition[@"id"];NSUInteger count=[[self.allProfiles filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *profile,NSDictionary *bindings){return [self profile:profile matchesKind:identifier];}]] count];UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.accessibilityIdentifier=[@"resource-filter-" stringByAppendingString:identifier];button.accessibilityLabel=[NSString stringWithFormat:@"%@，%lu 项",definition[@"name"],(unsigned long)count];button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;HostStylePillButton(button,[identifier isEqual:self.selectedKind]);button.contentEdgeInsets=UIEdgeInsetsMake(7,12,7,12);button.layer.cornerRadius=16;[button setTitle:[NSString stringWithFormat:@"%@ %lu",definition[@"name"],(unsigned long)count] forState:UIControlStateNormal];[button addTarget:self action:@selector(selectKind:) forControlEvents:UIControlEventTouchUpInside];[self.kindStack addArrangedSubview:button];}
-    UIButton *firstFilter=(UIButton *)self.kindStack.arrangedSubviews.firstObject;CGFloat pillHeight=MAX(42,ceil(firstFilter.titleLabel.font.lineHeight+14));self.kindScrollHeightConstraint.constant=pillHeight;[self.resourceHeader setNeedsLayout];[self updateResourceHeaderLayout];
+    if(self.kindFilterButtons.count!=definitions.count){
+        for(UIView *view in self.kindStack.arrangedSubviews.copy){[self.kindStack removeArrangedSubview:view];[view removeFromSuperview];}
+        NSMutableArray<UIButton *> *buttons=[NSMutableArray arrayWithCapacity:definitions.count];
+        for(NSDictionary *definition in definitions){
+            NSString *identifier=definition[@"id"];
+            UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];
+            button.accessibilityIdentifier=[@"resource-filter-" stringByAppendingString:identifier];
+            button.titleLabel.adjustsFontForContentSizeCategory=YES;
+            button.contentEdgeInsets=UIEdgeInsetsMake(7,12,7,12);
+            button.layer.cornerRadius=16;
+            [button addTarget:self action:@selector(selectKind:) forControlEvents:UIControlEventTouchUpInside];
+            [self.kindStack addArrangedSubview:button];
+            [buttons addObject:button];
+        }
+        self.kindFilterButtons=buttons;
+    }
+    for(NSUInteger index=0;index<definitions.count;index++){
+        NSDictionary *definition=definitions[index];
+        NSString *identifier=definition[@"id"];
+        NSUInteger count=0;
+        for(NSDictionary *profile in self.allProfiles)if([self profile:profile matchesKind:identifier])count++;
+        UIButton *button=self.kindFilterButtons[index];
+        BOOL selected=[identifier isEqual:self.selectedKind];
+        HostStylePillButton(button,selected);
+        button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+        button.titleLabel.adjustsFontForContentSizeCategory=YES;
+        button.contentEdgeInsets=UIEdgeInsetsMake(7,12,7,12);
+        button.layer.cornerRadius=16;
+        button.accessibilityLabel=[NSString stringWithFormat:@"%@，%lu 项",definition[@"name"],(unsigned long)count];
+        [button setTitle:[NSString stringWithFormat:@"%@ %lu",definition[@"name"],(unsigned long)count] forState:UIControlStateNormal];
+    }
+    UIButton *firstFilter=self.kindFilterButtons.firstObject;
+    CGFloat pillHeight=MAX(42,ceil(firstFilter.titleLabel.font.lineHeight+14));
+    if(fabs(self.kindScrollHeightConstraint.constant-pillHeight)>0.5){
+        self.kindScrollHeightConstraint.constant=pillHeight;
+        [self.resourceHeader setNeedsLayout];
+    }
 }
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
@@ -305,6 +346,21 @@
     [alert addAction:[UIAlertAction actionWithTitle:tvbox?(macCMS?@"移除接口":@"移除合集"):(plugin?@"移除资源":@"移除订阅") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){if(self.onDeleteProfile)self.onDeleteProfile(source);[self reloadProfiles];}]];
     [self presentViewController:alert animated:YES completion:nil];
 }
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {return UITableViewAutomaticDimension;}
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
+    UIView *container=[UIView new];
+    container.backgroundColor=UIColor.clearColor;
+    UILabel *label=[UILabel new];
+    label.translatesAutoresizingMaskIntoConstraints=NO;
+    label.text=[self tableView:tableView titleForHeaderInSection:section];
+    label.textColor=HostMutedText();
+    label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    label.adjustsFontForContentSizeCategory=YES;
+    label.numberOfLines=1;
+    label.accessibilityIdentifier=@"resource-list-summary";
+    [container addSubview:label];
+    [NSLayoutConstraint activateConstraints:@[[label.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:22],[label.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-16],[label.topAnchor constraintEqualToAnchor:container.topAnchor],[label.bottomAnchor constraintEqualToAnchor:container.bottomAnchor]]];
+    return container;
+}
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {return 34;}
 - (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section {return 4;}
 @end

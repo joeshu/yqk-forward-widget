@@ -289,7 +289,7 @@ static void next(NSArray *steps, NSUInteger index) {
             navigationProbe=[UIViewController new];navigationProbe.title=@"交互返回取消测试";[nav pushViewController:navigationProbe animated:NO];
           },
           @{ @"timeout":@8, @"until":^BOOL{return nav.topViewController==navigationProbe&&!nav.navigationBarHidden;}, @"run":^{check(nav.topViewController==navigationProbe&&!nav.navigationBarHidden,@"pushing a detail page restores the navigation bar");[(id)root navigationController:nav didShowViewController:navigationProbe animated:YES];check(!nav.navigationBarHidden,@"a cancelled interactive return keeps the visible detail navigation bar restored");[nav popViewControllerAnimated:NO];} },
-          @{ @"timeout":@8, @"until":^BOOL{return nav.topViewController==root&&nav.navigationBarHidden;}, @"run":^{check(nav.topViewController==root&&nav.navigationBarHidden,@"a completed return to the media home hides the navigation bar");check([[root valueForKey:@"channelGrid"] isHidden], @"media page hides live channel grid");capture(self.window, @"02-media");[root selectBottomTab:(id)tabs.arrangedSubviews[3]];UIButton *resourceActions=[root valueForKey:@"resourceActionsButton"];ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPage"];UIStackView *toolbar=[resourcePage valueForKey:@"topActionsStack"];UIButton *more=toolbar.arrangedSubviews.lastObject;UILabel *title=[resourcePage valueForKey:@"resourceTitleLabel"];UITextField *search=[resourcePage valueForKey:@"resourceSearchField"];check(nav.navigationBarHidden,@"resource tab keeps the title/navigation region hidden");check(root.title.length==0,@"resource tab has no large title");check(resourcePage.view.frame.origin.y==0,@"resource page keeps a stable full-root origin while navigation visibility changes");[root.view layoutIfNeeded];[resourcePage.view layoutIfNeeded];CGFloat toolbarTop=CGRectGetMinY(toolbar.frame),rootSafeTop=root.view.safeAreaInsets.top;check(fabs(toolbarTop-rootSafeTop-8)<1.5,[NSString stringWithFormat:@"resource toolbar remains 8 pt below the root safe area after return (toolbar=%.1f safe=%.1f)",toolbarTop,rootSafeTop]);check(resourceActions.hidden&&toolbar.arrangedSubviews.count==4&&more.menu.children.count==2,@"resource page exposes the four-button top toolbar and services menu");check([title.text isEqual:@"资源"]&&[search.placeholder isEqual:@"搜索资源"],@"resource page shows its title and inline search field");check(resourcePage.navigationItem.searchController==nil,@"resource page uses inline search rather than a navigation search controller");} },
+          @{ @"timeout":@8, @"until":^BOOL{return nav.topViewController==root&&nav.navigationBarHidden;}, @"run":^{check(nav.topViewController==root&&nav.navigationBarHidden,@"a completed return to the media home hides the navigation bar");check([[root valueForKey:@"channelGrid"] isHidden], @"media page hides live channel grid");capture(self.window, @"02-media");[root selectBottomTab:(id)tabs.arrangedSubviews[3]];UIButton *resourceActions=[root valueForKey:@"resourceActionsButton"];ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPage"];UIStackView *toolbar=[resourcePage valueForKey:@"topActionsStack"];UIButton *more=toolbar.arrangedSubviews.lastObject;UILabel *title=[resourcePage valueForKey:@"resourceTitleLabel"];UITextField *search=[resourcePage valueForKey:@"resourceSearchField"];check(nav.navigationBarHidden,@"resource tab keeps the title/navigation region hidden");check(root.title.length==0,@"resource tab has no large title");check(resourcePage.view.frame.origin.y==0,@"resource page keeps a stable full-root origin while navigation visibility changes");[root.view layoutIfNeeded];[resourcePage.view layoutIfNeeded];CGFloat toolbarTop=CGRectGetMinY(toolbar.frame),rootSafeTop=root.view.window.safeAreaInsets.top;check(fabs(toolbarTop-rootSafeTop-8)<1.5,[NSString stringWithFormat:@"resource toolbar remains 8 pt below the window safe area after return (toolbar=%.1f safe=%.1f)",toolbarTop,rootSafeTop]);check(resourceActions.hidden&&toolbar.arrangedSubviews.count==4&&more.menu.children.count==2,@"resource page exposes the four-button top toolbar and services menu");check([title.text isEqual:@"资源"]&&[search.placeholder isEqual:@"搜索资源"],@"resource page shows its title and inline search field");check(resourcePage.navigationItem.searchController==nil,@"resource page uses inline search rather than a navigation search controller");} },
           ^{
             check([[root valueForKey:@"tabPage"]
                       isKindOfClass:NSClassFromString(@"ConfigCenterViewController")],
@@ -371,6 +371,34 @@ static void next(NSArray *steps, NSUInteger index) {
                     saved = YES;
             check(saved, @"custom service editor saves code and metadata");
             [nav popToRootViewControllerAnimated:NO];
+          },
+          ^{
+            ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPage"];
+            check(nav.topViewController==root&&nav.navigationBarHidden&&[resourcePage isKindOfClass:ConfigCenterViewController.class],@"returning from service editing restores the resource page and its hidden navigation bar");
+            UIStackView *filters=[resourcePage valueForKey:@"kindStack"];
+            NSArray<UIView *> *filterInstances=[filters.arrangedSubviews copy];
+            [resourcePage reloadProfiles];
+            [resourcePage reloadProfiles];
+            [resourcePage.view layoutIfNeeded];
+            [resourcePage.tableView layoutIfNeeded];
+            BOOL filtersStable=filterInstances.count==6&&filters.arrangedSubviews.count==filterInstances.count;
+            for(NSUInteger index=0;filtersStable&&index<filterInstances.count;index++)filtersStable=filters.arrangedSubviews[index]==filterInstances[index];
+            check(filtersStable,@"resource filter controls keep the same views across repeated refreshes");
+            check(resourcePage.tableView.estimatedRowHeight==0&&resourcePage.tableView.estimatedSectionHeaderHeight==0,@"resource list measures variable-height rows and summary headers without estimates");
+            CGRect headerFrame=resourcePage.tableView.tableHeaderView.frame;
+            NSIndexPath *firstResource=[resourcePage.tableView numberOfRowsInSection:0]>0? [NSIndexPath indexPathForRow:0 inSection:0]:nil;
+            CGRect firstRow=firstResource?[resourcePage.tableView rectForRowAtIndexPath:firstResource]:CGRectZero;
+            check(!firstResource||CGRectGetMinY(firstRow)>=CGRectGetMaxY(headerFrame),@"resource rows begin after the measured top header without overlap");
+            CGFloat largestRowGap=0;BOOL resourceRowsOrdered=YES;
+            for(NSInteger row=1;row<[resourcePage.tableView numberOfRowsInSection:0];row++){
+                CGRect previous=[resourcePage.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:row-1 inSection:0]];
+                CGRect current=[resourcePage.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];
+                CGFloat gap=CGRectGetMinY(current)-CGRectGetMaxY(previous);
+                largestRowGap=MAX(largestRowGap,gap);
+                if(gap < -0.5)resourceRowsOrdered=NO;
+            }
+            check(resourceRowsOrdered&&largestRowGap<20,@"resource rows stay ordered without large scroll-layout gaps");
+            capture(self.window,@"04b-resource-return");
             [root selectBottomTab:(id)tabs.arrangedSubviews[4]];
           },
           ^{

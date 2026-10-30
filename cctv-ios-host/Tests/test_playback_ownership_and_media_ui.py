@@ -134,6 +134,7 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('- (void)setTopSafeAreaInset:(CGFloat)inset', RESOURCE_SOURCE)
         layout = method_body(ROOT_SOURCE, '- (void)viewDidLayoutSubviews')
         self.assertIn('BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class]', layout)
+        self.assertIn('CGFloat resourceSafeTop=self.view.window.safeAreaInsets.top', layout)
         self.assertIn('CGFloat pageTop=resourcePage?0:top', layout)
         self.assertIn('[self updateResourceHeaderLayout]', method_body(RESOURCE_SOURCE, '- (void)viewWillAppear:(BOOL)animated'))
         self.assertIn('NSString *query=self.searchQuery?:@""', RESOURCE_SOURCE)

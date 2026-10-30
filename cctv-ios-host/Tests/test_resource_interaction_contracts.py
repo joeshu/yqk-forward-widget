@@ -42,6 +42,16 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('onToggle=^', self.root)
         self.assertIn('isRunningServiceIdentifier', self.root)
 
+    def test_resource_return_layout_reuses_filters_and_measures_variable_rows(self):
+        self.assertIn('self.tableView.estimatedRowHeight = 0', self.catalog)
+        self.assertIn('self.tableView.estimatedSectionHeaderHeight = 0', self.catalog)
+        self.assertIn('self.tableView.estimatedSectionFooterHeight = 0', self.catalog)
+        filters = self.catalog.split('- (void)updateKindFilters {', 1)[1].split('- (void)traitCollectionDidChange:', 1)[0]
+        self.assertIn('if(self.kindFilterButtons.count!=definitions.count)', filters)
+        self.assertIn('UIButton *button=self.kindFilterButtons[index]', filters)
+        self.assertIn('viewForHeaderInSection', self.catalog)
+        self.assertIn('heightForHeaderInSection:(NSInteger)section {return 34;}', self.catalog)
+
     def test_service_directory_omits_empty_runtime_groups(self):
         services = (ROOT / 'Sources/ServicesViewController.m').read_text()
         self.assertIn('if(running.count){[visibleSections addObject:running]', services)
