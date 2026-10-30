@@ -119,19 +119,17 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('- (void)refreshProfiles;', RESOURCE_HEADER)
         self.assertIn('self.resourceActionsButton.frame=CGRectMake', ROOT_SOURCE)
         self.assertIn('||self.activeTab==3', ROOT_SOURCE)
-        self.assertNotIn('搜索资源', RESOURCE_SOURCE)
-        self.assertNotIn('self.navigationItem.searchController=self.search', RESOURCE_SOURCE)
+        self.assertIn('self.resourceSearchField.placeholder=@"搜索资源"', RESOURCE_SOURCE)
+        self.assertIn('accessibilityIdentifier=@"resource-search-field"', RESOURCE_SOURCE)
 
-    def test_resource_page_has_visible_services_and_add_buttons_above_filters(self):
-        self.assertIn('accessibilityIdentifier=@"resource-services-primary"', RESOURCE_SOURCE)
-        self.assertIn('accessibilityIdentifier=@"resource-add-primary"', RESOURCE_SOURCE)
-        self.assertIn('addTarget:self action:@selector(openServices)', RESOURCE_SOURCE)
-        self.assertIn('addTarget:self action:@selector(add)', RESOURCE_SOURCE)
-        self.assertIn('[self.servicesButton.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor]', RESOURCE_SOURCE)
-        self.assertNotIn('self.servicesButton.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor constant:10', RESOURCE_SOURCE)
-        self.assertIn('CGFloat headerHeight=servicesHeight+4+pillHeight+3', RESOURCE_SOURCE)
-        self.assertIn('self.tableView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever', RESOURCE_SOURCE)
-        self.assertIn('self.kindScroll.topAnchor constraintEqualToAnchor:self.servicesButton.bottomAnchor', RESOURCE_SOURCE)
+    def test_resource_page_matches_compact_toolbar_title_search_and_filters(self):
+        self.assertIn('accessibilityIdentifier=@"resource-action.more"', RESOURCE_SOURCE)
+        self.assertIn('accessibilityIdentifier=[@"resource-action." stringByAppendingString:item[@"label"]]', RESOURCE_SOURCE)
+        self.assertIn('UIAction *servicesAction=[UIAction actionWithTitle:@"脚本与服务"', RESOURCE_SOURCE)
+        self.assertIn('accessibilityIdentifier=@"resource-search-field"', RESOURCE_SOURCE)
+        self.assertIn('CGFloat headerHeight=8+44+8+titleHeight+6+44+12+pillHeight+6', RESOURCE_SOURCE)
+        self.assertIn('NSString *query=self.searchQuery?:@""', RESOURCE_SOURCE)
+        self.assertIn('self.resourceActionsButton.hidden=YES', ROOT_SOURCE)
 
 
 if __name__ == "__main__":

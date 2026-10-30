@@ -1004,7 +1004,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     BOOL media=[page isKindOfClass:MediaBrowserViewController.class];BOOL resource=[page isKindOfClass:ConfigCenterViewController.class];BOOL mediaHome=media&&((MediaBrowserViewController *)page).isHomeMode;BOOL hideNavigation=mediaHome||resource;self.navigationItem.largeTitleDisplayMode=media?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
     if(self.navigationController.topViewController==self&&self.navigationController.navigationBarHidden!=hideNavigation)[self.navigationController setNavigationBarHidden:hideNavigation animated:NO];
     self.tabPage=page;if(page.parentViewController!=self){[self addChildViewController:page];[self.view addSubview:page.view];[page didMoveToParentViewController:self];}else if(page.view.superview!=self.view)[self.view addSubview:page.view];self.title=(mediaHome||resource)?@"":(media?@"影视库":title);self.navigationItem.searchController=resource?nil:page.navigationItem.searchController;self.navigationItem.leftBarButtonItem=nil;
-    self.navigationItem.rightBarButtonItems=resource?nil:page.navigationItem.rightBarButtonItems;self.resourceActionsButton.hidden=!resource;[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];if(resource)[self.view bringSubviewToFront:self.resourceActionsButton];
+    self.navigationItem.rightBarButtonItems=resource?nil:page.navigationItem.rightBarButtonItems;self.resourceActionsButton.hidden=YES;[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
 }
 - (void)openMediaTab {
     MediaBrowserViewController *page=(MediaBrowserViewController *)self.tabPages[@2];
@@ -1746,7 +1746,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=frame;self.playbackPanel.view.hidden=!catalog;
         self.bottomBar.frame=CGRectMake(MAX(18,(w-420)/2),height-safe.bottom-64,MIN(w-36,420),56);self.bottomBarBackdrop.frame=self.bottomBar.frame;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
         self.tabPage.view.frame=CGRectMake(0,top,w,MAX(0,tabY-top));[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
-        self.resourceActionsButton.hidden=self.activeTab!=3;self.resourceActionsButton.frame=CGRectMake(w-safe.right-18-58,CGRectGetMinY(self.bottomBar.frame)-12-58,58,58);if(!self.resourceActionsButton.hidden)[self.view bringSubviewToFront:self.resourceActionsButton];
+        self.resourceActionsButton.hidden=YES;self.resourceActionsButton.frame=CGRectMake(w-safe.right-18-58,CGRectGetMinY(self.bottomBar.frame)-12-58,58,58);
     }
     [self relayoutPlayer];
     CGFloat overlayTop = self.fullscreen ? safe.top : 0;

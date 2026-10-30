@@ -633,11 +633,12 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('打开已有资源', importer)
         self.assertIn('[ServiceStore remove:identifier]', importer)
 
-    def test_imported_source_url_remains_visible_without_resource_search_bar(self):
+    def test_imported_source_url_remains_visible_with_inline_resource_search(self):
         self.assertIn('@"title":@"资源来源"', self.resource_detail)
         self.assertIn('copySource', self.resource_detail)
         self.assertNotIn('UISearchController', self.catalog)
-        self.assertNotIn('搜索资源', self.catalog)
+        self.assertIn('self.resourceSearchField.placeholder=@"搜索资源"', self.catalog)
+        self.assertIn('NSString *query=self.searchQuery?:@""', self.catalog)
 
     def test_list_restore_stops_when_source_has_no_more_pages(self):
         self.assertIn('owner.pendingRestorePage>requestedPage && [result[@"hasMore"] boolValue] && incoming.count', self.detail)
