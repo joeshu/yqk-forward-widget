@@ -11,6 +11,40 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     return [[value substringWithRange:prefix] stringByAppendingString:@"…"];
 }
 
+@interface CCTVResourceProfileCell : UITableViewCell
+@property(nonatomic,strong) UIImageView *profileIconView;
+@property(nonatomic,strong) UILabel *profileTitleLabel;
+@property(nonatomic,strong) UILabel *profileDetailLabel;
+@end
+
+@implementation CCTVResourceProfileCell
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
+    if((self=[super initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuseIdentifier])) {
+        self.profileIconView=[UIImageView new];self.profileIconView.translatesAutoresizingMaskIntoConstraints=NO;self.profileIconView.contentMode=UIViewContentModeScaleAspectFit;
+        self.profileTitleLabel=[UILabel new];self.profileTitleLabel.translatesAutoresizingMaskIntoConstraints=NO;self.profileTitleLabel.numberOfLines=2;self.profileTitleLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.profileTitleLabel.adjustsFontForContentSizeCategory=YES;
+        self.profileDetailLabel=[UILabel new];self.profileDetailLabel.translatesAutoresizingMaskIntoConstraints=NO;self.profileDetailLabel.numberOfLines=0;self.profileDetailLabel.lineBreakMode=NSLineBreakByCharWrapping;self.profileDetailLabel.adjustsFontForContentSizeCategory=YES;
+        [self.contentView addSubview:self.profileIconView];[self.contentView addSubview:self.profileTitleLabel];[self.contentView addSubview:self.profileDetailLabel];
+        [NSLayoutConstraint activateConstraints:@[
+            [self.profileIconView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:15],
+            [self.profileIconView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+            [self.profileIconView.widthAnchor constraintEqualToConstant:25],
+            [self.profileIconView.heightAnchor constraintEqualToConstant:25],
+            [self.profileTitleLabel.leadingAnchor constraintEqualToAnchor:self.profileIconView.trailingAnchor constant:13],
+            [self.profileTitleLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14],
+            [self.profileTitleLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],
+            [self.profileDetailLabel.leadingAnchor constraintEqualToAnchor:self.profileTitleLabel.leadingAnchor],
+            [self.profileDetailLabel.trailingAnchor constraintEqualToAnchor:self.profileTitleLabel.trailingAnchor],
+            [self.profileDetailLabel.topAnchor constraintEqualToAnchor:self.profileTitleLabel.bottomAnchor constant:4],
+            [self.profileDetailLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-12]
+        ]];
+    }
+    return self;
+}
+- (UILabel *)textLabel { return self.profileTitleLabel; }
+- (UILabel *)detailTextLabel { return self.profileDetailLabel; }
+- (UIImageView *)imageView { return self.profileIconView; }
+@end
+
 @interface ConfigCenterViewController () <UITextFieldDelegate>
 @property(nonatomic, strong) NSArray<NSDictionary *> *profiles;
 @property(nonatomic, strong) NSArray<NSDictionary *> *allProfiles;
@@ -282,9 +316,9 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     return [NSString stringWithFormat:@"%lu 项 · %lu 个合集 · %lu 个订阅启用 · %lu 个服务运行中",(unsigned long)self.profiles.count,(unsigned long)catalogs,(unsigned long)enabledSubscriptions,(unsigned long)runningServices];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:@"profile"];
+    CCTVResourceProfileCell *c = (id)[tableView dequeueReusableCellWithIdentifier:@"profile"];
     if (!c)
-        c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"profile"];
+        c = [[CCTVResourceProfileCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"profile"];
     c.backgroundColor = HostCard();
     c.layer.cornerRadius = 18;
     c.clipsToBounds = YES;

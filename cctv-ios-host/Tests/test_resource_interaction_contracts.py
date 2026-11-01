@@ -43,6 +43,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('isRunningServiceIdentifier', self.root)
 
     def test_resource_return_layout_reuses_filters_and_measures_variable_rows(self):
+        self.assertIn('@interface CCTVResourceProfileCell : UITableViewCell', self.catalog)
+        self.assertIn('profileDetailLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-12', self.catalog)
         self.assertIn('self.tableView.estimatedRowHeight = 0', self.catalog)
         self.assertIn('self.tableView.estimatedSectionHeaderHeight = 0', self.catalog)
         self.assertIn('self.tableView.estimatedSectionFooterHeight = 0', self.catalog)
