@@ -43,15 +43,15 @@ static inline UIUserInterfaceStyle HostSelectedInterfaceStyle(void) {
 
 static inline UIColor *HostBackground(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.018 green:0.021 blue:0.032 alpha:0.90]:[UIColor colorWithRed:0.925 green:0.938 blue:0.965 alpha:0.87];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.051 green:0.055 blue:0.075 alpha:1]:[UIColor colorWithRed:0.948 green:0.954 blue:0.974 alpha:1];}];});return color;
 }
 static inline UIColor *HostCard(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:0.105 alpha:0.88]:[UIColor colorWithWhite:1 alpha:0.78];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.082 green:0.090 blue:0.125 alpha:1]:[UIColor colorWithRed:0.990 green:0.991 blue:0.998 alpha:1];}];});return color;
 }
 static inline UIColor *HostRaisedSurface(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:0.18 alpha:0.91]:[UIColor colorWithWhite:0.985 alpha:0.88];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.110 green:0.122 blue:0.165 alpha:1]:[UIColor colorWithRed:0.918 green:0.926 blue:0.950 alpha:1];}];});return color;
 }
 static inline UIColor *HostText(void) {
     static UIColor *color;static dispatch_once_t once;
@@ -59,24 +59,24 @@ static inline UIColor *HostText(void) {
 }
 static inline UIColor *HostSecondaryText(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.68]:[UIColor colorWithWhite:0.27 alpha:1];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.62 green:0.65 blue:0.72 alpha:1]:[UIColor colorWithRed:0.31 green:0.33 blue:0.40 alpha:1];}];});return color;
 }
 static inline UIColor *HostAccent(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:1 green:0.16 blue:0.43 alpha:1]:[UIColor colorWithRed:0.78 green:0.04 blue:0.25 alpha:1];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:1 green:0.141 blue:0.259 alpha:1]:[UIColor colorWithRed:0.80 green:0.035 blue:0.16 alpha:1];}];});return color;
 }
 static inline UIColor *HostOnAccent(void) { return UIColor.whiteColor; }
 static inline UIColor *HostMutedText(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.68]:[UIColor colorWithWhite:0.28 alpha:0.82];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.62 green:0.65 blue:0.72 alpha:1]:[UIColor colorWithRed:0.35 green:0.37 blue:0.43 alpha:1];}];});return color;
 }
 static inline UIColor *HostGlassTint(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:0.10 alpha:0.46]:[UIColor colorWithWhite:1 alpha:0.68];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.085 green:0.092 blue:0.125 alpha:0.91]:[UIColor colorWithWhite:1 alpha:0.92];}];});return color;
 }
 static inline UIColor *HostBorder(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.11]:[UIColor colorWithWhite:0 alpha:0.09];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.07]:[UIColor colorWithWhite:0 alpha:0.08];}];});return color;
 }
 static inline UIColor *HostSeparator(void) {
     static UIColor *color;static dispatch_once_t once;
@@ -84,11 +84,11 @@ static inline UIColor *HostSeparator(void) {
 }
 static inline UIColor *HostNeutralSurface(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.09]:[UIColor colorWithWhite:0 alpha:0.055];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.13 green:0.14 blue:0.19 alpha:1]:[UIColor colorWithRed:0.91 green:0.92 blue:0.94 alpha:1];}];});return color;
 }
 static inline UIColor *HostSelectedSurface(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.16]:[UIColor colorWithWhite:0 alpha:0.07];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:1 green:0.141 blue:0.259 alpha:0.18]:[UIColor colorWithRed:0.80 green:0.035 blue:0.16 alpha:0.12];}];});return color;
 }
 static inline UIColor *HostHighlightedSurface(void) {
     static UIColor *color;static dispatch_once_t once;
@@ -180,7 +180,7 @@ static inline void HostRefreshAppearanceLayers(UIView *view) {
 static inline void HostStylePillButton(UIButton *button, BOOL primary) {
     HostInstallPressFeedback(button);
     button.contentEdgeInsets = UIEdgeInsetsMake(10, 16, 10, 16);
-    button.layer.cornerRadius = 18;
+    button.layer.cornerRadius = 15;
     button.layer.cornerCurve = kCACornerCurveContinuous;
     button.layer.borderWidth = primary ? 0 : 0.7;
     HostSetLayerBorderColor(button,HostBorder());

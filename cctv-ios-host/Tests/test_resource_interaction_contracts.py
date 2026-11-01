@@ -167,9 +167,10 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('selectionRow.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor', self.detail)
         self.assertIn('media-home-feature', self.detail)
         self.assertIn('- (void)addHomeFeatureCarousel:', self.detail)
-        self.assertIn('pagingEnabled=YES', self.detail)
+        self.assertIn('accessibilityIdentifier=@"media-home-feature-shelf"', self.detail)
+        self.assertNotIn('pagingEnabled=YES', self.detail)
         self.assertIn('UIPageControl', self.detail)
-        self.assertIn('MIN((NSUInteger)5,items.count)', self.detail)
+        self.assertIn('MIN((NSUInteger)10,items.count)', self.detail)
         self.assertIn('owner.generation!=generation', self.detail)
 
     def test_home_top_controls_floating_menu_and_navigation_transition_recovery(self):
@@ -218,7 +219,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('media-detail-jump-episodes', detail)
         self.assertNotIn('演职阵容', detail)
         self.assertNotIn('person.crop.circle.fill', detail)
-        self.assertIn('multiplier:0.5625', detail)
+        self.assertIn('multiplier:0.62', detail)
         self.assertIn('@"vod_pic_slide"', detail)
         self.assertIn('@"coverUrl"', detail)
         self.assertIn('暂无海报，显示影片占位图', detail)
@@ -228,7 +229,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('HostStyleGlassCard(infoCard,17)', detail)
         self.assertIn('HostStyleGlassCard(sourceCard,17)', detail)
         self.assertIn('self.contentStack.spacing=9', detail)
-        self.assertIn('NSUInteger rowCount=(visibleCount+3)/4', detail)
+        self.assertIn('NSUInteger rowCount=(visibleCount+columnCount-1)/columnCount', detail)
         self.assertIn('UIView *spacer=[UIView new]', detail)
         self.assertIn('media-detail-page-status', detail)
 

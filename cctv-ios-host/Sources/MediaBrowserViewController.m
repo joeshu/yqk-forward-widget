@@ -2,6 +2,7 @@
 #import "MediaAPIClient.h"
 #import "HostImageLoader.h"
 #import "HostTheme.h"
+#import "MediaEpisodeLayout.h"
 #import "HostToolbar.h"
 #import "LocalServiceReadiness.h"
 #import "ServiceStore.h"
@@ -44,9 +45,11 @@
 @implementation MediaPosterCell
 - (instancetype)initWithFrame:(CGRect)frame {
     if((self=[super initWithFrame:frame])){
-        HostStyleGlassCard(self.contentView,10);
+        HostStyleGlassCard(self.contentView,15);
         self.posterView=[UIImageView new];self.posterView.backgroundColor=HostNeutralSurface();self.posterView.contentMode=UIViewContentModeScaleAspectFill;self.posterView.clipsToBounds=YES;[self.contentView addSubview:self.posterView];
+        self.posterView.layer.cornerRadius=12;self.posterView.layer.cornerCurve=kCACornerCurveContinuous;
         self.nameLabel=[UILabel new];self.nameLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]];self.nameLabel.adjustsFontForContentSizeCategory=YES;self.nameLabel.textColor=HostText();self.nameLabel.lineBreakMode=NSLineBreakByTruncatingTail;[self.contentView addSubview:self.nameLabel];
+        self.nameLabel.numberOfLines=2;
         self.remarksLabel=[UILabel new];self.remarksLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11]];self.remarksLabel.adjustsFontForContentSizeCategory=YES;self.remarksLabel.textColor=HostSecondaryText();self.remarksLabel.lineBreakMode=NSLineBreakByTruncatingTail;[self.contentView addSubview:self.remarksLabel];
     }
     return self;
@@ -64,11 +67,11 @@
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
-    CGFloat width=CGRectGetWidth(self.contentView.bounds),posterHeight=width*1.4;
-    CGFloat nameHeight=ceil(self.nameLabel.font.lineHeight),remarksHeight=ceil(self.remarksLabel.font.lineHeight);
+    CGFloat width=CGRectGetWidth(self.contentView.bounds),posterHeight=width*1.43;
+    CGFloat nameHeight=ceil(self.nameLabel.font.lineHeight)*2,remarksHeight=ceil(self.remarksLabel.font.lineHeight);
     self.posterView.frame=CGRectMake(0,0,width,posterHeight);
-    self.nameLabel.frame=CGRectMake(8,posterHeight+4,MAX(0,width-16),nameHeight);
-    self.remarksLabel.frame=CGRectMake(8,CGRectGetMaxY(self.nameLabel.frame)+2,MAX(0,width-16),remarksHeight);
+    self.nameLabel.frame=CGRectMake(7,posterHeight+7,MAX(0,width-14),nameHeight);
+    self.remarksLabel.frame=CGRectMake(7,CGRectGetMaxY(self.nameLabel.frame)+1,MAX(0,width-14),remarksHeight);
 }
 @end
 
@@ -125,6 +128,8 @@
 @property(nonatomic,strong) UIStackView *contentStack;
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) UIImageView *posterView;
+@property(nonatomic,strong) UIImageView *posterThumbnailView;
+@property(nonatomic,strong) UIVisualEffectView *heroBlurView;
 @property(nonatomic,strong) UIView *posterPlaceholder;
 @property(nonatomic,strong) UIView *heroView;
 @property(nonatomic,strong) UILabel *heroTitle;
@@ -141,6 +146,9 @@
 @property(nonatomic,strong) UILabel *pageLabel;
 @property(nonatomic,strong) UIButton *previousPageButton;
 @property(nonatomic,strong) UIButton *nextPageButton;
+@property(nonatomic,strong) UIButton *episodeReverseButton;
+@property(nonatomic,strong) UIView *stickyPlayBar;
+@property(nonatomic) BOOL episodeOrderReversed;
 @property(nonatomic,strong) MediaPlaybackViewController *inlinePlaybackController;
 @property(nonatomic,strong) UIActivityIndicatorView *spinner;
 @property(nonatomic) NSInteger selectedLineIndex;
@@ -191,7 +199,7 @@
     self.contentStack.layoutMargins=UIEdgeInsetsMake(4,14,20,14);self.contentStack.layoutMarginsRelativeArrangement=YES;[self.scrollView addSubview:self.contentStack];
     [NSLayoutConstraint activateConstraints:@[[self.scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
         [self.scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],[self.contentStack.leadingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.leadingAnchor],
+        [self.contentStack.leadingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.leadingAnchor],
         [self.contentStack.trailingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.trailingAnchor],[self.contentStack.topAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.topAnchor],
         [self.contentStack.bottomAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.bottomAnchor],[self.contentStack.widthAnchor constraintEqualToAnchor:self.scrollView.frameLayoutGuide.widthAnchor]]];
     self.status=[UILabel new];self.status.textColor=HostSecondaryText();self.status.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.status.adjustsFontForContentSizeCategory=YES;
@@ -200,19 +208,23 @@
     self.posterPlaceholder=[UIView new];self.posterPlaceholder.translatesAutoresizingMaskIntoConstraints=NO;self.posterPlaceholder.backgroundColor=HostNeutralSurface();[hero addSubview:self.posterPlaceholder];
     UIImageView *placeholderIcon=[UIImageView new];placeholderIcon.translatesAutoresizingMaskIntoConstraints=NO;placeholderIcon.image=[UIImage systemImageNamed:@"film"];placeholderIcon.contentMode=UIViewContentModeScaleAspectFit;placeholderIcon.tintColor=[UIColor.secondaryLabelColor colorWithAlphaComponent:0.7];[self.posterPlaceholder addSubview:placeholderIcon];
     self.posterView=[UIImageView new];self.posterView.translatesAutoresizingMaskIntoConstraints=NO;self.posterView.contentMode=UIViewContentModeScaleAspectFill;self.posterView.clipsToBounds=YES;self.posterView.opaque=NO;self.posterView.backgroundColor=UIColor.clearColor;[hero addSubview:self.posterView];
-    UIView *shade=[UIView new];shade.translatesAutoresizingMaskIntoConstraints=NO;shade.backgroundColor=[UIColor colorWithWhite:0 alpha:0.25];[hero addSubview:shade];
+    self.heroBlurView=[[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterialDark]];self.heroBlurView.translatesAutoresizingMaskIntoConstraints=NO;self.heroBlurView.userInteractionEnabled=NO;[hero addSubview:self.heroBlurView];
+    UIView *shade=[UIView new];shade.translatesAutoresizingMaskIntoConstraints=NO;shade.backgroundColor=[UIColor colorWithWhite:0 alpha:0.38];[hero addSubview:shade];
+    self.posterThumbnailView=[UIImageView new];self.posterThumbnailView.translatesAutoresizingMaskIntoConstraints=NO;self.posterThumbnailView.contentMode=UIViewContentModeScaleAspectFill;self.posterThumbnailView.clipsToBounds=YES;self.posterThumbnailView.layer.cornerRadius=10;self.posterThumbnailView.layer.cornerCurve=kCACornerCurveContinuous;self.posterThumbnailView.backgroundColor=HostNeutralSurface();[hero addSubview:self.posterThumbnailView];
     self.heroTitle=[UILabel new];self.heroTitle.translatesAutoresizingMaskIntoConstraints=NO;self.heroTitle.font=[UIFont systemFontOfSize:21 weight:UIFontWeightBold];self.heroTitle.adjustsFontForContentSizeCategory=YES;self.heroTitle.textColor=UIColor.whiteColor;self.heroTitle.numberOfLines=2;
     self.heroMetadata=[UILabel new];self.heroMetadata.translatesAutoresizingMaskIntoConstraints=NO;self.heroMetadata.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.heroMetadata.adjustsFontForContentSizeCategory=YES;self.heroMetadata.textColor=[UIColor.whiteColor colorWithAlphaComponent:0.85];self.heroMetadata.numberOfLines=1;self.heroMetadata.lineBreakMode=NSLineBreakByTruncatingTail;
     [hero addSubview:self.heroTitle];[hero addSubview:self.heroMetadata];[self.contentStack addArrangedSubview:hero];
-    [NSLayoutConstraint activateConstraints:@[[hero.heightAnchor constraintEqualToAnchor:hero.widthAnchor multiplier:0.5625],
+    NSLayoutConstraint *posterWidth=[self.posterThumbnailView.widthAnchor constraintEqualToAnchor:hero.heightAnchor multiplier:0.56];posterWidth.priority=UILayoutPriorityDefaultHigh;
+    [NSLayoutConstraint activateConstraints:@[[hero.heightAnchor constraintEqualToAnchor:hero.widthAnchor multiplier:0.62],
         [self.posterPlaceholder.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor],[self.posterPlaceholder.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor],[self.posterPlaceholder.topAnchor constraintEqualToAnchor:hero.topAnchor],[self.posterPlaceholder.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor],
         [placeholderIcon.centerXAnchor constraintEqualToAnchor:self.posterPlaceholder.centerXAnchor],[placeholderIcon.centerYAnchor constraintEqualToAnchor:self.posterPlaceholder.centerYAnchor],[placeholderIcon.widthAnchor constraintEqualToConstant:42],[placeholderIcon.heightAnchor constraintEqualToConstant:42],
         [self.posterView.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor],[self.posterView.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor],[self.posterView.topAnchor constraintEqualToAnchor:hero.topAnchor],[self.posterView.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor],
+        [self.heroBlurView.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor],[self.heroBlurView.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor],[self.heroBlurView.topAnchor constraintEqualToAnchor:hero.topAnchor],[self.heroBlurView.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor],
         [shade.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor],[shade.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor],[shade.topAnchor constraintEqualToAnchor:hero.topAnchor],[shade.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor],
-        [self.heroTitle.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor constant:16],[self.heroTitle.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor constant:-16],
-        [self.heroTitle.bottomAnchor constraintEqualToAnchor:self.heroMetadata.topAnchor constant:-3],
-        [self.heroMetadata.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor constant:16],[self.heroMetadata.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor constant:-16],
-        [self.heroMetadata.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor constant:-12]]];
+        [self.posterThumbnailView.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor constant:12],[self.posterThumbnailView.centerYAnchor constraintEqualToAnchor:hero.centerYAnchor],posterWidth,[self.posterThumbnailView.widthAnchor constraintLessThanOrEqualToConstant:164],[self.posterThumbnailView.heightAnchor constraintEqualToAnchor:hero.heightAnchor multiplier:0.84],
+        [self.heroTitle.leadingAnchor constraintEqualToAnchor:self.posterThumbnailView.trailingAnchor constant:14],[self.heroTitle.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor constant:-12],[self.heroTitle.topAnchor constraintEqualToAnchor:hero.topAnchor constant:18],
+        [self.heroMetadata.leadingAnchor constraintEqualToAnchor:self.heroTitle.leadingAnchor],[self.heroMetadata.trailingAnchor constraintEqualToAnchor:self.heroTitle.trailingAnchor],
+        [self.heroMetadata.topAnchor constraintEqualToAnchor:self.heroTitle.bottomAnchor constant:8],[self.heroMetadata.bottomAnchor constraintLessThanOrEqualToAnchor:hero.bottomAnchor constant:-14]]];
     UIView *infoCard=[UIView new];infoCard.translatesAutoresizingMaskIntoConstraints=NO;HostStyleGlassCard(infoCard,17);
     UIStackView *infoStack=[UIStackView new];infoStack.translatesAutoresizingMaskIntoConstraints=NO;infoStack.axis=UILayoutConstraintAxisVertical;infoStack.spacing=4;infoStack.layoutMargins=UIEdgeInsetsMake(10,12,10,12);infoStack.layoutMarginsRelativeArrangement=YES;[infoCard addSubview:infoStack];
     [NSLayoutConstraint activateConstraints:@[[infoStack.leadingAnchor constraintEqualToAnchor:infoCard.leadingAnchor],[infoStack.trailingAnchor constraintEqualToAnchor:infoCard.trailingAnchor],[infoStack.topAnchor constraintEqualToAnchor:infoCard.topAnchor],[infoStack.bottomAnchor constraintEqualToAnchor:infoCard.bottomAnchor]]];
@@ -220,7 +232,9 @@
     self.descriptionLabel=[UILabel new];self.descriptionLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.descriptionLabel.adjustsFontForContentSizeCategory=YES;self.descriptionLabel.textColor=HostSecondaryText();self.descriptionLabel.numberOfLines=3;[infoStack addArrangedSubview:self.descriptionLabel];
     self.descriptionToggle=[UIButton buttonWithType:UIButtonTypeSystem];self.descriptionToggle.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeading;[self.descriptionToggle setTitle:@"展开简介" forState:UIControlStateNormal];[self.descriptionToggle setTitleColor:HostAccent() forState:UIControlStateNormal];self.descriptionToggle.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.descriptionToggle.titleLabel.adjustsFontForContentSizeCategory=YES;[self.descriptionToggle addTarget:self action:@selector(toggleDescription) forControlEvents:UIControlEventTouchUpInside];self.descriptionToggle.hidden=YES;[infoStack addArrangedSubview:self.descriptionToggle];
     [self.contentStack addArrangedSubview:infoCard];
-    self.playButton=[self actionButton:@"▶︎  播放" identifier:@"media-detail-play" action:@selector(playCurrentEpisode)];[self.contentStack addArrangedSubview:self.playButton];[self.playButton.heightAnchor constraintGreaterThanOrEqualToConstant:48].active=YES;
+    self.playButton=[self actionButton:@"▶︎  播放" identifier:@"media-detail-play" action:@selector(playCurrentEpisode)];self.playButton.accessibilityHint=@"播放当前线路和分集；上次播放过时会继续上次进度";[self.playButton.heightAnchor constraintGreaterThanOrEqualToConstant:50].active=YES;
+    self.stickyPlayBar=[UIView new];self.stickyPlayBar.translatesAutoresizingMaskIntoConstraints=NO;HostStyleGlassCard(self.stickyPlayBar,18);[self.view addSubview:self.stickyPlayBar];[self.stickyPlayBar addSubview:self.playButton];
+    [NSLayoutConstraint activateConstraints:@[[self.playButton.leadingAnchor constraintEqualToAnchor:self.stickyPlayBar.leadingAnchor constant:10],[self.playButton.trailingAnchor constraintEqualToAnchor:self.stickyPlayBar.trailingAnchor constant:-10],[self.playButton.topAnchor constraintEqualToAnchor:self.stickyPlayBar.topAnchor constant:8],[self.playButton.bottomAnchor constraintEqualToAnchor:self.stickyPlayBar.bottomAnchor constant:-8],[self.stickyPlayBar.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:14],[self.stickyPlayBar.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-14],[self.stickyPlayBar.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-6],[self.stickyPlayBar.heightAnchor constraintGreaterThanOrEqualToConstant:66],[self.scrollView.bottomAnchor constraintEqualToAnchor:self.stickyPlayBar.topAnchor constant:-8]]];
     UIStackView *actions=[UIStackView new];actions.axis=UILayoutConstraintAxisHorizontal;actions.alignment=UIStackViewAlignmentFill;actions.distribution=UIStackViewDistributionFillEqually;actions.spacing=6;actions.layoutMargins=UIEdgeInsetsMake(0,2,0,2);actions.layoutMarginsRelativeArrangement=YES;
     UIButton *copyButton=[self detailActionButton:@"复制" symbol:@"doc.on.doc" label:@"复制片名" identifier:@"media-detail-copy-title" action:@selector(copyTitle)];UIButton *shareButton=[self detailActionButton:@"分享" symbol:@"square.and.arrow.up" label:@"分享影片信息" identifier:@"media-detail-share" action:@selector(shareTitle)];self.favoriteButton=[self detailActionButton:@"收藏" symbol:@"heart" label:@"收藏影片" identifier:@"media-detail-favorite" action:@selector(toggleFavorite)];UIButton *episodesButton=[self detailActionButton:@"选集" symbol:@"list.number" label:@"查看选集" identifier:@"media-detail-jump-episodes" action:@selector(scrollToEpisodes)];
     [actions addArrangedSubview:copyButton];[actions addArrangedSubview:shareButton];[actions addArrangedSubview:self.favoriteButton];[actions addArrangedSubview:episodesButton];[self.contentStack addArrangedSubview:actions];
@@ -235,10 +249,11 @@
         [self.routeButtons.bottomAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.bottomAnchor],[self.routeButtons.heightAnchor constraintEqualToAnchor:routeScroll.frameLayoutGuide.heightAnchor]]];
     self.episodeTitle=[self sectionLabel:@"选集"];[sourceStack addArrangedSubview:self.episodeTitle];
     UIStackView *paging=[UIStackView new];paging.axis=UILayoutConstraintAxisHorizontal;paging.alignment=UIStackViewAlignmentCenter;paging.spacing=6;self.pageLabel=[UILabel new];self.pageLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.pageLabel.adjustsFontForContentSizeCategory=YES;self.pageLabel.textColor=HostSecondaryText();self.pageLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.pageLabel.accessibilityIdentifier=@"media-detail-page-status";[self.pageLabel setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];[self.pageLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];[paging addArrangedSubview:self.pageLabel];
-    self.previousPageButton=[UIButton buttonWithType:UIButtonTypeSystem];self.nextPageButton=[UIButton buttonWithType:UIButtonTypeSystem];
+    self.previousPageButton=[UIButton buttonWithType:UIButtonTypeSystem];self.nextPageButton=[UIButton buttonWithType:UIButtonTypeSystem];self.episodeReverseButton=[UIButton buttonWithType:UIButtonTypeSystem];
     [self.previousPageButton setImage:[UIImage systemImageNamed:@"chevron.left"] forState:UIControlStateNormal];[self.nextPageButton setImage:[UIImage systemImageNamed:@"chevron.right"] forState:UIControlStateNormal];self.previousPageButton.accessibilityLabel=@"上一页";self.nextPageButton.accessibilityLabel=@"下一页";HostStylePillButton(self.previousPageButton,NO);HostStylePillButton(self.nextPageButton,NO);self.previousPageButton.contentEdgeInsets=UIEdgeInsetsMake(4,9,4,9);self.nextPageButton.contentEdgeInsets=UIEdgeInsetsMake(4,9,4,9);self.previousPageButton.tintColor=HostText();self.nextPageButton.tintColor=HostText();
     [self.previousPageButton addTarget:self action:@selector(previousEpisodePage) forControlEvents:UIControlEventTouchUpInside];[self.nextPageButton addTarget:self action:@selector(nextEpisodePage) forControlEvents:UIControlEventTouchUpInside];
-    [paging addArrangedSubview:self.previousPageButton];[paging addArrangedSubview:self.nextPageButton];self.previousPageButton.hidden=YES;self.nextPageButton.hidden=YES;[self.previousPageButton.heightAnchor constraintGreaterThanOrEqualToConstant:34].active=YES;[self.nextPageButton.heightAnchor constraintGreaterThanOrEqualToConstant:34].active=YES;[sourceStack addArrangedSubview:paging];
+    self.episodeReverseButton.accessibilityLabel=@"切换选集正序或倒序";[self.episodeReverseButton setTitle:@"正序" forState:UIControlStateNormal];self.episodeReverseButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];HostStylePillButton(self.episodeReverseButton,NO);[self.episodeReverseButton addTarget:self action:@selector(toggleEpisodeOrder) forControlEvents:UIControlEventTouchUpInside];[paging addArrangedSubview:self.episodeReverseButton];
+    [paging addArrangedSubview:self.previousPageButton];[paging addArrangedSubview:self.nextPageButton];self.previousPageButton.hidden=YES;self.nextPageButton.hidden=YES;[self.previousPageButton.heightAnchor constraintGreaterThanOrEqualToConstant:38].active=YES;[self.nextPageButton.heightAnchor constraintGreaterThanOrEqualToConstant:38].active=YES;[self.episodeReverseButton.heightAnchor constraintGreaterThanOrEqualToConstant:38].active=YES;[sourceStack addArrangedSubview:paging];
     self.episodeGrid=[UIStackView new];self.episodeGrid.axis=UILayoutConstraintAxisVertical;self.episodeGrid.spacing=5;self.episodeGrid.distribution=UIStackViewDistributionFillEqually;self.episodeGrid.accessibilityIdentifier=@"media-detail-episode-grid";[sourceStack addArrangedSubview:self.episodeGrid];
     [self.contentStack addArrangedSubview:sourceCard];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.hidesWhenStopped=YES;self.spinner.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:self.spinner];
@@ -344,14 +359,14 @@
     NSArray *episodes=lineIndex>=0&&lineIndex<self.lines.count&&[self.lines[(NSUInteger)lineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[(NSUInteger)lineIndex][@"episodes"]:@[];BOOL episodeFound=NO;
     for(NSUInteger index=0;index<episodes.count;index++)if(episodeID.length&&[[episodes[index][@"id"] description] isEqual:episodeID]){episodeIndex=(NSInteger)index;episodeFound=YES;break;}
     if((episodeID.length&&!episodeFound)||(!episodeFound&&(episodeIndex<0||episodeIndex>=episodes.count))){self.resumeEntry=nil;return;}
-    self.selectedLineIndex=lineIndex;self.selectedEpisodeIndex=episodeIndex;self.episodePage=episodeIndex/12;
+    self.selectedLineIndex=lineIndex;self.selectedEpisodeIndex=episodeIndex;self.episodePage=CCTVEpisodeGroupForSourceIndex((NSUInteger)episodeIndex,episodes.count,self.episodeOrderReversed);
 }
 - (NSString *)metadataSummary {
     NSMutableArray *parts=[NSMutableArray array];for(NSString *key in @[@"year",@"area",@"lang",@"type",@"remarks"]){id value=self.detail[key];if([value isKindOfClass:NSString.class]&&[value length])[parts addObject:value];}
     return parts.count?[parts componentsJoinedByString:@" · "]:@"";
 }
 - (void)refreshDetailHeader {
-    NSString *poster=[self posterURL];self.posterView.image=nil;self.posterView.accessibilityLabel=poster.length?@"影片海报":@"暂无海报，显示影片占位图";if(poster.length)[HostImageLoader.shared loadPosterURL:poster intoImageView:self.posterView];
+    NSString *poster=[self posterURL];self.posterView.image=nil;self.posterThumbnailView.image=nil;self.posterView.accessibilityLabel=poster.length?@"影片背景海报":@"暂无海报，显示影片占位图";self.posterThumbnailView.accessibilityLabel=poster.length?@"影片海报":@"暂无海报";self.posterPlaceholder.hidden=poster.length>0;if(poster.length){[HostImageLoader.shared loadPosterURL:poster intoImageView:self.posterView];[HostImageLoader.shared loadPosterURL:poster intoImageView:self.posterThumbnailView];}
     NSString *name=[self.detail[@"name"] length]?self.detail[@"name"]:(self.item[@"name"]?:@"影片详情");self.title=name;self.heroTitle.text=name;self.heroMetadata.text=[self metadataSummary];
     NSMutableArray *info=[NSMutableArray array];NSString *metadata=[self metadataSummary];if(metadata.length)[info addObject:metadata];NSString *director=[self.detail[@"director"] isKindOfClass:NSString.class]?self.detail[@"director"]:@"";
     if(director.length)[info addObject:[NSString stringWithFormat:@"导演：%@",director]];self.metadataLabel.text=[info componentsJoinedByString:@"\n"];
@@ -367,19 +382,28 @@
     [NSUserDefaults.standardUserDefaults setObject:favorites forKey:@"cctv.mediaFavorites.v1"];[self updateFavoriteButton];
 }
 - (void)toggleDescription {self.descriptionExpanded=!self.descriptionExpanded;self.descriptionLabel.numberOfLines=self.descriptionExpanded?0:3;[self.descriptionToggle setTitle:self.descriptionExpanded?@"收起简介":@"展开简介" forState:UIControlStateNormal];}
+- (void)toggleEpisodeOrder {
+    NSArray *episodes=self.selectedLineIndex<self.lines.count&&[self.lines[self.selectedLineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[self.selectedLineIndex][@"episodes"]:@[];
+    self.episodeOrderReversed=!self.episodeOrderReversed;
+    self.episodePage=CCTVEpisodeGroupForSourceIndex((NSUInteger)MAX(0,self.selectedEpisodeIndex),episodes.count,self.episodeOrderReversed);
+    [RuntimeDiagnostics.shared recordEvent:@"media_episode_order_changed" category:@"media_api" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"service_id":self.source[@"id"]?:@"",@"provider_id":self.provider?:@"",@"reversed":@(self.episodeOrderReversed),@"episode_count":@(episodes.count),@"selected_episode_index":@(self.selectedEpisodeIndex)}];
+    [self updateRouteAndEpisodeViews];
+}
 - (void)updateRouteAndEpisodeViews {
     for(UIView *view in self.routeButtons.arrangedSubviews.copy){[self.routeButtons removeArrangedSubview:view];[view removeFromSuperview];}if(self.selectedLineIndex>=self.lines.count)self.selectedLineIndex=0;
     for(NSUInteger index=0;index<self.lines.count;index++){NSDictionary *line=self.lines[index];UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.tag=index;NSString *name=[line[@"name"] isKindOfClass:NSString.class]?line[@"name"]:[NSString stringWithFormat:@"线路 %lu",(unsigned long)index+1];
         [button setTitle:name forState:UIControlStateNormal];button.accessibilityIdentifier=[NSString stringWithFormat:@"media-detail-route-%lu",(unsigned long)index];HostStylePillButton(button,index==self.selectedLineIndex);[button addTarget:self action:@selector(selectRoute:) forControlEvents:UIControlEventTouchUpInside];[self.routeButtons addArrangedSubview:button];}
     NSArray *episodes=self.selectedLineIndex<self.lines.count&&[self.lines[self.selectedLineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[self.selectedLineIndex][@"episodes"]:@[];self.episodeTitle.text=[NSString stringWithFormat:@"选集 · %lu 集",(unsigned long)episodes.count];
-    NSUInteger pageCount=MAX(1,(episodes.count+11)/12);self.episodePage=MIN(self.episodePage,(NSInteger)pageCount-1);NSUInteger start=(NSUInteger)self.episodePage*12,end=MIN(start+12,episodes.count);
-    self.pageLabel.text=episodes.count?[NSString stringWithFormat:@"第 %ld/%lu 页  ·  第 %lu–%lu 集",(long)self.episodePage+1,(unsigned long)pageCount,(unsigned long)start+1,(unsigned long)end]:@"此线路没有可选分集";
+    NSUInteger pageCount=MAX(1,(episodes.count+CCTVEpisodesPerGroup-1)/CCTVEpisodesPerGroup);self.episodePage=MIN(self.episodePage,(NSInteger)pageCount-1);NSUInteger start=(NSUInteger)self.episodePage*CCTVEpisodesPerGroup,end=MIN(start+CCTVEpisodesPerGroup,episodes.count);
+    NSUInteger firstSource=end>start?CCTVEpisodeSourceIndex(start,episodes.count,self.episodeOrderReversed):0,lastSource=end>start?CCTVEpisodeSourceIndex(end-1,episodes.count,self.episodeOrderReversed):0;
+    self.pageLabel.text=episodes.count?[NSString stringWithFormat:@"第 %ld/%lu 组 · 第 %lu–%lu 集 · %@",(long)self.episodePage+1,(unsigned long)pageCount,(unsigned long)firstSource+1,(unsigned long)lastSource+1,self.episodeOrderReversed?@"倒序":@"正序"]:@"此线路没有可选分集";
+    [self.episodeReverseButton setTitle:self.episodeOrderReversed?@"正序":@"倒序" forState:UIControlStateNormal];self.episodeReverseButton.accessibilityLabel=self.episodeOrderReversed?@"按正序排列分集，当前为倒序":@"按倒序排列分集，当前为正序";self.episodeReverseButton.hidden=episodes.count<2;
     self.previousPageButton.hidden=pageCount<=1;self.nextPageButton.hidden=pageCount<=1;self.previousPageButton.enabled=self.episodePage>0;self.nextPageButton.enabled=self.episodePage+1<pageCount;self.playButton.enabled=episodes.count>0;self.playButton.alpha=episodes.count?1.0:0.55;
     NSDictionary *selectedLine=self.selectedLineIndex<self.lines.count?self.lines[self.selectedLineIndex]:@{};NSDictionary *selectedEpisode=self.selectedEpisodeIndex<episodes.count?episodes[self.selectedEpisodeIndex]:@{};NSString *resumeLineID=self.resumeEntry[@"lineID"]?:@"",*resumeEpisodeID=self.resumeEntry[@"episodeID"]?:@"";BOOL lineMatches=resumeLineID.length?[[selectedLine[@"id"] description] isEqual:resumeLineID]:self.selectedLineIndex==[self.resumeEntry[@"lineIndex"] integerValue];BOOL episodeMatches=resumeEpisodeID.length?[[selectedEpisode[@"id"] description] isEqual:resumeEpisodeID]:self.selectedEpisodeIndex==[self.resumeEntry[@"episodeIndex"] integerValue];BOOL resumeSelected=self.resumeEntry&&lineMatches&&episodeMatches;
     if(resumeSelected){NSString *verb=[self.resumeEntry[@"completed"] boolValue]?@"重新播放":@"继续观看";[self.playButton setTitle:[NSString stringWithFormat:@"▶︎  %@ · %@",verb,self.resumeEntry[@"episodeName"]?:@"上次分集"] forState:UIControlStateNormal];}else [self.playButton setTitle:@"▶︎  播放" forState:UIControlStateNormal];
     for(UIView *row in self.episodeGrid.arrangedSubviews.copy){[self.episodeGrid removeArrangedSubview:row];[row removeFromSuperview];}[self.episodeButtons removeAllObjects];if(!episodes.count)return;
-    NSUInteger visibleCount=end>start?end-start:0;NSUInteger rowCount=(visibleCount+3)/4;for(NSUInteger rowIndex=0;rowIndex<rowCount;rowIndex++){UIStackView *row=[UIStackView new];row.axis=UILayoutConstraintAxisHorizontal;row.spacing=6;row.distribution=UIStackViewDistributionFillEqually;
-        for(NSUInteger col=0;col<4;col++){NSUInteger index=start+rowIndex*4+col;if(index<end){UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.layer.cornerRadius=15;button.layer.cornerCurve=kCACornerCurveContinuous;button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;NSDictionary *episode=episodes[index];NSString *name=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1];[button setTitle:name forState:UIControlStateNormal];button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-detail-episode-%lu",(unsigned long)index];HostStylePillButton(button,(NSInteger)index==self.selectedEpisodeIndex);button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;[button addTarget:self action:@selector(selectEpisode:) forControlEvents:UIControlEventTouchUpInside];[self.episodeButtons addObject:button];[row addArrangedSubview:button];}else{UIView *spacer=[UIView new];spacer.isAccessibilityElement=NO;[row addArrangedSubview:spacer];}}
+    NSUInteger columnCount=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory)?3:4;NSUInteger visibleCount=end>start?end-start:0;NSUInteger rowCount=(visibleCount+columnCount-1)/columnCount;for(NSUInteger rowIndex=0;rowIndex<rowCount;rowIndex++){UIStackView *row=[UIStackView new];row.axis=UILayoutConstraintAxisHorizontal;row.spacing=6;row.distribution=UIStackViewDistributionFillEqually;
+        for(NSUInteger col=0;col<columnCount;col++){NSUInteger displayIndex=start+rowIndex*columnCount+col;if(displayIndex<end){NSUInteger index=CCTVEpisodeSourceIndex(displayIndex,episodes.count,self.episodeOrderReversed);UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.layer.cornerRadius=14;button.layer.cornerCurve=kCACornerCurveContinuous;button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.adjustsFontSizeToFitWidth=YES;button.titleLabel.minimumScaleFactor=0.78;button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;NSDictionary *episode=episodes[index];NSString *name=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1];[button setTitle:name forState:UIControlStateNormal];button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-detail-episode-%lu",(unsigned long)index];HostStylePillButton(button,(NSInteger)index==self.selectedEpisodeIndex);button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.adjustsFontSizeToFitWidth=YES;button.titleLabel.minimumScaleFactor=0.78;[button addTarget:self action:@selector(selectEpisode:) forControlEvents:UIControlEventTouchUpInside];[self.episodeButtons addObject:button];[row addArrangedSubview:button];}else{UIView *spacer=[UIView new];spacer.isAccessibilityElement=NO;[row addArrangedSubview:spacer];}}
         [self.episodeGrid addArrangedSubview:row];[row.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
     }
 }
@@ -399,12 +423,12 @@
     self.status.hidden=YES;
     self.resumeEntry=nil;
     self.selectedLineIndex=sender.tag;
-    NSInteger matchedEpisode=-1;if(previousEpisodeID.length)for(NSUInteger index=0;index<episodes.count;index++)if([[episodes[index][@"id"] description] isEqual:previousEpisodeID]){matchedEpisode=(NSInteger)index;break;}if(matchedEpisode<0&&previousEpisodeName.length)for(NSUInteger index=0;index<episodes.count;index++)if([[episodes[index][@"name"] description] localizedCaseInsensitiveCompare:previousEpisodeName]==NSOrderedSame){matchedEpisode=(NSInteger)index;break;}self.selectedEpisodeIndex=matchedEpisode>=0?matchedEpisode:0;self.episodePage=self.selectedEpisodeIndex/12;
+    NSInteger matchedEpisode=-1;if(previousEpisodeID.length)for(NSUInteger index=0;index<episodes.count;index++)if([[episodes[index][@"id"] description] isEqual:previousEpisodeID]){matchedEpisode=(NSInteger)index;break;}if(matchedEpisode<0&&previousEpisodeName.length)for(NSUInteger index=0;index<episodes.count;index++)if([[episodes[index][@"name"] description] localizedCaseInsensitiveCompare:previousEpisodeName]==NSOrderedSame){matchedEpisode=(NSInteger)index;break;}self.selectedEpisodeIndex=matchedEpisode>=0?matchedEpisode:0;self.episodePage=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,episodes.count,self.episodeOrderReversed);
     [self updateRouteAndEpisodeViews];
     if(self.inlinePlaybackController&&episodes.count)[self resolveAndPlaySelectedEpisode];
 }
 - (void)previousEpisodePage {if(self.episodePage>0){self.episodePage--;[self updateRouteAndEpisodeViews];}}
-- (void)nextEpisodePage {NSArray *episodes=self.selectedLineIndex<self.lines.count?self.lines[self.selectedLineIndex][@"episodes"]:@[];if(self.episodePage+1<(NSInteger)(episodes.count+11)/12){self.episodePage++;[self updateRouteAndEpisodeViews];}}
+- (void)nextEpisodePage {NSArray *episodes=self.selectedLineIndex<self.lines.count?self.lines[self.selectedLineIndex][@"episodes"]:@[];if(self.episodePage+1<(NSInteger)((episodes.count+CCTVEpisodesPerGroup-1)/CCTVEpisodesPerGroup)){self.episodePage++;[self updateRouteAndEpisodeViews];}}
 - (void)selectEpisode:(UIButton *)sender {
     NSArray *episodes=self.selectedLineIndex<self.lines.count&&[self.lines[self.selectedLineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[self.selectedLineIndex][@"episodes"]:@[];
     if(sender.tag>=episodes.count)return;
@@ -861,15 +885,18 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)addHomeFeatureCarousel:(NSArray<NSDictionary *> *)items source:(NSDictionary *)source provider:(NSString *)provider {
     if(!items.count)return;
     UIView *container=[UIView new];container.translatesAutoresizingMaskIntoConstraints=NO;container.accessibilityIdentifier=@"media-home-feature-carousel";
-    UIScrollView *paging=[UIScrollView new];paging.translatesAutoresizingMaskIntoConstraints=NO;paging.pagingEnabled=YES;paging.delegate=self;paging.showsHorizontalScrollIndicator=NO;paging.alwaysBounceHorizontal=NO;paging.decelerationRate=UIScrollViewDecelerationRateFast;paging.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;paging.accessibilityIdentifier=@"media-home-feature-paging";[container addSubview:paging];
-    UIStackView *row=[UIStackView new];row.translatesAutoresizingMaskIntoConstraints=NO;row.axis=UILayoutConstraintAxisHorizontal;row.alignment=UIStackViewAlignmentFill;row.distribution=UIStackViewDistributionFillEqually;row.spacing=0;[paging addSubview:row];
-    NSUInteger count=MIN((NSUInteger)5,items.count);
+    UIStackView *content=[UIStackView new];content.translatesAutoresizingMaskIntoConstraints=NO;content.axis=UILayoutConstraintAxisVertical;content.spacing=8;[container addSubview:content];
+    UIStackView *heading=(UIStackView *)[self homeSectionHeader:@"精选推荐" actionTitle:@"全部 ›" selector:@selector(browseRecommendations)];[content addArrangedSubview:heading];
+    UIScrollView *shelf=[UIScrollView new];shelf.translatesAutoresizingMaskIntoConstraints=NO;shelf.showsHorizontalScrollIndicator=NO;shelf.alwaysBounceHorizontal=YES;shelf.accessibilityIdentifier=@"media-home-feature-shelf";[content addArrangedSubview:shelf];
+    UIStackView *row=[UIStackView new];row.translatesAutoresizingMaskIntoConstraints=NO;row.axis=UILayoutConstraintAxisHorizontal;row.spacing=10;[shelf addSubview:row];
+    NSUInteger count=MIN((NSUInteger)10,items.count);CGFloat cardWidth=MAX(88,self.view.bounds.size.width/3.0-18),cardHeight=cardWidth*1.5+54;__weak typeof(self) weakSelf=self;
     for(NSUInteger index=0;index<count;index++){
-        NSDictionary *item=items[index];UIButton *card=[self homeFeatureCardForItem:item source:source provider:provider];card.accessibilityIdentifier=index==0?@"media-home-feature":[NSString stringWithFormat:@"media-home-feature-%lu",(unsigned long)index];[row addArrangedSubview:card];[card.widthAnchor constraintEqualToAnchor:paging.frameLayoutGuide.widthAnchor].active=YES;
+        NSDictionary *item=items[index];NSString *title=[item[@"name"] isKindOfClass:NSString.class]?item[@"name"]:@"精选推荐";NSString *poster=[item[@"poster"] isKindOfClass:NSString.class]?item[@"poster"]:@"";NSString *remarks=[item[@"remarks"] isKindOfClass:NSString.class]?item[@"remarks"]:@"";
+        UIButton *card=[self homeCardWithTitle:title subtitle:remarks imageURL:poster symbol:nil action:^{MediaBrowserViewController *owner=weakSelf;if(owner)[owner openHomeRecommendation:item source:source provider:provider];}];card.accessibilityIdentifier=index==0?@"media-home-feature":[NSString stringWithFormat:@"media-home-feature-%lu",(unsigned long)index];[row addArrangedSubview:card];
     }
-    UIPageControl *pages=[UIPageControl new];pages.translatesAutoresizingMaskIntoConstraints=NO;pages.numberOfPages=count;pages.currentPage=0;pages.hidesForSinglePage=YES;pages.currentPageIndicatorTintColor=HostAccent();pages.pageIndicatorTintColor=HostSecondaryText();pages.accessibilityLabel=@"首页精选影片分页";pages.accessibilityIdentifier=@"media-home-feature-pages";[container addSubview:pages];
-    [NSLayoutConstraint activateConstraints:@[[container.heightAnchor constraintEqualToConstant:MIN(540,MAX(240,self.view.bounds.size.width*1.05))],[paging.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],[paging.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],[paging.topAnchor constraintEqualToAnchor:container.topAnchor],[paging.bottomAnchor constraintEqualToAnchor:pages.topAnchor constant:-2],[row.leadingAnchor constraintEqualToAnchor:paging.contentLayoutGuide.leadingAnchor],[row.trailingAnchor constraintEqualToAnchor:paging.contentLayoutGuide.trailingAnchor],[row.topAnchor constraintEqualToAnchor:paging.contentLayoutGuide.topAnchor],[row.bottomAnchor constraintEqualToAnchor:paging.contentLayoutGuide.bottomAnchor],[row.heightAnchor constraintEqualToAnchor:paging.frameLayoutGuide.heightAnchor],[pages.centerXAnchor constraintEqualToAnchor:container.centerXAnchor],[pages.bottomAnchor constraintEqualToAnchor:container.bottomAnchor],[pages.heightAnchor constraintEqualToConstant:16]]];
-    self.homeCarousel=paging;self.homeCarouselPageControl=pages;[self.homeStack addArrangedSubview:container];
+    [NSLayoutConstraint activateConstraints:@[[content.topAnchor constraintEqualToAnchor:container.topAnchor],[content.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],[content.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],[content.bottomAnchor constraintEqualToAnchor:container.bottomAnchor],[shelf.heightAnchor constraintEqualToConstant:cardHeight],[row.leadingAnchor constraintEqualToAnchor:shelf.contentLayoutGuide.leadingAnchor],[row.trailingAnchor constraintEqualToAnchor:shelf.contentLayoutGuide.trailingAnchor],[row.topAnchor constraintEqualToAnchor:shelf.contentLayoutGuide.topAnchor],[row.bottomAnchor constraintEqualToAnchor:shelf.contentLayoutGuide.bottomAnchor],[row.heightAnchor constraintEqualToAnchor:shelf.frameLayoutGuide.heightAnchor]]];
+    for(UIButton *card in row.arrangedSubviews)[card.widthAnchor constraintEqualToConstant:cardWidth].active=YES;
+    self.homeCarousel=nil;self.homeCarouselPageControl=nil;[self.homeStack addArrangedSubview:container];
 }
 - (BOOL)isHomePageVisible {
     if(!self.homeMode||!self.view.window||self.view.hidden||self.homeScroll.hidden)return NO;
@@ -1433,7 +1460,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     }];
 }
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {return self.items.count;}
-- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {NSInteger columns=collectionView.bounds.size.width>700?4:2;CGFloat width=floor((collectionView.bounds.size.width-28-(columns-1)*10)/columns);UIFont *name=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection],*remarks=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11] compatibleWithTraitCollection:self.traitCollection];return CGSizeMake(width,width*1.4+10+ceil(name.lineHeight)+ceil(remarks.lineHeight));}
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {CGFloat available=collectionView.bounds.size.width;BOOL accessibilityText=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);NSInteger columns=available>=900?5:(available>=560?4:(available>=365&&!accessibilityText?3:2));CGFloat width=floor((available-24-(columns-1)*10)/columns);UIFont *name=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection],*remarks=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11] compatibleWithTraitCollection:self.traitCollection];return CGSizeMake(width,width*1.43+8+ceil(name.lineHeight)*2+ceil(remarks.lineHeight)+1);}
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)ip {
     MediaPosterCell *cell=(MediaPosterCell *)[collectionView dequeueReusableCellWithReuseIdentifier:@"movie" forIndexPath:ip];
     BOOL firstCellForRender=self.diagnosticGridConfiguredSerial!=self.diagnosticGridApplySerial;if(firstCellForRender){self.diagnosticGridConfiguredSerial=self.diagnosticGridApplySerial;[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_grid_cell_configuration_started" fields:@{@"service_id":self.source[@"id"]?:@"",@"render_serial":@(self.diagnosticGridApplySerial),@"item_index":@(ip.item),@"item_count":@(self.items.count)}];}

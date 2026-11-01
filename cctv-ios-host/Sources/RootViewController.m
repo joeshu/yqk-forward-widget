@@ -699,10 +699,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.groupControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"央视", @"卫视", @"地方", @"教育", @"熊猫", @"订阅"]];
     self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 28);
     self.groupControl.selectedSegmentIndex = 0;
-    self.groupControl.tintColor = HostAccent();
+    self.groupControl.tintColor = HostAccent();self.groupControl.selectedSegmentTintColor=HostAccent();NSDictionary *segmentNormal=@{NSForegroundColorAttributeName:HostMutedText(),NSFontAttributeName:[UIFont systemFontOfSize:10 weight:UIFontWeightMedium]},*segmentSelected=@{NSForegroundColorAttributeName:UIColor.whiteColor,NSFontAttributeName:[UIFont systemFontOfSize:10 weight:UIFontWeightSemibold]};[self.groupControl setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.groupControl setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];
     [self.groupControl addTarget:self action:@selector(onGroupChanged) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:self.groupControl];
-    self.playerTabs=[[UISegmentedControl alloc] initWithItems:@[@"分类",@"频道",@"节目",@"线路"]];self.playerTabs.selectedSegmentIndex=1;self.playerTabs.selectedSegmentTintColor=HostAccent();[self.playerTabs addTarget:self action:@selector(selectPlayerPanel) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.playerTabs];
+    self.playerTabs=[[UISegmentedControl alloc] initWithItems:@[@"分类",@"频道",@"节目",@"线路"]];self.playerTabs.selectedSegmentIndex=1;self.playerTabs.selectedSegmentTintColor=HostAccent();[self.playerTabs setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.playerTabs setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];[self.playerTabs addTarget:self action:@selector(selectPlayerPanel) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.playerTabs];
 
     self.versionLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, y + 38, self.view.bounds.size.width - 16, 14)];
     self.versionLabel.textColor = HostSecondaryText();
@@ -871,15 +871,15 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)buildBottomBar {
-    self.bottomBarBackdrop=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomBarBackdrop.userInteractionEnabled=NO;self.bottomBarBackdrop.layer.cornerRadius=29;self.bottomBarBackdrop.layer.cornerCurve=kCACornerCurveContinuous;self.bottomBarBackdrop.clipsToBounds=YES;self.bottomBarBackdrop.layer.borderWidth=0.7;HostSetLayerBorderColor(self.bottomBarBackdrop,HostBorder());
+    self.bottomBarBackdrop=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomBarBackdrop.userInteractionEnabled=NO;self.bottomBarBackdrop.layer.cornerRadius=27;self.bottomBarBackdrop.layer.cornerCurve=kCACornerCurveContinuous;self.bottomBarBackdrop.clipsToBounds=YES;self.bottomBarBackdrop.layer.borderWidth=0.7;HostSetLayerBorderColor(self.bottomBarBackdrop,HostBorder());
     UIView *glassTint=[[UIView alloc] initWithFrame:self.bottomBarBackdrop.contentView.bounds];glassTint.backgroundColor=HostGlassTint();glassTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.bottomBarBackdrop.contentView addSubview:glassTint];
     [self.view addSubview:self.bottomBarBackdrop];
-    self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=3; self.bottomBar.backgroundColor=UIColor.clearColor; self.bottomBar.layer.cornerRadius=29; self.bottomBar.layer.cornerCurve=kCACornerCurveContinuous; self.bottomBar.clipsToBounds=YES;
+    self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=3; self.bottomBar.backgroundColor=UIColor.clearColor; self.bottomBar.layer.cornerRadius=27; self.bottomBar.layer.cornerCurve=kCACornerCurveContinuous; self.bottomBar.clipsToBounds=YES;
     NSArray *titles=@[@"CCTV",@"频道",@"首页",@"资源",@"设置"];
     NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"house.fill",@"externaldrive.fill",@"gearshape"];
     for (NSInteger i=0;i<titles.count;i++) {
         UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;HostInstallPressFeedback(b);
-        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.baseForegroundColor=(i==0?HostAccent():HostMutedText()); cfg.background.backgroundColor=i==0?[HostAccent() colorWithAlphaComponent:0.20]:UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];return result;}; b.configuration=cfg;
+        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.baseForegroundColor=(i==0?UIColor.whiteColor:HostMutedText()); cfg.background.backgroundColor=i==0?HostAccent():UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[UIFont systemFontOfSize:10 weight:UIFontWeightSemibold];return result;}; b.configuration=cfg;
         b.accessibilityLabel=titles[i]; b.accessibilityIdentifier=[NSString stringWithFormat:@"tab.%@",titles[i]];
         b.accessibilityHint=[NSString stringWithFormat:@"切换到%@页面",titles[i]];
         [b addTarget:self action:@selector(bottomTabTapped:) forControlEvents:UIControlEventTouchUpInside]; [self.bottomBar addArrangedSubview:b];
@@ -927,10 +927,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     for (UIButton *button in self.bottomBar.arrangedSubviews) {
         UIButtonConfiguration *configuration=button.configuration;
         BOOL selected=button.tag==self.activeTab;
-        configuration.baseForegroundColor=selected?HostAccent():HostMutedText();
-        configuration.background.backgroundColor=selected?[HostAccent() colorWithAlphaComponent:0.20]:UIColor.clearColor;
-        configuration.background.strokeColor=selected?[HostAccent() colorWithAlphaComponent:0.30]:UIColor.clearColor;
-        configuration.background.strokeWidth=selected?0.6:0;
+        configuration.baseForegroundColor=selected?UIColor.whiteColor:HostMutedText();
+        configuration.background.backgroundColor=selected?HostAccent():UIColor.clearColor;
+        configuration.background.strokeColor=selected?[HostAccent() colorWithAlphaComponent:0.35]:UIColor.clearColor;
+        configuration.background.strokeWidth=selected?0.5:0;
         button.configuration=configuration;
     }
 }
@@ -1190,10 +1190,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self.subscriptionURLs removeObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);[self removeSubscriptionSource:source];[NSUserDefaults.standardUserDefaults setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
 }
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {return self.shownChannels.count;}
-- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {CGFloat width=collectionView.bounds.size.width;NSInteger columns=width>700?4:2;CGFloat itemWidth=floor((width-24-(columns-1)*8)/columns);UIFont *title=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection],*subtitle=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];CGFloat height=90+4+ceil(title.lineHeight)+1+ceil(subtitle.lineHeight)+4;return CGSizeMake(itemWidth,height);}
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {CGFloat width=collectionView.bounds.size.width;BOOL accessibilityText=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);NSInteger columns=width>=900?5:(width>=560?4:(accessibilityText?2:3));CGFloat itemWidth=floor((width-24-(columns-1)*8)/columns);UIFont *title=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection],*subtitle=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];CGFloat height=90+4+ceil(title.lineHeight)+1+ceil(subtitle.lineHeight)+4;return CGSizeMake(itemWidth,height);}
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)ip {
     UICollectionViewCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"channel.card" forIndexPath:ip];NSDictionary *ch=self.shownChannels[ip.item];
-    HostStyleGlassCard(cell.contentView,9);
+    HostStyleGlassCard(cell.contentView,11);
     const NSInteger posterTag=4101,logoTag=4102,brandTag=4103,numberTag=4104,titleTag=4105,subtitleTag=4106;
     UIView *poster=[cell.contentView viewWithTag:posterTag];UIImageView *logo=(UIImageView *)[cell.contentView viewWithTag:logoTag];UILabel *brand=(UILabel *)[cell.contentView viewWithTag:brandTag];UILabel *number=(UILabel *)[cell.contentView viewWithTag:numberTag];UILabel *title=(UILabel *)[cell.contentView viewWithTag:titleTag];UILabel *subtitle=(UILabel *)[cell.contentView viewWithTag:subtitleTag];
     if(!poster){poster=[[UIView alloc] initWithFrame:CGRectZero];poster.tag=posterTag;poster.autoresizingMask=UIViewAutoresizingFlexibleWidth;poster.backgroundColor=HostCard();poster.layer.cornerRadius=8;[cell.contentView addSubview:poster];
@@ -1760,10 +1760,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         self.playerBox.frame=CGRectMake(0,top,w,ph);self.playerBox.hidden=!catalog||!expanded;
         CGFloat y=top+ph;self.groupControl.frame=CGRectMake(12,y+6,w-24,28);self.groupControl.hidden=!catalog||expanded;self.playerTabs.frame=CGRectMake(12,y+6,w-24,28);self.playerTabs.hidden=!catalog||!expanded;
         self.versionLabel.hidden=YES;
-        CGFloat contentY=y+42;CGFloat tabY=height-safe.bottom-72;
+        CGFloat contentY=y+42;CGFloat tabY=height-safe.bottom-152;
         CGRect frame=CGRectMake(0,contentY,w,MAX(0,tabY-contentY));self.table.frame=frame;self.channelGrid.frame=frame;
         self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=frame;self.playbackPanel.view.hidden=!catalog;
-        self.bottomBar.frame=CGRectMake(MAX(18,(w-420)/2),height-safe.bottom-64,MIN(w-36,420),56);self.bottomBarBackdrop.frame=self.bottomBar.frame;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
+        self.bottomBar.frame=CGRectMake(MAX(16,(w-420)/2),height-safe.bottom-76,MIN(w-32,420),64);self.bottomBarBackdrop.frame=self.bottomBar.frame;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
         // The resource controller places its own header below the status-bar
         // safe area. Keep its root at a stable origin instead of applying the
         // navigation bar's changing safe-area top to the entire child view;

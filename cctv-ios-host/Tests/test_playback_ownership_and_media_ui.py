@@ -111,6 +111,21 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('self.episodeTitle.hidden=NO', embedded)
         self.assertIn('constraintEqualToAnchor:self.episodeTitle.bottomAnchor', embedded)
 
+    def test_long_series_uses_thirty_episode_groups_without_changing_playback_indexes(self):
+        layout = (SOURCES / "MediaEpisodeLayout.h").read_text(encoding="utf-8")
+        self.assertIn("static const NSUInteger CCTVEpisodesPerGroup = 30", layout)
+        self.assertIn("count - sourceIndex - 1", layout)
+        self.assertIn("count - displayIndex - 1", layout)
+        for source in (BROWSER_SOURCE, EPISODE_SOURCE):
+            with self.subTest(source="detail" if source is BROWSER_SOURCE else "player selection"):
+                self.assertIn("CCTVEpisodeSourceIndex(displayIndex,episodes.count,self.episodeOrderReversed)", source)
+                self.assertIn("button.tag=index", source)
+                self.assertIn('第 %ld/%lu 组 · 第 %lu–%lu 集', source)
+                self.assertNotIn("(episodes.count+11)/12", source)
+        self.assertIn("playback_gesture_seek", PLAYBACK_SOURCE)
+        self.assertIn("playback_gesture_rate_started", PLAYBACK_SOURCE)
+        self.assertIn("self.player.rate=3.0f", PLAYBACK_SOURCE)
+
     def test_scripts_and_services_is_a_primary_resource_page_button(self):
         self.assertIn('accessibilityIdentifier=@"resource-floating-actions"', ROOT_SOURCE)
         self.assertIn('self.resourceActionsButton.showsMenuAsPrimaryAction=NO', ROOT_SOURCE)

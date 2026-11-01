@@ -33,8 +33,8 @@ class GlobalThemeContracts(unittest.TestCase):
         media = (ROOT / "Sources/MediaBrowserViewController.m").read_text(encoding="utf-8")
 
         self.assertIn("HostInstallGlassBackdrop(self.window)", app)
-        self.assertIn("HostStyleGlassCard(cell.contentView,9)", root)
-        self.assertIn("HostStyleGlassCard(self.contentView,10)", media)
+        self.assertIn("HostStyleGlassCard(cell.contentView,11)", root)
+        self.assertIn("HostStyleGlassCard(self.contentView,15)", media)
         self.assertIn("HostAnimateSelection", theme)
         self.assertIn("UIVisualEffectView *glass=objc_getAssociatedObject", theme)
         self.assertIn("HostInstallPressFeedback(button)", theme)
