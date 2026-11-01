@@ -51,7 +51,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data = [{'id': 'primary', 'name': '主平台'}, {'id': 'secondary', 'name': '备用平台'}]
         elif operation == 'home':
             data = {'categories': [{'id': 'movies', 'name': '电影'}],
-                    'items': [card('home'), card('feature-2'), card('feature-3')], 'filters': {}}
+                    'items': [card('home'), card('feature-2'), card('feature-3'), card('feature-4')], 'filters': {}}
         elif operation in ('category', 'search'):
             page = int(args.get('page', 1))
             data = {'page': page, 'pagecount': 2, 'hasMore': page < 2, 'items': [card(str(args.get('keyword', 'category')) + str(page))]}

@@ -126,6 +126,14 @@ static void check(BOOL value, NSString *message) {
     if (!value)
         [failures addObject:message];
 }
+static UIView *SmokeViewWithAccessibilityIdentifier(UIView *root, NSString *identifier) {
+    if ([root.accessibilityIdentifier isEqualToString:identifier]) return root;
+    for (UIView *child in root.subviews) {
+        UIView *match=SmokeViewWithAccessibilityIdentifier(child,identifier);
+        if (match) return match;
+    }
+    return nil;
+}
 static void capture(UIWindow *window, NSString *name) {
     [window layoutIfNeeded];
     UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithBounds:window.bounds];
@@ -770,10 +778,28 @@ static void next(NSArray *steps, NSUInteger index) {
           // source is inserted. Keep a bounded readiness window and fail
           // promptly if the home request becomes wedged.
           @{ @"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]>0&&mediaPage.isHomeMode&&![[mediaPage valueForKey:@"loading"] boolValue];},@"timeout":@100,@"run":^{
-            check(mediaPage.isHomeMode,@"home start action waits through health and capability readiness while retaining the home");[mediaPage.view layoutIfNeeded];UIScrollView *carousel=[mediaPage valueForKey:@"homeCarousel"];UIPageControl *pages=[mediaPage valueForKey:@"homeCarouselPageControl"];NSDictionary *activeSource=[mediaPage valueForKey:@"source"]?:@{};UILabel *statusLabel=[mediaPage valueForKey:@"status"];UILabel *stageLabel=[mediaPage valueForKey:@"readinessStageLabel"];NSDictionary *probe=[[[mediaPage valueForKey:@"readiness"] diagnosticSummary] isKindOfClass:NSDictionary.class]?[[mediaPage valueForKey:@"readiness"] diagnosticSummary]:@{};id apiClient=[mediaPage valueForKey:@"client"];NSString *activeOperation=[apiClient valueForKey:@"activeOperation"]?:@"";NSString *activeRequestID=[apiClient valueForKey:@"activeRequestID"]?:@"";check(carousel.isPagingEnabled&&pages.numberOfPages==3,[NSString stringWithFormat:@"home renders a swipeable featured carousel from its source response (scroll=%@, paging=%d, pages=%ld, items=%lu, source=%@, provider=%@, source_id=%@, status=%@, stage=%@, loading=%@, generation=%@, active_operation=%@, active_request=%@, probe=%@)",carousel?NSStringFromCGRect(carousel.frame):@"missing",carousel.isPagingEnabled,(long)pages.numberOfPages,(unsigned long)[[mediaPage valueForKey:@"items"] count],[mediaPage valueForKey:@"homeResultSourceID"]?:@"",[mediaPage valueForKey:@"homeResultProvider"]?:@"",activeSource[@"id"]?:@"",statusLabel.text?:@"",stageLabel.text?:@"",[mediaPage valueForKey:@"loading"]?:@NO,[mediaPage valueForKey:@"generation"]?:@0,activeOperation,activeRequestID,probe]);[carousel setContentOffset:CGPointMake(carousel.bounds.size.width,0) animated:NO];check(pages.currentPage==1,[NSString stringWithFormat:@"featured carousel page indicator follows horizontal navigation (page=%ld, width=%.1f)",(long)pages.currentPage,carousel.bounds.size.width]);[carousel setContentOffset:CGPointZero animated:NO];UIButton *browse=[mediaPage valueForKey:@"homeModeButton"];[browse sendActionsForControlEvents:UIControlEventTouchUpInside];
+            check(mediaPage.isHomeMode,@"home start action waits through health and capability readiness while retaining the home");
+            [mediaPage.view layoutIfNeeded];
+            UIScrollView *shelf=(UIScrollView *)SmokeViewWithAccessibilityIdentifier(mediaPage.view,@"media-home-feature-shelf");
+            [shelf layoutIfNeeded];
+            UIStackView *row=nil;
+            for(UIView *child in shelf.subviews)if([child isKindOfClass:UIStackView.class]){row=(UIStackView *)child;break;}
+            [row layoutIfNeeded];
+            NSDictionary *activeSource=[mediaPage valueForKey:@"source"]?:@{};
+            UILabel *statusLabel=[mediaPage valueForKey:@"status"];
+            UILabel *stageLabel=[mediaPage valueForKey:@"readinessStageLabel"];
+            NSDictionary *probe=[[[mediaPage valueForKey:@"readiness"] diagnosticSummary] isKindOfClass:NSDictionary.class]?[[mediaPage valueForKey:@"readiness"] diagnosticSummary]:@{};
+            id apiClient=[mediaPage valueForKey:@"client"];
+            NSString *activeOperation=[apiClient valueForKey:@"activeOperation"]?:@"";
+            NSString *activeRequestID=[apiClient valueForKey:@"activeRequestID"]?:@"";
+            CGFloat shelfWidth=shelf.bounds.size.width,contentWidth=shelf.contentSize.width;
+            NSUInteger cardCount=row.arrangedSubviews.count;
+            check(shelf&&row&&cardCount==4&&contentWidth>shelfWidth+1&&[row.arrangedSubviews.firstObject.accessibilityIdentifier isEqual:@"media-home-feature"],[NSString stringWithFormat:@"home renders source recommendations in a horizontally browsable poster shelf (shelf=%@, cards=%lu, width=%.1f/%.1f, items=%lu, source=%@, status=%@, stage=%@, loading=%@, generation=%@, active_operation=%@, active_request=%@, probe=%@)",shelf?NSStringFromCGRect(shelf.frame):@"missing",(unsigned long)cardCount,contentWidth,shelfWidth,(unsigned long)[[mediaPage valueForKey:@"items"] count],[mediaPage valueForKey:@"homeResultSourceID"]?:@"",statusLabel.text?:@"",stageLabel.text?:@"",[mediaPage valueForKey:@"loading"]?:@NO,[mediaPage valueForKey:@"generation"]?:@0,activeOperation,activeRequestID,probe]);
+            if(shelf&&contentWidth>shelfWidth){CGFloat nextOffset=MIN(shelfWidth,contentWidth-shelfWidth);[shelf setContentOffset:CGPointMake(nextOffset,0) animated:NO];check(shelf.contentOffset.x>0,@"home poster shelf scrolls horizontally when recommendations exceed the viewport");[shelf setContentOffset:CGPointZero animated:NO];}
+            UIButton *browse=[mediaPage valueForKey:@"homeModeButton"];[browse sendActionsForControlEvents:UIControlEventTouchUpInside];
           }},
           @{ @"until":^BOOL{return [[mediaPage valueForKey:@"items"] count]>0&&!mediaPage.isHomeMode;},@"run":^{
-            check([[mediaPage valueForKey:@"items"] count]==3,@"media library preserves the source's real home recommendations");
+            check([[mediaPage valueForKey:@"items"] count]==4,@"media library preserves the source's real home recommendations");
             UIStackView *selectionRow=[mediaPage valueForKey:@"selectionRow"];UIButton *sourceSelector=[mediaPage valueForKey:@"sourceSelectButton"];UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];NSString *activeProviderID=[mediaPage valueForKey:@"provider"]?:@"";NSArray *loadedProviders=[mediaPage valueForKey:@"providers"]?:@[];NSString *activeProviderName=nil;for(NSDictionary *candidate in loadedProviders)if([candidate[@"id"] isEqual:activeProviderID]){activeProviderName=[candidate[@"name"] isKindOfClass:NSString.class]?candidate[@"name"]:candidate[@"id"];break;}check(CGRectGetMinY(selectionRow.frame)>=mediaPage.view.safeAreaInsets.top,@"two-level resource selectors stay inside the media safe area");check([sourceSelector.currentTitle containsString:@"本机影视测试"]&&activeProviderName.length&&[providerSelector.currentTitle containsString:activeProviderName],[NSString stringWithFormat:@"top selectors show the active resource and its selected site (provider=%@, button=%@)",activeProviderName?:@"unresolved",providerSelector.currentTitle?:@""]);check(providerSelector.enabled,@"second-level selector becomes available after providers load");
             UIScrollView *categories=[mediaPage valueForKey:@"categoryScroll"];check([mediaPage.title isEqual:@"影视库"]&&!mediaPage.isHomeMode&&!selectionRow.hidden,@"opening a selected source from home enters the separate resource library");check(CGRectGetMinY(categories.frame)>CGRectGetMaxY(selectionRow.frame),@"film categories appear below the two-level resource selectors");capture(self.window,@"16-media-library");[sourceSelector sendActionsForControlEvents:UIControlEventTouchUpInside];
           }},
@@ -782,18 +808,18 @@ static void next(NSArray *steps, NSUInteger index) {
             UIStackView *scopeStack=[picker valueForKey:@"scopeStack"];check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"resource selection uses a native bottom sheet");check([picker.tableView numberOfRowsInSection:0]==1&&current.accessoryType==UITableViewCellAccessoryCheckmark,@"resource sheet shows its current selection");check(scopeStack.arrangedSubviews.count==2,@"resource sheet groups resources by runtime and keeps all resources visible");capture(self.window,@"16b-media-resource-sheet");
             [picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
           }},
-          @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==3;},@"run":^{UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];[providerSelector sendActionsForControlEvents:UIControlEventTouchUpInside];}},
+          @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"run":^{UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];[providerSelector sendActionsForControlEvents:UIControlEventTouchUpInside];}},
           @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])!=nil;},@"run":^{
             UINavigationController *sheet=SmokePresentedNavigation(@[mediaPage,nav,root],@"provider selector");if(!sheet)return;UITableViewController *picker=(id)sheet.topViewController;[picker.tableView layoutIfNeeded];NSIndexPath *current=nil;for(NSInteger row=0;row<[picker.tableView numberOfRowsInSection:0];row++){UITableViewCell *cell=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];if(cell.accessoryType==UITableViewCellAccessoryCheckmark){current=[NSIndexPath indexPathForRow:row inSection:0];break;}}
             check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"platform selection uses a separate bottom sheet");check([picker.tableView numberOfRowsInSection:0]==2&&current!=nil,@"platform sheet lists choices and marks the current platform");capture(self.window,@"16c-media-platform-sheet");
             NSInteger nextRow=current.row==0?1:0;[picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:nextRow inSection:0]];
           }},
-          @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==3;},@"run":^{[mediaPage openSourceConfiguration];}},
+          @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"run":^{[mediaPage openSourceConfiguration];}},
           @{@"until":^BOOL{UIViewController *presented=SmokePresentedController(@[mediaPage,nav,root]);if(![presented isKindOfClass:UINavigationController.class])return NO;UINavigationController *sheet=(UINavigationController *)presented;WKWebView *web=[sheet.topViewController isKindOfClass:MediaWebViewController.class]?[sheet.topViewController valueForKey:@"web"]:nil;return [sheet isKindOfClass:UINavigationController.class]&&[sheet.topViewController isKindOfClass:MediaWebViewController.class]&&[web.URL.path isEqual:@"/source-config"];},@"run":^{
             UINavigationController *sheet=SmokePresentedNavigation(@[mediaPage,nav,root],@"source configuration");if(!sheet)return;MediaWebViewController *page=(id)sheet.topViewController;WKWebView *web=[page valueForKey:@"web"];
             check([web.URL.path isEqual:@"/source-config"],[NSString stringWithFormat:@"source configuration opens the real local service page (url=%@)",web.URL.absoluteString?:@"nil"]);check(!web.configuration.websiteDataStore.persistent,@"source configuration uses an isolated ephemeral cookie store");check(sheet.modalInPresentation,@"configuration has an explicit close-and-refresh action");capture(self.window,@"16d-media-source-configuration");[page close];
           }},
-          @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==3;},@"run":^{
+          @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"run":^{
             UISearchController *search=[mediaPage valueForKey:@"search"];search.searchBar.text=@"中文";[mediaPage updateSearchResultsForSearchController:search];
           }},
           @{@"until":^BOOL{return [[[mediaPage valueForKey:@"items"] firstObject][@"id"] isEqual:@"中文1"];},@"run":^{
