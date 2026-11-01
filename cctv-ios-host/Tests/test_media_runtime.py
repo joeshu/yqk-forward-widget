@@ -575,6 +575,33 @@ class Spider:
         with self.assertRaisesRegex(media.MediaError, '停止'):
             self.runtime.call('home')
 
+    def test_spider_owned_loopback_playback_proxy_stops_with_source(self):
+        entry = Path(self.tmp.name, 'proxy_spider.py')
+        entry.write_text('''
+import threading
+from http.server import BaseHTTPRequestHandler
+from socketserver import TCPServer
+class Spider:
+    def playerContent(self, flag, ident, vipFlags):
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+        server = TCPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return {'url': 'http://127.0.0.1:%d/video' % server.server_address[1]}
+''')
+        engine = media.PythonSpider(self.tmp.name, entry.name)
+        try:
+            result = engine.call('play', {'id': 'episode'})
+            port = urllib.parse.urlsplit(result['url']).port
+            connection = socket.create_connection(('127.0.0.1', port), timeout=1)
+            connection.close()
+            self.assertEqual(len(engine.local_proxy_servers), 1)
+        finally:
+            engine.close()
+        with self.assertRaises(OSError):
+            socket.create_connection(('127.0.0.1', port), timeout=.2)
+
     def test_failed_spider_import_does_not_leave_package_modules_loaded(self):
         helper = Path(self.tmp.name, '_fixture_import_helper.py')
         entry = Path(self.tmp.name, 'broken_spider.py')

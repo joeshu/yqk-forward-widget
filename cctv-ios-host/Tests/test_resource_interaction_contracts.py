@@ -744,7 +744,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('ResourceImportOptionTVBox', (ROOT / 'Sources/ResourceImportSheetViewController.m').read_text())
         self.assertIn('TVBoxCatalogStore parseData:data sourceURL:nil', self.root)
         self.assertIn('保留独立副本', self.root)
-        self.assertIn('TVBox type 1/4 JSON API', catalog_view)
+        self.assertIn('type 0 MacCMS 与 type 1/4 API', catalog_view)
         self.assertIn('apiKindTVBox', store)
         self.assertIn('TVBox API 请求地址无效或过长', api_client)
         self.assertIn('vod_play_from', api_client)
@@ -765,6 +765,28 @@ class ResourceInteractionContracts(unittest.TestCase):
         catalog_test = (ROOT / 'Tests/native_profile_tests.m').read_text()
         self.assertIn('type 3 JAR stays unsupported', catalog_test)
         self.assertIn('type 1 direct playback', (ROOT / 'Tests/native_media_api_tests.m').read_text())
+
+    def test_tvbox_aggregators_accept_redirects_maccms_basic_auth_and_larger_catalogs(self):
+        store = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
+        downloader = (ROOT / 'Sources/TVBoxCatalogDownloader.m').read_text()
+        package_downloader = (ROOT / 'Sources/MediaPackageDownloader.m').read_text()
+        root = self.root
+        self.assertIn('apiKindMacCMS', store)
+        self.assertIn('TVBoxBasicAuthorization', store)
+        self.assertIn('sites.count>2000 || lives.count>500', store)
+        self.assertIn('data.length > 8*1024*1024', store)
+        self.assertIn('++self.redirectCount<=5', downloader)
+        self.assertIn('https"]&&[to.scheme.lowercaseString isEqual:@"http', downloader)
+        self.assertIn('PackageSafeHeaders', package_downloader)
+        self.assertIn('PackageSameCredentialScope', package_downloader)
+        self.assertIn('saved[@"importHeaders"]', package_downloader)
+        self.assertIn('importHeaders",@"downloadChecksum', (ROOT / 'Sources/ServiceStore.m').read_text())
+        self.assertIn('headers:item[@"importHeaders"]', root)
+        api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        self.assertIn('return self.tvboxSource?8*1024*1024:2*1024*1024', api_client)
+        self.assertIn('redirectCount<=5', api_client)
+        self.assertIn('setValue:nil forHTTPHeaderField:name', api_client)
+        self.assertIn('_capture_plugin_loopback_servers()', (ROOT / 'Plugins/host_media_runtime.py').read_text())
 
     def test_media_home_reuses_existing_history_favorites_and_services(self):
         self.assertIn('MediaPlaybackStateStore.watchHistory', self.detail)

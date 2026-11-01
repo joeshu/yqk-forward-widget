@@ -85,6 +85,13 @@ def validate(path):
             assert len(z.read(root + 'js-runtime.bundle.js')) > 100000, 'missing generic JS and drpy engine'
             for package in ('requests', 'bs4', 'html5lib', 'urllib3'):
                 assert root + 'python/lib/python3.13/site-packages/' + package + '/__init__.py' in z.namelist(), 'missing Python dependency: ' + package
+            for member in (
+                    'Crypto/__init__.py', 'Crypto/Cipher/__init__.py', 'Crypto/Cipher/AES.py',
+                    'Crypto/Cipher/PKCS1_v1_5.py', 'Crypto/Cipher/_aes_core.py',
+                    'Crypto/PublicKey/__init__.py', 'Crypto/PublicKey/RSA.py',
+                    'Crypto/Util/__init__.py', 'Crypto/Util/Padding.py'):
+                assert root + 'python/lib/python3.13/site-packages/' + member in z.namelist(), 'missing pure-Python crypto compatibility module: ' + member
+            result['python_crypto_compat'] = ['AES ECB/CBC/CTR', 'RSA public-key PKCS#1 v1.5', 'PKCS#7 padding']
             result['local_media_runtimes'] = ['Python Spider', 'JavaScriptCore', 'drpy', 'Node.js Mobile']
         channels = json.loads(z.read(root + 'channels.json'))
         assert isinstance(channels, list) and channels, 'empty channel catalog'

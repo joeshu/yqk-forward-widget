@@ -103,6 +103,12 @@ static BOOL MediaTVBoxHeaderAllowed(NSString *name,NSString *value) {
     static NSSet<NSString *> *reserved;static dispatch_once_t once;dispatch_once(&once,^{reserved=[NSSet setWithArray:@[@"host",@"content-length",@"transfer-encoding",@"connection",@"proxy-authorization",@"proxy-authenticate"]];});
     return ![reserved containsObject:name.lowercaseString];
 }
+static BOOL MediaTVBoxHeaderIsSensitive(NSString *name) {
+    if(!name.length)return NO;
+    NSString *compact=[[[name lowercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@""] stringByReplacingOccurrencesOfString:@"_" withString:@""];
+    for(NSString *marker in @[@"authorization",@"cookie",@"token",@"apikey",@"secret",@"password",@"credential",@"signature",@"sign",@"session"])if([compact containsString:marker])return YES;
+    return [compact hasSuffix:@"key"];
+}
 static NSDictionary *MediaTVBoxPlaybackHeaders(NSDictionary *source,NSDictionary *response) {
     NSMutableDictionary *headers=[NSMutableDictionary dictionary];
     for(NSDictionary *input in @[([source[@"header"] isKindOfClass:NSDictionary.class]?source[@"header"]:@{}),
@@ -219,6 +225,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
 @property(nonatomic,strong) NSMutableData *data;
 @property(nonatomic,strong) NSURLResponse *response;
 @property(nonatomic,strong) NSError *failure;
+@property(nonatomic) NSUInteger redirectCount;
 @property(nonatomic,copy) void (^processor)(NSData *,NSURLResponse *,NSError *);
 @end
 @implementation MediaAPIRequestContext @end
@@ -236,6 +243,9 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
 @property(nonatomic, copy) NSString *activeOperation;
 @property(nonatomic, copy) NSDictionary *tvboxSource;
 - (void)cancelWithReason:(NSString *)reason;
+- (NSUInteger)maximumResponseBytes;
+- (BOOL)sameOrigin:(NSURL *)left as:(NSURL *)right;
+- (BOOL)sameCredentialScope:(NSURL *)origin as:(NSURL *)target;
 @end
 
 @implementation MediaAPIClient
@@ -260,6 +270,18 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
 - (instancetype)initWithTVBoxSource:(NSDictionary *)source {
     if((self=[self initWithPort:0 requestTimeout:20]))_tvboxSource=[source copy];
     return self;
+}
+- (NSUInteger)maximumResponseBytes {return self.tvboxSource?8*1024*1024:2*1024*1024;}
+- (BOOL)sameOrigin:(NSURL *)left as:(NSURL *)right {
+    if(!left||!right)return NO;
+    NSURLComponents *a=[NSURLComponents componentsWithURL:left resolvingAgainstBaseURL:NO],*b=[NSURLComponents componentsWithURL:right resolvingAgainstBaseURL:NO];if(!a||!b||![a.scheme.lowercaseString isEqual:b.scheme.lowercaseString]||![a.host.lowercaseString isEqual:b.host.lowercaseString])return NO;
+    NSNumber *aPort=a.port?:([a.scheme.lowercaseString isEqual:@"https"]?@443:@80),*bPort=b.port?:([b.scheme.lowercaseString isEqual:@"https"]?@443:@80);return [aPort isEqual:bPort];
+}
+- (BOOL)sameCredentialScope:(NSURL *)origin as:(NSURL *)target {
+    if(!origin||!target)return NO;
+    if([self sameOrigin:origin as:target])return YES;
+    NSURLComponents *a=[NSURLComponents componentsWithURL:origin resolvingAgainstBaseURL:NO],*b=[NSURLComponents componentsWithURL:target resolvingAgainstBaseURL:NO];if(!a||!b||![a.scheme.lowercaseString isEqual:@"http"]||![b.scheme.lowercaseString isEqual:@"https"]||![a.host.lowercaseString isEqual:b.host.lowercaseString])return NO;
+    NSNumber *aPort=a.port?:@80,*bPort=b.port?:@443;return [aPort isEqual:@80]&&[bPort isEqual:@443];
 }
 - (void)cancelWithReason:(NSString *)reason {
     if(self.task && self.activeRequestID.length){
@@ -351,8 +373,8 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
         NSString *pluginMessage=@"";
         BOOL pluginRetryable=NO;
         NSString *failureStage=failure?@"network_or_timeout":@"none";
-        if(!failure && data.length>2*1024*1024){
-            failure=[NSError errorWithDomain:@"CCTVHostMedia" code:3 userInfo:@{NSLocalizedDescriptionKey:@"资源服务响应超过 2 MiB"}];
+        if(!failure && data.length>[self maximumResponseBytes]){
+            failure=[NSError errorWithDomain:@"CCTVHostMedia" code:3 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"资源服务响应超过 %lu MiB",(unsigned long)([self maximumResponseBytes]/(1024*1024))]}];
             failureStage=@"response_too_large";
         } else if(!failure && !data.length){
             failure=[NSError errorWithDomain:@"CCTVHostMedia" code:4 userInfo:@{NSLocalizedDescriptionKey:@"资源服务返回空响应"}];
@@ -448,14 +470,31 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completionHandler {
     [self.contextLock lock];MediaAPIRequestContext *context=self.requestContexts[@(dataTask.taskIdentifier)];if(context)context.response=response;[self.contextLock unlock];
     if(!context){completionHandler(NSURLSessionResponseCancel);return;}
-    if(response.expectedContentLength>2*1024*1024){context.failure=[NSError errorWithDomain:@"CCTVHostMedia" code:3 userInfo:@{NSLocalizedDescriptionKey:@"资源服务响应超过 2 MiB"}];completionHandler(NSURLSessionResponseCancel);return;}
+    if(response.expectedContentLength>[self maximumResponseBytes]){context.failure=[NSError errorWithDomain:@"CCTVHostMedia" code:3 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"资源服务响应超过 %lu MiB",(unsigned long)([self maximumResponseBytes]/(1024*1024))]}];completionHandler(NSURLSessionResponseCancel);return;}
     completionHandler(NSURLSessionResponseAllow);
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data {
     [self.contextLock lock];MediaAPIRequestContext *context=self.requestContexts[@(dataTask.taskIdentifier)];
-    if(context&&context.data.length+data.length<=2*1024*1024)[context.data appendData:data];
-    else if(context&&!context.failure)context.failure=[NSError errorWithDomain:@"CCTVHostMedia" code:3 userInfo:@{NSLocalizedDescriptionKey:@"资源服务响应超过 2 MiB"}];
+    if(context&&context.data.length+data.length<=[self maximumResponseBytes])[context.data appendData:data];
+    else if(context&&!context.failure)context.failure=[NSError errorWithDomain:@"CCTVHostMedia" code:3 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"资源服务响应超过 %lu MiB",(unsigned long)([self maximumResponseBytes]/(1024*1024))]}];
     BOOL overLimit=context&&context.failure.code==3;[self.contextLock unlock];if(overLimit)[dataTask cancel];
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest * _Nullable))completionHandler {
+    [self.contextLock lock];MediaAPIRequestContext *context=self.requestContexts[@(task.taskIdentifier)];NSUInteger redirectCount=context?++context.redirectCount:NSUIntegerMax;[self.contextLock unlock];
+    NSURLComponents *from=[NSURLComponents componentsWithURL:response.URL resolvingAgainstBaseURL:NO],*to=[NSURLComponents componentsWithURL:request.URL resolvingAgainstBaseURL:NO];
+    BOOL valid=context&&redirectCount<=5&&to.scheme.length&&[@[@"http",@"https"] containsObject:to.scheme.lowercaseString]&&to.host.length&&!to.user.length&&!to.password.length;
+    if([from.scheme.lowercaseString isEqual:@"https"]&&[to.scheme.lowercaseString isEqual:@"http"])valid=NO;
+    if(valid&&![self sameOrigin:response.URL as:request.URL]){
+        NSMutableURLRequest *safe=[request mutableCopy];NSURL *sourceURL=[NSURL URLWithString:MediaTVBoxString(self.tvboxSource[@"api"])];BOOL sameHostUpgrade=[self sameCredentialScope:sourceURL as:response.URL]&&[self sameCredentialScope:sourceURL as:request.URL]&&[response.URL.scheme.lowercaseString isEqual:@"http"]&&[request.URL.scheme.lowercaseString isEqual:@"https"];
+        if(sameHostUpgrade){
+            NSDictionary *headers=[self.tvboxSource[@"header"] isKindOfClass:NSDictionary.class]?self.tvboxSource[@"header"]:@{};
+            for(id rawName in headers){if(![rawName isKindOfClass:NSString.class])continue;NSString *name=rawName;if(MediaTVBoxHeaderIsSensitive(name)&&[headers[name] isKindOfClass:NSString.class]&&MediaTVBoxHeaderAllowed(name,headers[name]))[safe setValue:headers[name] forHTTPHeaderField:name];}
+        }else{
+            for(NSString *name in safe.allHTTPHeaderFields?:@{})if(MediaTVBoxHeaderIsSensitive(name))[safe setValue:nil forHTTPHeaderField:name];
+        }
+        request=safe;
+    }
+    completionHandler(valid?request:nil);
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
     [self.contextLock lock];MediaAPIRequestContext *context=self.requestContexts[@(task.taskIdentifier)];[self.requestContexts removeObjectForKey:@(task.taskIdentifier)];NSData *data=[context.data copy];NSURLResponse *response=context.response;NSError *failure=context.failure?:error;void(^processor)(NSData *,NSURLResponse *,NSError *)=[context.processor copy];[self.contextLock unlock];

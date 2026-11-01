@@ -219,7 +219,7 @@ static BOOL ServiceValidPlaylistPath(id value){
     NSMutableDictionary *updated=[existing mutableCopy];NSMutableDictionary *manifest=[incoming[@"manifest"] mutableCopy];
     if(existing[@"manifest"][@"options"])manifest[@"options"]=existing[@"manifest"][@"options"];
     NSMutableDictionary *previous=[existing mutableCopy];[previous removeObjectForKey:@"previousImport"];updated[@"previousImport"]=previous;
-    for(NSString *key in @[@"engine",@"protocol",@"downloadChecksum",@"configDownloadChecksum",@"configContentChecksum",@"configurationState",@"updated"])if(incoming[key])updated[key]=incoming[key];
+    for(NSString *key in @[@"engine",@"protocol",@"url",@"importHeaders",@"downloadChecksum",@"configDownloadChecksum",@"configContentChecksum",@"configurationState",@"updated"])if(incoming[key])updated[key]=incoming[key];
     BOOL runtimeChanged=![existing[@"engine"] isEqual:incoming[@"engine"]];
     BOOL inferredArguments=[existing[@"argumentsSource"] isEqual:@"inferred"];
     // A changed runtime cannot safely reuse flags from the old engine. On the

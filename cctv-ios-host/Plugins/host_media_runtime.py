@@ -576,6 +576,44 @@ def playback(value):
     return result
 
 
+def _repair_mp4_stsd_walker(module):
+    """Adapt the bundled HGTV-style stsd walker when it is passed the fullbox header.
+
+    Some single-file spiders call `_walk_stsd` at the start of the `stsd`
+    payload, which still contains the 4-byte version/flags and 4-byte entry
+    count. Their walker expects the first sample-entry box. Detect this exact
+    call pattern and skip that header before delegating to the source helper.
+    """
+    if getattr(module, '_cctvhost_stsd_compat_applied', False):
+        return True
+    walker = getattr(module, '_walk_stsd', None)
+    collector = getattr(module, 'collect_patches', None)
+    if not (callable(walker) and callable(collector) and
+            callable(getattr(module, '_boxes', None)) and
+            callable(getattr(module, 'decrypt_moov_bytes', None))):
+        return False
+    try:
+        collector_source = inspect.getsource(collector)
+    except (OSError, TypeError):
+        return False
+    if not re.search(r'_walk_stsd\s*\(\s*d\s*,\s*cs\s*,\s*be\s*,\s*out\s*\)',
+                     collector_source):
+        return False
+
+    def walk_stsd(data, start, end, out):
+        count = int.from_bytes(data[start + 4:start + 8], 'big') if start + 8 <= end else 0
+        if (start + 8 <= end and data[start:start + 4] == b'\x00\x00\x00\x00' and
+                0 < count <= (end - start - 8) // 8):
+            start += 8
+        return walker(data, start, end, out)
+
+    walk_stsd.__name__ = getattr(walker, '__name__', '_walk_stsd')
+    walk_stsd.__doc__ = getattr(walker, '__doc__', None)
+    module._walk_stsd = walk_stsd
+    module._cctvhost_stsd_compat_applied = True
+    return True
+
+
 class PythonSpider:
     def __init__(self, root, entry, options=None, proxy_url=''):
         prepare_started_at = time.perf_counter()
@@ -590,6 +628,7 @@ class PythonSpider:
         if self.added_path:
             sys.path.insert(0, self.root)
         self.namespace = '_cctvhost_spider_' + uuid.uuid4().hex
+        self.local_proxy_servers = set()
         namespace = types.ModuleType(self.namespace)
         namespace.__path__ = [self.root]
         sys.modules[self.namespace] = namespace
@@ -643,6 +682,7 @@ class PythonSpider:
         _python_spider_log_stage('python_spider_prepare_started', entry, prepare_started_at)
         try:
             spec.loader.exec_module(module)
+            _repair_mp4_stsd_walker(module)
             _python_spider_log_stage('python_spider_module_loaded', entry, prepare_started_at)
             cls = getattr(module, 'Spider', None)
             if not callable(cls):
@@ -663,8 +703,11 @@ class PythonSpider:
                 _python_spider_log_stage('python_spider_init_started', entry, init_started_at)
                 self.spider.init(options if isinstance(options, str) else json.dumps(options or {}, ensure_ascii=False))
                 _python_spider_log_stage('python_spider_init_succeeded', entry, init_started_at)
+            self._capture_plugin_loopback_servers()
             _python_spider_log_stage('python_spider_ready', entry, prepare_started_at)
         except BaseException as error:
+            self._capture_plugin_loopback_servers()
+            self._stop_plugin_loopback_servers()
             _python_spider_log_stage('python_spider_prepare_failed', entry, prepare_started_at,
                                      stage=prepare_stage, error_type=type(error).__name__)
             self._remove_package_modules()
@@ -720,6 +763,39 @@ class PythonSpider:
         for module_name, loaded in list(sys.modules.items()):
             if module_name == self.namespace or module_name.startswith(self.namespace + '.'):
                 sys.modules.pop(module_name, None)
+
+    def _capture_plugin_loopback_servers(self):
+        """Track loopback HTTP servers created by this Spider for playback."""
+        for thread in threading.enumerate():
+            target = getattr(thread, '_target', None)
+            server = getattr(target, '__self__', None)
+            if server is None or not callable(getattr(server, 'shutdown', None)) or not callable(getattr(server, 'server_close', None)):
+                continue
+            address = getattr(server, 'server_address', None)
+            host = str(address[0]).strip('[]').lower() if isinstance(address, tuple) and address else ''
+            if host not in ('127.0.0.1', '::1', 'localhost'):
+                continue
+            handler = getattr(server, 'RequestHandlerClass', None)
+            module = str(getattr(handler, '__module__', ''))
+            if module == self.namespace or module.startswith(self.namespace + '.'):
+                self.local_proxy_servers.add(server)
+
+    def _stop_plugin_loopback_servers(self):
+        servers = tuple(self.local_proxy_servers)
+        self.local_proxy_servers.clear()
+        for server in servers:
+            def shutdown(target=server):
+                try:
+                    target.shutdown()
+                except Exception:
+                    pass
+                try:
+                    target.server_close()
+                except Exception:
+                    pass
+            stopper = threading.Thread(target=shutdown, name='cctvhost-spider-proxy-stop', daemon=True)
+            stopper.start()
+            stopper.join(timeout=1.0)
 
     def capabilities(self):
         methods = {'home': 'homeContent', 'category': 'categoryContent', 'search': 'searchContent',
@@ -786,6 +862,7 @@ class PythonSpider:
                 return spider.localProxy(args)
             raise MediaError('UNSUPPORTED', '此来源不支持该操作')
         finally:
+            self._capture_plugin_loopback_servers()
             self.lock.release()
 
     def close(self):
@@ -795,6 +872,8 @@ class PythonSpider:
                 if callable(callback):
                     callback()
             finally:
+                self._capture_plugin_loopback_servers()
+                self._stop_plugin_loopback_servers()
                 self._remove_package_modules()
                 if self.added_path and self.root in sys.path:
                     sys.path.remove(self.root)

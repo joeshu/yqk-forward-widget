@@ -350,7 +350,7 @@ route = '/all.m3u'
         result=subprocess.run([str(self.executable),'--update',str(old),str(new)],capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stderr)
         value=json.loads(result.stdout)
-        for key in ('ok','sameID','portKept','optionsKept','accountKept','argumentsUpdatedCorrectly','playlistUpdatedCorrectly','rollbackRestoredCode','rollbackRestoredArguments','rollbackRestoredPlaylist'):self.assertTrue(value[key],value)
+        for key in ('ok','sameID','portKept','optionsKept','accountKept','importHeadersUpdated','importHeadersRestored','argumentsUpdatedCorrectly','playlistUpdatedCorrectly','rollbackRestoredCode','rollbackRestoredArguments','rollbackRestoredPlaylist'):self.assertTrue(value[key],value)
 
     def test_imported_update_keeps_manual_arguments_and_playlist_override(self):
         old=self.folder/'old-manual.cjs';new=self.folder/'new-manual.cjs'
@@ -359,13 +359,18 @@ route = '/all.m3u'
         result=subprocess.run([str(self.executable),'--update-manual',str(old),str(new)],capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stderr)
         value=json.loads(result.stdout)
-        for key in ('ok','sameID','portKept','optionsKept','accountKept','argumentsUpdatedCorrectly','playlistUpdatedCorrectly','rollbackRestoredCode','rollbackRestoredArguments','rollbackRestoredPlaylist'):self.assertTrue(value[key],value)
+        for key in ('ok','sameID','portKept','optionsKept','accountKept','importHeadersUpdated','importHeadersRestored','argumentsUpdatedCorrectly','playlistUpdatedCorrectly','rollbackRestoredCode','rollbackRestoredArguments','rollbackRestoredPlaylist'):self.assertTrue(value[key],value)
 
     def test_md5_pair_downloads_original_code_and_rejects_mismatch_and_limits(self):
         source = b'module.exports={search(){return {list:[]}}}'
+        observed_auth=[]
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_): pass
             def do_GET(self):
+                if self.path.startswith('/auth/'):
+                    observed_auth.append(self.headers.get('Authorization',''))
+                    if self.headers.get('Authorization') != 'Basic d2V4Zm53OndleGZudw==':
+                        self.send_response(401);self.end_headers();return
                 if self.path == '/html.js':
                     body = b'<!doctype html><html><body>Sign in to download this resource</body></html>'
                     self.send_response(200)
@@ -398,6 +403,12 @@ route = '/all.m3u'
             self.assertIn('HTML 网页', html['error'])
             self.assertFalse(self.inspect(base + '/oversize.js')['ok'])
             self.assertFalse(self.inspect(base + '/unsupported.txt')['ok'])
+            authenticated=self.inspect(base.replace('http://','http://wexfnw:wexfnw@')+'/auth/index.js.md5')
+            self.assertTrue(authenticated['ok'],authenticated)
+            self.assertNotIn('wexfnw',authenticated['url'])
+            self.assertEqual(authenticated['importHeaders']['Authorization'],'Basic d2V4Zm53OndleGZudw==')
+            self.assertGreaterEqual(len(observed_auth),2)
+            self.assertTrue(all(value=='Basic d2V4Zm53OndleGZudw==' for value in observed_auth))
         finally:
             server.shutdown();server.server_close();thread.join(2)
 
