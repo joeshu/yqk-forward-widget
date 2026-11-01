@@ -31,11 +31,11 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
             [self.profileIconView.heightAnchor constraintEqualToConstant:25],
             [self.profileTitleLabel.leadingAnchor constraintEqualToAnchor:self.profileIconView.trailingAnchor constant:13],
             [self.profileTitleLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14],
-            [self.profileTitleLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],
+            [self.profileTitleLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
             [self.profileDetailLabel.leadingAnchor constraintEqualToAnchor:self.profileTitleLabel.leadingAnchor],
             [self.profileDetailLabel.trailingAnchor constraintEqualToAnchor:self.profileTitleLabel.trailingAnchor],
-            [self.profileDetailLabel.topAnchor constraintEqualToAnchor:self.profileTitleLabel.bottomAnchor constant:4],
-            [self.profileDetailLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-12]
+            [self.profileDetailLabel.topAnchor constraintEqualToAnchor:self.profileTitleLabel.bottomAnchor constant:6],
+            [self.profileDetailLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-14]
         ]];
     }
     return self;
@@ -114,7 +114,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     self.resourceHeaderTopConstraint=[self.topActionsStack.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor constant:4];
     [NSLayoutConstraint activateConstraints:@[self.resourceHeaderTopConstraint,[self.topActionsStack.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-16],[self.topActionsStack.widthAnchor constraintEqualToConstant:176],[self.topActionsStack.heightAnchor constraintEqualToConstant:44],[self.resourceTitleLabel.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:20],[self.resourceTitleLabel.topAnchor constraintEqualToAnchor:self.topActionsStack.bottomAnchor constant:8],[self.resourceTitleLabel.heightAnchor constraintGreaterThanOrEqualToConstant:42],[self.resourceSearchField.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:20],[self.resourceSearchField.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-20],[self.resourceSearchField.topAnchor constraintEqualToAnchor:self.resourceTitleLabel.bottomAnchor constant:6],[self.resourceSearchField.heightAnchor constraintEqualToConstant:44],[self.kindScroll.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:10],[self.kindScroll.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor],[self.kindScroll.topAnchor constraintEqualToAnchor:self.resourceSearchField.bottomAnchor constant:12],[self.kindScroll.bottomAnchor constraintEqualToAnchor:self.resourceHeader.bottomAnchor constant:-6],self.kindScrollHeightConstraint,[self.kindStack.leadingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.leadingAnchor],[self.kindStack.trailingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.trailingAnchor constant:-10],[self.kindStack.topAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.topAnchor],[self.kindStack.bottomAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.bottomAnchor],[self.kindStack.heightAnchor constraintEqualToAnchor:self.kindScroll.frameLayoutGuide.heightAnchor]]];
     self.tableView.tableHeaderView=self.resourceHeader;
-    self.tableView.contentInset=UIEdgeInsetsMake(0,0,78,0);self.tableView.scrollIndicatorInsets=UIEdgeInsetsMake(0,0,78,0);
+    self.tableView.contentInset=UIEdgeInsetsMake(0,0,8,0);self.tableView.scrollIndicatorInsets=UIEdgeInsetsMake(0,0,8,0);
     self.emptyLabel=[UILabel new];self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.tableView.backgroundView=self.emptyLabel;
     UIRefreshControl *r = [UIRefreshControl new];
     [r addTarget:self action:@selector(refreshProfiles) forControlEvents:UIControlEventValueChanged];
@@ -351,13 +351,16 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     NSDictionary *profile=self.profiles[indexPath.row];BOOL plugin=[profile[@"type"] isEqual:@"plugin"],tvbox=[profile[@"type"] isEqual:@"tvbox"];
     CGFloat accessoryWidth=plugin?96:(tvbox?36:56),cardWidth=MAX(1,tableView.bounds.size.width-40);
     CGFloat textWidth=MAX(44,cardWidth-15-25-13-14-accessoryWidth);
-    UIFont *titleFont=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline],*detailFont=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+    UIFont *titleFont=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline],*detailFont=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     CGRect titleBounds=[[self resourceTitleForProfile:profile] boundingRectWithSize:CGSizeMake(textWidth,ceil(titleFont.lineHeight*2)) options:NSStringDrawingUsesLineFragmentOrigin|NSStringDrawingUsesFontLeading attributes:@{NSFontAttributeName:titleFont} context:nil];
     NSMutableParagraphStyle *paragraph=[NSMutableParagraphStyle new];paragraph.lineBreakMode=NSLineBreakByCharWrapping;
     CGRect detailBounds=[[self resourceDetailForProfile:profile] boundingRectWithSize:CGSizeMake(textWidth,CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin|NSStringDrawingUsesFontLeading attributes:@{NSFontAttributeName:detailFont,NSParagraphStyleAttributeName:paragraph} context:nil];
     CGFloat titleHeight=MIN(ceil(titleFont.lineHeight*2),MAX(ceil(titleFont.lineHeight),ceil(titleBounds.size.height)));
     CGFloat detailHeight=MAX(ceil(detailFont.lineHeight),ceil(detailBounds.size.height));
-    return MAX(96,ceil(12+titleHeight+4+detailHeight+12+6));
+    // Keep extra room beyond the measured text. UIKit can make the cell's
+    // content view slightly narrower for grouped insets/accessories than the
+    // table width used above, which otherwise clips the final detail line.
+    return MAX(112,ceil(14+titleHeight+6+detailHeight+14+14));
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     NSUInteger enabledSubscriptions=0,runningServices=0,catalogs=0;
@@ -373,7 +376,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     c.clipsToBounds = YES;
     c.textLabel.textColor = HostText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
-    c.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+    c.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     c.textLabel.adjustsFontForContentSizeCategory=YES;
     c.detailTextLabel.adjustsFontForContentSizeCategory=YES;
     c.textLabel.numberOfLines=2;

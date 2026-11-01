@@ -1,3 +1,5 @@
+import hashlib
+import json
 import pathlib
 import re
 import unittest
@@ -160,6 +162,33 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('ServicesViewController *page', TEXT)
         self.assertIn('[weakSelf openPluginPage]', TEXT)
         self.assertIn('SettingsViewController *page', TEXT)
+
+    def test_channel_rows_resolve_each_station_to_a_bundled_logo(self):
+        channels = json.loads((SOURCE.parents[1] / "Resources" / "channels.json").read_text(encoding="utf-8"))
+        assets = SOURCE.parents[1] / "Resources" / "Assets.xcassets"
+        logo_digests = set()
+        for channel in channels:
+            image_set = assets / f"ChannelLogo_{channel['id']}.imageset"
+            self.assertTrue((image_set / "logo.png").is_file(), channel["id"])
+            logo_digests.add(hashlib.sha256((image_set / "logo.png").read_bytes()).digest())
+            manifest = json.loads((image_set / "Contents.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["images"][0]["filename"], "logo.png", channel["id"])
+            self.assertEqual(manifest["images"][0]["idiom"], "universal", channel["id"])
+            self.assertEqual(manifest["images"][0]["scale"], "2x", channel["id"])
+        self.assertEqual(len(logo_digests), len(channels), "each built-in channel needs its own image asset")
+        self.assertIn('UIImage imageNamed:[@"ChannelLogo_" stringByAppendingString:identifier]', TEXT)
+        self.assertIn('logo.image=CCTVChannelLogoImage(ch)', TEXT)
+        self.assertIn('cell.imageView.image=CCTVChannelLogoImage(ch)', TEXT)
+
+    def test_live_pages_end_eight_points_above_bottom_navigation(self):
+        layout_start = TEXT.rindex("- (void)viewDidLayoutSubviews {")
+        layout_end = TEXT.index("- (void)traitCollectionDidChange:", layout_start)
+        layout = TEXT[layout_start:layout_end]
+        self.assertIn('CGRectGetMinY(self.bottomBar.frame)-8', layout)
+        self.assertIn('MAX(0,contentBottom-contentY)', layout)
+        self.assertIn('MAX(0,contentBottom-pageTop)', layout)
+        self.assertNotIn('height-safe.bottom-152', layout)
+        self.assertIn('self.tableView.contentInset=UIEdgeInsetsMake(0,0,8,0)', CONFIG)
 
     def test_service_directory_applies_safe_area_only_once(self):
         self.assertIn('self.table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever', SERVICE_UI)

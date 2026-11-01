@@ -44,7 +44,7 @@ class ResourceInteractionContracts(unittest.TestCase):
 
     def test_resource_return_layout_reuses_filters_and_measures_variable_rows(self):
         self.assertIn('@interface CCTVResourceProfileCell : UITableViewCell', self.catalog)
-        self.assertIn('profileDetailLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-12', self.catalog)
+        self.assertIn('profileDetailLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-14', self.catalog)
         self.assertIn('self.tableView.estimatedRowHeight = 0', self.catalog)
         self.assertIn('self.tableView.estimatedSectionHeaderHeight = 0', self.catalog)
         self.assertIn('self.tableView.estimatedSectionFooterHeight = 0', self.catalog)
@@ -56,13 +56,14 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('c.textLabel.numberOfLines=2', self.catalog)
         self.assertIn('c.detailTextLabel.numberOfLines = 0', self.catalog)
         self.assertIn('c.detailTextLabel.lineBreakMode=NSLineBreakByCharWrapping', self.catalog)
+        self.assertIn('UIFontTextStyleFootnote', self.catalog)
         self.assertIn('CCTVResourceDisplayEndpoint(source)', self.catalog)
         self.assertIn('if(name.length)return name;', self.catalog)
         self.assertIn('c.accessibilityValue=c.detailTextLabel.text', self.catalog)
 
     def test_resource_rows_measure_and_keep_all_summary_fields_visible(self):
         self.assertIn('- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:', self.catalog)
-        self.assertIn('return MAX(96,ceil(12+titleHeight+4+detailHeight+12+6));', self.catalog)
+        self.assertIn('return MAX(112,ceil(14+titleHeight+6+detailHeight+14+14));', self.catalog)
         self.assertIn('- (NSString *)resourceTitleForProfile:(NSDictionary *)profile', self.catalog)
         self.assertIn('- (NSString *)resourceDetailForProfile:(NSDictionary *)profile', self.catalog)
         self.assertIn('CCTVResourceDisplayEndpoint(profile[@"subscriptionURL"])', self.catalog)

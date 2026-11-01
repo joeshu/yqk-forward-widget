@@ -70,6 +70,25 @@ static NSString *const kOptDefaultRate = @"CNPlayerConfigOptionKey_DefaultRate";
 static NSString *const kOptUserID = @"CNPlayerConfigOptionKey_UserID";
 static NSString *const kOptURLChannelIDForStats = @"CNPlayerConfigOptionKey_URLSource_VID_ChannelIDUsedStat";
 static NSString *const kLicenseUrl = @"https://drm.live.cntv.cn:444/udrm/udmCNTVGetLicense";
+static UIImage *CCTVChannelLogoImage(NSDictionary *channel) {
+    NSString *identifier=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+    if(identifier.length){UIImage *asset=[UIImage imageNamed:[@"ChannelLogo_" stringByAppendingString:identifier]];if(asset)return asset;}
+    static NSCache<NSString *,UIImage *> *cache;static dispatch_once_t once;dispatch_once(&once,^{cache=[NSCache new];cache.countLimit=100;});
+    NSString *cacheKey=identifier.length?identifier:([channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:@"频道");
+    UIImage *cached=[cache objectForKey:cacheKey];if(cached)return cached;
+    NSString *name=[channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:(identifier.length?identifier:@"直播频道");
+    NSUInteger hash=2166136261u;for(NSUInteger index=0;index<cacheKey.length;index++){hash^=[cacheKey characterAtIndex:index];hash*=16777619u;}
+    NSArray<UIColor *> *palette=@[[UIColor colorWithRed:.78 green:.05 blue:.20 alpha:1],[UIColor colorWithRed:.10 green:.38 blue:.72 alpha:1],[UIColor colorWithRed:.85 green:.36 blue:.08 alpha:1],[UIColor colorWithRed:.14 green:.52 blue:.43 alpha:1],[UIColor colorWithRed:.48 green:.29 blue:.69 alpha:1]];UIColor *accent=palette[hash%palette.count];
+    UIGraphicsImageRendererFormat *format=[UIGraphicsImageRendererFormat defaultFormat];format.scale=2;format.opaque=NO;
+    UIImage *generated=[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(120,72) format:format] imageWithActions:^(UIGraphicsImageRendererContext *context){(void)context;
+        CGRect bounds=CGRectMake(1,1,118,70);UIBezierPath *card=[UIBezierPath bezierPathWithRoundedRect:bounds cornerRadius:10];[[accent colorWithAlphaComponent:.10] setFill];[card fill];[[accent colorWithAlphaComponent:.55] setStroke];card.lineWidth=1.5;[card stroke];
+        CGFloat fontSize=14;UIFont *font=[UIFont systemFontOfSize:fontSize weight:UIFontWeightBold];NSDictionary *attributes=@{NSFontAttributeName:font,NSForegroundColorAttributeName:accent};while(fontSize>9&&[name sizeWithAttributes:attributes].width>bounds.size.width-12){fontSize-=1;font=[UIFont systemFontOfSize:fontSize weight:UIFontWeightBold];attributes=@{NSFontAttributeName:font,NSForegroundColorAttributeName:accent};}
+        CGSize textSize=[name sizeWithAttributes:attributes];[name drawAtPoint:CGPointMake(CGRectGetMidX(bounds)-textSize.width/2,CGRectGetMidY(bounds)-textSize.height/2) withAttributes:attributes];
+    }];[cache setObject:generated forKey:cacheKey];return generated;
+}
+static BOOL CCTVChannelLogoNeedsDarkBacking(NSString *identifier) {
+    return [identifier hasPrefix:@"cctv"]||[identifier hasPrefix:@"cetv"]||[identifier isEqual:@"neimenggu"]||[identifier isEqual:@"neimenggu2"];
+}
 static BOOL CCTVRemotePlaybackErrorCanRetrySameURL(NSError *error) {
     if(![error.domain isEqualToString:NSURLErrorDomain])return YES;
     switch(error.code){
@@ -1308,7 +1327,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     poster.frame=CGRectMake(0,0,width,posterHeight);poster.layer.borderWidth=selected?1.8:.5;HostSetLayerBorderColor(poster,selected?HostAccent():HostBorder());
     CGFloat logoInset=MAX(6,floor(width*.10)),logoHeight=MAX(28,floor(posterHeight*.62));logo.frame=CGRectMake(logoInset,floor((posterHeight-logoHeight)/2),MAX(1,width-logoInset*2),logoHeight);brand.frame=CGRectMake(5,MAX(4,floor((posterHeight-34)/2)),MAX(1,width-10),34);number.frame=CGRectMake(6,posterHeight-15,62,12);selectedMark.frame=CGRectMake(MAX(2,width-22),5,16,16);selectedMark.hidden=!selected;
     title.frame=CGRectMake(2,titleTop,labelWidth,titleHeight);subtitle.frame=CGRectMake(2,subtitleTop,labelWidth,subtitleHeight);
-    NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";logo.hidden=!logoURL.length;brand.hidden=logoURL.length>0;brand.text=name;if(logoURL.length)[self loadLogo:logoURL into:logo];else{logo.image=nil;logo.accessibilityIdentifier=nil;}
+    NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";logo.hidden=NO;brand.hidden=YES;brand.text=name;
+    if(logoURL.length){logo.backgroundColor=UIColor.clearColor;logo.layer.cornerRadius=0;logo.clipsToBounds=NO;[self loadLogo:logoURL into:logo];}
+    else{logo.image=CCTVChannelLogoImage(ch);logo.accessibilityIdentifier=[@"channel-logo:" stringByAppendingString:channelID];BOOL dark=CCTVChannelLogoNeedsDarkBacking(channelID);logo.backgroundColor=dark?[UIColor colorWithWhite:.10 alpha:1]:UIColor.clearColor;logo.layer.cornerRadius=dark?5:0;logo.clipsToBounds=dark;}
     number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=selected?HostAccent():HostText();cell.contentView.backgroundColor=selected?HostSelectedSurface():UIColor.clearColor;
     cell.accessibilityIdentifier=[@"channel-card-" stringByAppendingString:channelID];cell.accessibilityLabel=name;cell.accessibilityValue=selected?@"正在播放":@"频道";cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[ch[@"id"]])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:ch[@"id"]];subtitle.text=[self catalogSubtitleForChannel:ch];return cell;
@@ -1407,8 +1428,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     cell.accessibilityValue=playing?@"正在播放":@"频道";
     cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *logo = [ch[@"logo"] isKindOfClass:NSString.class] ? ch[@"logo"] : @"";
-    if (logo.length) [self loadLogo:logo into:cell.imageView];
-    else {cell.imageView.image=[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"];cell.imageView.accessibilityIdentifier=nil;}
+    if (logo.length) {cell.imageView.backgroundColor=UIColor.clearColor;cell.imageView.layer.cornerRadius=0;cell.imageView.clipsToBounds=NO;[self loadLogo:logo into:cell.imageView];}
+    else {cell.imageView.image=CCTVChannelLogoImage(ch);cell.imageView.accessibilityIdentifier=[@"channel-logo:" stringByAppendingString:cid];BOOL dark=CCTVChannelLogoNeedsDarkBacking(cid);cell.imageView.backgroundColor=dark?[UIColor colorWithWhite:.10 alpha:1]:UIColor.clearColor;cell.imageView.layer.cornerRadius=dark?5:0;cell.imageView.clipsToBounds=dark;}
     cell.imageView.tintColor=HostAccent();
     NSDictionary *epg = self.epgCache[cid];
     if ([epg[@"now"] isKindOfClass:NSString.class]) cell.detailTextLabel.text = [NSString stringWithFormat:@"正在播：%@", epg[@"now"]];
@@ -1868,16 +1889,16 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         self.playerBox.frame=CGRectMake(0,top,w,ph);self.playerBox.hidden=!catalog||!expanded;
         CGFloat y=top+ph;self.groupControl.frame=CGRectMake(12,y+6,w-24,28);self.groupControl.hidden=!catalog||expanded;self.playerTabs.frame=CGRectMake(12,y+6,w-24,28);self.playerTabs.hidden=!catalog||!expanded;
         self.versionLabel.hidden=YES;
-        CGFloat contentY=y+42;CGFloat tabY=height-safe.bottom-152;
-        CGRect frame=CGRectMake(0,contentY,w,MAX(0,tabY-contentY));self.table.frame=frame;self.channelGrid.frame=frame;
-        self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=frame;self.playbackPanel.view.hidden=!catalog;
         self.bottomBar.frame=CGRectMake(MAX(16,(w-420)/2),height-safe.bottom-76,MIN(w-32,420),64);self.bottomBarBackdrop.frame=self.bottomBar.frame;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
+        CGFloat contentY=y+42;CGFloat contentBottom=CGRectGetMinY(self.bottomBar.frame)-8;
+        CGRect frame=CGRectMake(0,contentY,w,MAX(0,contentBottom-contentY));self.table.frame=frame;self.channelGrid.frame=frame;
+        self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=frame;self.playbackPanel.view.hidden=!catalog;
         // The resource controller places its own header below the status-bar
         // safe area. Keep its root at a stable origin instead of applying the
         // navigation bar's changing safe-area top to the entire child view;
         // UIKit can otherwise move the complete page when returning from a
         // pushed page while the bar visibility is being reconciled.
-        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat resourceSafeTop=self.view.window.safeAreaInsets.top;if(resourceSafeTop<=0)resourceSafeTop=top;CGFloat pageTop=resourcePage?0:top;self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,tabY-pageTop));if(resourcePage)[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:resourceSafeTop];[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
+        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat resourceSafeTop=self.view.window.safeAreaInsets.top;if(resourceSafeTop<=0)resourceSafeTop=top;CGFloat pageTop=resourcePage?0:top;self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,contentBottom-pageTop));if(resourcePage)[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:resourceSafeTop];[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
         self.resourceActionsButton.hidden=YES;self.resourceActionsButton.frame=CGRectMake(w-safe.right-18-58,CGRectGetMinY(self.bottomBar.frame)-12-58,58,58);
     }
     [self relayoutPlayer];
@@ -2219,10 +2240,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     panel.selectionHandler=^(NSDictionary *item){RootViewController *owner=weakSelf;if(!owner||![owner.channelID isEqual:panelChannelID])return;NSDictionary *active=[owner channelWithID:owner.channelID];if([item[@"kind"] isEqual:@"remote"]){NSMutableDictionary *next=[(active?:@{@"id":owner.channelID?:@"",@"name":owner.channelName?:@"直播"}) mutableCopy];next[@"remoteURL"]=item[@"url"];[owner routePlayback:next];[owner configureCatalogNavigation];return;}if(!active)return;[owner playChannel:active route:[item[@"kind"] isEqual:@"native"]?item[@"route"]:nil];[owner configureCatalogNavigation];};return panel;
 }
 - (void)updatePlayerChannelLogoForChannel:(NSDictionary *)channel {
-    NSString *logo=[channel[@"logo"] isKindOfClass:NSString.class]?channel[@"logo"]:@"";self.playerChannelLogo.image=nil;self.playerChannelLogo.hidden=!logo.length;self.playerChannelLogo.accessibilityIdentifier=logo;
+    NSString *logo=[channel[@"logo"] isKindOfClass:NSString.class]?channel[@"logo"]:@"";NSString *identifier=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";self.playerChannelLogo.hidden=channel==nil;
+    if(logo.length){self.playerChannelLogo.image=nil;self.playerChannelLogo.accessibilityIdentifier=logo;self.playerChannelLogo.backgroundColor=UIColor.clearColor;self.playerChannelLogo.layer.cornerRadius=0;self.playerChannelLogo.clipsToBounds=NO;}
+    else{self.playerChannelLogo.image=channel?CCTVChannelLogoImage(channel):nil;self.playerChannelLogo.accessibilityIdentifier=identifier.length?[@"channel-logo:" stringByAppendingString:identifier]:@"";BOOL dark=CCTVChannelLogoNeedsDarkBacking(identifier);self.playerChannelLogo.backgroundColor=dark?[UIColor colorWithWhite:.10 alpha:1]:UIColor.clearColor;self.playerChannelLogo.layer.cornerRadius=dark?5:0;self.playerChannelLogo.clipsToBounds=dark;}
 }
 - (void)loadPlayerChannelLogoAfterFirstFrame {
-    NSString *url=self.playerChannelLogo.accessibilityIdentifier;if(url.length&&self.firstRender)[[HostImageLoader shared] loadURL:url intoImageView:self.playerChannelLogo];
+    NSString *url=self.playerChannelLogo.accessibilityIdentifier;if([NSURL URLWithString:url].host.length&&self.firstRender)[[HostImageLoader shared] loadURL:url intoImageView:self.playerChannelLogo];
 }
 - (void)selectPlayerPanel {
     if(self.playbackPanel){[self.playbackPanel willMoveToParentViewController:nil];[self.playbackPanel.view removeFromSuperview];[self.playbackPanel removeFromParentViewController];self.playbackPanel=nil;}
