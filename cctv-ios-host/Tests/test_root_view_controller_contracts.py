@@ -371,6 +371,10 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('loadPlayerChannelLogoAfterFirstFrame', TEXT)
         body = method_body('- (void)loadLogo:')
         self.assertIn('HostImageLoader shared] loadURL:url intoImageView:iv', body)
+        self.assertIn('@interface CCTVChannelListCell : UITableViewCell', TEXT)
+        self.assertIn('CGRectMake(12,MAX(4,(height-36)/2),56,36)', TEXT)
+        self.assertIn('CGFloat titleHeight=MIN(height,ceil(self.textLabel.font.lineHeight))', TEXT)
+        self.assertIn('w-safe.right-60),overlayTop+8,48,27', TEXT)
         self.assertNotIn('playbackPriorityUntil', body)
 
     def test_epg_debug_info_reports_subscription_match_fields_and_preserves_source_query(self):

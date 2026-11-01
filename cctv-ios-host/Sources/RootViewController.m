@@ -218,6 +218,22 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 @end
 
+@interface CCTVChannelListCell : UITableViewCell @end
+@implementation CCTVChannelListCell
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat width=CGRectGetWidth(self.contentView.bounds),height=CGRectGetHeight(self.contentView.bounds);
+    self.imageView.contentMode=UIViewContentModeScaleAspectFit;
+    self.imageView.frame=CGRectMake(12,MAX(4,(height-36)/2),56,36);
+    CGFloat titleHeight=MIN(height,ceil(self.textLabel.font.lineHeight)),detailHeight=MIN(MAX(0,height-titleHeight-4),ceil(self.detailTextLabel.font.lineHeight*MAX(1,self.detailTextLabel.numberOfLines)));
+    CGFloat blockHeight=titleHeight+3+detailHeight,top=MAX(4,floor((height-blockHeight)/2));
+    CGFloat textX=80,accessorySpace=self.accessoryView?44:(self.accessoryType==UITableViewCellAccessoryDisclosureIndicator?30:12);
+    CGFloat textWidth=MAX(0,width-textX-accessorySpace);
+    self.textLabel.frame=CGRectMake(textX,top,textWidth,titleHeight);
+    self.detailTextLabel.frame=CGRectMake(textX,top+titleHeight+3,textWidth,detailHeight);
+}
+@end
+
 @interface RootViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIDocumentPickerDelegate, AVPlayerViewControllerDelegate, UINavigationControllerDelegate>
 // 播放
 @property (nonatomic, strong) UIView *playerBox;
@@ -1362,14 +1378,14 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     static NSString *reuse = @"channel.list";
     UITableViewCell *cell = [t dequeueReusableCellWithIdentifier:reuse];
     if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];
+        cell = [[CCTVChannelListCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];
         cell.backgroundColor = HostCard();
         cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
         cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.textLabel.numberOfLines=1;cell.textLabel.lineBreakMode=NSLineBreakByTruncatingTail;
         cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
         cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=2;cell.detailTextLabel.lineBreakMode=NSLineBreakByTruncatingTail;
         cell.detailTextLabel.textColor = HostSecondaryText();
-        cell.imageView.contentMode=UIViewContentModeScaleAspectFit;
+        cell.imageView.contentMode=UIViewContentModeScaleAspectFit;cell.separatorInset=UIEdgeInsetsMake(0,80,0,0);cell.preservesSuperviewLayoutMargins=NO;
         UIView *selected = [[UIView alloc] init];
         selected.backgroundColor = HostSelectedSurface();
         cell.selectedBackgroundView = selected;
@@ -1866,9 +1882,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     }
     [self relayoutPlayer];
     CGFloat overlayTop = self.fullscreen ? safe.top : 0;
-    self.titleLabel.frame = CGRectMake(12 + safe.left, overlayTop + 8, MAX(0, w - safe.left - safe.right - 104), 20);
+    self.titleLabel.frame = CGRectMake(12 + safe.left, overlayTop + 8, MAX(0, w - safe.left - safe.right - 80), 20);
     self.infoLabel.frame = CGRectMake(12 + safe.left, overlayTop + 30, MAX(0, w - safe.left - safe.right - 24), 16);
-    self.playerChannelLogo.frame=CGRectMake(MAX(safe.left+12,w-safe.right-76),overlayTop+8,64,36);
+    self.playerChannelLogo.frame=CGRectMake(MAX(safe.left+12,w-safe.right-60),overlayTop+8,48,27);
     CGFloat bottom = self.fullscreen ? safe.bottom : 0;
     self.controlBar.frame = CGRectMake(8 + safe.left, CGRectGetHeight(self.playerBox.bounds) - bottom - 48,
                                       MAX(0, w - safe.left - safe.right - 16), 40);

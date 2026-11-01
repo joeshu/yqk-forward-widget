@@ -238,13 +238,20 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('indexPath.row==0?3:4 forKey:MediaBrowserGridColumnsDefaultsKey', configuration)
         self.assertIn('cctv.mediaGridColumns.v1', self.detail)
         self.assertIn('return [NSUserDefaults.standardUserDefaults integerForKey:MediaBrowserGridColumnsDefaultsKey]==4?4:3;', self.detail)
-        self.assertIn('首页精选和影视库', configuration)
+        self.assertIn('首页海报卡片和影视库', configuration)
         config_route = self.detail[self.detail.index('- (void)openHomeConfiguration {'):
                                    self.detail.index('- (void)openHomeFavorite:', self.detail.index('- (void)openHomeConfiguration {'))]
         self.assertIn('[owner.grid.collectionViewLayout invalidateLayout]', config_route)
         self.assertIn('[owner updateHomeGridLayout]', config_route)
         self.assertIn('CGRectIntersectsRect(frame,viewport)', self.detail)
         self.assertIn('convertRect:self.homeScroll.bounds toView:self.view', self.detail)
+
+    def test_home_shelf_cards_follow_the_selected_three_or_four_column_density(self):
+        self.assertIn('static CGFloat MediaHomeCardWidth(CGFloat viewWidth)', self.detail)
+        self.assertIn('spacing*(columns-1))/columns', self.detail)
+        self.assertIn('card.widthAnchor constraintEqualToConstant:MediaHomeCardWidth(self.view.bounds.size.width)', self.detail)
+        self.assertIn('CGFloat cardWidth=MediaHomeCardWidth(self.view.bounds.size.width);CGFloat posterShelfHeight=cardWidth*1.5+54', self.detail)
+        self.assertIn('@(MediaBrowserGridColumns())', self.detail)
 
     def test_movie_detail_is_compact_has_poster_fallback_and_removes_cast_strip(self):
         detail = self.detail[self.detail.index('@interface MediaDetailViewController'):
