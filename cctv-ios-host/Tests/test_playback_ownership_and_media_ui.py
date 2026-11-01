@@ -165,7 +165,9 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class]', layout)
         self.assertIn('CGFloat resourceSafeTop=self.view.window.safeAreaInsets.top', layout)
         self.assertIn('CGFloat pageTop=resourcePage?0:top', layout)
-        self.assertIn('[self refreshHeaderAfterNavigationTransition]', method_body(RESOURCE_SOURCE, '- (void)viewWillAppear:(BOOL)animated'))
+        view_will_appear = method_body(RESOURCE_SOURCE, '- (void)viewWillAppear:(BOOL)animated')
+        self.assertIn('[self updateResourceHeaderLayoutReattaching:YES]', view_will_appear)
+        self.assertNotIn('[self refreshHeaderAfterNavigationTransition]', view_will_appear)
         self.assertIn('NSString *query=self.searchQuery?:@""', RESOURCE_SOURCE)
         self.assertIn('self.resourceActionsButton.hidden=YES', ROOT_SOURCE)
 

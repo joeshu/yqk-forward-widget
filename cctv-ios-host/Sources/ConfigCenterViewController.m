@@ -89,7 +89,10 @@
     [self reloadProfiles];
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
-    [self refreshHeaderAfterNavigationTransition];
+    // Child viewWillAppear runs before the navigation pop completes. Re-measure
+    // the header here, but leave the saved offset for RootViewController's
+    // didShow callback, after the final bar and safe-area layout has settled.
+    [self updateResourceHeaderLayoutReattaching:YES];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(runtimeStateDidChange) name:PyHostRuntimeStateDidChangeNotification object:nil];
 }
 - (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];}

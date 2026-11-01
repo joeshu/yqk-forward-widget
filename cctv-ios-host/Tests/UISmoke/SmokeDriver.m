@@ -340,6 +340,10 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             check([nav.topViewController isKindOfClass:ServicesViewController.class],
                   @"service directory opened");
+            ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPages"][@3];
+            CGPoint capturedOffset=[[resourcePage valueForKey:@"navigationReturnContentOffset"] CGPointValue];
+            check([[resourcePage valueForKey:@"hasNavigationReturnPosition"] boolValue]&&fabs(capturedOffset.y-resourceScrollOffset)<1.5,
+                  @"resource source action snapshots its scroll position before navigation changes the layout");
             capture(self.window, @"04-services");
             ServicesViewController *v = (id)nav.topViewController;
             UITableView *table = [v valueForKey:@"table"];

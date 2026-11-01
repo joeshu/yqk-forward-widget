@@ -65,6 +65,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[resourcePage refreshHeaderAfterNavigationTransition]', self.root)
         self.assertIn('[resourcePage prepareForNavigationTransition]', self.root)
         self.assertIn('if(viewController==self&&self.activeTab==3)', self.root)
+        appearance = self.catalog.split('- (void)viewWillAppear:(BOOL)animated {', 1)[1].split('- (void)viewDidDisappear:', 1)[0]
+        self.assertIn('[self updateResourceHeaderLayoutReattaching:YES]', appearance)
+        self.assertNotIn('[self refreshHeaderAfterNavigationTransition]', appearance)
 
     def test_service_directory_omits_empty_runtime_groups(self):
         services = (ROOT / 'Sources/ServicesViewController.m').read_text()
