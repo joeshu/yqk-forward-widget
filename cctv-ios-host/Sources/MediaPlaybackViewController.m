@@ -513,7 +513,7 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
     [NSLayoutConstraint deactivateConstraints:self.portraitConstraints];[NSLayoutConstraint deactivateConstraints:self.landscapeConstraints];
     [NSLayoutConstraint deactivateConstraints:@[self.videoAspectConstraint,self.portraitTallViewportHeightConstraint,self.landscapeTallViewportHeightConstraint]];
     [NSLayoutConstraint activateConstraints:landscape?self.landscapeConstraints:self.portraitConstraints];
-    if(tallVideo)[NSLayoutConstraint activateConstraints:@[landscape?self.landscapeTallViewportHeightConstraint:self.portraitTallViewportHeightConstraint]];
+    if(tallVideo){self.videoAspectConstraint.active=NO;[NSLayoutConstraint activateConstraints:@[landscape?self.landscapeTallViewportHeightConstraint:self.portraitTallViewportHeightConstraint]];}
     else [NSLayoutConstraint activateConstraints:@[self.videoAspectConstraint]];
     self.tallVideoViewportLayout=tallVideo;
     [self.view setNeedsLayout];
