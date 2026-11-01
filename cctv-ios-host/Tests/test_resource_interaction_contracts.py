@@ -56,9 +56,19 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('c.textLabel.numberOfLines=2', self.catalog)
         self.assertIn('c.detailTextLabel.numberOfLines = 0', self.catalog)
         self.assertIn('c.detailTextLabel.lineBreakMode=NSLineBreakByCharWrapping', self.catalog)
-        self.assertIn('CCTVResourceDisplayEndpoint(p[@"source"])', self.catalog)
-        self.assertIn('if(!profileName.length){NSString *source=', self.catalog)
+        self.assertIn('CCTVResourceDisplayEndpoint(source)', self.catalog)
+        self.assertIn('if(name.length)return name;', self.catalog)
         self.assertIn('c.accessibilityValue=c.detailTextLabel.text', self.catalog)
+
+    def test_resource_rows_measure_and_keep_all_summary_fields_visible(self):
+        self.assertIn('- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:', self.catalog)
+        self.assertIn('return MAX(96,ceil(12+titleHeight+4+detailHeight+12+6));', self.catalog)
+        self.assertIn('- (NSString *)resourceTitleForProfile:(NSDictionary *)profile', self.catalog)
+        self.assertIn('- (NSString *)resourceDetailForProfile:(NSDictionary *)profile', self.catalog)
+        self.assertIn('CCTVResourceDisplayEndpoint(profile[@"subscriptionURL"])', self.catalog)
+        self.assertIn('profile[@"count"]?:@0,profile[@"epgStatus"]?:@"自动匹配"', self.catalog)
+        self.assertIn('summary=[summary stringByAppendingFormat:@"\\n%@",profile[@"status"]]', self.catalog)
+        self.assertIn('c.detailTextLabel.text=[self resourceDetailForProfile:p]', self.catalog)
 
     def test_resource_header_is_remeasured_after_navigation_return_and_preserves_scroll_position(self):
         self.assertIn('- (void)refreshHeaderAfterNavigationTransition', self.catalog)
@@ -168,7 +178,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('CCTVServiceLogAddress(sourceKey)', self.root)
         self.assertIn('CCTVServiceLogAddress(u)', self.root)
         self.assertIn('"value":subscription', self.resource_detail)
-        self.assertIn('p[@"subscriptionURL"]', self.catalog)
+        self.assertIn('profile[@"subscriptionURL"]', self.catalog)
 
     def test_home_separates_source_and_platform_and_uses_bounded_recommendation_cache(self):
         self.assertIn('MediaHomeModulesSchemaKey', self.detail)
