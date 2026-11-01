@@ -246,6 +246,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block UIViewController *mediaDetail;
       __block UIViewController *navigationProbe;
       __block CGFloat resourceScrollOffset=0;
+      __block NSArray<NSDictionary *> *(^resourceProfilesProvider)(void);
       __block MediaEpisodeSelectionViewController *mediaEpisodes;
       __block MediaPlaybackViewController *mediaPlayback;
       __block NSDate *stalePlaybackDeadline;
@@ -323,6 +324,19 @@ static void next(NSArray *steps, NSUInteger index) {
             check(resourceFilters.arrangedSubviews.count==6, @"resources page exposes counted filters for all, VOD, live, catalogs, scripts and attention");
             capture(self.window, @"03-configuration");
             ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPage"];
+            resourceProfilesProvider=resourcePage.profilesProvider;
+            NSArray<NSDictionary *> *(^originalProvider)(void)=resourceProfilesProvider;
+            resourcePage.profilesProvider=^NSArray<NSDictionary *> *{
+                NSMutableArray<NSDictionary *> *profiles=[NSMutableArray arrayWithArray:originalProvider?originalProvider():@[]];
+                for(NSUInteger index=0;index<12;index++){
+                    [profiles addObject:@{@"name":[NSString stringWithFormat:@"UI Smoke Resource %02lu",(unsigned long)index+1],@"type":@"subscription",@"source":[NSString stringWithFormat:@"https://example.test/smoke-%lu.m3u",(unsigned long)index+1],@"count":@12,@"epgStatus":@"自动匹配",@"enabled":@NO}];
+                }
+                return profiles;
+            };
+            [resourcePage reloadProfiles];
+            [resourcePage.tableView layoutIfNeeded];
+            CGFloat resourceMaximumOffset=MAX(-resourcePage.tableView.adjustedContentInset.top,resourcePage.tableView.contentSize.height-resourcePage.tableView.bounds.size.height+resourcePage.tableView.adjustedContentInset.bottom);
+            check(resourceMaximumOffset>=48,[NSString stringWithFormat:@"resource navigation fixture has a legal scroll range (max=%.1f)",resourceMaximumOffset]);
             [resourcePage.tableView setContentOffset:CGPointMake(0,48) animated:NO];
             resourceScrollOffset=resourcePage.tableView.contentOffset.y;
             [root addSubscription];
@@ -416,6 +430,7 @@ static void next(NSArray *steps, NSUInteger index) {
             CGFloat currentHeaderHeight=CGRectGetHeight(resourcePage.tableView.tableHeaderView.frame);
             BOOL returnSnapshotPending=[[resourcePage valueForKey:@"hasNavigationReturnPosition"] boolValue];
             check(fabs(returnedOffset-resourceScrollOffset)<1.5,[NSString stringWithFormat:@"resource scroll position survives service/editor round trip (before=%.1f after=%.1f pending=%d savedHeader=%.1f currentHeader=%.1f content=%.1f viewport=%.1f bottomInset=%.1f max=%.1f)",resourceScrollOffset,returnedOffset,returnSnapshotPending,savedHeaderHeight,currentHeaderHeight,resourcePage.tableView.contentSize.height,resourcePage.tableView.bounds.size.height,resourcePage.tableView.adjustedContentInset.bottom,maximumOffset]);
+            resourcePage.profilesProvider=resourceProfilesProvider;
             [resourcePage reloadProfiles];
             [resourcePage reloadProfiles];
             [resourcePage.view layoutIfNeeded];
