@@ -159,6 +159,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) UIActivityIndicatorView *spinner;
 @property(nonatomic,strong) UIButton *episodeButton;
+@property(nonatomic,strong) UIButton *playbackSpeedButton;
 @property(nonatomic,strong) UIStackView *playbackActionRow;
 @property(nonatomic,strong) UIButton *skipButton;
 @property(nonatomic,strong) UIButton *inlineRetryButton;
@@ -233,6 +234,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 - (void)recordPlaybackFailureForItem:(AVPlayerItem *)item error:(NSError *)error stage:(NSString *)stage;
 - (void)recordPlaybackAttemptOutcome:(NSString *)outcome failureKind:(NSString *)failureKind httpStatus:(NSInteger)httpStatus terminal:(BOOL)terminal;
 - (void)configurePlaybackOptions;
+- (UIMenu *)playbackRateMenu;
 - (void)updatePlaybackLayoutForSize:(CGSize)size;
 - (void)handlePlaybackPan:(UIPanGestureRecognizer *)recognizer;
 - (void)prepareVolumeSlider;
@@ -282,12 +284,13 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     self.status=[UILabel new];self.status.translatesAutoresizingMaskIntoConstraints=NO;self.status.textColor=UIColor.secondaryLabelColor;self.status.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.status.numberOfLines=2;self.status.adjustsFontForContentSizeCategory=YES;[self.controlPanel addSubview:self.status];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.translatesAutoresizingMaskIntoConstraints=NO;[self.controlPanel addSubview:self.spinner];
     self.episodeButton=[UIButton buttonWithType:UIButtonTypeSystem];self.episodeButton.translatesAutoresizingMaskIntoConstraints=NO;[self.episodeButton setTitle:@"选择分集" forState:UIControlStateNormal];HostStylePillButton(self.episodeButton,YES);[self.episodeButton addTarget:self action:@selector(openEpisodeSelection) forControlEvents:UIControlEventTouchUpInside];
+    self.playbackSpeedButton=[UIButton buttonWithType:UIButtonTypeSystem];self.playbackSpeedButton.translatesAutoresizingMaskIntoConstraints=NO;HostStylePillButton(self.playbackSpeedButton,NO);self.playbackSpeedButton.accessibilityIdentifier=@"media-playback-speed";self.playbackSpeedButton.accessibilityLabel=@"播放速度";self.playbackSpeedButton.showsMenuAsPrimaryAction=YES;double initialRate=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"] doubleValue]:1.0;NSString *initialRateLabel=fabs(initialRate*10-round(initialRate*10))<0.001?[NSString stringWithFormat:@"%.1f×",initialRate]:[NSString stringWithFormat:@"%.2f×",initialRate];[self.playbackSpeedButton setTitle:initialRateLabel forState:UIControlStateNormal];self.playbackSpeedButton.accessibilityValue=[NSString stringWithFormat:@"当前速度 %@",initialRateLabel];self.playbackSpeedButton.menu=[self playbackRateMenu];
     self.playbackActionRow=[UIStackView new];self.playbackActionRow.translatesAutoresizingMaskIntoConstraints=NO;self.playbackActionRow.axis=UILayoutConstraintAxisHorizontal;self.playbackActionRow.alignment=UIStackViewAlignmentFill;self.playbackActionRow.spacing=8;[self.controlPanel addSubview:self.playbackActionRow];
     self.skipButton=[UIButton buttonWithType:UIButtonTypeSystem];self.skipButton.translatesAutoresizingMaskIntoConstraints=NO;self.skipButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.skipButton.titleLabel.adjustsFontForContentSizeCategory=YES;HostStylePillButton(self.skipButton,YES);[self.skipButton addTarget:self action:@selector(performSkipAction) forControlEvents:UIControlEventTouchUpInside];self.skipButton.hidden=YES;
     self.inlineRetryButton=[UIButton buttonWithType:UIButtonTypeSystem];self.inlineRetryButton.translatesAutoresizingMaskIntoConstraints=NO;HostStylePillButton(self.inlineRetryButton,YES);[self.inlineRetryButton setTitle:@"重试" forState:UIControlStateNormal];[self.inlineRetryButton addTarget:self action:@selector(retryCurrentEpisode) forControlEvents:UIControlEventTouchUpInside];self.inlineRetryButton.hidden=YES;self.inlineRetryButton.accessibilityLabel=@"重试当前影片";
     self.inlineWebButton=[UIButton buttonWithType:UIButtonTypeSystem];self.inlineWebButton.translatesAutoresizingMaskIntoConstraints=NO;HostStylePillButton(self.inlineWebButton,NO);[self.inlineWebButton setTitle:@"网页尝试" forState:UIControlStateNormal];[self.inlineWebButton addTarget:self action:@selector(openWebPlaybackFallback) forControlEvents:UIControlEventTouchUpInside];self.inlineWebButton.hidden=YES;self.inlineWebButton.accessibilityLabel=@"尝试网页播放";
     self.inlineOptionsButton=[UIButton buttonWithType:UIButtonTypeSystem];self.inlineOptionsButton.translatesAutoresizingMaskIntoConstraints=NO;HostStylePillButton(self.inlineOptionsButton,NO);[self.inlineOptionsButton setTitle:@"更多" forState:UIControlStateNormal];self.inlineOptionsButton.accessibilityLabel=@"播放设置";self.inlineOptionsButton.menu=self.playbackOptionsItem.menu;self.inlineOptionsButton.showsMenuAsPrimaryAction=YES;
-    [self.playbackActionRow addArrangedSubview:self.skipButton];if(self.embeddedMode){[self.playbackActionRow addArrangedSubview:self.inlineRetryButton];[self.playbackActionRow addArrangedSubview:self.inlineWebButton];[self.playbackActionRow addArrangedSubview:self.inlineOptionsButton];}else [self.playbackActionRow addArrangedSubview:self.episodeButton];
+    [self.playbackActionRow addArrangedSubview:self.skipButton];if(self.embeddedMode){[self.playbackActionRow addArrangedSubview:self.inlineRetryButton];[self.playbackActionRow addArrangedSubview:self.inlineWebButton];[self.playbackActionRow addArrangedSubview:self.inlineOptionsButton];}else [self.playbackActionRow addArrangedSubview:self.episodeButton];[self.playbackActionRow addArrangedSubview:self.playbackSpeedButton];
 
     self.videoAspectRatio=16.0/9.0;self.videoAspectConstraint=[self.videoView.heightAnchor constraintEqualToAnchor:self.videoView.widthAnchor multiplier:0.5625];
     self.videoAspectConstraint.priority=UILayoutPriorityRequired;NSLayoutConstraint *videoAspect=self.videoAspectConstraint;
@@ -697,10 +700,14 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     self.playbackOptionsItem.accessibilityLabel=@"播放设置";
     self.navigationItem.rightBarButtonItems=@[self.playbackOptionsItem];
 }
-- (UIMenu *)playbackOptionsMenu {
+- (UIMenu *)playbackRateMenu {
     __weak typeof(self) weakSelf=self;NSMutableArray *rateActions=[NSMutableArray array];
     NSArray<NSNumber *> *rates=@[@0.5,@0.75,@1.0,@1.25,@1.5,@1.75,@2.0];double currentRate=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"] doubleValue]:1.0;
     for(NSNumber *candidate in rates){double rate=candidate.doubleValue;NSString *title=rate==1.0?@"正常速度": [NSString stringWithFormat:@"%.2gx",rate];UIImage *mark=fabs(currentRate-rate)<0.01?[UIImage systemImageNamed:@"checkmark"]:nil;[rateActions addObject:[UIAction actionWithTitle:title image:mark identifier:nil handler:^(UIAction *action){[weakSelf setPlaybackRate:rate];}]];}
+    return [UIMenu menuWithTitle:@"播放速度" children:rateActions];
+}
+- (UIMenu *)playbackOptionsMenu {
+    __weak typeof(self) weakSelf=self;
     NSArray *gravityValues=@[@{ @"title":@"画面适应", @"value":AVLayerVideoGravityResizeAspect },@{ @"title":@"铺满裁切", @"value":AVLayerVideoGravityResizeAspectFill },@{ @"title":@"拉伸填满", @"value":AVLayerVideoGravityResize }];
     NSMutableArray *gravityActions=[NSMutableArray array];NSString *currentGravity=[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.mediaVideoGravity"]?:AVLayerVideoGravityResizeAspect;
     for(NSDictionary *option in gravityValues){NSString *value=option[@"value"];UIImage *mark=[currentGravity isEqual:value]?[UIImage systemImageNamed:@"checkmark"]:nil;[gravityActions addObject:[UIAction actionWithTitle:option[@"title"] image:mark identifier:nil handler:^(UIAction *action){[weakSelf setVideoGravity:value];}]];}
@@ -711,11 +718,12 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     BOOL autoNext=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaAutoPlayNext"]? [NSUserDefaults.standardUserDefaults boolForKey:@"cctv.mediaAutoPlayNext"]:YES;
     UIAction *autoNextAction=[UIAction actionWithTitle:autoNext?@"关闭自动连播下一集":@"开启自动连播下一集" image:[UIImage systemImageNamed:autoNext?@"forward.end":@"forward.end.fill"] identifier:nil handler:^(UIAction *action){[NSUserDefaults.standardUserDefaults setBool:!autoNext forKey:@"cctv.mediaAutoPlayNext"];weakSelf.playbackOptionsItem.menu=[weakSelf playbackOptionsMenu];weakSelf.status.text=!autoNext?@"已开启自动连播下一集":@"已关闭自动连播下一集";}];
     UIAction *clear=[UIAction actionWithTitle:@"清除本片跳过位置" image:[UIImage systemImageNamed:@"eraser"] identifier:nil handler:^(UIAction *action){[MediaPlaybackStateStore clearSkipPointsForContext:weakSelf.context?:@{}];[weakSelf updateSkipButtonForCurrentPosition];weakSelf.status.text=@"已清除本片的片头片尾位置";}];
-    UIMenu *menu=[UIMenu menuWithChildren:@[[UIMenu menuWithTitle:@"播放速度" children:rateActions],[UIMenu menuWithTitle:@"画面比例" children:gravityActions],autoNextAction,intro,outro,clear,awake]];if(self.inlineOptionsButton)self.inlineOptionsButton.menu=menu;return menu;
+    UIMenu *menu=[UIMenu menuWithChildren:@[[self playbackRateMenu],[UIMenu menuWithTitle:@"画面比例" children:gravityActions],autoNextAction,intro,outro,clear,awake]];if(self.inlineOptionsButton)self.inlineOptionsButton.menu=menu;return menu;
 }
 - (void)setPlaybackRate:(double)rate {
     rate=MIN(2.0,MAX(0.5,rate));[NSUserDefaults.standardUserDefaults setDouble:rate forKey:@"cctv.mediaPlaybackRate"];self.player.defaultRate=(float)rate;
     if(self.player.timeControlStatus==AVPlayerTimeControlStatusPlaying)self.player.rate=(float)rate;
+    NSString *rateLabel=fabs(rate*10-round(rate*10))<0.001?[NSString stringWithFormat:@"%.1f×",rate]:[NSString stringWithFormat:@"%.2f×",rate];[self.playbackSpeedButton setTitle:rateLabel forState:UIControlStateNormal];self.playbackSpeedButton.accessibilityValue=[NSString stringWithFormat:@"当前速度 %@",rateLabel];self.playbackSpeedButton.menu=[self playbackRateMenu];
     self.playbackOptionsItem.menu=[self playbackOptionsMenu];
 }
 - (void)setVideoGravity:(NSString *)gravity {

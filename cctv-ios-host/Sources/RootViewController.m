@@ -931,17 +931,19 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)buildBottomBar {
-    self.bottomBarBackdrop=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomBarBackdrop.userInteractionEnabled=NO;self.bottomBarBackdrop.layer.cornerRadius=27;self.bottomBarBackdrop.layer.cornerCurve=kCACornerCurveContinuous;self.bottomBarBackdrop.clipsToBounds=YES;self.bottomBarBackdrop.layer.borderWidth=0.7;HostSetLayerBorderColor(self.bottomBarBackdrop,HostBorder());
+    self.bottomBarBackdrop=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomBarBackdrop.userInteractionEnabled=NO;self.bottomBarBackdrop.layer.cornerRadius=0;self.bottomBarBackdrop.clipsToBounds=YES;
     UIView *glassTint=[[UIView alloc] initWithFrame:self.bottomBarBackdrop.contentView.bounds];glassTint.backgroundColor=HostGlassTint();glassTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.bottomBarBackdrop.contentView addSubview:glassTint];
+    UIView *separator=[[UIView alloc] initWithFrame:CGRectMake(0,0,1,0.5)];separator.backgroundColor=HostBorder();separator.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleBottomMargin;[self.bottomBarBackdrop.contentView addSubview:separator];
     [self.view addSubview:self.bottomBarBackdrop];
-    self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=3; self.bottomBar.backgroundColor=UIColor.clearColor; self.bottomBar.layer.cornerRadius=27; self.bottomBar.layer.cornerCurve=kCACornerCurveContinuous; self.bottomBar.clipsToBounds=YES;
+    self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=0; self.bottomBar.backgroundColor=UIColor.clearColor;
     NSArray *titles=@[@"CCTV",@"频道",@"首页",@"资源",@"设置"];
     NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"house.fill",@"externaldrive.fill",@"gearshape"];
     for (NSInteger i=0;i<titles.count;i++) {
         UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;HostInstallPressFeedback(b);
-        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.baseForegroundColor=(i==0?UIColor.whiteColor:HostMutedText()); cfg.background.backgroundColor=i==0?HostAccent():UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[UIFont systemFontOfSize:10 weight:UIFontWeightSemibold];return result;}; b.configuration=cfg;
+        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=2; cfg.contentInsets=NSDirectionalEdgeInsetsMake(4,2,4,2); cfg.preferredSymbolConfigurationForImage=[UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightMedium]; cfg.baseForegroundColor=HostMutedText(); cfg.background.backgroundColor=UIColor.clearColor; cfg.background.strokeColor=UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[UIFont systemFontOfSize:10 weight:UIFontWeightSemibold];return result;}; b.configuration=cfg;
         b.accessibilityLabel=titles[i]; b.accessibilityIdentifier=[NSString stringWithFormat:@"tab.%@",titles[i]];
         b.accessibilityHint=[NSString stringWithFormat:@"切换到%@页面",titles[i]];
+        b.accessibilityTraits=UIAccessibilityTraitButton|(i==0?UIAccessibilityTraitSelected:0);b.accessibilityValue=i==0?@"已选中":@"未选中";
         [b addTarget:self action:@selector(bottomTabTapped:) forControlEvents:UIControlEventTouchUpInside]; [self.bottomBar addArrangedSubview:b];
     }
     [self.view addSubview:self.bottomBar];
@@ -987,11 +989,13 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     for (UIButton *button in self.bottomBar.arrangedSubviews) {
         UIButtonConfiguration *configuration=button.configuration;
         BOOL selected=button.tag==self.activeTab;
-        configuration.baseForegroundColor=selected?UIColor.whiteColor:HostMutedText();
-        configuration.background.backgroundColor=selected?HostAccent():UIColor.clearColor;
-        configuration.background.strokeColor=selected?[HostAccent() colorWithAlphaComponent:0.35]:UIColor.clearColor;
-        configuration.background.strokeWidth=selected?0.5:0;
+        configuration.baseForegroundColor=selected?HostAccent():HostMutedText();
+        configuration.background.backgroundColor=UIColor.clearColor;
+        configuration.background.strokeColor=UIColor.clearColor;
+        configuration.background.strokeWidth=0;
         button.configuration=configuration;
+        button.accessibilityTraits=UIAccessibilityTraitButton|(selected?UIAccessibilityTraitSelected:0);
+        button.accessibilityValue=selected?@"已选中":@"未选中";
     }
 }
 
@@ -1327,7 +1331,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     CGFloat labelWidth=MAX(1,width-4),titleHeight=[self catalogTextHeight:titleText font:title.font width:labelWidth maximumLines:2],subtitleHeight=[self catalogTextHeight:subtitle.text font:subtitle.font width:labelWidth maximumLines:2];
     CGFloat titleTop=posterHeight+5,subtitleTop=titleTop+titleHeight+1;
     poster.frame=CGRectMake(0,0,width,posterHeight);poster.layer.borderWidth=selected?1.8:.5;HostSetLayerBorderColor(poster,selected?HostAccent():HostBorder());
-    CGFloat logoInset=MAX(6,floor(width*.10)),logoHeight=MAX(28,floor(posterHeight*.62));logo.frame=CGRectMake(logoInset,floor((posterHeight-logoHeight)/2),MAX(1,width-logoInset*2),logoHeight);brand.frame=CGRectMake(5,MAX(4,floor((posterHeight-34)/2)),MAX(1,width-10),34);number.frame=CGRectMake(6,posterHeight-15,62,12);selectedMark.frame=CGRectMake(MAX(2,width-22),5,16,16);selectedMark.hidden=!selected;
+    CGFloat logoInset=MAX(8,floor(width*.15)),logoHeight=MIN(30,MAX(20,floor(posterHeight*.44)));logo.frame=CGRectMake(logoInset,floor((posterHeight-logoHeight)/2),MAX(1,width-logoInset*2),logoHeight);brand.frame=CGRectMake(5,MAX(4,floor((posterHeight-34)/2)),MAX(1,width-10),34);number.frame=CGRectMake(6,posterHeight-15,62,12);selectedMark.frame=CGRectMake(MAX(2,width-22),5,16,16);selectedMark.hidden=!selected;
     title.frame=CGRectMake(2,titleTop,labelWidth,titleHeight);subtitle.frame=CGRectMake(2,subtitleTop,labelWidth,subtitleHeight);
     NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";logo.hidden=NO;brand.hidden=YES;brand.text=name;
     if(logoURL.length){logo.backgroundColor=UIColor.clearColor;logo.layer.cornerRadius=0;logo.clipsToBounds=NO;[self loadLogo:logoURL into:logo];}
@@ -1891,7 +1895,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         self.playerBox.frame=CGRectMake(0,top,w,ph);self.playerBox.hidden=!catalog||!expanded;
         CGFloat y=top+ph;self.groupControl.frame=CGRectMake(12,y+6,w-24,28);self.groupControl.hidden=!catalog||expanded;self.playerTabs.frame=CGRectMake(12,y+6,w-24,28);self.playerTabs.hidden=!catalog||!expanded;
         self.versionLabel.hidden=YES;
-        self.bottomBar.frame=CGRectMake(MAX(16,(w-420)/2),height-safe.bottom-76,MIN(w-32,420),64);self.bottomBarBackdrop.frame=self.bottomBar.frame;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
+        CGFloat tabHeight=58,tabWidth=MIN(w,560),tabY=MAX(0,height-safe.bottom-tabHeight);self.bottomBar.frame=CGRectMake(MAX(0,(w-tabWidth)/2),tabY,tabWidth,tabHeight);self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
         CGFloat contentY=y+42;CGFloat contentBottom=CGRectGetMinY(self.bottomBar.frame)-8;
         CGRect frame=CGRectMake(0,contentY,w,MAX(0,contentBottom-contentY));self.table.frame=frame;self.channelGrid.frame=frame;
         self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=frame;self.playbackPanel.view.hidden=!catalog;

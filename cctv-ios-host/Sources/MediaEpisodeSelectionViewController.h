@@ -1,7 +1,7 @@
 #import <UIKit/UIKit.h>
 @class MediaAPIClient;
 NS_ASSUME_NONNULL_BEGIN
-@interface MediaEpisodeSelectionViewController : UITableViewController
+@interface MediaEpisodeSelectionViewController : UIViewController
 @property(nonatomic,copy) NSDictionary *item;
 @property(nonatomic,copy) NSDictionary *source;
 @property(nonatomic,copy) NSString *provider;

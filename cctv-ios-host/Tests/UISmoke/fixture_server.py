@@ -56,7 +56,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             page = int(args.get('page', 1))
             data = {'page': page, 'pagecount': 2, 'hasMore': page < 2, 'items': [card(str(args.get('keyword', 'category')) + str(page))]}
         elif operation == 'detail':
-            data = {'id': args['id'], 'name': '测试影片详情', 'description': '验证多线路和不透明播放 ID', 'actor': '演员甲、演员乙', 'lines': [{'id': 'line', 'name': '主线路', 'episodes': [{'id': 'opaque?$id', 'name': '第一集'}, {'id': 'slow-episode', 'name': '慢线路待切换'}, {'id': 'fast-episode', 'name': '快速切换'}]}, {'id': 'backup', 'name': '备用', 'episodes': [{'id': 'second', 'name': '正片'}]}]}
+            data = {'id': args['id'], 'name': '测试影片详情', 'description': '验证多线路和不透明播放 ID。通过季切换浏览不同季集数，再用底部续播入口播放当前集。', 'actor': '演员甲、演员乙', 'lines': [{'id': 'line', 'name': '主线路', 'episodes': [{'id': 'opaque?$id', 'name': '第一集'}, {'id': 'slow-episode', 'name': '慢线路待切换'}, {'id': 'fast-episode', 'name': '快速切换'}]}, {'id': 'backup', 'name': '备用', 'episodes': [{'id': 'second', 'name': '正片'}]}], 'seasons': [{'id': 's1', 'name': '第 1 季', 'episodes': [{'id': 'opaque?$id', 'name': '第一集'}, {'id': 'slow-episode', 'name': '慢线路待切换'}, {'id': 'fast-episode', 'name': '快速切换'}]}, {'id': 's2', 'name': '第 2 季', 'episodes': [{'id': 'opaque?$id', 'name': '第一集'}, {'id': 'slow-episode', 'name': '慢线路待切换'}, {'id': 'fast-episode', 'name': '快速切换'}]}]}
         elif operation == 'play':
             identifier = str(args.get('id', ''))
             if identifier == 'slow-episode':

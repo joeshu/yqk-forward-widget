@@ -249,7 +249,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('indexPath.row==0?3:4 forKey:MediaBrowserGridColumnsDefaultsKey', configuration)
         self.assertIn('cctv.mediaGridColumns.v1', self.detail)
         self.assertIn('return [NSUserDefaults.standardUserDefaults integerForKey:MediaBrowserGridColumnsDefaultsKey]==4?4:3;', self.detail)
-        self.assertIn('首页海报卡片和影视库', configuration)
+        self.assertIn('此设置只影响影视首页海报卡片，影视库固定为 3 列', configuration)
         config_route = self.detail[self.detail.index('- (void)openHomeConfiguration {'):
                                    self.detail.index('- (void)openHomeFavorite:', self.detail.index('- (void)openHomeConfiguration {'))]
         self.assertIn('[owner.grid.collectionViewLayout invalidateLayout]', config_route)
