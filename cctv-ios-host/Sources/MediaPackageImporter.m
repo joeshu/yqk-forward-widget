@@ -197,6 +197,8 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     BOOL catpawAppBundle=catpawRouter && [text rangeOfString:@"globalThis\\s*\\.\\s*Pans\\s*=\\s*await" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catpawNativeHooks=[text containsString:@"catServerFactory"] && [text containsString:@"catDartServerPort"] && [text containsString:@"module.exports"];
     BOOL catpawOpen=(catpawEntry||catpawAppBundle||catpawNativeHooks)&&catpawRouter;
+    BOOL hamoSourceType=[text rangeOfString:@"\\btype\\s*:\\s*'source'" options:NSRegularExpressionSearch].location!=NSNotFound || [text rangeOfString:@"\\btype\\s*:\\s*\"source\"" options:NSRegularExpressionSearch].location!=NSNotFound;
+    BOOL hamoSourceV3=[text rangeOfString:@"\\bapiVersion\\s*:\\s*3\\b" options:NSRegularExpressionSearch].location!=NSNotFound && hamoSourceType && [text rangeOfString:@"(?:async\\s+)?function\\s+home\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:async\\s+)?function\\s+resolve\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL widgetExtractor=[text containsString:@"WidgetMetadata"] && [text containsString:@"Widget.http"] && [text rangeOfString:@"(?:async\\s+)?function\\s+loadResource\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catVodMethods=[text rangeOfString:@"(?:(?:async\\s+)?(?:home|homeContent)\\s*\\(|\\b(?:home|homeContent)\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?category\\s*\\(|\\bcategory\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?detail\\s*\\(|\\bdetail\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?play\\s*\\(|\\bplay\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catVodQuickJS=catVodMethods && ([text containsString:@"export default"] || [text containsString:@"module.exports"]);
@@ -206,6 +208,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if([protocol isEqual:@"catvod-open"])protocol=catpawOpen?@"catpaw-http":@"catvod-js";
     if(!protocol.length){
         if([runtime isEqual:@"python"]){protocol=[text rangeOfString:@"class Spider"].location!=NSNotFound?@"python-spider":@"python-http";}
+        else if(hamoSourceV3){runtime=@"javascript";protocol=@"hamo-source-v3";moduleType=@"script";}
         else if(widgetExtractor){runtime=@"node";protocol=@"widget-extractor";}
         else if(catpawOpen){runtime=@"node";protocol=@"catpaw-http";}
         else if([text containsString:@"createService"] && [text containsString:@"/config"] && [text containsString:@"/spider/"]){runtime=@"node";protocol=@"catpaw-http";}
@@ -235,7 +238,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         runtime=([@[@"catvod-spider"] containsObject:protocol] || ([protocol isEqual:@"catvod-js"]&&catvodDependencies))?@"javascript":((dependencies.count || (hasCommonJSRequire && !nodeProtocol))?@"node":@"javascript");
     }
     if(![@[@"esm",@"commonjs",@"script"] containsObject:moduleType] || ([runtime isEqual:@"python"] != [entry.pathExtension.lowercaseString isEqual:@"py"])){PackageError(error,@"入口类型与运行时声明不匹配");return nil;}
-    if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"catvod-spider",@"drpy",@"iptv-extractor",@"catpaw-http",@"widget-extractor",@"nanotv-service-v2"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}
+    if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"catvod-spider",@"drpy",@"iptv-extractor",@"catpaw-http",@"widget-extractor",@"nanotv-service-v2",@"hamo-source-v3"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}
     if([protocol isEqual:@"catvod-spider"] && ![runtime isEqual:@"javascript"]){PackageError(error,@"CatPaw JS Spider 必须使用 JavaScriptCore 运行时（runtime: javascript）");return nil;}
     // Keep a small, typed manifest: no arbitrary paths or host control fields.
     NSMutableDictionary *clean=[@{@"schemaVersion":@1,@"entry":entry,@"runtime":runtime,@"protocol":protocol,@"moduleType":moduleType,@"name":([result[@"name"] isKindOfClass:NSString.class]?result[@"name"]:(package[@"name"]?:entry.stringByDeletingPathExtension))} mutableCopy];
@@ -244,6 +247,8 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(nanoServiceV2){clean[@"name"]=[nanoManifest[@"name"] isKindOfClass:NSString.class]?nanoManifest[@"name"]:clean[@"name"];clean[@"capabilities"]=nanoCapabilities;clean[@"pluginVersion"]=[nanoManifest[@"version"] isKindOfClass:NSString.class]?nanoManifest[@"version"]:@"";clean[@"apiVersion"]=@2;}
     if(verifiedLocalChecksums.count)clean[@"verifiedLocalChecksums"]=verifiedLocalChecksums;
     if([result[@"options"] isKindOfClass:NSDictionary.class] || [result[@"options"] isKindOfClass:NSString.class])clean[@"options"]=result[@"options"];
+    BOOL androidTVBoxIntegration=[text containsString:@"from java import"] || [text containsString:@"jclass("] || [text containsString:@"/sdcard/TV/CustomCsp"];
+    if([runtime isEqual:@"python"] && androidTVBoxIntegration)clean[@"compatibilityNote"]=@"此 Python Spider 含 Android/TVBox 本地目录或 Java 界面逻辑。iOS 不提供 /sdcard、Android Activity 或向其他 TVBox 写入配置的能力；其标准影视接口仍可尝试使用。";
     clean[@"packageRoot"]=root;
     if([protocol isEqual:@"catpaw-http"] && [fm fileExistsAtPath:[root stringByAppendingPathComponent:@"index.config.js"]])clean[@"configEntry"]=@"index.config.js";
     return clean;

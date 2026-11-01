@@ -9,7 +9,7 @@
 static NSString *ServiceEngineName(NSDictionary *service){return [service[@"engine"] isEqual:@"node"]?@"Node.js Mobile":([service[@"engine"] isEqual:@"javascript"]?@"JavaScriptCore":@"Python");}
 static NSString *ServiceProtocolName(NSDictionary *service){
     NSString *protocol=service[@"protocol"]?:@"";
-    NSDictionary *names=@{@"catvod-spider":@"CatPaw JS Spider",@"catvod-js":@"CatVod / TVBox JS",@"drpy":@"drpy 规则",@"iptv-extractor":@"IPTV JS Extractor",@"catpaw-http":@"CatPaw Node 服务",@"widget-extractor":@"Widget 影视解析脚本",@"nanotv-service-v2":@"NanoTV 实时频道服务",@"cctvhost.media/1":@"CCTVHost JS API",@"python-spider":@"Python Spider",@"python-http":@"Python HTTP 服务"};
+    NSDictionary *names=@{@"catvod-spider":@"CatPaw JS Spider",@"catvod-js":@"CatVod / TVBox JS",@"drpy":@"drpy 规则",@"iptv-extractor":@"IPTV JS Extractor",@"catpaw-http":@"CatPaw Node 服务",@"widget-extractor":@"Widget 影视解析脚本",@"nanotv-service-v2":@"NanoTV 实时频道服务",@"hamo-source-v3":@"Hamo v3 影视源",@"cctvhost.media/1":@"CCTVHost JS API",@"python-spider":@"Python Spider",@"python-http":@"Python HTTP 服务"};
     NSString *name=names[protocol]?: (protocol.length?protocol:@"未识别");
     NSDictionary *manifest=[service[@"manifest"] isKindOfClass:NSDictionary.class]?service[@"manifest"]:@{};
     NSString *moduleType=manifest[@"moduleType"];

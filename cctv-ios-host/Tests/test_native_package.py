@@ -231,6 +231,34 @@ route='/all.m3u';body='#EXTM3U'
         self.assertEqual((result['engine'], result['protocol']), ('python', 'python-spider'))
         self.assertFalse(marker.exists())
 
+    def test_hamo_v3_single_file_is_recognized_as_javascript_source_without_execution(self):
+        file = self.folder / 'hamo.js'
+        file.write_text('''async function home(params, context) { return {categories:[], items:[]} }
+async function category(params, context) { return {items:[]} }
+async function search(params, context) { return {items:[]} }
+async function detail(params, context) { return {id:params.itemId, title:'Fixture', sources:[]} }
+async function resolve(params, context) { return {url:'https://fixture.test/video.m3u8', type:'direct'} }
+var hawk={apiVersion:3,type:'source',meta:{name:'Hamo fixture'},capabilities:['home','category','search','detail','resolve'],home,category,search,detail,resolve};
+''')
+        result = self.inspect(file)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol']), ('javascript', 'hamo-source-v3'))
+        self.assertEqual(result['manifest']['moduleType'], 'script')
+
+    def test_python_spider_with_android_tvbox_file_access_shows_ios_compatibility_note(self):
+        file = self.folder / 'android-loader.py'
+        file.write_text('''class Spider:
+    path = "/sdcard/TV/CustomCsp/registry.json"
+    def homeContent(self, filter): return {"class": [], "list": []}
+    def action(self, action):
+        from java import jclass
+        return jclass("android.app.Activity")
+''')
+        result = self.inspect(file)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol']), ('python', 'python-spider'))
+        self.assertIn('iOS 不提供 /sdcard', result['manifest']['compatibilityNote'])
+
     def test_python_spider_routes_are_not_misidentified_as_local_live_subscriptions(self):
         file=self.folder/'spider_with_web_route.py'
         file.write_text("from flask import Flask\napp=Flask(__name__)\n@app.get('/all.m3u')\ndef playlist(): return '#EXTM3U'\nclass Spider: pass\n")

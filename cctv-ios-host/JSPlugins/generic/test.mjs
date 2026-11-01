@@ -109,5 +109,19 @@ try{
   assert.equal((await invoke('detail',{id:'opaque/id'})).result.list[0].vod_id,'opaque/id')
   assert.equal((await invoke('play',{lineId:'线路',id:'opaque/id'})).result.url,'https://fixture.test/opaque/id')
   await invoke('stop')
-  console.log('PASS: original imported ESM/CommonJS, relative and JSON dependencies, CryptoJS hash, Cheerio, POST, CatVod methods, opaque IDs and package path boundary')
+  files={'hamo.js':`async function home(params){const response=await $http.get('https://fixture.test/hamo',{responseType:'text'});await $cache.set('host','https://fixture.test',{ttl:60});return {categories:[{id:'movie',name:'电影',filters:[{key:'year',name:'年代',options:[{name:'2025',value:'2025'}]}]}],items:[{id:'home-1',title:'Home title',poster:'https://fixture.test/poster.jpg'}],remarks:String(response.status)+':'+(await $cache.get('host'))+':'+$crypto.encode('SGVsbG8=',{input:'base64',output:'utf8'})}}
+    async function category(params){return {page:params.page,items:[{id:'cat-1',title:'Category title'}]}}
+    async function search(params){return {page:params.page,items:[{id:'search-1',title:params.keyword}]}}
+    async function detail(params){return {id:params.itemId,title:'Detail title',poster:'https://fixture.test/detail.jpg',summary:'Fixture summary',genres:['电影'],sources:[{id:'main',name:'Main line',episodes:[{id:'ep-1',name:'第一集',ref:{playPath:'/movie/1'}}]}]}}
+    async function resolve(params){return {url:'https://fixture.test/watch?item='+params.itemId+'&path='+encodeURIComponent(params.ref.playPath),type:'web',headers:{Referer:'https://fixture.test/'}}}
+    var hawk={apiVersion:3,type:'source',meta:{name:'Hamo fixture'},capabilities:['home','category','search','detail','resolve'],home,category,search,detail,resolve};`}
+  reply=await invoke('start',{entry:'hamo.js',moduleType:'script',protocol:'hamo-source-v3',name:'Hamo fixture',serviceID:'hamo-fixture'})
+  assert.equal(reply.ok,true,JSON.stringify(reply));assert.ok(reply.result.capabilities.includes('play'))
+  reply=await invoke('home');assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.items[0].name,'Home title');assert.equal(reply.result.remarks,'200:https://fixture.test:Hello');assert.equal(reply.result.filters.movie[0].value[0].v,'2025')
+  assert.equal((await invoke('category',{categoryId:'movie',page:2})).result.items[0].name,'Category title')
+  assert.equal((await invoke('search',{keyword:'Hamo title',page:1})).result.items[0].name,'Hamo title')
+  reply=await invoke('detail',{id:'movie-1'});assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.name,'Detail title');assert.equal(reply.result.lines[0].episodes[0].name,'第一集')
+  reply=await invoke('play',{lineId:'main',id:reply.result.lines[0].episodes[0].id});assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.requiresWebPlayback,true);assert.equal(reply.result.url,'https://fixture.test/watch?item=movie-1&path=%2Fmovie%2F1')
+  await invoke('stop')
+  console.log('PASS: ESM/CommonJS/CatVod, Hamo v3 HTTP/cache/crypto, listing/filter/detail/resolve mapping, package boundaries')
 }finally{for(const timer of timers.values())clearTimeout(timer)}

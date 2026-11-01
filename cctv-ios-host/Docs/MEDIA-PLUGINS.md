@@ -20,6 +20,7 @@
 | 普通 JS | JavaScriptCore；CommonJS `require()` 或非 Spider npm dependencies 默认走 Node.js Mobile | home/category/search/detail/play，可选 channels/catalog/resolve |
 | CatPaw JS Spider | JavaScriptCore 本机路由适配器 | ESM 默认导出的工厂函数或旧式对象；运行 `api(fastify)` 的 init/home/category/detail/play/search 路由 |
 | CatVod / TVBox 风格 JS | JavaScriptCore 或清单指定 Node | 新式 `home/category/search/detail/play` 与旧式 `homeContent/categoryContent/searchContent/detailContent/playerContent` |
+| Hamo v3 影视源 | JavaScriptCore | `apiVersion: 3` 的 `home/category/search/detail/resolve`；兼容 `$http.get`、带 TTL 的 `$cache`、Base64 `$crypto.encode` |
 | drpy 规则 | JavaScriptCore + 固定版本 dr_py 引擎 | 声明 `var/let/const rule = {...}` 的规则文件 |
 | Python Spider | CPython 3.13 | Spider.init/homeContent/homeVideoContent/categoryContent/searchContent/detailContent/playerContent/destroy |
 | CatPawOpen / 猫爪 Node 服务 | Node.js Mobile 18.20.4 | `start/stop` + `/config`、`/spider/...` |
@@ -50,6 +51,10 @@ ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。
 CatPaw JS Spider 按附件中的本机 Spider 规范运行：ESM 默认导出工厂，返回 `{ meta, api(fastify) }`，并注册 `/init`、`/home`、`/category`、`/detail`、`/play`、`/search` 六个 POST 路由。兼容默认导出工厂与历史对象导出。请求会按 CatVod 字段传递：搜索 `wd/page/quick`、分类 `id/page/filters/extend`、详情 `id[]`、播放 `flag/id`。打包入口可为单文件，也可通过 ZIP 清单的 `entry` 指向包内入口。
 
 CatVod/TVBox 风格 JS 支持 `export default site => ({ init(ext), home(filter), homeVod(), category(tid, pg, filter, extend), search(key, quick, pg), detail(id), play(flag, id, vipFlags) })`，也兼容旧版 `homeContent/categoryContent/searchContent/detailContent/playerContent`。站点参数可放在 `options` 本身，或 `options.site`；`options.ext` 会传给 `init(ext)`。标准 `net.http/net.json`、`local.get/set/delete` 可在本机使用。没有清单时，导入器会按入口代码识别这类方法式 Spider。
+
+Hamo v3 单文件影视源可直接作为 JS 资源导入。宿主会把其 `title/poster/sources` 数据映射到影视卡片、详情线路和分集，并把分集引用保存在本机播放 ID 中，交给 `resolve` 解析；返回网页地址时会进入网页播放路径。`$http` 使用本机有界 HTTP 客户端，`$cache` 按来源隔离并支持 TTL，`$crypto.encode` 支持 UTF-8、Base64 与十六进制转换。
+
+TVBox type 3 的远程 `.py` 若提供标准 `class Spider` 接口，可按 Python Spider 导入。依赖 Android `/sdcard`、Activity 或向 Android TVBox 写配置的自动加载器，在 iOS 中不能执行这些 Android 专属动作；导入后会在资源详情中显示说明。Android/JAR `csp_*` 插件仍不能在 iOS 本机运行。
 
 CatPawOpen 服务 ZIP 可将 `entry` 指向服务入口（例如 `src/index.js`），入口导出 `start()`/`stop()` 并在本机监听，服务须实现 `/config` 与 `/spider/<key>/3/...`。导入器会检查入口及 `router.js`，自动识别常见 Node 服务包；Node 依赖须一并放进 ZIP 的 `node_modules`。启用后，影视来源选择器按 `/config` 提供的站点显示与搜索。
 
