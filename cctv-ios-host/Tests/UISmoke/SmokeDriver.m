@@ -354,8 +354,15 @@ static void next(NSArray *steps, NSUInteger index) {
                 [profiles addObject:@{@"name":@"",@"type":@"subscription",@"source":longEndpoint,@"count":@63,@"epgStatus":@"已配置",@"enabled":@NO,@"status":@"HTTP 健康状态正常 · 最近成功 11-01 16:27"}];
                 return profiles;
             };
+            [resourcePage setValue:@"" forKey:@"searchQuery"];
+            [resourcePage setValue:@"all" forKey:@"selectedKind"];
             [resourcePage reloadProfiles];
             [resourcePage.tableView layoutIfNeeded];
+            NSArray<NSDictionary *> *resourceItems=[resourcePage valueForKey:@"profiles"];
+            NSUInteger longResourceIndex=[resourceItems indexOfObjectPassingTest:^BOOL(NSDictionary *item,NSUInteger index,BOOL *stop){return [item[@"source"] hasPrefix:@"https://example.test/long-resource/"];}];
+            BOOL longResourceFits=NO;NSString *longResourceTitle=@"";
+            if(longResourceIndex!=NSNotFound){NSIndexPath *longResourcePath=[NSIndexPath indexPathForRow:(NSInteger)longResourceIndex inSection:0];[resourcePage.tableView scrollToRowAtIndexPath:longResourcePath atScrollPosition:UITableViewScrollPositionMiddle animated:NO];[resourcePage.tableView layoutIfNeeded];UITableViewCell *longCell=[resourcePage.tableView cellForRowAtIndexPath:longResourcePath];CGRect longRow=[resourcePage.tableView rectForRowAtIndexPath:longResourcePath];CGRect detailRect=[longCell.detailTextLabel convertRect:longCell.detailTextLabel.bounds toView:resourcePage.tableView];longResourceFits=CGRectGetMaxY(detailRect)<=CGRectGetMaxY(longRow)+1;longResourceTitle=longCell.textLabel.text?:@"";}
+            check(longResourceIndex!=NSNotFound&&longResourceFits&&[longResourceTitle isEqual:@"example.test"],[NSString stringWithFormat:@"long resource URLs and status remain inside a measured row (index=%lu title=%@ fits=%d)",(unsigned long)longResourceIndex,longResourceTitle,longResourceFits]);
             CGFloat resourceMaximumOffset=MAX(-resourcePage.tableView.adjustedContentInset.top,resourcePage.tableView.contentSize.height-resourcePage.tableView.bounds.size.height+resourcePage.tableView.adjustedContentInset.bottom);
             check(resourceMaximumOffset>=48,[NSString stringWithFormat:@"resource navigation fixture has a legal scroll range (max=%.1f)",resourceMaximumOffset]);
             [resourcePage.tableView setContentOffset:CGPointMake(0,48) animated:NO];
@@ -456,11 +463,6 @@ static void next(NSArray *steps, NSUInteger index) {
             [resourcePage reloadProfiles];
             [resourcePage.view layoutIfNeeded];
             [resourcePage.tableView layoutIfNeeded];
-            NSArray<NSDictionary *> *resourceItems=[resourcePage valueForKey:@"profiles"];
-            NSUInteger longResourceIndex=[resourceItems indexOfObjectPassingTest:^BOOL(NSDictionary *item,NSUInteger index,BOOL *stop){return [item[@"source"] hasPrefix:@"https://example.test/long-resource/"];}];
-            BOOL longResourceFits=NO;NSString *longResourceTitle=@"";
-            if(longResourceIndex!=NSNotFound){NSIndexPath *longResourcePath=[NSIndexPath indexPathForRow:(NSInteger)longResourceIndex inSection:0];[resourcePage.tableView scrollToRowAtIndexPath:longResourcePath atScrollPosition:UITableViewScrollPositionMiddle animated:NO];[resourcePage.tableView layoutIfNeeded];UITableViewCell *longCell=[resourcePage.tableView cellForRowAtIndexPath:longResourcePath];CGRect longRow=[resourcePage.tableView rectForRowAtIndexPath:longResourcePath];CGRect detailRect=[longCell.detailTextLabel convertRect:longCell.detailTextLabel.bounds toView:resourcePage.tableView];longResourceFits=CGRectGetMaxY(detailRect)<=CGRectGetMaxY(longRow)+1;longResourceTitle=longCell.textLabel.text?:@"";}
-            check(longResourceIndex!=NSNotFound&&longResourceFits&&[longResourceTitle isEqual:@"example.test"],[NSString stringWithFormat:@"long resource URLs and status remain inside a measured row (index=%lu title=%@ fits=%d)",(unsigned long)longResourceIndex,longResourceTitle,longResourceFits]);
             [resourcePage refreshHeaderAfterNavigationTransition];
             CGRect toolbarFrame=[(UIStackView *)[resourcePage valueForKey:@"topActionsStack"] frame];
             CGFloat safeTop=root.view.window.safeAreaInsets.top;
@@ -759,7 +761,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [NSUserDefaults.standardUserDefaults removeObjectForKey:@"disabledSubscriptions"];
             HostImageLoader *loader=HostImageLoader.shared;
             [loader cancelPending];[loader clearCache];
-            logoA=[UIImageView new];logoB=[UIImageView new];staleLogo=[UIImageView new];oversizeLogo=[UIImageView new];
+            logoA=[UIImageView new];logoB=[UIImageView new];staleLogo=[UIImageView new];preservedLogo=[UIImageView new];oversizeLogo=[UIImageView new];
             [loader loadURL:[base stringByAppendingString:@"/logo.png"] intoImageView:logoA];
             [loader loadURL:[base stringByAppendingString:@"/logo.png"] intoImageView:logoB];
             [loader loadURL:[base stringByAppendingString:@"/slow-logo.png"] intoImageView:staleLogo];
