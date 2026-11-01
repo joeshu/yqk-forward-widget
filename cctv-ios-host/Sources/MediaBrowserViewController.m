@@ -566,6 +566,8 @@
 static NSString * const MediaHomeModulesDefaultsKey = @"cctv.mediaHome.modules.v1";
 static NSString * const MediaHomeModulesSchemaKey = @"cctv.mediaHome.modules.schemaVersion";
 static NSString * const MediaHomePinnedSourcesDefaultsKey = @"cctv.mediaHome.pinnedSources.v1";
+static NSString * const MediaBrowserGridColumnsDefaultsKey = @"cctv.mediaGridColumns.v1";
+static NSInteger MediaBrowserGridColumns(void) {return [NSUserDefaults.standardUserDefaults integerForKey:MediaBrowserGridColumnsDefaultsKey]==4?4:3;}
 static NSArray<NSDictionary *> *MediaHomeModuleDefinitions(void) {
     return @[@{@"id":@"recommendations",@"title":@"来源推荐",@"detail":@"显示所选来源已有的推荐缓存；不会在首页自动启动服务"},
              @{@"id":@"catalog",@"title":@"首页分类筛选",@"detail":@"使用来源提供的分类筛选短剧海报网格"},
@@ -594,19 +596,21 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 @implementation MediaHomeConfigurationViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.title=@"首页模块";self.view.backgroundColor=HostBackground();self.tableView.backgroundColor=HostBackground();self.modules=[MediaHomeEnabledModules() mutableCopy];self.pinnedSources=[MediaHomePinnedSources() mutableCopy];
+    [super viewDidLoad];self.title=@"首页配置";self.view.backgroundColor=HostBackground();self.tableView.backgroundColor=HostBackground();self.modules=[MediaHomeEnabledModules() mutableCopy];self.pinnedSources=[MediaHomePinnedSources() mutableCopy];
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
 }
 - (void)close {[self dismissViewControllerAnimated:YES completion:self.onChange];}
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 2;}
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return section==0?MediaHomeModuleDefinitions().count:self.sources.count;}
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return section==0?@"显示模块":@"固定的影视来源";}
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {return section==0?@"首页内容来自本机观看记录、影视收藏和已导入资源。关闭模块只会隐藏首页入口，不会删除数据。":(self.sources.count?@"固定来源只会显示在首页。点按来源后才会启动对应服务。":@"导入影视资源后，可以在这里固定常用来源。");}
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 3;}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return section==0?MediaHomeModuleDefinitions().count:(section==1?2:self.sources.count);}
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return section==0?@"显示模块":(section==1?@"海报网格列数":@"固定的影视来源");}
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {return section==0?@"首页内容来自本机观看记录、影视收藏和已导入资源。关闭模块只会隐藏首页入口，不会删除数据。":(section==1?@"3 列卡片更大；4 列布局更紧凑。此设置同时应用于首页精选和影视库。":(self.sources.count?@"固定来源只会显示在首页。点按来源后才会启动对应服务。":@"导入影视资源后，可以在这里固定常用来源。"));}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"media-home-setting"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"media-home-setting"];cell.backgroundColor=HostCard();cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.numberOfLines=2;cell.accessoryType=UITableViewCellAccessoryNone;
-    NSString *identifier=nil;BOOL enabled=NO;if(indexPath.section==0){NSDictionary *row=MediaHomeModuleDefinitions()[indexPath.row];identifier=row[@"id"];cell.textLabel.text=row[@"title"];cell.detailTextLabel.text=row[@"detail"];enabled=[self.modules containsObject:identifier];}else{NSDictionary *source=self.sources[indexPath.row];identifier=source[@"id"]?:@"";cell.textLabel.text=source[@"name"]?:@"影视来源";NSString *engine=source[@"engine"]?:@"未知运行引擎";cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · 点按卡片时才启动",engine];enabled=[self.pinnedSources containsObject:identifier];}
+    if(indexPath.section==1){NSInteger columns=indexPath.row==0?3:4;cell.accessoryView=nil;cell.selectionStyle=UITableViewCellSelectionStyleDefault;cell.textLabel.text=[NSString stringWithFormat:@"%ld 列%@",(long)columns,columns==3?@" · 标准":@" · 紧凑"];cell.detailTextLabel.text=columns==3?@"海报和标题更大，浏览更舒适。":@"单屏展示更多影片，海报更紧凑。";cell.accessoryType=MediaBrowserGridColumns()==columns?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryNone;cell.accessibilityIdentifier=[NSString stringWithFormat:@"media-home-grid-columns-%ld",(long)columns];return cell;}
+    NSString *identifier=nil;BOOL enabled=NO;if(indexPath.section==0){NSDictionary *row=MediaHomeModuleDefinitions()[indexPath.row];identifier=row[@"id"];cell.textLabel.text=row[@"title"];cell.detailTextLabel.text=row[@"detail"];enabled=[self.modules containsObject:identifier];}else{NSDictionary *source=self.sources[indexPath.row];identifier=source[@"id"]?:@"";cell.textLabel.text=source[@"name"]?:@"影视资源";NSString *engine=source[@"engine"]?:@"未知运行引擎";cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · 点按卡片时才启动",engine];enabled=[self.pinnedSources containsObject:identifier];}
     UISwitch *toggle=[UISwitch new];toggle.on=enabled;toggle.accessibilityIdentifier=[NSString stringWithFormat:@"%@:%@",indexPath.section==0?@"module":@"source",identifier];[toggle addTarget:self action:@selector(toggleSetting:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=toggle;return cell;
 }
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {if(indexPath.section!=1){[tableView deselectRowAtIndexPath:indexPath animated:YES];return;}[NSUserDefaults.standardUserDefaults setInteger:indexPath.row==0?3:4 forKey:MediaBrowserGridColumnsDefaultsKey];[tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationAutomatic];if(self.onChange)self.onChange();}
 - (void)toggleSetting:(UISwitch *)sender {
     NSArray *parts=[sender.accessibilityIdentifier componentsSeparatedByString:@":"];if(parts.count!=2)return;NSString *kind=parts[0],*identifier=parts[1];NSMutableSet *set=[kind isEqual:@"module"]?self.modules:self.pinnedSources;if(sender.isOn)[set addObject:identifier];else[set removeObject:identifier];NSString *key=[kind isEqual:@"module"]?MediaHomeModulesDefaultsKey:MediaHomePinnedSourcesDefaultsKey;[NSUserDefaults.standardUserDefaults setObject:[[set allObjects] sortedArrayUsingSelector:@selector(compare:)] forKey:key];if([kind isEqual:@"module"])[NSUserDefaults.standardUserDefaults setInteger:3 forKey:MediaHomeModulesSchemaKey];if(self.onChange)self.onChange();
 }
@@ -959,8 +963,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)updateHomeGridLayout {
     if(!self.homeGrid)return;
     CGFloat width=CGRectGetWidth(self.homeGrid.bounds);if(width<=0)width=MAX(1,CGRectGetWidth(self.view.bounds)-32);self.homeGridLayoutWidth=width;
-    BOOL accessibilityText=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);
-    NSInteger columns=width>=900?5:(width>=560?4:(width>=340&&!accessibilityText?3:2));CGFloat spacing=10,cellWidth=floor((width-spacing*(columns-1))/columns);
+    NSInteger columns=MediaBrowserGridColumns();CGFloat spacing=10,cellWidth=floor((width-spacing*(columns-1))/columns);
     UIFont *name=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];UIFont *kind=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:10] compatibleWithTraitCollection:self.traitCollection];
     CGFloat posterHeight=ceil(cellWidth*1.5),cellHeight=posterHeight+7+ceil(name.lineHeight)*2+2+ceil(kind.lineHeight)+3;NSUInteger count=[self homeGridItems].count,rows=count?(count+(NSUInteger)columns-1)/(NSUInteger)columns:0;
     UICollectionViewFlowLayout *layout=(UICollectionViewFlowLayout *)self.homeGrid.collectionViewLayout;layout.minimumInteritemSpacing=spacing;layout.minimumLineSpacing=18;layout.sectionInset=UIEdgeInsetsZero;self.homeGridHeightConstraint.constant=rows?rows*cellHeight+(rows-1)*layout.minimumLineSpacing:0;[layout invalidateLayout];self.homePosterVisibilityInitialized=NO;[self.homeGrid reloadData];
@@ -1143,7 +1146,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)browsePinnedSource:(NSDictionary *)source {self.pendingBrowseState=nil;self.provider=nil;self.nextHomeLoadTrigger=@"home_pinned_source";[self activate:source];}
 - (void)openHomeConfiguration {
-    MediaHomeConfigurationViewController *page=[MediaHomeConfigurationViewController new];page.sources=self.sourcesProvider?self.sourcesProvider():self.sources?:@[];__weak typeof(self) weakSelf=self;page.onChange=^{[weakSelf refreshHomeModules];};UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:page];HostStyleNavigation(navigation);navigation.modalPresentationStyle=UIModalPresentationPageSheet;UISheetPresentationController *sheet=navigation.sheetPresentationController;if(sheet){sheet.detents=@[UISheetPresentationControllerDetent.mediumDetent,UISheetPresentationControllerDetent.largeDetent];sheet.prefersGrabberVisible=YES;sheet.preferredCornerRadius=24;}[self presentViewController:navigation animated:YES completion:nil];
+    MediaHomeConfigurationViewController *page=[MediaHomeConfigurationViewController new];page.sources=self.sourcesProvider?self.sourcesProvider():self.sources?:@[];__weak typeof(self) weakSelf=self;page.onChange=^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;[owner.grid.collectionViewLayout invalidateLayout];[owner.grid reloadData];[owner updateHomeGridLayout];[owner refreshHomeModules];};UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:page];HostStyleNavigation(navigation);navigation.modalPresentationStyle=UIModalPresentationPageSheet;UISheetPresentationController *sheet=navigation.sheetPresentationController;if(sheet){sheet.detents=@[UISheetPresentationControllerDetent.mediumDetent,UISheetPresentationControllerDetent.largeDetent];sheet.prefersGrabberVisible=YES;sheet.preferredCornerRadius=24;}[self presentViewController:navigation animated:YES completion:nil];
 }
 - (void)openHomeFavorite:(NSDictionary *)entry {
     NSString *sourceID=entry[@"sourceID"]?:@"";NSDictionary *source=nil;for(NSDictionary *candidate in self.sources)if([candidate[@"id"] isEqual:sourceID]){source=candidate;break;}
@@ -1559,7 +1562,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {return collectionView==self.homeGrid?[self homeGridItems].count:self.items.count;}
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {
-    CGFloat available=collectionView.bounds.size.width;BOOL home=collectionView==self.homeGrid;BOOL accessibilityText=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);NSInteger columns=available>=900?5:(available>=560?4:(available>=(home?340:365)&&!accessibilityText?3:2));CGFloat spacing=10;CGFloat width=floor((available-(home?0:24)-(columns-1)*spacing)/columns);
+    CGFloat available=collectionView.bounds.size.width;BOOL home=collectionView==self.homeGrid;NSInteger columns=MediaBrowserGridColumns();CGFloat spacing=10;CGFloat width=floor((available-(home?0:24)-(columns-1)*spacing)/columns);
     if(home){UIFont *name=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection],*kind=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:10] compatibleWithTraitCollection:self.traitCollection];return CGSizeMake(width,ceil(width*1.5)+7+ceil(name.lineHeight)*2+2+ceil(kind.lineHeight)+3);}
     UIFont *name=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection],*remarks=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11] compatibleWithTraitCollection:self.traitCollection];return CGSizeMake(width,width*1.43+8+ceil(name.lineHeight)*2+ceil(remarks.lineHeight)+1);
 }

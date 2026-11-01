@@ -218,7 +218,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('homeToolbarButtonWithSymbol:@"magnifyingglass"', self.detail)
         self.assertIn('homeToolbarButtonWithSymbol:@"gearshape.fill"', self.detail)
         self.assertIn('accessibilityIdentifier=@"media-home-discovery-grid"', self.detail)
-        self.assertIn('NSInteger columns=available>=900?5:(available>=560?4:(available>=(home?340:365)&&!accessibilityText?3:2))', self.detail)
+        self.assertGreaterEqual(self.detail.count('NSInteger columns=MediaBrowserGridColumns();'), 2)
         self.assertIn('MIN((NSUInteger)24,items.count)', self.detail)
         self.assertIn('featured.accessibilityIdentifier=@"__featured__"', self.detail)
         self.assertIn('self.category=featured?nil:identifier', self.detail)
@@ -228,6 +228,21 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('loadHomeShelves:self.homeCategories', self.detail)
         self.assertIn('media_home_discovery_first_card_displayed', self.detail)
         self.assertIn('loadPosterIfNeeded', self.detail)
+
+    def test_home_configuration_persists_three_or_four_columns_for_both_media_grids(self):
+        config_start = self.detail.index('@implementation MediaHomeConfigurationViewController')
+        config_end = self.detail.index('@end\n\n@interface MediaBrowserViewController', config_start)
+        configuration = self.detail[config_start:config_end]
+        self.assertIn('numberOfSectionsInTableView:(UITableView *)tableView {return 3;}', configuration)
+        self.assertIn('section==1?2:self.sources.count', configuration)
+        self.assertIn('indexPath.row==0?3:4 forKey:MediaBrowserGridColumnsDefaultsKey', configuration)
+        self.assertIn('cctv.mediaGridColumns.v1', self.detail)
+        self.assertIn('return [NSUserDefaults.standardUserDefaults integerForKey:MediaBrowserGridColumnsDefaultsKey]==4?4:3;', self.detail)
+        self.assertIn('首页精选和影视库', configuration)
+        config_route = self.detail[self.detail.index('- (void)openHomeConfiguration {'):
+                                   self.detail.index('- (void)openHomeFavorite:', self.detail.index('- (void)openHomeConfiguration {'))]
+        self.assertIn('[owner.grid.collectionViewLayout invalidateLayout]', config_route)
+        self.assertIn('[owner updateHomeGridLayout]', config_route)
         self.assertIn('CGRectIntersectsRect(frame,viewport)', self.detail)
         self.assertIn('convertRect:self.homeScroll.bounds toView:self.view', self.detail)
 
