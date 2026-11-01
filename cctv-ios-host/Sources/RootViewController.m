@@ -1292,7 +1292,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     poster.frame=CGRectMake(0,0,width,posterHeight);poster.layer.borderWidth=selected?1.8:.5;HostSetLayerBorderColor(poster,selected?HostAccent():HostBorder());
     CGFloat logoInset=MAX(6,floor(width*.10)),logoHeight=MAX(28,floor(posterHeight*.62));logo.frame=CGRectMake(logoInset,floor((posterHeight-logoHeight)/2),MAX(1,width-logoInset*2),logoHeight);brand.frame=CGRectMake(5,MAX(4,floor((posterHeight-34)/2)),MAX(1,width-10),34);number.frame=CGRectMake(6,posterHeight-15,62,12);selectedMark.frame=CGRectMake(MAX(2,width-22),5,16,16);selectedMark.hidden=!selected;
     title.frame=CGRectMake(2,titleTop,labelWidth,titleHeight);subtitle.frame=CGRectMake(2,subtitleTop,labelWidth,subtitleHeight);
-    NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";logo.hidden=!logoURL.length;brand.hidden=logoURL.length>0;brand.text=name;logo.image=nil;logo.accessibilityIdentifier=logoURL;if(logoURL.length)[self loadLogo:logoURL into:logo];
+    NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";logo.hidden=!logoURL.length;brand.hidden=logoURL.length>0;brand.text=name;if(logoURL.length)[self loadLogo:logoURL into:logo];else{logo.image=nil;logo.accessibilityIdentifier=nil;}
     number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=selected?HostAccent():HostText();cell.contentView.backgroundColor=selected?HostSelectedSurface():UIColor.clearColor;
     cell.accessibilityIdentifier=[@"channel-card-" stringByAppendingString:channelID];cell.accessibilityLabel=name;cell.accessibilityValue=selected?@"正在播放":@"频道";cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[ch[@"id"]])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:ch[@"id"]];subtitle.text=[self catalogSubtitleForChannel:ch];return cell;
@@ -1391,9 +1391,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     cell.accessibilityValue=playing?@"正在播放":@"频道";
     cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *logo = [ch[@"logo"] isKindOfClass:NSString.class] ? ch[@"logo"] : @"";
-    cell.imageView.image = nil;
     if (logo.length) [self loadLogo:logo into:cell.imageView];
-    else cell.imageView.image=[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"];
+    else {cell.imageView.image=[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"];cell.imageView.accessibilityIdentifier=nil;}
     cell.imageView.tintColor=HostAccent();
     NSDictionary *epg = self.epgCache[cid];
     if ([epg[@"now"] isKindOfClass:NSString.class]) cell.detailTextLabel.text = [NSString stringWithFormat:@"正在播：%@", epg[@"now"]];
@@ -2487,7 +2486,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 #pragma mark - 台标
 
 - (void)loadLogo:(NSString *)url into:(UIImageView *)iv {
-    if(CACurrentMediaTime()<self.playbackPriorityUntil){iv.image=nil;iv.accessibilityIdentifier=url;return;}
     [[HostImageLoader shared] loadURL:url intoImageView:iv];
 }
 

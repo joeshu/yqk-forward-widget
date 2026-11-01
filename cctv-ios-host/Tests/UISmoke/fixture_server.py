@@ -110,7 +110,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_header('Content-Length', str(3 * 1024 * 1024))
                 self.end_headers()
                 return
-            if self.path == '/slow-logo.png':
+            if self.path.split('?', 1)[0] == '/slow-logo.png':
                 time.sleep(1.5)
             content_type = 'image/png'
             data = LOGO

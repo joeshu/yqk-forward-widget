@@ -365,12 +365,13 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('[self.nativeRouteProbe cancel]',method_body('- (void)stopPlayback'))
         self.assertIn('self.nativePlainRouteActive?0:1',method_body('- (void)startRemoteChannel:'))
 
-    def test_player_toolbar_uses_real_airplay_picker_and_delays_logo_io_until_first_frame(self):
+    def test_player_toolbar_uses_real_airplay_picker_and_keeps_channel_logos_stable(self):
         self.assertIn('AVRoutePickerView *airPlayPicker', TEXT)
         self.assertIn('@"customView":airPlayPicker', TEXT)
         self.assertIn('loadPlayerChannelLogoAfterFirstFrame', TEXT)
         body = method_body('- (void)loadLogo:')
-        self.assertIn('playbackPriorityUntil', body)
+        self.assertIn('HostImageLoader shared] loadURL:url intoImageView:iv', body)
+        self.assertNotIn('playbackPriorityUntil', body)
 
     def test_epg_debug_info_reports_subscription_match_fields_and_preserves_source_query(self):
         epg=(SOURCE.parent / "EPGViewController.m").read_text(encoding="utf-8")

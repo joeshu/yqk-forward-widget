@@ -52,7 +52,10 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('viewForHeaderInSection', self.catalog)
         self.assertIn('heightForHeaderInSection:(NSInteger)section {return 34;}', self.catalog)
         self.assertIn('c.textLabel.numberOfLines=2', self.catalog)
-        self.assertIn('c.detailTextLabel.numberOfLines = 4', self.catalog)
+        self.assertIn('c.detailTextLabel.numberOfLines = 0', self.catalog)
+        self.assertIn('c.detailTextLabel.lineBreakMode=NSLineBreakByCharWrapping', self.catalog)
+        self.assertIn('CCTVResourceDisplayEndpoint(p[@"source"])', self.catalog)
+        self.assertIn('if(!profileName.length){NSString *source=', self.catalog)
         self.assertIn('c.accessibilityValue=c.detailTextLabel.text', self.catalog)
 
     def test_resource_header_is_remeasured_after_navigation_return_and_preserves_scroll_position(self):

@@ -236,7 +236,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSInteger configuredBeforeHandoff;
       __block id preparedWrapper;
       __block NativeChannelPreloader *nativePreloader;
-      __block UIImageView *logoA, *logoB, *staleLogo, *oversizeLogo;
+      __block UIImageView *logoA, *logoB, *staleLogo, *preservedLogo, *oversizeLogo;
       __block NSDictionary *imageStats;
       __block NSDictionary *nodeChecks;
       __block MediaBrowserViewController *mediaPage;
@@ -350,6 +350,8 @@ static void next(NSArray *steps, NSUInteger index) {
                 for(NSUInteger index=0;index<12;index++){
                     [profiles addObject:@{@"name":[NSString stringWithFormat:@"UI Smoke Resource %02lu",(unsigned long)index+1],@"type":@"subscription",@"source":[NSString stringWithFormat:@"https://example.test/smoke-%lu.m3u",(unsigned long)index+1],@"count":@12,@"epgStatus":@"自动匹配",@"enabled":@NO}];
                 }
+                NSString *longEndpoint=[@"https://example.test/long-resource/" stringByPaddingToLength:420 withString:@"segment/" startingAtIndex:0];
+                [profiles addObject:@{@"name":@"",@"type":@"subscription",@"source":longEndpoint,@"count":@63,@"epgStatus":@"已配置",@"enabled":@NO,@"status":@"HTTP 健康状态正常 · 最近成功 11-01 16:27"}];
                 return profiles;
             };
             [resourcePage reloadProfiles];
@@ -454,6 +456,11 @@ static void next(NSArray *steps, NSUInteger index) {
             [resourcePage reloadProfiles];
             [resourcePage.view layoutIfNeeded];
             [resourcePage.tableView layoutIfNeeded];
+            NSArray<NSDictionary *> *resourceItems=[resourcePage valueForKey:@"profiles"];
+            NSUInteger longResourceIndex=[resourceItems indexOfObjectPassingTest:^BOOL(NSDictionary *item,NSUInteger index,BOOL *stop){return [item[@"source"] hasPrefix:@"https://example.test/long-resource/"];}];
+            BOOL longResourceFits=NO;NSString *longResourceTitle=@"";
+            if(longResourceIndex!=NSNotFound){NSIndexPath *longResourcePath=[NSIndexPath indexPathForRow:(NSInteger)longResourceIndex inSection:0];[resourcePage.tableView scrollToRowAtIndexPath:longResourcePath atScrollPosition:UITableViewScrollPositionMiddle animated:NO];[resourcePage.tableView layoutIfNeeded];UITableViewCell *longCell=[resourcePage.tableView cellForRowAtIndexPath:longResourcePath];CGRect longRow=[resourcePage.tableView rectForRowAtIndexPath:longResourcePath];CGRect detailRect=[longCell.detailTextLabel convertRect:longCell.detailTextLabel.bounds toView:resourcePage.tableView];longResourceFits=CGRectGetMaxY(detailRect)<=CGRectGetMaxY(longRow)+1;longResourceTitle=longCell.textLabel.text?:@"";}
+            check(longResourceIndex!=NSNotFound&&longResourceFits&&[longResourceTitle isEqual:@"example.test"],[NSString stringWithFormat:@"long resource URLs and status remain inside a measured row (index=%lu title=%@ fits=%d)",(unsigned long)longResourceIndex,longResourceTitle,longResourceFits]);
             [resourcePage refreshHeaderAfterNavigationTransition];
             CGRect toolbarFrame=[(UIStackView *)[resourcePage valueForKey:@"topActionsStack"] frame];
             CGFloat safeTop=root.view.window.safeAreaInsets.top;
@@ -766,6 +773,8 @@ static void next(NSArray *steps, NSUInteger index) {
             check(oversizeLogo.image==nil,@"oversized logo response is rejected");
             NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];
             NSString *base=[NSString stringWithFormat:@"http://127.0.0.1:%@",arguments[at+1]];
+            UIImage *visibleLogo=logoA.image;NSString *slowLogoURL=[base stringByAppendingString:@"/slow-logo.png?refresh=1"];preservedLogo.image=visibleLogo;preservedLogo.accessibilityIdentifier=slowLogoURL;[HostImageLoader.shared loadURL:slowLogoURL intoImageView:preservedLogo];
+            check(preservedLogo.image==visibleLogo,@"same-channel logo stays visible while an uncached refresh is pending");
             [HostImageLoader.shared loadURL:[base stringByAppendingString:@"/logo.png"] intoImageView:logoA];
             [HostImageLoader.shared loadURL:[base stringByAppendingString:@"/oversize.png"] intoImageView:oversizeLogo];
             [[NSURLSession.sharedSession dataTaskWithURL:[NSURL URLWithString:[base stringByAppendingString:@"/image-stats"]] completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){NSDictionary *stats=data?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;dispatch_async(dispatch_get_main_queue(),^{imageStats=stats;});}] resume];

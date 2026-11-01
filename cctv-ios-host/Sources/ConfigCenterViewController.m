@@ -4,6 +4,13 @@
 #import "ProfileStore.h"
 #import "PyHost.h"
 #import <math.h>
+
+static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
+    if (![value isKindOfClass:NSString.class] || value.length <= 180) return [value isKindOfClass:NSString.class] ? value : @"";
+    NSRange prefix = [value rangeOfComposedCharacterSequencesForRange:NSMakeRange(0, 179)];
+    return [[value substringWithRange:prefix] stringByAppendingString:@"…"];
+}
+
 @interface ConfigCenterViewController () <UITextFieldDelegate>
 @property(nonatomic, strong) NSArray<NSDictionary *> *profiles;
 @property(nonatomic, strong) NSArray<NSDictionary *> *allProfiles;
@@ -289,8 +296,11 @@
     c.textLabel.numberOfLines=2;
     c.textLabel.lineBreakMode=NSLineBreakByTruncatingTail;
     c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    c.detailTextLabel.numberOfLines = 4;
-    c.detailTextLabel.lineBreakMode=NSLineBreakByTruncatingTail;
+    // Subscription endpoints and service health details can wrap to several
+    // lines. Let Auto Layout size the cell from the complete, bounded summary
+    // so a long URL cannot paint over the following resource row.
+    c.detailTextLabel.numberOfLines = 0;
+    c.detailTextLabel.lineBreakMode=NSLineBreakByCharWrapping;
     c.imageView.tintColor = HostAccent();
     c.accessoryView = nil;
     c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -299,12 +309,15 @@
         c.accessibilityIdentifier=[NSString stringWithFormat:@"resource-row-%ld",(long)ip.row];
         c.accessibilityLabel=[p[@"name"] isKindOfClass:NSString.class]?p[@"name"]:@"资源";
         c.accessibilityHint=[p[@"type"] isEqual:@"plugin"]?@"轻点查看服务能力与设置，使用开关启停服务":@"轻点查看资源，使用开关启用或停用";
-        c.textLabel.text = p[@"name"];
+        NSString *profileName=[p[@"name"] isKindOfClass:NSString.class]?p[@"name"]:@"";
+        if(!profileName.length){NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";NSString *host=[NSURL URLWithString:source].host;profileName=host.length?host:([source hasPrefix:@"local-playlist:"]?@"本地播放列表":@"未命名资源");}
+        c.textLabel.text = profileName;
+        c.accessibilityLabel=profileName;
         NSTimeInterval updated=[p[@"updatedAt"] doubleValue];
         NSString *refreshInfo=@"尚无成功刷新记录";
         if(updated>0){NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"MM-dd HH:mm";refreshInfo=[NSString stringWithFormat:@"最近成功 %@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]];}
         c.detailTextLabel.text =
-            [NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@ · %@", p[@"count"], p[@"epgStatus"]?:@"自动匹配", [p[@"source"] hasPrefix:@"local-playlist:"]?@"本机文件 · 长按可编辑、排序":([p[@"source"] length]?p[@"source"]:@"官方频道目录"),refreshInfo];
+            [NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@ · %@", p[@"count"], p[@"epgStatus"]?:@"自动匹配", [p[@"source"] hasPrefix:@"local-playlist:"]?@"本机文件 · 长按可编辑、排序":([p[@"source"] length]?CCTVResourceDisplayEndpoint(p[@"source"]):@"官方频道目录"),refreshInfo];
         c.imageView.image = [UIImage systemImageNamed:@"list.bullet.rectangle"];
         BOOL plugin=[p[@"type"] isEqual:@"plugin"],tvbox=[p[@"type"] isEqual:@"tvbox"];
         NSString *current=[p[@"current"] boolValue]?@"当前使用 · ":@"";
@@ -314,9 +327,9 @@
             if([p[@"subscriptionURL"] length]){
                 [lines addObject:[NSString stringWithFormat:@"清单：%@ · %@ 个频道",p[@"subscriptionStatus"]?:@"待检测",p[@"channelCount"]?:@0]];
                 NSTimeInterval last=[p[@"playlistUpdatedAt"] doubleValue];if(last>0){NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"MM-dd HH:mm";[lines addObject:[NSString stringWithFormat:@"最近成功：%@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:last]]]];}
-                [lines addObject:[NSString stringWithFormat:@"订阅：%@",p[@"subscriptionURL"]]];
+                [lines addObject:[NSString stringWithFormat:@"订阅：%@",CCTVResourceDisplayEndpoint(p[@"subscriptionURL"])]];
             }
-            if([p[@"epgURL"] length])[lines addObject:[NSString stringWithFormat:@"节目单：%@",p[@"epgURL"]]];
+            if([p[@"epgURL"] length])[lines addObject:[NSString stringWithFormat:@"节目单：%@",CCTVResourceDisplayEndpoint(p[@"epgURL"])]];
             c.detailTextLabel.text=[lines componentsJoinedByString:@"\n"];
             c.imageView.image=[UIImage systemImageNamed:[p[@"resourceKind"] isEqual:@"live"]?@"dot.radiowaves.left.and.right":@"play.rectangle"];
         }else if(tvbox){

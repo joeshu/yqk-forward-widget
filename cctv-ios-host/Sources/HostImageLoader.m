@@ -70,7 +70,11 @@ static NSUInteger const ImageQueueLimit = 96;
 }
 - (void)loadURL:(NSString *)url intoImageView:(UIImageView *)imageView maximumPixelSize:(NSUInteger)maximumPixelSize {
     NSAssert(NSThread.isMainThread, @"Image views must be configured on the main thread");
-    imageView.image=nil;imageView.accessibilityIdentifier=url;
+    // Keep the current logo while a same-URL request is joined or retried.
+    // Reused views still clear immediately when assigned to a different URL.
+    BOOL sameImage=[imageView.accessibilityIdentifier isEqualToString:url ?: @""];
+    if(!sameImage)imageView.image=nil;
+    imageView.accessibilityIdentifier=url;
     if(!url.length)return;
     NSURL *target=[NSURL URLWithString:url];
     if(!target.host.length || ![@[@"http",@"https"] containsObject:target.scheme.lowercaseString])return;

@@ -29,6 +29,17 @@ def method_body(source, signature):
 
 
 class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
+    def test_channel_logos_keep_their_image_during_reuse_and_playback_priority(self):
+        load_logo = method_body(ROOT_SOURCE, "- (void)loadLogo:(NSString *)url into:(UIImageView *)iv")
+        self.assertIn("HostImageLoader shared] loadURL:url intoImageView:iv", load_logo)
+        self.assertNotIn("playbackPriorityUntil", load_logo)
+        self.assertIn("BOOL sameImage=[imageView.accessibilityIdentifier isEqualToString:url ?: @\"\"]", IMAGE_SOURCE)
+        self.assertIn("if(!sameImage)imageView.image=nil", IMAGE_SOURCE)
+        grid_cell = method_body(ROOT_SOURCE, "- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:")
+        self.assertNotIn("logo.image=nil;logo.accessibilityIdentifier=logoURL", grid_cell)
+        list_cell = method_body(ROOT_SOURCE, "- (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:")
+        self.assertNotIn("cell.imageView.image = nil", list_cell)
+
     def test_leaving_live_tabs_suspends_before_the_active_tab_changes(self):
         body = method_body(ROOT_SOURCE, "- (void)selectBottomTab:(UIButton *)sender")
         suspend = body.index('suspendLivePlaybackForReason:@"left_live_interface"')
