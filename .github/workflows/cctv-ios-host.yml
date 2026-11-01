@@ -121,7 +121,7 @@ jobs:
           retention-days: 14
 
       - name: Publish release asset
-        if: success() && github.ref == 'refs/heads/main' && matrix.variant == 'full'
+        if: success() && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && matrix.variant == 'full'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
