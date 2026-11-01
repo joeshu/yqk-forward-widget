@@ -44,6 +44,7 @@
 - (void)logPluginLine:(NSString *)line identifier:(NSString *)identifier name:(NSString *)name;
 - (void)applyFilter;
 - (void)selectChannel:(NSDictionary *)channel;
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath;
 - (void)seekNativeStart:(NSTimeInterval)start end:(NSTimeInterval)end;
 - (void)returnToNativeLive;
 - (void)fetchSubscription:(NSString *)url silent:(BOOL)silent;
