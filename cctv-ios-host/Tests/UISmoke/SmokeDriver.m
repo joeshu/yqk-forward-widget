@@ -245,6 +245,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSDate *staleSearchDeadline;
       __block UIViewController *mediaDetail;
       __block UIViewController *navigationProbe;
+      __block CGFloat resourceScrollOffset=0;
       __block MediaEpisodeSelectionViewController *mediaEpisodes;
       __block MediaPlaybackViewController *mediaPlayback;
       __block NSDate *stalePlaybackDeadline;
@@ -321,6 +322,9 @@ static void next(NSArray *steps, NSUInteger index) {
             UIStackView *resourceFilters=[[root valueForKey:@"tabPage"] valueForKey:@"kindStack"];
             check(resourceFilters.arrangedSubviews.count==6, @"resources page exposes counted filters for all, VOD, live, catalogs, scripts and attention");
             capture(self.window, @"03-configuration");
+            ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPage"];
+            [resourcePage.tableView setContentOffset:CGPointMake(0,48) animated:NO];
+            resourceScrollOffset=resourcePage.tableView.contentOffset.y;
             [root addSubscription];
           },
           ^{
@@ -401,10 +405,19 @@ static void next(NSArray *steps, NSUInteger index) {
             check(nav.topViewController==root&&nav.navigationBarHidden&&[resourcePage isKindOfClass:ConfigCenterViewController.class],@"returning from service editing restores the resource page and its hidden navigation bar");
             UIStackView *filters=[resourcePage valueForKey:@"kindStack"];
             NSArray<UIView *> *filterInstances=[filters.arrangedSubviews copy];
+            CGFloat returnedOffset=resourcePage.tableView.contentOffset.y;
+            check(fabs(returnedOffset-resourceScrollOffset)<1.5,[NSString stringWithFormat:@"resource scroll position survives a pushed service/editor round trip (before=%.1f after=%.1f)",resourceScrollOffset,returnedOffset]);
             [resourcePage reloadProfiles];
             [resourcePage reloadProfiles];
             [resourcePage.view layoutIfNeeded];
             [resourcePage.tableView layoutIfNeeded];
+            [resourcePage refreshHeaderAfterNavigationTransition];
+            CGRect toolbarFrame=[(UIStackView *)[resourcePage valueForKey:@"topActionsStack"] frame];
+            CGFloat safeTop=root.view.window.safeAreaInsets.top;
+            check(fabs(CGRectGetMinY(toolbarFrame)-safeTop-8)<1.5&&fabs(CGRectGetWidth(resourcePage.tableView.tableHeaderView.frame)-CGRectGetWidth(resourcePage.tableView.bounds))<1.5,[NSString stringWithFormat:@"resource header is reattached at the window safe area with the current table width (top=%.1f safe=%.1f width=%.1f/%.1f)",CGRectGetMinY(toolbarFrame),safeTop,CGRectGetWidth(resourcePage.tableView.tableHeaderView.frame),CGRectGetWidth(resourcePage.tableView.bounds)]);
+            UIScrollView *filterScroll=[resourcePage valueForKey:@"kindScroll"];
+            CGRect filtersInHeader=[filterScroll convertRect:filterScroll.bounds toView:resourcePage.tableView.tableHeaderView];
+            check(CGRectGetMinY(filtersInHeader)>=0&&CGRectGetMaxY(filtersInHeader)<=CGRectGetHeight(resourcePage.tableView.tableHeaderView.frame)+1,[NSString stringWithFormat:@"resource category filters stay inside the measured header after return (filters=%@ header=%.1f)",NSStringFromCGRect(filtersInHeader),CGRectGetHeight(resourcePage.tableView.tableHeaderView.frame)]);
             BOOL filtersStable=filterInstances.count==6&&filters.arrangedSubviews.count==filterInstances.count;
             for(NSUInteger index=0;filtersStable&&index<filterInstances.count;index++)filtersStable=filters.arrangedSubviews[index]==filterInstances[index];
             check(filtersStable,@"resource filter controls keep the same views across repeated refreshes");
@@ -422,6 +435,8 @@ static void next(NSArray *steps, NSUInteger index) {
                 if(gap < -0.5)resourceRowsOrdered=NO;
             }
             check(resourceRowsOrdered&&largestRowGap<20,@"resource rows stay ordered without large scroll-layout gaps");
+            [resourcePage.tableView setContentOffset:CGPointZero animated:NO];
+            [resourcePage.tableView layoutIfNeeded];
             capture(self.window,@"04b-resource-return");
             [root selectBottomTab:(id)tabs.arrangedSubviews[4]];
           },
@@ -782,7 +797,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [mediaPage.view layoutIfNeeded];
             UICollectionView *discovery=(UICollectionView *)SmokeViewWithAccessibilityIdentifier(mediaPage.view,@"media-home-discovery-grid");[discovery layoutIfNeeded];UICollectionViewFlowLayout *flow=(UICollectionViewFlowLayout *)discovery.collectionViewLayout;NSIndexPath *firstIndex=[NSIndexPath indexPathForItem:0 inSection:0];UICollectionViewLayoutAttributes *firstAttributes=[flow layoutAttributesForItemAtIndexPath:firstIndex];CGSize cardSize=firstAttributes.size;CGRect first=firstAttributes.frame;CGRect third=[flow layoutAttributesForItemAtIndexPath:[NSIndexPath indexPathForItem:2 inSection:0]].frame;CGRect fourth=[flow layoutAttributesForItemAtIndexPath:[NSIndexPath indexPathForItem:3 inSection:0]].frame;UIStackView *categoryButtons=[mediaPage valueForKey:@"categories"];UIButton *movieCategory=nil,*featuredCategory=nil;for(UIButton *button in categoryButtons.arrangedSubviews){if([button.accessibilityIdentifier isEqual:@"movies"])movieCategory=button;if([button.accessibilityIdentifier isEqual:@"__featured__"])featuredCategory=button;}
             check(discovery&&[discovery numberOfItemsInSection:0]==4&&cardSize.width>90&&fabs(CGRectGetMinY(first)-CGRectGetMinY(third))<1&&CGRectGetMinY(fourth)>CGRectGetMaxY(first),[NSString stringWithFormat:@"home renders four real recommendations in a three-column portrait poster grid (grid=%@, size=%.1fx%.1f, rows=%.1f/%.1f)",discovery?NSStringFromCGRect(discovery.frame):@"missing",cardSize.width,cardSize.height,CGRectGetMinY(first),CGRectGetMinY(fourth)]);
-            check(movieCategory&&featuredCategory&&[movieCategory.currentTitle isEqual:@"电影"],@"home category pills mirror the source categories and offer a cached Featured view");UICollectionViewCell *firstCard=[discovery cellForItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];UIButton *cardMore=[firstCard valueForKey:@"moreButton"];check(firstCard&&cardMore.menu.children.count==4,@"poster card keeps an independent four-action menu for details, favorites, copy and share");capture(self.window,@"16-media-home-discovery-grid");
+            check(movieCategory&&featuredCategory&&[movieCategory.currentTitle isEqual:@"电影"],@"home category pills mirror the source categories and offer a cached Featured view");UICollectionViewCell *firstCard=[discovery cellForItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];UIButton *cardMore=[firstCard valueForKey:@"moreButton"];UIImageView *poster=[firstCard valueForKey:@"posterView"];UILabel *cardTitle=[firstCard valueForKey:@"nameLabel"];check(poster&&fabs(CGRectGetHeight(poster.frame)/CGRectGetWidth(poster.frame)-1.5)<0.02&&cardTitle.font.pointSize>=14&&cardMore.bounds.size.width==32,[NSString stringWithFormat:@"poster cards use the reference 2:3 key art, readable titles and clear circular actions (ratio=%.2f title=%.1f action=%.1f)",poster?CGRectGetHeight(poster.frame)/CGRectGetWidth(poster.frame):0,cardTitle.font.pointSize,cardMore.bounds.size.width]);check(firstCard&&cardMore.menu.children.count==4,@"poster card keeps an independent four-action menu for details, favorites, copy and share");capture(self.window,@"16-media-home-discovery-grid");
             [movieCategory sendActionsForControlEvents:UIControlEventTouchUpInside];
 
           }},

@@ -18,8 +18,11 @@
 @property(nonatomic, strong) NSLayoutConstraint *kindScrollHeightConstraint;
 @property(nonatomic, strong) NSLayoutConstraint *resourceHeaderTopConstraint;
 @property(nonatomic) CGFloat statusBarSafeInset;
+@property(nonatomic) BOOL updatingResourceHeaderLayout;
 @property(nonatomic, copy) NSString *selectedKind;
 @property(nonatomic, strong) UILabel *emptyLabel;
+- (void)updateResourceHeaderLayout;
+- (void)updateResourceHeaderLayoutReattaching:(BOOL)reattach;
 - (void)confirmRemoveProfile:(NSString *)source;
 - (void)selectKind:(UIButton *)sender;
 - (void)searchTextChanged;
@@ -83,7 +86,7 @@
     [self reloadProfiles];
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
-    [self updateResourceHeaderLayout];
+    [self refreshHeaderAfterNavigationTransition];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(runtimeStateDidChange) name:PyHostRuntimeStateDidChangeNotification object:nil];
 }
 - (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];}
@@ -94,14 +97,30 @@
     [self updateResourceHeaderLayout];
 }
 - (void)updateResourceHeaderLayout {
+    [self updateResourceHeaderLayoutReattaching:NO];
+}
+- (void)refreshHeaderAfterNavigationTransition {
+    if(!self.isViewLoaded)return;
+    [self.view setNeedsLayout];
+    [self.view layoutIfNeeded];
+    [self updateResourceHeaderLayoutReattaching:YES];
+}
+- (void)updateResourceHeaderLayoutReattaching:(BOOL)reattach {
     UIView *header=self.resourceHeader;
-    CGFloat width=CGRectGetWidth(self.tableView.bounds);
-    if(!header||width<=0)return;
+    UITableView *table=self.tableView;
+    CGFloat width=CGRectGetWidth(table.bounds);
+    if(!header||width<=0||self.updatingResourceHeaderLayout)return;
+    self.updatingResourceHeaderLayout=YES;
+    UIView *oldHeader=table.tableHeaderView;
+    CGFloat oldHeight=CGRectGetHeight(oldHeader.frame);
+    CGPoint oldOffset=table.contentOffset;
+    BOOL wasAtTop=oldOffset.y<=-table.adjustedContentInset.top+1;
     self.resourceHeaderTopConstraint.constant=MAX(0,self.statusBarSafeInset)+8;
     // UITableView caches tableHeaderView's frame independently from its Auto
-    // Layout subtree. Re-measure after every width/safe-area change and assign
-    // the header back even when its width is unchanged, so returning from a
-    // pushed page cannot keep a stale clipped header height.
+    // Layout subtree. Re-measure after width/safe-area changes and explicitly
+    // reattach after navigation transitions; this controller is embedded below
+    // the root controller, so UIKit does not send it appearance callbacks when
+    // a services/detail page is pushed and popped above the root.
     header.frame=CGRectMake(0,0,width,MAX(1,CGRectGetHeight(header.frame)));
     [header setNeedsLayout];
     [header layoutIfNeeded];
@@ -110,7 +129,19 @@
                                verticalFittingPriority:UILayoutPriorityFittingSizeLevel];
     CGFloat measured=ceil(fitting.height);
     if(measured>0&&fabs(CGRectGetHeight(header.frame)-measured)>0.5){CGRect frame=header.frame;frame.size.height=measured;header.frame=frame;}
-    if(self.tableView.tableHeaderView!=header||fabs(CGRectGetWidth(self.tableView.tableHeaderView.frame)-width)>0.5||fabs(CGRectGetHeight(self.tableView.tableHeaderView.frame)-CGRectGetHeight(header.frame))>0.5)self.tableView.tableHeaderView=header;
+    CGFloat newHeight=CGRectGetHeight(header.frame);
+    BOOL needsAttach=reattach||oldHeader!=header||fabs(CGRectGetWidth(oldHeader.frame)-width)>0.5||fabs(oldHeight-newHeight)>0.5;
+    if(needsAttach){
+        table.tableHeaderView=header;
+        if(oldHeader==header){
+            CGFloat minimum=-table.adjustedContentInset.top;
+            CGFloat maximum=MAX(minimum,table.contentSize.height-table.bounds.size.height+table.adjustedContentInset.bottom);
+            CGFloat y=wasAtTop?minimum:oldOffset.y+(newHeight-oldHeight);
+            CGPoint restored=CGPointMake(oldOffset.x,MIN(MAX(y,minimum),maximum));
+            if(fabs(table.contentOffset.y-restored.y)>0.5||fabs(table.contentOffset.x-restored.x)>0.5)[table setContentOffset:restored animated:NO];
+        }
+    }
+    self.updatingResourceHeaderLayout=NO;
 }
 - (void)setTopSafeAreaInset:(CGFloat)inset {if(!isfinite(inset))inset=0;inset=MAX(0,inset);if(fabs(self.statusBarSafeInset-inset)<0.5)return;self.statusBarSafeInset=inset;if(self.isViewLoaded)[self updateResourceHeaderLayout];}
 - (BOOL)profile:(NSDictionary *)profile matchesKind:(NSString *)kind {

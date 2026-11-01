@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 @interface ConfigCenterViewController : UITableViewController
 - (void)setTopSafeAreaInset:(CGFloat)inset;
+- (void)refreshHeaderAfterNavigationTransition;
 - (void)reloadProfiles;
 - (void)refreshProfiles;
 @property(nonatomic, copy) NSArray<NSDictionary *> * (^profilesProvider)(void);

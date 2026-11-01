@@ -55,6 +55,15 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('c.detailTextLabel.numberOfLines = 4', self.catalog)
         self.assertIn('c.accessibilityValue=c.detailTextLabel.text', self.catalog)
 
+    def test_resource_header_is_remeasured_after_navigation_return_and_preserves_scroll_position(self):
+        self.assertIn('- (void)refreshHeaderAfterNavigationTransition', self.catalog)
+        self.assertIn('updateResourceHeaderLayoutReattaching:(BOOL)reattach', self.catalog)
+        self.assertIn('BOOL needsAttach=reattach||oldHeader!=header', self.catalog)
+        self.assertIn('table.tableHeaderView=header', self.catalog)
+        self.assertIn('oldOffset.y+(newHeight-oldHeight)', self.catalog)
+        self.assertIn('[resourcePage refreshHeaderAfterNavigationTransition]', self.root)
+        self.assertIn('if(viewController==self&&self.activeTab==3)', self.root)
+
     def test_service_directory_omits_empty_runtime_groups(self):
         services = (ROOT / 'Sources/ServicesViewController.m').read_text()
         self.assertIn('if(running.count){[visibleSections addObject:running]', services)
