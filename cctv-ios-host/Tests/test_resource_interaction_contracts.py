@@ -356,6 +356,31 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertNotIn('[self refreshHomeModules]', show_message)
         self.assertIn('self.homeScroll.contentOffset=CGPointMake', self.detail)
 
+    def test_browse_status_and_loading_feedback_never_cover_existing_posters(self):
+        show_message = self.detail[self.detail.index('- (void)showMessage:'):
+                                   self.detail.index('- (void)chooseResource', self.detail.index('- (void)showMessage:'))]
+        browse_controls = self.detail[self.detail.index('- (void)setBrowseControlsHidden:'):
+                                      self.detail.index('- (void)toggleHomeBrowse', self.detail.index('- (void)setBrowseControlsHidden:'))]
+        self.assertIn('self.status.hidden=!message.length||hasContent', show_message)
+        self.assertIn('self.resourceButton.hidden=loading||hasContent||!message.length', show_message)
+        self.assertIn('if(loading&&!hasContent)[self.spinner startAnimating];else[self.spinner stopAnimating];', show_message)
+        self.assertIn('self.status.hidden=!self.status.text.length||hasContent', browse_controls)
+
+    def test_empty_home_shelves_are_compact_and_scroll_positions_are_source_scoped(self):
+        shelf_start = self.detail.index('- (void)addHomeCards:')
+        shelf = self.detail[shelf_start:self.detail.index('- (void)updateHomeStatusCard', shelf_start)]
+        self.assertIn('CGFloat shelfHeight=cards.count?posterShelfHeight:88', shelf)
+        self.assertIn('empty.heightAnchor constraintEqualToConstant:shelfHeight', shelf)
+        self.assertIn('media-home-shelf-%@', shelf)
+        self.assertIn('cctv.mediaHome.scrollOffset.v2.%lu:%@', self.detail)
+        self.assertIn('objectForKey:[self homeScrollOffsetKeyForSource:selected]', self.detail)
+        self.assertIn('if(keepingHome&&sourceChanged)', self.detail)
+
+    def test_home_poster_fetch_starts_when_a_cell_first_becomes_visible(self):
+        display_start = self.detail.index('- (void)collectionView:(UICollectionView *)collectionView willDisplayCell:')
+        display = self.detail[display_start:self.detail.index('- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:', display_start)]
+        self.assertIn('[(MediaDiscoveryCell *)cell loadPosterIfNeeded]', display)
+
     def test_home_plugin_deep_links_wait_for_health_and_capabilities_before_detail(self):
         implementation = self.detail.index('@implementation MediaBrowserViewController')
         recommendation_start = self.detail.index('- (void)openHomeRecommendation:', implementation)
