@@ -380,7 +380,8 @@ route = '/all.m3u'
                     return
                 body = source
                 if self.path.endswith('.md5'):
-                    body = (hashlib.md5(source).hexdigest() if self.path == '/index.cjs.md5' else '0' * 32).encode()
+                    body = ('0' * 32 if self.path.endswith('/mismatch.js.md5')
+                            else hashlib.md5(source).hexdigest()).encode()
                 self.send_response(200)
                 self.send_header('Content-Length', str(25 * 1024 * 1024 if self.path == '/oversize.js' else len(body)))
                 self.end_headers()
