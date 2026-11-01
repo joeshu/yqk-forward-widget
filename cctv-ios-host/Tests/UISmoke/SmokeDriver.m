@@ -207,6 +207,7 @@ static void next(NSArray *steps, NSUInteger index) {
 - (BOOL)smokeApplication:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
     [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];
     [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"resumeLastChannel"];
+    [NSUserDefaults.standardUserDefaults setInteger:4 forKey:@"cctv.channelGridColumns.v1"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"cctv.lastBottomTab.v1"];
     [NSUserDefaults.standardUserDefaults setObject:@[@"recommendations",@"catalog",@"continue",@"favorites",@"sources"] forKey:@"cctv.mediaHome.modules.v1"];
     [NSUserDefaults.standardUserDefaults setInteger:3 forKey:@"cctv.mediaHome.modules.schemaVersion"];
@@ -238,6 +239,8 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSDictionary *imageStats;
       __block NSDictionary *nodeChecks;
       __block MediaBrowserViewController *mediaPage;
+      __block UICollectionViewCell *selectedLiveCard;
+      __block UIImageView *selectedLiveMark;
       __block MediaGlobalSearchViewController *searchPage;
       __block CGPoint searchReturnOffset;
       __block id staleSearchJob;
@@ -255,12 +258,26 @@ static void next(NSArray *steps, NSUInteger index) {
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
             check([grid numberOfItemsInSection:0] > 20, @"home catalog populated");
             check(!grid.hidden, @"grid visible by default");
+            CGFloat expectedGridTop=root.view.safeAreaInsets.top+42;
+            check(fabs(CGRectGetMinY(grid.frame)-expectedGridTop)<1.5,[NSString stringWithFormat:@"live grid starts directly after safe-area channel controls (grid=%.1f expected=%.1f)",CGRectGetMinY(grid.frame),expectedGridTop]);
             capture(self.window, @"01-live-grid");
             check(root.navigationItem.rightBarButtonItems.count==1, @"catalog uses one compact toolbar");
             UIStackView *toolbar=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;
-            check(toolbar.arrangedSubviews.count==3,@"catalog exposes three page actions");
+            check(toolbar.arrangedSubviews.count==3,@"catalog exposes layout, density and more actions");
             UIButton *layoutButton=(UIButton *)toolbar.arrangedSubviews.firstObject;
             check([layoutButton.accessibilityLabel isEqual:@"切换列表布局"],@"grid toolbar clearly offers the live list-row layout");
+            UIButton *columnsButton=(UIButton *)toolbar.arrangedSubviews[1];
+            check([columnsButton.accessibilityIdentifier isEqual:@"channel.grid.columns.toggle"]&&[columnsButton.configuration.title isEqual:@"4列"],@"catalog has an always-visible, accessible four-column density control");
+            [columnsButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+            NSInteger columns=[[root valueForKey:@"gridColumns"] integerValue];
+            CGSize threeColumnSize=[(id<UICollectionViewDelegateFlowLayout>)root collectionView:grid layout:grid.collectionViewLayout sizeForItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];
+            CGFloat expectedThreeColumnWidth=floor((grid.bounds.size.width-20-2*6)/3);
+            check(columns==3&&[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"]==3&&fabs(threeColumnSize.width-expectedThreeColumnWidth)<1.0,@"density control switches to and persists exactly three compact columns");
+            toolbar=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;columnsButton=(UIButton *)toolbar.arrangedSubviews[1];
+            [columnsButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+            CGSize fourColumnSize=[(id<UICollectionViewDelegateFlowLayout>)root collectionView:grid layout:grid.collectionViewLayout sizeForItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];
+            CGFloat expectedFourColumnWidth=floor((grid.bounds.size.width-20-3*6)/4);
+            check([[root valueForKey:@"gridColumns"] integerValue]==4&&[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"]==4&&fabs(fourColumnSize.width-expectedFourColumnWidth)<1.0,@"density control restores four columns and persists the shared catalog setting");
             [layoutButton sendActionsForControlEvents:UIControlEventTouchUpInside];
             [root.view layoutIfNeeded];
             UITableView *liveList=[root valueForKey:@"table"];
@@ -288,6 +305,7 @@ static void next(NSArray *steps, NSUInteger index) {
             NSArray *subscriptionRows=[root valueForKey:@"shownChannels"];
             check(subscriptionRows.count==1&&[subscriptionRows.firstObject[@"id"] isEqualToString:@"remote-smoke"], @"channel page contains only subscription entries");
             check([root.title isEqualToString:@"频道"], @"subscription page has its own navigation title");
+            check(fabs(CGRectGetMinY(grid.frame)-(root.view.safeAreaInsets.top+42))<1.5,@"channel catalog starts below the native navigation safe area without an extra blank band");
             capture(self.window, @"01b-subscription-channels");
             [root setValue:original forKey:@"allChannels"];
             [root applyFilter];
@@ -315,7 +333,7 @@ static void next(NSArray *steps, NSUInteger index) {
             navigationProbe=[UIViewController new];navigationProbe.title=@"交互返回取消测试";[nav pushViewController:navigationProbe animated:NO];
           },
           @{ @"timeout":@8, @"until":^BOOL{return nav.topViewController==navigationProbe&&!nav.navigationBarHidden;}, @"run":^{check(nav.topViewController==navigationProbe&&!nav.navigationBarHidden,@"pushing a detail page restores the navigation bar");[(id)root navigationController:nav didShowViewController:navigationProbe animated:YES];check(!nav.navigationBarHidden,@"a cancelled interactive return keeps the visible detail navigation bar restored");[nav popViewControllerAnimated:NO];} },
-          @{ @"timeout":@8, @"until":^BOOL{return nav.topViewController==root&&nav.navigationBarHidden;}, @"run":^{check(nav.topViewController==root&&nav.navigationBarHidden,@"a completed return to the media home hides the navigation bar");check([[root valueForKey:@"channelGrid"] isHidden], @"media page hides live channel grid");capture(self.window, @"02-media");[root selectBottomTab:(id)tabs.arrangedSubviews[3]];UIButton *resourceActions=[root valueForKey:@"resourceActionsButton"];ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPage"];UIStackView *toolbar=[resourcePage valueForKey:@"topActionsStack"];UIButton *more=toolbar.arrangedSubviews.lastObject;UILabel *title=[resourcePage valueForKey:@"resourceTitleLabel"];UITextField *search=[resourcePage valueForKey:@"resourceSearchField"];check(nav.navigationBarHidden,@"resource tab keeps the title/navigation region hidden");check(root.title.length==0,@"resource tab has no large title");check(resourcePage.view.frame.origin.y==0,@"resource page keeps a stable full-root origin while navigation visibility changes");[root.view layoutIfNeeded];[resourcePage.view layoutIfNeeded];CGFloat toolbarTop=CGRectGetMinY(toolbar.frame),rootSafeTop=root.view.window.safeAreaInsets.top;check(fabs(toolbarTop-rootSafeTop-8)<1.5,[NSString stringWithFormat:@"resource toolbar remains 8 pt below the window safe area after return (toolbar=%.1f safe=%.1f)",toolbarTop,rootSafeTop]);check(resourceActions.hidden&&toolbar.arrangedSubviews.count==4&&more.menu.children.count==2,@"resource page exposes the four-button top toolbar and services menu");check([title.text isEqual:@"资源"]&&[search.placeholder isEqual:@"搜索资源"],@"resource page shows its title and inline search field");check(resourcePage.navigationItem.searchController==nil,@"resource page uses inline search rather than a navigation search controller");} },
+          @{ @"timeout":@8, @"until":^BOOL{return nav.topViewController==root&&nav.navigationBarHidden;}, @"run":^{check(nav.topViewController==root&&nav.navigationBarHidden,@"a completed return to the media home hides the navigation bar");check([[root valueForKey:@"channelGrid"] isHidden], @"media page hides live channel grid");capture(self.window, @"02-media");[root selectBottomTab:(id)tabs.arrangedSubviews[3]];UIButton *resourceActions=[root valueForKey:@"resourceActionsButton"];ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPage"];UIStackView *toolbar=[resourcePage valueForKey:@"topActionsStack"];UIButton *more=toolbar.arrangedSubviews.lastObject;UILabel *title=[resourcePage valueForKey:@"resourceTitleLabel"];UITextField *search=[resourcePage valueForKey:@"resourceSearchField"];check(nav.navigationBarHidden,@"resource tab keeps the title/navigation region hidden");check(root.title.length==0,@"resource tab has no large title");check(resourcePage.view.frame.origin.y==0,@"resource page keeps a stable full-root origin while navigation visibility changes");[root.view layoutIfNeeded];[resourcePage.view layoutIfNeeded];CGFloat toolbarTop=CGRectGetMinY(toolbar.frame),rootSafeTop=root.view.window.safeAreaInsets.top;check(fabs(toolbarTop-rootSafeTop-4)<1.5,[NSString stringWithFormat:@"resource toolbar remains 4 pt below the window safe area after return (toolbar=%.1f safe=%.1f)",toolbarTop,rootSafeTop]);check(resourceActions.hidden&&toolbar.arrangedSubviews.count==4&&more.menu.children.count==2,@"resource page exposes the four-button top toolbar and services menu");check([title.text isEqual:@"资源"]&&[search.placeholder isEqual:@"搜索资源"],@"resource page shows its title and inline search field");check(resourcePage.navigationItem.searchController==nil,@"resource page uses inline search rather than a navigation search controller");} },
           ^{
             check([[root valueForKey:@"tabPage"]
                       isKindOfClass:NSClassFromString(@"ConfigCenterViewController")],
@@ -438,7 +456,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [resourcePage refreshHeaderAfterNavigationTransition];
             CGRect toolbarFrame=[(UIStackView *)[resourcePage valueForKey:@"topActionsStack"] frame];
             CGFloat safeTop=root.view.window.safeAreaInsets.top;
-            check(fabs(CGRectGetMinY(toolbarFrame)-safeTop-8)<1.5&&fabs(CGRectGetWidth(resourcePage.tableView.tableHeaderView.frame)-CGRectGetWidth(resourcePage.tableView.bounds))<1.5,[NSString stringWithFormat:@"resource header is reattached at the window safe area with the current table width (top=%.1f safe=%.1f width=%.1f/%.1f)",CGRectGetMinY(toolbarFrame),safeTop,CGRectGetWidth(resourcePage.tableView.tableHeaderView.frame),CGRectGetWidth(resourcePage.tableView.bounds)]);
+            check(fabs(CGRectGetMinY(toolbarFrame)-safeTop-4)<1.5&&fabs(CGRectGetWidth(resourcePage.tableView.tableHeaderView.frame)-CGRectGetWidth(resourcePage.tableView.bounds))<1.5,[NSString stringWithFormat:@"resource header is reattached 4 pt below the safe area with the current table width (top=%.1f safe=%.1f width=%.1f/%.1f)",CGRectGetMinY(toolbarFrame),safeTop,CGRectGetWidth(resourcePage.tableView.tableHeaderView.frame),CGRectGetWidth(resourcePage.tableView.bounds)]);
             UIScrollView *filterScroll=[resourcePage valueForKey:@"kindScroll"];
             CGRect filtersInHeader=[filterScroll convertRect:filterScroll.bounds toView:resourcePage.tableView.tableHeaderView];
             check(CGRectGetMinY(filtersInHeader)>=0&&CGRectGetMaxY(filtersInHeader)<=CGRectGetHeight(resourcePage.tableView.tableHeaderView.frame)+1,[NSString stringWithFormat:@"resource category filters stay inside the measured header after return (filters=%@ header=%.1f)",NSStringFromCGRect(filtersInHeader),CGRectGetHeight(resourcePage.tableView.tableHeaderView.frame)]);
@@ -466,6 +484,8 @@ static void next(NSArray *steps, NSUInteger index) {
           },
           ^{
             capture(self.window, @"07-settings");
+            SettingsViewController *settingsPage=(id)[root valueForKey:@"tabPage"];[settingsPage.view layoutIfNeeded];UITableView *settingsTable=[settingsPage valueForKey:@"table"];CGRect settingsTableInRoot=[settingsTable convertRect:settingsTable.bounds toView:root.view];
+            check(!nav.navigationBarHidden&&fabs(CGRectGetMinY(settingsTableInRoot)-root.view.safeAreaInsets.top)<1.5,@"settings begins at the native navigation safe area without a reserved blank band");
             [root selectBottomTab:(id)tabs.arrangedSubviews[0]];
             [root setValue:@NO forKey:@"gridMode"];
             [root.view setNeedsLayout];
@@ -531,6 +551,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[root valueForKey:@"firstRender"] boolValue], @"legacy native first frame received");
             check([[root valueForKey:@"activeTab"] integerValue]==0, @"native playback opens CCTV page");
             check([root.title isEqual:@"CCTV-1 综合"], @"expanded live player promotes the playing channel into the navigation title");
+            NSArray *shown=[root valueForKey:@"shownChannels"];NSUInteger selectedIndex=NSNotFound;for(NSUInteger index=0;index<shown.count;index++)if([shown[index][@"id"] isEqual:@"cctv1"]){selectedIndex=index;break;}UICollectionView *grid=[root valueForKey:@"channelGrid"];NSIndexPath *selectedPath=selectedIndex==NSNotFound?nil:[NSIndexPath indexPathForItem:selectedIndex inSection:0];selectedLiveCard=selectedPath?[grid cellForItemAtIndexPath:selectedPath]:nil;selectedLiveMark=(id)[selectedLiveCard.contentView viewWithTag:4107];check(selectedLiveCard&&[selectedLiveCard.accessibilityValue isEqual:@"正在播放"]&&selectedLiveMark&&!selectedLiveMark.hidden,[NSString stringWithFormat:@"selected channel remains marked in the compact grid while playing (index=%lu visible=%@)",(unsigned long)selectedIndex,selectedLiveMark&&!selectedLiveMark.hidden?@"yes":@"no"]);UITableView *selectionList=[root valueForKey:@"table"];UITableViewCell *selectedRow=selectedIndex==NSNotFound?nil:[root tableView:selectionList cellForRowAtIndexPath:[NSIndexPath indexPathForRow:selectedIndex inSection:0]];check([selectedRow.accessibilityValue isEqual:@"正在播放"]&&selectedRow.accessoryView&&selectedRow.accessoryType==UITableViewCellAccessoryNone,@"selected channel keeps a persistent playing checkmark in list-row mode");
             UIStackView *liveActions=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;
             check(liveActions.arrangedSubviews.count==3, @"expanded live player exposes favorite, route and playback info actions");
             retainedWrapper = [root valueForKey:@"currentPlayer"];
@@ -543,6 +564,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [root player:retainedWrapper playbackFailed:[NSError errorWithDomain:@"fixture" code:4012 userInfo:nil]];
             check([[[root valueForKey:@"playPauseBtn"] titleForState:UIControlStateNormal] isEqual:@"重试"],
                   @"terminal playback error exposes an explicit retry action");
+            check([selectedLiveCard.accessibilityValue isEqual:@"正在播放"]&&![selectedLiveMark isHidden],@"selected channel marker remains visible through a terminal playback failure and retry state");
             [root togglePlayPause];
           },
           ^{

@@ -291,6 +291,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, strong) NSMutableDictionary<NSNumber *, UIViewController *> *tabPages;
 @property (nonatomic, strong) UIButton *resourceActionsButton;
 @property (nonatomic, assign) BOOL gridMode;
+@property (nonatomic, assign) NSInteger gridColumns;
 @property (nonatomic, assign) BOOL playerExpanded;
 @property (nonatomic, copy) NSString *activeSource;
 @property (nonatomic, strong) UISegmentedControl *groupControl;
@@ -385,6 +386,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)applyServiceConfigurationFrom:(NSDictionary *)previous to:(NSDictionary *)updated completion:(void (^)(NSError * _Nullable error))completion;
 - (void)saveImportedMedia:(NSDictionary *)service;
 - (void)toggleCatalogLayout;
+- (void)toggleCatalogColumns;
 - (void)shareDiagnosticLogAtURL:(NSURL *)source;
 - (void)restartMediaService:(NSDictionary *)source completion:(void (^)(NSError *))completion;
 @end
@@ -409,6 +411,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     id savedTab=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.lastBottomTab.v1"];
     if([savedTab respondsToSelector:@selector(integerValue)]&&[savedTab integerValue]>=0&&[savedTab integerValue]<=4){self.activeTab=[savedTab integerValue];self.initialTabRestorePending=self.activeTab!=0;}
     self.gridMode = [[NSUserDefaults standardUserDefaults] objectForKey:@"channelGridMode"] ? [[NSUserDefaults standardUserDefaults] boolForKey:@"channelGridMode"] : YES;
+    id savedGridColumns=[preferences objectForKey:@"cctv.channelGridColumns.v1"];
+    NSInteger gridColumns=[savedGridColumns respondsToSelector:@selector(integerValue)]?[savedGridColumns integerValue]:4;
+    self.gridColumns=gridColumns==3?3:4;
     self.logBuffer = [NSMutableString string];
     self.diagnosticLogQueue = dispatch_queue_create("com.cctvhost.diagnostic-log", DISPATCH_QUEUE_SERIAL);
     self.pendingLogWrites = [[HostLogBuffer alloc] initWithMaximumCharacters:65536];
@@ -745,7 +750,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.table.refreshControl = rc;
     UILongPressGestureRecognizer *routePress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onLongPress:)];
     [self.table addGestureRecognizer:routePress];
-    UICollectionViewFlowLayout *flow=[UICollectionViewFlowLayout new]; flow.minimumInteritemSpacing=8; flow.minimumLineSpacing=10; flow.sectionInset=UIEdgeInsetsMake(8,12,16,12);
+    UICollectionViewFlowLayout *flow=[UICollectionViewFlowLayout new]; flow.minimumInteritemSpacing=6; flow.minimumLineSpacing=8; flow.sectionInset=UIEdgeInsetsMake(8,10,16,10);
     self.channelGrid=[[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:flow]; self.channelGrid.backgroundColor=HostBackground(); self.channelGrid.dataSource=self; self.channelGrid.delegate=self; self.channelGrid.accessibilityIdentifier=@"channel.grid";
     [self.channelGrid registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"channel.card"]; [self.view addSubview:self.channelGrid];
     UIRefreshControl *gridRefresh=[UIRefreshControl new];[gridRefresh addTarget:self action:@selector(onPullRefresh) forControlEvents:UIControlEventValueChanged];self.channelGrid.refreshControl=gridRefresh;
@@ -987,9 +992,21 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             @{@"icon":@"info.circle",@"title":@"播放信息",@"action":[UIAction actionWithHandler:^(UIAction *a){[w showPlaybackInfo];}]}
         ])];
     }else{
+        NSInteger nextColumns=self.gridColumns==4?3:4;
+        UIButton *columnsButton=[UIButton buttonWithType:UIButtonTypeSystem];
+        UIButtonConfiguration *columnsConfiguration=[UIButtonConfiguration plainButtonConfiguration];
+        columnsConfiguration.title=[NSString stringWithFormat:@"%ld列",(long)self.gridColumns];
+        columnsConfiguration.baseForegroundColor=HostAccent();
+        columnsConfiguration.contentInsets=NSDirectionalEdgeInsetsMake(4,2,4,2);
+        columnsConfiguration.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *updated=[attributes mutableCopy];updated[NSFontAttributeName]=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];return updated;};
+        columnsButton.configuration=columnsConfiguration;
+        columnsButton.accessibilityIdentifier=@"channel.grid.columns.toggle";
+        columnsButton.accessibilityLabel=[NSString stringWithFormat:@"每行%ld个，切换为%ld列",(long)self.gridColumns,(long)nextColumns];
+        HostInstallPressFeedback(columnsButton);
+        [columnsButton addAction:[UIAction actionWithHandler:^(UIAction *a){[w toggleCatalogColumns];}] forControlEvents:UIControlEventTouchUpInside];
         self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
             @{@"icon":self.gridMode?@"list.bullet":@"square.grid.2x2",@"title":self.gridMode?@"切换列表布局":@"切换网格布局",@"action":[UIAction actionWithHandler:^(UIAction *a){[w toggleCatalogLayout];}]},
-            @{@"icon":@"arrow.clockwise",@"title":@"刷新当前页面",@"action":[UIAction actionWithHandler:^(UIAction *a){[w onPullRefresh];}]},
+            @{@"customView":columnsButton,@"title":columnsButton.accessibilityLabel,@"identifier":@"channel.grid.columns.toggle"},
             @{@"icon":@"ellipsis",@"title":@"更多",@"menu":[self catalogMenu]}
         ])];
     }
@@ -1007,6 +1024,17 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.table.contentOffset=listOffset;
     self.channelGrid.contentOffset=gridOffset;
 }
+- (void)toggleCatalogColumns {
+    CGPoint gridOffset=self.channelGrid.contentOffset;
+    self.gridColumns=self.gridColumns==4?3:4;
+    [NSUserDefaults.standardUserDefaults setInteger:self.gridColumns forKey:@"cctv.channelGridColumns.v1"];
+    [self.channelGrid.collectionViewLayout invalidateLayout];
+    [self.channelGrid reloadData];
+    [self configureCatalogNavigation];
+    [self.view setNeedsLayout];
+    [self.view layoutIfNeeded];
+    self.channelGrid.contentOffset=gridOffset;
+}
 - (void)toggleCurrentFavorite {
     if(!self.channelID.length)return;
     if([self.favorites containsObject:self.channelID])[self.favorites removeObject:self.channelID];
@@ -1017,14 +1045,14 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (UIMenu *)catalogMenu {
     __weak typeof(self) w=self;
     UIAction *grid=[UIAction actionWithTitle:self.gridMode?@"切换列表布局":@"切换网格布局" image:[UIImage systemImageNamed:self.gridMode?@"list.bullet":@"square.grid.2x2"] identifier:nil handler:^(UIAction *a){[w toggleCatalogLayout];}];
-    UIAction *refresh=[UIAction actionWithTitle:@"刷新播放列表" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){[w onPullRefresh];}];
+    UIAction *refresh=[UIAction actionWithTitle:self.subscriptionCatalog?@"刷新播放列表":@"刷新当前列表" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){[w onPullRefresh];}];
     UIAction *add=[UIAction actionWithTitle:@"添加订阅" image:[UIImage systemImageNamed:@"plus"] identifier:nil handler:^(UIAction *a){[w addSubscription];}];
     UIAction *hide=[UIAction actionWithTitle:self.playerExpanded?@"收起播放器":@"展开播放器" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){w.playerExpanded=!w.playerExpanded;[w configureCatalogNavigation];[w.view setNeedsLayout];}];
     UIAction *history=[UIAction actionWithTitle:@"最近观看" image:[UIImage systemImageNamed:@"clock"] identifier:nil handler:^(UIAction *a){[w showHistory];}];
     UIAction *playing=[UIAction actionWithTitle:@"返回正在播放" image:[UIImage systemImageNamed:@"play.circle"] identifier:nil handler:^(UIAction *a){if(!w.channelID.length)return;[w selectBottomTab:(id)w.bottomBar.arrangedSubviews[w.currentRemoteURL.length?1:0]];w.playerExpanded=YES;[w.view setNeedsLayout];}];
     UIAction *manage=[UIAction actionWithTitle:@"整理收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[w showFavoriteManager];}];
     UIAction *favorites=[UIAction actionWithTitle:self.favoritesOnly?@"显示全部频道":@"查看收藏频道" image:[UIImage systemImageNamed:@"heart.fill"] identifier:nil handler:^(UIAction *a){w.favoritesOnly=!w.favoritesOnly;[w configureCatalogNavigation];[w applyFilter];}];
-    return [UIMenu menuWithTitle:@"" children:self.subscriptionCatalog?@[grid,refresh,add,hide,playing,history,favorites,manage]:@[grid,hide,playing,history,favorites,manage]];
+    return [UIMenu menuWithTitle:@"" children:self.subscriptionCatalog?@[grid,refresh,add,hide,playing,history,favorites,manage]:@[grid,refresh,hide,playing,history,favorites,manage]];
 }
 - (void)showGroupMenu {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:@"按频道类型筛选当前列表" preferredStyle:UIAlertControllerStyleActionSheet];NSInteger selected=self.groupControl.selectedSegmentIndex;
@@ -1211,24 +1239,63 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self.subscriptionURLs removeObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);[self removeSubscriptionSource:source];[NSUserDefaults.standardUserDefaults setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
 }
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {return self.shownChannels.count;}
-- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {CGFloat width=collectionView.bounds.size.width;BOOL accessibilityText=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);NSInteger columns=width>=900?5:(width>=560?4:(accessibilityText?2:3));CGFloat itemWidth=floor((width-24-(columns-1)*8)/columns);UIFont *title=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection],*subtitle=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];CGFloat height=90+4+ceil(title.lineHeight)+1+ceil(subtitle.lineHeight)+4;return CGSizeMake(itemWidth,height);}
+- (CGFloat)catalogTextHeight:(NSString *)text font:(UIFont *)font width:(CGFloat)width maximumLines:(NSUInteger)maximumLines {
+    if(!text.length||width<=0)return ceil(font.lineHeight);
+    CGFloat maximumHeight=ceil(font.lineHeight*MAX(1,maximumLines));
+    CGRect measured=[text boundingRectWithSize:CGSizeMake(width,maximumHeight) options:NSStringDrawingUsesLineFragmentOrigin|NSStringDrawingUsesFontLeading attributes:@{NSFontAttributeName:font} context:nil];
+    return MIN(maximumHeight,MAX(ceil(font.lineHeight),ceil(measured.size.height)));
+}
+- (NSString *)catalogSubtitleForChannel:(NSDictionary *)channel {
+    NSString *cached=self.epgCache[channel[@"id"]][@"now"];
+    return [cached isKindOfClass:NSString.class]&&cached.length?cached:([channel[@"group"] isKindOfClass:NSString.class]?channel[@"group"]:@"");
+}
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {
+    UICollectionViewFlowLayout *flow=[layout isKindOfClass:UICollectionViewFlowLayout.class]?(id)layout:nil;
+    NSInteger columns=self.gridColumns==3?3:4;
+    UIEdgeInsets inset=flow?flow.sectionInset:UIEdgeInsetsZero;
+    CGFloat spacing=flow?flow.minimumInteritemSpacing:6;
+    CGFloat itemWidth=floor(MAX(1,(collectionView.bounds.size.width-inset.left-inset.right-(columns-1)*spacing)/columns));
+    UIFont *titleFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];
+    UIFont *subtitleFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];
+    NSDictionary *channel=ip.item>=0&&ip.item<self.shownChannels.count?self.shownChannels[ip.item]:@{};
+    NSString *name=[channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:([channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"");
+    if([self.favorites containsObject:channel[@"id"]])name=[@"♥ " stringByAppendingString:name];
+    CGFloat labelWidth=MAX(1,itemWidth-4);
+    CGFloat titleHeight=[self catalogTextHeight:name font:titleFont width:labelWidth maximumLines:2];
+    CGFloat subtitleHeight=[self catalogTextHeight:[self catalogSubtitleForChannel:channel] font:subtitleFont width:labelWidth maximumLines:2];
+    CGFloat posterHeight=MIN(78,MAX(44,floor(itemWidth*.68)));
+    CGFloat height=posterHeight+5+titleHeight+1+subtitleHeight+4;
+    return CGSizeMake(itemWidth,height);
+}
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)ip {
     UICollectionViewCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"channel.card" forIndexPath:ip];NSDictionary *ch=self.shownChannels[ip.item];
     HostStyleGlassCard(cell.contentView,11);
-    const NSInteger posterTag=4101,logoTag=4102,brandTag=4103,numberTag=4104,titleTag=4105,subtitleTag=4106;
-    UIView *poster=[cell.contentView viewWithTag:posterTag];UIImageView *logo=(UIImageView *)[cell.contentView viewWithTag:logoTag];UILabel *brand=(UILabel *)[cell.contentView viewWithTag:brandTag];UILabel *number=(UILabel *)[cell.contentView viewWithTag:numberTag];UILabel *title=(UILabel *)[cell.contentView viewWithTag:titleTag];UILabel *subtitle=(UILabel *)[cell.contentView viewWithTag:subtitleTag];
+    const NSInteger posterTag=4101,logoTag=4102,brandTag=4103,numberTag=4104,titleTag=4105,subtitleTag=4106,selectedTag=4107;
+    UIView *poster=[cell.contentView viewWithTag:posterTag];UIImageView *logo=(UIImageView *)[cell.contentView viewWithTag:logoTag];UILabel *brand=(UILabel *)[cell.contentView viewWithTag:brandTag];UILabel *number=(UILabel *)[cell.contentView viewWithTag:numberTag];UILabel *title=(UILabel *)[cell.contentView viewWithTag:titleTag];UILabel *subtitle=(UILabel *)[cell.contentView viewWithTag:subtitleTag];UIImageView *selectedMark=(UIImageView *)[cell.contentView viewWithTag:selectedTag];
     if(!poster){poster=[[UIView alloc] initWithFrame:CGRectZero];poster.tag=posterTag;poster.autoresizingMask=UIViewAutoresizingFlexibleWidth;poster.backgroundColor=HostCard();poster.layer.cornerRadius=8;[cell.contentView addSubview:poster];
         logo=[UIImageView new];logo.tag=logoTag;logo.autoresizingMask=UIViewAutoresizingFlexibleWidth;logo.contentMode=UIViewContentModeScaleAspectFit;[poster addSubview:logo];
-        brand=[UILabel new];brand.tag=brandTag;brand.textAlignment=NSTextAlignmentCenter;brand.font=[UIFont italicSystemFontOfSize:19];brand.adjustsFontForContentSizeCategory=YES;brand.textColor=HostText();brand.autoresizingMask=UIViewAutoresizingFlexibleWidth;[poster addSubview:brand];
+        brand=[UILabel new];brand.tag=brandTag;brand.textAlignment=NSTextAlignmentCenter;brand.font=[UIFont italicSystemFontOfSize:14];brand.adjustsFontForContentSizeCategory=YES;brand.textColor=HostText();brand.autoresizingMask=UIViewAutoresizingFlexibleWidth;brand.numberOfLines=2;[poster addSubview:brand];
         number=[UILabel new];number.tag=numberTag;number.font=[UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightMedium];number.textColor=UIColor.secondaryLabelColor;[poster addSubview:number];
-        title=[UILabel new];title.tag=titleTag;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;title.adjustsFontForContentSizeCategory=YES;title.numberOfLines=1;title.lineBreakMode=NSLineBreakByTruncatingTail;[cell.contentView addSubview:title];
-        subtitle=[UILabel new];subtitle.tag=subtitleTag;subtitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;subtitle.adjustsFontForContentSizeCategory=YES;subtitle.numberOfLines=1;subtitle.lineBreakMode=NSLineBreakByTruncatingTail;subtitle.textColor=UIColor.secondaryLabelColor;[cell.contentView addSubview:subtitle];}
-    title.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];subtitle.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];
-    CGFloat titleHeight=ceil(title.font.lineHeight),subtitleHeight=ceil(subtitle.font.lineHeight),titleTop=94,subtitleTop=titleTop+titleHeight+1;
-    poster.frame=CGRectMake(0,0,cell.bounds.size.width,90);logo.frame=CGRectMake(16,20,cell.bounds.size.width-32,48);brand.frame=logo.frame;number.frame=CGRectMake(7,72,70,12);title.frame=CGRectMake(2,titleTop,cell.bounds.size.width-4,titleHeight);subtitle.frame=CGRectMake(2,subtitleTop,cell.bounds.size.width-4,subtitleHeight);
-    NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";logo.hidden=!logoURL.length;brand.hidden=logoURL.length>0;brand.text=ch[@"name"]?:@"";logo.image=nil;logo.accessibilityIdentifier=logoURL;if(logoURL.length)[self loadLogo:logoURL into:logo];
-    number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=[ch[@"id"] isEqualToString:self.channelID]?HostAccent():HostText();title.text=[NSString stringWithFormat:@"%@%@",[self.favorites containsObject:ch[@"id"]]?@"♥ ":@"",ch[@"name"]?:ch[@"id"]];
-    NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[ch[@"id"]])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:ch[@"id"]];subtitle.text=self.epgCache[ch[@"id"]][@"now"]?:ch[@"group"];return cell;
+        title=[UILabel new];title.tag=titleTag;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;title.adjustsFontForContentSizeCategory=YES;title.numberOfLines=2;title.lineBreakMode=NSLineBreakByTruncatingTail;[cell.contentView addSubview:title];
+        subtitle=[UILabel new];subtitle.tag=subtitleTag;subtitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;subtitle.adjustsFontForContentSizeCategory=YES;subtitle.numberOfLines=2;subtitle.lineBreakMode=NSLineBreakByTruncatingTail;subtitle.textColor=UIColor.secondaryLabelColor;[cell.contentView addSubview:subtitle];
+        selectedMark=[UIImageView new];selectedMark.tag=selectedTag;selectedMark.contentMode=UIViewContentModeScaleAspectFit;selectedMark.image=[UIImage systemImageNamed:@"checkmark.circle.fill"];selectedMark.tintColor=HostAccent();selectedMark.backgroundColor=[UIColor colorWithWhite:0 alpha:.42];selectedMark.layer.cornerRadius=9;selectedMark.clipsToBounds=YES;[poster addSubview:selectedMark];}
+    title.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];subtitle.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];
+    CGFloat width=cell.contentView.bounds.size.width;
+    CGFloat posterHeight=MIN(78,MAX(44,floor(width*.68)));
+    NSString *channelID=[ch[@"id"] isKindOfClass:NSString.class]?ch[@"id"]:@"";
+    NSString *name=[ch[@"name"] isKindOfClass:NSString.class]?ch[@"name"]:([ch[@"id"] isKindOfClass:NSString.class]?ch[@"id"]:@"");
+    BOOL selected=[channelID isEqualToString:self.channelID];
+    NSString *titleText=[NSString stringWithFormat:@"%@%@",[self.favorites containsObject:channelID]?@"♥ ":@"",name];
+    title.text=titleText;subtitle.text=[self catalogSubtitleForChannel:ch];
+    CGFloat labelWidth=MAX(1,width-4),titleHeight=[self catalogTextHeight:titleText font:title.font width:labelWidth maximumLines:2],subtitleHeight=[self catalogTextHeight:subtitle.text font:subtitle.font width:labelWidth maximumLines:2];
+    CGFloat titleTop=posterHeight+5,subtitleTop=titleTop+titleHeight+1;
+    poster.frame=CGRectMake(0,0,width,posterHeight);poster.layer.borderWidth=selected?1.8:.5;HostSetLayerBorderColor(poster,selected?HostAccent():HostBorder());
+    CGFloat logoInset=MAX(6,floor(width*.10)),logoHeight=MAX(28,floor(posterHeight*.62));logo.frame=CGRectMake(logoInset,floor((posterHeight-logoHeight)/2),MAX(1,width-logoInset*2),logoHeight);brand.frame=CGRectMake(5,MAX(4,floor((posterHeight-34)/2)),MAX(1,width-10),34);number.frame=CGRectMake(6,posterHeight-15,62,12);selectedMark.frame=CGRectMake(MAX(2,width-22),5,16,16);selectedMark.hidden=!selected;
+    title.frame=CGRectMake(2,titleTop,labelWidth,titleHeight);subtitle.frame=CGRectMake(2,subtitleTop,labelWidth,subtitleHeight);
+    NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";logo.hidden=!logoURL.length;brand.hidden=logoURL.length>0;brand.text=name;logo.image=nil;logo.accessibilityIdentifier=logoURL;if(logoURL.length)[self loadLogo:logoURL into:logo];
+    number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=selected?HostAccent():HostText();cell.contentView.backgroundColor=selected?HostSelectedSurface():UIColor.clearColor;
+    cell.accessibilityIdentifier=[@"channel-card-" stringByAppendingString:channelID];cell.accessibilityLabel=name;cell.accessibilityValue=selected?@"正在播放":@"频道";cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
+    NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[ch[@"id"]])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:ch[@"id"]];subtitle.text=[self catalogSubtitleForChannel:ch];return cell;
 }
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip { HostAnimateSelection([collectionView cellForItemAtIndexPath:ip]);[self selectChannel:self.shownChannels[ip.item]]; }
 - (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
@@ -1316,9 +1383,13 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if ([self.favorites containsObject:cid]) title = [@"★ " stringByAppendingString:title];
     cell.textLabel.text = playing ? [NSString stringWithFormat:@"● %@", title] : title;
     cell.textLabel.textColor = playing ? HostAccent() : HostText();
+    cell.backgroundColor=playing?HostSelectedSurface():HostCard();
+    if(playing){UIImageView *check=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle.fill"]];check.tintColor=HostAccent();check.accessibilityLabel=@"正在播放";cell.accessoryView=check;cell.accessoryType=UITableViewCellAccessoryNone;}
+    else {cell.accessoryView=nil;cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;}
     cell.accessibilityIdentifier=[@"channel-row-" stringByAppendingString:cid];
+    cell.accessibilityLabel=[ch[@"name"] isKindOfClass:NSString.class]?ch[@"name"]:cid;
+    cell.accessibilityValue=playing?@"正在播放":@"频道";
     cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
-    cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;
     NSString *logo = [ch[@"logo"] isKindOfClass:NSString.class] ? ch[@"logo"] : @"";
     cell.imageView.image = nil;
     if (logo.length) [self loadLogo:logo into:cell.imageView];
@@ -1505,6 +1576,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self.view setNeedsLayout];
     self.channelID = cid;
     self.channelName = ch[@"name"] ?: cid;
+    [self.channelGrid reloadData];[self.table reloadData];
     self.routeName = route ? [NSString stringWithFormat:@"%@ · 自选地址", [route[@"provider"] uppercaseString]] : @"自动";
     if(self.playerTabs.selectedSegmentIndex!=3)self.playerTabs.selectedSegmentIndex=1;
     [self updatePlayerChannelLogoForChannel:ch];
@@ -2834,7 +2906,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSMutableDictionary *traceFields=[@{@"route_type":self.nativePlainRouteActive?@"user_selected":@"subscription", @"playback_generation":@(generation), @"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"", @"correlation_id":self.currentPlaybackTraceID?:@""} mutableCopy];[traceFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(self.currentRemoteHeaders)];[traceFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:u])];[RuntimeDiagnostics.shared recordEvent:@"remote_playback_start_requested" category:@"playback" fields:traceFields];
     NSTimeInterval requestedAt=self.selectionRequestedAt?:CACurrentMediaTime();self.selectionRequestedAt=0;
     [self stopPlayback];self.remoteFailureRecoveryPending=NO;self.playerExpanded=YES;[self.view setNeedsLayout];
-    self.currentRemoteURL=u;self.channelID=ch[@"id"]?:u;self.channelName=ch[@"name"]?:u;self.routeName=self.nativePlainRouteActive?[NSString stringWithFormat:@"%@ · AVPlayer 明文线路",self.requestedNativeRoute[@"provider"]?:@"自选"]:@"订阅";
+    self.currentRemoteURL=u;self.channelID=ch[@"id"]?:u;self.channelName=ch[@"name"]?:u;self.routeName=self.nativePlainRouteActive?[NSString stringWithFormat:@"%@ · AVPlayer 明文线路",self.requestedNativeRoute[@"provider"]?:@"自选"]:@"订阅";[self.channelGrid reloadData];[self.table reloadData];
     if(self.playerTabs.selectedSegmentIndex!=3)self.playerTabs.selectedSegmentIndex=1;[self updatePlayerChannelLogoForChannel:ch];[self selectPlayerPanel];
     self.firstRender=NO;self.retryCount=0;self.playStartedAt=requestedAt;self.firstFrameSeconds=0;
     self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt];
