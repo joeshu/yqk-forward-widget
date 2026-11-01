@@ -145,6 +145,7 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('- (void)updateResourceHeaderLayout', RESOURCE_SOURCE)
         self.assertIn('systemLayoutSizeFittingSize:CGSizeMake(width,UIViewNoIntrinsicMetric)', RESOURCE_SOURCE)
         self.assertIn('table.tableHeaderView=header', RESOURCE_SOURCE)
+        self.assertIn('- (void)prepareForNavigationTransition;', RESOURCE_HEADER)
         self.assertIn('- (void)refreshHeaderAfterNavigationTransition;', RESOURCE_HEADER)
         self.assertIn('self.resourceHeaderTopConstraint.constant=MAX(0,self.statusBarSafeInset)+8', RESOURCE_SOURCE)
         self.assertIn('- (void)setTopSafeAreaInset:(CGFloat)inset', RESOURCE_SOURCE)

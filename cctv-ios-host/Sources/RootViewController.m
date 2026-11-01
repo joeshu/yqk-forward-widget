@@ -459,6 +459,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
 - (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)viewController animated:(BOOL)animated {
     if(navigationController!=self.navigationController)return;
+    if(viewController!=self&&navigationController.topViewController==self&&self.activeTab==3){
+        ConfigCenterViewController *resourcePage=[self.tabPages[@3] isKindOfClass:ConfigCenterViewController.class]?self.tabPages[@3]:nil;
+        [resourcePage prepareForNavigationTransition];
+    }
     // A push from a compact home/resource tab must reveal the navigation bar at
     // the beginning of the transition so the destination is never presented
     // with a hidden back affordance. The completed-transition delegate below

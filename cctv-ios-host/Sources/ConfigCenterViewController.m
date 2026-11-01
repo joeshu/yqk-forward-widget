@@ -19,6 +19,9 @@
 @property(nonatomic, strong) NSLayoutConstraint *resourceHeaderTopConstraint;
 @property(nonatomic) CGFloat statusBarSafeInset;
 @property(nonatomic) BOOL updatingResourceHeaderLayout;
+@property(nonatomic) CGPoint navigationReturnContentOffset;
+@property(nonatomic) CGFloat navigationReturnHeaderHeight;
+@property(nonatomic) BOOL hasNavigationReturnPosition;
 @property(nonatomic, copy) NSString *selectedKind;
 @property(nonatomic, strong) UILabel *emptyLabel;
 - (void)updateResourceHeaderLayout;
@@ -99,11 +102,27 @@
 - (void)updateResourceHeaderLayout {
     [self updateResourceHeaderLayoutReattaching:NO];
 }
+- (void)prepareForNavigationTransition {
+    if(!self.isViewLoaded)return;
+    self.navigationReturnContentOffset=self.tableView.contentOffset;
+    self.navigationReturnHeaderHeight=CGRectGetHeight(self.tableView.tableHeaderView.frame);
+    self.hasNavigationReturnPosition=YES;
+}
 - (void)refreshHeaderAfterNavigationTransition {
     if(!self.isViewLoaded)return;
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
     [self updateResourceHeaderLayoutReattaching:YES];
+    if(self.hasNavigationReturnPosition){
+        UITableView *table=self.tableView;
+        CGFloat minimum=-table.adjustedContentInset.top;
+        CGFloat maximum=MAX(minimum,table.contentSize.height-table.bounds.size.height+table.adjustedContentInset.bottom);
+        BOOL wasAtTop=self.navigationReturnContentOffset.y<=minimum+1;
+        CGFloat y=wasAtTop?minimum:self.navigationReturnContentOffset.y+(CGRectGetHeight(table.tableHeaderView.frame)-self.navigationReturnHeaderHeight);
+        CGPoint restored=CGPointMake(self.navigationReturnContentOffset.x,MIN(MAX(y,minimum),maximum));
+        if(fabs(table.contentOffset.y-restored.y)>0.5||fabs(table.contentOffset.x-restored.x)>0.5)[table setContentOffset:restored animated:NO];
+        self.hasNavigationReturnPosition=NO;
+    }
 }
 - (void)updateResourceHeaderLayoutReattaching:(BOOL)reattach {
     UIView *header=self.resourceHeader;
