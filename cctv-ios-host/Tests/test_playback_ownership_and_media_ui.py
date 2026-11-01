@@ -149,6 +149,20 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn("playback_gesture_rate_started", PLAYBACK_SOURCE)
         self.assertIn("self.player.rate=3.0f", PLAYBACK_SOURCE)
 
+    def test_player_adapts_portrait_video_and_adds_reference_style_swipe_controls(self):
+        self.assertIn("videoAspectRatio>0.0&&self.videoAspectRatio<0.95", PLAYBACK_SOURCE)
+        self.assertIn("portraitTallViewportHeightConstraint", PLAYBACK_SOURCE)
+        self.assertIn("landscapeTallViewportHeightConstraint", PLAYBACK_SOURCE)
+        self.assertIn("embeddedTallVideoAspectConstraint", PLAYBACK_SOURCE)
+        self.assertIn("owner.videoAspectRatio=displayAspect", PLAYBACK_SOURCE)
+        self.assertIn("self.playbackPanGesture=[[UIPanGestureRecognizer alloc]", PLAYBACK_SOURCE)
+        self.assertIn("if(self.embeddedMode)return fabs(velocity.x)>fabs(velocity.y)*1.25", PLAYBACK_SOURCE)
+        self.assertIn("MediaPlaybackPanModeBrightness", PLAYBACK_SOURCE)
+        self.assertIn("UIScreen.mainScreen.brightness=value", PLAYBACK_SOURCE)
+        self.assertIn("MPVolumeView", PLAYBACK_SOURCE)
+        self.assertIn("playback_gesture_swipe_seek", PLAYBACK_SOURCE)
+        self.assertIn("touch.view", PLAYBACK_SOURCE)
+
     def test_scripts_and_services_is_a_primary_resource_page_button(self):
         self.assertIn('accessibilityIdentifier=@"resource-floating-actions"', ROOT_SOURCE)
         self.assertIn('self.resourceActionsButton.showsMenuAsPrimaryAction=NO', ROOT_SOURCE)

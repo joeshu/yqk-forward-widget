@@ -8,12 +8,20 @@
 #import "RuntimeDiagnostics.h"
 #import "MediaPlaybackStateStore.h"
 #import <AVKit/AVKit.h>
+#import <MediaPlayer/MediaPlayer.h>
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
 
 static void *CCTVPlayerItemStatusContext = &CCTVPlayerItemStatusContext;
 static void *CCTVPlayerTimeControlContext = &CCTVPlayerTimeControlContext;
 static void *CCTVPlayerLayerReadyContext = &CCTVPlayerLayerReadyContext;
+typedef NS_ENUM(NSInteger, MediaPlaybackPanMode) {
+    MediaPlaybackPanModeNone,
+    MediaPlaybackPanModeSeek,
+    MediaPlaybackPanModeBrightness,
+    MediaPlaybackPanModeVolume,
+    MediaPlaybackPanModeUnsupported
+};
 static NSString *MediaPlaybackFailureKind(NSError *error, AVPlayerItemErrorLogEvent *networkError) {
     if (networkError.errorStatusCode >= 400) return @"upstream_http_error";
     if ([error.domain isEqualToString:NSURLErrorDomain]) {
@@ -99,14 +107,28 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
     return parts.URL;
 }
 
-@interface MediaPlaybackViewController ()
+@interface MediaPlaybackViewController () <UIGestureRecognizerDelegate>
 @property(nonatomic,strong) AVPlayer *player;
 @property(nonatomic,strong) AVPlayerViewController *playerController;
 @property(nonatomic,strong) UIView *videoView;
+@property(nonatomic,strong) UIView *gestureSurface;
 @property(nonatomic,strong) UILabel *gestureFeedbackLabel;
 @property(nonatomic) NSUInteger gestureFeedbackGeneration;
 @property(nonatomic) BOOL gestureRateActive;
 @property(nonatomic) float gesturePreviousRate;
+@property(nonatomic,strong) UIPanGestureRecognizer *playbackPanGesture;
+@property(nonatomic,strong) UITapGestureRecognizer *playbackDoubleTapGesture;
+@property(nonatomic,strong) UILongPressGestureRecognizer *playbackLongPressGesture;
+@property(nonatomic,strong) MPVolumeView *volumeView;
+@property(nonatomic,weak) UISlider *volumeSlider;
+@property(nonatomic) CGPoint panStartPoint;
+@property(nonatomic) NSTimeInterval panStartTime;
+@property(nonatomic) NSTimeInterval panTargetTime;
+@property(nonatomic) CGFloat panStartValue;
+@property(nonatomic) MediaPlaybackPanMode panMode;
+@property(nonatomic) CGFloat videoAspectRatio;
+@property(nonatomic) BOOL tallVideoViewportLayout;
+@property(nonatomic) CGFloat embeddedVideoAspectRatio;
 @property(nonatomic,strong) UIView *controlPanel;
 @property(nonatomic,strong) UIScrollView *lineScroll;
 @property(nonatomic,strong) UIStackView *lineButtons;
@@ -135,6 +157,10 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
 @property(nonatomic,strong) NSArray<NSLayoutConstraint *> *portraitConstraints;
 @property(nonatomic,strong) NSArray<NSLayoutConstraint *> *landscapeConstraints;
 @property(nonatomic,strong) NSArray<NSLayoutConstraint *> *embeddedConstraints;
+@property(nonatomic,strong) NSLayoutConstraint *videoAspectConstraint;
+@property(nonatomic,strong) NSLayoutConstraint *portraitTallViewportHeightConstraint;
+@property(nonatomic,strong) NSLayoutConstraint *landscapeTallViewportHeightConstraint;
+@property(nonatomic,strong) NSLayoutConstraint *embeddedTallVideoAspectConstraint;
 @property(nonatomic,copy) NSDictionary *pendingEpisodeResult;
 @property(nonatomic,strong) AVPlayerLayer *videoLayer;
 @property(nonatomic) BOOL observingVideoLayer;
@@ -187,6 +213,11 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
 - (void)recordPlaybackFailureForItem:(AVPlayerItem *)item error:(NSError *)error stage:(NSString *)stage;
 - (void)recordPlaybackAttemptOutcome:(NSString *)outcome failureKind:(NSString *)failureKind httpStatus:(NSInteger)httpStatus terminal:(BOOL)terminal;
 - (void)configurePlaybackOptions;
+- (void)updatePlaybackLayoutForSize:(CGSize)size;
+- (void)handlePlaybackPan:(UIPanGestureRecognizer *)recognizer;
+- (void)prepareVolumeSlider;
+- (UISlider *)volumeSliderInView:(UIView *)view;
+- (NSString *)formatMediaTime:(NSTimeInterval)time;
 - (void)persistPlaybackProgress;
 - (void)updateSkipButtonForCurrentPosition;
 - (void)offerResumeForItem:(AVPlayerItem *)item;
@@ -212,8 +243,9 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
     self.playerController=[AVPlayerViewController new];self.playerController.allowsPictureInPicturePlayback=YES;[self addChildViewController:self.playerController];self.playerController.view.translatesAutoresizingMaskIntoConstraints=NO;[self.videoView addSubview:self.playerController.view];[self.playerController didMoveToParentViewController:self];
     [NSLayoutConstraint activateConstraints:@[[self.playerController.view.leadingAnchor constraintEqualToAnchor:self.videoView.leadingAnchor],[self.playerController.view.trailingAnchor constraintEqualToAnchor:self.videoView.trailingAnchor],[self.playerController.view.topAnchor constraintEqualToAnchor:self.videoView.topAnchor],[self.playerController.view.bottomAnchor constraintEqualToAnchor:self.videoView.bottomAnchor]]];
     self.gestureFeedbackLabel=[UILabel new];self.gestureFeedbackLabel.translatesAutoresizingMaskIntoConstraints=NO;self.gestureFeedbackLabel.hidden=YES;self.gestureFeedbackLabel.textAlignment=NSTextAlignmentCenter;self.gestureFeedbackLabel.textColor=UIColor.whiteColor;self.gestureFeedbackLabel.font=[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];self.gestureFeedbackLabel.backgroundColor=[UIColor colorWithWhite:0 alpha:0.72];self.gestureFeedbackLabel.layer.cornerRadius=14;self.gestureFeedbackLabel.clipsToBounds=YES;self.gestureFeedbackLabel.isAccessibilityElement=NO;UIView *gestureSurface=self.playerController.contentOverlayView?:self.videoView;[gestureSurface addSubview:self.gestureFeedbackLabel];[NSLayoutConstraint activateConstraints:@[[self.gestureFeedbackLabel.centerXAnchor constraintEqualToAnchor:gestureSurface.centerXAnchor],[self.gestureFeedbackLabel.topAnchor constraintEqualToAnchor:gestureSurface.topAnchor constant:16],[self.gestureFeedbackLabel.heightAnchor constraintEqualToConstant:34],[self.gestureFeedbackLabel.widthAnchor constraintGreaterThanOrEqualToConstant:112]]];
-    UITapGestureRecognizer *doubleTap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlaybackDoubleTap:)];doubleTap.numberOfTapsRequired=2;doubleTap.cancelsTouchesInView=NO;doubleTap.delaysTouchesBegan=NO;[gestureSurface addGestureRecognizer:doubleTap];
-    UILongPressGestureRecognizer *press=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlaybackLongPress:)];press.minimumPressDuration=0.48;press.cancelsTouchesInView=NO;press.allowableMovement=18;[gestureSurface addGestureRecognizer:press];
+    self.gestureSurface=gestureSurface;self.playbackDoubleTapGesture=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlaybackDoubleTap:)];self.playbackDoubleTapGesture.numberOfTapsRequired=2;self.playbackDoubleTapGesture.cancelsTouchesInView=NO;self.playbackDoubleTapGesture.delaysTouchesBegan=NO;[gestureSurface addGestureRecognizer:self.playbackDoubleTapGesture];
+    self.playbackLongPressGesture=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlaybackLongPress:)];self.playbackLongPressGesture.minimumPressDuration=0.48;self.playbackLongPressGesture.cancelsTouchesInView=NO;self.playbackLongPressGesture.allowableMovement=18;[gestureSurface addGestureRecognizer:self.playbackLongPressGesture];
+    self.playbackPanGesture=[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlaybackPan:)];self.playbackPanGesture.delegate=self;self.playbackPanGesture.cancelsTouchesInView=NO;self.playbackPanGesture.maximumNumberOfTouches=1;[gestureSurface addGestureRecognizer:self.playbackPanGesture];
 
     self.controlPanel=[UIView new];self.controlPanel.translatesAutoresizingMaskIntoConstraints=NO;HostStyleGlassCard(self.controlPanel,18);[self.view addSubview:self.controlPanel];
     self.lineScroll=[UIScrollView new];self.lineScroll.translatesAutoresizingMaskIntoConstraints=NO;self.lineScroll.showsHorizontalScrollIndicator=NO;[self.controlPanel addSubview:self.lineScroll];
@@ -234,8 +266,10 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
     self.inlineOptionsButton=[UIButton buttonWithType:UIButtonTypeSystem];self.inlineOptionsButton.translatesAutoresizingMaskIntoConstraints=NO;HostStylePillButton(self.inlineOptionsButton,NO);[self.inlineOptionsButton setTitle:@"更多" forState:UIControlStateNormal];self.inlineOptionsButton.accessibilityLabel=@"播放设置";self.inlineOptionsButton.menu=self.playbackOptionsItem.menu;self.inlineOptionsButton.showsMenuAsPrimaryAction=YES;
     [self.playbackActionRow addArrangedSubview:self.skipButton];if(self.embeddedMode){[self.playbackActionRow addArrangedSubview:self.inlineRetryButton];[self.playbackActionRow addArrangedSubview:self.inlineWebButton];[self.playbackActionRow addArrangedSubview:self.inlineOptionsButton];}else [self.playbackActionRow addArrangedSubview:self.episodeButton];
 
-    NSLayoutConstraint *videoAspect=[self.videoView.heightAnchor constraintEqualToAnchor:self.videoView.widthAnchor multiplier:0.5625];
-    videoAspect.priority=UILayoutPriorityRequired;
+    self.videoAspectRatio=16.0/9.0;self.videoAspectConstraint=[self.videoView.heightAnchor constraintEqualToAnchor:self.videoView.widthAnchor multiplier:0.5625];
+    self.videoAspectConstraint.priority=UILayoutPriorityRequired;NSLayoutConstraint *videoAspect=self.videoAspectConstraint;
+    self.portraitTallViewportHeightConstraint=[self.videoView.heightAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.heightAnchor multiplier:0.54];self.portraitTallViewportHeightConstraint.priority=UILayoutPriorityDefaultHigh;
+    self.landscapeTallViewportHeightConstraint=[self.videoView.heightAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.heightAnchor multiplier:0.86];self.landscapeTallViewportHeightConstraint.priority=UILayoutPriorityDefaultHigh;
     self.portraitConstraints=@[
         [self.lineScroll.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:10],
         [self.lineScroll.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:12],
@@ -368,6 +402,70 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
     if(recognizer.state==UIGestureRecognizerStateBegan){if(!self.player.currentItem||self.player.timeControlStatus!=AVPlayerTimeControlStatusPlaying||self.gestureRateActive)return;self.gesturePreviousRate=self.player.rate>0?self.player.rate:1.0f;self.gestureRateActive=YES;self.player.rate=3.0f;[self showGestureFeedback:@"按住 3× 倍速播放"];[RuntimeDiagnostics.shared recordEvent:@"playback_gesture_rate_started" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"playback_attempt_id":self.playbackAttemptID?:@"",@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex)}];return;}
     if((recognizer.state==UIGestureRecognizerStateEnded||recognizer.state==UIGestureRecognizerStateCancelled||recognizer.state==UIGestureRecognizerStateFailed)&&self.gestureRateActive){float previous=self.gesturePreviousRate;self.gestureRateActive=NO;if(self.player.currentItem&&self.player.timeControlStatus==AVPlayerTimeControlStatusPlaying)self.player.rate=previous;[self showGestureFeedback:@"已恢复原速"];[RuntimeDiagnostics.shared recordEvent:@"playback_gesture_rate_ended" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"playback_attempt_id":self.playbackAttemptID?:@"",@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex)}];}
 }
+- (UISlider *)volumeSliderInView:(UIView *)view {
+    if([view isKindOfClass:UISlider.class])return (UISlider *)view;
+    for(UIView *child in view.subviews){UISlider *slider=[self volumeSliderInView:child];if(slider)return slider;}
+    return nil;
+}
+- (void)prepareVolumeSlider {
+    if(self.volumeSlider)return;
+    if(!self.volumeView){self.volumeView=[[MPVolumeView alloc] initWithFrame:CGRectMake(-160,-80,120,40)];self.volumeView.showsRouteButton=NO;self.volumeView.showsVolumeSlider=YES;self.volumeView.alpha=0.01;self.volumeView.accessibilityElementsHidden=YES;[self.view addSubview:self.volumeView];}
+    [self.volumeView sizeToFit];[self.volumeView layoutIfNeeded];self.volumeSlider=[self volumeSliderInView:self.volumeView];
+}
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch {
+    if(gestureRecognizer!=self.playbackPanGesture)return YES;
+    UIView *candidate=touch.view;BOOL belongsToVideo=NO;
+    while(candidate){if(candidate==self.gestureSurface){belongsToVideo=YES;break;}if([candidate isKindOfClass:UIControl.class])return NO;candidate=candidate.superview;}
+    if(!belongsToVideo)return NO;
+    CGPoint point=[touch locationInView:self.gestureSurface];return point.y<CGRectGetHeight(self.gestureSurface.bounds)*0.84;
+}
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
+    if(gestureRecognizer!=self.playbackPanGesture)return YES;
+    CGPoint velocity=[(UIPanGestureRecognizer *)gestureRecognizer velocityInView:self.gestureSurface];
+    if(self.embeddedMode)return fabs(velocity.x)>fabs(velocity.y)*1.25;
+    return YES;
+}
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    if(gestureRecognizer==self.playbackPanGesture)return otherGestureRecognizer==self.playbackDoubleTapGesture||otherGestureRecognizer==self.playbackLongPressGesture;
+    if(otherGestureRecognizer==self.playbackPanGesture)return gestureRecognizer==self.playbackDoubleTapGesture||gestureRecognizer==self.playbackLongPressGesture;
+    return NO;
+}
+- (void)handlePlaybackPan:(UIPanGestureRecognizer *)recognizer {
+    if(!self.gestureSurface||self.gestureRateActive)return;
+    CGPoint translation=[recognizer translationInView:self.gestureSurface];CGSize size=self.gestureSurface.bounds.size;
+    if(recognizer.state==UIGestureRecognizerStateBegan){
+        self.panMode=MediaPlaybackPanModeNone;self.panStartPoint=[recognizer locationInView:self.gestureSurface];self.panStartValue=0;
+        NSTimeInterval current=CMTimeGetSeconds(self.player.currentTime);self.panStartTime=isfinite(current)&&current>=0?current:0;self.panTargetTime=self.panStartTime;return;
+    }
+    if(recognizer.state==UIGestureRecognizerStateChanged){
+        if(self.panMode==MediaPlaybackPanModeNone&&hypot(translation.x,translation.y)>=10){
+            if(fabs(translation.x)>=fabs(translation.y)){
+                NSTimeInterval duration=CMTimeGetSeconds(self.player.currentItem.duration);
+                if(!self.player.currentItem||!isfinite(duration)||duration<=0){self.panMode=MediaPlaybackPanModeUnsupported;[self showGestureFeedback:@"直播内容不支持拖动进度"];return;}
+                self.panMode=MediaPlaybackPanModeSeek;
+            }else if(self.embeddedMode){self.panMode=MediaPlaybackPanModeUnsupported;return;}
+            else if(self.panStartPoint.x<size.width*0.5){self.panMode=MediaPlaybackPanModeBrightness;self.panStartValue=UIScreen.mainScreen.brightness;}
+            else{self.panMode=MediaPlaybackPanModeVolume;[self prepareVolumeSlider];if(!self.volumeSlider){self.panMode=MediaPlaybackPanModeUnsupported;[self showGestureFeedback:@"音量手势暂不可用"];return;}self.panStartValue=self.volumeSlider.value;}
+        }
+        if(self.panMode==MediaPlaybackPanModeSeek){
+            NSTimeInterval duration=CMTimeGetSeconds(self.player.currentItem.duration),range=MIN(180.0,MAX(30.0,duration*0.25));self.panTargetTime=MIN(duration,MAX(0,self.panStartTime+translation.x/MAX(1,size.width)*range));
+            NSTimeInterval delta=self.panTargetTime-self.panStartTime;[self showGestureFeedback:[NSString stringWithFormat:@"%@ %@",delta<0?@"后退至":@"快进至",[self formatMediaTime:self.panTargetTime]]];
+        }else if(self.panMode==MediaPlaybackPanModeBrightness){
+            CGFloat value=MIN(1.0,MAX(0.0,self.panStartValue-translation.y/MAX(1,size.height)*0.8));UIScreen.mainScreen.brightness=value;[self showGestureFeedback:[NSString stringWithFormat:@"亮度 %.0f%%",value*100.0]];
+        }else if(self.panMode==MediaPlaybackPanModeVolume&&self.volumeSlider){
+            CGFloat value=MIN(self.volumeSlider.maximumValue,MAX(self.volumeSlider.minimumValue,self.panStartValue-translation.y/MAX(1,size.height)*0.8));self.volumeSlider.value=value;[self.volumeSlider sendActionsForControlEvents:UIControlEventValueChanged];[self showGestureFeedback:[NSString stringWithFormat:@"音量 %.0f%%",value*100.0]];
+        }
+        return;
+    }
+    if(recognizer.state==UIGestureRecognizerStateEnded){
+        if(self.panMode==MediaPlaybackPanModeSeek&&fabs(self.panTargetTime-self.panStartTime)>=0.75){
+            NSTimeInterval delta=self.panTargetTime-self.panStartTime;[self.player seekToTime:CMTimeMakeWithSeconds(self.panTargetTime,600) toleranceBefore:CMTimeMake(2,10) toleranceAfter:CMTimeMake(2,10)];[self updateSkipButtonForCurrentPosition];
+            [RuntimeDiagnostics.shared recordEvent:@"playback_gesture_swipe_seek" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"playback_attempt_id":self.playbackAttemptID?:@"",@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"delta_seconds":@(delta),@"target_seconds_bucket":@((NSInteger)(self.panTargetTime/30)*30)}];
+        }
+        self.panMode=MediaPlaybackPanModeNone;return;
+    }
+    if(recognizer.state==UIGestureRecognizerStateCancelled||recognizer.state==UIGestureRecognizerStateFailed)self.panMode=MediaPlaybackPanModeNone;
+}
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];self.pendingScreenExit=NO;NSDictionary *pending=self.pendingEpisodeResult;self.pendingEpisodeResult=nil;
     if(!self.idleTimerOverrideActive){self.previousIdleTimerDisabled=UIApplication.sharedApplication.idleTimerDisabled;self.idleTimerOverrideActive=YES;}
@@ -398,11 +496,27 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
 - (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];if(@available(iOS 16.0,*))[self setNeedsUpdateOfSupportedInterfaceOrientations];else [UIViewController attemptRotationToDeviceOrientation];}
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {[super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];[coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context){[self updatePlaybackLayoutForSize:size];} completion:nil];}
 - (void)updatePlaybackLayoutForSize:(CGSize)size {
-    if(self.embeddedMode||size.width<=0||size.height<=0)return;BOOL landscape=size.width>size.height;
-    if(self.playbackLayoutInitialized&&self.landscapeLayout==landscape)return;
+    if(size.width<=0||size.height<=0)return;
+    BOOL tallVideo=self.videoAspectRatio>0.0&&self.videoAspectRatio<0.95;
+    if(self.embeddedMode){
+        BOOL aspectChanged=tallVideo&&fabs(self.videoAspectRatio-self.embeddedVideoAspectRatio)>0.05;
+        if(self.playbackLayoutInitialized&&self.tallVideoViewportLayout==tallVideo&&!aspectChanged)return;
+        self.playbackLayoutInitialized=YES;self.tallVideoViewportLayout=tallVideo;self.embeddedVideoAspectRatio=self.videoAspectRatio;
+        self.videoAspectConstraint.active=NO;self.embeddedTallVideoAspectConstraint.active=NO;
+        if(tallVideo){CGFloat multiplier=MIN(1.25,1.0/MAX(0.5,self.videoAspectRatio));self.embeddedTallVideoAspectConstraint=[self.videoView.heightAnchor constraintEqualToAnchor:self.videoView.widthAnchor multiplier:multiplier];self.embeddedTallVideoAspectConstraint.priority=UILayoutPriorityRequired;self.embeddedTallVideoAspectConstraint.active=YES;}
+        else self.videoAspectConstraint.active=YES;
+        [self.view setNeedsLayout];return;
+    }
+    BOOL landscape=size.width>size.height;
+    if(self.playbackLayoutInitialized&&self.landscapeLayout==landscape&&self.tallVideoViewportLayout==tallVideo)return;
     self.playbackLayoutInitialized=YES;self.landscapeLayout=landscape;
     [NSLayoutConstraint deactivateConstraints:self.portraitConstraints];[NSLayoutConstraint deactivateConstraints:self.landscapeConstraints];
+    [NSLayoutConstraint deactivateConstraints:@[self.videoAspectConstraint,self.portraitTallViewportHeightConstraint,self.landscapeTallViewportHeightConstraint]];
     [NSLayoutConstraint activateConstraints:landscape?self.landscapeConstraints:self.portraitConstraints];
+    if(tallVideo)[NSLayoutConstraint activateConstraints:@[landscape?self.landscapeTallViewportHeightConstraint:self.portraitTallViewportHeightConstraint]];
+    else [NSLayoutConstraint activateConstraints:@[self.videoAspectConstraint]];
+    self.tallVideoViewportLayout=tallVideo;
+    [self.view setNeedsLayout];
 }
 - (void)playInlineResult:(NSDictionary *)result context:(NSDictionary *)context {
     if(!NSThread.isMainThread){NSDictionary *resultCopy=[result copy],*contextCopy=[context copy];dispatch_async(dispatch_get_main_queue(),^{[self playInlineResult:resultCopy context:contextCopy];});return;}
@@ -490,7 +604,7 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
         if(videoTrack){for(id description in videoTrack.formatDescriptions){CMFormatDescriptionRef format=(__bridge CMFormatDescriptionRef)description;if(CMFormatDescriptionGetMediaType(format)!=kCMMediaType_Video)continue;FourCharCode code=CMFormatDescriptionGetMediaSubType(format);char name[5]={(char)((code>>24)&0xff),(char)((code>>16)&0xff),(char)((code>>8)&0xff),(char)(code&0xff),0};BOOL printable=YES;for(int i=0;i<4;i++)if(name[i]<32||name[i]>126)printable=NO;if(printable)[codecs addObject:[NSString stringWithUTF8String:name]];}}
         dispatch_async(dispatch_get_main_queue(),^{
             MediaPlaybackViewController *owner=weakSelf;if(!owner||generation!=owner.playerGeneration||item!=owner.observedItem||item!=owner.player.currentItem)return;
-            CGSize presentation=item.presentationSize;AVPlayerLayer *layer=owner.videoLayer;BOOL hasVideo=tracks.count>0||presentation.width>0||presentation.height>0||owner.videoFrameReady;owner.hasVideoTrack=hasVideo;
+            CGSize presentation=item.presentationSize;CGFloat displayAspect=0;if(presentation.width>0&&presentation.height>0)displayAspect=presentation.width/presentation.height;else if(videoTrack){CGSize natural=videoTrack.naturalSize;CGRect transformed=CGRectStandardize(CGRectApplyAffineTransform(CGRectMake(0,0,fabs(natural.width),fabs(natural.height)),videoTrack.preferredTransform));if(transformed.size.width>0&&transformed.size.height>0)displayAspect=fabs(transformed.size.width)/fabs(transformed.size.height);}if(isfinite(displayAspect)&&displayAspect>0.1&&displayAspect<10.0){owner.videoAspectRatio=displayAspect;[owner updatePlaybackLayoutForSize:owner.view.bounds.size];}AVPlayerLayer *layer=owner.videoLayer;BOOL hasVideo=tracks.count>0||presentation.width>0||presentation.height>0||owner.videoFrameReady;owner.hasVideoTrack=hasVideo;
             NSMutableDictionary *fields=[@{@"playback_attempt_id":owner.playbackAttemptID?:@"",@"correlation_id":owner.diagnosticTraceID?:@"",@"track_load_status":loadStatus==AVKeyValueStatusLoaded?@"loaded":(loadStatus==AVKeyValueStatusFailed?@"failed":@"unavailable"),@"asset_video_track_count":@(tracks.count),@"video_track_state":hasVideo?@"present_video_track":(loadStatus==AVKeyValueStatusLoaded?@"no_video_track":@"unknown"),@"video_presentation_width":@(MAX(0,(NSInteger)llround(presentation.width))),@"video_presentation_height":@(MAX(0,(NSInteger)llround(presentation.height))),@"video_layer_ready_for_display":@(layer.readyForDisplay),@"video_layer_width":@(MAX(0,(NSInteger)llround(layer.bounds.size.width))),@"video_layer_height":@(MAX(0,(NSInteger)llround(layer.bounds.size.height)))} mutableCopy];
             if(videoTrack){fields[@"video_natural_width"]=@(MAX(0,(NSInteger)llround(fabs(naturalSize.width))));fields[@"video_natural_height"]=@(MAX(0,(NSInteger)llround(fabs(naturalSize.height))));}
             if(codecs.count)fields[@"video_codec_fourcc"]=codecs.array;
