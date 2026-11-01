@@ -41,6 +41,18 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn("viewController==self", body)
         self.assertIn("if(self.activeTab<2)[self suspendLivePlaybackForReason:@\"left_live_navigation_page\"]", body)
 
+    def test_resource_navigation_snapshots_scroll_before_push(self):
+        for signature in (
+            "- (void)openServicesPage",
+            "- (void)openPluginResource:(NSString *)source",
+            "- (void)openTVBoxCatalog:(NSString *)identifier",
+            "- (void)openServiceEditorForService:(NSDictionary *)service",
+        ):
+            body = method_body(ROOT_SOURCE, signature)
+            prepare = body.index("prepareForNavigationTransition]")
+            push = body.index("pushViewController:")
+            self.assertLess(prepare, push, signature)
+
     def test_live_suspend_invalidates_and_releases_the_old_player(self):
         body = method_body(ROOT_SOURCE, "- (void)suspendLivePlaybackForReason:(NSString *)reason")
         self.assertLess(body.index("self.playbackGeneration++"), body.index("[self stopPlayback]"))

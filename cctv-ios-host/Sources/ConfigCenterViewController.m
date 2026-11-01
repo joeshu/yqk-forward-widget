@@ -104,6 +104,10 @@
 }
 - (void)prepareForNavigationTransition {
     if(!self.isViewLoaded)return;
+    // Capture the offset at the source action, before UINavigationController
+    // starts changing safe-area geometry. The navigation delegate may run
+    // after UIKit has already begun adjusting the table's scroll position.
+    if(self.hasNavigationReturnPosition)return;
     self.navigationReturnContentOffset=self.tableView.contentOffset;
     self.navigationReturnHeaderHeight=CGRectGetHeight(self.tableView.tableHeaderView.frame);
     self.hasNavigationReturnPosition=YES;
