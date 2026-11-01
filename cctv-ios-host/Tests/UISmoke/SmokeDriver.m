@@ -249,6 +249,22 @@ static void next(NSArray *steps, NSUInteger index) {
             check(root.navigationItem.rightBarButtonItems.count==1, @"catalog uses one compact toolbar");
             UIStackView *toolbar=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;
             check(toolbar.arrangedSubviews.count==3,@"catalog exposes three page actions");
+            UIButton *layoutButton=(UIButton *)toolbar.arrangedSubviews.firstObject;
+            check([layoutButton.accessibilityLabel isEqual:@"切换列表布局"],@"grid toolbar clearly offers the live list-row layout");
+            [layoutButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+            [root.view layoutIfNeeded];
+            UITableView *liveList=[root valueForKey:@"table"];
+            check(!liveList.hidden&&grid.hidden,@"layout action opens live channels as a vertical list");
+            NSIndexPath *liveRow=[liveList numberOfRowsInSection:0]>0?[NSIndexPath indexPathForRow:0 inSection:0]:nil;
+            UITableViewCell *liveCell=liveRow?[liveList cellForRowAtIndexPath:liveRow]:nil;
+            check(liveCell.textLabel.text.length>0&&liveCell.detailTextLabel.text.length>0&&liveCell.accessoryType==UITableViewCellAccessoryDisclosureIndicator,@"live list row shows channel name, secondary details and a clear play affordance");
+            capture(self.window,@"01-live-list");
+            toolbar=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;
+            layoutButton=(UIButton *)toolbar.arrangedSubviews.firstObject;
+            check([layoutButton.accessibilityLabel isEqual:@"切换网格布局"],@"list toolbar offers the reverse grid-layout action");
+            [layoutButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+            [root.view layoutIfNeeded];
+            check(liveList.hidden&&!grid.hidden,@"switching back restores the live grid");
 
             check(tabs.arrangedSubviews.count==5, @"five navigation pages");
             NSString *source=@"https://example.com/smoke.m3u";

@@ -389,11 +389,17 @@ class RootViewControllerSourceContracts(unittest.TestCase):
 
     def test_catalog_supports_grid_and_list_and_routes_remain_long_press(self):
         self.assertIn('self.table.rowHeight = UITableViewAutomaticDimension', TEXT)
-        self.assertIn('self.table.estimatedRowHeight = 58', TEXT)
+        self.assertIn('self.table.estimatedRowHeight = 66', TEXT)
+        self.assertIn('self.table.sectionHeaderTopPadding = 0', TEXT)
         self.assertIn('channel.list', TEXT)
+        self.assertIn('cell.accessibilityHint=@"轻点播放，长按选择线路与节目单"', TEXT)
+        self.assertIn('cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator', TEXT)
         self.assertIn('return (NSInteger)self.shownChannels.count;', TEXT)
         self.assertIn('channel.grid', TEXT)
         self.assertIn('channelGridMode', TEXT)
+        self.assertIn('self.gridMode?@"list.bullet":@"square.grid.2x2"', TEXT)
+        self.assertIn('self.gridMode?@"切换列表布局":@"切换网格布局"', TEXT)
+        self.assertIn('- (void)toggleCatalogLayout', TEXT)
         self.assertIn('contextMenuConfigurationForItemAtIndexPath', TEXT)
         self.assertIn('onLongPress:', TEXT)
 

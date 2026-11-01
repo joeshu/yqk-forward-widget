@@ -384,6 +384,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)openServiceEditorForService:(NSDictionary *)service;
 - (void)applyServiceConfigurationFrom:(NSDictionary *)previous to:(NSDictionary *)updated completion:(void (^)(NSError * _Nullable error))completion;
 - (void)saveImportedMedia:(NSDictionary *)service;
+- (void)toggleCatalogLayout;
 - (void)shareDiagnosticLogAtURL:(NSURL *)source;
 - (void)restartMediaService:(NSDictionary *)source completion:(void (^)(NSError *))completion;
 @end
@@ -714,7 +715,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.table.dataSource = self;
     self.table.delegate = self;
     self.table.rowHeight = UITableViewAutomaticDimension;
-    self.table.estimatedRowHeight = 58;
+    self.table.estimatedRowHeight = 66;
+    self.table.estimatedSectionHeaderHeight = 0;
+    self.table.sectionHeaderTopPadding = 0;
     self.table.backgroundColor = HostBackground();
     self.table.separatorColor = HostSeparator();
     [self.view addSubview:self.table];
@@ -967,7 +970,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         ])];
     }else{
         self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
-            @{@"icon":@"square.grid.2x2",@"title":@"列表与网格",@"action":[UIAction actionWithHandler:^(UIAction *a){w.gridMode=!w.gridMode;[NSUserDefaults.standardUserDefaults setBool:w.gridMode forKey:@"channelGridMode"];[w.view setNeedsLayout];}]},
+            @{@"icon":self.gridMode?@"list.bullet":@"square.grid.2x2",@"title":self.gridMode?@"切换列表布局":@"切换网格布局",@"action":[UIAction actionWithHandler:^(UIAction *a){[w toggleCatalogLayout];}]},
             @{@"icon":@"arrow.clockwise",@"title":@"刷新当前页面",@"action":[UIAction actionWithHandler:^(UIAction *a){[w onPullRefresh];}]},
             @{@"icon":@"ellipsis",@"title":@"更多",@"menu":[self catalogMenu]}
         ])];
@@ -975,6 +978,16 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSInteger groupIndex=self.groupControl.selectedSegmentIndex;
     NSString *groupTitle=groupIndex>=0&&groupIndex<self.groupControl.numberOfSegments?[self.groupControl titleForSegmentAtIndex:groupIndex]:@"全部";
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:[NSString stringWithFormat:@"%@ ▾",groupTitle] style:UIBarButtonItemStylePlain target:self action:@selector(showGroupMenu)];
+}
+- (void)toggleCatalogLayout {
+    CGPoint listOffset=self.table.contentOffset,gridOffset=self.channelGrid.contentOffset;
+    self.gridMode=!self.gridMode;
+    [NSUserDefaults.standardUserDefaults setBool:self.gridMode forKey:@"channelGridMode"];
+    [self configureCatalogNavigation];
+    [self.view setNeedsLayout];
+    [self.view layoutIfNeeded];
+    self.table.contentOffset=listOffset;
+    self.channelGrid.contentOffset=gridOffset;
 }
 - (void)toggleCurrentFavorite {
     if(!self.channelID.length)return;
@@ -985,7 +998,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 - (UIMenu *)catalogMenu {
     __weak typeof(self) w=self;
-    UIAction *grid=[UIAction actionWithTitle:self.gridMode?@"切换列表样式":@"切换网格样式" image:[UIImage systemImageNamed:@"square.grid.2x2"] identifier:nil handler:^(UIAction *a){w.gridMode=!w.gridMode;[NSUserDefaults.standardUserDefaults setBool:w.gridMode forKey:@"channelGridMode"];[w configureCatalogNavigation];[w.view setNeedsLayout];}];
+    UIAction *grid=[UIAction actionWithTitle:self.gridMode?@"切换列表布局":@"切换网格布局" image:[UIImage systemImageNamed:self.gridMode?@"list.bullet":@"square.grid.2x2"] identifier:nil handler:^(UIAction *a){[w toggleCatalogLayout];}];
     UIAction *refresh=[UIAction actionWithTitle:@"刷新播放列表" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){[w onPullRefresh];}];
     UIAction *add=[UIAction actionWithTitle:@"添加订阅" image:[UIImage systemImageNamed:@"plus"] identifier:nil handler:^(UIAction *a){[w addSubscription];}];
     UIAction *hide=[UIAction actionWithTitle:self.playerExpanded?@"收起播放器":@"展开播放器" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){w.playerExpanded=!w.playerExpanded;[w configureCatalogNavigation];[w.view setNeedsLayout];}];
@@ -1263,11 +1276,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];
         cell.backgroundColor = HostCard();
-        cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-        cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.textLabel.numberOfLines=0;
+        cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+        cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.textLabel.numberOfLines=1;cell.textLabel.lineBreakMode=NSLineBreakByTruncatingTail;
         cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
-        cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=0;
+        cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=2;cell.detailTextLabel.lineBreakMode=NSLineBreakByTruncatingTail;
         cell.detailTextLabel.textColor = HostSecondaryText();
+        cell.imageView.contentMode=UIViewContentModeScaleAspectFit;
         UIView *selected = [[UIView alloc] init];
         selected.backgroundColor = HostSelectedSurface();
         cell.selectedBackgroundView = selected;
@@ -1281,9 +1295,14 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if ([self.favorites containsObject:cid]) title = [@"★ " stringByAppendingString:title];
     cell.textLabel.text = playing ? [NSString stringWithFormat:@"● %@", title] : title;
     cell.textLabel.textColor = playing ? HostAccent() : HostText();
+    cell.accessibilityIdentifier=[@"channel-row-" stringByAppendingString:cid];
+    cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
+    cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;
     NSString *logo = [ch[@"logo"] isKindOfClass:NSString.class] ? ch[@"logo"] : @"";
     cell.imageView.image = nil;
     if (logo.length) [self loadLogo:logo into:cell.imageView];
+    else cell.imageView.image=[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"];
+    cell.imageView.tintColor=HostAccent();
     NSDictionary *epg = self.epgCache[cid];
     if ([epg[@"now"] isKindOfClass:NSString.class]) cell.detailTextLabel.text = [NSString stringWithFormat:@"正在播：%@", epg[@"now"]];
     else if ([ch[@"remoteURL"] length]) cell.detailTextLabel.text = @"订阅源";

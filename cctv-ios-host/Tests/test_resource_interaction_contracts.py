@@ -51,6 +51,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('UIButton *button=self.kindFilterButtons[index]', filters)
         self.assertIn('viewForHeaderInSection', self.catalog)
         self.assertIn('heightForHeaderInSection:(NSInteger)section {return 34;}', self.catalog)
+        self.assertIn('c.textLabel.numberOfLines=2', self.catalog)
+        self.assertIn('c.detailTextLabel.numberOfLines = 4', self.catalog)
+        self.assertIn('c.accessibilityValue=c.detailTextLabel.text', self.catalog)
 
     def test_service_directory_omits_empty_runtime_groups(self):
         services = (ROOT / 'Sources/ServicesViewController.m').read_text()

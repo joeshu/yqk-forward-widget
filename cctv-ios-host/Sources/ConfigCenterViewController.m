@@ -229,14 +229,19 @@
     c.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
     c.textLabel.adjustsFontForContentSizeCategory=YES;
     c.detailTextLabel.adjustsFontForContentSizeCategory=YES;
-    c.textLabel.numberOfLines=0;
+    c.textLabel.numberOfLines=2;
+    c.textLabel.lineBreakMode=NSLineBreakByTruncatingTail;
     c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    c.detailTextLabel.numberOfLines = 0;
+    c.detailTextLabel.numberOfLines = 4;
+    c.detailTextLabel.lineBreakMode=NSLineBreakByTruncatingTail;
     c.imageView.tintColor = HostAccent();
     c.accessoryView = nil;
     c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     {
         NSDictionary *p = self.profiles[ip.row];
+        c.accessibilityIdentifier=[NSString stringWithFormat:@"resource-row-%ld",(long)ip.row];
+        c.accessibilityLabel=[p[@"name"] isKindOfClass:NSString.class]?p[@"name"]:@"资源";
+        c.accessibilityHint=[p[@"type"] isEqual:@"plugin"]?@"轻点查看服务能力与设置，使用开关启停服务":@"轻点查看资源，使用开关启用或停用";
         c.textLabel.text = p[@"name"];
         NSTimeInterval updated=[p[@"updatedAt"] doubleValue];
         NSString *refreshInfo=@"尚无成功刷新记录";
@@ -276,6 +281,7 @@
         }
     }
     if([self.profiles[ip.row][@"status"] length] && ![self.profiles[ip.row][@"type"] isEqual:@"plugin"] && ![self.profiles[ip.row][@"type"] isEqual:@"tvbox"])c.detailTextLabel.text=[NSString stringWithFormat:@"%@\n%@",c.detailTextLabel.text?:@"",self.profiles[ip.row][@"status"]];
+    c.accessibilityValue=c.detailTextLabel.text;
     return c;
 }
 - (void)toggle:(UISwitch *)sender {
