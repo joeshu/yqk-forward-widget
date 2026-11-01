@@ -458,7 +458,13 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)viewController animated:(BOOL)animated {
-    if(navigationController!=self.navigationController||viewController==self)return;
+    if(navigationController!=self.navigationController)return;
+    // A push from a compact home/resource tab must reveal the navigation bar at
+    // the beginning of the transition so the destination is never presented
+    // with a hidden back affordance. The completed-transition delegate below
+    // restores the correct hidden state if an interactive pop is cancelled.
+    if(viewController!=self&&navigationController.navigationBarHidden)[navigationController setNavigationBarHidden:NO animated:animated];
+    if(viewController==self)return;
     if(self.activeTab<2)[self suspendLivePlaybackForReason:@"left_live_navigation_page"];
 }
 
