@@ -410,7 +410,12 @@ static void next(NSArray *steps, NSUInteger index) {
             UIStackView *filters=[resourcePage valueForKey:@"kindStack"];
             NSArray<UIView *> *filterInstances=[filters.arrangedSubviews copy];
             CGFloat returnedOffset=resourcePage.tableView.contentOffset.y;
-            check(fabs(returnedOffset-resourceScrollOffset)<1.5,[NSString stringWithFormat:@"resource scroll position survives a pushed service/editor round trip (before=%.1f after=%.1f)",resourceScrollOffset,returnedOffset]);
+            CGFloat minimumOffset=-resourcePage.tableView.adjustedContentInset.top;
+            CGFloat maximumOffset=MAX(minimumOffset,resourcePage.tableView.contentSize.height-resourcePage.tableView.bounds.size.height+resourcePage.tableView.adjustedContentInset.bottom);
+            CGFloat savedHeaderHeight=[[resourcePage valueForKey:@"navigationReturnHeaderHeight"] doubleValue];
+            CGFloat currentHeaderHeight=CGRectGetHeight(resourcePage.tableView.tableHeaderView.frame);
+            BOOL returnSnapshotPending=[[resourcePage valueForKey:@"hasNavigationReturnPosition"] boolValue];
+            check(fabs(returnedOffset-resourceScrollOffset)<1.5,[NSString stringWithFormat:@"resource scroll position survives service/editor round trip (before=%.1f after=%.1f pending=%d savedHeader=%.1f currentHeader=%.1f content=%.1f viewport=%.1f bottomInset=%.1f max=%.1f)",resourceScrollOffset,returnedOffset,returnSnapshotPending,savedHeaderHeight,currentHeaderHeight,resourcePage.tableView.contentSize.height,resourcePage.tableView.bounds.size.height,resourcePage.tableView.adjustedContentInset.bottom,maximumOffset]);
             [resourcePage reloadProfiles];
             [resourcePage reloadProfiles];
             [resourcePage.view layoutIfNeeded];
