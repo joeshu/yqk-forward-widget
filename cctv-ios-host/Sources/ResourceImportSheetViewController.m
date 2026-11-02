@@ -200,7 +200,7 @@
             @{ @"id":@"kazumi",@"title":@"Kazumi 规则仓库",@"detail":@"规则搜索与解析后端尚未接入",@"icon":@"film.stack",@"color":rgb(103,83,222),@"unsupported":@YES},
             @{ @"id":@"network-mount",@"title":@"网络挂载",@"detail":@"WebDAV / SFTP / FTP 与 TMDB 刮削后端尚未接入",@"icon":@"folder.badge.plus",@"color":rgb(246,151,0),@"unsupported":@YES},
             @{ @"id":@"live-url",@"title":@"直播频道",@"detail":@"M3U / TXT 直播订阅地址",@"icon":@"dot.radiowaves.left.and.right",@"color":rgb(246,151,0),@"option":@(ResourceImportOptionLiveURL)},
-            @{ @"id":@"script-auto-url",@"title":@"影视脚本链接 · 自动识别",@"detail":@"JS、Python、ZIP 与 .md5；统一运行时检测",@"icon":@"sparkles",@"color":rgb(35,132,238),@"option":@(ResourceImportOptionMediaURL)},
+            @{ @"id":@"script-auto-url",@"title":@"影视 / 合集链接 · 自动识别",@"detail":@"TVBox JSON 与 iOS 合集地址，也支持 JS、Python、ZIP、.md5",@"icon":@"sparkles",@"color":rgb(35,132,238),@"option":@(ResourceImportOptionMediaURL)},
             @{ @"id":@"python-url",@"title":@"Python Spider 链接",@"detail":@"TVBox .py Spider；由内置 CPython 启动",@"icon":@"chevron.left.forwardslash.chevron.right",@"color":rgb(54,137,91),@"option":@(ResourceImportOptionPythonURL)},
             @{ @"id":@"catvod-url",@"title":@"CatVod / TVBox JS 链接",@"detail":@"CatVod、DRPY 与 .js.md5；检查协议和入口",@"icon":@"film.stack",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionCatVodURL)},
             @{ @"id":@"node-url",@"title":@"Node.js Mobile 链接",@"detail":@"Node 18.20.4；支持动态 require 与内置模块",@"icon":@"shippingbox",@"color":rgb(75,102,186),@"option":@(ResourceImportOptionNodeURL)},

@@ -489,6 +489,8 @@ configureCatalogNavigation;
 - (void)importMacCMSAPI;
 - (void)importTVBoxSite:(NSDictionary *)site;
 - (void)importTVBoxSite:(NSDictionary *)site browseAfterImport:(BOOL)browseAfterImport;
+- (BOOL)shouldImportTVBoxCatalogFromURL:(NSURL *)url runtimeHint:(nullable NSString *)runtimeHint;
+- (void)importMediaOrTVBoxURL:(NSURL *)url runtimeHint:(nullable NSString *)runtimeHint;
 - (void)importMediaURLWithTitle:(NSString *)title message:(NSString *)message placeholder:(NSString *)placeholder runtimeHint:(nullable NSString *)runtimeHint;
 - (void)importMediaPackageWithRuntimeHint:(nullable NSString *)runtimeHint;
 - (void)downloadPackageURL:(NSURL *)url headers:(nullable NSDictionary<NSString *,NSString *> *)headers completion:(void (^)(NSDictionary *,NSError *))completion;
@@ -2359,7 +2361,26 @@ configureCatalogNavigation;
     if(self.presentedViewController)[self.presentedViewController dismissViewControllerAnimated:YES completion:show];else show();
 }
 - (void)importMediaURL {
-    [self importMediaURLWithTitle:@"智能导入影视 / 插件链接" message:@"支持 JS、Python、ZIP，以及对应的 .md5 地址。会统一检查入口、协议和运行时；导入时不会执行脚本。" placeholder:@"https://…/index.js.md5、.py 或插件.zip" runtimeHint:nil];
+    [self importMediaURLWithTitle:@"智能导入影视 / 合集 / 插件链接" message:@"支持 TVBox JSON、iOS 资源合集地址，以及 JS、Python、ZIP 和 .md5。会识别配置或脚本格式；导入时不会执行脚本。" placeholder:@"https://…/tvbox.json、合集地址或 index.js.md5" runtimeHint:nil];
+}
+- (BOOL)shouldImportTVBoxCatalogFromURL:(NSURL *)url runtimeHint:(NSString *)runtimeHint {
+    if(!url||runtimeHint.length)return NO;
+    if([url.pathExtension.lowercaseString isEqual:@"json"])return YES;
+    NSURLComponents *parts=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
+    if(![parts.path.lastPathComponent.lowercaseString isEqual:@"get"])return NO;
+    BOOL hasIOSClient=NO,hasToken=NO;
+    for(NSURLQueryItem *item in parts.queryItems?:@[]){NSString *name=item.name.lowercaseString;if([name isEqual:@"client"]&&[item.value.lowercaseString isEqual:@"ios"])hasIOSClient=YES;else if([name isEqual:@"token"]&&item.value.length)hasToken=YES;}
+    return hasIOSClient&&hasToken;
+}
+- (void)importMediaOrTVBoxURL:(NSURL *)url runtimeHint:(NSString *)runtimeHint {
+    __weak typeof(self) weakSelf=self;
+    if(![self shouldImportTVBoxCatalogFromURL:url runtimeHint:runtimeHint]){
+        [self.tvboxCatalogDownloader cancel];self.tvboxCatalogDownloader=nil;
+        [self downloadPackageURL:url headers:nil runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){[weakSelf acceptImportedMedia:service error:error];}];return;
+    }
+    [self.packageDownloader cancel];self.packageDownloader=nil;
+    [self.tvboxCatalogDownloader cancel];TVBoxCatalogDownloader *downloader=[TVBoxCatalogDownloader new];self.tvboxCatalogDownloader=downloader;self.navigationItem.prompt=@"正在识别并导入资源合集…";
+    [downloader loadURL:url completion:^(NSDictionary *catalog,NSError *error){RootViewController *owner=weakSelf;if(!owner||owner.tvboxCatalogDownloader!=downloader)return;owner.tvboxCatalogDownloader=nil;owner.navigationItem.prompt=nil;if(catalog){[owner acceptTVBoxCatalog:catalog];return;}if(error.code!=NSURLErrorCancelled)[owner showServiceError:error.localizedDescription?:@"资源合集 JSON 无法识别"];}];
 }
 - (void)importMediaURLWithTitle:(NSString *)title message:(NSString *)message placeholder:(NSString *)placeholder runtimeHint:(NSString *)runtimeHint {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
@@ -2367,7 +2388,7 @@ configureCatalogNavigation;
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         NSString *text=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(text.length>8192){[self showServiceError:@"资源地址过长"];return;}
-        __weak typeof(self) weakSelf=self;[self downloadPackageURL:[NSURL URLWithString:text] headers:nil runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){[weakSelf acceptImportedMedia:service error:error];}];
+        NSURL *url=[NSURL URLWithString:text];if(!url){[self showServiceError:@"请输入有效的 HTTP/HTTPS 地址"];return;}[self importMediaOrTVBoxURL:url runtimeHint:runtimeHint];
     }]];[self presentViewController:alert animated:YES completion:nil];
 }
 - (void)importTVBoxCatalog {

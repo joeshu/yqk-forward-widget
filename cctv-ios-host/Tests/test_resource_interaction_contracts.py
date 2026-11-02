@@ -827,6 +827,20 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('type 3 JAR stays unsupported', catalog_test)
         self.assertIn('type 1 direct playback', (ROOT / 'Tests/native_media_api_tests.m').read_text())
 
+    def test_smart_resource_import_recognizes_tvbox_json_and_ios_bundle_urls(self):
+        root = self.root
+        detection = root.rsplit('- (BOOL)shouldImportTVBoxCatalogFromURL:', 1)[1].split('- (void)importMediaURLWithTitle:', 1)[0]
+        self.assertIn('runtimeHint.length)return NO', detection)
+        self.assertIn('url.pathExtension.lowercaseString isEqual:@"json"', detection)
+        self.assertIn('parts.path.lastPathComponent.lowercaseString isEqual:@"get"', detection)
+        self.assertIn('item.value.lowercaseString isEqual:@"ios"', detection)
+        self.assertIn('name isEqual:@"token"', detection)
+        self.assertIn('[downloader loadURL:url completion:', detection)
+        self.assertIn('[owner acceptTVBoxCatalog:catalog]', detection)
+        self.assertIn('TVBox JSON、iOS 资源合集地址', root)
+        import_sheet = (ROOT / 'Sources/ResourceImportSheetViewController.m').read_text()
+        self.assertIn('影视 / 合集链接 · 自动识别', import_sheet)
+
     def test_tvbox_collection_can_be_added_as_a_bounded_batch_with_live_user_agents(self):
         bulk = (ROOT / 'Sources/TVBoxCatalogBulkImporter.m').read_text()
         root = self.root
