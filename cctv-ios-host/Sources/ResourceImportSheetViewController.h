@@ -13,7 +13,8 @@ typedef NS_ENUM(NSInteger, ResourceImportOption) {
     ResourceImportOptionNodeURL,
     ResourceImportOptionPythonFile,
     ResourceImportOptionNodeFile,
-    ResourceImportOptionHostCapabilities
+    ResourceImportOptionHostCapabilities,
+    ResourceImportOptionFolder
 };
 
 @interface ResourceImportSheetViewController : UIViewController

@@ -407,6 +407,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property(nonatomic,strong) UIView *previewBox;
 @property(nonatomic,strong) NSTimer *previewTimer;
 @property(nonatomic,assign) BOOL importingPlaylist;
+@property(nonatomic,assign) BOOL importingFolder;
 @property(nonatomic,assign) NSUInteger selectionVersion;
 @property(nonatomic,assign) NSTimeInterval selectionRequestedAt;
 @property(nonatomic,assign) NSUInteger playbackIntentVersion;
@@ -439,6 +440,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)openServiceEditorForService:(NSDictionary *)service;
 - (void)applyServiceConfigurationFrom:(NSDictionary *)previous to:(NSDictionary *)updated completion:(void (^)(NSError * _Nullable error))completion;
 - (void)saveImportedMedia:(NSDictionary *)service;
+- (void)importMultipleMediaFiles:(NSArray<NSURL *> *)files runtimeHint:(nullable NSString *)runtimeHint;
+- (void)importLocalResourceFolder;
 - (void)toggleCatalogLayout;
 - (void)toggleCatalogColumns;
 - (void)shareDiagnosticLogAtURL:(NSURL *)source;
@@ -954,7 +957,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     UIView *separator=[[UIView alloc] initWithFrame:CGRectMake(0,0,1,0.5)];separator.backgroundColor=HostBorder();separator.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleBottomMargin;[self.bottomBarBackdrop.contentView addSubview:separator];
     [self.view addSubview:self.bottomBarBackdrop];
     self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=0; self.bottomBar.backgroundColor=UIColor.clearColor;
-    NSArray *titles=@[@"CCTV",@"频道",@"首页",@"资源",@"设置"];
+    NSArray *titles=@[@"CCTV",@"频道",@"媒体",@"资源",@"设置"];
     NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"house.fill",@"externaldrive.fill",@"gearshape"];
     for (NSInteger i=0;i<titles.count;i++) {
         UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;HostInstallPressFeedback(b);
@@ -1024,6 +1027,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if(!self.restoringLastTab&&self.activeTab<2){NSDictionary *state=@{@"query":self.query?:@"",@"group":@(self.groupControl.selectedSegmentIndex),@"gridY":@(self.channelGrid.contentOffset.y),@"listY":@(self.table.contentOffset.y)};self.catalogStates[@(self.activeTab)]=state;[[NSUserDefaults standardUserDefaults] setObject:state forKey:[NSString stringWithFormat:@"cctv.catalogState.%ld",(long)self.activeTab]];}
     if(self.restoringLastTab)[RuntimeDiagnostics.shared recordEvent:@"ui_session_tab_restored" category:@"lifecycle" fields:@{@"tab_index":@(sender.tag),@"automatic_content_load":@NO}];
     self.activeTab=sender.tag;
+    // Keep the media/resource surfaces consistently dark while restoring the
+    // user's configured appearance on CCTV, channel, and settings screens.
+    self.navigationController.overrideUserInterfaceStyle=(sender.tag==2||sender.tag==3)?UIUserInterfaceStyleDark:HostSelectedInterfaceStyle();
     [[NSUserDefaults standardUserDefaults] setInteger:self.activeTab forKey:@"cctv.lastBottomTab.v1"];
     [self updateBottomBarSelection];
     if([self.tabPage isKindOfClass:MediaBrowserViewController.class])[(MediaBrowserViewController *)self.tabPage saveSessionState];
@@ -2134,12 +2140,58 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)exportLocalConfiguration {
     NSData *data=[NSJSONSerialization dataWithJSONObject:[HostBackup snapshot] options:NSJSONWritingPrettyPrinted error:NULL];NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:@"CCTVHost-configuration.json"];[data writeToFile:path atomically:YES];UIActivityViewController *v=[[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:path]] applicationActivities:nil];v.popoverPresentationController.sourceView=self.bottomBar;v.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:v animated:YES completion:nil];
 }
-- (void)importLocalConfiguration {self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importMediaPackageRuntimeHint=nil;self.importingTVBoxCatalog=NO;UIDocumentPickerViewController *v=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];v.delegate=self;[self presentViewController:v animated:YES completion:nil];}
+- (void)importLocalConfiguration {self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importingFolder=NO;self.importMediaPackageRuntimeHint=nil;self.importingTVBoxCatalog=NO;UIDocumentPickerViewController *v=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];v.delegate=self;[self presentViewController:v animated:YES completion:nil];}
 - (void)importMediaPackage { [self importMediaPackageWithRuntimeHint:nil]; }
 - (void)importMediaPackageWithRuntimeHint:(NSString *)runtimeHint {
-    self.importingMediaPackage=YES;self.importingPlaylist=NO;self.importingTVBoxCatalog=NO;
+    self.importingMediaPackage=YES;self.importingPlaylist=NO;self.importingFolder=NO;self.importingTVBoxCatalog=NO;
     self.importMediaPackageRuntimeHint=runtimeHint;
-    UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];picker.delegate=self;[self presentViewController:picker animated:YES completion:nil];
+    UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];picker.delegate=self;picker.allowsMultipleSelection=YES;[self presentViewController:picker animated:YES completion:nil];
+}
+- (void)importLocalResourceFolder {
+    self.importingFolder=YES;self.importingMediaPackage=NO;self.importingPlaylist=NO;self.importingTVBoxCatalog=NO;self.importMediaPackageRuntimeHint=nil;
+    UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeFolder] asCopy:NO];picker.delegate=self;picker.allowsMultipleSelection=NO;
+    if(self.presentedViewController)[self.presentedViewController dismissViewControllerAnimated:YES completion:^{[self presentViewController:picker animated:YES completion:nil];}];else[self presentViewController:picker animated:YES completion:nil];
+}
+- (void)importMultipleMediaFiles:(NSArray<NSURL *> *)files runtimeHint:(NSString *)runtimeHint {
+    NSArray<NSURL *> *bounded=files.count>16?[files subarrayWithRange:NSMakeRange(0,16)]:files;NSUInteger omitted=files.count-bounded.count;self.navigationItem.prompt=[NSString stringWithFormat:@"正在检查 %lu 个本地影视资源…",(unsigned long)bounded.count];__weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
+        NSMutableArray<NSDictionary *> *services=[NSMutableArray array];NSMutableArray<NSString *> *failures=[NSMutableArray array];
+        for(NSURL *url in bounded){BOOL scoped=[url startAccessingSecurityScopedResource];NSError *error=nil;NSDictionary *service=nil;@try{service=[MediaPackageImporter importFile:url companionFiles:@{} runtimeHint:runtimeHint error:&error];if(service){[ServiceStore save:service];[services addObject:service];}}@catch(NSException *exception){error=[NSError errorWithDomain:@"CCTVHostImport" code:3 userInfo:@{NSLocalizedDescriptionKey:@"资源包检查失败，未执行代码"}];}@finally{if(scoped)[url stopAccessingSecurityScopedResource];}if(!service&&failures.count<12)[failures addObject:[NSString stringWithFormat:@"%@：%@",url.lastPathComponent,error.localizedDescription?:@"不支持的资源格式"]];
+        }
+        if(omitted)[failures addObject:[NSString stringWithFormat:@"另有 %lu 个文件超出单次最多 16 个的限制",(unsigned long)omitted]];
+        dispatch_async(dispatch_get_main_queue(),^{RootViewController *owner=weakSelf;if(!owner){for(NSDictionary *service in services)[ServiceStore remove:service[@"id"]];return;}owner.navigationItem.prompt=nil;if(services.count)[owner refreshConfigurationPage];NSMutableArray *lines=[NSMutableArray arrayWithObject:[NSString stringWithFormat:@"成功识别 %lu 个影视资源",(unsigned long)services.count]];for(NSDictionary *service in services){if(lines.count>=7)break;[lines addObject:[NSString stringWithFormat:@"✓ %@ · %@",service[@"name"]?:@"未命名资源",service[@"engine"]?:@"待识别"]];}if(failures.count)[lines addObject:[NSString stringWithFormat:@"未导入 %lu 个：%@",(unsigned long)failures.count,[failures componentsJoinedByString:@"\n"]]];UIAlertController *alert=[UIAlertController alertControllerWithTitle:services.count?@"批量导入完成":@"没有可导入的资源" message:[lines componentsJoinedByString:@"\n"] preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:alert animated:YES completion:nil];});
+    });
+}
+- (void)importMultiplePlaylistFiles:(NSArray<NSURL *> *)files {
+    NSArray<NSURL *> *bounded=files.count>32?[files subarrayWithRange:NSMakeRange(0,32)]:files;NSUInteger omitted=files.count-bounded.count;self.navigationItem.prompt=[NSString stringWithFormat:@"正在检查 %lu 个直播列表…",(unsigned long)bounded.count];__weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{NSMutableArray<NSDictionary *> *valid=[NSMutableArray array];NSMutableArray<NSString *> *failures=[NSMutableArray array];
+        for(NSURL *url in bounded){BOOL scoped=[url startAccessingSecurityScopedResource];NSError *error=nil;NSData *data=nil;NSFileHandle *file=nil;@try{file=[NSFileHandle fileHandleForReadingFromURL:url error:&error];if(file)data=[file readDataUpToLength:10*1024*1024+1 error:&error];if(data.length>10*1024*1024){data=nil;error=[NSError errorWithDomain:@"CCTVHostImport" code:4 userInfo:@{NSLocalizedDescriptionKey:@"列表超过 10 MiB 上限"}];}NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;if(text&&[M3UParser parse:text baseURL:nil].count)[valid addObject:@{@"data":data,@"name":url.lastPathComponent}];else if(failures.count<12)[failures addObject:[NSString stringWithFormat:@"%@：%@",url.lastPathComponent,error.localizedDescription?:@"不是有效 UTF-8 M3U/TXT"]];}@catch(NSException *exception){if(failures.count<12)[failures addObject:[NSString stringWithFormat:@"%@：读取失败",url.lastPathComponent]];}@finally{[file closeAndReturnError:NULL];if(scoped)[url stopAccessingSecurityScopedResource];}}
+        if(omitted)[failures addObject:[NSString stringWithFormat:@"另有 %lu 个文件超出单次最多 32 个的限制",(unsigned long)omitted]];
+        dispatch_async(dispatch_get_main_queue(),^{RootViewController *owner=weakSelf;if(!owner)return;owner.navigationItem.prompt=nil;for(NSDictionary *item in valid)[owner importPlaylistData:item[@"data"] name:item[@"name"]];NSMutableArray *lines=[NSMutableArray arrayWithObject:[NSString stringWithFormat:@"已加入 %lu 个直播列表",(unsigned long)valid.count]];if(failures.count)[lines addObject:[failures componentsJoinedByString:@"\n"]];UIAlertController *alert=[UIAlertController alertControllerWithTitle:valid.count?@"批量导入完成":@"没有有效的直播列表" message:[lines componentsJoinedByString:@"\n"] preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:alert animated:YES completion:nil];});
+    });
+}
+- (void)importResourceFolderContents:(NSURL *)folder {
+    BOOL scoped=[folder startAccessingSecurityScopedResource];self.navigationItem.prompt=@"正在扫描资源文件夹…";__weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
+        NSFileManager *fm=NSFileManager.defaultManager;NSMutableArray<NSURL *> *files=[NSMutableArray array];__block NSUInteger scanned=0;__block BOOL truncated=NO;
+        NSDirectoryEnumerator *enumerator=[fm enumeratorAtURL:folder includingPropertiesForKeys:@[NSURLIsRegularFileKey,NSURLIsSymbolicLinkKey] options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:^BOOL(NSURL *url,NSError *error){return YES;}];
+        for(NSURL *url in enumerator){if(++scanned>5000){truncated=YES;break;}NSNumber *regular=nil,*link=nil;[url getResourceValue:&regular forKey:NSURLIsRegularFileKey error:NULL];[url getResourceValue:&link forKey:NSURLIsSymbolicLinkKey error:NULL];if(!regular.boolValue||link.boolValue)continue;NSString *ext=url.pathExtension.lowercaseString;if([@[@"js",@"mjs",@"cjs",@"py",@"php",@"zip",@"m3u",@"m3u8",@"txt",@"json"] containsObject:ext]){if(files.count<64)[files addObject:url];else{truncated=YES;break;}}}
+        NSMutableArray<NSDictionary *> *services=[NSMutableArray array],*catalogs=[NSMutableArray array],*playlists=[NSMutableArray array];NSMutableArray<NSString *> *failures=[NSMutableArray array];
+        for(NSURL *url in files){NSString *ext=url.pathExtension.lowercaseString;BOOL childScoped=[url startAccessingSecurityScopedResource];NSError *error=nil;NSData *data=nil;NSFileHandle *file=nil;NSUInteger limit=[@[@"m3u",@"m3u8",@"txt"] containsObject:ext]?10*1024*1024:8*1024*1024;
+            @try{
+                if([ext isEqual:@"php"]){if(failures.count<12)[failures addObject:[NSString stringWithFormat:@"%@：PHP 运行时尚未接入",url.lastPathComponent]];}
+                else if([@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:ext]){NSDictionary *service=[MediaPackageImporter importFile:url companionFiles:@{} runtimeHint:nil error:&error];if(service){[ServiceStore save:service];[services addObject:service];}else if(failures.count<12)[failures addObject:[NSString stringWithFormat:@"%@：%@",url.lastPathComponent,error.localizedDescription?:@"资源包无法识别"]];}
+                else{file=[NSFileHandle fileHandleForReadingFromURL:url error:&error];if(file)data=[file readDataUpToLength:limit+1 error:&error];if(data.length>limit){data=nil;error=[NSError errorWithDomain:@"CCTVHostFolderImport" code:1 userInfo:@{NSLocalizedDescriptionKey:@"文件超出大小上限"}];}
+                    if(data&&[ext isEqual:@"json"]){NSDictionary *catalog=[TVBoxCatalogStore parseData:data sourceURL:nil error:&error];if(catalog)[catalogs addObject:catalog];else if(failures.count<12)[failures addObject:[NSString stringWithFormat:@"%@：%@",url.lastPathComponent,error.localizedDescription?:@"不是有效 TVBox JSON"]];}
+                    else if(data){NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];if(text.length&&[M3UParser parse:text baseURL:nil].count)[playlists addObject:@{@"data":data,@"name":url.lastPathComponent}];else if(failures.count<12)[failures addObject:[NSString stringWithFormat:@"%@：不是有效的 UTF-8 直播列表",url.lastPathComponent]];}
+                    else if(failures.count<12)[failures addObject:[NSString stringWithFormat:@"%@：%@",url.lastPathComponent,error.localizedDescription?:@"读取失败"]];
+                }
+            }@catch(NSException *exception){if(failures.count<12)[failures addObject:[NSString stringWithFormat:@"%@：检查失败",url.lastPathComponent]];}@finally{[file closeAndReturnError:NULL];if(childScoped)[url stopAccessingSecurityScopedResource];}
+        }
+        if(scoped)[folder stopAccessingSecurityScopedResource];
+        dispatch_async(dispatch_get_main_queue(),^{RootViewController *owner=weakSelf;if(!owner){for(NSDictionary *service in services)[ServiceStore remove:service[@"id"]];return;}owner.navigationItem.prompt=nil;NSUInteger savedCatalogs=0;for(NSDictionary *catalog in catalogs){NSString *url=catalog[@"url"]?:@"";BOOL duplicate=NO;for(NSDictionary *existing in [TVBoxCatalogStore catalogs])if(url.length&&[existing[@"url"] isEqual:url]){duplicate=YES;break;}if(duplicate||[TVBoxCatalogStore catalogs].count>=50)continue;[TVBoxCatalogStore saveCatalog:catalog];savedCatalogs++;}for(NSDictionary *playlist in playlists)[owner importPlaylistData:playlist[@"data"] name:playlist[@"name"]];if(services.count||savedCatalogs)[owner refreshConfigurationPage];NSMutableArray *summary=[NSMutableArray arrayWithObject:[NSString stringWithFormat:@"影视脚本 %lu 个 · TVBox 合集 %lu 个 · 直播列表 %lu 个",(unsigned long)services.count,(unsigned long)savedCatalogs,(unsigned long)playlists.count]];if(truncated)[summary addObject:@"扫描已达到文件数量上限，部分内容未处理。"];
+            if(failures.count)[summary addObject:[NSString stringWithFormat:@"跳过或失败：%@",[failures componentsJoinedByString:@"\n"]]];UIAlertController *alert=[UIAlertController alertControllerWithTitle:(services.count||savedCatalogs||playlists.count)?@"文件夹导入完成":@"未发现可导入内容" message:[summary componentsJoinedByString:@"\n\n"] preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:alert animated:YES completion:nil];});
+    });
 }
 - (void)downloadPackageURL:(NSURL *)url completion:(void (^)(NSDictionary *,NSError *))completion {
     [self downloadPackageURL:url headers:nil runtimeHint:nil completion:completion];
@@ -2267,13 +2319,14 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [alert addAction:[UIAlertAction actionWithTitle:@"查看能力与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self openPluginResource:[@"plugin:" stringByAppendingString:service[@"id"]]];}]];
     [self presentViewController:alert animated:YES completion:nil];
 }
-- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importMediaPackageRuntimeHint=nil;self.importingTVBoxCatalog=NO;}
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importingFolder=NO;self.importMediaPackageRuntimeHint=nil;self.importingTVBoxCatalog=NO;}
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    NSURL *u=urls.firstObject;if(!u){self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importMediaPackageRuntimeHint=nil;self.importingTVBoxCatalog=NO;return;}
+    if(self.importingFolder){self.importingFolder=NO;NSURL *folder=urls.firstObject;if(folder)[self importResourceFolderContents:folder];return;}
+    NSURL *u=urls.firstObject;if(!u){self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importingFolder=NO;self.importMediaPackageRuntimeHint=nil;self.importingTVBoxCatalog=NO;return;}
     if(self.importingTVBoxCatalog){self.importingTVBoxCatalog=NO;BOOL scoped=[u startAccessingSecurityScopedResource];__weak typeof(self) weakSelf=self;self.navigationItem.prompt=@"正在读取 TVBox 配置…";dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{NSError *readError=nil;NSData *data=nil;NSFileHandle *file=[NSFileHandle fileHandleForReadingFromURL:u error:&readError];@try{if(file)data=[file readDataUpToLength:8*1024*1024+1 error:&readError];}@catch(NSException *exception){readError=[NSError errorWithDomain:@"CCTVHostImport" code:1 userInfo:@{NSLocalizedDescriptionKey:@"无法读取所选 TVBox JSON 文件"}];}@finally{[file closeAndReturnError:NULL];if(scoped)[u stopAccessingSecurityScopedResource];}if(data.length>8*1024*1024){data=nil;readError=[NSError errorWithDomain:@"CCTVHostTVBox" code:2 userInfo:@{NSLocalizedDescriptionKey:@"TVBox 配置超过 8 MiB 上限"}];}NSError *parseError=nil;NSDictionary *catalog=data? [TVBoxCatalogStore parseData:data sourceURL:nil error:&parseError]:nil;dispatch_async(dispatch_get_main_queue(),^{RootViewController *owner=weakSelf;owner.navigationItem.prompt=nil;if(readError)[owner showServiceError:readError.localizedDescription];else if(parseError)[owner showServiceError:parseError.localizedDescription];else[owner acceptTVBoxCatalog:catalog];});});return;}
-    if(self.importingMediaPackage){self.importingMediaPackage=NO;NSString *runtimeHint=self.importMediaPackageRuntimeHint;self.importMediaPackageRuntimeHint=nil;self.navigationItem.prompt=@"正在检查并导入资源…";BOOL scoped=[u startAccessingSecurityScopedResource];__weak typeof(self) weakSelf=self;
+    if(self.importingMediaPackage){self.importingMediaPackage=NO;NSString *runtimeHint=self.importMediaPackageRuntimeHint;self.importMediaPackageRuntimeHint=nil;if(urls.count>1){[self importMultipleMediaFiles:urls runtimeHint:runtimeHint];return;}self.navigationItem.prompt=@"正在检查并导入资源…";BOOL scoped=[u startAccessingSecurityScopedResource];__weak typeof(self) weakSelf=self;
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{NSError *error=nil;NSDictionary *service=nil;@try{service=[MediaPackageImporter importFile:u companionFiles:@{} runtimeHint:runtimeHint error:&error];}@finally{if(scoped)[u stopAccessingSecurityScopedResource];}dispatch_async(dispatch_get_main_queue(),^{[weakSelf acceptImportedMedia:service error:error];});}});return;}
-    BOOL playlist=self.importingPlaylist;self.importingPlaylist=NO;
+    BOOL playlist=self.importingPlaylist;self.importingPlaylist=NO;if(playlist&&urls.count>1){[self importMultiplePlaylistFiles:urls];return;}
     BOOL scoped=[u startAccessingSecurityScopedResource];__weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{@autoreleasepool {
         NSUInteger limit=(playlist?10:32)*1024*1024;NSError *readError=nil;NSData *data=nil;
@@ -2760,7 +2813,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
 - (void)addSubscription {
     ResourceImportSheetViewController *sheet=[ResourceImportSheetViewController new];
-    sheet.modalPresentationStyle=UIModalPresentationPageSheet;
+    sheet.modalPresentationStyle=UIModalPresentationFullScreen;
     __weak typeof(self) weakSelf=self;
     sheet.onSelect=^(ResourceImportOption option){
         RootViewController *owner=weakSelf;if(!owner)return;
@@ -2773,9 +2826,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             case ResourceImportOptionLiveFile:{
                 owner.importingPlaylist=YES;owner.importingMediaPackage=NO;owner.importMediaPackageRuntimeHint=nil;
                 UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];
-                picker.delegate=owner;
+                picker.delegate=owner;picker.allowsMultipleSelection=YES;
                 [owner presentViewController:picker animated:YES completion:nil];
             }break;
+            case ResourceImportOptionFolder:[owner importLocalResourceFolder];break;
             case ResourceImportOptionMediaFile:[owner importMediaPackage];break;
             case ResourceImportOptionPythonFile:[owner importMediaPackageWithRuntimeHint:@"python"];break;
             case ResourceImportOptionNodeFile:[owner importMediaPackageWithRuntimeHint:@"node"];break;

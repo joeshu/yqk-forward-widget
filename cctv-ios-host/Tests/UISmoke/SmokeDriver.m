@@ -360,7 +360,7 @@ static void next(NSArray *steps, NSUInteger index) {
                       isKindOfClass:NSClassFromString(@"ConfigCenterViewController")],
                   @"configuration tab embedded");
             UIStackView *resourceFilters=[[root valueForKey:@"tabPage"] valueForKey:@"kindStack"];
-            check(resourceFilters.arrangedSubviews.count==6, @"resources page exposes counted filters for all, VOD, live, catalogs, scripts and attention");
+            check(resourceFilters.arrangedSubviews.count>=6, @"resources page exposes counted type filters and dynamic source-domain filters");
             capture(self.window, @"03-configuration");
             ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPage"];
             resourceProfilesProvider=resourcePage.profilesProvider;
@@ -394,8 +394,8 @@ static void next(NSArray *steps, NSUInteger index) {
             ResourceImportSheetViewController *sheet=(id)nav.presentedViewController;
             check([sheet isKindOfClass:ResourceImportSheetViewController.class], @"resource add opens the grouped import sheet");
             UITableView *options=[sheet valueForKey:@"tableView"];
-            check([options numberOfSections]==3 && [options numberOfRowsInSection:0]==7 && [options numberOfRowsInSection:1]==5 && [options numberOfRowsInSection:2]==2,
-                  @"resource sheet exposes smart, Python, CatVod, Node, TVBox, MacCMS, playlist, local-file and capability-guide actions");
+            check([options numberOfSections]==3 && [options numberOfRowsInSection:0]==3 && [options numberOfRowsInSection:1]==9 && [options numberOfRowsInSection:2]==7,
+                  @"resource sheet exposes supported server, TVBox, script, playlist, folder, local-file and capability-guide actions");
             capture(self.window, @"03b-add-resource");
             [sheet dismissViewControllerAnimated:NO completion:nil];
             [root openServicesPage];
@@ -491,7 +491,7 @@ static void next(NSArray *steps, NSUInteger index) {
             UIScrollView *filterScroll=[resourcePage valueForKey:@"kindScroll"];
             CGRect filtersInHeader=[filterScroll convertRect:filterScroll.bounds toView:resourcePage.tableView.tableHeaderView];
             check(CGRectGetMinY(filtersInHeader)>=0&&CGRectGetMaxY(filtersInHeader)<=CGRectGetHeight(resourcePage.tableView.tableHeaderView.frame)+1,[NSString stringWithFormat:@"resource category filters stay inside the measured header after return (filters=%@ header=%.1f)",NSStringFromCGRect(filtersInHeader),CGRectGetHeight(resourcePage.tableView.tableHeaderView.frame)]);
-            BOOL filtersStable=filterInstances.count==6&&filters.arrangedSubviews.count==filterInstances.count;
+            BOOL filtersStable=filterInstances.count>=6&&filters.arrangedSubviews.count==filterInstances.count;
             for(NSUInteger index=0;filtersStable&&index<filterInstances.count;index++)filtersStable=filters.arrangedSubviews[index]==filterInstances[index];
             check(filtersStable,@"resource filter controls keep the same views across repeated refreshes");
             check(resourcePage.tableView.estimatedRowHeight==0&&resourcePage.tableView.estimatedSectionHeaderHeight==0,@"resource list measures variable-height rows and summary headers without estimates");

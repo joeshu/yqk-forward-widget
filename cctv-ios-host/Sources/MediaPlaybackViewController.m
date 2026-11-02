@@ -290,7 +290,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 }
 - (instancetype)init {if((self=[super init])){_lineIndex=0;_episodeIndex=0;_selectedAlternateIndex=-1;}return self;}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.view.backgroundColor=HostBackground();
+    [super viewDidLoad];self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;self.view.backgroundColor=HostBackground();
     self.diagnosticTraceID=[self.context[@"correlationID"] isKindOfClass:NSString.class]&&[self.context[@"correlationID"] length]?self.context[@"correlationID"]:NSUUID.UUID.UUIDString.lowercaseString;
     self.lineIndex=[self.context[@"lineIndex"] integerValue];self.episodeIndex=[self.context[@"episodeIndex"] integerValue];
     if(self.lineIndex<0||self.lineIndex>=self.lines.count)self.lineIndex=0;

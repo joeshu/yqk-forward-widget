@@ -103,17 +103,13 @@
 @implementation ResourceImportSheetViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;
     UIColor *sheetSurface=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.055 green:0.059 blue:0.075 alpha:1]:[UIColor colorWithRed:0.94 green:0.949 blue:0.969 alpha:1];}];
     self.view.backgroundColor=sheetSurface;
 
     UIView *header=[UIView new];
     header.translatesAutoresizingMaskIntoConstraints=NO;
     [self.view addSubview:header];
-    UIView *grabber=[UIView new];
-    grabber.backgroundColor=HostBorder();
-    grabber.layer.cornerRadius=3;
-    grabber.translatesAutoresizingMaskIntoConstraints=NO;
-    [header addSubview:grabber];
     UILabel *title=[UILabel new];
     title.text=@"添加资源";
     title.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleLargeTitle] scaledFontForFont:[UIFont systemFontOfSize:28 weight:UIFontWeightBold]];
@@ -152,13 +148,9 @@
         [header.topAnchor constraintEqualToAnchor:safe.topAnchor],
         [header.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [header.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [header.heightAnchor constraintGreaterThanOrEqualToConstant:100],
-        [grabber.topAnchor constraintEqualToAnchor:header.topAnchor constant:8],
-        [grabber.centerXAnchor constraintEqualToAnchor:header.centerXAnchor],
-        [grabber.widthAnchor constraintEqualToConstant:58],
-        [grabber.heightAnchor constraintEqualToConstant:6],
+        [header.heightAnchor constraintGreaterThanOrEqualToConstant:76],
         [title.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:24],
-        [title.topAnchor constraintEqualToAnchor:grabber.bottomAnchor constant:18],
+        [title.topAnchor constraintEqualToAnchor:header.topAnchor constant:14],
         [title.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-10],
         [title.trailingAnchor constraintLessThanOrEqualToAnchor:close.leadingAnchor constant:-12],
         [close.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-22],
@@ -171,23 +163,16 @@
         [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
     ]];
 
-    UISheetPresentationController *sheet=self.sheetPresentationController;
-    if(sheet){
-        sheet.detents=@[UISheetPresentationControllerDetent.largeDetent];
-        sheet.prefersGrabberVisible=NO;
-        sheet.preferredCornerRadius=30;
-        sheet.largestUndimmedDetentIdentifier=nil;
-    }
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self optionsForSection:section].count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return @[@"在线导入",@"从本地导入",@"资源管理"][section];
+    return @[@"媒体服务器",@"影视源",@"从本地导入"][section];
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if(section==0)return @"脚本格式入口共用同一校验器。Node 快捷入口用于自动扫描不出来的动态 Node 模块引用；其余入口仍以实际代码和声明识别。";
-    if(section==1)return @"ZIP 会检查入口、相对路径、大小和声明后再保存；导入时不执行插件代码。";
-    return @"详情页可查看识别的运行时/协议，并在启动后检测实际接口能力。";
+    if(section==0)return @"Emby / Jellyfin 原生服务器适配尚未接入。可从“脚本与服务”导入已有兼容影视服务；未接入的服务器不会伪装成可播放资源。";
+    if(section==1)return @"TVBox、脚本和直播列表可实际导入。Kazumi 规则与 WebDAV / SFTP / FTP 挂载尚无可调用后端，不会保存为不可播放来源。";
+    return @"ZIP 会校验入口、相对路径、大小和声明后再保存；导入阶段不会执行插件代码。";
 }
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
     UILabel *label=[UILabel new];
@@ -201,43 +186,51 @@
     return container;
 }
 - (NSArray<NSDictionary *> *)optionsForSection:(NSInteger)section {
-    static NSArray *online,*local,*manage;
+    static NSArray *servers,*video,*local;
     static dispatch_once_t once;
     dispatch_once(&once,^{
         UIColor *(^rgb)(CGFloat,CGFloat,CGFloat)=^UIColor *(CGFloat r,CGFloat g,CGFloat b){return [UIColor colorWithRed:r/255.0 green:g/255.0 blue:b/255.0 alpha:1];};
-        online=@[
-            @{ @"id":@"live-url",@"title":@"直播列表链接",@"detail":@"M3U / TXT 订阅地址",@"icon":@"dot.radiowaves.left.and.right",@"color":rgb(246,151,0),@"option":@(ResourceImportOptionLiveURL)},
-            @{ @"id":@"script-auto-url",@"title":@"脚本链接 · 自动识别",@"detail":@"JS、Python、ZIP 和 .md5；推荐此入口",@"icon":@"sparkles",@"color":rgb(35,132,238),@"option":@(ResourceImportOptionMediaURL)},
-            @{ @"id":@"python-url",@"title":@"Python Spider 链接",@"detail":@"TVBox .py Spider；用内置 CPython 启动",@"icon":@"chevron.left.forwardslash.chevron.right",@"color":rgb(54,137,91),@"option":@(ResourceImportOptionPythonURL)},
-            @{ @"id":@"catvod-url",@"title":@"CatVod / TVBox JS 链接",@"detail":@"CatVod、猫源、.js.md5；自动检查协议",@"icon":@"film.stack",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionCatVodURL)},
-            @{ @"id":@"node-url",@"title":@"Node.js Mobile 链接",@"detail":@"用于动态 require 或 Node 内置模块；显式走 Node 18.20.4",@"icon":@"shippingbox",@"color":rgb(75,102,186),@"option":@(ResourceImportOptionNodeURL)},
-            @{ @"id":@"tvbox-url",@"title":@"TVBox 配置链接",@"detail":@"JSON 目录；站点脚本逐项检查后导入",@"icon":@"square.stack.3d.up",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionTVBox)},
-            @{ @"id":@"maccms-url",@"title":@"MacCMS 影视接口",@"detail":@"JSON / XML 采集 API；不需要脚本运行时",@"icon":@"film",@"color":rgb(197,67,147),@"option":@(ResourceImportOptionMacCMS)}
+        servers=@[
+            @{ @"id":@"emby-server",@"title":@"Emby 服务器",@"detail":@"本版本尚未接入 Emby 登录、媒体库与播放适配",@"icon":@"play.rectangle.fill",@"color":rgb(54,150,93),@"unsupported":@YES},
+            @{ @"id":@"jellyfin-server",@"title":@"飞牛影视 / Jellyfin",@"detail":@"本版本尚未接入 fnOS / Jellyfin 媒体库适配",@"icon":@"server.rack",@"color":rgb(76,112,232),@"unsupported":@YES},
+            @{ @"id":@"services",@"title":@"脚本与服务",@"detail":@"查看、启动和管理本机影视 / 直播服务",@"icon":@"slider.horizontal.3",@"color":rgb(229,43,105),@"option":@(ResourceImportOptionServices)}
+        ];
+        video=@[
+            @{ @"id":@"tvbox-url",@"title":@"TVBox 影视源",@"detail":@"粘贴配置地址，解析 JSON 后逐站点识别",@"icon":@"square.stack.3d.up",@"color":rgb(229,43,105),@"option":@(ResourceImportOptionTVBox)},
+            @{ @"id":@"kazumi",@"title":@"Kazumi 规则仓库",@"detail":@"规则搜索与解析后端尚未接入",@"icon":@"film.stack",@"color":rgb(103,83,222),@"unsupported":@YES},
+            @{ @"id":@"network-mount",@"title":@"网络挂载",@"detail":@"WebDAV / SFTP / FTP 与 TMDB 刮削后端尚未接入",@"icon":@"folder.badge.plus",@"color":rgb(246,151,0),@"unsupported":@YES},
+            @{ @"id":@"live-url",@"title":@"直播频道",@"detail":@"M3U / TXT 直播订阅地址",@"icon":@"dot.radiowaves.left.and.right",@"color":rgb(246,151,0),@"option":@(ResourceImportOptionLiveURL)},
+            @{ @"id":@"script-auto-url",@"title":@"影视脚本链接 · 自动识别",@"detail":@"JS、Python、ZIP 与 .md5；统一运行时检测",@"icon":@"sparkles",@"color":rgb(35,132,238),@"option":@(ResourceImportOptionMediaURL)},
+            @{ @"id":@"python-url",@"title":@"Python Spider 链接",@"detail":@"TVBox .py Spider；由内置 CPython 启动",@"icon":@"chevron.left.forwardslash.chevron.right",@"color":rgb(54,137,91),@"option":@(ResourceImportOptionPythonURL)},
+            @{ @"id":@"catvod-url",@"title":@"CatVod / TVBox JS 链接",@"detail":@"CatVod、DRPY 与 .js.md5；检查协议和入口",@"icon":@"film.stack",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionCatVodURL)},
+            @{ @"id":@"node-url",@"title":@"Node.js Mobile 链接",@"detail":@"Node 18.20.4；支持动态 require 与内置模块",@"icon":@"shippingbox",@"color":rgb(75,102,186),@"option":@(ResourceImportOptionNodeURL)},
+            @{ @"id":@"maccms-url",@"title":@"MacCMS 影视接口",@"detail":@"JSON / XML 采集 API，不依赖脚本运行时",@"icon":@"film",@"color":rgb(197,67,147),@"option":@(ResourceImportOptionMacCMS)}
         ];
         local=@[
             @{ @"id":@"live-file",@"title":@"导入直播列表文件",@"detail":@"本地 M3U / M3U8 / TXT 频道列表",@"icon":@"dot.radiowaves.left.and.right",@"color":rgb(246,151,0),@"option":@(ResourceImportOptionLiveFile)},
+            @{ @"id":@"folder-import",@"title":@"导入文件夹里的源",@"detail":@"扫描并批量识别 JS / Python / ZIP、TVBox JSON 与直播列表",@"icon":@"folder.badge.plus",@"color":rgb(45,127,164),@"option":@(ResourceImportOptionFolder)},
             @{ @"id":@"script-auto-file",@"title":@"导入脚本 / ZIP · 自动识别",@"detail":@"检查入口、运行环境、协议和校验文件",@"icon":@"doc.zipper",@"color":rgb(92,83,218),@"option":@(ResourceImportOptionMediaFile)},
             @{ @"id":@"python-file",@"title":@"导入 Python Spider 文件",@"detail":@"选择 .py；按 Spider 接口识别影视能力",@"icon":@"chevron.left.forwardslash.chevron.right",@"color":rgb(54,137,91),@"option":@(ResourceImportOptionPythonFile)},
             @{ @"id":@"node-file",@"title":@"导入 Node.js Mobile 脚本 / ZIP",@"detail":@"显式选 Node 运行时，支持动态 Node 模块引用",@"icon":@"shippingbox",@"color":rgb(75,102,186),@"option":@(ResourceImportOptionNodeFile)},
-            @{ @"id":@"tvbox-file",@"title":@"导入 TVBox JSON",@"detail":@"本地导入配置目录，不覆盖现有目录",@"icon":@"doc.text",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionTVBox)}
-        ];
-        manage=@[
-            @{ @"id":@"services",@"title":@"脚本与服务",@"detail":@"查看、启用、探测能力和管理已导入资源",@"icon":@"slider.horizontal.3",@"color":rgb(229,43,105),@"option":@(ResourceImportOptionServices)},
-            @{ @"id":@"host-capabilities",@"title":@"宿主运行能力与调用示例",@"detail":@"Python AES-CTR、localProxy、Node HTTP、超时与识别规则",@"icon":@"wrench.and.screwdriver",@"color":rgb(45,127,164),@"option":@(ResourceImportOptionHostCapabilities)}
+            @{ @"id":@"tvbox-file",@"title":@"导入 TVBox JSON",@"detail":@"本地导入配置目录，不覆盖现有目录",@"icon":@"doc.text",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionTVBox)},
+            @{ @"id":@"host-capabilities",@"title":@"宿主运行能力与调用示例",@"detail":@"Python AES-CTR、Node HTTP、播放超时与识别规则",@"icon":@"wrench.and.screwdriver",@"color":rgb(45,127,164),@"option":@(ResourceImportOptionHostCapabilities)}
         ];
     });
-    return @[online,local,manage][section];
+    return @[servers,video,local][section];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     ResourceImportSheetCell *cell=[tableView dequeueReusableCellWithIdentifier:@"resource-option" forIndexPath:indexPath];
     NSDictionary *item=[self optionsForSection:indexPath.section][indexPath.row];
     [cell configureWithTitle:item[@"title"] detail:item[@"detail"] icon:item[@"icon"] color:item[@"color"]];
     cell.accessibilityIdentifier=[@"resource-import.option." stringByAppendingString:item[@"id"]?:@"unknown"];
+    cell.accessibilityValue=[item[@"unsupported"] boolValue]?@"当前宿主未接入":nil;
     return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    NSNumber *storedOption=[self optionsForSection:indexPath.section][indexPath.row][@"option"];
+    NSDictionary *item=[self optionsForSection:indexPath.section][indexPath.row];
+    if([item[@"unsupported"] boolValue]){NSString *message=[NSString stringWithFormat:@"%@目前只有入口规划，项目尚未实现对应的认证、媒体库和播放适配，因此没有保存或加入来源。可以先使用脚本 / TVBox 方式导入已有兼容接口。",item[@"title"]?:@"此资源类型"];UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"当前版本暂不支持" message:message preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];[self presentViewController:alert animated:YES completion:nil];return;}
+    NSNumber *storedOption=item[@"option"];
     ResourceImportOption option=(ResourceImportOption)storedOption.integerValue;
     void (^selection)(ResourceImportOption)=self.onSelect;
     [self dismissViewControllerAnimated:YES completion:^{if(selection)selection(option);}];
