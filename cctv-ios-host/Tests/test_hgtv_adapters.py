@@ -27,6 +27,18 @@ def box(kind, payload):
     return struct.pack('>I4s', len(payload) + 8, kind) + payload
 
 
+def hevc_config(level=186):
+    record = bytearray(23)
+    record[0] = 1
+    record[12] = level
+    record[22] = 1
+    # SPS includes emulation-prevention bytes before general_level_idc.
+    sps = bytearray.fromhex('420103016000000300000300000300000300ba00')
+    sps[18] = level
+    array = bytes([0x80 | 33]) + struct.pack('>H', 1) + struct.pack('>H', len(sps)) + sps
+    return bytes(record) + array
+
+
 def encrypted_fixture():
     key = bytes.fromhex('2b7e151628aed2a6abf7158809cf4f3c')
     iv8 = bytes.fromhex('f0f1f2f3f4f5f6f7')
@@ -39,7 +51,9 @@ def encrypted_fixture():
     schm = box(b'schm', b'\0\0\0\0cenc\0\x01\0\0')
     tenc = box(b'tenc', b'\0\0\0\0\0\x01\x08' + b'k' * 16)
     sinf = box(b'sinf', frma + schm + box(b'schi', tenc))
-    sample_entry = box(b'encv', b'\0' * 78 + sinf)
+    visual_entry = bytearray(78)
+    struct.pack_into('>HH', visual_entry, 24, 360, 640)
+    sample_entry = box(b'encv', bytes(visual_entry) + box(b'hvcC', hevc_config()) + sinf)
     stsd = box(b'stsd', b'\0' * 4 + struct.pack('>I', 1) + sample_entry)
     stsz = box(b'stsz', b'\0' * 4 + struct.pack('>II', 0, 1) + struct.pack('>I', len(plain)))
     stsc = box(b'stsc', b'\0' * 4 + struct.pack('>I', 1) + struct.pack('>III', 1, 1, 1))
@@ -90,6 +104,44 @@ class HgtvAdapterTests(unittest.TestCase):
         self.assertIn(b'hvc1', output)
         self.assertNotIn(b'encv', output)
         self.assertNotIn(b'senc', output)
+
+    def test_cenc_decrypt_normalizes_overreported_hevc_level_for_ios(self):
+        for output in (self.decrypted_path.read_bytes(), self.decrypted_104_path.read_bytes()):
+            self.assertEqual(output[8:12], b'hvc1')
+            hvcc_type = output.index(b'hvcC')
+            hvcc_size = struct.unpack_from('>I', output, hvcc_type - 4)[0]
+            record = output[hvcc_type + 4:hvcc_type - 4 + hvcc_size]
+            self.assertEqual(record[12], 93)  # 360x640, ≤60 fps -> HEVC level 3.1
+            pos = 23
+            sps_level = None
+            for _ in range(record[22]):
+                nal_type = record[pos] & 0x3F
+                count = struct.unpack_from('>H', record, pos + 1)[0]
+                pos += 3
+                for _ in range(count):
+                    size = struct.unpack_from('>H', record, pos)[0]
+                    pos += 2
+                    nal = record[pos:pos + size]
+                    pos += size
+                    if nal_type == 33:
+                        rbsp = bytearray()
+                        zeros = 0
+                        for byte in nal[2:]:
+                            if zeros >= 2 and byte == 3:
+                                continue
+                            rbsp.append(byte)
+                            zeros = min(2, zeros + 1) if byte == 0 else 0
+                        sps_level = rbsp[12]
+            self.assertEqual(sps_level, 93)
+
+    def test_cenc_decrypt_works_with_hostcrypto_when_pycryptodome_is_absent(self):
+        for module, output_path in ((hgtv, self.decrypted_path),
+                                    (hgtv104, self.decrypted_104_path)):
+            with self.subTest(version=module.VERSION), \
+                 mock.patch.object(module, '_HAS_CRYPTO', False):
+                module._cenc_decrypt(str(self.encrypted_path), str(output_path), self.key)
+                output = output_path.read_bytes()
+                self.assertEqual(output[self.sample_offset:self.sample_offset + len(self.plain)], self.plain)
 
     @unittest.skipUnless(shutil.which('node'), 'requires Node to verify the JavaScript CENC path')
     def test_node_cenc_decrypt_and_range_parser_match_python_adapter(self):

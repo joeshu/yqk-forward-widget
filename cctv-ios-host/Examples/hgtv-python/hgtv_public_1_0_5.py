@@ -1515,9 +1515,147 @@ def _replace_fourcc(data, old, new):
         pos += 4
 
 
+def _iter_mp4_boxes(data, start, end):
+    """Iterate bounded child boxes without scanning into a sibling box."""
+    offset = start
+    while offset + 8 <= end:
+        item = _rd_box(data, offset)
+        if not item or item["offset"] + item["size"] > end:
+            return
+        yield item
+        offset = item["offset"] + item["size"]
+
+
+def _mp4_child(data, parent, kind):
+    if not parent:
+        return None
+    for item in _iter_mp4_boxes(data, parent["body"], parent["offset"] + parent["size"]):
+        if item["type"] == kind:
+            return item
+    return None
+
+
+def _hevc_entries(data, moov):
+    """Yield each HEVC config record and its coded dimensions from stsd."""
+    if not moov:
+        return
+    for trak in _iter_mp4_boxes(data, moov["body"], moov["offset"] + moov["size"]):
+        if trak["type"] != "trak":
+            continue
+        mdia = _mp4_child(data, trak, "mdia")
+        minf = _mp4_child(data, mdia, "minf")
+        stbl = _mp4_child(data, minf, "stbl")
+        stsd = _mp4_child(data, stbl, "stsd")
+        if not stsd or stsd["offset"] + stsd["size"] - stsd["body"] < 8:
+            continue
+        pos = stsd["body"] + 8  # full-box header and entry_count
+        end = stsd["offset"] + stsd["size"]
+        while pos + 8 <= end:
+            entry = _rd_box(data, pos)
+            if not entry or entry["offset"] + entry["size"] > end:
+                break
+            if entry["type"] in ("hvc1", "hev1", "encv") and entry["size"] >= entry["header"] + 78:
+                width, height = _struct.unpack_from(">HH", data, entry["body"] + 24)
+                child_start = entry["body"] + 78
+                for child in _iter_mp4_boxes(data, child_start, entry["offset"] + entry["size"]):
+                    if child["type"] == "hvcC":
+                        yield child, width, height, entry["type"]
+            pos = entry["offset"] + entry["size"]
+
+
+def _hevc_compat_level(width, height):
+    """Return a safe ≤60 fps HEVC level for the coded dimensions.
+
+    HGTV's encrypted streams commonly label 360x640 video as level 6.2.
+    That can exceed iPhone hardware decoder limits despite the tiny picture
+    and make AVFoundation report no video track. Keep a conservative level
+    that covers the picture and a 60 fps sample rate; leave larger streams
+    untouched when a safe level cannot be inferred.
+    """
+    pixels = int(width) * int(height)
+    if pixels <= 552960:       # Level 3.1: 33.18 Mpixel/s
+        return 93
+    if pixels <= 2228224:      # Level 4.1: 133.69 Mpixel/s
+        return 123
+    if pixels <= 8912896:      # Level 5.1: 534.77 Mpixel/s
+        return 153
+    return None
+
+
+def _normalize_hevc_for_ios(header, moov):
+    """Normalize over-reported HEVC levels and advertise the hvc1 brand.
+
+    The CENC samples are already decrypted when this runs. We update both the
+    HEVCDecoderConfigurationRecord and SPS NALUs in place, so MP4 chunk offsets
+    and all media bytes remain unchanged.
+    """
+    entries = list(_hevc_entries(header, moov))
+    if not entries:
+        return
+    brand = b"hvc1" if any(item[3] != "hev1" for item in entries) else b"hev1"
+    ftyp = _rd_box(header, 0)
+    if ftyp and ftyp["type"] == "ftyp" and ftyp["size"] >= 16:
+        compatible_start = ftyp["body"] + 8
+        compatible_end = ftyp["offset"] + ftyp["size"]
+        compatible = [bytes(header[offset:offset + 4])
+                      for offset in range(compatible_start, compatible_end - 3, 4)]
+        if b"hvc1" not in compatible and b"hev1" not in compatible:
+            header[ftyp["body"]:ftyp["body"] + 4] = brand
+
+    for config, width, height, _sample_entry_type in entries:
+        target = _hevc_compat_level(width, height)
+        if target is None:
+            continue
+        record_start = config["body"]
+        record_end = config["offset"] + config["size"]
+        if record_end - record_start < 23:
+            continue
+        level_changes = 0
+        if header[record_start + 12] > target:
+            header[record_start + 12] = target
+            level_changes += 1
+        array_count = header[record_start + 22]
+        pos = record_start + 23
+        for _array in range(array_count):
+            if pos + 3 > record_end:
+                break
+            nal_type = header[pos] & 0x3F
+            nal_count = _struct.unpack_from(">H", header, pos + 1)[0]
+            pos += 3
+            for _nal in range(nal_count):
+                if pos + 2 > record_end:
+                    pos = record_end
+                    break
+                nal_length = _struct.unpack_from(">H", header, pos)[0]
+                pos += 2
+                nal_end = pos + nal_length
+                if nal_end > record_end:
+                    pos = record_end
+                    break
+                if nal_type == 33 and nal_length >= 15:  # SPS
+                    rbsp_indices = []
+                    zero_count = 0
+                    for raw_index in range(pos + 2, nal_end):  # skip NAL header
+                        byte = header[raw_index]
+                        if zero_count >= 2 and byte == 3:  # emulation-prevention byte
+                            continue
+                        rbsp_indices.append(raw_index)
+                        zero_count = min(2, zero_count + 1) if byte == 0 else 0
+                    # general_level_idc is byte 12 of the SPS RBSP.
+                    if len(rbsp_indices) > 12:
+                        level_index = rbsp_indices[12]
+                        if header[level_index] > target:
+                            header[level_index] = target
+                            level_changes += 1
+                pos = nal_end
+        if level_changes:
+            _trace("hgtv_hevc_level_normalized", width=width, height=height,
+                   target_level_idc=target, patched_fields=level_changes)
+
+
 def _cenc_decrypt(src, dst, key):
     """CENC(AES-CTR) 解密，无需 ffmpeg。key 为 bytes(16)。"""
-    if not _HAS_CRYPTO:
+    if not _HAS_CRYPTO and _HOSTCRYPTO is None:
         raise RuntimeError("pycryptodome 不可用")
     with open(src, "rb") as source_file:
         data = source_file.read()
@@ -1544,6 +1682,7 @@ def _cenc_decrypt(src, dst, key):
     _replace_fourcc(header, "enca", "mp4a")
     _replace_sinf(header)
     _clear_aux_boxes(header)
+    _normalize_hevc_for_ios(header, moov)
     out[:len(header)] = header
     for start, end, iv in samples:
         if start >= len(out):
