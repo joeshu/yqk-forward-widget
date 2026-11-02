@@ -118,13 +118,16 @@ def localProxy(self, params):
 请求会把播放器的 `GET`/`HEAD`、`Range` 和常用请求头传入 `localProxy()`；参数 `url` 保留原地址，
 `headers` 是播放器请求头，`range` 是 Range 字符串，`upstreamHeaders` 是播放地址返回的源站请求头。
 回调返回 `[status, headers, body]`，其中 body 为 bytes；宿主管理端口和 HTTP 响应，不把源站 Cookie 交给播放器。
-单次响应上限 16 MiB，较大媒体应返回 Range 分片。原有 `/proxy?url=...` 调用形式继续兼容。
+直接返回 bytes 的单次响应上限为 16 MiB；较大媒体使用下面的文件引用流式返回。原有 `/proxy?url=...` 调用形式继续兼容。
 Python Spider 为兼容非线程安全脚本仍串行执行；代理调用等待前一个回调的排队上限为 120 秒，以容纳首轮下载/解密期间播放器并发的 Range 或 HEAD 请求。普通影视接口仍使用原 12 秒默认排队上限。
 
-Node.js Mobile 资源也可导出 `localProxy(params)`。Node 回调如果需要传输大文件，可把完成的媒体放在该资源的数据目录内，并将第三项设为
-`{__cctvhostFileResponse: true, path, offset, length}`。宿主会校验真实路径仍位于该资源数据目录、文件范围有效且单次响应不超过 16 MiB，随后从文件读取 Range 分片；视频内容不经过 2 MiB 的 Node JSON 控制桥。HEAD 保留声明的 `Content-Length`，但不读取文件内容。文件引用只供 Node 宿主内部使用，Python Spider 应继续直接返回 bytes。
+Python 和 Node.js Mobile 资源都可在第三项返回
+`{__cctvhostFileResponse: true, path, offset, length}`。宿主校验真实路径仍在该资源的数据目录、文件范围有效，然后用 256 KiB 缓冲流式交付，支持完整 GET、开放区间 Range、后缀 Range 和 HEAD。文件引用不受 bytes 的 16 MiB 上限影响；Node 视频数据也不会进入 JSON 控制桥。Python 新宿主会注入 `_cctvhost_file_proxy_supported = True`；HGTV 源在旧宿主上保留小响应的 bytes 兼容路径，较大文件需要更新 IPA。
 
-`Examples/hgtv-python-1.0.4`、`Examples/hgtv-python` 和 `Examples/hgtv-node` 提供红果 1.0.4/1.0.5 的导入示例。Python 版本解析供应商的 `video_meta` 画质字段，默认选最高可用档（通常 1080p）；在宿主提供的 `hostcrypto.AES_CTR` 上完成 CENC 解密，不要求 iPhone 内有 ffmpeg。公开兼容地址可用时直接播放；否则由 `localProxy` 解密并按播放器 Range 请求交付。解密后的 HEVC MP4 会按画面尺寸修正过高的 Level 标记，并设置 `hvc1` 文件品牌，避免部分 AVFoundation 硬件解码器误判视频轨。Node 版本走 Node 原生 AES-CTR，并使用受限数据目录文件引用传输媒体。对应 ZIP 包根目录都带有 `cctvhost.json`。
+`Examples/hgtv-python-1.0.4`、`Examples/hgtv-python` 和 `Examples/hgtv-node` 提供 HGTV 导入示例。两种运行时都读取实际分集画质，默认最高可用档，并返回各档 `alternates`；不存在的档位返回明确错误。JS 从 SSR 的完整 `vid_list` 读取全集。Python 使用 `hostcrypto.AES_CTR`、Node 使用原生 AES-CTR，无需 ffmpeg。解密保留 MP4 盒长度、从 `sinf/frma` 恢复原始编解码标识，再把保护盒类型改成 `free`；不改编码器的 HEVC Level。严格校验会拒绝先前写坏盒长度的缓存。公开试看不存在时明确提示，不将完整签名视频标成试看。包根目录为 `cctvhost.json`。
+
+`Scripts/hgtv-live-matrix.py` 下载指定集的各个实际画质并核对目录；`Scripts/validate-avfoundation.sh` 在 macOS 使用真实 AVFoundation 解析本地文件与 HTTP Range、解出画面，同时保留旧错误结构的对照样本。报告区分目录解析、媒体交付与解码验证，不将接口 HTTP 200 视作已经显示首帧。
+
 
 示例 `Plugins/example-encrypted-media.py` 使用标准库解析 MP4、按样本解密并支持 Range；资源的「插件选项」JSON
 可通过 `items` 配置分集 URL、32 位十六进制 AES-128 密钥和请求头。模板支持未分片 MP4、`stsz/stsc/stco`

@@ -27,7 +27,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, parse_qs, urlencode
 from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedirectHandler
 
-VERSION = '1.0.4-cctvhost'
+VERSION = '1.0.4-cctvhost-r3'
 ORIGIN = 'https://hongguoduanju.com'
 COMPAT_PATH = '/api/video/protected/fallback-play-info'
 UA_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -1355,7 +1355,9 @@ def _pick_best(vm, want):
         for c in cands:
             if c[2] == want and c[0] == 0:
                 return c[3], c[2]
-    return cands[0][3], cands[0][2]
+        return None
+    usable = [c for c in cands if c[0] == 0]
+    return (usable[0][3], usable[0][2]) if usable else None
 
 
 # 用 AES-CTR 逐样本解密 mdat，并把 moov 里的 encv/enca/sinf 改写掉。
@@ -1521,8 +1523,8 @@ def _replace_sinf(header):
         size = _struct.unpack_from(">I", header, pos - 4)[0]
         end = pos - 4 + size
         if 8 <= size < 50000 and end <= len(header):
-            header[pos - 4:pos] = b"free"
-            for i in range(pos, end):
+            header[pos:pos + 4] = b"free"
+            for i in range(pos + 4, end):
                 header[i] = 0
             pos = end
         else:
@@ -1614,94 +1616,74 @@ def _hevc_entries(data, moov):
             pos = entry["offset"] + entry["size"]
 
 
-def _hevc_compat_level(width, height):
-    """Return a safe ≤60 fps HEVC level for the coded dimensions.
-
-    HGTV's encrypted streams commonly label 360x640 video as level 6.2.
-    That can exceed iPhone hardware decoder limits despite the tiny picture
-    and make AVFoundation report no video track. Keep a conservative level
-    that covers the picture and a 60 fps sample rate; leave larger streams
-    untouched when a safe level cannot be inferred.
-    """
-    pixels = int(width) * int(height)
-    if pixels <= 552960:       # Level 3.1: 33.18 Mpixel/s
-        return 93
-    if pixels <= 2228224:      # Level 4.1: 133.69 Mpixel/s
-        return 123
-    if pixels <= 8912896:      # Level 5.1: 534.77 Mpixel/s
-        return 153
-    return None
-
-
-def _normalize_hevc_for_ios(header, moov):
-    """Normalize over-reported HEVC levels and advertise the hvc1 brand.
-
-    The CENC samples are already decrypted when this runs. We update both the
-    HEVCDecoderConfigurationRecord and SPS NALUs in place, so MP4 chunk offsets
-    and all media bytes remain unchanged.
-    """
-    entries = list(_hevc_entries(header, moov))
-    if not entries:
-        return
-    brand = b"hvc1" if any(item[3] != "hev1" for item in entries) else b"hev1"
-    ftyp = _rd_box(header, 0)
-    if ftyp and ftyp["type"] == "ftyp" and ftyp["size"] >= 16:
-        compatible_start = ftyp["body"] + 8
-        compatible_end = ftyp["offset"] + ftyp["size"]
-        compatible = [bytes(header[offset:offset + 4])
-                      for offset in range(compatible_start, compatible_end - 3, 4)]
-        if b"hvc1" not in compatible and b"hev1" not in compatible:
-            header[ftyp["body"]:ftyp["body"] + 4] = brand
-
-    for config, width, height, _sample_entry_type in entries:
-        target = _hevc_compat_level(width, height)
-        if target is None:
-            continue
-        record_start = config["body"]
-        record_end = config["offset"] + config["size"]
-        if record_end - record_start < 23:
-            continue
-        level_changes = 0
-        if header[record_start + 12] > target:
-            header[record_start + 12] = target
-            level_changes += 1
-        array_count = header[record_start + 22]
-        pos = record_start + 23
-        for _array in range(array_count):
-            if pos + 3 > record_end:
-                break
-            nal_type = header[pos] & 0x3F
-            nal_count = _struct.unpack_from(">H", header, pos + 1)[0]
-            pos += 3
-            for _nal in range(nal_count):
-                if pos + 2 > record_end:
-                    pos = record_end
-                    break
-                nal_length = _struct.unpack_from(">H", header, pos)[0]
-                pos += 2
-                nal_end = pos + nal_length
-                if nal_end > record_end:
-                    pos = record_end
-                    break
-                if nal_type == 33 and nal_length >= 15:  # SPS
-                    rbsp_indices = []
-                    zero_count = 0
-                    for raw_index in range(pos + 2, nal_end):  # skip NAL header
-                        byte = header[raw_index]
-                        if zero_count >= 2 and byte == 3:  # emulation-prevention byte
+def _restore_protected_entries(header, moov):
+    """Recover each sample codec from sinf/frma before clearing protection."""
+    def visit(parent):
+        for child in _iter_mp4_boxes(header, parent['body'], parent['offset'] + parent['size']):
+            if child['type'] in ('moov', 'trak', 'mdia', 'minf', 'stbl'):
+                visit(child)
+            elif child['type'] == 'stsd':
+                for entry in _iter_mp4_boxes(header, child['body'] + 8, child['offset'] + child['size']):
+                    if entry['type'] not in ('encv', 'enca'):
+                        continue
+                    prefix = 78 if entry['type'] == 'encv' else 28
+                    for box in _iter_mp4_boxes(header, entry['body'] + prefix, entry['offset'] + entry['size']):
+                        if box['type'] != 'sinf':
                             continue
-                        rbsp_indices.append(raw_index)
-                        zero_count = min(2, zero_count + 1) if byte == 0 else 0
-                    # general_level_idc is byte 12 of the SPS RBSP.
-                    if len(rbsp_indices) > 12:
-                        level_index = rbsp_indices[12]
-                        if header[level_index] > target:
-                            header[level_index] = target
-                            level_changes += 1
-                pos = nal_end
-        if level_changes:
-            _trace("hgtv_hevc_level_normalized", width=width, height=height,
-                   target_level_idc=target, patched_fields=level_changes)
+                        original = _mp4_child(header, box, 'frma')
+                        if not original or original['size'] < original['header'] + 4:
+                            raise ValueError('protected sample entry has no original codec')
+                        codec = bytes(header[original['body']:original['body'] + 4])
+                        header[entry['offset'] + 4:entry['offset'] + 8] = codec
+                        break
+                    else:
+                        raise ValueError('protected sample entry has no sinf')
+    visit(moov)
+
+
+def _validate_clear_moov(data):
+    """Strict box boundaries: FFmpeg scanning alone misses broken stsd boxes."""
+    video_count = 0
+    def boxes(start, end):
+        offset = start
+        while offset < end:
+            item = _rd_box(data, offset)
+            if not item or offset + item['size'] > end:
+                raise ValueError('invalid MP4 child box size')
+            yield item
+            offset += item['size']
+        if offset != end:
+            raise ValueError('incomplete MP4 children')
+    def visit(parent):
+        nonlocal video_count
+        for child in boxes(parent['body'], parent['offset'] + parent['size']):
+            if child['type'] in ('moov', 'trak', 'mdia', 'minf', 'stbl', 'edts', 'dinf'):
+                visit(child)
+            elif child['type'] == 'stsd':
+                if child['size'] < child['header'] + 8:
+                    raise ValueError('truncated stsd')
+                entries = list(boxes(child['body'] + 8, child['offset'] + child['size']))
+                if len(entries) != _u32b(data, child['body'] + 4):
+                    raise ValueError('stsd entry count mismatch')
+                for entry in entries:
+                    kind = entry['type']
+                    if kind in ('encv', 'enca'):
+                        raise ValueError('encrypted sample entry remains')
+                    if kind in ('hvc1', 'hev1', 'avc1', 'avc3', 'av01', 'vp09', 'mp4v'):
+                        if entry['size'] < entry['header'] + 78:
+                            raise ValueError('truncated visual sample entry')
+                        children = list(boxes(entry['body'] + 78, entry['offset'] + entry['size']))
+                        if any(box['type'] == 'sinf' for box in children):
+                            raise ValueError('protection metadata remains')
+                        required = 'hvcC' if kind in ('hvc1', 'hev1') else 'avcC' if kind in ('avc1', 'avc3') else None
+                        if required and not any(box['type'] == required for box in children):
+                            raise ValueError('missing video codec configuration')
+                        video_count += 1
+    moov = _rd_box(data, 0)
+    if not moov or moov['type'] != 'moov' or moov['size'] != len(data):
+        raise ValueError('invalid moov')
+    visit(moov)
+    return video_count > 0
 
 
 def _cenc_decrypt(src, dst, key):
@@ -1729,11 +1711,9 @@ def _cenc_decrypt(src, dst, key):
         raise ValueError("CENC sample table is empty")
     out = bytearray(data)
     header = bytearray(data[:moov["offset"] + moov["size"]])
-    _replace_fourcc(header, "encv", "hvc1")
-    _replace_fourcc(header, "enca", "mp4a")
+    _restore_protected_entries(header, moov)
     _replace_sinf(header)
     _clear_aux_boxes(header)
-    _normalize_hevc_for_ios(header, moov)
     out[:len(header)] = header
     for start, end, iv in samples:
         if start >= len(out):
@@ -1758,6 +1738,8 @@ def _cenc_decrypt(src, dst, key):
     return dst
 
 
+_FFMPEG = None
+
 
 def _ffmpeg_path():
     """探测 ffmpeg；宿主（iOS App 内 Python）通常没有，缓存结果。"""
@@ -1772,18 +1754,33 @@ def _ffmpeg_path():
 
 
 def _verify_mp4(path, min_bytes=8192):
-    """轻量校验：ftyp + moov + 至少一条 trak。防止把加密档/截断档当成成品缓存。"""
+    """Validate clear video descriptions and every relevant MP4 box boundary."""
     try:
-        if _os.path.getsize(path) < min_bytes:
+        size = _os.path.getsize(path)
+        if size < min_bytes:
             return False
-        with open(path, "rb") as f:
-            head = f.read(3 * 1024 * 1024)
-        if b"ftyp" not in head[:128]:
-            return False
-        if b"moov" not in head:
-            return False
-        return head.count(b"trak") >= 1
-    except OSError:
+        with open(path, 'rb') as media:
+            offset, ftyp, moov = 0, False, None
+            while offset + 8 <= size:
+                media.seek(offset)
+                prefix = media.read(16)
+                length, kind = _struct.unpack_from('>I4s', prefix)
+                if length == 1:
+                    length = _struct.unpack_from('>Q', prefix, 8)[0]
+                elif length == 0:
+                    length = size - offset
+                if length < 8 or offset + length > size:
+                    return False
+                if kind == b'ftyp':
+                    ftyp = True
+                if kind == b'moov':
+                    if length > 16 * 1024 * 1024 and not getattr(self, '_cctvhost_file_proxy_supported', False):
+                        return False
+                    media.seek(offset)
+                    moov = media.read(length)
+                offset += length
+            return offset == size and ftyp and moov is not None and _validate_clear_moov(moov)
+    except (OSError, ValueError, IndexError, _struct.error):
         return False
 
 
@@ -1809,9 +1806,10 @@ def _decrypt_to_file(vid, want):
     vm = _signed_model(vid)
     if not vm:
         return None
-    it, q = _pick_best(vm, want)
-    if not it:
+    selected = _pick_best(vm, want)
+    if not selected:
         return None
+    it, q = selected
     _trace("hgtv_quality_selected", episode_id=vid, quality=q)
     dst = _os.path.join(_DEC_DIR, "%s_%s.mp4" % (vid, q))
 
@@ -2153,13 +2151,17 @@ class Spider:
                                   'Accept-Ranges': 'bytes', 'Content-Type': 'video/mp4'}, b'']
                 partial = True
             length = end - start + 1
-            if length > 16 * 1024 * 1024:
+            if length > 16 * 1024 * 1024 and not getattr(self, '_cctvhost_file_proxy_supported', False):
                 return [413, {'Content-Type': 'text/plain; charset=utf-8'},
                         b'request a smaller byte range']
             headers = {'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes',
                        'Content-Length': str(length)}
             if partial:
                 headers['Content-Range'] = 'bytes %d-%d/%d' % (start, end, size)
+            if getattr(self, '_cctvhost_file_proxy_supported', False):
+                return [206 if partial else 200, headers,
+                        {'__cctvhostFileResponse': True, 'path': _os.path.realpath(fp),
+                         'offset': start, 'length': length}]
             if method == 'HEAD':
                 body = b''
             else:
@@ -2194,26 +2196,20 @@ class Spider:
             def resolve_public():
                 if preview:
                     url, referer, expiry = ORIGIN + '/video/public/' + vid + '/360p.mp4', ORIGIN + '/', None
-                    # 试看档同样可能不存在（public 360p 只对部分集开放）-> 不存在则走签名兜底
                     try:
                         self.http.probe(url, {'User-Agent': UA_WEB, 'Referer': ORIGIN + '/'})
                     except Exception:
-                        try:
-                            url, referer, expiry = resolve_signed(sid, vid, preview,
-                                host_proxy=bool(getattr(self, '_cctvhost_proxy_url', '')))
-                            _trace('hgtv_play_signed_fallback', series_id=sid, episode_id=vid, preview=True)
-                        except Exception:
-                            pass
+                        raise SourceError('本集没有公开试看片段，请选择官网完整播放',
+                                          stage='resolve_api', code='public_preview_unavailable')
                 else:
                     try:
-                        url, referer, expiry = self.http.compat(sid, vid)
+                        url, referer, expiry = resolve_signed(sid, vid, False,
+                            host_proxy=bool(getattr(self, '_cctvhost_proxy_url', '')))
+                        _trace('hgtv_play_signed_resolved', series_id=sid, episode_id=vid)
                     except Exception as error:
-                        # 公开档不可用（如 public_fallback_unavailable）时，走签名接口 + CENC 解密
                         try:
-                            url, referer, expiry = resolve_signed(sid, vid, preview,
-                                host_proxy=bool(getattr(self, '_cctvhost_proxy_url', '')))
-                            _trace('hgtv_play_signed_fallback', series_id=sid, episode_id=vid)
-                        except Exception as signed_error:
+                            url, referer, expiry = self.http.compat(sid, vid)
+                        except Exception:
                             raise _stage_error(error, 'resolve_api', 'provider_request_failed')
                 playback_headers = ({} if url.startswith('cenc://') else
                     {'User-Agent': UA_WEB, 'Referer': referer, 'Accept': '*/*', 'Accept-Encoding': 'identity'})
@@ -2250,7 +2246,14 @@ class Spider:
                             verification='signed-cenc-local-proxy' if url.startswith('cenc://') else 'mp4-video-initialization-only',
                             msg='公开试看片段，非整集' if preview else '官网兼容播放；已检查视频轨初始化，未验证客户端完整解码/播放')
                 if url.startswith('cenc://'):
-                    result.update(proxy=1, msg='签名视频已准备；首次播放会在本机解密并按需传输')
+                    vm = _signed_model(vid)
+                    alternatives = []
+                    for quality in _QORDER:
+                        if _pick_best(vm, quality):
+                            alternatives.append({'name': quality, 'url': 'cenc://%s?q=%s' % (vid, quality),
+                                                 'proxy': 1, 'format': 'mp4', 'contentType': 'video/mp4'})
+                    result.update(proxy=1, alternates=alternatives,
+                                  msg='已解析完整视频；默认最高可用画质，解码结果由播放器确认')
                 if preflight_error:
                     result.update(verification='compatibility-api-only',
                                   preflight_warning=_public_error_message(preflight_error),
@@ -2263,7 +2266,7 @@ class Spider:
             # Resolution can use an 18s API budget plus a 20s media probe. A
             # concurrent caller must not time out before that owner can finish.
             result = copy.deepcopy(self.cache.load(('play', preview, sid, vid), resolve_public, ttl, wait_timeout=45))
-            _trace('hgtv_play_success', series_id=sid, episode_id=vid, preview=preview,
+            _trace('hgtv_play_resolved', series_id=sid, episode_id=vid, preview=preview,
                    status=200, failure_stage='', error_code='', retryable=False,
                    elapsed_ms=round((time.monotonic() - started) * 1000))
             return result

@@ -13,6 +13,12 @@ permissions:
 
 
 jobs:
+  media-compat:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/cctv-media-compat.yml
+    permissions:
+      contents: read
+
   build:
     strategy:
       fail-fast: false

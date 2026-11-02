@@ -1,0 +1,51 @@
+name: Validate HGTV media with AVFoundation
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  avfoundation:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18.20.4'
+      - name: Install media fixture dependencies
+        run: python3 -m pip install pycryptodome requests
+      - name: Record Apple toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+      - name: Generate live Python and Node media comparison fixtures
+        working-directory: cctv-ios-host
+        run: |
+          mkdir -p validation-results
+          set -o pipefail
+          python3 -u Scripts/hgtv-live-matrix.py --output validation-media 2>&1 | tee validation-results/matrix.log
+      - name: Parse tracks and decode frames using real AVFoundation
+        if: ${{ !cancelled() }}
+        working-directory: cctv-ios-host
+        run: bash Scripts/validate-avfoundation.sh validation-media validation-results
+      - name: Preserve parser results, decoded frames and HTTP evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCTVHost-AVFoundation-${{ github.run_id }}
+          path: |
+            cctv-ios-host/validation-results/*.json
+            cctv-ios-host/validation-results/*.jsonl
+            cctv-ios-host/validation-results/*.log
+            cctv-ios-host/validation-results/*.png
+            cctv-ios-host/validation-media/**/*.json
+            cctv-ios-host/validation-media/**/*.log
+          if-no-files-found: error
+          retention-days: 14

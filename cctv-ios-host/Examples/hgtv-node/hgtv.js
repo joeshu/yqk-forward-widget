@@ -58,7 +58,6 @@ const SPADE_CONST = Buffer.from(
   'f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
 
 const CACHE_DIR = path.join(process.cwd(), 'hgtv-js-cache');
-const QORDER = ['1080p', '720p', '540p', '480p', '360p'];
 
 const modelCache = new Map();     // vid -> {t, vm}
 const decryptFlights = new Map(); // vid + quality -> Promise<path|null>
@@ -340,15 +339,84 @@ function cardsFrom(html) {
   return out;
 }
 
-async function parseEpisodes(sid) {
-  const html = await siteHtml('/player/' + sid);
+function routerData(html) {
+  const scripts = /<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi;
+  let match;
+  while ((match = scripts.exec(html))) {
+    const script = match[1];
+    const assignment = /^\s*(?:(?:window|globalThis)\.)?_ROUTER_DATA\s*=\s*/.exec(script);
+    if (!assignment || script[assignment[0].length] !== '{') continue;
+    const start = assignment[0].length;
+    let depth = 0, quoted = false, escaped = false;
+    for (let i = start; i < script.length && i - start < 4 * 1024 * 1024; i++) {
+      const ch = script[i];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (ch === '\\') escaped = true;
+        else if (ch === '"') quoted = false;
+      } else if (ch === '"') quoted = true;
+      else if (ch === '{' || ch === '[') depth++;
+      else if (ch === '}' || ch === ']') {
+        if (--depth === 0) {
+          try {
+            const value = JSON.parse(script.slice(start, i + 1));
+            if (value && value.loaderData && typeof value.loaderData === 'object') return value;
+          } catch (error) { }
+          break;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function detailSeries(html, sid) {
+  const router = routerData(html);
+  for (const key of ['detail_page', 'detail_$']) {
+    const page = router && router.loaderData[key];
+    const series = page && (page.seriesDetail || page.series_detail);
+    if (series && String(series.series_id || series.seriesId || series.id) === sid) return series;
+  }
+  return null;
+}
+
+function episodesFrom(html, sid) {
+  const series = detailSeries(html, sid);
+  const rows = series && (series.vid_list || series.video_list || series.videoList || series.episodes);
+  if (Array.isArray(rows)) {
+    const episodes = [], seen = new Set();
+    for (const row of rows) {
+      const item = row && typeof row === 'object' ? row : null;
+      const raw = item ? (item.vid || item.video_id || item.videoId || item.item_id || item.id) : row;
+      if (typeof raw !== 'string' && !Number.isSafeInteger(raw)) continue;
+      const eid = String(raw);
+      if (!/^\d{1,24}$/.test(eid) || seen.has(eid)) continue;
+      seen.add(eid);
+      const title = item && (item.title || item.name);
+      episodes.push({ name: String(title || ('第' + (episodes.length + 1) + '集')).replace(/[$#\r\n]/g, ' '), id: eid });
+    }
+    if (episodes.length) return episodes;
+  }
   const order = new Map();
-  const re = /\/(?:player)\/\d+\/(\d{15,25})/g;
+  const re = new RegExp('/player/' + sid + '/(\\d{15,24})(?!\\d)', 'g');
   let m, idx = 0;
   while ((m = re.exec(html))) {
     if (!order.has(m[1])) order.set(m[1], ++idx);
   }
   return Array.from(order.entries()).map(([eid, n]) => ({ name: '第' + n + '集', id: eid }));
+}
+
+async function parseEpisodes(sid, html) {
+  const series = detailSeries(html || '', sid);
+  const hasRows = series && ['vid_list', 'video_list', 'videoList', 'episodes'].some(key => Array.isArray(series[key]));
+  if (hasRows) {
+    const episodes = episodesFrom(html, sid);
+    if (episodes.length) return episodes;
+  }
+  // Detail pages show only a few navigation links when SSR data is absent.
+  // Give the player catalogue a chance to supply the full list first.
+  const playerEpisodes = episodesFrom(await siteHtml('/player/' + sid), sid);
+  return playerEpisodes.length ? playerEpisodes : episodesFrom(html || '', sid);
 }
 
 // ---------------- 视频模型（签名接口） ----------------
@@ -375,7 +443,7 @@ async function fetchModel(vid) {
       if (vm && vm.video_list) {
         if (Array.isArray(vm.video_list)) {
           const m = {};
-          vm.video_list.forEach((it, i) => { m[String(it.definition || i)] = it; });
+          vm.video_list.forEach((it, i) => { m[String(i)] = it; });
           vm.video_list = m;
         }
         modelCache.set(String(vid), { t: Date.now(), vm });
@@ -426,24 +494,56 @@ function deriveContentKey(spadeA) {
   return Buffer.from(work.subarray(1, 33).toString('ascii'), 'hex');
 }
 
-function pickBest(vm, want) {
+function videoMetadata(item) {
+  const value = item.video_meta || item.videoMeta || item.meta;
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string' || value.length > 65536) return {};
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch (error) { }
+  // Some App responses use Python dictionary syntax. Read only scalar fields;
+  // never evaluate the response as JavaScript or Python code.
+  const fields = {};
+  const re = /(['"])(definition|quality_name|vtype|vwidth|vheight)\1\s*:\s*(?:(['"])([^'"\\]*)\3|(-?\d+(?:\.\d+)?))(?=\s*[,}])/g;
+  let match;
+  while ((match = re.exec(value))) fields[match[2]] = match[4] === undefined ? Number(match[5]) : match[4];
+  return fields;
+}
+
+function videoQuality(item, fallback) {
+  const meta = videoMetadata(item);
+  for (const value of [item.definition, meta.definition, item.quality_name, meta.quality_name]) {
+    if (value == null) continue;
+    let q = String(value).toLowerCase().replace(/\s/g, '');
+    if (/^\d+$/.test(q)) q += 'p';
+    if (/^\d{3,4}p$/.test(q)) return q;
+  }
+  const gear = String(item.gear_des_key || '');
+  const match = /(?:^|\|)4:(\d{3,4}p)(?=\||$)/i.exec(gear);
+  return match ? match[1].toLowerCase() : String(fallback || '').toLowerCase();
+}
+
+function qualityCandidates(vm) {
   const vl = (vm && vm.video_list) || {};
   const cands = [];
   for (const k of Object.keys(vl)) {
     const it = vl[k] || {};
-    const q = String(it.definition || k);
-    const gear = String(it.gear_des_key || '');
-    const bad = (/bytevc2|bvc2/.test(gear)) ? 1 : 0;
-    const order = QORDER.indexOf(q) >= 0 ? QORDER.indexOf(q) : 99;
+    const q = videoQuality(it, k);
+    if (!/^(?:\d{1,4}|\d{3,4}p)$/.test(q)) continue;
+    const gear = String(it.gear_des_key || '').toLowerCase();
+    const meta = videoMetadata(it);
+    const bad = (/bytevc2|bvc2/.test(gear + ' ' + String(meta.vtype || '').toLowerCase())) ? 1 : 0;
+    const order = /^\d{3,4}p$/.test(q) ? -parseInt(q, 10) : 1;
     cands.push({ bad, order, q, it });
   }
-  if (!cands.length) return null;
   cands.sort((x, y) => (x.bad - y.bad) || (x.order - y.order));
-  if (want) {
-    const found = cands.find(c => c.q === want && c.bad === 0);
-    if (found) return found;
-  }
-  return cands[0];
+  return cands.filter(c => c.bad === 0);
+}
+
+function pickBest(vm, want) {
+  const cands = qualityCandidates(vm);
+  return (want ? cands.find(c => c.q === want) : cands[0]) || null;
 }
 
 // ---------------- MP4 / CENC ----------------
@@ -452,10 +552,65 @@ function readBox(d, off) {
   let size = d.readUInt32BE(off);
   const type = d.toString('ascii', off + 4, off + 8);
   let header = 8;
-  if (size === 1) { size = Number(d.readBigUInt64BE(off + 8)); header = 16; }
+  if (size === 1) {
+    if (off + 16 > d.length) return null;
+    size = Number(d.readBigUInt64BE(off + 8)); header = 16;
+  }
   else if (size === 0) size = d.length - off;
-  if (size < header || off + size > d.length) return null;
+  if (!Number.isSafeInteger(size) || size < header || off + size > d.length) return null;
   return { offset: off, size, type, header, body: off + header };
+}
+
+function boxesIn(data, start, end) {
+  const boxes = [];
+  for (let pos = start; pos < end;) {
+    const box = readBox(data, pos);
+    if (!box || pos + box.size > end) return null;
+    boxes.push(box);
+    pos += box.size;
+  }
+  return boxes;
+}
+
+function childBox(data, parent, kind) {
+  if (!parent) return null;
+  return (boxesIn(data, parent.body, parent.offset + parent.size) || []).find(b => b.type === kind) || null;
+}
+
+function sampleEntries(data, moov) {
+  const entries = [];
+  for (const track of boxesIn(data, moov.body, moov.offset + moov.size) || []) {
+    if (track.type !== 'trak') continue;
+    const mdia = childBox(data, track, 'mdia');
+    const minf = childBox(data, mdia, 'minf');
+    const stbl = childBox(data, minf, 'stbl');
+    const stsd = childBox(data, stbl, 'stsd');
+    if (stsd && stsd.body + 8 <= stsd.offset + stsd.size) {
+      entries.push(...(boxesIn(data, stsd.body + 8, stsd.offset + stsd.size) || []));
+    }
+  }
+  return entries;
+}
+
+function sampleChildStart(data, entry) {
+  if (['encv', 'hvc1', 'hev1', 'avc1', 'avc3', 'vp09', 'av01'].includes(entry.type)) return entry.body + 78;
+  if (['enca', 'mp4a', 'ac-3', 'ec-3', 'Opus', 'alac'].includes(entry.type)) {
+    if (entry.body + 28 > entry.offset + entry.size) return entry.offset + entry.size + 1;
+    const version = data.readUInt16BE(entry.body + 8);
+    return entry.body + 28 + (version === 1 ? 16 : version === 2 ? 36 : 0);
+  }
+  return null;
+}
+
+function restoreSampleFormats(header, moov) {
+  for (const entry of sampleEntries(header, moov)) {
+    if (entry.type !== 'encv' && entry.type !== 'enca') continue;
+    const start = sampleChildStart(header, entry);
+    const sinf = (boxesIn(header, start, entry.offset + entry.size) || []).find(b => b.type === 'sinf');
+    const frma = childBox(header, sinf, 'frma');
+    if (!frma || frma.size - frma.header !== 4) throw Error('encrypted sample entry has no original codec');
+    header.copy(header, entry.offset + 4, frma.body, frma.body + 4);
+  }
 }
 
 function findBox(d, type, start) {
@@ -474,7 +629,10 @@ function boxBody(d, type, start) {
 }
 
 function parseTrack(moov, track) {
-  const stbl = findBox(moov, 'stbl', track.body);
+  // Keep searches inside this track so an unencrypted audio track cannot borrow
+  // the following video track's sample/auxiliary tables.
+  moov = moov.subarray(track.offset, track.offset + track.size);
+  const stbl = findBox(moov, 'stbl', track.header);
   if (!stbl) return null;
   const stsz = boxBody(moov, 'stsz', stbl.body);
   const stsc = boxBody(moov, 'stsc', stbl.body);
@@ -548,8 +706,8 @@ function replaceSinf(h) {
     const size = h.readUInt32BE(pos - 4);
     const end = pos - 4 + size;
     if (size >= 8 && size < 50000 && end <= h.length) {
-      h.write('free', pos - 4, 'latin1');
-      h.fill(0, pos, end);
+      h.write('free', pos, 'latin1');
+      h.fill(0, pos + 4, end);
       pos = end;
     } else pos += 4;
   }
@@ -577,14 +735,6 @@ function clearAuxBoxes(header) {
   }
 }
 
-function replaceFourcc(buf, oldS, newS) {
-  let pos = 0;
-  while ((pos = buf.indexOf(oldS, pos, 'latin1')) >= 0) {
-    buf.write(newS, pos, 'latin1');
-    pos += 4;
-  }
-}
-
 function decryptCenc(src, dst, key) {
   const data = fs.readFileSync(src);
   const ftypSize = data.readUInt32BE(0);
@@ -604,8 +754,7 @@ function decryptCenc(src, dst, key) {
   if (!samples.length) throw new Error('CENC sample table is empty');
   const out = Buffer.from(data);
   const header = Buffer.from(data.subarray(0, moov.offset + moov.size));
-  replaceFourcc(header, 'encv', 'hvc1');
-  replaceFourcc(header, 'enca', 'mp4a');
+  restoreSampleFormats(header, moov);
   replaceSinf(header);
   clearAuxBoxes(header);
   header.copy(out, 0);
@@ -621,15 +770,42 @@ function decryptCenc(src, dst, key) {
 }
 
 // ---------------- 解密产物 ----------------
+function validBoxTree(data, start, end, state, depth = 0) {
+  if (depth > 24 || start > end) return false;
+  const boxes = boxesIn(data, start, end);
+  if (!boxes) return false;
+  const containers = ['moov', 'trak', 'mdia', 'minf', 'stbl', 'edts', 'dinf', 'mvex', 'moof', 'traf', 'sinf', 'schi'];
+  for (const box of boxes) {
+    if (box.type === 'trak') state.tracks++;
+    if (box.type === 'mdat') state.media++;
+    if (box.type === 'encv' || box.type === 'enca') return false;
+    const boxEnd = box.offset + box.size;
+    if (containers.includes(box.type)) {
+      if (!validBoxTree(data, box.body, boxEnd, state, depth + 1)) return false;
+    } else if (box.type === 'stsd') {
+      if (box.body + 8 > boxEnd) return false;
+      const entries = boxesIn(data, box.body + 8, boxEnd);
+      if (!entries || entries.length !== data.readUInt32BE(box.body + 4)) return false;
+      state.descriptions += entries.length;
+      for (const entry of entries) {
+        if (entry.type === 'encv' || entry.type === 'enca') return false;
+        const childStart = sampleChildStart(data, entry);
+        if (childStart !== null && !validBoxTree(data, childStart, entry.offset + entry.size, state, depth + 1)) return false;
+      }
+    }
+  }
+  return true;
+}
+
 function verifyMp4(p) {
   try {
-    if (fs.statSync(p).size < 8192) return false;
-    const fd = fs.openSync(p, 'r');
-    const buf = Buffer.alloc(Math.min(3 * 1024 * 1024, fs.statSync(p).size));
-    fs.readSync(fd, buf, 0, buf.length, 0);
-    fs.closeSync(fd);
-    const head = buf.toString('latin1');
-    return head.indexOf('ftyp') >= 0 && head.indexOf('moov') >= 0 && head.indexOf('trak') >= 0;
+    const size = fs.statSync(p).size;
+    if (size < 32 || size > 32 * 1024 * 1024) return false;
+    const data = fs.readFileSync(p);
+    const top = boxesIn(data, 0, data.length);
+    if (!top || !top.length || top[0].type !== 'ftyp' || !top.some(b => b.type === 'moov')) return false;
+    const state = { tracks: 0, media: 0, descriptions: 0 };
+    return validBoxTree(data, 0, data.length, state) && state.tracks > 0 && state.media > 0 && state.descriptions > 0;
   } catch (e) {
     return false;
   }
@@ -649,7 +825,7 @@ async function decryptVideo(vid, want) {
   const vm = await fetchModel(vid);
   if (!vm) return null;
   const pick = pickBest(vm, want);
-  if (!pick) return null;
+  if (!pick) throw Error(want ? `requested quality ${want} is unavailable for this episode` : 'no compatible video quality is available');
   const q = pick.q;
   const it = pick.it;
   const dst = path.join(CACHE_DIR, `${vid}_${q}.mp4`);
@@ -716,7 +892,7 @@ async function localProxy(params) {
   const vid = `${parsed.hostname}${parsed.pathname}`.replace(/^\/+|\/+$/g, '');
   if (!/^\d{1,24}$/.test(vid)) return [404, {'Content-Type':'text/plain; charset=utf-8'}, 'unknown episode'];
   const want = parsed.searchParams.get('q') || '';
-  if (want && !QORDER.includes(want)) return [400, {'Content-Type':'text/plain; charset=utf-8'}, 'invalid quality'];
+  if (want && !/^(?:\d{1,4}|\d{3,4}p)$/.test(want)) return [400, {'Content-Type':'text/plain; charset=utf-8'}, 'invalid quality'];
   const method = String(params.method || 'GET').toUpperCase();
   if (method !== 'GET' && method !== 'HEAD') return [405, {Allow:'GET, HEAD'}, ''];
   try {
@@ -729,14 +905,8 @@ async function localProxy(params) {
     const range = parseByteRange(rangeValue, size);
     if (!range) return [416, {'Content-Range':`bytes */${size}`,'Accept-Ranges':'bytes','Content-Type':'video/mp4'}, ''];
     const length = range.end - range.start + 1;
-    if (length > 16 * 1024 * 1024) return [413, {'Content-Type':'text/plain; charset=utf-8'}, 'request a smaller byte range'];
     const headers = {'Content-Type':'video/mp4','Accept-Ranges':'bytes','Content-Length':String(length)};
     if (range.partial) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${size}`;
-    if (method === 'HEAD') {
-      return [range.partial ? 206 : 200, headers, {
-        __cctvhostFileResponse:true, path:fp, offset:range.start, length,
-      }];
-    }
     return [range.partial ? 206 : 200, headers, {
       __cctvhostFileResponse:true, path:fp, offset:range.start, length,
     }];
@@ -818,13 +988,15 @@ const site = {
 
   async detail(id) {
     const sid = String(id).replace(/^.*?_/, '');
+    if (!/^\d{1,24}$/.test(sid)) throw Error('invalid series ID');
     const html = await siteHtml('/detail?series_id=' + sid);
-    const title = (html.match(/property="og:title"\s+content="([^"]*)"/) || [])[1] || '';
-    const cover = (html.match(/property="og:image"\s+content="([^"]*)"/) || [])[1] || '';
-    const intro = (html.match(/property="og:description"\s+content="([^"]*)"/) || [])[1] || '';
-    const eps = await parseEpisodes(sid);
-    const playFrom = ['红果1080p', '红果720p', '红果360p'].join('$$$');
-    const one = eps.map(e => `${e.name}$${e.id}`).join('#');
+    const series = detailSeries(html, sid) || {};
+    const title = series.series_name || series.series_title || (html.match(/property="og:title"\s+content="([^"]*)"/) || [])[1] || '';
+    const cover = series.series_cover || (html.match(/property="og:image"\s+content="([^"]*)"/) || [])[1] || '';
+    const intro = series.series_intro || (html.match(/property="og:description"\s+content="([^"]*)"/) || [])[1] || '';
+    const eps = await parseEpisodes(sid, html);
+    const one = eps.map(e => `${e.name}$${sid}~${e.id}`).join('#');
+    const expected = Number(series.episode_cnt || series.episode_count || (series.series_episode_info || {}).episode_total_cnt);
     return {
       list: [{
         vod_id: sid,
@@ -832,8 +1004,9 @@ const site = {
         vod_pic: cover,
         vod_content: stripTags(intro),
         vod_remarks: eps.length ? (eps.length + '集') : '',
-        vod_play_from: playFrom,
-        vod_play_url: [one, one, one].join('$$$'),
+        vod_play_from: '官网完整播放',
+        vod_play_url: one,
+        catalog_complete: Number.isSafeInteger(expected) && expected > 0 ? expected === eps.length : null,
       }],
     };
   },
@@ -841,19 +1014,31 @@ const site = {
   async play(flag, id) {
     const vid = String(id).split('~').pop();
     if (!/^\d+$/.test(vid)) return { parse: 0, url: '' };
-    let q = '1080p';
     const f = String(flag || '');
-    if (f.indexOf('720') >= 0) q = '720p';
-    else if (f.indexOf('360') >= 0) q = '360p';
-
-    return {
-      parse: 0,
-      url: `cenc://${vid}?q=${q}`,
-      proxy: 1,
-      format: 'mp4',
-      contentType: 'video/mp4',
-      header: {},
-    };
+    if (/试看|preview/i.test(f)) return { parse: 0, url: '', preview: true, msg: '此 JS 源未提供公开试看；请选择官网完整播放' };
+    try {
+      const vm = await fetchModel(vid);
+      const requested = (f.match(/\d{3,4}p/i) || [])[0];
+      const pick = pickBest(vm, requested && requested.toLowerCase());
+      if (!pick) return { parse: 0, url: '', msg: requested ? `此集未提供 ${requested} 清晰度` : '此集暂无可用的兼容视频清晰度' };
+      const seen = new Set();
+      const alternates = qualityCandidates(vm).filter(c => {
+        if (seen.has(c.q)) return false;
+        seen.add(c.q); return true;
+      }).map(c => ({ name: /^\d+$/.test(c.q) ? '档位 ' + c.q : c.q, url: `cenc://${vid}?q=${c.q}`, proxy: true, format: 'mp4', contentType: 'video/mp4' }));
+      return {
+        parse: 0,
+        url: `cenc://${vid}?q=${pick.q}`,
+        proxy: 1,
+        format: 'mp4',
+        contentType: 'video/mp4',
+        header: {},
+        preview: false,
+        alternates,
+      };
+    } catch (error) {
+      return { parse: 0, url: '', msg: '视频模型暂时不可用，请稍后重试' };
+    }
   },
 
   localProxy,

@@ -105,34 +105,25 @@ class HgtvAdapterTests(unittest.TestCase):
         self.assertNotIn(b'encv', output)
         self.assertNotIn(b'senc', output)
 
-    def test_cenc_decrypt_normalizes_overreported_hevc_level_for_ios(self):
-        for output in (self.decrypted_path.read_bytes(), self.decrypted_104_path.read_bytes()):
-            self.assertEqual(output[8:12], b'hvc1')
-            hvcc_type = output.index(b'hvcC')
-            hvcc_size = struct.unpack_from('>I', output, hvcc_type - 4)[0]
-            record = output[hvcc_type + 4:hvcc_type - 4 + hvcc_size]
-            self.assertEqual(record[12], 93)  # 360x640, ≤60 fps -> HEVC level 3.1
-            pos = 23
-            sps_level = None
-            for _ in range(record[22]):
-                nal_type = record[pos] & 0x3F
-                count = struct.unpack_from('>H', record, pos + 1)[0]
-                pos += 3
-                for _ in range(count):
-                    size = struct.unpack_from('>H', record, pos)[0]
-                    pos += 2
-                    nal = record[pos:pos + size]
-                    pos += size
-                    if nal_type == 33:
-                        rbsp = bytearray()
-                        zeros = 0
-                        for byte in nal[2:]:
-                            if zeros >= 2 and byte == 3:
-                                continue
-                            rbsp.append(byte)
-                            zeros = min(2, zeros + 1) if byte == 0 else 0
-                        sps_level = rbsp[12]
-            self.assertEqual(sps_level, 93)
+    def test_clear_sample_entry_keeps_box_sizes_and_codec_configuration(self):
+        for module, path in ((hgtv, self.decrypted_path), (hgtv104, self.decrypted_104_path)):
+            output = path.read_bytes()
+            self.assertEqual(output[8:12], self.media[8:12])
+            sinf_type = self.media.index(b'sinf')
+            self.assertEqual(output[sinf_type:sinf_type + 4], b'free')
+            self.assertEqual(output[sinf_type - 4:sinf_type], self.media[sinf_type - 4:sinf_type])
+            hvcc = output.index(b'hvcC')
+            self.assertEqual(output[hvcc + 4 + 12], 186)  # Preserve encoder profile/level.
+            self.assertTrue(module._verify_mp4(str(path)))
+
+    def test_old_malformed_sinf_cache_is_rejected(self):
+        for module, path in ((hgtv, self.decrypted_path), (hgtv104, self.decrypted_104_path)):
+            output = bytearray(path.read_bytes())
+            sinf_type = self.media.index(b'sinf')
+            output[sinf_type - 4:sinf_type] = b'free'
+            output[sinf_type:sinf_type + 4] = bytes(4)
+            path.write_bytes(output)
+            self.assertFalse(module._verify_mp4(str(path)))
 
     def test_cenc_decrypt_works_with_hostcrypto_when_pycryptodome_is_absent(self):
         for module, output_path in ((hgtv, self.decrypted_path),
@@ -221,7 +212,7 @@ class HgtvAdapterTests(unittest.TestCase):
                 picked = module._pick_best({'video_list': items}, None)
                 self.assertEqual(picked[1], '1080p')
                 self.assertEqual(module._pick_best({'video_list': items}, '360p')[1], '360p')
-                self.assertEqual(module._hevc_compat_level(1080, 1920), 123)
+                self.assertIsNone(module._pick_best({'video_list': items}, '480p'))
 
     def test_python_104_play_uses_host_proxy_and_returns_media_bytes(self):
         class HTTP:
@@ -235,6 +226,7 @@ class HgtvAdapterTests(unittest.TestCase):
         spider._cctvhost_proxy_url = 'http://127.0.0.1:18782/proxy'
         with mock.patch.object(hgtv104, 'resolve_signed', return_value=(
                 'cenc://67890?q=4', hgtv104.ORIGIN + '/', None)), \
+             mock.patch.object(hgtv104, '_signed_model', return_value={'video_list': {}}), \
              mock.patch.object(hgtv104, '_decrypt_to_file', return_value=str(self.decrypted_104_path)):
             result = spider.playerContent('官网完整播放', '12345~67890')
             self.assertEqual(result['url'], 'cenc://67890?q=4')
