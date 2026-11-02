@@ -124,6 +124,8 @@ Python Spider 为兼容非线程安全脚本仍串行执行；代理调用等待
 Node.js Mobile 资源也可导出 `localProxy(params)`。Node 回调如果需要传输大文件，可把完成的媒体放在该资源的数据目录内，并将第三项设为
 `{__cctvhostFileResponse: true, path, offset, length}`。宿主会校验真实路径仍位于该资源数据目录、文件范围有效且单次响应不超过 16 MiB，随后从文件读取 Range 分片；视频内容不经过 2 MiB 的 Node JSON 控制桥。HEAD 保留声明的 `Content-Length`，但不读取文件内容。文件引用只供 Node 宿主内部使用，Python Spider 应继续直接返回 bytes。
 
+`Examples/hgtv-python-1.0.4`、`Examples/hgtv-python` 和 `Examples/hgtv-node` 提供红果 1.0.4/1.0.5 的导入示例。Python 版本在宿主提供的 `hostcrypto.AES_CTR` 上完成 CENC 解密，不要求 iPhone 内有 ffmpeg；公开地址不可用时由 `localProxy` 下载、解密并按播放器 Range 请求交付。Node 版本走 Node 原生 AES-CTR，并使用受限数据目录文件引用传输媒体。对应 ZIP 包根目录都带有 `cctvhost.json`。
+
 示例 `Plugins/example-encrypted-media.py` 使用标准库解析 MP4、按样本解密并支持 Range；资源的「插件选项」JSON
 可通过 `items` 配置分集 URL、32 位十六进制 AES-128 密钥和请求头。模板支持未分片 MP4、`stsz/stsc/stco`
 或 `co64`、`tenc`/`senc` 每样本 8 或 16 字节 IV、CTR `cenc` 和标准 HTTP Range；文件最大 128 MiB，

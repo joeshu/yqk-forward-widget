@@ -80,7 +80,8 @@ class NodeMediaHostTests(unittest.TestCase):
         self.assertEqual(result['result'][2]['__cctvhostFileResponse'], True)
         self.assertEqual(result['result'][2]['offset'], 2)
         self.assertEqual(result['result'][2]['length'], 4)
-        self.assertEqual(Path(result['result'][2]['path']), payload_path)
+        self.assertEqual(Path(os.path.realpath(result['result'][2]['path'])),
+                         Path(os.path.realpath(payload_path)))
         self.assertTrue(self.call('stop')['ok'])
 
     def test_https_get_falls_back_through_authenticated_host_and_preserves_response(self):

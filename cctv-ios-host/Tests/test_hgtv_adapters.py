@@ -17,6 +17,10 @@ SPEC = importlib.util.spec_from_file_location(
     'hgtv_public_1_0_5_adapter', ROOT / 'Examples' / 'hgtv-python' / 'hgtv_public_1_0_5.py')
 hgtv = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(hgtv)
+SPEC_104 = importlib.util.spec_from_file_location(
+    'hgtv_public_1_0_4_adapter', ROOT / 'Examples' / 'hgtv-python-1.0.4' / 'hgtv_public_1_0_4.py')
+hgtv104 = importlib.util.module_from_spec(SPEC_104)
+SPEC_104.loader.exec_module(hgtv104)
 
 
 def box(kind, payload):
@@ -63,8 +67,10 @@ class HgtvAdapterTests(unittest.TestCase):
         self.media, self.key, self.plain, self.sample_offset = encrypted_fixture()
         self.encrypted_path = Path(self.tmp.name, 'encrypted.mp4')
         self.decrypted_path = Path(self.tmp.name, 'decrypted.mp4')
+        self.decrypted_104_path = Path(self.tmp.name, 'decrypted-104.mp4')
         self.encrypted_path.write_bytes(self.media)
         hgtv._cenc_decrypt(str(self.encrypted_path), str(self.decrypted_path), self.key)
+        hgtv104._cenc_decrypt(str(self.encrypted_path), str(self.decrypted_104_path), self.key)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -72,6 +78,14 @@ class HgtvAdapterTests(unittest.TestCase):
     def test_cenc_decrypt_uses_hostcrypto_and_produces_clear_mp4_sample(self):
         output = self.decrypted_path.read_bytes()
         self.assertTrue(hgtv._verify_mp4(str(self.decrypted_path)))
+        self.assertEqual(output[self.sample_offset:self.sample_offset + len(self.plain)], self.plain)
+        self.assertIn(b'hvc1', output)
+        self.assertNotIn(b'encv', output)
+        self.assertNotIn(b'senc', output)
+
+    def test_python_104_cenc_decrypt_uses_hostcrypto_and_produces_clear_mp4_sample(self):
+        output = self.decrypted_104_path.read_bytes()
+        self.assertTrue(hgtv104._verify_mp4(str(self.decrypted_104_path)))
         self.assertEqual(output[self.sample_offset:self.sample_offset + len(self.plain)], self.plain)
         self.assertIn(b'hvc1', output)
         self.assertNotIn(b'encv', output)
@@ -141,15 +155,39 @@ class HgtvAdapterTests(unittest.TestCase):
         self.assertEqual(headers['Content-Range'], 'bytes 0-3/%d' % self.decrypted_path.stat().st_size)
         self.assertEqual(body, self.decrypted_path.read_bytes()[:4])
 
+    def test_python_104_play_uses_host_proxy_and_returns_media_bytes(self):
+        class HTTP:
+            cache = hgtv104.BoundedCache()
+            def page(self, *_args): return {}
+            def compat(self, *_args):
+                raise hgtv104.SourceError('public fallback unavailable', status=403,
+                                          stage='resolve_api', code='public_unavailable')
+
+        spider = hgtv104.Spider(http=HTTP())
+        spider._cctvhost_proxy_url = 'http://127.0.0.1:18782/proxy'
+        with mock.patch.object(hgtv104, 'resolve_signed', return_value=(
+                'cenc://67890?q=4', hgtv104.ORIGIN + '/', None)), \
+             mock.patch.object(hgtv104, '_decrypt_to_file', return_value=str(self.decrypted_104_path)):
+            result = spider.playerContent('官网完整播放', '12345~67890')
+            self.assertEqual(result['url'], 'cenc://67890?q=4')
+            self.assertEqual(result['proxy'], 1)
+            response = spider.localProxy({'url': result['url'], 'method': 'GET',
+                                          'range': 'bytes=0-3'})
+        self.assertEqual(response[0], 206)
+        self.assertEqual(response[2], self.decrypted_104_path.read_bytes()[:4])
+
     def test_python_spider_writes_decrypted_cache_under_host_data_directory(self):
-        previous = hgtv._DEC_DIR
-        try:
-            spider = hgtv.Spider()
-            spider._cctvhost_data_dir = self.tmp.name
-            spider.init()
-            self.assertEqual(hgtv._DEC_DIR, os.path.join(self.tmp.name, 'hgtv-python-cache'))
-        finally:
-            hgtv._DEC_DIR = previous
+        for module in (hgtv, hgtv104):
+            with self.subTest(version=module.VERSION):
+                previous = module._DEC_DIR
+                try:
+                    spider = module.Spider()
+                    spider._cctvhost_data_dir = self.tmp.name
+                    spider.init()
+                    self.assertEqual(module._DEC_DIR, os.path.join(
+                        os.path.realpath(self.tmp.name), 'hgtv-python-cache'))
+                finally:
+                    module._DEC_DIR = previous
 
 
 if __name__ == '__main__':
