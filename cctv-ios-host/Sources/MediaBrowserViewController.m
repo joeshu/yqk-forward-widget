@@ -494,6 +494,11 @@
         [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"", @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"line_index":@(owner.selectedLineIndex), @"episode_index":@(owner.selectedEpisodeIndex), @"result_has_media_url":@([result[@"url"] isKindOfClass:NSString.class]&&[result[@"url"] length]>0), @"result_parse_mode":@([result[@"parse"] respondsToSelector:@selector(integerValue)]?[result[@"parse"] integerValue]:0), @"result_alternate_count":@([result[@"alternates"] isKindOfClass:NSArray.class]?[result[@"alternates"] count]:0)}];owner.status.hidden=YES;NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"episodeID":[episode[@"id"] description]?:@"",@"episodeName":[episode[@"name"] description]?:@"",@"lineIndex":@(owner.selectedLineIndex),@"episodeIndex":@(owner.selectedEpisodeIndex),@"correlationID":owner.diagnosticTraceID?:@""};if(owner.onPlay)owner.onPlay(result,context);
     }];
 }
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    if(scrollView!=self.scrollView||!self.inlinePlaybackController)return;
+    UIView *playerView=self.inlinePlaybackController.view;playerView.transform=CGAffineTransformIdentity;CGRect playerContentFrame=[playerView convertRect:playerView.bounds toView:self.contentStack];
+    CGFloat pinOffset=MAX(0,scrollView.contentOffset.y-playerContentFrame.origin.y);playerView.transform=CGAffineTransformMakeTranslation(0,pinOffset);playerView.layer.zPosition=pinOffset>0?10:0;
+}
 @end
 @interface MediaFavoritesViewController : UITableViewController
 @property(nonatomic,copy) NSArray<NSDictionary *> *entries;
@@ -997,10 +1002,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {if(scrollView==self.homeScroll)[self saveHomeScrollOffset];}
 - (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {if(scrollView==self.homeScroll&&!decelerate)[self saveHomeScrollOffset];}
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-    if(scrollView==self.homeScroll){[self updateVisibleHomePosters];return;}
-    if(scrollView!=self.scrollView||!self.inlinePlaybackController)return;
-    UIView *playerView=self.inlinePlaybackController.view;playerView.transform=CGAffineTransformIdentity;CGRect playerContentFrame=[playerView convertRect:playerView.bounds toView:self.contentStack];
-    CGFloat pinOffset=MAX(0,scrollView.contentOffset.y-playerContentFrame.origin.y);playerView.transform=CGAffineTransformMakeTranslation(0,pinOffset);playerView.layer.zPosition=pinOffset>0?10:0;
+    if(scrollView==self.homeScroll)[self updateVisibleHomePosters];
 }
 - (NSDictionary *)cachedHomeResultForSelectedProvider:(NSString **)providerOut {
     if(!self.source)return nil;
