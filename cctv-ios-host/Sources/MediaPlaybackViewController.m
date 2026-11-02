@@ -57,8 +57,28 @@ static NSString *MediaPlaybackFailureMessage(NSError *error, AVPlayerItemErrorLo
     return [NSString stringWithFormat:@"媒体载入失败 · %@", error.localizedDescription.length ? error.localizedDescription : @"请重试或切换线路"];
 }
 static MediaAPIClient *MediaPlaybackClientForSource(NSDictionary *source) {
-    if(MediaSourceUsesNativeCatalogAPI(source))return [[MediaAPIClient alloc] initWithTVBoxSource:source?:@{}];
-    return [[MediaAPIClient alloc] initWithPort:[source[@"port"] integerValue]];
+    id manifest=source[@"manifest"];
+    id rawOptions=[manifest isKindOfClass:NSDictionary.class]?manifest[@"options"]:nil;
+    if(!rawOptions)rawOptions=source[@"options"];
+    NSDictionary *options=[rawOptions isKindOfClass:NSDictionary.class]?rawOptions:nil;
+    if(!options&&[rawOptions isKindOfClass:NSString.class]){
+        NSData *data=[rawOptions dataUsingEncoding:NSUTF8StringEncoding];
+        id decoded=data.length<=65536?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+        if([decoded isKindOfClass:NSDictionary.class])options=decoded;
+    }
+    id rawTimeout=options[@"playTimeoutMs"];
+    NSInteger timeout=15000;
+    if([rawTimeout isKindOfClass:NSNumber.class])timeout=[rawTimeout integerValue];
+    else if([rawTimeout isKindOfClass:NSString.class]){
+        NSString *text=[rawTimeout stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        NSScanner *scanner=[NSScanner scannerWithString:text];long long parsed=0;
+        if(text.length&&[scanner scanLongLong:&parsed]&&scanner.isAtEnd&&parsed>0)timeout=parsed;
+    }
+    if(timeout<=0)timeout=15000;
+    timeout=MIN(120000,MAX(1000,timeout));
+    MediaAPIClient *client=MediaSourceUsesNativeCatalogAPI(source)?[[MediaAPIClient alloc] initWithTVBoxSource:source?:@{}]:[[MediaAPIClient alloc] initWithPort:[source[@"port"] integerValue]];
+    client.playTimeoutMilliseconds=timeout;
+    return client;
 }
 static NSDictionary *MediaPlaybackDiagnosticSourceFields(NSURL *url) {
     if(!RuntimeDiagnostics.shared.enabled||!url)return @{};

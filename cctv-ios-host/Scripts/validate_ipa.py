@@ -73,6 +73,7 @@ def validate(path):
         elif variant == 'full':
             assert result['python_embedded'] and linked, 'full build missing embedded or linked Python'
             assert root + 'host_service_runtime.py' in z.namelist(), 'full build missing service lifecycle manager'
+            assert root + 'python/lib/python3.13/site-packages/hostcrypto.py' in z.namelist(), 'full build missing portable hostcrypto fallback'
             assert root + 'python/lib/python3.13/site-packages/cctvhost_ffmpeg.py' in z.namelist(), 'full build missing native FFmpeg Python API'
             assert any('alivcffmpeg.framework/alivcffmpeg' in name for name in result['binaries'][binary].get('dependencies', [])), 'full build missing linked FFmpeg library'
             assert root + 'yangshipin-js.py' in z.namelist(), 'missing JS HTTP adapter'

@@ -17,6 +17,7 @@
 #if __has_include(<Python.h>)
 #define PY_SSIZE_T_CLEAN
 #import <Python.h>
+#import <CommonCrypto/CommonCryptor.h>
 #define PYHOST_AVAILABLE 1
 #else
 #define PYHOST_AVAILABLE 0
@@ -82,6 +83,7 @@ static PyObject *gServiceRuntime = NULL;
 static PyObject *gWriteFunction = NULL;
 static PyObject *gJSFunction = NULL;
 static PyObject *gNodeFunction = NULL;
+static BOOL gHostCryptoModuleRegistered = NO;
 #endif
 
 NSNotificationName const PyHostRuntimeStateDidChangeNotification = @"PyHostRuntimeStateDidChangeNotification";
@@ -612,10 +614,100 @@ static PyMethodDef jsMethod = {"_cctvhost_js_call", pyHostJSCall, METH_VARARGS, 
 static PyMethodDef nodeMethod = {"_cctvhost_node_call", pyHostNodeCall, METH_VARARGS, "Call the Node.js Mobile plugin host."};
 static PyMethodDef ffmpegMethod = {"_cctvhost_ffmpeg_call", pyHostFFmpegCall, METH_VARARGS, "Use the bundled in-process FFmpeg libraries."};
 
+typedef struct { PyObject_HEAD CCCryptorRef cryptor; } PyHostCryptoCTR;
+static int pyHostCryptoCTRInit(PyHostCryptoCTR *self, PyObject *args, PyObject *kwargs) {
+    PyObject *keyObject = NULL, *ivObject = NULL;
+    static char *keywords[] = {"key", "iv", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO:AES_CTR", keywords, &keyObject, &ivObject)) return -1;
+    Py_buffer key = {0}, iv = {0};
+    if (PyObject_GetBuffer(keyObject, &key, PyBUF_SIMPLE) < 0) return -1;
+    if (PyObject_GetBuffer(ivObject, &iv, PyBUF_SIMPLE) < 0) { PyBuffer_Release(&key); return -1; }
+    if (key.len != 16 || iv.len != 16) {
+        PyBuffer_Release(&iv); PyBuffer_Release(&key);
+        PyErr_SetString(PyExc_ValueError, "AES_CTR requires a 16-byte AES-128 key and a 16-byte counter block");
+        return -1;
+    }
+    if (self->cryptor) { CCCryptorRelease(self->cryptor); self->cryptor = NULL; }
+    CCCryptorStatus status = CCCryptorCreateWithMode(kCCEncrypt, kCCModeCTR, kCCAlgorithmAES,
+        ccNoPadding, iv.buf, key.buf, (size_t)key.len, NULL, 0, 0, kCCModeOptionCTR_BE, &self->cryptor);
+    PyBuffer_Release(&iv); PyBuffer_Release(&key);
+    if (status != kCCSuccess) {
+        self->cryptor = NULL;
+        PyErr_Format(PyExc_RuntimeError, "CommonCrypto AES-CTR initialization failed (%d)", (int)status);
+        return -1;
+    }
+    return 0;
+}
+static void pyHostCryptoCTRDealloc(PyHostCryptoCTR *self) {
+    if (self->cryptor) { CCCryptorRelease(self->cryptor); self->cryptor = NULL; }
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+static PyObject *pyHostCryptoCTRUpdate(PyHostCryptoCTR *self, PyObject *args) {
+    PyObject *inputObject = NULL;
+    if (!PyArg_ParseTuple(args, "O:update", &inputObject)) return NULL;
+    if (!self->cryptor) { PyErr_SetString(PyExc_RuntimeError, "AES_CTR context is closed"); return NULL; }
+    Py_buffer input = {0};
+    if (PyObject_GetBuffer(inputObject, &input, PyBUF_SIMPLE) < 0) return NULL;
+    PyObject *output = PyBytes_FromStringAndSize(NULL, input.len);
+    if (!output) { PyBuffer_Release(&input); return NULL; }
+    size_t moved = 0;
+    CCCryptorStatus status = CCCryptorUpdate(self->cryptor, input.buf, (size_t)input.len,
+        PyBytes_AS_STRING(output), (size_t)input.len, &moved);
+    PyBuffer_Release(&input);
+    if (status != kCCSuccess || moved > (size_t)PyBytes_GET_SIZE(output)) {
+        Py_DECREF(output);
+        PyErr_Format(PyExc_RuntimeError, "CommonCrypto AES-CTR update failed (%d)", (int)status);
+        return NULL;
+    }
+    if (moved != (size_t)PyBytes_GET_SIZE(output) && PyBytes_Resize(&output, (Py_ssize_t)moved) < 0) return NULL;
+    return output;
+}
+static PyObject *pyHostCryptoCTRClose(PyHostCryptoCTR *self, PyObject *Py_UNUSED(ignored)) {
+    if (self->cryptor) { CCCryptorRelease(self->cryptor); self->cryptor = NULL; }
+    Py_RETURN_NONE;
+}
+static PyMethodDef pyHostCryptoCTRMethods[] = {
+    {"update", (PyCFunction)pyHostCryptoCTRUpdate, METH_VARARGS, "Transform the next AES-CTR bytes, preserving the counter across calls."},
+    {"close", (PyCFunction)pyHostCryptoCTRClose, METH_NOARGS, "Release the CommonCrypto context."},
+    {NULL, NULL, 0, NULL}
+};
+static PyObject *pyHostCryptoCTRNew(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+    PyHostCryptoCTR *self = (PyHostCryptoCTR *)type->tp_alloc(type, 0);
+    if (self) self->cryptor = NULL;
+    return (PyObject *)self;
+}
+static PyTypeObject pyHostCryptoCTRType = { PyVarObject_HEAD_INIT(NULL, 0) };
+static PyModuleDef pyHostCryptoModule = {
+    PyModuleDef_HEAD_INIT, "hostcrypto", "CCTVHost native cryptographic acceleration.", -1, NULL,
+    NULL, NULL, NULL, NULL
+};
+static PyObject *PyInit_hostcrypto(void) {
+    pyHostCryptoCTRType.tp_name = "hostcrypto.AES_CTR";
+    pyHostCryptoCTRType.tp_basicsize = sizeof(PyHostCryptoCTR);
+    pyHostCryptoCTRType.tp_flags = Py_TPFLAGS_DEFAULT;
+    pyHostCryptoCTRType.tp_doc = "Stateful CommonCrypto AES-128-CTR context.";
+    pyHostCryptoCTRType.tp_new = pyHostCryptoCTRNew;
+    pyHostCryptoCTRType.tp_init = (initproc)pyHostCryptoCTRInit;
+    pyHostCryptoCTRType.tp_dealloc = (destructor)pyHostCryptoCTRDealloc;
+    pyHostCryptoCTRType.tp_methods = pyHostCryptoCTRMethods;
+    if (PyType_Ready(&pyHostCryptoCTRType) < 0) return NULL;
+    PyObject *module = PyModule_Create(&pyHostCryptoModule);
+    if (!module) return NULL;
+    Py_INCREF(&pyHostCryptoCTRType);
+    if (PyModule_AddObject(module, "AES_CTR", (PyObject *)&pyHostCryptoCTRType) < 0) {
+        Py_DECREF(&pyHostCryptoCTRType); Py_DECREF(module); return NULL;
+    }
+    if (PyModule_AddStringConstant(module, "backend", "CommonCrypto") < 0) { Py_DECREF(module); return NULL; }
+    Py_INCREF(Py_True);
+    if (PyModule_AddObject(module, "available", Py_True) < 0) { Py_DECREF(Py_True); Py_DECREF(module); return NULL; }
+    return module;
+}
+
 static BOOL initializeInterpreter(PyHostTask *task, NSError **failure) {
     int pipePolicy=HostProtectDefaultBrokenPipe();
     [RuntimeDiagnostics.shared recordEvent:@"python_sigpipe_policy" category:@"plugin" fields:@{@"service_id":task.identifier?:@"",@"policy_result":@(pipePolicy),@"existing_custom_handler_preserved":@(pipePolicy==2)}];
     if(pipePolicy<0){if(failure)*failure=[NSError errorWithDomain:@"CCTVHostPython" code:16 userInfo:@{NSLocalizedDescriptionKey:@"无法配置 Python HTTP 断开连接保护"}];return NO;}
+    if(!gHostCryptoModuleRegistered){if(PyImport_AppendInittab("hostcrypto",PyInit_hostcrypto)==-1){if(failure)*failure=[NSError errorWithDomain:@"PyHost" code:17 userInfo:@{NSLocalizedDescriptionKey:@"无法注册 Python 原生 AES-CTR 模块"}];return NO;}gHostCryptoModuleRegistered=YES;}
     NSString *home = task.pythonHome;
     setenv("SSL_CERT_FILE", [[home stringByAppendingPathComponent:@"ssl/cert.pem"] UTF8String], 1);
     setenv("SSL_CERT_DIR", "", 1);

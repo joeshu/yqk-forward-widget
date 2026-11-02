@@ -90,6 +90,7 @@ if [ -z "${PY_DISABLE:-}" ]; then
     --target "$APP/python/lib/python${PY_VER}/site-packages" -r Scripts/media-python-requirements.txt
   cp -R Plugins/crypto_compat/Crypto "$APP/python/lib/python${PY_VER}/site-packages/Crypto"
   cp -R Plugins/crypto_compat/Cryptodome "$APP/python/lib/python${PY_VER}/site-packages/Cryptodome"
+  cp Plugins/hostcrypto.py "$APP/python/lib/python${PY_VER}/site-packages/hostcrypto.py"
   cp Plugins/cctvhost_ffmpeg.py "$APP/python/lib/python${PY_VER}/site-packages/cctvhost_ffmpeg.py"
   rm -rf "$APP/python/lib/python${PY_VER}/test" "$APP/python/lib/python${PY_VER}/idlelib" \
          "$APP/python/lib/python${PY_VER}/tkinter" "$APP/python/lib/python${PY_VER}/ensurepip" \

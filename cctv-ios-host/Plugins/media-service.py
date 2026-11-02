@@ -3,10 +3,12 @@
 import argparse
 import base64
 import builtins
+import collections
 import json
 import os
 import re
 import threading
+import time
 import uuid
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -53,13 +55,46 @@ class Server(ThreadingHTTPServer):
         self.runtime = runtime
         self.relay = MediaRelay(stream_media=True)
         self.artwork_relay = MediaRelay()
+        self.plugin_proxy_lock = threading.Lock()
+        self.plugin_proxy_entries = collections.OrderedDict()
         self.slots = threading.BoundedSemaphore(6)
         super().__init__(address, Handler)
 
     def server_close(self):
         self.artwork_relay.close()
         self.relay.close()
+        with self.plugin_proxy_lock:
+            self.plugin_proxy_entries.clear()
         super().server_close()
+
+    def register_plugin_proxy(self, url, headers):
+        token = uuid.uuid4().hex
+        now = time.monotonic()
+        with self.plugin_proxy_lock:
+            for key in [key for key, value in self.plugin_proxy_entries.items()
+                        if now - value['created'] > 3600]:
+                self.plugin_proxy_entries.pop(key, None)
+            while len(self.plugin_proxy_entries) >= 128:
+                self.plugin_proxy_entries.popitem(last=False)
+            self.plugin_proxy_entries[token] = {
+                'url': str(url), 'upstreamHeaders': dict(headers or {}), 'created': now,
+            }
+        return f'http://127.0.0.1:{self.server_port}/proxy/{token}'
+
+    def plugin_proxy(self, token):
+        if not re.fullmatch(r'[0-9a-f]{32}', str(token or '')):
+            return None
+        now = time.monotonic()
+        with self.plugin_proxy_lock:
+            entry = self.plugin_proxy_entries.get(token)
+            if entry and now - entry['created'] > 3600:
+                self.plugin_proxy_entries.pop(token, None)
+                return None
+            if entry:
+                entry['created'] = now
+                self.plugin_proxy_entries.move_to_end(token)
+                return dict(entry)
+        return None
 
     def server_bind(self):
         import socketserver
@@ -173,8 +208,8 @@ class Handler(BaseHTTPRequestHandler):
             body = b''
         else:
             raise MediaError('INVALID_PROXY', '代理响应内容类型不受支持')
-        if len(body) > 8 * 1024 * 1024:
-            raise MediaError('RESULT_TOO_LARGE', '来源代理响应超过 8 MB')
+        if len(body) > 16 * 1024 * 1024:
+            raise MediaError('RESULT_TOO_LARGE', '来源代理响应超过 16 MB；请按 Range 返回较小分片')
         no_body_status = 100 <= status < 200 or status in (204, 304)
         if no_body_status:
             body = b''
@@ -205,6 +240,24 @@ class Handler(BaseHTTPRequestHandler):
         if not head:
             self.wfile.write(body)
 
+    def serve_plugin_proxy(self, method, path, query):
+        args = {key: values[-1] for key, values in query.items()}
+        if path.startswith('/proxy/'):
+            entry = self.server.plugin_proxy(path[len('/proxy/'):])
+            if not entry:
+                self.send(404, {'ok': False, 'error': '本机代理会话已过期或不存在'}, method == 'HEAD')
+                return
+            args = {'url': entry['url'], 'upstreamHeaders': entry['upstreamHeaders']}
+        headers = {}
+        for name in ('User-Agent', 'Range', 'Accept', 'Referer', 'If-Range',
+                     'If-None-Match', 'If-Modified-Since', 'Accept-Encoding'):
+            value = self.headers.get(name)
+            if value and len(value) <= 8192 and '\r' not in value and '\n' not in value:
+                headers[name] = value
+        args.update({'method': method, 'headers': headers,
+                     'range': headers.get('Range', '')})
+        self.send_proxy(self.call_runtime(self.server.runtime, 'proxy', args), method == 'HEAD')
+
     def do_HEAD(self):
         path = urllib.parse.urlsplit(self.path).path
         if path.startswith('/artwork/'):
@@ -219,11 +272,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as error:
                 self.send(502, {'ok': False, 'error': str(error)}, True)
             return
-        if path == '/proxy':
+        if path == '/proxy' or path.startswith('/proxy/'):
             try:
-                args = {key: values[-1] for key, values in urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).items()}
-                args.update({'method': 'HEAD', 'headers': {key: self.headers.get(key, '') for key in ('User-Agent', 'Range', 'Accept', 'Referer') if self.headers.get(key)}})
-                self.send_proxy(self.call_runtime(self.server.runtime, 'proxy', args), True)
+                parts = urllib.parse.urlsplit(self.path)
+                query = urllib.parse.parse_qs(parts.query, max_num_fields=32)
+                self.serve_plugin_proxy('HEAD', path, query)
             except Exception as error:
                 self.send(502, {'ok': False, 'error': str(error)}, True)
             return
@@ -308,10 +361,9 @@ class Handler(BaseHTTPRequestHandler):
             if parts.path.startswith('/spider/'):
                 self.route_plugin_path('POST' if post else 'GET')
                 return
-            if parts.path == '/proxy':
-                args = {key: values[-1] for key, values in urllib.parse.parse_qs(parts.query).items()}
-                args.update({'method': 'GET', 'headers': {key: self.headers.get(key, '') for key in ('User-Agent', 'Range', 'Accept', 'Referer') if self.headers.get(key)}})
-                self.send_proxy(self.call_runtime(runtime, 'proxy', args, request_id, correlation_id))
+            if parts.path == '/proxy' or parts.path.startswith('/proxy/'):
+                query = urllib.parse.parse_qs(parts.query, max_num_fields=32)
+                self.serve_plugin_proxy('GET', parts.path, query)
                 return
             if parts.path in ('/all.m3u', '/all.m3u8', '/m3u'):
                 channels = self.call_runtime(runtime, 'catalog', {}, request_id, correlation_id)
@@ -412,7 +464,20 @@ class Handler(BaseHTTPRequestHandler):
                     return f'http://127.0.0.1:{self.server.server_port}/media/{token}'
                 result = dict(result)
                 direct_media = bool(result.get('directMedia') or is_direct_media_url(result.get('url')))
-                can_relay_primary = ((headers or is_declared_hls(result, result.get('url'))
+                alternate_proxy = any(isinstance(item, dict) and item.get('proxy')
+                                      for item in result.get('alternates', []))
+                if result.get('proxy') or alternate_proxy:
+                    capabilities = self.call_runtime(runtime, 'capabilities', {}, request_id, correlation_id)
+                    if not isinstance(capabilities, dict) or 'proxy' not in (capabilities.get('capabilities') or []):
+                        raise MediaError('PROXY_UNSUPPORTED', '播放结果要求本机代理，但此来源没有提供 proxy/localProxy 方法')
+                if result.get('proxy'):
+                    result['originalURL'] = result['url']
+                    result['url'] = self.server.register_plugin_proxy(result['url'], headers)
+                    result['headers'] = {}
+                    result['baseHeaders'] = {}
+                    result['directMedia'] = True
+                    result['nativePlayable'] = True
+                can_relay_primary = (not result.get('proxy') and (headers or is_declared_hls(result, result.get('url'))
                                      or is_extensionless_url(result.get('url')))
                                      and (not result.get('parse') or direct_media))
                 if can_relay_primary:
@@ -429,6 +494,14 @@ class Handler(BaseHTTPRequestHandler):
                         address = alternate['url']
                         alternate_headers = dict(base_headers)
                         alternate_headers.update(alternate.get('headers') or {})
+                        if alternate.get('proxy') or result.get('proxy'):
+                            if result.get('proxy') and not alternate.get('proxy'):
+                                alternate['proxy'] = True
+                            alternate['originalURL'] = address
+                            alternate['url'] = self.server.register_plugin_proxy(address, alternate_headers)
+                            alternate.pop('headers', None)
+                            relayed.append(alternate)
+                            continue
                         alternate_media = dict(alternate)
                         alternate_direct = bool(alternate_media.get('directMedia') or
                                                 is_direct_media_url(address) or

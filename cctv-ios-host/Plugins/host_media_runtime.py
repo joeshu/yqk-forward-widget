@@ -257,6 +257,22 @@ def valid_media_url(value):
         return False
 
 
+def valid_proxy_address(value):
+    """Accept an HTTP URL or an opaque absolute URI owned by localProxy()."""
+    if valid_media_url(value):
+        return True
+    if (not isinstance(value, str) or len(value) > 8192 or
+            any(ord(char) <= 32 or ord(char) == 127 for char in value)):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        return (bool(re.fullmatch(r'[A-Za-z][A-Za-z0-9+.-]{0,31}', parsed.scheme)) and
+                parsed.scheme.lower() not in ('file', 'data', 'javascript', 'mailto') and
+                bool(parsed.netloc or parsed.path) and not parsed.username and not parsed.password)
+    except ValueError:
+        return False
+
+
 def normalize_media_address(value):
     if not isinstance(value, str):
         return value
@@ -368,7 +384,7 @@ def direct_episode_media_fallback(value, episode_id):
 def playback(value):
     value = unwrap_envelope(value, {'url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
                                     'video_url', 'mediaUrl', 'src', 'alternates',
-                                    'parse', 'jx', 'headers', 'header', 'error', 'message'})
+                                    'parse', 'jx', 'headers', 'header', 'proxy', 'error', 'message'})
     if isinstance(value, str):
         value = {'url': value}
     if not isinstance(value, dict):
@@ -390,13 +406,14 @@ def playback(value):
                 merged = dict(value, url=nested)
                 return playback(merged)
     transport_keys = ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
-                      'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback')
+                      'mimeType', 'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'webPlayback')
     source_transport = {key: value[key] for key in transport_keys if key in value}
     headers = media_headers(value.get('header', {}))
     headers.update(media_headers(value.get('headers', {})))
     url = next((value.get(key) for key in
                 ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl', 'video_url', 'mediaUrl', 'src')
                 if value.get(key) not in (None, '')), None)
+    proxy_requested = enabled(value.get('proxy'))
     alternates = value.get('alternates', [])
     primary_choice_headers = {}
     if isinstance(url, dict):
@@ -405,19 +422,26 @@ def playback(value):
         # Some spiders put transport metadata beside the nested media URL.
         # Keep it before replacing the object with its URL string.
         for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
-                    'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
+                    'mimeType', 'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'webPlayback'):
             if key not in value and key in url:
                 value[key] = url[key]
+        if 'proxy' in value:
+            proxy_requested = enabled(value.get('proxy'))
         choices = url.get('values') or url.get('list')
         if isinstance(choices, list):
             choices = [item for item in choices if isinstance(item, dict) and
-                       valid_media_url(normalize_media_address(media_choice_address(item)))]
+                       (valid_media_url(normalize_media_address(media_choice_address(item))) or
+                        (enabled(value.get('proxy')) or enabled(item.get('proxy'))) and
+                        valid_proxy_address(normalize_media_address(media_choice_address(item))))]
             first = choices[0] if choices else None
             if first:
                 for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
                             'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
                     if key not in value and key in first:
                         value[key] = first[key]
+                if 'proxy' not in value and 'proxy' in first:
+                    value['proxy'] = first['proxy']
+                    proxy_requested = enabled(first['proxy'])
                 first_headers = media_headers(first.get('header', {}))
                 first_headers.update(media_headers(first.get('headers', {})))
                 primary_choice_headers.update(first_headers)
@@ -427,11 +451,16 @@ def playback(value):
     if isinstance(url, list):
         if url and all(isinstance(item, dict) for item in url):
             url = [item for item in url if valid_media_url(
-                normalize_media_address(media_choice_address(item)))]
+                normalize_media_address(media_choice_address(item))) or
+                (enabled(value.get('proxy')) or enabled(item.get('proxy'))) and
+                valid_proxy_address(normalize_media_address(media_choice_address(item)))]
             if not url:
                 raise MediaError('NO_MEDIA', '来源的播放线路均未返回有效 HTTP/HTTPS 地址')
             alternates = []
             first = url[0]
+            if 'proxy' not in value and 'proxy' in first:
+                value['proxy'] = first['proxy']
+                proxy_requested = enabled(first['proxy'])
             for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
                         'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
                 if key not in value and key in first:
@@ -445,6 +474,8 @@ def playback(value):
                     continue
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}'),
                           'url': str(address)}
+                if enabled(item.get('proxy')) or proxy_requested:
+                    choice['proxy'] = True
                 choice_headers = media_headers(item.get('header', {}))
                 choice_headers.update(media_headers(item.get('headers', {})))
                 if choice_headers:
@@ -456,9 +487,11 @@ def playback(value):
                 alternates.append(choice)
         else:
             strings = [normalize_media_address(str(item)) for item in url if item not in (None, '')]
-            if len(strings) == 1 and valid_media_url(strings[0]):
+            if len(strings) == 1 and (valid_media_url(strings[0]) or
+                                      proxy_requested and valid_proxy_address(strings[0])):
                 alternates = [{'name': '线路 1', 'url': strings[0]}]
-            elif strings and all(valid_media_url(item) for item in strings):
+            elif strings and all(valid_media_url(item) or
+                                 proxy_requested and valid_proxy_address(item) for item in strings):
                 alternates = [{'name': f'线路 {index + 1}', 'url': address}
                               for index, address in enumerate(strings)]
             elif strings and all('$' in item for item in strings):
@@ -515,9 +548,9 @@ def playback(value):
         return address
 
     url = repair_url(url)
-    if not valid_media_url(url):
+    if not (valid_proxy_address(url) if proxy_requested else valid_media_url(url)):
         message = value.get('error') or value.get('message') or value.get('msg')
-        raise MediaError('NO_MEDIA', str(message or '来源未返回有效 HTTP/HTTPS 媒体地址')[:512])
+        raise MediaError('NO_MEDIA', str(message or ('来源未返回有效本机代理地址' if proxy_requested else '来源未返回有效 HTTP/HTTPS 媒体地址'))[:512])
     safe_alternates = []
     if isinstance(alternates, list):
         for index, item in enumerate(alternates[:32]):
@@ -525,22 +558,25 @@ def playback(value):
                 continue
             candidate = normalize_media_address(media_choice_address(item))
             candidate = repair_url(candidate)
-            if valid_media_url(candidate):
+            item_proxy = enabled(item.get('proxy')) or proxy_requested
+            if valid_media_url(candidate) or item_proxy and valid_proxy_address(candidate):
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}')[:128], 'url': candidate}
                 choice_headers = media_headers(item.get('header', {}))
                 choice_headers.update(media_headers(item.get('headers', {})))
                 if choice_headers:
                     choice['headers'] = choice_headers
                 for key in ('format', 'mediaType', 'playbackType', 'contentType', 'mimeType',
-                            'mime', 'parse', 'jx', 'requiresWebPlayback'):
+                            'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback'):
                     if item.get(key) is not None:
                         choice[key] = item[key]
                 transport = dict(source_transport)
                 transport.update({key: item[key] for key in transport_keys if key in item})
+                if item_proxy:
+                    transport['proxy'] = True
                 transport['url'] = candidate
                 normalized = playback(transport)
                 for key in ('format', 'contentType', 'parse', 'jx', 'requiresWebPlayback',
-                            'directMedia', 'nativePlayable'):
+                            'directMedia', 'nativePlayable', 'proxy'):
                     if key in normalized:
                         choice[key] = normalized[key]
                 safe_alternates.append(choice)
@@ -566,6 +602,8 @@ def playback(value):
               'parse': parse, 'jx': jx, 'playUrl': value.get('playUrl', '') if isinstance(value.get('playUrl', ''), str) else '',
               'directMedia': direct_media, 'nativePlayable': native_media,
               'requiresWebPlayback': requires_web}
+    if proxy_requested:
+        result['proxy'] = True
     if declared_format:
         result['format'] = declared_format[:64]
     if declared_type:

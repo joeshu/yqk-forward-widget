@@ -232,12 +232,14 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
 
 @interface MediaAPIClient () <NSURLSessionDataDelegate>
 @property(nonatomic, strong) NSURLSession *session;
+@property(nonatomic, strong) NSURLSession *playSession;
 @property(nonatomic, strong) NSURLSessionDataTask *task;
 @property(nonatomic,strong) NSOperationQueue *delegateQueue;
 @property(nonatomic,strong) NSLock *contextLock;
 @property(nonatomic,strong) NSMutableDictionary<NSNumber *,MediaAPIRequestContext *> *requestContexts;
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) NSInteger port;
+@property(nonatomic) NSTimeInterval requestTimeout;
 @property(nonatomic, copy) NSString *activeRequestID;
 @property(nonatomic, copy) NSString *activeCorrelationID;
 @property(nonatomic, copy) NSString *activeOperation;
@@ -249,6 +251,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
 @end
 
 @implementation MediaAPIClient
+@synthesize playTimeoutMilliseconds = _playTimeoutMilliseconds;
 - (instancetype)initWithPort:(NSInteger)port {
     return [self initWithPort:port requestTimeout:40];
 }
@@ -257,6 +260,8 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
         _port=port;
         NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.ephemeralSessionConfiguration;
         NSTimeInterval timeout=MIN(40,MAX(5,requestTimeout));
+        _requestTimeout=timeout;
+        _playTimeoutMilliseconds=15000;
         configuration.timeoutIntervalForRequest=timeout;
         configuration.timeoutIntervalForResource=timeout+5;
         configuration.URLCache=nil;
@@ -266,6 +271,21 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
         _session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:_delegateQueue];
     }
     return self;
+}
+- (void)setPlayTimeoutMilliseconds:(NSInteger)playTimeoutMilliseconds {
+    _playTimeoutMilliseconds=playTimeoutMilliseconds>0?MIN(120000,MAX(1000,playTimeoutMilliseconds)):15000;
+}
+- (NSURLSession *)sessionForOperation:(NSString *)operation {
+    if(![operation isEqual:@"play"])return self.session;
+    if(!self.playSession){
+        NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.ephemeralSessionConfiguration;
+        configuration.timeoutIntervalForRequest=120;
+        configuration.timeoutIntervalForResource=125;
+        configuration.URLCache=nil;
+        configuration.HTTPMaximumConnectionsPerHost=2;
+        self.playSession=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:self.delegateQueue];
+    }
+    return self.playSession;
 }
 - (instancetype)initWithTVBoxSource:(NSDictionary *)source {
     if((self=[self initWithPort:0 requestTimeout:20]))_tvboxSource=[source copy];
@@ -304,6 +324,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
 - (void)dealloc {
     [self.task cancel];
     [self.session invalidateAndCancel];
+    [self.playSession invalidateAndCancel];
 }
 - (NSURLRequest *)tvboxRequestForOperation:(NSString *)operation arguments:(NSDictionary *)arguments error:(NSError **)error {
     NSString *api=MediaTVBoxString(self.tvboxSource[@"api"]);NSURLComponents *parts=[NSURLComponents componentsWithString:api];
@@ -363,6 +384,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
     if(self.tvboxSource){request=[[self tvboxRequestForOperation:operation arguments:arguments?:@{} error:&requestError] mutableCopy];url=request.URL;}
     else{url=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/api/v1/%@",(long)self.port,operation]];request=[NSMutableURLRequest requestWithURL:url];request.HTTPMethod=@"POST";request.HTTPBody=[NSJSONSerialization dataWithJSONObject:arguments?:@{} options:0 error:NULL];[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];[request setValue:requestID forHTTPHeaderField:@"X-CCTVHost-Request-ID"];if(correlationID.length)[request setValue:correlationID forHTTPHeaderField:@"X-CCTVHost-Correlation-ID"];}
     if(!request){NSError *failure=requestError?:[NSError errorWithDomain:@"CCTVHostMedia" code:5 userInfo:@{NSLocalizedDescriptionKey:@"无法创建资源请求"}];if(diagnosticsEnabled){NSMutableDictionary *fields=[@{@"request_id":requestID,@"operation":operation?:@"unknown",@"protocol":self.tvboxSource[@"protocol"]?:@"plugin",@"failure_stage":@"invalid_request",@"error_domain":failure.domain?:@"",@"error_code":@(failure.code),@"error_message":failure.localizedDescription?:@""} mutableCopy];if(correlationID.length)fields[@"correlation_id"]=correlationID;[RuntimeDiagnostics.shared recordEvent:@"media_api_failed" category:@"media_api" fields:fields];}self.activeRequestID=nil;self.activeCorrelationID=nil;self.activeOperation=nil;if(completion)completion(nil,failure);return;}
+    request.timeoutInterval=[operation isEqual:@"play"]?self.playTimeoutMilliseconds/1000.0:self.requestTimeout;
     __weak typeof(self) weakSelf=self;
     void (^processor)(NSData *,NSURLResponse *,NSError *)=^(NSData *data,NSURLResponse *response,NSError *networkError){
         NSError *failure=networkError;
@@ -463,7 +485,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
         });
     };
     MediaAPIRequestContext *requestContext=[MediaAPIRequestContext new];requestContext.data=[NSMutableData data];requestContext.processor=processor;
-    self.task=[self.session dataTaskWithRequest:request];
+    self.task=[[self sessionForOperation:operation] dataTaskWithRequest:request];
     [self.contextLock lock];self.requestContexts[@(self.task.taskIdentifier)]=requestContext;[self.contextLock unlock];
     [self.task resume];
 }

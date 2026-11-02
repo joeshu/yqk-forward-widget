@@ -931,6 +931,20 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('关闭自动连播下一集', self.playback)
         self.assertIn('开启自动连播下一集', self.playback)
 
+    def test_configurable_play_timeout_uses_manifest_options_and_preserves_other_timeouts(self):
+        client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        playback_client = self.playback[self.playback.index('static MediaAPIClient *MediaPlaybackClientForSource'):
+                                        self.playback.index('static NSDictionary *MediaPlaybackDiagnosticSourceFields')]
+        self.assertIn('manifest[@"options"]', playback_client)
+        self.assertIn('source[@"options"]', playback_client)
+        self.assertIn('rawTimeout=options[@"playTimeoutMs"]', playback_client)
+        self.assertIn('timeout=MIN(120000,MAX(1000,timeout))', playback_client)
+        self.assertIn('_playTimeoutMilliseconds=15000', client)
+        self.assertIn('timeoutIntervalForResource=125', client)
+        self.assertIn('request.timeoutInterval=[operation isEqual:@"play"]?self.playTimeoutMilliseconds/1000.0:self.requestTimeout', client)
+        self.assertIn('sessionForOperation:operation', client)
+        self.assertIn('initWithPort:port requestTimeout:40', client)
+
     def test_tvbox_filters_and_playback_flags_survive_native_adaptation(self):
         client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
         self.assertIn('MediaTVBoxFilters(root)', client)

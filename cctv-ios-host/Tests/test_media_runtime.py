@@ -348,6 +348,20 @@ class Spider:
         self.assertEqual(choices['alternates'][1]['name'], '720P')
         self.assertEqual(choices['headers']['Referer'], 'https://a.test/')
 
+    def test_playback_explicit_proxy_accepts_only_absolute_proxy_addresses(self):
+        value = media.playback({'url': 'hongguo://episode-42', 'proxy': 1,
+                                'format': 'mp4', 'contentType': 'video/mp4'})
+        self.assertEqual(value['url'], 'hongguo://episode-42')
+        self.assertTrue(value['proxy'])
+        self.assertTrue(value['nativePlayable'])
+        with self.assertRaises(media.MediaError):
+            media.playback({'url': 'javascript:alert(1)', 'proxy': 1})
+        with self.assertRaises(media.MediaError):
+            media.playback({'url': 'hongguo://episode-42'})
+        nested = media.playback({'url': {'url': 'x:episode-42', 'proxy': 1, 'format': 'mp4'}})
+        self.assertEqual(nested['url'], 'x:episode-42')
+        self.assertTrue(nested['proxy'])
+
     def test_playback_removes_only_redundant_hls_format_suffix(self):
         signed = 'https://a.test/master.m3u8?token=a%2Fb&expires=123&format=.m3u8'
         repaired = media.playback({'url': signed, 'parse': 0, 'format': 'hls',
@@ -929,6 +943,74 @@ class Spider:
             self.assertEqual((status, body), (206, b''))
             self.assertEqual({key.lower(): value for key, value in headers.items()}['content-length'], '4')
             self.assertEqual(calls[-1]['method'], 'HEAD')
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+
+    def test_player_content_proxy_uses_host_url_and_forwards_range_to_local_proxy(self):
+        calls = []
+        self.engine.spider.playerContent = lambda *_: {
+            'url': 'hongguo://episode-42', 'proxy': 1, 'format': 'mp4',
+            'contentType': 'video/mp4',
+            'alternates': [{'name': '备用画质', 'url': 'hongguo://episode-42-hd'}],
+            'header': {'Referer': 'https://source.test/', 'Cookie': 'upstream-secret'}}
+
+        def local_proxy(args):
+            calls.append(args)
+            length = 1 if args['method'] == 'HEAD' else 4
+            return [206, {'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes',
+                          'Content-Range': 'bytes 2-5/10', 'Content-Length': str(length)},
+                    b'' if args['method'] == 'HEAD' else b'2345']
+
+        self.engine.spider.localProxy = local_proxy
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        def request(method, path, headers=None, data=None):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=4)
+            try:
+                body = json.dumps(data).encode() if data is not None else None
+                client.request(method, path, body, headers or {})
+                response = client.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally:
+                client.close()
+
+        try:
+            status, _, payload = request('POST', '/api/v1/play',
+                {'Content-Type': 'application/json'}, {'id': 'episode-42'})
+            self.assertEqual(status, 200)
+            result = json.loads(payload)['data']
+            self.assertTrue(result['url'].startswith(f'http://127.0.0.1:{server.server_port}/proxy/'))
+            self.assertEqual(result['originalURL'], 'hongguo://episode-42')
+            self.assertTrue(result['proxy'])
+            self.assertEqual(result['headers'], {})
+
+            path = urllib.parse.urlsplit(result['url']).path
+            status, response_headers, body = request('GET', path,
+                {'Range': 'bytes=2-5', 'User-Agent': 'fixture-player'})
+            lower = {key.lower(): value for key, value in response_headers.items()}
+            self.assertEqual((status, body, lower['content-type'], lower['content-range']),
+                             (206, b'2345', 'video/mp4', 'bytes 2-5/10'))
+            self.assertEqual(calls[-1]['url'], 'hongguo://episode-42')
+            self.assertEqual(calls[-1]['method'], 'GET')
+            self.assertEqual(calls[-1]['range'], 'bytes=2-5')
+            self.assertEqual(calls[-1]['headers']['Range'], 'bytes=2-5')
+            self.assertEqual(calls[-1]['headers']['User-Agent'], 'fixture-player')
+            self.assertEqual(calls[-1]['upstreamHeaders']['Cookie'], 'upstream-secret')
+
+            alternate_path = urllib.parse.urlsplit(result['alternates'][0]['url']).path
+            status, _, body = request('GET', alternate_path, {'Range': 'bytes=0-3'})
+            self.assertEqual((status, body), (206, b'2345'))
+            self.assertEqual(calls[-1]['url'], 'hongguo://episode-42-hd')
+
+            status, response_headers, body = request('HEAD', path, {'Range': 'bytes=2-2'})
+            self.assertEqual((status, body), (206, b''))
+            self.assertEqual({key.lower(): value for key, value in response_headers.items()}['content-length'], '1')
+            self.assertEqual(calls[-1]['method'], 'HEAD')
+            self.assertEqual(calls[-1]['range'], 'bytes=2-2')
         finally:
             server.shutdown()
             server.server_close()

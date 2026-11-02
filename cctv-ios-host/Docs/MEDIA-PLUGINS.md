@@ -44,6 +44,24 @@ MD5/SHA-1/SHA-2/SHA-3/SHAKE、HMAC/CMAC、PBKDF2/HKDF/scrypt、公钥 RSA PKCS#1
 PyCryptodome：RSA 私钥运算与签名、ECC、DES/3DES、ChaCha20、CCM 和原生内部模块仍不支持；
 依赖这些功能的脚本需要自行适配。
 
+需要高速逐块 AES-CTR 时，Python 还可直接使用宿主内建的 `hostcrypto`，无需 `ctypes`、
+wheel 或插件自建服务：
+
+```python
+import hostcrypto
+
+ctr = hostcrypto.AES_CTR(key16, iv16)  # key 和 counter block 都必须是 16 字节
+try:
+    first = ctr.update(cipher_bytes[:4096])
+    rest = ctr.update(cipher_bytes[4096:])  # 同一个对象会连续推进 counter
+finally:
+    ctr.close()
+```
+
+iOS 端由 CommonCrypto 原生实现，`Crypto`/`Cryptodome` 兼容包继续保留，供其它算法和旧脚本使用。
+桌面测试中的 `hostcrypto.py` 是兼容回退实现。8 MB 在真机上低于 2 秒是性能验收目标，须以目标 iPhone
+实测记录确认；模拟器或桌面耗时不能替代该验收。
+
 ## ZIP 清单
 
 ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。存在清单时优先使用清单，否则尝试 package.json 和常见入口。CommonJS 代码使用静态 `require("...")` 或 `package.json` 声明 dependencies 时，未指定运行时时默认选择 Node.js Mobile。导入 `node:*` 核心模块或 Node 内置模块（如 `crypto`、`fs`、`http`、`https`）时也会选择 Node.js Mobile，包括清单误标为 `javascript` 的 CatVod 源；检测会扫描 ZIP 内 `.js`、`.mjs`、`.cjs` 文件，包含 `node_modules`。旧版本已导入的资源会在下次启动时重新识别。CatPaw Spider、Hamo 等专用协议仍遵守各自运行时要求。Node 包需要在 ZIP 内带齐它使用的 `node_modules`，应用不会联网安装 npm 依赖。用变量拼出的动态模块名无法静态识别；这类包可在清单中指定 `runtime: node`。无法确定入口时会明确报错。
@@ -59,6 +77,47 @@ Node 核心模块按下表处理：
 
 包含 Node 核心模块导入的影视源会交给 Node.js Mobile（Node 18.20.4），避免把部分 JSC 适配误认为完整 Node 模块。`child_process` 的外部进程调用和 `worker_threads.Worker` 会被宿主拒绝；任意 `.node` 原生扩展也无法加载。依赖 ffmpeg 等外部二进制的源仍需改成纯 JS/WASM 或服务端方案。
 
+### Node 运行时与媒体服务
+
+CommonJS 的 `require()`、清单声明 `runtime: "node"`、或静态导入 `node:*` 核心模块时会选择内嵌
+Node.js Mobile 18.20.4。`node:crypto`、`node:http`、`node:https` 和 `node:fs` 使用 Node 运行时接口；
+其中 `fs` 的可写相对路径受限于该资源的数据目录。JavaScriptCore 会话只提供文档表格所列的兼容子集，
+不能把 JSC 中的 `http`、`https` 或部分 `crypto` 适配当成完整 Node 行为。CatPaw Spider、Hamo 等专用
+协议仍运行在各自指定的 JavaScriptCore 会话。
+
+Node 插件可用 `server.listen(0, "127.0.0.1")` 请求系统分配端口，并在监听回调后通过
+`server.address().port` 获取该端口；宿主不会为普通 Node 插件自动改写成媒体 URL 或接管其响应。
+监听服务需绑定 loopback，宿主为每个 Node 插件跟踪最多 4 个 Server 和关联连接，并在 `stop`/`close` 或
+资源停止时关闭。CatPawOpen 的 `start()`/`stop()` 服务入口另由宿主读取实际监听地址。iOS 后台运行受系统
+生命周期限制；定时器和异步 I/O 由 Node 管理，宿主会在停止资源时清理注册的计时器、连接和监听。
+`node:child_process` 不可用于启动桌面二进制；`Worker` 和任意 `.node` 扩展也不支持。
+
+Python Spider 的媒体中转应优先用 `localProxy()`，避免为一个解密流程另起 `http.server`：
+
+```python
+def playerContent(self, flag, vid, vipFlags):
+    return {"url": "cenc://" + vid, "proxy": 1,
+            "format": "mp4", "contentType": "video/mp4"}
+
+def localProxy(self, params):
+    # url、method、headers、range；upstreamHeaders 是 playerContent 的源站请求头
+    return [206, {"Content-Type": "video/mp4", "Accept-Ranges": "bytes",
+                  "Content-Range": "bytes 0-1023/8966975"}, chunk_bytes]
+```
+
+`proxy: 1` 会使 `playback()` 将自定义绝对 URI 改写成本机 `/proxy/<token>` 地址，供 AVPlayer 使用。
+请求会把播放器的 `GET`/`HEAD`、`Range` 和常用请求头传入 `localProxy()`；参数 `url` 保留原地址，
+`headers` 是播放器请求头，`range` 是 Range 字符串，`upstreamHeaders` 是播放地址返回的源站请求头。
+回调返回 `[status, headers, body]`，其中 body 为 bytes；宿主管理端口和 HTTP 响应，不把源站 Cookie 交给播放器。
+单次响应上限 16 MiB，较大媒体应返回 Range 分片。原有 `/proxy?url=...` 调用形式继续兼容。
+
+示例 `Plugins/example-encrypted-media.py` 使用标准库解析 MP4、按样本解密并支持 Range；资源的「插件选项」JSON
+可通过 `items` 配置分集 URL、32 位十六进制 AES-128 密钥和请求头。模板支持未分片 MP4、`stsz/stsc/stco`
+或 `co64`、`tenc`/`senc` 每样本 8 或 16 字节 IV、CTR `cenc` 和标准 HTTP Range；文件最大 128 MiB，
+单次代理响应和 `moov` 最大 16 MiB。不支持 fragmented MP4 (`moof`)、pattern encryption、外置 IV 表或所有
+私有 DRM 变体，也不替来源实现登录、签名和密钥派生。导入前需用目标来源的真实媒体样本验证；模板不依赖 ffmpeg
+或插件自建监听端口。
+
 ```json
 {
   "schemaVersion": 1,
@@ -67,9 +126,13 @@ Node 核心模块按下表处理：
   "protocol": "catvod-js",
   "moduleType": "esm",
   "entry": "src/index.js",
-  "options": {}
+  "options": {"playTimeoutMs": 20000}
 }
 ```
+
+`options.playTimeoutMs` 可将播放解析接口等待时间设置为 1,000–120,000 毫秒，默认 15,000 毫秒；
+超出范围的值会夹到边界，无效或零值回到默认值。此值只作用于 `play` 请求，列表、详情、搜索继续使用
+原有请求超时。Python Spider 等插件若 `playerContent()` 本身需下载、签名或解密，可据实际耗时增加该值。
 
 `runtime` 支持 `javascript`、`python`、`node`。`protocol` 支持 `cctvhost.media/1`、`catvod-js`、`catvod-spider`、`drpy`、`python-spider`、`python-http`、`iptv-extractor`、`catpaw-http`。清单中的 `tvbox`、`tvbox-js`、`catvod-quickjs`、`catvod-open-js` 会规范化为 `catvod-js`；`catvod-open` 根据入口识别为本机 CatPawOpen Node 服务或 CatVod JS。JS 的 moduleType 为 `esm`、`commonjs` 或普通规则使用的 `script`。
 
