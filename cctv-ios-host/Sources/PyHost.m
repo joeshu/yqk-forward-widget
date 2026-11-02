@@ -650,16 +650,17 @@ static PyObject *pyHostCryptoCTRUpdate(PyHostCryptoCTR *self, PyObject *args) {
     if (PyObject_GetBuffer(inputObject, &input, PyBUF_SIMPLE) < 0) return NULL;
     PyObject *output = PyBytes_FromStringAndSize(NULL, input.len);
     if (!output) { PyBuffer_Release(&input); return NULL; }
+    size_t inputLength = (size_t)input.len;
     size_t moved = 0;
-    CCCryptorStatus status = CCCryptorUpdate(self->cryptor, input.buf, (size_t)input.len,
-        PyBytes_AS_STRING(output), (size_t)input.len, &moved);
+    CCCryptorStatus status = CCCryptorUpdate(self->cryptor, input.buf, inputLength,
+        PyBytes_AS_STRING(output), inputLength, &moved);
     PyBuffer_Release(&input);
-    if (status != kCCSuccess || moved > (size_t)PyBytes_GET_SIZE(output)) {
+    if (status != kCCSuccess || moved != inputLength) {
         Py_DECREF(output);
-        PyErr_Format(PyExc_RuntimeError, "CommonCrypto AES-CTR update failed (%d)", (int)status);
+        if (status != kCCSuccess) PyErr_Format(PyExc_RuntimeError, "CommonCrypto AES-CTR update failed (%d)", (int)status);
+        else PyErr_SetString(PyExc_RuntimeError, "CommonCrypto AES-CTR returned an unexpected output length");
         return NULL;
     }
-    if (moved != (size_t)PyBytes_GET_SIZE(output) && PyBytes_Resize(&output, (Py_ssize_t)moved) < 0) return NULL;
     return output;
 }
 static PyObject *pyHostCryptoCTRClose(PyHostCryptoCTR *self, PyObject *Py_UNUSED(ignored)) {

@@ -13,6 +13,8 @@
 
 导入猫爪时可直接输入 `https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5`。宿主下载对应 JS，核对 MD5 后安装；MD5 文件本身不会作为 JS 执行。校验仅证明传输内容一致。
 
+「资源 → ＋」提供自动识别、Python Spider、CatVod/TVBox JS、Node.js Mobile、TVBox JSON、MacCMS、直播列表和本地文件入口。脚本链接与 ZIP 快捷入口最终共用 `MediaPackageImporter` 的静态检查，不会因入口标签换用不同的解析器；Node 快捷入口只在确实需要动态 Node 模块时使用，并会拒绝要求 JavaScriptCore / CPython 的协议。导入结果会显示识别出的运行时和协议；未静态声明的能力需在资源详情启动服务后实际查询，导入成功不等于播放解码成功。
+
 ## 包类型
 
 | 类型 | 本机引擎 | 接口 |

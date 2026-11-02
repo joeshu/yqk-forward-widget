@@ -54,6 +54,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
 @property(nonatomic,copy) NSString *configChecksum;
 @property(nonatomic,copy) NSString *configContentChecksum;
 @property(nonatomic,copy) NSString *configurationState;
+@property(nonatomic,copy) NSString *runtimeHint;
 @property(nonatomic,copy) void (^completion)(NSDictionary *,NSError *);
 @property(atomic) BOOL finished;
 @property(nonatomic) PackageDownloadPhase phase;
@@ -74,9 +75,13 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     if(callback)dispatch_async(dispatch_get_main_queue(),^{callback(stage,received,expected);});
 }
 - (void)importURL:(NSURL *)url completion:(void (^)(NSDictionary *,NSError *))completion {
-    [self importURL:url headers:nil completion:completion];
+    [self importURL:url headers:nil runtimeHint:nil completion:completion];
 }
 - (void)importURL:(NSURL *)url headers:(NSDictionary<NSString *,NSString *> *)headers completion:(void (^)(NSDictionary *,NSError *))completion {
+    [self importURL:url headers:headers runtimeHint:nil completion:completion];
+}
+- (void)importURL:(NSURL *)url headers:(NSDictionary<NSString *,NSString *> *)headers runtimeHint:(NSString *)runtimeHint completion:(void (^)(NSDictionary *,NSError *))completion {
+    self.runtimeHint=runtimeHint;
     self.completion=completion;NSMutableDictionary *safeHeaders=[PackageSafeHeaders(headers) mutableCopy];NSURLComponents *input=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];NSString *user=input.percentEncodedUser.stringByRemovingPercentEncoding?:@"",*password=input.percentEncodedPassword.stringByRemovingPercentEncoding?:@"";
     if(input.user.length||input.password.length){NSData *credentials=[[NSString stringWithFormat:@"%@:%@",user,password] dataUsingEncoding:NSUTF8StringEncoding];if(credentials.length){BOOL hasAuthorization=NO;for(NSString *name in safeHeaders)if([name caseInsensitiveCompare:@"Authorization"]==NSOrderedSame){hasAuthorization=YES;break;}if(!hasAuthorization)safeHeaders[@"Authorization"]=[@"Basic " stringByAppendingString:[credentials base64EncodedStringWithOptions:0]];}input.user=nil;input.password=nil;url=input.URL;}
     self.originalURL=url;self.targetURL=url;self.configurationState=@"not_applicable";self.requestHeaders=PackageSafeHeaders(safeHeaders);self.credentialOrigin=url;
@@ -162,7 +167,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     if(self.finished)return;self.lastProgressTime=0;[self progress:@"检查资源入口、运行时与协议"];
     NSError *error=nil;NSString *directory=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];NSFileManager *fm=NSFileManager.defaultManager;
     [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&error];NSString *path=[directory stringByAppendingPathComponent:self.targetURL.lastPathComponent];NSDictionary *service=nil;
-    if(!error&&[self.scriptData writeToFile:path options:NSDataWritingAtomic error:&error])service=[MediaPackageImporter importFile:[NSURL fileURLWithPath:path] companionFiles:companions error:&error];
+    if(!error&&[self.scriptData writeToFile:path options:NSDataWritingAtomic error:&error])service=[MediaPackageImporter importFile:[NSURL fileURLWithPath:path] companionFiles:companions runtimeHint:self.runtimeHint error:&error];
     [fm removeItemAtPath:directory error:NULL];
     if(self.finished){if(service)[ServiceStore remove:service[@"id"]];return;}
     if(service){[self progress:@"识别完成 · 保存到本机资源库"];NSMutableDictionary *saved=[service mutableCopy];saved[@"url"]=self.originalURL.absoluteString;if(self.requestHeaders.count)saved[@"importHeaders"]=self.requestHeaders;

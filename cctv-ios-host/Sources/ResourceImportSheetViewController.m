@@ -140,7 +140,8 @@
     self.tableView.estimatedRowHeight=98;
     self.tableView.sectionHeaderHeight=UITableViewAutomaticDimension;
     self.tableView.estimatedSectionHeaderHeight=34;
-    self.tableView.sectionFooterHeight=14;
+    self.tableView.sectionFooterHeight=UITableViewAutomaticDimension;
+    self.tableView.estimatedSectionFooterHeight=34;
     self.tableView.contentInset=UIEdgeInsetsMake(0,0,20,0);
     self.tableView.translatesAutoresizingMaskIntoConstraints=NO;
     [self.tableView registerClass:ResourceImportSheetCell.class forCellReuseIdentifier:@"resource-option"];
@@ -179,9 +180,14 @@
     }
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section==0?4:(section==1?3:1); }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self optionsForSection:section].count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     return @[@"在线导入",@"从本地导入",@"资源管理"][section];
+}
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if(section==0)return @"脚本格式入口共用同一校验器。Node 快捷入口用于自动扫描不出来的动态 Node 模块引用；其余入口仍以实际代码和声明识别。";
+    if(section==1)return @"ZIP 会检查入口、相对路径、大小和声明后再保存；导入时不执行插件代码。";
+    return @"详情页可查看识别的运行时/协议，并在启动后检测实际接口能力。";
 }
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
     UILabel *label=[UILabel new];
@@ -200,18 +206,24 @@
     dispatch_once(&once,^{
         UIColor *(^rgb)(CGFloat,CGFloat,CGFloat)=^UIColor *(CGFloat r,CGFloat g,CGFloat b){return [UIColor colorWithRed:r/255.0 green:g/255.0 blue:b/255.0 alpha:1];};
         online=@[
-            @{ @"title":@"直播频道",@"detail":@"M3U / TXT 直播列表地址",@"icon":@"dot.radiowaves.left.and.right",@"color":rgb(246,151,0),@"option":@(ResourceImportOptionLiveURL)},
-            @{ @"title":@"影视 / 猫源 / 插件链接",@"detail":@"JS、.js.md5 猫源、Python 或 ZIP 资源包",@"icon":@"link",@"color":rgb(35,132,238),@"option":@(ResourceImportOptionMediaURL)},
-            @{ @"title":@"TVBox 配置",@"detail":@"导入 JSON 目录；支持站点脚本与直播列表",@"icon":@"square.stack.3d.up",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionTVBox)},
-            @{ @"title":@"MacCMS 影视接口",@"detail":@"直接添加 JSON / XML 采集接口，不需要脚本运行时",@"icon":@"film",@"color":rgb(197,67,147),@"option":@(ResourceImportOptionMacCMS)}
+            @{ @"id":@"live-url",@"title":@"直播列表链接",@"detail":@"M3U / TXT 订阅地址",@"icon":@"dot.radiowaves.left.and.right",@"color":rgb(246,151,0),@"option":@(ResourceImportOptionLiveURL)},
+            @{ @"id":@"script-auto-url",@"title":@"脚本链接 · 自动识别",@"detail":@"JS、Python、ZIP 和 .md5；推荐此入口",@"icon":@"sparkles",@"color":rgb(35,132,238),@"option":@(ResourceImportOptionMediaURL)},
+            @{ @"id":@"python-url",@"title":@"Python Spider 链接",@"detail":@"TVBox .py Spider；用内置 CPython 启动",@"icon":@"chevron.left.forwardslash.chevron.right",@"color":rgb(54,137,91),@"option":@(ResourceImportOptionPythonURL)},
+            @{ @"id":@"catvod-url",@"title":@"CatVod / TVBox JS 链接",@"detail":@"CatVod、猫源、.js.md5；自动检查协议",@"icon":@"film.stack",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionCatVodURL)},
+            @{ @"id":@"node-url",@"title":@"Node.js Mobile 链接",@"detail":@"用于动态 require 或 Node 内置模块；显式走 Node 18.20.4",@"icon":@"shippingbox",@"color":rgb(75,102,186),@"option":@(ResourceImportOptionNodeURL)},
+            @{ @"id":@"tvbox-url",@"title":@"TVBox 配置链接",@"detail":@"JSON 目录；站点脚本逐项检查后导入",@"icon":@"square.stack.3d.up",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionTVBox)},
+            @{ @"id":@"maccms-url",@"title":@"MacCMS 影视接口",@"detail":@"JSON / XML 采集 API；不需要脚本运行时",@"icon":@"film",@"color":rgb(197,67,147),@"option":@(ResourceImportOptionMacCMS)}
         ];
         local=@[
-            @{ @"title":@"导入直播列表文件",@"detail":@"本地 M3U / M3U8 / TXT 频道列表",@"icon":@"dot.radiowaves.left.and.right",@"color":rgb(246,151,0),@"option":@(ResourceImportOptionLiveFile)},
-            @{ @"title":@"导入脚本或 ZIP 包",@"detail":@"导入后检查入口、运行环境和影视 / 直播能力",@"icon":@"doc.zipper",@"color":rgb(92,83,218),@"option":@(ResourceImportOptionMediaFile)},
-            @{ @"title":@"导入 TVBox JSON",@"detail":@"从本地导入配置文件，不会覆盖现有目录",@"icon":@"doc.text",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionTVBox)}
+            @{ @"id":@"live-file",@"title":@"导入直播列表文件",@"detail":@"本地 M3U / M3U8 / TXT 频道列表",@"icon":@"dot.radiowaves.left.and.right",@"color":rgb(246,151,0),@"option":@(ResourceImportOptionLiveFile)},
+            @{ @"id":@"script-auto-file",@"title":@"导入脚本 / ZIP · 自动识别",@"detail":@"检查入口、运行环境、协议和校验文件",@"icon":@"doc.zipper",@"color":rgb(92,83,218),@"option":@(ResourceImportOptionMediaFile)},
+            @{ @"id":@"python-file",@"title":@"导入 Python Spider 文件",@"detail":@"选择 .py；按 Spider 接口识别影视能力",@"icon":@"chevron.left.forwardslash.chevron.right",@"color":rgb(54,137,91),@"option":@(ResourceImportOptionPythonFile)},
+            @{ @"id":@"node-file",@"title":@"导入 Node.js Mobile 脚本 / ZIP",@"detail":@"显式选 Node 运行时，支持动态 Node 模块引用",@"icon":@"shippingbox",@"color":rgb(75,102,186),@"option":@(ResourceImportOptionNodeFile)},
+            @{ @"id":@"tvbox-file",@"title":@"导入 TVBox JSON",@"detail":@"本地导入配置目录，不覆盖现有目录",@"icon":@"doc.text",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionTVBox)}
         ];
         manage=@[
-            @{ @"title":@"脚本与服务",@"detail":@"查看、启用和管理已导入的影视插件",@"icon":@"slider.horizontal.3",@"color":rgb(229,43,105),@"option":@(ResourceImportOptionServices)}
+            @{ @"id":@"services",@"title":@"脚本与服务",@"detail":@"查看、启用、探测能力和管理已导入资源",@"icon":@"slider.horizontal.3",@"color":rgb(229,43,105),@"option":@(ResourceImportOptionServices)},
+            @{ @"id":@"host-capabilities",@"title":@"宿主运行能力与调用示例",@"detail":@"Python AES-CTR、localProxy、Node HTTP、超时与识别规则",@"icon":@"wrench.and.screwdriver",@"color":rgb(45,127,164),@"option":@(ResourceImportOptionHostCapabilities)}
         ];
     });
     return @[online,local,manage][section];
@@ -220,6 +232,7 @@
     ResourceImportSheetCell *cell=[tableView dequeueReusableCellWithIdentifier:@"resource-option" forIndexPath:indexPath];
     NSDictionary *item=[self optionsForSection:indexPath.section][indexPath.row];
     [cell configureWithTitle:item[@"title"] detail:item[@"detail"] icon:item[@"icon"] color:item[@"color"]];
+    cell.accessibilityIdentifier=[@"resource-import.option." stringByAppendingString:item[@"id"]?:@"unknown"];
     return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {

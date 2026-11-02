@@ -37,6 +37,12 @@ class NativePackageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
+    def inspect_with_runtime_hint(self, file, runtime):
+        result = subprocess.run([str(self.executable), '--runtime-hint', runtime, str(file)],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
     def archive(self, entries):
         file = self.folder / 'fixture.zip'
         with zipfile.ZipFile(file, 'w', zipfile.ZIP_DEFLATED) as archive:
@@ -66,6 +72,27 @@ class NativePackageTests(unittest.TestCase):
                                          'protocol': 'cctvhost.media/1'})}))
         self.assertTrue(explicit['ok'], explicit)
         self.assertEqual(explicit['engine'], 'javascript')
+
+    def test_explicit_import_shortcuts_recover_dynamic_runtime_and_keep_protocol_boundaries(self):
+        dynamic_node = self.archive({'cctvhost.json': json.dumps({'entry': 'index.js', 'runtime': 'javascript',
+                                                                  'protocol': 'cctvhost.media/1'}),
+                                     'index.js': "const load=require;const http=load('http');module.exports={search(){return {list:[]}}}"})
+        node = self.inspect_with_runtime_hint(dynamic_node, 'node')
+        self.assertEqual((node['ok'], node['engine'], node['protocol']), (True, 'node', 'cctvhost.media/1'))
+
+        python = self.folder / 'quick-spider.py'
+        python.write_text('class Spider:\n    def homeContent(self, filter): return {}\n')
+        spider = self.inspect_with_runtime_hint(python, 'python')
+        self.assertEqual((spider['ok'], spider['engine'], spider['protocol']), (True, 'python', 'python-spider'))
+
+        catpaw_source = '''export default function createSpider() { return {meta:{key:'fixture'},api:async fastify=>{
+          const handler=async()=>({});fastify.post('/init',handler);fastify.post('/home',handler);
+          fastify.post('/category',handler);fastify.post('/detail',handler);fastify.post('/play',handler);fastify.post('/search',handler);
+        }}; }'''
+        catpaw = self.archive({'index.mjs': catpaw_source})
+        rejected = self.inspect_with_runtime_hint(catpaw, 'node')
+        self.assertFalse(rejected['ok'])
+        self.assertIn('不能强制切换到 Node.js Mobile', rejected['error'])
 
     def test_package_dependencies_default_to_node_for_esm(self):
         result = self.inspect(self.archive({'package.json': json.dumps({'type': 'module',

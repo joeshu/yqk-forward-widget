@@ -62,6 +62,16 @@
 static NSString *CCTVBuildTag(void) {
     return [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"未知";
 }
+static NSString *CCTVImportRuntimeLabel(NSString *runtime) {
+    if([runtime isEqual:@"node"])return @"Node.js Mobile 18.20.4";
+    if([runtime isEqual:@"python"])return @"CPython 3.13";
+    if([runtime isEqual:@"javascript"])return @"JavaScriptCore";
+    return runtime.length?runtime:@"未识别";
+}
+static NSString *CCTVImportProtocolLabel(NSString *protocol) {
+    NSDictionary *labels=@{@"python-spider":@"Python Spider",@"python-http":@"Python HTTP 服务",@"catvod-js":@"CatVod / TVBox JS",@"catvod-spider":@"CatPaw JS Spider",@"drpy":@"DRPY",@"cctvhost.media/1":@"CCTVHost Media API",@"catpaw-http":@"CatPaw HTTP",@"iptv-extractor":@"IPTV Extractor",@"widget-extractor":@"Widget Extractor",@"nanotv-service-v2":@"NanoTV Service v2",@"hamo-source-v3":@"Hamo Source v3"};
+    return labels[protocol]?: (protocol.length?protocol:@"未知协议");
+}
 static void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 static void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
 // 这两个键名来自 CNPlayerSDK 导出常量（值即常量名本身），SDK 缺 Title 会直接拒播并报错误码 4012
@@ -377,6 +387,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property(nonatomic,strong) AVPlayer *moviePlayer;
 @property(nonatomic,strong) AVPlayerViewController *movieController;
 @property(nonatomic) BOOL importingMediaPackage;
+@property(nonatomic,copy) NSString *importMediaPackageRuntimeHint;
 @property(nonatomic) BOOL moviePiPActive;
 @property(nonatomic,strong) MediaPackageDownloader *packageDownloader;
 @property(nonatomic,strong) TVBoxCatalogDownloader *tvboxCatalogDownloader;
@@ -412,7 +423,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)importMacCMSAPI;
 - (void)importTVBoxSite:(NSDictionary *)site;
 - (void)importTVBoxSite:(NSDictionary *)site browseAfterImport:(BOOL)browseAfterImport;
+- (void)importMediaURLWithTitle:(NSString *)title message:(NSString *)message placeholder:(NSString *)placeholder runtimeHint:(nullable NSString *)runtimeHint;
+- (void)importMediaPackageWithRuntimeHint:(nullable NSString *)runtimeHint;
 - (void)downloadPackageURL:(NSURL *)url headers:(nullable NSDictionary<NSString *,NSString *> *)headers completion:(void (^)(NSDictionary *,NSError *))completion;
+- (void)downloadPackageURL:(NSURL *)url headers:(nullable NSDictionary<NSString *,NSString *> *)headers runtimeHint:(nullable NSString *)runtimeHint completion:(void (^)(NSDictionary *,NSError *))completion;
 - (void)acceptImportedMedia:(NSDictionary *)service error:(NSError *)error autoBrowse:(BOOL)autoBrowse;
 - (void)saveImportedMedia:(NSDictionary *)service autoBrowse:(BOOL)autoBrowse;
 - (void)usePluginService:(NSDictionary *)service kind:(NSString *)kind;
@@ -2053,17 +2067,22 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)exportLocalConfiguration {
     NSData *data=[NSJSONSerialization dataWithJSONObject:[HostBackup snapshot] options:NSJSONWritingPrettyPrinted error:NULL];NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:@"CCTVHost-configuration.json"];[data writeToFile:path atomically:YES];UIActivityViewController *v=[[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:path]] applicationActivities:nil];v.popoverPresentationController.sourceView=self.bottomBar;v.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:v animated:YES completion:nil];
 }
-- (void)importLocalConfiguration {self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importingTVBoxCatalog=NO;UIDocumentPickerViewController *v=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];v.delegate=self;[self presentViewController:v animated:YES completion:nil];}
-- (void)importMediaPackage {
+- (void)importLocalConfiguration {self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importMediaPackageRuntimeHint=nil;self.importingTVBoxCatalog=NO;UIDocumentPickerViewController *v=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];v.delegate=self;[self presentViewController:v animated:YES completion:nil];}
+- (void)importMediaPackage { [self importMediaPackageWithRuntimeHint:nil]; }
+- (void)importMediaPackageWithRuntimeHint:(NSString *)runtimeHint {
     self.importingMediaPackage=YES;self.importingPlaylist=NO;self.importingTVBoxCatalog=NO;
+    self.importMediaPackageRuntimeHint=runtimeHint;
     UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];picker.delegate=self;[self presentViewController:picker animated:YES completion:nil];
 }
 - (void)downloadPackageURL:(NSURL *)url completion:(void (^)(NSDictionary *,NSError *))completion {
-    [self downloadPackageURL:url headers:nil completion:completion];
+    [self downloadPackageURL:url headers:nil runtimeHint:nil completion:completion];
 }
 - (void)downloadPackageURL:(NSURL *)url headers:(NSDictionary<NSString *,NSString *> *)headers completion:(void (^)(NSDictionary *,NSError *))completion {
+    [self downloadPackageURL:url headers:headers runtimeHint:nil completion:completion];
+}
+- (void)downloadPackageURL:(NSURL *)url headers:(NSDictionary<NSString *,NSString *> *)headers runtimeHint:(NSString *)runtimeHint completion:(void (^)(NSDictionary *,NSError *))completion {
     [self.packageDownloader cancel];MediaPackageDownloader *downloader=[MediaPackageDownloader new];self.packageDownloader=downloader;
-    UIAlertController *progress=[UIAlertController alertControllerWithTitle:@"导入影视 / 插件资源" message:@"准备下载…" preferredStyle:UIAlertControllerStyleAlert];
+    NSString *title=[runtimeHint isEqual:@"node"]?@"导入 Node.js Mobile 资源":([runtimeHint isEqual:@"python"]?@"导入 Python Spider":@"导入影视 / 插件资源");UIAlertController *progress=[UIAlertController alertControllerWithTitle:title message:@"准备下载…" preferredStyle:UIAlertControllerStyleAlert];
     __weak typeof(self) weakSelf=self;__weak UIAlertController *weakProgress=progress;__block BOOL delivered=NO;__block NSString *lastStage=nil;NSString *traceID=NSUUID.UUID.UUIDString.lowercaseString;
     [RuntimeDiagnostics.shared recordEvent:@"resource_import_started" category:@"import" fields:@{@"correlation_id":traceID, @"source_host":url.host?:@"", @"source_extension":url.pathExtension?:@""}];
     void(^finish)(NSDictionary *,NSError *)=^(NSDictionary *service,NSError *error){
@@ -2075,7 +2094,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             if(error&&error.code!=NSURLErrorCancelled){
                 UIAlertController *failure=[UIAlertController alertControllerWithTitle:@"资源导入失败" message:[NSString stringWithFormat:@"%@\n%@",lastStage?:@"下载阶段",error.localizedDescription?:@"请检查网络后重试"] preferredStyle:UIAlertControllerStyleAlert];
                 [failure addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){if(completion)completion(nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);}]];
-                [failure addAction:[UIAlertAction actionWithTitle:@"重新下载并校验" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[owner downloadPackageURL:url headers:headers completion:completion];}]];
+                [failure addAction:[UIAlertAction actionWithTitle:@"重新下载并校验" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[owner downloadPackageURL:url headers:headers runtimeHint:runtimeHint completion:completion];}]];
                 [owner presentViewController:failure animated:YES completion:nil];return;
             }
             if(completion)completion(service,error);
@@ -2084,23 +2103,26 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     };
     [progress addAction:[UIAlertAction actionWithTitle:@"取消下载" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){[downloader cancel];finish(nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);}]];
     downloader.onProgress=^(NSString *stage,int64_t received,int64_t expected){if(delivered||weakSelf.packageDownloader!=downloader)return;if(![lastStage isEqual:stage]){lastStage=stage;[RuntimeDiagnostics.shared recordEvent:@"resource_import_stage" category:@"import" fields:@{@"correlation_id":traceID, @"stage":stage, @"received_bytes":@(received), @"expected_bytes":@(expected)}];}NSString *amount=expected>0?[NSString stringWithFormat:@"%.2f / %.2f MB · %ld%%",received/1048576.0,expected/1048576.0,(long)MIN(100,received*100/expected)]:[NSString stringWithFormat:@"已接收 %.2f MB",received/1048576.0];weakProgress.message=[NSString stringWithFormat:@"%@\n%@\n导入完成后可选择启动，当前不会执行脚本。",stage,amount];};
-    dispatch_block_t show=^{RootViewController *owner=weakSelf;if(!owner||owner.packageDownloader!=downloader||delivered)return;[owner presentViewController:progress animated:YES completion:^{if(!delivered)[downloader importURL:url headers:headers completion:finish];}];};
+    dispatch_block_t show=^{RootViewController *owner=weakSelf;if(!owner||owner.packageDownloader!=downloader||delivered)return;[owner presentViewController:progress animated:YES completion:^{if(!delivered)[downloader importURL:url headers:headers runtimeHint:runtimeHint completion:finish];}];};
     if(self.presentedViewController)[self.presentedViewController dismissViewControllerAnimated:YES completion:show];else show();
 }
 - (void)importMediaURL {
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"导入影视资源链接" message:@"支持 JS、Python、ZIP，以及对应的 .md5 地址。导入后再启用运行。" preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"https://…/index.js.md5 或插件.zip";field.keyboardType=UIKeyboardTypeURL;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.autocorrectionType=UITextAutocorrectionTypeNo;}];
+    [self importMediaURLWithTitle:@"智能导入影视 / 插件链接" message:@"支持 JS、Python、ZIP，以及对应的 .md5 地址。会统一检查入口、协议和运行时；导入时不会执行脚本。" placeholder:@"https://…/index.js.md5、.py 或插件.zip" runtimeHint:nil];
+}
+- (void)importMediaURLWithTitle:(NSString *)title message:(NSString *)message placeholder:(NSString *)placeholder runtimeHint:(NSString *)runtimeHint {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=placeholder;field.keyboardType=UIKeyboardTypeURL;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.autocorrectionType=UITextAutocorrectionTypeNo;}];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         NSString *text=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(text.length>8192){[self showServiceError:@"资源地址过长"];return;}
-        __weak typeof(self) weakSelf=self;[self downloadPackageURL:[NSURL URLWithString:text] completion:^(NSDictionary *service,NSError *error){[weakSelf acceptImportedMedia:service error:error];}];
+        __weak typeof(self) weakSelf=self;[self downloadPackageURL:[NSURL URLWithString:text] headers:nil runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){[weakSelf acceptImportedMedia:service error:error];}];
     }]];[self presentViewController:alert animated:YES completion:nil];
 }
 - (void)importTVBoxCatalog {
     UIAlertController *choice=[UIAlertController alertControllerWithTitle:@"导入 TVBox 配置" message:@"合集仅保存站点和直播列表索引；选择单个条目后才会访问或导入，不会批量启动。站点脚本仍会经过现有导入器检查，并由你单独启停。" preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf=self;
     [choice addAction:[UIAlertAction actionWithTitle:@"从 URL 导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"TVBox 配置地址" message:@"输入包含 sites 或 lives 的 JSON 配置。" preferredStyle:UIAlertControllerStyleAlert];[alert addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"https://…/tvbox.json";field.keyboardType=UIKeyboardTypeURL;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.autocorrectionType=UITextAutocorrectionTypeNo;}];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){NSString *text=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];NSURL *url=[NSURL URLWithString:text];if(!url){[owner showServiceError:@"请输入有效的 HTTP/HTTPS 地址"];return;}[owner.tvboxCatalogDownloader cancel];owner.tvboxCatalogDownloader=[TVBoxCatalogDownloader new];owner.navigationItem.prompt=@"正在下载并检查 TVBox 配置…";[owner.tvboxCatalogDownloader loadURL:url completion:^(NSDictionary *catalog,NSError *error){RootViewController *root=weakSelf;root.navigationItem.prompt=nil;if(error){[root showServiceError:error.localizedDescription];return;}[root acceptTVBoxCatalog:catalog];}];}]];[owner presentViewController:alert animated:YES completion:nil];}]];
-    [choice addAction:[UIAlertAction actionWithTitle:@"从本地 JSON 导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;owner.importingTVBoxCatalog=YES;owner.importingPlaylist=NO;owner.importingMediaPackage=NO;UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];picker.delegate=owner;[owner presentViewController:picker animated:YES completion:nil];}]];
+    [choice addAction:[UIAlertAction actionWithTitle:@"从本地 JSON 导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;owner.importingTVBoxCatalog=YES;owner.importingPlaylist=NO;owner.importingMediaPackage=NO;owner.importMediaPackageRuntimeHint=nil;UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];picker.delegate=owner;[owner presentViewController:picker animated:YES completion:nil];}]];
     [choice addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     if(choice.popoverPresentationController){choice.popoverPresentationController.sourceView=self.view;choice.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);}
     [self presentViewController:choice animated:YES completion:nil];
@@ -2170,19 +2192,20 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSArray *verifiedLocal=[service[@"manifest"][@"verifiedLocalChecksums"] isKindOfClass:NSArray.class]?service[@"manifest"][@"verifiedLocalChecksums"]:@[];
     NSString *verification=([service[@"downloadChecksum"] length]&&[service[@"configurationState"] isEqual:@"verified"])?@"主脚本与配套配置均已通过 MD5 校验。":(verifiedLocal.count?([service[@"downloadChecksum"] length]?[NSString stringWithFormat:@"下载资源及 ZIP 内 %@ 的 MD5 均已通过校验。",[verifiedLocal componentsJoinedByString:@"、"]]:[NSString stringWithFormat:@"ZIP 内已校验：%@。",[verifiedLocal componentsJoinedByString:@"、"]]):([service[@"downloadChecksum"] length]?@"下载资源 MD5 校验已通过。":@"可在资源详情查看校验与配套配置状态。"));
     if(autoBrowse){NSString *kind=[ServiceStore isVODMediaService:service]?@"vod":([ServiceStore subscriptionURLForService:service].length?@"live":@"configuration");[self usePluginService:service kind:kind];return;}
-    NSString *message=[NSString stringWithFormat:@"已检查并导入 %@。%@",service[@"name"],verification];
+    NSDictionary *manifest=[service[@"manifest"] isKindOfClass:NSDictionary.class]?service[@"manifest"]:@{};NSString *runtime=[manifest[@"runtime"] isKindOfClass:NSString.class]?manifest[@"runtime"]:([service[@"engine"] isKindOfClass:NSString.class]?service[@"engine"]:@"");NSString *protocol=[manifest[@"protocol"] isKindOfClass:NSString.class]?manifest[@"protocol"]:([service[@"protocol"] isKindOfClass:NSString.class]?service[@"protocol"]:@"");NSArray *capabilities=[service[@"capabilities"] isKindOfClass:NSArray.class]?service[@"capabilities"]:([manifest[@"capabilities"] isKindOfClass:NSArray.class]?manifest[@"capabilities"]:@[]);NSString *capabilityStatus=capabilities.count?[NSString stringWithFormat:@"声明能力：%@",[capabilities componentsJoinedByString:@"、"]]:@"能力待测：启动后查询插件的 capabilities()，导入阶段不会执行代码。";NSString *kind=([ServiceStore isVODMediaService:service]?@"影视":([ServiceStore subscriptionURLForService:service].length||[ServiceStore isLiveMediaService:service]?@"直播":@"待启动探测资源类型"));
+    NSString *message=[NSString stringWithFormat:@"已检查并导入 %@。\n识别类型：%@ · %@\n资源分类：%@\n%@\n%@",service[@"name"],CCTVImportRuntimeLabel(runtime),CCTVImportProtocolLabel(protocol),kind,capabilityStatus,verification];
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"资源已导入" message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"稍后" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"启动并浏览" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){NSString *kind=[ServiceStore isVODMediaService:service]?@"vod":([ServiceStore subscriptionURLForService:service].length?@"live":@"configuration");[self usePluginService:service kind:kind];}]];
     [alert addAction:[UIAlertAction actionWithTitle:@"查看能力与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self openPluginResource:[@"plugin:" stringByAppendingString:service[@"id"]]];}]];
     [self presentViewController:alert animated:YES completion:nil];
 }
-- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importingTVBoxCatalog=NO;}
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importMediaPackageRuntimeHint=nil;self.importingTVBoxCatalog=NO;}
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    NSURL *u=urls.firstObject;if(!u){self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importingTVBoxCatalog=NO;return;}
+    NSURL *u=urls.firstObject;if(!u){self.importingPlaylist=NO;self.importingMediaPackage=NO;self.importMediaPackageRuntimeHint=nil;self.importingTVBoxCatalog=NO;return;}
     if(self.importingTVBoxCatalog){self.importingTVBoxCatalog=NO;BOOL scoped=[u startAccessingSecurityScopedResource];__weak typeof(self) weakSelf=self;self.navigationItem.prompt=@"正在读取 TVBox 配置…";dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{NSError *readError=nil;NSData *data=nil;NSFileHandle *file=[NSFileHandle fileHandleForReadingFromURL:u error:&readError];@try{if(file)data=[file readDataUpToLength:8*1024*1024+1 error:&readError];}@catch(NSException *exception){readError=[NSError errorWithDomain:@"CCTVHostImport" code:1 userInfo:@{NSLocalizedDescriptionKey:@"无法读取所选 TVBox JSON 文件"}];}@finally{[file closeAndReturnError:NULL];if(scoped)[u stopAccessingSecurityScopedResource];}if(data.length>8*1024*1024){data=nil;readError=[NSError errorWithDomain:@"CCTVHostTVBox" code:2 userInfo:@{NSLocalizedDescriptionKey:@"TVBox 配置超过 8 MiB 上限"}];}NSError *parseError=nil;NSDictionary *catalog=data? [TVBoxCatalogStore parseData:data sourceURL:nil error:&parseError]:nil;dispatch_async(dispatch_get_main_queue(),^{RootViewController *owner=weakSelf;owner.navigationItem.prompt=nil;if(readError)[owner showServiceError:readError.localizedDescription];else if(parseError)[owner showServiceError:parseError.localizedDescription];else[owner acceptTVBoxCatalog:catalog];});});return;}
-    if(self.importingMediaPackage){self.importingMediaPackage=NO;self.navigationItem.prompt=@"正在检查并导入资源…";BOOL scoped=[u startAccessingSecurityScopedResource];__weak typeof(self) weakSelf=self;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{NSError *error=nil;NSDictionary *service=nil;@try{service=[MediaPackageImporter importFile:u error:&error];}@finally{if(scoped)[u stopAccessingSecurityScopedResource];}dispatch_async(dispatch_get_main_queue(),^{[weakSelf acceptImportedMedia:service error:error];});}});return;}
+    if(self.importingMediaPackage){self.importingMediaPackage=NO;NSString *runtimeHint=self.importMediaPackageRuntimeHint;self.importMediaPackageRuntimeHint=nil;self.navigationItem.prompt=@"正在检查并导入资源…";BOOL scoped=[u startAccessingSecurityScopedResource];__weak typeof(self) weakSelf=self;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{NSError *error=nil;NSDictionary *service=nil;@try{service=[MediaPackageImporter importFile:u companionFiles:@{} runtimeHint:runtimeHint error:&error];}@finally{if(scoped)[u stopAccessingSecurityScopedResource];}dispatch_async(dispatch_get_main_queue(),^{[weakSelf acceptImportedMedia:service error:error];});}});return;}
     BOOL playlist=self.importingPlaylist;self.importingPlaylist=NO;
     BOOL scoped=[u startAccessingSecurityScopedResource];__weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{@autoreleasepool {
@@ -2661,6 +2684,13 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
 #pragma mark - 订阅（m3u 源 / 本地插件）
 
+- (void)showHostCapabilitiesGuide {
+    NSString *message=@"Python AES-CTR：import hostcrypto；用 hostcrypto.AES_CTR(key16, iv16).update(cipher_bytes)；iOS 使用 CommonCrypto 原生实现。Crypto / Cryptodome 兼容包保留给其他算法。\n\nPython 本地解密代理：playerContent 返回 {url: 'cenc://…', proxy: 1, format: 'mp4'}，再实现 localProxy(params) 返回 [状态码, headers, bytes]。宿主管理监听端口并转发 Range / HEAD，不要在插件里另起 http.server。\n\n播放等待：cctvhost.json 的 options.playTimeoutMs，默认 15000，最大 120000。只延长播放解析请求。\n\nNode.js Mobile：CommonJS / 明确选择 Node 的资源运行于 Node 18.20.4；支持 node:crypto、node:http、node:fs 等。server.listen(0, '127.0.0.1') 后从 server.address().port 读取端口，并在 stop/close 时关闭服务。\n\n导入识别：URL、单文件与 ZIP 共用同一静态检查器；可在资源详情查看识别出的运行时/协议。实际 capabilities 在启动后探测；导入阶段不会执行脚本。FFmpeg 探测 API 读取媒体流信息，不提供 ffmpeg 命令行转码。详见 Docs/MEDIA-PLUGINS.md。";
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"宿主运行能力与调用方式" message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)addSubscription {
     ResourceImportSheetViewController *sheet=[ResourceImportSheetViewController new];
     sheet.modalPresentationStyle=UIModalPresentationPageSheet;
@@ -2670,16 +2700,22 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         switch(option){
             case ResourceImportOptionLiveURL:[owner addSubscriptionURL];break;
             case ResourceImportOptionMediaURL:[owner importMediaURL];break;
+            case ResourceImportOptionPythonURL:[owner importMediaURLWithTitle:@"导入 Python Spider 链接" message:@"粘贴 .py Spider 地址。将使用内置 CPython，并检查入口是否实现标准 Spider 接口。" placeholder:@"https://…/spider.py" runtimeHint:@"python"];break;
+            case ResourceImportOptionCatVodURL:[owner importMediaURLWithTitle:@"导入 CatVod / TVBox JS" message:@"支持普通 JS 和 .js.md5。通过同一识别器检查 CatVod、DRPY、Node 依赖和入口文件。" placeholder:@"https://…/index.js.md5" runtimeHint:nil];break;
+            case ResourceImportOptionNodeURL:[owner importMediaURLWithTitle:@"导入 Node.js Mobile 资源" message:@"为动态 require 或 Node 内置模块指定 Node 18.20.4。与普通链接导入使用同一安全下载和包检查流程。" placeholder:@"https://…/plugin.js 或 .zip" runtimeHint:@"node"];break;
             case ResourceImportOptionLiveFile:{
-                owner.importingPlaylist=YES;owner.importingMediaPackage=NO;
+                owner.importingPlaylist=YES;owner.importingMediaPackage=NO;owner.importMediaPackageRuntimeHint=nil;
                 UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];
                 picker.delegate=owner;
                 [owner presentViewController:picker animated:YES completion:nil];
             }break;
             case ResourceImportOptionMediaFile:[owner importMediaPackage];break;
+            case ResourceImportOptionPythonFile:[owner importMediaPackageWithRuntimeHint:@"python"];break;
+            case ResourceImportOptionNodeFile:[owner importMediaPackageWithRuntimeHint:@"node"];break;
             case ResourceImportOptionServices:[owner openServicesPage];break;
             case ResourceImportOptionTVBox:[owner importTVBoxCatalog];break;
             case ResourceImportOptionMacCMS:[owner importMacCMSAPI];break;
+            case ResourceImportOptionHostCapabilities:[owner showHostCapabilitiesGuide];break;
         }
     };
     [self presentViewController:sheet animated:YES completion:nil];

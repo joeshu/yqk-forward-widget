@@ -391,8 +391,8 @@ static void next(NSArray *steps, NSUInteger index) {
             ResourceImportSheetViewController *sheet=(id)nav.presentedViewController;
             check([sheet isKindOfClass:ResourceImportSheetViewController.class], @"resource add opens the grouped import sheet");
             UITableView *options=[sheet valueForKey:@"tableView"];
-            check([options numberOfSections]==3 && [options numberOfRowsInSection:0]==4 && [options numberOfRowsInSection:1]==3,
-                  @"resource sheet exposes supported online, local and service actions");
+            check([options numberOfSections]==3 && [options numberOfRowsInSection:0]==7 && [options numberOfRowsInSection:1]==5 && [options numberOfRowsInSection:2]==2,
+                  @"resource sheet exposes smart, Python, CatVod, Node, TVBox, MacCMS, playlist, local-file and capability-guide actions");
             capture(self.window, @"03b-add-resource");
             [sheet dismissViewControllerAnimated:NO completion:nil];
             [root openServicesPage];

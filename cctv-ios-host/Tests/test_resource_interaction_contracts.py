@@ -727,6 +727,27 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('打开已有资源', importer)
         self.assertIn('[ServiceStore remove:identifier]', importer)
 
+    def test_import_shortcuts_share_runtime_detection_and_report_recognized_type(self):
+        sheet = (ROOT / 'Sources/ResourceImportSheetViewController.m').read_text()
+        importer = (ROOT / 'Sources/MediaPackageImporter.m').read_text()
+        downloader = (ROOT / 'Sources/MediaPackageDownloader.m').read_text()
+        self.assertIn('ResourceImportOptionPythonURL', sheet)
+        self.assertIn('ResourceImportOptionCatVodURL', sheet)
+        self.assertIn('ResourceImportOptionNodeURL', sheet)
+        self.assertIn('ResourceImportOptionHostCapabilities', sheet)
+        self.assertIn('runtimeHint:self.runtimeHint', downloader)
+        self.assertIn('inspectDirectory:package runtimeHint:runtimeHint', importer)
+        self.assertIn('Node.js 快捷导入只适用于 JavaScript 入口', importer)
+        self.assertIn('识别类型：%@ · %@', self.root)
+        self.assertIn('能力待测：启动后查询插件的 capabilities()', self.root)
+
+    def test_native_crypto_does_not_use_private_cpython_bytes_resize(self):
+        host = (ROOT / 'Sources/PyHost.m').read_text()
+        self.assertIn('CCCryptorUpdate(self->cryptor', host)
+        self.assertIn('moved != inputLength', host)
+        self.assertNotIn('PyBytes_Resize', host)
+        self.assertNotIn('_PyBytes_Resize', host)
+
     def test_imported_source_url_remains_visible_with_inline_resource_search(self):
         self.assertIn('@"title":@"资源来源"', self.resource_detail)
         self.assertIn('copySource', self.resource_detail)

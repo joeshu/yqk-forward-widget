@@ -156,6 +156,10 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
 }
 
 + (NSDictionary *)inspectDirectory:(NSString *)directory error:(NSError **)error {
+    return [self inspectDirectory:directory runtimeHint:nil error:error];
+}
+
++ (NSDictionary *)inspectDirectory:(NSString *)directory runtimeHint:(NSString *)runtimeHint error:(NSError **)error {
     NSFileManager *fm=NSFileManager.defaultManager;NSString *root=directory;
     NSArray *visible=[[fm contentsOfDirectoryAtPath:root error:error] filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *name,NSDictionary *bindings){return ![name hasPrefix:@"."] && ![name isEqual:@"__MACOSX"];}]];
     if(visible.count==1){BOOL isDirectory=NO;NSString *nested=[root stringByAppendingPathComponent:visible.firstObject];if([fm fileExistsAtPath:nested isDirectory:&isDirectory] && isDirectory)root=nested;}
@@ -261,6 +265,16 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         BOOL catvodDependencies=YES;NSSet *jscPackages=[NSSet setWithArray:@[@"axios",@"buffer",@"cheerio",@"crypto",@"crypto-js",@"http2",@"iconv-lite",@"jpeg-js",@"qs",@"stream",@"url"]];for(NSString *name in dependencies)if(![jscPackages containsObject:name]){catvodDependencies=NO;break;}
         runtime=([@[@"catvod-spider"] containsObject:protocol] || ([protocol isEqual:@"catvod-js"]&&catvodDependencies))?@"javascript":((dependencies.count || (hasCommonJSRequire && !nodeProtocol))?@"node":@"javascript");
     }
+    if(runtimeHint.length){
+        if(![@[@"python",@"node"] containsObject:runtimeHint]){PackageError(error,@"导入运行时提示无效");return nil;}
+        NSString *extension=entry.pathExtension.lowercaseString;
+        if([runtimeHint isEqual:@"python"] && ![extension isEqual:@"py"]){PackageError(error,@"Python Spider 快捷导入需要以 .py 文件作为入口；ZIP 中请使用智能识别导入");return nil;}
+        if([runtimeHint isEqual:@"node"] && [extension isEqual:@"py"]){PackageError(error,@"Node.js 快捷导入只适用于 JavaScript 入口；Python 文件请使用 Python Spider 导入");return nil;}
+        if([runtimeHint isEqual:@"node"] && ([@[@"catvod-spider",@"hamo-source-v3",@"python-spider",@"python-http"] containsObject:protocol])){PackageError(error,@"此协议需要 JavaScriptCore 或 CPython，不能强制切换到 Node.js Mobile");return nil;}
+        runtime=runtimeHint;
+        if([runtime isEqual:@"python"])protocol=[text containsString:@"class Spider"]?@"python-spider":@"python-http";
+    }
+    if([runtime isEqual:@"python"])moduleType=@"script";
     if(![@[@"esm",@"commonjs",@"script"] containsObject:moduleType] || ([runtime isEqual:@"python"] != [entry.pathExtension.lowercaseString isEqual:@"py"])){PackageError(error,@"入口类型与运行时声明不匹配");return nil;}
     if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"catvod-spider",@"drpy",@"iptv-extractor",@"catpaw-http",@"widget-extractor",@"nanotv-service-v2",@"hamo-source-v3"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}
     if([protocol isEqual:@"catvod-spider"] && ![runtime isEqual:@"javascript"]){PackageError(error,@"CatPaw JS Spider 必须使用 JavaScriptCore 运行时（runtime: javascript）");return nil;}
@@ -281,6 +295,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     return [self importFile:file companionFiles:@{} error:error];
 }
 + (NSDictionary *)importFile:(NSURL *)file companionFiles:(NSDictionary<NSString *,NSData *> *)files error:(NSError **)error {
+    return [self importFile:file companionFiles:files runtimeHint:nil error:error];
+}
++ (NSDictionary *)importFile:(NSURL *)file companionFiles:(NSDictionary<NSString *,NSData *> *)files runtimeHint:(NSString *)runtimeHint error:(NSError **)error {
     NSData *bytes=ReadBounded(file,PackageArchiveLimit,error);if(!bytes)return nil;
     NSString *identifier=NSUUID.UUID.UUIDString,*stage=[[ServiceStore directory] stringByAppendingPathComponent:[@".import-" stringByAppendingString:identifier]];
     NSString *package=[stage stringByAppendingPathComponent:@"package"];NSFileManager *fm=NSFileManager.defaultManager;
@@ -299,7 +316,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             if(![name isEqual:@"index.config.js"] || ![data isKindOfClass:NSData.class] || !data.length || data.length>65536 || [fm fileExistsAtPath:[package stringByAppendingPathComponent:name]]){PackageError(error,@"配套配置文件无效或与包内文件冲突");return nil;}
             if(![data writeToFile:[package stringByAppendingPathComponent:name] options:NSDataWritingAtomic error:error])return nil;
         }
-        NSMutableDictionary *manifest=[[self inspectDirectory:package error:error] mutableCopy];if(!manifest)return nil;
+        NSMutableDictionary *manifest=[[self inspectDirectory:package runtimeHint:runtimeHint error:error] mutableCopy];if(!manifest)return nil;
         NSString *launchArguments=@"";
         NSString *playlistPath=@"";
         if([manifest[@"runtime"] isEqual:@"python"] && [manifest[@"protocol"] isEqual:@"python-http"]){
