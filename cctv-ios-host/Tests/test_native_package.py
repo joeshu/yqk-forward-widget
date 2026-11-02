@@ -101,6 +101,48 @@ class NativePackageTests(unittest.TestCase):
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['engine'], result['manifest']['moduleType']), ('node', 'esm'))
 
+    def test_package_exports_select_root_entry_for_esm_and_commonjs_conditions(self):
+        esm = self.inspect(self.archive({
+            'package.json': json.dumps({'type': 'module', 'dependencies': {'example': '^1.0.0'},
+                                        'exports': {'.': {'import': './src/index.js', 'require': './src/index.cjs',
+                                                          'default': './src/fallback.js'}}}),
+            'src/index.js': 'export default {search(){return {list:[]}}}',
+            'src/index.cjs': 'module.exports={search(){return {list:[]}}}',
+            'src/fallback.js': 'export default {search(){return {list:[]}}}',
+            'index.js': 'throw new Error("must not override package exports")'}))
+        self.assertTrue(esm['ok'], esm)
+        self.assertEqual((esm['engine'], esm['manifest']['entry'], esm['manifest']['moduleType']),
+                         ('node', 'src/index.js', 'esm'))
+
+        commonjs = self.inspect(self.archive({
+            'package.json': json.dumps({'dependencies': {'example': '^1.0.0'},
+                                        'exports': {'require': './lib/index.cjs', 'import': './lib/index.mjs'}}),
+            'lib/index.cjs': 'module.exports={search(){return {list:[]}}}',
+            'lib/index.mjs': 'export default {search(){return {list:[]}}}',
+            'index.js': 'throw new Error("must not override package exports")'}))
+        self.assertTrue(commonjs['ok'], commonjs)
+        self.assertEqual((commonjs['engine'], commonjs['manifest']['entry'], commonjs['manifest']['moduleType']),
+                         ('node', 'lib/index.cjs', 'commonjs'))
+
+    def test_package_subpath_exports_do_not_replace_root_or_explicit_manifest_entry(self):
+        archive = self.archive({
+            'package.json': json.dumps({'main': 'index.js', 'exports': {'./compat': './lib/compat.js'}}),
+            'cctvhost.json': json.dumps({'entry': 'custom.js', 'runtime': 'javascript',
+                                         'protocol': 'cctvhost.media/1'}),
+            'index.js': 'module.exports={search(){return {list:[]}}}',
+            'custom.js': 'module.exports={search(){return {list:[]}}}',
+            'lib/compat.js': 'module.exports={search(){return {list:[]}}}'})
+        explicit = self.inspect(archive)
+        self.assertTrue(explicit['ok'], explicit)
+        self.assertEqual(explicit['manifest']['entry'], 'custom.js')
+
+        no_manifest = self.inspect(self.archive({
+            'package.json': json.dumps({'main': 'index.js', 'exports': {'./compat': './lib/compat.js'}}),
+            'index.js': 'module.exports={search(){return {list:[]}}}',
+            'lib/compat.js': 'module.exports={search(){return {list:[]}}}'}))
+        self.assertTrue(no_manifest['ok'], no_manifest)
+        self.assertEqual(no_manifest['manifest']['entry'], 'index.js')
+
     def test_package_and_manifest_versions_are_persisted_as_resource_metadata(self):
         package=self.inspect(self.archive({'package.json': json.dumps({'name':'fixture','version':'2.4.1'}),
                                            'index.js':'module.exports={search(){return {list:[]}}}'}))

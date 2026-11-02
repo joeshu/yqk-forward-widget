@@ -15,6 +15,8 @@
 
 「资源 → ＋」提供自动识别、Python Spider、CatVod/TVBox JS、Node.js Mobile、TVBox JSON、MacCMS、直播列表和本地文件入口。脚本链接与 ZIP 快捷入口最终共用 `MediaPackageImporter` 的静态检查，不会因入口标签换用不同的解析器；Node 快捷入口只在确实需要动态 Node 模块时使用，并会拒绝要求 JavaScriptCore / CPython 的协议。导入结果会显示识别出的运行时和协议；未静态声明的能力需在资源详情启动服务后实际查询，导入成功不等于播放解码成功。
 
+Node ZIP 包的入口按 `cctvhost.json` 的 `entry`、`package.json` 根 `exports`、`module` / `main` 和常见入口名依次识别。根导出支持字符串、数组及 `import` / `require` / `node` / `default` 条件；只声明 `./subpath` 的 exports 不会误当成包入口，导出目标仍受资源目录路径校验限制。
+
 ## 包类型
 
 | 类型 | 本机引擎 | 接口 |

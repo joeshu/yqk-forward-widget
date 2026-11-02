@@ -15,6 +15,25 @@ static BOOL SafeRelative(NSString *path){
     for(NSString *part in path.pathComponents)if([part isEqual:@".."] || [part isEqual:@"."])return NO;
     return YES;
 }
+static NSString *PackageExportTarget(id value,BOOL preferESM,NSUInteger depth){
+    if(depth>8)return nil;
+    if([value isKindOfClass:NSString.class]){
+        NSString *target=value;
+        if([target hasPrefix:@"./"])target=[target substringFromIndex:2];
+        return SafeRelative(target)?target:nil;
+    }
+    if([value isKindOfClass:NSArray.class]){
+        for(id candidate in value){NSString *target=PackageExportTarget(candidate,preferESM,depth+1);if(target.length)return target;}
+        return nil;
+    }
+    if(![value isKindOfClass:NSDictionary.class])return nil;
+    NSDictionary *exports=value;
+    if(exports[@"."]){exports=exports[@"."];if(![exports isKindOfClass:NSDictionary.class]&&![exports isKindOfClass:NSArray.class]&&![exports isKindOfClass:NSString.class])return nil;}
+    else for(id key in exports)if([key isKindOfClass:NSString.class]&&[key hasPrefix:@"."])return nil; // Subpath-only exports do not define the package root.
+    NSArray *conditions=preferESM?@[@"import",@"node",@"default",@"require"]:@[@"require",@"node",@"default",@"import"];
+    for(NSString *condition in conditions){id candidate=exports[condition];if(candidate){NSString *target=PackageExportTarget(candidate,preferESM,depth+1);if(target.length)return target;}}
+    return nil;
+}
 static NSData *ReadBounded(NSURL *url,NSUInteger limit,NSError **error){
     NSFileHandle *file=[NSFileHandle fileHandleForReadingFromURL:url error:error];if(!file)return nil;
     NSMutableData *bytes=[NSMutableData data];
@@ -180,7 +199,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     for(NSString *key in @[@"version",@"pluginVersion"])if([result[key] length]>128 || [package[@"version"] length]>128){PackageError(error,@"资源版本标识超过 128 个字符");return nil;}
     NSString *entry=result[@"entry"];
     if(!entry.length){
-        entry=package[@"module"]?:package[@"main"];
+        NSString *exportEntry=PackageExportTarget(package[@"exports"],[package[@"type"] isEqual:@"module"],0);
+        if(exportEntry.length && [fm fileExistsAtPath:[root stringByAppendingPathComponent:exportEntry]])entry=exportEntry;
+        if(!entry.length)entry=package[@"module"]?:package[@"main"];
         if([entry hasPrefix:@"./"])entry=[entry substringFromIndex:2];
         if(!entry.length)for(NSString *candidate in @[@"index.js",@"index.mjs",@"index.cjs",@"src/index.js",@"src/index.mjs",@"nodejs/src/index.js",@"spider.py",@"main.py"]){if([fm fileExistsAtPath:[root stringByAppendingPathComponent:candidate]]){entry=candidate;break;}}
         if(!entry.length){NSMutableArray *candidates=[NSMutableArray array],*pythonServers=[NSMutableArray array];for(NSString *name in [fm contentsOfDirectoryAtPath:root error:NULL])if([@[@"py",@"js",@"mjs",@"cjs"] containsObject:name.pathExtension.lowercaseString]){[candidates addObject:name];if([name.pathExtension.lowercaseString isEqual:@"py"]){NSString *source=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:name]],PackageFileLimit,NULL) encoding:NSUTF8StringEncoding];if([source containsString:@"ThreadingHTTPServer"] && PythonDeclaresArgument(source,@"--bind") && (PythonDeclaresArgument(source,@"port") || PythonDeclaresArgument(source,@"--port")))[pythonServers addObject:name];}}if(candidates.count==1)entry=candidates.firstObject;else if(pythonServers.count==1)entry=pythonServers.firstObject;}
