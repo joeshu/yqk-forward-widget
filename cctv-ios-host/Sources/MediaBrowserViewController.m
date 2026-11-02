@@ -1162,7 +1162,15 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     MediaHomeCarouselView *banner=[MediaHomeCarouselView new];self.homeCarousel=banner;[banner configureWithItems:bannerItems];[banner.heightAnchor constraintEqualToConstant:208].active=YES;[self.homeStack addArrangedSubview:banner];
     __weak typeof(self) weakSelf=self;banner.onSelectItem=^(NSDictionary *item){MediaBrowserViewController *owner=weakSelf;if(owner)[owner openHomeRecommendation:item source:owner.source provider:owner.provider?:owner.homeResultProvider?:@""];};
     [self.homeStack addArrangedSubview:[self homeSectionHeader:@"热门推荐" actionTitle:@"全部 ›" selector:@selector(browseRecommendations)]];
-    NSMutableArray<UIButton *> *popular=[NSMutableArray array];for(NSUInteger index=0;index<items.count&&popular.count<8;index++){NSDictionary *item=items[index];[popular addObject:[self homeCardWithTitle:[item[@"name"] isKindOfClass:NSString.class]?item[@"name"]:@"影视内容" subtitle:[item[@"remarks"] isKindOfClass:NSString.class]?item[@"remarks"]:@"热门推荐"] imageURL:[item[@"poster"] isKindOfClass:NSString.class]?item[@"poster"]:@"" symbol:nil action:^{MediaBrowserViewController *owner=weakSelf;if(owner)[owner openHomeRecommendation:item source:owner.source provider:owner.provider?:owner.homeResultProvider?:@""];}]];}
+    NSMutableArray<UIButton *> *popular=[NSMutableArray array];
+    for(NSUInteger index=0;index<items.count&&popular.count<8;index++){
+        NSDictionary *item=items[index];
+        NSString *title=[item[@"name"] isKindOfClass:NSString.class]?item[@"name"]:@"影视内容";
+        NSString *subtitle=[item[@"remarks"] isKindOfClass:NSString.class]?item[@"remarks"]:@"热门推荐";
+        NSString *poster=[item[@"poster"] isKindOfClass:NSString.class]?item[@"poster"]:@"";
+        UIButton *card=[self homeCardWithTitle:title subtitle:subtitle imageURL:poster symbol:nil action:^{MediaBrowserViewController *owner=weakSelf;if(owner)[owner openHomeRecommendation:item source:owner.source provider:owner.provider?:owner.homeResultProvider?:@""];}];
+        [popular addObject:card];
+    }
     [self addHomeCards:popular emptyText:@"暂无热门推荐" identifier:@"popular"];
     [self.homeStack addArrangedSubview:[self homeSectionHeader:@"更多精选" actionTitle:@"打开影视库 ›" selector:@selector(browseRecommendations)]];
     UICollectionViewFlowLayout *layout=[UICollectionViewFlowLayout new];layout.minimumInteritemSpacing=10;layout.minimumLineSpacing=18;layout.sectionInset=UIEdgeInsetsZero;
@@ -1289,7 +1297,15 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
         if(shown>=8)break;
         NSString *identifier=[category[@"id"] isKindOfClass:NSString.class]?category[@"id"]:@"";NSString *name=[category[@"name"] isKindOfClass:NSString.class]?category[@"name"]:@"";if(!identifier.length||!name.length)continue;
         NSDictionary *arguments=[self arguments:@{@"categoryId":identifier,@"page":@1,@"filters":@{}}];id result=[[MediaMetadataCache shared] resultForSource:self.source operation:@"category" arguments:arguments maximumAge:DBL_MAX isStale:NULL];NSArray *items=[result isKindOfClass:NSDictionary.class]?MediaBrowserDictionaryRows(result[@"items"],NULL):@[];
-        NSMutableArray<UIButton *> *cards=[NSMutableArray array];for(NSUInteger itemIndex=0;itemIndex<items.count&&cards.count<8;itemIndex++){NSDictionary *item=items[itemIndex];[cards addObject:[self homeCardWithTitle:[item[@"name"] isKindOfClass:NSString.class]?item[@"name"]:@"影视内容" subtitle:[item[@"remarks"] isKindOfClass:NSString.class]?item[@"remarks"]:name imageURL:[item[@"poster"] isKindOfClass:NSString.class]?item[@"poster"]:@"" symbol:nil action:^{MediaBrowserViewController *owner=weakSelf;if(owner)[owner openHomeRecommendation:item source:owner.source provider:provider];}]];}
+        NSMutableArray<UIButton *> *cards=[NSMutableArray array];
+        for(NSUInteger itemIndex=0;itemIndex<items.count&&cards.count<8;itemIndex++){
+            NSDictionary *item=items[itemIndex];
+            NSString *title=[item[@"name"] isKindOfClass:NSString.class]?item[@"name"]:@"影视内容";
+            NSString *subtitle=[item[@"remarks"] isKindOfClass:NSString.class]?item[@"remarks"]:name;
+            NSString *poster=[item[@"poster"] isKindOfClass:NSString.class]?item[@"poster"]:@"";
+            UIButton *card=[self homeCardWithTitle:title subtitle:subtitle imageURL:poster symbol:nil action:^{MediaBrowserViewController *owner=weakSelf;if(owner)[owner openHomeRecommendation:item source:owner.source provider:provider];}];
+            [cards addObject:card];
+        }
         UIStackView *heading=(UIStackView *)[self homeSectionHeader:name actionTitle:@"" selector:nil];UIButton *all=[UIButton buttonWithType:UIButtonTypeSystem];[all setTitle:@"全部 ›" forState:UIControlStateNormal];all.accessibilityLabel=[NSString stringWithFormat:@"浏览全部%@",name];[all addAction:[UIAction actionWithHandler:^(UIAction *action){MediaBrowserViewController *owner=weakSelf;if(!owner)return;[owner showBrowse:YES];owner.category=identifier;owner.keyword=@"";owner.page=1;[owner loadListing:NO];}] forControlEvents:UIControlEventTouchUpInside];[heading addArrangedSubview:all];[self.homeStack addArrangedSubview:heading];
         [self addHomeCards:cards emptyText:@"滚动到此处自动加载" identifier:[NSString stringWithFormat:@"category-%@",identifier]];shown++;
     }
