@@ -99,6 +99,11 @@ static void MediaEpisodeSelectionLoadPoster(NSString *url, UIImageView *view, NS
     NSArray *seasonEpisodes=[self.currentSeason[@"episodes"] isKindOfClass:NSArray.class]?self.currentSeason[@"episodes"]:@[];
     return seasonEpisodes;
 }
+- (NSString *)currentParserID {
+    if(self.parserID.length)return self.parserID;
+    NSString *sourceID=[self.source[@"id"] isKindOfClass:NSString.class]?self.source[@"id"]:([self.source[@"api"] isKindOfClass:NSString.class]?self.source[@"api"]:@"default");
+    return [NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"cctv.media.parser.%@",sourceID]]?:@"";
+}
 - (NSString *)titleText {
     NSString *name=[self.detail[@"name"] isKindOfClass:NSString.class]?self.detail[@"name"]:@"";
     if(!name.length)name=[self.item[@"name"] isKindOfClass:NSString.class]?self.item[@"name"]:@"影视选集";
@@ -132,7 +137,7 @@ static void MediaEpisodeSelectionLoadPoster(NSString *url, UIImageView *view, NS
     if(!self.correlationID.length)self.correlationID=NSUUID.UUID.UUIDString.lowercaseString;
     self.page=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,[self episodesForLine:self.selectedLineIndex].count,self.episodeOrderReversed);
     if(!self.client){
-        self.client=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source?:@{}]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue]];
+        NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");self.client=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source?:@{}]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue] catalogID:catalogID];
     }
     self.refreshClient=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source?:@{}]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue]];
     [self buildLayout];
@@ -342,11 +347,11 @@ static void MediaEpisodeSelectionLoadPoster(NSString *url, UIImageView *view, NS
     episodes=[self episodesForLine:self.selectedLineIndex];if(selectedIndex<0||selectedIndex>=episodes.count)return;episode=episodes[(NSUInteger)selectedIndex];NSDictionary *line=self.selectedLineIndex<self.lines.count?self.lines[self.selectedLineIndex]:@{};
     self.selectedEpisodeIndex=selectedIndex;self.page=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,episodes.count,self.episodeOrderReversed);self.episodeExpanded=YES;[self rebuildSelection];[self.client cancel];NSUInteger generation=++self.generation;episodeName=[episode[@"name"] description]?:@"当前分集";self.statusLabel.text=[NSString stringWithFormat:@"正在解析 %@…",episodeName];self.statusLabel.hidden=NO;self.continueButton.enabled=NO;self.playSpinner.hidden=NO;[self.playSpinner startAnimating];
     [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_requested" category:@"media_api" fields:@{@"correlation_id":self.correlationID?:@"",@"request_generation":@(generation),@"line_index":@(self.selectedLineIndex),@"episode_index":@(self.selectedEpisodeIndex)}];
-    NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@""} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;__weak typeof(self) weakSelf=self;
+    NSString *parserID=[self currentParserID];NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":parserID} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;__weak typeof(self) weakSelf=self;
     [self.client call:@"play" arguments:args correlationID:self.correlationID completion:^(id result,NSError *error){
         MediaEpisodeSelectionViewController *owner=weakSelf;if(!owner||owner.generation!=generation)return;[owner.playSpinner stopAnimating];owner.playSpinner.hidden=YES;owner.continueButton.enabled=YES;owner.statusLabel.text=@"";owner.statusLabel.hidden=YES;
         if(error||![result isKindOfClass:NSDictionary.class]){[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_failed" category:@"media_api" fields:@{@"correlation_id":owner.correlationID?:@"",@"request_generation":@(generation),@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@""}];owner.statusLabel.text=[NSString stringWithFormat:@"解析失败：%@",error.localizedDescription?:@"来源没有返回可播放结果"];owner.statusLabel.hidden=NO;return;}
-        [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.correlationID?:@"",@"request_generation":@(generation)}];NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"seasonIndex":@(owner.selectedSeasonIndex),@"lineIndex":@(owner.selectedLineIndex),@"episodeIndex":@(owner.selectedEpisodeIndex),@"correlationID":owner.correlationID?:@""};
+        [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.correlationID?:@"",@"request_generation":@(generation)}];NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"seasonIndex":@(owner.selectedSeasonIndex),@"lineIndex":@(owner.selectedLineIndex),@"episodeIndex":@(owner.selectedEpisodeIndex),@"parserID":parserID,@"correlationID":owner.correlationID?:@""};
         if(owner.onSelectEpisode)owner.onSelectEpisode(result,context);if(owner.selectionUpdatesPlayer&&owner.navigationController.topViewController==owner)[owner.navigationController popViewControllerAnimated:YES];
     }];
 }

@@ -285,6 +285,10 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('HostStyleGlassCard(infoCard,17)', detail)
         self.assertIn('HostStyleGlassCard(sourceCard,17)', detail)
         self.assertIn('self.contentStack.spacing=9', detail)
+        self.assertIn('configureWithTransparentBackground', detail)
+        self.assertIn('contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever', detail)
+        self.assertIn('scrollView.topAnchor constraintEqualToAnchor:self.view.topAnchor', detail)
+        self.assertIn('heroSpacer.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.62', detail)
         self.assertIn('NSUInteger rowCount=(visibleCount+columnCount-1)/columnCount', detail)
         self.assertIn('UIView *spacer=[UIView new]', detail)
         self.assertIn('media-detail-page-status', detail)
@@ -587,6 +591,7 @@ class ResourceInteractionContracts(unittest.TestCase):
                              self.detail.index('@interface MediaBrowserViewController')]
         self.assertIn('media-detail-episode-grid', detail)
         self.assertIn('media-detail-route-', detail)
+        self.assertIn('media-detail-parser-selector', detail)
         self.assertIn('constraintGreaterThanOrEqualToConstant:44', detail)
         self.assertIn('call:@"play"', detail)
         self.assertIn('toggleFavorite', detail)
@@ -598,6 +603,31 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('viewWillTransitionToSize', self.playback)
         self.assertIn('landscapeConstraints', self.playback)
         self.assertIn('viewDidAppear:(BOOL)animated', self.playback)
+
+    def test_tvbox_parser_selection_drives_native_resolution_and_web_fallback(self):
+        catalog = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
+        api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        self.assertIn('playbackParsersForCatalogID:', catalog)
+        self.assertIn('parserCatalogID', api_client)
+        self.assertIn('MediaParserRequestURL', api_client)
+        self.assertIn('parserDirectURL', api_client)
+        self.assertIn('MediaParserResponseIsDirectMedia', api_client)
+        self.assertIn('MediaParserKind(parser)', api_client)
+        self.assertIn('self.parserWebFallbackResult?:self.parserFallbackResult', api_client)
+        self.assertIn('parserID', self.detail)
+        self.assertIn('parserID', self.playback)
+        self.assertIn('parserID', self.episodes)
+        self.assertIn('selected type 1 parser turns a TVBox web page',
+                      (ROOT / 'Tests/native_media_api_tests.m').read_text())
+        self.assertIn('selected type 0 parser keeps the in-app web playback fallback',
+                      (ROOT / 'Tests/native_media_api_tests.m').read_text())
+
+    def test_fullscreen_player_shows_observed_rate_and_available_audio_tracks(self):
+        self.assertIn('media-playback-throughput', self.playback)
+        self.assertIn('AVPlayerItemAccessLogEvent *event=self.player.currentItem.accessLog.events.lastObject', self.playback)
+        self.assertIn('AVMediaCharacteristicLegible title:@"字幕"', self.playback)
+        self.assertIn('AVMediaCharacteristicAudible title:@"音轨"', self.playback)
+        self.assertIn('弹幕 · 当前视频未提供弹幕轨道', self.playback)
 
     def test_detail_starts_player_inline_without_push_and_preserves_player_diagnostics(self):
         detail = self.detail[self.detail.index('@implementation MediaDetailViewController'):

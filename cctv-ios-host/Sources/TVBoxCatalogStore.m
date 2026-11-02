@@ -105,6 +105,52 @@ static NSString *TVBoxBasicAuthorization(NSURLComponents *parts) {
     NSArray *rows=[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"];
     return [rows isKindOfClass:NSArray.class]?rows:@[];
 }
++ (NSArray<NSDictionary *> *)playbackParsers {
+    return [self playbackParsersForCatalogID:nil];
+}
++ (NSArray<NSDictionary *> *)playbackParsersForCatalogID:(NSString *)catalogID {
+    NSMutableArray<NSDictionary *> *result=[NSMutableArray array];
+    // Keep endpoint choices scoped to the selected collection. When no catalog
+    // is known (for older imported sources), prefer the most recently imported
+    // collections and retain their order.
+    for(id rawCatalog in [[self catalogs] reverseObjectEnumerator]){
+        if(![rawCatalog isKindOfClass:NSDictionary.class])continue;
+        NSDictionary *catalog=rawCatalog;
+        NSString *currentID=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"";
+        if(catalogID.length&&![currentID isEqual:catalogID])continue;
+        NSDictionary *config=[catalog[@"tvboxConfig"] isKindOfClass:NSDictionary.class]?catalog[@"tvboxConfig"]:@{};
+        NSArray *parses=[config[@"parses"] isKindOfClass:NSArray.class]?config[@"parses"]:@[];
+        NSUInteger limit=MIN(parses.count,(NSUInteger)32);
+        for(NSUInteger index=0;index<limit;index++){
+            id value=parses[index];
+            if(result.count>=64)break;
+            NSDictionary *row=[value isKindOfClass:NSDictionary.class]?value:nil;
+            NSString *url=[value isKindOfClass:NSString.class]?value:([row[@"url"] isKindOfClass:NSString.class]?row[@"url"]:@"");
+            url=[url stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if(!url.length||url.length>8192)continue;
+            NSString *probe=[[[url stringByReplacingOccurrencesOfString:@"{url}" withString:@"fixture"] stringByReplacingOccurrencesOfString:@"$url" withString:@"fixture"] stringByReplacingOccurrencesOfString:@"%s" withString:@"fixture"];
+            NSURLComponents *parts=[NSURLComponents componentsWithString:probe];
+            if((!parts.scheme.length||!parts.host.length)&&[catalog[@"url"] isKindOfClass:NSString.class]){
+                NSString *marker=@"__TVBOX_MEDIA_URL_PLACEHOLDER__",*template=url;
+                for(NSString *placeholder in @[@"{url}",@"$url",@"%s"])template=[template stringByReplacingOccurrencesOfString:placeholder withString:marker];
+                NSURL *baseURL=[NSURL URLWithString:catalog[@"url"]],*absolute=[[NSURL URLWithString:template relativeToURL:baseURL] absoluteURL];
+                if(absolute){url=[absolute.absoluteString stringByReplacingOccurrencesOfString:marker withString:@"{url}"];probe=[[[url stringByReplacingOccurrencesOfString:@"{url}" withString:@"fixture"] stringByReplacingOccurrencesOfString:@"$url" withString:@"fixture"] stringByReplacingOccurrencesOfString:@"%s" withString:@"fixture"];parts=[NSURLComponents componentsWithString:probe];}
+            }
+            if(!parts||![@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]||!parts.host.length||parts.user.length||parts.password.length)continue;
+            id rawType=row[@"type"];id type=([rawType isKindOfClass:NSString.class]||[rawType isKindOfClass:NSNumber.class])?rawType:@0;
+            NSString *name=[row[@"name"] isKindOfClass:NSString.class]?[(NSString *)row[@"name"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";
+            if(name.length>256)name=[name substringToIndex:256];if(!name.length)name=@"资源合集解析";
+            NSString *identifier=[NSString stringWithFormat:@"%@:%lu",currentID.length?currentID:@"legacy",(unsigned long)index];
+            NSMutableDictionary *parser=[NSMutableDictionary dictionaryWithDictionary:@{@"id":identifier,@"url":url,@"name":name,@"type":type,@"index":@(index),@"catalogID":currentID}];
+            if([row[@"header"] isKindOfClass:NSDictionary.class])parser[@"header"]=row[@"header"];
+            if([row[@"ext"] isKindOfClass:NSDictionary.class]||[row[@"ext"] isKindOfClass:NSArray.class]||[row[@"ext"] isKindOfClass:NSString.class])parser[@"ext"]=row[@"ext"];
+            if([row[@"flag"] isKindOfClass:NSString.class])parser[@"flag"]=row[@"flag"];
+            parser[@"catalogName"]=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"资源合集";
+            [result addObject:parser.copy];
+        }
+    }
+    return result.copy;
+}
 + (void)saveCatalog:(NSDictionary *)catalog {
     NSMutableArray *rows=[[self catalogs] mutableCopy];
     for(NSUInteger i=0;i<rows.count;i++) if([rows[i][@"id"] isEqual:catalog[@"id"]]) { NSMutableDictionary *merged=[rows[i] mutableCopy]; [merged addEntriesFromDictionary:catalog]; rows[i]=merged; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"]; return; }
