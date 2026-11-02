@@ -63,6 +63,8 @@
 - (void)stopPlayback;
 - (void)updateSearchResultsForSearchController:(UISearchController *)controller;
 - (void)playChannel:(NSDictionary *)channel route:(NSDictionary *)route;
+- (void)toggleCatalogColumns;
+- (void)toggleCatalogLayout;
 - (void)importPlaylistData:(NSData *)data name:(NSString *)name;
 - (void)previewChannel:(NSDictionary *)channel;
 - (void)stopPreview;
@@ -276,21 +278,24 @@ static void next(NSArray *steps, NSUInteger index) {
             check(fabs(CGRectGetMinY(grid.frame)-expectedGridTop)<1.5,[NSString stringWithFormat:@"live grid starts directly after safe-area channel controls (grid=%.1f expected=%.1f)",CGRectGetMinY(grid.frame),expectedGridTop]);
             check(fabs(CGRectGetMinY(tabs.frame)-CGRectGetMaxY(grid.frame)-8)<1.5,@"five-tab navigation leaves only an 8 pt content gap instead of hiding the bottom channel rows");
             capture(self.window, @"01-live-grid");
-            check(root.navigationItem.rightBarButtonItems.count==1, @"catalog uses one compact toolbar");
-            UIStackView *toolbar=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;
-            check(toolbar.arrangedSubviews.count==4,@"catalog exposes layout, density, AirPlay and more actions");
-            UIButton *layoutButton=(UIButton *)toolbar.arrangedSubviews.firstObject;
-            check([layoutButton.accessibilityLabel isEqual:@"切换列表布局"],@"grid toolbar clearly offers the live list-row layout");
-            UIButton *columnsButton=(UIButton *)toolbar.arrangedSubviews[1];
-            check([columnsButton.accessibilityIdentifier isEqual:@"channel.grid.columns.toggle"]&&[columnsButton.configuration.title isEqual:@"4列"],@"catalog has an always-visible, accessible four-column density control");
-            check([((UIView *)toolbar.arrangedSubviews[2]).accessibilityIdentifier isEqual:@"playback.airplay"],@"CCTV and channel catalogs expose AirPlay casting from the top toolbar");
-            [columnsButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+            check(root.navigationItem.leftBarButtonItem==nil&&root.navigationItem.rightBarButtonItems.count==0,@"CCTV catalog keeps page actions out of the top navigation bar");
+            UIView *floating=(id)[root valueForKey:@"catalogFloatingControls"];
+            UIButton *layoutButton=(id)[root valueForKey:@"catalogLayoutButton"];
+            AVRoutePickerView *airplay=(id)[root valueForKey:@"catalogFloatingAirPlayPicker"];
+            UIButton *moreButton=(id)[root valueForKey:@"catalogMoreButton"];
+            check(floating&&!floating.hidden&&[floating.accessibilityIdentifier isEqual:@"channel.catalog.floating-controls"]&&[layoutButton.accessibilityIdentifier isEqual:@"channel.catalog.layout.toggle"]&&[airplay.accessibilityIdentifier isEqual:@"channel.catalog.airplay"]&&[moreButton.accessibilityIdentifier isEqual:@"channel.catalog.more"],@"CCTV catalog exposes layout, AirPlay and more controls in the floating group");
+            CGRect floatingFrame=floating.frame;
+            check(CGRectGetMaxX(floatingFrame)<=CGRectGetWidth(root.view.bounds)-root.view.safeAreaInsets.right-12&&CGRectGetMaxY(floatingFrame)<=CGRectGetMinY(tabs.frame)-8&&CGRectGetMinY(floatingFrame)>CGRectGetMinY(tabs.frame)-90,@"catalog action group floats at the lower right above the tab bar");
+            check([layoutButton.accessibilityLabel isEqual:@"切换列表布局"],@"grid floating control clearly offers the live list-row layout");
+            UIAction *columnsAction=nil;for(id child in moreButton.menu.children)if([child isKindOfClass:UIAction.class]&&[((UIAction *)child).identifier isEqual:@"channel.grid.columns.toggle"]){columnsAction=child;break;}
+            check(columnsAction!=nil&&[columnsAction.title containsString:@"每行 4 列"],@"catalog more menu exposes the current four-column density action");
+            [root toggleCatalogColumns];
             NSInteger columns=[[root valueForKey:@"gridColumns"] integerValue];
             CGSize threeColumnSize=[(id<UICollectionViewDelegateFlowLayout>)root collectionView:grid layout:grid.collectionViewLayout sizeForItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];
             CGFloat expectedThreeColumnWidth=floor((grid.bounds.size.width-20-2*6)/3);
             check(columns==3&&[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"]==3&&fabs(threeColumnSize.width-expectedThreeColumnWidth)<1.0,@"density control switches to and persists exactly three compact columns");
-            toolbar=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;columnsButton=(UIButton *)toolbar.arrangedSubviews[1];
-            [columnsButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+            moreButton=(id)[root valueForKey:@"catalogMoreButton"];columnsAction=nil;for(id child in moreButton.menu.children)if([child isKindOfClass:UIAction.class]&&[((UIAction *)child).identifier isEqual:@"channel.grid.columns.toggle"]){columnsAction=child;break;}
+            [root toggleCatalogColumns];
             CGSize fourColumnSize=[(id<UICollectionViewDelegateFlowLayout>)root collectionView:grid layout:grid.collectionViewLayout sizeForItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];
             CGFloat expectedFourColumnWidth=floor((grid.bounds.size.width-20-3*6)/4);
             check([[root valueForKey:@"gridColumns"] integerValue]==4&&[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"]==4&&fabs(fourColumnSize.width-expectedFourColumnWidth)<1.0,@"density control restores four columns and persists the shared catalog setting");
@@ -306,9 +311,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([cctv1LogoCell.imageView.accessibilityIdentifier isEqual:@"channel-logo:cctv1"]&&[cctv2LogoCell.imageView.accessibilityIdentifier isEqual:@"channel-logo:cctv2"]&&cctv1LogoCell.imageView.image&&cctv2LogoCell.imageView.image,@"CCTV list rows display each station's own bundled logo instead of repeating the generic broadcast glyph");
             [liveCell layoutIfNeeded];CGRect channelLogoFrame=liveCell.imageView.frame;UIImageView *playerLogo=[root valueForKey:@"playerChannelLogo"];check(channelLogoFrame.size.width>=55&&channelLogoFrame.size.width<=56.5&&channelLogoFrame.size.height>=35&&channelLogoFrame.size.height<=36.5&&playerLogo.frame.size.width>=47&&playerLogo.frame.size.width<=48.5&&playerLogo.frame.size.height>=26&&playerLogo.frame.size.height<=27.5,[NSString stringWithFormat:@"channel list and player logos stay within compact bounds (list=%.1fx%.1f player=%.1fx%.1f)",channelLogoFrame.size.width,channelLogoFrame.size.height,playerLogo.frame.size.width,playerLogo.frame.size.height]);
             capture(self.window,@"01-live-list");
-            toolbar=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;
-            layoutButton=(UIButton *)toolbar.arrangedSubviews.firstObject;
-            check([layoutButton.accessibilityLabel isEqual:@"切换网格布局"],@"list toolbar offers the reverse grid-layout action");
+            check([layoutButton.accessibilityLabel isEqual:@"切换网格布局"],@"list floating control offers the reverse grid-layout action");
             [layoutButton sendActionsForControlEvents:UIControlEventTouchUpInside];
             [root.view layoutIfNeeded];
             check(liveList.hidden&&!grid.hidden,@"switching back restores the live grid");
@@ -323,10 +326,13 @@ static void next(NSArray *steps, NSUInteger index) {
             for(NSDictionary *c in [root valueForKey:@"shownChannels"])
                 check(![c[@"remoteURL"] length], @"CCTV page excludes subscription channels even with CCTV names");
             [root selectBottomTab:(id)tabs.arrangedSubviews[1]];
+            [root.view layoutIfNeeded];
             NSArray *subscriptionRows=[root valueForKey:@"shownChannels"];
             check(subscriptionRows.count==1&&[subscriptionRows.firstObject[@"id"] isEqualToString:@"remote-smoke"], @"channel page contains only subscription entries");
             check([root.title isEqualToString:@"频道"], @"subscription page has its own navigation title");
             check(fabs(CGRectGetMinY(grid.frame)-(root.view.safeAreaInsets.top+42))<1.5,@"channel catalog starts below the native navigation safe area without an extra blank band");
+            UIView *channelFloating=(id)[root valueForKey:@"catalogFloatingControls"];AVRoutePickerView *channelAirplay=(id)[root valueForKey:@"catalogFloatingAirPlayPicker"];
+            check(!channelFloating.hidden&&[channelAirplay.accessibilityIdentifier isEqual:@"channel.catalog.airplay"]&&root.navigationItem.rightBarButtonItems.count==0,@"subscription channel page keeps AirPlay and catalog actions at the lower right");
             capture(self.window, @"01b-subscription-channels");
             [root setValue:original forKey:@"allChannels"];
             [root applyFilter];
@@ -584,8 +590,9 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[root valueForKey:@"activeTab"] integerValue]==0, @"native playback opens CCTV page");
             check([root.title isEqual:@"CCTV-1 综合"], @"expanded live player promotes the playing channel into the navigation title");
             NSArray *shown=[root valueForKey:@"shownChannels"];NSUInteger selectedIndex=NSNotFound;for(NSUInteger index=0;index<shown.count;index++)if([shown[index][@"id"] isEqual:@"cctv1"]){selectedIndex=index;break;}UICollectionView *grid=[root valueForKey:@"channelGrid"];NSIndexPath *selectedPath=selectedIndex==NSNotFound?nil:[NSIndexPath indexPathForItem:selectedIndex inSection:0];if(selectedPath){[grid scrollToItemAtIndexPath:selectedPath atScrollPosition:UICollectionViewScrollPositionCenteredVertically animated:NO];[grid layoutIfNeeded];}selectedLiveCard=selectedPath?[grid cellForItemAtIndexPath:selectedPath]:nil;selectedLiveMark=(id)[selectedLiveCard.contentView viewWithTag:4107];check(selectedLiveCard&&[selectedLiveCard.accessibilityValue isEqual:@"正在播放"]&&selectedLiveMark&&!selectedLiveMark.hidden,[NSString stringWithFormat:@"selected channel remains marked in the compact grid while playing (index=%lu visible=%@)",(unsigned long)selectedIndex,selectedLiveMark&&!selectedLiveMark.hidden?@"yes":@"no"]);UITableView *selectionList=[root valueForKey:@"table"];UITableViewCell *selectedRow=selectedIndex==NSNotFound?nil:[root tableView:selectionList cellForRowAtIndexPath:[NSIndexPath indexPathForRow:selectedIndex inSection:0]];check([selectedRow.accessibilityValue isEqual:@"正在播放"]&&selectedRow.accessoryView&&selectedRow.accessoryType==UITableViewCellAccessoryNone,@"selected channel keeps a persistent playing checkmark in list-row mode");
-            UIStackView *liveActions=(id)root.navigationItem.rightBarButtonItems.firstObject.customView;
-            check(liveActions.arrangedSubviews.count==3, @"expanded live player exposes favorite, route and playback info actions");
+            UIButton *liveMore=(id)[root valueForKey:@"catalogMoreButton"];
+            NSArray *liveActionTitles=[liveMore.menu.children valueForKey:@"title"];
+            check([liveActionTitles containsObject:@"收藏当前频道"]&&[liveActionTitles containsObject:@"播放信息"]&&![(UIView *)[root valueForKey:@"catalogFloatingControls"] isHidden], @"expanded live player exposes favorite and playback info actions through the floating menu");
             retainedWrapper = [root valueForKey:@"currentPlayer"];
             playCount = [CNPlayer smokePlayCount];
             [root selectChannel:[root channelWithID:@"cctv1"]];
