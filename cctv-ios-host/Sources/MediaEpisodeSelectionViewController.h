@@ -11,6 +11,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) void (^onSelectEpisode)(NSDictionary *result,NSDictionary *context);
 @property(nonatomic) NSInteger selectedLineIndex;
 @property(nonatomic) NSInteger selectedEpisodeIndex;
+@property(nonatomic) NSInteger selectedSeasonIndex;
 @property(nonatomic) BOOL selectionUpdatesPlayer;
 @end
 NS_ASSUME_NONNULL_END

@@ -270,8 +270,24 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 @implementation MediaPlaybackViewController
 - (BOOL)shouldAutorotate {return YES;}
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {return UIInterfaceOrientationMaskAllButUpsideDown;}
-- (NSArray *)lines {return [self.context[@"detail"][@"lines"] isKindOfClass:NSArray.class]?self.context[@"detail"][@"lines"]:@[];}
-- (NSArray *)episodes {NSArray *lines=self.lines;return self.lineIndex>=0&&self.lineIndex<lines.count&&[lines[self.lineIndex][@"episodes"] isKindOfClass:NSArray.class]?lines[self.lineIndex][@"episodes"]:@[];}
+- (NSDictionary *)currentSeason {
+    NSArray *seasons=[self.context[@"detail"][@"seasons"] isKindOfClass:NSArray.class]?self.context[@"detail"][@"seasons"]:@[];
+    id seasonValue=self.context[@"seasonIndex"];
+    if(![seasonValue respondsToSelector:@selector(integerValue)])return @{};
+    NSInteger index=[seasonValue integerValue];
+    return index>=0&&index<seasons.count&&[seasons[(NSUInteger)index] isKindOfClass:NSDictionary.class]?seasons[(NSUInteger)index]:@{};
+}
+- (NSArray *)lines {
+    NSArray *seasonLines=[self.currentSeason[@"lines"] isKindOfClass:NSArray.class]?self.currentSeason[@"lines"]:@[];
+    if(seasonLines.count)return seasonLines;
+    return [self.context[@"detail"][@"lines"] isKindOfClass:NSArray.class]?self.context[@"detail"][@"lines"]:@[];
+}
+- (NSArray *)episodes {
+    NSArray *seasonEpisodes=[self.currentSeason[@"episodes"] isKindOfClass:NSArray.class]?self.currentSeason[@"episodes"]:@[];
+    if(seasonEpisodes.count)return seasonEpisodes;
+    NSArray *lines=self.lines;
+    return self.lineIndex>=0&&self.lineIndex<lines.count&&[lines[(NSUInteger)self.lineIndex][@"episodes"] isKindOfClass:NSArray.class]?lines[(NSUInteger)self.lineIndex][@"episodes"]:@[];
+}
 - (instancetype)init {if((self=[super init])){_lineIndex=0;_episodeIndex=0;_selectedAlternateIndex=-1;}return self;}
 - (void)viewDidLoad {
     [super viewDidLoad];self.view.backgroundColor=HostBackground();
@@ -569,7 +585,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     if(self.isViewLoaded){[self persistPlaybackProgress];self.generation++;[self.client cancel];self.resolving=NO;self.pendingEpisodeResult=nil;[self.spinner stopAnimating];}
     NSString *previousSourceID=[self.context[@"source"][@"id"] description]?:@"",*nextSourceID=[context[@"source"][@"id"] description]?:@"";self.context=[context copy]?:@{};self.lineIndex=[self.context[@"lineIndex"] integerValue];self.episodeIndex=[self.context[@"episodeIndex"] integerValue];self.pendingEpisodeResult=nil;[self resetAutomaticFallbackLines];
     if(!self.isViewLoaded){self.result=[result copy];self.pendingEpisodeResult=self.result;return;}
-    if(!self.client||![previousSourceID isEqual:nextSourceID]){[self.client cancel];self.client=MediaPlaybackClientForSource(self.context[@"source"]?:@{});}self.basePlaybackHeaders=nil;self.selectedAlternateIndex=-1;self.pendingQualitySeekTime=nil;self.pendingPlaybackSeekTime=nil;self.pendingPlaybackResumeEntry=nil;self.pendingQualityRestorePlaybackState=NO;self.resumePromptPending=NO;self.resumePromptShown=NO;self.stallRecoveryAttempts=0;[self buildLines];[self updateEpisodeTitle];self.playbackOptionsItem.menu=[self playbackOptionsMenu];
+    if(!self.client||![previousSourceID isEqual:nextSourceID]){[self.client cancel];self.client=MediaPlaybackClientForSource(self.context[@"source"]?:@{});}self.basePlaybackHeaders=nil;self.selectedAlternateIndex=-1;self.pendingQualitySeekTime=nil;self.pendingPlaybackSeekTime=nil;self.pendingPlaybackResumeEntry=nil;self.pendingQualityRestorePlaybackState=NO;self.resumePromptPending=NO;self.resumePromptShown=NO;self.stallRecoveryAttempts=0;[self buildLines];if(self.lineIndex<0||self.lineIndex>=self.lines.count)self.lineIndex=0;if(self.episodeIndex<0||self.episodeIndex>=self.episodes.count)self.episodeIndex=0;[self updateEpisodeTitle];self.playbackOptionsItem.menu=[self playbackOptionsMenu];
     [self playResult:result];
 }
 - (void)dealloc {
@@ -787,9 +803,13 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 - (void)updateEpisodeTitle {
     NSArray *episodes=self.episodes;NSDictionary *episode=self.episodeIndex>=0&&self.episodeIndex<episodes.count?episodes[self.episodeIndex]:nil;
     NSString *name=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:@"";name=[name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSString *number=episodes.count?[NSString stringWithFormat:@"第 %ld 集",(long)self.episodeIndex+1]:@"当前分集";
+    NSString *spokenNumber=MediaPlaybackEpisodeNumber(name);NSString *number=spokenNumber.length?[NSString stringWithFormat:@"第 %@ 集",spokenNumber]:(episodes.count?[NSString stringWithFormat:@"第 %ld 集",(long)self.episodeIndex+1]:@"当前分集");
     NSString *title=name.length&&[name localizedCaseInsensitiveCompare:number]!=NSOrderedSame?[NSString stringWithFormat:@"%@ · %@",number,name]:number;
-    self.episodeTitle.text=title;self.episodeTitle.accessibilityLabel=title;
+    NSString *visibleTitle=[NSString stringWithFormat:@"正在播放 · %@",title];
+    self.episodeTitle.text=visibleTitle;self.episodeTitle.accessibilityLabel=visibleTitle;
+    // Keep the selected episode visible in both the playback bar and the
+    // navigation title; the series title alone is ambiguous during playback.
+    self.title=title;
     NSString *line=self.lineIndex>=0&&self.lineIndex<self.lines.count?self.lines[self.lineIndex][@"name"]:@"";
     NSString *label=line.length?[NSString stringWithFormat:@"选集 · %@ · %lu 集",line,(unsigned long)episodes.count]:@"选集";
     [self.episodeButton setTitle:label forState:UIControlStateNormal];self.episodeButton.enabled=episodes.count>0;self.episodeButton.alpha=episodes.count?1.0:0.55;[self updateSkipButtonForCurrentPosition];
@@ -797,8 +817,8 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 - (void)openEpisodeSelection {
     if(!self.lines.count)return;
     self.generation++;[self.client cancel];if(self.resolving){self.resolving=NO;[self.spinner stopAnimating];self.status.text=@"解析已取消 · 请选择分集";self.status.accessibilityLabel=self.status.text;}
-    MediaEpisodeSelectionViewController *page=[MediaEpisodeSelectionViewController new];page.item=self.context[@"item"]?:@{};page.source=self.context[@"source"]?:@{};page.provider=self.context[@"provider"]?:@"";page.detail=self.context[@"detail"]?:@{};page.correlationID=self.diagnosticTraceID;page.selectedLineIndex=self.lineIndex;page.selectedEpisodeIndex=self.episodeIndex;page.selectionUpdatesPlayer=YES;page.client=MediaPlaybackClientForSource(page.source);
-    __weak typeof(self) weakSelf=self;page.onSelectEpisode=^(NSDictionary *result,NSDictionary *context){MediaPlaybackViewController *owner=weakSelf;if(!owner)return;[owner persistPlaybackProgress];owner.stallRecoveryAttempts=0;owner.basePlaybackHeaders=nil;owner.context=context;owner.lineIndex=[context[@"lineIndex"] integerValue];owner.episodeIndex=[context[@"episodeIndex"] integerValue];owner.pendingEpisodeResult=result;[owner resetAutomaticFallbackLines];[owner buildLines];[owner updateEpisodeTitle];};
+    MediaEpisodeSelectionViewController *page=[MediaEpisodeSelectionViewController new];page.item=self.context[@"item"]?:@{};page.source=self.context[@"source"]?:@{};page.provider=self.context[@"provider"]?:@"";page.detail=self.context[@"detail"]?:@{};page.correlationID=self.diagnosticTraceID;page.selectedLineIndex=self.lineIndex;page.selectedEpisodeIndex=self.episodeIndex;page.selectedSeasonIndex=[self.context[@"seasonIndex"] integerValue];page.selectionUpdatesPlayer=YES;page.client=MediaPlaybackClientForSource(page.source);
+    __weak typeof(self) weakSelf=self;page.onSelectEpisode=^(NSDictionary *result,NSDictionary *context){MediaPlaybackViewController *owner=weakSelf;if(!owner)return;[owner persistPlaybackProgress];owner.stallRecoveryAttempts=0;owner.basePlaybackHeaders=nil;owner.context=context;owner.lineIndex=[context[@"lineIndex"] integerValue];owner.episodeIndex=[context[@"episodeIndex"] integerValue];owner.pendingEpisodeResult=result;[owner resetAutomaticFallbackLines];[owner buildLines];if(owner.lineIndex<0||owner.lineIndex>=owner.lines.count)owner.lineIndex=0;if(owner.episodeIndex<0||owner.episodeIndex>=owner.episodes.count)owner.episodeIndex=0;[owner updateEpisodeTitle];};
     [self.navigationController pushViewController:page animated:YES];
 }
 - (void)playResult:(NSDictionary *)result {

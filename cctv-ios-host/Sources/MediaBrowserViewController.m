@@ -448,7 +448,7 @@
 }
 - (void)selectRoute:(UIButton *)sender {
     if(sender.tag>=self.lines.count||sender.tag==self.selectedLineIndex)return;
-    NSUInteger previousLine=self.selectedLineIndex;
+    NSUInteger previousLine=self.selectedLineIndex;NSInteger previousEpisodeIndex=self.selectedEpisodeIndex;
     NSArray *previousEpisodes=previousLine<self.lines.count&&[self.lines[previousLine][@"episodes"] isKindOfClass:NSArray.class]?self.lines[previousLine][@"episodes"]:@[];NSDictionary *previousEpisode=self.selectedEpisodeIndex<previousEpisodes.count?previousEpisodes[self.selectedEpisodeIndex]:@{};NSString *previousEpisodeID=[previousEpisode[@"id"] description]?:@"",*previousEpisodeName=[previousEpisode[@"name"] description]?:@"";
     NSDictionary *line=self.lines[sender.tag];
     NSArray *episodes=[line[@"episodes"] isKindOfClass:NSArray.class]?line[@"episodes"]:@[];
@@ -462,7 +462,7 @@
     self.status.hidden=YES;
     self.resumeEntry=nil;
     self.selectedLineIndex=sender.tag;
-    NSInteger matchedEpisode=-1;if(previousEpisodeID.length)for(NSUInteger index=0;index<episodes.count;index++)if([[episodes[index][@"id"] description] isEqual:previousEpisodeID]){matchedEpisode=(NSInteger)index;break;}if(matchedEpisode<0&&previousEpisodeName.length)for(NSUInteger index=0;index<episodes.count;index++)if([[episodes[index][@"name"] description] localizedCaseInsensitiveCompare:previousEpisodeName]==NSOrderedSame){matchedEpisode=(NSInteger)index;break;}self.selectedEpisodeIndex=matchedEpisode>=0?matchedEpisode:0;self.episodePage=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,episodes.count,self.episodeOrderReversed);
+    NSInteger matchedEpisode=-1;if(previousEpisodeID.length)for(NSUInteger index=0;index<episodes.count;index++)if([[episodes[index][@"id"] description] isEqual:previousEpisodeID]){matchedEpisode=(NSInteger)index;break;}if(matchedEpisode<0&&previousEpisodeName.length)for(NSUInteger index=0;index<episodes.count;index++)if([[episodes[index][@"name"] description] localizedCaseInsensitiveCompare:previousEpisodeName]==NSOrderedSame){matchedEpisode=(NSInteger)index;break;}self.selectedEpisodeIndex=episodes.count?(matchedEpisode>=0?matchedEpisode:MIN(MAX(0,previousEpisodeIndex),(NSInteger)episodes.count-1)):0;self.episodePage=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,episodes.count,self.episodeOrderReversed);
     [self updateRouteAndEpisodeViews];
     if(self.inlinePlaybackController&&episodes.count)[self resolveAndPlaySelectedEpisode];
 }
@@ -477,6 +477,11 @@
         @"correlation_id":self.diagnosticTraceID?:@"", @"service_id":self.source[@"id"]?:@"", @"provider_id":self.provider?:@"",
         @"line_index":@(self.selectedLineIndex), @"episode_index":@(self.selectedEpisodeIndex), @"line_count":@(self.lines.count), @"episode_count":@(episodes.count), @"selection_source":@"detail_ui"
     }];
+    // Reflect the selected item before resolving its URL. Otherwise the old
+    // episode stays highlighted while the request is in flight and can appear
+    // selected again when playback returns to this detail page.
+    self.episodePage=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,episodes.count,self.episodeOrderReversed);
+    [self updateRouteAndEpisodeViews];
     [self resolveAndPlaySelectedEpisode];
 }
 - (void)playCurrentEpisode {NSArray *episodes=self.selectedLineIndex<self.lines.count?self.lines[self.selectedLineIndex][@"episodes"]:@[];if(!episodes.count)return;if(self.selectedEpisodeIndex<0||self.selectedEpisodeIndex>=episodes.count)self.selectedEpisodeIndex=0;[self resolveAndPlaySelectedEpisode];}
@@ -486,7 +491,7 @@
     NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@""} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;__weak typeof(self) weakSelf=self;
     [self.client call:@"play" arguments:args correlationID:self.diagnosticTraceID completion:^(id result,NSError *error){MediaDetailViewController *owner=weakSelf;if(!owner)return;if(owner.generation!=generation){[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_response_discarded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"request_generation":@(generation), @"current_generation":@(owner.generation), @"reason":@"superseded_selection"}];return;}[owner.spinner stopAnimating];owner.status.hidden=NO;
         if(error||![result isKindOfClass:NSDictionary.class]){[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_failed" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"", @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"line_index":@(owner.selectedLineIndex), @"episode_index":@(owner.selectedEpisodeIndex), @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@"", @"result_received":@([result isKindOfClass:NSDictionary.class])}];owner.status.text=[NSString stringWithFormat:@"解析失败：%@",error.localizedDescription?:@"来源没有返回可播放结果"];[owner updateRouteAndEpisodeViews];return;}
-        [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"", @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"line_index":@(owner.selectedLineIndex), @"episode_index":@(owner.selectedEpisodeIndex), @"result_has_media_url":@([result[@"url"] isKindOfClass:NSString.class]&&[result[@"url"] length]>0), @"result_parse_mode":@([result[@"parse"] respondsToSelector:@selector(integerValue)]?[result[@"parse"] integerValue]:0), @"result_alternate_count":@([result[@"alternates"] isKindOfClass:NSArray.class]?[result[@"alternates"] count]:0)}];owner.status.hidden=YES;NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"lineIndex":@(owner.selectedLineIndex),@"episodeIndex":@(owner.selectedEpisodeIndex),@"correlationID":owner.diagnosticTraceID?:@""};if(owner.onPlay)owner.onPlay(result,context);
+        [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"", @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"line_index":@(owner.selectedLineIndex), @"episode_index":@(owner.selectedEpisodeIndex), @"result_has_media_url":@([result[@"url"] isKindOfClass:NSString.class]&&[result[@"url"] length]>0), @"result_parse_mode":@([result[@"parse"] respondsToSelector:@selector(integerValue)]?[result[@"parse"] integerValue]:0), @"result_alternate_count":@([result[@"alternates"] isKindOfClass:NSArray.class]?[result[@"alternates"] count]:0)}];owner.status.hidden=YES;NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"episodeID":[episode[@"id"] description]?:@"",@"episodeName":[episode[@"name"] description]?:@"",@"lineIndex":@(owner.selectedLineIndex),@"episodeIndex":@(owner.selectedEpisodeIndex),@"correlationID":owner.diagnosticTraceID?:@""};if(owner.onPlay)owner.onPlay(result,context);
     }];
 }
 @end
