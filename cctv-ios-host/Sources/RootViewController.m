@@ -59,6 +59,39 @@
 #import <objc/runtime.h>
 #import <string.h>
 #import <CommonCrypto/CommonDigest.h>
+#import <Security/Security.h>
+
+static NSString *const CCTVTVBoxTokenPlaceholder = @"__LYTVS_SUBSCRIPTION_TOKEN__";
+static NSDictionary *CCTVTVBoxTokenKeychainQuery(void) {
+    return @{
+        (__bridge id)kSecClass:(__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecAttrService:@"com.yqk.cctvhost.resource-subscription",
+        (__bridge id)kSecAttrAccount:@"lytvs-ios"
+    };
+}
+static NSString *CCTVTVBoxStoredSubscriptionToken(void) {
+    NSMutableDictionary *query=[CCTVTVBoxTokenKeychainQuery() mutableCopy];query[(__bridge id)kSecReturnData]=@YES;query[(__bridge id)kSecMatchLimit]=(__bridge id)kSecMatchLimitOne;
+    CFTypeRef result=NULL;if(SecItemCopyMatching((__bridge CFDictionaryRef)query,&result)!=errSecSuccess||!result)return nil;
+    NSData *data=(__bridge_transfer NSData *)result;return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+}
+static BOOL CCTVTVBoxSaveSubscriptionToken(NSString *token) {
+    NSData *data=[token dataUsingEncoding:NSUTF8StringEncoding];if(!data.length||data.length>512)return NO;
+    NSMutableDictionary *attributes=[@{(__bridge id)kSecValueData:data,(__bridge id)kSecAttrAccessible:(__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly} mutableCopy];
+    NSDictionary *query=CCTVTVBoxTokenKeychainQuery();OSStatus status=SecItemUpdate((__bridge CFDictionaryRef)query,(__bridge CFDictionaryRef)attributes);
+    if(status==errSecItemNotFound){NSMutableDictionary *item=[query mutableCopy];[item addEntriesFromDictionary:attributes];status=SecItemAdd((__bridge CFDictionaryRef)item,NULL);}
+    return status==errSecSuccess;
+}
+static NSString *CCTVTVBoxTokenFromInput(NSString *input) {
+    NSString *value=[input stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";NSURLComponents *parts=[NSURLComponents componentsWithString:value];
+    if([parts.host.lowercaseString isEqual:@"sub.lytvs.top"]){for(NSURLQueryItem *item in parts.queryItems)if([@[@"token",@"tk"] containsObject:item.name.lowercaseString]&&item.value.length)return item.value;return nil;}
+    if(value.length>512||[value rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound)return nil;return value;
+}
+static NSString *CCTVTVBoxURLByResolvingToken(NSString *url,NSString *token) {
+    if(![url containsString:CCTVTVBoxTokenPlaceholder])return url;
+    NSURLComponents *parts=[NSURLComponents componentsWithString:url];if(!parts)return nil;BOOL replaced=NO;NSMutableArray *items=[NSMutableArray array];
+    for(NSURLQueryItem *item in parts.queryItems){NSString *value=item.value?:@"";if([value containsString:CCTVTVBoxTokenPlaceholder]){value=[value stringByReplacingOccurrencesOfString:CCTVTVBoxTokenPlaceholder withString:token?:@""];replaced=YES;}[items addObject:[NSURLQueryItem queryItemWithName:item.name value:value]];}
+    if(!replaced)return nil;parts.queryItems=items;return parts.URL.absoluteString;
+}
 
 static NSString *CCTVBuildTag(void) {
     return [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"未知";
@@ -506,9 +539,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)installBundledMediaResourcesIfNeeded {
-    NSUserDefaults *preferences=NSUserDefaults.standardUserDefaults;NSString *seedKey=@"cctv.bundledMediaResources.v1";
+    NSUserDefaults *preferences=NSUserDefaults.standardUserDefaults;NSString *seedKey=@"cctv.bundledMediaResources.v2";
     if([preferences boolForKey:seedKey]||self.bundledMediaSeedInProgress)return;self.bundledMediaSeedInProgress=YES;
     NSArray *catalogSpecs=@[
+        @{@"file":@"lytvs-ios",@"id":@"builtin-lytvs-ios",@"name":@"Hawk iOS 内部影视与 PY 聚合",@"kind":@"tvbox",@"url":@"https://sub.lytvs.top/get?token=__LYTVS_SUBSCRIPTION_TOKEN__&client=ios"},
         @{@"file":@"haoliang-live",@"id":@"builtin-haoliang-live",@"name":@"海量直播聚合",@"kind":@"live"},
         @{@"file":@"haoliang-py",@"id":@"builtin-haoliang-py",@"name":@"海量PY聚合接口",@"kind":@"tvbox"},
         @{@"file":@"haoliang-tvbox",@"id":@"builtin-haoliang-tvbox",@"name":@"海量采集聚合接口",@"kind":@"tvbox"}
@@ -517,9 +551,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         BOOL complete=YES,changed=NO;
         for(NSDictionary *spec in catalogSpecs){
             NSString *identifier=spec[@"id"];if([TVBoxCatalogStore catalogForID:identifier])continue;
+            NSString *catalogURL=[spec[@"url"] isKindOfClass:NSString.class]?spec[@"url"]:@"";BOOL alreadyImported=NO;
+            if(catalogURL.length){NSURLComponents *expected=[NSURLComponents componentsWithString:catalogURL];for(NSDictionary *existing in [TVBoxCatalogStore catalogs]){NSString *existingURL=[existing[@"url"] isKindOfClass:NSString.class]?existing[@"url"]:@"";NSURLComponents *actual=[NSURLComponents componentsWithString:existingURL];if(expected.host.length&&[actual.host.lowercaseString isEqual:expected.host.lowercaseString]&&[actual.path isEqual:expected.path]){alreadyImported=YES;break;}}}
+            if(alreadyImported)continue;
             NSString *path=[NSBundle.mainBundle pathForResource:spec[@"file"] ofType:@"json" inDirectory:@"BuiltinMedia"];NSData *data=path?[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL]:nil;NSError *error=nil;NSDictionary *parsed=data?[TVBoxCatalogStore parseData:data sourceURL:nil error:&error]:nil;
             if(!parsed){complete=NO;[RuntimeDiagnostics.shared recordEvent:@"bundled_media_catalog_import_failed" category:@"resource_import" fields:@{@"resource_id":identifier?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@"bundle resource missing or invalid"}];continue;}
-            NSMutableDictionary *catalog=[parsed mutableCopy];catalog[@"id"]=identifier;catalog[@"name"]=spec[@"name"];catalog[@"catalogKind"]=spec[@"kind"];catalog[@"bundledResourceID"]=identifier;[TVBoxCatalogStore saveCatalog:catalog];changed=YES;
+            NSMutableDictionary *catalog=[parsed mutableCopy];catalog[@"id"]=identifier;catalog[@"name"]=spec[@"name"];catalog[@"catalogKind"]=spec[@"kind"];catalog[@"bundledResourceID"]=identifier;if(catalogURL.length)catalog[@"url"]=catalogURL;[TVBoxCatalogStore saveCatalog:catalog];changed=YES;
         }
         NSString *pluginID=@"zen.keke.rex.stream";BOOL pluginFound=NO;for(NSDictionary *service in [ServiceStore services])if([service[@"bundledResourceID"] isEqual:pluginID]){pluginFound=YES;break;}
         if(!pluginFound){NSString *path=[NSBundle.mainBundle pathForResource:@"zen-keke-stream" ofType:@"js" inDirectory:@"BuiltinMedia"];NSError *error=nil;NSDictionary *imported=path?[MediaPackageImporter importFile:[NSURL fileURLWithPath:path] error:&error]:nil;if(!imported){complete=NO;[RuntimeDiagnostics.shared recordEvent:@"bundled_media_script_import_failed" category:@"resource_import" fields:@{@"resource_id":pluginID,@"error_code":@(error.code),@"error_message":error.localizedDescription?:@"bundle resource missing or invalid"}];}else{NSMutableDictionary *service=[imported mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];service[@"name"]=@"可可影视播放源";service[@"bundledResourceID"]=pluginID;service[@"capabilities"]=@[@"search",@"detail",@"play"];manifest[@"name"]=@"可可影视播放源";manifest[@"capabilities"]=@[@"search",@"detail",@"play"];service[@"manifest"]=manifest;[ServiceStore save:service];changed=YES;}}
@@ -2311,10 +2348,23 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 - (void)importTVBoxSite:(NSDictionary *)site { [self importTVBoxSite:site browseAfterImport:NO]; }
 - (void)importTVBoxSite:(NSDictionary *)site browseAfterImport:(BOOL)browseAfterImport {
-    NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";if(!api.length){[self showServiceError:@"此 TVBox 站点没有可导入的脚本地址"];return;}
+    NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
+    if([api containsString:CCTVTVBoxTokenPlaceholder]){
+        NSString *token=CCTVTVBoxStoredSubscriptionToken();
+        if(!token.length){
+            UIAlertController *credential=[UIAlertController alertControllerWithTitle:@"Hawk iOS 资源访问令牌" message:@"此合集的内部站点需要订阅令牌。粘贴 token，或粘贴原始订阅链接；令牌会保存到本机钥匙串供后续站点使用。" preferredStyle:UIAlertControllerStyleAlert];
+            [credential addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"token 或完整订阅链接";field.secureTextEntry=YES;field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.clearButtonMode=UITextFieldViewModeWhileEditing;}];
+            [credential addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+            __weak typeof(self) weakSelf=self;[credential addAction:[UIAlertAction actionWithTitle:@"保存并继续" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(!owner)return;NSString *entered=CCTVTVBoxTokenFromInput(credential.textFields.firstObject.text?:@"");if(!entered.length){[owner showServiceError:@"请输入有效的订阅令牌或完整订阅链接"];return;}if(!CCTVTVBoxSaveSubscriptionToken(entered)){[owner showServiceError:@"令牌未能保存到本机钥匙串，请检查设备设置后重试"];return;}NSString *resolvedURL=CCTVTVBoxURLByResolvingToken(api,entered);if(!resolvedURL.length){[owner showServiceError:@"无法将订阅令牌应用到此站点地址"];return;}NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=resolvedURL;dispatch_async(dispatch_get_main_queue(),^{[owner importTVBoxSite:resolvedSite browseAfterImport:browseAfterImport];});}]];
+            [self presentViewController:credential animated:YES completion:nil];return;
+        }
+        api=CCTVTVBoxURLByResolvingToken(api,token);if(!api.length){[self showServiceError:@"无法将本机令牌应用到此站点地址"];return;}NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=api;site=resolvedSite;
+    }
+    if(!api.length){[self showServiceError:@"此 TVBox 站点没有可导入的脚本地址"];return;}
     self.pendingTVBoxExt=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"";self.pendingTVBoxSiteName=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";
     __weak typeof(self) weakSelf=self;
-    [self downloadPackageURL:[NSURL URLWithString:api] headers:site[@"header"] completion:^(NSDictionary *service,NSError *error){RootViewController *owner=weakSelf;owner.navigationItem.prompt=nil;if(error){owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;if(error.code!=NSURLErrorCancelled)[owner showServiceError:error.localizedDescription];return;}if(!service){[owner showServiceError:@"站点脚本导入失败"];return;}NSMutableDictionary *updated=[service mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *ext=owner.pendingTVBoxExt,*name=owner.pendingTVBoxSiteName;if(ext.length)manifest[@"options"]=ext;if(name.length){manifest[@"name"]=name;updated[@"name"]=name;}updated[@"manifest"]=manifest;updated[@"tvboxSiteKey"]=site[@"key"]?:@"";updated[@"tvboxSiteKeys"]=@[site[@"key"]?:@""];if(site[@"tvboxCatalogID"])updated[@"tvboxCatalogID"]=site[@"tvboxCatalogID"];if(site[@"playUrl"])updated[@"tvboxPlayURL"]=site[@"playUrl"];if(site[@"header"])updated[@"tvboxSiteHeader"]=site[@"header"];owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;[owner acceptImportedMedia:updated error:nil autoBrowse:browseAfterImport];}];
+    NSString *runtimeHint=[[[NSURL URLWithString:api] pathExtension].lowercaseString isEqual:@"py"]?@"python":nil;
+    [self downloadPackageURL:[NSURL URLWithString:api] headers:site[@"header"] runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){RootViewController *owner=weakSelf;owner.navigationItem.prompt=nil;if(error){owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;if(error.code!=NSURLErrorCancelled)[owner showServiceError:error.localizedDescription];return;}if(!service){[owner showServiceError:@"站点脚本导入失败"];return;}NSMutableDictionary *updated=[service mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"",*name=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";if(ext.length)manifest[@"options"]=ext;if(name.length){manifest[@"name"]=name;updated[@"name"]=name;}updated[@"manifest"]=manifest;updated[@"tvboxSiteKey"]=site[@"key"]?:@"";updated[@"tvboxSiteKeys"]=@[site[@"key"]?:@""];if(site[@"tvboxCatalogID"])updated[@"tvboxCatalogID"]=site[@"tvboxCatalogID"];if(site[@"playUrl"])updated[@"tvboxPlayURL"]=site[@"playUrl"];if(site[@"header"])updated[@"tvboxSiteHeader"]=site[@"header"];owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;[owner acceptImportedMedia:updated error:nil autoBrowse:browseAfterImport];}];
 }
 - (void)acceptImportedMedia:(NSDictionary *)service error:(NSError *)error {
     [self acceptImportedMedia:service error:error autoBrowse:NO];
