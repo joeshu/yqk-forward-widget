@@ -4,16 +4,24 @@ import argparse
 import base64
 import builtins
 import collections
+import hmac
 import json
 import os
 import re
 import threading
 import time
 import uuid
+import urllib.error
 import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from host_media_runtime import MediaRuntime, MediaError, NativeJS, PythonSpider, playback, report_runtime_stage
 from host_media_relay import MediaRelay, safe_error_summary
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
 
 
 def is_direct_media_url(url):
@@ -57,6 +65,7 @@ class Server(ThreadingHTTPServer):
         self.artwork_relay = MediaRelay()
         self.plugin_proxy_lock = threading.Lock()
         self.plugin_proxy_entries = collections.OrderedDict()
+        self.host_fetch_token = uuid.uuid4().hex
         self.slots = threading.BoundedSemaphore(6)
         super().__init__(address, Handler)
 
@@ -258,8 +267,105 @@ class Handler(BaseHTTPRequestHandler):
                      'range': headers.get('Range', '')})
         self.send_proxy(self.call_runtime(self.server.runtime, 'proxy', args), method == 'HEAD')
 
+    def serve_host_fetch(self):
+        supplied = self.headers.get('X-CCTVHost-Host-Fetch', '')
+        if not hmac.compare_digest(supplied, self.server.host_fetch_token):
+            self.send_host_fetch_response(403, b'', reason='Forbidden')
+            return
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 <= length <= 2 * 1024 * 1024:
+                raise ValueError('host HTTPS request payload exceeds 2 MB')
+            payload = json.loads(self.rfile.read(length) or b'{}')
+            if not isinstance(payload, dict):
+                raise ValueError('host HTTPS request payload must be an object')
+            url = payload.get('url')
+            if not isinstance(url, str) or len(url) > 8192:
+                raise ValueError('host HTTPS URL is invalid')
+            parts = urllib.parse.urlsplit(url)
+            parts.port
+            if parts.scheme.lower() != 'https' or not parts.hostname or parts.username or parts.password:
+                raise ValueError('host HTTPS fallback only accepts valid HTTPS URLs')
+            method = str(payload.get('method') or 'GET').upper()
+            if method not in ('GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'):
+                raise ValueError('host HTTPS method is unsupported')
+            raw_body = payload.get('bodyBase64', '')
+            if not isinstance(raw_body, str) or len(raw_body) > 2 * 1024 * 1024:
+                raise ValueError('host HTTPS request body exceeds 1 MB')
+            body = base64.b64decode(raw_body, validate=True) if raw_body else None
+            if body and len(body) > 1024 * 1024:
+                raise ValueError('host HTTPS request body exceeds 1 MB')
+            raw_headers = payload.get('headers') if isinstance(payload.get('headers'), dict) else {}
+            headers = {}
+            blocked = {'content-length', 'connection', 'transfer-encoding',
+                       'keep-alive', 'upgrade', 'proxy-authorization', 'proxy-connection'}
+            for name, value in list(raw_headers.items())[:64]:
+                name, value = str(name), str(value)
+                if (1 <= len(name) <= 128 and len(value) <= 8192 and
+                        re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) and
+                        '\r' not in value and '\n' not in value and name.lower() not in blocked):
+                    headers[name] = value
+            timeout_ms = payload.get('timeoutMs', 15000)
+            if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)):
+                timeout_ms = 15000
+            timeout = max(1.0, min(float(timeout_ms) / 1000.0, 120.0))
+            request = urllib.request.Request(url, data=body, headers=headers, method=method)
+            opener = urllib.request.build_opener(NoRedirect())
+            try:
+                response = opener.open(request, timeout=timeout)
+            except urllib.error.HTTPError as error:
+                response = error
+            try:
+                status = int(response.getcode() or 502)
+                raw_response_headers = response.headers
+                response_body = b'' if method == 'HEAD' or status in (204, 304) else response.read(16 * 1024 * 1024 + 1)
+                if len(response_body) > 16 * 1024 * 1024:
+                    raise ValueError('host HTTPS response exceeds 16 MB')
+                response_headers = list(raw_response_headers.raw_items()) if hasattr(raw_response_headers, 'raw_items') else list(raw_response_headers.items())
+                reason = str(getattr(response, 'reason', '') or '')[:128]
+            finally:
+                response.close()
+            self.send_host_fetch_response(status, response_body, response_headers, reason)
+        except Exception as error:
+            message = safe_error_summary(str(error)).encode('utf-8')[:2048]
+            self.send_host_fetch_response(502, message, [('Content-Type', 'text/plain; charset=utf-8')], 'Bad Gateway')
+
+    def send_host_fetch_response(self, status, body, headers=(), reason=''):
+        status = max(100, min(599, int(status)))
+        reason = re.sub(r'[\x00-\x1f\x7f]', '', str(reason or ''))[:128]
+        no_body = 100 <= status < 200 or status in (204, 304)
+        if no_body:
+            body = b''
+        source_length = None
+        blocked = {'connection', 'content-length', 'transfer-encoding', 'host', 'keep-alive',
+                   'trailer', 'upgrade', 'proxy-authenticate', 'proxy-authorization'}
+        self.send_response(status, reason)
+        for index, pair in enumerate(headers):
+            if index >= 128:
+                break
+            name, value = str(pair[0]), str(pair[1])
+            if name.lower() == 'content-length' and len(value) <= 20 and value.isdigit():
+                source_length = int(value)
+                continue
+            if (len(name) > 128 or len(value) > 16384 or
+                    not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) or
+                    name.lower() in blocked or '\r' in value or '\n' in value):
+                continue
+            self.send_header(name, value)
+        if not no_body:
+            self.send_header('Content-Length', str(len(body)))
+        elif source_length is not None and source_length <= 9223372036854775807:
+            self.send_header('Content-Length', str(source_length))
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
     def do_HEAD(self):
         path = urllib.parse.urlsplit(self.path).path
+        if path == '/_cctvhost/host-fetch':
+            self.send_host_fetch_response(405, b'', [('Allow', 'POST')], 'Method Not Allowed')
+            return
         if path.startswith('/artwork/'):
             self.server.artwork_relay.serve(self, path.rsplit('/', 1)[-1], True)
             return
@@ -352,6 +458,12 @@ class Handler(BaseHTTPRequestHandler):
         operation = 'route'
         try:
             parts = urllib.parse.urlsplit(self.path)
+            if parts.path == '/_cctvhost/host-fetch':
+                if not post:
+                    self.send_host_fetch_response(405, b'', [('Allow', 'POST')], 'Method Not Allowed')
+                    return
+                self.serve_host_fetch()
+                return
             if parts.path.startswith('/artwork/'):
                 self.server.artwork_relay.serve(self, parts.path.rsplit('/', 1)[-1])
                 return
@@ -548,10 +660,14 @@ def main():
     def create_engine():
         if manifest['runtime'] == 'python':
             return PythonSpider(args.package, manifest['entry'], manifest.get('options'),
-                                f'http://127.0.0.1:{args.port}/proxy')
-        return NativeJS(args.package, dict(manifest, dataDirectory=args.data_dir,
-                                           proxyURL=f'http://127.0.0.1:{args.port}/proxy'),
-                        node=manifest['runtime'] == 'node')
+                                f'http://127.0.0.1:{server.server_port}/proxy')
+        node_manifest = dict(manifest, dataDirectory=args.data_dir,
+                             proxyURL=f'http://127.0.0.1:{server.server_port}/proxy')
+        if manifest['runtime'] == 'node':
+            node_manifest.update(
+                hostFetchURL=f'http://127.0.0.1:{server.server_port}/_cctvhost/host-fetch',
+                hostFetchToken=server.host_fetch_token)
+        return NativeJS(args.package, node_manifest, node=manifest['runtime'] == 'node')
     def initialization_failed(error):
         print('[影视] 资源初始化失败：%s: %s' % (type(error).__name__, error))
     report_runtime_stage('media_engine_prepare_started')

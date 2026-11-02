@@ -4,6 +4,7 @@
 'use strict'
 const http=require('node:http'),https=require('node:https'),net=require('node:net'),nodeCrypto=require('node:crypto'),zlib=require('node:zlib')
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm')
+const {Readable}=require('node:stream')
 const bundledFetch=fs.existsSync(path.join(__dirname,'node-fetch.bundle.cjs'))?path.join(__dirname,'node-fetch.bundle.cjs'):path.join(__dirname,'../GeneratedJS/node-fetch.bundle.cjs')
 const fetchExports=require(bundledFetch),nativeFetch=fetchExports.default||fetchExports
 // Accessing Node's lazy native FormData/File getters can initialize undici's
@@ -39,6 +40,104 @@ const watch=fs.watch
 fs.watch=function(...args){const owner=scope.getStore();if(owner&&(owner.closed||owner.watchers.size>=32))throw Error('插件文件监听超过限制或已停止');const watcher=watch.apply(this,args);if(owner){owner.watchers.add(watcher);watcher.once('close',()=>owner.watchers.delete(watcher))}return watcher}
 let inflight=0
 function appendLog(owner,line){const lines=owner?.logs||hostLogs;lines.push(String(line).slice(0,1024));if(lines.length>64)lines.shift()}
+const nativeHTTPSRequest=https.request
+const nativeHTTPRequest=http.request
+const certificateErrors=/^(?:CERT_|ERR_TLS_CERT|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT|ERR_TLS_SERVER_CERT_CHANGED|ERR_SSL_(?:CERTIFICATE_VERIFY_FAILED|BAD_CERTIFICATE|PEER_DID_NOT_RETURN_A_CERTIFICATE|EE_KEY_TOO_SMALL|CA_MD_TOO_WEAK|NO_CERTIFICATE_ASSIGNED))/
+const recoverableHTTPSErrors=new Set(['ECONNRESET','ECONNREFUSED','ECONNABORTED','ETIMEDOUT','EHOSTUNREACH','ENETUNREACH','EAI_AGAIN','ENOTFOUND','ERR_SSL_UNEXPECTED_EOF_WHILE_READING'])
+function recoverableHTTPSError(error){const code=String(error?.code||'');if(!code||error?.authorizationError||certificateErrors.test(code))return false;return recoverableHTTPSErrors.has(code)||code==='ERR_TLS_HANDSHAKE_TIMEOUT'||code.startsWith('ERR_SSL_')}
+function nodeHTTPSRequestDetails(args,request){
+  const first=args[0],fromURL=first instanceof URL||typeof first==='string'
+  let base=null,options={}
+  if(fromURL){try{base=new URL(first instanceof URL?first.href:first)}catch{return null}if(args[1]&&typeof args[1]==='object'&&!(args[1] instanceof URL))options=args[1]}
+  else if(first&&typeof first==='object')options=first
+  const protocol=String(options.protocol||base?.protocol||'https:').toLowerCase()
+  if(protocol!=='https:')return null
+  const hostname=String(options.hostname||options.host||base?.hostname||'')
+  if(!hostname||hostname.includes('/')||hostname.includes('@'))return null
+  const tlsOptions=['agent','ca','cert','key','pfx','passphrase','ciphers','sigalgs','ecdhCurve','dhparam','secureOptions','secureProtocol','checkServerIdentity','rejectUnauthorized','servername','session','secureContext']
+  if(tlsOptions.some(key=>Object.prototype.hasOwnProperty.call(options,key)&&options[key]!=null&&!(key==='agent'&&(options[key]===https.globalAgent||options[key]===false))))return null
+  const host=hostname.includes(':')&&!hostname.startsWith('[')?'['+hostname+']':hostname
+  const port=options.port??base?.port
+  let authority=host
+  if(port)authority+=':'+String(port)
+  let target
+  try{target=base?new URL(base.href):new URL('https://'+authority+'/')}catch{return null}
+  if(options.hostname||options.host){try{target=new URL('https://'+authority+(port?'/':''))}catch{return null}}
+  const requestPath=options.path??(base?base.pathname+base.search:'/')
+  if(typeof requestPath!=='string'||requestPath.length>8192||/^https?:\/\//i.test(requestPath))return null
+  try{target=new URL(requestPath||'/',target);if(target.protocol!=='https:'||target.username||target.password)return null;target.hash=''}catch{return null}
+  const method=String(options.method||'GET').toUpperCase()
+  if(!['GET','HEAD'].includes(method))return null
+  return {target,method,timeoutMs:Number(options.timeout)||15000}
+}
+function hostFetchEndpoint(owner){
+  if(!owner||owner.closed||typeof owner.payload.hostFetchURL!=='string'||typeof owner.payload.hostFetchToken!=='string')return null
+  try{const endpoint=new URL(owner.payload.hostFetchURL);if(endpoint.protocol!=='http:'||!['127.0.0.1','localhost','[::1]'].includes(endpoint.hostname)||endpoint.username||endpoint.password||endpoint.pathname!=='/_cctvhost/host-fetch'||endpoint.search||endpoint.hash)return null;return endpoint}catch{return null}
+}
+function requestHeadersForHost(request){
+  let source={};try{source=request.getHeaders()}catch{}
+  const output={};for(const [name,value] of Object.entries(source)){if(value==null)continue;const text=Buffer.isBuffer(value)?value.toString('utf8'):Array.isArray(value)?value.map(item=>String(item)).join(', '):String(value);if(text.length<=8192&&!/[\r\n]/.test(text))output[name]=text}
+  return output
+}
+function hostFetchResponse(request,incoming,target){
+  const response=new Readable({read(){}}),headers={},rawHeaders=Array.isArray(incoming.rawHeaders)?incoming.rawHeaders.slice(0,256):[]
+  for(const [name,value] of Object.entries(incoming.headers||{}))headers[String(name).toLowerCase()]=Array.isArray(value)?value.slice():value
+  response.statusCode=incoming.statusCode||502;response.statusMessage=String(incoming.statusMessage||'').slice(0,128);response.headers=headers;response.rawHeaders=rawHeaders
+  response.httpVersion='1.1';response.httpVersionMajor=1;response.httpVersionMinor=1;response.complete=true;response.aborted=false
+  response.trailers={};response.rawTrailers=[];response.req=request;response.socket=request.socket;response.connection=request.socket;response.url=target.pathname+target.search
+  return response
+}
+function fetchHTTPSWithHost(owner,request,details){
+  return new Promise((resolve,reject)=>{
+    const endpoint=hostFetchEndpoint(owner);if(!endpoint)return reject(Error('本机 HTTPS 回退服务不可用'))
+    const payload=Buffer.from(JSON.stringify({url:details.target.href,method:details.method,headers:requestHeadersForHost(request),timeoutMs:Math.max(1000,Math.min(details.timeoutMs,30000))}))
+    if(payload.length>2*1024*1024)return reject(Error('本机 HTTPS 回退请求超过限制'))
+    let settled=false,length=0;const chunks=[];let bridge
+    const finish=(error,value)=>{if(settled)return;settled=true;original.clearTimeout(timer);if(error)reject(error);else resolve(value)}
+    const timer=original.setTimeout(()=>bridge?.destroy(Error('本机 HTTPS 回退超时')),Math.max(1000,Math.min(details.timeoutMs,30000)))
+    bridge=nativeHTTPRequest(endpoint,{method:'POST',headers:{'X-CCTVHost-Host-Fetch':owner.payload.hostFetchToken,'Content-Type':'application/json','Content-Length':String(payload.length),'Connection':'close'}},incoming=>{
+      incoming.on('data',chunk=>{length+=chunk.length;if(length>16*1024*1024){incoming.destroy(Error('本机 HTTPS 回退响应超过限制'));return}chunks.push(Buffer.from(chunk))})
+      incoming.on('error',error=>finish(error))
+      incoming.on('end',()=>finish(null,{incoming,body:Buffer.concat(chunks)}))
+    })
+    bridge.on('error',error=>finish(error));bridge.end(payload)
+  })
+}
+https.request=function(...args){
+  const owner=scope.getStore(),details=nodeHTTPSRequestDetails(args)
+  if(!owner||!details||!hostFetchEndpoint(owner))return nativeHTTPSRequest.apply(this,args)
+  const request=nativeHTTPSRequest.apply(this,args),nativeEmit=request.emit
+  let wroteBody=false,fallbackStarted=false,fallbackClosed=false,pendingClose=false,responseSeen=false
+  const originalWrite=request.write,originalEnd=request.end
+  const hasData=chunk=>chunk!=null&&typeof chunk!=='function'&&(Buffer.isBuffer(chunk)?chunk.length:typeof chunk==='string'?Buffer.byteLength(chunk):ArrayBuffer.isView(chunk)?chunk.byteLength:1)>0
+  request.write=function(chunk,...rest){if(hasData(chunk))wroteBody=true;return originalWrite.call(this,chunk,...rest)}
+  request.end=function(chunk,...rest){if(hasData(chunk))wroteBody=true;return originalEnd.call(this,chunk,...rest)}
+  request.emit=function(event,...values){
+    if(event==='response')responseSeen=true
+    if(event==='close'&&fallbackStarted&&!fallbackClosed){pendingClose=true;return true}
+    if(event==='error'&&!responseSeen&&!fallbackStarted&&!wroteBody&&recoverableHTTPSError(values[0])){
+      fallbackStarted=true
+      const fallbackDetails={...details,timeoutMs:Number(request.timeout)||details.timeoutMs}
+      fetchHTTPSWithHost(owner,request,fallbackDetails).then(({incoming,body})=>{
+        const response=hostFetchResponse(request,incoming,details.target)
+        response.once('close',()=>{fallbackClosed=true;if(pendingClose)nativeEmit.call(request,'close')})
+        request.res=response
+        appendLog(owner,'Node HTTPS 宿主回退成功：'+details.target.hostname)
+        nativeEmit.call(request,'response',response)
+        response.push(body);response.push(null);response.resume()
+      },error=>{
+        appendLog(owner,'Node HTTPS 宿主回退失败（'+details.target.hostname+'）：'+String(error?.code||'网络错误'))
+        fallbackClosed=true;nativeEmit.call(request,'error',values[0])
+        if(pendingClose)nativeEmit.call(request,'close')
+      })
+      return true
+    }
+    return nativeEmit.call(this,event,...values)
+  }
+  return request
+}
+https.get=function(...args){const request=https.request(...args);request.end();return request}
+try{require('node:module').syncBuiltinESMExports()}catch{}
 function failOwner(owner,context,error){const message=String(error?.message||error||'未知错误').slice(0,512),diagnostic=baseEnvironment.CCTVHOST_TEST_DIAGNOSTICS==='1'&&error?.stack?'\n'+String(error.stack).slice(0,2048):'';appendLog(owner,context+message+diagnostic);if(owner&&!owner.closed){owner.failure=message;cancelHandles(owner)}}
 function drainLogs(identifier){const owner=owners.get(identifier),lines=owner?.logs||closedLogs.get(identifier)||hostLogs,result=lines.splice(0,20);if(!lines.length)closedLogs.delete(identifier);return result}
 for(const key of ['log','info','warn','error','debug'])console[key]=(...args)=>{const owner=scope.getStore();appendLog(owner,args.map(value=>{try{return typeof value==='string'?value:JSON.stringify(value)}catch{return '[无法显示日志对象]'}}).join(' '))}

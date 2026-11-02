@@ -89,12 +89,17 @@ Node.js Mobile 18.20.4。`node:crypto`、`node:http`、`node:https` 和 `node:fs
 不能把 JSC 中的 `http`、`https` 或部分 `crypto` 适配当成完整 Node 行为。CatPaw Spider、Hamo 等专用
 协议仍运行在各自指定的 JavaScriptCore 会话。
 
-Node 插件可用 `server.listen(0, "127.0.0.1")` 请求系统分配端口，并在监听回调后通过
-`server.address().port` 获取该端口；宿主不会为普通 Node 插件自动改写成媒体 URL 或接管其响应。
-监听服务需绑定 loopback，宿主为每个 Node 插件跟踪最多 4 个 Server 和关联连接，并在 `stop`/`close` 或
-资源停止时关闭。CatPawOpen 的 `start()`/`stop()` 服务入口另由宿主读取实际监听地址。iOS 后台运行受系统
-生命周期限制；定时器和异步 I/O 由 Node 管理，宿主会在停止资源时清理注册的计时器、连接和监听。
-`node:child_process` 不可用于启动桌面二进制；`Worker` 和任意 `.node` 扩展也不支持。
+Node 插件可以用 `server.listen(0, "127.0.0.1")` 获取系统分配的端口，并在监听回调后通过
+`server.address().port` 读取它；但普通插件的这个地址不会自动注册到宿主媒体代理，也不会被改写成 AVPlayer 可用的媒体 URL。
+CatPawOpen 是专用例外：宿主只把它声明的 `/spider/...` 服务路由转接到已发现的服务地址。宿主为每个 Node 插件跟踪最多
+4 个 loopback Server 和关联连接，并在 `stop`/`close` 或资源停止时关闭。解密媒体应由插件返回字节并走 Python Spider
+`localProxy()` 协议，不能把媒体交付依赖于插件另起 HTTP 监听。iOS 后台运行受系统生命周期限制；停止资源时宿主会清理
+注册的计时器、连接和监听。
+
+Node `https.request/get` 先尝试 Node 原生 TLS。默认 TLS 配置下，若在收到响应前发生连接或 TLS 握手错误，宿主会通过
+带随机令牌的回环接口让内嵌 Python `urllib` 重试一次，并透传请求头、Range、状态码、响应头和响应内容（最多 16 MiB）。
+Python 仍使用默认 CA 证书校验；证书校验失败、自定义 TLS 参数或自定义 Agent 不触发回退。明文 HTTP、已有原生 TLS
+响应的请求和自定义 Node TLS 配置都保留原行为。`node:child_process` 不能启动桌面二进制；`Worker` 和任意 `.node` 扩展不支持。
 
 Python Spider 的媒体中转应优先用 `localProxy()`，避免为一个解密流程另起 `http.server`：
 

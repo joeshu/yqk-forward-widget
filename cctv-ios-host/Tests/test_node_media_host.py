@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import ssl
 import subprocess
 import tempfile
 import threading
@@ -62,6 +63,126 @@ class NodeMediaHostTests(unittest.TestCase):
     def start(self, **extra):
         return self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.cjs',
                          protocol='catvod-js', moduleType='commonjs', **extra)
+
+    def test_https_get_falls_back_through_authenticated_host_and_preserves_response(self):
+        observed = []
+
+        class HostFetch(http.server.BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+            def log_message(self, *args): pass
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length', '0'))
+                observed.append((self.path, self.headers.get('X-CCTVHost-Host-Fetch'),
+                                 json.loads(self.rfile.read(length))))
+                body = b'host-fallback-video'
+                self.send_response(206, 'Partial Content')
+                self.send_header('Content-Type', 'video/mp2t')
+                self.send_header('Content-Range', 'bytes 0-18/99')
+                self.send_header('X-Fixture', 'preserved')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                self.wfile.write(body)
+
+        bridge = http.server.ThreadingHTTPServer(('127.0.0.1', 0), HostFetch)
+        bridge_thread = threading.Thread(target=bridge.serve_forever, daemon=True)
+        bridge_thread.start()
+        (self.package/'index.cjs').write_text('''const https=require('node:https');
+          module.exports={search(){return new Promise((resolve,reject)=>{
+            https.get('https://127.0.0.1:1/segment.ts?token=fixture',{headers:{'X-Fixture':'request-header',Range:'bytes=0-18'}},response=>{
+              let body='';response.setEncoding('utf8');response.on('data',chunk=>body+=chunk);
+              response.on('end',()=>resolve({list:[{vod_id:String(response.statusCode),
+                vod_name:body+'|'+response.headers['x-fixture']+'|'+response.headers['content-range']}]}));
+            }).on('error',reject);
+          })}}''')
+        token = 'host-fetch-test-' + os.urandom(8).hex()
+        try:
+            started = self.start(hostFetchURL=f'http://127.0.0.1:{bridge.server_port}/_cctvhost/host-fetch',
+                                 hostFetchToken=token)
+            self.assertTrue(started['ok'], started)
+            reply = self.call('search')
+            self.assertTrue(reply['ok'], reply)
+            row = reply['result']['list'][0]
+            self.assertEqual(row['vod_id'], '206')
+            self.assertEqual(row['vod_name'], 'host-fallback-video|preserved|bytes 0-18/99')
+            self.assertEqual(len(observed), 1)
+            path, supplied, request = observed[0]
+            self.assertEqual(path, '/_cctvhost/host-fetch')
+            self.assertEqual(supplied, token)
+            self.assertEqual(request['url'], 'https://127.0.0.1:1/segment.ts?token=fixture')
+            self.assertEqual(request['headers']['x-fixture'], 'request-header')
+            self.assertEqual(request['headers']['range'], 'bytes=0-18')
+            self.assertEqual(request['method'], 'GET')
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            bridge.shutdown(); bridge.server_close(); bridge_thread.join(2)
+
+    def test_https_custom_tls_options_do_not_get_replaced_by_host_defaults(self):
+        observed = []
+
+        class HostFetch(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                observed.append(self.path)
+                self.send_response(502);self.end_headers()
+
+        bridge = http.server.ThreadingHTTPServer(('127.0.0.1', 0), HostFetch)
+        threading.Thread(target=bridge.serve_forever, daemon=True).start()
+        (self.package/'index.cjs').write_text('''const https=require('node:https');
+          module.exports={search(){return new Promise(resolve=>https.get('https://127.0.0.1:1/fixture',
+            {rejectUnauthorized:false},()=>resolve({list:[]})).on('error',error=>resolve({list:[{vod_id:error.code||'error'}]})))}}''')
+        try:
+            self.assertTrue(self.start(hostFetchURL=f'http://127.0.0.1:{bridge.server_port}/_cctvhost/host-fetch',
+                                       hostFetchToken='fixture-token')['ok'])
+            result = self.call('search')
+            self.assertTrue(result['ok'], result)
+            self.assertEqual(result['result']['list'][0]['vod_id'], 'ECONNREFUSED')
+            self.assertEqual(observed, [])
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            bridge.shutdown(); bridge.server_close()
+
+    @unittest.skipUnless(shutil.which('openssl'), 'requires openssl to verify certificate failures are not bypassed')
+    def test_https_certificate_validation_failure_never_uses_host_fallback(self):
+        certificate = self.root/'fixture-cert.pem'
+        private_key = self.root/'fixture-key.pem'
+        subprocess.run([shutil.which('openssl'), 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+                        '-keyout', str(private_key), '-out', str(certificate), '-days', '1',
+                        '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1'],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        tls = http.server.ThreadingHTTPServer(('127.0.0.1', 0), http.server.BaseHTTPRequestHandler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certificate, private_key)
+        tls.socket = context.wrap_socket(tls.socket, server_side=True)
+        tls_thread = threading.Thread(target=tls.serve_forever, daemon=True)
+        tls_thread.start()
+        fallback_requests = []
+
+        class HostFetch(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                fallback_requests.append(self.path)
+                body = b'must-not-bypass-certificate-validation'
+                self.send_response(200);self.send_header('Content-Length', str(len(body)))
+                self.end_headers();self.wfile.write(body)
+
+        bridge = http.server.ThreadingHTTPServer(('127.0.0.1', 0), HostFetch)
+        threading.Thread(target=bridge.serve_forever, daemon=True).start()
+        (self.package/'index.cjs').write_text(f'''const https=require('node:https');
+          module.exports={{search(){{return new Promise(resolve=>https.get('https://127.0.0.1:{tls.server_port}/fixture',response=>{{
+            response.resume();resolve({{list:[{{vod_id:'unexpected-response'}}]}});
+          }}).on('error',error=>resolve({{list:[{{vod_id:error.code||'error'}}]}})))}}}}''')
+        try:
+            self.assertTrue(self.start(hostFetchURL=f'http://127.0.0.1:{bridge.server_port}/_cctvhost/host-fetch',
+                                       hostFetchToken='fixture-token')['ok'])
+            result = self.call('search')
+            self.assertTrue(result['ok'], result)
+            self.assertIn(result['result']['list'][0]['vod_id'],
+                          {'DEPTH_ZERO_SELF_SIGNED_CERT', 'ERR_TLS_CERT_ALTNAME_INVALID'})
+            self.assertEqual(fallback_requests, [])
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            bridge.shutdown(); bridge.server_close(); tls.shutdown(); tls.server_close(); tls_thread.join(2)
 
     def test_catpaw_defaults_config_exports_provider_identity_and_relative_media(self):
         source = """const http=require('http');let server,switched=false;

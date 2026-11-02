@@ -711,6 +711,59 @@ class Spider:
             server.server_close()
             thread.join(2)
 
+    def test_node_https_host_fetch_requires_token_and_preserves_upstream_response(self):
+        runtime = media.MediaRuntime()
+        server = transport.Server(('127.0.0.1', 0), runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        observed = []
+
+        class Response:
+            def __init__(self):
+                from email.message import Message
+                self.headers = Message()
+                self.headers.add_header('Content-Type', 'video/mp2t')
+                self.headers.add_header('Content-Range', 'bytes 0-6/20')
+                self.headers.add_header('X-Fixture', 'upstream')
+                self.reason = 'Partial Content'
+
+            def getcode(self): return 206
+            def read(self, limit): return b'segment'
+            def close(self): pass
+
+        class Opener:
+            def open(self, request, timeout):
+                observed.append((request.full_url, request.get_method(), request.data,
+                                 request.get_header('X-fixture'), timeout))
+                return Response()
+
+        token = server.host_fetch_token
+        payload = json.dumps({'url': 'https://media.fixture.test/segment.ts?sig=a%2Bb',
+                              'method': 'GET', 'headers': {'X-Fixture': 'preserved', 'Host': 'cdn.fixture.test'},
+                              'timeoutMs': 2500}).encode()
+        try:
+            with mock.patch.object(transport.urllib.request, 'build_opener', return_value=Opener()):
+                client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                client.request('POST', '/_cctvhost/host-fetch', payload,
+                               {'X-CCTVHost-Host-Fetch': token, 'Content-Type': 'application/json'})
+                response = client.getresponse(); body = response.read()
+                self.assertEqual((response.status, body), (206, b'segment'))
+                self.assertEqual(response.getheader('Content-Type'), 'video/mp2t')
+                self.assertEqual(response.getheader('Content-Range'), 'bytes 0-6/20')
+                client.close()
+                client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                client.request('POST', '/_cctvhost/host-fetch', payload, {'Content-Type': 'application/json'})
+                self.assertEqual(client.getresponse().status, 403)
+                client.close()
+                client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                client.request('GET', '/_cctvhost/host-fetch')
+                self.assertEqual(client.getresponse().status, 405)
+                client.close()
+            self.assertEqual(observed, [('https://media.fixture.test/segment.ts?sig=a%2Bb', 'GET', None,
+                                         'preserved', 2.5)])
+        finally:
+            server.shutdown(); server.server_close(); thread.join(2); runtime.close()
+
     def test_health_listener_is_available_while_spider_initializes(self):
         entered = threading.Event()
         release = threading.Event()
