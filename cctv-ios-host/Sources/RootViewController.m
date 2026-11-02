@@ -449,6 +449,25 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property(nonatomic,assign) NSTimeInterval selectionRequestedAt;
 @property(nonatomic,assign) NSUInteger playbackIntentVersion;
 @property(nonatomic,assign) NSUInteger subscriptionParseGeneration;
+- (void)loadChannels;
+- (void)
+configureCatalogNavigation;
+- (void)activateAudioSession;
+- (void)setupRemoteCommands;
+- (void)registerCallbackProtocol;
+- (void)setupSDK;
+- (void)refreshConfigurationPage;
+- (void)selectBottomTab
+:(UIButton *)sender;
+- (void)stopPreview;
+- (id)call:(id)object sel:(NSString *)name;
+- (id)call:(id)object sel:(NSString *)name args:(NSArray *)arguments;
+- (void)restartEPGTimer;
+- (void)refreshNowNext;
+- (void)buildBottomBar;
+- (void)showServiceError:(NSString *)message;
+- (void)exportDiagnosticLog;
+- (void)clearDiagnosticLog;
 - (void)displayNativePlaybackFailure:(NSString *)stage error:(nullable NSError *)error;
 - (void)suspendLivePlaybackForReason:(NSString *)reason;
 - (void)toggleCurrentFavorite;

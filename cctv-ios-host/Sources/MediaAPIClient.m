@@ -94,7 +94,7 @@ static BOOL MediaTVBoxURLHasSignedQuery(NSString *value) {
     return NO;
 }
 static BOOL MediaTVBoxURLLooksLikeWebPage(NSString *value) {
-    NSURLComponents *parts=[NSURLComponents componentsWithString:value?:@""];NSString *extension=parts.path.pathExtension.lowercaseString?:@"";
+    NSURLComponents *parts=[NSURLComponents componentsWithString:value?:@""];NSString *path=parts.percentEncodedPath?:parts.path?:@"";NSString *lastComponent=path.lastPathComponent?:@"";NSString *extension=lastComponent.pathExtension.lowercaseString?:@"";
     static NSSet<NSString *> *webExtensions,*directExtensions;static dispatch_once_t once;dispatch_once(&once,^{webExtensions=[NSSet setWithArray:@[@"html",@"htm",@"xhtml",@"php",@"asp",@"aspx",@"jsp",@"shtml"]];directExtensions=[NSSet setWithArray:@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"ts"]];});
     if([webExtensions containsObject:extension])return YES;
     if([directExtensions containsObject:extension])return NO;
