@@ -251,7 +251,8 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSDictionary *imageStats;
       __block NSDictionary *nodeChecks;
       __block MediaBrowserViewController *mediaPage;
-      __block BOOL catalogOpenedFromMediaSelector=NO;
+      __block NSString *mediaSourceID;
+      __block BOOL catalogSiteSelectedFromMediaSelector=NO;
       __block UICollectionViewCell *selectedLiveCard;
       __block UIImageView *selectedLiveMark;
       __block MediaGlobalSearchViewController *searchPage;
@@ -866,10 +867,10 @@ static void next(NSArray *steps, NSUInteger index) {
             NSData *diagnostic=[NSJSONSerialization dataWithJSONObject:nodeChecks options:NSJSONWritingPrettyPrinted error:NULL];[diagnostic writeToFile:[outputDir stringByAppendingPathComponent:@"node-runtime.json"] atomically:YES];
             mediaPage=[MediaBrowserViewController new];
             NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
-            NSString *mediaSourceID=[NSString stringWithFormat:@"media-ui-%@",NSUUID.UUID.UUIDString];
+            mediaSourceID=[NSString stringWithFormat:@"media-ui-%@",NSUUID.UUID.UUIDString];
             mediaPage.sourcesProvider=^NSArray *{return @[@{@"id":mediaSourceID,@"name":@"本机影视测试",@"port":@(port),@"engine":@"node",@"url":[NSString stringWithFormat:@"http://127.0.0.1:%ld/media.js?token=visible",(long)port]}];};
-            mediaPage.catalogsProvider=^NSArray *{return @[@{@"id":@"smoke-catalog",@"name":@"影视测试合集",@"sites":@[@{@"supported":@YES}],@"lives":@[]}];};
-            mediaPage.onOpenTVBoxCatalog=^(NSString *identifier){catalogOpenedFromMediaSelector=[identifier isEqual:@"smoke-catalog"];};
+            mediaPage.catalogsProvider=^NSArray *{return @[@{@"id":@"smoke-catalog",@"name":@"影视测试合集",@"sites":@[@{@"key":@"smoke-site",@"name":@"影视内部站点",@"apiKind":@"script",@"api":@"https://provider.test/index.js?token=kept",@"supported":@YES}],@"lives":@[@{@"name":@"直播内部列表",@"url":@"https://provider.test/live.m3u",@"supported":@YES}]}];};
+            mediaPage.onImportCatalogSite=^(NSDictionary *site,NSString *identifier){catalogSiteSelectedFromMediaSelector=[identifier isEqual:@"smoke-catalog"]&&[site[@"key"] isEqual:@"smoke-site"];};
             mediaPage.onActivateService=^(NSDictionary *service,void (^done)(NSError *)){done(nil);};
             mediaPage.onPlay=^(NSDictionary *result,NSDictionary *context){mediaPlayback=[MediaPlaybackViewController new];mediaPlayback.result=result;mediaPlayback.context=context;[nav pushViewController:mediaPlayback animated:NO];};
             [nav pushViewController:mediaPage animated:NO];
@@ -919,13 +920,25 @@ static void next(NSArray *steps, NSUInteger index) {
             UIStackView *scopeStack=[picker valueForKey:@"scopeStack"];check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"resource selection uses a native bottom sheet");check([picker.tableView numberOfRowsInSection:0]==2&&current.accessoryType==UITableViewCellAccessoryCheckmark,@"resource sheet shows the active resource and a saved collection");check(scopeStack.arrangedSubviews.count==3,@"resource sheet groups installed runtimes and on-demand collections");capture(self.window,@"16b-media-resource-sheet");
             NSIndexPath *catalogIndex=[NSIndexPath indexPathForRow:1 inSection:0];[picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:catalogIndex];
           }},
-          @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&catalogOpenedFromMediaSelector&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"run":^{check(catalogOpenedFromMediaSelector,@"home and library resource selectors open a saved collection without importing every script");UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];[providerSelector sendActionsForControlEvents:UIControlEventTouchUpInside];}},
-          @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])!=nil;},@"run":^{
-            UINavigationController *sheet=SmokePresentedNavigation(@[mediaPage,nav,root],@"provider selector");if(!sheet)return;UITableViewController *picker=(id)sheet.topViewController;[picker.tableView layoutIfNeeded];NSIndexPath *current=nil;for(NSInteger row=0;row<[picker.tableView numberOfRowsInSection:0];row++){UITableViewCell *cell=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];if(cell.accessoryType==UITableViewCellAccessoryCheckmark){current=[NSIndexPath indexPathForRow:row inSection:0];break;}}
-            check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"platform selection uses a separate bottom sheet");check([picker.tableView numberOfRowsInSection:0]==2&&current!=nil,@"platform sheet lists choices and marks the current platform");capture(self.window,@"16c-media-platform-sheet");
-            NSInteger nextRow=current.row==0?1:0;[picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:nextRow inSection:0]];
+          @{ @"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&[[mediaPage valueForKey:@"selectedCatalogID"] isEqual:@"smoke-catalog"]&&[mediaPage valueForKey:@"source"]==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==0;},@"run":^{
+            UIButton *sourceSelector=[mediaPage valueForKey:@"sourceSelectButton"];UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];
+            check([sourceSelector.currentTitle containsString:@"影视测试合集"]&&[providerSelector.currentTitle containsString:@"选择站点"]&&nav.topViewController==mediaPage,@"selecting an aggregate keeps one parent resource selected in the media page");[providerSelector sendActionsForControlEvents:UIControlEventTouchUpInside];
           }},
-          @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"run":^{[mediaPage openSourceConfiguration];}},
+          @{ @"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])!=nil;},@"run":^{
+            UINavigationController *sheet=SmokePresentedNavigation(@[mediaPage,nav,root],@"provider selector");if(!sheet)return;UITableViewController *picker=(id)sheet.topViewController;[picker.tableView layoutIfNeeded];UIStackView *scopeStack=[picker valueForKey:@"scopeStack"];
+            check([picker.title containsString:@"内部站点"],@"the second capsule opens the selected aggregate's internal source list");check([picker.tableView numberOfRowsInSection:0]==2&&scopeStack.arrangedSubviews.count==3,@"aggregate list includes its deferred film site and live playlist groups");UITableViewCell *site=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];UITableViewCell *live=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]];check([site.textLabel.text isEqual:@"影视内部站点"]&&[live.textLabel.text isEqual:@"直播内部列表"],[NSString stringWithFormat:@"internal selector shows individual entries (site=%@ live=%@)",site.textLabel.text?:@"",live.textLabel.text?:@""]);capture(self.window,@"16c-media-aggregate-sites");
+            [picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+          }},
+          @{ @"until":^BOOL{return catalogSiteSelectedFromMediaSelector&&SmokePresentedController(@[mediaPage,nav,root])==nil;},@"run":^{
+            check(catalogSiteSelectedFromMediaSelector&&[mediaPage valueForKey:@"source"]==nil,@"choosing an internal script requests only that site without importing the whole aggregate");UIButton *sourceSelector=[mediaPage valueForKey:@"sourceSelectButton"];[sourceSelector sendActionsForControlEvents:UIControlEventTouchUpInside];
+          }},
+          @{ @"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])!=nil;},@"run":^{
+            UINavigationController *sheet=SmokePresentedNavigation(@[mediaPage,nav,root],@"resource selector");if(!sheet)return;UITableViewController *picker=(id)sheet.topViewController;[picker.tableView layoutIfNeeded];NSIndexPath *standalone=nil;for(NSInteger row=0;row<[picker.tableView numberOfRowsInSection:0];row++){UITableViewCell *cell=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];if([cell.textLabel.text isEqual:@"本机影视测试"]){standalone=[NSIndexPath indexPathForRow:row inSection:0];break;}}
+            check(standalone!=nil&&[picker.tableView numberOfRowsInSection:0]==2,@"switching away from an aggregate retains independently imported resources");if(standalone)[picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:standalone];
+          }},
+          @{ @"until":^BOOL{return [[mediaPage valueForKeyPath:@"source.id"] isEqual:mediaSourceID]&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"run":^{
+            check([[mediaPage valueForKeyPath:@"source.id"] isEqual:mediaSourceID]&&[[mediaPage valueForKey:@"items"] count]==4,@"switching back from the aggregate restores the selected resource's real media listing");[mediaPage openSourceConfiguration];
+          }},
           @{@"until":^BOOL{UIViewController *presented=SmokePresentedController(@[mediaPage,nav,root]);if(![presented isKindOfClass:UINavigationController.class])return NO;UINavigationController *sheet=(UINavigationController *)presented;WKWebView *web=[sheet.topViewController isKindOfClass:MediaWebViewController.class]?[sheet.topViewController valueForKey:@"web"]:nil;return [sheet isKindOfClass:UINavigationController.class]&&[sheet.topViewController isKindOfClass:MediaWebViewController.class]&&[web.URL.path isEqual:@"/source-config"];},@"run":^{
             UINavigationController *sheet=SmokePresentedNavigation(@[mediaPage,nav,root],@"source configuration");if(!sheet)return;MediaWebViewController *page=(id)sheet.topViewController;WKWebView *web=[page valueForKey:@"web"];
             check([web.URL.path isEqual:@"/source-config"],[NSString stringWithFormat:@"source configuration opens the real local service page (url=%@)",web.URL.absoluteString?:@"nil"]);check(!web.configuration.websiteDataStore.persistent,@"source configuration uses an isolated ephemeral cookie store");check(sheet.modalInPresentation,@"configuration has an explicit close-and-refresh action");capture(self.window,@"16d-media-source-configuration");[page close];
