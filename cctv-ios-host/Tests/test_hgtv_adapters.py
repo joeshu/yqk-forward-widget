@@ -39,7 +39,7 @@ def hevc_config(level=186):
     return bytes(record) + array
 
 
-def encrypted_fixture():
+def encrypted_fixture(codec=b'hvc1'):
     key = bytes.fromhex('2b7e151628aed2a6abf7158809cf4f3c')
     iv8 = bytes.fromhex('f0f1f2f3f4f5f6f7')
     plain = b'fixture-video-frame-bytes'
@@ -47,13 +47,14 @@ def encrypted_fixture():
     encrypted = ctr.update(plain)
     ctr.close()
     ftyp = box(b'ftyp', b'isom\0\0\x02\0isomiso2')
-    frma = box(b'frma', b'hvc1')
+    frma = box(b'frma', codec)
     schm = box(b'schm', b'\0\0\0\0cenc\0\x01\0\0')
     tenc = box(b'tenc', b'\0\0\0\0\0\x01\x08' + b'k' * 16)
     sinf = box(b'sinf', frma + schm + box(b'schi', tenc))
     visual_entry = bytearray(78)
     struct.pack_into('>HH', visual_entry, 24, 360, 640)
-    sample_entry = box(b'encv', bytes(visual_entry) + box(b'hvcC', hevc_config()) + sinf)
+    config = box(b'hvcC', hevc_config()) if codec == b'hvc1' else box(b'avcC', bytes(12))
+    sample_entry = box(b'encv', bytes(visual_entry) + config + sinf)
     stsd = box(b'stsd', b'\0' * 4 + struct.pack('>I', 1) + sample_entry)
     stsz = box(b'stsz', b'\0' * 4 + struct.pack('>II', 0, 1) + struct.pack('>I', len(plain)))
     stsc = box(b'stsc', b'\0' * 4 + struct.pack('>I', 1) + struct.pack('>III', 1, 1, 1))
@@ -125,6 +126,18 @@ class HgtvAdapterTests(unittest.TestCase):
             path.write_bytes(output)
             self.assertFalse(module._verify_mp4(str(path)))
 
+    def test_encrypted_avc_codec_is_restored_from_frma(self):
+        media, key, plain, offset = encrypted_fixture(b'avc1')
+        self.encrypted_path.write_bytes(media)
+        for module, path in ((hgtv, self.decrypted_path), (hgtv104, self.decrypted_104_path)):
+            module._cenc_decrypt(str(self.encrypted_path), str(path), key)
+            output = path.read_bytes()
+            self.assertIn(b'avc1', output)
+            self.assertIn(b'avcC', output)
+            self.assertNotIn(b'hvc1', output)
+            self.assertEqual(output[offset:offset + len(plain)], plain)
+            self.assertTrue(module._verify_mp4(str(path)))
+
     def test_cenc_decrypt_works_with_hostcrypto_when_pycryptodome_is_absent(self):
         for module, output_path in ((hgtv, self.decrypted_path),
                                     (hgtv104, self.decrypted_104_path)):
@@ -173,6 +186,7 @@ class HgtvAdapterTests(unittest.TestCase):
             self.assertEqual(result['url'], 'cenc://67890?q=1080p')
             self.assertEqual(result['proxy'], 1)
             self.assertEqual(result['verification'], 'signed-cenc-local-proxy')
+            self.assertEqual([item['name'] for item in result['alternates']], ['1080p', '720p'])
 
             partial = spider.localProxy({'url': result['url'], 'method': 'GET',
                                          'range': f'bytes={self.sample_offset + 2}-{self.sample_offset + len(self.plain) - 3}'})
@@ -213,6 +227,32 @@ class HgtvAdapterTests(unittest.TestCase):
                 self.assertEqual(picked[1], '1080p')
                 self.assertEqual(module._pick_best({'video_list': items}, '360p')[1], '360p')
                 self.assertIsNone(module._pick_best({'video_list': items}, '480p'))
+
+    def test_host_file_proxy_returns_reference_and_preserves_head_length(self):
+        for module, path in ((hgtv, self.decrypted_path), (hgtv104, self.decrypted_104_path)):
+            spider = module.Spider()
+            spider._cctvhost_file_proxy_supported = True
+            with mock.patch.object(module, '_decrypt_to_file', return_value=str(path)):
+                status, headers, reference = spider.localProxy({
+                    'url': 'cenc://67890?q=1080p', 'method': 'HEAD', 'range': 'bytes=2-'})
+            self.assertEqual(status, 206)
+            self.assertTrue(reference['__cctvhostFileResponse'])
+            self.assertEqual(reference['offset'], 2)
+            self.assertEqual(reference['length'], path.stat().st_size - 2)
+            self.assertEqual(int(headers['Content-Length']), reference['length'])
+
+    def test_missing_public_preview_is_not_replaced_with_full_signed_video(self):
+        for module in (hgtv, hgtv104):
+            class HTTP:
+                cache = module.BoundedCache()
+                def page(self, *_args): return {}
+                def probe(self, *_args): raise module.SourceError('not found', 404)
+            spider = module.Spider(http=HTTP())
+            with mock.patch.object(module, 'resolve_signed') as signed:
+                result = spider.playerContent('公开试看（片段）', '12345~67890')
+            self.assertEqual(result['error_code'], 'public_preview_unavailable')
+            self.assertFalse(result['url'])
+            signed.assert_not_called()
 
     def test_python_104_play_uses_host_proxy_and_returns_media_bytes(self):
         class HTTP:

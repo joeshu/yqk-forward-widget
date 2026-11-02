@@ -127,7 +127,10 @@ if (p.action === 'catalog') {
     const decryptable = candidates.some(c => {
       const info = c.it.encrypt_info || {};
       const encrypted = !!info.encrypt || /1:encrypt/.test(String(c.it.gear_des_key || ''));
-      try { return !encrypted || !!api.deriveContentKey(c.it.spade_a || info.spade_a || ''); }
+      try {
+        const key = api.deriveContentKey(c.it.spade_a || info.spade_a || '');
+        return !encrypted || !!(key && key.length === 16);
+      }
       catch (_) { return false; }
     });
     return {episode_id: id, compatible_qualities: [...new Set(candidates.map(c => c.q))],
@@ -224,8 +227,9 @@ def batch_models(module, episode_ids):
 
 def verify_all_models(module, episodes, models):
     checks = []
-    for offset in range(0, len(episodes), 20):
-        batch = episodes[offset:offset + 20]
+    # The live provider accepts ten IDs; twenty returns code 100001 参数错误.
+    for offset in range(0, len(episodes), 10):
+        batch = episodes[offset:offset + 10]
         result = batch_models(module, [episode["id"] for episode in batch])
         for episode in batch:
             check = {"episode_id": episode["id"], "episode_number": episode["number"], "status": "failed"}
@@ -284,6 +288,7 @@ def verify_catalog(module, runtime, report, models, all_models=False, node=None)
             if all_models:
                 row["all_model_checks"] = verify_all_models(module, episodes, models)
                 row["all_model_count"] = len(row["all_model_checks"])
+                row["all_model_batch_size"] = 10
                 row["all_model_passed_count"] = sum(check["status"] == "passed" for check in row["all_model_checks"])
                 if node:
                     node_row = {"runtime": "node", "series_id": series_id, **expected,
@@ -483,7 +488,7 @@ def main(argv=None):
     parser.add_argument("--qualities", default=",".join(QUALITIES), help="comma-separated exact qualities; unavailable entries are recorded")
     parser.add_argument("--max-total-mb", type=float, default=512, help="maximum media output MiB, including temporary files (default: 512)")
     parser.add_argument("--catalog-only", action="store_true", help="check series counts and first/middle/last models without downloading MP4s")
-    parser.add_argument("--catalog-all-models", action="store_true", help="also resolve all 515 catalogue episode models in signed API batches of 20; no additional MP4s")
+    parser.add_argument("--catalog-all-models", action="store_true", help="also resolve all 515 catalogue episode models in signed API batches of 10; no additional MP4s")
     parser.add_argument("--skip-catalog", action="store_true", help="omit series catalogue checks for a targeted download rerun")
     parser.add_argument("--no-legacy-fixture", action="store_true", help="omit deliberately malformed .legacy.mp4 control")
     args = parser.parse_args(argv)
@@ -501,7 +506,10 @@ def main(argv=None):
     report = {"schema_version": 1, "started_at": datetime.now(timezone.utc).isoformat(),
               "online": True, "ffmpeg_disabled": True, "runtimes": args.runtimes,
               "episodes": args.episodes, "qualities": args.qualities,
-              "catalog_only": args.catalog_only, "catalogs": [], "samples": [], "fixtures": []}
+              "catalog_only": args.catalog_only, "catalog_all_models": args.catalog_all_models,
+              "catalogs": [], "samples": [], "fixtures": [],
+              "source_sha256": {runtime: sha256(path) for runtime, path in
+                                {**SOURCES, "node": ROOT / "Examples/hgtv-node/hgtv.js"}.items()}}
     started = time.monotonic()
     try:
         with tempfile.TemporaryDirectory(prefix="hgtv-live-matrix-") as temp:

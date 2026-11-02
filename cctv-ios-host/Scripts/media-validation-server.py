@@ -7,6 +7,7 @@ import mimetypes
 import os
 from pathlib import Path
 import re
+import socketserver
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlsplit
@@ -21,6 +22,13 @@ class FixtureServer(ThreadingHTTPServer):
         self.request_log = request_log
         self.log_lock = threading.Lock()
         super().__init__(('127.0.0.1', 0), FixtureHandler)
+
+    def server_bind(self):
+        # HTTPServer.server_bind calls getfqdn(), which can stall on macOS
+        # runners. This loopback-only fixture does not need reverse DNS.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = 'localhost'
+        self.server_port = self.server_address[1]
 
     def record(self, record):
         with self.log_lock:
@@ -128,6 +136,7 @@ def main():
     args.port_file.parent.mkdir(parents=True, exist_ok=True)
     args.request_log.parent.mkdir(parents=True, exist_ok=True)
     args.request_log.write_text('', encoding='utf-8')
+    print('Binding loopback media fixture server', flush=True)
     with FixtureServer(args.directory, args.request_log) as server:
         pending = args.port_file.with_name(args.port_file.name + '.tmp')
         pending.write_text(str(server.server_port) + '\n', encoding='ascii')

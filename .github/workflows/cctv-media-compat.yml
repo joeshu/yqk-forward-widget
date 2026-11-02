@@ -30,7 +30,7 @@ jobs:
         run: |
           mkdir -p validation-results
           set -o pipefail
-          python3 -u Scripts/hgtv-live-matrix.py --output validation-media 2>&1 | tee validation-results/matrix.log
+          python3 -u Scripts/hgtv-live-matrix.py --output validation-media --catalog-all-models 2>&1 | tee validation-results/matrix.log
       - name: Parse tracks and decode frames using real AVFoundation
         if: ${{ !cancelled() }}
         working-directory: cctv-ios-host

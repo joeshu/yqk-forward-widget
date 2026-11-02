@@ -21,19 +21,23 @@ python3 -u Scripts/media-validation-server.py --directory "$INPUT_DIRECTORY" \
 SERVER_PID=$!
 cleanup() { kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; }
 trap cleanup EXIT
-for attempt in $(seq 1 100); do
+for attempt in $(seq 1 300); do
   if [ -s "$PORT_FILE" ]; then break; fi
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then cat "$OUTPUT_DIRECTORY/http-server.log"; exit 1; fi
   sleep 0.1
 done
 if [ ! -s "$PORT_FILE" ]; then cat "$OUTPUT_DIRECTORY/http-server.log"; exit 1; fi
 PORT=$(cat "$PORT_FILE")
-EXTRA_ARGUMENTS=()
-if [ "$#" -eq 3 ]; then EXTRA_ARGUMENTS+=("$3"); fi
 set +e
-"$OUTPUT_DIRECTORY/validate-avfoundation" "$INPUT_DIRECTORY" "$OUTPUT_DIRECTORY" \
-  "http://127.0.0.1:$PORT/" "${EXTRA_ARGUMENTS[@]}" 2>&1 | tee "$OUTPUT_DIRECTORY/avfoundation.log"
-VALIDATION_STATUS=${PIPESTATUS[0]}
+if [ "$#" -eq 3 ]; then
+  "$OUTPUT_DIRECTORY/validate-avfoundation" "$INPUT_DIRECTORY" "$OUTPUT_DIRECTORY" \
+    "http://127.0.0.1:$PORT/" "$3" 2>&1 | tee "$OUTPUT_DIRECTORY/avfoundation.log"
+  VALIDATION_STATUS=${PIPESTATUS[0]}
+else
+  "$OUTPUT_DIRECTORY/validate-avfoundation" "$INPUT_DIRECTORY" "$OUTPUT_DIRECTORY" \
+    "http://127.0.0.1:$PORT/" 2>&1 | tee "$OUTPUT_DIRECTORY/avfoundation.log"
+  VALIDATION_STATUS=${PIPESTATUS[0]}
+fi
 set -e
 cleanup
 trap - EXIT
