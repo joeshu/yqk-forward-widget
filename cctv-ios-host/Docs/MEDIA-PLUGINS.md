@@ -114,6 +114,7 @@ def localProxy(self, params):
 `headers` 是播放器请求头，`range` 是 Range 字符串，`upstreamHeaders` 是播放地址返回的源站请求头。
 回调返回 `[status, headers, body]`，其中 body 为 bytes；宿主管理端口和 HTTP 响应，不把源站 Cookie 交给播放器。
 单次响应上限 16 MiB，较大媒体应返回 Range 分片。原有 `/proxy?url=...` 调用形式继续兼容。
+Python Spider 为兼容非线程安全脚本仍串行执行；代理调用等待前一个回调的排队上限为 120 秒，以容纳首轮下载/解密期间播放器并发的 Range 或 HEAD 请求。普通影视接口仍使用原 12 秒默认排队上限。
 
 示例 `Plugins/example-encrypted-media.py` 使用标准库解析 MP4、按样本解密并支持 Range；资源的「插件选项」JSON
 可通过 `items` 配置分集 URL、32 位十六进制 AES-128 密钥和请求头。模板支持未分片 MP4、`stsz/stsc/stco`

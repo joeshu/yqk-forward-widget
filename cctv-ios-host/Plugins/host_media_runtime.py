@@ -730,6 +730,7 @@ class PythonSpider:
             self.spider = cls()
             self.spider._cctvhost_proxy_url = proxy_url
             self.lock = threading.Lock()
+            self.proxy_lock_timeout = 120.0
             # Python Spider implementations are not generally thread-safe, so
             # calls stay serialized. Give a request already in progress time to
             # finish instead of turning ordinary home -> detail navigation into
@@ -844,6 +845,12 @@ class PythonSpider:
     def call(self, operation, args):
         wait_started = time.perf_counter()
         lock_timeout = max(.1, float(getattr(self, 'lock_timeout', 12.0)))
+        if operation == 'proxy':
+            try:
+                proxy_lock_timeout = float(getattr(self, 'proxy_lock_timeout', 120.0))
+            except (TypeError, ValueError):
+                proxy_lock_timeout = 120.0
+            lock_timeout = min(120.0, max(lock_timeout, proxy_lock_timeout))
         acquired = self.lock.acquire(timeout=lock_timeout)
         wait_ms = max(0, int((time.perf_counter() - wait_started) * 1000))
         request = getattr(threading.current_thread(), '_host_media_request_context', {})

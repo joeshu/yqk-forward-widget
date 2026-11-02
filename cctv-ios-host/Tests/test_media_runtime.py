@@ -446,6 +446,40 @@ class Spider:
         finally:
             self.engine.lock.release()
 
+    def test_local_proxy_queue_allows_long_first_decode_without_changing_normal_api_timeout(self):
+        self.engine.lock_timeout = .01
+        self.engine.proxy_lock_timeout = .5
+        self.engine.spider.localProxy = lambda _args: [200, {'Content-Type': 'video/mp4'}, b'frame']
+        started = threading.Event()
+        results, failures = [], []
+        self.engine.lock.acquire()
+
+        def invoke_proxy():
+            started.set()
+            try:
+                results.append(self.runtime.call('proxy', {'method': 'GET'}))
+            except Exception as error:
+                failures.append(error)
+
+        worker = threading.Thread(target=invoke_proxy)
+        worker.start()
+        try:
+            self.assertTrue(started.wait(1))
+            time.sleep(.05)
+        finally:
+            self.engine.lock.release()
+        worker.join(1)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(failures, [])
+        self.assertEqual(results, [[200, {'Content-Type': 'video/mp4'}, b'frame']])
+
+        self.engine.lock.acquire()
+        try:
+            with self.assertRaisesRegex(media.MediaError, '排队超时'):
+                self.runtime.call('search', {'keyword': 'busy'})
+        finally:
+            self.engine.lock.release()
+
     def test_spider_serializes_overlapping_requests_instead_of_immediate_busy(self):
         self.engine.lock_timeout = 1.0
         active = 0
