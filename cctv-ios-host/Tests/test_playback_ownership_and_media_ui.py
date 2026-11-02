@@ -129,7 +129,9 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
     def test_current_episode_number_stays_visible_during_playback(self):
         body = method_body(PLAYBACK_SOURCE, "- (void)updateEpisodeTitle")
         self.assertIn('第 %ld 集', body)
-        self.assertIn('self.episodeTitle.accessibilityLabel=title', body)
+        self.assertIn('正在播放 · ', body)
+        self.assertIn('self.episodeTitle.accessibilityLabel=visibleTitle', body)
+        self.assertIn('self.title=title', body)
         embedded = PLAYBACK_SOURCE[PLAYBACK_SOURCE.index('if(self.embeddedMode){'):PLAYBACK_SOURCE.index('[NSNotificationCenter.defaultCenter addObserver:self')]
         self.assertIn('self.episodeTitle.hidden=NO', embedded)
         self.assertIn('constraintEqualToAnchor:self.episodeTitle.bottomAnchor', embedded)
