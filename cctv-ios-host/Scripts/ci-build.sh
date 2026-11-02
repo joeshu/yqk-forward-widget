@@ -89,6 +89,7 @@ if [ -z "${PY_DISABLE:-}" ]; then
   python3 -m pip install --disable-pip-version-check --no-compile --only-binary=:all: --platform any --implementation py --python-version 3.13 \
     --target "$APP/python/lib/python${PY_VER}/site-packages" -r Scripts/media-python-requirements.txt
   cp -R Plugins/crypto_compat/Crypto "$APP/python/lib/python${PY_VER}/site-packages/Crypto"
+  cp Plugins/cctvhost_ffmpeg.py "$APP/python/lib/python${PY_VER}/site-packages/cctvhost_ffmpeg.py"
   rm -rf "$APP/python/lib/python${PY_VER}/test" "$APP/python/lib/python${PY_VER}/idlelib" \
          "$APP/python/lib/python${PY_VER}/tkinter" "$APP/python/lib/python${PY_VER}/ensurepip" \
          "$APP/python/lib/python${PY_VER}/turtledemo" "$APP/python/lib/python${PY_VER}/distutils"

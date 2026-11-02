@@ -30,6 +30,13 @@
 
 JS 原文件由 JS 引擎执行，Python 原文件由 CPython 执行，均在 iPhone 进程内。Node 框架首次启用相关资源才加载，不在 CCTV 开台时启动。
 
+iPhone 的 CPython 不包含也不能启动桌面 `ffmpeg` 命令行程序。应用已链接
+`alivcffmpeg.framework`；Python 现可导入 `cctvhost_ffmpeg`，读取本机构建的
+FFmpeg 版本和解码器能力，并用 `cctvhost_ffmpeg.probe(url, headers={}, timeout=12)`
+检查本地文件或 HTTP(S) 媒体是否包含视频、音频和字幕流。接口设置 1–30 秒的单次 I/O
+等待上限、2 MiB 格式探测上限、256 个探测包上限和 5 秒流分析参数，不会启动进程。当前 Python 接口用于媒体
+探测；任意 FFmpeg 命令行参数、滤镜和转码任务仍需各自的原生 API 支持。
+
 ## ZIP 清单
 
 ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。存在清单时优先使用清单，否则尝试 package.json 和常见入口。CommonJS 代码使用静态 `require("...")` 或 `package.json` 声明 dependencies 时，未指定运行时时默认选择 Node.js Mobile；drpy 等专用协议仍使用 JavaScriptCore。旧版本已导入的无清单 Node/CommonJS 资源会在下次启动时重新识别。Node 包需要在 ZIP 内带齐它使用的 `node_modules`，应用不会联网安装 npm 依赖。无法确定入口时会明确报错。
