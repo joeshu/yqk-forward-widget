@@ -195,16 +195,20 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('[self.table.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor]', SERVICE_UI)
         self.assertIn('[self.table.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor]', SERVICE_UI)
 
-    def test_live_header_actions_follow_selected_channel_and_group(self):
+    def test_live_page_actions_float_at_lower_right_and_follow_selected_channel(self):
         navigation = method_body("- (void)configureCatalogNavigation")
         group_menu = method_body("- (void)showGroupMenu")
         self.assertIn("BOOL expandedLive", navigation)
         self.assertIn("self.channelName", navigation)
-        self.assertIn('@"heart.fill":@"heart"', navigation)
-        self.assertIn('AVRoutePickerView *airPlayPicker', navigation)
-        self.assertIn('@"customView":airPlayPicker', navigation)
-        self.assertIn('@"info.circle"', navigation)
-        self.assertIn("self.groupControl.selectedSegmentIndex", navigation)
+        self.assertIn('self.navigationItem.rightBarButtonItems=nil', navigation)
+        self.assertIn('self.navigationItem.leftBarButtonItem=nil', navigation)
+        self.assertIn('channel.catalog.floating-controls', TEXT)
+        self.assertIn('AVRoutePickerView *catalogFloatingAirPlayPicker', TEXT)
+        self.assertIn('self.catalogFloatingControls.hidden=!catalog', TEXT)
+        self.assertIn('tabY-controlsHeight-12', TEXT)
+        self.assertIn('channel.catalog.layout.toggle', TEXT)
+        self.assertIn('频道分组 · %@', TEXT)
+        self.assertIn('播放信息', TEXT)
         self.assertIn("self.groupControl.numberOfSegments", group_menu)
         self.assertIn("✓", group_menu)
 
@@ -395,8 +399,8 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('self.nativePlainRouteActive?0:1',method_body('- (void)startRemoteChannel:'))
 
     def test_player_toolbar_uses_real_airplay_picker_and_keeps_channel_logos_stable(self):
-        self.assertIn('AVRoutePickerView *airPlayPicker', TEXT)
-        self.assertIn('@"customView":airPlayPicker', TEXT)
+        self.assertIn('AVRoutePickerView *catalogFloatingAirPlayPicker', TEXT)
+        self.assertIn('catalogFloatingAirPlayPicker.accessibilityIdentifier=@"channel.catalog.airplay"', TEXT)
         self.assertIn('loadPlayerChannelLogoAfterFirstFrame', TEXT)
         body = method_body('- (void)loadLogo:')
         self.assertIn('HostImageLoader shared] loadURL:url intoImageView:iv', body)

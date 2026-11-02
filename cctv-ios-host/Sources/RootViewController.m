@@ -408,6 +408,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, strong) PluginViewController *pluginPage;
 @property (nonatomic, strong) UIStackView *bottomBar;
 @property (nonatomic, strong) UIVisualEffectView *bottomBarBackdrop;
+@property (nonatomic, strong) UIView *catalogFloatingControls;
+@property (nonatomic, strong) UIButton *catalogLayoutButton;
+@property (nonatomic, strong) UIButton *catalogMoreButton;
+@property (nonatomic, strong) AVRoutePickerView *catalogFloatingAirPlayPicker;
 @property (nonatomic, assign) NSInteger activeTab;
 @property (nonatomic, assign) BOOL initialTabRestorePending;
 @property (nonatomic, assign) BOOL restoringLastTab;
@@ -1094,6 +1098,18 @@ configureCatalogNavigation;
     UIAction *refresh=[UIAction actionWithTitle:@"刷新资源" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){[(ConfigCenterViewController *)weakSelf.tabPages[@3] refreshProfiles];}];
     UIAction *home=[UIAction actionWithTitle:@"更新影视首页内容" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){ConfigCenterViewController *page=(ConfigCenterViewController *)weakSelf.tabPages[@3];if(page.onRefreshMediaHome)page.onRefreshMediaHome();}];
     self.resourceActionsButton.menu=[UIMenu menuWithChildren:@[services,import,refresh,home]];self.resourceActionsButton.showsMenuAsPrimaryAction=NO;[self.resourceActionsButton addTarget:self action:@selector(openServicesPage) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:self.resourceActionsButton];
+
+    UIVisualEffectView *catalogControls=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];
+    catalogControls.accessibilityIdentifier=@"channel.catalog.floating-controls";catalogControls.layer.cornerRadius=27;catalogControls.clipsToBounds=YES;catalogControls.layer.borderWidth=0.7;catalogControls.layer.borderColor=HostBorder().CGColor;
+    UIView *catalogTint=[[UIView alloc] initWithFrame:catalogControls.contentView.bounds];catalogTint.backgroundColor=HostGlassTint();catalogTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;catalogTint.userInteractionEnabled=NO;[catalogControls.contentView addSubview:catalogTint];
+    self.catalogFloatingControls=catalogControls;
+    self.catalogLayoutButton=[UIButton buttonWithType:UIButtonTypeSystem];self.catalogLayoutButton.accessibilityIdentifier=@"channel.catalog.layout.toggle";self.catalogLayoutButton.accessibilityLabel=self.gridMode?@"切换列表布局":@"切换网格布局";
+    UIButtonConfiguration *layoutConfig=[UIButtonConfiguration plainButtonConfiguration];layoutConfig.image=[UIImage systemImageNamed:self.gridMode?@"list.bullet":@"square.grid.2x2"];layoutConfig.baseForegroundColor=HostText();layoutConfig.preferredSymbolConfigurationForImage=[UIImageSymbolConfiguration configurationWithPointSize:19 weight:UIImageSymbolWeightSemibold];layoutConfig.contentInsets=NSDirectionalEdgeInsetsMake(8,8,8,8);self.catalogLayoutButton.configuration=layoutConfig;HostInstallPressFeedback(self.catalogLayoutButton);[self.catalogLayoutButton addTarget:self action:@selector(toggleCatalogLayout) forControlEvents:UIControlEventTouchUpInside];
+    self.catalogFloatingAirPlayPicker=[AVRoutePickerView new];self.catalogFloatingAirPlayPicker.tintColor=HostText();self.catalogFloatingAirPlayPicker.activeTintColor=HostAccent();self.catalogFloatingAirPlayPicker.prioritizesVideoDevices=YES;self.catalogFloatingAirPlayPicker.accessibilityIdentifier=@"channel.catalog.airplay";self.catalogFloatingAirPlayPicker.accessibilityLabel=@"投屏到 AirPlay 设备";
+    self.catalogMoreButton=[UIButton buttonWithType:UIButtonTypeSystem];self.catalogMoreButton.accessibilityIdentifier=@"channel.catalog.more";self.catalogMoreButton.accessibilityLabel=@"频道页面操作";
+    UIButtonConfiguration *moreConfig=[UIButtonConfiguration plainButtonConfiguration];moreConfig.image=[UIImage systemImageNamed:@"ellipsis"];moreConfig.baseForegroundColor=HostText();moreConfig.preferredSymbolConfigurationForImage=[UIImageSymbolConfiguration configurationWithPointSize:19 weight:UIImageSymbolWeightSemibold];moreConfig.contentInsets=NSDirectionalEdgeInsetsMake(8,8,8,8);self.catalogMoreButton.configuration=moreConfig;self.catalogMoreButton.menu=[self catalogMenu];self.catalogMoreButton.showsMenuAsPrimaryAction=YES;HostInstallPressFeedback(self.catalogMoreButton);
+    [catalogControls.contentView addSubview:self.catalogLayoutButton];[catalogControls.contentView addSubview:self.catalogFloatingAirPlayPicker];[catalogControls.contentView addSubview:self.catalogMoreButton];
+    [self.view addSubview:catalogControls];
     [self updateBottomBarSelection];
 }
 
@@ -1165,39 +1181,11 @@ configureCatalogNavigation;
     self.title=expandedLive?(self.channelName?:@"直播"):(self.favoritesOnly?@"收藏频道":(self.subscriptionCatalog?@"频道":@"CCTV"));
     self.navigationItem.largeTitleDisplayMode=expandedLive?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationItem.searchController=self.searchController; self.navigationItem.hidesSearchBarWhenScrolling=NO;
-    __weak typeof(self) w=self;
-    if(expandedLive){
-        BOOL favorite=[self.favorites containsObject:self.channelID];
-        AVRoutePickerView *airPlayPicker=[AVRoutePickerView new];airPlayPicker.tintColor=HostText();airPlayPicker.activeTintColor=HostAccent();airPlayPicker.prioritizesVideoDevices=YES;
-        self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
-            @{@"icon":favorite?@"heart.fill":@"heart",@"title":favorite?@"取消收藏当前频道":@"收藏当前频道",@"action":[UIAction actionWithHandler:^(UIAction *a){[w toggleCurrentFavorite];}]},
-            @{@"customView":airPlayPicker,@"title":@"投屏到 AirPlay 设备",@"identifier":@"playback.airplay"},
-            @{@"icon":@"info.circle",@"title":@"播放信息",@"action":[UIAction actionWithHandler:^(UIAction *a){[w showPlaybackInfo];}]}
-        ])];
-    }else{
-        NSInteger nextColumns=self.gridColumns==4?3:4;
-        UIButton *columnsButton=[UIButton buttonWithType:UIButtonTypeSystem];
-        UIButtonConfiguration *columnsConfiguration=[UIButtonConfiguration plainButtonConfiguration];
-        columnsConfiguration.title=[NSString stringWithFormat:@"%ld列",(long)self.gridColumns];
-        columnsConfiguration.baseForegroundColor=HostAccent();
-        columnsConfiguration.contentInsets=NSDirectionalEdgeInsetsMake(4,2,4,2);
-        columnsConfiguration.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *updated=[attributes mutableCopy];updated[NSFontAttributeName]=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];return updated;};
-        columnsButton.configuration=columnsConfiguration;
-        columnsButton.accessibilityIdentifier=@"channel.grid.columns.toggle";
-        columnsButton.accessibilityLabel=[NSString stringWithFormat:@"每行%ld个，切换为%ld列",(long)self.gridColumns,(long)nextColumns];
-        HostInstallPressFeedback(columnsButton);
-        [columnsButton addAction:[UIAction actionWithHandler:^(UIAction *a){[w toggleCatalogColumns];}] forControlEvents:UIControlEventTouchUpInside];
-        AVRoutePickerView *catalogAirPlayPicker=[AVRoutePickerView new];catalogAirPlayPicker.tintColor=HostText();catalogAirPlayPicker.activeTintColor=HostAccent();catalogAirPlayPicker.prioritizesVideoDevices=YES;catalogAirPlayPicker.accessibilityIdentifier=@"channel.catalog.airplay";
-        self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
-            @{@"icon":self.gridMode?@"list.bullet":@"square.grid.2x2",@"title":self.gridMode?@"切换列表布局":@"切换网格布局",@"action":[UIAction actionWithHandler:^(UIAction *a){[w toggleCatalogLayout];}]},
-            @{@"customView":columnsButton,@"title":columnsButton.accessibilityLabel,@"identifier":@"channel.grid.columns.toggle"},
-            @{@"customView":catalogAirPlayPicker,@"title":@"投屏到 AirPlay 设备",@"identifier":@"playback.airplay"},
-            @{@"icon":@"ellipsis",@"title":@"更多",@"menu":[self catalogMenu]}
-        ])];
-    }
-    NSInteger groupIndex=self.groupControl.selectedSegmentIndex;
-    NSString *groupTitle=groupIndex>=0&&groupIndex<self.groupControl.numberOfSegments?[self.groupControl titleForSegmentAtIndex:groupIndex]:@"全部";
-    self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:[NSString stringWithFormat:@"%@ ▾",groupTitle] style:UIBarButtonItemStylePlain target:self action:@selector(showGroupMenu)];
+    // Keep the live pages' transport and catalog controls independent of the
+    // navigation bar so they remain visible when the top chrome collapses.
+    self.navigationItem.leftBarButtonItem=nil;self.navigationItem.rightBarButtonItems=nil;
+    if(self.catalogLayoutButton){self.catalogLayoutButton.accessibilityLabel=self.gridMode?@"切换列表布局":@"切换网格布局";UIButtonConfiguration *configuration=self.catalogLayoutButton.configuration;configuration.image=[UIImage systemImageNamed:self.gridMode?@"list.bullet":@"square.grid.2x2"];self.catalogLayoutButton.configuration=configuration;}
+    self.catalogMoreButton.menu=[self catalogMenu];
 }
 - (void)toggleCatalogLayout {
     CGPoint listOffset=self.table.contentOffset,gridOffset=self.channelGrid.contentOffset;
@@ -1229,7 +1217,10 @@ configureCatalogNavigation;
 }
 - (UIMenu *)catalogMenu {
     __weak typeof(self) w=self;
-    UIAction *grid=[UIAction actionWithTitle:self.gridMode?@"切换列表布局":@"切换网格布局" image:[UIImage systemImageNamed:self.gridMode?@"list.bullet":@"square.grid.2x2"] identifier:nil handler:^(UIAction *a){[w toggleCatalogLayout];}];
+    NSInteger groupIndex=self.groupControl.selectedSegmentIndex;NSString *groupName=groupIndex>=0&&groupIndex<self.groupControl.numberOfSegments?[self.groupControl titleForSegmentAtIndex:groupIndex]:@"全部";
+    UIAction *group=[UIAction actionWithTitle:[NSString stringWithFormat:@"频道分组 · %@",groupName] image:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] identifier:nil handler:^(UIAction *a){[w showGroupMenu];}];
+    NSInteger nextColumns=self.gridColumns==4?3:4;
+    UIAction *columns=[UIAction actionWithTitle:[NSString stringWithFormat:@"每行 %ld 列 · 切换为 %ld 列",(long)self.gridColumns,(long)nextColumns] image:[UIImage systemImageNamed:@"square.grid.3x3"] identifier:@"channel.grid.columns.toggle" handler:^(UIAction *a){[w toggleCatalogColumns];}];
     UIAction *refresh=[UIAction actionWithTitle:self.subscriptionCatalog?@"刷新播放列表":@"刷新当前列表" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){[w onPullRefresh];}];
     UIAction *add=[UIAction actionWithTitle:@"添加订阅" image:[UIImage systemImageNamed:@"plus"] identifier:nil handler:^(UIAction *a){[w addSubscription];}];
     UIAction *hide=[UIAction actionWithTitle:self.playerExpanded?@"收起播放器":@"展开播放器" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){w.playerExpanded=!w.playerExpanded;[w configureCatalogNavigation];[w.view setNeedsLayout];}];
@@ -1237,12 +1228,15 @@ configureCatalogNavigation;
     UIAction *playing=[UIAction actionWithTitle:@"返回正在播放" image:[UIImage systemImageNamed:@"play.circle"] identifier:nil handler:^(UIAction *a){if(!w.channelID.length)return;[w selectBottomTab:(id)w.bottomBar.arrangedSubviews[w.currentRemoteURL.length?1:0]];w.playerExpanded=YES;[w.view setNeedsLayout];}];
     UIAction *manage=[UIAction actionWithTitle:@"整理收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[w showFavoriteManager];}];
     UIAction *favorites=[UIAction actionWithTitle:self.favoritesOnly?@"显示全部频道":@"查看收藏频道" image:[UIImage systemImageNamed:@"heart.fill"] identifier:nil handler:^(UIAction *a){w.favoritesOnly=!w.favoritesOnly;[w configureCatalogNavigation];[w applyFilter];}];
-    return [UIMenu menuWithTitle:@"" children:self.subscriptionCatalog?@[grid,refresh,add,hide,playing,history,favorites,manage]:@[grid,refresh,hide,playing,history,favorites,manage]];
+    NSMutableArray *actions=[NSMutableArray arrayWithObjects:group,columns,refresh,hide,playing,history,favorites,manage,nil];
+    if(self.subscriptionCatalog)[actions insertObject:add atIndex:2];
+    if(self.channelID.length){BOOL favorite=[self.favorites containsObject:self.channelID];UIAction *currentFavorite=[UIAction actionWithTitle:favorite?@"取消收藏当前频道":@"收藏当前频道" image:[UIImage systemImageNamed:favorite?@"heart.fill":@"heart"] identifier:nil handler:^(UIAction *a){[w toggleCurrentFavorite];}];UIAction *playbackInfo=[UIAction actionWithTitle:@"播放信息" image:[UIImage systemImageNamed:@"info.circle"] identifier:nil handler:^(UIAction *a){[w showPlaybackInfo];}];[actions insertObjects:@[currentFavorite,playbackInfo] atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0,2)]];}
+    return [UIMenu menuWithTitle:@"" children:actions];
 }
 - (void)showGroupMenu {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:@"按频道类型筛选当前列表" preferredStyle:UIAlertControllerStyleActionSheet];NSInteger selected=self.groupControl.selectedSegmentIndex;
     for(NSUInteger i=0;i<self.groupControl.numberOfSegments;i++){NSString *group=[self.groupControl titleForSegmentAtIndex:i]?:@"全部";NSString *title=(NSInteger)i==selected?[NSString stringWithFormat:@"✓  %@",group]:group;[a addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.groupControl.selectedSegmentIndex=i;[self onGroupChanged];}]];}
-    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.barButtonItem=self.navigationItem.leftBarButtonItem;[self presentViewController:a animated:YES completion:nil];
+    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];UIPopoverPresentationController *popover=a.popoverPresentationController;if(popover){if(self.catalogMoreButton){popover.sourceView=self.catalogMoreButton;popover.sourceRect=self.catalogMoreButton.bounds;}else{popover.sourceView=self.view;popover.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);}}[self presentViewController:a animated:YES completion:nil];
 }
 - (void)showTabPage:(UIViewController *)page title:(NSString *)title {
     BOOL media=[page isKindOfClass:MediaBrowserViewController.class];BOOL resource=[page isKindOfClass:ConfigCenterViewController.class];BOOL mediaHome=media&&((MediaBrowserViewController *)page).isHomeMode;BOOL hideNavigation=mediaHome||resource;self.navigationItem.largeTitleDisplayMode=media?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
@@ -2107,6 +2101,7 @@ configureCatalogNavigation;
         self.bottomBar.hidden = YES;
         self.bottomBarBackdrop.hidden = YES;
         self.resourceActionsButton.hidden=YES;
+        self.catalogFloatingControls.hidden=YES;
         self.channelGrid.hidden=YES;
         self.playerTabs.hidden=YES;
         self.playbackPanel.view.hidden=YES;
@@ -2130,6 +2125,7 @@ configureCatalogNavigation;
         // pushed page while the bar visibility is being reconciled.
         BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat resourceSafeTop=self.view.window.safeAreaInsets.top;if(resourceSafeTop<=0)resourceSafeTop=top;CGFloat pageTop=resourcePage?0:top;self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,contentBottom-pageTop));if(resourcePage)[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:resourceSafeTop];[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
         self.resourceActionsButton.hidden=YES;self.resourceActionsButton.frame=CGRectMake(w-safe.right-18-58,CGRectGetMinY(self.bottomBar.frame)-12-58,58,58);
+        self.catalogFloatingControls.hidden=!catalog;CGFloat controlsWidth=164,controlsHeight=54;self.catalogFloatingControls.frame=CGRectMake(MAX(12,w-safe.right-controlsWidth-14),MAX(top+8,tabY-controlsHeight-12),controlsWidth,controlsHeight);self.catalogLayoutButton.frame=CGRectMake(4,3,48,48);self.catalogFloatingAirPlayPicker.frame=CGRectMake(58,3,48,48);self.catalogMoreButton.frame=CGRectMake(112,3,48,48);[self.view bringSubviewToFront:self.catalogFloatingControls];
     }
     [self relayoutPlayer];
     CGFloat overlayTop = self.fullscreen ? safe.top : 0;
