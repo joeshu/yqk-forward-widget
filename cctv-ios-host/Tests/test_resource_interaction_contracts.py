@@ -765,7 +765,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('ResourceImportOptionTVBox', (ROOT / 'Sources/ResourceImportSheetViewController.m').read_text())
         self.assertIn('TVBoxCatalogStore parseData:data sourceURL:nil', self.root)
         self.assertIn('保留独立副本', self.root)
-        self.assertIn('type 0 MacCMS 与 type 1/4 API', catalog_view)
+        self.assertIn('整包加入', catalog_view)
+        self.assertIn('type 1/4 JSON API', catalog_view)
+        self.assertIn('tvboxConfig', store)
         self.assertIn('apiKindTVBox', store)
         self.assertIn('TVBox API 请求地址无效或过长', api_client)
         self.assertIn('vod_play_from', api_client)
@@ -786,6 +788,26 @@ class ResourceInteractionContracts(unittest.TestCase):
         catalog_test = (ROOT / 'Tests/native_profile_tests.m').read_text()
         self.assertIn('type 3 JAR stays unsupported', catalog_test)
         self.assertIn('type 1 direct playback', (ROOT / 'Tests/native_media_api_tests.m').read_text())
+
+    def test_tvbox_collection_can_be_added_as_a_bounded_batch_with_live_user_agents(self):
+        bulk = (ROOT / 'Sources/TVBoxCatalogBulkImporter.m').read_text()
+        root = self.root
+        store = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
+        catalog_view = (ROOT / 'Sources/TVBoxCatalogViewController.m').read_text()
+        self.assertIn('onImportCompatibleContents', catalog_view)
+        self.assertIn('整包加入兼容内容', catalog_view)
+        self.assertIn('bulkImportTVBoxCatalog:identifier page:weakPage', root)
+        self.assertIn('_maximumConcurrentDownloads=3', bulk)
+        self.assertIn('512*1024*1024', bulk)
+        self.assertIn('downloadLimitReached', root)
+        self.assertIn('headers:site[@"header"]', bulk)
+        self.assertIn('manifest[@"options"]=ext', bulk)
+        self.assertIn('tvboxSiteKeys', bulk)
+        self.assertIn('[downloader cancel]', bulk)
+        self.assertIn('live[@"ua"]', store)
+        self.assertIn('for(NSDictionary *live in lives)', root)
+        self.assertIn('forHTTPHeaderField:@"User-Agent"', root)
+        self.assertIn('导入阶段不会启动脚本', catalog_view)
 
     def test_tvbox_aggregators_accept_redirects_maccms_basic_auth_and_larger_catalogs(self):
         store = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()

@@ -8,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) void (^onOpenImportedService)(NSDictionary *service);
 @property(nonatomic,copy) void (^onUseNativeSite)(NSDictionary *site);
 @property(nonatomic,copy) void (^onSubscribeLive)(NSDictionary *live);
+@property(nonatomic,copy) dispatch_block_t onImportCompatibleContents;
 @property(nonatomic,copy) dispatch_block_t onRemove;
 @end
 NS_ASSUME_NONNULL_END
