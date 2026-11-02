@@ -1,8 +1,7 @@
-"""Small pure-Python subset of PyCryptodome used by supplied TVBox spiders.
+"""Pure-Python PyCryptodome compatibility APIs for embedded media scripts.
 
-This is an API compatibility layer for AES ECB/CBC/CTR, PKCS#7 padding, and
-RSA public-key import plus PKCS#1 v1.5 encryption. It is not a replacement for
-the full PyCryptodome package.
+See the host documentation for the implemented module and algorithm coverage.
+This package does not include PyCryptodome's native extensions.
 """
 
-__version__ = "cctvhost-compat-1"
+__version__ = "cctvhost-compat-2"

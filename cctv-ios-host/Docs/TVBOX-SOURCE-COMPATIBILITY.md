@@ -28,10 +28,18 @@ including when a resource is updated.
 
 Python scripts use the conventional `Spider` methods supported by the embedded
 CPython host. The packaged runtime includes `requests`, BeautifulSoup, and a
-small pure-Python `Crypto` compatibility package. The latter implements the
-subset used by the supplied `1-橘汁视频.py`: AES ECB/CBC/CTR, PKCS#7 padding,
-RSA public-key import, and PKCS#1 v1.5 encryption. It does not install arbitrary
-provider wheels or expose the rest of PyCryptodome.
+pure-Python `Crypto`/`Cryptodome` compatibility package for common PyCryptodome imports:
+AES ECB/CBC/CFB/OFB/CTR/GCM/EAX; MD5, SHA-1/2/3 and SHAKE hashes; HMAC and AES-CMAC;
+PBKDF2, HKDF and scrypt; AES padding/counter/byte-XOR/number helpers; secure random
+bytes; and RSA public-key import with PKCS#1 v1.5 and OAEP encryption. Its AES and
+hash implementations use the bundled Python AES core and the interpreter's
+`hashlib`/OS random source, so source code can use these APIs without installing
+desktop wheels or native extensions.
+
+This is a documented compatibility set, not the complete PyCryptodome package:
+RSA private-key operations and signatures, ECC, DES/3DES, ChaCha20, CCM, and
+PyCryptodome-only native/internal modules are not implemented. Provider wheels
+and arbitrary C extensions are not installed or loaded by the iPhone runtime.
 
 The supplied `2-hgtv.py` now has offline regression coverage using a synthetic
 CENC MP4: the host verifies sample-table parsing, encrypted-sample AES-CTR
