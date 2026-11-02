@@ -88,6 +88,11 @@ static BOOL MediaTVBoxQueryNameLooksSigned(NSString *rawName) {
         if([compact containsString:marker])return YES;
     return [compact hasSuffix:@"key"]||[@[@"key",@"keyid",@"apikey",@"hash",@"st",@"e"] containsObject:compact];
 }
+static BOOL MediaTVBoxURLHasSignedQuery(NSString *value) {
+    NSURLComponents *parts=[NSURLComponents componentsWithString:value?:@""];
+    for(NSURLQueryItem *item in parts.queryItems?:@[])if(MediaTVBoxQueryNameLooksSigned(item.name))return YES;
+    return NO;
+}
 static BOOL MediaTVBoxURLLooksLikeWebPage(NSString *value) {
     NSURLComponents *parts=[NSURLComponents componentsWithString:value?:@""];NSString *extension=parts.path.pathExtension.lowercaseString?:@"";
     static NSSet<NSString *> *webExtensions,*directExtensions;static dispatch_once_t once;dispatch_once(&once,^{webExtensions=[NSSet setWithArray:@[@"html",@"htm",@"xhtml",@"php",@"asp",@"aspx",@"jsp",@"shtml"]];directExtensions=[NSSet setWithArray:@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"ts"]];});
@@ -204,7 +209,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
     if([operation isEqual:@"detail"])return MediaTVBoxDetail(root,arguments,source);
     if([operation isEqual:@"play"]){
         NSDictionary *headers=MediaTVBoxPlaybackHeaders(source,root);
-        if(macCMS){NSString *url=MediaTVBoxString(arguments[@"id"]);if(!url.length)return @{@"error":@"MacCMS 分集没有播放地址"};BOOL webPage=MediaTVBoxURLLooksLikeWebPage(url);NSMutableDictionary *result=[@{@"url":url,@"originalURL":url,@"parse":@(webPage),@"jx":@0,@"headers":headers} mutableCopy];for(NSString *key in @[@"format",@"contentType",@"mimeType",@"mediaType"])if([root[key] isKindOfClass:NSString.class])result[key]=root[key];BOOL native=!webPage&&MediaPlaybackResultSupportsAVPlayer(result);result[@"nativePlayable"]=@(native);result[@"directMedia"]=@(!webPage&&MediaPlaybackResultIsDirectMedia(result));result[@"requiresWebPlayback"]=@(webPage||!native);return result;}
+        if(macCMS){NSString *url=MediaTVBoxString(arguments[@"id"]);if(!url.length)return @{@"error":@"MacCMS 分集没有播放地址"};BOOL webPage=MediaTVBoxURLLooksLikeWebPage(url);NSMutableDictionary *result=[@{@"url":url,@"originalURL":url,@"parse":@(webPage),@"jx":@0,@"headers":headers} mutableCopy];for(NSString *key in @[@"format",@"contentType",@"mimeType",@"mediaType"])if([root[key] isKindOfClass:NSString.class])result[key]=root[key];BOOL native=!webPage&&(MediaPlaybackResultSupportsAVPlayer(result)||MediaTVBoxURLHasSignedQuery(url));result[@"nativePlayable"]=@(native);result[@"directMedia"]=@(!webPage&&MediaPlaybackResultIsDirectMedia(result));result[@"requiresWebPlayback"]=@(webPage||!native);return result;}
         if([source[@"tvboxType"] integerValue]==1){NSString *url=MediaTVBoxString(arguments[@"id"]);NSString *prefix=MediaTVBoxString(source[@"playUrl"]);if(!url.length)return @{@"error":@"TVBox type 1 没有返回分集地址"};NSMutableDictionary *result=[@{@"url":[prefix stringByAppendingString:url],@"parse":@(prefix.length>0),@"headers":headers} mutableCopy];BOOL native=MediaPlaybackResultSupportsAVPlayer(result);result[@"nativePlayable"]=@(native);result[@"directMedia"]=@(MediaPlaybackResultIsDirectMedia(result));result[@"requiresWebPlayback"]=@(prefix.length>0&&!native);return result;}
         id rawURL=root[@"url"];NSString *prefix=MediaTVBoxFirstString(root,@[@"playUrl"]);
         NSMutableArray<NSDictionary *> *alternates=[NSMutableArray array];NSString *url=@"";

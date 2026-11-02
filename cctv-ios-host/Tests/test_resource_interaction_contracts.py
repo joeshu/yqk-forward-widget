@@ -1189,7 +1189,8 @@ class ResourceInteractionContracts(unittest.TestCase):
 
     def test_explicit_maccms_web_pages_keep_the_web_playback_handoff(self):
         api = (ROOT / 'Sources/MediaAPIClient.m').read_text()
-        self.assertIn('BOOL native=!webPage&&MediaPlaybackResultSupportsAVPlayer(result)', api)
+        self.assertIn('BOOL native=!webPage&&(MediaPlaybackResultSupportsAVPlayer(result)||MediaTVBoxURLHasSignedQuery(url))', api)
+        self.assertIn('static BOOL MediaTVBoxURLHasSignedQuery(NSString *value)', api)
         self.assertIn('result[@"requiresWebPlayback"]=@(webPage||!native)', api)
 
 
