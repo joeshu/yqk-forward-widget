@@ -1,10 +1,13 @@
 import pathlib
+import hashlib
+import re
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import unittest
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -24,6 +27,30 @@ class NativeProfiles(unittest.TestCase):
                     body = b'{"name":"Easy TVBox","sites":[{"key":"mac","name":"MacCMS","api":"api.php/provide/vod/","type":0}]}'
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if self.path == "/site.py":
+                    body = b"print('resource package export fixture')\n"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if self.path == "/site.js.md5":
+                    body = hashlib.md5(b"export fixture javascript\n").hexdigest().encode() + b"  site.js\n"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if self.path == "/site.js":
+                    body = b"export fixture javascript\n"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/javascript")
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
@@ -48,12 +75,22 @@ class NativeProfiles(unittest.TestCase):
                 exe = str(pathlib.Path(tmp) / "native-profiles")
                 command = ["xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-lz", "-I", str(root / "Sources")]
                 command += [str(root / "Tests/native_profile_tests.m")]
-                command += [str(root / "Sources" / f) for f in ("M3UParser.m", "ProfileStore.m", "HostBackup.m", "XMLTVStore.m", "TVBoxCatalogStore.m", "TVBoxCatalogDownloader.m")]
+                command += [str(root / "Sources" / f) for f in ("M3UParser.m", "ProfileStore.m", "HostBackup.m", "XMLTVStore.m", "TVBoxCatalogStore.m", "TVBoxCatalogDownloader.m", "TVBoxCatalogPackageExporter.m")]
                 command += ["-o", exe]
                 result = subprocess.run(command, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                result = subprocess.run([exe, f"http://127.0.0.1:{server.server_port}/guide.xml", f"http://127.0.0.1:{server.server_port}/tvbox-start"], capture_output=True, text=True, timeout=20)
+                result = subprocess.run([exe, f"http://127.0.0.1:{server.server_port}/guide.xml", f"http://127.0.0.1:{server.server_port}/tvbox-start", f"http://127.0.0.1:{server.server_port}"], capture_output=True, text=True, timeout=25)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                match = re.search(r"TVBOX_EXPORTER_ZIP=(.+)", result.stderr)
+                self.assertIsNotNone(match, result.stdout + result.stderr)
+                with zipfile.ZipFile(match.group(1).strip()) as archive:
+                    self.assertIsNone(archive.testzip())
+                    self.assertIn("config.json", archive.namelist())
+                    self.assertIn("source-manifest.json", archive.namelist())
+                    script = next(name for name in archive.namelist() if name.startswith("scripts/") and name.endswith(".py"))
+                    self.assertIn(b"resource package export fixture", archive.read(script))
+                    javascript = next(name for name in archive.namelist() if name.startswith("scripts/") and name.endswith(".js"))
+                    self.assertEqual(archive.read(javascript), b"export fixture javascript\n")
                 self.assertEqual(requests.count("/guide.xml"), 1, "cache should prevent a second download")
         finally:
             server.shutdown()

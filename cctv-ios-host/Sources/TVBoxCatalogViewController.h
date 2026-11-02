@@ -9,6 +9,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) void (^onUseNativeSite)(NSDictionary *site);
 @property(nonatomic,copy) void (^onSubscribeLive)(NSDictionary *live);
 @property(nonatomic,copy) dispatch_block_t onImportCompatibleContents;
+@property(nonatomic,copy) void (^onExportCatalog)(NSString *format);
+@property(nonatomic,copy) void (^onExportSingleResource)(NSDictionary *resource,NSString *kind,NSUInteger index);
 @property(nonatomic,copy) dispatch_block_t onRemove;
 @end
 NS_ASSUME_NONNULL_END

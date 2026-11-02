@@ -38,6 +38,8 @@
             [alert addAction:[UIAlertAction actionWithTitle:@"仍然导入影视脚本" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){if(owner.onImportCompatibleContents)owner.onImportCompatibleContents();}]];
             [owner presentViewController:alert animated:YES completion:nil];
         }]},
+        @{@"icon":@"square.and.arrow.up",@"title":@"导出完整合集 JSON",@"action":[UIAction actionWithHandler:^(UIAction *a){if(weakSelf.onExportCatalog)weakSelf.onExportCatalog(@"json");}]},
+        @{@"icon":@"archivebox",@"title":@"导出完整资源 ZIP（含 PY / JS）",@"action":[UIAction actionWithHandler:^(UIAction *a){if(weakSelf.onExportCatalog)weakSelf.onExportCatalog(@"zip");}]},
         @{@"icon":@"trash",@"title":@"移除资源合集",@"action":[UIAction actionWithHandler:^(UIAction *a){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"移除资源合集？" message:@"仅移除这份集合索引；已导入的脚本和直播订阅会保留。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"移除合集" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){if(weakSelf.onRemove)weakSelf.onRemove();}]];[weakSelf presentViewController:alert animated:YES completion:nil];}]}
     ])];
 }
@@ -49,6 +51,13 @@
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"tvbox.catalog.row"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"tvbox.catalog.row"];cell.backgroundColor=HostCard();cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.textColor=UIColor.labelColor;cell.detailTextLabel.textColor=UIColor.secondaryLabelColor;
     NSDictionary *row=[self filteredRowsForSection:ip.section][ip.row];cell.textLabel.text=row[@"name"]?:@"未命名";
     BOOL supported=[row[@"supported"] boolValue];NSDictionary *service=ip.section==0&&self.serviceForSite?self.serviceForSite(row):nil;NSString *status=row[@"status"]?:@"";if(service)status=[service[@"enabled"] boolValue]?@"服务运行中 · 点按打开资源":@"服务已导入 · 点按启动并打开资源";cell.detailTextLabel.text=ip.section==0?[NSString stringWithFormat:@"%@\n%@",status,row[@"api"]?:@""]:[NSString stringWithFormat:@"%@\n%@",status,row[@"url"]?:@""];cell.accessoryType=supported?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;cell.selectionStyle=supported?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;cell.textLabel.textColor=supported?UIColor.labelColor:UIColor.tertiaryLabelColor;return cell;
+}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
+    NSDictionary *row=[self filteredRowsForSection:ip.section][ip.row];NSString *kind=ip.section==0?@"site":@"live";NSUInteger index=[row[@"sourceIndex"] respondsToSelector:@selector(unsignedIntegerValue)]?[row[@"sourceIndex"] unsignedIntegerValue]:(NSUInteger)ip.row;NSString *title=[row[@"name"] isKindOfClass:NSString.class]?row[@"name"]:@"资源";__weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:[NSString stringWithFormat:@"%@:%@:%lu",self.catalog[@"id"]?:@"",kind,(unsigned long)index] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
+        UIAction *export=[UIAction actionWithTitle:[NSString stringWithFormat:@"导出 %@ JSON",title] image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *action){if(weakSelf.onExportSingleResource)weakSelf.onExportSingleResource(row,kind,index);}];
+        return [UIMenu menuWithTitle:@"单项资源" children:@[export]];
+    }];
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [tableView deselectRowAtIndexPath:ip animated:YES];NSDictionary *row=[self filteredRowsForSection:ip.section][ip.row];

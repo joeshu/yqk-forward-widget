@@ -874,6 +874,30 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('setValue:nil forHTTPHeaderField:name', api_client)
         self.assertIn('_capture_plugin_loopback_servers()', (ROOT / 'Plugins/host_media_runtime.py').read_text())
 
+    def test_resource_exports_keep_complete_catalog_data_and_bundle_internal_scripts(self):
+        store = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
+        exporter = (ROOT / 'Sources/TVBoxCatalogPackageExporter.m').read_text()
+        catalog_view = (ROOT / 'Sources/TVBoxCatalogViewController.m').read_text()
+        resource_view = (ROOT / 'Sources/ConfigCenterViewController.m').read_text()
+        root = self.root
+        self.assertIn('_sourceConfigData', store)
+        self.assertIn('exportDataForCatalogID:', store)
+        self.assertIn('exportSingleResourceForCatalogID:', store)
+        self.assertIn('TVBoxZIPData', store)
+        self.assertIn('导出完整合集 JSON', catalog_view)
+        self.assertIn('导出完整资源 ZIP（含 PY / JS）', catalog_view)
+        self.assertIn('contextMenuConfigurationForRowAtIndexPath', catalog_view)
+        self.assertIn('导出单项资源文件', resource_view)
+        self.assertIn('catalog-json', resource_view)
+        self.assertIn('catalog-zip', resource_view)
+        self.assertIn('TVBoxCatalogPackageExporter', root)
+        self.assertIn('CCTVTVBoxStoredSubscriptionToken()', root)
+        self.assertIn('scripts/%03lu-', exporter)
+        self.assertIn('source-manifest.json', exporter)
+        self.assertIn('128*1024*1024', exporter)
+        native = (ROOT / 'Tests/native_profile_tests.m').read_text()
+        self.assertIn('complete collection JSON and single-site JSON preserve original provider fields', native)
+
     def test_media_home_reuses_existing_history_favorites_and_services(self):
         self.assertIn('MediaPlaybackStateStore.watchHistory', self.detail)
         self.assertIn('trailingSwipeActionsConfigurationForRowAtIndexPath', self.detail)

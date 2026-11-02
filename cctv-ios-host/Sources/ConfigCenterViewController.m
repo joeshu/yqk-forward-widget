@@ -414,8 +414,8 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
     if(indexPath.row<0||indexPath.row>=self.profiles.count)return 96;
-    NSDictionary *profile=self.profiles[indexPath.row];BOOL plugin=[profile[@"type"] isEqual:@"plugin"],tvbox=[profile[@"type"] isEqual:@"tvbox"];
-    CGFloat accessoryWidth=plugin?96:(tvbox?36:56),cardWidth=MAX(1,tableView.bounds.size.width-40);
+    NSDictionary *profile=self.profiles[indexPath.row];BOOL plugin=[profile[@"type"] isEqual:@"plugin"],tvbox=[profile[@"type"] isEqual:@"tvbox"],hasExportMenu=plugin||[profile[@"source"] length]||[profile[@"native"] boolValue];
+    CGFloat accessoryWidth=tvbox?36:(hasExportMenu?96:56),cardWidth=MAX(1,tableView.bounds.size.width-40);
     // The latency badge shares the title row, so match its reserved width in
     // the row-height measurement as well as the actual Auto Layout geometry.
     CGFloat textWidth=MAX(44,cardWidth-15-25-13-14-accessoryWidth-56);
@@ -472,14 +472,21 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
         if(!plugin&&!tvbox){
             UISwitch *s=[self compactSwitchForRow:ip.row enabled:[p[@"enabled"] boolValue] label:[NSString stringWithFormat:@"加入频道 %@",p[@"name"]?:@"订阅"]];c.accessoryView=[self switchAccessoryForSwitch:s width:56];
         }
-        if(plugin||tvbox){
+        if(plugin||tvbox||[p[@"source"] length]||[p[@"native"] boolValue]){
             __weak typeof(self) weakSelf=self;NSString *source=p[@"source"]?:@"";BOOL macCMS=[p[@"catalogKind"] isEqual:@"maccms"];
             UIAction *manage=[UIAction actionWithTitle:tvbox?(macCMS?@"打开影视接口":@"打开资源合集"): @"资源能力与设置" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(UIAction *a){if(tvbox){if(weakSelf.onOpenTVBoxCatalog)weakSelf.onOpenTVBoxCatalog([source substringFromIndex:6]);}else if(weakSelf.onOpenResource)weakSelf.onOpenResource(source);}];
-            NSMutableArray<UIAction *> *menuActions=[NSMutableArray arrayWithObject:manage];
+            NSMutableArray<UIAction *> *menuActions=[NSMutableArray array];
+            if(plugin||tvbox)[menuActions addObject:manage];
+            if(tvbox){
+                [menuActions addObject:[UIAction actionWithTitle:@"导出完整 JSON" image:[UIImage systemImageNamed:@"doc.text"] identifier:nil handler:^(UIAction *a){if(weakSelf.onExportResource)weakSelf.onExportResource(source,@"catalog-json");}]];
+                [menuActions addObject:[UIAction actionWithTitle:@"导出完整资源 ZIP（含 PY / JS）" image:[UIImage systemImageNamed:@"archivebox"] identifier:nil handler:^(UIAction *a){if(weakSelf.onExportResource)weakSelf.onExportResource(source,@"catalog-zip");}]];
+            }else{
+                [menuActions addObject:[UIAction actionWithTitle:@"导出单项资源文件" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *a){if(weakSelf.onExportResource)weakSelf.onExportResource(source,@"single");}]];
+            }
             if(plugin&&self.onUseResource){NSString *resourceKind=p[@"resourceKind"];if([resourceKind isEqual:@"live"]||[resourceKind isEqual:@"both"])[menuActions addObject:[UIAction actionWithTitle:@"添加直播频道" image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:nil handler:^(UIAction *a){if(weakSelf.onUseResource)weakSelf.onUseResource(source,@"live");}]];if([resourceKind isEqual:@"vod"]||[resourceKind isEqual:@"both"])[menuActions addObject:[UIAction actionWithTitle:@"进入影视" image:[UIImage systemImageNamed:@"film"] identifier:nil handler:^(UIAction *a){if(weakSelf.onUseResource)weakSelf.onUseResource(source,@"vod");}]];}
-            UIAction *remove=[UIAction actionWithTitle:tvbox?(macCMS?@"移除影视接口":@"移除资源合集"): @"移除资源" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[weakSelf confirmRemoveProfile:source];}];[menuActions addObject:remove];
+            if(plugin||tvbox){UIAction *remove=[UIAction actionWithTitle:tvbox?(macCMS?@"移除影视接口":@"移除资源合集"): @"移除资源" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[weakSelf confirmRemoveProfile:source];}];[menuActions addObject:remove];}
             UIButton *more=[UIButton buttonWithType:UIButtonTypeSystem];more.frame=CGRectMake(0,0,36,36);[more setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];more.menu=[UIMenu menuWithChildren:menuActions];more.showsMenuAsPrimaryAction=YES;more.accessibilityLabel=@"更多资源操作";more.accessibilityIdentifier=[NSString stringWithFormat:@"resource-more-%ld",(long)ip.row];more.tintColor=HostSecondaryText();more.backgroundColor=HostNeutralSurface();more.layer.cornerRadius=12;more.layer.cornerCurve=kCACornerCurveContinuous;more.layer.borderWidth=.6;HostSetLayerBorderColor(more,HostBorder());HostInstallPressFeedback(more);
-            if(plugin){BOOL runningState=[p[@"enabled"] boolValue];UISwitch *running=[self compactSwitchForRow:ip.row enabled:runningState label:[NSString stringWithFormat:@"%@服务，%@",p[@"name"]?:@"脚本",runningState?@"停止":@"启动"]];UIView *actions=[[UIView alloc] initWithFrame:CGRectMake(0,0,96,44)];actions.isAccessibilityElement=NO;running.frame=CGRectMake(0,6.5,51,31);running.transform=CGAffineTransformMakeScale(.88,.88);[actions addSubview:running];more.frame=CGRectMake(58,4,36,36);[actions addSubview:more];c.accessoryView=actions;}else c.accessoryView=more;
+            if(plugin||(!tvbox&&([p[@"source"] length]||[p[@"native"] boolValue]))){UIView *actions=[[UIView alloc] initWithFrame:CGRectMake(0,0,96,44)];actions.isAccessibilityElement=NO;if(plugin){BOOL runningState=[p[@"enabled"] boolValue];UISwitch *running=[self compactSwitchForRow:ip.row enabled:runningState label:[NSString stringWithFormat:@"%@服务，%@",p[@"name"]?:@"脚本",runningState?@"停止":@"启动"]];running.frame=CGRectMake(0,6.5,51,31);running.transform=CGAffineTransformMakeScale(.88,.88);[actions addSubview:running];}else if(!tvbox&&c.accessoryView){UISwitch *toggle=[c.accessoryView.subviews.firstObject isKindOfClass:UISwitch.class]?c.accessoryView.subviews.firstObject:nil;if(toggle){toggle.frame=CGRectMake(0,6.5,51,31);toggle.transform=CGAffineTransformMakeScale(.88,.88);[actions addSubview:toggle];}}more.frame=CGRectMake(58,4,36,36);[actions addSubview:more];c.accessoryView=actions;}else c.accessoryView=more;
         }
     }
     c.accessibilityValue=c.detailTextLabel.text;
@@ -532,10 +539,11 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     return [UISwipeActionsConfiguration configurationWithActions:@[refresh]];
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
-    if(![self.profiles[ip.row][@"source"] length]||[self.profiles[ip.row][@"type"] isEqual:@"tvbox"])return nil;
-    NSString *source=self.profiles[ip.row][@"source"];__weak typeof(self) w=self;
+    NSDictionary *profile=self.profiles[ip.row];NSString *source=[profile[@"source"] isKindOfClass:NSString.class]?profile[@"source"]:@"";if((!source.length&&![profile[@"native"] boolValue])||[profile[@"type"] isEqual:@"tvbox"])return nil;__weak typeof(self) w=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:source previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
-        NSMutableArray *actions=[NSMutableArray arrayWithObject:[UIAction actionWithTitle:[source hasPrefix:@"plugin:"]?@"编辑资源":@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
+        NSMutableArray *actions=[NSMutableArray array];if(source.length)[actions addObject:[UIAction actionWithTitle:[source hasPrefix:@"plugin:"]?@"编辑资源":@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
+        [actions addObject:[UIAction actionWithTitle:@"导出单项资源文件" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *a){if(w.onExportResource)w.onExportResource(source,@"single");}]];
+        if(!source.length)return [UIMenu menuWithTitle:@"资源操作" children:actions];
         if([source hasPrefix:@"plugin:"]){[actions addObject:[UIAction actionWithTitle:@"移除资源" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[w confirmRemoveProfile:source];}]];return [UIMenu menuWithTitle:@"资源操作" children:actions];}
         [actions addObject:[UIAction actionWithTitle:@"刷新此订阅" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){if(w.onRefreshProfile)w.onRefreshProfile(source);}]];
         for(NSNumber *offset in @[@(-1),@1]){[actions addObject:[UIAction actionWithTitle:offset.integerValue<0?@"上移":@"下移" image:[UIImage systemImageNamed:offset.integerValue<0?@"arrow.up":@"arrow.down"] identifier:nil handler:^(UIAction *a){NSArray *sources=[w.allProfiles valueForKey:@"source"];sources=[sources filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *s,NSDictionary *b){return s.length>0;}]];[ProfileStore move:source offset:offset.integerValue sources:sources];[w reloadProfiles];}]];}

@@ -1,4 +1,5 @@
 #import "TVBoxCatalogStore.h"
+#import <zlib.h>
 
 static NSError *TVBoxError(NSString *message) {
     return [NSError errorWithDomain:@"CCTVHostTVBox" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];
@@ -13,6 +14,53 @@ static NSString *TVBoxString(id value, NSUInteger limit) {
 static BOOL TVBoxWebURL(NSString *value) {
     NSURLComponents *parts=[NSURLComponents componentsWithString:value ?: @""];
     return parts&&[@[@"http",@"https"] containsObject:parts.scheme.lowercaseString] && parts.host.length && !parts.user.length && !parts.password.length && value.length<=8192;
+}
+
+static NSString *TVBoxCatalogStorageDirectory(void) {
+    NSString *applicationSupport=NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject;
+    NSString *directory=[applicationSupport stringByAppendingPathComponent:@"TVBoxCatalogs"];
+    [NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL];
+    return directory;
+}
+
+static BOOL TVBoxSafeCatalogID(NSString *identifier) {
+    if(![identifier isKindOfClass:NSString.class]||!identifier.length||identifier.length>128)return NO;
+    NSCharacterSet *allowed=[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"];
+    return [identifier rangeOfCharacterFromSet:allowed.invertedSet].location==NSNotFound;
+}
+
+static NSString *TVBoxExportFilename(NSString *name) {
+    NSString *base=[name isKindOfClass:NSString.class]?name:@"资源合集";
+    base=[base stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSCharacterSet *invalid=[NSCharacterSet characterSetWithCharactersInString:@"/\\:?%*|\"<>\n\r"];
+    NSMutableString *safe=[NSMutableString string];
+    [base enumerateSubstringsInRange:NSMakeRange(0,base.length) options:NSStringEnumerationByComposedCharacterSequences usingBlock:^(NSString *substring,NSRange substringRange,NSRange enclosingRange,BOOL *stop){
+        [safe appendString:([substring rangeOfCharacterFromSet:invalid].location==NSNotFound&&[substring rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound)?substring:@"_"];
+        if(safe.length>=64)*stop=YES;
+    }];
+    base=[safe stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(!base.length)base=@"资源合集";
+    return base;
+}
+
+static void TVBoxAppendLE16(NSMutableData *data,uint16_t value) {uint8_t bytes[2]={(uint8_t)value,(uint8_t)(value>>8)};[data appendBytes:bytes length:sizeof(bytes)];}
+static void TVBoxAppendLE32(NSMutableData *data,uint32_t value) {uint8_t bytes[4]={(uint8_t)value,(uint8_t)(value>>8),(uint8_t)(value>>16),(uint8_t)(value>>24)};[data appendBytes:bytes length:sizeof(bytes)];}
+
+static NSData *TVBoxZIPData(NSDictionary<NSString *,NSData *> *files,NSError **error) {
+    NSMutableData *archive=[NSMutableData data],*central=[NSMutableData data];NSUInteger entryCount=0;
+    NSArray<NSString *> *paths=[[files allKeys] sortedArrayUsingSelector:@selector(compare:)];
+    for(NSString *path in paths){
+        if(![path isKindOfClass:NSString.class]||!path.length||[path hasPrefix:@"/"]||[path containsString:@".."]||[path containsString:@"\\"]||[path rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){if(error)*error=TVBoxError(@"ZIP 文件路径无效");return nil;}
+        NSData *plain=files[path];NSData *name=[path dataUsingEncoding:NSUTF8StringEncoding];if(!plain||!name.length||name.length>UINT16_MAX||plain.length>UINT32_MAX){if(error)*error=TVBoxError(@"资源 ZIP 中有文件超过格式限制");return nil;}
+        z_stream stream={0};if(deflateInit2(&stream,Z_DEFAULT_COMPRESSION,Z_DEFLATED,-MAX_WBITS,8,Z_DEFAULT_STRATEGY)!=Z_OK){if(error)*error=TVBoxError(@"无法初始化 ZIP 压缩");return nil;}
+        NSMutableData *compressed=[NSMutableData dataWithLength:MAX(64,compressBound((uLong)plain.length))];stream.next_in=(Bytef *)plain.bytes;stream.avail_in=(uInt)plain.length;stream.next_out=compressed.mutableBytes;stream.avail_out=(uInt)compressed.length;int zresult=deflate(&stream,Z_FINISH);if(zresult!=Z_STREAM_END){deflateEnd(&stream);if(error)*error=TVBoxError(@"压缩资源 ZIP 失败");return nil;}compressed.length=stream.total_out;deflateEnd(&stream);
+        if(compressed.length>UINT32_MAX||archive.length>UINT32_MAX||central.length>UINT32_MAX){if(error)*error=TVBoxError(@"资源 ZIP 超过 4 GiB 格式限制");return nil;}
+        uint32_t crc=(uint32_t)crc32(0,plain.bytes,(uInt)plain.length),offset=(uint32_t)archive.length;
+        TVBoxAppendLE32(archive,0x04034b50);TVBoxAppendLE16(archive,20);TVBoxAppendLE16(archive,0x0800);TVBoxAppendLE16(archive,8);TVBoxAppendLE16(archive,0);TVBoxAppendLE16(archive,0x0021);TVBoxAppendLE32(archive,crc);TVBoxAppendLE32(archive,(uint32_t)compressed.length);TVBoxAppendLE32(archive,(uint32_t)plain.length);TVBoxAppendLE16(archive,(uint16_t)name.length);TVBoxAppendLE16(archive,0);[archive appendData:name];[archive appendData:compressed];
+        TVBoxAppendLE32(central,0x02014b50);TVBoxAppendLE16(central,20);TVBoxAppendLE16(central,20);TVBoxAppendLE16(central,0x0800);TVBoxAppendLE16(central,8);TVBoxAppendLE16(central,0);TVBoxAppendLE16(central,0x0021);TVBoxAppendLE32(central,crc);TVBoxAppendLE32(central,(uint32_t)compressed.length);TVBoxAppendLE32(central,(uint32_t)plain.length);TVBoxAppendLE16(central,(uint16_t)name.length);TVBoxAppendLE16(central,0);TVBoxAppendLE16(central,0);TVBoxAppendLE16(central,0);TVBoxAppendLE16(central,0);TVBoxAppendLE32(central,0);TVBoxAppendLE32(central,offset);[central appendData:name];entryCount++;
+    }
+    if(entryCount>UINT16_MAX||archive.length>UINT32_MAX||central.length>UINT32_MAX){if(error)*error=TVBoxError(@"资源 ZIP 超过经典 ZIP 格式限制");return nil;}
+    [archive appendData:central];TVBoxAppendLE32(archive,0x06054b50);TVBoxAppendLE16(archive,0);TVBoxAppendLE16(archive,0);TVBoxAppendLE16(archive,(uint16_t)entryCount);TVBoxAppendLE16(archive,(uint16_t)entryCount);TVBoxAppendLE32(archive,(uint32_t)central.length);TVBoxAppendLE32(archive,(uint32_t)(archive.length-central.length));TVBoxAppendLE16(archive,0);return archive;
 }
 
 static NSString *TVBoxBasicAuthorization(NSURLComponents *parts) {
@@ -74,7 +122,7 @@ static NSString *TVBoxBasicAuthorization(NSURLComponents *parts) {
         BOOL supported=direct||apiKindTVBox||apiKindMacCMS;
         NSString *reason=apiKindMacCMS?@"TVBox type 0 · MacCMS JSON/XML API · 选中后请求":(apiKindTVBox?[NSString stringWithFormat:@"TVBox type %@ JSON API · 选中后请求，尚未验证",siteType]:(direct?@"可导入 · 将由现有脚本适配器检查":([siteType isEqual:@"3"]?((jarFile||jarSpiderClass)?@"需要 Android/JAR 运行时；iOS 不支持":@"脚本地址无法识别；保留在合集中"):([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"]?@"此脚本类型需 Android/JAR 运行时；iOS 不支持":@"站点地址无效；保留在合集中"))));
         NSString *apiKind=apiKindMacCMS?@"maccms-api":(apiKindTVBox?@"tvbox-api":(direct?@"script":@"unsupported"));
-        NSMutableDictionary *site=[@{@"key":key,@"name":name,@"api":api?:@"",@"ext":ext?:@"",@"type":siteType,@"supported":@(supported),@"status":reason,@"apiKind":apiKind} mutableCopy];
+        NSMutableDictionary *site=[@{@"key":key,@"name":name,@"api":api?:@"",@"ext":ext?:@"",@"type":siteType,@"supported":@(supported),@"status":reason,@"apiKind":apiKind,@"sourceIndex":@(siteIndex-1)} mutableCopy];
         if(safeHeaders.count)site[@"header"]=safeHeaders;
         if([value[@"playUrl"] isKindOfClass:NSString.class]&&[value[@"playUrl"] length]<=4096)site[@"playUrl"]=value[@"playUrl"];
         [cleanSites addObject:site];
@@ -88,7 +136,7 @@ static NSString *TVBoxBasicAuthorization(NSURLComponents *parts) {
         if (!name.length) name=[NSString stringWithFormat:@"TVBox 直播源 %lu",(unsigned long)liveIndex];
         BOOL validURL=TVBoxWebURL(url);BOOL supported=validURL&&[type isEqual:@"0"];
         NSString *status=supported?@"可订阅 · M3U/TXT 清单（刷新时应用 UA）":([type isEqual:@"3"]?@"需要 Android/JAR 运行时；直播项保留但不能直接订阅":@"直播地址无效或类型暂不支持；已保留");
-        NSMutableDictionary *live=[@{@"name":name,@"url":url?:@"",@"type":type,@"supported":@(supported),@"status":status} mutableCopy];
+        NSMutableDictionary *live=[@{@"name":name,@"url":url?:@"",@"type":type,@"supported":@(supported),@"status":status,@"sourceIndex":@(liveIndex-1)} mutableCopy];
         if(userAgent.length&&[userAgent rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\r\n"]].location==NSNotFound)live[@"ua"]=userAgent;
         [cleanLives addObject:live];
     }
@@ -99,6 +147,9 @@ static NSString *TVBoxBasicAuthorization(NSURLComponents *parts) {
     if(tvboxConfig.count)catalog[@"tvboxConfig"]=tvboxConfig.copy;
     if(omittedConfigFields.count)catalog[@"tvboxConfigOmittedFields"]=omittedConfigFields.copy;
     if (TVBoxWebURL(sourceURL)) catalog[@"url"]=sourceURL;
+    // Keep the provider's original JSON as a sidecar when saved. Normalized
+    // records drive browsing; exports still preserve every provider field.
+    catalog[@"_sourceConfigData"]=data.copy;
     return catalog;
 }
 + (NSArray<NSDictionary *> *)catalogs {
@@ -152,11 +203,52 @@ static NSString *TVBoxBasicAuthorization(NSURLComponents *parts) {
     return result.copy;
 }
 + (void)saveCatalog:(NSDictionary *)catalog {
+    NSString *identifier=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"";
+    NSData *sourceData=[catalog[@"_sourceConfigData"] isKindOfClass:NSData.class]?catalog[@"_sourceConfigData"]:nil;
+    NSMutableDictionary *storedCatalog=[catalog mutableCopy];
+    if(sourceData.length){BOOL saved=NO;if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];saved=[sourceData writeToFile:path options:NSDataWritingAtomic error:NULL];}if(saved)[storedCatalog removeObjectForKey:@"_sourceConfigData"];else storedCatalog[@"_sourceConfigData"]=sourceData;}
+    else [storedCatalog removeObjectForKey:@"_sourceConfigData"];
     NSMutableArray *rows=[[self catalogs] mutableCopy];
-    for(NSUInteger i=0;i<rows.count;i++) if([rows[i][@"id"] isEqual:catalog[@"id"]]) { NSMutableDictionary *merged=[rows[i] mutableCopy]; [merged addEntriesFromDictionary:catalog]; rows[i]=merged; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"]; return; }
-    [rows addObject:catalog]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];
+    for(NSUInteger i=0;i<rows.count;i++) if([rows[i][@"id"] isEqual:identifier]) { NSMutableDictionary *merged=[rows[i] mutableCopy]; [merged addEntriesFromDictionary:storedCatalog]; rows[i]=merged; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"]; return; }
+    [rows addObject:storedCatalog]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];
 }
 + (NSDictionary *)catalogForID:(NSString *)identifier { for(NSDictionary *row in [self catalogs])if([row[@"id"] isEqual:identifier])return row; return nil; }
-+ (void)removeCatalog:(NSString *)identifier { NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"]; }
++ (void)removeCatalog:(NSString *)identifier { NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];} }
 + (NSArray<NSDictionary *> *)liveSourcesInCatalog:(NSDictionary *)catalog { return [catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[]; }
++ (NSDictionary *)reconstructedConfigForCatalog:(NSDictionary *)catalog {
+    NSMutableDictionary *config=[NSMutableDictionary dictionary];NSString *name=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"资源合集";config[@"name"]=name;
+    NSMutableArray *sites=[NSMutableArray array];for(NSDictionary *site in [catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[]){NSMutableDictionary *row=[NSMutableDictionary dictionary];for(NSString *key in @[@"key",@"name",@"api",@"type",@"header",@"playUrl"]){id value=site[key];if(value)row[key]=value;}NSString *ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"";if(ext.length){id value=[NSJSONSerialization JSONObjectWithData:[ext dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingFragmentsAllowed error:NULL];row[@"ext"]=value?:ext;}if(row.count)[sites addObject:row];}
+    NSMutableArray *lives=[NSMutableArray array];for(NSDictionary *live in [catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[]){NSMutableDictionary *row=[NSMutableDictionary dictionary];for(NSString *key in @[@"name",@"url",@"type",@"ua"]){id value=live[key];if(value)row[key]=value;}if(row.count)[lives addObject:row];}config[@"sites"]=sites;config[@"lives"]=lives;
+    NSDictionary *extras=[catalog[@"tvboxConfig"] isKindOfClass:NSDictionary.class]?catalog[@"tvboxConfig"]:@{};[config addEntriesFromDictionary:extras];return config;
+}
++ (nullable NSDictionary *)originalConfigForCatalogID:(NSString *)identifier catalog:(NSDictionary **)catalogOut error:(NSError **)error {
+    NSDictionary *catalog=[self catalogForID:identifier];if(!catalog){if(error)*error=TVBoxError(@"找不到此资源合集");return nil;}if(catalogOut)*catalogOut=catalog;
+    NSData *data=nil;if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];data=[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL];}
+    if(!data.length&&[catalog[@"_sourceConfigData"] isKindOfClass:NSData.class])data=catalog[@"_sourceConfigData"];
+    NSDictionary *config=nil;if(data.length){id value=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:NULL];if([value isKindOfClass:NSDictionary.class])config=value;}
+    return config?:[self reconstructedConfigForCatalog:catalog];
+}
++ (nullable NSData *)exportDataForCatalogID:(NSString *)identifier error:(NSError **)error {
+    NSDictionary *catalog=nil,*config=[self originalConfigForCatalogID:identifier catalog:&catalog error:error];if(!config)return nil;
+    NSData *preserved=nil;if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];preserved=[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL];}if(!preserved.length&&[catalog[@"_sourceConfigData"] isKindOfClass:NSData.class])preserved=catalog[@"_sourceConfigData"];if(preserved.length){id original=[NSJSONSerialization JSONObjectWithData:preserved options:NSJSONReadingFragmentsAllowed error:NULL];if([original isKindOfClass:NSDictionary.class])return preserved;}
+    NSData *result=[NSJSONSerialization dataWithJSONObject:config options:NSJSONWritingPrettyPrinted|NSJSONWritingSortedKeys error:error];if(!result&&error&&!*error)*error=TVBoxError(@"无法生成资源合集 JSON");return result;
+}
++ (nullable NSData *)exportSingleResourceForCatalogID:(NSString *)identifier kind:(NSString *)kind index:(NSUInteger)index error:(NSError **)error {
+    NSDictionary *catalog=nil,*original=[self originalConfigForCatalogID:identifier catalog:&catalog error:error];if(!original||!catalog)return nil;
+    BOOL isLive=[kind isEqual:@"live"];if(!isLive&&![kind isEqual:@"site"]){if(error)*error=TVBoxError(@"未知的资源类型");return nil;}
+    NSArray *rows=[catalog[isLive?@"lives":@"sites"] isKindOfClass:NSArray.class]?catalog[isLive?@"lives":@"sites"]:@[];if(index>=rows.count){if(error)*error=TVBoxError(@"找不到要导出的资源");return nil;}NSDictionary *selected=rows[index];
+    NSString *sourceKey=isLive?@"lives":@"sites";NSArray *originalRows=[original[sourceKey] isKindOfClass:NSArray.class]?original[sourceKey]:@[];NSUInteger sourceIndex=[selected[@"sourceIndex"] respondsToSelector:@selector(unsignedIntegerValue)]?[selected[@"sourceIndex"] unsignedIntegerValue]:index;
+    id raw=sourceIndex<originalRows.count?originalRows[sourceIndex]:nil;
+    if(!raw){NSMutableDictionary *fallback=[NSMutableDictionary dictionary];for(NSString *key in (isLive?@[@"name",@"url",@"type",@"ua"]:@[@"key",@"name",@"api",@"ext",@"type",@"header",@"playUrl"]))if(selected[key])fallback[key]=selected[key];raw=fallback;}
+    if(isLive&&[raw isKindOfClass:NSString.class])raw=selected[@"url"]?:raw;
+    else if([raw isKindOfClass:NSDictionary.class]){NSMutableDictionary *resolved=[raw mutableCopy];NSString *urlKey=isLive?@"url":@"api";if([selected[urlKey] isKindOfClass:NSString.class]&&[selected[urlKey] length])resolved[urlKey]=selected[urlKey];raw=resolved;}
+    NSMutableDictionary *single=[original mutableCopy];single[@"sites"]=isLive?@[]:@[raw];single[@"lives"]=isLive?@[raw]:@[];
+    NSData *data=[NSJSONSerialization dataWithJSONObject:single options:NSJSONWritingPrettyPrinted|NSJSONWritingSortedKeys error:error];if(!data&&error&&!*error)*error=TVBoxError(@"无法生成单资源 JSON");return data;
+}
++ (nullable NSURL *)writeZIPArchiveForCatalogID:(NSString *)identifier files:(NSDictionary<NSString *,NSData *> *)files error:(NSError **)error {
+    if(![self catalogForID:identifier]){if(error)*error=TVBoxError(@"找不到此资源合集");return nil;}NSMutableDictionary *contents=[files mutableCopy]?:[NSMutableDictionary dictionary];if(!contents[@"config.json"]){NSData *json=[self exportDataForCatalogID:identifier error:error];if(!json)return nil;contents[@"config.json"]=json;}
+    NSDictionary *catalog=[self catalogForID:identifier];NSString *name=TVBoxExportFilename(catalog[@"name"]);if(!contents[@"README.txt"]){NSString *readme=[NSString stringWithFormat:@"%@\n\n本 ZIP 包含完整 TVBox JSON 配置，以及可下载的内部 PY/JS 文件。source-manifest.json 记录文件与站点的对应关系和未能获取的项目。\n",name];contents[@"README.txt"]=[readme dataUsingEncoding:NSUTF8StringEncoding];}NSData *archive=TVBoxZIPData(contents,error);if(!archive)return nil;
+    NSString *filename=[NSString stringWithFormat:@"%@-%@.zip",name,NSUUID.UUID.UUIDString.lowercaseString];NSURL *url=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:filename]];if(![archive writeToURL:url options:NSDataWritingAtomic error:error])return nil;return url;
+}
++ (nullable NSURL *)writeZIPArchiveForCatalogID:(NSString *)identifier error:(NSError **)error {return [self writeZIPArchiveForCatalogID:identifier files:nil error:error];}
 @end
