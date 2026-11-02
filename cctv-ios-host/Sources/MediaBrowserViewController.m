@@ -496,8 +496,8 @@
 }
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
     if(scrollView!=self.scrollView||!self.inlinePlaybackController)return;
-    UIView *playerView=self.inlinePlaybackController.view;playerView.transform=CGAffineTransformIdentity;CGRect playerContentFrame=[playerView convertRect:playerView.bounds toView:self.contentStack];
-    CGFloat pinOffset=MAX(0,scrollView.contentOffset.y-playerContentFrame.origin.y);playerView.transform=CGAffineTransformMakeTranslation(0,pinOffset);playerView.layer.zPosition=pinOffset>0?10:0;
+    UIView *playerView=self.inlinePlaybackController.view;playerView.transform=CGAffineTransformIdentity;CGRect playerViewportFrame=[playerView convertRect:playerView.bounds toView:scrollView];
+    CGFloat pinOffset=MAX(0,-CGRectGetMinY(playerViewportFrame));playerView.transform=CGAffineTransformMakeTranslation(0,pinOffset);playerView.layer.zPosition=pinOffset>0?10:0;
 }
 @end
 @interface MediaFavoritesViewController : UITableViewController
