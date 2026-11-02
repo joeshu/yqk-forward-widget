@@ -153,7 +153,7 @@
 @end
 
 
-@interface MediaDetailViewController : UIViewController
+@interface MediaDetailViewController : UIViewController <UIScrollViewDelegate>
 @property(nonatomic,copy) NSDictionary *item;
 @property(nonatomic,copy) NSDictionary *source;
 @property(nonatomic,copy) NSString *provider;
@@ -233,7 +233,7 @@
     [button.heightAnchor constraintGreaterThanOrEqualToConstant:40].active=YES;[button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];return button;
 }
 - (void)buildDetailLayout {
-    self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.accessibilityIdentifier=@"media-detail-scroll";[self.view addSubview:self.scrollView];
+    self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.accessibilityIdentifier=@"media-detail-scroll";self.scrollView.delegate=self;[self.view addSubview:self.scrollView];
     self.contentStack=[UIStackView new];self.contentStack.translatesAutoresizingMaskIntoConstraints=NO;self.contentStack.axis=UILayoutConstraintAxisVertical;self.contentStack.spacing=9;
     self.contentStack.layoutMargins=UIEdgeInsetsMake(4,14,20,14);self.contentStack.layoutMarginsRelativeArrangement=YES;[self.scrollView addSubview:self.contentStack];
     [NSLayoutConstraint activateConstraints:@[[self.scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
@@ -996,7 +996,12 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {if(scrollView==self.homeScroll)[self saveHomeScrollOffset];}
 - (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {if(scrollView==self.homeScroll&&!decelerate)[self saveHomeScrollOffset];}
-- (void)scrollViewDidScroll:(UIScrollView *)scrollView {if(scrollView==self.homeScroll)[self updateVisibleHomePosters];}
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    if(scrollView==self.homeScroll){[self updateVisibleHomePosters];return;}
+    if(scrollView!=self.scrollView||!self.inlinePlaybackController)return;
+    UIView *playerView=self.inlinePlaybackController.view;playerView.transform=CGAffineTransformIdentity;CGRect playerContentFrame=[playerView convertRect:playerView.bounds toView:self.contentStack];
+    CGFloat pinOffset=MAX(0,scrollView.contentOffset.y-playerContentFrame.origin.y);playerView.transform=CGAffineTransformMakeTranslation(0,pinOffset);playerView.layer.zPosition=pinOffset>0?10:0;
+}
 - (NSDictionary *)cachedHomeResultForSelectedProvider:(NSString **)providerOut {
     if(!self.source)return nil;
     NSString *provider=self.provider.length?self.provider:[NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"mediaProvider.%@",self.source[@"id"]?:@""]];

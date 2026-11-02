@@ -1059,9 +1059,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         columnsButton.accessibilityLabel=[NSString stringWithFormat:@"每行%ld个，切换为%ld列",(long)self.gridColumns,(long)nextColumns];
         HostInstallPressFeedback(columnsButton);
         [columnsButton addAction:[UIAction actionWithHandler:^(UIAction *a){[w toggleCatalogColumns];}] forControlEvents:UIControlEventTouchUpInside];
+        AVRoutePickerView *catalogAirPlayPicker=[AVRoutePickerView new];catalogAirPlayPicker.tintColor=HostText();catalogAirPlayPicker.activeTintColor=HostAccent();catalogAirPlayPicker.prioritizesVideoDevices=YES;catalogAirPlayPicker.accessibilityIdentifier=@"channel.catalog.airplay";
         self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
             @{@"icon":self.gridMode?@"list.bullet":@"square.grid.2x2",@"title":self.gridMode?@"切换列表布局":@"切换网格布局",@"action":[UIAction actionWithHandler:^(UIAction *a){[w toggleCatalogLayout];}]},
             @{@"customView":columnsButton,@"title":columnsButton.accessibilityLabel,@"identifier":@"channel.grid.columns.toggle"},
+            @{@"customView":catalogAirPlayPicker,@"title":@"投屏到 AirPlay 设备",@"identifier":@"playback.airplay"},
             @{@"icon":@"ellipsis",@"title":@"更多",@"menu":[self catalogMenu]}
         ])];
     }
