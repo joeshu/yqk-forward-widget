@@ -1035,6 +1035,69 @@ class Spider:
             server.server_close()
             thread.join(2)
 
+    def test_python_spider_receives_its_writable_resource_data_directory(self):
+        data_dir = Path(self.tmp.name, 'plugin-data')
+        data_dir.mkdir()
+        engine = media.PythonSpider(self.tmp.name, '影视.py', data_dir=str(data_dir))
+        try:
+            self.assertEqual(engine.spider._cctvhost_data_dir, os.path.realpath(data_dir))
+        finally:
+            engine.close()
+
+    def test_node_proxy_file_response_reads_only_bounded_range_from_source_data_dir(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory, 'data')
+            data_dir.mkdir()
+            media_path = data_dir / 'video.mp4'
+            media_path.write_bytes(b'0123456789')
+            outside_path = Path(directory, 'outside.mp4')
+            outside_path.write_bytes(b'not-in-source-data')
+
+            class NodeFileEngine:
+                def __init__(self): self.path = str(media_path)
+                def capabilities(self): return {'capabilities': ['proxy']}
+                def call(self, operation, args):
+                    if operation != 'proxy': return {}
+                    if args['method'] == 'HEAD':
+                        offset, length = 2, 4
+                    else:
+                        offset, length = 2, 4
+                    return [206, {'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes',
+                                  'Content-Range': 'bytes 2-5/10', 'Content-Length': '4'},
+                            {'__cctvhostFileResponse': True, 'path': self.path,
+                             'offset': offset, 'length': length}]
+                def close(self): pass
+
+            runtime = media.MediaRuntime(NodeFileEngine())
+            server = transport.Server(('127.0.0.1', 0), runtime)
+            server.node_proxy_file_root = str(data_dir)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+
+            def request(method):
+                client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                try:
+                    client.request(method, '/proxy?url=cenc%3A%2F%2F123', headers={'Range': 'bytes=2-5'})
+                    response = client.getresponse()
+                    return response.status, {key.lower(): value for key, value in response.getheaders()}, response.read()
+                finally:
+                    client.close()
+
+            try:
+                status, headers, body = request('GET')
+                self.assertEqual((status, body), (206, b'2345'))
+                self.assertEqual(headers['content-range'], 'bytes 2-5/10')
+                self.assertEqual(headers['content-length'], '4')
+                status, headers, body = request('HEAD')
+                self.assertEqual((status, body), (206, b''))
+                self.assertEqual(headers['content-length'], '4')
+                runtime.engine.path = str(outside_path)
+                status, _, body = request('GET')
+                self.assertEqual(status, 502)
+                self.assertNotIn(b'not-in-source-data', body)
+            finally:
+                server.shutdown(); server.server_close(); runtime.close(); thread.join(2)
+
     def test_player_content_proxy_uses_host_url_and_forwards_range_to_local_proxy(self):
         calls = []
         self.engine.spider.playerContent = lambda *_: {

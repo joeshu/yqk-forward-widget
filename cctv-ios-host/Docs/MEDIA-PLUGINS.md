@@ -92,8 +92,8 @@ Node.js Mobile 18.20.4。`node:crypto`、`node:http`、`node:https` 和 `node:fs
 Node 插件可以用 `server.listen(0, "127.0.0.1")` 获取系统分配的端口，并在监听回调后通过
 `server.address().port` 读取它；但普通插件的这个地址不会自动注册到宿主媒体代理，也不会被改写成 AVPlayer 可用的媒体 URL。
 CatPawOpen 是专用例外：宿主只把它声明的 `/spider/...` 服务路由转接到已发现的服务地址。宿主为每个 Node 插件跟踪最多
-4 个 loopback Server 和关联连接，并在 `stop`/`close` 或资源停止时关闭。解密媒体应由插件返回字节并走 Python Spider
-`localProxy()` 协议，不能把媒体交付依赖于插件另起 HTTP 监听。iOS 后台运行受系统生命周期限制；停止资源时宿主会清理
+4 个 loopback Server 和关联连接，并在 `stop`/`close` 或资源停止时关闭。解密媒体应走宿主 `localProxy()` 协议，不能把媒体交付依赖于插件另起 HTTP 监听。Python Spider 可直接返回
+`[status, headers, bytes]`；Node.js Mobile 的 `localProxy()` 可返回同样结构，或返回宿主管理的数据目录中的受限文件引用。iOS 后台运行受系统生命周期限制；停止资源时宿主会清理
 注册的计时器、连接和监听。
 
 Node `https.request/get` 先尝试 Node 原生 TLS。默认 TLS 配置下，若在收到响应前发生连接或 TLS 握手错误，宿主会通过
@@ -120,6 +120,9 @@ def localProxy(self, params):
 回调返回 `[status, headers, body]`，其中 body 为 bytes；宿主管理端口和 HTTP 响应，不把源站 Cookie 交给播放器。
 单次响应上限 16 MiB，较大媒体应返回 Range 分片。原有 `/proxy?url=...` 调用形式继续兼容。
 Python Spider 为兼容非线程安全脚本仍串行执行；代理调用等待前一个回调的排队上限为 120 秒，以容纳首轮下载/解密期间播放器并发的 Range 或 HEAD 请求。普通影视接口仍使用原 12 秒默认排队上限。
+
+Node.js Mobile 资源也可导出 `localProxy(params)`。Node 回调如果需要传输大文件，可把完成的媒体放在该资源的数据目录内，并将第三项设为
+`{__cctvhostFileResponse: true, path, offset, length}`。宿主会校验真实路径仍位于该资源数据目录、文件范围有效且单次响应不超过 16 MiB，随后从文件读取 Range 分片；视频内容不经过 2 MiB 的 Node JSON 控制桥。HEAD 保留声明的 `Content-Length`，但不读取文件内容。文件引用只供 Node 宿主内部使用，Python Spider 应继续直接返回 bytes。
 
 示例 `Plugins/example-encrypted-media.py` 使用标准库解析 MP4、按样本解密并支持 Range；资源的「插件选项」JSON
 可通过 `items` 配置分集 URL、32 位十六进制 AES-128 密钥和请求头。模板支持未分片 MP4、`stsz/stsc/stco`

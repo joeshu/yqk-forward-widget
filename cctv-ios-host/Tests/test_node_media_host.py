@@ -64,6 +64,25 @@ class NodeMediaHostTests(unittest.TestCase):
         return self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.cjs',
                          protocol='catvod-js', moduleType='commonjs', **extra)
 
+    def test_local_proxy_is_exposed_and_returns_small_file_reference_metadata(self):
+        payload_path = self.data / 'video.mp4'
+        payload_path.write_bytes(b'0123456789')
+        (self.package/'index.cjs').write_text('''const path=require('node:path');
+          module.exports={localProxy(params){return [206,
+            {'Content-Type':'video/mp4','Accept-Ranges':'bytes','Content-Range':'bytes 2-5/10','Content-Length':'4'},
+            {__cctvhostFileResponse:true,path:path.join(process.cwd(),'video.mp4'),offset:2,length:4}]}}''')
+        started = self.start()
+        self.assertTrue(started['ok'], started)
+        self.assertIn('proxy', started['result']['capabilities'])
+        result = self.call('proxy', url='cenc://fixture-episode', method='GET', range='bytes=2-5')
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['result'][0], 206)
+        self.assertEqual(result['result'][2]['__cctvhostFileResponse'], True)
+        self.assertEqual(result['result'][2]['offset'], 2)
+        self.assertEqual(result['result'][2]['length'], 4)
+        self.assertEqual(Path(result['result'][2]['path']), payload_path)
+        self.assertTrue(self.call('stop')['ok'])
+
     def test_https_get_falls_back_through_authenticated_host_and_preserves_response(self):
         observed = []
 
@@ -113,6 +132,55 @@ class NodeMediaHostTests(unittest.TestCase):
             self.assertEqual(request['headers']['x-fixture'], 'request-header')
             self.assertEqual(request['headers']['range'], 'bytes=0-18')
             self.assertEqual(request['method'], 'GET')
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            bridge.shutdown(); bridge.server_close(); bridge_thread.join(2)
+
+    def test_https_post_fallback_replays_bounded_signing_body_and_headers(self):
+        observed = []
+
+        class HostFetch(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length', '0'))
+                observed.append((self.path, self.headers.get('X-CCTVHost-Host-Fetch'),
+                                 json.loads(self.rfile.read(length))))
+                body = b'signed-api-ok'
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                self.wfile.write(body)
+
+        bridge = http.server.ThreadingHTTPServer(('127.0.0.1', 0), HostFetch)
+        bridge_thread = threading.Thread(target=bridge.serve_forever, daemon=True)
+        bridge_thread.start()
+        (self.package/'index.cjs').write_text('''const https=require('node:https');
+          module.exports={search(){return new Promise(resolve=>{
+            const request=https.request('https://127.0.0.1:1/signed-model',
+              {method:'POST',headers:{'Content-Type':'application/json','X-Signing-Fixture':'preserved'}},response=>{
+                let body='';response.setEncoding('utf8');response.on('data',chunk=>body+=chunk);
+                response.on('end',()=>resolve({list:[{vod_id:String(response.statusCode),vod_name:body}]}));
+              });request.on('error',error=>resolve({list:[{vod_id:error.code||'error'}]}));request.end('{"model":"fixture"}');
+          })}}''')
+        token = 'host-fetch-post-test-' + os.urandom(8).hex()
+        try:
+            started = self.start(hostFetchURL=f'http://127.0.0.1:{bridge.server_port}/_cctvhost/host-fetch',
+                                 hostFetchToken=token)
+            self.assertTrue(started['ok'], started)
+            result = self.call('search')
+            self.assertTrue(result['ok'], result)
+            self.assertEqual(result['result']['list'][0], {'vod_id': '200', 'vod_name': 'signed-api-ok'})
+            self.assertEqual(len(observed), 1)
+            path, supplied, request = observed[0]
+            self.assertEqual(path, '/_cctvhost/host-fetch')
+            self.assertEqual(supplied, token)
+            self.assertEqual(request['url'], 'https://127.0.0.1:1/signed-model')
+            self.assertEqual(request['method'], 'POST')
+            self.assertEqual({key.lower(): value for key, value in request['headers'].items()}['x-signing-fixture'], 'preserved')
+            import base64
+            self.assertEqual(base64.b64decode(request['bodyBase64']), b'{"model":"fixture"}')
             self.assertTrue(self.call('stop')['ok'])
         finally:
             bridge.shutdown(); bridge.server_close(); bridge_thread.join(2)

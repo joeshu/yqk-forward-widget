@@ -653,7 +653,7 @@ def _repair_mp4_stsd_walker(module):
 
 
 class PythonSpider:
-    def __init__(self, root, entry, options=None, proxy_url=''):
+    def __init__(self, root, entry, options=None, proxy_url='', data_dir=''):
         prepare_started_at = time.perf_counter()
         prepare_stage = 'module_import'
         owner = getattr(threading.current_thread(), '_host_session', None)
@@ -729,6 +729,7 @@ class PythonSpider:
             _python_spider_log_stage('python_spider_constructor_started', entry, prepare_started_at)
             self.spider = cls()
             self.spider._cctvhost_proxy_url = proxy_url
+            self.spider._cctvhost_data_dir = os.path.realpath(data_dir) if data_dir else ''
             self.lock = threading.Lock()
             self.proxy_lock_timeout = 120.0
             # Python Spider implementations are not generally thread-safe, so

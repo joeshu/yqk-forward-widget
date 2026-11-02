@@ -67,7 +67,7 @@ function nodeHTTPSRequestDetails(args,request){
   if(typeof requestPath!=='string'||requestPath.length>8192||/^https?:\/\//i.test(requestPath))return null
   try{target=new URL(requestPath||'/',target);if(target.protocol!=='https:'||target.username||target.password)return null;target.hash=''}catch{return null}
   const method=String(options.method||'GET').toUpperCase()
-  if(!['GET','HEAD'].includes(method))return null
+  if(!['GET','HEAD','POST'].includes(method))return null
   return {target,method,timeoutMs:Number(options.timeout)||15000}
 }
 function hostFetchEndpoint(owner){
@@ -87,10 +87,10 @@ function hostFetchResponse(request,incoming,target){
   response.trailers={};response.rawTrailers=[];response.req=request;response.socket=request.socket;response.connection=request.socket;response.url=target.pathname+target.search
   return response
 }
-function fetchHTTPSWithHost(owner,request,details){
+function fetchHTTPSWithHost(owner,request,details,body=Buffer.alloc(0)){
   return new Promise((resolve,reject)=>{
     const endpoint=hostFetchEndpoint(owner);if(!endpoint)return reject(Error('本机 HTTPS 回退服务不可用'))
-    const payload=Buffer.from(JSON.stringify({url:details.target.href,method:details.method,headers:requestHeadersForHost(request),timeoutMs:Math.max(1000,Math.min(details.timeoutMs,30000))}))
+    const payload=Buffer.from(JSON.stringify({url:details.target.href,method:details.method,headers:requestHeadersForHost(request),timeoutMs:Math.max(1000,Math.min(details.timeoutMs,30000)),...(body.length?{bodyBase64:body.toString('base64')}:{})}))
     if(payload.length>2*1024*1024)return reject(Error('本机 HTTPS 回退请求超过限制'))
     let settled=false,length=0;const chunks=[];let bridge
     const finish=(error,value)=>{if(settled)return;settled=true;original.clearTimeout(timer);if(error)reject(error);else resolve(value)}
@@ -107,18 +107,27 @@ https.request=function(...args){
   const owner=scope.getStore(),details=nodeHTTPSRequestDetails(args)
   if(!owner||!details||!hostFetchEndpoint(owner))return nativeHTTPSRequest.apply(this,args)
   const request=nativeHTTPSRequest.apply(this,args),nativeEmit=request.emit
-  let wroteBody=false,fallbackStarted=false,fallbackClosed=false,pendingClose=false,responseSeen=false
+  let wroteBody=false,bodyReplayable=true,bodySize=0,bodyChunks=[],fallbackStarted=false,fallbackClosed=false,pendingClose=false,responseSeen=false
   const originalWrite=request.write,originalEnd=request.end
   const hasData=chunk=>chunk!=null&&typeof chunk!=='function'&&(Buffer.isBuffer(chunk)?chunk.length:typeof chunk==='string'?Buffer.byteLength(chunk):ArrayBuffer.isView(chunk)?chunk.byteLength:1)>0
-  request.write=function(chunk,...rest){if(hasData(chunk))wroteBody=true;return originalWrite.call(this,chunk,...rest)}
-  request.end=function(chunk,...rest){if(hasData(chunk))wroteBody=true;return originalEnd.call(this,chunk,...rest)}
+  const captureBody=(chunk,encoding)=>{
+    if(!hasData(chunk))return
+    wroteBody=true
+    if(details.method!=='POST'||!bodyReplayable){bodyReplayable=false;return}
+    let value
+    try{value=Buffer.isBuffer(chunk)?Buffer.from(chunk):typeof chunk==='string'?Buffer.from(chunk,typeof encoding==='string'?encoding:'utf8'):ArrayBuffer.isView(chunk)?Buffer.from(chunk.buffer,chunk.byteOffset,chunk.byteLength):null}catch{}
+    if(!value||bodySize+value.length>1024*1024){bodyReplayable=false;bodyChunks.length=0;return}
+    bodySize+=value.length;bodyChunks.push(value)
+  }
+  request.write=function(chunk,...rest){captureBody(chunk,rest[0]);return originalWrite.call(this,chunk,...rest)}
+  request.end=function(chunk,...rest){captureBody(chunk,rest[0]);return originalEnd.call(this,chunk,...rest)}
   request.emit=function(event,...values){
     if(event==='response')responseSeen=true
     if(event==='close'&&fallbackStarted&&!fallbackClosed){pendingClose=true;return true}
-    if(event==='error'&&!responseSeen&&!fallbackStarted&&!wroteBody&&recoverableHTTPSError(values[0])){
+    if(event==='error'&&!responseSeen&&!fallbackStarted&&(!wroteBody||(details.method==='POST'&&bodyReplayable))&&recoverableHTTPSError(values[0])){
       fallbackStarted=true
       const fallbackDetails={...details,timeoutMs:Number(request.timeout)||details.timeoutMs}
-      fetchHTTPSWithHost(owner,request,fallbackDetails).then(({incoming,body})=>{
+      fetchHTTPSWithHost(owner,request,fallbackDetails,bodySize?Buffer.concat(bodyChunks,bodySize):Buffer.alloc(0)).then(({incoming,body})=>{
         const response=hostFetchResponse(request,incoming,details.target)
         response.once('close',()=>{fallbackClosed=true;if(pendingClose)nativeEmit.call(request,'close')})
         request.res=response
@@ -572,7 +581,7 @@ async function start(payload){
       owner.modernCatVod=isCatVodProtocol(owner.protocol)&&typeof owner.module.home==='function'&&!owner.module.homeContent&&typeof owner.module.category==='function'&&typeof owner.module.detail==='function'&&typeof owner.module.play==='function'
       if(isCatVodProtocol(owner.protocol)){if(!owner.modernCatVod)for(const [key,alias] of Object.entries({home:'homeContent',homeVod:'homeVideoContent',category:'categoryContent',search:'searchContent',detail:'detailContent',play:'playerContent'}))if(!owner.module[key]&&typeof owner.module[alias]==='function')owner.module[key]=owner.module[alias];if(!owner.module.homeVod&&owner.module.homeVideoContent)owner.module.homeVod=owner.module.homeVideoContent}
       if(typeof owner.module.init==='function')await owner.module.init(isCatVodProtocol(owner.protocol)?catVodExt(payload,catVodSite(payload)):(payload.options||{}))
-      owner.metadata={engine:'Node.js Mobile',version:process.versions.node,protocol:owner.protocol,capabilities:['home','category','search','detail','play','providers','proxy'].filter(key=>typeof owner.module[key]==='function').concat((owner.module.channels||owner.module.catalog||(owner.protocol==='iptv-extractor'&&owner.module.fetch))&&owner.module.resolve?['live']:[])}
+      owner.metadata={engine:'Node.js Mobile',version:process.versions.node,protocol:owner.protocol,capabilities:['home','category','search','detail','play','providers','proxy'].filter(key=>key==='proxy'?(typeof owner.module.localProxy==='function'||typeof owner.module.proxy==='function'):typeof owner.module[key]==='function').concat((owner.module.channels||owner.module.catalog||(owner.protocol==='iptv-extractor'&&owner.module.fetch))&&owner.module.resolve?['live']:[])}
     }
     return owner.metadata
   });owner.metadata=metadata;owner.resolveReady(metadata);return metadata}catch(error){cancelHandles(owner);owner.closed=true;owners.delete(owner.session);closedLogs.set(owner.session,owner.logs.slice(-20));owner.rejectReady(error);throw error}
@@ -586,6 +595,11 @@ async function invoke(operation,payload){
   return scope.run(owner,async()=>{
     let value
     if(operation==='capabilities')value=owner.metadata
+    else if(operation==='proxy'){
+      const proxy=typeof owner.module?.localProxy==='function'?owner.module.localProxy:owner.module?.proxy
+      if(typeof proxy!=='function')throw Error('Node 模块未提供 localProxy(params)')
+      value=await proxy.call(owner.module,payload)
+    }
     else if(owner.protocol==='catpaw-http'){
       if(operation==='configuration'){if(!owner.configurationURL)throw Error('此猫源未提供可用的本机配置页面');return {url:owner.configurationURL,headers:owner.authHeaders||{},configurationPage:true}}
       if(operation==='providers'){owner.providers=catpawProviders(await sourceJSON(owner.base+'/config',undefined,owner.authHeaders),owner.base);return owner.providers.map(({id,name,searchable})=>({id,name,...(searchable!=null?{searchable}:{})}))}

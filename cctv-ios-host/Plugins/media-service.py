@@ -61,6 +61,7 @@ class Server(ThreadingHTTPServer):
 
     def __init__(self, address, runtime):
         self.runtime = runtime
+        self.node_proxy_file_root = None
         self.relay = MediaRelay(stream_media=True)
         self.artwork_relay = MediaRelay()
         self.plugin_proxy_lock = threading.Lock()
@@ -265,7 +266,43 @@ class Handler(BaseHTTPRequestHandler):
                 headers[name] = value
         args.update({'method': method, 'headers': headers,
                      'range': headers.get('Range', '')})
-        self.send_proxy(self.call_runtime(self.server.runtime, 'proxy', args), method == 'HEAD')
+        result = self.call_runtime(self.server.runtime, 'proxy', args)
+        if (isinstance(result, (list, tuple)) and len(result) >= 3 and
+                isinstance(result[2], dict) and result[2].get('__cctvhostFileResponse') is True):
+            result = self.read_node_proxy_file(result, method == 'HEAD')
+        self.send_proxy(result, method == 'HEAD')
+
+    def read_node_proxy_file(self, result, head=False):
+        """Expand a bounded Node file reference without sending media through JSON."""
+        root = self.server.node_proxy_file_root
+        reference = result[2]
+        path = reference.get('path')
+        offset, length = reference.get('offset'), reference.get('length')
+        if not root or not isinstance(path, str) or not path or len(path) > 4096:
+            raise MediaError('INVALID_PROXY', 'Node 媒体文件引用无效')
+        if (isinstance(offset, bool) or not isinstance(offset, int) or offset < 0 or
+                isinstance(length, bool) or not isinstance(length, int) or
+                not 0 <= length <= 16 * 1024 * 1024):
+            raise MediaError('INVALID_PROXY', 'Node 媒体文件范围无效')
+        try:
+            real_root = os.path.realpath(root)
+            real_path = os.path.realpath(path)
+            if os.path.commonpath((real_root, real_path)) != real_root or not os.path.isfile(real_path):
+                raise ValueError('path outside source data directory')
+            size = os.path.getsize(real_path)
+            if offset > size or length > size - offset:
+                raise ValueError('range outside file')
+            if head:
+                body = b''
+            else:
+                with open(real_path, 'rb') as media_file:
+                    media_file.seek(offset)
+                    body = media_file.read(length)
+                if len(body) != length:
+                    raise ValueError('short read')
+        except (OSError, ValueError, TypeError):
+            raise MediaError('INVALID_PROXY', 'Node 媒体文件不可读或范围超出文件')
+        return [result[0], result[1], body]
 
     def serve_host_fetch(self):
         supplied = self.headers.get('X-CCTVHost-Host-Fetch', '')
@@ -660,10 +697,11 @@ def main():
     def create_engine():
         if manifest['runtime'] == 'python':
             return PythonSpider(args.package, manifest['entry'], manifest.get('options'),
-                                f'http://127.0.0.1:{server.server_port}/proxy')
+                                f'http://127.0.0.1:{server.server_port}/proxy', args.data_dir)
         node_manifest = dict(manifest, dataDirectory=args.data_dir,
                              proxyURL=f'http://127.0.0.1:{server.server_port}/proxy')
         if manifest['runtime'] == 'node':
+            server.node_proxy_file_root = os.path.realpath(args.data_dir)
             node_manifest.update(
                 hostFetchURL=f'http://127.0.0.1:{server.server_port}/_cctvhost/host-fetch',
                 hostFetchToken=server.host_fetch_token)

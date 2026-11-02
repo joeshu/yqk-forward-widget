@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "HGTV 红果短剧（Node 1.0.5）",
+  "runtime": "node",
+  "protocol": "catvod-js",
+  "moduleType": "commonjs",
+  "entry": "hgtv.js",
+  "options": {
+    "playTimeoutMs": 120000
+  }
+}
