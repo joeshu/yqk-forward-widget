@@ -283,10 +283,10 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     return [self.context[@"detail"][@"lines"] isKindOfClass:NSArray.class]?self.context[@"detail"][@"lines"]:@[];
 }
 - (NSArray *)episodes {
-    NSArray *seasonEpisodes=[self.currentSeason[@"episodes"] isKindOfClass:NSArray.class]?self.currentSeason[@"episodes"]:@[];
-    if(seasonEpisodes.count)return seasonEpisodes;
     NSArray *lines=self.lines;
-    return self.lineIndex>=0&&self.lineIndex<lines.count&&[lines[(NSUInteger)self.lineIndex][@"episodes"] isKindOfClass:NSArray.class]?lines[(NSUInteger)self.lineIndex][@"episodes"]:@[];
+    if(self.lineIndex>=0&&self.lineIndex<lines.count){NSArray *lineEpisodes=[lines[(NSUInteger)self.lineIndex][@"episodes"] isKindOfClass:NSArray.class]?lines[(NSUInteger)self.lineIndex][@"episodes"]:@[];if(lineEpisodes.count)return lineEpisodes;}
+    NSArray *seasonEpisodes=[self.currentSeason[@"episodes"] isKindOfClass:NSArray.class]?self.currentSeason[@"episodes"]:@[];
+    return seasonEpisodes;
 }
 - (instancetype)init {if((self=[super init])){_lineIndex=0;_episodeIndex=0;_selectedAlternateIndex=-1;}return self;}
 - (void)viewDidLoad {

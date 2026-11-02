@@ -79,13 +79,10 @@ static UIColor *MediaSelectionMuted(void) { return [UIColor colorWithWhite:1 alp
     return seasonLines.count?seasonLines:([self.detail[@"lines"] isKindOfClass:NSArray.class]?self.detail[@"lines"]:@[]);
 }
 - (NSArray *)episodesForLine:(NSInteger)index {
-    NSDictionary *season=self.currentSeason;
-    NSArray *seasonEpisodes=[season[@"episodes"] isKindOfClass:NSArray.class]?season[@"episodes"]:@[];
-    if(seasonEpisodes.count)return seasonEpisodes;
     NSArray *lines=self.lines;
-    if(index<0||index>=lines.count)return @[];
-    NSArray *episodes=[lines[(NSUInteger)index][@"episodes"] isKindOfClass:NSArray.class]?lines[(NSUInteger)index][@"episodes"]:@[];
-    return episodes;
+    if(index>=0&&index<lines.count){NSArray *lineEpisodes=[lines[(NSUInteger)index][@"episodes"] isKindOfClass:NSArray.class]?lines[(NSUInteger)index][@"episodes"]:@[];if(lineEpisodes.count)return lineEpisodes;}
+    NSArray *seasonEpisodes=[self.currentSeason[@"episodes"] isKindOfClass:NSArray.class]?self.currentSeason[@"episodes"]:@[];
+    return seasonEpisodes;
 }
 - (NSString *)titleText {
     NSString *name=[self.detail[@"name"] isKindOfClass:NSString.class]?self.detail[@"name"]:@"";
