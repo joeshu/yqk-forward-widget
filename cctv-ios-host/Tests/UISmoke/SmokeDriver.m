@@ -35,6 +35,7 @@
 #import "SettingsViewController.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
+#import <AVKit/AVKit.h>
 #import <objc/runtime.h>
 
 @interface MediaBrowserViewController (UISmokeLayoutHooks)
