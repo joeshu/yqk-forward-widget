@@ -1770,7 +1770,7 @@ def _verify_mp4(path, min_bytes=8192):
                 if kind == b'ftyp':
                     ftyp = True
                 if kind == b'moov':
-                    if length > 16 * 1024 * 1024 and not getattr(self, '_cctvhost_file_proxy_supported', False):
+                    if length > 16 * 1024 * 1024:
                         return False
                     media.seek(offset)
                     moov = media.read(length)

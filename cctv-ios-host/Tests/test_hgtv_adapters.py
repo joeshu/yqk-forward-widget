@@ -126,6 +126,16 @@ class HgtvAdapterTests(unittest.TestCase):
             path.write_bytes(output)
             self.assertFalse(module._verify_mp4(str(path)))
 
+    def test_oversized_metadata_is_rejected_without_spider_instance(self):
+        path = Path(self.tmp.name, 'large-metadata.mp4')
+        ftyp = box(b'ftyp', b'isom' + bytes(4) + b'isom')
+        metadata_size = 17 * 1024 * 1024
+        with path.open('wb') as stream:
+            stream.write(ftyp + struct.pack('>I4s', metadata_size, b'moov'))
+            stream.truncate(len(ftyp) + metadata_size)
+        for module in (hgtv, hgtv104):
+            self.assertFalse(module._verify_mp4(str(path)))
+
     def test_encrypted_avc_codec_is_restored_from_frma(self):
         media, key, plain, offset = encrypted_fixture(b'avc1')
         self.encrypted_path.write_bytes(media)
