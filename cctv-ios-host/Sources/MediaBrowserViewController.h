@@ -7,6 +7,9 @@
 - (void)invalidateServiceIdentifier:(NSString *)identifier;
 - (void)showConfigurationForSource:(NSDictionary *)source;
 @property(nonatomic, copy) NSArray<NSDictionary *> *(^sourcesProvider)(void);
+/// Saved TVBox collections are listed alongside resources and opened only when selected.
+@property(nonatomic, copy) NSArray<NSDictionary *> *(^catalogsProvider)(void);
+@property(nonatomic, copy) void (^onOpenTVBoxCatalog)(NSString *catalogID);
 @property(nonatomic, copy) void (^onActivateService)(NSDictionary *service,void (^completion)(NSError *error));
 @property(nonatomic, copy) void (^onRestartService)(NSDictionary *service,void (^completion)(NSError *error));
 - (void)checkCurrentService;

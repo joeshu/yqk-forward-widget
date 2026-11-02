@@ -23,19 +23,19 @@
 }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {self.searchText=searchController.searchBar.text?:@"";[self.tableView reloadData];}
 - (void)viewDidLoad {
-    [super viewDidLoad];NSString *catalogName=[self.catalog[@"name"] isKindOfClass:NSString.class]?self.catalog[@"name"]:@"";self.title=(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])?@"资源合集":catalogName;self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=88;
+    [super viewDidLoad];NSString *catalogName=[self.catalog[@"name"] isKindOfClass:NSString.class]?self.catalog[@"name"]:@"";self.title=(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])?@"资源合集":catalogName;self.navigationItem.prompt=@"点按需要的站点按需加载 · 不必全量导入";self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=88;
     self.searchController=[[UISearchController alloc] initWithSearchResultsController:nil];self.searchController.searchResultsUpdater=self;self.searchController.obscuresBackgroundDuringPresentation=NO;self.searchController.searchBar.placeholder=@"搜索合集中的站点、协议或 URL";self.searchController.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchController.searchBar.autocorrectionType=UITextAutocorrectionTypeNo;self.navigationItem.searchController=self.searchController;self.navigationItem.hidesSearchBarWhenScrolling=NO;self.definesPresentationContext=YES;
     __weak typeof(self) weakSelf=self;
     self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
-        @{@"icon":@"square.and.arrow.down",@"title":@"整包加入兼容内容",@"action":[UIAction actionWithHandler:^(UIAction *a){
+        @{@"icon":@"square.and.arrow.down",@"title":@"全量导入（较慢）",@"action":[UIAction actionWithHandler:^(UIAction *a){
             TVBoxCatalogViewController *owner=weakSelf;if(!owner)return;
             NSUInteger scripts=0,native=0,live=0,unsupported=0;
             for(NSDictionary *site in owner.sites){if(![site[@"supported"] boolValue])unsupported++;else if([site[@"apiKind"] isEqual:@"script"])scripts++;else native++;}
             for(NSDictionary *row in owner.lives){if([row[@"supported"] boolValue])live++;else unsupported++;}
-            NSString *message=[NSString stringWithFormat:@"将自动检查并加入 %lu 个影视脚本站点，同时订阅 %lu 个直播清单。另有 %lu 个原生 API 站点已可直接在影视库使用；%lu 个不兼容项会保留在合集里。导入阶段不会启动脚本。",(unsigned long)scripts,(unsigned long)live,(unsigned long)native,(unsigned long)unsupported];
-            UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"整包加入兼容内容" message:message preferredStyle:UIAlertControllerStyleAlert];
+            NSString *message=[NSString stringWithFormat:@"推荐按需加载：回到首页或影视库，点顶部资源按钮，选择本合集，再点选需要的站点。这样只会导入所选脚本。\n\n全量导入会检查并下载 %lu 个影视脚本站点及订阅 %lu 个直播清单，耗时较长；%lu 个原生 API 站点本来就可按需直接使用，%lu 个不兼容项仍保留在合集里。",(unsigned long)scripts,(unsigned long)live,(unsigned long)native,(unsigned long)unsupported];
+            UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"全量导入（较慢）" message:message preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-            [alert addAction:[UIAlertAction actionWithTitle:@"开始加入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){if(owner.onImportCompatibleContents)owner.onImportCompatibleContents();}]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"仍然全量导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){if(owner.onImportCompatibleContents)owner.onImportCompatibleContents();}]];
             [owner presentViewController:alert animated:YES completion:nil];
         }]},
         @{@"icon":@"trash",@"title":@"移除资源合集",@"action":[UIAction actionWithHandler:^(UIAction *a){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"移除资源合集？" message:@"仅移除这份集合索引；已导入的脚本和直播订阅会保留。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"移除合集" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){if(weakSelf.onRemove)weakSelf.onRemove();}]];[weakSelf presentViewController:alert animated:YES completion:nil];}]}
@@ -44,7 +44,7 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self filteredRowsForSection:section].count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {NSArray *rows=[self filteredRowsForSection:section];return section==0?[NSString stringWithFormat:@"影视站点 · %lu",(unsigned long)rows.count]:[NSString stringWithFormat:@"直播列表 · %lu",(unsigned long)rows.count];}
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return @"点右上角“整包加入”可批量检查并导入兼容脚本；type 1/4 JSON API 可直接在影视库使用。未识别的 Android/JAR 或无效项会保留并标注。";return @"可一次性订阅全部兼容的 type 0 M3U/TXT 清单；读取清单时会应用合集提供的 UA。";}
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return @"推荐按需加载：在首页或影视库顶部资源按钮中选择本合集，再点选需要的站点；仅所选脚本会导入，type 1/4 JSON API 会直接读取。全量导入仍可从右上角选择，但会下载全部兼容脚本，耗时较长。不兼容项会保留并标注。";return @"点按需要的直播清单即可添加；也可从右上角选择全量导入。刷新播放列表时会应用合集提供的 UA。";}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"tvbox.catalog.row"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"tvbox.catalog.row"];cell.backgroundColor=HostCard();cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.textColor=UIColor.labelColor;cell.detailTextLabel.textColor=UIColor.secondaryLabelColor;
     NSDictionary *row=[self filteredRowsForSection:ip.section][ip.row];cell.textLabel.text=row[@"name"]?:@"未命名";

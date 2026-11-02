@@ -765,7 +765,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('ResourceImportOptionTVBox', (ROOT / 'Sources/ResourceImportSheetViewController.m').read_text())
         self.assertIn('TVBoxCatalogStore parseData:data sourceURL:nil', self.root)
         self.assertIn('保留独立副本', self.root)
-        self.assertIn('整包加入', catalog_view)
+        self.assertIn('全量导入（较慢）', catalog_view)
+        self.assertIn('推荐按需加载', catalog_view)
         self.assertIn('type 1/4 JSON API', catalog_view)
         self.assertIn('tvboxConfig', store)
         self.assertIn('apiKindTVBox', store)
@@ -795,7 +796,12 @@ class ResourceInteractionContracts(unittest.TestCase):
         store = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
         catalog_view = (ROOT / 'Sources/TVBoxCatalogViewController.m').read_text()
         self.assertIn('onImportCompatibleContents', catalog_view)
-        self.assertIn('整包加入兼容内容', catalog_view)
+        self.assertIn('全量导入（较慢）', catalog_view)
+        self.assertIn('catalogsProvider', (ROOT / 'Sources/MediaBrowserViewController.h').read_text())
+        self.assertIn('onOpenTVBoxCatalog', self.detail)
+        source_selector = self.detail[self.detail.index('- (void)chooseResource'):self.detail.index('- (void)refreshCurrentSource')]
+        self.assertIn('catalogsProvider', source_selector)
+        self.assertIn('按需选择', source_selector)
         self.assertIn('bulkImportTVBoxCatalog:identifier page:weakPage', root)
         self.assertIn('_maximumConcurrentDownloads=3', bulk)
         self.assertIn('512*1024*1024', bulk)
@@ -807,7 +813,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('live[@"ua"]', store)
         self.assertIn('for(NSDictionary *live in lives)', root)
         self.assertIn('forHTTPHeaderField:@"User-Agent"', root)
-        self.assertIn('导入阶段不会启动脚本', catalog_view)
+        self.assertIn('推荐按需加载', catalog_view)
 
     def test_tvbox_aggregators_accept_redirects_maccms_basic_auth_and_larger_catalogs(self):
         store = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()

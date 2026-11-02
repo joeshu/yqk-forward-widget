@@ -1148,6 +1148,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             }
             return sources;
         };
+        page.catalogsProvider=^{return [TVBoxCatalogStore catalogs];};
+        page.onOpenTVBoxCatalog=^(NSString *identifier){RootViewController *owner=weakSelf;if(owner)[owner openTVBoxCatalog:identifier];};
         __weak MediaBrowserViewController *weakPage=page;page.onDisplayModeChanged=^(BOOL homeMode){RootViewController *owner=weakSelf;MediaBrowserViewController *mediaPage=weakPage;if(!owner||!mediaPage)return;owner.title=homeMode?@"":@"影视库";owner.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;owner.navigationItem.searchController=mediaPage.navigationItem.searchController;owner.navigationItem.leftBarButtonItem=mediaPage.navigationItem.leftBarButtonItem;owner.navigationItem.rightBarButtonItems=mediaPage.navigationItem.rightBarButtonItems;if(owner.navigationController.topViewController==owner&&owner.navigationController.navigationBarHidden!=homeMode)[owner.navigationController setNavigationBarHidden:homeMode animated:YES];};
         page.onActivateService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf changeService:service enabled:YES completion:completion];};
         page.onRestartService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf restartMediaService:service completion:completion];};

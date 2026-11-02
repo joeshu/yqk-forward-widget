@@ -251,6 +251,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSDictionary *imageStats;
       __block NSDictionary *nodeChecks;
       __block MediaBrowserViewController *mediaPage;
+      __block BOOL catalogOpenedFromMediaSelector=NO;
       __block UICollectionViewCell *selectedLiveCard;
       __block UIImageView *selectedLiveMark;
       __block MediaGlobalSearchViewController *searchPage;
@@ -867,6 +868,8 @@ static void next(NSArray *steps, NSUInteger index) {
             NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
             NSString *mediaSourceID=[NSString stringWithFormat:@"media-ui-%@",NSUUID.UUID.UUIDString];
             mediaPage.sourcesProvider=^NSArray *{return @[@{@"id":mediaSourceID,@"name":@"本机影视测试",@"port":@(port),@"engine":@"node",@"url":[NSString stringWithFormat:@"http://127.0.0.1:%ld/media.js?token=visible",(long)port]}];};
+            mediaPage.catalogsProvider=^NSArray *{return @[@{@"id":@"smoke-catalog",@"name":@"影视测试合集",@"sites":@[@{@"supported":@YES}],@"lives":@[]}];};
+            mediaPage.onOpenTVBoxCatalog=^(NSString *identifier){catalogOpenedFromMediaSelector=[identifier isEqual:@"smoke-catalog"];};
             mediaPage.onActivateService=^(NSDictionary *service,void (^done)(NSError *)){done(nil);};
             mediaPage.onPlay=^(NSDictionary *result,NSDictionary *context){mediaPlayback=[MediaPlaybackViewController new];mediaPlayback.result=result;mediaPlayback.context=context;[nav pushViewController:mediaPlayback animated:NO];};
             [nav pushViewController:mediaPage animated:NO];
@@ -913,8 +916,8 @@ static void next(NSArray *steps, NSUInteger index) {
           }},
           @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])!=nil;},@"run":^{
             UINavigationController *sheet=SmokePresentedNavigation(@[mediaPage,nav,root],@"resource selector");if(!sheet)return;UITableViewController *picker=(id)sheet.topViewController;[picker.tableView layoutIfNeeded];UITableViewCell *current=[picker.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
-            UIStackView *scopeStack=[picker valueForKey:@"scopeStack"];check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"resource selection uses a native bottom sheet");check([picker.tableView numberOfRowsInSection:0]==1&&current.accessoryType==UITableViewCellAccessoryCheckmark,@"resource sheet shows its current selection");check(scopeStack.arrangedSubviews.count==2,@"resource sheet groups resources by runtime and keeps all resources visible");capture(self.window,@"16b-media-resource-sheet");
-            [picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+            UIStackView *scopeStack=[picker valueForKey:@"scopeStack"];check(sheet.modalPresentationStyle==UIModalPresentationPageSheet,@"resource selection uses a native bottom sheet");check([picker.tableView numberOfRowsInSection:0]==2&&current.accessoryType==UITableViewCellAccessoryCheckmark,@"resource sheet shows the active resource and a saved collection");check(scopeStack.arrangedSubviews.count==3,@"resource sheet groups installed runtimes and on-demand collections");capture(self.window,@"16b-media-resource-sheet");
+            NSIndexPath *catalogIndex=[NSIndexPath indexPathForRow:1 inSection:0];[picker.tableView.delegate tableView:picker.tableView didSelectRowAtIndexPath:catalogIndex];check(catalogOpenedFromMediaSelector,@"home and library resource selectors open a saved collection without importing every script");
           }},
           @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"run":^{UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];[providerSelector sendActionsForControlEvents:UIControlEventTouchUpInside];}},
           @{@"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])!=nil;},@"run":^{
