@@ -813,6 +813,9 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     NSString *line=self.lineIndex>=0&&self.lineIndex<self.lines.count?self.lines[self.lineIndex][@"name"]:@"";
     NSString *label=line.length?[NSString stringWithFormat:@"选集 · %@ · %lu 集",line,(unsigned long)episodes.count]:@"选集";
     [self.episodeButton setTitle:label forState:UIControlStateNormal];self.episodeButton.enabled=episodes.count>0;self.episodeButton.alpha=episodes.count?1.0:0.55;[self updateSkipButtonForCurrentPosition];
+    NSMutableDictionary *updatedContext=[self.context mutableCopy]?:[NSMutableDictionary dictionary];updatedContext[@"lineIndex"]=@(self.lineIndex);updatedContext[@"episodeIndex"]=@(self.episodeIndex);
+    NSDictionary *selectedLine=self.lineIndex>=0&&self.lineIndex<self.lines.count?self.lines[self.lineIndex]:@{};updatedContext[@"lineID"]=[selectedLine[@"id"] description]?:@"";updatedContext[@"episodeID"]=[episode[@"id"] description]?:@"";updatedContext[@"episodeName"]=name?:@"";self.context=updatedContext;
+    if(self.onEpisodeSelectionChanged)self.onEpisodeSelectionChanged(self.context);
 }
 - (void)openEpisodeSelection {
     if(!self.lines.count)return;

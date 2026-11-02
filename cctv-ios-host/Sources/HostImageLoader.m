@@ -13,6 +13,7 @@ static NSUInteger const ImageQueueLimit = 96;
 @property(nonatomic, strong) NSURLSessionDataTask *task;
 @property(nonatomic, strong) NSMutableData *data;
 @property(nonatomic, strong) NSHashTable<UIImageView *> *views;
+@property(nonatomic, strong) NSMutableArray *observers;
 @property(nonatomic, copy) NSString *url;
 @property(nonatomic, copy) NSString *cacheKey;
 @property(nonatomic) NSUInteger maximumPixelSize;
@@ -28,6 +29,13 @@ static NSUInteger const ImageQueueLimit = 96;
 @implementation HostImageRequest
 @end
 
+@interface HostImageObserver : NSObject
+@property(nonatomic, weak) UIImageView *view;
+@property(nonatomic, copy) HostImageLoadCompletion completion;
+@end
+@implementation HostImageObserver
+@end
+
 @interface HostImageLoader () <NSURLSessionDataDelegate>
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic, strong) NSURLSession *session;
@@ -38,7 +46,7 @@ static NSUInteger const ImageQueueLimit = 96;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, HostImageRequest *> *tasks;
 @property(nonatomic, strong) NSMutableArray<HostImageRequest *> *pending;
 @property(atomic) NSUInteger generation;
-- (void)loadURL:(NSString *)url intoImageView:(UIImageView *)imageView maximumPixelSize:(NSUInteger)maximumPixelSize;
+- (void)loadURL:(NSString *)url intoImageView:(UIImageView *)imageView maximumPixelSize:(NSUInteger)maximumPixelSize completion:(nullable HostImageLoadCompletion)completion;
 @end
 
 @implementation HostImageLoader
@@ -63,34 +71,48 @@ static NSUInteger const ImageQueueLimit = 96;
     return self;
 }
 - (void)loadURL:(NSString *)url intoImageView:(UIImageView *)imageView {
-    [self loadURL:url intoImageView:imageView maximumPixelSize:192];
+    [self loadURL:url intoImageView:imageView maximumPixelSize:192 completion:nil];
 }
 - (void)loadPosterURL:(NSString *)url intoImageView:(UIImageView *)imageView {
-    [self loadURL:url intoImageView:imageView maximumPixelSize:1024];
+    [self loadPosterURL:url intoImageView:imageView completion:nil];
 }
-- (void)loadURL:(NSString *)url intoImageView:(UIImageView *)imageView maximumPixelSize:(NSUInteger)maximumPixelSize {
+- (void)loadPosterURL:(NSString *)url intoImageView:(UIImageView *)imageView completion:(HostImageLoadCompletion)completion {
+    NSAssert(NSThread.isMainThread, @"Image views must be configured on the main thread");
+    NSString *normalizedURL=url?:@"";
+    BOOL sameImage=[imageView.accessibilityIdentifier isEqualToString:normalizedURL];
+    if(!sameImage){
+        imageView.image=[UIImage systemImageNamed:@"film"];
+        imageView.contentMode=UIViewContentModeCenter;
+        imageView.tintColor=UIColor.secondaryLabelColor;
+    }
+    // Mark the fallback as belonging to this URL so the shared loader does not
+    // clear it while the request is pending or after a transient failure.
+    imageView.accessibilityIdentifier=normalizedURL;
+    [self loadURL:url intoImageView:imageView maximumPixelSize:1024 completion:completion];
+}
+- (void)loadURL:(NSString *)url intoImageView:(UIImageView *)imageView maximumPixelSize:(NSUInteger)maximumPixelSize completion:(HostImageLoadCompletion)completion {
     NSAssert(NSThread.isMainThread, @"Image views must be configured on the main thread");
     // Keep the current logo while a same-URL request is joined or retried.
     // Reused views still clear immediately when assigned to a different URL.
     BOOL sameImage=[imageView.accessibilityIdentifier isEqualToString:url ?: @""];
     if(!sameImage)imageView.image=nil;
     imageView.accessibilityIdentifier=url;
-    if(!url.length)return;
+    if(!url.length){if(completion)completion(NO,0);return;}
     NSURL *target=[NSURL URLWithString:url];
-    if(!target.host.length || ![@[@"http",@"https"] containsObject:target.scheme.lowercaseString])return;
+    if(!target.host.length || ![@[@"http",@"https"] containsObject:target.scheme.lowercaseString]){if(completion)completion(NO,0);return;}
     maximumPixelSize=MIN(MAX(maximumPixelSize,64),2048);NSString *cacheKey=[NSString stringWithFormat:@"%lu|%@",(unsigned long)maximumPixelSize,url];
-    UIImage *cached=[self.cache objectForKey:cacheKey];if(cached){imageView.image=cached;return;}
+    UIImage *cached=[self.cache objectForKey:cacheKey];if(cached){imageView.image=cached;if(maximumPixelSize>512){imageView.contentMode=UIViewContentModeScaleAspectFill;imageView.tintColor=nil;}if(completion)completion(YES,0);return;}
     NSUInteger generation=self.generation;__weak UIImageView *view=imageView;
     dispatch_async(self.queue, ^{@autoreleasepool {
         if(generation!=self.generation || !view)return;
-        NSDate *failed=[self.failures objectForKey:cacheKey];if(failed && failed.timeIntervalSinceNow>0)return;
+        NSDate *failed=[self.failures objectForKey:cacheKey];if(failed && failed.timeIntervalSinceNow>0){NSTimeInterval retryAfter=MAX(0,failed.timeIntervalSinceNow);dispatch_async(dispatch_get_main_queue(),^{UIImageView *current=view;if(current&&[current.accessibilityIdentifier isEqualToString:url]&&completion)completion(NO,retryAfter);});return;}
         HostImageRequest *request=self.requests[cacheKey];
         if(!request) {
-            if(self.requests.count>=ImageQueueLimit)return;
+            if(self.requests.count>=ImageQueueLimit){dispatch_async(dispatch_get_main_queue(),^{UIImageView *current=view;if(current&&[current.accessibilityIdentifier isEqualToString:url]&&completion)completion(NO,30);});return;}
             request=[HostImageRequest new];request.url=url;request.cacheKey=cacheKey;request.maximumPixelSize=maximumPixelSize;request.generation=generation;
-            request.views=[NSHashTable weakObjectsHashTable];self.requests[cacheKey]=request;[self.pending addObject:request];
+            request.views=[NSHashTable weakObjectsHashTable];request.observers=[NSMutableArray array];self.requests[cacheKey]=request;[self.pending addObject:request];
         }
-        [request.views addObject:view];[self startPending];
+        [request.views addObject:view];if(completion){HostImageObserver *observer=[HostImageObserver new];observer.view=view;observer.completion=completion;[request.observers addObject:observer];}[self startPending];
     }});
 }
 - (NSUInteger)maximumBodyLengthForRequest:(HostImageRequest *)record {
@@ -164,9 +186,13 @@ static NSUInteger const ImageQueueLimit = 96;
     }
     // Never carry a potentially 2 MB network body onto the UI queue.
     record.data=nil;record.task=nil;
-    if(image)dispatch_async(dispatch_get_main_queue(), ^{
+    NSArray<HostImageObserver *> *observers=record.observers.copy?:@[];
+    NSArray<UIImageView *> *views=record.views.allObjects?:@[];
+    NSTimeInterval retryAfter=HostImageFailureBackoff(record.httpStatus);
+    if(image||observers.count)dispatch_async(dispatch_get_main_queue(), ^{
         if(record.generation!=self.generation)return;
-        for(UIImageView *view in record.views.allObjects)if([view.accessibilityIdentifier isEqualToString:record.url])view.image=image;
+        for(UIImageView *view in views)if([view.accessibilityIdentifier isEqualToString:record.url]){if(image)view.image=image;if(image&&record.maximumPixelSize>512){view.contentMode=UIViewContentModeScaleAspectFill;view.tintColor=nil;}}
+        for(HostImageObserver *observer in observers){UIImageView *view=observer.view;if(!view||![view.accessibilityIdentifier isEqualToString:record.url])continue;if(observer.completion)observer.completion(image!=nil,image?0:retryAfter);}
     });
     [self startPending];
 }

@@ -756,7 +756,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('NSString *query=self.searchQuery?:@""', self.catalog)
 
     def test_list_restore_stops_when_source_has_no_more_pages(self):
-        self.assertIn('owner.pendingRestorePage>requestedPage && [result[@"hasMore"] boolValue] && incoming.count', self.detail)
+        self.assertIn('owner.pendingRestorePage>requestedPage && MediaBrowserBoolean(normalized[@"hasMore"]) && incoming.count', self.detail)
 
     def test_tvbox_catalog_import_is_additive_and_adapter_bounded(self):
         store = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
@@ -856,7 +856,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[self.renderedFilterKey isEqual:self.filterPositionKey]', search)
         self.assertIn('MediaSearchEntries(entries,provider).count', search)
         self.assertIn('MediaSearchAppend(stored,items,providerID,providerName,remaining)', search)
-        self.assertIn('HostImageLoader.shared loadURL:', search)
+        self.assertIn('HostImageLoader.shared loadPosterURL:url intoImageView:view completion:', search)
         self.assertIn('暂无影片信息', search)
         self.assertIn('@"无结果"', search)
         self.assertIn('@"来源失败"', search)

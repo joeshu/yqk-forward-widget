@@ -9,6 +9,21 @@ static UIColor *MediaSelectionBackground(void) { return HostBackground(); }
 static UIColor *MediaSelectionSurface(void) { return [UIColor colorWithWhite:1 alpha:0.075]; }
 static UIColor *MediaSelectionMuted(void) { return [UIColor colorWithWhite:1 alpha:0.68]; }
 
+static NSArray<NSDictionary *> *MediaEpisodeSelectionDictionaryRows(id value) {
+    if(![value isKindOfClass:NSArray.class])return @[];NSMutableArray *rows=[NSMutableArray array];for(id row in value)if([row isKindOfClass:NSDictionary.class])[rows addObject:row];return rows;
+}
+static NSArray<NSDictionary *> *MediaEpisodeSelectionLines(id value) {
+    NSArray *rows=MediaEpisodeSelectionDictionaryRows(value);NSMutableArray *lines=[NSMutableArray arrayWithCapacity:rows.count];for(NSDictionary *rawLine in rows){NSMutableDictionary *line=[rawLine mutableCopy];line[@"episodes"]=MediaEpisodeSelectionDictionaryRows(line[@"episodes"]);[lines addObject:line];}return lines;
+}
+static NSDictionary *MediaEpisodeSelectionSanitizedDetail(id value) {
+    if(![value isKindOfClass:NSDictionary.class])return nil;NSMutableDictionary *detail=[value mutableCopy];detail[@"lines"]=MediaEpisodeSelectionLines(detail[@"lines"]);id rawSeasons=detail[@"seasons"]?:detail[@"seasonList"]?:detail[@"season_list"];if([rawSeasons isKindOfClass:NSArray.class]){NSMutableArray *seasons=[NSMutableArray array];for(NSDictionary *rawSeason in MediaEpisodeSelectionDictionaryRows(rawSeasons)){NSMutableDictionary *season=[rawSeason mutableCopy];season[@"lines"]=MediaEpisodeSelectionLines(season[@"lines"]);season[@"episodes"]=MediaEpisodeSelectionDictionaryRows(season[@"episodes"]);[seasons addObject:season];}detail[@"seasons"]=seasons;}return detail;
+}
+static void MediaEpisodeSelectionLoadPoster(NSString *url, UIImageView *view, NSUInteger retriesRemaining);
+static void MediaEpisodeSelectionLoadPoster(NSString *url, UIImageView *view, NSUInteger retriesRemaining) {
+    if(!url.length||!view)return;__weak UIImageView *weakView=view;
+    [HostImageLoader.shared loadPosterURL:url intoImageView:view completion:^(BOOL succeeded,NSTimeInterval retryAfter){if(succeeded||!retriesRemaining||retryAfter<=0)return;NSTimeInterval delay=MIN(120.0,MAX(1.0,retryAfter+0.25));dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{UIImageView *current=weakView;if(current&&current.window&&[current.accessibilityIdentifier isEqualToString:url])MediaEpisodeSelectionLoadPoster(url,current,retriesRemaining-1);});}];
+}
+
 @interface MediaEpisodeSelectionViewController ()
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) NSUInteger refreshGeneration;
@@ -106,6 +121,7 @@ static UIColor *MediaSelectionMuted(void) { return [UIColor colorWithWhite:1 alp
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.detail=MediaEpisodeSelectionSanitizedDetail(self.detail)?:@{};
     self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;
     self.view.backgroundColor=MediaSelectionBackground();
     self.title=self.titleText;
@@ -207,10 +223,10 @@ static UIColor *MediaSelectionMuted(void) { return [UIColor colorWithWhite:1 alp
     [self updateDescription];
 }
 - (void)refreshBackdrop {
-    NSString *url=[self posterURL];self.backdropImageView.image=nil;
+    NSString *url=[self posterURL];
     UIImageView *poster=[self.view viewWithTag:4101];
-    if(url.length){[HostImageLoader.shared loadPosterURL:url intoImageView:self.backdropImageView];if(poster)[HostImageLoader.shared loadPosterURL:url intoImageView:poster];}
-    else if(poster)poster.image=[UIImage systemImageNamed:@"film"];
+    if(url.length){MediaEpisodeSelectionLoadPoster(url,self.backdropImageView,1);if(poster)MediaEpisodeSelectionLoadPoster(url,poster,1);}
+    else{self.backdropImageView.image=nil;self.backdropImageView.accessibilityIdentifier=nil;if(poster){poster.image=[UIImage systemImageNamed:@"film"];poster.accessibilityIdentifier=nil;poster.contentMode=UIViewContentModeCenter;}}
 }
 - (void)updateDescription {
     NSString *synopsis=[self.detail[@"description"] isKindOfClass:NSString.class]?self.detail[@"description"]:@"";
@@ -239,17 +255,20 @@ static UIColor *MediaSelectionMuted(void) { return [UIColor colorWithWhite:1 alp
     __weak typeof(self) weakSelf=self;
     [self.refreshClient call:@"detail" arguments:args correlationID:self.correlationID completion:^(id result,NSError *error){
         MediaEpisodeSelectionViewController *owner=weakSelf;if(!owner||owner.refreshGeneration!=generation)return;[owner.refreshSpinner stopAnimating];owner.refreshButton.tintColor=UIColor.whiteColor;
-        if(error||![result isKindOfClass:NSDictionary.class]){owner.statusLabel.text=[NSString stringWithFormat:@"刷新失败，保留当前分集：%@",error.localizedDescription?:@"来源未返回详情"];owner.statusLabel.hidden=NO;return;}
+        NSDictionary *sanitized=MediaEpisodeSelectionSanitizedDetail(result);if(error||!sanitized){owner.statusLabel.text=[NSString stringWithFormat:@"刷新失败，保留当前分集：%@",error.localizedDescription?:@"来源未返回详情"];owner.statusLabel.hidden=NO;return;}
         owner.generation++;[owner.client cancel];[owner.playSpinner stopAnimating];owner.playSpinner.hidden=YES;owner.continueButton.enabled=YES;
         NSDictionary *oldSeason=owner.currentSeason;NSString *seasonID=[oldSeason[@"id"] description]?:@"",*seasonName=[oldSeason[@"name"] description]?:@"";
         NSArray *oldLines=owner.lines;NSDictionary *oldLine=owner.selectedLineIndex<oldLines.count?oldLines[(NSUInteger)owner.selectedLineIndex]:@{};NSString *lineID=[oldLine[@"id"] description]?:@"",*lineName=[oldLine[@"name"] description]?:@"";
         NSArray *oldEpisodes=[owner episodesForLine:owner.selectedLineIndex];NSDictionary *oldEpisode=owner.selectedEpisodeIndex<oldEpisodes.count?oldEpisodes[(NSUInteger)owner.selectedEpisodeIndex]:@{};NSString *episodeID=[oldEpisode[@"id"] description]?:@"",*episodeName=[oldEpisode[@"name"] description]?:@"";NSInteger oldSeasonIndex=owner.selectedSeasonIndex,oldLineIndex=owner.selectedLineIndex,oldEpisodeIndex=owner.selectedEpisodeIndex;
-        owner.detail=result;NSArray *newSeasons=owner.seasonCollections;owner.selectedSeasonIndex=newSeasons.count?MIN(MAX(0,oldSeasonIndex),(NSInteger)newSeasons.count-1):0;
-        if(seasonID.length||seasonName.length)for(NSUInteger index=0;index<newSeasons.count;index++){NSDictionary *candidate=[newSeasons[index] isKindOfClass:NSDictionary.class]?newSeasons[index]:@{};if((seasonID.length&&[[candidate[@"id"] description] isEqual:seasonID])||(seasonName.length&&[[candidate[@"name"] description] isEqual:seasonName])){owner.selectedSeasonIndex=(NSInteger)index;break;}}
+        owner.detail=sanitized;NSArray *newSeasons=owner.seasonCollections;owner.selectedSeasonIndex=newSeasons.count?MIN(MAX(0,oldSeasonIndex),(NSInteger)newSeasons.count-1):0;BOOL seasonMatched=NO;
+        if(seasonID.length){for(NSUInteger index=0;index<newSeasons.count;index++){NSDictionary *candidate=newSeasons[index];if([[candidate[@"id"] description] isEqual:seasonID]){owner.selectedSeasonIndex=(NSInteger)index;seasonMatched=YES;break;}}}
+        if(!seasonMatched&&seasonName.length){for(NSUInteger index=0;index<newSeasons.count;index++){NSDictionary *candidate=newSeasons[index];if([[candidate[@"name"] description] localizedCaseInsensitiveCompare:seasonName]==NSOrderedSame){owner.selectedSeasonIndex=(NSInteger)index;seasonMatched=YES;break;}}}
         NSArray *newLines=owner.lines;owner.selectedLineIndex=newLines.count?MIN(MAX(0,oldLineIndex),(NSInteger)newLines.count-1):0;
-        if(lineID.length||lineName.length)for(NSUInteger index=0;index<newLines.count;index++){NSDictionary *candidate=[newLines[index] isKindOfClass:NSDictionary.class]?newLines[index]:@{};if((lineID.length&&[[candidate[@"id"] description] isEqual:lineID])||(lineName.length&&[[candidate[@"name"] description] isEqual:lineName])){owner.selectedLineIndex=(NSInteger)index;break;}}
+        BOOL lineMatched=NO;if(lineID.length){for(NSUInteger index=0;index<newLines.count;index++){NSDictionary *candidate=newLines[index];if([[candidate[@"id"] description] isEqual:lineID]){owner.selectedLineIndex=(NSInteger)index;lineMatched=YES;break;}}}
+        if(!lineMatched&&lineName.length){for(NSUInteger index=0;index<newLines.count;index++){NSDictionary *candidate=newLines[index];if([[candidate[@"name"] description] localizedCaseInsensitiveCompare:lineName]==NSOrderedSame){owner.selectedLineIndex=(NSInteger)index;lineMatched=YES;break;}}}
         NSArray *newEpisodes=[owner episodesForLine:owner.selectedLineIndex];owner.selectedEpisodeIndex=newEpisodes.count?MIN(MAX(0,oldEpisodeIndex),(NSInteger)newEpisodes.count-1):0;
-        if(episodeID.length||episodeName.length)for(NSUInteger index=0;index<newEpisodes.count;index++){NSDictionary *candidate=[newEpisodes[index] isKindOfClass:NSDictionary.class]?newEpisodes[index]:@{};if((episodeID.length&&[[candidate[@"id"] description] isEqual:episodeID])||(episodeName.length&&[[candidate[@"name"] description] isEqual:episodeName])){owner.selectedEpisodeIndex=(NSInteger)index;break;}}
+        BOOL episodeMatched=NO;if(episodeID.length){for(NSUInteger index=0;index<newEpisodes.count;index++){NSDictionary *candidate=newEpisodes[index];if([[candidate[@"id"] description] isEqual:episodeID]){owner.selectedEpisodeIndex=(NSInteger)index;episodeMatched=YES;break;}}}
+        if(!episodeMatched&&episodeName.length){for(NSUInteger index=0;index<newEpisodes.count;index++){NSDictionary *candidate=newEpisodes[index];if([[candidate[@"name"] description] localizedCaseInsensitiveCompare:episodeName]==NSOrderedSame){owner.selectedEpisodeIndex=(NSInteger)index;episodeMatched=YES;break;}}}
         owner.page=CCTVEpisodeGroupForSourceIndex((NSUInteger)MAX(0,owner.selectedEpisodeIndex),newEpisodes.count,owner.episodeOrderReversed);
         owner.statusLabel.hidden=YES;[owner refreshBackdrop];[owner updateDescription];[owner rebuildSelection];
     }];
@@ -296,7 +315,8 @@ static UIColor *MediaSelectionMuted(void) { return [UIColor colorWithWhite:1 alp
 - (void)selectRoute:(UIButton *)sender {
     NSArray *oldEpisodes=[self episodesForLine:self.selectedLineIndex];NSDictionary *oldEpisode=self.selectedEpisodeIndex>=0&&self.selectedEpisodeIndex<oldEpisodes.count?oldEpisodes[(NSUInteger)self.selectedEpisodeIndex]:@{};NSString *episodeID=[oldEpisode[@"id"] description]?:@"",*episodeName=[oldEpisode[@"name"] description]?:@"";NSInteger oldIndex=self.selectedEpisodeIndex;
     self.generation++;[self.client cancel];[self.playSpinner stopAnimating];self.playSpinner.hidden=YES;self.selectedLineIndex=sender.tag;NSArray *newEpisodes=[self episodesForLine:self.selectedLineIndex];NSInteger match=-1;
-    for(NSUInteger index=0;index<newEpisodes.count;index++){NSDictionary *episode=newEpisodes[index];if((episodeID.length&&[[episode[@"id"] description] isEqual:episodeID])||(episodeName.length&&[[episode[@"name"] description] localizedCaseInsensitiveCompare:episodeName]==NSOrderedSame)){match=(NSInteger)index;break;}}
+    if(episodeID.length){for(NSUInteger index=0;index<newEpisodes.count;index++){NSDictionary *episode=newEpisodes[index];if([[episode[@"id"] description] isEqual:episodeID]){match=(NSInteger)index;break;}}}
+    if(match<0&&episodeName.length){for(NSUInteger index=0;index<newEpisodes.count;index++){NSDictionary *episode=newEpisodes[index];if([[episode[@"name"] description] localizedCaseInsensitiveCompare:episodeName]==NSOrderedSame){match=(NSInteger)index;break;}}}
     self.selectedEpisodeIndex=newEpisodes.count?(match>=0?match:MIN(MAX(0,oldIndex),(NSInteger)newEpisodes.count-1)):0;self.page=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,newEpisodes.count,self.episodeOrderReversed);self.statusLabel.text=@"";self.statusLabel.hidden=YES;[self rebuildSelection];
 }
 - (void)selectSeason:(UIButton *)sender {

@@ -8,6 +8,12 @@
 #import "MediaSearchResults.h"
 #import <math.h>
 
+static void MediaSearchLoadPosterWithRetry(NSString *url, UIImageView *view, NSUInteger retriesRemaining);
+static void MediaSearchLoadPosterWithRetry(NSString *url, UIImageView *view, NSUInteger retriesRemaining) {
+    if(!url.length||!view)return;__weak UIImageView *weakView=view;
+    [HostImageLoader.shared loadPosterURL:url intoImageView:view completion:^(BOOL succeeded,NSTimeInterval retryAfter){if(succeeded||!retriesRemaining||retryAfter<=0)return;NSTimeInterval delay=MIN(120.0,MAX(1.0,retryAfter+0.25));dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{UIImageView *current=weakView;if(current&&current.window&&[current.accessibilityIdentifier isEqualToString:url])MediaSearchLoadPosterWithRetry(url,current,retriesRemaining-1);});}];
+}
+
 static const NSUInteger MediaGlobalSearchMaximumResults = 100;
 static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 
@@ -715,7 +721,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         resultCell.sourceLabel.text=[NSString stringWithFormat:@"%@ · %@",MediaSearchText(source[@"name"]),MediaSearchText(entry[@"providerName"])];
         resultCell.nameLabel.textColor=HostText();resultCell.metadataLabel.textColor=HostSecondaryText();resultCell.sourceLabel.textColor=HostAccent();resultCell.poster.backgroundColor=HostNeutralSurface();
         resultCell.poster.image=[UIImage systemImageNamed:@"film" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:24 weight:UIImageSymbolWeightRegular]];resultCell.poster.tintColor=HostSecondaryText();resultCell.poster.accessibilityIdentifier=nil;
-        NSString *poster=MediaSearchText(item[@"poster"]);resultCell.poster.contentMode=poster.length?UIViewContentModeScaleAspectFill:UIViewContentModeCenter;if(poster.length)[HostImageLoader.shared loadURL:poster intoImageView:resultCell.poster];
+        NSString *poster=MediaSearchText(item[@"poster"]);resultCell.poster.contentMode=poster.length?UIViewContentModeScaleAspectFill:UIViewContentModeCenter;if(poster.length)MediaSearchLoadPosterWithRetry(poster,resultCell.poster,1);
         cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;cell.selectionStyle=UITableViewCellSelectionStyleDefault;
         cell.accessibilityLabel=[NSString stringWithFormat:@"%@，%@，%@",resultCell.nameLabel.text,resultCell.metadataLabel.text,resultCell.sourceLabel.text];
     }

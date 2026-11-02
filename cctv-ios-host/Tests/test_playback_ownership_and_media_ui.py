@@ -199,6 +199,43 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('NSString *query=self.searchQuery?:@""', RESOURCE_SOURCE)
         self.assertIn('self.resourceActionsButton.hidden=YES', ROOT_SOURCE)
 
+    def test_movie_posters_keep_a_fallback_and_retry_once_after_transient_failure(self):
+        self.assertIn('loadPosterURL:(NSString *)url intoImageView:(UIImageView *)imageView completion:', (SOURCES / "HostImageLoader.h").read_text(encoding="utf-8"))
+        self.assertIn('imageView.image=[UIImage systemImageNamed:@"film"]', IMAGE_SOURCE)
+        self.assertIn('observer.completion(image!=nil,image?0:retryAfter)', IMAGE_SOURCE)
+        self.assertIn('loadPosterURL:url intoImageView:imageView completion:', BROWSER_SOURCE)
+        self.assertIn('posterRetryCount', BROWSER_SOURCE)
+        self.assertIn('MediaSearchLoadPosterWithRetry(poster,resultCell.poster,1)', (SOURCES / "MediaGlobalSearchViewController.m").read_text(encoding="utf-8"))
+
+    def test_home_and_listing_payloads_filter_bad_rows_and_never_insert_nil_ids(self):
+        listing = method_body(BROWSER_SOURCE, "- (void)loadListing:(BOOL)append")
+        home = method_body(BROWSER_SOURCE, "- (void)applyHomeResult:(NSDictionary *)result")
+        self.assertIn('![result isKindOfClass:NSDictionary.class]', listing)
+        self.assertIn('![result[@"items"] isKindOfClass:NSArray.class]', listing)
+        self.assertIn('MediaBrowserDictionaryRows(result[@"items"]', listing)
+        self.assertIn('MediaBrowserItemIdentity(item)', listing)
+        self.assertNotIn('addObject:item[@"id"]', listing)
+        self.assertIn('MediaBrowserDictionaryRows(result[@"items"]', home)
+        self.assertIn('discarded_item_count', home)
+
+    def test_detail_refresh_keeps_stable_episode_identity_and_player_syncs_parent(self):
+        restore = method_body(BROWSER_SOURCE, "- (void)restoreSelectionFromDetail:")
+        inline = method_body(BROWSER_SOURCE, "- (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context")
+        player_update = method_body(PLAYBACK_SOURCE, "- (void)updateEpisodeTitle")
+        self.assertIn('lineID.length', restore)
+        self.assertIn('episodeID.length', restore)
+        self.assertIn('onEpisodeSelectionChanged', inline)
+        self.assertIn('owner.selectedEpisodeIndex=episodeIndex', inline)
+        self.assertIn('updatedContext[@"episodeIndex"]', player_update)
+        self.assertIn('if(self.onEpisodeSelectionChanged)self.onEpisodeSelectionChanged(self.context)', player_update)
+
+    def test_episode_selection_refresh_prefers_ids_before_names(self):
+        refresh = method_body(EPISODE_SOURCE, "- (void)refreshDetail")
+        self.assertIn('MediaEpisodeSelectionSanitizedDetail(result)', refresh)
+        self.assertIn('if(lineID.length)', refresh)
+        self.assertIn('if(!lineMatched&&lineName.length)', refresh)
+        self.assertIn('if(!episodeMatched&&episodeName.length)', refresh)
+
 
 if __name__ == "__main__":
     unittest.main()
