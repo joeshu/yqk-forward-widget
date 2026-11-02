@@ -105,7 +105,7 @@ class NativeMediaAPITests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 executable = str(pathlib.Path(tmp) / "native-media-api-tests")
                 build = subprocess.run([
-                    "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-framework", "QuartzCore",
+                    "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-framework", "QuartzCore", "-lz",
                     "-I", str(root / "Sources"), str(root / "Tests" / "native_media_api_tests.m"),
                     str(root / "Sources" / "MediaAPIClient.m"),
                     str(root / "Sources" / "TVBoxCatalogStore.m"),

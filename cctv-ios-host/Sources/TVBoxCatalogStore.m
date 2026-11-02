@@ -60,7 +60,7 @@ static NSData *TVBoxZIPData(NSDictionary<NSString *,NSData *> *files,NSError **e
         TVBoxAppendLE32(central,0x02014b50);TVBoxAppendLE16(central,20);TVBoxAppendLE16(central,20);TVBoxAppendLE16(central,0x0800);TVBoxAppendLE16(central,8);TVBoxAppendLE16(central,0);TVBoxAppendLE16(central,0x0021);TVBoxAppendLE32(central,crc);TVBoxAppendLE32(central,(uint32_t)compressed.length);TVBoxAppendLE32(central,(uint32_t)plain.length);TVBoxAppendLE16(central,(uint16_t)name.length);TVBoxAppendLE16(central,0);TVBoxAppendLE16(central,0);TVBoxAppendLE16(central,0);TVBoxAppendLE16(central,0);TVBoxAppendLE32(central,0);TVBoxAppendLE32(central,offset);[central appendData:name];entryCount++;
     }
     if(entryCount>UINT16_MAX||archive.length>UINT32_MAX||central.length>UINT32_MAX){if(error)*error=TVBoxError(@"资源 ZIP 超过经典 ZIP 格式限制");return nil;}
-    [archive appendData:central];TVBoxAppendLE32(archive,0x06054b50);TVBoxAppendLE16(archive,0);TVBoxAppendLE16(archive,0);TVBoxAppendLE16(archive,(uint16_t)entryCount);TVBoxAppendLE16(archive,(uint16_t)entryCount);TVBoxAppendLE32(archive,(uint32_t)central.length);TVBoxAppendLE32(archive,(uint32_t)(archive.length-central.length));TVBoxAppendLE16(archive,0);return archive;
+    uint32_t centralOffset=(uint32_t)archive.length;[archive appendData:central];TVBoxAppendLE32(archive,0x06054b50);TVBoxAppendLE16(archive,0);TVBoxAppendLE16(archive,0);TVBoxAppendLE16(archive,(uint16_t)entryCount);TVBoxAppendLE16(archive,(uint16_t)entryCount);TVBoxAppendLE32(archive,(uint32_t)central.length);TVBoxAppendLE32(archive,centralOffset);TVBoxAppendLE16(archive,0);return archive;
 }
 
 static NSString *TVBoxBasicAuthorization(NSURLComponents *parts) {
