@@ -6,6 +6,7 @@ available, the source keeps its signed CENC route and decrypts it on demand
 through CCTVHost's managed localProxy. Preview remains explicitly marked.
 """
 import argparse
+import ast
 import copy
 import email.utils
 import http.cookiejar
@@ -37,7 +38,8 @@ def _trace(event, **fields):
     # CCTVHost retains stderr even when it replaces a source's empty result
     # with NO_MEDIA. Never include media URLs, headers, cookies or error bodies.
     allowed = ('series_id', 'episode_id', 'preview', 'status', 'failure_stage',
-               'error_code', 'retryable', 'elapsed_ms')
+               'error_code', 'retryable', 'elapsed_ms', 'quality', 'width', 'height',
+               'target_level_idc', 'patched_fields')
     record = {'event': event, 'source_version': VERSION}
     record.update((key, fields[key]) for key in allowed if key in fields)
     try:
@@ -1286,9 +1288,51 @@ def _signed_model(vid):
         return None
     lst = vm.get("video_list")
     if isinstance(lst, list):
-        vm["video_list"] = {str(x.get("definition") or i): x for i, x in enumerate(lst)}
+        videos = {}
+        for i, item in enumerate(lst):
+            if isinstance(item, dict):
+                videos[_video_quality(item, str(i))] = item
+        vm["video_list"] = videos
     _SIGN_CACHE[str(vid)] = (_time.time(), vm)
     return vm
+
+
+def _video_metadata(item):
+    """Parse the provider's Python-dict video_meta string safely."""
+    if not isinstance(item, dict):
+        return {}
+    value = item.get("video_meta") or item.get("videoMeta") or item.get("meta")
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or len(value) > 65536:
+        return {}
+    try:
+        parsed = _json.loads(value)
+    except (ValueError, TypeError):
+        try:
+            parsed = ast.literal_eval(value)
+        except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+            return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _video_quality(item, fallback=""):
+    metadata = _video_metadata(item)
+    for candidate in (item.get("definition"), metadata.get("definition"),
+                      item.get("quality_name"), metadata.get("quality_name")):
+        if candidate is None:
+            continue
+        quality = str(candidate).strip().lower().replace(" ", "")
+        if quality.isdigit():
+            quality += "p"
+        if quality in _QORDER:
+            return quality
+    gear = str(item.get("gear_des_key") or "")
+    match = _re.search(r"(?:^|\|)4:(1080p|720p|540p|480p|360p)(?=\||$)", gear, _re.I)
+    if match:
+        return match.group(1).lower()
+    fallback = str(fallback).strip().lower()
+    return fallback if fallback in _QORDER else fallback
 
 
 def _pick_best(vm, want):
@@ -1296,9 +1340,12 @@ def _pick_best(vm, want):
     vl = (vm or {}).get("video_list") or {}
     cands = []
     for k, it in vl.items():
-        q = str(it.get("definition") or k)
+        q = _video_quality(it, str(k))
         gear = str(it.get("gear_des_key") or "")
+        metadata = _video_metadata(it)
         bad = 1 if ("bytevc2" in gear or "bvc2" in gear) else 0
+        if str(metadata.get("vtype") or "").lower() in ("bytevc2", "bvc2"):
+            bad = 1
         order = _QORDER.index(q) if q in _QORDER else 99
         cands.append((bad, order, q, it))
     if not cands:
@@ -1765,6 +1812,7 @@ def _decrypt_to_file(vid, want):
     it, q = _pick_best(vm, want)
     if not it:
         return None
+    _trace("hgtv_quality_selected", episode_id=vid, quality=q)
     dst = _os.path.join(_DEC_DIR, "%s_%s.mp4" % (vid, q))
 
     # 顺手清掉同一集的其它无效缓存（修复前留下的加密档/截断档）
@@ -1961,7 +2009,7 @@ def resolve_signed(sid, vid, preview=False, host_proxy=False, want=None):
         if not selected:
             raise SourceError("签名接口没有可播放画质", stage="resolve_api", code="provider_video_unavailable", retryable=False)
         _item, quality = selected
-        _trace("hgtv_signed_queued", episode_id=vid)
+        _trace("hgtv_signed_queued", episode_id=vid, quality=quality)
         return ("cenc://%s?q=%s" % (vid, quality), ORIGIN + "/", None)
     if not ensure_signed_service():
         raise SourceError("本地解密服务启动失败", stage="resolve_api", code="signed_service_unavailable", retryable=False)

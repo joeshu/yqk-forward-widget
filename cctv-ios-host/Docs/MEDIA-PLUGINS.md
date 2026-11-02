@@ -124,7 +124,7 @@ Python Spider 为兼容非线程安全脚本仍串行执行；代理调用等待
 Node.js Mobile 资源也可导出 `localProxy(params)`。Node 回调如果需要传输大文件，可把完成的媒体放在该资源的数据目录内，并将第三项设为
 `{__cctvhostFileResponse: true, path, offset, length}`。宿主会校验真实路径仍位于该资源数据目录、文件范围有效且单次响应不超过 16 MiB，随后从文件读取 Range 分片；视频内容不经过 2 MiB 的 Node JSON 控制桥。HEAD 保留声明的 `Content-Length`，但不读取文件内容。文件引用只供 Node 宿主内部使用，Python Spider 应继续直接返回 bytes。
 
-`Examples/hgtv-python-1.0.4`、`Examples/hgtv-python` 和 `Examples/hgtv-node` 提供红果 1.0.4/1.0.5 的导入示例。Python 版本在宿主提供的 `hostcrypto.AES_CTR` 上完成 CENC 解密，不要求 iPhone 内有 ffmpeg；公开地址不可用时由 `localProxy` 下载、解密并按播放器 Range 请求交付。解密后的 HEVC MP4 会按画面尺寸修正过高的 Level 标记，并设置 `hvc1` 文件品牌，避免部分 AVFoundation 硬件解码器误判视频轨。Node 版本走 Node 原生 AES-CTR，并使用受限数据目录文件引用传输媒体。对应 ZIP 包根目录都带有 `cctvhost.json`。
+`Examples/hgtv-python-1.0.4`、`Examples/hgtv-python` 和 `Examples/hgtv-node` 提供红果 1.0.4/1.0.5 的导入示例。Python 版本解析供应商的 `video_meta` 画质字段，默认选最高可用档（通常 1080p）；在宿主提供的 `hostcrypto.AES_CTR` 上完成 CENC 解密，不要求 iPhone 内有 ffmpeg。公开兼容地址可用时直接播放；否则由 `localProxy` 解密并按播放器 Range 请求交付。解密后的 HEVC MP4 会按画面尺寸修正过高的 Level 标记，并设置 `hvc1` 文件品牌，避免部分 AVFoundation 硬件解码器误判视频轨。Node 版本走 Node 原生 AES-CTR，并使用受限数据目录文件引用传输媒体。对应 ZIP 包根目录都带有 `cctvhost.json`。
 
 示例 `Plugins/example-encrypted-media.py` 使用标准库解析 MP4、按样本解密并支持 Range；资源的「插件选项」JSON
 可通过 `items` 配置分集 URL、32 位十六进制 AES-128 密钥和请求头。模板支持未分片 MP4、`stsz/stsc/stco`

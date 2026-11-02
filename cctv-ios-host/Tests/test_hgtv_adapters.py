@@ -207,6 +207,22 @@ class HgtvAdapterTests(unittest.TestCase):
         self.assertEqual(headers['Content-Range'], 'bytes 0-3/%d' % self.decrypted_path.stat().st_size)
         self.assertEqual(body, self.decrypted_path.read_bytes()[:4])
 
+    def test_signed_quality_uses_nested_video_meta_and_defaults_to_highest(self):
+        items = {
+            '0': {'video_meta': "{'definition': '360p', 'vwidth': 360, 'vheight': 640}",
+                  'gear_des_key': '2:h265_hvc1|4:360p|5:normal'},
+            '1': {'video_meta': '{"definition":"720p","vwidth":720,"vheight":1280}',
+                  'gear_des_key': '2:h265_hvc1|4:720p|5:normal'},
+            '2': {'video_meta': "{'definition': '1080p', 'vwidth': 1080, 'vheight': 1920}",
+                  'gear_des_key': '2:h265_hvc1|4:1080p|5:normal'},
+        }
+        for module in (hgtv, hgtv104):
+            with self.subTest(version=module.VERSION):
+                picked = module._pick_best({'video_list': items}, None)
+                self.assertEqual(picked[1], '1080p')
+                self.assertEqual(module._pick_best({'video_list': items}, '360p')[1], '360p')
+                self.assertEqual(module._hevc_compat_level(1080, 1920), 123)
+
     def test_python_104_play_uses_host_proxy_and_returns_media_bytes(self):
         class HTTP:
             cache = hgtv104.BoundedCache()
