@@ -953,6 +953,16 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('httpCookieStore setCookie:item', webview)
         self.assertIn('WKWebsiteDataStore.nonPersistentDataStore', webview)
 
+    def test_parser_marked_source_plays_inside_the_app_without_external_handoff(self):
+        route = self.playback[self.playback.index('BOOL directMedia='):
+                              self.playback.index('self.hasDiagnosticTimeControlStatus=NO;', self.playback.index('BOOL directMedia='))]
+        self.assertIn('result[@"parse"]', route)
+        self.assertIn('result[@"jx"]', route)
+        self.assertIn('MediaWebViewController *web=[[MediaWebViewController alloc] initWithResult:result', route)
+        self.assertIn('[[UINavigationController alloc] initWithRootViewController:web]', route)
+        self.assertIn('[self presentViewController:nav animated:YES completion:nil]', route)
+        self.assertNotIn('openURL:', route)
+
     def test_no_media_error_offers_the_original_episode_page_without_exposing_its_url(self):
         self.assertIn('MediaPlaybackEpisodePageFallbackURL', self.playback)
         self.assertIn('pluginCode isEqualToString:@"NO_MEDIA"', self.playback)

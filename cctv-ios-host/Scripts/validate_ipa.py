@@ -94,11 +94,11 @@ def validate(path):
                     'Crypto/PublicKey/__init__.py', 'Crypto/PublicKey/RSA.py',
                     'Crypto/Util/__init__.py', 'Crypto/Util/Padding.py', 'Crypto/Util/Counter.py',
                     'Crypto/Util/number.py', 'Crypto/Util/strxor.py',
-                    'Crypto/Hash/__init__.py', 'Crypto/Hash/HMAC.py', 'Crypto/Hash/CMAC.py',
+                    'Crypto/Hash/__init__.py', 'Crypto/Hash/MD5.py', 'Crypto/Hash/HMAC.py', 'Crypto/Hash/CMAC.py',
                     'Crypto/Protocol/__init__.py', 'Crypto/Protocol/KDF.py', 'Crypto/Random/__init__.py'):
                 assert root + 'python/lib/python3.13/site-packages/' + member in z.namelist(), 'missing pure-Python crypto compatibility module: ' + member
             assert root + 'python/lib/python3.13/site-packages/Cryptodome/__init__.py' in z.namelist(), 'missing Cryptodome namespace alias'
-            result['python_crypto_compat'] = ['AES ECB/CBC/CFB/OFB/CTR/GCM/EAX', 'RSA public-key PKCS#1 v1.5/OAEP', 'Hash/HMAC/CMAC', 'PBKDF2/HKDF', 'Padding/Counter/number/strxor']
+            result['python_crypto_compat'] = ['AES ECB/CBC/CFB/OFB/CTR/GCM/EAX', 'RSA public-key PKCS#1 v1.5/OAEP', 'MD5/Hash/HMAC/CMAC', 'PBKDF2/HKDF', 'Padding/Counter/number/strxor']
             result['local_media_runtimes'] = ['Python Spider', 'JavaScriptCore', 'drpy', 'Node.js Mobile']
         channels = json.loads(z.read(root + 'channels.json'))
         assert isinstance(channels, list) and channels, 'empty channel catalog'

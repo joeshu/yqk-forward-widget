@@ -113,6 +113,17 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(result['url'], 'https://fixture.test/video.m3u8?signature=a%2Bb')
         self.assertEqual(result['parse'], 0)
 
+    def test_youku_style_parser_result_stays_in_host_web_player(self):
+        page = 'https://v.youku.com/video?vid=fixture-show-id'
+        with mock.patch.object(self.engine.spider, 'playerContent', return_value={
+                'jx': 1, 'parse': 1, 'url': page, 'header': ''}):
+            result = self.runtime.call('play', {'lineId': '优酷', 'id': 'fixture-video-id'})
+        self.assertEqual(result['url'], page)
+        self.assertEqual(result['jx'], 1)
+        self.assertEqual(result['parse'], 1)
+        self.assertTrue(result['requiresWebPlayback'])
+        self.assertFalse(result['nativePlayable'])
+
     def test_empty_spider_play_result_uses_direct_episode_media_url(self):
         address = 'https://cdn.fixture.test/episode.m3u8?token=a%2Fb&expires=123'
         self.engine.spider.playerContent = lambda *_: None

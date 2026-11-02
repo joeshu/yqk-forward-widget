@@ -178,6 +178,8 @@ MacCMS JSON/XML 接口可在「资源 → ＋ → MacCMS 影视接口」单独�
 
 CatPaw Spider 的常用 `util/req.js`、`util/htmlParser.js`、缓存、并发、通用工具及运行时配置导入映射到本机兼容模块；`req.js` 提供域名隔离 Cookie、保存/恢复/清除接口。`axios`、`cheerio`、`crypto-js`、`iconv-lite`、`jpeg-js`、`http2`、`stream`、`qs` 等通过应用内的 JS 依赖注册表提供。`node:stream` 当前提供 `Readable.from`、`data/end` 事件和 `pipe` 常用能力；`fs` 只读 ZIP 文件，临时写入留在内存中，不会访问 iPhone 其它目录。ZIP 自带的其它 JS 依赖仍须保持在 ZIP 中。Fastify 标准 `get/post` 路由可在本机服务下调用；`/spider/<key>/3/...` 私有路由同样可从 AVPlayer 请求，适合返回重写后的 HLS 清单。`parse: 1` 会交给应用的网页播放页，`parse: 0` 则交给 AVPlayer；本机播放器不会把解析页面冒充媒体流。
 
+优酷 Python Spider 示例的 `playerContent()` 返回 `https://v.youku.com/video?vid=…` 网页，并标记 `jx: 1`、`parse: 1`；它没有返回媒体直链，也没有实现 `localProxy()`。宿主会在应用自己的 `WKWebView` 中打开这个网页，不会调用系统浏览器或外部解析 App。若网页暴露出可访问的媒体地址，可在网页页选择“原生播放”交给 AVPlayer；若优酷页面使用受保护或无法提取的媒体流，则只能由网页播放器播放，不能据此承诺原生 AVPlayer 直放。要保证某档画质由 AVPlayer 播放，Spider 必须返回真实的 HLS/MP4 地址及所需请求头，或实现兼容的本机 `localProxy()`；仅设置 `jx/parse` 代表网页播放，不代表已经解析出媒体。
+
 手动声明 CatPaw Spider 时使用：
 
 ```json
