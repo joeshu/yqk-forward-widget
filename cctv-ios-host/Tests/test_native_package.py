@@ -222,6 +222,23 @@ route='/all.m3u';body='#EXTM3U'
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['engine'], result['protocol']), ('javascript', 'catvod-js'))
 
+    def test_catvod_node_core_imports_are_routed_to_node_runtime(self):
+        source = "import http from 'node:http'; import https from 'node:https'; import crypto from 'node:crypto'; import fs from 'node:fs'; export default site=>({home(){return {class:[]}},category(){return {list:[]}},search(){return {list:[]}},detail(){return {list:[]}},play(){return {parse:0,url:'https://fixture.test'}}})"
+        result = self.inspect(self.archive({
+            'cctvhost.json': json.dumps({'entry': 'index.mjs', 'runtime': 'javascript',
+                                        'protocol': 'catvod-js', 'moduleType': 'esm'}),
+            'index.mjs': source}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol'], result['manifest']['moduleType']),
+                         ('node', 'catvod-js', 'esm'))
+
+        commonjs = self.inspect(self.archive({
+            'cctvhost.json': json.dumps({'entry': 'index.cjs', 'runtime': 'javascript',
+                                        'protocol': 'catvod-js', 'moduleType': 'commonjs'}),
+            'index.cjs': "const crypto=require('crypto'); module.exports={search(){return {list:[]}}}"}))
+        self.assertTrue(commonjs['ok'], commonjs)
+        self.assertEqual(commonjs['engine'], 'node')
+
     def test_python_spider_is_recognized_without_executing_user_code(self):
         marker = self.folder / 'must-not-run'
         file = self.folder / '看剧.py'

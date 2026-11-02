@@ -394,6 +394,27 @@ class NodeMediaHostTests(unittest.TestCase):
         self.assertEqual(self.call('play', lineId='线路', id='opaque/id')['result']['header']['Referer'], 'https://fixture.test/线路')
         self.assertTrue(self.call('stop')['ok'])
 
+    def test_catvod_esm_can_use_node_crypto_fs_http_and_https(self):
+        (self.package / 'index.mjs').write_text('''
+          import http from 'node:http';
+          import https from 'node:https';
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          let server;
+          export default () => ({
+            async init(){fs.writeFileSync('crypto-fixture.txt',crypto.createHash('sha256').update('abc').digest('hex'));server=http.createServer((_req,res)=>res.end('ok'));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))},
+            async search(){return {list:[{vod_id:String(server.address().port),vod_name:fs.readFileSync('crypto-fixture.txt','utf8')+':'+typeof https.request+':'+crypto.createHmac('sha256','key').update('abc').digest('hex')}]}},
+            async stop(){if(server)await new Promise(resolve=>server.close(resolve))}
+          });
+        ''')
+        reply = self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.mjs',
+                          protocol='catvod-js', moduleType='esm')
+        self.assertTrue(reply['ok'], reply)
+        row = self.call('search')['result']['list'][0]
+        self.assertTrue(int(row['vod_id']) > 0)
+        self.assertEqual(row['vod_name'], 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad:function:9c196e32dc0175f86f4b1cb89289d6619de6bee699e4c378e68309ed97a1a6ab')
+        self.assertTrue(self.call('stop')['ok'])
+
     def test_path_escape_and_plugin_process_exit_are_reported_without_killing_host(self):
         (self.package / 'index.cjs').write_text("module.exports={search(){process.exit(1)}}")
         reply = self.call('start', packageRoot=str(self.root), dataDirectory=str(self.data), entry='outside.cjs')

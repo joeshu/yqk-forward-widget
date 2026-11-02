@@ -227,6 +227,12 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         BOOL commonJS=[entry.pathExtension.lowercaseString isEqual:@"cjs"] || [text rangeOfString:@"(?:^|[;\\n])\\s*(?:module\\s*\\.\\s*exports|exports\\s*\\.)" options:NSRegularExpressionSearch].location!=NSNotFound;
         moduleType=esmSource?@"esm":((commonJS||bundledCommonJS)?@"commonjs":@"script");
     }
+    // Explicit Node core imports need Node.js Mobile. The JSC import registry
+    // contains convenience shims, not full Node APIs (notably crypto, fs,
+    // http and https), so run these packages against Node's actual modules.
+    NSString *nodeCorePattern=@"(?:from\\s*|import\\s*(?:\\(\\s*)?|require\\s*\\(\\s*)['\\\"](?:node:[^'\\\"]+|(?:assert|async_hooks|buffer|child_process|crypto|dgram|diagnostics_channel|dns|events|fs|http2?|https|module|net|os|path|perf_hooks|process|punycode|querystring|readline|stream|string_decoder|timers|tls|tty|url|util|v8|vm|wasi|worker_threads|zlib)(?:/(?:promises|consumers|web|types))?)['\\\"]";
+    BOOL nodeCoreImport=[serviceText rangeOfString:nodeCorePattern options:NSRegularExpressionSearch].location!=NSNotFound;
+    if(nodeCoreImport && ![protocol isEqual:@"catvod-spider"] && !hamoSourceV3)runtime=@"node";
     if(!runtime.length){
         NSDictionary *dependencies=[package[@"dependencies"] isKindOfClass:NSDictionary.class]?package[@"dependencies"]:@{};
         BOOL hasCommonJSRequire=[text rangeOfString:@"\\brequire\\s*\\(\\s*['\\\"]" options:NSRegularExpressionSearch].location!=NSNotFound;

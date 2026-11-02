@@ -54,3 +54,10 @@ The catalog redirect, relative-API, MacCMS type 0, Basic-auth sanitization,
 source update, large-catalog, crypto-compatibility, and local encrypted-stream
 behaviors have regression coverage. The Foundation/QuartzCore native tests and
 an iOS IPA build require macOS and did not run in this Linux workspace.
+
+TVBox/CatVod JavaScript sources that import Node core modules are assigned to
+Node.js Mobile, even if an older saved manifest says `runtime: javascript`.
+This gives `node:crypto`, `node:fs`, `node:http`, and `node:https` their actual
+Node APIs instead of the JavaScriptCore convenience shims. The package must
+still include its JavaScript dependencies; iOS does not support native `.node`
+addons, child processes, or Worker threads.

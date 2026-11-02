@@ -46,7 +46,18 @@ PyCryptodome：RSA 私钥运算与签名、ECC、DES/3DES、ChaCha20、CCM 和�
 
 ## ZIP 清单
 
-ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。存在清单时优先使用清单，否则尝试 package.json 和常见入口。CommonJS 代码使用静态 `require("...")` 或 `package.json` 声明 dependencies 时，未指定运行时时默认选择 Node.js Mobile；drpy 等专用协议仍使用 JavaScriptCore。旧版本已导入的无清单 Node/CommonJS 资源会在下次启动时重新识别。Node 包需要在 ZIP 内带齐它使用的 `node_modules`，应用不会联网安装 npm 依赖。无法确定入口时会明确报错。
+ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。存在清单时优先使用清单，否则尝试 package.json 和常见入口。CommonJS 代码使用静态 `require("...")` 或 `package.json` 声明 dependencies 时，未指定运行时时默认选择 Node.js Mobile。入口导入 `node:*` 核心模块或 Node 内置模块（如 `crypto`、`fs`、`http`、`https`）时也会选择 Node.js Mobile，包括清单误标为 `javascript` 的 CatVod 源；旧版本已导入的资源会在下次启动时重新识别。CatPaw Spider、Hamo 等专用协议仍遵守各自运行时要求。Node 包需要在 ZIP 内带齐它使用的 `node_modules`，应用不会联网安装 npm 依赖。无法确定入口时会明确报错。
+
+Node 核心模块按下表处理：
+
+| 模块 | JavaScriptCore 兼容层 | Node.js Mobile |
+| --- | --- | --- |
+| `node:crypto` | 只有常见摘要、HMAC、随机数等轻量适配 | Node 原生 Crypto API |
+| `node:fs` | ZIP 只读及内存临时文件子集 | Node 文件 API；相对路径落在资源数据目录 |
+| `node:http` / `node:https` | 不提供 Node 兼容实现 | Node HTTP/HTTPS API |
+| `node:stream` / `node:buffer` / `node:url` | 有常用适配子集 | Node 原生 API |
+
+包含 Node 核心模块导入的影视源会交给 Node.js Mobile，避免把部分 JSC 适配误认为完整 Node 模块。Node 宿主仍禁用 `child_process`、Worker 和任意 `.node` 扩展。
 
 ```json
 {
