@@ -1150,6 +1150,11 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('tvboxLiveSelection.%@', live_loader)
         self.assertIn('tvboxCatalogID', live_loader)
 
+    def test_explicit_maccms_web_pages_keep_the_web_playback_handoff(self):
+        api = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        self.assertIn('BOOL native=!webPage&&MediaPlaybackResultSupportsAVPlayer(result)', api)
+        self.assertIn('result[@"requiresWebPlayback"]=@(webPage||!native)', api)
+
 
 if __name__ == '__main__':
     unittest.main()
