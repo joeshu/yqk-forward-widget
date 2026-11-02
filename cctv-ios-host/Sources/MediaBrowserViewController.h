@@ -10,6 +10,10 @@
 /// Saved TVBox collections are listed alongside resources and opened only when selected.
 @property(nonatomic, copy) NSArray<NSDictionary *> *(^catalogsProvider)(void);
 @property(nonatomic, copy) void (^onOpenTVBoxCatalog)(NSString *catalogID);
+/// Loads only the selected script site from the current catalog.
+@property(nonatomic, copy) void (^onImportCatalogSite)(NSDictionary *site,NSString *catalogID);
+/// Adds the selected playlist from a grouped live catalog.
+@property(nonatomic, copy) void (^onSubscribeCatalogLive)(NSDictionary *live,NSString *catalogID);
 @property(nonatomic, copy) void (^onActivateService)(NSDictionary *service,void (^completion)(NSError *error));
 @property(nonatomic, copy) void (^onRestartService)(NSDictionary *service,void (^completion)(NSError *error));
 - (void)checkCurrentService;

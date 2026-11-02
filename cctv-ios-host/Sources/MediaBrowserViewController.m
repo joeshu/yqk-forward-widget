@@ -869,6 +869,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 @property(nonatomic, copy) NSDictionary *source;
 @property(nonatomic, copy) NSArray<NSDictionary *> *providers;
 @property(nonatomic, copy) NSString *provider;
+@property(nonatomic,copy) NSString *selectedCatalogID;
 @property(nonatomic, copy) NSArray<NSDictionary *> *items;
 @property(nonatomic, copy) NSString *category;
 @property(nonatomic, copy) NSString *keyword;
@@ -950,6 +951,10 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)performHomeStatusAction;
 - (BOOL)isHomePageVisible;
 - (void)updateSelectionControls;
+- (NSDictionary *)selectedCatalog;
+- (NSDictionary *)sourceForCatalogSite:(NSDictionary *)site catalog:(NSDictionary *)catalog;
+- (void)selectCatalogResource:(NSDictionary *)catalog;
+- (void)chooseCatalogProvider;
 - (UIButton *)homeToolbarButtonWithSymbol:(NSString *)symbol identifier:(NSString *)identifier label:(NSString *)label action:(SEL)action;
 - (NSArray<NSDictionary *> *)homeGridItems;
 - (void)updateHomeGridLayout;
@@ -1101,12 +1106,16 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     [self.navigationController pushViewController:page animated:YES];
 }
 - (void)updateSelectionControls {
+    NSString *sourceCatalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");
+    if(!self.selectedCatalogID.length&&sourceCatalogID.length)self.selectedCatalogID=sourceCatalogID;
+    NSDictionary *catalog=[self selectedCatalog];NSString *catalogName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"";
     NSString *sourceName=[self.source[@"name"] isKindOfClass:NSString.class]?self.source[@"name"]:@"";
-    NSString *sourceTitle=sourceName.length?sourceName:@"选择影视资源或合集";
+    BOOL sourceBelongsToCatalog=catalogName.length&&[sourceCatalogID isEqual:catalog[@"id"]];
+    NSString *sourceTitle=catalogName.length?catalogName:(sourceName.length?sourceName:@"选择影视资源或合集");
     [self.sourceSelectButton setTitle:[NSString stringWithFormat:@"%@  ▾",sourceTitle] forState:UIControlStateNormal];
-    self.sourceSelectButton.accessibilityLabel=sourceName.length?[NSString stringWithFormat:@"影视资源：%@，点按切换",sourceName]:@"选择影视资源或合集";
-    self.sourceSelectButton.accessibilityHint=@"打开影视资源与资源合集；选择合集后可按需加载单个站点";
-    NSString *providerTitle=nil;
+    self.sourceSelectButton.accessibilityLabel=sourceTitle.length?[NSString stringWithFormat:@"影视资源：%@，点按切换",sourceTitle]:@"选择影视资源或合集";
+    self.sourceSelectButton.accessibilityHint=@"打开影视资源合集；只在二级列表中加载所选站点";
+    NSString *providerTitle=sourceBelongsToCatalog?sourceName:nil;
     NSString *providerID=self.provider;
     NSString *savedProviderKey=[NSString stringWithFormat:@"mediaProvider.%@",self.source[@"id"]?:@""];
     NSString *savedProviderID=[NSUserDefaults.standardUserDefaults stringForKey:savedProviderKey];
@@ -1116,16 +1125,17 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
         NSString *savedName=[NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"mediaProviderName.%@",self.source[@"id"]?:@""]];
         providerTitle=[savedProviderID isEqualToString:providerID]&&savedName.length?savedName:providerID;
     }
-    BOOL directAPI=MediaSourceUsesNativeCatalogAPI(self.source);
+    BOOL directAPI=MediaSourceUsesNativeCatalogAPI(self.source)&&!catalogName.length;
     NSArray *capabilities=[self.source[@"capabilities"] isKindOfClass:NSArray.class]?self.source[@"capabilities"]:@[];
-    NSString *emptySiteTitle=!self.source?@"选择站点":(self.pendingProviderPickerAfterLoad?@"正在读取站点…":(self.loading?@"加载站点…":(!capabilities.count||[capabilities containsObject:@"providers"]||!self.client||self.sourceInvalidated?@"选择站点":@"无站点")));
+    NSString *emptySiteTitle=catalogName.length?@"选择站点":(!self.source?@"选择站点":(self.pendingProviderPickerAfterLoad?@"正在读取站点…":(self.loading?@"加载站点…":(!capabilities.count||[capabilities containsObject:@"providers"]||!self.client||self.sourceInvalidated?@"选择站点":@"无站点"))));
     NSString *siteTitle=directAPI?@"单站点资源":(providerTitle.length?providerTitle:emptySiteTitle);
     self.providerSelectButton.hidden=directAPI&&!self.homeMode;
-    [self.providerSelectButton setTitle:[NSString stringWithFormat:@"%@%@",siteTitle,directAPI?@"":@"  ▾"] forState:UIControlStateNormal];
-    self.providerSelectButton.enabled=!directAPI&&self.source!=nil&&!(self.pendingProviderPickerAfterLoad&&self.loading);
+    BOOL catalogSelector=catalogName.length>0;
+    [self.providerSelectButton setTitle:[NSString stringWithFormat:@"%@%@",siteTitle,(directAPI||(!catalogSelector&&!self.source))?@"":@"  ▾"] forState:UIControlStateNormal];
+    self.providerSelectButton.enabled=catalogSelector||(!directAPI&&self.source!=nil&&!(self.pendingProviderPickerAfterLoad&&self.loading));
     self.providerSelectButton.alpha=self.providerSelectButton.enabled?1.0:0.62;
-    self.providerSelectButton.accessibilityLabel=directAPI?@"此资源为单站点接口":(providerTitle.length?[NSString stringWithFormat:@"影视站点：%@，点按切换",providerTitle]:@"选择影视站点");
-    self.providerSelectButton.accessibilityHint=self.pendingProviderPickerAfterLoad?@"正在准备并读取站点列表":(self.providers.count?@"打开当前影视资源的站点列表":@"点按后按需准备资源并读取站点列表");
+    self.providerSelectButton.accessibilityLabel=directAPI?@"此资源为单站点接口":(providerTitle.length?[NSString stringWithFormat:@"内部站点：%@，点按切换",providerTitle]:@"选择内部站点");
+    self.providerSelectButton.accessibilityHint=catalogSelector?@"打开此合集中的站点列表；只加载点选的站点":(self.pendingProviderPickerAfterLoad?@"正在准备并读取站点列表":(self.providers.count?@"打开当前影视资源的站点列表":@"点按后按需准备资源并读取站点列表"));
 }
 - (void)setBrowseControlsHidden:(BOOL)hidden {
     BOOL hasCategories=self.categories.arrangedSubviews.count>0&&[MediaHomeEnabledModules() containsObject:@"catalog"];
@@ -1496,8 +1506,11 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)loadSources {
     self.sources=self.sourcesProvider?self.sourcesProvider():@[];
-    if(!self.sources.count){self.source=nil;self.providers=@[];[self updateSelectionControls];[self refreshHomeModules];if(self.deferAutomaticLoading){self.homeLoadDeferred=YES;[self showMessage:@"尚未导入影视资源" loading:NO];}return;}
-    NSString *saved=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaSource"];NSDictionary *selected=self.sources.firstObject;for(NSDictionary *source in self.sources)if([source[@"id"] isEqual:saved])selected=source;
+    if(!self.sources.count){self.source=nil;self.providers=@[];[self updateSelectionControls];[self refreshHomeModules];if(self.deferAutomaticLoading){self.homeLoadDeferred=YES;[self showMessage:[self selectedCatalog]?@"已选择资源合集 · 从右侧胶囊选择内部站点":@"尚未导入影视资源" loading:NO];}return;}
+    NSString *saved=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaSource"];NSDictionary *selected=nil;NSDictionary *catalog=[self selectedCatalog];
+    if(catalog){NSString *catalogID=catalog[@"id"]?:@"";for(NSDictionary *source in self.sources){NSString *memberID=[source[@"catalogID"] isKindOfClass:NSString.class]?source[@"catalogID"]:([source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?source[@"tvboxCatalogID"]:@"");if([source[@"id"] isEqual:saved]&&[memberID isEqual:catalogID]){selected=source;break;}}}
+    else{selected=self.sources.firstObject;for(NSDictionary *source in self.sources)if([source[@"id"] isEqual:saved]){selected=source;break;}}
+    if(catalog&&!selected){self.source=nil;self.providers=@[];self.provider=nil;self.homeLoadDeferred=YES;self.deferAutomaticLoading=YES;[self updateSelectionControls];[self refreshHomeModules];[self showMessage:@"已选择资源合集 · 从右侧胶囊选择内部站点" loading:NO];return;}
     self.source=selected;id savedHomeOffset=[NSUserDefaults.standardUserDefaults objectForKey:[self homeScrollOffsetKeyForSource:selected]];self.pendingHomeOffsetRestore=[savedHomeOffset respondsToSelector:@selector(doubleValue)]?savedHomeOffset:nil;[self updateSelectionControls];
     if(self.deferAutomaticLoading){
         self.homeLoadDeferred=YES;NSString *cachedProvider=@"";NSDictionary *cached=[self cachedHomeResultForSelectedProvider:&cachedProvider];
@@ -1511,6 +1524,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)loadHomeOnDemand {
     if(!self.homeLoadDeferred)return;
+    if(!self.source&&[self selectedCatalog]){self.nextHomeLoadTrigger=nil;[self chooseCatalogProvider];return;}
     if(!self.nextHomeLoadTrigger.length)self.nextHomeLoadTrigger=@"explicit_home_action";
     [RuntimeDiagnostics.shared recordEvent:@"media_home_user_load_requested" category:@"media_api" fields:@{@"service_id":self.source[@"id"]?:@"",@"cache_available":@(self.homeResult!=nil)}];
     self.deferAutomaticLoading=NO;self.homeLoadDeferred=NO;
@@ -1531,11 +1545,20 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     if(!updated.count){
         self.generation++;[self.readiness cancel];[self.client cancel];self.readiness=nil;self.client=nil;self.source=nil;[self clearHomeResult];self.provider=nil;self.providers=@[];self.items=@[];self.category=nil;self.keyword=@"";self.loading=NO;self.activeMediaOperation=nil;self.activeHomeRequestSourceID=nil;self.activeHomeRequestProviderID=nil;self.moreButton.hidden=YES;[self.grid reloadData];[self updateSelectionControls];[self refreshHomeModules];
         for(UIView *view in self.categories.arrangedSubviews.copy){[self.categories removeArrangedSubview:view];[view removeFromSuperview];}
+        if(self.homeMode&&[self selectedCatalog])[self showMessage:@"已选择资源合集 · 从右侧胶囊选择内部站点" loading:NO];
         return;
     }
     if(self.homeMode){NSString *saved=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaSource"];for(NSDictionary *candidate in updated)if(saved.length&&[candidate[@"id"] isEqual:saved]&&![candidate[@"id"] isEqual:self.source[@"id"]]){self.generation++;[self.readiness cancel];[self.client cancel];self.readiness=nil;self.client=nil;self.activeMediaOperation=nil;self.activeHomeRequestSourceID=nil;self.activeHomeRequestProviderID=nil;self.loading=NO;self.homeShelfRequestInFlight=NO;self.homeShelfQueueActive=NO;[self.homeCategoryLoadsInFlight removeAllObjects];self.source=candidate;[self clearHomeResult];self.provider=nil;self.providers=@[];self.items=@[];self.sourceInvalidated=NO;self.homeLoadDeferred=YES;[self.grid reloadData];[self updateSelectionControls];[self showMessage:@"影视来源已更新 · 点按加载首页" loading:NO];[self refreshHomeModules];return;}}
     for(NSDictionary *candidate in updated)if([candidate[@"id"] isEqual:self.source[@"id"]]){BOOL changed=![(candidate[@"packageRoot"]?:@"") isEqual:(self.source[@"packageRoot"]?:@"")]||![(candidate[@"api"]?:@"") isEqual:(self.source[@"api"]?:@"")];self.source=candidate;if(self.homeMode){if(changed){self.generation++;[self.readiness cancel];[self.client cancel];self.client=nil;self.activeMediaOperation=nil;self.activeHomeRequestSourceID=nil;self.activeHomeRequestProviderID=nil;self.loading=NO;self.homeShelfRequestInFlight=NO;self.homeShelfQueueActive=NO;[self.homeCategoryLoadsInFlight removeAllObjects];self.providers=@[];self.items=@[];self.homeCategories=@[];self.homeShelfGeneration=0;[self clearHomeResult];self.sourceInvalidated=NO;self.homeLoadDeferred=YES;[self showMessage:@"影视来源已更新 · 点按加载首页" loading:NO];} [self updateSelectionControls];[self refreshHomeModules];return;}if((self.sourceInvalidated||changed)&&MediaSourceUsesNativeCatalogAPI(candidate)){[self activate:candidate];return;}if((self.sourceInvalidated||changed)&&[PyHost isRunningServiceIdentifier:candidate[@"id"]]){[self activate:candidate];return;}if(changed)[self invalidateServiceIdentifier:candidate[@"id"]];[self updateSelectionControls];[self refreshHomeModules];return;}
     NSString *saved=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaSource"];NSDictionary *selected=updated.firstObject;
+    NSString *selectedCatalogID=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaCatalogID"]?:@"";NSDictionary *savedCatalog=[self selectedCatalog];BOOL selectedCatalogMemberFound=NO;
+    if(savedCatalog&&selectedCatalogID.length){for(NSDictionary *candidate in updated){NSString *memberID=[candidate[@"catalogID"] isKindOfClass:NSString.class]?candidate[@"catalogID"]:([candidate[@"tvboxCatalogID"] isKindOfClass:NSString.class]?candidate[@"tvboxCatalogID"]:@"");if([candidate[@"id"] isEqual:saved]&&[memberID isEqual:selectedCatalogID]){selectedCatalogMemberFound=YES;selected=candidate;break;}}}
+    else if(selectedCatalogID.length){self.selectedCatalogID=@"";[NSUserDefaults.standardUserDefaults removeObjectForKey:@"selectedMediaCatalogID"];selectedCatalogID=@"";}
+    if(self.homeMode&&savedCatalog&&!selectedCatalogMemberFound){
+        NSString *currentCatalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");
+        if(![currentCatalogID isEqual:selectedCatalogID]){self.generation++;[self.readiness cancel];[self.client cancel];[self.configurationClient cancel];self.readiness=nil;self.client=nil;self.source=nil;self.provider=nil;self.providers=@[];self.items=@[];self.homeCategories=@[];self.loading=NO;self.activeMediaOperation=nil;self.activeHomeRequestSourceID=nil;self.activeHomeRequestProviderID=nil;self.homeShelfRequestInFlight=NO;self.homeShelfQueueActive=NO;[self clearHomeResult];[self.grid reloadData];}
+        self.homeLoadDeferred=YES;self.deferAutomaticLoading=YES;[self updateSelectionControls];[self showMessage:@"已选择资源合集 · 从右侧胶囊选择内部站点" loading:NO];[self refreshHomeModules];return;
+    }
     for(NSDictionary *candidate in updated)if([candidate[@"id"] isEqual:saved]){selected=candidate;break;}
     if(self.homeMode){self.generation++;[self.readiness cancel];[self.client cancel];[self.configurationClient cancel];self.readiness=nil;self.client=nil;self.activeMediaOperation=nil;self.activeHomeRequestSourceID=nil;self.activeHomeRequestProviderID=nil;self.loading=NO;self.homeShelfRequestInFlight=NO;self.homeShelfQueueActive=NO;[self.homeCategoryLoadsInFlight removeAllObjects];self.source=selected;[self clearHomeResult];self.provider=nil;self.providers=@[];self.homeLoadDeferred=YES;[self updateSelectionControls];[self showMessage:@"影视来源已更新 · 请到资源页手动加载首页" loading:NO];[self refreshHomeModules];}
     else [self activate:selected];
@@ -1558,6 +1581,8 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     self.sources=self.sourcesProvider?self.sourcesProvider():@[];
     NSDictionary *target=nil;for(NSDictionary *candidate in self.sources)if([candidate[@"id"] isEqual:targetID]){target=candidate;break;}
     if(!target){[self updateSelectionControls];[self showMessage:@"此来源已从资源合集移除，请回到资源页重新选择" loading:NO];return;}
+    NSString *catalogID=[target[@"catalogID"] isKindOfClass:NSString.class]?target[@"catalogID"]:([target[@"tvboxCatalogID"] isKindOfClass:NSString.class]?target[@"tvboxCatalogID"]:@"");
+    if(catalogID.length){self.selectedCatalogID=catalogID;[NSUserDefaults.standardUserDefaults setObject:catalogID forKey:@"selectedMediaCatalogID"];}else{self.selectedCatalogID=@"";[NSUserDefaults.standardUserDefaults removeObjectForKey:@"selectedMediaCatalogID"];}
     [NSUserDefaults.standardUserDefaults setObject:targetID forKey:@"selectedMediaSource"];
     self.nextHomeLoadTrigger=@"resource_list_open";
     [self activate:target];
@@ -1570,11 +1595,47 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)chooseResource {
     NSArray<NSDictionary *> *catalogs=self.catalogsProvider?self.catalogsProvider():@[];
+    self.sources=self.sourcesProvider?self.sourcesProvider():self.sources?:@[];
     if(!self.sources.count&&!catalogs.count){[self openResources];return;}
-    NSMutableArray *choices=[NSMutableArray array];for(NSDictionary *source in self.sources){BOOL current=[source[@"id"] isEqual:self.source[@"id"]];NSString *engineValue=[source[@"engine"] isKindOfClass:NSString.class]?source[@"engine"]:@"";NSString *engine=engineValue.lowercaseString;NSString *scope=([engine containsString:@"python"]||[engine containsString:@"py"])?@"python":([engine containsString:@"node"])?@"node":([engine containsString:@"javascript"]||[engine isEqual:@"js"])?@"javascriptcore":@"other";NSString *scopeName=[scope isEqual:@"python"]?@"Python":([scope isEqual:@"node"]?@"Node.js":([scope isEqual:@"javascriptcore"]?@"JavaScriptCore":@"其他"));NSString *status=[source[@"status"] isKindOfClass:NSString.class]?source[@"status"]:@"已导入";NSString *name=[source[@"name"] isKindOfClass:NSString.class]?source[@"name"]:@"影视资源";NSString *url=[source[@"url"] isKindOfClass:NSString.class]?source[@"url"]:@"";NSString *subtitle=[NSString stringWithFormat:@"%@ · %@%@",scopeName,current?@"当前资源 · ":@"",status];[choices addObject:@{@"name":name,@"subtitle":subtitle,@"url":url,@"source":source,@"scope":scope,@"scopeName":scopeName,@"selected":@(current)}];}
-    for(NSDictionary *catalog in catalogs){NSString *catalogID=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"";if(!catalogID.length)continue;NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];NSArray *lives=[catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[];NSUInteger usable=0;for(NSDictionary *site in sites)if([site[@"supported"] boolValue])usable++;for(NSDictionary *live in lives)if([live[@"supported"] boolValue])usable++;NSString *catalogName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"资源合集";NSString *subtitle=[NSString stringWithFormat:@"按需选择 · %lu 个可用站点/清单 · 不会预载全部脚本",(unsigned long)usable];[choices addObject:@{@"name":[NSString stringWithFormat:@"合集 · %@",catalogName],@"subtitle":subtitle,@"catalogID":catalogID,@"scope":@"catalog",@"scopeName":@"资源合集",@"selected":@NO}];}
+    NSMutableArray *choices=[NSMutableArray array];for(NSDictionary *source in self.sources){NSString *memberID=[source[@"catalogID"] isKindOfClass:NSString.class]?source[@"catalogID"]:([source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?source[@"tvboxCatalogID"]:@"");if(memberID.length)continue;BOOL current=[source[@"id"] isEqual:self.source[@"id"]];NSString *engineValue=[source[@"engine"] isKindOfClass:NSString.class]?source[@"engine"]:@"";NSString *engine=engineValue.lowercaseString;NSString *scope=([engine containsString:@"python"]||[engine containsString:@"py"])?@"python":([engine containsString:@"node"])?@"node":([engine containsString:@"javascript"]||[engine isEqual:@"js"])?@"javascriptcore":@"other";NSString *scopeName=[scope isEqual:@"python"]?@"Python":([scope isEqual:@"node"]?@"Node.js":([scope isEqual:@"javascriptcore"]?@"JavaScriptCore":@"其他"));NSString *status=[source[@"status"] isKindOfClass:NSString.class]?source[@"status"]:@"已导入";NSString *name=[source[@"name"] isKindOfClass:NSString.class]?source[@"name"]:@"影视资源";NSString *url=[source[@"url"] isKindOfClass:NSString.class]?source[@"url"]:@"";NSString *subtitle=[NSString stringWithFormat:@"%@ · %@%@",scopeName,current?@"当前资源 · ":@"",status];[choices addObject:@{@"name":name,@"subtitle":subtitle,@"url":url,@"source":source,@"scope":scope,@"scopeName":scopeName,@"selected":@(current)}];}
+    for(NSDictionary *catalog in catalogs){NSString *catalogID=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"";if(!catalogID.length)continue;NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];NSArray *lives=[catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[];NSUInteger usable=0;for(NSDictionary *site in sites)if([site[@"supported"] boolValue])usable++;for(NSDictionary *live in lives)if([live[@"supported"] boolValue])usable++;NSString *catalogName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"资源合集";NSString *subtitle=[NSString stringWithFormat:@"一个资源站 · 按需选择 %lu 个内部站点/直播列表 · 点选后再加载",(unsigned long)usable];[choices addObject:@{@"name":catalogName,@"subtitle":subtitle,@"catalogID":catalogID,@"scope":@"catalog",@"scopeName":@"资源合集",@"selected":@([self.selectedCatalogID isEqual:catalogID])}];}
     MediaSourcePicker *picker=[[MediaSourcePicker alloc] initWithStyle:UITableViewStyleInsetGrouped];picker.screenTitle=@"选择影视资源或资源合集";picker.choices=choices;__weak typeof(self) weakSelf=self;
-    picker.onSelect=^(NSDictionary *choice){MediaBrowserViewController *owner=weakSelf;if(!owner)return;NSString *catalogID=[choice[@"catalogID"] isKindOfClass:NSString.class]?choice[@"catalogID"]:@"";if(catalogID.length){if(owner.onOpenTVBoxCatalog)owner.onOpenTVBoxCatalog(catalogID);return;}NSDictionary *source=choice[@"source"];if(source){owner.pendingProviderPickerAfterLoad=NO;owner.nextHomeLoadTrigger=@"resource_selector";if(owner.homeMode)[owner activate:source keepingHome:YES];else[owner activate:source];}};[self presentPicker:picker];
+    picker.onSelect=^(NSDictionary *choice){MediaBrowserViewController *owner=weakSelf;if(!owner)return;NSString *catalogID=[choice[@"catalogID"] isKindOfClass:NSString.class]?choice[@"catalogID"]:@"";if(catalogID.length){NSDictionary *catalog=nil;NSArray *availableCatalogs=owner.catalogsProvider?owner.catalogsProvider():@[];for(NSDictionary *item in availableCatalogs)if([item[@"id"] isEqual:catalogID]){catalog=item;break;}if(catalog)[owner selectCatalogResource:catalog];return;}NSDictionary *source=choice[@"source"];if(source){NSString *memberID=[source[@"catalogID"] isKindOfClass:NSString.class]?source[@"catalogID"]:([source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?source[@"tvboxCatalogID"]:@"");owner.selectedCatalogID=memberID;owner.deferAutomaticLoading=NO;owner.homeLoadDeferred=NO;if(memberID.length)[NSUserDefaults.standardUserDefaults setObject:memberID forKey:@"selectedMediaCatalogID"];else[NSUserDefaults.standardUserDefaults removeObjectForKey:@"selectedMediaCatalogID"];owner.pendingProviderPickerAfterLoad=NO;owner.nextHomeLoadTrigger=@"resource_selector";if(owner.homeMode)[owner activate:source keepingHome:YES];else[owner activate:source];}};[self presentPicker:picker];
+}
+- (NSDictionary *)selectedCatalog {
+    if(!self.selectedCatalogID.length){NSString *saved=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaCatalogID"];if(saved.length)self.selectedCatalogID=saved;}
+    NSArray *catalogs=self.catalogsProvider?self.catalogsProvider():@[];for(NSDictionary *catalog in catalogs)if([catalog[@"id"] isEqual:self.selectedCatalogID])return catalog;return nil;
+}
+- (NSDictionary *)sourceForCatalogSite:(NSDictionary *)site catalog:(NSDictionary *)catalog {
+    NSString *catalogID=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"",*key=[site[@"key"] isKindOfClass:NSString.class]?site[@"key"]:@"",*apiKind=[site[@"apiKind"] isKindOfClass:NSString.class]?site[@"apiKind"]:@"";
+    if(!self.sources)self.sources=self.sourcesProvider?self.sourcesProvider():@[];
+    NSString *nativeID=([apiKind isEqual:@"tvbox-api"]||[apiKind isEqual:@"maccms-api"])?[NSString stringWithFormat:@"%@:%@:%@",apiKind,catalogID,key]:@"";
+    for(NSDictionary *source in self.sources){if(nativeID.length&&[source[@"id"] isEqual:nativeID])return source;NSString *sourceCatalog=[source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?source[@"tvboxCatalogID"]:([source[@"catalogID"] isKindOfClass:NSString.class]?source[@"catalogID"]:@"");if(![sourceCatalog isEqual:catalogID])continue;NSArray *siteKeys=[source[@"tvboxSiteKeys"] isKindOfClass:NSArray.class]?source[@"tvboxSiteKeys"]:@[];if([source[@"tvboxSiteKey"] isEqual:key]||[siteKeys containsObject:key])return source;}
+    return nil;
+}
+- (void)selectCatalogResource:(NSDictionary *)catalog {
+    NSString *identifier=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"";if(!identifier.length)return;
+    [self saveCurrentBrowseState];self.selectedCatalogID=identifier;[NSUserDefaults.standardUserDefaults setObject:identifier forKey:@"selectedMediaCatalogID"];
+    NSString *sourceCatalog=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");
+    if(![sourceCatalog isEqual:identifier]){self.generation++;[self.readiness cancel];[self.client cancel];[self.configurationClient cancel];self.readiness=nil;self.client=nil;self.source=nil;self.provider=nil;self.providers=@[];self.loading=NO;self.homeStatusLoading=NO;self.activeMediaOperation=nil;self.activeHomeRequestSourceID=nil;self.activeHomeRequestProviderID=nil;self.homeShelfRequestInFlight=NO;self.homeShelfQueueActive=NO;self.homeLoadDeferred=YES;self.items=@[];self.homeCategories=@[];self.category=nil;self.keyword=@"";self.selectedFilters=[NSMutableDictionary dictionary];[NSUserDefaults.standardUserDefaults removeObjectForKey:@"selectedMediaSource"];[self clearHomeResult];[self.grid reloadData];}
+    self.deferAutomaticLoading=YES;[self updateSelectionControls];[self showMessage:[NSString stringWithFormat:@"已选择 %@ · 从二级胶囊选择内部站点",catalog[@"name"]?:@"资源合集"] loading:NO];
+}
+- (void)chooseCatalogProvider {
+    NSDictionary *catalog=[self selectedCatalog];if(!catalog){self.selectedCatalogID=@"";[NSUserDefaults.standardUserDefaults removeObjectForKey:@"selectedMediaCatalogID"];[self chooseProvider];return;}
+    self.sources=self.sourcesProvider?self.sourcesProvider():self.sources?:@[];
+    NSString *catalogID=catalog[@"id"]?:@"";NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];NSArray *lives=[catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[];NSMutableArray *choices=[NSMutableArray array];
+    for(NSDictionary *site in sites){if(![site[@"supported"] boolValue])continue;NSDictionary *source=[self sourceForCatalogSite:site catalog:catalog];NSString *siteKey=site[@"key"]?:@"";BOOL current=source&&[source[@"id"] isEqual:self.source[@"id"]];NSString *status=[site[@"status"] isKindOfClass:NSString.class]?site[@"status"]:@"按需加载";if(source)status=@"已加入合集 · 点按切换";NSString *apiKind=site[@"apiKind"]?:@"";NSString *subtitle=[NSString stringWithFormat:@"%@ · %@",[apiKind isEqual:@"script"]?@"脚本站点":([apiKind isEqual:@"maccms-api"]?@"MacCMS 接口":@"影视接口"),status];NSMutableDictionary *choice=[@{@"name":site[@"name"]?:@"未命名影视站点",@"subtitle":subtitle,@"site":site,@"catalogID":catalogID,@"siteKey":siteKey,@"scope":@"site",@"scopeName":@"影视站点",@"selected":@(current)} mutableCopy];if(source)choice[@"source"]=source;[choices addObject:choice];}
+    for(NSDictionary *live in lives){if(![live[@"supported"] boolValue])continue;NSString *savedURL=[NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"tvboxLiveSelection.%@",catalogID]]?:@"";BOOL selected=[savedURL isEqual:live[@"url"]?:@""];[choices addObject:@{@"name":live[@"name"]?:@"直播列表",@"subtitle":@"直播列表 · 仅加载所选清单",@"live":live,@"catalogID":catalogID,@"scope":@"live",@"scopeName":@"直播列表",@"selected":@(selected)}];}
+    if(!choices.count){[self showMessage:@"这个资源合集没有可用的内部站点" loading:NO];return;}
+    MediaSourcePicker *picker=[[MediaSourcePicker alloc] initWithStyle:UITableViewStyleInsetGrouped];picker.screenTitle=[NSString stringWithFormat:@"%@ · 内部站点",catalog[@"name"]?:@"资源合集"];picker.choices=choices;__weak typeof(self) weakSelf=self;
+    picker.onSelect=^(NSDictionary *choice){MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.selectedCatalogID=catalogID;[NSUserDefaults.standardUserDefaults setObject:catalogID forKey:@"selectedMediaCatalogID"];
+        NSDictionary *live=choice[@"live"];if(live){if(owner.onSubscribeCatalogLive)owner.onSubscribeCatalogLive(live,catalogID);else if(owner.onOpenTVBoxCatalog)owner.onOpenTVBoxCatalog(catalogID);return;}
+        NSDictionary *site=choice[@"site"];if(!site)return;NSDictionary *source=choice[@"source"]?:[owner sourceForCatalogSite:site catalog:catalog];NSString *apiKind=site[@"apiKind"]?:@"";
+        if(source){owner.deferAutomaticLoading=NO;owner.homeLoadDeferred=NO;owner.pendingProviderPickerAfterLoad=NO;owner.nextHomeLoadTrigger=@"catalog_site_selection";[NSUserDefaults.standardUserDefaults setObject:source[@"id"]?:@"" forKey:@"selectedMediaSource"];if([source[@"id"] isEqual:owner.source[@"id"]]){owner.provider=nil;[owner loadHome];}else if(owner.homeMode)[owner activate:source keepingHome:YES];else[owner activate:source];return;}
+        if([apiKind isEqual:@"script"]&&owner.onImportCatalogSite){owner.deferAutomaticLoading=NO;owner.homeLoadDeferred=NO;owner.onImportCatalogSite(site,catalogID);return;}
+        [owner showMessage:@"此站点暂不能在 iOS 上加载" loading:NO];
+    };
+    [self presentPicker:picker];
 }
 - (void)refreshCurrentSource {
     self.deferAutomaticLoading=NO;self.homeLoadDeferred=NO;
@@ -1658,6 +1719,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     }];
 }
 - (void)chooseProvider {
+    if([self selectedCatalog]){[self chooseCatalogProvider];return;}
     if(!self.source){[self openResources];return;}
     if(MediaSourceUsesNativeCatalogAPI(self.source)){[self showMessage:@"此资源使用单站点接口，没有可切换的站点列表" loading:NO];return;}
     if(self.pendingProviderPickerAfterLoad&&self.loading){[self showMessage:@"正在准备当前资源并读取站点列表，请稍候" loading:YES];return;}
@@ -1700,6 +1762,9 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)activate:(NSDictionary *)source keepingHome:(BOOL)keepingHome {
     BOOL sourceChanged=![[self.source[@"id"] description] isEqual:[source[@"id"] description]];
+    NSString *catalogID=[source[@"catalogID"] isKindOfClass:NSString.class]?source[@"catalogID"]:([source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?source[@"tvboxCatalogID"]:@"");
+    self.selectedCatalogID=catalogID;if(catalogID.length)[NSUserDefaults.standardUserDefaults setObject:catalogID forKey:@"selectedMediaCatalogID"];else[NSUserDefaults.standardUserDefaults removeObjectForKey:@"selectedMediaCatalogID"];
+    if([source[@"id"] isKindOfClass:NSString.class])[NSUserDefaults.standardUserDefaults setObject:source[@"id"] forKey:@"selectedMediaSource"];
     if(keepingHome&&sourceChanged){[self saveHomeScrollOffset];self.pendingHomeOffsetRestore=nil;if(self.homeScroll)[self.homeScroll setContentOffset:CGPointMake(0,-self.homeScroll.adjustedContentInset.top) animated:NO];}
     if(!self.nextHomeLoadTrigger.length)self.nextHomeLoadTrigger=@"source_activation";
     self.deferAutomaticLoading=NO;self.homeLoadDeferred=NO;self.homeMode=keepingHome;self.title=keepingHome?@"":@"影视库";self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;self.navigationItem.searchController=keepingHome?nil:self.search;self.navigationItem.hidesSearchBarWhenScrolling=NO;[self setBrowseControlsHidden:keepingHome];[self notifyDisplayModeChanged];

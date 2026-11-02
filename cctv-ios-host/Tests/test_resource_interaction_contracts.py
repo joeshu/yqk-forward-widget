@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import plistlib
 import unittest
 
@@ -681,7 +682,7 @@ class ResourceInteractionContracts(unittest.TestCase):
 
     def test_media_resource_and_site_pickers_are_separate(self):
         self.assertIn('选择影视资源', self.detail)
-        self.assertIn('影视站点：%@，点按切换', self.detail)
+        self.assertIn('内部站点：%@，点按切换', self.detail)
         self.assertIn('media-source-selector', self.detail)
         self.assertIn('media-provider-selector', self.detail)
         self.assertIn('selectionRow.bottomAnchor', self.detail)
@@ -1116,6 +1117,38 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('supportedInterfaceOrientations { return UIInterfaceOrientationMaskPortrait;', self.root)
         self.assertIn('supportedInterfaceOrientations {return UIInterfaceOrientationMaskPortrait;}', self.detail)
         self.assertIn('UIInterfaceOrientationMaskAllButUpsideDown', self.playback)
+
+    def test_bundled_aggregators_stay_grouped_and_load_members_on_demand(self):
+        media = self.detail
+        resources = ROOT / 'Resources/BuiltinMedia'
+        live = json.loads((resources / 'haoliang-live.json').read_text())
+        python_aggregate = json.loads((resources / 'haoliang-py.json').read_text())
+        tvbox_aggregate = json.loads((resources / 'haoliang-tvbox.json').read_text())
+        self.assertEqual(len(live['lives']), 186)
+        self.assertEqual(len(python_aggregate['sites']), 307)
+        self.assertEqual(len(tvbox_aggregate['sites']), 285)
+        self.assertTrue((resources / 'zen-keke-stream.js').is_file())
+        self.assertIn('installBundledMediaResourcesIfNeeded', self.root)
+        self.assertIn('MediaPackageImporter importFile:', self.root)
+        self.assertIn('cp -R Resources/BuiltinMedia "$APP/BuiltinMedia"', (ROOT / 'Scripts/ci-build.sh').read_text())
+
+        selector = media[media.index('- (void)chooseResource'):media.index('- (void)refreshCurrentSource')]
+        self.assertIn('if(memberID.length)continue', selector)
+        self.assertIn('一个资源站 · 按需选择 %lu 个内部站点/直播列表', selector)
+        self.assertIn('chooseCatalogProvider', selector)
+        self.assertIn('onImportCatalogSite', selector)
+        self.assertIn('onSubscribeCatalogLive', selector)
+        self.assertIn('selectedMediaCatalogID', media)
+
+        profiles_start = self.root.index('- (NSArray *)configurationProfiles')
+        profiles = self.root[profiles_start:self.root.index('- (void)openPluginResource:', profiles_start)]
+        self.assertIn('tvboxCatalogID', profiles)
+        self.assertIn('[catalogIDs containsObject:catalogID]', profiles)
+        live_loader_start = self.root.index('- (void)subscribeLiveFromCatalog:')
+        live_loader = self.root[live_loader_start:self.root.index('- (void)openTVBoxCatalog:', live_loader_start)]
+        self.assertIn('[self deleteSubscription:existingURL]', live_loader)
+        self.assertIn('tvboxLiveSelection.%@', live_loader)
+        self.assertIn('tvboxCatalogID', live_loader)
 
 
 if __name__ == '__main__':

@@ -32,10 +32,10 @@
             NSUInteger scripts=0,native=0,live=0,unsupported=0;
             for(NSDictionary *site in owner.sites){if(![site[@"supported"] boolValue])unsupported++;else if([site[@"apiKind"] isEqual:@"script"])scripts++;else native++;}
             for(NSDictionary *row in owner.lives){if([row[@"supported"] boolValue])live++;else unsupported++;}
-            NSString *message=[NSString stringWithFormat:@"推荐按需加载：回到首页或影视库，点顶部资源按钮，选择本合集，再点选需要的站点。这样只会导入所选脚本。\n\n全量导入会检查并下载 %lu 个影视脚本站点及订阅 %lu 个直播清单，耗时较长；%lu 个原生 API 站点本来就可按需直接使用，%lu 个不兼容项仍保留在合集里。",(unsigned long)scripts,(unsigned long)live,(unsigned long)native,(unsigned long)unsupported];
-            UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"全量导入（较慢）" message:message preferredStyle:UIAlertControllerStyleAlert];
+            NSString *message=[NSString stringWithFormat:@"推荐按需加载：回到首页或影视库，点顶部资源按钮，选择本合集，再点选需要的站点。这样只会下载所选脚本。\n\n全量影视导入会检查并下载 %lu 个脚本站点，耗时较长；%lu 个原生 API 站点可直接按需使用，%lu 个不兼容项仍保留在合集里。%lu 个直播清单不会整包订阅，会继续留在本合集，点选其中一个后才加载。",(unsigned long)scripts,(unsigned long)native,(unsigned long)unsupported,(unsigned long)live];
+            UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"全量影视导入（较慢）" message:message preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-            [alert addAction:[UIAlertAction actionWithTitle:@"仍然全量导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){if(owner.onImportCompatibleContents)owner.onImportCompatibleContents();}]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"仍然导入影视脚本" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){if(owner.onImportCompatibleContents)owner.onImportCompatibleContents();}]];
             [owner presentViewController:alert animated:YES completion:nil];
         }]},
         @{@"icon":@"trash",@"title":@"移除资源合集",@"action":[UIAction actionWithHandler:^(UIAction *a){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"移除资源合集？" message:@"仅移除这份集合索引；已导入的脚本和直播订阅会保留。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"移除合集" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){if(weakSelf.onRemove)weakSelf.onRemove();}]];[weakSelf presentViewController:alert animated:YES completion:nil];}]}
@@ -44,7 +44,7 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self filteredRowsForSection:section].count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {NSArray *rows=[self filteredRowsForSection:section];return section==0?[NSString stringWithFormat:@"影视站点 · %lu",(unsigned long)rows.count]:[NSString stringWithFormat:@"直播列表 · %lu",(unsigned long)rows.count];}
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return @"推荐按需加载：在首页或影视库顶部资源按钮中选择本合集，再点选需要的站点；仅所选脚本会导入，type 1/4 JSON API 会直接读取。全量导入仍可从右上角选择，但会下载全部兼容脚本，耗时较长。不兼容项会保留并标注。";return @"点按需要的直播清单即可添加；也可从右上角选择全量导入。刷新播放列表时会应用合集提供的 UA。";}
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return @"推荐按需加载：在首页顶部选择本合集，再从右侧胶囊点选站点；仅所选脚本会下载，type 1/4 JSON API 会直接读取。不兼容项会保留并标注。";return @"点按需要的直播清单即可加载；同一直播合集只保留当前选择的一个清单，其他清单仍留在合集内。刷新播放列表时会应用合集提供的 UA。";}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"tvbox.catalog.row"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"tvbox.catalog.row"];cell.backgroundColor=HostCard();cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.textColor=UIColor.labelColor;cell.detailTextLabel.textColor=UIColor.secondaryLabelColor;
     NSDictionary *row=[self filteredRowsForSection:ip.section][ip.row];cell.textLabel.text=row[@"name"]?:@"未命名";

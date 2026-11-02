@@ -18,6 +18,7 @@ rm -rf "$OUT"
 mkdir -p "$APP"
 cp Resources/Info.plist "$APP/Info.plist"
 cp Resources/*.json "$APP/" 2>/dev/null || true
+cp -R Resources/BuiltinMedia "$APP/BuiltinMedia"
 # GitHub Actions assigns a monotonically increasing workflow run number. Keep
 # local builds reproducible with the plist fallback, but stamp CI IPAs uniquely.
 if [[ "${GITHUB_RUN_NUMBER:-}" =~ ^[0-9]+$ ]]; then

@@ -308,6 +308,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic) NSTimeInterval playbackPriorityUntil;
 @property (nonatomic, strong) AVPlayer *avPlayer;
 @property (nonatomic, strong) AVPlayerLayer *avLayer;
+@property(nonatomic) BOOL bundledMediaSeedInProgress;
 @property (nonatomic, strong) NSMutableArray<NSDictionary *> *subscriptions;
 @property (nonatomic, strong) NSMutableSet<NSString *> *subscriptionURLs;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *subscriptionRequestVersions;
@@ -421,6 +422,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)logPluginLine:(NSString *)line identifier:(NSString *)identifier name:(NSString *)name;
 - (void)openPluginResource:(NSString *)source;
 - (void)openTVBoxCatalog:(NSString *)identifier;
+- (void)subscribeLiveFromCatalog:(NSDictionary *)live catalogID:(NSString *)identifier;
+- (void)installBundledMediaResourcesIfNeeded;
 - (void)bulkImportTVBoxCatalog:(NSString *)identifier page:(nullable TVBoxCatalogViewController *)page;
 - (void)acceptTVBoxCatalog:(NSDictionary *)catalog;
 - (void)importTVBoxCatalog;
@@ -499,6 +502,31 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(checkVisibleMediaAfterActivation) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [self installBundledMediaResourcesIfNeeded];
+}
+
+- (void)installBundledMediaResourcesIfNeeded {
+    NSUserDefaults *preferences=NSUserDefaults.standardUserDefaults;NSString *seedKey=@"cctv.bundledMediaResources.v1";
+    if([preferences boolForKey:seedKey]||self.bundledMediaSeedInProgress)return;self.bundledMediaSeedInProgress=YES;
+    NSArray *catalogSpecs=@[
+        @{@"file":@"haoliang-live",@"id":@"builtin-haoliang-live",@"name":@"海量直播聚合",@"kind":@"live"},
+        @{@"file":@"haoliang-py",@"id":@"builtin-haoliang-py",@"name":@"海量PY聚合接口",@"kind":@"tvbox"},
+        @{@"file":@"haoliang-tvbox",@"id":@"builtin-haoliang-tvbox",@"name":@"海量采集聚合接口",@"kind":@"tvbox"}
+    ];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        BOOL complete=YES,changed=NO;
+        for(NSDictionary *spec in catalogSpecs){
+            NSString *identifier=spec[@"id"];if([TVBoxCatalogStore catalogForID:identifier])continue;
+            NSString *path=[NSBundle.mainBundle pathForResource:spec[@"file"] ofType:@"json" inDirectory:@"BuiltinMedia"];NSData *data=path?[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL]:nil;NSError *error=nil;NSDictionary *parsed=data?[TVBoxCatalogStore parseData:data sourceURL:nil error:&error]:nil;
+            if(!parsed){complete=NO;[RuntimeDiagnostics.shared recordEvent:@"bundled_media_catalog_import_failed" category:@"resource_import" fields:@{@"resource_id":identifier?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@"bundle resource missing or invalid"}];continue;}
+            NSMutableDictionary *catalog=[parsed mutableCopy];catalog[@"id"]=identifier;catalog[@"name"]=spec[@"name"];catalog[@"catalogKind"]=spec[@"kind"];catalog[@"bundledResourceID"]=identifier;[TVBoxCatalogStore saveCatalog:catalog];changed=YES;
+        }
+        NSString *pluginID=@"zen.keke.rex.stream";BOOL pluginFound=NO;for(NSDictionary *service in [ServiceStore services])if([service[@"bundledResourceID"] isEqual:pluginID]){pluginFound=YES;break;}
+        if(!pluginFound){NSString *path=[NSBundle.mainBundle pathForResource:@"zen-keke-stream" ofType:@"js" inDirectory:@"BuiltinMedia"];NSError *error=nil;NSDictionary *imported=path?[MediaPackageImporter importFile:[NSURL fileURLWithPath:path] error:&error]:nil;if(!imported){complete=NO;[RuntimeDiagnostics.shared recordEvent:@"bundled_media_script_import_failed" category:@"resource_import" fields:@{@"resource_id":pluginID,@"error_code":@(error.code),@"error_message":error.localizedDescription?:@"bundle resource missing or invalid"}];}else{NSMutableDictionary *service=[imported mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];service[@"name"]=@"可可影视播放源";service[@"bundledResourceID"]=pluginID;service[@"capabilities"]=@[@"search",@"detail",@"play"];manifest[@"name"]=@"可可影视播放源";manifest[@"capabilities"]=@[@"search",@"detail",@"play"];service[@"manifest"]=manifest;[ServiceStore save:service];changed=YES;}}
+        if(complete)[preferences setBool:YES forKey:seedKey];
+        dispatch_async(dispatch_get_main_queue(),^{self.bundledMediaSeedInProgress=NO;if(changed){[self refreshConfigurationPage];MediaBrowserViewController *browser=[self.tabPages[@2] isKindOfClass:MediaBrowserViewController.class]?self.tabPages[@2]:nil;[browser refreshSources];}if(!complete)[self log:@"内置影视资源注册未完成；下次启动会继续检查缺少的资源"];
+        });
+    });
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -1156,6 +1184,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         };
         page.catalogsProvider=^{return [TVBoxCatalogStore catalogs];};
         page.onOpenTVBoxCatalog=^(NSString *identifier){RootViewController *owner=weakSelf;if(owner)[owner openTVBoxCatalog:identifier];};
+        page.onImportCatalogSite=^(NSDictionary *site,NSString *identifier){RootViewController *owner=weakSelf;if(!owner)return;NSMutableDictionary *scoped=[site mutableCopy];scoped[@"tvboxCatalogID"]=identifier;[owner importTVBoxSite:scoped browseAfterImport:YES];};
+        page.onSubscribeCatalogLive=^(NSDictionary *live,NSString *identifier){RootViewController *owner=weakSelf;if(owner)[owner subscribeLiveFromCatalog:live catalogID:identifier];};
         __weak MediaBrowserViewController *weakPage=page;page.onDisplayModeChanged=^(BOOL homeMode){RootViewController *owner=weakSelf;MediaBrowserViewController *mediaPage=weakPage;if(!owner||!mediaPage)return;owner.title=homeMode?@"":@"影视库";owner.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;owner.navigationItem.searchController=mediaPage.navigationItem.searchController;owner.navigationItem.leftBarButtonItem=mediaPage.navigationItem.leftBarButtonItem;owner.navigationItem.rightBarButtonItems=mediaPage.navigationItem.rightBarButtonItems;if(owner.navigationController.topViewController==owner&&owner.navigationController.navigationBarHidden!=homeMode)[owner.navigationController setNavigationBarHidden:homeMode animated:YES];};
         page.onActivateService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf changeService:service enabled:YES completion:completion];};
         page.onRestartService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf restartMediaService:service completion:completion];};
@@ -1214,9 +1244,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     for(NSDictionary *channel in self.allChannels){if(![channel[@"remoteURL"] length])native++;for(NSString *source in [NSSet setWithArray:channel[@"subscriptionSources"]?:@[]])counts[source]=@([counts[source] unsignedIntegerValue]+1);}
     [rows addObject:@{@"name":@"央视直播 · 官方频道",@"source":@"",@"resourceKind":@"live",@"native":@YES,@"current":@(!self.activeSource.length),@"epgStatus":@"官方",@"count":@(native),@"enabled":@(CCTVBoolPreference(@"nativeChannelsEnabled",YES))}];
     NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
-    for(NSString *u in [ProfileStore orderedSources:self.subscriptionURLs.allObjects]){NSDictionary *metadata=[ProfileStore metadata:u];NSMutableDictionary *row=[@{@"name":metadata[@"name"]?:[NSURL URLWithString:u].host?:@"本地播放列表",@"status":metadata[@"status"]?:@"等待刷新",@"resourceKind":@"live",@"current":@([self.activeSource isEqual:u]),@"epgStatus":(metadata[@"epgURL"]?:metadata[@"detectedEPGURL"])?@"已配置":@"自动匹配",@"source":u,@"count":counts[u]?:@0,@"enabled":@(![disabled containsObject:u])} mutableCopy];if(metadata[@"updatedAt"])row[@"updatedAt"]=metadata[@"updatedAt"];[rows addObject:row];}
     NSString *selectedMedia=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaSource"]?:@"";
+    NSString *selectedMediaCatalog=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaCatalogID"]?:@"";
+    NSMutableSet<NSString *> *catalogIDs=[NSMutableSet set];for(NSDictionary *catalog in [TVBoxCatalogStore catalogs])if([catalog[@"id"] isKindOfClass:NSString.class])[catalogIDs addObject:catalog[@"id"]];
+    for(NSString *u in [ProfileStore orderedSources:self.subscriptionURLs.allObjects]){NSDictionary *metadata=[ProfileStore metadata:u];NSString *catalogID=[metadata[@"tvboxCatalogID"] isKindOfClass:NSString.class]?metadata[@"tvboxCatalogID"]:@"";if(catalogID.length&&[catalogIDs containsObject:catalogID])continue;NSMutableDictionary *row=[@{@"name":metadata[@"name"]?:[NSURL URLWithString:u].host?:@"本地播放列表",@"status":metadata[@"status"]?:@"等待刷新",@"resourceKind":@"live",@"current":@([self.activeSource isEqual:u]),@"epgStatus":(metadata[@"epgURL"]?:metadata[@"detectedEPGURL"])?@"已配置":@"自动匹配",@"source":u,@"count":counts[u]?:@0,@"enabled":@(![disabled containsObject:u])} mutableCopy];if(metadata[@"updatedAt"])row[@"updatedAt"]=metadata[@"updatedAt"];[rows addObject:row];}
     for(NSDictionary *service in [ServiceStore services])if(![service[@"builtin"] boolValue]){
+        NSString *catalogID=[service[@"tvboxCatalogID"] isKindOfClass:NSString.class]?service[@"tvboxCatalogID"]:@"";if(catalogID.length&&[catalogIDs containsObject:catalogID])continue;
         BOOL enabled=[PyHost isRunningServiceIdentifier:service[@"id"]];NSArray *caps=[service[@"capabilities"] isKindOfClass:NSArray.class]?service[@"capabilities"]:@[];
         NSString *subscriptionURL=[ServiceStore subscriptionURLForService:service]?:@"",*epgURL=[ServiceStore epgURLForService:service]?:@"";
         NSDictionary *playlistMetadata=subscriptionURL.length?[ProfileStore metadata:subscriptionURL]:@{};NSArray *cachedChannels=[playlistMetadata[@"cachedChannels"] isKindOfClass:NSArray.class]?playlistMetadata[@"cachedChannels"]:@[];
@@ -1227,7 +1260,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){
         NSString *identifier=catalog[@"id"]?:@"";NSString *catalogName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"";if(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])catalogName=@"资源合集";NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];NSUInteger supported=0;for(NSDictionary *site in sites)if([site[@"supported"] boolValue])supported++;
         NSUInteger liveCount=[catalog[@"lives"] count];NSString *kind=supported&&liveCount?@"both":(supported?@"vod":(liveCount?@"live":@"unknown"));NSString *catalogKind=[catalog[@"catalogKind"] isKindOfClass:NSString.class]?catalog[@"catalogKind"]:@"tvbox";
-        [rows addObject:@{@"name":catalogName,@"type":@"tvbox",@"catalogKind":catalogKind,@"resourceKind":kind,@"source":[@"tvbox:" stringByAppendingString:identifier],@"url":catalog[@"url"]?:@"",@"siteCount":@(sites.count),@"supportedCount":@(supported),@"liveCount":@(liveCount),@"current":@NO}];
+        BOOL current=[selectedMediaCatalog isEqual:identifier]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"tvbox-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"maccms-api:%@:",identifier]];
+        [rows addObject:@{@"name":catalogName,@"type":@"tvbox",@"catalogKind":catalogKind,@"resourceKind":kind,@"source":[@"tvbox:" stringByAppendingString:identifier],@"url":catalog[@"url"]?:@"",@"siteCount":@(sites.count),@"supportedCount":@(supported),@"liveCount":@(liveCount),@"current":@(current)}];
     }
     return rows;
 }
@@ -1290,6 +1324,21 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if([kind isEqual:@"live"]&&!liveURL.length){for(NSString *candidate in self.subscriptionURLs){NSDictionary *provider=[self localServiceForURL:[NSURL URLWithString:candidate]];if([provider[@"id"] isEqual:item[@"id"]]){liveURL=candidate;break;}}if(!liveURL.length){[self openServiceEditorForService:item];return;}}
     [self changeService:item enabled:YES completion:^(NSError *error){if(error){[self showServiceError:error.localizedDescription];return;}if([kind isEqual:@"vod"]||[kind isEqual:@"configuration"]){[NSUserDefaults.standardUserDefaults setObject:item[@"id"] forKey:@"selectedMediaSource"];[self.navigationController popToViewController:self animated:NO];[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)self.tabPages[@2];if([kind isEqual:@"configuration"])[browser showConfigurationForSource:item];else [browser openSourceIdentifier:item[@"id"]?:@""];return;}NSString *url=[ServiceStore subscriptionURLForService:item]?:liveURL;if(!url.length){[self showServiceError:@"服务已启动，但尚未发现可读取的直播列表路径。请编辑此资源的直播列表路径后重试。"];return;}NSMutableDictionary *metadata=[@{@"managedServiceID":item[@"id"]?:@""} mutableCopy];if(![ProfileStore metadata:url][@"name"])[metadata addEntriesFromDictionary:@{@"name":item[@"name"]?:@"本机直播服务"}];[ProfileStore update:url values:metadata];if(![self.subscriptionURLs containsObject:url]){[self.subscriptionURLs addObject:url];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];}[self.navigationController popToViewController:self animated:NO];[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[1]];self.activeSource=url;self.title=@"订阅直播";[self fetchSubscription:url silent:NO];}];
 }
+- (void)subscribeLiveFromCatalog:(NSDictionary *)live catalogID:(NSString *)identifier {
+    NSDictionary *catalog=[TVBoxCatalogStore catalogForID:identifier];NSString *url=[self stableURLKey:live[@"url"]];
+    if(!catalog||!url.length||![live[@"supported"] boolValue]){[self showServiceError:@"这条直播清单无法从该资源合集中加载"];return;}
+    BOOL belongs=NO;for(NSDictionary *entry in [TVBoxCatalogStore liveSourcesInCatalog:catalog])if([[self stableURLKey:entry[@"url"]] isEqual:url]){belongs=YES;break;}
+    if(!belongs){[self showServiceError:@"直播清单与所选资源合集不匹配"];return;}
+    for(NSString *existingURL in self.subscriptionURLs.allObjects){if([existingURL isEqual:url])continue;NSDictionary *metadata=[ProfileStore metadata:existingURL];if([metadata[@"tvboxCatalogID"] isEqual:identifier])[self deleteSubscription:existingURL];}
+    NSString *catalogName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"直播合集";NSString *liveName=[live[@"name"] isKindOfClass:NSString.class]?live[@"name"]:@"直播列表";
+    NSMutableDictionary *metadata=[@{@"name":[NSString stringWithFormat:@"%@ · %@",catalogName,liveName],@"tvboxCatalogID":identifier,@"tvboxLiveEntryName":liveName,@"userAgent":live[@"ua"]?:@""} mutableCopy];
+    [ProfileStore update:url values:metadata];if(![self.subscriptionURLs containsObject:url])[self.subscriptionURLs addObject:url];
+    [NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];
+    [NSUserDefaults.standardUserDefaults setObject:identifier forKey:@"selectedMediaCatalogID"];[NSUserDefaults.standardUserDefaults removeObjectForKey:@"selectedMediaSource"];
+    [NSUserDefaults.standardUserDefaults setObject:url forKey:[NSString stringWithFormat:@"tvboxLiveSelection.%@",identifier]];
+    [self refreshConfigurationPage];if(self.navigationController.topViewController!=self)[self.navigationController popToViewController:self animated:NO];
+    [self selectBottomTab:(id)self.bottomBar.arrangedSubviews[1]];self.activeSource=url;self.title=@"订阅直播";[self fetchSubscription:url silent:NO];
+}
 - (void)openTVBoxCatalog:(NSString *)identifier {
     NSDictionary *catalog=[TVBoxCatalogStore catalogForID:identifier];if(!catalog){[self showServiceError:@"找不到此资源合集，请重新导入"];return;}
     TVBoxCatalogViewController *page=[TVBoxCatalogViewController new];page.catalog=catalog;__weak typeof(self) weakSelf=self;
@@ -1311,7 +1360,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     page.onImportSite=^(NSDictionary *site,BOOL browseAfterImport){NSMutableDictionary *scoped=[site mutableCopy];scoped[@"tvboxCatalogID"]=identifier;[weakSelf importTVBoxSite:scoped browseAfterImport:browseAfterImport];};
     __weak TVBoxCatalogViewController *weakPage=page;page.onImportCompatibleContents=^{[weakSelf bulkImportTVBoxCatalog:identifier page:weakPage];};
     page.onUseNativeSite=^(NSDictionary *site){RootViewController *owner=weakSelf;if(!owner)return;NSString *protocol=[site[@"apiKind"] isEqual:@"maccms-api"]?@"maccms-api":@"tvbox-api";NSString *sourceID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalog[@"id"]?:@"",site[@"key"]?:@""];[NSUserDefaults.standardUserDefaults setObject:sourceID forKey:@"selectedMediaSource"];[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)owner.tabPages[@2];[browser openSourceIdentifier:sourceID];};
-    page.onSubscribeLive=^(NSDictionary *live){RootViewController *owner=weakSelf;NSString *url=[owner stableURLKey:live[@"url"]];if(!owner||!url.length||![live[@"supported"] boolValue])return;[ProfileStore update:url values:@{@"name":live[@"name"]?:@"TVBox 直播源",@"userAgent":live[@"ua"]?:@""}];if(![owner.subscriptionURLs containsObject:url]){[owner.subscriptionURLs addObject:url];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:owner.subscriptionURLs.allObjects] forKey:@"subscriptions"];}[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[1]];owner.activeSource=url;owner.title=@"订阅直播";[owner fetchSubscription:url silent:NO];};
+    page.onSubscribeLive=^(NSDictionary *live){RootViewController *owner=weakSelf;if(owner)[owner subscribeLiveFromCatalog:live catalogID:identifier];};
     page.onRemove=^{RootViewController *owner=weakSelf;[TVBoxCatalogStore removeCatalog:identifier];[owner.navigationController popViewControllerAnimated:YES];[owner refreshConfigurationPage];};
     if(self.activeTab==3)[(ConfigCenterViewController *)self.tabPages[@3] prepareForNavigationTransition];
     [self.navigationController pushViewController:page animated:YES];
@@ -1321,7 +1370,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSDictionary *catalog=[TVBoxCatalogStore catalogForID:identifier];if(!catalog){[self showServiceError:@"找不到此资源合集，请重新导入"];return;}
     NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];
     NSArray *lives=[catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[];
-    NSMutableArray *pending=[NSMutableArray array];NSUInteger alreadyImported=0,nativeCount=0,liveAdded=0,liveAlready=0;
+    NSMutableArray *pending=[NSMutableArray array];NSUInteger alreadyImported=0,nativeCount=0;
     NSArray *services=[ServiceStore services];
     for(NSDictionary *site in sites){
         if(![site[@"supported"] boolValue])continue;
@@ -1332,15 +1381,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         for(NSDictionary *service in services){NSString *serviceExt=[service[@"manifest"][@"options"] description]?:@"";NSDictionary *siteHeaders=[site[@"header"] isKindOfClass:NSDictionary.class]?site[@"header"]:@{},*savedHeaders=service[@"tvboxSiteHeader"]?:service[@"importHeaders"]?:@{};NSString *playURL=[site[@"playUrl"] isKindOfClass:NSString.class]?site[@"playUrl"]:@"";if(api.length&&[service[@"url"] isEqual:api]&&[serviceExt isEqual:ext]&&[savedHeaders isEqual:siteHeaders]&&[(service[@"tvboxPlayURL"]?:@"") isEqual:playURL]){exists=YES;break;}}
         if(exists)alreadyImported++;else[pending addObject:site];
     }
-    for(NSDictionary *live in lives){
-        if(![live[@"supported"] boolValue])continue;NSString *url=[self stableURLKey:live[@"url"]];if(!url.length)continue;
-        NSString *ua=[live[@"ua"] isKindOfClass:NSString.class]?live[@"ua"]:@"";[ProfileStore update:url values:@{@"name":live[@"name"]?:@"TVBox 直播源",@"userAgent":ua}];
-        if([self.subscriptionURLs containsObject:url]){liveAlready++;continue;}[self.subscriptionURLs addObject:url];liveAdded++;
-    }
-    if(liveAdded)[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];
-    if(!pending.count){[self refreshConfigurationPage];[(MediaBrowserViewController *)self.tabPages[@2] refreshSources];if(page)[page.tableView reloadData];UIAlertController *done=[UIAlertController alertControllerWithTitle:@"合集内容已就绪" message:[NSString stringWithFormat:@"原生影视 API：%lu 个可直接使用\n已保存的脚本站点：%lu 个\n新加入直播清单：%lu 个\n已存在直播清单：%lu 个",(unsigned long)nativeCount,(unsigned long)alreadyImported,(unsigned long)liveAdded,(unsigned long)liveAlready] preferredStyle:UIAlertControllerStyleAlert];[done addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:done animated:YES completion:nil];return;}
+    NSUInteger supportedLiveCount=0;for(NSDictionary *live in lives)if([live[@"supported"] boolValue])supportedLiveCount++;
+    if(!pending.count){[self refreshConfigurationPage];[(MediaBrowserViewController *)self.tabPages[@2] refreshSources];if(page)[page.tableView reloadData];UIAlertController *done=[UIAlertController alertControllerWithTitle:@"合集内容已就绪" message:[NSString stringWithFormat:@"原生影视 API：%lu 个可直接使用\n已保存的脚本站点：%lu 个\n直播清单：%lu 个，仍留在合集内，按需选择后才加载",(unsigned long)nativeCount,(unsigned long)alreadyImported,(unsigned long)supportedLiveCount] preferredStyle:UIAlertControllerStyleAlert];[done addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:done animated:YES completion:nil];return;}
     TVBoxCatalogBulkImporter *importer=[TVBoxCatalogBulkImporter new];self.tvboxCatalogBulkImporter=importer;
-    NSUInteger total=pending.count;UIAlertController *progress=[UIAlertController alertControllerWithTitle:@"正在整包导入影视站点" message:[NSString stringWithFormat:@"准备检查 %lu 个站点…\n已加入 %lu 个直播清单。导入不会启动脚本。",(unsigned long)total,(unsigned long)liveAdded] preferredStyle:UIAlertControllerStyleAlert];
+    NSUInteger total=pending.count;UIAlertController *progress=[UIAlertController alertControllerWithTitle:@"正在整包导入影视站点" message:[NSString stringWithFormat:@"准备检查 %lu 个站点…\n%lu 个直播清单保留在合集内，不会整包订阅。导入不会启动脚本。",(unsigned long)total,(unsigned long)supportedLiveCount] preferredStyle:UIAlertControllerStyleAlert];
     __weak typeof(self) weakSelf=self;__weak UIAlertController *weakProgress=progress;__weak TVBoxCatalogViewController *weakPage=page;
     [progress addAction:[UIAlertAction actionWithTitle:@"取消批量导入" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(owner.tvboxCatalogBulkImporter==importer)[importer cancel];weakProgress.message=@"正在停止当前下载并保留已完成项目…";}]];
     importer.onProgress=^(NSUInteger completed,NSUInteger totalCount,NSUInteger succeeded,NSUInteger failed,NSString *current){if(!weakProgress)return;if(importer.downloadLimitReached){weakProgress.message=@"累计下载达到 512 MiB 上限，正在停止并保存已完成项目…";return;}weakProgress.message=[NSString stringWithFormat:@"%lu / %lu · 已识别 %lu · 失败 %lu\n当前：%@\n导入不会执行脚本。",(unsigned long)completed,(unsigned long)totalCount,(unsigned long)succeeded,(unsigned long)failed,current?:@"准备中"];};
@@ -1351,8 +1395,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             NSInteger nextPort=18780;
             for(NSDictionary *service in imported){NSMutableDictionary *saved=[service mutableCopy];while([ports containsObject:@(nextPort)]&&nextPort<65535)nextPort++;if(nextPort<65535){saved[@"port"]=@(nextPort);[ports addObject:@(nextPort)];nextPort++;}[ServiceStore save:saved];}
             [owner refreshConfigurationPage];MediaBrowserViewController *browser=(MediaBrowserViewController *)owner.tabPages[@2];[browser refreshSources];if(weakPage)[weakPage.tableView reloadData];
-            NSUInteger native=nativeCount,liveCount=liveAdded,skipped=alreadyImported;
-            NSMutableString *message=[NSMutableString stringWithFormat:@"原生影视 API：%lu 个可直接在影视库使用\n脚本站点加入：%lu 个\n已存在脚本：%lu 个\n新增直播清单：%lu 个（已有 %lu 个）",(unsigned long)native,(unsigned long)imported.count,(unsigned long)skipped,(unsigned long)liveCount,(unsigned long)liveAlready];
+            NSUInteger native=nativeCount,skipped=alreadyImported;
+            NSMutableString *message=[NSMutableString stringWithFormat:@"原生影视 API：%lu 个可直接按需使用\n脚本站点加入：%lu 个\n已存在脚本：%lu 个\n直播清单：%lu 个继续保留在合集内，点选后才加载",(unsigned long)native,(unsigned long)imported.count,(unsigned long)skipped,(unsigned long)supportedLiveCount];
             if(failures.count)[message appendFormat:@"\n未识别或下载失败：%lu 个，仍保留在合集中。",(unsigned long)failures.count];
             if(cancelled)[message appendString:@"\n批量导入已取消；已经完成的项目已保存。"];
             if(importer.downloadLimitReached)[message appendString:@"\n累计下载达到 512 MiB 安全上限；已经完成的项目已保存。"];
