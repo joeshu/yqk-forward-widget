@@ -55,8 +55,8 @@ class NativePackageTests(unittest.TestCase):
         self.assertTrue(result['entryExists'])
         self.assertTrue(result['archiveExists'])
 
-    def test_commonjs_node_require_is_routed_to_node_unless_manifest_overrides(self):
-        source = "const fs=require('fs');module.exports={search(){return {list:[]}}}"
+    def test_commonjs_require_is_routed_to_node_unless_manifest_overrides(self):
+        source = "const helper=require('example-helper');module.exports={search(){return {list:[]}}}"
         inferred = self.inspect(self.archive({'index.js': source}))
         self.assertTrue(inferred['ok'], inferred)
         self.assertEqual((inferred['engine'], inferred['manifest']['moduleType']), ('node', 'commonjs'))
@@ -238,6 +238,15 @@ route='/all.m3u';body='#EXTM3U'
             'index.cjs': "const crypto=require('crypto'); module.exports={search(){return {list:[]}}}"}))
         self.assertTrue(commonjs['ok'], commonjs)
         self.assertEqual(commonjs['engine'], 'node')
+
+    def test_transitive_node_core_import_is_found_below_package_entry(self):
+        result = self.inspect(self.archive({
+            'cctvhost.json': json.dumps({'entry': 'index.js', 'runtime': 'javascript',
+                                        'protocol': 'catvod-js', 'moduleType': 'commonjs'}),
+            'index.js': "module.exports=require('./lib/network.js')",
+            'lib/network.js': "const http=require('node:http');module.exports=http;"}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['engine'], 'node')
 
     def test_python_spider_is_recognized_without_executing_user_code(self):
         marker = self.folder / 'must-not-run'

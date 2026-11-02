@@ -28,6 +28,22 @@ static BOOL PythonDeclaresArgument(NSString *source,NSString *argument){
     NSString *pattern=[NSString stringWithFormat:@"add_argument\\s*\\(\\s*['\"]%@['\"]",[NSRegularExpression escapedPatternForString:argument]];
     return [source rangeOfString:pattern options:NSRegularExpressionSearch].location!=NSNotFound;
 }
+static BOOL PackageContainsNodeCoreImport(NSString *root,NSString *pattern){
+    NSRegularExpression *expression=[NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];
+    if(!expression)return NO;
+    NSDirectoryEnumerator *files=[NSFileManager.defaultManager enumeratorAtURL:[NSURL fileURLWithPath:root isDirectory:YES] includingPropertiesForKeys:@[NSURLIsRegularFileKey,NSURLFileSizeKey] options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:nil];
+    NSUInteger scanned=0;
+    for(NSURL *url in files){
+        NSString *extension=url.pathExtension.lowercaseString;
+        if(![@[@"js",@"mjs",@"cjs"] containsObject:extension])continue;
+        NSNumber *regular=nil,*size=nil;[url getResourceValue:&regular forKey:NSURLIsRegularFileKey error:NULL];[url getResourceValue:&size forKey:NSURLFileSizeKey error:NULL];
+        NSUInteger length=size.unsignedIntegerValue;if(!regular.boolValue||length>PackageFileLimit||length>PackageTotalLimit-scanned)continue;
+        scanned+=length;
+        NSData *data=ReadBounded(url,PackageFileLimit,NULL);NSString *source=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
+        if(source&&[expression firstMatchInString:source options:0 range:NSMakeRange(0,source.length)])return YES;
+    }
+    return NO;
+}
 static NSString *PackageMD5(NSData *data){
     unsigned char digest[CC_MD5_DIGEST_LENGTH];CC_MD5(data.bytes,(CC_LONG)data.length,digest);
     NSMutableString *value=[NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH*2];for(NSUInteger i=0;i<CC_MD5_DIGEST_LENGTH;i++)[value appendFormat:@"%02x",digest[i]];return value;
@@ -231,7 +247,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     // contains convenience shims, not full Node APIs (notably crypto, fs,
     // http and https), so run these packages against Node's actual modules.
     NSString *nodeCorePattern=@"(?:from\\s*|import\\s*(?:\\(\\s*)?|require\\s*\\(\\s*)['\\\"](?:node:[^'\\\"]+|(?:assert|async_hooks|buffer|child_process|crypto|dgram|diagnostics_channel|dns|events|fs|http2?|https|module|net|os|path|perf_hooks|process|punycode|querystring|readline|stream|string_decoder|timers|tls|tty|url|util|v8|vm|wasi|worker_threads|zlib)(?:/(?:promises|consumers|web|types))?)['\\\"]";
-    BOOL nodeCoreImport=[serviceText rangeOfString:nodeCorePattern options:NSRegularExpressionSearch].location!=NSNotFound;
+    // Imports can live in a transitive helper under src/ or node_modules, not
+    // only in the declared entry file. Scan the bounded package source set.
+    BOOL nodeCoreImport=PackageContainsNodeCoreImport(root,nodeCorePattern);
     if(nodeCoreImport && ![protocol isEqual:@"catvod-spider"] && !hamoSourceV3)runtime=@"node";
     if(!runtime.length){
         NSDictionary *dependencies=[package[@"dependencies"] isKindOfClass:NSDictionary.class]?package[@"dependencies"]:@{};

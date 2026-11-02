@@ -57,7 +57,10 @@ an iOS IPA build require macOS and did not run in this Linux workspace.
 
 TVBox/CatVod JavaScript sources that import Node core modules are assigned to
 Node.js Mobile, even if an older saved manifest says `runtime: javascript`.
-This gives `node:crypto`, `node:fs`, `node:http`, and `node:https` their actual
-Node APIs instead of the JavaScriptCore convenience shims. The package must
-still include its JavaScript dependencies; iOS does not support native `.node`
-addons, child processes, or Worker threads.
+The importer scans `.js`, `.mjs`, and `.cjs` files throughout the extracted ZIP,
+including nested helpers and `node_modules`. This gives `node:crypto`,
+`node:fs`, `node:http`, and `node:https` their actual Node APIs instead of the
+JavaScriptCore convenience shims. The package must still include its JavaScript
+dependencies; dynamically computed module names must declare `runtime: node`.
+The host rejects child-process execution and Worker creation, and iOS does not
+support arbitrary native `.node` addons.
