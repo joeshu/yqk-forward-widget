@@ -310,6 +310,41 @@ function stripTags(s) {
     .replace(/&#x27;/g, "'").replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
 }
 
+function htmlAttributes(tag) {
+  const attrs = {};
+  const re = /([^\s=<>/]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
+  let match;
+  while ((match = re.exec(tag))) attrs[match[1].toLowerCase()] = match[2] ?? match[3] ?? match[4] ?? '';
+  return attrs;
+}
+
+function cardCover(chunk) {
+  const tags = chunk.match(/<(?:img|source)\b[^>]*>/gi) || [];
+  const covers = [];
+  for (const tag of tags) {
+    const attrs = htmlAttributes(tag);
+    const cls = attrs.class || '';
+    const alt = attrs.alt || '';
+    const candidates = [attrs['data-src'], attrs['data-original'], attrs['data-lazy-src'], attrs.src, attrs.srcset]
+      .filter(Boolean);
+    if (/\bempty\b|placeholder|loading/i.test(cls) || /empty_play/i.test(candidates.join(' '))) continue;
+    const isImage = /^<img\b/i.test(tag);
+    // Prefer a real img (usually JPEG) over its WebP <source>; skip generic
+    // loading placeholders that appear before the actual cover in each card.
+    covers.push({ score: isImage ? (alt ? 3 : 2) : 1, urls: candidates });
+  }
+  covers.sort((a, b) => b.score - a.score);
+  for (const cover of covers) {
+    for (const candidate of cover.urls) {
+      const first = candidate.split(',')[0].trim().split(/\s+/)[0]
+        .replace(/&amp;/g, '&').replace(/\\u0026/g, '&');
+      const url = first.startsWith('//') ? 'https:' + first : first;
+      if (/^https?:\/\//i.test(url) && !/empty_play|placeholder/i.test(url)) return url;
+    }
+  }
+  return '';
+}
+
 function cardsFrom(html) {
   const re = /href="\/detail\?series_id=(\d+)"/g;
   const hits = [];
@@ -327,12 +362,12 @@ function cardsFrom(html) {
     if (tm) title = stripTags(tm[1]);
     if (!title) continue;
     seen.add(sid);
-    const im = chunk.match(/(?:data-src|src)="(https?:\/\/[^"]+?\.(?:jpg|jpeg|png|webp))"/i);
+    const cover = cardCover(chunk);
     const ep = chunk.match(/class="[^"]*(?:pc-episode|m-episode|episode)[^"]*"[^>]*>(.*?)</s);
     out.push({
       vod_id: sid,
       vod_name: title,
-      vod_pic: im ? im[1] : '',
+      vod_pic: cover,
       vod_remarks: ep ? stripTags(ep[1]) : '',
     });
   }
