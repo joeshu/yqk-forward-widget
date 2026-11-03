@@ -54,7 +54,9 @@ SIM=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=js
 xcrun simctl boot "$SIM" || true
 xcrun simctl bootstatus "$SIM" -b
 xcrun simctl install "$SIM" "$APP"
-xcrun simctl launch "$SIM" com.example.cctvhost.uismoke --smoke-port "$FIXTURE_PORT"
+APP_LAUNCH=$(xcrun simctl launch "$SIM" com.example.cctvhost.uismoke --smoke-port "$FIXTURE_PORT")
+echo "$APP_LAUNCH"
+SMOKE_APP_PID=$(printf '%s\n' "$APP_LAUNCH" | sed -nE 's/.*: ([0-9]+)$/\1/p' | tail -n 1)
 CONTAINER=$(xcrun simctl get_app_container "$SIM" com.example.cctvhost.uismoke data)
 PROGRESS_FILE="$CONTAINER/Documents/ui-smoke/smoke-progress.json"
 SMOKE_WAIT_STARTED=$(date +%s)
@@ -73,6 +75,10 @@ PY
     if (( stalled_for >= 120 )); then
       echo "::error::UI smoke stopped advancing for ${stalled_for}s"
       if [ -f "$PROGRESS_FILE" ]; then cat "$PROGRESS_FILE"; fi
+      if [[ "$SMOKE_APP_PID" =~ ^[0-9]+$ ]] && command -v sample >/dev/null 2>&1; then
+        sample "$SMOKE_APP_PID" 5 -file "$OUT/ui-main-thread-sample.txt" >/dev/null 2>&1 || true
+        if [ -s "$OUT/ui-main-thread-sample.txt" ]; then sed -n '1,220p' "$OUT/ui-main-thread-sample.txt"; fi
+      fi
       break
     fi
   fi
