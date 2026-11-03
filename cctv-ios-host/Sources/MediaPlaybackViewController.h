@@ -6,6 +6,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic) BOOL embeddedMode;
 @property(nonatomic,copy) dispatch_block_t onPlaybackWillStart;
 @property(nonatomic,copy) void (^onEpisodeSelectionChanged)(NSDictionary *context);
+@property(nonatomic,copy) void (^onVideoAspectRatioChanged)(CGFloat aspectRatio);
 - (void)playInlineResult:(NSDictionary *)result context:(NSDictionary *)context;
+- (void)installFloatingInlineSurfaceInHost:(UIView *)videoHost controlsStack:(UIStackView *)controlsStack;
+- (CGFloat)preferredInlineVideoHeightForWidth:(CGFloat)width maximumHeight:(CGFloat)maximumHeight;
 @end
 NS_ASSUME_NONNULL_END

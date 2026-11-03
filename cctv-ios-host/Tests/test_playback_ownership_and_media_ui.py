@@ -110,10 +110,12 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
             self.assertIn(f'detailActionButton:@"{title}"', BROWSER_SOURCE)
         self.assertIn("[button setTitle:title forState:UIControlStateNormal]", action)
 
-    def test_inline_player_prefers_compact_height_without_clipping_extra_routes(self):
+    def test_inline_player_floats_video_while_its_controls_join_detail_content(self):
         inline = method_body(BROWSER_SOURCE, "- (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context")
-        self.assertIn("multiplier:0.5625 constant:88", inline)
-        self.assertIn("inlineHeight.priority=UILayoutPriorityDefaultHigh", inline)
+        self.assertIn("installFloatingInlineSurfaceInHost:dock controlsStack:self.contentStack", inline)
+        self.assertIn("inlinePlaybackScrollTopConstraint=[self.scrollView.topAnchor constraintEqualToAnchor:dock.bottomAnchor constant:8]", inline)
+        self.assertNotIn("multiplier:0.5625 constant:88", inline)
+        self.assertIn("preferredInlineVideoHeightForWidth:width maximumHeight:maximum", BROWSER_SOURCE)
         self.assertIn("setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical", PLAYBACK_SOURCE)
 
     def test_poster_download_budget_handles_large_covers_without_unbounded_reads(self):

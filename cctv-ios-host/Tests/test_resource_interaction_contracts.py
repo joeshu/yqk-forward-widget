@@ -655,6 +655,26 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('landscapeConstraints', self.playback)
         self.assertIn('viewDidAppear:(BOOL)animated', self.playback)
 
+    def test_detail_resume_survives_regenerated_route_and_episode_ids(self):
+        restore = self.detail.split('- (void)restoreResumeEntrySelection {', 1)[1].split(
+            '\n- (void)restoreSelectionFromDetail:', 1)[0]
+        route_view = self.detail.split('- (void)updateRouteAndEpisodeViews {', 1)[1].split(
+            '\n- (void)selectRoute:', 1)[0]
+        name_matcher = self.detail.split('static BOOL MediaBrowserIdentityNameMatches', 1)[1].split(
+            '\n}', 1)[0]
+        playback_state = (ROOT / 'Sources/MediaPlaybackStateStore.m').read_text()
+
+        self.assertLess(restore.index('lineID.length'), restore.index('lineName.length'))
+        self.assertLess(restore.index('lineName.length'), restore.index('lineIndex<0||lineIndex>=self.lines.count'))
+        self.assertLess(restore.index('episodeID.length'), restore.index('episodeName.length'))
+        self.assertLess(restore.index('episodeName.length'), restore.index('episodeIndex<0||episodeIndex>=episodes.count'))
+        self.assertIn('resumeLineName', route_view)
+        self.assertIn('resumeEpisodeName', route_view)
+        self.assertIn('value isKindOfClass:NSString.class', name_matcher)
+        self.assertIn('saved.length', name_matcher)
+        self.assertIn('@"lineName"', playback_state)
+        self.assertIn('@"episodeName"', playback_state)
+
     def test_tvbox_parser_selection_drives_native_resolution_and_web_fallback(self):
         catalog = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
         api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
@@ -720,7 +740,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         push = self.detail[self.detail.index('- (void)pushMediaDetail:', self.detail.index('@implementation MediaBrowserViewController')):
                            self.detail.index('- (void)openHomeRecommendation:', self.detail.index('- (void)pushMediaDetail:', self.detail.index('@implementation MediaBrowserViewController')))]
         self.assertIn('showInlinePlaybackResult:result context:context', push)
-        self.assertIn('insertArrangedSubview:player.view atIndex:0', detail)
+        self.assertIn('installFloatingInlineSurfaceInHost:dock controlsStack:self.contentStack', detail)
+        self.assertIn('[player loadViewIfNeeded]', detail)
         self.assertIn('playInlineResult:result context:context', detail)
         self.assertIn('embeddedMode=YES', detail)
         self.assertIn('inline_playback_attached', detail)
@@ -730,15 +751,19 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('if(self.inlinePlaybackController&&episodes.count)[self resolveAndPlaySelectedEpisode]', detail)
         self.assertIn('pendingEpisodeResult', self.playback)
 
-    def test_inline_player_and_play_action_follow_detail_scroll_flow(self):
+    def test_inline_player_floats_above_scrolling_detail_controls(self):
         detail = self.detail[self.detail.index('@implementation MediaDetailViewController'):
                              self.detail.index('@interface MediaFavoritesViewController')]
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
-        self.assertNotIn('updateInlinePlaybackFloatingPosition', detail)
+        self.assertIn('media-detail-floating-player', detail)
+        self.assertIn('installFloatingInlineSurfaceInHost:dock controlsStack:self.contentStack', detail)
+        self.assertIn('inlinePlaybackScrollTopConstraint.active=YES', detail)
+        self.assertIn('media-inline-now-playing', self.playback)
+        self.assertIn('inlineNowPlayingPill.hidden=!self.floatingInlineSurfaceInstalled', self.playback)
         self.assertNotIn('stickyPlayBar', detail)
         self.assertIn('[self.contentStack addArrangedSubview:self.playButton]', detail)
-        self.assertIn('[self.scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]', detail)
-        self.assertIn('inline player scrolls away with detail content and returns with it', smoke)
+        self.assertIn('inline player surface stays pinned while detail content scrolls', smoke)
+        self.assertIn('inline playback controls flow with detail content below the floating video', smoke)
 
     def test_live_player_resource_capsule_selects_resource_page_live_sources(self):
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()

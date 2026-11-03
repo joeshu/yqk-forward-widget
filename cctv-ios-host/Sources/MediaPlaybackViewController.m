@@ -176,6 +176,8 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 @property(nonatomic,strong) UILabel *throughputLabel;
 @property(nonatomic,strong) UIView *gestureSurface;
 @property(nonatomic,strong) UILabel *gestureFeedbackLabel;
+@property(nonatomic,strong) UIView *inlineNowPlayingPill;
+@property(nonatomic,strong) UILabel *inlineNowPlayingLabel;
 @property(nonatomic) NSUInteger gestureFeedbackGeneration;
 @property(nonatomic) BOOL gestureRateActive;
 @property(nonatomic) float gesturePreviousRate;
@@ -221,6 +223,9 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 @property(nonatomic,strong) NSArray<NSLayoutConstraint *> *portraitConstraints;
 @property(nonatomic,strong) NSArray<NSLayoutConstraint *> *landscapeConstraints;
 @property(nonatomic,strong) NSArray<NSLayoutConstraint *> *embeddedConstraints;
+@property(nonatomic,strong) NSArray<NSLayoutConstraint *> *embeddedSurfaceConstraints;
+@property(nonatomic,strong) NSArray<NSLayoutConstraint *> *embeddedControlConstraints;
+@property(nonatomic) BOOL floatingInlineSurfaceInstalled;
 @property(nonatomic,strong) NSLayoutConstraint *videoAspectConstraint;
 @property(nonatomic,strong) NSLayoutConstraint *portraitTallViewportHeightConstraint;
 @property(nonatomic,strong) NSLayoutConstraint *landscapeTallViewportHeightConstraint;
@@ -349,6 +354,9 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     [NSLayoutConstraint activateConstraints:@[[self.cicadaControls.leadingAnchor constraintEqualToAnchor:self.videoView.leadingAnchor constant:12],[self.cicadaControls.trailingAnchor constraintEqualToAnchor:self.videoView.trailingAnchor constant:-12],[self.cicadaControls.bottomAnchor constraintEqualToAnchor:self.videoView.bottomAnchor constant:-12],[self.cicadaControls.heightAnchor constraintEqualToConstant:40],[self.cicadaPlayPauseButton.leadingAnchor constraintEqualToAnchor:self.cicadaControls.leadingAnchor constant:8],[self.cicadaPlayPauseButton.centerYAnchor constraintEqualToAnchor:self.cicadaControls.centerYAnchor],[self.cicadaPlayPauseButton.widthAnchor constraintEqualToConstant:30],[self.cicadaPlayPauseButton.heightAnchor constraintEqualToConstant:32],[self.cicadaSeekSlider.leadingAnchor constraintEqualToAnchor:self.cicadaPlayPauseButton.trailingAnchor constant:6],[self.cicadaSeekSlider.centerYAnchor constraintEqualToAnchor:self.cicadaControls.centerYAnchor],[self.cicadaTimeLabel.leadingAnchor constraintEqualToAnchor:self.cicadaSeekSlider.trailingAnchor constant:6],[self.cicadaTimeLabel.trailingAnchor constraintEqualToAnchor:self.cicadaControls.trailingAnchor constant:-10],[self.cicadaTimeLabel.centerYAnchor constraintEqualToAnchor:self.cicadaControls.centerYAnchor],[self.cicadaTimeLabel.widthAnchor constraintGreaterThanOrEqualToConstant:74],[self.cicadaTimeLabel.widthAnchor constraintLessThanOrEqualToConstant:92]]];
     self.throughputLabel=[UILabel new];self.throughputLabel.translatesAutoresizingMaskIntoConstraints=NO;self.throughputLabel.text=@"测速中";self.throughputLabel.textColor=UIColor.whiteColor;self.throughputLabel.font=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];self.throughputLabel.textAlignment=NSTextAlignmentCenter;self.throughputLabel.backgroundColor=[UIColor colorWithWhite:0 alpha:0.68];self.throughputLabel.layer.cornerRadius=11;self.throughputLabel.clipsToBounds=YES;self.throughputLabel.userInteractionEnabled=NO;self.throughputLabel.accessibilityIdentifier=@"media-playback-throughput";self.throughputLabel.hidden=self.embeddedMode;[self.videoView addSubview:self.throughputLabel];self.throughputPortraitTopConstraint=[self.throughputLabel.topAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.topAnchor constant:8];self.throughputViewportTopConstraint=[self.throughputLabel.topAnchor constraintEqualToAnchor:self.videoView.topAnchor constant:10];self.throughputViewportTopConstraint.active=NO;[NSLayoutConstraint activateConstraints:@[self.throughputPortraitTopConstraint,[self.throughputLabel.trailingAnchor constraintEqualToAnchor:self.videoView.trailingAnchor constant:-10],[self.throughputLabel.heightAnchor constraintGreaterThanOrEqualToConstant:24],[self.throughputLabel.widthAnchor constraintGreaterThanOrEqualToConstant:68]]];
     self.gestureFeedbackLabel=[UILabel new];self.gestureFeedbackLabel.translatesAutoresizingMaskIntoConstraints=NO;self.gestureFeedbackLabel.hidden=YES;self.gestureFeedbackLabel.textAlignment=NSTextAlignmentCenter;self.gestureFeedbackLabel.textColor=UIColor.whiteColor;self.gestureFeedbackLabel.font=[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];self.gestureFeedbackLabel.backgroundColor=[UIColor colorWithWhite:0 alpha:0.72];self.gestureFeedbackLabel.layer.cornerRadius=14;self.gestureFeedbackLabel.clipsToBounds=YES;self.gestureFeedbackLabel.isAccessibilityElement=NO;UIView *gestureSurface=self.videoView;[gestureSurface addSubview:self.gestureFeedbackLabel];self.gestureFeedbackPortraitTopConstraint=[self.gestureFeedbackLabel.topAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.topAnchor constant:8];self.gestureFeedbackViewportTopConstraint=[self.gestureFeedbackLabel.topAnchor constraintEqualToAnchor:gestureSurface.topAnchor constant:16];self.gestureFeedbackViewportTopConstraint.active=NO;[NSLayoutConstraint activateConstraints:@[[self.gestureFeedbackLabel.centerXAnchor constraintEqualToAnchor:gestureSurface.centerXAnchor],self.gestureFeedbackPortraitTopConstraint,[self.gestureFeedbackLabel.heightAnchor constraintEqualToConstant:34],[self.gestureFeedbackLabel.widthAnchor constraintGreaterThanOrEqualToConstant:112]]];
+    self.inlineNowPlayingPill=[UIView new];self.inlineNowPlayingPill.translatesAutoresizingMaskIntoConstraints=NO;self.inlineNowPlayingPill.hidden=YES;self.inlineNowPlayingPill.userInteractionEnabled=NO;self.inlineNowPlayingPill.backgroundColor=[UIColor colorWithWhite:0 alpha:.72];self.inlineNowPlayingPill.layer.cornerRadius=9;self.inlineNowPlayingPill.layer.cornerCurve=kCACornerCurveContinuous;self.inlineNowPlayingPill.isAccessibilityElement=YES;self.inlineNowPlayingPill.accessibilityIdentifier=@"media-inline-now-playing";self.inlineNowPlayingPill.accessibilityHint=@"滚动影片详情时仍显示当前播放集数";[self.videoView addSubview:self.inlineNowPlayingPill];
+    self.inlineNowPlayingLabel=[UILabel new];self.inlineNowPlayingLabel.translatesAutoresizingMaskIntoConstraints=NO;self.inlineNowPlayingLabel.font=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];self.inlineNowPlayingLabel.textColor=UIColor.whiteColor;self.inlineNowPlayingLabel.numberOfLines=1;self.inlineNowPlayingLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.inlineNowPlayingLabel.isAccessibilityElement=NO;[self.inlineNowPlayingPill addSubview:self.inlineNowPlayingLabel];[self.inlineNowPlayingLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    [NSLayoutConstraint activateConstraints:@[[self.inlineNowPlayingPill.leadingAnchor constraintEqualToAnchor:self.videoView.leadingAnchor constant:12],[self.inlineNowPlayingPill.trailingAnchor constraintLessThanOrEqualToAnchor:self.videoView.trailingAnchor constant:-12],[self.inlineNowPlayingPill.bottomAnchor constraintEqualToAnchor:self.videoView.bottomAnchor constant:-50],[self.inlineNowPlayingPill.heightAnchor constraintGreaterThanOrEqualToConstant:28],[self.inlineNowPlayingPill.widthAnchor constraintLessThanOrEqualToAnchor:self.videoView.widthAnchor constant:-24],[self.inlineNowPlayingLabel.leadingAnchor constraintEqualToAnchor:self.inlineNowPlayingPill.leadingAnchor constant:9],[self.inlineNowPlayingLabel.trailingAnchor constraintEqualToAnchor:self.inlineNowPlayingPill.trailingAnchor constant:-9],[self.inlineNowPlayingLabel.topAnchor constraintEqualToAnchor:self.inlineNowPlayingPill.topAnchor constant:5],[self.inlineNowPlayingLabel.bottomAnchor constraintEqualToAnchor:self.inlineNowPlayingPill.bottomAnchor constant:-5]]];
     self.gestureSurface=gestureSurface;self.playbackDoubleTapGesture=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlaybackDoubleTap:)];self.playbackDoubleTapGesture.numberOfTapsRequired=2;self.playbackDoubleTapGesture.cancelsTouchesInView=NO;self.playbackDoubleTapGesture.delaysTouchesBegan=NO;[gestureSurface addGestureRecognizer:self.playbackDoubleTapGesture];
     self.playbackLongPressGesture=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlaybackLongPress:)];self.playbackLongPressGesture.minimumPressDuration=0.48;self.playbackLongPressGesture.cancelsTouchesInView=NO;self.playbackLongPressGesture.allowableMovement=18;[gestureSurface addGestureRecognizer:self.playbackLongPressGesture];
     self.playbackPanGesture=[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlaybackPan:)];self.playbackPanGesture.delegate=self;self.playbackPanGesture.cancelsTouchesInView=NO;self.playbackPanGesture.maximumNumberOfTouches=1;[gestureSurface addGestureRecognizer:self.playbackPanGesture];
@@ -453,19 +461,20 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     ];
     if(self.embeddedMode){
         self.view.backgroundColor=UIColor.clearColor;self.videoView.layer.cornerRadius=14;self.episodeTitle.hidden=NO;self.episodeTitle.numberOfLines=1;self.episodeTitle.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.lineScroll.hidden=YES;self.episodeButton.hidden=YES;self.controlPanel.layer.cornerRadius=15;
-        // The detail page gives this controller a compact preferred height.
-        // Keep status at its real one/two-line height so Auto Layout does not
-        // stretch it into a large blank panel while alternatives are absent.
+        // Keep the controls compact when the video surface is pinned above
+        // the scrolling detail content, especially when no alternate stream exists.
         [self.status setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical];
         [self.status setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical];
-        self.embeddedConstraints=@[
+        self.embeddedSurfaceConstraints=@[
             [self.videoView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
             [self.videoView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
             [self.videoView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],videoAspect,
             [self.controlPanel.topAnchor constraintEqualToAnchor:self.videoView.bottomAnchor constant:8],
             [self.controlPanel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
             [self.controlPanel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-            [self.controlPanel.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+            [self.controlPanel.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+        ];
+        self.embeddedControlConstraints=@[
             [self.qualityGroup.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:8],
             [self.qualityGroup.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:14],
             [self.qualityGroup.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-14],
@@ -487,12 +496,32 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
             [self.inlineRetryButton.heightAnchor constraintGreaterThanOrEqualToConstant:40],
             [self.inlineWebButton.heightAnchor constraintGreaterThanOrEqualToConstant:40]
         ];
+        self.embeddedConstraints=[self.embeddedSurfaceConstraints arrayByAddingObjectsFromArray:self.embeddedControlConstraints];
         [NSLayoutConstraint activateConstraints:self.embeddedConstraints];
     }else [self updatePlaybackLayoutForSize:self.view.bounds.size];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationDidEnterBackground:) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [self buildLines];[self buildQualityButtons];[self updateEpisodeTitle];self.pendingEpisodeResult=self.result;
 }
 - (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self updatePlaybackLayoutForSize:self.view.bounds.size];self.videoTopScrim.frame=CGRectMake(0,0,CGRectGetWidth(self.videoView.bounds),MIN(168,MAX(72,CGRectGetHeight(self.videoView.bounds)*0.58)));[self observePlayerLayerIfAvailable];}
+- (void)installFloatingInlineSurfaceInHost:(UIView *)videoHost controlsStack:(UIStackView *)controlsStack {
+    if(!self.embeddedMode||self.floatingInlineSurfaceInstalled||!videoHost||!controlsStack||!self.isViewLoaded)return;
+    self.floatingInlineSurfaceInstalled=YES;
+    [NSLayoutConstraint deactivateConstraints:self.embeddedSurfaceConstraints?:@[]];
+    self.videoAspectConstraint.active=NO;self.embeddedTallVideoAspectConstraint.active=NO;
+    self.view.translatesAutoresizingMaskIntoConstraints=NO;[self.view removeFromSuperview];[videoHost addSubview:self.view];
+    [NSLayoutConstraint activateConstraints:@[[self.view.leadingAnchor constraintEqualToAnchor:videoHost.leadingAnchor],[self.view.trailingAnchor constraintEqualToAnchor:videoHost.trailingAnchor],[self.view.topAnchor constraintEqualToAnchor:videoHost.topAnchor],[self.view.bottomAnchor constraintEqualToAnchor:videoHost.bottomAnchor],[self.videoView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.videoView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.videoView.topAnchor constraintEqualToAnchor:self.view.topAnchor],[self.videoView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
+    [self.controlPanel removeFromSuperview];[controlsStack insertArrangedSubview:self.controlPanel atIndex:0];
+    self.inlineNowPlayingLabel.text=self.episodeTitle.text;self.inlineNowPlayingPill.accessibilityLabel=self.episodeTitle.accessibilityLabel?:self.episodeTitle.text;self.inlineNowPlayingPill.hidden=NO;
+}
+- (CGFloat)preferredInlineVideoHeightForWidth:(CGFloat)width maximumHeight:(CGFloat)maximumHeight {
+    if(!isfinite(width)||width<=0)return 0;
+    CGFloat ratio=isfinite(self.videoAspectRatio)&&self.videoAspectRatio>0.1?self.videoAspectRatio:16.0/9.0;
+    CGFloat height=width/ratio;
+    CGFloat comfortableHeight=width/(16.0/9.0);
+    height=MAX(comfortableHeight,height);
+    if(isfinite(maximumHeight)&&maximumHeight>0)height=MIN(height,maximumHeight);
+    return MAX(160,height);
+}
 - (void)showGestureFeedback:(NSString *)text {
     self.gestureFeedbackLabel.text=[NSString stringWithFormat:@"  %@  ",text?:@""];self.gestureFeedbackLabel.hidden=NO;NSUInteger generation=++self.gestureFeedbackGeneration;__weak typeof(self) weakSelf=self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,850*NSEC_PER_MSEC),dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(owner&&owner.gestureFeedbackGeneration==generation)owner.gestureFeedbackLabel.hidden=YES;});
@@ -608,6 +637,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {[super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];[coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context){[self updatePlaybackLayoutForSize:size];} completion:nil];}
 - (void)updatePlaybackLayoutForSize:(CGSize)size {
     if(size.width<=0||size.height<=0)return;
+    if(self.floatingInlineSurfaceInstalled)return;
     BOOL tallVideo=self.videoAspectRatio>0.0&&self.videoAspectRatio<0.95;
     if(self.embeddedMode){
         BOOL aspectChanged=tallVideo&&fabs(self.videoAspectRatio-self.embeddedVideoAspectRatio)>0.05;
@@ -725,7 +755,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
         if(videoTrack){for(id description in videoTrack.formatDescriptions){CMFormatDescriptionRef format=(__bridge CMFormatDescriptionRef)description;if(CMFormatDescriptionGetMediaType(format)!=kCMMediaType_Video)continue;FourCharCode code=CMFormatDescriptionGetMediaSubType(format);char name[5]={(char)((code>>24)&0xff),(char)((code>>16)&0xff),(char)((code>>8)&0xff),(char)(code&0xff),0};BOOL printable=YES;for(int i=0;i<4;i++)if(name[i]<32||name[i]>126)printable=NO;if(printable)[codecs addObject:[NSString stringWithUTF8String:name]];}}
         dispatch_async(dispatch_get_main_queue(),^{
             MediaPlaybackViewController *owner=weakSelf;if(!owner||generation!=owner.playerGeneration||item!=owner.observedItem||item!=owner.player.currentItem)return;
-            CGSize presentation=item.presentationSize;CGFloat displayAspect=0;if(presentation.width>0&&presentation.height>0)displayAspect=presentation.width/presentation.height;else if(videoTrack){CGSize natural=videoTrack.naturalSize;CGRect transformed=CGRectStandardize(CGRectApplyAffineTransform(CGRectMake(0,0,fabs(natural.width),fabs(natural.height)),videoTrack.preferredTransform));if(transformed.size.width>0&&transformed.size.height>0)displayAspect=fabs(transformed.size.width)/fabs(transformed.size.height);}if(isfinite(displayAspect)&&displayAspect>0.1&&displayAspect<10.0){owner.videoAspectRatio=displayAspect;[owner updatePlaybackLayoutForSize:owner.view.bounds.size];}AVPlayerLayer *layer=owner.videoLayer;BOOL hasVideo=tracks.count>0||presentation.width>0||presentation.height>0||owner.videoFrameReady;owner.hasVideoTrack=hasVideo;
+            CGSize presentation=item.presentationSize;CGFloat displayAspect=0;if(presentation.width>0&&presentation.height>0)displayAspect=presentation.width/presentation.height;else if(videoTrack){CGSize natural=videoTrack.naturalSize;CGRect transformed=CGRectStandardize(CGRectApplyAffineTransform(CGRectMake(0,0,fabs(natural.width),fabs(natural.height)),videoTrack.preferredTransform));if(transformed.size.width>0&&transformed.size.height>0)displayAspect=fabs(transformed.size.width)/fabs(transformed.size.height);}if(isfinite(displayAspect)&&displayAspect>0.1&&displayAspect<10.0){owner.videoAspectRatio=displayAspect;[owner updatePlaybackLayoutForSize:owner.view.bounds.size];if(owner.onVideoAspectRatioChanged)owner.onVideoAspectRatioChanged(displayAspect);}AVPlayerLayer *layer=owner.videoLayer;BOOL hasVideo=tracks.count>0||presentation.width>0||presentation.height>0||owner.videoFrameReady;owner.hasVideoTrack=hasVideo;
             NSMutableDictionary *fields=[@{@"playback_attempt_id":owner.playbackAttemptID?:@"",@"correlation_id":owner.diagnosticTraceID?:@"",@"track_load_status":loadStatus==AVKeyValueStatusLoaded?@"loaded":(loadStatus==AVKeyValueStatusFailed?@"failed":@"unavailable"),@"asset_video_track_count":@(tracks.count),@"video_track_state":hasVideo?@"present_video_track":(loadStatus==AVKeyValueStatusLoaded?@"no_video_track":@"unknown"),@"video_presentation_width":@(MAX(0,(NSInteger)llround(presentation.width))),@"video_presentation_height":@(MAX(0,(NSInteger)llround(presentation.height))),@"video_layer_ready_for_display":@(layer.readyForDisplay),@"video_layer_width":@(MAX(0,(NSInteger)llround(layer.bounds.size.width))),@"video_layer_height":@(MAX(0,(NSInteger)llround(layer.bounds.size.height)))} mutableCopy];
             if(videoTrack){fields[@"video_natural_width"]=@(MAX(0,(NSInteger)llround(fabs(naturalSize.width))));fields[@"video_natural_height"]=@(MAX(0,(NSInteger)llround(fabs(naturalSize.height))));}
             if(codecs.count)fields[@"video_codec_fourcc"]=codecs.array;
@@ -939,7 +969,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 - (void)onError:(CicadaPlayer *)player errorModel:(CicadaErrorModel *)errorModel {if(player!=self.cicadaPlayer)return;dispatch_async(dispatch_get_main_queue(),^{if(player==self.cicadaPlayer)[self handleCicadaFailure:errorModel];});}
 - (void)onCurrentPositionUpdate:(CicadaPlayer *)player position:(int64_t)position {if(player!=self.cicadaPlayer)return;dispatch_async(dispatch_get_main_queue(),^{if(player==self.cicadaPlayer)[self updateCicadaPosition:position];});}
 - (void)onCurrentDownLoadSpeed:(CicadaPlayer *)player progress:(float)speed {if(player!=self.cicadaPlayer)return;dispatch_async(dispatch_get_main_queue(),^{if(player!=self.cicadaPlayer)return;self.cicadaDownloadBPS=MAX(0,speed);[self updateEstimatedThroughput];});}
-- (void)onVideoSizeChanged:(CicadaPlayer *)player width:(int)width height:(int)height rotation:(int)rotation {if(player!=self.cicadaPlayer||width<=0||height<=0)return;dispatch_async(dispatch_get_main_queue(),^{if(player!=self.cicadaPlayer)return;CGFloat ratio=(CGFloat)width/(CGFloat)height;if(rotation==90||rotation==270)ratio=1.0/ratio;if(isfinite(ratio)&&ratio>0.1&&ratio<10){self.videoAspectRatio=ratio;[self updatePlaybackLayoutForSize:self.view.bounds.size];}});}
+- (void)onVideoSizeChanged:(CicadaPlayer *)player width:(int)width height:(int)height rotation:(int)rotation {if(player!=self.cicadaPlayer||width<=0||height<=0)return;dispatch_async(dispatch_get_main_queue(),^{if(player!=self.cicadaPlayer)return;CGFloat ratio=(CGFloat)width/(CGFloat)height;if(rotation==90||rotation==270)ratio=1.0/ratio;if(isfinite(ratio)&&ratio>0.1&&ratio<10){self.videoAspectRatio=ratio;[self updatePlaybackLayoutForSize:self.view.bounds.size];if(self.onVideoAspectRatioChanged)self.onVideoAspectRatioChanged(ratio);}});}
 - (void)onVideoRendered:(CicadaPlayer *)player timeMs:(int64_t)timeMs pts:(int64_t)pts {if(player!=self.cicadaPlayer)return;dispatch_async(dispatch_get_main_queue(),^{if(player==self.cicadaPlayer)[self markCicadaFirstFrame];});}
 - (void)updateEpisodeTitle {
     NSArray *episodes=self.episodes;NSDictionary *episode=self.episodeIndex>=0&&self.episodeIndex<episodes.count?episodes[self.episodeIndex]:nil;
@@ -948,6 +978,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     NSString *title=name.length&&[name localizedCaseInsensitiveCompare:number]!=NSOrderedSame?[NSString stringWithFormat:@"%@ · %@",number,name]:number;
     NSString *visibleTitle=[NSString stringWithFormat:@"正在播放 · %@",title];
     self.episodeTitle.text=visibleTitle;self.episodeTitle.accessibilityLabel=visibleTitle;
+    self.inlineNowPlayingLabel.text=visibleTitle;self.inlineNowPlayingPill.accessibilityLabel=visibleTitle;self.inlineNowPlayingPill.hidden=!self.floatingInlineSurfaceInstalled;
     // Keep the selected episode visible in both the playback bar and the
     // navigation title; the series title alone is ambiguous during playback.
     self.title=title;

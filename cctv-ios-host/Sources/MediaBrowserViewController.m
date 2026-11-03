@@ -59,6 +59,13 @@ static BOOL MediaBrowserBoolean(id value) {
     return NO;
 }
 
+static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
+    if(![value isKindOfClass:NSString.class]||![savedName isKindOfClass:NSString.class])return NO;
+    NSString *candidate=[value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *saved=[savedName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return candidate.length&&saved.length&&[candidate localizedCaseInsensitiveCompare:saved]==NSOrderedSame;
+}
+
 static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *discardedLines, NSUInteger *discardedEpisodes) {
     if(discardedLines)*discardedLines=0;if(discardedEpisodes)*discardedEpisodes=0;
     if(![rawDetail isKindOfClass:NSDictionary.class])return nil;
@@ -304,6 +311,10 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
 @property(nonatomic,copy) dispatch_block_t onReturnHome;
 @property(nonatomic,strong) UIScrollView *scrollView;
 @property(nonatomic,strong) UIStackView *contentStack;
+@property(nonatomic,strong) UIView *inlinePlaybackDock;
+@property(nonatomic,strong) NSLayoutConstraint *detailScrollTopConstraint;
+@property(nonatomic,strong) NSLayoutConstraint *inlinePlaybackScrollTopConstraint;
+@property(nonatomic,strong) NSLayoutConstraint *inlinePlaybackDockHeightConstraint;
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) UIImageView *posterView;
 @property(nonatomic,strong) UIImageView *posterThumbnailView;
@@ -352,6 +363,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
 - (NSString *)posterURL;
 - (void)restoreSelectionFromDetail:(NSDictionary *)previousDetail;
 - (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context;
+- (void)updateInlinePlaybackDockLayout;
 @end
 @implementation MediaDetailViewController
 - (BOOL)shouldAutorotate {return YES;}
@@ -400,7 +412,8 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
     self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;self.scrollView.accessibilityIdentifier=@"media-detail-scroll";[self.view addSubview:self.scrollView];
     self.contentStack=[UIStackView new];self.contentStack.translatesAutoresizingMaskIntoConstraints=NO;self.contentStack.axis=UILayoutConstraintAxisVertical;self.contentStack.spacing=9;
     self.contentStack.layoutMargins=UIEdgeInsetsMake(0,14,20,14);self.contentStack.layoutMarginsRelativeArrangement=YES;[self.scrollView addSubview:self.contentStack];
-    [NSLayoutConstraint activateConstraints:@[[self.scrollView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+    self.detailScrollTopConstraint=[self.scrollView.topAnchor constraintEqualToAnchor:self.view.topAnchor];
+    [NSLayoutConstraint activateConstraints:@[self.detailScrollTopConstraint,
         [self.scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [self.contentStack.leadingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.leadingAnchor],
         [self.contentStack.trailingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.trailingAnchor],[self.contentStack.topAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.topAnchor],
@@ -493,11 +506,21 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
         if(!matched&&(episodeID.length||episodeName.length)){for(NSUInteger line=0;line<lines.count&&!matched;line++){NSArray *episodes=[lines[line][@"episodes"] isKindOfClass:NSArray.class]?lines[line][@"episodes"]:@[];for(NSUInteger episode=0;episode<episodes.count;episode++){NSDictionary *candidate=episodes[episode];if((episodeID.length&&[[candidate[@"id"] description] isEqual:episodeID])||(!episodeID.length&&episodeName.length&&[[candidate[@"name"] description] localizedCaseInsensitiveCompare:episodeName]==NSOrderedSame)){lineIndex=(NSInteger)line;episodeIndex=(NSInteger)episode;matched=YES;break;}}}}
         if(!matched||lineIndex<0||lineIndex>=lines.count)return;NSArray *episodes=[lines[(NSUInteger)lineIndex][@"episodes"] isKindOfClass:NSArray.class]?lines[(NSUInteger)lineIndex][@"episodes"]:@[];if(episodeIndex<0||episodeIndex>=episodes.count)return;owner.selectedLineIndex=lineIndex;owner.selectedEpisodeIndex=episodeIndex;owner.episodePage=CCTVEpisodeGroupForSourceIndex((NSUInteger)episodeIndex,episodes.count,owner.episodeOrderReversed);owner.resumeEntry=nil;[owner updateRouteAndEpisodeViews];};
     if(self.heroSpacer){[self.contentStack removeArrangedSubview:self.heroSpacer];[self.heroSpacer removeFromSuperview];self.heroSpacer=nil;}
-    [self addChildViewController:player];player.view.translatesAutoresizingMaskIntoConstraints=NO;
-    [self.contentStack insertArrangedSubview:player.view atIndex:0];
-    NSLayoutConstraint *inlineHeight=[player.view.heightAnchor constraintEqualToAnchor:player.view.widthAnchor multiplier:0.5625 constant:88];inlineHeight.priority=UILayoutPriorityDefaultHigh;inlineHeight.identifier=@"media-detail-inline-player-compact-height";inlineHeight.active=YES;
-    [player didMoveToParentViewController:self];self.heroView.hidden=YES;[player playInlineResult:result context:context];[self.scrollView setContentOffset:CGPointMake(0,-self.scrollView.adjustedContentInset.top) animated:YES];
+    [self addChildViewController:player];[player loadViewIfNeeded];
+    UIView *dock=[UIView new];dock.translatesAutoresizingMaskIntoConstraints=NO;dock.backgroundColor=UIColor.blackColor;dock.layer.cornerRadius=14;dock.layer.cornerCurve=kCACornerCurveContinuous;dock.clipsToBounds=YES;dock.accessibilityIdentifier=@"media-detail-floating-player";dock.accessibilityLabel=@"悬浮播放画面";[self.view addSubview:dock];self.inlinePlaybackDock=dock;
+    self.inlinePlaybackDockHeightConstraint=[dock.heightAnchor constraintEqualToConstant:220];
+    [NSLayoutConstraint activateConstraints:@[[dock.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4],[dock.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[dock.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],self.inlinePlaybackDockHeightConstraint]];
+    self.inlinePlaybackScrollTopConstraint=[self.scrollView.topAnchor constraintEqualToAnchor:dock.bottomAnchor constant:8];self.detailScrollTopConstraint.active=NO;self.inlinePlaybackScrollTopConstraint.active=YES;
+    [player installFloatingInlineSurfaceInHost:dock controlsStack:self.contentStack];
+    __weak typeof(self) weakOwner=self;player.onVideoAspectRatioChanged=^(CGFloat aspectRatio){MediaDetailViewController *owner=weakOwner;if(owner)[owner updateInlinePlaybackDockLayout];};
+    [player didMoveToParentViewController:self];self.heroView.hidden=YES;[self updateInlinePlaybackDockLayout];[player playInlineResult:result context:context];[self.scrollView setContentOffset:CGPointZero animated:YES];
     [RuntimeDiagnostics.shared recordEvent:@"inline_playback_attached" category:@"playback" fields:@{@"correlation_id":context[@"correlationID"]?:@"",@"service_id":context[@"source"][@"id"]?:@"",@"line_index":context[@"lineIndex"]?:@0,@"episode_index":context[@"episodeIndex"]?:@0}];
+}
+- (void)updateInlinePlaybackDockLayout {
+    if(!self.inlinePlaybackController||!self.inlinePlaybackDockHeightConstraint)return;
+    CGFloat width=CGRectGetWidth(self.view.bounds),height=CGRectGetHeight(self.view.bounds);if(width<=0||height<=0)return;
+    CGFloat maximum=MIN(420.0,MAX(180.0,height*.42));CGFloat target=[self.inlinePlaybackController preferredInlineVideoHeightForWidth:width maximumHeight:maximum];
+    if(fabs(self.inlinePlaybackDockHeightConstraint.constant-target)>.5){self.inlinePlaybackDockHeightConstraint.constant=target;[self.view setNeedsLayout];}
 }
 - (void)loadDetail {
     NSUInteger generation=++self.generation;
@@ -569,12 +592,15 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
 - (void)restoreResumeEntrySelection {
     NSDictionary *entry=self.resumeEntry;if(![entry isKindOfClass:NSDictionary.class])return;
     if(![entry[@"sourceID"] isEqual:self.source[@"id"]]||![entry[@"provider"] isEqual:self.provider?:@""]||![entry[@"itemID"] isEqual:([self.item[@"id"] description]?:@"")]){self.resumeEntry=nil;return;}
-    NSInteger lineIndex=[entry[@"lineIndex"] integerValue],episodeIndex=[entry[@"episodeIndex"] integerValue];NSString *lineID=entry[@"lineID"]?:@"",*episodeID=entry[@"episodeID"]?:@"";BOOL lineFound=NO;
+    if(!self.lines.count){self.resumeEntry=nil;return;}
+    NSInteger lineIndex=[entry[@"lineIndex"] integerValue],episodeIndex=[entry[@"episodeIndex"] integerValue];NSString *lineID=[entry[@"lineID"] description]?:@"",*episodeID=[entry[@"episodeID"] description]?:@"",*lineName=[entry[@"lineName"] isKindOfClass:NSString.class]?entry[@"lineName"]:@"",*episodeName=[entry[@"episodeName"] isKindOfClass:NSString.class]?entry[@"episodeName"]:@"";BOOL lineFound=NO;
     for(NSUInteger index=0;index<self.lines.count;index++)if(lineID.length&&[[self.lines[index][@"id"] description] isEqual:lineID]){lineIndex=(NSInteger)index;lineFound=YES;break;}
-    if(lineID.length&&!lineFound){self.resumeEntry=nil;return;}if(!lineFound&&(lineIndex<0||lineIndex>=self.lines.count))lineIndex=0;
-    NSArray *episodes=lineIndex>=0&&lineIndex<self.lines.count&&[self.lines[(NSUInteger)lineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[(NSUInteger)lineIndex][@"episodes"]:@[];BOOL episodeFound=NO;
+    if(!lineFound&&lineName.length){if(lineIndex>=0&&lineIndex<self.lines.count&&MediaBrowserIdentityNameMatches(self.lines[(NSUInteger)lineIndex][@"name"],lineName))lineFound=YES;else for(NSUInteger index=0;index<self.lines.count;index++)if(MediaBrowserIdentityNameMatches(self.lines[index][@"name"],lineName)){lineIndex=(NSInteger)index;lineFound=YES;break;}}
+    if(!lineFound&&(lineIndex<0||lineIndex>=self.lines.count)){self.resumeEntry=nil;return;}
+    NSArray *episodes=[self.lines[(NSUInteger)lineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[(NSUInteger)lineIndex][@"episodes"]:@[];BOOL episodeFound=NO;
     for(NSUInteger index=0;index<episodes.count;index++)if(episodeID.length&&[[episodes[index][@"id"] description] isEqual:episodeID]){episodeIndex=(NSInteger)index;episodeFound=YES;break;}
-    if((episodeID.length&&!episodeFound)||(!episodeFound&&(episodeIndex<0||episodeIndex>=episodes.count))){self.resumeEntry=nil;return;}
+    if(!episodeFound&&episodeName.length){if(episodeIndex>=0&&episodeIndex<episodes.count&&MediaBrowserIdentityNameMatches(episodes[(NSUInteger)episodeIndex][@"name"],episodeName))episodeFound=YES;else for(NSUInteger index=0;index<episodes.count;index++)if(MediaBrowserIdentityNameMatches(episodes[index][@"name"],episodeName)){episodeIndex=(NSInteger)index;episodeFound=YES;break;}}
+    if(!episodeFound&&(episodeIndex<0||episodeIndex>=episodes.count)){self.resumeEntry=nil;return;}
     self.selectedLineIndex=lineIndex;self.selectedEpisodeIndex=episodeIndex;self.episodePage=CCTVEpisodeGroupForSourceIndex((NSUInteger)episodeIndex,episodes.count,self.episodeOrderReversed);
 }
 - (void)restoreSelectionFromDetail:(NSDictionary *)previousDetail {
@@ -644,7 +670,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
     self.pageLabel.text=episodes.count?[NSString stringWithFormat:@"第 %ld/%lu 组 · 第 %lu–%lu 集 · %@",(long)self.episodePage+1,(unsigned long)pageCount,(unsigned long)firstSource+1,(unsigned long)lastSource+1,self.episodeOrderReversed?@"倒序":@"正序"]:@"此线路没有可选分集";
     [self.episodeReverseButton setTitle:self.episodeOrderReversed?@"正序":@"倒序" forState:UIControlStateNormal];self.episodeReverseButton.accessibilityLabel=self.episodeOrderReversed?@"按正序排列分集，当前为倒序":@"按倒序排列分集，当前为正序";self.episodeReverseButton.hidden=episodes.count<2;
     self.previousPageButton.hidden=pageCount<=1;self.nextPageButton.hidden=pageCount<=1;self.previousPageButton.enabled=self.episodePage>0;self.nextPageButton.enabled=self.episodePage+1<pageCount;self.playButton.enabled=episodes.count>0;self.playButton.alpha=episodes.count?1.0:0.55;
-    NSDictionary *selectedLine=self.selectedLineIndex<self.lines.count?self.lines[self.selectedLineIndex]:@{};NSDictionary *selectedEpisode=self.selectedEpisodeIndex<episodes.count?episodes[self.selectedEpisodeIndex]:@{};NSString *resumeLineID=self.resumeEntry[@"lineID"]?:@"",*resumeEpisodeID=self.resumeEntry[@"episodeID"]?:@"";BOOL lineMatches=resumeLineID.length?[[selectedLine[@"id"] description] isEqual:resumeLineID]:self.selectedLineIndex==[self.resumeEntry[@"lineIndex"] integerValue];BOOL episodeMatches=resumeEpisodeID.length?[[selectedEpisode[@"id"] description] isEqual:resumeEpisodeID]:self.selectedEpisodeIndex==[self.resumeEntry[@"episodeIndex"] integerValue];BOOL resumeSelected=self.resumeEntry&&lineMatches&&episodeMatches;
+    NSDictionary *selectedLine=self.selectedLineIndex<self.lines.count?self.lines[self.selectedLineIndex]:@{};NSDictionary *selectedEpisode=self.selectedEpisodeIndex<episodes.count?episodes[self.selectedEpisodeIndex]:@{};NSString *resumeLineID=[self.resumeEntry[@"lineID"] description]?:@"",*resumeEpisodeID=[self.resumeEntry[@"episodeID"] description]?:@"",*resumeLineName=[self.resumeEntry[@"lineName"] isKindOfClass:NSString.class]?self.resumeEntry[@"lineName"]:@"",*resumeEpisodeName=[self.resumeEntry[@"episodeName"] isKindOfClass:NSString.class]?self.resumeEntry[@"episodeName"]:@"";BOOL lineMatches=resumeLineID.length&&[[selectedLine[@"id"] description] isEqual:resumeLineID];if(!lineMatches&&resumeLineName.length)lineMatches=MediaBrowserIdentityNameMatches(selectedLine[@"name"],resumeLineName);if(!lineMatches)lineMatches=self.selectedLineIndex==[self.resumeEntry[@"lineIndex"] integerValue];BOOL episodeMatches=resumeEpisodeID.length&&[[selectedEpisode[@"id"] description] isEqual:resumeEpisodeID];if(!episodeMatches&&resumeEpisodeName.length)episodeMatches=MediaBrowserIdentityNameMatches(selectedEpisode[@"name"],resumeEpisodeName);if(!episodeMatches)episodeMatches=self.selectedEpisodeIndex==[self.resumeEntry[@"episodeIndex"] integerValue];BOOL resumeSelected=self.resumeEntry&&lineMatches&&episodeMatches;
     if(resumeSelected){NSString *verb=[self.resumeEntry[@"completed"] boolValue]?@"重新播放":@"继续观看";[self.playButton setTitle:[NSString stringWithFormat:@"▶︎  %@ · %@",verb,self.resumeEntry[@"episodeName"]?:@"上次分集"] forState:UIControlStateNormal];}else [self.playButton setTitle:@"▶︎  播放" forState:UIControlStateNormal];
     for(UIView *row in self.episodeGrid.arrangedSubviews.copy){[self.episodeGrid removeArrangedSubview:row];[row removeFromSuperview];}[self.episodeButtons removeAllObjects];if(!episodes.count)return;
     NSUInteger columnCount=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory)?3:4;NSUInteger visibleCount=end>start?end-start:0;NSUInteger rowCount=(visibleCount+columnCount-1)/columnCount;for(NSUInteger rowIndex=0;rowIndex<rowCount;rowIndex++){UIStackView *row=[UIStackView new];row.axis=UILayoutConstraintAxisHorizontal;row.spacing=6;row.distribution=UIStackViewDistributionFillEqually;
@@ -700,7 +726,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
         [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"", @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"line_index":@(owner.selectedLineIndex), @"episode_index":@(owner.selectedEpisodeIndex), @"result_has_media_url":@([result[@"url"] isKindOfClass:NSString.class]&&[result[@"url"] length]>0), @"result_parse_mode":@([result[@"parse"] respondsToSelector:@selector(integerValue)]?[result[@"parse"] integerValue]:0), @"result_alternate_count":@([result[@"alternates"] isKindOfClass:NSArray.class]?[result[@"alternates"] count]:0)}];owner.status.hidden=YES;NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"episodeID":[episode[@"id"] description]?:@"",@"episodeName":[episode[@"name"] description]?:@"",@"lineIndex":@(owner.selectedLineIndex),@"episodeIndex":@(owner.selectedEpisodeIndex),@"parserID":parserID,@"correlationID":owner.diagnosticTraceID?:@""};if(owner.onPlay)owner.onPlay(result,context);
     }];
 }
-- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews];self.heroGradient.frame=self.heroView.bounds;UIEdgeInsets inset=UIEdgeInsetsMake(0,0,MAX(24,self.view.safeAreaInsets.bottom+20),0);self.scrollView.contentInset=inset;self.scrollView.scrollIndicatorInsets=inset; }
+- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews];self.heroGradient.frame=self.heroView.bounds;UIEdgeInsets inset=UIEdgeInsetsMake(0,0,MAX(24,self.view.safeAreaInsets.bottom+20),0);self.scrollView.contentInset=inset;self.scrollView.scrollIndicatorInsets=inset;[self updateInlinePlaybackDockLayout]; }
 @end
 @interface MediaFavoritesViewController : UITableViewController
 @property(nonatomic,copy) NSArray<NSDictionary *> *entries;
