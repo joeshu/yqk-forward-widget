@@ -187,10 +187,29 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom))', layout)
         self.assertIn('CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets)', layout)
         self.assertIn('CGRectMake(0,0,w,ph)', layout)
+        self.assertIn('BOOL expanded=[self hasVisibleExpandedLivePlayer]', layout)
         self.assertIn('tabContentInset=MAX(8,height-tabY+8)', layout)
         self.assertIn('MAX(0,contentBottom-pageTop)', layout)
         self.assertNotIn('height-safe.bottom-152', layout)
         self.assertIn('self.tableView.contentInset=UIEdgeInsetsMake(0,0,tableBottomInset,0)', CONFIG)
+
+    def test_expanded_live_player_hides_opaque_header_and_keeps_search_reachable(self):
+        expanded_start = TEXT.index('- (BOOL)hasVisibleExpandedLivePlayer {')
+        expanded = TEXT[expanded_start:TEXT.index('\n}', expanded_start)]
+        navigation = method_body('- (void)configureCatalogNavigation {')
+        menu = method_body('- (UIMenu *)catalogMenu')
+        search_start = TEXT.index('- (void)showCatalogSearch {')
+        search = TEXT[search_start:TEXT.index('\n}', search_start)]
+        status = method_body('- (UIStatusBarStyle)preferredStatusBarStyle')
+        self.assertIn('self.navigationController setNavigationBarHidden:hideNavigation animated:NO', navigation)
+        self.assertIn('[self setNeedsStatusBarAppearanceUpdate]', navigation)
+        self.assertIn('self.currentRemoteURL', expanded)
+        self.assertIn('identifier:@"channel.catalog.search"', menu)
+        self.assertIn('[w showCatalogSearch]', menu)
+        self.assertIn('owner.searchController.searchBar.text=owner.query', search)
+        self.assertIn('UIStatusBarStyleLightContent', status)
+        self.assertIn('expanded subscription playback hides the opaque search header',
+                      (SOURCE.parents[1] / 'Tests' / 'UISmoke' / 'SmokeDriver.m').read_text())
 
     def test_service_directory_applies_safe_area_only_once(self):
         self.assertIn('self.table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever', SERVICE_UI)

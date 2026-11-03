@@ -469,6 +469,8 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)loadChannels;
 - (void)
 configureCatalogNavigation;
+- (BOOL)hasVisibleExpandedLivePlayer;
+- (void)showCatalogSearch;
 - (void)activateAudioSession;
 - (void)setupRemoteCommands;
 - (void)registerCallbackProtocol;
@@ -626,7 +628,23 @@ configureCatalogNavigation;
 - (BOOL)shouldHideNavigationBarForVisibleController:(UIViewController *)visibleController {
     if(visibleController!=self)return NO;
     MediaBrowserViewController *mediaPage=[self.tabPages[@2] isKindOfClass:MediaBrowserViewController.class]?self.tabPages[@2]:nil;
-    return self.fullscreen||(self.activeTab==2&&mediaPage.isHomeMode)||self.activeTab==3;
+    return self.fullscreen||[self hasVisibleExpandedLivePlayer]||(self.activeTab==2&&mediaPage.isHomeMode)||self.activeTab==3;
+}
+
+- (BOOL)hasVisibleExpandedLivePlayer {
+    if(!self.playerExpanded||self.activeTab>=2||!self.channelID.length)return NO;
+    BOOL playerMatchesTab=self.favoritesOnly||(self.subscriptionCatalog==([self.currentRemoteURL length]>0));
+    return playerMatchesTab;
+}
+
+- (UIStatusBarStyle)preferredStatusBarStyle {
+    if(self.fullscreen||[self hasVisibleExpandedLivePlayer])return UIStatusBarStyleLightContent;
+    if(@available(iOS 13.0,*)){
+        UIUserInterfaceStyle style=self.navigationController.overrideUserInterfaceStyle;
+        if(style==UIUserInterfaceStyleUnspecified)style=self.traitCollection.userInterfaceStyle;
+        return style==UIUserInterfaceStyleDark?UIStatusBarStyleLightContent:UIStatusBarStyleDarkContent;
+    }
+    return UIStatusBarStyleDefault;
 }
 
 - (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)viewController animated:(BOOL)animated {
@@ -1193,13 +1211,17 @@ configureCatalogNavigation;
 }
 
 - (void)configureCatalogNavigation {
-    BOOL expandedLive=self.playerExpanded&&self.activeTab<2&&!self.favoritesOnly&&self.channelID.length&&((self.activeTab==0&&!self.currentRemoteURL.length)||(self.activeTab==1&&self.currentRemoteURL.length));
+    BOOL expandedLive=[self hasVisibleExpandedLivePlayer];
     self.title=expandedLive?(self.channelName?:@"直播"):(self.favoritesOnly?@"收藏频道":(self.subscriptionCatalog?@"频道":@"CCTV"));
     self.navigationItem.largeTitleDisplayMode=expandedLive?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationItem.searchController=self.searchController; self.navigationItem.hidesSearchBarWhenScrolling=NO;
     // Keep the live pages' transport and catalog controls independent of the
     // navigation bar so they remain visible when the top chrome collapses.
     self.navigationItem.leftBarButtonItem=nil;self.navigationItem.rightBarButtonItems=nil;
+    BOOL hideNavigation=self.fullscreen||expandedLive;
+    if(self.navigationController.topViewController==self&&self.navigationController.navigationBarHidden!=hideNavigation)
+        [self.navigationController setNavigationBarHidden:hideNavigation animated:NO];
+    [self setNeedsStatusBarAppearanceUpdate];
     if(self.catalogLayoutButton){self.catalogLayoutButton.accessibilityLabel=self.gridMode?@"切换列表布局":@"切换网格布局";UIButtonConfiguration *configuration=self.catalogLayoutButton.configuration;configuration.image=[UIImage systemImageNamed:self.gridMode?@"list.bullet":@"square.grid.2x2"];self.catalogLayoutButton.configuration=configuration;}
     self.catalogMoreButton.menu=[self catalogMenu];
 }
@@ -1234,6 +1256,7 @@ configureCatalogNavigation;
 - (UIMenu *)catalogMenu {
     __weak typeof(self) w=self;
     NSInteger groupIndex=self.groupControl.selectedSegmentIndex;NSString *groupName=groupIndex>=0&&groupIndex<self.groupControl.numberOfSegments?[self.groupControl titleForSegmentAtIndex:groupIndex]:@"全部";
+    UIAction *search=[UIAction actionWithTitle:@"搜索频道" image:[UIImage systemImageNamed:@"magnifyingglass"] identifier:@"channel.catalog.search" handler:^(UIAction *a){[w showCatalogSearch];}];
     UIAction *group=[UIAction actionWithTitle:[NSString stringWithFormat:@"频道分组 · %@",groupName] image:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] identifier:nil handler:^(UIAction *a){[w showGroupMenu];}];
     NSInteger nextColumns=self.gridColumns==4?3:4;
     UIAction *columns=[UIAction actionWithTitle:[NSString stringWithFormat:@"每行 %ld 列 · 切换为 %ld 列",(long)self.gridColumns,(long)nextColumns] image:[UIImage systemImageNamed:@"square.grid.3x3"] identifier:@"channel.grid.columns.toggle" handler:^(UIAction *a){[w toggleCatalogColumns];}];
@@ -1241,13 +1264,22 @@ configureCatalogNavigation;
     UIAction *add=[UIAction actionWithTitle:@"添加订阅" image:[UIImage systemImageNamed:@"plus"] identifier:nil handler:^(UIAction *a){[w addSubscription];}];
     UIAction *hide=[UIAction actionWithTitle:self.playerExpanded?@"收起播放器":@"展开播放器" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){w.playerExpanded=!w.playerExpanded;[w configureCatalogNavigation];[w.view setNeedsLayout];}];
     UIAction *history=[UIAction actionWithTitle:@"最近观看" image:[UIImage systemImageNamed:@"clock"] identifier:nil handler:^(UIAction *a){[w showHistory];}];
-    UIAction *playing=[UIAction actionWithTitle:@"返回正在播放" image:[UIImage systemImageNamed:@"play.circle"] identifier:nil handler:^(UIAction *a){if(!w.channelID.length)return;[w selectBottomTab:(id)w.bottomBar.arrangedSubviews[w.currentRemoteURL.length?1:0]];w.playerExpanded=YES;[w.view setNeedsLayout];}];
+    UIAction *playing=[UIAction actionWithTitle:@"返回正在播放" image:[UIImage systemImageNamed:@"play.circle"] identifier:nil handler:^(UIAction *a){if(!w.channelID.length)return;[w selectBottomTab:(id)w.bottomBar.arrangedSubviews[w.currentRemoteURL.length?1:0]];w.playerExpanded=YES;[w configureCatalogNavigation];[w.view setNeedsLayout];}];
     UIAction *manage=[UIAction actionWithTitle:@"整理收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[w showFavoriteManager];}];
     UIAction *favorites=[UIAction actionWithTitle:self.favoritesOnly?@"显示全部频道":@"查看收藏频道" image:[UIImage systemImageNamed:@"heart.fill"] identifier:nil handler:^(UIAction *a){w.favoritesOnly=!w.favoritesOnly;[w configureCatalogNavigation];[w applyFilter];}];
-    NSMutableArray *actions=[NSMutableArray arrayWithObjects:group,columns,refresh,hide,playing,history,favorites,manage,nil];
+    NSMutableArray *actions=[NSMutableArray arrayWithObjects:search,group,columns,refresh,hide,playing,history,favorites,manage,nil];
     if(self.subscriptionCatalog)[actions insertObject:add atIndex:2];
     if(self.channelID.length){BOOL favorite=[self.favorites containsObject:self.channelID];UIAction *currentFavorite=[UIAction actionWithTitle:favorite?@"取消收藏当前频道":@"收藏当前频道" image:[UIImage systemImageNamed:favorite?@"heart.fill":@"heart"] identifier:nil handler:^(UIAction *a){[w toggleCurrentFavorite];}];UIAction *playbackInfo=[UIAction actionWithTitle:@"播放信息" image:[UIImage systemImageNamed:@"info.circle"] identifier:nil handler:^(UIAction *a){[w showPlaybackInfo];}];[actions insertObjects:@[currentFavorite,playbackInfo] atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0,2)]];}
     return [UIMenu menuWithTitle:@"" children:actions];
+}
+- (void)showCatalogSearch {
+    NSString *message=self.subscriptionCatalog?@"按频道名称或编号筛选订阅频道。":@"按频道名称或编号筛选 CCTV。";
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"搜索频道" message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){field.text=self.query?:@"";field.placeholder=@"频道名称或编号";field.clearButtonMode=UITextFieldViewModeWhileEditing;field.returnKeyType=UIReturnKeySearch;}];
+    __weak typeof(self) weakSelf=self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"搜索" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(!owner)return;owner.query=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";owner.searchController.searchBar.text=owner.query;[owner applyFilter];}]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)showGroupMenu {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:@"按频道类型筛选当前列表" preferredStyle:UIAlertControllerStyleActionSheet];NSInteger selected=self.groupControl.selectedSegmentIndex;
@@ -1589,7 +1621,7 @@ configureCatalogNavigation;
     BOOL activeNative=self.currentPlayer && !self.nativePlaybackFailed && ![ch[@"remoteURL"] length] && (self.firstRender || self.watchdog.isValid);
     BOOL activeRemote=([ch[@"remoteURL"] isEqualToString:self.currentRemoteURL]) && (self.remotePlaybackWanted || self.playbackReadiness);
     if(sameChannel && (activeNative || activeRemote)) {
-        self.selectionVersion++;self.playerTabs.selectedSegmentIndex=1;[self selectPlayerPanel];self.playerExpanded=YES;[self.view setNeedsLayout];return;
+        self.selectionVersion++;self.playerTabs.selectedSegmentIndex=1;[self selectPlayerPanel];self.playerExpanded=YES;[self configureCatalogNavigation];[self.view setNeedsLayout];return;
     }
     // Coalesce rapid taps without the previous fixed 80 ms delay.
     NSTimeInterval selectedAt=CACurrentMediaTime();NSUInteger selection=++self.selectionVersion;NSString *selectionTraceID=NSUUID.UUID.UUIDString.lowercaseString;self.currentPlaybackTraceID=selectionTraceID;self.playbackIntentVersion++;[self.playbackReadiness cancel];[self stopPreview];
@@ -2126,8 +2158,7 @@ configureCatalogNavigation;
         self.tabPage.view.hidden=YES;
     } else {
         BOOL catalog=self.activeTab<2;
-        BOOL matchingPlayer=self.favoritesOnly||(self.subscriptionCatalog==([self.currentRemoteURL length]>0));
-        BOOL expanded=self.playerExpanded&&matchingPlayer;
+        BOOL expanded=[self hasVisibleExpandedLivePlayer];
         CGFloat ph=expanded?MIN(w*9.0/16.0,MAX(120,(height-safe.bottom)*0.50)):0;
         self.playerBox.frame=CGRectMake(0,0,w,ph);self.playerBox.hidden=!catalog||!expanded;
         CGFloat y=expanded?ph:top;self.groupControl.frame=CGRectMake(12,y+6,w-24,28);self.groupControl.hidden=!catalog||expanded;self.playerTabs.frame=CGRectMake(12,y+6,w-24,28);self.playerTabs.hidden=!catalog||!expanded;
@@ -2180,7 +2211,6 @@ configureCatalogNavigation;
         self.table.hidden = YES;
         self.groupControl.hidden = YES;
         self.versionLabel.hidden = YES;
-        self.navigationController.navigationBarHidden = YES;
     } else {
         self.playerBox.frame = CGRectMake(0, 0, w, w * 9.0 / 16.0);
         self.bottomBar.hidden = NO;
@@ -2188,8 +2218,9 @@ configureCatalogNavigation;
         self.table.hidden = NO;
         self.groupControl.hidden = NO;
         self.versionLabel.hidden = NO;
-        self.navigationController.navigationBarHidden = NO;
     }
+    [self configureCatalogNavigation];
+    [self setNeedsStatusBarAppearanceUpdate];
     self.tabPage.view.hidden=NO;
     [self.view setNeedsLayout];
     [self relayoutPlayer];
