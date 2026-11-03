@@ -256,6 +256,12 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('self.navigationController.delegate=self', self.root)
         self.assertIn('didShowViewController:(UIViewController *)viewController animated:(BOOL)animated', self.root)
         self.assertIn('shouldHideNavigationBarForVisibleController:', self.root)
+
+    def test_media_bottom_overlay_setter_does_not_reenter_itself(self):
+        setter = self.detail.split('- (void)setBottomOverlayInset:', 1)[1].split('\n}', 1)[0]
+        self.assertIn('_bottomOverlayInset=inset;', setter)
+        self.assertIn('fabs(_bottomOverlayInset-inset)<0.01', setter)
+        self.assertNotIn('self.bottomOverlayInset=', setter)
         self.assertIn('navigationController.topViewController!=viewController', self.root)
 
     def test_home_uses_reference_style_discovery_grid_and_on_demand_categories(self):

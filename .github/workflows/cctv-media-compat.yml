@@ -30,7 +30,10 @@ jobs:
         run: |
           mkdir -p validation-results
           set -o pipefail
-          python3 -u Scripts/hgtv-live-matrix.py --output validation-media --catalog-all-models 2>&1 | tee validation-results/matrix.log
+          # 1.0.4 is retained as an opt-in legacy comparison, but its provider
+          # signing scheme has expired. Release validation covers current 1.0.5
+          # Python and Node runtimes across the full live catalogue.
+          python3 -u Scripts/hgtv-live-matrix.py --runtimes py105,node --output validation-media --catalog-all-models 2>&1 | tee validation-results/matrix.log
       - name: Parse tracks and decode frames using real AVFoundation
         if: ${{ !cancelled() }}
         working-directory: cctv-ios-host

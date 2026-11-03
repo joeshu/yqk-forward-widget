@@ -352,6 +352,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [root selectBottomTab:(id)tabs.arrangedSubviews[2]];
             [root.view layoutIfNeeded];
             MediaBrowserViewController *mediaHome=(id)[root valueForKey:@"tabPage"];
+            CGFloat expectedMediaOverlayInset=MAX(8,CGRectGetHeight(root.view.bounds)-CGRectGetMinY(tabs.frame)+8);CGFloat actualMediaOverlayInset=[[mediaHome valueForKey:@"bottomOverlayInset"] doubleValue];check(fabs(actualMediaOverlayInset-expectedMediaOverlayInset)<1.5,[NSString stringWithFormat:@"root passes the tab overlay inset to the media page (actual=%.1f expected=%.1f)",actualMediaOverlayInset,expectedMediaOverlayInset]);[mediaHome setValue:@(actualMediaOverlayInset) forKey:@"bottomOverlayInset"];
             check([mediaHome isKindOfClass:MediaBrowserViewController.class]&&mediaHome.isHomeMode&&root.title.length==0, @"media tab opens the compact untitled home");
             check(mediaHome!=nil, @"media page embedded");
             check(nav.delegate==root&&nav.navigationBarHidden,@"navigation bar is hidden only while the home tab is visible");

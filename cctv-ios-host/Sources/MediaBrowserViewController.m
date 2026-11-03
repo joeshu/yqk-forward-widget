@@ -1102,7 +1102,14 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     [self loadSources];
     if(self.onDisplayModeChanged)self.onDisplayModeChanged(YES);
 }
-- (void)setBottomOverlayInset:(CGFloat)inset {if(!isfinite(inset))inset=0;self.bottomOverlayInset=MAX(0,inset);if(self.homeScroll){self.homeScroll.contentInset=UIEdgeInsetsMake(0,0,MAX(28,self.bottomOverlayInset),0);self.homeScroll.scrollIndicatorInsets=self.homeScroll.contentInset;}self.moreButtonBottomConstraint.constant=-self.bottomOverlayInset;}
+- (void)setBottomOverlayInset:(CGFloat)inset {
+    if(!isfinite(inset))inset=0;
+    inset=MAX(0,inset);
+    if(fabs(_bottomOverlayInset-inset)<0.01)return;
+    _bottomOverlayInset=inset;
+    if(self.homeScroll){self.homeScroll.contentInset=UIEdgeInsetsMake(0,0,MAX(28,inset),0);self.homeScroll.scrollIndicatorInsets=self.homeScroll.contentInset;}
+    if(self.moreButtonBottomConstraint)self.moreButtonBottomConstraint.constant=-inset;
+}
 - (UIButton *)selectionButtonWithSymbol:(NSString *)symbol identifier:(NSString *)identifier action:(SEL)action {
     UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;HostStylePillButton(button,NO);button.layer.cornerRadius=23;button.contentEdgeInsets=UIEdgeInsetsMake(8,12,8,12);button.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeading;button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;button.titleLabel.adjustsFontSizeToFitWidth=YES;button.titleLabel.minimumScaleFactor=0.82;button.accessibilityIdentifier=identifier;button.isAccessibilityElement=YES;button.accessibilityTraits|=UIAccessibilityTraitButton;[button setImage:[UIImage systemImageNamed:symbol] forState:UIControlStateNormal];button.tintColor=HostAccent();button.imageEdgeInsets=UIEdgeInsetsMake(0,0,0,7);[button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];return button;
 }
