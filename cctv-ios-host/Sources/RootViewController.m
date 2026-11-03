@@ -320,6 +320,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
 @property (nonatomic, strong) UIImageView *playerChannelLogo;
 @property (nonatomic, strong) UIStackView *controlBar;
+@property (nonatomic, strong) UIButton *liveResourceCapsule;
 @property (nonatomic, strong) UIButton *playPauseBtn;
 @property (nonatomic, strong) UIButton *muteBtn;
 @property (nonatomic, strong) UIButton *routeBtn;
@@ -471,6 +472,9 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 configureCatalogNavigation;
 - (BOOL)hasVisibleExpandedLivePlayer;
 - (void)showCatalogSearch;
+- (void)updateLiveResourceCapsule;
+- (void)selectLiveResourceSource:(nullable NSString *)source;
+- (BOOL)subscriptionOwner:(NSString *)owner matchesLiveResourceSource:(NSString *)source;
 - (void)activateAudioSession;
 - (void)setupRemoteCommands;
 - (void)registerCallbackProtocol;
@@ -825,6 +829,13 @@ configureCatalogNavigation;
     self.playerBox.backgroundColor = UIColor.blackColor;
     self.playerBox.clipsToBounds = YES;
     [self.view addSubview:self.playerBox];
+
+    self.liveResourceCapsule=[UIButton buttonWithType:UIButtonTypeSystem];
+    self.liveResourceCapsule.accessibilityIdentifier=@"live.resource.capsule";
+    self.liveResourceCapsule.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;
+    self.liveResourceCapsule.hidden=YES;
+    [self.view addSubview:self.liveResourceCapsule];
+    [self updateLiveResourceCapsule];
 
     self.playerTopScrim=[UIView new];self.playerTopScrim.userInteractionEnabled=NO;self.playerTopGradient=[CAGradientLayer layer];self.playerTopGradient.colors=@[(id)[UIColor colorWithWhite:0 alpha:.76].CGColor,(id)[UIColor colorWithWhite:0 alpha:.36].CGColor,(id)UIColor.clearColor.CGColor];self.playerTopGradient.locations=@[@0,@0.62,@1];self.playerTopGradient.startPoint=CGPointMake(.5,0);self.playerTopGradient.endPoint=CGPointMake(.5,1);[self.playerTopScrim.layer addSublayer:self.playerTopGradient];[self.playerBox addSubview:self.playerTopScrim];
 
@@ -1222,6 +1233,7 @@ configureCatalogNavigation;
     if(self.navigationController.topViewController==self&&self.navigationController.navigationBarHidden!=hideNavigation)
         [self.navigationController setNavigationBarHidden:hideNavigation animated:NO];
     [self setNeedsStatusBarAppearanceUpdate];
+    [self updateLiveResourceCapsule];
     if(self.catalogLayoutButton){self.catalogLayoutButton.accessibilityLabel=self.gridMode?@"切换列表布局":@"切换网格布局";UIButtonConfiguration *configuration=self.catalogLayoutButton.configuration;configuration.image=[UIImage systemImageNamed:self.gridMode?@"list.bullet":@"square.grid.2x2"];self.catalogLayoutButton.configuration=configuration;}
     self.catalogMoreButton.menu=[self catalogMenu];
 }
@@ -1361,12 +1373,12 @@ configureCatalogNavigation;
     if(!page){page=[ConfigCenterViewController new];__weak typeof(self) w=self;
         page.profilesProvider=^{return [(id)w configurationProfiles];};page.onServices=^{[w openServicesPage];};page.onAdd=^{[w addSubscription];};page.onRefresh=^{[w onPullRefresh];};page.onRefreshProfile=^(NSString *source){[w fetchSubscription:source silent:NO];};
         page.onRefreshMediaHome=^{RootViewController *owner=w;if(!owner)return;[owner selectBottomTab:(UIButton *)owner.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)owner.tabPages[@2];[browser returnToHomeFromNavigation];dispatch_async(dispatch_get_main_queue(),^{if(![browser refreshHomeContentFromResourcePage])[owner showServiceError:@"没有可加载的影视资源。请先导入并启用一个影视来源。"] ;});};
-        page.onToggleProfile=^(NSString *source,BOOL enabled){NSDictionary *service=[w resourceServiceForSource:source];if(service){[w toggleService:service enabled:enabled];return;}if(!source.length)[NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"nativeChannelsEnabled"];else{NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabled removeObject:source];if(!enabled)[disabled addObject:source];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];}[w applyFilter];};
+        page.onToggleProfile=^(NSString *source,BOOL enabled){NSDictionary *service=[w resourceServiceForSource:source];if(service){[w toggleService:service enabled:enabled];return;}if(!source.length)[NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"nativeChannelsEnabled"];else{NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabled removeObject:source];if(!enabled)[disabled addObject:source];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];}[w applyFilter];[w updateLiveResourceCapsule];};
         page.onOpenResource=^(NSString *source){[w openPluginResource:source];};
         page.onUseResource=^(NSString *source,NSString *kind){NSDictionary *service=[w resourceServiceForSource:source];if(!service)return;if([kind isEqual:@"choose"]){UIAlertController *choice=[UIAlertController alertControllerWithTitle:service[@"name"]?:@"选择资源用途" message:@"这个资源同时提供影视与直播能力。" preferredStyle:UIAlertControllerStyleActionSheet];[choice addAction:[UIAlertAction actionWithTitle:@"进入影视" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"vod"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"添加直播频道" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"live"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"资源详情与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w openPluginResource:source];}]];[choice addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];choice.popoverPresentationController.sourceView=w.view;choice.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(w.view.bounds),CGRectGetMidY(w.view.bounds),1,1);[w presentViewController:choice animated:YES completion:nil];return;}[w usePluginService:service kind:kind];};
         page.onOpenTVBoxCatalog=^(NSString *identifier){[w openTVBoxCatalog:identifier];};
         page.onExportResource=^(NSString *source,NSString *format){[w exportResource:source format:format];};
-        page.onSelectProfile=^(NSString *source){UIButton *b=(UIButton *)w.bottomBar.arrangedSubviews[source.length?1:0];[w selectBottomTab:b];w.activeSource=source;w.title=source.length?@"订阅直播":@"央视直播";[w applyFilter];};
+        page.onSelectProfile=^(NSString *source){UIButton *b=(UIButton *)w.bottomBar.arrangedSubviews[source.length?1:0];[w selectBottomTab:b];w.activeSource=source;w.title=source.length?@"订阅直播":@"央视直播";[w applyFilter];[w updateLiveResourceCapsule];};
         page.onEditProfile=^(NSString *source){NSDictionary *service=[w resourceServiceForSource:source];if(service)[w openServiceEditorForService:service];else[w editProfile:source];};
         page.onDeleteProfile=^(NSString *source){if([source hasPrefix:@"tvbox:"]){[TVBoxCatalogStore removeCatalog:[source substringFromIndex:6]];[w refreshConfigurationPage];return;}NSDictionary *service=[w resourceServiceForSource:source];if(service){if([PyHost isManagedServiceIdentifier:service[@"id"]]){[w showServiceError:@"该资源仍有运行或待清理会话，请先停止"];return;}[ServiceStore remove:service[@"id"]];}else[w deleteSubscription:source];};
         self.tabPages[@3]=page;
@@ -1396,9 +1408,62 @@ configureCatalogNavigation;
         NSString *identifier=catalog[@"id"]?:@"";NSString *catalogName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"";if(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])catalogName=@"资源合集";NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];NSUInteger supported=0;for(NSDictionary *site in sites)if([site[@"supported"] boolValue])supported++;
         NSUInteger liveCount=[catalog[@"lives"] count];NSString *kind=supported&&liveCount?@"both":(supported?@"vod":(liveCount?@"live":@"unknown"));NSString *catalogKind=[catalog[@"catalogKind"] isKindOfClass:NSString.class]?catalog[@"catalogKind"]:@"tvbox";
         BOOL current=[selectedMediaCatalog isEqual:identifier]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"tvbox-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"maccms-api:%@:",identifier]];
-        [rows addObject:@{@"name":catalogName,@"type":@"tvbox",@"catalogKind":catalogKind,@"resourceKind":kind,@"source":[@"tvbox:" stringByAppendingString:identifier],@"url":catalog[@"url"]?:@"",@"siteCount":@(sites.count),@"supportedCount":@(supported),@"liveCount":@(liveCount),@"current":@(current)}];
+        BOOL liveEnabled=NO;for(NSString *owner in self.subscriptionURLs){NSDictionary *ownerMetadata=[ProfileStore metadata:owner];if([ownerMetadata[@"tvboxCatalogID"] isEqual:identifier]&&![disabled containsObject:owner]&&[counts[owner] unsignedIntegerValue]){liveEnabled=YES;break;}}
+        [rows addObject:@{@"name":catalogName,@"type":@"tvbox",@"catalogKind":catalogKind,@"resourceKind":kind,@"source":[@"tvbox:" stringByAppendingString:identifier],@"url":catalog[@"url"]?:@"",@"siteCount":@(sites.count),@"supportedCount":@(supported),@"liveCount":@(liveCount),@"enabled":@(liveEnabled),@"current":@(current)}];
     }
     return rows;
+}
+- (void)updateLiveResourceCapsule {
+    UIButton *capsule=self.liveResourceCapsule;if(!capsule)return;
+    BOOL visible=!self.fullscreen&&[self hasVisibleExpandedLivePlayer];capsule.hidden=!visible;
+    if(!visible)return;
+    NSString *title=self.activeTab==0?@"央视直播":@"全部直播资源";
+    UIMenu *menu=nil;
+    if(self.activeTab==1){
+        __weak typeof(self) weakSelf=self;NSMutableArray<UIMenuElement *> *actions=[NSMutableArray array];
+        BOOL allSelected=!self.activeSource.length;
+        [actions addObject:[[UIAction alloc] initWithTitle:@"全部直播资源" image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:@"live.resource.all" discoverabilityTitle:nil attributes:UIMenuElementAttributesNone state:allSelected?UIMenuElementStateOn:UIMenuElementStateOff handler:^(UIAction *action){[weakSelf selectLiveResourceSource:nil];}]];
+        NSString *selectedName=nil;
+        for(NSDictionary *profile in [self configurationProfiles]){
+            NSString *kind=[profile[@"resourceKind"] isKindOfClass:NSString.class]?profile[@"resourceKind"]:@"";
+            if(!([kind isEqual:@"live"]||[kind isEqual:@"both"])||[profile[@"native"] boolValue]||(profile[@"enabled"]&&![profile[@"enabled"] boolValue]))continue;
+            NSString *source=[profile[@"source"] isKindOfClass:NSString.class]?profile[@"source"]:@"";
+            if(!source.length)continue;
+            if([profile[@"type"] isEqual:@"tvbox"]&&![profile[@"liveCount"] unsignedIntegerValue])continue;
+            if([profile[@"type"] isEqual:@"plugin"]&&![[profile[@"subscriptionURL"] description] length]&&![profile[@"channelCount"] unsignedIntegerValue])continue;
+            NSString *name=[profile[@"name"] isKindOfClass:NSString.class]?profile[@"name"]:source;
+            NSUInteger count=[profile[@"count"] unsignedIntegerValue];if(!count)count=[profile[@"channelCount"] unsignedIntegerValue];if(!count)count=[profile[@"liveCount"] unsignedIntegerValue];
+            NSString *menuTitle=count?[NSString stringWithFormat:@"%@ · %lu",name,(unsigned long)count]:name;
+            BOOL selected=[source isEqual:self.activeSource];if(selected)selectedName=name;
+            NSString *capturedSource=[source copy];
+            [actions addObject:[[UIAction alloc] initWithTitle:menuTitle image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:nil discoverabilityTitle:nil attributes:UIMenuElementAttributesNone state:selected?UIMenuElementStateOn:UIMenuElementStateOff handler:^(UIAction *action){[weakSelf selectLiveResourceSource:capturedSource];}]];
+        }
+        if(actions.count==1){UIAction *empty=[[UIAction alloc] initWithTitle:@"资源页暂无可选直播源" image:[UIImage systemImageNamed:@"info.circle"] identifier:nil discoverabilityTitle:nil attributes:UIMenuElementAttributesDisabled state:UIMenuElementStateOff handler:^(UIAction *action){}];[actions addObject:empty];}
+        if(selectedName.length)title=selectedName;
+        title=[title stringByAppendingString:@"  ▾"];
+        menu=[UIMenu menuWithTitle:@"选择直播资源" children:actions];
+    }
+    UIButtonConfiguration *configuration=[UIButtonConfiguration plainButtonConfiguration];configuration.title=title;configuration.image=[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"];configuration.imagePlacement=NSDirectionalRectEdgeLeading;configuration.imagePadding=7;configuration.preferredSymbolConfigurationForImage=[UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightSemibold];configuration.baseForegroundColor=HostText();configuration.background.backgroundColor=HostGlassTint();configuration.background.strokeColor=HostBorder();configuration.background.strokeWidth=.7;configuration.background.cornerRadius=18;configuration.contentInsets=NSDirectionalEdgeInsetsMake(6,12,6,12);configuration.titleTextAttributesTransformer=^NSDictionary<NSAttributedStringKey,id> *(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];return result;};capsule.configuration=configuration;capsule.menu=menu;capsule.showsMenuAsPrimaryAction=self.activeTab==1;capsule.accessibilityLabel=self.activeTab==1?([title stringByReplacingOccurrencesOfString:@"  ▾" withString:@""]):@"央视直播";capsule.accessibilityHint=self.activeTab==1?@"下拉切换资源页中的直播资源":@"当前为央视官方频道";
+}
+- (void)selectLiveResourceSource:(NSString *)source {
+    self.activeSource=source.length?[source copy]:nil;self.favoritesOnly=NO;
+    [self applyFilter];[self updateLiveResourceCapsule];
+    CGFloat top=-self.channelGrid.contentInset.top;self.channelGrid.contentOffset=CGPointMake(0,top);self.table.contentOffset=CGPointMake(0,-self.table.contentInset.top);
+    [self.view setNeedsLayout];
+}
+- (BOOL)subscriptionOwner:(NSString *)owner matchesLiveResourceSource:(NSString *)source {
+    if(!source.length||[owner isEqual:source])return YES;
+    NSDictionary *metadata=[ProfileStore metadata:owner]?:@{};
+    if([source hasPrefix:@"tvbox:"]){
+        NSString *catalogID=[source substringFromIndex:6];if([metadata[@"tvboxCatalogID"] isEqual:catalogID])return YES;
+        NSDictionary *service=[self localServiceForURL:[NSURL URLWithString:owner]];return [service[@"tvboxCatalogID"] isEqual:catalogID];
+    }
+    if([source hasPrefix:@"plugin:"]){
+        NSString *serviceID=[source substringFromIndex:7];if([metadata[@"managedServiceID"] isEqual:serviceID])return YES;
+        NSDictionary *service=[self resourceServiceForSource:source];NSString *playlist=[ServiceStore subscriptionURLForService:service]?:@"";if(playlist.length&&[[self stableURLKey:playlist] isEqual:[self stableURLKey:owner]])return YES;
+        NSDictionary *ownerService=[self localServiceForURL:[NSURL URLWithString:owner]];return [ownerService[@"id"] isEqual:serviceID];
+    }
+    return NO;
 }
 - (void)openPluginResource:(NSString *)source {
     if([source hasPrefix:@"tvbox:"]){[self openTVBoxCatalog:[source substringFromIndex:6]];return;}
@@ -2146,8 +2211,10 @@ configureCatalogNavigation;
     CGFloat w = CGRectGetWidth(self.view.bounds);
     CGFloat height = CGRectGetHeight(self.view.bounds);
     CGFloat top = safe.top;
+    BOOL expandedLive=!self.fullscreen&&[self hasVisibleExpandedLivePlayer];
     if (self.fullscreen) {
         self.playerBox.frame = self.view.bounds;
+        self.liveResourceCapsule.hidden=YES;
         self.bottomBar.hidden = YES;
         self.bottomBarBackdrop.hidden = YES;
         self.resourceActionsButton.hidden=YES;
@@ -2158,26 +2225,30 @@ configureCatalogNavigation;
         self.tabPage.view.hidden=YES;
     } else {
         BOOL catalog=self.activeTab<2;
-        BOOL expanded=[self hasVisibleExpandedLivePlayer];
-        CGFloat ph=expanded?MIN(w*9.0/16.0,MAX(120,(height-safe.bottom)*0.50)):0;
-        self.playerBox.frame=CGRectMake(0,0,w,ph);self.playerBox.hidden=!catalog||!expanded;
-        CGFloat y=expanded?ph:top;self.groupControl.frame=CGRectMake(12,y+6,w-24,28);self.groupControl.hidden=!catalog||expanded;self.playerTabs.frame=CGRectMake(12,y+6,w-24,28);self.playerTabs.hidden=!catalog||!expanded;
+        CGFloat capsuleRowHeight=expandedLive?44:0;
+        CGFloat playerTop=expandedLive?top+capsuleRowHeight:0;
+        CGFloat ph=expandedLive?MIN(w*9.0/16.0,MAX(120,(height-safe.bottom-playerTop)*0.50)):0;
+        self.playerBox.frame=CGRectMake(0,playerTop,w,ph);self.playerBox.hidden=!catalog||!expandedLive;
+        self.liveResourceCapsule.hidden=!catalog||!expandedLive;
+        if(!self.liveResourceCapsule.hidden){CGFloat maximumWidth=MAX(0,w-safe.left-safe.right-28);CGFloat naturalWidth=[self.liveResourceCapsule sizeThatFits:CGSizeMake(maximumWidth,36)].width;CGFloat capsuleWidth=MIN(maximumWidth,MIN(270,MAX(150,naturalWidth)));self.liveResourceCapsule.frame=CGRectMake(safe.left+14,top+4,capsuleWidth,36);}
+        CGFloat playerBottom=expandedLive?playerTop+ph:top;
+        self.groupControl.frame=CGRectMake(12,playerBottom+6,w-24,28);self.groupControl.hidden=!catalog||expandedLive;self.playerTabs.frame=CGRectMake(12,playerBottom+6,w-24,28);self.playerTabs.hidden=!catalog||!expandedLive;
         self.versionLabel.hidden=YES;
         CGFloat tabHeight=58,tabWidth=MIN(w,560),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBar.frame=CGRectMake(MAX(0,(w-tabWidth)/2),tabY,tabWidth,tabHeight);self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
-        CGFloat contentY=y+42;CGFloat contentBottom=height;
+        CGFloat contentY=playerBottom+42;CGFloat contentBottom=height;
         CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom));UIEdgeInsets catalogInsets=UIEdgeInsetsMake(contentY,0,tabContentInset,0);CCTVApplyImmersiveScrollGeometry(self.table,frame,catalogInsets);CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets);
         self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=frame;self.playbackPanel.view.hidden=!catalog;if([self.playbackPanel isKindOfClass:CCTVPlaybackListPanelController.class]){UITableView *panelTable=((CCTVPlaybackListPanelController *)self.playbackPanel).tableView;CCTVApplyImmersiveScrollGeometry(panelTable,panelTable.frame,catalogInsets);}
         // Every tab page owns the full root bounds. Child controls use their
         // safe-area guides, while their backgrounds and scroll views can pass
         // behind the status and navigation bars.
         BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat resourceSafeTop=self.view.window.safeAreaInsets.top;if(resourceSafeTop<=0)resourceSafeTop=top;CGFloat pageTop=0;self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,contentBottom-pageTop));if(resourcePage){[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:resourceSafeTop];[(ConfigCenterViewController *)self.tabPage setBottomOverlayInset:tabContentInset];}else if([self.tabPage isKindOfClass:MediaBrowserViewController.class])[(MediaBrowserViewController *)self.tabPage setBottomOverlayInset:tabContentInset];else if([self.tabPage isKindOfClass:SettingsViewController.class])[(SettingsViewController *)self.tabPage setBottomOverlayInset:tabContentInset];
-        self.playerTopScrim.frame=CGRectMake(0,0,w,MIN(CGRectGetHeight(self.playerBox.bounds),top+24));self.playerTopGradient.frame=self.playerTopScrim.bounds;
-        [self.view bringSubviewToFront:self.playerBox];[self.view bringSubviewToFront:self.groupControl];[self.view bringSubviewToFront:self.playerTabs];[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
+        self.playerTopScrim.frame=CGRectMake(0,0,w,MIN(CGRectGetHeight(self.playerBox.bounds),expandedLive?48:top+24));self.playerTopGradient.frame=self.playerTopScrim.bounds;
+        [self.view bringSubviewToFront:self.playerBox];[self.view bringSubviewToFront:self.liveResourceCapsule];[self.view bringSubviewToFront:self.groupControl];[self.view bringSubviewToFront:self.playerTabs];[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
         self.resourceActionsButton.hidden=YES;self.resourceActionsButton.frame=CGRectMake(w-safe.right-18-58,CGRectGetMinY(self.bottomBar.frame)-12-58,58,58);
         self.catalogFloatingControls.hidden=!catalog;CGFloat controlsWidth=164,controlsHeight=54;self.catalogFloatingControls.frame=CGRectMake(MAX(12,w-safe.right-controlsWidth-14),MAX(top+8,tabY-controlsHeight-12),controlsWidth,controlsHeight);self.catalogLayoutButton.frame=CGRectMake(4,3,48,48);self.catalogFloatingAirPlayPicker.frame=CGRectMake(58,3,48,48);self.catalogMoreButton.frame=CGRectMake(112,3,48,48);[self.view bringSubviewToFront:self.catalogFloatingControls];
     }
     [self relayoutPlayer];
-    CGFloat overlayTop = safe.top;
+    CGFloat overlayTop = expandedLive?0:safe.top;
     self.titleLabel.frame = CGRectMake(12 + safe.left, overlayTop + 8, MAX(0, w - safe.left - safe.right - 80), 20);
     self.infoLabel.frame = CGRectMake(12 + safe.left, overlayTop + 30, MAX(0, w - safe.left - safe.right - 24), 16);
     self.playerChannelLogo.frame=CGRectMake(MAX(safe.left+12,w-safe.right-60),overlayTop+8,48,27);
@@ -2915,7 +2986,10 @@ configureCatalogNavigation;
         if(!self.favoritesOnly && remote!=self.subscriptionCatalog)return NO;
         if(!remote)return CCTVBoolPreference(@"nativeChannelsEnabled",YES) && (!self.activeSource || !self.activeSource.length);
         NSSet *owners=[NSSet setWithArray:c[@"subscriptionSources"]?:@[]];NSMutableSet *enabled=[owners mutableCopy];[enabled minusSet:disabled];
-        return enabled.count && (!self.activeSource || [enabled containsObject:self.activeSource]);
+        if(!enabled.count)return NO;
+        if(!self.activeSource.length)return YES;
+        for(NSString *owner in enabled)if([self subscriptionOwner:owner matchesLiveResourceSource:self.activeSource])return YES;
+        return NO;
     }]];
     if (self.favoritesOnly) {
         NSSet *ids=[NSSet setWithArray:self.favorites ?: @[]];
@@ -3903,7 +3977,7 @@ configureCatalogNavigation;
     if(CACurrentMediaTime()<self.playbackPriorityUntil)return;
     NSArray *pending=self.deferredLocalSubscriptions.allObjects;[self.deferredLocalSubscriptions removeAllObjects];for(NSString *s in pending)[self fetchSubscription:s silent:YES];
 }
-- (void)refreshConfigurationPage {if([self.tabPage isKindOfClass:ConfigCenterViewController.class])[(ConfigCenterViewController *)self.tabPage reloadProfiles];}
+- (void)refreshConfigurationPage {if([self.tabPage isKindOfClass:ConfigCenterViewController.class])[(ConfigCenterViewController *)self.tabPage reloadProfiles];[self updateLiveResourceCapsule];}
 - (void)importPlaylistData:(NSData *)data name:(NSString *)name {
     NSString *text=data.length<=10*1024*1024?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
     if(![M3UParser parse:text baseURL:nil].count){[self showServiceError:@"文件须为 UTF-8 M3U 播放列表，包含有效 HTTP/HTTPS 频道，且不超过 10MB。"];return;}

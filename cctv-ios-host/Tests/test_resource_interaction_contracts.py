@@ -75,7 +75,7 @@ class ResourceInteractionContracts(unittest.TestCase):
     def test_five_tab_navigation_is_clear_and_pages_scroll_under_it(self):
         self.assertIn('self.bottomBarBackdrop.backgroundColor=UIColor.clearColor', self.root)
         self.assertIn('self.bottomBar.backgroundColor=UIColor.clearColor', self.root)
-        self.assertIn('CGFloat contentY=y+42;CGFloat contentBottom=height', self.root)
+        self.assertIn('CGFloat contentY=playerBottom+42;CGFloat contentBottom=height', self.root)
         self.assertIn('tabContentInset=MAX(8,height-tabY+8)', self.root)
         self.assertIn('setBottomOverlayInset:tabContentInset', self.root)
         self.assertIn('five-tab navigation stays fully transparent over content that extends behind it',
@@ -90,8 +90,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('CGFloat pageTop=0', self.root)
         self.assertIn('CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom))', self.root)
         self.assertIn('CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets)', self.root)
-        self.assertIn('self.playerBox.frame=CGRectMake(0,0,w,ph)', self.root)
-        self.assertIn('CGFloat overlayTop = safe.top', self.root)
+        self.assertIn('self.playerBox.frame=CGRectMake(0,playerTop,w,ph)', self.root)
+        self.assertIn('CGFloat overlayTop = expandedLive?0:safe.top', self.root)
+        self.assertIn('self.liveResourceCapsule.frame=CGRectMake(safe.left+14,top+4,capsuleWidth,36)', self.root)
         self.assertIn('@"immersiveTopVersion":@1', self.root)
         self.assertIn('if(oldTopGeometry){gridY-=topInset;listY-=self.table.contentInset.top;}', self.root)
         self.assertIn('homeScrollTopConstraint=[self.homeScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor]',
@@ -101,7 +102,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[self.table.topAnchor constraintEqualToAnchor:self.view.topAnchor]', settings)
         self.assertIn('UIEdgeInsetsMake(top,0,bottom,0)', settings)
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
-        self.assertIn('expanded live video reaches behind the status bar while its title stays in the safe area', smoke)
+        self.assertIn('expanded CCTV video has a distinct resource capsule row above the player', smoke)
         self.assertIn('under a readable immersive status region', smoke)
 
     def test_resource_header_is_remeasured_after_navigation_return_and_preserves_scroll_position(self):
@@ -729,15 +730,23 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('if(self.inlinePlaybackController&&episodes.count)[self resolveAndPlaySelectedEpisode]', detail)
         self.assertIn('pendingEpisodeResult', self.playback)
 
-    def test_inline_player_floats_below_navigation_while_detail_scrolls(self):
+    def test_inline_player_and_play_action_follow_detail_scroll_flow(self):
         detail = self.detail[self.detail.index('@implementation MediaDetailViewController'):
                              self.detail.index('@interface MediaFavoritesViewController')]
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
-        self.assertIn('- (void)updateInlinePlaybackFloatingPosition', detail)
-        self.assertIn('convertRect:playerView.bounds toView:self.view', detail)
-        self.assertIn('pinTop-CGRectGetMinY(playerFrame)', detail)
-        self.assertIn('inline player remains floating as the detail page continues scrolling', smoke)
-        self.assertIn('inline player remains floating when scrolling back toward the top', smoke)
+        self.assertNotIn('updateInlinePlaybackFloatingPosition', detail)
+        self.assertNotIn('stickyPlayBar', detail)
+        self.assertIn('[self.contentStack addArrangedSubview:self.playButton]', detail)
+        self.assertIn('[self.scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]', detail)
+        self.assertIn('inline player scrolls away with detail content and returns with it', smoke)
+
+    def test_live_player_resource_capsule_selects_resource_page_live_sources(self):
+        smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
+        self.assertIn('live.resource.capsule', self.root)
+        self.assertIn('showsMenuAsPrimaryAction=self.activeTab==1', self.root)
+        self.assertIn('subscriptionOwner:owner matchesLiveResourceSource:self.activeSource', self.root)
+        self.assertIn('UI Smoke Live Resource · 1', smoke)
+        self.assertIn('selecting a resource capsule filters the channel page to that resource', smoke)
 
     def test_player_exposes_quality_choices_and_keeps_parse_and_resolution_states_clear(self):
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()

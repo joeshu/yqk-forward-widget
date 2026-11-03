@@ -292,7 +292,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
 @end
 
 
-@interface MediaDetailViewController : UIViewController <UIScrollViewDelegate>
+@interface MediaDetailViewController : UIViewController
 @property(nonatomic,copy) NSDictionary *item;
 @property(nonatomic,copy) NSDictionary *source;
 @property(nonatomic,copy) NSString *provider;
@@ -329,7 +329,6 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
 @property(nonatomic,strong) UIButton *previousPageButton;
 @property(nonatomic,strong) UIButton *nextPageButton;
 @property(nonatomic,strong) UIButton *episodeReverseButton;
-@property(nonatomic,strong) UIView *stickyPlayBar;
 @property(nonatomic) BOOL episodeOrderReversed;
 @property(nonatomic,strong) MediaPlaybackViewController *inlinePlaybackController;
 @property(nonatomic,strong) UIActivityIndicatorView *spinner;
@@ -350,7 +349,6 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
 - (void)shareTitle;
 - (void)copyTitle;
 - (void)scrollToEpisodes;
-- (void)updateInlinePlaybackFloatingPosition;
 - (NSString *)posterURL;
 - (void)restoreSelectionFromDetail:(NSDictionary *)previousDetail;
 - (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context;
@@ -399,7 +397,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
     [button.heightAnchor constraintGreaterThanOrEqualToConstant:40].active=YES;[button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];return button;
 }
 - (void)buildDetailLayout {
-    self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;self.scrollView.accessibilityIdentifier=@"media-detail-scroll";self.scrollView.delegate=self;[self.view addSubview:self.scrollView];
+    self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;self.scrollView.accessibilityIdentifier=@"media-detail-scroll";[self.view addSubview:self.scrollView];
     self.contentStack=[UIStackView new];self.contentStack.translatesAutoresizingMaskIntoConstraints=NO;self.contentStack.axis=UILayoutConstraintAxisVertical;self.contentStack.spacing=9;
     self.contentStack.layoutMargins=UIEdgeInsetsMake(0,14,20,14);self.contentStack.layoutMarginsRelativeArrangement=YES;[self.scrollView addSubview:self.contentStack];
     [NSLayoutConstraint activateConstraints:@[[self.scrollView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
@@ -438,8 +436,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
     self.descriptionToggle=[UIButton buttonWithType:UIButtonTypeSystem];self.descriptionToggle.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeading;[self.descriptionToggle setTitle:@"展开简介" forState:UIControlStateNormal];[self.descriptionToggle setTitleColor:HostAccent() forState:UIControlStateNormal];self.descriptionToggle.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.descriptionToggle.titleLabel.adjustsFontForContentSizeCategory=YES;[self.descriptionToggle addTarget:self action:@selector(toggleDescription) forControlEvents:UIControlEventTouchUpInside];self.descriptionToggle.hidden=YES;[infoStack addArrangedSubview:self.descriptionToggle];
     [self.contentStack addArrangedSubview:infoCard];
     self.playButton=[self actionButton:@"▶︎  播放" identifier:@"media-detail-play" action:@selector(playCurrentEpisode)];self.playButton.accessibilityHint=@"播放当前线路和分集；上次播放过时会继续上次进度";[self.playButton.heightAnchor constraintGreaterThanOrEqualToConstant:50].active=YES;
-    self.stickyPlayBar=[UIView new];self.stickyPlayBar.translatesAutoresizingMaskIntoConstraints=NO;HostStyleGlassCard(self.stickyPlayBar,18);[self.view addSubview:self.stickyPlayBar];[self.stickyPlayBar addSubview:self.playButton];
-    [NSLayoutConstraint activateConstraints:@[[self.playButton.leadingAnchor constraintEqualToAnchor:self.stickyPlayBar.leadingAnchor constant:10],[self.playButton.trailingAnchor constraintEqualToAnchor:self.stickyPlayBar.trailingAnchor constant:-10],[self.playButton.topAnchor constraintEqualToAnchor:self.stickyPlayBar.topAnchor constant:8],[self.playButton.bottomAnchor constraintEqualToAnchor:self.stickyPlayBar.bottomAnchor constant:-8],[self.stickyPlayBar.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:14],[self.stickyPlayBar.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-14],[self.stickyPlayBar.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-6],[self.stickyPlayBar.heightAnchor constraintGreaterThanOrEqualToConstant:66],[self.scrollView.bottomAnchor constraintEqualToAnchor:self.stickyPlayBar.topAnchor constant:-8]]];
+    [self.playButton.heightAnchor constraintGreaterThanOrEqualToConstant:58].active=YES;
     UIStackView *actions=[UIStackView new];actions.axis=UILayoutConstraintAxisHorizontal;actions.alignment=UIStackViewAlignmentFill;actions.distribution=UIStackViewDistributionFillEqually;actions.spacing=6;actions.layoutMargins=UIEdgeInsetsMake(0,2,0,2);actions.layoutMarginsRelativeArrangement=YES;
     UIButton *copyButton=[self detailActionButton:@"复制" symbol:@"doc.on.doc" label:@"复制片名" identifier:@"media-detail-copy-title" action:@selector(copyTitle)];UIButton *shareButton=[self detailActionButton:@"分享" symbol:@"square.and.arrow.up" label:@"分享影片信息" identifier:@"media-detail-share" action:@selector(shareTitle)];self.favoriteButton=[self detailActionButton:@"收藏" symbol:@"heart" label:@"收藏影片" identifier:@"media-detail-favorite" action:@selector(toggleFavorite)];UIButton *episodesButton=[self detailActionButton:@"选集" symbol:@"list.number" label:@"查看选集" identifier:@"media-detail-jump-episodes" action:@selector(scrollToEpisodes)];
     [actions addArrangedSubview:copyButton];[actions addArrangedSubview:shareButton];[actions addArrangedSubview:self.favoriteButton];[actions addArrangedSubview:episodesButton];[self.contentStack addArrangedSubview:actions];
@@ -465,6 +462,8 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
     [paging addArrangedSubview:self.previousPageButton];[paging addArrangedSubview:self.nextPageButton];self.previousPageButton.hidden=YES;self.nextPageButton.hidden=YES;[self.previousPageButton.heightAnchor constraintGreaterThanOrEqualToConstant:38].active=YES;[self.nextPageButton.heightAnchor constraintGreaterThanOrEqualToConstant:38].active=YES;[self.episodeReverseButton.heightAnchor constraintGreaterThanOrEqualToConstant:38].active=YES;[sourceStack addArrangedSubview:paging];
     self.episodeGrid=[UIStackView new];self.episodeGrid.axis=UILayoutConstraintAxisVertical;self.episodeGrid.spacing=5;self.episodeGrid.distribution=UIStackViewDistributionFillEqually;self.episodeGrid.accessibilityIdentifier=@"media-detail-episode-grid";[sourceStack addArrangedSubview:self.episodeGrid];
     [self.contentStack addArrangedSubview:sourceCard];
+    [self.contentStack addArrangedSubview:self.playButton];
+    [self.scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor].active=YES;
     [self updateParserSelectionButton];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.hidesWhenStopped=YES;self.spinner.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:self.spinner];
     [NSLayoutConstraint activateConstraints:@[[self.spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],[self.spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor]]];
@@ -701,17 +700,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
         [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"", @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"line_index":@(owner.selectedLineIndex), @"episode_index":@(owner.selectedEpisodeIndex), @"result_has_media_url":@([result[@"url"] isKindOfClass:NSString.class]&&[result[@"url"] length]>0), @"result_parse_mode":@([result[@"parse"] respondsToSelector:@selector(integerValue)]?[result[@"parse"] integerValue]:0), @"result_alternate_count":@([result[@"alternates"] isKindOfClass:NSArray.class]?[result[@"alternates"] count]:0)}];owner.status.hidden=YES;NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"episodeID":[episode[@"id"] description]?:@"",@"episodeName":[episode[@"name"] description]?:@"",@"lineIndex":@(owner.selectedLineIndex),@"episodeIndex":@(owner.selectedEpisodeIndex),@"parserID":parserID,@"correlationID":owner.diagnosticTraceID?:@""};if(owner.onPlay)owner.onPlay(result,context);
     }];
 }
-- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews];self.heroGradient.frame=self.heroView.bounds;[self updateInlinePlaybackFloatingPosition]; }
-- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-    if(scrollView!=self.scrollView)return;[self updateInlinePlaybackFloatingPosition];
-}
-- (void)updateInlinePlaybackFloatingPosition {
-    if(!self.inlinePlaybackController||!self.scrollView)return;
-    UIView *playerView=self.inlinePlaybackController.view;playerView.transform=CGAffineTransformIdentity;
-    CGRect scrollFrame=[self.scrollView convertRect:self.scrollView.bounds toView:self.view];CGFloat pinTop=MAX(CGRectGetMinY(scrollFrame),self.view.safeAreaInsets.top);
-    UINavigationBar *bar=self.navigationController.navigationBar;if(bar&&!bar.hidden)pinTop=MAX(pinTop,CGRectGetMaxY([bar convertRect:bar.bounds toView:self.view]));
-    CGRect playerFrame=[playerView convertRect:playerView.bounds toView:self.view];CGFloat pinOffset=MAX(0,pinTop-CGRectGetMinY(playerFrame));playerView.transform=CGAffineTransformMakeTranslation(0,pinOffset);playerView.layer.zPosition=pinOffset>0?10:0;
-}
+- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews];self.heroGradient.frame=self.heroView.bounds;UIEdgeInsets inset=UIEdgeInsetsMake(0,0,MAX(24,self.view.safeAreaInsets.bottom+20),0);self.scrollView.contentInset=inset;self.scrollView.scrollIndicatorInsets=inset; }
 @end
 @interface MediaFavoritesViewController : UITableViewController
 @property(nonatomic,copy) NSArray<NSDictionary *> *entries;

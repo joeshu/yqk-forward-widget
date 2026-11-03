@@ -186,8 +186,9 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         layout = TEXT[layout_start:layout_end]
         self.assertIn('CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom))', layout)
         self.assertIn('CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets)', layout)
-        self.assertIn('CGRectMake(0,0,w,ph)', layout)
-        self.assertIn('BOOL expanded=[self hasVisibleExpandedLivePlayer]', layout)
+        self.assertIn('CGRectMake(0,playerTop,w,ph)', layout)
+        self.assertIn('BOOL expandedLive=!self.fullscreen&&[self hasVisibleExpandedLivePlayer]', layout)
+        self.assertIn('CGFloat capsuleRowHeight=expandedLive?44:0', layout)
         self.assertIn('tabContentInset=MAX(8,height-tabY+8)', layout)
         self.assertIn('MAX(0,contentBottom-pageTop)', layout)
         self.assertNotIn('height-safe.bottom-152', layout)
@@ -208,7 +209,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('[w showCatalogSearch]', menu)
         self.assertIn('owner.searchController.searchBar.text=owner.query', search)
         self.assertIn('UIStatusBarStyleLightContent', status)
-        self.assertIn('expanded subscription playback hides the opaque search header',
+        self.assertIn('expanded channel playback keeps the capsule row in the safe area above the 16:9 player',
                       (SOURCE.parents[1] / 'Tests' / 'UISmoke' / 'SmokeDriver.m').read_text())
 
     def test_service_directory_applies_safe_area_only_once(self):
