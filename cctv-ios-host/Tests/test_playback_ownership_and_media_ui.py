@@ -88,7 +88,7 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
     def test_inline_and_pushed_vod_players_notify_the_live_owner(self):
         show_inline = method_body(BROWSER_SOURCE, "- (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context")
         play_result = method_body(PLAYBACK_SOURCE, "- (void)playResult:(NSDictionary *)result")
-        root_media = method_body(ROOT_SOURCE, "- (void)openMediaTab")
+        root_media = method_body(ROOT_SOURCE, "- (MediaBrowserViewController *)mediaPageCreatingIfNeeded")
         self.assertIn("@property(nonatomic,copy) dispatch_block_t onPlaybackWillStart", BROWSER_SOURCE)
         self.assertIn("detail.onPlaybackWillStart=self.onPlaybackWillStart", BROWSER_SOURCE)
         self.assertIn("player.onPlaybackWillStart=self.onPlaybackWillStart", show_inline)
@@ -205,8 +205,13 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('loadPosterURL:(NSString *)url intoImageView:(UIImageView *)imageView completion:', (SOURCES / "HostImageLoader.h").read_text(encoding="utf-8"))
         self.assertIn('imageView.image=[UIImage systemImageNamed:@"film"]', IMAGE_SOURCE)
         self.assertIn('observer.completion(image!=nil,image?0:retryAfter)', IMAGE_SOURCE)
-        self.assertIn('loadPosterURL:url intoImageView:imageView completion:', BROWSER_SOURCE)
-        self.assertIn('posterRetryCount', BROWSER_SOURCE)
+        feed = (SOURCES / 'MediaFeedView.m').read_text(encoding='utf-8')
+        self.assertIn('MediaFeedLoadPosterWithRetry', feed)
+        self.assertIn('retriesRemaining', feed)
+        self.assertIn('self.poster.image=[UIImage systemImageNamed:@"film"]', feed)
+        self.assertIn('MediaFeedLoadPosterWithRetry(poster,self.poster,1)', feed)
+        self.assertIn('current.window', feed)
+        self.assertIn('accessibilityIdentifier isEqualToString:url', feed)
         self.assertIn('MediaSearchLoadPosterWithRetry(poster,resultCell.poster,1)', (SOURCES / "MediaGlobalSearchViewController.m").read_text(encoding="utf-8"))
 
     def test_home_and_listing_payloads_filter_bad_rows_and_never_insert_nil_ids(self):

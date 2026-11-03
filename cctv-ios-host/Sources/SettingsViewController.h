@@ -7,4 +7,5 @@
 @property(nonatomic,copy) dispatch_block_t onExportData;
 @property(nonatomic,copy) dispatch_block_t onImportData;
 @property(nonatomic,copy) dispatch_block_t onOpenDiagnostics;
+@property(nonatomic,copy) dispatch_block_t onMediaDisplaySettings;
 @end

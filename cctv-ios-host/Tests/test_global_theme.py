@@ -30,11 +30,12 @@ class GlobalThemeContracts(unittest.TestCase):
         backdrop = (ROOT / "Sources/HostGlassBackdropView.m").read_text(encoding="utf-8")
         app = (ROOT / "Sources/AppDelegate.m").read_text(encoding="utf-8")
         root = (ROOT / "Sources/RootViewController.m").read_text(encoding="utf-8")
-        media = (ROOT / "Sources/MediaBrowserViewController.m").read_text(encoding="utf-8")
-
         self.assertIn("HostInstallGlassBackdrop(self.window)", app)
         self.assertIn("HostStyleGlassCard(cell.contentView,11)", root)
-        self.assertIn("HostStyleGlassCard(self.contentView,15)", media)
+        feed = (ROOT / "Sources/MediaFeedView.m").read_text(encoding="utf-8")
+        self.assertIn("HostNeutralSurface()", feed)
+        self.assertIn("self.poster.layer.cornerRadius=14", feed)
+        self.assertIn("HostBackground()", feed)
         self.assertIn("HostAnimateSelection", theme)
         self.assertIn("UIVisualEffectView *glass=objc_getAssociatedObject", theme)
         self.assertIn("HostInstallPressFeedback(button)", theme)
@@ -54,6 +55,7 @@ class GlobalThemeContracts(unittest.TestCase):
         pages = (
             "RootViewController.m",
             "MediaBrowserViewController.m",
+            "MediaFeedView.m",
             "MediaPlaybackViewController.m",
             "MediaEpisodeSelectionViewController.m",
             "ServicesViewController.m",

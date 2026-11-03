@@ -9,6 +9,7 @@ MEDIA = (ROOT / "Sources/MediaAPIClient.m").read_text()
 PLAYBACK = (ROOT / "Sources/MediaPlaybackViewController.m").read_text()
 READINESS = (ROOT / "Sources/LocalServiceReadiness.m").read_text()
 BROWSER = (ROOT / "Sources/MediaBrowserViewController.m").read_text()
+FEED = (ROOT / "Sources/MediaFeedView.m").read_text()
 PYHOST = (ROOT / "Sources/PyHost.m").read_text()
 APP_DELEGATE = (ROOT / "Sources/AppDelegate.m").read_text()
 IMAGE_LOADER = (ROOT / "Sources/HostImageLoader.m").read_text()
@@ -107,7 +108,7 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
             'media_grid_cell_configuration_started', 'media_grid_cell_configuration_completed',
             'media_grid_first_cell_will_display',
         ):
-            self.assertIn(marker, BROWSER)
+            self.assertIn(marker, BROWSER + FEED)
         self.assertIn('MetricKit.framework', (ROOT / 'project.yml').read_text())
         self.assertIn('-framework MetricKit', (ROOT / 'Scripts/ui-smoke.sh').read_text())
         self.assertIn('-framework MetricKit', (ROOT / 'Scripts/ci-build.sh').read_text())

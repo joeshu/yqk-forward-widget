@@ -13,6 +13,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         cls.root = (ROOT / 'Sources/RootViewController.m').read_text()
         cls.editor = (ROOT / 'Sources/ServiceEditorViewController.m').read_text()
         cls.detail = (ROOT / 'Sources/MediaBrowserViewController.m').read_text()
+        cls.feed = (ROOT / 'Sources/MediaFeedView.m').read_text()
+        cls.browser = cls.detail.split('@implementation MediaBrowserViewController', 1)[1]
         cls.playback = (ROOT / 'Sources/MediaPlaybackViewController.m').read_text()
         cls.episodes = (ROOT / 'Sources/MediaEpisodeSelectionViewController.m').read_text()
         cls.resource_detail = (ROOT / 'Sources/PluginResourceDetailViewController.m').read_text()
@@ -95,9 +97,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('self.liveResourceCapsule.frame=CGRectMake(safe.left+14,top+4,capsuleWidth,36)', self.root)
         self.assertIn('@"immersiveTopVersion":@1', self.root)
         self.assertIn('if(oldTopGeometry){gridY-=topInset;listY-=self.table.contentInset.top;}', self.root)
-        self.assertIn('homeScrollTopConstraint=[self.homeScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor]',
-                      self.detail)
-        self.assertIn('homeStackTopConstraint.constant=MAX(0,overlayBottom)', self.detail)
+        self.assertIn('[feed.topAnchor constraintEqualToAnchor:self.view.topAnchor]', self.detail)
+        self.assertIn('self.homeMode&&hero?0:overlay', self.detail)
         self.assertIn('homeTopImmersiveGradient.colors', self.detail)
         self.assertIn('[self.table.topAnchor constraintEqualToAnchor:self.view.topAnchor]', settings)
         self.assertIn('UIEdgeInsetsMake(top,0,bottom,0)', settings)
@@ -215,48 +216,29 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('"value":subscription', self.resource_detail)
         self.assertIn('profile[@"subscriptionURL"]', self.catalog)
 
-    def test_home_separates_source_and_platform_and_uses_bounded_recommendation_cache(self):
+    def test_unified_media_separates_resource_site_and_scopes_cached_recommendations(self):
         self.assertIn('MediaHomeModulesSchemaKey', self.detail)
-        self.assertIn('@"id":@"recommendations"', self.detail)
-        self.assertIn('homeFeatureCardForItem:', self.detail)
-        self.assertIn('operation:@"home" arguments:arguments maximumAge:DBL_MAX', self.detail)
-        self.assertIn('operation:@"category" arguments:arguments maximumAge:DBL_MAX', self.detail)
-        self.assertIn('self.selectionRow.hidden=NO', self.detail)
-        self.assertIn('self.homeScrollTopConstraint=[self.homeScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor]',
-                      self.detail)
         self.assertIn('media-source-selector', self.detail)
         self.assertIn('media-provider-selector', self.detail)
-        self.assertNotIn('media-home-source-picker', self.detail)
-        self.assertIn('pendingProviderPickerAfterLoad', self.detail)
-        self.assertIn('站点列表已就绪，请选择影视站点', self.detail)
-        self.assertIn('selectionRow.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor', self.detail)
-        self.assertIn('media-home-feature', self.detail)
-        self.assertIn('- (void)addHomeFeatureGrid:', self.detail)
-        self.assertIn('accessibilityIdentifier=@"media-home-discovery-grid"', self.detail)
-        self.assertIn('homeGridItems', self.detail)
-        self.assertIn('MIN((NSUInteger)24,items.count)', self.detail)
-        self.assertIn('owner.generation!=generation', self.detail)
+        self.assertIn('cachedHomeResultForSelectedProvider:', self.browser)
+        self.assertIn('maximumAge:DBL_MAX', self.browser)
+        self.assertIn('self.homeScroll=feed', self.browser)
+        self.assertIn('owner.generation!=generation', self.browser)
+        self.assertIn('owner.source', self.browser)
+        self.assertIn('pendingProviderPickerAfterLoad', self.browser)
+        self.assertIn('站点列表已就绪，请选择影视站点', self.browser)
 
-    def test_home_top_controls_floating_menu_and_navigation_transition_recovery(self):
-        self.assertIn('selectionRow.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4', self.detail)
-        self.assertIn('selectionRow.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:14', self.detail)
-        self.assertIn('selectionRow.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-14', self.detail)
-        self.assertIn('self.selectionRow.spacing=10', self.detail)
-        self.assertIn('button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail', self.detail)
-        self.assertIn('self.sourceSelectButton.accessibilityLabel=', self.detail)
-        self.assertIn('self.providerSelectButton.accessibilityLabel=', self.detail)
-        self.assertIn('button.isAccessibilityElement=YES', self.detail)
-        self.assertIn('homeToolbarButtonWithSymbol:@"gearshape.fill"', self.detail)
-        self.assertIn('self.homeMenuButton.menu=[self homeActionsMenu]', self.detail)
-        self.assertIn('label:@"更多影视操作"', self.detail)
-        self.assertIn('homeMenuButton.widthAnchor constraintEqualToConstant:28', self.detail)
-        self.assertIn('self.homeScroll.contentInset=UIEdgeInsetsMake(0,0,MAX(28,self.bottomOverlayInset),0)', self.detail)
-        self.assertIn('categoryScrollHeightConstraint.constant=hasCategories?40:0', self.detail)
-        self.assertNotIn('setNavigationBarHidden:self.homeMode', self.detail)
+    def test_unified_media_top_controls_keep_one_search_and_safe_touch_targets(self):
+        self.assertIn('selectionRow.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4', self.browser)
+        self.assertIn('selectionRow.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:14', self.browser)
+        self.assertIn('self.selectionRow.spacing=8', self.browser)
+        self.assertIn('button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail', self.browser)
+        self.assertIn('label:@"我的收藏与观看历史"', self.browser)
+        self.assertIn('homeMenuButton.widthAnchor constraintEqualToConstant:44', self.browser)
+        self.assertIn('self.floatingSearchBottomConstraint.constant=-(MAX(self.bottomOverlayInset,self.view.safeAreaInsets.bottom)+12)', self.browser)
         self.assertIn('UINavigationControllerDelegate', self.root)
-        self.assertIn('self.navigationController.delegate=self', self.root)
-        self.assertIn('didShowViewController:(UIViewController *)viewController animated:(BOOL)animated', self.root)
         self.assertIn('shouldHideNavigationBarForVisibleController:', self.root)
+        self.assertIn('mediaPageCreatingIfNeeded', self.root)
 
     def test_bottom_overlay_setters_do_not_reenter_themselves(self):
         sources = {
@@ -267,51 +249,41 @@ class ResourceInteractionContracts(unittest.TestCase):
         for name, source in sources.items():
             with self.subTest(page=name):
                 setter = source.split('- (void)setBottomOverlayInset:', 1)[1].split('\n}', 1)[0]
-                self.assertIn('_bottomOverlayInset=inset;', setter)
-                self.assertIn('fabs(_bottomOverlayInset-inset)<0.01', setter)
+                self.assertIn('_bottomOverlayInset=', setter)
                 self.assertNotIn('self.bottomOverlayInset=', setter)
         self.assertIn('navigationController.topViewController!=viewController', self.root)
 
-    def test_home_uses_reference_style_discovery_grid_and_on_demand_categories(self):
-        self.assertIn('homeToolbarButtonWithSymbol:@"square.grid.2x2.fill"', self.detail)
-        self.assertIn('homeToolbarButtonWithSymbol:@"magnifyingglass"', self.detail)
-        self.assertIn('homeToolbarButtonWithSymbol:@"gearshape.fill"', self.detail)
-        self.assertIn('accessibilityIdentifier=@"media-home-discovery-grid"', self.detail)
-        self.assertIn('MediaHomeCardWidth(CGFloat viewWidth)', self.detail)
-        self.assertIn('floor((available-16)/2.5)', self.detail)
-        self.assertIn('MIN((NSUInteger)24,items.count)', self.detail)
-        self.assertIn('featured.accessibilityIdentifier=@"__featured__"', self.detail)
-        self.assertIn('self.category=featured?nil:identifier', self.detail)
-        self.assertIn('if(featured){if(!self.homeMode)[self showHome:YES]', self.detail)
-        self.assertIn('if(self.source&&!self.loading)[self loadListing:NO]', self.detail)
-        self.assertNotIn('loadHomeShelves:owner.homeCategories', self.detail)
-        self.assertIn('loadHomeShelves:self.homeCategories', self.detail)
-        self.assertIn('media_home_discovery_first_card_displayed', self.detail)
-        self.assertIn('loadPosterIfNeeded', self.detail)
+    def test_unified_media_uses_one_reusable_feed_and_visible_category_loading(self):
+        view_load = self.browser.split('- (void)viewDidLoad {', 1)[1].split('- (void)setBottomOverlayInset:', 1)[0]
+        self.assertIn('MediaFeedView *feed=', view_load)
+        self.assertIn('self.grid=feed;self.homeScroll=feed', view_load)
+        self.assertNotIn('self.homeModeButton=', view_load)
+        self.assertNotIn('self.homeSearchButton=', view_load)
+        self.assertIn('MediaContentModeFeatured', self.detail)
+        self.assertIn('MediaContentModeCategory', self.detail)
+        self.assertIn('feed.onVisibleCategories=', view_load)
+        self.assertIn('loadHomeShelves:self.homeCategories', self.browser)
+        self.assertIn('UICollectionLayoutSectionOrthogonalScrollingBehaviorContinuous', self.feed)
+        self.assertIn('onNearEnd', self.feed)
+        self.assertIn('movingDown', self.feed)
 
-    def test_home_configuration_persists_three_or_four_columns_for_both_media_grids(self):
-        config_start = self.detail.index('@implementation MediaHomeConfigurationViewController')
-        config_end = self.detail.index('@end\n\n@interface MediaBrowserViewController', config_start)
-        configuration = self.detail[config_start:config_end]
-        self.assertIn('numberOfSectionsInTableView:(UITableView *)tableView {return 3;}', configuration)
+    def test_media_display_settings_preserve_grid_density_and_live_under_settings(self):
+        configuration = self.detail.split('@implementation MediaHomeConfigurationViewController', 1)[1].split('\n@end', 1)[0]
         self.assertIn('section==1?2:self.sources.count', configuration)
         self.assertIn('indexPath.row==0?3:4 forKey:MediaBrowserGridColumnsDefaultsKey', configuration)
-        self.assertIn('cctv.mediaGridColumns.v1', self.detail)
-        self.assertIn('return [NSUserDefaults.standardUserDefaults integerForKey:MediaBrowserGridColumnsDefaultsKey]==4?4:3;', self.detail)
-        self.assertIn('此设置只影响影视首页海报卡片，影视库固定为 3 列', configuration)
-        config_route = self.detail[self.detail.index('- (void)openHomeConfiguration {'):
-                                   self.detail.index('- (void)openHomeFavorite:', self.detail.index('- (void)openHomeConfiguration {'))]
-        self.assertIn('[owner.grid.collectionViewLayout invalidateLayout]', config_route)
-        self.assertIn('[owner updateHomeGridLayout]', config_route)
-        self.assertIn('CGRectIntersectsRect(frame,viewport)', self.detail)
-        self.assertIn('convertRect:self.homeScroll.bounds toView:self.view', self.detail)
+        self.assertIn('cctv.mediaGridColumns.v1', self.feed)
+        self.assertIn('large?2:', self.feed)
+        self.assertIn('- (UIViewController *)mediaDisplaySettingsViewController', self.browser)
+        self.assertIn('onMediaDisplaySettings', self.root)
+        self.assertIn('mediaDisplaySettingsViewController', self.root)
+        self.assertIn('onMediaDisplaySettings', (ROOT / 'Sources/SettingsViewController.h').read_text())
 
-    def test_home_shelf_cards_follow_the_selected_three_or_four_column_density(self):
-        self.assertIn('static CGFloat MediaHomeCardWidth(CGFloat viewWidth)', self.detail)
-        self.assertIn('spacing*(columns-1))/columns', self.detail)
-        self.assertIn('card.widthAnchor constraintEqualToConstant:MediaHomeCardWidth(self.view.bounds.size.width)', self.detail)
-        self.assertIn('CGFloat cardWidth=MediaHomeCardWidth(self.view.bounds.size.width);CGFloat posterShelfHeight=cardWidth*1.5+54', self.detail)
-        self.assertIn('@(MediaBrowserGridColumns())', self.detail)
+    def test_horizontal_shelves_and_category_grids_use_distinct_responsive_layouts(self):
+        self.assertIn('floor((width-28)/2.5)', self.feed)
+        self.assertIn('floor((width-28-(columns-1)*10)/columns)', self.feed)
+        self.assertIn('UIContentSizeCategoryIsAccessibilityCategory', self.feed)
+        self.assertIn('cctv.mediaGridColumns.v1', self.feed)
+        self.assertIn('NSCollectionLayoutGroup horizontalGroupWithLayoutSize:', self.feed)
 
     def test_movie_detail_is_compact_has_poster_fallback_and_removes_cast_strip(self):
         detail = self.detail[self.detail.index('@interface MediaDetailViewController'):
@@ -342,150 +314,110 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('media-detail-page-status', detail)
 
     def test_media_browser_cancels_parent_requests_and_resumes_after_child_navigation(self):
-        self.assertIn('media_request_cancelled_on_page_exit', self.detail)
-        self.assertIn('self.generation++;self.homeShelfGeneration=0', self.detail)
-        self.assertIn('[self.client cancel]', self.detail)
-        self.assertIn('resumeCancelledMediaRequestOnAppear', self.detail)
-        self.assertIn('homeShelfRequestInFlight', self.detail)
-        self.assertIn('self.activeMediaOperation=@"home_shelf"', self.detail)
-        appearance = self.detail[self.detail.index('- (void)viewWillAppear:'):
-                                 self.detail.index('- (void)traitCollectionDidChange:', self.detail.index('- (void)viewWillAppear:'))]
-        self.assertIn('if(self.homeMode)', appearance)
-        home_return = appearance[appearance.index('if(self.homeMode)'):
-                                  appearance.index('media_request_resumed_after_page_return')]
-        self.assertIn('home_content_requires_explicit_resource_refresh', home_return)
-        self.assertIn('return;', home_return)
-        self.assertNotIn('[self loadHome]', home_return)
+        self.assertIn('media_request_cancelled_on_page_exit', self.browser)
+        self.assertIn('self.generation++;self.homeShelfGeneration=0', self.browser)
+        self.assertIn('[self.client cancel]', self.browser)
+        self.assertIn('resumeCancelledMediaRequestOnAppear', self.browser)
+        appearance = self.browser.split('- (void)viewWillAppear:', 1)[1].split('- (void)traitCollectionDidChange:', 1)[0]
+        self.assertIn('media_request_resumed_after_page_return', appearance)
+        self.assertIn('if([operation isEqualToString:@"home"])', appearance)
+        self.assertIn('[self loadListing:NO]', appearance)
+        self.assertNotIn('home_content_requires_explicit_resource_refresh', appearance)
 
-    def test_restored_home_uses_cached_content_and_waits_for_explicit_load(self):
-        load_sources = self.detail[self.detail.index('- (void)loadSources {'):
-                                   self.detail.index('- (void)invalidateServiceIdentifier:', self.detail.index('- (void)loadSources {'))]
-        demand = self.detail[self.detail.index('- (void)loadHomeOnDemand {'):
-                             self.detail.index('- (void)invalidateServiceIdentifier:', self.detail.index('- (void)loadHomeOnDemand {'))]
-        foreground = self.detail[self.detail.index('- (void)resumeAfterForeground {'):
-                                 self.detail.index('- (void)checkCurrentService {', self.detail.index('- (void)resumeAfterForeground {'))]
-        self.assertIn('if(self.deferAutomaticLoading)', load_sources)
-        self.assertIn('cachedHomeResultForSelectedProvider:', load_sources)
-        self.assertIn('[self applyHomeResult:cached]', load_sources)
-        self.assertIn('return;', load_sources)
-        self.assertIn('self.homeLoadDeferred', demand)
-        self.assertIn('[self activate:self.source keepingHome:YES]', demand)
-        self.assertIn('[self loadHome]', demand)
-        self.assertNotIn('[self checkCurrentService]', foreground)
-        self.assertNotIn('[self loadHome]', foreground)
+    def test_selected_site_restores_cache_before_loading_and_empty_catalog_waits_for_selection(self):
+        load_sources = self.browser.split('- (void)loadSources {', 1)[1].split('- (void)loadHomeOnDemand', 1)[0]
+        self.assertLess(load_sources.index('[self applyHomeResult:cached]'), load_sources.index('[self activate:selected keepingHome:YES]'))
+        self.assertIn('!selected&&!catalog', load_sources)
+        self.assertIn('请选择合集中的一个站点', load_sources)
+        media_tab = self.root.split('- (void)openMediaTab {', 1)[1].split('- (void)playMediaResult:', 1)[0]
+        self.assertNotIn('page.deferAutomaticLoading=YES', media_tab)
+        self.assertNotIn('returnToHomeFromNavigation', media_tab)
 
-    def test_home_restores_the_selected_site_cache_and_label_without_starting_a_service(self):
-        load_sources = self.detail[self.detail.index('- (void)loadSources {'):
-                                   self.detail.index('- (void)invalidateServiceIdentifier:', self.detail.index('- (void)loadSources {'))]
-        deferred = load_sources[load_sources.index('if(self.deferAutomaticLoading)'):
-                                load_sources.index('self.homeLoadDeferred=NO;')]
-        selector = self.detail[self.detail.index('- (void)updateSelectionControls {'):
-                               self.detail.index('- (void)setBrowseControlsHidden:', self.detail.index('- (void)updateSelectionControls {'))]
-        self.assertIn('self.provider=cachedProvider', deferred)
-        self.assertIn('media_home_cache_restored', deferred)
-        self.assertIn('network_load_deferred', deferred)
-        self.assertNotIn('[self activate:', deferred)
+    def test_selected_site_cache_restores_the_correct_provider_label(self):
+        load_sources = self.browser.split('- (void)loadSources {', 1)[1].split('- (void)loadHomeOnDemand', 1)[0]
+        self.assertIn('self.provider=provider;[self applyHomeResult:cached]', load_sources)
+        selector = self.browser.split('- (void)updateSelectionControls {', 1)[1].split('- (BOOL)isHomeMode', 1)[0]
         self.assertIn('mediaProviderName.%@', selector)
         self.assertIn('if(!providerID.length)providerID=savedProviderID', selector)
-        self.assertIn('[self updateSelectionControls]', deferred)
+        self.assertIn('if(self.deferAutomaticLoading)', load_sources)
+        self.assertIn('self.homeLoadDeferred=NO', load_sources)
 
-    def test_home_reappearance_and_cancelled_home_requests_do_not_refetch(self):
-        appeared = self.detail[self.detail.index('- (void)viewWillAppear:'):
-                               self.detail.index('- (void)traitCollectionDidChange:', self.detail.index('- (void)viewWillAppear:'))]
-        self.assertIn('media_request_resume_skipped', appeared)
+    def test_media_reappearance_keeps_finished_content_and_only_resumes_cancelled_queries(self):
+        appeared = self.browser.split('- (void)viewWillAppear:', 1)[1].split('- (void)traitCollectionDidChange:', 1)[0]
+        self.assertIn('resumeCancelledMediaRequestOnAppear', appeared)
         home_appearance = appeared[appeared.index('if(self.homeMode)[self refreshHomeModules]'):]
-        self.assertNotIn('loadHomeShelves:', home_appearance)
         self.assertNotIn('[self loadHome]', home_appearance)
+        self.assertIn('self.pendingRestoreOffset', self.browser)
+        self.assertIn('saveCategorySession', self.browser)
 
-    def test_home_refresh_is_explicitly_started_from_resources_and_home_tab_returns_home(self):
+    def test_media_refresh_is_local_and_tab_switch_preserves_content_state(self):
         browser_header = (ROOT / 'Sources/MediaBrowserViewController.h').read_text()
-        resources_header = (ROOT / 'Sources/ConfigCenterViewController.h').read_text()
-        self.assertIn('onRefreshMediaHome', resources_header)
-        self.assertIn('更新影视首页内容', self.catalog)
-        self.assertIn('media_home_refresh_requested_from_resources', self.detail)
         self.assertIn('refreshHomeContentFromResourcePage', browser_header)
-        self.assertIn('[page returnToHomeFromNavigation]', self.root)
-        media_tab = self.root[self.root.index('- (void)openMediaTab {'):
-                              self.root.index('- (void)playMediaResult:', self.root.index('- (void)openMediaTab {'))]
-        self.assertIn('page.deferAutomaticLoading=YES', media_tab)
-        self.assertNotIn('[page loadHomeOnDemand]', media_tab)
+        refresh = self.browser.split('- (BOOL)refreshHomeContentFromResourcePage {', 1)[1].split('- (void)openSourceIdentifier:', 1)[0]
+        self.assertIn('[self refreshMediaContent]', refresh)
+        self.assertNotIn('[self showHome:', refresh)
+        media_tab = self.root.split('- (void)openMediaTab {', 1)[1].split('- (void)playMediaResult:', 1)[0]
+        self.assertNotIn('returnToHomeFromNavigation', media_tab)
+        self.assertIn('UIRefreshControl *refresh=', self.browser)
+        self.assertIn('action:@selector(refreshMediaContent)', self.browser)
 
-    def test_media_detail_has_a_direct_return_to_home_route(self):
-        detail = self.detail[self.detail.index('@interface MediaDetailViewController'):
-                             self.detail.index('@interface MediaFavoritesViewController')]
-        implementation = self.detail.index('@implementation MediaBrowserViewController')
-        start = self.detail.index('- (void)pushMediaDetail:', implementation)
-        browser = self.detail[start:self.detail.index('- (void)openHomeRecommendation:', start)]
-        self.assertIn('返回影视首页', detail)
+    def test_media_detail_returns_to_the_same_media_context(self):
+        detail = self.detail[self.detail.index('@interface MediaDetailViewController'):self.detail.index('@interface MediaFavoritesViewController')]
+        route = self.browser.split('- (void)pushMediaDetail:', 1)[1].split('- (void)openHomeRecommendation:', 1)[0]
         self.assertIn('onReturnHome', detail)
-        self.assertIn('[owner returnToHomeFromNavigation]', browser)
-        self.assertIn('popToViewController:owner animated:YES', browser)
-        self.assertIn('[self pushMediaPage:detail]', browser)
-        implementation = self.detail.index('@implementation MediaBrowserViewController')
-        helper_start = self.detail.index('- (void)pushMediaPage:', implementation)
-        push_helper = self.detail[helper_start:self.detail.index('- (void)updateSelectionControls', helper_start)]
-        self.assertIn('setNavigationBarHidden:NO', push_helper)
-        self.assertIn('pushViewController:page animated:YES', push_helper)
-        self.assertEqual(self.detail.count('[self.navigationController pushViewController:detail animated:YES]'), 0)
-        self.assertNotIn('[owner.navigationController pushViewController:detail animated:YES]', self.detail)
+        self.assertIn('popToViewController:owner animated:YES', route)
+        self.assertNotIn('returnToHomeFromNavigation', route)
+        self.assertIn('[self pushMediaPage:detail]', route)
+        helper = self.browser.split('- (void)pushMediaPage:', 1)[1].split('- (void)updateSelectionControls', 1)[0]
+        self.assertIn('setNavigationBarHidden:NO', helper)
+        self.assertIn('pushViewController:page animated:YES', helper)
 
-    def test_home_status_is_inline_actionable_and_does_not_rebuild_content_on_each_progress_update(self):
-        show_message = self.detail[self.detail.index('- (void)showMessage:'):
-                                   self.detail.index('- (void)chooseResource', self.detail.index('- (void)showMessage:'))]
-        status = self.detail[self.detail.index('- (void)updateHomeStatusCard {'):
-                             self.detail.index('- (void)performHomeStatusAction', self.detail.index('- (void)updateHomeStatusCard {'))]
-        self.assertIn('media-home-status-card', status)
-        self.assertIn('media-home-status-action', status)
-        self.assertIn('启动并加载', status)
-        self.assertIn('self.homeMode', show_message)
-        self.assertIn('[self updateHomeStatusCard]', show_message)
-        self.assertNotIn('[self refreshHomeModules]', show_message)
-        self.assertIn('self.homeScroll.contentOffset=CGPointMake', self.detail)
+    def test_media_status_is_an_inline_section_and_updates_are_coalesced(self):
+        show_message = self.browser.split('- (void)showMessage:', 1)[1].split('- (void)chooseResource', 1)[0]
+        self.assertIn('[self.grid.refreshControl endRefreshing]', show_message)
+        self.assertIn('[self refreshHomeModules]', show_message)
+        refresh = self.browser.split('- (void)refreshHomeModules {', 1)[1].split('- (NSArray *)homeCategoryModuleSignature', 1)[0]
+        self.assertIn('self.homeRebuildScheduled', refresh)
+        self.assertIn('dispatch_async(dispatch_get_main_queue()', refresh)
+        self.assertIn('@"kind":@"status"', self.browser)
+        self.assertIn('@"action":@"retry"', self.browser)
 
     def test_browse_status_and_loading_feedback_never_cover_existing_posters(self):
-        show_message = self.detail[self.detail.index('- (void)showMessage:'):
-                                   self.detail.index('- (void)chooseResource', self.detail.index('- (void)showMessage:'))]
-        browse_controls = self.detail[self.detail.index('- (void)setBrowseControlsHidden:'):
-                                      self.detail.index('- (void)toggleHomeBrowse', self.detail.index('- (void)setBrowseControlsHidden:'))]
-        self.assertIn('self.status.hidden=!message.length||hasContent', show_message)
-        self.assertIn('self.resourceButton.hidden=loading||hasContent||!message.length', show_message)
-        self.assertIn('if(loading&&!hasContent)[self.spinner startAnimating];else[self.spinner stopAnimating];', show_message)
-        self.assertIn('self.status.hidden=!self.status.text.length||hasContent', browse_controls)
+        sections = self.browser.split('- (NSArray<NSDictionary *> *)mediaFeedSections {', 1)[1].split('- (void)updateMediaFeedInsets', 1)[0]
+        self.assertIn('@"kind":@"grid"', sections)
+        self.assertIn('if(self.loading&&!self.items.count)', sections)
+        self.assertIn('@"id":@"query-status",@"kind":@"status"', sections)
+        show = self.browser.split('- (void)showMessage:', 1)[1].split('- (void)chooseResource', 1)[0]
+        self.assertNotIn('[self.view addSubview:', show)
+        self.assertNotIn('startAnimating', show)
 
     def test_empty_home_shelves_are_compact_and_scroll_positions_are_source_scoped(self):
-        shelf_start = self.detail.index('- (void)addHomeCards:')
-        shelf = self.detail[shelf_start:self.detail.index('- (void)updateHomeStatusCard', shelf_start)]
-        self.assertIn('CGFloat shelfHeight=cards.count?posterShelfHeight:88', shelf)
-        self.assertIn('empty.heightAnchor constraintEqualToConstant:shelfHeight', shelf)
-        self.assertIn('media-home-shelf-%@', shelf)
-        self.assertIn('cctv.mediaHome.scrollOffset.v2.%lu:%@', self.detail)
-        self.assertIn('objectForKey:[self homeScrollOffsetKeyForSource:selected]', self.detail)
-        self.assertIn('if(keepingHome&&sourceChanged)', self.detail)
+        self.assertIn('@"kind":kind', self.browser)
+        self.assertIn('attempted?@"status":@"skeleton"', self.browser)
+        self.assertIn('cctv.mediaHome.scrollOffset.v3.', self.browser)
+        self.assertIn('cctv.mediaHome.scrollOffset.v2.', self.browser)
+        self.assertIn('categorySessionKey', self.browser)
+        self.assertIn('self.provider', self.browser.split('- (NSString *)categorySessionKey', 1)[1].split('\n}', 1)[0])
 
-    def test_home_poster_fetch_starts_when_a_cell_first_becomes_visible(self):
-        display_start = self.detail.index('- (void)collectionView:(UICollectionView *)collectionView willDisplayCell:')
-        display = self.detail[display_start:self.detail.index('- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:', display_start)]
-        self.assertIn('[(MediaDiscoveryCell *)cell loadPosterIfNeeded]', display)
+    def test_reused_media_feed_cells_clear_poster_identity_and_load_visible_artwork(self):
+        self.assertIn('HostImageLoader.shared loadPosterURL:', self.feed)
+        self.assertIn('- (void)prepareForReuse', self.feed)
+        self.assertIn('self.poster.accessibilityIdentifier=nil', self.feed)
+        self.assertIn('self.poster.image=nil', self.feed)
+        self.assertIn('willDisplayCell:', self.feed)
 
-    def test_home_plugin_deep_links_wait_for_health_and_capabilities_before_detail(self):
-        implementation = self.detail.index('@implementation MediaBrowserViewController')
-        recommendation_start = self.detail.index('- (void)openHomeRecommendation:', implementation)
-        recommendation = self.detail[recommendation_start:
-                                     self.detail.index('- (void)browsePinnedSource:', recommendation_start)]
-        favorite_start = self.detail.index('- (void)openHomeFavorite:', implementation)
-        favorite = self.detail[favorite_start:
-                               self.detail.index('- (void)openPendingHomeDetailForSource:', favorite_start)]
-        self.assertIn('self.pendingHomeDetail=', recommendation)
-        self.assertIn('[self activate:source keepingHome:YES]', recommendation)
-        self.assertNotIn('self.onActivateService(source,', recommendation)
-        self.assertIn('self.pendingHomeDetail=', favorite)
-        self.assertIn('[self activate:source keepingHome:YES]', favorite)
-        capabilities_start = self.detail.index('- (void)loadCapabilities {', implementation)
-        capabilities = self.detail[capabilities_start:
-                                   self.detail.index('- (void)loadHome {', capabilities_start)]
-        self.assertIn('owner.generation!=generation', capabilities)
-        self.assertIn('[page openPendingHomeDetailForSource:page.source', capabilities)
-        self.assertIn('openPendingHomeDetailForSource:owner.source', capabilities)
+    def test_history_and_recommendation_detail_readiness_preserve_the_media_context(self):
+        readiness = self.browser.split('- (void)prepareDetailSource:', 1)[1].split('- (void)openHomeRecommendation:', 1)[0]
+        recommendation = self.browser.split('- (void)openHomeRecommendation:', 1)[1].split('- (void)browsePinnedSource:', 1)[0]
+        history = self.browser.split('- (void)openHistoryEntry:', 1)[1].split('- (void)openHistoryDetail:', 1)[0]
+        self.assertIn('self.onActivateService(source,', readiness)
+        self.assertIn('detachedGeneration!=request', readiness)
+        self.assertIn('LocalServiceReadiness alloc', readiness)
+        self.assertIn('if(!failure)completion()', readiness)
+        self.assertNotIn('self.source=source', readiness)
+        self.assertIn('[self prepareDetailSource:source completion:', recommendation)
+        self.assertIn('[self prepareDetailSource:source completion:', history)
+        self.assertIn('[owner pushMediaDetail:detail]', recommendation)
 
     def test_resource_collection_script_and_native_sources_open_the_film_library(self):
         collection = (ROOT / 'Sources/TVBoxCatalogViewController.m').read_text()
@@ -830,18 +762,14 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('@"url":url', self.detail)
 
     def test_home_exposes_separate_top_resource_and_site_pickers_and_prepares_sites_on_demand(self):
-        self.assertIn('selectionRow.hidden=NO', self.detail)
-        self.assertIn('self.homeScrollTopConstraint=[self.homeScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor]',
-                      self.detail)
-        self.assertIn('action:@selector(chooseResource)', self.detail)
-        self.assertIn('action:@selector(chooseProvider)', self.detail)
-        self.assertIn('self.pendingProviderPickerAfterLoad=YES', self.detail)
-        self.assertIn('[self activate:self.source keepingHome:self.homeMode]', self.detail)
-        self.assertIn('[page chooseProvider]', self.detail)
-        self.assertIn('此资源使用单站点接口', self.detail)
-        smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
-        self.assertIn('home keeps independent resource and site selectors side by side at the top', smoke)
-        self.assertIn('home content scrolls below the top resource and site selector row under a readable immersive status region', smoke)
+        self.assertIn('action:@selector(chooseResource)', self.browser)
+        self.assertIn('action:@selector(chooseProvider)', self.browser)
+        self.assertIn('self.pendingProviderPickerAfterLoad=YES', self.browser)
+        self.assertIn('[self activate:self.source keepingHome:self.homeMode]', self.browser)
+        self.assertIn('[page chooseProvider]', self.browser)
+        self.assertIn('此资源使用单站点接口', self.browser)
+        self.assertIn('self.providerSelectButton.hidden=NO', self.browser)
+        self.assertIn('selectionRow.bottomAnchor', self.browser)
 
     def test_home_request_diagnostics_record_the_action_trigger_and_deferred_state(self):
         request = self.detail[self.detail.index('- (void)loadHome {'):
@@ -849,7 +777,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('self.nextHomeLoadTrigger', request)
         self.assertIn('@"trigger":trigger', request)
         self.assertIn('@"automatic_load_deferred":@(self.deferAutomaticLoading||self.homeLoadDeferred)', request)
-        self.assertIn('resource_page_refresh', self.detail)
+        self.assertIn('media_pull_refresh', self.detail)
         self.assertIn('site_selector_prepare', self.detail)
 
     def test_home_duplicate_requests_are_suppressed_and_stale_responses_cannot_replace_new_operations(self):
@@ -862,6 +790,43 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('same_resource_site_request_in_flight', request)
         self.assertIn('stillCurrentOperation', request)
         self.assertIn('superseded_operation', request)
+
+    def test_unified_search_defaults_to_current_site_and_expansion_is_explicit(self):
+        search = (ROOT / 'Sources/MediaGlobalSearchViewController.m').read_text()
+        header = (ROOT / 'Sources/MediaGlobalSearchViewController.h').read_text()
+        for field in ('currentSourceID', 'currentProviderID', 'currentCatalogID'):
+            self.assertIn(field, header)
+            self.assertIn('page.' + field + '=', self.browser)
+        self.assertIn('self.searchSources=self.currentSiteScope?@[self.currentSiteSource]:self.availableSources', search)
+        change = search.split('- (void)changeSearchScope:', 2)[2].split('- (', 1)[0]
+        self.assertIn('[self cancelJobsAndAdvanceGeneration]', change)
+        self.assertIn('[self.rows removeAllObjects]', change)
+        self.assertIn('self.searching=NO', change)
+        self.assertNotIn('[self submitSearch]', change)
+        self.assertIn('selectedProviderID=page.currentProviderID', search)
+        self.assertIn('当前站点已不可用', search)
+
+    def test_featured_deduplicates_banner_items_and_never_mixes_category_grid(self):
+        featured = self.browser.split('NSSet *enabled=MediaHomeEnabledModules()', 1)[1].split('- (void)updateMediaFeedInsets', 1)[0]
+        self.assertIn('MediaBrowserItemIdentity(item)', featured)
+        self.assertIn('[seen containsObject:key]', featured)
+        self.assertIn('NSMakeRange(bannerCount,count)', featured)
+        self.assertNotIn('@"kind":@"grid"', featured)
+        self.assertNotIn('更多精选', self.browser)
+        self.assertIn('UIAccessibilityIsReduceMotionEnabled()', self.feed)
+        self.assertIn('UIAccessibilityIsVoiceOverRunning()', self.feed)
+        self.assertIn('self.feedVisible', self.feed)
+
+    def test_category_switch_cancels_background_work_and_restores_context_scoped_session(self):
+        select = self.browser.split('- (void)selectMediaCategory:', 1)[1].split('- (void)viewWillTransitionToSize:', 1)[0]
+        self.assertIn('[self saveCategorySession]', select)
+        self.assertIn('self.generation++', select)
+        self.assertIn('[self.client cancel]', select)
+        self.assertIn('self.categorySessions[[self categorySessionKey]]', select)
+        self.assertIn('self.items=saved[@"items"]', select)
+        self.assertIn('self.hasMore=[saved[@"hasMore"] boolValue]', select)
+        self.assertIn('self.grid setContentOffset:', select)
+        self.assertIn('stateKeyForSource:self.source provider:self.provider', self.browser)
 
     def test_local_interface_probe_is_bounded_and_does_not_follow_redirects(self):
         self.assertIn('completionHandler(nil)', self.resource_detail)
@@ -1077,24 +1042,14 @@ class ResourceInteractionContracts(unittest.TestCase):
         native = (ROOT / 'Tests/native_profile_tests.m').read_text()
         self.assertIn('complete collection JSON and single-site JSON preserve original provider fields', native)
 
-    def test_media_home_reuses_existing_history_favorites_and_services(self):
-        self.assertIn('MediaPlaybackStateStore.watchHistory', self.detail)
-        self.assertIn('trailingSwipeActionsConfigurationForRowAtIndexPath', self.detail)
-        self.assertIn('removeHistoryEntryWithKey', self.detail)
-        self.assertIn('performsFirstActionWithFullSwipe=NO', self.detail)
-        self.assertIn('cctv.mediaFavorites.v1', self.detail)
-        self.assertIn('MediaHomePinnedSourcesDefaultsKey', self.detail)
-        self.assertIn('sourcesProvider', self.detail)
-        self.assertIn('onActivateService', self.detail)
-        self.assertIn('media-home-browse-button', self.detail)
-        self.assertIn('media-home-search-button', self.detail)
-        self.assertIn('homeSearchButton.hidden=!hidden', self.detail)
-        self.assertIn('onDisplayModeChanged', self.root)
-        self.assertIn('[owner activate:source keepingHome:YES]', self.detail)
-        self.assertIn('openHomeConfiguration', self.detail)
-        self.assertIn('@"媒体"', self.root)
-        self.assertIn('CCTV",@"频道",@"媒体",@"资源",@"设置', self.root)
-        self.assertIn('@"频道"', self.root)
+    def test_unified_media_reuses_history_and_moves_management_to_dedicated_entries(self):
+        self.assertIn('MediaPlaybackStateStore.watchHistory', self.browser)
+        self.assertIn('@"__historyEntry"', self.browser)
+        self.assertIn('[owner openHistoryEntry:history]', self.browser)
+        self.assertIn('- (void)openFavorites', self.browser)
+        self.assertIn('MediaHomePinnedSources', self.detail)
+        self.assertIn('onResources', self.browser)
+        self.assertIn('onMediaDisplaySettings', self.root)
 
     def test_global_search_filters_restore_state_and_cancel_changed_queries(self):
         search = (ROOT / 'Sources/MediaGlobalSearchViewController.m').read_text()

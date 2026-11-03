@@ -22,6 +22,9 @@ static NSString *MediaMetadataCacheSummaryText(void) {
       @{ @"title":@"外观", @"footer":@"主题会应用到全部页面。可跟随 iPhone 外观，也可固定使用浅色或深色。", @"rows":@[
         @{ @"title":@"全局主题", @"detail":@"系统 / 浅色 / 深色", @"key":HostThemeModePreferenceKey, @"appearance":@YES, @"icon":@"circle.lefthalf.filled" }
       ]},
+      @{ @"title":@"媒体", @"footer":@"调整精选内容与海报布局；资源站和内部站点仍在媒体页顶部选择。", @"rows":@[
+        @{ @"title":@"媒体显示", @"detail":@"精选模块与海报布局", @"action":@"mediaDisplay", @"icon":@"rectangle.grid.2x2" }
+      ]},
       @{ @"title":@"播放", @"footer":@"启动时自动续播默认关闭，打开软件后由你点选频道播放。快速起播仅降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；预解析只缓存一个相邻频道的信息，有效期 15 秒，会额外请求频道元数据。播放选项下次选台生效。", @"rows":@[
         @{ @"title":@"预解析下一个 CCTV 频道", @"key":@"preloadNativeChannel", @"icon":@"forward.end", @"default":@YES },
         @{ @"title":@"SDK 详细日志（诊断）", @"key":@"nativeSDKVerboseLogs", @"icon":@"doc.text", @"default":@NO },
@@ -99,6 +102,7 @@ static NSString *MediaMetadataCacheSummaryText(void) {
     else if([row[@"action"] isEqualToString:@"clearMediaMetadata"]) [self confirmClearMediaMetadata:ip];
     else if([row[@"action"] isEqualToString:@"export"]){if(self.onExportData)self.onExportData();}
     else if([row[@"action"] isEqualToString:@"runtimeDiagnostics"]){if(self.onOpenDiagnostics)self.onOpenDiagnostics();}
+    else if([row[@"action"] isEqualToString:@"mediaDisplay"]){if(self.onMediaDisplaySettings)self.onMediaDisplaySettings();}
     else if([row[@"action"] isEqualToString:@"import"]){if(self.onImportData)self.onImportData();}
     else if([row[@"action"] isEqualToString:@"logs"]){if(self.onOpenLog)self.onOpenLog();}
 }

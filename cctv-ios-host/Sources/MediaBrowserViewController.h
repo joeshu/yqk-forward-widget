@@ -3,6 +3,8 @@
 @interface MediaBrowserViewController : UIViewController
 /// Refresh installed sources while preserving the current browser state when possible.
 - (void)refreshSources;
+/// Media display preferences, pushable from Settings without loading this page.
+- (UIViewController *)mediaDisplaySettingsViewController;
 - (void)openSourceIdentifier:(NSString *)identifier;
 - (void)invalidateServiceIdentifier:(NSString *)identifier;
 - (void)showConfigurationForSource:(NSDictionary *)source;
