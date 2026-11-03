@@ -699,11 +699,19 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('videoView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor', player)
         self.assertIn('self.videoTopScrim', player)
         self.assertIn('throughputPortraitTopConstraint.active=!landscape', player)
-        self.assertIn('throughputLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor', player)
+        self.assertIn('throughputLabel.topAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.topAnchor', player)
         self.assertIn('gestureFeedbackPortraitTopConstraint.active=!landscape', player)
         self.assertIn('controlPanel.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor', player)
         self.assertIn('videoView.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor', player)
         self.assertIn('if(viewController==self)HostStyleNavigation(navigationController)', self.root)
+
+    def test_embedded_player_overlays_stay_inside_the_video_view_hierarchy(self):
+        player = self.playback[self.playback.index('@implementation MediaPlaybackViewController'):]
+        self.assertIn('UIView *gestureSurface=self.videoView;', player)
+        self.assertIn('gestureFeedbackLabel.topAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.topAnchor', player)
+        switch_surface = player[player.index('- (void)setGestureSurfaceForCicada:'):]
+        self.assertIn('UIView *next=self.videoView;', switch_surface)
+        self.assertNotIn('self.playerController.contentOverlayView?:self.videoView', switch_surface)
 
     def test_detail_starts_player_inline_without_push_and_preserves_player_diagnostics(self):
         detail = self.detail[self.detail.index('@implementation MediaDetailViewController'):
