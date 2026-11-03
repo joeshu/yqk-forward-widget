@@ -66,7 +66,9 @@ jobs:
       - name: Run regression checks
         working-directory: cctv-ios-host
         run: |
-          python3 -m pip install --disable-pip-version-check -r Scripts/media-python-requirements.txt
+          CCTVHOST_TEST_PYTHON_DEPS="${RUNNER_TEMP}/cctvhost-test-python-deps"
+          python3 -m pip install --disable-pip-version-check --target "$CCTVHOST_TEST_PYTHON_DEPS" -r Scripts/media-python-requirements.txt
+          export PYTHONPATH="$CCTVHOST_TEST_PYTHON_DEPS${PYTHONPATH:+:$PYTHONPATH}"
           set +e
           python3 -m unittest discover -s Tests -p 'test_*.py' -v > regression.log 2>&1
           rc=$?
