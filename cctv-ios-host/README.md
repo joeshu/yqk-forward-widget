@@ -49,7 +49,7 @@ Node 插件的 `https.request/get` 保留原生请求优先；若默认 TLS 配�
     python3 -m unittest discover -s Tests -p 'test_*.py' -v
     (cd JSPlugins && npm test)
 
-完整 iOS 设备构建和替身 UI smoke 由仓库 .github/workflows/cctv-ios-host.yml 在 macOS runner 执行。具体真机验收项和当前未验证项目见质量审查记录。
+完整 iOS 设备构建和替身 UI smoke 由仓库 .github/workflows/cctv-ios-host.yml 在 macOS runner 执行。较慢的在线全目录 AVFoundation 兼容矩阵可单独运行 `.github/workflows/cctv-media-compat.yml`；也可在发布工作流手动派发时启用 `run_media_compat`。具体真机验收项和当前未验证项目见质量审查记录。
 
 ## 已知边界
 

@@ -16,6 +16,7 @@ for attempt in $(seq 1 150); do
 done
 if [ ! -s "$OUT/fixture-port.txt" ]; then cat "$OUT/fixture.log"; exit 1; fi
 FIXTURE_PORT=$(cat "$OUT/fixture-port.txt")
+SMOKE_LAUNCH_EPOCH=$(date +%s)
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 ARCH=$(uname -m)
 xcrun --sdk iphonesimulator clang -fobjc-arc -target "$ARCH-apple-ios15.0-simulator" -isysroot "$SDK" \
@@ -75,10 +76,49 @@ PY
     if (( stalled_for >= 120 )); then
       echo "::error::UI smoke stopped advancing for ${stalled_for}s"
       if [ -f "$PROGRESS_FILE" ]; then cat "$PROGRESS_FILE"; fi
-      if [[ "$SMOKE_APP_PID" =~ ^[0-9]+$ ]] && command -v sample >/dev/null 2>&1; then
-        sample "$SMOKE_APP_PID" 5 -file "$OUT/ui-main-thread-sample.txt" >/dev/null 2>&1 || true
-        if [ -s "$OUT/ui-main-thread-sample.txt" ]; then sed -n '1,220p' "$OUT/ui-main-thread-sample.txt"; fi
+      if [[ "$SMOKE_APP_PID" =~ ^[0-9]+$ ]]; then
+        ps -p "$SMOKE_APP_PID" -o pid=,stat=,comm= || echo "Simulator app PID $SMOKE_APP_PID is no longer alive"
+        if command -v sample >/dev/null 2>&1; then
+          sample "$SMOKE_APP_PID" 5 -file "$OUT/ui-main-thread-sample.txt" || echo "sample could not attach to simulator PID $SMOKE_APP_PID"
+          if [ -s "$OUT/ui-main-thread-sample.txt" ]; then sed -n '1,240p' "$OUT/ui-main-thread-sample.txt"; fi
+        else
+          echo "macOS sample utility is unavailable; collecting simulator crash reports instead"
+        fi
       fi
+      xcrun simctl spawn "$SIM" log show --last 5m --style compact --predicate 'process == "CCTVHostUI" OR process == "CCTVHost"' > "$OUT/ui-simulator-console.log" 2>&1 || true
+      if [ -s "$OUT/ui-simulator-console.log" ]; then tail -n 160 "$OUT/ui-simulator-console.log"; fi
+      python3 - "$SMOKE_LAUNCH_EPOCH" "$OUT" <<'PY'
+import json
+import pathlib
+import shutil
+import sys
+
+started = int(sys.argv[1])
+output = pathlib.Path(sys.argv[2])
+roots = [pathlib.Path.home() / "Library/Logs/DiagnosticReports"]
+reports = []
+for root in roots:
+    if root.exists():
+        reports.extend(path for path in root.rglob("*")
+                       if path.is_file() and path.suffix.lower() in {".ips", ".crash", ".hang"}
+                       and "cctvhost" in path.name.lower()
+                       and path.stat().st_mtime >= started - 10)
+for report in sorted(set(reports), key=lambda path: path.stat().st_mtime):
+    target = output / report.name
+    shutil.copy2(report, target)
+    print(f"Captured simulator crash report: {target}")
+    if report.suffix.lower() == ".ips":
+        try:
+            content = report.read_text(errors="replace")
+            payload = json.loads(content[content.index("\n") + 1:])
+            print("Crash summary:", json.dumps({"exception": payload.get("exception"),
+                  "faultingThread": payload.get("faultingThread"), "threads": payload.get("threads", [])},
+                  ensure_ascii=False)[:24000])
+        except Exception as error:
+            print(f"Could not summarize crash report {report.name}: {type(error).__name__}")
+if not reports:
+    print("No new CCTVHost simulator crash report was found")
+PY
       break
     fi
   fi
@@ -94,6 +134,9 @@ cat "$OUT/fixture.log"
 if [ ! -f "$OUT/results.json" ]; then
   echo "::error::UI smoke did not finish; last checkpoint follows"
   if [ -f "$OUT/smoke-progress.json" ]; then cat "$OUT/smoke-progress.json"; fi
+  for diagnostic in "$OUT/ui-main-thread-sample.txt" "$OUT/ui-simulator-console.log"; do
+    if [ -s "$diagnostic" ]; then echo "::group::$(basename "$diagnostic")"; tail -n 240 "$diagnostic"; echo "::endgroup::"; fi
+  done
   exit 1
 fi
 if [ -f "$OUT/runtime-debug.jsonl" ]; then

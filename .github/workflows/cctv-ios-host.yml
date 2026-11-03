@@ -7,6 +7,12 @@ on:
       - 'cctv-ios-host/**'
       - '.github/workflows/cctv-ios-host.yml'
   workflow_dispatch:
+    inputs:
+      run_media_compat:
+        description: "Run the longer live-catalogue AVFoundation compatibility matrix"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -14,7 +20,7 @@ permissions:
 
 jobs:
   media-compat:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.run_media_compat == true
     uses: ./.github/workflows/cctv-media-compat.yml
     permissions:
       contents: read
@@ -191,4 +197,7 @@ jobs:
             cctv-ios-host/ui-preview/*.json
             cctv-ios-host/ui-preview/*.log
             cctv-ios-host/ui-preview/*.txt
+            cctv-ios-host/ui-preview/*.ips
+            cctv-ios-host/ui-preview/*.crash
+            cctv-ios-host/ui-preview/*.hang
           if-no-files-found: error
