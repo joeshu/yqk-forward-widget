@@ -605,7 +605,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [root player:retainedWrapper playbackFailed:[NSError errorWithDomain:@"fixture" code:4012 userInfo:nil]];
             check([[[root valueForKey:@"playPauseBtn"] titleForState:UIControlStateNormal] isEqual:@"重试"],
                   @"terminal playback error exposes an explicit retry action");
-            NSIndexPath *failedSelectionPath=[root indexPathForChannelID:@"cctv1"];if(failedSelectionPath){[grid scrollToItemAtIndexPath:failedSelectionPath atScrollPosition:UICollectionViewScrollPositionCenteredVertically animated:NO];[grid layoutIfNeeded];selectedLiveCard=[grid cellForItemAtIndexPath:failedSelectionPath];selectedLiveMark=(id)[selectedLiveCard.contentView viewWithTag:4107];}
+            UICollectionView *failedGrid=(id)[root valueForKey:@"channelGrid"];NSIndexPath *failedSelectionPath=[root indexPathForChannelID:@"cctv1"];if(failedGrid&&failedSelectionPath){[failedGrid scrollToItemAtIndexPath:failedSelectionPath atScrollPosition:UICollectionViewScrollPositionCenteredVertically animated:NO];[failedGrid layoutIfNeeded];selectedLiveCard=[failedGrid cellForItemAtIndexPath:failedSelectionPath];selectedLiveMark=(id)[selectedLiveCard.contentView viewWithTag:4107];}
             check([selectedLiveCard.accessibilityValue isEqual:@"正在播放"]&&selectedLiveMark&&!selectedLiveMark.hidden,@"selected channel marker remains visible through a terminal playback failure and retry state");
             [root togglePlayPause];
           },
