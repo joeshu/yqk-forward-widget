@@ -1421,8 +1421,8 @@ configureCatalogNavigation;
     UIMenu *menu=nil;
     if(self.activeTab==1){
         __weak typeof(self) weakSelf=self;NSMutableArray<UIMenuElement *> *actions=[NSMutableArray array];
-        BOOL allSelected=!self.activeSource.length;
-        [actions addObject:[[UIAction alloc] initWithTitle:@"全部直播资源" image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:@"live.resource.all" discoverabilityTitle:nil attributes:UIMenuElementAttributesNone state:allSelected?UIMenuElementStateOn:UIMenuElementStateOff handler:^(UIAction *action){[weakSelf selectLiveResourceSource:nil];}]];
+        BOOL allSelected=!self.activeSource.length;NSString *allTitle=allSelected?@"✓ 全部直播资源":@"全部直播资源";
+        [actions addObject:[UIAction actionWithTitle:allTitle image:[UIImage systemImageNamed:allSelected?@"checkmark.circle.fill":@"dot.radiowaves.left.and.right"] identifier:@"live.resource.all" handler:^(UIAction *action){[weakSelf selectLiveResourceSource:nil];}]];
         NSString *selectedName=nil;
         for(NSDictionary *profile in [self configurationProfiles]){
             NSString *kind=[profile[@"resourceKind"] isKindOfClass:NSString.class]?profile[@"resourceKind"]:@"";
@@ -1434,11 +1434,11 @@ configureCatalogNavigation;
             NSString *name=[profile[@"name"] isKindOfClass:NSString.class]?profile[@"name"]:source;
             NSUInteger count=[profile[@"count"] unsignedIntegerValue];if(!count)count=[profile[@"channelCount"] unsignedIntegerValue];if(!count)count=[profile[@"liveCount"] unsignedIntegerValue];
             NSString *menuTitle=count?[NSString stringWithFormat:@"%@ · %lu",name,(unsigned long)count]:name;
-            BOOL selected=[source isEqual:self.activeSource];if(selected)selectedName=name;
+            BOOL selected=[source isEqual:self.activeSource];if(selected){selectedName=name;menuTitle=[@"✓ " stringByAppendingString:menuTitle];}
             NSString *capturedSource=[source copy];
-            [actions addObject:[[UIAction alloc] initWithTitle:menuTitle image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:nil discoverabilityTitle:nil attributes:UIMenuElementAttributesNone state:selected?UIMenuElementStateOn:UIMenuElementStateOff handler:^(UIAction *action){[weakSelf selectLiveResourceSource:capturedSource];}]];
+            [actions addObject:[UIAction actionWithTitle:menuTitle image:[UIImage systemImageNamed:selected?@"checkmark.circle.fill":@"dot.radiowaves.left.and.right"] identifier:nil handler:^(UIAction *action){[weakSelf selectLiveResourceSource:capturedSource];}]];
         }
-        if(actions.count==1){UIAction *empty=[[UIAction alloc] initWithTitle:@"资源页暂无可选直播源" image:[UIImage systemImageNamed:@"info.circle"] identifier:nil discoverabilityTitle:nil attributes:UIMenuElementAttributesDisabled state:UIMenuElementStateOff handler:^(UIAction *action){}];[actions addObject:empty];}
+        if(actions.count==1){UIAction *empty=[UIAction actionWithTitle:@"资源页暂无可选直播源" image:[UIImage systemImageNamed:@"info.circle"] identifier:nil handler:^(UIAction *action){}];[actions addObject:empty];}
         if(selectedName.length)title=selectedName;
         title=[title stringByAppendingString:@"  ▾"];
         menu=[UIMenu menuWithTitle:@"选择直播资源" children:actions];
