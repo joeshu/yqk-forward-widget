@@ -719,6 +719,7 @@ class PythonSpider:
         sys.modules[name] = module
         _python_spider_log_stage('python_spider_prepare_started', entry, prepare_started_at)
         try:
+            _install_python_spider_compatibility()
             spec.loader.exec_module(module)
             _repair_mp4_stsd_walker(module)
             _python_spider_log_stage('python_spider_module_loaded', entry, prepare_started_at)
@@ -923,6 +924,33 @@ class PythonSpider:
                 self._remove_package_modules()
                 if self.added_path and self.root in sys.path:
                     sys.path.remove(self.root)
+
+
+def _install_python_spider_compatibility():
+    """Adapt common Android-TVBox Python parser imports to bundled pure Python."""
+    try:
+        import bs4
+    except ImportError:
+        return
+    current = bs4.BeautifulSoup
+    if getattr(current, '_cctvhost_lxml_alias', False):
+        return
+
+    class CompatibleBeautifulSoup(current):
+        _cctvhost_lxml_alias = True
+
+        def __init__(self, markup="", features=None, *args, **kwargs):
+            if features in ('lxml', 'lxml-html'):
+                features = 'html.parser'
+            elif features == 'lxml-xml':
+                features = 'xml'
+            if features is None:
+                features = 'html.parser'
+            super().__init__(markup, features, *args, **kwargs)
+
+    CompatibleBeautifulSoup.__name__ = current.__name__
+    CompatibleBeautifulSoup.__qualname__ = current.__qualname__
+    bs4.BeautifulSoup = CompatibleBeautifulSoup
 
 
 class NativeJS:

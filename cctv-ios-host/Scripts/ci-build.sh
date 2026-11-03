@@ -56,6 +56,8 @@ if [ -z "${PY_DISABLE:-}" ]; then cp Plugins/ysp-live.py "$APP/ysp-live.py"; cp 
 if [ -z "${PY_DISABLE:-}" ]; then
   cp Plugins/media-service.py Plugins/host_media_runtime.py Plugins/host_media_relay.py Plugins/node-plugin-host.cjs "$APP/"
   cp -R Plugins/base "$APP/base"
+  cp -R Plugins/lxml "$APP/lxml"
+  cp Plugins/pyquery.py "$APP/pyquery.py"
   cp -R JSPlugins/generic JSPlugins/drpy "$APP/JSPlugins/"
   cp Resources/NodeMobile-LICENSE.txt "$APP/"
   python3 Scripts/prepare_node_runtime.py "$APP"

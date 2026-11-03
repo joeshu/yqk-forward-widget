@@ -66,6 +66,7 @@ jobs:
       - name: Run regression checks
         working-directory: cctv-ios-host
         run: |
+          python3 -m pip install --disable-pip-version-check -r Scripts/media-python-requirements.txt
           set +e
           python3 -m unittest discover -s Tests -p 'test_*.py' -v > regression.log 2>&1
           rc=$?
