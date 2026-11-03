@@ -18,8 +18,7 @@
 
 @implementation CicadaUrlSource
 - (instancetype)urlWithString:(NSString *)url {
-    self = [super init];
-    if (self) self.smokeURL = [url copy];
+    self.smokeURL = [url copy];
     return self;
 }
 @end
