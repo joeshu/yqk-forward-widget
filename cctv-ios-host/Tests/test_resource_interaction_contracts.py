@@ -1149,9 +1149,19 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('candidate[@"playbackMethodOverride"]=@"native"', fallback)
         self.assertIn('web.onTryNativePlayback=^{[weakSelf tryNativePlayback];}', self.playback)
         self.assertIn('@"原生播放"', webview)
-        self.assertIn('installCookieHeader:cookie forURL:configurationURL', webview)
+        self.assertIn('loadInitialPageAtURL:configurationURL cookie:cookie', webview)
         self.assertIn('httpCookieStore setCookie:item', webview)
         self.assertIn('WKWebsiteDataStore.nonPersistentDataStore', webview)
+
+    def test_webview_cookie_store_cannot_block_initial_page_load(self):
+        webview = (ROOT / 'Sources/MediaWebViewController.m').read_text()
+        self.assertEqual(webview.count('loadInitialPageAtURL:configurationURL cookie:cookie'), 2)
+        initial_load = webview[webview.index('- (void)loadInitialPageAtURL:'):
+                               webview.index('- (void)installCookieHeader:', webview.index('- (void)loadInitialPageAtURL:'))]
+        self.assertIn('installCookieHeader:cookie forURL:url completion:startLoading', initial_load)
+        self.assertIn('dispatch_after(dispatch_time(DISPATCH_TIME_NOW,1200*NSEC_PER_MSEC)', initial_load)
+        self.assertIn('if(!owner||owner.didClose||started)return', initial_load)
+        self.assertIn('allHTTPHeaderFields=MediaPlaybackHeadersFromResult(self.result)', webview)
 
     def test_parser_marked_source_plays_inside_the_app_without_external_handoff(self):
         route = self.playback[self.playback.index('BOOL directMedia='):
