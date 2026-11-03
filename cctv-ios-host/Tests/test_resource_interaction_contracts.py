@@ -72,6 +72,38 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('summary=[summary stringByAppendingFormat:@"\\n%@",profile[@"status"]]', self.catalog)
         self.assertIn('c.detailTextLabel.text=[self resourceDetailForProfile:p]', self.catalog)
 
+    def test_five_tab_navigation_is_clear_and_pages_scroll_under_it(self):
+        self.assertIn('self.bottomBarBackdrop.backgroundColor=UIColor.clearColor', self.root)
+        self.assertIn('self.bottomBar.backgroundColor=UIColor.clearColor', self.root)
+        self.assertIn('CGFloat contentY=y+42;CGFloat contentBottom=height', self.root)
+        self.assertIn('tabContentInset=MAX(8,height-tabY+8)', self.root)
+        self.assertIn('setBottomOverlayInset:tabContentInset', self.root)
+        self.assertIn('five-tab navigation stays fully transparent over content that extends behind it',
+                      (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text())
+
+    def test_top_edge_is_immersive_while_controls_respect_safe_areas(self):
+        navigation = (ROOT / 'Sources/HostTheme.h').read_text()
+        settings = (ROOT / 'Sources/SettingsViewController.m').read_text()
+        self.assertIn('[edge configureWithTransparentBackground]', navigation)
+        self.assertIn('nav.navigationBar.scrollEdgeAppearance = edge', navigation)
+        self.assertIn('compactScrollEdgeAppearance = edge', navigation)
+        self.assertIn('CGFloat pageTop=0', self.root)
+        self.assertIn('CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom))', self.root)
+        self.assertIn('CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets)', self.root)
+        self.assertIn('self.playerBox.frame=CGRectMake(0,0,w,ph)', self.root)
+        self.assertIn('CGFloat overlayTop = safe.top', self.root)
+        self.assertIn('@"immersiveTopVersion":@1', self.root)
+        self.assertIn('if(oldTopGeometry){gridY-=topInset;listY-=self.table.contentInset.top;}', self.root)
+        self.assertIn('homeScrollTopConstraint=[self.homeScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor]',
+                      self.detail)
+        self.assertIn('homeStackTopConstraint.constant=MAX(0,overlayBottom)', self.detail)
+        self.assertIn('homeTopImmersiveGradient.colors', self.detail)
+        self.assertIn('[self.table.topAnchor constraintEqualToAnchor:self.view.topAnchor]', settings)
+        self.assertIn('UIEdgeInsetsMake(top,0,bottom,0)', settings)
+        smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
+        self.assertIn('expanded live video reaches behind the status bar while its title stays in the safe area', smoke)
+        self.assertIn('under a readable immersive status region', smoke)
+
     def test_resource_header_is_remeasured_after_navigation_return_and_preserves_scroll_position(self):
         self.assertIn('- (void)refreshHeaderAfterNavigationTransition', self.catalog)
         self.assertIn('- (void)prepareForNavigationTransition', self.catalog)
@@ -189,7 +221,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('operation:@"home" arguments:arguments maximumAge:DBL_MAX', self.detail)
         self.assertIn('operation:@"category" arguments:arguments maximumAge:DBL_MAX', self.detail)
         self.assertIn('self.selectionRow.hidden=NO', self.detail)
-        self.assertIn('self.homeScroll.topAnchor constraintEqualToAnchor:self.categoryScroll.bottomAnchor', self.detail)
+        self.assertIn('self.homeScrollTopConstraint=[self.homeScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor]',
+                      self.detail)
         self.assertIn('media-source-selector', self.detail)
         self.assertIn('media-provider-selector', self.detail)
         self.assertNotIn('media-home-source-picker', self.detail)
@@ -216,7 +249,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('self.homeMenuButton.menu=[self homeActionsMenu]', self.detail)
         self.assertIn('label:@"更多影视操作"', self.detail)
         self.assertIn('homeMenuButton.widthAnchor constraintEqualToConstant:28', self.detail)
-        self.assertIn('self.homeScroll.contentInset=UIEdgeInsetsMake(0,0,28,0)', self.detail)
+        self.assertIn('self.homeScroll.contentInset=UIEdgeInsetsMake(0,0,MAX(28,self.bottomOverlayInset),0)', self.detail)
         self.assertIn('categoryScrollHeightConstraint.constant=hasCategories?40:0', self.detail)
         self.assertNotIn('setNavigationBarHidden:self.homeMode', self.detail)
         self.assertIn('UINavigationControllerDelegate', self.root)
@@ -593,6 +626,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('media-detail-episode-grid', detail)
         self.assertIn('media-detail-route-', detail)
         self.assertIn('media-detail-parser-selector', detail)
+        self.assertIn('self.parserRow.hidden=parsers.count==0', detail)
+        self.assertIn('if(!catalogID.length)return @[];', detail)
+        self.assertIn('NSString *parserID=[self selectedPlaybackParserID]', detail)
         self.assertIn('constraintGreaterThanOrEqualToConstant:44', detail)
         self.assertIn('call:@"play"', detail)
         self.assertIn('toggleFavorite', detail)
@@ -609,12 +645,18 @@ class ResourceInteractionContracts(unittest.TestCase):
         catalog = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
         api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
         self.assertIn('playbackParsersForCatalogID:', catalog)
+        self.assertIn('if(!catalogID.length)return @[];', catalog)
         self.assertIn('parserCatalogID', api_client)
         self.assertIn('MediaParserRequestURL', api_client)
         self.assertIn('parserDirectURL', api_client)
         self.assertIn('MediaParserResponseIsDirectMedia', api_client)
+        self.assertIn('MediaParserCandidateSupportsNativePlayer(address,found)', api_client)
+        self.assertIn('application/dash+xml', api_client)
         self.assertIn('MediaParserKind(parser)', api_client)
         self.assertIn('self.parserWebFallbackResult?:self.parserFallbackResult', api_client)
+        self.assertIn('if(!catalogID.length){if(completion)completion(result,nil);return;}', api_client)
+        self.assertIn('playbackParsersForCatalogID:catalogID])if([parser[@"id"] isEqual:selected])return selected', self.playback)
+        self.assertIn('playbackParsersForCatalogID:catalogID])if([parser[@"id"] isEqual:selected])return selected', self.episodes)
         self.assertIn('parserID', self.detail)
         self.assertIn('parserID', self.playback)
         self.assertIn('parserID', self.episodes)
@@ -629,6 +671,26 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('AVMediaCharacteristicLegible title:@"字幕"', self.playback)
         self.assertIn('AVMediaCharacteristicAudible title:@"音轨"', self.playback)
         self.assertIn('弹幕 · 当前视频未提供弹幕轨道', self.playback)
+
+    def test_detail_and_portrait_player_extend_under_top_chrome_without_hiding_controls(self):
+        detail_page = self.detail[self.detail.index('@implementation MediaDetailViewController'):
+                                  self.detail.index('@interface MediaFavoritesViewController')]
+        self.assertIn('bar.standardAppearance=scrolled;bar.scrollEdgeAppearance=edge', detail_page)
+        self.assertIn('compactScrollEdgeAppearance=edge', detail_page)
+        self.assertIn('colorWithWhite:0 alpha:0.78', detail_page)
+        self.assertIn('scrollView.topAnchor constraintEqualToAnchor:self.view.topAnchor', detail_page)
+
+        player = self.playback[self.playback.index('@implementation MediaPlaybackViewController'):]
+        self.assertIn('videoView.topAnchor constraintEqualToAnchor:self.view.topAnchor', player)
+        self.assertIn('videoView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor', player)
+        self.assertIn('videoView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor', player)
+        self.assertIn('self.videoTopScrim', player)
+        self.assertIn('throughputPortraitTopConstraint.active=!landscape', player)
+        self.assertIn('throughputLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor', player)
+        self.assertIn('gestureFeedbackPortraitTopConstraint.active=!landscape', player)
+        self.assertIn('controlPanel.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor', player)
+        self.assertIn('videoView.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor', player)
+        self.assertIn('if(viewController==self)HostStyleNavigation(navigationController)', self.root)
 
     def test_detail_starts_player_inline_without_push_and_preserves_player_diagnostics(self):
         detail = self.detail[self.detail.index('@implementation MediaDetailViewController'):
@@ -646,13 +708,29 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('if(self.inlinePlaybackController&&episodes.count)[self resolveAndPlaySelectedEpisode]', detail)
         self.assertIn('pendingEpisodeResult', self.playback)
 
+    def test_inline_player_floats_below_navigation_while_detail_scrolls(self):
+        detail = self.detail[self.detail.index('@implementation MediaDetailViewController'):
+                             self.detail.index('@interface MediaFavoritesViewController')]
+        smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
+        self.assertIn('- (void)updateInlinePlaybackFloatingPosition', detail)
+        self.assertIn('convertRect:playerView.bounds toView:self.view', detail)
+        self.assertIn('pinTop-CGRectGetMinY(playerFrame)', detail)
+        self.assertIn('inline player remains floating as the detail page continues scrolling', smoke)
+        self.assertIn('inline player remains floating when scrolling back toward the top', smoke)
+
     def test_player_exposes_quality_choices_and_keeps_parse_and_resolution_states_clear(self):
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
         self.assertIn('self.result[@"alternates"]', self.playback)
+        self.assertIn('BOOL available=alternates.count>0', self.playback)
+        self.assertIn('alternates.count==1?@"清晰度（仅此档可用）":@"清晰度"', self.playback)
+        self.assertIn('button.enabled=alternates.count>1', self.playback)
         self.assertIn('playback_quality_selected', self.playback)
         self.assertIn('awaitingWebPlaybackReturn', self.playback)
         self.assertIn('if(self.resolving)return', self.playback)
-        self.assertIn('MediaPlaybackResultSupportsAVPlayer(result)', self.playback)
+        self.assertIn('MediaPlaybackResultSupportsNativePlayback(result)', self.playback)
+        self.assertIn('if(cicadaMedia){[self playCicadaResult:result generation:playerGeneration];return;}', self.playback)
+        self.assertIn('engine.enableHardwareDecoder=!self.cicadaSoftwareDecodeFallbackAttempted', self.playback)
+        self.assertIn('cicada_software_decode_fallback', self.playback)
         self.assertIn('url.user.length||url.password.length', self.playback)
         self.assertIn('[self setRetryAvailable:NO]', self.playback)
         self.assertIn('inline player exposes the source\'s actual alternate quality choices', smoke)
@@ -698,7 +776,8 @@ class ResourceInteractionContracts(unittest.TestCase):
 
     def test_home_exposes_separate_top_resource_and_site_pickers_and_prepares_sites_on_demand(self):
         self.assertIn('selectionRow.hidden=NO', self.detail)
-        self.assertIn('self.homeScroll.topAnchor constraintEqualToAnchor:self.categoryScroll.bottomAnchor', self.detail)
+        self.assertIn('self.homeScrollTopConstraint=[self.homeScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor]',
+                      self.detail)
         self.assertIn('action:@selector(chooseResource)', self.detail)
         self.assertIn('action:@selector(chooseProvider)', self.detail)
         self.assertIn('self.pendingProviderPickerAfterLoad=YES', self.detail)
@@ -707,7 +786,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('此资源使用单站点接口', self.detail)
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
         self.assertIn('home keeps independent resource and site selectors side by side at the top', smoke)
-        self.assertIn('home content starts below the top resource and site selector row', smoke)
+        self.assertIn('home content scrolls below the top resource and site selector row under a readable immersive status region', smoke)
 
     def test_home_request_diagnostics_record_the_action_trigger_and_deferred_state(self):
         request = self.detail[self.detail.index('- (void)loadHome {'):
@@ -778,6 +857,20 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('识别类型：%@ · %@', self.root)
         self.assertIn('能力待测：启动后查询插件的 capabilities()', self.root)
 
+    def test_resource_import_sheet_hides_types_without_backend_support(self):
+        sheet = (ROOT / 'Sources/ResourceImportSheetViewController.m').read_text()
+        for unsupported in ('Emby 服务器', '飞牛影视 / Jellyfin', 'Kazumi 规则仓库',
+                            'network-mount', 'WebDAV / SFTP / FTP'):
+            self.assertNotIn(unsupported, sheet)
+        self.assertNotIn('@"unsupported"', sheet)
+        self.assertNotIn('当前版本暂不支持', sheet)
+        self.assertIn('@"id":@"services"', sheet)
+        self.assertIn('@"id":@"tvbox-url"', sheet)
+        self.assertIn('@"id":@"script-auto-url"', sheet)
+        self.assertIn('@"id":@"live-file"', sheet)
+        smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
+        self.assertIn('numberOfRowsInSection:0]==1 && [options numberOfRowsInSection:1]==7', smoke)
+
     def test_native_crypto_does_not_use_private_cpython_bytes_resize(self):
         host = (ROOT / 'Sources/PyHost.m').read_text()
         self.assertIn('CCCryptorUpdate(self->cryptor', host)
@@ -823,6 +916,23 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('onUseNativeSite', self.root)
         self.assertIn('removeCatalog:', self.root)
         self.assertIn('@"tvboxCatalogs"', store)
+
+    def test_catvod_doudou_metadata_spider_uses_native_index_and_cross_source_playback(self):
+        store = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
+        api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        browser = (ROOT / 'Sources/MediaBrowserViewController.m').read_text()
+        global_search = (ROOT / 'Sources/MediaGlobalSearchViewController.m').read_text()
+        root = (ROOT / 'Sources/RootViewController.m').read_text()
+        self.assertIn('apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"]', store)
+        self.assertIn('@"douban-index"', store)
+        self.assertIn('MediaDoubanRequest(operation,arguments?:@{},error)', api_client)
+        self.assertIn('/api/v2/search/subjects', api_client)
+        self.assertIn('msearch:###%@###%@', api_client)
+        self.assertIn('openMetadataSearchForItem', browser)
+        self.assertIn('excludingIndexSources:YES', browser)
+        self.assertIn('page.initialKeyword=keyword', browser)
+        self.assertIn('self.initialKeyword.length', global_search)
+        self.assertIn('douban-index', root)
         catalog_test = (ROOT / 'Tests/native_profile_tests.m').read_text()
         self.assertIn('type 3 JAR stays unsupported', catalog_test)
         self.assertIn('type 1 direct playback', (ROOT / 'Tests/native_media_api_tests.m').read_text())
@@ -1015,7 +1125,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('网页播放已关闭 · 可尝试原生播放', appeared)
         self.assertIn('[self setRetryAvailable:YES]', appeared)
         self.assertNotIn('self.awaitingWebPlaybackReturn=NO', appeared)
-        self.assertIn('candidate[@"playbackMethodOverride"]=@"avplayer"', fallback)
+        self.assertIn('candidate[@"playbackMethodOverride"]=@"native"', fallback)
         self.assertIn('web.onTryNativePlayback=^{[weakSelf tryNativePlayback];}', self.playback)
         self.assertIn('@"原生播放"', webview)
         self.assertIn('installCookieHeader:cookie forURL:configurationURL', webview)
@@ -1203,7 +1313,7 @@ class ResourceInteractionContracts(unittest.TestCase):
 
     def test_explicit_maccms_web_pages_keep_the_web_playback_handoff(self):
         api = (ROOT / 'Sources/MediaAPIClient.m').read_text()
-        self.assertIn('BOOL native=!webPage&&(MediaPlaybackResultSupportsAVPlayer(result)||MediaTVBoxURLHasSignedQuery(url))', api)
+        self.assertIn('BOOL native=!webPage&&(MediaPlaybackResultSupportsNativePlayback(result)||MediaTVBoxURLHasSignedQuery(url))', api)
         self.assertIn('static BOOL MediaTVBoxURLHasSignedQuery(NSString *value)', api)
         self.assertIn('result[@"requiresWebPlayback"]=@(webPage||!native)', api)
 

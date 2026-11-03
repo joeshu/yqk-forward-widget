@@ -52,7 +52,7 @@ class HgtvNodeRegressions(unittest.TestCase):
         source = (ROOT / 'Examples/hgtv-node/hgtv.js').read_text()
         self.module = self.folder / 'hgtv-test.cjs'
         self.module.write_text(source.replace('module.exports = site;', '''
-module.exports = {site, decryptCenc, verifyMp4, pickBest, qualityCandidates,
+module.exports = {site, decryptCenc, verifyMp4, pickBest, qualityCandidates, fetchModel, signedRequest,
   videoMetadata, episodesFrom, replaceSinf, decryptVideo,
   setModel: fn => fetchModel = fn, setHtml: fn => siteHtml = fn,
   setHttp: fn => httpText = fn, setDecrypt: fn => ensureDecrypted = fn};
@@ -153,6 +153,43 @@ const assert = require('node:assert/strict');
           const result = (await api.site.detail(sid)).list[0];
           assert.equal(result.vod_play_url.split('#').length, 3);
           assert.deepEqual(requests, ['/detail?series_id=' + sid, '/player/' + sid]);''')
+
+    def test_home_cover_and_signed_video_tab_model_route(self):
+        self.node('''const sid='1234567890123456789', vid='7701565108626918424';
+          api.setHtml(async () => '<a href="/detail?series_id=' + sid + '">' +
+            '<img class="empty_play" src="https://img.invalid/empty_play.png">' +
+            '<img alt="poster" data-src="https://img.invalid/poster.jpg">' +
+            '<span class="pc-title">测试封面</span></a>');
+          const home=await api.site.home();
+          assert.equal(home.list.length,1);
+          assert.equal(home.list[0].vod_pic,'https://img.invalid/poster.jpg');
+
+          const calls=[];
+          api.setHttp(async (url, options) => {
+            calls.push({url, options});
+            if(calls.length===1)return {status:200,body:Buffer.alloc(0)};
+            return {status:200,body:Buffer.from(JSON.stringify({code:0,data:{video_model_data:{
+              [vid]:{video_model:{video_list:[{definition:'720p',main_url:'https://media.invalid/video',spade_a:'fixture'}]}}
+            }}}))};
+          });
+          const model=await api.fetchModel(vid);
+          assert.ok(model.video_list);
+          assert.equal(api.pickBest(model).q,'720p');
+          assert.equal(calls.length,2);
+          for(const call of calls){
+            const u=new URL(call.url);
+            assert.equal(u.hostname,'reading.snssdk.com');
+            assert.equal(u.pathname,'/reading/bookapi/video_tab/multi_video_model/v1/');
+            assert.equal(u.searchParams.get('video_id'),vid);
+            assert.equal(u.searchParams.get('version_code'),'71332');
+            assert.match(u.searchParams.get('device_id'),/^\\d{18}$/);
+            assert.match(u.searchParams.get('iid'),/^\\d{18}$/);
+            assert.equal(call.options.method,'GET');
+            assert.ok(call.options.headers['x-gorgon']);
+            assert.ok(call.options.headers['x-helios']);
+          }
+          assert.notEqual(new URL(calls[0].url).searchParams.get('device_id'),
+                          new URL(calls[1].url).searchParams.get('device_id'));''')
 
     def test_play_lists_all_actual_qualities_and_rejects_missing_quality(self):
         self.node('''const rows = {};

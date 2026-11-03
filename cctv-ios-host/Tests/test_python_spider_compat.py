@@ -72,6 +72,22 @@ class Spider:
             finally:
                 engine.close()
 
+    def test_missing_options_use_legacy_empty_extend_and_base_log_is_available(self):
+        source = '''from base.spider import Spider as BaseSpider
+
+class Spider(BaseSpider):
+    def init(self, extend=""):
+        self.received_extend = extend
+        self.log("initialized")
+'''
+        with tempfile.TemporaryDirectory() as root:
+            Path(root, 'source.py').write_text(source, encoding='utf-8')
+            engine = media.PythonSpider(root, 'source.py')
+            try:
+                self.assertEqual(engine.spider.received_extend, '')
+            finally:
+                engine.close()
+
 
 if __name__ == '__main__':
     unittest.main()

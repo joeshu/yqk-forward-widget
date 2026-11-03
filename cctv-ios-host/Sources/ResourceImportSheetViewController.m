@@ -167,11 +167,11 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self optionsForSection:section].count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return @[@"媒体服务器",@"影视源",@"从本地导入"][section];
+    return @[@"已导入服务",@"在线资源",@"从本地导入"][section];
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if(section==0)return @"Emby / Jellyfin 原生服务器适配尚未接入。可从“脚本与服务”导入已有兼容影视服务；未接入的服务器不会伪装成可播放资源。";
-    if(section==1)return @"TVBox、脚本和直播列表可实际导入。Kazumi 规则与 WebDAV / SFTP / FTP 挂载尚无可调用后端，不会保存为不可播放来源。";
+    if(section==0)return @"管理已导入的本机影视与直播服务。";
+    if(section==1)return @"支持导入 TVBox 配置、影视接口、脚本资源和 M3U / TXT 直播订阅。";
     return @"ZIP 会校验入口、相对路径、大小和声明后再保存；导入阶段不会执行插件代码。";
 }
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
@@ -191,14 +191,10 @@
     dispatch_once(&once,^{
         UIColor *(^rgb)(CGFloat,CGFloat,CGFloat)=^UIColor *(CGFloat r,CGFloat g,CGFloat b){return [UIColor colorWithRed:r/255.0 green:g/255.0 blue:b/255.0 alpha:1];};
         servers=@[
-            @{ @"id":@"emby-server",@"title":@"Emby 服务器",@"detail":@"本版本尚未接入 Emby 登录、媒体库与播放适配",@"icon":@"play.rectangle.fill",@"color":rgb(54,150,93),@"unsupported":@YES},
-            @{ @"id":@"jellyfin-server",@"title":@"飞牛影视 / Jellyfin",@"detail":@"本版本尚未接入 fnOS / Jellyfin 媒体库适配",@"icon":@"server.rack",@"color":rgb(76,112,232),@"unsupported":@YES},
             @{ @"id":@"services",@"title":@"脚本与服务",@"detail":@"查看、启动和管理本机影视 / 直播服务",@"icon":@"slider.horizontal.3",@"color":rgb(229,43,105),@"option":@(ResourceImportOptionServices)}
         ];
         video=@[
             @{ @"id":@"tvbox-url",@"title":@"TVBox 影视源",@"detail":@"粘贴配置地址，解析 JSON 后逐站点识别",@"icon":@"square.stack.3d.up",@"color":rgb(229,43,105),@"option":@(ResourceImportOptionTVBox)},
-            @{ @"id":@"kazumi",@"title":@"Kazumi 规则仓库",@"detail":@"规则搜索与解析后端尚未接入",@"icon":@"film.stack",@"color":rgb(103,83,222),@"unsupported":@YES},
-            @{ @"id":@"network-mount",@"title":@"网络挂载",@"detail":@"WebDAV / SFTP / FTP 与 TMDB 刮削后端尚未接入",@"icon":@"folder.badge.plus",@"color":rgb(246,151,0),@"unsupported":@YES},
             @{ @"id":@"live-url",@"title":@"直播频道",@"detail":@"M3U / TXT 直播订阅地址",@"icon":@"dot.radiowaves.left.and.right",@"color":rgb(246,151,0),@"option":@(ResourceImportOptionLiveURL)},
             @{ @"id":@"script-auto-url",@"title":@"影视 / 合集链接 · 自动识别",@"detail":@"TVBox JSON 与 iOS 合集地址，也支持 JS、Python、ZIP、.md5",@"icon":@"sparkles",@"color":rgb(35,132,238),@"option":@(ResourceImportOptionMediaURL)},
             @{ @"id":@"python-url",@"title":@"Python Spider 链接",@"detail":@"TVBox .py Spider；由内置 CPython 启动",@"icon":@"chevron.left.forwardslash.chevron.right",@"color":rgb(54,137,91),@"option":@(ResourceImportOptionPythonURL)},
@@ -223,13 +219,11 @@
     NSDictionary *item=[self optionsForSection:indexPath.section][indexPath.row];
     [cell configureWithTitle:item[@"title"] detail:item[@"detail"] icon:item[@"icon"] color:item[@"color"]];
     cell.accessibilityIdentifier=[@"resource-import.option." stringByAppendingString:item[@"id"]?:@"unknown"];
-    cell.accessibilityValue=[item[@"unsupported"] boolValue]?@"当前宿主未接入":nil;
     return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *item=[self optionsForSection:indexPath.section][indexPath.row];
-    if([item[@"unsupported"] boolValue]){NSString *message=[NSString stringWithFormat:@"%@目前只有入口规划，项目尚未实现对应的认证、媒体库和播放适配，因此没有保存或加入来源。可以先使用脚本 / TVBox 方式导入已有兼容接口。",item[@"title"]?:@"此资源类型"];UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"当前版本暂不支持" message:message preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];[self presentViewController:alert animated:YES completion:nil];return;}
     NSNumber *storedOption=item[@"option"];
     ResourceImportOption option=(ResourceImportOption)storedOption.integerValue;
     void (^selection)(ResourceImportOption)=self.onSelect;

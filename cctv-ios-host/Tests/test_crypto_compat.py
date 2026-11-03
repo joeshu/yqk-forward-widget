@@ -16,6 +16,7 @@ crypto = importlib.util.module_from_spec(spec)
 sys.modules[PACKAGE_NAME] = crypto
 spec.loader.exec_module(crypto)
 AES = importlib.import_module(PACKAGE_NAME + '.Cipher.AES')
+ARC4 = importlib.import_module(PACKAGE_NAME + '.Cipher.ARC4')
 PKCS1_v1_5 = importlib.import_module(PACKAGE_NAME + '.Cipher.PKCS1_v1_5')
 RSA = importlib.import_module(PACKAGE_NAME + '.PublicKey.RSA')
 Padding = importlib.import_module(PACKAGE_NAME + '.Util.Padding')
@@ -36,6 +37,25 @@ cryptodomex_spec.loader.exec_module(cryptodomex)
 
 
 class CryptoCompatibilityTests(unittest.TestCase):
+    def test_arc4_rfc_6229_vector_and_drop_parameter(self):
+        cipher = ARC4.new(b'Key')
+        self.assertEqual(cipher.encrypt(b'Plaintext').hex(), 'bbf316e8d940af0ad3')
+
+        self.assertEqual(ARC4.new(b'Wiki').encrypt(b'pedia').hex(), '1021bf0420')
+        ciphertext = ARC4.new(b'Wiki').encrypt(bytes(24))
+        self.assertEqual(ciphertext[:8].hex(), '6044db6d41b7e8e7')
+        dropped = ARC4.new(b'Wiki', drop=16).encrypt(bytes(8))
+        self.assertEqual(dropped, ciphertext[16:24])
+        self.assertEqual(ARC4.new(b'Wiki').decrypt(ciphertext), bytes(24))
+
+    def test_arc4_rejects_invalid_parameters(self):
+        for key in (b'', bytes(257), 'text'):
+            with self.assertRaises((TypeError, ValueError)):
+                ARC4.new(key)
+        for drop in (-1, 1.5, True, 1_000_001):
+            with self.assertRaises(ValueError):
+                ARC4.new(b'key', drop=drop)
+
     def test_aes_ecb_cbc_ctr_vectors_and_padding(self):
         key = bytes.fromhex('000102030405060708090a0b0c0d0e0f')
         plain = bytes.fromhex('00112233445566778899aabbccddeeff')

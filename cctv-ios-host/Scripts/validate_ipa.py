@@ -89,7 +89,7 @@ def validate(path):
             for package in ('requests', 'bs4', 'html5lib', 'urllib3', 'elementpath'):
                 assert root + 'python/lib/python3.13/site-packages/' + package + '/__init__.py' in z.namelist(), 'missing Python dependency: ' + package
             for member in (
-                    'Crypto/__init__.py', 'Crypto/Cipher/__init__.py', 'Crypto/Cipher/AES.py',
+                    'Crypto/__init__.py', 'Crypto/Cipher/__init__.py', 'Crypto/Cipher/ARC4.py', 'Crypto/Cipher/AES.py',
                     'Crypto/Cipher/PKCS1_v1_5.py', 'Crypto/Cipher/PKCS1_OAEP.py', 'Crypto/Cipher/_aes_core.py',
                     'Crypto/PublicKey/__init__.py', 'Crypto/PublicKey/RSA.py',
                     'Crypto/Util/__init__.py', 'Crypto/Util/Padding.py', 'Crypto/Util/Counter.py',
@@ -98,7 +98,7 @@ def validate(path):
                     'Crypto/Protocol/__init__.py', 'Crypto/Protocol/KDF.py', 'Crypto/Random/__init__.py'):
                 assert root + 'python/lib/python3.13/site-packages/' + member in z.namelist(), 'missing pure-Python crypto compatibility module: ' + member
             assert root + 'python/lib/python3.13/site-packages/Cryptodome/__init__.py' in z.namelist(), 'missing Cryptodome namespace alias'
-            result['python_crypto_compat'] = ['AES ECB/CBC/CFB/OFB/CTR/GCM/EAX', 'RSA public-key PKCS#1 v1.5/OAEP', 'MD5/Hash/HMAC/CMAC', 'PBKDF2/HKDF', 'Padding/Counter/number/strxor']
+            result['python_crypto_compat'] = ['ARC4', 'AES ECB/CBC/CFB/OFB/CTR/GCM/EAX', 'RSA public-key PKCS#1 v1.5/OAEP', 'MD5/Hash/HMAC/CMAC', 'PBKDF2/HKDF', 'Padding/Counter/number/strxor']
             result['local_media_runtimes'] = ['Python Spider', 'JavaScriptCore', 'drpy', 'Node.js Mobile']
         channels = json.loads(z.read(root + 'channels.json'))
         assert isinstance(channels, list) and channels, 'empty channel catalog'

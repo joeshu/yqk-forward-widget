@@ -65,6 +65,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 @property(nonatomic, strong) NSLayoutConstraint *kindScrollHeightConstraint;
 @property(nonatomic, strong) NSLayoutConstraint *resourceHeaderTopConstraint;
 @property(nonatomic) CGFloat statusBarSafeInset;
+@property(nonatomic) CGFloat bottomOverlayInset;
 @property(nonatomic) BOOL updatingResourceHeaderLayout;
 @property(nonatomic) CGPoint navigationReturnContentOffset;
 @property(nonatomic) CGFloat navigationReturnHeaderHeight;
@@ -125,7 +126,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     self.resourceHeaderTopConstraint=[self.topActionsStack.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor constant:4];
     [NSLayoutConstraint activateConstraints:@[self.resourceHeaderTopConstraint,[self.topActionsStack.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-16],[self.topActionsStack.widthAnchor constraintEqualToConstant:220],[self.topActionsStack.heightAnchor constraintEqualToConstant:44],[self.resourceTitleLabel.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:20],[self.resourceTitleLabel.topAnchor constraintEqualToAnchor:self.topActionsStack.bottomAnchor constant:8],[self.resourceTitleLabel.heightAnchor constraintGreaterThanOrEqualToConstant:42],[self.resourceSearchField.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:20],[self.resourceSearchField.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-20],[self.resourceSearchField.topAnchor constraintEqualToAnchor:self.resourceTitleLabel.bottomAnchor constant:6],[self.resourceSearchField.heightAnchor constraintEqualToConstant:44],[self.kindScroll.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:10],[self.kindScroll.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor],[self.kindScroll.topAnchor constraintEqualToAnchor:self.resourceSearchField.bottomAnchor constant:12],[self.kindScroll.bottomAnchor constraintEqualToAnchor:self.resourceHeader.bottomAnchor constant:-6],self.kindScrollHeightConstraint,[self.kindStack.leadingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.leadingAnchor],[self.kindStack.trailingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.trailingAnchor constant:-10],[self.kindStack.topAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.topAnchor],[self.kindStack.bottomAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.bottomAnchor],[self.kindStack.heightAnchor constraintEqualToAnchor:self.kindScroll.frameLayoutGuide.heightAnchor]]];
     self.tableView.tableHeaderView=self.resourceHeader;
-    self.tableView.contentInset=UIEdgeInsetsMake(0,0,8,0);self.tableView.scrollIndicatorInsets=UIEdgeInsetsMake(0,0,8,0);
+    CGFloat tableBottomInset=MAX(8,self.bottomOverlayInset);self.tableView.contentInset=UIEdgeInsetsMake(0,0,tableBottomInset,0);self.tableView.scrollIndicatorInsets=self.tableView.contentInset;
     self.emptyLabel=[UILabel new];self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.tableView.backgroundView=self.emptyLabel;
     UIRefreshControl *r = [UIRefreshControl new];
     [r addTarget:self action:@selector(refreshProfiles) forControlEvents:UIControlEventValueChanged];
@@ -224,6 +225,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     self.updatingResourceHeaderLayout=NO;
 }
 - (void)setTopSafeAreaInset:(CGFloat)inset {if(!isfinite(inset))inset=0;inset=MAX(0,inset);if(fabs(self.statusBarSafeInset-inset)<0.5)return;self.statusBarSafeInset=inset;if(self.isViewLoaded)[self updateResourceHeaderLayout];}
+- (void)setBottomOverlayInset:(CGFloat)inset {if(!isfinite(inset))inset=0;self.bottomOverlayInset=MAX(8,inset);if(!self.isViewLoaded)return;self.tableView.contentInset=UIEdgeInsetsMake(0,0,self.bottomOverlayInset,0);self.tableView.scrollIndicatorInsets=self.tableView.contentInset;}
 - (BOOL)profile:(NSDictionary *)profile matchesKind:(NSString *)kind {
     NSString *resourceKind=[profile[@"resourceKind"] isKindOfClass:NSString.class]?profile[@"resourceKind"]:@"unknown";
     NSString *status=[profile[@"status"] isKindOfClass:NSString.class]?profile[@"status"]:@"";

@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, parse_qs, urlencode
 from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedirectHandler
 
-VERSION = '1.0.5-cctvhost-r3'
+VERSION = '1.0.5-cctvhost-r4'
 ORIGIN = 'https://hongguoduanju.com'
 COMPAT_PATH = '/api/video/protected/fallback-play-info'
 UA_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -994,11 +994,9 @@ def _card(item):
 
 
 
-########## 签名取流 + CENC 解密（解决 public_fallback_unavailable） ##########
-# 背景：/api/video/protected/fallback-play-info 只对「有公开档」的集返回 200，
-#       新剧很多返回 {"error":"public_fallback_unavailable"}（HTTP 403）。
-# 兜底：走 App 的 multi_video_model（需 x-gorgon 等四个签名头），拿到加密档后
-#       用 spade 解 URL、派生 CENC 密钥、ffmpeg 解密，再由本地 HTTP 提供流。
+########## 签名取流 + CENC 解密 ##########
+# App 的旧 novel/player 模型 POST 对匿名固定设备会返回 200 空包。
+# 使用 video_tab 签名 GET 获取 video_model，再由 spade 派生 CENC 密钥并提供本地 MP4。
 import base64 as _b64
 import binascii as _binascii
 import hashlib as _hashlib
@@ -1013,17 +1011,19 @@ import time as _time
 import urllib.request as _ureq
 from http.server import BaseHTTPRequestHandler as _BHTTPH, ThreadingHTTPServer as _THS
 
-_SIGN_API = "https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/"
-_SIGN_UA = ("com.phoenix.read/74132 (iPhone; iOS 27.0.1; zh_CN; iPhone 12; Build/21A342)")
+_VIDEO_MODEL_MULTI_API = "https://reading.snssdk.com/reading/bookapi/video_tab/multi_video_model/v1/"
+_SIGN_UA = ("com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; "
+            "Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 "
+            "QuicVersion:c67e9834 2025-09-08)")
 _SIGN_DEVICE = {
-    "device_id": "780019670991881", "user_id": "3594769438086775", "aid": "8662",
-    "app_name": "novelread", "version_code": "74132", "version_name": "7.4.1.32",
-    "manifest_version_code": "74132", "update_version_code": "74132",
-    "device_platform": "iphone", "os": "ios", "os_version": "27.0.1", "os_api": "27",
-    "device_type": "iPhone 12", "device_brand": "Apple", "language": "zh",
-    "resolution": "1170*2532", "dpi": "460", "host_abi": "arm64",
-    "channel": "App Store", "ac": "wifi", "ssmix": "a", "pv_player": "74132",
-    "compliance_status": "0", "need_personal_recommend": "1", "player_so_load": "1",
+    "ac": "wifi", "channel": "update_64", "aid": "8662", "app_name": "novelread",
+    "version_code": "71332", "version_name": "7.1.3.32", "device_platform": "android",
+    "os": "android", "ssmix": "a", "device_type": "25053RT47C", "device_brand": "Redmi",
+    "language": "zh", "os_api": "36", "os_version": "16",
+    "manifest_version_code": "71332", "resolution": "1280*2772", "dpi": "520",
+    "update_version_code": "71332", "host_abi": "arm64-v8a", "dragon_device_type": "phone",
+    "pv_player": "71332", "compliance_status": "0", "need_personal_recommend": "1",
+    "player_so_load": "1", "is_android_pad_screen": "0",
 }
 _SPADE_CONST = _binascii.unhexlify(
     "4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524"
@@ -1159,38 +1159,39 @@ def _pct(s):
         c if (c.isalnum() or c in "-_.~") else "%%%02X" % ord(c) for c in str(s))
 
 
-def _signed_request(payload):
+def _signed_request(vid):
+    """Build a current video_tab GET request with a fresh, non-persistent device pair."""
     ts = int(_time.time())
-    body = payload.encode() if isinstance(payload, str) else payload
-    rnd = _random.randint(0, 65535)
     vals = dict(_SIGN_DEVICE)
-    vals["ts"] = str(ts)
-    base = int(_time.time() * 1000)
-    for off in range(32):
-        vals["_rticket"] = str(base + off)
-        query = "&".join("%s=%s" % (_pct(k), _pct(v)) for k, v in vals.items())
-        url = _SIGN_API + "?" + query
-        if _branch_of(url, body, ts) != 1:
-            break
+    vals.update({
+        "iid": str(_random.randrange(10**17, 10**18)),
+        "device_id": str(_random.randrange(10**17, 10**18)),
+        "ts": str(ts),
+        "_rticket": str(int(_time.time() * 1000)),
+        "video_id": str(vid),
+        "need_all_video_definition": "1",
+        "video_platform": "1024",
+    })
+    query = "&".join("%s=%s" % (_pct(k), _pct(v)) for k, v in vals.items())
+    url = _VIDEO_MODEL_MULTI_API + "?" + query
+    rnd = _random.randint(0, 65535)
     headers = {
         "User-Agent": _SIGN_UA,
         "Accept": "application/json; charset=utf-8,application/x-protobuf",
         "Content-Type": "application/json; charset=UTF-8",
-        "x-xs-from-web": "0",
         "x-ss-req-ticket": vals["_rticket"],
         "x-tt-request-tag": "t=0;n=0",
         "sdk-version": "2",
         "passport-sdk-version": "50561",
         "x-vc-bdturing-sdk-version": "3.7.2.cn",
-        "x-ss-stub": _md5_bytes(body).hex().upper(),
-        "x-gorgon": _x_gorgon(query, body, ts, rnd),
+        "x-gorgon": _x_gorgon(query, b"", ts, rnd),
         "x-khronos": str(ts),
         "x-ladon": _b64.b64encode(_be32(ts)).decode(),
         "x-argus": _b64.b64encode(_le32(ts)).decode(),
         "x-helios": _helios(ts),
         "x-tt-dt": "",
     }
-    return url, headers, body
+    return url, headers, None
 
 
 def _decrypt_spade(value, seed):
@@ -1241,54 +1242,56 @@ def _content_key(spade_a):
 
 
 def _signed_model(vid):
-    """签名取 video_model（带 5 分钟缓存）。"""
+    """Fetch a signed video model from the current Red Fruit video_tab API."""
     ent = _SIGN_CACHE.get(str(vid))
     if ent and _time.time() - ent[0] < _SIGN_CACHE_TTL:
         return ent[1]
-    payload = _json.dumps({
-        "biz_param": {"detail_page_version": 0, "device_level": 3,
-                      "disable_digg_stat": False, "need_all_video_definition": True,
-                      "need_mp4_align": False, "use_os_player": False,
-                      "use_server_dns": False, "video_platform": 1024},
-        "mixed_video_id_map": {"1004": [str(vid)]},
-    }, separators=(",", ":"))
-    payload_url, headers, body = _signed_request(payload)
-    j = None
     last_err = None
-    for attempt in (0, 1):
+    for attempt in range(3):
         try:
-            req = _ureq.Request(payload_url, data=body, headers=headers, method="POST")
+            payload_url, headers, body = _signed_request(vid)
+            req = _ureq.Request(payload_url, data=body, headers=headers, method="GET")
             with _ureq.urlopen(req, timeout=25) as r:
-                j = _json.loads(r.read().decode("utf-8", "replace"))
-            break
+                raw = r.read(8 * 1024 * 1024 + 1)
+            if len(raw) > 8 * 1024 * 1024:
+                raise ValueError("video model response exceeds 8 MiB")
+            if not raw:
+                raise ValueError("video model API returned an empty response")
+            j = _json.loads(raw.decode("utf-8", "replace"))
+            if not isinstance(j, dict) or j.get("code") not in (0, None):
+                raise ValueError("video model API rejected the request")
+            data = j.get("data") or {}
+            models = data.get("video_model_data") if isinstance(data, dict) else None
+            ent = models.get(str(vid)) if isinstance(models, dict) else None
+            if ent is None and isinstance(models, dict):
+                ent = next((value for value in models.values() if isinstance(value, dict)), None)
+            if not isinstance(ent, dict):
+                ent = data if isinstance(data, dict) else {}
+            vm = ent.get("video_model") if isinstance(ent, dict) else None
+            if vm is None and isinstance(data, dict):
+                vm = data.get("video_model")
+            if isinstance(vm, str):
+                vm = _json.loads(vm)
+            if not isinstance(vm, dict):
+                raise ValueError("video model API returned no model")
+            lst = vm.get("video_list") or vm.get("dynamic_video_list")
+            if isinstance(lst, list):
+                videos = {}
+                for i, item in enumerate(lst):
+                    if isinstance(item, dict):
+                        videos[_video_quality(item, str(i))] = item
+                vm["video_list"] = videos
+            if not isinstance(vm.get("video_list"), dict) or not vm["video_list"]:
+                raise ValueError("video model has no video qualities")
+            _SIGN_CACHE[str(vid)] = (_time.time(), vm)
+            return vm
         except Exception as e:
             last_err = e
-            if attempt == 0:
-                _time.sleep(0.6)
-                # 重签一次（时间戳/rticket 可能刚好卡边界）
-                payload_url, headers, body = _signed_request(payload)
-    if j is None:
-        _trace("hgtv_signed_model_error", episode_id=vid, err=str(last_err)[:160])
-        return None
-    if j.get("code") not in (0, None):
-        _trace("hgtv_signed_rejected", episode_id=vid, code=j.get("code"),
-               msg=str(j.get("message") or j.get("Message") or "")[:80])
-        return None
-    ent = (j.get("data") or {}).get(str(vid)) or {}
-    vm = ent.get("video_model")
-    if isinstance(vm, str):
-        vm = _json.loads(vm)
-    if not isinstance(vm, dict):
-        return None
-    lst = vm.get("video_list")
-    if isinstance(lst, list):
-        videos = {}
-        for i, item in enumerate(lst):
-            if isinstance(item, dict):
-                videos[_video_quality(item, str(i))] = item
-        vm["video_list"] = videos
-    _SIGN_CACHE[str(vid)] = (_time.time(), vm)
-    return vm
+            if attempt < 2:
+                _time.sleep(0.4 * (attempt + 1))
+    _trace("hgtv_signed_model_error", episode_id=vid,
+           err=(type(last_err).__name__ if last_err else "request failed"))
+    return None
 
 
 def _video_metadata(item):

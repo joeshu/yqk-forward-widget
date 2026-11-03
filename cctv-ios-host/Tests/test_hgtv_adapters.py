@@ -1,3 +1,4 @@
+import json
 import importlib.util
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from urllib.parse import parse_qs, urlsplit
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -237,6 +239,44 @@ class HgtvAdapterTests(unittest.TestCase):
                 self.assertEqual(picked[1], '1080p')
                 self.assertEqual(module._pick_best({'video_list': items}, '360p')[1], '360p')
                 self.assertIsNone(module._pick_best({'video_list': items}, '480p'))
+
+    def test_signed_model_uses_current_video_tab_get_api_and_parses_model(self):
+        vid = '7701565108626918424'
+        response = json.dumps({'code': 0, 'data': {'video_model_data': {
+            vid: {'video_model': {'video_list': [
+                {'definition': '720p', 'main_url': 'https://media.invalid/video', 'spade_a': 'fixture'}
+            ]}}
+        }}}).encode()
+        captured = {}
+
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self, _limit=-1): return response
+
+        def fake_urlopen(request, timeout):
+            captured.update(url=request.full_url, method=request.get_method(), body=request.data,
+                            headers={key.lower(): value for key, value in request.header_items()},
+                            timeout=timeout)
+            return Response()
+
+        hgtv._SIGN_CACHE.pop(vid, None)
+        with mock.patch.object(hgtv._ureq, 'urlopen', side_effect=fake_urlopen):
+            model = hgtv._signed_model(vid)
+        self.assertEqual(captured['method'], 'GET')
+        self.assertIsNone(captured['body'])
+        parsed = urlsplit(captured['url'])
+        self.assertEqual(parsed.hostname, 'reading.snssdk.com')
+        self.assertEqual(parsed.path, '/reading/bookapi/video_tab/multi_video_model/v1/')
+        query = parse_qs(parsed.query)
+        self.assertEqual(query['video_id'], [vid])
+        self.assertEqual(query['version_code'], ['71332'])
+        self.assertRegex(query['device_id'][0], r'^\d{18}$')
+        self.assertRegex(query['iid'][0], r'^\d{18}$')
+        self.assertTrue(captured['headers'].get('x-gorgon'))
+        self.assertTrue(captured['headers'].get('x-helios'))
+        self.assertIn('720p', model['video_list'])
+        self.assertEqual(hgtv._pick_best(model, None)[1], '720p')
 
     def test_host_file_proxy_returns_reference_and_preserves_head_length(self):
         for module, path in ((hgtv, self.decrypted_path), (hgtv104, self.decrypted_104_path)):

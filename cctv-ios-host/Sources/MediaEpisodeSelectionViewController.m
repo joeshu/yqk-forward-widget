@@ -4,6 +4,7 @@
 #import "HostImageLoader.h"
 #import "MediaEpisodeLayout.h"
 #import "RuntimeDiagnostics.h"
+#import "TVBoxCatalogStore.h"
 
 static UIColor *MediaSelectionBackground(void) { return HostBackground(); }
 static UIColor *MediaSelectionSurface(void) { return [UIColor colorWithWhite:1 alpha:0.075]; }
@@ -100,9 +101,9 @@ static void MediaEpisodeSelectionLoadPoster(NSString *url, UIImageView *view, NS
     return seasonEpisodes;
 }
 - (NSString *)currentParserID {
-    if(self.parserID.length)return self.parserID;
     NSString *sourceID=[self.source[@"id"] isKindOfClass:NSString.class]?self.source[@"id"]:([self.source[@"api"] isKindOfClass:NSString.class]?self.source[@"api"]:@"default");
-    return [NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"cctv.media.parser.%@",sourceID]]?:@"";
+    NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");catalogID=[catalogID stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!catalogID.length)return @"";
+    NSString *selected=self.parserID.length?self.parserID:([NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"cctv.media.parser.%@",sourceID]]?:@"");for(NSDictionary *parser in [TVBoxCatalogStore playbackParsersForCatalogID:catalogID])if([parser[@"id"] isEqual:selected])return selected;return @"";
 }
 - (NSString *)titleText {
     NSString *name=[self.detail[@"name"] isKindOfClass:NSString.class]?self.detail[@"name"]:@"";

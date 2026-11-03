@@ -115,13 +115,13 @@ static NSString *TVBoxBasicAuthorization(NSURLComponents *parts) {
         apiParts=[NSURLComponents componentsWithString:api?:@""];
         NSString *path=apiParts.path.lowercaseString;
         if ([path hasSuffix:@".md5"]) path=[path stringByDeletingPathExtension];
-        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=[api.lowercaseString hasPrefix:@"csp_"];
+        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=[api.lowercaseString hasPrefix:@"csp_"];BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];
         BOOL apiKindMacCMS=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&[siteType isEqual:@"0"];
         BOOL apiKindTVBox=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&([siteType isEqual:@"1"]||[siteType isEqual:@"4"]);
         BOOL direct=TVBoxWebURL(api)&&scriptFile;
-        BOOL supported=direct||apiKindTVBox||apiKindMacCMS;
-        NSString *reason=apiKindMacCMS?@"TVBox type 0 · MacCMS JSON/XML API · 选中后请求":(apiKindTVBox?[NSString stringWithFormat:@"TVBox type %@ JSON API · 选中后请求，尚未验证",siteType]:(direct?@"可导入 · 将由现有脚本适配器检查":([siteType isEqual:@"3"]?((jarFile||jarSpiderClass)?@"需要 Android/JAR 运行时；iOS 不支持":@"脚本地址无法识别；保留在合集中"):([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"]?@"此脚本类型需 Android/JAR 运行时；iOS 不支持":@"站点地址无效；保留在合集中"))));
-        NSString *apiKind=apiKindMacCMS?@"maccms-api":(apiKindTVBox?@"tvbox-api":(direct?@"script":@"unsupported"));
+        BOOL supported=direct||apiKindTVBox||apiKindMacCMS||apiKindDouban;
+        NSString *reason=apiKindDouban?@"豆瓣影视索引 · iOS 原生适配 · 影片需跨点播源搜索播放":(apiKindMacCMS?@"TVBox type 0 · MacCMS JSON/XML API · 选中后请求":(apiKindTVBox?[NSString stringWithFormat:@"TVBox type %@ JSON API · 选中后请求，尚未验证",siteType]:(direct?@"可导入 · 将由现有脚本适配器检查":([siteType isEqual:@"3"]?((jarFile||jarSpiderClass)?@"需要 Android/JAR 运行时；iOS 不支持":@"脚本地址无法识别；保留在合集中"):([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"]?@"此脚本类型需 Android/JAR 运行时；iOS 不支持":@"站点地址无效；保留在合集中")))));
+        NSString *apiKind=apiKindDouban?@"douban-index":(apiKindMacCMS?@"maccms-api":(apiKindTVBox?@"tvbox-api":(direct?@"script":@"unsupported")));
         NSMutableDictionary *site=[@{@"key":key,@"name":name,@"api":api?:@"",@"ext":ext?:@"",@"type":siteType,@"supported":@(supported),@"status":reason,@"apiKind":apiKind,@"sourceIndex":@(siteIndex-1)} mutableCopy];
         if(safeHeaders.count)site[@"header"]=safeHeaders;
         if([value[@"playUrl"] isKindOfClass:NSString.class]&&[value[@"playUrl"] length]<=4096)site[@"playUrl"]=value[@"playUrl"];
@@ -160,15 +160,16 @@ static NSString *TVBoxBasicAuthorization(NSURLComponents *parts) {
     return [self playbackParsersForCatalogID:nil];
 }
 + (NSArray<NSDictionary *> *)playbackParsersForCatalogID:(NSString *)catalogID {
+    catalogID=[catalogID stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    // Parser endpoints belong to their importing collection. With no known
+    // collection there is no safe fallback, so never borrow another package's.
+    if(!catalogID.length)return @[];
     NSMutableArray<NSDictionary *> *result=[NSMutableArray array];
-    // Keep endpoint choices scoped to the selected collection. When no catalog
-    // is known (for older imported sources), prefer the most recently imported
-    // collections and retain their order.
     for(id rawCatalog in [[self catalogs] reverseObjectEnumerator]){
         if(![rawCatalog isKindOfClass:NSDictionary.class])continue;
         NSDictionary *catalog=rawCatalog;
         NSString *currentID=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"";
-        if(catalogID.length&&![currentID isEqual:catalogID])continue;
+        if(![currentID isEqual:catalogID])continue;
         NSDictionary *config=[catalog[@"tvboxConfig"] isKindOfClass:NSDictionary.class]?catalog[@"tvboxConfig"]:@{};
         NSArray *parses=[config[@"parses"] isKindOfClass:NSArray.class]?config[@"parses"]:@[];
         NSUInteger limit=MIN(parses.count,(NSUInteger)32);

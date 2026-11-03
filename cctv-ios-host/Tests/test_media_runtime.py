@@ -139,6 +139,40 @@ class MediaTests(unittest.TestCase):
         self.assertNotIn('token', json.dumps(events))
         self.assertNotIn('cdn.fixture.test', json.dumps(events))
 
+    def test_dash_manifest_is_a_native_cicada_playback_result(self):
+        address = 'https://cdn.fixture.test/manifest.mpd?token=a%2Fb'
+        with mock.patch.object(self.engine.spider, 'playerContent', return_value={
+                'url': address, 'format': 'mpd', 'parse': 1, 'jx': 1,
+                'header': {'Referer': 'https://source.fixture.test/'}}):
+            result = self.runtime.call('play', {'lineId': '主线', 'id': 'episode-1'})
+        self.assertEqual(result['url'], address)
+        self.assertEqual(result['playbackEngine'], 'cicada')
+        self.assertTrue(result['directMedia'])
+        self.assertFalse(result['nativePlayable'])
+        self.assertFalse(result['requiresWebPlayback'])
+
+    def test_dash_mime_routes_extensionless_media_directly(self):
+        address = 'https://cdn.fixture.test/dash/stream?id=fixture'
+        for metadata in ({'contentType': 'application/dash+xml'},
+                         {'format': 'application/dash+xml'}):
+            with self.subTest(metadata=metadata):
+                with mock.patch.object(self.engine.spider, 'playerContent', return_value={
+                        'url': address, **metadata, 'parse': 1}):
+                    result = self.runtime.call('play', {'lineId': '主线', 'id': 'episode-1'})
+                self.assertEqual(result['url'], address)
+                self.assertEqual(result['playbackEngine'], 'cicada')
+                self.assertTrue(result['directMedia'])
+                self.assertFalse(result['requiresWebPlayback'])
+
+    def test_empty_spider_result_direct_episode_mpd_is_recognized(self):
+        address = 'https://cdn.fixture.test/episode.mpd?token=a%2Fb'
+        self.engine.spider.playerContent = lambda *_: None
+        result = self.runtime.call('play', {'lineId': '主线', 'id': address})
+        self.assertEqual(result['url'], address)
+        self.assertEqual(result['playbackEngine'], 'cicada')
+        self.assertTrue(result['directMedia'])
+        self.assertFalse(result['requiresWebPlayback'])
+
     def test_direct_episode_fallback_does_not_override_explicit_errors_or_pages(self):
         address = 'https://cdn.fixture.test/episode.m3u8?token=private'
         for raw in ({'error': 'source denied'},
@@ -2024,6 +2058,37 @@ class Spider:
             upstream.shutdown()
             upstream.server_close()
             upstream_thread.join(2)
+
+    def test_dash_manifest_keeps_original_url_for_relative_segment_resolution(self):
+        address = 'https://cdn.fixture.test/dash/manifest.mpd?token=fixture'
+        alternate = 'https://cdn.fixture.test/dash/alternate.mpd?token=alternate'
+        self.engine.spider.playerContent = lambda *_: {
+            'url': address, 'format': 'mpd', 'parse': 1, 'jx': 1,
+            'header': {'Referer': 'https://source.fixture.test/'},
+            'alternates': [{'name': '备用', 'url': alternate, 'format': 'dash'}]}
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=4)
+        try:
+            body = json.dumps({'id': 'episode-1'}).encode()
+            client.request('POST', '/api/v1/play', body,
+                           {'Content-Type': 'application/json', 'Content-Length': str(len(body))})
+            response = client.getresponse()
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            result = payload['data']
+            self.assertEqual(result['url'], address)
+            self.assertNotIn('originalURL', result)
+            self.assertEqual(result['alternates'][0]['url'], alternate)
+            self.assertEqual(result['playbackEngine'], 'cicada')
+            self.assertFalse(result['requiresWebPlayback'])
+            self.assertEqual(result['headers']['Referer'], 'https://source.fixture.test/')
+        finally:
+            client.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
 
     def test_declared_hls_on_php_endpoint_is_proxied_and_rewritten_without_headers(self):
         received = []

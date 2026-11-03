@@ -35,4 +35,5 @@
 @property(nonatomic) BOOL deferAutomaticLoading;
 /// Starts or refreshes the selected source only after an explicit user action.
 - (void)loadHomeOnDemand;
+- (void)setBottomOverlayInset:(CGFloat)inset;
 @end

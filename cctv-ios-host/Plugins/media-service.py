@@ -49,6 +49,18 @@ def is_declared_hls(result, url):
         'application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/mpegurl'}
 
 
+def is_dash_media(result, url):
+    if urllib.parse.urlsplit(str(url or '')).path.lower().endswith('.mpd'):
+        return True
+    if not isinstance(result, dict):
+        return False
+    media_format = str(result.get('format') or result.get('mediaType') or
+                       result.get('playbackType') or '').strip().lower()
+    content_type = str(result.get('contentType') or result.get('content_type') or
+                       result.get('mimeType') or result.get('mime') or '').split(';', 1)[0].strip().lower()
+    return media_format in {'mpd', 'dash', 'mpeg-dash', 'application/dash+xml'} or content_type == 'application/dash+xml'
+
+
 def is_extensionless_url(url):
     path = urllib.parse.urlsplit(str(url or '')).path
     name = path.rsplit('/', 1)[-1]
@@ -652,7 +664,7 @@ class Handler(BaseHTTPRequestHandler):
                     result['baseHeaders'] = {}
                     result['directMedia'] = True
                     result['nativePlayable'] = True
-                can_relay_primary = (not result.get('proxy') and (headers or is_declared_hls(result, result.get('url'))
+                can_relay_primary = (not result.get('proxy') and not is_dash_media(result, result.get('url')) and (headers or is_declared_hls(result, result.get('url'))
                                      or is_extensionless_url(result.get('url')))
                                      and (not result.get('parse') or direct_media))
                 if can_relay_primary:
@@ -681,7 +693,8 @@ class Handler(BaseHTTPRequestHandler):
                         alternate_direct = bool(alternate_media.get('directMedia') or
                                                 is_direct_media_url(address) or
                                                 is_declared_hls(alternate_media, address))
-                        if ((alternate_headers or is_declared_hls(alternate_media, address)
+                        if (not is_dash_media(alternate_media, address) and
+                                (alternate_headers or is_declared_hls(alternate_media, address)
                              or is_extensionless_url(address))
                                 and (not alternate_media.get('parse') or alternate_direct)):
                             alternate['originalURL'] = address

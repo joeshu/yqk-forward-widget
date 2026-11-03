@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 from types import SimpleNamespace
 
 
@@ -73,9 +74,9 @@ class ByteBudget:
 
     def urlopen(self, original, request, **kwargs):
         response = original(request, **kwargs)
-        # Only this alias's GET calls download the source MP4. Catalogue reads
-        # use PublicHTTP's own opener; signed model calls use POST.
-        if request.get_method() != "GET":
+        # Count actual media bodies, not the signed JSON model GET response.
+        if (request.get_method() != "GET" or
+                urllib.parse.urlsplit(request.full_url).hostname == "reading.snssdk.com"):
             return response
         length = response.headers.get("Content-Length")
         try:
@@ -200,34 +201,19 @@ def model_summary(module, model):
 
 
 def batch_models(module, episode_ids):
-    payload = json.dumps({"biz_param": {
-        "detail_page_version": 0, "device_level": 3, "disable_digg_stat": False,
-        "need_all_video_definition": True, "need_mp4_align": False,
-        "use_os_player": False, "use_server_dns": False, "video_platform": 1024},
-        "mixed_video_id_map": {"1004": episode_ids}}, separators=(",", ":"))
-    last_error = None
-    for attempt in range(3):
-        try:
-            url, headers, body = module._signed_request(payload)
-            request = module._ureq.Request(url, data=body, headers=headers, method="POST")
-            with module._ureq.urlopen(request, timeout=30) as response:
-                data = response.read(16 * 1024 * 1024 + 1)
-            if len(data) > 16 * 1024 * 1024:
-                raise RuntimeError("batch model response exceeds 16 MiB")
-            result = json.loads(data)
-            if result.get("code") not in (0, None) or not isinstance(result.get("data"), dict):
-                raise RuntimeError("signed batch API rejected catalogue model request")
-            return result["data"]
-        except Exception as error:
-            last_error = error
-            if attempt < 2:
-                time.sleep(0.6)
-    raise last_error
+    # The current API returns one episode per signed GET. Keep the matrix's
+    # batch-shaped caller while routing every ID through the production path.
+    result = {}
+    for episode_id in episode_ids:
+        model = module._signed_model(episode_id)
+        if isinstance(model, dict):
+            result[episode_id] = {"video_model": model}
+    return result
 
 
 def verify_all_models(module, episodes, models):
     checks = []
-    # The live provider accepts ten IDs; twenty returns code 100001 参数错误.
+    # Keep requests small and sequential; the provider rotates request IDs.
     for offset in range(0, len(episodes), 10):
         batch = episodes[offset:offset + 10]
         result = batch_models(module, [episode["id"] for episode in batch])
@@ -488,7 +474,7 @@ def main(argv=None):
     parser.add_argument("--qualities", default=",".join(QUALITIES), help="comma-separated exact qualities; unavailable entries are recorded")
     parser.add_argument("--max-total-mb", type=float, default=512, help="maximum media output MiB, including temporary files (default: 512)")
     parser.add_argument("--catalog-only", action="store_true", help="check series counts and first/middle/last models without downloading MP4s")
-    parser.add_argument("--catalog-all-models", action="store_true", help="also resolve all 515 catalogue episode models in signed API batches of 10; no additional MP4s")
+    parser.add_argument("--catalog-all-models", action="store_true", help="also resolve all 515 catalogue episode models with per-episode signed GETs; no MP4s")
     parser.add_argument("--skip-catalog", action="store_true", help="omit series catalogue checks for a targeted download rerun")
     parser.add_argument("--no-legacy-fixture", action="store_true", help="omit deliberately malformed .legacy.mp4 control")
     args = parser.parse_args(argv)

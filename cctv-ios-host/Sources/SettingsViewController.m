@@ -2,6 +2,7 @@
 #import "HostTheme.h"
 #import "HostImageLoader.h"
 #import "MediaMetadataCache.h"
+#import <math.h>
 
 static NSString *MediaMetadataCacheSummaryText(void) {
     NSDictionary *summary=MediaMetadataCache.shared.summary;
@@ -11,6 +12,7 @@ static NSString *MediaMetadataCacheSummaryText(void) {
 
 @interface SettingsViewController () <UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic,strong) UITableView *table;
+@property(nonatomic) CGFloat bottomOverlayInset;
 @property(nonatomic,strong) NSArray<NSDictionary *> *sections;
 @end
 @implementation SettingsViewController
@@ -50,9 +52,20 @@ static NSString *MediaMetadataCacheSummaryText(void) {
         @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass" }
       ]}
     ];
-    self.table=[[UITableView alloc]initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped]; self.table.translatesAutoresizingMaskIntoConstraints=NO; self.table.backgroundColor=HostBackground(); self.table.dataSource=self; self.table.delegate=self; self.table.rowHeight=UITableViewAutomaticDimension; self.table.estimatedRowHeight=68; self.table.tintColor=HostAccent(); [self.view addSubview:self.table];
-    [NSLayoutConstraint activateConstraints:@[[self.table.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],[self.table.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.table.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
+    self.table=[[UITableView alloc]initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped]; self.table.translatesAutoresizingMaskIntoConstraints=NO; self.table.backgroundColor=HostBackground(); self.table.dataSource=self; self.table.delegate=self; self.table.rowHeight=UITableViewAutomaticDimension; self.table.estimatedRowHeight=68; self.table.tintColor=HostAccent();self.table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever; [self.view addSubview:self.table];
+    [NSLayoutConstraint activateConstraints:@[[self.table.topAnchor constraintEqualToAnchor:self.view.topAnchor],[self.table.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.table.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
+    [self updateImmersiveTableInsets];
 }
+- (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self updateImmersiveTableInsets];}
+- (void)viewSafeAreaInsetsDidChange {[super viewSafeAreaInsetsDidChange];[self updateImmersiveTableInsets];}
+- (void)updateImmersiveTableInsets {
+    if(!self.isViewLoaded||!self.table)return;
+    CGFloat top=MAX(0,self.view.safeAreaInsets.top),bottom=MAX(8,self.bottomOverlayInset);UIEdgeInsets old=self.table.contentInset,next=UIEdgeInsetsMake(top,0,bottom,0);
+    if(fabs(old.top-top)<0.5&&fabs(old.bottom-bottom)<0.5)return;
+    BOOL wasAtTop=self.table.contentOffset.y<=-old.top+1;self.table.contentInset=next;self.table.scrollIndicatorInsets=next;
+    if(wasAtTop)self.table.contentOffset=CGPointMake(self.table.contentOffset.x,-top);
+}
+- (void)setBottomOverlayInset:(CGFloat)inset {if(!isfinite(inset))inset=0;self.bottomOverlayInset=MAX(8,inset);[self updateImmersiveTableInsets];}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView{return self.sections.count;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return [self.sections[section][@"rows"] count];}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section{return self.sections[section][@"title"];}

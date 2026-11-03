@@ -320,6 +320,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
 @property(nonatomic,strong) UIButton *playButton;
 @property(nonatomic,strong) UIButton *favoriteButton;
 @property(nonatomic,strong) UIButton *parserButton;
+@property(nonatomic,strong) UIStackView *parserRow;
 @property(nonatomic,strong) UIStackView *routeButtons;
 @property(nonatomic,strong) UIStackView *episodeGrid;
 @property(nonatomic,strong) NSMutableArray<UIButton *> *episodeButtons;
@@ -342,10 +343,14 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
 - (void)selectRoute:(UIButton *)sender;
 - (void)selectParser;
 - (void)updateParserSelectionButton;
+- (NSString *)playbackParserCatalogID;
+- (NSArray<NSDictionary *> *)availablePlaybackParsers;
+- (NSString *)selectedPlaybackParserID;
 - (void)selectEpisode:(UIButton *)sender;
 - (void)shareTitle;
 - (void)copyTitle;
 - (void)scrollToEpisodes;
+- (void)updateInlinePlaybackFloatingPosition;
 - (NSString *)posterURL;
 - (void)restoreSelectionFromDetail:(NSDictionary *)previousDetail;
 - (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context;
@@ -359,11 +364,10 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
     [super viewWillAppear:animated];
     UINavigationBar *bar=self.navigationController.navigationBar;
     if(!bar)return;
-    UINavigationBarAppearance *appearance=[UINavigationBarAppearance new];
-    [appearance configureWithTransparentBackground];
-    appearance.titleTextAttributes=@{NSForegroundColorAttributeName:UIColor.whiteColor};
-    appearance.largeTitleTextAttributes=@{NSForegroundColorAttributeName:UIColor.whiteColor};
-    bar.standardAppearance=appearance;bar.scrollEdgeAppearance=appearance;bar.compactAppearance=appearance;bar.translucent=YES;bar.tintColor=HostAccent();
+    NSDictionary *titleAttributes=@{NSForegroundColorAttributeName:UIColor.whiteColor,NSFontAttributeName:[UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]};
+    UINavigationBarAppearance *scrolled=[UINavigationBarAppearance new];[scrolled configureWithDefaultBackground];scrolled.backgroundEffect=HostGlassBlur();scrolled.backgroundColor=HostGlassTint();scrolled.titleTextAttributes=titleAttributes;scrolled.largeTitleTextAttributes=titleAttributes;scrolled.shadowColor=UIColor.clearColor;
+    UINavigationBarAppearance *edge=[UINavigationBarAppearance new];[edge configureWithTransparentBackground];edge.titleTextAttributes=titleAttributes;edge.largeTitleTextAttributes=titleAttributes;edge.backgroundColor=[UIColor colorWithWhite:0 alpha:0.12];edge.shadowColor=UIColor.clearColor;
+    bar.standardAppearance=scrolled;bar.scrollEdgeAppearance=edge;bar.compactAppearance=scrolled;if(@available(iOS 15.0,*))bar.compactScrollEdgeAppearance=edge;bar.translucent=YES;bar.tintColor=HostAccent();bar.prefersLargeTitles=NO;
 }
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
@@ -411,7 +415,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
     self.posterView=[UIImageView new];self.posterView.translatesAutoresizingMaskIntoConstraints=NO;self.posterView.contentMode=UIViewContentModeScaleAspectFill;self.posterView.clipsToBounds=YES;self.posterView.opaque=NO;self.posterView.backgroundColor=UIColor.clearColor;[hero addSubview:self.posterView];
     self.heroBlurView=[[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterialDark]];self.heroBlurView.translatesAutoresizingMaskIntoConstraints=NO;self.heroBlurView.userInteractionEnabled=NO;self.heroBlurView.hidden=YES;[hero addSubview:self.heroBlurView];
     UIView *shade=[UIView new];shade.translatesAutoresizingMaskIntoConstraints=NO;shade.backgroundColor=UIColor.clearColor;shade.userInteractionEnabled=NO;[hero addSubview:shade];
-    self.heroGradient=[CAGradientLayer layer];self.heroGradient.colors=@[(id)[UIColor colorWithWhite:0 alpha:0.02].CGColor,(id)[UIColor colorWithWhite:0 alpha:0.03].CGColor,(id)[UIColor colorWithWhite:0 alpha:0.74].CGColor];self.heroGradient.locations=@[@0.0,@0.52,@1.0];self.heroGradient.startPoint=CGPointMake(0.5,0);self.heroGradient.endPoint=CGPointMake(0.5,1);[hero.layer addSublayer:self.heroGradient];
+    self.heroGradient=[CAGradientLayer layer];self.heroGradient.colors=@[(id)[UIColor colorWithWhite:0 alpha:0.78].CGColor,(id)[UIColor colorWithWhite:0 alpha:0.68].CGColor,(id)[UIColor colorWithWhite:0 alpha:0.16].CGColor,(id)[UIColor colorWithWhite:0 alpha:0.10].CGColor,(id)[UIColor colorWithWhite:0 alpha:0.82].CGColor];self.heroGradient.locations=@[@0.0,@0.18,@0.46,@0.66,@1.0];self.heroGradient.startPoint=CGPointMake(0.5,0);self.heroGradient.endPoint=CGPointMake(0.5,1);[hero.layer addSublayer:self.heroGradient];
     self.posterThumbnailView=[UIImageView new];self.posterThumbnailView.translatesAutoresizingMaskIntoConstraints=NO;self.posterThumbnailView.contentMode=UIViewContentModeScaleAspectFill;self.posterThumbnailView.clipsToBounds=YES;self.posterThumbnailView.layer.cornerRadius=10;self.posterThumbnailView.layer.cornerCurve=kCACornerCurveContinuous;self.posterThumbnailView.backgroundColor=HostNeutralSurface();self.posterThumbnailView.hidden=YES;self.posterThumbnailView.isAccessibilityElement=NO;[hero addSubview:self.posterThumbnailView];
     self.heroTitle=[UILabel new];self.heroTitle.translatesAutoresizingMaskIntoConstraints=NO;self.heroTitle.font=[UIFont systemFontOfSize:21 weight:UIFontWeightBold];self.heroTitle.adjustsFontForContentSizeCategory=YES;self.heroTitle.textColor=UIColor.whiteColor;self.heroTitle.numberOfLines=2;
     self.heroMetadata=[UILabel new];self.heroMetadata.translatesAutoresizingMaskIntoConstraints=NO;self.heroMetadata.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.heroMetadata.adjustsFontForContentSizeCategory=YES;self.heroMetadata.textColor=[UIColor.whiteColor colorWithAlphaComponent:0.85];self.heroMetadata.numberOfLines=1;self.heroMetadata.lineBreakMode=NSLineBreakByTruncatingTail;
@@ -448,10 +452,10 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
     [NSLayoutConstraint activateConstraints:@[[routeScroll.heightAnchor constraintGreaterThanOrEqualToConstant:44],[self.routeButtons.leadingAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.leadingAnchor],
         [self.routeButtons.trailingAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.trailingAnchor],[self.routeButtons.topAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.topAnchor],
         [self.routeButtons.bottomAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.bottomAnchor],[self.routeButtons.heightAnchor constraintEqualToAnchor:routeScroll.frameLayoutGuide.heightAnchor]]];
-    UIStackView *parserRow=[UIStackView new];parserRow.axis=UILayoutConstraintAxisHorizontal;parserRow.alignment=UIStackViewAlignmentCenter;parserRow.spacing=8;
-    UILabel *parserLabel=[self sectionLabel:@"解析接口"];parserLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];parserLabel.adjustsFontForContentSizeCategory=YES;[parserRow addArrangedSubview:parserLabel];
-    UIView *parserSpacer=[UIView new];[parserSpacer setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];[parserSpacer setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];[parserRow addArrangedSubview:parserSpacer];
-    self.parserButton=[UIButton buttonWithType:UIButtonTypeSystem];self.parserButton.accessibilityIdentifier=@"media-detail-parser-selector";self.parserButton.accessibilityLabel=@"选择解析接口";self.parserButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.parserButton.titleLabel.adjustsFontForContentSizeCategory=YES;HostStylePillButton(self.parserButton,NO);self.parserButton.contentEdgeInsets=UIEdgeInsetsMake(8,13,8,13);[self.parserButton addTarget:self action:@selector(selectParser) forControlEvents:UIControlEventTouchUpInside];[parserRow addArrangedSubview:self.parserButton];[sourceStack addArrangedSubview:parserRow];
+    self.parserRow=[UIStackView new];self.parserRow.axis=UILayoutConstraintAxisHorizontal;self.parserRow.alignment=UIStackViewAlignmentCenter;self.parserRow.spacing=8;
+    UILabel *parserLabel=[self sectionLabel:@"解析接口"];parserLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];parserLabel.adjustsFontForContentSizeCategory=YES;[self.parserRow addArrangedSubview:parserLabel];
+    UIView *parserSpacer=[UIView new];[parserSpacer setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];[parserSpacer setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];[self.parserRow addArrangedSubview:parserSpacer];
+    self.parserButton=[UIButton buttonWithType:UIButtonTypeSystem];self.parserButton.accessibilityIdentifier=@"media-detail-parser-selector";self.parserButton.accessibilityLabel=@"选择解析接口";self.parserButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.parserButton.titleLabel.adjustsFontForContentSizeCategory=YES;HostStylePillButton(self.parserButton,NO);self.parserButton.contentEdgeInsets=UIEdgeInsetsMake(8,13,8,13);[self.parserButton addTarget:self action:@selector(selectParser) forControlEvents:UIControlEventTouchUpInside];[self.parserRow addArrangedSubview:self.parserButton];[sourceStack addArrangedSubview:self.parserRow];
     self.episodeTitle=[self sectionLabel:@"选集"];[sourceStack addArrangedSubview:self.episodeTitle];
     UIStackView *paging=[UIStackView new];paging.axis=UILayoutConstraintAxisHorizontal;paging.alignment=UIStackViewAlignmentCenter;paging.spacing=6;self.pageLabel=[UILabel new];self.pageLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.pageLabel.adjustsFontForContentSizeCategory=YES;self.pageLabel.textColor=HostSecondaryText();self.pageLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.pageLabel.accessibilityIdentifier=@"media-detail-page-status";[self.pageLabel setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];[self.pageLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];[paging addArrangedSubview:self.pageLabel];
     self.previousPageButton=[UIButton buttonWithType:UIButtonTypeSystem];self.nextPageButton=[UIButton buttonWithType:UIButtonTypeSystem];self.episodeReverseButton=[UIButton buttonWithType:UIButtonTypeSystem];
@@ -602,15 +606,17 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
     NSDictionary *favorites=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"]?:@{};BOOL favorite=favorites[[self favoriteKey]]!=nil;UIImageSymbolConfiguration *configuration=[UIImageSymbolConfiguration configurationWithPointSize:15 weight:UIImageSymbolWeightSemibold];UIImage *image=[UIImage systemImageNamed:favorite?@"heart.fill":@"heart" withConfiguration:configuration];if(image)[self.favoriteButton setImage:image forState:UIControlStateNormal];self.favoriteButton.tintColor=HostAccent();[self.favoriteButton setTitleColor:HostText() forState:UIControlStateNormal];self.favoriteButton.accessibilityLabel=favorite?@"取消收藏影片":@"收藏影片";
 }
 - (NSString *)parserPreferenceKey {NSString *sourceID=[self.source[@"id"] isKindOfClass:NSString.class]?self.source[@"id"]:([self.source[@"api"] isKindOfClass:NSString.class]?self.source[@"api"]:@"default");return [NSString stringWithFormat:@"cctv.media.parser.%@",sourceID];}
+- (NSString *)playbackParserCatalogID {NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");return [catalogID stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];}
+- (NSArray<NSDictionary *> *)availablePlaybackParsers {NSString *catalogID=[self playbackParserCatalogID];if(!catalogID.length)return @[];return [TVBoxCatalogStore playbackParsersForCatalogID:catalogID];}
+- (NSString *)selectedPlaybackParserID {NSString *selectedID=[NSUserDefaults.standardUserDefaults stringForKey:[self parserPreferenceKey]]?:@"";for(NSDictionary *parser in [self availablePlaybackParsers])if([parser[@"id"] isEqual:selectedID])return selectedID;return @"";}
 - (void)updateParserSelectionButton {
-    NSString *selectedID=[NSUserDefaults.standardUserDefaults stringForKey:[self parserPreferenceKey]]?:@"";NSString *title=@"自动解析";
-    NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");
-    for(NSDictionary *parser in [TVBoxCatalogStore playbackParsersForCatalogID:catalogID])if([parser[@"id"] isEqual:selectedID]){title=parser[@"name"]?:@"解析接口";break;}
+    NSArray<NSDictionary *> *parsers=[self availablePlaybackParsers];self.parserRow.hidden=parsers.count==0;NSString *selectedID=[self selectedPlaybackParserID];NSString *title=@"自动解析";
+    for(NSDictionary *parser in parsers)if([parser[@"id"] isEqual:selectedID]){title=parser[@"name"]?:@"解析接口";break;}
     [self.parserButton setTitle:[NSString stringWithFormat:@"%@ ▾",title] forState:UIControlStateNormal];self.parserButton.accessibilityValue=title;
 }
 - (void)selectParser {
-    NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");NSArray<NSDictionary *> *parsers=[TVBoxCatalogStore playbackParsersForCatalogID:catalogID];NSString *selectedID=[NSUserDefaults.standardUserDefaults stringForKey:[self parserPreferenceKey]]?:@"";
-    NSMutableArray *choices=[NSMutableArray arrayWithObject:@{@"id":@"",@"name":@"自动",@"subtitle":parsers.count?@"优先尝试 JSON 解析接口，失败后使用网页解析或站点原页":@"当前资源合集没有配置解析接口",@"selected":@(!selectedID.length)}];
+    NSArray<NSDictionary *> *parsers=[self availablePlaybackParsers];if(!parsers.count)return;NSString *selectedID=[self selectedPlaybackParserID];
+    NSMutableArray *choices=[NSMutableArray arrayWithObject:@{@"id":@"",@"name":@"自动",@"subtitle":@"优先尝试此资源合集中的 JSON 解析接口，失败后使用网页解析或站点原页",@"selected":@(!selectedID.length)}];
     for(NSDictionary *parser in parsers){NSString *type=[parser[@"type"] respondsToSelector:@selector(stringValue)]?[parser[@"type"] stringValue]:[parser[@"type"] description];NSString *kind=[@[@"0",@"web",@"html"] containsObject:type.lowercaseString]?@"网页解析":([@[@"1",@"json",@"api"] containsObject:type.lowercaseString]?@"JSON 解析接口":@"解析接口");NSMutableDictionary *choice=[@{@"id":parser[@"id"]?:@"",@"name":parser[@"name"]?:@"解析接口",@"subtitle":[NSString stringWithFormat:@"type %@ · %@ · %@",type.length?type:@"0",kind,parser[@"catalogName"]?:@"资源合集"],@"selected":@([parser[@"id"] isEqual:selectedID])} mutableCopy];if([parser[@"url"] isKindOfClass:NSString.class])choice[@"url"]=parser[@"url"];[choices addObject:choice];}
     MediaSourcePicker *picker=[[MediaSourcePicker alloc] initWithStyle:UITableViewStyleInsetGrouped];picker.screenTitle=@"解析接口";picker.choices=choices;__weak typeof(self) weakSelf=self;
     picker.onSelect=^(NSDictionary *choice){MediaDetailViewController *owner=weakSelf;if(!owner)return;NSString *identifier=[choice[@"id"] isKindOfClass:NSString.class]?choice[@"id"]:@"";[NSUserDefaults.standardUserDefaults setObject:identifier forKey:[owner parserPreferenceKey]];[owner updateParserSelectionButton];[RuntimeDiagnostics.shared recordEvent:@"media_parser_selection_changed" category:@"playback" fields:@{@"service_id":owner.source[@"id"]?:@"",@"parser_id":identifier,@"parser_name":choice[@"name"]?:@"自动"}];};
@@ -689,17 +695,22 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
 - (void)resolveAndPlaySelectedEpisode {
     if(self.selectedLineIndex>=self.lines.count)return;NSArray *episodes=self.lines[self.selectedLineIndex][@"episodes"];if(self.selectedEpisodeIndex<0||self.selectedEpisodeIndex>=episodes.count)return;
     NSDictionary *line=self.lines[self.selectedLineIndex],*episode=episodes[self.selectedEpisodeIndex];NSUInteger generation=++self.generation;[self.client cancel];self.status.hidden=NO;self.status.text=[NSString stringWithFormat:@"正在解析 %@…",episode[@"name"]?:@"当前分集"];[self.spinner startAnimating];[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_requested" category:@"media_api" fields:@{@"correlation_id":self.diagnosticTraceID?:@"", @"service_id":self.source[@"id"]?:@"", @"provider_id":self.provider?:@"", @"request_generation":@(generation), @"line_index":@(self.selectedLineIndex), @"episode_index":@(self.selectedEpisodeIndex), @"line_count":@(self.lines.count), @"episode_count":@(episodes.count), @"episode_has_id":@([episode[@"id"] description].length>0), @"line_has_id":@([line[@"id"] description].length>0)}];
-    NSString *parserID=[NSUserDefaults.standardUserDefaults stringForKey:[self parserPreferenceKey]]?:@"";NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":parserID} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;__weak typeof(self) weakSelf=self;
+    NSString *parserID=[self selectedPlaybackParserID];NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":parserID} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;__weak typeof(self) weakSelf=self;
     [self.client call:@"play" arguments:args correlationID:self.diagnosticTraceID completion:^(id result,NSError *error){MediaDetailViewController *owner=weakSelf;if(!owner)return;if(owner.generation!=generation){[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_response_discarded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"request_generation":@(generation), @"current_generation":@(owner.generation), @"reason":@"superseded_selection"}];return;}[owner.spinner stopAnimating];owner.status.hidden=NO;
         if(error||![result isKindOfClass:NSDictionary.class]){[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_failed" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"", @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"line_index":@(owner.selectedLineIndex), @"episode_index":@(owner.selectedEpisodeIndex), @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@"", @"result_received":@([result isKindOfClass:NSDictionary.class])}];owner.status.text=[NSString stringWithFormat:@"解析失败：%@",error.localizedDescription?:@"来源没有返回可播放结果"];[owner updateRouteAndEpisodeViews];return;}
         [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"", @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"line_index":@(owner.selectedLineIndex), @"episode_index":@(owner.selectedEpisodeIndex), @"result_has_media_url":@([result[@"url"] isKindOfClass:NSString.class]&&[result[@"url"] length]>0), @"result_parse_mode":@([result[@"parse"] respondsToSelector:@selector(integerValue)]?[result[@"parse"] integerValue]:0), @"result_alternate_count":@([result[@"alternates"] isKindOfClass:NSArray.class]?[result[@"alternates"] count]:0)}];owner.status.hidden=YES;NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"episodeID":[episode[@"id"] description]?:@"",@"episodeName":[episode[@"name"] description]?:@"",@"lineIndex":@(owner.selectedLineIndex),@"episodeIndex":@(owner.selectedEpisodeIndex),@"parserID":parserID,@"correlationID":owner.diagnosticTraceID?:@""};if(owner.onPlay)owner.onPlay(result,context);
     }];
 }
-- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews];self.heroGradient.frame=self.heroView.bounds;if(self.inlinePlaybackController)[self scrollViewDidScroll:self.scrollView]; }
+- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews];self.heroGradient.frame=self.heroView.bounds;[self updateInlinePlaybackFloatingPosition]; }
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-    if(scrollView!=self.scrollView||!self.inlinePlaybackController)return;
-    UIView *playerView=self.inlinePlaybackController.view;playerView.transform=CGAffineTransformIdentity;CGRect playerViewportFrame=[playerView convertRect:playerView.bounds toView:scrollView];
-    CGFloat pinOffset=MAX(0,-CGRectGetMinY(playerViewportFrame));playerView.transform=CGAffineTransformMakeTranslation(0,pinOffset);playerView.layer.zPosition=pinOffset>0?10:0;
+    if(scrollView!=self.scrollView)return;[self updateInlinePlaybackFloatingPosition];
+}
+- (void)updateInlinePlaybackFloatingPosition {
+    if(!self.inlinePlaybackController||!self.scrollView)return;
+    UIView *playerView=self.inlinePlaybackController.view;playerView.transform=CGAffineTransformIdentity;
+    CGRect scrollFrame=[self.scrollView convertRect:self.scrollView.bounds toView:self.view];CGFloat pinTop=MAX(CGRectGetMinY(scrollFrame),self.view.safeAreaInsets.top);
+    UINavigationBar *bar=self.navigationController.navigationBar;if(bar&&!bar.hidden)pinTop=MAX(pinTop,CGRectGetMaxY([bar convertRect:bar.bounds toView:self.view]));
+    CGRect playerFrame=[playerView convertRect:playerView.bounds toView:self.view];CGFloat pinOffset=MAX(0,pinTop-CGRectGetMinY(playerFrame));playerView.transform=CGAffineTransformMakeTranslation(0,pinOffset);playerView.layer.zPosition=pinOffset>0?10:0;
 }
 @end
 @interface MediaFavoritesViewController : UITableViewController
@@ -842,6 +853,10 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 @property(nonatomic, strong) UISearchController *search;
 @property(nonatomic,strong) UIScrollView *homeScroll;
 @property(nonatomic,strong) UIStackView *homeStack;
+@property(nonatomic,strong) NSLayoutConstraint *homeScrollTopConstraint;
+@property(nonatomic,strong) NSLayoutConstraint *homeStackTopConstraint;
+@property(nonatomic,strong) UIView *homeTopImmersiveScrim;
+@property(nonatomic,strong) CAGradientLayer *homeTopImmersiveGradient;
 @property(nonatomic,strong) NSDictionary *homeResult;
 @property(nonatomic,copy) NSString *homeResultSourceID;
 @property(nonatomic,copy) NSString *homeResultProvider;
@@ -856,6 +871,8 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 @property(nonatomic, strong) UILabel *readinessStageLabel;
 @property(nonatomic, strong) UIButton *resourceButton;
 @property(nonatomic, strong) UIButton *moreButton;
+@property(nonatomic,strong) NSLayoutConstraint *moreButtonBottomConstraint;
+@property(nonatomic) CGFloat bottomOverlayInset;
 @property(nonatomic, strong) UIActivityIndicatorView *spinner;
 @property(nonatomic, strong) UIStackView *selectionRow;
 @property(nonatomic, strong) UIButton *sourceSelectButton;
@@ -966,6 +983,8 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (UIView *)homeSkeletonBarWithWidth:(CGFloat)width height:(CGFloat)height;
 - (void)toggleHomeFavoriteItem:(NSDictionary *)item source:(NSDictionary *)source provider:(NSString *)provider;
 - (void)openGlobalSearch;
+- (void)openGlobalSearchForKeyword:(nullable NSString *)keyword excludingIndexSources:(BOOL)excludeIndexSources;
+- (BOOL)openMetadataSearchForItem:(NSDictionary *)item;
 - (void)loadHomeShelves:(NSArray<NSDictionary *> *)categories index:(NSUInteger)index generation:(NSUInteger)generation sourceID:(NSString *)sourceID provider:(NSString *)provider;
 - (void)addHomeFeatureGrid:(NSArray<NSDictionary *> *)items;
 - (void)loadHome;
@@ -1023,6 +1042,10 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
+    CGFloat overlayBottom=CGRectGetMaxY(self.categoryScroll.frame)+6;
+    if(self.homeStackTopConstraint.constant!=overlayBottom)self.homeStackTopConstraint.constant=MAX(0,overlayBottom);
+    self.homeTopImmersiveScrim.frame=CGRectMake(0,0,CGRectGetWidth(self.view.bounds),MAX(overlayBottom+12,self.view.safeAreaInsets.top+48));
+    self.homeTopImmersiveGradient.frame=self.homeTopImmersiveScrim.bounds;
     CGFloat width=CGRectGetWidth(self.homeGrid.bounds);
     if(self.homeMode&&width>0&&fabs(width-self.homeGridLayoutWidth)>0.5)[self updateHomeGridLayout];
     [self updateVisibleHomePosters];
@@ -1033,7 +1056,8 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
         @{@"icon":@"ellipsis",@"title":@"更多影视操作",@"menu":[self homeActionsMenu]}
     ])];
-    self.homeScroll=[UIScrollView new];self.homeScroll.translatesAutoresizingMaskIntoConstraints=NO;self.homeScroll.alwaysBounceVertical=YES;self.homeScroll.delegate=self;self.homeScroll.accessibilityIdentifier=@"media-home-scroll";[self.view addSubview:self.homeScroll];
+    self.homeScroll=[UIScrollView new];self.homeScroll.translatesAutoresizingMaskIntoConstraints=NO;self.homeScroll.alwaysBounceVertical=YES;self.homeScroll.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;self.homeScroll.delegate=self;self.homeScroll.accessibilityIdentifier=@"media-home-scroll";[self.view addSubview:self.homeScroll];
+    self.homeTopImmersiveScrim=[UIView new];self.homeTopImmersiveScrim.userInteractionEnabled=NO;self.homeTopImmersiveGradient=[CAGradientLayer layer];self.homeTopImmersiveGradient.colors=@[(id)[UIColor colorWithWhite:0 alpha:.84].CGColor,(id)[UIColor colorWithWhite:0 alpha:.52].CGColor,(id)UIColor.clearColor.CGColor];self.homeTopImmersiveGradient.locations=@[@0,@0.68,@1];self.homeTopImmersiveGradient.startPoint=CGPointMake(.5,0);self.homeTopImmersiveGradient.endPoint=CGPointMake(.5,1);[self.homeTopImmersiveScrim.layer addSublayer:self.homeTopImmersiveGradient];[self.view addSubview:self.homeTopImmersiveScrim];
     self.homeStack=[UIStackView new];self.homeStack.translatesAutoresizingMaskIntoConstraints=NO;self.homeStack.axis=UILayoutConstraintAxisVertical;self.homeStack.spacing=12;self.homeStack.layoutMargins=UIEdgeInsetsMake(8,16,24,16);self.homeStack.layoutMarginsRelativeArrangement=YES;[self.homeScroll addSubview:self.homeStack];
     self.selectionRow=[UIStackView new];self.selectionRow.translatesAutoresizingMaskIntoConstraints=NO;self.selectionRow.axis=UILayoutConstraintAxisHorizontal;self.selectionRow.alignment=UIStackViewAlignmentCenter;self.selectionRow.distribution=UIStackViewDistributionFill;self.selectionRow.spacing=10;[self.view addSubview:self.selectionRow];
     self.sourceSelectButton=[self selectionButtonWithSymbol:@"square.stack.3d.up" identifier:@"media-source-selector" action:@selector(chooseResource)];
@@ -1055,9 +1079,12 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     self.resourceButton=[UIButton buttonWithType:UIButtonTypeSystem];self.resourceButton.translatesAutoresizingMaskIntoConstraints=NO;[self.resourceButton setTitle:@"管理资源" forState:UIControlStateNormal];HostStylePillButton(self.resourceButton,NO);[self.resourceButton addTarget:self action:@selector(openResources) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:self.resourceButton];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:self.spinner];
     self.floatingHomeSearchButton=[UIButton buttonWithType:UIButtonTypeSystem];self.floatingHomeSearchButton.translatesAutoresizingMaskIntoConstraints=NO;self.floatingHomeSearchButton.accessibilityIdentifier=@"media-home-floating-search";self.floatingHomeSearchButton.accessibilityLabel=@"搜索影视";self.floatingHomeSearchButton.accessibilityHint=@"打开影视全站搜索";self.floatingHomeSearchButton.backgroundColor=HostAccent();self.floatingHomeSearchButton.tintColor=UIColor.whiteColor;self.floatingHomeSearchButton.layer.cornerRadius=28;self.floatingHomeSearchButton.layer.cornerCurve=kCACornerCurveContinuous;self.floatingHomeSearchButton.layer.shadowColor=HostAccent().CGColor;self.floatingHomeSearchButton.layer.shadowOpacity=.34;self.floatingHomeSearchButton.layer.shadowRadius=14;self.floatingHomeSearchButton.layer.shadowOffset=CGSizeMake(0,5);[self.floatingHomeSearchButton setImage:[UIImage systemImageNamed:@"magnifyingglass"] forState:UIControlStateNormal];self.floatingHomeSearchButton.imageView.contentMode=UIViewContentModeScaleAspectFit;HostInstallPressFeedback(self.floatingHomeSearchButton);[self.floatingHomeSearchButton addTarget:self action:@selector(openGlobalSearchFromHome) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:self.floatingHomeSearchButton];
+    self.moreButtonBottomConstraint=[self.moreButton.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor];
+    self.homeScrollTopConstraint=[self.homeScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor];
+    self.homeStackTopConstraint=[self.homeStack.topAnchor constraintEqualToAnchor:self.homeScroll.contentLayoutGuide.topAnchor];
     [NSLayoutConstraint activateConstraints:@[
-        [self.homeScroll.topAnchor constraintEqualToAnchor:self.categoryScroll.bottomAnchor constant:6],[self.homeScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.homeScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.homeScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-        [self.homeStack.leadingAnchor constraintEqualToAnchor:self.homeScroll.contentLayoutGuide.leadingAnchor],[self.homeStack.trailingAnchor constraintEqualToAnchor:self.homeScroll.contentLayoutGuide.trailingAnchor],[self.homeStack.topAnchor constraintEqualToAnchor:self.homeScroll.contentLayoutGuide.topAnchor],[self.homeStack.bottomAnchor constraintEqualToAnchor:self.homeScroll.contentLayoutGuide.bottomAnchor],[self.homeStack.widthAnchor constraintEqualToAnchor:self.homeScroll.frameLayoutGuide.widthAnchor],
+        self.homeScrollTopConstraint,[self.homeScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.homeScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.homeScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [self.homeStack.leadingAnchor constraintEqualToAnchor:self.homeScroll.contentLayoutGuide.leadingAnchor],[self.homeStack.trailingAnchor constraintEqualToAnchor:self.homeScroll.contentLayoutGuide.trailingAnchor],self.homeStackTopConstraint,[self.homeStack.bottomAnchor constraintEqualToAnchor:self.homeScroll.contentLayoutGuide.bottomAnchor],[self.homeStack.widthAnchor constraintEqualToAnchor:self.homeScroll.frameLayoutGuide.widthAnchor],
         [self.selectionRow.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4],[self.selectionRow.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:14],[self.selectionRow.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-14],[self.selectionRow.heightAnchor constraintEqualToConstant:42],
         [self.homeModeButton.widthAnchor constraintEqualToConstant:28],[self.homeModeButton.heightAnchor constraintEqualToConstant:32],[self.homeSearchButton.widthAnchor constraintEqualToConstant:28],[self.homeSearchButton.heightAnchor constraintEqualToConstant:32],[self.homeMenuButton.widthAnchor constraintEqualToConstant:28],[self.homeMenuButton.heightAnchor constraintEqualToConstant:32],
         [self.categoryScroll.topAnchor constraintEqualToAnchor:self.selectionRow.bottomAnchor constant:8],[self.categoryScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.categoryScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
@@ -1065,16 +1092,17 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
         [self.categories.leadingAnchor constraintEqualToAnchor:self.categoryScroll.contentLayoutGuide.leadingAnchor constant:14],[self.categories.trailingAnchor constraintEqualToAnchor:self.categoryScroll.contentLayoutGuide.trailingAnchor constant:-14],[self.categories.topAnchor constraintEqualToAnchor:self.categoryScroll.contentLayoutGuide.topAnchor constant:2],[self.categories.bottomAnchor constraintEqualToAnchor:self.categoryScroll.contentLayoutGuide.bottomAnchor constant:-2],[self.categories.heightAnchor constraintEqualToConstant:36],
         [self.readinessStageLabel.topAnchor constraintEqualToAnchor:self.categoryScroll.bottomAnchor constant:2],[self.readinessStageLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],[self.readinessStageLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],[self.readinessStageLabel.heightAnchor constraintGreaterThanOrEqualToConstant:16],
         [self.grid.topAnchor constraintEqualToAnchor:self.readinessStageLabel.bottomAnchor constant:2],[self.grid.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.grid.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.grid.bottomAnchor constraintEqualToAnchor:self.moreButton.topAnchor],
-        [self.moreButton.heightAnchor constraintEqualToConstant:40],[self.moreButton.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],[self.moreButton.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [self.moreButton.heightAnchor constraintEqualToConstant:40],self.moreButtonBottomConstraint,[self.moreButton.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [self.status.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],[self.status.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:24],[self.status.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-24],
         [self.resourceButton.topAnchor constraintEqualToAnchor:self.status.bottomAnchor constant:16],[self.resourceButton.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [self.spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],[self.spinner.bottomAnchor constraintEqualToAnchor:self.status.topAnchor constant:-16],
         [self.floatingHomeSearchButton.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-18],[self.floatingHomeSearchButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-14],[self.floatingHomeSearchButton.widthAnchor constraintEqualToConstant:56],[self.floatingHomeSearchButton.heightAnchor constraintEqualToConstant:56]]];
     [self setBrowseControlsHidden:YES];
-    self.homeScroll.contentInset=UIEdgeInsetsMake(0,0,28,0);self.homeScroll.scrollIndicatorInsets=self.homeScroll.contentInset;
+    self.homeScroll.contentInset=UIEdgeInsetsMake(0,0,MAX(28,self.bottomOverlayInset),0);self.homeScroll.scrollIndicatorInsets=self.homeScroll.contentInset;
     [self loadSources];
     if(self.onDisplayModeChanged)self.onDisplayModeChanged(YES);
 }
+- (void)setBottomOverlayInset:(CGFloat)inset {if(!isfinite(inset))inset=0;self.bottomOverlayInset=MAX(0,inset);if(self.homeScroll){self.homeScroll.contentInset=UIEdgeInsetsMake(0,0,MAX(28,self.bottomOverlayInset),0);self.homeScroll.scrollIndicatorInsets=self.homeScroll.contentInset;}self.moreButtonBottomConstraint.constant=-self.bottomOverlayInset;}
 - (UIButton *)selectionButtonWithSymbol:(NSString *)symbol identifier:(NSString *)identifier action:(SEL)action {
     UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;HostStylePillButton(button,NO);button.layer.cornerRadius=23;button.contentEdgeInsets=UIEdgeInsetsMake(8,12,8,12);button.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeading;button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;button.titleLabel.adjustsFontSizeToFitWidth=YES;button.titleLabel.minimumScaleFactor=0.82;button.accessibilityIdentifier=identifier;button.isAccessibilityElement=YES;button.accessibilityTraits|=UIAccessibilityTraitButton;[button setImage:[UIImage systemImageNamed:symbol] forState:UIControlStateNormal];button.tintColor=HostAccent();button.imageEdgeInsets=UIEdgeInsetsMake(0,0,0,7);[button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];return button;
 }
@@ -1139,7 +1167,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)setBrowseControlsHidden:(BOOL)hidden {
     BOOL hasCategories=self.categories.arrangedSubviews.count>0&&[MediaHomeEnabledModules() containsObject:@"catalog"];
-    self.selectionRow.hidden=NO;self.categoryScroll.hidden=!hasCategories;self.categoryScrollHeightConstraint.constant=hasCategories?40:0;self.readinessStageLabel.hidden=hidden||!self.readinessStageLabel.text.length;self.grid.hidden=hidden;self.moreButton.hidden=hidden||!self.hasMore;self.homeScroll.hidden=!hidden;
+    self.selectionRow.hidden=NO;self.categoryScroll.hidden=!hasCategories;self.categoryScrollHeightConstraint.constant=hasCategories?40:0;self.readinessStageLabel.hidden=hidden||!self.readinessStageLabel.text.length;self.grid.hidden=hidden;self.moreButton.hidden=hidden||!self.hasMore;self.homeScroll.hidden=!hidden;self.homeTopImmersiveScrim.hidden=!hidden;
     self.homeSearchButton.hidden=!hidden;self.homeMenuButton.hidden=!hidden;self.floatingHomeSearchButton.hidden=!hidden;self.homeModeButton.hidden=NO;[self.homeModeButton setImage:[UIImage systemImageNamed:hidden?@"square.grid.2x2.fill":@"house.fill"] forState:UIControlStateNormal];self.homeModeButton.accessibilityIdentifier=hidden?@"media-home-browse-button":@"media-browser-home-button";self.homeModeButton.accessibilityLabel=hidden?@"打开影视库":@"返回首页";
     if(hidden){self.navigationItem.searchController=nil;self.search.active=NO;self.status.hidden=YES;self.resourceButton.hidden=YES;[self.spinner stopAnimating];}
     else{BOOL hasContent=self.items.count>0;self.status.hidden=!self.status.text.length||hasContent;self.resourceButton.hidden=self.loading||hasContent||!self.status.text.length;self.readinessStageLabel.hidden=!self.readinessStageLabel.text.length;if(self.loading&&!hasContent)[self.spinner startAnimating];else[self.spinner stopAnimating];}
@@ -1443,6 +1471,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)openHomeRecommendation:(NSDictionary *)item source:(NSDictionary *)source provider:(NSString *)provider {
     if(![item isKindOfClass:NSDictionary.class]||![source isKindOfClass:NSDictionary.class])return;
+    if([self openMetadataSearchForItem:item])return;
     if(MediaSourceUsesNativeCatalogAPI(source)){MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;[self pushMediaDetail:detail];return;}
     self.pendingHomeDetail=@{@"item":item,@"source":source,@"provider":provider?:@""};self.pendingBrowseState=nil;[self activate:source keepingHome:YES];
 }
@@ -1452,13 +1481,13 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)openHomeFavorite:(NSDictionary *)entry {
     NSString *sourceID=entry[@"sourceID"]?:@"";NSDictionary *source=nil;for(NSDictionary *candidate in self.sources)if([candidate[@"id"] isEqual:sourceID]){source=candidate;break;}
-    if(!source){[self showMessage:@"该收藏对应的影视资源已移除，请重新导入后打开" loading:NO];return;}NSDictionary *item=[entry[@"item"] isKindOfClass:NSDictionary.class]?entry[@"item"]:@{};NSString *provider=[entry[@"provider"] isKindOfClass:NSString.class]?entry[@"provider"]:@"";
+    if(!source){[self showMessage:@"该收藏对应的影视资源已移除，请重新导入后打开" loading:NO];return;}NSDictionary *item=[entry[@"item"] isKindOfClass:NSDictionary.class]?entry[@"item"]:@{};if([self openMetadataSearchForItem:item])return;NSString *provider=[entry[@"provider"] isKindOfClass:NSString.class]?entry[@"provider"]:@"";
     if(MediaSourceUsesNativeCatalogAPI(source)){MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider;detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;[self pushMediaDetail:detail];return;}
     self.pendingHomeDetail=@{@"item":item,@"source":source,@"provider":provider};self.pendingBrowseState=nil;[self activate:source keepingHome:YES];
 }
 - (void)openPendingHomeDetailForSource:(NSDictionary *)source provider:(NSString *)provider {
     NSDictionary *pending=self.pendingHomeDetail;if(![pending isKindOfClass:NSDictionary.class]||![[pending[@"source"][@"id"] description] isEqual:[source[@"id"] description]])return;
-    NSDictionary *item=[pending[@"item"] isKindOfClass:NSDictionary.class]?pending[@"item"]:@{};MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;self.pendingHomeDetail=nil;[self pushMediaDetail:detail];
+    NSDictionary *item=[pending[@"item"] isKindOfClass:NSDictionary.class]?pending[@"item"]:@{};self.pendingHomeDetail=nil;if([self openMetadataSearchForItem:item])return;MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;[self pushMediaDetail:detail];
 }
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];[self.readiness cancel];[self.client cancel];[self.configurationClient cancel];}
 - (NSString *)stateKeyForSource:(NSDictionary *)source provider:(NSString *)provider {return [NSString stringWithFormat:@"%@|%@",source[@"id"]?:@"",provider?:@""];}
@@ -1466,7 +1495,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)restorePendingBrowseState {NSDictionary *state=self.pendingBrowseState;self.pendingBrowseState=nil;if(!state)return;self.keyword=[NSUserDefaults.standardUserDefaults boolForKey:@"media.globalSearchHistoryEnabled.v1"]&&[state[@"keyword"] isKindOfClass:NSString.class]?state[@"keyword"]:@"";self.category=state[@"category"];self.selectedFilters=[state[@"filters"] isKindOfClass:NSDictionary.class]?[state[@"filters"] mutableCopy]:[NSMutableDictionary dictionary];self.pendingRestorePage=MAX(1,MIN(100,[state[@"page"] integerValue]));self.page=self.pendingRestorePage;self.widgetSeason=MAX(1,[state[@"season"] integerValue]);self.widgetEpisode=MAX(1,[state[@"episode"] integerValue]);self.pendingRestoreOffset=@([state[@"offset"] doubleValue]);self.search.searchBar.text=self.keyword;self.navigationItem.prompt=[self.source[@"protocol"] isEqual:@"widget-extractor"]?[NSString stringWithFormat:@"第 %ld 季 · 第 %ld 集",(long)self.widgetSeason,(long)self.widgetEpisode]:nil;for(UIButton *button in self.categories.arrangedSubviews){BOOL selected=[button.accessibilityIdentifier isEqual:self.category];button.backgroundColor=selected?[HostAccent() colorWithAlphaComponent:0.23]:HostNeutralSurface();HostSetLayerBorderColor(button,selected?[HostAccent() colorWithAlphaComponent:0.42]:HostBorder());[button setTitleColor:selected?HostAccent():HostText() forState:UIControlStateNormal];}if(self.keyword.length||self.category.length){self.page=1;[self loadListing:NO];return;}self.pendingRestorePage=0;CGFloat offset=self.pendingRestoreOffset.doubleValue;self.pendingRestoreOffset=nil;dispatch_async(dispatch_get_main_queue(),^{[self.grid setContentOffset:CGPointMake(0,offset) animated:NO];});}
 - (void)openFavorites {
     MediaFavoritesViewController *page=[MediaFavoritesViewController new];__weak typeof(self) weakSelf=self;
-    page.onSelect=^(NSDictionary *entry){MediaBrowserViewController *owner=weakSelf;if(!owner)return;NSArray *available=owner.sourcesProvider?owner.sourcesProvider():owner.sources?:@[];NSString *sourceID=entry[@"sourceID"]?:@"";NSDictionary *source=nil;
+     page.onSelect=^(NSDictionary *entry){MediaBrowserViewController *owner=weakSelf;if(!owner)return;NSDictionary *savedItem=[entry[@"item"] isKindOfClass:NSDictionary.class]?entry[@"item"]:@{};if([owner openMetadataSearchForItem:savedItem])return;NSArray *available=owner.sourcesProvider?owner.sourcesProvider():owner.sources?:@[];NSString *sourceID=entry[@"sourceID"]?:@"";NSDictionary *source=nil;
         for(NSDictionary *candidate in available)if([candidate[@"id"] isEqual:sourceID]){source=candidate;break;}
         if(!source){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"影视资源不可用" message:@"该收藏对应的资源未启用或已移除。重新启用资源后即可继续播放。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:alert animated:YES completion:nil];return;}
         MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=entry[@"item"]?:@{};detail.source=source;detail.provider=entry[@"provider"]?:@"";detail.onPlay=owner.onPlay;detail.onPlaybackWillStart=owner.onPlaybackWillStart;[owner pushMediaDetail:detail];
@@ -1490,14 +1519,21 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 }
 - (void)openHistoryDetail:(NSDictionary *)entry source:(NSDictionary *)source provider:(NSString *)provider {
     NSDictionary *item=[entry[@"item"] isKindOfClass:NSDictionary.class]?entry[@"item"]:@{};
+    if([self openMetadataSearchForItem:item])return;
     id itemID=item[@"id"];if(![itemID isKindOfClass:NSString.class]&&![itemID isKindOfClass:NSNumber.class]){[self showMessage:@"观看记录缺少影片标识，无法重新打开详情" loading:NO];return;}
     MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.resumeEntry=entry;detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;[self pushMediaDetail:detail];
 }
 - (void)openResources {if(self.onResources)self.onResources();}
 - (void)openGlobalSearch {
-    MediaGlobalSearchViewController *page=[MediaGlobalSearchViewController new];page.sources=self.sourcesProvider?self.sourcesProvider():self.sources?:@[];page.onActivateService=self.onActivateService;__weak typeof(self) weakSelf=self;
-    page.onSelectResult=^(NSDictionary *item,NSDictionary *source,NSString *provider){MediaBrowserViewController *owner=weakSelf;if(!owner)return;MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlay=owner.onPlay;detail.onPlaybackWillStart=owner.onPlaybackWillStart;[owner pushMediaDetail:detail];};
+    [self openGlobalSearchForKeyword:nil excludingIndexSources:NO];
+}
+- (void)openGlobalSearchForKeyword:(NSString *)keyword excludingIndexSources:(BOOL)excludeIndexSources {
+    MediaGlobalSearchViewController *page=[MediaGlobalSearchViewController new];NSArray *available=self.sourcesProvider?self.sourcesProvider():self.sources?:@[];if(excludeIndexSources){NSMutableArray *playableSources=[NSMutableArray array];for(NSDictionary *source in available)if(![source[@"protocol"] isEqual:@"douban-index"])[playableSources addObject:source];available=playableSources.copy;}page.sources=available;page.initialKeyword=keyword;page.onActivateService=self.onActivateService;__weak typeof(self) weakSelf=self;
+    page.onSelectResult=^(NSDictionary *item,NSDictionary *source,NSString *provider){MediaBrowserViewController *owner=weakSelf;if(!owner)return;if([owner openMetadataSearchForItem:item])return;MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlay=owner.onPlay;detail.onPlaybackWillStart=owner.onPlaybackWillStart;[owner pushMediaDetail:detail];};
     [self pushMediaPage:page];
+}
+- (BOOL)openMetadataSearchForItem:(NSDictionary *)item {
+    NSString *identifier=[item[@"id"] isKindOfClass:NSString.class]?item[@"id"]:@"";if(![identifier hasPrefix:@"msearch:"])return NO;NSString *keyword=[item[@"name"] isKindOfClass:NSString.class]?item[@"name"]:@"";if(!keyword.length){NSArray *parts=[identifier componentsSeparatedByString:@"###"];if(parts.count>1)keyword=parts[1];}keyword=[keyword stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!keyword.length){[self showMessage:@"豆瓣索引没有返回可搜索的片名" loading:NO];return YES;}NSArray *all=self.sourcesProvider?self.sourcesProvider():self.sources?:@[];NSUInteger playableCount=0;for(NSDictionary *source in all)if(![source[@"protocol"] isEqual:@"douban-index"])playableCount++;if(!playableCount){[self showMessage:[NSString stringWithFormat:@"%@ 是片名索引，不提供视频流。请先导入一个点播源，再从此处搜索播放。",keyword] loading:NO];return YES;}[self openGlobalSearchForKeyword:keyword excludingIndexSources:YES];return YES;
 }
 - (void)presentPicker:(MediaSourcePicker *)picker {
     UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:picker];navigation.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;HostStyleNavigation(navigation);navigation.navigationBar.prefersLargeTitles=NO;navigation.modalPresentationStyle=UIModalPresentationPageSheet;
@@ -1609,7 +1645,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (NSDictionary *)sourceForCatalogSite:(NSDictionary *)site catalog:(NSDictionary *)catalog {
     NSString *catalogID=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"",*key=[site[@"key"] isKindOfClass:NSString.class]?site[@"key"]:@"",*apiKind=[site[@"apiKind"] isKindOfClass:NSString.class]?site[@"apiKind"]:@"";
     if(!self.sources)self.sources=self.sourcesProvider?self.sourcesProvider():@[];
-    NSString *nativeID=([apiKind isEqual:@"tvbox-api"]||[apiKind isEqual:@"maccms-api"])?[NSString stringWithFormat:@"%@:%@:%@",apiKind,catalogID,key]:@"";
+    NSString *nativeID=([apiKind isEqual:@"tvbox-api"]||[apiKind isEqual:@"maccms-api"]||[apiKind isEqual:@"douban-index"])?[NSString stringWithFormat:@"%@:%@:%@",apiKind,catalogID,key]:@"";
     for(NSDictionary *source in self.sources){if(nativeID.length&&[source[@"id"] isEqual:nativeID])return source;NSString *sourceCatalog=[source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?source[@"tvboxCatalogID"]:([source[@"catalogID"] isKindOfClass:NSString.class]?source[@"catalogID"]:@"");if(![sourceCatalog isEqual:catalogID])continue;NSArray *siteKeys=[source[@"tvboxSiteKeys"] isKindOfClass:NSArray.class]?source[@"tvboxSiteKeys"]:@[];if([source[@"tvboxSiteKey"] isEqual:key]||[siteKeys containsObject:key])return source;}
     return nil;
 }
@@ -1624,7 +1660,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     NSDictionary *catalog=[self selectedCatalog];if(!catalog){self.selectedCatalogID=@"";[NSUserDefaults.standardUserDefaults removeObjectForKey:@"selectedMediaCatalogID"];[self chooseProvider];return;}
     self.sources=self.sourcesProvider?self.sourcesProvider():self.sources?:@[];
     NSString *catalogID=catalog[@"id"]?:@"";NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];NSArray *lives=[catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[];NSMutableArray *choices=[NSMutableArray array];
-    for(NSDictionary *site in sites){BOOL supported=[site[@"supported"] boolValue];NSDictionary *source=[self sourceForCatalogSite:site catalog:catalog];NSString *siteKey=site[@"key"]?:@"";BOOL current=source&&[source[@"id"] isEqual:self.source[@"id"]];NSString *status=[site[@"status"] isKindOfClass:NSString.class]?site[@"status"]:@"按需加载";if(source)status=@"已加入合集 · 点按切换";NSString *apiKind=site[@"apiKind"]?:@"";NSString *subtitle=[NSString stringWithFormat:@"%@ · %@",[apiKind isEqual:@"script"]?@"脚本站点":([apiKind isEqual:@"maccms-api"]?@"MacCMS 接口":@"影视接口"),status];NSMutableDictionary *choice=[@{@"name":site[@"name"]?:@"未命名影视站点",@"subtitle":subtitle,@"site":site,@"catalogID":catalogID,@"siteKey":siteKey,@"scope":@"site",@"scopeName":@"影视站点",@"selected":@(current),@"supported":@(supported)} mutableCopy];if(source)choice[@"source"]=source;[choices addObject:choice];}
+    for(NSDictionary *site in sites){BOOL supported=[site[@"supported"] boolValue];NSDictionary *source=[self sourceForCatalogSite:site catalog:catalog];NSString *siteKey=site[@"key"]?:@"";BOOL current=source&&[source[@"id"] isEqual:self.source[@"id"]];NSString *status=[site[@"status"] isKindOfClass:NSString.class]?site[@"status"]:@"按需加载";if(source)status=@"已加入合集 · 点按切换";NSString *apiKind=site[@"apiKind"]?:@"";NSString *kindLabel=[apiKind isEqual:@"script"]?@"脚本站点":([apiKind isEqual:@"maccms-api"]?@"MacCMS 接口":([apiKind isEqual:@"douban-index"]?@"豆瓣影视索引":@"影视接口"));NSString *subtitle=[NSString stringWithFormat:@"%@ · %@",kindLabel,status];NSMutableDictionary *choice=[@{@"name":site[@"name"]?:@"未命名影视站点",@"subtitle":subtitle,@"site":site,@"catalogID":catalogID,@"siteKey":siteKey,@"scope":@"site",@"scopeName":@"影视站点",@"selected":@(current),@"supported":@(supported)} mutableCopy];if(source)choice[@"source"]=source;[choices addObject:choice];}
     for(NSDictionary *live in lives){if(![live[@"supported"] boolValue])continue;NSString *savedURL=[NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"tvboxLiveSelection.%@",catalogID]]?:@"";BOOL selected=[savedURL isEqual:live[@"url"]?:@""];[choices addObject:@{@"name":live[@"name"]?:@"直播列表",@"subtitle":@"直播列表 · 仅加载所选清单",@"live":live,@"catalogID":catalogID,@"scope":@"live",@"scopeName":@"直播列表",@"selected":@(selected)}];}
     if(!choices.count){[self showMessage:@"这个资源合集没有可用的内部站点" loading:NO];return;}
     MediaSourcePicker *picker=[[MediaSourcePicker alloc] initWithStyle:UITableViewStyleInsetGrouped];picker.screenTitle=[NSString stringWithFormat:@"%@ · 内部站点",catalog[@"name"]?:@"资源合集"];picker.choices=choices;__weak typeof(self) weakSelf=self;
@@ -1775,7 +1811,7 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
     for(UIView *view in self.categories.arrangedSubviews){[self.categories removeArrangedSubview:view];[view removeFromSuperview];}
     [NSUserDefaults.standardUserDefaults setObject:source[@"id"] forKey:@"selectedMediaSource"];
     if(MediaSourceUsesNativeCatalogAPI(source)){
-        self.client=[[MediaAPIClient alloc] initWithTVBoxSource:source];NSMutableDictionary *saved=[source mutableCopy];saved[@"capabilities"]=@[@"home",@"category",@"search",@"detail",@"play"];self.source=saved;self.provider=@"";self.providers=@[];self.readinessStageLabel.text=[source[@"protocol"] isEqual:@"maccms-api"]?@"MacCMS JSON/XML API · 按需连接，不启动插件运行时":@"TVBox JSON API · 不启动插件运行时";self.loading=NO;[self updateSelectionControls];[self loadHome];NSDictionary *resume=self.pendingHistoryEntry;if(resume&&[resume[@"sourceID"] isEqual:self.source[@"id"]]){self.pendingHistoryEntry=nil;[self openHistoryDetail:resume source:self.source provider:@""];}return;
+        self.client=[[MediaAPIClient alloc] initWithTVBoxSource:source];NSMutableDictionary *saved=[source mutableCopy];BOOL doubanIndex=[source[@"protocol"] isEqual:@"douban-index"];saved[@"capabilities"]=doubanIndex?@[@"home",@"category",@"search"]:@[@"home",@"category",@"search",@"detail",@"play"];self.source=saved;self.provider=@"";self.providers=@[];self.readinessStageLabel.text=doubanIndex?@"豆瓣索引 · 仅提供影片信息，播放时跨点播源搜索":([source[@"protocol"] isEqual:@"maccms-api"]?@"MacCMS JSON/XML API · 按需连接，不启动插件运行时":@"TVBox JSON API · 不启动插件运行时");self.loading=NO;[self updateSelectionControls];[self loadHome];NSDictionary *resume=self.pendingHistoryEntry;if(resume&&[resume[@"sourceID"] isEqual:self.source[@"id"]]){self.pendingHistoryEntry=nil;[self openHistoryDetail:resume source:self.source provider:@""];}return;
     }
     self.readinessStageLabel.text=@"准备启动已选资源";[self showMessage:[NSString stringWithFormat:@"正在启动 %@…",source[@"name"]] loading:YES];
     self.client=[[MediaAPIClient alloc] initWithPort:[source[@"port"] integerValue]];__weak typeof(self) weakSelf=self;
@@ -1950,6 +1986,6 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip {
     HostAnimateSelection([collectionView cellForItemAtIndexPath:ip]);
     if(collectionView==self.homeGrid){NSArray<NSDictionary *> *items=[self homeGridItems];if(ip.item<items.count)[self openHomeRecommendation:items[ip.item] source:self.source provider:self.provider?:self.homeResultProvider?:@""];return;}
-    MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=self.items[ip.item];detail.source=self.source;detail.provider=self.provider;detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;[self pushMediaDetail:detail];
+    NSDictionary *selectedItem=self.items[ip.item];if([self openMetadataSearchForItem:selectedItem])return;MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=selectedItem;detail.source=self.source;detail.provider=self.provider;detail.onPlay=self.onPlay;detail.onPlaybackWillStart=self.onPlaybackWillStart;[self pushMediaDetail:detail];
 }
 @end

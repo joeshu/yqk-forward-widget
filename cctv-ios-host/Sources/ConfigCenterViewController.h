@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 @interface ConfigCenterViewController : UITableViewController
 - (void)setTopSafeAreaInset:(CGFloat)inset;
+- (void)setBottomOverlayInset:(CGFloat)inset;
 - (void)prepareForNavigationTransition;
 - (void)refreshHeaderAfterNavigationTransition;
 - (void)reloadProfiles;

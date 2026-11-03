@@ -180,15 +180,17 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('logo.image=CCTVChannelLogoImage(ch)', TEXT)
         self.assertIn('cell.imageView.image=CCTVChannelLogoImage(ch)', TEXT)
 
-    def test_live_pages_end_eight_points_above_bottom_navigation(self):
+    def test_live_pages_scroll_under_top_and_bottom_overlays(self):
         layout_start = TEXT.rindex("- (void)viewDidLayoutSubviews {")
         layout_end = TEXT.index("- (void)traitCollectionDidChange:", layout_start)
         layout = TEXT[layout_start:layout_end]
-        self.assertIn('CGRectGetMinY(self.bottomBar.frame)-8', layout)
-        self.assertIn('MAX(0,contentBottom-contentY)', layout)
+        self.assertIn('CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom))', layout)
+        self.assertIn('CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets)', layout)
+        self.assertIn('CGRectMake(0,0,w,ph)', layout)
+        self.assertIn('tabContentInset=MAX(8,height-tabY+8)', layout)
         self.assertIn('MAX(0,contentBottom-pageTop)', layout)
         self.assertNotIn('height-safe.bottom-152', layout)
-        self.assertIn('self.tableView.contentInset=UIEdgeInsetsMake(0,0,8,0)', CONFIG)
+        self.assertIn('self.tableView.contentInset=UIEdgeInsetsMake(0,0,tableBottomInset,0)', CONFIG)
 
     def test_service_directory_applies_safe_area_only_once(self):
         self.assertIn('self.table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever', SERVICE_UI)

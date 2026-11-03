@@ -158,6 +158,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     self.tableView.tableHeaderView = header;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"搜索" style:UIBarButtonItemStyleDone target:self action:@selector(submitSearch)];
     [self updateFilters];[self.tableView reloadData];
+    NSString *initial=[self.initialKeyword stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(initial.length){self.searchBar.text=initial;dispatch_async(dispatch_get_main_queue(),^{if(self.isViewLoaded&&self.initialKeyword.length&&[self.searchBar.text isEqual:self.initialKeyword])[self submitSearch];});}
 }
 
 - (void)viewDidLayoutSubviews {

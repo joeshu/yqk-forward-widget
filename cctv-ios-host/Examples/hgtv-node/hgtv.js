@@ -20,37 +20,20 @@ const path = require('node:path');
 
 // ---------------- 配置 ----------------
 const SITE = 'https://hongguoduanju.com';
-const VIDEO_API = 'https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/';
+const VIDEO_MODEL_MULTI_API = 'https://reading.snssdk.com/reading/bookapi/video_tab/multi_video_model/v1/';
 const UA_WEB = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
-const UA_APP = 'com.phoenix.read/74132 (iPhone; iOS 27.0.1; zh_CN; iPhone 12; Build/21A342)';
+const UA_APP = 'com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
 
-// 真实 iOS 设备参数（从 App 的 fallback_api URL 提取；失效时改这里）
+// App video_tab API profile. A fresh temporary DID/IID is generated per request;
+// do not ship a shared device identity in a plugin package.
 const DEVICE = {
-  device_id: '780019670991881',
-  user_id: '3594769438086775',
-  aid: '8662',
-  app_name: 'novelread',
-  version_code: '74132',
-  version_name: '7.4.1.32',
-  manifest_version_code: '74132',
-  update_version_code: '74132',
-  device_platform: 'iphone',
-  os: 'ios',
-  os_version: '27.0.1',
-  os_api: '27',
-  device_type: 'iPhone 12',
-  device_brand: 'Apple',
-  language: 'zh',
-  resolution: '1170*2532',
-  dpi: '460',
-  host_abi: 'arm64',
-  channel: 'App Store',
-  ac: 'wifi',
-  ssmix: 'a',
-  pv_player: '74132',
-  compliance_status: '0',
-  need_personal_recommend: '1',
-  player_so_load: '1',
+  ac: 'wifi', channel: 'update_64', aid: '8662', app_name: 'novelread',
+  version_code: '71332', version_name: '7.1.3.32', device_platform: 'android', os: 'android',
+  ssmix: 'a', device_type: '25053RT47C', device_brand: 'Redmi', language: 'zh',
+  os_api: '36', os_version: '16', manifest_version_code: '71332', resolution: '1280*2772',
+  dpi: '520', update_version_code: '71332', host_abi: 'arm64-v8a', dragon_device_type: 'phone',
+  pv_player: '71332', compliance_status: '0', need_personal_recommend: '1',
+  player_so_load: '1', is_android_pad_screen: '0',
 };
 
 const SPADE_CONST = Buffer.from(
@@ -191,38 +174,37 @@ function branchOf(url, body, ts) {
   return low - ((((low * 171) >>> 9) * 3));
 }
 
-function signedRequest(payload) {
+function randomDeviceId() {
+  return (crypto.randomBytes(8).readBigUInt64BE(0) % 900000000000000000n + 100000000000000000n).toString();
+}
+
+function signedRequest(vid) {
   const ts = Math.floor(Date.now() / 1000);
-  const body = Buffer.from(payload);
   const rnd = crypto.randomInt(0, 65536);
-  const vals = Object.assign({}, DEVICE, { ts: String(ts) });
-  const base = Date.now();
-  let query = '', url = '';
-  for (let off = 0; off < 32; off++) {
-    vals._rticket = String(base + off);
-    query = Object.keys(vals).map(k => `${pct(k)}=${pct(vals[k])}`).join('&');
-    url = VIDEO_API + '?' + query;
-    if (branchOf(url, body, ts) !== 1) break;
-  }
+  const vals = Object.assign({}, DEVICE, {
+    iid: randomDeviceId(), device_id: randomDeviceId(), ts: String(ts),
+    _rticket: String(Date.now()), video_id: String(vid),
+    need_all_video_definition: '1', video_platform: '1024',
+  });
+  const query = Object.keys(vals).map(k => `${pct(k)}=${pct(vals[k])}`).join('&');
+  const url = VIDEO_MODEL_MULTI_API + '?' + query;
   const headers = {
     'User-Agent': UA_APP,
     'Accept': 'application/json; charset=utf-8,application/x-protobuf',
     'Content-Type': 'application/json; charset=UTF-8',
-    'x-xs-from-web': '0',
     'x-ss-req-ticket': vals._rticket,
     'x-tt-request-tag': 't=0;n=0',
     'sdk-version': '2',
     'passport-sdk-version': '50561',
     'x-vc-bdturing-sdk-version': '3.7.2.cn',
-    'x-ss-stub': md5(body).toString('hex').toUpperCase(),
-    'x-gorgon': xGorgon(query, body, ts, rnd),
+    'x-gorgon': xGorgon(query, null, ts, rnd),
     'x-khronos': String(ts),
     'x-ladon': be32(ts).toString('base64'),
     'x-argus': le32(ts).toString('base64'),
     'x-helios': helios(ts),
     'x-tt-dt': '',
   };
-  return { url, headers, body };
+  return { url, headers };
 }
 
 // ---------------- HTTP 客户端 ----------------
@@ -458,34 +440,35 @@ async function parseEpisodes(sid, html) {
 async function fetchModel(vid) {
   const hit = modelCache.get(String(vid));
   if (hit && Date.now() - hit.t < MODEL_TTL) return hit.vm;
-  const payload = JSON.stringify({
-    biz_param: {
-      detail_page_version: 0, device_level: 3, disable_digg_stat: false,
-      need_all_video_definition: true, need_mp4_align: false,
-      use_os_player: false, use_server_dns: false, video_platform: 1024,
-    },
-    mixed_video_id_map: { '1004': [String(vid)] },
-  });
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const s = signedRequest(payload);
-    const r = await httpText(s.url, { method: 'POST', headers: s.headers, body: s.body });
-    let j = null;
-    try { j = JSON.parse(r.body.toString('utf8')); } catch (e) { }
-    if (j && (j.code === 0 || j.code == null)) {
-      const ent = (j.data || {})[String(vid)] || {};
-      let vm = ent.video_model;
-      if (typeof vm === 'string') { try { vm = JSON.parse(vm); } catch (e) { vm = null; } }
-      if (vm && vm.video_list) {
-        if (Array.isArray(vm.video_list)) {
-          const m = {};
-          vm.video_list.forEach((it, i) => { m[String(i)] = it; });
-          vm.video_list = m;
-        }
-        modelCache.set(String(vid), { t: Date.now(), vm });
-        return vm;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const s = signedRequest(vid);
+      const r = await httpText(s.url, { method: 'GET', headers: s.headers, timeout: 25000 });
+      if (r.status < 200 || r.status >= 300 || !r.body.length) throw Error('empty video model response');
+      const j = JSON.parse(r.body.toString('utf8'));
+      if (!j || (j.code !== 0 && j.code != null)) throw Error('video model request rejected');
+      const data = j.data || {};
+      const models = data.video_model_data || {};
+      let ent = models[String(vid)] || Object.values(models).find(value => value && typeof value === 'object') || data;
+      let vm = ent && ent.video_model;
+      if (typeof vm === 'string') { try { vm = JSON.parse(vm); } catch (error) { vm = null; } }
+      if (!vm && data.video_model) vm = data.video_model;
+      if (!vm || typeof vm !== 'object') throw Error('video model missing');
+      const rows = vm.video_list || vm.dynamic_video_list;
+      if (Array.isArray(rows)) {
+        const normalized = {};
+        rows.forEach((item, index) => { if (item && typeof item === 'object') normalized[String(index)] = item; });
+        vm.video_list = normalized;
       }
+      if (!vm.video_list || typeof vm.video_list !== 'object' || !Object.keys(vm.video_list).length) {
+        throw Error('video model contains no qualities');
+      }
+      modelCache.set(String(vid), { t: Date.now(), vm });
+      return vm;
+    } catch (error) {
+      if (attempt === 2) break;
+      await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
     }
-    await new Promise(r2 => setTimeout(r2, 600));
   }
   return null;
 }

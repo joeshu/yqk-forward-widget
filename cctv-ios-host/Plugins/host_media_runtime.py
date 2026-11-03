@@ -376,7 +376,7 @@ def direct_episode_media_fallback(value, episode_id):
     except ValueError:
         return None
     if not path.endswith(('.m3u8', '.m3u', '.mp4', '.m4v', '.mov',
-                          '.m4a', '.mp3', '.aac', '.ts')):
+                          '.m4a', '.mp3', '.aac', '.ts', '.mpd')):
         return None
     return playback({'url': address})
 
@@ -586,16 +586,22 @@ def playback(value):
         extension = ''
     native_extensions = {'m3u8', 'm3u', 'mp4', 'm4v', 'mov', 'mp3', 'm4a', 'aac', 'ts'}
     stream_extensions = native_extensions | {'mpd', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'rmvb'}
+    cicada_extensions = {'mpd', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'asf', 'rmvb', 'rm', 'mpg', 'mpeg', 'm2ts', '3gp'}
+    cicada_formats = cicada_extensions | {'dash', 'mpeg-dash', 'matroska', 'application/dash+xml'}
+    cicada_mimes = {'application/dash+xml', 'application/vnd.ms-sstr+xml', 'video/x-flv',
+                    'video/x-matroska', 'video/webm', 'video/x-msvideo', 'video/x-ms-wmv'}
+    cicada_media = (extension in cicada_extensions or declared_format in cicada_formats or
+                    declared_mime in cicada_mimes)
     native_media = (extension in native_extensions or declared_format in native_formats or
                     declared_mime in native_mimes)
-    direct_media = (native_media or extension in stream_extensions or
+    direct_media = (native_media or cicada_media or extension in stream_extensions or
                     declared_format in native_formats | {'mpd', 'dash', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'rmvb'} or
                     declared_mime.startswith(('video/', 'audio/')))
     requires_web = bool(enabled(value.get('requiresWebPlayback')) or
                         enabled(value.get('webPlayback')) or parse or jx)
-    if native_media:
-        # A parser flag is common in legacy spiders even when the returned URL
-        # is already a playable HLS/MP4 stream. Explicit media type wins.
+    if native_media or cicada_media:
+        # Legacy spiders often leave parser flags on direct media. An explicit
+        # HLS/MP4 or Cicada-supported format must reach the native decoder.
         requires_web = False
     result = {'url': url, 'headers': media_headers(headers), 'baseHeaders': media_headers(base_headers),
               'alternates': safe_alternates,
@@ -608,6 +614,8 @@ def playback(value):
         result['format'] = declared_format[:64]
     if declared_type:
         result['contentType'] = declared_type[:128]
+    if cicada_media:
+        result['playbackEngine'] = 'cicada'
     for key in ('sessionID', 'expiresAt', 'refreshAfter', 'refreshInterval', 'isLive'):
         if key in value and isinstance(value[key], (str, int, float, bool)):
             result[key] = value[key]
@@ -742,7 +750,9 @@ class PythonSpider:
                 prepare_stage = 'spider_init'
                 init_started_at = time.perf_counter()
                 _python_spider_log_stage('python_spider_init_started', entry, init_started_at)
-                self.spider.init(options if isinstance(options, str) else json.dumps(options or {}, ensure_ascii=False))
+                init_options = (options if isinstance(options, str) else
+                                (json.dumps(options, ensure_ascii=False) if options is not None else ''))
+                self.spider.init(init_options)
                 _python_spider_log_stage('python_spider_init_succeeded', entry, init_started_at)
             self._capture_plugin_loopback_servers()
             _python_spider_log_stage('python_spider_ready', entry, prepare_started_at)

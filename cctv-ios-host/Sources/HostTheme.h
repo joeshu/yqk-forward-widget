@@ -201,9 +201,16 @@ static inline void HostStyleNavigation(UINavigationController *nav) {
     a.largeTitleTextAttributes = @{NSForegroundColorAttributeName : HostText(),
                                    NSFontAttributeName : [UIFont systemFontOfSize:32 weight:UIFontWeightBold]};
     a.shadowColor = UIColor.clearColor;
+    UINavigationBarAppearance *edge = [UINavigationBarAppearance new];
+    [edge configureWithTransparentBackground];
+    edge.backgroundColor = [HostBackground() colorWithAlphaComponent:0.16];
+    edge.titleTextAttributes = a.titleTextAttributes;
+    edge.largeTitleTextAttributes = a.largeTitleTextAttributes;
+    edge.shadowColor = UIColor.clearColor;
     nav.navigationBar.standardAppearance = a;
-    nav.navigationBar.scrollEdgeAppearance = a;
+    nav.navigationBar.scrollEdgeAppearance = edge;
     nav.navigationBar.compactAppearance = a;
+    if (@available(iOS 15.0, *)) nav.navigationBar.compactScrollEdgeAppearance = edge;
     nav.navigationBar.translucent = YES;
     nav.navigationBar.prefersLargeTitles = YES;
     nav.navigationBar.tintColor = HostAccent();
