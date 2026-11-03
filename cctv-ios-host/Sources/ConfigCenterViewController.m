@@ -225,7 +225,15 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     self.updatingResourceHeaderLayout=NO;
 }
 - (void)setTopSafeAreaInset:(CGFloat)inset {if(!isfinite(inset))inset=0;inset=MAX(0,inset);if(fabs(self.statusBarSafeInset-inset)<0.5)return;self.statusBarSafeInset=inset;if(self.isViewLoaded)[self updateResourceHeaderLayout];}
-- (void)setBottomOverlayInset:(CGFloat)inset {if(!isfinite(inset))inset=0;self.bottomOverlayInset=MAX(8,inset);if(!self.isViewLoaded)return;self.tableView.contentInset=UIEdgeInsetsMake(0,0,self.bottomOverlayInset,0);self.tableView.scrollIndicatorInsets=self.tableView.contentInset;}
+- (void)setBottomOverlayInset:(CGFloat)inset {
+    if(!isfinite(inset))inset=0;
+    inset=MAX(8,inset);
+    if(fabs(_bottomOverlayInset-inset)<0.01)return;
+    _bottomOverlayInset=inset;
+    if(!self.isViewLoaded)return;
+    self.tableView.contentInset=UIEdgeInsetsMake(0,0,inset,0);
+    self.tableView.scrollIndicatorInsets=self.tableView.contentInset;
+}
 - (BOOL)profile:(NSDictionary *)profile matchesKind:(NSString *)kind {
     NSString *resourceKind=[profile[@"resourceKind"] isKindOfClass:NSString.class]?profile[@"resourceKind"]:@"unknown";
     NSString *status=[profile[@"status"] isKindOfClass:NSString.class]?profile[@"status"]:@"";

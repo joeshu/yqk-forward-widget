@@ -65,7 +65,13 @@ static NSString *MediaMetadataCacheSummaryText(void) {
     BOOL wasAtTop=self.table.contentOffset.y<=-old.top+1;self.table.contentInset=next;self.table.scrollIndicatorInsets=next;
     if(wasAtTop)self.table.contentOffset=CGPointMake(self.table.contentOffset.x,-top);
 }
-- (void)setBottomOverlayInset:(CGFloat)inset {if(!isfinite(inset))inset=0;self.bottomOverlayInset=MAX(8,inset);[self updateImmersiveTableInsets];}
+- (void)setBottomOverlayInset:(CGFloat)inset {
+    if(!isfinite(inset))inset=0;
+    inset=MAX(8,inset);
+    if(fabs(_bottomOverlayInset-inset)<0.01)return;
+    _bottomOverlayInset=inset;
+    [self updateImmersiveTableInsets];
+}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView{return self.sections.count;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return [self.sections[section][@"rows"] count];}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section{return self.sections[section][@"title"];}
