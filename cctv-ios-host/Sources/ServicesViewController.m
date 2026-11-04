@@ -16,6 +16,9 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     if(moduleType.length)name=[name stringByAppendingFormat:@" · %@",[moduleType isEqual:@"esm"]?@"ESM":([moduleType isEqual:@"commonjs"]?@"CommonJS":@"脚本")];
     return name;
 }
+static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
+    NSString *result=[snapshot[@"result"] isKindOfClass:NSString.class]?snapshot[@"result"]:@"";NSTimeInterval checked=[snapshot[@"checkedAt"] doubleValue];if(!checked)return result;NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"MM-dd HH:mm";return [NSString stringWithFormat:@"%@ · %@",result,[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:checked]]];
+}
 @interface ServiceProbeRedirectGuard : NSObject <NSURLSessionTaskDelegate>
 @end
 @implementation ServiceProbeRedirectGuard
@@ -70,6 +73,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
         if ([s[@"id"] isEqualToString:self.service[@"id"]])
             self.service = s;
     self.title = self.service[@"name"];
+    NSDictionary *healthSnapshot=[ServiceStore healthSnapshotForServiceIdentifier:self.service[@"id"]];self.health=ServiceHealthDisplay(healthSnapshot);NSTimeInterval checked=[healthSnapshot[@"checkedAt"] doubleValue];self.lastProbeResponseAt=checked>0?[NSDate dateWithTimeIntervalSince1970:checked]:nil;self.probePlaylistChecked=[ServiceStore playlistPathForService:self.service].length>0&&[healthSnapshot[@"channelCount"] respondsToSelector:@selector(unsignedIntegerValue)];self.probeChannelCount=self.probePlaylistChecked?[healthSnapshot[@"channelCount"] unsignedIntegerValue]:0;
     [self.tableView reloadData];
     self.displayedRunning=[self running];
     self.displayedRuntimeStatus=[self currentRuntimeStatus];
@@ -233,6 +237,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     if(![self running]){self.health=@"服务未运行 · 未检测";[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];return;}
     self.probing = YES;
     self.health = @"检测中…";
+    self.probePlaylistChecked=NO;self.probeChannelCount=0;
     [self.tableView reloadData];
     BOOL manifestService=[ServiceStore isMediaService:self.service];
     NSString *playlistPath=[ServiceStore playlistPathForService:self.service];
@@ -261,6 +266,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
               else if(manifestService){id json=data.length?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;BOOL healthy=[json isKindOfClass:NSDictionary.class]&&[json[@"ok"] isKindOfClass:NSNumber.class]&&[json[@"ok"] boolValue];w.health=[(healthy?@"健康检查通过 · GET /health":@"HTTP 可访问 · /health 未确认健康字段") stringByAppendingString:time];}
               else if(playlistPath.length){NSString *text=data.length<=10*1024*1024?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;NSArray *channels=text.length?[M3UParser parse:text baseURL:probeURL]:@[];BOOL format=[text containsString:@"#EXTM3U"]||[text containsString:@"#EXTINF"]||channels.count>0;if(format){w.probePlaylistChecked=YES;w.probeChannelCount=channels.count;}w.health=[(format?[NSString stringWithFormat:@"频道清单可读取 · %lu 个频道",(unsigned long)channels.count]:[NSString stringWithFormat:@"HTTP %ld · 响应不是有效频道清单",(long)status]) stringByAppendingString:time];}
               else w.health=[[NSString stringWithFormat:@"HTTP 可访问 · GET %@ 返回 %ld · 健康状态未知",path,(long)status] stringByAppendingString:time];
+              NSMutableDictionary *snapshot=[@{@"status":error?@"failed":((status>=200&&status<300)?@"reachable":@"http-error"),@"result":w.health?:@"检测完成",@"httpStatus":@(status),@"checkedAt":@(NSDate.date.timeIntervalSince1970),@"path":path?:@"/"} mutableCopy];if(w.probePlaylistChecked)snapshot[@"channelCount"]=@(w.probeChannelCount);[ServiceStore recordHealthSnapshot:snapshot forServiceIdentifier:w.service[@"id"]];
               [w.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];
             });
           }];

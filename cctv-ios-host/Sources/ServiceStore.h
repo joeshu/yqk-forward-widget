@@ -18,6 +18,8 @@
 + (nullable NSString *)epgURLForService:(NSDictionary *)service;
 + (void)associateLegacyLoopbackSubscriptionsForService:(NSDictionary *)service;
 + (void)save:(NSDictionary *)service;
++ (NSDictionary *)healthSnapshotForServiceIdentifier:(NSString *)identifier;
++ (void)recordHealthSnapshot:(NSDictionary *)snapshot forServiceIdentifier:(NSString *)identifier;
 /// Caller must first confirm that this service is stopped. Retains code for rollback and all user data.
 + (NSDictionary *)replaceImportedService:(NSDictionary *)existing withService:(NSDictionary *)incoming error:(NSError **)error;
 + (NSDictionary *)rollbackImportedService:(NSDictionary *)service error:(NSError **)error;

@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import json
 import plistlib
 import unittest
@@ -19,6 +20,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         cls.episodes = (ROOT / 'Sources/MediaEpisodeSelectionViewController.m').read_text()
         cls.resource_detail = (ROOT / 'Sources/PluginResourceDetailViewController.m').read_text()
         cls.service_store = (ROOT / 'Sources/ServiceStore.m').read_text()
+        cls.import_workflow = (ROOT / 'Sources/ResourceImportWorkflowViewController.m').read_text()
+        cls.services = (ROOT / 'Sources/ServicesViewController.m').read_text()
+        cls.package_downloader = (ROOT / 'Sources/MediaPackageDownloader.m').read_text()
 
     def test_player_exit_cancels_work_after_confirmed_transition(self):
         will = self.playback.split('- (void)viewWillDisappear:', 1)[1].split('- (void)viewDidDisappear:', 1)[0]
@@ -519,6 +523,31 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('@"progressStages":progressStages',native)
         remote=(ROOT / 'Tests/test_native_package.py').read_text()
         self.assertIn("stages=result['progressStages']",remote)
+
+    def test_import_preview_and_single_file_retries_survive_process_recreation(self):
+        self.assertIn('ApplicationSupportDirectory', self.import_workflow)
+        self.assertIn('workflow-v1.plist', self.import_workflow)
+        self.assertIn('NSPropertyListBinaryFormat_v1_0', self.import_workflow)
+        self.assertIn('ResourceImportReadSnapshot()', self.import_workflow)
+        self.assertIn('if([snapshot[@"busy"] boolValue])', self.import_workflow)
+        self.assertIn('retryData', self.import_workflow)
+        self.assertIn('retryBookmark', self.import_workflow)
+        self.assertIn('retryCandidateAtIndex:', self.import_workflow)
+        self.assertIn('retrySaveCandidateAtIndex:', self.import_workflow)
+        self.assertIn('refreshExistingResourceMatches', self.import_workflow)
+        self.assertIn('existingImportTargetsProvider', self.root)
+        self.assertIn('importFingerprint', self.import_workflow)
+        self.assertIn('filename.lastPathComponent', self.import_workflow)
+
+    def test_service_health_snapshot_is_persistent_and_channel_counts_are_scoped(self):
+        self.assertIn('healthSnapshotForServiceIdentifier:', self.service_store)
+        self.assertIn('recordHealthSnapshot:', self.service_store)
+        self.assertIn('updated[@"healthSnapshot"]=clean', self.service_store)
+        self.assertIn('healthResult', self.root)
+        self.assertIn('healthCheckedAt', self.root)
+        self.assertIn('healthSnapshotForServiceIdentifier:', self.services)
+        self.assertIn('self.probePlaylistChecked=NO;self.probeChannelCount=0', self.services)
+        self.assertIn('removeObjectForKey:@"healthSnapshot"', self.service_store)
 
     def test_service_editor_uses_dynamic_type_and_vertical_input_rows(self):
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
@@ -1292,22 +1321,37 @@ class ResourceInteractionContracts(unittest.TestCase):
     def test_bundled_aggregators_stay_grouped_and_load_members_on_demand(self):
         media = self.detail
         resources = ROOT / 'Resources/BuiltinMedia'
-        live = json.loads((resources / 'haoliang-live.json').read_text())
-        python_aggregate = json.loads((resources / 'haoliang-py.json').read_text())
-        tvbox_aggregate = json.loads((resources / 'haoliang-tvbox.json').read_text())
         lytvs = json.loads((resources / 'lytvs-ios.json').read_text())
-        self.assertEqual(len(live['lives']), 186)
-        self.assertEqual(len(python_aggregate['sites']), 307)
-        self.assertEqual(len(tvbox_aggregate['sites']), 285)
+        for_adm = json.loads((resources / 'for-adm.json').read_text())
+        for retired in ('haoliang-live.json', 'haoliang-py.json', 'haoliang-tvbox.json'):
+            self.assertFalse((resources / retired).exists())
         self.assertEqual(len(lytvs['sites']), 324)
         self.assertEqual(len(lytvs['lives']), 40)
+        self.assertEqual(for_adm['name'], 'For-ADM CCTVHost 影视资源合集')
+        self.assertEqual(len(for_adm['sites']), 8)
+        self.assertEqual(len(for_adm['lives']), 0)
+        self.assertTrue(all(site.get('type') == 'script' and site.get('api', '').lower().split('?', 1)[0].endswith('.js') for site in for_adm['sites']))
+        self.assertEqual(len({site['key'] for site in for_adm['sites']}), 8)
+        for builtin, example in (
+            (resources / 'hongguo-python.py', ROOT / 'Examples/hgtv-python/hgtv_public_1_0_5.py'),
+            (resources / 'hongguo-node.js', ROOT / 'Examples/hgtv-node/hgtv.js'),
+        ):
+            self.assertEqual(hashlib.sha256(builtin.read_bytes()).digest(), hashlib.sha256(example.read_bytes()).digest())
         lytvs_python = [site for site in lytvs['sites'] if site['api'].split('?', 1)[0].lower().endswith('.py')]
         self.assertEqual(len(lytvs_python), 223)
         self.assertEqual(sum(site['api'].count('__LYTVS_SUBSCRIPTION_TOKEN__') for site in lytvs['sites']), 218)
         self.assertTrue((resources / 'zen-keke-stream.js').is_file())
         self.assertIn('installBundledMediaResourcesIfNeeded', self.root)
         self.assertIn('builtin-lytvs-ios', self.root)
-        self.assertIn('cctv.bundledMediaResources.v2', self.root)
+        self.assertIn('builtin-for-adm', self.root)
+        self.assertIn('cctv.bundledMediaResources.v4', self.root)
+        self.assertIn('builtin-hongguo-python', self.root)
+        self.assertIn('builtin-hongguo-node', self.root)
+        self.assertIn('runtimeHint:spec[@"runtime"]', self.root)
+        self.assertIn('playTimeoutMs', self.root)
+        self.assertIn('builtin-haoliang-live', self.root)  # one-time migration removes prior installs
+        self.assertIn('builtin-haoliang-py', self.root)
+        self.assertIn('builtin-haoliang-tvbox', self.root)
         self.assertIn('CCTVTVBoxStoredSubscriptionToken', self.root)
         self.assertIn('CCTVTVBoxSaveSubscriptionToken', self.root)
         self.assertIn('kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly', self.root)
@@ -1333,6 +1377,26 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[self deleteSubscription:existingURL]', live_loader)
         self.assertIn('tvboxLiveSelection.%@', live_loader)
         self.assertIn('tvboxCatalogID', live_loader)
+
+    def test_for_adm_signed_sources_follow_the_working_native_client_contract(self):
+        downloader = self.package_downloader
+        self.assertIn('PackageAdaptForADMSignedSource', downloader)
+        self.assertIn('raw.githubusercontent.com', downloader)
+        for source in ('kkapp', 'ncat', 'happ'):
+            self.assertIn(f'/joeshu/for-adm/master/cctvhost/{source}.js', downloader)
+        self.assertIn('/joeshu/for-adm/master/cctvhost/dyls.js', downloader)
+        self.assertIn("if(String(ep.parseUrl||'').trim())return false", downloader)
+        self.assertIn("function dylProbeHls(url,headers)", downloader)
+        self.assertIn("await dylProbeHls(safe,headers)", downloader)
+        self.assertIn("m3u8|mp4", downloader)
+        self.assertIn("method.toLowerCase()", downloader)
+        self.assertIn("path==='/config/prod/appInit.html'?method:method.toLowerCase()", downloader)
+        self.assertIn("join('&')", downloader)
+        self.assertIn("headers['Content-Type']='application/json'", downloader)
+        self.assertIn("this.api(path,params,'logic','GET')", downloader)
+        self.assertIn('rows=Array.isArray(result)?result:', downloader)
+        self.assertIn("headers.Referer=Source.origin+'/'", downloader)
+        self.assertIn('For-ADM 三源脚本协议已变化，未导入不兼容版本。', downloader)
 
     def test_explicit_maccms_web_pages_keep_the_web_playback_handoff(self):
         api = (ROOT / 'Sources/MediaAPIClient.m').read_text()

@@ -25,6 +25,51 @@ static NSDictionary<NSString *,NSString *> *PackageSafeHeaders(id value) {
     for(id rawName in value){if(count++>=24)break;id rawValue=value[rawName];if(![rawName isKindOfClass:NSString.class]||![rawValue isKindOfClass:NSString.class])continue;NSString *name=rawName,*text=rawValue;NSRange range=NSMakeRange(0,name.length);if(!name.length||name.length>128||text.length>4096||[namePattern numberOfMatchesInString:name options:0 range:range]!=1||[blocked containsObject:name.lowercaseString]||[text rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\r\n"]].location!=NSNotFound)continue;result[name]=text;}
     return result.copy;
 }
+static NSData *PackageAdaptForADMSignedSource(NSData *data,NSURL *sourceURL,NSError **error) {
+    if(![sourceURL.host.lowercaseString isEqual:@"raw.githubusercontent.com"])return data;
+    if([sourceURL.path.lowercaseString isEqual:@"/joeshu/for-adm/master/cctvhost/dyls.js"]){
+        NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        if(!text||![text containsString:@"id:'joeshu.dyls'"]){
+            if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:31 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 电影猎手脚本与站点地址不匹配，已停止导入。"}];return nil;
+        }
+        NSString *old=@"function dylNeedParse(ep,line){var value=line.need_to_parse??line.player_need_to_parse??ep.need_to_parse??ep.player_need_to_parse;if(value!=null&&value!=='')return value===true||value===1||String(value).toLowerCase()==='true'||String(value)==='1';return !ep.ready_to_play;}";
+        NSString *updated=@"function dylNeedParse(ep,line){if(String(ep.parseUrl||'').trim())return false;var direct=String(ep.play_url||'');if(/^https?:\\/\\//i.test(direct)&&/\\.(?:m3u8|mp4)(?:[?#]|$)/i.test(direct))return false;var value=line.need_to_parse??line.player_need_to_parse??ep.need_to_parse??ep.player_need_to_parse;if(value!=null&&value!=='')return value===true||value===1||String(value).toLowerCase()==='true'||String(value)==='1';return !ep.ready_to_play;}";
+        NSUInteger occurrences=[[text componentsSeparatedByString:old] count]-1;
+        if(occurrences==1)text=[text stringByReplacingOccurrencesOfString:old withString:updated];
+        else if(![text containsString:updated]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 电影猎手播放协议已变化，未导入不兼容版本。"}];return nil;}
+        NSString *oldResolver=@"async function dylResolve(id,line,episode){";
+        NSString *newResolver=@"async function dylProbeHls(url,headers){var r=await CCTVHttp.get(url,{headers:headers||{}}),status=Number(r.statusCode||r.status||0),body=r.data;if(status!==200||typeof body!=='string'||body.length>1048576||!/^\\s*#EXTM3U(?:\\s|$)/.test(body))throw new Error('电影猎手 HLS 清单不可用');if(!/#EXT-X-STREAM-INF:/i.test(body)&&!body.split(/\\r?\\n/).some(function(line){line=line.trim();return line&&line.charAt(0)!=='#';}))throw new Error('电影猎手 HLS 清单为空');return url;}async function dylResolve(id,line,episode){";
+        NSUInteger resolverOccurrences=[[text componentsSeparatedByString:oldResolver] count]-1;
+        if(resolverOccurrences==1)text=[text stringByReplacingOccurrencesOfString:oldResolver withString:newResolver];
+        else if(![text containsString:@"async function dylProbeHls(url,headers)"]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 电影猎手播放流程已变化，未导入不兼容版本。"}];return nil;}
+        NSString *oldReturn=@"return [{url:safe,name:line.name,headers:dylMediaHeaders(line)}];}";
+        NSString *newReturn=@"var headers=dylMediaHeaders(line);if(/\\.m3u8(?:[?#]|$)/i.test(safe))await dylProbeHls(safe,headers);return [{url:safe,name:line.name,headers:headers}];}";
+        NSUInteger returnOccurrences=[[text componentsSeparatedByString:oldReturn] count]-1;
+        if(returnOccurrences==1)text=[text stringByReplacingOccurrencesOfString:oldReturn withString:newReturn];
+        else if(![text containsString:@"await dylProbeHls(safe,headers)"]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 电影猎手媒体校验流程已变化，未导入不兼容版本。"}];return nil;}
+        return [text dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    NSDictionary *sourceIDs=@{@"/joeshu/for-adm/master/cctvhost/kkapp.js":@"kkapp",@"/joeshu/for-adm/master/cctvhost/ncat.js":@"ncat",@"/joeshu/for-adm/master/cctvhost/happ.js":@"happ"};
+    NSString *sourceID=sourceIDs[sourceURL.path.lowercaseString];if(!sourceID.length)return data;
+    NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if(!text||![text containsString:[NSString stringWithFormat:@"var Source={\"id\":\"%@\"",sourceID]]){
+        if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:31 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源脚本与站点地址不匹配，已停止导入。"}];return nil;
+    }
+    NSArray<NSDictionary<NSString *,NSString *> *> *replacements=@[
+        @{@"old":@"var query=get?Object.keys(data).sort().filter(function(k){return data[k]!==''&&data[k]!=null;}).map(function(k){return k+'='+data[k]+'&';}).join(''):'';",@"new":@"var query=get?Object.keys(data).sort().filter(function(k){return data[k]!==''&&data[k]!=null;}).map(function(k){return k+'='+data[k];}).join('&'):'';"},
+        @{@"old":@"var ts=String(Date.now()),sig=C.HmacSHA1(method+'|'+path+'|'+query+'|'+ts+'|'+session+'|',Source.signKey).toString(C.enc.Hex);",@"new":@"var signMethod=path==='/config/prod/appInit.html'?method:method.toLowerCase(),ts=String(Date.now()),sig=C.HmacSHA1(signMethod+'|'+path+'|'+query+'|'+ts+'|'+session+'|',Source.signKey).toString(C.enc.Hex);"},
+        @{@"old":@"if(user&&user.id&&user.token){headers.userId=String(user.id);headers['x-token']=String(user.token);}",@"new":@"if(!get)headers['Content-Type']='application/json';if(user&&user.id&&user.token){headers.userId=String(user.id);headers['x-token']=String(user.token);}"},
+        @{@"old":@"SiteAdapter.prototype.sessionApi=async function(path,params){await this.ensureGuest();return this.api(path,params,'logic','POST');};",@"new":@"SiteAdapter.prototype.sessionApi=async function(path,params){await this.ensureGuest();return this.api(path,params,'logic','GET');};"},
+        @{@"old":@"var result=await adapter.play(vodId,line,selected),rows=siteArray(result&& (result.playUrls||result.urls));",@"new":@"var result=await adapter.play(vodId,line,selected),rows=Array.isArray(result)?result:siteArray(result&& (result.playUrls||result.urls));"},
+        @{@"old":@"return {name:String(row.name||line.name||'原站线路'),url:url,playerType:'app',customHeaders:siteHeaders(row.customHeaders||row.headers||row.header)};",@"new":@"var headers=siteHeaders(row.customHeaders||row.headers||row.header);if(row.referrerPolicy!=='no-referrer'&&!headers.Referer&&!headers.referer)headers.Referer=Source.origin+'/';return {name:String(row.name||line.name||'原站线路'),url:url,playerType:'app',customHeaders:headers};"}
+    ];
+    for(NSDictionary<NSString *,NSString *> *replacement in replacements){
+        NSString *old=replacement[@"old"],*updated=replacement[@"new"];NSUInteger occurrences=[[text componentsSeparatedByString:old] count]-1;
+        if(occurrences==1)text=[text stringByReplacingOccurrencesOfString:old withString:updated];
+        else if(![text containsString:updated]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源脚本协议已变化，未导入不兼容版本。"}];return nil;}
+    }
+    return [text dataUsingEncoding:NSUTF8StringEncoding];
+}
 static BOOL PackageHeaderIsSensitive(NSString *name) {
     if(!name.length)return NO;
     NSString *compact=[[[name lowercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@""] stringByReplacingOccurrencesOfString:@"_" withString:@""];
@@ -157,7 +202,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     if(PackageLooksLikeHTML(self.body)){[self finish:nil error:[self error:@"资源地址返回了 HTML 网页而非脚本或 ZIP；请检查直链、访问权限或登录状态"]];return;}
     if(self.checksum&&![PackageMD5(self.body) isEqual:self.checksum]){[self finish:nil error:[self error:@"资源与 MD5 校验值不一致，未安装"]];return;}
     [self progress:self.checksum?@"主资源 MD5 校验通过":@"来源没有 MD5 · 未验证来源完整性"];
-    self.scriptData=[self.body copy];
+    self.scriptData=[self.body copy];NSError *adapterError=nil;NSData *adapted=PackageAdaptForADMSignedSource(self.scriptData,self.effectiveURL?:self.originalURL,&adapterError);if(!adapted){[self finish:nil error:adapterError];return;}self.scriptData=adapted;
     NSString *text=[@[@"js",@"mjs",@"cjs"] containsObject:self.targetURL.pathExtension.lowercaseString]?[[NSString alloc] initWithData:self.scriptData encoding:NSUTF8StringEncoding]:nil;
     BOOL catpaw=[text containsString:@"/config"]&&[text containsString:@"/spider"]&&([text containsString:@"catServerFactory"]||[text containsString:@"createService"]||[text containsString:@"serverFactory"]);
     if(catpaw){self.phase=PackageConfigChecksum;[self begin:[self configURL:YES]];return;}

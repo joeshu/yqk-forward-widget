@@ -2,11 +2,14 @@ import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import {randomBytes,randomUUID,createHash} from 'node:crypto'
 import vm from 'node:vm'
+import CryptoJS from 'crypto-js'
 
 let files={}
 const timers=new Map(),requests=[]
 const storage=new Map()
 let next=1
+const binaryKey='0123456789abcdef',binaryIV='fedcba9876543210'
+const encryptedFixture=CryptoJS.AES.encrypt('{"code":200,"message":"decrypted binary"}',CryptoJS.enc.Utf8.parse(binaryKey),{iv:CryptoJS.enc.Utf8.parse(binaryIV),mode:CryptoJS.mode.CBC,padding:CryptoJS.pad.Pkcs7}).ciphertext.toString(CryptoJS.enc.Base64)
 const host={
   __hostLog(){},__hostUUID:randomUUID,__hostRandomBytes:n=>[...randomBytes(n)],
   __hostListPackageFiles:()=>Object.keys(files),__hostReadPackageFile:path=>{if(!Object.hasOwn(files,path))throw Error('missing '+path);return files[path]},
@@ -14,7 +17,7 @@ const host={
   __hostFetchSync(url,options){return {code:200,url,headers:{'Content-Type':'text/html'},content:'<div class="list"><a href="/detail/1"><img src="https://fixture.test/p.jpg"><span class="remark">HD</span>Rule movie</a></div>'}},
   __hostSetTimeout(fn,ms){const id=next++;timers.set(id,setTimeout(()=>{timers.delete(id);fn()},ms));return id},
   __hostClearTimeout(id){clearTimeout(timers.get(id));timers.delete(id)},__hostAbortFetch(){},
-  __hostFetch(url,options,callback){const request={url,...JSON.parse(options)};if(request.bodyBase64)request.body=Buffer.from(request.bodyBase64,'base64').toString();requests.push(request);const headers={'Content-Type':'application/json'};if(url.endsWith('/login'))headers['Set-Cookie']='sid=fixture; Path=/; HttpOnly';setTimeout(()=>callback({status:200,url,headers,base64:Buffer.from(JSON.stringify({received:request.body,cookie:request.headers?.Cookie||request.headers?.cookie||''})).toString('base64')}),0);return next++},
+  __hostFetch(url,options,callback){const request={url,...JSON.parse(options)};if(request.bodyBase64)request.body=Buffer.from(request.bodyBase64,'base64').toString();requests.push(request);const headers={'Content-Type':'application/json'};let status=200,body=Buffer.from(JSON.stringify({received:request.body,cookie:request.headers?.Cookie||request.headers?.cookie||''}));if(url.endsWith('/binary-stream')){status=400;headers['Content-Type']='application/stream';body=Buffer.from('{"code":40105,"message":"sign error"}')}if(url.endsWith('/encrypted-stream')){headers['Content-Type']='application/stream';body=Buffer.from(encryptedFixture,'base64')}if(url.endsWith('/login'))headers['Set-Cookie']='sid=fixture; Path=/; HttpOnly';setTimeout(()=>callback({status,url,headers,base64:body.toString('base64')}),0);return next++},
 }
 const context=vm.createContext(host)
 vm.runInContext(readFileSync(new URL('../../GeneratedJS/js-runtime.bundle.js',import.meta.url),'utf8'),context)
@@ -32,6 +35,7 @@ try{
   }
   let reply=await invoke('start',{entry:'index.js',moduleType:'esm',protocol:'cctvhost.media/1'})
   assert.equal(reply.ok,true,JSON.stringify(reply))
+  assert.equal(vm.runInContext('self===window',context),true)
   assert.deepEqual(requests[0],{url:'https://fixture.test/init',method:'POST',headers:{'X-Test':'yes'},body:'original-js'})
   assert.equal((await invoke('home')).result.items[0].name,'Film')
   reply=await invoke('search',{keyword:'hello',page:2})
@@ -123,5 +127,12 @@ try{
   reply=await invoke('detail',{id:'movie-1'});assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.name,'Detail title');assert.equal(reply.result.lines[0].episodes[0].name,'第一集')
   reply=await invoke('play',{lineId:'main',id:reply.result.lines[0].episodes[0].id});assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.requiresWebPlayback,true);assert.equal(reply.result.url,'https://fixture.test/watch?item=movie-1&path=%2Fmovie%2F1')
   await invoke('stop')
-  console.log('PASS: ESM/CommonJS/CatVod, Hamo v3 HTTP/cache/crypto, listing/filter/detail/resolve mapping, package boundaries')
+  files={'index.cjs':`module.exports={async home(){const raw=await net.http('https://fixture.test/binary-stream'),text=await net.http('https://fixture.test/binary-stream',{encoding:'utf8'}),bytes=await net.http('https://fixture.test/binary-stream',{buffer:2}),encrypted=await net.http('https://fixture.test/encrypted-stream'),ciphertext=CryptoJS.enc.Base64.parse(encrypted.content),clear=CryptoJS.AES.decrypt({ciphertext},CryptoJS.enc.Utf8.parse('${binaryKey}'),{iv:CryptoJS.enc.Utf8.parse('${binaryIV}'),mode:CryptoJS.mode.CBC,padding:CryptoJS.pad.Pkcs7}).toString(CryptoJS.enc.Utf8);return {list:[{vod_id:'binary',vod_name:[Buffer.from(raw.content,'base64').toString('utf8'),text.content,Buffer.from(bytes.content).toString('utf8'),clear].join('|')}]}}}`}
+  reply=await invoke('start',{entry:'index.cjs',moduleType:'commonjs',protocol:'catvod-js',name:'Binary fixture'})
+  assert.equal(reply.ok,true,JSON.stringify(reply))
+  reply=await invoke('home');assert.equal(reply.ok,true,JSON.stringify(reply))
+  const expected='{"code":40105,"message":"sign error"}'
+  assert.equal(reply.result.list[0].vod_name,[expected,expected,expected,'{"code":200,"message":"decrypted binary"}'].join('|'),'application/stream defaults to base64 while explicit text/byte-array modes and AES-CBC decoding remain available')
+  await invoke('stop')
+  console.log('PASS: ESM/CommonJS/CatVod, binary signed API responses, explicit text/byte modes, Hamo v3 HTTP/cache/crypto, listing/filter/detail/resolve mapping, package boundaries')
 }finally{for(const timer of timers.values())clearTimeout(timer)}

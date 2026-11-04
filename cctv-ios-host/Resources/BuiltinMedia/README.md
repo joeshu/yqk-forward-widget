@@ -4,4 +4,6 @@ These files are registered locally as grouped resource catalogs on first launch.
 
 `lytvs-ios.json` contains the iOS subscription's 324 internal entries, including 223 Python Spider endpoints and 40 live lists. Its subscription credential is replaced with `__LYTVS_SUBSCRIPTION_TOKEN__` in this public repository. The app asks for the token only when a protected site is first selected and keeps it in this device's Keychain; individual Python scripts are downloaded and checked on demand.
 
-The `haoliang-live.json`, `haoliang-py.json`, and `haoliang-tvbox.json` files are the separate owner-supplied aggregates. `zen-keke-stream.js` is the imported JavaScript source.
+`hongguo-python.py` and `hongguo-node.js` are the standalone Red Fruit short-drama sources. The app imports them as two separate local resources on first launch; both keep the 120-second playback-resolution budget, and neither executes during registration. They are maintained byte-for-byte with `Examples/hgtv-python/hgtv_public_1_0_5.py` and `Examples/hgtv-node/hgtv.js`. `zen-keke-stream.js` is the imported JavaScript source.
+
+`for-adm.json` registers joeshu's For-ADM CCTVHost collection as one catalog row. Its eight JS sites remain remote and are fetched only when selected; the app recognizes their CatVod-compatible `home/category/search/detail/play` exports and passes returned media URLs and headers to the native player.

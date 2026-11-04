@@ -358,6 +358,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
         NSString *kind=[profile[@"resourceKind"] isEqual:@"live"]?@"直播服务":([profile[@"resourceKind"] isEqual:@"vod"]?@"影视服务":([profile[@"resourceKind"] isEqual:@"both"]?@"影视 / 直播服务":@"待识别能力"));
         NSMutableArray *lines=[NSMutableArray arrayWithObject:[NSString stringWithFormat:@"%@%@ · %@",current,kind,profile[@"status"]?:@"未启动"]];
         if([profile[@"subscriptionURL"] length]){[lines addObject:[NSString stringWithFormat:@"%@ 个缓存频道 · %@",profile[@"channelCount"]?:@0,profile[@"subscriptionStatus"]?:@"尚未读取清单"]];}
+        if([profile[@"healthResult"] isKindOfClass:NSString.class]){NSTimeInterval checked=[profile[@"healthCheckedAt"] doubleValue];NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"MM-dd HH:mm";NSString *time=checked>0?[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:checked]]:@"未知时间";[lines addObject:[NSString stringWithFormat:@"最近接口检测 %@ · %@",time,profile[@"healthResult"]]];}
         return [lines componentsJoinedByString:@"\n"];
     }
     if(tvbox){

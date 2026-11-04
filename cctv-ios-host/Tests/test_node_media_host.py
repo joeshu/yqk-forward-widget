@@ -526,6 +526,39 @@ class NodeMediaHostTests(unittest.TestCase):
         finally:
             upstream.shutdown(); upstream.server_close(); thread.join(timeout=2)
 
+    def test_binary_stream_response_is_preserved_as_base64_for_encrypted_api_adapters(self):
+        node = os.environ.get('CCTVHOST_NODE_BINARY', shutil.which('node'))
+        payload = b'{"code":40105,"message":"sign error"}'
+        compressed = subprocess.check_output([node, '-e',
+            "process.stdout.write(require('node:zlib').brotliCompressSync(Buffer.from(process.argv[1])))",
+            payload.decode('ascii')])
+
+        class Fixture(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/stream')
+                self.send_header('Content-Encoding', 'br')
+                self.send_header('Content-Length', str(len(compressed)))
+                self.end_headers()
+                self.wfile.write(compressed)
+
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
+        thread = threading.Thread(target=upstream.serve_forever, daemon=True); thread.start()
+        try:
+            (self.package / 'index.cjs').write_text(f'''module.exports={{async search(){{
+              const response=await net.http('http://127.0.0.1:{upstream.server_port}/api');
+              return {{list:[{{vod_id:String(response.code),vod_name:Buffer.from(response.content,'base64').toString('utf8')}}]}};
+            }}}};''')
+            self.assertTrue(self.start()['ok'])
+            response = self.call('search')
+            self.assertTrue(response['ok'], response)
+            row = response['result']['list'][0]
+            self.assertEqual((row['vod_id'], row['vod_name']), ('400', payload.decode('ascii')))
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            upstream.shutdown(); upstream.server_close(); thread.join(timeout=2)
+
     def test_unhandled_rejection_isolated_to_owning_plugin_session(self):
         (self.package / 'index.cjs').write_text('''module.exports={init(ext){if(ext!=='healthy')
           setTimeout(()=>Promise.reject(new Error('fixture rejection')),0)},

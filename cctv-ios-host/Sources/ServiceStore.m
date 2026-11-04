@@ -207,6 +207,14 @@ static BOOL ServiceValidPlaylistPath(id value){
     [rows addObject:service];
     [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];
 }
++ (NSDictionary *)healthSnapshotForServiceIdentifier:(NSString *)identifier {
+    if(!identifier.length)return @{};for(NSDictionary *service in [self services])if([service[@"id"] isEqual:identifier]){NSDictionary *snapshot=service[@"healthSnapshot"];return [snapshot isKindOfClass:NSDictionary.class]?snapshot:@{};}return @{};
+}
++ (void)recordHealthSnapshot:(NSDictionary *)snapshot forServiceIdentifier:(NSString *)identifier {
+    if(!identifier.length||![snapshot isKindOfClass:NSDictionary.class])return;NSMutableArray *rows=[[self services] mutableCopy];BOOL found=NO;
+    for(NSUInteger i=0;i<rows.count;i++){NSDictionary *service=rows[i];if(![service[@"id"] isEqual:identifier])continue;NSMutableDictionary *updated=[service mutableCopy];NSMutableDictionary *clean=[NSMutableDictionary dictionary];for(NSString *key in @[@"status",@"result",@"httpStatus",@"channelCount",@"checkedAt",@"path"]){id value=snapshot[key];if(([value isKindOfClass:NSString.class]&&[value length]<=1024)||[value isKindOfClass:NSNumber.class])clean[key]=value;}updated[@"healthSnapshot"]=clean;rows[i]=updated;found=YES;break;}
+    if(found)[NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];
+}
 + (NSDictionary *)replaceImportedService:(NSDictionary *)existing withService:(NSDictionary *)incoming error:(NSError **)error {
     NSString *identifier=existing[@"id"],*incomingID=incoming[@"id"];
     if(!ServiceRelativePath(identifier)||identifier.pathComponents.count!=1||!ServiceRelativePath(incomingID)||incomingID.pathComponents.count!=1||[identifier isEqual:incomingID]||[existing[@"builtin"] boolValue]||![incoming[@"manifest"] isKindOfClass:NSDictionary.class]){
@@ -216,7 +224,7 @@ static BOOL ServiceValidPlaylistPath(id value){
     if(![package hasPrefix:[source stringByAppendingString:@"/"]]||![fm fileExistsAtPath:[self codePath:resolved]]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:3 userInfo:@{NSLocalizedDescriptionKey:@"新版资源文件不完整，保留原版"}];return nil;}
     NSString *relative=[@"versions" stringByAppendingPathComponent:incomingID],*destination=[base stringByAppendingPathComponent:relative];
     if(![fm createDirectoryAtPath:destination.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:error]||![fm moveItemAtPath:source toPath:destination error:error])return nil;
-    NSMutableDictionary *updated=[existing mutableCopy];NSMutableDictionary *manifest=[incoming[@"manifest"] mutableCopy];
+    NSMutableDictionary *updated=[existing mutableCopy];[updated removeObjectForKey:@"healthSnapshot"];NSMutableDictionary *manifest=[incoming[@"manifest"] mutableCopy];
     if(existing[@"manifest"][@"options"])manifest[@"options"]=existing[@"manifest"][@"options"];
     NSMutableDictionary *previous=[existing mutableCopy];[previous removeObjectForKey:@"previousImport"];updated[@"previousImport"]=previous;
     for(NSString *key in @[@"engine",@"protocol",@"url",@"importHeaders",@"downloadChecksum",@"configDownloadChecksum",@"configContentChecksum",@"configurationState",@"updated"])if(incoming[key])updated[key]=incoming[key];
