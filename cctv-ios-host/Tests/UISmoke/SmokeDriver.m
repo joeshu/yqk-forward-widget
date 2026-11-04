@@ -80,6 +80,8 @@
 - (void)toggleCatalogColumns;
 - (void)toggleCatalogLayout;
 - (void)importPlaylistData:(NSData *)data name:(NSString *)name;
+- (void)replaceSubscription:(NSString *)source URL:(NSString *)url values:(NSDictionary *)values disabled:(BOOL)disabled completion:(void (^)(NSError *error))completion;
+- (void)deleteSubscription:(NSString *)source;
 - (void)previewChannel:(NSDictionary *)channel;
 - (void)stopPreview;
 - (NSDictionary *)channelWithID:(NSString *)identifier;
@@ -286,6 +288,8 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSUInteger importSaveCount=0;
       __block ServiceEditorViewController *editorProbe;
       __block NSDate *editorDeadline;
+      __block BOOL replacementFinished=NO,replacementFailureKept=NO;
+      __block NSString *replacementOriginal,*replacementTarget;
       NSArray *steps = @[
           ^{
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
@@ -525,7 +529,7 @@ static void next(NSArray *steps, NSUInteger index) {
             UIScrollView *filterScroll=[resourcePage valueForKey:@"kindScroll"];
             CGRect filtersInHeader=[filterScroll convertRect:filterScroll.bounds toView:resourcePage.tableView.tableHeaderView];
             check(CGRectGetMinY(filtersInHeader)>=0&&CGRectGetMaxY(filtersInHeader)<=CGRectGetHeight(resourcePage.tableView.tableHeaderView.frame)+1,[NSString stringWithFormat:@"resource category filters stay inside the measured header after return (filters=%@ header=%.1f)",NSStringFromCGRect(filtersInHeader),CGRectGetHeight(resourcePage.tableView.tableHeaderView.frame)]);
-            BOOL filtersStable=filterInstances.count>=6&&filters.arrangedSubviews.count==filterInstances.count;
+            BOOL filtersStable=filterInstances.count==5&&filters.arrangedSubviews.count==filterInstances.count;
             for(NSUInteger index=0;filtersStable&&index<filterInstances.count;index++)filtersStable=filters.arrangedSubviews[index]==filterInstances[index];
             check(filtersStable,@"resource filter controls keep the same views across repeated refreshes");
             check(resourcePage.tableView.estimatedRowHeight==0&&resourcePage.tableView.estimatedSectionHeaderHeight==0,@"resource list measures variable-height rows and summary headers without estimates");
@@ -1021,7 +1025,7 @@ static void next(NSArray *steps, NSUInteger index) {
             UIMenu *collectionActions=catalogPage.navigationItem.rightBarButtonItem.menu;UIMenu *exports=(id)collectionActions.children.firstObject;NSString *jsonAction=exports.children.count>0?((UIAction *)exports.children[0]).title:@"",*zipAction=exports.children.count>1?((UIAction *)exports.children[1]).title:@"";UIContextMenuConfiguration *singleResourceMenu=[catalogPage tableView:catalogPage.tableView contextMenuConfigurationForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0] point:CGPointZero];check([jsonAction isEqual:@"导出完整合集 JSON"]&&[zipAction isEqual:@"导出完整资源 ZIP（含 PY / JS）"]&&singleResourceMenu!=nil,@"resource collection offers complete JSON, full PY/JS ZIP and per-item export");
             UISearchController *catalogSearch=[catalogPage valueForKey:@"searchController"];catalogSearch.searchBar.text=@"index.js";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];check([catalogPage.tableView numberOfRowsInSection:0]==1,@"large resource collections can find one script by URL");catalogSearch.searchBar.text=@"";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];
             catalogPage.serviceForSite=^NSDictionary *(NSDictionary *site){return [site[@"key"] isEqual:@"js-site"]?@{@"id":@"fixture-js",@"name":@"Fixture JS",@"enabled":@YES}:nil;};
-            NSIndexPath *siteIndex=[NSIndexPath indexPathForRow:0 inSection:0];UITableViewCell *siteCell=[catalogPage tableView:catalogPage.tableView cellForRowAtIndexPath:siteIndex];check([siteCell.detailTextLabel.text containsString:@"服务运行中"]&&[siteCell.detailTextLabel.text containsString:@"点按打开资源"],@"collection reflects an already imported script runtime");check(![siteCell.detailTextLabel.text containsString:@"token=kept"]&&[catalogPage.catalog[@"sites"][0][@"api"] containsString:@"token=kept"],@"collection masks credentials in display while preserving the original URL");
+            NSIndexPath *siteIndex=[NSIndexPath indexPathForRow:0 inSection:0];UITableViewCell *siteCell=[catalogPage tableView:catalogPage.tableView cellForRowAtIndexPath:siteIndex];check([siteCell.detailTextLabel.text containsString:@"服务已导入"]&&[siteCell.detailTextLabel.text containsString:@"点按启动并打开资源"],@"an enabled saved configuration is not presented as a running process");check(![siteCell.detailTextLabel.text containsString:@"token=kept"]&&[catalogPage.catalog[@"sites"][0][@"api"] containsString:@"token=kept"],@"collection masks credentials in display while preserving the original URL");
             [catalogPage.tableView.delegate tableView:catalogPage.tableView didSelectRowAtIndexPath:siteIndex];UIViewController *presented=SmokePresentedController(@[catalogPage,nav,root]);UIAlertController *existingActions=[presented isKindOfClass:UIAlertController.class]?(UIAlertController *)presented:nil;NSArray *existingTitles=[existingActions.actions valueForKey:@"title"]?:@[];check([existingTitles containsObject:@"启动并打开资源"],[NSString stringWithFormat:@"an imported collection script offers direct browse (presented=%@ actions=%@)",presented?NSStringFromClass(presented.class):@"none",existingTitles]);[catalogPage dismissViewControllerAnimated:NO completion:nil];capture(self.window,@"21-tvbox-catalog");
           }},
           @{ @"until":^BOOL{return SmokePresentedController(@[(UIViewController *)nav.topViewController,nav,root])==nil;}, @"run":^{
@@ -1083,8 +1087,14 @@ static void next(NSArray *steps, NSUInteger index) {
             check([live[@"kind"] isEqual:@"playlist"],@"unified import recognizes live files before script parsing");
             [importProbe setValue:[NSMutableArray arrayWithArray:@[catalog,live]] forKey:@"candidates"];importProbe.onSaveCandidate=^(NSDictionary *candidate,BOOL update,void (^completion)(NSError *error)){importSaveCount++;check(update,@"import defaults to updating an existing resource while preserving identity");completion(nil);};[importProbe saveSelected];
             editorProbe=[ServiceEditorViewController new];[editorProbe loadViewIfNeeded];UITextField *url=[editorProbe valueForKey:@"urlField"];NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];url.text=[NSString stringWithFormat:@"http://127.0.0.1:%ld/slow-logo.png",(long)port];[editorProbe loadRemote];url.text=@"https://fixture.test/replacement.py";[editorProbe urlChanged];editorDeadline=[NSDate dateWithTimeIntervalSinceNow:1.5];
+            replacementOriginal=[NSString stringWithFormat:@"http://127.0.0.1:%ld/original-edit.m3u",(long)port];replacementTarget=[NSString stringWithFormat:@"http://127.0.0.1:%ld/replacement.m3u",(long)port];NSMutableSet *subscriptions=[root valueForKey:@"subscriptionURLs"];[subscriptions addObject:replacementOriginal];[ProfileStore update:replacementOriginal values:@{@"name":@"Original preserved",@"detectedEPGURL":@"https://fixture.test/auto.xml"}];
+            [root replaceSubscription:replacementOriginal URL:[NSString stringWithFormat:@"http://127.0.0.1:%ld/invalid-edit.m3u",(long)port] values:@{@"name":@"Invalid replacement"} disabled:NO completion:^(NSError *error){
+                replacementFailureKept=error!=nil&&[[root valueForKey:@"subscriptionURLs"] containsObject:replacementOriginal]&&[[ProfileStore metadata:replacementOriginal][@"name"] isEqual:@"Original preserved"];
+                [root replaceSubscription:replacementOriginal URL:replacementTarget values:@{@"name":@"Validated replacement"} disabled:YES completion:^(NSError *successError){check(successError==nil&& ![[root valueForKey:@"subscriptionURLs"] containsObject:replacementOriginal]&&[[root valueForKey:@"subscriptionURLs"] containsObject:replacementTarget],@"a valid subscription is committed only after its channel list has been read");check([[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"] containsObject:replacementTarget],@"subscription replacement retains the disabled preference");replacementFinished=YES;}];
+            }];
           },
-          @{@"timeout":@8,@"until":^BOOL{return !importProbe.busy&&[editorDeadline timeIntervalSinceNow]<=0;},@"run":^{
+          @{@"timeout":@8,@"until":^BOOL{return !importProbe.busy&&replacementFinished&&[editorDeadline timeIntervalSinceNow]<=0;},@"run":^{
+            check(replacementFinished&&replacementFailureKept,@"invalid subscription edits preserve the original source and its metadata");[root deleteSubscription:replacementOriginal];[root deleteSubscription:replacementTarget];NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabled removeObject:replacementTarget];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];
             check(importSaveCount==2&&!importProbe.busy&&[importProbe.taskSummary containsString:@"已保存 2 项"],@"unified import saves only selected preview rows and reports the completed batch");
             check(![[editorProbe valueForKey:@"downloading"] boolValue]&&[editorProbe valueForKey:@"code"]==nil&&editorProbe.presentedViewController==nil,@"editing the URL cancels the old download without applying stale code or presenting a stale error");importProbe=nil;editorProbe=nil;
           }},

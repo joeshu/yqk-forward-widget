@@ -117,7 +117,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/health":
             type(self).health_count += 1
             data = json.dumps({"ok": type(self).health_count >= 3}).encode()
-        elif self.path == "/all.m3u":
+        elif self.path in ("/all.m3u", "/replacement.m3u"):
             content_type = "audio/x-mpegurl"
             data = (f'#EXTM3U\n#EXTINF:-1 tvg-id="cctv1",Startup Test\n'
                     f'http://127.0.0.1:{self.server.server_port}/video.mp4\n').encode()

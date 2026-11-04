@@ -76,6 +76,11 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 @property(nonatomic) BOOL probingResources;
 @property(nonatomic,strong) UIButton *importTaskButton;
 @property(nonatomic,strong) NSLayoutConstraint *importTaskHeight;
+@property(nonatomic,strong) UIView *compactHeader;
+@property(nonatomic,strong) UILabel *compactTitle;
+@property(nonatomic,strong) UIButton *compactAdd;
+@property(nonatomic,strong) UIButton *compactMore;
+- (void)layoutCompactHeader;
 - (void)updateResourceHeaderLayout;
 - (void)updateResourceHeaderLayoutReattaching:(BOOL)reattach;
 - (void)confirmRemoveProfile:(NSString *)source;
@@ -142,6 +147,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
         @{@"icon":@"plus",@"title":@"导入资源",@"action":[UIAction actionWithHandler:^(UIAction *a){[w add];}]},
         @{@"icon":@"play.rectangle",@"title":@"更新影视首页内容",@"action":[UIAction actionWithHandler:^(UIAction *a){if(w.onRefreshMediaHome)w.onRefreshMediaHome();}]}
     ])];
+    self.compactHeader=[UIView new];self.compactHeader.backgroundColor=[HostBackground() colorWithAlphaComponent:.94];self.compactHeader.hidden=YES;[self.tableView addSubview:self.compactHeader];self.compactTitle=[UILabel new];self.compactTitle.text=@"资源";self.compactTitle.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline] scaledFontForFont:[UIFont systemFontOfSize:17 weight:UIFontWeightSemibold] maximumPointSize:22];self.compactTitle.textColor=HostText();[self.compactHeader addSubview:self.compactTitle];self.compactAdd=[UIButton buttonWithType:UIButtonTypeSystem];[self.compactAdd setImage:[UIImage systemImageNamed:@"plus"] forState:UIControlStateNormal];self.compactAdd.accessibilityLabel=@"添加资源";[self.compactAdd addTarget:self action:@selector(add) forControlEvents:UIControlEventTouchUpInside];self.compactMore=[UIButton buttonWithType:UIButtonTypeSystem];[self.compactMore setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];self.compactMore.menu=moreButton.menu;self.compactMore.showsMenuAsPrimaryAction=YES;self.compactMore.accessibilityLabel=@"更多资源操作";for(UIButton *button in @[self.compactAdd,self.compactMore]){button.tintColor=HostText();[self.compactHeader addSubview:button];}
     [self reloadProfiles];
 }
 - (void)viewWillAppear:(BOOL)animated {
@@ -160,8 +166,12 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 - (void)runtimeStateDidChange {[self reloadProfiles];}
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    [self updateResourceHeaderLayout];
+    [self updateResourceHeaderLayout];[self layoutCompactHeader];
 }
+- (void)layoutCompactHeader {
+    if(!self.compactHeader)return;CGFloat width=self.tableView.bounds.size.width,top=MAX(self.statusBarSafeInset,self.view.safeAreaInsets.top);CGFloat offset=self.tableView.contentOffset.y;self.compactHeader.frame=CGRectMake(0,offset,width,top+52);self.compactTitle.frame=CGRectMake(20,top+4,MAX(1,width-132),44);self.compactAdd.frame=CGRectMake(width-104,top+4,44,44);self.compactMore.frame=CGRectMake(width-56,top+4,44,44);self.compactHeader.hidden=offset<=CGRectGetMaxY(self.topActionsStack.frame)-top;[self.tableView bringSubviewToFront:self.compactHeader];
+}
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {[self layoutCompactHeader];}
 - (void)updateResourceHeaderLayout {
     [self updateResourceHeaderLayoutReattaching:NO];
 }
@@ -374,7 +384,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 - (NSString *)latencyTextForProfile:(NSDictionary *)profile color:(UIColor * __autoreleasing *)colorOut {
     NSString *source=[profile[@"source"] isKindOfClass:NSString.class]?profile[@"source"]:@"";NSDictionary *result=self.latencyResults[source];UIColor *color=HostSecondaryText();NSString *text=@"未检测";
     if([result[@"notProbeable"] boolValue])text=@"本机";
-    else if(result){if(![result[@"ok"] boolValue]){NSInteger status=[result[@"status"] integerValue];text=(status==401||status==403)?@"需授权":(status==405?@"不支持检测":@"连接失败");color=[UIColor colorWithRed:1 green:.27 blue:.23 alpha:1];}else{double ms=[result[@"milliseconds"] doubleValue];text=ms>=1000?[NSString stringWithFormat:@"%.1fs",ms/1000.0]:[NSString stringWithFormat:@"%.0fms",ms];color=ms<300?[UIColor colorWithRed:.19 green:.82 blue:.35 alpha:1]:(ms<1000?[UIColor colorWithRed:1 green:.62 blue:.04 alpha:1]:[UIColor colorWithRed:1 green:.27 blue:.23 alpha:1]);}}
+    else if(result){if(![result[@"ok"] boolValue]){NSInteger status=[result[@"status"] integerValue];text=(status==401||status==403)?@"需授权":(status==405?@"不支持检测":@"连接失败");color=status==405?HostSecondaryText():((status==401||status==403)?UIColor.systemOrangeColor:[UIColor colorWithRed:1 green:.27 blue:.23 alpha:1]);}else{double ms=[result[@"milliseconds"] doubleValue];text=ms>=1000?[NSString stringWithFormat:@"%.1fs",ms/1000.0]:[NSString stringWithFormat:@"%.0fms",ms];color=ms<300?[UIColor colorWithRed:.19 green:.82 blue:.35 alpha:1]:(ms<1000?[UIColor colorWithRed:1 green:.62 blue:.04 alpha:1]:[UIColor colorWithRed:1 green:.27 blue:.23 alpha:1]);}}
     if(colorOut)*colorOut=color;return text;
 }
 - (NSURL *)probeURLForProfile:(NSDictionary *)profile {
@@ -457,7 +467,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     if (!c)
         c = [[CCTVResourceProfileCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"profile"];
     c.backgroundColor = HostCard();
-    c.layer.cornerRadius = 18;
+    c.layer.cornerRadius = 14;
     c.clipsToBounds = YES;
     c.textLabel.textColor = HostText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];

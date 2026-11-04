@@ -472,7 +472,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     NSDictionary *service=nil;for(NSDictionary *candidate in self.services)if([candidate[@"id"] isEqual:identifier]){service=candidate;break;}if(!service)return;
     BOOL enabled=![PyHost isManagedServiceIdentifier:identifier];if(!self.onChangeService){if(self.onToggleService)self.onToggleService(service,enabled);return;}
     if(!self.changingServiceIDs)self.changingServiceIDs=[NSMutableSet set];[self.changingServiceIDs addObject:identifier];[self.table reloadData];__weak typeof(self) weakSelf=self;
-    self.onChangeService(service,enabled,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{ServicesViewController *owner=weakSelf;if(!owner)return;[owner.changingServiceIDs removeObject:identifier];[owner refresh];
+    self.onChangeService(service,enabled,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{ServicesViewController *owner=weakSelf;if(!owner)return;[owner.changingServiceIDs removeObject:identifier];owner.displayedRunningID=nil;[owner refresh];
         if(error){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"服务操作失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];[owner presentViewController:alert animated:YES completion:nil];}
     });});
 }
