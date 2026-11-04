@@ -28,6 +28,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 @property(nonatomic, copy) void (^onToggle)(NSDictionary *, BOOL);
 @property(nonatomic, copy) void (^onChangeService)(NSDictionary *, BOOL, void (^)(NSError * _Nullable));
 @property(nonatomic) BOOL changingService;
+@property(nonatomic) BOOL changingServiceTarget;
 @property(nonatomic, copy) void (^onApplyService)(NSDictionary *, NSDictionary *, void (^)(NSError * _Nullable));
 @property(nonatomic, copy) void (^onLog)(NSDictionary * _Nullable service);
 @property(nonatomic, copy) void (^onSubscribe)(NSString *);
@@ -138,8 +139,10 @@ static NSString *ServiceProtocolName(NSDictionary *service){
             c.detailTextLabel.text = [self running]?@"HTTP 健康状态未知 · 点按“检测服务接口”":[self currentRuntimeStatus];
             UIButton *control=[UIButton buttonWithType:UIButtonTypeSystem];
             BOOL managed=[PyHost isManagedServiceIdentifier:self.service[@"id"]];
-            [control setTitle:self.changingService?@"处理中…":(managed?@"停止":@"启动") forState:UIControlStateNormal];
-            control.frame=CGRectMake(0,0,80,44);control.enabled=!self.changingService;
+            BOOL starting=[PyHost isStartingServiceIdentifier:self.service[@"id"]],uncertain=[PyHost hasUncertainSessionForServiceIdentifier:self.service[@"id"]];
+            NSString *controlTitle=self.changingService?(self.changingServiceTarget?@"正在启动…":@"正在停止…"):(starting?@"启动中…":(uncertain?@"停止并清理":(managed?@"停止":@"启动")));
+            [control setTitle:controlTitle forState:UIControlStateNormal];
+            control.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];control.frame=CGRectMake(0,0,112,44);control.enabled=!self.changingService&&!starting;control.accessibilityLabel=self.changingService?(self.changingServiceTarget?@"正在启动服务":@"正在停止服务"):(starting?@"服务启动中":(uncertain?@"停止并清理不确定会话":(managed?@"停止服务":@"启动服务")));
             [control addTarget:self action:@selector(changeService:) forControlEvents:UIControlEventTouchUpInside];c.accessoryView=control;
         } else {
             c.textLabel.text = @"允许局域网访问";
@@ -199,12 +202,17 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     return c;
 }
 - (void)changeService:(UIButton *)sender {
-    if(self.changingService)return;BOOL enabled=![PyHost isManagedServiceIdentifier:self.service[@"id"]];
+    if(self.changingService)return;BOOL uncertain=[PyHost hasUncertainSessionForServiceIdentifier:self.service[@"id"]];[self performServiceChange:uncertain?NO:![PyHost isManagedServiceIdentifier:self.service[@"id"]]];
+}
+- (void)performServiceChange:(BOOL)enabled {
     if(!self.onChangeService){if(self.onToggle)self.onToggle(self.service,enabled);return;}
-    self.changingService=YES;[self.tableView reloadData];__weak typeof(self) weakSelf=self;
-    self.onChangeService(self.service,enabled,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{
+    self.changingService=YES;self.changingServiceTarget=enabled;[self.tableView reloadData];__weak typeof(self) weakSelf=self;NSDictionary *service=self.service;
+    self.onChangeService(service,enabled,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{
         ServiceDetailViewController *owner=weakSelf;if(!owner)return;owner.changingService=NO;[owner.tableView reloadData];
-        if(error){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"服务操作失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];[owner presentViewController:alert animated:YES completion:nil];}
+        if(error){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"服务操作失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+            if(owner.onChangeService)[alert addAction:[UIAlertAction actionWithTitle:@"重试" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[owner performServiceChange:enabled];}]];
+            if(owner.onLog)[alert addAction:[UIAlertAction actionWithTitle:@"查看日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){owner.onLog(service);}]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"完成" style:UIAlertActionStyleCancel handler:nil]];[owner presentViewController:alert animated:YES completion:nil];}
     });});
 }
 - (void)toggle:(UISwitch *)sender {
@@ -337,6 +345,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 
 @interface ServicesViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
 @property(nonatomic,strong) NSMutableSet<NSString *> *changingServiceIDs;
+@property(nonatomic,strong) NSMutableDictionary<NSString *,NSNumber *> *changingServiceTargets;
 @property(nonatomic,strong) UISegmentedControl *statusFilter;
 @property(nonatomic,strong) UILabel *runtimeSummary;
 @property(nonatomic, strong) UITableView *table;
@@ -461,19 +470,29 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     c.imageView.image = [UIImage systemImageNamed:@"terminal.fill"];
     c.imageView.tintColor = HostAccent();
     UIButton *control=[UIButton buttonWithType:UIButtonTypeSystem];NSString *identifier=s[@"id"]?:@"";
-    BOOL busy=[self.changingServiceIDs containsObject:identifier],managed=[PyHost isManagedServiceIdentifier:identifier];
-    [control setTitle:busy?@"处理中…":(managed?@"停止":@"启动") forState:UIControlStateNormal];
-    control.frame=CGRectMake(0,0,80,44);control.enabled=!busy;control.accessibilityIdentifier=identifier;
+    BOOL busy=[self.changingServiceIDs containsObject:identifier],managed=[PyHost isManagedServiceIdentifier:identifier],starting=[PyHost isStartingServiceIdentifier:identifier],uncertain=[PyHost hasUncertainSessionForServiceIdentifier:identifier];
+    BOOL target=[[self.changingServiceTargets objectForKey:identifier] boolValue];
+    NSString *controlTitle=busy?(target?@"正在启动…":@"正在停止…"):(starting?@"启动中…":(uncertain?@"停止并清理":(managed?@"停止":@"启动")));
+    [control setTitle:controlTitle forState:UIControlStateNormal];
+    control.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];control.frame=CGRectMake(0,0,108,44);control.enabled=!busy&&!starting;control.accessibilityIdentifier=identifier;control.accessibilityLabel=busy?(target?@"正在启动服务":@"正在停止服务"):(starting?@"服务启动中":(uncertain?@"停止并清理不确定会话":(managed?@"停止服务":@"启动服务")));
     [control addTarget:self action:@selector(changeService:) forControlEvents:UIControlEventTouchUpInside];c.accessoryView=control;
     return c;
 }
 - (void)changeService:(UIButton *)sender {
     NSString *identifier=sender.accessibilityIdentifier;if(!identifier.length||[self.changingServiceIDs containsObject:identifier])return;
     NSDictionary *service=nil;for(NSDictionary *candidate in self.services)if([candidate[@"id"] isEqual:identifier]){service=candidate;break;}if(!service)return;
-    BOOL enabled=![PyHost isManagedServiceIdentifier:identifier];if(!self.onChangeService){if(self.onToggleService)self.onToggleService(service,enabled);return;}
-    if(!self.changingServiceIDs)self.changingServiceIDs=[NSMutableSet set];[self.changingServiceIDs addObject:identifier];[self.table reloadData];__weak typeof(self) weakSelf=self;
-    self.onChangeService(service,enabled,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{ServicesViewController *owner=weakSelf;if(!owner)return;[owner.changingServiceIDs removeObject:identifier];owner.displayedRunningID=nil;[owner refresh];
-        if(error){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"服务操作失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];[owner presentViewController:alert animated:YES completion:nil];}
+    BOOL enabled=[PyHost hasUncertainSessionForServiceIdentifier:identifier]?NO:![PyHost isManagedServiceIdentifier:identifier];[self performServiceChange:service enabled:enabled];
+}
+- (void)performServiceChange:(NSDictionary *)service enabled:(BOOL)enabled {
+    NSString *identifier=[service[@"id"] description];if(!identifier.length)return;
+    if(!self.onChangeService){if(self.onToggleService)self.onToggleService(service,enabled);return;}
+    if(!self.changingServiceIDs)self.changingServiceIDs=[NSMutableSet set];if(!self.changingServiceTargets)self.changingServiceTargets=[NSMutableDictionary dictionary];if([self.changingServiceIDs containsObject:identifier])return;
+    [self.changingServiceIDs addObject:identifier];self.changingServiceTargets[identifier]=@(enabled);[self.table reloadData];__weak typeof(self) weakSelf=self;
+    self.onChangeService(service,enabled,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{ServicesViewController *owner=weakSelf;if(!owner)return;[owner.changingServiceIDs removeObject:identifier];[owner.changingServiceTargets removeObjectForKey:identifier];owner.displayedRunningID=nil;[owner refresh];
+        if(error){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"服务操作失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"重试" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[owner performServiceChange:service enabled:enabled];}]];
+            if(owner.onOpenLog)[alert addAction:[UIAlertAction actionWithTitle:@"查看日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){owner.onOpenLog(service);}]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"完成" style:UIAlertActionStyleCancel handler:nil]];[owner presentViewController:alert animated:YES completion:nil];}
     });});
 }
 - (void)toggle:(UISwitch *)sender {
