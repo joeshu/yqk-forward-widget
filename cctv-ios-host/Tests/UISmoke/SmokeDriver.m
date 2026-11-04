@@ -712,7 +712,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [root importPlaylistData:[playlist dataUsingEncoding:NSUTF8StringEncoding] name:@"本地测试配置"];
             [root selectBottomTab:(id)tabs.arrangedSubviews[3]];
             NSArray *profiles=[NSUserDefaults.standardUserDefaults arrayForKey:@"subscriptions"];
-            BOOL imported=NO;for(NSString *source in profiles)if([source hasPrefix:@"local-playlist:"]){imported=YES;check([[ProfileStore metadata:source][@"cachedChannels"] count]==1,@"import stores last-good channels");check([[ProfileStore metadata:source][@"detectedEPGURL"] isEqual:@"https://example.com/guide.xml.gz"],@"file import discovers XMLTV");}
+            BOOL imported=NO;for(NSString *source in profiles)if([source hasPrefix:@"local-playlist:"]){imported=YES;NSDictionary *profile=[ProfileStore metadata:source];check([profile[@"cachedChannels"] count]==1,@"import stores last-good channels");check([profile[@"cachedChannels"].firstObject isKindOfClass:NSDictionary.class],@"cached playlist rows use serializable channel snapshots");check([NSPropertyListSerialization propertyList:profile isValidForFormat:NSPropertyListBinaryFormat_v1_0],@"imported live profile remains valid for persistent preference storage");check([profile[@"detectedEPGURL"] isEqual:@"https://example.com/guide.xml.gz"],@"file import discovers XMLTV");}
             check(imported,@"file profile persisted");
             capture(self.window,@"11-configuration-imported");
           },

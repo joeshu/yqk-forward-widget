@@ -1318,6 +1318,13 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('supportedInterfaceOrientations {return UIInterfaceOrientationMaskPortrait;}', self.detail)
         self.assertIn('UIInterfaceOrientationMaskAllButUpsideDown', self.playback)
 
+    def test_imported_playlist_snapshots_are_property_list_safe(self):
+        self.assertIn("CCTVPlaylistSnapshotRows", self.root)
+        self.assertNotIn('@"cachedChannels":parsed', self.root)
+        smoke = (ROOT / "Tests/UISmoke/SmokeDriver.m").read_text()
+        self.assertIn("valid for persistent preference storage", smoke)
+        self.assertIn("serializable channel snapshots", smoke)
+
     def test_bundled_aggregators_stay_grouped_and_load_members_on_demand(self):
         media = self.detail
         resources = ROOT / 'Resources/BuiltinMedia'
