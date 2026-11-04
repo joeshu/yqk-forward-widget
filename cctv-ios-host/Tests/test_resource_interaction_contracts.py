@@ -60,7 +60,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('c.detailTextLabel.numberOfLines = 0', self.catalog)
         self.assertIn('c.detailTextLabel.lineBreakMode=NSLineBreakByCharWrapping', self.catalog)
         self.assertIn('UIFontTextStyleFootnote', self.catalog)
-        self.assertIn('CCTVResourceDisplayEndpoint(source)', self.catalog)
+        self.assertIn('[NSURL URLWithString:source].host', self.catalog)
         self.assertIn('if(name.length)return name;', self.catalog)
         self.assertIn('c.accessibilityValue=c.detailTextLabel.text', self.catalog)
 
@@ -69,7 +69,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('return MAX(112,ceil(14+titleHeight+6+detailHeight+14+14));', self.catalog)
         self.assertIn('- (NSString *)resourceTitleForProfile:(NSDictionary *)profile', self.catalog)
         self.assertIn('- (NSString *)resourceDetailForProfile:(NSDictionary *)profile', self.catalog)
-        self.assertIn('CCTVResourceDisplayEndpoint(profile[@"subscriptionURL"])', self.catalog)
+        self.assertIn('个缓存频道', self.catalog)
         self.assertIn('profile[@"count"]?:@0,profile[@"epgStatus"]?:@"自动匹配"', self.catalog)
         self.assertIn('summary=[summary stringByAppendingFormat:@"\\n%@",profile[@"status"]]', self.catalog)
         self.assertIn('c.detailTextLabel.text=[self resourceDetailForProfile:p]', self.catalog)
@@ -191,7 +191,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         services = (ROOT / 'Sources/ServicesViewController.m').read_text()
         self.assertIn('订阅清单状态', services)
         self.assertIn('最近成功刷新', services)
-        self.assertIn('section == 2 ? 12', services)
+        self.assertIn('section == 2 ? ([ServiceStore isLiveMediaService:self.service]?12:7)', services)
         self.assertIn('probePlaylistChecked', services)
         self.assertIn('probeChannelCount=channels.count', services)
         self.assertIn('probeChannelCount', services)
@@ -443,7 +443,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[browser openSourceIdentifier:sourceID]', self.root)
         self.assertIn('[service[@"url"] isEqual:api]', self.root)
         self.assertIn('siteCount', self.root)
-        self.assertIn('个站点 · %lu 个可用', self.catalog)
+        self.assertIn('个站点 · %lu 个已识别', self.catalog)
 
     def test_live_resource_uses_declared_route_and_can_configure_missing_route(self):
         self.assertIn('[ServiceStore subscriptionURLForService:item]', self.root)
@@ -889,7 +889,10 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('@"id":@"script-auto-url"', sheet)
         self.assertIn('@"id":@"live-file"', sheet)
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
-        self.assertIn('numberOfRowsInSection:0]==1 && [options numberOfRowsInSection:1]==7', smoke)
+        self.assertIn('numberOfRowsInSection:0]==5', smoke)
+        workflow = (ROOT / 'Sources/ResourceImportWorkflowViewController.m').read_text()
+        self.assertIn('选择文件（多选）', workflow)
+        self.assertIn('选择文件夹', workflow)
 
     def test_native_crypto_does_not_use_private_cpython_bytes_resize(self):
         host = (ROOT / 'Sources/PyHost.m').read_text()

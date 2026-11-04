@@ -9,9 +9,11 @@
 @property(nonatomic, copy) NSArray<NSDictionary *> * (^profilesProvider)(void);
 @property(nonatomic, copy) dispatch_block_t onServices;
 @property(nonatomic, copy) dispatch_block_t onAdd;
+@property(nonatomic, copy) NSString * (^importTaskSummaryProvider)(void);
 @property(nonatomic, copy) dispatch_block_t onRefresh;
 @property(nonatomic, copy) dispatch_block_t onRefreshMediaHome;
 @property(nonatomic, copy) void (^onRefreshProfile)(NSString *source);
+@property(nonatomic, copy) void (^onOpenSubscription)(NSString *source);
 @property(nonatomic, copy) void (^onSelectProfile)(NSString *source);
 @property(nonatomic, copy) void (^onToggleProfile)(NSString *source, BOOL enabled);
 @property(nonatomic, copy) void (^onEditProfile)(NSString *source);

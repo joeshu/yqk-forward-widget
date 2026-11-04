@@ -15,6 +15,8 @@
 #import "NodePluginRuntime.h"
 #import "MediaBrowserViewController.h"
 #import "MediaFeedView.h"
+#import "ResourceImportWorkflowViewController.h"
+#import "ServiceEditorViewController.h"
 #import "MediaGlobalSearchViewController.h"
 #import "MediaAPIClient.h"
 #import "MediaSearchResults.h"
@@ -38,6 +40,15 @@
 #import <AVFoundation/AVFoundation.h>
 #import <AVKit/AVKit.h>
 #import <objc/runtime.h>
+
+@interface ResourceImportWorkflowViewController (SmokeImport)
+- (NSMutableDictionary *)candidateForData:(NSData *)data file:(NSURL *)file origin:(NSString *)origin companions:(NSDictionary *)companions hint:(NSString *)hint;
+- (void)saveSelected;
+@end
+@interface ServiceEditorViewController (SmokeImport)
+- (void)loadRemote;
+- (void)urlChanged;
+@end
 
 @interface MediaBrowserViewController (UISmokeLayoutHooks)
 - (void)showMessage:(NSString *)message loading:(BOOL)loading;
@@ -271,6 +282,10 @@ static void next(NSArray *steps, NSUInteger index) {
       __block MediaEpisodeSelectionViewController *mediaEpisodes;
       __block MediaPlaybackViewController *mediaPlayback;
       __block NSDate *stalePlaybackDeadline;
+      __block ResourceImportWorkflowViewController *importProbe;
+      __block NSUInteger importSaveCount=0;
+      __block ServiceEditorViewController *editorProbe;
+      __block NSDate *editorDeadline;
       NSArray *steps = @[
           ^{
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
@@ -375,13 +390,13 @@ static void next(NSArray *steps, NSUInteger index) {
             navigationProbe=[UIViewController new];navigationProbe.title=@"交互返回取消测试";[nav pushViewController:navigationProbe animated:NO];
           },
           @{ @"timeout":@8, @"until":^BOOL{return nav.topViewController==navigationProbe&&!nav.navigationBarHidden;}, @"run":^{check(nav.topViewController==navigationProbe&&!nav.navigationBarHidden,@"pushing a detail page restores the navigation bar");[(id)root navigationController:nav didShowViewController:navigationProbe animated:YES];check(!nav.navigationBarHidden,@"a cancelled interactive return keeps the visible detail navigation bar restored");[nav popViewControllerAnimated:NO];} },
-          @{ @"timeout":@8, @"until":^BOOL{return nav.topViewController==root&&nav.navigationBarHidden;}, @"run":^{check(nav.topViewController==root&&nav.navigationBarHidden,@"a completed return to the media home hides the navigation bar");check([[root valueForKey:@"channelGrid"] isHidden], @"media page hides live channel grid");capture(self.window, @"02-media");[root selectBottomTab:(id)tabs.arrangedSubviews[3]];UIButton *resourceActions=[root valueForKey:@"resourceActionsButton"];ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPage"];UIStackView *toolbar=[resourcePage valueForKey:@"topActionsStack"];UIButton *more=toolbar.arrangedSubviews.lastObject;UILabel *title=[resourcePage valueForKey:@"resourceTitleLabel"];UITextField *search=[resourcePage valueForKey:@"resourceSearchField"];check(nav.navigationBarHidden,@"resource tab keeps the title/navigation region hidden");check(root.title.length==0,@"resource tab has no large title");check(resourcePage.view.frame.origin.y==0,@"resource page keeps a stable full-root origin while navigation visibility changes");[root.view layoutIfNeeded];[resourcePage.view layoutIfNeeded];CGFloat toolbarTop=CGRectGetMinY(toolbar.frame),rootSafeTop=root.view.window.safeAreaInsets.top;check(fabs(toolbarTop-rootSafeTop-4)<1.5,[NSString stringWithFormat:@"resource toolbar remains 4 pt below the window safe area after return (toolbar=%.1f safe=%.1f)",toolbarTop,rootSafeTop]);check(fabs(CGRectGetMaxY(resourcePage.view.frame)-CGRectGetHeight(root.view.bounds))<1.5&&resourcePage.tableView.contentInset.bottom>=CGRectGetHeight(root.view.bounds)-CGRectGetMinY(tabs.frame)+7,@"resource page scrolls behind the transparent tab overlay while reserving room for the final row");check(resourceActions.hidden&&toolbar.arrangedSubviews.count==5&&more.menu.children.count==3,@"resource page exposes its five-button toolbar and additional services menu");check([title.text isEqual:@"资源"]&&[search.placeholder isEqual:@"搜索资源"],@"resource page shows its title and inline search field");check(resourcePage.navigationItem.searchController==nil,@"resource page uses inline search rather than a navigation search controller");} },
+          @{ @"timeout":@8, @"until":^BOOL{return nav.topViewController==root&&nav.navigationBarHidden;}, @"run":^{check(nav.topViewController==root&&nav.navigationBarHidden,@"a completed return to the media home hides the navigation bar");check([[root valueForKey:@"channelGrid"] isHidden], @"media page hides live channel grid");capture(self.window, @"02-media");[root selectBottomTab:(id)tabs.arrangedSubviews[3]];UIButton *resourceActions=[root valueForKey:@"resourceActionsButton"];ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPage"];UIStackView *toolbar=[resourcePage valueForKey:@"topActionsStack"];UIButton *more=toolbar.arrangedSubviews.lastObject;UILabel *title=[resourcePage valueForKey:@"resourceTitleLabel"];UITextField *search=[resourcePage valueForKey:@"resourceSearchField"];check(nav.navigationBarHidden,@"resource tab keeps the title/navigation region hidden");check(root.title.length==0,@"resource tab has no large title");check(resourcePage.view.frame.origin.y==0,@"resource page keeps a stable full-root origin while navigation visibility changes");[root.view layoutIfNeeded];[resourcePage.view layoutIfNeeded];CGFloat toolbarTop=CGRectGetMinY(toolbar.frame),rootSafeTop=root.view.window.safeAreaInsets.top;check(fabs(toolbarTop-rootSafeTop-4)<1.5,[NSString stringWithFormat:@"resource toolbar remains 4 pt below the window safe area after return (toolbar=%.1f safe=%.1f)",toolbarTop,rootSafeTop]);check(fabs(CGRectGetMaxY(resourcePage.view.frame)-CGRectGetHeight(root.view.bounds))<1.5&&resourcePage.tableView.contentInset.bottom>=CGRectGetHeight(root.view.bounds)-CGRectGetMinY(tabs.frame)+7,@"resource page scrolls behind the transparent tab overlay while reserving room for the final row");check(resourceActions.hidden&&toolbar.arrangedSubviews.count==2&&more.menu.children.count==3,@"resource page keeps add and more actions without duplicate toolbar entries");check([title.text isEqual:@"资源"]&&[search.placeholder isEqual:@"搜索资源"],@"resource page shows its title and inline search field");check(resourcePage.navigationItem.searchController==nil,@"resource page uses inline search rather than a navigation search controller");} },
           ^{
             check([[root valueForKey:@"tabPage"]
                       isKindOfClass:NSClassFromString(@"ConfigCenterViewController")],
                   @"configuration tab embedded");
             UIStackView *resourceFilters=[[root valueForKey:@"tabPage"] valueForKey:@"kindStack"];
-            check(resourceFilters.arrangedSubviews.count>=6, @"resources page exposes counted type filters and dynamic source-domain filters");
+            check(resourceFilters.arrangedSubviews.count==5, @"resource page shows five content filters and moves source domains into the filter menu");
             capture(self.window, @"03-configuration");
             ConfigCenterViewController *resourcePage=(id)[root valueForKey:@"tabPage"];
             resourceProfilesProvider=resourcePage.profilesProvider;
@@ -402,8 +417,8 @@ static void next(NSArray *steps, NSUInteger index) {
             NSArray<NSDictionary *> *resourceItems=[resourcePage valueForKey:@"profiles"];
             NSUInteger longResourceIndex=[resourceItems indexOfObjectPassingTest:^BOOL(NSDictionary *item,NSUInteger index,BOOL *stop){return [item[@"source"] hasPrefix:@"https://example.test/long-resource/"];}];
             BOOL longResourceFits=NO,resourceFieldsVisible=NO;NSString *longResourceTitle=@"";CGFloat longResourceRowHeight=0;
-            if(longResourceIndex!=NSNotFound){NSIndexPath *longResourcePath=[NSIndexPath indexPathForRow:(NSInteger)longResourceIndex inSection:0];[resourcePage.tableView scrollToRowAtIndexPath:longResourcePath atScrollPosition:UITableViewScrollPositionMiddle animated:NO];[resourcePage.tableView layoutIfNeeded];UITableViewCell *longCell=[resourcePage.tableView cellForRowAtIndexPath:longResourcePath];CGRect longRow=[resourcePage.tableView rectForRowAtIndexPath:longResourcePath];CGRect titleRect=[longCell.textLabel convertRect:longCell.textLabel.bounds toView:resourcePage.tableView],detailRect=[longCell.detailTextLabel convertRect:longCell.detailTextLabel.bounds toView:resourcePage.tableView];NSString *summary=longCell.detailTextLabel.text?:@"";longResourceFits=CGRectGetMinY(titleRect)>=CGRectGetMinY(longRow)-1&&CGRectGetMaxY(detailRect)<=CGRectGetMaxY(longRow)+1;longResourceTitle=longCell.textLabel.text?:@"";longResourceRowHeight=CGRectGetHeight(longRow);resourceFieldsVisible=[summary containsString:@"63 个频道"]&&[summary containsString:@"EPG 已配置"]&&[summary containsString:@"https://example.test/long-resource/"]&&[summary containsString:@"最近成功"]&&[summary containsString:@"HTTP 健康状态正常"];}
-            check(longResourceIndex!=NSNotFound&&longResourceFits&&longResourceRowHeight>=112&&resourceFieldsVisible&&[longResourceTitle isEqual:@"example.test"],[NSString stringWithFormat:@"resource rows preserve count, EPG, endpoint, refresh time and health within a padded expanded row (index=%lu title=%@ height=%.1f fits=%d fields=%d)",(unsigned long)longResourceIndex,longResourceTitle,longResourceRowHeight,longResourceFits,resourceFieldsVisible]);
+            if(longResourceIndex!=NSNotFound){NSIndexPath *longResourcePath=[NSIndexPath indexPathForRow:(NSInteger)longResourceIndex inSection:0];[resourcePage.tableView scrollToRowAtIndexPath:longResourcePath atScrollPosition:UITableViewScrollPositionMiddle animated:NO];[resourcePage.tableView layoutIfNeeded];UITableViewCell *longCell=[resourcePage.tableView cellForRowAtIndexPath:longResourcePath];CGRect longRow=[resourcePage.tableView rectForRowAtIndexPath:longResourcePath];CGRect titleRect=[longCell.textLabel convertRect:longCell.textLabel.bounds toView:resourcePage.tableView],detailRect=[longCell.detailTextLabel convertRect:longCell.detailTextLabel.bounds toView:resourcePage.tableView];NSString *summary=longCell.detailTextLabel.text?:@"";longResourceFits=CGRectGetMinY(titleRect)>=CGRectGetMinY(longRow)-1&&CGRectGetMaxY(detailRect)<=CGRectGetMaxY(longRow)+1;longResourceTitle=longCell.textLabel.text?:@"";longResourceRowHeight=CGRectGetHeight(longRow);resourceFieldsVisible=[summary containsString:@"63 个频道"]&&[summary containsString:@"EPG 已配置"]&&([summary containsString:@"example.test"]&&![summary containsString:@"https://example.test/long-resource/"])&&[summary containsString:@"最近成功"]&&[summary containsString:@"HTTP 健康状态正常"];}
+            check(longResourceIndex!=NSNotFound&&longResourceFits&&longResourceRowHeight>=112&&resourceFieldsVisible&&[longResourceTitle isEqual:@"example.test"],[NSString stringWithFormat:@"resource rows keep domain, count, EPG, refresh time and health without exposing full URLs within a padded expanded row (index=%lu title=%@ height=%.1f fits=%d fields=%d)",(unsigned long)longResourceIndex,longResourceTitle,longResourceRowHeight,longResourceFits,resourceFieldsVisible]);
             if(longResourceIndex!=NSNotFound){UITableViewCell *longCell=[resourcePage.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)longResourceIndex inSection:0]];check(longCell.detailTextLabel.numberOfLines==0&&CGRectGetHeight(longCell.detailTextLabel.bounds)>=longCell.detailTextLabel.font.lineHeight*3,[NSString stringWithFormat:@"expanded resource row keeps multiple detail lines visible (lines=%.1f)",CGRectGetHeight(longCell.detailTextLabel.bounds)/longCell.detailTextLabel.font.lineHeight]);}
             CGFloat resourceMaximumOffset=MAX(-resourcePage.tableView.adjustedContentInset.top,resourcePage.tableView.contentSize.height-resourcePage.tableView.bounds.size.height+resourcePage.tableView.adjustedContentInset.bottom);
             check(resourceMaximumOffset>=48,[NSString stringWithFormat:@"resource navigation fixture has a legal scroll range (max=%.1f)",resourceMaximumOffset]);
@@ -412,13 +427,11 @@ static void next(NSArray *steps, NSUInteger index) {
             [root addSubscription];
           },
           ^{
-            ResourceImportSheetViewController *sheet=(id)nav.presentedViewController;
-            check([sheet isKindOfClass:ResourceImportSheetViewController.class], @"resource add opens the grouped import sheet");
-            UITableView *options=[sheet valueForKey:@"tableView"];
-            check([options numberOfSections]==3 && [options numberOfRowsInSection:0]==1 && [options numberOfRowsInSection:1]==7 && [options numberOfRowsInSection:2]==7,
-                  @"resource sheet exposes only implemented service, TVBox, script, playlist, folder, local-file and capability-guide actions");
-            capture(self.window, @"03b-add-resource");
-            [sheet dismissViewControllerAnimated:NO completion:nil];
+            UINavigationController *importNavigation=(id)nav.presentedViewController;
+            ResourceImportWorkflowViewController *sheet=[importNavigation isKindOfClass:UINavigationController.class]?(id)importNavigation.topViewController:nil;
+            check([sheet isKindOfClass:ResourceImportWorkflowViewController.class],@"resource add opens the unified import workflow");
+            UITableView *options=sheet.tableView;check([options numberOfSections]==3&&[options numberOfRowsInSection:0]==5,@"unified import offers URL, multiple files and folder input with runtime selection");
+            capture(self.window,@"03b-add-resource");[importNavigation dismissViewControllerAnimated:NO completion:nil];ConfigCenterViewController *currentResource=(id)[root valueForKey:@"tabPages"][@3];[currentResource.view layoutIfNeeded];resourceScrollOffset=currentResource.tableView.contentOffset.y;
             [root openServicesPage];
           },
           ^{
@@ -1005,10 +1018,10 @@ static void next(NSArray *steps, NSUInteger index) {
             if(catalog)[TVBoxCatalogStore saveCatalog:catalog];
             TVBoxCatalogViewController *catalogPage=[TVBoxCatalogViewController new];catalogPage.catalog=[TVBoxCatalogStore catalogForID:catalog[@"id"]]?:catalog;[nav pushViewController:catalogPage animated:NO];
             check([catalogPage.tableView numberOfSections]==2&&[catalogPage.tableView numberOfRowsInSection:0]==2,@"resource collection separates script sites from live lists");
-            UIStackView *collectionActions=(id)catalogPage.navigationItem.rightBarButtonItems.firstObject.customView;NSString *jsonAction=((UIView *)collectionActions.arrangedSubviews[1]).accessibilityLabel,*zipAction=((UIView *)collectionActions.arrangedSubviews[2]).accessibilityLabel;UIContextMenuConfiguration *singleResourceMenu=[catalogPage tableView:catalogPage.tableView contextMenuConfigurationForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0] point:CGPointZero];check([jsonAction isEqual:@"导出完整合集 JSON"]&&[zipAction isEqual:@"导出完整资源 ZIP（含 PY / JS）"]&&singleResourceMenu!=nil,@"resource collection offers complete JSON, full PY/JS ZIP and per-item export");
+            UIMenu *collectionActions=catalogPage.navigationItem.rightBarButtonItem.menu;UIMenu *exports=(id)collectionActions.children.firstObject;NSString *jsonAction=exports.children.count>0?((UIAction *)exports.children[0]).title:@"",*zipAction=exports.children.count>1?((UIAction *)exports.children[1]).title:@"";UIContextMenuConfiguration *singleResourceMenu=[catalogPage tableView:catalogPage.tableView contextMenuConfigurationForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0] point:CGPointZero];check([jsonAction isEqual:@"导出完整合集 JSON"]&&[zipAction isEqual:@"导出完整资源 ZIP（含 PY / JS）"]&&singleResourceMenu!=nil,@"resource collection offers complete JSON, full PY/JS ZIP and per-item export");
             UISearchController *catalogSearch=[catalogPage valueForKey:@"searchController"];catalogSearch.searchBar.text=@"index.js";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];check([catalogPage.tableView numberOfRowsInSection:0]==1,@"large resource collections can find one script by URL");catalogSearch.searchBar.text=@"";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];
             catalogPage.serviceForSite=^NSDictionary *(NSDictionary *site){return [site[@"key"] isEqual:@"js-site"]?@{@"id":@"fixture-js",@"name":@"Fixture JS",@"enabled":@YES}:nil;};
-            NSIndexPath *siteIndex=[NSIndexPath indexPathForRow:0 inSection:0];UITableViewCell *siteCell=[catalogPage tableView:catalogPage.tableView cellForRowAtIndexPath:siteIndex];check([siteCell.detailTextLabel.text containsString:@"服务运行中"]&&[siteCell.detailTextLabel.text containsString:@"点按打开资源"],@"collection reflects an already imported script runtime");check([siteCell.detailTextLabel.text containsString:@"?token=kept"],@"collection keeps source query parameters visible");
+            NSIndexPath *siteIndex=[NSIndexPath indexPathForRow:0 inSection:0];UITableViewCell *siteCell=[catalogPage tableView:catalogPage.tableView cellForRowAtIndexPath:siteIndex];check([siteCell.detailTextLabel.text containsString:@"服务运行中"]&&[siteCell.detailTextLabel.text containsString:@"点按打开资源"],@"collection reflects an already imported script runtime");check(![siteCell.detailTextLabel.text containsString:@"token=kept"]&&[catalogPage.catalog[@"sites"][0][@"api"] containsString:@"token=kept"],@"collection masks credentials in display while preserving the original URL");
             [catalogPage.tableView.delegate tableView:catalogPage.tableView didSelectRowAtIndexPath:siteIndex];UIViewController *presented=SmokePresentedController(@[catalogPage,nav,root]);UIAlertController *existingActions=[presented isKindOfClass:UIAlertController.class]?(UIAlertController *)presented:nil;NSArray *existingTitles=[existingActions.actions valueForKey:@"title"]?:@[];check([existingTitles containsObject:@"启动并打开资源"],[NSString stringWithFormat:@"an imported collection script offers direct browse (presented=%@ actions=%@)",presented?NSStringFromClass(presented.class):@"none",existingTitles]);[catalogPage dismissViewControllerAnimated:NO completion:nil];capture(self.window,@"21-tvbox-catalog");
           }},
           @{ @"until":^BOOL{return SmokePresentedController(@[(UIViewController *)nav.topViewController,nav,root])==nil;}, @"run":^{
@@ -1059,6 +1072,21 @@ static void next(NSArray *steps, NSUInteger index) {
             check(results.count==1&&[results.firstObject[@"item"][@"id"] isEqual:@"新关键词"],@"a late old-query completion cannot overwrite or append to the new query");
             check([[searchPage valueForKey:@"resultCount"] unsignedIntegerValue]==1,@"late callbacks cannot inflate station result counts");
             UISearchBar *bar=[searchPage valueForKey:@"searchBar"];bar.text=@"";[bar.delegate searchBar:bar textDidChange:bar.text];check([[searchPage valueForKey:@"rows"] count]==0&&[[searchPage valueForKey:@"resultCount"] unsignedIntegerValue]==0,@"clearing the keyword clears old results and counts");[nav popViewControllerAnimated:NO];
+          }},
+          ^{
+            importProbe=[ResourceImportWorkflowViewController new];[importProbe loadViewIfNeeded];NSUInteger before=[TVBoxCatalogStore catalogs].count;
+            NSDictionary *package=@{@"name":@"Preview aggregate",@"sites":@[@{@"key":@"site",@"name":@"One site",@"api":@"https://fixture.test/api.php/provide/vod/",@"type":@1}]};NSData *bytes=[NSJSONSerialization dataWithJSONObject:package options:0 error:NULL];
+            NSMutableDictionary *catalog=[importProbe candidateForData:bytes file:[NSURL fileURLWithPath:@"/tmp/preview.json"] origin:@"https://fixture.test/config?token=keep%2Bvalue" companions:@{} hint:nil];
+            check([catalog[@"kind"] isEqual:@"catalog"]&&[TVBoxCatalogStore catalogs].count==before,@"import preview recognizes one aggregate without persisting or importing its internal sites");
+            check([catalog[@"catalog"][@"url"] containsString:@"token=keep%2Bvalue"],@"import preview preserves signed URL query bytes");
+            NSData *playlist=[@"#EXTM3U\n#EXTINF:-1,Preview Channel\nhttps://fixture.test/video.m3u8\n" dataUsingEncoding:NSUTF8StringEncoding];NSMutableDictionary *live=[importProbe candidateForData:playlist file:[NSURL fileURLWithPath:@"/tmp/preview.m3u"] origin:nil companions:@{} hint:nil];
+            check([live[@"kind"] isEqual:@"playlist"],@"unified import recognizes live files before script parsing");
+            [importProbe setValue:[NSMutableArray arrayWithArray:@[catalog,live]] forKey:@"candidates"];importProbe.onSaveCandidate=^(NSDictionary *candidate,BOOL update,void (^completion)(NSError *error)){importSaveCount++;check(update,@"import defaults to updating an existing resource while preserving identity");completion(nil);};[importProbe saveSelected];
+            editorProbe=[ServiceEditorViewController new];[editorProbe loadViewIfNeeded];UITextField *url=[editorProbe valueForKey:@"urlField"];NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];url.text=[NSString stringWithFormat:@"http://127.0.0.1:%ld/slow-logo.png",(long)port];[editorProbe loadRemote];url.text=@"https://fixture.test/replacement.py";[editorProbe urlChanged];editorDeadline=[NSDate dateWithTimeIntervalSinceNow:1.5];
+          },
+          @{@"timeout":@8,@"until":^BOOL{return !importProbe.busy&&[editorDeadline timeIntervalSinceNow]<=0;},@"run":^{
+            check(importSaveCount==2&&!importProbe.busy&&[importProbe.taskSummary containsString:@"已保存 2 项"],@"unified import saves only selected preview rows and reports the completed batch");
+            check(![[editorProbe valueForKey:@"downloading"] boolValue]&&[editorProbe valueForKey:@"code"]==nil&&editorProbe.presentedViewController==nil,@"editing the URL cancels the old download without applying stale code or presenting a stale error");importProbe=nil;editorProbe=nil;
           }},
           ^{
             MediaBrowserViewController *recoveryProbe=[MediaBrowserViewController new];[recoveryProbe loadViewIfNeeded];

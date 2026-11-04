@@ -26,9 +26,12 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 @interface ServiceDetailViewController : UITableViewController
 @property(nonatomic, copy) NSDictionary *service;
 @property(nonatomic, copy) void (^onToggle)(NSDictionary *, BOOL);
+@property(nonatomic, copy) void (^onChangeService)(NSDictionary *, BOOL, void (^)(NSError * _Nullable));
+@property(nonatomic) BOOL changingService;
 @property(nonatomic, copy) void (^onApplyService)(NSDictionary *, NSDictionary *, void (^)(NSError * _Nullable));
 @property(nonatomic, copy) void (^onLog)(NSDictionary * _Nullable service);
 @property(nonatomic, copy) void (^onSubscribe)(NSString *);
+@property(nonatomic, copy) void (^onOpenResource)(NSDictionary *);
 @property(nonatomic, copy) void (^onBrowseService)(NSDictionary *);
 @property(nonatomic, copy) NSString *health;
 @property(nonatomic, strong) NSURLSessionDataTask *probeTask;
@@ -52,7 +55,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     self.tableView.backgroundColor = HostBackground();
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 56;
-    __weak typeof(self) w=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[@{@"icon":@"pencil",@"title":@"编辑服务",@"action":[UIAction actionWithHandler:^(UIAction *a){[w edit];}]}])];
+    self.navigationItem.rightBarButtonItems=nil;
 }
 - (BOOL)running {
     return [PyHost isRunningServiceIdentifier:self.service[@"id"]];
@@ -98,7 +101,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return section == 0   ? 2
            : section == 1 ? 3
-           : section == 2 ? 12
+           : section == 2 ? ([ServiceStore isLiveMediaService:self.service]?12:7)
            : section == 3 ? 4
                           : ([self.service[@"builtin"] boolValue] ? 0 : 1);
 }
@@ -133,11 +136,11 @@ static NSString *ServiceProtocolName(NSDictionary *service){
             c.textLabel.text = [self currentRuntimeStatus];
             c.textLabel.textColor = [self running] ? UIColor.systemGreenColor : UIColor.secondaryLabelColor;
             c.detailTextLabel.text = [self running]?@"HTTP 健康状态未知 · 点按“检测服务接口”":[self currentRuntimeStatus];
-            UISwitch *sw = [UISwitch new];
-            sw.on = [PyHost isManagedServiceIdentifier:self.service[@"id"]];
-            sw.onTintColor = HostAccent();
-            [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
-            c.accessoryView = sw;
+            UIButton *control=[UIButton buttonWithType:UIButtonTypeSystem];
+            BOOL managed=[PyHost isManagedServiceIdentifier:self.service[@"id"]];
+            [control setTitle:self.changingService?@"处理中…":(managed?@"停止":@"启动") forState:UIControlStateNormal];
+            control.frame=CGRectMake(0,0,80,44);control.enabled=!self.changingService;
+            [control addTarget:self action:@selector(changeService:) forControlEvents:UIControlEventTouchUpInside];c.accessoryView=control;
         } else {
             c.textLabel.text = @"允许局域网访问";
             c.detailTextLabel.text = [self.service[@"lan"] boolValue] ? @"已开启" : @"仅本机";
@@ -182,7 +185,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
         NSString *address=ip.row==7?values[7]:(ip.row==8?values[8]:nil);
         if(address){c.detailTextLabel.textAlignment=NSTextAlignmentLeft;if([address hasPrefix:@"http://"]||[address.lowercaseString hasPrefix:@"https://"]){c.accessoryType=UITableViewCellAccessoryDisclosureIndicator;c.selectionStyle=UITableViewCellSelectionStyleDefault;}}
     } else if (ip.section == 3) {
-        c.textLabel.text = @[ @"查看日志", @"编辑服务", @"查看 / 导出代码", @"添加到直播订阅" ][ip.row];
+        c.textLabel.text = @[ @"查看日志", @"资源详情与配置", @"查看 / 导出代码", @"添加到直播订阅" ][ip.row];
         if(ip.row==3){if([self opensMedia])c.textLabel.text=@"打开影视";else if([ServiceStore subscriptionURLForService:self.service].length)c.textLabel.text=@"打开直播频道";else c.textLabel.text=@"配置直播列表路径";}
         c.imageView.image = [UIImage systemImageNamed:@[
             @"doc.text", @"square.and.pencil", @"square.and.arrow.up", @"plus.rectangle.on.rectangle"
@@ -195,12 +198,22 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     }
     return c;
 }
+- (void)changeService:(UIButton *)sender {
+    if(self.changingService)return;BOOL enabled=![PyHost isManagedServiceIdentifier:self.service[@"id"]];
+    if(!self.onChangeService){if(self.onToggle)self.onToggle(self.service,enabled);return;}
+    self.changingService=YES;[self.tableView reloadData];__weak typeof(self) weakSelf=self;
+    self.onChangeService(self.service,enabled,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{
+        ServiceDetailViewController *owner=weakSelf;if(!owner)return;owner.changingService=NO;[owner.tableView reloadData];
+        if(error){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"服务操作失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];[owner presentViewController:alert animated:YES completion:nil];}
+    });});
+}
 - (void)toggle:(UISwitch *)sender {
     if (self.onToggle)
         self.onToggle(self.service, sender.on);
     [self.tableView reloadData];
 }
 - (void)edit {
+    if(self.onOpenResource){self.onOpenResource(self.service);return;}
     ServiceEditorViewController *v = [ServiceEditorViewController new];
     v.service = self.service;
     v.onApplyService = self.onApplyService;
@@ -249,7 +262,8 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     [tableView deselectRowAtIndexPath:ip animated:YES];
     if (ip.section == 1 && ip.row == 1) {
         UIPasteboard.generalPasteboard.string = [self baseURL];
-        self.health = @"地址已复制";
+        self.navigationItem.prompt = @"地址已复制";
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{if([self.navigationItem.prompt isEqual:@"地址已复制"])self.navigationItem.prompt=nil;});
         [tableView reloadData];
     } else if (ip.section == 1 && ip.row == 2)
         [self probe];
@@ -304,8 +318,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
                 if(u.length)self.onSubscribe(u);else{UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"未配置直播列表" message:@"请编辑服务，填写或修复播放列表路径后再添加频道。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"编辑服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self edit];}]];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:alert animated:YES completion:nil];}
         }
     } else if (ip.section == 4) {
-        if ([PyHost isManagedServiceIdentifier:self.service[@"id"]])
-            return;
+        if ([PyHost isManagedServiceIdentifier:self.service[@"id"]]){UIAlertController *notice=[UIAlertController alertControllerWithTitle:@"请先停止此服务" message:@"服务仍在运行、停止或清理中，完成后可以删除。" preferredStyle:UIAlertControllerStyleAlert];[notice addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:notice animated:YES completion:nil];return;}
         UIAlertController *a =
             [UIAlertController alertControllerWithTitle:@"删除服务？"
                                                 message:@"这会删除本机保存的服务与代码文件。"
@@ -323,6 +336,9 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 @end
 
 @interface ServicesViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
+@property(nonatomic,strong) NSMutableSet<NSString *> *changingServiceIDs;
+@property(nonatomic,strong) UISegmentedControl *statusFilter;
+@property(nonatomic,strong) UILabel *runtimeSummary;
 @property(nonatomic, strong) UITableView *table;
 @property(nonatomic, strong) NSArray<NSDictionary *> *services;
 @property(nonatomic, strong) UISearchController *search;
@@ -334,7 +350,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
 @implementation ServicesViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"服务";
+    self.title = @"资源服务";
     self.view.backgroundColor = HostBackground();
     self.table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.table.translatesAutoresizingMaskIntoConstraints = NO;
@@ -362,8 +378,10 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     self.search.obscuresBackgroundDuringPresentation = NO;
     self.search.searchBar.placeholder = @"搜索服务";
     self.navigationItem.searchController = self.search;
+    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,88)];self.runtimeSummary=[[UILabel alloc] initWithFrame:CGRectMake(16,4,MAX(1,header.bounds.size.width-32),28)];self.runtimeSummary.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.runtimeSummary.textColor=HostSecondaryText();self.runtimeSummary.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];[header addSubview:self.runtimeSummary];self.statusFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"运行中",@"待处理",@"已停止"]];self.statusFilter.frame=CGRectMake(16,36,MAX(1,header.bounds.size.width-32),44);self.statusFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.statusFilter.selectedSegmentIndex=0;[self.statusFilter addTarget:self action:@selector(statusFilterChanged) forControlEvents:UIControlEventValueChanged];[header addSubview:self.statusFilter];self.table.tableHeaderView=header;
     [self refresh];
 }
+- (void)statusFilterChanged {self.displayedRunningID=nil;[self refresh];}
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(runtimeStateDidChange) name:PyHostRuntimeStateDidChangeNotification object:nil];
@@ -374,7 +392,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];
 }
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];}
-- (void)runtimeStateDidChange {[self refresh];}
+- (void)runtimeStateDidChange {if(!self.changingServiceIDs.count)[self refresh];}
 - (void)refresh {
     NSArray *all = [ServiceStore services];
     NSString *q = self.search.searchBar.text.lowercaseString;
@@ -396,6 +414,8 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     if(running.count){[visibleSections addObject:running];[titles addObject:@"运行时活跃 · HTTP 状态单独检测"];}
     if(pending.count){[visibleSections addObject:pending];[titles addObject:@"启停结果待确认 · 可关闭后清理"];}
     if(stopped.count){[visibleSections addObject:stopped];[titles addObject:@"已停止"];}
+    self.runtimeSummary.text=[NSString stringWithFormat:@"运行 %lu · 待处理 %lu · 已停止 %lu",(unsigned long)running.count,(unsigned long)pending.count,(unsigned long)stopped.count];
+    NSInteger scope=self.statusFilter.selectedSegmentIndex;if(scope>0){NSArray *chosen=@[running,pending,stopped][scope-1];visibleSections=[NSMutableArray array];titles=[NSMutableArray array];if(chosen.count){[visibleSections addObject:chosen];[titles addObject:@[@"运行时活跃 · HTTP 状态单独检测",@"启停结果待确认",@"已停止"][scope-1]];}}
     self.sections=visibleSections;self.sectionTitles=titles;
     [self.table reloadData];
 }
@@ -423,7 +443,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     NSDictionary *s = [self rows:ip.section][ip.row];
     UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:@"service.session"];
     if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"service.session"];
-    c.backgroundColor = ip.section == 0 ? HostSuccessSurface() : HostCard();
+    c.backgroundColor = [PyHost isRunningServiceIdentifier:s[@"id"]] ? HostSuccessSurface() : HostCard();
     c.accessoryView=nil;c.accessoryType=UITableViewCellAccessoryNone;c.imageView.image=nil;c.selectionStyle=UITableViewCellSelectionStyleDefault;
     c.textLabel.text = s[@"name"];
     c.textLabel.textColor = HostText();
@@ -440,13 +460,21 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     c.imageView.image = [UIImage systemImageNamed:@"terminal.fill"];
     c.imageView.tintColor = HostAccent();
-    UISwitch *sw = [UISwitch new];
-    sw.on = [PyHost isManagedServiceIdentifier:s[@"id"]];
-    sw.onTintColor = HostAccent();
-    sw.accessibilityIdentifier = s[@"id"];
-    [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
-    c.accessoryView = sw;
+    UIButton *control=[UIButton buttonWithType:UIButtonTypeSystem];NSString *identifier=s[@"id"]?:@"";
+    BOOL busy=[self.changingServiceIDs containsObject:identifier],managed=[PyHost isManagedServiceIdentifier:identifier];
+    [control setTitle:busy?@"处理中…":(managed?@"停止":@"启动") forState:UIControlStateNormal];
+    control.frame=CGRectMake(0,0,80,44);control.enabled=!busy;control.accessibilityIdentifier=identifier;
+    [control addTarget:self action:@selector(changeService:) forControlEvents:UIControlEventTouchUpInside];c.accessoryView=control;
     return c;
+}
+- (void)changeService:(UIButton *)sender {
+    NSString *identifier=sender.accessibilityIdentifier;if(!identifier.length||[self.changingServiceIDs containsObject:identifier])return;
+    NSDictionary *service=nil;for(NSDictionary *candidate in self.services)if([candidate[@"id"] isEqual:identifier]){service=candidate;break;}if(!service)return;
+    BOOL enabled=![PyHost isManagedServiceIdentifier:identifier];if(!self.onChangeService){if(self.onToggleService)self.onToggleService(service,enabled);return;}
+    if(!self.changingServiceIDs)self.changingServiceIDs=[NSMutableSet set];[self.changingServiceIDs addObject:identifier];[self.table reloadData];__weak typeof(self) weakSelf=self;
+    self.onChangeService(service,enabled,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{ServicesViewController *owner=weakSelf;if(!owner)return;[owner.changingServiceIDs removeObject:identifier];[owner refresh];
+        if(error){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"服务操作失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];[owner presentViewController:alert animated:YES completion:nil];}
+    });});
 }
 - (void)toggle:(UISwitch *)sender {
     for (NSDictionary *s in self.services)
@@ -463,6 +491,7 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     ServiceDetailViewController *v = [ServiceDetailViewController new];
     v.service = [self rows:ip.section][ip.row];
     v.onToggle = self.onToggleService;
+    v.onChangeService=self.onChangeService;v.onOpenResource=self.onOpenResource;
     v.onApplyService = self.onApplyService;
     v.onLog = self.onOpenLog;
     v.onSubscribe = self.onSubscribe;

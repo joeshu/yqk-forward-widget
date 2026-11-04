@@ -6,6 +6,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) void (^onUse)(NSDictionary *service,NSString *kind);
 /// Called only after a local HTTP endpoint returns a valid non-empty M3U.
 @property(nonatomic,copy) void (^onPlaylistDiscovered)(NSDictionary *service,NSString *subscriptionURL,NSUInteger channelCount);
+@property(nonatomic,copy) void (^onExport)(NSDictionary *service);
 @property(nonatomic,copy) void (^onLog)(NSDictionary *service);
 @property(nonatomic,copy) void (^onEdit)(NSDictionary *service);
 @property(nonatomic,copy) void (^onUpdate)(NSDictionary *service);

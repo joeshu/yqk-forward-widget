@@ -42,6 +42,8 @@
 #import "PluginLogStore.h"
 #import "CNPlayerCrashGuard.h"
 #import "ResourceImportSheetViewController.h"
+#import "ResourceImportWorkflowViewController.h"
+#import "SubscriptionResourceViewController.h"
 #import "PluginResourceDetailViewController.h"
 #import "MediaPlaybackViewController.h"
 #import "MediaPlaybackHeaders.h"
@@ -311,6 +313,12 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @end
 
 @interface RootViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIDocumentPickerDelegate, AVPlayerViewControllerDelegate, UINavigationControllerDelegate>
+@property(nonatomic,strong) ResourceImportWorkflowViewController *resourceImportWorkflow;
+- (void)addAdvancedResource;
+- (void)saveImportCandidate:(NSDictionary *)candidate update:(BOOL)update completion:(void (^)(NSError *error))completion;
+@property(nonatomic,strong) NSMutableDictionary<NSString *,NSURLSessionTask *> *subscriptionEditTasks;
+- (void)replaceSubscription:(NSString *)source URL:(NSString *)url values:(NSDictionary *)values disabled:(BOOL)disabled completion:(void (^)(NSError *error))completion;
+- (void)openSubscriptionProfile:(NSString *)source editing:(BOOL)editing;
 // 播放
 @property (nonatomic, strong) UIView *playerBox;
 @property (nonatomic, strong) UIView *playerTopScrim;
@@ -1374,10 +1382,10 @@ configureCatalogNavigation;
 - (void)openConfigurationTab {
     ConfigCenterViewController *page=(ConfigCenterViewController *)self.tabPages[@3];
     if(!page){page=[ConfigCenterViewController new];__weak typeof(self) w=self;
-        page.profilesProvider=^{return [(id)w configurationProfiles];};page.onServices=^{[w openServicesPage];};page.onAdd=^{[w addSubscription];};page.onRefresh=^{[w onPullRefresh];};page.onRefreshProfile=^(NSString *source){[w fetchSubscription:source silent:NO];};
+        page.profilesProvider=^{return [(id)w configurationProfiles];};page.onServices=^{[w openServicesPage];};page.onAdd=^{[w addSubscription];};page.importTaskSummaryProvider=^{return w.resourceImportWorkflow.taskSummary;};page.onRefresh=^{[w onPullRefresh];};page.onRefreshProfile=^(NSString *source){[w fetchSubscription:source silent:NO];};
         page.onRefreshMediaHome=^{RootViewController *owner=w;if(!owner)return;[owner selectBottomTab:(UIButton *)owner.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)owner.tabPages[@2];dispatch_async(dispatch_get_main_queue(),^{if(![browser refreshHomeContentFromResourcePage])[owner showServiceError:@"没有可加载的影视资源。请先导入并启用一个影视来源。"] ;});};
         page.onToggleProfile=^(NSString *source,BOOL enabled){NSDictionary *service=[w resourceServiceForSource:source];if(service){[w toggleService:service enabled:enabled];return;}if(!source.length)[NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"nativeChannelsEnabled"];else{NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabled removeObject:source];if(!enabled)[disabled addObject:source];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];}[w applyFilter];[w updateLiveResourceCapsule];};
-        page.onOpenResource=^(NSString *source){[w openPluginResource:source];};
+        page.onOpenResource=^(NSString *source){[w openPluginResource:source];};page.onOpenSubscription=^(NSString *source){[w openSubscriptionProfile:source editing:NO];};
         page.onUseResource=^(NSString *source,NSString *kind){NSDictionary *service=[w resourceServiceForSource:source];if(!service)return;if([kind isEqual:@"choose"]){UIAlertController *choice=[UIAlertController alertControllerWithTitle:service[@"name"]?:@"选择资源用途" message:@"这个资源同时提供影视与直播能力。" preferredStyle:UIAlertControllerStyleActionSheet];[choice addAction:[UIAlertAction actionWithTitle:@"进入影视" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"vod"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"添加直播频道" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"live"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"资源详情与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w openPluginResource:source];}]];[choice addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];choice.popoverPresentationController.sourceView=w.view;choice.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(w.view.bounds),CGRectGetMidY(w.view.bounds),1,1);[w presentViewController:choice animated:YES completion:nil];return;}[w usePluginService:service kind:kind];};
         page.onOpenTVBoxCatalog=^(NSString *identifier){[w openTVBoxCatalog:identifier];};
         page.onExportResource=^(NSString *source,NSString *format){[w exportResource:source format:format];};
@@ -1472,6 +1480,7 @@ configureCatalogNavigation;
     if([source hasPrefix:@"tvbox:"]){[self openTVBoxCatalog:[source substringFromIndex:6]];return;}
     NSDictionary *service=[self resourceServiceForSource:source];if(!service)return;PluginResourceDetailViewController *page=[PluginResourceDetailViewController new];page.service=service;__weak typeof(self) weakSelf=self;
     page.onToggle=^(NSDictionary *item,BOOL enabled,void(^completion)(NSError *)){[weakSelf changeService:item enabled:enabled completion:completion];};
+    page.onExport=^(NSDictionary *item){[weakSelf exportResource:[@"plugin:" stringByAppendingString:item[@"id"]?:@""] format:@"single"];};
     page.onPlaylistDiscovered=^(NSDictionary *item,NSString *url,NSUInteger channelCount){
         RootViewController *owner=weakSelf;if(!owner||![ProfileStore isHTTP:url])return;
         NSURLComponents *parts=[NSURLComponents componentsWithString:url];
@@ -2348,10 +2357,12 @@ configureCatalogNavigation;
     ServicesViewController *page=[ServicesViewController new];
     __weak typeof(self) weakSelf=self;
     page.onOpenYSP=^{ [weakSelf openPluginPage]; };
+    page.onOpenResource=^(NSDictionary *service){[weakSelf openPluginResource:[@"plugin:" stringByAppendingString:service[@"id"]?:@""]];};
     page.onToggleService=^(NSDictionary *service,BOOL enabled){[weakSelf toggleService:service enabled:enabled];};
+    page.onChangeService=^(NSDictionary *service,BOOL enabled,void (^completion)(NSError *)){RootViewController *owner=weakSelf;if(owner)[owner changeService:service enabled:enabled completion:completion];else if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:10 userInfo:@{NSLocalizedDescriptionKey:@"页面已关闭"}]);};
     page.onApplyService=^(NSDictionary *previousService,NSDictionary *updatedService,void (^completion)(NSError * _Nullable)){RootViewController *owner=weakSelf;if(owner)[owner applyServiceConfigurationFrom:previousService to:updatedService completion:completion];else if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:10 userInfo:@{@"NSLocalizedDescriptionKey":@"服务页面已关闭，端口更改未应用。"}]);};
     page.onBrowseService=^(NSDictionary *service){[NSUserDefaults.standardUserDefaults setObject:service[@"id"] forKey:@"selectedMediaSource"];[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[2]];};
-    page.onImportResource=^{[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[3]];dispatch_async(dispatch_get_main_queue(),^{[weakSelf importMediaPackage];});};
+    page.onImportResource=^{[weakSelf addSubscription];};
     page.onOpenLog=^(NSDictionary *service){if(service)[weakSelf openDiagnosticLogForIdentifier:service[@"id"] name:service[@"name"]];else[weakSelf openDiagnosticLog];};
     page.onSubscribe=^(NSString *url){RootViewController *owner=weakSelf;NSString *key=[owner stableURLKey:url];if(!owner||!key.length)return;NSDictionary *service=[owner localServiceForURL:[NSURL URLWithString:key]];if(service){NSMutableDictionary *metadata=[@{@"managedServiceID":service[@"id"]?:@""} mutableCopy];if(![ProfileStore metadata:key][@"name"])[metadata addEntriesFromDictionary:@{@"name":service[@"name"]?:@"本机直播服务"}];[ProfileStore update:key values:metadata];}if(![owner.subscriptionURLs containsObject:key]){[owner.subscriptionURLs addObject:key];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:owner.subscriptionURLs.allObjects] forKey:@"subscriptions"];}if(service&&![PyHost isRunningServiceIdentifier:service[@"id"]]){[owner changeService:service enabled:YES completion:^(NSError *error){if(error){[owner showServiceError:error.localizedDescription];return;}[owner fetchSubscription:key silent:NO];}];}else[owner fetchSubscription:key silent:NO];};
     if(self.activeTab==3)[(ConfigCenterViewController *)self.tabPages[@3] prepareForNavigationTransition];
@@ -3105,6 +3116,26 @@ configureCatalogNavigation;
 }
 
 - (void)addSubscription {
+    if(!self.resourceImportWorkflow){
+        ResourceImportWorkflowViewController *workflow=[ResourceImportWorkflowViewController new];self.resourceImportWorkflow=workflow;__weak typeof(self) weakSelf=self;
+        workflow.onAdvanced=^{[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[3]];[weakSelf addAdvancedResource];};
+        workflow.onStateChanged=^{[weakSelf refreshConfigurationPage];};
+        workflow.onSaveCandidate=^(NSDictionary *candidate,BOOL update,void (^completion)(NSError *)){RootViewController *owner=weakSelf;if(owner)[owner saveImportCandidate:candidate update:update completion:completion];else completion([NSError errorWithDomain:@"ResourceImport" code:1 userInfo:@{NSLocalizedDescriptionKey:@"资源页面已关闭"}]);};
+    }
+    UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:self.resourceImportWorkflow];navigation.modalPresentationStyle=UIModalPresentationFullScreen;HostStyleNavigation(navigation);[self.navigationController.topViewController presentViewController:navigation animated:YES completion:nil];
+}
+- (void)saveImportCandidate:(NSDictionary *)candidate update:(BOOL)update completion:(void (^)(NSError *error))completion {
+    NSError *failure=nil;NSString *kind=candidate[@"kind"];
+    if([kind isEqual:@"catalog"]){NSMutableDictionary *incoming=[candidate[@"catalog"] mutableCopy];NSDictionary *existing=nil;for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){if(([incoming[@"url"] length]&&[incoming[@"url"] isEqual:catalog[@"url"]])||([incoming[@"importFingerprint"] length]&&[incoming[@"importFingerprint"] isEqual:catalog[@"importFingerprint"]])){existing=catalog;break;}}
+        if(existing&&update){incoming[@"id"]=existing[@"id"];incoming[@"name"]=existing[@"name"]?:incoming[@"name"]?:@"资源合集";}
+        if([TVBoxCatalogStore catalogs].count>=50&&!(existing&&update))failure=[NSError errorWithDomain:@"ResourceImport" code:2 userInfo:@{NSLocalizedDescriptionKey:@"已达到 50 个合集上限"}];else [TVBoxCatalogStore saveCatalog:incoming];
+    }else if([kind isEqual:@"service"]){NSDictionary *incoming=candidate[@"service"],*existing=nil;for(NSDictionary *service in [ServiceStore services])if(![service[@"builtin"] boolValue]&&![service[@"id"] isEqual:incoming[@"id"]]&&(([incoming[@"url"] length]&&[incoming[@"url"] isEqual:service[@"url"]])||([incoming[@"importFingerprint"] length]&&[incoming[@"importFingerprint"] isEqual:service[@"importFingerprint"]]))){existing=service;break;}
+        if(existing&&update){if([PyHost isManagedServiceIdentifier:existing[@"id"]])failure=[NSError errorWithDomain:@"ResourceImport" code:3 userInfo:@{NSLocalizedDescriptionKey:@"已有资源正在运行或清理，请先停止该资源，再重试保存"}];else{NSDictionary *saved=[ServiceStore replaceImportedService:existing withService:incoming error:&failure];if(saved&&incoming[@"importFingerprint"]){NSMutableDictionary *metadata=[saved mutableCopy];metadata[@"importFingerprint"]=incoming[@"importFingerprint"];[ServiceStore save:metadata];}}}else [ServiceStore save:incoming];
+    }else if([kind isEqual:@"playlist"]){NSString *origin=[self stableURLKey:candidate[@"origin"]],*text=candidate[@"text"];if(origin.length&&[self.subscriptionURLs containsObject:origin]&&!update){failure=[NSError errorWithDomain:@"ResourceImport" code:4 userInfo:@{NSLocalizedDescriptionKey:@"相同在线订阅只能更新；如需独立副本，请导出后作为本地文件导入"}];}else if(origin.length){[ProfileStore update:origin values:@{@"name":candidate[@"name"]?:@"直播订阅",@"text":text}];[self.subscriptionURLs addObject:origin];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];[self applyPlaylistText:text source:origin];}else[self importPlaylistData:[text dataUsingEncoding:NSUTF8StringEncoding] name:candidate[@"name"]];
+    }else failure=[NSError errorWithDomain:@"ResourceImport" code:5 userInfo:@{NSLocalizedDescriptionKey:@"资源类型尚未识别"}];
+    [self refreshConfigurationPage];completion(failure);
+}
+- (void)addAdvancedResource {
     ResourceImportSheetViewController *sheet=[ResourceImportSheetViewController new];
     sheet.modalPresentationStyle=UIModalPresentationFullScreen;
     __weak typeof(self) weakSelf=self;
@@ -3987,19 +4018,50 @@ configureCatalogNavigation;
     if(![M3UParser parse:text baseURL:nil].count){[self showServiceError:@"文件须为 UTF-8 M3U 播放列表，包含有效 HTTP/HTTPS 频道，且不超过 10MB。"];return;}
     NSString *source=[@"local-playlist:" stringByAppendingString:NSUUID.UUID.UUIDString];[ProfileStore update:source values:@{@"name":name?:@"本地播放列表",@"text":text}];[self.subscriptionURLs addObject:source];[NSUserDefaults.standardUserDefaults setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];[self applyPlaylistText:text source:source];
 }
-- (void)editProfile:(NSString *)source {
-    BOOL wasDisabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"] containsObject:source];
-    NSDictionary *p=[ProfileStore metadata:source];UIAlertController *a=[UIAlertController alertControllerWithTitle:@"编辑配置" message:@"XMLTV 地址留空时使用播放列表提供的 EPG。" preferredStyle:UIAlertControllerStyleAlert];
-    [a addTextFieldWithConfigurationHandler:^(UITextField *t){t.placeholder=@"配置名称";t.text=p[@"name"]?:[NSURL URLWithString:source].host;}];
-    [a addTextFieldWithConfigurationHandler:^(UITextField *t){t.placeholder=@"订阅链接（本地文件不可修改）";t.text=[ProfileStore isHTTP:source]?source:@"本地文件";t.enabled=[ProfileStore isHTTP:source];t.autocapitalizationType=UITextAutocapitalizationTypeNone;t.keyboardType=UIKeyboardTypeURL;}];
-    [a addTextFieldWithConfigurationHandler:^(UITextField *t){t.placeholder=@"XMLTV / XMLTV.gz 地址";t.text=p[@"epgURL"]?:p[@"detectedEPGURL"];t.autocapitalizationType=UITextAutocapitalizationTypeNone;t.keyboardType=UIKeyboardTypeURL;}];
-    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [a addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){NSString *u=[ProfileStore isHTTP:source]?[self stableURLKey:a.textFields[1].text]:source;NSString *epg=[a.textFields[2].text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!u.length||(epg.length&&![ProfileStore isHTTP:epg])){[self showServiceError:@"订阅和 EPG 地址须为有效 HTTP/HTTPS 链接。"];return;}
-        NSMutableDictionary *values=[p mutableCopy];values[@"name"]=a.textFields[0].text?:@"";values[@"epgURL"]=epg?:@"";
-        if(![source isEqualToString:u]){[self deleteSubscription:source];[values removeObjectForKey:@"cachedChannels"];[self.subscriptionURLs addObject:u];[NSUserDefaults.standardUserDefaults setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];}
-        if(wasDisabled){NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];if(![disabled containsObject:u])[disabled addObject:u];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];}
-        self.activeSource=nil;[ProfileStore update:u values:values];[self.epgCache removeAllObjects];[self fetchSubscription:u silent:NO];[self refreshConfigurationPage];
-    }]];[self presentViewController:a animated:YES completion:nil];
+- (void)replaceSubscription:(NSString *)source URL:(NSString *)url values:(NSDictionary *)values disabled:(BOOL)disabled completion:(void (^)(NSError *error))completion {
+    if([self.subscriptionURLs containsObject:url]){completion([NSError errorWithDomain:@"SubscriptionEdit" code:1 userInfo:@{NSLocalizedDescriptionKey:@"该地址已存在，请编辑已有订阅"}]);return;}
+    if(!self.subscriptionEditTasks)self.subscriptionEditTasks=[NSMutableDictionary dictionary];
+    [self.subscriptionEditTasks[source] cancel];
+    UIAlertController *progress=[UIAlertController alertControllerWithTitle:@"正在验证新订阅" message:@"验证成功后替换；原订阅和频道暂时保留。" preferredStyle:UIAlertControllerStyleAlert];
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
+    __weak typeof(self) weakSelf=self;__block NSURLSessionDownloadTask *task=nil;
+    task=[NSURLSession.sharedSession downloadTaskWithRequest:request completionHandler:^(NSURL *location,NSURLResponse *response,NSError *error){
+        NSNumber *size=nil;[location getResourceValue:&size forKey:NSURLFileSizeKey error:NULL];
+        NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
+        NSData *data=(location&&size&&!error&&status>=200&&status<300&&size.unsignedLongLongValue<=10*1024*1024)?[NSData dataWithContentsOfURL:location]:nil;
+        NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
+        NSArray *channels=text.length?[M3UParser parse:text baseURL:response.URL?:[NSURL URLWithString:url]]:nil;
+        dispatch_async(dispatch_get_main_queue(),^{RootViewController *owner=weakSelf;if(!owner||owner.subscriptionEditTasks[source]!=(id)task)return;[owner.subscriptionEditTasks removeObjectForKey:source];
+            [progress dismissViewControllerAnimated:YES completion:^{
+                if(!channels.count){completion(error?:[NSError errorWithDomain:@"SubscriptionEdit" code:2 userInfo:@{NSLocalizedDescriptionKey:@"新地址没有返回有效频道，已保留原订阅"}]);return;}
+                if(![owner.subscriptionURLs containsObject:source]){completion([NSError errorWithDomain:@"SubscriptionEdit" code:3 userInfo:@{NSLocalizedDescriptionKey:@"原订阅已被移除，未保存此次编辑"}]);return;}
+                NSArray *ordered=[ProfileStore orderedSources:owner.subscriptionURLs.allObjects];NSMutableArray *replacement=[ordered mutableCopy];NSUInteger index=[replacement indexOfObject:source];if(index!=NSNotFound)replacement[index]=url;
+                BOOL selected=[owner.activeSource isEqual:source];NSMutableDictionary *metadata=[values mutableCopy];[metadata removeObjectForKey:@"cachedChannels"];[metadata removeObjectForKey:@"detectedEPGURL"];
+                NSString *epg=[M3UParser epgURL:text baseURL:response.URL?:[NSURL URLWithString:url]];if(epg.length)metadata[@"detectedEPGURL"]=epg;
+                [owner deleteSubscription:source];[owner.subscriptionURLs addObject:url];[ProfileStore update:url values:metadata];
+                NSMutableArray *disabledSources=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabledSources removeObject:source];[disabledSources removeObject:url];if(disabled)[disabledSources addObject:url];[NSUserDefaults.standardUserDefaults setObject:disabledSources forKey:@"disabledSubscriptions"];
+                [NSUserDefaults.standardUserDefaults setObject:replacement forKey:@"subscriptions"];
+                if(selected)owner.activeSource=url;[owner.epgCache removeAllObjects];[owner installPlaylist:channels source:url];[owner refreshConfigurationPage];completion(nil);
+            }];
+        });
+    }];
+    self.subscriptionEditTasks[source]=(id)task;
+    [progress addAction:[UIAlertAction actionWithTitle:@"取消验证" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(owner.subscriptionEditTasks[source]==(id)task)[owner.subscriptionEditTasks removeObjectForKey:source];[task cancel];completion([NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);}]];
+    [self.navigationController.topViewController presentViewController:progress animated:YES completion:^{[task resume];}];
+}
+- (void)editProfile:(NSString *)source {[self openSubscriptionProfile:source editing:YES];}
+- (void)openSubscriptionProfile:(NSString *)source editing:(BOOL)editing {
+    SubscriptionResourceViewController *page=[SubscriptionResourceViewController new];page.source=source;page.initiallyEditing=editing;__weak typeof(self) weakSelf=self;__weak SubscriptionResourceViewController *weakPage=page;
+    page.profileProvider=^{RootViewController *owner=weakSelf;NSString *current=weakPage.source?:source;for(NSDictionary *profile in [owner configurationProfiles])if([profile[@"source"] isEqual:current])return profile;return @{};};
+    page.onCommit=^(NSString *name,NSString *url,NSString *epg,void (^completion)(NSError *error)){
+        RootViewController *owner=weakSelf;NSString *current=weakPage.source?:source;if(!owner){completion([NSError errorWithDomain:@"SubscriptionEdit" code:1 userInfo:@{NSLocalizedDescriptionKey:@"页面已关闭"}]);return;}
+        NSMutableDictionary *values=[[ProfileStore metadata:current] mutableCopy];values[@"name"]=name;values[@"epgURL"]=epg;
+        if(![url isEqual:current]){BOOL disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"] containsObject:current];[owner replaceSubscription:current URL:url values:values disabled:disabled completion:completion];return;}
+        [ProfileStore update:current values:values];[owner.epgCache removeAllObjects];[owner applyFilter];[owner refreshConfigurationPage];completion(nil);
+    };
+    page.onOpen=^{RootViewController *owner=weakSelf;if(!owner)return;NSString *current=weakPage.source?:source;[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[current.length?1:0]];owner.activeSource=current;[owner applyFilter];[owner updateLiveResourceCapsule];};
+    page.onRefresh=^{[weakSelf fetchSubscription:weakPage.source?:source silent:NO];};page.onExport=^{[weakSelf exportResource:weakPage.source?:source format:@"single"];};
+    if(self.activeTab==3)[(ConfigCenterViewController *)self.tabPages[@3] prepareForNavigationTransition];[self.navigationController pushViewController:page animated:YES];
 }
 - (void)editEPGMapping:(NSDictionary *)ch {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"EPG 手动匹配" message:@"输入 XMLTV channel ID 或央视官方频道 ID；留空恢复自动匹配。" preferredStyle:UIAlertControllerStyleAlert];[a addTextFieldWithConfigurationHandler:^(UITextField *t){t.text=[ProfileStore epgIDForChannel:ch];t.autocapitalizationType=UITextAutocapitalizationTypeNone;}];
