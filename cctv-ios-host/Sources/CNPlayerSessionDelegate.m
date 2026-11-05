@@ -2,6 +2,16 @@
 #import "RootViewController.h"
 #import <objc/runtime.h>
 
+// 时移 / 回看新增转发（手册 §4.7 版权变动、§4.9 每秒周期事件）。
+// 宿主侧的方法由集成补丁在 RootViewController 补齐；此处先判
+// respondsToSelector，补丁未合入前不崩溃，也不影响其它回调的转发。
+// 注意：分类声明必须放在 @implementation 之前，不能写在实现块里。
+@interface RootViewController (CCTVTimeshiftCallbacks)
+- (void)player:(id)player programPubicChanged:(BOOL)isPublic;
+- (void)player:(id)player programPubicChanged:(BOOL)isPublic type:(NSUInteger)sourceType error:(NSError *)error;
+- (void)playerPeriodicTimeEvent:(id)player;
+@end
+
 @implementation CNPlayerSessionDelegate {
     __weak RootViewController *_owner;
     NSUInteger _sessionID;
@@ -73,15 +83,6 @@
     if (![self isCurrentSession]) return;
     [_owner authFailed:error];
 }
-
-// 时移 / 回看新增转发（手册 §4.7 版权变动、§4.9 每秒周期事件）。
-// 宿主侧的方法由集成补丁在 RootViewController 补齐；此处先判
-// respondsToSelector，补丁未合入前不崩溃，也不影响其它回调的转发。
-@interface RootViewController (CCTVTimeshiftCallbacks)
-- (void)player:(id)player programPubicChanged:(BOOL)isPublic;
-- (void)player:(id)player programPubicChanged:(BOOL)isPublic type:(NSUInteger)sourceType error:(NSError *)error;
-- (void)playerPeriodicTimeEvent:(id)player;
-@end
 
 - (void)player:(id)player programPubicChanged:(BOOL)isPublic {
     if (![self isCurrentSession]) return;
