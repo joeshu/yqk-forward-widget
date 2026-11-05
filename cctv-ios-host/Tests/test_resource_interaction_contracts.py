@@ -58,10 +58,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('onToggle=^', self.root)
         self.assertIn('isRunningServiceIdentifier', self.root)
         self.assertIn('打开资源详情与配置', self.services)
-        # 移植合并：Services 第 3 节恢复 main 的 4 行设计（含“查看 / 导出代码”行），
-        # 与合并后 didSelect 的 row==2 代码菜单分支一致；413 的 3 行设计已被取代。
+        # 移植合并：5f2eac6 给第 3 节加了“重启服务”行，现为 5 行。
         self.assertIn('查看 / 导出代码', self.services)
-        self.assertIn(': section == 3 ? 4', self.services)
+        self.assertIn(': section == 3 ? 5', self.services)
 
     def test_floating_resource_add_opens_the_unified_import_workflow(self):
         action = self.root.split('UIAction *import=', 1)[1].split(';', 1)[0]

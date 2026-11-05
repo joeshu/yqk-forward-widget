@@ -18,7 +18,15 @@ REDACTOR = (SOURCE.parent / "HostLogRedactor.m").read_text(encoding="utf-8")
 
 
 def method_body(signature):
-    start = TEXT.index(signature)
+    # 413 分支的类扩展里有前向声明（"- (void)foo;"），TEXT.index 会先命中
+    # 声明而非实现；跳过以 ";" 结尾的声明，找到以 "{" 开头的实现。
+    start = 0
+    while True:
+        start = TEXT.index(signature, start)
+        after = TEXT[start + len(signature):].lstrip()
+        if not after.startswith(";"):
+            break
+        start += len(signature)
     opening = TEXT.index("{", start)
     depth = 0
     for index in range(opening, len(TEXT)):
