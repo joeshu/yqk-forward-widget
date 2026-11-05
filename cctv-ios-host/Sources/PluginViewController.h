@@ -7,6 +7,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) dispatch_block_t onAddSubscription;
 @property (nonatomic, copy, nullable) dispatch_block_t onManageSubscriptions;
 @property (nonatomic, copy, nullable) dispatch_block_t onOpenLog;
+@property (nonatomic, copy, nullable) NSUInteger (^subscriptionCountProvider)(void);
 - (void)updateRunning:(BOOL)running subscriptionCount:(NSUInteger)count;
 @end
 NS_ASSUME_NONNULL_END

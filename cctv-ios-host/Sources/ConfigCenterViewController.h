@@ -14,6 +14,10 @@
 @property(nonatomic, copy) dispatch_block_t onRefreshMediaHome;
 @property(nonatomic, copy) void (^onRefreshProfile)(NSString *source);
 @property(nonatomic, copy) void (^onOpenSubscription)(NSString *source);
+@property(nonatomic, copy) void (^onRecheckProfile)(NSString *source);
+@property(nonatomic, copy) void (^onRematchEPGProfile)(NSString *source);
+@property(nonatomic, copy) void (^onRestartProfile)(NSString *source);
+@property(nonatomic, copy) void (^onRefreshCatalogProfile)(NSString *source);
 @property(nonatomic, copy) void (^onSelectProfile)(NSString *source);
 @property(nonatomic, copy) void (^onToggleProfile)(NSString *source, BOOL enabled);
 @property(nonatomic, copy) void (^onEditProfile)(NSString *source);

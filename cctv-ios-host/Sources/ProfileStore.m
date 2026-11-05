@@ -16,6 +16,16 @@ NSNotificationName const ProfileStoreMetadataDidChangeNotification = @"CCTVHostP
     NSMutableDictionary *p=[[self metadata:source] mutableCopy];[p addEntriesFromDictionary:values];all[source]=p;
     [NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
 }
++ (void)removeValueForKey:(NSString *)key source:(NSString *)source {
+    // 只清一个键，其余元数据保留：重新匹配 EPG 时用它丢弃过期
+    // detectedEPGURL，而不丢弃名称、状态与更新时间等其余字段。
+    if(![self isSource:source]||![key isKindOfClass:NSString.class]||!key.length)return;
+    NSMutableDictionary *all=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{} mutableCopy];
+    NSMutableDictionary *p=[[self metadata:source] mutableCopy];
+    if(![p objectForKey:key])return;
+    [p removeObjectForKey:key];all[source]=p;
+    [NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
+}
 + (void)remove:(NSString *)source {
     NSMutableDictionary *all=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{} mutableCopy];[all removeObjectForKey:source];[NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
     for(NSString *key in @[@"profileOrder",@"disabledSubscriptions"]){NSMutableArray *a=[[NSUserDefaults.standardUserDefaults arrayForKey:key]?:@[] mutableCopy];[a removeObject:source];[NSUserDefaults.standardUserDefaults setObject:a forKey:key];}

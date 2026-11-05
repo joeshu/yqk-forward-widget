@@ -26,6 +26,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         cls.js_runtime = (ROOT / 'Sources/JSPluginRuntime.m').read_text()
         cls.importer = (ROOT / 'Sources/MediaPackageImporter.m').read_text()
         cls.tvbox = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
+        cls.services = (ROOT / 'Sources/ServicesViewController.m').read_text()
+        cls.plugin_page = (ROOT / 'Sources/PluginViewController.m').read_text()
+        cls.profile_store = (ROOT / 'Sources/ProfileStore.m').read_text()
 
     def test_player_exit_cancels_work_after_confirmed_transition(self):
         will = self.playback.split('- (void)viewWillDisappear:', 1)[1].split('- (void)viewDidDisappear:', 1)[0]
@@ -1479,6 +1482,71 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('BOOL native=!webPage&&(MediaPlaybackResultSupportsNativePlayback(result)||MediaTVBoxURLHasSignedQuery(url))', api)
         self.assertIn('static BOOL MediaTVBoxURLHasSignedQuery(NSString *value)', api)
         self.assertIn('result[@"requiresWebPlayback"]=@(webPage||!native)', api)
+    def test_resource_page_has_per_item_refresh_actions(self):
+        # 资源页每种主要条目都有独立刷新入口：插件行（清单/健康/EPG/重启）、
+        # 订阅行（健康/EPG）、合集行（重新下载），不再只有整页刷新。
+        for action in ('onRecheckProfile', 'onRematchEPGProfile', 'onRestartProfile', 'onRefreshCatalogProfile'):
+            self.assertIn(action, self.catalog)
+            self.assertIn(action, self.root)
+        for title in ('刷新订阅清单', '重新检测健康', '重新匹配节目单（EPG）', '重启服务', '刷新合集'):
+            self.assertIn(title, self.catalog)
+        # 插件行的刷新回调收到的仍是行 source（plugin:<id>），由 Root 解析
+        # 到它自己的订阅清单地址；直接传 plugin: 源给 fetchSubscription 是空操作。
+        self.assertIn('refreshSubscriptionForProfile:', self.root)
+        self.assertIn('resourceServiceForSource:source', self.root)
+        self.assertIn('subscriptionURLForService:service', self.root)
+
+    def test_resource_page_catalog_refresh_preserves_existing_id(self):
+        # 合集刷新用新解析结果覆盖旧行：先把解析出的新 id 换回原合集 id，
+        # saveCatalog 按 id 合并才不会把同一合集存成两行。
+        body = self.root.split('- (void)refreshTVBoxCatalogProfile:(NSString *)source {', 1)[1].split('- (void)installPlaylist:', 1)[0]
+        self.assertIn('catalogForID:identifier', body)
+        self.assertIn('loadURL:url completion:', body)
+        self.assertIn('updated[@"id"]=identifier', body)
+        self.assertIn('saveCatalog:updated', body)
+        self.assertIn('refreshConfigurationPage', body)
+        # MacCMS 行的 url 是接口地址而非 JSON 配置，不走下载刷新；空合集不覆盖。
+        self.assertIn('isEqual:@"maccms"', body)
+        self.assertIn('重新下载的合集为空，已保留原合集', body)
+
+    def test_resource_page_health_recheck_forces_a_fresh_readiness_probe(self):
+        # 有清单的条目重查健康时先丢弃 2 秒内的就绪缓存，强制重新探测；
+        # 无清单的插件直接对服务做一次就绪探测，失败有明确提示。
+        body = self.root.split('- (void)recheckProfileHealth:(NSString *)source {', 1)[1].split('- (void)rematchEPGForProfile:(NSString *)source {', 1)[0]
+        self.assertIn('readyLocalOrigins removeObjectForKey', body)
+        self.assertIn('readinessForURL:base service:service', body)
+        self.assertIn('服务未运行，无法检测健康状态', body)
+        self.assertIn('showServiceError:error.localizedDescription', body)
+
+    def test_successful_subscription_refresh_clears_stale_detected_epg(self):
+        # 新清单不再提供节目单地址时，成功刷新要清掉过期推导值，否则行上
+        # 永远显示“已配置”；失败路径不碰它，旧地址留待下次成功刷新再推导。
+        self.assertIn('removeValueForKey:@"detectedEPGURL"', self.root)
+        self.assertIn('+ (void)removeValueForKey:', self.profile_store)
+        fetch = self.root.split('- (void)fetchSubscription:', 1)[1].split('- (void)installPlaylist:', 1)[0]
+        self.assertIn('removeValueForKey:@"detectedEPGURL"', fetch)
+        self.assertIn('新订阅清单未提供节目单', fetch)
+
+    def test_service_detail_offers_restart_with_progress_and_failure_feedback(self):
+        # 服务详情页此前只有启停开关与接口检测，没有重启入口；重启与
+        # 影视库页复用同一 restartMediaService，失败弹明确原因。
+        self.assertIn('onRestartService', self.services)
+        self.assertIn('onRestart', self.services)
+        self.assertIn('重启服务', self.services)
+        self.assertIn('正在重启服务…', self.services)
+        self.assertIn('重启失败', self.services)
+        self.assertIn('restartMediaService:service completion:completion', self.root)
+
+    def test_plugin_service_page_probes_http_and_refreshes_subscription_count(self):
+        # YSP Live 服务页此前只写“HTTP 未检测”，订阅数只在建页时传入一次：
+        # 现每次出现时现取订阅数，并对 /health 做一次带代次守卫的探测。
+        self.assertIn('subscriptionCountProvider', self.plugin_page)
+        self.assertIn('subscriptionCountProvider=^', self.root)
+        self.assertIn('/health', self.plugin_page)
+        self.assertIn('HTTP 可达', self.plugin_page)
+        self.assertIn('HTTP 未响应', self.plugin_page)
+        self.assertNotIn('HTTP 未检测', self.plugin_page)
+        self.assertIn('httpProbeGeneration!=generation', self.plugin_page)
 
 
 if __name__ == '__main__':

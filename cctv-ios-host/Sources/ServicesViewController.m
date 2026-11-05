@@ -32,6 +32,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 @property(nonatomic, copy) void (^onChangeService)(NSDictionary *, BOOL, void (^)(NSError * _Nullable));
 @property(nonatomic) BOOL changingService;
 @property(nonatomic) BOOL changingServiceTarget;
+@property(nonatomic, copy) void (^onRestart)(NSDictionary *, void (^)(NSError * _Nullable));
 @property(nonatomic, copy) void (^onApplyService)(NSDictionary *, NSDictionary *, void (^)(NSError * _Nullable));
 @property(nonatomic, copy) void (^onLog)(NSDictionary * _Nullable service);
 @property(nonatomic, copy) void (^onSubscribe)(NSString *);
@@ -107,7 +108,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     return section == 0   ? 2
            : section == 1 ? 3
            : section == 2 ? ([ServiceStore isLiveMediaService:self.service]?12:7)
-           : section == 3 ? 4
+           : section == 3 ? 5
                           : ([self.service[@"builtin"] boolValue] ? 0 : 1);
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
@@ -198,10 +199,11 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
         NSString *address=ip.row==7?values[7]:(ip.row==8?values[8]:nil);
         if(address){c.detailTextLabel.textAlignment=NSTextAlignmentLeft;if([address hasPrefix:@"http://"]||[address.lowercaseString hasPrefix:@"https://"]){c.accessoryType=UITableViewCellAccessoryDisclosureIndicator;c.selectionStyle=UITableViewCellSelectionStyleDefault;}}
     } else if (ip.section == 3) {
-        c.textLabel.text = @[ @"查看日志", @"打开资源详情与配置", @"查看 / 导出代码", @"添加到直播订阅" ][ip.row];
+        c.textLabel.text = @[ @"查看日志", @"打开资源详情与配置", @"查看 / 导出代码", @"添加到直播订阅", @"重启服务" ][ip.row];
         if(ip.row==3){if([self opensMedia])c.textLabel.text=@"打开影视";else if([ServiceStore subscriptionURLForService:self.service].length)c.textLabel.text=@"打开直播频道";else c.textLabel.text=@"配置直播列表路径";}
+        if(ip.row==4){c.detailTextLabel.text=[self running]?@"先停止再启动，端口不变":@"服务未运行 · 请先启动";c.textLabel.textColor=[self running]?HostText():UIColor.secondaryLabelColor;}
         c.imageView.image = [UIImage systemImageNamed:@[
-            @"doc.text", @"square.and.pencil", @"square.and.arrow.up", @"plus.rectangle.on.rectangle"
+            @"doc.text", @"square.and.pencil", @"square.and.arrow.up", @"plus.rectangle.on.rectangle", @"arrow.triangle.2.circlepath"
         ][ip.row]];
         c.imageView.tintColor = HostAccent();
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -278,6 +280,18 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
           }];
     [self.probeTask resume];
 }
+- (void)restart {
+    // 重启只对运行中的服务有意义：已停止的服务用第 0 区的开关启动，
+    // 避免“重启”被误读成启动。进行中用 prompt 反馈，失败弹明确原因。
+    if(![self running]){self.navigationItem.prompt=@"服务未运行 · 请先启动";__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{ServiceDetailViewController *owner=weakSelf;if(owner&&[owner.navigationItem.prompt isEqual:@"服务未运行 · 请先启动"])owner.navigationItem.prompt=nil;});return;}
+    if(!self.onRestart){self.navigationItem.prompt=@"当前版本不支持重启此服务";__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{ServiceDetailViewController *owner=weakSelf;if(owner&&[owner.navigationItem.prompt isEqual:@"当前版本不支持重启此服务"])owner.navigationItem.prompt=nil;});return;}
+    self.navigationItem.prompt=@"正在重启服务…";__weak typeof(self) w=self;
+    self.onRestart(self.service,^(NSError *error){
+        ServiceDetailViewController *owner=w;if(!owner)return;owner.navigationItem.prompt=nil;
+        if(error){UIAlertController *a=[UIAlertController alertControllerWithTitle:@"重启失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:a animated:YES completion:nil];return;}
+        [owner.tableView reloadData];
+    });
+}
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [tableView deselectRowAtIndexPath:ip animated:YES];
     if (ip.section == 0 && ip.row == 1) {
@@ -339,11 +353,13 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
             // 行已滑出可视区时 cell 为 nil：iPad 上 sourceView 为 nil 会崩溃，用 self.view 兜底。
             UITableViewCell *actionCell=[tableView cellForRowAtIndexPath:ip];a.popoverPresentationController.sourceView=actionCell?:self.view;a.popoverPresentationController.sourceRect=actionCell?actionCell.bounds:CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);
             [self presentViewController:a animated:YES completion:nil];
-        } else {
+        } else if (ip.row == 3) {
             if([self opensMedia]){if(self.onBrowseService)self.onBrowseService(self.service);return;}
             NSString *u = [ServiceStore subscriptionURLForService:self.service];
             if (self.onSubscribe)
                 if(u.length)self.onSubscribe(u);else{UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"未配置直播列表" message:@"请编辑服务，填写或修复播放列表路径后再添加频道。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"编辑服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self edit];}]];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:alert animated:YES completion:nil];}
+        } else if (ip.row == 4) {
+            [self restart];
         }
     } else if (ip.section == 4) {
         if ([PyHost isManagedServiceIdentifier:self.service[@"id"]]){UIAlertController *notice=[UIAlertController alertControllerWithTitle:@"请先停止此服务" message:@"服务仍在运行、停止或清理中，完成后可以删除。" preferredStyle:UIAlertControllerStyleAlert];[notice addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:notice animated:YES completion:nil];return;}
@@ -535,6 +551,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     v.service = [self rows:ip.section][ip.row];
     v.onToggle = self.onToggleService;
     v.onChangeService=self.onChangeService;v.onOpenResource=self.onOpenResource;
+    v.onRestart = self.onRestartService;
     v.onApplyService = self.onApplyService;
     v.onLog = self.onOpenLog;
     v.onSubscribe = self.onSubscribe;
