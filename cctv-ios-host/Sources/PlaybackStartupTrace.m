@@ -12,20 +12,25 @@
     return self;
 }
 - (NSDictionary<NSString *, NSNumber *> *)stages {
-    return self.mutableStages.copy;
+    @synchronized(self){return self.mutableStages.copy;}
 }
 - (BOOL)record:(NSString *)stage atTime:(NSTimeInterval)time {
+    @synchronized(self){
     if (!stage.length || self.mutableStages[stage] || time < self.startedAt)
         return NO;
     self.mutableStages[stage] = @(time - self.startedAt);
     return YES;
+    }
 }
 - (BOOL)shouldRecoverMissingSetupAtTime:(NSTimeInterval)time alreadyRetried:(BOOL)retried failed:(BOOL)failed {
+    @synchronized(self){
     NSNumber *vdn=self.mutableStages[@"vdn"];
     return !retried && !failed && vdn && !self.mutableStages[@"setup"] && !self.mutableStages[@"frame"] &&
         time-self.startedAt>=8.0 && time-self.startedAt-vdn.doubleValue>=6.0;
+    }
 }
 - (NSString *)summary {
+    @synchronized(self){
     NSMutableArray *parts = [NSMutableArray array];
     for (NSString *key in @[
              @"service", @"recovery", @"teardown", @"preloadedVDN", @"configure", @"prepareCall", @"vdn", @"setup", @"bufferTuned", @"itemReady",
@@ -36,5 +41,6 @@
             [parts addObject:[NSString stringWithFormat:@"%@=%.2fs", key, value.doubleValue]];
     }
     return [parts componentsJoinedByString:@" · "];
+    }
 }
 @end

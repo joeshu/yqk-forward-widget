@@ -84,6 +84,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 - (void)restoreReadingPosition:(NSDictionary *)position;
 - (void)sortPendingSectionsByHealth;
 - (void)showSearchHistory;
+- (void)updateEmptyState;
 - (void)rememberSearchKeyword:(NSString *)keyword;
 @end
 
@@ -143,7 +144,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         [self.searchBar.topAnchor constraintEqualToAnchor:header.topAnchor constant:4],
         [self.historyButton.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-14],
         [self.historyButton.centerYAnchor constraintEqualToAnchor:self.searchBar.centerYAnchor],
-        [self.historyButton.widthAnchor constraintEqualToConstant:48],
+        [self.historyButton.widthAnchor constraintGreaterThanOrEqualToConstant:48],
         [self.progressLabel.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:20],
         [self.progressLabel.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-20],
         [self.progressLabel.topAnchor constraintEqualToAnchor:self.searchBar.bottomAnchor constant:2],
@@ -151,7 +152,12 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     ]];
     self.tableView.tableHeaderView = header;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"搜索" style:UIBarButtonItemStyleDone target:self action:@selector(submitSearch)];
-    [self updateFilters];[self.tableView reloadData];
+    [self updateFilters];[self.tableView reloadData];[self updateEmptyState];
+}
+
+- (void)updateEmptyState {
+    if(self.sources.count){self.tableView.backgroundView=nil;return;}
+    UILabel *empty=[[UILabel alloc] initWithFrame:self.tableView.bounds];empty.text=@"尚未导入影视资源\n请先到资源页导入影视包，再回来搜索";empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;
 }
 
 - (void)viewDidLayoutSubviews {
@@ -215,8 +221,9 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     CGPoint offset=self.filterScroll.contentOffset;
     NSMutableArray *choices=[NSMutableArray arrayWithObject:@{@"section":@(-1),@"name":@"全部",@"count":@(self.resultCount)}];
     for(NSUInteger section=0;section<self.rows.count;section++){
-        NSDictionary *row=self.rows[section];NSArray *entries=row[@"results"];
-        [choices addObject:@{@"section":@(section),@"name":MediaSearchText(self.sources[section][@"name"]),@"count":@(entries.count)}];
+        NSDictionary *row=self.rows[section];NSArray *entries=[row[@"results"] isKindOfClass:NSArray.class]?row[@"results"]:@[];
+        NSString *sourceName=section<self.sources.count?MediaSearchText(self.sources[section][@"name"]):@"";
+        [choices addObject:@{@"section":@(section),@"name":sourceName,@"count":@(entries.count)}];
         NSDictionary *states=row[@"providerStates"];
         for(NSString *provider in [states.allKeys sortedArrayUsingSelector:@selector(compare:)]){
             NSDictionary *station=states[provider];
@@ -260,7 +267,9 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     [super viewDidDisappear:animated];
     // Pushing a film detail keeps this controller in the stack and preserves the
     // ongoing bounded search. An actual pop/dismiss invalidates its callbacks.
-    if(![self.navigationController.viewControllers containsObject:self]&&!self.presentingViewController){[self cancelJobsAndAdvanceGeneration];self.searching=NO;}
+    // 注意：presentingViewController 是“呈现自己的 VC”，不能用它判断是否离页；
+    // 模态 dismiss 后它仍非 nil，会导致任务永远不取消。
+    if(self.isMovingFromParentViewController||self.isBeingDismissed){[self cancelJobsAndAdvanceGeneration];self.searching=NO;}
 }
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
     NSString *query=[searchText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -543,7 +552,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         if (job.section < self.rows.count) self.rows[job.section][@"state"] = @"已达结果上限";
     }
     [self.jobs removeAllObjects];
-    for (NSNumber *number in self.pendingSections) self.rows[number.unsignedIntegerValue][@"state"] = @"未搜索 · 已达结果上限";
+    for (NSNumber *number in self.pendingSections) if(number.unsignedIntegerValue<self.rows.count)self.rows[number.unsignedIntegerValue][@"state"] = @"未搜索 · 已达结果上限";
     [self.pendingSections removeAllObjects];
     self.navigationItem.rightBarButtonItem.title = @"重试失败";
     self.navigationItem.rightBarButtonItem.action = @selector(retryFailedSources);

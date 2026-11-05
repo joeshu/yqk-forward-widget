@@ -14,5 +14,6 @@ static inline NSUInteger CCTVEpisodeSourceIndex(NSUInteger displayIndex, NSUInte
 
 static inline NSInteger CCTVEpisodeGroupForSourceIndex(NSUInteger sourceIndex, NSUInteger count, BOOL reversed) {
     NSUInteger displayIndex = CCTVEpisodeDisplayIndex(sourceIndex, count, reversed);
-    return displayIndex == NSNotFound ? 0 : (NSInteger)(displayIndex / CCTVEpisodesPerGroup);
+    // 非法下标返回 NSNotFound 而不是静默映射为第 0 组，由调用点显式决定回退。
+    return displayIndex == NSNotFound ? NSNotFound : (NSInteger)(displayIndex / CCTVEpisodesPerGroup);
 }

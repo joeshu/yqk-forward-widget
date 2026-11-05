@@ -142,7 +142,13 @@ static void M3UAddHTTPDirective(NSMutableDictionary<NSString *, NSString *> *hea
 
 + (NSString *)attribute:(NSString *)key in:(NSString *)line {
     NSString *pattern = [NSString stringWithFormat:@"%@=\"([^\"]*)\"", key];
-    NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];
+    // 属性键只有少量固定取值：缓存已编译的正则，避免每行每属性重编译。
+    static NSCache *patternCache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ patternCache = [NSCache new]; patternCache.countLimit = 32; });
+    NSRegularExpression *re = [patternCache objectForKey:pattern];
+    if(!re){re = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];if(re)[patternCache setObject:re forKey:pattern];}
+    if(!re)return nil;
     NSTextCheckingResult *m = [re firstMatchInString:line options:0 range:NSMakeRange(0, line.length)];
     if (!m || m.numberOfRanges < 2) return nil;
     return [line substringWithRange:[m rangeAtIndex:1]];

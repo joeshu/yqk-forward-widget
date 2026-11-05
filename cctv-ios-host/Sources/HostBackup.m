@@ -37,8 +37,15 @@
     if(!valid){if(error)*error=[NSError errorWithDomain:@"CCTVHostBackup" code:1 userInfo:@{NSLocalizedDescriptionKey:@"备份格式无效或超过限制；本机配置未修改。"}];return nil;}return j;
 }
 + (void)restore:(NSDictionary *)backup {
-    NSUserDefaults *d=NSUserDefaults.standardUserDefaults;[d setObject:backup[@"subscriptions"] forKey:@"subscriptions"];[d setObject:backup[@"favorites"] forKey:@"favorites"];
-    for(NSString *key in self.preferenceKeys)[d removeObjectForKey:key];for(NSString *key in backup[@"preferences"])[d setObject:backup[@"preferences"][key] forKey:key];
-    [d setObject:backup[@"profiles"]?:@{} forKey:@"profileMetadata"];[d setObject:backup[@"order"]?:@[] forKey:@"profileOrder"];[d setObject:backup[@"disabled"]?:@[] forKey:@"disabledSubscriptions"];[d setObject:backup[@"epgMappings"]?:@{} forKey:@"epgMappings"];[d setObject:backup[@"recents"]?:@[] forKey:@"recents"];
+    // 纵深防御：调用方应传 validatedBackup: 的输出，但 restore 本身也要校验，
+    // 避免类型错误的备份写坏 NSUserDefaults（例如非数组的 subscriptions）。
+    if(![backup isKindOfClass:NSDictionary.class])return;
+    NSArray *subscriptions=backup[@"subscriptions"],*favorites=backup[@"favorites"];NSDictionary *preferences=backup[@"preferences"];
+    if(![subscriptions isKindOfClass:NSArray.class]||![favorites isKindOfClass:NSArray.class]||![preferences isKindOfClass:NSDictionary.class])return;
+    for(id s in subscriptions)if(![s isKindOfClass:NSString.class])return;
+    for(id f in favorites)if(![f isKindOfClass:NSString.class])return;
+    NSUserDefaults *d=NSUserDefaults.standardUserDefaults;[d setObject:subscriptions forKey:@"subscriptions"];[d setObject:favorites forKey:@"favorites"];
+    for(NSString *key in self.preferenceKeys)[d removeObjectForKey:key];for(NSString *key in preferences)if([self.preferenceKeys containsObject:key]&&[preferences[key] isKindOfClass:NSNumber.class])[d setObject:preferences[key] forKey:key];
+    [d setObject:[backup[@"profiles"] isKindOfClass:NSDictionary.class]?backup[@"profiles"]:@{} forKey:@"profileMetadata"];[d setObject:[backup[@"order"] isKindOfClass:NSArray.class]?backup[@"order"]:@[] forKey:@"profileOrder"];[d setObject:[backup[@"disabled"] isKindOfClass:NSArray.class]?backup[@"disabled"]:@[] forKey:@"disabledSubscriptions"];[d setObject:[backup[@"epgMappings"] isKindOfClass:NSDictionary.class]?backup[@"epgMappings"]:@{} forKey:@"epgMappings"];[d setObject:[backup[@"recents"] isKindOfClass:NSArray.class]?backup[@"recents"]:@[] forKey:@"recents"];
 }
 @end

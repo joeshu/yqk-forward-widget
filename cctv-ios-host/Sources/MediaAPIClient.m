@@ -304,7 +304,9 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
     [self call:operation arguments:arguments correlationID:nil completion:completion];
 }
 - (void)call:(NSString *)operation arguments:(NSDictionary *)arguments correlationID:(NSString *)correlationID completion:(void (^)(id,NSError *))completion {
-    NSAssert(NSThread.isMainThread,@"Media client UI operations run on main thread");
+    // NSAssert 只在 Debug 生效：Release 下后台线程调用会直接跑下去并触碰主线程状态，
+    // 改为切回主队列重调（一次性异步派发，不形成保留环）。
+    if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self call:operation arguments:arguments correlationID:correlationID completion:completion];});return;}
     [self cancelWithReason:@"superseded_by_new_request"];
     NSUInteger generation=self.generation;
     NSTimeInterval startedAt=CACurrentMediaTime();
@@ -342,6 +344,10 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
     else{url=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/api/v1/%@",(long)self.port,operation]];request=[NSMutableURLRequest requestWithURL:url];request.HTTPMethod=@"POST";request.HTTPBody=[NSJSONSerialization dataWithJSONObject:arguments?:@{} options:0 error:NULL];[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];[request setValue:requestID forHTTPHeaderField:@"X-CCTVHost-Request-ID"];if(correlationID.length)[request setValue:correlationID forHTTPHeaderField:@"X-CCTVHost-Correlation-ID"];}
     if(!request){NSError *failure=requestError?:[NSError errorWithDomain:@"CCTVHostMedia" code:5 userInfo:@{NSLocalizedDescriptionKey:@"无法创建资源请求"}];if(diagnosticsEnabled){NSMutableDictionary *fields=[@{@"request_id":requestID,@"operation":operation?:@"unknown",@"protocol":self.tvboxSource[@"protocol"]?:@"plugin",@"failure_stage":@"invalid_request",@"error_domain":failure.domain?:@"",@"error_code":@(failure.code),@"error_message":failure.localizedDescription?:@""} mutableCopy];if(correlationID.length)fields[@"correlation_id"]=correlationID;[RuntimeDiagnostics.shared recordEvent:@"media_api_failed" category:@"media_api" fields:fields];}self.activeRequestID=nil;self.activeCorrelationID=nil;self.activeOperation=nil;if(completion)completion(nil,failure);return;}
     __weak typeof(self) weakSelf=self;
+    // processor 存入 requestContexts（self 持有），块内再强引 self.tvboxSource/self.port
+    // 会形成保留环（仅靠请求完成/40s 超时打破）；tvboxSource/port 初始化后不变，
+    // 改为块前捕获局部值，彻底断开循环引用。
+    NSDictionary *tvboxSource=self.tvboxSource;NSInteger port=self.port;
     void (^processor)(NSData *,NSURLResponse *,NSError *)=^(NSData *data,NSURLResponse *response,NSError *networkError){
         NSError *failure=networkError;
         id reply=nil;
@@ -359,7 +365,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
             failureStage=@"empty_response";
         } else if(!failure){
             reply=[NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-            if(jsonError&&self.tvboxSource&&[self.tvboxSource[@"protocol"] isEqual:@"maccms-api"]){jsonError=nil;reply=MediaCMSXMLObject(data,&jsonError);if(!reply&&jsonError){failure=jsonError;failureStage=@"invalid_xml";}}
+            if(jsonError&&tvboxSource&&[tvboxSource[@"protocol"] isEqual:@"maccms-api"]){jsonError=nil;reply=MediaCMSXMLObject(data,&jsonError);if(!reply&&jsonError){failure=jsonError;failureStage=@"invalid_xml";}}
             else if(jsonError){failure=jsonError;failureStage=@"invalid_json";}
         }
         NSDictionary *errorPayload=[reply isKindOfClass:NSDictionary.class]&&[reply[@"error"] isKindOfClass:NSDictionary.class]?reply[@"error"]:@{};
@@ -375,14 +381,14 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
             failureStage=@"http_status";
         }
         BOOL responseOK=[reply isKindOfClass:NSDictionary.class]&&[reply[@"ok"] isKindOfClass:NSNumber.class]&&[reply[@"ok"] boolValue];
-        if(!failure && self.tvboxSource && [reply isKindOfClass:NSDictionary.class]){
+        if(!failure && tvboxSource && [reply isKindOfClass:NSDictionary.class]){
             NSDictionary *rootPayload=MediaTVBoxObject(reply);NSDictionary *payload=([rootPayload[@"data"] isKindOfClass:NSDictionary.class]&&![rootPayload[@"list"] isKindOfClass:NSArray.class])?rootPayload[@"data"]:rootPayload;NSInteger apiCode=[rootPayload[@"code"] integerValue];NSString *apiMessage=MediaTVBoxFirstString(rootPayload,@[@"msg",@"message",@"errMsg"]);
             BOOL hasUsablePayload=[payload[@"list"] isKindOfClass:NSArray.class]||[payload[@"class"] isKindOfClass:NSArray.class]||([payload[@"data"] isKindOfClass:NSDictionary.class]&&payload[@"data"]!=NSNull.null)||MediaTVBoxString(payload[@"url"]).length>0||MediaTVBoxString(payload[@"playUrl"]).length>0;
             // CMS forks disagree on success codes. Treat code 0 as an error only
             // when an error message is present and the response carries no usable data.
             if(rootPayload[@"code"]&&apiCode==0&&apiMessage.length&&!hasUsablePayload){failure=[NSError errorWithDomain:@"CCTVHostCatalogAPI" code:apiCode userInfo:@{NSLocalizedDescriptionKey:apiMessage}];failureStage=@"catalog_api_error";}
         }
-        if(!failure && !self.tvboxSource && !responseOK){
+        if(!failure && !tvboxSource && !responseOK){
             NSString *message=pluginMessage.length?pluginMessage:@"资源未返回有效结果，请查看插件日志";
             NSMutableDictionary *info=[@{NSLocalizedDescriptionKey:message} mutableCopy];
             if(pluginCode.length)info[@"plugin_error_code"]=pluginCode;
@@ -392,12 +398,12 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
             failure=[NSError errorWithDomain:@"CCTVHostMedia" code:2 userInfo:info];
             failureStage=errorPayload.count?@"plugin_error":@"invalid_response_shape";
         }
-        id result=self.tvboxSource?MediaTVBoxNormalize(operation,arguments?:@{},self.tvboxSource,reply):([reply isKindOfClass:NSDictionary.class]?reply[@"data"]:nil);
+        id result=tvboxSource?MediaTVBoxNormalize(operation,arguments?:@{},tvboxSource,reply):([reply isKindOfClass:NSDictionary.class]?reply[@"data"]:nil);
         if(!failure&&[result isKindOfClass:NSDictionary.class]&&[result[@"error"] isKindOfClass:NSString.class]){failure=[NSError errorWithDomain:@"CCTVHostCatalogAPI" code:3 userInfo:@{NSLocalizedDescriptionKey:result[@"error"]}];failureStage=@"catalog_api_error";}
         if(diagnosticsEnabled){
         NSMutableDictionary *fields=[@{@"request_id":requestID,
                                         @"operation":operation?:@"unknown",
-                                        @"port":@(self.port),
+                                        @"port":@(port),
                                         @"elapsed_ms":@((NSInteger)((CACurrentMediaTime()-startedAt)*1000)),
                                         @"http_status":@(status),
                                         @"response_bytes":@(data.length),

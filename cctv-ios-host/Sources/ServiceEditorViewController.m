@@ -16,7 +16,10 @@
     _editor.backgroundColor = HostCard();
     _editor.textColor = HostText();
     UIFont *baseCodeFont=[UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular];
-    _editor.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:baseCodeFont];
+    UIFont *scaledCodeFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:baseCodeFont];
+    // 大字体下代码等比放大到 30pt+ 会导致每行只剩几个字符、无法手工编辑：封顶 20pt。
+    if(scaledCodeFont.pointSize>20)scaledCodeFont=[UIFont monospacedSystemFontOfSize:20 weight:UIFontWeightRegular];
+    _editor.font=scaledCodeFont;
     _editor.adjustsFontForContentSizeCategory=YES;
     _editor.editable = !self.readOnly;
     _editor.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -66,12 +69,14 @@
 }
 @end
 
-@interface ServiceEditorViewController () <UIDocumentPickerDelegate>
+@interface ServiceEditorViewController () <UIDocumentPickerDelegate,NSURLSessionDataDelegate>
 - (BOOL)customCodeMatchesSavedVersion;
 - (BOOL)writeCodeForService:(NSDictionary *)service;
 - (void)applyPortChange:(NSDictionary *)service;
 - (void)persistService:(NSDictionary *)service;
 - (void)finishSavingService:(NSDictionary *)service;
+- (void)dismissKeyboard;
+- (void)updateSourceControlFont;
 @property(nonatomic, strong) UITextField *nameField;
 @property(nonatomic, strong) UITextField *portField;
 @property(nonatomic, strong) UITextField *playlistPathField;
@@ -79,13 +84,17 @@
 @property(nonatomic, strong) UITextField *argsField;
 @property(nonatomic, strong) UISwitch *lanSwitch;
 @property(nonatomic, strong) UISegmentedControl *sourceControl;
-@property(nonatomic, strong) UILabel *fileLabel;
 @property(nonatomic, copy) NSString *identifier;
 @property(nonatomic, copy) NSString *code;
 @property(nonatomic, strong) NSURLSessionDataTask *downloadTask;
+@property(nonatomic, strong) NSURLSession *downloadSession;
+@property(nonatomic, strong) NSMutableData *downloadData;
+@property(nonatomic) NSUInteger downloadGeneration;
+@property(nonatomic, copy) NSString *downloadFailureMessage;
 @property(nonatomic, assign) BOOL downloading;
 @property(nonatomic, copy) NSString *optionsText;
 @property(nonatomic, assign) BOOL applyingPortChange;
+@property(nonatomic) NSUInteger applyPortGeneration;
 @end
 @implementation ServiceEditorViewController
 - (BOOL)managedCode {return [self.service[@"builtin"] boolValue] || [self.service[@"manifest"] isKindOfClass:NSDictionary.class];}
@@ -114,6 +123,11 @@
     self.nameField = [self field:@"服务名称" value:self.service[@"name"]];
     self.portField = [self field:@"端口 1024–65535" value:[self.service[@"port"] description] ?: @"18768"];
     self.portField.keyboardType = UIKeyboardTypeNumberPad;
+    // 数字键盘没有 Return 键：给一个完成按钮收键盘，否则只能靠拖动列表收起。
+    UIToolbar *portToolbar=[[UIToolbar alloc] init];[portToolbar sizeToFit];
+    UIBarButtonItem *portDone=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissKeyboard)];
+    portToolbar.items=@[[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil],portDone];
+    self.portField.inputAccessoryView=portToolbar;
     NSString *configuredPlaylistPath=([self.service[@"playlistPathSource"] isEqual:@"inferred"]||[self.service[@"playlistPathSource"] isEqual:@"detected"])?@"":[ServiceStore playlistPathForService:self.service];
     self.playlistPathField=[self field:@"留空自动识别，或填 /all.m3u" value:configuredPlaylistPath];self.playlistPathField.autocapitalizationType=UITextAutocapitalizationTypeNone;
     self.urlField = [self field:@"https://…/service.py" value:self.service[@"url"]];
@@ -125,6 +139,7 @@
     self.lanSwitch.on = [self.service[@"lan"] boolValue];
     self.sourceControl = [[UISegmentedControl alloc] initWithItems:@[ @"文件", @"链接", @"代码" ]];
     self.sourceControl.accessibilityLabel=@"服务代码来源";
+    [self updateSourceControlFont];
     self.sourceControl.selectedSegmentIndex = 1;
     [self.sourceControl addTarget:self
                            action:@selector(sourceChanged)
@@ -133,9 +148,6 @@
         self.code = [NSString stringWithContentsOfFile:[ServiceStore codePath:self.service]
                                               encoding:NSUTF8StringEncoding
                                                  error:NULL];
-    self.fileLabel = [UILabel new];
-    self.fileLabel.textColor = UIColor.secondaryLabelColor;
-    self.fileLabel.font = [UIFont systemFontOfSize:12];
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave
                                                       target:self
@@ -143,6 +155,16 @@
 }
 - (void)dealloc {
     [self.downloadTask cancel];
+    [self.downloadSession invalidateAndCancel];
+}
+- (void)dismissKeyboard {[self.view endEditing:YES];}
+- (void)updateSourceControlFont {
+    // 分段控件标题默认 13pt 固定字号，大字体下会截断：跟随辅助字体。
+    [self.sourceControl setTitleTextAttributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if(previousTraitCollection&&![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory])[self updateSourceControlFont];
 }
 - (void)urlChanged {
     if (![self managedCode])
@@ -161,7 +183,9 @@
                           : 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return @[ ([self.service[@"engine"] isEqual:@"javascript"]?@"JavaScript 服务":@"Python 服务"), @"代码来源", @"网络与启动", @"" ][section];
+    if(section==3)return nil;
+    // Node.js 服务此前被误标为“Python 服务”。
+    return @[ ([self.service[@"engine"] isEqual:@"node"]?@"Node.js 服务":([self.service[@"engine"] isEqual:@"javascript"]?@"JavaScript 服务":@"Python 服务")), @"代码来源", @"网络与启动", @"" ][section];
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 1)
@@ -206,6 +230,7 @@
                                                   : @"加载代码";
             c.textLabel.textColor = HostAccent();
             c.selectionStyle = UITableViewCellSelectionStyleDefault;
+            if(self.downloading){UIActivityIndicatorView *spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];[spinner startAnimating];c.accessoryView=spinner;}
         }
     } else if (ip.section == 2) {
         if (ip.row == 0) {
@@ -323,33 +348,59 @@
         [self message:@"请输入有效的 HTTP 或 HTTPS 代码链接。"];
         return;
     }
+    // 取消旧任务先行：此前只覆盖 downloadTask 而不取消，旧下载会继续跑并回写。
+    [self.downloadTask cancel];[self.downloadSession invalidateAndCancel];self.downloadSession=nil;
+    self.downloadGeneration++;self.downloadFailureMessage=nil;
     self.downloading = YES;
     [self.tableView reloadData];
-    __weak typeof(self) w = self;
     NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:url];
     r.timeoutInterval = 20;
-    self.downloadTask = [NSURLSession.sharedSession
-        dataTaskWithRequest:r
-          completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-              w.downloading = NO;
-              if (error || [(NSHTTPURLResponse *)response statusCode] != 200)
-                  [w message:error.localizedDescription ?: @"下载失败，请检查代码链接。"];
-              else
-                  [w acceptCode:data];
-              [w.tableView reloadData];
-            });
-          }];
+    NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
+    self.downloadSession=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:nil];
+    self.downloadData=[NSMutableData data];
+    self.downloadTask=[self.downloadSession dataTaskWithRequest:r];
     [self.downloadTask resume];
+}
+// 流式上限：状态码非 200 或声明超过 2 MiB 直接取消，不等整包下完再由 acceptCode 事后判断。
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {
+    if(task!=self.downloadTask){completion(NSURLSessionResponseCancel);return;}
+    NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;
+    if(status!=200){self.downloadFailureMessage=@"下载失败，请检查代码链接。";completion(NSURLSessionResponseCancel);return;}
+    if(response.expectedContentLength>2*1024*1024){self.downloadFailureMessage=@"文件超过 2 MB，请选择较小的 Python 脚本。";completion(NSURLSessionResponseCancel);return;}
+    completion(NSURLSessionResponseAllow);
+}
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
+    if(task!=self.downloadTask)return;
+    [self.downloadData appendData:data];
+    if(self.downloadData.length>2*1024*1024)[task cancel];
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+    if(task!=self.downloadTask)return;
+    NSUInteger generation=self.downloadGeneration;
+    NSData *data=[self.downloadData copy];NSString *failure=self.downloadFailureMessage;BOOL tooLarge=self.downloadData.length>2*1024*1024;
+    __weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_main_queue(),^{
+        ServiceEditorViewController *owner=weakSelf;if(!owner||generation!=owner.downloadGeneration)return;
+        owner.downloading=NO;owner.downloadTask=nil;
+        if(tooLarge||failure.length)[owner message:tooLarge?@"文件超过 2 MB，请选择较小的 Python 脚本。":failure];
+        else if(error)[owner message:error.localizedDescription?:@"下载失败，请检查代码链接。"];
+        else [owner acceptCode:data];
+        [owner.tableView reloadData];
+    });
 }
 - (void)documentPicker:(UIDocumentPickerViewController *)controller
     didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    NSURL *u = urls.firstObject;
-    BOOL scoped = [u startAccessingSecurityScopedResource];
-    NSData *data = [NSData dataWithContentsOfURL:u];
-    if (scoped)
-        [u stopAccessingSecurityScopedResource];
-    [self acceptCode:data];
+    NSURL *u = urls.firstObject;if(!u)return;
+    // 先用文件大小预判，超限直接提示；读取放后台，避免主线程同步读大文件卡顿。
+    NSNumber *size=nil;[u getResourceValue:&size forKey:NSURLFileSizeKey error:NULL];
+    if(size&&size.unsignedLongLongValue>2*1024*1024){[self message:@"文件超过 2 MB，请选择较小的 Python 脚本。"];return;}
+    __weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
+        BOOL scoped=[u startAccessingSecurityScopedResource];
+        NSData *data=[NSData dataWithContentsOfURL:u];
+        if(scoped)[u stopAccessingSecurityScopedResource];
+        dispatch_async(dispatch_get_main_queue(),^{ServiceEditorViewController *owner=weakSelf;if(owner)[owner acceptCode:data];});
+    });
 }
 - (NSString *)draftPath {
     return [[ServiceStore directory]
@@ -359,10 +410,13 @@
 - (void)editManual {
     if([self managedCode]){ServiceCodeViewController *view=[ServiceCodeViewController new];view.path=[ServiceStore codePath:self.service];view.readOnly=YES;[self.navigationController pushViewController:view animated:YES];return;}
     NSString *path = [self draftPath];
-    [self.code ?: @"# Python service\n" writeToFile:path
+    NSError *writeError=nil;
+    // 写草稿失败（如空间不足）此前被 error:NULL 吞掉，仍会 push 编辑器打开空文件；
+    // 失败时提示并停留。
+    if(![self.code ?: @"# Python service\n" writeToFile:path
                                          atomically:YES
                                            encoding:NSUTF8StringEncoding
-                                              error:NULL];
+                                              error:&writeError]){[self message:writeError.localizedDescription?:@"无法写入草稿，请检查存储空间。"];return;}
     ServiceCodeViewController *v = [ServiceCodeViewController new];
     v.path = path;
     v.readOnly = [self managedCode];
@@ -451,6 +505,7 @@
     self.applyingPortChange=YES;
     self.navigationItem.rightBarButtonItem.enabled=NO;
     __weak typeof(self) weakSelf=self;
+    NSUInteger applyGeneration=++self.applyPortGeneration;
     self.onApplyService(self.service,service,^(NSError *error){
         dispatch_async(dispatch_get_main_queue(),^{
             ServiceEditorViewController *owner=weakSelf;if(!owner)return;
@@ -468,6 +523,8 @@
             [owner finishSavingService:service];
         });
     });
+    // onApplyService 回调若永不触发，保存按钮会永久禁用：30 秒看门狗兜底复位。
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{ServiceEditorViewController *owner=weakSelf;if(!owner||applyGeneration!=owner.applyPortGeneration||!owner.applyingPortChange)return;owner.applyingPortChange=NO;owner.navigationItem.rightBarButtonItem.enabled=YES;[owner message:@"应用新端口超时，保存按钮已恢复；请查看此服务的独立日志确认状态。"];});
 }
 - (void)persistService:(NSDictionary *)service {
     if(![self writeCodeForService:service])return;

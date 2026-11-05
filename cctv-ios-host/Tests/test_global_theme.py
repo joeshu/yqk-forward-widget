@@ -71,7 +71,9 @@ class GlobalThemeContracts(unittest.TestCase):
                 self.assertIn("HostBackground()", source)
 
         services = (ROOT / "Sources/ServicesViewController.m").read_text(encoding="utf-8")
-        self.assertIn("HostSuccessSurface()", services)
+        # 运行中只代表会话活跃，不代表接口健康或能播：运行分组不用绿色成功底，改用共享卡片底。
+        self.assertNotIn("HostSuccessSurface()", services)
+        self.assertIn("c.backgroundColor = HostCard();", services)
 
     def test_video_canvas_remains_black_in_both_themes(self):
         playback = (ROOT / "Sources/MediaPlaybackViewController.m").read_text(encoding="utf-8")

@@ -62,7 +62,6 @@
         [_iconView.widthAnchor constraintEqualToConstant:24],
         [_iconView.heightAnchor constraintEqualToConstant:24],
         [labels.leadingAnchor constraintEqualToAnchor:_iconBackground.trailingAnchor constant:16],
-        [labels.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
         [labels.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
         [labels.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-14],
         [labels.trailingAnchor constraintLessThanOrEqualToAnchor:chevron.leadingAnchor constant:-12],
@@ -127,6 +126,7 @@
     close.backgroundColor=HostRaisedSurface();
     close.layer.cornerRadius=22;
     close.accessibilityLabel=@"关闭添加资源";
+    close.accessibilityIdentifier=@"resource-import.close";
     [close addTarget:self action:@selector(closeSheet) forControlEvents:UIControlEventTouchUpInside];
     close.translatesAutoresizingMaskIntoConstraints=NO;
     [header addSubview:close];
@@ -167,7 +167,7 @@
         [self.tableView.topAnchor constraintEqualToAnchor:header.bottomAnchor],
         [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+        [self.tableView.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor]
     ]];
 
     UISheetPresentationController *sheet=self.sheetPresentationController;
@@ -214,17 +214,20 @@
             @{ @"title":@"脚本与服务",@"detail":@"查看、启用和管理已导入的影视插件",@"icon":@"slider.horizontal.3",@"color":rgb(229,43,105),@"option":@(ResourceImportOptionServices)}
         ];
     });
+    if(section<0||section>=3)return @[];
     return @[online,local,manage][section];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     ResourceImportSheetCell *cell=[tableView dequeueReusableCellWithIdentifier:@"resource-option" forIndexPath:indexPath];
-    NSDictionary *item=[self optionsForSection:indexPath.section][indexPath.row];
+    NSArray *options=[self optionsForSection:indexPath.section];if(indexPath.row<0||indexPath.row>=options.count)return cell;
+    NSDictionary *item=options[indexPath.row];
     [cell configureWithTitle:item[@"title"] detail:item[@"detail"] icon:item[@"icon"] color:item[@"color"]];
     return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    NSNumber *storedOption=[self optionsForSection:indexPath.section][indexPath.row][@"option"];
+    NSArray *options=[self optionsForSection:indexPath.section];if(indexPath.row<0||indexPath.row>=options.count)return;
+    NSNumber *storedOption=options[indexPath.row][@"option"];
     ResourceImportOption option=(ResourceImportOption)storedOption.integerValue;
     void (^selection)(ResourceImportOption)=self.onSelect;
     [self dismissViewControllerAnimated:YES completion:^{if(selection)selection(option);}];

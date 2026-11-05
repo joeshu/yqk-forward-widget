@@ -27,7 +27,7 @@
         [scroll.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
         [scroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [scroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [scroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+        [scroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor]
     ]];
 
     UIStackView *content = [UIStackView new];
@@ -45,13 +45,16 @@
         [content.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor]
     ]];
 
-    UILabel *heading = [self label:@"服务" size:30 weight:UIFontWeightBold color:HostText()];
+    UILabel *heading = [self label:@"YSP Live" size:30 weight:UIFontWeightBold color:HostText()];
     [content addArrangedSubview:heading];
     UILabel *intro = [self label:@"运行本机频道插件并管理 M3U 订阅。" size:14 weight:UIFontWeightRegular color:UIColor.secondaryLabelColor];
     [content addArrangedSubview:intro];
 
     UIView *statusCard = [self card];
     UIStackView *statusRow = [self rowStack];
+    // 状态行是圆点 + 文案：FillEqually 会把 12pt 圆点拉成半行宽，改用 Fill 并居中对齐。
+    statusRow.distribution = UIStackViewDistributionFill;
+    statusRow.alignment = UIStackViewAlignmentCenter;
     self.statusDot = [UIView new];
     self.statusDot.backgroundColor = UIColor.systemGrayColor;
     self.statusDot.layer.cornerRadius = 6;
@@ -119,13 +122,18 @@
     UIStackView *s = [UIStackView new]; s.axis = UILayoutConstraintAxisHorizontal; s.spacing = 12; s.distribution = UIStackViewDistributionFillEqually; s.translatesAutoresizingMaskIntoConstraints = NO; return s;
 }
 - (UILabel *)label:(NSString *)text size:(CGFloat)size weight:(UIFontWeight)weight color:(UIColor *)color {
-    UILabel *l = [UILabel new]; l.text = text; l.textColor = color; l.font = [UIFont systemFontOfSize:size weight:weight]; l.numberOfLines = 0; return l;
+    UILabel *l = [UILabel new]; l.text = text; l.textColor = color;
+    // 本页此前全部用固定字号，大字体下不缩放：按字号映射到对应文本样式后缩放。
+    UIFontTextStyle style = size >= 28 ? UIFontTextStyleLargeTitle : (size >= 17 ? UIFontTextStyleHeadline : (size >= 14 ? UIFontTextStyleSubheadline : UIFontTextStyleFootnote));
+    l.font = [[UIFontMetrics metricsForTextStyle:style] scaledFontForFont:[UIFont systemFontOfSize:size weight:weight]];
+    l.adjustsFontForContentSizeCategory = YES; l.numberOfLines = 0; return l;
 }
 - (UIButton *)button:(NSString *)title action:(SEL)action {
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
     HostInstallPressFeedback(b);
     [b setTitle:title forState:UIControlStateNormal];
-    b.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    b.titleLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]];
+    b.titleLabel.adjustsFontForContentSizeCategory = YES;
     [b setTitleColor:HostText() forState:UIControlStateNormal];
     b.backgroundColor = HostRaisedSurface();
     b.layer.cornerRadius = 12;
@@ -163,5 +171,5 @@
     for(NSDictionary *s in [ServiceStore services])if([s[@"builtin"] boolValue]){port=[s[@"port"] integerValue];break;}
     return [NSString stringWithFormat:@"http://127.0.0.1:%ld/all.m3u",(long)port];
 }
-- (void)copyURL { UIPasteboard.generalPasteboard.string=[self subscriptionURL];self.urlLabel.text=[@"已复制 · " stringByAppendingString:[self subscriptionURL]]; }
+- (void)copyURL { UIPasteboard.generalPasteboard.string=[self subscriptionURL];self.urlLabel.text=[@"已复制 · " stringByAppendingString:[self subscriptionURL]];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"播放列表地址已复制");__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{PluginViewController *owner=weakSelf;if(owner&&[owner.urlLabel.text hasPrefix:@"已复制 · "])owner.urlLabel.text=[owner subscriptionURL];}); }
 @end
