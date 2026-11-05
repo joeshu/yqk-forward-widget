@@ -12,8 +12,10 @@
 @property(nonatomic,strong) UIBarButtonItem *nativeButton;
 @property(nonatomic, strong) WKWebView *web;
 @property(nonatomic, strong) UIActivityIndicatorView *spinner;
+@property(nonatomic, strong) UILabel *statusLabel;
 - (void)installCookieHeader:(NSString *)cookie forURL:(NSURL *)url completion:(dispatch_block_t)completion;
 - (void)loadInitialPageAtURL:(NSURL *)url cookie:(NSString *)cookie;
+- (void)showStatusMessage:(NSString *)message;
 @end
 @implementation MediaWebViewController
 - (instancetype)initWithResult:(NSDictionary *)result title:(NSString *)title {if((self=[super init])){_result=result;self.title=title;}return self;}
@@ -25,11 +27,15 @@
     WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];configuration.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;configuration.allowsInlineMediaPlayback=YES;configuration.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;
     self.web=[[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration];self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;self.web.navigationDelegate=self;self.web.allowsBackForwardNavigationGestures=YES;[self.view addSubview:self.web];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.center=self.view.center;self.spinner.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin|UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin;[self.view addSubview:self.spinner];
+    self.statusLabel=[UILabel new];self.statusLabel.translatesAutoresizingMaskIntoConstraints=NO;self.statusLabel.numberOfLines=0;self.statusLabel.textAlignment=NSTextAlignmentCenter;self.statusLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.statusLabel.adjustsFontForContentSizeCategory=YES;self.statusLabel.textColor=HostSecondaryText();self.statusLabel.hidden=YES;[self.view addSubview:self.statusLabel];
+    [NSLayoutConstraint activateConstraints:@[[self.statusLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],[self.statusLabel.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor constant:48],[self.statusLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:24],[self.statusLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-24]]];
     NSDictionary *headers=MediaPlaybackHeadersFromResult(self.result);for(NSString *key in headers)if([key.lowercaseString isEqual:@"user-agent"])self.web.customUserAgent=headers[key];
     self.configurationPage=[self.result[@"configurationPage"] boolValue];
     NSURL *configurationURL=[NSURL URLWithString:self.result[@"url"]];
     if(self.configurationPage){
-        if(![configurationURL.scheme isEqual:@"http"]||![@[@"127.0.0.1",@"localhost",@"::1"] containsObject:configurationURL.host.lowercaseString]||!configurationURL.port||configurationURL.user.length||configurationURL.password.length){self.navigationItem.prompt=@"配置页地址无效";return;}
+        // host 为 nil（如 http:///path）时直接传给 containsObject: 会抛异常，先归一为空串。
+        NSString *configurationHost=configurationURL.host.lowercaseString?:@"";
+        if(![configurationURL.scheme isEqual:@"http"]||![@[@"127.0.0.1",@"localhost",@"::1"] containsObject:configurationHost]||!configurationURL.port||configurationURL.user.length||configurationURL.password.length){self.navigationItem.prompt=@"配置页地址无效";[self showStatusMessage:@"配置页地址无效，请检查来源配置后重试"];return;}
         // Install only this loopback service's normal login cookie, never a script bridge.
         NSString *cookie=nil;for(NSString *key in headers)if([key.lowercaseString isEqual:@"cookie"])cookie=headers[key];
         [self loadInitialPageAtURL:configurationURL cookie:cookie];
@@ -48,6 +54,7 @@
     [self installCookieHeader:cookie forURL:url completion:startLoading];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,1200*NSEC_PER_MSEC),dispatch_get_main_queue(),startLoading);
 }
+- (void)showStatusMessage:(NSString *)message {self.statusLabel.text=message?:@"";self.statusLabel.hidden=!message.length;}
 - (void)installCookieHeader:(NSString *)cookie forURL:(NSURL *)url completion:(dispatch_block_t)completion {
     if(!url.host.length){if(completion)dispatch_async(dispatch_get_main_queue(),completion);return;}
     dispatch_group_t group=dispatch_group_create();
@@ -58,11 +65,14 @@
     dispatch_group_notify(group,dispatch_get_main_queue(),^{if(completion)completion();});
 }
 - (void)invalidateMediaResolution {self.mediaGeneration++;self.resolvingMedia=NO;self.nativeButton.enabled=YES;}
-- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];if(self.isBeingDismissed||self.navigationController.isBeingDismissed){self.didClose=YES;[self invalidateMediaResolution];[self.web stopLoading];self.onResolvedMedia=nil;self.onTryNativePlayback=nil;}}
+- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];if(self.isMovingFromParentViewController||self.isBeingDismissed||self.navigationController.isBeingDismissed){self.didClose=YES;[self invalidateMediaResolution];[self.web stopLoading];self.onResolvedMedia=nil;self.onTryNativePlayback=nil;}}
 - (void)refresh {
     if(self.didClose)return;[self invalidateMediaResolution];
-    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:self.result[@"url"]] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25];request.allHTTPHeaderFields=MediaPlaybackHeadersFromResult(self.result);
-    self.navigationItem.prompt=self.configurationPage?@"源配置 · 账号数据由此资源管理":@"网页播放 · 由当前来源提供";[self.spinner startAnimating];[self.web loadRequest:request];
+    NSString *urlString=[self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:nil;
+    NSURL *targetURL=urlString.length?[NSURL URLWithString:urlString]:nil;
+    if(!targetURL||!targetURL.scheme.length){[self.spinner stopAnimating];self.navigationItem.prompt=@"网页地址无效";[self showStatusMessage:@"网页地址无效，无法打开此页面"];return;}
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:targetURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25];request.allHTTPHeaderFields=MediaPlaybackHeadersFromResult(self.result);
+    self.navigationItem.prompt=self.configurationPage?@"源配置 · 账号数据由此资源管理":@"网页播放 · 由当前来源提供";[self.spinner startAnimating];[self showStatusMessage:nil];[self.web loadRequest:request];
 }
 - (void)recordMediaEvent:(NSString *)event fields:(NSDictionary *)extra {
     if(self.configurationPage)return;
@@ -93,6 +103,11 @@
             [page recordMediaEvent:@"web_media_native_handoff" fields:@{@"result_has_media_url":@YES,@"transport_host":url.host.lowercaseString?:@"",@"request_header_count":@(headers.count),@"matched_cookie_count":@(matching.count)}];page.didClose=YES;[page.web stopLoading];void (^callback)(NSDictionary *)=page.onResolvedMedia;page.onResolvedMedia=nil;page.onClose=nil;[page dismissViewControllerAnimated:YES completion:^{if(callback)callback(resolved);}];
         });}];
     }];
+    // evaluateJavaScript 与 getAllCookies 均无超时：挂起时 resolvingMedia 恒为
+    // YES、原生按钮永久禁用。15 秒后若同一代次仍未完成，直接失效本次解析，
+    // 让迟到的回调因代次不匹配而丢弃，用户可重试。
+    __weak typeof(self) weakTimeoutSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,15*NSEC_PER_SEC),dispatch_get_main_queue(),^{MediaWebViewController *owner=weakTimeoutSelf;if(!owner||owner.didClose||owner.mediaGeneration!=generation||!owner.resolvingMedia)return;[owner recordMediaEvent:@"web_media_extraction_timeout" fields:nil];[owner invalidateMediaResolution];owner.navigationItem.prompt=@"网页媒体读取超时，请重试";});
 }
 - (void)close {if(self.didClose)return;self.didClose=YES;[self.web stopLoading];dispatch_block_t callback=self.onClose;self.onClose=nil;[self dismissViewControllerAnimated:YES completion:callback];}
 - (void)dealloc {self.web.navigationDelegate=nil;[self.web stopLoading];}
@@ -101,9 +116,9 @@
     decisionHandler(allowed?WKNavigationActionPolicyAllow:WKNavigationActionPolicyCancel);
     if(allowed && !action.targetFrame)[webView loadRequest:action.request];
 }
-- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {[self invalidateMediaResolution];}
-- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {[self.spinner stopAnimating];self.navigationItem.prompt=nil;}
+- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {[self invalidateMediaResolution];[self showStatusMessage:nil];}
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {[self.spinner stopAnimating];self.navigationItem.prompt=nil;[self showStatusMessage:nil];}
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self failed:error];}
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self failed:error];}
-- (void)failed:(NSError *)error {if(error.code==NSURLErrorCancelled)return;[self.spinner stopAnimating];[self recordMediaEvent:@"web_media_navigation_failed" fields:@{@"failure_stage":@"web_navigation",@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];self.navigationItem.prompt=error.localizedDescription;}
+- (void)failed:(NSError *)error {if(error.code==NSURLErrorCancelled)return;[self.spinner stopAnimating];[self recordMediaEvent:@"web_media_navigation_failed" fields:@{@"failure_stage":@"web_navigation",@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];self.navigationItem.prompt=error.localizedDescription;[self showStatusMessage:error.localizedDescription];}
 @end

@@ -65,13 +65,15 @@
     if(!self.applied)return NO;
     @try {
         id<CCTVBufferConfig> config=[self configForCore:self.core];
-        if(!config)return NO;
+        // 恢复失败时也必须清除 applied：否则 applyToPlayer 会短路返回 YES，
+        // 误认缓冲调优仍生效，且之后无法重新调优。
+        if(!config){self.applied=NO;return NO;}
         config.startBufferDuration=self.originalStart;config.highBufferDuration=self.originalHigh;
         [self.core setConfig:config];
         id<CCTVBufferConfig> effective=[self configForCore:self.core];
         BOOL restored=effective && effective.startBufferDuration==self.originalStart && effective.highBufferDuration==self.originalHigh;
-        if(restored)self.applied=NO;
+        self.applied=NO;
         return restored;
-    } @catch(NSException *exception) {return NO;}
+    } @catch(NSException *exception) {self.applied=NO;return NO;}
 }
 @end

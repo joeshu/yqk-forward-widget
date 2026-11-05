@@ -9,6 +9,7 @@
 @property(nonatomic,strong) UISearchController *searchController;
 @property(nonatomic,copy) NSString *searchText;
 @property(nonatomic,strong) UISegmentedControl *contentFilter;
+- (void)updateEmptyState;
 @end
 
 @implementation TVBoxCatalogViewController
@@ -27,10 +28,15 @@
         return NO;
     }]];
 }
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {self.searchText=searchController.searchBar.text?:@"";[self.tableView reloadData];}
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {self.searchText=searchController.searchBar.text?:@"";[self.tableView reloadData];[self updateEmptyState];}
+- (void)updateEmptyState {
+    NSUInteger total=[self filteredRowsForSection:0].count+[self filteredRowsForSection:1].count;
+    if(total){self.tableView.backgroundView=nil;return;}
+    UILabel *empty=[[UILabel alloc] initWithFrame:self.tableView.bounds];empty.text=self.searchText.length?@"没有匹配的站点或直播源，请修改搜索词":@"此合集暂无站点与直播列表";empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;
+}
 - (void)viewDidLoad {
     [super viewDidLoad];NSString *catalogName=[self.catalog[@"name"] isKindOfClass:NSString.class]?self.catalog[@"name"]:@"";self.title=(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])?@"资源合集":catalogName;self.navigationItem.prompt=@"点按需要的站点按需加载 · 不必全量导入";self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=88;
-    self.searchController=[[UISearchController alloc] initWithSearchResultsController:nil];self.searchController.searchResultsUpdater=self;self.searchController.obscuresBackgroundDuringPresentation=NO;self.searchController.searchBar.placeholder=@"搜索合集中的站点、协议或 URL";self.searchController.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchController.searchBar.autocorrectionType=UITextAutocorrectionTypeNo;self.navigationItem.searchController=self.searchController;self.navigationItem.hidesSearchBarWhenScrolling=NO;self.definesPresentationContext=YES;
+    self.searchController=[[UISearchController alloc] initWithSearchResultsController:nil];self.searchController.searchResultsUpdater=self;self.searchController.obscuresBackgroundDuringPresentation=NO;self.searchController.searchBar.placeholder=@"搜索合集中的站点、协议或 URL";self.searchController.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchController.searchBar.autocorrectionType=UITextAutocorrectionTypeNo;self.navigationItem.searchController=self.searchController;self.navigationItem.hidesSearchBarWhenScrolling=NO;self.definesPresentationContext=YES;[self updateEmptyState];
     __weak typeof(self) weakSelf=self;
     NSArray *resourceActions=@[
         @{@"icon":@"square.and.arrow.down",@"title":@"全量导入（较慢）",@"action":[UIAction actionWithHandler:^(UIAction *a){
@@ -63,26 +69,29 @@
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return @"推荐按需加载：在首页顶部选择本合集，再从右侧胶囊点选站点；仅所选脚本会下载，type 1/4 JSON API 会直接读取。不兼容项会保留并标注。";return @"点按需要的直播清单即可加载；同一直播合集只保留当前选择的一个清单，其他清单仍留在合集内。刷新播放列表时会应用合集提供的 UA。";}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"tvbox.catalog.row"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"tvbox.catalog.row"];cell.backgroundColor=HostCard();cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.textColor=UIColor.labelColor;cell.detailTextLabel.textColor=UIColor.secondaryLabelColor;
-    NSDictionary *row=[self filteredRowsForSection:ip.section][ip.row];cell.textLabel.text=row[@"name"]?:@"未命名";
-    BOOL supported=[row[@"supported"] boolValue];NSDictionary *service=ip.section==0&&self.serviceForSite?self.serviceForSite(row):nil;NSString *status=row[@"status"]?:@"";if(service)status=[PyHost isRunningServiceIdentifier:service[@"id"]]?@"服务运行中 · 点按打开资源":@"服务已导入 · 点按启动并打开资源";cell.detailTextLabel.text=ip.section==0?[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:row[@"api"]?:@""]]:[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:row[@"url"]?:@""]];cell.accessoryType=supported?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;cell.selectionStyle=supported?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;cell.textLabel.textColor=supported?UIColor.labelColor:UIColor.tertiaryLabelColor;return cell;
+    NSArray *rows=[self filteredRowsForSection:ip.section];if(ip.row<0||ip.row>=rows.count)return cell;
+    NSDictionary *row=rows[ip.row];if(![row isKindOfClass:NSDictionary.class])return cell;
+    cell.textLabel.text=[row[@"name"] description]?:@"未命名";
+    BOOL supported=[row[@"supported"] boolValue];NSDictionary *service=ip.section==0&&self.serviceForSite?self.serviceForSite(row):nil;NSString *status=[row[@"status"] description]?:@"";if(service)status=[PyHost isRunningServiceIdentifier:service[@"id"]]?@"服务运行中 · 点按打开资源":@"服务已导入 · 点按启动并打开资源";cell.detailTextLabel.text=ip.section==0?[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"api"] description]?:@""]]:[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"url"] description]?:@""]];cell.accessoryType=supported?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;cell.selectionStyle=supported?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;cell.textLabel.textColor=supported?UIColor.labelColor:UIColor.tertiaryLabelColor;return cell;
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
-    NSDictionary *row=[self filteredRowsForSection:ip.section][ip.row];NSString *kind=ip.section==0?@"site":@"live";NSUInteger index=[row[@"sourceIndex"] respondsToSelector:@selector(unsignedIntegerValue)]?[row[@"sourceIndex"] unsignedIntegerValue]:(NSUInteger)ip.row;NSString *title=[row[@"name"] isKindOfClass:NSString.class]?row[@"name"]:@"资源";__weak typeof(self) weakSelf=self;
+    NSArray *rows=[self filteredRowsForSection:ip.section];if(ip.row<0||ip.row>=rows.count)return nil;
+    NSDictionary *row=rows[ip.row];if(![row isKindOfClass:NSDictionary.class])return nil;NSString *kind=ip.section==0?@"site":@"live";NSUInteger index=[row[@"sourceIndex"] respondsToSelector:@selector(unsignedIntegerValue)]?[row[@"sourceIndex"] unsignedIntegerValue]:(NSUInteger)ip.row;NSString *title=[row[@"name"] isKindOfClass:NSString.class]?row[@"name"]:@"资源";__weak typeof(self) weakSelf=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:[NSString stringWithFormat:@"%@:%@:%lu",self.catalog[@"id"]?:@"",kind,(unsigned long)index] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
         UIAction *export=[UIAction actionWithTitle:[NSString stringWithFormat:@"导出 %@ JSON",title] image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *action){if(weakSelf.onExportSingleResource)weakSelf.onExportSingleResource(row,kind,index);}];
         return [UIMenu menuWithTitle:@"单项资源" children:@[export]];
     }];
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    [tableView deselectRowAtIndexPath:ip animated:YES];NSDictionary *row=[self filteredRowsForSection:ip.section][ip.row];
+    [tableView deselectRowAtIndexPath:ip animated:YES];NSArray *rows=[self filteredRowsForSection:ip.section];if(ip.row<0||ip.row>=rows.count)return;NSDictionary *row=rows[ip.row];if(![row isKindOfClass:NSDictionary.class])return;
     if(ip.section==1){if([row[@"supported"] boolValue]&&self.onSubscribeLive)self.onSubscribeLive(row);return;}
     if(![row[@"supported"] boolValue])return;
     BOOL nativeAPI=[row[@"apiKind"] isEqual:@"tvbox-api"]||[row[@"apiKind"] isEqual:@"maccms-api"]||[row[@"apiKind"] isEqual:@"douban-index"];if(nativeAPI){if(self.onUseNativeSite)self.onUseNativeSite(row);return;}
-    NSDictionary *existing=self.serviceForSite?self.serviceForSite(row):nil;UIAlertController *alert=[UIAlertController alertControllerWithTitle:row[@"name"] message:existing?@"此脚本已在资源中。打开后会启动该资源并进入影视库。":@"仅对当前选择的站点执行脚本导入。可直接导入并浏览，也可先保存到资源页。ext 会作为 Spider 初始化配置传递。" preferredStyle:UIAlertControllerStyleActionSheet];
+    NSDictionary *existing=self.serviceForSite?self.serviceForSite(row):nil;UIAlertController *alert=[UIAlertController alertControllerWithTitle:[row[@"name"] description]?:@"未命名" message:existing?@"此脚本已在资源中。打开后会启动该资源并进入影视库。":@"仅对当前选择的站点执行脚本导入。可直接导入并浏览，也可先保存到资源页。ext 会作为 Spider 初始化配置传递。" preferredStyle:UIAlertControllerStyleActionSheet];
     if(existing){[alert addAction:[UIAlertAction actionWithTitle:@"启动并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onUseImportedService)self.onUseImportedService(existing);}]];[alert addAction:[UIAlertAction actionWithTitle:@"查看能力与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onOpenImportedService)self.onOpenImportedService(existing);}]];}
     else {[alert addAction:[UIAlertAction actionWithTitle:@"导入并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onImportSite)self.onImportSite(row,YES);}]];[alert addAction:[UIAlertAction actionWithTitle:@"仅导入到资源页" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onImportSite)self.onImportSite(row,NO);}]];}
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    if(alert.popoverPresentationController){UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];alert.popoverPresentationController.sourceView=cell;alert.popoverPresentationController.sourceRect=cell.bounds;}
+    if(alert.popoverPresentationController){UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];alert.popoverPresentationController.sourceView=cell?:self.view;alert.popoverPresentationController.sourceRect=cell?cell.bounds:CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);}
     [self presentViewController:alert animated:YES completion:nil];
 }
 @end

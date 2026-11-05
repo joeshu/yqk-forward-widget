@@ -75,11 +75,11 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"日志操作" children:@[copy,clear]]];more.accessibilityLabel=@"更多日志操作";
     self.navigationItem.rightBarButtonItems=@[more,export];
 
-    self.categories=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"播放",@"插件",@"错误"]];self.categories.translatesAutoresizingMaskIntoConstraints=NO;self.categories.selectedSegmentIndex=0;self.categories.selectedSegmentTintColor=HostAccent();[self.categories addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
-    self.searchBar=[UISearchBar new];self.searchBar.translatesAutoresizingMaskIntoConstraints=NO;self.searchBar.delegate=self;self.searchBar.placeholder=@"搜索日志内容";self.searchBar.searchBarStyle=UISearchBarStyleMinimal;self.searchBar.barStyle=UIBarStyleBlack;self.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchBar.accessibilityIdentifier=@"diagnostic.logs.search";
-    self.summaryLabel=[UILabel new];self.summaryLabel.translatesAutoresizingMaskIntoConstraints=NO;self.summaryLabel.font=[UIFont systemFontOfSize:11 weight:UIFontWeightMedium];self.summaryLabel.textColor=UIColor.secondaryLabelColor;
+    self.categories=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"播放",@"插件",@"错误"]];self.categories.translatesAutoresizingMaskIntoConstraints=NO;self.categories.selectedSegmentIndex=0;self.categories.selectedSegmentTintColor=HostAccent();[self.categories setTitleTextAttributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];[self.categories addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
+    self.searchBar=[UISearchBar new];self.searchBar.translatesAutoresizingMaskIntoConstraints=NO;self.searchBar.delegate=self;self.searchBar.placeholder=@"搜索日志内容";self.searchBar.searchBarStyle=UISearchBarStyleMinimal;self.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchBar.accessibilityIdentifier=@"diagnostic.logs.search";
+    self.summaryLabel=[UILabel new];self.summaryLabel.translatesAutoresizingMaskIntoConstraints=NO;self.summaryLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.summaryLabel.adjustsFontForContentSizeCategory=YES;self.summaryLabel.textColor=UIColor.secondaryLabelColor;
     self.tableView=[[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];self.tableView.translatesAutoresizingMaskIntoConstraints=NO;self.tableView.backgroundColor=HostBackground();self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;self.tableView.dataSource=self;self.tableView.delegate=self;self.tableView.estimatedRowHeight=54;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.accessibilityIdentifier=@"diagnostic.logs.list";[self.tableView registerClass:DiagnosticLogLineCell.class forCellReuseIdentifier:@"diagnostic.line"];
-    self.emptyLabel=[UILabel new];self.emptyLabel.translatesAutoresizingMaskIntoConstraints=NO;self.emptyLabel.text=@"暂无日志";self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.font=[UIFont systemFontOfSize:15];self.emptyLabel.textAlignment=NSTextAlignmentCenter;
+    self.emptyLabel=[UILabel new];self.emptyLabel.translatesAutoresizingMaskIntoConstraints=NO;self.emptyLabel.text=@"暂无日志";self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.emptyLabel.adjustsFontForContentSizeCategory=YES;self.emptyLabel.textAlignment=NSTextAlignmentCenter;
     [self.view addSubview:self.categories];[self.view addSubview:self.searchBar];[self.view addSubview:self.summaryLabel];[self.view addSubview:self.tableView];[self.view addSubview:self.emptyLabel];
     UILayoutGuide *safe=self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
@@ -129,6 +129,8 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     if(!self.pageVisible)return;
     NSString *text=self.logSnapshotProvider?self.logSnapshotProvider():@"";
     NSMutableArray *lines=[NSMutableArray array];for(NSString *line in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet])if(line.length)[lines addObject:line];
+    // 诊断日志源头上限 4 MiB，整串仍可能上万行：只保留末尾 5000 行，避免两份全量数组常驻内存。
+    if(lines.count>5000)[lines removeObjectsInRange:NSMakeRange(0,lines.count-5000)];
     if(self.hasLoadedSnapshot&&[self.allLines isEqualToArray:lines])return;
     BOOL followsTail=!self.hasLoadedSnapshot||(self.tableView.window&&self.visibleLines.count>0&&
         self.tableView.contentSize.height-(self.tableView.contentOffset.y+self.tableView.bounds.size.height-self.tableView.adjustedContentInset.bottom)<=48);
@@ -147,7 +149,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
         if(query.length&&[line rangeOfString:query options:NSCaseInsensitiveSearch].location==NSNotFound)continue;
         [filtered addObject:line];
     }
-    self.visibleLines=filtered;self.summaryLabel.text=[NSString stringWithFormat:@"共 %lu 条 · 实时刷新",(unsigned long)filtered.count];self.emptyLabel.hidden=filtered.count>0;self.tableView.hidden=filtered.count==0;[self.tableView reloadData];
+    self.visibleLines=filtered;BOOL filteredByUser=query.length>0||selected!=0;self.summaryLabel.text=[NSString stringWithFormat:@"共 %lu 条%@",(unsigned long)filtered.count,filteredByUser?@" · 已筛选":@" · 实时刷新"];self.emptyLabel.text=self.allLines.count?@"没有符合筛选的日志":@"暂无日志";self.emptyLabel.hidden=filtered.count>0;self.tableView.hidden=filtered.count==0;[self.tableView reloadData];
     if(followsTail&&filtered.count&&query.length==0&&selected==0)[self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:filtered.count-1 inSection:0] atScrollPosition:UITableViewScrollPositionBottom animated:NO];
 }
 - (DiagnosticLogCategory)categoryForLine:(NSString *)line {

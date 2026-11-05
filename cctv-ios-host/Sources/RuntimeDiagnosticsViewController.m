@@ -51,6 +51,8 @@
 }
 
 - (void)reloadRecords {
+    // 异步加载完成前先给一个加载态，避免空表被误读成“没有记录”。
+    if(self.sessionID.length ? !self.events.count : !self.sessions.count)self.table.backgroundView=[self emptyViewWithText:@"正在加载…"];
     __weak typeof(self) weakSelf = self;
     if (self.sessionID.length) {
         [[RuntimeDiagnostics shared] loadEventsForSessionID:self.sessionID completion:^(NSArray<NSDictionary *> *events, NSError *error) {
@@ -73,7 +75,7 @@
 - (UIView *)emptyViewWithText:(NSString *)text {
     UILabel *label = [UILabel new]; label.translatesAutoresizingMaskIntoConstraints = NO;
     label.text = text; label.textAlignment = NSTextAlignmentCenter; label.textColor = HostSecondaryText();
-    label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody]; label.numberOfLines = 0;
+    label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody]; label.adjustsFontForContentSizeCategory = YES; label.numberOfLines = 0;
     UIView *view = [UIView new]; [view addSubview:label];
     [NSLayoutConstraint activateConstraints:@[[label.centerYAnchor constraintEqualToAnchor:view.centerYAnchor], [label.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:32], [label.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-32]]];
     return view;
@@ -90,8 +92,9 @@
     cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody]; cell.textLabel.adjustsFontForContentSizeCategory = YES; cell.textLabel.numberOfLines = 0;
     cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote]; cell.detailTextLabel.adjustsFontForContentSizeCategory = YES; cell.detailTextLabel.numberOfLines = 0;
     cell.accessoryType = UITableViewCellAccessoryNone; cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    NSArray *rows=self.sessionID.length?self.events:self.sessions;if(indexPath.row<0||indexPath.row>=rows.count)return cell;
     if (self.sessionID.length) {
-        NSDictionary *event = self.events[indexPath.row];
+        NSDictionary *event = rows[indexPath.row];if(![event isKindOfClass:NSDictionary.class])return cell;
         NSString *category = event[@"category"] ?: @"unknown";
         NSString *time = event[@"time"] ?: @"时间未知";
         NSDictionary *fields = [event[@"fields"] isKindOfClass:NSDictionary.class] ? event[@"fields"] : nil;
@@ -100,11 +103,13 @@
             NSData *data = [NSJSONSerialization dataWithJSONObject:fields options:NSJSONWritingPrettyPrinted error:NULL];
             if (data.length) payload = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
         }
+        // 长列表里单个事件的完整 JSON 会把行撑成巨型卡片：列表只给前 500 字预览，完整内容见导出。
+        if(payload.length>500){NSRange prefix=[payload rangeOfComposedCharacterSequencesForRange:NSMakeRange(0,500)];payload=[[payload substringWithRange:prefix] stringByAppendingString:@"…（完整内容见导出）"];}
         cell.textLabel.text = [NSString stringWithFormat:@"%@ · %@", event[@"event"] ?: @"未知事件", category];
         cell.detailTextLabel.text = payload.length ? [NSString stringWithFormat:@"%@\n%@", time, payload] : time;
         cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote].pointSize weight:UIFontWeightRegular];
     } else {
-        NSDictionary *session = self.sessions[indexPath.row];
+        NSDictionary *session = rows[indexPath.row];if(![session isKindOfClass:NSDictionary.class])return cell;
         NSString *date = session[@"started_at"] ?: @"开始时间未知";
         NSString *versionValue = [session[@"app_version"] isKindOfClass:NSString.class] ? session[@"app_version"] : @"";
         NSString *buildValue = [session[@"app_build"] isKindOfClass:NSString.class] && [session[@"app_build"] length] ? session[@"app_build"] : @"未知";
@@ -121,15 +126,27 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (self.sessionID.length) return;
-    NSString *sessionID = self.sessions[indexPath.row][@"session_id"];
+    if (self.sessionID.length) {
+        // 事件行点按复制本条事件，便于对照日志中心逐条粘贴排查。
+        if(indexPath.row<0||indexPath.row>=self.events.count)return;
+        NSDictionary *event=self.events[indexPath.row];if(![event isKindOfClass:NSDictionary.class])return;
+        UIPasteboard.generalPasteboard.string=[NSString stringWithFormat:@"%@ · %@\n%@",event[@"event"]?:@"未知事件",event[@"category"]?:@"",event[@"time"]?:@"时间未知"];
+        UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"事件已复制");
+        return;
+    }
+    if(indexPath.row<0||indexPath.row>=self.sessions.count)return;
+    id rawID=self.sessions[indexPath.row][@"session_id"];if(![rawID isKindOfClass:NSString.class]||![rawID length])return;
+    NSString *sessionID = rawID;
     RuntimeDiagnosticsViewController *detail = [[RuntimeDiagnosticsViewController alloc] initWithSessionID:sessionID];
     [self.navigationController pushViewController:detail animated:YES];
 }
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (self.sessionID.length) return nil;
-    NSDictionary *session = self.sessions[indexPath.row]; NSString *sessionID = session[@"session_id"];
+    if(indexPath.row<0||indexPath.row>=self.sessions.count)return nil;
+    NSDictionary *session = self.sessions[indexPath.row];if(![session isKindOfClass:NSDictionary.class])return nil;
+    id rawID=session[@"session_id"];if(![rawID isKindOfClass:NSString.class]||![rawID length])return nil;
+    NSString *sessionID = rawID;
     UIContextualAction *delete = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"删除" handler:^(UIContextualAction *action, UIView *sourceView, void (^done)(BOOL)) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"删除这次运行记录？" message:@"删除后无法恢复，其他运行记录不受影响。" preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *item) { done(NO); }]];

@@ -254,6 +254,9 @@ static BOOL ServiceValidPlaylistPath(id value){
     restored[@"previousImport"]=current;restored[@"status"]=@"已切回上一版 · 待启动验证";[self save:restored];return restored;
 }
 + (void)remove:(NSString *)identifier {
+    // identifier 直接拼路径删文件/目录：非单组件标识（如含 ../）会越界删除，
+    // 先用 ServiceRelativePath + 单组件校验拦截。
+    if(!ServiceRelativePath(identifier)||identifier.pathComponents.count!=1)return;
     if ([identifier isEqualToString:@"builtin-ysp"] || [identifier isEqualToString:@"builtin-yangshipin-js"])
         return;
     NSMutableArray *rows = [[self services] mutableCopy];
@@ -271,6 +274,7 @@ static BOOL ServiceValidPlaylistPath(id value){
 }
 + (NSString *)dataDirectoryForService:(NSDictionary *)service error:(NSError **)error {
     NSString *identifier=service[@"id"];
+    if(!ServiceRelativePath(identifier)||identifier.pathComponents.count!=1){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:1 userInfo:@{NSLocalizedDescriptionKey:@"服务标识无效"}];return nil;}
     NSString *target=[[self directory] stringByAppendingPathComponent:identifier];
     NSFileManager *fm=NSFileManager.defaultManager;
     if([identifier isEqual:@"builtin-ysp"]){

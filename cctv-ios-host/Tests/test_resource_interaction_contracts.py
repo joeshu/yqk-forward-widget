@@ -45,7 +45,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('importTaskExpanded?76:44', self.catalog)
         self.assertIn('profile:profile matchesKind:identifier', self.catalog)
         self.assertIn('initWithFrame:CGRectMake(0,0,96,44)', self.catalog)
-        self.assertIn('running.transform=CGAffineTransformMakeScale(.88,.88)', self.catalog)
+        # 资源列表开关恢复标准尺寸，不再缩放到 0.88（低于标准触控目标）。
+        self.assertNotIn('CGAffineTransformMakeScale(.88,.88)', self.catalog)
         self.assertIn('more.frame=CGRectMake(58,4,36,36)', self.catalog)
         self.assertIn('onOpenResource', self.catalog)
         self.assertIn('onToggleProfile(p[@"source"], sender.on)', self.catalog)
@@ -73,7 +74,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('if(self.kindFilterButtons.count!=definitions.count)', filters)
         self.assertIn('UIButton *button=self.kindFilterButtons[index]', filters)
         self.assertIn('viewForHeaderInSection', self.catalog)
-        self.assertIn('heightForHeaderInSection:(NSInteger)section {return 34;}', self.catalog)
+        # 资源分组头按实际文本测高（最小 34pt），大字体/窄屏下不再截断。
+        self.assertIn('heightForHeaderInSection:(NSInteger)section {', self.catalog)
+        self.assertIn('return MAX(34,ceil(bounds.size.height)+8);', self.catalog)
         self.assertIn('c.textLabel.numberOfLines=2', self.catalog)
         self.assertIn('c.detailTextLabel.numberOfLines = 0', self.catalog)
         self.assertIn('c.detailTextLabel.lineBreakMode=NSLineBreakByCharWrapping', self.catalog)

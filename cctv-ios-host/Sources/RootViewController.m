@@ -367,6 +367,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic) BOOL nativePlaybackFailed;
 @property (nonatomic, strong) LocalServiceReadiness *playbackReadiness;
 @property (nonatomic, strong) NSMutableDictionary<NSString *,LocalServiceReadiness *> *subscriptionReadiness;
+@property (nonatomic, strong) NSMutableSet<NSString *> *pendingSubscriptionRefresh;
 @property (nonatomic, strong) NSMutableDictionary<NSString *,NSNumber *> *readyLocalOrigins;
 @property (nonatomic, strong) NSMutableSet<NSString *> *deferredLocalSubscriptions;
 @property (nonatomic, strong) NativeCDNPreference *nativeCDNPreference;
@@ -708,6 +709,15 @@ configureCatalogNavigation;
 }
 
 - (void)dealloc {
+    // 先停播放再拆通知/定时器：stopPlayback 负责拆除 AVPlayerItem 的 status /
+    // playbackLikelyToKeepUp 与 avLayer.readyForDisplay 的 KVO、currentPlayer
+    // delegate 置 nil、销毁 cicadaPlayer；stopPreview 负责预览播放器与定时器。
+    // 若只拆通知而不停播放，悬垂 KVO 会在 item 释放时崩溃。
+    [self stopPlayback];
+    [self stopPreview];
+    MPRemoteCommandCenter *commandCenter = MPRemoteCommandCenter.sharedCommandCenter;
+    [commandCenter.playCommand removeTarget:self];
+    [commandCenter.pauseCommand removeTarget:self];
     [self.packageDownloader cancel];
     [self.tvboxCatalogBulkImporter cancel];
     [self.nativePreloader cancel];
@@ -759,16 +769,30 @@ configureCatalogNavigation;
 #pragma mark - 日志
 
 - (void)restoreDiagnosticLog {
-    NSError *error=nil;
-    NSString *text=[NSString stringWithContentsOfFile:self.diagnosticLogPath encoding:NSUTF8StringEncoding error:&error];
-    text=[HostLogRedactor redactText:text?:@""];
-    if (text.length) {
-        [self.logBuffer appendString:@"—— 上次运行日志（崩溃/强制退出前）——\n"];
-        [self.logBuffer appendString:text];
-        if (![text hasSuffix:@"\n"]) [self.logBuffer appendString:@"\n"];
-        [self.logBuffer appendString:@"—— 本次启动 ——\n"];
-        NSLog(@"[CCTVHost] 已恢复上次运行日志，%lu 字符",(unsigned long)text.length);
-    }
+    // 日志文件可达 4 MiB，启动时在主线程同步读 + 脱敏会卡启动；移到后台读，
+    // 只保留末尾 256 KiB（就近的崩溃上下文），再回主线程追加到日志缓冲。
+    NSString *path=self.diagnosticLogPath;
+    if(!path.length)return;
+    __weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        NSError *error=nil;
+        NSString *text=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&error];
+        if(text.length>256*1024){
+            NSUInteger cut=text.length-256*1024;
+            NSRange newline=[text rangeOfString:@"\n" options:0 range:NSMakeRange(cut,MIN(4096,text.length-cut))];
+            text=[text substringFromIndex:newline.location!=NSNotFound?NSMaxRange(newline):cut];
+        }
+        text=[HostLogRedactor redactText:text?:@""];
+        if(!text.length)return;
+        dispatch_async(dispatch_get_main_queue(),^{
+            RootViewController *owner=weakSelf;if(!owner)return;
+            [owner.logBuffer appendString:@"—— 上次运行日志（崩溃/强制退出前）——\n"];
+            [owner.logBuffer appendString:text];
+            if (![text hasSuffix:@"\n"]) [owner.logBuffer appendString:@"\n"];
+            [owner.logBuffer appendString:@"—— 本次启动 ——\n"];
+            NSLog(@"[CCTVHost] 已恢复上次运行日志，%lu 字符",(unsigned long)text.length);
+        });
+    });
 }
 - (void)persistDiagnosticLine:(NSString *)line {
     [self.pendingLogWrites append:line];
@@ -863,13 +887,17 @@ configureCatalogNavigation;
 
     self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 8, w - 24, 20)];
     self.titleLabel.textColor = [UIColor colorWithWhite:1 alpha:0.9];
-    self.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    self.titleLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline] scaledFontForFont:[UIFont boldSystemFontOfSize:13]];
+    self.titleLabel.adjustsFontForContentSizeCategory = YES;
+    self.titleLabel.numberOfLines = 1;
     self.titleLabel.text = @"选择频道开始播放";
     [self.playerBox addSubview:self.titleLabel];
 
     self.infoLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 26, w - 24, 16)];
     self.infoLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1];
-    self.infoLabel.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
+    self.infoLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10]];
+    self.infoLabel.adjustsFontForContentSizeCategory = YES;
+    self.infoLabel.numberOfLines = 1;
     self.infoLabel.text = [NSString stringWithFormat:@"版本 %@", CCTVBuildTag()];
     [self.playerBox addSubview:self.infoLabel];
 
@@ -884,7 +912,7 @@ configureCatalogNavigation;
     self.playerChannelLogo.accessibilityLabel=@"当前频道台标";
     [self.playerBox addSubview:self.playerChannelLogo];
 
-    self.controlBar = [[UIStackView alloc] initWithFrame:CGRectMake(8, h - 36, w - 16, 28)];
+    self.controlBar = [[UIStackView alloc] initWithFrame:CGRectMake(8, h - 52, w - 16, 44)];
     self.controlBar.axis = UILayoutConstraintAxisHorizontal;
     self.controlBar.distribution = UIStackViewDistributionFillEqually;
     self.controlBar.spacing = 5;
@@ -918,7 +946,8 @@ configureCatalogNavigation;
 - (UIButton *)barButton:(NSString *)title action:(SEL)action {
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
     [b setTitle:title forState:UIControlStateNormal];
-    [b.titleLabel setFont:[UIFont systemFontOfSize:11]];
+    b.titleLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]];
+    b.titleLabel.adjustsFontForContentSizeCategory = YES;
     [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     b.backgroundColor = [UIColor colorWithWhite:0 alpha:0.42];
     b.layer.cornerRadius = 5;
@@ -942,16 +971,17 @@ configureCatalogNavigation;
 - (void)buildList {
     CGFloat y = CGRectGetMaxY(self.playerBox.frame);
     self.groupControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"央视", @"卫视", @"地方", @"教育", @"熊猫", @"订阅"]];
-    self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 28);
+    self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 32);
     self.groupControl.selectedSegmentIndex = 0;
-    self.groupControl.tintColor = HostAccent();self.groupControl.selectedSegmentTintColor=HostAccent();NSDictionary *segmentNormal=@{NSForegroundColorAttributeName:HostMutedText(),NSFontAttributeName:[UIFont systemFontOfSize:10 weight:UIFontWeightMedium]},*segmentSelected=@{NSForegroundColorAttributeName:UIColor.whiteColor,NSFontAttributeName:[UIFont systemFontOfSize:10 weight:UIFontWeightSemibold]};[self.groupControl setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.groupControl setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];
+    self.groupControl.tintColor = HostAccent();self.groupControl.selectedSegmentTintColor=HostAccent();NSDictionary *segmentNormal=@{NSForegroundColorAttributeName:HostMutedText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightMedium]]},*segmentSelected=@{NSForegroundColorAttributeName:UIColor.whiteColor,NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]]};[self.groupControl setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.groupControl setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];
     [self.groupControl addTarget:self action:@selector(onGroupChanged) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:self.groupControl];
     self.playerTabs=[[UISegmentedControl alloc] initWithItems:@[@"分类",@"频道",@"节目",@"线路"]];self.playerTabs.selectedSegmentIndex=1;self.playerTabs.selectedSegmentTintColor=HostAccent();[self.playerTabs setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.playerTabs setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];[self.playerTabs addTarget:self action:@selector(selectPlayerPanel) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.playerTabs];
 
     self.versionLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, y + 38, self.view.bounds.size.width - 16, 14)];
     self.versionLabel.textColor = HostSecondaryText();
-    self.versionLabel.font = [UIFont systemFontOfSize:9];
+    self.versionLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9]];
+    self.versionLabel.adjustsFontForContentSizeCategory = YES;
     self.versionLabel.text = [NSString stringWithFormat:@"%@ · 点击自动播放 · 长按选线路", CCTVBuildTag()];
     [self.view addSubview:self.versionLabel];
 
@@ -1110,7 +1140,7 @@ configureCatalogNavigation;
         if([cache isKindOfClass:NSArray.class])self.allChannels=[self.allChannels arrayByAddingObjectsFromArray:cache];
         [self.deferredLocalSubscriptions addObject:key];
     }
-    NSMutableDictionary *unique=[NSMutableDictionary dictionary];NSMutableArray *dedup=[NSMutableArray array];for(NSDictionary *c in self.allChannels){NSString *cid=c[@"id"];NSNumber *index=unique[cid];if(index){NSMutableDictionary *existing=[dedup[index.unsignedIntegerValue] mutableCopy];NSMutableSet *owners=[NSMutableSet setWithArray:existing[@"subscriptionSources"]?:@[]];[owners addObjectsFromArray:c[@"subscriptionSources"]?:@[]];if(owners.count)existing[@"subscriptionSources"]=owners.allObjects;dedup[index.unsignedIntegerValue]=existing;}else{unique[cid]=@(dedup.count);[dedup addObject:c];}}self.allChannels=dedup;
+    NSMutableDictionary *unique=[NSMutableDictionary dictionary];NSMutableArray *dedup=[NSMutableArray array];for(id rawChannel in self.allChannels){if(![rawChannel isKindOfClass:NSDictionary.class])continue;NSDictionary *c=rawChannel;NSString *cid=[c[@"id"] isKindOfClass:NSString.class]?c[@"id"]:nil;if(!cid.length){[dedup addObject:c];continue;}NSNumber *index=unique[cid];if(index){NSMutableDictionary *existing=[dedup[index.unsignedIntegerValue] mutableCopy];NSMutableSet *owners=[NSMutableSet setWithArray:existing[@"subscriptionSources"]?:@[]];[owners addObjectsFromArray:c[@"subscriptionSources"]?:@[]];if(owners.count)existing[@"subscriptionSources"]=owners.allObjects;dedup[index.unsignedIntegerValue]=existing;}else{unique[cid]=@(dedup.count);[dedup addObject:c];}}self.allChannels=dedup;
     self.shownChannels=self.allChannels;
     [self log:@"频道 %lu 个 / 线路 %lu 条",
          (unsigned long)self.allChannels.count,
@@ -1150,7 +1180,7 @@ configureCatalogNavigation;
     NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"house.fill",@"externaldrive.fill",@"gearshape"];
     for (NSInteger i=0;i<titles.count;i++) {
         UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;HostInstallPressFeedback(b);
-        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=2; cfg.contentInsets=NSDirectionalEdgeInsetsMake(4,2,4,2); cfg.preferredSymbolConfigurationForImage=[UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightMedium]; cfg.baseForegroundColor=HostMutedText(); cfg.background.backgroundColor=UIColor.clearColor; cfg.background.strokeColor=UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[UIFont systemFontOfSize:10 weight:UIFontWeightSemibold];return result;}; b.configuration=cfg;
+        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.preferredSymbolConfigurationForImage=[UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightMedium]; cfg.baseForegroundColor=(i==0?UIColor.whiteColor:HostMutedText()); cfg.background.backgroundColor=i==0?HostAccent():UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]];return result;}; b.configuration=cfg;
         b.accessibilityLabel=titles[i]; b.accessibilityIdentifier=[NSString stringWithFormat:@"tab.%@",titles[i]];
         b.accessibilityHint=[NSString stringWithFormat:@"切换到%@页面",titles[i]];
         b.accessibilityTraits=UIAccessibilityTraitButton|(i==0?UIAccessibilityTraitSelected:0);b.accessibilityValue=i==0?@"已选中":@"未选中";
@@ -1668,13 +1698,15 @@ configureCatalogNavigation;
     return CGSizeMake(itemWidth,height);
 }
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)ip {
-    UICollectionViewCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"channel.card" forIndexPath:ip];NSDictionary *ch=self.shownChannels[ip.item];
+    UICollectionViewCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"channel.card" forIndexPath:ip];
+    if(ip.item<0||ip.item>=(NSInteger)self.shownChannels.count)return cell;
+    NSDictionary *ch=self.shownChannels[ip.item];
     HostStyleGlassCard(cell.contentView,11);
     const NSInteger posterTag=4101,logoTag=4102,brandTag=4103,numberTag=4104,titleTag=4105,subtitleTag=4106,selectedTag=4107;
     UIView *poster=[cell.contentView viewWithTag:posterTag];UIImageView *logo=(UIImageView *)[cell.contentView viewWithTag:logoTag];UILabel *brand=(UILabel *)[cell.contentView viewWithTag:brandTag];UILabel *number=(UILabel *)[cell.contentView viewWithTag:numberTag];UILabel *title=(UILabel *)[cell.contentView viewWithTag:titleTag];UILabel *subtitle=(UILabel *)[cell.contentView viewWithTag:subtitleTag];UIImageView *selectedMark=(UIImageView *)[cell.contentView viewWithTag:selectedTag];
     if(!poster){poster=[[UIView alloc] initWithFrame:CGRectZero];poster.tag=posterTag;poster.autoresizingMask=UIViewAutoresizingFlexibleWidth;poster.backgroundColor=HostCard();poster.layer.cornerRadius=8;[cell.contentView addSubview:poster];
         logo=[UIImageView new];logo.tag=logoTag;logo.autoresizingMask=UIViewAutoresizingFlexibleWidth;logo.contentMode=UIViewContentModeScaleAspectFit;[poster addSubview:logo];
-        brand=[UILabel new];brand.tag=brandTag;brand.textAlignment=NSTextAlignmentCenter;brand.font=[UIFont italicSystemFontOfSize:14];brand.adjustsFontForContentSizeCategory=YES;brand.textColor=HostText();brand.autoresizingMask=UIViewAutoresizingFlexibleWidth;brand.numberOfLines=2;[poster addSubview:brand];
+        brand=[UILabel new];brand.tag=brandTag;brand.textAlignment=NSTextAlignmentCenter;brand.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:[UIFont italicSystemFontOfSize:14]];brand.adjustsFontForContentSizeCategory=YES;brand.textColor=HostText();brand.autoresizingMask=UIViewAutoresizingFlexibleWidth;brand.numberOfLines=2;[poster addSubview:brand];
         number=[UILabel new];number.tag=numberTag;number.font=[UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightMedium];number.textColor=UIColor.secondaryLabelColor;[poster addSubview:number];
         title=[UILabel new];title.tag=titleTag;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;title.adjustsFontForContentSizeCategory=YES;title.numberOfLines=2;title.lineBreakMode=NSLineBreakByTruncatingTail;[cell.contentView addSubview:title];
         subtitle=[UILabel new];subtitle.tag=subtitleTag;subtitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;subtitle.adjustsFontForContentSizeCategory=YES;subtitle.numberOfLines=2;subtitle.lineBreakMode=NSLineBreakByTruncatingTail;subtitle.textColor=UIColor.secondaryLabelColor;[cell.contentView addSubview:subtitle];
@@ -1693,14 +1725,15 @@ configureCatalogNavigation;
     CGFloat logoInset=MAX(8,floor(width*.15)),logoHeight=MIN(30,MAX(20,floor(posterHeight*.44)));logo.frame=CGRectMake(logoInset,floor((posterHeight-logoHeight)/2),MAX(1,width-logoInset*2),logoHeight);brand.frame=CGRectMake(5,MAX(4,floor((posterHeight-34)/2)),MAX(1,width-10),34);number.frame=CGRectMake(6,posterHeight-15,62,12);selectedMark.frame=CGRectMake(MAX(2,width-22),5,16,16);selectedMark.hidden=!selected;
     title.frame=CGRectMake(2,titleTop,labelWidth,titleHeight);subtitle.frame=CGRectMake(2,subtitleTop,labelWidth,subtitleHeight);
     NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";logo.hidden=NO;brand.hidden=YES;brand.text=name;
-    if(logoURL.length){logo.backgroundColor=UIColor.clearColor;logo.layer.cornerRadius=0;logo.clipsToBounds=NO;[self loadLogo:logoURL into:logo];}
+    if(logoURL.length){logo.image=nil;logo.backgroundColor=UIColor.clearColor;logo.layer.cornerRadius=0;logo.clipsToBounds=NO;[self loadLogo:logoURL into:logo];}
     else{logo.image=CCTVChannelLogoImage(ch);logo.accessibilityIdentifier=[@"channel-logo:" stringByAppendingString:channelID];BOOL dark=CCTVChannelLogoNeedsDarkBacking(channelID);logo.backgroundColor=dark?[UIColor colorWithWhite:.10 alpha:1]:UIColor.clearColor;logo.layer.cornerRadius=dark?5:0;logo.clipsToBounds=dark;}
     number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=selected?HostAccent():HostText();cell.contentView.backgroundColor=selected?HostSelectedSurface():UIColor.clearColor;
     cell.accessibilityIdentifier=[@"channel-card-" stringByAppendingString:channelID];cell.accessibilityLabel=name;cell.accessibilityValue=selected?@"正在播放":@"频道";cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[ch[@"id"]])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:ch[@"id"]];subtitle.text=[self catalogSubtitleForChannel:ch];return cell;
 }
-- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip { HostAnimateSelection([collectionView cellForItemAtIndexPath:ip]);[self selectChannel:self.shownChannels[ip.item]]; }
+- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip { if(ip.item<0||ip.item>=(NSInteger)self.shownChannels.count)return;HostAnimateSelection([collectionView cellForItemAtIndexPath:ip]);[self selectChannel:self.shownChannels[ip.item]]; }
 - (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
+    if(ip.item<0||ip.item>=(NSInteger)self.shownChannels.count)return nil;
     NSDictionary *ch=self.shownChannels[ip.item];__weak typeof(self) w=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){BOOL favorite=[w.favorites containsObject:ch[@"id"]];UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w configureCatalogNavigation];[w applyFilter];}];UIAction *route=[UIAction actionWithTitle:@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];else[w presentRouteSheetForChannel:ch fromIndexPath:nil];}];NSMutableArray *actions=[NSMutableArray arrayWithObjects:fav,route,nil];
         if([ch[@"remoteURL"] length]){[actions addObject:[UIAction actionWithTitle:@"静音预览（30 秒）" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){[w previewChannel:ch];}]];[actions addObject:[UIAction actionWithTitle:@"EPG 手动匹配" image:[UIImage systemImageNamed:@"calendar"] identifier:nil handler:^(UIAction *a){[w editEPGMapping:ch];}]];}
@@ -1794,7 +1827,7 @@ configureCatalogNavigation;
     cell.accessibilityValue=playing?@"正在播放":@"频道";
     cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *logo = [ch[@"logo"] isKindOfClass:NSString.class] ? ch[@"logo"] : @"";
-    if (logo.length) {cell.imageView.backgroundColor=UIColor.clearColor;cell.imageView.layer.cornerRadius=0;cell.imageView.clipsToBounds=NO;[self loadLogo:logo into:cell.imageView];}
+    if (logo.length) {cell.imageView.image=nil;cell.imageView.backgroundColor=UIColor.clearColor;cell.imageView.layer.cornerRadius=0;cell.imageView.clipsToBounds=NO;[self loadLogo:logo into:cell.imageView];}
     else {cell.imageView.image=CCTVChannelLogoImage(ch);cell.imageView.accessibilityIdentifier=[@"channel-logo:" stringByAppendingString:cid];BOOL dark=CCTVChannelLogoNeedsDarkBacking(cid);cell.imageView.backgroundColor=dark?[UIColor colorWithWhite:.10 alpha:1]:UIColor.clearColor;cell.imageView.layer.cornerRadius=dark?5:0;cell.imageView.clipsToBounds=dark;}
     cell.imageView.tintColor=HostAccent();
     NSDictionary *epg = self.epgCache[cid];
@@ -2274,7 +2307,7 @@ configureCatalogNavigation;
         self.liveResourceCapsule.hidden=!catalog||!expandedLive;
         if(!self.liveResourceCapsule.hidden){CGFloat maximumWidth=MAX(0,w-safe.left-safe.right-28);CGFloat naturalWidth=[self.liveResourceCapsule sizeThatFits:CGSizeMake(maximumWidth,36)].width;CGFloat capsuleWidth=MIN(maximumWidth,MIN(270,MAX(150,naturalWidth)));self.liveResourceCapsule.frame=CGRectMake(safe.left+14,top+4,capsuleWidth,36);}
         CGFloat playerBottom=expandedLive?playerTop+ph:top;
-        self.groupControl.frame=CGRectMake(12,playerBottom+6,w-24,28);self.groupControl.hidden=!catalog||expandedLive;self.playerTabs.frame=CGRectMake(12,playerBottom+6,w-24,28);self.playerTabs.hidden=!catalog||!expandedLive;
+        self.groupControl.frame=CGRectMake(12,playerBottom+6,w-24,32);self.groupControl.hidden=!catalog||expandedLive;self.playerTabs.frame=CGRectMake(12,playerBottom+6,w-24,32);self.playerTabs.hidden=!catalog||!expandedLive;
         self.versionLabel.hidden=YES;
         CGFloat tabHeight=58,tabWidth=MIN(w,560),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBar.frame=CGRectMake(MAX(0,(w-tabWidth)/2),tabY,tabWidth,tabHeight);self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
         CGFloat contentY=playerBottom+42;CGFloat contentBottom=height;
@@ -2290,13 +2323,15 @@ configureCatalogNavigation;
         self.catalogFloatingControls.hidden=!catalog;CGFloat controlsWidth=164,controlsHeight=54;self.catalogFloatingControls.frame=CGRectMake(MAX(12,w-safe.right-controlsWidth-14),MAX(top+8,tabY-controlsHeight-12),controlsWidth,controlsHeight);self.catalogLayoutButton.frame=CGRectMake(4,3,48,48);self.catalogFloatingAirPlayPicker.frame=CGRectMake(58,3,48,48);self.catalogMoreButton.frame=CGRectMake(112,3,48,48);[self.view bringSubviewToFront:self.catalogFloatingControls];
     }
     [self relayoutPlayer];
-    CGFloat overlayTop = expandedLive?0:safe.top;
-    self.titleLabel.frame = CGRectMake(12 + safe.left, overlayTop + 8, MAX(0, w - safe.left - safe.right - 80), 20);
-    self.infoLabel.frame = CGRectMake(12 + safe.left, overlayTop + 30, MAX(0, w - safe.left - safe.right - 24), 16);
+    CGFloat overlayTop = expandedLive?0:(self.fullscreen?safe.top:0);
+    CGFloat playerTitleHeight = ceil(self.titleLabel.font.lineHeight);
+    CGFloat playerInfoHeight = ceil(self.infoLabel.font.lineHeight);
+    self.titleLabel.frame = CGRectMake(12 + safe.left, overlayTop + 8, MAX(0, w - safe.left - safe.right - 80), playerTitleHeight);
+    self.infoLabel.frame = CGRectMake(12 + safe.left, overlayTop + 8 + playerTitleHeight + 2, MAX(0, w - safe.left - safe.right - 24), playerInfoHeight);
     self.playerChannelLogo.frame=CGRectMake(MAX(safe.left+12,w-safe.right-60),overlayTop+8,48,27);
     CGFloat bottom = self.fullscreen ? safe.bottom : 0;
-    self.controlBar.frame = CGRectMake(8 + safe.left, CGRectGetHeight(self.playerBox.bounds) - bottom - 48,
-                                      MAX(0, w - safe.left - safe.right - 16), 40);
+    self.controlBar.frame = CGRectMake(8 + safe.left, CGRectGetHeight(self.playerBox.bounds) - bottom - 52,
+                                      MAX(0, w - safe.left - safe.right - 16), 44);
     self.spinner.center=CGPointMake(CGRectGetMidX(self.playerBox.bounds),CGRectGetMidY(self.playerBox.bounds));
     self.avLayer.frame = self.playerBox.bounds;
     [self attachVideoView];
@@ -2343,9 +2378,10 @@ configureCatalogNavigation;
 
 - (void)relayoutPlayer {
     CGRect b = self.playerBox.bounds;
-    self.controlBar.frame = CGRectMake(8, b.size.height - 36, b.size.width - 16, 28);
-    self.titleLabel.frame = CGRectMake(12, 8, b.size.width - 24, 20);
-    self.infoLabel.frame = CGRectMake(12, 26, b.size.width - 24, 16);
+    self.controlBar.frame = CGRectMake(8, b.size.height - 52, b.size.width - 16, 44);
+    CGFloat titleHeight = ceil(self.titleLabel.font.lineHeight);
+    self.titleLabel.frame = CGRectMake(12, 8, b.size.width - 24, titleHeight);
+    self.infoLabel.frame = CGRectMake(12, 8 + titleHeight + 2, b.size.width - 24, ceil(self.infoLabel.font.lineHeight));
     self.spinner.center = CGPointMake(b.size.width / 2, b.size.height / 2);
 }
 
@@ -2357,7 +2393,9 @@ configureCatalogNavigation;
         [sheet addAction:[UIAlertAction actionWithTitle:@"暂无订阅" style:UIAlertActionStyleDefault handler:nil]];
     }
     for (NSString *u in self.subscriptionURLs.allObjects) {
-        NSString *title = u.length > 42 ? [[u substringToIndex:42] stringByAppendingString:@"…"] : u;
+        NSString *sourceName=[ProfileStore metadata:u][@"name"];
+        if(![sourceName isKindOfClass:NSString.class]||!sourceName.length)sourceName=[NSURL URLWithString:u].host;
+        NSString *title = sourceName.length?sourceName:(u.length > 42 ? [[u substringToIndex:42] stringByAppendingString:@"…"] : u);
         [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
             UIAlertController *op = [UIAlertController alertControllerWithTitle:u message:nil preferredStyle:UIAlertControllerStyleActionSheet];
             [op addAction:[UIAlertAction actionWithTitle:@"刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *y) {
@@ -2729,19 +2767,22 @@ configureCatalogNavigation;
     if([self.serviceOperations containsObject:identifier]){if(completion)completion(failure(@"该服务已有启停操作，请等待当前操作完成。"));return;}
     [self.serviceOperations addObject:identifier];
     [RuntimeDiagnostics.shared recordEvent:@"service_recovery_started" category:@"service" fields:@{@"service_id":identifier,@"port":snapshot[@"port"]?:@0,@"trigger":@"user_restart"}];
+    __weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
         __block NSError *error=nil;BOOL stopped=[PyHost stopServiceIdentifier:identifier error:&error];
         int portState=stopped?HostLocalPortState([snapshot[@"port"] intValue]):-1;
         if(stopped&&portState!=0)error=failure(portState==1?@"旧服务停止后端口仍可访问，已阻止重复启动。请检查是否有其他服务占用该端口。":@"无法确认旧端口已释放，已阻止重复启动。请稍后重试。 ");
         if(!stopped&&!error)error=failure(@"服务停止未确认，已取消重新启动。请查看该服务日志。 ");
         dispatch_async(dispatch_get_main_queue(),^{
+            RootViewController *owner=weakSelf;
+            if(!owner){if(completion)completion(error?:failure(@"页面已关闭，重启未完成。"));return;}
             BOOL unchanged=NO;for(NSDictionary *candidate in ServiceStore.services)if([candidate[@"id"] isEqual:identifier]){unchanged=[candidate isEqualToDictionary:snapshot];break;}
-            if(stopped){[self logPluginLine:@"重启前旧服务已停止" identifier:identifier name:snapshot[@"name"]?:identifier];[PluginLogStore.shared finishRunForIdentifier:identifier status:@"重启前已停止"];}
+            if(stopped){[owner logPluginLine:@"重启前旧服务已停止" identifier:identifier name:snapshot[@"name"]?:identifier];[PluginLogStore.shared finishRunForIdentifier:identifier status:@"重启前已停止"];}
             if(!error&&!unchanged)error=failure(@"重启期间资源配置已变更，已取消启动。请重新选择来源。 ");
-            if(!error){[self clearServiceLogHandlers:identifier];NSError *startError=nil;if(![self startService:snapshot error:&startError])error=startError?:failure(@"重新启动请求失败，请查看服务日志。 ");}
-            [self.serviceOperations removeObject:identifier];
+            if(!error){[owner clearServiceLogHandlers:identifier];NSError *startError=nil;if(![owner startService:snapshot error:&startError])error=startError?:failure(@"重新启动请求失败，请查看服务日志。 ");}
+            [owner.serviceOperations removeObject:identifier];
             [RuntimeDiagnostics.shared recordEvent:@"service_recovery_finished" category:@"service" fields:@{@"service_id":identifier,@"phase":@"start_request_finished",@"http_health_verified":@NO,@"stop_confirmed":@(stopped),@"port_released":@(stopped&&portState==0),@"start_accepted":@(!error),@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@""}];
-            [self refreshConfigurationPage];if(completion)completion(error);
+            [owner refreshConfigurationPage];if(completion)completion(error);
         });
     });
 }
@@ -2759,11 +2800,14 @@ configureCatalogNavigation;
     [self.serviceOperations addObject:serviceID];
     [RuntimeDiagnostics.shared recordEvent:@"service_stop_requested" category:@"service" fields:@{@"service_id":serviceID, @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"python", @"port":service[@"port"]?:@0}];
     [self log:@"正在停止服务 %@",service[@"name"]];
+    __weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
         NSError *stopError=nil;BOOL stopped=[PyHost stopServiceIdentifier:serviceID error:&stopError];
         dispatch_async(dispatch_get_main_queue(),^{
-            [self.serviceOperations removeObject:serviceID];[RuntimeDiagnostics.shared recordEvent:stopped?@"service_stopped":@"service_stop_failed" category:@"service" fields:@{@"service_id":serviceID, @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"python", @"port":service[@"port"]?:@0, @"error_domain":stopError.domain?:@"", @"error_code":@(stopError.code), @"error_message":stopError.localizedDescription?:@""}];if(!stopped){if(completion)completion(stopError);[self refreshConfigurationPage];return;}
-            [self completeServiceStopForIdentifier:serviceID];[self refreshConfigurationPage];if(completion)completion(nil);
+            RootViewController *owner=weakSelf;
+            if(!owner){if(completion)completion(stopped?nil:stopError);return;}
+            [owner.serviceOperations removeObject:serviceID];[RuntimeDiagnostics.shared recordEvent:stopped?@"service_stopped":@"service_stop_failed" category:@"service" fields:@{@"service_id":serviceID, @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"python", @"port":service[@"port"]?:@0, @"error_domain":stopError.domain?:@"", @"error_code":@(stopError.code), @"error_message":stopError.localizedDescription?:@""}];if(!stopped){if(completion)completion(stopError);[owner refreshConfigurationPage];return;}
+            [owner completeServiceStopForIdentifier:serviceID];[owner refreshConfigurationPage];if(completion)completion(nil);
         });
     });
 }
@@ -2826,15 +2870,15 @@ configureCatalogNavigation;
 }
 
 - (void)setupRemoteCommands {
+    // 用 target-action 而不用 addTargetWithHandler:：后者的 block 会被
+    // MPRemoteCommandCenter 单例强引用，进而永久强引用 self，使 dealloc
+    // 永远走不到、dealloc 里的 KVO 拆除也永远执行不了。target-action 配合
+    // dealloc 中的 removeTarget: 才能正常释放。
     MPRemoteCommandCenter *c = MPRemoteCommandCenter.sharedCommandCenter;
-    [c.playCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
-        [self togglePlayPause];
-        return MPRemoteCommandHandlerStatusSuccess;
-    }];
-    [c.pauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
-        [self togglePlayPause];
-        return MPRemoteCommandHandlerStatusSuccess;
-    }];
+    [c.playCommand removeTarget:self];
+    [c.pauseCommand removeTarget:self];
+    [c.playCommand addTarget:self action:@selector(togglePlayPause)];
+    [c.pauseCommand addTarget:self action:@selector(togglePlayPause)];
 }
 
 - (void)updateNowPlaying {
@@ -2867,6 +2911,7 @@ configureCatalogNavigation;
         if (ts > 0 && ts <= now && now - ts < 6 * 3600 &&
             [obj[@"now"] isKindOfClass:NSString.class]) self.epgCache[key] = obj;
     }];
+    [self trimEPGCache];
     [self log:@"EPG 缓存载入 %lu 条", (unsigned long)self.epgCache.count];
 }
 
@@ -2933,11 +2978,15 @@ configureCatalogNavigation;
     if (self.query.length) {
         NSString *q = self.query.lowercaseString;
         base = [base filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *o, NSDictionary *b) {
-            return [[o[@"name"] lowercaseString] containsString:q] || [[o[@"id"] lowercaseString] containsString:q];
+            // name/id 可能来自外部订阅缓存，非字符串时直接调 lowercaseString 会
+            // 抛 unrecognized selector；用 description 归一为字符串再比较。
+            NSString *name=[(o[@"name"]?:@"") description];
+            NSString *cid=[(o[@"id"]?:@"") description];
+            return [[name lowercaseString] containsString:q] || [[cid lowercaseString] containsString:q];
         }]];
     }
     NSMutableDictionary<NSString *,NSNumber *> *ranks=[NSMutableDictionary dictionary];
-    for(NSUInteger index=0;index<self.favorites.count;index++)if(!ranks[self.favorites[index]])ranks[self.favorites[index]]=@(index);
+    for(NSUInteger index=0;index<self.favorites.count;index++){id fav=self.favorites[index];if([fav isKindOfClass:NSString.class]&&!ranks[fav])ranks[fav]=@(index);}
     NSArray *sorted = [base sortedArrayWithOptions:NSSortStable usingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         NSNumber *left=ranks[a[@"id"]?:@""],*right=ranks[b[@"id"]?:@""];
         if(left && right)return [left compare:right];
@@ -2948,9 +2997,9 @@ configureCatalogNavigation;
     [self.table reloadData];
     [self.channelGrid reloadData];
     NSString *empty=self.query.length?@"没有找到匹配频道":(self.favoritesOnly?@"还没有收藏频道，长按频道即可收藏":(self.subscriptionCatalog?@"暂无订阅频道\n点击右上角更多 → 添加订阅，或在资源中导入播放列表":@"暂无官方频道，请在资源中启用官方频道"));
-    UILabel *hint=[UILabel new];hint.text=empty;hint.numberOfLines=0;hint.textAlignment=NSTextAlignmentCenter;hint.textColor=UIColor.secondaryLabelColor;hint.font=[UIFont systemFontOfSize:14];
+    UILabel *hint=[UILabel new];hint.text=empty;hint.numberOfLines=0;hint.textAlignment=NSTextAlignmentCenter;hint.textColor=UIColor.secondaryLabelColor;hint.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];hint.adjustsFontForContentSizeCategory=YES;
     self.channelGrid.backgroundView=sorted.count?nil:hint;
-    UILabel *listHint=[UILabel new];listHint.text=empty;listHint.numberOfLines=0;listHint.textAlignment=NSTextAlignmentCenter;listHint.textColor=UIColor.secondaryLabelColor;self.table.backgroundView=sorted.count?nil:listHint;
+    UILabel *listHint=[UILabel new];listHint.text=empty;listHint.numberOfLines=0;listHint.textAlignment=NSTextAlignmentCenter;listHint.textColor=UIColor.secondaryLabelColor;listHint.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];listHint.adjustsFontForContentSizeCategory=YES;self.table.backgroundView=sorted.count?nil:listHint;
 }
 
 - (void)rememberChannel:(NSDictionary *)ch {
@@ -2969,7 +3018,7 @@ configureCatalogNavigation;
 
 - (void)onPullRefresh {
     if(self.subscriptionCatalog||self.activeTab==3){for(NSString *u in self.subscriptionURLs.allObjects)[self fetchSubscription:u silent:NO];}
-    else{[self.epgCache removeAllObjects];[self saveEPGCache];if(self.firstRender)[self refreshNowNext];[self applyFilter];}
+    else{[self.epgListGeneration++;self.epgCache removeAllObjects];[self saveEPGCache];if(self.firstRender)[self refreshNowNext];[self applyFilter];}
     [self.table.refreshControl endRefreshing];[self.channelGrid.refreshControl endRefreshing];
 }
 
@@ -2991,9 +3040,12 @@ configureCatalogNavigation;
     __weak typeof(self) weakSelf = self;
     NSURLSessionDataTask *task=[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *r, NSError *e) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            if(listGeneration!=weakSelf.epgListGeneration)return;
+            // 先清理在途标记再判代次：代次不匹配时若直接 return，该频道会永久
+            // 留在 epgInflight 里，此后 loadEPGForChannel 每次都因
+            // containsObject: 提前返回，EPG 再也加载不出来。
             [weakSelf.epgListTasks removeObjectForKey:cid];
             [weakSelf.epgInflight removeObject:cid];
+            if(listGeneration!=weakSelf.epgListGeneration)return;
             if (!data.length) return;
             id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
             NSArray *rows = [json isKindOfClass:NSDictionary.class] ? [(NSDictionary *)json objectForKey:@"EPG"] : nil;
@@ -3116,14 +3168,17 @@ configureCatalogNavigation;
         }
         NSString *origin=[self originForURL:sourceURL];NSNumber *readyAt=self.readyLocalOrigins[origin];
         if(!readyAt||CACurrentMediaTime()-readyAt.doubleValue>2){
-            if(self.subscriptionReadiness[sourceKey])return;
+            // 就绪检查进行中时不要静默丢弃用户的刷新请求：登记一次待处理，
+            // 待本次探测结束（失败分支）再重调一次；成功分支本身就会重调，
+            // 故只在失败分支消费，避免重复与死循环。
+            if(self.subscriptionReadiness[sourceKey]){if(!self.pendingSubscriptionRefresh)self.pendingSubscriptionRefresh=[NSMutableSet set];[self.pendingSubscriptionRefresh addObject:sourceKey];return;}
             NSUInteger readinessVersion=[self.subscriptionRequestVersions[sourceKey] unsignedIntegerValue]+1;self.subscriptionRequestVersions[sourceKey]=@(readinessVersion);
             LocalServiceReadiness *probe=[self readinessForURL:sourceURL service:localService];self.subscriptionReadiness[sourceKey]=probe;__weak typeof(self) w=self;
             [probe start:^(NSError *error,NSTimeInterval elapsed){
                 if(w.subscriptionReadiness[sourceKey]!=probe)return;[w.subscriptionReadiness removeObjectForKey:sourceKey];
                 if([w.subscriptionRequestVersions[sourceKey] unsignedIntegerValue]!=readinessVersion||![w.subscriptionURLs containsObject:sourceKey])return;
                 NSMutableDictionary *probeFields=[@{@"correlation_id":traceID?:@"", @"service_id":localService[@"id"]?:@"", @"service_name":localService[@"name"]?:@"", @"engine":localService[@"engine"]?:@"python", @"port":localService[@"port"]?:@0, @"elapsed_ms":@((NSInteger)(elapsed*1000))} mutableCopy];[probeFields addEntriesFromDictionary:probe.diagnosticSummary];[probeFields addEntriesFromDictionary:CCTVDiagnosticURLFields(sourceURL)];
-                if(error){probeFields[@"error_domain"]=error.domain?:@"";probeFields[@"error_code"]=@(error.code);probeFields[@"error_message"]=error.localizedDescription?:@"";[RuntimeDiagnostics.shared recordEvent:@"local_service_health_failed" category:@"service" fields:probeFields];[ProfileStore update:sourceKey values:@{@"status":error.localizedDescription?:@"服务未就绪"}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[w refreshConfigurationPage];[w logPluginLine:[NSString stringWithFormat:@"订阅接口健康检查失败 · %@",[HostLogRedactor redactText:error.localizedDescription?:@"未知错误"]] identifier:localService[@"id"] name:localService[@"name"]];[w log:@"本机订阅等待服务失败 %@",error.localizedDescription];return;}
+                if(error){probeFields[@"error_domain"]=error.domain?:@"";probeFields[@"error_code"]=@(error.code);probeFields[@"error_message"]=error.localizedDescription?:@"";[RuntimeDiagnostics.shared recordEvent:@"local_service_health_failed" category:@"service" fields:probeFields];[ProfileStore update:sourceKey values:@{@"status":error.localizedDescription?:@"服务未就绪"}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[w refreshConfigurationPage];[w logPluginLine:[NSString stringWithFormat:@"订阅接口健康检查失败 · %@",[HostLogRedactor redactText:error.localizedDescription?:@"未知错误"]] identifier:localService[@"id"] name:localService[@"name"]];[w log:@"本机订阅等待服务失败 %@",error.localizedDescription];if([w.pendingSubscriptionRefresh containsObject:sourceKey]){[w.pendingSubscriptionRefresh removeObject:sourceKey];[w fetchSubscription:sourceKey silent:silent];}return;}
                 [RuntimeDiagnostics.shared recordEvent:@"local_service_health_ready" category:@"service" fields:probeFields];[w logPluginLine:[NSString stringWithFormat:@"订阅接口健康检查通过 · %.2f 秒",elapsed] identifier:localService[@"id"] name:localService[@"name"]];
                 w.readyLocalOrigins[origin]=@(CACurrentMediaTime());[w.deferredLocalSubscriptions removeObject:sourceKey];[w fetchSubscription:sourceKey silent:silent];
             }];return;
@@ -3599,9 +3654,9 @@ configureCatalogNavigation;
 - (void)tick:(NSTimer *)timer {
     if(timer!=self.watchdog)return;
     self.watchdogTicks += 1;
-    if (!self.currentPlayer) { [timer invalidate]; return; }
+    if (!self.currentPlayer) { [timer invalidate]; self.watchdog=nil; return; }
     [self attachVideoView];
-    if (self.firstRender) { [timer invalidate]; return; }
+    if (self.firstRender) { [timer invalidate]; self.watchdog=nil; return; }
     NSTimeInterval now=CACurrentMediaTime();
     NSTimeInterval elapsed=now-self.playStartedAt;
     NSTimeInterval attemptElapsed=self.nativeAttemptStartedAt>0?now-self.nativeAttemptStartedAt:elapsed;
@@ -3639,6 +3694,8 @@ configureCatalogNavigation;
 - (id)invokeTarget:(id)target selector:(SEL)sel args:(NSArray *)args {
     if (!target || ![target respondsToSelector:sel]) return nil;
     NSMethodSignature *sig = [target methodSignatureForSelector:sel];
+    if (!sig) return nil; // @try 只包了 invoke；signature 为 nil 时
+    // invocationWithMethodSignature:nil 会直接抛异常，先判空返回。
     NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
     inv.target = target;
     inv.selector = sel;
@@ -3985,17 +4042,26 @@ configureCatalogNavigation;
 - (void)stopPreview {[self.previewTimer invalidate];self.previewTimer=nil;[self.previewPlayer pause];[self.previewPlayer.currentItem.asset cancelLoading];[self.previewPlayer replaceCurrentItemWithPlayerItem:nil];self.previewPlayer=nil;self.previewLayer.player=nil;[self.previewLayer removeFromSuperlayer];self.previewLayer=nil;[self.previewBox removeFromSuperview];self.previewBox=nil;}
 - (void)showHistory {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"最近观看" message:self.recents.count?nil:@"还没有观看记录" preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSDictionary *r in self.recents)[a addAction:[UIAlertAction actionWithTitle:r[@"name"]?:r[@"id"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){NSDictionary *ch=[self channelWithID:r[@"id"]];if(ch)[self selectChannel:ch];else[self showServiceError:@"该频道已不在配置中，请刷新或重新导入原配置。"];}]];
+    for(NSDictionary *r in self.recents){NSString *title=[r[@"name"] isKindOfClass:NSString.class]?r[@"name"]:([r[@"id"] isKindOfClass:NSString.class]?r[@"id"]:@"");if(!title.length)title=@"未知频道";[a addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){NSDictionary *ch=[self channelWithID:r[@"id"]];if(ch)[self selectChannel:ch];else[self showServiceError:@"该频道已不在配置中，请刷新或重新导入原配置。"];}]];}
     if(self.recents.count)[a addAction:[UIAlertAction actionWithTitle:@"清空历史" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){[self.recents removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"recents"];[self applyFilter];}]];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.sourceView=self.bottomBar;a.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:a animated:YES completion:nil];
 }
 - (void)showFavoriteManager {
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"整理收藏" message:@"点选频道可移到收藏首位；频道列表左滑可取消收藏。" preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSString *cid in self.favorites){NSDictionary *ch=[self channelWithID:cid];[a addAction:[UIAlertAction actionWithTitle:ch[@"name"]?:cid style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self.favorites removeObject:cid];[self.favorites insertObject:cid atIndex:0];[NSUserDefaults.standardUserDefaults setObject:self.favorites forKey:@"favorites"];[self applyFilter];}]];}
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"整理收藏" message:self.favorites.count?@"点选频道可移到收藏首位；频道列表左滑可取消收藏。":@"还没有收藏频道，长按频道即可收藏。" preferredStyle:UIAlertControllerStyleActionSheet];
+    for(NSString *cid in self.favorites){NSDictionary *ch=[self channelWithID:cid];NSString *title=([ch[@"name"] isKindOfClass:NSString.class]&&[ch[@"name"] length])?ch[@"name"]:cid;[a addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self.favorites removeObject:cid];[self.favorites insertObject:cid atIndex:0];[NSUserDefaults.standardUserDefaults setObject:self.favorites forKey:@"favorites"];[self applyFilter];}]];}
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.sourceView=self.bottomBar;a.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:a animated:YES completion:nil];
 }
 - (void)cacheXMLRows:(NSArray *)rows channel:(NSString *)cid {
     NSTimeInterval now=NSDate.date.timeIntervalSince1970;NSString *current=nil,*next=nil;for(NSDictionary *r in rows){double start=[r[@"start"] doubleValue],end=[r[@"end"] doubleValue];if(now>=start&&now<end)current=r[@"title"];else if(start>now&&!next)next=r[@"title"];}
-    if(current||next)self.epgCache[cid]=@{@"now":current?:@"",@"next":next?:@"",@"ts":@(now)};
+    if(current||next){self.epgCache[cid]=@{@"now":current?:@"",@"next":next?:@"",@"ts":@(now)};[self trimEPGCache];}
+}
+- (void)trimEPGCache {
+    // EPG 缓存无上限会随频道浏览持续增长；保留最近的 128 条，按 ts 淘汰最旧。
+    while(self.epgCache.count>128){
+        NSString *oldest=nil;NSTimeInterval oldestTS=DBL_MAX;
+        for(NSString *key in self.epgCache){NSTimeInterval ts=[self.epgCache[key][@"ts"] doubleValue];if(ts<oldestTS){oldestTS=ts;oldest=key;}}
+        if(!oldest.length)break;
+        [self.epgCache removeObjectForKey:oldest];
+    }
 }
 @end
