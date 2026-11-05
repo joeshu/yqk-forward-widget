@@ -18,7 +18,8 @@ class VersioningContractTests(unittest.TestCase):
         build = (ROOT / "Scripts" / "ci-build.sh").read_text()
         workflow = (ROOT.parent / ".github" / "workflows" / "cctv-ios-host.yml").read_text()
         # Workflow reads the highest released version and bumps its last component.
-        self.assertIn("gh release list", workflow)
+        # (Uses curl + the releases API; gh CLI proved unreliable on the runner.)
+        self.assertIn("api.github.com/repos/${GITHUB_REPOSITORY}/releases", workflow)
         self.assertIn("CCTV_NEXT_VERSION", workflow)
         # ci-build.sh stamps the computed version into the built app when provided.
         self.assertIn("CCTV_NEXT_VERSION", build)

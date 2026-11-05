@@ -89,7 +89,8 @@ jobs:
           # take the highest released version and bump its last component.
           # (Release list order is not trusted, so take the max, not the first.)
           base=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' cctv-ios-host/Resources/Info.plist)
-          last=$(gh release list --limit 50 --json name --jq -r '.[].name' 2>/dev/null | sed -n 's/^CCTVHost \([0-9][0-9.]*\) ([0-9][0-9]*)$/\1/p' | python3 -c "import sys; vs=[l.strip() for l in sys.stdin if l.strip()]; print(max(vs, key=lambda v: tuple(map(int, v.split('.')))) if vs else '')")
+          # gh CLI 在 runner 上取发布列表不可靠（曾返回空），改用 curl + API。
+          last=$(curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=50" | jq -r '.[].name' | sed -n 's/^CCTVHost \([0-9][0-9.]*\) ([0-9][0-9]*)$/\1/p' | python3 -c "import sys; vs=[l.strip() for l in sys.stdin if l.strip()]; print(max(vs, key=lambda v: tuple(map(int, v.split('.')))) if vs else '')")
           if [ -n "$last" ]; then
             next=$(python3 -c "v='$last'.split('.'); v[-1]=str(int(v[-1])+1); print('.'.join(v))")
           else
