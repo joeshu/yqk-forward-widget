@@ -210,6 +210,9 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
 @property(nonatomic) BOOL resumePromptPending;
 @property(nonatomic) BOOL resumePromptShown;
 @property(nonatomic,copy) NSString *skipButtonAction;
+@property(nonatomic) NSInteger autoSkippedIntroEpisodeIndex;
+@property(nonatomic) NSInteger autoSkippedOutroEpisodeIndex;
+@property(nonatomic,copy,nullable) NSDictionary *autoSkipContext;
 @property(nonatomic) BOOL previousIdleTimerDisabled;
 @property(nonatomic) BOOL idleTimerOverrideActive;
 - (void)stopObservingCurrentPlayback;
@@ -241,6 +244,7 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
 - (instancetype)init {if((self=[super init])){_lineIndex=0;_episodeIndex=0;_selectedAlternateIndex=-1;}return self;}
 - (void)viewDidLoad {
     [super viewDidLoad];self.view.backgroundColor=HostBackground();
+    self.autoSkippedIntroEpisodeIndex=-1;self.autoSkippedOutroEpisodeIndex=-1;
     self.diagnosticTraceID=[self.context[@"correlationID"] isKindOfClass:NSString.class]&&[self.context[@"correlationID"] length]?self.context[@"correlationID"]:NSUUID.UUID.UUIDString.lowercaseString;
     self.lineIndex=[self.context[@"lineIndex"] integerValue];self.episodeIndex=[self.context[@"episodeIndex"] integerValue];
     if(self.lineIndex<0||self.lineIndex>=self.lines.count)self.lineIndex=0;
@@ -740,9 +744,13 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
 - (void)updateSkipButtonForCurrentPosition {
     if(!self.skipButton||!self.observedItem||self.observedItem!=self.player.currentItem){self.skipButton.hidden=YES;return;}
     NSTimeInterval position=CMTimeGetSeconds(self.player.currentTime),duration=CMTimeGetSeconds(self.player.currentItem.duration);if(!isfinite(position)||position<0){self.skipButton.hidden=YES;return;}
-    NSTimeInterval intro=[MediaPlaybackStateStore introEndForContext:self.context?:@{}];if(intro>5&&position<intro-2){self.skipButtonAction=@"intro";[self.skipButton setTitle:[NSString stringWithFormat:@"跳过片头 · %@",[self formatMediaTime:intro-position]] forState:UIControlStateNormal];self.skipButton.hidden=NO;return;}
+    // 换片后重置本集自动跳过标记，否则同一集号在另一部影片里会被误判为已跳过。
+    NSDictionary *context=self.context?:@{};
+    if(![self.autoSkipContext isEqualToDictionary:context]){self.autoSkipContext=[context copy];self.autoSkippedIntroEpisodeIndex=-1;self.autoSkippedOutroEpisodeIndex=-1;}
+    BOOL autoSkip=[[NSUserDefaults standardUserDefaults] boolForKey:@"cctv.mediaAutoSkipIntroOutro"];
+    NSTimeInterval intro=[MediaPlaybackStateStore introEndForContext:self.context?:@{}];if(intro>5&&position<intro-2){self.skipButtonAction=@"intro";if(autoSkip&&self.episodeIndex!=self.autoSkippedIntroEpisodeIndex){self.autoSkippedIntroEpisodeIndex=self.episodeIndex;[self performSkipAction];return;}[self.skipButton setTitle:[NSString stringWithFormat:@"跳过片头 · %@",[self formatMediaTime:intro-position]] forState:UIControlStateNormal];self.skipButton.hidden=NO;return;}
     NSTimeInterval outro=[MediaPlaybackStateStore outroSkipForContext:self.context?:@{}];BOOL hasNext=self.episodeIndex+1<self.episodes.count;NSTimeInterval remaining=duration-position;
-    if(outro>0&&isfinite(remaining)&&remaining>0&&remaining<=outro&&hasNext){self.skipButtonAction=@"outro";[self.skipButton setTitle:@"跳过片尾 · 下一集" forState:UIControlStateNormal];self.skipButton.hidden=NO;return;}
+    if(outro>0&&isfinite(remaining)&&remaining>0&&remaining<=outro&&hasNext){self.skipButtonAction=@"outro";if(autoSkip&&self.episodeIndex!=self.autoSkippedOutroEpisodeIndex){self.autoSkippedOutroEpisodeIndex=self.episodeIndex;[self performSkipAction];return;}[self.skipButton setTitle:@"跳过片尾 · 下一集" forState:UIControlStateNormal];self.skipButton.hidden=NO;return;}
     self.skipButtonAction=nil;self.skipButton.hidden=YES;
 }
 - (NSString *)formatMediaTime:(NSTimeInterval)time {NSUInteger value=(NSUInteger)MAX(0,time);return value>=3600?[NSString stringWithFormat:@"%lu:%02lu:%02lu",(unsigned long)(value/3600),(unsigned long)((value%3600)/60),(unsigned long)(value%60)]:[NSString stringWithFormat:@"%02lu:%02lu",(unsigned long)(value/60),(unsigned long)(value%60)];}
@@ -795,6 +803,11 @@ static NSURL *MediaPlaybackEpisodePageFallbackURL(NSDictionary *episode) {
     self.hasDiagnosticTimeControlStatus=NO;self.playbackStartedAt=CACurrentMediaTime();self.status.text=@"正在载入媒体…";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];[self setRetryAvailable:NO];
     NSDictionary *requestHeaders=MediaPlaybackHeadersFromResult(result);NSString *host=url.host.lowercaseString?:@"";BOOL localRelay=![sourceURL.absoluteString isEqualToString:raw]&&[@[@"127.0.0.1",@"localhost",@"::1"] containsObject:host];if(localRelay)requestHeaders=@{};
     AVURLAsset *asset=[AVURLAsset URLAssetWithURL:url options:requestHeaders.count?@{@"AVURLAssetHTTPHeaderFieldsKey":requestHeaders}:nil];AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];
+    // 默认清晰度只约束多码率 HLS 的自适应选线：单文件 MP4 只有一个码率，不受影响；央视直播走 SDK，不走这里。
+    NSString *preferredQuality=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaPreferredQuality.v1"]?:@"auto";
+    if([preferredQuality isEqual:@"smooth"])item.preferredPeakBitRate=1500000;
+    else if([preferredQuality isEqual:@"hd"])item.preferredPeakBitRate=4000000;
+    else if([preferredQuality isEqual:@"uhd"])item.preferredPeakBitRate=8000000;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerItemFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerItemStalled:) name:AVPlayerItemPlaybackStalledNotification object:item];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerItemEnded:) name:AVPlayerItemDidPlayToEndTimeNotification object:item];

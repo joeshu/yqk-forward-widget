@@ -22,6 +22,14 @@ static NSString *SettingsVideoGravityText(void) {
     return @"画面适应";
 }
 
+static NSString *SettingsPreferredQualityText(void) {
+    NSString *quality=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaPreferredQuality.v1"]?:@"auto";
+    if([quality isEqual:@"smooth"])return @"流畅";
+    if([quality isEqual:@"hd"])return @"高清";
+    if([quality isEqual:@"uhd"])return @"超清";
+    return @"自动";
+}
+
 static NSString *SettingsEPGCacheFilePath(void) {
     NSArray *dirs=NSSearchPathForDirectoriesInDomains(NSCachesDirectory,NSUserDomainMask,YES);
     return [[dirs firstObject] stringByAppendingPathComponent:@"epg-cache.json"];
@@ -43,20 +51,23 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
 @interface SettingsViewController () <UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic,strong) UITableView *table;
 @property(nonatomic,strong) NSArray<NSDictionary *> *sections;
+@property(nonatomic,copy,nullable) NSString *lastUpdateCheckText;
 @end
 @implementation SettingsViewController
 - (void)viewDidLoad {
     [super viewDidLoad]; self.title=@"设置"; self.view.backgroundColor=HostBackground(); self.navigationController.navigationBar.tintColor=HostAccent();
     self.sections=@[
-      @{ @"title":@"外观", @"footer":@"主题会应用到全部页面。可跟随 iPhone 外观，也可固定使用浅色或深色。频道网格列数只在网格显示时生效。", @"rows":@[
+      @{ @"title":@"外观", @"footer":@"主题会应用到全部页面。可跟随 iPhone 外观，也可固定使用浅色或深色；下方色板提供 6 套主题（4 套深色沉浸、2 套浅色），点选立即生效，无需重启。频道网格列数只在网格显示时生效。字号对五个主页面与后续打开的页面生效。", @"rows":@[
         @{ @"title":@"全局主题", @"detail":@"系统 / 浅色 / 深色", @"key":HostThemeModePreferenceKey, @"appearance":@YES, @"icon":@"circle.lefthalf.filled" },
+        @{ @"title":@"主题色板", @"detail":@"午夜影院", @"action":@"themePalette", @"icon":@"paintpalette" },
+        @{ @"title":@"字号", @"key":@"cctv.appFontSize.v1", @"segmented":@YES, @"options":@[@"标准",@"大",@"特大"], @"values":@[@0,@1,@2], @"default":@0, @"icon":@"textformat.size" },
         @{ @"title":@"频道用网格显示", @"key":@"channelGridMode", @"icon":@"square.grid.2x2", @"default":@YES },
         @{ @"title":@"频道网格列数", @"key":@"cctv.channelGridColumns.v1", @"segmented":@YES, @"options":@[@"3 列",@"4 列"], @"values":@[@3,@4], @"default":@4, @"icon":@"rectangle.grid.3x2" }
       ]},
       @{ @"title":@"启动", @"footer":@"打开时回到上次离开的页面；关闭后每次打开都从央视直播开始。", @"rows":@[
         @{ @"title":@"启动时恢复上次打开的页面", @"key":@"cctv.restoreLastTab.v1", @"icon":@"arrow.uturn.left", @"default":@YES }
       ]},
-      @{ @"title":@"播放", @"footer":@"启动时自动续播默认关闭，打开软件后由你点选频道播放。快速起播仅降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；预解析只缓存一个相邻频道的信息，有效期 15 秒，会额外请求频道元数据。播放选项下次选台生效。影视的默认速度、画面比例、自动连播与屏幕常亮下次播放生效，也可在播放器右上角菜单里临时调整。", @"rows":@[
+      @{ @"title":@"播放", @"footer":@"启动时自动续播默认关闭，打开软件后由你点选频道播放。快速起播仅降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；预解析只缓存一个相邻频道的信息，有效期 15 秒，会额外请求频道元数据。播放选项下次选台生效。影视的默认速度、画面比例、自动连播与屏幕常亮下次播放生效，也可在播放器右上角菜单里临时调整。默认清晰度仅对多码率 HLS 订阅流生效，央视直播由 VDN 自动选线。自动跳过仅对已记住片头片尾位置的影片生效，位置在播放器菜单里设置。", @"rows":@[
         @{ @"title":@"预解析下一个 CCTV 频道", @"key":@"preloadNativeChannel", @"icon":@"forward.end", @"default":@YES },
         @{ @"title":@"SDK 详细日志（诊断）", @"key":@"nativeSDKVerboseLogs", @"icon":@"doc.text", @"default":@NO },
         @{ @"title":@"原生播放器快速起播", @"key":@"fastNativeStartup", @"icon":@"bolt", @"default":@YES },
@@ -67,14 +78,17 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
         @{ @"title":@"允许后台音频播放", @"key":@"allowBackgroundAudio", @"icon":@"speaker.wave.2", @"default":@YES },
         @{ @"title":@"订阅流自动画中画", @"key":@"autoPiP", @"icon":@"pip", @"default":@NO },
         @{ @"title":@"自动连播下一集", @"key":@"cctv.mediaAutoPlayNext", @"icon":@"forward.end.fill", @"default":@YES },
+        @{ @"title":@"自动跳过片头片尾", @"key":@"cctv.mediaAutoSkipIntroOutro", @"icon":@"forward.end.circle", @"default":@NO },
         @{ @"title":@"播放时屏幕常亮", @"key":@"cctv.mediaKeepScreenAwake", @"icon":@"sun.max", @"default":@YES },
         @{ @"title":@"默认播放速度", @"detail":SettingsPlaybackRateText(), @"action":@"defaultPlaybackRate", @"icon":@"speedometer" },
-        @{ @"title":@"默认画面比例", @"detail":SettingsVideoGravityText(), @"action":@"defaultVideoGravity", @"icon":@"aspectratio" }
+        @{ @"title":@"默认画面比例", @"detail":SettingsVideoGravityText(), @"action":@"defaultVideoGravity", @"icon":@"aspectratio" },
+        @{ @"title":@"默认清晰度", @"detail":SettingsPreferredQualityText(), @"action":@"defaultQuality", @"icon":@"4k.tv" }
       ]},
-      @{ @"title":@"服务", @"footer":@"内置 Python 插件仅在前台运行；高码率并发已限制以降低闪退风险。", @"rows":@[
+      @{ @"title":@"服务", @"footer":@"内置 Python 插件仅在前台运行；高码率并发已限制以降低闪退风险。网络请求超时控制影视数据请求的等待时间，偏短在弱网时更容易失败，偏长等待更久。", @"rows":@[
         @{ @"title":@"央视直播", @"detail":@"官方 CNPlayerSDK · VDN 自动选线", @"action":@"openTabLive", @"icon":@"tv" },
         @{ @"title":@"M3U / HLS 订阅", @"detail":@"AVPlayer · iOS 系统解码", @"action":@"openTabChannels", @"icon":@"play.rectangle" },
-        @{ @"title":@"内置插件", @"detail":@"Python / JavaScriptCore · 本机运行", @"action":@"openServices", @"icon":@"curlybraces" }
+        @{ @"title":@"内置插件", @"detail":@"Python / JavaScriptCore · 本机运行", @"action":@"openServices", @"icon":@"curlybraces" },
+        @{ @"title":@"网络请求超时", @"key":@"cctv.networkTimeout.v1", @"segmented":@YES, @"options":@[@"10 秒",@"20 秒",@"40 秒"], @"values":@[@10,@20,@40], @"default":@20, @"icon":@"network" }
       ]},
       @{ @"title":@"运行诊断", @"footer":@"开启后记录应用启动、影视加载与播放阶段、海报失败、服务启停和系统内存警告。每次 App 运行单独存档，单次最多 4 MiB；最多保留 24 次或 32 MiB，较旧记录会自动清理。重启后会标出上次未正常收尾及最后记录的状态；这不能单独证明崩溃原因，也不能替代 iOS .ips / JetsamEvent 报告。日志默认脱敏，不记录完整播放地址、查询参数值、Cookie 或脚本内容。", @"rows":@[
         @{ @"title":@"运行诊断模式", @"detail":@"先开启再复现；若闪退，重开 App 后导出", @"key":@"runtimeDiagnosticsEnabled", @"icon":@"waveform.path.ecg", @"default":@NO },
@@ -93,6 +107,7 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
         @{ @"title":@"清除搜索历史", @"detail":@"本机保存的搜索关键词", @"icon":@"magnifyingglass.circle", @"action":@"clearSearchHistory" },
         @{ @"title":@"隐私说明", @"detail":@"数据如何保存与使用", @"action":@"privacy", @"icon":@"hand.raised" },
         @{ @"title":@"CCTVHost", @"detail":[NSString stringWithFormat:@"%@ (%@) · %@",[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"开发版",[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"]?:@"?",[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"] isEqual:@"no-python"]?@"无 Python 诊断版":@"完整版"], @"icon":@"info.circle" },
+        @{ @"title":@"检查更新", @"detail":@"点按检查最新发布", @"action":@"checkUpdate", @"icon":@"arrow.down.circle" },
         @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass" }
       ]}
     ];
@@ -111,6 +126,9 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     if([row[@"action"] isEqualToString:@"clearEPG"])cell.detailTextLabel.text=SettingsEPGCacheSizeText();
     if([row[@"action"] isEqualToString:@"defaultPlaybackRate"])cell.detailTextLabel.text=SettingsPlaybackRateText();
     if([row[@"action"] isEqualToString:@"defaultVideoGravity"])cell.detailTextLabel.text=SettingsVideoGravityText();
+    if([row[@"action"] isEqualToString:@"defaultQuality"])cell.detailTextLabel.text=SettingsPreferredQualityText();
+    if([row[@"action"] isEqualToString:@"themePalette"])cell.detailTextLabel.text=[HostThemePalette currentPalette].displayName;
+    if([row[@"action"] isEqualToString:@"checkUpdate"])cell.detailTextLabel.text=self.lastUpdateCheckText?:@"点按检查最新发布";
     cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=0; cell.imageView.image=[UIImage systemImageNamed:row[@"icon"]]; cell.imageView.tintColor=HostAccent(); cell.backgroundColor=HostCard(); cell.accessoryView=nil; cell.accessoryType=UITableViewCellAccessoryNone;cell.selectionStyle=UITableViewCellSelectionStyleNone;
     NSString *key=row[@"key"];
     if([row[@"appearance"] boolValue]){UISegmentedControl *style=[[UISegmentedControl alloc] initWithItems:@[@"系统",@"浅色",@"深色"]];[style setTitleTextAttributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];NSString *mode=HostThemeMode();style.selectedSegmentIndex=[mode isEqual:@"system"]?0:([mode isEqual:@"light"]?1:2);style.selectedSegmentTintColor=HostAccent();[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];style.accessibilityIdentifier=HostThemeModePreferenceKey;[style addTarget:self action:@selector(appearanceChanged:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=style;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
@@ -145,6 +163,9 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     else if([row[@"action"] isEqualToString:@"privacy"]) [self showPrivacyStatement];
     else if([row[@"action"] isEqualToString:@"defaultPlaybackRate"]) [self presentPlaybackRatePicker:ip];
     else if([row[@"action"] isEqualToString:@"defaultVideoGravity"]) [self presentVideoGravityPicker:ip];
+    else if([row[@"action"] isEqualToString:@"defaultQuality"]) [self presentPreferredQualityPicker:ip];
+    else if([row[@"action"] isEqualToString:@"themePalette"]) [self presentThemePicker:ip];
+    else if([row[@"action"] isEqualToString:@"checkUpdate"]) [self checkForUpdateFromIndexPath:ip];
     else if([row[@"action"] isEqualToString:@"openTabLive"]){if(self.onOpenTab)self.onOpenTab(0);}
     else if([row[@"action"] isEqualToString:@"openTabChannels"]){if(self.onOpenTab)self.onOpenTab(1);}
     else if([row[@"action"] isEqualToString:@"openServices"]){if(self.onOpenServices)self.onOpenServices();}
@@ -181,6 +202,85 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [self presentActionSheet:sheet fromIndexPath:ip];
 }
+- (void)presentPreferredQualityPicker:(NSIndexPath *)ip {
+    // 清晰度只对多码率 HLS 订阅流有效：央视直播走 SDK 的 VDN 自动选线，宿主没有可调的清晰度接口；单文件 MP4 只有一个码率。
+    NSString *current=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaPreferredQuality.v1"]?:@"auto";
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"默认清晰度" message:@"仅对多码率 HLS 订阅流生效；央视直播由 VDN 自动选线；单文件 MP4 无多码率可选。下次播放生效。" preferredStyle:UIAlertControllerStyleActionSheet];
+    for(NSDictionary *option in @[@{@"title":@"自动",@"value":@"auto"},@{@"title":@"流畅",@"value":@"smooth"},@{@"title":@"高清",@"value":@"hd"},@{@"title":@"超清",@"value":@"uhd"}]){
+        NSString *title=option[@"title"],*value=option[@"value"];
+        [sheet addAction:[UIAlertAction actionWithTitle:[current isEqual:value]?[title stringByAppendingString:@" ✓"]:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[NSUserDefaults.standardUserDefaults setObject:value forKey:@"cctv.mediaPreferredQuality.v1"];[self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"默认清晰度已设为%@",title]);}]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentActionSheet:sheet fromIndexPath:ip];
+}
+- (void)checkForUpdateFromIndexPath:(NSIndexPath *)ip {
+    // 手动检查 GitHub 最新发布：版本号用数字比较；同一版本号内的新构建无法仅凭版本号识别，提示里会同时给出最新构建号，由用户对照发布页判断。
+    self.lastUpdateCheckText=@"正在检查…";[self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+    NSURL *url=[NSURL URLWithString:@"https://api.github.com/repos/joeshu/yqk-forward-widget/releases/latest"];
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:10];
+    [request setValue:@"CCTVHost" forHTTPHeaderField:@"User-Agent"];
+    __weak typeof(self) weakSelf=self;
+    [[[NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration] dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+        dispatch_async(dispatch_get_main_queue(),^{SettingsViewController *owner=weakSelf;if(!owner)return;
+            NSDictionary *json=[NSJSONSerialization JSONObjectWithData:data?:[NSData data] options:0 error:NULL];
+            NSString *name=[json isKindOfClass:NSDictionary.class]&&[json[@"name"] isKindOfClass:NSString.class]?json[@"name"]:@"";
+            NSString *htmlURL=[json isKindOfClass:NSDictionary.class]&&[json[@"html_url"] isKindOfClass:NSString.class]?json[@"html_url"]:@"";
+            NSString *published=[json isKindOfClass:NSDictionary.class]&&[json[@"published_at"] isKindOfClass:NSString.class]?json[@"published_at"]:@"";
+            NSString *latestVersion=nil,*latestBuild=nil;
+            NSRegularExpression *versionPattern=[NSRegularExpression regularExpressionWithPattern:@"\\d+(\\.\\d+){1,2}" options:0 error:NULL];
+            NSTextCheckingResult *versionMatch=[versionPattern firstMatchInString:name options:0 range:NSMakeRange(0,name.length)];
+            if(versionMatch)latestVersion=[name substringWithRange:versionMatch.range];
+            NSRegularExpression *buildPattern=[NSRegularExpression regularExpressionWithPattern:@"\\((\\d+)\\)" options:0 error:NULL];
+            NSTextCheckingResult *buildMatch=[buildPattern firstMatchInString:name options:0 range:NSMakeRange(0,name.length)];
+            if(buildMatch&&buildMatch.numberOfRanges>1)latestBuild=[name substringWithRange:[buildMatch rangeAtIndex:1]];
+            NSString *installed=[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"开发版";
+            NSString *installedBuild=[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"]?:@"?";
+            if(error||!latestVersion){
+                owner.lastUpdateCheckText=@"检查失败 · 点按重试";
+                [owner.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+                UIAlertController *failed=[UIAlertController alertControllerWithTitle:@"检查更新失败" message:@"无法获取最新发布信息，请检查网络后重试。" preferredStyle:UIAlertControllerStyleAlert];
+                [failed addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                [owner presentViewController:failed animated:YES completion:nil];return;
+            }
+            NSComparisonResult compared=[latestVersion compare:installed options:NSNumericSearch];
+            NSString *buildInfo=latestBuild?[NSString stringWithFormat:@"（构建 %@）",latestBuild]:@"";
+            NSString *dateInfo=published.length>10?[NSString stringWithFormat:@"，发布于 %@",[published substringToIndex:10]]:@"";
+            if(compared==NSOrderedDescending){
+                owner.lastUpdateCheckText=[NSString stringWithFormat:@"发现新版本 %@%@",latestVersion,buildInfo];
+                [owner.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+                UIAlertController *found=[UIAlertController alertControllerWithTitle:@"发现新版本" message:[NSString stringWithFormat:@"最新版本 %@%@%@，当前版本 %@ (%@)。请前往 GitHub 发布页下载安装包。",latestVersion,buildInfo,dateInfo,installed,installedBuild] preferredStyle:UIAlertControllerStyleAlert];
+                [found addAction:[UIAlertAction actionWithTitle:@"稍后" style:UIAlertActionStyleCancel handler:nil]];
+                if(htmlURL.length)[found addAction:[UIAlertAction actionWithTitle:@"去下载" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[UIApplication.sharedApplication openURL:[NSURL URLWithString:htmlURL] options:@{} completionHandler:nil];}]];
+                [owner presentViewController:found animated:YES completion:nil];return;
+            }
+            owner.lastUpdateCheckText=[NSString stringWithFormat:@"已是最新版本 %@%@",latestVersion,buildInfo];
+            [owner.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+            UIAlertController *uptodate=[UIAlertController alertControllerWithTitle:@"已是最新版本" message:[NSString stringWithFormat:@"当前版本 %@ (%@)，最新发布 %@%@%@。同一版本号内的新构建请以发布页为准。",installed,installedBuild,latestVersion,buildInfo,dateInfo] preferredStyle:UIAlertControllerStyleAlert];
+            [uptodate addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+            [owner presentViewController:uptodate animated:YES completion:nil];
+        });
+    }] resume];
+}
+- (void)presentThemePicker:(NSIndexPath *)ip {
+    HostThemePalette *current=[HostThemePalette currentPalette];
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"主题色板" message:@"深色沉浸：午夜影院、曜石黑、深海蓝、鎏金棕；浅色：晨光白、雪原白。切换立即生效，无需重启。" preferredStyle:UIAlertControllerStyleActionSheet];
+    for(HostThemePalette *theme in HostThemePalette.allThemes){
+        NSString *title=[theme.identifier isEqualToString:current.identifier]?[theme.displayName stringByAppendingString:@" ✓"]:[NSString stringWithFormat:@"%@ · %@",theme.displayName,theme.tagline];
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+            [HostThemePalette setCurrentPaletteIdentifier:theme.identifier];
+            // 主题自带深浅：选深色主题切深色模式，选浅色主题切浅色模式，保证点选立即生效；“跟随系统”仍可通过上方的全局主题切回。
+            NSString *mode=theme.dark?@"dark":@"light";
+            [NSUserDefaults.standardUserDefaults setObject:mode forKey:HostThemeModePreferenceKey];
+            [NSUserDefaults.standardUserDefaults setBool:theme.dark forKey:HostDarkThemePreferenceKey];
+            UIWindow *window=self.view.window;
+            if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);[self.table reloadData];});}
+            if(self.onPreferenceChanged)self.onPreferenceChanged(HostThemePaletteIdentifierPreferenceKey,theme.dark);
+            UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"主题已切换为%@",theme.displayName]);
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentActionSheet:sheet fromIndexPath:ip];
+}
 - (void)confirmClearMediaMetadata:(NSIndexPath *)indexPath {
     NSDictionary *summary=[MediaMetadataCache.shared summary];NSString *size=[NSByteCountFormatter stringFromByteCount:[summary[@"bytes"] longLongValue] countStyle:NSByteCountFormatterCountStyleMemory];
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清理影视元数据缓存？" message:[NSString stringWithFormat:@"将清理 %lu 项影视目录、分类和搜索缓存（%@）。影片详情与播放线路不写入此缓存；收藏、观看历史、订阅和插件数据会保留。",(unsigned long)[summary[@"entries"] unsignedIntegerValue],size] preferredStyle:UIAlertControllerStyleAlert];
@@ -207,9 +307,19 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)confirmClearSearchHistory {
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清除搜索历史？" message:@"将清除本机保存的搜索关键词。影视浏览记录不受影响。" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清除搜索历史？" message:@"将清除本机保存的搜索关键词，以及影视浏览状态里保存的关键词。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"清除历史" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[NSUserDefaults.standardUserDefaults removeObjectForKey:@"media.globalSearchHistory.v1"];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"搜索历史已清除");}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"清除历史" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"media.globalSearchHistory.v1"];
+        // 浏览状态里也存了搜索关键词：只清历史键的话，下次回到影视来源还会把旧关键词恢复出来。
+        id rawBrowse=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"media.browseStates.v1"];
+        NSMutableDictionary *browse=[rawBrowse isKindOfClass:NSDictionary.class]?[rawBrowse mutableCopy]:[NSMutableDictionary dictionary];
+        for(NSString *key in browse.allKeys){NSMutableDictionary *state=[browse[key] mutableCopy];if([state isKindOfClass:NSDictionary.class]){state[@"keyword"]=@"";browse[key]=state;}}
+        [NSUserDefaults.standardUserDefaults setObject:browse forKey:@"media.browseStates.v1"];
+        BOOL enabled=[[NSUserDefaults standardUserDefaults] boolForKey:@"media.globalSearchHistoryEnabled.v1"];
+        [NSNotificationCenter.defaultCenter postNotificationName:@"MediaGlobalSearchHistoryDidChange" object:nil userInfo:@{@"enabled":@(enabled),@"cleared":@YES}];
+        UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"搜索历史已清除");
+    }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)showPrivacyStatement {
@@ -223,7 +333,7 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     [NSUserDefaults.standardUserDefaults setObject:mode forKey:HostThemeModePreferenceKey];
     if(![mode isEqual:@"system"])[NSUserDefaults.standardUserDefaults setBool:dark forKey:HostDarkThemePreferenceKey];
     UIWindow *window=self.view.window;
-    if(window){window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);});}
+    if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);});}
     if(self.onPreferenceChanged)self.onPreferenceChanged(HostThemeModePreferenceKey,HostIsDarkThemeSelected());
 }
 - (void)confirmClearEPG {

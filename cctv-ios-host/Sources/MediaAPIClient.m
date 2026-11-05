@@ -240,7 +240,8 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
 
 @implementation MediaAPIClient
 - (instancetype)initWithPort:(NSInteger)port {
-    return [self initWithPort:port requestTimeout:40];
+    NSTimeInterval savedTimeout=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.networkTimeout.v1"]?[[NSUserDefaults standardUserDefaults] doubleForKey:@"cctv.networkTimeout.v1"]:20;
+    return [self initWithPort:port requestTimeout:savedTimeout];
 }
 - (instancetype)initWithPort:(NSInteger)port requestTimeout:(NSTimeInterval)requestTimeout {
     if((self=[super init])){
