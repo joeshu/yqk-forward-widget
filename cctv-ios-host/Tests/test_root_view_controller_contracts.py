@@ -115,6 +115,35 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("playSelectedNativeRouteOrChannel", body)
         self.assertIn("self.playbackGeneration += 1", method_body("- (void)startRemoteChannel:"))
 
+    def test_sdk_failure_exhaustion_falls_back_to_untried_subscription_source(self):
+        # SDK 2 次重连耗尽后改走未试过的同名订阅源（AVPlayer），而不是直接判死刑。
+        failed = method_body("- (void)player:(id)player playbackFailed:")
+        self.assertIn("nextUntriedAlternateChannel", failed)
+        self.assertIn("startRemoteChannel:alternate", failed)
+        alternate = method_body("- (NSDictionary *)nextUntriedAlternateChannel")
+        self.assertIn("remoteAttemptedURLs.count>=4", alternate)
+        self.assertIn("disabledSubscriptions", alternate)
+        self.assertIn("subscriptionSources", alternate)
+        self.assertIn("nextUntriedAlternateChannel", method_body("- (void)tryAlternateSource"))
+
+    def test_playback_failure_shows_redacted_error_detail(self):
+        failure = TEXT[TEXT.rindex("- (void)displayNativePlaybackFailure:"):]
+        self.assertIn("HostLogRedactor redactText:error.localizedDescription", failure)
+
+    def test_sdk_entries_reset_attempted_remote_urls_for_new_channel(self):
+        # 换台进 SDK 时清空上个频道的已试地址集，否则残留满 4 条会误拦回退。
+        for signature in ("- (void)playViaSDKURL:", "- (void)playViaSDK:"):
+            self.assertIn("[self.remoteAttemptedURLs removeAllObjects]", method_body(signature))
+
+    def test_timeshift_rejection_reports_the_specific_reason(self):
+        seek = method_body("- (void)seekNativeStart:")
+        self.assertIn("error:&seekError", seek)
+        self.assertIn("seekError.localizedDescription", seek)
+        timeshift = (SOURCE.parent / "NativeTimeshiftSession.h").read_text(encoding="utf-8")
+        self.assertIn("CCTVHostTimeshiftErrorInvalidRange", timeshift)
+        self.assertIn("CCTVHostTimeshiftErrorUnsupportedPlayer", timeshift)
+        self.assertIn("error:(NSError **)error", timeshift)
+
     def test_sdk_callbacks_go_through_session_delegate(self):
         session = (SOURCE.parent / "CNPlayerSessionDelegate.m").read_text(encoding="utf-8")
         self.assertIn("isCurrentSession", session)

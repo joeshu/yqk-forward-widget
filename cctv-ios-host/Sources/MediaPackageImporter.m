@@ -28,6 +28,14 @@ static BOOL PythonDeclaresArgument(NSString *source,NSString *argument){
     NSString *pattern=[NSString stringWithFormat:@"add_argument\\s*\\(\\s*['\"]%@['\"]",[NSRegularExpression escapedPatternForString:argument]];
     return [source rangeOfString:pattern options:NSRegularExpressionSearch].location!=NSNotFound;
 }
+static BOOL MediaAPIMethodDeclaredInSource(NSString *source) {
+    // 与 JSPlugins/generic/entry.mjs 的起播校验保持一致：cctvhost.media/1 插件
+    // 至少实现 home/category/search/detail/play/channels/catalog/resolve 之一。
+    // 仅用于默认兜底判定，避免规则配置文件被误认成影视插件；入口转交本地
+    // 模块时不做判断，起播校验兜底。
+    if([source rangeOfString:@"(?:^|[\\s{,;])(?:async\\s+)?(home|category|search|detail|play|channels|catalog|resolve)\\s*(?:\\(|:|=)" options:NSRegularExpressionSearch].location!=NSNotFound)return YES;
+    return [source rangeOfString:@"(?:import\\s+(?:[^;]*?\\sfrom\\s+)?['\"]\\.|export\\s+[^;]*?\\sfrom\\s+['\"]\\.|require\\s*\\(\\s*['\"]\\.)" options:NSRegularExpressionSearch].location!=NSNotFound;
+}
 static NSString *PackageMD5(NSData *data){
     unsigned char digest[CC_MD5_DIGEST_LENGTH];CC_MD5(data.bytes,(CC_LONG)data.length,digest);
     NSMutableString *value=[NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH*2];for(NSUInteger i=0;i<CC_MD5_DIGEST_LENGTH;i++)[value appendFormat:@"%02x",digest[i]];return value;
@@ -204,6 +212,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(!runtime.length && [entry.pathExtension.lowercaseString isEqual:@"py"])runtime=@"python";
     if([protocol isEqual:@"tvbox"] || [protocol isEqual:@"tvbox-js"] || [protocol isEqual:@"catvod-quickjs"] || [protocol isEqual:@"catvod-open-js"])protocol=@"catvod-js";
     if([protocol isEqual:@"catvod-open"])protocol=catpawOpen?@"catpaw-http":@"catvod-js";
+    BOOL protocolDefaulted=NO;
     if(!protocol.length){
         if([runtime isEqual:@"python"]){protocol=[text rangeOfString:@"class Spider"].location!=NSNotFound?@"python-spider":@"python-http";}
         else if(widgetExtractor){runtime=@"node";protocol=@"widget-extractor";}
@@ -214,8 +223,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         else if(catSpider)protocol=@"catvod-spider";
         else if(catVodQuickJS)protocol=@"catvod-js";
         else if([text containsString:@"vod_play_from"] || [text containsString:@"vod_id"])protocol=@"catvod-js";
-        else protocol=@"cctvhost.media/1";
+        else {protocol=@"cctvhost.media/1";protocolDefaulted=YES;}
     }
+    if(protocolDefaulted && !MediaAPIMethodDeclaredInSource(text)){PackageError(error,@"未实现 cctvhost.media/1 接口：入口未定义 home/category/search/detail/play/channels/catalog/resolve 中的任一方法；若为规则配置请改用对应协议，或在 cctvhost.json 中声明 protocol");return nil;}
     if([runtime isEqual:@"python"])moduleType=@"script";
     if(!moduleType.length){
         BOOL bundledCommonJS=[text rangeOfString:@"(?:^|[;\\n}])\\s*module\\s*\\.\\s*exports\\s*=" options:NSRegularExpressionSearch].location!=NSNotFound;
