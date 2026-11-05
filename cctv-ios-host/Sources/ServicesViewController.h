@@ -3,6 +3,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface ServicesViewController : UIViewController
 @property(nonatomic,copy) dispatch_block_t onOpenYSP;
 @property(nonatomic,copy) void (^onToggleService)(NSDictionary *service,BOOL enabled);
+@property(nonatomic,copy) void (^onRestartService)(NSDictionary *service,void (^completion)(NSError * _Nullable error));
 @property(nonatomic,copy) void (^onApplyService)(NSDictionary *previousService,
                                                  NSDictionary *updatedService,
                                                  void (^completion)(NSError * _Nullable error));

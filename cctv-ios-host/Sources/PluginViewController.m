@@ -11,6 +11,10 @@
 @property(nonatomic,strong) UIButton *stopButton;
 @property(nonatomic,strong) UIView *statusDot;
 @property(nonatomic,assign) NSUInteger subscriptionCount;
+@property(nonatomic,assign) BOOL running;
+@property(nonatomic,strong) NSURLSessionDataTask *httpProbeTask;
+@property(nonatomic,assign) NSUInteger httpProbeGeneration;
+@property(nonatomic,strong,nullable) NSNumber *httpReachable;
 @end
 
 @implementation PluginViewController
@@ -146,14 +150,43 @@
     [self refreshStatus];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refreshStatus) name:PyHostRuntimeStateDidChangeNotification object:nil];
 }
-- (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated]; [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil]; }
-- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
-- (void)refreshStatus { [self updateRunning:[PyHost isRunningServiceIdentifier:@"builtin-ysp"] subscriptionCount:self.subscriptionCount]; }
+- (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated]; [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil]; [self.httpProbeTask cancel]; self.httpProbeTask=nil; self.httpProbeGeneration++; }
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; [self.httpProbeTask cancel]; }
+- (void)refreshStatus {
+    // 订阅数不在本页维护：每次出现时向调用方现取，否则在资源页增删订阅
+    // 后返回本页仍显示旧数。未提供 provider 时沿用上次传入的值。
+    NSUInteger count=self.subscriptionCountProvider?self.subscriptionCountProvider():self.subscriptionCount;
+    [self updateRunning:[PyHost isRunningServiceIdentifier:@"builtin-ysp"] subscriptionCount:count];
+    if(self.running)[self probeHTTPIfNeeded];
+}
+- (void)updateStatusLabelWithPort:(NSInteger)port {
+    if(!self.running){self.statusLabel.text=@"未运行";return;}
+    NSString *http=self.httpReachable==nil?@"HTTP 检测中…":([self.httpReachable boolValue]?@"HTTP 可达":@"HTTP 未响应");
+    self.statusLabel.text=[NSString stringWithFormat:@"YSP Live 运行时活跃 · 端口 %ld · %@",(long)port,http];
+}
+- (void)probeHTTPIfNeeded {
+    // 进程活跃不等于接口可达：每次出现时对 /health 做一次 3 秒探测，
+    // 把状态文案换成实测结果；代次守卫丢弃过期回调。
+    if(!self.running)return;
+    [self.httpProbeTask cancel];self.httpProbeTask=nil;
+    NSUInteger generation=++self.httpProbeGeneration;
+    self.httpReachable=nil;
+    NSInteger port=8767;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:@"builtin-ysp"]){port=[service[@"port"] integerValue];break;}
+    [self updateStatusLabelWithPort:port];
+    NSURL *url=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/health",(long)port]];
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3];
+    __weak typeof(self) weakSelf=self;
+    self.httpProbeTask=[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+        dispatch_async(dispatch_get_main_queue(),^{PluginViewController *owner=weakSelf;if(!owner||owner.httpProbeGeneration!=generation||!owner.running)return;NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;owner.httpReachable=@(!error&&status>=200&&status<300);owner.httpProbeTask=nil;[owner updateStatusLabelWithPort:port];});
+    }];
+    [self.httpProbeTask resume];
+}
 - (void)updateRunning:(BOOL)running subscriptionCount:(NSUInteger)count {
     NSInteger port=8767;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:@"builtin-ysp"]){port=[service[@"port"] integerValue];break;}
     self.subscriptionCount = count;
+    self.running = running;
     self.statusDot.backgroundColor = running ? UIColor.systemGreenColor : UIColor.systemGrayColor;
-    self.statusLabel.text = running ? [NSString stringWithFormat:@"YSP Live 运行时活跃 · 端口 %ld · HTTP 未检测",(long)port] : @"未运行";
+    [self updateStatusLabelWithPort:port];
     self.urlLabel.text=[self subscriptionURL];
     self.countLabel.text = [NSString stringWithFormat:@"订阅源 · %lu", (unsigned long)count];
     self.startButton.enabled = !running;

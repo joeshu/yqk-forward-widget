@@ -433,6 +433,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)toggleCatalogColumns;
 - (void)shareDiagnosticLogAtURL:(NSURL *)source;
 - (void)restartMediaService:(NSDictionary *)source completion:(void (^)(NSError *))completion;
+- (void)refreshSubscriptionForProfile:(NSString *)source;
+- (void)recheckProfileHealth:(NSString *)source;
+- (void)rematchEPGForProfile:(NSString *)source;
+- (void)refreshTVBoxCatalogProfile:(NSString *)source;
 @end
 
 @implementation RootViewController
@@ -1199,7 +1203,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)openConfigurationTab {
     ConfigCenterViewController *page=(ConfigCenterViewController *)self.tabPages[@3];
     if(!page){page=[ConfigCenterViewController new];__weak typeof(self) w=self;
-        page.profilesProvider=^{return [(id)w configurationProfiles];};page.onServices=^{[w openServicesPage];};page.onAdd=^{[w addSubscription];};page.onRefresh=^{[w onPullRefresh];};page.onRefreshProfile=^(NSString *source){[w fetchSubscription:source silent:NO];};
+        page.profilesProvider=^{return [(id)w configurationProfiles];};page.onServices=^{[w openServicesPage];};page.onAdd=^{[w addSubscription];};page.onRefresh=^{[w onPullRefresh];};page.onRefreshProfile=^(NSString *source){[w refreshSubscriptionForProfile:source];};page.onRecheckProfile=^(NSString *source){[w recheckProfileHealth:source];};page.onRematchEPGProfile=^(NSString *source){[w rematchEPGForProfile:source];};page.onRestartProfile=^(NSString *source){NSDictionary *service=[w resourceServiceForSource:source];if(!service)return;[w restartMediaService:service completion:^(NSError *error){if(error)[w showServiceError:error.localizedDescription];}];};page.onRefreshCatalogProfile=^(NSString *source){[w refreshTVBoxCatalogProfile:source];};
         page.onRefreshMediaHome=^{RootViewController *owner=w;if(!owner)return;[owner selectBottomTab:(UIButton *)owner.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)owner.tabPages[@2];[browser returnToHomeFromNavigation];dispatch_async(dispatch_get_main_queue(),^{if(![browser refreshHomeContentFromResourcePage])[owner showServiceError:@"没有可加载的影视资源。请先导入并启用一个影视来源。"] ;});};
         page.onToggleProfile=^(NSString *source,BOOL enabled){NSDictionary *service=[w resourceServiceForSource:source];if(service){[w toggleService:service enabled:enabled];return;}if(!source.length)[NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"nativeChannelsEnabled"];else{NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabled removeObject:source];if(!enabled)[disabled addObject:source];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];}[w applyFilter];};
         page.onOpenResource=^(NSString *source){[w openPluginResource:source];};
@@ -2061,6 +2065,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     __weak typeof(self) weakSelf=self;
     page.onOpenYSP=^{ [weakSelf openPluginPage]; };
     page.onToggleService=^(NSDictionary *service,BOOL enabled){[weakSelf toggleService:service enabled:enabled];};
+    page.onRestartService=^(NSDictionary *service,void (^completion)(NSError *)){[weakSelf restartMediaService:service completion:completion];};
     page.onApplyService=^(NSDictionary *previousService,NSDictionary *updatedService,void (^completion)(NSError * _Nullable)){RootViewController *owner=weakSelf;if(owner)[owner applyServiceConfigurationFrom:previousService to:updatedService completion:completion];else if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:10 userInfo:@{@"NSLocalizedDescriptionKey":@"服务页面已关闭，端口更改未应用。"}]);};
     page.onBrowseService=^(NSDictionary *service){[NSUserDefaults.standardUserDefaults setObject:service[@"id"] forKey:@"selectedMediaSource"];[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[2]];};
     page.onImportResource=^{[weakSelf.navigationController popToViewController:weakSelf animated:NO];[weakSelf selectBottomTab:(id)weakSelf.bottomBar.arrangedSubviews[3]];dispatch_async(dispatch_get_main_queue(),^{[weakSelf importMediaPackage];});};
@@ -2081,6 +2086,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSDictionary *builtinService=nil;for(NSDictionary *service in [ServiceStore services])if([service[@"builtin"] boolValue]){builtinService=service;break;}
     NSString *builtinID=[builtinService[@"id"] copy],*builtinName=[builtinService[@"name"] copy];
     page.onOpenLog = ^{[weakSelf openDiagnosticLogForIdentifier:builtinID name:builtinName];};
+    page.subscriptionCountProvider=^{return weakSelf.subscriptionURLs.count;};
     [page updateRunning:[PyHost isRunningServiceIdentifier:builtinID] subscriptionCount:self.subscriptionURLs.count];
     [self.navigationController pushViewController:page animated:YES];
 }
@@ -2898,10 +2904,80 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             }
             NSMutableDictionary *fields=[@{@"source_type":@"http", @"correlation_id":traceID?:@"", @"trigger":silent?@"automatic":@"user", @"http_status":@(status), @"response_mime_type":mimeType, @"elapsed_ms":@((NSInteger)((CACurrentMediaTime()-requestStartedAt)*1000)), @"channel_count":@(list.count), @"received_bytes":@(receivedBytes)} mutableCopy];[fields addEntriesFromDictionary:CCTVDiagnosticURLFields(url)];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_succeeded" category:@"subscription" fields:fields];[weakSelf.subscriptionTraceIDs removeObjectForKey:sourceKey];
             NSString *detected=[M3UParser epgURL:text baseURL:url];if(detected.length){NSString *prior=[ProfileStore metadata:sourceKey][@"detectedEPGURL"]?:[ProfileStore metadata:sourceKey][@"epgURL"];[ProfileStore update:sourceKey values:@{@"detectedEPGURL":detected}];if(![prior isEqual:detected])[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];if(localService&&![prior isEqual:detected])[weakSelf logPluginLine:[NSString stringWithFormat:@"节目单地址：%@",CCTVServiceLogAddress(detected)] identifier:localService[@"id"] name:localService[@"name"]];}
+            // 新清单不再提供节目单地址时清掉过期推导值，否则行上永远显示
+            // “已配置”，且 EPG 页会继续用旧地址。失败路径不碰它。
+            else if([ProfileStore metadata:sourceKey][@"detectedEPGURL"]){[ProfileStore removeValueForKey:@"detectedEPGURL" source:sourceKey];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];if(localService)[weakSelf logPluginLine:@"节目单地址已清除 · 新订阅清单未提供节目单" identifier:localService[@"id"] name:localService[@"name"]];}
             if(localService)[weakSelf logPluginLine:[NSString stringWithFormat:@"订阅清单可读取 · %lu 个频道",(unsigned long)list.count] identifier:localService[@"id"] name:localService[@"name"]];
             [weakSelf installPlaylist:list source:sourceKey];
         });
     }];self.subscriptionTasks[sourceKey]=subscriptionTask;[subscriptionTask resume];
+}
+// 资源页单条目刷新：行里的 source 可能是订阅 URL，也可能是 plugin:<id>。
+// 插件行先解析到它自己的订阅清单地址，再走同一条刷新链路。
+- (void)refreshSubscriptionForProfile:(NSString *)source {
+    NSString *url=source;
+    NSDictionary *service=[self resourceServiceForSource:source];
+    if(service)url=[ServiceStore subscriptionURLForService:service]?:@"";
+    if(!url.length){[self showServiceError:@"此资源没有可刷新的订阅清单"];return;}
+    [self fetchSubscription:url silent:NO];
+}
+// 单条目健康重查：有订阅清单的走一次带就绪探测的刷新（先丢弃该源
+// 2 秒内的就绪缓存，强制重新探测）；无清单的插件直接对服务做一次
+// 就绪探测，成功只写日志并刷新本行，失败弹明确提示。
+- (void)recheckProfileHealth:(NSString *)source {
+    NSDictionary *service=[self resourceServiceForSource:source];
+    NSString *url=service?[ServiceStore subscriptionURLForService:service]?:@"":source;
+    if(url.length){NSURL *u=[NSURL URLWithString:url];if(u&&[self localServiceForURL:u])[self.readyLocalOrigins removeObjectForKey:[self originForURL:u]];[self fetchSubscription:url silent:NO];return;}
+    if(!service){[self showServiceError:@"找不到此资源，无法检测健康状态"];return;}
+    if(![PyHost isRunningServiceIdentifier:service[@"id"]]){[self showServiceError:@"服务未运行，无法检测健康状态。请先启动服务。"];return;}
+    NSURL *base=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%@",service[@"port"]?:@0]];
+    LocalServiceReadiness *probe=[self readinessForURL:base service:service];
+    if(!self.subscriptionReadiness)self.subscriptionReadiness=[NSMutableDictionary dictionary];
+    [self.subscriptionReadiness[source] cancel];self.subscriptionReadiness[source]=probe;
+    __weak typeof(self) weakSelf=self;
+    [probe start:^(NSError *error,NSTimeInterval elapsed){
+        RootViewController *owner=weakSelf;if(!owner||owner.subscriptionReadiness[source]!=probe)return;
+        [owner.subscriptionReadiness removeObjectForKey:source];
+        // 探测完成前服务已被停掉：停服务本身已刷新页面，不再弹失败提示。
+        if(![PyHost isRunningServiceIdentifier:service[@"id"]])return;
+        if(error){[owner showServiceError:error.localizedDescription?:@"服务未就绪"];return;}
+        [owner logPluginLine:[NSString stringWithFormat:@"健康检查通过 · %.2f 秒",elapsed] identifier:service[@"id"] name:service[@"name"]];
+        NSString *origin=[owner originForURL:base];if(origin.length)owner.readyLocalOrigins[origin]=@(CACurrentMediaTime());
+        [owner refreshConfigurationPage];
+    }];
+}
+// 单条目 EPG 重匹配：复用订阅刷新链路，新清单重新推导 detectedEPGURL；
+// 若新清单不再提供节目单地址，成功路径会清掉过期值（见 fetchSubscription）。
+- (void)rematchEPGForProfile:(NSString *)source {
+    NSDictionary *service=[self resourceServiceForSource:source];
+    NSString *url=service?[ServiceStore subscriptionURLForService:service]?:@"":source;
+    if(!url.length){[self showServiceError:@"此资源没有订阅清单，无法重新匹配节目单"];return;}
+    [self fetchSubscription:url silent:NO];
+}
+// 单条目合集刷新：按原地址重新下载并解析，解析出的新 id 换回原合集 id
+// 后保存——saveCatalog 按 id 合并，行不会重复，站点/直播数就地更新。
+// MacCMS 行的 url 是接口地址，不走 JSON 下载；空合集不覆盖原合集。
+- (void)refreshTVBoxCatalogProfile:(NSString *)source {
+    NSString *identifier=[source hasPrefix:@"tvbox:"]?[source substringFromIndex:6]:@"";
+    NSDictionary *catalog=[TVBoxCatalogStore catalogForID:identifier];
+    if(!catalog){[self showServiceError:@"找不到此资源合集，请重新导入"];return;}
+    if([[catalog[@"catalogKind"] isKindOfClass:NSString.class]?catalog[@"catalogKind"]:@"" isEqual:@"maccms"]){[self showServiceError:@"MacCMS 影视接口按接口配置使用，无需下载刷新"];return;}
+    NSURL *url=[NSURL URLWithString:[catalog[@"url"] isKindOfClass:NSString.class]?catalog[@"url"]:@""];
+    if(!url||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]){[self showServiceError:@"此合集没有可重新下载的配置地址"];return;}
+    [self.tvboxCatalogDownloader cancel];self.tvboxCatalogDownloader=[TVBoxCatalogDownloader new];
+    self.navigationItem.prompt=@"正在重新下载资源合集…";
+    __weak typeof(self) weakSelf=self;
+    [self.tvboxCatalogDownloader loadURL:url completion:^(NSDictionary *fresh,NSError *error){
+        RootViewController *owner=weakSelf;if(!owner)return;owner.navigationItem.prompt=nil;
+        if(error||!fresh){[owner showServiceError:error.localizedDescription?:@"资源合集下载失败"];return;}
+        NSArray *sites=[fresh[@"sites"] isKindOfClass:NSArray.class]?fresh[@"sites"]:@[];
+        NSArray *lives=[fresh[@"lives"] isKindOfClass:NSArray.class]?fresh[@"lives"]:@[];
+        if(!sites.count&&!lives.count){[owner showServiceError:@"重新下载的合集为空，已保留原合集"];return;}
+        NSMutableDictionary *updated=[fresh mutableCopy];updated[@"id"]=identifier;
+        [TVBoxCatalogStore saveCatalog:updated];
+        [owner refreshConfigurationPage];
+        [owner log:@"资源合集已刷新 · %@ · %lu 个站点",(fresh[@"name"]?:catalog[@"name"]?:@"资源合集"),(unsigned long)sites.count];
+    }];
 }
 - (void)installPlaylist:(NSArray<M3UChannel *> *)list source:(NSString *)sourceKey {
             NSDictionary *managedService=[self localServiceForURL:[NSURL URLWithString:sourceKey]];
@@ -3010,6 +3086,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_succeeded" category:@"subscription" fields:@{@"source_type":@"imported_text", @"correlation_id":traceID, @"input_bytes":@(byteCount), @"channel_count":@(list.count)}];
     NSString *detected=[M3UParser epgURL:text baseURL:nil];
     if(detected.length)[ProfileStore update:sourceKey values:@{@"detectedEPGURL":detected}];
+    else if([ProfileStore metadata:sourceKey][@"detectedEPGURL"]){[ProfileStore removeValueForKey:@"detectedEPGURL" source:sourceKey];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];}
     [self installPlaylist:list source:sourceKey];
 }
 - (void)playRemote:(NSDictionary *)ch {

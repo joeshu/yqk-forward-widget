@@ -413,6 +413,21 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
             UIAction *manage=[UIAction actionWithTitle:tvbox?(macCMS?@"打开影视接口":@"打开资源合集"): @"资源能力与设置" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(UIAction *a){if(tvbox){if([source hasPrefix:@"tvbox:"]&&weakSelf.onOpenTVBoxCatalog)weakSelf.onOpenTVBoxCatalog([source substringFromIndex:6]);}else if(weakSelf.onOpenResource)weakSelf.onOpenResource(source);}];
             NSMutableArray<UIAction *> *menuActions=[NSMutableArray arrayWithObject:manage];
             if(plugin&&self.onUseResource){NSString *resourceKind=p[@"resourceKind"];if([resourceKind isEqual:@"live"]||[resourceKind isEqual:@"both"])[menuActions addObject:[UIAction actionWithTitle:@"添加直播频道" image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:nil handler:^(UIAction *a){if(weakSelf.onUseResource)weakSelf.onUseResource(source,@"live");}]];if([resourceKind isEqual:@"vod"]||[resourceKind isEqual:@"both"])[menuActions addObject:[UIAction actionWithTitle:@"进入影视" image:[UIImage systemImageNamed:@"film"] identifier:nil handler:^(UIAction *a){if(weakSelf.onUseResource)weakSelf.onUseResource(source,@"vod");}]];}
+            if(plugin){
+                // 单条目刷新：只刷新这一行对应的订阅清单 / 健康 / EPG / 服务，
+                // 不走整页刷新。无订阅清单的纯影视插件不显示清单与 EPG 项。
+                NSString *subscriptionURL=[p[@"subscriptionURL"] isKindOfClass:NSString.class]?p[@"subscriptionURL"]:@"";
+                if(subscriptionURL.length&&weakSelf.onRefreshProfile)[menuActions addObject:[UIAction actionWithTitle:@"刷新订阅清单" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){if(weakSelf.onRefreshProfile)weakSelf.onRefreshProfile(source);}]];
+                if(weakSelf.onRecheckProfile)[menuActions addObject:[UIAction actionWithTitle:@"重新检测健康" image:[UIImage systemImageNamed:@"checkmark.shield"] identifier:nil handler:^(UIAction *a){if(weakSelf.onRecheckProfile)weakSelf.onRecheckProfile(source);}]];
+                if(subscriptionURL.length&&weakSelf.onRematchEPGProfile)[menuActions addObject:[UIAction actionWithTitle:@"重新匹配节目单（EPG）" image:[UIImage systemImageNamed:@"list.bullet.rectangle"] identifier:nil handler:^(UIAction *a){if(weakSelf.onRematchEPGProfile)weakSelf.onRematchEPGProfile(source);}]];
+                if(weakSelf.onRestartProfile)[menuActions addObject:[UIAction actionWithTitle:@"重启服务" image:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath"] identifier:nil handler:^(UIAction *a){if(weakSelf.onRestartProfile)weakSelf.onRestartProfile(source);}]];
+            }
+            if(tvbox&&!macCMS&&weakSelf.onRefreshCatalogProfile){
+                // MacCMS 行的 url 是接口地址而非可下载的 JSON 配置，不提供刷新。
+                NSString *catalogURL=[p[@"url"] isKindOfClass:NSString.class]?p[@"url"]:@"";
+                NSURL *catalogURLObject=[NSURL URLWithString:catalogURL];
+                if(catalogURLObject&&[@[@"http",@"https"] containsObject:catalogURLObject.scheme.lowercaseString])[menuActions addObject:[UIAction actionWithTitle:@"刷新合集" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){if(weakSelf.onRefreshCatalogProfile)weakSelf.onRefreshCatalogProfile(source);}]];
+            }
             UIAction *remove=[UIAction actionWithTitle:tvbox?(macCMS?@"移除影视接口":@"移除资源合集"): @"移除资源" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[weakSelf confirmRemoveProfile:source];}];[menuActions addObject:remove];
             UIButton *more=[UIButton buttonWithType:UIButtonTypeSystem];more.frame=CGRectMake(0,0,36,36);[more setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];more.menu=[UIMenu menuWithChildren:menuActions];more.showsMenuAsPrimaryAction=YES;more.accessibilityLabel=@"更多资源操作";more.accessibilityIdentifier=[NSString stringWithFormat:@"resource-more-%ld",(long)ip.row];more.tintColor=HostSecondaryText();more.backgroundColor=HostNeutralSurface();more.layer.cornerRadius=12;more.layer.cornerCurve=kCACornerCurveContinuous;more.layer.borderWidth=.6;HostSetLayerBorderColor(more,HostBorder());HostInstallPressFeedback(more);
             if(plugin){BOOL runningState=[p[@"enabled"] boolValue];UISwitch *running=[self compactSwitchForRow:ip.row enabled:runningState label:[NSString stringWithFormat:@"%@服务，%@",p[@"name"]?:@"脚本",runningState?@"停止":@"启动"] source:p[@"source"]];UIView *actions=[[UIView alloc] initWithFrame:CGRectMake(0,0,96,44)];actions.isAccessibilityElement=NO;running.frame=CGRectMake(0,6.5,51,31);[actions addSubview:running];more.frame=CGRectMake(58,4,36,36);[actions addSubview:more];c.accessoryView=actions;}else c.accessoryView=more;
@@ -443,6 +458,8 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
         if(self.onSelectProfile)[actions addAction:[UIAlertAction actionWithTitle:@"打开频道" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onSelectProfile(source);}]];
         if(source.length&&self.onEditProfile)[actions addAction:[UIAlertAction actionWithTitle:@"编辑订阅与节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onEditProfile(source);}]];
         if(source.length&&self.onRefreshProfile)[actions addAction:[UIAlertAction actionWithTitle:@"刷新此订阅" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onRefreshProfile(source);}]];
+        if(source.length&&self.onRecheckProfile)[actions addAction:[UIAlertAction actionWithTitle:@"重新检测健康" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onRecheckProfile(source);}]];
+        if(source.length&&self.onRematchEPGProfile)[actions addAction:[UIAlertAction actionWithTitle:@"重新匹配节目单（EPG）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onRematchEPGProfile(source);}]];
         [actions addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
         UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];actions.popoverPresentationController.sourceView=cell?:self.view;actions.popoverPresentationController.sourceRect=cell?cell.bounds:CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);[self presentViewController:actions animated:YES completion:nil];
     }
@@ -474,12 +491,34 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
     if(ip.row<0||ip.row>=self.profiles.count)return nil;
-    id rawSource=self.profiles[ip.row][@"source"];if(![rawSource isKindOfClass:NSString.class]||![rawSource length]||[self.profiles[ip.row][@"type"] isEqual:@"tvbox"])return nil;
+    NSDictionary *profile=self.profiles[ip.row];if(![profile isKindOfClass:NSDictionary.class])return nil;
+    id rawSource=profile[@"source"];if(![rawSource isKindOfClass:NSString.class]||![rawSource length])return nil;
     NSString *source=rawSource;__weak typeof(self) w=self;
+    BOOL tvbox=[profile[@"type"] isEqual:@"tvbox"];
+    BOOL macCMS=[profile[@"catalogKind"] isEqual:@"maccms"];
+    NSString *subscriptionURL=[profile[@"subscriptionURL"] isKindOfClass:NSString.class]?profile[@"subscriptionURL"]:@"";
+    NSString *catalogURL=[profile[@"url"] isKindOfClass:NSString.class]?profile[@"url"]:@"";
+    NSURL *catalogURLObject=[NSURL URLWithString:catalogURL];
+    BOOL catalogRefreshable=tvbox&&!macCMS&&catalogURLObject&&[@[@"http",@"https"] containsObject:catalogURLObject.scheme.lowercaseString];
     return [UIContextMenuConfiguration configurationWithIdentifier:source previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
+        if(tvbox){
+            NSMutableArray *actions=[NSMutableArray array];
+            if(catalogRefreshable)[actions addObject:[UIAction actionWithTitle:@"刷新合集" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){if(w.onRefreshCatalogProfile)w.onRefreshCatalogProfile(source);}]];
+            [actions addObject:[UIAction actionWithTitle:macCMS?@"移除影视接口":@"移除资源合集" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[w confirmRemoveProfile:source];}]];
+            return [UIMenu menuWithTitle:@"合集操作" children:actions];
+        }
         NSMutableArray *actions=[NSMutableArray arrayWithObject:[UIAction actionWithTitle:[source hasPrefix:@"plugin:"]?@"编辑资源":@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
-        if([source hasPrefix:@"plugin:"]){[actions addObject:[UIAction actionWithTitle:@"移除资源" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[w confirmRemoveProfile:source];}]];return [UIMenu menuWithTitle:@"资源操作" children:actions];}
+        if([source hasPrefix:@"plugin:"]){
+            if(subscriptionURL.length)[actions addObject:[UIAction actionWithTitle:@"刷新订阅清单" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){if(w.onRefreshProfile)w.onRefreshProfile(source);}]];
+            [actions addObject:[UIAction actionWithTitle:@"重新检测健康" image:[UIImage systemImageNamed:@"checkmark.shield"] identifier:nil handler:^(UIAction *a){if(w.onRecheckProfile)w.onRecheckProfile(source);}]];
+            if(subscriptionURL.length)[actions addObject:[UIAction actionWithTitle:@"重新匹配节目单（EPG）" image:[UIImage systemImageNamed:@"list.bullet.rectangle"] identifier:nil handler:^(UIAction *a){if(w.onRematchEPGProfile)w.onRematchEPGProfile(source);}]];
+            [actions addObject:[UIAction actionWithTitle:@"重启服务" image:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath"] identifier:nil handler:^(UIAction *a){if(w.onRestartProfile)w.onRestartProfile(source);}]];
+            [actions addObject:[UIAction actionWithTitle:@"移除资源" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[w confirmRemoveProfile:source];}]];
+            return [UIMenu menuWithTitle:@"资源操作" children:actions];
+        }
         [actions addObject:[UIAction actionWithTitle:@"刷新此订阅" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){if(w.onRefreshProfile)w.onRefreshProfile(source);}]];
+        [actions addObject:[UIAction actionWithTitle:@"重新检测健康" image:[UIImage systemImageNamed:@"checkmark.shield"] identifier:nil handler:^(UIAction *a){if(w.onRecheckProfile)w.onRecheckProfile(source);}]];
+        [actions addObject:[UIAction actionWithTitle:@"重新匹配节目单（EPG）" image:[UIImage systemImageNamed:@"list.bullet.rectangle"] identifier:nil handler:^(UIAction *a){if(w.onRematchEPGProfile)w.onRematchEPGProfile(source);}]];
         for(NSNumber *offset in @[@(-1),@1]){[actions addObject:[UIAction actionWithTitle:offset.integerValue<0?@"上移":@"下移" image:[UIImage systemImageNamed:offset.integerValue<0?@"arrow.up":@"arrow.down"] identifier:nil handler:^(UIAction *a){NSArray *sources=[w.allProfiles valueForKey:@"source"];sources=[sources filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(id s,NSDictionary *b){return [s isKindOfClass:NSString.class]&&[(NSString *)s length]>0;}]];[ProfileStore move:source offset:offset.integerValue sources:sources];[w reloadProfiles];}]];}
         [actions addObject:[UIAction actionWithTitle:@"移除订阅" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[w confirmRemoveProfile:source];}]];
         return [UIMenu menuWithTitle:@"订阅操作" children:actions];
