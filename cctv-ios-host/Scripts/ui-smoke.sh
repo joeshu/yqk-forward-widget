@@ -60,13 +60,23 @@ for attempt in $(seq 1 255); do
   if [ -f "$CONTAINER/Documents/ui-smoke/results.json" ]; then break; fi
   sleep 2
 done
-cp -R "$CONTAINER/Documents/ui-smoke/." "$OUT/"
+if [ -d "$CONTAINER/Documents/ui-smoke" ]; then
+  cp -R "$CONTAINER/Documents/ui-smoke/." "$OUT/"
+else
+  echo "::warning::UI smoke produced no output directory in the simulator container; the app may have crashed or hung at startup"
+fi
 if [ -f "$CONTAINER/Library/Application Support/ysp/cctvhost.log" ]; then
   cp "$CONTAINER/Library/Application Support/ysp/cctvhost.log" "$OUT/diagnostic.log"
 fi
 if [ -f "$CONTAINER/Library/Application Support/ysp/diagnostics/runtime-debug.jsonl" ]; then
   cp "$CONTAINER/Library/Application Support/ysp/diagnostics/runtime-debug.jsonl" "$OUT/runtime-debug.jsonl"
 fi
+# Best-effort simulator diagnostics: app console output and crash reports, so a
+# silent smoke run still leaves evidence instead of an empty artifact.
+xcrun simctl spawn "$SIM" log show --predicate 'processImagePath CONTAINS "CCTVHost"' --style syslog --last 15m > "$OUT/simulator.log" 2>&1 || true
+for crash in ~/Library/Logs/DiagnosticReports/*CCTVHost*.ips; do
+  [ -f "$crash" ] && cp "$crash" "$OUT/crash-$(basename "$crash" .ips).log" 2>/dev/null || true
+done
 cat "$OUT/fixture.log"
 if [ ! -f "$OUT/results.json" ]; then
   echo "::error::UI smoke did not finish; last checkpoint follows"
