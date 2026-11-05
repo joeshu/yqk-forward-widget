@@ -232,7 +232,7 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     [request setValue:@"CCTVHost" forHTTPHeaderField:@"User-Agent"];
     __weak typeof(self) weakSelf=self;
     NSURLSession *updateSession=[NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration];
-    [updateSession dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+    [[updateSession dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
         [updateSession finishTasksAndInvalidate];
         dispatch_async(dispatch_get_main_queue(),^{SettingsViewController *owner=weakSelf;if(!owner)return;owner.checkingUpdate=NO;
             NSDictionary *json=[NSJSONSerialization JSONObjectWithData:data?:[NSData data] options:0 error:NULL];
