@@ -115,6 +115,22 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("playSelectedNativeRouteOrChannel", body)
         self.assertIn("self.playbackGeneration += 1", method_body("- (void)startRemoteChannel:"))
 
+    def test_sdk_callbacks_go_through_session_delegate(self):
+        session = (SOURCE.parent / "CNPlayerSessionDelegate.m").read_text(encoding="utf-8")
+        self.assertIn("isCurrentSession", session)
+        self.assertIn("_sessionID == owner.nativeSessionID", session)
+        self.assertIn("authFailed:", session)
+        url = method_body("- (void)playViaSDKURL:")
+        sdk = method_body("- (void)playViaSDK:")
+        self.assertIn("beginNativeSession", url)
+        self.assertIn("beginNativeSession", sdk)
+        self.assertNotIn("args:@[url,self,options]", url)
+        self.assertNotIn("args:@[cid,self,options]", sdk)
+        self.assertNotIn('[inst setValue:self forKey:@"delegate"]', sdk)
+        stop = method_body("- (void)stopPlayback")
+        self.assertIn("self.nativeSessionDelegate=nil", stop)
+        self.assertIn("self.nativeSessionID++", stop)
+
     def test_remote_failure_recovery_is_bounded_and_deduplicates_player_callbacks(self):
         body = method_body("- (void)recoverRemoteFailureForItem:")
         self.assertIn("self.remoteRetryCount<1", body)

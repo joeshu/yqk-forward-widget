@@ -193,9 +193,11 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
 - (void)finishCall:(NSString *)identifier answer:(NSString *)answer { void (^reply)(NSString *)=self.calls[identifier];[self.calls removeObjectForKey:identifier];if(reply)reply(answer); }
 - (void)dispose {
     self.generation++;self.activeSession=nil;[self.session invalidateAndCancel];self.session=nil;
-    // 先逐项回调在途 fetch（此时 context 仍在，JS 回调可正常执行），再清空；
-    // 否则调用方永远等不到 fetch 结果。
-    for(NSNumber *key in self.requests.allKeys.copy)[self fetchFinished:key error:@"JS 服务已停止"];
+    // 在途 fetch 不在这里逐项回调：JS 回调会跑进正在拆除的 context，Promise
+    // 微任务未必能在 context 置空前跑完，还可能重入 fetch（见 26d40e9 的
+    // CI：回调重入曾让 fetch 拿到 nil task 崩溃，改守卫后又改变了待决
+    // resolve 的结算结果）。在途调用方由下面 finishCall 的 ok:false
+    // 统一唤醒，fetch 记录直接丢弃即可。
     [self.requests removeAllObjects];[self.timers removeAllObjects];self.context=nil;self.unresponsive=NO;
     self.packageRoot=nil;self.genericMode=NO;
     for(NSString *key in self.calls.allKeys)[self finishCall:key answer:@"{\"ok\":false,\"error\":\"JS 服务已停止\"}"];

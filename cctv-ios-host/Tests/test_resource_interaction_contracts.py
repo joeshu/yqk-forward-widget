@@ -217,7 +217,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('homeToolbarButtonWithSymbol:@"gearshape.fill"', self.detail)
         self.assertIn('self.homeMenuButton.menu=[self homeActionsMenu]', self.detail)
         self.assertIn('label:@"更多影视操作"', self.detail)
-        self.assertIn('homeMenuButton.widthAnchor constraintEqualToConstant:28', self.detail)
+        self.assertIn('homeMenuButton.widthAnchor constraintEqualToConstant:44', self.detail)
+        self.assertIn('homeMenuButton.heightAnchor constraintEqualToConstant:44', self.detail)
         self.assertIn('self.homeScroll.contentInset=UIEdgeInsetsMake(0,0,28,0)', self.detail)
         self.assertIn('categoryScrollHeightConstraint.constant=hasCategories?40:0', self.detail)
         self.assertNotIn('setNavigationBarHidden:self.homeMode', self.detail)
@@ -784,8 +785,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('onDisplayModeChanged', self.root)
         self.assertIn('[owner activate:source keepingHome:YES]', self.detail)
         self.assertIn('openHomeConfiguration', self.detail)
-        self.assertIn('@"首页"', self.root)
-        self.assertIn('CCTV",@"频道",@"首页",@"资源",@"设置', self.root)
+        self.assertIn('@"影视库"', self.root)
+        self.assertIn('CCTV",@"频道",@"影视库",@"资源",@"设置', self.root)
         self.assertIn('@"频道"', self.root)
 
     def test_global_search_filters_restore_state_and_cancel_changed_queries(self):

@@ -41,6 +41,7 @@
 #import "RuntimeDiagnostics.h"
 #import "PluginLogStore.h"
 #import "CNPlayerCrashGuard.h"
+#import "CNPlayerSessionDelegate.h"
 #import "ResourceImportSheetViewController.h"
 #import "PluginResourceDetailViewController.h"
 #import "MediaPlaybackViewController.h"
@@ -346,6 +347,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, assign) BOOL diagnosticFlushScheduled;
 @property (nonatomic, assign) NSUInteger diagnosticLogGeneration;
 @property (nonatomic, assign) NSUInteger playbackGeneration;
+// Native SDK session, bumped at every native play start and on stopPlayback.
+// The session delegate captures the ID at creation; a stale delegate drops
+// callbacks from the previous stream. Timeshift/back-to-live bump
+// playbackGeneration but keep the session, so they do not touch these.
+@property (nonatomic, assign) NSUInteger nativeSessionID;
+@property (nonatomic, strong) CNPlayerSessionDelegate *nativeSessionDelegate;
 @property (nonatomic, copy) NSString *currentPlaybackTraceID;
 // 计时
 @property (nonatomic, strong) NSTimer *watchdog;
@@ -964,7 +971,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     UIView *glassTint=[[UIView alloc] initWithFrame:self.bottomBarBackdrop.contentView.bounds];glassTint.backgroundColor=HostGlassTint();glassTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.bottomBarBackdrop.contentView addSubview:glassTint];
     [self.view addSubview:self.bottomBarBackdrop];
     self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=3; self.bottomBar.backgroundColor=UIColor.clearColor; self.bottomBar.layer.cornerRadius=27; self.bottomBar.layer.cornerCurve=kCACornerCurveContinuous; self.bottomBar.clipsToBounds=YES;
-    NSArray *titles=@[@"CCTV",@"频道",@"首页",@"资源",@"设置"];
+    NSArray *titles=@[@"CCTV",@"频道",@"影视库",@"资源",@"设置"];
     NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"house.fill",@"externaldrive.fill",@"gearshape"];
     for (NSInteger i=0;i<titles.count;i++) {
         UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;HostInstallPressFeedback(b);
@@ -1707,6 +1714,16 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self playViaSDK:self.channelID title:self.channelName];
 }
 
+// Starts a new native SDK session: bumps the session ID and installs a fresh
+// session delegate as the SDK delegate for this playback. Every native play
+// start goes through here so no callback can ever be attributed to an older
+// session, even when the legacy path reuses the same CNPlayer instance.
+- (CNPlayerSessionDelegate *)beginNativeSession {
+    self.nativeSessionID++;
+    self.nativeSessionDelegate=[[CNPlayerSessionDelegate alloc] initWithOwner:self sessionID:self.nativeSessionID];
+    return self.nativeSessionDelegate;
+}
+
 - (void)playViaSDKURL:(NSString *)url channelID:(NSString *)cid title:(NSString *)title {
     [CNPlayerCrashGuard install];
     if(!url.length||!cid.length){[self displayNativePlaybackFailure:@"所选线路参数缺失" error:nil];return;}
@@ -1729,10 +1746,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     id userID=[self call:dataManager sel:@"userID"];
     if([userID isKindOfClass:NSString.class]&&[userID length])options[kOptUserID]=userID;
     [self log:@"CNPlayer URL 起播 %@ · %@",cid,[NSURL URLWithString:url].host?:@"未知主机"];
-    id accepted=[self invokeTarget:player selector:selector args:@[url,self,options]];
+    CNPlayerSessionDelegate *session=[self beginNativeSession];
+    id accepted=[self invokeTarget:player selector:selector args:@[url,session,options]];
     [self recordStartupStage:@"configure"];
     if(![accepted isKindOfClass:NSNumber.class]||![accepted boolValue]){
-        self.currentPlayer=nil;@try{[player setValue:nil forKey:@"delegate"];}@catch(NSException *exception){}[self call:player sel:@"stop"];
+        self.nativeSessionDelegate=nil;self.currentPlayer=nil;@try{[player setValue:nil forKey:@"delegate"];}@catch(NSException *exception){}[self call:player sel:@"stop"];
         [self log:@"CNPlayer 未接受所选地址；保留线路选择，不回退自动"];
         [self displayNativePlaybackFailure:@"SDK 拒绝所选地址" error:nil];return;
     }
@@ -1763,6 +1781,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if(!inst){@try{inst=[[cls alloc] init];}@catch(NSException *e){[self log:@"创建播放器异常 %@",e.reason];}}
     if(!inst||![inst respondsToSelector:playSel]){[self displayNativePlaybackFailure:@"SDK 接口不可用" error:nil];return;}
     self.currentPlayer=inst;self.cicadaPlayer=nil;self.sdkPlayer=legacy?inst:nil;self.sdkPlayerUsed=YES;
+    CNPlayerSessionDelegate *session=[self beginNativeSession];
     @try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}
     self.nativePlaybackFailed=NO;
     self.nativeStartupTuner=CCTVBoolPreference(@"fastNativeStartup",YES)?[NativeStartupTuner new]:nil;
@@ -1770,16 +1789,16 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self log:@"原生起播 %@ · %@",cid,legacy?@"0.12 兼容复用":@"独立实例对比"];
     id accepted=@YES;
     if(prepared){
-        @try{[inst setValue:self forKey:@"delegate"];}@catch(NSException *e){prepared=nil;}
+        @try{[inst setValue:session forKey:@"delegate"];}@catch(NSException *e){prepared=nil;}
         if(prepared){[self recordStartupStage:@"preloadedVDN"];[self log:@"命中原生预解析 %@，保留播放信息直接 prepare",cid];}
     }
-    if(!prepared)accepted=[self invokeTarget:inst selector:playSel args:@[cid,self,options]];
+    if(!prepared)accepted=[self invokeTarget:inst selector:playSel args:@[cid,session,options]];
     if([accepted isKindOfClass:NSNumber.class]&&![accepted boolValue]){
         id previous=inst;self.currentPlayer=nil;
         @try{[previous setValue:nil forKey:@"delegate"];}@catch(NSException *e){}
         [self call:previous sel:@"stop"];
         @try{inst=[[cls alloc] init];}@catch(NSException *e){inst=nil;}
-        if(inst){self.currentPlayer=inst;self.sdkPlayer=legacy?inst:nil;@try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}accepted=[self invokeTarget:inst selector:playSel args:@[cid,self,options]];}
+        if(inst){self.currentPlayer=inst;self.sdkPlayer=legacy?inst:nil;@try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}accepted=[self invokeTarget:inst selector:playSel args:@[cid,session,options]];}
     }
     [self recordStartupStage:@"configure"];
     if(!inst||([accepted isKindOfClass:NSNumber.class]&&![accepted boolValue])){
@@ -1796,6 +1815,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 - (void)stopPlayback {
+    // Invalidate the native session first: any callback still in flight to the
+    // old session delegate is dropped by its session check, and bumping the ID
+    // keeps even a delegate retained by the SDK from forwarding again.
+    self.nativeSessionDelegate=nil;self.nativeSessionID++;
     [self.nativeRouteProbe cancel];self.nativeRouteProbe=nil;
     self.nativeRetryPending=NO;
     self.moviePiPActive=NO;
@@ -2651,7 +2674,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 
 - (void)onPullRefresh {
     if(self.subscriptionCatalog||self.activeTab==3){for(NSString *u in self.subscriptionURLs.allObjects)[self fetchSubscription:u silent:NO];}
-    else{[self.epgListGeneration++;self.epgCache removeAllObjects];[self saveEPGCache];if(self.firstRender)[self refreshNowNext];[self applyFilter];}
+    else{self.epgListGeneration++;[self.epgCache removeAllObjects];[self saveEPGCache];if(self.firstRender)[self refreshNowNext];[self applyFilter];}
     [self.table.refreshControl endRefreshing];[self.channelGrid.refreshControl endRefreshing];
 }
 
