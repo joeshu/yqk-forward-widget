@@ -365,10 +365,10 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     return MAX(112,ceil(14+titleHeight+6+detailHeight+14+14));
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    NSUInteger enabledSubscriptions=0,enabledServices=0,catalogs=0;
-    for(NSDictionary *p in self.profiles){if([p[@"type"] isEqual:@"plugin"]){if([p[@"enabled"] boolValue])enabledServices++;}else if([p[@"type"] isEqual:@"tvbox"])catalogs++;else if([p[@"enabled"] boolValue])enabledSubscriptions++;}
-    // 这里统计的是“已启用”，不是“正在运行”：已启用 ≠ 进程运行中 ≠ 接口健康 ≠ 能播。
-    return [NSString stringWithFormat:@"%lu 项 · %lu 个合集 · %lu 个订阅启用 · %lu 个服务已启用",(unsigned long)self.profiles.count,(unsigned long)catalogs,(unsigned long)enabledSubscriptions,(unsigned long)enabledServices];
+    NSUInteger enabledSubscriptions=0,enabledServices=0,catalogs=0,runningServices=0;
+    for(NSDictionary *p in self.profiles){if([p[@"type"] isEqual:@"plugin"]){if([p[@"enabled"] boolValue])enabledServices++;NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";NSString *identifier=[source hasPrefix:@"plugin:"]?[source substringFromIndex:7]:@"";if(identifier.length&&[PyHost isRunningServiceIdentifier:identifier])runningServices++;}else if([p[@"type"] isEqual:@"tvbox"])catalogs++;else if([p[@"enabled"] boolValue])enabledSubscriptions++;}
+    // 这里统计的是“已启用”，不是“正在运行”：已启用 ≠ 进程运行中 ≠ 接口健康 ≠ 能播；运行中单独计数。
+    return [NSString stringWithFormat:@"%lu 项 · %lu 个合集 · %lu 个订阅启用 · %lu 个服务已启用 · %lu 个运行中",(unsigned long)self.profiles.count,(unsigned long)catalogs,(unsigned long)enabledSubscriptions,(unsigned long)enabledServices,(unsigned long)runningServices];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     CCTVResourceProfileCell *c = (id)[tableView dequeueReusableCellWithIdentifier:@"profile"];

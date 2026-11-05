@@ -1,5 +1,6 @@
 #import "PluginViewController.h"
 #import "HostTheme.h"
+#import "HostLocalPort.h"
 #import "PyHost.h"
 #import "ServiceStore.h"
 
@@ -9,12 +10,16 @@
 @property(nonatomic,strong) UILabel *countLabel;
 @property(nonatomic,strong) UIButton *startButton;
 @property(nonatomic,strong) UIButton *stopButton;
+@property(nonatomic,strong) UIButton *restartButton;
 @property(nonatomic,strong) UIView *statusDot;
 @property(nonatomic,assign) NSUInteger subscriptionCount;
 @property(nonatomic,assign) BOOL running;
+@property(nonatomic,assign) BOOL restarting;
 @property(nonatomic,strong) NSURLSessionDataTask *httpProbeTask;
 @property(nonatomic,assign) NSUInteger httpProbeGeneration;
 @property(nonatomic,strong,nullable) NSNumber *httpReachable;
+@property(nonatomic, copy, nullable) NSNumber *stopPortState; // 0 端口已释放，1 仍可访问，-1 未知
+@property(nonatomic, assign) NSUInteger stopVerifyGeneration;
 @end
 
 @implementation PluginViewController
@@ -94,8 +99,10 @@
     UIStackView *actions = [self rowStack];
     self.startButton = [self button:@"启动服务" action:@selector(start)];
     self.stopButton = [self button:@"停止服务" action:@selector(stop)];
+    self.restartButton = [self button:@"重启服务" action:@selector(restart)];
     [actions addArrangedSubview:self.startButton];
     [actions addArrangedSubview:self.stopButton];
+    [actions addArrangedSubview:self.restartButton];
     [serviceStack addArrangedSubview:actions];
     [content addArrangedSubview:serviceCard];
 
@@ -150,17 +157,38 @@
     [self refreshStatus];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refreshStatus) name:PyHostRuntimeStateDidChangeNotification object:nil];
 }
-- (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated]; [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil]; [self.httpProbeTask cancel]; self.httpProbeTask=nil; self.httpProbeGeneration++; }
+- (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated]; [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil]; [self.httpProbeTask cancel]; self.httpProbeTask=nil; self.httpProbeGeneration++; self.stopVerifyGeneration++; }
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; [self.httpProbeTask cancel]; }
 - (void)refreshStatus {
     // 订阅数不在本页维护：每次出现时向调用方现取，否则在资源页增删订阅
     // 后返回本页仍显示旧数。未提供 provider 时沿用上次传入的值。
     NSUInteger count=self.subscriptionCountProvider?self.subscriptionCountProvider():self.subscriptionCount;
+    BOOL wasRunning=self.running;
     [self updateRunning:[PyHost isRunningServiceIdentifier:@"builtin-ysp"] subscriptionCount:count];
     if(self.running)[self probeHTTPIfNeeded];
+    if(!wasRunning&&self.running)self.stopPortState=nil;
+    // 运行 → 已停止：停止只代表会话结束，不代表监听端口已释放，
+    // 后台确认一次端口状态再写进状态文案；结果只改文案。
+    if(wasRunning&&!self.running)[self verifyPortReleasedAfterStop];
+}
+- (void)verifyPortReleasedAfterStop {
+    NSInteger port=8767;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:@"builtin-ysp"]){port=[service[@"port"] integerValue];break;}
+    if(port<1||port>65535)return;
+    NSUInteger generation=++self.stopVerifyGeneration;
+    __weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        int state=HostLocalPortState((int)port);
+        dispatch_async(dispatch_get_main_queue(),^{PluginViewController *owner=weakSelf;if(!owner||generation!=owner.stopVerifyGeneration||owner.running)return;owner.stopPortState=@(state);[owner updateStatusLabelWithPort:port];});
+    });
+}
+- (NSString *)stoppedStatusText {
+    if(!self.stopPortState)return @"未运行";
+    if([self.stopPortState integerValue]==0)return @"未运行 · 本机端口已释放";
+    if([self.stopPortState integerValue]==1)return @"未运行 · 端口仍可访问，请检查是否有其他程序占用";
+    return @"未运行 · 端口状态未知";
 }
 - (void)updateStatusLabelWithPort:(NSInteger)port {
-    if(!self.running){self.statusLabel.text=@"未运行";return;}
+    if(!self.running){self.statusLabel.text=[self stoppedStatusText];return;}
     NSString *http=self.httpReachable==nil?@"HTTP 检测中…":([self.httpReachable boolValue]?@"HTTP 可达":@"HTTP 未响应");
     self.statusLabel.text=[NSString stringWithFormat:@"YSP Live 运行时活跃 · 端口 %ld · %@",(long)port,http];
 }
@@ -189,13 +217,32 @@
     [self updateStatusLabelWithPort:port];
     self.urlLabel.text=[self subscriptionURL];
     self.countLabel.text = [NSString stringWithFormat:@"订阅源 · %lu", (unsigned long)count];
-    self.startButton.enabled = !running;
-    self.stopButton.enabled = running;
-    self.startButton.alpha = running ? 0.45 : 1.0;
-    self.stopButton.alpha = running ? 1.0 : 0.45;
+    self.startButton.enabled = !running && !self.restarting;
+    self.stopButton.enabled = running && !self.restarting;
+    self.restartButton.enabled = running && !self.restarting;
+    self.startButton.alpha = (running||self.restarting) ? 0.45 : 1.0;
+    self.stopButton.alpha = (running&&!self.restarting) ? 1.0 : 0.45;
+    self.restartButton.alpha = (running&&!self.restarting) ? 1.0 : 0.45;
 }
 - (void)start { if (self.onStart) self.onStart(); }
 - (void)stop { if (self.onStop) self.onStop(); }
+- (void)restart {
+    // 重启只对运行中的服务有意义：复用与服务详情同一条 restartMediaService
+    //（先停、确认端口释放后再启动），失败弹框给明确原因。
+    if(!self.running||self.restarting||!self.onRestart)return;
+    self.restarting=YES;[self updateRunning:self.running subscriptionCount:self.subscriptionCount];
+    __weak typeof(self) weakSelf=self;
+    self.onRestart(^(NSError *error){
+        dispatch_async(dispatch_get_main_queue(),^{PluginViewController *owner=weakSelf;if(!owner)return;owner.restarting=NO;[owner refreshStatus];if(error)[owner showRestartError:error];});
+    });
+}
+- (void)showRestartError:(NSError *)error {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"重启失败" message:error.localizedDescription?:@"服务未重新启动，请查看运行日志。" preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf=self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"查看运行日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(weakSelf.onOpenLog)weakSelf.onOpenLog();}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
 - (void)add { if (self.onAddSubscription) self.onAddSubscription(); }
 - (void)manage { if (self.onManageSubscriptions) self.onManageSubscriptions(); }
 - (void)openLog { if (self.onOpenLog) self.onOpenLog(); }

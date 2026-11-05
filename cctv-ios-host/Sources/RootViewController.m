@@ -329,6 +329,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, strong) NSMutableDictionary<NSNumber *, UIViewController *> *tabPages;
 @property (nonatomic, strong) UIButton *resourceActionsButton;
 @property (nonatomic, assign) BOOL gridMode;
+@property (nonatomic, assign) NSInteger channelSortMode;
 @property (nonatomic, assign) NSInteger gridColumns;
 @property (nonatomic, assign) BOOL playerExpanded;
 @property (nonatomic, copy) NSString *activeSource;
@@ -409,6 +410,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)displayNativePlaybackFailure:(NSString *)stage error:(nullable NSError *)error;
 - (void)suspendLivePlaybackForReason:(NSString *)reason;
 - (void)toggleCurrentFavorite;
+- (void)playAdjacentChannel:(NSInteger)direction;
+- (void)scrollCatalogToPlayingChannel;
+- (void)retryPlaybackWithAlternateSource;
+- (MPRemoteCommandHandlerStatus)stepToNextChannelForRemoteCommand:(MPRemoteCommandEvent *)event;
+- (MPRemoteCommandHandlerStatus)stepToPreviousChannelForRemoteCommand:(MPRemoteCommandEvent *)event;
 - (void)openDiagnosticLog;
 - (void)openDiagnosticLogForIdentifier:(nullable NSString *)identifier name:(nullable NSString *)name;
 - (void)openPluginRunLogForIdentifier:(NSString *)identifier name:(NSString *)name run:(NSDictionary *)run;
@@ -456,9 +462,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.view.tintColor=HostAccent();
     NSUserDefaults *preferences=NSUserDefaults.standardUserDefaults;
     if(![preferences boolForKey:@"cctv.manualStartupLoadingMigration.v1"]){[preferences setBool:NO forKey:@"resumeLastChannel"];[preferences setBool:YES forKey:@"cctv.manualStartupLoadingMigration.v1"];}
-    id savedTab=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.lastBottomTab.v1"];
+    // 启动恢复可由设置页关闭：关闭后每次打开都从央视直播开始。
+    BOOL restoreLastTab=CCTVBoolPreference(@"cctv.restoreLastTab.v1",YES);
+    id savedTab=restoreLastTab?[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.lastBottomTab.v1"]:nil;
     if([savedTab respondsToSelector:@selector(integerValue)]&&[savedTab integerValue]>=0&&[savedTab integerValue]<=4){self.activeTab=[savedTab integerValue];self.initialTabRestorePending=self.activeTab!=0;}
     self.gridMode = [[NSUserDefaults standardUserDefaults] objectForKey:@"channelGridMode"] ? [[NSUserDefaults standardUserDefaults] boolForKey:@"channelGridMode"] : YES;
+    self.channelSortMode = [[NSUserDefaults standardUserDefaults] integerForKey:@"cctv.channelSortMode.v1"];
     id savedGridColumns=[preferences objectForKey:@"cctv.channelGridColumns.v1"];
     NSInteger gridColumns=[savedGridColumns respondsToSelector:@selector(integerValue)]?[savedGridColumns integerValue]:4;
     self.gridColumns=gridColumns==3?3:4;
@@ -552,6 +561,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     MPRemoteCommandCenter *commandCenter = MPRemoteCommandCenter.sharedCommandCenter;
     [commandCenter.playCommand removeTarget:self];
     [commandCenter.pauseCommand removeTarget:self];
+    [commandCenter.nextTrackCommand removeTarget:self];
+    [commandCenter.previousTrackCommand removeTarget:self];
     [self.packageDownloader cancel];
     [self.tvboxCatalogDownloader cancel];
     [self.nativePreloader cancel];
@@ -1119,6 +1130,23 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [NSUserDefaults.standardUserDefaults setObject:self.favorites forKey:@"favorites"];
     [self configureCatalogNavigation];[self applyFilter];
 }
+- (void)playAdjacentChannel:(NSInteger)direction {
+    // 上 / 下一个频道：在当前可见列表内循环换台（到头绕回另一端），
+    // 未选台时从第一条开始；列表为空时不操作。
+    if(!self.shownChannels.count)return;
+    NSInteger current=[self.shownChannels indexOfObjectPassingTest:^BOOL(NSDictionary *c,NSUInteger idx,BOOL *stop){return [c[@"id"] isEqualToString:self.channelID];}];
+    NSInteger next=current==NSNotFound?0:(current+direction+(NSInteger)self.shownChannels.count)%(NSInteger)self.shownChannels.count;
+    if(next<0||next>=(NSInteger)self.shownChannels.count)return;
+    [self selectChannel:self.shownChannels[next]];
+}
+- (void)scrollCatalogToPlayingChannel {
+    // 回到正在播放：把列表滚到当前频道所在行；未选台或频道不在当前列表时不操作。
+    if(!self.channelID.length)return;
+    NSIndexPath *ip=[self indexPathForChannelID:self.channelID];
+    if(!ip)return;
+    if(!self.gridMode&&self.table&&!self.table.hidden)[self.table scrollToRowAtIndexPath:ip atScrollPosition:UITableViewScrollPositionMiddle animated:YES];
+    else if(self.gridMode&&self.channelGrid&&!self.channelGrid.hidden){NSInteger gridIndex=[self.shownChannels indexOfObjectPassingTest:^BOOL(NSDictionary *c,NSUInteger idx,BOOL *stop){return [c[@"id"] isEqualToString:self.channelID];}];if(gridIndex!=NSNotFound)[self.channelGrid scrollToItemAtIndexPath:[NSIndexPath indexPathForItem:gridIndex inSection:0] atScrollPosition:UICollectionViewScrollPositionCenteredVertically animated:YES];}
+}
 - (UIMenu *)catalogMenu {
     __weak typeof(self) w=self;
     UIAction *grid=[UIAction actionWithTitle:self.gridMode?@"切换列表布局":@"切换网格布局" image:[UIImage systemImageNamed:self.gridMode?@"list.bullet":@"square.grid.2x2"] identifier:nil handler:^(UIAction *a){[w toggleCatalogLayout];}];
@@ -1126,10 +1154,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     UIAction *add=[UIAction actionWithTitle:@"添加订阅" image:[UIImage systemImageNamed:@"plus"] identifier:nil handler:^(UIAction *a){[w addSubscription];}];
     UIAction *hide=[UIAction actionWithTitle:self.playerExpanded?@"收起播放器":@"展开播放器" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){w.playerExpanded=!w.playerExpanded;[w configureCatalogNavigation];[w.view setNeedsLayout];}];
     UIAction *history=[UIAction actionWithTitle:@"最近观看" image:[UIImage systemImageNamed:@"clock"] identifier:nil handler:^(UIAction *a){[w showHistory];}];
-    UIAction *playing=[UIAction actionWithTitle:@"返回正在播放" image:[UIImage systemImageNamed:@"play.circle"] identifier:nil handler:^(UIAction *a){if(!w.channelID.length)return;[w selectBottomTab:(id)w.bottomBar.arrangedSubviews[w.currentRemoteURL.length?1:0]];w.playerExpanded=YES;[w.view setNeedsLayout];}];
+    UIAction *playing=[UIAction actionWithTitle:@"返回正在播放" image:[UIImage systemImageNamed:@"play.circle"] identifier:nil handler:^(UIAction *a){if(!w.channelID.length)return;[w selectBottomTab:(id)w.bottomBar.arrangedSubviews[w.currentRemoteURL.length?1:0]];w.playerExpanded=YES;[w.view setNeedsLayout];dispatch_async(dispatch_get_main_queue(),^{[w scrollCatalogToPlayingChannel];});}];
     UIAction *manage=[UIAction actionWithTitle:@"整理收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[w showFavoriteManager];}];
     UIAction *favorites=[UIAction actionWithTitle:self.favoritesOnly?@"显示全部频道":@"查看收藏频道" image:[UIImage systemImageNamed:@"heart.fill"] identifier:nil handler:^(UIAction *a){w.favoritesOnly=!w.favoritesOnly;[w configureCatalogNavigation];[w applyFilter];}];
-    return [UIMenu menuWithTitle:@"" children:self.subscriptionCatalog?@[grid,refresh,add,hide,playing,history,favorites,manage]:@[grid,refresh,hide,playing,history,favorites,manage]];
+    UIAction *sort=[UIAction actionWithTitle:self.channelSortMode==1?@"按默认顺序排列":@"按名称排序" image:[UIImage systemImageNamed:@"arrow.up.arrow.down"] identifier:nil handler:^(UIAction *a){w.channelSortMode=w.channelSortMode==1?0:1;[NSUserDefaults.standardUserDefaults setInteger:w.channelSortMode forKey:@"cctv.channelSortMode.v1"];[w applyFilter];}];
+    return [UIMenu menuWithTitle:@"" children:self.subscriptionCatalog?@[grid,refresh,add,hide,playing,history,favorites,manage,sort]:@[grid,refresh,hide,playing,history,favorites,manage,sort]];
 }
 - (void)showGroupMenu {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:@"按频道类型筛选当前列表" preferredStyle:UIAlertControllerStyleActionSheet];NSInteger selected=self.groupControl.selectedSegmentIndex;
@@ -2086,6 +2115,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSDictionary *builtinService=nil;for(NSDictionary *service in [ServiceStore services])if([service[@"builtin"] boolValue]){builtinService=service;break;}
     NSString *builtinID=[builtinService[@"id"] copy],*builtinName=[builtinService[@"name"] copy];
     page.onOpenLog = ^{[weakSelf openDiagnosticLogForIdentifier:builtinID name:builtinName];};
+    page.onRestart=^(void (^completion)(NSError *)){RootViewController *owner=weakSelf;if(!owner){if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:10 userInfo:@{NSLocalizedDescriptionKey:@"服务页面已关闭，重启未完成。"}]);return;}NSDictionary *current=nil;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:builtinID]){current=service;break;}if(!current){if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:1 userInfo:@{NSLocalizedDescriptionKey:@"找不到 YSP Live 服务，请从资源页重新导入。"}]);return;}[owner restartMediaService:current completion:completion];};
     page.subscriptionCountProvider=^{return weakSelf.subscriptionURLs.count;};
     [page updateRunning:[PyHost isRunningServiceIdentifier:builtinID] subscriptionCount:self.subscriptionURLs.count];
     [self.navigationController pushViewController:page animated:YES];
@@ -2101,6 +2131,11 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     page.onExportData=^{[weakSelf exportLocalConfiguration];};page.onImportData=^{[weakSelf importLocalConfiguration];};page.onOpenLog=^{[weakSelf openDiagnosticLog];};
     page.onOpenDiagnostics=^{[weakSelf.navigationController pushViewController:[[RuntimeDiagnosticsViewController alloc] initWithSessionID:nil] animated:YES];};
     page.onClearEPG=^{ [[XMLTVStore shared] clear];[weakSelf.epgCache removeAllObjects]; [weakSelf saveEPGCache]; [weakSelf.table reloadData]; };
+    page.onClearWatchHistory=^{[weakSelf.recents removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"recents"];[weakSelf applyFilter];};
+    page.onClearFavorites=^{[weakSelf.favorites removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"favorites"];[weakSelf configureCatalogNavigation];[weakSelf applyFilter];};
+    page.onOpenTab=^(NSInteger tab){if(tab<0||tab>=weakSelf.bottomBar.arrangedSubviews.count)return;[weakSelf selectBottomTab:(UIButton *)weakSelf.bottomBar.arrangedSubviews[tab]];};
+    page.onOpenServices=^{[weakSelf openServicesPage];};
+    page.onIntegerPreferenceChanged=^(NSString *key, NSInteger value){if([key isEqualToString:@"cctv.channelGridColumns.v1"]){weakSelf.gridColumns=value==3?3:4;[weakSelf configureCatalogNavigation];}};
     page.onPreferenceChanged=^(NSString *key, BOOL value){
         if([key isEqualToString:HostDarkThemePreferenceKey]||[key isEqualToString:HostThemeModePreferenceKey]){UIWindow *window=weakSelf.view.window;window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostStyleNavigation(weakSelf.navigationController);HostRefreshAppearanceLayers(window);});}
         if ([key isEqualToString:@"runtimeDiagnosticsEnabled"]) [RuntimeDiagnostics.shared setEnabled:value];
@@ -2108,6 +2143,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         if ([key isEqualToString:@"preloadNativeChannel"] && !value) [weakSelf.nativePreloader cancel];
         if ([key isEqualToString:@"allowBackgroundAudio"]) [weakSelf activateAudioSession];
         if ([key isEqualToString:@"autoLoadEPG"]) { [weakSelf.epgTimer invalidate]; weakSelf.epgTimer=nil; weakSelf.epgRefreshDesired=value;if(value) [weakSelf restartEPGTimer]; else weakSelf.infoLabel.text=@"节目单自动获取已关闭"; }
+        if ([key isEqualToString:@"channelGridMode"]) { weakSelf.gridMode=value; [weakSelf configureCatalogNavigation]; }
     };
     return page;
 }
@@ -2547,12 +2583,25 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     MPRemoteCommandCenter *c = MPRemoteCommandCenter.sharedCommandCenter;
     [c.playCommand removeTarget:self];
     [c.pauseCommand removeTarget:self];
+    [c.nextTrackCommand removeTarget:self];
+    [c.previousTrackCommand removeTarget:self];
     [c.playCommand addTarget:self action:@selector(togglePlayPauseForRemoteCommand:)];
     [c.pauseCommand addTarget:self action:@selector(togglePlayPauseForRemoteCommand:)];
+    [c.nextTrackCommand addTarget:self action:@selector(stepToNextChannelForRemoteCommand:)];
+    [c.previousTrackCommand addTarget:self action:@selector(stepToPreviousChannelForRemoteCommand:)];
 }
 
 - (MPRemoteCommandHandlerStatus)togglePlayPauseForRemoteCommand:(MPRemoteCommandEvent *)event {
     [self togglePlayPause];
+    return MPRemoteCommandHandlerStatusSuccess;
+}
+- (MPRemoteCommandHandlerStatus)stepToNextChannelForRemoteCommand:(MPRemoteCommandEvent *)event {
+    // 锁屏 / 耳机 / 车载的下一首即下一个频道；与播放暂停用同一签名要求。
+    [self playAdjacentChannel:1];
+    return MPRemoteCommandHandlerStatusSuccess;
+}
+- (MPRemoteCommandHandlerStatus)stepToPreviousChannelForRemoteCommand:(MPRemoteCommandEvent *)event {
+    [self playAdjacentChannel:-1];
     return MPRemoteCommandHandlerStatusSuccess;
 }
 
@@ -2663,6 +2712,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         NSNumber *left=ranks[a[@"id"]?:@""],*right=ranks[b[@"id"]?:@""];
         if(left && right)return [left compare:right];
         if(left || right)return left?NSOrderedAscending:NSOrderedDescending;
+        // 按名称排序：收藏仍置顶（按收藏顺序），其余按名称排序；默认模式保持订阅原始顺序。
+        if(self.channelSortMode==1){NSString *an=[(a[@"name"]?:@"") description],*bn=[(b[@"name"]?:@"") description];return [an localizedCaseInsensitiveCompare:bn];}
         return NSOrderedSame;
     }];
     self.shownChannels = sorted;
@@ -3574,13 +3625,27 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     }
 }
 
+- (void)retryPlaybackWithAlternateSource {
+    // 失败后换源重试：订阅频道复用已有的备用源回退（未试过的同名源，最多 4 条），
+    // 原生频道循环到下一条自选线路（绕回 SDK 自动）；无可换的就按原线路重试。
+    if(self.remotePlaybackFailed&&self.currentRemoteURL.length){self.remotePlaybackWanted=YES;[self tryAlternateSource];return;}
+    NSDictionary *channel=[self channelWithID:self.channelID];
+    if(!channel&&self.channelID.length)channel=@{@"id":self.channelID,@"name":self.channelName?:self.channelID};
+    if(!channel)return;
+    NSArray *routes=[channel[@"routes"] isKindOfClass:NSArray.class]?channel[@"routes"]:@[];
+    if(!routes.count){self.selectionRequestedAt=CACurrentMediaTime();[self playChannel:channel route:self.requestedNativeRoute];return;}
+    NSInteger current=[routes indexOfObjectPassingTest:^BOOL(NSDictionary *r,NSUInteger idx,BOOL *stop){return [r isEqual:self.requestedNativeRoute];}];
+    NSDictionary *next=current==NSNotFound?routes.firstObject:(current+1<(NSInteger)routes.count?routes[current+1]:nil);
+    [self log:@"换线路重试：%@ -> %@",self.routeName?:@"自动",next?@"自选线路":@"SDK 自动"];
+    self.selectionRequestedAt=CACurrentMediaTime();[self playChannel:channel route:next];
+}
 - (void)displayNativePlaybackFailure:(NSString *)stage error:(NSError *)error {
     NSString *player=self.avPlayer?@"AVPlayer":(self.cicadaPlayer?@"CicadaPlayer":@"CNPlayerSDK");
     [RuntimeDiagnostics.shared recordEvent:@"playback_failed" category:@"playback" fields:@{@"player":player, @"stage":stage?:@"unknown", @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@"", @"playback_generation":@(self.playbackGeneration), @"correlation_id":self.currentPlaybackTraceID?:@"", @"route_type":self.directNativeRouteActive?@"user_selected":@"sdk_auto"}];
     self.nativePlaybackFailed=YES;self.nativeRetryPending=NO;[self.watchdog invalidate];self.watchdog=nil;[self.nativeStartupTuner restore];[self endPlaybackPriority];[self.spinner stopAnimating];
     NSString *channel=self.channelName.length?self.channelName:@"频道";
     self.titleLabel.text=error.code?[NSString stringWithFormat:@"%@ · %@ (%ld)",channel,stage,(long)error.code]:[NSString stringWithFormat:@"%@ · %@",channel,stage];
-    self.titleLabel.hidden=NO;NSString *failureDetail=error.localizedDescription.length?[HostLogRedactor redactText:error.localizedDescription]:nil;self.infoLabel.text=failureDetail?[NSString stringWithFormat:@"%@ · 点按“重试”或重新选择频道",failureDetail]:@"点按“重试”或重新选择频道";self.infoLabel.hidden=NO;
+    self.titleLabel.hidden=NO;NSString *failureDetail=error.localizedDescription.length?[HostLogRedactor redactText:error.localizedDescription]:nil;self.infoLabel.text=failureDetail?[NSString stringWithFormat:@"%@ · 点按“重试”再次播放，或点“线路”换源后重试",failureDetail]:@"点按“重试”再次播放，或点“线路”换源后重试";self.infoLabel.hidden=NO;self.controlBar.hidden=NO;
     [self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;
 }
 
@@ -3669,6 +3734,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)showMorePlaybackActions {
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:self.channelName ?: @"播放操作" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     [sheet addAction:[UIAlertAction actionWithTitle:self.fullscreen?@"退出全屏":@"全屏" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self toggleFullscreen]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"上一个频道" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self playAdjacentChannel:-1];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"下一个频道" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self playAdjacentChannel:1];}]];
+    if(self.nativePlaybackFailed||self.remotePlaybackFailed)[sheet addAction:[UIAlertAction actionWithTitle:@"换线路 / 换源重试" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self retryPlaybackWithAlternateSource];}]];
     if(self.currentPlayer && !self.avPlayer){
         [sheet addAction:[UIAlertAction actionWithTitle:@"时移 / 回看" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self showNativeTimeshiftActions];}]];
         if(self.nativeTimeShiftActive)[sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self returnToNativeLive];}]];
@@ -3753,6 +3821,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)showFavoriteManager {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"整理收藏" message:self.favorites.count?@"点选频道可移到收藏首位；频道列表左滑可取消收藏。":@"还没有收藏频道，长按频道即可收藏。" preferredStyle:UIAlertControllerStyleActionSheet];
     for(NSString *cid in self.favorites){NSDictionary *ch=[self channelWithID:cid];NSString *title=([ch[@"name"] isKindOfClass:NSString.class]&&[ch[@"name"] length])?ch[@"name"]:cid;[a addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self.favorites removeObject:cid];[self.favorites insertObject:cid atIndex:0];[NSUserDefaults.standardUserDefaults setObject:self.favorites forKey:@"favorites"];[self applyFilter];}]];}
+    if(self.favorites.count)[a addAction:[UIAlertAction actionWithTitle:@"清空收藏" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){[self.favorites removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"favorites"];[self configureCatalogNavigation];[self applyFilter];}]];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.sourceView=self.bottomBar;a.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:a animated:YES completion:nil];
 }
 - (void)cacheXMLRows:(NSArray *)rows channel:(NSString *)cid {

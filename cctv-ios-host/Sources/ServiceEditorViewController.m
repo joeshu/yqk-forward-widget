@@ -73,6 +73,7 @@
 - (BOOL)customCodeMatchesSavedVersion;
 - (BOOL)writeCodeForService:(NSDictionary *)service;
 - (void)applyPortChange:(NSDictionary *)service;
+- (void)applySaveForService:(NSDictionary *)service;
 - (void)persistService:(NSDictionary *)service;
 - (void)finishSavingService:(NSDictionary *)service;
 - (void)dismissKeyboard;
@@ -463,9 +464,34 @@
         NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy];manifest[@"options"]=options;service[@"manifest"]=manifest;
     }
     [ServiceStore associateLegacyLoopbackSubscriptionsForService:self.service];
+    // 端口冲突只在启动时才报错：保存时先提示，避免悄悄造出一个
+    // 启动即失败的端口冲突（对方即使已停止，同时运行仍会冲突）。
+    NSDictionary *conflictingService=nil;
+    for(NSDictionary *other in [ServiceStore services])if(![other[@"id"] isEqual:self.identifier]&&[other[@"port"] integerValue]==port){conflictingService=other;break;}
+    if(conflictingService){
+        BOOL conflictingRunning=[PyHost isManagedServiceIdentifier:conflictingService[@"id"]];
+        UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"端口已被占用" message:[NSString stringWithFormat:@"端口 %ld 已被“%@”使用（%@）。同时运行会冲突；只保留一个运行中的服务才能正常监听该端口。",(long)port,conflictingService[@"name"]?:conflictingService[@"id"],conflictingRunning?@"当前运行中":@"当前已停止"] preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+        __weak typeof(self) weakSelf=self;
+        [alert addAction:[UIAlertAction actionWithTitle:@"仍要保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[weakSelf applySaveForService:service];}]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    [self applySaveForService:service];
+}
+- (void)applySaveForService:(NSDictionary *)service {
+    NSInteger port=[service[@"port"] integerValue];
     if([PyHost isManagedServiceIdentifier:self.identifier]){
         NSInteger oldPort=[self.service[@"port"] integerValue];
-        if(oldPort==port){[self message:@"此服务仍在运行。停止服务后才能保存其他配置。"];return;}
+        if(oldPort==port){
+            // 只改了名称：不需要重启，直接保存名称并返回；代码无未保存
+            // 修改时才允许，改了代码仍须先停服务。
+            NSMutableDictionary *candidate=[service mutableCopy];[candidate removeObjectForKey:@"name"];[candidate removeObjectForKey:@"updated"];
+            NSMutableDictionary *current=[self.service mutableCopy];[current removeObjectForKey:@"name"];[current removeObjectForKey:@"updated"];
+            for(NSString *key in @[@"url",@"arguments",@"playlistPath",@"playlistPathSource"]){if([candidate[key] isKindOfClass:NSString.class]&&![candidate[key] length])[candidate removeObjectForKey:key];if([current[key] isKindOfClass:NSString.class]&&![current[key] length])[current removeObjectForKey:key];}
+            if([candidate isEqualToDictionary:current]&&[self customCodeMatchesSavedVersion]){[self persistService:service];return;}
+            [self message:@"此服务仍在运行。停止服务后才能保存其他配置。"];return;
+        }
         if(!self.onApplyService){[self message:@"端口尚未保存。请先停止服务，再保存新端口并重新启动。"] ;return;}
         if(![self customCodeMatchesSavedVersion]){[self message:@"当前脚本也有未保存修改。运行中的服务不能同时改代码和端口；请先停止服务后再保存。"];return;}
         UIAlertController *confirmation=[UIAlertController alertControllerWithTitle:@"应用新端口？"
