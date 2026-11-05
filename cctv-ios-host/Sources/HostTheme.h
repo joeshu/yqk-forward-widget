@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "HostGlassBackdropView.h"
+#import "HostThemePalette.h"
 
 static NSString * const HostDarkThemePreferenceKey = @"hostDarkTheme";
 static NSString * const HostThemeModePreferenceKey = @"hostThemeMode";
@@ -43,60 +44,63 @@ static inline UIUserInterfaceStyle HostSelectedInterfaceStyle(void) {
 
 static inline UIColor *HostBackground(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.051 green:0.055 blue:0.075 alpha:1]:[UIColor colorWithRed:0.948 green:0.954 blue:0.974 alpha:1];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].background;}];});return color;
 }
 static inline UIColor *HostCard(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.082 green:0.090 blue:0.125 alpha:1]:[UIColor colorWithRed:0.990 green:0.991 blue:0.998 alpha:1];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].card;}];});return color;
 }
 static inline UIColor *HostRaisedSurface(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.110 green:0.122 blue:0.165 alpha:1]:[UIColor colorWithRed:0.918 green:0.926 blue:0.950 alpha:1];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].raisedSurface;}];});return color;
 }
 static inline UIColor *HostText(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?UIColor.whiteColor:[UIColor colorWithWhite:0.075 alpha:1];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].text;}];});return color;
 }
 static inline UIColor *HostSecondaryText(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.62 green:0.65 blue:0.72 alpha:1]:[UIColor colorWithRed:0.31 green:0.33 blue:0.40 alpha:1];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].secondaryText;}];});return color;
 }
 static inline UIColor *HostAccent(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:1 green:0.141 blue:0.259 alpha:1]:[UIColor colorWithRed:0.80 green:0.035 blue:0.16 alpha:1];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].accent;}];});return color;
 }
-static inline UIColor *HostOnAccent(void) { return UIColor.whiteColor; }
+static inline UIColor *HostOnAccent(void) {
+    static UIColor *color;static dispatch_once_t once;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].onAccent;}];});return color;
+}
 static inline UIColor *HostMutedText(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.62 green:0.65 blue:0.72 alpha:1]:[UIColor colorWithRed:0.35 green:0.37 blue:0.43 alpha:1];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].mutedText;}];});return color;
 }
 static inline UIColor *HostGlassTint(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.085 green:0.092 blue:0.125 alpha:0.91]:[UIColor colorWithWhite:1 alpha:0.92];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].glassTint;}];});return color;
 }
 static inline UIColor *HostBorder(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.07]:[UIColor colorWithWhite:0 alpha:0.08];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].border;}];});return color;
 }
 static inline UIColor *HostSeparator(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.11]:[UIColor colorWithWhite:0 alpha:0.10];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].separator;}];});return color;
 }
 static inline UIColor *HostNeutralSurface(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.13 green:0.14 blue:0.19 alpha:1]:[UIColor colorWithRed:0.91 green:0.92 blue:0.94 alpha:1];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].neutralSurface;}];});return color;
 }
 static inline UIColor *HostSelectedSurface(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:1 green:0.141 blue:0.259 alpha:0.18]:[UIColor colorWithRed:0.80 green:0.035 blue:0.16 alpha:0.12];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].selectedSurface;}];});return color;
 }
 static inline UIColor *HostHighlightedSurface(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithWhite:1 alpha:0.2]:[UIColor colorWithWhite:0 alpha:0.06];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].highlightedSurface;}];});return color;
 }
 static inline UIColor *HostSuccessSurface(void) {
     static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.07 green:0.18 blue:0.13 alpha:1]:[UIColor colorWithRed:0.88 green:0.96 blue:0.91 alpha:1];}];});return color;
+    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].successSurface;}];});return color;
 }
 static inline UIBlurEffect *HostGlassBlur(void) { return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]; }
 static inline void HostSetLayerBorderColor(UIView *view, UIColor *color);
@@ -214,4 +218,25 @@ static inline void HostStyleNavigation(UINavigationController *nav) {
     nav.navigationBar.translucent = YES;
     nav.navigationBar.prefersLargeTitles = YES;
     nav.navigationBar.tintColor = HostAccent();
+}
+
+// 把当前主题与模式应用到窗口。按 HostSelectedInterfaceStyle() 设定
+// overrideUserInterfaceStyle；同深浅换主题时（深色→深色），动态颜色本身不会
+// 重新解析，因此先把 override 切到相反深浅并用 layoutIfNeeded 冲掉中间态，
+// 再切回目标深浅——两次切换在同一 runloop 内完成，不产生可见闪烁。
+// 调用方随后仍需重刷导航栏与图层边框（HostStyleNavigation /
+// HostRefreshAppearanceLayers），并重载可见的列表（cellForRow 会重新取色）。
+static inline void HostApplyThemeToWindow(UIWindow *window) {
+    if(!window)return;
+    UIUserInterfaceStyle target=HostSelectedInterfaceStyle();
+    if(window.overrideUserInterfaceStyle==target&&target!=UIUserInterfaceStyleUnspecified){
+        [CATransaction begin];[CATransaction setDisableActions:YES];
+        window.overrideUserInterfaceStyle=(target==UIUserInterfaceStyleDark)?UIUserInterfaceStyleLight:UIUserInterfaceStyleDark;
+        [window layoutIfNeeded];
+        window.overrideUserInterfaceStyle=target;
+        [CATransaction commit];
+    }else{
+        window.overrideUserInterfaceStyle=target;
+    }
+    [window layoutIfNeeded];
 }

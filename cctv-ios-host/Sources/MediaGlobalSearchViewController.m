@@ -124,6 +124,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     self.keyword = @"";self.selectedSourceSection=-1;self.filterOffsets=[NSMutableDictionary dictionary];
     NSArray *history=[NSUserDefaults.standardUserDefaults arrayForKey:@"media.globalSearchHistory.v1"];
     self.searchHistory=[history isKindOfClass:NSArray.class]?history:@[];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(searchHistoryCleared:) name:@"MediaGlobalSearchHistoryDidChange" object:nil];
 
     UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, MAX(1, self.tableView.bounds.size.width), 104)];
     header.backgroundColor = HostBackground();
@@ -381,6 +382,11 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     NSMutableArray *values=[self.searchHistory mutableCopy]?:[NSMutableArray array];[values removeObject:keyword];[values insertObject:keyword atIndex:0];if(values.count>20)[values removeObjectsInRange:NSMakeRange(20,values.count-20)];self.searchHistory=values.copy;[NSUserDefaults.standardUserDefaults setObject:self.searchHistory forKey:@"media.globalSearchHistory.v1"];
 }
 
+- (void)searchHistoryCleared:(NSNotification *)notification {
+    // 设置页清除搜索历史时同步清掉本页内存里的历史，否则菜单里仍显示旧关键词。
+    if([notification.userInfo[@"enabled"] boolValue]&&![notification.userInfo[@"cleared"] boolValue])return;
+    self.searchHistory=@[];
+}
 - (void)showSearchHistory {
     BOOL enabled=[NSUserDefaults.standardUserDefaults boolForKey:@"media.globalSearchHistoryEnabled.v1"];
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"搜索历史" message:enabled?(self.searchHistory.count?@"选择关键词重新搜索。历史只保存在本机，可随时清除。":@"还没有保存搜索词。"):@"搜索历史默认关闭；开启后最多保留 20 条关键词，仅保存在本机。" preferredStyle:UIAlertControllerStyleActionSheet];
@@ -823,5 +829,5 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 }
 
 - (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar { [self submitSearch]; }
-- (void)dealloc { [self cancelJobsAndAdvanceGeneration]; }
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; [self cancelJobsAndAdvanceGeneration]; }
 @end

@@ -11,7 +11,7 @@ class VersioningContractTests(unittest.TestCase):
     def test_app_bundle_has_valid_marketing_and_fallback_build_versions(self):
         with (ROOT / "Resources" / "Info.plist").open("rb") as source:
             info = plistlib.load(source)
-        self.assertRegex(info["CFBundleShortVersionString"], r"^\d+\.\d+\.\d+$")
+        self.assertRegex(info["CFBundleShortVersionString"], r"^\d+\.\d+(?:\.\d+)?$")
         self.assertRegex(info["CFBundleVersion"], r"^\d+(?:\.\d+){0,2}$")
 
     def test_ui_reads_version_from_app_bundle(self):

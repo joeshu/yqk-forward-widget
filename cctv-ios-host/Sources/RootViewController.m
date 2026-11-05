@@ -581,6 +581,7 @@ configureCatalogNavigation;
     self.view.backgroundColor = HostBackground();
     self.title = @"CCTV";
     self.navigationController.delegate=self;
+    [self applyFontSizeOverride];
     HostStyleNavigation(self.navigationController);
     self.view.tintColor=HostAccent();
     NSUserDefaults *preferences=NSUserDefaults.standardUserDefaults;
@@ -708,6 +709,7 @@ configureCatalogNavigation;
     // restores the correct hidden state if an interactive pop is cancelled.
     if(viewController!=self&&navigationController.navigationBarHidden)[navigationController setNavigationBarHidden:NO animated:animated];
     if(viewController==self)return;
+    [navigationController setOverrideTraitCollection:[self fontSizeOverrideTraitCollection] forChildViewController:viewController];
     if(self.activeTab<2)[self suspendLivePlaybackForReason:@"left_live_navigation_page"];
 }
 
@@ -2401,6 +2403,7 @@ configureCatalogNavigation;
         HostRefreshAppearanceLayers(self.view.window);
     }
     if(previousTraitCollection && ![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]){
+        [self applyFontSizeOverride];
         [self.channelGrid.collectionViewLayout invalidateLayout];
         [self.channelGrid reloadData];
         [self.table reloadData];
@@ -2516,6 +2519,23 @@ configureCatalogNavigation;
     [self.navigationController pushViewController:[self makeSettingsPage] animated:YES];
 }
 
+// 应用内字号：以系统字号为基准上调 0/1/2 档。覆盖写在 RootViewController 上后，
+// 五个 Tab 子页面自动继承；被 push 的页面由 willShowViewController 逐个覆盖。
+- (UITraitCollection *)fontSizeOverrideTraitCollection {
+    NSInteger offset=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.appFontSize.v1"]?[[NSUserDefaults standardUserDefaults] integerForKey:@"cctv.appFontSize.v1"]:0;
+    if(offset<=0)return nil;
+    NSArray<NSString *> *ordered=@[UIContentSizeCategoryExtraSmall,UIContentSizeCategorySmall,UIContentSizeCategoryMedium,UIContentSizeCategoryLarge,UIContentSizeCategoryExtraLarge,UIContentSizeCategoryExtraExtraLarge,UIContentSizeCategoryExtraExtraExtraLarge];
+    NSInteger index=[ordered indexOfObject:self.traitCollection.preferredContentSizeCategory];
+    if(index==NSNotFound)return nil;
+    NSInteger stepped=MIN((NSInteger)ordered.count-1,index+offset);
+    return [UITraitCollection traitCollectionWithPreferredContentSizeCategory:ordered[stepped]];
+}
+- (void)applyFontSizeOverride {
+    UITraitCollection *override=[self fontSizeOverrideTraitCollection];
+    if(self.navigationController)[self.navigationController setOverrideTraitCollection:override forChildViewController:self];
+    UIViewController *top=self.navigationController.topViewController;
+    if(top&&top!=self)[self.navigationController setOverrideTraitCollection:override forChildViewController:top];
+}
 - (SettingsViewController *)makeSettingsPage {
     SettingsViewController *page=[SettingsViewController new];
     __weak typeof(self) weakSelf=self;
@@ -2527,9 +2547,9 @@ configureCatalogNavigation;
     page.onClearFavorites=^{[weakSelf.favorites removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"favorites"];[weakSelf configureCatalogNavigation];[weakSelf applyFilter];};
     page.onOpenTab=^(NSInteger tab){if(tab<0||tab>=weakSelf.bottomBar.arrangedSubviews.count)return;[weakSelf selectBottomTab:(UIButton *)weakSelf.bottomBar.arrangedSubviews[tab]];};
     page.onOpenServices=^{[weakSelf openServicesPage];};
-    page.onIntegerPreferenceChanged=^(NSString *key, NSInteger value){if([key isEqualToString:@"cctv.channelGridColumns.v1"]){weakSelf.gridColumns=value==3?3:4;[weakSelf configureCatalogNavigation];}};
+    page.onIntegerPreferenceChanged=^(NSString *key, NSInteger value){if([key isEqualToString:@"cctv.channelGridColumns.v1"]){weakSelf.gridColumns=value==3?3:4;[weakSelf configureCatalogNavigation];}if([key isEqualToString:@"cctv.appFontSize.v1"]){[weakSelf applyFontSizeOverride];}};
     page.onPreferenceChanged=^(NSString *key, BOOL value){
-        if([key isEqualToString:HostDarkThemePreferenceKey]||[key isEqualToString:HostThemeModePreferenceKey]){UIWindow *window=weakSelf.view.window;window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostStyleNavigation(weakSelf.navigationController);HostRefreshAppearanceLayers(window);});}
+        if([key isEqualToString:HostDarkThemePreferenceKey]||[key isEqualToString:HostThemeModePreferenceKey]||[key isEqualToString:HostThemePaletteIdentifierPreferenceKey]){UIWindow *window=weakSelf.view.window;HostApplyThemeToWindow(window);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostStyleNavigation(weakSelf.navigationController);HostRefreshAppearanceLayers(window);});}
         if ([key isEqualToString:@"runtimeDiagnosticsEnabled"]) [RuntimeDiagnostics.shared setEnabled:value];
         if ([key isEqualToString:@"nativeSDKVerboseLogs"]) [weakSelf configureSDKLogging];
         if ([key isEqualToString:@"preloadNativeChannel"] && !value) [weakSelf.nativePreloader cancel];
