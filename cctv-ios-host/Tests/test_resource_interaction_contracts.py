@@ -24,6 +24,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         cls.services = (ROOT / 'Sources/ServicesViewController.m').read_text()
         cls.package_downloader = (ROOT / 'Sources/MediaPackageDownloader.m').read_text()
         cls.js_runtime = (ROOT / 'Sources/JSPluginRuntime.m').read_text()
+        cls.importer = (ROOT / 'Sources/MediaPackageImporter.m').read_text()
+        cls.tvbox = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
 
     def test_player_exit_cancels_work_after_confirmed_transition(self):
         will = self.playback.split('- (void)viewWillDisappear:', 1)[1].split('- (void)viewDidDisappear:', 1)[0]
@@ -65,6 +67,21 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertNotIn('[weakSelf importMediaPackage]', action)
         self.assertIn('导入资源 · URL / 文件 / 文件夹', self.services)
         self.assertIn('self.onImportResource();', self.services)
+
+    def test_live_only_service_without_capabilities_is_not_both(self):
+        # 无能力元数据且有直播证据的服务不再被默认成 vod，避免纯直播被标为 both。
+        self.assertIn('resourceKindForService:service subscriptionURL:subscriptionURL', self.root)
+        self.assertIn('+ (NSString *)resourceKindForService:', self.service_store)
+        self.assertIn('if(!capabilities.count && live)vod=NO;', self.service_store)
+
+    def test_default_media_protocol_requires_a_media_api_method(self):
+        # 默认兜底 cctvhost.media/1 须入口实现至少一个媒体方法，否则拒绝导入。
+        self.assertIn('MediaAPIMethodDeclaredInSource', self.importer)
+        self.assertIn('protocolDefaulted', self.importer)
+        self.assertIn('未实现 cctvhost.media/1 接口', self.importer)
+
+    def test_tvbox_type_zero_spider_gets_its_own_unsupported_reason(self):
+        self.assertIn('TVBox type 0 为 JS 爬虫', self.tvbox)
 
     def test_resource_return_layout_reuses_filters_and_measures_variable_rows(self):
         self.assertIn('@interface CCTVResourceProfileCell : UITableViewCell', self.catalog)

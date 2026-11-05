@@ -101,6 +101,13 @@ static BOOL ServiceValidPlaylistPath(id value){
     NSArray *capabilities=[service[@"capabilities"] isKindOfClass:NSArray.class]?service[@"capabilities"]:([service[@"manifest"][@"capabilities"] isKindOfClass:NSArray.class]?service[@"manifest"][@"capabilities"]:@[]);
     return [capabilities containsObject:@"live"];
 }
++ (NSString *)resourceKindForService:(NSDictionary *)service subscriptionURL:(NSString *)subscriptionURL {
+    BOOL live=[self isLiveMediaService:service]||subscriptionURL.length>0;
+    BOOL vod=[self isVODMediaService:service];
+    NSArray *capabilities=[service[@"capabilities"] isKindOfClass:NSArray.class]?service[@"capabilities"]:([service[@"manifest"][@"capabilities"] isKindOfClass:NSArray.class]?service[@"manifest"][@"capabilities"]:@[]);
+    if(!capabilities.count && live)vod=NO;
+    return live&&vod?@"both":(live?@"live":(vod?@"vod":@"unknown"));
+}
 + (NSString *)inferredPlaylistPathInCode:(NSString *)source {
     if(![source isKindOfClass:NSString.class]||source.length>2*1024*1024)return nil;
     // Only infer a URL when it appears in an actual route declaration or a
