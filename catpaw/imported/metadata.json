@@ -10,7 +10,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_douer_tgfilebot",
@@ -23,7 +24,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_douer_douban",
@@ -36,7 +38,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：分类有内容但所选条目无分集，无法播放；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_douer_doubi",
@@ -49,7 +52,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：分类有内容但所选条目无分集，无法播放；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_douer_xingya",
@@ -62,7 +66,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_douer_live2vod",
@@ -75,7 +80,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_douer_jianpian",
@@ -114,7 +120,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_douer_hanxiaoquan",
@@ -127,7 +134,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_douer_girigiri",
@@ -140,7 +148,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_douer_kafei",
@@ -153,7 +162,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_yswag_douban",
@@ -166,7 +176,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_yswag_livesource",
@@ -179,7 +190,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_yswag_hanjutv",
@@ -218,7 +230,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_yswag_gugu",
@@ -231,7 +244,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_yswag_dmghg",
@@ -270,7 +284,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：分类有内容但所选条目无分集，无法播放；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_yswag_jinpai",
@@ -296,7 +311,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_lmentor_hongguo",
@@ -309,7 +325,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_lmentor_douban",
@@ -322,7 +339,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_lmentor_bili_all",
@@ -335,7 +353,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：首页接口上游响应超时，无法进入该源；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_lmentor_bili_official",
@@ -348,7 +367,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：首页接口上游响应超时，无法进入该源；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_lmentor_88kanqiu",
@@ -361,7 +381,8 @@
     "searchable": 0,
     "quickSearch": 0,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_lmentor_live",
@@ -374,7 +395,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_lmentor_jinpai",
@@ -387,7 +409,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_lmentor_jp",
@@ -400,7 +423,8 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "import_lmentor_guazi",
@@ -413,6 +437,7 @@
     "searchable": 1,
     "quickSearch": 1,
     "filterable": 1,
-    "enabled": true
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   }
 ]

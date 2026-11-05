@@ -379,7 +379,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('refreshHomeContentFromResourcePage', browser_header)
         self.assertIn('[page returnToHomeFromNavigation]', self.root)
         media_tab = self.root[self.root.index('- (void)openMediaTab {'):
-                              self.root.index('- (void)playMediaResult:', self.root.index('- (void)openMediaTab {'))]
+                              self.root.index('- (void)playerViewController:', self.root.index('- (void)openMediaTab {'))]
         self.assertIn('page.deferAutomaticLoading=YES', media_tab)
         self.assertNotIn('[page loadHomeOnDemand]', media_tab)
 
@@ -895,7 +895,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('网页播放已关闭 · 可尝试原生播放', appeared)
         self.assertIn('[self setRetryAvailable:YES]', appeared)
         self.assertNotIn('self.awaitingWebPlaybackReturn=NO', appeared)
-        self.assertIn('candidate[@"playbackMethodOverride"]=@"avplayer"', fallback)
+        # playbackMethodOverride 是死数据（全仓库无读取处），tryNativePlayback
+        # 已删掉它，路由改按格式决定，不再把 FLV 推回注定失败的 AVPlayer。
+        self.assertNotIn('playbackMethodOverride', fallback)
         self.assertIn('web.onTryNativePlayback=^{[weakSelf tryNativePlayback];}', self.playback)
         self.assertIn('@"原生播放"', webview)
         self.assertIn('installCookieHeader:cookie forURL:configurationURL', webview)

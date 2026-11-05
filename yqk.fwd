@@ -9,7 +9,9 @@
       "requiredVersion": "0.0.1",
       "version": "0.9.1",
       "author": "joeshu",
-      "url": "https://joeshu.github.io/yqk-forward-widget/yqk-0.9.1.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/yqk-0.9.1.js",
+      "enabled": false,
+      "disabledReason": "2026-11-05 探测：播放阶段上游响应超时，未拿到播放地址；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
     },
     {
       "id": "joeshu.souju",
@@ -18,7 +20,9 @@
       "requiredVersion": "0.0.1",
       "version": "0.6.1",
       "author": "joeshu",
-      "url": "https://joeshu.github.io/yqk-forward-widget/souju-0.6.1.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/souju-0.6.1.js",
+      "enabled": false,
+      "disabledReason": "2026-11-05 探测：播放阶段上游响应超时，未拿到播放地址；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
     },
     {
       "id": "joeshu.kanju",
@@ -36,7 +40,9 @@
       "requiredVersion": "0.0.1",
       "version": "0.1.1",
       "author": "joeshu",
-      "url": "https://joeshu.github.io/yqk-forward-widget/zip0-0.1.1.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/zip0-0.1.1.js",
+      "enabled": false,
+      "disabledReason": "2026-11-05 探测：详情阶段上游响应超时，未拿到分集；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
     },
     {
       "id": "joeshu.4kvm",
@@ -45,7 +51,9 @@
       "author": "joeshu",
       "version": "0.1.2",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/4kvm-0.1.2.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/4kvm-0.1.2.js",
+      "enabled": false,
+      "disabledReason": "2026-11-05 探测：播放阶段原站 HTTP 502，未拿到播放地址；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
     },
     {
       "id": "joeshu.auete",
@@ -54,7 +62,9 @@
       "author": "joeshu",
       "version": "0.1.1",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/auete-0.1.1.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/auete-0.1.1.js",
+      "enabled": false,
+      "disabledReason": "2026-11-05 探测：播放阶段上游响应超时，未拿到播放地址；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
     },
     {
       "id": "joeshu.anime1",
@@ -63,7 +73,9 @@
       "author": "joeshu",
       "version": "0.1.2",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/anime1-0.1.2.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/anime1-0.1.2.js",
+      "enabled": false,
+      "disabledReason": "2026-11-05 探测：详情阶段原站 HTTP 502，未拿到分集；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
     },
     {
       "id": "joeshu.eboyang",
@@ -72,7 +84,9 @@
       "author": "joeshu",
       "version": "0.1.2",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/eboyang-0.1.2.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/eboyang-0.1.2.js",
+      "enabled": false,
+      "disabledReason": "2026-11-05 探测：播放阶段上游响应超时，未拿到播放地址；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
     },
     {
       "id": "joeshu.gold",
@@ -81,7 +95,9 @@
       "author": "joeshu",
       "version": "0.1.3",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/gold-0.1.3.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/gold-0.1.3.js",
+      "enabled": false,
+      "disabledReason": "2026-11-05 探测：播放阶段上游响应超时，未拿到播放地址；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
     },
     {
       "id": "joeshu.zhuiyingmiao",
@@ -90,7 +106,9 @@
       "author": "joeshu",
       "version": "0.1.3",
       "requiredVersion": "0.0.1",
-      "url": "https://joeshu.github.io/yqk-forward-widget/zhuiyingmiao-0.1.3.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/zhuiyingmiao-0.1.3.js",
+      "enabled": false,
+      "disabledReason": "2026-11-05 探测：播放阶段原站 HTTP 502，未拿到播放地址；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
     },
     {
       "id": "joeshu.ggduanju",
@@ -99,7 +117,9 @@
       "version": "0.1.0",
       "requiredVersion": "0.0.1",
       "description": "短剧/电影/电视剧/动漫 · 搜索与完整分集 · 游客直连检查",
-      "url": "https://joeshu.github.io/yqk-forward-widget/ggduanju-0.1.0.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/ggduanju-0.1.0.js",
+      "enabled": false,
+      "disabledReason": "2026-11-05 探测：播放阶段原站 HTTP 502，未拿到播放地址；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
     },
     {
       "id": "joeshu.kkys",
@@ -108,7 +128,9 @@
       "version": "0.1.1",
       "requiredVersion": "0.0.1",
       "description": "五类片库 · 搜索与真实分页 · 完整分集与全部线路",
-      "url": "https://joeshu.github.io/yqk-forward-widget/kkys-0.1.1.js"
+      "url": "https://joeshu.github.io/yqk-forward-widget/kkys-0.1.1.js",
+      "enabled": false,
+      "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
     },
     {
       "id": "joeshu.duboku",

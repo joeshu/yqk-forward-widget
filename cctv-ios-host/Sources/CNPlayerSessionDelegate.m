@@ -74,4 +74,28 @@
     [_owner authFailed:error];
 }
 
+// 时移 / 回看新增转发（手册 §4.7 版权变动、§4.9 每秒周期事件）。
+// 宿主侧的方法由集成补丁在 RootViewController 补齐；此处先判
+// respondsToSelector，补丁未合入前不崩溃，也不影响其它回调的转发。
+@interface RootViewController (CCTVTimeshiftCallbacks)
+- (void)player:(id)player programPubicChanged:(BOOL)isPublic;
+- (void)player:(id)player programPubicChanged:(BOOL)isPublic type:(NSUInteger)sourceType error:(NSError *)error;
+- (void)playerPeriodicTimeEvent:(id)player;
+@end
+
+- (void)player:(id)player programPubicChanged:(BOOL)isPublic {
+    if (![self isCurrentSession]) return;
+    if ([_owner respondsToSelector:@selector(player:programPubicChanged:)]) [_owner player:player programPubicChanged:isPublic];
+}
+
+- (void)player:(id)player programPubicChanged:(BOOL)isPublic type:(NSUInteger)sourceType error:(NSError *)error {
+    if (![self isCurrentSession]) return;
+    if ([_owner respondsToSelector:@selector(player:programPubicChanged:type:error:)]) [_owner player:player programPubicChanged:isPublic type:sourceType error:error];
+}
+
+- (void)playerPeriodicTimeEvent:(id)player {
+    if (![self isCurrentSession]) return;
+    if ([_owner respondsToSelector:@selector(playerPeriodicTimeEvent:)]) [_owner playerPeriodicTimeEvent:player];
+}
+
 @end

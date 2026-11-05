@@ -2,32 +2,44 @@
   {
     "factory": "uo0",
     "key": "douban",
-    "name": "豆瓣|首页"
+    "name": "豆瓣|首页",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "kf0",
     "key": "hanxiaoquan",
-    "name": "韩剧|秒播（网络受限待验证）"
+    "name": "韩剧|秒播（网络受限待验证）",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "Bf0",
     "key": "guazi",
-    "name": "瓜子|秒播"
+    "name": "瓜子|秒播",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "Qf0",
     "key": "wexYueYue",
-    "name": "悦悦|秒播"
+    "name": "悦悦|秒播",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "ed0",
     "key": "wencai",
-    "name": "文采|秒播"
+    "name": "文采|秒播",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "_d0",
     "key": "rebo",
-    "name": "热播|秒播"
+    "name": "热播|秒播",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "Id0",
@@ -39,7 +51,9 @@
   {
     "factory": "Wd0",
     "key": "wexfengye4k",
-    "name": "枫叶|秒播"
+    "name": "枫叶|秒播",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "Gd0",
@@ -49,7 +63,9 @@
   {
     "factory": "e20",
     "key": "bililive",
-    "name": "哔哩|直播"
+    "name": "哔哩|直播",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "a20",
@@ -59,22 +75,30 @@
   {
     "factory": "B20",
     "key": "manjuhongguo",
-    "name": "漫剧|小红"
+    "name": "漫剧|小红",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "L20",
     "key": "manjuhuolong",
-    "name": "漫剧|小龙"
+    "name": "漫剧|小龙",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "M20",
     "key": "manjuqimao",
-    "name": "漫剧|小猫"
+    "name": "漫剧|小猫",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "U20",
     "key": "manjuxifan",
-    "name": "漫剧|小喜"
+    "name": "漫剧|小喜",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "H20",
@@ -86,7 +110,9 @@
   {
     "factory": "k60",
     "key": "animehuazi",
-    "name": "花子|动漫"
+    "name": "花子|动漫",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "R60",
@@ -96,7 +122,9 @@
   {
     "factory": "B1e",
     "key": "animexifan",
-    "name": "稀饭|动漫"
+    "name": "稀饭|动漫",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "V60",
@@ -129,17 +157,23 @@
   {
     "factory": "p10",
     "key": "childrenaitutu",
-    "name": "兔兔|少儿"
+    "name": "兔兔|少儿",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "m10",
     "key": "childrenaibaobao",
-    "name": "宝宝|少儿"
+    "name": "宝宝|少儿",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "h10",
     "key": "childrenaibeiwa",
-    "name": "贝瓦|少儿"
+    "name": "贝瓦|少儿",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "A10",
@@ -200,7 +234,9 @@
   {
     "factory": "hp0",
     "key": "sportaiguazi",
-    "name": "瓜子|体育"
+    "name": "瓜子|体育",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "yp0",
@@ -210,7 +246,9 @@
   {
     "factory": "_p0",
     "key": "sportaifeiqiu",
-    "name": "飞球|体育"
+    "name": "飞球|体育",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：详情阶段原站 HTTP 502，未拿到分集；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "Ip0",
@@ -220,12 +258,16 @@
   {
     "factory": "Dp0",
     "key": "sportaikanqiu",
-    "name": "看球|体育"
+    "name": "看球|体育",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "Mp0",
     "key": "sportaiwwe",
-    "name": "WWE|体育"
+    "name": "WWE|体育",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "om0",
@@ -235,17 +277,23 @@
   {
     "factory": "Cm0",
     "key": "wexaitiantang",
-    "name": "天堂|采集"
+    "name": "天堂|采集",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "g10",
     "key": "musicailiyuan",
-    "name": "梨园|戏曲"
+    "name": "梨园|戏曲",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "factory": "v10",
     "key": "musicaitangdou",
-    "name": "糖豆|舞蹈"
+    "name": "糖豆|舞蹈",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "appv7dashixiong",
@@ -320,36 +368,50 @@
   {
     "key": "bilibili",
     "name": "哔哩|合集",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "bilixiqu",
     "name": "哔哩|戏曲",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "biliych",
     "name": "哔哩|歌曲",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "少儿教育",
     "name": "少儿|教育",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "小学课堂",
     "name": "小学|课堂",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "初中课堂",
     "name": "初中|课堂",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   },
   {
     "key": "高中教育",
     "name": "高中|课堂",
-    "factory": "dynamic-public-source"
+    "factory": "dynamic-public-source",
+    "enabled": false,
+    "disabledReason": "2026-11-05 探测：全部分类均为空，无可浏览内容，属源侧问题；先从默认展示隐藏，保留实现；上游恢复后删除 enabled/disabledReason 即可恢复。"
   }
 ]

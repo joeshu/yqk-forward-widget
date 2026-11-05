@@ -97,9 +97,12 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn("player.onPlaybackWillStart=", root_media)
         self.assertIn('recordEvent:@"playback_owner_acquired"', play_result)
 
-    def test_legacy_vod_entry_stops_live_before_creating_its_player(self):
-        body = method_body(ROOT_SOURCE, "- (void)playMediaResult:(NSDictionary *)result name:")
-        self.assertLess(body.index('suspendLivePlaybackForReason:@"vod_playback_starting"'), body.index("AVPlayer playerWithPlayerItem:item"))
+    def test_legacy_vod_entry_is_removed_and_live_owner_still_notified(self):
+        # 旧的 playMediaResult 入口已删除（无调用者）：VOD 统一走
+        # MediaPlaybackViewController.playResult:，起播前仍通过
+        # onPlaybackWillStart 通知直播方释放所有权；直播挂起辅助
+        # 方法仍记录挂起/释放事件。
+        self.assertNotIn("playMediaResult:", ROOT_SOURCE)
         self.assertIn('recordEvent:hasLivePlayback?@"live_playback_suspended":@"playback_owner_released"', method_body(ROOT_SOURCE, "- (void)suspendLivePlaybackForReason:"))
 
     def test_back_and_detail_actions_keep_visible_text_fallbacks(self):

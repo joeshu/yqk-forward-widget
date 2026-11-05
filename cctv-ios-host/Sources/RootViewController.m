@@ -35,6 +35,7 @@
 #import "NativeCDNPreference.h"
 #import "NativeChannelPreloader.h"
 #import "NativeTimeshiftSession.h"
+#import "CCTVTimeshiftController.h"
 #import "PlaybackInfoViewController.h"
 #import "LogCenterViewController.h"
 #import "PluginRunHistoryViewController.h"
@@ -279,6 +280,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, strong) NativeStartupTuner *nativeStartupTuner;
 @property (nonatomic, strong) NativeChannelPreloader *nativePreloader;
 @property(nonatomic,strong) NativeTimeshiftSession *nativeTimeshift;
+@property (nonatomic, strong) CCTVTimeshiftController *timeshiftController;
 @property(nonatomic,copy) NSString *nativeTransitionKind;
 @property(nonatomic) BOOL nativeTimeShiftActive;
 @property (nonatomic) BOOL nativePlaybackFailed;
@@ -1210,22 +1212,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if(page.onDisplayModeChanged)page.onDisplayModeChanged(page.isHomeMode);
     if(!created){if(self.userInitiatedTabSelection)[page returnToHomeFromNavigation];[page refreshSources];}
 }
-- (void)playMediaResult:(NSDictionary *)result name:(NSString *)name {
-    NSString *url=[self stableURLKey:result[@"url"]];if(!url.length){[self showServiceError:@"资源没有返回可播放媒体地址"];return;}
-    [self suspendLivePlaybackForReason:@"vod_playback_starting"];
-    self.playbackGeneration++;[self stopPlayback];[self.nativePreloader cancel];[self endPlaybackPriority];
-    self.currentRemoteURL=url;self.channelName=name;self.channelID=nil;
-    NSString *sourceURL=[self stableURLKey:result[@"originalURL"]?:result[@"url"]];
-    BOOL directMedia=MediaPlaybackResultSupportsAVPlayer(result)||MediaPlaybackResultSupportsAVPlayer(@{@"url":sourceURL?:@""});
-    [RuntimeDiagnostics.shared recordEvent:@"media_playback_handoff" category:@"playback" fields:@{@"player":([result[@"parse"] integerValue]>0&&!directMedia)?@"webview":@"avplayer", @"parsed":@([result[@"parse"] integerValue]>0)}];
-    BOOL requiresWebPlayback=[result[@"requiresWebPlayback"] boolValue]||[result[@"parse"] integerValue]>0||[result[@"jx"] integerValue]>0;if(requiresWebPlayback&&!directMedia){MediaWebViewController *page=[[MediaWebViewController alloc] initWithResult:result title:name];UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:page];UIViewController *presenter=self.navigationController.topViewController?:self;[presenter presentViewController:navigation animated:YES completion:nil];return;}
-    NSDictionary *headers=MediaPlaybackHeadersFromResult(result);NSURL *resolvedURL=[NSURL URLWithString:url];NSString *resolvedHost=resolvedURL.host.lowercaseString?:@"";BOOL localRelay=![sourceURL isEqualToString:url]&&[@[@"127.0.0.1",@"localhost",@"::1"] containsObject:resolvedHost];if(localRelay)headers=@{};
-    AVURLAsset *asset=[AVURLAsset URLAssetWithURL:resolvedURL options:headers.count?@{@"AVURLAssetHTTPHeaderFieldsKey":headers}:nil];AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];
-    AVMutableMetadataItem *title=[AVMutableMetadataItem metadataItem];title.identifier=AVMetadataCommonIdentifierTitle;title.value=name?:@"影视";title.extendedLanguageTag=@"und";item.externalMetadata=@[title];
-    self.moviePlayer=[AVPlayer playerWithPlayerItem:item];self.moviePlayer.automaticallyWaitsToMinimizeStalling=YES;
-    self.movieController=[AVPlayerViewController new];self.movieController.player=self.moviePlayer;self.movieController.delegate=self;self.movieController.allowsPictureInPicturePlayback=YES;
-    UIViewController *presenter=self.navigationController.topViewController?:self;[presenter presentViewController:self.movieController animated:YES completion:^{[self.moviePlayer play];}];
-}
 - (void)playerViewController:(AVPlayerViewController *)controller willEndFullScreenPresentationWithAnimationCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
     [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){if(controller==self.movieController && !self.moviePiPActive)[self.moviePlayer pause];}];
 }
@@ -1759,6 +1745,16 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     return self.nativeSessionDelegate;
 }
 
+- (void)rebuildTimeshiftController {
+    // 控制器与播放器一一对应：每次起播（或起播失败换实例）都重建，
+    // 旧控制器的回调随之丢弃，不串台；回调弱引用宿主，避免循环引用。
+    if(!self.currentPlayer){self.timeshiftController=nil;return;}
+    self.timeshiftController=[[CCTVTimeshiftController alloc] initWithPlayer:self.currentPlayer];
+    __weak typeof(self) weakSelf=self;
+    self.timeshiftController.onFailure=^(NSError *error){[weakSelf displayNativePlaybackFailure:@"时移 / 回看失败" error:error];};
+    self.timeshiftController.onReturnToLiveFallback=^{[weakSelf playSelectedNativeRouteOrChannel];};
+    self.timeshiftController.onProgress=^(NSTimeInterval behindLive,NSTimeInterval position){weakSelf.infoLabel.hidden=NO;weakSelf.infoLabel.text=[NSString stringWithFormat:@"回看中 · 距直播 %.0f 分钟",behindLive/60.0];};
+}
 - (void)playViaSDKURL:(NSString *)url channelID:(NSString *)cid title:(NSString *)title {
     [CNPlayerCrashGuard install];
     if(!url.length||!cid.length){[self displayNativePlaybackFailure:@"所选线路参数缺失" error:nil];return;}
@@ -1774,6 +1770,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     BOOL supported=player&&[player respondsToSelector:selector]&&signature&&signature.numberOfArguments==5&&signature.methodReturnType[0]=='B'&&strcmp([signature getArgumentTypeAtIndex:2],"@")==0&&strcmp([signature getArgumentTypeAtIndex:3],"@")==0&&strcmp([signature getArgumentTypeAtIndex:4],"@")==0;
     if(!supported){[self displayNativePlaybackFailure:@"SDK 不支持自选地址起播" error:nil];return;}
     self.currentPlayer=player;self.cicadaPlayer=nil;self.nativePlaybackFailed=NO;
+    [self rebuildTimeshiftController];
     @try{[player setValue:@YES forKey:@"autoPlay"];}@catch(NSException *exception){}
     self.nativeStartupTuner=CCTVBoolPreference(@"fastNativeStartup",YES)?[NativeStartupTuner new]:nil;
     NSMutableDictionary *options=[@{kOptTitle:title?:cid,kOptURLChannelIDForStats:cid} mutableCopy];
@@ -1816,6 +1813,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if(!inst){@try{inst=[[cls alloc] init];}@catch(NSException *e){[self log:@"创建播放器异常 %@",e.reason];}}
     if(!inst||![inst respondsToSelector:playSel]){[self displayNativePlaybackFailure:@"SDK 接口不可用" error:nil];return;}
     self.currentPlayer=inst;self.cicadaPlayer=nil;self.sdkPlayer=legacy?inst:nil;self.sdkPlayerUsed=YES;
+    [self rebuildTimeshiftController];
     CNPlayerSessionDelegate *session=[self beginNativeSession];
     @try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}
     self.nativePlaybackFailed=NO;
@@ -1833,7 +1831,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         @try{[previous setValue:nil forKey:@"delegate"];}@catch(NSException *e){}
         [self call:previous sel:@"stop"];
         @try{inst=[[cls alloc] init];}@catch(NSException *e){inst=nil;}
-        if(inst){self.currentPlayer=inst;self.sdkPlayer=legacy?inst:nil;@try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}accepted=[self invokeTarget:inst selector:playSel args:@[cid,session,options]];}
+        if(inst){self.currentPlayer=inst;self.sdkPlayer=legacy?inst:nil;[self rebuildTimeshiftController];@try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}accepted=[self invokeTarget:inst selector:playSel args:@[cid,session,options]];}
     }
     [self recordStartupStage:@"configure"];
     if(!inst||([accepted isKindOfClass:NSNumber.class]&&![accepted boolValue])){
@@ -2129,12 +2127,21 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 }
 
 // 应用内字号：以系统字号为基准上调 0/1/2 档。覆盖写在 RootViewController 上后，
-// 五个 Tab 子页面自动继承；被 push 的页面由 willShowViewController 逐个覆盖。
+// 以系统字号为基准上调 0/1/2 档。基准必须取自未被覆盖的字号：
+// window 自身的 trait 不受本控制器上写的覆盖影响；viewDidLoad 时
+// view 尚未进 window，取启动时快照的系统档位。切忌用 self.traitCollection
+// 作基准——它已被上次覆盖改写，每次重算都在已上调的档位上再上调，
+// “大”和“特大”都会顶到最大档。超出范围时按最大档截断。
 - (UITraitCollection *)fontSizeOverrideTraitCollection {
     NSInteger offset=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.appFontSize.v1"]?[[NSUserDefaults standardUserDefaults] integerForKey:@"cctv.appFontSize.v1"]:0;
     if(offset<=0)return nil;
     NSArray<NSString *> *ordered=@[UIContentSizeCategoryExtraSmall,UIContentSizeCategorySmall,UIContentSizeCategoryMedium,UIContentSizeCategoryLarge,UIContentSizeCategoryExtraLarge,UIContentSizeCategoryExtraExtraLarge,UIContentSizeCategoryExtraExtraExtraLarge];
-    NSInteger index=[ordered indexOfObject:self.traitCollection.preferredContentSizeCategory];
+    // 基准取 iOS 系统字号（屏幕 trait，不受本控制器覆盖影响，且 view 未进
+    // window 时也能取到）；不能取 self.traitCollection（已被覆盖）或
+    // self.view.window（view 未进 window 时为 nil）。
+    NSString *baseCategory=[UIScreen mainScreen].traitCollection.preferredContentSizeCategory;
+    if(!baseCategory.length)return nil;
+    NSInteger index=[ordered indexOfObject:baseCategory];
     if(index==NSNotFound)return nil;
     NSInteger stepped=MIN((NSInteger)ordered.count-1,index+offset);
     return [UITraitCollection traitCollectionWithPreferredContentSizeCategory:ordered[stepped]];
@@ -2316,6 +2323,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"导入本机配置" message:@"将替换本机订阅、收藏和偏好。Python 服务代码单独导入，不受影响。" preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[a addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         for(NSString *source in self.subscriptionURLs.allObjects){self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);[self removeSubscriptionSource:source];}
         [HostBackup restore:backup];self.subscriptionURLs=[NSMutableSet setWithArray:backup[@"subscriptions"]];self.favorites=[backup[@"favorites"] mutableCopy];self.recents=[[NSUserDefaults.standardUserDefaults arrayForKey:@"recents"] mutableCopy];self.activeSource=nil;self.gridMode=CCTVBoolPreference(@"channelGridMode",YES);for(NSString *source in self.subscriptionURLs)[self fetchSubscription:source silent:YES];[self activateAudioSession];[self applyFilter];[self selectBottomTab:(UIButton *)self.bottomBar.arrangedSubviews.firstObject];
+        // 备份里的主题与字号刚恢复：立即应用到窗口并重刷可见页面，
+        // 否则要等下次启动才生效。
+        UIWindow *window=self.view.window;if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);HostRefreshAppearanceLayers(window);}[self applyFontSizeOverride];[self.table reloadData];[self.view setNeedsLayout];
     }]];[self presentViewController:a animated:YES completion:nil];
 }
 - (PlaybackInfoViewController *)playbackInformationPage {
@@ -3245,6 +3255,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSDictionary *headers=self.nativePlainRouteActive?@{@"User-Agent":@"qqlive",@"Referer":@"https://live.cctv.cn/"}:(self.currentRemoteHeaders?:@{});
     AVURLAsset *asset=[AVURLAsset URLAssetWithURL:[NSURL URLWithString:url] options:headers.count?@{@"AVURLAssetHTTPHeaderFieldsKey":headers}:nil];
     AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];item.preferredForwardBufferDuration=0;
+    // 直播 AVPlayer 回退路径也按默认清晰度偏好约束 HLS 自适应码率，
+    // 与影视播放页的映射一致（smooth 1.5M / hd 4M / uhd 8M，auto 不限）。
+    NSString *preferredQuality=[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.mediaPreferredQuality.v1"]?:@"auto";
+    if([preferredQuality isEqualToString:@"smooth"])item.preferredPeakBitRate=1500000;
+    else if([preferredQuality isEqualToString:@"hd"])item.preferredPeakBitRate=4000000;
+    else if([preferredQuality isEqualToString:@"uhd"])item.preferredPeakBitRate=8000000;
     self.avPlayer=[AVPlayer playerWithPlayerItem:item];self.avPlayer.automaticallyWaitsToMinimizeStalling=YES;self.remotePlaybackWanted=YES;
     self.avLayer=[AVPlayerLayer playerLayerWithPlayer:self.avPlayer];self.avLayer.frame=self.playerBox.bounds;self.avLayer.videoGravity=AVLayerVideoGravityResizeAspect;[self.playerBox.layer insertSublayer:self.avLayer atIndex:0];
     [item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:kAVItemStatusContext];
@@ -3532,6 +3548,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)player:(id)player loadStateDidChanged:(NSUInteger)state {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player loadStateDidChanged:state]; }); return; }
     if (player != self.currentPlayer) return;
+    [self.timeshiftController noteLoadState:state];
     [self attachVideoView];
     if (state == 4) {                     // PrepareDone
         [self recordStartupStage:@"prepared"];
@@ -3539,6 +3556,21 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     } else if (state == 13) {
         [self log:@"加载取消"];
     }
+}
+
+- (void)player:(id)player programPubicChanged:(BOOL)isPublic {
+    if (player != self.currentPlayer) return;
+    [self.timeshiftController noteCopyrightChanged:isPublic error:nil];
+}
+
+- (void)player:(id)player programPubicChanged:(BOOL)isPublic type:(NSUInteger)sourceType error:(NSError *)error {
+    if (player != self.currentPlayer) return;
+    [self.timeshiftController noteCopyrightChanged:isPublic error:error];
+}
+
+- (void)playerPeriodicTimeEvent:(id)player {
+    if (player != self.currentPlayer) return;
+    [self.timeshiftController notePeriodicTick];
 }
 
 - (void)player:(id)player vdnRequestStateDidChanged:(NSUInteger)state {
@@ -3551,6 +3583,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (void)player:(id)player statEvent:(NSUInteger)event value:(id)value {
     if (![NSThread isMainThread]) { NSTimeInterval received=CACurrentMediaTime();NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self log:@"SDK stat callback %@ · raw +%.3fs · mainLag %.3fs",@(event),received-self.playStartedAt,CACurrentMediaTime()-received];[self player:player statEvent:event value:value]; }); return; }
     if (player != self.currentPlayer) return;
+    [self.timeshiftController noteStatEvent:event];
     if(event==1)[self recordStartupStage:@"sdkStartup"];
     if(event==2) {
         [self recordStartupStage:@"setup"];
@@ -3566,12 +3599,12 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if (event == 3 && !self.firstRender) {
         self.firstFrameSeconds = CACurrentMediaTime() - self.playStartedAt;
         self.firstRender = YES;self.nativePlaybackFailed=NO;
+        if(!self.nativeTimeShiftActive)[self.timeshiftController noteReturnedToLive];
         if([self.nativeStartupTuner restore])[self log:@"首帧后已恢复 SDK 稳态缓冲"];
         [self endPlaybackPriority];
         [self.spinner stopAnimating];
         self.titleLabel.text = self.channelName;
-        self.titleLabel.hidden = YES;
-        self.infoLabel.hidden = YES;
+        if(!self.nativeTimeShiftActive){self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;}
         [self loadPlayerChannelLogoAfterFirstFrame];
         [self recordStartupStage:@"frame"];
         [RuntimeDiagnostics.shared recordEvent:@"playback_first_frame" category:@"playback" fields:@{@"player":@"CNPlayerSDK", @"elapsed_ms":@((NSInteger)(self.firstFrameSeconds*1000)), @"playback_generation":@(self.playbackGeneration), @"correlation_id":self.currentPlaybackTraceID?:@"", @"route_type":self.requestedNativeRoute?@"user_selected":@"sdk_auto"}];
@@ -3729,26 +3762,36 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.titleLabel.text=[NSString stringWithFormat:@"%@ · %@中",self.channelName,kind];self.titleLabel.hidden=NO;[self.spinner startAnimating];[self startWatchdog];
 }
 - (void)seekNativeStart:(NSTimeInterval)start end:(NSTimeInterval)end {
-    if(!self.currentPlayer || self.avPlayer || !self.firstRender){[self showServiceError:@"请等待 CCTV 原生频道起播完成后再操作。"];return;}
-    if(!self.nativeTimeshift)self.nativeTimeshift=[[NativeTimeshiftSession alloc] initWithPlayer:self.currentPlayer];
-    [self beginNativeTransition:end==0?@"时移":@"回看"];self.nativeTimeShiftActive=YES;
-    NSUInteger generation=self.playbackGeneration;__weak id player=self.currentPlayer;__weak typeof(self) weakSelf=self;
-    NSError *seekError=nil;
-    BOOL accepted=[self.nativeTimeshift seekStart:start end:end now:NSDate.date.timeIntervalSince1970 error:&seekError completion:^(BOOL allowed,NSError *error){
-        if(generation!=weakSelf.playbackGeneration || player!=weakSelf.currentPlayer)return;
-        if(!allowed || error){[weakSelf failNativeTransition:error.localizedDescription.length?error.localizedDescription:@"频道未允许该时间的时移/回看，请返回直播或重新选台。"];}else [weakSelf log:@"原生时移请求已完成，等待/确认首帧"];
+    if (!self.currentPlayer || self.avPlayer || !self.firstRender) {
+        [self showServiceError:@"请等待 CCTV 原生频道起播完成后再操作。"]; return;
+    }
+    if (!self.timeshiftController) [self rebuildTimeshiftController];
+    [self beginNativeTransition:end == 0 ? @"时移" : @"回看"];
+    self.nativeTimeShiftActive = YES;
+    NSUInteger generation = self.playbackGeneration;
+    __weak id player = self.currentPlayer;
+    __weak typeof(self) weakSelf = self;
+    [self.timeshiftController requestSeekToStart:start end:end channelID:self.channelID completion:^(BOOL ok, NSError *error) {
+        if (generation != weakSelf.playbackGeneration || player != weakSelf.currentPlayer) return;
+        if (!ok || error) {
+            [weakSelf failNativeTransition:error.localizedDescription.length
+                ? error.localizedDescription
+                : @"频道未允许该时间的时移/回看，请返回直播或重新选台。"];
+        } else {
+            [weakSelf log:@"原生时移请求已完成，等待/确认首帧"];
+        }
     }];
-    if(!accepted)[self failNativeTransition:seekError.localizedDescription.length?seekError.localizedDescription:@"当前 SDK 不支持此调用，或时间范围无效。"];
 }
 - (void)failNativeTransition:(NSString *)message {
     [self.nativeTimeshift cancel];self.nativeTransitionKind=nil;self.nativePlaybackFailed=YES;[self.watchdog invalidate];[self.spinner stopAnimating];[self endPlaybackPriority];
     self.titleLabel.text=[NSString stringWithFormat:@"%@ · 时移操作失败",self.channelName];[self log:@"%@",message];[self showServiceError:message];
 }
 - (void)returnToNativeLive {
-    if(!self.currentPlayer || self.avPlayer)return;
-    if(!self.nativeTimeshift)self.nativeTimeshift=[[NativeTimeshiftSession alloc] initWithPlayer:self.currentPlayer];
-    [self beginNativeTransition:@"返回直播"];self.nativeTimeShiftActive=NO;
-    if(![self.nativeTimeshift backToLive])[self failNativeTransition:@"当前 SDK 无法执行返回直播，请重新选台。"];
+    if (!self.currentPlayer || self.avPlayer) return;
+    if (!self.timeshiftController) [self rebuildTimeshiftController];
+    [self beginNativeTransition:@"返回直播"];
+    self.nativeTimeShiftActive = NO;
+    [self.timeshiftController returnToLive];
 }
 
 - (void)showMorePlaybackActions {

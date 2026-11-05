@@ -67,7 +67,7 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
       @{ @"title":@"启动", @"footer":@"打开时回到上次离开的页面；关闭后每次打开都从央视直播开始。", @"rows":@[
         @{ @"title":@"启动时恢复上次打开的页面", @"key":@"cctv.restoreLastTab.v1", @"icon":@"arrow.uturn.left", @"default":@YES }
       ]},
-      @{ @"title":@"播放", @"footer":@"启动时自动续播默认关闭，打开软件后由你点选频道播放。快速起播仅降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；预解析只缓存一个相邻频道的信息，有效期 15 秒，会额外请求频道元数据。播放选项下次选台生效。影视的默认速度、画面比例、自动连播与屏幕常亮下次播放生效，也可在播放器右上角菜单里临时调整。默认清晰度仅对多码率 HLS 订阅流生效，央视直播由 VDN 自动选线。自动跳过仅对已记住片头片尾位置的影片生效，位置在播放器菜单里设置。", @"rows":@[
+      @{ @"title":@"播放", @"footer":@"启动时自动续播默认关闭，打开软件后由你点选频道播放。快速起播仅降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；预解析只缓存一个相邻频道的信息，有效期 15 秒，会额外请求频道元数据。播放选项下次选台生效。影视的默认速度、画面比例、自动连播与屏幕常亮下次播放生效，也可在播放器右上角菜单里临时调整。默认清晰度对多码率 HLS 流生效（影视页与直播 AVPlayer 回退路径），央视直播走 SDK 时由 VDN 自动选线。自动跳过仅对已记住片头片尾位置的影片生效，位置在播放器菜单里设置。", @"rows":@[
         @{ @"title":@"预解析下一个 CCTV 频道", @"key":@"preloadNativeChannel", @"icon":@"forward.end", @"default":@YES },
         @{ @"title":@"SDK 详细日志（诊断）", @"key":@"nativeSDKVerboseLogs", @"icon":@"doc.text", @"default":@NO },
         @{ @"title":@"原生播放器快速起播", @"key":@"fastNativeStartup", @"icon":@"bolt", @"default":@YES },
@@ -203,9 +203,9 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     [self presentActionSheet:sheet fromIndexPath:ip];
 }
 - (void)presentPreferredQualityPicker:(NSIndexPath *)ip {
-    // 清晰度只对多码率 HLS 订阅流有效：央视直播走 SDK 的 VDN 自动选线，宿主没有可调的清晰度接口；单文件 MP4 只有一个码率。
+    // 清晰度对多码率 HLS 流有效：影视页与直播 AVPlayer 回退路径按偏好约束码率；央视直播走 SDK 时由 VDN 自动选线，宿主没有可调的清晰度接口；单文件 MP4 只有一个码率。
     NSString *current=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaPreferredQuality.v1"]?:@"auto";
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"默认清晰度" message:@"仅对多码率 HLS 订阅流生效；央视直播由 VDN 自动选线；单文件 MP4 无多码率可选。下次播放生效。" preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"默认清晰度" message:@"对多码率 HLS 流生效（影视页与直播 AVPlayer 回退）；央视直播走 SDK 时由 VDN 自动选线；单文件 MP4 无多码率可选。下次播放生效。" preferredStyle:UIAlertControllerStyleActionSheet];
     for(NSDictionary *option in @[@{@"title":@"自动",@"value":@"auto"},@{@"title":@"流畅",@"value":@"smooth"},@{@"title":@"高清",@"value":@"hd"},@{@"title":@"超清",@"value":@"uhd"}]){
         NSString *title=option[@"title"],*value=option[@"value"];
         [sheet addAction:[UIAlertAction actionWithTitle:[current isEqual:value]?[title stringByAppendingString:@" ✓"]:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[NSUserDefaults.standardUserDefaults setObject:value forKey:@"cctv.mediaPreferredQuality.v1"];[self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"默认清晰度已设为%@",title]);}]];
@@ -249,6 +249,17 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
                 owner.lastUpdateCheckText=[NSString stringWithFormat:@"发现新版本 %@%@",latestVersion,buildInfo];
                 [owner.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
                 UIAlertController *found=[UIAlertController alertControllerWithTitle:@"发现新版本" message:[NSString stringWithFormat:@"最新版本 %@%@%@，当前版本 %@ (%@)。请前往 GitHub 发布页下载安装包。",latestVersion,buildInfo,dateInfo,installed,installedBuild] preferredStyle:UIAlertControllerStyleAlert];
+                [found addAction:[UIAlertAction actionWithTitle:@"稍后" style:UIAlertActionStyleCancel handler:nil]];
+                if(htmlURL.length)[found addAction:[UIAlertAction actionWithTitle:@"去下载" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[UIApplication.sharedApplication openURL:[NSURL URLWithString:htmlURL] options:@{} completionHandler:nil];}]];
+                [owner presentViewController:found animated:YES completion:nil];return;
+            }
+            // 同版本号但构建号更新：标题不能再说“已是最新版本”，否则
+            // 用户会错过同一版本内的修复构建（installedBuild 取不到时
+            // 视作 0，任何新构建都会提示）。
+            if(compared==NSOrderedSame&&latestBuild&&latestBuild.integerValue>installedBuild.integerValue){
+                owner.lastUpdateCheckText=[NSString stringWithFormat:@"发现新构建 %@%@",latestVersion,buildInfo];
+                [owner.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+                UIAlertController *found=[UIAlertController alertControllerWithTitle:@"发现新构建" message:[NSString stringWithFormat:@"同一版本 %@ 有新构建 %@%@，当前构建 %@。请前往 GitHub 发布页下载安装包。",latestVersion,buildInfo,dateInfo,installedBuild] preferredStyle:UIAlertControllerStyleAlert];
                 [found addAction:[UIAlertAction actionWithTitle:@"稍后" style:UIAlertActionStyleCancel handler:nil]];
                 if(htmlURL.length)[found addAction:[UIAlertAction actionWithTitle:@"去下载" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[UIApplication.sharedApplication openURL:[NSURL URLWithString:htmlURL] options:@{} completionHandler:nil];}]];
                 [owner presentViewController:found animated:YES completion:nil];return;
@@ -336,10 +347,15 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);});}
     if(self.onPreferenceChanged)self.onPreferenceChanged(HostThemeModePreferenceKey,HostIsDarkThemeSelected());
 }
+// 按 action 在 sections 里找行位置（清理类行清理后要重刷本行 detail）。
+- (NSIndexPath *)indexPathForRowAction:(NSString *)action {
+    for(NSInteger s=0;s<self.sections.count;s++){NSArray *rows=self.sections[s][@"rows"];for(NSInteger r=0;r<rows.count;r++)if([rows[r][@"action"] isEqualToString:action])return [NSIndexPath indexPathForRow:r inSection:s];}
+    return nil;
+}
 - (void)confirmClearEPG {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清理节目单缓存" message:@"缓存将在下次访问频道时重新获取。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"清理" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){ BOOL ok=SettingsRemoveEPGCacheFile(); if(ok&&self.onClearEPG) self.onClearEPG(); UIAlertController *done=[UIAlertController alertControllerWithTitle:@"缓存" message:ok?@"节目单缓存已清理。":@"节目单缓存清理失败，请重试。" preferredStyle:UIAlertControllerStyleAlert]; [done addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]]; [self dismissViewControllerAnimated:YES completion:^{[self presentViewController:done animated:YES completion:nil];}]; }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"清理" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){ BOOL ok=SettingsRemoveEPGCacheFile(); if(ok&&self.onClearEPG) self.onClearEPG(); if(ok){NSIndexPath *epgRow=[self indexPathForRowAction:@"clearEPG"];if(epgRow)[self.table reloadRowsAtIndexPaths:@[epgRow] withRowAnimation:UITableViewRowAnimationNone];} UIAlertController *done=[UIAlertController alertControllerWithTitle:@"缓存" message:ok?@"节目单缓存已清理。":@"节目单缓存清理失败，请重试。" preferredStyle:UIAlertControllerStyleAlert]; [done addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]]; [self dismissViewControllerAnimated:YES completion:^{[self presentViewController:done animated:YES completion:nil];}]; }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 @end

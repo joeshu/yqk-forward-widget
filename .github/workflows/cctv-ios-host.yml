@@ -80,8 +80,28 @@ jobs:
           done
           if grep -qE ":[0-9]+:[0-9]+: (fatal )?error:|clang: error:" syntax.log; then exit 1; fi
 
+      - name: Compute next version
+        id: next_version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Marketing version starts at 1.1 and increments by one per build:
+          # take the highest released version and bump its last component.
+          # (Release list order is not trusted, so take the max, not the first.)
+          base=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' cctv-ios-host/Resources/Info.plist)
+          last=$(gh release list --limit 50 --json name --jq -r '.[].name' 2>/dev/null | sed -n 's/^CCTVHost \([0-9][0-9.]*\) ([0-9][0-9]*)$/\1/p' | python3 -c "import sys; vs=[l.strip() for l in sys.stdin if l.strip()]; print(max(vs, key=lambda v: tuple(map(int, v.split('.')))) if vs else '')")
+          if [ -n "$last" ]; then
+            next=$(python3 -c "v='$last'.split('.'); v[-1]=str(int(v[-1])+1); print('.'.join(v))")
+          else
+            next="$base"
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "Next version: $next (last released: ${last:-none}, base in repo: $base)"
+
       - name: Build app
         working-directory: cctv-ios-host
+        env:
+          CCTV_NEXT_VERSION: ${{ steps.next_version.outputs.version }}
         run: |
           set +e
           bash Scripts/ci-build.sh > build.log 2>&1

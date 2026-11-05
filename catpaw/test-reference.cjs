@@ -1,4 +1,5 @@
-const IMPORTED_COUNT=require('./imported/metadata.json').length,REGISTERED_COUNT=81+IMPORTED_COUNT,ENABLED_COUNT=53+IMPORTED_COUNT;
+// 2026-11-05 订阅清理：启用 85 站 → 14 站（1 快照 + 0 原生 + 6 参考 + 7 导入）；其余 71 站停用保留代码，登记总数 113 不变。
+const IMPORTED_COUNT=require('./imported/metadata.json').length,REGISTERED_COUNT=81+IMPORTED_COUNT,ENABLED_COUNT=14;
 const fs=require('node:fs'),assert=require('node:assert/strict'),path=require('node:path'),os=require('node:os');
 (async()=>{const {referenceSources,createReferenceAdapter}=await import('./reference/adapter.js');let passed=0;const memory=()=>{const v=new Map();return {get:k=>v.get(k),set:(k,x)=>v.set(k,x),flush:async()=>{}};};
 async function test(name,fn){await fn();console.log('PASS '+name);passed++;}
