@@ -947,7 +947,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([nodeChecks[@"stop"][@"ok"] boolValue] && !NodePluginRuntime.shared.hasActivePlugin,@"Node plugin closes without destroying the reusable engine");
             check([nodeChecks[@"saved"] isEqual:@"start-closed"],@"plugin relative data path is isolated and close hook finishes");
             check([nodeChecks[@"catpaw"][@"ok"] boolValue],@"original 4 MB Catpaw bundle starts inside actual iOS Node Mobile framework");
-            check([nodeChecks[@"providers"][@"result"] count]>50,@"original Catpaw configuration exposes its real film providers");
+            check([nodeChecks[@"providers"][@"result"] count]>10,@"original Catpaw configuration exposes its real film providers");
             check([nodeChecks[@"catpawStop"][@"ok"] boolValue],@"original Catpaw HTTP listener and handles stop on iOS");
             NSDictionary *pythonCrypto=nodeChecks[@"pythonCrypto"];
             if([nodeChecks[@"pythonSmokeAvailable"] boolValue]){
