@@ -161,8 +161,10 @@ class DecodeRouterContracts(unittest.TestCase):
     # ---- 集成补丁说明 ----
 
     def test_integration_patch_doc_exists(self):
-        patch = pathlib.Path.home() / 'workspace' / 'cicada-vod-integration-patch.md'
-        self.assertTrue(patch.exists(), '集成补丁说明缺失：~/workspace/cicada-vod-integration-patch.md')
+        # 集成补丁说明在仓库内（cctv-ios-host/Docs/），CI 上也能取到；
+        # 不要指向工作区外的绝对路径，CI 机器上没有那个文件。
+        patch = pathlib.Path(__file__).resolve().parent.parent / 'Docs' / 'CICADA-VOD-INTEGRATION-PATCH.md'
+        self.assertTrue(patch.exists(), '集成补丁说明缺失：cctv-ios-host/Docs/CICADA-VOD-INTEGRATION-PATCH.md')
         text = patch.read_text()
         for anchor in ('playResult:', 'recordPlaybackFailureForItem:',
                        'stopObservingCurrentPlayback',
