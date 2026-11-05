@@ -29,7 +29,6 @@
 #import "TVBoxCatalogStore.h"
 #import "TVBoxCatalogViewController.h"
 #import "CNPlayerCrashGuard.h"
-#import "ResourceImportSheetViewController.h"
 #import "LogCenterViewController.h"
 #import "PluginRunHistoryViewController.h"
 #import "PluginLogStore.h"
@@ -138,6 +137,11 @@
 + (NSInteger)smokeResetCount;
 + (NSInteger)smokePlayCount;
 + (NSInteger)smokeConfigureCount;
++ (NSInteger)smokeURLConfigureCount;
++ (NSString *)smokeLastLiveURL;
++ (NSInteger)smokeCicadaLicenseOverrideCount;
++ (void)smokeFailNextChannelConfiguration;
++ (void)smokeFailChannelConfigurations:(NSInteger)count;
 @end
 @interface PyHost (SmokeMetrics)
 + (NSInteger)smokeStartCount;
@@ -246,6 +250,7 @@ static void next(NSArray *steps, NSUInteger index) {
       [UIView setAnimationsEnabled:NO];
       failures = [NSMutableArray array];
       check([CNPlayerCrashGuard install], @"CNPlayer thumbnail exception guard installs");
+      check([CNPlayer smokeCicadaLicenseOverrideCount]==0,@"SDK setup preserves the Cicada core's built-in license endpoint without a host override");
       UIImage *guardedThumbnail=[[NSClassFromString(@"IJKFFMoviePlayerController") new]
           performSelector:NSSelectorFromString(@"thumbnailImageAtCurrentTime")];
       check(guardedThumbnail==nil, @"invalid SDK teardown thumbnail exception is contained");
@@ -260,6 +265,12 @@ static void next(NSArray *steps, NSUInteger index) {
       __block id retainedWrapper = nil;
       __block id oldWrapper = nil;
       __block NSInteger playCount = 0;
+      __block NSDictionary *selectedUDRMRoute;
+      __block NSString *selectedUDRMURL;
+      __block NSInteger configuredBeforeUDRM, urlConfiguredBeforeUDRM;
+      __block id rejectedNativeWrapper;
+      __block NSInteger configuredBeforeNativeRecovery, playedBeforeNativeRecovery;
+      __block NSInteger configuredBeforeTerminalNativeFailure, playedBeforeTerminalNativeFailure;
       __block AVPlayer *hlsPlayer;
       __block NSInteger configuredBeforeHandoff;
       __block id preparedWrapper;
@@ -286,6 +297,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSDate *stalePlaybackDeadline;
       __block ResourceImportWorkflowViewController *importProbe;
       __block NSUInteger importSaveCount=0;
+      __block NSUInteger batchRetrySaveCount=0;
       __block ServiceEditorViewController *editorProbe;
       __block NSDate *editorDeadline;
       __block BOOL replacementFinished=NO,replacementFailureKept=NO;
@@ -426,6 +438,7 @@ static void next(NSArray *steps, NSUInteger index) {
             if(longResourceIndex!=NSNotFound){UITableViewCell *longCell=[resourcePage.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)longResourceIndex inSection:0]];check(longCell.detailTextLabel.numberOfLines==0&&CGRectGetHeight(longCell.detailTextLabel.bounds)>=longCell.detailTextLabel.font.lineHeight*3,[NSString stringWithFormat:@"expanded resource row keeps multiple detail lines visible (lines=%.1f)",CGRectGetHeight(longCell.detailTextLabel.bounds)/longCell.detailTextLabel.font.lineHeight]);}
             CGFloat resourceMaximumOffset=MAX(-resourcePage.tableView.adjustedContentInset.top,resourcePage.tableView.contentSize.height-resourcePage.tableView.bounds.size.height+resourcePage.tableView.adjustedContentInset.bottom);
             check(resourceMaximumOffset>=48,[NSString stringWithFormat:@"resource navigation fixture has a legal scroll range (max=%.1f)",resourceMaximumOffset]);
+            NSString *(^originalTaskProvider)(void)=resourcePage.importTaskSummaryProvider;resourcePage.importTaskSummaryProvider=^{return @"识别完成 · 2 项失败";};[resourcePage reloadProfiles];UIView *taskCard=[resourcePage valueForKey:@"importTaskContainer"];UIButton *taskToggle=[resourcePage valueForKey:@"importTaskToggleButton"];NSLayoutConstraint *taskHeight=[resourcePage valueForKey:@"importTaskHeight"];check(!taskCard.hidden&&taskHeight.constant==44,@"resource page shows a compact import task card");[taskToggle sendActionsForControlEvents:UIControlEventTouchUpInside];check(taskHeight.constant==76&&[[[resourcePage valueForKey:@"importTaskDetailLabel"] text] isEqual:@"识别完成 · 2 项失败"],@"import task card expands to show its full status");[taskToggle sendActionsForControlEvents:UIControlEventTouchUpInside];check(taskHeight.constant==44,@"import task card collapses without leaving the resource page");resourcePage.importTaskSummaryProvider=originalTaskProvider;[resourcePage reloadProfiles];
             [resourcePage.tableView setContentOffset:CGPointMake(0,48) animated:NO];
             resourceScrollOffset=resourcePage.tableView.contentOffset.y;
             [root addSubscription];
@@ -434,8 +447,8 @@ static void next(NSArray *steps, NSUInteger index) {
             UINavigationController *importNavigation=(id)nav.presentedViewController;
             ResourceImportWorkflowViewController *sheet=[importNavigation isKindOfClass:UINavigationController.class]?(id)importNavigation.topViewController:nil;
             check([sheet isKindOfClass:ResourceImportWorkflowViewController.class],@"resource add opens the unified import workflow");
-            UITableView *options=sheet.tableView;check([options numberOfSections]==3&&[options numberOfRowsInSection:0]==5,@"unified import offers URL, multiple files and folder input with runtime selection");
-            capture(self.window,@"03b-add-resource");[importNavigation dismissViewControllerAnimated:NO completion:nil];ConfigCenterViewController *currentResource=(id)[root valueForKey:@"tabPages"][@3];[currentResource.view layoutIfNeeded];resourceScrollOffset=currentResource.tableView.contentOffset.y;
+            UITableView *options=sheet.tableView;UITableViewCell *advanced=[options.dataSource tableView:options cellForRowAtIndexPath:[NSIndexPath indexPathForRow:4 inSection:0]];check([options numberOfSections]==3&&[options numberOfRowsInSection:0]==5&&[advanced.textLabel.text isEqual:@"高级选项"],@"unified import keeps runtime and category overrides out of the primary input flow");
+            capture(self.window,@"03b-add-resource");[options.delegate tableView:options didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:4 inSection:0]];UISegmentedControl *runtimeOverride=[sheet valueForKey:@"runtime"];UITableViewCell *category=[options.dataSource tableView:options cellForRowAtIndexPath:[NSIndexPath indexPathForRow:6 inSection:0]];check([options numberOfRowsInSection:0]==7&&runtimeOverride.selectedSegmentIndex==0&&[category.textLabel.text isEqual:@"按类型选择导入方式"],@"runtime override and the categorized import entry are both inside advanced options");[options.delegate tableView:options didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:4 inSection:0]];[importNavigation dismissViewControllerAnimated:NO completion:nil];ConfigCenterViewController *currentResource=(id)[root valueForKey:@"tabPages"][@3];[currentResource.view layoutIfNeeded];resourceScrollOffset=currentResource.tableView.contentOffset.y;
             [root openServicesPage];
           },
           ^{
@@ -650,6 +663,26 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             check([CNPlayer smokePlayCount] == playCount + 1,
                   @"PrepareDone cannot play again after auto first frame");
+            rejectedNativeWrapper=[root valueForKey:@"currentPlayer"];
+            configuredBeforeNativeRecovery=[CNPlayer smokeConfigureCount];playedBeforeNativeRecovery=[CNPlayer smokePlayCount];
+            [CNPlayer smokeFailNextChannelConfiguration];
+            [root playChannel:[root channelWithID:@"cctv1"] route:nil];
+            check([CNPlayer smokeConfigureCount]==configuredBeforeNativeRecovery+2,@"automatic CCTV-1 retries a failed SDK configuration exactly once with a fresh wrapper");
+            check([root valueForKey:@"currentPlayer"]!=nil&&[root valueForKey:@"currentPlayer"]!=rejectedNativeWrapper&&[root valueForKey:@"requestedNativeRoute"]==nil&&[root valueForKey:@"avPlayer"]==nil,@"automatic CCTV-1 replaces the rejected legacy wrapper and keeps SDK channel-ID dispatch");
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue]&&[CNPlayer smokePlayCount]==playedBeforeNativeRecovery+1,@"automatic CCTV-1's fresh recovery wrapper starts once and receives the SDK fixture frame callback");
+            configuredBeforeTerminalNativeFailure=[CNPlayer smokeConfigureCount];playedBeforeTerminalNativeFailure=[CNPlayer smokePlayCount];
+            [CNPlayer smokeFailChannelConfigurations:2];
+            [root playChannel:[root channelWithID:@"cctv1"] route:nil];
+            check([CNPlayer smokeConfigureCount]==configuredBeforeTerminalNativeFailure+2&&[CNPlayer smokePlayCount]==playedBeforeTerminalNativeFailure,@"two rejected automatic CCTV-1 configurations exhaust the single fresh retry without starting either wrapper");
+            check([root valueForKey:@"currentPlayer"]==nil&&[root valueForKey:@"sdkPlayer"]==nil&&[[root valueForKey:@"nativePlaybackFailed"] boolValue]&&![[root valueForKey:@"sdkPlayerUsed"] boolValue],@"terminal automatic CCTV-1 configuration failure releases both rejected wrappers and exposes retry state");
+            [CNPlayer smokeFailChannelConfigurations:0];
+            [root togglePlayPause];
+            check([CNPlayer smokeConfigureCount]==configuredBeforeTerminalNativeFailure+3&&[root valueForKey:@"currentPlayer"]!=nil&&![[root valueForKey:@"nativePlaybackFailed"] boolValue],@"explicit CCTV-1 retry starts a new SDK configuration after terminal rejection cleanup");
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue]&&[CNPlayer smokePlayCount]==playedBeforeTerminalNativeFailure+1,@"explicit CCTV-1 retry after two rejected configurations starts once and receives the SDK fixture frame callback");
             [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"legacyNativePlayback"];
             oldWrapper = [root valueForKey:@"currentPlayer"];
             [root playChannel:[root channelWithID:@"cctv3"] route:nil];
@@ -661,6 +694,25 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             check([[root valueForKey:@"firstRender"] boolValue], @"fresh-mode first frame received");
             [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"legacyNativePlayback"];
+            NSDictionary *cctv1=[root channelWithID:@"cctv1"];
+            selectedUDRMRoute=[cctv1[@"routes"] firstObject];selectedUDRMURL=selectedUDRMRoute[@"url"];
+            check(selectedUDRMURL.length>0&&[selectedUDRMURL.lowercaseString containsString:@"/udrm"],@"CCTV-1 manual-route regression uses the bundled UDRM address");
+            [root setValue:[@{(selectedUDRMURL?:@"missing-url"):@{@"plain":@YES,@"at":@(CACurrentMediaTime())}} mutableCopy] forKey:@"plainRouteCache"];
+            configuredBeforeUDRM=[CNPlayer smokeConfigureCount];urlConfiguredBeforeUDRM=[CNPlayer smokeURLConfigureCount];
+            [root playChannel:cctv1 route:selectedUDRMRoute];
+            check([CNPlayer smokeConfigureCount]==configuredBeforeUDRM+1&&[CNPlayer smokeURLConfigureCount]==urlConfiguredBeforeUDRM+1&&[[CNPlayer smokeLastLiveURL] isEqual:selectedUDRMURL],@"CCTV-1 UDRM manual route passes the selected URL to the SDK despite an old plain-HLS cache entry");
+            check([root valueForKey:@"currentPlayer"]!=nil&&[root valueForKey:@"nativeRouteProbe"]==nil&&[root valueForKey:@"avPlayer"]==nil&&![[root valueForKey:@"nativePlainRouteActive"] boolValue],@"CCTV-1 UDRM manual route creates neither a plain-HLS probe nor an AVPlayer session");
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue],@"manual UDRM route reaches the SDK fixture first-frame callback");
+            id failedUDRMPlayer=[root valueForKey:@"currentPlayer"];
+            [root player:failedUDRMPlayer playbackFailed:[NSError errorWithDomain:@"fixture.udrm" code:4012 userInfo:nil]];
+            [root togglePlayPause];
+            check([CNPlayer smokeConfigureCount]==configuredBeforeUDRM+2&&[CNPlayer smokeURLConfigureCount]==urlConfiguredBeforeUDRM+2&&[[CNPlayer smokeLastLiveURL] isEqual:selectedUDRMURL],@"explicit UDRM retry stays on the original SDK URL instead of switching to automatic dispatch");
+            check([[root valueForKey:@"requestedNativeRoute"] isEqual:selectedUDRMRoute]&&[root valueForKey:@"nativeRouteProbe"]==nil&&[root valueForKey:@"avPlayer"]==nil&&[[root valueForKey:@"activeTab"] integerValue]==0,@"explicit UDRM retry retains the selected manual route on the CCTV page");
+          },
+          ^{
+            check([[root valueForKey:@"firstRender"] boolValue],@"retried manual UDRM route receives the SDK fixture frame callback");
             NSArray *arguments = NSProcessInfo.processInfo.arguments;
             NSUInteger at = [arguments indexOfObject:@"--smoke-port"];
             NSString *port = at != NSNotFound && at + 1 < arguments.count ? arguments[at + 1] : @"0";
@@ -1022,7 +1074,7 @@ static void next(NSArray *steps, NSUInteger index) {
             if(catalog)[TVBoxCatalogStore saveCatalog:catalog];
             TVBoxCatalogViewController *catalogPage=[TVBoxCatalogViewController new];catalogPage.catalog=[TVBoxCatalogStore catalogForID:catalog[@"id"]]?:catalog;[nav pushViewController:catalogPage animated:NO];
             check([catalogPage.tableView numberOfSections]==2&&[catalogPage.tableView numberOfRowsInSection:0]==2,@"resource collection separates script sites from live lists");
-            UIMenu *collectionActions=catalogPage.navigationItem.rightBarButtonItem.menu;UIMenu *exports=(id)collectionActions.children.firstObject;NSString *jsonAction=exports.children.count>0?((UIAction *)exports.children[0]).title:@"",*zipAction=exports.children.count>1?((UIAction *)exports.children[1]).title:@"";UIContextMenuConfiguration *singleResourceMenu=[catalogPage tableView:catalogPage.tableView contextMenuConfigurationForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0] point:CGPointZero];check([jsonAction isEqual:@"导出完整合集 JSON"]&&[zipAction isEqual:@"导出完整资源 ZIP（含 PY / JS）"]&&singleResourceMenu!=nil,@"resource collection offers complete JSON, full PY/JS ZIP and per-item export");
+            UIMenu *collectionActions=catalogPage.navigationItem.rightBarButtonItem.menu;UIMenu *exports=(id)collectionActions.children.firstObject;NSString *jsonAction=exports.children.count>0?((UIAction *)exports.children[0]).title:@"",*zipAction=exports.children.count>1?((UIAction *)exports.children[1]).title:@"";UIContextMenuConfiguration *singleResourceMenu=[catalogPage tableView:catalogPage.tableView contextMenuConfigurationForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0] point:CGPointZero];check([jsonAction isEqual:@"导出完整合集 JSON"]&&[zipAction isEqual:@"导出资源 ZIP（含可获取的 PY / JS）"]&&singleResourceMenu!=nil,@"resource collection offers complete JSON, report-aware PY/JS ZIP and per-item export");
             UISearchController *catalogSearch=[catalogPage valueForKey:@"searchController"];catalogSearch.searchBar.text=@"index.js";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];check([catalogPage.tableView numberOfRowsInSection:0]==1,@"large resource collections can find one script by URL");catalogSearch.searchBar.text=@"";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];
             catalogPage.serviceForSite=^NSDictionary *(NSDictionary *site){return [site[@"key"] isEqual:@"js-site"]?@{@"id":@"fixture-js",@"name":@"Fixture JS",@"enabled":@YES}:nil;};
             NSIndexPath *siteIndex=[NSIndexPath indexPathForRow:0 inSection:0];UITableViewCell *siteCell=[catalogPage tableView:catalogPage.tableView cellForRowAtIndexPath:siteIndex];check([siteCell.detailTextLabel.text containsString:@"服务已导入"]&&[siteCell.detailTextLabel.text containsString:@"点按启动并打开资源"],@"an enabled saved configuration is not presented as a running process");check(![siteCell.detailTextLabel.text containsString:@"token=kept"]&&[catalogPage.catalog[@"sites"][0][@"api"] containsString:@"token=kept"],@"collection masks credentials in display while preserving the original URL");
@@ -1096,7 +1148,11 @@ static void next(NSArray *steps, NSUInteger index) {
           @{@"timeout":@8,@"until":^BOOL{return !importProbe.busy&&replacementFinished&&[editorDeadline timeIntervalSinceNow]<=0;},@"run":^{
             check(replacementFinished&&replacementFailureKept,@"invalid subscription edits preserve the original source and its metadata");[root deleteSubscription:replacementOriginal];[root deleteSubscription:replacementTarget];NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabled removeObject:replacementTarget];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];
             check(importSaveCount==2&&!importProbe.busy&&[importProbe.taskSummary containsString:@"已保存 2 项"],@"unified import saves only selected preview rows and reports the completed batch");
-            check(![[editorProbe valueForKey:@"downloading"] boolValue]&&[editorProbe valueForKey:@"code"]==nil&&editorProbe.presentedViewController==nil,@"editing the URL cancels the old download without applying stale code or presenting a stale error");importProbe=nil;editorProbe=nil;
+            check(![[editorProbe valueForKey:@"downloading"] boolValue]&&[editorProbe valueForKey:@"code"]==nil&&editorProbe.presentedViewController==nil,@"editing the URL cancels the old download without applying stale code or presenting a stale error");
+            NSMutableArray *failedImports=[NSMutableArray arrayWithArray:@[[@{@"kind":@"service",@"name":@"Failed one",@"saveError":@"Temporary failure",@"selected":@YES} mutableCopy],[@{@"kind":@"playlist",@"name":@"Failed two",@"saveError":@"Temporary failure",@"selected":@YES} mutableCopy]]];[importProbe setValue:failedImports forKey:@"candidates"];importProbe.onSaveCandidate=^(NSDictionary *candidate,BOOL update,void (^completion)(NSError *error)){batchRetrySaveCount++;check(update,@"batch retry preserves the selected duplicate policy");completion(nil);};NSIndexPath *retryFailures=[NSIndexPath indexPathForRow:1 inSection:2];[importProbe tableView:importProbe.tableView didSelectRowAtIndexPath:retryFailures];
+          }},
+          @{ @"timeout":@4, @"until":^BOOL{return !importProbe.busy&&[importProbe.taskSummary containsString:@"失败项目重试完成"];}, @"run":^{
+            check(batchRetrySaveCount==2&&[importProbe.taskSummary containsString:@"失败项目重试完成"],@"retry failed items retries only the failed candidates and processes them sequentially");check([importProbe numberOfSectionsInTableView:importProbe.tableView]==3&&[importProbe tableView:importProbe.tableView numberOfRowsInSection:2]==1,@"successful batch retry removes the retry-failed action");importProbe=nil;editorProbe=nil;
           }},
           ^{
             MediaBrowserViewController *recoveryProbe=[MediaBrowserViewController new];[recoveryProbe loadViewIfNeeded];

@@ -370,10 +370,11 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
     def test_poster_failures_are_classified_without_logging_image_addresses(self):
         self.assertIn('recordEvent:@"poster_image_failed"', IMAGE_LOADER)
         for stage in ('http_status', 'response_too_large', 'network_error',
-                      'image_decode_failed', 'empty_body'):
+                      'image_decode_failed', 'empty_body',
+                      'encrypted_image_requires_decryption_or_clear_mirror'):
             self.assertIn(f'@"{stage}"', IMAGE_LOADER)
         for field in ('image_host', 'image_extension', 'http_status',
-                      'content_type', 'response_bytes', 'elapsed_ms',
+                      'content_type', 'encrypted_response', 'response_bytes', 'elapsed_ms',
                       'expected_content_length_known', 'expected_response_bytes',
                       'response_length_matches_expected', 'error_domain', 'error_code'):
             self.assertIn(f'@"{field}"', IMAGE_LOADER)

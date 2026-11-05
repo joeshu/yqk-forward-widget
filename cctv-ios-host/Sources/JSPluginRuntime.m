@@ -69,7 +69,9 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     if(![opts isKindOfClass:NSDictionary.class])opts=@{};
     NSString *method=[opts[@"method"] isKindOfClass:NSString.class]?[opts[@"method"] uppercaseString]:@"GET";
     if((!self.genericMode && ![method isEqual:@"GET"]) || ![@[@"GET",@"POST",@"PUT",@"PATCH",@"DELETE",@"HEAD",@"OPTIONS"] containsObject:method]){[callback callWithArguments:@[@{@"error":@"不支持的 HTTP 方法"}]];return key;}
-    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:target cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
+    NSTimeInterval timeout=12;id rawTimeout=opts[@"timeout"];
+    if([rawTimeout isKindOfClass:NSNumber.class]){double configured=[rawTimeout doubleValue];if(configured>120)configured/=1000.0;if(isfinite(configured)&&configured>0)timeout=MIN(120.0,MAX(1.0,configured));}
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:target cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout];
     request.HTTPMethod=method;
     if(self.genericMode){
         if([opts[@"body"] isKindOfClass:NSString.class])request.HTTPBody=[opts[@"body"] dataUsingEncoding:NSUTF8StringEncoding];
@@ -176,7 +178,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
         });return key;
     };
     self.context[@"__hostClearTimeout"]=^(NSNumber *key){[weak.timers removeObjectForKey:key];};
-    NSURLSessionConfiguration *config=self.networkConfiguration.copy?:NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPCookieStorage=nil;config.HTTPMaximumConnectionsPerHost=4;config.timeoutIntervalForRequest=12;config.timeoutIntervalForResource=15;
+    NSURLSessionConfiguration *config=self.networkConfiguration.copy?:NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPCookieStorage=nil;config.HTTPMaximumConnectionsPerHost=4;config.timeoutIntervalForRequest=12;config.timeoutIntervalForResource=self.genericMode?120:15;
     NSOperationQueue *delegate=[NSOperationQueue new];delegate.maxConcurrentOperationCount=1;delegate.underlyingQueue=self.queue;
     self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:delegate];
     NSString *path=self.scriptURL.path?:[NSBundle.mainBundle pathForResource:self.genericMode?@"js-runtime.bundle":@"yangshipin.bundle" ofType:@"js"];

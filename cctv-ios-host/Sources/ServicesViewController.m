@@ -107,13 +107,13 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     return section == 0   ? 2
            : section == 1 ? 3
            : section == 2 ? ([ServiceStore isLiveMediaService:self.service]?12:7)
-           : section == 3 ? 4
+           : section == 3 ? 3
                           : ([self.service[@"builtin"] boolValue] ? 0 : 1);
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     NSArray<NSString *> *titles = @[
         [NSString stringWithFormat:@"%@ · 服务状态", ServiceEngineName(self.service)],
-        @"本机访问", @"服务信息", @"操作"
+        @"本机访问", @"服务信息", @"运行与使用"
     ];
     return section >= 0 && section < (NSInteger)titles.count ? titles[(NSUInteger)section] : nil;
 }
@@ -192,10 +192,9 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
         NSString *address=ip.row==7?values[7]:(ip.row==8?values[8]:nil);
         if(address){c.detailTextLabel.textAlignment=NSTextAlignmentLeft;if([address hasPrefix:@"http://"]||[address.lowercaseString hasPrefix:@"https://"]){c.accessoryType=UITableViewCellAccessoryDisclosureIndicator;c.selectionStyle=UITableViewCellSelectionStyleDefault;}}
     } else if (ip.section == 3) {
-        c.textLabel.text = @[ @"查看日志", @"资源详情与配置", @"查看 / 导出代码", @"添加到直播订阅" ][ip.row];
-        if(ip.row==3){if([self opensMedia])c.textLabel.text=@"打开影视";else if([ServiceStore subscriptionURLForService:self.service].length)c.textLabel.text=@"打开直播频道";else c.textLabel.text=@"配置直播列表路径";}
+        c.textLabel.text = ip.row==0?@"查看日志":(ip.row==1?@"打开资源详情与配置":([self opensMedia]?@"打开影视":([ServiceStore subscriptionURLForService:self.service].length?@"打开直播频道":@"配置直播列表路径")));
         c.imageView.image = [UIImage systemImageNamed:@[
-            @"doc.text", @"square.and.pencil", @"square.and.arrow.up", @"plus.rectangle.on.rectangle"
+            @"doc.text", @"square.and.pencil", @"plus.rectangle.on.rectangle"
         ][ip.row]];
         c.imageView.tintColor = HostAccent();
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -292,40 +291,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
                 self.onLog(self.service);
         } else if (ip.row == 1)
             [self edit];
-        else if (ip.row == 2) {
-            UIAlertController *a =
-                [UIAlertController alertControllerWithTitle:@"资源代码"
-                                                    message:nil
-                                             preferredStyle:UIAlertControllerStyleActionSheet];
-            [a addAction:[UIAlertAction
-                             actionWithTitle:@"查看代码"
-                                       style:UIAlertActionStyleDefault
-                                     handler:^(UIAlertAction *action) {
-                                       ServiceCodeViewController *v = [ServiceCodeViewController new];
-                                       v.path = [ServiceStore codePath:self.service];
-                                       v.readOnly = YES;
-                                       [self.navigationController pushViewController:v animated:YES];
-                                     }]];
-            [a addAction:[UIAlertAction
-                             actionWithTitle:@"导出文件"
-                                       style:UIAlertActionStyleDefault
-                                     handler:^(UIAlertAction *action) {
-                                       UIActivityViewController *v =
-                                           [[UIActivityViewController alloc] initWithActivityItems:@[
-                                               [NSURL fileURLWithPath:[self.service[@"archivePath"] length]?self.service[@"archivePath"]:[ServiceStore codePath:self.service]]
-                                           ]
-                                                                             applicationActivities:nil];
-                                       v.popoverPresentationController.sourceView = self.view;
-                                       v.popoverPresentationController.sourceRect =
-                                           CGRectMake(self.view.bounds.size.width / 2,
-                                                      self.view.bounds.size.height / 2, 1, 1);
-                                       [self presentViewController:v animated:YES completion:nil];
-                                     }]];
-            [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-            a.popoverPresentationController.sourceView = [tableView cellForRowAtIndexPath:ip];
-            a.popoverPresentationController.sourceRect = [tableView cellForRowAtIndexPath:ip].bounds;
-            [self presentViewController:a animated:YES completion:nil];
-        } else {
+        else {
             if([self opensMedia]){if(self.onBrowseService)self.onBrowseService(self.service);return;}
             NSString *u = [ServiceStore subscriptionURLForService:self.service];
             if (self.onSubscribe)
@@ -438,7 +404,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     [self refresh];
 }
 - (void)add {
-    if(self.onImportResource){UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"添加资源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];[sheet addAction:[UIAlertAction actionWithTitle:@"导入影视包 · JS / Python / ZIP" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.onImportResource();}]];[sheet addAction:[UIAlertAction actionWithTitle:@"添加 Python HTTP 服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){ServiceEditorViewController *editor=[ServiceEditorViewController new];[self.navigationController pushViewController:editor animated:YES];}]];[sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];sheet.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItems.firstObject;[self presentViewController:sheet animated:YES completion:nil];return;}
+    if(self.onImportResource){UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"添加资源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];[sheet addAction:[UIAlertAction actionWithTitle:@"导入资源 · URL / 文件 / 文件夹" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.onImportResource();}]];[sheet addAction:[UIAlertAction actionWithTitle:@"添加 Python HTTP 服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){ServiceEditorViewController *editor=[ServiceEditorViewController new];[self.navigationController pushViewController:editor animated:YES];}]];[sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];sheet.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItems.firstObject;[self presentViewController:sheet animated:YES completion:nil];return;}
     ServiceEditorViewController *v = [ServiceEditorViewController new];
     [self.navigationController pushViewController:v animated:YES];
 }

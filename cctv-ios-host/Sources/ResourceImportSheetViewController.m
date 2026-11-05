@@ -111,7 +111,7 @@
     header.translatesAutoresizingMaskIntoConstraints=NO;
     [self.view addSubview:header];
     UILabel *title=[UILabel new];
-    title.text=@"添加资源";
+    title.text=@"按类型选择导入方式";
     title.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleLargeTitle] scaledFontForFont:[UIFont systemFontOfSize:28 weight:UIFontWeightBold]];
     title.adjustsFontForContentSizeCategory=YES;
     title.textColor=HostText();
@@ -208,7 +208,7 @@
             @{ @"id":@"script-auto-file",@"title":@"导入脚本 / ZIP · 自动识别",@"detail":@"检查入口、运行环境、协议和校验文件",@"icon":@"doc.zipper",@"color":rgb(92,83,218),@"option":@(ResourceImportOptionMediaFile)},
             @{ @"id":@"python-file",@"title":@"导入 Python Spider 文件",@"detail":@"选择 .py；按 Spider 接口识别影视能力",@"icon":@"chevron.left.forwardslash.chevron.right",@"color":rgb(54,137,91),@"option":@(ResourceImportOptionPythonFile)},
             @{ @"id":@"node-file",@"title":@"导入 Node.js Mobile 脚本 / ZIP",@"detail":@"显式选 Node 运行时，支持动态 Node 模块引用",@"icon":@"shippingbox",@"color":rgb(75,102,186),@"option":@(ResourceImportOptionNodeFile)},
-            @{ @"id":@"tvbox-file",@"title":@"导入 TVBox JSON",@"detail":@"本地导入配置目录，不覆盖现有目录",@"icon":@"doc.text",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionTVBox)},
+            @{ @"id":@"tvbox-file",@"title":@"导入 TVBox JSON",@"detail":@"本地导入配置目录，不覆盖现有目录",@"icon":@"doc.text",@"color":rgb(103,83,222),@"option":@(ResourceImportOptionTVBoxFile)},
             @{ @"id":@"host-capabilities",@"title":@"宿主运行能力与调用示例",@"detail":@"Python AES-CTR、Node HTTP、播放超时与识别规则",@"icon":@"wrench.and.screwdriver",@"color":rgb(45,127,164),@"option":@(ResourceImportOptionHostCapabilities)}
         ];
     });

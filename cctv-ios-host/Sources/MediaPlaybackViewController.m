@@ -78,6 +78,8 @@ static MediaAPIClient *MediaPlaybackClientForSource(NSDictionary *source) {
     }
     if(timeout<=0)timeout=15000;
     timeout=MIN(120000,MAX(1000,timeout));
+    NSURL *scriptURL=[source[@"url"] isKindOfClass:NSString.class]?[NSURL URLWithString:source[@"url"]]:nil;
+    if([scriptURL.host.lowercaseString isEqual:@"raw.githubusercontent.com"]&&[scriptURL.path.lowercaseString isEqual:@"/joeshu/for-adm/master/cctvhost/yqk.js"])timeout=MAX(timeout,60000);
     NSString *catalogID=[source[@"catalogID"] isKindOfClass:NSString.class]?source[@"catalogID"]:([source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?source[@"tvboxCatalogID"]:@"");MediaAPIClient *client=MediaSourceUsesNativeCatalogAPI(source)?[[MediaAPIClient alloc] initWithTVBoxSource:source?:@{}]:[[MediaAPIClient alloc] initWithPort:[source[@"port"] integerValue] catalogID:catalogID];
     client.playTimeoutMilliseconds=timeout;
     return client;

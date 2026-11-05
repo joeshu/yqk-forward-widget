@@ -14,7 +14,8 @@ typedef NS_ENUM(NSInteger, ResourceImportOption) {
     ResourceImportOptionPythonFile,
     ResourceImportOptionNodeFile,
     ResourceImportOptionHostCapabilities,
-    ResourceImportOptionFolder
+    ResourceImportOptionFolder,
+    ResourceImportOptionTVBoxFile
 };
 
 @interface ResourceImportSheetViewController : UIViewController

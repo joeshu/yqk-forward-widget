@@ -46,6 +46,21 @@ int main(int argc, const char **argv) {
         check(![stalled shouldRecoverMissingSetupAtTime:120 alreadyRetried:NO failed:YES], @"do not bypass failure or authentication rejection");
         [stalled record:@"setup" atTime:103];
         check(![stalled shouldRecoverMissingSetupAtTime:120 alreadyRetried:NO failed:NO], @"buffering after setup is not missing core");
+        PlaybackStartupTrace *preloaded=[[PlaybackStartupTrace alloc] initWithStartTime:100];
+        [preloaded record:@"preloadedVDN" atTime:100];
+        check(![preloaded shouldRecoverMissingSetupAtTime:107.9 alreadyRetried:NO failed:NO], @"metadata handoff retains the overall startup grace period");
+        check([preloaded shouldRecoverMissingSetupAtTime:108 alreadyRetried:NO failed:NO], @"metadata handoff recovers missing core without a repeated VDN callback");
+        check(![preloaded shouldRecoverMissingSetupAtTime:120 alreadyRetried:YES failed:NO], @"metadata handoff recovery remains single-use");
+        check(![preloaded shouldRecoverMissingSetupAtTime:120 alreadyRetried:NO failed:YES], @"metadata handoff cannot bypass a terminal failure");
+        [preloaded record:@"frame" atTime:109];
+        check(![preloaded shouldRecoverMissingSetupAtTime:120 alreadyRetried:NO failed:NO], @"rendered metadata handoff never restarts");
+        PlaybackStartupTrace *preloadedSetup=[[PlaybackStartupTrace alloc] initWithStartTime:100];
+        [preloadedSetup record:@"preloadedVDN" atTime:100];[preloadedSetup record:@"setup" atTime:101];
+        check(![preloadedSetup shouldRecoverMissingSetupAtTime:120 alreadyRetried:NO failed:NO], @"metadata handoff with a core is not missing setup");
+        PlaybackStartupTrace *repeatedVDN=[[PlaybackStartupTrace alloc] initWithStartTime:100];
+        [repeatedVDN record:@"preloadedVDN" atTime:100];[repeatedVDN record:@"vdn" atTime:107];
+        check(![repeatedVDN shouldRecoverMissingSetupAtTime:108 alreadyRetried:NO failed:NO], @"a new VDN callback receives its full core-creation grace period");
+        check([repeatedVDN shouldRecoverMissingSetupAtTime:113 alreadyRetried:NO failed:NO], @"repeated VDN still permits bounded missing-core recovery");
         __block BOOL done = NO;
         __block NSInteger calls = 0;
         LocalServiceReadiness *ready = [[LocalServiceReadiness alloc]

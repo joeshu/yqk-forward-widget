@@ -420,6 +420,53 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('[self.nativeRouteProbe cancel]',method_body('- (void)stopPlayback'))
         self.assertIn('self.nativePlainRouteActive?0:1',method_body('- (void)startRemoteChannel:'))
 
+    def test_builtin_cctv_channel_ids_exist_in_bundled_cnplayer_config(self):
+        channels=json.loads((SOURCE.parents[1]/"Resources"/"channels.json").read_text(encoding="utf-8"))
+        sdk=json.loads((SOURCE.parents[1]/"Frameworks"/"CNPlayerSDK.framework"/"CNLiveConfig_V2th.json").read_text(encoding="utf-8"))
+        sdk_ids={row.get("channel") for row in sdk.get("client_config",{}).get("channel_info",[]) if isinstance(row,dict)}
+        missing=[row.get("id") for row in channels if not row.get("remoteURL") and row.get("id") not in sdk_ids]
+        self.assertEqual([],missing,f"built-in SDK channel IDs missing from the bundled CNPlayer config: {missing}")
+
+    def test_cctv1_udrm_routes_are_never_sent_to_plain_avplayer_probe(self):
+        channels=json.loads((SOURCE.parents[1]/"Resources"/"channels.json").read_text(encoding="utf-8"))
+        sdk=json.loads((SOURCE.parents[1]/"Frameworks"/"CNPlayerSDK.framework"/"CNLiveConfig_V2th.json").read_text(encoding="utf-8"))
+        cctv1=next(row for row in channels if row.get("id")=="cctv1")
+        sdk_cctv1=next(row for row in sdk["client_config"]["channel_info"] if row.get("channel")=="cctv1")
+        self.assertEqual("1",sdk_cctv1.get("drm"))
+        self.assertTrue(all("/udrm" in route.get("url","").lower() for route in cctv1.get("routes",[])))
+        self.assertIn('return [path containsString:@"/udrm"]||[query containsString:@"udrm"]',TEXT)
+        playback=method_body("- (void)playChannel:")
+        self.assertLess(playback.index("if(CCTVRouteRequiresSDK(route))"),playback.index("self.nativeRouteProbe=[HLSRouteProbe new]"))
+        self.assertIn("[self playViaSDKURL:selectedURL channelID:cid title:self.channelName]",playback)
+
+    def test_sdk_channel_failures_keep_safe_channel_and_node_diagnostics(self):
+        selection=method_body('- (void)selectChannel:')
+        startup=method_body('- (void)playViaSDK:')
+        failure=method_body('- (void)displayNativePlaybackFailure:(NSString *)stage error:(NSError *)error {')
+        self.assertIn('selectionFields[@"sdk_channel_id"]',selection)
+        self.assertIn('startFields[@"sdk_channel_id"]',startup)
+        self.assertIn('failureFields[@"sdk_channel_id"]',failure)
+        self.assertIn('failureFields[@"sdk_reported_node"]',failure)
+        self.assertIn('if(![ProfileStore isHTTP:cid]&&cid.length<=128)',startup)
+        self.assertIn('if(![ProfileStore isHTTP:self.channelID]',failure)
+
+    def test_native_stop_restores_startup_buffer_before_reusing_sdk_wrapper(self):
+        stop=method_body('- (void)stopPlayback {')
+        self.assertLess(stop.index('[self.nativeStartupTuner restore]'),stop.index('self.nativeStartupTuner=nil'))
+        self.assertLess(stop.index('[self.nativeStartupTuner restore]'),stop.index('[self call:previous sel:@"stop"]'))
+
+    def test_sdk_auto_uses_official_license_defaults_and_requires_explicit_acceptance(self):
+        setup=method_body('- (void)setupSDK {')
+        self.assertIn('[CNPlayer startPlayerSDK_Options:[CNPlayer defaultOptions]]',setup)
+        self.assertNotIn('configSDK_CICADA_UDRMUrl:',setup)
+        self.assertNotIn('kLicenseUrl',TEXT)
+        startup=method_body('- (void)playViaSDK:')
+        self.assertIn('if(![accepted isKindOfClass:NSNumber.class]||![accepted boolValue])',startup)
+        self.assertIn('self.currentPlayer=nil;self.sdkPlayer=nil;self.sdkPlayerUsed=NO',startup)
+        terminal=startup[startup.index('if(!inst||![accepted isKindOfClass:NSNumber.class]||![accepted boolValue])'):]
+        self.assertLess(terminal.index('self.currentPlayer=nil;self.sdkPlayer=nil;self.sdkPlayerUsed=NO'),terminal.index('displayNativePlaybackFailure:'))
+        self.assertLess(terminal.index('[inst setValue:nil forKey:@"delegate"]'),terminal.index('[self call:inst sel:@"stop"]'))
+
     def test_player_toolbar_uses_real_airplay_picker_and_keeps_channel_logos_stable(self):
         self.assertIn('AVRoutePickerView *catalogFloatingAirPlayPicker', TEXT)
         self.assertIn('catalogFloatingAirPlayPicker.accessibilityIdentifier=@"channel.catalog.airplay"', TEXT)

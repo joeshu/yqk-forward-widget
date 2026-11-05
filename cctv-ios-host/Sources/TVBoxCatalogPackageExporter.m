@@ -99,7 +99,17 @@ static NSString *TVBoxPackageSafeName(NSString *value) {
     self.completedCount++;[self.taskEntries removeObjectForKey:identifier];[self.taskData removeObjectForKey:identifier];[self.redirectCounts removeObjectForKey:identifier];if(self.progressHandler)dispatch_async(dispatch_get_main_queue(),^{self.progressHandler(self.completedCount,self.totalCount,entry[@"name"]?:@"资源");});[self pump];
 }
 - (void)finishArchive {
-    if(self.finished||self.cancelled)return;NSError *error=nil;NSData *manifest=[NSJSONSerialization dataWithJSONObject:@{@"format":@"CCTVHostTVBoxPackage",@"version":@1,@"files":self.manifestEntries,@"failures":self.manifestFailures} options:NSJSONWritingPrettyPrinted|NSJSONWritingSortedKeys error:&error];if(manifest)self.archiveFiles[@"source-manifest.json"]=manifest;NSString *readme=[NSString stringWithFormat:@"TVBox 资源合集完整导出\n\nconfig.json 是完整原始配置；scripts/ 内为按原站点 URL 获取的 PY/JS 文件；source-manifest.json 记录每个文件及未能下载的项目。\n\n文件：%lu 个 · 未能获取：%lu 个\n",(unsigned long)self.manifestEntries.count,(unsigned long)self.failedCount];self.archiveFiles[@"README.txt"]=[readme dataUsingEncoding:NSUTF8StringEncoding];NSURL *url=manifest?[TVBoxCatalogStore writeZIPArchiveForCatalogID:self.catalogID files:self.archiveFiles error:&error]:nil;if(!url&&!error)error=TVBoxPackageError(@"生成 ZIP 文件失败");[self finish:url error:error];
+    if(self.finished||self.cancelled)return;
+    NSError *error=nil;
+    NSData *manifest=[NSJSONSerialization dataWithJSONObject:@{@"format":@"CCTVHostTVBoxPackage",@"version":@1,@"files":self.manifestEntries,@"failures":self.manifestFailures} options:NSJSONWritingPrettyPrinted|NSJSONWritingSortedKeys error:&error];
+    if(manifest)self.archiveFiles[@"source-manifest.json"]=manifest;
+    NSUInteger collected=self.manifestEntries.count>=self.failedCount?self.manifestEntries.count-self.failedCount:0;
+    NSString *state=self.failedCount?@"部分导出 · 内部脚本未收齐":@"完整导出";
+    NSString *readme=[NSString stringWithFormat:@"TVBox 资源合集%@\n\nconfig.json 是完整原始配置；scripts/ 内只包含成功获取的 PY/JS 文件；source-manifest.json 记录每个文件及未能获取的项目。\n\n内部脚本：已收集 %lu / %lu · 未能获取 %lu 个\n",state,(unsigned long)collected,(unsigned long)self.manifestEntries.count,(unsigned long)self.failedCount];
+    self.archiveFiles[@"README.txt"]=[readme dataUsingEncoding:NSUTF8StringEncoding];
+    NSURL *url=manifest?[TVBoxCatalogStore writeZIPArchiveForCatalogID:self.catalogID files:self.archiveFiles error:&error]:nil;
+    if(!url&&!error)error=TVBoxPackageError(@"生成 ZIP 文件失败");
+    [self finish:url error:error];
 }
 - (void)finish:(NSURL *)url error:(NSError *)error {
     if(self.finished)return;self.finished=YES;[self.session invalidateAndCancel];self.session=nil;void(^completion)(NSURL *,NSUInteger,NSError *)=self.completion;self.completion=nil;if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(url,self.failedCount,error);});

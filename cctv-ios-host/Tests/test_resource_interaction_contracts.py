@@ -23,6 +23,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         cls.import_workflow = (ROOT / 'Sources/ResourceImportWorkflowViewController.m').read_text()
         cls.services = (ROOT / 'Sources/ServicesViewController.m').read_text()
         cls.package_downloader = (ROOT / 'Sources/MediaPackageDownloader.m').read_text()
+        cls.js_runtime = (ROOT / 'Sources/JSPluginRuntime.m').read_text()
 
     def test_player_exit_cancels_work_after_confirmed_transition(self):
         will = self.playback.split('- (void)viewWillDisappear:', 1)[1].split('- (void)viewDidDisappear:', 1)[0]
@@ -40,6 +41,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         for kind in ('all', 'vod', 'live', 'catalog', 'script', 'attention'):
             self.assertIn(f'@"id":@"{kind}"', self.catalog)
         self.assertIn('resource-filter-', self.catalog)
+        self.assertIn('chevron.up', self.catalog)
+        self.assertIn('importTaskExpanded?76:44', self.catalog)
         self.assertIn('profile:profile matchesKind:identifier', self.catalog)
         self.assertIn('initWithFrame:CGRectMake(0,0,96,44)', self.catalog)
         self.assertIn('running.transform=CGAffineTransformMakeScale(.88,.88)', self.catalog)
@@ -48,6 +51,17 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('onToggleProfile(p[@"source"], sender.on)', self.catalog)
         self.assertIn('onToggle=^', self.root)
         self.assertIn('isRunningServiceIdentifier', self.root)
+        self.assertIn('打开资源详情与配置', self.services)
+        self.assertNotIn('查看 / 导出代码', self.services)
+        self.assertIn(': section == 3 ? 3', self.services)
+
+    def test_floating_resource_add_opens_the_unified_import_workflow(self):
+        action = self.root.split('UIAction *import=', 1)[1].split(';', 1)[0]
+        self.assertIn('actionWithTitle:@"添加资源"', action)
+        self.assertIn('[weakSelf addSubscription]', action)
+        self.assertNotIn('[weakSelf importMediaPackage]', action)
+        self.assertIn('导入资源 · URL / 文件 / 文件夹', self.services)
+        self.assertIn('self.onImportResource();', self.services)
 
     def test_resource_return_layout_reuses_filters_and_measures_variable_rows(self):
         self.assertIn('@interface CCTVResourceProfileCell : UITableViewCell', self.catalog)
@@ -74,6 +88,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('- (NSString *)resourceTitleForProfile:(NSDictionary *)profile', self.catalog)
         self.assertIn('- (NSString *)resourceDetailForProfile:(NSDictionary *)profile', self.catalog)
         self.assertIn('个缓存频道', self.catalog)
+        self.assertIn('最近保存', self.catalog)
+        self.assertIn('最近更新', self.catalog)
+        self.assertIn('检测中…', self.catalog)
         self.assertIn('profile[@"count"]?:@0,profile[@"epgStatus"]?:@"自动匹配"', self.catalog)
         self.assertIn('summary=[summary stringByAppendingFormat:@"\\n%@",profile[@"status"]]', self.catalog)
         self.assertIn('c.detailTextLabel.text=[self resourceDetailForProfile:p]', self.catalog)
@@ -539,6 +556,16 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('importFingerprint', self.import_workflow)
         self.assertIn('filename.lastPathComponent', self.import_workflow)
 
+    def test_categorized_import_remains_inside_advanced_options_and_reuses_preview(self):
+        self.assertIn('advancedOptionsExpanded?7:5', self.import_workflow)
+        self.assertIn('按类型选择导入方式', self.import_workflow)
+        self.assertIn('showCategorizedImportOptions', self.import_workflow)
+        self.assertIn('applyImportCategory:', self.import_workflow)
+        self.assertIn('snapshot[@"importCategory"]', self.import_workflow)
+        self.assertIn('ResourceImportOptionTVBoxFile', self.import_workflow)
+        self.assertIn('catalogWithMacCMSAPIURL:raw name:nil', self.import_workflow)
+        self.assertIn('workflow.onOpenServices=^{[weakSelf openServicesPage];}', self.root)
+
     def test_service_health_snapshot_is_persistent_and_channel_counts_are_scoped(self):
         self.assertIn('healthSnapshotForServiceIdentifier:', self.service_store)
         self.assertIn('recordHealthSnapshot:', self.service_store)
@@ -891,15 +918,19 @@ class ResourceInteractionContracts(unittest.TestCase):
         sheet = (ROOT / 'Sources/ResourceImportSheetViewController.m').read_text()
         importer = (ROOT / 'Sources/MediaPackageImporter.m').read_text()
         downloader = (ROOT / 'Sources/MediaPackageDownloader.m').read_text()
+        workflow = self.import_workflow
         self.assertIn('ResourceImportOptionPythonURL', sheet)
         self.assertIn('ResourceImportOptionCatVodURL', sheet)
         self.assertIn('ResourceImportOptionNodeURL', sheet)
         self.assertIn('ResourceImportOptionHostCapabilities', sheet)
         self.assertIn('ResourceImportOptionFolder', sheet)
-        self.assertIn('picker.allowsMultipleSelection=YES', self.root)
-        self.assertIn('- (void)importMultipleMediaFiles:', self.root)
-        self.assertIn('- (void)importResourceFolderContents:', self.root)
-        self.assertIn('UTTypeFolder', self.root)
+        self.assertIn('showCategorizedImportOptions', workflow)
+        self.assertIn('applyImportCategory:', workflow)
+        self.assertIn('UTTypeFolder', workflow)
+        self.assertIn('picker.allowsMultipleSelection=!folder', workflow)
+        self.assertNotIn('importMediaPackage', self.root)
+        self.assertNotIn('importMultipleMediaFiles', self.root)
+        self.assertNotIn('importTVBoxCatalog', self.root)
         self.assertIn('runtimeHint:self.runtimeHint', downloader)
         self.assertIn('inspectDirectory:package runtimeHint:runtimeHint', importer)
         self.assertIn('Node.js 快捷导入只适用于 JavaScript 入口', importer)
@@ -922,6 +953,10 @@ class ResourceInteractionContracts(unittest.TestCase):
         workflow = (ROOT / 'Sources/ResourceImportWorkflowViewController.m').read_text()
         self.assertIn('选择文件（多选）', workflow)
         self.assertIn('选择文件夹', workflow)
+        self.assertIn('高级选项', workflow)
+        self.assertIn('runtimeSelection', workflow)
+        self.assertIn('仅重试失败项', workflow)
+        self.assertNotIn('高级导入方式', workflow)
 
     def test_native_crypto_does_not_use_private_cpython_bytes_resize(self):
         host = (ROOT / 'Sources/PyHost.m').read_text()
@@ -945,8 +980,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         catalog_view = (ROOT / 'Sources/TVBoxCatalogViewController.m').read_text()
         api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
         self.assertIn('ResourceImportOptionTVBox', (ROOT / 'Sources/ResourceImportSheetViewController.m').read_text())
-        self.assertIn('TVBoxCatalogStore parseData:data sourceURL:nil', self.root)
-        self.assertIn('保留独立副本', self.root)
+        self.assertIn('TVBoxCatalogStore parseData:data sourceURL:origin', self.import_workflow)
+        self.assertIn('@[@"更新已有",@"保存副本"]', self.import_workflow)
         self.assertIn('全量导入（较慢）', catalog_view)
         self.assertIn('推荐按需加载', catalog_view)
         self.assertIn('type 1/4 JSON API', catalog_view)
@@ -990,18 +1025,16 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('type 1 direct playback', (ROOT / 'Tests/native_media_api_tests.m').read_text())
 
     def test_smart_resource_import_recognizes_tvbox_json_and_ios_bundle_urls(self):
-        root = self.root
-        detection = root.rsplit('- (BOOL)shouldImportTVBoxCatalogFromURL:', 1)[1].split('- (void)importMediaURLWithTitle:', 1)[0]
-        self.assertIn('runtimeHint.length)return NO', detection)
-        self.assertIn('url.pathExtension.lowercaseString isEqual:@"json"', detection)
-        self.assertIn('parts.path.lastPathComponent.lowercaseString isEqual:@"get"', detection)
-        self.assertIn('item.value.lowercaseString isEqual:@"ios"', detection)
-        self.assertIn('name isEqual:@"token"', detection)
-        self.assertIn('[downloader loadURL:url completion:', detection)
-        self.assertIn('[owner acceptTVBoxCatalog:catalog]', detection)
-        self.assertIn('TVBox JSON、iOS 资源合集地址', root)
-        import_sheet = (ROOT / 'Sources/ResourceImportSheetViewController.m').read_text()
-        self.assertIn('影视 / 合集链接 · 自动识别', import_sheet)
+        workflow = self.import_workflow
+        self.assertIn('TVBoxCatalogStore parseData:data sourceURL:origin', workflow)
+        self.assertIn('candidateForData:data file:', workflow)
+        self.assertIn('catalogWithMacCMSAPIURL:origin', workflow)
+        self.assertIn('row[@"kind"] isEqual:@"catalog"', workflow)
+        self.assertIn('ResourceImportFetcher', workflow)
+        self.assertIn('isEqual:@"url"', workflow)
+        self.assertIn('recognizeURL', workflow)
+        self.assertIn('response.URL.absoluteString?:raw', workflow)
+        self.assertNotIn('shouldImportTVBoxCatalogFromURL', self.root)
 
     def test_tvbox_collection_can_be_added_as_a_bounded_batch_with_live_user_agents(self):
         bulk = (ROOT / 'Sources/TVBoxCatalogBulkImporter.m').read_text()
@@ -1061,7 +1094,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('exportSingleResourceForCatalogID:', store)
         self.assertIn('TVBoxZIPData', store)
         self.assertIn('导出完整合集 JSON', catalog_view)
-        self.assertIn('导出完整资源 ZIP（含 PY / JS）', catalog_view)
+        self.assertIn('导出资源 ZIP（含可获取的 PY / JS）', catalog_view)
+        self.assertNotIn('导出完整资源 ZIP（含 PY / JS）', catalog_view)
         self.assertIn('contextMenuConfigurationForRowAtIndexPath', catalog_view)
         self.assertIn('导出单项资源文件', resource_view)
         self.assertIn('catalog-json', resource_view)
@@ -1070,6 +1104,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('CCTVTVBoxStoredSubscriptionToken()', root)
         self.assertIn('scripts/%03lu-', exporter)
         self.assertIn('source-manifest.json', exporter)
+        self.assertIn('部分导出 · 内部脚本未收齐', exporter)
+        self.assertIn('已收集 %lu / %lu', exporter)
         self.assertIn('128*1024*1024', exporter)
         native = (ROOT / 'Tests/native_profile_tests.m').read_text()
         self.assertIn('complete collection JSON and single-site JSON preserve original provider fields', native)
@@ -1338,6 +1374,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertEqual(len(for_adm['sites']), 8)
         self.assertEqual(len(for_adm['lives']), 0)
         self.assertTrue(all(site.get('type') == 'script' and site.get('api', '').lower().split('?', 1)[0].endswith('.js') for site in for_adm['sites']))
+        self.assertTrue(all(site['api'].endswith('?v=3') for site in for_adm['sites']))
         self.assertEqual(len({site['key'] for site in for_adm['sites']}), 8)
         for builtin, example in (
             (resources / 'hongguo-python.py', ROOT / 'Examples/hgtv-python/hgtv_public_1_0_5.py'),
@@ -1391,6 +1428,16 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('raw.githubusercontent.com', downloader)
         for source in ('kkapp', 'ncat', 'happ'):
             self.assertIn(f'/joeshu/for-adm/master/cctvhost/{source}.js', downloader)
+        self.assertIn('/joeshu/for-adm/master/cctvhost/yqk.js', downloader)
+        self.assertIn('sitePrepareImageDomains(value)', downloader)
+        self.assertIn("siteHeaderValue(headers,'encrypted')!=='1'", downloader)
+        self.assertIn("contentType.indexOf('image/')===0", downloader)
+        self.assertIn('await sitePrepareImageDomains(data)', downloader)
+        self.assertIn('encrypted_image_requires_decryption_or_clear_mirror', (ROOT / 'Sources/HostImageLoader.m').read_text())
+        self.assertIn('timeout=MAX(timeout,60000)', self.playback)
+        self.assertIn('rawTimeout=opts[@"timeout"]', self.js_runtime)
+        self.assertIn('timeoutInterval:timeout', self.js_runtime)
+        self.assertIn('timeoutIntervalForResource=self.genericMode?120:15', self.js_runtime)
         self.assertIn('/joeshu/for-adm/master/cctvhost/dyls.js', downloader)
         self.assertIn("if(String(ep.parseUrl||'').trim())return false", downloader)
         self.assertIn("function dylProbeHls(url,headers)", downloader)
@@ -1404,6 +1451,10 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('rows=Array.isArray(result)?result:', downloader)
         self.assertIn("headers.Referer=Source.origin+'/'", downloader)
         self.assertIn('For-ADM 三源脚本协议已变化，未导入不兼容版本。', downloader)
+        self.assertIn('adapterOccurrences==1&&![text containsString:@"async function sitePrepareImageDomains(value)"]', downloader)
+        self.assertIn('probe=siteImageDomains[String(row.imageGroup||\'\')]', downloader)
+        self.assertIn('resolverOccurrences==1&&![text containsString:@"async function dylProbeHls(url,headers)"]', downloader)
+        self.assertIn('function yqkRequestTimeout(budget,fallback)', downloader)
 
     def test_explicit_maccms_web_pages_keep_the_web_playback_handoff(self):
         api = (ROOT / 'Sources/MediaAPIClient.m').read_text()

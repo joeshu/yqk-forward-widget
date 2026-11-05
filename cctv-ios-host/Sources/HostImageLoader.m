@@ -20,6 +20,7 @@ static NSUInteger const ImageQueueLimit = 96;
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) CFTimeInterval startedAt;
 @property(nonatomic) NSInteger httpStatus;
+@property(nonatomic) BOOL responseEncrypted;
 @property(nonatomic) double pixelWidth;
 @property(nonatomic) double pixelHeight;
 @property(nonatomic) long long expectedContentLength;
@@ -133,7 +134,7 @@ static NSUInteger const ImageQueueLimit = 96;
         if(!HostImageDomainAllows(domain.mutableBytes,CACurrentMediaTime())){[self.requests removeObjectForKey:record.cacheKey];continue;}
         NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:record.url]];
         [request setValue:@"image/*" forHTTPHeaderField:@"Accept"];
-        record.data=[NSMutableData data];record.startedAt=CACurrentMediaTime();record.httpStatus=0;record.expectedContentLength=-1;record.responseContentType=@"";record.failureStage=nil;record.task=[self.session dataTaskWithRequest:request];
+        record.data=[NSMutableData data];record.startedAt=CACurrentMediaTime();record.httpStatus=0;record.expectedContentLength=-1;record.responseContentType=@"";record.responseEncrypted=NO;record.failureStage=nil;record.task=[self.session dataTaskWithRequest:request];
         record.task.priority=NSURLSessionTaskPriorityLow;self.tasks[@(record.task.taskIdentifier)]=record;[record.task resume];
     }
 }
@@ -147,7 +148,7 @@ static NSUInteger const ImageQueueLimit = 96;
         if((previous<3&&state->timeouts>=3)||probe)[RuntimeDiagnostics.shared recordEvent:probe?@"image_domain_probe_finished":@"image_domain_backoff_started" category:@"media_api" fields:@{@"image_host":[NSURL URLWithString:record.url].host?:@"",@"http_status":@(record.httpStatus),@"error_code":@(error.code),@"remaining_backoff_seconds":@(MAX(0,state->until-CACurrentMediaTime())),@"timeout_streak":@(state->timeouts)}];
     }
     UIImage *image=nil;
-    if(!error && record.generation==self.generation && record.data.length) {
+    if(!error && record.generation==self.generation && record.data.length && !record.responseEncrypted) {
         CGImageSourceRef source=CGImageSourceCreateWithData((__bridge CFDataRef)record.data, (__bridge CFDictionaryRef)@{(__bridge NSString *)kCGImageSourceShouldCache:@NO});
         if(source) {
             NSDictionary *properties=CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source,0,NULL));
@@ -173,7 +174,7 @@ static NSUInteger const ImageQueueLimit = 96;
             [RuntimeDiagnostics.shared recordEvent:@"poster_image_failed" category:@"media_api" fields:@{
                 @"failure_stage":failureStage,@"image_host":imageURL.host.lowercaseString?:@"",
                 @"image_extension":imageURL.pathExtension.lowercaseString?:@"",@"http_status":@(record.httpStatus),
-                @"content_type":record.responseContentType?:@"",@"response_bytes":@(record.data.length),
+                @"content_type":record.responseContentType?:@"",@"encrypted_response":@(record.responseEncrypted),@"response_bytes":@(record.data.length),
                 @"expected_content_length_known":@(record.expectedContentLength>=0),@"expected_response_bytes":@(MAX(0,record.expectedContentLength)),
                 @"response_length_matches_expected":@(record.expectedContentLength>=0&&(long long)record.data.length==record.expectedContentLength),
                 @"image_pixel_width":@(isfinite(record.pixelWidth)?record.pixelWidth:0),@"image_pixel_height":@(isfinite(record.pixelHeight)?record.pixelHeight:0),
@@ -200,7 +201,7 @@ static NSUInteger const ImageQueueLimit = 96;
     HostImageRequest *record=self.tasks[@(task.taskIdentifier)];
     NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;
     NSUInteger bodyLimit=record?[self maximumBodyLengthForRequest:record]:ImageBodyLimit;
-    if(record){record.httpStatus=status;record.expectedContentLength=response.expectedContentLength;NSString *contentType=response.MIMEType.lowercaseString?:@"";record.responseContentType=[contentType substringToIndex:MIN((NSUInteger)96,contentType.length)];if(status!=200)record.failureStage=@"http_status";else if(response.expectedContentLength>(long long)bodyLimit)record.failureStage=@"response_too_large";}
+    if(record){record.httpStatus=status;record.expectedContentLength=response.expectedContentLength;NSString *contentType=response.MIMEType.lowercaseString?:@"";record.responseContentType=[contentType substringToIndex:MIN((NSUInteger)96,contentType.length)];NSDictionary *headers=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response allHeaderFields]:@{};for(id key in headers)if([[key description].lowercaseString isEqual:@"encrypted"]&&[[headers[key] description] isEqual:@"1"]){record.responseEncrypted=YES;break;}if(status!=200)record.failureStage=@"http_status";else if(response.expectedContentLength>(long long)bodyLimit)record.failureStage=@"response_too_large";else if(record.responseEncrypted)record.failureStage=@"encrypted_image_requires_decryption_or_clear_mirror";}
     BOOL valid=record && status==200 && response.expectedContentLength<=(long long)bodyLimit;
     completion(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);
     if(!valid && record){[self.failures setObject:[NSDate dateWithTimeIntervalSinceNow:HostImageFailureBackoff(record.httpStatus)] forKey:record.cacheKey];}
