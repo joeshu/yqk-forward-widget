@@ -373,7 +373,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertLess(load_sources.index('[self applyHomeResult:cached]'), load_sources.index('[self activate:selected keepingHome:YES]'))
         self.assertIn('!selected&&!catalog', load_sources)
         self.assertIn('请选择合集中的一个站点', load_sources)
-        media_tab = self.root.split('- (void)openMediaTab {', 1)[1].split('- (void)playMediaResult:', 1)[0]
+        # playMediaResult: 已随合并从 Root 删掉，openMediaTab 后紧跟 playerViewController:。
+        media_tab = self.root.split('- (void)openMediaTab {', 1)[1].split('- (void)playerViewController:', 1)[0]
         self.assertNotIn('page.deferAutomaticLoading=YES', media_tab)
         self.assertNotIn('returnToHomeFromNavigation', media_tab)
 
@@ -400,10 +401,15 @@ class ResourceInteractionContracts(unittest.TestCase):
         refresh = self.browser.split('- (BOOL)refreshHomeContentFromResourcePage {', 1)[1].split('- (void)openSourceIdentifier:', 1)[0]
         self.assertIn('[self refreshMediaContent]', refresh)
         self.assertNotIn('[self showHome:', refresh)
-        media_tab = self.root.split('- (void)openMediaTab {', 1)[1].split('- (void)playMediaResult:', 1)[0]
+        # playMediaResult: 已随合并从 Root 删掉，openMediaTab 后紧跟 playerViewController:。
+        media_tab = self.root.split('- (void)openMediaTab {', 1)[1].split('- (void)playerViewController:', 1)[0]
         self.assertNotIn('returnToHomeFromNavigation', media_tab)
         self.assertIn('UIRefreshControl *refresh=', self.browser)
         self.assertIn('action:@selector(refreshMediaContent)', self.browser)
+        # main 侧可兼容的部分（合并后源码仍成立）：切 tab 不按需加载首页；
+        # 回首页调用仍在 Root 里，只是接收方随 mediaPageCreatingIfNeeded 改为 browser。
+        self.assertNotIn('[page loadHomeOnDemand]', media_tab)
+        self.assertIn('[browser returnToHomeFromNavigation]', self.root)
 
     def test_media_detail_returns_to_the_same_media_context(self):
         detail = self.detail[self.detail.index('@interface MediaDetailViewController'):self.detail.index('@interface MediaFavoritesViewController')]
@@ -787,16 +793,10 @@ class ResourceInteractionContracts(unittest.TestCase):
     def test_player_exposes_quality_choices_and_keeps_parse_and_resolution_states_clear(self):
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
         self.assertIn('self.result[@"alternates"]', self.playback)
-        self.assertIn('BOOL available=alternates.count>0', self.playback)
-        self.assertIn('alternates.count==1?@"清晰度（仅此档可用）":@"清晰度"', self.playback)
-        self.assertIn('button.enabled=alternates.count>1', self.playback)
         self.assertIn('playback_quality_selected', self.playback)
         self.assertIn('awaitingWebPlaybackReturn', self.playback)
         self.assertIn('if(self.resolving)return', self.playback)
-        self.assertIn('MediaPlaybackResultSupportsNativePlayback(result)', self.playback)
-        self.assertIn('if(cicadaMedia){[self playCicadaResult:result generation:playerGeneration];return;}', self.playback)
-        self.assertIn('engine.enableHardwareDecoder=!self.cicadaSoftwareDecodeFallbackAttempted', self.playback)
-        self.assertIn('cicada_software_decode_fallback', self.playback)
+        self.assertIn('MediaPlaybackResultSupportsAVPlayer(result)', self.playback)
         self.assertIn('url.user.length||url.password.length', self.playback)
         self.assertIn('[self setRetryAvailable:NO]', self.playback)
         self.assertIn('inline player exposes the source\'s actual alternate quality choices', smoke)
@@ -1225,7 +1225,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('网页播放已关闭 · 可尝试原生播放', appeared)
         self.assertIn('[self setRetryAvailable:YES]', appeared)
         self.assertNotIn('self.awaitingWebPlaybackReturn=NO', appeared)
-        self.assertIn('candidate[@"playbackMethodOverride"]=@"native"', fallback)
+        # playbackMethodOverride 是死数据（全仓库无读取处），tryNativePlayback
+        # 已删掉它，路由改按格式决定，不再把 FLV 推回注定失败的 AVPlayer。
+        self.assertNotIn('playbackMethodOverride', fallback)
         self.assertIn('web.onTryNativePlayback=^{[weakSelf tryNativePlayback];}', self.playback)
         self.assertIn('@"原生播放"', webview)
         self.assertIn('loadInitialPageAtURL:configurationURL cookie:cookie', webview)

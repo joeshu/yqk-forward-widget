@@ -37,6 +37,11 @@
         NSString *configurationHost=configurationURL.host.lowercaseString?:@"";
         if(![configurationURL.scheme isEqual:@"http"]||![@[@"127.0.0.1",@"localhost",@"::1"] containsObject:configurationHost]||!configurationURL.port||configurationURL.user.length||configurationURL.password.length){self.navigationItem.prompt=@"配置页地址无效";[self showStatusMessage:@"配置页地址无效，请检查来源配置后重试"];return;}
         // Install only this loopback service's normal login cookie, never a script bridge.
+        // Do not gate the first load on the cookie-store install: WKHTTPCookieStore
+        // setCookie completion is unreliable on an ephemeral store and can leave the
+        // web view with a nil URL (smoke step 16d). The initial request already carries
+        // the Cookie header (set in -refresh via MediaPlaybackHeadersFromResult), so
+        // load immediately and install the cookie in the background for later navigations.
         NSString *cookie=nil;for(NSString *key in headers)if([key.lowercaseString isEqual:@"cookie"])cookie=headers[key];
         [self loadInitialPageAtURL:configurationURL cookie:cookie];
     }else{

@@ -86,7 +86,6 @@
 - (NSDictionary *)channelWithID:(NSString *)identifier;
 - (void)player:(id)player statEvent:(NSUInteger)event value:(id)value;
 - (void)player:(id)player playbackFailed:(NSError *)error;
-- (void)playMediaResult:(NSDictionary *)result name:(NSString *)name;
 - (void)addSubscription;
 - (NSIndexPath *)indexPathForChannelID:(NSString *)channelID;
 @end

@@ -14,7 +14,7 @@
 - (void)loadURL:(NSURL *)url completion:(void (^)(NSDictionary *,NSError *))completion {
     self.completion=completion;self.source=url.absoluteString;self.redirectCount=0;NSURLComponents *parts=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
     if(!parts||![@[@"https",@"http"] containsObject:parts.scheme.lowercaseString]||!parts.host.length||parts.user.length||parts.password.length){[self finish:nil error:[self failure:@"请输入有效的 HTTP/HTTPS TVBox JSON 地址"]];return;}
-    NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPCookieStorage=nil;config.timeoutIntervalForRequest=15;config.timeoutIntervalForResource=20;
+    NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPCookieStorage=nil;NSTimeInterval savedTimeout=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.networkTimeout.v1"]?[[NSUserDefaults standardUserDefaults] doubleForKey:@"cctv.networkTimeout.v1"]:20;NSTimeInterval timeout=MIN(40,MAX(5,savedTimeout));config.timeoutIntervalForRequest=timeout;config.timeoutIntervalForResource=timeout+5;
     NSOperationQueue *queue=[NSOperationQueue new];queue.maxConcurrentOperationCount=1;self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:queue];self.data=[NSMutableData data];self.task=[self.session dataTaskWithURL:url];[self.task resume];
 }
 - (void)cancel {[self finish:nil error:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]];}

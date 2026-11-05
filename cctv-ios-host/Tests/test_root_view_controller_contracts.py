@@ -144,9 +144,12 @@ class RootViewControllerSourceContracts(unittest.TestCase):
             self.assertIn("[self.remoteAttemptedURLs removeAllObjects]", method_body(signature))
 
     def test_timeshift_rejection_reports_the_specific_reason(self):
+        # 时移拒绝要报具体原因：控制器 completion 的 error.localizedDescription
+        # 原样透传给 failNativeTransition（无描述时才用兜底文案）。
         seek = method_body("- (void)seekNativeStart:")
-        self.assertIn("error:&seekError", seek)
-        self.assertIn("seekError.localizedDescription", seek)
+        self.assertIn("requestSeekToStart:", seek)
+        self.assertIn("error.localizedDescription", seek)
+        self.assertIn("failNativeTransition:", seek)
         timeshift = (SOURCE.parent / "NativeTimeshiftSession.h").read_text(encoding="utf-8")
         self.assertIn("CCTVHostTimeshiftErrorInvalidRange", timeshift)
         self.assertIn("CCTVHostTimeshiftErrorUnsupportedPlayer", timeshift)
@@ -585,9 +588,9 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('onLongPress:', TEXT)
 
     def test_video_text_overlays_hide_after_first_render(self):
+        # 首帧后隐藏文字浮层；回看/时移中除外（infoLabel 保留距直播指示）。
         body = method_body('- (void)player:(id)player statEvent:')
-        self.assertIn('self.titleLabel.hidden = YES', body)
-        self.assertIn('self.infoLabel.hidden = YES', body)
+        self.assertIn('if(!self.nativeTimeShiftActive){self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;}', body)
 
     def test_ios_plugin_uses_bounded_startup_resources(self):
         self.assertIn('@"--cache-mb",@"32"', TEXT)

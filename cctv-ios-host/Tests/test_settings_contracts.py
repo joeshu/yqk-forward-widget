@@ -4,6 +4,20 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def method_body(text, signature):
+    start = text.index(signature)
+    opening = text.index("{", start)
+    depth = 0
+    for index in range(opening, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[opening + 1:index]
+    raise AssertionError(f"unterminated Objective-C method: {signature}")
+
+
 class SettingsContracts(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -15,6 +29,7 @@ class SettingsContracts(unittest.TestCase):
         cls.media_api = (ROOT / 'Sources/MediaAPIClient.m').read_text()
         cls.browser = (ROOT / 'Sources/MediaBrowserViewController.m').read_text()
         cls.search = (ROOT / 'Sources/MediaGlobalSearchViewController.m').read_text()
+        cls.tvbox = (ROOT / 'Sources/TVBoxCatalogDownloader.m').read_text()
 
     def test_settings_expose_hidden_playback_preferences(self):
         # 只在播放器菜单里有的偏好，设置页也要有入口：自动连播、屏幕常亮、
@@ -103,6 +118,7 @@ class SettingsContracts(unittest.TestCase):
         self.assertIn('@\"cctv.channelGridColumns.v1\"', self.backup)
         self.assertIn('stringPreferenceKeys', self.backup)
         self.assertIn('@\"cctv.mediaVideoGravity\"', self.backup)
+        self.assertIn('@\"cctv.themeIdentifier.v1\"', self.backup)
         self.assertIn('[value doubleValue]<0.5||[value doubleValue]>2.0', self.backup)
         self.assertIn('[value integerValue]!=3&&[value integerValue]!=4', self.backup)
         self.assertIn('AVLayerVideoGravityResizeAspectFill', self.backup)
@@ -115,6 +131,11 @@ class SettingsContracts(unittest.TestCase):
         self.assertIn('autoSkippedOutroEpisodeIndex', self.playback)
         self.assertIn('autoSkipContext', self.playback)
         self.assertIn('[self performSkipAction];return;', self.playback)
+        # 续播/恢复到已过片头的位置后起播：把本集自动跳过标记置位，
+        # 之后手动拉回片头区间不再被自动拉走（跳过按钮仍可手动点按）。
+        self.assertIn('markAutoSkipFlagsForCurrentPosition', self.playback)
+        # AVPlayer 三处（从头播放/继续观看/恢复 seek）+ Cicada 三处，共 6 处。
+        self.assertEqual(self.playback.count('[owner markAutoSkipFlagsForCurrentPosition]'), 6)
 
     def test_settings_offer_default_quality(self):
         # 默认清晰度：设置页有选择入口；播放器建 AVPlayerItem 时按选择
@@ -124,6 +145,13 @@ class SettingsContracts(unittest.TestCase):
         self.assertIn('presentPreferredQualityPicker', self.settings)
         self.assertIn('preferredPeakBitRate', self.playback)
         self.assertIn('cctv.mediaPreferredQuality.v1', self.playback)
+        # 直播 AVPlayer 回退路径也要按偏好约束码率，不只影视播放页。
+        body = method_body(self.root, '- (void)startRemoteURL:(NSString *)url generation:(NSUInteger)generation')
+        self.assertIn('preferredPeakBitRate', body)
+        self.assertIn('cctv.mediaPreferredQuality.v1', body)
+        self.assertIn('1500000', body)
+        self.assertIn('4000000', body)
+        self.assertIn('8000000', body)
 
     def test_settings_offer_network_timeout(self):
         # 网络请求超时：设置页有 10/20/40 秒三档；影视数据请求默认走
@@ -132,6 +160,13 @@ class SettingsContracts(unittest.TestCase):
         self.assertIn('@\"values\":@[@10,@20,@40]', self.settings)
         self.assertIn('cctv.networkTimeout.v1', self.media_api)
         self.assertIn('requestTimeout:savedTimeout', self.media_api)
+        # 超时偏好要覆盖 TVBox/MacCMS 与全局搜索，不再写死 20/15 秒。
+        self.assertIn('initWithTVBoxSource', self.media_api)
+        self.assertNotIn('initWithPort:0 requestTimeout:20', self.media_api)
+        self.assertNotIn('initWithPort:port requestTimeout:15', self.search)
+        self.assertIn('initWithPort:port]', self.search)
+        self.assertIn('cctv.networkTimeout.v1', self.tvbox)
+        self.assertNotIn('timeoutIntervalForRequest=15', self.tvbox)
 
     def test_settings_offer_font_size(self):
         # 应用内字号：设置页有标准/大/特大三档；以系统字号为基准上调，
@@ -144,6 +179,16 @@ class SettingsContracts(unittest.TestCase):
         self.assertIn('traitCollectionWithPreferredContentSizeCategory', self.root)
         self.assertIn('setOverrideTraitCollection:', self.root)
         self.assertIn('cctv.appFontSize.v1', self.root)
+        # 覆盖基准必须是 iOS 系统字号（屏幕 trait，不受本控制器覆盖
+        # 影响，view 未进 window 时也能取到），否则每次重算都在已
+        # 上调的档位上再上调，大/特大都会顶到最大档；档位上调后按
+        # 最大档截断，不越顶。
+        body = method_body(self.root, '- (UITraitCollection *)fontSizeOverrideTraitCollection')
+        self.assertIn('[UIScreen mainScreen].traitCollection.preferredContentSizeCategory', body)
+        self.assertNotIn('view.window.traitCollection', body)
+        self.assertNotIn('systemBaseContentSizeCategory', body)
+        self.assertNotIn('self.traitCollection.preferredContentSizeCategory', body)
+        self.assertIn('MIN((NSInteger)ordered.count-1,index+offset)', body)
 
     def test_settings_offer_update_check(self):
         # 检查更新：设置页有入口；拉取 GitHub 最新发布并用数字比较版本
@@ -153,6 +198,32 @@ class SettingsContracts(unittest.TestCase):
         self.assertIn('releases/latest', self.settings)
         self.assertIn('NSNumericSearch', self.settings)
         self.assertIn('lastUpdateCheckText', self.settings)
+        # 同版本号新构建要提示“发现新构建”，不能说已是最新版本。
+        self.assertIn('发现新构建', self.settings)
+        self.assertIn('latestBuild.integerValue>installedBuild.integerValue', self.settings)
+
+    def test_default_speed_resume_branches_fall_back_to_1x(self):
+        # 续播读点（从头播放/继续观看/恢复 seek）与播放器启动处
+        # 都要有 objectForKey 保护，未设置过速度时默认 1.0，否则
+        # defaultRate=0 会让播放器静默不动。AVPlayer 三处 + Cicada
+        # 三处 + 长按恢复原速一处 + 播放器启动一处，共 8 处。
+        guarded = 'objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0'
+        self.assertEqual(self.playback.count(guarded), 8)
+        self.assertNotIn('defaultRate=(float)[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]', self.playback)
+
+    def test_clear_epg_cache_refreshes_its_row(self):
+        # 清理节目单缓存后要重刷本行，否则 detail 仍显示清理前的旧大小
+        #（cellForRow 每次渲染时重算大小，重刷后即显示新值）。
+        body = method_body(self.settings, '- (void)confirmClearEPG')
+        self.assertIn('indexPathForRowAction:@"clearEPG"', body)
+        self.assertIn('reloadRowsAtIndexPaths', body)
+
+    def test_backup_import_applies_theme_and_font_size_immediately(self):
+        # 导入备份后主题/字号要立即生效，不等下次启动。
+        body = method_body(self.root, '- (void)finishResourceImport:(NSData *)data playlist:(BOOL)playlist name:(NSString *)name')
+        self.assertIn('HostApplyThemeToWindow', body)
+        self.assertIn('applyFontSizeOverride', body)
+        self.assertIn('[self.table reloadData]', body)
 
     def test_settings_clear_search_history_clears_browse_keywords(self):
         # 设置页清除搜索历史：只删历史键不够，浏览状态里存的关键词也
@@ -178,6 +249,8 @@ class SettingsContracts(unittest.TestCase):
             self.assertIn('@\"' + key + '\"', self.backup)
         for key in ['cctv.mediaPreferredQuality.v1', 'hostThemeMode']:
             self.assertIn('@\"' + key + '\"', self.backup)
+        self.assertIn('@\"cctv.themeIdentifier.v1\"', self.backup)
+        self.assertIn('@\"midnight\",@\"obsidian\",@\"ocean\",@\"amber\",@\"daylight\",@\"snow\"', self.backup)
         self.assertIn('[value doubleValue]<5||[value doubleValue]>40', self.backup)
         self.assertIn('[value integerValue]<0||[value integerValue]>2', self.backup)
         self.assertIn('@\"auto\",@\"smooth\",@\"hd\",@\"uhd\"', self.backup)

@@ -410,7 +410,9 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
     return self.playSession;
 }
 - (instancetype)initWithTVBoxSource:(NSDictionary *)source {
-    if((self=[self initWithPort:0 requestTimeout:20])){_tvboxSource=[source copy];_parserCatalogID=[source[@"catalogID"] isKindOfClass:NSString.class]?source[@"catalogID"]:([source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?source[@"tvboxCatalogID"]:@"");}
+    // TVBox/MacCMS 也走网络超时偏好（默认 20 秒，夹取 5–40 秒），不再写死 20 秒。
+    NSTimeInterval savedTimeout=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.networkTimeout.v1"]?[[NSUserDefaults standardUserDefaults] doubleForKey:@"cctv.networkTimeout.v1"]:20;
+    if((self=[self initWithPort:0 requestTimeout:savedTimeout])){_tvboxSource=[source copy];_parserCatalogID=[source[@"catalogID"] isKindOfClass:NSString.class]?source[@"catalogID"]:([source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?source[@"tvboxCatalogID"]:@"");}
     return self;
 }
 - (NSUInteger)maximumResponseBytes {return self.tvboxSource?8*1024*1024:2*1024*1024;}

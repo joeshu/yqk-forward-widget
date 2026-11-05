@@ -24,6 +24,13 @@ cp -R Resources/BuiltinMedia "$APP/BuiltinMedia"
 if [[ "${GITHUB_RUN_NUMBER:-}" =~ ^[0-9]+$ ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "$APP/Info.plist"
 fi
+# Marketing version starts at 1.1 and increments by one per build. The workflow
+# computes the next version from the latest release and passes it in
+# CCTV_NEXT_VERSION; local builds keep the plist fallback (1.1). The baseline
+# variant below still forces 0.9.0 when CCTV_BASELINE is set.
+if [[ -n "${CCTV_NEXT_VERSION:-}" && "${CCTV_NEXT_VERSION}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${CCTV_NEXT_VERSION}" "$APP/Info.plist"
+fi
 if [ -n "${PY_DISABLE:-}" ]; then
   /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.example.cctvhost.nopy' "$APP/Info.plist"
   /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName CCTVHost 无PY' "$APP/Info.plist"

@@ -473,7 +473,8 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 
     id rawPort = source[@"port"];
     NSInteger port = [rawPort respondsToSelector:@selector(integerValue)] ? [rawPort integerValue] : 0;
-    job.client = [[MediaAPIClient alloc] initWithPort:port requestTimeout:15];
+    // 全局搜索也走网络超时偏好（默认 20 秒），不再写死 15 秒。
+    job.client = [[MediaAPIClient alloc] initWithPort:port];
     NSURL *healthURL = [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/health", (long)port]];
     if (!healthURL || port < 1 || port > 65535) {
         [self finishJob:job error:[NSError errorWithDomain:@"CCTVHostSearch" code:1 userInfo:@{NSLocalizedDescriptionKey:@"本机影视服务端口无效。"}]];

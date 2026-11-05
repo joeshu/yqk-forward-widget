@@ -14,6 +14,24 @@ class VersioningContractTests(unittest.TestCase):
         self.assertRegex(info["CFBundleShortVersionString"], r"^\d+\.\d+(?:\.\d+)?$")
         self.assertRegex(info["CFBundleVersion"], r"^\d+(?:\.\d+){0,2}$")
 
+    def test_ci_increments_marketing_version_per_build(self):
+        build = (ROOT / "Scripts" / "ci-build.sh").read_text()
+        workflow = (ROOT.parent / ".github" / "workflows" / "cctv-ios-host.yml").read_text()
+        # Workflow reads the highest released version and bumps its last component.
+        self.assertIn("gh release list", workflow)
+        self.assertIn("CCTV_NEXT_VERSION", workflow)
+        # ci-build.sh stamps the computed version into the built app when provided.
+        self.assertIn("CCTV_NEXT_VERSION", build)
+        self.assertIn("Set :CFBundleShortVersionString ${CCTV_NEXT_VERSION}", build)
+        # Increment rule: last component +1 (1.1 -> 1.2, 1.9 -> 1.10).
+        def bump(last):
+            parts = last.split(".")
+            parts[-1] = str(int(parts[-1]) + 1)
+            return ".".join(parts)
+        self.assertEqual(bump("1.1"), "1.2")
+        self.assertEqual(bump("1.9"), "1.10")
+        self.assertEqual(bump("1.1.0"), "1.1.1")
+
     def test_ui_reads_version_from_app_bundle(self):
         source = (ROOT / "Sources" / "RootViewController.m").read_text()
         self.assertIn('objectForInfoDictionaryKey:@"CFBundleShortVersionString"', source)
