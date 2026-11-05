@@ -144,6 +144,18 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("CCTVHostTimeshiftErrorUnsupportedPlayer", timeshift)
         self.assertIn("error:(NSError **)error", timeshift)
 
+    def test_remote_command_action_returns_handler_status(self):
+        # MPRemoteCommand 的 action 只接受返回 MPRemoteCommandHandlerStatus
+        # 或带 completion handler 的签名；void 无参方法会在 addTarget 时抛
+        # NSInternalInconsistencyException（“Unsupported action method
+        # signature”），导致启动即崩溃（edc19569 的 ui-preview 崩溃报告）。
+        setup = method_body("- (void)setupRemoteCommands")
+        self.assertIn("togglePlayPauseForRemoteCommand:", setup)
+        self.assertNotIn("action:@selector(togglePlayPause)]", setup)
+        wrapper = method_body("- (MPRemoteCommandHandlerStatus)togglePlayPauseForRemoteCommand:")
+        self.assertIn("[self togglePlayPause]", wrapper)
+        self.assertIn("MPRemoteCommandHandlerStatusSuccess", wrapper)
+
     def test_sdk_callbacks_go_through_session_delegate(self):
         session = (SOURCE.parent / "CNPlayerSessionDelegate.m").read_text(encoding="utf-8")
         self.assertIn("isCurrentSession", session)
