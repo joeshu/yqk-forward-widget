@@ -16,7 +16,7 @@
 - Python 构建限定 ios-arm64 设备切片，取消模糊匹配。
 
 ## 尚未解决 / 不得标为已完成
-- 重用同一 SDK 实例时，回调没有携带业务代次；同实例旧回调仍难与新播放区分。需引入独立 delegate-session 代理或 SDK 提供的请求标识。
+- 重用同一 SDK 实例的回调代次隔离（2026-11-05 已做，未编译/未真机验证）：每次原生起播创建 CNPlayerSessionDelegate 会话代理（Sources/CNPlayerSessionDelegate.h/.m），会话 ID 随起播递增、stopPlayback 时失效，过期会话的回调直接丢弃；Root 的 9 个回调仍保留实例与代次检查作第二层。残留边界：SDK 自身把旧流事件发给当前已安装的代理对象时，宿主侧无法区分，仍需 SDK 提供请求标识才能彻底关闭。
 - PyHost.stop 不等于 HTTP 服务 shutdown，暂不能承诺可靠停止/重启。
 - CPython 的 ssl、扩展模块、证书路径和 /health 必须真机验收；Linux 跑通脚本不等于 iOS 内置插件跑通。
 - APTV-COMPARISON.md 之前的“已实现”只表示代码存在，不表示编译或设备验收通过；包括 PiP、跨源换源、手势等。
