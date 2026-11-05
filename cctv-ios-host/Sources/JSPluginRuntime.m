@@ -85,7 +85,10 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
            (self.genericMode?![@[@"host",@"content-length",@"connection",@"transfer-encoding"] containsObject:name.lowercaseString]:[@[@"accept",@"user-agent",@"referer",@"content-type"] containsObject:name.lowercaseString]))
             [request setValue:headers[name] forHTTPHeaderField:name];
     }
+    if(!callback)return key;
+    if(!self.session){[callback callWithArguments:@[@{@"error":@"JS 服务已停止"}]];return key;}
     NSURLSessionDataTask *task=[self.session dataTaskWithRequest:request];
+    if(!task){[callback callWithArguments:@[@{@"error":@"JS 服务已停止"}]];return key;}
     self.requests[key]=[@{@"callback":callback,@"task":task,@"data":[NSMutableData data]} mutableCopy];
     [task resume];return key;
 }
