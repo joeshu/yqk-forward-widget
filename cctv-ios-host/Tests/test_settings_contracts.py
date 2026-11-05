@@ -206,9 +206,10 @@ class SettingsContracts(unittest.TestCase):
         # 续播读点（从头播放/继续观看/恢复 seek）与播放器启动处
         # 都要有 objectForKey 保护，未设置过速度时默认 1.0，否则
         # defaultRate=0 会让播放器静默不动。AVPlayer 三处 + Cicada
-        # 三处 + 长按恢复原速一处 + 播放器启动一处，共 8 处。
+        # 三处 + 长按恢复原速一处 + 播放器启动一处，共 8 处；413
+        # 另保留直连 Cicada 引擎初始化时的一处，共 9 处。
         guarded = 'objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0'
-        self.assertEqual(self.playback.count(guarded), 8)
+        self.assertEqual(self.playback.count(guarded), 9)
         self.assertNotIn('defaultRate=(float)[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]', self.playback)
 
     def test_clear_epg_cache_refreshes_its_row(self):
@@ -219,8 +220,10 @@ class SettingsContracts(unittest.TestCase):
         self.assertIn('reloadRowsAtIndexPaths', body)
 
     def test_backup_import_applies_theme_and_font_size_immediately(self):
-        # 导入备份后主题/字号要立即生效，不等下次启动。
-        body = method_body(self.root, '- (void)finishResourceImport:(NSData *)data playlist:(BOOL)playlist name:(NSString *)name')
+        # 导入备份后主题/字号要立即生效，不等下次启动。413 分支的导入
+        # 入口叫 finishConfigurationImport:（main 叫 finishResourceImport:），
+        # 方法体里已有同样的立即应用代码。
+        body = method_body(self.root, '- (void)finishConfigurationImport:(NSData *)data')
         self.assertIn('HostApplyThemeToWindow', body)
         self.assertIn('applyFontSizeOverride', body)
         self.assertIn('[self.table reloadData]', body)
