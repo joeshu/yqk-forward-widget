@@ -2898,11 +2898,21 @@ configureCatalogNavigation;
     // MPRemoteCommandCenter 单例强引用，进而永久强引用 self，使 dealloc
     // 永远走不到、dealloc 里的 KVO 拆除也永远执行不了。target-action 配合
     // dealloc 中的 removeTarget: 才能正常释放。
+    // 注意：MPRemoteCommand 的 action 只接受两种签名——返回
+    // MPRemoteCommandHandlerStatus，或第二个参数为 completion handler。
+    // void 无参的 togglePlayPause 会在 addTarget 时直接抛
+    // NSInternalInconsistencyException（“Unsupported action method
+    // signature”）导致启动即崩溃，故用下面的薄包装转发。
     MPRemoteCommandCenter *c = MPRemoteCommandCenter.sharedCommandCenter;
     [c.playCommand removeTarget:self];
     [c.pauseCommand removeTarget:self];
-    [c.playCommand addTarget:self action:@selector(togglePlayPause)];
-    [c.pauseCommand addTarget:self action:@selector(togglePlayPause)];
+    [c.playCommand addTarget:self action:@selector(togglePlayPauseForRemoteCommand:)];
+    [c.pauseCommand addTarget:self action:@selector(togglePlayPauseForRemoteCommand:)];
+}
+
+- (MPRemoteCommandHandlerStatus)togglePlayPauseForRemoteCommand:(MPRemoteCommandEvent *)event {
+    [self togglePlayPause];
+    return MPRemoteCommandHandlerStatusSuccess;
 }
 
 - (void)updateNowPlaying {
