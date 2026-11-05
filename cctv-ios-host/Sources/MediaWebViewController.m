@@ -108,7 +108,7 @@
 - (void)close {if(self.didClose)return;self.didClose=YES;[self.web stopLoading];dispatch_block_t callback=self.onClose;self.onClose=nil;[self dismissViewControllerAnimated:YES completion:callback];}
 - (void)dealloc {self.web.navigationDelegate=nil;[self.web stopLoading];}
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)action decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
-    NSURL *url=action.request.URL;BOOL allowed=[@[@"http",@"https",@"about"] containsObject:url.scheme.lowercaseString];if(self.configurationPage&&(action.targetFrame.isMainFrame||!action.targetFrame)){NSURL *base=[NSURL URLWithString:self.result[@"url"]];allowed=allowed&&[url.scheme.lowercaseString isEqual:base.scheme.lowercaseString]&&[url.host.lowercaseString isEqual:base.host.lowercaseString]&&[(url.port?:@0) isEqual:(base.port?:@0)];if(!allowed)self.navigationItem.prompt=@"此操作需要离开源配置页，当前未打开";}
+    NSURL *url=action.request.URL;NSString *scheme=url.scheme.lowercaseString?:@"";BOOL allowed=[@[@"http",@"https",@"about"] containsObject:scheme];if(self.configurationPage&&(action.targetFrame.isMainFrame||!action.targetFrame)){NSURL *base=[NSURL URLWithString:self.result[@"url"]];allowed=allowed&&[url.scheme.lowercaseString isEqual:base.scheme.lowercaseString]&&[url.host.lowercaseString isEqual:base.host.lowercaseString]&&[(url.port?:@0) isEqual:(base.port?:@0)];if(!allowed)self.navigationItem.prompt=@"此操作需要离开源配置页，当前未打开";}
     decisionHandler(allowed?WKNavigationActionPolicyAllow:WKNavigationActionPolicyCancel);
     if(allowed && !action.targetFrame)[webView loadRequest:action.request];
 }

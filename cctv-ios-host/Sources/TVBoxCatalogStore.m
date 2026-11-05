@@ -74,7 +74,33 @@ static BOOL TVBoxWebURL(NSString *value) {
     if (TVBoxWebURL(sourceURL)) catalog[@"url"]=sourceURL;
     return catalog;
 }
+// 内置 MacCMS 影视源：与 For-ADM 蜘蛛 ystj.py 同款 4 源（默认 lziapi）。
+// 固定 id + 固定 siteKey，读取目录时幂等补入；用户删除后下次读取会重新补回
+//（与 ServiceStore 内置服务 builtin-ysp 同款约定）。直读 NSUserDefaults，
+// 不经 +catalogs，避免递归。直链 m3u8 走 AVPlayer；share 播放页由 MacCMS
+// play 路径判为网页走 WebView（WebView 会提取 video 地址回原生播放）。
++ (void)ensureBuiltInMacCMSCatalogs {
+    NSArray *specs=@[
+        @{@"id":@"builtin-maccms-lziapi",@"name":@"量子采集",@"api":@"https://cj.lziapi.com/api.php/provide/vod/",@"siteKey":@"maccms-builtin-lziapi"},
+        @{@"id":@"builtin-maccms-dytt",@"name":@"电影天堂采集",@"api":@"https://caiji.dyttzyapi.com/api.php/provide/vod/",@"siteKey":@"maccms-builtin-dytt"},
+        @{@"id":@"builtin-maccms-wujin",@"name":@"无尽采集",@"api":@"https://api.wujinapi.me/api.php/provide/vod/",@"siteKey":@"maccms-builtin-wujin"},
+        @{@"id":@"builtin-maccms-ffzy",@"name":@"非凡采集",@"api":@"https://api.ffzyapi.com/api.php/provide/vod/",@"siteKey":@"maccms-builtin-ffzy"},
+    ];
+    NSArray *rows=[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"];
+    NSMutableArray *mutable=[rows isKindOfClass:NSArray.class]?[rows mutableCopy]:[NSMutableArray array];
+    NSMutableSet *ids=[NSMutableSet set];
+    for(NSDictionary *row in mutable) if([row[@"id"] isKindOfClass:NSString.class]) [ids addObject:row[@"id"]];
+    BOOL changed=NO;
+    for(NSDictionary *spec in specs) {
+        if([ids containsObject:spec[@"id"]]) continue;
+        NSDictionary *site=@{@"key":spec[@"siteKey"],@"name":spec[@"name"],@"api":spec[@"api"],@"type":@"maccms",@"apiKind":@"maccms-api",@"supported":@YES,@"status":@"内置 · 选中后读取",@"maccmsFormat":@"auto"};
+        [mutable addObject:@{@"id":spec[@"id"],@"name":spec[@"name"],@"sites":@[site],@"lives":@[],@"url":spec[@"api"],@"updatedAt":@(NSDate.date.timeIntervalSince1970),@"catalogKind":@"maccms",@"builtin":@YES}];
+        changed=YES;
+    }
+    if(changed) [NSUserDefaults.standardUserDefaults setObject:mutable forKey:@"tvboxCatalogs"];
+}
 + (NSArray<NSDictionary *> *)catalogs {
+    [self ensureBuiltInMacCMSCatalogs];
     NSArray *rows=[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"];
     return [rows isKindOfClass:NSArray.class]?rows:@[];
 }

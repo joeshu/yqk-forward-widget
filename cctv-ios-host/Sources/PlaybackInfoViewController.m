@@ -43,7 +43,7 @@
     c.textLabel.text = [(row[@"title"]?:@"") description];
     c.detailTextLabel.text = [(row[@"value"]?:@"") description];
     c.textLabel.textColor = HostText();
-    c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+    c.detailTextLabel.textColor = HostSecondaryText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
     c.textLabel.adjustsFontForContentSizeCategory=YES;c.textLabel.numberOfLines=0;
     c.detailTextLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightRegular]];

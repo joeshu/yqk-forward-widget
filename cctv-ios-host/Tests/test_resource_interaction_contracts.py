@@ -39,10 +39,11 @@ class ResourceInteractionContracts(unittest.TestCase):
             self.assertIn(f'@"id":@"{kind}"', self.catalog)
         self.assertIn('resource-filter-', self.catalog)
         self.assertIn('profile:profile matchesKind:identifier', self.catalog)
-        self.assertIn('initWithFrame:CGRectMake(0,0,96,44)', self.catalog)
+        self.assertIn('initWithFrame:CGRectMake(0,0,104,44)', self.catalog)
         # 资源列表开关恢复标准尺寸，不再缩放到 0.88（低于标准触控目标）。
+        # 第二轮 UI：更多按钮 36→44pt 达最小触摸目标，容器 96→104 宽与之匹配。
         self.assertNotIn('CGAffineTransformMakeScale(.88,.88)', self.catalog)
-        self.assertIn('more.frame=CGRectMake(58,4,36,36)', self.catalog)
+        self.assertIn('more.frame=CGRectMake(58,0,44,44)', self.catalog)
         self.assertIn('onOpenResource', self.catalog)
         self.assertIn('onToggleProfile(p[@"source"], sender.on)', self.catalog)
         self.assertIn('onToggle=^', self.root)
@@ -791,6 +792,28 @@ class ResourceInteractionContracts(unittest.TestCase):
         catalog_test = (ROOT / 'Tests/native_profile_tests.m').read_text()
         self.assertIn('type 3 JAR stays unsupported', catalog_test)
         self.assertIn('type 1 direct playback', (ROOT / 'Tests/native_media_api_tests.m').read_text())
+
+    def test_builtin_maccms_catalogs_cover_ystj_sources(self):
+        # 内置 4 个 MacCMS 影视源（与 For-ADM 蜘蛛 ystj.py 同款），读取目录时幂等补入。
+        store = self.tvbox
+        self.assertIn('ensureBuiltInMacCMSCatalogs', store)
+        self.assertIn('[self ensureBuiltInMacCMSCatalogs]', store)
+        for api in ('https://cj.lziapi.com/api.php/provide/vod/',
+                    'https://caiji.dyttzyapi.com/api.php/provide/vod/',
+                    'https://api.wujinapi.me/api.php/provide/vod/',
+                    'https://api.ffzyapi.com/api.php/provide/vod/'):
+            self.assertIn(api, store)
+        for cid in ('builtin-maccms-lziapi', 'builtin-maccms-dytt',
+                    'builtin-maccms-wujin', 'builtin-maccms-ffzy'):
+            self.assertIn(cid, store)
+        self.assertIn('@"maccms-api"', store)
+        self.assertIn('@"builtin":@YES', store)
+        # 幂等：已存在同 id 时跳过（不重复插入）。
+        ensure = store.split('+ (void)ensureBuiltInMacCMSCatalogs', 1)[1].split('+ (NSArray<NSDictionary *> *)catalogs', 1)[0]
+        self.assertIn('if([ids containsObject:spec[@"id"]]) continue;', ensure)
+        # 直读 NSUserDefaults，不经 +catalogs，避免递归。
+        self.assertIn('[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"]', ensure)
+        self.assertNotIn('[self catalogs]', ensure)
 
     def test_media_home_reuses_existing_history_favorites_and_services(self):
         self.assertIn('MediaPlaybackStateStore.watchHistory', self.detail)

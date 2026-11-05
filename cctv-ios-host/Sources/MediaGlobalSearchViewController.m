@@ -146,6 +146,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         [self.historyButton.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-14],
         [self.historyButton.centerYAnchor constraintEqualToAnchor:self.searchBar.centerYAnchor],
         [self.historyButton.widthAnchor constraintGreaterThanOrEqualToConstant:48],
+        [self.historyButton.heightAnchor constraintGreaterThanOrEqualToConstant:44],
         [self.progressLabel.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:20],
         [self.progressLabel.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-20],
         [self.progressLabel.topAnchor constraintEqualToAnchor:self.searchBar.bottomAnchor constant:2],
@@ -722,7 +723,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         cell.accessibilityHint = stopped ? @"点按后只启动此插件，然后检查健康状态和影视接口" : (failed ? ([row[@"state"] isEqual:@"部分完成"]?@"点按只重试失败站点":@"点按重试此来源") : nil);
     } else {
         NSArray *entries=[self visibleEntriesForSection:indexPath.section];
-        if((NSUInteger)(indexPath.row-1)>=entries.count)return cell;
+        if((NSUInteger)(indexPath.row-1)>=entries.count){MediaSearchResultCell *stale=(MediaSearchResultCell *)cell;stale.nameLabel.text=@"";stale.metadataLabel.text=@"";stale.sourceLabel.text=@"";stale.poster.image=nil;stale.searchEntry=nil;cell.accessibilityLabel=nil;return cell;}
         NSDictionary *entry=entries[indexPath.row-1],*item=entry[@"item"];
         MediaSearchResultCell *resultCell=(MediaSearchResultCell *)cell;resultCell.searchEntry=entry;
         resultCell.nameLabel.text=MediaSearchText(item[@"name"]);

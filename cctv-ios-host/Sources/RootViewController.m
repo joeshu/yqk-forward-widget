@@ -182,6 +182,11 @@ static NSString *CCTVServiceLogAddress(NSString *raw) {
     if(items.count){NSMutableArray *safe=[NSMutableArray arrayWithCapacity:items.count];for(NSURLQueryItem *item in items)[safe addObject:[NSURLQueryItem queryItemWithName:item.name value:item.value.length?@"[已脱敏]":item.value]];components.queryItems=safe;}
     return components.URL.absoluteString?:[HostLogRedactor redactText:raw?:@""];
 }
+// 订阅来源只应是字符串数组；缓存/旧版本数据里一旦混入非数组，
+// setWithArray:/containsObject: 会直接抛异常。统一归一为空数组。
+static NSArray *CCTVStringArrayValue(id value) {
+    return [value isKindOfClass:NSArray.class] ? value : @[];
+}
 static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *rawEPGID=[channel[@"epgID"] isKindOfClass:NSString.class]?channel[@"epgID"]:@"";
     NSString *epgID=[rawEPGID stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -209,7 +214,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.tableView.dataSource=self;self.tableView.delegate=self;
     self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=66;
     self.tableView.separatorColor=HostSeparator();
-    self.emptyLabel=[UILabel new];self.emptyLabel.text=self.emptyMessage?:@"暂无可显示内容";self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.numberOfLines=0;self.emptyLabel.textAlignment=NSTextAlignmentCenter;
+    self.emptyLabel=[UILabel new];self.emptyLabel.text=self.emptyMessage?:@"暂无可显示内容";self.emptyLabel.textColor=HostSecondaryText();self.emptyLabel.numberOfLines=0;self.emptyLabel.textAlignment=NSTextAlignmentCenter;
     self.tableView.backgroundView=self.emptyLabel;
     [self.view addSubview:self.tableView];
 }
@@ -223,7 +228,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     static NSString *reuse=@"cctv.playback.panel";
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:reuse];
-    if(!cell){cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];cell.backgroundColor=HostCard();cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=3;cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=UIColor.secondaryLabelColor;}
+    if(!cell){cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];cell.backgroundColor=HostCard();cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=3;cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();}
     NSDictionary *item=self.items[indexPath.row];cell.textLabel.text=item[@"title"]?:@"";cell.detailTextLabel.text=item[@"detail"]?:@"";
     cell.accessoryType=[item[@"selected"] boolValue]?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDisclosureIndicator;
     cell.tintColor=HostAccent();cell.selectionStyle=UITableViewCellSelectionStyleDefault;
@@ -268,7 +273,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, strong) UIButton *muteBtn;
 @property (nonatomic, strong) UIButton *routeBtn;
 @property (nonatomic, strong) UIButton *epgBtn;
-@property (nonatomic, strong) UIButton *fullBtn;
 @property (nonatomic, strong) id currentPlayer;
 @property (nonatomic, strong) id sdkPlayer;
 @property (nonatomic, assign) BOOL sdkPlayerUsed;
@@ -379,7 +383,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 @property (nonatomic, assign) BOOL userInitiatedTabSelection;
 @property (nonatomic, assign) BOOL subscriptionCatalog;
 @property (nonatomic, assign) BOOL favoritesOnly;
-@property (nonatomic, strong) UIButton *pipBtn;
 @property (nonatomic, strong) UIButton *moreBtn;
 @property (nonatomic, copy) NSString *epgChannel;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSURLSessionDataTask *> *subscriptionTasks;
@@ -760,8 +763,6 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.muteBtn = [self barButton:@"静音" action:@selector(toggleMute)];
     self.routeBtn = [self barButton:@"线路" action:@selector(showRoutes)];
     self.epgBtn = [self barButton:@"节目单" action:@selector(openEPG)];
-    self.fullBtn = [self barButton:@"全屏" action:@selector(toggleFullscreen)];
-    self.pipBtn = [self barButton:@"画中画" action:@selector(togglePiP)];
     self.moreBtn = [self barButton:@"更多" action:@selector(showMorePlaybackActions)];
     for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.routeBtn, self.epgBtn, self.moreBtn]) {
         [self.controlBar addArrangedSubview:b];
@@ -788,6 +789,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [b setTitle:title forState:UIControlStateNormal];
     b.titleLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]];
     b.titleLabel.adjustsFontForContentSizeCategory = YES;
+    // 大字体下 5 个等宽按钮放不下 12pt 放大标题：允许缩到 60% 而不是截断。
+    b.titleLabel.adjustsFontSizeToFitWidth = YES;
+    b.titleLabel.minimumScaleFactor = 0.6;
     [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     b.backgroundColor = [UIColor colorWithWhite:0 alpha:0.42];
     b.layer.cornerRadius = 5;
@@ -813,7 +817,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     self.groupControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"央视", @"卫视", @"地方", @"教育", @"熊猫", @"订阅"]];
     self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 32);
     self.groupControl.selectedSegmentIndex = 0;
-    self.groupControl.tintColor = HostAccent();self.groupControl.selectedSegmentTintColor=HostAccent();NSDictionary *segmentNormal=@{NSForegroundColorAttributeName:HostMutedText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightMedium]]},*segmentSelected=@{NSForegroundColorAttributeName:UIColor.whiteColor,NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]]};[self.groupControl setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.groupControl setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];
+    self.groupControl.tintColor = HostAccent();self.groupControl.selectedSegmentTintColor=HostAccent();NSDictionary *segmentNormal=@{NSForegroundColorAttributeName:HostMutedText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightMedium]]},*segmentSelected=@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]]};[self.groupControl setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.groupControl setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];
     [self.groupControl addTarget:self action:@selector(onGroupChanged) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:self.groupControl];
     self.playerTabs=[[UISegmentedControl alloc] initWithItems:@[@"分类",@"频道",@"节目",@"线路"]];self.playerTabs.selectedSegmentIndex=1;self.playerTabs.selectedSegmentTintColor=HostAccent();[self.playerTabs setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.playerTabs setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];[self.playerTabs addTarget:self action:@selector(selectPlayerPanel) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.playerTabs];
@@ -953,7 +957,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         if([cache isKindOfClass:NSArray.class])self.allChannels=[self.allChannels arrayByAddingObjectsFromArray:cache];
         [self.deferredLocalSubscriptions addObject:key];
     }
-    NSMutableDictionary *unique=[NSMutableDictionary dictionary];NSMutableArray *dedup=[NSMutableArray array];for(id rawChannel in self.allChannels){if(![rawChannel isKindOfClass:NSDictionary.class])continue;NSDictionary *c=rawChannel;NSString *cid=[c[@"id"] isKindOfClass:NSString.class]?c[@"id"]:nil;if(!cid.length){[dedup addObject:c];continue;}NSNumber *index=unique[cid];if(index){NSMutableDictionary *existing=[dedup[index.unsignedIntegerValue] mutableCopy];NSMutableSet *owners=[NSMutableSet setWithArray:existing[@"subscriptionSources"]?:@[]];[owners addObjectsFromArray:c[@"subscriptionSources"]?:@[]];if(owners.count)existing[@"subscriptionSources"]=owners.allObjects;dedup[index.unsignedIntegerValue]=existing;}else{unique[cid]=@(dedup.count);[dedup addObject:c];}}self.allChannels=dedup;
+    NSMutableDictionary *unique=[NSMutableDictionary dictionary];NSMutableArray *dedup=[NSMutableArray array];for(id rawChannel in self.allChannels){if(![rawChannel isKindOfClass:NSDictionary.class])continue;NSDictionary *c=rawChannel;NSString *cid=[c[@"id"] isKindOfClass:NSString.class]?c[@"id"]:nil;if(!cid.length){[dedup addObject:c];continue;}NSNumber *index=unique[cid];if(index){NSMutableDictionary *existing=[dedup[index.unsignedIntegerValue] mutableCopy];NSMutableSet *owners=[NSMutableSet setWithArray:CCTVStringArrayValue(existing[@"subscriptionSources"])];[owners addObjectsFromArray:CCTVStringArrayValue(c[@"subscriptionSources"])];if(owners.count)existing[@"subscriptionSources"]=owners.allObjects;dedup[index.unsignedIntegerValue]=existing;}else{unique[cid]=@(dedup.count);[dedup addObject:c];}}self.allChannels=dedup;
     self.shownChannels=self.allChannels;
     [self log:@"频道 %lu 个 / 线路 %lu 条",
          (unsigned long)self.allChannels.count,
@@ -994,7 +998,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"house.fill",@"externaldrive.fill",@"gearshape"];
     for (NSInteger i=0;i<titles.count;i++) {
         UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;HostInstallPressFeedback(b);
-        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.baseForegroundColor=(i==0?UIColor.whiteColor:HostMutedText()); cfg.background.backgroundColor=i==0?HostAccent():UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]];return result;}; b.configuration=cfg;
+        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.baseForegroundColor=(i==0?HostOnAccent():HostMutedText()); cfg.background.backgroundColor=i==0?HostAccent():UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]];return result;}; b.configuration=cfg;
         b.accessibilityLabel=titles[i]; b.accessibilityIdentifier=[NSString stringWithFormat:@"tab.%@",titles[i]];
         b.accessibilityHint=[NSString stringWithFormat:@"切换到%@页面",titles[i]];
         [b addTarget:self action:@selector(bottomTabTapped:) forControlEvents:UIControlEventTouchUpInside]; [self.bottomBar addArrangedSubview:b];
@@ -1042,7 +1046,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     for (UIButton *button in self.bottomBar.arrangedSubviews) {
         UIButtonConfiguration *configuration=button.configuration;
         BOOL selected=button.tag==self.activeTab;
-        configuration.baseForegroundColor=selected?UIColor.whiteColor:HostMutedText();
+        configuration.baseForegroundColor=selected?HostOnAccent():HostMutedText();
         configuration.background.backgroundColor=selected?HostAccent():UIColor.clearColor;
         configuration.background.strokeColor=selected?[HostAccent() colorWithAlphaComponent:0.35]:UIColor.clearColor;
         configuration.background.strokeWidth=selected?0.5:0;
@@ -1090,7 +1094,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         columnsConfiguration.title=[NSString stringWithFormat:@"%ld列",(long)self.gridColumns];
         columnsConfiguration.baseForegroundColor=HostAccent();
         columnsConfiguration.contentInsets=NSDirectionalEdgeInsetsMake(8,8,8,8);
-        columnsConfiguration.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *updated=[attributes mutableCopy];updated[NSFontAttributeName]=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];return updated;};
+        columnsConfiguration.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *updated=[attributes mutableCopy];updated[NSFontAttributeName]=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]];return updated;};
         columnsButton.configuration=columnsConfiguration;
         columnsButton.accessibilityIdentifier=@"channel.grid.columns.toggle";
         columnsButton.accessibilityLabel=[NSString stringWithFormat:@"每行%ld个，切换为%ld列",(long)self.gridColumns,(long)nextColumns];
@@ -1236,7 +1240,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 - (NSDictionary *)resourceServiceForSource:(NSString *)source {if(![source hasPrefix:@"plugin:"])return nil;NSString *identifier=[source substringFromIndex:7];for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:identifier])return service;return nil;}
 - (NSArray *)configurationProfiles {
     NSMutableArray *rows=[NSMutableArray array];NSMutableDictionary<NSString *,NSNumber *> *counts=[NSMutableDictionary dictionary];NSUInteger native=0;
-    for(NSDictionary *channel in self.allChannels){if(![channel[@"remoteURL"] length])native++;for(NSString *source in [NSSet setWithArray:channel[@"subscriptionSources"]?:@[]])counts[source]=@([counts[source] unsignedIntegerValue]+1);}
+    for(NSDictionary *channel in self.allChannels){if(![channel[@"remoteURL"] length])native++;for(NSString *source in [NSSet setWithArray:CCTVStringArrayValue(channel[@"subscriptionSources"])])counts[source]=@([counts[source] unsignedIntegerValue]+1);}
     [rows addObject:@{@"name":@"央视直播 · 官方频道",@"source":@"",@"resourceKind":@"live",@"native":@YES,@"current":@(!self.activeSource.length),@"epgStatus":@"官方",@"count":@(native),@"enabled":@(CCTVBoolPreference(@"nativeChannelsEnabled",YES))}];
     NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
     for(NSString *u in [ProfileStore orderedSources:self.subscriptionURLs.allObjects]){NSDictionary *metadata=[ProfileStore metadata:u];NSMutableDictionary *row=[@{@"name":metadata[@"name"]?:[NSURL URLWithString:u].host?:@"本地播放列表",@"status":metadata[@"status"]?:@"等待刷新",@"resourceKind":@"live",@"current":@([self.activeSource isEqual:u]),@"epgStatus":(metadata[@"epgURL"]?:metadata[@"detectedEPGURL"])?@"已配置":@"自动匹配",@"source":u,@"count":counts[u]?:@0,@"enabled":@(![disabled containsObject:u])} mutableCopy];if(metadata[@"updatedAt"])row[@"updatedAt"]=metadata[@"updatedAt"];[rows addObject:row];}
@@ -1371,9 +1375,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if(!poster){poster=[[UIView alloc] initWithFrame:CGRectZero];poster.tag=posterTag;poster.autoresizingMask=UIViewAutoresizingFlexibleWidth;poster.backgroundColor=HostCard();poster.layer.cornerRadius=8;[cell.contentView addSubview:poster];
         logo=[UIImageView new];logo.tag=logoTag;logo.autoresizingMask=UIViewAutoresizingFlexibleWidth;logo.contentMode=UIViewContentModeScaleAspectFit;[poster addSubview:logo];
         brand=[UILabel new];brand.tag=brandTag;brand.textAlignment=NSTextAlignmentCenter;brand.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:[UIFont italicSystemFontOfSize:14]];brand.adjustsFontForContentSizeCategory=YES;brand.textColor=HostText();brand.autoresizingMask=UIViewAutoresizingFlexibleWidth;brand.numberOfLines=2;[poster addSubview:brand];
-        number=[UILabel new];number.tag=numberTag;number.font=[UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightMedium];number.textColor=UIColor.secondaryLabelColor;[poster addSubview:number];
+        number=[UILabel new];number.tag=numberTag;number.font=[UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightMedium];number.textColor=HostSecondaryText();[poster addSubview:number];
         title=[UILabel new];title.tag=titleTag;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;title.adjustsFontForContentSizeCategory=YES;title.numberOfLines=2;title.lineBreakMode=NSLineBreakByTruncatingTail;[cell.contentView addSubview:title];
-        subtitle=[UILabel new];subtitle.tag=subtitleTag;subtitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;subtitle.adjustsFontForContentSizeCategory=YES;subtitle.numberOfLines=2;subtitle.lineBreakMode=NSLineBreakByTruncatingTail;subtitle.textColor=UIColor.secondaryLabelColor;[cell.contentView addSubview:subtitle];
+        subtitle=[UILabel new];subtitle.tag=subtitleTag;subtitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;subtitle.adjustsFontForContentSizeCategory=YES;subtitle.numberOfLines=2;subtitle.lineBreakMode=NSLineBreakByTruncatingTail;subtitle.textColor=HostSecondaryText();[cell.contentView addSubview:subtitle];
         selectedMark=[UIImageView new];selectedMark.tag=selectedTag;selectedMark.contentMode=UIViewContentModeScaleAspectFit;selectedMark.image=[UIImage systemImageNamed:@"checkmark.circle.fill"];selectedMark.tintColor=HostAccent();selectedMark.backgroundColor=[UIColor colorWithWhite:0 alpha:.42];selectedMark.layer.cornerRadius=9;selectedMark.clipsToBounds=YES;[poster addSubview:selectedMark];}
     title.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];subtitle.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];
     CGFloat width=cell.contentView.bounds.size.width;
@@ -1498,9 +1502,10 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     else if ([ch[@"remoteURL"] length]) cell.detailTextLabel.text = @"订阅源";
     else {
         NSUInteger routes = [ch[@"routes"] isKindOfClass:NSArray.class] ? [ch[@"routes"] count] : 0;
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %lu 线路", ch[@"group"] ?: @"直播", (unsigned long)routes];
+        NSString *groupName=[ch[@"group"] isKindOfClass:NSString.class]?ch[@"group"]:@"直播";
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %lu 线路", groupName, (unsigned long)routes];
     }
-    [self loadEPGForChannel:cid section:ip];
+    [self loadEPGForChannel:cid channel:ch section:ip];
     return cell;
 }
 
@@ -1977,10 +1982,14 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         BOOL expanded=self.playerExpanded&&matchingPlayer;
         CGFloat ph=expanded?MIN(w*9.0/16.0,MAX(120,(height-top-safe.bottom)*0.50)):0;
         self.playerBox.frame=CGRectMake(0,top,w,ph);self.playerBox.hidden=!catalog||!expanded;
-        CGFloat y=top+ph;self.groupControl.frame=CGRectMake(12,y+6,w-24,32);self.groupControl.hidden=!catalog||expanded;self.playerTabs.frame=CGRectMake(12,y+6,w-24,32);self.playerTabs.hidden=!catalog||!expanded;
+        CGFloat y=top+ph;
+        // 大字体下分段标题行高会超过 32pt 固定高度而被裁：按缩放后行高给高度。
+        UIFont *segmentFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]];
+        CGFloat segmentHeight=MAX(32,ceil(segmentFont.lineHeight)+14);
+        self.groupControl.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.groupControl.hidden=!catalog||expanded;self.playerTabs.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.playerTabs.hidden=!catalog||!expanded;
         self.versionLabel.hidden=YES;
         self.bottomBar.frame=CGRectMake(MAX(16,(w-420)/2),height-safe.bottom-76,MIN(w-32,420),64);self.bottomBarBackdrop.frame=self.bottomBar.frame;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
-        CGFloat contentY=y+42;CGFloat contentBottom=CGRectGetMinY(self.bottomBar.frame)-8;
+        CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=CGRectGetMinY(self.bottomBar.frame)-8;
         CGRect frame=CGRectMake(0,contentY,w,MAX(0,contentBottom-contentY));self.table.frame=frame;self.channelGrid.frame=frame;
         self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=frame;self.playbackPanel.view.hidden=!catalog;
         // The resource controller places its own header below the status-bar
@@ -2347,7 +2356,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     for(NSDictionary *channel in self.allChannels){
         BOOL remote=[channel[@"remoteURL"] length]>0;if(!self.favoritesOnly&&remote!=self.subscriptionCatalog)continue;
         if(!remote&&(!CCTVBoolPreference(@"nativeChannelsEnabled",YES)||self.activeSource.length))continue;
-        if(remote){NSMutableSet *owners=[NSMutableSet setWithArray:channel[@"subscriptionSources"]?:@[]];[owners minusSet:disabled];if(!owners.count||(self.activeSource.length&&![owners containsObject:self.activeSource]))continue;}
+        if(remote){NSMutableSet *owners=[NSMutableSet setWithArray:CCTVStringArrayValue(channel[@"subscriptionSources"])];[owners minusSet:disabled];if(!owners.count||(self.activeSource.length&&![owners containsObject:self.activeSource]))continue;}
         if(self.favoritesOnly&&![favoriteIDs containsObject:channel[@"id"]?:@""])continue;
         NSString *query=self.query.lowercaseString;NSString *name=[channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:@"";NSString *identifier=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
         if(query.length && ![name.lowercaseString containsString:query] && ![identifier.lowercaseString containsString:query])continue;
@@ -2417,7 +2426,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *host=url.host.lowercaseString;if(![@[@"127.0.0.1",@"localhost",@"::1",@"[::1]"] containsObject:host])return nil;
     NSInteger port=url.port?url.port.integerValue:([url.scheme.lowercaseString isEqualToString:@"https"]?443:80);
     NSMutableDictionary<NSString *,NSDictionary *> *owners=[NSMutableDictionary dictionary];
-    for(NSString *source in [ProfileStore orderedSources:channel[@"subscriptionSources"]?:@[]]){NSString *identifier=[ProfileStore metadata:source][@"managedServiceID"];if(![identifier isKindOfClass:NSString.class]||!identifier.length)continue;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:identifier]&&[service[@"port"] integerValue]==port)owners[identifier]=service;}
+    for(NSString *source in [ProfileStore orderedSources:CCTVStringArrayValue(channel[@"subscriptionSources"])]){NSString *identifier=[ProfileStore metadata:source][@"managedServiceID"];if(![identifier isKindOfClass:NSString.class]||!identifier.length)continue;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:identifier]&&[service[@"port"] integerValue]==port)owners[identifier]=service;}
     if(owners.count==1)return owners.allValues.firstObject;
     if(owners.count>1){NSDictionary *running=nil;for(NSDictionary *service in owners.allValues)if([PyHost isRunningServiceIdentifier:service[@"id"]]){if(running)return nil;running=service;}if(running)return running;return nil;}
     return [self localServiceForURL:url];
@@ -2711,7 +2720,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         BOOL remote=[c[@"remoteURL"] length]>0;
         if(!self.favoritesOnly && remote!=self.subscriptionCatalog)return NO;
         if(!remote)return CCTVBoolPreference(@"nativeChannelsEnabled",YES) && (!self.activeSource || !self.activeSource.length);
-        NSSet *owners=[NSSet setWithArray:c[@"subscriptionSources"]?:@[]];NSMutableSet *enabled=[owners mutableCopy];[enabled minusSet:disabled];
+        NSSet *owners=[NSSet setWithArray:CCTVStringArrayValue(c[@"subscriptionSources"])];NSMutableSet *enabled=[owners mutableCopy];[enabled minusSet:disabled];
         return enabled.count && (!self.activeSource || [enabled containsObject:self.activeSource]);
     }]];
     if (self.favoritesOnly) {
@@ -2723,7 +2732,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     if (idx > 0 && idx < (NSInteger)groups.count) {
         NSString *g = groups[idx];
         base = [base filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *o, NSDictionary *b) {
-            return [o[@"group"] isEqualToString:g];
+            return [o[@"group"] isKindOfClass:NSString.class] && [o[@"group"] isEqualToString:g];
         }]];
     }
     if (self.query.length) {
@@ -2750,9 +2759,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self.table reloadData];
     [self.channelGrid reloadData];
     NSString *empty=self.query.length?@"没有找到匹配频道":(self.favoritesOnly?@"还没有收藏频道，长按频道即可收藏":(self.subscriptionCatalog?@"暂无订阅频道\n点击右上角更多 → 添加订阅，或在资源中导入播放列表":@"暂无官方频道，请在资源中启用官方频道"));
-    UILabel *hint=[UILabel new];hint.text=empty;hint.numberOfLines=0;hint.textAlignment=NSTextAlignmentCenter;hint.textColor=UIColor.secondaryLabelColor;hint.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];hint.adjustsFontForContentSizeCategory=YES;
+    UILabel *hint=[UILabel new];hint.text=empty;hint.numberOfLines=0;hint.textAlignment=NSTextAlignmentCenter;hint.textColor=HostSecondaryText();hint.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];hint.adjustsFontForContentSizeCategory=YES;
     self.channelGrid.backgroundView=sorted.count?nil:hint;
-    UILabel *listHint=[UILabel new];listHint.text=empty;listHint.numberOfLines=0;listHint.textAlignment=NSTextAlignmentCenter;listHint.textColor=UIColor.secondaryLabelColor;listHint.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];listHint.adjustsFontForContentSizeCategory=YES;self.table.backgroundView=sorted.count?nil:listHint;
+    UILabel *listHint=[UILabel new];listHint.text=empty;listHint.numberOfLines=0;listHint.textAlignment=NSTextAlignmentCenter;listHint.textColor=HostSecondaryText();listHint.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];listHint.adjustsFontForContentSizeCategory=YES;self.table.backgroundView=sorted.count?nil:listHint;
 }
 
 - (void)rememberChannel:(NSDictionary *)ch {
@@ -2775,14 +2784,16 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self.table.refreshControl endRefreshing];[self.channelGrid.refreshControl endRefreshing];
 }
 
-- (void)loadEPGForChannel:(NSString *)cid section:(NSIndexPath *)ip {
+- (void)loadEPGForChannel:(NSString *)cid channel:(NSDictionary *)channel section:(NSIndexPath *)ip {
     if (!CCTVBoolPreference(@"autoLoadEPG",YES)) return;
     if(CACurrentMediaTime()<self.playbackPriorityUntil)return;
     if (!cid.length || self.epgCache[cid] || [self.epgInflight containsObject:cid]) return;
-    NSDictionary *channel=[self channelWithID:cid];NSString *xmlSource=[ProfileStore epgSourceForChannel:channel];
+    // cellForRow 已持有该频道字典：直接复用，避免每次出现新 cell 都对
+    // 全量频道做两次线性查找（约 2 万条时滚动掉帧）。
+    if(!channel)channel=[self channelWithID:cid];NSString *xmlSource=[ProfileStore epgSourceForChannel:channel];
     if(xmlSource.length){NSArray *rows=[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:channel]];[self cacheXMLRows:rows channel:cid];if(self.epgCache[cid])return;}
     if (self.epgInflight.count >= 3) return;
-    NSString *epgCID=[self epgIDForChannel:[self channelWithID:cid]];
+    NSString *epgCID=[self epgIDForChannel:channel];
     if(!epgCID.length)return;
     [self.epgInflight addObject:cid];
     NSString *url = [NSString stringWithFormat:@"https://api.cntv.cn/epg/get3D12HEPG?c=%@&serviceId=cbox",
@@ -2809,8 +2820,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
                 if (![row isKindOfClass:NSDictionary.class]) continue;
                 double s0 = [row[@"startTime"] doubleValue], e0 = [row[@"endTime"] doubleValue];
                 if (s0 > 1e11) s0 /= 1000; if (e0 > 1e11) e0 /= 1000;
-                if (now >= s0 && now < e0) cur = row[@"title"];
-                else if (s0 > now && !nxt) nxt = row[@"title"];
+                NSString *title=[row[@"title"] isKindOfClass:NSString.class]?row[@"title"]:nil;
+                if (now >= s0 && now < e0) cur = title;
+                else if (s0 > now && !nxt) nxt = title;
             }
             if (cur || nxt) {
                 weakSelf.epgCache[cid] = @{@"now": cur ?: @"", @"next": nxt ?: @"", @"ts": @(now)};
@@ -2896,7 +2908,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [self.subscriptionReadiness[sourceKey] cancel];[self.subscriptionReadiness removeObjectForKey:sourceKey];[self.deferredLocalSubscriptions removeObject:sourceKey];
     NSMutableArray *kept = [NSMutableArray array];
     for (NSDictionary *channel in self.allChannels ?: @[]) {
-        NSMutableSet *sources = [NSMutableSet setWithArray:channel[@"subscriptionSources"] ?: @[]];
+        NSMutableSet *sources = [NSMutableSet setWithArray:CCTVStringArrayValue(channel[@"subscriptionSources"])];
         if ([sources containsObject:sourceKey]) {
             [sources removeObject:sourceKey];
             if (!sources.count) continue;
@@ -2975,7 +2987,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
                 [weakSelf.subscriptionTraceIDs removeObjectForKey:sourceKey];
                 NSDictionary *sourceMetadata=[ProfileStore metadata:sourceKey];id cachedChannels=sourceMetadata[@"cachedChannels"];
                 NSUInteger retainedCount=[cachedChannels isKindOfClass:NSArray.class]?[(NSArray *)cachedChannels count]:0;
-                if(!retainedCount)for(NSDictionary *channel in weakSelf.allChannels)if([channel[@"subscriptionSources"] containsObject:sourceKey])retainedCount++;
+                if(!retainedCount)for(NSDictionary *channel in weakSelf.allChannels)if([CCTVStringArrayValue(channel[@"subscriptionSources"]) containsObject:sourceKey])retainedCount++;
                 NSString *reason=err.localizedDescription?:parseError.localizedDescription?:[NSString stringWithFormat:@"HTTP %ld / 无有效 M3U",(long)status];
                 NSString *statusText=retainedCount?[NSString stringWithFormat:@"刷新失败 · 保留上次 %lu 个频道 · %@",(unsigned long)retainedCount,reason]:[NSString stringWithFormat:@"刷新失败 · %@",reason];
                 [ProfileStore update:sourceKey values:@{@"status":statusText}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[weakSelf refreshConfigurationPage];
@@ -3066,7 +3078,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             NSSet<NSString *> *retiredSourceSet=[NSSet setWithArray:retiredManagedSources];
             NSMutableArray *merged = [NSMutableArray array];
             for (NSDictionary *existing in self.allChannels ?: @[]) {
-                NSArray *originalOwners=existing[@"subscriptionSources"]?:@[];NSMutableSet *owners = [NSMutableSet setWithArray:originalOwners];
+                NSArray *originalOwners=CCTVStringArrayValue(existing[@"subscriptionSources"]);NSMutableSet *owners = [NSMutableSet setWithArray:originalOwners];
                 [owners minusSet:retiredSourceSet];
                 if ([owners containsObject:sourceKey]) {
                     [owners removeObject:sourceKey];
@@ -3099,7 +3111,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
                 NSNumber *existingIndex = urlIndexes[stable];
                 if (existingIndex) {
                     NSMutableDictionary *entry = [merged[existingIndex.unsignedIntegerValue] mutableCopy];
-                    NSMutableSet *owners = [NSMutableSet setWithArray:entry[@"subscriptionSources"] ?: @[]];
+                    NSMutableSet *owners = [NSMutableSet setWithArray:CCTVStringArrayValue(entry[@"subscriptionSources"])];
                     [owners addObject:sourceKey];
                     entry[@"subscriptionSources"] = owners.allObjects;
                     entry[@"name"] = c.name;
@@ -3128,7 +3140,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
                 }
             }
             if(merged.count>20000){NSString *message=@"合并后频道数量超过 20000 条安全上限，已保留上次有效订阅";[ProfileStore update:sourceKey values:@{@"status":message}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"playlist",@"failure_stage":@"merged_channel_limit",@"channel_count":@(merged.count)}];[self refreshConfigurationPage];[self log:@"%@",message];return;}
-            NSArray *owned=[merged filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *c,NSDictionary *b){return [c[@"subscriptionSources"] containsObject:sourceKey];}]];
+            NSArray *owned=[merged filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *c,NSDictionary *b){return [CCTVStringArrayValue(c[@"subscriptionSources"]) containsObject:sourceKey];}]];
             NSData *snapshot=[NSJSONSerialization dataWithJSONObject:owned options:0 error:NULL];
             if(!snapshot.length||snapshot.length>4*1024*1024){NSString *message=@"频道快照超过 4 MiB 安全上限，已保留上次有效订阅";[ProfileStore update:sourceKey values:@{@"status":message}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"playlist",@"failure_stage":@"snapshot_size_limit",@"snapshot_bytes":@(snapshot.length)}];[self refreshConfigurationPage];[self log:@"%@",message];return;}
             NSArray *disabledBefore=[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[];BOOL migratedDisabled=NO;NSMutableArray *profileOrder=[[NSUserDefaults.standardUserDefaults arrayForKey:@"profileOrder"]?:@[] mutableCopy];NSUInteger replacementOrderIndex=NSNotFound;
@@ -3329,7 +3341,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
         if(![channel[@"name"] isEqualToString:self.channelName])continue;
         NSString *url=[self stableURLKey:channel[@"remoteURL"]];
         if(!url.length || [self.remoteAttemptedURLs containsObject:url])continue;
-        NSMutableSet *owners=[NSMutableSet setWithArray:channel[@"subscriptionSources"]?:@[]];[owners minusSet:disabled];
+        NSMutableSet *owners=[NSMutableSet setWithArray:CCTVStringArrayValue(channel[@"subscriptionSources"])];[owners minusSet:disabled];
         if(!owners.count)continue;
         return channel;
     }
@@ -3452,8 +3464,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
             if (![row isKindOfClass:NSDictionary.class]) continue;
             double s0 = [row[@"startTime"] doubleValue], e0 = [row[@"endTime"] doubleValue];
             if (s0 > 1e11) s0 /= 1000; if (e0 > 1e11) e0 /= 1000;
-            if (now >= s0 && now < e0) cur = row[@"title"];
-            else if (s0 > now && !next) next = row[@"title"];
+            NSString *title=[row[@"title"] isKindOfClass:NSString.class]?row[@"title"]:nil;
+            if (now >= s0 && now < e0) cur = title;
+            else if (s0 > now && !next) next = title;
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             if (![weakSelf.epgChannel isEqualToString:cid] || requestGeneration!=weakSelf.officialEPGRequestGeneration || epgGeneration != weakSelf.playbackGeneration ||
@@ -3871,8 +3884,9 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *url=[self stableURLKey:ch[@"remoteURL"]];if(!url.length)return;
     NSDictionary *localService=[self localServiceForChannel:ch URL:[NSURL URLWithString:url]];if(localService&&![PyHost isRunningServiceIdentifier:localService[@"id"]]){[self showServiceError:@"请先启动该频道的本机服务。"];return;}
     [self stopPreview];self.previewPlayer=[AVPlayer playerWithURL:[NSURL URLWithString:url]];self.previewPlayer.muted=YES;self.previewLayer=[AVPlayerLayer playerLayerWithPlayer:self.previewPlayer];
-    UIView *box=[[UIView alloc] initWithFrame:CGRectMake(16,self.view.safeAreaInsets.top+12,MIN(280,self.view.bounds.size.width-32),158)];box.backgroundColor=UIColor.blackColor;box.layer.cornerRadius=14;box.clipsToBounds=YES;self.previewBox=box;[self.view addSubview:box];self.previewLayer.frame=box.bounds;self.previewLayer.videoGravity=AVLayerVideoGravityResizeAspect;[box.layer addSublayer:self.previewLayer];
-    UIButton *close=[UIButton buttonWithType:UIButtonTypeSystem];[close setTitle:@"关闭预览" forState:UIControlStateNormal];close.backgroundColor=[UIColor colorWithWhite:0 alpha:0.6];close.frame=CGRectMake(180,0,100,44);[close addTarget:self action:@selector(stopPreview) forControlEvents:UIControlEventTouchUpInside];[box addSubview:close];[self.previewPlayer play];__weak typeof(self) w=self;self.previewTimer=[NSTimer scheduledTimerWithTimeInterval:30 repeats:NO block:^(NSTimer *t){[w stopPreview];}];
+    CGFloat previewWidth=MIN(280,self.view.bounds.size.width-32);
+    UIView *box=[[UIView alloc] initWithFrame:CGRectMake(16,self.view.safeAreaInsets.top+12,previewWidth,158)];box.backgroundColor=UIColor.blackColor;box.layer.cornerRadius=14;box.clipsToBounds=YES;self.previewBox=box;[self.view addSubview:box];self.previewLayer.frame=box.bounds;self.previewLayer.videoGravity=AVLayerVideoGravityResizeAspect;[box.layer addSublayer:self.previewLayer];
+    UIButton *close=[UIButton buttonWithType:UIButtonTypeSystem];[close setTitle:@"关闭预览" forState:UIControlStateNormal];close.backgroundColor=[UIColor colorWithWhite:0 alpha:0.6];close.frame=CGRectMake(MAX(0,previewWidth-100),0,MIN(100,previewWidth),44);[close addTarget:self action:@selector(stopPreview) forControlEvents:UIControlEventTouchUpInside];[box addSubview:close];[self.previewPlayer play];__weak typeof(self) w=self;self.previewTimer=[NSTimer scheduledTimerWithTimeInterval:30 repeats:NO block:^(NSTimer *t){[w stopPreview];}];
 }
 - (void)stopPreview {[self.previewTimer invalidate];self.previewTimer=nil;[self.previewPlayer pause];[self.previewPlayer.currentItem.asset cancelLoading];[self.previewPlayer replaceCurrentItemWithPlayerItem:nil];self.previewPlayer=nil;self.previewLayer.player=nil;[self.previewLayer removeFromSuperlayer];self.previewLayer=nil;[self.previewBox removeFromSuperview];self.previewBox=nil;}
 - (void)showHistory {
@@ -3888,7 +3902,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.sourceView=self.bottomBar;a.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:a animated:YES completion:nil];
 }
 - (void)cacheXMLRows:(NSArray *)rows channel:(NSString *)cid {
-    NSTimeInterval now=NSDate.date.timeIntervalSince1970;NSString *current=nil,*next=nil;for(NSDictionary *r in rows){double start=[r[@"start"] doubleValue],end=[r[@"end"] doubleValue];if(now>=start&&now<end)current=r[@"title"];else if(start>now&&!next)next=r[@"title"];}
+    NSTimeInterval now=NSDate.date.timeIntervalSince1970;NSString *current=nil,*next=nil;for(NSDictionary *r in rows){if(![r isKindOfClass:NSDictionary.class])continue;double start=[r[@"start"] doubleValue],end=[r[@"end"] doubleValue];NSString *title=[r[@"title"] isKindOfClass:NSString.class]?r[@"title"]:nil;if(now>=start&&now<end)current=title;else if(start>now&&!next)next=title;}
     if(current||next){self.epgCache[cid]=@{@"now":current?:@"",@"next":next?:@"",@"ts":@(now)};[self trimEPGCache];}
 }
 - (void)trimEPGCache {
