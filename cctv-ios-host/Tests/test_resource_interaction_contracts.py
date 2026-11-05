@@ -1297,7 +1297,10 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('timeoutIntervalForResource=125', client)
         self.assertIn('request.timeoutInterval=[operation isEqual:@"play"]?self.playTimeoutMilliseconds/1000.0:self.requestTimeout', client)
         self.assertIn('sessionForOperation:operation', client)
-        self.assertIn('initWithPort:port requestTimeout:40', client)
+        # 移植合并：cdeeaff 把网络超时改为可配置（cctv.networkTimeout.v1，
+        # 默认 20s，上限 40s），不再硬编码 requestTimeout:40。
+        self.assertIn('initWithPort:port requestTimeout:savedTimeout', client)
+        self.assertIn('doubleForKey:@"cctv.networkTimeout.v1"]:20', client)
 
     def test_tvbox_filters_and_playback_flags_survive_native_adaptation(self):
         client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
