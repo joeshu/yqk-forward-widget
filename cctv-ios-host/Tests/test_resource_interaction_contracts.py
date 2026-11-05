@@ -49,10 +49,11 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('chevron.up', self.catalog)
         self.assertIn('importTaskExpanded?76:44', self.catalog)
         self.assertIn('profile:profile matchesKind:identifier', self.catalog)
-        self.assertIn('initWithFrame:CGRectMake(0,0,96,44)', self.catalog)
+        self.assertIn('initWithFrame:CGRectMake(0,0,104,44)', self.catalog)
         # 资源列表开关恢复标准尺寸，不再缩放到 0.88（低于标准触控目标）。
+        # 第二轮 UI：更多按钮 36→44pt 达最小触摸目标，容器 96→104 宽与之匹配。
         self.assertNotIn('CGAffineTransformMakeScale(.88,.88)', self.catalog)
-        self.assertIn('more.frame=CGRectMake(58,4,36,36)', self.catalog)
+        self.assertIn('more.frame=CGRectMake(58,0,44,44)', self.catalog)
         self.assertIn('onOpenResource', self.catalog)
         self.assertIn('onToggleProfile(p[@"source"], sender.on)', self.catalog)
         self.assertIn('onToggle=^', self.root)
@@ -122,7 +123,7 @@ class ResourceInteractionContracts(unittest.TestCase):
     def test_five_tab_navigation_is_clear_and_pages_scroll_under_it(self):
         self.assertIn('self.bottomBarBackdrop.backgroundColor=UIColor.clearColor', self.root)
         self.assertIn('self.bottomBar.backgroundColor=UIColor.clearColor', self.root)
-        self.assertIn('CGFloat contentY=playerBottom+42;CGFloat contentBottom=height', self.root)
+        self.assertIn('CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=height', self.root)
         self.assertIn('tabContentInset=MAX(8,height-tabY+8)', self.root)
         self.assertIn('setBottomOverlayInset:tabContentInset', self.root)
         self.assertIn('five-tab navigation stays fully transparent over content that extends behind it',
@@ -352,7 +353,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('configureWithTransparentBackground', detail)
         self.assertIn('contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever', detail)
         self.assertIn('scrollView.topAnchor constraintEqualToAnchor:self.view.topAnchor', detail)
-        self.assertIn('heroSpacer.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.62', detail)
+        self.assertIn('heroSpacer.heightAnchor constraintGreaterThanOrEqualToAnchor:self.view.heightAnchor multiplier:0.62', detail)
         self.assertIn('NSUInteger rowCount=(visibleCount+columnCount-1)/columnCount', detail)
         self.assertIn('UIView *spacer=[UIView new]', detail)
         self.assertIn('media-detail-page-status', detail)
@@ -1058,6 +1059,49 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('recognizeURL', workflow)
         self.assertIn('response.URL.absoluteString?:raw', workflow)
         self.assertNotIn('shouldImportTVBoxCatalogFromURL', self.root)
+
+    def test_builtin_maccms_catalogs_cover_ystj_sources(self):
+        # 内置 4 个 MacCMS 影视源（与 For-ADM 蜘蛛 ystj.py 同款），读取目录时幂等补入。
+        store = self.tvbox
+        self.assertIn('ensureBuiltInMacCMSCatalogs', store)
+        self.assertIn('[self ensureBuiltInMacCMSCatalogs]', store)
+        for api in ('https://cj.lziapi.com/api.php/provide/vod/',
+                    'https://caiji.dyttzyapi.com/api.php/provide/vod/',
+                    'https://api.wujinapi.me/api.php/provide/vod/',
+                    'https://api.ffzyapi.com/api.php/provide/vod/'):
+            self.assertIn(api, store)
+        for cid in ('builtin-maccms-lziapi', 'builtin-maccms-dytt',
+                    'builtin-maccms-wujin', 'builtin-maccms-ffzy'):
+            self.assertIn(cid, store)
+        self.assertIn('@"maccms-api"', store)
+        self.assertIn('@"builtin":@YES', store)
+        # 幂等：已存在同 id 时跳过（不重复插入）。
+        ensure = store.split('+ (void)ensureBuiltInMacCMSCatalogs', 1)[1].split('+ (NSArray<NSDictionary *> *)catalogs', 1)[0]
+        self.assertIn('if([ids containsObject:spec[@"id"]]) continue;', ensure)
+        # 直读 NSUserDefaults，不经 +catalogs，避免递归。
+        self.assertIn('[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"]', ensure)
+        self.assertNotIn('[self catalogs]', ensure)
+
+    def test_media_home_reuses_existing_history_favorites_and_services(self):
+        self.assertIn('MediaPlaybackStateStore.watchHistory', self.detail)
+        self.assertIn('trailingSwipeActionsConfigurationForRowAtIndexPath', self.detail)
+        self.assertIn('removeHistoryEntryWithKey', self.detail)
+        self.assertIn('performsFirstActionWithFullSwipe=NO', self.detail)
+        self.assertIn('cctv.mediaFavorites.v1', self.detail)
+        self.assertIn('MediaHomePinnedSourcesDefaultsKey', self.detail)
+        self.assertIn('sourcesProvider', self.detail)
+        self.assertIn('onActivateService', self.detail)
+        # 413 首页用悬浮搜索按钮（MediaFeedView 架构），不用 main 旧首页
+        # 的 browse/search 按钮与 homeSearchButton 显隐切换。
+        self.assertIn('media-home-floating-search', self.detail)
+        self.assertIn('floatingHomeSearchButton', self.detail)
+        self.assertIn('openGlobalSearch', self.detail)
+        self.assertIn('onDisplayModeChanged', self.root)
+        self.assertIn('[owner activate:source keepingHome:YES]', self.detail)
+        self.assertIn('openHomeConfiguration', self.detail)
+        self.assertIn('@"影视库"', self.root)
+        self.assertIn('CCTV",@"频道",@"影视库",@"资源",@"设置', self.root)
+        self.assertIn('@"频道"', self.root)
 
     def test_tvbox_collection_can_be_added_as_a_bounded_batch_with_live_user_agents(self):
         bulk = (ROOT / 'Sources/TVBoxCatalogBulkImporter.m').read_text()

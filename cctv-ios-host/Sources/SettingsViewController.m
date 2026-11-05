@@ -54,6 +54,7 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
 @property(nonatomic) CGFloat bottomOverlayInset;
 @property(nonatomic,strong) NSArray<NSDictionary *> *sections;
 @property(nonatomic,copy,nullable) NSString *lastUpdateCheckText;
+@property(nonatomic,assign) BOOL checkingUpdate;
 @end
 @implementation SettingsViewController
 - (void)viewDidLoad {
@@ -136,6 +137,11 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     _bottomOverlayInset=inset;
     [self updateImmersiveTableInsets];
 }
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    // 分段控件标题字号取自 preferredFont：大字体档位变化时旧字号不会自动跟随，重载一次让 cellForRow 用当前档位重算字号与行高。
+    if(previousTraitCollection&&![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory])[self.table reloadData];
+}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView{return self.sections.count;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return [self.sections[section][@"rows"] count];}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section{return self.sections[section][@"title"];}
@@ -153,14 +159,15 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     if([row[@"action"] isEqualToString:@"checkUpdate"])cell.detailTextLabel.text=self.lastUpdateCheckText?:@"点按检查最新发布";
     cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=0; cell.imageView.image=[UIImage systemImageNamed:row[@"icon"]]; cell.imageView.tintColor=HostAccent(); cell.backgroundColor=HostCard(); cell.accessoryView=nil; cell.accessoryType=UITableViewCellAccessoryNone;cell.selectionStyle=UITableViewCellSelectionStyleNone;
     NSString *key=row[@"key"];
-    if([row[@"appearance"] boolValue]){UISegmentedControl *style=[[UISegmentedControl alloc] initWithItems:@[@"系统",@"浅色",@"深色"]];[style setTitleTextAttributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];NSString *mode=HostThemeMode();style.selectedSegmentIndex=[mode isEqual:@"system"]?0:([mode isEqual:@"light"]?1:2);style.selectedSegmentTintColor=HostAccent();[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];style.accessibilityIdentifier=HostThemeModePreferenceKey;[style addTarget:self action:@selector(appearanceChanged:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=style;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
-    else if([row[@"segmented"] boolValue]){NSArray *options=row[@"options"];UISegmentedControl *seg=[[UISegmentedControl alloc] initWithItems:options];[seg setTitleTextAttributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];NSInteger saved=[[NSUserDefaults standardUserDefaults] objectForKey:key]?[[NSUserDefaults standardUserDefaults] integerForKey:key]:[row[@"default"] integerValue];NSInteger index=[row[@"values"] indexOfObject:@(saved)];seg.selectedSegmentIndex=index==NSNotFound?0:index;seg.selectedSegmentTintColor=HostAccent();[seg setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];[seg setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];seg.accessibilityIdentifier=key;[seg addTarget:self action:@selector(segmentedChanged:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=seg;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
-    else if(key){ UISwitch *sw=[UISwitch new]; sw.onTintColor=HostAccent(); id saved=[[NSUserDefaults standardUserDefaults] objectForKey:key]; sw.on=saved? [saved boolValue]:[row[@"default"] boolValue]; sw.accessibilityIdentifier=key; [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView=sw; cell.selectionStyle=UITableViewCellSelectionStyleNone; }
+    if([row[@"appearance"] boolValue]){UISegmentedControl *style=[[UISegmentedControl alloc] initWithItems:@[@"系统",@"浅色",@"深色"]];[style setTitleTextAttributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];NSString *mode=HostThemeMode();style.selectedSegmentIndex=[mode isEqual:@"system"]?0:([mode isEqual:@"light"]?1:2);style.selectedSegmentTintColor=HostAccent();[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];[style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];style.accessibilityIdentifier=HostThemeModePreferenceKey;style.accessibilityLabel=row[@"title"];[style addTarget:self action:@selector(appearanceChanged:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=style;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
+    else if([row[@"segmented"] boolValue]){NSArray *options=row[@"options"];UISegmentedControl *seg=[[UISegmentedControl alloc] initWithItems:options];[seg setTitleTextAttributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];NSInteger saved=[[NSUserDefaults standardUserDefaults] objectForKey:key]?[[NSUserDefaults standardUserDefaults] integerForKey:key]:[row[@"default"] integerValue];NSInteger index=[row[@"values"] indexOfObject:@(saved)];seg.selectedSegmentIndex=index==NSNotFound?0:index;seg.selectedSegmentTintColor=HostAccent();[seg setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];[seg setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];seg.accessibilityIdentifier=key;seg.accessibilityLabel=row[@"title"];[seg addTarget:self action:@selector(segmentedChanged:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=seg;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
+    else if(key){ UISwitch *sw=[UISwitch new]; sw.onTintColor=HostAccent(); id saved=[[NSUserDefaults standardUserDefaults] objectForKey:key]; sw.on=saved? [saved boolValue]:[row[@"default"] boolValue]; sw.accessibilityIdentifier=key;sw.accessibilityLabel=row[@"title"]; [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView=sw; cell.selectionStyle=UITableViewCellSelectionStyleNone; }
     else if(row[@"action"]){ cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator; cell.selectionStyle=UITableViewCellSelectionStyleDefault; }
     else cell.selectionStyle=UITableViewCellSelectionStyleNone;
     return cell;
 }
 - (void)toggle:(UISwitch *)sender {
+    if(!sender.accessibilityIdentifier.length)return;
     NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
     [defaults setBool:sender.on forKey:sender.accessibilityIdentifier];
     if ([sender.accessibilityIdentifier isEqualToString:@"rememberLastChannel"] && !sender.on) [defaults removeObjectForKey:@"lastChannel"];
@@ -198,6 +205,8 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     else if([row[@"action"] isEqualToString:@"logs"]){if(self.onOpenLog)self.onOpenLog();}
 }
 - (void)presentActionSheet:(UIAlertController *)sheet fromIndexPath:(NSIndexPath *)ip {
+    // 快速连点同一行会重复 present，系统只会警告并丢掉后一个；直接拦截。
+    if(self.presentedViewController)return;
     // iPad 上 action sheet 必须指定弹出位置，否则会崩溃；行滑出可视区时 cell 为 nil，用 self.view 兜底。
     UITableViewCell *cell=[self.table cellForRowAtIndexPath:ip];
     sheet.popoverPresentationController.sourceView=cell?:self.view;
@@ -237,14 +246,18 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     [self presentActionSheet:sheet fromIndexPath:ip];
 }
 - (void)checkForUpdateFromIndexPath:(NSIndexPath *)ip {
+    // 连点会发重复请求并弹出重复提示；检查中直接返回。
+    if(self.checkingUpdate)return;self.checkingUpdate=YES;
     // 手动检查 GitHub 最新发布：版本号用数字比较；同一版本号内的新构建无法仅凭版本号识别，提示里会同时给出最新构建号，由用户对照发布页判断。
     self.lastUpdateCheckText=@"正在检查…";[self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
     NSURL *url=[NSURL URLWithString:@"https://api.github.com/repos/joeshu/yqk-forward-widget/releases/latest"];
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:10];
     [request setValue:@"CCTVHost" forHTTPHeaderField:@"User-Agent"];
     __weak typeof(self) weakSelf=self;
-    [[[NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration] dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
-        dispatch_async(dispatch_get_main_queue(),^{SettingsViewController *owner=weakSelf;if(!owner)return;
+    NSURLSession *updateSession=[NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration];
+    [updateSession dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+        [updateSession finishTasksAndInvalidate];
+        dispatch_async(dispatch_get_main_queue(),^{SettingsViewController *owner=weakSelf;if(!owner)return;owner.checkingUpdate=NO;
             NSDictionary *json=[NSJSONSerialization JSONObjectWithData:data?:[NSData data] options:0 error:NULL];
             NSString *name=[json isKindOfClass:NSDictionary.class]&&[json[@"name"] isKindOfClass:NSString.class]?json[@"name"]:@"";
             NSString *htmlURL=[json isKindOfClass:NSDictionary.class]&&[json[@"html_url"] isKindOfClass:NSString.class]?json[@"html_url"]:@"";
@@ -307,7 +320,9 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
             [NSUserDefaults.standardUserDefaults setObject:mode forKey:HostThemeModePreferenceKey];
             [NSUserDefaults.standardUserDefaults setBool:theme.dark forKey:HostDarkThemePreferenceKey];
             UIWindow *window=self.view.window;
-            if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);[self.table reloadData];});}
+            if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);});}
+            // window 为 nil 时主题仍已写入偏好：照样刷新本行，否则色板副标题会一直显示旧主题。
+            [self.table reloadData];
             if(self.onPreferenceChanged)self.onPreferenceChanged(HostThemePaletteIdentifierPreferenceKey,theme.dark);
             UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"主题已切换为%@",theme.displayName]);
         }]];
@@ -367,7 +382,7 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     [NSUserDefaults.standardUserDefaults setObject:mode forKey:HostThemeModePreferenceKey];
     if(![mode isEqual:@"system"])[NSUserDefaults.standardUserDefaults setBool:dark forKey:HostDarkThemePreferenceKey];
     UIWindow *window=self.view.window;
-    if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);});}
+    if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);[self.table reloadData];});}
     if(self.onPreferenceChanged)self.onPreferenceChanged(HostThemeModePreferenceKey,HostIsDarkThemeSelected());
 }
 // 按 action 在 sections 里找行位置（清理类行清理后要重刷本行 detail）。

@@ -97,6 +97,7 @@
 
 @interface ResourceImportSheetViewController () <UITableViewDataSource,UITableViewDelegate>
 @property(nonatomic,strong) UITableView *tableView;
+@property(nonatomic,assign) BOOL didSelectOption;
 @end
 
 @implementation ResourceImportSheetViewController
@@ -219,12 +220,15 @@
     ResourceImportSheetCell *cell=[tableView dequeueReusableCellWithIdentifier:@"resource-option" forIndexPath:indexPath];
     NSArray *options=[self optionsForSection:indexPath.section];if(indexPath.row<0||indexPath.row>=options.count)return cell;
     NSDictionary *item=options[indexPath.row];
+    cell.accessibilityIdentifier=[NSString stringWithFormat:@"resource-import-option-%ld-%ld",(long)indexPath.section,(long)indexPath.row];
     [cell configureWithTitle:item[@"title"] detail:item[@"detail"] icon:item[@"icon"] color:item[@"color"]];
     cell.accessibilityIdentifier=[@"resource-import.option." stringByAppendingString:item[@"id"]?:@"unknown"];
     return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    // 快速连点会 dismiss 两次并回调两次 onSelect（上层可能重复 push）；只认第一次。
+    if(self.didSelectOption)return;self.didSelectOption=YES;
     NSArray *options=[self optionsForSection:indexPath.section];if(indexPath.row<0||indexPath.row>=options.count)return;
     NSNumber *storedOption=options[indexPath.row][@"option"];
     ResourceImportOption option=(ResourceImportOption)storedOption.integerValue;

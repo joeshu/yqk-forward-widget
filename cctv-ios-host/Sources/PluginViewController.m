@@ -20,6 +20,9 @@
 @property(nonatomic,strong,nullable) NSNumber *httpReachable;
 @property(nonatomic, copy, nullable) NSNumber *stopPortState; // 0 端口已释放，1 仍可访问，-1 未知
 @property(nonatomic, assign) NSUInteger stopVerifyGeneration;
+@property(nonatomic, assign) NSUInteger restartGeneration;
+@property(nonatomic, assign) NSUInteger startStopGeneration;
+@property(nonatomic, assign) BOOL startStopPending;
 @end
 
 @implementation PluginViewController
@@ -145,6 +148,7 @@
     [b setTitle:title forState:UIControlStateNormal];
     b.titleLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]];
     b.titleLabel.adjustsFontForContentSizeCategory = YES;
+    b.titleLabel.adjustsFontSizeToFitWidth=YES;b.titleLabel.minimumScaleFactor=0.6;
     [b setTitleColor:HostText() forState:UIControlStateNormal];
     b.backgroundColor = HostRaisedSurface();
     b.layer.cornerRadius = 12;
@@ -155,11 +159,19 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self refreshStatus];
+    [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refreshStatus) name:PyHostRuntimeStateDidChangeNotification object:nil];
 }
 - (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated]; [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil]; [self.httpProbeTask cancel]; self.httpProbeTask=nil; self.httpProbeGeneration++; self.stopVerifyGeneration++; }
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; [self.httpProbeTask cancel]; }
+- (NSInteger)pluginServicePort {
+    // 端口只认 builtin-ysp 这一项，且落在 1…65535 内；配置缺失或非法时
+    // 回落 8767，避免拼出 http://127.0.0.1:0/all.m3u 这种无效地址。
+    for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:@"builtin-ysp"]){NSInteger port=[service[@"port"] integerValue];return (port>=1&&port<=65535)?port:8767;}
+    return 8767;
+}
 - (void)refreshStatus {
+    self.startStopPending=NO;
     // 订阅数不在本页维护：每次出现时向调用方现取，否则在资源页增删订阅
     // 后返回本页仍显示旧数。未提供 provider 时沿用上次传入的值。
     NSUInteger count=self.subscriptionCountProvider?self.subscriptionCountProvider():self.subscriptionCount;
@@ -172,7 +184,7 @@
     if(wasRunning&&!self.running)[self verifyPortReleasedAfterStop];
 }
 - (void)verifyPortReleasedAfterStop {
-    NSInteger port=8767;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:@"builtin-ysp"]){port=[service[@"port"] integerValue];break;}
+    NSInteger port=[self pluginServicePort];
     if(port<1||port>65535)return;
     NSUInteger generation=++self.stopVerifyGeneration;
     __weak typeof(self) weakSelf=self;
@@ -199,7 +211,7 @@
     [self.httpProbeTask cancel];self.httpProbeTask=nil;
     NSUInteger generation=++self.httpProbeGeneration;
     self.httpReachable=nil;
-    NSInteger port=8767;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:@"builtin-ysp"]){port=[service[@"port"] integerValue];break;}
+    NSInteger port=[self pluginServicePort];
     [self updateStatusLabelWithPort:port];
     NSURL *url=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/health",(long)port]];
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3];
@@ -210,7 +222,7 @@
     [self.httpProbeTask resume];
 }
 - (void)updateRunning:(BOOL)running subscriptionCount:(NSUInteger)count {
-    NSInteger port=8767;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:@"builtin-ysp"]){port=[service[@"port"] integerValue];break;}
+    NSInteger port=[self pluginServicePort];
     self.subscriptionCount = count;
     self.running = running;
     self.statusDot.backgroundColor = running ? UIColor.systemGreenColor : UIColor.systemGrayColor;
@@ -224,17 +236,26 @@
     self.stopButton.alpha = (running&&!self.restarting) ? 1.0 : 0.45;
     self.restartButton.alpha = (running&&!self.restarting) ? 1.0 : 0.45;
 }
-- (void)start { if (self.onStart) self.onStart(); }
-- (void)stop { if (self.onStop) self.onStop(); }
+- (void)start { if(self.startStopPending)return;self.startStopPending=YES;self.startButton.enabled=NO;self.stopButton.enabled=NO;if(self.onStart)self.onStart();[self armStartStopWatchdog]; }
+- (void)stop { if(self.startStopPending)return;self.startStopPending=YES;self.startButton.enabled=NO;self.stopButton.enabled=NO;if(self.onStop)self.onStop();[self armStartStopWatchdog]; }
+- (void)armStartStopWatchdog {
+    // 启停是异步的：状态通知回来前按钮仍可用，连点会重复下发启停。
+    // 先锁住按钮，状态通知（refreshStatus）或 10 秒看门狗会恢复。
+    NSUInteger generation=++self.startStopGeneration;__weak typeof(self) weakSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,10*NSEC_PER_SEC),dispatch_get_main_queue(),^{PluginViewController *owner=weakSelf;if(!owner||generation!=owner.startStopGeneration||!owner.startStopPending)return;owner.startStopPending=NO;[owner refreshStatus];});
+}
 - (void)restart {
     // 重启只对运行中的服务有意义：复用与服务详情同一条 restartMediaService
     //（先停、确认端口释放后再启动），失败弹框给明确原因。
     if(!self.running||self.restarting||!self.onRestart)return;
     self.restarting=YES;[self updateRunning:self.running subscriptionCount:self.subscriptionCount];
     __weak typeof(self) weakSelf=self;
+    NSUInteger restartGeneration=++self.restartGeneration;
     self.onRestart(^(NSError *error){
         dispatch_async(dispatch_get_main_queue(),^{PluginViewController *owner=weakSelf;if(!owner)return;owner.restarting=NO;[owner refreshStatus];if(error)[owner showRestartError:error];});
     });
+    // onRestart 回调若永不触发，重启按钮会永久锁死：30 秒看门狗兜底复位（与服务详情页一致）。
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{PluginViewController *owner=weakSelf;if(!owner||restartGeneration!=owner.restartGeneration||!owner.restarting)return;owner.restarting=NO;[owner refreshStatus];[owner showRestartError:[NSError errorWithDomain:@"CCTVHost" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"重启超时，服务未重新启动，请查看运行日志。"}]];});
 }
 - (void)showRestartError:(NSError *)error {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"重启失败" message:error.localizedDescription?:@"服务未重新启动，请查看运行日志。" preferredStyle:UIAlertControllerStyleAlert];
@@ -247,9 +268,8 @@
 - (void)manage { if (self.onManageSubscriptions) self.onManageSubscriptions(); }
 - (void)openLog { if (self.onOpenLog) self.onOpenLog(); }
 - (NSString *)subscriptionURL {
-    NSInteger port=8767;
-    for(NSDictionary *s in [ServiceStore services])if([s[@"builtin"] boolValue]){port=[s[@"port"] integerValue];break;}
-    return [NSString stringWithFormat:@"http://127.0.0.1:%ld/all.m3u",(long)port];
+    // 之前取“第一个 builtin 服务”的端口，可能取到别的服务或 0 端口；与状态文案用同一来源。
+    return [NSString stringWithFormat:@"http://127.0.0.1:%ld/all.m3u",(long)[self pluginServicePort]];
 }
 - (void)copyURL { UIPasteboard.generalPasteboard.string=[self subscriptionURL];self.urlLabel.text=[@"已复制 · " stringByAppendingString:[self subscriptionURL]];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"播放列表地址已复制");__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{PluginViewController *owner=weakSelf;if(owner&&[owner.urlLabel.text hasPrefix:@"已复制 · "])owner.urlLabel.text=[owner subscriptionURL];}); }
 @end

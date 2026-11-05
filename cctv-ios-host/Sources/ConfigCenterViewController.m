@@ -50,6 +50,15 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 - (UIImageView *)imageView { return self.profileIconView; }
 @end
 
+static NSDateFormatter *CCTVResourceListDateFormatter(void) {
+    // heightForRow 与 cellForRow 每行都会调 resourceDetailForProfile：
+    // NSDateFormatter 创建昂贵，复用同一实例，避免滚动时反复分配。
+    // 只在主线程调用（列表渲染），无需加锁。
+    static NSDateFormatter *formatter;static dispatch_once_t once;
+    dispatch_once(&once,^{formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"MM-dd HH:mm";});
+    return formatter;
+}
+
 @interface ConfigCenterViewController () <UITextFieldDelegate>
 @property(nonatomic, strong) NSArray<NSDictionary *> *profiles;
 @property(nonatomic, strong) NSArray<NSDictionary *> *allProfiles;
@@ -166,6 +175,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     // the header here, but leave the saved offset for RootViewController's
     // didShow callback, after the final bar and safe-area layout has settled.
     [self updateResourceHeaderLayoutReattaching:YES];
+    [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(runtimeStateDidChange) name:PyHostRuntimeStateDidChangeNotification object:nil];
 }
 - (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];}
@@ -315,7 +325,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
         [button setTitle:[NSString stringWithFormat:@"%@ %lu",definition[@"name"],(unsigned long)count] forState:UIControlStateNormal];
     }
     UIButton *firstFilter=self.kindFilterButtons.firstObject;
-    CGFloat pillHeight=MAX(42,ceil(firstFilter.titleLabel.font.lineHeight+14));
+    CGFloat pillHeight=MAX(44,ceil(firstFilter.titleLabel.font.lineHeight+14));
     if(fabs(self.kindScrollHeightConstraint.constant-pillHeight)>0.5){
         self.kindScrollHeightConstraint.constant=pillHeight;
         [self.resourceHeader setNeedsLayout];
@@ -368,19 +378,25 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     NSString *current=[profile[@"current"] boolValue]?@"当前使用 · ":@"";
     if(plugin){
         NSString *kind=[profile[@"resourceKind"] isEqual:@"live"]?@"直播服务":([profile[@"resourceKind"] isEqual:@"vod"]?@"影视服务":([profile[@"resourceKind"] isEqual:@"both"]?@"影视 / 直播服务":@"待识别能力"));
-        NSMutableArray *lines=[NSMutableArray arrayWithObject:[NSString stringWithFormat:@"%@%@ · %@",current,kind,profile[@"status"]?:@"未启动"]];
-        NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];if(updated>0){NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"MM-dd HH:mm";[lines addObject:[NSString stringWithFormat:@"最近更新 %@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]]];}
-        if([profile[@"subscriptionURL"] length]){[lines addObject:[NSString stringWithFormat:@"%@ 个缓存频道 · %@",profile[@"channelCount"]?:@0,profile[@"subscriptionStatus"]?:@"尚未读取清单"]];}
-        if([profile[@"healthResult"] isKindOfClass:NSString.class]){NSTimeInterval checked=[profile[@"healthCheckedAt"] doubleValue];NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"MM-dd HH:mm";NSString *time=checked>0?[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:checked]]:@"未知时间";[lines addObject:[NSString stringWithFormat:@"最近接口检测 %@ · %@",time,profile[@"healthResult"]]];}
+        NSMutableArray *lines=[NSMutableArray arrayWithObject:[NSString stringWithFormat:@"%@%@ · %@ · %@",current,kind,profile[@"runtime"]?:@"引擎未知",profile[@"status"]?:@"未启动"]];
+        NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];if(updated>0){NSDateFormatter *formatter=CCTVResourceListDateFormatter();[lines addObject:[NSString stringWithFormat:@"最近更新 %@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]]];}
+        if([profile[@"subscriptionURL"] length]){
+            [lines addObject:[NSString stringWithFormat:@"%@ 个缓存频道 · %@",profile[@"channelCount"]?:@0,profile[@"subscriptionStatus"]?:@"尚未读取清单"]];
+            NSTimeInterval last=[profile[@"playlistUpdatedAt"] doubleValue];
+            if(last>0){NSDateFormatter *formatter=CCTVResourceListDateFormatter();[lines addObject:[NSString stringWithFormat:@"最近成功：%@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:last]]]];}
+            [lines addObject:[NSString stringWithFormat:@"订阅：%@",CCTVResourceDisplayEndpoint(profile[@"subscriptionURL"])]];
+        }
+        if([profile[@"healthResult"] isKindOfClass:NSString.class]){NSTimeInterval checked=[profile[@"healthCheckedAt"] doubleValue];NSDateFormatter *formatter=CCTVResourceListDateFormatter();NSString *time=checked>0?[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:checked]]:@"未知时间";[lines addObject:[NSString stringWithFormat:@"最近接口检测 %@ · %@",time,profile[@"healthResult"]]];}
+        if([profile[@"epgURL"] length])[lines addObject:[NSString stringWithFormat:@"节目单：%@",CCTVResourceDisplayEndpoint(profile[@"epgURL"])]];
         return [lines componentsJoinedByString:@"\n"];
     }
     if(tvbox){
         BOOL macCMS=[profile[@"catalogKind"] isEqual:@"maccms"];NSString *catalogTitle=macCMS?@"MacCMS 影视接口":@"资源合集";
-        NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];NSDateFormatter *savedFormatter=[NSDateFormatter new];savedFormatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];savedFormatter.dateFormat=@"MM-dd HH:mm";NSString *saved=updated>0?[NSString stringWithFormat:@"最近保存 %@",[savedFormatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]]:@"尚无保存时间";
+        NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];NSDateFormatter *savedFormatter=CCTVResourceListDateFormatter();NSString *saved=updated>0?[NSString stringWithFormat:@"最近保存 %@",[savedFormatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]]:@"尚无保存时间";
         return macCMS?[NSString stringWithFormat:@"%@%@ · 选中后浏览 · 仅请求当前接口\n%@",current,catalogTitle,saved]:[NSString stringWithFormat:@"%@%@ · %lu 个站点 · %lu 个已识别 · %lu 个直播列表\n%@",current,catalogTitle,(unsigned long)[profile[@"siteCount"] unsignedIntegerValue],(unsigned long)[profile[@"supportedCount"] unsignedIntegerValue],(unsigned long)[profile[@"liveCount"] unsignedIntegerValue],saved];
     }
     NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];NSString *refreshInfo=@"尚无成功刷新记录";
-    if(updated>0){NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"MM-dd HH:mm";refreshInfo=[NSString stringWithFormat:@"最近成功 %@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]];}
+    if(updated>0){NSDateFormatter *formatter=CCTVResourceListDateFormatter();refreshInfo=[NSString stringWithFormat:@"最近成功 %@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]];}
     NSString *source=[profile[@"source"] isKindOfClass:NSString.class]?profile[@"source"]:@"";
     NSString *location=[source hasPrefix:@"local-playlist:"]?@"本机文件":(source.length?[NSURL URLWithString:source].host?:@"直播订阅":@"官方频道目录");
     NSString *summary=[NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@ · %@",profile[@"count"]?:@0,profile[@"epgStatus"]?:@"自动匹配",location,refreshInfo];
@@ -465,7 +481,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
     if(indexPath.row<0||indexPath.row>=self.profiles.count)return 96;
     NSDictionary *profile=self.profiles[indexPath.row];BOOL plugin=[profile[@"type"] isEqual:@"plugin"],tvbox=[profile[@"type"] isEqual:@"tvbox"],hasExportMenu=plugin||[profile[@"source"] length]||[profile[@"native"] boolValue];
-    CGFloat accessoryWidth=(tvbox||plugin)?36:(hasExportMenu?96:56),cardWidth=MAX(1,tableView.bounds.size.width-40);
+    CGFloat accessoryWidth=plugin?104:(tvbox?44:(hasExportMenu?104:56)),cardWidth=MAX(1,tableView.bounds.size.width-40);
     // The latency badge shares the title row, so match its reserved width in
     // the row-height measurement as well as the actual Auto Layout geometry.
     CGFloat textWidth=MAX(44,cardWidth-15-25-13-14-accessoryWidth-56);
@@ -553,8 +569,8 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
                 if(catalogURLObject&&[@[@"http",@"https"] containsObject:catalogURLObject.scheme.lowercaseString])[menuActions addObject:[UIAction actionWithTitle:@"刷新合集" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){if(weakSelf.onRefreshCatalogProfile)weakSelf.onRefreshCatalogProfile(source);}]];
             }
             UIAction *remove=[UIAction actionWithTitle:tvbox?(macCMS?@"移除影视接口":@"移除资源合集"): @"移除资源" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[weakSelf confirmRemoveProfile:source];}];[menuActions addObject:remove];
-            UIButton *more=[UIButton buttonWithType:UIButtonTypeSystem];more.frame=CGRectMake(0,0,36,36);[more setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];more.menu=[UIMenu menuWithChildren:menuActions];more.showsMenuAsPrimaryAction=YES;more.accessibilityLabel=@"更多资源操作";more.accessibilityIdentifier=[NSString stringWithFormat:@"resource-more-%ld",(long)ip.row];more.tintColor=HostSecondaryText();more.backgroundColor=HostNeutralSurface();more.layer.cornerRadius=12;more.layer.cornerCurve=kCACornerCurveContinuous;more.layer.borderWidth=.6;HostSetLayerBorderColor(more,HostBorder());HostInstallPressFeedback(more);
-            if(plugin){BOOL runningState=[p[@"enabled"] boolValue];UISwitch *running=[self compactSwitchForRow:ip.row enabled:runningState label:[NSString stringWithFormat:@"%@服务，%@",p[@"name"]?:@"脚本",runningState?@"停止":@"启动"] source:p[@"source"]];UIView *actions=[[UIView alloc] initWithFrame:CGRectMake(0,0,96,44)];actions.isAccessibilityElement=NO;running.frame=CGRectMake(0,6.5,51,31);[actions addSubview:running];more.frame=CGRectMake(58,4,36,36);[actions addSubview:more];c.accessoryView=actions;}else if(!tvbox&&([p[@"source"] length]||[p[@"native"] boolValue])){UIView *actions=[[UIView alloc] initWithFrame:CGRectMake(0,0,96,44)];actions.isAccessibilityElement=NO;UISwitch *toggle=[c.accessoryView.subviews.firstObject isKindOfClass:UISwitch.class]?c.accessoryView.subviews.firstObject:nil;if(toggle){toggle.frame=CGRectMake(0,6.5,51,31);[actions addSubview:toggle];}more.frame=CGRectMake(58,4,36,36);[actions addSubview:more];c.accessoryView=actions;}else c.accessoryView=more;
+            UIButton *more=[UIButton buttonWithType:UIButtonTypeSystem];more.frame=CGRectMake(0,0,44,44);[more setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];more.menu=[UIMenu menuWithChildren:menuActions];more.showsMenuAsPrimaryAction=YES;more.accessibilityLabel=@"更多资源操作";more.accessibilityIdentifier=[NSString stringWithFormat:@"resource-more-%ld",(long)ip.row];more.tintColor=HostSecondaryText();more.backgroundColor=HostNeutralSurface();more.layer.cornerRadius=12;more.layer.cornerCurve=kCACornerCurveContinuous;more.layer.borderWidth=.6;HostSetLayerBorderColor(more,HostBorder());HostInstallPressFeedback(more);
+            if(plugin){BOOL runningState=[p[@"enabled"] boolValue];UISwitch *running=[self compactSwitchForRow:ip.row enabled:runningState label:[NSString stringWithFormat:@"%@服务，%@",p[@"name"]?:@"脚本",runningState?@"停止":@"启动"] source:p[@"source"]];UIView *actions=[[UIView alloc] initWithFrame:CGRectMake(0,0,104,44)];actions.isAccessibilityElement=NO;running.frame=CGRectMake(0,6.5,51,31);[actions addSubview:running];more.frame=CGRectMake(58,0,44,44);[actions addSubview:more];c.accessoryView=actions;}else if(!tvbox&&([p[@"source"] length]||[p[@"native"] boolValue])){UIView *actions=[[UIView alloc] initWithFrame:CGRectMake(0,0,104,44)];actions.isAccessibilityElement=NO;UISwitch *toggle=[c.accessoryView.subviews.firstObject isKindOfClass:UISwitch.class]?c.accessoryView.subviews.firstObject:nil;if(toggle){toggle.frame=CGRectMake(0,6.5,51,31);[actions addSubview:toggle];}more.frame=CGRectMake(58,0,44,44);[actions addSubview:more];c.accessoryView=actions;}else c.accessoryView=more;
         }
     }
     c.accessibilityValue=c.detailTextLabel.text;
@@ -564,7 +580,8 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
     // 不再信任 tag=row：按开关携带的 source 查找配置，排序/筛选后也不会误触他行。
     NSString *source=sender.accessibilityIdentifier;NSDictionary *p=nil;
     for(NSDictionary *profile in self.profiles)if([profile[@"source"] isEqual:source]){p=profile;break;}
-    if(!p)return;
+    // 找不到配置（筛选变化/已被移除）时把开关拨回去，否则界面与实际状态不一致。
+    if(!p){sender.on=!sender.on;return;}
     if (self.onToggleProfile)
         self.onToggleProfile(p[@"source"], sender.on);
     if([p[@"type"] isEqual:@"plugin"])return;

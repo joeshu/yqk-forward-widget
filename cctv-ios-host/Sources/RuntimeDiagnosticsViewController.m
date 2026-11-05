@@ -10,6 +10,9 @@
 @property(nonatomic, strong) UIBarButtonItem *clearButton;
 @property(nonatomic, strong) UIBarButtonItem *exportButton;
 @property(nonatomic, strong) UIBarButtonItem *deleteButton;
+// 异步加载的代次：viewWillAppear 与删除/清空后的 reload 可能重叠，
+// 先发出的旧加载后完成时会把已删会话写回列表；代次不符直接丢弃。
+@property(nonatomic) NSUInteger reloadGeneration;
 @end
 
 @implementation RuntimeDiagnosticsViewController
@@ -53,17 +56,18 @@
 - (void)reloadRecords {
     // 异步加载完成前先给一个加载态，避免空表被误读成“没有记录”。
     if(self.sessionID.length ? !self.events.count : !self.sessions.count)self.table.backgroundView=[self emptyViewWithText:@"正在加载…"];
+    self.reloadGeneration++;NSUInteger generation=self.reloadGeneration;
     __weak typeof(self) weakSelf = self;
     if (self.sessionID.length) {
         [[RuntimeDiagnostics shared] loadEventsForSessionID:self.sessionID completion:^(NSArray<NSDictionary *> *events, NSError *error) {
-            RuntimeDiagnosticsViewController *owner = weakSelf; if (!owner) return;
+            RuntimeDiagnosticsViewController *owner = weakSelf; if (!owner||owner.reloadGeneration!=generation) return;
             owner.events = events ?: @[];
             owner.table.backgroundView = owner.events.count ? nil : [owner emptyViewWithText:error.localizedDescription ?: @"这次运行没有诊断记录。"];
             [owner.table reloadData];
         }];
     } else {
         [[RuntimeDiagnostics shared] loadSessionsWithCompletion:^(NSArray<NSDictionary *> *sessions, NSError *error) {
-            RuntimeDiagnosticsViewController *owner = weakSelf; if (!owner) return;
+            RuntimeDiagnosticsViewController *owner = weakSelf; if (!owner||owner.reloadGeneration!=generation) return;
             owner.sessions = sessions ?: @[];
             owner.clearButton.enabled = owner.sessions.count > 0;
             owner.table.backgroundView = owner.sessions.count ? nil : [owner emptyViewWithText:error.localizedDescription ?: @"暂无运行记录。开启运行诊断并复现问题后，每次 App 运行会单独出现在这里。"];
@@ -95,8 +99,11 @@
     NSArray *rows=self.sessionID.length?self.events:self.sessions;if(indexPath.row<0||indexPath.row>=rows.count)return cell;
     if (self.sessionID.length) {
         NSDictionary *event = rows[indexPath.row];if(![event isKindOfClass:NSDictionary.class])return cell;
-        NSString *category = event[@"category"] ?: @"unknown";
-        NSString *time = event[@"time"] ?: @"时间未知";
+        // 磁盘 JSON 里的 NSNull 若直接进 %@ 只会显示“<null>”，但进 boolValue /
+        // unsignedIntegerValue 会因不识别 selector 而崩溃：取值前一律验类型。
+        NSString *category = [event[@"category"] isKindOfClass:NSString.class] ? event[@"category"] : @"unknown";
+        NSString *time = [event[@"time"] isKindOfClass:NSString.class] ? event[@"time"] : @"时间未知";
+        NSString *eventName = [event[@"event"] isKindOfClass:NSString.class] ? event[@"event"] : @"未知事件";
         NSDictionary *fields = [event[@"fields"] isKindOfClass:NSDictionary.class] ? event[@"fields"] : nil;
         NSString *payload = @"";
         if (fields.count) {
@@ -105,20 +112,22 @@
         }
         // 长列表里单个事件的完整 JSON 会把行撑成巨型卡片：列表只给前 500 字预览，完整内容见导出。
         if(payload.length>500){NSRange prefix=[payload rangeOfComposedCharacterSequencesForRange:NSMakeRange(0,500)];payload=[[payload substringWithRange:prefix] stringByAppendingString:@"…（完整内容见导出）"];}
-        cell.textLabel.text = [NSString stringWithFormat:@"%@ · %@", event[@"event"] ?: @"未知事件", category];
+        cell.textLabel.text = [NSString stringWithFormat:@"%@ · %@", eventName, category];
         cell.detailTextLabel.text = payload.length ? [NSString stringWithFormat:@"%@\n%@", time, payload] : time;
         cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote].pointSize weight:UIFontWeightRegular];
     } else {
         NSDictionary *session = rows[indexPath.row];if(![session isKindOfClass:NSDictionary.class])return cell;
-        NSString *date = session[@"started_at"] ?: @"开始时间未知";
+        NSString *date = [session[@"started_at"] isKindOfClass:NSString.class] ? session[@"started_at"] : @"开始时间未知";
         NSString *versionValue = [session[@"app_version"] isKindOfClass:NSString.class] ? session[@"app_version"] : @"";
         NSString *buildValue = [session[@"app_build"] isKindOfClass:NSString.class] && [session[@"app_build"] length] ? session[@"app_build"] : @"未知";
         NSString *version = versionValue.length ? [NSString stringWithFormat:@"版本 %@ · 构建 %@", versionValue, buildValue] : @"版本信息未知";
-        NSString *state = [session[@"is_current"] boolValue] ? @"本次运行" : ([session[@"is_open"] boolValue] ? @"运行中" : ([session[@"cleanly_ended"] boolValue] ? @"已结束" : @"未正常收尾"));
-        unsigned long long bytes = [session[@"bytes"] unsignedLongLongValue];
+        BOOL isCurrent=[session[@"is_current"] isKindOfClass:NSNumber.class]?[session[@"is_current"] boolValue]:NO;BOOL isOpen=[session[@"is_open"] isKindOfClass:NSNumber.class]?[session[@"is_open"] boolValue]:NO;BOOL cleanlyEnded=[session[@"cleanly_ended"] isKindOfClass:NSNumber.class]?[session[@"cleanly_ended"] boolValue]:NO;
+        NSString *state = isCurrent ? @"本次运行" : (isOpen ? @"运行中" : (cleanlyEnded ? @"已结束" : @"未正常收尾"));
+        unsigned long long bytes = [session[@"bytes"] isKindOfClass:NSNumber.class] ? [session[@"bytes"] unsignedLongLongValue] : 0;
         NSString *size = [NSByteCountFormatter stringFromByteCount:(long long)bytes countStyle:NSByteCountFormatterCountStyleMemory];
         cell.textLabel.text = [NSString stringWithFormat:@"%@  ·  %@", date, state];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@\n%lu 条事件 · %@ · 最后事件：%@", version, (unsigned long)[session[@"event_count"] unsignedIntegerValue], size, session[@"last_event"] ?: @"未知"];
+        unsigned long eventCount=[session[@"event_count"] isKindOfClass:NSNumber.class]?[session[@"event_count"] unsignedIntegerValue]:0;NSString *lastEvent=[session[@"last_event"] isKindOfClass:NSString.class]?session[@"last_event"]:@"未知";
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@\n%lu 条事件 · %@ · 最后事件：%@", version, eventCount, size, lastEvent];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator; cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     }
     return cell;
@@ -130,7 +139,8 @@
         // 事件行点按复制本条事件，便于对照日志中心逐条粘贴排查。
         if(indexPath.row<0||indexPath.row>=self.events.count)return;
         NSDictionary *event=self.events[indexPath.row];if(![event isKindOfClass:NSDictionary.class])return;
-        UIPasteboard.generalPasteboard.string=[NSString stringWithFormat:@"%@ · %@\n%@",event[@"event"]?:@"未知事件",event[@"category"]?:@"",event[@"time"]?:@"时间未知"];
+        NSString *eventName=[event[@"event"] isKindOfClass:NSString.class]?event[@"event"]:@"未知事件";NSString *category=[event[@"category"] isKindOfClass:NSString.class]?event[@"category"]:@"";NSString *time=[event[@"time"] isKindOfClass:NSString.class]?event[@"time"]:@"时间未知";
+        UIPasteboard.generalPasteboard.string=[NSString stringWithFormat:@"%@ · %@\n%@",eventName,category,time];
         UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"事件已复制");
         return;
     }
@@ -148,10 +158,11 @@
     id rawID=session[@"session_id"];if(![rawID isKindOfClass:NSString.class]||![rawID length])return nil;
     NSString *sessionID = rawID;
     UIContextualAction *delete = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"删除" handler:^(UIContextualAction *action, UIView *sourceView, void (^done)(BOOL)) {
+        __weak typeof(self) weakSelf=self;
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"删除这次运行记录？" message:@"删除后无法恢复，其他运行记录不受影响。" preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *item) { done(NO); }]];
         [alert addAction:[UIAlertAction actionWithTitle:@"删除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *item) {
-            [[RuntimeDiagnostics shared] deleteSessionID:sessionID completion:^(NSError *error) { done(error == nil); [self reloadRecords]; }];
+            [[RuntimeDiagnostics shared] deleteSessionID:sessionID completion:^(NSError *error) { done(error == nil); RuntimeDiagnosticsViewController *owner=weakSelf; if(owner)[owner reloadRecords]; }];
         }]];
         [self presentViewController:alert animated:YES completion:nil];
     }];
@@ -161,10 +172,12 @@
 - (void)confirmClearAll {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"清空全部运行诊断记录？" message:@"将删除所有按次诊断日志，包括崩溃前的运行检查点。此操作不能撤销；其他配置、订阅、插件和播放历史不会受影响。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf=self;
     [alert addAction:[UIAlertAction actionWithTitle:@"清空全部" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         [[RuntimeDiagnostics shared] clearAllSessionsWithCompletion:^(NSError *error) {
-            if (error) [self showMessage:error.localizedDescription];
-            [self reloadRecords];
+            RuntimeDiagnosticsViewController *owner=weakSelf;if(!owner)return;
+            if (error) [owner showMessage:error.localizedDescription];
+            [owner reloadRecords];
         }];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
@@ -173,26 +186,32 @@
 - (void)confirmDeleteCurrentSession {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"删除这次运行记录？" message:@"删除后无法恢复。其他运行记录不受影响。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf=self;
     [alert addAction:[UIAlertAction actionWithTitle:@"删除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         [[RuntimeDiagnostics shared] deleteSessionID:self.sessionID completion:^(NSError *error) {
-            if (error) [self showMessage:error.localizedDescription];
-            else [self.navigationController popViewControllerAnimated:YES];
+            RuntimeDiagnosticsViewController *owner=weakSelf;if(!owner)return;
+            if (error) [owner showMessage:error.localizedDescription];
+            else [owner.navigationController popViewControllerAnimated:YES];
         }];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)exportSession {
+    __weak typeof(self) weakSelf=self;
     [[RuntimeDiagnostics shared] prepareExportForSessionID:self.sessionID completion:^(NSURL *url, NSError *error) {
-        if (!url) { [self showMessage:error.localizedDescription ?: @"导出诊断日志失败"]; return; }
+        RuntimeDiagnosticsViewController *owner=weakSelf;if(!owner)return;
+        if (!url) { [owner showMessage:error.localizedDescription ?: @"导出诊断日志失败"]; return; }
         UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:nil];
-        UIBarButtonItem *anchor = self.exportButton;
+        UIBarButtonItem *anchor = owner.exportButton;
         share.popoverPresentationController.barButtonItem = anchor;
-        [self presentViewController:share animated:YES completion:nil];
+        [owner presentViewController:share animated:YES completion:nil];
     }];
 }
 
 - (void)showMessage:(NSString *)message {
+    // 页面已不在窗口层级时弹 alert 只会打一条层级警告、用户也看不到，直接跳过。
+    if(!self.view.window)return;
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"运行诊断" message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];

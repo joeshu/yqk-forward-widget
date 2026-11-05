@@ -77,9 +77,9 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 
     self.categories=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"播放",@"插件",@"错误"]];self.categories.translatesAutoresizingMaskIntoConstraints=NO;self.categories.selectedSegmentIndex=0;self.categories.selectedSegmentTintColor=HostAccent();[self.categories setTitleTextAttributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];[self.categories addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
     self.searchBar=[UISearchBar new];self.searchBar.translatesAutoresizingMaskIntoConstraints=NO;self.searchBar.delegate=self;self.searchBar.placeholder=@"搜索日志内容";self.searchBar.searchBarStyle=UISearchBarStyleMinimal;self.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchBar.accessibilityIdentifier=@"diagnostic.logs.search";
-    self.summaryLabel=[UILabel new];self.summaryLabel.translatesAutoresizingMaskIntoConstraints=NO;self.summaryLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.summaryLabel.adjustsFontForContentSizeCategory=YES;self.summaryLabel.textColor=UIColor.secondaryLabelColor;
+    self.summaryLabel=[UILabel new];self.summaryLabel.translatesAutoresizingMaskIntoConstraints=NO;self.summaryLabel.numberOfLines=0;self.summaryLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.summaryLabel.adjustsFontForContentSizeCategory=YES;self.summaryLabel.textColor=UIColor.secondaryLabelColor;
     self.tableView=[[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];self.tableView.translatesAutoresizingMaskIntoConstraints=NO;self.tableView.backgroundColor=HostBackground();self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;self.tableView.dataSource=self;self.tableView.delegate=self;self.tableView.estimatedRowHeight=54;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.accessibilityIdentifier=@"diagnostic.logs.list";[self.tableView registerClass:DiagnosticLogLineCell.class forCellReuseIdentifier:@"diagnostic.line"];
-    self.emptyLabel=[UILabel new];self.emptyLabel.translatesAutoresizingMaskIntoConstraints=NO;self.emptyLabel.text=@"暂无日志";self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.emptyLabel.adjustsFontForContentSizeCategory=YES;self.emptyLabel.textAlignment=NSTextAlignmentCenter;
+    self.emptyLabel=[UILabel new];self.emptyLabel.translatesAutoresizingMaskIntoConstraints=NO;self.emptyLabel.numberOfLines=0;self.emptyLabel.text=@"暂无日志";self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.emptyLabel.adjustsFontForContentSizeCategory=YES;self.emptyLabel.textAlignment=NSTextAlignmentCenter;
     [self.view addSubview:self.categories];[self.view addSubview:self.searchBar];[self.view addSubview:self.summaryLabel];[self.view addSubview:self.tableView];[self.view addSubview:self.emptyLabel];
     UILayoutGuide *safe=self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
@@ -92,13 +92,16 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
         [self.summaryLabel.topAnchor constraintEqualToAnchor:self.searchBar.bottomAnchor constant:0],
         [self.summaryLabel.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:18],
         [self.summaryLabel.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-18],
-        [self.summaryLabel.heightAnchor constraintEqualToConstant:22],
+        // 统计行固定 22pt 在超大字体下会被截断：只定下限，让它随字体换行长高。
+        [self.summaryLabel.heightAnchor constraintGreaterThanOrEqualToConstant:22],
         [self.tableView.topAnchor constraintEqualToAnchor:self.summaryLabel.bottomAnchor constant:4],
         [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [self.tableView.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor],
         [self.emptyLabel.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
-        [self.emptyLabel.centerYAnchor constraintEqualToAnchor:self.tableView.centerYAnchor]
+        [self.emptyLabel.centerYAnchor constraintEqualToAnchor:self.tableView.centerYAnchor],
+        [self.emptyLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:safe.leadingAnchor constant:24],
+        [self.emptyLabel.trailingAnchor constraintLessThanOrEqualToAnchor:safe.trailingAnchor constant:-24]
     ]];
 }
 - (void)dealloc {[[NSNotificationCenter defaultCenter] removeObserver:self];}
@@ -160,11 +163,14 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     return DiagnosticLogCategoryGeneral;
 }
 - (UIColor *)colorForLine:(NSString *)line {
-    switch([self categoryForLine:line]){case DiagnosticLogCategoryError:return [UIColor colorWithRed:1 green:0.34 blue:0.38 alpha:1];case DiagnosticLogCategoryPlayback:return [UIColor colorWithRed:0.36 green:0.75 blue:1 alpha:1];case DiagnosticLogCategoryPlugin:return [UIColor colorWithRed:0.76 green:0.56 blue:1 alpha:1];default:return HostMutedText();}
+    // 分类色必须用随深浅模式自适应的系统语义色：上一轮的硬编码 RGB
+    //（错误 #FF575E / 播放 #5CBFFF / 插件 #C28FFF）在晨光白、雪原白两套
+    // 浅色主题下对比度不足（浅蓝在白卡上约 2:1），11pt 等宽正文难读。
+    switch([self categoryForLine:line]){case DiagnosticLogCategoryError:return UIColor.systemRedColor;case DiagnosticLogCategoryPlayback:return UIColor.systemBlueColor;case DiagnosticLogCategoryPlugin:return UIColor.systemPurpleColor;default:return HostMutedText();}
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return self.visibleLines.count;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    DiagnosticLogLineCell *cell=[tableView dequeueReusableCellWithIdentifier:@"diagnostic.line" forIndexPath:indexPath];NSString *line=self.visibleLines[indexPath.row];UIColor *color=[self colorForLine:line];cell.messageLabel.text=line;cell.messageLabel.textColor=color;cell.categoryDot.backgroundColor=color;return cell;
+    DiagnosticLogLineCell *cell=[tableView dequeueReusableCellWithIdentifier:@"diagnostic.line" forIndexPath:indexPath];if(indexPath.row<0||indexPath.row>=self.visibleLines.count)return cell;NSString *line=self.visibleLines[indexPath.row];UIColor *color=[self colorForLine:line];cell.messageLabel.text=line;cell.messageLabel.textColor=color;cell.categoryDot.backgroundColor=color;cell.accessibilityHint=@"点按复制这行日志";return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {if(indexPath.row<self.visibleLines.count){UIPasteboard.generalPasteboard.string=self.visibleLines[indexPath.row];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"日志内容已复制");}[tableView deselectRowAtIndexPath:indexPath animated:YES];}
 - (void)filterChanged {[self applyFilter];}

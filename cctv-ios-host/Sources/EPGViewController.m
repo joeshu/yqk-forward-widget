@@ -88,9 +88,9 @@
     self.table.backgroundView = self.emptyLabel;
     [self.view addSubview:self.table];
 
-    self.dates=[[UISegmentedControl alloc] initWithItems:@[]];self.dates.selectedSegmentTintColor=HostAccent();self.dates.apportionsSegmentWidthsByContent=YES;self.dates.accessibilityLabel=@"选择节目单日期";[self.dates addTarget:self action:@selector(filterDate) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.dates];
+    self.dates=[[UISegmentedControl alloc] initWithItems:@[]];self.dates.selectedSegmentTintColor=HostAccent();self.dates.apportionsSegmentWidthsByContent=YES;self.dates.accessibilityLabel=@"选择节目单日期";[self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12]]} forState:UIControlStateNormal];[self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]]} forState:UIControlStateSelected];[self.dates addTarget:self action:@selector(filterDate) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.dates];
     self.reminders=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.epgReminders.v1"] mutableCopy]?:[NSMutableDictionary dictionary];
-    self.dateMenuButton=[UIButton buttonWithType:UIButtonTypeSystem];self.dateMenuButton.hidden=YES;self.dateMenuButton.accessibilityLabel=@"选择节目单日期";self.dateMenuButton.showsMenuAsPrimaryAction=YES;[self.view addSubview:self.dateMenuButton];
+    self.dateMenuButton=[UIButton buttonWithType:UIButtonTypeSystem];self.dateMenuButton.hidden=YES;self.dateMenuButton.accessibilityLabel=@"选择节目单日期";self.dateMenuButton.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:15]];self.dateMenuButton.titleLabel.adjustsFontForContentSizeCategory=YES;self.dateMenuButton.showsMenuAsPrimaryAction=YES;[self.view addSubview:self.dateMenuButton];
     self.programSearch=[[UISearchController alloc] initWithSearchResultsController:nil];self.programSearch.searchResultsUpdater=self;self.programSearch.obscuresBackgroundDuringPresentation=NO;self.programSearch.searchBar.placeholder=@"搜索本页节目";self.navigationItem.searchController=self.programSearch;self.definesPresentationContext=YES;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationDidEnterBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationWillEnterForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
@@ -136,7 +136,7 @@
             if(rows.count){w.allRows=rows;w.sourceName=w.xmlSource;[w rebuildDates];w.hint.text=error?@"使用上次缓存，刷新暂不可用":[NSString stringWithFormat:@"XMLTV · %lu 个节目",(unsigned long)rows.count];}
             else if(error.code==NSURLErrorCancelled){w.hint.text=@"正在优先加载视频，稍后下拉刷新节目单";[w updateEmptyState];}
             else if(w.channelID.length){[w fetchOfficial];}
-            else {w.hint.text=error.localizedDescription?:@"暂无匹配节目；请在频道菜单中设置 EPG ID";[w updateEmptyState];}
+            else {w.hint.text=w.allRows.count?@"刷新失败，显示上次节目单":(error.localizedDescription?:@"暂无匹配节目；请在频道菜单中设置 EPG ID");[w updateEmptyState];}
         }];return;}
     [self fetchOfficial];
 }
@@ -170,6 +170,10 @@
                 [weakSelf rebuildDates];
                 weakSelf.hint.text = [NSString stringWithFormat:@"%lu 个节目 · 每分钟自动刷新",
                                       (unsigned long)rows.count];
+            } else if (weakSelf.allRows.count) {
+                // 刷新失败时保留上次节目单：提示必须说清是旧数据，
+                // 不能一边展示旧节目一边写“暂无有效节目单”。
+                weakSelf.hint.text = @"刷新失败，显示上次节目单";
             } else {
                 weakSelf.hint.text = err ? [NSString stringWithFormat:@"获取失败：%@", err.localizedDescription]
                                          : @"官方暂无有效节目单";
@@ -181,9 +185,9 @@
 }
 
 - (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];CGFloat top=self.view.safeAreaInsets.top;CGFloat width=self.view.bounds.size.width;
+    [super viewDidLayoutSubviews];CGFloat top=self.view.safeAreaInsets.top;CGFloat bottom=self.view.safeAreaInsets.bottom;CGFloat width=self.view.bounds.size.width;
     CGFloat hintHeight=ceil(self.hint.font.lineHeight*2);
-    self.dates.frame=CGRectMake(16,top+8,width-32,40);self.dateMenuButton.frame=self.dates.frame;self.hint.frame=CGRectMake(16,top+56,width-32,hintHeight);self.table.frame=CGRectMake(0,top+56+hintHeight+8,width,MAX(0,self.view.bounds.size.height-top-56-hintHeight-8));self.spinner.center=CGPointMake(width/2,top+150);
+    self.dates.frame=CGRectMake(16,top+8,width-32,40);self.dateMenuButton.frame=self.dates.frame;self.hint.frame=CGRectMake(16,top+56,width-32,hintHeight);self.table.frame=CGRectMake(0,top+56+hintHeight+8,width,MAX(0,self.view.bounds.size.height-top-56-hintHeight-8-bottom));self.spinner.center=CGPointMake(width/2,top+150);
 }
 - (void)updateEmptyState {
     self.emptyLabel.hidden = self.rows.count > 0 || self.spinner.isAnimating;
@@ -297,7 +301,7 @@
         cell.textLabel.numberOfLines=0;
         cell.detailTextLabel.numberOfLines=0;
         cell.textLabel.textColor = HostText();
-        cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+        cell.detailTextLabel.textColor = HostSecondaryText();
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
     NSDictionary *row = self.rows[indexPath.row];
@@ -305,9 +309,9 @@
     double end = [row[@"end"] doubleValue];
     double now = NSDate.date.timeIntervalSince1970;
 
-    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    fmt.dateFormat = @"HH:mm";
-    fmt.timeZone=[NSTimeZone timeZoneWithName:@"Asia/Shanghai"];
+    static NSDateFormatter *fmt = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ fmt = [[NSDateFormatter alloc] init]; fmt.dateFormat = @"HH:mm"; fmt.timeZone = [NSTimeZone timeZoneWithName:@"Asia/Shanghai"]; });
     NSString *range = [NSString stringWithFormat:@"%@ - %@",
                        [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:start]],
                        [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:end]]];
