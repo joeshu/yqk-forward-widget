@@ -1,6 +1,8 @@
 #import "ServicesViewController.h"
 #import "HostTheme.h"
 #import "HostToolbar.h"
+#import "HostLocalPort.h"
+#import "PluginLogStore.h"
 #import "PyHost.h"
 #import "ServiceEditorViewController.h"
 #import "ServiceStore.h"
@@ -48,6 +50,9 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 @property(nonatomic,strong) NSDate *lastProbeResponseAt;
 @property(nonatomic,assign) BOOL probePlaylistChecked;
 @property(nonatomic,assign) NSUInteger probeChannelCount;
+@property(nonatomic, copy, nullable) NSNumber *stopPortState; // 0 端口已释放，1 仍可访问，-1 未知
+@property(nonatomic, assign) NSUInteger stopVerifyGeneration;
+@property(nonatomic, copy, nullable) NSString *currentRunStartedAt;
 @end
 @implementation ServiceDetailViewController
 - (BOOL)opensMedia {return [ServiceStore isVODMediaService:self.service];}
@@ -78,6 +83,11 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     [self.tableView reloadData];
     self.displayedRunning=[self running];
     self.displayedRuntimeStatus=[self currentRuntimeStatus];
+    self.stopPortState=nil;
+    [self refreshCurrentRunStart];
+    // 打开详情即自动检测一次接口健康：运行中才探测，60 秒内已有成功
+    // 响应时不再重复探测，避免来回进出页面反复打接口。
+    if([self running])[self probeIfStale];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(runtimeStateDidChange) name:PyHostRuntimeStateDidChangeNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(subscriptionMetadataDidChange) name:ProfileStoreMetadataDidChangeNotification object:nil];
 }
@@ -86,6 +96,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];
     [NSNotificationCenter.defaultCenter removeObserver:self name:ProfileStoreMetadataDidChangeNotification object:nil];
     self.probeGeneration++;
+    self.stopVerifyGeneration++;
     [self.probeTask cancel];
     self.probeTask=nil;
     [self.probeSession invalidateAndCancel];self.probeSession=nil;
@@ -95,11 +106,49 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 - (NSString *)currentRuntimeStatus {return [PyHost runtimeStatusDescriptionForServiceIdentifier:self.service[@"id"]];}
 - (void)subscriptionMetadataDidChange {if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self subscriptionMetadataDidChange];});return;}if(self.isViewLoaded&&self.view.window)[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];}
 - (void)runtimeStateDidChange {
+    BOOL wasRunning=self.displayedRunning;
     BOOL running=[self running];NSString *status=[self currentRuntimeStatus];
     BOOL changed=running!=self.displayedRunning||![status isEqualToString:self.displayedRuntimeStatus];
     self.displayedRunning=running;self.displayedRuntimeStatus=status;
-    if(changed)[self.tableView reloadSections:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0,2)] withRowAnimation:UITableViewRowAnimationNone];
+    if(changed){[self.tableView reloadSections:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0,2)] withRowAnimation:UITableViewRowAnimationNone];[self refreshCurrentRunStart];}
+    if(!wasRunning&&running)self.stopPortState=nil;
+    // 运行 → 已停止：停止只代表会话结束，不代表监听端口已释放。
+    // 后台确认一次端口状态，让“已停止”有实测依据；结果只改文案。
+    if(wasRunning&&!running)[self verifyPortReleasedAfterStop];
     if(!running&&self.probing){self.probeGeneration++;[self.probeTask cancel];self.probeTask=nil;[self.probeSession invalidateAndCancel];self.probeSession=nil;self.probing=NO;self.health=@"服务已停止 · 未完成检测";[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];}
+}
+- (void)probeIfStale {
+    if(self.probing)return;
+    if(self.lastProbeResponseAt&&-[self.lastProbeResponseAt timeIntervalSinceNow]<60)return;
+    [self probe];
+}
+- (void)verifyPortReleasedAfterStop {
+    NSInteger port=[self.service[@"port"] integerValue];
+    if(port<1||port>65535)return;
+    NSUInteger generation=++self.stopVerifyGeneration;
+    __weak typeof(self) w=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        int state=HostLocalPortState((int)port);
+        dispatch_async(dispatch_get_main_queue(),^{ServiceDetailViewController *owner=w;if(!owner||generation!=owner.stopVerifyGeneration||[owner running])return;owner.stopPortState=@(state);[owner.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];});
+    });
+}
+- (NSString *)stopDetailText {
+    if(!self.stopPortState)return @"已停止 · 点按开关启动服务";
+    if([self.stopPortState integerValue]==0)return @"已停止 · 本机端口已释放";
+    if([self.stopPortState integerValue]==1)return @"已停止 · 端口仍可访问，请检查是否有其他程序占用";
+    return @"已停止 · 端口状态未知";
+}
+- (void)refreshCurrentRunStart {
+    NSString *value=nil;
+    if([self running]){
+        NSArray<NSDictionary *> *runs=[PluginLogStore.shared runsForIdentifier:self.service[@"id"]];
+        for(NSDictionary *record in runs){
+            if([record[@"legacy"] boolValue])continue;
+            NSTimeInterval started=[record[@"startedAt"] doubleValue];
+            if(started>0){NSDateFormatter *fmt=[NSDateFormatter new];fmt.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];fmt.dateFormat=@"yyyy-MM-dd HH:mm";value=[fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:started]];break;}
+        }
+    }
+    if((value&&![value isEqualToString:self.currentRunStartedAt])||(!value&&self.currentRunStartedAt)){self.currentRunStartedAt=value;if(self.isViewLoaded&&self.view.window)[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];}
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     return 5;
@@ -107,7 +156,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return section == 0   ? 2
            : section == 1 ? 3
-           : section == 2 ? ([ServiceStore isLiveMediaService:self.service]?12:7)
+           : section == 2 ? ([ServiceStore isLiveMediaService:self.service]?13:7)
            : section == 3 ? 5
                           : ([self.service[@"builtin"] boolValue] ? 0 : 1);
 }
@@ -141,7 +190,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
         if (ip.row == 0) {
             c.textLabel.text = [self currentRuntimeStatus];
             c.textLabel.textColor = [self running] ? UIColor.systemGreenColor : UIColor.secondaryLabelColor;
-            c.detailTextLabel.text = [self running]?@"HTTP 健康状态未知 · 点按“检测服务接口”":[self currentRuntimeStatus];
+            c.detailTextLabel.text = [self running]?@"HTTP 健康状态未知 · 点按“检测服务接口”":[self stopDetailText];
             UIButton *control=[UIButton buttonWithType:UIButtonTypeSystem];
             BOOL managed=[PyHost isManagedServiceIdentifier:self.service[@"id"]];
             BOOL starting=[PyHost isStartingServiceIdentifier:self.service[@"id"]],uncertain=[PyHost hasUncertainSessionForServiceIdentifier:self.service[@"id"]];
@@ -166,7 +215,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
         if (ip.row > 0)
             c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (ip.section == 2) {
-        c.textLabel.text = @[ @"运行引擎", @"资源协议识别", @"版本", @"代码来源", @"入口文件", @"上次更新", @"源地址", @"服务订阅地址", @"节目单地址", @"订阅清单状态", @"频道数量", @"最近成功刷新" ][ip.row];
+        c.textLabel.text = @[ @"运行引擎", @"资源协议识别", @"版本", @"代码来源", @"入口文件", @"上次更新", @"源地址", @"服务订阅地址", @"节目单地址", @"订阅清单状态", @"频道数量", @"最近成功刷新", @"本次启动时间" ][ip.row];
         NSDate *updated = [NSDate dateWithTimeIntervalSince1970:[self.service[@"updated"] doubleValue]];
         NSDateFormatter *fmt = [NSDateFormatter new];
         fmt.dateFormat = @"yyyy-MM-dd HH:mm";
@@ -193,7 +242,8 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
             epgURL.length ? epgURL : @"尚未从订阅清单中识别",
             playlistStatus,
             cachedChannels.count? [NSString stringWithFormat:@"%lu 个缓存频道",(unsigned long)cachedChannels.count]:(self.probePlaylistChecked?[NSString stringWithFormat:@"%ld 个 · 接口探测",(long)self.probeChannelCount]:@"未知 · 尚未读取有效清单"),
-            lastRefresh
+            lastRefresh,
+            self.currentRunStartedAt?:([self running]?@"未知 · 无运行记录":@"未运行")
         ];
         c.detailTextLabel.text = values[ip.row];
         NSString *address=ip.row==7?values[7]:(ip.row==8?values[8]:nil);
@@ -362,7 +412,13 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
             [self restart];
         }
     } else if (ip.section == 4) {
-        if ([PyHost isManagedServiceIdentifier:self.service[@"id"]]){UIAlertController *notice=[UIAlertController alertControllerWithTitle:@"请先停止此服务" message:@"服务仍在运行、停止或清理中，完成后可以删除。" preferredStyle:UIAlertControllerStyleAlert];[notice addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:notice animated:YES completion:nil];return;}
+        if ([PyHost isManagedServiceIdentifier:self.service[@"id"]]) {
+            // 运行中的服务点“删除”此前静默无反应：明确告诉用户先停止再删。
+            UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"请先停止服务" message:@"该服务正在运行、停止或清理中，停止后才能删除本机保存的服务与代码文件。" preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+            return;
+        }
         UIAlertController *a =
             [UIAlertController alertControllerWithTitle:@"删除服务？"
                                                 message:@"这会删除本机保存的服务与代码文件。"
@@ -422,7 +478,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.search.searchResultsUpdater = self;
     self.search.obscuresBackgroundDuringPresentation = NO;
-    self.search.searchBar.placeholder = @"搜索服务";
+    self.search.searchBar.placeholder = @"搜索名称、端口或协议";
     self.navigationItem.searchController = self.search;
     UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,88)];self.runtimeSummary=[[UILabel alloc] initWithFrame:CGRectMake(16,4,MAX(1,header.bounds.size.width-32),28)];self.runtimeSummary.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.runtimeSummary.textColor=HostSecondaryText();self.runtimeSummary.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];[header addSubview:self.runtimeSummary];self.statusFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"运行中",@"待处理",@"已停止"]];self.statusFilter.frame=CGRectMake(16,36,MAX(1,header.bounds.size.width-32),44);self.statusFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.statusFilter.selectedSegmentIndex=0;[self.statusFilter addTarget:self action:@selector(statusFilterChanged) forControlEvents:UIControlEventValueChanged];[header addSubview:self.statusFilter];self.table.tableHeaderView=header;
     self.emptyLabel=[UILabel new];self.emptyLabel.text=@"还没有服务\n点右上角 + 添加服务，或从资源页导入脚本";self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.emptyLabel.adjustsFontForContentSizeCategory=YES;self.table.backgroundView=self.emptyLabel;
@@ -446,7 +502,13 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     NSArray *filtered =
         q.length ? [all filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *s,
                                                                                           NSDictionary *b) {
-                          return [[s[@"name"] lowercaseString] containsString:q];
+                          // 排查端口冲突时常按端口或协议找服务：只按名称搜不到。
+                          NSString *name=[s[@"name"] lowercaseString]?:@"";
+                          NSString *identifier=[s[@"id"] lowercaseString]?:@"";
+                          NSString *engine=[s[@"engine"] lowercaseString]?:@"";
+                          NSString *protocol=[s[@"protocol"] lowercaseString]?:@"";
+                          NSString *port=[s[@"port"] description]?:@"";
+                          return [name containsString:q]||[identifier containsString:q]||[engine containsString:q]||[protocol containsString:q]||[port containsString:q];
                         }]]
                  : all;
     NSMutableArray *runningIDs=[NSMutableArray array];for(NSDictionary *service in filtered)if([PyHost isRunningServiceIdentifier:service[@"id"]])[runningIDs addObject:service[@"id"]];[runningIDs sortUsingSelector:@selector(compare:)];

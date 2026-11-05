@@ -598,6 +598,108 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('self.favoritesOnly', TEXT)
         self.assertIn('if (self.favoritesOnly) {', TEXT)
 
+    def test_adjacent_channel_switching_wraps_within_visible_list(self):
+        body = method_body('- (void)playAdjacentChannel:(NSInteger)direction {')
+        self.assertIn('self.shownChannels', body)
+        self.assertIn('current==NSNotFound?0', body)
+        self.assertIn('selectChannel:self.shownChannels[next]', body)
+        self.assertIn('self.shownChannels.count', body)
+        more = method_body('- (void)showMorePlaybackActions')
+        self.assertIn('上一个频道', more)
+        self.assertIn('下一个频道', more)
+        self.assertIn('playAdjacentChannel:-1', more)
+        self.assertIn('playAdjacentChannel:1', more)
+
+    def test_remote_next_previous_track_return_handler_status(self):
+        self.assertIn('- (MPRemoteCommandHandlerStatus)stepToNextChannelForRemoteCommand:', TEXT)
+        self.assertIn('- (MPRemoteCommandHandlerStatus)stepToPreviousChannelForRemoteCommand:', TEXT)
+        nxt = method_body('- (MPRemoteCommandHandlerStatus)stepToNextChannelForRemoteCommand:(MPRemoteCommandEvent *)event {')
+        self.assertIn('playAdjacentChannel:1', nxt)
+        self.assertIn('MPRemoteCommandHandlerStatusSuccess', nxt)
+        prev = method_body('- (MPRemoteCommandHandlerStatus)stepToPreviousChannelForRemoteCommand:(MPRemoteCommandEvent *)event {')
+        self.assertIn('playAdjacentChannel:-1', prev)
+        self.assertIn('MPRemoteCommandHandlerStatusSuccess', prev)
+        setup = method_body('- (void)setupRemoteCommands')
+        self.assertIn('nextTrackCommand', setup)
+        self.assertIn('previousTrackCommand', setup)
+        self.assertIn('stepToNextChannelForRemoteCommand:', setup)
+        self.assertIn('stepToPreviousChannelForRemoteCommand:', setup)
+        dealloc = method_body('- (void)dealloc')
+        self.assertIn('nextTrackCommand removeTarget:self', dealloc)
+        self.assertIn('previousTrackCommand removeTarget:self', dealloc)
+
+    def test_failed_playback_offers_alternate_source_retry(self):
+        body = method_body('- (void)retryPlaybackWithAlternateSource {')
+        self.assertIn('tryAlternateSource', body)
+        self.assertIn('playChannel:channel route:next', body)
+        self.assertIn('routes.firstObject', body)
+        more = method_body('- (void)showMorePlaybackActions')
+        self.assertIn('换线路 / 换源重试', more)
+        self.assertIn('retryPlaybackWithAlternateSource', more)
+        self.assertIn('self.nativePlaybackFailed||self.remotePlaybackFailed', more)
+        failure = method_body('- (void)displayNativePlaybackFailure:(NSString *)stage error:(NSError *)error {')
+        self.assertIn('self.controlBar.hidden=NO', failure)
+        self.assertIn('点“线路”换源后重试', failure)
+
+    def test_channel_sort_by_name_keeps_favorites_first(self):
+        self.assertIn('channelSortMode', TEXT)
+        self.assertIn('cctv.channelSortMode.v1', TEXT)
+        self.assertIn('localizedCaseInsensitiveCompare', TEXT)
+        self.assertIn('self.channelSortMode==1', TEXT)
+        menu = method_body('- (UIMenu *)catalogMenu')
+        self.assertIn('按名称排序', menu)
+        self.assertIn('按默认顺序排列', menu)
+
+    def test_return_to_playing_scrolls_catalog_to_current_channel(self):
+        body = method_body('- (void)scrollCatalogToPlayingChannel {')
+        self.assertIn('indexPathForChannelID:self.channelID', body)
+        self.assertIn('scrollToRowAtIndexPath:ip', body)
+        self.assertIn('scrollToItemAtIndexPath:', body)
+        menu = method_body('- (UIMenu *)catalogMenu')
+        self.assertIn('scrollCatalogToPlayingChannel', menu)
+
+    def test_favorite_manager_offers_clear_all(self):
+        body = method_body('- (void)showFavoriteManager')
+        self.assertIn('清空收藏', body)
+        self.assertIn('UIAlertActionStyleDestructive', body)
+        self.assertIn('[self.favorites removeAllObjects]', body)
+
+    def test_epg_program_reminder_is_stored_and_scheduled_before_start(self):
+        epg = (SOURCE.parent / "EPGViewController.m").read_text(encoding="utf-8")
+        self.assertIn('UNUserNotificationCenter', epg)
+        self.assertIn('cctv.epgReminders.v1', epg)
+        self.assertIn('reminderKeyForProgram:', epg)
+        self.assertIn('start-300', epg)
+        self.assertIn('removePendingNotificationRequestsWithIdentifiers', epg)
+        toggle = epg[epg.index('- (void)toggleReminderForProgram:'):]
+        self.assertIn('requestAuthorizationWithOptions', toggle)
+        self.assertIn('UNTimeIntervalNotificationTrigger', toggle)
+        self.assertIn('开播前 5 分钟提醒', toggle)
+        select = epg[epg.index('didSelectRowAtIndexPath'):]
+        self.assertIn('toggleReminderForProgram:program', select)
+        self.assertIn('已预约', epg)
+
+    def test_epg_date_overflow_uses_menu_instead_of_squeezed_segments(self):
+        epg = (SOURCE.parent / "EPGViewController.m").read_text(encoding="utf-8")
+        self.assertIn('dateMenuButton', epg)
+        self.assertIn('self.dateKeys.count>5', epg)
+        self.assertIn('self.dates.hidden=overflow', epg)
+        self.assertIn('showsMenuAsPrimaryAction=YES', epg)
+
+    def test_epg_search_filters_programs_by_title(self):
+        epg = (SOURCE.parent / "EPGViewController.m").read_text(encoding="utf-8")
+        self.assertIn('UISearchController', epg)
+        self.assertIn('updateSearchResultsForSearchController:', epg)
+        self.assertIn('self.searchQuery=searchController.searchBar.text', epg)
+        self.assertIn('搜索本页节目', epg)
+
+    def test_epg_jump_to_live_program_scrolls_to_current_row(self):
+        epg = (SOURCE.parent / "EPGViewController.m").read_text(encoding="utf-8")
+        self.assertIn('正在播', epg)
+        self.assertIn('scrollToLiveProgram', epg)
+        self.assertIn('scrollToCurrentProgramAnimated:', epg)
+        self.assertIn('scrollToRowAtIndexPath:', epg)
+
 
 if __name__ == "__main__":
     unittest.main()

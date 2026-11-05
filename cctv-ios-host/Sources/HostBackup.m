@@ -1,9 +1,11 @@
 #import "HostBackup.h"
 #import "ProfileStore.h"
 @implementation HostBackup
-+ (NSArray<NSString *> *)preferenceKeys {return @[@"legacyNativePlayback",@"resumeLastChannel",@"rememberLastChannel",@"autoLoadEPG",@"allowBackgroundAudio",@"autoPiP",@"channelGridMode",@"nativeChannelsEnabled"];}
++ (NSArray<NSString *> *)preferenceKeys {return @[@"legacyNativePlayback",@"resumeLastChannel",@"rememberLastChannel",@"autoLoadEPG",@"allowBackgroundAudio",@"autoPiP",@"channelGridMode",@"nativeChannelsEnabled",@"cctv.mediaAutoPlayNext",@"cctv.mediaKeepScreenAwake",@"media.globalSearchHistoryEnabled.v1"];}
++ (NSArray<NSString *> *)numberPreferenceKeys {return @[@"cctv.mediaPlaybackRate",@"cctv.channelGridColumns.v1"];}
++ (NSArray<NSString *> *)stringPreferenceKeys {return @[@"cctv.mediaVideoGravity"];}
 + (NSDictionary *)snapshot {
-    NSUserDefaults *d=NSUserDefaults.standardUserDefaults;NSMutableDictionary *preferences=[NSMutableDictionary dictionary];for(NSString *key in self.preferenceKeys)if([d objectForKey:key])preferences[key]=@([d boolForKey:key]);
+    NSUserDefaults *d=NSUserDefaults.standardUserDefaults;NSMutableDictionary *preferences=[NSMutableDictionary dictionary];for(NSString *key in self.preferenceKeys)if([d objectForKey:key])preferences[key]=@([d boolForKey:key]);for(NSString *key in self.numberPreferenceKeys)if([[d objectForKey:key] isKindOfClass:NSNumber.class])preferences[key]=[d objectForKey:key];for(NSString *key in self.stringPreferenceKeys)if([[d objectForKey:key] isKindOfClass:NSString.class])preferences[key]=[d objectForKey:key];
     NSMutableDictionary *profiles=[NSMutableDictionary dictionary];NSArray *subscriptions=[d arrayForKey:@"subscriptions"]?:@[];
     for(NSString *source in subscriptions){NSMutableDictionary *p=[[ProfileStore metadata:source] mutableCopy];[p removeObjectForKey:@"cachedChannels"];[p removeObjectForKey:@"status"];[p removeObjectForKey:@"updatedAt"];profiles[source]=p;}
     return @{@"format":@"CCTVHost",@"version":@2,@"subscriptions":subscriptions,@"favorites":[d arrayForKey:@"favorites"]?:@[],@"preferences":preferences,@"profiles":profiles,@"order":[ProfileStore orderedSources:subscriptions],@"disabled":[d arrayForKey:@"disabledSubscriptions"]?:@[],@"epgMappings":[d dictionaryForKey:@"epgMappings"]?:@{},@"recents":[d arrayForKey:@"recents"]?:@[]};
@@ -16,7 +18,7 @@
     valid=valid&&sources.count<=500&&favorites.count<=10000;
     for(id s in sources)if(!(v2?[ProfileStore isSource:s]:[ProfileStore isHTTP:s]))valid=NO;
     for(id cid in favorites)if(![cid isKindOfClass:NSString.class]||[cid length]>8192)valid=NO;
-    if(valid)for(NSString *key in j[@"preferences"])if(![self.preferenceKeys containsObject:key]||![j[@"preferences"][key] isKindOfClass:NSNumber.class])valid=NO;
+    if(valid)for(NSString *key in j[@"preferences"]){id value=j[@"preferences"][key];if([self.preferenceKeys containsObject:key]){if(![value isKindOfClass:NSNumber.class])valid=NO;}else if([self.numberPreferenceKeys containsObject:key]){if(![value isKindOfClass:NSNumber.class])valid=NO;else if([key isEqualToString:@"cctv.mediaPlaybackRate"]&&([value doubleValue]<0.5||[value doubleValue]>2.0))valid=NO;else if([key isEqualToString:@"cctv.channelGridColumns.v1"]&&([value integerValue]!=3&&[value integerValue]!=4))valid=NO;}else if([self.stringPreferenceKeys containsObject:key]){if(![value isKindOfClass:NSString.class]||![@[@"AVLayerVideoGravityResizeAspect",@"AVLayerVideoGravityResizeAspectFill",@"AVLayerVideoGravityResize"] containsObject:value])valid=NO;}else valid=NO;if(!valid)break;}
     if(valid&&v2){
         NSDictionary *profiles=j[@"profiles"],*mappings=j[@"epgMappings"];NSArray *order=j[@"order"],*disabled=j[@"disabled"],*recents=j[@"recents"];
         valid=[profiles isKindOfClass:NSDictionary.class]&&[mappings isKindOfClass:NSDictionary.class]&&[order isKindOfClass:NSArray.class]&&[disabled isKindOfClass:NSArray.class]&&[recents isKindOfClass:NSArray.class];
@@ -45,7 +47,7 @@
     for(id s in subscriptions)if(![s isKindOfClass:NSString.class])return;
     for(id f in favorites)if(![f isKindOfClass:NSString.class])return;
     NSUserDefaults *d=NSUserDefaults.standardUserDefaults;[d setObject:subscriptions forKey:@"subscriptions"];[d setObject:favorites forKey:@"favorites"];
-    for(NSString *key in self.preferenceKeys)[d removeObjectForKey:key];for(NSString *key in preferences)if([self.preferenceKeys containsObject:key]&&[preferences[key] isKindOfClass:NSNumber.class])[d setObject:preferences[key] forKey:key];
+    for(NSString *key in self.preferenceKeys)[d removeObjectForKey:key];for(NSString *key in self.numberPreferenceKeys)[d removeObjectForKey:key];for(NSString *key in self.stringPreferenceKeys)[d removeObjectForKey:key];for(NSString *key in preferences)if(([self.preferenceKeys containsObject:key]||[self.numberPreferenceKeys containsObject:key])&&[preferences[key] isKindOfClass:NSNumber.class])[d setObject:preferences[key] forKey:key];else if([self.stringPreferenceKeys containsObject:key]&&[preferences[key] isKindOfClass:NSString.class])[d setObject:preferences[key] forKey:key];
     [d setObject:[backup[@"profiles"] isKindOfClass:NSDictionary.class]?backup[@"profiles"]:@{} forKey:@"profileMetadata"];[d setObject:[backup[@"order"] isKindOfClass:NSArray.class]?backup[@"order"]:@[] forKey:@"profileOrder"];[d setObject:[backup[@"disabled"] isKindOfClass:NSArray.class]?backup[@"disabled"]:@[] forKey:@"disabledSubscriptions"];[d setObject:[backup[@"epgMappings"] isKindOfClass:NSDictionary.class]?backup[@"epgMappings"]:@{} forKey:@"epgMappings"];[d setObject:[backup[@"recents"] isKindOfClass:NSArray.class]?backup[@"recents"]:@[] forKey:@"recents"];
 }
 @end

@@ -237,7 +237,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         services = (ROOT / 'Sources/ServicesViewController.m').read_text()
         self.assertIn('订阅清单状态', services)
         self.assertIn('最近成功刷新', services)
-        self.assertIn('section == 2 ? ([ServiceStore isLiveMediaService:self.service]?12:7)', services)
+        # 服务信息区：直播类服务 13 行（含 main 新增第 13 行“本次启动时间”），非直播类服务只列前 7 行（Codex 的条件行数保留）。
+        self.assertIn('section == 2 ? ([ServiceStore isLiveMediaService:self.service]?13:7)', services)
+        self.assertIn('本次启动时间', services)
         self.assertIn('probePlaylistChecked', services)
         self.assertIn('probeChannelCount=channels.count', services)
         self.assertIn('probeChannelCount', services)
@@ -1546,6 +1548,83 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('HTTP 未响应', self.plugin_page)
         self.assertNotIn('HTTP 未检测', self.plugin_page)
         self.assertIn('httpProbeGeneration!=generation', self.plugin_page)
+
+
+    def test_service_detail_delete_blocked_while_running_explains_stop_first(self):
+        # 运行中的服务点“删除”此前静默无反应：现在明确提示先停止再删。
+        delete = self.services.split('ip.section == 4', 1)[1][:1200]
+        self.assertIn('isManagedServiceIdentifier', delete)
+        self.assertIn('请先停止服务', delete)
+        self.assertIn('停止后才能删除', delete)
+
+    def test_service_detail_auto_probes_health_on_appear_when_running(self):
+        # 打开服务详情即自动检测一次接口健康，不再等用户手动点按；
+        # 60 秒内已有成功响应时不再重复探测。
+        appear = self.services.split('- (void)viewWillAppear:(BOOL)animated {', 1)[1].split('- (void)viewDidDisappear:', 1)[0]
+        self.assertIn('probeIfStale', appear)
+        stale = self.services.split('- (void)probeIfStale {', 1)[1].split('- (void)verifyPortReleasedAfterStop', 1)[0]
+        self.assertIn('lastProbeResponseAt', stale)
+        self.assertIn('[self probe]', stale)
+
+    def test_service_stop_is_verified_against_the_local_port(self):
+        # 停止只代表会话结束，不代表监听端口已释放：运行→已停止时
+        # 后台确认一次端口状态，文案写清已释放/仍可访问/未知。
+        self.assertIn('HostLocalPortState', self.services)
+        self.assertIn('verifyPortReleasedAfterStop', self.services)
+        self.assertIn('端口已释放', self.services)
+        self.assertIn('端口仍可访问', self.services)
+        self.assertIn('stopPortState', self.services)
+        self.assertIn('HostLocalPortState', self.plugin_page)
+        self.assertIn('verifyPortReleasedAfterStop', self.plugin_page)
+        self.assertIn('stopPortState', self.plugin_page)
+
+    def test_plugin_service_page_offers_restart(self):
+        # YSP Live 服务页此前只有启动/停止，没有重启入口；现与服务详情
+        # 复用同一 restartMediaService，失败弹框给明确原因并可看日志。
+        self.assertIn('重启服务', self.plugin_page)
+        self.assertIn('onRestart', self.plugin_page)
+        self.assertIn('restarting', self.plugin_page)
+        self.assertIn('showRestartError', self.plugin_page)
+        self.assertIn('page.onRestart', self.root)
+        self.assertIn('restartMediaService:current completion:completion', self.root)
+
+    def test_service_search_matches_engine_protocol_and_port(self):
+        # 排查端口冲突时常按端口或协议找服务：搜索只按名称搜不到。
+        refresh = self.services.split('- (void)refresh {', 1)[1].split('- (void)updateSearchResultsForSearchController', 1)[0]
+        self.assertIn('s[@"engine"]', refresh)
+        self.assertIn('s[@"protocol"]', refresh)
+        self.assertIn('s[@"port"]', refresh)
+        self.assertIn('s[@"id"]', refresh)
+        self.assertIn('搜索名称、端口或协议', self.services)
+
+    def test_resource_header_counts_running_services(self):
+        # 资源页头部此前只统计“已启用”，已启用 ≠ 运行中：现单独计运行中。
+        header = self.catalog.split('titleForHeaderInSection', 1)[1].split('- (UITableViewCell *)tableView:', 1)[0]
+        self.assertIn('运行中', header)
+        self.assertIn('isRunningServiceIdentifier', header)
+        self.assertIn('runningServices', header)
+
+    def test_service_editor_warns_on_port_collision_before_saving(self):
+        # 端口冲突此前只在启动时才报错：保存时先提示，点“仍要保存”才继续。
+        self.assertIn('端口已被占用', self.editor)
+        self.assertIn('仍要保存', self.editor)
+        self.assertIn('applySaveForService', self.editor)
+        self.assertIn('conflictingService', self.editor)
+
+    def test_service_editor_allows_name_only_save_while_running(self):
+        # 运行中的服务此前任何保存都被拒：只改名称且代码无未保存修改时
+        # 直接保存名称，不用先停服务。
+        save = self.editor.split('- (void)applySaveForService:', 1)[1].split('- (void)applyPortChange:', 1)[0]
+        self.assertIn('只改了名称', save)
+        self.assertIn('customCodeMatchesSavedVersion', save)
+        self.assertIn('persistService', save)
+
+    def test_service_detail_shows_current_run_start_time(self):
+        # 服务详情此前没有本次启动时间：现从运行日志的最新记录取 startedAt。
+        self.assertIn('本次启动时间', self.services)
+        self.assertIn('runsForIdentifier', self.services)
+        self.assertIn('currentRunStartedAt', self.services)
+        self.assertIn('PluginLogStore', self.services)
 
 
 if __name__ == '__main__':

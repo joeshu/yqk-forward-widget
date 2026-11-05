@@ -1,9 +1,10 @@
 #import "EPGViewController.h"
+#import <UserNotifications/UserNotifications.h>
 #import "HostTheme.h"
 #import "ProfileStore.h"
 #import "XMLTVStore.h"
 
-@interface EPGViewController () <UITableViewDataSource, UITableViewDelegate>
+@interface EPGViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
 @property (nonatomic, copy) NSString *channelID;
 @property(nonatomic,strong) NSDictionary *channel;
 @property(nonatomic,copy) NSString *xmlSource;
@@ -22,6 +23,11 @@
 @property (nonatomic, strong) NSTimer *refreshTimer;
 @property(nonatomic,assign) BOOL pageVisible;
 @property(nonatomic,assign) BOOL needsRefreshOnAppear;
+@property(nonatomic,strong) NSMutableDictionary<NSString *,NSDictionary *> *reminders;
+@property(nonatomic,copy) NSString *searchQuery;
+@property(nonatomic,strong) UISearchController *programSearch;
+@property(nonatomic,strong) UIButton *dateMenuButton;
+@property(nonatomic,strong) UIBarButtonItem *jumpToLiveItem;
 @end
 
 @implementation EPGViewController
@@ -42,7 +48,8 @@
     self.title = self.channelName.length ? self.channelName : self.channelID;
     self.view.backgroundColor = HostBackground();
     self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
-    self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"info.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(showSourceInfo)];
+    self.jumpToLiveItem=[[UIBarButtonItem alloc] initWithTitle:@"正在播" style:UIBarButtonItemStylePlain target:self action:@selector(scrollToLiveProgram)];
+    self.navigationItem.rightBarButtonItems=@[self.jumpToLiveItem, [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"info.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(showSourceInfo)]];
 
     self.hint = [[UILabel alloc] initWithFrame:CGRectMake(16, 12, self.view.bounds.size.width - 32, 20)];
     self.hint.textColor = HostSecondaryText();
@@ -82,6 +89,9 @@
     [self.view addSubview:self.table];
 
     self.dates=[[UISegmentedControl alloc] initWithItems:@[]];self.dates.selectedSegmentTintColor=HostAccent();self.dates.apportionsSegmentWidthsByContent=YES;self.dates.accessibilityLabel=@"选择节目单日期";[self.dates addTarget:self action:@selector(filterDate) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.dates];
+    self.reminders=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.epgReminders.v1"] mutableCopy]?:[NSMutableDictionary dictionary];
+    self.dateMenuButton=[UIButton buttonWithType:UIButtonTypeSystem];self.dateMenuButton.hidden=YES;self.dateMenuButton.accessibilityLabel=@"选择节目单日期";self.dateMenuButton.showsMenuAsPrimaryAction=YES;[self.view addSubview:self.dateMenuButton];
+    self.programSearch=[[UISearchController alloc] initWithSearchResultsController:nil];self.programSearch.searchResultsUpdater=self;self.programSearch.obscuresBackgroundDuringPresentation=NO;self.programSearch.searchBar.placeholder=@"搜索本页节目";self.navigationItem.searchController=self.programSearch;self.definesPresentationContext=YES;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationDidEnterBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationWillEnterForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
     [self fetch];
@@ -173,7 +183,7 @@
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];CGFloat top=self.view.safeAreaInsets.top;CGFloat width=self.view.bounds.size.width;
     CGFloat hintHeight=ceil(self.hint.font.lineHeight*2);
-    self.dates.frame=CGRectMake(16,top+8,width-32,40);self.hint.frame=CGRectMake(16,top+56,width-32,hintHeight);self.table.frame=CGRectMake(0,top+56+hintHeight+8,width,MAX(0,self.view.bounds.size.height-top-56-hintHeight-8));self.spinner.center=CGPointMake(width/2,top+150);
+    self.dates.frame=CGRectMake(16,top+8,width-32,40);self.dateMenuButton.frame=self.dates.frame;self.hint.frame=CGRectMake(16,top+56,width-32,hintHeight);self.table.frame=CGRectMake(0,top+56+hintHeight+8,width,MAX(0,self.view.bounds.size.height-top-56-hintHeight-8));self.spinner.center=CGPointMake(width/2,top+150);
 }
 - (void)updateEmptyState {
     self.emptyLabel.hidden = self.rows.count > 0 || self.spinner.isAnimating;
@@ -183,12 +193,53 @@
     NSDateFormatter *f=[self dayFormatter];NSString *previous=(self.dates.selectedSegmentIndex>=0&&self.dates.selectedSegmentIndex<self.dateKeys.count)?self.dateKeys[self.dates.selectedSegmentIndex]:nil;NSMutableOrderedSet *days=[NSMutableOrderedSet orderedSet];for(NSDictionary *row in self.allRows)[days addObject:[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]]];self.dateKeys=days.array;
     [self.dates removeAllSegments];NSString *today=[f stringFromDate:NSDate.date];NSInteger selected=NSNotFound;for(NSUInteger i=0;i<self.dateKeys.count;i++){NSString *key=self.dateKeys[i];NSString *title=[key isEqualToString:today]?@"今天":[key substringFromIndex:5];[self.dates insertSegmentWithTitle:title atIndex:i animated:NO];if([key isEqualToString:previous])selected=i;}
     if(selected==NSNotFound)for(NSUInteger i=0;i<self.dateKeys.count;i++)if([self.dateKeys[i] isEqualToString:today]){selected=i;break;}
-    self.dates.selectedSegmentIndex=self.dateKeys.count?(selected==NSNotFound?(NSInteger)self.dateKeys.count-1:selected):UISegmentedControlNoSegment;[self filterDate];
+    self.dates.selectedSegmentIndex=self.dateKeys.count?(selected==NSNotFound?(NSInteger)self.dateKeys.count-1:selected):UISegmentedControlNoSegment;[self updateDateMenuButton];[self filterDate];
+}
+- (void)updateDateMenuButton {
+    // 日期超过 5 天时分段控件会被挤扁：隐藏它，改用下拉菜单选日期。
+    BOOL overflow=self.dateKeys.count>5;
+    self.dates.hidden=overflow;self.dateMenuButton.hidden=!overflow;
+    if(!overflow)return;
+    NSDateFormatter *f=[self dayFormatter];NSString *today=[f stringFromDate:NSDate.date];
+    NSString *selected=(self.dates.selectedSegmentIndex>=0&&self.dates.selectedSegmentIndex<self.dateKeys.count)?self.dateKeys[self.dates.selectedSegmentIndex]:nil;
+    [self.dateMenuButton setTitle:selected?([selected isEqualToString:today]?@"今天":selected):@"选择日期" forState:UIControlStateNormal];
+    NSMutableArray<UIAction *> *actions=[NSMutableArray array];
+    for(NSUInteger i=0;i<self.dateKeys.count;i++){NSString *key=self.dateKeys[i];NSString *title=[key isEqualToString:today]?@"今天":key;__weak typeof(self) w=self;[actions addObject:[UIAction actionWithTitle:title image:(selected&&[key isEqualToString:selected])?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){w.dates.selectedSegmentIndex=(NSInteger)i;[w updateDateMenuButton];[w filterDate];}]];}
+    self.dateMenuButton.menu=[UIMenu menuWithTitle:@"选择日期" children:actions];
 }
 - (void)filterDate {
-    NSInteger idx=self.dates.selectedSegmentIndex;if(idx<0||idx>=self.dateKeys.count){[self updateEmptyState];return;}NSString *key=self.dateKeys[idx];NSDateFormatter *f=[self dayFormatter];self.rows=[self.allRows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]] isEqualToString:key];}]];[self.table reloadData];
-    NSTimeInterval now=NSDate.date.timeIntervalSince1970;for(NSUInteger i=0;i<self.rows.count;i++){NSDictionary *row=self.rows[i];if(now>=[row[@"start"] doubleValue]&&now<[row[@"end"] doubleValue]){[self.table scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:i inSection:0] atScrollPosition:UITableViewScrollPositionMiddle animated:NO];break;}}
+    NSInteger idx=self.dates.selectedSegmentIndex;if(idx<0||idx>=self.dateKeys.count){[self updateEmptyState];return;}NSString *key=self.dateKeys[idx];NSDateFormatter *f=[self dayFormatter];self.rows=[self.allRows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]] isEqualToString:key];}]];
+    if(self.searchQuery.length){NSString *q=self.searchQuery.lowercaseString;self.rows=[self.rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [[(row[@"title"]?:@"") description].lowercaseString containsString:q];}]];}
+    [self.table reloadData];if(!self.searchQuery.length)[self scrollToCurrentProgramAnimated:NO];
     [self updateEmptyState];
+}
+- (void)scrollToCurrentProgramAnimated:(BOOL)animated {
+    NSTimeInterval now=NSDate.date.timeIntervalSince1970;for(NSUInteger i=0;i<self.rows.count;i++){NSDictionary *row=self.rows[i];if(now>=[row[@"start"] doubleValue]&&now<[row[@"end"] doubleValue]){[self.table scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:i inSection:0] atScrollPosition:UITableViewScrollPositionMiddle animated:animated];break;}}
+}
+- (void)scrollToLiveProgram {[self scrollToCurrentProgramAnimated:YES];}
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {self.searchQuery=searchController.searchBar.text;[self filterDate];}
+- (NSString *)reminderKeyForProgram:(NSDictionary *)program {
+    // 提醒以“频道 | 开播时间戳”为键，同一节目只会有一条提醒。
+    return [NSString stringWithFormat:@"%@|%lld",self.channelID?:@"",(long long)[program[@"start"] doubleValue]];
+}
+- (BOOL)isProgramReminded:(NSDictionary *)program {return self.reminders[[self reminderKeyForProgram:program]]!=nil;}
+- (void)saveReminders {[NSUserDefaults.standardUserDefaults setObject:self.reminders forKey:@"cctv.epgReminders.v1"];}
+- (void)toggleReminderForProgram:(NSDictionary *)program {
+    NSString *key=[self reminderKeyForProgram:program];NSString *title=[program[@"title"] isKindOfClass:NSString.class]?program[@"title"]:@"节目";
+    if(self.reminders[key]){[self.reminders removeObjectForKey:key];[self saveReminders];[[UNUserNotificationCenter currentNotificationCenter] removePendingNotificationRequestsWithIdentifiers:@[key]];self.hint.text=[NSString stringWithFormat:@"已取消提醒：%@",title];[self.table reloadData];return;}
+    NSTimeInterval now=NSDate.date.timeIntervalSince1970;NSTimeInterval start=[program[@"start"] doubleValue];if(start<=now)return;
+    __weak typeof(self) w=self;
+    [[UNUserNotificationCenter currentNotificationCenter] requestAuthorizationWithOptions:UNAuthorizationOptionAlert|UNAuthorizationOptionSound completionHandler:^(BOOL granted,NSError *error){
+        dispatch_async(dispatch_get_main_queue(),^{EPGViewController *owner=w;if(!owner)return;
+            if(!granted){owner.hint.text=@"通知未开启，请在设置中允许通知后重试";return;}
+            NSTimeInterval fire=start-300>now?start-300:start;
+            UNMutableNotificationContent *content=[UNMutableNotificationContent new];content.title=owner.channelName.length?owner.channelName:@"CCTV";content.body=[NSString stringWithFormat:@"即将播出：%@",title];content.sound=[UNNotificationSound defaultSound];
+            UNNotificationRequest *request=[UNNotificationRequest requestWithIdentifier:key content:content trigger:[UNTimeIntervalNotificationTrigger triggerWithTimeInterval:MAX(1,fire-now) repeats:NO]];
+            [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:request withCompletionHandler:nil];
+            owner.reminders[key]=@{@"title":title,@"channelName":owner.channelName?:@"",@"start":@(start)};[owner saveReminders];
+            owner.hint.text=[NSString stringWithFormat:@"已预约：%@，开播前 5 分钟提醒",title];[owner.table reloadData];
+        });
+    }];
 }
 - (NSString *)safeSourceDescription {
     NSString *raw=self.xmlSource?:@"";NSURLComponents *components=[NSURLComponents componentsWithString:raw];
@@ -265,7 +316,7 @@
 
     BOOL replayable=self.onReplay && end<=now;
     cell.accessoryType=replayable?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;
-    cell.selectionStyle=replayable?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;
+    cell.selectionStyle=(replayable||start>now)?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;
     BOOL live = (now >= start && now < end);
     if (live) {
         cell.textLabel.textColor = HostAccent();
@@ -275,8 +326,9 @@
         if(replayable)cell.detailTextLabel.text=[range stringByAppendingString:@"  点按回看"];
     } else {
         cell.textLabel.textColor = HostText();
+        if([self isProgramReminded:row])cell.detailTextLabel.text=[range stringByAppendingString:@"  ⏰ 已预约"];
     }
-    cell.accessibilityLabel = [NSString stringWithFormat:@"%@，%@%@", row[@"title"] ?: @"", range, live ? @"，正在播出" : (end <= now ? (replayable ? @"，已播出，点按回看" : @"，已播出") : @"，尚未播出")];
+    cell.accessibilityLabel = [NSString stringWithFormat:@"%@，%@%@", row[@"title"] ?: @"", range, live ? @"，正在播出" : (end <= now ? (replayable ? @"，已播出，点按回看" : @"，已播出") : ([self isProgramReminded:row] ? @"，尚未播出，已预约" : @"，尚未播出"))];
     return cell;
 }
 
@@ -284,6 +336,7 @@
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if(indexPath.row>=self.rows.count)return;
     NSDictionary *program=self.rows[indexPath.row];NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+    if([program[@"start"] doubleValue]>now){[self toggleReminderForProgram:program];return;}
     if(!self.onReplay || [program[@"end"] doubleValue]>now)return;
     self.onReplay(program);
 }
