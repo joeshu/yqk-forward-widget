@@ -6,7 +6,7 @@
 // CicadaPlayerSDK，且无 -Wl,-undefined,dynamic_lookup）。所有 SDK 交互都走
 // NSClassFromString + respondsToSelector + objc_msgSend 运行时调用；
 // SDK 不存在时 +isAvailable 返回 NO，绝不崩溃。
-// 另见集成补丁说明（~/workspace/cicada-vod-integration-patch.md）与
+// 另见集成补丁说明（cctv-ios-host/Docs/CICADA-VOD-INTEGRATION-PATCH.md）与
 // Tests/test_decode_router.py。
 //
 // 能力边界（以 CicadaPlayerSDK / alivcffmpeg 二进制为准，见 .m 注释）：

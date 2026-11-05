@@ -30,6 +30,7 @@
 //   6) CNPlayer 的 startPlayerSDK 已在 App 启动时调用（RootViewController
 //      1617 行附近），Cicada 内核随之初始化；本适配器不再重复初始化。
 #import "MediaPlaybackCicadaAdapter.h"
+#import <AVFoundation/AVFoundation.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 
@@ -115,6 +116,8 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 }
 
 @interface MediaPlaybackCicadaAdapter ()
+// state 对外只读，内部可写（公开头文件里是 readonly）。
+@property (nonatomic, readwrite) MediaPlaybackCicadaAdapterState state;
 @property (nonatomic, strong) NSURL *url;
 @property (nonatomic, strong, nullable) NSDictionary<NSString *, NSString *> *headers;
 @property (nonatomic) NSTimeInterval networkTimeout;
