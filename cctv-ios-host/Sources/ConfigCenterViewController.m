@@ -14,6 +14,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 @property(nonatomic,strong) UIImageView *profileIconView;
 @property(nonatomic,strong) UILabel *profileTitleLabel;
 @property(nonatomic,strong) UILabel *profileDetailLabel;
+@property(nonatomic,strong) UILabel *protocolBadge;
 @property(nonatomic,strong) UILabel *latencyBadge;
 @end
 
@@ -23,8 +24,9 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
         self.profileIconView=[UIImageView new];self.profileIconView.translatesAutoresizingMaskIntoConstraints=NO;self.profileIconView.contentMode=UIViewContentModeScaleAspectFit;
         self.profileTitleLabel=[UILabel new];self.profileTitleLabel.translatesAutoresizingMaskIntoConstraints=NO;self.profileTitleLabel.numberOfLines=2;self.profileTitleLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.profileTitleLabel.adjustsFontForContentSizeCategory=YES;
         self.profileDetailLabel=[UILabel new];self.profileDetailLabel.translatesAutoresizingMaskIntoConstraints=NO;self.profileDetailLabel.numberOfLines=0;self.profileDetailLabel.lineBreakMode=NSLineBreakByCharWrapping;self.profileDetailLabel.adjustsFontForContentSizeCategory=YES;
+        self.protocolBadge=[UILabel new];self.protocolBadge.translatesAutoresizingMaskIntoConstraints=NO;self.protocolBadge.font=[UIFont systemFontOfSize:10 weight:UIFontWeightBold];self.protocolBadge.textAlignment=NSTextAlignmentCenter;self.protocolBadge.layer.cornerRadius=7;self.protocolBadge.clipsToBounds=YES;self.protocolBadge.backgroundColor=HostSelectedSurface();self.protocolBadge.textColor=HostAccent();self.protocolBadge.accessibilityIdentifier=@"resource.protocol.badge";
         self.latencyBadge=[UILabel new];self.latencyBadge.translatesAutoresizingMaskIntoConstraints=NO;self.latencyBadge.font=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];self.latencyBadge.textAlignment=NSTextAlignmentCenter;self.latencyBadge.layer.cornerRadius=9;self.latencyBadge.clipsToBounds=YES;self.latencyBadge.backgroundColor=HostRaisedSurface();self.latencyBadge.textColor=HostSecondaryText();
-        [self.contentView addSubview:self.profileIconView];[self.contentView addSubview:self.profileTitleLabel];[self.contentView addSubview:self.profileDetailLabel];[self.contentView addSubview:self.latencyBadge];
+        [self.contentView addSubview:self.profileIconView];[self.contentView addSubview:self.profileTitleLabel];[self.contentView addSubview:self.profileDetailLabel];[self.contentView addSubview:self.protocolBadge];[self.contentView addSubview:self.latencyBadge];
         [NSLayoutConstraint activateConstraints:@[
             [self.profileIconView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:15],
             [self.profileIconView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
@@ -37,6 +39,9 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
             [self.latencyBadge.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:13],
             [self.latencyBadge.widthAnchor constraintGreaterThanOrEqualToConstant:48],
             [self.latencyBadge.heightAnchor constraintEqualToConstant:22],
+            [self.protocolBadge.trailingAnchor constraintEqualToAnchor:self.latencyBadge.trailingAnchor],
+            [self.protocolBadge.topAnchor constraintEqualToAnchor:self.latencyBadge.bottomAnchor constant:4],
+            [self.protocolBadge.heightAnchor constraintEqualToConstant:18],
             [self.profileDetailLabel.leadingAnchor constraintEqualToAnchor:self.profileTitleLabel.leadingAnchor],
             [self.profileDetailLabel.trailingAnchor constraintEqualToAnchor:self.profileTitleLabel.trailingAnchor],
             [self.profileDetailLabel.topAnchor constraintEqualToAnchor:self.profileTitleLabel.bottomAnchor constant:6],
@@ -82,6 +87,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 @property(nonatomic, copy) NSString *sortMode;
 @property(nonatomic, strong) UILabel *emptyLabel;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSDictionary *> *latencyResults;
+@property(nonatomic,strong) NSMutableDictionary<NSString *,NSString *> *detailSummaryCache;
 @property(nonatomic) BOOL probingResources;
 @property(nonatomic,strong) UIButton *importTaskButton;
 @property(nonatomic,strong) UIButton *importTaskToggleButton;
@@ -119,7 +125,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     self.title = @"";
     self.tableView.backgroundColor = HostBackground();
     self.tableView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;
@@ -132,7 +138,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     self.tableView.estimatedSectionHeaderHeight = 0;
     self.tableView.estimatedSectionFooterHeight = 0;
     self.tableView.sectionHeaderTopPadding = 0;
-    self.selectedKind=@"all";NSString *savedSort=[NSUserDefaults.standardUserDefaults stringForKey:@"resourceListSortMode"];self.sortMode=(savedSort.length&&[@[@"manual",@"name",@"recent",@"attention"] containsObject:savedSort])?savedSort:@"manual";self.latencyResults=[NSMutableDictionary dictionary];
+    self.selectedKind=@"all";NSString *savedSort=[NSUserDefaults.standardUserDefaults stringForKey:@"resourceListSortMode"];self.sortMode=(savedSort.length&&[@[@"manual",@"name",@"recent",@"attention"] containsObject:savedSort])?savedSort:@"manual";self.latencyResults=[NSMutableDictionary dictionary];self.detailSummaryCache=[NSMutableDictionary dictionary];
     self.resourceHeader=[[UIView alloc] initWithFrame:CGRectMake(0,0,MAX(1,self.tableView.bounds.size.width),220)];
     self.resourceHeader.backgroundColor=HostBackground();
 
@@ -158,7 +164,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     [NSLayoutConstraint activateConstraints:@[[self.importTaskContainer.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:20],[self.importTaskContainer.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-20],[self.importTaskContainer.topAnchor constraintEqualToAnchor:self.kindScroll.bottomAnchor constant:4],[self.importTaskContainer.bottomAnchor constraintEqualToAnchor:self.resourceHeader.bottomAnchor constant:-6],self.importTaskHeight,[self.importTaskButton.leadingAnchor constraintEqualToAnchor:self.importTaskContainer.leadingAnchor],[self.importTaskButton.trailingAnchor constraintEqualToAnchor:self.importTaskToggleButton.leadingAnchor],[self.importTaskButton.topAnchor constraintEqualToAnchor:self.importTaskContainer.topAnchor],self.importTaskButtonHeight,[self.importTaskToggleButton.trailingAnchor constraintEqualToAnchor:self.importTaskContainer.trailingAnchor],[self.importTaskToggleButton.topAnchor constraintEqualToAnchor:self.importTaskContainer.topAnchor],[self.importTaskToggleButton.widthAnchor constraintEqualToConstant:44],self.importTaskToggleHeight,[self.importTaskDetailLabel.leadingAnchor constraintEqualToAnchor:self.importTaskContainer.leadingAnchor constant:12],[self.importTaskDetailLabel.trailingAnchor constraintEqualToAnchor:self.importTaskContainer.trailingAnchor constant:-12],[self.importTaskDetailLabel.topAnchor constraintEqualToAnchor:self.importTaskButton.bottomAnchor],self.importTaskDetailHeight]];
     self.tableView.tableHeaderView=self.resourceHeader;
     CGFloat tableBottomInset=MAX(8,self.bottomOverlayInset);self.tableView.contentInset=UIEdgeInsetsMake(0,0,tableBottomInset,0);self.tableView.scrollIndicatorInsets=self.tableView.contentInset;
-    self.emptyLabel=[UILabel new];self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.tableView.backgroundView=self.emptyLabel;
+    self.emptyLabel=[UILabel new];self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=HostSecondaryText();self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.tableView.backgroundView=self.emptyLabel;
     UIRefreshControl *r = [UIRefreshControl new];
     [r addTarget:self action:@selector(refreshProfiles) forControlEvents:UIControlEventValueChanged];
     self.refreshControl = r;
@@ -348,6 +354,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 - (void)selectKind:(UIButton *)sender {NSString *kind=[sender.accessibilityIdentifier stringByReplacingOccurrencesOfString:@"resource-filter-" withString:@""];if(!kind.length||[kind isEqual:self.selectedKind])return;self.selectedKind=kind;[self reloadProfiles];}
 - (void)reloadProfiles {
     NSString *task=self.importTaskSummaryProvider?self.importTaskSummaryProvider():nil;BOOL hasTask=task.length>0;self.importTaskContainer.hidden=!hasTask;self.importTaskHeight.constant=hasTask?(self.importTaskExpanded?76:44):0;self.importTaskButtonHeight.constant=hasTask?44:0;self.importTaskToggleHeight.constant=hasTask?44:0;self.importTaskDetailHeight.constant=hasTask&&self.importTaskExpanded?28:0;self.importTaskDetailLabel.hidden=!hasTask||!self.importTaskExpanded;self.importTaskDetailLabel.text=task?:@"";[self.importTaskButton setTitle:!hasTask?@"":(self.importTaskExpanded?@"继续查看导入任务":[@"导入任务 · " stringByAppendingString:task]) forState:UIControlStateNormal];[self.importTaskToggleButton setImage:[UIImage systemImageNamed:self.importTaskExpanded?@"chevron.up":@"chevron.down"] forState:UIControlStateNormal];[self.importTaskToggleButton setAccessibilityValue:self.importTaskExpanded?@"已展开":@"已收起"];[self updateResourceHeaderLayout];
+    [self.detailSummaryCache removeAllObjects];
     NSArray *all = self.profilesProvider ? self.profilesProvider() : @[];
     self.allProfiles=all;
     [self updateKindFilters];
@@ -374,6 +381,8 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     return host.length?host:([source hasPrefix:@"local-playlist:"]?@"本地播放列表":@"未命名资源");
 }
 - (NSString *)resourceDetailForProfile:(NSDictionary *)profile {
+    NSString *cacheKey=[NSString stringWithFormat:@"%@|%@|%@|%@|%@",profile[@"source"]?:@"",profile[@"status"]?:@"",profile[@"updatedAt"]?:@0,profile[@"playlistUpdatedAt"]?:@0,profile[@"current"]?:@0];
+    NSString *cached=self.detailSummaryCache[cacheKey];if(cached)return cached;
     BOOL plugin=[profile[@"type"] isEqual:@"plugin"],tvbox=[profile[@"type"] isEqual:@"tvbox"];
     NSString *current=[profile[@"current"] boolValue]?@"当前使用 · ":@"";
     if(plugin){
@@ -401,7 +410,9 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     NSString *location=[source hasPrefix:@"local-playlist:"]?@"本机文件":(source.length?[NSURL URLWithString:source].host?:@"直播订阅":@"官方频道目录");
     NSString *summary=[NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@ · %@",profile[@"count"]?:@0,profile[@"epgStatus"]?:@"自动匹配",location,refreshInfo];
     if([profile[@"status"] isKindOfClass:NSString.class]&&[profile[@"status"] length])summary=[summary stringByAppendingFormat:@"\n%@",profile[@"status"]];
-    return [NSString stringWithFormat:@"%@%@",current,summary];
+    NSString *result=[NSString stringWithFormat:@"%@%@",current,summary];
+    if(cacheKey.length)self.detailSummaryCache[cacheKey]=result;
+    return result;
 }
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {[textField resignFirstResponder];return YES;}
 - (void)refreshHomeContent {if(self.onRefreshMediaHome)self.onRefreshMediaHome();}
@@ -517,7 +528,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     c.detailTextLabel.adjustsFontForContentSizeCategory=YES;
     c.textLabel.numberOfLines=2;
     c.textLabel.lineBreakMode=NSLineBreakByTruncatingTail;
-    c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+    c.detailTextLabel.textColor = HostSecondaryText();
     // Subscription endpoints and service health details can wrap to several
     // lines. Let Auto Layout size the cell from the complete, bounded summary
     // so a long URL cannot paint over the following resource row.
@@ -537,6 +548,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         c.textLabel.text=profileName;
         c.detailTextLabel.text=[self resourceDetailForProfile:p];
         UIColor *latencyColor=nil;c.latencyBadge.text=[self latencyTextForProfile:p color:&latencyColor];c.latencyBadge.textColor=latencyColor?:HostSecondaryText();c.latencyBadge.backgroundColor=HostRaisedSurface();c.latencyBadge.accessibilityLabel=[NSString stringWithFormat:@"资源测速：%@",c.latencyBadge.text?:@"未测速"];
+        NSString *protoTag=plugin?(p[@"runtime"]?:@"插件"):(tvbox?([p[@"catalogKind"] isEqual:@"maccms"]?@"MacCMS":@"合集"):@"M3U");c.protocolBadge.text=[NSString stringWithFormat:@"  %@  ",protoTag];
         c.imageView.image=[UIImage systemImageNamed:plugin?([p[@"resourceKind"] isEqual:@"live"]?@"dot.radiowaves.left.and.right":@"play.rectangle"):(tvbox?([p[@"catalogKind"] isEqual:@"maccms"]?@"film":@"square.stack.3d.up"):@"list.bullet.rectangle")];
         if(!plugin&&!tvbox){
             UISwitch *s=[self compactSwitchForRow:ip.row enabled:[p[@"enabled"] boolValue] label:[NSString stringWithFormat:@"加入频道 %@",p[@"name"]?:@"订阅"] source:p[@"source"]];c.accessoryView=[self switchAccessoryForSwitch:s width:56];

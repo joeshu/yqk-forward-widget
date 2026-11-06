@@ -5,5 +5,6 @@
 - (void)setPaused:(BOOL)paused;
 - (NSArray<NSDictionary *> *)cachedRowsForSource:(NSString *)source channel:(NSString *)identifier;
 - (void)loadSource:(NSString *)source channel:(NSString *)identifier force:(BOOL)force completion:(void (^)(NSArray<NSDictionary *> *,NSError *))completion;
+- (void)evictMemoryCache;
 - (void)clear;
 @end

@@ -42,7 +42,9 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 @implementation MediaSearchResultCell
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)identifier {
     if((self=[super initWithStyle:style reuseIdentifier:identifier])){
-        self.poster=[UIImageView new];self.poster.translatesAutoresizingMaskIntoConstraints=NO;self.poster.contentMode=UIViewContentModeScaleAspectFill;self.poster.clipsToBounds=YES;self.poster.layer.cornerRadius=10;
+        self.backgroundColor=HostCard();
+        self.layer.cornerRadius=14;self.layer.cornerCurve=kCACornerCurveContinuous;self.clipsToBounds=YES;self.layer.borderWidth=0.6;HostSetLayerBorderColor(self,HostBorder());
+        self.poster=[UIImageView new];self.poster.translatesAutoresizingMaskIntoConstraints=NO;self.poster.contentMode=UIViewContentModeScaleAspectFill;self.poster.clipsToBounds=YES;self.poster.layer.cornerRadius=10;self.poster.layer.cornerCurve=kCACornerCurveContinuous;self.poster.layer.borderWidth=0.6;HostSetLayerBorderColor(self.poster,HostBorder());
         self.nameLabel=[UILabel new];self.nameLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];self.nameLabel.numberOfLines=2;
         self.metadataLabel=[UILabel new];self.metadataLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.metadataLabel.numberOfLines=2;
         self.sourceLabel=[UILabel new];self.sourceLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];self.sourceLabel.numberOfLines=2;
@@ -112,7 +114,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     self.searchSources=self.currentSiteScope?@[self.currentSiteSource]:self.availableSources;
     self.view.backgroundColor = HostBackground();
     self.tableView.backgroundColor = HostBackground();
-    self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 74;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
@@ -828,6 +830,36 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     NSDictionary *entry=entries[indexPath.row-1];
     self.savedSearchOffset=self.tableView.contentOffset;
     if (self.onSelectResult) self.onSelectResult(entry[@"item"] ?: @{}, self.searchSources[indexPath.section], entry[@"provider"] ?: @"");
+}
+
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    if (indexPath.row == 0 || indexPath.section >= self.searchSources.count) return nil;
+    NSArray *entries = [self visibleEntriesForSection:indexPath.section];
+    if ((NSUInteger)(indexPath.row - 1) >= entries.count) return nil;
+    NSDictionary *entry = entries[indexPath.row - 1];
+    NSDictionary *item = [entry[@"item"] isKindOfClass:NSDictionary.class] ? entry[@"item"] : @{};
+    NSString *title = MediaSearchText(item[@"name"]);
+    NSString *provider = MediaSearchText(entry[@"provider"]);
+    NSDictionary *source = self.searchSources[indexPath.section];
+    __weak typeof(self) weakSelf = self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
+        UIAction *openAction = [UIAction actionWithTitle:@"查看影片详情" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(__unused UIAction *a) {
+            MediaGlobalSearchViewController *owner = weakSelf;
+            if (owner && owner.onSelectResult) owner.onSelectResult(item, source, provider);
+        }];
+        UIAction *copyAction = [UIAction actionWithTitle:@"复制片名" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a) {
+            if (title.length) UIPasteboard.generalPasteboard.string = title;
+        }];
+        UIAction *filterStationAction = [UIAction actionWithTitle:@"仅看此来源结果" image:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] identifier:nil handler:^(__unused UIAction *a) {
+            MediaGlobalSearchViewController *owner = weakSelf;
+            if (!owner) return;
+            owner.selectedSourceSection = indexPath.section;
+            owner.selectedProvider = provider.length ? provider : nil;
+            [owner updateFilters];
+            [owner.tableView reloadData];
+        }];
+        return [UIMenu menuWithTitle:title children:@[openAction, filterStationAction, copyAction]];
+    }];
 }
 
 - (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar { [self submitSearch]; }

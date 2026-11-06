@@ -466,6 +466,13 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, strong) PluginViewController *pluginPage;
 @property (nonatomic, strong) UIStackView *bottomBar;
 @property (nonatomic, strong) UIView *bottomBarBackdrop;
+@property (nonatomic, strong) UIVisualEffectView *bottomDockGlass;
+@property (nonatomic, strong) UIView *liveMiniPlayerBar;
+@property (nonatomic, strong) UILabel *liveMiniPlayerLabel;
+@property (nonatomic, strong) UIButton *liveMiniPlayerResumeButton;
+@property (nonatomic, strong) UIButton *liveMiniPlayerCloseButton;
+@property (nonatomic, strong) NSTimer *liveSleepTimer;
+@property (nonatomic, assign) NSInteger liveSleepMinutes;
 @property (nonatomic, strong) UIView *catalogFloatingControls;
 @property (nonatomic, strong) UIButton *catalogLayoutButton;
 @property (nonatomic, strong) UIButton *catalogMoreButton;
@@ -784,6 +791,7 @@ configureCatalogNavigation;
     for(LocalServiceReadiness *probe in self.subscriptionReadiness.allValues)[probe cancel];
     [self.watchdog invalidate];
     [self.epgTimer invalidate];
+    [self.liveSleepTimer invalidate];
     [self.epgTask cancel];
     [self flushDiagnosticLog];
 }
@@ -1002,14 +1010,22 @@ configureCatalogNavigation;
 - (UIButton *)barButton:(NSString *)title action:(SEL)action {
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
     [b setTitle:title forState:UIControlStateNormal];
+    NSDictionary<NSString *,NSString *> *symbols=@{@"暂停":@"pause.fill",@"播放":@"play.fill",@"继续播放":@"play.circle.fill",@"静音":@"speaker.wave.2.fill",@"线路":@"antenna.radiowaves.left.and.right",@"节目单":@"list.bullet.rectangle",@"更多":@"ellipsis.circle"};
+    NSString *symbol=symbols[title];
+    if(symbol){UIImageSymbolConfiguration *sc=[UIImageSymbolConfiguration configurationWithPointSize:11 weight:UIImageSymbolWeightSemibold];[b setImage:[UIImage systemImageNamed:symbol withConfiguration:sc] forState:UIControlStateNormal];b.imageEdgeInsets=UIEdgeInsetsMake(0,-2,0,3);}
     b.titleLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]];
     b.titleLabel.adjustsFontForContentSizeCategory = YES;
     // 大字体下 5 个等宽按钮放不下 12pt 放大标题：允许缩到 60% 而不是截断。
     b.titleLabel.adjustsFontSizeToFitWidth = YES;
     b.titleLabel.minimumScaleFactor = 0.6;
     [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    b.tintColor = [UIColor colorWithWhite:1 alpha:0.95];
     b.backgroundColor = [UIColor colorWithWhite:0 alpha:0.42];
-    b.layer.cornerRadius = 5;
+    b.layer.cornerRadius = 12;
+    b.layer.cornerCurve = kCACornerCurveContinuous;
+    b.layer.borderWidth = 0.65;
+    b.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
+    HostInstallPressFeedback(b);
     [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return b;
 }
@@ -1233,7 +1249,15 @@ configureCatalogNavigation;
 
 - (void)buildBottomBar {
     self.bottomBarBackdrop=[UIView new];self.bottomBarBackdrop.backgroundColor=UIColor.clearColor;self.bottomBarBackdrop.opaque=NO;self.bottomBarBackdrop.userInteractionEnabled=NO;self.bottomBarBackdrop.layer.cornerRadius=0;self.bottomBarBackdrop.clipsToBounds=NO;
+    self.bottomDockGlass=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomDockGlass.userInteractionEnabled=NO;self.bottomDockGlass.layer.cornerRadius=27;self.bottomDockGlass.layer.cornerCurve=kCACornerCurveContinuous;self.bottomDockGlass.clipsToBounds=YES;self.bottomDockGlass.layer.borderWidth=0.8;HostSetLayerBorderColor(self.bottomDockGlass,HostBorder());
+    UIView *dockTint=[[UIView alloc] initWithFrame:self.bottomDockGlass.contentView.bounds];dockTint.backgroundColor=HostGlassTint();dockTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;dockTint.userInteractionEnabled=NO;[self.bottomDockGlass.contentView addSubview:dockTint];
+    [self.bottomBarBackdrop addSubview:self.bottomDockGlass];
     [self.view addSubview:self.bottomBarBackdrop];
+    self.liveMiniPlayerBar=[UIView new];self.liveMiniPlayerBar.hidden=YES;self.liveMiniPlayerBar.accessibilityIdentifier=@"live.mini-player.bar";HostStyleGlassCard(self.liveMiniPlayerBar,20);
+    self.liveMiniPlayerLabel=[UILabel new];self.liveMiniPlayerLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold]];self.liveMiniPlayerLabel.adjustsFontForContentSizeCategory=YES;self.liveMiniPlayerLabel.textColor=HostText();self.liveMiniPlayerLabel.lineBreakMode=NSLineBreakByTruncatingTail;[self.liveMiniPlayerBar addSubview:self.liveMiniPlayerLabel];
+    self.liveMiniPlayerResumeButton=[UIButton buttonWithType:UIButtonTypeSystem];[self.liveMiniPlayerResumeButton setTitle:@"继续直播" forState:UIControlStateNormal];HostStylePillButton(self.liveMiniPlayerResumeButton,YES);self.liveMiniPlayerResumeButton.layer.cornerRadius=14;self.liveMiniPlayerResumeButton.contentEdgeInsets=UIEdgeInsetsMake(5,12,5,12);self.liveMiniPlayerResumeButton.accessibilityIdentifier=@"live.mini-player.resume";[self.liveMiniPlayerResumeButton addTarget:self action:@selector(resumeSuspendedLiveFromMiniBar) forControlEvents:UIControlEventTouchUpInside];[self.liveMiniPlayerBar addSubview:self.liveMiniPlayerResumeButton];
+    self.liveMiniPlayerCloseButton=[UIButton buttonWithType:UIButtonTypeSystem];[self.liveMiniPlayerCloseButton setImage:[UIImage systemImageNamed:@"xmark.circle.fill"] forState:UIControlStateNormal];self.liveMiniPlayerCloseButton.tintColor=HostSecondaryText();self.liveMiniPlayerCloseButton.accessibilityIdentifier=@"live.mini-player.close";self.liveMiniPlayerCloseButton.accessibilityLabel=@"关闭直播挂起提示";[self.liveMiniPlayerCloseButton addTarget:self action:@selector(dismissSuspendedLiveMiniBar) forControlEvents:UIControlEventTouchUpInside];[self.liveMiniPlayerBar addSubview:self.liveMiniPlayerCloseButton];
+    [self.view addSubview:self.liveMiniPlayerBar];
     self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=3; self.bottomBar.backgroundColor=UIColor.clearColor; self.bottomBar.layer.cornerRadius=27; self.bottomBar.layer.cornerCurve=kCACornerCurveContinuous; self.bottomBar.clipsToBounds=YES;
     NSArray *titles=@[@"CCTV",@"频道",@"影视库",@"资源",@"设置"];
     NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"house.fill",@"externaldrive.fill",@"gearshape"];
@@ -1294,6 +1318,33 @@ configureCatalogNavigation;
     self.infoLabel.text=@"直播与点播不会同时播放";
     self.playPauseBtn.enabled=YES;
     [self.playPauseBtn setTitle:@"继续播放" forState:UIControlStateNormal];
+    self.liveMiniPlayerLabel.text=[NSString stringWithFormat:@"直播已挂起 · %@",self.channelName.length?self.channelName:@"当前频道"];
+    self.liveMiniPlayerBar.hidden=NO;
+}
+
+- (void)resumeSuspendedLiveFromMiniBar {
+    self.liveMiniPlayerBar.hidden=YES;
+    NSInteger targetTab=self.currentRemoteURL.length?1:0;
+    if(targetTab<self.bottomBar.arrangedSubviews.count)[self selectBottomTab:(UIButton *)self.bottomBar.arrangedSubviews[targetTab]];
+    self.playerExpanded=YES;[self configureCatalogNavigation];[self.view setNeedsLayout];
+    if(self.livePlaybackSuspendedForNavigation)[self togglePlayPause];
+}
+
+- (void)dismissSuspendedLiveMiniBar {
+    self.livePlaybackSuspendedForNavigation=NO;
+    self.liveMiniPlayerBar.hidden=YES;
+}
+
+- (void)configureLiveSleepTimerMinutes:(NSInteger)minutes {
+    [self.liveSleepTimer invalidate];self.liveSleepTimer=nil;self.liveSleepMinutes=minutes;
+    if(minutes<=0){[self log:@"已关闭直播睡眠定时"];return;}
+    __weak typeof(self) weakSelf=self;
+    self.liveSleepTimer=[NSTimer scheduledTimerWithTimeInterval:minutes*60.0 repeats:NO block:^(__unused NSTimer *timer){
+        RootViewController *owner=weakSelf;if(!owner)return;owner.liveSleepTimer=nil;owner.liveSleepMinutes=0;
+        [owner suspendLivePlaybackForReason:@"sleep_timer_expired"];
+        owner.titleLabel.hidden=NO;owner.titleLabel.text=@"已按睡眠定时暂停直播";
+    }];
+    [self log:@"已开启直播睡眠定时：%ld 分钟",(long)minutes];
 }
 
 - (void)updateBottomBarSelection {
@@ -1317,9 +1368,9 @@ configureCatalogNavigation;
     if(!self.restoringLastTab&&self.activeTab<2){NSDictionary *state=@{@"query":self.query?:@"",@"group":@(self.groupControl.selectedSegmentIndex),@"gridY":@(self.channelGrid.contentOffset.y),@"listY":@(self.table.contentOffset.y),@"immersiveTopVersion":@1};self.catalogStates[@(self.activeTab)]=state;[[NSUserDefaults standardUserDefaults] setObject:state forKey:[NSString stringWithFormat:@"cctv.catalogState.%ld",(long)self.activeTab]];}
     if(self.restoringLastTab)[RuntimeDiagnostics.shared recordEvent:@"ui_session_tab_restored" category:@"lifecycle" fields:@{@"tab_index":@(sender.tag),@"automatic_content_load":@NO}];
     self.activeTab=sender.tag;
-    // Keep the media/resource surfaces consistently dark while restoring the
-    // user's configured appearance on CCTV, channel, and settings screens.
-    self.navigationController.overrideUserInterfaceStyle=(sender.tag==2||sender.tag==3)?UIUserInterfaceStyleDark:HostSelectedInterfaceStyle();
+    // Unify 2026 Spatial Glass theme across all 5 tabs.
+    self.navigationController.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    if(sender.tag<2)self.liveMiniPlayerBar.hidden=YES;
     [[NSUserDefaults standardUserDefaults] setInteger:self.activeTab forKey:@"cctv.lastBottomTab.v1"];
     [self updateBottomBarSelection];
     if([self.tabPage isKindOfClass:MediaBrowserViewController.class])[(MediaBrowserViewController *)self.tabPage saveSessionState];
@@ -1884,6 +1935,8 @@ configureCatalogNavigation;
     cell.textLabel.text = playing ? [NSString stringWithFormat:@"● %@", title] : title;
     cell.textLabel.textColor = playing ? HostAccent() : HostText();
     cell.backgroundColor=playing?HostSelectedSurface():HostCard();
+    cell.layer.cornerRadius=13; cell.layer.cornerCurve=kCACornerCurveContinuous; cell.clipsToBounds=YES;
+    cell.layer.borderWidth=playing?1.1:0.6; HostSetLayerBorderColor(cell,playing?HostAccent():HostBorder());
     if(playing){UIImageView *check=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle.fill"]];check.tintColor=HostAccent();check.accessibilityLabel=@"正在播放";cell.accessoryView=check;cell.accessoryType=UITableViewCellAccessoryNone;}
     else {cell.accessoryView=nil;cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;}
     cell.accessibilityIdentifier=[@"channel-row-" stringByAppendingString:cid];
@@ -2406,7 +2459,8 @@ configureCatalogNavigation;
         CGFloat segmentHeight=MAX(32,ceil(segmentFont.lineHeight)+14);
         self.groupControl.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.groupControl.hidden=!catalog||expandedLive;self.playerTabs.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.playerTabs.hidden=!catalog||!expandedLive;
         self.versionLabel.hidden=YES;
-        CGFloat tabHeight=58,tabWidth=MIN(w,560),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBar.frame=CGRectMake(MAX(0,(w-tabWidth)/2),tabY,tabWidth,tabHeight);self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
+        CGFloat tabHeight=58,tabWidth=MIN(w,560),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBar.frame=CGRectMake(MAX(0,(w-tabWidth)/2),tabY,tabWidth,tabHeight);self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomDockGlass.frame=CGRectMake(MAX(10,(w-MIN(w-20,540))/2),2,MIN(w-20,540),tabHeight-4);self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
+        BOOL showMiniBar=self.livePlaybackSuspendedForNavigation&&self.channelID.length&&self.activeTab>=2;self.liveMiniPlayerBar.hidden=!showMiniBar;if(showMiniBar){CGFloat miniW=MIN(w-28,520),miniH=42;self.liveMiniPlayerBar.frame=CGRectMake((w-miniW)/2,MAX(top+8,tabY-miniH-8),miniW,miniH);self.liveMiniPlayerCloseButton.frame=CGRectMake(miniW-38,5,32,32);self.liveMiniPlayerResumeButton.frame=CGRectMake(miniW-130,5,88,32);self.liveMiniPlayerLabel.frame=CGRectMake(14,0,MAX(0,miniW-150),miniH);[self.view bringSubviewToFront:self.liveMiniPlayerBar];}
         CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=height;
         CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom));UIEdgeInsets catalogInsets=UIEdgeInsetsMake(contentY,0,tabContentInset,0);CCTVApplyImmersiveScrollGeometry(self.table,frame,catalogInsets);CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets);
         self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=frame;self.playbackPanel.view.hidden=!catalog;if([self.playbackPanel isKindOfClass:CCTVPlaybackListPanelController.class]){UITableView *panelTable=((CCTVPlaybackListPanelController *)self.playbackPanel).tableView;CCTVApplyImmersiveScrollGeometry(panelTable,panelTable.frame,catalogInsets);}
@@ -4229,6 +4283,14 @@ configureCatalogNavigation;
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"播放信息" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self showPlaybackInfo]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"画中画" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self togglePiP]; }]];
+    NSString *sleepTitle=self.liveSleepMinutes>0?[NSString stringWithFormat:@"睡眠定时（当前 %ld 分钟）",(long)self.liveSleepMinutes]:@"睡眠定时关闭";
+    [sheet addAction:[UIAlertAction actionWithTitle:sleepTitle style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+        UIAlertController *sleepSheet=[UIAlertController alertControllerWithTitle:@"直播睡眠定时" message:@"到点后自动暂停直播并释放解码器" preferredStyle:UIAlertControllerStyleActionSheet];
+        for(NSNumber *mins in @[@0,@15,@30,@60]){NSInteger m=mins.integerValue;NSString *label=m==0?@"关闭定时":[NSString stringWithFormat:@"%ld 分钟后暂停",(long)m];[sleepSheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){[self configureLiveSleepTimerMinutes:m];}]];}
+        [sleepSheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+        sleepSheet.popoverPresentationController.sourceView=self.moreBtn;sleepSheet.popoverPresentationController.sourceRect=self.moreBtn.bounds;
+        [self presentViewController:sleepSheet animated:YES completion:nil];
+    }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"诊断日志" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self openDiagnosticLog]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     if (sheet.popoverPresentationController) { sheet.popoverPresentationController.sourceView=self.moreBtn; sheet.popoverPresentationController.sourceRect=self.moreBtn.bounds; }

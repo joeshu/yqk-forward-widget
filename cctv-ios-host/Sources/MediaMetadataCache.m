@@ -1,4 +1,5 @@
 #import "MediaMetadataCache.h"
+#import <UIKit/UIKit.h>
 #import <CommonCrypto/CommonDigest.h>
 
 static const NSUInteger MediaMetadataCacheEntryLimit = 64;
@@ -89,6 +90,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         NSURL *directory=[support URLByAppendingPathComponent:@"CCTVHost" isDirectory:YES];
         if(directory){[NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL];_persistentPath=[[directory URLByAppendingPathComponent:@"MediaMetadataCache-v1.json"] path];}
         [self loadPersistentRecords];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(evictMemoryCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
     }
     return self;
 }
@@ -190,5 +192,6 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
     });
     return @{@"entries":@(count),@"bytes":@(bytes)};
 }
+- (void)evictMemoryCache { dispatch_async(self.queue, ^{[self.entries removeAllObjects];[self.order removeAllObjects];}); }
 - (void)clear { dispatch_sync(self.queue, ^{[self.entries removeAllObjects];[self.order removeAllObjects];[self.persistentRecords removeAllObjects];});[self schedulePersistentWrite]; }
 @end

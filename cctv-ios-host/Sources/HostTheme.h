@@ -9,6 +9,7 @@ extern char HostLayerBorderColorAssociationKey;
 extern char HostAppearanceRefreshAssociationKey;
 extern char HostGlassEffectAssociationKey;
 extern char HostPressFeedbackAssociationKey;
+extern char HostSpecularRimAssociationKey;
 
 static inline NSString *HostThemeMode(void) {
     NSString *mode=[NSUserDefaults.standardUserDefaults stringForKey:HostThemeModePreferenceKey];
@@ -136,10 +137,32 @@ static inline void HostStyleGlassCard(UIView *view, CGFloat radius) {
         objc_setAssociatedObject(view,&HostGlassEffectAssociationKey,glass,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     glass.layer.cornerRadius=radius;
+    glass.layer.cornerCurve=kCACornerCurveContinuous;
+    CAGradientLayer *specularRim=objc_getAssociatedObject(view,&HostSpecularRimAssociationKey);
+    if(!specularRim){
+        specularRim=[CAGradientLayer layer];
+        specularRim.startPoint=CGPointMake(0,0);
+        specularRim.endPoint=CGPointMake(1,1);
+        specularRim.colors=@[(id)[UIColor colorWithWhite:1 alpha:0.22].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.05].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.12].CGColor];
+        specularRim.locations=@[@0.0,@0.52,@1.0];
+        [glass.contentView.layer addSublayer:specularRim];
+        objc_setAssociatedObject(view,&HostSpecularRimAssociationKey,specularRim,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    specularRim.frame=CGRectMake(0,0,CGRectGetWidth(view.bounds),MIN(1.2,CGRectGetHeight(view.bounds)));
     view.backgroundColor=UIColor.clearColor;
     view.layer.cornerRadius=radius;
     view.layer.cornerCurve=kCACornerCurveContinuous;
-    view.layer.borderWidth=.7;
+    view.layer.borderWidth=.85;
+    HostSetLayerBorderColor(view,HostBorder());
+    view.clipsToBounds=YES;
+}
+
+static inline void HostStyleSurfaceCard(UIView *view, CGFloat radius) {
+    if(!view)return;
+    view.backgroundColor=HostCard();
+    view.layer.cornerRadius=radius;
+    view.layer.cornerCurve=kCACornerCurveContinuous;
+    view.layer.borderWidth=.75;
     HostSetLayerBorderColor(view,HostBorder());
     view.clipsToBounds=YES;
 }
@@ -176,6 +199,8 @@ static inline void HostSetLayerBorderColor(UIView *view, UIColor *color) {
 static inline void HostRefreshAppearanceLayers(UIView *view) {
     if(!view)return;
     HostGlassBackdropView *backdrop=objc_getAssociatedObject(view,&HostAppearanceRefreshAssociationKey);if(backdrop)[backdrop refreshAppearance];
+    CAGradientLayer *specularRim=objc_getAssociatedObject(view,&HostSpecularRimAssociationKey);
+    if(specularRim)specularRim.frame=CGRectMake(0,0,CGRectGetWidth(view.bounds),MIN(1.2,CGRectGetHeight(view.bounds)));
     UIColor *border=objc_getAssociatedObject(view,&HostLayerBorderColorAssociationKey);
     if(border)view.layer.borderColor=[[border resolvedColorWithTraitCollection:view.traitCollection] CGColor];
     for(UIView *child in view.subviews)HostRefreshAppearanceLayers(child);
@@ -186,12 +211,16 @@ static inline void HostStylePillButton(UIButton *button, BOOL primary) {
     button.contentEdgeInsets = UIEdgeInsetsMake(10, 16, 10, 16);
     button.layer.cornerRadius = 15;
     button.layer.cornerCurve = kCACornerCurveContinuous;
-    button.layer.borderWidth = primary ? 0 : 0.7;
-    HostSetLayerBorderColor(button,HostBorder());
+    button.layer.borderWidth = primary ? 0.5 : 0.75;
+    HostSetLayerBorderColor(button,primary?[HostOnAccent() colorWithAlphaComponent:0.24]:HostBorder());
     button.backgroundColor = primary ? HostAccent() : HostNeutralSurface();
     [button setTitleColor:primary?HostOnAccent():HostText() forState:UIControlStateNormal];
     [button setTitleColor:HostSecondaryText() forState:UIControlStateHighlighted];
     button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    button.titleLabel.layer.shadowColor = primary ? [UIColor colorWithWhite:0 alpha:0.35].CGColor : UIColor.clearColor.CGColor;
+    button.titleLabel.layer.shadowOffset = CGSizeMake(0, 0.5);
+    button.titleLabel.layer.shadowRadius = primary ? 1.5 : 0;
+    button.titleLabel.layer.shadowOpacity = primary ? 1.0 : 0;
     button.accessibilityTraits |= UIAccessibilityTraitButton;
 }
 static inline void HostStyleNavigation(UINavigationController *nav) {

@@ -12,6 +12,7 @@
 @property(nonatomic,strong) UIBarButtonItem *nativeButton;
 @property(nonatomic, strong) WKWebView *web;
 @property(nonatomic, strong) UIActivityIndicatorView *spinner;
+@property(nonatomic, strong) UIProgressView *webProgressView;
 @property(nonatomic, strong) UILabel *statusLabel;
 - (void)installCookieHeader:(NSString *)cookie forURL:(NSURL *)url completion:(dispatch_block_t)completion;
 - (void)loadInitialPageAtURL:(NSURL *)url cookie:(NSString *)cookie;
@@ -26,6 +27,8 @@
     if(self.onTryNativePlayback||self.onResolvedMedia){UIBarButtonItem *native=[[UIBarButtonItem alloc] initWithTitle:@"原生播放" style:UIBarButtonItemStylePlain target:self action:@selector(tryNativePlayback)];self.nativeButton=native;self.navigationItem.rightBarButtonItems=@[native,refresh];}else self.navigationItem.rightBarButtonItem=refresh;
     WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];configuration.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;configuration.allowsInlineMediaPlayback=YES;configuration.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;
     self.web=[[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration];self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;self.web.navigationDelegate=self;self.web.allowsBackForwardNavigationGestures=YES;[self.view addSubview:self.web];
+    self.webProgressView=[[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];self.webProgressView.translatesAutoresizingMaskIntoConstraints=NO;self.webProgressView.progressTintColor=HostAccent();self.webProgressView.trackTintColor=UIColor.clearColor;self.webProgressView.accessibilityIdentifier=@"media.web.progress";[self.view addSubview:self.webProgressView];
+    [NSLayoutConstraint activateConstraints:@[[self.webProgressView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],[self.webProgressView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.webProgressView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.webProgressView.heightAnchor constraintEqualToConstant:2.5]]];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.center=self.view.center;self.spinner.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin|UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin;[self.view addSubview:self.spinner];
     self.statusLabel=[UILabel new];self.statusLabel.translatesAutoresizingMaskIntoConstraints=NO;self.statusLabel.numberOfLines=0;self.statusLabel.textAlignment=NSTextAlignmentCenter;self.statusLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.statusLabel.adjustsFontForContentSizeCategory=YES;self.statusLabel.textColor=HostSecondaryText();self.statusLabel.hidden=YES;[self.view addSubview:self.statusLabel];
     [NSLayoutConstraint activateConstraints:@[[self.statusLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],[self.statusLabel.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor constant:48],[self.statusLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:24],[self.statusLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-24]]];
@@ -121,8 +124,8 @@
     decisionHandler(allowed?WKNavigationActionPolicyAllow:WKNavigationActionPolicyCancel);
     if(allowed && !action.targetFrame)[webView loadRequest:action.request];
 }
-- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {[self invalidateMediaResolution];[self showStatusMessage:nil];}
-- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {[self.spinner stopAnimating];self.navigationItem.prompt=nil;[self showStatusMessage:nil];}
+- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {[self.spinner startAnimating];self.webProgressView.hidden=NO;[self.webProgressView setProgress:0.35 animated:YES];[self showStatusMessage:nil];}
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {[self.spinner stopAnimating];[self.webProgressView setProgress:1.0 animated:YES];dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{self.webProgressView.hidden=YES;self.webProgressView.progress=0;});[self showStatusMessage:nil];}
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self failed:error];}
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self failed:error];}
 - (void)failed:(NSError *)error {if(error.code==NSURLErrorCancelled)return;[self.spinner stopAnimating];[self recordMediaEvent:@"web_media_navigation_failed" fields:@{@"failure_stage":@"web_navigation",@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];self.navigationItem.prompt=error.localizedDescription;[self showStatusMessage:error.localizedDescription];}

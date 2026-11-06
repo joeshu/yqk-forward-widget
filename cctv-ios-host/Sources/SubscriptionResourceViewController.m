@@ -17,7 +17,7 @@
     UITextField *field=[UITextField new];field.placeholder=placeholder;field.textColor=HostText();field.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];field.adjustsFontForContentSizeCategory=YES;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.autocorrectionType=UITextAutocorrectionTypeNo;[field addTarget:self action:@selector(changed) forControlEvents:UIControlEventEditingChanged];return field;
 }
 - (void)viewDidLoad {
-    [super viewDidLoad];self.title=@"直播资源";self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;self.tableView.backgroundColor=HostBackground();self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;
+    [super viewDidLoad];self.title=@"直播资源";self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.tableView.backgroundColor=HostBackground();self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;
     self.nameField=[self field:@"资源名称"];self.urlField=[self field:@"HTTP / HTTPS 订阅地址"];self.urlField.keyboardType=UIKeyboardTypeURL;self.epgField=[self field:@"留空使用列表提供的 EPG"];self.epgField.keyboardType=UIKeyboardTypeURL;self.editingResource=self.initiallyEditing;[self loadFields];
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"返回" style:UIBarButtonItemStylePlain target:self action:@selector(close)];[self updateAction];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(metadataChanged) name:ProfileStoreMetadataDidChangeNotification object:nil];

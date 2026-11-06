@@ -1,5 +1,6 @@
 #import "XMLTVStore.h"
 #import "ProfileStore.h"
+#import <UIKit/UIKit.h>
 #import <zlib.h>
 #import <CommonCrypto/CommonDigest.h>
 @interface XMLTVReader : NSObject <NSXMLParserDelegate>
@@ -39,21 +40,21 @@
 @property(nonatomic,strong) dispatch_queue_t diskQueue;
 @end
 @implementation XMLTVStore
-+ (instancetype)shared {static XMLTVStore *s;static dispatch_once_t once;dispatch_once(&once,^{s=[self new];s.cache=[NSMutableDictionary dictionary];s.tasks=[NSMutableDictionary dictionary];s.callbacks=[NSMutableDictionary dictionary];s.diskQueue=dispatch_queue_create("com.cctvhost.xmltv",DISPATCH_QUEUE_SERIAL);});return s;}
++ (instancetype)shared {static XMLTVStore *s;static dispatch_once_t once;dispatch_once(&once,^{s=[self new];s.cache=[NSMutableDictionary dictionary];s.tasks=[NSMutableDictionary dictionary];s.callbacks=[NSMutableDictionary dictionary];s.diskQueue=dispatch_queue_create("com.cctvhost.xmltv",DISPATCH_QUEUE_SERIAL);[NSNotificationCenter.defaultCenter addObserver:s selector:@selector(evictMemoryCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];});return s;}
 + (NSDictionary *)parseData:(NSData *)input error:(NSError **)error {
     NSData *data=input;const unsigned char *b=data.bytes;
     if(data.length>64*1024*1024)goto invalid;
     if(data.length>2&&b[0]==0x1f&&b[1]==0x8b){z_stream stream={0};if(inflateInit2(&stream,15+32)!=Z_OK)goto invalid;stream.next_in=(Bytef *)data.bytes;stream.avail_in=(uInt)data.length;NSMutableData *out=[NSMutableData data];int rc;unsigned char buffer[32768];do{stream.next_out=buffer;stream.avail_out=sizeof(buffer);rc=inflate(&stream,Z_NO_FLUSH);[out appendBytes:buffer length:sizeof(buffer)-stream.avail_out];if(out.length>64*1024*1024){rc=Z_MEM_ERROR;break;}}while(rc==Z_OK);inflateEnd(&stream);if(rc!=Z_STREAM_END)goto invalid;data=out;}
-    {XMLTVReader *reader=[XMLTVReader new];NSXMLParser *p=[[NSXMLParser alloc] initWithData:data];p.shouldResolveExternalEntities=NO;p.delegate=reader;
+    {@autoreleasepool{XMLTVReader *reader=[XMLTVReader new];NSXMLParser *p=[[NSXMLParser alloc] initWithData:data];p.shouldResolveExternalEntities=NO;p.delegate=reader;
         if(![p parse]||!reader.channels.count)goto invalid;
         NSMutableDictionary *result=[NSMutableDictionary dictionary];for(NSString *cid in reader.channels){NSArray *rows=[reader.channels[cid] sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"start"] compare:b[@"start"]];}];result[cid.lowercaseString]=rows;}
         for(NSString *alias in reader.aliases)if(!result[alias])result[alias]=result[[reader.aliases[alias] lowercaseString]];
-        return result;}
+        return result;}}
 invalid:
     if(error)*error=[NSError errorWithDomain:@"XMLTV" code:1 userInfo:@{NSLocalizedDescriptionKey:@"XMLTV 数据无效、过大或没有有效节目，请检查来源。"}];return nil;
 }
 - (NSString *)pathForSource:(NSString *)s {NSString *dir=[NSSearchPathForDirectoriesInDomains(NSCachesDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"XMLTV"];[NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];NSData *d=[s dataUsingEncoding:NSUTF8StringEncoding];unsigned char hash[CC_SHA256_DIGEST_LENGTH];CC_SHA256(d.bytes,(CC_LONG)d.length,hash);NSMutableString *key=[NSMutableString string];for(int i=0;i<CC_SHA256_DIGEST_LENGTH;i++)[key appendFormat:@"%02x",hash[i]];return [dir stringByAppendingPathComponent:[key stringByAppendingString:@".plist"]];}
-- (NSArray *)cachedRowsForSource:(NSString *)source channel:(NSString *)identifier {return self.cache[source][@"rows"][identifier.lowercaseString]?:@[];}
+- (NSArray *)cachedRowsForSource:(NSString *)source channel:(NSString *)identifier {if(!source.length||!identifier.length)return @[];return self.cache[source][@"rows"][identifier.lowercaseString]?:@[];}
 - (void)setPaused:(BOOL)paused {
     _paused=paused;if(!paused)return;self.generation++;
     for(NSURLSessionDataTask *task in self.tasks.allValues)[task cancel];[self.tasks removeAllObjects];
@@ -83,5 +84,6 @@ invalid:
     });});
 }
 - (void)complete:(NSString *)source cache:(NSDictionary *)cache error:(NSError *)error {NSArray *blocks=[self.callbacks[source] copy];[self.callbacks removeObjectForKey:source];[self.tasks removeObjectForKey:source];for(void (^block)(NSDictionary *,NSError *) in blocks)block(cache,error);}
+- (void)evictMemoryCache {if(NSThread.isMainThread)[self.cache removeAllObjects];else dispatch_async(dispatch_get_main_queue(),^{[self.cache removeAllObjects];});}
 - (void)clear {[self setPaused:YES];[self.cache removeAllObjects];NSString *dir=[[self pathForSource:@"clear"] stringByDeletingLastPathComponent];dispatch_async(self.diskQueue,^{[NSFileManager.defaultManager removeItemAtPath:dir error:NULL];});[self setPaused:NO];}
 @end

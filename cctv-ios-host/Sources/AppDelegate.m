@@ -1,6 +1,9 @@
 #import "AppDelegate.h"
 #import "RootViewController.h"
 #import "HostTheme.h"
+#import "HostImageLoader.h"
+#import "MediaMetadataCache.h"
+#import "XMLTVStore.h"
 #import "RuntimeDiagnostics.h"
 #import <mach/mach.h>
 
@@ -61,6 +64,9 @@
 }
 
 - (void)applicationDidReceiveMemoryWarning:(UIApplication *)application {
+    [HostImageLoader.shared clearCache];
+    [MediaMetadataCache.shared evictMemoryCache];
+    [XMLTVStore.shared evictMemoryCache];
     [RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"memory_warning_received" fields:[self diagnosticLifecycleFields]];
 }
 

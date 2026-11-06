@@ -47,11 +47,51 @@
         [_editor.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
         [_editor.bottomAnchor constraintEqualToAnchor:self.view.keyboardLayoutGuide.topAnchor]
     ]];
-    if (!self.readOnly)
-        self.navigationItem.rightBarButtonItem =
-            [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave
-                                                          target:self
-                                                          action:@selector(save)];
+    __weak typeof(self) weakSelf = self;
+    UIAction *findAction = [UIAction actionWithTitle:@"搜索代码关键字" image:[UIImage systemImageNamed:@"magnifyingglass"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf promptFindInCode]; }];
+    UIAction *formatJSONAction = [UIAction actionWithTitle:@"校验并美化 JSON" image:[UIImage systemImageNamed:@"curlybraces"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf formatJSONIfApplicable]; }];
+    UIBarButtonItem *toolsItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"wand.and.stars"] menu:[UIMenu menuWithTitle:@"代码工具" children:@[findAction, formatJSONAction]]];
+    toolsItem.accessibilityIdentifier = @"service.code.tools";
+    if (!self.readOnly) {
+        UIBarButtonItem *saveItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(save)];
+        self.navigationItem.rightBarButtonItems = @[saveItem, toolsItem];
+    } else {
+        self.navigationItem.rightBarButtonItem = toolsItem;
+    }
+}
+
+- (void)promptFindInCode {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"搜索代码" message:@"输入要定位的函数名、字段或配置键" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){ field.placeholder = @"输入关键字"; }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"定位" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+        NSString *query = alert.textFields.firstObject.text ?: @"";
+        if (!query.length || !_editor.text.length) return;
+        NSRange range = [_editor.text rangeOfString:query options:NSCaseInsensitiveSearch];
+        if (range.location != NSNotFound) {
+            [_editor becomeFirstResponder];
+            _editor.selectedRange = range;
+            [_editor scrollRangeToVisible:range];
+        }
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)formatJSONIfApplicable {
+    NSData *raw = [_editor.text dataUsingEncoding:NSUTF8StringEncoding];
+    if (!raw.length || raw.length > 2 * 1024 * 1024) return;
+    NSError *err = nil;
+    id obj = [NSJSONSerialization JSONObjectWithData:raw options:NSJSONReadingFragmentsAllowed error:&err];
+    if (err || !obj) {
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"JSON 校验未通过" message:err.localizedDescription ?: @"当前内容不是有效的 JSON" preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
+    NSData *pretty = [NSJSONSerialization dataWithJSONObject:obj options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:NULL];
+    if (pretty.length && !self.readOnly) {
+        _editor.text = [[NSString alloc] initWithData:pretty encoding:NSUTF8StringEncoding];
+    }
 }
 - (void)save {
     if(!_editor.editable)return;

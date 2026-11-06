@@ -25,10 +25,25 @@
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
     self.emptyLabel.hidden = YES;
     self.tableView.backgroundView = self.emptyLabel;
+    UIBarButtonItem *copyItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"doc.on.doc"] style:UIBarButtonItemStylePlain target:self action:@selector(copyAllDiagnostics)];
+    copyItem.accessibilityIdentifier = @"playback.info.copy";
+    copyItem.accessibilityLabel = @"复制播放诊断信息";
+    self.navigationItem.rightBarButtonItem = copyItem;
     UIRefreshControl *refresh = [UIRefreshControl new];
     [refresh addTarget:self action:@selector(refreshSnapshot) forControlEvents:UIControlEventValueChanged];
     self.refreshControl = refresh;
     [self refreshSnapshot];
+}
+
+- (void)copyAllDiagnostics {
+    if (!self.snapshotRows.count) return;
+    NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithCapacity:self.snapshotRows.count];
+    for (NSDictionary *row in self.snapshotRows) {
+        if (![row isKindOfClass:NSDictionary.class]) continue;
+        [lines addObject:[NSString stringWithFormat:@"%@：%@", [(row[@"title"]?:@"") description], [(row[@"value"]?:@"") description]]];
+    }
+    UIPasteboard.generalPasteboard.string = [lines componentsJoinedByString:@"\n"];
+    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, @"已复制全部播放诊断信息");
 }
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated];[self refreshSnapshot]; }
 - (void)refreshSnapshot { NSArray *rows=@[];if(self.rowsProvider){@try{rows=self.rowsProvider()?:@[];}@catch(NSException *e){rows=@[];}}self.snapshotRows=[rows isKindOfClass:NSArray.class]?rows:@[];self.emptyLabel.hidden=self.snapshotRows.count>0;[self.refreshControl endRefreshing];if(self.isViewLoaded)[self.tableView reloadData]; }
@@ -40,15 +55,31 @@
     UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:@"playback.info.row"];
     if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"playback.info.row"];
     c.backgroundColor = HostCard();
-    c.textLabel.text = [(row[@"title"]?:@"") description];
+    c.layer.cornerRadius = 13;
+    c.layer.cornerCurve = kCACornerCurveContinuous;
+    NSString *titleText = [(row[@"title"]?:@"") description];
+    c.textLabel.text = titleText;
     c.detailTextLabel.text = [(row[@"value"]?:@"") description];
+    NSString *symbol = [titleText containsString:@"带宽"]||[titleText containsString:@"速率"]?@"speedometer":([titleText containsString:@"分辨率"]||[titleText containsString:@"画面"]?@"rectangle.expand.vertical":([titleText containsString:@"节点"]||[titleText containsString:@"线路"]||[titleText containsString:@"地址"]?@"network":@"waveform.path.ecg"));
+    c.imageView.image = [UIImage systemImageNamed:symbol];
+    c.imageView.tintColor = HostAccent();
     c.textLabel.textColor = HostText();
     c.detailTextLabel.textColor = HostSecondaryText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
     c.textLabel.adjustsFontForContentSizeCategory=YES;c.textLabel.numberOfLines=0;
     c.detailTextLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightRegular]];
     c.detailTextLabel.adjustsFontForContentSizeCategory=YES;c.detailTextLabel.numberOfLines = 0;
-    c.selectionStyle = UITableViewCellSelectionStyleNone;
+    c.selectionStyle = UITableViewCellSelectionStyleDefault;
+    c.accessibilityHint = @"点按复制此项指标";
     return c;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
+    [tableView deselectRowAtIndexPath:ip animated:YES];
+    if (ip.row >= self.snapshotRows.count) return;
+    NSDictionary *row = [self.snapshotRows[ip.row] isKindOfClass:NSDictionary.class] ? self.snapshotRows[ip.row] : @{};
+    NSString *line = [NSString stringWithFormat:@"%@：%@", [(row[@"title"]?:@"") description], [(row[@"value"]?:@"") description]];
+    UIPasteboard.generalPasteboard.string = line;
+    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, @"指标已复制");
 }
 @end

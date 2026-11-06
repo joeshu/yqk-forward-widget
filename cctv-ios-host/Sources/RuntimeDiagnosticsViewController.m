@@ -7,6 +7,8 @@
 @property(nonatomic, strong) UITableView *table;
 @property(nonatomic, copy) NSArray<NSDictionary *> *sessions;
 @property(nonatomic, copy) NSArray<NSDictionary *> *events;
+@property(nonatomic, copy) NSArray<NSDictionary *> *allEvents;
+@property(nonatomic, strong) UISegmentedControl *eventCategoryFilter;
 @property(nonatomic, strong) UIBarButtonItem *clearButton;
 @property(nonatomic, strong) UIBarButtonItem *exportButton;
 @property(nonatomic, strong) UIBarButtonItem *deleteButton;
@@ -41,6 +43,16 @@
         self.deleteButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"trash"] style:UIBarButtonItemStylePlain target:self action:@selector(confirmDeleteCurrentSession)];
         self.deleteButton.tintColor = UIColor.systemRedColor;
         self.navigationItem.rightBarButtonItems = @[self.deleteButton, self.exportButton];
+        self.eventCategoryFilter = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"播放", @"接口", @"服务", @"异常"]];
+        self.eventCategoryFilter.selectedSegmentIndex = 0;
+        self.eventCategoryFilter.selectedSegmentTintColor = HostAccent();
+        self.eventCategoryFilter.accessibilityIdentifier = @"diagnostic.event.filter";
+        [self.eventCategoryFilter addTarget:self action:@selector(applyEventCategoryFilter) forControlEvents:UIControlEventValueChanged];
+        UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 48)];
+        self.eventCategoryFilter.frame = CGRectMake(16, 6, 288, 36);
+        self.eventCategoryFilter.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        [header addSubview:self.eventCategoryFilter];
+        self.table.tableHeaderView = header;
     } else {
         self.clearButton = [[UIBarButtonItem alloc] initWithTitle:@"清空" style:UIBarButtonItemStylePlain target:self action:@selector(confirmClearAll)];
         self.clearButton.tintColor = UIColor.systemRedColor;
@@ -61,9 +73,9 @@
     if (self.sessionID.length) {
         [[RuntimeDiagnostics shared] loadEventsForSessionID:self.sessionID completion:^(NSArray<NSDictionary *> *events, NSError *error) {
             RuntimeDiagnosticsViewController *owner = weakSelf; if (!owner||owner.reloadGeneration!=generation) return;
-            owner.events = events ?: @[];
-            owner.table.backgroundView = owner.events.count ? nil : [owner emptyViewWithText:error.localizedDescription ?: @"这次运行没有诊断记录。"];
-            [owner.table reloadData];
+            owner.allEvents = events ?: @[];
+            [owner applyEventCategoryFilter];
+            if (!owner.allEvents.count) owner.table.backgroundView = [owner emptyViewWithText:error.localizedDescription ?: @"这次运行没有诊断记录。"];
         }];
     } else {
         [[RuntimeDiagnostics shared] loadSessionsWithCompletion:^(NSArray<NSDictionary *> *sessions, NSError *error) {
@@ -74,6 +86,26 @@
             [owner.table reloadData];
         }];
     }
+}
+
+- (void)applyEventCategoryFilter {
+    NSArray<NSDictionary *> *source = self.allEvents ?: @[];
+    NSInteger idx = self.eventCategoryFilter ? self.eventCategoryFilter.selectedSegmentIndex : 0;
+    if (idx <= 0) {
+        self.events = source;
+    } else {
+        self.events = [source filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *event, NSDictionary *bindings) {
+            if (![event isKindOfClass:NSDictionary.class]) return NO;
+            NSString *cat = [event[@"category"] isKindOfClass:NSString.class] ? event[@"category"] : @"";
+            NSString *name = [event[@"event"] isKindOfClass:NSString.class] ? event[@"event"] : @"";
+            if (idx == 1) return [cat isEqualToString:@"playback"];
+            if (idx == 2) return [cat isEqualToString:@"media_api"];
+            if (idx == 3) return [cat isEqualToString:@"service"];
+            return [name localizedCaseInsensitiveContainsString:@"fail"] || [name localizedCaseInsensitiveContainsString:@"error"] || [name localizedCaseInsensitiveContainsString:@"timeout"] || [name localizedCaseInsensitiveContainsString:@"reject"];
+        }]];
+    }
+    self.table.backgroundView = self.events.count ? nil : [self emptyViewWithText:@"当前筛选分类下没有诊断事件。"];
+    [self.table reloadData];
 }
 
 - (UIView *)emptyViewWithText:(NSString *)text {
@@ -92,7 +124,7 @@
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"diagnostic.row"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"diagnostic.row"];
-    cell.backgroundColor = HostCard(); cell.textLabel.textColor = HostText(); cell.detailTextLabel.textColor = HostSecondaryText();
+    cell.backgroundColor = HostCard(); cell.layer.cornerRadius = 14; cell.layer.cornerCurve = kCACornerCurveContinuous; cell.clipsToBounds = YES; cell.layer.borderWidth = 0.6; HostSetLayerBorderColor(cell, HostBorder()); cell.textLabel.textColor = HostText(); cell.detailTextLabel.textColor = HostSecondaryText();
     cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody]; cell.textLabel.adjustsFontForContentSizeCategory = YES; cell.textLabel.numberOfLines = 0;
     cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote]; cell.detailTextLabel.adjustsFontForContentSizeCategory = YES; cell.detailTextLabel.numberOfLines = 0;
     cell.accessoryType = UITableViewCellAccessoryNone; cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -122,7 +154,8 @@
         NSString *buildValue = [session[@"app_build"] isKindOfClass:NSString.class] && [session[@"app_build"] length] ? session[@"app_build"] : @"未知";
         NSString *version = versionValue.length ? [NSString stringWithFormat:@"版本 %@ · 构建 %@", versionValue, buildValue] : @"版本信息未知";
         BOOL isCurrent=[session[@"is_current"] isKindOfClass:NSNumber.class]?[session[@"is_current"] boolValue]:NO;BOOL isOpen=[session[@"is_open"] isKindOfClass:NSNumber.class]?[session[@"is_open"] boolValue]:NO;BOOL cleanlyEnded=[session[@"cleanly_ended"] isKindOfClass:NSNumber.class]?[session[@"cleanly_ended"] boolValue]:NO;
-        NSString *state = isCurrent ? @"本次运行" : (isOpen ? @"运行中" : (cleanlyEnded ? @"已结束" : @"未正常收尾"));
+        NSString *state = isCurrent ? @"本次运行" : (isOpen ? @"运行中" : (cleanlyEnded ? @"已结束" : @"未正常收尾 ⚠"));
+        if(!cleanlyEnded && !isOpen && !isCurrent) { cell.layer.borderWidth=1.0; HostSetLayerBorderColor(cell, [UIColor systemRedColor]); }
         unsigned long long bytes = [session[@"bytes"] isKindOfClass:NSNumber.class] ? [session[@"bytes"] unsignedLongLongValue] : 0;
         NSString *size = [NSByteCountFormatter stringFromByteCount:(long long)bytes countStyle:NSByteCountFormatterCountStyleMemory];
         cell.textLabel.text = [NSString stringWithFormat:@"%@  ·  %@", date, state];

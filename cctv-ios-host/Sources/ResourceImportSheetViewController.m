@@ -103,7 +103,7 @@
 @implementation ResourceImportSheetViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     UIColor *sheetSurface=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:0.055 green:0.059 blue:0.075 alpha:1]:[UIColor colorWithRed:0.94 green:0.949 blue:0.969 alpha:1];}];
     self.view.backgroundColor=sheetSurface;
 

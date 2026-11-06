@@ -175,6 +175,10 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 @property(nonatomic,strong) UILabel *inlineNowPlayingLabel;
 @property(nonatomic) NSUInteger gestureFeedbackGeneration;
 @property(nonatomic) BOOL gestureRateActive;
+@property(nonatomic) BOOL gestureLockActive;
+@property(nonatomic,strong) UIButton *screenLockButton;
+@property(nonatomic,strong) NSTimer *mediaSleepTimer;
+@property(nonatomic) NSInteger mediaSleepMinutes;
 @property(nonatomic) float gesturePreviousRate;
 @property(nonatomic,strong) UIPanGestureRecognizer *playbackPanGesture;
 @property(nonatomic,strong) UITapGestureRecognizer *playbackDoubleTapGesture;
@@ -351,7 +355,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 }
 - (instancetype)init {if((self=[super init])){_lineIndex=0;_episodeIndex=0;_selectedAlternateIndex=-1;}return self;}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;self.view.backgroundColor=HostBackground();self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
+    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.view.backgroundColor=HostBackground();self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
     self.autoSkippedIntroEpisodeIndex=-1;self.autoSkippedOutroEpisodeIndex=-1;
     self.diagnosticTraceID=[self.context[@"correlationID"] isKindOfClass:NSString.class]&&[self.context[@"correlationID"] length]?self.context[@"correlationID"]:NSUUID.UUID.UUIDString.lowercaseString;
     self.lineIndex=[self.context[@"lineIndex"] integerValue];self.episodeIndex=[self.context[@"episodeIndex"] integerValue];
@@ -371,6 +375,8 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     self.inlineNowPlayingPill=[UIView new];self.inlineNowPlayingPill.translatesAutoresizingMaskIntoConstraints=NO;self.inlineNowPlayingPill.hidden=YES;self.inlineNowPlayingPill.userInteractionEnabled=NO;self.inlineNowPlayingPill.backgroundColor=[UIColor colorWithWhite:0 alpha:.72];self.inlineNowPlayingPill.layer.cornerRadius=9;self.inlineNowPlayingPill.layer.cornerCurve=kCACornerCurveContinuous;self.inlineNowPlayingPill.isAccessibilityElement=YES;self.inlineNowPlayingPill.accessibilityIdentifier=@"media-inline-now-playing";self.inlineNowPlayingPill.accessibilityHint=@"滚动影片详情时仍显示当前播放集数";[self.videoView addSubview:self.inlineNowPlayingPill];
     self.inlineNowPlayingLabel=[UILabel new];self.inlineNowPlayingLabel.translatesAutoresizingMaskIntoConstraints=NO;self.inlineNowPlayingLabel.font=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];self.inlineNowPlayingLabel.textColor=UIColor.whiteColor;self.inlineNowPlayingLabel.numberOfLines=1;self.inlineNowPlayingLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.inlineNowPlayingLabel.isAccessibilityElement=NO;[self.inlineNowPlayingPill addSubview:self.inlineNowPlayingLabel];[self.inlineNowPlayingLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
     [NSLayoutConstraint activateConstraints:@[[self.inlineNowPlayingPill.leadingAnchor constraintEqualToAnchor:self.videoView.leadingAnchor constant:12],[self.inlineNowPlayingPill.trailingAnchor constraintLessThanOrEqualToAnchor:self.videoView.trailingAnchor constant:-12],[self.inlineNowPlayingPill.bottomAnchor constraintEqualToAnchor:self.videoView.bottomAnchor constant:-50],[self.inlineNowPlayingPill.heightAnchor constraintGreaterThanOrEqualToConstant:28],[self.inlineNowPlayingPill.widthAnchor constraintLessThanOrEqualToAnchor:self.videoView.widthAnchor constant:-24],[self.inlineNowPlayingLabel.leadingAnchor constraintEqualToAnchor:self.inlineNowPlayingPill.leadingAnchor constant:9],[self.inlineNowPlayingLabel.trailingAnchor constraintEqualToAnchor:self.inlineNowPlayingPill.trailingAnchor constant:-9],[self.inlineNowPlayingLabel.topAnchor constraintEqualToAnchor:self.inlineNowPlayingPill.topAnchor constant:5],[self.inlineNowPlayingLabel.bottomAnchor constraintEqualToAnchor:self.inlineNowPlayingPill.bottomAnchor constant:-5]]];
+    self.screenLockButton=[UIButton buttonWithType:UIButtonTypeSystem];self.screenLockButton.translatesAutoresizingMaskIntoConstraints=NO;[self.screenLockButton setImage:[UIImage systemImageNamed:@"lock.open"] forState:UIControlStateNormal];self.screenLockButton.tintColor=UIColor.whiteColor;self.screenLockButton.backgroundColor=[UIColor colorWithWhite:0 alpha:0.58];self.screenLockButton.layer.cornerRadius=18;self.screenLockButton.layer.cornerCurve=kCACornerCurveContinuous;self.screenLockButton.layer.borderWidth=0.7;self.screenLockButton.layer.borderColor=[UIColor colorWithWhite:1 alpha:0.2].CGColor;self.screenLockButton.accessibilityIdentifier=@"media-playback-lock-button";self.screenLockButton.accessibilityLabel=@"锁定或解锁播放画面手势";self.screenLockButton.hidden=self.embeddedMode;[self.screenLockButton addTarget:self action:@selector(toggleGestureLock) forControlEvents:UIControlEventTouchUpInside];[gestureSurface addSubview:self.screenLockButton];
+    [NSLayoutConstraint activateConstraints:@[[self.screenLockButton.leadingAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.leadingAnchor constant:12],[self.screenLockButton.centerYAnchor constraintEqualToAnchor:self.videoView.centerYAnchor],[self.screenLockButton.widthAnchor constraintEqualToConstant:36],[self.screenLockButton.heightAnchor constraintEqualToConstant:36]]];
     self.gestureSurface=gestureSurface;self.playbackDoubleTapGesture=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlaybackDoubleTap:)];self.playbackDoubleTapGesture.numberOfTapsRequired=2;self.playbackDoubleTapGesture.cancelsTouchesInView=NO;self.playbackDoubleTapGesture.delaysTouchesBegan=NO;[gestureSurface addGestureRecognizer:self.playbackDoubleTapGesture];
     self.playbackLongPressGesture=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlaybackLongPress:)];self.playbackLongPressGesture.minimumPressDuration=0.48;self.playbackLongPressGesture.cancelsTouchesInView=NO;self.playbackLongPressGesture.allowableMovement=18;[gestureSurface addGestureRecognizer:self.playbackLongPressGesture];
     self.playbackPanGesture=[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlaybackPan:)];self.playbackPanGesture.delegate=self;self.playbackPanGesture.cancelsTouchesInView=NO;self.playbackPanGesture.maximumNumberOfTouches=1;[gestureSurface addGestureRecognizer:self.playbackPanGesture];
@@ -436,16 +442,18 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
         [self.episodeButton.heightAnchor constraintGreaterThanOrEqualToConstant:44],
         [self.skipButton.heightAnchor constraintGreaterThanOrEqualToConstant:44]
     ];
-    NSLayoutConstraint *landscapeWidth=[self.videoView.widthAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.widthAnchor multiplier:0.62];
+    NSLayoutConstraint *landscapeWidth=[self.videoView.widthAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.widthAnchor multiplier:0.68];
+    NSLayoutConstraint *landscapePanelWidth=[self.controlPanel.widthAnchor constraintLessThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.widthAnchor multiplier:0.34];
     self.landscapeConstraints=@[
-        [self.videoView.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:12],
+        [self.videoView.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:8],
         [self.videoView.centerYAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerYAnchor],
         landscapeWidth,
         videoAspect,
-        [self.videoView.heightAnchor constraintLessThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.heightAnchor multiplier:0.88],
-        [self.controlPanel.leadingAnchor constraintEqualToAnchor:self.videoView.trailingAnchor constant:12],
-        [self.controlPanel.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-12],
+        [self.videoView.heightAnchor constraintLessThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.heightAnchor multiplier:0.94],
+        [self.controlPanel.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.videoView.trailingAnchor constant:8],
+        [self.controlPanel.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-10],
         [self.controlPanel.centerYAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerYAnchor],
+        landscapePanelWidth,
         [self.lineScroll.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:10],
         [self.lineScroll.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:10],
         [self.lineScroll.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-10],
@@ -537,10 +545,64 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     return MAX(160,height);
 }
 - (void)showGestureFeedback:(NSString *)text {
-    self.gestureFeedbackLabel.text=[NSString stringWithFormat:@"  %@  ",text?:@""];self.gestureFeedbackLabel.hidden=NO;NSUInteger generation=++self.gestureFeedbackGeneration;__weak typeof(self) weakSelf=self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,850*NSEC_PER_MSEC),dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(owner&&owner.gestureFeedbackGeneration==generation)owner.gestureFeedbackLabel.hidden=YES;});
+    NSString *prefix=@"";
+    if([text containsString:@"亮度"])prefix=@"☀︎ ";
+    else if([text containsString:@"音量"])prefix=@"🔊 ";
+    else if([text containsString:@"倍速"]||[text containsString:@"原速"])prefix=@"⚡ ";
+    else if([text containsString:@"快进"]||[text containsString:@"+10"])prefix=@"⏩ ";
+    else if([text containsString:@"后退"]||[text containsString:@"−10"])prefix=@"⏪ ";
+    self.gestureFeedbackLabel.text=[NSString stringWithFormat:@"   %@%@   ",prefix,text?:@""];
+    self.gestureFeedbackLabel.layer.borderWidth=0.75;
+    self.gestureFeedbackLabel.layer.borderColor=[UIColor colorWithWhite:1 alpha:0.22].CGColor;
+    if(self.gestureFeedbackLabel.hidden){
+        self.gestureFeedbackLabel.alpha=0;self.gestureFeedbackLabel.transform=CGAffineTransformMakeScale(0.92,0.92);
+        self.gestureFeedbackLabel.hidden=NO;
+        [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.75 initialSpringVelocity:0.4 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
+            self.gestureFeedbackLabel.alpha=1.0;self.gestureFeedbackLabel.transform=CGAffineTransformIdentity;
+        } completion:nil];
+    }
+    NSUInteger generation=++self.gestureFeedbackGeneration;__weak typeof(self) weakSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,850*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
+        MediaPlaybackViewController *owner=weakSelf;if(!owner||owner.gestureFeedbackGeneration!=generation)return;
+        [UIView animateWithDuration:0.20 animations:^{owner.gestureFeedbackLabel.alpha=0;} completion:^(BOOL finished){if(finished&&owner.gestureFeedbackGeneration==generation){owner.gestureFeedbackLabel.hidden=YES;owner.gestureFeedbackLabel.alpha=1.0;}}];
+    });
+}
+- (void)toggleGestureLock {
+    self.gestureLockActive=!self.gestureLockActive;
+    [self.screenLockButton setImage:[UIImage systemImageNamed:self.gestureLockActive?@"lock.fill":@"lock.open"] forState:UIControlStateNormal];
+    self.screenLockButton.backgroundColor=self.gestureLockActive?HostAccent():[UIColor colorWithWhite:0 alpha:0.58];
+    self.controlPanel.userInteractionEnabled=!self.gestureLockActive;
+    self.controlPanel.alpha=self.gestureLockActive?0.35:1.0;
+    [UIView animateWithDuration:0.25 usingSpringWithDamping:0.65 initialSpringVelocity:0.5 animations:^{
+        self.screenLockButton.transform=CGAffineTransformMakeScale(1.15,1.15);
+    } completion:^(BOOL finished){
+        [UIView animateWithDuration:0.18 animations:^{self.screenLockButton.transform=CGAffineTransformIdentity;}];
+    }];
+    [self showGestureFeedback:self.gestureLockActive?@"画面手势已锁定":@"画面手势已解锁"];
+}
+- (void)configureMediaSleepTimerMinutes:(NSInteger)minutes {
+    [self.mediaSleepTimer invalidate];self.mediaSleepTimer=nil;self.mediaSleepMinutes=minutes;
+    if(minutes<=0){[self showGestureFeedback:@"已关闭睡眠定时"];self.playbackOptionsItem.menu=[self playbackOptionsMenu];return;}
+    __weak typeof(self) weakSelf=self;
+    self.mediaSleepTimer=[NSTimer scheduledTimerWithTimeInterval:minutes*60.0 repeats:NO block:^(__unused NSTimer *t){
+        MediaPlaybackViewController *owner=weakSelf;if(!owner)return;owner.mediaSleepTimer=nil;owner.mediaSleepMinutes=0;
+        [owner pauseActiveEngine];owner.status.text=@"已按睡眠定时自动暂停播放";[owner showGestureFeedback:@"睡眠定时已到 · 已暂停"];
+        owner.playbackOptionsItem.menu=[owner playbackOptionsMenu];
+    }];
+    [self showGestureFeedback:[NSString stringWithFormat:@"%ld 分钟后自动暂停",(long)minutes]];
+    self.playbackOptionsItem.menu=[self playbackOptionsMenu];
+}
+- (UIMenu *)playbackSleepTimerMenu {
+    __weak typeof(self) weakSelf=self;NSMutableArray *items=[NSMutableArray array];
+    for(NSNumber *candidate in @[@0,@15,@30,@60]){
+        NSInteger mins=candidate.integerValue;NSString *title=mins==0?@"关闭定时":[NSString stringWithFormat:@"%ld 分钟",(long)mins];
+        UIImage *mark=(self.mediaSleepMinutes==mins)?[UIImage systemImageNamed:@"checkmark"]:nil;
+        [items addObject:[UIAction actionWithTitle:title image:mark identifier:nil handler:^(__unused UIAction *a){[weakSelf configureMediaSleepTimerMinutes:mins];}]];
+    }
+    return [UIMenu menuWithTitle:@"睡眠定时" image:[UIImage systemImageNamed:@"moon.zzz"] identifier:nil options:0 children:items];
 }
 - (void)handlePlaybackDoubleTap:(UITapGestureRecognizer *)recognizer {
+    if(self.gestureLockActive){[self showGestureFeedback:@"画面已锁定 · 点按左侧锁图标解锁"];return;}
     if(recognizer.state!=UIGestureRecognizerStateRecognized||(!self.cicadaAdapter&&(!self.player.currentItem||!self.observedItem||self.player.currentItem!=self.observedItem)))return;
     CGPoint point=[recognizer locationInView:self.videoView];CGFloat width=CGRectGetWidth(self.videoView.bounds);if(width<=0||point.y>CGRectGetHeight(self.videoView.bounds)*0.84||(point.x>width*0.32&&point.x<width*0.68))return;
     NSTimeInterval current=[self activeEngineCurrentPosition],duration=[self activeEngineDuration];if(!isfinite(current)||current<0)return;
@@ -549,6 +611,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     [RuntimeDiagnostics.shared recordEvent:@"playback_gesture_seek" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"playback_attempt_id":self.playbackAttemptID?:@"",@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"delta_seconds":@(delta),@"target_seconds_bucket":@((NSInteger)(target/30)*30)}];
 }
 - (void)handlePlaybackLongPress:(UILongPressGestureRecognizer *)recognizer {
+    if(self.gestureLockActive)return;
     if(recognizer.state==UIGestureRecognizerStateBegan){BOOL playing=[self isCicadaEngineActive]?self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying:self.player.timeControlStatus==AVPlayerTimeControlStatusPlaying;if((!self.cicadaAdapter&&!self.player.currentItem)||!playing||self.gestureRateActive)return;self.gesturePreviousRate=self.cicadaAdapter?(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0):(self.player.rate>0?self.player.rate:1.0f);self.gestureRateActive=YES;if(self.cicadaAdapter)[self.cicadaAdapter setRate:3.0f];else self.player.rate=3.0f;[self showGestureFeedback:@"按住 3× 倍速播放"];[RuntimeDiagnostics.shared recordEvent:@"playback_gesture_rate_started" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"playback_attempt_id":self.playbackAttemptID?:@"",@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex)}];return;}
     if((recognizer.state==UIGestureRecognizerStateEnded||recognizer.state==UIGestureRecognizerStateCancelled||recognizer.state==UIGestureRecognizerStateFailed)&&self.gestureRateActive){float previous=self.gesturePreviousRate;self.gestureRateActive=NO;BOOL playing=[self isCicadaEngineActive]?self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying:(self.player.currentItem&&self.player.timeControlStatus==AVPlayerTimeControlStatusPlaying);if(playing){if(self.cicadaAdapter)[self.cicadaAdapter setRate:previous];else self.player.rate=previous;}[self showGestureFeedback:@"已恢复原速"];[RuntimeDiagnostics.shared recordEvent:@"playback_gesture_rate_ended" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"playback_attempt_id":self.playbackAttemptID?:@"",@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex)}];}
 }
@@ -581,7 +644,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     return NO;
 }
 - (void)handlePlaybackPan:(UIPanGestureRecognizer *)recognizer {
-    if(!self.gestureSurface||self.gestureRateActive)return;
+    if(!self.gestureSurface||self.gestureRateActive||self.gestureLockActive)return;
     CGPoint translation=[recognizer translationInView:self.gestureSurface];CGSize size=self.gestureSurface.bounds.size;
     if(recognizer.state==UIGestureRecognizerStateBegan){
         self.panMode=MediaPlaybackPanModeNone;self.panStartPoint=[recognizer locationInView:self.gestureSurface];self.panStartValue=0;
@@ -639,6 +702,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 }
 - (void)teardownAfterScreenExit {
     self.pendingScreenExit=NO;
+    [self.mediaSleepTimer invalidate];self.mediaSleepTimer=nil;
     self.generation++;[self.client cancel];self.resolving=NO;
     self.awaitingWebPlaybackReturn=NO;self.pendingEpisodeResult=nil;self.pendingEpisodeGeneration=0;
     [self.spinner stopAnimating];[self clearCurrentPlayerItem];
@@ -704,6 +768,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     [self playResult:result];
 }
 - (void)dealloc {
+    [self.mediaSleepTimer invalidate];self.mediaSleepTimer=nil;
     self.generation++;
     self.playerGeneration++;
     [self persistPlaybackProgress];
@@ -869,7 +934,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     if(self.selectedAlternateIndex<0||self.selectedAlternateIndex>=alternates.count){self.selectedAlternateIndex=-1;for(NSUInteger index=0;index<alternates.count;index++){NSDictionary *alternate=alternates[index];NSString *original=[alternate[@"originalURL"] isKindOfClass:NSString.class]?alternate[@"originalURL"]:alternate[@"url"];if([original isEqual:currentURL]){self.selectedAlternateIndex=index;break;}}if(self.selectedAlternateIndex<0&&alternates.count==1)self.selectedAlternateIndex=0;}
     for(NSUInteger index=0;index<alternates.count;index++){
         NSDictionary *alternate=[alternates[index] isKindOfClass:NSDictionary.class]?alternates[index]:nil;if(!alternate)continue;NSString *name=[alternate[@"name"] isKindOfClass:NSString.class]?alternate[@"name"]:[NSString stringWithFormat:@"清晰度 %lu",(unsigned long)index+1];
-        UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-quality-%lu",(unsigned long)index];[button setTitle:name forState:UIControlStateNormal];button.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightMedium];button.enabled=alternates.count>1;if(!button.enabled)[button setTitleColor:HostText() forState:UIControlStateDisabled];button.accessibilityLabel=name;button.accessibilityHint=alternates.count==1?@"当前资源仅提供这一档可播放清晰度":@"切换到此视频清晰度";HostStylePillButton(button,(NSInteger)index==self.selectedAlternateIndex);MediaPlaybackApplyScaledPillFont(button);[button addTarget:self action:@selector(selectAlternate:) forControlEvents:UIControlEventTouchUpInside];[self.qualityButtons addArrangedSubview:button];
+        UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-quality-%lu",(unsigned long)index];[button setTitle:name forState:UIControlStateNormal];button.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightMedium];button.enabled=alternates.count>1;if(!button.enabled)[button setTitleColor:HostText() forState:UIControlStateDisabled];button.accessibilityLabel=name;button.accessibilityHint=alternates.count==1?@"当前资源仅提供这一档可播放清晰度":@"切换到此视频清晰度";HostStylePillButton(button,(NSInteger)index==self.selectedAlternateIndex);HostInstallPressFeedback(button);MediaPlaybackApplyScaledPillFont(button);[button addTarget:self action:@selector(selectAlternate:) forControlEvents:UIControlEventTouchUpInside];[self.qualityButtons addArrangedSubview:button];
     }
 }
 - (void)selectAlternate:(UIButton *)sender {
@@ -914,7 +979,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     UIAction *autoNextAction=[UIAction actionWithTitle:autoNext?@"关闭自动连播下一集":@"开启自动连播下一集" image:[UIImage systemImageNamed:autoNext?@"forward.end":@"forward.end.fill"] identifier:nil handler:^(UIAction *action){[NSUserDefaults.standardUserDefaults setBool:!autoNext forKey:@"cctv.mediaAutoPlayNext"];weakSelf.playbackOptionsItem.menu=[weakSelf playbackOptionsMenu];weakSelf.status.text=!autoNext?@"已开启自动连播下一集":@"已关闭自动连播下一集";}];
     UIAction *clear=[UIAction actionWithTitle:@"清除本片跳过位置" image:[UIImage systemImageNamed:@"eraser"] identifier:nil handler:^(UIAction *action){[MediaPlaybackStateStore clearSkipPointsForContext:weakSelf.context?:@{}];[weakSelf updateSkipButtonForCurrentPosition];weakSelf.status.text=@"已清除本片的片头片尾位置";}];
     UIAction *danmaku=[UIAction actionWithTitle:@"弹幕 · 当前视频未提供弹幕轨道" image:[UIImage systemImageNamed:@"text.bubble"] identifier:nil handler:^(UIAction *action){}];danmaku.attributes=UIMenuElementAttributesDisabled;
-    UIMenu *menu=[UIMenu menuWithChildren:@[[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicLegible title:@"字幕"],[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicAudible title:@"音轨"],danmaku,[self playbackRateMenu],[UIMenu menuWithTitle:@"画面比例" children:gravityActions],autoNextAction,intro,outro,clear,awake]];if(self.inlineOptionsButton)self.inlineOptionsButton.menu=menu;return menu;
+    UIMenu *menu=[UIMenu menuWithChildren:@[[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicLegible title:@"字幕"],[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicAudible title:@"音轨"],danmaku,[self playbackRateMenu],[self playbackSleepTimerMenu],[UIMenu menuWithTitle:@"画面比例" children:gravityActions],autoNextAction,intro,outro,clear,awake]];if(self.inlineOptionsButton)self.inlineOptionsButton.menu=menu;return menu;
 }
 - (void)setPlaybackRate:(double)rate {
     rate=MIN(2.0,MAX(0.5,rate));[NSUserDefaults.standardUserDefaults setDouble:rate forKey:@"cctv.mediaPlaybackRate"];[self setActiveEngineRate:(float)rate];

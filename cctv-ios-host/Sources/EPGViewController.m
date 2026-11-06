@@ -28,6 +28,8 @@
 @property(nonatomic,strong) UISearchController *programSearch;
 @property(nonatomic,strong) UIButton *dateMenuButton;
 @property(nonatomic,strong) UIBarButtonItem *jumpToLiveItem;
+@property(nonatomic,strong) UIBarButtonItem *filterMenuItem;
+@property(nonatomic,assign) NSInteger programFilterMode;
 @end
 
 @implementation EPGViewController
@@ -49,7 +51,10 @@
     self.view.backgroundColor = HostBackground();
     self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
     self.jumpToLiveItem=[[UIBarButtonItem alloc] initWithTitle:@"正在播" style:UIBarButtonItemStylePlain target:self action:@selector(scrollToLiveProgram)];
-    self.navigationItem.rightBarButtonItems=@[self.jumpToLiveItem, [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"info.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(showSourceInfo)]];
+    self.filterMenuItem=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] menu:[self buildProgramFilterMenu]];
+    self.filterMenuItem.accessibilityIdentifier=@"epg.filter.menu";
+    self.filterMenuItem.accessibilityLabel=@"筛选节目单与预约管理";
+    self.navigationItem.rightBarButtonItems=@[self.jumpToLiveItem, self.filterMenuItem, [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"info.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(showSourceInfo)]];
 
     self.hint = [[UILabel alloc] initWithFrame:CGRectMake(16, 12, self.view.bounds.size.width - 32, 20)];
     self.hint.textColor = HostSecondaryText();
@@ -211,10 +216,34 @@
     for(NSUInteger i=0;i<self.dateKeys.count;i++){NSString *key=self.dateKeys[i];NSString *title=[key isEqualToString:today]?@"今天":key;__weak typeof(self) w=self;[actions addObject:[UIAction actionWithTitle:title image:(selected&&[key isEqualToString:selected])?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){w.dates.selectedSegmentIndex=(NSInteger)i;[w updateDateMenuButton];[w filterDate];}]];}
     self.dateMenuButton.menu=[UIMenu menuWithTitle:@"选择日期" children:actions];
 }
+- (UIMenu *)buildProgramFilterMenu {
+    __weak typeof(self) weakSelf=self;
+    UIAction *all=[UIAction actionWithTitle:@"全部节目" image:self.programFilterMode==0?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=0;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf filterDate];}];
+    UIAction *replayOnly=[UIAction actionWithTitle:@"仅看已播 / 可回看" image:self.programFilterMode==1?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=1;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf filterDate];}];
+    UIAction *remindedOnly=[UIAction actionWithTitle:@"仅看已预约提醒" image:self.programFilterMode==2?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=2;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf filterDate];}];
+    UIAction *clearReminders=[UIAction actionWithTitle:@"清空本频道预约提醒" image:[UIImage systemImageNamed:@"bell.slash"] identifier:nil handler:^(__unused UIAction *a){[weakSelf clearChannelReminders];}];
+    clearReminders.attributes=UIMenuElementAttributesDestructive;
+    return [UIMenu menuWithTitle:@"节目筛选与预约" children:@[all,replayOnly,remindedOnly,clearReminders]];
+}
+
+- (void)clearChannelReminders {
+    NSString *prefix=[NSString stringWithFormat:@"%@|",self.channelID?:@""];
+    NSMutableArray<NSString *> *toRemove=[NSMutableArray array];
+    for(NSString *key in self.reminders.allKeys)if([key hasPrefix:prefix])[toRemove addObject:key];
+    if(!toRemove.count){self.hint.text=@"当前频道没有已预约的节目提醒";return;}
+    [self.reminders removeObjectsForKeys:toRemove];[self saveReminders];
+    [[UNUserNotificationCenter currentNotificationCenter] removePendingNotificationRequestsWithIdentifiers:toRemove];
+    self.hint.text=[NSString stringWithFormat:@"已清空本频道 %lu 条预约提醒",(unsigned long)toRemove.count];
+    [self filterDate];
+}
+
 - (void)filterDate {
     NSInteger idx=self.dates.selectedSegmentIndex;if(idx<0||idx>=self.dateKeys.count){[self updateEmptyState];return;}NSString *key=self.dateKeys[idx];NSDateFormatter *f=[self dayFormatter];self.rows=[self.allRows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]] isEqualToString:key];}]];
+    NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+    if(self.programFilterMode==1)self.rows=[self.rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [row[@"end"] doubleValue]<=now;}]];
+    else if(self.programFilterMode==2)self.rows=[self.rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [self isProgramReminded:row];}]];
     if(self.searchQuery.length){NSString *q=self.searchQuery.lowercaseString;self.rows=[self.rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [[(row[@"title"]?:@"") description].lowercaseString containsString:q];}]];}
-    [self.table reloadData];if(!self.searchQuery.length)[self scrollToCurrentProgramAnimated:NO];
+    [self.table reloadData];if(!self.searchQuery.length&&self.programFilterMode==0)[self scrollToCurrentProgramAnimated:NO];
     [self updateEmptyState];
 }
 - (void)scrollToCurrentProgramAnimated:(BOOL)animated {
@@ -322,9 +351,28 @@
     cell.accessoryType=replayable?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;
     cell.selectionStyle=(replayable||start>now)?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;
     BOOL live = (now >= start && now < end);
+    cell.backgroundColor = live ? HostSelectedSurface() : HostCard();
+    cell.layer.cornerRadius=13; cell.layer.cornerCurve=kCACornerCurveContinuous; cell.clipsToBounds=YES;
+    cell.layer.borderWidth=live?1.1:0.6; HostSetLayerBorderColor(cell,live?HostAccent():HostBorder());
+    UIProgressView *liveProgress = (UIProgressView *)[cell.contentView viewWithTag:9102];
+    if (!liveProgress) {
+        liveProgress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];
+        liveProgress.tag = 9102;
+        liveProgress.accessibilityIdentifier = @"epg.live.progress";
+        liveProgress.trackTintColor = [HostBorder() colorWithAlphaComponent:0.25];
+        liveProgress.progressTintColor = HostAccent();
+        liveProgress.layer.cornerRadius = 1.5;
+        liveProgress.clipsToBounds = YES;
+        liveProgress.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
+        [cell.contentView addSubview:liveProgress];
+    }
+    liveProgress.hidden = !live;
     if (live) {
+        float progress = (end > start) ? (float)MIN(1.0, MAX(0.05, (now - start) / (end - start))) : 0.5f;
+        liveProgress.progress = progress;
+        liveProgress.frame = CGRectMake(16, MAX(0, CGRectGetHeight(cell.contentView.bounds) - 4), MAX(0, CGRectGetWidth(cell.contentView.bounds) - 32), 3);
         cell.textLabel.textColor = HostAccent();
-        cell.detailTextLabel.text = [range stringByAppendingString:@"  ● 正在播出"];
+        cell.detailTextLabel.text = [range stringByAppendingFormat:@"  ● 正在播出 · %.0f%%", progress * 100.0];
     } else if (end <= now) {
         cell.textLabel.textColor = replayable?HostText():HostSecondaryText();
         if(replayable)cell.detailTextLabel.text=[range stringByAppendingString:@"  点按回看"];

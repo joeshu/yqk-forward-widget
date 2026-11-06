@@ -6,9 +6,12 @@ static NSString * const MediaSourceHealthDefaultsKey = @"cctv.mediaSourceHealth.
 static NSUInteger const MediaSourceHealthLimit = 128;
 static NSTimeInterval const MediaSourceHealthExpiry = 7 * 24 * 60 * 60;
 
+@interface MediaSourceHealthStore ()
+@property(nonatomic,strong) NSMutableDictionary *memoryRecords;
+@end
 @implementation MediaSourceHealthStore
 + (instancetype)shared { static MediaSourceHealthStore *store; static dispatch_once_t once; dispatch_once(&once, ^{ store=[MediaSourceHealthStore new]; }); return store; }
-- (NSMutableDictionary *)records { id value=[NSUserDefaults.standardUserDefaults dictionaryForKey:MediaSourceHealthDefaultsKey];return [value isKindOfClass:NSDictionary.class]?[value mutableCopy]:[NSMutableDictionary dictionary]; }
+- (NSMutableDictionary *)records { if(!_memoryRecords){id value=[NSUserDefaults.standardUserDefaults dictionaryForKey:MediaSourceHealthDefaultsKey];_memoryRecords=[value isKindOfClass:NSDictionary.class]?[value mutableCopy]:[NSMutableDictionary dictionary];}return _memoryRecords; }
 - (BOOL)isDeprioritizedSourceID:(NSString *)sourceID {
     if(!sourceID.length)return NO;@synchronized(self){NSDictionary *record=[self records][sourceID];if(![record isKindOfClass:NSDictionary.class])return NO;NSTimeInterval now=NSDate.date.timeIntervalSince1970,updated=[record[@"updated"] doubleValue];if(now-updated>MediaSourceHealthExpiry)return NO;return [record[@"cooldownUntil"] doubleValue]>now;}
 }

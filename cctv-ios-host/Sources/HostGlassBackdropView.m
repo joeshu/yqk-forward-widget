@@ -47,8 +47,11 @@
     UITraitCollection *traits=self.traitCollection;
     UIColor *(^resolved)(UIColor *)=^UIColor *(UIColor *value){return [value resolvedColorWithTraitCollection:traits];};
     self.baseGradient.colors=@[(id)resolved(HostBackground()).CGColor,(id)resolved(HostRaisedSurface()).CGColor];
-    UIColor *roseTint=traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:1 green:.16 blue:.43 alpha:.13]:[UIColor colorWithRed:.93 green:.24 blue:.48 alpha:.16];
-    UIColor *blueTint=traits.userInterfaceStyle==UIUserInterfaceStyleDark?[UIColor colorWithRed:.20 green:.43 blue:.92 alpha:.10]:[UIColor colorWithRed:.20 green:.50 blue:.96 alpha:.13];
+    BOOL dark=traits.userInterfaceStyle==UIUserInterfaceStyleDark;
+    UIColor *accent=[HostAccent() resolvedColorWithTraitCollection:traits];
+    UIColor *selected=[HostSelectedSurface() resolvedColorWithTraitCollection:traits];
+    UIColor *roseTint=[accent colorWithAlphaComponent:dark?0.16:0.14];
+    UIColor *blueTint=[selected colorWithAlphaComponent:dark?0.22:0.18];
     self.roseGradient.colors=@[(id)resolved(roseTint).CGColor,(id)UIColor.clearColor.CGColor];
     self.blueGradient.colors=@[(id)resolved(blueTint).CGColor,(id)UIColor.clearColor.CGColor];
     [self setNeedsLayout];

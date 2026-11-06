@@ -64,7 +64,7 @@ static NSUInteger const ImageQueueLimit = 96;
         _domainFailures=[NSCache new];_domainFailures.countLimit=64;
         _requests=[NSMutableDictionary dictionary];_tasks=[NSMutableDictionary dictionary];_pending=[NSMutableArray array];
         NSURLSessionConfiguration *config=configuration.copy;config.URLCache=nil;config.HTTPCookieStorage=nil;
-        config.timeoutIntervalForRequest=6;config.timeoutIntervalForResource=10;config.HTTPMaximumConnectionsPerHost=4;
+        config.timeoutIntervalForRequest=6;config.timeoutIntervalForResource=10;config.HTTPMaximumConnectionsPerHost=4;config.waitsForConnectivity=NO;
         NSOperationQueue *delegate=[NSOperationQueue new];delegate.maxConcurrentOperationCount=1;delegate.underlyingQueue=_queue;
         _session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:delegate];
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(clearCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
@@ -219,5 +219,5 @@ static NSUInteger const ImageQueueLimit = 96;
         [self.tasks removeAllObjects];[self.requests removeAllObjects];[self.pending removeAllObjects];
     });
 }
-- (void)clearCache { [self.cache removeAllObjects];[self.failures removeAllObjects]; }
+- (void)clearCache { [self.cache removeAllObjects];[self.failures removeAllObjects];[self.domainFailures removeAllObjects]; }
 @end

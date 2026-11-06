@@ -59,7 +59,7 @@
 
     UILabel *heading = [self label:@"YSP Live" size:30 weight:UIFontWeightBold color:HostText()];
     [content addArrangedSubview:heading];
-    UILabel *intro = [self label:@"运行本机频道插件并管理 M3U 订阅。" size:14 weight:UIFontWeightRegular color:UIColor.secondaryLabelColor];
+    UILabel *intro = [self label:@"运行本机频道插件并管理 M3U 订阅。" size:14 weight:UIFontWeightRegular color:HostSecondaryText()];
     [content addArrangedSubview:intro];
 
     UIView *statusCard = [self card];
@@ -82,7 +82,7 @@
     UIStackView *feedStack = [self verticalStack];
     [feedCard addSubview:feedStack];
     [NSLayoutConstraint activateConstraints:@[[feedStack.leadingAnchor constraintEqualToAnchor:feedCard.leadingAnchor constant:16],[feedStack.trailingAnchor constraintEqualToAnchor:feedCard.trailingAnchor constant:-16],[feedStack.topAnchor constraintEqualToAnchor:feedCard.topAnchor constant:14],[feedStack.bottomAnchor constraintEqualToAnchor:feedCard.bottomAnchor constant:-14]]];
-    [feedStack addArrangedSubview:[self label:@"播放列表地址" size:13 weight:UIFontWeightMedium color:UIColor.secondaryLabelColor]];
+    [feedStack addArrangedSubview:[self label:@"播放列表地址" size:13 weight:UIFontWeightMedium color:HostSecondaryText()]];
     self.urlLabel = [self label:@"http://127.0.0.1:8767/all.m3u" size:14 weight:UIFontWeightMedium color:HostText()];
     self.urlLabel.numberOfLines = 0;
     self.urlLabel.lineBreakMode = NSLineBreakByCharWrapping;
@@ -96,7 +96,7 @@
     [serviceCard addSubview:serviceStack];
     [NSLayoutConstraint activateConstraints:@[[serviceStack.leadingAnchor constraintEqualToAnchor:serviceCard.leadingAnchor constant:16],[serviceStack.trailingAnchor constraintEqualToAnchor:serviceCard.trailingAnchor constant:-16],[serviceStack.topAnchor constraintEqualToAnchor:serviceCard.topAnchor constant:14],[serviceStack.bottomAnchor constraintEqualToAnchor:serviceCard.bottomAnchor constant:-14]]];
     [serviceStack addArrangedSubview:[self label:@"插件服务" size:17 weight:UIFontWeightSemibold color:HostText()]];
-    UILabel *note = [self label:@"插件仅绑定本机回环地址。iOS 安全模式限制缓存 32 MB、高码率并发 2 路；后台服务可能被系统挂起。" size:13 weight:UIFontWeightRegular color:UIColor.secondaryLabelColor];
+    UILabel *note = [self label:@"插件仅绑定本机回环地址。iOS 安全模式限制缓存 32 MB、高码率并发 2 路；后台服务可能被系统挂起。" size:13 weight:UIFontWeightRegular color:HostSecondaryText()];
     note.numberOfLines = 0;
     [serviceStack addArrangedSubview:note];
     UIStackView *actions = [self rowStack];
