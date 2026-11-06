@@ -1,3 +1,4 @@
+# CI re-trigger: run 438 (450cebd) was cancelled before it ran; this no-op comment re-triggers the Build workflow.
 """第二轮直播 / 频道页 UI、布局与稳定性合同测试。
 
 只覆盖 RootViewController.m（央视直播页 + 频道页）与 EPGViewController.m
