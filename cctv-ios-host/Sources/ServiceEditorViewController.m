@@ -47,7 +47,6 @@
         [_editor.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
         [_editor.bottomAnchor constraintEqualToAnchor:self.view.keyboardLayoutGuide.topAnchor]
     ]];
-    __weak typeof(self) weakSelf = self;
     UIAction *findAction = [UIAction actionWithTitle:@"搜索代码关键字" image:[UIImage systemImageNamed:@"magnifyingglass"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf promptFindInCode]; }];
     UIAction *formatJSONAction = [UIAction actionWithTitle:@"校验并美化 JSON" image:[UIImage systemImageNamed:@"curlybraces"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf formatJSONIfApplicable]; }];
     UIBarButtonItem *toolsItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"wand.and.stars"] menu:[UIMenu menuWithTitle:@"代码工具" children:@[findAction, formatJSONAction]]];

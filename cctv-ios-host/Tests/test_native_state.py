@@ -11,7 +11,7 @@ class NativeStateTests(unittest.TestCase):
         root = pathlib.Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
             executable = str(pathlib.Path(tmp) / "cctvhost-native-state-tests")
-            subprocess.run([
+            compile_result = subprocess.run([
                 "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation",
                 "-I", str(root / "Sources"),
                 str(root / "Tests" / "native_state_tests.m"),
@@ -22,5 +22,12 @@ class NativeStateTests(unittest.TestCase):
                 str(root / "Sources" / "MediaMetadataCache.m"),
                 str(root / "Sources" / "MediaPlaybackStateStore.m"),
                 str(root / "Sources" / "MediaSourceHealthStore.m"),
-            ], check=True, capture_output=True, text=True)
+            ], capture_output=True, text=True)
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                "native state test compilation failed:\n"
+                + compile_result.stdout
+                + compile_result.stderr,
+            )
             subprocess.run([executable], check=True, capture_output=True, text=True, timeout=30)
