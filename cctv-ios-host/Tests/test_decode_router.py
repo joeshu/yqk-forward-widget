@@ -114,6 +114,43 @@ class DecodeRouterContracts(unittest.TestCase):
         self.assertIn('setDelegate:', self.adapter_m)
         self.assertIn('setEnableHardwareDecoder:', self.adapter_m)
 
+    def test_adapter_unified_path_fixes_and_ports_direct_engine(self):
+        # 直连 Cicada 引擎已删除，统一走适配器 + 路由；以下断言钉住
+        # 移植时修掉的适配器问题与搬过来的直连能力。
+        # Step 0(1)：画面比例按 CicadaScalingMode 映射（0=Fill、1=Fit、2=AspectFill）。
+        self.assertIn('AVLayerVideoGravityResizeAspectFill]) mode = 2;', self.adapter_m)
+        self.assertIn('AVLayerVideoGravityResize]) mode = 0;', self.adapter_m)
+        self.assertIn('int mode = 1;', self.adapter_m)
+        # Step 0(2)：seekMode 传 CICADA_SEEKMODE_ACCURATE（0x01），不再传 0。
+        self.assertIn('MAX(0, time), 0x01)', self.adapter_m)
+        # Step 0(3)：CicadaConfig.networkTimeout 单位是毫秒，秒数要 ×1000。
+        self.assertIn('(int)llround(self.networkTimeout * 1000.0)', self.adapter_m)
+        # Step 0(4)：长按 3x 不再被静默截断到 2.0。
+        self.assertIn('MIN(3.0f, MAX(0.5f, rate))', self.adapter_m)
+        # Step 1(1)：prepare 可指定硬解开关，默认硬件优先。
+        self.assertIn('- (void)prepareWithHardwareDecoder:(BOOL)enableHardwareDecoder;', self.adapter_h)
+        self.assertIn('prepareWithHardwareDecoder:!self.cicadaAdapterSoftwareDecodeFallbackAttempted',
+                      read_source('MediaPlaybackViewController.m'))
+        # Step 1(2)(3)：下载速度与视频尺寸回调已接进适配器 delegate。
+        self.assertIn('onCurrentDownLoadSpeed:', self.adapter_m)
+        self.assertIn('didUpdateDownloadSpeed:', self.adapter_h)
+        self.assertIn('onVideoSizeChanged:', self.adapter_m)
+        self.assertIn('didUpdateVideoSize:', self.adapter_h)
+        # Step 1(4)(5)：Cicada 失败无下一路时自动换线路；位置回调做进度采样。
+        player = read_source('MediaPlaybackViewController.m')
+        self.assertIn('tryNextLineForAutomaticFallback:@"cicada_playback_failed"', player)
+        self.assertIn('cicada_software_decode_fallback', player)
+        self.assertIn('HostPlaybackProgressSample(&self->_progressEvidence,CACurrentMediaTime(),position,self.cicadaAdapter.rate',
+                      player)
+        # Step 2：直连引擎已删干净（VC 不再 import CicadaSDK.h、不再有
+        # CicadaPlayer 实例与直连回调方法）。
+        self.assertNotIn('#import "CicadaSDK.h"', player)
+        self.assertNotIn('CicadaPlayer *cicadaPlayer', player)
+        self.assertNotIn('tearDownCicadaPlayer', player)
+        self.assertNotIn('playCicadaResult:', player)
+        self.assertNotIn('setGestureSurfaceForCicada:', player)
+        self.assertNotIn('onVideoRendered:', player)
+
     def test_adapter_teardown_clears_delegate_and_destroys_player(self):
         # 拆解先摘 delegate 再 stop/destroy，避免回调落到已释放的适配器。
         destroy = self.adapter_m[self.adapter_m.index('- (void)destroy'):][:1200]

@@ -8,6 +8,9 @@
 > 构建系统自动收录新文件（`ci-build.sh` 用 `find Sources -maxdepth 1 -name '*.m'`；
 > `ui-smoke.sh` 编译 `Sources/*.m`），无需改构建脚本。
 > 新文件不引用任何 SDK 符号，ui-smoke 构建（不链接 CicadaPlayerSDK）不受影响。
+> 2026-11-06 port 分支统一：VC 里的旧直连 CicadaPlayer 引擎（`playCicadaResult:` /
+> `tearDownCicadaPlayer` 等）已删除，Cicada 播放只走适配器 + 路由；本文所述的
+> 回退链与适配器接口不变，另见 `Tests/test_decode_router.py` 的统一路径断言。
 
 ## 0. 决策摘要
 

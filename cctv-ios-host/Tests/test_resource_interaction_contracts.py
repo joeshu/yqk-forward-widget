@@ -748,8 +748,11 @@ class ResourceInteractionContracts(unittest.TestCase):
         player = self.playback[self.playback.index('@implementation MediaPlaybackViewController'):]
         self.assertIn('UIView *gestureSurface=self.videoView;', player)
         self.assertIn('gestureFeedbackLabel.topAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.topAnchor', player)
-        switch_surface = player[player.index('- (void)setGestureSurfaceForCicada:'):]
-        self.assertIn('UIView *next=self.videoView;', switch_surface)
+        # 直连 Cicada 引擎已删除（setGestureSurfaceForCicada 随之删除）：
+        # 手势面改锚 viewDidLoad 的初始化行，仍断言反馈标签挂在 videoView
+        # 派生的手势面上、而非 AVPlayerViewController 的 contentOverlayView。
+        switch_surface = player[player.index('UIView *gestureSurface=self.videoView;'):]
+        self.assertIn('[gestureSurface addSubview:self.gestureFeedbackLabel]', switch_surface)
         self.assertNotIn('self.playerController.contentOverlayView?:self.videoView', switch_surface)
 
     def test_detail_starts_player_inline_without_push_and_preserves_player_diagnostics(self):

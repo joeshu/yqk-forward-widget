@@ -207,9 +207,10 @@ class SettingsContracts(unittest.TestCase):
         # 都要有 objectForKey 保护，未设置过速度时默认 1.0，否则
         # defaultRate=0 会让播放器静默不动。AVPlayer 三处 + Cicada
         # 三处 + 长按恢复原速一处 + 播放器启动一处，共 8 处；413
-        # 另保留直连 Cicada 引擎初始化时的一处，共 9 处。
+        # 曾保留直连 Cicada 引擎初始化时的一处（共 9 处），直连引擎
+        # 已在 port 分支删除，改回 8 处。
         guarded = 'objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0'
-        self.assertEqual(self.playback.count(guarded), 9)
+        self.assertEqual(self.playback.count(guarded), 8)
         self.assertNotIn('defaultRate=(float)[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]', self.playback)
 
     def test_clear_epg_cache_refreshes_its_row(self):
