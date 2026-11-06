@@ -6,7 +6,10 @@
 #import "PluginLogStore.h"
 #import <pthread.h>
 #import <stdlib.h>
+#import <stdio.h>
+#import <string.h>
 #import <time.h>
+#import <math.h>
 #import <mach/mach.h>
 #import <mach/task_info.h>
 #import <QuartzCore/QuartzCore.h>
@@ -14,9 +17,34 @@
 #if __has_include(<Python.h>)
 #define PY_SSIZE_T_CLEAN
 #import <Python.h>
+#import <CommonCrypto/CommonCryptor.h>
 #define PYHOST_AVAILABLE 1
 #else
 #define PYHOST_AVAILABLE 0
+#endif
+
+#if PYHOST_AVAILABLE
+// alivcffmpeg.framework exports this FFmpeg 4.2 API surface. Keep the formats
+// opaque here so Python can probe media without shipping a CLI executable.
+typedef struct AVFormatContext AVFormatContext;
+typedef struct AVInputFormat AVInputFormat;
+typedef struct AVDictionary AVDictionary;
+typedef struct AVCodec AVCodec;
+extern unsigned avcodec_version(void);
+extern unsigned avformat_version(void);
+extern unsigned avutil_version(void);
+extern const AVCodec *avcodec_find_decoder_by_name(const char *name);
+extern int avformat_network_init(void);
+extern int av_dict_set(AVDictionary **dictionary, const char *key, const char *value, int flags);
+extern void av_dict_free(AVDictionary **dictionary);
+extern int avformat_open_input(AVFormatContext **context, const char *url,
+                               const AVInputFormat *format, AVDictionary **options);
+extern int avformat_find_stream_info(AVFormatContext *context, AVDictionary **options);
+extern int av_find_best_stream(AVFormatContext *context, int mediaType,
+                               int wantedStream, int relatedStream,
+                               AVCodec **decoder, int flags);
+extern void avformat_close_input(AVFormatContext **context);
+extern int av_strerror(int errorCode, char *buffer, size_t bufferSize);
 #endif
 
 @interface PyHostTask : NSObject
@@ -55,6 +83,7 @@ static PyObject *gServiceRuntime = NULL;
 static PyObject *gWriteFunction = NULL;
 static PyObject *gJSFunction = NULL;
 static PyObject *gNodeFunction = NULL;
+static BOOL gHostCryptoModuleRegistered = NO;
 #endif
 
 NSNotificationName const PyHostRuntimeStateDidChangeNotification = @"PyHostRuntimeStateDidChangeNotification";
@@ -442,6 +471,140 @@ static PyObject *pyHostNodeCall(PyObject *self, PyObject *args) {
         return PyUnicode_FromString(reply.UTF8String);
     }
 }
+static NSString *CCTVFFmpegVersionString(unsigned version) {
+    return [NSString stringWithFormat:@"%u.%u.%u", (version >> 16) & 0xff,
+            (version >> 8) & 0xff, version & 0xff];
+}
+static PyObject *pyHostFFmpegCall(PyObject *self, PyObject *args) {
+    const char *json = NULL;
+    if (!PyArg_ParseTuple(args, "s", &json)) return NULL;
+    if (strlen(json) > 65536) { PyErr_SetString(PyExc_ValueError, "FFmpeg request exceeds 64 KiB"); return NULL; }
+    @autoreleasepool {
+        NSData *requestData = [[NSString stringWithUTF8String:json] dataUsingEncoding:NSUTF8StringEncoding];
+        id requestObject = requestData ? [NSJSONSerialization JSONObjectWithData:requestData options:0 error:NULL] : nil;
+        if (![requestObject isKindOfClass:NSDictionary.class]) {
+            PyErr_SetString(PyExc_ValueError, "FFmpeg request must be a JSON object");
+            return NULL;
+        }
+        NSDictionary *request = requestObject;
+        NSString *operation = [request[@"operation"] isKindOfClass:NSString.class] ? request[@"operation"] : @"";
+        if ([operation isEqualToString:@"capabilities"]) {
+            NSArray<NSString *> *names = @[@"h264", @"hevc", @"aac", @"mpeg4", @"mp3"];
+            NSMutableDictionary *decoders = [NSMutableDictionary dictionaryWithCapacity:names.count];
+            for (NSString *name in names)
+                decoders[name] = @(avcodec_find_decoder_by_name(name.UTF8String) != NULL);
+            NSDictionary *reply = @{
+                @"native_library":@YES,
+                @"command_line":@NO,
+                @"engine":@"alivcffmpeg.framework",
+                @"libavcodec":CCTVFFmpegVersionString(avcodec_version()),
+                @"libavformat":CCTVFFmpegVersionString(avformat_version()),
+                @"libavutil":CCTVFFmpegVersionString(avutil_version()),
+                @"operations":@[@"probe"],
+                @"decoders":decoders
+            };
+            NSData *replyData = [NSJSONSerialization dataWithJSONObject:reply options:0 error:NULL];
+            NSString *replyText = replyData ? [[NSString alloc] initWithData:replyData encoding:NSUTF8StringEncoding] : nil;
+            if (!replyText) { PyErr_SetString(PyExc_RuntimeError, "could not encode FFmpeg capabilities"); return NULL; }
+            return PyUnicode_FromString(replyText.UTF8String);
+        }
+        if (![operation isEqualToString:@"probe"]) {
+            PyErr_SetString(PyExc_ValueError, "unsupported native FFmpeg operation");
+            return NULL;
+        }
+        NSString *url = [request[@"url"] isKindOfClass:NSString.class] ? request[@"url"] : @"";
+        NSURLComponents *components = [NSURLComponents componentsWithString:url];
+        NSString *scheme = components.scheme.lowercaseString ?: @"";
+        BOOL localPath = [url hasPrefix:@"/"];
+        BOOL networkURL = ([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"])
+            && components.host.length && !components.user && !components.password;
+        BOOL fileURL = [scheme isEqualToString:@"file"] && !components.host.length
+            && !components.user && !components.password;
+        if (!url.length || url.length > 4096 || [url containsString:@"\r"] || [url containsString:@"\n"]
+            || !(localPath || networkURL || fileURL)) {
+            PyErr_SetString(PyExc_ValueError, "FFmpeg probe accepts a local file or HTTP(S) URL");
+            return NULL;
+        }
+        NSNumber *timeoutNumber = [request[@"timeout"] isKindOfClass:NSNumber.class] ? request[@"timeout"] : @12;
+        double timeout = timeoutNumber.doubleValue;
+        if (!isfinite(timeout) || timeout < 1 || timeout > 30) {
+            PyErr_SetString(PyExc_ValueError, "FFmpeg probe timeout must be from 1 to 30 seconds");
+            return NULL;
+        }
+        NSDictionary *headers = [request[@"headers"] isKindOfClass:NSDictionary.class] ? request[@"headers"] : @{};
+        if (headers.count > 64) { PyErr_SetString(PyExc_ValueError, "too many FFmpeg request headers"); return NULL; }
+        NSMutableString *headerText = [NSMutableString string];
+        NSCharacterSet *headerNameCharacters = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"];
+        for (id rawKey in headers) {
+            id rawValue = headers[rawKey];
+            if (![rawKey isKindOfClass:NSString.class] || ![rawValue isKindOfClass:NSString.class]) {
+                PyErr_SetString(PyExc_ValueError, "FFmpeg headers must contain text names and values"); return NULL;
+            }
+            NSString *key = rawKey, *value = rawValue;
+            if (!key.length || key.length > 128 || value.length > 4096
+                || [key rangeOfCharacterFromSet:headerNameCharacters.invertedSet].location != NSNotFound
+                || [value containsString:@"\r"] || [value containsString:@"\n"]) {
+                PyErr_SetString(PyExc_ValueError, "invalid FFmpeg request header"); return NULL;
+            }
+            [headerText appendFormat:@"%@: %@\r\n", key, value];
+            if ([headerText lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > 16384) {
+                PyErr_SetString(PyExc_ValueError, "FFmpeg request headers exceed 16 KiB"); return NULL;
+            }
+        }
+        AVDictionary *options = NULL;
+        char timeoutText[32];
+        snprintf(timeoutText, sizeof(timeoutText), "%lld", (long long)(timeout * 1000000.0));
+        if (av_dict_set(&options, "rw_timeout", timeoutText, 0) < 0
+            || av_dict_set(&options, "probesize", "2097152", 0) < 0
+            || av_dict_set(&options, "analyzeduration", "5000000", 0) < 0
+            || av_dict_set(&options, "max_probe_packets", "256", 0) < 0
+            || (headerText.length && av_dict_set(&options, "headers", headerText.UTF8String, 0) < 0)) {
+            av_dict_free(&options);
+            PyErr_SetString(PyExc_MemoryError, "could not allocate FFmpeg probe options");
+            return NULL;
+        }
+        static dispatch_once_t networkOnce;
+        static int networkResult = 0;
+        dispatch_once(&networkOnce, ^{ networkResult = avformat_network_init(); });
+        if (networkResult < 0) {
+            av_dict_free(&options);
+            PyErr_SetString(PyExc_RuntimeError, "FFmpeg network initialization failed");
+            return NULL;
+        }
+        AVFormatContext *context = NULL;
+        int openResult = 0, infoResult = 0;
+        Py_BEGIN_ALLOW_THREADS
+        openResult = avformat_open_input(&context, url.UTF8String, NULL, &options);
+        if (openResult >= 0) infoResult = avformat_find_stream_info(context, NULL);
+        Py_END_ALLOW_THREADS
+        av_dict_free(&options);
+        int failure = openResult < 0 ? openResult : infoResult;
+        if (failure < 0) {
+            char errorText[256] = {0};
+            av_strerror(failure, errorText, sizeof(errorText));
+            if (context) { Py_BEGIN_ALLOW_THREADS avformat_close_input(&context); Py_END_ALLOW_THREADS }
+            PyErr_Format(PyExc_RuntimeError, "FFmpeg media probe failed (%d): %s", failure, errorText);
+            return NULL;
+        }
+        int videoIndex = av_find_best_stream(context, 0, -1, -1, NULL, 0);
+        int audioIndex = av_find_best_stream(context, 1, -1, -1, NULL, 0);
+        int subtitleIndex = av_find_best_stream(context, 3, -1, -1, NULL, 0);
+        Py_BEGIN_ALLOW_THREADS
+        avformat_close_input(&context);
+        Py_END_ALLOW_THREADS
+        NSDictionary *reply = @{
+            @"ok":@YES,
+            @"has_video":@(videoIndex >= 0), @"video_stream_index":@(videoIndex),
+            @"has_audio":@(audioIndex >= 0), @"audio_stream_index":@(audioIndex),
+            @"has_subtitles":@(subtitleIndex >= 0), @"subtitle_stream_index":@(subtitleIndex),
+            @"verification":@"native-demux-stream-discovery-only"
+        };
+        NSData *replyData = [NSJSONSerialization dataWithJSONObject:reply options:0 error:NULL];
+        NSString *replyText = replyData ? [[NSString alloc] initWithData:replyData encoding:NSUTF8StringEncoding] : nil;
+        if (!replyText) { PyErr_SetString(PyExc_RuntimeError, "could not encode FFmpeg probe result"); return NULL; }
+        return PyUnicode_FromString(replyText.UTF8String);
+    }
+}
 static PyMethodDef writeMethod = {"_pyhost_write", pyHostWrite, METH_VARARGS, "Forward Python output to its service log."};
 static PyMethodDef pythonRuntimeStageMethod = {"_cctvhost_python_stage", pyHostRuntimeStage, METH_VARARGS, "Persist a bounded Python runtime phase for crash recovery diagnostics."};
 static PyMethodDef pythonExceptionMethod = {"_cctvhost_python_exception", pyHostPythonException, METH_VARARGS, "Persist and log an uncaught Python worker-thread exception."};
@@ -449,11 +612,103 @@ static PyMethodDef pythonResourceLimitMethod = {"_cctvhost_python_resource_limit
 static PyMethodDef pythonHTTPWorkerRejectedMethod = {"_cctvhost_python_http_worker_rejected", pyHostPythonHTTPWorkerRejected, METH_VARARGS, "Persist and log a Python HTTP handler concurrency rejection."};
 static PyMethodDef jsMethod = {"_cctvhost_js_call", pyHostJSCall, METH_VARARGS, "Call the native JavaScriptCore plugin host."};
 static PyMethodDef nodeMethod = {"_cctvhost_node_call", pyHostNodeCall, METH_VARARGS, "Call the Node.js Mobile plugin host."};
+static PyMethodDef ffmpegMethod = {"_cctvhost_ffmpeg_call", pyHostFFmpegCall, METH_VARARGS, "Use the bundled in-process FFmpeg libraries."};
+
+typedef struct { PyObject_HEAD CCCryptorRef cryptor; } PyHostCryptoCTR;
+static int pyHostCryptoCTRInit(PyHostCryptoCTR *self, PyObject *args, PyObject *kwargs) {
+    PyObject *keyObject = NULL, *ivObject = NULL;
+    static char *keywords[] = {"key", "iv", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO:AES_CTR", keywords, &keyObject, &ivObject)) return -1;
+    Py_buffer key = {0}, iv = {0};
+    if (PyObject_GetBuffer(keyObject, &key, PyBUF_SIMPLE) < 0) return -1;
+    if (PyObject_GetBuffer(ivObject, &iv, PyBUF_SIMPLE) < 0) { PyBuffer_Release(&key); return -1; }
+    if (key.len != 16 || iv.len != 16) {
+        PyBuffer_Release(&iv); PyBuffer_Release(&key);
+        PyErr_SetString(PyExc_ValueError, "AES_CTR requires a 16-byte AES-128 key and a 16-byte counter block");
+        return -1;
+    }
+    if (self->cryptor) { CCCryptorRelease(self->cryptor); self->cryptor = NULL; }
+    CCCryptorStatus status = CCCryptorCreateWithMode(kCCEncrypt, kCCModeCTR, kCCAlgorithmAES,
+        ccNoPadding, iv.buf, key.buf, (size_t)key.len, NULL, 0, 0, kCCModeOptionCTR_BE, &self->cryptor);
+    PyBuffer_Release(&iv); PyBuffer_Release(&key);
+    if (status != kCCSuccess) {
+        self->cryptor = NULL;
+        PyErr_Format(PyExc_RuntimeError, "CommonCrypto AES-CTR initialization failed (%d)", (int)status);
+        return -1;
+    }
+    return 0;
+}
+static void pyHostCryptoCTRDealloc(PyHostCryptoCTR *self) {
+    if (self->cryptor) { CCCryptorRelease(self->cryptor); self->cryptor = NULL; }
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+static PyObject *pyHostCryptoCTRUpdate(PyHostCryptoCTR *self, PyObject *args) {
+    PyObject *inputObject = NULL;
+    if (!PyArg_ParseTuple(args, "O:update", &inputObject)) return NULL;
+    if (!self->cryptor) { PyErr_SetString(PyExc_RuntimeError, "AES_CTR context is closed"); return NULL; }
+    Py_buffer input = {0};
+    if (PyObject_GetBuffer(inputObject, &input, PyBUF_SIMPLE) < 0) return NULL;
+    PyObject *output = PyBytes_FromStringAndSize(NULL, input.len);
+    if (!output) { PyBuffer_Release(&input); return NULL; }
+    size_t inputLength = (size_t)input.len;
+    size_t moved = 0;
+    CCCryptorStatus status = CCCryptorUpdate(self->cryptor, input.buf, inputLength,
+        PyBytes_AS_STRING(output), inputLength, &moved);
+    PyBuffer_Release(&input);
+    if (status != kCCSuccess || moved != inputLength) {
+        Py_DECREF(output);
+        if (status != kCCSuccess) PyErr_Format(PyExc_RuntimeError, "CommonCrypto AES-CTR update failed (%d)", (int)status);
+        else PyErr_SetString(PyExc_RuntimeError, "CommonCrypto AES-CTR returned an unexpected output length");
+        return NULL;
+    }
+    return output;
+}
+static PyObject *pyHostCryptoCTRClose(PyHostCryptoCTR *self, PyObject *Py_UNUSED(ignored)) {
+    if (self->cryptor) { CCCryptorRelease(self->cryptor); self->cryptor = NULL; }
+    Py_RETURN_NONE;
+}
+static PyMethodDef pyHostCryptoCTRMethods[] = {
+    {"update", (PyCFunction)pyHostCryptoCTRUpdate, METH_VARARGS, "Transform the next AES-CTR bytes, preserving the counter across calls."},
+    {"close", (PyCFunction)pyHostCryptoCTRClose, METH_NOARGS, "Release the CommonCrypto context."},
+    {NULL, NULL, 0, NULL}
+};
+static PyObject *pyHostCryptoCTRNew(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+    PyHostCryptoCTR *self = (PyHostCryptoCTR *)type->tp_alloc(type, 0);
+    if (self) self->cryptor = NULL;
+    return (PyObject *)self;
+}
+static PyTypeObject pyHostCryptoCTRType = { PyVarObject_HEAD_INIT(NULL, 0) };
+static PyModuleDef pyHostCryptoModule = {
+    PyModuleDef_HEAD_INIT, "hostcrypto", "CCTVHost native cryptographic acceleration.", -1, NULL,
+    NULL, NULL, NULL, NULL
+};
+static PyObject *PyInit_hostcrypto(void) {
+    pyHostCryptoCTRType.tp_name = "hostcrypto.AES_CTR";
+    pyHostCryptoCTRType.tp_basicsize = sizeof(PyHostCryptoCTR);
+    pyHostCryptoCTRType.tp_flags = Py_TPFLAGS_DEFAULT;
+    pyHostCryptoCTRType.tp_doc = "Stateful CommonCrypto AES-128-CTR context.";
+    pyHostCryptoCTRType.tp_new = pyHostCryptoCTRNew;
+    pyHostCryptoCTRType.tp_init = (initproc)pyHostCryptoCTRInit;
+    pyHostCryptoCTRType.tp_dealloc = (destructor)pyHostCryptoCTRDealloc;
+    pyHostCryptoCTRType.tp_methods = pyHostCryptoCTRMethods;
+    if (PyType_Ready(&pyHostCryptoCTRType) < 0) return NULL;
+    PyObject *module = PyModule_Create(&pyHostCryptoModule);
+    if (!module) return NULL;
+    Py_INCREF(&pyHostCryptoCTRType);
+    if (PyModule_AddObject(module, "AES_CTR", (PyObject *)&pyHostCryptoCTRType) < 0) {
+        Py_DECREF(&pyHostCryptoCTRType); Py_DECREF(module); return NULL;
+    }
+    if (PyModule_AddStringConstant(module, "backend", "CommonCrypto") < 0) { Py_DECREF(module); return NULL; }
+    Py_INCREF(Py_True);
+    if (PyModule_AddObject(module, "available", Py_True) < 0) { Py_DECREF(Py_True); Py_DECREF(module); return NULL; }
+    return module;
+}
 
 static BOOL initializeInterpreter(PyHostTask *task, NSError **failure) {
     int pipePolicy=HostProtectDefaultBrokenPipe();
     [RuntimeDiagnostics.shared recordEvent:@"python_sigpipe_policy" category:@"plugin" fields:@{@"service_id":task.identifier?:@"",@"policy_result":@(pipePolicy),@"existing_custom_handler_preserved":@(pipePolicy==2)}];
     if(pipePolicy<0){if(failure)*failure=[NSError errorWithDomain:@"CCTVHostPython" code:16 userInfo:@{NSLocalizedDescriptionKey:@"无法配置 Python HTTP 断开连接保护"}];return NO;}
+    if(!gHostCryptoModuleRegistered){if(PyImport_AppendInittab("hostcrypto",PyInit_hostcrypto)==-1){if(failure)*failure=[NSError errorWithDomain:@"PyHost" code:17 userInfo:@{NSLocalizedDescriptionKey:@"无法注册 Python 原生 AES-CTR 模块"}];return NO;}gHostCryptoModuleRegistered=YES;}
     NSString *home = task.pythonHome;
     setenv("SSL_CERT_FILE", [[home stringByAppendingPathComponent:@"ssl/cert.pem"] UTF8String], 1);
     setenv("SSL_CERT_DIR", "", 1);
@@ -488,6 +743,7 @@ static BOOL initializeInterpreter(PyHostTask *task, NSError **failure) {
     PyObject *pythonHTTPWorkerRejectedFunction = PyCFunction_New(&pythonHTTPWorkerRejectedMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_python_http_worker_rejected", pythonHTTPWorkerRejectedFunction); Py_XDECREF(pythonHTTPWorkerRejectedFunction);
     gJSFunction = PyCFunction_New(&jsMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_js_call", gJSFunction);
     gNodeFunction = PyCFunction_New(&nodeMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_node_call", gNodeFunction);
+    PyObject *ffmpegFunction = PyCFunction_New(&ffmpegMethod, NULL); PyDict_SetItemString(builtins, "_cctvhost_ffmpeg_call", ffmpegFunction); Py_XDECREF(ffmpegFunction);
     [JSPluginRuntime shared].logHandler = ^(NSString *line) { emitLog([@"[JS] " stringByAppendingString:line]); };
     NodePluginRuntime.shared.logHandler = ^(NSString *line) { emitLog([@"[Node] " stringByAppendingString:line]); };
     PyObject *mainDict = PyDict_New(); PyDict_SetItemString(mainDict, "__builtins__", builtins);

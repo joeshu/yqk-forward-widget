@@ -16,6 +16,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import struct
 import tempfile
 import threading
 import time
@@ -28,12 +29,131 @@ import zipfile
 SAMPLES = os.environ.get('CCTVHOST_SAMPLE_DIR')
 
 
+@contextlib.contextmanager
+def bundled_crypto_compatibility():
+    """Load the app's Crypto shim by its real import name, isolated from host packages."""
+    compat = Path(__file__).resolve().parents[1] / 'Plugins' / 'crypto_compat'
+    previous_modules = {name: module for name, module in sys.modules.items()
+                        if name == 'Crypto' or name.startswith('Crypto.')}
+    for name in previous_modules:
+        sys.modules.pop(name, None)
+    sys.path.insert(0, str(compat))
+    try:
+        yield
+    finally:
+        sys.path.remove(str(compat))
+        for name in tuple(sys.modules):
+            if name == 'Crypto' or name.startswith('Crypto.'):
+                sys.modules.pop(name, None)
+        sys.modules.update(previous_modules)
+
+
 @unittest.skipUnless(SAMPLES, 'set CCTVHOST_SAMPLE_DIR to verify original attachments')
 class ImportedSamples(unittest.TestCase):
     def sample(self, suffix):
         matches=list(Path(SAMPLES).glob('*'+suffix))
         self.assertEqual(len(matches),1,suffix)
         return matches[0]
+
+    def test_orange_spider_initializes_crypto_without_network(self):
+        bridge=sys.modules.get('test_media_runtime') or importlib.import_module('Tests.test_media_runtime')
+        with tempfile.TemporaryDirectory() as root, bundled_crypto_compatibility():
+            shutil.copyfile(self.sample('橘汁视频.py'), Path(root) / 'source.py')
+            engine = None
+            try:
+                with patch('urllib.request.urlopen', side_effect=urllib.error.URLError('offline fixture')):
+                    engine = bridge.media.PythonSpider(root, 'source.py')
+                spider_class = engine.spider.__class__
+                self.assertTrue(spider_class.__module__)
+                loaded = sys.modules[spider_class.__module__]
+                self.assertTrue(loaded._CRYPTO_OK, loaded._CRYPTO_ERR)
+                self.assertIsNotNone(engine.spider._rsa1)
+                self.assertTrue(engine.spider._secure('offline-fixture'))
+            finally:
+                if engine is not None:
+                    engine.close()
+
+    def test_hgtv_encrypted_loopback_proxy_serves_local_ranges(self):
+        bridge=sys.modules.get('test_media_runtime') or importlib.import_module('Tests.test_media_runtime')
+        with tempfile.TemporaryDirectory() as root, bundled_crypto_compatibility():
+            shutil.copyfile(self.sample('hgtv.py'), Path(root) / 'source.py')
+            engine = None
+            try:
+                engine = bridge.media.PythonSpider(root, 'source.py')
+                loaded = sys.modules[engine.module_name]
+                key = bytes.fromhex('00112233445566778899aabbccddeeff')
+                iv = bytes.fromhex('0102030405060708')
+                plain = b'local encrypted sample from the supplied HGTV Spider'
+                encrypted = loaded.ctr_xor(key, iv + bytes(8), plain)
+
+                def mp4_box(kind, payload):
+                    return struct.pack('>I4s', len(payload) + 8, kind) + payload
+
+                def make_moov(sample_offset):
+                    stsd = mp4_box(b'stsd', bytes(4) + struct.pack('>I', 1) +
+                                   mp4_box(b'encv', bytes(78)))
+                    stsz = mp4_box(b'stsz', bytes(4) + struct.pack('>II', 0, 1) +
+                                   struct.pack('>I', len(encrypted)))
+                    stco = mp4_box(b'stco', bytes(4) + struct.pack('>II', 1, sample_offset))
+                    stsc = mp4_box(b'stsc', bytes(4) + struct.pack('>IIII', 1, 1, 1, 1))
+                    senc = mp4_box(b'senc', bytes(4) + struct.pack('>I', 1) + iv)
+                    stbl = mp4_box(b'stbl', stsd + stsz + stco + stsc + senc)
+                    return mp4_box(b'moov', mp4_box(b'trak', mp4_box(b'mdia',
+                                     mp4_box(b'minf', stbl))))
+
+                moov = make_moov(0)
+                moov = make_moov(len(moov) + 8)
+                fixture = moov + mp4_box(b'mdat', encrypted)
+                media_url = 'http://fixture.invalid/media.mp4'
+                loaded._content_length = lambda _url: len(fixture)
+                loaded._fetch = lambda _url, start, end: fixture[start:end + 1]
+                session = loaded.PROXY.session(media_url, key)
+                sample_offset = len(moov) + 8
+                self.assertEqual(session.samples, [(sample_offset, len(plain), iv)])
+                self.assertTrue(any(new_type == b'hvc1' for _pos, new_type in session.patches),
+                                'encrypted video sample entry should become hvc1')
+                self.assertTrue(any(new_type == b'free' for _pos, new_type in session.patches),
+                                'CENC auxiliary encryption boxes should be stripped')
+
+                loaded.video_model = lambda _vid: {
+                    'key_seed': 'local-fixture',
+                    'video_list': {'720p': {'main_url': 'fixture', 'definition': '720p',
+                                             'encrypt': True, 'spade_a': 'fixture'}}}
+                loaded.decrypt_main_url = lambda _main, _seed: media_url
+                loaded.decrypt_content_key = lambda _spade: key
+
+                result = engine.call('play', {'id': '123', 'lineId': ''})
+                proxy_url = urllib.parse.urlsplit(result['url'])
+                self.assertEqual(proxy_url.hostname, '127.0.0.1')
+                self.assertEqual(len(engine.local_proxy_servers), 1)
+                client = http.client.HTTPConnection(proxy_url.hostname, proxy_url.port, timeout=4)
+                try:
+                    client.request('HEAD', proxy_url.path + '?' + proxy_url.query)
+                    head = client.getresponse()
+                    self.assertEqual(head.status, 200)
+                    self.assertEqual(int(head.getheader('Content-Length')), len(fixture))
+                    head.read()
+
+                    client.request('GET', proxy_url.path + '?' + proxy_url.query,
+                                   headers={'Range': 'bytes=%d-%d' %
+                                            (sample_offset, sample_offset + len(plain) - 1)})
+                    partial = client.getresponse()
+                    self.assertEqual(partial.status, 206)
+                    self.assertEqual(partial.getheader('Content-Range'),
+                                     'bytes %d-%d/%d' %
+                                     (sample_offset, sample_offset + len(plain) - 1, len(fixture)))
+                    self.assertEqual(partial.read(), plain)
+
+                    client.request('GET', proxy_url.path + '?' + proxy_url.query,
+                                   headers={'Range': 'bytes=0-%d' % (session.moov_end - 1)})
+                    moov = client.getresponse()
+                    self.assertEqual(moov.read(), loaded.decrypt_moov_bytes(
+                        fixture[:session.moov_end], 0, session.patches))
+                finally:
+                    client.close()
+            finally:
+                if engine is not None:
+                    engine.close()
 
     def test_original_spiders_reach_hls_segment_with_playback_headers(self):
         bridge=sys.modules.get('test_media_runtime') or importlib.import_module('Tests.test_media_runtime')

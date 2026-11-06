@@ -7,12 +7,29 @@ on:
       - 'cctv-ios-host/**'
       - '.github/workflows/cctv-ios-host.yml'
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish the verified IPA as a GitHub Release"
+        required: false
+        default: true
+        type: boolean
+      run_media_compat:
+        description: "Run the longer live-catalogue AVFoundation compatibility matrix"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
 
 
 jobs:
+  media-compat:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_media_compat == true
+    uses: ./.github/workflows/cctv-media-compat.yml
+    permissions:
+      contents: read
+
   build:
     strategy:
       fail-fast: false
@@ -59,7 +76,33 @@ jobs:
 
       - name: Run regression checks
         working-directory: cctv-ios-host
-        run: python3 -m unittest discover -s Tests -p 'test_*.py' -v
+        run: |
+          CCTVHOST_TEST_PYTHON_DEPS="${RUNNER_TEMP}/cctvhost-test-python-deps"
+          python3 -m pip install --disable-pip-version-check --target "$CCTVHOST_TEST_PYTHON_DEPS" -r Scripts/media-python-requirements.txt
+          export PYTHONPATH="$CCTVHOST_TEST_PYTHON_DEPS${PYTHONPATH:+:$PYTHONPATH}"
+          set +e
+          python3 -m unittest discover -s Tests -p 'test_*.py' -v > regression.log 2>&1
+          rc=$?
+          cat regression.log
+          if [ "$rc" -ne 0 ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          lines = Path("regression.log").read_text(errors="replace").splitlines()
+          patterns = re.compile(r"FAIL:|ERROR:|FAILED|AssertionError:|Traceback|error:|Ran [0-9]+ tests")
+          found = []
+          for index, line in enumerate(lines):
+              if patterns.search(line):
+                  for detail in lines[index:min(len(lines), index + 3)]:
+                      if detail.strip() and detail not in found:
+                          found.append(detail.strip())
+          for detail in found[:24]:
+              escaped = detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A").replace(":", "%3A").replace(",", "%2C")
+              print(f"::error title=Regression failure::{escaped}")
+          PY
+          fi
+          exit "$rc"
 
       - name: Syntax check
         working-directory: cctv-ios-host
@@ -108,7 +151,7 @@ jobs:
           bash Scripts/ci-build.sh > build.log 2>&1
           rc=$?
           tail -60 build.log
-          grep -E "error:|fatal error:|ld: |Undefined symbols|referenced from|No such file" build.log | head -25 | sed 's/\r//' | while IFS= read -r l; do
+          grep -E "(^| )[^ ]+:[0-9]+:[0-9]+: (fatal )?error:|^ld: |Undefined symbols|^clang: error:|No such file" build.log | head -25 | sed 's/\r//' | while IFS= read -r l; do
             echo "::error title=build::$l"
           done
           exit $rc
@@ -138,11 +181,12 @@ jobs:
           path: |
             cctv-ios-host/build.log
             cctv-ios-host/syntax.log
+            cctv-ios-host/regression.log
           if-no-files-found: ignore
           retention-days: 14
 
       - name: Publish release asset
-        if: success() && github.ref == 'refs/heads/main' && matrix.variant == 'full'
+        if: success() && (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)) && matrix.variant == 'full'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -178,4 +222,8 @@ jobs:
             cctv-ios-host/ui-preview/*.png
             cctv-ios-host/ui-preview/*.json
             cctv-ios-host/ui-preview/*.log
+            cctv-ios-host/ui-preview/*.txt
+            cctv-ios-host/ui-preview/*.ips
+            cctv-ios-host/ui-preview/*.crash
+            cctv-ios-host/ui-preview/*.hang
           if-no-files-found: error

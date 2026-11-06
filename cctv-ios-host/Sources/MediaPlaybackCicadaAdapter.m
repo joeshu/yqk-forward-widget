@@ -23,10 +23,19 @@
 //      （CicadaOCHelper）中确认，ObjC selector 拼写未在二进制中直接确认，
 //      故实现为 best-effort，并用 1 秒位置轮询兜底：位置推进即视为首帧已出，
 //      位置到达时长末尾即视为播放完成。回调缺失时绝不静默黑屏。
+//      onCurrentDownLoadSpeed:progress: 按 CicadaSDK.h 的声明实现
+//      （float speed，单位 bit/s），二进制中未直接确认，属 best-effort；
+//      onVideoSizeChanged 的宽高/旋转按头文件声明的 int 读取。
 //   4) 时长/位置单位：CicadaPlayer 的 duration / currentPosition 按秒计；
 //      为防个别构建返回毫秒，>360000 的值按毫秒折算（见归一化函数）。
-//   5) seekMode 传 0（精确 seek，Aliyun 约定）、scalingMode 0=AspectFit、
-//      1=AspectFill（Aliyun 约定），均未在二进制中确认，需真机验证。
+//      网络超时单位：CicadaConfig.networkTimeout 按毫秒计（仓库内证据：
+//      直连路径传 15000，Tests/native_buffer_tests.m 里 networkTimeout=
+//      15000 与 500/3000/20000 毫秒级缓冲时长并列）。公开 API 的
+//      networkTimeout 参数仍按秒收，prepare 里 ×1000 再传给 SDK。
+//   5) seekMode 传 CICADA_SEEKMODE_ACCURATE（0x01，见 CicadaSDK.h）、
+//      scalingMode 按 CicadaScalingMode 枚举（0=SCALETOFILL、
+//      1=SCALEASPECTFIT、2=SCALEASPECTFILL，见 CicadaSDK.h）；
+//      二进制中未直接确认，需真机验证。
 //   6) CNPlayer 的 startPlayerSDK 已在 App 启动时调用（RootViewController
 //      1617 行附近），Cicada 内核随之初始化；本适配器不再重复初始化。
 #import "MediaPlaybackCicadaAdapter.h"
@@ -138,6 +147,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 @property (nonatomic, copy, nullable) void (^pendingSeekCompletion)(BOOL finished);
 @property (nonatomic) NSTimeInterval lastPolledPosition;
 @property (nonatomic) BOOL destroyed;
+@property (nonatomic) BOOL enableHardwareDecoder;
 @end
 
 @implementation MediaPlaybackCicadaAdapter
@@ -167,7 +177,12 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 // ---------- 生命周期 ----------
 
 - (void)prepare {
+    [self prepareWithHardwareDecoder:YES];
+}
+
+- (void)prepareWithHardwareDecoder:(BOOL)enableHardwareDecoder {
     if (self.destroyed || self.player) return;
+    self.enableHardwareDecoder = enableHardwareDecoder;
     Class playerClass = MediaPlaybackCicadaClass(@"CicadaPlayer");
     Class configClass = MediaPlaybackCicadaClass(@"CicadaConfig");
     Class sourceClass = MediaPlaybackCicadaClass(@"CicadaUrlSource");
@@ -187,11 +202,12 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 
     // 配置：网络超时读设置（调用方传入，已钳制 5–40 秒）；重试 2 次；
     // 请求头 / UA / Referer 由播放结果带入（猫源常需 Referer 才能出流）。
+    // 注意：CicadaConfig.networkTimeout 单位是毫秒，公开 API 的秒数要 ×1000。
     id config = nil;
     @try { config = [[configClass alloc] init]; } @catch (NSException *e) { config = nil; }
     self.config = config;
     if (config) {
-        CicadaCallVoidInt(config, NSSelectorFromString(@"setNetworkTimeout:"), (int)llround(self.networkTimeout));
+        CicadaCallVoidInt(config, NSSelectorFromString(@"setNetworkTimeout:"), (int)llround(self.networkTimeout * 1000.0));
         CicadaCallVoidInt(config, NSSelectorFromString(@"setNetworkRetryCount:"), 2);
         if (self.headers.count) {
             CicadaCallVoidObject(config, NSSelectorFromString(@"setHttpHeaders:"), self.headers);
@@ -202,7 +218,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
         }
         CicadaCallVoidObject(player, NSSelectorFromString(@"setConfig:"), config);
     }
-    CicadaCallVoidBool(player, NSSelectorFromString(@"setEnableHardwareDecoder:"), YES);
+    CicadaCallVoidBool(player, NSSelectorFromString(@"setEnableHardwareDecoder:"), self.enableHardwareDecoder);
     CicadaCallVoidBool(player, NSSelectorFromString(@"setAutoPlay:"), NO);
     id source = nil;
     @try {
@@ -295,7 +311,8 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
         return;
     }
     self.pendingSeekCompletion = completion;
-    CicadaCallVoidDoubleLong(self.player, NSSelectorFromString(@"seekToTime:seekMode:"), MAX(0, time), 0);
+    // CICADA_SEEKMODE_ACCURATE（0x01，见 CicadaSDK.h）：直连路径同值。
+    CicadaCallVoidDoubleLong(self.player, NSSelectorFromString(@"seekToTime:seekMode:"), MAX(0, time), 0x01);
     // onSeekEnd 回调的 selector 拼写未在二进制中直接确认：3 秒后无论是否收到
     // 回调都按完成处理，避免调用方永久等待。
     __weak typeof(self) weakSelf = self;
@@ -309,9 +326,15 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 }
 
 - (void)setRate:(float)rate {
-    self.pendingRate = MIN(2.0f, MAX(0.5f, rate));
+    // 上限 3.0：长按手势请求 3.0x（见 VC handlePlaybackLongPress:），
+    // 旧钳制 2.0 会把它静默截断；设置菜单的持久倍速仍由调用方钳制在 2.0。
+    self.pendingRate = MIN(3.0f, MAX(0.5f, rate));
     self.hasPendingRate = YES;
     [self applyPendingRate];
+}
+
+- (float)rate {
+    return self.pendingRate;
 }
 
 - (void)applyPendingRate {
@@ -321,10 +344,12 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 
 - (void)applyVideoGravity:(NSString *)gravity {
     if (!self.player) return;
-    // Aliyun 约定：0=AspectFit、1=AspectFill、2=Fill；未在二进制中确认，需真机验证。
-    int mode = 0;
-    if ([gravity isEqualToString:AVLayerVideoGravityResizeAspectFill]) mode = 1;
-    else if ([gravity isEqualToString:AVLayerVideoGravityResize]) mode = 2;
+    // CicadaScalingMode（见 CicadaSDK.h）：0=SCALETOFILL、1=SCALEASPECTFIT、
+    // 2=SCALEASPECTFILL。旧映射把 ResizeAspect 错写成 0、Resize 错写成 2，
+    // 与直连路径用的命名常量正好颠倒。
+    int mode = 1;
+    if ([gravity isEqualToString:AVLayerVideoGravityResizeAspectFill]) mode = 2;
+    else if ([gravity isEqualToString:AVLayerVideoGravityResize]) mode = 0;
     CicadaCallVoidInt(self.player, NSSelectorFromString(@"setScalingMode:"), mode);
 }
 
@@ -459,12 +484,29 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     // 播放/暂停由调用方显式控制。这里只作代收点，不产生状态上报。
 }
 
-- (void)onVideoSizeChanged:(id)player width:(id)width height:(id)height rotation:(id)rotation {
-    // 宽高参数类型未确认，不读它们；SDK 上报尺寸变化本身即证明有视频轨。
+- (void)onCurrentDownLoadSpeed:(id)player progress:(float)speed {
+    // Best-effort 回调（见文件头注释 3）：speed 单位 bit/s（CicadaSDK.h
+    // 声明为 float；直连路径同样按 float 读，并除以 8 得字节/秒）。
+    // 适配器此前未实现它——SDK 若无 respondsToSelector 守卫就调用，
+    // 会因 unrecognized selector 崩溃；现在实现并转发给调用方更新测速。
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.destroyed) return;
+        if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateDownloadSpeed:)]) {
+            [self.delegate cicadaAdapter:self didUpdateDownloadSpeed:MAX(0, (double)speed)];
+        }
+    });
+}
+
+- (void)onVideoSizeChanged:(id)player width:(int)width height:(int)height rotation:(int)rotation {
+    // 宽高/旋转按 CicadaSDK.h 声明的 int 读取（此前声明为 id 且不读参数，
+    // 调用方拿不到尺寸，无法更新画面比例）；SDK 上报尺寸变化本身即证明有视频轨。
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.destroyed) return;
         _hasVideoTrack = YES;
         if (!self.firstFrameReported) [self handleFirstFrame];
+        if (width > 0 && height > 0 && [self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateVideoSize:rotation:)]) {
+            [self.delegate cicadaAdapter:self didUpdateVideoSize:CGSizeMake(width, height) rotation:rotation];
+        }
     });
 }
 

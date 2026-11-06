@@ -5,3 +5,5 @@ FOUNDATION_EXPORT NSDictionary<NSString *, NSString *> *MediaPlaybackHeadersFrom
 FOUNDATION_EXPORT NSDictionary<NSString *, id> *MediaPlaybackDiagnosticHeaderFields(NSDictionary * _Nullable headers);
 FOUNDATION_EXPORT BOOL MediaPlaybackResultIsDirectMedia(NSDictionary * _Nullable result);
 FOUNDATION_EXPORT BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary * _Nullable result);
+FOUNDATION_EXPORT BOOL MediaPlaybackResultSupportsCicada(NSDictionary * _Nullable result);
+FOUNDATION_EXPORT BOOL MediaPlaybackResultSupportsNativePlayback(NSDictionary * _Nullable result);

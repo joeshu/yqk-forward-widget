@@ -18,7 +18,15 @@ REDACTOR = (SOURCE.parent / "HostLogRedactor.m").read_text(encoding="utf-8")
 
 
 def method_body(signature):
-    start = TEXT.index(signature)
+    # 413 分支的类扩展里有前向声明（"- (void)foo;"），TEXT.index 会先命中
+    # 声明而非实现；跳过以 ";" 结尾的声明，找到以 "{" 开头的实现。
+    start = 0
+    while True:
+        start = TEXT.index(signature, start)
+        after = TEXT[start + len(signature):].lstrip()
+        if not after.startswith(";"):
+            break
+        start += len(signature)
     opening = TEXT.index("{", start)
     depth = 0
     for index in range(opening, len(TEXT)):
@@ -240,31 +248,61 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('logo.image=CCTVChannelLogoImage(ch)', TEXT)
         self.assertIn('cell.imageView.image=CCTVChannelLogoImage(ch)', TEXT)
 
-    def test_live_pages_end_eight_points_above_bottom_navigation(self):
+    def test_live_pages_scroll_under_top_and_bottom_overlays(self):
         layout_start = TEXT.rindex("- (void)viewDidLayoutSubviews {")
         layout_end = TEXT.index("- (void)traitCollectionDidChange:", layout_start)
         layout = TEXT[layout_start:layout_end]
-        self.assertIn('CGRectGetMinY(self.bottomBar.frame)-8', layout)
-        self.assertIn('MAX(0,contentBottom-contentY)', layout)
+        self.assertIn('CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom))', layout)
+        self.assertIn('CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets)', layout)
+        self.assertIn('CGRectMake(0,playerTop,w,ph)', layout)
+        self.assertIn('BOOL expandedLive=[self isExpandedLivePlayerVisible]', layout)
+        # Step 3：展开直播的唯一判定收敛到 isExpandedLivePlayerVisible。
+        self.assertIn('- (BOOL)isExpandedLivePlayerVisible {', TEXT)
+        self.assertIn('return !self.fullscreen && [self hasVisibleExpandedLivePlayer]', TEXT)
+        self.assertIn('CGFloat capsuleRowHeight=expandedLive?44:0', layout)
+        self.assertIn('tabContentInset=MAX(8,height-tabY+8)', layout)
         self.assertIn('MAX(0,contentBottom-pageTop)', layout)
         self.assertNotIn('height-safe.bottom-152', layout)
-        self.assertIn('self.tableView.contentInset=UIEdgeInsetsMake(0,0,8,0)', CONFIG)
+        self.assertIn('self.tableView.contentInset=UIEdgeInsetsMake(0,0,tableBottomInset,0)', CONFIG)
+
+    def test_expanded_live_player_hides_opaque_header_and_keeps_search_reachable(self):
+        expanded_start = TEXT.index('- (BOOL)hasVisibleExpandedLivePlayer {')
+        expanded = TEXT[expanded_start:TEXT.index('\n}', expanded_start)]
+        navigation = method_body('- (void)configureCatalogNavigation {')
+        menu = method_body('- (UIMenu *)catalogMenu')
+        search_start = TEXT.index('- (void)showCatalogSearch {')
+        search = TEXT[search_start:TEXT.index('\n}', search_start)]
+        status = method_body('- (UIStatusBarStyle)preferredStatusBarStyle')
+        self.assertIn('self.navigationController setNavigationBarHidden:hideNavigation animated:NO', navigation)
+        self.assertIn('BOOL expandedLive=[self isExpandedLivePlayerVisible]', navigation)
+        self.assertIn('[self setNeedsStatusBarAppearanceUpdate]', navigation)
+        self.assertIn('self.currentRemoteURL', expanded)
+        self.assertIn('identifier:@"channel.catalog.search"', menu)
+        self.assertIn('[w showCatalogSearch]', menu)
+        self.assertIn('owner.searchController.searchBar.text=owner.query', search)
+        self.assertIn('UIStatusBarStyleLightContent', status)
+        self.assertIn('expanded channel playback keeps the capsule row in the safe area above the 16:9 player',
+                      (SOURCE.parents[1] / 'Tests' / 'UISmoke' / 'SmokeDriver.m').read_text())
 
     def test_service_directory_applies_safe_area_only_once(self):
         self.assertIn('self.table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever', SERVICE_UI)
         self.assertIn('[self.table.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor]', SERVICE_UI)
         self.assertIn('[self.table.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor]', SERVICE_UI)
 
-    def test_live_header_actions_follow_selected_channel_and_group(self):
+    def test_live_page_actions_float_at_lower_right_and_follow_selected_channel(self):
         navigation = method_body("- (void)configureCatalogNavigation")
         group_menu = method_body("- (void)showGroupMenu")
         self.assertIn("BOOL expandedLive", navigation)
         self.assertIn("self.channelName", navigation)
-        self.assertIn('@"heart.fill":@"heart"', navigation)
-        self.assertIn('AVRoutePickerView *airPlayPicker', navigation)
-        self.assertIn('@"customView":airPlayPicker', navigation)
-        self.assertIn('@"info.circle"', navigation)
-        self.assertIn("self.groupControl.selectedSegmentIndex", navigation)
+        self.assertIn('self.navigationItem.rightBarButtonItems=nil', navigation)
+        self.assertIn('self.navigationItem.leftBarButtonItem=nil', navigation)
+        self.assertIn('channel.catalog.floating-controls', TEXT)
+        self.assertIn('AVRoutePickerView *catalogFloatingAirPlayPicker', TEXT)
+        self.assertIn('self.catalogFloatingControls.hidden=!catalog', TEXT)
+        self.assertIn('tabY-controlsHeight-12', TEXT)
+        self.assertIn('channel.catalog.layout.toggle', TEXT)
+        self.assertIn('频道分组 · %@', TEXT)
+        self.assertIn('播放信息', TEXT)
         self.assertIn("self.groupControl.numberOfSegments", group_menu)
         self.assertIn("✓", group_menu)
 
@@ -454,9 +492,56 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('[self.nativeRouteProbe cancel]',method_body('- (void)stopPlayback'))
         self.assertIn('self.nativePlainRouteActive?0:1',method_body('- (void)startRemoteChannel:'))
 
+    def test_builtin_cctv_channel_ids_exist_in_bundled_cnplayer_config(self):
+        channels=json.loads((SOURCE.parents[1]/"Resources"/"channels.json").read_text(encoding="utf-8"))
+        sdk=json.loads((SOURCE.parents[1]/"Frameworks"/"CNPlayerSDK.framework"/"CNLiveConfig_V2th.json").read_text(encoding="utf-8"))
+        sdk_ids={row.get("channel") for row in sdk.get("client_config",{}).get("channel_info",[]) if isinstance(row,dict)}
+        missing=[row.get("id") for row in channels if not row.get("remoteURL") and row.get("id") not in sdk_ids]
+        self.assertEqual([],missing,f"built-in SDK channel IDs missing from the bundled CNPlayer config: {missing}")
+
+    def test_cctv1_udrm_routes_are_never_sent_to_plain_avplayer_probe(self):
+        channels=json.loads((SOURCE.parents[1]/"Resources"/"channels.json").read_text(encoding="utf-8"))
+        sdk=json.loads((SOURCE.parents[1]/"Frameworks"/"CNPlayerSDK.framework"/"CNLiveConfig_V2th.json").read_text(encoding="utf-8"))
+        cctv1=next(row for row in channels if row.get("id")=="cctv1")
+        sdk_cctv1=next(row for row in sdk["client_config"]["channel_info"] if row.get("channel")=="cctv1")
+        self.assertEqual("1",sdk_cctv1.get("drm"))
+        self.assertTrue(all("/udrm" in route.get("url","").lower() for route in cctv1.get("routes",[])))
+        self.assertIn('return [path containsString:@"/udrm"]||[query containsString:@"udrm"]',TEXT)
+        playback=method_body("- (void)playChannel:")
+        self.assertLess(playback.index("if(CCTVRouteRequiresSDK(route))"),playback.index("self.nativeRouteProbe=[HLSRouteProbe new]"))
+        self.assertIn("[self playViaSDKURL:selectedURL channelID:cid title:self.channelName]",playback)
+
+    def test_sdk_channel_failures_keep_safe_channel_and_node_diagnostics(self):
+        selection=method_body('- (void)selectChannel:')
+        startup=method_body('- (void)playViaSDK:')
+        failure=method_body('- (void)displayNativePlaybackFailure:(NSString *)stage error:(NSError *)error {')
+        self.assertIn('selectionFields[@"sdk_channel_id"]',selection)
+        self.assertIn('startFields[@"sdk_channel_id"]',startup)
+        self.assertIn('failureFields[@"sdk_channel_id"]',failure)
+        self.assertIn('failureFields[@"sdk_reported_node"]',failure)
+        self.assertIn('if(![ProfileStore isHTTP:cid]&&cid.length<=128)',startup)
+        self.assertIn('if(![ProfileStore isHTTP:self.channelID]',failure)
+
+    def test_native_stop_restores_startup_buffer_before_reusing_sdk_wrapper(self):
+        stop=method_body('- (void)stopPlayback {')
+        self.assertLess(stop.index('[self.nativeStartupTuner restore]'),stop.index('self.nativeStartupTuner=nil'))
+        self.assertLess(stop.index('[self.nativeStartupTuner restore]'),stop.index('[self call:previous sel:@"stop"]'))
+
+    def test_sdk_auto_uses_official_license_defaults_and_requires_explicit_acceptance(self):
+        setup=method_body('- (void)setupSDK {')
+        self.assertIn('[CNPlayer startPlayerSDK_Options:[CNPlayer defaultOptions]]',setup)
+        self.assertNotIn('configSDK_CICADA_UDRMUrl:',setup)
+        self.assertNotIn('kLicenseUrl',TEXT)
+        startup=method_body('- (void)playViaSDK:')
+        self.assertIn('if(![accepted isKindOfClass:NSNumber.class]||![accepted boolValue])',startup)
+        self.assertIn('self.currentPlayer=nil;self.sdkPlayer=nil;self.sdkPlayerUsed=NO',startup)
+        terminal=startup[startup.index('if(!inst||![accepted isKindOfClass:NSNumber.class]||![accepted boolValue])'):]
+        self.assertLess(terminal.index('self.currentPlayer=nil;self.sdkPlayer=nil;self.sdkPlayerUsed=NO'),terminal.index('displayNativePlaybackFailure:'))
+        self.assertLess(terminal.index('[inst setValue:nil forKey:@"delegate"]'),terminal.index('[self call:inst sel:@"stop"]'))
+
     def test_player_toolbar_uses_real_airplay_picker_and_keeps_channel_logos_stable(self):
-        self.assertIn('AVRoutePickerView *airPlayPicker', TEXT)
-        self.assertIn('@"customView":airPlayPicker', TEXT)
+        self.assertIn('AVRoutePickerView *catalogFloatingAirPlayPicker', TEXT)
+        self.assertIn('catalogFloatingAirPlayPicker.accessibilityIdentifier=@"channel.catalog.airplay"', TEXT)
         self.assertIn('loadPlayerChannelLogoAfterFirstFrame', TEXT)
         body = method_body('- (void)loadLogo:')
         self.assertIn('HostImageLoader shared] loadURL:url intoImageView:iv', body)

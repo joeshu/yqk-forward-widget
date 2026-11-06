@@ -18,6 +18,7 @@ rm -rf "$OUT"
 mkdir -p "$APP"
 cp Resources/Info.plist "$APP/Info.plist"
 cp Resources/*.json "$APP/" 2>/dev/null || true
+cp -R Resources/BuiltinMedia "$APP/BuiltinMedia"
 # GitHub Actions assigns a monotonically increasing workflow run number. Keep
 # local builds reproducible with the plist fallback, but stamp CI IPAs uniquely.
 if [[ "${GITHUB_RUN_NUMBER:-}" =~ ^[0-9]+$ ]]; then
@@ -62,6 +63,8 @@ if [ -z "${PY_DISABLE:-}" ]; then cp Plugins/ysp-live.py "$APP/ysp-live.py"; cp 
 if [ -z "${PY_DISABLE:-}" ]; then
   cp Plugins/media-service.py Plugins/host_media_runtime.py Plugins/host_media_relay.py Plugins/node-plugin-host.cjs "$APP/"
   cp -R Plugins/base "$APP/base"
+  cp -R Plugins/lxml "$APP/lxml"
+  cp Plugins/pyquery.py "$APP/pyquery.py"
   cp -R JSPlugins/generic JSPlugins/drpy "$APP/JSPlugins/"
   cp Resources/NodeMobile-LICENSE.txt "$APP/"
   python3 Scripts/prepare_node_runtime.py "$APP"
@@ -95,6 +98,10 @@ if [ -z "${PY_DISABLE:-}" ]; then
   cp -R "$DEVICE_LIB/" "$APP/python/lib/python${PY_VER}/"
   python3 -m pip install --disable-pip-version-check --no-compile --only-binary=:all: --platform any --implementation py --python-version 3.13 \
     --target "$APP/python/lib/python${PY_VER}/site-packages" -r Scripts/media-python-requirements.txt
+  cp -R Plugins/crypto_compat/Crypto "$APP/python/lib/python${PY_VER}/site-packages/Crypto"
+  cp -R Plugins/crypto_compat/Cryptodome "$APP/python/lib/python${PY_VER}/site-packages/Cryptodome"
+  cp Plugins/hostcrypto.py "$APP/python/lib/python${PY_VER}/site-packages/hostcrypto.py"
+  cp Plugins/cctvhost_ffmpeg.py "$APP/python/lib/python${PY_VER}/site-packages/cctvhost_ffmpeg.py"
   rm -rf "$APP/python/lib/python${PY_VER}/test" "$APP/python/lib/python${PY_VER}/idlelib" \
          "$APP/python/lib/python${PY_VER}/tkinter" "$APP/python/lib/python${PY_VER}/ensurepip" \
          "$APP/python/lib/python${PY_VER}/turtledemo" "$APP/python/lib/python${PY_VER}/distutils"

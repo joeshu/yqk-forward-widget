@@ -3,8 +3,10 @@
 FOUNDATION_EXPORT BOOL MediaSourceUsesNativeCatalogAPI(NSDictionary *source);
 
 @interface MediaAPIClient : NSObject
+@property(nonatomic) NSInteger playTimeoutMilliseconds;
 - (instancetype)initWithPort:(NSInteger)port;
 - (instancetype)initWithPort:(NSInteger)port requestTimeout:(NSTimeInterval)requestTimeout;
+- (instancetype)initWithPort:(NSInteger)port catalogID:(nullable NSString *)catalogID;
 - (instancetype)initWithTVBoxSource:(NSDictionary *)source;
 - (void)call:(NSString *)operation arguments:(NSDictionary *)arguments completion:(void (^)(id result,NSError *error))completion;
 - (void)call:(NSString *)operation arguments:(NSDictionary *)arguments correlationID:(nullable NSString *)correlationID completion:(void (^)(id result,NSError *error))completion;

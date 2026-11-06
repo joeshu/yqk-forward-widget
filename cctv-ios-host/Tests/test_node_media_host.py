@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import ssl
 import subprocess
 import tempfile
 import threading
@@ -62,6 +63,195 @@ class NodeMediaHostTests(unittest.TestCase):
     def start(self, **extra):
         return self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.cjs',
                          protocol='catvod-js', moduleType='commonjs', **extra)
+
+    def test_local_proxy_is_exposed_and_returns_small_file_reference_metadata(self):
+        payload_path = self.data / 'video.mp4'
+        payload_path.write_bytes(b'0123456789')
+        (self.package/'index.cjs').write_text('''const path=require('node:path');
+          module.exports={localProxy(params){return [206,
+            {'Content-Type':'video/mp4','Accept-Ranges':'bytes','Content-Range':'bytes 2-5/10','Content-Length':'4'},
+            {__cctvhostFileResponse:true,path:path.join(process.cwd(),'video.mp4'),offset:2,length:4}]}}''')
+        started = self.start()
+        self.assertTrue(started['ok'], started)
+        self.assertIn('proxy', started['result']['capabilities'])
+        result = self.call('proxy', url='cenc://fixture-episode', method='GET', range='bytes=2-5')
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['result'][0], 206)
+        self.assertEqual(result['result'][2]['__cctvhostFileResponse'], True)
+        self.assertEqual(result['result'][2]['offset'], 2)
+        self.assertEqual(result['result'][2]['length'], 4)
+        self.assertEqual(Path(os.path.realpath(result['result'][2]['path'])),
+                         Path(os.path.realpath(payload_path)))
+        self.assertTrue(self.call('stop')['ok'])
+
+    def test_https_get_falls_back_through_authenticated_host_and_preserves_response(self):
+        observed = []
+
+        class HostFetch(http.server.BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+            def log_message(self, *args): pass
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length', '0'))
+                observed.append((self.path, self.headers.get('X-CCTVHost-Host-Fetch'),
+                                 json.loads(self.rfile.read(length))))
+                body = b'host-fallback-video'
+                self.send_response(206, 'Partial Content')
+                self.send_header('Content-Type', 'video/mp2t')
+                self.send_header('Content-Range', 'bytes 0-18/99')
+                self.send_header('X-Fixture', 'preserved')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                self.wfile.write(body)
+
+        bridge = http.server.ThreadingHTTPServer(('127.0.0.1', 0), HostFetch)
+        bridge_thread = threading.Thread(target=bridge.serve_forever, daemon=True)
+        bridge_thread.start()
+        (self.package/'index.cjs').write_text('''const https=require('node:https');
+          module.exports={search(){return new Promise((resolve,reject)=>{
+            https.get('https://127.0.0.1:1/segment.ts?token=fixture',{headers:{'X-Fixture':'request-header',Range:'bytes=0-18'}},response=>{
+              let body='';response.setEncoding('utf8');response.on('data',chunk=>body+=chunk);
+              response.on('end',()=>resolve({list:[{vod_id:String(response.statusCode),
+                vod_name:body+'|'+response.headers['x-fixture']+'|'+response.headers['content-range']}]}));
+            }).on('error',reject);
+          })}}''')
+        token = 'host-fetch-test-' + os.urandom(8).hex()
+        try:
+            started = self.start(hostFetchURL=f'http://127.0.0.1:{bridge.server_port}/_cctvhost/host-fetch',
+                                 hostFetchToken=token)
+            self.assertTrue(started['ok'], started)
+            reply = self.call('search')
+            self.assertTrue(reply['ok'], reply)
+            row = reply['result']['list'][0]
+            self.assertEqual(row['vod_id'], '206')
+            self.assertEqual(row['vod_name'], 'host-fallback-video|preserved|bytes 0-18/99')
+            self.assertEqual(len(observed), 1)
+            path, supplied, request = observed[0]
+            self.assertEqual(path, '/_cctvhost/host-fetch')
+            self.assertEqual(supplied, token)
+            self.assertEqual(request['url'], 'https://127.0.0.1:1/segment.ts?token=fixture')
+            self.assertEqual(request['headers']['x-fixture'], 'request-header')
+            self.assertEqual(request['headers']['range'], 'bytes=0-18')
+            self.assertEqual(request['method'], 'GET')
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            bridge.shutdown(); bridge.server_close(); bridge_thread.join(2)
+
+    def test_https_post_fallback_replays_bounded_signing_body_and_headers(self):
+        observed = []
+
+        class HostFetch(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length', '0'))
+                observed.append((self.path, self.headers.get('X-CCTVHost-Host-Fetch'),
+                                 json.loads(self.rfile.read(length))))
+                body = b'signed-api-ok'
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                self.wfile.write(body)
+
+        bridge = http.server.ThreadingHTTPServer(('127.0.0.1', 0), HostFetch)
+        bridge_thread = threading.Thread(target=bridge.serve_forever, daemon=True)
+        bridge_thread.start()
+        (self.package/'index.cjs').write_text('''const https=require('node:https');
+          module.exports={search(){return new Promise(resolve=>{
+            const request=https.request('https://127.0.0.1:1/signed-model',
+              {method:'POST',headers:{'Content-Type':'application/json','X-Signing-Fixture':'preserved'}},response=>{
+                let body='';response.setEncoding('utf8');response.on('data',chunk=>body+=chunk);
+                response.on('end',()=>resolve({list:[{vod_id:String(response.statusCode),vod_name:body}]}));
+              });request.on('error',error=>resolve({list:[{vod_id:error.code||'error'}]}));request.end('{"model":"fixture"}');
+          })}}''')
+        token = 'host-fetch-post-test-' + os.urandom(8).hex()
+        try:
+            started = self.start(hostFetchURL=f'http://127.0.0.1:{bridge.server_port}/_cctvhost/host-fetch',
+                                 hostFetchToken=token)
+            self.assertTrue(started['ok'], started)
+            result = self.call('search')
+            self.assertTrue(result['ok'], result)
+            self.assertEqual(result['result']['list'][0], {'vod_id': '200', 'vod_name': 'signed-api-ok'})
+            self.assertEqual(len(observed), 1)
+            path, supplied, request = observed[0]
+            self.assertEqual(path, '/_cctvhost/host-fetch')
+            self.assertEqual(supplied, token)
+            self.assertEqual(request['url'], 'https://127.0.0.1:1/signed-model')
+            self.assertEqual(request['method'], 'POST')
+            self.assertEqual({key.lower(): value for key, value in request['headers'].items()}['x-signing-fixture'], 'preserved')
+            import base64
+            self.assertEqual(base64.b64decode(request['bodyBase64']), b'{"model":"fixture"}')
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            bridge.shutdown(); bridge.server_close(); bridge_thread.join(2)
+
+    def test_https_custom_tls_options_do_not_get_replaced_by_host_defaults(self):
+        observed = []
+
+        class HostFetch(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                observed.append(self.path)
+                self.send_response(502);self.end_headers()
+
+        bridge = http.server.ThreadingHTTPServer(('127.0.0.1', 0), HostFetch)
+        threading.Thread(target=bridge.serve_forever, daemon=True).start()
+        (self.package/'index.cjs').write_text('''const https=require('node:https');
+          module.exports={search(){return new Promise(resolve=>https.get('https://127.0.0.1:1/fixture',
+            {rejectUnauthorized:false},()=>resolve({list:[]})).on('error',error=>resolve({list:[{vod_id:error.code||'error'}]})))}}''')
+        try:
+            self.assertTrue(self.start(hostFetchURL=f'http://127.0.0.1:{bridge.server_port}/_cctvhost/host-fetch',
+                                       hostFetchToken='fixture-token')['ok'])
+            result = self.call('search')
+            self.assertTrue(result['ok'], result)
+            self.assertEqual(result['result']['list'][0]['vod_id'], 'ECONNREFUSED')
+            self.assertEqual(observed, [])
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            bridge.shutdown(); bridge.server_close()
+
+    @unittest.skipUnless(shutil.which('openssl'), 'requires openssl to verify certificate failures are not bypassed')
+    def test_https_certificate_validation_failure_never_uses_host_fallback(self):
+        certificate = self.root/'fixture-cert.pem'
+        private_key = self.root/'fixture-key.pem'
+        subprocess.run([shutil.which('openssl'), 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+                        '-keyout', str(private_key), '-out', str(certificate), '-days', '1',
+                        '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1'],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        tls = http.server.ThreadingHTTPServer(('127.0.0.1', 0), http.server.BaseHTTPRequestHandler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certificate, private_key)
+        tls.socket = context.wrap_socket(tls.socket, server_side=True)
+        tls_thread = threading.Thread(target=tls.serve_forever, daemon=True)
+        tls_thread.start()
+        fallback_requests = []
+
+        class HostFetch(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                fallback_requests.append(self.path)
+                body = b'must-not-bypass-certificate-validation'
+                self.send_response(200);self.send_header('Content-Length', str(len(body)))
+                self.end_headers();self.wfile.write(body)
+
+        bridge = http.server.ThreadingHTTPServer(('127.0.0.1', 0), HostFetch)
+        threading.Thread(target=bridge.serve_forever, daemon=True).start()
+        (self.package/'index.cjs').write_text(f'''const https=require('node:https');
+          module.exports={{search(){{return new Promise(resolve=>https.get('https://127.0.0.1:{tls.server_port}/fixture',response=>{{
+            response.resume();resolve({{list:[{{vod_id:'unexpected-response'}}]}});
+          }}).on('error',error=>resolve({{list:[{{vod_id:error.code||'error'}}]}})))}}}}''')
+        try:
+            self.assertTrue(self.start(hostFetchURL=f'http://127.0.0.1:{bridge.server_port}/_cctvhost/host-fetch',
+                                       hostFetchToken='fixture-token')['ok'])
+            result = self.call('search')
+            self.assertTrue(result['ok'], result)
+            self.assertIn(result['result']['list'][0]['vod_id'],
+                          {'DEPTH_ZERO_SELF_SIGNED_CERT', 'ERR_TLS_CERT_ALTNAME_INVALID'})
+            self.assertEqual(fallback_requests, [])
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            bridge.shutdown(); bridge.server_close(); tls.shutdown(); tls.server_close(); tls_thread.join(2)
 
     def test_catpaw_defaults_config_exports_provider_identity_and_relative_media(self):
         source = """const http=require('http');let server,switched=false;
@@ -336,6 +526,39 @@ class NodeMediaHostTests(unittest.TestCase):
         finally:
             upstream.shutdown(); upstream.server_close(); thread.join(timeout=2)
 
+    def test_binary_stream_response_is_preserved_as_base64_for_encrypted_api_adapters(self):
+        node = os.environ.get('CCTVHOST_NODE_BINARY', shutil.which('node'))
+        payload = b'{"code":40105,"message":"sign error"}'
+        compressed = subprocess.check_output([node, '-e',
+            "process.stdout.write(require('node:zlib').brotliCompressSync(Buffer.from(process.argv[1])))",
+            payload.decode('ascii')])
+
+        class Fixture(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/stream')
+                self.send_header('Content-Encoding', 'br')
+                self.send_header('Content-Length', str(len(compressed)))
+                self.end_headers()
+                self.wfile.write(compressed)
+
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
+        thread = threading.Thread(target=upstream.serve_forever, daemon=True); thread.start()
+        try:
+            (self.package / 'index.cjs').write_text(f'''module.exports={{async search(){{
+              const response=await net.http('http://127.0.0.1:{upstream.server_port}/api');
+              return {{list:[{{vod_id:String(response.code),vod_name:Buffer.from(response.content,'base64').toString('utf8')}}]}};
+            }}}};''')
+            self.assertTrue(self.start()['ok'])
+            response = self.call('search')
+            self.assertTrue(response['ok'], response)
+            row = response['result']['list'][0]
+            self.assertEqual((row['vod_id'], row['vod_name']), ('400', payload.decode('ascii')))
+            self.assertTrue(self.call('stop')['ok'])
+        finally:
+            upstream.shutdown(); upstream.server_close(); thread.join(timeout=2)
+
     def test_unhandled_rejection_isolated_to_owning_plugin_session(self):
         (self.package / 'index.cjs').write_text('''module.exports={init(ext){if(ext!=='healthy')
           setTimeout(()=>Promise.reject(new Error('fixture rejection')),0)},
@@ -392,6 +615,27 @@ class NodeMediaHostTests(unittest.TestCase):
         self.assertEqual(self.call('category', categoryId='movie', page=2, filters={'area': '大陆'})['result']['list'][0]['vod_name'], '{"area":"大陆"}')
         self.assertEqual(self.call('detail', id='opaque/id')['result']['list'][0]['vod_id'], 'opaque/id')
         self.assertEqual(self.call('play', lineId='线路', id='opaque/id')['result']['header']['Referer'], 'https://fixture.test/线路')
+        self.assertTrue(self.call('stop')['ok'])
+
+    def test_catvod_esm_can_use_node_crypto_fs_http_and_https(self):
+        (self.package / 'index.mjs').write_text('''
+          import http from 'node:http';
+          import https from 'node:https';
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          let server;
+          export default () => ({
+            async init(){fs.writeFileSync('crypto-fixture.txt',crypto.createHash('sha256').update('abc').digest('hex'));server=http.createServer((_req,res)=>res.end('ok'));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))},
+            async search(){return {list:[{vod_id:String(server.address().port),vod_name:fs.readFileSync('crypto-fixture.txt','utf8')+':'+typeof https.request+':'+crypto.createHmac('sha256','key').update('abc').digest('hex')}]}},
+            async stop(){if(server)await new Promise(resolve=>server.close(resolve))}
+          });
+        ''')
+        reply = self.call('start', packageRoot=str(self.package), dataDirectory=str(self.data), entry='index.mjs',
+                          protocol='catvod-js', moduleType='esm')
+        self.assertTrue(reply['ok'], reply)
+        row = self.call('search')['result']['list'][0]
+        self.assertTrue(int(row['vod_id']) > 0)
+        self.assertEqual(row['vod_name'], 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad:function:9c196e32dc0175f86f4b1cb89289d6619de6bee699e4c378e68309ed97a1a6ab')
         self.assertTrue(self.call('stop')['ok'])
 
     def test_path_escape_and_plugin_process_exit_are_reported_without_killing_host(self):

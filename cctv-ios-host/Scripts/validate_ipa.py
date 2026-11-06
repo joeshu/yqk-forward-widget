@@ -73,6 +73,9 @@ def validate(path):
         elif variant == 'full':
             assert result['python_embedded'] and linked, 'full build missing embedded or linked Python'
             assert root + 'host_service_runtime.py' in z.namelist(), 'full build missing service lifecycle manager'
+            assert root + 'python/lib/python3.13/site-packages/hostcrypto.py' in z.namelist(), 'full build missing portable hostcrypto fallback'
+            assert root + 'python/lib/python3.13/site-packages/cctvhost_ffmpeg.py' in z.namelist(), 'full build missing native FFmpeg Python API'
+            assert any('alivcffmpeg.framework/alivcffmpeg' in name for name in result['binaries'][binary].get('dependencies', [])), 'full build missing linked FFmpeg library'
             assert root + 'yangshipin-js.py' in z.namelist(), 'missing JS HTTP adapter'
             assert len(z.read(root + 'yangshipin.bundle.js')) > 10000, 'missing original JS extractor bundle'
             assert root + 'yangshipin-LICENSE.txt' in z.namelist(), 'missing JS plugin license'
@@ -80,11 +83,22 @@ def validate(path):
             assert any('JavaScriptCore.framework/' in name for name in result['binaries'][binary]['dependencies']), 'missing JavaScriptCore link'
             result['binaries']['NodeMobile'] = macho_info(z.read(root + 'Frameworks/NodeMobile.framework/NodeMobile'))
             assert not any('NodeMobile.framework/' in name for name in result['binaries'][binary]['dependencies']), 'Node must load on demand'
-            for member in ('media-service.py', 'host_media_runtime.py', 'host_media_relay.py', 'node-plugin-host.cjs', 'node-fetch.bundle.cjs', 'node-fetch-THIRD-PARTY-NOTICES.txt', 'base/spider.py', 'NodeMobile-LICENSE.txt', 'drpy-LICENSE.txt'):
+            for member in ('media-service.py', 'host_media_runtime.py', 'host_media_relay.py', 'node-plugin-host.cjs', 'node-fetch.bundle.cjs', 'node-fetch-THIRD-PARTY-NOTICES.txt', 'base/spider.py', 'lxml/__init__.py', 'lxml/etree.py', 'lxml/html.py', 'pyquery.py', 'NodeMobile-LICENSE.txt', 'drpy-LICENSE.txt'):
                 assert root + member in z.namelist(), 'missing media component: ' + member
             assert len(z.read(root + 'js-runtime.bundle.js')) > 100000, 'missing generic JS and drpy engine'
-            for package in ('requests', 'bs4', 'html5lib', 'urllib3'):
+            for package in ('requests', 'bs4', 'html5lib', 'urllib3', 'elementpath'):
                 assert root + 'python/lib/python3.13/site-packages/' + package + '/__init__.py' in z.namelist(), 'missing Python dependency: ' + package
+            for member in (
+                    'Crypto/__init__.py', 'Crypto/Cipher/__init__.py', 'Crypto/Cipher/ARC4.py', 'Crypto/Cipher/AES.py',
+                    'Crypto/Cipher/PKCS1_v1_5.py', 'Crypto/Cipher/PKCS1_OAEP.py', 'Crypto/Cipher/_aes_core.py',
+                    'Crypto/PublicKey/__init__.py', 'Crypto/PublicKey/RSA.py',
+                    'Crypto/Util/__init__.py', 'Crypto/Util/Padding.py', 'Crypto/Util/Counter.py',
+                    'Crypto/Util/number.py', 'Crypto/Util/strxor.py',
+                    'Crypto/Hash/__init__.py', 'Crypto/Hash/MD5.py', 'Crypto/Hash/HMAC.py', 'Crypto/Hash/CMAC.py',
+                    'Crypto/Protocol/__init__.py', 'Crypto/Protocol/KDF.py', 'Crypto/Random/__init__.py'):
+                assert root + 'python/lib/python3.13/site-packages/' + member in z.namelist(), 'missing pure-Python crypto compatibility module: ' + member
+            assert root + 'python/lib/python3.13/site-packages/Cryptodome/__init__.py' in z.namelist(), 'missing Cryptodome namespace alias'
+            result['python_crypto_compat'] = ['ARC4', 'AES ECB/CBC/CFB/OFB/CTR/GCM/EAX', 'RSA public-key PKCS#1 v1.5/OAEP', 'MD5/Hash/HMAC/CMAC', 'PBKDF2/HKDF', 'Padding/Counter/number/strxor']
             result['local_media_runtimes'] = ['Python Spider', 'JavaScriptCore', 'drpy', 'Node.js Mobile']
         channels = json.loads(z.read(root + 'channels.json'))
         assert isinstance(channels, list) and channels, 'empty channel catalog'

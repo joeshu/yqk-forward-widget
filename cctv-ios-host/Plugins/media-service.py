@@ -3,15 +3,26 @@
 import argparse
 import base64
 import builtins
+import collections
+import hmac
 import json
 import os
 import re
+import stat
 import threading
+import time
 import uuid
+import urllib.error
 import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from host_media_runtime import MediaRuntime, MediaError, NativeJS, PythonSpider, playback, report_runtime_stage
 from host_media_relay import MediaRelay, safe_error_summary
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
 
 
 def is_direct_media_url(url):
@@ -38,6 +49,18 @@ def is_declared_hls(result, url):
         'application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/mpegurl'}
 
 
+def is_dash_media(result, url):
+    if urllib.parse.urlsplit(str(url or '')).path.lower().endswith('.mpd'):
+        return True
+    if not isinstance(result, dict):
+        return False
+    media_format = str(result.get('format') or result.get('mediaType') or
+                       result.get('playbackType') or '').strip().lower()
+    content_type = str(result.get('contentType') or result.get('content_type') or
+                       result.get('mimeType') or result.get('mime') or '').split(';', 1)[0].strip().lower()
+    return media_format in {'mpd', 'dash', 'mpeg-dash', 'application/dash+xml'} or content_type == 'application/dash+xml'
+
+
 def is_extensionless_url(url):
     path = urllib.parse.urlsplit(str(url or '')).path
     name = path.rsplit('/', 1)[-1]
@@ -51,15 +74,52 @@ class Server(ThreadingHTTPServer):
 
     def __init__(self, address, runtime):
         self.runtime = runtime
+        self.proxy_file_root = None
+        # Older embedders/tests set the Node-only name directly.
+        self.node_proxy_file_root = None
         self.relay = MediaRelay(stream_media=True)
         self.artwork_relay = MediaRelay()
+        self.plugin_proxy_lock = threading.Lock()
+        self.plugin_proxy_entries = collections.OrderedDict()
+        self.host_fetch_token = uuid.uuid4().hex
         self.slots = threading.BoundedSemaphore(6)
         super().__init__(address, Handler)
 
     def server_close(self):
         self.artwork_relay.close()
         self.relay.close()
+        with self.plugin_proxy_lock:
+            self.plugin_proxy_entries.clear()
         super().server_close()
+
+    def register_plugin_proxy(self, url, headers):
+        token = uuid.uuid4().hex
+        now = time.monotonic()
+        with self.plugin_proxy_lock:
+            for key in [key for key, value in self.plugin_proxy_entries.items()
+                        if now - value['created'] > 3600]:
+                self.plugin_proxy_entries.pop(key, None)
+            while len(self.plugin_proxy_entries) >= 128:
+                self.plugin_proxy_entries.popitem(last=False)
+            self.plugin_proxy_entries[token] = {
+                'url': str(url), 'upstreamHeaders': dict(headers or {}), 'created': now,
+            }
+        return f'http://127.0.0.1:{self.server_port}/proxy/{token}'
+
+    def plugin_proxy(self, token):
+        if not re.fullmatch(r'[0-9a-f]{32}', str(token or '')):
+            return None
+        now = time.monotonic()
+        with self.plugin_proxy_lock:
+            entry = self.plugin_proxy_entries.get(token)
+            if entry and now - entry['created'] > 3600:
+                self.plugin_proxy_entries.pop(token, None)
+                return None
+            if entry:
+                entry['created'] = now
+                self.plugin_proxy_entries.move_to_end(token)
+                return dict(entry)
+        return None
 
     def server_bind(self):
         import socketserver
@@ -159,6 +219,9 @@ class Handler(BaseHTTPRequestHandler):
         else:
             raw_headers = {}
         value = result[2]
+        if isinstance(value, dict) and value.get('__cctvhostFileResponse') is True:
+            self.send_proxy_file(status, raw_headers, value, head)
+            return
         if isinstance(value, bytes):
             body = value
         elif isinstance(value, (bytearray, memoryview)):
@@ -173,11 +236,17 @@ class Handler(BaseHTTPRequestHandler):
             body = b''
         else:
             raise MediaError('INVALID_PROXY', '代理响应内容类型不受支持')
-        if len(body) > 8 * 1024 * 1024:
-            raise MediaError('RESULT_TOO_LARGE', '来源代理响应超过 8 MB')
+        if len(body) > 16 * 1024 * 1024:
+            raise MediaError('RESULT_TOO_LARGE', '来源代理响应超过 16 MB；请按 Range 返回较小分片')
         no_body_status = 100 <= status < 200 or status in (204, 304)
         if no_body_status:
             body = b''
+        self.send_proxy_headers(status, raw_headers, len(body), head)
+        if not head:
+            self.wfile.write(body)
+
+    def send_proxy_headers(self, status, raw_headers, body_length, head=False, file_response=False):
+        no_body_status = 100 <= status < 200 or status in (204, 304)
         self.send_response(status)
         has_type = False
         source_length = None
@@ -199,14 +268,179 @@ class Handler(BaseHTTPRequestHandler):
         if not has_type:
             self.send_header('Content-Type', 'application/octet-stream')
         if not no_body_status:
-            self.send_header('Content-Length', str(source_length if head and source_length is not None else len(body)))
+            length = source_length if head and source_length is not None and not file_response else body_length
+            self.send_header('Content-Length', str(length))
         self.send_header('Connection', 'close')
         self.end_headers()
-        if not head:
+
+    def send_proxy_file(self, status, headers, reference, head=False):
+        """Stream a validated source-data file without expanding it into RAM/JSON."""
+        root = self.server.proxy_file_root or self.server.node_proxy_file_root
+        path = reference.get('path')
+        offset, length = reference.get('offset'), reference.get('length')
+        if not root or not isinstance(path, str) or not path or len(path) > 4096:
+            raise MediaError('INVALID_PROXY', '媒体文件引用无效')
+        if (isinstance(offset, bool) or not isinstance(offset, int) or
+                not 0 <= offset <= 9223372036854775807 or
+                isinstance(length, bool) or not isinstance(length, int) or
+                not 0 <= length <= 9223372036854775807):
+            raise MediaError('INVALID_PROXY', '媒体文件范围无效')
+        media_file = None
+        try:
+            real_root = os.path.realpath(root)
+            real_path = os.path.realpath(path)
+            if os.path.commonpath((real_root, real_path)) != real_root or not os.path.isfile(real_path):
+                raise ValueError('path outside source data directory')
+            media_file = open(real_path, 'rb')
+            details = os.fstat(media_file.fileno())
+            if not stat.S_ISREG(details.st_mode) or offset > details.st_size or length > details.st_size - offset:
+                raise ValueError('range outside regular file')
+            media_file.seek(offset)
+        except (OSError, ValueError, TypeError):
+            if media_file is not None:
+                media_file.close()
+            raise MediaError('INVALID_PROXY', '媒体文件不可读或范围超出文件')
+        with media_file:
+            self.send_proxy_headers(status, headers, length, head, file_response=True)
+            if head or 100 <= status < 200 or status in (204, 304):
+                return
+            remaining = length
+            try:
+                while remaining:
+                    chunk = media_file.read(min(256 * 1024, remaining))
+                    if not chunk:
+                        # A cache truncated after validation must close this
+                        # response; appending a JSON error would corrupt it.
+                        self.close_connection = True
+                        return
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            except (OSError, TimeoutError):
+                self.close_connection = True
+
+    def serve_plugin_proxy(self, method, path, query):
+        args = {key: values[-1] for key, values in query.items()}
+        if path.startswith('/proxy/'):
+            entry = self.server.plugin_proxy(path[len('/proxy/'):])
+            if not entry:
+                self.send(404, {'ok': False, 'error': '本机代理会话已过期或不存在'}, method == 'HEAD')
+                return
+            args = {'url': entry['url'], 'upstreamHeaders': entry['upstreamHeaders']}
+        headers = {}
+        for name in ('User-Agent', 'Range', 'Accept', 'Referer', 'If-Range',
+                     'If-None-Match', 'If-Modified-Since', 'Accept-Encoding'):
+            value = self.headers.get(name)
+            if value and len(value) <= 8192 and '\r' not in value and '\n' not in value:
+                headers[name] = value
+        args.update({'method': method, 'headers': headers,
+                     'range': headers.get('Range', '')})
+        result = self.call_runtime(self.server.runtime, 'proxy', args)
+        try:
+            self.send_proxy(result, method == 'HEAD')
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            # AVFoundation routinely cancels a probe or seeks while a response
+            # is being delivered. Its closed socket is not a source failure.
+            self.close_connection = True
+
+    def serve_host_fetch(self):
+        supplied = self.headers.get('X-CCTVHost-Host-Fetch', '')
+        if not hmac.compare_digest(supplied, self.server.host_fetch_token):
+            self.send_host_fetch_response(403, b'', reason='Forbidden')
+            return
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 <= length <= 2 * 1024 * 1024:
+                raise ValueError('host HTTPS request payload exceeds 2 MB')
+            payload = json.loads(self.rfile.read(length) or b'{}')
+            if not isinstance(payload, dict):
+                raise ValueError('host HTTPS request payload must be an object')
+            url = payload.get('url')
+            if not isinstance(url, str) or len(url) > 8192:
+                raise ValueError('host HTTPS URL is invalid')
+            parts = urllib.parse.urlsplit(url)
+            parts.port
+            if parts.scheme.lower() != 'https' or not parts.hostname or parts.username or parts.password:
+                raise ValueError('host HTTPS fallback only accepts valid HTTPS URLs')
+            method = str(payload.get('method') or 'GET').upper()
+            if method not in ('GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'):
+                raise ValueError('host HTTPS method is unsupported')
+            raw_body = payload.get('bodyBase64', '')
+            if not isinstance(raw_body, str) or len(raw_body) > 2 * 1024 * 1024:
+                raise ValueError('host HTTPS request body exceeds 1 MB')
+            body = base64.b64decode(raw_body, validate=True) if raw_body else None
+            if body and len(body) > 1024 * 1024:
+                raise ValueError('host HTTPS request body exceeds 1 MB')
+            raw_headers = payload.get('headers') if isinstance(payload.get('headers'), dict) else {}
+            headers = {}
+            blocked = {'content-length', 'connection', 'transfer-encoding',
+                       'keep-alive', 'upgrade', 'proxy-authorization', 'proxy-connection'}
+            for name, value in list(raw_headers.items())[:64]:
+                name, value = str(name), str(value)
+                if (1 <= len(name) <= 128 and len(value) <= 8192 and
+                        re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) and
+                        '\r' not in value and '\n' not in value and name.lower() not in blocked):
+                    headers[name] = value
+            timeout_ms = payload.get('timeoutMs', 15000)
+            if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)):
+                timeout_ms = 15000
+            timeout = max(1.0, min(float(timeout_ms) / 1000.0, 120.0))
+            request = urllib.request.Request(url, data=body, headers=headers, method=method)
+            opener = urllib.request.build_opener(NoRedirect())
+            try:
+                response = opener.open(request, timeout=timeout)
+            except urllib.error.HTTPError as error:
+                response = error
+            try:
+                status = int(response.getcode() or 502)
+                raw_response_headers = response.headers
+                response_body = b'' if method == 'HEAD' or status in (204, 304) else response.read(16 * 1024 * 1024 + 1)
+                if len(response_body) > 16 * 1024 * 1024:
+                    raise ValueError('host HTTPS response exceeds 16 MB')
+                response_headers = list(raw_response_headers.raw_items()) if hasattr(raw_response_headers, 'raw_items') else list(raw_response_headers.items())
+                reason = str(getattr(response, 'reason', '') or '')[:128]
+            finally:
+                response.close()
+            self.send_host_fetch_response(status, response_body, response_headers, reason)
+        except Exception as error:
+            message = safe_error_summary(str(error)).encode('utf-8')[:2048]
+            self.send_host_fetch_response(502, message, [('Content-Type', 'text/plain; charset=utf-8')], 'Bad Gateway')
+
+    def send_host_fetch_response(self, status, body, headers=(), reason=''):
+        status = max(100, min(599, int(status)))
+        reason = re.sub(r'[\x00-\x1f\x7f]', '', str(reason or ''))[:128]
+        no_body = 100 <= status < 200 or status in (204, 304)
+        if no_body:
+            body = b''
+        source_length = None
+        blocked = {'connection', 'content-length', 'transfer-encoding', 'host', 'keep-alive',
+                   'trailer', 'upgrade', 'proxy-authenticate', 'proxy-authorization'}
+        self.send_response(status, reason)
+        for index, pair in enumerate(headers):
+            if index >= 128:
+                break
+            name, value = str(pair[0]), str(pair[1])
+            if name.lower() == 'content-length' and len(value) <= 20 and value.isdigit():
+                source_length = int(value)
+                continue
+            if (len(name) > 128 or len(value) > 16384 or
+                    not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) or
+                    name.lower() in blocked or '\r' in value or '\n' in value):
+                continue
+            self.send_header(name, value)
+        if not no_body:
+            self.send_header('Content-Length', str(len(body)))
+        elif source_length is not None and source_length <= 9223372036854775807:
+            self.send_header('Content-Length', str(source_length))
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        if body:
             self.wfile.write(body)
 
     def do_HEAD(self):
         path = urllib.parse.urlsplit(self.path).path
+        if path == '/_cctvhost/host-fetch':
+            self.send_host_fetch_response(405, b'', [('Allow', 'POST')], 'Method Not Allowed')
+            return
         if path.startswith('/artwork/'):
             self.server.artwork_relay.serve(self, path.rsplit('/', 1)[-1], True)
             return
@@ -219,11 +453,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as error:
                 self.send(502, {'ok': False, 'error': str(error)}, True)
             return
-        if path == '/proxy':
+        if path == '/proxy' or path.startswith('/proxy/'):
             try:
-                args = {key: values[-1] for key, values in urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).items()}
-                args.update({'method': 'HEAD', 'headers': {key: self.headers.get(key, '') for key in ('User-Agent', 'Range', 'Accept', 'Referer') if self.headers.get(key)}})
-                self.send_proxy(self.call_runtime(self.server.runtime, 'proxy', args), True)
+                parts = urllib.parse.urlsplit(self.path)
+                query = urllib.parse.parse_qs(parts.query, max_num_fields=32)
+                self.serve_plugin_proxy('HEAD', path, query)
             except Exception as error:
                 self.send(502, {'ok': False, 'error': str(error)}, True)
             return
@@ -299,6 +533,12 @@ class Handler(BaseHTTPRequestHandler):
         operation = 'route'
         try:
             parts = urllib.parse.urlsplit(self.path)
+            if parts.path == '/_cctvhost/host-fetch':
+                if not post:
+                    self.send_host_fetch_response(405, b'', [('Allow', 'POST')], 'Method Not Allowed')
+                    return
+                self.serve_host_fetch()
+                return
             if parts.path.startswith('/artwork/'):
                 self.server.artwork_relay.serve(self, parts.path.rsplit('/', 1)[-1])
                 return
@@ -308,10 +548,9 @@ class Handler(BaseHTTPRequestHandler):
             if parts.path.startswith('/spider/'):
                 self.route_plugin_path('POST' if post else 'GET')
                 return
-            if parts.path == '/proxy':
-                args = {key: values[-1] for key, values in urllib.parse.parse_qs(parts.query).items()}
-                args.update({'method': 'GET', 'headers': {key: self.headers.get(key, '') for key in ('User-Agent', 'Range', 'Accept', 'Referer') if self.headers.get(key)}})
-                self.send_proxy(self.call_runtime(runtime, 'proxy', args, request_id, correlation_id))
+            if parts.path == '/proxy' or parts.path.startswith('/proxy/'):
+                query = urllib.parse.parse_qs(parts.query, max_num_fields=32)
+                self.serve_plugin_proxy('GET', parts.path, query)
                 return
             if parts.path in ('/all.m3u', '/all.m3u8', '/m3u'):
                 channels = self.call_runtime(runtime, 'catalog', {}, request_id, correlation_id)
@@ -412,7 +651,20 @@ class Handler(BaseHTTPRequestHandler):
                     return f'http://127.0.0.1:{self.server.server_port}/media/{token}'
                 result = dict(result)
                 direct_media = bool(result.get('directMedia') or is_direct_media_url(result.get('url')))
-                can_relay_primary = ((headers or is_declared_hls(result, result.get('url'))
+                alternate_proxy = any(isinstance(item, dict) and item.get('proxy')
+                                      for item in result.get('alternates', []))
+                if result.get('proxy') or alternate_proxy:
+                    capabilities = self.call_runtime(runtime, 'capabilities', {}, request_id, correlation_id)
+                    if not isinstance(capabilities, dict) or 'proxy' not in (capabilities.get('capabilities') or []):
+                        raise MediaError('PROXY_UNSUPPORTED', '播放结果要求本机代理，但此来源没有提供 proxy/localProxy 方法')
+                if result.get('proxy'):
+                    result['originalURL'] = result['url']
+                    result['url'] = self.server.register_plugin_proxy(result['url'], headers)
+                    result['headers'] = {}
+                    result['baseHeaders'] = {}
+                    result['directMedia'] = True
+                    result['nativePlayable'] = True
+                can_relay_primary = (not result.get('proxy') and not is_dash_media(result, result.get('url')) and (headers or is_declared_hls(result, result.get('url'))
                                      or is_extensionless_url(result.get('url')))
                                      and (not result.get('parse') or direct_media))
                 if can_relay_primary:
@@ -429,11 +681,20 @@ class Handler(BaseHTTPRequestHandler):
                         address = alternate['url']
                         alternate_headers = dict(base_headers)
                         alternate_headers.update(alternate.get('headers') or {})
+                        if alternate.get('proxy') or result.get('proxy'):
+                            if result.get('proxy') and not alternate.get('proxy'):
+                                alternate['proxy'] = True
+                            alternate['originalURL'] = address
+                            alternate['url'] = self.server.register_plugin_proxy(address, alternate_headers)
+                            alternate.pop('headers', None)
+                            relayed.append(alternate)
+                            continue
                         alternate_media = dict(alternate)
                         alternate_direct = bool(alternate_media.get('directMedia') or
                                                 is_direct_media_url(address) or
                                                 is_declared_hls(alternate_media, address))
-                        if ((alternate_headers or is_declared_hls(alternate_media, address)
+                        if (not is_dash_media(alternate_media, address) and
+                                (alternate_headers or is_declared_hls(alternate_media, address)
                              or is_extensionless_url(address))
                                 and (not alternate_media.get('parse') or alternate_direct)):
                             alternate['originalURL'] = address
@@ -471,14 +732,23 @@ def main():
     os.makedirs(args.data_dir, exist_ok=True)
     runtime = MediaRuntime()
     server = Server((args.bind, args.port), runtime)
+    if manifest['runtime'] in ('python', 'node'):
+        server.proxy_file_root = os.path.realpath(args.data_dir)
     report_runtime_stage('media_service_listener_bound')
     def create_engine():
         if manifest['runtime'] == 'python':
-            return PythonSpider(args.package, manifest['entry'], manifest.get('options'),
-                                f'http://127.0.0.1:{args.port}/proxy')
-        return NativeJS(args.package, dict(manifest, dataDirectory=args.data_dir,
-                                           proxyURL=f'http://127.0.0.1:{args.port}/proxy'),
-                        node=manifest['runtime'] == 'node')
+            engine = PythonSpider(args.package, manifest['entry'], manifest.get('options'),
+                                  f'http://127.0.0.1:{server.server_port}/proxy', args.data_dir)
+            engine.spider._cctvhost_file_proxy_supported = True
+            return engine
+        node_manifest = dict(manifest, dataDirectory=args.data_dir,
+                             proxyURL=f'http://127.0.0.1:{server.server_port}/proxy')
+        if manifest['runtime'] == 'node':
+            server.node_proxy_file_root = os.path.realpath(args.data_dir)
+            node_manifest.update(
+                hostFetchURL=f'http://127.0.0.1:{server.server_port}/_cctvhost/host-fetch',
+                hostFetchToken=server.host_fetch_token)
+        return NativeJS(args.package, node_manifest, node=manifest['runtime'] == 'node')
     def initialization_failed(error):
         print('[影视] 资源初始化失败：%s: %s' % (type(error).__name__, error))
     report_runtime_stage('media_engine_prepare_started')

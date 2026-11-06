@@ -58,10 +58,12 @@ static NSString *MediaPlaybackString(id value) {
 
 BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary *result) {
     if(![result isKindOfClass:NSDictionary.class])return NO;
-    if([result[@"nativePlayable"] respondsToSelector:@selector(boolValue)]&&[result[@"nativePlayable"] boolValue])return YES;
     NSString *format=MediaPlaybackString(result[@"format"]?:result[@"mediaType"]?:result[@"playbackType"]);
     NSString *mime=MediaPlaybackString(result[@"contentType"]?:result[@"content_type"]?:result[@"mimeType"]?:result[@"mime"]);
     NSRange semicolon=[mime rangeOfString:@";"];if(semicolon.location!=NSNotFound)mime=[mime substringToIndex:semicolon.location];
+    NSString *engine=MediaPlaybackString(result[@"playbackEngine"]);
+    if([engine isEqual:@"cicada"]||MediaPlaybackResultSupportsCicada(result))return NO;
+    if([result[@"nativePlayable"] respondsToSelector:@selector(boolValue)]&&[result[@"nativePlayable"] boolValue])return YES;
     NSSet *formats=[NSSet setWithArray:@[@"hls",@"m3u8",@"m3u",@"mpegurl",@"application/vnd.apple.mpegurl",@"application/x-mpegurl",@"audio/mpegurl",@"mp4",@"m4v",@"mov",@"quicktime",@"mp3",@"m4a",@"aac",@"mpeg-ts",@"mpegts",@"ts"]];
     NSSet *mimes=[NSSet setWithArray:@[@"application/vnd.apple.mpegurl",@"application/x-mpegurl",@"audio/mpegurl",@"video/mp4",@"application/mp4",@"video/quicktime",@"audio/mp4",@"audio/mpeg",@"audio/aac",@"video/mp2t"]];
     if([formats containsObject:format]||[mimes containsObject:mime])return YES;
@@ -71,10 +73,30 @@ BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary *result) {
     return [@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"aac",@"ts"] containsObject:extension];
 }
 
+BOOL MediaPlaybackResultSupportsCicada(NSDictionary *result) {
+    if(![result isKindOfClass:NSDictionary.class])return NO;
+    NSString *engine=MediaPlaybackString(result[@"playbackEngine"]);
+    if([engine isEqual:@"cicada"])return YES;
+    NSString *format=MediaPlaybackString(result[@"format"]?:result[@"mediaType"]?:result[@"playbackType"]);
+    NSString *mime=MediaPlaybackString(result[@"contentType"]?:result[@"content_type"]?:result[@"mimeType"]?:result[@"mime"]);
+    NSRange semicolon=[mime rangeOfString:@";"];if(semicolon.location!=NSNotFound)mime=[mime substringToIndex:semicolon.location];
+    NSString *raw=[result[@"originalURL"] isKindOfClass:NSString.class]?result[@"originalURL"]:result[@"url"];
+    NSURLComponents *components=[NSURLComponents componentsWithString:[raw isKindOfClass:NSString.class]?raw:@""];
+    NSString *extension=components.path.pathExtension.lowercaseString?:@"";
+    NSSet *formats=[NSSet setWithArray:@[@"mpd",@"dash",@"mpeg-dash",@"flv",@"mkv",@"matroska",@"avi",@"webm",@"wmv",@"asf",@"rmvb",@"rm",@"mpg",@"mpeg",@"m2ts",@"3gp"]];
+    NSSet *extensions=[NSSet setWithArray:@[@"mpd",@"flv",@"mkv",@"avi",@"webm",@"wmv",@"asf",@"rmvb",@"rm",@"mpg",@"mpeg",@"m2ts",@"3gp"]];
+    NSSet *mimes=[NSSet setWithArray:@[@"application/dash+xml",@"application/vnd.ms-sstr+xml",@"video/x-flv",@"video/x-matroska",@"video/webm",@"video/x-msvideo",@"video/x-ms-wmv"]];
+    return [formats containsObject:format]||[extensions containsObject:extension]||[mimes containsObject:mime]||[mimes containsObject:format];
+}
+
+BOOL MediaPlaybackResultSupportsNativePlayback(NSDictionary *result) {
+    return MediaPlaybackResultSupportsAVPlayer(result)||MediaPlaybackResultSupportsCicada(result);
+}
+
 BOOL MediaPlaybackResultIsDirectMedia(NSDictionary *result) {
     if(![result isKindOfClass:NSDictionary.class])return NO;
     if([result[@"directMedia"] respondsToSelector:@selector(boolValue)]&&[result[@"directMedia"] boolValue])return YES;
-    if(MediaPlaybackResultSupportsAVPlayer(result))return YES;
+    if(MediaPlaybackResultSupportsNativePlayback(result))return YES;
     NSString *format=MediaPlaybackString(result[@"format"]?:result[@"mediaType"]?:result[@"playbackType"]);
     NSString *mime=MediaPlaybackString(result[@"contentType"]?:result[@"content_type"]?:result[@"mimeType"]?:result[@"mime"]);
     if([mime hasPrefix:@"video/"]||[mime hasPrefix:@"audio/"])return YES;

@@ -14,8 +14,11 @@
 @property(nonatomic, assign) BOOL autoPlay;
 @property(nonatomic, assign) BOOL isPlaying;
 @property(nonatomic, assign) NSUInteger preparation;
+- (BOOL)playLIVEWithUrl:(NSString *)url delegate:(id)delegate configOptions:(NSDictionary *)options;
 @end
-static NSInteger resets, plays, configures;
+static NSInteger resets, plays, configures, urlConfigures, cicadaLicenseOverrides;
+static NSInteger channelConfigurationFailuresRemaining;
+static NSString *lastLiveURL;
 static NSDictionary *cdnPreference;
 @interface CNVDNManager : NSObject
 + (NSDictionary *)getVDNConfig_CDNLive_DefaultCDNInfo;
@@ -51,6 +54,7 @@ static NSDictionary *cdnPreference;
 + (void)configSDK_LiveVDNUrl_V2th:(NSString *)url {
 }
 + (void)configSDK_CICADA_UDRMUrl:(NSString *)url {
+    cicadaLicenseOverrides++;
 }
 + (void)configSDK_HTTP_Origin:(NSString *)origin {
 }
@@ -70,6 +74,11 @@ static NSDictionary *cdnPreference;
     return resets;
 }
 + (NSInteger)smokeConfigureCount { return configures; }
++ (NSInteger)smokeURLConfigureCount { return urlConfigures; }
++ (NSString *)smokeLastLiveURL { return lastLiveURL; }
++ (NSInteger)smokeCicadaLicenseOverrideCount { return cicadaLicenseOverrides; }
++ (void)smokeFailNextChannelConfiguration { channelConfigurationFailuresRemaining=1; }
++ (void)smokeFailChannelConfigurations:(NSInteger)count { channelConfigurationFailuresRemaining=MAX(0,count); }
 + (NSInteger)smokePlayCount {
     return plays;
 }
@@ -77,7 +86,17 @@ static NSDictionary *cdnPreference;
     return nil;
 }
 - (BOOL)playLIVEWithChannelID:(NSString *)cid delegate:(id)delegate configOptions:(NSDictionary *)options {
-    configures++;self.delegate = delegate;
+    configures++;
+    if(channelConfigurationFailuresRemaining>0){
+        channelConfigurationFailuresRemaining--;
+        @throw [NSException exceptionWithName:NSInternalInconsistencyException reason:@"Fixture channel configuration failure" userInfo:nil];
+    }
+    self.delegate = delegate;
+    return YES;
+}
+- (BOOL)playLIVEWithUrl:(NSString *)url delegate:(id)delegate configOptions:(NSDictionary *)options {
+    if(!url.length)return NO;
+    configures++;urlConfigures++;lastLiveURL=[url copy];self.delegate=delegate;
     return YES;
 }
 - (void)prepareRateItemToPlay_completionBlock:(void (^)(BOOL,NSError *))completion {

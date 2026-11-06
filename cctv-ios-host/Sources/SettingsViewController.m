@@ -2,6 +2,7 @@
 #import "HostTheme.h"
 #import "HostImageLoader.h"
 #import "MediaMetadataCache.h"
+#import <math.h>
 #import <AVFoundation/AVFoundation.h>
 
 static NSString *MediaMetadataCacheSummaryText(void) {
@@ -50,6 +51,7 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
 
 @interface SettingsViewController () <UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic,strong) UITableView *table;
+@property(nonatomic) CGFloat bottomOverlayInset;
 @property(nonatomic,strong) NSArray<NSDictionary *> *sections;
 @property(nonatomic,copy,nullable) NSString *lastUpdateCheckText;
 @property(nonatomic,assign) BOOL checkingUpdate;
@@ -64,6 +66,9 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
         @{ @"title":@"字号", @"key":@"cctv.appFontSize.v1", @"segmented":@YES, @"options":@[@"标准",@"大",@"特大"], @"values":@[@0,@1,@2], @"default":@0, @"icon":@"textformat.size" },
         @{ @"title":@"频道用网格显示", @"key":@"channelGridMode", @"icon":@"square.grid.2x2", @"default":@YES },
         @{ @"title":@"频道网格列数", @"key":@"cctv.channelGridColumns.v1", @"segmented":@YES, @"options":@[@"3 列",@"4 列"], @"values":@[@3,@4], @"default":@4, @"icon":@"rectangle.grid.3x2" }
+      ]},
+      @{ @"title":@"媒体", @"footer":@"调整精选内容与海报布局；资源站和内部站点仍在媒体页顶部选择。", @"rows":@[
+        @{ @"title":@"媒体显示", @"detail":@"精选模块与海报布局", @"action":@"mediaDisplay", @"icon":@"rectangle.grid.2x2" }
       ]},
       @{ @"title":@"启动", @"footer":@"打开时回到上次离开的页面；关闭后每次打开都从央视直播开始。", @"rows":@[
         @{ @"title":@"启动时恢复上次打开的页面", @"key":@"cctv.restoreLastTab.v1", @"icon":@"arrow.uturn.left", @"default":@YES }
@@ -112,8 +117,25 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
         @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass" }
       ]}
     ];
-    self.table=[[UITableView alloc]initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped]; self.table.translatesAutoresizingMaskIntoConstraints=NO; self.table.backgroundColor=HostBackground(); self.table.dataSource=self; self.table.delegate=self; self.table.rowHeight=UITableViewAutomaticDimension; self.table.estimatedRowHeight=68; self.table.tintColor=HostAccent(); [self.view addSubview:self.table];
-    [NSLayoutConstraint activateConstraints:@[[self.table.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],[self.table.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.table.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.table.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor]]];
+    self.table=[[UITableView alloc]initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped]; self.table.translatesAutoresizingMaskIntoConstraints=NO; self.table.backgroundColor=HostBackground(); self.table.dataSource=self; self.table.delegate=self; self.table.rowHeight=UITableViewAutomaticDimension; self.table.estimatedRowHeight=68; self.table.tintColor=HostAccent();self.table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever; [self.view addSubview:self.table];
+    [NSLayoutConstraint activateConstraints:@[[self.table.topAnchor constraintEqualToAnchor:self.view.topAnchor],[self.table.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.table.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
+    [self updateImmersiveTableInsets];
+}
+- (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self updateImmersiveTableInsets];}
+- (void)viewSafeAreaInsetsDidChange {[super viewSafeAreaInsetsDidChange];[self updateImmersiveTableInsets];}
+- (void)updateImmersiveTableInsets {
+    if(!self.isViewLoaded||!self.table)return;
+    CGFloat top=MAX(0,self.view.safeAreaInsets.top),bottom=MAX(8,self.bottomOverlayInset);UIEdgeInsets old=self.table.contentInset,next=UIEdgeInsetsMake(top,0,bottom,0);
+    if(fabs(old.top-top)<0.5&&fabs(old.bottom-bottom)<0.5)return;
+    BOOL wasAtTop=self.table.contentOffset.y<=-old.top+1;self.table.contentInset=next;self.table.scrollIndicatorInsets=next;
+    if(wasAtTop)self.table.contentOffset=CGPointMake(self.table.contentOffset.x,-top);
+}
+- (void)setBottomOverlayInset:(CGFloat)inset {
+    if(!isfinite(inset))inset=0;
+    inset=MAX(8,inset);
+    if(fabs(_bottomOverlayInset-inset)<0.01)return;
+    _bottomOverlayInset=inset;
+    [self updateImmersiveTableInsets];
 }
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
@@ -178,6 +200,7 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     else if([row[@"action"] isEqualToString:@"openServices"]){if(self.onOpenServices)self.onOpenServices();}
     else if([row[@"action"] isEqualToString:@"export"]){if(self.onExportData)self.onExportData();}
     else if([row[@"action"] isEqualToString:@"runtimeDiagnostics"]){if(self.onOpenDiagnostics)self.onOpenDiagnostics();}
+    else if([row[@"action"] isEqualToString:@"mediaDisplay"]){if(self.onMediaDisplaySettings)self.onMediaDisplaySettings();}
     else if([row[@"action"] isEqualToString:@"import"]){if(self.onImportData)self.onImportData();}
     else if([row[@"action"] isEqualToString:@"logs"]){if(self.onOpenLog)self.onOpenLog();}
 }

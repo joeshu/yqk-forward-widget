@@ -15,6 +15,25 @@ static BOOL SafeRelative(NSString *path){
     for(NSString *part in path.pathComponents)if([part isEqual:@".."] || [part isEqual:@"."])return NO;
     return YES;
 }
+static NSString *PackageExportTarget(id value,BOOL preferESM,NSUInteger depth){
+    if(depth>8)return nil;
+    if([value isKindOfClass:NSString.class]){
+        NSString *target=value;
+        if([target hasPrefix:@"./"])target=[target substringFromIndex:2];
+        return SafeRelative(target)?target:nil;
+    }
+    if([value isKindOfClass:NSArray.class]){
+        for(id candidate in value){NSString *target=PackageExportTarget(candidate,preferESM,depth+1);if(target.length)return target;}
+        return nil;
+    }
+    if(![value isKindOfClass:NSDictionary.class])return nil;
+    NSDictionary *exports=value;
+    if(exports[@"."]){exports=exports[@"."];if(![exports isKindOfClass:NSDictionary.class]&&![exports isKindOfClass:NSArray.class]&&![exports isKindOfClass:NSString.class])return nil;}
+    else for(id key in exports)if([key isKindOfClass:NSString.class]&&[key hasPrefix:@"."])return nil; // Subpath-only exports do not define the package root.
+    NSArray *conditions=preferESM?@[@"import",@"node",@"default",@"require"]:@[@"require",@"node",@"default",@"import"];
+    for(NSString *condition in conditions){id candidate=exports[condition];if(candidate){NSString *target=PackageExportTarget(candidate,preferESM,depth+1);if(target.length)return target;}}
+    return nil;
+}
 static NSData *ReadBounded(NSURL *url,NSUInteger limit,NSError **error){
     NSFileHandle *file=[NSFileHandle fileHandleForReadingFromURL:url error:error];if(!file)return nil;
     NSMutableData *bytes=[NSMutableData data];
@@ -28,6 +47,21 @@ static BOOL PythonDeclaresArgument(NSString *source,NSString *argument){
     NSString *pattern=[NSString stringWithFormat:@"add_argument\\s*\\(\\s*['\"]%@['\"]",[NSRegularExpression escapedPatternForString:argument]];
     return [source rangeOfString:pattern options:NSRegularExpressionSearch].location!=NSNotFound;
 }
+static BOOL PackageContainsNodeCoreImport(NSString *root,NSString *pattern){
+    NSRegularExpression *expression=[NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];
+    if(!expression)return NO;
+    NSDirectoryEnumerator *files=[NSFileManager.defaultManager enumeratorAtURL:[NSURL fileURLWithPath:root isDirectory:YES] includingPropertiesForKeys:@[NSURLIsRegularFileKey,NSURLFileSizeKey] options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:nil];
+    NSUInteger scanned=0;
+    for(NSURL *url in files){
+        NSString *extension=url.pathExtension.lowercaseString;
+        if(![@[@"js",@"mjs",@"cjs"] containsObject:extension])continue;
+        NSNumber *regular=nil,*size=nil;[url getResourceValue:&regular forKey:NSURLIsRegularFileKey error:NULL];[url getResourceValue:&size forKey:NSURLFileSizeKey error:NULL];
+        NSUInteger length=size.unsignedIntegerValue;if(!regular.boolValue||length>PackageFileLimit||length>PackageTotalLimit-scanned)continue;
+        scanned+=length;
+        NSData *data=ReadBounded(url,PackageFileLimit,NULL);NSString *source=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
+        if(source&&[expression firstMatchInString:source options:0 range:NSMakeRange(0,source.length)])return YES;
+    }
+    return NO;
 static BOOL MediaAPIMethodDeclaredInSource(NSString *source) {
     // 与 JSPlugins/generic/entry.mjs 的起播校验保持一致：cctvhost.media/1 插件
     // 至少实现 home/category/search/detail/play/channels/catalog/resolve 之一。
@@ -148,6 +182,10 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
 }
 
 + (NSDictionary *)inspectDirectory:(NSString *)directory error:(NSError **)error {
+    return [self inspectDirectory:directory runtimeHint:nil error:error];
+}
+
++ (NSDictionary *)inspectDirectory:(NSString *)directory runtimeHint:(NSString *)runtimeHint error:(NSError **)error {
     NSFileManager *fm=NSFileManager.defaultManager;NSString *root=directory;
     NSArray *visible=[[fm contentsOfDirectoryAtPath:root error:error] filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *name,NSDictionary *bindings){return ![name hasPrefix:@"."] && ![name isEqual:@"__MACOSX"];}]];
     if(visible.count==1){BOOL isDirectory=NO;NSString *nested=[root stringByAppendingPathComponent:visible.firstObject];if([fm fileExistsAtPath:nested isDirectory:&isDirectory] && isDirectory)root=nested;}
@@ -168,7 +206,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     for(NSString *key in @[@"version",@"pluginVersion"])if([result[key] length]>128 || [package[@"version"] length]>128){PackageError(error,@"资源版本标识超过 128 个字符");return nil;}
     NSString *entry=result[@"entry"];
     if(!entry.length){
-        entry=package[@"module"]?:package[@"main"];
+        NSString *exportEntry=PackageExportTarget(package[@"exports"],[package[@"type"] isEqual:@"module"],0);
+        if(exportEntry.length && [fm fileExistsAtPath:[root stringByAppendingPathComponent:exportEntry]])entry=exportEntry;
+        if(!entry.length)entry=package[@"module"]?:package[@"main"];
         if([entry hasPrefix:@"./"])entry=[entry substringFromIndex:2];
         if(!entry.length)for(NSString *candidate in @[@"index.js",@"index.mjs",@"index.cjs",@"src/index.js",@"src/index.mjs",@"nodejs/src/index.js",@"spider.py",@"main.py"]){if([fm fileExistsAtPath:[root stringByAppendingPathComponent:candidate]]){entry=candidate;break;}}
         if(!entry.length){NSMutableArray *candidates=[NSMutableArray array],*pythonServers=[NSMutableArray array];for(NSString *name in [fm contentsOfDirectoryAtPath:root error:NULL])if([@[@"py",@"js",@"mjs",@"cjs"] containsObject:name.pathExtension.lowercaseString]){[candidates addObject:name];if([name.pathExtension.lowercaseString isEqual:@"py"]){NSString *source=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:name]],PackageFileLimit,NULL) encoding:NSUTF8StringEncoding];if([source containsString:@"ThreadingHTTPServer"] && PythonDeclaresArgument(source,@"--bind") && (PythonDeclaresArgument(source,@"port") || PythonDeclaresArgument(source,@"--port")))[pythonServers addObject:name];}}if(candidates.count==1)entry=candidates.firstObject;else if(pythonServers.count==1)entry=pythonServers.firstObject;}
@@ -205,6 +245,8 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     BOOL catpawAppBundle=catpawRouter && [text rangeOfString:@"globalThis\\s*\\.\\s*Pans\\s*=\\s*await" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catpawNativeHooks=[text containsString:@"catServerFactory"] && [text containsString:@"catDartServerPort"] && [text containsString:@"module.exports"];
     BOOL catpawOpen=(catpawEntry||catpawAppBundle||catpawNativeHooks)&&catpawRouter;
+    BOOL hamoSourceType=[text rangeOfString:@"\\btype\\s*:\\s*'source'" options:NSRegularExpressionSearch].location!=NSNotFound || [text rangeOfString:@"\\btype\\s*:\\s*\"source\"" options:NSRegularExpressionSearch].location!=NSNotFound;
+    BOOL hamoSourceV3=[text rangeOfString:@"\\bapiVersion\\s*:\\s*3\\b" options:NSRegularExpressionSearch].location!=NSNotFound && hamoSourceType && [text rangeOfString:@"(?:async\\s+)?function\\s+home\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:async\\s+)?function\\s+resolve\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL widgetExtractor=[text containsString:@"WidgetMetadata"] && [text containsString:@"Widget.http"] && [text rangeOfString:@"(?:async\\s+)?function\\s+loadResource\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catVodMethods=[text rangeOfString:@"(?:(?:async\\s+)?(?:home|homeContent)\\s*\\(|\\b(?:home|homeContent)\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?category\\s*\\(|\\bcategory\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?detail\\s*\\(|\\bdetail\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?play\\s*\\(|\\bplay\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catVodQuickJS=catVodMethods && ([text containsString:@"export default"] || [text containsString:@"module.exports"]);
@@ -215,6 +257,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     BOOL protocolDefaulted=NO;
     if(!protocol.length){
         if([runtime isEqual:@"python"]){protocol=[text rangeOfString:@"class Spider"].location!=NSNotFound?@"python-spider":@"python-http";}
+        else if(hamoSourceV3){runtime=@"javascript";protocol=@"hamo-source-v3";moduleType=@"script";}
         else if(widgetExtractor){runtime=@"node";protocol=@"widget-extractor";}
         else if(catpawOpen){runtime=@"node";protocol=@"catpaw-http";}
         else if([text containsString:@"createService"] && [text containsString:@"/config"] && [text containsString:@"/spider/"]){runtime=@"node";protocol=@"catpaw-http";}
@@ -234,6 +277,14 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         BOOL commonJS=[entry.pathExtension.lowercaseString isEqual:@"cjs"] || [text rangeOfString:@"(?:^|[;\\n])\\s*(?:module\\s*\\.\\s*exports|exports\\s*\\.)" options:NSRegularExpressionSearch].location!=NSNotFound;
         moduleType=esmSource?@"esm":((commonJS||bundledCommonJS)?@"commonjs":@"script");
     }
+    // Explicit Node core imports need Node.js Mobile. The JSC import registry
+    // contains convenience shims, not full Node APIs (notably crypto, fs,
+    // http and https), so run these packages against Node's actual modules.
+    NSString *nodeCorePattern=@"(?:from\\s*|import\\s*(?:\\(\\s*)?|require\\s*\\(\\s*)['\\\"](?:node:[^'\\\"]+|(?:assert|async_hooks|buffer|child_process|crypto|dgram|diagnostics_channel|dns|events|fs|http2?|https|module|net|os|path|perf_hooks|process|punycode|querystring|readline|stream|string_decoder|timers|tls|tty|url|util|v8|vm|wasi|worker_threads|zlib)(?:/(?:promises|consumers|web|types))?)['\\\"]";
+    // Imports can live in a transitive helper under src/ or node_modules, not
+    // only in the declared entry file. Scan the bounded package source set.
+    BOOL nodeCoreImport=PackageContainsNodeCoreImport(root,nodeCorePattern);
+    if(nodeCoreImport && ![protocol isEqual:@"catvod-spider"] && !hamoSourceV3)runtime=@"node";
     if(!runtime.length){
         NSDictionary *dependencies=[package[@"dependencies"] isKindOfClass:NSDictionary.class]?package[@"dependencies"]:@{};
         BOOL hasCommonJSRequire=[text rangeOfString:@"\\brequire\\s*\\(\\s*['\\\"]" options:NSRegularExpressionSearch].location!=NSNotFound;
@@ -244,8 +295,18 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         BOOL catvodDependencies=YES;NSSet *jscPackages=[NSSet setWithArray:@[@"axios",@"buffer",@"cheerio",@"crypto",@"crypto-js",@"http2",@"iconv-lite",@"jpeg-js",@"qs",@"stream",@"url"]];for(NSString *name in dependencies)if(![jscPackages containsObject:name]){catvodDependencies=NO;break;}
         runtime=([@[@"catvod-spider"] containsObject:protocol] || ([protocol isEqual:@"catvod-js"]&&catvodDependencies))?@"javascript":((dependencies.count || (hasCommonJSRequire && !nodeProtocol))?@"node":@"javascript");
     }
+    if(runtimeHint.length){
+        if(![@[@"python",@"node"] containsObject:runtimeHint]){PackageError(error,@"导入运行时提示无效");return nil;}
+        NSString *extension=entry.pathExtension.lowercaseString;
+        if([runtimeHint isEqual:@"python"] && ![extension isEqual:@"py"]){PackageError(error,@"Python Spider 快捷导入需要以 .py 文件作为入口；ZIP 中请使用智能识别导入");return nil;}
+        if([runtimeHint isEqual:@"node"] && [extension isEqual:@"py"]){PackageError(error,@"Node.js 快捷导入只适用于 JavaScript 入口；Python 文件请使用 Python Spider 导入");return nil;}
+        if([runtimeHint isEqual:@"node"] && ([@[@"catvod-spider",@"hamo-source-v3",@"python-spider",@"python-http"] containsObject:protocol])){PackageError(error,@"此协议需要 JavaScriptCore 或 CPython，不能强制切换到 Node.js Mobile");return nil;}
+        runtime=runtimeHint;
+        if([runtime isEqual:@"python"])protocol=[text containsString:@"class Spider"]?@"python-spider":@"python-http";
+    }
+    if([runtime isEqual:@"python"])moduleType=@"script";
     if(![@[@"esm",@"commonjs",@"script"] containsObject:moduleType] || ([runtime isEqual:@"python"] != [entry.pathExtension.lowercaseString isEqual:@"py"])){PackageError(error,@"入口类型与运行时声明不匹配");return nil;}
-    if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"catvod-spider",@"drpy",@"iptv-extractor",@"catpaw-http",@"widget-extractor",@"nanotv-service-v2"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}
+    if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"catvod-spider",@"drpy",@"iptv-extractor",@"catpaw-http",@"widget-extractor",@"nanotv-service-v2",@"hamo-source-v3"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}
     if([protocol isEqual:@"catvod-spider"] && ![runtime isEqual:@"javascript"]){PackageError(error,@"CatPaw JS Spider 必须使用 JavaScriptCore 运行时（runtime: javascript）");return nil;}
     // Keep a small, typed manifest: no arbitrary paths or host control fields.
     NSMutableDictionary *clean=[@{@"schemaVersion":@1,@"entry":entry,@"runtime":runtime,@"protocol":protocol,@"moduleType":moduleType,@"name":([result[@"name"] isKindOfClass:NSString.class]?result[@"name"]:(package[@"name"]?:entry.stringByDeletingPathExtension))} mutableCopy];
@@ -254,6 +315,8 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(nanoServiceV2){clean[@"name"]=[nanoManifest[@"name"] isKindOfClass:NSString.class]?nanoManifest[@"name"]:clean[@"name"];clean[@"capabilities"]=nanoCapabilities;clean[@"pluginVersion"]=[nanoManifest[@"version"] isKindOfClass:NSString.class]?nanoManifest[@"version"]:@"";clean[@"apiVersion"]=@2;}
     if(verifiedLocalChecksums.count)clean[@"verifiedLocalChecksums"]=verifiedLocalChecksums;
     if([result[@"options"] isKindOfClass:NSDictionary.class] || [result[@"options"] isKindOfClass:NSString.class])clean[@"options"]=result[@"options"];
+    BOOL androidTVBoxIntegration=[text containsString:@"from java import"] || [text containsString:@"jclass("] || [text containsString:@"/sdcard/TV/CustomCsp"];
+    if([runtime isEqual:@"python"] && androidTVBoxIntegration)clean[@"compatibilityNote"]=@"此 Python Spider 含 Android/TVBox 本地目录或 Java 界面逻辑。iOS 不提供 /sdcard、Android Activity 或向其他 TVBox 写入配置的能力；其标准影视接口仍可尝试使用。";
     clean[@"packageRoot"]=root;
     if([protocol isEqual:@"catpaw-http"] && [fm fileExistsAtPath:[root stringByAppendingPathComponent:@"index.config.js"]])clean[@"configEntry"]=@"index.config.js";
     return clean;
@@ -262,6 +325,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     return [self importFile:file companionFiles:@{} error:error];
 }
 + (NSDictionary *)importFile:(NSURL *)file companionFiles:(NSDictionary<NSString *,NSData *> *)files error:(NSError **)error {
+    return [self importFile:file companionFiles:files runtimeHint:nil error:error];
+}
++ (NSDictionary *)importFile:(NSURL *)file companionFiles:(NSDictionary<NSString *,NSData *> *)files runtimeHint:(NSString *)runtimeHint error:(NSError **)error {
     NSData *bytes=ReadBounded(file,PackageArchiveLimit,error);if(!bytes)return nil;
     NSString *identifier=NSUUID.UUID.UUIDString,*stage=[[ServiceStore directory] stringByAppendingPathComponent:[@".import-" stringByAppendingString:identifier]];
     NSString *package=[stage stringByAppendingPathComponent:@"package"];NSFileManager *fm=NSFileManager.defaultManager;
@@ -280,7 +346,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             if(![name isEqual:@"index.config.js"] || ![data isKindOfClass:NSData.class] || !data.length || data.length>65536 || [fm fileExistsAtPath:[package stringByAppendingPathComponent:name]]){PackageError(error,@"配套配置文件无效或与包内文件冲突");return nil;}
             if(![data writeToFile:[package stringByAppendingPathComponent:name] options:NSDataWritingAtomic error:error])return nil;
         }
-        NSMutableDictionary *manifest=[[self inspectDirectory:package error:error] mutableCopy];if(!manifest)return nil;
+        NSMutableDictionary *manifest=[[self inspectDirectory:package runtimeHint:runtimeHint error:error] mutableCopy];if(!manifest)return nil;
         NSString *launchArguments=@"";
         NSString *playlistPath=@"";
         if([manifest[@"runtime"] isEqual:@"python"] && [manifest[@"protocol"] isEqual:@"python-http"]){

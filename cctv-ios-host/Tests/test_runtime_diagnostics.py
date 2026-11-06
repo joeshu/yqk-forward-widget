@@ -9,6 +9,7 @@ MEDIA = (ROOT / "Sources/MediaAPIClient.m").read_text()
 PLAYBACK = (ROOT / "Sources/MediaPlaybackViewController.m").read_text()
 READINESS = (ROOT / "Sources/LocalServiceReadiness.m").read_text()
 BROWSER = (ROOT / "Sources/MediaBrowserViewController.m").read_text()
+FEED = (ROOT / "Sources/MediaFeedView.m").read_text()
 PYHOST = (ROOT / "Sources/PyHost.m").read_text()
 APP_DELEGATE = (ROOT / "Sources/AppDelegate.m").read_text()
 IMAGE_LOADER = (ROOT / "Sources/HostImageLoader.m").read_text()
@@ -107,7 +108,7 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
             'media_grid_cell_configuration_started', 'media_grid_cell_configuration_completed',
             'media_grid_first_cell_will_display',
         ):
-            self.assertIn(marker, BROWSER)
+            self.assertIn(marker, BROWSER + FEED)
         self.assertIn('MetricKit.framework', (ROOT / 'project.yml').read_text())
         self.assertIn('-framework MetricKit', (ROOT / 'Scripts/ui-smoke.sh').read_text())
         self.assertIn('-framework MetricKit', (ROOT / 'Scripts/ci-build.sh').read_text())
@@ -369,10 +370,11 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
     def test_poster_failures_are_classified_without_logging_image_addresses(self):
         self.assertIn('recordEvent:@"poster_image_failed"', IMAGE_LOADER)
         for stage in ('http_status', 'response_too_large', 'network_error',
-                      'image_decode_failed', 'empty_body'):
+                      'image_decode_failed', 'empty_body',
+                      'encrypted_image_requires_decryption_or_clear_mirror'):
             self.assertIn(f'@"{stage}"', IMAGE_LOADER)
         for field in ('image_host', 'image_extension', 'http_status',
-                      'content_type', 'response_bytes', 'elapsed_ms',
+                      'content_type', 'encrypted_response', 'response_bytes', 'elapsed_ms',
                       'expected_content_length_known', 'expected_response_bytes',
                       'response_length_matches_expected', 'error_domain', 'error_code'):
             self.assertIn(f'@"{field}"', IMAGE_LOADER)

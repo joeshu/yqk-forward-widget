@@ -2,5 +2,7 @@
 @interface MediaPackageDownloader : NSObject
 @property(nonatomic, copy) void (^onProgress)(NSString *stage, int64_t receivedBytes, int64_t expectedBytes);
 - (void)importURL:(NSURL *)url completion:(void (^)(NSDictionary *service,NSError *error))completion;
+- (void)importURL:(NSURL *)url headers:(nullable NSDictionary<NSString *,NSString *> *)headers completion:(void (^)(NSDictionary *service,NSError *error))completion;
+- (void)importURL:(NSURL *)url headers:(nullable NSDictionary<NSString *,NSString *> *)headers runtimeHint:(nullable NSString *)runtimeHint completion:(void (^)(NSDictionary *service,NSError *error))completion;
 - (void)cancel;
 @end

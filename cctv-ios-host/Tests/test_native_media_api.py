@@ -13,18 +13,69 @@ from urllib.parse import parse_qs, urlsplit
 class NativeMediaAPITests(unittest.TestCase):
     def test_tvbox_type_1_and_4_protocol_roundtrip(self):
         requests = []
+        parser_requests = []
+        auth_headers = []
+        api_key_headers = []
+        redirected_headers = []
+
+        class RedirectTargetHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                redirected_headers.append((self.headers.get('Authorization'), self.headers.get('Cookie'), self.headers.get('X-API-Key')))
+                data = json.dumps({"code": 1, "page": 1, "pagecount": 1,
+                                   "list": [{"vod_id": "redirected", "vod_name": "Redirected fixture"}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args): pass
+
+        redirect_server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectTargetHandler)
+        threading.Thread(target=redirect_server.serve_forever, daemon=True).start()
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 parsed = urlsplit(self.path)
                 query = parse_qs(parsed.query)
+                if parsed.path == "/parse":
+                    parser_requests.append((query, self.headers.get("X-Parser")))
+                    if query.get("url") == ["https://resolver.example/watch?id=mpd"]:
+                        payload = {"url": "https://cdn.example/manifest.mpd", "format": "mpd"}
+                    else:
+                        payload = {"url": f"http://127.0.0.1:{server.server_port}/stream.m3u8?token=fixture",
+                                   "header": {"Referer": "https://parser.example/"}}
+                    data = json.dumps(payload).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                if parsed.path == "/stream.m3u8":
+                    data = b"#EXTM3U\n#EXT-X-ENDLIST\n"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/vnd.apple.mpegurl")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 requests.append((query, self.headers.get("X-Fixture"), self.headers.get("Host")))
+                auth_headers.append(self.headers.get("Authorization"))
+                api_key_headers.append(self.headers.get("X-API-Key"))
+                if query.get("wd") == ["redirect"]:
+                    self.send_response(302)
+                    self.send_header("Location", f"http://127.0.0.1:{redirect_server.server_port}/redirected")
+                    self.end_headers()
+                    return
                 if query.get("wd") == ["fail"]:
                     payload = {"code": 0, "msg": "fixture denied"}
                 elif query.get("wd") == ["empty"]:
                     payload = {"code": 0, "msg": "ok", "page": 1, "list": []}
                 elif query.get("play") == ["web-episode"]:
                     payload = {"code": 1, "url": "https://resolver.example/watch?id=fixture", "parse": 1, "jx": 1}
+                elif query.get("play") == ["web-episode-mpd"]:
+                    payload = {"code": 1, "url": "https://resolver.example/watch?id=mpd", "parse": 1, "jx": 1}
                 elif query.get("play") == ["quality-specific"]:
                     payload = {"code": 1, "url": [
                         {"name": "高清", "url": "https://cdn.example/high.m3u8",
@@ -59,9 +110,10 @@ class NativeMediaAPITests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 executable = str(pathlib.Path(tmp) / "native-media-api-tests")
                 build = subprocess.run([
-                    "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-framework", "QuartzCore",
+                    "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-framework", "QuartzCore", "-lz",
                     "-I", str(root / "Sources"), str(root / "Tests" / "native_media_api_tests.m"),
                     str(root / "Sources" / "MediaAPIClient.m"),
+                    str(root / "Sources" / "TVBoxCatalogStore.m"),
                     str(root / "Sources" / "MediaPlaybackHeaders.m"), "-o", executable,
                 ], capture_output=True, text=True)
                 self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
@@ -77,10 +129,20 @@ class NativeMediaAPITests(unittest.TestCase):
             self.assertTrue(all(header == "header" for _, header, _ in requests), "source headers reach each API request")
             self.assertTrue(all(host.startswith("127.0.0.1:") for _, _, host in requests), "untrusted Host headers cannot override the API host")
             self.assertTrue(all(query.get("token") == ["fixture"] and query.get("extend") == ['{"region":"cn"}'] for query, _, _ in requests))
-            self.assertEqual(len(requests), 9, "type 1 play is resolved locally and does not make an API request")
+            self.assertTrue(all(value == "Basic fixture" for value in auth_headers), "source authorization reaches its own API origin")
+            self.assertTrue(all(value == "fixture-key" for value in api_key_headers), "source API-key headers reach their own origin")
+            self.assertEqual(redirected_headers, [(None, None, None)], "credential headers are stripped when an API redirects to another origin")
+            self.assertGreaterEqual(len(requests), 12, "TVBox and unscoped package play requests reach the expected APIs")
+            self.assertLessEqual(len(requests), 13, "TVBox and unscoped package play requests stay bounded")
+            self.assertEqual(len(parser_requests), 2, "selected TVBox JSON parser receives both page URLs once")
+            self.assertEqual(parser_requests[0][0].get("url"), ["https://resolver.example/watch?id=fixture"])
+            self.assertEqual(parser_requests[0][1], "parser-fixture", "parser-specific headers reach the parser endpoint")
+            self.assertEqual(parser_requests[1][0].get("url"), ["https://resolver.example/watch?id=mpd"])
         finally:
             server.shutdown()
             server.server_close()
+            redirect_server.shutdown()
+            redirect_server.server_close()
 
 
 if __name__ == "__main__":

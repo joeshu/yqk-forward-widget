@@ -6,6 +6,7 @@ LOG = (ROOT / "Sources/LogCenterViewController.m").read_text()
 DIAG = (ROOT / "Sources/RuntimeDiagnosticsViewController.m").read_text()
 BROWSER = (ROOT / "Sources/MediaBrowserViewController.m").read_text()
 BROWSER_LINES = BROWSER.splitlines()
+FEED = (ROOT / "Sources/MediaFeedView.m").read_text()
 
 
 def browser_head():
@@ -85,30 +86,32 @@ class MediaLibraryRound2Tests(unittest.TestCase):
         self.assertTrue(any(line.startswith("@interface MediaDetailViewController") for line in BROWSER_LINES))
         self.assertNotIn("@implementation MediaDetailViewController", HEAD)
 
-    def test_discovery_more_button_meets_44pt_touch_target(self):
-        # 之前是 32x32，低于 44pt 最小触摸目标；改大后状态标签同步让位避免重叠。
-        self.assertIn("CGRectMake(width-44,2,44,44)", HEAD)
-        self.assertIn("self.moreButton.layer.cornerRadius=22", HEAD)
-        self.assertNotIn("CGRectMake(width-38,6,32,32)", HEAD)
-        self.assertIn("MAX(0,width-58)", HEAD)
+    # 旧发现页 MediaDiscoveryCell/MediaPosterCell 已被 413 的 MediaFeedView
+    # 取代：feed 海报 cell 没有每格 more 按钮与状态标签，故无 44pt more
+    # 按钮及其与状态标签重叠的问题；下面三项断言改为 feed 的等价实现。
+    # （原 test_discovery_more_button_meets_44pt_touch_target 已随旧 cell 删除。）
 
-    def test_discovery_status_label_height_follows_dynamic_type(self):
-        # 状态行固定 16pt 在超大字体下截断；默认字号下行高仍为 16，外观不变。
-        self.assertIn("MAX(16,ceil(self.posterStatusLabel.font.lineHeight))", HEAD)
-        self.assertNotIn("CGRectMake(8,posterHeight-23,MAX(0,width-50),16)", HEAD)
+    def test_feed_status_label_height_follows_dynamic_type(self):
+        # feed 海报 cell 的片名/副标题用 preferredFont + adjustsFont，
+        # 行高按当前字号的 lineHeight 算，超大字体下不截断。
+        self.assertIn("self.nameLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.nameLabel.adjustsFontForContentSizeCategory=YES", FEED)
+        self.assertIn("self.detailLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.detailLabel.adjustsFontForContentSizeCategory=YES", FEED)
+        self.assertIn("CGFloat titleHeight=ceil(self.nameLabel.font.lineHeight)*2,detailHeight=ceil(self.detailLabel.font.lineHeight)", FEED)
 
-    def test_discovery_labels_use_scaled_fonts(self):
-        # 固定字号 + adjustsFont 虽能缩放，但应与 sizeForItemAtIndexPath 的
-        # UIFontMetrics 计算口径一致，默认字号外观不变。
-        self.assertIn("scaledFontForFont:[UIFont systemFontOfSize:9 weight:UIFontWeightSemibold]", HEAD)
-        self.assertIn("scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]", HEAD)
-        self.assertIn("scaledFontForFont:[UIFont systemFontOfSize:10 weight:UIFontWeightRegular]", HEAD)
+    def test_feed_labels_use_scaled_fonts(self):
+        # feed 分组头与 hero 标题用 UIFontMetrics 缩放字号，默认字号外观不变。
+        self.assertIn("scaledFontForFont:[UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]", FEED)
+        self.assertIn("scaledFontForFont:[UIFont systemFontOfSize:27 weight:UIFontWeightBold]", FEED)
+        self.assertIn("adjustsFontForContentSizeCategory=YES", FEED)
 
-    def test_poster_cell_placeholder_matches_discovery_cell(self):
-        # 无海报时之前是空白色块，与发现页 film 占位不一致；contentMode 必须
-        # 随分支复位，否则复用 cell 上一次的 Center 会让新海报居中显示。
-        self.assertIn("self.posterView.contentMode=UIViewContentModeScaleAspectFill;[HostImageLoader.shared loadURL:poster intoImageView:self.posterView];", HEAD)
-        self.assertIn('self.posterView.image=[UIImage systemImageNamed:@"film"];self.posterView.contentMode=UIViewContentModeCenter;self.posterView.tintColor=HostSecondaryText();', HEAD)
+    def test_feed_poster_cell_placeholder_matches_film_fallback(self):
+        # 无海报时显示 film 占位（Center + 次级文本色）；有海报时经带重试
+        # 的加载器取图，成功后 HostImageLoader 把 contentMode 复位为
+        # AspectFill；复用时先清图片，避免旧图残留。
+        self.assertIn('self.poster.image=[UIImage systemImageNamed:@"film"];self.poster.contentMode=UIViewContentModeCenter;self.poster.tintColor=HostSecondaryText();', FEED)
+        self.assertIn("self.poster.contentMode=UIViewContentModeScaleAspectFill", FEED)
+        self.assertIn("MediaFeedLoadPosterWithRetry(poster,self.poster,1)", FEED)
+        self.assertIn("self.poster.image=nil", FEED)
 
     def test_source_picker_scope_buttons_meet_44pt_height(self):
         # 分组 pill 高 42pt（52 头高 - 上 6 - 下 4）：上边距改 4 后为 44pt。

@@ -24,7 +24,9 @@
 }
 - (BOOL)shouldRecoverMissingSetupAtTime:(NSTimeInterval)time alreadyRetried:(BOOL)retried failed:(BOOL)failed {
     @synchronized(self){
-    NSNumber *vdn=self.mutableStages[@"vdn"];
+    // A metadata-prepared player may reuse its completed VDN result without
+    // emitting another VDN callback after ownership passes to the live view.
+    NSNumber *vdn=self.mutableStages[@"vdn"]?:self.mutableStages[@"preloadedVDN"];
     return !retried && !failed && vdn && !self.mutableStages[@"setup"] && !self.mutableStages[@"frame"] &&
         time-self.startedAt>=8.0 && time-self.startedAt-vdn.doubleValue>=6.0;
     }

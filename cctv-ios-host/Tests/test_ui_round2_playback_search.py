@@ -191,8 +191,14 @@ class PlaybackSearchRound2Contracts(unittest.TestCase):
         self.assertIn("stale.searchEntry=nil", body)
 
     def test_episode_page_scroll_view_respects_safe_area_bottom(self):
+        # 413 选集页 scrollView 底接 playBar，playBar 底锚 safeArea：
+        # 内容同样不会落入 Home Indicator 区，只是经 playBar 间接锚定。
         self.assertIn(
-            "[self.scrollView.bottomAnchor constraintEqualToAnchor:"
+            "[self.scrollView.bottomAnchor constraintEqualToAnchor:playBar.topAnchor]",
+            EPISODE_SOURCE,
+        )
+        self.assertIn(
+            "[playBar.bottomAnchor constraintEqualToAnchor:"
             "self.view.safeAreaLayoutGuide.bottomAnchor]",
             EPISODE_SOURCE,
         )
@@ -202,7 +208,7 @@ class PlaybackSearchRound2Contracts(unittest.TestCase):
             EPISODE_SOURCE, "- (NSArray *)episodesForLine:(NSInteger)index {"
         )
         self.assertIn(
-            "isKindOfClass:NSDictionary.class]?lines[index]:@{}", episodes_body
+            "isKindOfClass:NSDictionary.class]?lines[(NSUInteger)index]:@{}", episodes_body
         )
         rebuild_body = method_body(EPISODE_SOURCE, "- (void)rebuildSelection {")
         self.assertIn(

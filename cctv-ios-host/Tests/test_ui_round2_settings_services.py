@@ -80,7 +80,7 @@ class ConfigCenterRound2(unittest.TestCase):
         self.assertIn('more.frame=CGRectMake(0,0,44,44);', self.config)
         self.assertIn('more.frame=CGRectMake(58,0,44,44);', self.config)
         self.assertIn('initWithFrame:CGRectMake(0,0,104,44)', self.config)
-        self.assertIn('accessoryWidth=plugin?104:(tvbox?44:56)', self.config)
+        self.assertIn('accessoryWidth=plugin?104:(tvbox?44:(hasExportMenu?104:56))', self.config)
 
     def test_toggle_reverts_when_profile_is_gone(self):
         # 配置已被筛选掉/移除时，开关还停在拨动后的样子，与实际状态不一致。

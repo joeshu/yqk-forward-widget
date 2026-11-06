@@ -69,7 +69,7 @@
 }
 @end
 
-@interface ServiceEditorViewController () <UIDocumentPickerDelegate,NSURLSessionDataDelegate>
+@interface ServiceEditorViewController () <UIDocumentPickerDelegate,UIGestureRecognizerDelegate,NSURLSessionDataDelegate>
 - (BOOL)customCodeMatchesSavedVersion;
 - (BOOL)writeCodeForService:(NSDictionary *)service;
 - (void)applyPortChange:(NSDictionary *)service;
@@ -92,6 +92,12 @@
 @property(nonatomic, strong) NSMutableData *downloadData;
 @property(nonatomic) NSUInteger downloadGeneration;
 @property(nonatomic, copy) NSString *downloadFailureMessage;
+@property(nonatomic, copy) NSString *downloadRequestedURL;
+@property(nonatomic,copy) NSDictionary *initialDraft;
+@property(nonatomic,weak) id<UIGestureRecognizerDelegate> previousPopDelegate;
+- (void)draftChanged;
+- (NSDictionary *)draftSnapshot;
+- (void)requestClose;
 @property(nonatomic, assign) BOOL downloading;
 @property(nonatomic, copy) NSString *optionsText;
 @property(nonatomic, assign) BOOL applyingPortChange;
@@ -111,11 +117,13 @@
     f.adjustsFontForContentSizeCategory=YES;
     f.autocorrectionType = UITextAutocorrectionTypeNo;
     f.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    [f addTarget:self action:@selector(draftChanged) forControlEvents:UIControlEventEditingChanged];
     return f;
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = self.service ? @"编辑服务" : @"添加服务";
+    self.title = self.service ? @"编辑资源" : @"添加资源配置";
+    self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"返回" style:UIBarButtonItemStylePlain target:self action:@selector(requestClose)];
     self.tableView.backgroundColor = HostBackground();
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
@@ -138,6 +146,7 @@
     self.lanSwitch = [UISwitch new];
     self.lanSwitch.onTintColor = HostAccent();
     self.lanSwitch.on = [self.service[@"lan"] boolValue];
+    [self.lanSwitch addTarget:self action:@selector(draftChanged) forControlEvents:UIControlEventValueChanged];
     self.sourceControl = [[UISegmentedControl alloc] initWithItems:@[ @"文件", @"链接", @"代码" ]];
     self.sourceControl.accessibilityLabel=@"服务代码来源";
     [self updateSourceControlFont];
@@ -168,14 +177,16 @@
     if(previousTraitCollection&&![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory])[self updateSourceControlFont];
 }
 - (void)urlChanged {
+    self.downloadGeneration++;[self.downloadTask cancel];self.downloadTask=nil;self.downloading=NO;
     if (![self managedCode])
         self.code = nil;
+    [self draftChanged];
 }
 - (void)sourceChanged {
     [self.tableView reloadData];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 4;
+    return 3;
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return section == 0   ? 2
@@ -339,7 +350,7 @@
         [self message:@"无法读取 UTF-8 Python 代码。"];
         return;
     }
-    self.code = text;
+    self.code = text;[self draftChanged];
     [self.tableView reloadData];
 }
 - (void)loadRemote {
@@ -349,10 +360,9 @@
         [self message:@"请输入有效的 HTTP 或 HTTPS 代码链接。"];
         return;
     }
-    // 取消旧任务先行：此前只覆盖 downloadTask 而不取消，旧下载会继续跑并回写。
     [self.downloadTask cancel];[self.downloadSession invalidateAndCancel];self.downloadSession=nil;
-    self.downloadGeneration++;self.downloadFailureMessage=nil;
-    self.downloading = YES;
+    self.downloadGeneration++;self.downloadFailureMessage=nil;self.downloadRequestedURL=[self.urlField.text copy];
+    self.downloading = YES;[self draftChanged];
     [self.tableView reloadData];
     NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:url];
     r.timeoutInterval = 20;
@@ -381,7 +391,7 @@
     NSData *data=[self.downloadData copy];NSString *failure=self.downloadFailureMessage;BOOL tooLarge=self.downloadData.length>2*1024*1024;
     __weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_main_queue(),^{
-        ServiceEditorViewController *owner=weakSelf;if(!owner||generation!=owner.downloadGeneration)return;
+        ServiceEditorViewController *owner=weakSelf;if(!owner||generation!=owner.downloadGeneration||![owner.urlField.text isEqualToString:owner.downloadRequestedURL])return;
         owner.downloading=NO;owner.downloadTask=nil;
         if(tooLarge||failure.length)[owner message:tooLarge?@"文件超过 2 MB，请选择较小的 Python 脚本。":failure];
         else if(error)[owner message:error.localizedDescription?:@"下载失败，请检查代码链接。"];
@@ -431,10 +441,37 @@
     if (text)
         self.code = text;
     self.optionsText=[NSString stringWithContentsOfFile:[self optionsDraftPath] encoding:NSUTF8StringEncoding error:NULL];
-    [self.tableView reloadData];
+    if(!self.initialDraft)self.initialDraft=[self draftSnapshot];
+    UIGestureRecognizer *gesture=self.navigationController.interactivePopGestureRecognizer;
+    if(gesture.delegate!=self){self.previousPopDelegate=gesture.delegate;gesture.delegate=self;}
+    [self draftChanged];[self.tableView reloadData];
+}
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];UIGestureRecognizer *gesture=self.navigationController.interactivePopGestureRecognizer;
+    if(gesture.delegate==self)gesture.delegate=self.previousPopDelegate;
+}
+- (NSDictionary *)draftSnapshot {
+    return @{@"name":self.nameField.text?:@"",@"port":self.portField.text?:@"",@"url":self.urlField.text?:@"",@"arguments":self.argsField.text?:@"",@"playlist":self.playlistPathField.text?:@"",@"lan":@(self.lanSwitch.on),@"code":self.code?:@"",@"options":self.optionsText?:@""};
+}
+- (void)draftChanged {
+    BOOL changed=!self.service||![[self draftSnapshot] isEqual:self.initialDraft];NSInteger port=self.portField.text.integerValue;
+    self.navigationItem.rightBarButtonItem.enabled=changed&&!self.downloading&&!self.applyingPortChange&&self.nameField.text.length&&port>=1024&&port<=65535;
+}
+- (void)requestClose {
+    if(self.applyingPortChange)return;
+    if([[self draftSnapshot] isEqual:self.initialDraft]){[self.navigationController popViewControllerAnimated:YES];return;}
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"有尚未保存的更改" message:@"可以继续编辑、保存，或放弃本次更改。" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"继续编辑" style:UIAlertActionStyleCancel handler:nil]];
+    if(self.navigationItem.rightBarButtonItem.enabled)[alert addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self save];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"放弃更改" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self.downloadTask cancel];self.downloadGeneration++;[NSFileManager.defaultManager removeItemAtPath:[self draftPath] error:NULL];[NSFileManager.defaultManager removeItemAtPath:[self optionsDraftPath] error:NULL];[self.navigationController popViewControllerAnimated:YES];}]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
+    if(self.applyingPortChange)return NO;
+    if(![[self draftSnapshot] isEqual:self.initialDraft]){[self requestClose];return NO;}return YES;
 }
 - (void)save {
-    if(self.applyingPortChange)return;
+    if(self.applyingPortChange||self.downloading)return;
     NSInteger port = self.portField.text.integerValue;
     NSString *name =
         [self.nameField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -462,6 +499,11 @@
         NSError *jsonError=nil;id options=[NSJSONSerialization JSONObjectWithData:[self.optionsText dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingFragmentsAllowed error:&jsonError];
         if(![options isKindOfClass:NSDictionary.class] && ![options isKindOfClass:NSString.class]){[self message:jsonError.localizedDescription?:@"插件参数须为 JSON 对象或字符串"];return;}
         NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy];manifest[@"options"]=options;service[@"manifest"]=manifest;
+    }
+    if(self.service){
+        BOOL runtimeUnchanged=[self customCodeMatchesSavedVersion];
+        for(NSString *key in @[@"arguments",@"url",@"playlistPath"]){if(![(self.service[key]?:@"") isEqual:(service[key]?:@"")])runtimeUnchanged=NO;}if([self.service[@"port"] integerValue]!=port||[self.service[@"lan"] boolValue]!=self.lanSwitch.on||![(self.service[@"manifest"]?:@{}) isEqual:(service[@"manifest"]?:@{})])runtimeUnchanged=NO;
+        if(runtimeUnchanged){[ServiceStore save:service];[self finishSavingService:service];return;}
     }
     [ServiceStore associateLegacyLoopbackSubscriptionsForService:self.service];
     // 端口冲突只在启动时才报错：保存时先提示，避免悄悄造出一个

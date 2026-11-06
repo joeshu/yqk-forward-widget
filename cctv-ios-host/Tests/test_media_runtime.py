@@ -113,6 +113,17 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(result['url'], 'https://fixture.test/video.m3u8?signature=a%2Bb')
         self.assertEqual(result['parse'], 0)
 
+    def test_youku_style_parser_result_stays_in_host_web_player(self):
+        page = 'https://v.youku.com/video?vid=fixture-show-id'
+        with mock.patch.object(self.engine.spider, 'playerContent', return_value={
+                'jx': 1, 'parse': 1, 'url': page, 'header': ''}):
+            result = self.runtime.call('play', {'lineId': '优酷', 'id': 'fixture-video-id'})
+        self.assertEqual(result['url'], page)
+        self.assertEqual(result['jx'], 1)
+        self.assertEqual(result['parse'], 1)
+        self.assertTrue(result['requiresWebPlayback'])
+        self.assertFalse(result['nativePlayable'])
+
     def test_empty_spider_play_result_uses_direct_episode_media_url(self):
         address = 'https://cdn.fixture.test/episode.m3u8?token=a%2Fb&expires=123'
         self.engine.spider.playerContent = lambda *_: None
@@ -127,6 +138,40 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(events[0]['event'], 'media_play_direct_episode_fallback')
         self.assertNotIn('token', json.dumps(events))
         self.assertNotIn('cdn.fixture.test', json.dumps(events))
+
+    def test_dash_manifest_is_a_native_cicada_playback_result(self):
+        address = 'https://cdn.fixture.test/manifest.mpd?token=a%2Fb'
+        with mock.patch.object(self.engine.spider, 'playerContent', return_value={
+                'url': address, 'format': 'mpd', 'parse': 1, 'jx': 1,
+                'header': {'Referer': 'https://source.fixture.test/'}}):
+            result = self.runtime.call('play', {'lineId': '主线', 'id': 'episode-1'})
+        self.assertEqual(result['url'], address)
+        self.assertEqual(result['playbackEngine'], 'cicada')
+        self.assertTrue(result['directMedia'])
+        self.assertFalse(result['nativePlayable'])
+        self.assertFalse(result['requiresWebPlayback'])
+
+    def test_dash_mime_routes_extensionless_media_directly(self):
+        address = 'https://cdn.fixture.test/dash/stream?id=fixture'
+        for metadata in ({'contentType': 'application/dash+xml'},
+                         {'format': 'application/dash+xml'}):
+            with self.subTest(metadata=metadata):
+                with mock.patch.object(self.engine.spider, 'playerContent', return_value={
+                        'url': address, **metadata, 'parse': 1}):
+                    result = self.runtime.call('play', {'lineId': '主线', 'id': 'episode-1'})
+                self.assertEqual(result['url'], address)
+                self.assertEqual(result['playbackEngine'], 'cicada')
+                self.assertTrue(result['directMedia'])
+                self.assertFalse(result['requiresWebPlayback'])
+
+    def test_empty_spider_result_direct_episode_mpd_is_recognized(self):
+        address = 'https://cdn.fixture.test/episode.mpd?token=a%2Fb'
+        self.engine.spider.playerContent = lambda *_: None
+        result = self.runtime.call('play', {'lineId': '主线', 'id': address})
+        self.assertEqual(result['url'], address)
+        self.assertEqual(result['playbackEngine'], 'cicada')
+        self.assertTrue(result['directMedia'])
+        self.assertFalse(result['requiresWebPlayback'])
 
     def test_direct_episode_fallback_does_not_override_explicit_errors_or_pages(self):
         address = 'https://cdn.fixture.test/episode.m3u8?token=private'
@@ -348,6 +393,20 @@ class Spider:
         self.assertEqual(choices['alternates'][1]['name'], '720P')
         self.assertEqual(choices['headers']['Referer'], 'https://a.test/')
 
+    def test_playback_explicit_proxy_accepts_only_absolute_proxy_addresses(self):
+        value = media.playback({'url': 'hongguo://episode-42', 'proxy': 1,
+                                'format': 'mp4', 'contentType': 'video/mp4'})
+        self.assertEqual(value['url'], 'hongguo://episode-42')
+        self.assertTrue(value['proxy'])
+        self.assertTrue(value['nativePlayable'])
+        with self.assertRaises(media.MediaError):
+            media.playback({'url': 'javascript:alert(1)', 'proxy': 1})
+        with self.assertRaises(media.MediaError):
+            media.playback({'url': 'hongguo://episode-42'})
+        nested = media.playback({'url': {'url': 'x:episode-42', 'proxy': 1, 'format': 'mp4'}})
+        self.assertEqual(nested['url'], 'x:episode-42')
+        self.assertTrue(nested['proxy'])
+
     def test_playback_removes_only_redundant_hls_format_suffix(self):
         signed = 'https://a.test/master.m3u8?token=a%2Fb&expires=123&format=.m3u8'
         repaired = media.playback({'url': signed, 'parse': 0, 'format': 'hls',
@@ -425,6 +484,40 @@ class Spider:
 
     def test_busy_spider_does_not_execute_concurrently(self):
         self.engine.lock_timeout = .01
+        self.engine.lock.acquire()
+        try:
+            with self.assertRaisesRegex(media.MediaError, '排队超时'):
+                self.runtime.call('search', {'keyword': 'busy'})
+        finally:
+            self.engine.lock.release()
+
+    def test_local_proxy_queue_allows_long_first_decode_without_changing_normal_api_timeout(self):
+        self.engine.lock_timeout = .01
+        self.engine.proxy_lock_timeout = .5
+        self.engine.spider.localProxy = lambda _args: [200, {'Content-Type': 'video/mp4'}, b'frame']
+        started = threading.Event()
+        results, failures = [], []
+        self.engine.lock.acquire()
+
+        def invoke_proxy():
+            started.set()
+            try:
+                results.append(self.runtime.call('proxy', {'method': 'GET'}))
+            except Exception as error:
+                failures.append(error)
+
+        worker = threading.Thread(target=invoke_proxy)
+        worker.start()
+        try:
+            self.assertTrue(started.wait(1))
+            time.sleep(.05)
+        finally:
+            self.engine.lock.release()
+        worker.join(1)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(failures, [])
+        self.assertEqual(results, [[200, {'Content-Type': 'video/mp4'}, b'frame']])
+
         self.engine.lock.acquire()
         try:
             with self.assertRaisesRegex(media.MediaError, '排队超时'):
@@ -575,6 +668,33 @@ class Spider:
         with self.assertRaisesRegex(media.MediaError, '停止'):
             self.runtime.call('home')
 
+    def test_spider_owned_loopback_playback_proxy_stops_with_source(self):
+        entry = Path(self.tmp.name, 'proxy_spider.py')
+        entry.write_text('''
+import threading
+from http.server import BaseHTTPRequestHandler
+from socketserver import TCPServer
+class Spider:
+    def playerContent(self, flag, ident, vipFlags):
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+        server = TCPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return {'url': 'http://127.0.0.1:%d/video' % server.server_address[1]}
+''')
+        engine = media.PythonSpider(self.tmp.name, entry.name)
+        try:
+            result = engine.call('play', {'id': 'episode'})
+            port = urllib.parse.urlsplit(result['url']).port
+            connection = socket.create_connection(('127.0.0.1', port), timeout=1)
+            connection.close()
+            self.assertEqual(len(engine.local_proxy_servers), 1)
+        finally:
+            engine.close()
+        with self.assertRaises(OSError):
+            socket.create_connection(('127.0.0.1', port), timeout=.2)
+
     def test_failed_spider_import_does_not_leave_package_modules_loaded(self):
         helper = Path(self.tmp.name, '_fixture_import_helper.py')
         entry = Path(self.tmp.name, 'broken_spider.py')
@@ -635,6 +755,59 @@ class Spider:
             server.shutdown()
             server.server_close()
             thread.join(2)
+
+    def test_node_https_host_fetch_requires_token_and_preserves_upstream_response(self):
+        runtime = media.MediaRuntime()
+        server = transport.Server(('127.0.0.1', 0), runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        observed = []
+
+        class Response:
+            def __init__(self):
+                from email.message import Message
+                self.headers = Message()
+                self.headers.add_header('Content-Type', 'video/mp2t')
+                self.headers.add_header('Content-Range', 'bytes 0-6/20')
+                self.headers.add_header('X-Fixture', 'upstream')
+                self.reason = 'Partial Content'
+
+            def getcode(self): return 206
+            def read(self, limit): return b'segment'
+            def close(self): pass
+
+        class Opener:
+            def open(self, request, timeout):
+                observed.append((request.full_url, request.get_method(), request.data,
+                                 request.get_header('X-fixture'), timeout))
+                return Response()
+
+        token = server.host_fetch_token
+        payload = json.dumps({'url': 'https://media.fixture.test/segment.ts?sig=a%2Bb',
+                              'method': 'GET', 'headers': {'X-Fixture': 'preserved', 'Host': 'cdn.fixture.test'},
+                              'timeoutMs': 2500}).encode()
+        try:
+            with mock.patch.object(transport.urllib.request, 'build_opener', return_value=Opener()):
+                client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                client.request('POST', '/_cctvhost/host-fetch', payload,
+                               {'X-CCTVHost-Host-Fetch': token, 'Content-Type': 'application/json'})
+                response = client.getresponse(); body = response.read()
+                self.assertEqual((response.status, body), (206, b'segment'))
+                self.assertEqual(response.getheader('Content-Type'), 'video/mp2t')
+                self.assertEqual(response.getheader('Content-Range'), 'bytes 0-6/20')
+                client.close()
+                client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                client.request('POST', '/_cctvhost/host-fetch', payload, {'Content-Type': 'application/json'})
+                self.assertEqual(client.getresponse().status, 403)
+                client.close()
+                client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                client.request('GET', '/_cctvhost/host-fetch')
+                self.assertEqual(client.getresponse().status, 405)
+                client.close()
+            self.assertEqual(observed, [('https://media.fixture.test/segment.ts?sig=a%2Bb', 'GET', None,
+                                         'preserved', 2.5)])
+        finally:
+            server.shutdown(); server.server_close(); thread.join(2); runtime.close()
 
     def test_health_listener_is_available_while_spider_initializes(self):
         entered = threading.Event()
@@ -902,6 +1075,137 @@ class Spider:
             self.assertEqual((status, body), (206, b''))
             self.assertEqual({key.lower(): value for key, value in headers.items()}['content-length'], '4')
             self.assertEqual(calls[-1]['method'], 'HEAD')
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+
+    def test_python_spider_receives_its_writable_resource_data_directory(self):
+        data_dir = Path(self.tmp.name, 'plugin-data')
+        data_dir.mkdir()
+        engine = media.PythonSpider(self.tmp.name, '影视.py', data_dir=str(data_dir))
+        try:
+            self.assertEqual(engine.spider._cctvhost_data_dir, os.path.realpath(data_dir))
+        finally:
+            engine.close()
+
+    def test_node_proxy_file_response_reads_only_bounded_range_from_source_data_dir(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory, 'data')
+            data_dir.mkdir()
+            media_path = data_dir / 'video.mp4'
+            media_path.write_bytes(b'0123456789')
+            outside_path = Path(directory, 'outside.mp4')
+            outside_path.write_bytes(b'not-in-source-data')
+
+            class NodeFileEngine:
+                def __init__(self): self.path = str(media_path)
+                def capabilities(self): return {'capabilities': ['proxy']}
+                def call(self, operation, args):
+                    if operation != 'proxy': return {}
+                    if args['method'] == 'HEAD':
+                        offset, length = 2, 4
+                    else:
+                        offset, length = 2, 4
+                    return [206, {'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes',
+                                  'Content-Range': 'bytes 2-5/10', 'Content-Length': '4'},
+                            {'__cctvhostFileResponse': True, 'path': self.path,
+                             'offset': offset, 'length': length}]
+                def close(self): pass
+
+            runtime = media.MediaRuntime(NodeFileEngine())
+            server = transport.Server(('127.0.0.1', 0), runtime)
+            server.node_proxy_file_root = str(data_dir)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+
+            def request(method):
+                client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                try:
+                    client.request(method, '/proxy?url=cenc%3A%2F%2F123', headers={'Range': 'bytes=2-5'})
+                    response = client.getresponse()
+                    return response.status, {key.lower(): value for key, value in response.getheaders()}, response.read()
+                finally:
+                    client.close()
+
+            try:
+                status, headers, body = request('GET')
+                self.assertEqual((status, body), (206, b'2345'))
+                self.assertEqual(headers['content-range'], 'bytes 2-5/10')
+                self.assertEqual(headers['content-length'], '4')
+                status, headers, body = request('HEAD')
+                self.assertEqual((status, body), (206, b''))
+                self.assertEqual(headers['content-length'], '4')
+                runtime.engine.path = str(outside_path)
+                status, _, body = request('GET')
+                self.assertEqual(status, 502)
+                self.assertNotIn(b'not-in-source-data', body)
+            finally:
+                server.shutdown(); server.server_close(); runtime.close(); thread.join(2)
+
+    def test_player_content_proxy_uses_host_url_and_forwards_range_to_local_proxy(self):
+        calls = []
+        self.engine.spider.playerContent = lambda *_: {
+            'url': 'hongguo://episode-42', 'proxy': 1, 'format': 'mp4',
+            'contentType': 'video/mp4',
+            'alternates': [{'name': '备用画质', 'url': 'hongguo://episode-42-hd'}],
+            'header': {'Referer': 'https://source.test/', 'Cookie': 'upstream-secret'}}
+
+        def local_proxy(args):
+            calls.append(args)
+            length = 1 if args['method'] == 'HEAD' else 4
+            return [206, {'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes',
+                          'Content-Range': 'bytes 2-5/10', 'Content-Length': str(length)},
+                    b'' if args['method'] == 'HEAD' else b'2345']
+
+        self.engine.spider.localProxy = local_proxy
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        def request(method, path, headers=None, data=None):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=4)
+            try:
+                body = json.dumps(data).encode() if data is not None else None
+                client.request(method, path, body, headers or {})
+                response = client.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally:
+                client.close()
+
+        try:
+            status, _, payload = request('POST', '/api/v1/play',
+                {'Content-Type': 'application/json'}, {'id': 'episode-42'})
+            self.assertEqual(status, 200)
+            result = json.loads(payload)['data']
+            self.assertTrue(result['url'].startswith(f'http://127.0.0.1:{server.server_port}/proxy/'))
+            self.assertEqual(result['originalURL'], 'hongguo://episode-42')
+            self.assertTrue(result['proxy'])
+            self.assertEqual(result['headers'], {})
+
+            path = urllib.parse.urlsplit(result['url']).path
+            status, response_headers, body = request('GET', path,
+                {'Range': 'bytes=2-5', 'User-Agent': 'fixture-player'})
+            lower = {key.lower(): value for key, value in response_headers.items()}
+            self.assertEqual((status, body, lower['content-type'], lower['content-range']),
+                             (206, b'2345', 'video/mp4', 'bytes 2-5/10'))
+            self.assertEqual(calls[-1]['url'], 'hongguo://episode-42')
+            self.assertEqual(calls[-1]['method'], 'GET')
+            self.assertEqual(calls[-1]['range'], 'bytes=2-5')
+            self.assertEqual(calls[-1]['headers']['Range'], 'bytes=2-5')
+            self.assertEqual(calls[-1]['headers']['User-Agent'], 'fixture-player')
+            self.assertEqual(calls[-1]['upstreamHeaders']['Cookie'], 'upstream-secret')
+
+            alternate_path = urllib.parse.urlsplit(result['alternates'][0]['url']).path
+            status, _, body = request('GET', alternate_path, {'Range': 'bytes=0-3'})
+            self.assertEqual((status, body), (206, b'2345'))
+            self.assertEqual(calls[-1]['url'], 'hongguo://episode-42-hd')
+
+            status, response_headers, body = request('HEAD', path, {'Range': 'bytes=2-2'})
+            self.assertEqual((status, body), (206, b''))
+            self.assertEqual({key.lower(): value for key, value in response_headers.items()}['content-length'], '1')
+            self.assertEqual(calls[-1]['method'], 'HEAD')
+            self.assertEqual(calls[-1]['range'], 'bytes=2-2')
         finally:
             server.shutdown()
             server.server_close()
@@ -1754,6 +2058,37 @@ class Spider:
             upstream.shutdown()
             upstream.server_close()
             upstream_thread.join(2)
+
+    def test_dash_manifest_keeps_original_url_for_relative_segment_resolution(self):
+        address = 'https://cdn.fixture.test/dash/manifest.mpd?token=fixture'
+        alternate = 'https://cdn.fixture.test/dash/alternate.mpd?token=alternate'
+        self.engine.spider.playerContent = lambda *_: {
+            'url': address, 'format': 'mpd', 'parse': 1, 'jx': 1,
+            'header': {'Referer': 'https://source.fixture.test/'},
+            'alternates': [{'name': '备用', 'url': alternate, 'format': 'dash'}]}
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=4)
+        try:
+            body = json.dumps({'id': 'episode-1'}).encode()
+            client.request('POST', '/api/v1/play', body,
+                           {'Content-Type': 'application/json', 'Content-Length': str(len(body))})
+            response = client.getresponse()
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            result = payload['data']
+            self.assertEqual(result['url'], address)
+            self.assertNotIn('originalURL', result)
+            self.assertEqual(result['alternates'][0]['url'], alternate)
+            self.assertEqual(result['playbackEngine'], 'cicada')
+            self.assertFalse(result['requiresWebPlayback'])
+            self.assertEqual(result['headers']['Referer'], 'https://source.fixture.test/')
+        finally:
+            client.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
 
     def test_declared_hls_on_php_endpoint_is_proxied_and_rewritten_without_headers(self):
         received = []

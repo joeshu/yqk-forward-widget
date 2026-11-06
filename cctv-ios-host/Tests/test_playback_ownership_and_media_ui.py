@@ -88,7 +88,7 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
     def test_inline_and_pushed_vod_players_notify_the_live_owner(self):
         show_inline = method_body(BROWSER_SOURCE, "- (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context")
         play_result = method_body(PLAYBACK_SOURCE, "- (void)playResult:(NSDictionary *)result")
-        root_media = method_body(ROOT_SOURCE, "- (void)openMediaTab")
+        root_media = method_body(ROOT_SOURCE, "- (MediaBrowserViewController *)mediaPageCreatingIfNeeded")
         self.assertIn("@property(nonatomic,copy) dispatch_block_t onPlaybackWillStart", BROWSER_SOURCE)
         self.assertIn("detail.onPlaybackWillStart=self.onPlaybackWillStart", BROWSER_SOURCE)
         self.assertIn("player.onPlaybackWillStart=self.onPlaybackWillStart", show_inline)
@@ -113,10 +113,12 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
             self.assertIn(f'detailActionButton:@"{title}"', BROWSER_SOURCE)
         self.assertIn("[button setTitle:title forState:UIControlStateNormal]", action)
 
-    def test_inline_player_prefers_compact_height_without_clipping_extra_routes(self):
+    def test_inline_player_floats_video_while_its_controls_join_detail_content(self):
         inline = method_body(BROWSER_SOURCE, "- (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context")
-        self.assertIn("multiplier:0.5625 constant:88", inline)
-        self.assertIn("inlineHeight.priority=UILayoutPriorityDefaultHigh", inline)
+        self.assertIn("installFloatingInlineSurfaceInHost:dock controlsStack:self.contentStack", inline)
+        self.assertIn("inlinePlaybackScrollTopConstraint=[self.scrollView.topAnchor constraintEqualToAnchor:dock.bottomAnchor constant:8]", inline)
+        self.assertNotIn("multiplier:0.5625 constant:88", inline)
+        self.assertIn("preferredInlineVideoHeightForWidth:width maximumHeight:maximum", BROWSER_SOURCE)
         self.assertIn("setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical", PLAYBACK_SOURCE)
 
     def test_poster_download_budget_handles_large_covers_without_unbounded_reads(self):
@@ -132,7 +134,9 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
     def test_current_episode_number_stays_visible_during_playback(self):
         body = method_body(PLAYBACK_SOURCE, "- (void)updateEpisodeTitle")
         self.assertIn('第 %ld 集', body)
-        self.assertIn('self.episodeTitle.accessibilityLabel=title', body)
+        self.assertIn('正在播放 · ', body)
+        self.assertIn('self.episodeTitle.accessibilityLabel=visibleTitle', body)
+        self.assertIn('self.title=title', body)
         embedded = PLAYBACK_SOURCE[PLAYBACK_SOURCE.index('if(self.embeddedMode){'):PLAYBACK_SOURCE.index('[NSNotificationCenter.defaultCenter addObserver:self')]
         self.assertIn('self.episodeTitle.hidden=NO', embedded)
         self.assertIn('constraintEqualToAnchor:self.episodeTitle.bottomAnchor', embedded)
@@ -192,13 +196,57 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('- (void)setTopSafeAreaInset:(CGFloat)inset', RESOURCE_SOURCE)
         layout = method_body(ROOT_SOURCE, '- (void)viewDidLayoutSubviews')
         self.assertIn('BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class]', layout)
-        self.assertIn('CGFloat resourceSafeTop=self.view.window.safeAreaInsets.top', layout)
-        self.assertIn('CGFloat pageTop=resourcePage?0:top', layout)
+        # Step 3：资源页顶边距直接用 view 的 safe.top，不再读 window（window 可能为 nil）。
+        self.assertNotIn('self.view.window.safeAreaInsets.top', layout)
+        self.assertIn('setTopSafeAreaInset:top]', layout)
+        self.assertIn('CGFloat pageTop=0', layout)
         view_will_appear = method_body(RESOURCE_SOURCE, '- (void)viewWillAppear:(BOOL)animated')
         self.assertIn('[self updateResourceHeaderLayoutReattaching:YES]', view_will_appear)
         self.assertNotIn('[self refreshHeaderAfterNavigationTransition]', view_will_appear)
         self.assertIn('NSString *query=self.searchQuery?:@""', RESOURCE_SOURCE)
         self.assertIn('self.resourceActionsButton.hidden=YES', ROOT_SOURCE)
+
+    def test_movie_posters_keep_a_fallback_and_retry_once_after_transient_failure(self):
+        self.assertIn('loadPosterURL:(NSString *)url intoImageView:(UIImageView *)imageView completion:', (SOURCES / "HostImageLoader.h").read_text(encoding="utf-8"))
+        self.assertIn('imageView.image=[UIImage systemImageNamed:@"film"]', IMAGE_SOURCE)
+        self.assertIn('observer.completion(image!=nil,image?0:retryAfter)', IMAGE_SOURCE)
+        feed = (SOURCES / 'MediaFeedView.m').read_text(encoding='utf-8')
+        self.assertIn('MediaFeedLoadPosterWithRetry', feed)
+        self.assertIn('retriesRemaining', feed)
+        self.assertIn('self.poster.image=[UIImage systemImageNamed:@"film"]', feed)
+        self.assertIn('MediaFeedLoadPosterWithRetry(poster,self.poster,1)', feed)
+        self.assertIn('current.window', feed)
+        self.assertIn('accessibilityIdentifier isEqualToString:url', feed)
+        self.assertIn('MediaSearchLoadPosterWithRetry(poster,resultCell.poster,1)', (SOURCES / "MediaGlobalSearchViewController.m").read_text(encoding="utf-8"))
+
+    def test_home_and_listing_payloads_filter_bad_rows_and_never_insert_nil_ids(self):
+        listing = method_body(BROWSER_SOURCE, "- (void)loadListing:(BOOL)append")
+        home = method_body(BROWSER_SOURCE, "- (void)applyHomeResult:(NSDictionary *)result")
+        self.assertIn('![result isKindOfClass:NSDictionary.class]', listing)
+        self.assertIn('![result[@"items"] isKindOfClass:NSArray.class]', listing)
+        self.assertIn('MediaBrowserDictionaryRows(result[@"items"]', listing)
+        self.assertIn('MediaBrowserItemIdentity(item)', listing)
+        self.assertNotIn('addObject:item[@"id"]', listing)
+        self.assertIn('MediaBrowserDictionaryRows(result[@"items"]', home)
+        self.assertIn('discarded_item_count', home)
+
+    def test_detail_refresh_keeps_stable_episode_identity_and_player_syncs_parent(self):
+        restore = method_body(BROWSER_SOURCE, "- (void)restoreSelectionFromDetail:")
+        inline = method_body(BROWSER_SOURCE, "- (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context")
+        player_update = method_body(PLAYBACK_SOURCE, "- (void)updateEpisodeTitle")
+        self.assertIn('lineID.length', restore)
+        self.assertIn('episodeID.length', restore)
+        self.assertIn('onEpisodeSelectionChanged', inline)
+        self.assertIn('owner.selectedEpisodeIndex=episodeIndex', inline)
+        self.assertIn('updatedContext[@"episodeIndex"]', player_update)
+        self.assertIn('if(self.onEpisodeSelectionChanged)self.onEpisodeSelectionChanged(self.context)', player_update)
+
+    def test_episode_selection_refresh_prefers_ids_before_names(self):
+        refresh = method_body(EPISODE_SOURCE, "- (void)refreshDetail")
+        self.assertIn('MediaEpisodeSelectionSanitizedDetail(result)', refresh)
+        self.assertIn('if(lineID.length)', refresh)
+        self.assertIn('if(!lineMatched&&lineName.length)', refresh)
+        self.assertIn('if(!episodeMatched&&episodeName.length)', refresh)
 
 
 if __name__ == "__main__":

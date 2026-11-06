@@ -56,7 +56,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             page = int(args.get('page', 1))
             data = {'page': page, 'pagecount': 2, 'hasMore': page < 2, 'items': [card(str(args.get('keyword', 'category')) + str(page))]}
         elif operation == 'detail':
-            data = {'id': args['id'], 'name': '测试影片详情', 'description': '验证多线路和不透明播放 ID', 'actor': '演员甲、演员乙', 'lines': [{'id': 'line', 'name': '主线路', 'episodes': [{'id': 'opaque?$id', 'name': '第一集'}, {'id': 'slow-episode', 'name': '慢线路待切换'}, {'id': 'fast-episode', 'name': '快速切换'}]}, {'id': 'backup', 'name': '备用', 'episodes': [{'id': 'second', 'name': '正片'}]}]}
+            data = {'id': args['id'], 'name': '测试影片详情', 'description': '验证多线路和不透明播放 ID。通过季切换浏览不同季集数，再用底部续播入口播放当前集。', 'actor': '演员甲、演员乙', 'lines': [{'id': 'line', 'name': '主线路', 'episodes': [{'id': 'opaque?$id', 'name': '第一集'}, {'id': 'slow-episode', 'name': '慢线路待切换'}, {'id': 'fast-episode', 'name': '快速切换'}]}, {'id': 'backup', 'name': '备用', 'episodes': [{'id': 'second', 'name': '正片'}]}], 'seasons': [{'id': 's1', 'name': '第 1 季', 'episodes': [{'id': 'opaque?$id', 'name': '第一集'}, {'id': 'slow-episode', 'name': '慢线路待切换'}, {'id': 'fast-episode', 'name': '快速切换'}]}, {'id': 's2', 'name': '第 2 季', 'episodes': [{'id': 'opaque?$id', 'name': '第一集'}, {'id': 'slow-episode', 'name': '慢线路待切换'}, {'id': 'fast-episode', 'name': '快速切换'}]}]}
         elif operation == 'play':
             identifier = str(args.get('id', ''))
             if identifier == 'slow-episode':
@@ -117,7 +117,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/health":
             type(self).health_count += 1
             data = json.dumps({"ok": type(self).health_count >= 3}).encode()
-        elif self.path == "/all.m3u":
+        elif self.path in ("/all.m3u", "/replacement.m3u"):
             content_type = "audio/x-mpegurl"
             data = (f'#EXTM3U\n#EXTINF:-1 tvg-id="cctv1",Startup Test\n'
                     f'http://127.0.0.1:{self.server.server_port}/video.mp4\n').encode()

@@ -257,6 +257,22 @@ def valid_media_url(value):
         return False
 
 
+def valid_proxy_address(value):
+    """Accept an HTTP URL or an opaque absolute URI owned by localProxy()."""
+    if valid_media_url(value):
+        return True
+    if (not isinstance(value, str) or len(value) > 8192 or
+            any(ord(char) <= 32 or ord(char) == 127 for char in value)):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        return (bool(re.fullmatch(r'[A-Za-z][A-Za-z0-9+.-]{0,31}', parsed.scheme)) and
+                parsed.scheme.lower() not in ('file', 'data', 'javascript', 'mailto') and
+                bool(parsed.netloc or parsed.path) and not parsed.username and not parsed.password)
+    except ValueError:
+        return False
+
+
 def normalize_media_address(value):
     if not isinstance(value, str):
         return value
@@ -360,7 +376,7 @@ def direct_episode_media_fallback(value, episode_id):
     except ValueError:
         return None
     if not path.endswith(('.m3u8', '.m3u', '.mp4', '.m4v', '.mov',
-                          '.m4a', '.mp3', '.aac', '.ts')):
+                          '.m4a', '.mp3', '.aac', '.ts', '.mpd')):
         return None
     return playback({'url': address})
 
@@ -368,7 +384,7 @@ def direct_episode_media_fallback(value, episode_id):
 def playback(value):
     value = unwrap_envelope(value, {'url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
                                     'video_url', 'mediaUrl', 'src', 'alternates',
-                                    'parse', 'jx', 'headers', 'header', 'error', 'message'})
+                                    'parse', 'jx', 'headers', 'header', 'proxy', 'error', 'message'})
     if isinstance(value, str):
         value = {'url': value}
     if not isinstance(value, dict):
@@ -390,13 +406,14 @@ def playback(value):
                 merged = dict(value, url=nested)
                 return playback(merged)
     transport_keys = ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
-                      'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback')
+                      'mimeType', 'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'webPlayback')
     source_transport = {key: value[key] for key in transport_keys if key in value}
     headers = media_headers(value.get('header', {}))
     headers.update(media_headers(value.get('headers', {})))
     url = next((value.get(key) for key in
                 ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl', 'video_url', 'mediaUrl', 'src')
                 if value.get(key) not in (None, '')), None)
+    proxy_requested = enabled(value.get('proxy'))
     alternates = value.get('alternates', [])
     primary_choice_headers = {}
     if isinstance(url, dict):
@@ -405,19 +422,26 @@ def playback(value):
         # Some spiders put transport metadata beside the nested media URL.
         # Keep it before replacing the object with its URL string.
         for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
-                    'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
+                    'mimeType', 'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'webPlayback'):
             if key not in value and key in url:
                 value[key] = url[key]
+        if 'proxy' in value:
+            proxy_requested = enabled(value.get('proxy'))
         choices = url.get('values') or url.get('list')
         if isinstance(choices, list):
             choices = [item for item in choices if isinstance(item, dict) and
-                       valid_media_url(normalize_media_address(media_choice_address(item)))]
+                       (valid_media_url(normalize_media_address(media_choice_address(item))) or
+                        (enabled(value.get('proxy')) or enabled(item.get('proxy'))) and
+                        valid_proxy_address(normalize_media_address(media_choice_address(item))))]
             first = choices[0] if choices else None
             if first:
                 for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
                             'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
                     if key not in value and key in first:
                         value[key] = first[key]
+                if 'proxy' not in value and 'proxy' in first:
+                    value['proxy'] = first['proxy']
+                    proxy_requested = enabled(first['proxy'])
                 first_headers = media_headers(first.get('header', {}))
                 first_headers.update(media_headers(first.get('headers', {})))
                 primary_choice_headers.update(first_headers)
@@ -427,11 +451,16 @@ def playback(value):
     if isinstance(url, list):
         if url and all(isinstance(item, dict) for item in url):
             url = [item for item in url if valid_media_url(
-                normalize_media_address(media_choice_address(item)))]
+                normalize_media_address(media_choice_address(item))) or
+                (enabled(value.get('proxy')) or enabled(item.get('proxy'))) and
+                valid_proxy_address(normalize_media_address(media_choice_address(item)))]
             if not url:
                 raise MediaError('NO_MEDIA', '来源的播放线路均未返回有效 HTTP/HTTPS 地址')
             alternates = []
             first = url[0]
+            if 'proxy' not in value and 'proxy' in first:
+                value['proxy'] = first['proxy']
+                proxy_requested = enabled(first['proxy'])
             for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
                         'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
                 if key not in value and key in first:
@@ -445,6 +474,8 @@ def playback(value):
                     continue
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}'),
                           'url': str(address)}
+                if enabled(item.get('proxy')) or proxy_requested:
+                    choice['proxy'] = True
                 choice_headers = media_headers(item.get('header', {}))
                 choice_headers.update(media_headers(item.get('headers', {})))
                 if choice_headers:
@@ -456,9 +487,11 @@ def playback(value):
                 alternates.append(choice)
         else:
             strings = [normalize_media_address(str(item)) for item in url if item not in (None, '')]
-            if len(strings) == 1 and valid_media_url(strings[0]):
+            if len(strings) == 1 and (valid_media_url(strings[0]) or
+                                      proxy_requested and valid_proxy_address(strings[0])):
                 alternates = [{'name': '线路 1', 'url': strings[0]}]
-            elif strings and all(valid_media_url(item) for item in strings):
+            elif strings and all(valid_media_url(item) or
+                                 proxy_requested and valid_proxy_address(item) for item in strings):
                 alternates = [{'name': f'线路 {index + 1}', 'url': address}
                               for index, address in enumerate(strings)]
             elif strings and all('$' in item for item in strings):
@@ -515,9 +548,9 @@ def playback(value):
         return address
 
     url = repair_url(url)
-    if not valid_media_url(url):
+    if not (valid_proxy_address(url) if proxy_requested else valid_media_url(url)):
         message = value.get('error') or value.get('message') or value.get('msg')
-        raise MediaError('NO_MEDIA', str(message or '来源未返回有效 HTTP/HTTPS 媒体地址')[:512])
+        raise MediaError('NO_MEDIA', str(message or ('来源未返回有效本机代理地址' if proxy_requested else '来源未返回有效 HTTP/HTTPS 媒体地址'))[:512])
     safe_alternates = []
     if isinstance(alternates, list):
         for index, item in enumerate(alternates[:32]):
@@ -525,22 +558,25 @@ def playback(value):
                 continue
             candidate = normalize_media_address(media_choice_address(item))
             candidate = repair_url(candidate)
-            if valid_media_url(candidate):
+            item_proxy = enabled(item.get('proxy')) or proxy_requested
+            if valid_media_url(candidate) or item_proxy and valid_proxy_address(candidate):
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}')[:128], 'url': candidate}
                 choice_headers = media_headers(item.get('header', {}))
                 choice_headers.update(media_headers(item.get('headers', {})))
                 if choice_headers:
                     choice['headers'] = choice_headers
                 for key in ('format', 'mediaType', 'playbackType', 'contentType', 'mimeType',
-                            'mime', 'parse', 'jx', 'requiresWebPlayback'):
+                            'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback'):
                     if item.get(key) is not None:
                         choice[key] = item[key]
                 transport = dict(source_transport)
                 transport.update({key: item[key] for key in transport_keys if key in item})
+                if item_proxy:
+                    transport['proxy'] = True
                 transport['url'] = candidate
                 normalized = playback(transport)
                 for key in ('format', 'contentType', 'parse', 'jx', 'requiresWebPlayback',
-                            'directMedia', 'nativePlayable'):
+                            'directMedia', 'nativePlayable', 'proxy'):
                     if key in normalized:
                         choice[key] = normalized[key]
                 safe_alternates.append(choice)
@@ -550,34 +586,82 @@ def playback(value):
         extension = ''
     native_extensions = {'m3u8', 'm3u', 'mp4', 'm4v', 'mov', 'mp3', 'm4a', 'aac', 'ts'}
     stream_extensions = native_extensions | {'mpd', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'rmvb'}
+    cicada_extensions = {'mpd', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'asf', 'rmvb', 'rm', 'mpg', 'mpeg', 'm2ts', '3gp'}
+    cicada_formats = cicada_extensions | {'dash', 'mpeg-dash', 'matroska', 'application/dash+xml'}
+    cicada_mimes = {'application/dash+xml', 'application/vnd.ms-sstr+xml', 'video/x-flv',
+                    'video/x-matroska', 'video/webm', 'video/x-msvideo', 'video/x-ms-wmv'}
+    cicada_media = (extension in cicada_extensions or declared_format in cicada_formats or
+                    declared_mime in cicada_mimes)
     native_media = (extension in native_extensions or declared_format in native_formats or
                     declared_mime in native_mimes)
-    direct_media = (native_media or extension in stream_extensions or
+    direct_media = (native_media or cicada_media or extension in stream_extensions or
                     declared_format in native_formats | {'mpd', 'dash', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'rmvb'} or
                     declared_mime.startswith(('video/', 'audio/')))
     requires_web = bool(enabled(value.get('requiresWebPlayback')) or
                         enabled(value.get('webPlayback')) or parse or jx)
-    if native_media:
-        # A parser flag is common in legacy spiders even when the returned URL
-        # is already a playable HLS/MP4 stream. Explicit media type wins.
+    if native_media or cicada_media:
+        # Legacy spiders often leave parser flags on direct media. An explicit
+        # HLS/MP4 or Cicada-supported format must reach the native decoder.
         requires_web = False
     result = {'url': url, 'headers': media_headers(headers), 'baseHeaders': media_headers(base_headers),
               'alternates': safe_alternates,
               'parse': parse, 'jx': jx, 'playUrl': value.get('playUrl', '') if isinstance(value.get('playUrl', ''), str) else '',
               'directMedia': direct_media, 'nativePlayable': native_media,
               'requiresWebPlayback': requires_web}
+    if proxy_requested:
+        result['proxy'] = True
     if declared_format:
         result['format'] = declared_format[:64]
     if declared_type:
         result['contentType'] = declared_type[:128]
+    if cicada_media:
+        result['playbackEngine'] = 'cicada'
     for key in ('sessionID', 'expiresAt', 'refreshAfter', 'refreshInterval', 'isLive'):
         if key in value and isinstance(value[key], (str, int, float, bool)):
             result[key] = value[key]
     return result
 
 
+def _repair_mp4_stsd_walker(module):
+    """Adapt the bundled HGTV-style stsd walker when it is passed the fullbox header.
+
+    Some single-file spiders call `_walk_stsd` at the start of the `stsd`
+    payload, which still contains the 4-byte version/flags and 4-byte entry
+    count. Their walker expects the first sample-entry box. Detect this exact
+    call pattern and skip that header before delegating to the source helper.
+    """
+    if getattr(module, '_cctvhost_stsd_compat_applied', False):
+        return True
+    walker = getattr(module, '_walk_stsd', None)
+    collector = getattr(module, 'collect_patches', None)
+    if not (callable(walker) and callable(collector) and
+            callable(getattr(module, '_boxes', None)) and
+            callable(getattr(module, 'decrypt_moov_bytes', None))):
+        return False
+    try:
+        collector_source = inspect.getsource(collector)
+    except (OSError, TypeError):
+        return False
+    if not re.search(r'_walk_stsd\s*\(\s*d\s*,\s*cs\s*,\s*be\s*,\s*out\s*\)',
+                     collector_source):
+        return False
+
+    def walk_stsd(data, start, end, out):
+        count = int.from_bytes(data[start + 4:start + 8], 'big') if start + 8 <= end else 0
+        if (start + 8 <= end and data[start:start + 4] == b'\x00\x00\x00\x00' and
+                0 < count <= (end - start - 8) // 8):
+            start += 8
+        return walker(data, start, end, out)
+
+    walk_stsd.__name__ = getattr(walker, '__name__', '_walk_stsd')
+    walk_stsd.__doc__ = getattr(walker, '__doc__', None)
+    module._walk_stsd = walk_stsd
+    module._cctvhost_stsd_compat_applied = True
+    return True
+
+
 class PythonSpider:
-    def __init__(self, root, entry, options=None, proxy_url=''):
+    def __init__(self, root, entry, options=None, proxy_url='', data_dir=''):
         prepare_started_at = time.perf_counter()
         prepare_stage = 'module_import'
         owner = getattr(threading.current_thread(), '_host_session', None)
@@ -590,6 +674,7 @@ class PythonSpider:
         if self.added_path:
             sys.path.insert(0, self.root)
         self.namespace = '_cctvhost_spider_' + uuid.uuid4().hex
+        self.local_proxy_servers = set()
         namespace = types.ModuleType(self.namespace)
         namespace.__path__ = [self.root]
         sys.modules[self.namespace] = namespace
@@ -642,7 +727,9 @@ class PythonSpider:
         sys.modules[name] = module
         _python_spider_log_stage('python_spider_prepare_started', entry, prepare_started_at)
         try:
+            _install_python_spider_compatibility()
             spec.loader.exec_module(module)
+            _repair_mp4_stsd_walker(module)
             _python_spider_log_stage('python_spider_module_loaded', entry, prepare_started_at)
             cls = getattr(module, 'Spider', None)
             if not callable(cls):
@@ -651,7 +738,9 @@ class PythonSpider:
             _python_spider_log_stage('python_spider_constructor_started', entry, prepare_started_at)
             self.spider = cls()
             self.spider._cctvhost_proxy_url = proxy_url
+            self.spider._cctvhost_data_dir = os.path.realpath(data_dir) if data_dir else ''
             self.lock = threading.Lock()
+            self.proxy_lock_timeout = 120.0
             # Python Spider implementations are not generally thread-safe, so
             # calls stay serialized. Give a request already in progress time to
             # finish instead of turning ordinary home -> detail navigation into
@@ -661,10 +750,15 @@ class PythonSpider:
                 prepare_stage = 'spider_init'
                 init_started_at = time.perf_counter()
                 _python_spider_log_stage('python_spider_init_started', entry, init_started_at)
-                self.spider.init(options if isinstance(options, str) else json.dumps(options or {}, ensure_ascii=False))
+                init_options = (options if isinstance(options, str) else
+                                (json.dumps(options, ensure_ascii=False) if options is not None else ''))
+                self.spider.init(init_options)
                 _python_spider_log_stage('python_spider_init_succeeded', entry, init_started_at)
+            self._capture_plugin_loopback_servers()
             _python_spider_log_stage('python_spider_ready', entry, prepare_started_at)
         except BaseException as error:
+            self._capture_plugin_loopback_servers()
+            self._stop_plugin_loopback_servers()
             _python_spider_log_stage('python_spider_prepare_failed', entry, prepare_started_at,
                                      stage=prepare_stage, error_type=type(error).__name__)
             self._remove_package_modules()
@@ -721,6 +815,39 @@ class PythonSpider:
             if module_name == self.namespace or module_name.startswith(self.namespace + '.'):
                 sys.modules.pop(module_name, None)
 
+    def _capture_plugin_loopback_servers(self):
+        """Track loopback HTTP servers created by this Spider for playback."""
+        for thread in threading.enumerate():
+            target = getattr(thread, '_target', None)
+            server = getattr(target, '__self__', None)
+            if server is None or not callable(getattr(server, 'shutdown', None)) or not callable(getattr(server, 'server_close', None)):
+                continue
+            address = getattr(server, 'server_address', None)
+            host = str(address[0]).strip('[]').lower() if isinstance(address, tuple) and address else ''
+            if host not in ('127.0.0.1', '::1', 'localhost'):
+                continue
+            handler = getattr(server, 'RequestHandlerClass', None)
+            module = str(getattr(handler, '__module__', ''))
+            if module == self.namespace or module.startswith(self.namespace + '.'):
+                self.local_proxy_servers.add(server)
+
+    def _stop_plugin_loopback_servers(self):
+        servers = tuple(self.local_proxy_servers)
+        self.local_proxy_servers.clear()
+        for server in servers:
+            def shutdown(target=server):
+                try:
+                    target.shutdown()
+                except Exception:
+                    pass
+                try:
+                    target.server_close()
+                except Exception:
+                    pass
+            stopper = threading.Thread(target=shutdown, name='cctvhost-spider-proxy-stop', daemon=True)
+            stopper.start()
+            stopper.join(timeout=1.0)
+
     def capabilities(self):
         methods = {'home': 'homeContent', 'category': 'categoryContent', 'search': 'searchContent',
                    'detail': 'detailContent', 'play': 'playerContent', 'proxy': 'localProxy'}
@@ -730,6 +857,12 @@ class PythonSpider:
     def call(self, operation, args):
         wait_started = time.perf_counter()
         lock_timeout = max(.1, float(getattr(self, 'lock_timeout', 12.0)))
+        if operation == 'proxy':
+            try:
+                proxy_lock_timeout = float(getattr(self, 'proxy_lock_timeout', 120.0))
+            except (TypeError, ValueError):
+                proxy_lock_timeout = 120.0
+            lock_timeout = min(120.0, max(lock_timeout, proxy_lock_timeout))
         acquired = self.lock.acquire(timeout=lock_timeout)
         wait_ms = max(0, int((time.perf_counter() - wait_started) * 1000))
         request = getattr(threading.current_thread(), '_host_media_request_context', {})
@@ -786,6 +919,7 @@ class PythonSpider:
                 return spider.localProxy(args)
             raise MediaError('UNSUPPORTED', '此来源不支持该操作')
         finally:
+            self._capture_plugin_loopback_servers()
             self.lock.release()
 
     def close(self):
@@ -795,9 +929,38 @@ class PythonSpider:
                 if callable(callback):
                     callback()
             finally:
+                self._capture_plugin_loopback_servers()
+                self._stop_plugin_loopback_servers()
                 self._remove_package_modules()
                 if self.added_path and self.root in sys.path:
                     sys.path.remove(self.root)
+
+
+def _install_python_spider_compatibility():
+    """Adapt common Android-TVBox Python parser imports to bundled pure Python."""
+    try:
+        import bs4
+    except ImportError:
+        return
+    current = bs4.BeautifulSoup
+    if getattr(current, '_cctvhost_lxml_alias', False):
+        return
+
+    class CompatibleBeautifulSoup(current):
+        _cctvhost_lxml_alias = True
+
+        def __init__(self, markup="", features=None, *args, **kwargs):
+            if features in ('lxml', 'lxml-html'):
+                features = 'html.parser'
+            elif features == 'lxml-xml':
+                features = 'xml'
+            if features is None:
+                features = 'html.parser'
+            super().__init__(markup, features, *args, **kwargs)
+
+    CompatibleBeautifulSoup.__name__ = current.__name__
+    CompatibleBeautifulSoup.__qualname__ = current.__qualname__
+    bs4.BeautifulSoup = CompatibleBeautifulSoup
 
 
 class NativeJS:

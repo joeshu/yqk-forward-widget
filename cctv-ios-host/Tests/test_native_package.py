@@ -37,6 +37,12 @@ class NativePackageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
+    def inspect_with_runtime_hint(self, file, runtime):
+        result = subprocess.run([str(self.executable), '--runtime-hint', runtime, str(file)],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
     def archive(self, entries):
         file = self.folder / 'fixture.zip'
         with zipfile.ZipFile(file, 'w', zipfile.ZIP_DEFLATED) as archive:
@@ -55,8 +61,8 @@ class NativePackageTests(unittest.TestCase):
         self.assertTrue(result['entryExists'])
         self.assertTrue(result['archiveExists'])
 
-    def test_commonjs_node_require_is_routed_to_node_unless_manifest_overrides(self):
-        source = "const fs=require('fs');module.exports={search(){return {list:[]}}}"
+    def test_commonjs_require_is_routed_to_node_unless_manifest_overrides(self):
+        source = "const helper=require('example-helper');module.exports={search(){return {list:[]}}}"
         inferred = self.inspect(self.archive({'index.js': source}))
         self.assertTrue(inferred['ok'], inferred)
         self.assertEqual((inferred['engine'], inferred['manifest']['moduleType']), ('node', 'commonjs'))
@@ -67,12 +73,75 @@ class NativePackageTests(unittest.TestCase):
         self.assertTrue(explicit['ok'], explicit)
         self.assertEqual(explicit['engine'], 'javascript')
 
+    def test_explicit_import_shortcuts_recover_dynamic_runtime_and_keep_protocol_boundaries(self):
+        dynamic_node = self.archive({'cctvhost.json': json.dumps({'entry': 'index.js', 'runtime': 'javascript',
+                                                                  'protocol': 'cctvhost.media/1'}),
+                                     'index.js': "const load=require;const http=load('http');module.exports={search(){return {list:[]}}}"})
+        node = self.inspect_with_runtime_hint(dynamic_node, 'node')
+        self.assertEqual((node['ok'], node['engine'], node['protocol']), (True, 'node', 'cctvhost.media/1'))
+
+        python = self.folder / 'quick-spider.py'
+        python.write_text('class Spider:\n    def homeContent(self, filter): return {}\n')
+        spider = self.inspect_with_runtime_hint(python, 'python')
+        self.assertEqual((spider['ok'], spider['engine'], spider['protocol']), (True, 'python', 'python-spider'))
+
+        catpaw_source = '''export default function createSpider() { return {meta:{key:'fixture'},api:async fastify=>{
+          const handler=async()=>({});fastify.post('/init',handler);fastify.post('/home',handler);
+          fastify.post('/category',handler);fastify.post('/detail',handler);fastify.post('/play',handler);fastify.post('/search',handler);
+        }}; }'''
+        catpaw = self.archive({'index.mjs': catpaw_source})
+        rejected = self.inspect_with_runtime_hint(catpaw, 'node')
+        self.assertFalse(rejected['ok'])
+        self.assertIn('不能强制切换到 Node.js Mobile', rejected['error'])
+
     def test_package_dependencies_default_to_node_for_esm(self):
         result = self.inspect(self.archive({'package.json': json.dumps({'type': 'module',
                                                                        'dependencies': {'example': '^1.0.0'}}),
                                            'index.js': 'export default {search(){return {list:[]}}}'}))
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['engine'], result['manifest']['moduleType']), ('node', 'esm'))
+
+    def test_package_exports_select_root_entry_for_esm_and_commonjs_conditions(self):
+        esm = self.inspect(self.archive({
+            'package.json': json.dumps({'type': 'module', 'dependencies': {'example': '^1.0.0'},
+                                        'exports': {'.': {'import': './src/index.js', 'require': './src/index.cjs',
+                                                          'default': './src/fallback.js'}}}),
+            'src/index.js': 'export default {search(){return {list:[]}}}',
+            'src/index.cjs': 'module.exports={search(){return {list:[]}}}',
+            'src/fallback.js': 'export default {search(){return {list:[]}}}',
+            'index.js': 'throw new Error("must not override package exports")'}))
+        self.assertTrue(esm['ok'], esm)
+        self.assertEqual((esm['engine'], esm['manifest']['entry'], esm['manifest']['moduleType']),
+                         ('node', 'src/index.js', 'esm'))
+
+        commonjs = self.inspect(self.archive({
+            'package.json': json.dumps({'dependencies': {'example': '^1.0.0'},
+                                        'exports': {'require': './lib/index.cjs', 'import': './lib/index.mjs'}}),
+            'lib/index.cjs': 'module.exports={search(){return {list:[]}}}',
+            'lib/index.mjs': 'export default {search(){return {list:[]}}}',
+            'index.js': 'throw new Error("must not override package exports")'}))
+        self.assertTrue(commonjs['ok'], commonjs)
+        self.assertEqual((commonjs['engine'], commonjs['manifest']['entry'], commonjs['manifest']['moduleType']),
+                         ('node', 'lib/index.cjs', 'commonjs'))
+
+    def test_package_subpath_exports_do_not_replace_root_or_explicit_manifest_entry(self):
+        archive = self.archive({
+            'package.json': json.dumps({'main': 'index.js', 'exports': {'./compat': './lib/compat.js'}}),
+            'cctvhost.json': json.dumps({'entry': 'custom.js', 'runtime': 'javascript',
+                                         'protocol': 'cctvhost.media/1'}),
+            'index.js': 'module.exports={search(){return {list:[]}}}',
+            'custom.js': 'module.exports={search(){return {list:[]}}}',
+            'lib/compat.js': 'module.exports={search(){return {list:[]}}}'})
+        explicit = self.inspect(archive)
+        self.assertTrue(explicit['ok'], explicit)
+        self.assertEqual(explicit['manifest']['entry'], 'custom.js')
+
+        no_manifest = self.inspect(self.archive({
+            'package.json': json.dumps({'main': 'index.js', 'exports': {'./compat': './lib/compat.js'}}),
+            'index.js': 'module.exports={search(){return {list:[]}}}',
+            'lib/compat.js': 'module.exports={search(){return {list:[]}}}'}))
+        self.assertTrue(no_manifest['ok'], no_manifest)
+        self.assertEqual(no_manifest['manifest']['entry'], 'index.js')
 
     def test_package_and_manifest_versions_are_persisted_as_resource_metadata(self):
         package=self.inspect(self.archive({'package.json': json.dumps({'name':'fixture','version':'2.4.1'}),
@@ -222,6 +291,32 @@ route='/all.m3u';body='#EXTM3U'
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['engine'], result['protocol']), ('javascript', 'catvod-js'))
 
+    def test_catvod_node_core_imports_are_routed_to_node_runtime(self):
+        source = "import http from 'node:http'; import https from 'node:https'; import crypto from 'node:crypto'; import fs from 'node:fs'; export default site=>({home(){return {class:[]}},category(){return {list:[]}},search(){return {list:[]}},detail(){return {list:[]}},play(){return {parse:0,url:'https://fixture.test'}}})"
+        result = self.inspect(self.archive({
+            'cctvhost.json': json.dumps({'entry': 'index.mjs', 'runtime': 'javascript',
+                                        'protocol': 'catvod-js', 'moduleType': 'esm'}),
+            'index.mjs': source}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol'], result['manifest']['moduleType']),
+                         ('node', 'catvod-js', 'esm'))
+
+        commonjs = self.inspect(self.archive({
+            'cctvhost.json': json.dumps({'entry': 'index.cjs', 'runtime': 'javascript',
+                                        'protocol': 'catvod-js', 'moduleType': 'commonjs'}),
+            'index.cjs': "const crypto=require('crypto'); module.exports={search(){return {list:[]}}}"}))
+        self.assertTrue(commonjs['ok'], commonjs)
+        self.assertEqual(commonjs['engine'], 'node')
+
+    def test_transitive_node_core_import_is_found_below_package_entry(self):
+        result = self.inspect(self.archive({
+            'cctvhost.json': json.dumps({'entry': 'index.js', 'runtime': 'javascript',
+                                        'protocol': 'catvod-js', 'moduleType': 'commonjs'}),
+            'index.js': "module.exports=require('./lib/network.js')",
+            'lib/network.js': "const http=require('node:http');module.exports=http;"}))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['engine'], 'node')
+
     def test_python_spider_is_recognized_without_executing_user_code(self):
         marker = self.folder / 'must-not-run'
         file = self.folder / '看剧.py'
@@ -230,6 +325,34 @@ route='/all.m3u';body='#EXTM3U'
         self.assertTrue(result['ok'], result)
         self.assertEqual((result['engine'], result['protocol']), ('python', 'python-spider'))
         self.assertFalse(marker.exists())
+
+    def test_hamo_v3_single_file_is_recognized_as_javascript_source_without_execution(self):
+        file = self.folder / 'hamo.js'
+        file.write_text('''async function home(params, context) { return {categories:[], items:[]} }
+async function category(params, context) { return {items:[]} }
+async function search(params, context) { return {items:[]} }
+async function detail(params, context) { return {id:params.itemId, title:'Fixture', sources:[]} }
+async function resolve(params, context) { return {url:'https://fixture.test/video.m3u8', type:'direct'} }
+var hawk={apiVersion:3,type:'source',meta:{name:'Hamo fixture'},capabilities:['home','category','search','detail','resolve'],home,category,search,detail,resolve};
+''')
+        result = self.inspect(file)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol']), ('javascript', 'hamo-source-v3'))
+        self.assertEqual(result['manifest']['moduleType'], 'script')
+
+    def test_python_spider_with_android_tvbox_file_access_shows_ios_compatibility_note(self):
+        file = self.folder / 'android-loader.py'
+        file.write_text('''class Spider:
+    path = "/sdcard/TV/CustomCsp/registry.json"
+    def homeContent(self, filter): return {"class": [], "list": []}
+    def action(self, action):
+        from java import jclass
+        return jclass("android.app.Activity")
+''')
+        result = self.inspect(file)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol']), ('python', 'python-spider'))
+        self.assertIn('iOS 不提供 /sdcard', result['manifest']['compatibilityNote'])
 
     def test_python_spider_routes_are_not_misidentified_as_local_live_subscriptions(self):
         file=self.folder/'spider_with_web_route.py'
@@ -350,7 +473,7 @@ route = '/all.m3u'
         result=subprocess.run([str(self.executable),'--update',str(old),str(new)],capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stderr)
         value=json.loads(result.stdout)
-        for key in ('ok','sameID','portKept','optionsKept','accountKept','argumentsUpdatedCorrectly','playlistUpdatedCorrectly','rollbackRestoredCode','rollbackRestoredArguments','rollbackRestoredPlaylist'):self.assertTrue(value[key],value)
+        for key in ('ok','sameID','portKept','optionsKept','accountKept','importHeadersUpdated','importHeadersRestored','argumentsUpdatedCorrectly','playlistUpdatedCorrectly','rollbackRestoredCode','rollbackRestoredArguments','rollbackRestoredPlaylist'):self.assertTrue(value[key],value)
 
     def test_imported_update_keeps_manual_arguments_and_playlist_override(self):
         old=self.folder/'old-manual.cjs';new=self.folder/'new-manual.cjs'
@@ -359,13 +482,18 @@ route = '/all.m3u'
         result=subprocess.run([str(self.executable),'--update-manual',str(old),str(new)],capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stderr)
         value=json.loads(result.stdout)
-        for key in ('ok','sameID','portKept','optionsKept','accountKept','argumentsUpdatedCorrectly','playlistUpdatedCorrectly','rollbackRestoredCode','rollbackRestoredArguments','rollbackRestoredPlaylist'):self.assertTrue(value[key],value)
+        for key in ('ok','sameID','portKept','optionsKept','accountKept','importHeadersUpdated','importHeadersRestored','argumentsUpdatedCorrectly','playlistUpdatedCorrectly','rollbackRestoredCode','rollbackRestoredArguments','rollbackRestoredPlaylist'):self.assertTrue(value[key],value)
 
     def test_md5_pair_downloads_original_code_and_rejects_mismatch_and_limits(self):
         source = b'module.exports={search(){return {list:[]}}}'
+        observed_auth=[]
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_): pass
             def do_GET(self):
+                if self.path.startswith('/auth/'):
+                    observed_auth.append(self.headers.get('Authorization',''))
+                    if self.headers.get('Authorization') != 'Basic d2V4Zm53OndleGZudw==':
+                        self.send_response(401);self.end_headers();return
                 if self.path == '/html.js':
                     body = b'<!doctype html><html><body>Sign in to download this resource</body></html>'
                     self.send_response(200)
@@ -375,7 +503,8 @@ route = '/all.m3u'
                     return
                 body = source
                 if self.path.endswith('.md5'):
-                    body = (hashlib.md5(source).hexdigest() if self.path == '/index.cjs.md5' else '0' * 32).encode()
+                    body = ('0' * 32 if self.path.endswith('/mismatch.js.md5')
+                            else hashlib.md5(source).hexdigest()).encode()
                 self.send_response(200)
                 self.send_header('Content-Length', str(25 * 1024 * 1024 if self.path == '/oversize.js' else len(body)))
                 self.end_headers()
@@ -398,6 +527,12 @@ route = '/all.m3u'
             self.assertIn('HTML 网页', html['error'])
             self.assertFalse(self.inspect(base + '/oversize.js')['ok'])
             self.assertFalse(self.inspect(base + '/unsupported.txt')['ok'])
+            authenticated=self.inspect(base.replace('http://','http://wexfnw:wexfnw@')+'/auth/index.js.md5')
+            self.assertTrue(authenticated['ok'],authenticated)
+            self.assertNotIn('wexfnw',authenticated['url'])
+            self.assertEqual(authenticated['importHeaders']['Authorization'],'Basic d2V4Zm53OndleGZudw==')
+            self.assertGreaterEqual(len(observed_auth),2)
+            self.assertTrue(all(value=='Basic d2V4Zm53OndleGZudw==' for value in observed_auth))
         finally:
             server.shutdown();server.server_close();thread.join(2)
 

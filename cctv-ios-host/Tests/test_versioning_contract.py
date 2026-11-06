@@ -46,6 +46,12 @@ class VersioningContractTests(unittest.TestCase):
         self.assertIn('Print :CFBundleShortVersionString', workflow)
         self.assertIn('--title "CCTVHost ${version} (${build})"', workflow)
 
+    def test_slow_live_media_matrix_is_opt_in_for_release_runs(self):
+        workflow = (ROOT.parent / ".github" / "workflows" / "cctv-ios-host.yml").read_text()
+        self.assertIn("run_media_compat:", workflow)
+        self.assertIn("default: false", workflow)
+        self.assertIn("inputs.run_media_compat == true", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

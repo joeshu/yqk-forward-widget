@@ -64,6 +64,15 @@ class Spider:
         self._host_persistent_cache = {}
         self._host_persistent_cache_loaded = False
 
+    def log(self, *values, **kwargs):
+        """Accept the logging calls used by Android TVBox base classes.
+
+        Provider messages may contain signed URLs or credentials. The iOS host
+        keeps its own redacted diagnostics, so the compatibility shim must not
+        forward arbitrary Spider text into the app log.
+        """
+        return None
+
     def _persistent_cache_path(self):
         data_dir = os.environ.get('CCTVHOST_DATA_DIR') or os.environ.get('YSP_DATA_DIR')
         if not data_dir:

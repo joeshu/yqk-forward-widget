@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "HGTV 红果短剧（Python 1.0.4）",
+  "runtime": "python",
+  "protocol": "python-spider",
+  "entry": "hgtv_public_1_0_4.py",
+  "options": {
+    "playTimeoutMs": 120000
+  }
+}

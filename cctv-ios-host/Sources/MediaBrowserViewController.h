@@ -3,10 +3,19 @@
 @interface MediaBrowserViewController : UIViewController
 /// Refresh installed sources while preserving the current browser state when possible.
 - (void)refreshSources;
+/// Media display preferences, pushable from Settings without loading this page.
+- (UIViewController *)mediaDisplaySettingsViewController;
 - (void)openSourceIdentifier:(NSString *)identifier;
 - (void)invalidateServiceIdentifier:(NSString *)identifier;
 - (void)showConfigurationForSource:(NSDictionary *)source;
 @property(nonatomic, copy) NSArray<NSDictionary *> *(^sourcesProvider)(void);
+/// Saved TVBox collections are listed alongside resources and opened only when selected.
+@property(nonatomic, copy) NSArray<NSDictionary *> *(^catalogsProvider)(void);
+@property(nonatomic, copy) void (^onOpenTVBoxCatalog)(NSString *catalogID);
+/// Loads only the selected script site from the current catalog.
+@property(nonatomic, copy) void (^onImportCatalogSite)(NSDictionary *site,NSString *catalogID);
+/// Adds the selected playlist from a grouped live catalog.
+@property(nonatomic, copy) void (^onSubscribeCatalogLive)(NSDictionary *live,NSString *catalogID);
 @property(nonatomic, copy) void (^onActivateService)(NSDictionary *service,void (^completion)(NSError *error));
 @property(nonatomic, copy) void (^onRestartService)(NSDictionary *service,void (^completion)(NSError *error));
 - (void)checkCurrentService;
@@ -28,4 +37,5 @@
 @property(nonatomic) BOOL deferAutomaticLoading;
 /// Starts or refreshes the selected source only after an explicit user action.
 - (void)loadHomeOnDemand;
+- (void)setBottomOverlayInset:(CGFloat)inset;
 @end

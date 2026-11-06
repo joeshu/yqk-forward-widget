@@ -13,6 +13,10 @@
 
 导入猫爪时可直接输入 `https://joeshu.github.io/yqk-forward-widget/catpaw/index.js.md5`。宿主下载对应 JS，核对 MD5 后安装；MD5 文件本身不会作为 JS 执行。校验仅证明传输内容一致。
 
+「资源 → ＋」提供自动识别、Python Spider、CatVod/TVBox JS、Node.js Mobile、TVBox JSON、MacCMS、直播列表和本地文件入口。脚本链接与 ZIP 快捷入口最终共用 `MediaPackageImporter` 的静态检查，不会因入口标签换用不同的解析器；Node 快捷入口只在确实需要动态 Node 模块时使用，并会拒绝要求 JavaScriptCore / CPython 的协议。导入结果会显示识别出的运行时和协议；未静态声明的能力需在资源详情启动服务后实际查询，导入成功不等于播放解码成功。
+
+Node ZIP 包的入口按 `cctvhost.json` 的 `entry`、`package.json` 根 `exports`、`module` / `main` 和常见入口名依次识别。根导出支持字符串、数组及 `import` / `require` / `node` / `default` 条件；只声明 `./subpath` 的 exports 不会误当成包入口，导出目标仍受资源目录路径校验限制。
+
 ## 包类型
 
 | 类型 | 本机引擎 | 接口 |
@@ -20,6 +24,7 @@
 | 普通 JS | JavaScriptCore；CommonJS `require()` 或非 Spider npm dependencies 默认走 Node.js Mobile | home/category/search/detail/play，可选 channels/catalog/resolve |
 | CatPaw JS Spider | JavaScriptCore 本机路由适配器 | ESM 默认导出的工厂函数或旧式对象；运行 `api(fastify)` 的 init/home/category/detail/play/search 路由 |
 | CatVod / TVBox 风格 JS | JavaScriptCore 或清单指定 Node | 新式 `home/category/search/detail/play` 与旧式 `homeContent/categoryContent/searchContent/detailContent/playerContent` |
+| Hamo v3 影视源 | JavaScriptCore | `apiVersion: 3` 的 `home/category/search/detail/resolve`；兼容 `$http.get`、带 TTL 的 `$cache`、Base64 `$crypto.encode` |
 | drpy 规则 | JavaScriptCore + 固定版本 dr_py 引擎 | 声明 `var/let/const rule = {...}` 的规则文件 |
 | Python Spider | CPython 3.13 | Spider.init/homeContent/homeVideoContent/categoryContent/searchContent/detailContent/playerContent/destroy |
 | CatPawOpen / 猫爪 Node 服务 | Node.js Mobile 18.20.4 | `start/stop` + `/config`、`/spider/...` |
@@ -29,9 +34,107 @@
 
 JS 原文件由 JS 引擎执行，Python 原文件由 CPython 执行，均在 iPhone 进程内。Node 框架首次启用相关资源才加载，不在 CCTV 开台时启动。
 
+iPhone 的 CPython 不包含也不能启动桌面 `ffmpeg` 命令行程序。应用已链接
+`alivcffmpeg.framework`；Python 现可导入 `cctvhost_ffmpeg`，读取本机构建的
+FFmpeg 版本和解码器能力，并用 `cctvhost_ffmpeg.probe(url, headers={}, timeout=12)`
+检查本地文件或 HTTP(S) 媒体是否包含视频、音频和字幕流。接口设置 1–30 秒的单次 I/O
+等待上限、2 MiB 格式探测上限、256 个探测包上限和 5 秒流分析参数，不会启动进程。当前 Python 接口用于媒体
+探测；任意 FFmpeg 命令行参数、滤镜和转码任务仍需各自的原生 API 支持。
+
+Python 同时内置纯 Python `Crypto` 与 `Cryptodome` 兼容包，常见 PyCryptodome
+脚本可直接导入，无需安装桌面 wheel 或加载原生扩展。覆盖 AES ECB/CBC/CFB/OFB/CTR/GCM/EAX、
+MD5/SHA-1/SHA-2/SHA-3/SHAKE、HMAC/CMAC、PBKDF2/HKDF/scrypt、公钥 RSA PKCS#1 v1.5/OAEP
+加密、PKCS#7/X9.23/ISO7816 填充、随机字节和常用 `Crypto.Util` 辅助接口。它不包含完整
+PyCryptodome：RSA 私钥运算与签名、ECC、DES/3DES、ChaCha20、CCM 和原生内部模块仍不支持；
+依赖这些功能的脚本需要自行适配。
+
+需要高速逐块 AES-CTR 时，Python 还可直接使用宿主内建的 `hostcrypto`，无需 `ctypes`、
+wheel 或插件自建服务：
+
+```python
+import hostcrypto
+
+ctr = hostcrypto.AES_CTR(key16, iv16)  # key 和 counter block 都必须是 16 字节
+try:
+    first = ctr.update(cipher_bytes[:4096])
+    rest = ctr.update(cipher_bytes[4096:])  # 同一个对象会连续推进 counter
+finally:
+    ctr.close()
+```
+
+iOS 端由 CommonCrypto 原生实现，`Crypto`/`Cryptodome` 兼容包继续保留，供其它算法和旧脚本使用。
+桌面测试中的 `hostcrypto.py` 是兼容回退实现。8 MB 在真机上低于 2 秒是性能验收目标，须以目标 iPhone
+实测记录确认；模拟器或桌面耗时不能替代该验收。
+
 ## ZIP 清单
 
-ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。存在清单时优先使用清单，否则尝试 package.json 和常见入口。CommonJS 代码使用静态 `require("...")` 或 `package.json` 声明 dependencies 时，未指定运行时时默认选择 Node.js Mobile；drpy 等专用协议仍使用 JavaScriptCore。旧版本已导入的无清单 Node/CommonJS 资源会在下次启动时重新识别。Node 包需要在 ZIP 内带齐它使用的 `node_modules`，应用不会联网安装 npm 依赖。无法确定入口时会明确报错。
+ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。存在清单时优先使用清单，否则尝试 package.json 和常见入口。CommonJS 代码使用静态 `require("...")` 或 `package.json` 声明 dependencies 时，未指定运行时时默认选择 Node.js Mobile。导入 `node:*` 核心模块或 Node 内置模块（如 `crypto`、`fs`、`http`、`https`）时也会选择 Node.js Mobile，包括清单误标为 `javascript` 的 CatVod 源；检测会扫描 ZIP 内 `.js`、`.mjs`、`.cjs` 文件，包含 `node_modules`。旧版本已导入的资源会在下次启动时重新识别。CatPaw Spider、Hamo 等专用协议仍遵守各自运行时要求。Node 包需要在 ZIP 内带齐它使用的 `node_modules`，应用不会联网安装 npm 依赖。用变量拼出的动态模块名无法静态识别；这类包可在清单中指定 `runtime: node`。无法确定入口时会明确报错。
+
+Node 核心模块按下表处理：
+
+| 模块 | JavaScriptCore 兼容层 | Node.js Mobile |
+| --- | --- | --- |
+| `node:crypto` | 只有常见摘要、HMAC、随机数等轻量适配 | Node 原生 Crypto API |
+| `node:fs` | ZIP 只读及内存临时文件子集 | Node 文件 API；相对路径落在资源数据目录 |
+| `node:http` / `node:https` | 不提供 Node 兼容实现 | Node HTTP/HTTPS API |
+| `node:stream` / `node:buffer` / `node:url` | 有常用适配子集 | Node 原生 API |
+
+包含 Node 核心模块导入的影视源会交给 Node.js Mobile（Node 18.20.4），避免把部分 JSC 适配误认为完整 Node 模块。`child_process` 的外部进程调用和 `worker_threads.Worker` 会被宿主拒绝；任意 `.node` 原生扩展也无法加载。依赖 ffmpeg 等外部二进制的源仍需改成纯 JS/WASM 或服务端方案。
+
+### Node 运行时与媒体服务
+
+CommonJS 的 `require()`、清单声明 `runtime: "node"`、或静态导入 `node:*` 核心模块时会选择内嵌
+Node.js Mobile 18.20.4。`node:crypto`、`node:http`、`node:https` 和 `node:fs` 使用 Node 运行时接口；
+其中 `fs` 的可写相对路径受限于该资源的数据目录。JavaScriptCore 会话只提供文档表格所列的兼容子集，
+不能把 JSC 中的 `http`、`https` 或部分 `crypto` 适配当成完整 Node 行为。CatPaw Spider、Hamo 等专用
+协议仍运行在各自指定的 JavaScriptCore 会话。
+
+Node 插件可以用 `server.listen(0, "127.0.0.1")` 获取系统分配的端口，并在监听回调后通过
+`server.address().port` 读取它；但普通插件的这个地址不会自动注册到宿主媒体代理，也不会被改写成 AVPlayer 可用的媒体 URL。
+CatPawOpen 是专用例外：宿主只把它声明的 `/spider/...` 服务路由转接到已发现的服务地址。宿主为每个 Node 插件跟踪最多
+4 个 loopback Server 和关联连接，并在 `stop`/`close` 或资源停止时关闭。解密媒体应走宿主 `localProxy()` 协议，不能把媒体交付依赖于插件另起 HTTP 监听。Python Spider 可直接返回
+`[status, headers, bytes]`；Node.js Mobile 的 `localProxy()` 可返回同样结构，或返回宿主管理的数据目录中的受限文件引用。iOS 后台运行受系统生命周期限制；停止资源时宿主会清理
+注册的计时器、连接和监听。
+
+Node `https.request/get` 先尝试 Node 原生 TLS。默认 TLS 配置下，若在收到响应前发生连接或 TLS 握手错误，宿主会通过
+带随机令牌的回环接口让内嵌 Python `urllib` 重试一次，并透传请求头、Range、状态码、响应头和响应内容（最多 16 MiB）。
+Python 仍使用默认 CA 证书校验；证书校验失败、自定义 TLS 参数或自定义 Agent 不触发回退。明文 HTTP、已有原生 TLS
+响应的请求和自定义 Node TLS 配置都保留原行为。`node:child_process` 不能启动桌面二进制；`Worker` 和任意 `.node` 扩展不支持。
+
+Python Spider 的媒体中转应优先用 `localProxy()`，避免为一个解密流程另起 `http.server`：
+
+```python
+def playerContent(self, flag, vid, vipFlags):
+    return {"url": "cenc://" + vid, "proxy": 1,
+            "format": "mp4", "contentType": "video/mp4"}
+
+def localProxy(self, params):
+    # url、method、headers、range；upstreamHeaders 是 playerContent 的源站请求头
+    return [206, {"Content-Type": "video/mp4", "Accept-Ranges": "bytes",
+                  "Content-Range": "bytes 0-1023/8966975"}, chunk_bytes]
+```
+
+`proxy: 1` 会使 `playback()` 将自定义绝对 URI 改写成本机 `/proxy/<token>` 地址，供 AVPlayer 使用。
+请求会把播放器的 `GET`/`HEAD`、`Range` 和常用请求头传入 `localProxy()`；参数 `url` 保留原地址，
+`headers` 是播放器请求头，`range` 是 Range 字符串，`upstreamHeaders` 是播放地址返回的源站请求头。
+回调返回 `[status, headers, body]`，其中 body 为 bytes；宿主管理端口和 HTTP 响应，不把源站 Cookie 交给播放器。
+直接返回 bytes 的单次响应上限为 16 MiB；较大媒体使用下面的文件引用流式返回。原有 `/proxy?url=...` 调用形式继续兼容。
+Python Spider 为兼容非线程安全脚本仍串行执行；代理调用等待前一个回调的排队上限为 120 秒，以容纳首轮下载/解密期间播放器并发的 Range 或 HEAD 请求。普通影视接口仍使用原 12 秒默认排队上限。
+
+Python 和 Node.js Mobile 资源都可在第三项返回
+`{__cctvhostFileResponse: true, path, offset, length}`。宿主校验真实路径仍在该资源的数据目录、文件范围有效，然后用 256 KiB 缓冲流式交付，支持完整 GET、开放区间 Range、后缀 Range 和 HEAD。文件引用不受 bytes 的 16 MiB 上限影响；Node 视频数据也不会进入 JSON 控制桥。Python 新宿主会注入 `_cctvhost_file_proxy_supported = True`；HGTV 源在旧宿主上保留小响应的 bytes 兼容路径，较大文件需要更新 IPA。
+
+`Examples/hgtv-python-1.0.4`、`Examples/hgtv-python` 和 `Examples/hgtv-node` 提供 HGTV 导入示例。两种运行时都读取实际分集画质，默认最高可用档，并返回各档 `alternates`；不存在的档位返回明确错误。JS 从 SSR 的完整 `vid_list` 读取全集。Python 使用 `hostcrypto.AES_CTR`、Node 使用原生 AES-CTR，无需 ffmpeg。解密保留 MP4 盒长度、从 `sinf/frma` 恢复原始编解码标识，再把保护盒类型改成 `free`；不改编码器的 HEVC Level。严格校验会拒绝先前写坏盒长度的缓存。公开试看不存在时明确提示，不将完整签名视频标成试看。包根目录为 `cctvhost.json`。
+
+`Scripts/hgtv-live-matrix.py` 下载指定集的各个实际画质并核对目录；`Scripts/validate-avfoundation.sh` 在 macOS 使用真实 AVFoundation 解析本地文件与 HTTP Range、解出画面，同时保留旧错误结构的对照样本。报告区分目录解析、媒体交付与解码验证，不将接口 HTTP 200 视作已经显示首帧。
+
+
+示例 `Plugins/example-encrypted-media.py` 使用标准库解析 MP4、按样本解密并支持 Range；资源的「插件选项」JSON
+可通过 `items` 配置分集 URL、32 位十六进制 AES-128 密钥和请求头。模板支持未分片 MP4、`stsz/stsc/stco`
+或 `co64`、`tenc`/`senc` 每样本 8 或 16 字节 IV、CTR `cenc` 和标准 HTTP Range；文件最大 128 MiB，
+单次代理响应和 `moov` 最大 16 MiB。不支持 fragmented MP4 (`moof`)、pattern encryption、外置 IV 表或所有
+私有 DRM 变体，也不替来源实现登录、签名和密钥派生。导入前需用目标来源的真实媒体样本验证；模板不依赖 ffmpeg
+或插件自建监听端口。
 
 ```json
 {
@@ -41,15 +144,23 @@ ZIP 根目录可包含 `cctvhost.json`；也支持外层再套一个文件夹。
   "protocol": "catvod-js",
   "moduleType": "esm",
   "entry": "src/index.js",
-  "options": {}
+  "options": {"playTimeoutMs": 20000}
 }
 ```
+
+`options.playTimeoutMs` 可将播放解析接口等待时间设置为 1,000–120,000 毫秒，默认 15,000 毫秒；
+超出范围的值会夹到边界，无效或零值回到默认值。此值只作用于 `play` 请求，列表、详情、搜索继续使用
+原有请求超时。Python Spider 等插件若 `playerContent()` 本身需下载、签名或解密，可据实际耗时增加该值。
 
 `runtime` 支持 `javascript`、`python`、`node`。`protocol` 支持 `cctvhost.media/1`、`catvod-js`、`catvod-spider`、`drpy`、`python-spider`、`python-http`、`iptv-extractor`、`catpaw-http`。清单中的 `tvbox`、`tvbox-js`、`catvod-quickjs`、`catvod-open-js` 会规范化为 `catvod-js`；`catvod-open` 根据入口识别为本机 CatPawOpen Node 服务或 CatVod JS。JS 的 moduleType 为 `esm`、`commonjs` 或普通规则使用的 `script`。
 
 CatPaw JS Spider 按附件中的本机 Spider 规范运行：ESM 默认导出工厂，返回 `{ meta, api(fastify) }`，并注册 `/init`、`/home`、`/category`、`/detail`、`/play`、`/search` 六个 POST 路由。兼容默认导出工厂与历史对象导出。请求会按 CatVod 字段传递：搜索 `wd/page/quick`、分类 `id/page/filters/extend`、详情 `id[]`、播放 `flag/id`。打包入口可为单文件，也可通过 ZIP 清单的 `entry` 指向包内入口。
 
 CatVod/TVBox 风格 JS 支持 `export default site => ({ init(ext), home(filter), homeVod(), category(tid, pg, filter, extend), search(key, quick, pg), detail(id), play(flag, id, vipFlags) })`，也兼容旧版 `homeContent/categoryContent/searchContent/detailContent/playerContent`。站点参数可放在 `options` 本身，或 `options.site`；`options.ext` 会传给 `init(ext)`。标准 `net.http/net.json`、`local.get/set/delete` 可在本机使用。没有清单时，导入器会按入口代码识别这类方法式 Spider。
+
+Hamo v3 单文件影视源可直接作为 JS 资源导入。宿主会把其 `title/poster/sources` 数据映射到影视卡片、详情线路和分集，并把分集引用保存在本机播放 ID 中，交给 `resolve` 解析；返回网页地址时会进入网页播放路径。`$http` 使用本机有界 HTTP 客户端，`$cache` 按来源隔离并支持 TTL，`$crypto.encode` 支持 UTF-8、Base64 与十六进制转换。
+
+TVBox type 3 的远程 `.py` 若提供标准 `class Spider` 接口，可按 Python Spider 导入。依赖 Android `/sdcard`、Activity 或向 Android TVBox 写配置的自动加载器，在 iOS 中不能执行这些 Android 专属动作；导入后会在资源详情中显示说明。Android/JAR `csp_*` 插件仍不能在 iOS 本机运行。
 
 CatPawOpen 服务 ZIP 可将 `entry` 指向服务入口（例如 `src/index.js`），入口导出 `start()`/`stop()` 并在本机监听，服务须实现 `/config` 与 `/spider/<key>/3/...`。导入器会检查入口及 `router.js`，自动识别常见 Node 服务包；Node 依赖须一并放进 ZIP 的 `node_modules`。启用后，影视来源选择器按 `/config` 提供的站点显示与搜索。
 
@@ -66,6 +177,10 @@ MacCMS JSON/XML 接口可在「资源 → ＋ → MacCMS 影视接口」单独�
 跨来源搜索每次最多并行检查 3 个独立来源；同一个 Python、Node.js 或 JavaScriptCore 服务中的站点仍按顺序请求，避免争用它自己的会话。结果按来源即时追加，显示当前站点、失败信息和进度。搜索不会自动启动停用的插件；用户点按某个来源后才会启动该服务，其他插件不受影响。搜索结果最多保留 100 条，失败来源可单独重试。
 
 CatPaw Spider 的常用 `util/req.js`、`util/htmlParser.js`、缓存、并发、通用工具及运行时配置导入映射到本机兼容模块；`req.js` 提供域名隔离 Cookie、保存/恢复/清除接口。`axios`、`cheerio`、`crypto-js`、`iconv-lite`、`jpeg-js`、`http2`、`stream`、`qs` 等通过应用内的 JS 依赖注册表提供。`node:stream` 当前提供 `Readable.from`、`data/end` 事件和 `pipe` 常用能力；`fs` 只读 ZIP 文件，临时写入留在内存中，不会访问 iPhone 其它目录。ZIP 自带的其它 JS 依赖仍须保持在 ZIP 中。Fastify 标准 `get/post` 路由可在本机服务下调用；`/spider/<key>/3/...` 私有路由同样可从 AVPlayer 请求，适合返回重写后的 HLS 清单。`parse: 1` 会交给应用的网页播放页，`parse: 0` 则交给 AVPlayer；本机播放器不会把解析页面冒充媒体流。
+
+TVBox 合集的 `parses` 配置会按当前合集载入详情页的「解析接口」选择器。自动模式最多依次尝试 3 个 type 1 JSON 接口；type 1 返回 HTTP(S) 媒体地址后交给 AVPlayer，type 0 则在应用内网页播放器中打开。也可以逐个手动选择，失败时回到合集的网页解析器或站点原页。解析请求只向已导入配置中声明的接口发送影片网页 URL；跨域跳转会移除敏感请求头。TVBox 解析配置能否成功仍取决于接口本身及媒体授权。
+
+优酷 Python Spider 示例的 `playerContent()` 返回 `https://v.youku.com/video?vid=…` 网页，并标记 `jx: 1`、`parse: 1`；它没有返回媒体直链，也没有实现 `localProxy()`。如果当前合集有可用 `parses`，详情页可以选择其解析接口；否则宿主会在应用自己的 `WKWebView` 中打开这个网页，不会调用系统浏览器或外部解析 App。只有取得真实的 HLS/MP4 地址和所需请求头后，才能由 AVPlayer 独立播放；受保护或无法提取的媒体仍由网页播放器处理。仅设置 `jx/parse` 代表网页播放请求，不代表已经解析出媒体。
 
 手动声明 CatPaw Spider 时使用：
 

@@ -42,6 +42,11 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 - (void)cicadaAdapterDidComplete:(id)adapter;
 - (void)cicadaAdapter:(id)adapter didUpdatePosition:(NSTimeInterval)position duration:(NSTimeInterval)duration;
 - (void)cicadaAdapter:(id)adapter didUpdateLoading:(BOOL)loading progress:(float)progress;
+// 下载速度：SDK 的 onCurrentDownLoadSpeed 回调，speed 单位 bit/s（与直连
+// 路径的 cicadaDownloadBPS 同义，调用方除以 8 得字节/秒）。
+- (void)cicadaAdapter:(id)adapter didUpdateDownloadSpeed:(double)bitsPerSecond;
+// 视频尺寸：SDK 的 onVideoSizeChanged 回调，rotation 为视频旋转角度。
+- (void)cicadaAdapter:(id)adapter didUpdateVideoSize:(CGSize)size rotation:(NSInteger)rotation;
 - (void)cicadaAdapterDidSeek:(id)adapter;
 @end
 
@@ -62,18 +67,24 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 @property (nonatomic, readonly) NSTimeInterval currentPosition;
 @property (nonatomic, readonly) NSTimeInterval duration;
 @property (nonatomic, readonly) BOOL hasVideoTrack;
+// 当前倍速（最近一次 setRate: 的值，未调用时为 1.0；供进度采样校验用）。
+@property (nonatomic, readonly) float rate;
 
 - (void)prepare;
+// 硬解开关：默认 YES（硬件优先）。软件解码重试时传 NO 重建播放器。
+- (void)prepareWithHardwareDecoder:(BOOL)enableHardwareDecoder;
 - (void)start;
 - (void)pause;
 - (void)stop;
 - (void)destroy;
-// seekMode 传 0（精确 seek，Aliyun 约定；未在二进制中确认，需真机验证）。
+// seekMode 传 CICADA_SEEKMODE_ACCURATE（0x01，见 CicadaSDK.h）。
 - (void)seekToTime:(NSTimeInterval)time completion:(nullable void (^)(BOOL finished))completion;
 - (void)setRate:(float)rate;
+// 长按手势会请求 3.0x：上限放宽到 3.0（设置菜单的持久倍速仍由调用方
+// 钳制在 2.0 以内，见 MediaPlaybackViewController setPlaybackRate:）。
 // gravity 取 AVLayerVideoGravityResizeAspect / ResizeAspectFill / Resize；
-// 映射到 CicadaPlayer scalingMode（0=AspectFit、1=AspectFill，Aliyun 约定，
-// 未在二进制中确认，需真机验证）。SDK 不支持时静默保留默认。
+// 映射到 CicadaPlayer scalingMode（CicadaSDK.h 的 CicadaScalingMode：
+// 0=SCALETOFILL、1=SCALEASPECTFIT、2=SCALEASPECTFILL）。SDK 不支持时静默保留默认。
 - (void)applyVideoGravity:(NSString *)gravity;
 
 @end

@@ -7,5 +7,6 @@ beautifulsoup4==4.14.2
 soupsieve==2.8
 typing_extensions==4.15.0
 html5lib==1.1
+elementpath==5.1.4
 six==1.17.0
 webencodings==0.5.1

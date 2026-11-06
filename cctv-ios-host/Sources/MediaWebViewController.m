@@ -14,6 +14,7 @@
 @property(nonatomic, strong) UIActivityIndicatorView *spinner;
 @property(nonatomic, strong) UILabel *statusLabel;
 - (void)installCookieHeader:(NSString *)cookie forURL:(NSURL *)url completion:(dispatch_block_t)completion;
+- (void)loadInitialPageAtURL:(NSURL *)url cookie:(NSString *)cookie;
 - (void)showStatusMessage:(NSString *)message;
 @end
 @implementation MediaWebViewController
@@ -42,13 +43,21 @@
         // the Cookie header (set in -refresh via MediaPlaybackHeadersFromResult), so
         // load immediately and install the cookie in the background for later navigations.
         NSString *cookie=nil;for(NSString *key in headers)if([key.lowercaseString isEqual:@"cookie"])cookie=headers[key];
-        [self installCookieHeader:cookie forURL:configurationURL completion:nil];
-        [self refresh];
+        [self loadInitialPageAtURL:configurationURL cookie:cookie];
     }else{
         NSString *cookie=nil;for(NSString *key in headers)if([key.lowercaseString isEqual:@"cookie"])cookie=headers[key];
-        if(cookie.length)[self installCookieHeader:cookie forURL:configurationURL completion:nil];
-        [self refresh];
+        [self loadInitialPageAtURL:configurationURL cookie:cookie];
     }
+}
+- (void)loadInitialPageAtURL:(NSURL *)url cookie:(NSString *)cookie {
+    __weak typeof(self) weakSelf=self;__block BOOL started=NO;
+    dispatch_block_t startLoading=^{MediaWebViewController *owner=weakSelf;if(!owner||owner.didClose||started)return;started=YES;[owner refresh];};
+    if(!cookie.length){startLoading();return;}
+    // Cookie-store writes normally finish quickly, but must not block the page
+    // forever. The initial request also carries the source's Cookie header;
+    // later requests can use the asynchronously installed WebKit cookie.
+    [self installCookieHeader:cookie forURL:url completion:startLoading];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,1200*NSEC_PER_MSEC),dispatch_get_main_queue(),startLoading);
 }
 - (void)showStatusMessage:(NSString *)message {self.statusLabel.text=message?:@"";self.statusLabel.hidden=!message.length;}
 - (void)installCookieHeader:(NSString *)cookie forURL:(NSURL *)url completion:(dispatch_block_t)completion {
