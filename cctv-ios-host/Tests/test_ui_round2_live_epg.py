@@ -70,12 +70,12 @@ class LivePageDynamicTypeContracts(unittest.TestCase):
         self.assertIn("CGFloat contentY=y+6+segmentHeight+4", TEXT)
 
     def test_columns_toggle_scales_with_dynamic_type(self):
-        navigation = method_body(TEXT, "- (void)configureCatalogNavigation {")
-        self.assertIn(
-            "updated[NSFontAttributeName]=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] "
-            "scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]]",
-            navigation,
-        )
+        # 列数切换已从顶部导航栏移到“更多”菜单（configureCatalogNavigation
+        # 不再往导航栏加按钮）；菜单项用系统字体，Dynamic Type 由系统自动
+        # 缩放，不再需要手动 UIFontMetrics 代码。断言列数切换仍在菜单里。
+        menu = method_body(TEXT, "- (UIMenu *)catalogMenu {")
+        self.assertIn("channel.grid.columns.toggle", menu)
+        self.assertIn("toggleCatalogColumns", menu)
 
 
 class LivePageDeadCodeContracts(unittest.TestCase):

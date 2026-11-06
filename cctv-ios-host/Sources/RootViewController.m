@@ -1347,37 +1347,10 @@ configureCatalogNavigation;
     [self updateLiveResourceCapsule];
     if(self.catalogLayoutButton){self.catalogLayoutButton.accessibilityLabel=self.gridMode?@"切换列表布局":@"切换网格布局";UIButtonConfiguration *configuration=self.catalogLayoutButton.configuration;configuration.image=[UIImage systemImageNamed:self.gridMode?@"list.bullet":@"square.grid.2x2"];self.catalogLayoutButton.configuration=configuration;}
     self.catalogMoreButton.menu=[self catalogMenu];
-    __weak typeof(self) w=self;
-    if(expandedLive){
-        BOOL favorite=[self.favorites containsObject:self.channelID];
-        AVRoutePickerView *airPlayPicker=[AVRoutePickerView new];airPlayPicker.tintColor=HostText();airPlayPicker.activeTintColor=HostAccent();airPlayPicker.prioritizesVideoDevices=YES;
-        self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
-            @{@"icon":favorite?@"heart.fill":@"heart",@"title":favorite?@"取消收藏当前频道":@"收藏当前频道",@"action":[UIAction actionWithHandler:^(UIAction *a){[w toggleCurrentFavorite];}]},
-            @{@"customView":airPlayPicker,@"title":@"投屏到 AirPlay 设备",@"identifier":@"playback.airplay"},
-            @{@"icon":@"info.circle",@"title":@"播放信息",@"action":[UIAction actionWithHandler:^(UIAction *a){[w showPlaybackInfo];}]}
-        ])];
-    }else{
-        NSInteger nextColumns=self.gridColumns==4?3:4;
-        UIButton *columnsButton=[UIButton buttonWithType:UIButtonTypeSystem];
-        UIButtonConfiguration *columnsConfiguration=[UIButtonConfiguration plainButtonConfiguration];
-        columnsConfiguration.title=[NSString stringWithFormat:@"%ld列",(long)self.gridColumns];
-        columnsConfiguration.baseForegroundColor=HostAccent();
-        columnsConfiguration.contentInsets=NSDirectionalEdgeInsetsMake(8,8,8,8);
-        columnsConfiguration.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *updated=[attributes mutableCopy];updated[NSFontAttributeName]=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]];return updated;};
-        columnsButton.configuration=columnsConfiguration;
-        columnsButton.accessibilityIdentifier=@"channel.grid.columns.toggle";
-        columnsButton.accessibilityLabel=[NSString stringWithFormat:@"每行%ld个，切换为%ld列",(long)self.gridColumns,(long)nextColumns];
-        HostInstallPressFeedback(columnsButton);
-        [columnsButton addAction:[UIAction actionWithHandler:^(UIAction *a){[w toggleCatalogColumns];}] forControlEvents:UIControlEventTouchUpInside];
-        self.navigationItem.rightBarButtonItems=@[HostToolbar(@[
-            @{@"icon":self.gridMode?@"list.bullet":@"square.grid.2x2",@"title":self.gridMode?@"切换列表布局":@"切换网格布局",@"action":[UIAction actionWithHandler:^(UIAction *a){[w toggleCatalogLayout];}]},
-            @{@"customView":columnsButton,@"title":columnsButton.accessibilityLabel,@"identifier":@"channel.grid.columns.toggle"},
-            @{@"icon":@"ellipsis",@"title":@"更多",@"menu":[self catalogMenu]}
-        ])];
-    }
-    NSInteger groupIndex=self.groupControl.selectedSegmentIndex;
-    NSString *groupTitle=groupIndex>=0&&groupIndex<self.groupControl.numberOfSegments?[self.groupControl titleForSegmentAtIndex:groupIndex]:@"全部";
-    self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:[NSString stringWithFormat:@"%@ ▾",groupTitle] style:UIBarButtonItemStylePlain target:self action:@selector(showGroupMenu)];
+    // Page actions live in the floating catalog controls (layout, AirPlay,
+    // more menu) and never in the navigation bar — the bar items were
+    // cleared above and stay cleared (ui-preview: 'CCTV catalog keeps page
+    // actions out of the top navigation bar').
 }
 - (void)toggleCatalogLayout {
     CGPoint listOffset=self.table.contentOffset,gridOffset=self.channelGrid.contentOffset;
