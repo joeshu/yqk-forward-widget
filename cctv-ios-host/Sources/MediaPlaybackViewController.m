@@ -663,7 +663,6 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     }
     if(completionHandler)completionHandler(NO);
 }
-- (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];if(@available(iOS 16.0,*))[self setNeedsUpdateOfSupportedInterfaceOrientations];else [UIViewController attemptRotationToDeviceOrientation];}
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];UINavigationBar *bar=self.navigationController.navigationBar;
     if(bar){UINavigationBarAppearance *immersive=[UINavigationBarAppearance new];[immersive configureWithTransparentBackground];immersive.titleTextAttributes=@{NSForegroundColorAttributeName:UIColor.whiteColor,NSFontAttributeName:[UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]};immersive.largeTitleTextAttributes=immersive.titleTextAttributes;immersive.backgroundColor=UIColor.clearColor;immersive.shadowColor=UIColor.clearColor;bar.standardAppearance=immersive;bar.scrollEdgeAppearance=immersive;bar.compactAppearance=immersive;if(@available(iOS 15.0,*))bar.compactScrollEdgeAppearance=immersive;bar.translucent=YES;bar.tintColor=HostAccent();bar.prefersLargeTitles=NO;}

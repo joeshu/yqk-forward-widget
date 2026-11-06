@@ -52,6 +52,7 @@
 #import "TVBoxCatalogStore.h"
 #import "TVBoxCatalogPackageExporter.h"
 #import "TVBoxCatalogBulkImporter.h"
+#import "TVBoxCatalogDownloader.h"
 #import "TVBoxCatalogViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <AVFoundation/AVFoundation.h>
@@ -484,6 +485,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property(nonatomic,strong) AVPlayerViewController *movieController;
 @property(nonatomic) BOOL moviePiPActive;
 @property(nonatomic,strong) MediaPackageDownloader *packageDownloader;
+@property(nonatomic,strong) TVBoxCatalogDownloader *tvboxCatalogDownloader;
 @property(nonatomic,strong) TVBoxCatalogBulkImporter *tvboxCatalogBulkImporter;
 @property(nonatomic,strong) TVBoxCatalogPackageExporter *tvboxCatalogPackageExporter;
 @property(nonatomic,strong) UIAlertController *tvboxCatalogExportProgressAlert;

@@ -62,6 +62,7 @@ static BOOL PackageContainsNodeCoreImport(NSString *root,NSString *pattern){
         if(source&&[expression firstMatchInString:source options:0 range:NSMakeRange(0,source.length)])return YES;
     }
     return NO;
+}
 static BOOL MediaAPIMethodDeclaredInSource(NSString *source) {
     // 与 JSPlugins/generic/entry.mjs 的起播校验保持一致：cctvhost.media/1 插件
     // 至少实现 home/category/search/detail/play/channels/catalog/resolve 之一。
