@@ -13,6 +13,7 @@
 @property(nonatomic, strong) WKWebView *web;
 @property(nonatomic, strong) UIActivityIndicatorView *spinner;
 @property(nonatomic, strong) UIProgressView *webProgressView;
+@property(nonatomic, strong) UIView *statusCard;
 @property(nonatomic, strong) UILabel *statusLabel;
 - (void)installCookieHeader:(NSString *)cookie forURL:(NSURL *)url completion:(dispatch_block_t)completion;
 - (void)loadInitialPageAtURL:(NSURL *)url cookie:(NSString *)cookie;
@@ -21,17 +22,25 @@
 @implementation MediaWebViewController
 - (instancetype)initWithResult:(NSDictionary *)result title:(NSString *)title {if((self=[super init])){_result=result;self.title=title;}return self;}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.view.backgroundColor=HostBackground();
+    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];
     UIBarButtonItem *refresh=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refresh)];
-    if(self.onTryNativePlayback||self.onResolvedMedia){UIBarButtonItem *native=[[UIBarButtonItem alloc] initWithTitle:@"原生播放" style:UIBarButtonItemStylePlain target:self action:@selector(tryNativePlayback)];self.nativeButton=native;self.navigationItem.rightBarButtonItems=@[native,refresh];}else self.navigationItem.rightBarButtonItem=refresh;
+    __weak typeof(self) weakSelf=self;
+    UIAction *backAction=[UIAction actionWithTitle:@"后退上一页" image:[UIImage systemImageNamed:@"chevron.backward"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.web.canGoBack)[weakSelf.web goBack];}];
+    UIAction *forwardAction=[UIAction actionWithTitle:@"前进下一页" image:[UIImage systemImageNamed:@"chevron.forward"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.web.canGoForward)[weakSelf.web goForward];}];
+    UIAction *copyURLAction=[UIAction actionWithTitle:@"复制当前网页地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){NSString *current=weakSelf.web.URL.absoluteString?:weakSelf.result[@"url"];if([current isKindOfClass:NSString.class]&&current.length){UIPasteboard.generalPasteboard.string=current;weakSelf.navigationItem.prompt=@"已复制当前网页地址";}}];
+    UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"网页操作" children:@[backAction,forwardAction,copyURLAction]]];
+    more.accessibilityIdentifier=@"media.web.more";
+    more.accessibilityLabel=@"更多网页操作";
+    if(self.onTryNativePlayback||self.onResolvedMedia){UIBarButtonItem *native=[[UIBarButtonItem alloc] initWithTitle:@"原生播放" style:UIBarButtonItemStylePlain target:self action:@selector(tryNativePlayback)];self.nativeButton=native;self.navigationItem.rightBarButtonItems=@[native,more,refresh];}else self.navigationItem.rightBarButtonItems=@[more,refresh];
     WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];configuration.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;configuration.allowsInlineMediaPlayback=YES;configuration.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;
     self.web=[[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration];self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;self.web.navigationDelegate=self;self.web.allowsBackForwardNavigationGestures=YES;[self.view addSubview:self.web];
     self.webProgressView=[[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];self.webProgressView.translatesAutoresizingMaskIntoConstraints=NO;self.webProgressView.progressTintColor=HostAccent();self.webProgressView.trackTintColor=UIColor.clearColor;self.webProgressView.accessibilityIdentifier=@"media.web.progress";[self.view addSubview:self.webProgressView];
     [NSLayoutConstraint activateConstraints:@[[self.webProgressView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],[self.webProgressView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.webProgressView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.webProgressView.heightAnchor constraintEqualToConstant:2.5]]];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.center=self.view.center;self.spinner.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin|UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin;[self.view addSubview:self.spinner];
-    self.statusLabel=[UILabel new];self.statusLabel.translatesAutoresizingMaskIntoConstraints=NO;self.statusLabel.numberOfLines=0;self.statusLabel.textAlignment=NSTextAlignmentCenter;self.statusLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.statusLabel.adjustsFontForContentSizeCategory=YES;self.statusLabel.textColor=HostSecondaryText();self.statusLabel.hidden=YES;[self.view addSubview:self.statusLabel];
-    [NSLayoutConstraint activateConstraints:@[[self.statusLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],[self.statusLabel.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor constant:48],[self.statusLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:24],[self.statusLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-24]]];
+    self.statusCard=[UIView new];self.statusCard.translatesAutoresizingMaskIntoConstraints=NO;HostStyleGlassCard(self.statusCard,16);self.statusCard.hidden=YES;[self.view addSubview:self.statusCard];
+    self.statusLabel=[UILabel new];self.statusLabel.translatesAutoresizingMaskIntoConstraints=NO;self.statusLabel.numberOfLines=0;self.statusLabel.textAlignment=NSTextAlignmentCenter;self.statusLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.statusLabel.adjustsFontForContentSizeCategory=YES;self.statusLabel.textColor=HostSecondaryText();self.statusLabel.hidden=YES;[self.statusCard addSubview:self.statusLabel];
+    [NSLayoutConstraint activateConstraints:@[[self.statusCard.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],[self.statusCard.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor constant:48],[self.statusCard.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:24],[self.statusCard.trailingAnchor constraintLessThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-24],[self.statusLabel.leadingAnchor constraintEqualToAnchor:self.statusCard.leadingAnchor constant:16],[self.statusLabel.trailingAnchor constraintEqualToAnchor:self.statusCard.trailingAnchor constant:-16],[self.statusLabel.topAnchor constraintEqualToAnchor:self.statusCard.topAnchor constant:12],[self.statusLabel.bottomAnchor constraintEqualToAnchor:self.statusCard.bottomAnchor constant:-12]]];
     NSDictionary *headers=MediaPlaybackHeadersFromResult(self.result);for(NSString *key in headers)if([key.lowercaseString isEqual:@"user-agent"])self.web.customUserAgent=headers[key];
     self.configurationPage=[self.result[@"configurationPage"] boolValue];
     NSURL *configurationURL=[NSURL URLWithString:self.result[@"url"]];
@@ -52,6 +61,15 @@
         [self loadInitialPageAtURL:configurationURL cookie:cookie];
     }
 }
+- (void)reloadThemeAppearance {
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    if(!self.isViewLoaded)return;
+    self.view.backgroundColor=HostBackground();
+    self.view.tintColor=HostAccent();
+    self.webProgressView.progressTintColor=HostAccent();
+    self.statusLabel.textColor=HostSecondaryText();
+    if(self.statusCard)HostStyleGlassCard(self.statusCard,16);
+}
 - (void)loadInitialPageAtURL:(NSURL *)url cookie:(NSString *)cookie {
     __weak typeof(self) weakSelf=self;__block BOOL started=NO;
     dispatch_block_t startLoading=^{MediaWebViewController *owner=weakSelf;if(!owner||owner.didClose||started)return;started=YES;[owner refresh];};
@@ -62,7 +80,7 @@
     [self installCookieHeader:cookie forURL:url completion:startLoading];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,1200*NSEC_PER_MSEC),dispatch_get_main_queue(),startLoading);
 }
-- (void)showStatusMessage:(NSString *)message {self.statusLabel.text=message?:@"";self.statusLabel.hidden=!message.length;}
+- (void)showStatusMessage:(NSString *)message {self.statusLabel.text=message?:@"";self.statusLabel.hidden=!message.length;self.statusCard.hidden=!message.length;}
 - (void)installCookieHeader:(NSString *)cookie forURL:(NSURL *)url completion:(dispatch_block_t)completion {
     if(!url.host.length){if(completion)dispatch_async(dispatch_get_main_queue(),completion);return;}
     dispatch_group_t group=dispatch_group_create();

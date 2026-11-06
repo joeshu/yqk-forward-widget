@@ -28,10 +28,13 @@
 @property(nonatomic) NSUInteger probePathIndex;
 @property(nonatomic) NSInteger probeLastHTTPStatus;
 @property(nonatomic,copy) NSString *probeLastFailure;
+@property(nonatomic,strong) NSURLSession *epgProbeSession;
+@property(nonatomic,strong) NSURLSessionDataTask *epgProbeTask;
 - (NSString *)baseURL;
 - (void)showNotice:(NSString *)message;
 - (void)showError:(NSString *)message;
 - (void)probeNextPlaylistPath;
+- (void)probeLocalEPGCandidatesForSubscription:(NSString *)subscriptionURL index:(NSUInteger)index generation:(NSUInteger)generation;
 @end
 
 @implementation PluginResourceDetailViewController
@@ -45,15 +48,23 @@
 - (NSDictionary *)serviceManifest {NSDictionary *manifest=self.service[@"manifest"];return [manifest isKindOfClass:NSDictionary.class]?manifest:@{};}
 - (NSString *)serviceURLString {NSString *url=self.service[@"url"];return [url isKindOfClass:NSString.class]?url:@"";}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.title=self.service[@"name"]?:@"资源详情";self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=58;
-    self.notice=[UILabel new];self.notice.textColor=UIColor.secondaryLabelColor;self.notice.numberOfLines=0;self.notice.textAlignment=NSTextAlignmentCenter;self.tableView.backgroundView=self.notice;
+    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=self.service[@"name"]?:@"资源详情";self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=58;
+    self.notice=[UILabel new];self.notice.textColor=HostSecondaryText();self.notice.numberOfLines=0;self.notice.textAlignment=NSTextAlignmentCenter;self.tableView.backgroundView=self.notice;
     __weak typeof(self) w=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[@{@"icon":@"square.and.pencil",@"title":@"编辑配置",@"action":[UIAction actionWithHandler:^(UIAction *a){if(w.onEdit)w.onEdit(w.service);}]}])];
+}
+- (void)reloadThemeAppearance {
+    if(!self.isViewLoaded)return;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.tableView.backgroundColor=HostBackground();
+    self.notice.textColor=HostSecondaryText();
+    [self.tableView reloadData];
 }
 - (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];for(NSDictionary *latest in [ServiceStore services])if([latest[@"id"] isEqual:self.service[@"id"]]){self.service=latest;break;}self.title=self.service[@"name"];[self refreshPlaylistPathState];[NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(stateChanged) name:PyHostRuntimeStateDidChangeNotification object:nil];[NSNotificationCenter.defaultCenter removeObserver:self name:ProfileStoreMetadataDidChangeNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(metadataDidChange) name:ProfileStoreMetadataDidChangeNotification object:nil];[self.tableView reloadData];}
-- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];[NSNotificationCenter.defaultCenter removeObserver:self name:ProfileStoreMetadataDidChangeNotification object:nil];self.probeGeneration++;self.probingPlaylist=NO;[self.probeTask cancel];self.probeTask=nil;[self.probeSession invalidateAndCancel];self.probeSession=nil;}
-- (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];[self.probeTask cancel];[self.probeSession invalidateAndCancel];}
+- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];[NSNotificationCenter.defaultCenter removeObserver:self name:ProfileStoreMetadataDidChangeNotification object:nil];self.probeGeneration++;self.probingPlaylist=NO;[self.probeTask cancel];self.probeTask=nil;[self.probeSession invalidateAndCancel];self.probeSession=nil;[self.epgProbeTask cancel];self.epgProbeTask=nil;[self.epgProbeSession invalidateAndCancel];self.epgProbeSession=nil;}
+- (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];[self.probeTask cancel];[self.probeSession invalidateAndCancel];[self.epgProbeTask cancel];[self.epgProbeSession invalidateAndCancel];}
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest * _Nullable))completionHandler {completionHandler(nil);}
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {BOOL valid=task==self.probeTask&&[response isKindOfClass:NSHTTPURLResponse.class]&&response.expectedContentLength<=1024*1024;if(task==self.probeTask){self.probeStatusCode=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;self.probeResponseURL=response.URL;}completion(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);}
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {if(task!=self.probeTask)return;if(self.probeData.length+data.length>1024*1024){[task cancel];return;}[self.probeData appendData:data];}
@@ -79,8 +90,19 @@
                     self.probePlaylistChecked=YES;self.probeChannelCount=(NSInteger)channels.count;self.probingPlaylist=NO;
                     NSMutableDictionary *updated=[self.service mutableCopy];updated[@"playlistPath"]=attemptedPath;
                     if(![updated[@"playlistPathSource"] isEqual:@"manual"])updated[@"playlistPathSource"]=@"detected";
+                    NSString *detectedEPG=text.length?[M3UParser epgURL:text baseURL:url]:nil;
+                    if(!detectedEPG.length){
+                        NSString *epgPath=[ServiceStore epgPathForService:updated];
+                        if(epgPath.length)detectedEPG=[NSString stringWithFormat:@"%@%@",self.baseURL,epgPath];
+                    }
                     [ServiceStore save:updated];self.service=updated;[self refreshPlaylistPathState];
                     NSString *subscriptionURL=[ServiceStore subscriptionURLForService:self.service];
+                    if(subscriptionURL.length&&detectedEPG.length){
+                        [ProfileStore update:subscriptionURL values:@{@"managedServiceID":self.service[@"id"]?:@"",@"detectedEPGURL":detectedEPG}];
+                        [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:subscriptionURL];
+                    }else if(subscriptionURL.length){
+                        [self probeLocalEPGCandidatesForSubscription:subscriptionURL index:0 generation:generation];
+                    }
                     self.probeStatus=[NSString stringWithFormat:subscriptionURL.length&&self.onPlaylistDiscovered?@"已识别 %@ · %lu 个频道 · 已加入资源列表":@"已识别 %@ · %lu 个频道 · 请检查订阅地址",attemptedPath,(unsigned long)channels.count];
                     [RuntimeDiagnostics.shared recordEvent:@"service_playlist_endpoint_discovered" category:@"service" fields:@{@"service_id":self.service[@"id"]?:@"",@"engine":self.service[@"engine"]?:@"unknown",@"protocol":self.service[@"protocol"]?:@"unknown",@"candidate_index":@(pathIndex),@"candidate_count":@(self.probePaths.count),@"channel_count":@(channels.count),@"path_length":@(attemptedPath.length)}];
                     [self.probeSession finishTasksAndInvalidate];self.probeSession=nil;
@@ -98,6 +120,52 @@
         [self.probeSession finishTasksAndInvalidate];self.probeSession=nil;
         [self.tableView reloadSections:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(1,2)] withRowAnimation:UITableViewRowAnimationNone];
     });
+}
+- (void)probeLocalEPGCandidatesForSubscription:(NSString *)subscriptionURL index:(NSUInteger)index generation:(NSUInteger)generation {
+    if(generation!=self.probeGeneration||!subscriptionURL.length||!self.running)return;
+    NSArray<NSString *> *candidates=[ServiceStore epgPathCandidatesForService:self.service];
+    if(index>=candidates.count){[self.epgProbeSession finishTasksAndInvalidate];self.epgProbeSession=nil;return;}
+    if(!self.epgProbeSession){
+        NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;
+        config.timeoutIntervalForRequest=1.5;config.timeoutIntervalForResource=2.0;config.URLCache=nil;
+        self.epgProbeSession=[NSURLSession sessionWithConfiguration:config];
+    }
+    NSString *candidatePath=candidates[index];
+    NSURL *epgURL=[NSURL URLWithString:[NSString stringWithFormat:@"%@%@",self.baseURL,candidatePath]];
+    if(!epgURL||![epgURL.host isEqualToString:@"127.0.0.1"]){
+        [self probeLocalEPGCandidatesForSubscription:subscriptionURL index:index+1 generation:generation];
+        return;
+    }
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:epgURL];
+    req.HTTPMethod=@"GET";req.timeoutInterval=1.5;
+    [req setValue:@"bytes=0-4095" forHTTPHeaderField:@"Range"];
+    __weak typeof(self) weakSelf=self;
+    self.epgProbeTask=[self.epgProbeSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(),^{
+            PluginResourceDetailViewController *owner=weakSelf;
+            if(!owner||generation!=owner.probeGeneration)return;
+            NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;
+            BOOL validXMLTV=NO;
+            if(!error&&status>=200&&status<300&&data.length>=2){
+                const uint8_t *bytes=data.bytes;
+                BOOL gzip=(bytes[0]==0x1f&&bytes[1]==0x8b);
+                NSString *head=[[NSString alloc] initWithData:[data subdataWithRange:NSMakeRange(0,MIN(data.length,(NSUInteger)2048))] encoding:NSUTF8StringEncoding]?:@"";
+                NSString *lower=head.lowercaseString;
+                validXMLTV=gzip||[lower containsString:@"<tv"]||[lower containsString:@"<programme"]||([lower containsString:@"<?xml"]&&[lower containsString:@"channel"]);
+            }
+            if(validXMLTV){
+                NSMutableDictionary *updated=[owner.service mutableCopy];
+                if(![updated[@"epgPathSource"] isEqual:@"manual"]){updated[@"epgPath"]=candidatePath;updated[@"epgPathSource"]=@"detected";[ServiceStore save:updated];owner.service=updated;}
+                [ProfileStore update:subscriptionURL values:@{@"managedServiceID":owner.service[@"id"]?:@"",@"detectedEPGURL":epgURL.absoluteString}];
+                [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:subscriptionURL];
+                [owner.epgProbeSession finishTasksAndInvalidate];owner.epgProbeSession=nil;owner.epgProbeTask=nil;
+                if(owner.isViewLoaded)[owner.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
+                return;
+            }
+            [owner probeLocalEPGCandidatesForSubscription:subscriptionURL index:index+1 generation:generation];
+        });
+    }];
+    [self.epgProbeTask resume];
 }
 - (void)stateChanged {
     // 运行状态通知可能来自后台线程：直接 reloadData 会触发 UIKit 断言；
@@ -126,6 +194,7 @@
 - (NSArray *)managementRows {
     if([self.service[@"builtin"] boolValue])return @[];
     NSMutableArray *rows=[NSMutableArray arrayWithObject:@{@"title":@"查看此资源日志",@"value":@"独立日志 · 查看与导出",@"action":@"log"}];
+    if(self.onRestart)[rows addObject:@{@"title":@"重启此服务",@"value":self.running?@"先停止再重新启动，端口不变":@"服务未运行 · 请先启动",@"action":@"restart"}];
     if(self.onExport)[rows addObject:@{@"title":@"导出单项资源文件",@"value":@"分享此资源代码或原始资源包",@"action":@"export"}];
     if([[self serviceURLString] length])[rows addObject:@{@"title":@"检查资源更新",@"value":@"校验新版 · 保留服务 ID、账号和配置",@"action":@"update"}];
     if([self.service[@"previousImport"] isKindOfClass:NSDictionary.class])[rows addObject:@{@"title":@"切回上一版代码",@"value":@"保留账号数据与当前端口",@"action":@"rollback"}];
@@ -133,7 +202,7 @@
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {if(section==0)return self.resourceRows.count;if(section==1)return self.liveCapable?4:3;if(section==2)return self.liveCapable?7:1;return self.managementRows.count;}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return @[@"资源能力",@"运行状态",@"本机接口",@"管理与诊断"][section];}
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return @"点“打开影视”或“打开直播频道”后才会按需启动服务。运行中、接口健康、列表可读和视频解码是不同状态。";if(section==1)return [[self serviceManifest][@"compatibilityNote"] isKindOfClass:NSString.class]?[self serviceManifest][@"compatibilityNote"]:@"服务可独立启停；停止失败时请查看此资源的日志。";return nil;}
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return @"点“打开影视”或“打开直播频道”后才会按需启动服务。运行中、接口健康、列表可读和视频解码是不同状态。";if(section==1)return [[self serviceManifest][@"compatibilityNote"] isKindOfClass:NSString.class]?[self serviceManifest][@"compatibilityNote"]:@"服务可独立启停；停止失败时请查看此资源的日志。";if(section==2)return [NSString stringWithFormat:@"端口识别：%@ · 本机节目单地址会自动对齐至 127.0.0.1:%@",[ServiceStore portRecognitionSummaryForService:self.service],self.service[@"port"]?:@0];return nil;}
 - (NSDictionary *)rowAt:(NSIndexPath *)ip {
     if(ip.section==0)return self.resourceRows[ip.row];
     NSString *port=[NSString stringWithFormat:@"%@",self.service[@"port"]?:@"未知"];
@@ -141,13 +210,13 @@
     if(ip.section==2){NSString *resolvedPath=self.resolvedPlaylistPath;NSString *pendingPath=self.playlistCandidates.firstObject;NSString *playlist=resolvedPath?: (pendingPath.length?[NSString stringWithFormat:@"待验证 · %@",pendingPath]:@"未发现 · 点击上方检测资源接口");NSInteger servicePort=[self.service[@"port"] integerValue];NSString *resolvedURL=[ServiceStore subscriptionURLForService:self.service];NSString *subscription=resolvedURL?: (pendingPath.length&&servicePort>0?[NSString stringWithFormat:@"待验证 · http://127.0.0.1:%ld%@",(long)servicePort,pendingPath]:@"未识别 · 点击上方检测后加入资源列表");NSString *epg=[ServiceStore epgURLForService:self.service]?:@"尚未从订阅清单中识别";NSDictionary *metadata=resolvedURL.length?[ProfileStore metadata:resolvedURL]:@{};NSArray *cached=[metadata[@"cachedChannels"] isKindOfClass:NSArray.class]?metadata[@"cachedChannels"]:@[];NSString *count=cached.count?[NSString stringWithFormat:@"%lu 个缓存频道",(unsigned long)cached.count]:(self.probePlaylistChecked?[NSString stringWithFormat:@"%ld 个 · 最近一次接口检测",(long)self.probeChannelCount]:@"未知 · 尚未读取有效清单");NSString *status=[metadata[@"status"] isKindOfClass:NSString.class]?metadata[@"status"]:(resolvedURL.length?(self.running?@"服务运行中 · 等待读取":@"服务已停止"): @"未配置已验证的播放列表");NSTimeInterval updated=[metadata[@"updatedAt"] doubleValue];NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"yyyy-MM-dd HH:mm";NSString *last=updated>0?[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]:@"尚无成功记录";NSArray *rows=@[@{@"title":@"复制本机服务地址",@"value":[NSString stringWithFormat:@"http://127.0.0.1:%@",port],@"action":@"copy"},@{@"title":@"服务订阅地址",@"value":subscription},@{@"title":@"节目单地址",@"value":epg},@{@"title":@"播放列表路径",@"value":playlist},@{@"title":@"频道数量",@"value":count},@{@"title":@"订阅清单状态",@"value":status},@{@"title":@"最近成功刷新",@"value":last}];NSMutableDictionary *row=[rows[ip.row] mutableCopy];BOOL subscriptionURL=[subscription hasPrefix:@"http://"]||[subscription hasPrefix:@"https://"];BOOL epgURL=[epg hasPrefix:@"http://"]||[epg hasPrefix:@"https://"];if((ip.row==1&&subscriptionURL)||(ip.row==2&&epgURL))row[@"action"]=@"copy";return row;}
     return self.managementRows[ip.row];
 }
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {NSDictionary *row=[self rowAt:ip];BOOL sourceURL=[row[@"action"] isEqual:@"copySource"],copyURL=[row[@"action"] isEqual:@"copy"];BOOL address=sourceURL||copyURL;BOOL longValue=!address&&[row[@"value"] isKindOfClass:NSString.class]&&[(NSString *)row[@"value"] length]>80;NSString *reuse=address?@"service.resource.address":(longValue?@"service.resource.long-value":@"service.resource.value");UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:reuse];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:(address||longValue)?UITableViewCellStyleSubtitle:UITableViewCellStyleValue1 reuseIdentifier:reuse];cell.backgroundColor=HostCard();cell.textLabel.text=row[@"title"];cell.textLabel.textColor=HostText();cell.textLabel.numberOfLines=0;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.text=address?[HostLogRedactor redactText:row[@"value"]?:@""]:row[@"value"];cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=0;cell.detailTextLabel.textAlignment=(address||longValue)?NSTextAlignmentLeft:NSTextAlignmentNatural;cell.accessoryType=row[@"action"]?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;cell.selectionStyle=row[@"action"]?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;return cell;}
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {NSDictionary *row=[self rowAt:ip];BOOL sourceURL=[row[@"action"] isEqual:@"copySource"],copyURL=[row[@"action"] isEqual:@"copy"];BOOL address=sourceURL||copyURL;BOOL longValue=!address&&[row[@"value"] isKindOfClass:NSString.class]&&[(NSString *)row[@"value"] length]>80;NSString *reuse=address?@"service.resource.address":(longValue?@"service.resource.long-value":@"service.resource.value");UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:reuse];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:(address||longValue)?UITableViewCellStyleSubtitle:UITableViewCellStyleValue1 reuseIdentifier:reuse];cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.text=row[@"title"];BOOL isRemove=[row[@"action"] isEqual:@"remove"];BOOL isPrimary=[row[@"action"] isEqual:@"use"]||[row[@"action"] isEqual:@"toggle"];cell.textLabel.textColor=isRemove?UIColor.systemRedColor:(isPrimary?HostAccent():HostText());cell.textLabel.numberOfLines=0;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.text=address?[HostLogRedactor redactText:row[@"value"]?:@""]:row[@"value"];cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=0;cell.detailTextLabel.textAlignment=(address||longValue)?NSTextAlignmentLeft:NSTextAlignmentNatural;cell.accessoryType=row[@"action"]?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;cell.selectionStyle=row[@"action"]?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;return cell;}
 - (void)probeInterface {
     if(self.probingPlaylist)return;
     if(!self.running){self.probeStatus=@"服务未运行 · 启动后可检测节目单地址";[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];return;}
     NSArray<NSString *> *paths=self.playlistCandidates?:@[];
     if(!paths.count){self.probeStatus=@"此资源未提供本机播放列表接口";[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];return;}
-    self.probeGeneration++;[self.probeTask cancel];self.probeTask=nil;[self.probeSession invalidateAndCancel];
+    self.probeGeneration++;[self.probeTask cancel];self.probeTask=nil;[self.probeSession invalidateAndCancel];[self.epgProbeTask cancel];self.epgProbeTask=nil;[self.epgProbeSession invalidateAndCancel];self.epgProbeSession=nil;
     self.probePaths=paths;self.probePathIndex=0;self.probeLastHTTPStatus=0;self.probeLastFailure=@"";self.probeData=[NSMutableData data];self.probeChannelCount=0;self.probePlaylistChecked=NO;self.probingPlaylist=YES;
     NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.timeoutIntervalForRequest=1.5;config.timeoutIntervalForResource=2;config.HTTPMaximumConnectionsPerHost=2;config.URLCache=nil;config.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;self.probeSession=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:nil];
     self.probeStatus=[NSString stringWithFormat:@"正在检测 %lu 个本机节目单地址…",(unsigned long)paths.count];[self.tableView reloadSections:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(1,2)] withRowAnimation:UITableViewRowAnimationNone];[self probeNextPlaylistPath];
@@ -165,7 +234,7 @@
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url];request.HTTPMethod=@"GET";request.timeoutInterval=1.5;[request setValue:@"application/vnd.apple.mpegurl, application/x-mpegURL, text/plain" forHTTPHeaderField:@"Accept"];
     self.probeTask=[self.probeSession dataTaskWithRequest:request];[self.probeTask resume];
 }
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {[tableView deselectRowAtIndexPath:ip animated:YES];NSDictionary *row=[self rowAt:ip];NSString *action=row[@"action"];if(ip.section==0 && [row[@"title"] isEqual:@"进入媒体"]){if(self.onUse)self.onUse(self.service,@"vod");return;}if(ip.section==0 && [row[@"title"] isEqual:@"打开直播频道"]){if(self.onUse)self.onUse(self.service,@"live");return;}if([action isEqual:@"configuration"]){if(self.onUse)self.onUse(self.service,@"configuration");return;}if([action isEqual:@"update"]){if(self.onUpdate)self.onUpdate(self.service);return;}if([action isEqual:@"rollback"]){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"切回上一版代码？" message:@"会先停止此服务，再切换到保留的上一版代码。账号、日志和当前端口会保留。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"切换" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onRollback)self.onRollback(self.service);}]];[self presentViewController:alert animated:YES completion:nil];return;}if([action isEqual:@"toggle"]){if(self.operationPending)return;if(!self.onToggle){[self showError:@"服务控制暂不可用"];return;}self.operationPending=YES;[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];__weak typeof(self) weakSelf=self;NSUInteger toggleGeneration=++self.toggleGeneration;self.onToggle(self.service,!self.running,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{PluginResourceDetailViewController *owner=weakSelf;if(!owner)return;owner.operationPending=NO;if(error)[owner showError:error.localizedDescription?:@"服务操作失败，请查看此资源日志"];[owner.tableView reloadData];});});
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {[tableView deselectRowAtIndexPath:ip animated:YES];NSDictionary *row=[self rowAt:ip];NSString *action=row[@"action"];if(ip.section==0 && [row[@"title"] isEqual:@"进入媒体"]){if(self.onUse)self.onUse(self.service,@"vod");return;}if(ip.section==0 && [row[@"title"] isEqual:@"打开直播频道"]){if(self.onUse)self.onUse(self.service,@"live");return;}if([action isEqual:@"configuration"]){if(self.onUse)self.onUse(self.service,@"configuration");return;}if([action isEqual:@"update"]){if(self.onUpdate)self.onUpdate(self.service);return;}if([action isEqual:@"rollback"]){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"切回上一版代码？" message:@"会先停止此服务，再切换到保留的上一版代码。账号、日志和当前端口会保留。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"切换" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onRollback)self.onRollback(self.service);}]];[self presentViewController:alert animated:YES completion:nil];return;}if([action isEqual:@"restart"]){if(self.operationPending)return;if(!self.running){[self showNotice:@"服务未运行 · 请先启动"];return;}if(!self.onRestart){[self showNotice:@"当前版本不支持重启此服务"];return;}self.operationPending=YES;[self showNotice:@"正在重启服务…"];[self.tableView reloadData];__weak typeof(self) weakSelf=self;self.onRestart(self.service,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{PluginResourceDetailViewController *owner=weakSelf;if(!owner)return;owner.operationPending=NO;if(error)[owner showError:error.localizedDescription?:@"重启服务失败，请查看此资源日志"];else[owner showNotice:@"服务已重新启动"];[owner.tableView reloadData];});});return;}if([action isEqual:@"toggle"]){if(self.operationPending)return;if(!self.onToggle){[self showError:@"服务控制暂不可用"];return;}self.operationPending=YES;[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];__weak typeof(self) weakSelf=self;NSUInteger toggleGeneration=++self.toggleGeneration;self.onToggle(self.service,!self.running,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{PluginResourceDetailViewController *owner=weakSelf;if(!owner)return;owner.operationPending=NO;if(error)[owner showError:error.localizedDescription?:@"服务操作失败，请查看此资源日志"];[owner.tableView reloadData];});});
     // onToggle 回调若永不触发，operationPending 会永久锁死开关：30 秒看门狗兜底复位。
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{PluginResourceDetailViewController *owner=weakSelf;if(!owner||toggleGeneration!=owner.toggleGeneration||!owner.operationPending)return;owner.operationPending=NO;[owner showError:@"服务操作超时，请查看此资源日志"];[owner.tableView reloadData];});return;}if([action isEqual:@"probe"]){[self probeInterface];return;}if([action isEqual:@"copy"]||[action isEqual:@"copySource"]){UIPasteboard.generalPasteboard.string=row[@"value"];NSString *message=[action isEqual:@"copySource"]?@"资源来源地址已复制（包含原查询参数）":([row[@"title"] isEqual:@"节目单地址"]?@"节目单地址已复制":([row[@"title"] isEqual:@"服务订阅地址"]?@"服务订阅地址已复制":@"本机服务地址已复制"));[self showNotice:message];return;}if([action isEqual:@"export"]){if(self.onExport)self.onExport(self.service);return;}if([action isEqual:@"log"]){if(self.onLog)self.onLog(self.service);return;}if([action isEqual:@"remove"]){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"移除此资源？" message:@"会移除本机服务代码及配置。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"移除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a){if(self.onRemove)self.onRemove(self.service);}]];[self presentViewController:alert animated:YES completion:nil];}}
 - (void)showNotice:(NSString *)message {if(!message.length)return;self.navigationItem.prompt=message;UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,message);__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{PluginResourceDetailViewController *owner=weakSelf;if(owner&&[owner.navigationItem.prompt isEqual:message])owner.navigationItem.prompt=nil;});}

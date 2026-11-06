@@ -13,5 +13,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) void (^onOpenResource)(NSDictionary *service);
 @property(nonatomic,copy) void (^onBrowseService)(NSDictionary *service);
 @property(nonatomic,copy) dispatch_block_t onImportResource;
+- (void)reloadThemeAppearance;
 @end
 NS_ASSUME_NONNULL_END

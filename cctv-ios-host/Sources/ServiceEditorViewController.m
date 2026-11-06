@@ -9,12 +9,17 @@
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     self.title = self.readOnly ? @"查看代码" : @"编辑代码";
     self.view.backgroundColor = HostBackground();
     _editor = [UITextView new];
     _editor.translatesAutoresizingMaskIntoConstraints = NO;
     _editor.backgroundColor = HostCard();
     _editor.textColor = HostText();
+    _editor.layer.cornerRadius = 14;
+    _editor.layer.cornerCurve = kCACornerCurveContinuous;
+    _editor.layer.borderWidth = 0.6;
+    HostSetLayerBorderColor(_editor, HostBorder());
     UIFont *baseCodeFont=[UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular];
     UIFont *scaledCodeFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:baseCodeFont];
     // 大字体下代码等比放大到 30pt+ 会导致每行只剩几个字符、无法手工编辑：封顶 20pt。
@@ -47,10 +52,15 @@
         [_editor.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
         [_editor.bottomAnchor constraintEqualToAnchor:self.view.keyboardLayoutGuide.topAnchor]
     ]];
-    __weak typeof(self) weakSelf = self;
     UIAction *findAction = [UIAction actionWithTitle:@"搜索代码关键字" image:[UIImage systemImageNamed:@"magnifyingglass"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf promptFindInCode]; }];
     UIAction *formatJSONAction = [UIAction actionWithTitle:@"校验并美化 JSON" image:[UIImage systemImageNamed:@"curlybraces"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf formatJSONIfApplicable]; }];
-    UIBarButtonItem *toolsItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"wand.and.stars"] menu:[UIMenu menuWithTitle:@"代码工具" children:@[findAction, formatJSONAction]]];
+    UIAction *copyCodeAction = [UIAction actionWithTitle:@"复制全部代码" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf copyAllCode]; }];
+    NSMutableArray<UIAction *> *toolActions = [NSMutableArray arrayWithObjects:findAction, formatJSONAction, copyCodeAction, nil];
+    if (!self.readOnly) {
+        UIAction *pasteCodeAction = [UIAction actionWithTitle:@"粘贴剪贴板替换代码" image:[UIImage systemImageNamed:@"doc.on.clipboard"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf pasteReplaceCode]; }];
+        [toolActions addObject:pasteCodeAction];
+    }
+    UIBarButtonItem *toolsItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"wand.and.stars"] menu:[UIMenu menuWithTitle:@"代码工具" children:toolActions]];
     toolsItem.accessibilityIdentifier = @"service.code.tools";
     if (!self.readOnly) {
         UIBarButtonItem *saveItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(save)];
@@ -58,6 +68,40 @@
     } else {
         self.navigationItem.rightBarButtonItem = toolsItem;
     }
+}
+
+- (void)reloadThemeAppearance {
+    if(!self.isViewLoaded)return;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.backgroundColor=HostBackground();
+    _editor.backgroundColor=HostCard();
+    _editor.textColor=HostText();
+    HostSetLayerBorderColor(_editor,HostBorder());
+}
+
+- (void)copyAllCode {
+    if (!_editor.text.length) return;
+    UIPasteboard.generalPasteboard.string = _editor.text;
+    self.navigationItem.prompt = @"代码已复制到剪贴板";
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        ServiceCodeViewController *owner = weakSelf;
+        if (owner && [owner.navigationItem.prompt isEqual:@"代码已复制到剪贴板"]) owner.navigationItem.prompt = nil;
+    });
+}
+
+- (void)pasteReplaceCode {
+    if (self.readOnly || !_editor.editable) return;
+    NSString *clip = UIPasteboard.generalPasteboard.string;
+    if (!clip.length) return;
+    _editor.text = clip;
+    self.navigationItem.prompt = @"已从剪贴板替换代码";
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        ServiceCodeViewController *owner = weakSelf;
+        if (owner && [owner.navigationItem.prompt isEqual:@"已从剪贴板替换代码"]) owner.navigationItem.prompt = nil;
+    });
 }
 
 - (void)promptFindInCode {
@@ -153,6 +197,7 @@
     f.placeholder = placeholder;
     f.text = value;
     f.textColor = HostText();
+    f.tintColor = HostAccent();
     f.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     f.adjustsFontForContentSizeCategory=YES;
     f.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -160,8 +205,34 @@
     [f addTarget:self action:@selector(draftChanged) forControlEvents:UIControlEventEditingChanged];
     return f;
 }
+- (void)assignAvailablePort {
+    NSMutableSet<NSNumber *> *usedPorts=[NSMutableSet set];
+    for(NSDictionary *other in [ServiceStore services]){
+        if(![other[@"id"] isEqual:self.identifier]){
+            NSInteger p=[other[@"port"] integerValue];
+            if(p>0)[usedPorts addObject:@(p)];
+        }
+    }
+    NSInteger inferred=[ServiceStore inferredPortInCode:self.code];
+    if(inferred>=1024&&inferred<=65535&&![usedPorts containsObject:@(inferred)]){
+        self.portField.text=[NSString stringWithFormat:@"%ld",(long)inferred];
+        [self draftChanged];
+        return;
+    }
+    NSInteger candidate=18768;
+    while([usedPorts containsObject:@(candidate)]&&candidate<65535)candidate++;
+    self.portField.text=[NSString stringWithFormat:@"%ld",(long)candidate];
+    [self draftChanged];
+}
+- (void)pasteURLIntoField {
+    NSString *clip=[UIPasteboard.generalPasteboard.string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(!clip.length)return;
+    self.urlField.text=clip;
+    [self urlChanged];
+}
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     self.title = self.service ? @"编辑资源" : @"添加资源配置";
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"返回" style:UIBarButtonItemStylePlain target:self action:@selector(requestClose)];
     self.tableView.backgroundColor = HostBackground();
@@ -172,6 +243,14 @@
     self.nameField = [self field:@"服务名称" value:self.service[@"name"]];
     self.portField = [self field:@"端口 1024–65535" value:[self.service[@"port"] description] ?: @"18768"];
     self.portField.keyboardType = UIKeyboardTypeNumberPad;
+    UIButton *autoPortBtn=[UIButton buttonWithType:UIButtonTypeSystem];
+    [autoPortBtn setTitle:@"自动分配" forState:UIControlStateNormal];
+    autoPortBtn.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    autoPortBtn.tintColor=HostAccent();
+    autoPortBtn.frame=CGRectMake(0,0,64,32);
+    [autoPortBtn addTarget:self action:@selector(assignAvailablePort) forControlEvents:UIControlEventTouchUpInside];
+    self.portField.rightView=autoPortBtn;
+    self.portField.rightViewMode=UITextFieldViewModeAlways;
     // 数字键盘没有 Return 键：给一个完成按钮收键盘，否则只能靠拖动列表收起。
     UIToolbar *portToolbar=[[UIToolbar alloc] init];[portToolbar sizeToFit];
     UIBarButtonItem *portDone=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissKeyboard)];
@@ -181,6 +260,15 @@
     self.playlistPathField=[self field:@"留空自动识别，或填 /all.m3u" value:configuredPlaylistPath];self.playlistPathField.autocapitalizationType=UITextAutocapitalizationTypeNone;
     self.urlField = [self field:@"https://…/service.py" value:self.service[@"url"]];
     self.urlField.keyboardType = UIKeyboardTypeURL;
+    UIButton *pasteURLBtn=[UIButton buttonWithType:UIButtonTypeSystem];
+    [pasteURLBtn setTitle:@"粘贴" forState:UIControlStateNormal];
+    pasteURLBtn.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    pasteURLBtn.tintColor=HostAccent();
+    pasteURLBtn.frame=CGRectMake(0,0,44,32);
+    [pasteURLBtn addTarget:self action:@selector(pasteURLIntoField) forControlEvents:UIControlEventTouchUpInside];
+    self.urlField.rightView=pasteURLBtn;
+    self.urlField.rightViewMode=UITextFieldViewModeUnlessEditing;
+    self.urlField.clearButtonMode=UITextFieldViewModeWhileEditing;
     [self.urlField addTarget:self action:@selector(urlChanged) forControlEvents:UIControlEventEditingChanged];
     self.argsField = [self field:@"参数以 | 分隔，可用 {port} / {bind}" value:self.service[@"arguments"]];
     self.lanSwitch = [UISwitch new];
@@ -189,6 +277,7 @@
     [self.lanSwitch addTarget:self action:@selector(draftChanged) forControlEvents:UIControlEventValueChanged];
     self.sourceControl = [[UISegmentedControl alloc] initWithItems:@[ @"文件", @"链接", @"代码" ]];
     self.sourceControl.accessibilityLabel=@"服务代码来源";
+    self.sourceControl.selectedSegmentTintColor=HostAccent();
     [self updateSourceControlFont];
     self.sourceControl.selectedSegmentIndex = 1;
     [self.sourceControl addTarget:self
@@ -202,6 +291,18 @@
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave
                                                       target:self
                                                       action:@selector(save)];
+}
+- (void)reloadThemeAppearance {
+    if(!self.isViewLoaded)return;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.tableView.backgroundColor=HostBackground();
+    for(UITextField *f in @[self.nameField,self.portField,self.playlistPathField,self.urlField,self.argsField]){
+        f.textColor=HostText();f.tintColor=HostAccent();
+    }
+    self.lanSwitch.onTintColor=HostAccent();
+    self.sourceControl.selectedSegmentTintColor=HostAccent();
+    [self.tableView reloadData];
 }
 - (void)dealloc {
     [self.downloadTask cancel];
@@ -240,6 +341,24 @@
     return @[ ([self.service[@"engine"] isEqual:@"node"]?@"Node.js 服务":([self.service[@"engine"] isEqual:@"javascript"]?@"JavaScript 服务":@"Python 服务")), @"代码来源", @"网络与启动", @"" ][section];
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 0) {
+        NSString *sourceCode = self.code;
+        if (!sourceCode.length && self.service) {
+            NSString *entry = [ServiceStore codePath:self.service];
+            if (entry.length) sourceCode = [NSString stringWithContentsOfFile:entry encoding:NSUTF8StringEncoding error:NULL];
+        }
+        NSMutableArray<NSString *> *parts = [NSMutableArray array];
+        NSInteger inferredPort = [ServiceStore inferredPortInCode:sourceCode] ?: [self.service[@"inferredPort"] integerValue];
+        if (inferredPort >= 1024 && inferredPort <= 65535) [parts addObject:[NSString stringWithFormat:@"脚本默认端口 %ld",(long)inferredPort]];
+        NSString *playlist = [ServiceStore inferredPlaylistPathInCode:sourceCode] ?: [ServiceStore playlistPathForService:self.service];
+        if (playlist.length) [parts addObject:[NSString stringWithFormat:@"直播路由 %@",playlist]];
+        NSString *epg = [ServiceStore inferredEPGPathInCode:sourceCode] ?: [ServiceStore epgPathForService:self.service];
+        if (epg.length) [parts addObject:[NSString stringWithFormat:@"节目单路由 %@",epg]];
+        if (parts.count) {
+            return [NSString stringWithFormat:@"已识别：%@ · 宿主会自动将服务与本机节目单端口对齐至上方设置的端口。",[parts componentsJoinedByString:@" · "]];
+        }
+        return nil;
+    }
     if (section == 1)
         return @"导入后可查看、编辑或导出代码。内置服务代码只读。";
     if (section == 2)
@@ -251,7 +370,13 @@
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1
                                                 reuseIdentifier:nil];
     c.backgroundColor = HostCard();
+    c.layer.cornerRadius = 14;
+    c.layer.cornerCurve = kCACornerCurveContinuous;
+    c.clipsToBounds = YES;
+    c.layer.borderWidth = 0.6;
+    HostSetLayerBorderColor(c, HostBorder());
     c.textLabel.textColor = HostText();
+    c.detailTextLabel.textColor = HostSecondaryText();
     c.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     c.textLabel.adjustsFontForContentSizeCategory=YES;
     c.textLabel.numberOfLines=0;
@@ -390,7 +515,18 @@
         [self message:@"无法读取 UTF-8 Python 代码。"];
         return;
     }
-    self.code = text;[self draftChanged];
+    self.code = text;
+    if (!self.service) {
+        NSInteger inferredPort = [ServiceStore inferredPortInCode:text];
+        if (inferredPort >= 1024 && inferredPort <= 65535 && [self.portField.text isEqualToString:@"18768"]) {
+            BOOL used = NO;
+            for (NSDictionary *other in [ServiceStore services]) {
+                if ([other[@"port"] integerValue] == inferredPort) { used = YES; break; }
+            }
+            if (!used) self.portField.text = [NSString stringWithFormat:@"%ld", (long)inferredPort];
+        }
+    }
+    [self draftChanged];
     [self.tableView reloadData];
 }
 - (void)loadRemote {
@@ -532,6 +668,15 @@
     if(![arguments isEqual:(self.service[@"arguments"]?:@"")])service[@"argumentsSource"]=@"manual";
     service[@"arguments"] = arguments;
     service[@"url"] = self.urlField.text ?: @"";
+    if (self.code.length) {
+        NSInteger inferredPort = [ServiceStore inferredPortInCode:self.code];
+        if (inferredPort >= 1024 && inferredPort <= 65535) service[@"inferredPort"] = @(inferredPort);
+        NSString *inferredEPG = [ServiceStore inferredEPGPathInCode:self.code];
+        if (inferredEPG.length && ![service[@"epgPathSource"] isEqual:@"manual"]) {
+            service[@"epgPath"] = inferredEPG;
+            service[@"epgPathSource"] = @"inferred";
+        }
+    }
     NSString *playlistPath=[self.playlistPathField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if(playlistPath.length){if(![playlistPath hasPrefix:@"/"]||[playlistPath hasPrefix:@"//"]||playlistPath.length>=128||[playlistPath containsString:@".."]||[playlistPath containsString:@"?"]||[playlistPath containsString:@"#"]||[playlistPath containsString:@"\\"]||[playlistPath containsString:@":"]||[playlistPath rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[self message:@"直播列表路径须以单个 / 开头，且不能包含 ..、查询参数、片段或控制字符。例：/all.m3u"];return;}service[@"playlistPath"]=playlistPath;service[@"playlistPathSource"]=@"manual";}else if(![service[@"playlistPathSource"] isEqual:@"detected"]){[service removeObjectForKey:@"playlistPath"];[service removeObjectForKey:@"playlistPathSource"];} // Keep a verified path when users save unrelated settings.
     service[@"updated"] = @(NSDate.date.timeIntervalSince1970);

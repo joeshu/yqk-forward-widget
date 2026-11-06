@@ -11,6 +11,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 };
 
 @interface DiagnosticLogLineCell : UITableViewCell
+@property(nonatomic,strong) UIView *cardView;
 @property(nonatomic,strong) UILabel *messageLabel;
 @property(nonatomic,strong) UIView *categoryDot;
 @end
@@ -20,7 +21,8 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     if((self=[super initWithStyle:style reuseIdentifier:reuseIdentifier])){
         self.backgroundColor=UIColor.clearColor;
         self.selectionStyle=UITableViewCellSelectionStyleNone;
-        UIView *card=[UIView new];card.translatesAutoresizingMaskIntoConstraints=NO;card.backgroundColor=HostCard();card.layer.cornerRadius=13;card.layer.cornerCurve=kCACornerCurveContinuous;
+        UIView *card=[UIView new];card.translatesAutoresizingMaskIntoConstraints=NO;card.backgroundColor=HostCard();card.layer.cornerRadius=14;card.layer.cornerCurve=kCACornerCurveContinuous;card.layer.borderWidth=0.6;HostSetLayerBorderColor(card,HostBorder());
+        self.cardView=card;
         [self.contentView addSubview:card];
         self.categoryDot=[UIView new];self.categoryDot.translatesAutoresizingMaskIntoConstraints=NO;self.categoryDot.layer.cornerRadius=3;
         self.messageLabel=[UILabel new];self.messageLabel.translatesAutoresizingMaskIntoConstraints=NO;self.messageLabel.numberOfLines=0;self.messageLabel.font=[[UIFontMetrics defaultMetrics] scaledFontForFont:[UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular]];self.messageLabel.adjustsFontForContentSizeCategory=YES;self.messageLabel.textColor=HostMutedText();self.messageLabel.lineBreakMode=NSLineBreakByCharWrapping;
@@ -62,6 +64,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 @implementation LogCenterViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     self.title=self.titleOverride.length?self.titleOverride:(self.scopeName.length?[NSString stringWithFormat:@"%@日志",self.scopeName]:@"运行日志");
     self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
     self.view.backgroundColor=HostBackground();
@@ -70,12 +73,13 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 
     __weak typeof(self) weakSelf=self;
     UIBarButtonItem *export=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"square.and.arrow.up"] style:UIBarButtonItemStylePlain target:self action:@selector(exportLog)];export.accessibilityLabel=@"导出日志";
+    UIAction *scrollBottom=[UIAction actionWithTitle:@"跳到最新末尾" image:[UIImage systemImageNamed:@"arrow.down.to.line"] identifier:nil handler:^(__unused UIAction *action){[weakSelf scrollToBottomLog];}];
     UIAction *copy=[UIAction actionWithTitle:@"复制当前结果" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *action){[weakSelf copyVisibleLog];}];
     UIAction *clear=[UIAction actionWithTitle:self.clearActionTitle.length?self.clearActionTitle:@"清空日志" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *action){[weakSelf confirmClearLog];}];
-    UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"日志操作" children:@[copy,clear]]];more.accessibilityLabel=@"更多日志操作";
+    UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"日志操作" children:@[scrollBottom,copy,clear]]];more.accessibilityLabel=@"更多日志操作";
     self.navigationItem.rightBarButtonItems=@[more,export];
 
-    self.categories=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"播放",@"插件",@"错误"]];self.categories.translatesAutoresizingMaskIntoConstraints=NO;self.categories.selectedSegmentIndex=0;self.categories.selectedSegmentTintColor=HostAccent();[self.categories setTitleTextAttributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];[self.categories addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
+    self.categories=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"播放",@"插件",@"错误"]];self.categories.translatesAutoresizingMaskIntoConstraints=NO;self.categories.selectedSegmentIndex=0;self.categories.selectedSegmentTintColor=HostAccent();[self.categories setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];[self.categories setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateSelected];[self.categories addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
     self.searchBar=[UISearchBar new];self.searchBar.translatesAutoresizingMaskIntoConstraints=NO;self.searchBar.delegate=self;self.searchBar.placeholder=@"搜索日志内容";self.searchBar.searchBarStyle=UISearchBarStyleMinimal;self.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchBar.accessibilityIdentifier=@"diagnostic.logs.search";
     self.summaryLabel=[UILabel new];self.summaryLabel.translatesAutoresizingMaskIntoConstraints=NO;self.summaryLabel.numberOfLines=0;self.summaryLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.summaryLabel.adjustsFontForContentSizeCategory=YES;self.summaryLabel.textColor=HostSecondaryText();
     self.tableView=[[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];self.tableView.translatesAutoresizingMaskIntoConstraints=NO;self.tableView.backgroundColor=HostBackground();self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;self.tableView.dataSource=self;self.tableView.delegate=self;self.tableView.estimatedRowHeight=54;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.accessibilityIdentifier=@"diagnostic.logs.list";[self.tableView registerClass:DiagnosticLogLineCell.class forCellReuseIdentifier:@"diagnostic.line"];
@@ -103,6 +107,30 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
         [self.emptyLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:safe.leadingAnchor constant:24],
         [self.emptyLabel.trailingAnchor constraintLessThanOrEqualToAnchor:safe.trailingAnchor constant:-24]
     ]];
+}
+- (void)reloadThemeAppearance {
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    if(!self.isViewLoaded)return;
+    self.view.backgroundColor=HostBackground();
+    self.view.tintColor=HostAccent();
+    self.categories.selectedSegmentTintColor=HostAccent();
+    [self.categories setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];
+    [self.categories setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateSelected];
+    self.summaryLabel.textColor=HostSecondaryText();
+    self.emptyLabel.textColor=HostSecondaryText();
+    self.tableView.backgroundColor=HostBackground();
+    [self.tableView reloadData];
+}
+- (void)showTransientPrompt:(NSString *)prompt {
+    self.navigationItem.prompt=prompt;
+    __weak typeof(self) weakSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.5*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+        if([weakSelf.navigationItem.prompt isEqualToString:prompt])weakSelf.navigationItem.prompt=nil;
+    });
+}
+- (void)scrollToBottomLog {
+    if(!self.visibleLines.count)return;
+    [self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:self.visibleLines.count-1 inSection:0] atScrollPosition:UITableViewScrollPositionBottom animated:YES];
 }
 - (void)dealloc {[[NSNotificationCenter defaultCenter] removeObserver:self];}
 - (void)viewWillAppear:(BOOL)animated {
@@ -152,7 +180,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
         if(query.length&&[line rangeOfString:query options:NSCaseInsensitiveSearch].location==NSNotFound)continue;
         [filtered addObject:line];
     }
-    self.visibleLines=filtered;BOOL filteredByUser=query.length>0||selected!=0;self.summaryLabel.text=[NSString stringWithFormat:@"共 %lu 条%@",(unsigned long)filtered.count,filteredByUser?@" · 已筛选":@" · 实时刷新"];self.emptyLabel.text=self.allLines.count?@"没有符合筛选的日志":@"暂无日志";self.emptyLabel.hidden=filtered.count>0;self.tableView.hidden=filtered.count==0;[self.tableView reloadData];
+    self.visibleLines=filtered;BOOL filteredByUser=query.length>0||selected!=0;self.summaryLabel.text=[NSString stringWithFormat:@"共 %lu 条%@ · 点按单行可复制",(unsigned long)filtered.count,filteredByUser?@" · 已筛选":@" · 实时刷新"];self.emptyLabel.text=self.allLines.count?@"没有符合筛选的日志":@"暂无日志";self.emptyLabel.hidden=filtered.count>0;self.tableView.hidden=filtered.count==0;[self.tableView reloadData];
     if(followsTail&&filtered.count&&query.length==0&&selected==0)[self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:filtered.count-1 inSection:0] atScrollPosition:UITableViewScrollPositionBottom animated:NO];
 }
 - (DiagnosticLogCategory)categoryForLine:(NSString *)line {
@@ -170,14 +198,14 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return self.visibleLines.count;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    DiagnosticLogLineCell *cell=[tableView dequeueReusableCellWithIdentifier:@"diagnostic.line" forIndexPath:indexPath];if(indexPath.row<0||indexPath.row>=self.visibleLines.count)return cell;NSString *line=self.visibleLines[indexPath.row];UIColor *color=[self colorForLine:line];cell.messageLabel.text=line;cell.messageLabel.textColor=color;cell.categoryDot.backgroundColor=color;cell.accessibilityHint=@"点按复制这行日志";return cell;
+    DiagnosticLogLineCell *cell=[tableView dequeueReusableCellWithIdentifier:@"diagnostic.line" forIndexPath:indexPath];if(indexPath.row<0||indexPath.row>=self.visibleLines.count)return cell;NSString *line=self.visibleLines[indexPath.row];UIColor *color=[self colorForLine:line];cell.cardView.backgroundColor=HostCard();HostSetLayerBorderColor(cell.cardView,HostBorder());cell.messageLabel.text=line;cell.messageLabel.textColor=color;cell.categoryDot.backgroundColor=color;cell.accessibilityHint=@"点按复制这行日志";return cell;
 }
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {if(indexPath.row<self.visibleLines.count){UIPasteboard.generalPasteboard.string=self.visibleLines[indexPath.row];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"日志内容已复制");}[tableView deselectRowAtIndexPath:indexPath animated:YES];}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {if(indexPath.row<self.visibleLines.count){UIPasteboard.generalPasteboard.string=self.visibleLines[indexPath.row];[self showTransientPrompt:@"日志内容已复制"];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"日志内容已复制");}[tableView deselectRowAtIndexPath:indexPath animated:YES];}
 - (void)filterChanged {[self applyFilter];}
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {[self applyFilter];}
 - (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar {[searchBar resignFirstResponder];}
 - (void)exportLog {if(self.onExportLog)self.onExportLog();}
-- (void)copyVisibleLog {UIPasteboard.generalPasteboard.string=[self.visibleLines componentsJoinedByString:@"\n"]?:@"";UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"当前筛选的日志已复制");}
+- (void)copyVisibleLog {UIPasteboard.generalPasteboard.string=[self.visibleLines componentsJoinedByString:@"\n"]?:@"";[self showTransientPrompt:@"当前筛选的日志已复制"];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"当前筛选的日志已复制");}
 - (void)confirmClearLog {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:self.clearActionTitle.length?self.clearActionTitle:@"清空日志" message:self.clearConfirmationMessage.length?self.clearConfirmationMessage:@"将清除当前日志文件和内存中的日志记录。此操作无法撤销。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];

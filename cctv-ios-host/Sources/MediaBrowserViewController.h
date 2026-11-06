@@ -5,6 +5,7 @@
 - (void)refreshSources;
 /// Media display preferences, pushable from Settings without loading this page.
 - (UIViewController *)mediaDisplaySettingsViewController;
+- (void)reloadMediaDisplayConfigurationIfLoaded;
 - (void)openSourceIdentifier:(NSString *)identifier;
 - (void)invalidateServiceIdentifier:(NSString *)identifier;
 - (void)showConfigurationForSource:(NSDictionary *)source;

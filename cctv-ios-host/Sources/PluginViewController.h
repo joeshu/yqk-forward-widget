@@ -11,5 +11,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) dispatch_block_t onOpenLog;
 @property (nonatomic, copy, nullable) NSUInteger (^subscriptionCountProvider)(void);
 - (void)updateRunning:(BOOL)running subscriptionCount:(NSUInteger)count;
+- (void)reloadThemeAppearance;
 @end
 NS_ASSUME_NONNULL_END

@@ -74,9 +74,15 @@ class ByteBudget:
 
     def urlopen(self, original, request, **kwargs):
         response = original(request, **kwargs)
-        # Count actual media bodies, not the signed JSON model GET response.
+        # Count actual media bodies, not device_register or signed video_model API responses.
         if (request.get_method() != "GET" or
-                urllib.parse.urlsplit(request.full_url).hostname == "reading.snssdk.com"):
+                urllib.parse.urlsplit(request.full_url).hostname in (
+                    "reading.snssdk.com",
+                    "api5-normal-sinfonlineb.fqnovel.com",
+                    "api3-normal-sinfonlinea.fqnovel.com",
+                    "log5-applog.fqnovel.com",
+                    "log3-applog-hl.fqnovel.com",
+                )):
             return response
         length = response.headers.get("Content-Length")
         try:

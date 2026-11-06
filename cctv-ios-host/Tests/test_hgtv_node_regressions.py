@@ -53,6 +53,7 @@ class HgtvNodeRegressions(unittest.TestCase):
         self.module = self.folder / 'hgtv-test.cjs'
         self.module.write_text(source.replace('module.exports = site;', '''
 module.exports = {site, decryptCenc, verifyMp4, pickBest, qualityCandidates, fetchModel, signedRequest,
+  registerDevice, ensureDeviceSession, branchOf,
   videoMetadata, episodesFrom, replaceSinf, decryptVideo,
   setModel: fn => fetchModel = fn, setHtml: fn => siteHtml = fn,
   setHttp: fn => httpText = fn, setDecrypt: fn => ensureDecrypted = fn};
@@ -154,8 +155,10 @@ const assert = require('node:assert/strict');
           assert.equal(result.vod_play_url.split('#').length, 3);
           assert.deepEqual(requests, ['/detail?series_id=' + sid, '/player/' + sid]);''')
 
-    def test_home_cover_and_signed_video_tab_model_route(self):
-        self.node('''const sid='1234567890123456789', vid='7701565108626918424';
+    def test_home_cover_device_register_and_current_video_model_route(self):
+        self.node('''const sid='1234567890123456789';
+          const episodes=['7701565033376910360','7701820244146261016','7701832903004556312'];
+          const qualities=['360p','480p','540p','720p','1080p'];
           api.setHtml(async () => '<a href="/detail?series_id=' + sid + '">' +
             '<img class="empty_play" src="https://img.invalid/empty_play.png">' +
             '<img alt="poster" data-src="https://img.invalid/poster.jpg">' +
@@ -165,31 +168,63 @@ const assert = require('node:assert/strict');
           assert.equal(home.list[0].vod_pic,'https://img.invalid/poster.jpg');
 
           const calls=[];
+          let regCount=0;
+          let playCount=0;
           api.setHttp(async (url, options) => {
             calls.push({url, options});
-            if(calls.length===1)return {status:200,body:Buffer.alloc(0)};
-            return {status:200,body:Buffer.from(JSON.stringify({code:0,data:{video_model_data:{
-              [vid]:{video_model:{video_list:[{definition:'720p',main_url:'https://media.invalid/video',spade_a:'fixture'}]}}
-            }}}))};
+            const u=new URL(url);
+            if(u.pathname.endsWith('/device_register/')){
+              regCount++;
+              const did=`770199887766550${regCount}`;
+              const iid=`770199887766990${regCount}`;
+              return {status:200,body:Buffer.from(JSON.stringify({
+                device_id_str:did,install_id_str:iid,device_id:Number(did),install_id:Number(iid)
+              }))};
+            }
+            playCount++;
+            if(playCount===1)return {status:200,body:Buffer.alloc(0)};
+            const vlist={};
+            qualities.forEach((q, idx)=>{
+              vlist['video_'+(idx+1)]={definition:q,main_url:'https://media.invalid/'+q+'.mp4',spade_a:'fixture'};
+            });
+            return {status:200,body:Buffer.from(JSON.stringify({
+              code:0,data:{video_model:JSON.stringify({video_list:vlist})}
+            }))};
           });
-          const model=await api.fetchModel(vid);
-          assert.ok(model.video_list);
-          assert.equal(api.pickBest(model).q,'720p');
-          assert.equal(calls.length,2);
-          for(const call of calls){
+
+          for(const vid of episodes){
+            const model=await api.fetchModel(vid);
+            assert.ok(model && model.video_list);
+            assert.deepEqual(api.qualityCandidates(model).map(c=>c.q), ['1080p','720p','540p','480p','360p']);
+            assert.equal(api.pickBest(model).q,'1080p');
+          }
+          // Episode 1: register (#1) -> play (#1 empty) -> re-register (#2) -> play (#2 ok)
+          // Episode 2 (middle) & Episode 3 (late): reuse registered device (#2) directly!
+          assert.equal(regCount,2);
+          assert.equal(playCount,4);
+          const playCalls=calls.filter(c=>new URL(c.url).pathname==='/novel/player/video_model/v1/');
+          assert.equal(playCalls.length,4);
+          for(const call of playCalls){
             const u=new URL(call.url);
-            assert.equal(u.hostname,'reading.snssdk.com');
-            assert.equal(u.pathname,'/reading/bookapi/video_tab/multi_video_model/v1/');
-            assert.equal(u.searchParams.get('video_id'),vid);
-            assert.equal(u.searchParams.get('version_code'),'71332');
-            assert.match(u.searchParams.get('device_id'),/^\\d{18}$/);
-            assert.match(u.searchParams.get('iid'),/^\\d{18}$/);
-            assert.equal(call.options.method,'GET');
+            assert.equal(u.hostname,'api5-normal-sinfonlineb.fqnovel.com');
+            assert.equal(u.pathname,'/novel/player/video_model/v1/');
+            assert.equal(u.searchParams.get('version_code'),'73532');
+            assert.ok(u.searchParams.get('cdid'));
+            assert.ok(u.searchParams.get('openudid'));
+            assert.ok(u.searchParams.get('rom_version'));
+            assert.ok(u.searchParams.get('key_register_ts'));
+            assert.equal(u.searchParams.get('req_type'),'1');
+            assert.equal(call.options.method,'POST');
             assert.ok(call.options.headers['x-gorgon']);
             assert.ok(call.options.headers['x-helios']);
+            assert.ok(call.options.headers['x-ss-stub']);
+            assert.notEqual(api.branchOf(call.url,call.options.body,Number(call.options.headers['x-khronos'])),1);
           }
-          assert.notEqual(new URL(calls[0].url).searchParams.get('device_id'),
-                          new URL(calls[1].url).searchParams.get('device_id'));''')
+          // Verify first failed attempt used device #1, and subsequent calls reused device #2 across episodes
+          assert.equal(new URL(playCalls[0].url).searchParams.get('device_id'),'7701998877665501');
+          assert.equal(new URL(playCalls[1].url).searchParams.get('device_id'),'7701998877665502');
+          assert.equal(new URL(playCalls[2].url).searchParams.get('device_id'),'7701998877665502');
+          assert.equal(new URL(playCalls[3].url).searchParams.get('device_id'),'7701998877665502');''')
 
     def test_play_lists_all_actual_qualities_and_rejects_missing_quality(self):
         self.node('''const rows = {};
@@ -218,6 +253,82 @@ const assert = require('node:assert/strict');
             assert.equal(result[0], 200); assert.equal(result[2].__cctvhostFileResponse, true);
             assert.equal(result[2].length, fs.statSync(process.argv[2]).size);
           }''', dst)
+
+
+
+    def test_middle_and_late_episodes_end_to_end_spade_and_cenc_decryption(self):
+        data, _, plain, offset, _ = self.decrypt()
+        enc_fixture = self.folder / 'cdn-encrypted.mp4'
+        enc_fixture.write_bytes(data)
+        self.node("""const crypto = require('node:crypto');
+          const encMedia = fs.readFileSync(process.argv[2]);
+          const expectedPlain = Buffer.from(process.argv[3], 'hex');
+          const sampleOffset = Number(process.argv[4]);
+          const seed = Buffer.from('hongguo-seed-2026', 'utf8');
+          const spadeConst = Buffer.from(
+            '4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524' +
+            'f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
+          const h1 = crypto.createHash('sha512').update(seed).digest();
+          const h2 = crypto.createHash('sha512').update(Buffer.concat([h1, spadeConst])).digest();
+          function encryptSpadeUrl(plainUrl) {
+            const pt = Buffer.from(plainUrl, 'utf8');
+            const pad = 16 - (pt.length % 16);
+            const padded = Buffer.concat([pt, Buffer.alloc(pad, pad)]);
+            const cipher = crypto.createCipheriv('aes-128-cbc', h2.subarray(0, 16), h2.subarray(16, 32));
+            cipher.setAutoPadding(false);
+            const ct = Buffer.concat([cipher.update(padded), cipher.final()]);
+            return Buffer.concat([Buffer.from([0xa8, 0x00, 0x01, 0x00]), ct]).toString('base64');
+          }
+          const spadeA = 'nrMdy1OwG/xSsBv/YoMeyWSFHPxisiv/erAy4U6fA+BOmQ==';
+          const qualities = ['360p', '480p', '540p', '720p', '1080p'];
+          const episodes = ['7701820244146261016', '7701832903004556312'];
+          let regCalls = 0;
+          api.setHttp(async (url, opts) => {
+            const u = new URL(url);
+            if (u.pathname.endsWith('/device_register/')) {
+              regCalls++;
+              return {status: 200, body: Buffer.from(JSON.stringify({
+                device_id_str: '7701998877665588', install_id_str: '7701998877669988'
+              }))};
+            }
+            if (u.pathname === '/novel/player/video_model/v1/') {
+              const reqBody = JSON.parse(opts.body.toString('utf8'));
+              const vid = reqBody.video_id;
+              const vlist = {};
+              qualities.forEach((q, idx) => {
+                vlist['video_' + (idx + 1)] = {
+                  definition: q,
+                  main_url: encryptSpadeUrl('https://v3-reading.qznovelvod.com/' + vid + '/' + q + '.mp4'),
+                  spade_a: spadeA,
+                  encrypt_info: {encrypt: true, spade_a: spadeA},
+                  gear_des_key: '1:encrypt|2:h265_hvc1|4:' + q + '|5:normal',
+                  video_meta: JSON.stringify({definition: q, vtype: 'h265'})
+                };
+              });
+              return {status: 200, body: Buffer.from(JSON.stringify({
+                code: 0,
+                data: {key_seed: seed.toString('base64'), video_model: JSON.stringify({key_seed: seed.toString('base64'), video_list: vlist})}
+              }))};
+            }
+            if (u.hostname === 'v3-reading.qznovelvod.com') {
+              return {status: 200, body: encMedia};
+            }
+            throw Error('unexpected URL ' + url);
+          });
+
+          for (const vid of episodes) {
+            const playInfo = await api.site.play('官网完整播放', '7701226234214108185~' + vid);
+            assert.equal(playInfo.url, 'cenc://' + vid + '?q=1080p');
+            assert.deepEqual(playInfo.alternates.map(a => a.name), ['1080p', '720p', '540p', '480p', '360p']);
+            const proxyRes = await api.site.localProxy({url: playInfo.url, method: 'GET'});
+            assert.equal(proxyRes[0], 200);
+            assert.equal(proxyRes[2].__cctvhostFileResponse, true);
+            assert.equal(api.verifyMp4(proxyRes[2].path), true);
+            const clearBytes = fs.readFileSync(proxyRes[2].path);
+            assert.deepEqual(clearBytes.subarray(sampleOffset, sampleOffset + expectedPlain.length), expectedPlain);
+          }
+          assert.equal(regCalls, 1);
+        """, enc_fixture, plain.hex(), offset)
 
 
 if __name__ == '__main__':

@@ -42,6 +42,9 @@ int main(void) {
         check([ServiceStore epgURLForService:@{@"id":@"python-http-fixture",@"port":@18770,@"protocol":@"python-http"}]==nil,@"service without a route never inherits another subscription EPG");
         [ProfileStore update:unrelatedURL values:@{@"managedServiceID":@"python-http-fixture",@"epgURL":guideURL}];
         check([[ServiceStore epgURLForService:@{@"id":@"python-http-fixture",@"port":@18770,@"protocol":@"python-http"}] isEqual:guideURL],@"explicit service EPG remains available during local port migration");
+        check([ServiceStore inferredPortInCode:@"from http.server import HTTPServer\nPORT = 8899\nHTTPServer(('127.0.0.1', 8899), Handler)"]==8899,@"live service port is inferred from script declarations");
+        check([[ServiceStore inferredEPGPathInCode:@"from flask import Flask\napp=Flask(__name__)\n@app.route('/epg.xml')\ndef epg(): return '<tv><programme/></tv>'"] isEqual:@"/epg.xml"],@"live service EPG route is inferred from route declaration");
+        check([[ServiceStore rewrittenLoopbackURL:@"http://localhost:8080/epg.xml" forService:@{@"id":@"python-http-fixture",@"port":@18775}] isEqual:@"http://127.0.0.1:18775/epg.xml"],@"loopback EPG URL port is rewritten to current service port");
         NSString *legacyURL=@"http://127.0.0.1:18768/custom.m3u";[NSUserDefaults.standardUserDefaults setObject:@[legacyURL,unrelatedURL] forKey:@"subscriptions"];[ProfileStore update:legacyURL values:@{@"name":@"旧服务频道"}];
         [ServiceStore associateLegacyLoopbackSubscriptionsForService:@{@"id":@"legacy-http-fixture",@"port":@18768}];
         check([[ProfileStore metadata:legacyURL][@"managedServiceID"] isEqual:@"legacy-http-fixture"],@"legacy loopback playlist is linked to its matching service port");

@@ -999,11 +999,10 @@ def _card(item):
 
 
 
-########## 签名取流 + CENC 解密（解决 public_fallback_unavailable） ##########
-# 背景：/api/video/protected/fallback-play-info 只对「有公开档」的集返回 200，
-#       新剧很多返回 {"error":"public_fallback_unavailable"}（HTTP 403）。
-# 兜底：走 App 的 multi_video_model（需 x-gorgon 等四个签名头），拿到加密档后
-#       用 spade 解 URL、派生 CENC 密钥、ffmpeg 解密，再由本地 HTTP 提供流。
+########## 签名取流 + CENC 解密 ##########
+# 通过匿名设备注册（service/2/device_register）获取并复用已注册的 device_id + iid，
+# 再使用当前播放接口（novel/player/video_model/v1）及新版校验字段获取 5 档 video_model，
+# 由 spade 解密 CDN 地址、派生 CENC 密钥并在本地完成 AES-CTR 解密交付。
 import base64 as _b64
 import binascii as _binascii
 import hashlib as _hashlib
@@ -1016,19 +1015,28 @@ import subprocess as _subprocess
 import threading as _threading
 import time as _time
 import urllib.request as _ureq
+import uuid as _uuid
 from http.server import BaseHTTPRequestHandler as _BHTTPH, ThreadingHTTPServer as _THS
 
-_SIGN_API = "https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/"
-_SIGN_UA = ("com.phoenix.read/74132 (iPhone; iOS 27.0.1; zh_CN; iPhone 12; Build/21A342)")
+_DEVICE_REGISTER_API = "https://log5-applog.fqnovel.com/service/2/device_register/"
+_VIDEO_MODEL_API = "https://api5-normal-sinfonlineb.fqnovel.com/novel/player/video_model/v1/"
+_VIDEO_MODEL_MULTI_API = "https://reading.snssdk.com/reading/bookapi/video_tab/multi_video_model/v1/"
+_SIGN_API = _VIDEO_MODEL_API
+_SIGN_UA = ("com.phoenix.read/73532 (Linux; U; Android 16; zh_CN; 25053RT47C; "
+            "Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 "
+            "QuicVersion:c67e9834 2025-09-08)")
 _SIGN_DEVICE = {
-    "device_id": "780019670991881", "user_id": "3594769438086775", "aid": "8662",
-    "app_name": "novelread", "version_code": "74132", "version_name": "7.4.1.32",
-    "manifest_version_code": "74132", "update_version_code": "74132",
-    "device_platform": "iphone", "os": "ios", "os_version": "27.0.1", "os_api": "27",
-    "device_type": "iPhone 12", "device_brand": "Apple", "language": "zh",
-    "resolution": "1170*2532", "dpi": "460", "host_abi": "arm64",
-    "channel": "App Store", "ac": "wifi", "ssmix": "a", "pv_player": "74132",
-    "compliance_status": "0", "need_personal_recommend": "1", "player_so_load": "1",
+    "ac": "wifi", "channel": "update_64", "aid": "8662", "app_name": "novelread",
+    "package": "com.phoenix.read",
+    "version_code": "73532", "version_name": "7.3.5.32", "device_platform": "android",
+    "os": "android", "ssmix": "a", "device_type": "25053RT47C", "device_brand": "Redmi",
+    "language": "zh", "os_api": "36", "os_version": "16",
+    "manifest_version_code": "73532", "resolution": "1280*2772", "dpi": "520",
+    "update_version_code": "73532", "host_abi": "arm64-v8a", "dragon_device_type": "phone",
+    "pv_player": "73532", "compliance_status": "0", "need_personal_recommend": "1",
+    "player_so_load": "1", "is_android_pad_screen": "0",
+    "rom_version": "BP2A.250605.031.A3 release-keys",
+    "use_store_region_cookie": "1", "okhttp_version": "4.2.137.76-fanqie",
 }
 _SPADE_CONST = _binascii.unhexlify(
     "4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524"
@@ -1036,11 +1044,13 @@ _SPADE_CONST = _binascii.unhexlify(
 )
 _SIGN_CACHE = {}
 _SIGN_CACHE_TTL = 300
+_DEVICE_SESSION = None
+_DEVICE_LOCK = _threading.RLock()
+_DEVICE_SESSION_TTL = 7 * 24 * 3600
 _DEC_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "decrypt_cache")
 _DEC_SRV = None
 _DEC_PORT = int(_os.environ.get("HGTV_DEC_PORT", "8789"))
 _QORDER = ["1080p", "720p", "540p", "480p", "360p"]
-_FFMPEG = None
 
 
 def _md5_bytes(b):
@@ -1153,7 +1163,8 @@ def _sm3(b):
 
 
 def _branch_of(url, body, ts):
-    q = _sm3(url.split("?", 1)[1].encode())
+    q_part = url.split("?", 1)[1] if "?" in url else ""
+    q = _sm3(q_part.encode())
     bm = _md5_bytes(body) if body else b"\0" * 16
     iv = _get_iv(_get_iv(_get_iv(0x20230928, q), bm), _le32(ts))
     low = iv & 15
@@ -1165,37 +1176,267 @@ def _pct(s):
         c if (c.isalnum() or c in "-_.~") else "%%%02X" % ord(c) for c in str(s))
 
 
-def _signed_request(payload):
-    ts = int(_time.time())
-    body = payload.encode() if isinstance(payload, str) else payload
-    rnd = _random.randint(0, 65535)
-    vals = dict(_SIGN_DEVICE)
-    vals["ts"] = str(ts)
-    base = int(_time.time() * 1000)
+def _random_uuid():
+    return str(_uuid.uuid4())
+
+
+def _random_openudid():
+    return "%040x" % _random.getrandbits(160)
+
+
+def _valid_device_identity(session):
+    if not isinstance(session, dict):
+        return False
+    did = str(session.get("device_id") or "")
+    iid = str(session.get("iid") or session.get("install_id") or "")
+    return bool(_re.fullmatch(r"[1-9]\d{5,23}", did) and _re.fullmatch(r"[1-9]\d{5,23}", iid))
+
+
+def _new_device_seed():
+    return {
+        "cdid": _random_uuid(),
+        "openudid": _random_openudid(),
+        "clientudid": _random_uuid(),
+        "req_id": _random_uuid(),
+        "key_register_ts": int(_time.time()),
+    }
+
+
+def _device_session_file():
+    return _os.path.join(_DEC_DIR, "device_session.json")
+
+
+def _load_persisted_device_session():
+    try:
+        fp = _device_session_file()
+        if not _os.path.exists(fp):
+            return None
+        with open(fp, "r", encoding="utf-8") as f:
+            parsed = _json.load(f)
+        if not _valid_device_identity(parsed):
+            return None
+        reg_at = float(parsed.get("registered_at") or 0)
+        if reg_at and (_time.time() - reg_at) > _DEVICE_SESSION_TTL:
+            return None
+        return {
+            "device_id": str(parsed["device_id"]),
+            "iid": str(parsed.get("iid") or parsed.get("install_id")),
+            "cdid": str(parsed.get("cdid") or _random_uuid()),
+            "openudid": str(parsed.get("openudid") or _random_openudid()),
+            "clientudid": str(parsed.get("clientudid") or _random_uuid()),
+            "key_register_ts": int(parsed.get("key_register_ts") or _time.time()),
+            "registered_at": reg_at or _time.time(),
+        }
+    except Exception:
+        return None
+
+
+def _save_persisted_device_session(session):
+    try:
+        _os.makedirs(_DEC_DIR, exist_ok=True)
+        fp = _device_session_file()
+        tmp = fp + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(session, f, ensure_ascii=False)
+        _os.replace(tmp, fp)
+    except Exception:
+        pass
+
+
+def _select_signed_url(base_url, vals, body, ts):
+    base_ms = int(_time.time() * 1000)
+    query = ""
+    url = ""
     for off in range(32):
-        vals["_rticket"] = str(base + off)
+        vals["_rticket"] = str(base_ms + off)
         query = "&".join("%s=%s" % (_pct(k), _pct(v)) for k, v in vals.items())
-        url = _SIGN_API + "?" + query
+        url = base_url + "?" + query
         if _branch_of(url, body, ts) != 1:
             break
+    return url, query, vals["_rticket"]
+
+
+def _build_signed_headers(query, body, ts, rticket, extra_headers=None):
+    rnd = _random.randint(0, 65535)
+    body_bytes = body.encode("utf-8") if isinstance(body, str) else (body or b"")
     headers = {
         "User-Agent": _SIGN_UA,
         "Accept": "application/json; charset=utf-8,application/x-protobuf",
         "Content-Type": "application/json; charset=UTF-8",
         "x-xs-from-web": "0",
-        "x-ss-req-ticket": vals["_rticket"],
+        "x-ss-req-ticket": str(rticket),
         "x-tt-request-tag": "t=0;n=0",
         "sdk-version": "2",
         "passport-sdk-version": "50561",
         "x-vc-bdturing-sdk-version": "3.7.2.cn",
-        "x-ss-stub": _md5_bytes(body).hex().upper(),
-        "x-gorgon": _x_gorgon(query, body, ts, rnd),
+        "x-gorgon": _x_gorgon(query, body_bytes, ts, rnd),
         "x-khronos": str(ts),
         "x-ladon": _b64.b64encode(_be32(ts)).decode(),
         "x-argus": _b64.b64encode(_le32(ts)).decode(),
         "x-helios": _helios(ts),
         "x-tt-dt": "",
     }
+    if body_bytes:
+        headers["x-ss-stub"] = _md5_bytes(body_bytes).hex().upper()
+    if isinstance(extra_headers, dict):
+        headers.update(extra_headers)
+    return headers
+
+
+def _device_register_request(seed=None):
+    s = seed if isinstance(seed, dict) else _new_device_seed()
+    ts = int(_time.time())
+    now_ms = int(_time.time() * 1000)
+    payload = {
+        "magic_tag": "ss_app_log",
+        "header": {
+            "display_name": "红果免费短剧",
+            "aid": 8662,
+            "channel": _SIGN_DEVICE["channel"],
+            "package": _SIGN_DEVICE["package"],
+            "app_version": _SIGN_DEVICE["version_name"],
+            "version_code": int(_SIGN_DEVICE["version_code"]),
+            "update_version_code": int(_SIGN_DEVICE["update_version_code"]),
+            "manifest_version_code": int(_SIGN_DEVICE["manifest_version_code"]),
+            "app_version_minor": _SIGN_DEVICE["version_name"],
+            "sdk_version": "3.7.0-rc.25-fanqie-xiaoshuo-opt",
+            "sdk_target_version": 29,
+            "git_hash": "5b6a0d3",
+            "sdk_flavor": "china",
+            "guest_mode": 0,
+            "is_system_app": 0,
+            "pre_installed_channel": "",
+            "not_request_sender": 0,
+            "os": "Android",
+            "os_version": _SIGN_DEVICE["os_version"],
+            "os_api": int(_SIGN_DEVICE["os_api"]),
+            "device_model": _SIGN_DEVICE["device_type"],
+            "device_brand": _SIGN_DEVICE["device_brand"],
+            "device_manufacturer": "Xiaomi",
+            "cpu_abi": _SIGN_DEVICE["host_abi"],
+            "release_build": "BP2A.250605.031.A3",
+            "density_dpi": int(_SIGN_DEVICE["dpi"]),
+            "display_density": "xxhdpi",
+            "resolution": "1280x2772",
+            "language": _SIGN_DEVICE["language"],
+            "timezone": 8,
+            "access": _SIGN_DEVICE["ac"],
+            "rom_version": _SIGN_DEVICE["rom_version"],
+            "cdid": s["cdid"],
+            "openudid": s["openudid"],
+            "clientudid": s["clientudid"],
+            "ipv6_list": [{"type": "client_anpi", "value": "::"}],
+            "region": "CN",
+            "tz_name": "Asia/Shanghai",
+            "tz_offset": 28800,
+            "sim_serial_number": [],
+            "oaid_may_support": False,
+            "req_id": s.get("req_id") or _random_uuid(),
+            "device_platform": _SIGN_DEVICE["device_platform"],
+            "custom": {
+                "host_bit": 64,
+                "account_region": "cn",
+                "device_type": "phone",
+            },
+            "apk_first_install_time": now_ms - 86400000,
+        },
+        "_gen_time": now_ms,
+    }
+    body = _json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    vals = dict(_SIGN_DEVICE)
+    vals.update({
+        "cdid": s["cdid"],
+        "openudid": s["openudid"],
+        "clientudid": s["clientudid"],
+        "req_type": "1",
+        "ts": str(ts),
+    })
+    url, query, rticket = _select_signed_url(_DEVICE_REGISTER_API, vals, body, ts)
+    headers = _build_signed_headers(query, body, ts, rticket)
+    return url, headers, body, s, ts
+
+
+def _register_device():
+    global _DEVICE_SESSION
+    url, headers, body, seed, ts = _device_register_request()
+    req = _ureq.Request(url, data=body, headers=headers, method="POST")
+    with _ureq.urlopen(req, timeout=20) as r:
+        raw = r.read(1024 * 1024 + 1)
+    if not raw or len(raw) > 1024 * 1024:
+        raise ValueError("empty or oversized device_register response")
+    j = _json.loads(raw.decode("utf-8", "replace"))
+    if not isinstance(j, dict):
+        raise ValueError("invalid device_register JSON")
+    data = j.get("data") if isinstance(j.get("data"), dict) else {}
+    did = str(j.get("device_id_str") or j.get("device_id") or data.get("device_id_str") or data.get("device_id") or "")
+    iid = str(j.get("install_id_str") or j.get("install_id") or j.get("iid") or data.get("install_id_str") or data.get("install_id") or data.get("iid") or "")
+    session = {
+        "device_id": did,
+        "iid": iid,
+        "cdid": seed["cdid"],
+        "openudid": seed["openudid"],
+        "clientudid": seed["clientudid"],
+        "key_register_ts": ts,
+        "registered_at": _time.time(),
+    }
+    if not _valid_device_identity(session):
+        raise ValueError("device_register returned invalid device identity")
+    _DEVICE_SESSION = session
+    _save_persisted_device_session(session)
+    return session
+
+
+def _ensure_device(force_refresh=False):
+    global _DEVICE_SESSION
+    with _DEVICE_LOCK:
+        if not force_refresh:
+            if _valid_device_identity(_DEVICE_SESSION):
+                return _DEVICE_SESSION
+            persisted = _load_persisted_device_session()
+            if persisted:
+                _DEVICE_SESSION = persisted
+                return _DEVICE_SESSION
+        return _register_device()
+
+
+def _signed_request(vid, device=None):
+    """Build a signed POST request to the current novel/player/video_model/v1/ endpoint."""
+    ts = int(_time.time())
+    dev = device if _valid_device_identity(device) else _ensure_device(False)
+    payload = {
+        "biz_param": {
+            "detail_page_version": 0,
+            "device_level": 3,
+            "disable_digg_stat": False,
+            "disable_video_relate_book": False,
+            "from_video_id": "",
+            "need_all_video_definition": True,
+            "need_mp4_align": False,
+            "source": 4,
+            "use_os_player": False,
+            "use_server_dns": False,
+            "video_platform": 3,
+        },
+        "content_type": 1,
+        "video_id": str(vid),
+    }
+    body = _json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    vals = dict(_SIGN_DEVICE)
+    vals.update({
+        "iid": str(dev["iid"]),
+        "device_id": str(dev["device_id"]),
+        "cdid": str(dev.get("cdid") or _random_uuid()),
+        "openudid": str(dev.get("openudid") or _random_openudid()),
+        "key_register_ts": str(dev.get("key_register_ts") or ts),
+        "req_type": "1",
+        "ts": str(ts),
+    })
+    url, query, rticket = _select_signed_url(_VIDEO_MODEL_API, vals, body, ts)
+    headers = _build_signed_headers(query, body, ts, rticket, {
+        "Cookie": "install_id=%s; store-region=cn-zj; store-region-src=did" % vals["iid"],
+        "x-tt-store-region": "cn-zj",
+        "x-tt-store-region-src": "did",
+    })
     return url, headers, body
 
 
@@ -1222,6 +1463,30 @@ def _decrypt_spade(value, seed):
     return s if s.startswith("http") else None
 
 
+def _resolve_media_url(it, vm):
+    if not isinstance(it, dict):
+        return None
+    seed_s = (vm.get("key_seed") if isinstance(vm, dict) else "") or it.get("key_seed") or ""
+    seed = _b64.b64decode(seed_s + "=" * (-len(seed_s) % 4)) if seed_s else b""
+    for key in ("main_url", "backup_url_1", "backup_url_2", "backup_url"):
+        raw_url = it.get(key)
+        if not isinstance(raw_url, str) or not raw_url:
+            continue
+        if raw_url.startswith(("http://", "https://")):
+            return raw_url
+        if seed:
+            dec = _decrypt_spade(raw_url, seed)
+            if dec:
+                return dec
+        try:
+            plain = _b64.b64decode(raw_url + "=" * (-len(raw_url) % 4)).decode("utf-8").strip()
+            if plain.startswith(("http://", "https://")):
+                return plain
+        except Exception:
+            pass
+    return None
+
+
 def _content_key(spade_a):
     s = spade_a.replace("-", "+").replace("_", "/")
     raw = _b64.b64decode(s + "=" * (-len(s) % 4))
@@ -1246,55 +1511,84 @@ def _content_key(spade_a):
         return None
 
 
-def _signed_model(vid):
-    """签名取 video_model（带 5 分钟缓存）。"""
-    ent = _SIGN_CACHE.get(str(vid))
-    if ent and _time.time() - ent[0] < _SIGN_CACHE_TTL:
-        return ent[1]
-    payload = _json.dumps({
-        "biz_param": {"detail_page_version": 0, "device_level": 3,
-                      "disable_digg_stat": False, "need_all_video_definition": True,
-                      "need_mp4_align": False, "use_os_player": False,
-                      "use_server_dns": False, "video_platform": 1024},
-        "mixed_video_id_map": {"1004": [str(vid)]},
-    }, separators=(",", ":"))
-    payload_url, headers, body = _signed_request(payload)
-    j = None
-    last_err = None
-    for attempt in (0, 1):
-        try:
-            req = _ureq.Request(payload_url, data=body, headers=headers, method="POST")
-            with _ureq.urlopen(req, timeout=25) as r:
-                j = _json.loads(r.read().decode("utf-8", "replace"))
-            break
-        except Exception as e:
-            last_err = e
-            if attempt == 0:
-                _time.sleep(0.6)
-                # 重签一次（时间戳/rticket 可能刚好卡边界）
-                payload_url, headers, body = _signed_request(payload)
-    if j is None:
-        _trace("hgtv_signed_model_error", episode_id=vid, err=str(last_err)[:160])
-        return None
-    if j.get("code") not in (0, None):
-        _trace("hgtv_signed_rejected", episode_id=vid, code=j.get("code"),
-               msg=str(j.get("message") or j.get("Message") or "")[:80])
-        return None
-    ent = (j.get("data") or {}).get(str(vid)) or {}
-    vm = ent.get("video_model")
+def _parse_video_model_response(j, vid):
+    if not isinstance(j, dict) or j.get("code") not in (0, None):
+        raise ValueError("video model API rejected the request")
+    data = j.get("data") if isinstance(j.get("data"), dict) else {}
+    models = data.get("video_model_data") if isinstance(data.get("video_model_data"), dict) else None
+    ent = None
+    if models is not None:
+        ent = models.get(str(vid))
+        if ent is None:
+            ent = next((value for value in models.values() if isinstance(value, dict)), None)
+    if not isinstance(ent, dict) and isinstance(data.get(str(vid)), dict):
+        ent = data.get(str(vid))
+    if not isinstance(ent, dict):
+        ent = data
+    vm = ent.get("video_model") if isinstance(ent, dict) else None
+    if vm is None and isinstance(data, dict):
+        vm = data.get("video_model")
     if isinstance(vm, str):
         vm = _json.loads(vm)
+    if not isinstance(vm, dict) and isinstance(data, dict) and (
+            data.get("video_list") or data.get("dynamic_video_list") or data.get("dynamic_video")):
+        vm = dict(data)
     if not isinstance(vm, dict):
-        return None
-    lst = vm.get("video_list")
+        raise ValueError("video model API returned no model")
+    if not vm.get("key_seed"):
+        if isinstance(ent, dict) and ent.get("key_seed"):
+            vm["key_seed"] = ent["key_seed"]
+        elif isinstance(data, dict) and data.get("key_seed"):
+            vm["key_seed"] = data["key_seed"]
+    dyn = vm.get("dynamic_video") if isinstance(vm.get("dynamic_video"), dict) else {}
+    lst = vm.get("video_list") or vm.get("dynamic_video_list") or dyn.get("dynamic_video_list") or dyn.get("video_list")
     if isinstance(lst, list):
         videos = {}
         for i, item in enumerate(lst):
             if isinstance(item, dict):
-                videos[_video_quality(item, str(i))] = item
+                q = _video_quality(item, str(i))
+                videos[q if q and q not in videos else str(i)] = item
         vm["video_list"] = videos
-    _SIGN_CACHE[str(vid)] = (_time.time(), vm)
+    elif isinstance(lst, dict):
+        vm["video_list"] = lst
+    if not isinstance(vm.get("video_list"), dict) or not vm["video_list"]:
+        raise ValueError("video model has no video qualities")
     return vm
+
+
+def _signed_model(vid):
+    """Fetch a signed 5-tier video model using a registered anonymous device session."""
+    ent = _SIGN_CACHE.get(str(vid))
+    if ent and _time.time() - ent[0] < _SIGN_CACHE_TTL:
+        return ent[1]
+    last_err = None
+    force_refresh = False
+    for attempt in range(3):
+        try:
+            dev = _ensure_device(force_refresh=force_refresh)
+            force_refresh = False
+            payload_url, headers, body = _signed_request(vid, dev)
+            method = "POST" if body is not None else "GET"
+            req = _ureq.Request(payload_url, data=body, headers=headers, method=method)
+            with _ureq.urlopen(req, timeout=25) as r:
+                raw = r.read(8 * 1024 * 1024 + 1)
+            if len(raw) > 8 * 1024 * 1024:
+                raise ValueError("video model response exceeds 8 MiB")
+            if not raw:
+                force_refresh = True
+                raise ValueError("video model API returned an empty response")
+            j = _json.loads(raw.decode("utf-8", "replace"))
+            vm = _parse_video_model_response(j, vid)
+            _SIGN_CACHE[str(vid)] = (_time.time(), vm)
+            return vm
+        except Exception as e:
+            last_err = e
+            force_refresh = True
+            if attempt < 2:
+                _time.sleep(0.4 * (attempt + 1))
+    _trace("hgtv_signed_model_error", episode_id=vid,
+           err=(type(last_err).__name__ if last_err else "request failed"))
+    return None
 
 
 def _video_metadata(item):
@@ -1319,7 +1613,8 @@ def _video_metadata(item):
 def _video_quality(item, fallback=""):
     metadata = _video_metadata(item)
     for candidate in (item.get("definition"), metadata.get("definition"),
-                      item.get("quality_name"), metadata.get("quality_name")):
+                      item.get("quality_name"), metadata.get("quality_name"),
+                      item.get("quality"), metadata.get("quality")):
         if candidate is None:
             continue
         quality = str(candidate).strip().lower().replace(" ", "")
@@ -1331,6 +1626,14 @@ def _video_quality(item, fallback=""):
     match = _re.search(r"(?:^|\|)4:(1080p|720p|540p|480p|360p)(?=\||$)", gear, _re.I)
     if match:
         return match.group(1).lower()
+    try:
+        w = int(item.get("vwidth") or metadata.get("vwidth") or 0)
+        h = int(item.get("vheight") or metadata.get("vheight") or 0)
+        short_side = min(w, h) if (w > 0 and h > 0) else 0
+        if short_side in (360, 480, 540, 720, 1080):
+            return "%dp" % short_side
+    except (ValueError, TypeError):
+        pass
     fallback = str(fallback).strip().lower()
     return fallback if fallback in _QORDER else fallback
 
@@ -1344,7 +1647,7 @@ def _pick_best(vm, want):
         gear = str(it.get("gear_des_key") or "")
         metadata = _video_metadata(it)
         bad = 1 if ("bytevc2" in gear or "bvc2" in gear) else 0
-        if str(metadata.get("vtype") or "").lower() in ("bytevc2", "bvc2"):
+        if str(metadata.get("vtype") or it.get("vtype") or "").lower() in ("bytevc2", "bvc2"):
             bad = 1
         order = _QORDER.index(q) if q in _QORDER else 99
         cands.append((bad, order, q, it))
@@ -1834,11 +2137,7 @@ def _decrypt_to_file(vid, want):
         except OSError:
             pass
 
-    seed_s = vm.get("key_seed") or ""
-    seed = _b64.b64decode(seed_s + "=" * (-len(seed_s) % 4)) if seed_s else b""
-    url = it.get("main_url") or ""
-    if url and not url.startswith("http") and seed:
-        url = _decrypt_spade(url, seed)
+    url = _resolve_media_url(it, vm)
     if not url:
         return None
 

@@ -9,7 +9,9 @@
 @property(nonatomic,strong) UISearchController *searchController;
 @property(nonatomic,copy) NSString *searchText;
 @property(nonatomic,strong) UISegmentedControl *contentFilter;
+@property(nonatomic,strong) UILabel *summaryLabel;
 - (void)updateEmptyState;
+- (void)updateCatalogSummary;
 @end
 
 @implementation TVBoxCatalogViewController
@@ -23,20 +25,36 @@
     if(scope==3)rows=[rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return ![row[@"supported"] boolValue];}]];
     if(!query.length)return rows;
     return [rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){
-        NSArray *keys=section==0?@[@"name",@"status",@"api"]:@[@"name",@"url"];
+        NSArray *keys=section==0?@[@"name",@"status",@"api",@"key"]:@[@"name",@"url"];
         for(NSString *key in keys){id value=row[key];if([value isKindOfClass:NSString.class]&&[[(NSString *)value lowercaseString] containsString:query])return YES;}
         return NO;
     }]];
 }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {self.searchText=searchController.searchBar.text?:@"";[self.tableView reloadData];[self updateEmptyState];}
+- (void)updateCatalogSummary {
+    if(!self.summaryLabel)return;
+    NSUInteger supportedSites=0,nativeSites=0,scriptSites=0,supportedLives=0;
+    for(NSDictionary *site in self.sites){
+        if([site[@"supported"] boolValue]){
+            supportedSites++;
+            if([site[@"apiKind"] isEqual:@"script"])scriptSites++;
+            else nativeSites++;
+        }
+    }
+    for(NSDictionary *live in self.lives)if([live[@"supported"] boolValue])supportedLives++;
+    self.summaryLabel.text=[NSString stringWithFormat:@"共 %lu 个影视站点（%lu 个原生直连 · %lu 个脚本） · %lu 个直播列表",(unsigned long)supportedSites,(unsigned long)nativeSites,(unsigned long)scriptSites,(unsigned long)supportedLives];
+}
 - (void)updateEmptyState {
     NSUInteger total=[self filteredRowsForSection:0].count+[self filteredRowsForSection:1].count;
     if(total){self.tableView.backgroundView=nil;return;}
-    UILabel *empty=[[UILabel alloc] initWithFrame:self.tableView.bounds];empty.text=self.searchText.length?@"没有匹配的站点或直播源，请修改搜索词":@"此合集暂无站点与直播列表";empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;
+    UILabel *empty=[[UILabel alloc] initWithFrame:self.tableView.bounds];
+    NSInteger scope=self.contentFilter?self.contentFilter.selectedSegmentIndex:0;
+    empty.text=self.searchText.length?@"没有匹配的站点或直播源，请修改搜索词":(scope>0?@"当前筛选分类下暂无站点或直播列表":@"此合集暂无站点与直播列表");
+    empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;
 }
 - (void)viewDidLoad {
-    [super viewDidLoad];NSString *catalogName=[self.catalog[@"name"] isKindOfClass:NSString.class]?self.catalog[@"name"]:@"";self.title=(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])?@"资源合集":catalogName;self.navigationItem.prompt=@"点按需要的站点按需加载 · 不必全量导入";self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=88;
-    self.searchController=[[UISearchController alloc] initWithSearchResultsController:nil];self.searchController.searchResultsUpdater=self;self.searchController.obscuresBackgroundDuringPresentation=NO;self.searchController.searchBar.placeholder=@"搜索合集中的站点、协议或 URL";self.searchController.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchController.searchBar.autocorrectionType=UITextAutocorrectionTypeNo;self.navigationItem.searchController=self.searchController;self.navigationItem.hidesSearchBarWhenScrolling=NO;self.definesPresentationContext=YES;[self updateEmptyState];
+    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();NSString *catalogName=[self.catalog[@"name"] isKindOfClass:NSString.class]?self.catalog[@"name"]:@"";self.title=(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])?@"资源合集":catalogName;self.navigationItem.prompt=@"点按需要的站点按需加载 · 不必全量导入";self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=88;
+    self.searchController=[[UISearchController alloc] initWithSearchResultsController:nil];self.searchController.searchResultsUpdater=self;self.searchController.obscuresBackgroundDuringPresentation=NO;self.searchController.searchBar.placeholder=@"搜索合集中的站点、协议或 URL";self.searchController.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchController.searchBar.autocorrectionType=UITextAutocorrectionTypeNo;self.navigationItem.searchController=self.searchController;self.navigationItem.hidesSearchBarWhenScrolling=NO;self.definesPresentationContext=YES;
     __weak typeof(self) weakSelf=self;
     NSArray *resourceActions=@[
         @{@"icon":@"square.and.arrow.down",@"title":@"全量导入（较慢）",@"action":[UIAction actionWithHandler:^(UIAction *a){
@@ -56,12 +74,37 @@
     ];
     UIAction *json=resourceActions[1][@"action"],*zip=resourceActions[2][@"action"],*bulk=resourceActions[0][@"action"],*remove=resourceActions[3][@"action"];
     json.title=@"导出完整合集 JSON";zip.title=@"导出资源 ZIP（含可获取的 PY / JS）";bulk.title=@"全量导入影视脚本";remove.title=@"移除资源合集";remove.attributes=UIMenuElementAttributesDestructive;
+    NSMutableArray<UIMenuElement *> *exportChildren=[NSMutableArray arrayWithObjects:json,zip,nil];
+    NSString *catalogURL=[self.catalog[@"url"] isKindOfClass:NSString.class]?self.catalog[@"url"]:@"";
+    if(catalogURL.length){
+        UIAction *copyCatalogURL=[UIAction actionWithTitle:@"复制合集源地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=[HostLogRedactor redactText:catalogURL];}];
+        [exportChildren addObject:copyCatalogURL];
+    }
     UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:nil action:nil];
-    more.accessibilityLabel=@"合集操作";more.menu=[UIMenu menuWithChildren:@[[UIMenu menuWithTitle:@"导出" children:@[json,zip]],[UIMenu menuWithTitle:@"高级操作" children:@[bulk]],remove]];self.navigationItem.rightBarButtonItem=more;
-    self.contentFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"影视",@"直播",@"不支持"]];self.contentFilter.selectedSegmentIndex=0;[self.contentFilter addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
-    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.tableView.bounds.size.width,56)];self.contentFilter.frame=CGRectMake(16,6,MAX(1,header.bounds.size.width-32),44);self.contentFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;[header addSubview:self.contentFilter];self.tableView.tableHeaderView=header;
+    more.accessibilityLabel=@"合集操作";more.menu=[UIMenu menuWithChildren:@[[UIMenu menuWithTitle:@"导出与复制" children:exportChildren],[UIMenu menuWithTitle:@"高级操作" children:@[bulk]],remove]];self.navigationItem.rightBarButtonItem=more;
+    self.contentFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"影视",@"直播",@"不支持"]];self.contentFilter.selectedSegmentIndex=0;self.contentFilter.selectedSegmentTintColor=HostAccent();[self.contentFilter addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
+    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.tableView.bounds.size.width,82)];
+    self.summaryLabel=[[UILabel alloc] initWithFrame:CGRectMake(18,4,MAX(1,header.bounds.size.width-36),22)];
+    self.summaryLabel.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.summaryLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+    self.summaryLabel.textColor=HostSecondaryText();
+    self.summaryLabel.accessibilityIdentifier=@"tvbox.catalog.summary";
+    [header addSubview:self.summaryLabel];
+    self.contentFilter.frame=CGRectMake(16,30,MAX(1,header.bounds.size.width-32),44);self.contentFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;[header addSubview:self.contentFilter];self.tableView.tableHeaderView=header;
+    [self updateCatalogSummary];
+    [self updateEmptyState];
 }
-- (void)filterChanged {[self.tableView reloadData];}
+- (void)reloadThemeAppearance {
+    if(!self.isViewLoaded)return;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.tableView.backgroundColor=HostBackground();
+    self.summaryLabel.textColor=HostSecondaryText();
+    self.contentFilter.selectedSegmentTintColor=HostAccent();
+    [self updateEmptyState];
+    [self.tableView reloadData];
+}
+- (void)filterChanged {[self.tableView reloadData];[self updateEmptyState];}
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self filteredRowsForSection:section].count; }
@@ -76,12 +119,21 @@
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
     NSArray *rows=[self filteredRowsForSection:ip.section];if(ip.row<0||ip.row>=rows.count)return nil;
-    NSDictionary *row=rows[ip.row];if(![row isKindOfClass:NSDictionary.class])return nil;NSString *kind=ip.section==0?@"site":@"live";NSUInteger index=[row[@"sourceIndex"] respondsToSelector:@selector(unsignedIntegerValue)]?[row[@"sourceIndex"] unsignedIntegerValue]:(NSUInteger)ip.row;NSString *title=[row[@"name"] isKindOfClass:NSString.class]?row[@"name"]:@"资源";__weak typeof(self) weakSelf=self;
+    NSDictionary *row=rows[ip.row];if(![row isKindOfClass:NSDictionary.class])return nil;NSString *kind=ip.section==0?@"site":@"live";NSUInteger index=[row[@"sourceIndex"] respondsToSelector:@selector(unsignedIntegerValue)]?[row[@"sourceIndex"] unsignedIntegerValue]:(NSUInteger)ip.row;NSString *title=[row[@"name"] isKindOfClass:NSString.class]?row[@"name"]:@"资源";BOOL supported=[row[@"supported"] boolValue];__weak typeof(self) weakSelf=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:[NSString stringWithFormat:@"%@:%@:%lu",self.catalog[@"id"]?:@"",kind,(unsigned long)index] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
+        NSMutableArray<UIAction *> *children=[NSMutableArray array];
+        if(supported){
+            UIAction *open=[UIAction actionWithTitle:ip.section==0?@"打开或导入此站点":@"加载此直播清单" image:[UIImage systemImageNamed:@"play.circle"] identifier:nil handler:^(__unused UIAction *action){[weakSelf tableView:tableView didSelectRowAtIndexPath:ip];}];
+            [children addObject:open];
+        }
         UIAction *export=[UIAction actionWithTitle:[NSString stringWithFormat:@"导出 %@ JSON",title] image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *action){if(weakSelf.onExportSingleResource)weakSelf.onExportSingleResource(row,kind,index);}];
+        [children addObject:export];
         NSString *endpoint=[row[ip.section==0?@"api":@"url"] description]?:@"";
         UIAction *copyEndpoint=[UIAction actionWithTitle:@"复制接口地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *action){if(endpoint.length)UIPasteboard.generalPasteboard.string=[HostLogRedactor redactText:endpoint];}];
-        return [UIMenu menuWithTitle:@"单项资源" children:@[export,copyEndpoint]];
+        [children addObject:copyEndpoint];
+        UIAction *copyTitle=[UIAction actionWithTitle:@"复制资源名称" image:[UIImage systemImageNamed:@"textformat"] identifier:nil handler:^(__unused UIAction *action){UIPasteboard.generalPasteboard.string=title;}];
+        [children addObject:copyTitle];
+        return [UIMenu menuWithTitle:@"单项资源" children:children];
     }];
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {

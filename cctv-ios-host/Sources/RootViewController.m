@@ -283,6 +283,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @implementation CCTVPlaybackListPanelController
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     self.view.backgroundColor=HostBackground();
     self.tableView=[[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
     self.tableView.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
@@ -296,6 +297,16 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
     [self.view addSubview:self.tableView];
 }
 
+- (void)reloadThemeAppearance {
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    if(!self.isViewLoaded)return;
+    self.view.backgroundColor=HostBackground();
+    self.tableView.backgroundColor=HostBackground();
+    self.tableView.separatorColor=HostSeparator();
+    self.emptyLabel.textColor=HostSecondaryText();
+    [self.tableView reloadData];
+}
+
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
     if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])
@@ -306,8 +317,13 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
     static NSString *reuse=@"cctv.playback.panel";
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:reuse];
     if(!cell){cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];cell.backgroundColor=HostCard();cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=3;cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();}
-    NSDictionary *item=self.items[indexPath.row];cell.textLabel.text=item[@"title"]?:@"";cell.detailTextLabel.text=item[@"detail"]?:@"";
-    cell.accessoryType=[item[@"selected"] boolValue]?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDisclosureIndicator;
+    NSDictionary *item=self.items[indexPath.row];BOOL selected=[item[@"selected"] boolValue];
+    cell.backgroundColor=selected?HostSelectedSurface():HostCard();
+    cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;
+    cell.layer.borderWidth=selected?1.1:0.6;HostSetLayerBorderColor(cell,selected?HostAccent():HostBorder());
+    cell.textLabel.text=item[@"title"]?:@"";cell.detailTextLabel.text=item[@"detail"]?:@"";
+    cell.textLabel.textColor=selected?HostAccent():HostText();cell.detailTextLabel.textColor=HostSecondaryText();
+    cell.accessoryType=selected?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDisclosureIndicator;
     cell.tintColor=HostAccent();cell.selectionStyle=UITableViewCellSelectionStyleDefault;
     NSString *symbol=item[@"symbol"];cell.imageView.image=symbol.length?[UIImage systemImageNamed:symbol]:nil;cell.imageView.tintColor=HostAccent();
     return cell;
@@ -640,6 +656,7 @@ configureCatalogNavigation;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(checkVisibleMediaAfterActivation) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadThemeAppearance) name:@"HostThemeDidChangeNotification" object:nil];
     [self installBundledMediaResourcesIfNeeded];
 }
 
@@ -928,6 +945,7 @@ configureCatalogNavigation;
     if (!self.avLayer) { [self log:@"画中画仅支持订阅源（AVPlayer）"]; return; }
     if (self.pip && self.pip.isPictureInPictureActive) { [self.pip stopPictureInPicture]; return; }
     self.pip = [[AVPictureInPictureController alloc] initWithPlayerLayer:self.avLayer];
+    if (@available(iOS 14.2, *)) { self.pip.canStartPictureInPictureAutomaticallyFromInline = CCTVBoolPreference(@"autoPiP", NO); }
     [self.pip startPictureInPicture];
     [self log:@"进入画中画"];
 }
@@ -1639,6 +1657,7 @@ configureCatalogNavigation;
     if([source hasPrefix:@"tvbox:"]){[self openTVBoxCatalog:[source substringFromIndex:6]];return;}
     NSDictionary *service=[self resourceServiceForSource:source];if(!service)return;PluginResourceDetailViewController *page=[PluginResourceDetailViewController new];page.service=service;__weak typeof(self) weakSelf=self;
     page.onToggle=^(NSDictionary *item,BOOL enabled,void(^completion)(NSError *)){[weakSelf changeService:item enabled:enabled completion:completion];};
+    page.onRestart=^(NSDictionary *item,void(^completion)(NSError *)){[weakSelf restartMediaService:item completion:completion];};
     page.onExport=^(NSDictionary *item){[weakSelf exportResource:[@"plugin:" stringByAppendingString:item[@"id"]?:@""] format:@"single"];};
     page.onPlaylistDiscovered=^(NSDictionary *item,NSString *url,NSUInteger channelCount){
         RootViewController *owner=weakSelf;if(!owner||![ProfileStore isHTTP:url])return;
@@ -2250,6 +2269,7 @@ configureCatalogNavigation;
     }
     if(![CNPlayerCrashGuard install])[self log:@"未能安装播放器缩略图异常保护"];
     [self attachVideoView];[self call:player sel:@"prepareToPlay"];[self recordStartupStage:@"prepareCall"];[self startWatchdog];
+    [self updateLiveScreenAwakeState];
 }
 
 - (void)playViaSDK:(NSString *)cid title:(NSString *)title {
@@ -2371,6 +2391,7 @@ configureCatalogNavigation;
         if (v == self.titleLabel || v == self.infoLabel || v == self.spinner || v == self.controlBar || v == self.playerChannelLogo || v == self.playerTopScrim) continue;
         [v removeFromSuperview];
     }
+    [self updateLiveScreenAwakeState];
 }
 
 - (void)attachVideoView {
@@ -2627,6 +2648,61 @@ configureCatalogNavigation;
     if(self.navigationController)[self.navigationController setOverrideTraitCollection:override forChildViewController:self];
     UIViewController *top=self.navigationController.topViewController;
     if(top&&top!=self)[self.navigationController setOverrideTraitCollection:override forChildViewController:top];
+    for(UIViewController *child in self.childViewControllers){[self setOverrideTraitCollection:override forChildViewController:child];}
+    for(UIViewController *page in self.tabPages.allValues){if(page.parentViewController==self)[self setOverrideTraitCollection:override forChildViewController:page];}
+    [self.table reloadData];[self.channelGrid reloadData];
+}
+- (void)updateLiveScreenAwakeState {
+    BOOL isPlaying=self.currentPlayer!=nil||self.avPlayer!=nil||self.cicadaPlayer!=nil;
+    BOOL keepAwake=isPlaying && CCTVBoolPreference(@"cctv.mediaKeepScreenAwake",YES);
+    if(self.activeTab<2){
+        UIApplication.sharedApplication.idleTimerDisabled=keepAwake;
+    }
+}
+- (void)reloadThemeAppearance {
+    self.view.backgroundColor=HostBackground();
+    self.view.tintColor=HostAccent();
+    self.bottomBar.tintColor=HostAccent();
+    self.bottomBarBackdrop.backgroundColor=HostGlassTint();
+    self.catalogFloatingAirPlayPicker.activeTintColor=HostAccent();
+    self.groupControl.tintColor=HostAccent();
+    self.groupControl.selectedSegmentTintColor=HostAccent();
+    self.playerTabs.selectedSegmentTintColor=HostAccent();
+    [self updateLiveResourceCapsule];
+    for(NSInteger i=0;i<self.bottomBar.arrangedSubviews.count;i++){
+        UIButton *b=(UIButton *)self.bottomBar.arrangedSubviews[i];
+        BOOL selected=i==self.activeTab;
+        b.selected=selected;
+        UIButtonConfiguration *cfg=b.configuration;
+        cfg.baseForegroundColor=selected?HostOnAccent():HostMutedText();
+        cfg.background.backgroundColor=selected?HostAccent():UIColor.clearColor;
+        cfg.background.strokeColor=selected?[HostAccent() colorWithAlphaComponent:0.35]:UIColor.clearColor;
+        b.configuration=cfg;
+    }
+    HostStyleNavigation(self.navigationController);
+    [self.table reloadData];
+    [self.channelGrid reloadData];
+    [self.view setNeedsLayout];
+    UIWindow *window=self.view.window;
+    if(window)HostRefreshAppearanceLayers(window);
+    for(UIViewController *child in self.childViewControllers){
+        if([child respondsToSelector:@selector(reloadThemeAppearance)]){
+            ((void (*)(id, SEL))[child methodForSelector:@selector(reloadThemeAppearance)])(child, @selector(reloadThemeAppearance));
+        }
+    }
+    for(UIViewController *page in self.tabPages.allValues){
+        if((page.parentViewController==self || page.isViewLoaded) && [page respondsToSelector:@selector(reloadThemeAppearance)]){
+            ((void (*)(id, SEL))[page methodForSelector:@selector(reloadThemeAppearance)])(page, @selector(reloadThemeAppearance));
+        }
+    }
+    for(UIViewController *vc in self.navigationController.viewControllers){
+        if(vc!=self && vc.isViewLoaded && [vc respondsToSelector:@selector(reloadThemeAppearance)]){
+            ((void (*)(id, SEL))[vc methodForSelector:@selector(reloadThemeAppearance)])(vc, @selector(reloadThemeAppearance));
+        }
+    }
+    if(self.resourceImportWorkflow && self.resourceImportWorkflow.isViewLoaded && [self.resourceImportWorkflow respondsToSelector:@selector(reloadThemeAppearance)]){
+        [self.resourceImportWorkflow reloadThemeAppearance];
+    }
 }
 - (SettingsViewController *)makeSettingsPage {
     SettingsViewController *page=[SettingsViewController new];
@@ -2639,15 +2715,47 @@ configureCatalogNavigation;
     page.onClearFavorites=^{[weakSelf.favorites removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"favorites"];[weakSelf configureCatalogNavigation];[weakSelf applyFilter];};
     page.onOpenTab=^(NSInteger tab){if(tab<0||tab>=weakSelf.bottomBar.arrangedSubviews.count)return;[weakSelf selectBottomTab:(UIButton *)weakSelf.bottomBar.arrangedSubviews[tab]];};
     page.onOpenServices=^{[weakSelf openServicesPage];};
-    page.onIntegerPreferenceChanged=^(NSString *key, NSInteger value){if([key isEqualToString:@"cctv.channelGridColumns.v1"]){weakSelf.gridColumns=value==3?3:4;[weakSelf configureCatalogNavigation];}if([key isEqualToString:@"cctv.appFontSize.v1"]){[weakSelf applyFontSizeOverride];}};
+    page.onIntegerPreferenceChanged=^(NSString *key, NSInteger value){
+        if([key isEqualToString:@"cctv.channelGridColumns.v1"]){weakSelf.gridColumns=value==3?3:4;[weakSelf configureCatalogNavigation];[weakSelf.channelGrid.collectionViewLayout invalidateLayout];[weakSelf.channelGrid reloadData];[weakSelf.view setNeedsLayout];}
+        if([key isEqualToString:@"cctv.channelSortMode.v1"]){weakSelf.channelSortMode=value==1?1:0;[weakSelf configureCatalogNavigation];[weakSelf applyFilter];}
+        if([key isEqualToString:@"cctv.mediaGridColumns.v1"]){MediaBrowserViewController *browser=(MediaBrowserViewController *)weakSelf.tabPages[@2];if(browser)[browser reloadMediaDisplayConfigurationIfLoaded];}
+        if([key isEqualToString:@"cctv.appFontSize.v1"]){[weakSelf applyFontSizeOverride];}
+    };
     page.onPreferenceChanged=^(NSString *key, BOOL value){
-        if([key isEqualToString:HostDarkThemePreferenceKey]||[key isEqualToString:HostThemeModePreferenceKey]||[key isEqualToString:HostThemePaletteIdentifierPreferenceKey]){UIWindow *window=weakSelf.view.window;HostApplyThemeToWindow(window);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostStyleNavigation(weakSelf.navigationController);HostRefreshAppearanceLayers(window);});}
+        if([key isEqualToString:HostDarkThemePreferenceKey]||[key isEqualToString:HostThemeModePreferenceKey]||[key isEqualToString:HostThemePaletteIdentifierPreferenceKey]){
+            UIWindow *window=weakSelf.view.window;
+            HostApplyThemeToWindow(window);
+            [weakSelf reloadThemeAppearance];
+            dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostStyleNavigation(weakSelf.navigationController);HostRefreshAppearanceLayers(window);});
+        }
         if ([key isEqualToString:@"runtimeDiagnosticsEnabled"]) [RuntimeDiagnostics.shared setEnabled:value];
         if ([key isEqualToString:@"nativeSDKVerboseLogs"]) [weakSelf configureSDKLogging];
         if ([key isEqualToString:@"preloadNativeChannel"] && !value) [weakSelf.nativePreloader cancel];
         if ([key isEqualToString:@"allowBackgroundAudio"]) [weakSelf activateAudioSession];
         if ([key isEqualToString:@"autoLoadEPG"]) { [weakSelf.epgTimer invalidate]; weakSelf.epgTimer=nil; weakSelf.epgRefreshDesired=value;if(value) [weakSelf restartEPGTimer]; else weakSelf.infoLabel.text=@"节目单自动获取已关闭"; }
+        if ([key isEqualToString:@"nativeChannelsEnabled"]) { [weakSelf configureCatalogNavigation]; [weakSelf applyFilter]; [weakSelf updateLiveResourceCapsule]; }
         if ([key isEqualToString:@"channelGridMode"]) { weakSelf.gridMode=value; [weakSelf configureCatalogNavigation]; }
+        if ([key isEqualToString:@"channelGridMode"]) { [weakSelf.channelGrid.collectionViewLayout invalidateLayout]; [weakSelf.channelGrid reloadData]; [weakSelf.view setNeedsLayout]; }
+        if ([key isEqualToString:@"cctv.mediaKeepScreenAwake"]) { [weakSelf updateLiveScreenAwakeState]; }
+        if ([key isEqualToString:@"autoPiP"]) { if (@available(iOS 14.2, *)) { weakSelf.pip.canStartPictureInPictureAutomaticallyFromInline = value; } }
+        if ([key isEqualToString:@"cctv.mediaVideoGravity"]) {
+            NSString *gravity=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaVideoGravity"]?:AVLayerVideoGravityResizeAspect;
+            if(weakSelf.avLayer)weakSelf.avLayer.videoGravity=gravity;
+        }
+        if ([key isEqualToString:@"resetDefaultPreferences"]) {
+            weakSelf.gridMode=CCTVBoolPreference(@"channelGridMode",YES);
+            weakSelf.gridColumns=4;
+            weakSelf.channelSortMode=0;
+            [RuntimeDiagnostics.shared setEnabled:NO];
+            [weakSelf configureSDKLogging];
+            [weakSelf activateAudioSession];
+            [weakSelf applyFontSizeOverride];
+            [weakSelf reloadThemeAppearance];
+            [weakSelf configureCatalogNavigation];
+            [weakSelf applyFilter];
+            [weakSelf updateLiveScreenAwakeState];
+            [weakSelf updateLiveResourceCapsule];
+        }
     };
     return page;
 }
@@ -2921,7 +3029,7 @@ configureCatalogNavigation;
         if(!alreadySubscribed){[self.subscriptionURLs addObject:playlistURL];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];}
         NSMutableDictionary *sourceMetadata=[@{@"managedServiceID":serviceID} mutableCopy];
         if(![newMetadata[@"name"] isKindOfClass:NSString.class]||![newMetadata[@"name"] length]){NSString *previousName=nil;for(NSString *oldSource in previousSources){id candidate=[ProfileStore metadata:oldSource][@"name"];if([candidate isKindOfClass:NSString.class]&&[candidate length]){previousName=candidate;break;}}sourceMetadata[@"name"]=previousName?:serviceName?:@"本机直播服务";}
-        if(![newMetadata[@"epgURL"] isKindOfClass:NSString.class]||![newMetadata[@"epgURL"] length])for(NSString *oldSource in previousSources){id configured=[ProfileStore metadata:oldSource][@"epgURL"];if([ProfileStore isHTTP:configured]){sourceMetadata[@"epgURL"]=configured;break;}}
+        if(![newMetadata[@"epgURL"] isKindOfClass:NSString.class]||![newMetadata[@"epgURL"] length])for(NSString *oldSource in previousSources){id configured=[ProfileStore metadata:oldSource][@"epgURL"];if([ProfileStore isHTTP:configured]){sourceMetadata[@"epgURL"]=[ServiceStore rewrittenLoopbackURL:configured forService:service];break;}}if(![newMetadata[@"detectedEPGURL"] isKindOfClass:NSString.class]||![newMetadata[@"detectedEPGURL"] length])for(NSString *oldSource in previousSources){id detected=[ProfileStore metadata:oldSource][@"detectedEPGURL"];if([ProfileStore isHTTP:detected]){sourceMetadata[@"detectedEPGURL"]=[ServiceStore rewrittenLoopbackURL:detected forService:service];break;}}
         [ProfileStore update:playlistURL values:sourceMetadata];
         for(NSString *oldSource in previousSources)[ProfileStore update:oldSource values:@{@"status":@"服务端口或列表路径已变更 · 等待新订阅验证，保留旧频道"}];
         [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:playlistURL];
@@ -4368,7 +4476,7 @@ configureCatalogNavigation;
         [ProfileStore update:current values:values];[owner.epgCache removeAllObjects];[owner applyFilter];[owner refreshConfigurationPage];completion(nil);
     };
     page.onOpen=^{RootViewController *owner=weakSelf;if(!owner)return;NSString *current=weakPage.source?:source;[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[current.length?1:0]];owner.activeSource=current;[owner applyFilter];[owner updateLiveResourceCapsule];};
-    page.onRefresh=^{[weakSelf fetchSubscription:weakPage.source?:source silent:NO];};page.onExport=^{[weakSelf exportResource:weakPage.source?:source format:@"single"];};
+    page.onRefresh=^{[weakSelf fetchSubscription:weakPage.source?:source silent:NO];};page.onExport=^{[weakSelf exportResource:weakPage.source?:source format:@"single"];};page.onRecheckHealth=^{[weakSelf recheckProfileHealth:weakPage.source?:source];};page.onRematchEPG=^{[weakSelf rematchEPGForProfile:weakPage.source?:source];};page.onDelete=^{[weakSelf deleteSubscription:weakPage.source?:source];[weakSelf refreshConfigurationPage];};
     if(self.activeTab==3)[(ConfigCenterViewController *)self.tabPages[@3] prepareForNavigationTransition];[self.navigationController pushViewController:page animated:YES];
 }
 - (void)editEPGMapping:(NSDictionary *)ch {

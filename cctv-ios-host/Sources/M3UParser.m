@@ -44,17 +44,65 @@ static void M3UAddHTTPDirective(NSMutableDictionary<NSString *, NSString *> *hea
     M3UAddVLCOption(headers, directive);
 }
 
+static BOOL M3UIsLoopbackOrWildcardHost(NSString *host) {
+    NSString *lower = host.lowercaseString;
+    return [lower isEqualToString:@"127.0.0.1"] || [lower isEqualToString:@"localhost"] || [lower isEqualToString:@"0.0.0.0"] || [lower isEqualToString:@"::1"];
+}
+
+static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
+    if (!url) return nil;
+    NSURLComponents *parts = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:YES];
+    if (!parts.host.length) return url.absoluteURL;
+    if (!M3UIsLoopbackOrWildcardHost(parts.host)) return parts.URL ?: url.absoluteURL;
+    parts.host = @"127.0.0.1";
+    if (!parts.scheme.length || [parts.scheme.lowercaseString isEqualToString:@"http"] || [parts.scheme.lowercaseString isEqualToString:@"https"]) {
+        if (![parts.scheme.lowercaseString isEqualToString:@"https"]) parts.scheme = @"http";
+    }
+    NSInteger basePort = baseURL.port.integerValue;
+    if (M3UIsLoopbackOrWildcardHost(baseURL.host) && basePort >= 1 && basePort <= 65535) {
+        // 本机直播服务生成的 M3U 头部常硬编码作者默认端口（如 127.0.0.1:8080/epg.xml 或 localhost/epg.xml），
+        // 统一对齐到当前本机服务的实际监听端口，避免节目单端口与服务端口脱节。
+        parts.scheme = @"http";
+        parts.port = @(basePort);
+    }
+    return parts.URL ?: url.absoluteURL;
+}
+
 @implementation M3UChannel
 @end
 
 @implementation M3UParser
 + (NSString *)epgURL:(NSString *)text baseURL:(NSURL *)baseURL {
     if(!text.length)return nil;
-    NSString *header=[text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet].firstObject;
-    NSString *value=[self attribute:@"x-tvg-url" in:header]?:[self attribute:@"url-tvg" in:header];
-    value=[value componentsSeparatedByString:@","].firstObject;
-    NSURL *u=value.length?[NSURL URLWithString:value relativeToURL:baseURL]:nil;
-    if(![@[@"http",@"https"] containsObject:u.scheme.lowercaseString]||!u.host.length)return nil;return u.absoluteURL.absoluteString;
+    if([text hasPrefix:@"\uFEFF"])text=[text substringFromIndex:1];
+    NSArray<NSString *> *keys=@[@"x-tvg-url",@"url-tvg",@"tvg-url",@"epg-url",@"tvg-epg"];
+    NSCharacterSet *separators=[NSCharacterSet characterSetWithCharactersInString:@",;"];
+    __block NSString *resolvedEPG=nil;
+    __block NSUInteger scanned=0;
+    [text enumerateLinesUsingBlock:^(NSString *raw, BOOL *stop) {
+        NSString *line=[raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if([line hasPrefix:@"\uFEFF"])line=[[line substringFromIndex:1] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if(!line.length)return;
+        scanned++;
+        if(scanned>30||![line hasPrefix:@"#"]){*stop=YES;return;}
+        for(NSString *key in keys){
+            NSString *rawValue=[self attribute:key in:line];
+            if(!rawValue.length)continue;
+            for(NSString *item in [rawValue componentsSeparatedByCharactersInSet:separators]){
+                NSString *value=[item stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+                if(!value.length)continue;
+                NSURL *u=[NSURL URLWithString:value relativeToURL:baseURL];
+                if(!u)continue;
+                NSURL *normalized=M3UNormalizedLoopbackURL(u,baseURL);
+                if(![@[@"http",@"https"] containsObject:normalized.scheme.lowercaseString]||!normalized.host.length)continue;
+                resolvedEPG=normalized.absoluteURL.absoluteString;
+                *stop=YES;
+                return;
+            }
+        }
+        if([line hasPrefix:@"#EXTINF"]){*stop=YES;}
+    }];
+    return resolvedEPG;
 }
 
 + (NSArray<M3UChannel *> *)parse:(NSString *)text baseURL:(NSURL *)baseURL {
@@ -114,7 +162,15 @@ static void M3UAddHTTPDirective(NSMutableDictionary<NSString *, NSString *> *hea
             NSURLComponents *parts = url ? [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:YES] : nil;
             NSString *scheme = parts.scheme.lowercaseString;
             if ((! [scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"]) || !parts.host.length) url = nil;
-            else url = parts.URL;
+            else {
+                if ([[parts.host lowercaseString] isEqualToString:@"0.0.0.0"] || [[parts.host lowercaseString] isEqualToString:@"localhost"]) {
+                    parts.host = @"127.0.0.1";
+                    if (!parts.port && M3UIsLoopbackOrWildcardHost(baseURL.host) && baseURL.port.integerValue >= 1 && baseURL.port.integerValue <= 65535) {
+                        parts.port = baseURL.port;
+                    }
+                }
+                url = parts.URL;
+            }
         } @catch (NSException *exception) {
             url = nil;
         }
@@ -141,17 +197,23 @@ static void M3UAddHTTPDirective(NSMutableDictionary<NSString *, NSString *> *hea
 }
 
 + (NSString *)attribute:(NSString *)key in:(NSString *)line {
-    NSString *pattern = [NSString stringWithFormat:@"%@=\"([^\"]*)\"", key];
+    if (!key.length || !line.length) return nil;
+    NSString *escaped = [NSRegularExpression escapedPatternForString:key];
+    NSString *pattern = [NSString stringWithFormat:@"(?:^|[\\s,;])%@\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')", escaped];
     // 属性键只有少量固定取值：缓存已编译的正则，避免每行每属性重编译。
     static NSCache *patternCache = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{ patternCache = [NSCache new]; patternCache.countLimit = 32; });
     NSRegularExpression *re = [patternCache objectForKey:pattern];
-    if(!re){re = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];if(re)[patternCache setObject:re forKey:pattern];}
+    if(!re){re = [NSRegularExpression regularExpressionWithPattern:pattern options:NSRegularExpressionCaseInsensitive error:NULL];if(re)[patternCache setObject:re forKey:pattern];}
     if(!re)return nil;
     NSTextCheckingResult *m = [re firstMatchInString:line options:0 range:NSMakeRange(0, line.length)];
-    if (!m || m.numberOfRanges < 2) return nil;
-    return [line substringWithRange:[m rangeAtIndex:1]];
+    if (!m || m.numberOfRanges < 3) return nil;
+    NSRange dq = [m rangeAtIndex:1];
+    if (dq.location != NSNotFound) return [line substringWithRange:dq];
+    NSRange sq = [m rangeAtIndex:2];
+    if (sq.location != NSNotFound) return [line substringWithRange:sq];
+    return nil;
 }
 
 @end

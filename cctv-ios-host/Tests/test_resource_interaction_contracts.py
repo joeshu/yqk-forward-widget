@@ -1685,5 +1685,86 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('PluginLogStore', self.services)
 
 
+
+    def test_resource_center_unicode_search_single_probe_and_diagnostic_summary(self):
+        self.assertIn('- (BOOL)profile:(NSDictionary *)profile matchesSearchQuery:(NSString *)query', self.catalog)
+        self.assertIn('[self resourceTitleForProfile:profile]', self.catalog)
+        self.assertIn('[self resourceDetailForProfile:profile]', self.catalog)
+        self.assertIn('- (void)probeSingleProfile:(NSString *)source', self.catalog)
+        self.assertIn('- (void)copyResourceDiagnosticSummary', self.catalog)
+        self.assertIn('@"单条测速连接"', self.catalog)
+        self.assertIn('@"复制资源概览摘要"', self.catalog)
+        self.assertIn('@"仅已启用资源"', self.catalog)
+
+    def test_subscription_subpage_stack_form_paste_helpers_and_complete_management(self):
+        sub_h = (ROOT / 'Sources/SubscriptionResourceViewController.h').read_text()
+        sub_m = (ROOT / 'Sources/SubscriptionResourceViewController.m').read_text()
+        for prop in ('onRecheckHealth', 'onRematchEPG', 'onDelete', 'reloadThemeAppearance'):
+            self.assertIn(prop, sub_h)
+            self.assertIn(prop, sub_m)
+        self.assertIn('UIStackView *stack=[[UIStackView alloc] initWithArrangedSubviews:@[label,field]]', sub_m)
+        self.assertIn('- (void)pasteIntoField:(UIButton *)sender', sub_m)
+        self.assertIn('- (void)confirmDeleteSubscription', sub_m)
+        self.assertIn('@"复制订阅地址"', sub_m)
+        self.assertIn('@"移除此订阅"', sub_m)
+        self.assertIn('page.onRecheckHealth=', self.root)
+        self.assertIn('page.onRematchEPG=', self.root)
+        self.assertIn('page.onDelete=', self.root)
+
+    def test_tvbox_catalog_subpage_filter_updates_empty_state_and_summary_header(self):
+        tvbox_m = (ROOT / 'Sources/TVBoxCatalogViewController.m').read_text()
+        self.assertIn('- (void)filterChanged {[self.tableView reloadData];[self updateEmptyState];}', tvbox_m)
+        self.assertIn('- (void)updateCatalogSummary', tvbox_m)
+        self.assertIn('tvbox.catalog.summary', tvbox_m)
+        self.assertIn('@"打开或导入此站点"', tvbox_m)
+        self.assertIn('@"复制合集源地址"', tvbox_m)
+
+    def test_resource_subpages_support_live_theme_reload_and_practical_tools(self):
+        for filename in (
+            'ConfigCenterViewController.m',
+            'SubscriptionResourceViewController.m',
+            'TVBoxCatalogViewController.m',
+            'PluginResourceDetailViewController.m',
+            'ServicesViewController.m',
+            'ServiceEditorViewController.m',
+            'PluginViewController.m',
+            'PluginRunHistoryViewController.m',
+            'ResourceImportSheetViewController.m',
+            'ResourceImportWorkflowViewController.m',
+        ):
+            src = (ROOT / 'Sources' / filename).read_text()
+            self.assertIn('- (void)reloadThemeAppearance', src, f"{filename} missing reloadThemeAppearance")
+        self.assertIn('- (void)assignAvailablePort', self.editor)
+        self.assertIn('- (void)pasteURLIntoField', self.editor)
+        self.assertIn('- (void)copyAllCode', self.editor)
+        self.assertIn('- (void)pasteReplaceCode', self.editor)
+        self.assertIn('- (void)pasteClipboardAddress', self.import_workflow)
+        self.assertIn('- (void)clearAddressText', self.import_workflow)
+        self.assertIn('- (void)toggleSelectAllCandidates', self.import_workflow)
+        self.assertIn('page.onRestart=', self.root)
+
+
+
+    def test_live_service_port_and_epg_port_recognition_across_resource_pages(self):
+        m3u_parser = (ROOT / 'Sources/M3UParser.m').read_text()
+        importer = (ROOT / 'Sources/MediaPackageImporter.m').read_text()
+        self.assertIn('M3UNormalizedLoopbackURL', m3u_parser)
+        self.assertIn('@"x-tvg-url",@"url-tvg",@"tvg-url",@"epg-url",@"tvg-epg"', m3u_parser)
+        self.assertIn('+ (NSInteger)inferredPortInCode:(NSString *)source', self.service_store)
+        self.assertIn('+ (NSString *)portRecognitionSummaryForService:(NSDictionary *)service', self.service_store)
+        self.assertIn('+ (NSString *)inferredEPGPathInCode:(NSString *)source', self.service_store)
+        self.assertIn('+ (NSString *)epgPathForService:(NSDictionary *)service', self.service_store)
+        self.assertIn('+ (NSArray<NSString *> *)epgPathCandidatesForService:(NSDictionary *)service', self.service_store)
+        self.assertIn('+ (NSString *)rewrittenLoopbackURL:(NSString *)urlString forService:(NSDictionary *)service', self.service_store)
+        self.assertIn('inferredEPGPathInCode:entryText', importer)
+        self.assertIn('inferredPortInCode:entryText', importer)
+        self.assertIn('probeLocalEPGCandidatesForSubscription:', self.resource_detail)
+        self.assertIn('[M3UParser epgURL:text baseURL:url]', self.resource_detail)
+        self.assertIn('[M3UParser epgURL:text baseURL:probeURL]', self.services)
+        self.assertIn('[ServiceStore portRecognitionSummaryForService:self.service]', self.services)
+        self.assertIn('[ServiceStore rewrittenLoopbackURL:configured forService:service]', self.root)
+
+
 if __name__ == '__main__':
+
     unittest.main()

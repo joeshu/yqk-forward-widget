@@ -53,6 +53,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 @property(nonatomic, copy, nullable) NSNumber *stopPortState; // 0 端口已释放，1 仍可访问，-1 未知
 @property(nonatomic, assign) NSUInteger stopVerifyGeneration;
 @property(nonatomic, copy, nullable) NSString *currentRunStartedAt;
+- (void)reloadThemeAppearance;
 @end
 @implementation ServiceDetailViewController
 - (BOOL)opensMedia {return [ServiceStore isVODMediaService:self.service];}
@@ -61,11 +62,19 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     self.title = self.service[@"name"];
     self.tableView.backgroundColor = HostBackground();
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 56;
     self.navigationItem.rightBarButtonItems=nil;
+}
+- (void)reloadThemeAppearance {
+    if(!self.isViewLoaded)return;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.tableView.backgroundColor=HostBackground();
+    [self.tableView reloadData];
 }
 - (BOOL)running {
     return [PyHost isRunningServiceIdentifier:self.service[@"id"]];
@@ -177,7 +186,13 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:reuse];
     if(!c)c=[[UITableViewCell alloc] initWithStyle:addressRow?UITableViewCellStyleSubtitle:UITableViewCellStyleValue1 reuseIdentifier:reuse];
     c.backgroundColor = HostCard();
+    c.layer.cornerRadius = 14;
+    c.layer.cornerCurve = kCACornerCurveContinuous;
+    c.clipsToBounds = YES;
+    c.layer.borderWidth = 0.6;
+    HostSetLayerBorderColor(c, HostBorder());
     c.textLabel.textColor = HostText();
+    c.detailTextLabel.textColor = HostSecondaryText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
     c.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
     c.textLabel.adjustsFontForContentSizeCategory=YES;
@@ -189,7 +204,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     if (ip.section == 0) {
         if (ip.row == 0) {
             c.textLabel.text = [self currentRuntimeStatus];
-            c.textLabel.textColor = [self running] ? UIColor.systemGreenColor : UIColor.secondaryLabelColor;
+            c.textLabel.textColor = [self running] ? UIColor.systemGreenColor : HostSecondaryText();
             c.detailTextLabel.text = [self running]?@"HTTP 健康状态未知 · 点按“检测服务接口”":[self stopDetailText];
             UIButton *control=[UIButton buttonWithType:UIButtonTypeSystem];
             BOOL managed=[PyHost isManagedServiceIdentifier:self.service[@"id"]];
@@ -209,7 +224,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
         NSString *playlistPath=[ServiceStore playlistPathForService:self.service];
         NSString *probePath=[ServiceStore isMediaService:self.service]?@"/health":([self.service[@"builtin"] boolValue]?@"/all.m3u":(playlistPath?:@"/"));
         c.textLabel.text = @[ @"本机端口", @"复制访问地址", @"检测服务接口" ][ip.row];
-        c.detailTextLabel.text = ip.row == 0   ? [self.service[@"port"] description]
+        c.detailTextLabel.text = ip.row == 0   ? [ServiceStore portRecognitionSummaryForService:self.service]
                                  : ip.row == 1 ? [self baseURL]
                                                : (self.health ?: [NSString stringWithFormat:@"GET %@ · 点击检测",probePath]);
         if (ip.row > 0)
@@ -251,7 +266,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     } else if (ip.section == 3) {
         c.textLabel.text = @[ @"查看日志", @"打开资源详情与配置", @"查看 / 导出代码", @"添加到直播订阅", @"重启服务" ][ip.row];
         if(ip.row==3){if([self opensMedia])c.textLabel.text=@"打开影视";else if([ServiceStore subscriptionURLForService:self.service].length)c.textLabel.text=@"打开直播频道";else c.textLabel.text=@"配置直播列表路径";}
-        if(ip.row==4){c.detailTextLabel.text=[self running]?@"先停止再启动，端口不变":@"服务未运行 · 请先启动";c.textLabel.textColor=[self running]?HostText():UIColor.secondaryLabelColor;}
+        if(ip.row==4){c.detailTextLabel.text=[self running]?@"先停止再启动，端口不变":@"服务未运行 · 请先启动";c.textLabel.textColor=[self running]?HostText():HostSecondaryText();}
         c.imageView.image = [UIImage systemImageNamed:@[
             @"doc.text", @"square.and.pencil", @"square.and.arrow.up", @"plus.rectangle.on.rectangle", @"arrow.triangle.2.circlepath"
         ][ip.row]];
@@ -322,10 +337,10 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
               if(error)w.health=[NSString stringWithFormat:@"连接失败：%@",error.localizedDescription?:@"未知错误"];
               else if(status<200||status>=300)w.health=[NSString stringWithFormat:@"HTTP 可达 · 返回 %ld · 服务状态未知%@",(long)status,time];
               else if(manifestService){id json=data.length?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;BOOL healthy=[json isKindOfClass:NSDictionary.class]&&[json[@"ok"] isKindOfClass:NSNumber.class]&&[json[@"ok"] boolValue];w.health=[(healthy?@"健康检查通过 · GET /health":@"HTTP 可访问 · /health 未确认健康字段") stringByAppendingString:time];}
-              else if(playlistPath.length){NSString *text=data.length<=10*1024*1024?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;NSArray *channels=text.length?[M3UParser parse:text baseURL:probeURL]:@[];BOOL format=[text containsString:@"#EXTM3U"]||[text containsString:@"#EXTINF"]||channels.count>0;if(format){w.probePlaylistChecked=YES;w.probeChannelCount=channels.count;}w.health=[(format?[NSString stringWithFormat:@"频道清单可读取 · %lu 个频道",(unsigned long)channels.count]:[NSString stringWithFormat:@"HTTP %ld · 响应不是有效频道清单",(long)status]) stringByAppendingString:time];}
+              else if(playlistPath.length){NSString *text=data.length<=10*1024*1024?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;NSArray *channels=text.length?[M3UParser parse:text baseURL:probeURL]:@[];BOOL format=[text containsString:@"#EXTM3U"]||[text containsString:@"#EXTINF"]||channels.count>0;if(format){w.probePlaylistChecked=YES;w.probeChannelCount=channels.count;NSString *detectedEPG=text.length?[M3UParser epgURL:text baseURL:probeURL]:nil;if(!detectedEPG.length){NSString *epgPath=[ServiceStore epgPathForService:w.service];if(epgPath.length)detectedEPG=[[w baseURL] stringByAppendingString:epgPath];}NSString *subURL=[ServiceStore subscriptionURLForService:w.service];if(subURL.length&&detectedEPG.length){[ProfileStore update:subURL values:@{@"managedServiceID":w.service[@"id"]?:@"",@"detectedEPGURL":detectedEPG}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:subURL];}}w.health=[(format?[NSString stringWithFormat:@"频道清单可读取 · %lu 个频道",(unsigned long)channels.count]:[NSString stringWithFormat:@"HTTP %ld · 响应不是有效频道清单",(long)status]) stringByAppendingString:time];}
               else w.health=[[NSString stringWithFormat:@"HTTP 可访问 · GET %@ 返回 %ld · 健康状态未知",path,(long)status] stringByAppendingString:time];
               NSMutableDictionary *snapshot=[@{@"status":error?@"failed":((status>=200&&status<300)?@"reachable":@"http-error"),@"result":w.health?:@"检测完成",@"httpStatus":@(status),@"checkedAt":@(NSDate.date.timeIntervalSince1970),@"path":path?:@"/"} mutableCopy];if(w.probePlaylistChecked)snapshot[@"channelCount"]=@(w.probeChannelCount);[ServiceStore recordHealthSnapshot:snapshot forServiceIdentifier:w.service[@"id"]];
-              [w.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];
+              [w.tableView reloadSections:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(1,2)] withRowAnimation:UITableViewRowAnimationNone];
             });
           }];
     [self.probeTask resume];
@@ -452,6 +467,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 @implementation ServicesViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     self.title = @"资源服务";
     self.view.backgroundColor = HostBackground();
     self.table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
@@ -480,9 +496,20 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     self.search.obscuresBackgroundDuringPresentation = NO;
     self.search.searchBar.placeholder = @"搜索名称、端口或协议";
     self.navigationItem.searchController = self.search;
-    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,88)];self.runtimeSummary=[[UILabel alloc] initWithFrame:CGRectMake(16,4,MAX(1,header.bounds.size.width-32),28)];self.runtimeSummary.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.runtimeSummary.textColor=HostSecondaryText();self.runtimeSummary.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];[header addSubview:self.runtimeSummary];self.statusFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"运行中",@"待处理",@"已停止"]];self.statusFilter.frame=CGRectMake(16,36,MAX(1,header.bounds.size.width-32),44);self.statusFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.statusFilter.selectedSegmentIndex=0;[self.statusFilter addTarget:self action:@selector(statusFilterChanged) forControlEvents:UIControlEventValueChanged];[header addSubview:self.statusFilter];self.table.tableHeaderView=header;
-    self.emptyLabel=[UILabel new];self.emptyLabel.text=@"还没有服务\n点右上角 + 添加服务，或从资源页导入脚本";self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=UIColor.secondaryLabelColor;self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.emptyLabel.adjustsFontForContentSizeCategory=YES;self.table.backgroundView=self.emptyLabel;
+    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,88)];self.runtimeSummary=[[UILabel alloc] initWithFrame:CGRectMake(16,4,MAX(1,header.bounds.size.width-32),28)];self.runtimeSummary.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.runtimeSummary.textColor=HostSecondaryText();self.runtimeSummary.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];[header addSubview:self.runtimeSummary];self.statusFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"运行中",@"待处理",@"已停止"]];self.statusFilter.frame=CGRectMake(16,36,MAX(1,header.bounds.size.width-32),44);self.statusFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.statusFilter.selectedSegmentIndex=0;self.statusFilter.selectedSegmentTintColor=HostAccent();[self.statusFilter addTarget:self action:@selector(statusFilterChanged) forControlEvents:UIControlEventValueChanged];[header addSubview:self.statusFilter];self.table.tableHeaderView=header;
+    self.emptyLabel=[UILabel new];self.emptyLabel.text=@"还没有服务\n点右上角 + 添加服务，或从资源页导入脚本";self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=HostSecondaryText();self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.emptyLabel.adjustsFontForContentSizeCategory=YES;self.table.backgroundView=self.emptyLabel;
     [self refresh];
+}
+- (void)reloadThemeAppearance {
+    if(!self.isViewLoaded)return;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.backgroundColor=HostBackground();
+    self.table.backgroundColor=HostBackground();
+    self.runtimeSummary.textColor=HostSecondaryText();
+    self.statusFilter.selectedSegmentTintColor=HostAccent();
+    self.emptyLabel.textColor=HostSecondaryText();
+    [self.table reloadData];
 }
 - (void)statusFilterChanged {self.displayedRunningID=nil;[self refresh];}
 - (void)viewWillAppear:(BOOL)animated {
@@ -508,7 +535,8 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
                           NSString *engine=[s[@"engine"] lowercaseString]?:@"";
                           NSString *protocol=[s[@"protocol"] lowercaseString]?:@"";
                           NSString *port=[s[@"port"] description]?:@"";
-                          return [name containsString:q]||[identifier containsString:q]||[engine containsString:q]||[protocol containsString:q]||[port containsString:q];
+                          NSString *epg=[[ServiceStore epgURLForService:s] lowercaseString]?:@"";
+                          return [name containsString:q]||[identifier containsString:q]||[engine containsString:q]||[protocol containsString:q]||[port containsString:q]||[epg containsString:q];
                         }]]
                  : all;
     NSMutableArray *runningIDs=[NSMutableArray array];for(NSDictionary *service in filtered)if([PyHost isRunningServiceIdentifier:service[@"id"]])[runningIDs addObject:service[@"id"]];[runningIDs sortUsingSelector:@selector(compare:)];
@@ -555,20 +583,29 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"service.session"];
     // 运行中只代表进程/会话活跃，不代表接口健康或能播：不用绿色底暗示“健康”。
     c.backgroundColor = HostCard();
+    c.layer.cornerRadius = 14;
+    c.layer.cornerCurve = kCACornerCurveContinuous;
+    c.clipsToBounds = YES;
+    c.layer.borderWidth = 0.6;
+    HostSetLayerBorderColor(c, HostBorder());
     c.accessoryView=nil;c.accessoryType=UITableViewCellAccessoryNone;c.imageView.image=nil;c.selectionStyle=UITableViewCellSelectionStyleDefault;
     c.textLabel.text = s[@"name"];
     c.textLabel.textColor = HostText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
     c.textLabel.adjustsFontForContentSizeCategory=YES;
-    c.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@\n%@\nhttp://127.0.0.1:%@",
+    NSString *epgURL=[ServiceStore epgURLForService:s];
+    NSString *liveSummary=epgURL.length?[NSString stringWithFormat:@" · 节目单 %@",epgURL]:@"";
+    c.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@\n%@\nhttp://127.0.0.1:%@（%@）%@",
                                    ServiceEngineName(s),
                                    [s[@"builtin"] boolValue] ? @"内置服务" : @"本机脚本",
                                    [PyHost runtimeStatusDescriptionForServiceIdentifier:s[@"id"]],
-                                   s[@"port"]];
+                                   s[@"port"],
+                                   [ServiceStore portRecognitionSummaryForService:s],
+                                   liveSummary];
     c.detailTextLabel.numberOfLines = 0;
     c.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
     c.detailTextLabel.adjustsFontForContentSizeCategory=YES;
-    c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+    c.detailTextLabel.textColor = HostSecondaryText();
     c.imageView.image = [UIImage systemImageNamed:@"terminal.fill"];
     c.imageView.tintColor = HostAccent();
     UIButton *control=[UIButton buttonWithType:UIButtonTypeSystem];NSString *identifier=s[@"id"]?:@"";
@@ -579,6 +616,32 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     control.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];control.frame=CGRectMake(0,0,108,44);control.enabled=!busy&&!starting;control.accessibilityIdentifier=identifier;control.accessibilityLabel=busy?(target?@"正在启动服务":@"正在停止服务"):(starting?@"服务启动中":(uncertain?@"停止并清理不确定会话":(managed?@"停止服务":@"启动服务")));
     [control addTarget:self action:@selector(changeService:) forControlEvents:UIControlEventTouchUpInside];c.accessoryView=control;
     return c;
+}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
+    NSArray *sectionRows=[self rows:ip.section];
+    if(ip.row<0||ip.row>=(NSInteger)sectionRows.count)return nil;
+    NSDictionary *service=sectionRows[ip.row];
+    NSString *identifier=service[@"id"]?:@"";
+    if(!identifier.length)return nil;
+    __weak typeof(self) weakSelf=self;
+    BOOL running=[PyHost isRunningServiceIdentifier:identifier];
+    BOOL managed=[PyHost isManagedServiceIdentifier:identifier];
+    return [UIContextMenuConfiguration configurationWithIdentifier:identifier previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        NSMutableArray<UIAction *> *actions=[NSMutableArray array];
+        [actions addObject:[UIAction actionWithTitle:managed?@"停止服务":@"启动服务" image:[UIImage systemImageNamed:managed?@"stop.circle":@"play.circle"] identifier:nil handler:^(__unused UIAction *a){[weakSelf performServiceChange:service enabled:!managed];}]];
+        if(running&&weakSelf.onRestartService){
+            [actions addObject:[UIAction actionWithTitle:@"重启服务" image:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath"] identifier:nil handler:^(__unused UIAction *a){weakSelf.onRestartService(service,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{weakSelf.displayedRunningID=nil;[weakSelf refresh];});});}]];
+        }
+        if(weakSelf.onOpenResource){
+            [actions addObject:[UIAction actionWithTitle:@"打开资源详情与配置" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(__unused UIAction *a){weakSelf.onOpenResource(service);}]];
+        }
+        if(weakSelf.onOpenLog){
+            [actions addObject:[UIAction actionWithTitle:@"查看运行日志" image:[UIImage systemImageNamed:@"doc.text"] identifier:nil handler:^(__unused UIAction *a){weakSelf.onOpenLog(service);}]];
+        }
+        NSString *endpoint=[NSString stringWithFormat:@"http://127.0.0.1:%@",service[@"port"]?:@8767];
+        [actions addObject:[UIAction actionWithTitle:@"复制本机访问地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=endpoint;}]];
+        return [UIMenu menuWithTitle:service[@"name"]?:@"服务操作" children:actions];
+    }];
 }
 - (void)changeService:(UIButton *)sender {
     NSString *identifier=sender.accessibilityIdentifier;if(!identifier.length||[self.changingServiceIDs containsObject:identifier])return;

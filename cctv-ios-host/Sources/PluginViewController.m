@@ -29,6 +29,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     self.title = @"服务";
     self.view.backgroundColor = HostBackground();
 
@@ -122,6 +123,17 @@
     UIButton *logs = [self button:@"查看运行日志" action:@selector(openLog)];
     [content addArrangedSubview:logs];
     [self updateRunning:NO subscriptionCount:0];
+}
+
+- (void)reloadThemeAppearance {
+    if(!self.isViewLoaded)return;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.backgroundColor=HostBackground();
+    self.statusLabel.textColor=HostText();
+    self.urlLabel.textColor=HostText();
+    self.countLabel.textColor=HostText();
+    HostRefreshAppearanceLayers(self.view);
 }
 
 - (UIView *)card {

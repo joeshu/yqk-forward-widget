@@ -44,64 +44,49 @@ static inline UIUserInterfaceStyle HostSelectedInterfaceStyle(void) {
 }
 
 static inline UIColor *HostBackground(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].background;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].background;}];
 }
 static inline UIColor *HostCard(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].card;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].card;}];
 }
 static inline UIColor *HostRaisedSurface(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].raisedSurface;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].raisedSurface;}];
 }
 static inline UIColor *HostText(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].text;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].text;}];
 }
 static inline UIColor *HostSecondaryText(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].secondaryText;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].secondaryText;}];
 }
 static inline UIColor *HostAccent(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].accent;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].accent;}];
 }
 static inline UIColor *HostOnAccent(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].onAccent;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].onAccent;}];
 }
 static inline UIColor *HostMutedText(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].mutedText;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].mutedText;}];
 }
 static inline UIColor *HostGlassTint(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].glassTint;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].glassTint;}];
 }
 static inline UIColor *HostBorder(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].border;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].border;}];
 }
 static inline UIColor *HostSeparator(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].separator;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].separator;}];
 }
 static inline UIColor *HostNeutralSurface(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].neutralSurface;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].neutralSurface;}];
 }
 static inline UIColor *HostSelectedSurface(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].selectedSurface;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].selectedSurface;}];
 }
 static inline UIColor *HostHighlightedSurface(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].highlightedSurface;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].highlightedSurface;}];
 }
 static inline UIColor *HostSuccessSurface(void) {
-    static UIColor *color;static dispatch_once_t once;
-    dispatch_once(&once,^{color=[UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].successSurface;}];});return color;
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].successSurface;}];
 }
 static inline UIBlurEffect *HostGlassBlur(void) { return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]; }
 static inline void HostSetLayerBorderColor(UIView *view, UIColor *color);
@@ -202,7 +187,7 @@ static inline void HostRefreshAppearanceLayers(UIView *view) {
     CAGradientLayer *specularRim=objc_getAssociatedObject(view,&HostSpecularRimAssociationKey);
     if(specularRim)specularRim.frame=CGRectMake(0,0,CGRectGetWidth(view.bounds),MIN(1.2,CGRectGetHeight(view.bounds)));
     UIColor *border=objc_getAssociatedObject(view,&HostLayerBorderColorAssociationKey);
-    if(border)view.layer.borderColor=[[border resolvedColorWithTraitCollection:view.traitCollection] CGColor];
+    if(border)view.layer.borderColor=[[HostBorder() resolvedColorWithTraitCollection:view.traitCollection] CGColor];
     for(UIView *child in view.subviews)HostRefreshAppearanceLayers(child);
 }
 
@@ -256,16 +241,24 @@ static inline void HostStyleNavigation(UINavigationController *nav) {
 // 调用方随后仍需重刷导航栏与图层边框（HostStyleNavigation /
 // HostRefreshAppearanceLayers），并重载可见的列表（cellForRow 会重新取色）。
 static inline void HostApplyThemeToWindow(UIWindow *window) {
-    if(!window)return;
     UIUserInterfaceStyle target=HostSelectedInterfaceStyle();
-    if(window.overrideUserInterfaceStyle==target&&target!=UIUserInterfaceStyleUnspecified){
-        [CATransaction begin];[CATransaction setDisableActions:YES];
-        window.overrideUserInterfaceStyle=(target==UIUserInterfaceStyleDark)?UIUserInterfaceStyleLight:UIUserInterfaceStyleDark;
-        [window layoutIfNeeded];
-        window.overrideUserInterfaceStyle=target;
-        [CATransaction commit];
-    }else{
-        window.overrideUserInterfaceStyle=target;
+    NSMutableArray<UIWindow *> *windows=[NSMutableArray array];
+    if(window)[windows addObject:window];
+    for(UIScene *scene in UIApplication.sharedApplication.connectedScenes){
+        if([scene isKindOfClass:UIWindowScene.class]){
+            for(UIWindow *w in ((UIWindowScene *)scene).windows){
+                if(![windows containsObject:w])[windows addObject:w];
+            }
+        }
     }
-    [window layoutIfNeeded];
+    for(UIWindow *w in windows){
+        UIUserInterfaceStyle opposite=(target==UIUserInterfaceStyleDark)?UIUserInterfaceStyleLight:UIUserInterfaceStyleDark;
+        [CATransaction begin];[CATransaction setDisableActions:YES];
+        w.overrideUserInterfaceStyle=opposite;
+        [w layoutIfNeeded];
+        w.overrideUserInterfaceStyle=target;
+        [CATransaction commit];
+        [w layoutIfNeeded];
+        HostRefreshAppearanceLayers(w);
+    }
 }

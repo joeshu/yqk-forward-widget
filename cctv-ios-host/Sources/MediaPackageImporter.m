@@ -93,11 +93,16 @@ static NSString *SuggestedPythonHTTPArguments(NSString *source){
     // Only pass launch flags when the imported script explicitly declares the
     // compatible argparse options. Generic Python HTTP services keep their
     // original argv so unknown flags cannot prevent them from starting.
-    BOOL positional=!PythonDeclaresArgument(source,@"--port") && PythonDeclaresArgument(source,@"port");
-    if((!PythonDeclaresArgument(source,@"--port") && !positional) || !PythonDeclaresArgument(source,@"--bind"))return @"";
+    BOOL hasLongPort=PythonDeclaresArgument(source,@"--port");
+    BOOL hasShortPort=!hasLongPort && PythonDeclaresArgument(source,@"-p");
+    BOOL positional=!hasLongPort && !hasShortPort && PythonDeclaresArgument(source,@"port");
+    if(!hasLongPort && !hasShortPort && !positional)return @"";
     NSMutableArray<NSString *> *arguments=[NSMutableArray array];
-    if(!positional)[arguments addObject:@"--port"];
-    [arguments addObjectsFromArray:@[@"{port}",@"--bind",@"{bind}"]];
+    if(hasLongPort)[arguments addObject:@"--port"];
+    else if(hasShortPort)[arguments addObject:@"-p"];
+    [arguments addObject:@"{port}"];
+    if(PythonDeclaresArgument(source,@"--bind"))[arguments addObjectsFromArray:@[@"--bind",@"{bind}"]];
+    else if(PythonDeclaresArgument(source,@"--host"))[arguments addObjectsFromArray:@[@"--host",@"{bind}"]];
     if(PythonDeclaresArgument(source,@"--serve"))[arguments addObject:@"--serve"];
     if(PythonDeclaresArgument(source,@"--data-dir"))[arguments addObjectsFromArray:@[@"--data-dir",@"{dataDir}"]];
     if(PythonDeclaresArgument(source,@"--cache-mb"))[arguments addObjectsFromArray:@[@"--cache-mb",@"32"]];
@@ -350,6 +355,8 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         NSMutableDictionary *manifest=[[self inspectDirectory:package runtimeHint:runtimeHint error:error] mutableCopy];if(!manifest)return nil;
         NSString *launchArguments=@"";
         NSString *playlistPath=@"";
+        NSString *epgPath=@"";
+        NSInteger inferredPort=0;
         if([manifest[@"runtime"] isEqual:@"python"] && [manifest[@"protocol"] isEqual:@"python-http"]){
             NSString *entryPath=[manifest[@"packageRoot"] stringByAppendingPathComponent:manifest[@"entry"]];
             NSData *entryData=ReadBounded([NSURL fileURLWithPath:entryPath],PackageFileLimit,error);
@@ -357,6 +364,8 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             if(entryText){
                 launchArguments=SuggestedPythonHTTPArguments(entryText);
                 playlistPath=[ServiceStore inferredPlaylistPathInCode:entryText]?:@"";
+                epgPath=[ServiceStore inferredEPGPathInCode:entryText]?:@"";
+                inferredPort=[ServiceStore inferredPortInCode:entryText];
                 if([launchArguments containsString:@"--no-4k"])manifest[@"compatibilityNote"]=@"此包的设备协议线程没有停止接口。默认启用可独立关闭的 1080p 模式；iPhone 内不启动 Node/WASM 子进程，TS 缓存限 32 MB。";
             }
         }
@@ -378,12 +387,18 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         if(zip && ![bytes writeToFile:[stage stringByAppendingPathComponent:@"source.zip"] options:NSDataWritingAtomic error:error])return nil;
         NSString *target=[[ServiceStore directory] stringByAppendingPathComponent:identifier];
         if(![fm moveItemAtPath:stage toPath:target error:error])return nil;
-        NSMutableSet *ports=[NSMutableSet set];for(NSDictionary *existing in [ServiceStore services])[ports addObject:existing[@"port"]?:@0];NSInteger port=18780;while([ports containsObject:@(port)] && port<65535)port++;
+        NSMutableSet *ports=[NSMutableSet set];for(NSDictionary *existing in [ServiceStore services])[ports addObject:existing[@"port"]?:@0];
+        NSInteger port=18780;while([ports containsObject:@(port)] && port<65535)port++;
+        if(inferredPort>=1024&&inferredPort<=65535&&![ports containsObject:@(inferredPort)]&&![launchArguments containsString:@"{port}"]){
+            port=inferredPort;
+        }
         NSMutableDictionary *importedService=[@{@"id":identifier,@"name":manifest[@"name"],@"port":@(port),@"engine":manifest[@"runtime"],@"protocol":manifest[@"protocol"],@"manifest":manifest,@"packageRoot":[target stringByAppendingPathComponent:relative],@"archivePath":zip?[target stringByAppendingPathComponent:@"source.zip"]:@"",@"lan":@NO,@"updated":@(NSDate.date.timeIntervalSince1970),@"arguments":launchArguments,@"argumentsSource":@"inferred"} mutableCopy];
+        if(inferredPort>=1024&&inferredPort<=65535)importedService[@"inferredPort"]=@(inferredPort);
         if([manifest[@"capabilities"] isKindOfClass:NSArray.class]&&[manifest[@"capabilities"] count])importedService[@"capabilities"]=manifest[@"capabilities"];
         if([manifest[@"protocol"] isEqual:@"nanotv-service-v2"]){importedService[@"capabilities"]=@[@"live"];importedService[@"playlistPath"]=@"/all.m3u";importedService[@"playlistPathSource"]=@"inferred";}
         else if([ServiceStore isMediaService:importedService]&&[ServiceStore isLiveMediaService:importedService]){importedService[@"playlistPath"]=@"/all.m3u";importedService[@"playlistPathSource"]=@"inferred";}
         if(playlistPath.length){importedService[@"playlistPath"]=playlistPath;importedService[@"playlistPathSource"]=@"inferred";}
+        if(epgPath.length){importedService[@"epgPath"]=epgPath;importedService[@"epgPathSource"]=@"inferred";}
         service=importedService;
     } @catch(NSException *exception){PackageError(error,@"资源包结构或清单无效，未执行代码");return nil;}
     @finally {if([fm fileExistsAtPath:stage])[fm removeItemAtPath:stage error:NULL];}

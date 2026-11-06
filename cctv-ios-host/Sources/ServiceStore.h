@@ -15,10 +15,16 @@
 /// isVODMediaService 的旧规则默认当影视，但已有直播证据（live 能力或
 /// 订阅地址）时不再默认 vod，否则纯直播服务会被误标为 both。
 + (NSString *)resourceKindForService:(NSDictionary *)service subscriptionURL:(NSString *)subscriptionURL;
++ (NSInteger)inferredPortInCode:(NSString *)source;
++ (NSString *)portRecognitionSummaryForService:(NSDictionary *)service;
 + (nullable NSString *)inferredPlaylistPathInCode:(NSString *)source;
 + (NSArray<NSString *> *)playlistPathCandidatesForService:(NSDictionary *)service;
 + (nullable NSString *)playlistPathForService:(NSDictionary *)service;
 + (nullable NSString *)subscriptionURLForService:(NSDictionary *)service;
++ (nullable NSString *)inferredEPGPathInCode:(NSString *)source;
++ (nullable NSString *)epgPathForService:(NSDictionary *)service;
++ (NSArray<NSString *> *)epgPathCandidatesForService:(NSDictionary *)service;
++ (nullable NSString *)rewrittenLoopbackURL:(NSString *)urlString forService:(NSDictionary *)service;
 + (nullable NSString *)epgURLForService:(NSDictionary *)service;
 + (void)associateLegacyLoopbackSubscriptionsForService:(NSDictionary *)service;
 + (void)save:(NSDictionary *)service;

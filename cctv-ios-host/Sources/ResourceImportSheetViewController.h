@@ -20,4 +20,5 @@ typedef NS_ENUM(NSInteger, ResourceImportOption) {
 
 @interface ResourceImportSheetViewController : UIViewController
 @property(nonatomic, copy) void (^onSelect)(ResourceImportOption option);
+- (void)reloadThemeAppearance;
 @end

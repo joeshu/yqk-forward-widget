@@ -112,7 +112,9 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     for(NSDictionary *source in self.availableSources)if(self.currentSourceID.length&&[[source[@"id"] description] isEqual:self.currentSourceID]){self.currentSiteSource=source;break;}
     self.currentSiteScope=self.currentSiteSource!=nil;
     self.searchSources=self.currentSiteScope?@[self.currentSiteSource]:self.availableSources;
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     self.view.backgroundColor = HostBackground();
+    self.view.tintColor = HostAccent();
     self.tableView.backgroundColor = HostBackground();
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
@@ -141,6 +143,8 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     self.historyButton=[UIButton buttonWithType:UIButtonTypeSystem];
     self.historyButton.translatesAutoresizingMaskIntoConstraints=NO;
     [self.historyButton setTitle:@"历史" forState:UIControlStateNormal];
+    HostStylePillButton(self.historyButton,NO);
+    HostInstallPressFeedback(self.historyButton);
     self.historyButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
     self.historyButton.titleLabel.adjustsFontForContentSizeCategory=YES;
     self.historyButton.accessibilityLabel=@"搜索历史设置";
@@ -152,7 +156,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     [self.scopeControl setEnabled:self.currentSiteSource!=nil forSegmentAtIndex:0];
     self.scopeControl.selectedSegmentTintColor=HostAccent();
     [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];
-    [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName:UIColor.whiteColor} forState:UIControlStateSelected];
+    [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];
     self.scopeControl.accessibilityIdentifier=@"media-search-scope";
     self.scopeControl.accessibilityLabel=@"影视搜索范围";
     self.scopeControl.accessibilityHint=self.currentCatalogID.length?@"当前站点只搜索合集内已选站点，不会下载其他站点；未运行插件需要手动启动":@"当前站点只搜索顶部已选站点；可用来源保留独立进度，未运行插件需要手动启动";
@@ -297,11 +301,11 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     for(NSUInteger index=0;index<choices.count;index++){
         NSDictionary *choice=choices[index];UIButton *button;
         if(index<self.filterStack.arrangedSubviews.count)button=(UIButton *)self.filterStack.arrangedSubviews[index];
-        else{button=[UIButton buttonWithType:UIButtonTypeSystem];[button addTarget:self action:@selector(selectSearchFilter:) forControlEvents:UIControlEventTouchUpInside];[button.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;[self.filterStack addArrangedSubview:button];}
+        else{button=[UIButton buttonWithType:UIButtonTypeSystem];HostInstallPressFeedback(button);[button addTarget:self action:@selector(selectSearchFilter:) forControlEvents:UIControlEventTouchUpInside];[button.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;[self.filterStack addArrangedSubview:button];}
         NSString *title=[NSString stringWithFormat:@"%@ %@",choice[@"name"],choice[@"count"]];
-        [button setTitle:title forState:UIControlStateNormal];button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.contentEdgeInsets=UIEdgeInsetsMake(10,14,10,14);button.layer.cornerRadius=20;
+        [button setTitle:title forState:UIControlStateNormal];button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.contentEdgeInsets=UIEdgeInsetsMake(10,14,10,14);button.layer.cornerRadius=20;button.layer.cornerCurve=kCACornerCurveContinuous;
         BOOL selected=[choice[@"section"] integerValue]==self.selectedSourceSection&&((!choice[@"provider"]&&!self.selectedProvider)||[choice[@"provider"] isEqual:self.selectedProvider]);
-        button.backgroundColor=selected?[HostAccent() colorWithAlphaComponent:0.15]:HostNeutralSurface();[button setTitleColor:selected?HostAccent():HostText() forState:UIControlStateNormal];button.accessibilityTraits=UIAccessibilityTraitButton|(selected?UIAccessibilityTraitSelected:0);button.accessibilityLabel=[NSString stringWithFormat:@"%@，%@ 条结果，%@",choice[@"name"],choice[@"count"],choice[@"state"]?:@"来源筛选"];button.accessibilityIdentifier=[NSString stringWithFormat:@"media-search-filter-%lu",(unsigned long)index];button.tag=index;
+        button.backgroundColor=selected?HostSelectedSurface():HostNeutralSurface();button.layer.borderWidth=selected?1.0:0.6;HostSetLayerBorderColor(button,selected?HostAccent():HostBorder());[button setTitleColor:selected?HostAccent():HostText() forState:UIControlStateNormal];button.accessibilityTraits=UIAccessibilityTraitButton|(selected?UIAccessibilityTraitSelected:0);button.accessibilityLabel=[NSString stringWithFormat:@"%@，%@ 条结果，%@",choice[@"name"],choice[@"count"],choice[@"state"]?:@"来源筛选"];button.accessibilityIdentifier=[NSString stringWithFormat:@"media-search-filter-%lu",(unsigned long)index];button.tag=index;
     }
     [self.filterScroll layoutIfNeeded];CGFloat maximum=MAX(0,self.filterScroll.contentSize.width-self.filterScroll.bounds.size.width);self.filterScroll.contentOffset=CGPointMake(MIN(MAX(0,offset.x),maximum),0);
 }
@@ -774,6 +778,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     NSDictionary *source = indexPath.section < self.searchSources.count ? self.searchSources[indexPath.section] : @{};
     NSDictionary *row = indexPath.section < self.rows.count ? self.rows[indexPath.section] : @{};
     if (statusRow) {
+        cell.layer.cornerRadius = 14; cell.layer.cornerCurve = kCACornerCurveContinuous; cell.clipsToBounds = YES; cell.layer.borderWidth = 0.6; HostSetLayerBorderColor(cell, HostBorder());
         cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
         cell.textLabel.adjustsFontForContentSizeCategory = YES;
         BOOL sourceFailed=[@[@"搜索失败",@"启动失败"] containsObject:row[@"state"]?:@""];
@@ -862,6 +867,25 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     }];
 }
 
+- (void)reloadThemeAppearance {
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
+    if (!self.isViewLoaded) return;
+    self.view.backgroundColor = HostBackground();
+    self.view.tintColor = HostAccent();
+    self.tableView.backgroundColor = HostBackground();
+    self.tableView.tableHeaderView.backgroundColor = HostBackground();
+    self.progressLabel.textColor = HostSecondaryText();
+    HostStylePillButton(self.historyButton, NO);
+    self.historyButton.titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+    self.historyButton.titleLabel.adjustsFontForContentSizeCategory = YES;
+    self.scopeControl.selectedSegmentTintColor = HostAccent();
+    [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];
+    [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];
+    self.renderedFilterKey = nil;
+    [self updateFilters];
+    [self updateEmptyState];
+    [self.tableView reloadData];
+}
 - (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar { [self submitSearch]; }
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; [self cancelJobsAndAdvanceGeneration]; }
 @end

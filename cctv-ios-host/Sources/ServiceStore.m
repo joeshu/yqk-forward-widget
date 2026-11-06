@@ -9,6 +9,20 @@ static BOOL ServiceValidPlaylistPath(id value){
     if(![value isKindOfClass:NSString.class])return NO;NSString *path=[value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     return [path isEqual:value]&&path.length>0&&path.length<128&&[path hasPrefix:@"/"]&&![path hasPrefix:@"//"]&&![path containsString:@".."]&&![path containsString:@"?"]&&![path containsString:@"#"]&&![path containsString:@"\\"]&&![path containsString:@":"]&&![path containsString:@"{"]&&![path containsString:@"}"]&&![path containsString:@"<"]&&![path containsString:@">"]&&[path rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound&&[path rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].location==NSNotFound;
 }
+static NSString *ServiceCodeWithoutComments(NSString *source){
+    if(![source isKindOfClass:NSString.class]||source.length>2*1024*1024)return nil;
+    NSMutableString *routeSource=[NSMutableString string];BOOL inBlockComment=NO;
+    for(NSString *line in [source componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]){
+        NSString *code=line;
+        if(inBlockComment){NSRange close=[code rangeOfString:@"*/"];if(close.location==NSNotFound)continue;code=[code substringFromIndex:NSMaxRange(close)];inBlockComment=NO;}
+        NSRange open=[code rangeOfString:@"/*"];
+        if(open.location!=NSNotFound){NSRange close=[code rangeOfString:@"*/" options:0 range:NSMakeRange(NSMaxRange(open),code.length-NSMaxRange(open))];if(close.location==NSNotFound){code=[code substringToIndex:open.location];inBlockComment=YES;}else code=[[code substringToIndex:open.location]stringByAppendingString:[code substringFromIndex:NSMaxRange(close)]];}
+        NSString *trimmed=[code stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if([trimmed hasPrefix:@"#"]||[trimmed hasPrefix:@"//"])continue;
+        [routeSource appendString:code];[routeSource appendString:@"\n"];
+    }
+    return routeSource;
+}
 @implementation ServiceStore
 + (NSString *)directory {
     NSString *d =
@@ -108,6 +122,52 @@ static BOOL ServiceValidPlaylistPath(id value){
     if(!capabilities.count && live)vod=NO;
     return live&&vod?@"both":(live?@"live":(vod?@"vod":@"unknown"));
 }
++ (NSInteger)inferredPortInCode:(NSString *)source {
+    NSString *code=ServiceCodeWithoutComments(source);
+    if(!code.length)return 0;
+    NSArray<NSString *> *patterns=@[
+        @"(?is)add_argument\\s*\\(\\s*['\\\"](?:--port|-p|port)['\\\"][^\\n)]*?default\\s*=\\s*['\\\"]?(\\d{4,5})['\\\"]?",
+        @"(?is)(?:os\\.environ\\.get|os\\.getenv)\\s*\\(\\s*['\\\"](?:CCTVHOST_PORT|PORT)['\\\"]\\s*,\\s*['\\\"]?(\\d{4,5})['\\\"]?\\s*\\)",
+        @"(?is)process\\.env\\.(?:CCTVHOST_PORT|PORT)\\s*(?:\\|\\||\\?\\?)\\s*['\\\"]?(\\d{4,5})['\\\"]?",
+        @"(?is)(?:ThreadingHTTPServer|HTTPServer|TCPServer|ThreadingTCPServer)\\s*\\(\\s*\\([^,)]+,\\s*(\\d{4,5})\\s*\\)",
+        @"(?is)(?:app|server|uvicorn|bottle|web)\\.(?:run|run_app|listen)\\s*\\([^\\n)]*?(?:port\\s*=\\s*|:\\s*|(?:^|[,\\(\\s]))(\\d{4,5})\\b",
+        @"(?m)^\\s*(?:DEFAULT_PORT|SERVER_PORT|LISTEN_PORT|PORT|port)\\s*=\\s*(\\d{4,5})\\b"
+    ];
+    for(NSString *pattern in patterns){
+        NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];
+        NSTextCheckingResult *match=[re firstMatchInString:code options:0 range:NSMakeRange(0,code.length)];
+        if(match&&match.numberOfRanges>1){
+            NSInteger port=[[code substringWithRange:[match rangeAtIndex:1]] integerValue];
+            if(port>=1024&&port<=65535)return port;
+        }
+    }
+    return 0;
+}
++ (NSString *)portRecognitionSummaryForService:(NSDictionary *)service {
+    if(![service isKindOfClass:NSDictionary.class])return @"未配置端口";
+    NSInteger port=[service[@"port"] integerValue];
+    if([service[@"builtin"] boolValue])return [NSString stringWithFormat:@"内置固定端口 %ld · 宿主直连",(long)port];
+    if([self isMediaService:service])return [NSString stringWithFormat:@"宿主网关端口 %ld · 自动桥接",(long)port];
+    NSInteger inferred=[service[@"inferredPort"] integerValue];
+    if(inferred<1024){
+        NSString *entry=[self codePath:service];NSDictionary *attrs=entry.length?[NSFileManager.defaultManager attributesOfItemAtPath:entry error:NULL]:nil;
+        if(entry.length&&[attrs[NSFileSize] unsignedLongLongValue]<=2*1024*1024){
+            NSData *data=[NSData dataWithContentsOfFile:entry options:NSDataReadingMappedIfSafe error:NULL];
+            NSString *source=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
+            inferred=[self inferredPortInCode:source];
+        }
+    }
+    NSString *args=[service[@"arguments"] isKindOfClass:NSString.class]?service[@"arguments"]:@"";
+    if([args containsString:@"{port}"]){
+        if(inferred>=1024&&inferred!=port)return [NSString stringWithFormat:@"启动参数注入 %ld（脚本默认 %ld）",(long)port,(long)inferred];
+        return [NSString stringWithFormat:@"启动参数注入 %ld · 宿主接管",(long)port];
+    }
+    if(inferred>=1024){
+        if(inferred==port)return [NSString stringWithFormat:@"脚本声明端口 %ld · 宿主对齐",(long)inferred];
+        return [NSString stringWithFormat:@"宿主重映射 %ld（脚本默认 %ld）",(long)port,(long)inferred];
+    }
+    return [NSString stringWithFormat:@"宿主接管端口 %ld（CCTVHOST_PORT）",(long)port];
+}
 + (NSString *)inferredPlaylistPathInCode:(NSString *)source {
     if(![source isKindOfClass:NSString.class]||source.length>2*1024*1024)return nil;
     // Only infer a URL when it appears in an actual route declaration or a
@@ -130,11 +190,35 @@ static BOOL ServiceValidPlaylistPath(id value){
     NSError *error=nil;NSRegularExpression *routes=[NSRegularExpression regularExpressionWithPattern:routePattern options:0 error:&error];if(!routes||error)return nil;
     NSArray<NSTextCheckingResult *> *matches=[routes matchesInString:routeSource options:0 range:NSMakeRange(0,routeSource.length)];
     NSSet *tokens=[NSSet setWithArray:@[@"m3u",@"playlist",@"live",@"channel",@"iptv",@"tv"]];
-    NSArray *preferred=@[@"/all.m3u",@"/m3u",@"/playlist.m3u",@"/live.m3u",@"/channels.m3u"];
+    NSArray *preferred=@[@"/all.m3u",@"/all.m3u8",@"/m3u",@"/playlist.m3u",@"/playlist.m3u8",@"/live.m3u",@"/live.m3u8",@"/channels.m3u",@"/tv.m3u",@"/iptv.m3u",@"/index.m3u"];
     NSMutableArray<NSString *> *candidates=[NSMutableArray array];
     for(NSTextCheckingResult *match in matches){NSString *path=[routeSource substringWithRange:[match rangeAtIndex:1]];if(ServiceValidPlaylistPath(path)&&![candidates containsObject:path])[candidates addObject:path];}
     for(NSString *preferredPath in preferred)if([candidates containsObject:preferredPath])return preferredPath;
     for(NSString *path in candidates){NSString *candidate=path.lowercaseString;BOOL likely=NO;for(NSString *token in tokens)if([candidate containsString:token]){likely=YES;break;}if(likely)return path;}
+    return nil;
+}
++ (NSString *)inferredEPGPathInCode:(NSString *)source {
+    NSString *routeSource=ServiceCodeWithoutComments(source);
+    if(!routeSource.length)return nil;
+    NSString *lower=routeSource.lowercaseString;
+    BOOL epgEvidence=[lower containsString:@"epg"]||[lower containsString:@"xmltv"]||[lower containsString:@"x-tvg-url"]||[lower containsString:@"url-tvg"]||[lower containsString:@"tvg-url"]||[lower containsString:@"<programme"];
+    if(!epgEvidence)return nil;
+    NSString *routePattern=@"(?is)(?:@[a-z_][a-z0-9_.]*\\.(?:route|get|post|put)\\s*\\(|(?:[a-z_$][a-z0-9_$]*(?:\\.[a-z_$][a-z0-9_$]*)*)\\.(?:route|get|post|put|addroute|add_route|addget|add_get)\\s*\\(|(?:add_url_rule|add_get|add_route)\\s*\\(|(?:(?:self|request)\\.)?path\\s*(?:==|in)\\s*|(?:epg(?:_path|_route)?|xmltv(?:_path|_route)?|guide_path)\\s*=\\s*|(?:x-tvg-url|url-tvg|tvg-url|epg-url)\\s*=\\s*['\\\"]?(?:https?://[^'\\\"\\s/]+)?)['\\\"]?(/[^'\\\"?#\\\\\\s,;]{1,126})";
+    NSError *error=nil;NSRegularExpression *routes=[NSRegularExpression regularExpressionWithPattern:routePattern options:0 error:&error];if(!routes||error)return nil;
+    NSArray<NSTextCheckingResult *> *matches=[routes matchesInString:routeSource options:0 range:NSMakeRange(0,routeSource.length)];
+    NSSet *tokens=[NSSet setWithArray:@[@"epg",@"xmltv",@"guide",@"tv.xml",@".xml"]];
+    NSArray *preferred=@[@"/epg.xml",@"/epg.xml.gz",@"/xmltv.xml",@"/epg",@"/tv.xml",@"/guide.xml"];
+    NSMutableArray<NSString *> *candidates=[NSMutableArray array];
+    for(NSTextCheckingResult *match in matches){
+        NSString *path=[routeSource substringWithRange:[match rangeAtIndex:1]];
+        if(ServiceValidPlaylistPath(path)&&![candidates containsObject:path])[candidates addObject:path];
+    }
+    for(NSString *preferredPath in preferred)if([candidates containsObject:preferredPath])return preferredPath;
+    for(NSString *path in candidates){
+        NSString *candidate=path.lowercaseString;
+        if([candidate hasSuffix:@".m3u"]||[candidate hasSuffix:@".m3u8"])continue;
+        for(NSString *token in tokens)if([candidate containsString:token])return path;
+    }
     return nil;
 }
 + (NSString *)playlistPathForService:(NSDictionary *)service {
@@ -161,6 +245,35 @@ static BOOL ServiceValidPlaylistPath(id value){
     if(!entry.length||[attributes[NSFileSize] unsignedLongLongValue]>2*1024*1024)return nil;
     NSData *data=[NSData dataWithContentsOfFile:entry options:NSDataReadingMappedIfSafe error:NULL];NSString *source=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
     return [self inferredPlaylistPathInCode:source];
+}
++ (NSString *)epgPathForService:(NSDictionary *)service {
+    if(![service isKindOfClass:NSDictionary.class])return nil;
+    BOOL mediaHost=[self isMediaService:service];
+    BOOL pythonHTTP=[service[@"protocol"] isEqual:@"python-http"];
+    BOOL legacyPythonHTTP=![service[@"manifest"] isKindOfClass:NSDictionary.class]&&[service[@"engine"] isEqual:@"python"];
+    if(!mediaHost&&!pythonHTTP&&!legacyPythonHTTP&&![service[@"protocol"] isEqual:@"nanotv-service-v2"])return nil;
+    NSString *configured=service[@"epgPath"];
+    if(ServiceValidPlaylistPath(configured))return configured;
+    if(mediaHost)return nil;
+    if(![service[@"engine"] isEqual:@"python"])return nil;
+    NSString *entry=[self codePath:service];NSDictionary *attributes=entry.length?[NSFileManager.defaultManager attributesOfItemAtPath:entry error:NULL]:nil;
+    if(!entry.length||[attributes[NSFileSize] unsignedLongLongValue]>2*1024*1024)return nil;
+    NSData *data=[NSData dataWithContentsOfFile:entry options:NSDataReadingMappedIfSafe error:NULL];NSString *source=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
+    return [self inferredEPGPathInCode:source];
+}
++ (NSArray<NSString *> *)epgPathCandidatesForService:(NSDictionary *)service {
+    if(![service isKindOfClass:NSDictionary.class])return @[];
+    BOOL mediaHost=[self isMediaService:service];
+    BOOL pythonHTTP=[service[@"protocol"] isEqual:@"python-http"]||(![service[@"manifest"] isKindOfClass:NSDictionary.class]&&[service[@"engine"] isEqual:@"python"]);
+    if(!mediaHost&&!pythonHTTP&&![service[@"protocol"] isEqual:@"nanotv-service-v2"])return @[];
+    NSMutableOrderedSet<NSString *> *candidates=[NSMutableOrderedSet orderedSet];
+    NSString *path=[self epgPathForService:service];
+    if(path.length)[candidates addObject:path];
+    for(NSString *candidate in @[@"/epg.xml",@"/xmltv.xml",@"/epg.xml.gz",@"/epg",@"/tv.xml",@"/guide.xml"]){
+        if(ServiceValidPlaylistPath(candidate))[candidates addObject:candidate];
+    }
+    if(candidates.count>6)return [[candidates.array subarrayWithRange:NSMakeRange(0,6)] copy];
+    return candidates.array.copy?:@[];
 }
 + (NSArray<NSString *> *)playlistPathCandidatesForService:(NSDictionary *)service {
     if(![service isKindOfClass:NSDictionary.class])return @[];
@@ -191,16 +304,49 @@ static BOOL ServiceValidPlaylistPath(id value){
     NSSet *loopback=[NSSet setWithArray:@[@"127.0.0.1",@"localhost",@"::1"]];
     for(id rawSource in [NSUserDefaults.standardUserDefaults arrayForKey:@"subscriptions"]?:@[]){if(![ProfileStore isHTTP:rawSource])continue;NSString *source=rawSource;NSURLComponents *components=[NSURLComponents componentsWithString:source];NSString *host=components.host.lowercaseString;if(!components.URL||![loopback containsObject:host]||components.port.integerValue!=port)continue;NSDictionary *metadata=[ProfileStore metadata:source];if([metadata[@"managedServiceID"] isEqual:identifier])continue;if(metadata[@"managedServiceID"]&&![metadata[@"managedServiceID"] isEqual:identifier])continue;[ProfileStore update:source values:@{@"managedServiceID":identifier}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:source];}
 }
++ (NSString *)rewrittenLoopbackURL:(NSString *)urlString forService:(NSDictionary *)service {
+    if(![ProfileStore isHTTP:urlString])return nil;
+    NSInteger port=[service[@"port"] integerValue];
+    if(port<1||port>65535)return urlString;
+    NSURLComponents *parts=[NSURLComponents componentsWithString:urlString];
+    NSString *host=parts.host.lowercaseString;
+    if(!parts||!([host isEqualToString:@"127.0.0.1"]||[host isEqualToString:@"localhost"]||[host isEqualToString:@"0.0.0.0"]||[host isEqualToString:@"::1"]))return urlString;
+    parts.scheme=@"http";
+    parts.host=@"127.0.0.1";
+    parts.port=@(port);
+    return parts.URL.absoluteString?:urlString;
+}
 + (NSString *)epgURLForService:(NSDictionary *)service {
-    NSString *explicit=service[@"epgURL"];if([ProfileStore isHTTP:explicit])return explicit;NSInteger port=[service[@"port"] integerValue];if(port<1||port>65535)return nil;
+    NSString *explicit=service[@"epgURL"];if([ProfileStore isHTTP:explicit])return [self rewrittenLoopbackURL:explicit forService:service];
+    NSInteger port=[service[@"port"] integerValue];if(port<1||port>65535)return nil;
     NSString *expected=[self subscriptionURLForService:service];
     NSArray *sources=[NSUserDefaults.standardUserDefaults arrayForKey:@"subscriptions"]?:@[];
-    for(NSString *source in sources){if(!expected.length||![source isEqual:expected])continue;NSDictionary *metadata=[ProfileStore metadata:source];NSString *candidate=[metadata[@"epgURL"] isKindOfClass:NSString.class]?metadata[@"epgURL"]:metadata[@"detectedEPGURL"];if([ProfileStore isHTTP:candidate])return candidate;}
+    for(NSString *source in sources){
+        if(!expected.length||![source isEqual:expected])continue;
+        NSDictionary *metadata=[ProfileStore metadata:source];
+        NSString *candidate=[metadata[@"epgURL"] isKindOfClass:NSString.class]&&[metadata[@"epgURL"] length]?metadata[@"epgURL"]:metadata[@"detectedEPGURL"];
+        if([ProfileStore isHTTP:candidate])return [self rewrittenLoopbackURL:candidate forService:service];
+    }
     // A manually configured XMLTV URL belongs to the service, not to its old
     // loopback port. Keep it available while the replacement playlist is being
     // checked, but never reuse an automatically detected URL from an old route.
     NSString *identifier=service[@"id"];
-    for(NSString *source in sources){NSDictionary *metadata=[ProfileStore metadata:source];if([metadata[@"managedServiceID"] isEqual:identifier]&&[ProfileStore isHTTP:metadata[@"epgURL"]])return metadata[@"epgURL"];}
+    for(NSString *source in sources){
+        NSDictionary *metadata=[ProfileStore metadata:source];
+        if([metadata[@"managedServiceID"] isEqual:identifier]&&[ProfileStore isHTTP:metadata[@"epgURL"]]){
+            return [self rewrittenLoopbackURL:metadata[@"epgURL"] forService:service];
+        }
+    }
+    if(expected.length){
+        for(NSString *source in sources){
+            NSDictionary *metadata=[ProfileStore metadata:source];
+            if([metadata[@"managedServiceID"] isEqual:identifier]&&[ProfileStore isHTTP:metadata[@"detectedEPGURL"]]){
+                return [self rewrittenLoopbackURL:metadata[@"detectedEPGURL"] forService:service];
+            }
+        }
+        NSString *epgPath=[self epgPathForService:service];
+        if(epgPath.length)return [NSString stringWithFormat:@"http://127.0.0.1:%ld%@",(long)port,epgPath];
+    }
     return nil;
 }
 + (void)save:(NSDictionary *)service {
@@ -234,7 +380,7 @@ static BOOL ServiceValidPlaylistPath(id value){
     NSMutableDictionary *updated=[existing mutableCopy];[updated removeObjectForKey:@"healthSnapshot"];NSMutableDictionary *manifest=[incoming[@"manifest"] mutableCopy];
     if(existing[@"manifest"][@"options"])manifest[@"options"]=existing[@"manifest"][@"options"];
     NSMutableDictionary *previous=[existing mutableCopy];[previous removeObjectForKey:@"previousImport"];updated[@"previousImport"]=previous;
-    for(NSString *key in @[@"engine",@"protocol",@"url",@"importHeaders",@"downloadChecksum",@"configDownloadChecksum",@"configContentChecksum",@"configurationState",@"updated"])if(incoming[key])updated[key]=incoming[key];
+    for(NSString *key in @[@"engine",@"protocol",@"url",@"importHeaders",@"downloadChecksum",@"configDownloadChecksum",@"configContentChecksum",@"configurationState",@"updated",@"inferredPort"])if(incoming[key])updated[key]=incoming[key];
     BOOL runtimeChanged=![existing[@"engine"] isEqual:incoming[@"engine"]];
     BOOL inferredArguments=[existing[@"argumentsSource"] isEqual:@"inferred"];
     // A changed runtime cannot safely reuse flags from the old engine. On the
@@ -242,6 +388,8 @@ static BOOL ServiceValidPlaylistPath(id value){
     if(runtimeChanged||inferredArguments){updated[@"arguments"]=incoming[@"arguments"]?:@"";updated[@"argumentsSource"]=incoming[@"argumentsSource"]?:@"inferred";}
     BOOL hasManualPlaylist=[existing[@"playlistPath"] isKindOfClass:NSString.class]&&[existing[@"playlistPath"] length]&&![existing[@"playlistPathSource"] isEqual:@"inferred"]&&![existing[@"playlistPathSource"] isEqual:@"detected"];
     if(!hasManualPlaylist){[updated removeObjectForKey:@"playlistPath"];[updated removeObjectForKey:@"playlistPathSource"];if([incoming[@"playlistPath"] isKindOfClass:NSString.class]&&[incoming[@"playlistPath"] length]){updated[@"playlistPath"]=incoming[@"playlistPath"];updated[@"playlistPathSource"]=incoming[@"playlistPathSource"]?:@"inferred";}}
+    BOOL hasManualEPG=[existing[@"epgPath"] isKindOfClass:NSString.class]&&[existing[@"epgPath"] length]&&![existing[@"epgPathSource"] isEqual:@"inferred"]&&![existing[@"epgPathSource"] isEqual:@"detected"];
+    if(!hasManualEPG){[updated removeObjectForKey:@"epgPath"];[updated removeObjectForKey:@"epgPathSource"];if([incoming[@"epgPath"] isKindOfClass:NSString.class]&&[incoming[@"epgPath"] length]){updated[@"epgPath"]=incoming[@"epgPath"];updated[@"epgPathSource"]=incoming[@"epgPathSource"]?:@"inferred";}}
     updated[@"manifest"]=manifest;[updated removeObjectForKey:@"capabilities"];
     updated[@"packageRelativePath"]=[relative stringByAppendingPathComponent:[package substringFromIndex:source.length+1]];updated[@"packageRoot"]=[base stringByAppendingPathComponent:updated[@"packageRelativePath"]];
     updated[@"archivePath"]=@"";[updated removeObjectForKey:@"archiveRelativePath"];
@@ -257,6 +405,7 @@ static BOOL ServiceValidPlaylistPath(id value){
     for(NSString *key in @[@"name",@"port",@"lan",@"url"])if(service[key])restored[key]=service[key];
     if(![service[@"argumentsSource"] isEqual:@"inferred"]){if(service[@"arguments"])restored[@"arguments"]=service[@"arguments"];if(service[@"argumentsSource"])restored[@"argumentsSource"]=service[@"argumentsSource"];}
     if([service[@"playlistPath"] isKindOfClass:NSString.class]&&[service[@"playlistPath"] length]&&![service[@"playlistPathSource"] isEqual:@"inferred"]&&![service[@"playlistPathSource"] isEqual:@"detected"]){restored[@"playlistPath"]=service[@"playlistPath"];restored[@"playlistPathSource"]=service[@"playlistPathSource"]?:@"manual";}
+    if([service[@"epgPath"] isKindOfClass:NSString.class]&&[service[@"epgPath"] length]&&![service[@"epgPathSource"] isEqual:@"inferred"]&&![service[@"epgPathSource"] isEqual:@"detected"]){restored[@"epgPath"]=service[@"epgPath"];restored[@"epgPathSource"]=service[@"epgPathSource"]?:@"manual";}
     if(service[@"manifest"][@"options"]){NSMutableDictionary *manifest=[restored[@"manifest"] mutableCopy];manifest[@"options"]=service[@"manifest"][@"options"];restored[@"manifest"]=manifest;}
     restored[@"previousImport"]=current;restored[@"status"]=@"已切回上一版 · 待启动验证";[self save:restored];return restored;
 }

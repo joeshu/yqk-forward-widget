@@ -3,6 +3,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface PluginResourceDetailViewController : UITableViewController
 @property(nonatomic,copy) NSDictionary *service;
 @property(nonatomic,copy) void (^onToggle)(NSDictionary *service,BOOL enabled,void (^completion)(NSError *error));
+@property(nonatomic,copy,nullable) void (^onRestart)(NSDictionary *service,void (^completion)(NSError * _Nullable error));
 @property(nonatomic,copy) void (^onUse)(NSDictionary *service,NSString *kind);
 /// Called only after a local HTTP endpoint returns a valid non-empty M3U.
 @property(nonatomic,copy) void (^onPlaylistDiscovered)(NSDictionary *service,NSString *subscriptionURL,NSUInteger channelCount);
@@ -12,5 +13,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) void (^onUpdate)(NSDictionary *service);
 @property(nonatomic,copy) void (^onRollback)(NSDictionary *service);
 @property(nonatomic,copy) void (^onRemove)(NSDictionary *service);
+- (void)reloadThemeAppearance;
 @end
 NS_ASSUME_NONNULL_END

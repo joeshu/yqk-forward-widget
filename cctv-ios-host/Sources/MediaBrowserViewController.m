@@ -106,7 +106,8 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
 - (void)selectScope:(UIButton *)sender {self.selectedScope=sender.accessibilityIdentifier?:@"*";for(UIButton *button in self.scopeStack.arrangedSubviews){BOOL selected=[button.accessibilityIdentifier isEqual:self.selectedScope];HostStylePillButton(button,selected);MediaBrowserApplyScaledPillFont(button);}[self updateSearchResultsForSearchController:self.search];}
 - (void)closePicker { [self.navigationController dismissViewControllerAnimated:YES completion:nil]; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return self.shown.count;}
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)index {UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"source"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"source"];NSDictionary *choice=index.row<self.shown.count?self.shown[index.row]:nil;if(![choice isKindOfClass:NSDictionary.class]){cell.textLabel.text=@"";cell.detailTextLabel.text=@"";cell.accessoryType=UITableViewCellAccessoryNone;return cell;}cell.backgroundColor=HostCard();cell.textLabel.text=[choice[@"name"] isKindOfClass:NSString.class]?choice[@"name"]:@"";cell.textLabel.textColor=HostText();cell.textLabel.numberOfLines=0;NSMutableArray *details=[NSMutableArray array];NSString *subtitle=[choice[@"subtitle"] isKindOfClass:NSString.class]?choice[@"subtitle"]:nil;if(subtitle.length)[details addObject:subtitle];NSString *url=[choice[@"url"] isKindOfClass:NSString.class]?choice[@"url"]:nil;if(url.length)[details addObject:url];cell.detailTextLabel.text=[details componentsJoinedByString:@"\n"];cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.numberOfLines=0;cell.tintColor=HostAccent();BOOL selected=[choice[@"selected"] isKindOfClass:NSNumber.class]?[choice[@"selected"] boolValue]:NO;cell.accessoryType=selected?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDisclosureIndicator;return cell;}
+- (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();for(UIButton *button in self.scopeStack.arrangedSubviews){BOOL selected=[button.accessibilityIdentifier isEqual:self.selectedScope];HostStylePillButton(button,selected);MediaBrowserApplyScaledPillFont(button);}[self.tableView reloadData];}
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)index {UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"source"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"source"];NSDictionary *choice=index.row<self.shown.count?self.shown[index.row]:nil;if(![choice isKindOfClass:NSDictionary.class]){cell.textLabel.text=@"";cell.detailTextLabel.text=@"";cell.accessoryType=UITableViewCellAccessoryNone;return cell;}BOOL selected=[choice[@"selected"] isKindOfClass:NSNumber.class]?[choice[@"selected"] boolValue]:NO;cell.backgroundColor=selected?HostSelectedSurface():HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=selected?1.1:0.6;HostSetLayerBorderColor(cell,selected?HostAccent():HostBorder());cell.textLabel.text=[choice[@"name"] isKindOfClass:NSString.class]?choice[@"name"]:@"";cell.textLabel.textColor=selected?HostAccent():HostText();cell.textLabel.numberOfLines=0;NSMutableArray *details=[NSMutableArray array];NSString *subtitle=[choice[@"subtitle"] isKindOfClass:NSString.class]?choice[@"subtitle"]:nil;if(subtitle.length)[details addObject:subtitle];NSString *url=[choice[@"url"] isKindOfClass:NSString.class]?choice[@"url"]:nil;if(url.length)[details addObject:url];cell.detailTextLabel.text=[details componentsJoinedByString:@"\n"];cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.numberOfLines=0;cell.tintColor=HostAccent();cell.accessoryType=selected?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDisclosureIndicator;return cell;}
 - (void)updateSearchResultsForSearchController:(UISearchController *)controller {NSString *query=controller.searchBar.text?:@"";self.shown=[self.choices filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *choice,NSDictionary *bindings){if(![choice isKindOfClass:NSDictionary.class])return NO;NSString *scope=[choice[@"scope"] isKindOfClass:NSString.class]?choice[@"scope"]:@"";if(![self.selectedScope isEqual:@"*"]&&![scope isEqual:self.selectedScope])return NO;BOOL matches=![query length];for(NSString *key in @[@"name",@"subtitle",@"url"]){NSString *value=[choice[key] isKindOfClass:NSString.class]?choice[key]:@"";if(query.length&&[value rangeOfString:query options:NSCaseInsensitiveSearch|NSDiacriticInsensitiveSearch].location!=NSNotFound)matches=YES;}return matches;}]];if(!self.shown.count){UILabel *empty=[UILabel new];empty.text=query.length?@"没有匹配的选项，请修改或清除搜索词":@"当前分组暂无选项，请切换到全部";empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();empty.accessibilityIdentifier=@"media-picker-empty";self.tableView.backgroundView=empty;}else self.tableView.backgroundView=nil;[self.tableView reloadData];}
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)index {if(index.row<0||index.row>=self.shown.count)return;NSDictionary *choice=self.shown[index.row];if(![choice isKindOfClass:NSDictionary.class])return;void(^onSelect)(NSDictionary *)=self.onSelect;[self.navigationController dismissViewControllerAnimated:YES completion:^{if(onSelect)onSelect(choice);}];}
 @end
@@ -583,6 +584,7 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
         [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"", @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"line_index":@(owner.selectedLineIndex), @"episode_index":@(owner.selectedEpisodeIndex), @"result_has_media_url":@([result[@"url"] isKindOfClass:NSString.class]&&[result[@"url"] length]>0), @"result_parse_mode":@([result[@"parse"] respondsToSelector:@selector(integerValue)]?[result[@"parse"] integerValue]:0), @"result_alternate_count":@([result[@"alternates"] isKindOfClass:NSArray.class]?[result[@"alternates"] count]:0)}];owner.status.hidden=YES;NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"episodeID":[episode[@"id"] description]?:@"",@"episodeName":[episode[@"name"] description]?:@"",@"lineIndex":@(owner.selectedLineIndex),@"episodeIndex":@(owner.selectedEpisodeIndex),@"parserID":parserID,@"correlationID":owner.diagnosticTraceID?:@""};if(owner.onPlay)owner.onPlay(result,context);
     }];
 }
+- (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.heroBlurView.effect=HostGlassBlur();self.heroGradient.colors=@[(id)[HostBackground() colorWithAlphaComponent:0.15].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.68].CGColor,(id)HostBackground().CGColor];self.titleLabel.textColor=HostText();self.metaLabel.textColor=HostSecondaryText();self.castLabel.textColor=HostSecondaryText();self.synopsisLabel.textColor=HostSecondaryText();self.status.textColor=HostSecondaryText();HostStylePillButton(self.playButton,YES);MediaBrowserApplyScaledPillFont(self.playButton);[self updateFavoriteButtonTitle];[self buildDetailControls];}
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews];self.heroGradient.frame=self.heroView.bounds;UIEdgeInsets inset=UIEdgeInsetsMake(0,0,MAX(24,self.view.safeAreaInsets.bottom+20),0);self.scrollView.contentInset=inset;self.scrollView.scrollIndicatorInsets=inset;[self updateInlinePlaybackDockLayout]; }
 @end
 @interface MediaFavoritesViewController : UITableViewController
@@ -592,9 +594,10 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
 @implementation MediaFavoritesViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.title=@"影视收藏";self.view.backgroundColor=HostBackground();self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=78;
+    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"影视收藏";self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=78;
     [self reloadFavoriteEntries];
 }
+- (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();[self.tableView reloadData];}
 - (void)reloadFavoriteEntries {
     NSDictionary *saved=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"]?:@{};
     NSMutableArray<NSDictionary *> *rows=[NSMutableArray array];
@@ -645,10 +648,11 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
 @implementation MediaWatchHistoryViewController
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
 - (void)viewDidLoad {
-    [super viewDidLoad];self.title=@"观看历史";self.view.backgroundColor=HostBackground();self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=78;
+    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"观看历史";self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=78;
     self.entries=MediaPlaybackStateStore.watchHistory;
     [self updateClearHistoryButton];
 }
+- (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();[self.tableView reloadData];}
 - (void)updateClearHistoryButton {self.navigationItem.rightBarButtonItem=self.entries.count?[[UIBarButtonItem alloc] initWithTitle:@"清空" style:UIBarButtonItemStylePlain target:self action:@selector(confirmClearHistory)]:nil;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if(self.entries.count){self.tableView.backgroundView=nil;return self.entries.count;}
@@ -664,7 +668,8 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
     NSMutableArray *parts=[NSMutableArray array];if([entry[@"episodeName"] length])[parts addObject:entry[@"episodeName"]];if([entry[@"sourceName"] length])[parts addObject:entry[@"sourceName"]];if([entry[@"provider"] length])[parts addObject:entry[@"provider"]];[parts addObject:progress];
     cell.detailTextLabel.text=[parts componentsJoinedByString:@" · "];cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.numberOfLines=2;cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;
     UIProgressView *watchProgress=(UIProgressView *)[cell.contentView viewWithTag:9201];
-    if(!watchProgress){watchProgress=[[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];watchProgress.tag=9201;watchProgress.accessibilityIdentifier=@"media.history.progress";watchProgress.trackTintColor=[HostBorder() colorWithAlphaComponent:0.22];watchProgress.progressTintColor=HostAccent();watchProgress.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleTopMargin;[cell.contentView addSubview:watchProgress];}
+    if(!watchProgress){watchProgress=[[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];watchProgress.tag=9201;watchProgress.accessibilityIdentifier=@"media.history.progress";watchProgress.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleTopMargin;[cell.contentView addSubview:watchProgress];}
+    watchProgress.trackTintColor=[HostBorder() colorWithAlphaComponent:0.22];watchProgress.progressTintColor=HostAccent();
     float ratio=[entry[@"completed"] boolValue]?1.0f:(duration>0?(float)MIN(1.0,MAX(0.04,position/duration)):0.15f);
     watchProgress.progress=ratio;watchProgress.frame=CGRectMake(16,MAX(0,CGRectGetHeight(cell.contentView.bounds)-3),MAX(0,CGRectGetWidth(cell.contentView.bounds)-32),2.5);
     NSString *poster=[item[@"poster"] isKindOfClass:NSString.class]?item[@"poster"]:@"";if(poster.length)MediaLoadPosterWithRetry(poster,cell.imageView,1);else{cell.imageView.image=[UIImage systemImageNamed:@"film"];cell.imageView.accessibilityIdentifier=nil;cell.imageView.contentMode=UIViewContentModeCenter;cell.imageView.tintColor=HostSecondaryText();}return cell;
@@ -718,8 +723,12 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 @implementation MediaHomeConfigurationViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.title=@"媒体显示";self.view.backgroundColor=HostBackground();self.tableView.backgroundColor=HostBackground();self.modules=[MediaHomeEnabledModules() mutableCopy];self.pinnedSources=[MediaHomePinnedSources() mutableCopy];
+    [super viewDidLoad];self.title=@"媒体显示";self.view.backgroundColor=HostBackground();self.tableView.backgroundColor=HostBackground();self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;self.tableView.tintColor=HostAccent();self.modules=[MediaHomeEnabledModules() mutableCopy];self.pinnedSources=[MediaHomePinnedSources() mutableCopy];
     if(self.navigationController.viewControllers.firstObject==self)self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
+}
+- (void)reloadThemeAppearance {
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.backgroundColor=HostBackground();self.tableView.backgroundColor=HostBackground();self.tableView.tintColor=HostAccent();[self.tableView reloadData];
 }
 - (void)close {if(self.navigationController.viewControllers.firstObject!=self)[self.navigationController popViewControllerAnimated:YES];else[self dismissViewControllerAnimated:YES completion:self.onChange];}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 3;}
@@ -727,10 +736,10 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return section==0?@"显示模块":(section==1?@"海报网格列数":@"固定的影视来源");}
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {return section==0?@"精选来自当前站点与本机观看记录。隐藏模块不会删除收藏或历史。":(section==1?@"3 列卡片更大；4 列布局更紧凑。此设置用于媒体分类网格；大字体模式会自动增大卡片。":(self.sources.count?@"固定来源会在资源选择器中优先显示，不会提前启动服务。":@"导入影视资源后，可以在这里固定常用来源。"));}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"media-home-setting"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"media-home-setting"];cell.backgroundColor=HostCard();cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.numberOfLines=2;cell.accessoryType=UITableViewCellAccessoryNone;
+    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"media-home-setting"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"media-home-setting"];cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.numberOfLines=2;cell.accessoryType=UITableViewCellAccessoryNone;cell.tintColor=HostAccent();
     if(indexPath.section==1){NSInteger columns=indexPath.row==0?3:4;cell.accessoryView=nil;cell.selectionStyle=UITableViewCellSelectionStyleDefault;cell.textLabel.text=[NSString stringWithFormat:@"%ld 列%@",(long)columns,columns==3?@" · 标准":@" · 紧凑"];cell.detailTextLabel.text=columns==3?@"海报和标题更大，浏览更舒适。":@"单屏展示更多影片，海报更紧凑。";cell.accessoryType=MediaBrowserGridColumns()==columns?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryNone;cell.accessibilityIdentifier=[NSString stringWithFormat:@"media-home-grid-columns-%ld",(long)columns];return cell;}
     NSString *identifier=nil;BOOL enabled=NO;if(indexPath.section==0){NSDictionary *row=MediaHomeModuleDefinitions()[indexPath.row];identifier=row[@"id"];cell.textLabel.text=row[@"title"];cell.detailTextLabel.text=row[@"detail"];enabled=[self.modules containsObject:identifier];}else{NSDictionary *source=self.sources[indexPath.row];identifier=source[@"id"]?:@"";cell.textLabel.text=source[@"name"]?:@"影视资源";NSString *engine=source[@"engine"]?:@"未知运行引擎";cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · 点按卡片时才启动",engine];enabled=[self.pinnedSources containsObject:identifier];}
-    UISwitch *toggle=[UISwitch new];toggle.on=enabled;toggle.accessibilityIdentifier=[NSString stringWithFormat:@"%@:%@",indexPath.section==0?@"module":@"source",identifier];[toggle addTarget:self action:@selector(toggleSetting:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=toggle;return cell;
+    UISwitch *toggle=[UISwitch new];toggle.onTintColor=HostAccent();toggle.on=enabled;toggle.accessibilityIdentifier=[NSString stringWithFormat:@"%@:%@",indexPath.section==0?@"module":@"source",identifier];[toggle addTarget:self action:@selector(toggleSetting:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=toggle;return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {if(indexPath.section!=1){[tableView deselectRowAtIndexPath:indexPath animated:YES];return;}[NSUserDefaults.standardUserDefaults setInteger:indexPath.row==0?3:4 forKey:MediaBrowserGridColumnsDefaultsKey];[tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationAutomatic];if(self.onChange)self.onChange();}
 - (void)toggleSetting:(UISwitch *)sender {
@@ -1215,8 +1224,14 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     __weak typeof(self) weakSelf=self;[self prepareDetailSource:source completion:^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;MediaDetailViewController *detail=[MediaDetailViewController new];detail.item=item;detail.source=source;detail.provider=provider?:@"";detail.onPlaybackWillStart=owner.onPlaybackWillStart;[owner pushMediaDetail:detail];}];
 }
 - (void)browsePinnedSource:(NSDictionary *)source {self.pendingBrowseState=nil;self.provider=nil;self.nextHomeLoadTrigger=@"home_pinned_source";[self activate:source];}
+- (void)reloadMediaDisplayConfigurationIfLoaded {
+    if(!self.isViewLoaded)return;
+    if(self.homeMode)[self refreshHomeModules];
+    [self.grid.collectionViewLayout invalidateLayout];
+    [self.grid reloadData];
+}
 - (UIViewController *)mediaDisplaySettingsViewController {
-    MediaHomeConfigurationViewController *page=[MediaHomeConfigurationViewController new];page.sources=self.sourcesProvider?self.sourcesProvider():self.sources?:@[];__weak typeof(self) weakSelf=self;page.onChange=^{[weakSelf refreshHomeModules];};return page;
+    MediaHomeConfigurationViewController *page=[MediaHomeConfigurationViewController new];page.sources=self.sourcesProvider?self.sourcesProvider():self.sources?:@[];__weak typeof(self) weakSelf=self;page.onChange=^{[weakSelf reloadMediaDisplayConfigurationIfLoaded];};return page;
 }
 - (void)openHomeConfiguration {[self pushMediaPage:[self mediaDisplaySettingsViewController]];}
 - (void)openHomeFavorite:(NSDictionary *)entry {
@@ -1642,6 +1657,25 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
         owner.items=all;owner.readinessStageLabel.text=@"影视内容接口已读取 · 实际播放需以视频首帧确认";[RuntimeDiagnostics.shared recordEvent:@"media_content_readable" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.source[@"id"]?:@"",@"content_count":@(all.count),@"operation":operation}];[RuntimeDiagnostics.shared recordEvent:@"media_listing_result_applied" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":requestedSourceID,@"provider_id":requestedProvider,@"operation":operation,@"page":@(requestedPage),@"append":@(append),@"incoming_count":@(incoming.count),@"discarded_row_count":@(discardedRows),@"displayed_count":@(all.count),@"has_more":@(MediaBrowserBoolean(normalized[@"hasMore"])),@"elapsed_ms":@(elapsedMS)}];if(owner.pendingRestorePage>requestedPage && MediaBrowserBoolean(normalized[@"hasMore"]) && incoming.count && requestedPage<owner.pendingRestorePage){owner.page=requestedPage+1;[owner loadListing:YES];return;}if(owner.pendingRestorePage){owner.page=requestedPage;owner.pendingRestorePage=0;}owner.hasMore=MediaBrowserBoolean(normalized[@"hasMore"]);owner.moreButton.hidden=!owner.hasMore;[owner.grid reloadData];[owner updateHomeGridLayout];[owner showMessage:all.count?@"":@"没有找到影片，请更换关键词或分类" loading:NO];
         if(owner.pendingRestoreOffset){CGFloat offset=owner.pendingRestoreOffset.doubleValue;owner.pendingRestoreOffset=nil;dispatch_async(dispatch_get_main_queue(),^{[owner.grid setContentOffset:CGPointMake(0,offset) animated:NO];});}
     }];
+}
+
+- (void)reloadThemeAppearance {
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    if(!self.isViewLoaded)return;
+    self.view.backgroundColor=HostBackground();
+    self.view.tintColor=HostAccent();
+    self.grid.backgroundColor=HostBackground();
+    self.status.textColor=HostSecondaryText();
+    self.readinessStageLabel.textColor=HostSecondaryText();
+    [self updateSelectionControls];
+    for(UIButton *button in self.categories.arrangedSubviews){
+        BOOL selected=[button.accessibilityIdentifier isEqual:@"__featured__"]?!self.category.length:[button.accessibilityIdentifier isEqual:self.category];
+        HostStylePillButton(button,selected);
+        MediaBrowserApplyScaledPillFont(button);
+        [button setTitleColor:selected?HostOnAccent():HostSecondaryText() forState:UIControlStateNormal];
+        if(selected){button.backgroundColor=HostAccent();HostSetLayerBorderColor(button,HostAccent());}
+    }
+    [self.grid reloadData];
 }
 
 @end

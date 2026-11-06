@@ -47,8 +47,10 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     self.title = self.channelName.length ? self.channelName : self.channelID;
     self.view.backgroundColor = HostBackground();
+    self.view.tintColor = HostAccent();
     self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
     self.jumpToLiveItem=[[UIBarButtonItem alloc] initWithTitle:@"正在播" style:UIBarButtonItemStylePlain target:self action:@selector(scrollToLiveProgram)];
     self.filterMenuItem=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] menu:[self buildProgramFilterMenu]];
@@ -95,12 +97,30 @@
 
     self.dates=[[UISegmentedControl alloc] initWithItems:@[]];self.dates.selectedSegmentTintColor=HostAccent();self.dates.apportionsSegmentWidthsByContent=YES;self.dates.accessibilityLabel=@"选择节目单日期";[self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12]]} forState:UIControlStateNormal];[self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]]} forState:UIControlStateSelected];[self.dates addTarget:self action:@selector(filterDate) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.dates];
     self.reminders=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.epgReminders.v1"] mutableCopy]?:[NSMutableDictionary dictionary];
-    self.dateMenuButton=[UIButton buttonWithType:UIButtonTypeSystem];self.dateMenuButton.hidden=YES;self.dateMenuButton.accessibilityLabel=@"选择节目单日期";self.dateMenuButton.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:15]];self.dateMenuButton.titleLabel.adjustsFontForContentSizeCategory=YES;self.dateMenuButton.showsMenuAsPrimaryAction=YES;[self.view addSubview:self.dateMenuButton];
+    self.dateMenuButton=[UIButton buttonWithType:UIButtonTypeSystem];self.dateMenuButton.hidden=YES;self.dateMenuButton.accessibilityLabel=@"选择节目单日期";HostStylePillButton(self.dateMenuButton,NO);HostInstallPressFeedback(self.dateMenuButton);self.dateMenuButton.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:15]];self.dateMenuButton.titleLabel.adjustsFontForContentSizeCategory=YES;self.dateMenuButton.showsMenuAsPrimaryAction=YES;[self.view addSubview:self.dateMenuButton];
     self.programSearch=[[UISearchController alloc] initWithSearchResultsController:nil];self.programSearch.searchResultsUpdater=self;self.programSearch.obscuresBackgroundDuringPresentation=NO;self.programSearch.searchBar.placeholder=@"搜索本页节目";self.navigationItem.searchController=self.programSearch;self.definesPresentationContext=YES;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationDidEnterBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationWillEnterForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
     [self fetch];
 
+}
+
+- (void)reloadThemeAppearance {
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
+    if (!self.isViewLoaded) return;
+    self.view.backgroundColor = HostBackground();
+    self.view.tintColor = HostAccent();
+    self.hint.textColor = HostSecondaryText();
+    self.emptyLabel.textColor = HostSecondaryText();
+    self.table.backgroundColor = HostBackground();
+    self.table.separatorColor = HostSeparator();
+    self.dates.selectedSegmentTintColor = HostAccent();
+    [self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12]]} forState:UIControlStateNormal];
+    [self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]]} forState:UIControlStateSelected];
+    HostStylePillButton(self.dateMenuButton, NO);
+    self.dateMenuButton.titleLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:15]];
+    self.dateMenuButton.titleLabel.adjustsFontForContentSizeCategory = YES;
+    [self.table reloadData];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -346,6 +366,7 @@
                        [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:end]]];
     cell.textLabel.text = row[@"title"];
     cell.detailTextLabel.text = range;
+    cell.detailTextLabel.textColor = HostSecondaryText();
 
     BOOL replayable=self.onReplay && end<=now;
     cell.accessoryType=replayable?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;
@@ -359,13 +380,13 @@
         liveProgress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];
         liveProgress.tag = 9102;
         liveProgress.accessibilityIdentifier = @"epg.live.progress";
-        liveProgress.trackTintColor = [HostBorder() colorWithAlphaComponent:0.25];
-        liveProgress.progressTintColor = HostAccent();
         liveProgress.layer.cornerRadius = 1.5;
         liveProgress.clipsToBounds = YES;
         liveProgress.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
         [cell.contentView addSubview:liveProgress];
     }
+    liveProgress.trackTintColor = [HostBorder() colorWithAlphaComponent:0.25];
+    liveProgress.progressTintColor = HostAccent();
     liveProgress.hidden = !live;
     if (live) {
         float progress = (end > start) ? (float)MIN(1.0, MAX(0.05, (now - start) / (end - start))) : 0.5f;

@@ -84,6 +84,10 @@
     return self;
 }
 - (void)configureWithTitle:(NSString *)title detail:(NSString *)detail icon:(NSString *)icon color:(UIColor *)color {
+    self.backgroundColor=HostCard();
+    self.contentView.backgroundColor=HostCard();
+    _titleLabel.textColor=HostText();
+    _detailLabel.textColor=HostSecondaryText();
     _titleLabel.text=title;
     _detailLabel.text=detail;
     _iconView.image=[UIImage systemImageNamed:icon];
@@ -97,6 +101,8 @@
 
 @interface ResourceImportSheetViewController () <UITableViewDataSource,UITableViewDelegate>
 @property(nonatomic,strong) UITableView *tableView;
+@property(nonatomic,strong) UILabel *titleLabel;
+@property(nonatomic,strong) UIButton *closeButton;
 @property(nonatomic,assign) BOOL didSelectOption;
 @end
 
@@ -116,6 +122,7 @@
     title.adjustsFontForContentSizeCategory=YES;
     title.textColor=HostText();
     title.translatesAutoresizingMaskIntoConstraints=NO;
+    self.titleLabel=title;
     [header addSubview:title];
     UIButton *close=[UIButton buttonWithType:UIButtonTypeSystem];
     [close setImage:[UIImage systemImageNamed:@"xmark"] forState:UIControlStateNormal];
@@ -126,6 +133,7 @@
     close.accessibilityIdentifier=@"resource-import.close";
     [close addTarget:self action:@selector(closeSheet) forControlEvents:UIControlEventTouchUpInside];
     close.translatesAutoresizingMaskIntoConstraints=NO;
+    self.closeButton=close;
     [header addSubview:close];
 
     self.tableView=[[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
@@ -164,6 +172,15 @@
         [self.tableView.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor]
     ]];
 
+}
+- (void)reloadThemeAppearance {
+    if(!self.isViewLoaded)return;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.titleLabel.textColor=HostText();
+    self.closeButton.tintColor=HostSecondaryText();
+    self.closeButton.backgroundColor=HostRaisedSurface();
+    [self.tableView reloadData];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self optionsForSection:section].count; }

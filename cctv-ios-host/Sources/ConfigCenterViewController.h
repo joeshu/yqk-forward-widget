@@ -6,6 +6,9 @@
 - (void)refreshHeaderAfterNavigationTransition;
 - (void)reloadProfiles;
 - (void)refreshProfiles;
+- (void)reloadThemeAppearance;
+- (void)probeSingleProfile:(NSString *)source;
+- (void)copyResourceDiagnosticSummary;
 @property(nonatomic, copy) NSArray<NSDictionary *> * (^profilesProvider)(void);
 @property(nonatomic, copy) dispatch_block_t onServices;
 @property(nonatomic, copy) dispatch_block_t onAdd;

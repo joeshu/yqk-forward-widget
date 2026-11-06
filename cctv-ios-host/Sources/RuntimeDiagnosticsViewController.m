@@ -26,12 +26,15 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     self.view.backgroundColor = HostBackground();
+    self.view.tintColor = HostAccent();
     self.navigationController.navigationBar.tintColor = HostAccent();
     self.title = self.sessionID.length ? @"运行记录" : @"运行诊断记录";
     self.table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.table.translatesAutoresizingMaskIntoConstraints = NO;
     self.table.backgroundColor = HostBackground();
+    self.table.separatorColor = HostSeparator();
     self.table.dataSource = self; self.table.delegate = self;
     self.table.rowHeight = UITableViewAutomaticDimension; self.table.estimatedRowHeight = 86;
     self.table.tintColor = HostAccent();
@@ -46,6 +49,8 @@
         self.eventCategoryFilter = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"播放", @"接口", @"服务", @"异常"]];
         self.eventCategoryFilter.selectedSegmentIndex = 0;
         self.eventCategoryFilter.selectedSegmentTintColor = HostAccent();
+        [self.eventCategoryFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateNormal];
+        [self.eventCategoryFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateSelected];
         self.eventCategoryFilter.accessibilityIdentifier = @"diagnostic.event.filter";
         [self.eventCategoryFilter addTarget:self action:@selector(applyEventCategoryFilter) forControlEvents:UIControlEventValueChanged];
         UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 48)];
@@ -58,6 +63,33 @@
         self.clearButton.tintColor = UIColor.systemRedColor;
         self.navigationItem.rightBarButtonItem = self.clearButton;
     }
+}
+
+- (void)reloadThemeAppearance {
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
+    if (!self.isViewLoaded) return;
+    self.view.backgroundColor = HostBackground();
+    self.view.tintColor = HostAccent();
+    self.navigationController.navigationBar.tintColor = HostAccent();
+    self.table.backgroundColor = HostBackground();
+    self.table.separatorColor = HostSeparator();
+    self.table.tintColor = HostAccent();
+    if (self.eventCategoryFilter) {
+        self.eventCategoryFilter.selectedSegmentTintColor = HostAccent();
+        [self.eventCategoryFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateNormal];
+        [self.eventCategoryFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateSelected];
+    }
+    [self.table reloadData];
+}
+
+- (void)showTransientPrompt:(NSString *)prompt {
+    self.navigationItem.prompt = prompt;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if ([weakSelf.navigationItem.prompt isEqualToString:prompt]) {
+            weakSelf.navigationItem.prompt = nil;
+        }
+    });
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -119,7 +151,7 @@
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.sessionID.length ? self.events.count : self.sessions.count; }
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return self.sessionID.length ? [NSString stringWithFormat:@"事件 · %lu 条", (unsigned long)self.events.count] : [NSString stringWithFormat:@"按次记录 · %lu 次", (unsigned long)self.sessions.count]; }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return self.sessionID.length ? [NSString stringWithFormat:@"事件 · %lu 条 · 点按可复制", (unsigned long)self.events.count] : [NSString stringWithFormat:@"按次记录 · %lu 次", (unsigned long)self.sessions.count]; }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"diagnostic.row"];
@@ -147,6 +179,7 @@
         cell.textLabel.text = [NSString stringWithFormat:@"%@ · %@", eventName, category];
         cell.detailTextLabel.text = payload.length ? [NSString stringWithFormat:@"%@\n%@", time, payload] : time;
         cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote].pointSize weight:UIFontWeightRegular];
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     } else {
         NSDictionary *session = rows[indexPath.row];if(![session isKindOfClass:NSDictionary.class])return cell;
         NSString *date = [session[@"started_at"] isKindOfClass:NSString.class] ? session[@"started_at"] : @"开始时间未知";
@@ -173,7 +206,11 @@
         if(indexPath.row<0||indexPath.row>=self.events.count)return;
         NSDictionary *event=self.events[indexPath.row];if(![event isKindOfClass:NSDictionary.class])return;
         NSString *eventName=[event[@"event"] isKindOfClass:NSString.class]?event[@"event"]:@"未知事件";NSString *category=[event[@"category"] isKindOfClass:NSString.class]?event[@"category"]:@"";NSString *time=[event[@"time"] isKindOfClass:NSString.class]?event[@"time"]:@"时间未知";
-        UIPasteboard.generalPasteboard.string=[NSString stringWithFormat:@"%@ · %@\n%@",eventName,category,time];
+        NSDictionary *fields=[event[@"fields"] isKindOfClass:NSDictionary.class]?event[@"fields"]:nil;
+        NSString *payload=@"";
+        if(fields.count){NSData *data=[NSJSONSerialization dataWithJSONObject:fields options:NSJSONWritingPrettyPrinted error:NULL];if(data.length)payload=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]?:@"";}
+        UIPasteboard.generalPasteboard.string=payload.length?[NSString stringWithFormat:@"%@ · %@\n%@\n%@",eventName,category,time,payload]:[NSString stringWithFormat:@"%@ · %@\n%@",eventName,category,time];
+        [self showTransientPrompt:@"诊断事件已复制"];
         UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"事件已复制");
         return;
     }

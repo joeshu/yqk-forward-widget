@@ -12,5 +12,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) void (^onExportCatalog)(NSString *format);
 @property(nonatomic,copy) void (^onExportSingleResource)(NSDictionary *resource,NSString *kind,NSUInteger index);
 @property(nonatomic,copy) dispatch_block_t onRemove;
+- (void)reloadThemeAppearance;
 @end
 NS_ASSUME_NONNULL_END

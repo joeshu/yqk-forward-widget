@@ -83,6 +83,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 @interface ResourceImportWorkflowViewController () <UIDocumentPickerDelegate,UITextViewDelegate>
 @property(nonatomic,strong) UITextView *address;
 @property(nonatomic,strong) UILabel *addressPlaceholder;
+@property(nonatomic,strong) UIButton *pasteAddressButton;
+@property(nonatomic,strong) UIButton *clearAddressButton;
 @property(nonatomic,strong) UISegmentedControl *runtime;
 @property(nonatomic,strong) UISegmentedControl *duplicatePolicy;
 @property(nonatomic,strong) NSMutableArray<NSMutableDictionary *> *candidates;
@@ -122,17 +124,57 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"添加资源";UISheetPresentationController *sheet=self.navigationController.sheetPresentationController?:self.sheetPresentationController;if(sheet){sheet.detents=@[UISheetPresentationControllerDetent.mediumDetent,UISheetPresentationControllerDetent.largeDetent];sheet.prefersGrabberVisible=YES;sheet.preferredCornerRadius=26;}self.tableView.backgroundColor=HostBackground();self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"收起" style:UIBarButtonItemStylePlain target:self action:@selector(minimize)];
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"保存" style:UIBarButtonItemStyleDone target:self action:@selector(saveSelected)];
-    self.address=[UITextView new];self.address.delegate=self;self.address.text=self.restoredAddress?:@"";self.address.backgroundColor=HostRaisedSurface();self.address.textColor=HostText();self.address.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.address.autocapitalizationType=UITextAutocapitalizationTypeNone;self.address.autocorrectionType=UITextAutocorrectionTypeNo;self.address.smartQuotesType=UITextSmartQuotesTypeNo;self.address.smartDashesType=UITextSmartDashesTypeNo;self.address.smartInsertDeleteType=UITextSmartInsertDeleteTypeNo;self.address.keyboardType=UIKeyboardTypeURL;self.address.layer.cornerRadius=14;self.address.accessibilityLabel=@"资源链接";self.address.accessibilityHint=@"影视、直播或资源合集链接";self.address.accessibilityIdentifier=@"resource-import-url";
-    self.addressPlaceholder=[UILabel new];self.addressPlaceholder.text=@"粘贴影视、直播或资源合集链接";self.addressPlaceholder.font=self.address.font;self.addressPlaceholder.textColor=HostSecondaryText();self.addressPlaceholder.userInteractionEnabled=NO;self.addressPlaceholder.translatesAutoresizingMaskIntoConstraints=NO;[self.address addSubview:self.addressPlaceholder];[NSLayoutConstraint activateConstraints:@[[self.addressPlaceholder.leadingAnchor constraintEqualToAnchor:self.address.leadingAnchor constant:8],[self.addressPlaceholder.topAnchor constraintEqualToAnchor:self.address.topAnchor constant:10]]];self.addressPlaceholder.hidden=self.address.text.length>0;
-    self.runtime=[[UISegmentedControl alloc] initWithItems:@[@"自动识别",@"Python",@"Node.js"]];self.runtime.selectedSegmentIndex=MIN(2,MAX(0,self.restoredRuntimeSelection));[self.runtime addTarget:self action:@selector(runtimeChanged:) forControlEvents:UIControlEventValueChanged];
-    self.duplicatePolicy=[[UISegmentedControl alloc] initWithItems:@[@"更新已有",@"保存副本"]];self.duplicatePolicy.selectedSegmentIndex=MIN(1,MAX(0,self.restoredDuplicatePolicy));
+    self.address=[UITextView new];self.address.delegate=self;self.address.text=self.restoredAddress?:@"";self.address.backgroundColor=HostRaisedSurface();self.address.textColor=HostText();self.address.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.address.autocapitalizationType=UITextAutocapitalizationTypeNone;self.address.autocorrectionType=UITextAutocorrectionTypeNo;self.address.smartQuotesType=UITextSmartQuotesTypeNo;self.address.smartDashesType=UITextSmartDashesTypeNo;self.address.smartInsertDeleteType=UITextSmartInsertDeleteTypeNo;self.address.keyboardType=UIKeyboardTypeURL;self.address.layer.cornerRadius=14;self.address.textContainerInset=UIEdgeInsetsMake(10,6,34,6);self.address.accessibilityLabel=@"资源链接";self.address.accessibilityHint=@"影视、直播或资源合集链接";self.address.accessibilityIdentifier=@"resource-import-url";
+    self.addressPlaceholder=[UILabel new];self.addressPlaceholder.text=@"粘贴影视、直播或资源合集链接";self.addressPlaceholder.font=self.address.font;self.addressPlaceholder.textColor=HostSecondaryText();self.addressPlaceholder.userInteractionEnabled=NO;self.addressPlaceholder.translatesAutoresizingMaskIntoConstraints=NO;[self.address addSubview:self.addressPlaceholder];[NSLayoutConstraint activateConstraints:@[[self.addressPlaceholder.leadingAnchor constraintEqualToAnchor:self.address.leadingAnchor constant:10],[self.addressPlaceholder.topAnchor constraintEqualToAnchor:self.address.topAnchor constant:10]]];self.addressPlaceholder.hidden=self.address.text.length>0;
+    self.pasteAddressButton=[UIButton buttonWithType:UIButtonTypeSystem];[self.pasteAddressButton setTitle:@"粘贴剪贴板" forState:UIControlStateNormal];self.pasteAddressButton.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];self.pasteAddressButton.tintColor=HostAccent();self.pasteAddressButton.accessibilityIdentifier=@"resource-import-paste";[self.pasteAddressButton addTarget:self action:@selector(pasteClipboardAddress) forControlEvents:UIControlEventTouchUpInside];
+    self.clearAddressButton=[UIButton buttonWithType:UIButtonTypeSystem];[self.clearAddressButton setTitle:@"清空" forState:UIControlStateNormal];self.clearAddressButton.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];self.clearAddressButton.tintColor=HostSecondaryText();self.clearAddressButton.accessibilityIdentifier=@"resource-import-clear";[self.clearAddressButton addTarget:self action:@selector(clearAddressText) forControlEvents:UIControlEventTouchUpInside];
+    self.runtime=[[UISegmentedControl alloc] initWithItems:@[@"自动识别",@"Python",@"Node.js"]];self.runtime.selectedSegmentIndex=MIN(2,MAX(0,self.restoredRuntimeSelection));self.runtime.selectedSegmentTintColor=HostAccent();[self.runtime addTarget:self action:@selector(runtimeChanged:) forControlEvents:UIControlEventValueChanged];
+    self.duplicatePolicy=[[UISegmentedControl alloc] initWithItems:@[@"更新已有",@"保存副本"]];self.duplicatePolicy.selectedSegmentIndex=MIN(1,MAX(0,self.restoredDuplicatePolicy));self.duplicatePolicy.selectedSegmentTintColor=HostAccent();
     [self.duplicatePolicy addTarget:self action:@selector(duplicatePolicyChanged:) forControlEvents:UIControlEventValueChanged];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationDidEnterBackground:) name:UIApplicationDidEnterBackgroundNotification object:nil];[self updateView];
+}
+- (void)reloadThemeAppearance {
+    if(!self.isViewLoaded)return;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.tableView.backgroundColor=HostBackground();
+    self.address.backgroundColor=HostRaisedSurface();
+    self.address.textColor=HostText();
+    self.addressPlaceholder.textColor=HostSecondaryText();
+    self.pasteAddressButton.tintColor=HostAccent();
+    self.clearAddressButton.tintColor=HostSecondaryText();
+    self.runtime.selectedSegmentTintColor=HostAccent();
+    self.duplicatePolicy.selectedSegmentTintColor=HostAccent();
+    [self.tableView reloadData];
+}
+- (void)pasteClipboardAddress {
+    if(self.busy||self.candidates.count)return;
+    NSString *clip=[UIPasteboard.generalPasteboard.string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(!clip.length)return;
+    self.address.text=clip;
+    [self textViewDidChange:self.address];
+}
+- (void)clearAddressText {
+    if(self.busy||self.candidates.count)return;
+    self.address.text=@"";
+    [self textViewDidChange:self.address];
+}
+- (void)toggleSelectAllCandidates {
+    if(self.busy||!self.candidates.count)return;
+    BOOL anyUnselected=NO;
+    for(NSDictionary *row in self.candidates){
+        if(!row[@"error"]&&![row[@"saved"] boolValue]&&![row[@"selected"] boolValue]){anyUnselected=YES;break;}
+    }
+    for(NSMutableDictionary *row in self.candidates){
+        if(!row[@"error"]&&![row[@"saved"] boolValue])row[@"selected"]=@(anyUnselected);
+    }
+    self.finished=NO;
+    [self updateView];
 }
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];[self.fetcher cancel];[self.downloader cancel];}
 - (void)updateView {
     self.navigationItem.rightBarButtonItem.enabled=!self.busy&&!self.finished&&[self.candidates filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [row[@"selected"] boolValue]&&!row[@"error"]&&![row[@"saved"] boolValue];}]].count>0;
-    self.address.editable=!self.busy&&!self.candidates.count;self.runtime.enabled=!self.busy&&!self.candidates.count;self.duplicatePolicy.enabled=!self.busy;[self.tableView reloadData];[self persistSnapshot];if(self.onStateChanged)self.onStateChanged();
+    self.address.editable=!self.busy&&!self.candidates.count;self.pasteAddressButton.enabled=self.address.editable;self.clearAddressButton.enabled=self.address.editable;self.clearAddressButton.hidden=self.address.text.length==0;self.runtime.enabled=!self.busy&&!self.candidates.count;self.duplicatePolicy.enabled=!self.busy;[self.tableView reloadData];[self persistSnapshot];if(self.onStateChanged)self.onStateChanged();
 }
 - (void)persistSnapshot {
     NSString *address=self.address.text?:self.restoredAddress?:@"";BOOL blank=!self.busy&&!self.candidates.count&&!address.length&&[self.stage isEqual:@"粘贴地址，或选择本地文件"];
@@ -140,7 +182,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     self.persistentSnapshotAvailable=!blank;NSDictionary *immutable=snapshot.copy;UIBackgroundTaskIdentifier task=UIApplication.sharedApplication.applicationState==UIApplicationStateBackground?[UIApplication.sharedApplication beginBackgroundTaskWithExpirationHandler:nil]:UIBackgroundTaskInvalid;dispatch_async(ResourceImportSnapshotQueue(),^{ResourceImportWriteSnapshot(immutable);if(task!=UIBackgroundTaskInvalid)dispatch_async(dispatch_get_main_queue(),^{[UIApplication.sharedApplication endBackgroundTask:task];});});
 }
 - (void)applicationDidEnterBackground:(NSNotification *)notification {[self persistSnapshot];}
-- (void)textViewDidChange:(UITextView *)textView {self.restoredAddress=textView.text?:@"";self.addressPlaceholder.hidden=textView.text.length>0;[self persistSnapshot];}
+- (void)textViewDidChange:(UITextView *)textView {self.restoredAddress=textView.text?:@"";self.addressPlaceholder.hidden=textView.text.length>0;self.clearAddressButton.hidden=textView.text.length==0;[self persistSnapshot];}
 - (void)runtimeChanged:(UISegmentedControl *)sender {self.restoredRuntimeSelection=sender.selectedSegmentIndex;[self persistSnapshot];}
 - (void)duplicatePolicyChanged:(UISegmentedControl *)sender {self.finished=NO;[self updateView];}
 - (void)minimize {[self.view endEditing:YES];[self.navigationController dismissViewControllerAnimated:YES completion:nil];}
@@ -152,12 +194,31 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     if(section==1)return @"合集仅保存一份索引，内部站点按需加载。勾选要保存的项目；更新保留原资源身份，运行中的资源须先停止后更新。";
     return @"失败项可逐条重试，或只重试失败项；收起后资源页会保留任务卡。应用进入后台后受系统调度限制，回到前台可继续查看结果。";
 }
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {return indexPath.section==0&&indexPath.row==0?116:UITableViewAutomaticDimension;}
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {return indexPath.section==0&&indexPath.row==0?124:UITableViewAutomaticDimension;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];cell.backgroundColor=HostCard();cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+    UITableViewCell *cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
     UIView *control=nil;
     if(ip.section==0){
-        if(ip.row==0){control=self.address;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
+        if(ip.row==0){
+            UIView *box=[UIView new];
+            [box addSubview:self.address];
+            [box addSubview:self.pasteAddressButton];
+            [box addSubview:self.clearAddressButton];
+            self.address.translatesAutoresizingMaskIntoConstraints=NO;
+            self.pasteAddressButton.translatesAutoresizingMaskIntoConstraints=NO;
+            self.clearAddressButton.translatesAutoresizingMaskIntoConstraints=NO;
+            [NSLayoutConstraint activateConstraints:@[
+                [self.address.topAnchor constraintEqualToAnchor:box.topAnchor],
+                [self.address.bottomAnchor constraintEqualToAnchor:box.bottomAnchor],
+                [self.address.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
+                [self.address.trailingAnchor constraintEqualToAnchor:box.trailingAnchor],
+                [self.pasteAddressButton.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-10],
+                [self.pasteAddressButton.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-4],
+                [self.clearAddressButton.trailingAnchor constraintEqualToAnchor:self.pasteAddressButton.leadingAnchor constant:-12],
+                [self.clearAddressButton.centerYAnchor constraintEqualToAnchor:self.pasteAddressButton.centerYAnchor]
+            ]];
+            control=box;cell.selectionStyle=UITableViewCellSelectionStyleNone;
+        }
         else if(ip.row==1){cell.textLabel.text=[self.taskKind isEqual:@"url"]&&self.restoredAddress.length?@"识别链接 · 可重试上次地址":@"识别链接";cell.textLabel.textColor=HostAccent();}
         else if(ip.row==2){cell.textLabel.text=@"选择文件（多选）";cell.textLabel.textColor=HostAccent();}
         else if(ip.row==3){cell.textLabel.text=@"选择文件夹";cell.textLabel.textColor=HostAccent();}
@@ -165,7 +226,22 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
         else if(ip.row==5){UILabel *label=[UILabel new];label.text=@"运行环境";label.textColor=HostText();label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];UIStackView *stack=[[UIStackView alloc] initWithArrangedSubviews:@[label,self.runtime]];stack.axis=UILayoutConstraintAxisVertical;stack.spacing=8;control=stack;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
         else {cell.textLabel.text=@"按类型选择导入方式";cell.detailTextLabel.text=@"TVBox、直播、Python、JS、ZIP 与文件夹";cell.textLabel.textColor=HostAccent();cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;}
     }
-    else if(ip.section==1){if(ip.row==0){control=self.duplicatePolicy;cell.selectionStyle=UITableViewCellSelectionStyleNone;}else{NSDictionary *row=self.candidates[ip.row-1];cell.textLabel.text=row[@"name"]?:@"资源";NSString *detail=row[@"saved"]?@"已保存":(row[@"saveError"]?:row[@"error"]?:row[@"summary"]);if(!row[@"saved"]&&row[@"updatePreview"]){NSString *preview=self.duplicatePolicy.selectedSegmentIndex==0?row[@"updatePreview"]:@"将另存为独立副本 · 原资源保持不变";detail=[NSString stringWithFormat:@"%@\n%@",detail,preview];}cell.detailTextLabel.text=detail;cell.accessoryType=[row[@"selected"] boolValue]?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryNone;cell.tintColor=HostAccent();if(row[@"error"]||row[@"saveError"]){UIButton *retry=[UIButton buttonWithType:UIButtonTypeSystem];retry.tag=ip.row-1;[retry setTitle:@"重试" forState:UIControlStateNormal];retry.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];retry.tintColor=HostAccent();[retry sizeToFit];retry.frame=CGRectMake(0,0,52,44);[retry addTarget:self action:@selector(retryButtonTapped:) forControlEvents:UIControlEventTouchUpInside];cell.accessoryView=retry;}}}
+    else if(ip.section==1){if(ip.row==0){
+        if(self.candidates.count>1){
+            UIButton *toggleAll=[UIButton buttonWithType:UIButtonTypeSystem];
+            [toggleAll setTitle:@"全选 / 反选" forState:UIControlStateNormal];
+            toggleAll.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+            toggleAll.tintColor=HostAccent();
+            [toggleAll addTarget:self action:@selector(toggleSelectAllCandidates) forControlEvents:UIControlEventTouchUpInside];
+            UIStackView *policyRow=[[UIStackView alloc] initWithArrangedSubviews:@[self.duplicatePolicy,toggleAll]];
+            policyRow.axis=UILayoutConstraintAxisHorizontal;
+            policyRow.spacing=10;
+            control=policyRow;
+        }else{
+            control=self.duplicatePolicy;
+        }
+        cell.selectionStyle=UITableViewCellSelectionStyleNone;
+    }else{NSDictionary *row=self.candidates[ip.row-1];cell.textLabel.text=row[@"name"]?:@"资源";NSString *detail=row[@"saved"]?@"已保存":(row[@"saveError"]?:row[@"error"]?:row[@"summary"]);if(!row[@"saved"]&&row[@"updatePreview"]){NSString *preview=self.duplicatePolicy.selectedSegmentIndex==0?row[@"updatePreview"]:@"将另存为独立副本 · 原资源保持不变";detail=[NSString stringWithFormat:@"%@\n%@",detail,preview];}cell.detailTextLabel.text=detail;cell.accessoryType=[row[@"selected"] boolValue]?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryNone;cell.tintColor=HostAccent();if(row[@"error"]||row[@"saveError"]){UIButton *retry=[UIButton buttonWithType:UIButtonTypeSystem];retry.tag=ip.row-1;[retry setTitle:@"重试" forState:UIControlStateNormal];retry.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];retry.tintColor=HostAccent();[retry sizeToFit];retry.frame=CGRectMake(0,0,52,44);[retry addTarget:self action:@selector(retryButtonTapped:) forControlEvents:UIControlEventTouchUpInside];cell.accessoryView=retry;}}}
     else {NSUInteger failed=[self failedCandidateCount];if(ip.row==0){cell.textLabel.text=self.busy?@"取消当前任务":@"开始新的导入";cell.textLabel.textColor=HostAccent();}else{cell.textLabel.text=[NSString stringWithFormat:@"仅重试失败项（%lu）",(unsigned long)failed];cell.textLabel.textColor=HostAccent();}}
     if(control){[cell.contentView addSubview:control];control.translatesAutoresizingMaskIntoConstraints=NO;[NSLayoutConstraint activateConstraints:@[[control.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:8],[control.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-8],[control.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:12],[control.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-12]]];}
     return cell;

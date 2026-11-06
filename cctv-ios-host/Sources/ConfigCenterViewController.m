@@ -1,5 +1,6 @@
 #import "ConfigCenterViewController.h"
 #import "HostTheme.h"
+#import "HostLogRedactor.h"
 #import "ProfileStore.h"
 #import "PyHost.h"
 #import <math.h>
@@ -108,6 +109,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 - (void)confirmRemoveProfile:(NSString *)source;
 - (NSString *)resourceTitleForProfile:(NSDictionary *)profile;
 - (NSString *)resourceDetailForProfile:(NSDictionary *)profile;
+- (BOOL)profile:(NSDictionary *)profile matchesSearchQuery:(NSString *)query;
 - (void)selectKind:(UIButton *)sender;
 - (void)searchTextChanged;
 - (BOOL)textFieldShouldReturn:(UITextField *)textField;
@@ -171,6 +173,37 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     self.navigationItem.rightBarButtonItems=nil;self.navigationItem.rightBarButtonItem=nil;
     self.compactHeader=[UIView new];self.compactHeader.backgroundColor=[HostBackground() colorWithAlphaComponent:.94];self.compactHeader.hidden=YES;[self.tableView addSubview:self.compactHeader];self.compactTitle=[UILabel new];self.compactTitle.text=@"资源";self.compactTitle.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline] scaledFontForFont:[UIFont systemFontOfSize:17 weight:UIFontWeightSemibold] maximumPointSize:22];self.compactTitle.textColor=HostText();[self.compactHeader addSubview:self.compactTitle];self.compactAdd=[UIButton buttonWithType:UIButtonTypeSystem];[self.compactAdd setImage:[UIImage systemImageNamed:@"plus"] forState:UIControlStateNormal];self.compactAdd.accessibilityLabel=@"添加资源";[self.compactAdd addTarget:self action:@selector(add) forControlEvents:UIControlEventTouchUpInside];self.compactMore=[UIButton buttonWithType:UIButtonTypeSystem];[self.compactMore setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];self.compactMore.menu=moreButton.menu;self.compactMore.showsMenuAsPrimaryAction=YES;self.compactMore.accessibilityLabel=@"更多资源操作";for(UIButton *button in @[self.compactAdd,self.compactMore]){button.tintColor=HostText();[self.compactHeader addSubview:button];}
     [self reloadProfiles];
+}
+- (void)reloadThemeAppearance {
+    if(!self.isViewLoaded)return;
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    self.tableView.backgroundColor=HostBackground();
+    self.resourceHeader.backgroundColor=HostBackground();
+    self.topActionsStack.backgroundColor=HostRaisedSurface();
+    HostSetLayerBorderColor(self.topActionsStack,HostBorder());
+    for(UIView *sub in self.topActionsStack.arrangedSubviews){
+        if([sub isKindOfClass:UIButton.class]){
+            UIButton *btn=(UIButton *)sub;
+            UIButtonConfiguration *cfg=btn.configuration;
+            if(cfg){cfg.baseForegroundColor=HostText();btn.configuration=cfg;}
+        }
+    }
+    self.resourceTitleLabel.textColor=HostText();
+    self.resourceSearchField.textColor=HostText();
+    self.resourceSearchField.tintColor=HostAccent();
+    self.resourceSearchField.backgroundColor=HostRaisedSurface();
+    self.importTaskContainer.backgroundColor=HostRaisedSurface();
+    self.importTaskButton.tintColor=HostAccent();
+    self.importTaskToggleButton.tintColor=HostSecondaryText();
+    self.importTaskDetailLabel.textColor=HostSecondaryText();
+    self.emptyLabel.textColor=HostSecondaryText();
+    self.compactHeader.backgroundColor=[HostBackground() colorWithAlphaComponent:.94];
+    self.compactTitle.textColor=HostText();
+    self.compactAdd.tintColor=HostText();
+    self.compactMore.tintColor=HostText();
+    [self updateKindFilters];
+    [self.tableView reloadData];
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
@@ -282,6 +315,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     if([kind isEqual:@"live"])return [resourceKind isEqual:@"live"]||[resourceKind isEqual:@"both"];
     if([kind isEqual:@"catalog"])return [profile[@"type"] isEqual:@"tvbox"];
     if([kind isEqual:@"script"])return [profile[@"type"] isEqual:@"plugin"];
+    if([kind isEqual:@"enabled"])return [profile[@"enabled"] boolValue];
     if([kind isEqual:@"attention"])return pending;
     if([kind hasPrefix:@"domain:"]){NSArray *parts=[[kind substringFromIndex:7] componentsSeparatedByString:@"|"];NSString *expectedHost=parts.firstObject?:@"",*expectedKind=parts.count>1?parts[1]:@"";NSString *raw=[profile[@"url"] isKindOfClass:NSString.class]?profile[@"url"]:@"";if(!raw.length)raw=[profile[@"source"] isKindOfClass:NSString.class]?profile[@"source"]:@"";NSString *host=[NSURLComponents componentsWithString:raw].host.lowercaseString?:@"";if(![host isEqual:expectedHost])return NO;if([expectedKind isEqual:@"live"])return [resourceKind isEqual:@"live"]||[resourceKind isEqual:@"both"];if([expectedKind isEqual:@"vod"])return [resourceKind isEqual:@"vod"]||[resourceKind isEqual:@"both"]||[profile[@"type"] isEqual:@"tvbox"];return YES;}
     return YES;
@@ -294,7 +328,9 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     NSMutableArray *definitions=[@[@{@"id":@"all",@"name":@"全部"},@{@"id":@"vod",@"name":@"影视"},@{@"id":@"live",@"name":@"直播"},@{@"id":@"catalog",@"name":@"合集"},@{@"id":@"attention",@"name":@"待处理"}] mutableCopy];
     NSMutableDictionary<NSString *,NSMutableDictionary *> *domains=[NSMutableDictionary dictionary];
     for(NSDictionary *profile in self.allProfiles){NSString *host=[self resourceDomainForProfile:profile];if(!host.length)continue;NSString *resourceKind=[profile[@"resourceKind"] isKindOfClass:NSString.class]?profile[@"resourceKind"]:@"unknown";NSString *kind=([resourceKind isEqual:@"live"]||[resourceKind isEqual:@"both"])?@"live":([resourceKind isEqual:@"vod"]||[profile[@"type"] isEqual:@"tvbox"]?@"vod":@"unknown");NSString *identifier=[NSString stringWithFormat:@"domain:%@|%@",host,kind];NSMutableDictionary *entry=domains[identifier]?:[NSMutableDictionary dictionaryWithDictionary:@{@"id":identifier,@"host":host,@"kind":kind,@"count":@0}];entry[@"count"]=@([entry[@"count"] unsignedIntegerValue]+1);domains[identifier]=entry;}
-    NSArray *domainEntries=[domains.allValues sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"host"] localizedStandardCompare:b[@"host"]];}];if([self.selectedKind isEqual:@"script"])[definitions addObject:@{@"id":@"script",@"name":@"脚本"}];
+    NSArray *domainEntries=[domains.allValues sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"host"] localizedStandardCompare:b[@"host"]];}];
+    if([self.selectedKind isEqual:@"script"])[definitions addObject:@{@"id":@"script",@"name":@"脚本"}];
+    if([self.selectedKind isEqual:@"enabled"])[definitions addObject:@{@"id":@"enabled",@"name":@"已启用"}];
     for(NSDictionary *entry in domainEntries)if([entry[@"id"] isEqual:self.selectedKind]){[definitions addObject:@{@"id":entry[@"id"],@"name":entry[@"host"],@"fixedCount":entry[@"count"]}];break;}
     if([self.selectedKind hasPrefix:@"domain:"]&&![self.selectedKind containsString:@"|"])[definitions addObject:@{@"id":self.selectedKind,@"name":[self.selectedKind substringFromIndex:7]}];
     BOOL selectionExists=NO;for(NSDictionary *definition in definitions)if([definition[@"id"] isEqual:self.selectedKind]){selectionExists=YES;break;}if(!selectionExists)self.selectedKind=@"all";
@@ -341,17 +377,44 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     [super traitCollectionDidChange:previousTraitCollection];
     if(previousTraitCollection&&![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory])[self updateKindFilters];
 }
+- (void)copyResourceDiagnosticSummary {
+    NSString *summary=[self tableView:self.tableView titleForHeaderInSection:0]?:@"";
+    NSMutableArray<NSString *> *lines=[NSMutableArray arrayWithObject:[NSString stringWithFormat:@"资源中心概览：%@",summary]];
+    for(NSDictionary *p in self.profiles){
+        NSString *title=[self resourceTitleForProfile:p];
+        NSString *latency=[self latencyTextForProfile:p color:NULL];
+        NSString *kind=[p[@"type"] isEqual:@"plugin"]?@"脚本服务":([p[@"type"] isEqual:@"tvbox"]?@"资源合集":@"直播订阅");
+        [lines addObject:[NSString stringWithFormat:@"- [%@] %@ (%@)",kind,title,latency]];
+    }
+    UIPasteboard.generalPasteboard.string=[lines componentsJoinedByString:@"\n"];
+    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"资源概览摘要已复制");
+}
 - (void)showResourceFilters {
     NSString *sortName=@{@"manual":@"手动顺序",@"name":@"名称 A–Z",@"recent":@"最近更新",@"attention":@"待处理优先"}[self.sortMode]?:@"手动顺序";
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"筛选与排序" message:[NSString stringWithFormat:@"来源筛选 · %@\n排序方式 · %@",[self.selectedKind isEqual:@"all"]?@"全部来源":self.selectedKind,sortName] preferredStyle:UIAlertControllerStyleActionSheet];
     NSArray *sortOptions=@[@{@"id":@"manual",@"name":@"手动顺序"},@{@"id":@"name",@"name":@"名称 A–Z"},@{@"id":@"recent",@"name":@"最近更新"},@{@"id":@"attention",@"name":@"待处理优先"}];
     for(NSDictionary *option in sortOptions){NSString *identifier=option[@"id"],*name=option[@"name"];NSString *title=[NSString stringWithFormat:@"排序 · %@%@",name,[identifier isEqual:self.sortMode]?@" ✓":@""];[sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.sortMode=identifier;[NSUserDefaults.standardUserDefaults setObject:identifier forKey:@"resourceListSortMode"];[self reloadProfiles];}]];}
-    NSMutableArray *options=[NSMutableArray arrayWithArray:@[@{@"id":@"all",@"name":@"全部来源"},@{@"id":@"script",@"name":@"脚本资源"}]];
+    NSMutableArray *options=[NSMutableArray arrayWithArray:@[@{@"id":@"all",@"name":@"全部来源"},@{@"id":@"enabled",@"name":@"仅已启用资源"},@{@"id":@"script",@"name":@"脚本资源"}]];
     NSMutableSet *seen=[NSMutableSet set];for(NSDictionary *profile in self.allProfiles){NSString *domain=[self resourceDomainForProfile:profile];if(!domain.length||[seen containsObject:domain])continue;[seen addObject:domain];[options addObject:@{@"id":[@"domain:" stringByAppendingString:domain],@"name":domain}];}
     for(NSDictionary *option in options){NSString *identifier=option[@"id"],*name=option[@"name"];NSString *title=[NSString stringWithFormat:@"来源 · %@%@",name,[identifier isEqual:self.selectedKind]?@" ✓":@""];[sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.selectedKind=identifier;[self reloadProfiles];}]];}
+    __weak typeof(self) weakSelf=self;
+    [sheet addAction:[UIAlertAction actionWithTitle:@"复制资源概览摘要" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf copyResourceDiagnosticSummary];}]];
+    if(self.latencyResults.count)[sheet addAction:[UIAlertAction actionWithTitle:@"清除连接测速结果" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf.latencyResults removeAllObjects];[weakSelf.tableView reloadData];}]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];sheet.popoverPresentationController.sourceView=self.topActionsStack;sheet.popoverPresentationController.sourceRect=self.topActionsStack.bounds;[self presentViewController:sheet animated:YES completion:nil];
 }
 - (void)selectKind:(UIButton *)sender {NSString *kind=[sender.accessibilityIdentifier stringByReplacingOccurrencesOfString:@"resource-filter-" withString:@""];if(!kind.length||[kind isEqual:self.selectedKind])return;self.selectedKind=kind;[self reloadProfiles];}
+- (BOOL)profile:(NSDictionary *)profile matchesSearchQuery:(NSString *)query {
+    if(!query.length)return YES;
+    NSString *title=[[self resourceTitleForProfile:profile] lowercaseString]?:@"";
+    if([title containsString:query])return YES;
+    NSString *detail=[[self resourceDetailForProfile:profile] lowercaseString]?:@"";
+    if([detail containsString:query])return YES;
+    for(NSString *key in @[@"name",@"source",@"url",@"runtime",@"protocol",@"subscriptionStatus",@"status",@"healthResult"]){
+        id val=profile[key];
+        if([val isKindOfClass:NSString.class]&&[[(NSString *)val lowercaseString] containsString:query])return YES;
+    }
+    return [[profile description].lowercaseString containsString:query];
+}
 - (void)reloadProfiles {
     NSString *task=self.importTaskSummaryProvider?self.importTaskSummaryProvider():nil;BOOL hasTask=task.length>0;self.importTaskContainer.hidden=!hasTask;self.importTaskHeight.constant=hasTask?(self.importTaskExpanded?76:44):0;self.importTaskButtonHeight.constant=hasTask?44:0;self.importTaskToggleHeight.constant=hasTask?44:0;self.importTaskDetailHeight.constant=hasTask&&self.importTaskExpanded?28:0;self.importTaskDetailLabel.hidden=!hasTask||!self.importTaskExpanded;self.importTaskDetailLabel.text=task?:@"";[self.importTaskButton setTitle:!hasTask?@"":(self.importTaskExpanded?@"继续查看导入任务":[@"导入任务 · " stringByAppendingString:task]) forState:UIControlStateNormal];[self.importTaskToggleButton setImage:[UIImage systemImageNamed:self.importTaskExpanded?@"chevron.up":@"chevron.down"] forState:UIControlStateNormal];[self.importTaskToggleButton setAccessibilityValue:self.importTaskExpanded?@"已展开":@"已收起"];[self updateResourceHeaderLayout];
     [self.detailSummaryCache removeAllObjects];
@@ -361,14 +424,15 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     NSArray *matchedProfiles=[all filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *p,NSDictionary *bindings){
         NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";
         if(![self profile:p matchesKind:self.selectedKind?:@"all"])return NO;
-        NSString *query=self.searchQuery?:@"";if(query.length&&![[p description].lowercaseString containsString:query])return NO;
+        NSString *query=self.searchQuery?:@"";if(query.length&&![self profile:p matchesSearchQuery:query]&&![[p description].lowercaseString containsString:query])return NO;
         return [p[@"type"] isEqual:@"plugin"]||[p[@"type"] isEqual:@"tvbox"]||source.length>0||[p[@"native"] boolValue];
     }]];
     NSArray *profiles=matchedProfiles;
     if([self.sortMode isEqual:@"name"]){profiles=[matchedProfiles sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [[self resourceTitleForProfile:a] localizedStandardCompare:[self resourceTitleForProfile:b]];}];}
     else if([self.sortMode isEqual:@"recent"]){profiles=[matchedProfiles sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){NSTimeInterval at=MAX([a[@"updatedAt"] doubleValue],[a[@"playlistUpdatedAt"] doubleValue]),bt=MAX([b[@"updatedAt"] doubleValue],[b[@"playlistUpdatedAt"] doubleValue]);if(at>bt)return NSOrderedAscending;if(at<bt)return NSOrderedDescending;return [[self resourceTitleForProfile:a] localizedStandardCompare:[self resourceTitleForProfile:b]];}];}
     else if([self.sortMode isEqual:@"attention"]){profiles=[matchedProfiles sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){BOOL aa=[self profile:a matchesKind:@"attention"],ba=[self profile:b matchesKind:@"attention"];if(aa!=ba)return aa?NSOrderedAscending:NSOrderedDescending;NSUInteger ai=[matchedProfiles indexOfObjectIdenticalTo:a],bi=[matchedProfiles indexOfObjectIdenticalTo:b];return ai<bi?NSOrderedAscending:(ai>bi?NSOrderedDescending:NSOrderedSame);}];}
-    if([self.profiles isEqualToArray:profiles]){self.emptyLabel.text=profiles.count?@"":@"还没有导入资源\n点顶部“添加”导入影视脚本、直播服务或订阅列表";return;}self.profiles=profiles;self.emptyLabel.text=profiles.count?@"":@"还没有导入资源\n点顶部“添加”导入影视脚本、直播服务或订阅列表";
+    NSString *emptyText=profiles.count?@"":(self.searchQuery.length?@"没有找到匹配的移入资源，请尝试其他搜索词":(![self.selectedKind isEqual:@"all"]?@"当前筛选分类下暂无资源\n可切换顶部筛选胶囊查看全部":@"还没有导入资源\n点顶部“添加”导入影视脚本、直播服务或订阅列表"));
+    if([self.profiles isEqualToArray:profiles]){self.emptyLabel.text=emptyText;return;}self.profiles=profiles;self.emptyLabel.text=emptyText;
     [self.tableView reloadData];
 }
 - (void)kindChanged {[self reloadProfiles];}
@@ -435,6 +499,34 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 }
 - (NSURL *)probeURLForProfile:(NSDictionary *)profile {
     NSString *raw=[profile[@"url"] isKindOfClass:NSString.class]?profile[@"url"]:@"";if(![ProfileStore isHTTP:raw])raw=[profile[@"source"] isKindOfClass:NSString.class]?profile[@"source"]:@"";if(![ProfileStore isHTTP:raw])return nil;NSURLComponents *parts=[NSURLComponents componentsWithString:raw];if(!parts||parts.user.length||parts.password.length)return nil;return parts.URL;
+}
+- (void)probeSingleProfile:(NSString *)source {
+    if(!source.length)return;
+    NSDictionary *targetProfile=nil;
+    for(NSDictionary *p in self.allProfiles)if([p[@"source"] isEqual:source]){targetProfile=p;break;}
+    if(!targetProfile)return;
+    NSURL *url=[self probeURLForProfile:targetProfile];
+    if(!url){self.latencyResults[source]=@{@"notProbeable":@YES};[self.tableView reloadData];return;}
+    self.latencyResults[source]=@{@"probing":@YES};
+    [self.tableView reloadData];
+    __weak typeof(self) weakSelf=self;
+    NSURLSessionConfiguration *configuration=[NSURLSessionConfiguration ephemeralSessionConfiguration];configuration.timeoutIntervalForRequest=4;configuration.timeoutIntervalForResource=5;configuration.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
+    NSURLSession *session=[NSURLSession sessionWithConfiguration:configuration];
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:4];request.HTTPMethod=@"HEAD";
+    NSDate *start=[NSDate date];
+    NSURLSessionDataTask *task=[session dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *rawResponse,NSError *error){
+        double elapsed=[[NSDate date] timeIntervalSinceDate:start]*1000.0;
+        NSHTTPURLResponse *response=[rawResponse isKindOfClass:NSHTTPURLResponse.class]?(id)rawResponse:nil;
+        NSInteger status=response.statusCode;BOOL ok=!error&&status>=200&&status<300;
+        NSDictionary *result=@{@"ok":@(ok),@"milliseconds":@(MAX(0,elapsed)),@"status":@(status)};
+        [session finishTasksAndInvalidate];
+        dispatch_async(dispatch_get_main_queue(),^{
+            ConfigCenterViewController *owner=weakSelf;if(!owner)return;
+            owner.latencyResults[source]=result;
+            [owner.tableView reloadData];
+        });
+    }];
+    [task resume];
 }
 - (void)probeResources {
     if(self.probingResources)return;
@@ -520,6 +612,9 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     if(ip.row<0||ip.row>=self.profiles.count)return c;
     c.backgroundColor = HostCard();
     c.layer.cornerRadius = 14;
+    c.layer.cornerCurve = kCACornerCurveContinuous;
+    c.layer.borderWidth = 0.6;
+    HostSetLayerBorderColor(c, HostBorder());
     c.clipsToBounds = YES;
     c.textLabel.textColor = HostText();
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
@@ -548,6 +643,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         c.textLabel.text=profileName;
         c.detailTextLabel.text=[self resourceDetailForProfile:p];
         UIColor *latencyColor=nil;c.latencyBadge.text=[self latencyTextForProfile:p color:&latencyColor];c.latencyBadge.textColor=latencyColor?:HostSecondaryText();c.latencyBadge.backgroundColor=HostRaisedSurface();c.latencyBadge.accessibilityLabel=[NSString stringWithFormat:@"资源测速：%@",c.latencyBadge.text?:@"未测速"];
+        c.protocolBadge.backgroundColor=HostSelectedSurface();c.protocolBadge.textColor=HostAccent();
         NSString *protoTag=plugin?(p[@"runtime"]?:@"插件"):(tvbox?([p[@"catalogKind"] isEqual:@"maccms"]?@"MacCMS":@"合集"):@"M3U");c.protocolBadge.text=[NSString stringWithFormat:@"  %@  ",protoTag];
         c.imageView.image=[UIImage systemImageNamed:plugin?([p[@"resourceKind"] isEqual:@"live"]?@"dot.radiowaves.left.and.right":@"play.rectangle"):(tvbox?([p[@"catalogKind"] isEqual:@"maccms"]?@"film":@"square.stack.3d.up"):@"list.bullet.rectangle")];
         if(!plugin&&!tvbox){
@@ -579,6 +675,13 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
                 NSString *catalogURL=[p[@"url"] isKindOfClass:NSString.class]?p[@"url"]:@"";
                 NSURL *catalogURLObject=[NSURL URLWithString:catalogURL];
                 if(catalogURLObject&&[@[@"http",@"https"] containsObject:catalogURLObject.scheme.lowercaseString])[menuActions addObject:[UIAction actionWithTitle:@"刷新合集" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){if(weakSelf.onRefreshCatalogProfile)weakSelf.onRefreshCatalogProfile(source);}]];
+            }
+            if([self probeURLForProfile:p]){
+                [menuActions addObject:[UIAction actionWithTitle:@"单条测速连接" image:[UIImage systemImageNamed:@"network"] identifier:nil handler:^(UIAction *a){[weakSelf probeSingleProfile:source];}]];
+            }
+            NSString *copyableURL=[p[@"url"] isKindOfClass:NSString.class]&&[p[@"url"] length]?p[@"url"]:([ProfileStore isHTTP:source]?source:@"");
+            if(copyableURL.length){
+                [menuActions addObject:[UIAction actionWithTitle:@"复制资源地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(UIAction *a){UIPasteboard.generalPasteboard.string=[HostLogRedactor redactText:copyableURL];}]];
             }
             UIAction *remove=[UIAction actionWithTitle:tvbox?(macCMS?@"移除影视接口":@"移除资源合集"): @"移除资源" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[weakSelf confirmRemoveProfile:source];}];[menuActions addObject:remove];
             UIButton *more=[UIButton buttonWithType:UIButtonTypeSystem];more.frame=CGRectMake(0,0,44,44);[more setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];more.menu=[UIMenu menuWithChildren:menuActions];more.showsMenuAsPrimaryAction=YES;more.accessibilityLabel=@"更多资源操作";more.accessibilityIdentifier=[NSString stringWithFormat:@"resource-more-%ld",(long)ip.row];more.tintColor=HostSecondaryText();more.backgroundColor=HostNeutralSurface();more.layer.cornerRadius=12;more.layer.cornerCurve=kCACornerCurveContinuous;more.layer.borderWidth=.6;HostSetLayerBorderColor(more,HostBorder());HostInstallPressFeedback(more);
@@ -655,16 +758,25 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     NSString *catalogURL=[profile[@"url"] isKindOfClass:NSString.class]?profile[@"url"]:@"";
     NSURL *catalogURLObject=[NSURL URLWithString:catalogURL];
     BOOL catalogRefreshable=tvbox&&!macCMS&&catalogURLObject&&[@[@"http",@"https"] containsObject:catalogURLObject.scheme.lowercaseString];
+    NSString *profileName=[self resourceTitleForProfile:profile];
+    NSString *copyableURL=catalogURL.length?catalogURL:([ProfileStore isHTTP:source]?source:@"");
+    BOOL canProbe=[self probeURLForProfile:profile]!=nil;
     return [UIContextMenuConfiguration configurationWithIdentifier:source previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
         if(tvbox){
             NSMutableArray *actions=[NSMutableArray array];
             if(catalogRefreshable)[actions addObject:[UIAction actionWithTitle:@"刷新合集" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){if(w.onRefreshCatalogProfile)w.onRefreshCatalogProfile(source);}]];
+            if(canProbe)[actions addObject:[UIAction actionWithTitle:@"单条测速连接" image:[UIImage systemImageNamed:@"network"] identifier:nil handler:^(UIAction *a){[w probeSingleProfile:source];}]];
+            if(copyableURL.length)[actions addObject:[UIAction actionWithTitle:@"复制资源地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(UIAction *a){UIPasteboard.generalPasteboard.string=[HostLogRedactor redactText:copyableURL];}]];
+            [actions addObject:[UIAction actionWithTitle:@"复制资源名称" image:[UIImage systemImageNamed:@"textformat"] identifier:nil handler:^(UIAction *a){UIPasteboard.generalPasteboard.string=profileName;}]];
             [actions addObject:[UIAction actionWithTitle:macCMS?@"移除影视接口":@"移除资源合集" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a){[w confirmRemoveProfile:source];}]];
             return [UIMenu menuWithTitle:@"合集操作" children:actions];
         }
         NSMutableArray *actions=[NSMutableArray array];
         if(source.length)[actions addObject:[UIAction actionWithTitle:[source hasPrefix:@"plugin:"]?@"编辑资源":@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
         [actions addObject:[UIAction actionWithTitle:@"导出单项资源文件" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *a){if(w.onExportResource)w.onExportResource(source,@"single");}]];
+        if(canProbe)[actions addObject:[UIAction actionWithTitle:@"单条测速连接" image:[UIImage systemImageNamed:@"network"] identifier:nil handler:^(UIAction *a){[w probeSingleProfile:source];}]];
+        if(copyableURL.length)[actions addObject:[UIAction actionWithTitle:@"复制资源地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(UIAction *a){UIPasteboard.generalPasteboard.string=[HostLogRedactor redactText:copyableURL];}]];
+        [actions addObject:[UIAction actionWithTitle:@"复制资源名称" image:[UIImage systemImageNamed:@"textformat"] identifier:nil handler:^(UIAction *a){UIPasteboard.generalPasteboard.string=profileName;}]];
         if(!source.length)return [UIMenu menuWithTitle:@"资源操作" children:actions];
         if([source hasPrefix:@"plugin:"]){
             if(subscriptionURL.length)[actions addObject:[UIAction actionWithTitle:@"刷新订阅清单" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *a){if(w.onRefreshProfile)w.onRefreshProfile(source);}]];

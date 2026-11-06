@@ -11,7 +11,9 @@
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     self.title = @"播放信息";
+    self.view.tintColor = HostAccent();
     self.tableView.backgroundColor = HostBackground();
     self.tableView.separatorColor = HostSeparator();
     self.tableView.rowHeight = UITableViewAutomaticDimension;
@@ -35,6 +37,27 @@
     [self refreshSnapshot];
 }
 
+- (void)reloadThemeAppearance {
+    self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
+    if (!self.isViewLoaded) return;
+    self.view.backgroundColor = HostBackground();
+    self.view.tintColor = HostAccent();
+    self.tableView.backgroundColor = HostBackground();
+    self.tableView.separatorColor = HostSeparator();
+    self.emptyLabel.textColor = HostSecondaryText();
+    [self.tableView reloadData];
+}
+
+- (void)showTransientPrompt:(NSString *)prompt {
+    self.navigationItem.prompt = prompt;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if ([weakSelf.navigationItem.prompt isEqualToString:prompt]) {
+            weakSelf.navigationItem.prompt = nil;
+        }
+    });
+}
+
 - (void)copyAllDiagnostics {
     if (!self.snapshotRows.count) return;
     NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithCapacity:self.snapshotRows.count];
@@ -43,12 +66,16 @@
         [lines addObject:[NSString stringWithFormat:@"%@：%@", [(row[@"title"]?:@"") description], [(row[@"value"]?:@"") description]]];
     }
     UIPasteboard.generalPasteboard.string = [lines componentsJoinedByString:@"\n"];
+    [self showTransientPrompt:@"已复制全部播放诊断信息"];
     UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, @"已复制全部播放诊断信息");
 }
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated];[self refreshSnapshot]; }
 - (void)refreshSnapshot { NSArray *rows=@[];if(self.rowsProvider){@try{rows=self.rowsProvider()?:@[];}@catch(NSException *e){rows=@[];}}self.snapshotRows=[rows isKindOfClass:NSArray.class]?rows:@[];self.emptyLabel.hidden=self.snapshotRows.count>0;[self.refreshControl endRefreshing];if(self.isViewLoaded)[self.tableView reloadData]; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return self.snapshotRows.count;
+}
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    return self.snapshotRows.count ? @"实时播放链路指标 · 点按任意行可复制" : nil;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     if(ip.row>=self.snapshotRows.count)return [UITableViewCell new];NSDictionary *row = [self.snapshotRows[ip.row] isKindOfClass:NSDictionary.class]?self.snapshotRows[ip.row]:@{};
@@ -57,6 +84,9 @@
     c.backgroundColor = HostCard();
     c.layer.cornerRadius = 13;
     c.layer.cornerCurve = kCACornerCurveContinuous;
+    c.clipsToBounds = YES;
+    c.layer.borderWidth = 0.6;
+    HostSetLayerBorderColor(c, HostBorder());
     NSString *titleText = [(row[@"title"]?:@"") description];
     c.textLabel.text = titleText;
     c.detailTextLabel.text = [(row[@"value"]?:@"") description];
@@ -80,6 +110,7 @@
     NSDictionary *row = [self.snapshotRows[ip.row] isKindOfClass:NSDictionary.class] ? self.snapshotRows[ip.row] : @{};
     NSString *line = [NSString stringWithFormat:@"%@：%@", [(row[@"title"]?:@"") description], [(row[@"value"]?:@"") description]];
     UIPasteboard.generalPasteboard.string = line;
+    [self showTransientPrompt:@"指标已复制"];
     UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, @"指标已复制");
 }
 @end

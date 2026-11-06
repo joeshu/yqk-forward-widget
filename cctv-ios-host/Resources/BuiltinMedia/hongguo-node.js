@@ -5,8 +5,9 @@
  * 一旦 require 就切到完整 Node（18.20.4），从而拿到原生 AES-CTR、文件和网络接口。
  *
  * 链路：
- *   签名 multi_video_model（x-gorgon/x-ladon/x-argus/x-helios）
- *   → 解 spade URL（AES-128-CBC）
+ *   匿名设备注册（service/2/device_register，持久化/复用已注册 device_id + iid）
+ *   → 签名请求当前播放接口（novel/player/video_model/v1，含新版校验字段与分支对齐）
+ *   → 解析 5 档视频模型（1080p/720p/540p/480p/360p）+ 解 spade URL（AES-128-CBC）
  *   → 派生 CENC key
  *   → 下载 + 原生 AES-CTR 逐样本解密 + 改写 moov
  *   → CCTVHost localProxy 按 Range 从资源数据目录交付给播放器
@@ -20,31 +21,39 @@ const path = require('node:path');
 
 // ---------------- 配置 ----------------
 const SITE = 'https://hongguoduanju.com';
+const DEVICE_REGISTER_API = 'https://log5-applog.fqnovel.com/service/2/device_register/';
+const VIDEO_MODEL_API = 'https://api5-normal-sinfonlineb.fqnovel.com/novel/player/video_model/v1/';
 const VIDEO_MODEL_MULTI_API = 'https://reading.snssdk.com/reading/bookapi/video_tab/multi_video_model/v1/';
 const UA_WEB = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
-const UA_APP = 'com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
+const UA_APP = 'com.phoenix.read/73532 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
 
-// App video_tab API profile. A fresh temporary DID/IID is generated per request;
-// do not ship a shared device identity in a plugin package.
+// App 播放与匿名注册公共设备参数（通过 device_register 获取真实注册的 device_id / iid 并复用）
 const DEVICE = {
   ac: 'wifi', channel: 'update_64', aid: '8662', app_name: 'novelread',
-  version_code: '71332', version_name: '7.1.3.32', device_platform: 'android', os: 'android',
+  package: 'com.phoenix.read',
+  version_code: '73532', version_name: '7.3.5.32', device_platform: 'android', os: 'android',
   ssmix: 'a', device_type: '25053RT47C', device_brand: 'Redmi', language: 'zh',
-  os_api: '36', os_version: '16', manifest_version_code: '71332', resolution: '1280*2772',
-  dpi: '520', update_version_code: '71332', host_abi: 'arm64-v8a', dragon_device_type: 'phone',
-  pv_player: '71332', compliance_status: '0', need_personal_recommend: '1',
+  os_api: '36', os_version: '16', manifest_version_code: '73532', resolution: '1280*2772',
+  dpi: '520', update_version_code: '73532', host_abi: 'arm64-v8a', dragon_device_type: 'phone',
+  pv_player: '73532', compliance_status: '0', need_personal_recommend: '1',
   player_so_load: '1', is_android_pad_screen: '0',
+  rom_version: 'BP2A.250605.031.A3 release-keys',
+  use_store_region_cookie: '1', okhttp_version: '4.2.137.76-fanqie',
 };
 
 const SPADE_CONST = Buffer.from(
   '4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524' +
   'f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
 
-const CACHE_DIR = path.join(process.cwd(), 'hgtv-js-cache');
+let CACHE_DIR = path.join(process.cwd(), 'hgtv-js-cache');
 
 const modelCache = new Map();     // vid -> {t, vm}
 const decryptFlights = new Map(); // vid + quality -> Promise<path|null>
 const MODEL_TTL = 300 * 1000;
+const DEVICE_SESSION_TTL = 7 * 24 * 3600 * 1000;
+
+let deviceSession = null;
+let deviceRegisterFlight = null;
 
 // ---------------- 工具 ----------------
 function md5(b) {
@@ -91,14 +100,26 @@ function rc4(data, key) {
 function pct(s) {
   return encodeURIComponent(String(s)).replace(/[!'()]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
+function randomUuid() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = crypto.randomBytes(16);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = b.toString('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+function randomOpenUdid() {
+  return crypto.randomBytes(20).toString('hex');
+}
 
-// ---------------- 签名 ----------------
+// ---------------- 签名与匿名设备注册 ----------------
 function xGorgon(query, body, ts, rnd) {
   const sdk = Buffer.alloc(4);
   sdk.writeUInt32LE(67503104);
+  const bodyBuf = body ? (Buffer.isBuffer(body) ? body : Buffer.from(body)) : null;
   const input = Buffer.concat([
     md5(query).subarray(0, 4),
-    body ? md5(body).subarray(0, 4) : Buffer.alloc(4),
+    bodyBuf && bodyBuf.length ? md5(bodyBuf).subarray(0, 4) : Buffer.alloc(4),
     Buffer.alloc(4),
     sdk,
     be32(ts),
@@ -167,44 +188,272 @@ function getIv(iv, data) {
 }
 
 function branchOf(url, body, ts) {
-  const q = crypto.createHash('sm3').update(url.split('?')[1]).digest();
-  const bm = body ? md5(body) : Buffer.alloc(16);
+  const qPart = String(url).split('?')[1] || '';
+  const q = crypto.createHash('sm3').update(qPart).digest();
+  const bodyBuf = body ? (Buffer.isBuffer(body) ? body : Buffer.from(body)) : null;
+  const bm = bodyBuf && bodyBuf.length ? md5(bodyBuf) : Buffer.alloc(16);
   const iv = getIv(getIv(getIv(0x20230928, q), bm), le32(ts));
   const low = iv & 15;
   return low - ((((low * 171) >>> 9) * 3));
 }
 
-function randomDeviceId() {
-  return (crypto.randomBytes(8).readBigUInt64BE(0) % 900000000000000000n + 100000000000000000n).toString();
+function selectSignedUrl(baseUrl, vals, body, ts) {
+  const baseMs = Date.now();
+  let query = '';
+  let url = '';
+  for (let off = 0; off < 32; off++) {
+    vals._rticket = String(baseMs + off);
+    query = Object.keys(vals).map(k => `${pct(k)}=${pct(vals[k])}`).join('&');
+    url = baseUrl + '?' + query;
+    if (branchOf(url, body, ts) !== 1) break;
+  }
+  return { url, query, rticket: vals._rticket };
 }
 
-function signedRequest(vid) {
-  const ts = Math.floor(Date.now() / 1000);
+function buildSignedHeaders(query, body, ts, rticket, extraHeaders) {
   const rnd = crypto.randomInt(0, 65536);
-  const vals = Object.assign({}, DEVICE, {
-    iid: randomDeviceId(), device_id: randomDeviceId(), ts: String(ts),
-    _rticket: String(Date.now()), video_id: String(vid),
-    need_all_video_definition: '1', video_platform: '1024',
-  });
-  const query = Object.keys(vals).map(k => `${pct(k)}=${pct(vals[k])}`).join('&');
-  const url = VIDEO_MODEL_MULTI_API + '?' + query;
+  const bodyBuf = body ? (Buffer.isBuffer(body) ? body : Buffer.from(body)) : null;
   const headers = {
     'User-Agent': UA_APP,
     'Accept': 'application/json; charset=utf-8,application/x-protobuf',
     'Content-Type': 'application/json; charset=UTF-8',
-    'x-ss-req-ticket': vals._rticket,
+    'x-xs-from-web': '0',
+    'x-ss-req-ticket': String(rticket),
     'x-tt-request-tag': 't=0;n=0',
     'sdk-version': '2',
     'passport-sdk-version': '50561',
     'x-vc-bdturing-sdk-version': '3.7.2.cn',
-    'x-gorgon': xGorgon(query, null, ts, rnd),
+    'x-gorgon': xGorgon(query, bodyBuf, ts, rnd),
     'x-khronos': String(ts),
     'x-ladon': be32(ts).toString('base64'),
     'x-argus': le32(ts).toString('base64'),
     'x-helios': helios(ts),
     'x-tt-dt': '',
   };
-  return { url, headers };
+  if (bodyBuf && bodyBuf.length) {
+    headers['x-ss-stub'] = md5(bodyBuf).toString('hex').toUpperCase();
+  }
+  if (extraHeaders && typeof extraHeaders === 'object') {
+    Object.assign(headers, extraHeaders);
+  }
+  return headers;
+}
+
+function validDeviceIdentity(session) {
+  if (!session || typeof session !== 'object') return false;
+  const did = String(session.device_id || '');
+  const iid = String(session.iid || session.install_id || '');
+  return /^[1-9]\d{5,23}$/.test(did) && /^[1-9]\d{5,23}$/.test(iid);
+}
+
+function newAnonymousDeviceSeed() {
+  const nowSec = Math.floor(Date.now() / 1000);
+  return {
+    cdid: randomUuid(),
+    openudid: randomOpenUdid(),
+    clientudid: randomUuid(),
+    req_id: randomUuid(),
+    key_register_ts: nowSec,
+  };
+}
+
+function deviceSessionFile() {
+  return path.join(CACHE_DIR, 'device_session.json');
+}
+
+function loadPersistedDeviceSession() {
+  try {
+    const fp = deviceSessionFile();
+    if (!fs.existsSync(fp)) return null;
+    const parsed = JSON.parse(fs.readFileSync(fp, 'utf8'));
+    if (!validDeviceIdentity(parsed)) return null;
+    if (parsed.registered_at && (Date.now() - Number(parsed.registered_at)) > DEVICE_SESSION_TTL) return null;
+    return {
+      device_id: String(parsed.device_id),
+      iid: String(parsed.iid || parsed.install_id),
+      cdid: String(parsed.cdid || randomUuid()),
+      openudid: String(parsed.openudid || randomOpenUdid()),
+      clientudid: String(parsed.clientudid || randomUuid()),
+      key_register_ts: Number(parsed.key_register_ts) || Math.floor(Date.now() / 1000),
+      registered_at: Number(parsed.registered_at) || Date.now(),
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function savePersistedDeviceSession(session) {
+  try {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    const fp = deviceSessionFile();
+    const tmp = fp + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(session));
+    fs.renameSync(tmp, fp);
+  } catch (error) { }
+}
+
+function deviceRegisterRequest(seed) {
+  const s = seed || newAnonymousDeviceSeed();
+  const ts = Math.floor(Date.now() / 1000);
+  const nowMs = Date.now();
+  const payload = {
+    magic_tag: 'ss_app_log',
+    header: {
+      display_name: '红果免费短剧',
+      aid: 8662,
+      channel: DEVICE.channel,
+      package: DEVICE.package,
+      app_version: DEVICE.version_name,
+      version_code: Number(DEVICE.version_code),
+      update_version_code: Number(DEVICE.update_version_code),
+      manifest_version_code: Number(DEVICE.manifest_version_code),
+      app_version_minor: DEVICE.version_name,
+      sdk_version: '3.7.0-rc.25-fanqie-xiaoshuo-opt',
+      sdk_target_version: 29,
+      git_hash: '5b6a0d3',
+      sdk_flavor: 'china',
+      guest_mode: 0,
+      is_system_app: 0,
+      pre_installed_channel: '',
+      not_request_sender: 0,
+      os: 'Android',
+      os_version: DEVICE.os_version,
+      os_api: Number(DEVICE.os_api),
+      device_model: DEVICE.device_type,
+      device_brand: DEVICE.device_brand,
+      device_manufacturer: 'Xiaomi',
+      cpu_abi: DEVICE.host_abi,
+      release_build: 'BP2A.250605.031.A3',
+      density_dpi: Number(DEVICE.dpi),
+      display_density: 'xxhdpi',
+      resolution: '1280x2772',
+      language: DEVICE.language,
+      timezone: 8,
+      access: DEVICE.ac,
+      rom_version: DEVICE.rom_version,
+      cdid: s.cdid,
+      openudid: s.openudid,
+      clientudid: s.clientudid,
+      ipv6_list: [{ type: 'client_anpi', value: '::' }],
+      region: 'CN',
+      tz_name: 'Asia/Shanghai',
+      tz_offset: 28800,
+      sim_serial_number: [],
+      oaid_may_support: false,
+      req_id: s.req_id || randomUuid(),
+      device_platform: DEVICE.device_platform,
+      custom: {
+        host_bit: 64,
+        account_region: 'cn',
+        device_type: 'phone',
+      },
+      apk_first_install_time: nowMs - 86400000,
+    },
+    _gen_time: nowMs,
+  };
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  const vals = Object.assign({}, DEVICE, {
+    cdid: s.cdid,
+    openudid: s.openudid,
+    clientudid: s.clientudid,
+    req_type: '1',
+    ts: String(ts),
+  });
+  const { url, query, rticket } = selectSignedUrl(DEVICE_REGISTER_API, vals, body, ts);
+  const headers = buildSignedHeaders(query, body, ts, rticket);
+  return { url, method: 'POST', headers, body, seed: s, ts };
+}
+
+async function registerDevice() {
+  const req = deviceRegisterRequest();
+  const r = await httpText(req.url, {
+    method: req.method,
+    headers: req.headers,
+    body: req.body,
+    timeout: 20000,
+  });
+  if (r.status < 200 || r.status >= 300 || !r.body.length) {
+    throw Error('empty device_register response');
+  }
+  const j = JSON.parse(r.body.toString('utf8'));
+  const data = (j && typeof j.data === 'object' && j.data) ? j.data : {};
+  const did = String(j.device_id_str || j.device_id || data.device_id_str || data.device_id || '');
+  const iid = String(j.install_id_str || j.install_id || j.iid || data.install_id_str || data.install_id || data.iid || '');
+  const session = {
+    device_id: did,
+    iid,
+    cdid: req.seed.cdid,
+    openudid: req.seed.openudid,
+    clientudid: req.seed.clientudid,
+    key_register_ts: req.ts,
+    registered_at: Date.now(),
+  };
+  if (!validDeviceIdentity(session)) {
+    throw Error('device_register returned invalid device identity');
+  }
+  deviceSession = session;
+  savePersistedDeviceSession(session);
+  return session;
+}
+
+async function ensureDeviceSession(forceRefresh = false) {
+  if (!forceRefresh) {
+    if (validDeviceIdentity(deviceSession)) return deviceSession;
+    const persisted = loadPersistedDeviceSession();
+    if (persisted) {
+      deviceSession = persisted;
+      return deviceSession;
+    }
+  }
+  if (deviceRegisterFlight) return deviceRegisterFlight;
+  deviceRegisterFlight = (async () => {
+    try {
+      return await registerDevice();
+    } finally {
+      deviceRegisterFlight = null;
+    }
+  })();
+  return deviceRegisterFlight;
+}
+
+function signedRequest(vid, device) {
+  const ts = Math.floor(Date.now() / 1000);
+  const dev = validDeviceIdentity(device) ? device : (validDeviceIdentity(deviceSession) ? deviceSession : null);
+  if (!dev) throw Error('registered device identity is required before signing playback request');
+  const payload = {
+    biz_param: {
+      detail_page_version: 0,
+      device_level: 3,
+      disable_digg_stat: false,
+      disable_video_relate_book: false,
+      from_video_id: '',
+      need_all_video_definition: true,
+      need_mp4_align: false,
+      source: 4,
+      use_os_player: false,
+      use_server_dns: false,
+      video_platform: 3,
+    },
+    content_type: 1,
+    video_id: String(vid),
+  };
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  const vals = Object.assign({}, DEVICE, {
+    iid: String(dev.iid),
+    device_id: String(dev.device_id),
+    cdid: String(dev.cdid || randomUuid()),
+    openudid: String(dev.openudid || randomOpenUdid()),
+    key_register_ts: String(dev.key_register_ts || ts),
+    req_type: '1',
+    ts: String(ts),
+  });
+  const { url, query, rticket } = selectSignedUrl(VIDEO_MODEL_API, vals, body, ts);
+  const headers = buildSignedHeaders(query, body, ts, rticket, {
+    'Cookie': `install_id=${vals.iid}; store-region=cn-zj; store-region-src=did`,
+    'x-tt-store-region': 'cn-zj',
+    'x-tt-store-region-src': 'did',
+  });
+  return { url, method: 'POST', headers, body, device: dev };
 }
 
 // ---------------- HTTP 客户端 ----------------
@@ -437,35 +686,71 @@ async function parseEpisodes(sid, html) {
 }
 
 // ---------------- 视频模型（签名接口） ----------------
+function parseVideoModelResponse(j, vid) {
+  if (!j || typeof j !== 'object') throw Error('invalid video model JSON');
+  if (j.code !== 0 && j.code != null) throw Error('video model request rejected');
+  const data = (j.data && typeof j.data === 'object') ? j.data : {};
+  const models = (data.video_model_data && typeof data.video_model_data === 'object') ? data.video_model_data : null;
+  let ent = (models && (models[String(vid)] || Object.values(models).find(value => value && typeof value === 'object'))) ||
+            ((data[String(vid)] && typeof data[String(vid)] === 'object') ? data[String(vid)] : null) ||
+            data;
+  let vm = ent && ent.video_model;
+  if (typeof vm === 'string') {
+    try { vm = JSON.parse(vm); } catch (error) { vm = null; }
+  }
+  if (!vm && typeof data.video_model === 'string') {
+    try { vm = JSON.parse(data.video_model); } catch (error) { vm = null; }
+  } else if (!vm && data.video_model && typeof data.video_model === 'object') {
+    vm = data.video_model;
+  }
+  if (!vm && (data.video_list || data.dynamic_video_list || data.dynamic_video)) {
+    vm = data;
+  }
+  if (!vm || typeof vm !== 'object') throw Error('video model missing');
+  if (!vm.key_seed && ent && ent.key_seed) vm.key_seed = ent.key_seed;
+  if (!vm.key_seed && data.key_seed) vm.key_seed = data.key_seed;
+  const dyn = (vm.dynamic_video && typeof vm.dynamic_video === 'object') ? vm.dynamic_video : null;
+  const rows = vm.video_list || vm.dynamic_video_list || (dyn && (dyn.dynamic_video_list || dyn.video_list));
+  if (Array.isArray(rows)) {
+    const normalized = {};
+    rows.forEach((item, index) => {
+      if (item && typeof item === 'object') normalized[String(index)] = item;
+    });
+    vm.video_list = normalized;
+  } else if (rows && typeof rows === 'object') {
+    vm.video_list = rows;
+  }
+  if (!vm.video_list || typeof vm.video_list !== 'object' || !Object.keys(vm.video_list).length) {
+    throw Error('video model contains no qualities');
+  }
+  return vm;
+}
+
 async function fetchModel(vid) {
   const hit = modelCache.get(String(vid));
   if (hit && Date.now() - hit.t < MODEL_TTL) return hit.vm;
+  let forceRefreshDevice = false;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const s = signedRequest(vid);
-      const r = await httpText(s.url, { method: 'GET', headers: s.headers, timeout: 25000 });
-      if (r.status < 200 || r.status >= 300 || !r.body.length) throw Error('empty video model response');
+      const dev = await ensureDeviceSession(forceRefreshDevice);
+      forceRefreshDevice = false;
+      const s = signedRequest(vid, dev);
+      const r = await httpText(s.url, {
+        method: s.method,
+        headers: s.headers,
+        body: s.body,
+        timeout: 25000,
+      });
+      if (r.status < 200 || r.status >= 300 || !r.body.length) {
+        forceRefreshDevice = true;
+        throw Error('empty video model response');
+      }
       const j = JSON.parse(r.body.toString('utf8'));
-      if (!j || (j.code !== 0 && j.code != null)) throw Error('video model request rejected');
-      const data = j.data || {};
-      const models = data.video_model_data || {};
-      let ent = models[String(vid)] || Object.values(models).find(value => value && typeof value === 'object') || data;
-      let vm = ent && ent.video_model;
-      if (typeof vm === 'string') { try { vm = JSON.parse(vm); } catch (error) { vm = null; } }
-      if (!vm && data.video_model) vm = data.video_model;
-      if (!vm || typeof vm !== 'object') throw Error('video model missing');
-      const rows = vm.video_list || vm.dynamic_video_list;
-      if (Array.isArray(rows)) {
-        const normalized = {};
-        rows.forEach((item, index) => { if (item && typeof item === 'object') normalized[String(index)] = item; });
-        vm.video_list = normalized;
-      }
-      if (!vm.video_list || typeof vm.video_list !== 'object' || !Object.keys(vm.video_list).length) {
-        throw Error('video model contains no qualities');
-      }
+      const vm = parseVideoModelResponse(j, vid);
       modelCache.set(String(vid), { t: Date.now(), vm });
       return vm;
     } catch (error) {
+      forceRefreshDevice = true;
       if (attempt === 2) break;
       await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
     }
@@ -491,6 +776,25 @@ function decryptSpade(value, seed) {
   while (pt.length && pt[pt.length - 1] === 0) pt = pt.subarray(0, pt.length - 1);
   const s = pt.toString('utf8');
   return s.startsWith('http') ? s : null;
+}
+
+function resolveMediaUrl(it, vm) {
+  const seedS = (vm && vm.key_seed) || (it && it.key_seed) || '';
+  const seed = seedS ? Buffer.from(seedS, 'base64') : Buffer.alloc(0);
+  const candidates = [it && it.main_url, it && it.backup_url_1, it && it.backup_url_2, it && it.backup_url]
+    .filter(u => typeof u === 'string' && u.length > 0);
+  for (const rawUrl of candidates) {
+    if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) return rawUrl;
+    if (seed.length) {
+      const dec = decryptSpade(rawUrl, seed);
+      if (dec) return dec;
+    }
+    try {
+      const plain = Buffer.from(rawUrl, 'base64').toString('utf8').trim();
+      if (plain.startsWith('http://') || plain.startsWith('https://')) return plain;
+    } catch (error) { }
+  }
+  return null;
 }
 
 function deriveContentKey(spadeA) {
@@ -523,7 +827,7 @@ function videoMetadata(item) {
   // Some App responses use Python dictionary syntax. Read only scalar fields;
   // never evaluate the response as JavaScript or Python code.
   const fields = {};
-  const re = /(['"])(definition|quality_name|vtype|vwidth|vheight)\1\s*:\s*(?:(['"])([^'"\\]*)\3|(-?\d+(?:\.\d+)?))(?=\s*[,}])/g;
+  const re = /(['"])(definition|quality_name|quality|vtype|vwidth|vheight)\1\s*:\s*(?:(['"])([^'"\\]*)\3|(-?\d+(?:\.\d+)?))(?=\s*[,}])/g;
   let match;
   while ((match = re.exec(value))) fields[match[2]] = match[4] === undefined ? Number(match[5]) : match[4];
   return fields;
@@ -531,7 +835,7 @@ function videoMetadata(item) {
 
 function videoQuality(item, fallback) {
   const meta = videoMetadata(item);
-  for (const value of [item.definition, meta.definition, item.quality_name, meta.quality_name]) {
+  for (const value of [item.definition, meta.definition, item.quality_name, meta.quality_name, item.quality, meta.quality]) {
     if (value == null) continue;
     let q = String(value).toLowerCase().replace(/\s/g, '');
     if (/^\d+$/.test(q)) q += 'p';
@@ -539,7 +843,12 @@ function videoQuality(item, fallback) {
   }
   const gear = String(item.gear_des_key || '');
   const match = /(?:^|\|)4:(\d{3,4}p)(?=\||$)/i.exec(gear);
-  return match ? match[1].toLowerCase() : String(fallback || '').toLowerCase();
+  if (match) return match[1].toLowerCase();
+  const w = Number(item.vwidth || meta.vwidth || 0);
+  const h = Number(item.vheight || meta.vheight || 0);
+  const shortSide = (w > 0 && h > 0) ? Math.min(w, h) : 0;
+  if ([360, 480, 540, 720, 1080].includes(shortSide)) return `${shortSide}p`;
+  return String(fallback || '').toLowerCase();
 }
 
 function qualityCandidates(vm) {
@@ -551,7 +860,7 @@ function qualityCandidates(vm) {
     if (!/^(?:\d{1,4}|\d{3,4}p)$/.test(q)) continue;
     const gear = String(it.gear_des_key || '').toLowerCase();
     const meta = videoMetadata(it);
-    const bad = (/bytevc2|bvc2/.test(gear + ' ' + String(meta.vtype || '').toLowerCase())) ? 1 : 0;
+    const bad = (/bytevc2|bvc2/.test(gear + ' ' + String(meta.vtype || it.vtype || '').toLowerCase())) ? 1 : 0;
     const order = /^\d{3,4}p$/.test(q) ? -parseInt(q, 10) : 1;
     cands.push({ bad, order, q, it });
   }
@@ -850,10 +1159,7 @@ async function decryptVideo(vid, want) {
   if (fs.existsSync(dst) && verifyMp4(dst)) return dst;
   if (fs.existsSync(dst)) { try { fs.unlinkSync(dst); } catch (e) { } }
 
-  const seedS = vm.key_seed || '';
-  const seed = seedS ? Buffer.from(seedS, 'base64') : Buffer.alloc(0);
-  let url = it.main_url || '';
-  if (url && !url.startsWith('http') && seed.length) url = decryptSpade(url, seed);
+  const url = resolveMediaUrl(it, vm);
   if (!url) return null;
   const encInfo = it.encrypt_info || {};
   const spadeA = it.spade_a || encInfo.spade_a;
@@ -946,7 +1252,12 @@ const CATS = [
 ];
 
 const site = {
-  init(ext) { return null; },
+  init(ext) {
+    if (ext && typeof ext === 'object' && ext.dataDir) {
+      CACHE_DIR = path.join(String(ext.dataDir), 'hgtv-js-cache');
+    }
+    return null;
+  },
 
   async home(filter) {
     try {
@@ -1064,6 +1375,8 @@ const site = {
   destroy() {
     decryptFlights.clear();
     modelCache.clear();
+    deviceSession = null;
+    deviceRegisterFlight = null;
   },
 };
 

@@ -8,5 +8,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,readonly) BOOL busy;
 @property(nonatomic,readonly,copy) NSString *taskSummary;
 - (void)refreshExistingResourceMatches;
+- (void)reloadThemeAppearance;
 @end
 NS_ASSUME_NONNULL_END

@@ -261,5 +261,26 @@ class SettingsContracts(unittest.TestCase):
         self.assertIn('@\"system\",@\"light\",@\"dark\"', self.backup)
 
 
+
+    def test_settings_refactored_seven_domain_architecture_and_category_filter(self):
+        # 设置页重构为 7 大科学领域分组 + 顶部分类胶囊快筛栏，且每一项均实际联动生效。
+        for cat_id in ['all', 'appearance', 'live', 'vod', 'engine', 'diagnostics', 'storage', 'about']:
+            self.assertIn(f'@"id":@"{cat_id}"', self.settings)
+        self.assertIn('settings.category.filter.scroll', self.settings)
+        self.assertIn('selectCategoryPill:', self.settings)
+        self.assertIn('applyCategoryFilter', self.settings)
+        for key in ['nativeChannelsEnabled', 'cctv.channelSortMode.v1', 'cctv.mediaGridColumns.v1']:
+            self.assertIn(f'@"key":@"{key}"', self.settings)
+            self.assertIn(key, self.root)
+            self.assertIn(key, self.backup)
+        for action in ['resetDefaultPreferences', 'clearEPGReminders', 'openTabMedia', 'openTabResources']:
+            self.assertIn(f'@"action":@"{action}"', self.settings)
+        self.assertIn('reloadMediaDisplayConfigurationIfLoaded', self.root)
+        self.assertIn('reloadMediaDisplayConfigurationIfLoaded', self.browser)
+        self.assertIn('[MediaPlaybackStateStore clearWatchHistory]', self.settings)
+        self.assertIn('removeObjectForKey:@"cctv.mediaFavorites.v1"', self.settings)
+        self.assertIn('removeObjectForKey:@"cctv.epgReminders.v1"', self.settings)
+
+
 if __name__ == '__main__':
     unittest.main()
