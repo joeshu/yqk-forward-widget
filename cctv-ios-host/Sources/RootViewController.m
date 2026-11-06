@@ -507,6 +507,9 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)
 configureCatalogNavigation;
 - (BOOL)hasVisibleExpandedLivePlayer;
+- (BOOL)isExpandedLivePlayerVisible;
+- (CGFloat)playerOverlayTopInset;
+- (UIEdgeInsets)playerOverlayInsets;
 - (void)showCatalogSearch;
 - (void)updateLiveResourceCapsule;
 - (void)selectLiveResourceSource:(nullable NSString *)source;
@@ -690,6 +693,29 @@ configureCatalogNavigation;
     if(!self.playerExpanded||self.activeTab>=2||!self.channelID.length)return NO;
     BOOL playerMatchesTab=self.favoritesOnly||(self.subscriptionCatalog==([self.currentRemoteURL length]>0));
     return playerMatchesTab;
+}
+
+// 展开直播的唯一判定：非全屏且有可见的展开直播播放器。viewDidLayoutSubviews、
+// configureCatalogNavigation 与 updateLiveResourceCapsule 共用此谓词，
+// 避免三处各自拼写 !fullscreen && hasVisibleExpandedLivePlayer 时漂移。
+- (BOOL)isExpandedLivePlayerVisible {
+    return !self.fullscreen && [self hasVisibleExpandedLivePlayer];
+}
+
+// 播放器覆盖层顶边距：展开直播时贴顶 0，全屏时留出安全区顶边，其余 0。
+// 与旧内联三元（expanded 0 / fullscreen safe.top / 其余 0）的取值完全一致。
+- (CGFloat)playerOverlayTopInset {
+    if ([self isExpandedLivePlayerVisible]) return 0;
+    if (self.fullscreen) return self.view.safeAreaInsets.top;
+    return 0;
+}
+
+// 播放器覆盖层边距：展开直播时上下均为 0，全屏时取全部安全区，其余为 0。
+// 底边与旧规则 self.fullscreen ? safe.bottom : 0 的取值完全一致。
+- (UIEdgeInsets)playerOverlayInsets {
+    if ([self isExpandedLivePlayerVisible]) return UIEdgeInsetsZero;
+    if (self.fullscreen) return self.view.safeAreaInsets;
+    return UIEdgeInsetsZero;
 }
 
 - (UIStatusBarStyle)preferredStatusBarStyle {
@@ -1305,7 +1331,7 @@ configureCatalogNavigation;
 }
 
 - (void)configureCatalogNavigation {
-    BOOL expandedLive=[self hasVisibleExpandedLivePlayer];
+    BOOL expandedLive=[self isExpandedLivePlayerVisible];
     self.title=expandedLive?(self.channelName?:@"直播"):(self.favoritesOnly?@"收藏频道":(self.subscriptionCatalog?@"频道":@"CCTV"));
     self.navigationItem.largeTitleDisplayMode=expandedLive?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationItem.searchController=self.searchController; self.navigationItem.hidesSearchBarWhenScrolling=NO;
@@ -1533,7 +1559,7 @@ configureCatalogNavigation;
 }
 - (void)updateLiveResourceCapsule {
     UIButton *capsule=self.liveResourceCapsule;if(!capsule)return;
-    BOOL visible=!self.fullscreen&&[self hasVisibleExpandedLivePlayer];capsule.hidden=!visible;
+    BOOL visible=[self isExpandedLivePlayerVisible];capsule.hidden=!visible;
     if(!visible)return;
     NSString *title=self.activeTab==0?@"央视直播":@"全部直播资源";
     UIMenu *menu=nil;
@@ -2378,7 +2404,7 @@ configureCatalogNavigation;
     CGFloat w = CGRectGetWidth(self.view.bounds);
     CGFloat height = CGRectGetHeight(self.view.bounds);
     CGFloat top = safe.top;
-    BOOL expandedLive=!self.fullscreen&&[self hasVisibleExpandedLivePlayer];
+    BOOL expandedLive=[self isExpandedLivePlayerVisible];
     if (self.fullscreen) {
         self.playerBox.frame = self.view.bounds;
         self.liveResourceCapsule.hidden=YES;
@@ -2412,20 +2438,20 @@ configureCatalogNavigation;
         // Every tab page owns the full root bounds. Child controls use their
         // safe-area guides, while their backgrounds and scroll views can pass
         // behind the status and navigation bars.
-        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat resourceSafeTop=self.view.window.safeAreaInsets.top;if(resourceSafeTop<=0)resourceSafeTop=top;CGFloat pageTop=0;self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,contentBottom-pageTop));if(resourcePage){[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:resourceSafeTop];[(ConfigCenterViewController *)self.tabPage setBottomOverlayInset:tabContentInset];}else if([self.tabPage isKindOfClass:MediaBrowserViewController.class])[(MediaBrowserViewController *)self.tabPage setBottomOverlayInset:tabContentInset];else if([self.tabPage isKindOfClass:SettingsViewController.class])[(SettingsViewController *)self.tabPage setBottomOverlayInset:tabContentInset];
+        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat pageTop=0;self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,contentBottom-pageTop));if(resourcePage){[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:top];[(ConfigCenterViewController *)self.tabPage setBottomOverlayInset:tabContentInset];}else if([self.tabPage isKindOfClass:MediaBrowserViewController.class])[(MediaBrowserViewController *)self.tabPage setBottomOverlayInset:tabContentInset];else if([self.tabPage isKindOfClass:SettingsViewController.class])[(SettingsViewController *)self.tabPage setBottomOverlayInset:tabContentInset];
         self.playerTopScrim.frame=CGRectMake(0,0,w,MIN(CGRectGetHeight(self.playerBox.bounds),expandedLive?48:top+24));self.playerTopGradient.frame=self.playerTopScrim.bounds;
         [self.view bringSubviewToFront:self.playerBox];[self.view bringSubviewToFront:self.liveResourceCapsule];[self.view bringSubviewToFront:self.groupControl];[self.view bringSubviewToFront:self.playerTabs];[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
         self.resourceActionsButton.hidden=YES;self.resourceActionsButton.frame=CGRectMake(w-safe.right-18-58,CGRectGetMinY(self.bottomBar.frame)-12-58,58,58);
         self.catalogFloatingControls.hidden=!catalog;CGFloat controlsWidth=164,controlsHeight=54;self.catalogFloatingControls.frame=CGRectMake(MAX(12,w-safe.right-controlsWidth-14),MAX(top+8,tabY-controlsHeight-12),controlsWidth,controlsHeight);self.catalogLayoutButton.frame=CGRectMake(4,3,48,48);self.catalogFloatingAirPlayPicker.frame=CGRectMake(58,3,48,48);self.catalogMoreButton.frame=CGRectMake(112,3,48,48);[self.view bringSubviewToFront:self.catalogFloatingControls];
     }
-    [self relayoutPlayer];
-    CGFloat overlayTop = expandedLive?0:(self.fullscreen?safe.top:0);
+    UIEdgeInsets overlayInsets=[self playerOverlayInsets];
+    CGFloat overlayTop=overlayInsets.top;
     CGFloat playerTitleHeight = ceil(self.titleLabel.font.lineHeight);
     CGFloat playerInfoHeight = ceil(self.infoLabel.font.lineHeight);
     self.titleLabel.frame = CGRectMake(12 + safe.left, overlayTop + 8, MAX(0, w - safe.left - safe.right - 80), playerTitleHeight);
     self.infoLabel.frame = CGRectMake(12 + safe.left, overlayTop + 8 + playerTitleHeight + 2, MAX(0, w - safe.left - safe.right - 24), playerInfoHeight);
     self.playerChannelLogo.frame=CGRectMake(MAX(safe.left+12,w-safe.right-60),overlayTop+8,48,27);
-    CGFloat bottom = self.fullscreen ? safe.bottom : 0;
+    CGFloat bottom = overlayInsets.bottom;
     self.controlBar.frame = CGRectMake(8 + safe.left, CGRectGetHeight(self.playerBox.bounds) - bottom - 52,
                                       MAX(0, w - safe.left - safe.right - 16), 44);
     self.spinner.center=CGPointMake(CGRectGetMidX(self.playerBox.bounds),CGRectGetMidY(self.playerBox.bounds));
@@ -2450,23 +2476,15 @@ configureCatalogNavigation;
 
 - (void)toggleFullscreen {
     self.fullscreen = !self.fullscreen;
-    CGFloat w = self.view.bounds.size.width;
     if (self.fullscreen) {
-        self.playerBox.frame = CGRectMake(0, 0, w, self.view.bounds.size.height);
-        self.table.hidden = YES;
-        self.groupControl.hidden = YES;
-        self.versionLabel.hidden = YES;
+        // 防御：播放器可能在非展开态被隐藏，全屏时必须可见；具体布局由
+        // viewDidLayoutSubviews 接管（全屏分支给 playerBox 全屏 frame）。
+        self.playerBox.hidden=NO;
     } else {
-        self.playerBox.frame = CGRectMake(0, 0, w, w * 9.0 / 16.0);
-        self.bottomBar.hidden = NO;
-        self.bottomBarBackdrop.hidden = NO;
-        self.table.hidden = NO;
-        self.groupControl.hidden = NO;
-        self.versionLabel.hidden = NO;
+        self.tabPage.view.hidden=NO;
     }
     [self configureCatalogNavigation];
     [self setNeedsStatusBarAppearanceUpdate];
-    self.tabPage.view.hidden=NO;
     [self.view setNeedsLayout];
     [self relayoutPlayer];
     [self attachVideoView];
@@ -2474,11 +2492,10 @@ configureCatalogNavigation;
 }
 
 - (void)relayoutPlayer {
+    // 标题/信息/controlBar 的 frame 由 viewDidLayoutSubviews 在 overlayTop/
+    // overlayInsets 算出后统一写，这里只保留 spinner 居中（toggleFullscreen
+    // 路径下 setNeedsLayout 尚未执行时也需要它）。
     CGRect b = self.playerBox.bounds;
-    self.controlBar.frame = CGRectMake(8, b.size.height - 52, b.size.width - 16, 44);
-    CGFloat titleHeight = ceil(self.titleLabel.font.lineHeight);
-    self.titleLabel.frame = CGRectMake(12, 8, b.size.width - 24, titleHeight);
-    self.infoLabel.frame = CGRectMake(12, 8 + titleHeight + 2, b.size.width - 24, ceil(self.infoLabel.font.lineHeight));
     self.spinner.center = CGPointMake(b.size.width / 2, b.size.height / 2);
 }
 

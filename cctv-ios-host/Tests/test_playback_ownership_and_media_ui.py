@@ -196,7 +196,9 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn('- (void)setTopSafeAreaInset:(CGFloat)inset', RESOURCE_SOURCE)
         layout = method_body(ROOT_SOURCE, '- (void)viewDidLayoutSubviews')
         self.assertIn('BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class]', layout)
-        self.assertIn('CGFloat resourceSafeTop=self.view.window.safeAreaInsets.top', layout)
+        # Step 3：资源页顶边距直接用 view 的 safe.top，不再读 window（window 可能为 nil）。
+        self.assertNotIn('self.view.window.safeAreaInsets.top', layout)
+        self.assertIn('setTopSafeAreaInset:top]', layout)
         self.assertIn('CGFloat pageTop=0', layout)
         view_will_appear = method_body(RESOURCE_SOURCE, '- (void)viewWillAppear:(BOOL)animated')
         self.assertIn('[self updateResourceHeaderLayoutReattaching:YES]', view_will_appear)

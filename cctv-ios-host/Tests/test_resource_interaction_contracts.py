@@ -139,8 +139,14 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom))', self.root)
         self.assertIn('CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets)', self.root)
         self.assertIn('self.playerBox.frame=CGRectMake(0,playerTop,w,ph)', self.root)
-        # 移植合并：overlayTop 同时兼顾 Codex 的 expandedLive 与 main 的 fullscreen。
-        self.assertIn('CGFloat overlayTop = expandedLive?0:(self.fullscreen?safe.top:0)', self.root)
+        # Step 3：overlayTop 改由统一 helper 计算，取值与旧三元一致
+        # （expanded 0 / fullscreen safe.top / 其余 0），底边亦然。
+        self.assertIn('- (CGFloat)playerOverlayTopInset', self.root)
+        self.assertIn('- (UIEdgeInsets)playerOverlayInsets', self.root)
+        self.assertIn('UIEdgeInsets overlayInsets=[self playerOverlayInsets]', self.root)
+        self.assertIn('CGFloat overlayTop=overlayInsets.top', self.root)
+        self.assertIn('CGFloat bottom = overlayInsets.bottom', self.root)
+        self.assertNotIn('expandedLive?0:(self.fullscreen?safe.top:0)', self.root)
         self.assertIn('self.liveResourceCapsule.frame=CGRectMake(safe.left+14,top+4,capsuleWidth,36)', self.root)
         self.assertIn('@"immersiveTopVersion":@1', self.root)
         self.assertIn('if(oldTopGeometry){gridY-=topInset;listY-=self.table.contentInset.top;}', self.root)

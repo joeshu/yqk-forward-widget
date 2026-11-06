@@ -255,7 +255,10 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom))', layout)
         self.assertIn('CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets)', layout)
         self.assertIn('CGRectMake(0,playerTop,w,ph)', layout)
-        self.assertIn('BOOL expandedLive=!self.fullscreen&&[self hasVisibleExpandedLivePlayer]', layout)
+        self.assertIn('BOOL expandedLive=[self isExpandedLivePlayerVisible]', layout)
+        # Step 3：展开直播的唯一判定收敛到 isExpandedLivePlayerVisible。
+        self.assertIn('- (BOOL)isExpandedLivePlayerVisible {', TEXT)
+        self.assertIn('return !self.fullscreen && [self hasVisibleExpandedLivePlayer]', TEXT)
         self.assertIn('CGFloat capsuleRowHeight=expandedLive?44:0', layout)
         self.assertIn('tabContentInset=MAX(8,height-tabY+8)', layout)
         self.assertIn('MAX(0,contentBottom-pageTop)', layout)
@@ -271,6 +274,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         search = TEXT[search_start:TEXT.index('\n}', search_start)]
         status = method_body('- (UIStatusBarStyle)preferredStatusBarStyle')
         self.assertIn('self.navigationController setNavigationBarHidden:hideNavigation animated:NO', navigation)
+        self.assertIn('BOOL expandedLive=[self isExpandedLivePlayerVisible]', navigation)
         self.assertIn('[self setNeedsStatusBarAppearanceUpdate]', navigation)
         self.assertIn('self.currentRemoteURL', expanded)
         self.assertIn('identifier:@"channel.catalog.search"', menu)
