@@ -15,12 +15,17 @@ class MediaDetailContracts(unittest.TestCase):
 
     def test_detail_sanitizes_untyped_detail_payload(self):
         self.assertIn('- (NSString *)safeDetailString:(id)value', self.impl)
-        self.assertIn('- (NSDictionary *)sanitizedDetail:(id)raw', self.impl)
+        self.assertIn('- (NSDictionary *)sanitizedDetail:(id)raw discardedLines:(NSUInteger *)discardedLines discardedEpisodes:(NSUInteger *)discardedEpisodes', self.impl)
         self.assertIn('if([value isKindOfClass:NSNumber.class])return [value stringValue];', self.impl)
-        self.assertIn('if(![rawLine isKindOfClass:NSDictionary.class])continue;', self.impl)
-        self.assertIn('if(![rawEpisode isKindOfClass:NSDictionary.class])continue;', self.impl)
-        self.assertIn('if(!episodeID.length)continue;', self.impl)
-        self.assertIn('if(!episodes.count)continue;', self.impl)
+        # 统一清洗器：丢弃的行/集计入 out-param，loadDetail 的诊断事件才能触发。
+        self.assertIn('if(discardedLines)*discardedLines=0;if(discardedEpisodes)*discardedEpisodes=0;', self.impl)
+        self.assertIn('if(![rawLine isKindOfClass:NSDictionary.class]){droppedLines++;continue;}', self.impl)
+        self.assertIn('if(![rawEpisode isKindOfClass:NSDictionary.class]){droppedEpisodes++;continue;}', self.impl)
+        self.assertIn('if(!episodeID.length){droppedEpisodes++;continue;}', self.impl)
+        self.assertIn('if(!episodes.count){droppedLines++;continue;}', self.impl)
+        self.assertIn('if(discardedLines)*discardedLines=droppedLines;if(discardedEpisodes)*discardedEpisodes=droppedEpisodes;', self.impl)
+        self.assertIn('@\"vod_pic\"', self.impl)
+        self.assertNotIn('MediaBrowserSanitizedDetail', self.source)
         self.assertIn('clean[@\"lines\"]=lines;', self.impl)
         # Unknown keys are preserved for the playback context (only known
         # display fields are coerced); the raw dict is the starting point.
@@ -28,9 +33,9 @@ class MediaDetailContracts(unittest.TestCase):
 
     def test_detail_load_applies_sanitizer(self):
         load = self.impl.split('- (void)loadDetail', 1)[1].split('- (void)restoreResumeEntrySelection', 1)[0]
-        # 合并后是链式双清洗：先实例 sanitizedDetail，再过静态
-        # MediaBrowserSanitizedDetail（丢弃行诊断 + 选中恢复）。
-        self.assertIn('MediaBrowserSanitizedDetail([owner sanitizedDetail:result],&discardedLines,&discardedEpisodes)', load)
+        # 统一清洗器：一次调用同时清洗并回传丢弃计数，诊断事件才能触发。
+        self.assertIn('[owner sanitizedDetail:result discardedLines:&discardedLines discardedEpisodes:&discardedEpisodes]', load)
+        self.assertNotIn('MediaBrowserSanitizedDetail', load)
         self.assertIn('owner.detail=sanitizedDetail;', load)
         self.assertNotIn('owner.detail=result;', load)
 

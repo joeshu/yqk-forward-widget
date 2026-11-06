@@ -73,19 +73,6 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
     return candidate.length&&saved.length&&[candidate localizedCaseInsensitiveCompare:saved]==NSOrderedSame;
 }
 
-static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *discardedLines, NSUInteger *discardedEpisodes) {
-    if(discardedLines)*discardedLines=0;if(discardedEpisodes)*discardedEpisodes=0;
-    if(![rawDetail isKindOfClass:NSDictionary.class])return nil;
-    NSMutableDictionary *detail=[rawDetail mutableCopy];NSUInteger droppedLines=0,droppedEpisodes=0;
-    NSArray *rawLines=[detail[@"lines"] isKindOfClass:NSArray.class]?detail[@"lines"]:@[];NSMutableArray *lines=[NSMutableArray arrayWithCapacity:rawLines.count];
-    for(id rawLine in rawLines){
-        if(![rawLine isKindOfClass:NSDictionary.class]){droppedLines++;continue;}
-        NSMutableDictionary *line=[rawLine mutableCopy];NSUInteger dropped=0;line[@"episodes"]=MediaBrowserDictionaryRows(line[@"episodes"],&dropped);droppedEpisodes+=dropped;[lines addObject:line];
-    }
-    detail[@"lines"]=lines;if(discardedLines)*discardedLines=droppedLines;if(discardedEpisodes)*discardedEpisodes=droppedEpisodes;
-    return detail;
-}
-
 @interface MediaSourcePicker : UITableViewController <UISearchResultsUpdating>
 @property(nonatomic, copy) NSArray<NSDictionary *> *choices;
 @property(nonatomic, copy) NSArray<NSDictionary *> *shown;
@@ -177,7 +164,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
 @property(nonatomic,copy) NSString *diagnosticTraceID;
 - (void)loadDetail;
 - (NSString *)safeDetailString:(id)value;
-- (NSDictionary *)sanitizedDetail:(id)raw;
+- (NSDictionary *)sanitizedDetail:(id)raw discardedLines:(NSUInteger *)discardedLines discardedEpisodes:(NSUInteger *)discardedEpisodes;
 - (void)selectRoute:(UIButton *)sender;
 - (void)selectParser;
 - (void)updateParserSelectionButton;
@@ -219,28 +206,29 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
     if([value isKindOfClass:NSNumber.class])return [value stringValue];
     return @"";
 }
-- (NSDictionary *)sanitizedDetail:(id)raw {
+- (NSDictionary *)sanitizedDetail:(id)raw discardedLines:(NSUInteger *)discardedLines discardedEpisodes:(NSUInteger *)discardedEpisodes {
+    if(discardedLines)*discardedLines=0;if(discardedEpisodes)*discardedEpisodes=0;
     if(![raw isKindOfClass:NSDictionary.class])return @{};
     NSMutableDictionary *clean=[(NSDictionary *)raw mutableCopy];
-    for(NSString *key in @[@"id",@"name",@"year",@"area",@"lang",@"type",@"actor",@"director",@"description",@"remarks",@"poster",@"banner",@"vod_pic_slide",@"pic",@"cover",@"cover_url",@"coverUrl",@"image",@"img",@"thumbnail",@"thumb",@"poster_url",@"posterUrl"]){
+    for(NSString *key in @[@"id",@"name",@"year",@"area",@"lang",@"type",@"actor",@"director",@"description",@"remarks",@"poster",@"banner",@"vod_pic_slide",@"vod_pic",@"pic",@"cover",@"cover_url",@"coverUrl",@"image",@"img",@"thumbnail",@"thumb",@"poster_url",@"posterUrl"]){
         NSString *text=[self safeDetailString:raw[key]];
         if(text.length)clean[key]=text;else [clean removeObjectForKey:key];
     }
-    NSMutableArray *lines=[NSMutableArray array];
+    NSMutableArray *lines=[NSMutableArray array];NSUInteger droppedLines=0,droppedEpisodes=0;
     if([raw[@"lines"] isKindOfClass:NSArray.class]){
         for(id rawLine in (NSArray *)raw[@"lines"]){
-            if(![rawLine isKindOfClass:NSDictionary.class])continue;
+            if(![rawLine isKindOfClass:NSDictionary.class]){droppedLines++;continue;}
             NSMutableArray *episodes=[NSMutableArray array];
             if([rawLine[@"episodes"] isKindOfClass:NSArray.class]){
                 for(id rawEpisode in (NSArray *)rawLine[@"episodes"]){
-                    if(![rawEpisode isKindOfClass:NSDictionary.class])continue;
+                    if(![rawEpisode isKindOfClass:NSDictionary.class]){droppedEpisodes++;continue;}
                     NSString *episodeID=[self safeDetailString:rawEpisode[@"id"]];
-                    if(!episodeID.length)continue;
+                    if(!episodeID.length){droppedEpisodes++;continue;}
                     NSString *episodeName=[self safeDetailString:rawEpisode[@"name"]];
                     [episodes addObject:@{@"id":episodeID,@"name":episodeName.length?episodeName:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)episodes.count+1],@"lineId":[self safeDetailString:rawEpisode[@"lineId"]]}];
                 }
             }
-            if(!episodes.count)continue;
+            if(!episodes.count){droppedLines++;continue;}
             NSString *lineName=[self safeDetailString:rawLine[@"name"]];
             NSString *lineID=[self safeDetailString:rawLine[@"id"]];
             NSString *fallback=[NSString stringWithFormat:@"线路 %lu",(unsigned long)lines.count+1];
@@ -248,6 +236,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
         }
     }
     clean[@"lines"]=lines;
+    if(discardedLines)*discardedLines=droppedLines;if(discardedEpisodes)*discardedEpisodes=droppedEpisodes;
     return clean;
 }
 - (void)viewDidLoad {
@@ -427,7 +416,7 @@ static NSDictionary *MediaBrowserSanitizedDetail(id rawDetail, NSUInteger *disca
             else{owner.status.text=[NSString stringWithFormat:@"影片详情加载失败\n%@",error.localizedDescription?:@"来源没有提供影片详情"];owner.status.hidden=NO;}
             return;
         }
-        NSUInteger discardedLines=0,discardedEpisodes=0;NSDictionary *sanitizedDetail=MediaBrowserSanitizedDetail([owner sanitizedDetail:result],&discardedLines,&discardedEpisodes);if(!sanitizedDetail){owner.status.text=@"来源返回的影片详情格式无法识别";owner.status.hidden=NO;return;}
+        NSUInteger discardedLines=0,discardedEpisodes=0;NSDictionary *sanitizedDetail=[owner sanitizedDetail:result discardedLines:&discardedLines discardedEpisodes:&discardedEpisodes];if(!sanitizedDetail){owner.status.text=@"来源返回的影片详情格式无法识别";owner.status.hidden=NO;return;}
         NSDictionary *previousDetail=owner.detail;owner.detail=sanitizedDetail;[owner restoreSelectionFromDetail:previousDetail];
         if(discardedLines||discardedEpisodes)[RuntimeDiagnostics.shared recordEvent:@"media_detail_malformed_rows_skipped" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.source[@"id"]?:@"",@"discarded_line_count":@(discardedLines),@"discarded_episode_count":@(discardedEpisodes)}];
         NSUInteger episodeCount=0;
