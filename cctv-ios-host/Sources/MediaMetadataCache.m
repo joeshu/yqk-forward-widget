@@ -95,7 +95,8 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         NSURL *directory=[support URLByAppendingPathComponent:@"CCTVHost" isDirectory:YES];
         if(directory){[NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL];_persistentPath=[[directory URLByAppendingPathComponent:@"MediaMetadataCache-v1.json"] path];}
         [self loadPersistentRecords];
-        #if CCTV_CACHE_HAS_UIKIT
+
+#if CCTV_CACHE_HAS_UIKIT
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(evictMemoryCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
 #endif
     }
