@@ -4,6 +4,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) NSDictionary *result;
 @property(nonatomic,copy) NSDictionary *context;
 @property(nonatomic) BOOL embeddedMode;
+@property(nonatomic,strong) UILabel *status;
+@property(nonatomic,strong) UIActivityIndicatorView *spinner;
 @property(nonatomic,copy) dispatch_block_t onPlaybackWillStart;
 @property(nonatomic,copy) void (^onEpisodeSelectionChanged)(NSDictionary *context);
 @property(nonatomic,copy) void (^onVideoAspectRatioChanged)(CGFloat aspectRatio);

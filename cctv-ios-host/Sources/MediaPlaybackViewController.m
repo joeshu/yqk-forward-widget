@@ -203,8 +203,6 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 @property(nonatomic,strong) UIScrollView *qualityScroll;
 @property(nonatomic,strong) UIStackView *qualityButtons;
 @property(nonatomic,strong) UILabel *episodeTitle;
-@property(nonatomic,strong) UILabel *status;
-@property(nonatomic,strong) UIActivityIndicatorView *spinner;
 @property(nonatomic,strong) UIButton *episodeButton;
 @property(nonatomic,strong) UIButton *playbackSpeedButton;
 @property(nonatomic,strong) UIStackView *playbackActionRow;
