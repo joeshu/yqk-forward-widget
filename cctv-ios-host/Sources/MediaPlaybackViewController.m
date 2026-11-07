@@ -576,7 +576,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     self.screenLockButton.backgroundColor=self.gestureLockActive?HostAccent():[UIColor colorWithWhite:0 alpha:0.58];
     self.controlPanel.userInteractionEnabled=!self.gestureLockActive;
     self.controlPanel.alpha=self.gestureLockActive?0.35:1.0;
-    [UIView animateWithDuration:0.25 usingSpringWithDamping:0.65 initialSpringVelocity:0.5 animations:^{
+    [UIView animateWithDuration:0.25 delay:0 usingSpringWithDamping:0.65 initialSpringVelocity:0.5 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
         self.screenLockButton.transform=CGAffineTransformMakeScale(1.15,1.15);
     } completion:^(BOOL finished){
         [UIView animateWithDuration:0.18 animations:^{self.screenLockButton.transform=CGAffineTransformIdentity;}];
