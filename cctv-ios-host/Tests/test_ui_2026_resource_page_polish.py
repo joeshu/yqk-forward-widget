@@ -101,7 +101,7 @@ class ResourcePage2026PolishTests(unittest.TestCase):
         self.assertIn("- (void)endBackgroundAutoAdvanceTaskIfNeeded", mp)
         self.assertIn("- (void)applicationWillEnterForeground:(NSNotification *)notification", mp)
         self.assertIn("if(self.player&&!self.pictureInPictureActive)self.playerController.player=nil;", mp)
-        self.assertIn("BOOL attachViewPlayer=(UIApplication.sharedApplication.applicationState==UIApplicationStateActive||self.pictureInPictureActive);self.playerController.player=attachViewPlayer?self.player:nil;", mp)
+        self.assertIn("BOOL attachViewPlayer=(UIApplication.sharedApplication.applicationState!=UIApplicationStateBackground||self.pictureInPictureActive);self.playerController.player=attachViewPlayer?self.player:nil;", mp)
         self.assertIn("- (void)updateNowPlayingInfoCenter", mp)
 
     def test_10_cctv_and_channel_pages_segments_recents_casting_center_and_empty_state_actions(self):
