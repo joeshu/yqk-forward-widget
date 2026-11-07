@@ -1408,6 +1408,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('playback_stall_recovery_started', self.playback)
         self.assertIn('generation!=owner.playerGeneration', self.playback)
         self.assertIn('pendingQualityWasPlaying', self.playback)
+        self.assertIn('self.player.timeControlStatus!=AVPlayerTimeControlStatusPaused', self.playback)
         self.assertIn('未能按名称确认分集', self.playback)
 
     def test_settings_expose_bounded_movie_metadata_cache_cleanup(self):

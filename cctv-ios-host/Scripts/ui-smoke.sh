@@ -131,8 +131,11 @@ fi
 if [ -f "$CONTAINER/Library/Application Support/ysp/cctvhost.log" ]; then
   cp "$CONTAINER/Library/Application Support/ysp/cctvhost.log" "$OUT/diagnostic.log"
 fi
-if [ -f "$CONTAINER/Library/Application Support/ysp/diagnostics/runtime-debug.jsonl" ]; then
-  cp "$CONTAINER/Library/Application Support/ysp/diagnostics/runtime-debug.jsonl" "$OUT/runtime-debug.jsonl"
+DIAGNOSTIC_SESSIONS="$CONTAINER/Library/Application Support/ysp/diagnostics/sessions"
+if [ -d "$DIAGNOSTIC_SESSIONS" ]; then
+  for session in "$DIAGNOSTIC_SESSIONS"/*.jsonl; do
+    [ -f "$session" ] && cp "$session" "$OUT/runtime-$(basename "$session" .jsonl).log"
+  done
 fi
 # Best-effort simulator diagnostics: app console output and crash reports, so a
 # silent smoke run still leaves evidence instead of an empty artifact.
