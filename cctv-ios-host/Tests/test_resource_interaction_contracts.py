@@ -1409,6 +1409,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('generation!=owner.playerGeneration', self.playback)
         self.assertIn('pendingQualityWasPlaying', self.playback)
         self.assertIn('self.player.timeControlStatus!=AVPlayerTimeControlStatusPaused', self.playback)
+        self.assertIn('UIApplication.sharedApplication.applicationState!=UIApplicationStateBackground||self.pictureInPictureActive', self.playback)
         self.assertIn('CCTVPlayerControllerReadyContext', self.playback)
         self.assertIn('[self.playerController addObserver:self forKeyPath:@"readyForDisplay"', self.playback)
         self.assertIn('[self.playerController removeObserver:self forKeyPath:@"readyForDisplay"', self.playback)
