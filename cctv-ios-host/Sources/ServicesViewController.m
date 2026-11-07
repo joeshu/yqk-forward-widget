@@ -498,7 +498,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     self.search.obscuresBackgroundDuringPresentation = NO;
     self.search.searchBar.placeholder = @"搜索名称、端口或协议";
     self.navigationItem.searchController = self.search;
-    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,88)];self.runtimeSummary=[[UILabel alloc] initWithFrame:CGRectMake(16,4,MAX(1,header.bounds.size.width-32),28)];self.runtimeSummary.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.runtimeSummary.textColor=HostSecondaryText();self.runtimeSummary.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];[header addSubview:self.runtimeSummary];self.statusFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"运行中",@"待处理",@"已停止"]];self.statusFilter.frame=CGRectMake(16,36,MAX(1,header.bounds.size.width-32),44);self.statusFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.statusFilter.selectedSegmentIndex=0;self.statusFilter.selectedSegmentTintColor=HostAccent();[self.statusFilter addTarget:self action:@selector(statusFilterChanged) forControlEvents:UIControlEventValueChanged];[header addSubview:self.statusFilter];self.table.tableHeaderView=header;
+    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,88)];self.runtimeSummary=[[UILabel alloc] initWithFrame:CGRectMake(16,4,MAX(1,header.bounds.size.width-32),28)];self.runtimeSummary.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.runtimeSummary.textColor=HostSecondaryText();self.runtimeSummary.font=HostMonospacedDigitFont(12.5,UIFontWeightMedium,UIFontTextStyleCaption1);[header addSubview:self.runtimeSummary];self.statusFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"运行中",@"待处理",@"已停止"]];self.statusFilter.frame=CGRectMake(16,36,MAX(1,header.bounds.size.width-32),44);self.statusFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.statusFilter.selectedSegmentIndex=0;self.statusFilter.selectedSegmentTintColor=HostAccent();[self.statusFilter addTarget:self action:@selector(statusFilterChanged) forControlEvents:UIControlEventValueChanged];[header addSubview:self.statusFilter];self.table.tableHeaderView=header;
     self.emptyLabel=[UILabel new];self.emptyLabel.text=@"还没有服务\n点右上角 + 添加服务，或从资源页导入脚本";self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=HostSecondaryText();self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.emptyLabel.adjustsFontForContentSizeCategory=YES;self.table.backgroundView=self.emptyLabel;
     [self refresh];
 }
@@ -576,6 +576,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return [self rows:section].count;
 }
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     return section<self.sectionTitles.count?self.sectionTitles[section]:nil;
 }
@@ -615,7 +616,8 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     BOOL target=[[self.changingServiceTargets objectForKey:identifier] boolValue];
     NSString *controlTitle=busy?(target?@"正在启动…":@"正在停止…"):(starting?@"启动中…":(uncertain?@"停止并清理":(managed?@"停止":@"启动")));
     [control setTitle:controlTitle forState:UIControlStateNormal];
-    control.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];control.frame=CGRectMake(0,0,108,44);control.enabled=!busy&&!starting;control.accessibilityIdentifier=identifier;control.accessibilityLabel=busy?(target?@"正在启动服务":@"正在停止服务"):(starting?@"服务启动中":(uncertain?@"停止并清理不确定会话":(managed?@"停止服务":@"启动服务")));
+    control.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];control.frame=CGRectMake(0,0,108,44);control.enabled=!busy&&!starting;control.backgroundColor=managed?HostNeutralSurface():HostSelectedSurface();control.tintColor=managed?HostText():HostAccent();control.layer.cornerRadius=14;control.layer.cornerCurve=kCACornerCurveContinuous;control.layer.borderWidth=0.6;HostSetLayerBorderColor(control,managed?HostBorder():[HostAccent() colorWithAlphaComponent:0.35]);HostInstallPressFeedback(control);control.accessibilityIdentifier=identifier;control.accessibilityLabel=busy?(target?@"正在启动服务":@"正在停止服务"):(starting?@"服务启动中":(uncertain?@"停止并清理不确定会话":(managed?@"停止服务":@"启动服务")));
+    if([PyHost isRunningServiceIdentifier:identifier]){c.layer.borderWidth=1.05;HostSetLayerBorderColor(c,HostAccent());}
     [control addTarget:self action:@selector(changeService:) forControlEvents:UIControlEventTouchUpInside];c.accessoryView=control;
     return c;
 }

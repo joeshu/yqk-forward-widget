@@ -86,7 +86,7 @@
     UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.tableView.bounds.size.width,82)];
     self.summaryLabel=[[UILabel alloc] initWithFrame:CGRectMake(18,4,MAX(1,header.bounds.size.width-36),22)];
     self.summaryLabel.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.summaryLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+    self.summaryLabel.font=HostMonospacedDigitFont(12.5,UIFontWeightMedium,UIFontTextStyleCaption1);
     self.summaryLabel.textColor=HostSecondaryText();
     self.summaryLabel.accessibilityIdentifier=@"tvbox.catalog.summary";
     [header addSubview:self.summaryLabel];
@@ -109,13 +109,22 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self filteredRowsForSection:section].count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {NSArray *rows=[self filteredRowsForSection:section];return section==0?[NSString stringWithFormat:@"影视站点 · %lu",(unsigned long)rows.count]:[NSString stringWithFormat:@"直播列表 · %lu",(unsigned long)rows.count];}
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
+- (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionFooterView(view); }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return @"推荐按需加载：在首页顶部选择本合集，再从右侧胶囊点选站点；仅所选脚本会下载，type 1/4 JSON API 会直接读取。不兼容项会保留并标注。";return @"点按需要的直播清单即可加载；同一直播合集只保留当前选择的一个清单，其他清单仍留在合集内。刷新播放列表时会应用合集提供的 UA。";}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"tvbox.catalog.row"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"tvbox.catalog.row"];cell.backgroundColor=HostCard();cell.layer.cornerRadius=13;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();
     NSArray *rows=[self filteredRowsForSection:ip.section];if(ip.row<0||ip.row>=rows.count)return cell;
     NSDictionary *row=rows[ip.row];if(![row isKindOfClass:NSDictionary.class])return cell;
     cell.textLabel.text=[row[@"name"] description]?:@"未命名";
-    BOOL supported=[row[@"supported"] boolValue];NSDictionary *service=ip.section==0&&self.serviceForSite?self.serviceForSite(row):nil;NSString *status=[row[@"status"] description]?:@"";if(service)status=[PyHost isRunningServiceIdentifier:service[@"id"]]?@"服务运行中 · 点按打开资源":@"服务已导入 · 点按启动并打开资源";cell.detailTextLabel.text=ip.section==0?[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"api"] description]?:@""]]:[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"url"] description]?:@""]];cell.accessoryType=supported?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;cell.selectionStyle=supported?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;cell.textLabel.textColor=supported?HostText():HostMutedText();return cell;
+    cell.textLabel.font=HostRoundedFont(16,UIFontWeightSemibold,UIFontTextStyleHeadline);
+    cell.detailTextLabel.font=HostMonospacedDigitFont(12,UIFontWeightRegular,UIFontTextStyleCaption1);
+    BOOL supported=[row[@"supported"] boolValue];NSDictionary *service=ip.section==0&&self.serviceForSite?self.serviceForSite(row):nil;BOOL serviceRunning=service&&[PyHost isRunningServiceIdentifier:service[@"id"]];NSString *status=[row[@"status"] description]?:@"";if(service)status=serviceRunning?@"服务运行中 · 点按打开资源":@"服务已导入 · 点按启动并打开资源";cell.detailTextLabel.text=ip.section==0?[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"api"] description]?:@""]]:[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"url"] description]?:@""]];
+    NSString *iconName=ip.section==0?([row[@"apiKind"] isEqual:@"script"]?@"terminal":@"bolt.horizontal.circle"):@"dot.radiowaves.left.and.right";
+    cell.imageView.image=[UIImage systemImageNamed:iconName];
+    cell.imageView.tintColor=supported?(serviceRunning?UIColor.systemGreenColor:HostAccent()):HostMutedText();
+    if(serviceRunning){cell.layer.borderWidth=1.05;HostSetLayerBorderColor(cell,HostAccent());}
+    cell.accessoryType=supported?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;cell.selectionStyle=supported?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;cell.textLabel.textColor=supported?HostText():HostMutedText();return cell;
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
     NSArray *rows=[self filteredRowsForSection:ip.section];if(ip.row<0||ip.row>=rows.count)return nil;

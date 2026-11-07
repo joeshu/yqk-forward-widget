@@ -18,6 +18,9 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 @property(nonatomic,strong) UILabel *profileDetailLabel;
 @property(nonatomic,strong) UILabel *protocolBadge;
 @property(nonatomic,strong) UILabel *latencyBadge;
+@property(nonatomic,strong) UILabel *statusBadge;
+@property(nonatomic,copy) NSString *profileSource;
+@property(nonatomic,copy) void (^onTapLatency)(NSString *source);
 @end
 
 @implementation CCTVResourceProfileCell
@@ -29,8 +32,10 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
         self.profileTitleLabel=[UILabel new];self.profileTitleLabel.translatesAutoresizingMaskIntoConstraints=NO;self.profileTitleLabel.numberOfLines=2;self.profileTitleLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.profileTitleLabel.adjustsFontForContentSizeCategory=YES;
         self.profileDetailLabel=[UILabel new];self.profileDetailLabel.translatesAutoresizingMaskIntoConstraints=NO;self.profileDetailLabel.numberOfLines=0;self.profileDetailLabel.lineBreakMode=NSLineBreakByCharWrapping;self.profileDetailLabel.adjustsFontForContentSizeCategory=YES;
         self.protocolBadge=[UILabel new];self.protocolBadge.translatesAutoresizingMaskIntoConstraints=NO;self.protocolBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightBold,UIFontTextStyleCaption2);self.protocolBadge.textAlignment=NSTextAlignmentCenter;self.protocolBadge.layer.cornerRadius=6;self.protocolBadge.layer.cornerCurve=kCACornerCurveContinuous;self.protocolBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.protocolBadge,[HostAccent() colorWithAlphaComponent:0.32]);self.protocolBadge.clipsToBounds=YES;self.protocolBadge.backgroundColor=HostSelectedSurface();self.protocolBadge.textColor=HostAccent();self.protocolBadge.accessibilityIdentifier=@"resource.protocol.badge";
-        self.latencyBadge=[UILabel new];self.latencyBadge.translatesAutoresizingMaskIntoConstraints=NO;self.latencyBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightSemibold,UIFontTextStyleCaption2);self.latencyBadge.textAlignment=NSTextAlignmentCenter;self.latencyBadge.layer.cornerRadius=6;self.latencyBadge.layer.cornerCurve=kCACornerCurveContinuous;self.latencyBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.latencyBadge,HostBorder());self.latencyBadge.clipsToBounds=YES;self.latencyBadge.backgroundColor=HostRaisedSurface();self.latencyBadge.textColor=HostSecondaryText();
-        [self.contentView addSubview:self.iconBadgeContainer];[self.contentView addSubview:self.profileTitleLabel];[self.contentView addSubview:self.protocolBadge];[self.contentView addSubview:self.latencyBadge];[self.contentView addSubview:self.profileDetailLabel];
+        self.latencyBadge=[UILabel new];self.latencyBadge.translatesAutoresizingMaskIntoConstraints=NO;self.latencyBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightSemibold,UIFontTextStyleCaption2);self.latencyBadge.textAlignment=NSTextAlignmentCenter;self.latencyBadge.layer.cornerRadius=6;self.latencyBadge.layer.cornerCurve=kCACornerCurveContinuous;self.latencyBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.latencyBadge,HostBorder());self.latencyBadge.clipsToBounds=YES;self.latencyBadge.backgroundColor=HostRaisedSurface();self.latencyBadge.textColor=HostSecondaryText();self.latencyBadge.userInteractionEnabled=YES;self.latencyBadge.accessibilityIdentifier=@"resource.latency.badge";
+        UITapGestureRecognizer *latencyTap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleLatencyBadgeTap)];[self.latencyBadge addGestureRecognizer:latencyTap];
+        self.statusBadge=[UILabel new];self.statusBadge.translatesAutoresizingMaskIntoConstraints=NO;self.statusBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightSemibold,UIFontTextStyleCaption2);self.statusBadge.textAlignment=NSTextAlignmentCenter;self.statusBadge.layer.cornerRadius=6;self.statusBadge.layer.cornerCurve=kCACornerCurveContinuous;self.statusBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.statusBadge,HostBorder());self.statusBadge.clipsToBounds=YES;self.statusBadge.backgroundColor=HostNeutralSurface();self.statusBadge.textColor=HostSecondaryText();self.statusBadge.accessibilityIdentifier=@"resource.status.badge";
+        [self.contentView addSubview:self.iconBadgeContainer];[self.contentView addSubview:self.profileTitleLabel];[self.contentView addSubview:self.protocolBadge];[self.contentView addSubview:self.latencyBadge];[self.contentView addSubview:self.statusBadge];[self.contentView addSubview:self.profileDetailLabel];
         [NSLayoutConstraint activateConstraints:@[
             [self.iconBadgeContainer.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
             [self.iconBadgeContainer.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
@@ -50,6 +55,10 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
             [self.latencyBadge.centerYAnchor constraintEqualToAnchor:self.protocolBadge.centerYAnchor],
             [self.latencyBadge.widthAnchor constraintGreaterThanOrEqualToConstant:44],
             [self.latencyBadge.heightAnchor constraintEqualToConstant:19],
+            [self.statusBadge.leadingAnchor constraintEqualToAnchor:self.latencyBadge.trailingAnchor constant:6],
+            [self.statusBadge.centerYAnchor constraintEqualToAnchor:self.protocolBadge.centerYAnchor],
+            [self.statusBadge.heightAnchor constraintEqualToConstant:19],
+            [self.statusBadge.trailingAnchor constraintLessThanOrEqualToAnchor:self.contentView.trailingAnchor constant:-8],
             [self.profileDetailLabel.leadingAnchor constraintEqualToAnchor:self.profileTitleLabel.leadingAnchor],
             [self.profileDetailLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-8],
             [self.profileDetailLabel.topAnchor constraintEqualToAnchor:self.protocolBadge.bottomAnchor constant:6],
@@ -57,6 +66,19 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
         ]];
     }
     return self;
+}
+- (void)handleLatencyBadgeTap {
+    if(!self.profileSource.length||!self.onTapLatency)return;
+    HostAnimateSelection(self.latencyBadge);
+    self.onTapLatency(self.profileSource);
+}
+- (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
+    [super setHighlighted:highlighted animated:animated];
+    self.backgroundColor=highlighted?HostHighlightedSurface():HostCard();
+    if(UIAccessibilityIsReduceMotionEnabled())return;
+    [UIView animateWithDuration:highlighted?0.10:0.24 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        self.transform=highlighted?CGAffineTransformMakeScale(0.985,0.985):CGAffineTransformIdentity;
+    } completion:nil];
 }
 - (UILabel *)textLabel { return self.profileTitleLabel; }
 - (UILabel *)detailTextLabel { return self.profileDetailLabel; }
@@ -106,10 +128,15 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 @property(nonatomic,strong) NSLayoutConstraint *importTaskToggleHeight;
 @property(nonatomic,strong) NSLayoutConstraint *importTaskDetailHeight;
 @property(nonatomic) BOOL importTaskExpanded;
+@property(nonatomic,strong) UIButton *sortFilterButton;
 @property(nonatomic,strong) UIView *compactHeader;
+@property(nonatomic,strong) UIVisualEffectView *compactBlur;
+@property(nonatomic,strong) UIView *compactSeparator;
 @property(nonatomic,strong) UILabel *compactTitle;
 @property(nonatomic,strong) UIButton *compactAdd;
 @property(nonatomic,strong) UIButton *compactMore;
+- (void)updateSortPillButton;
+- (NSString *)statusBadgeTextForProfile:(NSDictionary *)profile textColor:(UIColor * __autoreleasing *)textColorOut backgroundColor:(UIColor * __autoreleasing *)bgColorOut borderColor:(UIColor * __autoreleasing *)borderColorOut;
 - (void)layoutCompactHeader;
 - (void)updateResourceHeaderLayout;
 - (void)updateResourceHeaderLayoutReattaching:(BOOL)reattach;
@@ -156,15 +183,19 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     for(NSDictionary *item in actions){UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.accessibilityLabel=item[@"label"];button.accessibilityIdentifier=[@"resource-action." stringByAppendingString:item[@"label"]];UIButtonConfiguration *config=[UIButtonConfiguration plainButtonConfiguration];config.image=[UIImage systemImageNamed:item[@"icon"]];config.baseForegroundColor=HostText();config.contentInsets=NSDirectionalEdgeInsetsMake(8,8,8,8);button.configuration=config;HostInstallPressFeedback(button);SEL selector=NSSelectorFromString(item[@"selector"]);[button addTarget:self action:selector forControlEvents:UIControlEventTouchUpInside];[self.topActionsStack addArrangedSubview:button];[button.widthAnchor constraintEqualToConstant:44].active=YES;[button.heightAnchor constraintEqualToConstant:44].active=YES;}
     UIButton *moreButton=[UIButton buttonWithType:UIButtonTypeSystem];moreButton.translatesAutoresizingMaskIntoConstraints=NO;moreButton.accessibilityLabel=@"更多资源操作";moreButton.accessibilityIdentifier=@"resource-action.more";UIButtonConfiguration *moreConfig=[UIButtonConfiguration plainButtonConfiguration];moreConfig.image=[UIImage systemImageNamed:@"ellipsis"];moreConfig.baseForegroundColor=HostText();moreConfig.contentInsets=NSDirectionalEdgeInsetsMake(8,8,8,8);moreButton.configuration=moreConfig;HostInstallPressFeedback(moreButton);[moreButton.widthAnchor constraintEqualToConstant:44].active=YES;[moreButton.heightAnchor constraintEqualToConstant:44].active=YES;__weak typeof(self) weakSelf=self;UIAction *servicesAction=[UIAction actionWithTitle:@"脚本与服务" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(UIAction *action){[weakSelf openServices];}];UIAction *filterAction=[UIAction actionWithTitle:@"筛选与排序" image:[UIImage systemImageNamed:@"line.3.horizontal.decrease"] identifier:nil handler:^(UIAction *action){[weakSelf showResourceFilters];}];UIAction *probeAction=[UIAction actionWithTitle:@"检查全部资源连接" image:[UIImage systemImageNamed:@"network"] identifier:nil handler:^(UIAction *action){[weakSelf probeResources];}];moreButton.menu=[UIMenu menuWithChildren:@[filterAction,probeAction,servicesAction]];moreButton.showsMenuAsPrimaryAction=YES;[self.topActionsStack addArrangedSubview:moreButton];
 
-    self.resourceTitleLabel=[UILabel new];self.resourceTitleLabel.translatesAutoresizingMaskIntoConstraints=NO;self.resourceTitleLabel.text=@"资源";self.resourceTitleLabel.textColor=HostText();self.resourceTitleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleLargeTitle] scaledFontForFont:[UIFont systemFontOfSize:34 weight:UIFontWeightBold]];self.resourceTitleLabel.adjustsFontForContentSizeCategory=YES;[self.resourceHeader addSubview:self.resourceTitleLabel];
-    self.resourceSearchField=[UITextField new];self.resourceSearchField.translatesAutoresizingMaskIntoConstraints=NO;self.resourceSearchField.accessibilityIdentifier=@"resource-search-field";self.resourceSearchField.accessibilityLabel=@"搜索资源";self.resourceSearchField.placeholder=@"搜索资源";self.resourceSearchField.clearButtonMode=UITextFieldViewModeWhileEditing;self.resourceSearchField.returnKeyType=UIReturnKeySearch;self.resourceSearchField.delegate=self;self.resourceSearchField.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.resourceSearchField.adjustsFontForContentSizeCategory=YES;self.resourceSearchField.textColor=HostText();self.resourceSearchField.tintColor=HostAccent();self.resourceSearchField.backgroundColor=HostRaisedSurface();self.resourceSearchField.layer.cornerRadius=14;self.resourceSearchField.layer.cornerCurve=kCACornerCurveContinuous;self.resourceSearchField.leftViewMode=UITextFieldViewModeAlways;UIView *searchIconContainer=[[UIView alloc] initWithFrame:CGRectMake(0,0,38,44)];UIImageView *searchIcon=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"magnifyingglass"]];searchIcon.tintColor=HostMutedText();searchIcon.frame=CGRectMake(12,13,18,18);searchIconContainer.userInteractionEnabled=NO;[searchIconContainer addSubview:searchIcon];self.resourceSearchField.leftView=searchIconContainer;[self.resourceSearchField addTarget:self action:@selector(searchTextChanged) forControlEvents:UIControlEventEditingChanged];[self.resourceHeader addSubview:self.resourceSearchField];
+    self.resourceTitleLabel=[UILabel new];self.resourceTitleLabel.translatesAutoresizingMaskIntoConstraints=NO;self.resourceTitleLabel.text=@"资源";self.resourceTitleLabel.textColor=HostText();self.resourceTitleLabel.font=HostRoundedFont(34,UIFontWeightBold,UIFontTextStyleLargeTitle);self.resourceTitleLabel.adjustsFontForContentSizeCategory=YES;[self.resourceHeader addSubview:self.resourceTitleLabel];
+    self.resourceSearchField=[UITextField new];self.resourceSearchField.translatesAutoresizingMaskIntoConstraints=NO;self.resourceSearchField.accessibilityIdentifier=@"resource-search-field";self.resourceSearchField.accessibilityLabel=@"搜索资源";self.resourceSearchField.placeholder=@"搜索资源";self.resourceSearchField.clearButtonMode=UITextFieldViewModeWhileEditing;self.resourceSearchField.returnKeyType=UIReturnKeySearch;self.resourceSearchField.delegate=self;self.resourceSearchField.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.resourceSearchField.adjustsFontForContentSizeCategory=YES;self.resourceSearchField.textColor=HostText();self.resourceSearchField.tintColor=HostAccent();self.resourceSearchField.backgroundColor=HostRaisedSurface();self.resourceSearchField.layer.cornerRadius=14;self.resourceSearchField.layer.cornerCurve=kCACornerCurveContinuous;self.resourceSearchField.layer.borderWidth=0.65;HostSetLayerBorderColor(self.resourceSearchField,HostBorder());self.resourceSearchField.leftViewMode=UITextFieldViewModeAlways;UIView *searchIconContainer=[[UIView alloc] initWithFrame:CGRectMake(0,0,38,44)];UIImageView *searchIcon=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"magnifyingglass"]];searchIcon.tintColor=HostMutedText();searchIcon.frame=CGRectMake(12,13,18,18);searchIconContainer.userInteractionEnabled=NO;[searchIconContainer addSubview:searchIcon];self.resourceSearchField.leftView=searchIconContainer;
+    self.sortFilterButton=[UIButton buttonWithType:UIButtonTypeSystem];self.sortFilterButton.accessibilityIdentifier=@"resource-sort-pill";self.sortFilterButton.titleLabel.font=HostMonospacedDigitFont(11.5,UIFontWeightSemibold,UIFontTextStyleCaption1);self.sortFilterButton.backgroundColor=HostNeutralSurface();self.sortFilterButton.tintColor=HostSecondaryText();self.sortFilterButton.layer.cornerRadius=11;self.sortFilterButton.layer.cornerCurve=kCACornerCurveContinuous;self.sortFilterButton.layer.borderWidth=0.55;HostSetLayerBorderColor(self.sortFilterButton,HostBorder());self.sortFilterButton.contentEdgeInsets=UIEdgeInsetsMake(4,9,4,9);self.sortFilterButton.showsMenuAsPrimaryAction=YES;HostInstallPressFeedback(self.sortFilterButton);
+    UIView *sortRightContainer=[[UIView alloc] initWithFrame:CGRectMake(0,0,82,32)];self.sortFilterButton.frame=CGRectMake(0,3,74,26);[sortRightContainer addSubview:self.sortFilterButton];self.resourceSearchField.rightView=sortRightContainer;self.resourceSearchField.rightViewMode=UITextFieldViewModeUnlessEditing;
+    [self updateSortPillButton];
+    [self.resourceSearchField addTarget:self action:@selector(searchTextChanged) forControlEvents:UIControlEventEditingChanged];[self.resourceHeader addSubview:self.resourceSearchField];
 
     self.kindScroll=[UIScrollView new];self.kindScroll.translatesAutoresizingMaskIntoConstraints=NO;self.kindScroll.showsHorizontalScrollIndicator=NO;self.kindScroll.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;
     self.kindStack=[UIStackView new];self.kindStack.translatesAutoresizingMaskIntoConstraints=NO;self.kindStack.axis=UILayoutConstraintAxisHorizontal;self.kindStack.spacing=8;[self.kindScroll addSubview:self.kindStack];[self.resourceHeader addSubview:self.kindScroll];
     self.kindScrollHeightConstraint=[self.kindScroll.heightAnchor constraintEqualToConstant:48];
     self.resourceHeaderTopConstraint=[self.topActionsStack.topAnchor constraintEqualToAnchor:self.resourceHeader.topAnchor constant:4];
     [NSLayoutConstraint activateConstraints:@[self.resourceHeaderTopConstraint,[self.topActionsStack.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-16],[self.topActionsStack.widthAnchor constraintEqualToConstant:88],[self.topActionsStack.heightAnchor constraintEqualToConstant:44],[self.resourceTitleLabel.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:20],[self.resourceTitleLabel.topAnchor constraintEqualToAnchor:self.topActionsStack.topAnchor],[self.resourceTitleLabel.heightAnchor constraintGreaterThanOrEqualToConstant:42],[self.resourceSearchField.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:20],[self.resourceSearchField.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor constant:-20],[self.resourceSearchField.topAnchor constraintEqualToAnchor:self.resourceTitleLabel.bottomAnchor constant:6],[self.resourceSearchField.heightAnchor constraintGreaterThanOrEqualToConstant:44],[self.kindScroll.leadingAnchor constraintEqualToAnchor:self.resourceHeader.leadingAnchor constant:10],[self.kindScroll.trailingAnchor constraintEqualToAnchor:self.resourceHeader.trailingAnchor],[self.kindScroll.topAnchor constraintEqualToAnchor:self.resourceSearchField.bottomAnchor constant:12],self.kindScrollHeightConstraint,[self.kindStack.leadingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.leadingAnchor],[self.kindStack.trailingAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.trailingAnchor constant:-10],[self.kindStack.topAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.topAnchor],[self.kindStack.bottomAnchor constraintEqualToAnchor:self.kindScroll.contentLayoutGuide.bottomAnchor],[self.kindStack.heightAnchor constraintEqualToAnchor:self.kindScroll.frameLayoutGuide.heightAnchor]]];
-    self.importTaskContainer=[UIView new];self.importTaskContainer.translatesAutoresizingMaskIntoConstraints=NO;self.importTaskContainer.backgroundColor=HostRaisedSurface();self.importTaskContainer.layer.cornerRadius=14;self.importTaskContainer.layer.cornerCurve=kCACornerCurveContinuous;self.importTaskContainer.clipsToBounds=YES;[self.resourceHeader addSubview:self.importTaskContainer];self.importTaskHeight=[self.importTaskContainer.heightAnchor constraintEqualToConstant:0];
+    self.importTaskContainer=[UIView new];self.importTaskContainer.translatesAutoresizingMaskIntoConstraints=NO;self.importTaskContainer.backgroundColor=HostRaisedSurface();self.importTaskContainer.layer.cornerRadius=14;self.importTaskContainer.layer.cornerCurve=kCACornerCurveContinuous;self.importTaskContainer.layer.borderWidth=0.65;HostSetLayerBorderColor(self.importTaskContainer,[HostAccent() colorWithAlphaComponent:0.32]);self.importTaskContainer.clipsToBounds=YES;[self.resourceHeader addSubview:self.importTaskContainer];self.importTaskHeight=[self.importTaskContainer.heightAnchor constraintEqualToConstant:0];
     self.importTaskButton=[UIButton buttonWithType:UIButtonTypeSystem];self.importTaskButton.translatesAutoresizingMaskIntoConstraints=NO;self.importTaskButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.importTaskButton.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.importTaskButton.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeading;self.importTaskButton.contentEdgeInsets=UIEdgeInsetsMake(0,12,0,8);self.importTaskButton.tintColor=HostAccent();self.importTaskButton.accessibilityIdentifier=@"resource-import-task";[self.importTaskButton addTarget:self action:@selector(add) forControlEvents:UIControlEventTouchUpInside];[self.importTaskContainer addSubview:self.importTaskButton];
     self.importTaskToggleButton=[UIButton buttonWithType:UIButtonTypeSystem];self.importTaskToggleButton.translatesAutoresizingMaskIntoConstraints=NO;self.importTaskToggleButton.accessibilityLabel=@"展开或收起导入任务";[self.importTaskToggleButton setImage:[UIImage systemImageNamed:@"chevron.down"] forState:UIControlStateNormal];self.importTaskToggleButton.tintColor=HostSecondaryText();[self.importTaskToggleButton addTarget:self action:@selector(toggleImportTaskExpanded) forControlEvents:UIControlEventTouchUpInside];[self.importTaskContainer addSubview:self.importTaskToggleButton];
     self.importTaskDetailLabel=[UILabel new];self.importTaskDetailLabel.translatesAutoresizingMaskIntoConstraints=NO;self.importTaskDetailLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption2];self.importTaskDetailLabel.textColor=HostSecondaryText();self.importTaskDetailLabel.numberOfLines=2;self.importTaskDetailLabel.hidden=YES;[self.importTaskContainer addSubview:self.importTaskDetailLabel];
@@ -178,7 +209,10 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     [r addTarget:self action:@selector(refreshProfiles) forControlEvents:UIControlEventValueChanged];
     self.refreshControl = r;
     self.navigationItem.rightBarButtonItems=nil;self.navigationItem.rightBarButtonItem=nil;
-    self.compactHeader=[UIView new];self.compactHeader.backgroundColor=[HostBackground() colorWithAlphaComponent:.94];self.compactHeader.hidden=YES;[self.tableView addSubview:self.compactHeader];self.compactTitle=[UILabel new];self.compactTitle.text=@"资源";self.compactTitle.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline] scaledFontForFont:[UIFont systemFontOfSize:17 weight:UIFontWeightSemibold] maximumPointSize:22];self.compactTitle.textColor=HostText();[self.compactHeader addSubview:self.compactTitle];self.compactAdd=[UIButton buttonWithType:UIButtonTypeSystem];[self.compactAdd setImage:[UIImage systemImageNamed:@"plus"] forState:UIControlStateNormal];self.compactAdd.accessibilityLabel=@"添加资源";[self.compactAdd addTarget:self action:@selector(add) forControlEvents:UIControlEventTouchUpInside];self.compactMore=[UIButton buttonWithType:UIButtonTypeSystem];[self.compactMore setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];self.compactMore.menu=moreButton.menu;self.compactMore.showsMenuAsPrimaryAction=YES;self.compactMore.accessibilityLabel=@"更多资源操作";for(UIButton *button in @[self.compactAdd,self.compactMore]){button.tintColor=HostText();[self.compactHeader addSubview:button];}
+    self.compactHeader=[UIView new];self.compactHeader.backgroundColor=[HostBackground() colorWithAlphaComponent:.94];self.compactHeader.hidden=YES;[self.tableView addSubview:self.compactHeader];
+    self.compactBlur=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.compactBlur.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;self.compactBlur.userInteractionEnabled=NO;[self.compactHeader addSubview:self.compactBlur];
+    self.compactSeparator=[UIView new];self.compactSeparator.backgroundColor=HostSeparator();self.compactSeparator.userInteractionEnabled=NO;[self.compactHeader addSubview:self.compactSeparator];
+    self.compactTitle=[UILabel new];self.compactTitle.text=@"资源";self.compactTitle.font=HostRoundedFont(17,UIFontWeightSemibold,UIFontTextStyleHeadline);self.compactTitle.textColor=HostText();[self.compactHeader addSubview:self.compactTitle];self.compactAdd=[UIButton buttonWithType:UIButtonTypeSystem];[self.compactAdd setImage:[UIImage systemImageNamed:@"plus"] forState:UIControlStateNormal];self.compactAdd.accessibilityLabel=@"添加资源";[self.compactAdd addTarget:self action:@selector(add) forControlEvents:UIControlEventTouchUpInside];self.compactMore=[UIButton buttonWithType:UIButtonTypeSystem];[self.compactMore setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];self.compactMore.menu=moreButton.menu;self.compactMore.showsMenuAsPrimaryAction=YES;self.compactMore.accessibilityLabel=@"更多资源操作";for(UIButton *button in @[self.compactAdd,self.compactMore]){button.tintColor=HostText();button.backgroundColor=HostRaisedSurface();button.layer.cornerRadius=18;button.layer.cornerCurve=kCACornerCurveContinuous;button.layer.borderWidth=0.6;HostSetLayerBorderColor(button,HostBorder());HostInstallPressFeedback(button);[self.compactHeader addSubview:button];}
     [self reloadProfiles];
 }
 - (void)reloadThemeAppearance {
@@ -200,15 +234,22 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     self.resourceSearchField.textColor=HostText();
     self.resourceSearchField.tintColor=HostAccent();
     self.resourceSearchField.backgroundColor=HostRaisedSurface();
+    HostSetLayerBorderColor(self.resourceSearchField,HostBorder());
     self.importTaskContainer.backgroundColor=HostRaisedSurface();
+    HostSetLayerBorderColor(self.importTaskContainer,[HostAccent() colorWithAlphaComponent:0.32]);
     self.importTaskButton.tintColor=HostAccent();
     self.importTaskToggleButton.tintColor=HostSecondaryText();
     self.importTaskDetailLabel.textColor=HostSecondaryText();
     self.emptyLabel.textColor=HostSecondaryText();
     self.compactHeader.backgroundColor=[HostBackground() colorWithAlphaComponent:.94];
+    self.compactSeparator.backgroundColor=HostSeparator();
     self.compactTitle.textColor=HostText();
-    self.compactAdd.tintColor=HostText();
-    self.compactMore.tintColor=HostText();
+    for(UIButton *button in @[self.compactAdd,self.compactMore]){
+        button.tintColor=HostText();
+        button.backgroundColor=HostRaisedSurface();
+        HostSetLayerBorderColor(button,HostBorder());
+    }
+    [self updateSortPillButton];
     [self updateKindFilters];
     [self.tableView reloadData];
 }
@@ -232,7 +273,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     [self updateResourceHeaderLayout];[self layoutCompactHeader];
 }
 - (void)layoutCompactHeader {
-    if(!self.compactHeader)return;CGFloat width=self.tableView.bounds.size.width,top=MAX(self.statusBarSafeInset,self.view.safeAreaInsets.top);CGFloat offset=self.tableView.contentOffset.y;self.compactHeader.frame=CGRectMake(0,offset,width,top+52);self.compactTitle.frame=CGRectMake(20,top+4,MAX(1,width-132),44);self.compactAdd.frame=CGRectMake(width-104,top+4,44,44);self.compactMore.frame=CGRectMake(width-56,top+4,44,44);self.compactHeader.hidden=offset<=CGRectGetMaxY(self.topActionsStack.frame)-top;[self.tableView bringSubviewToFront:self.compactHeader];
+    if(!self.compactHeader)return;CGFloat width=self.tableView.bounds.size.width,top=MAX(self.statusBarSafeInset,self.view.safeAreaInsets.top);CGFloat offset=self.tableView.contentOffset.y;self.compactHeader.frame=CGRectMake(0,offset,width,top+52);self.compactBlur.frame=self.compactHeader.bounds;self.compactSeparator.frame=CGRectMake(0,top+51.5,width,0.5);self.compactTitle.frame=CGRectMake(20,top+4,MAX(1,width-132),44);self.compactAdd.frame=CGRectMake(width-104,top+4,44,44);self.compactMore.frame=CGRectMake(width-56,top+4,44,44);self.compactHeader.hidden=offset<=CGRectGetMaxY(self.topActionsStack.frame)-top;[self.tableView bringSubviewToFront:self.compactHeader];
 }
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {[self layoutCompactHeader];}
 - (void)updateResourceHeaderLayout {
@@ -396,6 +437,88 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     UIPasteboard.generalPasteboard.string=[lines componentsJoinedByString:@"\n"];
     UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"资源概览摘要已复制");
 }
+- (void)updateSortPillButton {
+    if(!self.sortFilterButton)return;
+    NSDictionary *shortNames=@{@"manual":@"⇅ 手动",@"name":@"⇅ A–Z",@"recent":@"⇅ 最近",@"attention":@"⇅ 待处理"};
+    NSString *shortTitle=shortNames[self.sortMode?:@"manual"]?:@"⇅ 手动";
+    BOOL customSort=self.sortMode.length&&![self.sortMode isEqualToString:@"manual"];
+    [self.sortFilterButton setTitle:shortTitle forState:UIControlStateNormal];
+    self.sortFilterButton.backgroundColor=customSort?HostSelectedSurface():HostNeutralSurface();
+    self.sortFilterButton.tintColor=customSort?HostAccent():HostSecondaryText();
+    HostSetLayerBorderColor(self.sortFilterButton,customSort?[HostAccent() colorWithAlphaComponent:0.35]:HostBorder());
+    self.sortFilterButton.accessibilityLabel=[NSString stringWithFormat:@"资源排序：%@",shortTitle];
+    __weak typeof(self) weakSelf=self;
+    NSArray *sortOptions=@[@{@"id":@"manual",@"name":@"手动顺序"},@{@"id":@"name",@"name":@"名称 A–Z"},@{@"id":@"recent",@"name":@"最近更新"},@{@"id":@"attention",@"name":@"待处理优先"}];
+    NSMutableArray<UIMenuElement *> *children=[NSMutableArray array];
+    for(NSDictionary *option in sortOptions){
+        NSString *identifier=option[@"id"],*name=option[@"name"];
+        UIAction *action=[UIAction actionWithTitle:name image:[UIImage systemImageNamed:[identifier isEqual:self.sortMode]?@"checkmark":@"arrow.up.arrow.down"] identifier:nil handler:^(__unused UIAction *a){
+            ConfigCenterViewController *owner=weakSelf;if(!owner)return;
+            owner.sortMode=identifier;
+            [NSUserDefaults.standardUserDefaults setObject:identifier forKey:@"resourceListSortMode"];
+            [owner reloadProfiles];
+        }];
+        if([identifier isEqual:self.sortMode])action.state=UIMenuElementStateOn;
+        [children addObject:action];
+    }
+    UIAction *moreFilter=[UIAction actionWithTitle:@"筛选与诊断摘要…" image:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] identifier:nil handler:^(__unused UIAction *a){[weakSelf showResourceFilters];}];
+    [children addObject:[UIMenu menuWithTitle:@"" options:UIMenuOptionsDisplayInline children:@[moreFilter]]];
+    self.sortFilterButton.menu=[UIMenu menuWithTitle:@"资源排序方式" children:children];
+}
+- (NSString *)statusBadgeTextForProfile:(NSDictionary *)profile textColor:(UIColor * __autoreleasing *)textColorOut backgroundColor:(UIColor * __autoreleasing *)bgColorOut borderColor:(UIColor * __autoreleasing *)borderColorOut {
+    BOOL isCurrent=[profile[@"current"] boolValue];
+    BOOL plugin=[profile[@"type"] isEqual:@"plugin"],tvbox=[profile[@"type"] isEqual:@"tvbox"];
+    BOOL attention=[self profile:profile matchesKind:@"attention"];
+    UIColor *textColor=HostSecondaryText(),*bgColor=HostNeutralSurface(),*borderColor=HostBorder();
+    NSString *text=@"  ● 就绪  ";
+    if(isCurrent){
+        text=@"  ● 当前使用  ";
+        textColor=HostAccent();
+        bgColor=HostSelectedSurface();
+        borderColor=[HostAccent() colorWithAlphaComponent:0.38];
+    }else if(attention){
+        text=@"  ⚠ 待处理  ";
+        textColor=UIColor.systemOrangeColor;
+        bgColor=[UIColor.systemOrangeColor colorWithAlphaComponent:0.14];
+        borderColor=[UIColor.systemOrangeColor colorWithAlphaComponent:0.35];
+    }else if(plugin){
+        NSString *source=[profile[@"source"] isKindOfClass:NSString.class]?profile[@"source"]:@"";
+        NSString *identifier=[source hasPrefix:@"plugin:"]?[source substringFromIndex:7]:@"";
+        BOOL running=identifier.length&&[PyHost isRunningServiceIdentifier:identifier];
+        if(running){
+            text=@"  ● 运行中  ";
+            textColor=[UIColor colorWithRed:0.19 green:0.82 blue:0.35 alpha:1.0];
+            bgColor=HostSuccessSurface();
+            borderColor=[textColor colorWithAlphaComponent:0.36];
+        }else if([profile[@"enabled"] boolValue]){
+            text=@"  ● 已启用  ";
+            textColor=HostAccent();
+            bgColor=HostSelectedSurface();
+            borderColor=[HostAccent() colorWithAlphaComponent:0.28];
+        }else{
+            text=@"  ○ 按需启动  ";
+            textColor=HostMutedText();
+            bgColor=HostNeutralSurface();
+            borderColor=HostBorder();
+        }
+    }else if(tvbox){
+        NSUInteger supported=[profile[@"supportedCount"] unsignedIntegerValue];
+        text=supported>0?[NSString stringWithFormat:@"  ● %lu 可用  ",(unsigned long)supported]:@"  ● 按需加载  ";
+        textColor=HostSecondaryText();
+        bgColor=HostRaisedSurface();
+        borderColor=HostBorder();
+    }else{
+        BOOL enabled=[profile[@"enabled"] boolValue];
+        text=enabled?@"  ● 已启用  ":@"  ○ 已停用  ";
+        textColor=enabled?HostAccent():HostMutedText();
+        bgColor=enabled?HostSelectedSurface():HostNeutralSurface();
+        borderColor=enabled?[HostAccent() colorWithAlphaComponent:0.28]:HostBorder();
+    }
+    if(textColorOut)*textColorOut=textColor;
+    if(bgColorOut)*bgColorOut=bgColor;
+    if(borderColorOut)*borderColorOut=borderColor;
+    return text;
+}
 - (void)showResourceFilters {
     NSString *sortName=@{@"manual":@"手动顺序",@"name":@"名称 A–Z",@"recent":@"最近更新",@"attention":@"待处理优先"}[self.sortMode]?:@"手动顺序";
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"筛选与排序" message:[NSString stringWithFormat:@"来源筛选 · %@\n排序方式 · %@",[self.selectedKind isEqual:@"all"]?@"全部来源":self.selectedKind,sortName] preferredStyle:UIAlertControllerStyleActionSheet];
@@ -427,6 +550,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     [self.detailSummaryCache removeAllObjects];
     NSArray *all = self.profilesProvider ? self.profilesProvider() : @[];
     self.allProfiles=all;
+    [self updateSortPillButton];
     [self updateKindFilters];
     NSArray *matchedProfiles=[all filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *p,NSDictionary *bindings){
         NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";
@@ -659,6 +783,15 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         UIColor *latencyColor=nil;NSString *rawLatency=[self latencyTextForProfile:p color:&latencyColor];
         if([p[@"native"] boolValue]&&[rawLatency isEqualToString:@"未检测"])rawLatency=@"官方源";
         c.latencyBadge.text=[NSString stringWithFormat:@"  %@  ",rawLatency];c.latencyBadge.textColor=latencyColor?:HostSecondaryText();c.latencyBadge.backgroundColor=HostRaisedSurface();HostSetLayerBorderColor(c.latencyBadge,HostBorder());c.latencyBadge.accessibilityLabel=[NSString stringWithFormat:@"资源测速：%@",rawLatency?:@"未测速"];
+        NSString *rowSource=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";
+        c.profileSource=rowSource;
+        __weak typeof(self) weakLatencySelf=self;
+        c.onTapLatency=^(NSString *tappedSource){[weakLatencySelf probeSingleProfile:tappedSource];};
+        UIColor *statusTextColor=nil,*statusBgColor=nil,*statusBorderColor=nil;
+        NSString *statusText=[self statusBadgeTextForProfile:p textColor:&statusTextColor backgroundColor:&statusBgColor borderColor:&statusBorderColor];
+        c.statusBadge.text=statusText;c.statusBadge.textColor=statusTextColor?:HostSecondaryText();c.statusBadge.backgroundColor=statusBgColor?:HostNeutralSurface();HostSetLayerBorderColor(c.statusBadge,statusBorderColor?:HostBorder());
+        BOOL isCurrent=[p[@"current"] boolValue];
+        if(isCurrent){c.layer.borderWidth=1.15;HostSetLayerBorderColor(c,HostAccent());c.iconBadgeContainer.backgroundColor=[HostAccent() colorWithAlphaComponent:0.22];}
         c.protocolBadge.backgroundColor=HostSelectedSurface();c.protocolBadge.textColor=HostAccent();HostSetLayerBorderColor(c.protocolBadge,[HostAccent() colorWithAlphaComponent:0.32]);
         NSString *protoTag=plugin?(p[@"runtime"]?:@"插件"):(tvbox?([p[@"catalogKind"] isEqual:@"maccms"]?@"MacCMS":@"合集"):@"M3U");c.protocolBadge.text=[NSString stringWithFormat:@"  %@  ",protoTag];
         c.imageView.image=[UIImage systemImageNamed:plugin?([p[@"resourceKind"] isEqual:@"live"]?@"dot.radiowaves.left.and.right":@"play.rectangle"):(tvbox?([p[@"catalogKind"] isEqual:@"maccms"]?@"film":@"square.stack.3d.up"):@"list.bullet.rectangle")];
@@ -740,9 +873,11 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
     trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip {
     if(ip.row<0||ip.row>=self.profiles.count)return nil;
-    id rawSource=self.profiles[ip.row][@"source"];if(![rawSource isKindOfClass:NSString.class]||![rawSource length] || [self.profiles[ip.row][@"type"] isEqual:@"plugin"] || [self.profiles[ip.row][@"type"] isEqual:@"tvbox"])
+    NSDictionary *profile=self.profiles[ip.row];
+    id rawSource=profile[@"source"];if(![rawSource isKindOfClass:NSString.class]||![rawSource length])
         return nil;
     NSString *source = rawSource;
+    BOOL tvbox=[profile[@"type"] isEqual:@"tvbox"];
     UIContextualAction *a = [UIContextualAction
         contextualActionWithStyle:UIContextualActionStyleDestructive
                             title:@"删除"
@@ -750,17 +885,45 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
                             done(NO);
                             [self confirmRemoveProfile:source];
                           }];
-    UIContextualAction *edit=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"编辑" handler:^(UIContextualAction *action,UIView *view,void (^done)(BOOL)){if(self.onEditProfile)self.onEditProfile(source);done(YES);}];
+    UIContextualAction *edit=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:tvbox?@"打开":@"编辑" handler:^(UIContextualAction *action,UIView *view,void (^done)(BOOL)){
+        if(tvbox){if([source hasPrefix:@"tvbox:"]&&self.onOpenTVBoxCatalog)self.onOpenTVBoxCatalog([source substringFromIndex:6]);}
+        else if(self.onEditProfile)self.onEditProfile(source);
+        done(YES);
+    }];
     return [UISwipeActionsConfiguration configurationWithActions:@[a,edit]];
 }
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
     leadingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip {
     if(ip.row<0||ip.row>=self.profiles.count)return nil;
-    id rawSource=self.profiles[ip.row][@"source"];if(![rawSource isKindOfClass:NSString.class]||![rawSource length]||[self.profiles[ip.row][@"type"] isEqual:@"plugin"]||[self.profiles[ip.row][@"type"] isEqual:@"tvbox"])return nil;
+    NSDictionary *profile=self.profiles[ip.row];
+    id rawSource=profile[@"source"];if(![rawSource isKindOfClass:NSString.class]||![rawSource length])return nil;
     NSString *source=rawSource;
-    UIContextualAction *refresh=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"刷新" handler:^(UIContextualAction *action,UIView *view,void (^done)(BOOL)){if(self.onRefreshProfile)self.onRefreshProfile(source);done(YES);}];
-    refresh.backgroundColor=HostAccent();
-    return [UISwipeActionsConfiguration configurationWithActions:@[refresh]];
+    BOOL plugin=[profile[@"type"] isEqual:@"plugin"],tvbox=[profile[@"type"] isEqual:@"tvbox"];
+    NSMutableArray<UIContextualAction *> *actions=[NSMutableArray array];
+    if(plugin){
+        if(self.onRecheckProfile){
+            UIContextualAction *recheck=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"健康检测" handler:^(UIContextualAction *action,UIView *view,void (^done)(BOOL)){self.onRecheckProfile(source);done(YES);}];
+            recheck.backgroundColor=HostAccent();
+            [actions addObject:recheck];
+        }
+    }else if(tvbox){
+        BOOL macCMS=[profile[@"catalogKind"] isEqual:@"maccms"];
+        if(!macCMS&&self.onRefreshCatalogProfile){
+            UIContextualAction *refreshCatalog=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"刷新合集" handler:^(UIContextualAction *action,UIView *view,void (^done)(BOOL)){self.onRefreshCatalogProfile(source);done(YES);}];
+            refreshCatalog.backgroundColor=HostAccent();
+            [actions addObject:refreshCatalog];
+        }
+    }else{
+        UIContextualAction *refresh=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"刷新" handler:^(UIContextualAction *action,UIView *view,void (^done)(BOOL)){if(self.onRefreshProfile)self.onRefreshProfile(source);done(YES);}];
+        refresh.backgroundColor=HostAccent();
+        [actions addObject:refresh];
+    }
+    if([self probeURLForProfile:profile]){
+        UIContextualAction *probe=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"测速" handler:^(UIContextualAction *action,UIView *view,void (^done)(BOOL)){[self probeSingleProfile:source];done(YES);}];
+        probe.backgroundColor=HostSecondaryText();
+        [actions addObject:probe];
+    }
+    return actions.count?[UISwipeActionsConfiguration configurationWithActions:actions]:nil;
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
     if(ip.row<0||ip.row>=self.profiles.count)return nil;
@@ -827,7 +990,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     label.translatesAutoresizingMaskIntoConstraints=NO;
     label.text=[self tableView:tableView titleForHeaderInSection:section];
     label.textColor=HostMutedText();
-    label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    label.font=HostMonospacedDigitFont(12.5,UIFontWeightMedium,UIFontTextStyleFootnote);
     label.adjustsFontForContentSizeCategory=YES;
     label.numberOfLines=0;
     label.accessibilityIdentifier=@"resource-list-summary";

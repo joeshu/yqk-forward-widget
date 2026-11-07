@@ -25,6 +25,10 @@
         pasteBtn.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
         pasteBtn.tintColor=HostAccent();
         pasteBtn.frame=CGRectMake(0,0,44,32);
+        pasteBtn.backgroundColor=HostSelectedSurface();
+        pasteBtn.layer.cornerRadius=10;
+        pasteBtn.layer.cornerCurve=kCACornerCurveContinuous;
+        HostInstallPressFeedback(pasteBtn);
         [pasteBtn addTarget:self action:@selector(pasteIntoField:) forControlEvents:UIControlEventTouchUpInside];
         field.rightView=pasteBtn;
         field.rightViewMode=UITextFieldViewModeUnlessEditing;
@@ -93,6 +97,8 @@
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 3;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return section==0?3:(section==1?2:self.managementRows.count);}
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
+- (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionFooterView(view); }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return @[@"资源配置",@"内容状态",@"使用与管理"][section];}
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return self.notice?:@"修改订阅地址会先读取新清单，验证成功后替换。EPG 留空使用列表自动提供的地址。";return nil;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -141,6 +147,8 @@
             cell.selectionStyle=UITableViewCellSelectionStyleNone;
         }else{
             cell.textLabel.text=rowTitle;
+            cell.imageView.image=[UIImage systemImageNamed:@[@"tag",@"link",@"calendar.badge.clock"][ip.row]];
+            cell.imageView.tintColor=HostAccent();
             NSURL *url=[NSURL URLWithString:self.source];
             NSDictionary *meta=[ProfileStore metadata:self.source];
             NSString *epgURL=self.epgField.text.length?self.epgField.text:(meta[@"detectedEPGURL"]?:@"");

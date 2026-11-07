@@ -289,6 +289,8 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 @property(nonatomic,copy,nullable) NSDictionary *autoSkipContext;
 @property(nonatomic) BOOL previousIdleTimerDisabled;
 @property(nonatomic) BOOL idleTimerOverrideActive;
+@property(nonatomic) UIBackgroundTaskIdentifier backgroundAutoAdvanceTask;
+@property(nonatomic) BOOL isAutoAdvancingEpisode;
 - (void)stopObservingCurrentPlayback;
 - (void)observePlayerLayerIfAvailable;
 - (void)inspectVideoTracksForItem:(AVPlayerItem *)item generation:(NSUInteger)generation;
@@ -328,6 +330,11 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 - (void)resetAutomaticFallbackLines;
 - (BOOL)tryNextAlternateForAutomaticFallback:(NSString *)reason;
 - (BOOL)tryNextLineForAutomaticFallback:(NSString *)reason;
+- (void)activateBackgroundAudioSessionIfNeeded;
+- (void)beginBackgroundAutoAdvanceTaskIfNeeded;
+- (void)endBackgroundAutoAdvanceTaskIfNeeded;
+- (void)applicationWillEnterForeground:(NSNotification *)notification;
+- (void)updateNowPlayingInfoCenter;
 @end
 
 @implementation MediaPlaybackViewController
@@ -355,7 +362,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     if(!raw.count)raw=[self.currentSeason[@"episodes"] isKindOfClass:NSArray.class]?self.currentSeason[@"episodes"]:@[];
     NSMutableArray *clean=[NSMutableArray arrayWithCapacity:raw.count];for(id episode in raw)[clean addObject:[episode isKindOfClass:NSDictionary.class]?episode:@{}];return clean;
 }
-- (instancetype)init {if((self=[super init])){_lineIndex=0;_episodeIndex=0;_selectedAlternateIndex=-1;}return self;}
+- (instancetype)init {if((self=[super init])){_lineIndex=0;_episodeIndex=0;_selectedAlternateIndex=-1;_backgroundAutoAdvanceTask=UIBackgroundTaskInvalid;}return self;}
 - (void)viewDidLoad {
     [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.view.backgroundColor=HostBackground();self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
     self.autoSkippedIntroEpisodeIndex=-1;self.autoSkippedOutroEpisodeIndex=-1;
@@ -371,7 +378,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     self.videoView=[UIView new];self.videoView.translatesAutoresizingMaskIntoConstraints=NO;self.videoView.backgroundColor=UIColor.blackColor;self.videoView.layer.cornerRadius=10;self.videoView.clipsToBounds=YES;[self.view addSubview:self.videoView];
     self.playerController=[AVPlayerViewController new];self.playerController.delegate=self;self.playerController.allowsPictureInPicturePlayback=YES;[self addChildViewController:self.playerController];self.playerController.view.translatesAutoresizingMaskIntoConstraints=NO;[self.videoView addSubview:self.playerController.view];[self.playerController didMoveToParentViewController:self];
     [NSLayoutConstraint activateConstraints:@[[self.playerController.view.leadingAnchor constraintEqualToAnchor:self.videoView.leadingAnchor],[self.playerController.view.trailingAnchor constraintEqualToAnchor:self.videoView.trailingAnchor],[self.playerController.view.topAnchor constraintEqualToAnchor:self.videoView.topAnchor],[self.playerController.view.bottomAnchor constraintEqualToAnchor:self.videoView.bottomAnchor]]];
-    self.videoTopScrim=[CAGradientLayer layer];self.videoTopScrim.colors=@[(id)[UIColor colorWithWhite:0 alpha:0.82].CGColor,(id)[UIColor colorWithWhite:0 alpha:0.62].CGColor,(id)[UIColor colorWithWhite:0 alpha:0.0].CGColor];self.videoTopScrim.locations=@[@0.0,@0.66,@1.0];self.videoTopScrim.startPoint=CGPointMake(0.5,0);self.videoTopScrim.endPoint=CGPointMake(0.5,1);self.videoTopScrim.name=@"media-playback-top-scrim";[self.videoView.layer addSublayer:self.videoTopScrim];
+    self.videoTopScrim=[CAGradientLayer layer];self.videoTopScrim.colors=@[(id)UIColor.clearColor.CGColor,(id)UIColor.clearColor.CGColor];self.videoTopScrim.locations=@[@0.0,@1.0];self.videoTopScrim.startPoint=CGPointMake(0.5,0);self.videoTopScrim.endPoint=CGPointMake(0.5,1);self.videoTopScrim.hidden=YES;self.videoTopScrim.opacity=0.0f;self.videoTopScrim.name=@"media-playback-top-scrim";[self.videoView.layer addSublayer:self.videoTopScrim];
     self.throughputLabel=[UILabel new];self.throughputLabel.translatesAutoresizingMaskIntoConstraints=NO;self.throughputLabel.text=@"测速中";self.throughputLabel.textColor=UIColor.whiteColor;self.throughputLabel.font=HostMonospacedDigitFont(11,UIFontWeightSemibold,UIFontTextStyleCaption2);self.throughputLabel.textAlignment=NSTextAlignmentCenter;self.throughputLabel.backgroundColor=[UIColor colorWithWhite:0 alpha:0.68];self.throughputLabel.layer.cornerRadius=11;self.throughputLabel.layer.borderWidth=0.5;self.throughputLabel.layer.borderColor=[UIColor colorWithWhite:1 alpha:0.22].CGColor;self.throughputLabel.clipsToBounds=YES;self.throughputLabel.userInteractionEnabled=NO;self.throughputLabel.accessibilityIdentifier=@"media-playback-throughput";self.throughputLabel.hidden=self.embeddedMode;[self.videoView addSubview:self.throughputLabel];self.throughputPortraitTopConstraint=[self.throughputLabel.topAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.topAnchor constant:8];self.throughputViewportTopConstraint=[self.throughputLabel.topAnchor constraintEqualToAnchor:self.videoView.topAnchor constant:10];self.throughputViewportTopConstraint.active=NO;[NSLayoutConstraint activateConstraints:@[self.throughputPortraitTopConstraint,[self.throughputLabel.trailingAnchor constraintEqualToAnchor:self.videoView.trailingAnchor constant:-10],[self.throughputLabel.heightAnchor constraintGreaterThanOrEqualToConstant:24],[self.throughputLabel.widthAnchor constraintGreaterThanOrEqualToConstant:68]]];
     self.gestureFeedbackLabel=[UILabel new];self.gestureFeedbackLabel.translatesAutoresizingMaskIntoConstraints=NO;self.gestureFeedbackLabel.hidden=YES;self.gestureFeedbackLabel.textAlignment=NSTextAlignmentCenter;self.gestureFeedbackLabel.textColor=UIColor.whiteColor;self.gestureFeedbackLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]];self.gestureFeedbackLabel.adjustsFontForContentSizeCategory=YES;self.gestureFeedbackLabel.backgroundColor=[UIColor colorWithWhite:0 alpha:0.72];self.gestureFeedbackLabel.layer.cornerRadius=14;self.gestureFeedbackLabel.clipsToBounds=YES;self.gestureFeedbackLabel.isAccessibilityElement=NO;UIView *gestureSurface=self.videoView;[gestureSurface addSubview:self.gestureFeedbackLabel];self.gestureFeedbackPortraitTopConstraint=[self.gestureFeedbackLabel.topAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.topAnchor constant:8];self.gestureFeedbackViewportTopConstraint=[self.gestureFeedbackLabel.topAnchor constraintEqualToAnchor:gestureSurface.topAnchor constant:16];self.gestureFeedbackViewportTopConstraint.active=NO;[NSLayoutConstraint activateConstraints:@[[self.gestureFeedbackLabel.centerXAnchor constraintEqualToAnchor:gestureSurface.centerXAnchor],self.gestureFeedbackPortraitTopConstraint,[self.gestureFeedbackLabel.heightAnchor constraintEqualToConstant:34],[self.gestureFeedbackLabel.widthAnchor constraintGreaterThanOrEqualToConstant:112]]];
     self.inlineNowPlayingPill=[UIView new];self.inlineNowPlayingPill.translatesAutoresizingMaskIntoConstraints=NO;self.inlineNowPlayingPill.hidden=YES;self.inlineNowPlayingPill.userInteractionEnabled=NO;self.inlineNowPlayingPill.backgroundColor=[UIColor colorWithWhite:0 alpha:.72];self.inlineNowPlayingPill.layer.cornerRadius=9;self.inlineNowPlayingPill.layer.cornerCurve=kCACornerCurveContinuous;self.inlineNowPlayingPill.isAccessibilityElement=YES;self.inlineNowPlayingPill.accessibilityIdentifier=@"media-inline-now-playing";self.inlineNowPlayingPill.accessibilityHint=@"滚动影片详情时仍显示当前播放集数";[self.videoView addSubview:self.inlineNowPlayingPill];
@@ -525,9 +532,11 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
         [NSLayoutConstraint activateConstraints:self.embeddedConstraints];
     }else [self updatePlaybackLayoutForSize:self.view.bounds.size];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationDidEnterBackground:) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationWillEnterForeground:) name:UIApplicationWillEnterForegroundNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationWillEnterForeground:) name:UIApplicationDidBecomeActiveNotification object:nil];
     [self buildLines];[self buildQualityButtons];[self updateEpisodeTitle];self.pendingEpisodeResult=self.result;self.pendingEpisodeGeneration=self.generation;
 }
-- (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self updatePlaybackLayoutForSize:self.view.bounds.size];self.videoTopScrim.frame=CGRectMake(0,0,CGRectGetWidth(self.videoView.bounds),MIN(168,MAX(72,CGRectGetHeight(self.videoView.bounds)*0.58)));if(!self.observingVideoLayer)[self observePlayerLayerIfAvailable];}
+- (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self updatePlaybackLayoutForSize:self.view.bounds.size];self.videoTopScrim.frame=CGRectZero;self.videoTopScrim.hidden=YES;if(!self.observingVideoLayer)[self observePlayerLayerIfAvailable];}
 - (void)installFloatingInlineSurfaceInHost:(UIView *)videoHost controlsStack:(UIStackView *)controlsStack {
     if(!self.embeddedMode||self.floatingInlineSurfaceInstalled||!videoHost||!controlsStack||!self.isViewLoaded)return;
     self.floatingInlineSurfaceInstalled=YES;
@@ -576,7 +585,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     self.screenLockButton.backgroundColor=self.gestureLockActive?HostAccent():[UIColor colorWithWhite:0 alpha:0.58];
     self.controlPanel.userInteractionEnabled=!self.gestureLockActive;
     self.controlPanel.alpha=self.gestureLockActive?0.35:1.0;
-    [UIView animateWithDuration:0.25 delay:0 usingSpringWithDamping:0.65 initialSpringVelocity:0.5 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
+    [UIView animateWithDuration:0.25 usingSpringWithDamping:0.65 initialSpringVelocity:0.5 animations:^{
         self.screenLockButton.transform=CGAffineTransformMakeScale(1.15,1.15);
     } completion:^(BOOL finished){
         [UIView animateWithDuration:0.18 animations:^{self.screenLockButton.transform=CGAffineTransformIdentity;}];
@@ -705,6 +714,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 }
 - (void)teardownAfterScreenExit {
     self.pendingScreenExit=NO;
+    [self endBackgroundAutoAdvanceTaskIfNeeded];
     [self.mediaSleepTimer invalidate];self.mediaSleepTimer=nil;
     self.generation++;[self.client cancel];self.resolving=NO;
     self.awaitingWebPlaybackReturn=NO;self.pendingEpisodeResult=nil;self.pendingEpisodeGeneration=0;
@@ -771,6 +781,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     [self playResult:result];
 }
 - (void)dealloc {
+    [self endBackgroundAutoAdvanceTaskIfNeeded];
     [self.mediaSleepTimer invalidate];self.mediaSleepTimer=nil;
     self.generation++;
     self.playerGeneration++;
@@ -825,12 +836,56 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     [MediaPlaybackStateStore recordContext:self.context lineIndex:self.lineIndex episodeIndex:self.episodeIndex position:position duration:duration completed:NO];
     self.lastPersistedPosition=position;
 }
-- (void)applicationDidEnterBackground:(NSNotification *)notification {[self persistPlaybackProgress];}
+- (void)activateBackgroundAudioSessionIfNeeded {
+    AVAudioSession *session=[AVAudioSession sharedInstance];
+    @try{
+        [session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeMoviePlayback options:0 error:nil];
+        [session setActive:YES error:nil];
+    }@catch(NSException *exception){}
+}
+- (void)beginBackgroundAutoAdvanceTaskIfNeeded {
+    UIApplication *app=UIApplication.sharedApplication;
+    if(self.backgroundAutoAdvanceTask!=UIBackgroundTaskInvalid){[app endBackgroundTask:self.backgroundAutoAdvanceTask];self.backgroundAutoAdvanceTask=UIBackgroundTaskInvalid;}
+    __weak typeof(self) weakSelf=self;
+    self.backgroundAutoAdvanceTask=[app beginBackgroundTaskWithName:@"cctv.media.autoAdvanceEpisode" expirationHandler:^{
+        MediaPlaybackViewController *owner=weakSelf;if(!owner)return;
+        [owner endBackgroundAutoAdvanceTaskIfNeeded];
+    }];
+}
+- (void)endBackgroundAutoAdvanceTaskIfNeeded {
+    if(self.backgroundAutoAdvanceTask==UIBackgroundTaskInvalid)return;
+    UIBackgroundTaskIdentifier task=self.backgroundAutoAdvanceTask;
+    self.backgroundAutoAdvanceTask=UIBackgroundTaskInvalid;
+    [UIApplication.sharedApplication endBackgroundTask:task];
+}
+- (void)updateNowPlayingInfoCenter {
+    NSString *seriesTitle=[self.context[@"detail"][@"name"] isKindOfClass:NSString.class]?self.context[@"detail"][@"name"]:([self.context[@"item"][@"name"] isKindOfClass:NSString.class]?self.context[@"item"][@"name"]:@"影视播放");
+    NSString *episodeTitle=self.title.length?self.title:(self.episodeTitle.text?:seriesTitle);
+    NSMutableDictionary *info=[[MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo mutableCopy]?:[NSMutableDictionary dictionary];
+    info[MPMediaItemPropertyTitle]=episodeTitle?:@"";
+    info[MPMediaItemPropertyAlbumTitle]=seriesTitle?:@"";
+    NSTimeInterval position=[self activeEngineCurrentPosition],duration=[self activeEngineDuration];
+    if(isfinite(position)&&position>=0)info[MPNowPlayingInfoPropertyElapsedPlaybackTime]=@(position);
+    if(isfinite(duration)&&duration>0)info[MPMediaItemPropertyPlaybackDuration]=@(duration);
+    float rate=self.cicadaAdapter?self.cicadaAdapter.rate:(self.player?self.player.rate:1.0f);
+    info[MPNowPlayingInfoPropertyPlaybackRate]=@(isfinite(rate)?rate:1.0f);
+    [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo=info;
+}
+- (void)applicationDidEnterBackground:(NSNotification *)notification {
+    [self persistPlaybackProgress];
+    [self activateBackgroundAudioSessionIfNeeded];
+    if(self.player&&!self.pictureInPictureActive)self.playerController.player=nil;
+    [self updateNowPlayingInfoCenter];
+}
+- (void)applicationWillEnterForeground:(NSNotification *)notification {
+    if(self.player&&!self.cicadaAdapter&&self.playerController.player!=self.player)self.playerController.player=self.player;
+    [self observePlayerLayerIfAvailable];
+}
 - (void)offerResumeForItem:(AVPlayerItem *)item {
     NSDictionary *entry=self.pendingPlaybackResumeEntry;if(!entry||self.resumePromptShown||item!=self.observedItem||item!=self.player.currentItem)return;
     NSTimeInterval position=[entry[@"position"] doubleValue];
     // 弹框时已有模态页或视图不在窗口内会丢提示、播放停在暂停态：直接从上次位置继续。
-    if(self.presentedViewController||!self.view.window){self.pendingPlaybackResumeEntry=nil;self.resumePromptPending=NO;self.pendingPlaybackSeekTime=@(MAX(0,position));[self applyPendingPlaybackSeekForItem:item];return;}
+    if(self.presentedViewController||!self.view.window||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive){self.pendingPlaybackResumeEntry=nil;self.resumePromptPending=NO;self.pendingPlaybackSeekTime=@(MAX(0,position));[self applyPendingPlaybackSeekForItem:item];return;}
     self.resumePromptShown=YES;self.resumePromptPending=YES;[self.player pause];
     NSString *episode=entry[@"episodeName"]?:@"上次分集";NSUInteger generation=self.playerGeneration;__weak typeof(self) weakSelf=self;
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"继续上次播放？" message:[NSString stringWithFormat:@"%@ · %@",episode,[self formatMediaTime:position]] preferredStyle:UIAlertControllerStyleAlert];
@@ -847,7 +902,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     NSDictionary *entry=self.pendingPlaybackResumeEntry;if(!entry||self.resumePromptShown||!self.cicadaAdapter)return;
     NSTimeInterval position=[entry[@"position"] doubleValue];
     // 弹框时已有模态页或视图不在窗口内会丢提示、播放停在暂停态：直接从上次位置继续。
-    if(self.presentedViewController||!self.view.window){self.pendingPlaybackResumeEntry=nil;self.resumePromptPending=NO;self.pendingPlaybackSeekTime=@(MAX(0,position));[self applyPendingPlaybackSeekForCicada];return;}
+    if(self.presentedViewController||!self.view.window||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive){self.pendingPlaybackResumeEntry=nil;self.resumePromptPending=NO;self.pendingPlaybackSeekTime=@(MAX(0,position));[self applyPendingPlaybackSeekForCicada];return;}
     self.resumePromptShown=YES;self.resumePromptPending=YES;[self pauseActiveEngine];
     NSString *episode=entry[@"episodeName"]?:@"上次分集";NSUInteger generation=self.playerGeneration;__weak typeof(self) weakSelf=self;
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"继续上次播放？" message:[NSString stringWithFormat:@"%@ · %@",episode,[self formatMediaTime:position]] preferredStyle:UIAlertControllerStyleAlert];
@@ -1037,7 +1092,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 - (NSString *)formatMediaTime:(NSTimeInterval)time {NSUInteger value=(NSUInteger)MAX(0,time);return value>=3600?[NSString stringWithFormat:@"%lu:%02lu:%02lu",(unsigned long)(value/3600),(unsigned long)((value%3600)/60),(unsigned long)(value%60)]:[NSString stringWithFormat:@"%02lu:%02lu",(unsigned long)(value/60),(unsigned long)(value%60)];}
 - (void)performSkipAction {
     NSString *action=self.skipButtonAction;if([action isEqual:@"intro"]){NSTimeInterval target=[MediaPlaybackStateStore introEndForContext:self.context?:@{}];if(target>0)[self seekActiveEngineToTime:target completion:nil];self.skipButton.hidden=YES;return;}
-    if([action isEqual:@"outro"]&&self.episodeIndex+1<self.episodes.count){[self persistPlaybackProgress];self.episodeIndex++;[self resetAutomaticFallbackLines];self.pendingResolutionReason=@"skip_outro";[self updateEpisodeTitle];[self resolveAndPlay];}
+    if([action isEqual:@"outro"]&&self.episodeIndex+1<self.episodes.count){[self persistPlaybackProgress];self.isAutoAdvancingEpisode=YES;[self activateBackgroundAudioSessionIfNeeded];[self beginBackgroundAutoAdvanceTaskIfNeeded];self.episodeIndex++;[self resetAutomaticFallbackLines];self.pendingResolutionReason=@"skip_outro";[self updateEpisodeTitle];[self resolveAndPlay];}
 }
 - (void)setRetryAvailable:(BOOL)available {
     if(self.embeddedMode){BOOL nativeFallback=self.awaitingWebPlaybackReturn&&[self.result[@"url"] isKindOfClass:NSString.class];BOOL hasResolvedPage=[self.result[@"url"] isKindOfClass:NSString.class]&&[self.result[@"url"] length];self.inlineRetryButton.hidden=!available;[self.inlineRetryButton setTitle:nativeFallback?@"原生播放":@"重试" forState:UIControlStateNormal];self.inlineRetryButton.accessibilityLabel=nativeFallback?@"尝试原生播放器":@"重试当前影片";BOOL canTryWeb=available&&!nativeFallback&&(hasResolvedPage||self.episodeWebFallbackAvailable);self.inlineWebButton.hidden=!canTryWeb;if(canTryWeb){BOOL episodePageFallback=!hasResolvedPage;[self.inlineWebButton setTitle:episodePageFallback?@"打开网页":@"网页播放" forState:UIControlStateNormal];self.inlineWebButton.accessibilityLabel=episodePageFallback?@"打开分集网页尝试播放":@"尝试网页播放";[self.inlineWebButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];[self.inlineWebButton addTarget:self action:episodePageFallback?@selector(openEpisodePageWebFallback):@selector(openWebPlaybackFallback) forControlEvents:UIControlEventTouchUpInside];}return;}
@@ -1063,6 +1118,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     [self.episodeButton setTitle:label forState:UIControlStateNormal];self.episodeButton.enabled=episodes.count>0;self.episodeButton.alpha=episodes.count?1.0:0.55;[self updateSkipButtonForCurrentPosition];
     NSMutableDictionary *updatedContext=[self.context mutableCopy]?:[NSMutableDictionary dictionary];updatedContext[@"lineIndex"]=@(self.lineIndex);updatedContext[@"episodeIndex"]=@(self.episodeIndex);
     NSDictionary *selectedLine=self.lineIndex>=0&&self.lineIndex<self.lines.count?self.lines[self.lineIndex]:@{};updatedContext[@"lineID"]=[selectedLine[@"id"] description]?:@"";updatedContext[@"episodeID"]=[episode[@"id"] description]?:@"";updatedContext[@"episodeName"]=name?:@"";self.context=updatedContext;
+    [self updateNowPlayingInfoCenter];
     if(self.onEpisodeSelectionChanged)self.onEpisodeSelectionChanged(self.context);
 }
 - (void)openEpisodeSelection {
@@ -1086,8 +1142,9 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     if(!url||raw.length>8192||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||!url.host.length||url.user.length||url.password.length||[raw rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[self.spinner stopAnimating];NSMutableDictionary *fields=[@{@"reason":@"invalid_media_url", @"failure_kind":@"invalid_media_url", @"playback_attempt_id":self.playbackAttemptID, @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(sourceURL)];[RuntimeDiagnostics.shared recordEvent:@"episode_playback_rejected" category:@"playback" fields:fields];[self recordPlaybackAttemptOutcome:@"rejected" failureKind:@"invalid_media_url" httpStatus:0 terminal:YES];self.status.text=@"资源未返回有效的 HTTP/HTTPS 播放地址";self.status.accessibilityLabel=self.status.text;[self setRetryAvailable:YES];return;}
     if(!self.basePlaybackHeaders)self.basePlaybackHeaders=[result[@"baseHeaders"] isKindOfClass:NSDictionary.class]?result[@"baseHeaders"]:MediaPlaybackHeadersFromResult(result);self.selectedAlternateIndex=-1;[self buildQualityButtons];self.resumeEntry=[MediaPlaybackStateStore historyEntryForContext:self.context?:@{} lineIndex:self.lineIndex episodeIndex:self.episodeIndex];self.pendingPlaybackResumeEntry=nil;self.resumePromptPending=NO;self.resumePromptShown=NO;
     NSNumber *qualityPosition=self.pendingQualitySeekTime;self.pendingQualitySeekTime=nil;self.pendingPlaybackSeekTime=qualityPosition;if(!qualityPosition)self.pendingQualityRestorePlaybackState=NO;
+    BOOL autoAdvancing=self.isAutoAdvancingEpisode;self.isAutoAdvancingEpisode=NO;
     NSTimeInterval savedPosition=[self.resumeEntry[@"position"] doubleValue],savedDuration=[self.resumeEntry[@"duration"] doubleValue];BOOL hasResume=self.resumeEntry&&![self.resumeEntry[@"completed"] boolValue]&&savedPosition>=15&&(!isfinite(savedDuration)||savedDuration<=0||savedPosition<savedDuration-10);
-    if(!qualityPosition&&hasResume){self.pendingPlaybackResumeEntry=self.resumeEntry;self.resumePromptPending=YES;self.pendingPlaybackSeekTime=nil;}
+    if(!qualityPosition&&hasResume&&!autoAdvancing&&UIApplication.sharedApplication.applicationState==UIApplicationStateActive){self.pendingPlaybackResumeEntry=self.resumeEntry;self.resumePromptPending=YES;self.pendingPlaybackSeekTime=nil;}
     BOOL directMedia=MediaPlaybackResultSupportsAVPlayer(result)||MediaPlaybackResultSupportsAVPlayer(@{@"url":raw});
     BOOL requiresWebPlayback=([result[@"requiresWebPlayback"] boolValue]||[result[@"parse"] integerValue]>0||[result[@"jx"] integerValue]>0)&&!directMedia;
     MediaPlaybackDecodeRoute initialRoute=MediaPlaybackDecodeRouteNextForResult(result,self.attemptedRoutes);
@@ -1110,10 +1167,12 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerItemFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerItemStalled:) name:AVPlayerItemPlaybackStalledNotification object:item];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerItemEnded:) name:AVPlayerItemDidPlayToEndTimeNotification object:item];
+    [self activateBackgroundAudioSessionIfNeeded];
     if(!self.player){self.player=[AVPlayer playerWithPlayerItem:item];[self.player addObserver:self forKeyPath:@"timeControlStatus" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerTimeControlContext];self.observingPlayer=YES;}else[self.player replaceCurrentItemWithPlayerItem:item];
-    self.observedItem=item;[item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerItemStatusContext];self.player.automaticallyWaitsToMinimizeStalling=YES;self.player.defaultRate=(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0);self.playerController.videoGravity=[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.mediaVideoGravity"]?:AVLayerVideoGravityResizeAspect;self.playerController.player=self.player;self.playbackOptionsItem.menu=[self playbackOptionsMenu];[self updateEstimatedThroughput];[self installProgressObserverIfNeeded];[self updateEpisodeTitle];
+    if(@available(iOS 15.0,*))self.player.audiovisualBackgroundPlaybackPolicy=AVPlayerAudiovisualBackgroundPlaybackPolicyContinuesIfPossible;
+    self.observedItem=item;[item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerItemStatusContext];self.player.automaticallyWaitsToMinimizeStalling=YES;self.player.defaultRate=(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0);self.playerController.videoGravity=[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.mediaVideoGravity"]?:AVLayerVideoGravityResizeAspect;BOOL attachViewPlayer=(UIApplication.sharedApplication.applicationState==UIApplicationStateActive||self.pictureInPictureActive);self.playerController.player=attachViewPlayer?self.player:nil;self.playbackOptionsItem.menu=[self playbackOptionsMenu];[self updateEstimatedThroughput];[self installProgressObserverIfNeeded];[self updateEpisodeTitle];
     __weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(owner&&playerGeneration==owner.playerGeneration)[owner observePlayerLayerIfAvailable];});
-    if(!self.resumePromptPending&&!self.pendingPlaybackSeekTime)[self.player play];dispatch_after(dispatch_time(DISPATCH_TIME_NOW,20*NSEC_PER_SEC),dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||playerGeneration!=owner.playerGeneration||item!=owner.player.currentItem||owner.resumePromptPending||owner.pendingPlaybackSeekTime||owner.videoFrameReady||item.status==AVPlayerItemStatusFailed)return;NSTimeInterval position=CMTimeGetSeconds(owner.player.currentTime);NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":owner.playbackAttemptID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-owner.playbackStartedAt)*1000))), @"line_index":@(owner.lineIndex), @"episode_index":@(owner.episodeIndex), @"correlation_id":owner.diagnosticTraceID?:@"", @"time_control_status":@(owner.player.timeControlStatus), @"playback_position_seconds":@(isfinite(position)&&position>0?position:0), @"video_track_state":owner.hasVideoTrack?@"confirmed_video":@"unknown", @"video_layer_ready_for_display":@(owner.videoLayer.readyForDisplay), @"video_layer_width":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.width))), @"video_layer_height":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.height)))} mutableCopy];[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(owner.result))];MediaPlaybackAddAccessLogFields(fields,item);[RuntimeDiagnostics.shared recordEvent:@"playback_video_frame_timeout" category:@"playback" fields:fields];[owner recordPlaybackAttemptOutcome:@"first_frame_timeout" failureKind:@"first_frame_timeout" httpStatus:0 terminal:NO];if([owner tryNextLineForAutomaticFallback:@"first_frame_timeout"])return;[owner.spinner stopAnimating];owner.status.text=@"播放器尚未显示画面 · 可重试或手动切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];});
+    if(!self.resumePromptPending&&!self.pendingPlaybackSeekTime)[self.player play];dispatch_after(dispatch_time(DISPATCH_TIME_NOW,20*NSEC_PER_SEC),dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||playerGeneration!=owner.playerGeneration||item!=owner.player.currentItem||owner.resumePromptPending||owner.pendingPlaybackSeekTime||owner.videoFrameReady||item.status==AVPlayerItemStatusFailed||(UIApplication.sharedApplication.applicationState!=UIApplicationStateActive&&(owner.player.timeControlStatus==AVPlayerTimeControlStatusPlaying||item.status==AVPlayerItemStatusReadyToPlay)))return;NSTimeInterval position=CMTimeGetSeconds(owner.player.currentTime);NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":owner.playbackAttemptID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-owner.playbackStartedAt)*1000))), @"line_index":@(owner.lineIndex), @"episode_index":@(owner.episodeIndex), @"correlation_id":owner.diagnosticTraceID?:@"", @"time_control_status":@(owner.player.timeControlStatus), @"playback_position_seconds":@(isfinite(position)&&position>0?position:0), @"video_track_state":owner.hasVideoTrack?@"confirmed_video":@"unknown", @"video_layer_ready_for_display":@(owner.videoLayer.readyForDisplay), @"video_layer_width":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.width))), @"video_layer_height":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.height)))} mutableCopy];[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(owner.result))];MediaPlaybackAddAccessLogFields(fields,item);[RuntimeDiagnostics.shared recordEvent:@"playback_video_frame_timeout" category:@"playback" fields:fields];[owner recordPlaybackAttemptOutcome:@"first_frame_timeout" failureKind:@"first_frame_timeout" httpStatus:0 terminal:NO];if([owner tryNextLineForAutomaticFallback:@"first_frame_timeout"])return;[owner.spinner stopAnimating];owner.status.text=@"播放器尚未显示画面 · 可重试或手动切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];});
 }
 - (void)startCicadaPlaybackWithResult:(NSDictionary *)result url:(NSURL *)url sourceURL:(NSURL *)sourceURL playerGeneration:(NSUInteger)playerGeneration {
     self.attemptedRoutes|=MediaPlaybackDecodeRouteAttemptedCicadaPlayer;
@@ -1274,9 +1333,9 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     self.status.text=MediaPlaybackFailureMessage(failure,networkError);self.status.accessibilityLabel=self.status.text;[self setRetryAvailable:YES];
 }
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context {
-    if(context==CCTVPlayerItemStatusContext){AVPlayerItem *item=(AVPlayerItem *)object;if(item.status==AVPlayerItemStatusFailed){dispatch_async(dispatch_get_main_queue(),^{if(item!=self.observedItem||item!=self.player.currentItem)return;self.resumePromptPending=NO;self.pendingPlaybackSeekTime=nil;[self recordPlaybackFailureForItem:item error:item.error stage:@"item_status_failed"];});}else if(item.status==AVPlayerItemStatusReadyToPlay){dispatch_async(dispatch_get_main_queue(),^{if(item!=self.observedItem||item!=self.player.currentItem)return;self.hasVideoTrack=self.videoFrameReady||(item.presentationSize.width>0&&item.presentationSize.height>0);for(AVPlayerItemTrack *track in item.tracks)if(track.assetTrack.mediaType==AVMediaTypeVideo){self.hasVideoTrack=YES;break;}NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":self.playbackAttemptID?:@"", @"video_track_state":self.hasVideoTrack?@"confirmed_video":@"unknown", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(self.result))];MediaPlaybackAddAccessLogFields(fields,item);[RuntimeDiagnostics.shared recordEvent:@"media_item_ready" category:@"playback" fields:fields];[self inspectVideoTracksForItem:item generation:self.playerGeneration];self.playbackOptionsItem.menu=[self playbackOptionsMenu];if(self.pendingPlaybackSeekTime)[self applyPendingPlaybackSeekForItem:item];else if(self.resumePromptPending)[self offerResumeForItem:item];if(self.hasVideoTrack){if(!self.videoFrameReady){self.status.text=@"媒体已准备 · 等待视频首帧显示";self.status.accessibilityLabel=self.status.text;if(self.player.timeControlStatus==AVPlayerTimeControlStatusPaused)[self.spinner stopAnimating];else[self.spinner startAnimating];[self observePlayerLayerIfAvailable];}}else{[self.spinner stopAnimating];self.status.text=@"媒体已准备 · 视频轨道尚未确认";self.status.accessibilityLabel=self.status.text;}});}return;}
+    if(context==CCTVPlayerItemStatusContext){AVPlayerItem *item=(AVPlayerItem *)object;if(item.status==AVPlayerItemStatusFailed){dispatch_async(dispatch_get_main_queue(),^{if(item!=self.observedItem||item!=self.player.currentItem)return;self.resumePromptPending=NO;self.pendingPlaybackSeekTime=nil;[self recordPlaybackFailureForItem:item error:item.error stage:@"item_status_failed"];});}else if(item.status==AVPlayerItemStatusReadyToPlay){dispatch_async(dispatch_get_main_queue(),^{if(item!=self.observedItem||item!=self.player.currentItem)return;self.hasVideoTrack=self.videoFrameReady||(item.presentationSize.width>0&&item.presentationSize.height>0);for(AVPlayerItemTrack *track in item.tracks)if(track.assetTrack.mediaType==AVMediaTypeVideo){self.hasVideoTrack=YES;break;}NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":self.playbackAttemptID?:@"", @"video_track_state":self.hasVideoTrack?@"confirmed_video":@"unknown", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(self.result))];MediaPlaybackAddAccessLogFields(fields,item);[RuntimeDiagnostics.shared recordEvent:@"media_item_ready" category:@"playback" fields:fields];[self inspectVideoTracksForItem:item generation:self.playerGeneration];self.playbackOptionsItem.menu=[self playbackOptionsMenu];if(self.pendingPlaybackSeekTime)[self applyPendingPlaybackSeekForItem:item];else if(self.resumePromptPending)[self offerResumeForItem:item];else{[self activateBackgroundAudioSessionIfNeeded];[self.player play];[self updateNowPlayingInfoCenter];}if(self.hasVideoTrack){if(!self.videoFrameReady){self.status.text=@"媒体已准备 · 等待视频首帧显示";self.status.accessibilityLabel=self.status.text;if(self.player.timeControlStatus==AVPlayerTimeControlStatusPaused)[self.spinner stopAnimating];else[self.spinner startAnimating];[self observePlayerLayerIfAvailable];}}else{[self.spinner stopAnimating];self.status.text=@"媒体已准备 · 视频轨道尚未确认";self.status.accessibilityLabel=self.status.text;}});}return;}
     if(context==CCTVPlayerLayerReadyContext){AVPlayerLayer *layer=(AVPlayerLayer *)object;AVPlayerItem *item=self.observedItem;NSUInteger generation=self.playerGeneration;if(layer==self.videoLayer&&layer.readyForDisplay){dispatch_async(dispatch_get_main_queue(),^{if(generation==self.playerGeneration&&item==self.observedItem&&layer==self.videoLayer&&layer.readyForDisplay)[self markFirstVideoFrameReadyForItem:item];});}return;}
-    if(context==CCTVPlayerTimeControlContext){AVPlayerItem *reportedItem=self.player.currentItem;NSUInteger reportedGeneration=self.playerGeneration;AVPlayerTimeControlStatus state=self.player.timeControlStatus;dispatch_async(dispatch_get_main_queue(),^{if(!reportedItem||reportedGeneration!=self.playerGeneration||reportedItem!=self.observedItem||reportedItem!=self.player.currentItem||self.playbackFailureRecorded)return;if(!self.hasDiagnosticTimeControlStatus||self.lastDiagnosticTimeControlStatus!=(NSInteger)state){self.hasDiagnosticTimeControlStatus=YES;self.lastDiagnosticTimeControlStatus=(NSInteger)state;NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":self.playbackAttemptID?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-self.playbackStartedAt)*1000))), @"video_track_state":self.hasVideoTrack?@"confirmed_video":@"unknown"} mutableCopy];[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(self.result))];MediaPlaybackAddAccessLogFields(fields,self.observedItem);if(state==AVPlayerTimeControlStatusPlaying)[RuntimeDiagnostics.shared recordEvent:@"player_reports_playing" category:@"playback" fields:fields];else if(state==AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate){fields[@"wait_reason"]=self.player.reasonForWaitingToPlay?:@"unknown";[RuntimeDiagnostics.shared recordEvent:@"player_waiting_to_play" category:@"playback" fields:fields];}}if(self.resolving)return;if(state==AVPlayerTimeControlStatusPlaying){if(self.videoFrameReady){self.status.text=@"视频首帧已就绪 · AVPlayer 正在播放";[self.spinner stopAnimating];}else if(self.hasVideoTrack){self.status.text=@"AVPlayer 正在播放 · 等待视频首帧";[self.spinner startAnimating];}else{self.status.text=@"播放器报告播放中 · 视频画面未确认";[self.spinner stopAnimating];}}else if(state==AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate){self.status.text=@"正在缓冲 · 等待 AVPlayer";[self.spinner startAnimating];}else if(self.player.currentItem.status==AVPlayerItemStatusReadyToPlay){self.status.text=self.videoFrameReady?@"视频首帧已就绪 · 当前已暂停":(self.hasVideoTrack?@"媒体已准备 · 当前已暂停，等待视频首帧":@"媒体已准备 · 当前暂停");if(!self.videoFrameReady)[self.spinner stopAnimating];}self.status.accessibilityLabel=self.status.text;});return;}
+    if(context==CCTVPlayerTimeControlContext){AVPlayerItem *reportedItem=self.player.currentItem;NSUInteger reportedGeneration=self.playerGeneration;AVPlayerTimeControlStatus state=self.player.timeControlStatus;dispatch_async(dispatch_get_main_queue(),^{if(!reportedItem||reportedGeneration!=self.playerGeneration||reportedItem!=self.observedItem||reportedItem!=self.player.currentItem||self.playbackFailureRecorded)return;if(!self.hasDiagnosticTimeControlStatus||self.lastDiagnosticTimeControlStatus!=(NSInteger)state){self.hasDiagnosticTimeControlStatus=YES;self.lastDiagnosticTimeControlStatus=(NSInteger)state;NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":self.playbackAttemptID?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-self.playbackStartedAt)*1000))), @"video_track_state":self.hasVideoTrack?@"confirmed_video":@"unknown"} mutableCopy];[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(self.result))];MediaPlaybackAddAccessLogFields(fields,self.observedItem);if(state==AVPlayerTimeControlStatusPlaying){[self endBackgroundAutoAdvanceTaskIfNeeded];[self updateNowPlayingInfoCenter];[RuntimeDiagnostics.shared recordEvent:@"player_reports_playing" category:@"playback" fields:fields];}else if(state==AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate){fields[@"wait_reason"]=self.player.reasonForWaitingToPlay?:@"unknown";[RuntimeDiagnostics.shared recordEvent:@"player_waiting_to_play" category:@"playback" fields:fields];}}if(self.resolving)return;if(state==AVPlayerTimeControlStatusPlaying){if(self.videoFrameReady){self.status.text=@"视频首帧已就绪 · AVPlayer 正在播放";[self.spinner stopAnimating];}else if(self.hasVideoTrack){self.status.text=@"AVPlayer 正在播放 · 等待视频首帧";[self.spinner startAnimating];}else{self.status.text=@"播放器报告播放中 · 视频画面未确认";[self.spinner stopAnimating];}}else if(state==AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate){self.status.text=@"正在缓冲 · 等待 AVPlayer";[self.spinner startAnimating];}else if(self.player.currentItem.status==AVPlayerItemStatusReadyToPlay){self.status.text=self.videoFrameReady?@"视频首帧已就绪 · 当前已暂停":(self.hasVideoTrack?@"媒体已准备 · 当前已暂停，等待视频首帧":@"媒体已准备 · 当前暂停");if(!self.videoFrameReady)[self.spinner stopAnimating];}self.status.accessibilityLabel=self.status.text;});return;}
     [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
 }
 - (void)playerItemStalled:(NSNotification *)notification {
@@ -1307,7 +1366,8 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     NSTimeInterval position=CMTimeGetSeconds(self.player.currentTime),duration=CMTimeGetSeconds(self.observedItem.duration);if(!isfinite(position)||position<0)position=0;if(!isfinite(duration)||duration<0)duration=0;
     [MediaPlaybackStateStore recordContext:self.context?:@{} lineIndex:self.lineIndex episodeIndex:self.episodeIndex position:position duration:duration completed:YES];[self.spinner stopAnimating];[self recordPlaybackAttemptOutcome:@"completed" failureKind:nil httpStatus:0 terminal:YES];
     BOOL autoNext=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaAutoPlayNext"]? [NSUserDefaults.standardUserDefaults boolForKey:@"cctv.mediaAutoPlayNext"]:YES;
-    if(autoNext&&self.episodeIndex+1<self.episodes.count){NSInteger previousEpisode=self.episodeIndex;self.episodeIndex++;self.stallRecoveryAttempts=0;[self resetAutomaticFallbackLines];self.pendingResolutionReason=@"auto_advance";[self updateEpisodeTitle];self.status.text=@"本集已结束 · 正在加载下一集";self.status.accessibilityLabel=self.status.text;[RuntimeDiagnostics.shared recordEvent:@"playback_auto_advance" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"line_index":@(self.lineIndex),@"from_episode_index":@(previousEpisode),@"to_episode_index":@(self.episodeIndex)}];[self resolveAndPlay];return;}
+    if(autoNext&&self.episodeIndex+1<self.episodes.count){self.isAutoAdvancingEpisode=YES;[self activateBackgroundAudioSessionIfNeeded];[self beginBackgroundAutoAdvanceTaskIfNeeded];NSInteger previousEpisode=self.episodeIndex;self.episodeIndex++;self.stallRecoveryAttempts=0;[self resetAutomaticFallbackLines];self.pendingResolutionReason=@"auto_advance";[self updateEpisodeTitle];self.status.text=@"本集已结束 · 正在加载下一集";self.status.accessibilityLabel=self.status.text;[RuntimeDiagnostics.shared recordEvent:@"playback_auto_advance" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"line_index":@(self.lineIndex),@"from_episode_index":@(previousEpisode),@"to_episode_index":@(self.episodeIndex)}];[self resolveAndPlay];return;}
+    [self endBackgroundAutoAdvanceTaskIfNeeded];
     self.status.text=@"播放完成";self.status.accessibilityLabel=self.status.text;
 }
 #pragma mark - MediaPlaybackCicadaAdapterDelegate
@@ -1330,7 +1390,8 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     [MediaPlaybackStateStore recordContext:self.context?:@{} lineIndex:self.lineIndex episodeIndex:self.episodeIndex position:position duration:duration completed:YES];
     [self.spinner stopAnimating];[self recordPlaybackAttemptOutcome:@"completed" failureKind:nil httpStatus:0 terminal:YES];
     BOOL autoNext=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaAutoPlayNext"]?[NSUserDefaults.standardUserDefaults boolForKey:@"cctv.mediaAutoPlayNext"]:YES;
-    if(autoNext&&self.episodeIndex+1<self.episodes.count){NSInteger previousEpisode=self.episodeIndex;self.episodeIndex++;self.stallRecoveryAttempts=0;self.pendingResolutionReason=@"auto_advance";[self updateEpisodeTitle];self.status.text=@"本集已结束 · 正在加载下一集";self.status.accessibilityLabel=self.status.text;[RuntimeDiagnostics.shared recordEvent:@"playback_auto_advance" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"line_index":@(self.lineIndex),@"from_episode_index":@(previousEpisode),@"to_episode_index":@(self.episodeIndex)}];[self resolveAndPlay];return;}
+    if(autoNext&&self.episodeIndex+1<self.episodes.count){self.isAutoAdvancingEpisode=YES;[self activateBackgroundAudioSessionIfNeeded];[self beginBackgroundAutoAdvanceTaskIfNeeded];NSInteger previousEpisode=self.episodeIndex;self.episodeIndex++;self.stallRecoveryAttempts=0;self.pendingResolutionReason=@"auto_advance";[self updateEpisodeTitle];self.status.text=@"本集已结束 · 正在加载下一集";self.status.accessibilityLabel=self.status.text;[RuntimeDiagnostics.shared recordEvent:@"playback_auto_advance" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"line_index":@(self.lineIndex),@"from_episode_index":@(previousEpisode),@"to_episode_index":@(self.episodeIndex)}];[self resolveAndPlay];return;}
+    [self endBackgroundAutoAdvanceTaskIfNeeded];
     self.status.text=@"播放完成";self.status.accessibilityLabel=self.status.text;
 }
 - (void)cicadaAdapter:(id)adapter didUpdatePosition:(NSTimeInterval)position duration:(NSTimeInterval)duration {
@@ -1480,6 +1541,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
             @"reason":@"selected_index_out_of_range"}];
         return;
     }
+    if(UIApplication.sharedApplication.applicationState!=UIApplicationStateActive||self.isAutoAdvancingEpisode){[self activateBackgroundAudioSessionIfNeeded];[self beginBackgroundAutoAdvanceTaskIfNeeded];}
     NSDictionary *line=lines[self.lineIndex],*episode=episodes[self.episodeIndex];
     self.resolving=YES;self.episodeWebFallbackAvailable=NO;
     NSUInteger generation=++self.generation;
@@ -1532,6 +1594,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
             }
             [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_failed" category:@"media_api" fields:fields];
             if(!owner.episodeWebFallbackAvailable&&[owner tryNextLineForAutomaticFallback:@"episode_resolve_failed"])return;
+            [owner endBackgroundAutoAdvanceTaskIfNeeded];
             owner.status.text=owner.episodeWebFallbackAvailable?@"来源未解析出媒体地址 · 可点右上角“网页尝试”打开分集页":(error.localizedDescription?:@"来源没有返回可播放结果");
             owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];
             return;

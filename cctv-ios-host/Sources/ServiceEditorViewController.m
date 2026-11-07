@@ -247,6 +247,10 @@
     [autoPortBtn setTitle:@"自动分配" forState:UIControlStateNormal];
     autoPortBtn.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
     autoPortBtn.tintColor=HostAccent();
+    autoPortBtn.backgroundColor=HostSelectedSurface();
+    autoPortBtn.layer.cornerRadius=10;
+    autoPortBtn.layer.cornerCurve=kCACornerCurveContinuous;
+    HostInstallPressFeedback(autoPortBtn);
     autoPortBtn.frame=CGRectMake(0,0,64,32);
     [autoPortBtn addTarget:self action:@selector(assignAvailablePort) forControlEvents:UIControlEventTouchUpInside];
     self.portField.rightView=autoPortBtn;
@@ -264,6 +268,10 @@
     [pasteURLBtn setTitle:@"粘贴" forState:UIControlStateNormal];
     pasteURLBtn.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
     pasteURLBtn.tintColor=HostAccent();
+    pasteURLBtn.backgroundColor=HostSelectedSurface();
+    pasteURLBtn.layer.cornerRadius=10;
+    pasteURLBtn.layer.cornerCurve=kCACornerCurveContinuous;
+    HostInstallPressFeedback(pasteURLBtn);
     pasteURLBtn.frame=CGRectMake(0,0,44,32);
     [pasteURLBtn addTarget:self action:@selector(pasteURLIntoField) forControlEvents:UIControlEventTouchUpInside];
     self.urlField.rightView=pasteURLBtn;
@@ -335,6 +343,8 @@
            : section == 2 ? ([self.service[@"builtin"] boolValue] ? 1 : 3)
                           : 1;
 }
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
+- (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionFooterView(view); }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if(section==3)return nil;
     // Node.js 服务此前被误标为“Python 服务”。

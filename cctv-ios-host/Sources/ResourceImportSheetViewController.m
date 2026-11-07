@@ -18,8 +18,13 @@
     self.contentView.backgroundColor=HostCard();
     self.selectionStyle=UITableViewCellSelectionStyleDefault;
 
+    self.layer.cornerRadius=16;
+    self.layer.cornerCurve=kCACornerCurveContinuous;
     _iconBackground=[UIView new];
-    _iconBackground.layer.cornerRadius=26;
+    _iconBackground.layer.cornerRadius=16;
+    _iconBackground.layer.cornerCurve=kCACornerCurveContinuous;
+    _iconBackground.layer.borderWidth=0.6;
+    HostSetLayerBorderColor(_iconBackground,[UIColor colorWithWhite:1 alpha:0.22]);
     _iconBackground.translatesAutoresizingMaskIntoConstraints=NO;
     [self.contentView addSubview:_iconBackground];
     _iconView=[UIImageView new];
@@ -96,6 +101,10 @@
 - (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
     [super setHighlighted:highlighted animated:animated];
     self.contentView.backgroundColor=highlighted?HostHighlightedSurface():HostCard();
+    if(UIAccessibilityIsReduceMotionEnabled())return;
+    [UIView animateWithDuration:highlighted?0.10:0.22 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        self.transform=highlighted?CGAffineTransformMakeScale(0.985,0.985):CGAffineTransformIdentity;
+    } completion:nil];
 }
 @end
 
@@ -118,7 +127,7 @@
     [self.view addSubview:header];
     UILabel *title=[UILabel new];
     title.text=@"按类型选择导入方式";
-    title.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleLargeTitle] scaledFontForFont:[UIFont systemFontOfSize:28 weight:UIFontWeightBold]];
+    title.font=HostRoundedFont(28,UIFontWeightBold,UIFontTextStyleLargeTitle);
     title.adjustsFontForContentSizeCategory=YES;
     title.textColor=HostText();
     title.translatesAutoresizingMaskIntoConstraints=NO;
@@ -129,6 +138,10 @@
     close.tintColor=HostSecondaryText();
     close.backgroundColor=HostRaisedSurface();
     close.layer.cornerRadius=22;
+    close.layer.cornerCurve=kCACornerCurveContinuous;
+    close.layer.borderWidth=0.6;
+    HostSetLayerBorderColor(close,HostBorder());
+    HostInstallPressFeedback(close);
     close.accessibilityLabel=@"关闭添加资源";
     close.accessibilityIdentifier=@"resource-import.close";
     [close addTarget:self action:@selector(closeSheet) forControlEvents:UIControlEventTouchUpInside];
