@@ -1409,6 +1409,10 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('generation!=owner.playerGeneration', self.playback)
         self.assertIn('pendingQualityWasPlaying', self.playback)
         self.assertIn('self.player.timeControlStatus!=AVPlayerTimeControlStatusPaused', self.playback)
+        self.assertIn('CCTVPlayerControllerReadyContext', self.playback)
+        self.assertIn('[self.playerController addObserver:self forKeyPath:@"readyForDisplay"', self.playback)
+        self.assertIn('[self.playerController removeObserver:self forKeyPath:@"readyForDisplay"', self.playback)
+        self.assertIn('item==self.player.currentItem&&controller==self.playerController&&controller.readyForDisplay', self.playback)
         self.assertIn('未能按名称确认分集', self.playback)
 
     def test_settings_expose_bounded_movie_metadata_cache_cleanup(self):
