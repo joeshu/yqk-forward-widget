@@ -26,14 +26,18 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def is_direct_media_url(url):
-    path = urllib.parse.urlsplit(str(url or '')).path.lower()
-    return path.endswith(('.m3u8', '.m3u', '.mp4', '.m4v', '.mov', '.m4a', '.mp3',
-                          '.aac', '.ts', '.mpd', '.flv', '.mkv', '.avi', '.webm', '.wmv', '.rmvb'))
+    raw = str(url or '').lower()
+    path = urllib.parse.urlsplit(raw).path
+    if path.endswith(('.m3u8', '.m3u', '.mp4', '.m4v', '.mov', '.m4a', '.mp3',
+                      '.aac', '.ts', '.mpd', '.flv', '.mkv', '.avi', '.webm', '.wmv', '.rmvb')):
+        return True
+    return any(tok in raw for tok in ('.m3u8', '.mp4', '.flv', '.mpd'))
 
 
 def is_hls_url(url):
-    path = urllib.parse.urlsplit(str(url or '')).path.lower()
-    return path.endswith(('.m3u8', '.m3u'))
+    raw = str(url or '').lower()
+    path = urllib.parse.urlsplit(raw).path
+    return path.endswith(('.m3u8', '.m3u')) or '.m3u8' in raw
 
 
 def is_declared_hls(result, url):
@@ -737,10 +741,17 @@ def main():
     report_runtime_stage('media_service_listener_bound')
     def create_engine():
         if manifest['runtime'] == 'python':
+            if str(manifest.get('entry', '')).startswith('csp_') or manifest.get('protocol') == 'jar-bridge':
+                from csp_adapter import CSPAdapter
+                return CSPAdapter(manifest['entry'], manifest.get('options'))
             engine = PythonSpider(args.package, manifest['entry'], manifest.get('options'),
                                   f'http://127.0.0.1:{server.server_port}/proxy', args.data_dir)
             engine.spider._cctvhost_file_proxy_supported = True
             return engine
+        if manifest['runtime'] in ('jar-bridge', 'csp'):
+            from csp_adapter import CSPAdapter
+            return CSPAdapter(manifest.get('entry') or manifest.get('api') or manifest.get('className'),
+                              manifest.get('options') or manifest.get('ext') or '')
         node_manifest = dict(manifest, dataDirectory=args.data_dir,
                              proxyURL=f'http://127.0.0.1:{server.server_port}/proxy')
         if manifest['runtime'] == 'node':

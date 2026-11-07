@@ -464,7 +464,7 @@ class MediaRelay:
             # responses before returning opaque bytes to AVPlayer.
             mime_type = mime.split(';', 1)[0].strip().lower()
             generic_mime = mime_type in ('', 'application/octet-stream', 'binary/octet-stream', 'text/plain')
-            extensionless = not urllib.parse.urlsplit(final_url).path.rsplit('/', 1)[-1].count('.')
+            extensionless = not urllib.parse.urlsplit(final_url).path.rsplit('/', 1)[-1].count('.') or '.m3u8' in final_url.lower()
             if not head and not is_hls and (expected_hls or generic_mime or extensionless):
                 prefix = response.read(64)
                 is_hls = prefix.lstrip(b'\xef\xbb\xbf \t\r\n').startswith(b'#EXTM3U')

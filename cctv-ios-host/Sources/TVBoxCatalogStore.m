@@ -71,6 +71,30 @@ static NSString *TVBoxBasicAuthorization(NSURLComponents *parts) {
     return credentials.length ? [@"Basic " stringByAppendingString:[credentials base64EncodedStringWithOptions:0]] : nil;
 }
 
+static BOOL TVBoxSupportedJARClass(NSString *api) {
+    if(![api isKindOfClass:NSString.class])return NO;
+    NSString *low=api.lowercaseString;
+    static NSSet *set;static dispatch_once_t once;
+    dispatch_once(&once,^{
+        set=[NSSet setWithArray:@[
+            @"csp_xbpq", @"csp_xyqhiker", @"csp_music1",
+            @"csp_appget", @"csp_appdrama", @"csp_appysv2", @"csp_apprj",
+            @"csp_app99", @"csp_app3q", @"csp_appqi", @"csp_appsy", @"csp_appyqk",
+            @"csp_bili", @"csp_biliys", @"csp_panwebshare", @"csp_wogg",
+            @"csp_hxq", @"csp_sp360", @"csp_tvyb", @"csp_pianku8", @"csp_feiyu",
+            @"csp_duboku", @"csp_czsapp", @"csp_xlys", @"csp_wwys", @"csp_fengye",
+            @"csp_ikanbot", @"csp_web1905", @"csp_tuxiaobei", @"csp_beilehu",
+            @"csp_yst", @"csp_qimaodj", @"csp_hemadj", @"csp_weiguandj",
+            @"csp_haokandj", @"csp_xingyadj", @"csp_miaowu", @"csp_modu",
+            @"csp_kanqiu", @"csp_qiutongty", @"csp_guazity",
+            @"csp_kafeity", @"csp_919ty", @"csp_firstaid", @"csp_djuu",
+            @"csp_djlh", @"csp_qingtingfm", @"csp_tingshijie", @"csp_apply",
+            @"csp_gz360", @"csp_saohuo", @"csp_jpys",
+            @"csp_panali", @"csp_panquark", @"csp_panuc", @"csp_panbaidu"
+        ]];
+    });
+    return [set containsObject:low];
+}
 @implementation TVBoxCatalogStore
 + (NSDictionary *)catalogWithMacCMSAPIURL:(NSString *)apiURL name:(NSString *)name error:(NSError **)error {
     NSString *trimmed=[apiURL stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -115,13 +139,13 @@ static NSString *TVBoxBasicAuthorization(NSURLComponents *parts) {
         apiParts=[NSURLComponents componentsWithString:api?:@""];
         NSString *path=apiParts.path.lowercaseString;
         if ([path hasSuffix:@".md5"]) path=[path stringByDeletingPathExtension];
-        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=[api.lowercaseString hasPrefix:@"csp_"];BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];
+        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=[api.lowercaseString hasPrefix:@"csp_"];BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&TVBoxSupportedJARClass(api);
         BOOL apiKindMacCMS=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&[siteType isEqual:@"0"];
         BOOL apiKindTVBox=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&([siteType isEqual:@"1"]||[siteType isEqual:@"4"]);
         BOOL direct=TVBoxWebURL(api)&&scriptFile;
-        BOOL supported=direct||apiKindTVBox||apiKindMacCMS||apiKindDouban;
-        NSString *reason=apiKindDouban?@"豆瓣影视索引 · iOS 原生适配 · 影片需跨点播源搜索播放":(apiKindMacCMS?@"TVBox type 0 · MacCMS JSON/XML API · 选中后请求":(apiKindTVBox?[NSString stringWithFormat:@"TVBox type %@ JSON API · 选中后请求，尚未验证",siteType]:(direct?@"可导入 · 将由现有脚本适配器检查":([siteType isEqual:@"0"]?@"TVBox type 0 为 JS 爬虫，需脚本文件地址；iOS 不支持此地址形式":([siteType isEqual:@"3"]?((jarFile||jarSpiderClass)?@"需要 Android/JAR 运行时；iOS 不支持":@"脚本地址无法识别；保留在合集中"):([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"]?@"此脚本类型需 Android/JAR 运行时；iOS 不支持":@"站点地址无效；保留在合集中"))))));
-        NSString *apiKind=apiKindDouban?@"douban-index":(apiKindMacCMS?@"maccms-api":(apiKindTVBox?@"tvbox-api":(direct?@"script":@"unsupported")));
+        BOOL supported=direct||apiKindTVBox||apiKindMacCMS||apiKindDouban||apiKindJARBridge;
+        NSString *reason=apiKindDouban?@"豆瓣影视索引 · iOS 原生适配 · 影片需跨点播源搜索播放":(apiKindMacCMS?@"TVBox type 0 · MacCMS JSON/XML API · 选中后请求":(apiKindTVBox?[NSString stringWithFormat:@"TVBox type %@ JSON API · 选中后请求，尚未验证",siteType]:(direct?@"可导入 · 将由现有脚本适配器检查":(apiKindJARBridge?@"Android/JAR 适配引擎 · iOS 原生执行":([siteType isEqual:@"0"]?@"TVBox type 0 为 JS 爬虫，需脚本文件地址；iOS 不支持此地址形式":([siteType isEqual:@"3"]?((jarFile||jarSpiderClass)?@"需要 Android/JAR 运行时；iOS 不支持":@"脚本地址无法识别；保留在合集中"):([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"]?@"此脚本类型需 Android/JAR 运行时；iOS 不支持":@"站点地址无效；保留在合集中"))))));
+        NSString *apiKind=apiKindDouban?@"douban-index":(apiKindMacCMS?@"maccms-api":(apiKindTVBox?@"tvbox-api":(direct?@"script":(apiKindJARBridge?@"jar-bridge":@"unsupported"))));
         NSMutableDictionary *site=[@{@"key":key,@"name":name,@"api":api?:@"",@"ext":ext?:@"",@"type":siteType,@"supported":@(supported),@"status":reason,@"apiKind":apiKind,@"sourceIndex":@(siteIndex-1)} mutableCopy];
         if(safeHeaders.count)site[@"header"]=safeHeaders;
         if([value[@"playUrl"] isKindOfClass:NSString.class]&&[value[@"playUrl"] length]<=4096)site[@"playUrl"]=value[@"playUrl"];

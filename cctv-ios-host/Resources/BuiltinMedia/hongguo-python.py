@@ -1965,10 +1965,24 @@ def _parse_video_model_response(j, vid):
         code = -1
     if code != 0:
         raise ValueError("video model API rejected the request")
-    data = j.get("data") if isinstance(j.get("data"), dict) else {}
-    models = data.get("video_model_data") if isinstance(data.get("video_model_data"), dict) else None
+    data = j.get("data")
+    if isinstance(data, str):
+        try:
+            data = _json.loads(data)
+        except Exception:
+            pass
+    if isinstance(data, list):
+        matching = next((x for x in data if isinstance(x, dict) and str(x.get("item_id") or x.get("id") or x.get("vid")) == str(vid)), None)
+        data = matching or (data[0] if data and isinstance(data[0], dict) else {})
+    elif not isinstance(data, dict):
+        data = j if isinstance(j, dict) else {}
+
+    models = data.get("video_model_data") if isinstance(data, dict) else None
     ent = None
-    if models is not None:
+    if isinstance(models, list):
+        matching = next((x for x in models if isinstance(x, dict) and str(x.get("item_id") or x.get("id") or x.get("vid")) == str(vid)), None)
+        ent = matching or (models[0] if models and isinstance(models[0], dict) else None)
+    elif isinstance(models, dict):
         ent = models.get(str(vid))
         if ent is None:
             ent = next((value for value in models.values() if isinstance(value, dict)), None)
@@ -1979,11 +1993,28 @@ def _parse_video_model_response(j, vid):
     vm = ent.get("video_model") if isinstance(ent, dict) else None
     if vm is None and isinstance(data, dict):
         vm = data.get("video_model")
+    if vm is None and isinstance(j, dict):
+        vm = j.get("video_model")
     if isinstance(vm, str):
-        vm = _json.loads(vm)
+        try:
+            vm = _json.loads(vm)
+        except Exception:
+            vm = None
+    if isinstance(vm, dict) and isinstance(vm.get("video_model"), (dict, str)):
+        inner = vm.get("video_model")
+        if isinstance(inner, str):
+            try:
+                inner = _json.loads(inner)
+            except Exception:
+                inner = None
+        if isinstance(inner, dict):
+            vm = inner
     if not isinstance(vm, dict) and isinstance(data, dict) and (
             data.get("video_list") or data.get("dynamic_video_list") or data.get("dynamic_video")):
         vm = dict(data)
+    if not isinstance(vm, dict) and isinstance(ent, dict) and (
+            ent.get("video_list") or ent.get("dynamic_video_list") or ent.get("dynamic_video")):
+        vm = dict(ent)
     if not isinstance(vm, dict):
         raise ValueError("video model API returned no model")
     if not vm.get("key_seed"):
@@ -2045,18 +2076,18 @@ def _signed_model(vid):
                     vm = _parse_video_model_response(j, vid)
                 except Exception as e:
                     last_err = e
-                    retryable = False
+                    retryable = True
                 else:
                     _SIGN_CACHE[str(vid)] = (_time.time(), vm)
                     return vm
         if not retryable or attempt == 2:
             break
         # 空响应/截断/损坏：预算充足时重新注册设备，换域名重试。
-        if deadline - _time.monotonic() >= 8:
+        if deadline - _time.monotonic() >= 3:
             try:
                 dev = _ensure_device(force_refresh=True)
             except Exception:
-                pass
+                dev = None
         if deadline - _time.monotonic() < 0.5:
             break
         _time.sleep(0.3)

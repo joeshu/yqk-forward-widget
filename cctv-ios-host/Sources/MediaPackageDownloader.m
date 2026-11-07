@@ -79,10 +79,16 @@ static NSData *PackageAdaptForADMSignedSource(NSData *data,NSURL *sourceURL,NSEr
         else if(![text containsString:@"await dylProbeHls(safe,headers)"]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 电影猎手媒体校验流程已变化，未导入不兼容版本。"}];return nil;}
         return [text dataUsingEncoding:NSUTF8StringEncoding];
     }
-    NSDictionary *sourceIDs=@{@"/joeshu/for-adm/master/cctvhost/kkapp.js":@"kkapp",@"/joeshu/for-adm/master/cctvhost/ncat.js":@"ncat",@"/joeshu/for-adm/master/cctvhost/happ.js":@"happ"};
+    NSDictionary *sourceIDs=@{@"/joeshu/for-adm/master/cctvhost/kkapp.js":@"kkapp",@"/joeshu/for-adm/master/cctvhost/ncat.js":@"ncat",@"/joeshu/for-adm/master/cctvhost/happ.js":@"happ",@"/joeshu/for-adm/master/cctvhost/qntv.js":@"qntv",@"/joeshu/for-adm/master/cctvhost/souju.js":@"souju",@"/joeshu/for-adm/master/cctvhost/kanju.js":@"kanju"};
     NSString *sourceID=sourceIDs[sourceURL.path.lowercaseString];if(!sourceID.length)return data;
     NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if(!text||![text containsString:[NSString stringWithFormat:@"var Source={\"id\":\"%@\"",sourceID]]){
+    BOOL matchesSource = [text containsString:[NSString stringWithFormat:@"var Source={\"id\":\"%@\"",sourceID]] ||
+                      [text containsString:[NSString stringWithFormat:@"\"id\":\"%@\"",sourceID]] ||
+                      [text containsString:[NSString stringWithFormat:@"\"id\":\"joeshu.%@\"",sourceID]] ||
+                      [text containsString:[NSString stringWithFormat:@"id:\"%@\"",sourceID]] ||
+                      [text containsString:[NSString stringWithFormat:@"id:\"joeshu.%@\"",sourceID]] ||
+                      [text containsString:@"var Source="];
+    if(!text || !matchesSource){
         if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:31 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源脚本与站点地址不匹配，已停止导入。"}];return nil;
     }
     NSArray<NSDictionary<NSString *,NSString *> *> *replacements=@[

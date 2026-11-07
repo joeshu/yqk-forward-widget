@@ -735,11 +735,21 @@ async function parseEpisodes(sid, html) {
 function parseVideoModelResponse(j, vid) {
   if (!j || typeof j !== 'object') throw Error('invalid video model JSON');
   if (j.code !== 0 && j.code != null) throw Error('video model request rejected');
-  const data = (j.data && typeof j.data === 'object') ? j.data : {};
+  let data = (j.data && typeof j.data === 'object') ? j.data : {};
+  if (Array.isArray(data)) {
+    const matching = data.find(x => x && typeof x === 'object' && String(x.item_id || x.id || x.vid) === String(vid));
+    data = matching || (data[0] && typeof data[0] === 'object' ? data[0] : {});
+  }
   const models = (data.video_model_data && typeof data.video_model_data === 'object') ? data.video_model_data : null;
-  let ent = (models && (models[String(vid)] || Object.values(models).find(value => value && typeof value === 'object'))) ||
-            ((data[String(vid)] && typeof data[String(vid)] === 'object') ? data[String(vid)] : null) ||
-            data;
+  let ent = null;
+  if (Array.isArray(models)) {
+    const matching = models.find(x => x && typeof x === 'object' && String(x.item_id || x.id || x.vid) === String(vid));
+    ent = matching || (models[0] && typeof models[0] === 'object' ? models[0] : null);
+  } else if (models && typeof models === 'object') {
+    ent = models[String(vid)] || Object.values(models).find(value => value && typeof value === 'object');
+  }
+  if (!ent && data[String(vid)] && typeof data[String(vid)] === 'object') ent = data[String(vid)];
+  if (!ent) ent = data;
   let vm = ent && ent.video_model;
   if (typeof vm === 'string') {
     try { vm = JSON.parse(vm); } catch (error) { vm = null; }

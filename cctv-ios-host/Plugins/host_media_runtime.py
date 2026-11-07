@@ -100,6 +100,38 @@ def rows(value):
     return []
 
 
+def _normalize_poster(raw_poster, raw_headers=None):
+    poster = str(raw_poster or '').strip()
+    headers = media_headers(raw_headers) if isinstance(raw_headers, dict) else {}
+    if poster.startswith('//') and len(poster) > 4:
+        poster = 'https:' + poster
+    if '@' in poster and poster.lower().startswith(('http://', 'https://')):
+        parts = poster.split('@')
+        base_url = parts[0].strip()
+        extra = {}
+        valid_inline = True
+        for seg in parts[1:]:
+            if '=' in seg:
+                k, _, v = seg.partition('=')
+                k_clean = k.strip()
+                if k_clean.lower() in ('referer', 'referrer', 'user-agent', 'ua', 'cookie', 'origin', 'authorization'):
+                    if k_clean.lower() == 'ua':
+                        k_clean = 'User-Agent'
+                    elif k_clean.lower() == 'referrer':
+                        k_clean = 'Referer'
+                    extra[k_clean] = v.strip()
+                else:
+                    valid_inline = False
+                    break
+            else:
+                valid_inline = False
+                break
+        if valid_inline and extra:
+            poster = base_url
+            headers.update(media_headers(extra))
+    return poster, headers
+
+
 def cards(value):
     result = []
     for row in rows(value):
@@ -109,10 +141,14 @@ def cards(value):
         name = row.get('name', row.get('vod_name'))
         if identifier is None or not name:
             continue
+        poster_url, poster_headers = _normalize_poster(
+            row.get('poster', row.get('vod_pic', '')),
+            row.get('posterHeaders') if isinstance(row.get('posterHeaders'), dict) else None,
+        )
         result.append({'id': str(identifier), 'name': str(name),
-                       'poster': str(row.get('poster', row.get('vod_pic', '')) or ''),
+                       'poster': poster_url,
                        'remarks': str(row.get('remarks', row.get('vod_remarks', '')) or ''),
-                       **({'posterHeaders': media_headers(row['posterHeaders'])} if isinstance(row.get('posterHeaders'), dict) else {})})
+                       **({'posterHeaders': poster_headers} if poster_headers else {})})
     return result
 
 
@@ -229,14 +265,18 @@ def detail(value, identifier):
                              'name': str(name or f'第 {index + 1} 集').strip()})
         if episodes:
             lines = [{'id': '', 'name': '播放', 'episodes': episodes}]
+    poster_url, poster_headers = _normalize_poster(
+        item.get('poster', item.get('vod_pic', '')),
+        item.get('posterHeaders') if isinstance(item.get('posterHeaders'), dict) else None,
+    )
     result = {'id': str(item.get('id', item.get('vod_id', identifier))),
               'name': str(item.get('name', item.get('vod_name', identifier))),
-              'poster': str(item.get('poster', item.get('vod_pic', '')) or ''),
+              'poster': poster_url,
               'description': str(item.get('description', item.get('vod_content', '')) or ''),
               'actor': str(item.get('actor', item.get('vod_actor', '')) or ''),
               'year': str(item.get('year', item.get('vod_year', '')) or ''), 'lines': lines}
-    if isinstance(item.get('posterHeaders'), dict):
-        result['posterHeaders'] = media_headers(item['posterHeaders'])
+    if poster_headers:
+        result['posterHeaders'] = poster_headers
     # Preserve optional provider metadata when present so the native detail page
     # can show accurate credits and classification without inventing values.
     for key, aliases in {
@@ -607,6 +647,16 @@ def playback(value, _depth=0):
         extension = urllib.parse.urlsplit(url).path.rsplit('.', 1)[-1].lower() if '.' in urllib.parse.urlsplit(url).path else ''
     except ValueError:
         extension = ''
+    if not extension and isinstance(url, str) and url:
+        lower_url = url.lower()
+        if '.m3u8' in lower_url:
+            extension = 'm3u8'
+        elif '.mp4' in lower_url:
+            extension = 'mp4'
+        elif '.flv' in lower_url:
+            extension = 'flv'
+        elif '.mpd' in lower_url:
+            extension = 'mpd'
     native_extensions = {'m3u8', 'm3u', 'mp4', 'm4v', 'mov', 'mp3', 'm4a', 'aac', 'ts'}
     stream_extensions = native_extensions | {'mpd', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'rmvb'}
     cicada_extensions = {'mpd', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'asf', 'rmvb', 'rm', 'mpg', 'mpeg', 'm2ts', '3gp'}

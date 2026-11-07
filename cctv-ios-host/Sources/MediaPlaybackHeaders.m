@@ -31,8 +31,13 @@ static void MediaPlaybackAddHeaderValue(NSMutableDictionary<NSString *,NSString 
 
 NSDictionary<NSString *,NSString *> *MediaPlaybackHeadersFromResult(NSDictionary *result) {
     NSMutableDictionary<NSString *,NSString *> *headers=[NSMutableDictionary dictionary];
+    if([result[@"ext"] isKindOfClass:NSDictionary.class]){
+        MediaPlaybackAddHeaderValue(headers,result[@"ext"][@"headers"]);
+        MediaPlaybackAddHeaderValue(headers,result[@"ext"][@"header"]);
+    }
     MediaPlaybackAddHeaderValue(headers,result[@"headers"]);
     MediaPlaybackAddHeaderValue(headers,result[@"header"]);
+    MediaPlaybackAddHeaderValue(headers,result[@"customHeaders"]);
     return headers.copy;
 }
 
@@ -70,7 +75,12 @@ BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary *result) {
     NSString *raw=[result[@"originalURL"] isKindOfClass:NSString.class]?result[@"originalURL"]:result[@"url"];
     NSURLComponents *components=[NSURLComponents componentsWithString:[raw isKindOfClass:NSString.class]?raw:@""];
     NSString *extension=components.path.pathExtension.lowercaseString?:@"";
-    return [@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"aac",@"ts"] containsObject:extension];
+    if([@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"aac",@"ts"] containsObject:extension])return YES;
+    if(!extension.length&&[raw isKindOfClass:NSString.class]&&raw.length){
+        NSString *lowerRaw=[raw lowercaseString];
+        if([lowerRaw containsString:@".m3u8"]||[lowerRaw containsString:@".mp4"]||[lowerRaw containsString:@"/m3u8/"]||[lowerRaw containsString:@"format=m3u8"]||[lowerRaw containsString:@"type=m3u8"]||[lowerRaw containsString:@"ext=m3u8"]||[lowerRaw containsString:@"ext=mp4"])return YES;
+    }
+    return NO;
 }
 
 BOOL MediaPlaybackResultSupportsCicada(NSDictionary *result) {
@@ -103,5 +113,11 @@ BOOL MediaPlaybackResultIsDirectMedia(NSDictionary *result) {
     if([@[@"mpd",@"dash",@"flv",@"mkv",@"avi",@"webm",@"wmv",@"rmvb"] containsObject:format])return YES;
     NSString *raw=[result[@"originalURL"] isKindOfClass:NSString.class]?result[@"originalURL"]:result[@"url"];
     NSURLComponents *components=[NSURLComponents componentsWithString:[raw isKindOfClass:NSString.class]?raw:@""];
-    return [@[@"mpd",@"flv",@"mkv",@"avi",@"webm",@"wmv",@"rmvb"] containsObject:components.path.pathExtension.lowercaseString?:@""];
+    NSString *ext=components.path.pathExtension.lowercaseString?:@"";
+    if([@[@"mpd",@"flv",@"mkv",@"avi",@"webm",@"wmv",@"rmvb",@"m3u8",@"mp4"] containsObject:ext])return YES;
+    if(!ext.length&&[raw isKindOfClass:NSString.class]&&raw.length){
+        NSString *lowerRaw=[raw lowercaseString];
+        if([lowerRaw containsString:@".m3u8"]||[lowerRaw containsString:@".mp4"]||[lowerRaw containsString:@".flv"]||[lowerRaw containsString:@".mpd"])return YES;
+    }
+    return NO;
 }

@@ -132,8 +132,13 @@ static NSUInteger const ImageQueueLimit = 96;
         if(record.generation!=self.generation || !record.views.allObjects.count){[self.requests removeObjectForKey:record.cacheKey];continue;}
         NSMutableData *domain=[self domainStateForURL:record.url];
         if(!HostImageDomainAllows(domain.mutableBytes,CACurrentMediaTime())){[self.requests removeObjectForKey:record.cacheKey];continue;}
-        NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:record.url]];
+        NSURL *targetURL=[NSURL URLWithString:record.url];
+        NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:targetURL];
         [request setValue:@"image/*" forHTTPHeaderField:@"Accept"];
+        [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+        NSString *host=targetURL.host.lowercaseString?:@"";
+        if([host hasSuffix:@"doubanio.com"])[request setValue:@"https://movie.douban.com/" forHTTPHeaderField:@"Referer"];
+        else if([host hasSuffix:@"hdslb.com"])[request setValue:@"https://www.bilibili.com/" forHTTPHeaderField:@"Referer"];
         record.data=[NSMutableData data];record.startedAt=CACurrentMediaTime();record.httpStatus=0;record.expectedContentLength=-1;record.responseContentType=@"";record.responseEncrypted=NO;record.failureStage=nil;record.task=[self.session dataTaskWithRequest:request];
         record.task.priority=NSURLSessionTaskPriorityLow;self.tasks[@(record.task.taskIdentifier)]=record;[record.task resume];
     }

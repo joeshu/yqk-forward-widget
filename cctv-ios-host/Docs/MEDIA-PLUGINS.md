@@ -124,7 +124,7 @@ Python Spider 为兼容非线程安全脚本仍串行执行；代理调用等待
 Python 和 Node.js Mobile 资源都可在第三项返回
 `{__cctvhostFileResponse: true, path, offset, length}`。宿主校验真实路径仍在该资源的数据目录、文件范围有效，然后用 256 KiB 缓冲流式交付，支持完整 GET、开放区间 Range、后缀 Range 和 HEAD。文件引用不受 bytes 的 16 MiB 上限影响；Node 视频数据也不会进入 JSON 控制桥。Python 新宿主会注入 `_cctvhost_file_proxy_supported = True`；HGTV 源在旧宿主上保留小响应的 bytes 兼容路径，较大文件需要更新 IPA。
 
-`Examples/hgtv-python` 和 `Examples/hgtv-node` 提供当前唯一的 HGTV Python/JS 导入示例；旧版 1.0.4 示例已移除。两种运行时都读取实际分集画质，默认最高可用档，并返回各档 `alternates`；不存在的档位返回明确错误。JS 从 SSR 的完整 `vid_list` 读取全集。Python 使用 `hostcrypto.AES_CTR`、Node 使用原生 AES-CTR，无需 ffmpeg。解密保留 MP4 盒长度、从 `sinf/frma` 恢复原始编解码标识，再把保护盒类型改成 `free`；不改编码器的 HEVC Level。严格校验会拒绝先前写坏盒长度的缓存。公开试看不存在时明确提示，不将完整签名视频标成试看。包根目录为 `cctvhost.json`。
+`Examples/hgtv-python-1.0.4`、`Examples/hgtv-python` 和 `Examples/hgtv-node` 提供 HGTV 导入示例。两种运行时都读取实际分集画质，默认最高可用档，并返回各档 `alternates`；不存在的档位返回明确错误。JS 从 SSR 的完整 `vid_list` 读取全集。Python 使用 `hostcrypto.AES_CTR`、Node 使用原生 AES-CTR，无需 ffmpeg。解密保留 MP4 盒长度、从 `sinf/frma` 恢复原始编解码标识，再把保护盒类型改成 `free`；不改编码器的 HEVC Level。严格校验会拒绝先前写坏盒长度的缓存。公开试看不存在时明确提示，不将完整签名视频标成试看。包根目录为 `cctvhost.json`。
 
 `Scripts/hgtv-live-matrix.py` 下载指定集的各个实际画质并核对目录；`Scripts/validate-avfoundation.sh` 在 macOS 使用真实 AVFoundation 解析本地文件与 HTTP Range、解出画面，同时保留旧错误结构的对照样本。报告区分目录解析、媒体交付与解码验证，不将接口 HTTP 200 视作已经显示首帧。
 
