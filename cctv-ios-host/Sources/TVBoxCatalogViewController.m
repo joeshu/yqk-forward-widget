@@ -83,14 +83,18 @@
     UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:nil action:nil];
     more.accessibilityLabel=@"合集操作";more.menu=[UIMenu menuWithChildren:@[[UIMenu menuWithTitle:@"导出与复制" children:exportChildren],[UIMenu menuWithTitle:@"高级操作" children:@[bulk]],remove]];self.navigationItem.rightBarButtonItem=more;
     self.contentFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"影视",@"直播",@"不支持"]];self.contentFilter.selectedSegmentIndex=0;self.contentFilter.selectedSegmentTintColor=HostAccent();[self.contentFilter addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
-    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.tableView.bounds.size.width,82)];
-    self.summaryLabel=[[UILabel alloc] initWithFrame:CGRectMake(18,4,MAX(1,header.bounds.size.width-36),22)];
+    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.tableView.bounds.size.width,92)];
+    UIView *headerCard=[[UIView alloc] initWithFrame:CGRectMake(16,4,MAX(1,header.bounds.size.width-32),80)];
+    headerCard.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    HostStyleGlassCard(headerCard,16);
+    [header addSubview:headerCard];
+    self.summaryLabel=[[UILabel alloc] initWithFrame:CGRectMake(14,8,MAX(1,headerCard.bounds.size.width-28),20)];
     self.summaryLabel.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.summaryLabel.font=HostMonospacedDigitFont(12.5,UIFontWeightMedium,UIFontTextStyleCaption1);
+    self.summaryLabel.font=HostMonospacedDigitFont(12.5,UIFontWeightSemibold,UIFontTextStyleCaption1);
     self.summaryLabel.textColor=HostSecondaryText();
     self.summaryLabel.accessibilityIdentifier=@"tvbox.catalog.summary";
-    [header addSubview:self.summaryLabel];
-    self.contentFilter.frame=CGRectMake(16,30,MAX(1,header.bounds.size.width-32),44);self.contentFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;[header addSubview:self.contentFilter];self.tableView.tableHeaderView=header;
+    [headerCard addSubview:self.summaryLabel];
+    self.contentFilter.frame=CGRectMake(10,32,MAX(1,headerCard.bounds.size.width-20),40);self.contentFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;[headerCard addSubview:self.contentFilter];self.tableView.tableHeaderView=header;
     [self updateCatalogSummary];
     [self updateEmptyState];
 }
@@ -120,6 +124,7 @@
     cell.textLabel.font=HostRoundedFont(16,UIFontWeightSemibold,UIFontTextStyleHeadline);
     cell.detailTextLabel.font=HostMonospacedDigitFont(12,UIFontWeightRegular,UIFontTextStyleCaption1);
     BOOL supported=[row[@"supported"] boolValue];NSDictionary *service=ip.section==0&&self.serviceForSite?self.serviceForSite(row):nil;BOOL serviceRunning=service&&[PyHost isRunningServiceIdentifier:service[@"id"]];NSString *status=[row[@"status"] description]?:@"";if(service)status=serviceRunning?@"服务运行中 · 点按打开资源":@"服务已导入 · 点按启动并打开资源";cell.detailTextLabel.text=ip.section==0?[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"api"] description]?:@""]]:[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"url"] description]?:@""]];
+    if(cell.detailTextLabel.text.length){NSMutableParagraphStyle *pStyle=[NSMutableParagraphStyle new];pStyle.lineSpacing=3.0;pStyle.paragraphSpacing=1.5;cell.detailTextLabel.attributedText=[[NSAttributedString alloc] initWithString:cell.detailTextLabel.text attributes:@{NSFontAttributeName:cell.detailTextLabel.font,NSForegroundColorAttributeName:HostSecondaryText(),NSParagraphStyleAttributeName:pStyle}];}
     NSString *iconName=ip.section==0?([row[@"apiKind"] isEqual:@"script"]?@"terminal":@"bolt.horizontal.circle"):@"dot.radiowaves.left.and.right";
     cell.imageView.image=[UIImage systemImageNamed:iconName];
     cell.imageView.tintColor=supported?(serviceRunning?UIColor.systemGreenColor:HostAccent()):HostMutedText();
@@ -149,7 +154,7 @@
     [tableView deselectRowAtIndexPath:ip animated:YES];NSArray *rows=[self filteredRowsForSection:ip.section];if(ip.row<0||ip.row>=rows.count)return;NSDictionary *row=rows[ip.row];if(![row isKindOfClass:NSDictionary.class])return;
     if(ip.section==1){if([row[@"supported"] boolValue]&&self.onSubscribeLive)self.onSubscribeLive(row);return;}
     if(![row[@"supported"] boolValue])return;
-    BOOL nativeAPI=[row[@"apiKind"] isEqual:@"tvbox-api"]||[row[@"apiKind"] isEqual:@"maccms-api"]||[row[@"apiKind"] isEqual:@"douban-index"];if(nativeAPI){if(self.onUseNativeSite)self.onUseNativeSite(row);return;}
+    BOOL nativeAPI=[row[@"apiKind"] isEqual:@"tvbox-api"]||[row[@"apiKind"] isEqual:@"maccms-api"]||[row[@"apiKind"] isEqual:@"douban-index"]||[row[@"apiKind"] isEqual:@"jar-bridge"];if(nativeAPI){if(self.onUseNativeSite)self.onUseNativeSite(row);return;}
     NSDictionary *existing=self.serviceForSite?self.serviceForSite(row):nil;UIAlertController *alert=[UIAlertController alertControllerWithTitle:[row[@"name"] description]?:@"未命名" message:existing?@"此脚本已在资源中。打开后会启动该资源并进入影视库。":@"仅对当前选择的站点执行脚本导入。可直接导入并浏览，也可先保存到资源页。ext 会作为 Spider 初始化配置传递。" preferredStyle:UIAlertControllerStyleActionSheet];
     if(existing){[alert addAction:[UIAlertAction actionWithTitle:@"启动并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onUseImportedService)self.onUseImportedService(existing);}]];[alert addAction:[UIAlertAction actionWithTitle:@"查看能力与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onOpenImportedService)self.onOpenImportedService(existing);}]];}
     else {[alert addAction:[UIAlertAction actionWithTitle:@"导入并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onImportSite)self.onImportSite(row,YES);}]];[alert addAction:[UIAlertAction actionWithTitle:@"仅导入到资源页" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onImportSite)self.onImportSite(row,NO);}]];}

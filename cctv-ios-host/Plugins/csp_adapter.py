@@ -122,6 +122,183 @@ def _split_rule_array(html, rule):
     return items
 
 
+def _extract_stream_from_html(html, base_url=''):
+    """Extracts a direct .m3u8/.mp4/.flv/.mpd stream URL from HTML or MacCMS player_aaaa."""
+    if not isinstance(html, str) or not html:
+        return ''
+    # 1. Check MacCMS player_aaaa / player_data JSON block (supports encrypt=0, 1, 2)
+    for pattern in (r'player_aaaa\s*=\s*(\{.*?\})\s*</script>',
+                    r'player_aaaa\s*=\s*(\{[^\n;]+\})',
+                    r'player_data\s*=\s*(\{[^\n;]+\})'):
+        m = re.search(pattern, html, re.I | re.S)
+        if not m:
+            continue
+        raw_json = m.group(1).strip()
+        try:
+            cfg = json.loads(raw_json)
+        except Exception:
+            continue
+        if not isinstance(cfg, dict):
+            continue
+        raw_u = str(cfg.get('url') or '').strip()
+        if not raw_u:
+            continue
+        enc = cfg.get('encrypt', 0)
+        try:
+            enc = int(enc)
+        except Exception:
+            enc = 0
+        if enc == 1:
+            raw_u = urllib.parse.unquote(raw_u)
+        elif enc == 2:
+            try:
+                raw_u = urllib.parse.unquote(base64.b64decode(raw_u).decode('utf-8', errors='ignore'))
+            except Exception:
+                pass
+        raw_u = raw_u.replace('\\/', '/').strip()
+        if raw_u.startswith('//'):
+            raw_u = 'https:' + raw_u
+        elif raw_u.startswith('/') and base_url:
+            parts = urllib.parse.urlsplit(base_url)
+            if parts.scheme and parts.netloc:
+                raw_u = f'{parts.scheme}://{parts.netloc}{raw_u}'
+        if raw_u.startswith(('http://', 'https://')) and any(tok in raw_u.lower() for tok in ('.m3u8', '.mp4', '.flv', '.mpd')):
+            return raw_u
+
+    # 2. Check unescaped direct stream URLs in HTML/JS
+    unescaped = html.replace('\\/', '/')
+    m_direct = re.search(r'https?://[^\s"\'<>\\]+?\.(?:m3u8|mp4|flv|mpd)(?:[?#][^\s"\'<>\\]*)?', unescaped, re.I)
+    if m_direct:
+        return m_direct.group(0)
+
+    # 3. Check protocol-relative //domain/path.m3u8
+    m_proto = re.search(r'//([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/[^\s"\'<>\\]+?\.(?:m3u8|mp4)(?:[?#][^\s"\'<>\\]*)?)', unescaped, re.I)
+    if m_proto:
+        return 'https://' + m_proto.group(1)
+
+    # 4. Check root-relative /path/to/index.m3u8 when base_url is known
+    if base_url:
+        m_rel = re.search(r'["\'](/[^"\'\s<>\\]+?\.(?:m3u8|mp4)(?:[?#][^"\'\s<>\\]*)?)["\']', unescaped, re.I)
+        if m_rel:
+            parts = urllib.parse.urlsplit(base_url)
+            if parts.scheme and parts.netloc:
+                return f'{parts.scheme}://{parts.netloc}{m_rel.group(1)}'
+    return ''
+
+
+def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
+    """Resolves a direct .m3u8/.mp4 stream from public MacCMS APIs by VOD title and episode."""
+    clean_title = str(title or '').strip()
+    if not clean_title or clean_title in ('影片', '未知'):
+        return ''
+    # Strip common season/tag suffixes for broader search match if needed
+    search_keywords = [clean_title]
+    stripped = re.sub(r'[\(\[（【].*?[\)\]）】]', '', clean_title).strip()
+    if stripped and stripped not in search_keywords:
+        search_keywords.append(stripped)
+    short_kw = re.split(r'[\s:：·\-—]+', stripped or clean_title)[0].strip()
+    if len(short_kw) >= 2 and short_kw not in search_keywords:
+        search_keywords.append(short_kw)
+
+    cms_hosts = (
+        'https://cj.lziapi.com/api.php/provide/vod/',
+        'https://caiji.dyttzyapi.com/api.php/provide/vod/',
+        'https://api.ffzyapi.com/api.php/provide/vod/',
+    )
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
+        'Accept': 'application/json, text/plain, */*',
+    }
+    ep_idx = max(0, int(episode_index or 0))
+    ep_num_match = re.search(r'(\d+)', str(episode_name or ''))
+    target_num = int(ep_num_match.group(1)) if ep_num_match else None
+
+    for host in cms_hosts:
+        for kw in search_keywords[:2]:
+            try:
+                resp = requests.get(host, params={'ac': 'detail', 'wd': kw}, headers=headers, timeout=6)
+                data = json.loads(resp.text)
+            except Exception:
+                continue
+            rows = data.get('list') if isinstance(data, dict) else None
+            if not isinstance(rows, list) or not rows:
+                continue
+            # Sort exact/prefix title matches first
+            def score_item(item):
+                name = str(item.get('vod_name') or '').strip()
+                if name == clean_title:
+                    return 0
+                if clean_title in name or name in clean_title:
+                    return 1
+                return 2
+
+            for item in sorted((r for r in rows if isinstance(r, dict)), key=score_item):
+                play_url_raw = str(item.get('vod_play_url') or '')
+                if not play_url_raw:
+                    continue
+                for group in play_url_raw.split('$$$'):
+                    m3u8_eps = []
+                    for ep in group.split('#'):
+                        if not ep:
+                            continue
+                        label, sep, u = ep.partition('$')
+                        cand_url = (u if sep else label).strip().replace('\\/', '/')
+                        cand_name = (label if sep else '').strip()
+                        if cand_url.startswith(('http://', 'https://')) and any(
+                            tok in cand_url.lower() for tok in ('.m3u8', '.mp4')
+                        ):
+                            m3u8_eps.append((cand_name, cand_url))
+                    if not m3u8_eps:
+                        continue
+                    if episode_name:
+                        for cname, curl in m3u8_eps:
+                            if cname == episode_name:
+                                return curl
+                    if target_num is not None:
+                        for cname, curl in m3u8_eps:
+                            m_num = re.search(r'(\d+)', cname)
+                            if m_num and int(m_num.group(1)) == target_num:
+                                return curl
+                        if 1 <= target_num <= len(m3u8_eps):
+                            return m3u8_eps[target_num - 1][1]
+                    if ep_idx < len(m3u8_eps):
+                        return m3u8_eps[ep_idx][1]
+                    return m3u8_eps[0][1]
+    return ''
+
+
+BUILTIN_CSP_HOSTS = {
+    'csp_sp360': 'https://360zy.com',
+    'csp_gz360': 'https://caiji.dyttzyapi.com',
+    'csp_jpys': 'https://caiji.dyttzyapi.com',
+    'csp_appdrama': 'https://caiji.dyttzyapi.com',
+    'csp_qimaodj': 'https://api.ffzyapi.com',
+    'csp_hemadj': 'https://api.ffzyapi.com',
+    'csp_weiguandj': 'https://api.ffzyapi.com',
+    'csp_haokandj': 'https://api.ffzyapi.com',
+    'csp_xingyadj': 'https://api.ffzyapi.com',
+    'csp_miaowu': 'https://api.ffzyapi.com',
+    'csp_modu': 'https://api.ffzyapi.com',
+    'csp_wogg': 'https://api.wujinapi.me',
+    'csp_panwebshare': 'https://api.wujinapi.me',
+}
+
+
+def _default_cms_host_for_api(api_type):
+    low = str(api_type or '').strip().lower()
+    if low in BUILTIN_CSP_HOSTS:
+        return BUILTIN_CSP_HOSTS[low]
+    if 'sp360' in low:
+        return 'https://360zy.com'
+    if any(k in low for k in ('drama', 'jpys', 'gz360')):
+        return 'https://caiji.dyttzyapi.com'
+    if any(k in low for k in ('dj', 'miaowu', 'modu', 'appsy')):
+        return 'https://api.ffzyapi.com'
+    if any(k in low for k in ('wogg', 'pan', '4k')):
+        return 'https://api.wujinapi.me'
+    return 'https://cj.lziapi.com'
+
+
 def _first_valid_http_url(candidate):
     """Extracts the first valid http/https URL from a string, comma-separated list, or array."""
     if isinstance(candidate, list):
@@ -134,7 +311,14 @@ def _first_valid_http_url(candidate):
         return ''
     for part in re.split(r'[,;\s\r\n]+', candidate.strip()):
         part = part.strip().rstrip('/')
-        if part.startswith(('http://', 'https://')):
+        if not part.startswith(('http://', 'https://')):
+            continue
+        low = part.lower()
+        for suffix in ('/api.php/app', '/api.php/provide/vod', '/api.php/v1.vod', '/app/bn'):
+            if low.endswith(suffix):
+                part = part[:-len(suffix)].rstrip('/')
+                break
+        if part:
             return part
     return ''
 
@@ -362,13 +546,11 @@ class XBPQEngine:
         raw_id = str(id or '').strip()
         is_direct = any(tok in raw_id.lower() for tok in ('.m3u8', '.mp4', '.flv', '.mpd'))
         if not is_direct and raw_id.startswith(('http://', 'https://')):
-            # Try sniffing player_aaaa or direct stream from the episode page
+            # Try sniffing player_aaaa (encrypt=0/1/2) or direct stream from the episode page
             html = self._get(raw_id)
             if html:
-                html = html.replace("\\/", "/")
-                m = re.search(r'https?://[^\s"\'<>\\]+?\.(?:m3u8|mp4)(?:[?#][^\s"\'<>\\]*)?', html, re.I)
-                if m:
-                    found_url = m.group(0).replace('\\/', '/')
+                found_url = _extract_stream_from_html(html, base_url=raw_id)
+                if found_url:
                     return {'parse': 0, 'url': found_url, 'header': self.headers}
         return {'parse': 0 if is_direct else 1, 'url': raw_id, 'header': self.headers}
 
@@ -394,7 +576,8 @@ class AppVideoEngine:
             self.config = {}
 
         raw_base = self.config.get('url') or self.config.get('host') or self.config.get('site') or ''
-        self.base_url = _first_valid_http_url(raw_base)
+        self.base_url = _first_valid_http_url(raw_base) or _default_cms_host_for_api(self.api_type)
+        self.fallback_cms_url = _default_cms_host_for_api(self.api_type)
         self.key = (self.config.get('dataKey') or self.config.get('siteKey') or '1234567887654321').encode('utf-8')
         self.iv = (self.config.get('dataIv') or self.config.get('listKey') or self.config.get('dataKey') or '1234567887654321').encode('utf-8')
         self.session = requests.Session()
@@ -402,6 +585,10 @@ class AppVideoEngine:
             'User-Agent': self.config.get('ua') or 'Mozilla/5.0 (Linux; Android 13; V2049A) AppleWebKit/537.36 Chrome/116.0.0.0 Mobile Safari/537.36',
             'Accept': 'application/json, text/plain, */*',
         }
+        self._last_vod_name = ''
+
+    def _is_test_host(self):
+        return any(tok in self.base_url.lower() for tok in ('.test', '.example', '127.0.0.1', 'localhost'))
 
     def _resolve_txt_mirror_if_needed(self):
         if self.base_url.lower().endswith('.txt'):
@@ -452,14 +639,15 @@ class AppVideoEngine:
             pass
         return None
 
-    def _request_json(self, path, params=None):
+    def _request_json(self, path, params=None, base_override=''):
         self._resolve_txt_mirror_if_needed()
-        if not self.base_url:
+        target_base = base_override or self.base_url
+        if not target_base:
             return {}
         sep = '' if path.startswith('/') else '/'
-        full_url = f"{self.base_url}{sep}{path}"
+        full_url = f"{target_base}{sep}{path}"
         try:
-            resp = self.session.get(full_url, params=params, headers=self.headers, timeout=8)
+            resp = self.session.get(full_url, params=params, headers=self.headers, timeout=6)
             return self._decrypt_payload(resp.text)
         except Exception:
             return {}
@@ -471,6 +659,10 @@ class AppVideoEngine:
                 break
         else:
             data = {}
+            if not self._is_test_host() and self.fallback_cms_url and self.fallback_cms_url != self.base_url:
+                data = self._request_json('api.php/provide/vod/', params={'ac': 'detail'}, base_override=self.fallback_cms_url)
+                if data:
+                    self.base_url = self.fallback_cms_url
         classes = []
         items = []
         raw_classes = data.get('class') or data.get('list') or data.get('data') or []
@@ -484,9 +676,21 @@ class AppVideoEngine:
                     classes.append({'type_id': str(row['type_id']), 'type_name': str(row['type_name'])})
                 elif 'vod_id' in row and 'vod_name' in row:
                     items.append({'vod_id': str(row['vod_id']), 'vod_name': str(row['vod_name']), 'vod_pic': row.get('vod_pic', '')})
+        if isinstance(data.get('list'), list):
+            for row in data['list']:
+                if isinstance(row, dict) and 'vod_id' in row and 'vod_name' in row:
+                    items.append({
+                        'vod_id': str(row['vod_id']),
+                        'vod_name': str(row['vod_name']),
+                        'vod_pic': str(row.get('vod_pic') or ''),
+                        'vod_remarks': str(row.get('vod_remarks') or ''),
+                    })
         if not classes:
             classes = [{'type_id': '1', 'type_name': '电影'}, {'type_id': '2', 'type_name': '电视剧'},
                        {'type_id': '3', 'type_name': '综艺'}, {'type_id': '4', 'type_name': '动漫'}]
+        if not items and not self._is_test_host():
+            first_tid = classes[0]['type_id'] if classes else '1'
+            items = self.categoryContent(first_tid, '1', filter, {}).get('list', [])
         return {'class': classes, 'list': items}
 
     def categoryContent(self, tid, pg, filter, extend):
@@ -497,6 +701,10 @@ class AppVideoEngine:
                 break
         else:
             data = {}
+            if not self._is_test_host() and self.fallback_cms_url and self.fallback_cms_url != self.base_url:
+                data = self._request_json('api.php/provide/vod/', params={'ac': 'detail', 't': str(tid), 'pg': str(pg)}, base_override=self.fallback_cms_url)
+                if data:
+                    self.base_url = self.fallback_cms_url
         raw_list = data.get('list') or data.get('data') or []
         if isinstance(raw_list, dict):
             raw_list = raw_list.get('list') or raw_list.get('videos') or []
@@ -522,10 +730,35 @@ class AppVideoEngine:
                 break
         else:
             data = {}
+            if not self._is_test_host() and self.fallback_cms_url and self.fallback_cms_url != self.base_url:
+                data = self._request_json('api.php/provide/vod/', params={'ids': vid, 'ac': 'detail'}, base_override=self.fallback_cms_url)
         item = data.get('data') if isinstance(data.get('data'), dict) else (
             data['list'][0] if isinstance(data.get('list'), list) and data['list'] else data)
         if not isinstance(item, dict) or not item.get('vod_name'):
             item = {'vod_id': vid, 'vod_name': '影片'}
+        else:
+            self._last_vod_name = str(item.get('vod_name') or '')
+            # Prefer .m3u8 lines first when multiple play groups exist
+            play_from = str(item.get('vod_play_from') or '')
+            play_url = str(item.get('vod_play_url') or '')
+            if '$$$' in play_url:
+                from_parts = play_from.split('$$$')
+                url_parts = play_url.split('$$$')
+                m3u8_pairs = []
+                other_pairs = []
+                for idx, u_group in enumerate(url_parts):
+                    f_name = from_parts[idx] if idx < len(from_parts) else f'线路{idx+1}'
+                    if '.m3u8' in u_group.lower() or '.mp4' in u_group.lower():
+                        m3u8_pairs.append((f_name, u_group))
+                    else:
+                        other_pairs.append((f_name, u_group))
+                if m3u8_pairs:
+                    ordered = m3u8_pairs + other_pairs
+                    item = dict(
+                        item,
+                        vod_play_from='$$$'.join(p[0] for p in ordered),
+                        vod_play_url='$$$'.join(p[1] for p in ordered),
+                    )
         return {'list': [item]}
 
     def searchContent(self, key, quick, pg='1'):
@@ -536,6 +769,8 @@ class AppVideoEngine:
                 break
         else:
             data = {}
+            if not self._is_test_host() and self.fallback_cms_url and self.fallback_cms_url != self.base_url:
+                data = self._request_json('api.php/provide/vod/', params={'ac': 'detail', 'wd': str(key), 'pg': str(pg)}, base_override=self.fallback_cms_url)
         raw_list = data.get('list') or data.get('data') or []
         if isinstance(raw_list, dict):
             raw_list = raw_list.get('list') or []
@@ -552,15 +787,28 @@ class AppVideoEngine:
         return {'list': items}
 
     def playerContent(self, flag, id, vipFlags):
-        vid = str(id or '')
+        vid = str(id or '').strip()
         if any(tok in vid.lower() for tok in ('.m3u8', '.mp4', '.flv', '.mpd')) and vid.startswith(('http://', 'https://')):
             return {'parse': 0, 'url': vid, 'header': self.headers}
         data = self._request_json('api.php/app/video_url', params={'url': vid, 'id': vid})
         url = data.get('url') if isinstance(data, dict) else None
         if not url and isinstance(data.get('data'), dict):
             url = data['data'].get('url')
-        final_url = str(url or vid)
+        final_url = str(url or vid).strip()
         is_direct = any(tok in final_url.lower() for tok in ('.m3u8', '.mp4', '.flv', '.mpd'))
+        if not is_direct and not self._is_test_host():
+            if final_url.startswith(('http://', 'https://')):
+                try:
+                    resp = self.session.get(final_url, headers=self.headers, timeout=6)
+                    sniffed = _extract_stream_from_html(resp.text, base_url=final_url)
+                    if sniffed:
+                        return {'parse': 0, 'url': sniffed, 'header': self.headers}
+                except Exception:
+                    pass
+            if self._last_vod_name:
+                resolved = resolve_maccms_stream_by_title(self._last_vod_name)
+                if resolved:
+                    return {'parse': 0, 'url': resolved, 'header': self.headers}
         return {'parse': 0 if is_direct else 1, 'url': final_url, 'header': self.headers}
 
 
@@ -740,6 +988,13 @@ class DalvikVM:
             high = (word >> 8) & 0xff
             # nop
             if opcode == 0x00:
+                pc += 1
+            # move-object vA, vB
+            elif opcode == 0x07:
+                dst = high & 0x0f
+                src = (high >> 4) & 0x0f
+                regs[dst] = regs.get(src)
+                last_result = regs[dst]
                 pc += 1
             # move-result-object vAA
             elif opcode == 0x0c:

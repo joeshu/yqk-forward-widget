@@ -11,8 +11,18 @@ static NSString *TVBoxString(id value, NSUInteger limit) {
     return nil;
 }
 
+static NSURLComponents *TVBoxURLComponents(NSString *value) {
+    if(![value isKindOfClass:NSString.class]||!value.length)return nil;
+    NSURLComponents *parts=[NSURLComponents componentsWithString:value];
+    if(parts)return parts;
+    NSMutableCharacterSet *allowed=[NSCharacterSet.URLQueryAllowedCharacterSet mutableCopy];
+    [allowed addCharactersInString:@"#%/:?@[]!$&'()*+,;="];
+    NSString *encoded=[value stringByAddingPercentEncodingWithAllowedCharacters:allowed];
+    return encoded.length?[NSURLComponents componentsWithString:encoded]:nil;
+}
+
 static BOOL TVBoxWebURL(NSString *value) {
-    NSURLComponents *parts=[NSURLComponents componentsWithString:value ?: @""];
+    NSURLComponents *parts=TVBoxURLComponents(value ?: @"");
     return parts&&[@[@"http",@"https"] containsObject:parts.scheme.lowercaseString] && parts.host.length && !parts.user.length && !parts.password.length && value.length<=8192;
 }
 
@@ -90,10 +100,12 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
             @"csp_kafeity", @"csp_919ty", @"csp_firstaid", @"csp_djuu",
             @"csp_djlh", @"csp_qingtingfm", @"csp_tingshijie", @"csp_apply",
             @"csp_gz360", @"csp_saohuo", @"csp_jpys",
-            @"csp_panali", @"csp_panquark", @"csp_panuc", @"csp_panbaidu"
+            @"csp_panali", @"csp_panquark", @"csp_panuc", @"csp_panbaidu",
+            @"csp_config"
         ]];
     });
-    return [set containsObject:low];
+    if([set containsObject:low])return YES;
+    return [low hasPrefix:@"csp_"]&&![low isEqualToString:@"csp_doudou"]&&![low isEqualToString:@"csp_example"];
 }
 @implementation TVBoxCatalogStore
 + (NSDictionary *)catalogWithMacCMSAPIURL:(NSString *)apiURL name:(NSString *)name error:(NSError **)error {
@@ -128,7 +140,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         [keys addObject:key];
         NSMutableDictionary *safeHeaders=[NSMutableDictionary dictionary];
         if([value[@"header"] isKindOfClass:NSDictionary.class]){NSUInteger headerCount=0;for(id headerKey in value[@"header"]){id headerValue=value[@"header"][headerKey];if(headerCount++>=24)break;if([headerKey isKindOfClass:NSString.class]&&[headerValue isKindOfClass:NSString.class]&&[headerKey length]<=128&&[headerValue length]<=4096)safeHeaders[headerKey]=headerValue;}}
-        NSURLComponents *apiParts=[NSURLComponents componentsWithString:api?:@""];
+        NSURLComponents *apiParts=TVBoxURLComponents(api?:@"");
         NSString *basicAuthorization=TVBoxBasicAuthorization(apiParts);
         if(basicAuthorization.length){apiParts.user=nil;apiParts.password=nil;api=apiParts.URL.absoluteString;BOOL hasAuthorization=NO;for(NSString *headerName in safeHeaders)if([headerName caseInsensitiveCompare:@"Authorization"]==NSOrderedSame){hasAuthorization=YES;break;}if(!hasAuthorization)safeHeaders[@"Authorization"]=basicAuthorization;}
         NSString *ext=TVBoxString(value[@"ext"],8192); id extObject=value[@"ext"];
@@ -136,7 +148,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
             NSData *encoded=[NSJSONSerialization dataWithJSONObject:extObject options:0 error:NULL];
             if (encoded.length<=65536) ext=[[NSString alloc] initWithData:encoded encoding:NSUTF8StringEncoding]; else ext=nil;
         }
-        apiParts=[NSURLComponents componentsWithString:api?:@""];
+        apiParts=TVBoxURLComponents(api?:@"");
         NSString *path=apiParts.path.lowercaseString;
         if ([path hasSuffix:@".md5"]) path=[path stringByDeletingPathExtension];
         NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=[api.lowercaseString hasPrefix:@"csp_"];BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&TVBoxSupportedJARClass(api);
@@ -212,7 +224,42 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
 + (NSArray<NSDictionary *> *)catalogs {
     [self ensureBuiltInMacCMSCatalogs];
     NSArray *rows=[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"];
-    return [rows isKindOfClass:NSArray.class]?rows:@[];
+    if(![rows isKindOfClass:NSArray.class])return @[];
+    BOOL upgraded=NO;
+    NSMutableArray *updatedCatalogs=[NSMutableArray arrayWithCapacity:rows.count];
+    for(id rawCat in rows){
+        if(![rawCat isKindOfClass:NSDictionary.class]){continue;}
+        NSDictionary *cat=(NSDictionary *)rawCat;
+        NSArray *sites=[cat[@"sites"] isKindOfClass:NSArray.class]?cat[@"sites"]:nil;
+        if(!sites.count){[updatedCatalogs addObject:cat];continue;}
+        BOOL catChanged=NO;
+        NSMutableArray *updatedSites=[NSMutableArray arrayWithCapacity:sites.count];
+        for(id rawSite in sites){
+            if(![rawSite isKindOfClass:NSDictionary.class]){continue;}
+            NSDictionary *site=(NSDictionary *)rawSite;
+            NSString *siteType=[site[@"type"] description]?:@"";
+            NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
+            if([siteType isEqual:@"3"]&&TVBoxSupportedJARClass(api)&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"jar-bridge"])){
+                NSMutableDictionary *mSite=[site mutableCopy];
+                mSite[@"supported"]=@YES;
+                mSite[@"apiKind"]=@"jar-bridge";
+                mSite[@"status"]=@"Android/JAR 适配引擎 · iOS 原生执行";
+                [updatedSites addObject:mSite.copy];
+                catChanged=YES;upgraded=YES;
+            }else{
+                [updatedSites addObject:site];
+            }
+        }
+        if(catChanged){
+            NSMutableDictionary *mCat=[cat mutableCopy];
+            mCat[@"sites"]=updatedSites.copy;
+            [updatedCatalogs addObject:mCat.copy];
+        }else{
+            [updatedCatalogs addObject:cat];
+        }
+    }
+    if(upgraded)[NSUserDefaults.standardUserDefaults setObject:updatedCatalogs forKey:@"tvboxCatalogs"];
+    return updatedCatalogs.copy;
 }
 + (NSArray<NSDictionary *> *)playbackParsers {
     return [self playbackParsersForCatalogID:nil];

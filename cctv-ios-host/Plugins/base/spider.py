@@ -166,8 +166,59 @@ class Spider:
     def getDependence(self):
         return []
 
-    def getProxyUrl(self):
+    def getProxyUrl(self, local=True):
         return getattr(self, '_cctvhost_proxy_url', '')
+
+    def html(self, content):
+        from lxml import etree
+        if isinstance(content, bytes):
+            content = content.decode('utf-8', errors='ignore')
+        return etree.HTML(str(content or ''))
+
+    def str2json(self, text):
+        if isinstance(text, (dict, list)):
+            return text
+        try:
+            return json.loads(str(text or '{}'))
+        except Exception:
+            return {}
+
+    def regStr(self, reg, src='', group=1):
+        import re
+        s = str(src or '')
+        r = str(reg or '')
+        try:
+            m = re.search(r, s, re.I | re.S)
+            if m:
+                return m.group(group) if group <= (m.lastindex or 0) else m.group(0)
+        except Exception:
+            pass
+        try:
+            m = re.search(s, r, re.I | re.S)
+            if m:
+                return m.group(group) if group <= (m.lastindex or 0) else m.group(0)
+        except Exception:
+            pass
+        return ''
+
+    def cleanText(self, src):
+        import html as _html
+        import re
+        text = re.sub(r'<[^>]+>', '', str(src or ''))
+        text = _html.unescape(text)
+        clean = re.sub(r'[\t\r\n\s]+', ' ', text)
+        return clean.strip()
+
+    def removeHtmlTags(self, src):
+        import re
+        return re.sub(r'<[^>]+>', '', str(src or '')).strip()
+
+    def isVideoFormat(self, url):
+        u = str(url or '').lower()
+        return any(ext in u for ext in ('.m3u8', '.mp4', '.flv', '.mpd', '.m4v', '.mov', '.ts'))
+
+    def manualVideoCheck(self):
+        return False
 
     def getCache(self, key):
         key = str(key)

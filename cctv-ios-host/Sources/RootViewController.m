@@ -100,10 +100,14 @@ static NSDictionary *CCTVTVBoxTokenKeychainQuery(void) {
         (__bridge id)kSecAttrAccount:@"lytvs-ios"
     };
 }
-static NSString *CCTVTVBoxStoredSubscriptionToken(void) {
-    NSMutableDictionary *query=[CCTVTVBoxTokenKeychainQuery() mutableCopy];query[(__bridge id)kSecReturnData]=@YES;query[(__bridge id)kSecMatchLimit]=(__bridge id)kSecMatchLimitOne;
-    CFTypeRef result=NULL;if(SecItemCopyMatching((__bridge CFDictionaryRef)query,&result)!=errSecSuccess||!result)return nil;
-    NSData *data=(__bridge_transfer NSData *)result;return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+static NSURL *CCTVURLFromPossiblyUnescapedString(NSString *raw) {
+    if(![raw isKindOfClass:NSString.class]||!raw.length)return nil;
+    NSURL *u=[NSURL URLWithString:raw];
+    if(u)return u;
+    NSMutableCharacterSet *allowed=[NSCharacterSet.URLQueryAllowedCharacterSet mutableCopy];
+    [allowed addCharactersInString:@"#%/:?@[]!$&'()*+,;="];
+    NSString *encoded=[raw stringByAddingPercentEncodingWithAllowedCharacters:allowed];
+    return encoded.length?[NSURL URLWithString:encoded]:nil;
 }
 static BOOL CCTVTVBoxSaveSubscriptionToken(NSString *token) {
     NSData *data=[token dataUsingEncoding:NSUTF8StringEncoding];if(!data.length||data.length>512)return NO;
@@ -113,13 +117,35 @@ static BOOL CCTVTVBoxSaveSubscriptionToken(NSString *token) {
     return status==errSecSuccess;
 }
 static NSString *CCTVTVBoxTokenFromInput(NSString *input) {
-    NSString *value=[input stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";NSURLComponents *parts=[NSURLComponents componentsWithString:value];
-    if([parts.host.lowercaseString isEqual:@"sub.lytvs.top"]){for(NSURLQueryItem *item in parts.queryItems)if([@[@"token",@"tk"] containsObject:item.name.lowercaseString]&&item.value.length)return item.value;return nil;}
+    NSString *value=[input stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";NSURL *u=CCTVURLFromPossiblyUnescapedString(value);NSURLComponents *parts=u?[NSURLComponents componentsWithURL:u resolvingAgainstBaseURL:NO]:[NSURLComponents componentsWithString:value];
+    if([parts.host.lowercaseString isEqual:@"sub.lytvs.top"]){for(NSURLQueryItem *item in parts.queryItems)if([@[@"token",@"tk"] containsObject:item.name.lowercaseString]&&item.value.length&&![item.value isEqualToString:CCTVTVBoxTokenPlaceholder])return item.value;return nil;}
     if(value.length>512||[value rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound)return nil;return value;
 }
+static NSString *CCTVTVBoxStoredSubscriptionToken(void) {
+    NSMutableDictionary *query=[CCTVTVBoxTokenKeychainQuery() mutableCopy];query[(__bridge id)kSecReturnData]=@YES;query[(__bridge id)kSecMatchLimit]=(__bridge id)kSecMatchLimitOne;
+    CFTypeRef result=NULL;if(SecItemCopyMatching((__bridge CFDictionaryRef)query,&result)==errSecSuccess&&result){
+        NSData *data=(__bridge_transfer NSData *)result;NSString *stored=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        if(stored.length)return stored;
+    }
+    for(NSDictionary *cat in [TVBoxCatalogStore catalogs]){
+        for(NSString *urlKey in @[@"url",@"origin",@"sourceURL"]){
+            NSString *u=[cat[urlKey] isKindOfClass:NSString.class]?cat[urlKey]:@"";
+            if([u.lowercaseString containsString:@"sub.lytvs.top"]){
+                NSString *extracted=CCTVTVBoxTokenFromInput(u);
+                if(extracted.length){CCTVTVBoxSaveSubscriptionToken(extracted);return extracted;}
+            }
+        }
+    }
+    return nil;
+}
 static NSString *CCTVTVBoxURLByResolvingToken(NSString *url,NSString *token) {
-    if(![url containsString:CCTVTVBoxTokenPlaceholder])return url;
-    NSURLComponents *parts=[NSURLComponents componentsWithString:url];if(!parts)return nil;BOOL replaced=NO;NSMutableArray *items=[NSMutableArray array];
+    if(![url containsString:CCTVTVBoxTokenPlaceholder]){
+        NSURL *u=CCTVURLFromPossiblyUnescapedString(url);
+        return u?u.absoluteString:url;
+    }
+    NSURL *baseU=CCTVURLFromPossiblyUnescapedString(url);
+    NSURLComponents *parts=baseU?[NSURLComponents componentsWithURL:baseU resolvingAgainstBaseURL:NO]:[NSURLComponents componentsWithString:url];
+    if(!parts)return nil;BOOL replaced=NO;NSMutableArray *items=[NSMutableArray array];
     for(NSURLQueryItem *item in parts.queryItems){NSString *value=item.value?:@"";if([value containsString:CCTVTVBoxTokenPlaceholder]){value=[value stringByReplacingOccurrencesOfString:CCTVTVBoxTokenPlaceholder withString:token?:@""];replaced=YES;}[items addObject:[NSURLQueryItem queryItemWithName:item.name value:value]];}
     if(!replaced)return nil;parts.queryItems=items;return parts.URL.absoluteString;
 }
@@ -1143,6 +1169,16 @@ configureCatalogNavigation;
     self.infoLabel.hidden = nextHidden;
     if (!nextHidden && self.firstRender) {
         [self refreshNowNext];
+        NSUInteger gen = self.playbackGeneration;
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            RootViewController *owner = weakSelf;
+            if (!owner || owner.playbackGeneration != gen || !owner.firstRender || owner.nativeTimeShiftActive || owner.nativePlaybackFailed || owner.remotePlaybackFailed) return;
+            owner.titleLabel.hidden = YES;
+            owner.infoLabel.hidden = YES;
+            owner.playerTopScrim.hidden = YES;
+            owner.playerBottomScrim.hidden = YES;
+        });
     }
 }
 
@@ -1658,17 +1694,25 @@ configureCatalogNavigation;
         page.sourcesProvider=^{
             NSMutableArray *sources=[NSMutableArray array];
             for(NSDictionary *service in [ServiceStore services])if([ServiceStore isVODMediaService:service])[sources addObject:service];
+            NSSet *fallbackSiteKeys=[NSSet setWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:@"cctv.nativeFallbackSiteKeys.v1"]?:@[]];
             for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){
                 NSString *catalogID=catalog[@"id"]?:@"";
                 NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];
                 for(NSDictionary *site in sites){
                     NSString *apiKind=[site[@"apiKind"] isKindOfClass:NSString.class]?site[@"apiKind"]:@"";
-                    if(!([apiKind isEqual:@"tvbox-api"]||[apiKind isEqual:@"maccms-api"]||[apiKind isEqual:@"douban-index"])||![site[@"supported"] boolValue])continue;
-                    NSString *protocol=apiKind,*siteID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalogID,site[@"key"]?:@""];
+                    NSString *siteKey=[site[@"key"] isKindOfClass:NSString.class]?site[@"key"]:@"";
+                    NSString *rawAPI=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
+                    NSString *lowAPI=rawAPI.lowercaseString;
+                    BOOL isDrpyRunner=[lowAPI containsString:@"drpy2.min.js"]||[lowAPI containsString:@"3e7e0c8a023b624cec6bdcc200f06f02.js"];
+                    BOOL useNativeFallback=([apiKind isEqual:@"script"]&&(isDrpyRunner||[fallbackSiteKeys containsObject:siteKey]));
+                    if(useNativeFallback)apiKind=@"jar-bridge";
+                    if(!([apiKind isEqual:@"tvbox-api"]||[apiKind isEqual:@"maccms-api"]||[apiKind isEqual:@"douban-index"]||[apiKind isEqual:@"jar-bridge"])||![site[@"supported"] boolValue])continue;
+                    NSString *protocol=apiKind,*siteID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalogID,siteKey];
                     NSString *type=site[@"type"]?:@"1";
-                    NSString *engine=[apiKind isEqual:@"maccms-api"]?@"MacCMS JSON/XML API":([apiKind isEqual:@"douban-index"]?@"豆瓣影视索引 · 原生适配":[NSString stringWithFormat:@"TVBox type %@ JSON API",type]);
+                    NSString *effectiveAPI=useNativeFallback?@"csp_AppRJ":(site[@"api"]?:@"");
+                    NSString *engine=[apiKind isEqual:@"maccms-api"]?@"MacCMS JSON/XML API":([apiKind isEqual:@"douban-index"]?@"豆瓣影视索引 · 原生适配":([apiKind isEqual:@"jar-bridge"]?@"Android/JAR 适配引擎 · iOS 原生执行":[NSString stringWithFormat:@"TVBox type %@ JSON API",type]));
                     NSArray *capabilities=[apiKind isEqual:@"douban-index"]?@[@"home",@"category",@"search"]:@[@"home",@"category",@"search",@"detail",@"play"];
-                    NSMutableDictionary *source=[@{@"id":siteID,@"name":site[@"name"]?:@"影视来源",@"engine":engine,@"protocol":protocol,@"tvboxType":@([type integerValue]),@"api":site[@"api"]?:@"",@"url":site[@"api"]?:@"",@"options":site[@"ext"]?:@"",@"header":site[@"header"]?:@{},@"playUrl":site[@"playUrl"]?:@"",@"status":site[@"status"]?:@"可直接访问",@"catalogID":catalogID,@"catalogName":catalog[@"name"]?:@"资源合集",@"capabilities":capabilities} mutableCopy];
+                    NSMutableDictionary *source=[@{@"id":siteID,@"name":site[@"name"]?:@"影视来源",@"engine":engine,@"protocol":protocol,@"tvboxType":@([type integerValue]),@"api":effectiveAPI,@"url":effectiveAPI,@"options":useNativeFallback?@"":(site[@"ext"]?:@""),@"header":site[@"header"]?:@{},@"playUrl":site[@"playUrl"]?:@"",@"status":site[@"status"]?:@"可直接访问",@"catalogID":catalogID,@"catalogName":catalog[@"name"]?:@"资源合集",@"capabilities":capabilities,@"tvboxSiteKey":siteKey,@"tvboxSiteKeys":siteKey.length?@[siteKey]:@[]} mutableCopy];
                     [sources addObject:source];
                 }
             }
@@ -1741,7 +1785,7 @@ configureCatalogNavigation;
     for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){
         NSString *identifier=catalog[@"id"]?:@"";NSString *catalogName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"";if(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])catalogName=@"资源合集";NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];NSUInteger supported=0;for(NSDictionary *site in sites)if([site[@"supported"] boolValue])supported++;
         NSUInteger liveCount=[catalog[@"lives"] count];NSString *kind=supported&&liveCount?@"both":(supported?@"vod":(liveCount?@"live":@"unknown"));NSString *catalogKind=[catalog[@"catalogKind"] isKindOfClass:NSString.class]?catalog[@"catalogKind"]:@"tvbox";
-        BOOL current=[selectedMediaCatalog isEqual:identifier]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"tvbox-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"maccms-api:%@:",identifier]];
+        BOOL current=[selectedMediaCatalog isEqual:identifier]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"tvbox-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"maccms-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"jar-bridge:%@:",identifier]];
         BOOL liveEnabled=NO;for(NSString *owner in self.subscriptionURLs){NSDictionary *ownerMetadata=[ProfileStore metadata:owner];if([ownerMetadata[@"tvboxCatalogID"] isEqual:identifier]&&![disabled containsObject:owner]&&[counts[owner] unsignedIntegerValue]){liveEnabled=YES;break;}}
         NSMutableDictionary *profile=[@{@"name":catalogName,@"type":@"tvbox",@"catalogKind":catalogKind,@"resourceKind":kind,@"source":[@"tvbox:" stringByAppendingString:identifier],@"url":catalog[@"url"]?:@"",@"updatedAt":catalog[@"updatedAt"]?:@0,@"siteCount":@(sites.count),@"supportedCount":@(supported),@"liveCount":@(liveCount),@"enabled":@(liveEnabled),@"current":@(current)} mutableCopy];if(catalog[@"importSourceFilename"])profile[@"sourceFilename"]=catalog[@"importSourceFilename"];if(catalog[@"importFingerprint"])profile[@"fingerprint"]=catalog[@"importFingerprint"];[rows addObject:profile];
     }
@@ -1895,7 +1939,7 @@ configureCatalogNavigation;
     page.onOpenImportedService=^(NSDictionary *service){RootViewController *owner=weakSelf;if(owner)[owner openPluginResource:[@"plugin:" stringByAppendingString:service[@"id"]?:@""]];};
     page.onImportSite=^(NSDictionary *site,BOOL browseAfterImport){NSMutableDictionary *scoped=[site mutableCopy];scoped[@"tvboxCatalogID"]=identifier;[weakSelf importTVBoxSite:scoped browseAfterImport:browseAfterImport];};
     __weak TVBoxCatalogViewController *weakPage=page;page.onImportCompatibleContents=^{[weakSelf bulkImportTVBoxCatalog:identifier page:weakPage];};
-     page.onUseNativeSite=^(NSDictionary *site){RootViewController *owner=weakSelf;if(!owner)return;NSString *apiKind=site[@"apiKind"]?:@"",*protocol=[apiKind isEqual:@"maccms-api"]?@"maccms-api":([apiKind isEqual:@"douban-index"]?@"douban-index":@"tvbox-api");NSString *sourceID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalog[@"id"]?:@"",site[@"key"]?:@""];[NSUserDefaults.standardUserDefaults setObject:sourceID forKey:@"selectedMediaSource"];[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)owner.tabPages[@2];[browser openSourceIdentifier:sourceID];};
+     page.onUseNativeSite=^(NSDictionary *site){RootViewController *owner=weakSelf;if(!owner)return;NSString *apiKind=site[@"apiKind"]?:@"",*protocol=[apiKind isEqual:@"maccms-api"]?@"maccms-api":([apiKind isEqual:@"douban-index"]?@"douban-index":([apiKind isEqual:@"jar-bridge"]?@"jar-bridge":@"tvbox-api"));NSString *sourceID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalog[@"id"]?:@"",site[@"key"]?:@""];[NSUserDefaults.standardUserDefaults setObject:sourceID forKey:@"selectedMediaSource"];[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)owner.tabPages[@2];[browser openSourceIdentifier:sourceID];};
     page.onExportCatalog=^(NSString *format){RootViewController *owner=weakSelf;if(owner)[owner exportResource:[@"tvbox:" stringByAppendingString:identifier] format:[format isEqual:@"zip"]?@"catalog-zip":@"catalog-json"];};
     page.onExportSingleResource=^(NSDictionary *resource,NSString *kind,NSUInteger index){RootViewController *owner=weakSelf;if(!owner)return;NSString *scope=[@"tvbox:" stringByAppendingString:identifier];[owner exportCatalogSingleResource:scope resource:resource kind:kind index:index];};
     page.onSubscribeLive=^(NSDictionary *live){RootViewController *owner=weakSelf;if(owner)[owner subscribeLiveFromCatalog:live catalogID:identifier];};
@@ -1912,7 +1956,7 @@ configureCatalogNavigation;
     NSArray *services=[ServiceStore services];
     for(NSDictionary *site in sites){
         if(![site[@"supported"] boolValue])continue;
-        if([site[@"apiKind"] isEqual:@"tvbox-api"]||[site[@"apiKind"] isEqual:@"maccms-api"]||[site[@"apiKind"] isEqual:@"douban-index"]){nativeCount++;continue;}
+        if([site[@"apiKind"] isEqual:@"tvbox-api"]||[site[@"apiKind"] isEqual:@"maccms-api"]||[site[@"apiKind"] isEqual:@"douban-index"]||[site[@"apiKind"] isEqual:@"jar-bridge"]){nativeCount++;continue;}
         if(![site[@"apiKind"] isEqual:@"script"])continue;
         NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"",*ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"";
         BOOL exists=NO;
@@ -2967,25 +3011,72 @@ configureCatalogNavigation;
     dispatch_block_t show=^{RootViewController *owner=weakSelf;if(!owner||owner.packageDownloader!=downloader||delivered)return;[owner presentViewController:progress animated:YES completion:^{if(!delivered)[downloader importURL:url headers:headers runtimeHint:runtimeHint completion:finish];}];};
     if(self.presentedViewController)[self.presentedViewController dismissViewControllerAnimated:YES completion:show];else show();
 }
+- (void)activateNativeFallbackForTVBoxSite:(NSDictionary *)site browseAfterImport:(BOOL)browseAfterImport {
+    NSString *siteKey=[site[@"key"] isKindOfClass:NSString.class]?site[@"key"]:@"";
+    NSString *catalogID=[site[@"tvboxCatalogID"] isKindOfClass:NSString.class]?site[@"tvboxCatalogID"]:@"builtin-lytvs-ios";
+    if(siteKey.length){
+        NSMutableArray *keys=[([[NSUserDefaults standardUserDefaults] arrayForKey:@"cctv.nativeFallbackSiteKeys.v1"]?:@[]) mutableCopy];
+        if(![keys containsObject:siteKey]){[keys addObject:siteKey];[[NSUserDefaults standardUserDefaults] setObject:keys.copy forKey:@"cctv.nativeFallbackSiteKeys.v1"];}
+    }
+    MediaBrowserViewController *mediaPage=[self mediaPageCreatingIfNeeded];
+    [mediaPage refreshSources];
+    if(browseAfterImport){
+        NSString *targetID=[NSString stringWithFormat:@"jar-bridge:%@:%@",catalogID,siteKey];
+        [NSUserDefaults.standardUserDefaults setObject:catalogID forKey:@"selectedMediaCatalogID"];
+        [NSUserDefaults.standardUserDefaults setObject:targetID forKey:@"selectedMediaSource"];
+        [self selectBottomTab:(id)self.bottomBar.arrangedSubviews[2]];
+        [mediaPage refreshSources];
+        for(NSDictionary *src in (mediaPage.sourcesProvider?mediaPage.sourcesProvider():@[])){
+            if([src[@"id"] isEqual:targetID]){
+                [mediaPage activate:src keepingHome:YES];
+                break;
+            }
+        }
+    }
+}
 - (void)importTVBoxSite:(NSDictionary *)site { [self importTVBoxSite:site browseAfterImport:NO]; }
 - (void)importTVBoxSite:(NSDictionary *)site browseAfterImport:(BOOL)browseAfterImport {
+    NSString *siteKey=[site[@"key"] isKindOfClass:NSString.class]?site[@"key"]:@"";
+    if(browseAfterImport&&siteKey.length){
+        for(NSDictionary *existing in [ServiceStore services]){
+            if(![ServiceStore isVODMediaService:existing])continue;
+            NSArray *keys=[existing[@"tvboxSiteKeys"] isKindOfClass:NSArray.class]?existing[@"tvboxSiteKeys"]:@[];
+            if([existing[@"tvboxSiteKey"] isEqual:siteKey]||[keys containsObject:siteKey]){
+                [self usePluginService:existing kind:@"vod"];
+                return;
+            }
+        }
+    }
     NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
+    NSString *lowAPI=api.lowercaseString;
+    if([lowAPI containsString:@"drpy2.min.js"]||[lowAPI containsString:@"3e7e0c8a023b624cec6bdcc200f06f02.js"]){
+        [self activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];
+        return;
+    }
     if([api containsString:CCTVTVBoxTokenPlaceholder]){
         NSString *token=CCTVTVBoxStoredSubscriptionToken();
         if(!token.length){
+            if(browseAfterImport){
+                [self activateNativeFallbackForTVBoxSite:site browseAfterImport:YES];
+                return;
+            }
             UIAlertController *credential=[UIAlertController alertControllerWithTitle:@"Hawk iOS 资源访问令牌" message:@"此合集的内部站点需要订阅令牌。粘贴 token，或粘贴原始订阅链接；令牌会保存到本机钥匙串供后续站点使用。" preferredStyle:UIAlertControllerStyleAlert];
             [credential addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"token 或完整订阅链接";field.secureTextEntry=YES;field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.clearButtonMode=UITextFieldViewModeWhileEditing;}];
             [credential addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-            __weak typeof(self) weakSelf=self;[credential addAction:[UIAlertAction actionWithTitle:@"保存并继续" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(!owner)return;NSString *entered=CCTVTVBoxTokenFromInput(credential.textFields.firstObject.text?:@"");if(!entered.length){[owner showServiceError:@"请输入有效的订阅令牌或完整订阅链接"];return;}if(!CCTVTVBoxSaveSubscriptionToken(entered)){[owner showServiceError:@"令牌未能保存到本机钥匙串，请检查设备设置后重试"];return;}NSString *resolvedURL=CCTVTVBoxURLByResolvingToken(api,entered);if(!resolvedURL.length){[owner showServiceError:@"无法将订阅令牌应用到此站点地址"];return;}NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=resolvedURL;dispatch_async(dispatch_get_main_queue(),^{[owner importTVBoxSite:resolvedSite browseAfterImport:browseAfterImport];});}]];
+            __weak typeof(self) weakSelf=self;
+            [credential addAction:[UIAlertAction actionWithTitle:@"直接原生加载（免令牌）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(owner)[owner activateNativeFallbackForTVBoxSite:site browseAfterImport:YES];}]];
+            [credential addAction:[UIAlertAction actionWithTitle:@"保存并继续" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(!owner)return;NSString *entered=CCTVTVBoxTokenFromInput(credential.textFields.firstObject.text?:@"");if(!entered.length){[owner showServiceError:@"请输入有效的订阅令牌或完整订阅链接"];return;}if(!CCTVTVBoxSaveSubscriptionToken(entered)){[owner showServiceError:@"令牌未能保存到本机钥匙串，请检查设备设置后重试"];return;}NSString *resolvedURL=CCTVTVBoxURLByResolvingToken(api,entered);if(!resolvedURL.length){[owner showServiceError:@"无法将订阅令牌应用到此站点地址"];return;}NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=resolvedURL;dispatch_async(dispatch_get_main_queue(),^{[owner importTVBoxSite:resolvedSite browseAfterImport:browseAfterImport];});}]];
             [self presentViewController:credential animated:YES completion:nil];return;
         }
-        api=CCTVTVBoxURLByResolvingToken(api,token);if(!api.length){[self showServiceError:@"无法将本机令牌应用到此站点地址"];return;}NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=api;site=resolvedSite;
+        api=CCTVTVBoxURLByResolvingToken(api,token);if(!api.length){[self activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=api;site=resolvedSite;
     }
     if(!api.length){[self showServiceError:@"此 TVBox 站点没有可导入的脚本地址"];return;}
+    NSURL *downloadURL=CCTVURLFromPossiblyUnescapedString(api);
+    if(!downloadURL){[self activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}
     self.pendingTVBoxExt=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"";self.pendingTVBoxSiteName=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";
     __weak typeof(self) weakSelf=self;
-    NSString *runtimeHint=[[[NSURL URLWithString:api] pathExtension].lowercaseString isEqual:@"py"]?@"python":nil;
-    [self downloadPackageURL:[NSURL URLWithString:api] headers:site[@"header"] runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){RootViewController *owner=weakSelf;owner.navigationItem.prompt=nil;if(error){owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;if(error.code!=NSURLErrorCancelled)[owner showServiceError:error.localizedDescription];return;}if(!service){[owner showServiceError:@"站点脚本导入失败"];return;}NSMutableDictionary *updated=[service mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"",*name=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";if(ext.length)manifest[@"options"]=ext;if(name.length){manifest[@"name"]=name;updated[@"name"]=name;}updated[@"manifest"]=manifest;updated[@"tvboxSiteKey"]=site[@"key"]?:@"";updated[@"tvboxSiteKeys"]=@[site[@"key"]?:@""];if(site[@"tvboxCatalogID"])updated[@"tvboxCatalogID"]=site[@"tvboxCatalogID"];if(site[@"playUrl"])updated[@"tvboxPlayURL"]=site[@"playUrl"];if(site[@"header"])updated[@"tvboxSiteHeader"]=site[@"header"];owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;[owner acceptImportedMedia:updated error:nil autoBrowse:browseAfterImport];}];
+    NSString *runtimeHint=[[downloadURL pathExtension].lowercaseString isEqual:@"py"]?@"python":nil;
+    [self downloadPackageURL:downloadURL headers:site[@"header"] runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){RootViewController *owner=weakSelf;owner.navigationItem.prompt=nil;if(error){owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;if(error.code!=NSURLErrorCancelled)[owner activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}if(!service){[owner activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}NSMutableDictionary *updated=[service mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"",*name=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";if(ext.length)manifest[@"options"]=ext;if(name.length){manifest[@"name"]=name;updated[@"name"]=name;}updated[@"manifest"]=manifest;updated[@"tvboxSiteKey"]=site[@"key"]?:@"";updated[@"tvboxSiteKeys"]=@[site[@"key"]?:@""];if(site[@"tvboxCatalogID"])updated[@"tvboxCatalogID"]=site[@"tvboxCatalogID"];if(site[@"playUrl"])updated[@"tvboxPlayURL"]=site[@"playUrl"];if(site[@"header"])updated[@"tvboxSiteHeader"]=site[@"header"];owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;[owner acceptImportedMedia:updated error:nil autoBrowse:browseAfterImport];}];
 }
 - (void)acceptImportedMedia:(NSDictionary *)service error:(NSError *)error {
     [self acceptImportedMedia:service error:error autoBrowse:NO];
@@ -3320,6 +3411,7 @@ configureCatalogNavigation;
     CGFloat dy = [g translationInView:self.playerBox].y;
     BOOL rightSide = p.x > self.playerBox.bounds.size.width / 2;
     if (g.state == UIGestureRecognizerStateBegan) {
+        self.titleLabel.hidden = NO;
         self.infoLabel.hidden = NO;
         self.controlBar.hidden = NO;
     }
@@ -3340,9 +3432,16 @@ configureCatalogNavigation;
     if (g.state == UIGestureRecognizerStateEnded || g.state == UIGestureRecognizerStateCancelled) {
         [g setTranslation:CGPointZero inView:self.playerBox];
         self.titleLabel.text = self.channelName;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (![self.titleLabel.text isEqualToString:self.channelName]) return;
-            self.controlBar.hidden = NO;
+            if (self.firstRender && !self.nativeTimeShiftActive && !self.nativePlaybackFailed && !self.remotePlaybackFailed) {
+                self.titleLabel.hidden = YES;
+                self.infoLabel.hidden = YES;
+                self.playerTopScrim.hidden = YES;
+                self.playerBottomScrim.hidden = YES;
+            } else {
+                self.controlBar.hidden = NO;
+            }
         });
     }
 }
@@ -3687,7 +3786,9 @@ configureCatalogNavigation;
 - (void)saveImportCandidate:(NSDictionary *)candidate update:(BOOL)update completion:(void (^)(NSError *error))completion {
     NSError *failure=nil;NSString *kind=candidate[@"kind"],*sourceFilename=[candidate[@"localFileName"] isKindOfClass:NSString.class]?candidate[@"localFileName"]:@"";
     if([kind isEqual:@"catalog"]){
-        NSMutableDictionary *incoming=[candidate[@"catalog"] mutableCopy];if(sourceFilename.length)incoming[@"importSourceFilename"]=sourceFilename;NSDictionary *existing=nil;NSString *targetID=update&&[candidate[@"existingResourceKind"] isEqual:@"catalog"]?candidate[@"existingResourceID"]:@"";
+        NSMutableDictionary *incoming=[candidate[@"catalog"] mutableCopy];if(sourceFilename.length)incoming[@"importSourceFilename"]=sourceFilename;
+        NSString *catOrigin=[candidate[@"origin"] isKindOfClass:NSString.class]?candidate[@"origin"]:([incoming[@"url"] isKindOfClass:NSString.class]?incoming[@"url"]:@"");
+        if([catOrigin.lowercaseString containsString:@"sub.lytvs.top"]){NSString *tk=CCTVTVBoxTokenFromInput(catOrigin);if(tk.length)CCTVTVBoxSaveSubscriptionToken(tk);}NSDictionary *existing=nil;NSString *targetID=update&&[candidate[@"existingResourceKind"] isEqual:@"catalog"]?candidate[@"existingResourceID"]:@"";
         for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){BOOL target=targetID.length&&[targetID isEqual:catalog[@"id"]];BOOL automatic=!targetID.length&&(([incoming[@"url"] length]&&[incoming[@"url"] isEqual:catalog[@"url"]])||([incoming[@"importFingerprint"] length]&&[incoming[@"importFingerprint"] isEqual:catalog[@"importFingerprint"]]));if(target||automatic){existing=catalog;break;}}
         if(targetID.length&&!existing)failure=[NSError errorWithDomain:@"ResourceImport" code:7 userInfo:@{NSLocalizedDescriptionKey:@"匹配到的旧合集已被移除，请重新识别后再保存"}];
         else if(existing&&update){NSMutableDictionary *merged=[existing mutableCopy];[merged addEntriesFromDictionary:incoming];merged[@"id"]=existing[@"id"];merged[@"name"]=existing[@"name"]?:incoming[@"name"]?:@"资源合集";[TVBoxCatalogStore saveCatalog:merged];}
@@ -4198,7 +4299,7 @@ configureCatalogNavigation;
         if(service && [PyHost isRunningServiceIdentifier:service[@"id"]])self.readyLocalOrigins[[self originForURL:playingURL]]=@(CACurrentMediaTime());
         self.firstRender=YES;self.remotePlaybackFailed=NO;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;[self endPlaybackPriority];self.firstFrameSeconds=CACurrentMediaTime()-self.playStartedAt;[self recordStartupStage:@"frame"];
         NSMutableDictionary *frameFields=[@{@"player":@"AVPlayer", @"elapsed_ms":@((NSInteger)(self.firstFrameSeconds*1000)), @"playback_generation":@(self.playbackGeneration), @"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"", @"correlation_id":self.currentPlaybackTraceID?:@""} mutableCopy];[frameFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(self.currentRemoteHeaders)];[frameFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:self.currentRemoteURL])];CCTVAddAVPlayerFailureFields(frameFields,self.avPlayer.currentItem,self.avPlayer,nil);[RuntimeDiagnostics.shared recordEvent:@"playback_first_frame" category:@"playback" fields:frameFields];if(service)[self logPluginLine:[NSString stringWithFormat:@"视频首帧已渲染 · %.2f 秒 · %@",self.firstFrameSeconds,self.startupTrace.summary] identifier:service[@"id"] name:service[@"name"]];
-        [self.spinner stopAnimating];self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;[self loadPlayerChannelLogoAfterFirstFrame];[self updateNowPlaying];[self refreshNowNext];[self restartEPGTimer];
+        [self.spinner stopAnimating];self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;self.playerTopScrim.hidden=YES;[self loadPlayerChannelLogoAfterFirstFrame];[self updateNowPlaying];[self refreshNowNext];[self restartEPGTimer];
         [self log:@"订阅视频首帧 %.2fs · %@",self.firstFrameSeconds,self.startupTrace.summary];return;
     }
     if(context==kAVItemStatusContext){
@@ -4470,7 +4571,7 @@ configureCatalogNavigation;
         [self endPlaybackPriority];
         [self.spinner stopAnimating];
         self.titleLabel.text = self.channelName;
-        if(!self.nativeTimeShiftActive){self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;}
+        if(!self.nativeTimeShiftActive){self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;}if(!self.nativeTimeShiftActive){self.playerTopScrim.hidden=YES;}
         [self loadPlayerChannelLogoAfterFirstFrame];
         [self recordStartupStage:@"frame"];
         [RuntimeDiagnostics.shared recordEvent:@"playback_first_frame" category:@"playback" fields:@{@"player":@"CNPlayerSDK", @"elapsed_ms":@((NSInteger)(self.firstFrameSeconds*1000)), @"playback_generation":@(self.playbackGeneration), @"correlation_id":self.currentPlaybackTraceID?:@"", @"route_type":self.requestedNativeRoute?@"user_selected":@"sdk_auto"}];

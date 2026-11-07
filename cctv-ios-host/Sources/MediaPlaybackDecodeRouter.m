@@ -106,28 +106,18 @@ MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *res
     BOOL avSupported = MediaPlaybackResultSupportsAVPlayer(result);
     BOOL cicadaSupported = MediaPlaybackResultSupportsCicadaPlayer(result);
     BOOL requiresWebPlayback = ([result[@"requiresWebPlayback"] boolValue] || [result[@"parse"] integerValue] > 0 || [result[@"jx"] integerValue] > 0) && !directMedia;
+    NSString *decodeMode = [[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"] ?: @"auto";
+    BOOL preferCicada = [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || ([result[@"playbackEngine"] isKindOfClass:NSString.class] && [result[@"playbackEngine"] isEqualToString:@"cicada"]);
 
-    // 候选优先级表（按结果特征），取第一个未尝试过的。
+    // 完全剔除网页播放：统一走 App 原生 AVPlayer 与 CicadaPlayer（硬解 -> ffmpeg 软解 cc）。
     MediaPlaybackDecodeRoute candidates[4];
     NSUInteger count = 0;
-    if (webOnly) {
-        // AVI/WMV/RMVB：两路原生引擎都明确不支持，只剩 WebView。
-        candidates[count++] = MediaPlaybackDecodeRouteWebView;
-    } else if (requiresWebPlayback) {
-        // 需解析且非直连媒体：先 WebView；WebView 回原生时再试 Cicada/AVPlayer。
-        candidates[count++] = MediaPlaybackDecodeRouteWebView;
-        if (cicadaSupported) candidates[count++] = MediaPlaybackDecodeRouteCicadaPlayer;
-        if (avSupported) candidates[count++] = MediaPlaybackDecodeRouteAVPlayer;
-    } else if (cicadaSupported && !avSupported) {
-        // Cicada 专属格式（FLV/DASH/MKV/WebM/3GP/RTMP）：AVPlayer 注定失败，跳过。
+    if (preferCicada || webOnly || requiresWebPlayback || (cicadaSupported && !avSupported)) {
         candidates[count++] = MediaPlaybackDecodeRouteCicadaPlayer;
-        candidates[count++] = MediaPlaybackDecodeRouteWebView;
+        candidates[count++] = MediaPlaybackDecodeRouteAVPlayer;
     } else {
-        // AVPlayer 支持、或格式未知/无扩展名、或其他：AVPlayer 先行，
-        // 失败后让 ffmpeg 探测（扩展名撒谎、无扩展名地址都靠这一路），最后 WebView。
         candidates[count++] = MediaPlaybackDecodeRouteAVPlayer;
         candidates[count++] = MediaPlaybackDecodeRouteCicadaPlayer;
-        candidates[count++] = MediaPlaybackDecodeRouteWebView;
     }
     for (NSUInteger i = 0; i < count; i++) {
         MediaPlaybackDecodeRoute route = candidates[i];

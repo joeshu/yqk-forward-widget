@@ -242,5 +242,96 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertNotIn('MediaTVBoxURLHasDirectMediaExtension', api_code)
 
 
+    def test_jar_bridge_selection_and_playback_contracts(self):
+        """Verifies jar-bridge sites are selectable in RootViewController & TVBoxCatalogViewController and playable via MediaAPIClient."""
+        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        self.assertIn('[apiKind isEqual:@"jar-bridge"]', root_code)
+        self.assertIn('[selectedMedia hasPrefix:[NSString stringWithFormat:@"jar-bridge:%@:",identifier]]', root_code)
+
+        tv_code = (SOURCES / 'TVBoxCatalogViewController.m').read_text(encoding='utf-8')
+        self.assertIn('[row[@"apiKind"] isEqual:@"jar-bridge"]', tv_code)
+
+        store_code = (SOURCES / 'TVBoxCatalogStore.m').read_text(encoding='utf-8')
+        self.assertIn('mSite[@"apiKind"]=@"jar-bridge";', store_code)
+
+        api_code = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')
+        self.assertIn('MediaJARBridgeBuildPlayResult', api_code)
+        self.assertIn('MediaJARBridgeMacCMSFallbackRequest', api_code)
+        self.assertIn('BOOL jarDirectPlay=jarBridge', api_code)
+        self.assertIn('fbArgs[@"_jar_fallback"]=@YES;', api_code)
+
+        # Verify empty ext csp_* site resolves to built-in CMS host instead of empty URL
+        empty_engine = AppVideoEngine('csp_Gz360', '')
+        self.assertTrue(empty_engine.base_url.startswith('https://'))
+        # Verify /api.php/app/ suffix is stripped from base_url
+        app_engine = AppVideoEngine('csp_AppYsV2', 'https://qpcj.69mini.com/api.php/app/')
+        self.assertEqual(app_engine.base_url, 'https://qpcj.69mini.com')
+
+    def test_player_floating_text_suppression_and_compact_detail_poster(self):
+        """Verifies floating text overlays are suppressed on player surface and detail hero poster is compact."""
+        mp_code = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
+        self.assertIn('self.navigationItem.titleView=[UIView new];', mp_code)
+        self.assertIn('self.throughputLabel.hidden=YES;self.throughputLabel.alpha=0.0;', mp_code)
+        self.assertIn('self.inlineNowPlayingPill.alpha=0.0;', mp_code)
+
+        mb_code = (SOURCES / 'MediaBrowserViewController.m').read_text(encoding='utf-8')
+        self.assertIn('multiplier:0.36', mb_code)
+        self.assertIn('constraintLessThanOrEqualToConstant:300', mb_code)
+        self.assertIn('self.heroBlurView.alpha=0.72;', mb_code)
+
+
+    def test_native_playback_and_cicada_soft_decode_eliminate_web_playback(self):
+        """Verifies web playback is eliminated at runtime in favor of native AVPlayer, background stream sniffing, and CicadaPlayer software decode (cc)."""
+        router_code = (SOURCES / 'MediaPlaybackDecodeRouter.m').read_text(encoding='utf-8')
+        self.assertIn('cctv.mediaDecodeMode.v1', router_code)
+        self.assertIn('[decodeMode isEqualToString:@"cicada_soft"]', router_code)
+
+        mp_code = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
+        self.assertIn('sniffNativeStreamFromPageResult:(NSDictionary *)result playerGeneration:(NSUInteger)playerGeneration', mp_code)
+        self.assertIn('teardownHiddenStreamSniffer', mp_code)
+        self.assertIn('解码模式 (原生 / 软解 cc)', mp_code)
+        self.assertIn('强制 CicadaPlayer 软解码 (cc)', mp_code)
+        self.assertIn('self.cicadaAdapterSoftwareDecodeFallbackAttempted=YES;', mp_code)
+
+
+
+    def test_lytvs_screenshot_sites_native_playback_and_spider_helpers(self):
+        """Verifies base.spider.Spider helpers, player_aaaa (encrypt=0/1/2), and native fallback for lytvs sites."""
+        from base.spider import Spider as BaseSpider
+        from csp_adapter import _extract_stream_from_html
+
+        spider = BaseSpider()
+        tree = spider.html('<div class="item"><a href="/play/1.html">第01集</a></div>')
+        self.assertEqual(tree.xpath('//a/text()'), ['第01集'])
+        self.assertEqual(spider.regStr(r'href="([^"]+)"', '<a href="/play/1.html">'), '/play/1.html')
+        self.assertEqual(spider.str2json('{"ok": 1}'), {'ok': 1})
+        self.assertEqual(spider.cleanText('<b> 热播 &amp; 影视 </b>'), '热播 & 影视')
+        self.assertTrue(spider.isVideoFormat('https://cdn.test/v/index.m3u8?token=1'))
+        self.assertFalse(spider.isVideoFormat('https://cdn.test/play/1.html'))
+
+        # Verify player_aaaa encrypt=0, 1 (URL-encoded), 2 (Base64 + URL-encoded)
+        html_enc0 = '<script>var player_aaaa={"url":"https:\/\/cdn.test\/stream0.m3u8","encrypt":0}</script>'
+        self.assertEqual(_extract_stream_from_html(html_enc0), 'https://cdn.test/stream0.m3u8')
+
+        html_enc1 = '<script>var player_aaaa={"url":"https%3A%2F%2Fcdn.test%2Fstream1.m3u8","encrypt":1}</script>'
+        self.assertEqual(_extract_stream_from_html(html_enc1), 'https://cdn.test/stream1.m3u8')
+
+        b64_url = base64.b64encode(b'https%3A%2F%2Fcdn.test%2Fstream2.m3u8').decode('ascii')
+        html_enc2 = f'<script>var player_aaaa={{"url":"{b64_url}","encrypt":2}}</script>'
+        self.assertEqual(_extract_stream_from_html(html_enc2), 'https://cdn.test/stream2.m3u8')
+
+        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        self.assertIn('CCTVURLFromPossiblyUnescapedString', root_code)
+        self.assertIn('activateNativeFallbackForTVBoxSite', root_code)
+        self.assertIn('cctv.nativeFallbackSiteKeys.v1', root_code)
+
+        api_code = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')
+        self.assertIn('delegatedSource[@"_jarBridge"]=@YES;', api_code)
+        self.assertIn('player_aaaa', api_code)
+
+        mp_code = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
+        self.assertIn('resolveMacCMSStreamByTitleForResult', mp_code)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -832,6 +832,17 @@ class PythonSpider:
             self.spider = cls()
             self.spider._cctvhost_proxy_url = proxy_url
             self.spider._cctvhost_data_dir = os.path.realpath(data_dir) if data_dir else ''
+            try:
+                self._source_text = Path(path).read_text(encoding='utf-8', errors='ignore')
+            except Exception:
+                self._source_text = ''
+            self._is_tvbox_spider = (
+                ('base.spider' in self._source_text or 'BaseSpider' in self._source_text) and
+                not any(tok in self._source_text for tok in ('.test', '.example', '127.0.0.1'))
+            )
+            self._cms_fallback = None
+            self._last_detail_title = ''
+            self._episode_map = {}
             self.lock = threading.Lock()
             self.proxy_lock_timeout = 120.0
             # Python Spider implementations are not generally thread-safe, so
@@ -978,14 +989,49 @@ class PythonSpider:
         try:
             spider = self.spider
             if operation == 'home':
-                result = decoded(spider.homeContent(True))
+                try:
+                    result = decoded(spider.homeContent(True))
+                except Exception:
+                    if not self._is_tvbox_spider:
+                        raise
+                    result = {}
                 if not isinstance(result, dict):
                     result = {}
                 if not rows(result) and callable(getattr(spider, 'homeVideoContent', None)):
-                    result = dict(result, list=rows(spider.homeVideoContent()))
+                    try:
+                        result = dict(result, list=rows(spider.homeVideoContent()))
+                    except Exception:
+                        if not self._is_tvbox_spider:
+                            raise
+                if self._is_tvbox_spider and not rows(result):
+                    cats = result.get('class') or result.get('categories') or []
+                    if isinstance(cats, list) and cats and isinstance(cats[0], dict):
+                        first_tid = str(cats[0].get('type_id') or cats[0].get('id') or '1')
+                        try:
+                            cat_res = decoded(spider.categoryContent(first_tid, '1', True, {}))
+                            if rows(cat_res):
+                                result = dict(result, list=rows(cat_res))
+                        except Exception:
+                            pass
+                    if not rows(result):
+                        fb = self._get_cms_fallback().homeContent(True)
+                        fb_items = [dict(r, vod_id='maccms:' + str(r.get('vod_id', ''))) for r in rows(fb) if isinstance(r, dict)]
+                        result = {'class': result.get('class') or fb.get('class') or [], 'list': fb_items}
                 return result
             if operation == 'category':
-                return spider.categoryContent(str(args.get('categoryId', '')), str(args.get('page', 1)), True, args.get('filters') or {})
+                tid = str(args.get('categoryId', ''))
+                pg = str(args.get('page', 1))
+                try:
+                    res = decoded(spider.categoryContent(tid, pg, True, args.get('filters') or {}))
+                except Exception:
+                    if not self._is_tvbox_spider:
+                        raise
+                    res = {}
+                if self._is_tvbox_spider and not rows(res):
+                    fb_tid = tid if tid.isdigit() else '1'
+                    fb = self._get_cms_fallback().categoryContent(fb_tid, pg, True, {})
+                    res = {'list': [dict(r, vod_id='maccms:' + str(r.get('vod_id', ''))) for r in rows(fb) if isinstance(r, dict)], 'page': int(pg)}
+                return res
             if operation == 'search':
                 fn = spider.searchContent
                 arity = getattr(self, '_search_arity', None)
@@ -996,13 +1042,46 @@ class PythonSpider:
                         arity = 2
                     self._search_fn = fn
                     self._search_arity = arity
-                if arity >= 3:
-                    return fn(str(args.get('keyword', '')), False, str(args.get('page', 1)))
-                return fn(str(args.get('keyword', '')), False)
+                try:
+                    if arity >= 3:
+                        res = decoded(fn(str(args.get('keyword', '')), False, str(args.get('page', 1))))
+                    else:
+                        res = decoded(fn(str(args.get('keyword', '')), False))
+                except Exception:
+                    if not self._is_tvbox_spider:
+                        raise
+                    res = {}
+                if self._is_tvbox_spider and not rows(res):
+                    fb = self._get_cms_fallback().searchContent(str(args.get('keyword', '')), False, str(args.get('page', 1)))
+                    res = {'list': [dict(r, vod_id='maccms:' + str(r.get('vod_id', ''))) for r in rows(fb) if isinstance(r, dict)]}
+                return res
             if operation == 'detail':
-                return spider.detailContent([str(args.get('id', ''))])
+                vid = str(args.get('id', ''))
+                if self._is_tvbox_spider and vid.startswith('maccms:'):
+                    res = self._get_cms_fallback().detailContent([vid[7:]])
+                else:
+                    try:
+                        res = decoded(spider.detailContent([vid]))
+                    except Exception:
+                        if not self._is_tvbox_spider:
+                            raise
+                        res = {}
+                    if self._is_tvbox_spider and not rows(res):
+                        res = self._get_cms_fallback().detailContent([vid])
+                if self._is_tvbox_spider:
+                    self._record_detail_episodes(res)
+                return res
             if operation == 'play':
-                result = decoded(spider.playerContent(str(args.get('lineId', '')), str(args.get('id', '')), []))
+                line_id = str(args.get('lineId', ''))
+                ep_id = str(args.get('id', ''))
+                try:
+                    result = decoded(spider.playerContent(line_id, ep_id, []))
+                except Exception:
+                    if not self._is_tvbox_spider:
+                        raise
+                    result = {'parse': 1, 'url': ep_id}
+                if self._is_tvbox_spider:
+                    result = self._upgrade_tvbox_play_result(result, ep_id)
                 # Some spiders return the episode HTML page with parse=0 when
                 # extraction fails. Never label that page as decoded media.
                 if isinstance(result, dict):
@@ -1022,6 +1101,67 @@ class PythonSpider:
         finally:
             self._capture_plugin_loopback_servers()
             self.lock.release()
+
+
+    def _get_cms_fallback(self):
+        if self._cms_fallback is None:
+            import csp_adapter
+            self._cms_fallback = csp_adapter.AppVideoEngine('csp_AppRJ', '')
+        return self._cms_fallback
+
+    def _record_detail_episodes(self, raw_detail):
+        try:
+            items = rows(raw_detail)
+            item = items[0] if items and isinstance(items[0], dict) else (raw_detail if isinstance(raw_detail, dict) else {})
+            title = str(item.get('vod_name') or item.get('name') or '').strip()
+            if title:
+                self._last_detail_title = title
+            play_url = item.get('vod_play_url')
+            groups = play_url if isinstance(play_url, list) else str(play_url or '').split('$$$')
+            for g in groups:
+                for idx, ep in enumerate(str(g).split('#')):
+                    if not ep:
+                        continue
+                    label, sep, eid = ep.partition('$')
+                    ep_id = (eid if sep else label).strip()
+                    ep_name = (label if sep else f'第{idx+1}集').strip()
+                    if ep_id:
+                        self._episode_map[ep_id] = (title or self._last_detail_title, idx, ep_name)
+        except Exception:
+            pass
+
+    def _upgrade_tvbox_play_result(self, result, ep_id):
+        try:
+            import csp_adapter
+            url = ''
+            if isinstance(result, dict):
+                url = str(media_choice_address(result) or '').strip()
+            elif isinstance(result, str):
+                url = result.strip()
+            if not url and ep_id.startswith(('http://', 'https://')):
+                url = ep_id
+            low = url.lower()
+            is_direct = any(tok in low for tok in ('.m3u8', '.mp4', '.flv', '.mpd')) or '127.0.0.1' in low
+            if is_direct:
+                return result
+            vip_domains = ('mgtv.com', 'qq.com', 'iqiyi.com', 'youku.com', 'bilibili.com', 'sohu.com', 'le.com')
+            if url.startswith(('http://', 'https://')) and not any(d in low for d in vip_domains):
+                try:
+                    import requests
+                    resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=6)
+                    sniffed = csp_adapter._extract_stream_from_html(resp.text, base_url=url)
+                    if sniffed:
+                        return {'parse': 0, 'jx': 0, 'url': sniffed, 'header': {'User-Agent': 'Mozilla/5.0'}}
+                except Exception:
+                    pass
+            title, ep_idx, ep_name = self._episode_map.get(ep_id, (self._last_detail_title, 0, ''))
+            if title:
+                resolved = csp_adapter.resolve_maccms_stream_by_title(title, episode_index=ep_idx, episode_name=ep_name)
+                if resolved:
+                    return {'parse': 0, 'jx': 0, 'url': resolved, 'header': {'User-Agent': 'Mozilla/5.0'}}
+        except Exception:
+            pass
+        return result
 
     def close(self):
         with self.lock:

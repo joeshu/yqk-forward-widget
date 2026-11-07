@@ -19,6 +19,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 @property(nonatomic,strong) UILabel *protocolBadge;
 @property(nonatomic,strong) UILabel *latencyBadge;
 @property(nonatomic,strong) UILabel *statusBadge;
+@property(nonatomic,strong) UIView *detailDivider;
 @property(nonatomic,copy) NSString *profileSource;
 @property(nonatomic,copy) void (^onTapLatency)(NSString *source);
 @end
@@ -35,7 +36,8 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
         self.latencyBadge=[UILabel new];self.latencyBadge.translatesAutoresizingMaskIntoConstraints=NO;self.latencyBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightSemibold,UIFontTextStyleCaption2);self.latencyBadge.textAlignment=NSTextAlignmentCenter;self.latencyBadge.layer.cornerRadius=6;self.latencyBadge.layer.cornerCurve=kCACornerCurveContinuous;self.latencyBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.latencyBadge,HostBorder());self.latencyBadge.clipsToBounds=YES;self.latencyBadge.backgroundColor=HostRaisedSurface();self.latencyBadge.textColor=HostSecondaryText();self.latencyBadge.userInteractionEnabled=YES;self.latencyBadge.accessibilityIdentifier=@"resource.latency.badge";
         UITapGestureRecognizer *latencyTap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleLatencyBadgeTap)];[self.latencyBadge addGestureRecognizer:latencyTap];
         self.statusBadge=[UILabel new];self.statusBadge.translatesAutoresizingMaskIntoConstraints=NO;self.statusBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightSemibold,UIFontTextStyleCaption2);self.statusBadge.textAlignment=NSTextAlignmentCenter;self.statusBadge.layer.cornerRadius=6;self.statusBadge.layer.cornerCurve=kCACornerCurveContinuous;self.statusBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.statusBadge,HostBorder());self.statusBadge.clipsToBounds=YES;self.statusBadge.backgroundColor=HostNeutralSurface();self.statusBadge.textColor=HostSecondaryText();self.statusBadge.accessibilityIdentifier=@"resource.status.badge";
-        [self.contentView addSubview:self.iconBadgeContainer];[self.contentView addSubview:self.profileTitleLabel];[self.contentView addSubview:self.protocolBadge];[self.contentView addSubview:self.latencyBadge];[self.contentView addSubview:self.statusBadge];[self.contentView addSubview:self.profileDetailLabel];
+        self.detailDivider=[UIView new];self.detailDivider.translatesAutoresizingMaskIntoConstraints=NO;self.detailDivider.backgroundColor=[HostSeparator() colorWithAlphaComponent:0.42];
+        [self.contentView addSubview:self.iconBadgeContainer];[self.contentView addSubview:self.profileTitleLabel];[self.contentView addSubview:self.protocolBadge];[self.contentView addSubview:self.latencyBadge];[self.contentView addSubview:self.statusBadge];[self.contentView addSubview:self.detailDivider];[self.contentView addSubview:self.profileDetailLabel];
         [NSLayoutConstraint activateConstraints:@[
             [self.iconBadgeContainer.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
             [self.iconBadgeContainer.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
@@ -59,9 +61,13 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
             [self.statusBadge.centerYAnchor constraintEqualToAnchor:self.protocolBadge.centerYAnchor],
             [self.statusBadge.heightAnchor constraintEqualToConstant:19],
             [self.statusBadge.trailingAnchor constraintLessThanOrEqualToAnchor:self.contentView.trailingAnchor constant:-8],
+            [self.detailDivider.leadingAnchor constraintEqualToAnchor:self.profileTitleLabel.leadingAnchor],
+            [self.detailDivider.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],
+            [self.detailDivider.topAnchor constraintEqualToAnchor:self.protocolBadge.bottomAnchor constant:6],
+            [self.detailDivider.heightAnchor constraintEqualToConstant:0.5],
             [self.profileDetailLabel.leadingAnchor constraintEqualToAnchor:self.profileTitleLabel.leadingAnchor],
             [self.profileDetailLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-8],
-            [self.profileDetailLabel.topAnchor constraintEqualToAnchor:self.protocolBadge.bottomAnchor constant:6],
+            [self.profileDetailLabel.topAnchor constraintEqualToAnchor:self.protocolBadge.bottomAnchor constant:10],
             [self.profileDetailLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-14]
         ]];
     }
@@ -722,7 +728,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     CGFloat textWidth=MAX(44,cardWidth-14-36-12-8-accessoryWidth);
     UIFont *titleFont=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline],*detailFont=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     CGRect titleBounds=[[self resourceTitleForProfile:profile] boundingRectWithSize:CGSizeMake(textWidth,ceil(titleFont.lineHeight*2)) options:NSStringDrawingUsesLineFragmentOrigin|NSStringDrawingUsesFontLeading attributes:@{NSFontAttributeName:titleFont} context:nil];
-    NSMutableParagraphStyle *paragraph=[NSMutableParagraphStyle new];paragraph.lineBreakMode=NSLineBreakByCharWrapping;
+    NSMutableParagraphStyle *paragraph=[NSMutableParagraphStyle new];paragraph.lineBreakMode=NSLineBreakByCharWrapping;paragraph.lineSpacing=3.2;paragraph.paragraphSpacing=2.0;
     CGRect detailBounds=[[self resourceDetailForProfile:profile] boundingRectWithSize:CGSizeMake(textWidth,CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin|NSStringDrawingUsesFontLeading attributes:@{NSFontAttributeName:detailFont,NSParagraphStyleAttributeName:paragraph} context:nil];
     CGFloat titleHeight=MIN(ceil(titleFont.lineHeight*2),MAX(ceil(titleFont.lineHeight),ceil(titleBounds.size.height)));
     CGFloat detailHeight=MAX(ceil(detailFont.lineHeight),ceil(detailBounds.size.height))+24;
@@ -777,6 +783,8 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         c.accessibilityHint=plugin?@"轻点查看服务能力与设置，进入详情使用、编辑或管理运行服务":@"轻点查看资源，使用开关启用或停用";
         c.textLabel.text=profileName;
         c.detailTextLabel.text=[self resourceDetailForProfile:p];
+        if(c.detailTextLabel.text.length){NSMutableParagraphStyle *detailPara=[NSMutableParagraphStyle new];detailPara.lineBreakMode=NSLineBreakByCharWrapping;detailPara.lineSpacing=3.2;detailPara.paragraphSpacing=2.0;NSMutableAttributedString *attrDetail=[[NSMutableAttributedString alloc] initWithString:c.detailTextLabel.text attributes:@{NSFontAttributeName:c.detailTextLabel.font,NSForegroundColorAttributeName:HostSecondaryText(),NSParagraphStyleAttributeName:detailPara}];NSRange firstNewline=[c.detailTextLabel.text rangeOfString:@"\n"];NSRange firstLineRange=firstNewline.location!=NSNotFound?NSMakeRange(0,firstNewline.location):NSMakeRange(0,c.detailTextLabel.text.length);[attrDetail addAttribute:NSForegroundColorAttributeName value:[HostText() colorWithAlphaComponent:0.88] range:firstLineRange];c.detailTextLabel.attributedText=attrDetail;}
+        c.detailDivider.backgroundColor=[HostSeparator() colorWithAlphaComponent:0.42];
         c.iconBadgeContainer.backgroundColor=[HostAccent() colorWithAlphaComponent:0.14];
         HostSetLayerBorderColor(c.iconBadgeContainer,[HostAccent() colorWithAlphaComponent:0.28]);
         UIColor *latencyColor=nil;NSString *rawLatency=[self latencyTextForProfile:p color:&latencyColor];
