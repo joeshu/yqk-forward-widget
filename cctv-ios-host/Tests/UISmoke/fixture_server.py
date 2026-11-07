@@ -32,8 +32,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     segment_delayed = False
     image_counts = {}
 
-    def log_message(self, *_):
-        pass
+    def log_message(self, format, *args):
+        print(f"{time.monotonic():.3f} HTTP {format % args}", flush=True)
 
     def do_POST(self):
         args = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
