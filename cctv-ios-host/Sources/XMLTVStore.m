@@ -43,9 +43,11 @@
 @property(nonatomic,strong) dispatch_queue_t diskQueue;
 @end
 @implementation XMLTVStore
-+ (instancetype)shared {static XMLTVStore *s;static dispatch_once_t once;dispatch_once(&once,^{s=[self new];s.cache=[NSMutableDictionary dictionary];s.tasks=[NSMutableDictionary dictionary];s.callbacks=[NSMutableDictionary dictionary];s.diskQueue=dispatch_queue_create("com.cctvhost.xmltv",DISPATCH_QUEUE_SERIAL);#if TARGET_OS_IOS
++ (instancetype)shared {static XMLTVStore *s;static dispatch_once_t once;dispatch_once(&once,^{s=[self new];s.cache=[NSMutableDictionary dictionary];s.tasks=[NSMutableDictionary dictionary];s.callbacks=[NSMutableDictionary dictionary];s.diskQueue=dispatch_queue_create("com.cctvhost.xmltv",DISPATCH_QUEUE_SERIAL);
+#if TARGET_OS_IOS
     [NSNotificationCenter.defaultCenter addObserver:s selector:@selector(evictMemoryCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
-#endif});return s;}
+#endif
+});return s;}
 + (NSDictionary *)parseData:(NSData *)input error:(NSError **)error {
     NSData *data=input;const unsigned char *b=data.bytes;
     if(data.length>64*1024*1024)goto invalid;

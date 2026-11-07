@@ -144,7 +144,15 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         BOOL apiKindTVBox=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&([siteType isEqual:@"1"]||[siteType isEqual:@"4"]);
         BOOL direct=TVBoxWebURL(api)&&scriptFile;
         BOOL supported=direct||apiKindTVBox||apiKindMacCMS||apiKindDouban||apiKindJARBridge;
-        NSString *reason=apiKindDouban?@"豆瓣影视索引 · iOS 原生适配 · 影片需跨点播源搜索播放":(apiKindMacCMS?@"TVBox type 0 · MacCMS JSON/XML API · 选中后请求":(apiKindTVBox?[NSString stringWithFormat:@"TVBox type %@ JSON API · 选中后请求，尚未验证",siteType]:(direct?@"可导入 · 将由现有脚本适配器检查":(apiKindJARBridge?@"Android/JAR 适配引擎 · iOS 原生执行":([siteType isEqual:@"0"]?@"TVBox type 0 为 JS 爬虫，需脚本文件地址；iOS 不支持此地址形式":([siteType isEqual:@"3"]?((jarFile||jarSpiderClass)?@"需要 Android/JAR 运行时；iOS 不支持":@"脚本地址无法识别；保留在合集中"):([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"]?@"此脚本类型需 Android/JAR 运行时；iOS 不支持":@"站点地址无效；保留在合集中"))))));
+        NSString *reason=@"站点地址无效；保留在合集中";
+        if(apiKindDouban)reason=@"豆瓣影视索引 · iOS 原生适配 · 影片需跨点播源搜索播放";
+        else if(apiKindMacCMS)reason=@"TVBox type 0 · MacCMS JSON/XML API · 选中后请求";
+        else if(apiKindTVBox)reason=[NSString stringWithFormat:@"TVBox type %@ JSON API · 选中后请求，尚未验证",siteType];
+        else if(direct)reason=@"可导入 · 将由现有脚本适配器检查";
+        else if(apiKindJARBridge)reason=@"Android/JAR 适配引擎 · iOS 原生执行";
+        else if([siteType isEqual:@"0"])reason=@"TVBox type 0 为 JS 爬虫，需脚本文件地址；iOS 不支持此地址形式";
+        else if([siteType isEqual:@"3"])reason=(jarFile||jarSpiderClass)?@"需要 Android/JAR 运行时；iOS 不支持":@"脚本地址无法识别；保留在合集中";
+        else if([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"])reason=@"此脚本类型需 Android/JAR 运行时；iOS 不支持";
         NSString *apiKind=apiKindDouban?@"douban-index":(apiKindMacCMS?@"maccms-api":(apiKindTVBox?@"tvbox-api":(direct?@"script":(apiKindJARBridge?@"jar-bridge":@"unsupported"))));
         NSMutableDictionary *site=[@{@"key":key,@"name":name,@"api":api?:@"",@"ext":ext?:@"",@"type":siteType,@"supported":@(supported),@"status":reason,@"apiKind":apiKind,@"sourceIndex":@(siteIndex-1)} mutableCopy];
         if(safeHeaders.count)site[@"header"]=safeHeaders;

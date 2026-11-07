@@ -293,6 +293,7 @@ static id MediaDoubanNormalize(NSString *operation,NSDictionary *arguments,id ra
     if([operation isEqual:@"home"]){result[@"categories"]=@[@{@"id":@"hot_gaia",@"name":@"热门电影"},@{@"id":@"tv_hot",@"name":@"热播剧集"},@{@"id":@"show_hot",@"name":@"热播综艺"},@{@"id":@"movie",@"name":@"电影筛选"},@{@"id":@"tv",@"name":@"电视筛选"},@{@"id":@"rank_list_movie",@"name":@"电影榜单"},@{@"id":@"rank_list_tv",@"name":@"电视剧榜单"}];result[@"filters"]=@{};}
     return result;
 }
+static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NSDictionary *source,id raw);
 static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDictionary *source,id raw) {
     if([source[@"protocol"] isEqual:@"douban-index"])return MediaDoubanNormalize(operation,arguments?:@{},raw);
     if([source[@"protocol"] isEqual:@"jar-bridge"])return MediaJARBridgeNormalize(operation,arguments?:@{},source,raw);
