@@ -252,7 +252,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         [self.heroHeaderView removeFromSuperview];
         self.heroHeaderView=nil;
     }
-    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,CGRectGetWidth(self.view.bounds)?:390,196)];
+    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,CGRectGetWidth(self.view.bounds)?:390,180)];
     header.autoresizingMask=UIViewAutoresizingFlexibleWidth;
 
     UIView *card=[UIView new];
@@ -278,7 +278,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     titleLabel.translatesAutoresizingMaskIntoConstraints=NO;
     titleLabel.text=@"CCTVHost 2026";
     titleLabel.textColor=HostText();
-    titleLabel.font=[UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+    titleLabel.font=HostRoundedFont(20.5,UIFontWeightBold,UIFontTextStyleTitle3);
     [card addSubview:titleLabel];
 
     UILabel *subtitleLabel=[UILabel new];
@@ -297,21 +297,22 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 
     NSString *qualityLabel=SettingsPreferredQualityText();
     NSArray<NSDictionary *> *chipData=@[
-        @{@"text":[NSString stringWithFormat:@"🎨 %@", [HostThemePalette currentPalette].displayName]},
-        @{@"text":[NSString stringWithFormat:@"📺 画质·%@", qualityLabel]},
-        @{@"text":@"🛡️ 纯本地无上传"}
+        @{@"text":[NSString stringWithFormat:@"  🎨 %@  ", [HostThemePalette currentPalette].displayName]},
+        @{@"text":[NSString stringWithFormat:@"  📺 画质·%@  ", qualityLabel]},
+        @{@"text":@"  🛡️ 纯本地无上传  "}
     ];
     for(NSDictionary *item in chipData){
         UILabel *chip=[UILabel new];
         chip.text=item[@"text"];
-        chip.font=[UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+        chip.font=HostRoundedFont(11,UIFontWeightSemibold,UIFontTextStyleCaption2);
         chip.textColor=HostSecondaryText();
         chip.backgroundColor=[HostText() colorWithAlphaComponent:0.06];
-        chip.layer.cornerRadius=6;
+        chip.layer.cornerRadius=8;
         chip.layer.cornerCurve=kCACornerCurveContinuous;
+        chip.layer.borderWidth=0.5;
+        HostSetLayerBorderColor(chip,HostBorder());
         chip.clipsToBounds=YES;
         chip.textAlignment=NSTextAlignmentCenter;
-        chip.layoutMargins=UIEdgeInsetsMake(3,8,3,8);
         [chipsStack addArrangedSubview:chip];
     }
 
@@ -359,10 +360,10 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     }
 
     [NSLayoutConstraint activateConstraints:@[
-        [card.topAnchor constraintEqualToAnchor:header.topAnchor constant:10],
+        [card.topAnchor constraintEqualToAnchor:header.topAnchor constant:4],
         [card.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16],
         [card.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16],
-        [card.heightAnchor constraintEqualToConstant:126],
+        [card.heightAnchor constraintEqualToConstant:120],
 
         [iconBox.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
         [iconBox.topAnchor constraintEqualToAnchor:card.topAnchor constant:18],
@@ -384,10 +385,10 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 
         [chipsStack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
         [chipsStack.trailingAnchor constraintLessThanOrEqualToAnchor:card.trailingAnchor constant:-16],
-        [chipsStack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-14],
-        [chipsStack.heightAnchor constraintEqualToConstant:22],
+        [chipsStack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-12],
+        [chipsStack.heightAnchor constraintEqualToConstant:24],
 
-        [filterScroll.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:12],
+        [filterScroll.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:10],
         [filterScroll.leadingAnchor constraintEqualToAnchor:header.leadingAnchor],
         [filterScroll.trailingAnchor constraintEqualToAnchor:header.trailingAnchor],
         [filterScroll.heightAnchor constraintEqualToConstant:38],
@@ -424,7 +425,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 
 - (void)updateImmersiveTableInsets {
     if(!self.isViewLoaded||!self.table)return;
-    CGFloat top=MAX(0,self.view.safeAreaInsets.top),bottom=MAX(8,self.bottomOverlayInset);
+    CGFloat top=MAX(0,self.view.safeAreaInsets.top),bottom=MAX(24,self.bottomOverlayInset+22);
     UIEdgeInsets old=self.table.contentInset,next=UIEdgeInsetsMake(top,0,bottom,0);
     if(fabs(old.top-top)<0.5&&fabs(old.bottom-bottom)<0.5)return;
     BOOL wasAtTop=self.table.contentOffset.y<=-old.top+1;
@@ -462,6 +463,12 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     return self.sections[section][@"footer"];
+}
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section {
+    HostStyleSectionHeaderView(view);
+}
+- (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section {
+    HostStyleSectionFooterView(view);
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {

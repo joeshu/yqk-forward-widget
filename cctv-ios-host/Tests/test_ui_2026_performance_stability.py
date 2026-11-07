@@ -61,6 +61,24 @@ class UI2026PerformanceStabilityTests(unittest.TestCase):
         self.assertIn("config.waitsForConnectivity=NO;", loader)
         self.assertIn("[self.domainFailures removeAllObjects];", loader)
 
+    def test_11_cross_platform_uikit_guards_for_macos_native_ci_tests(self):
+        for filename in ("XMLTVStore.m", "MediaMetadataCache.m"):
+            impl = (SOURCES / filename).read_text(encoding="utf-8")
+            self.assertIn("#import <TargetConditionals.h>", impl)
+            self.assertIn("#if TARGET_OS_IOS\n#import <UIKit/UIKit.h>\n#endif", impl)
+            self.assertGreaterEqual(impl.count("#if TARGET_OS_IOS"), 2)
+
+    def test_12_media_service_port_collision_deduplication_and_reassignment(self):
+        service_store = (SOURCES / "ServiceStore.m").read_text(encoding="utf-8")
+        import_workflow = (SOURCES / "ResourceImportWorkflowViewController.m").read_text(encoding="utf-8")
+        root = (SOURCES / "RootViewController.m").read_text(encoding="utf-8")
+        browser = (SOURCES / "MediaBrowserViewController.m").read_text(encoding="utf-8")
+        self.assertIn("if([self isMediaService:resolved]&&(port<1024||port>65535||[usedPorts containsObject:@(port)]))", service_store)
+        self.assertIn('if(![mutableService[@"builtin"] boolValue]&&[self isMediaService:mutableService])', service_store)
+        self.assertIn("NSMutableSet *batchPorts=[NSMutableSet set];", import_workflow)
+        self.assertIn("if(portBusy||HostLocalPortState((int)port)==1)", root)
+        self.assertIn('if(![activeSource[@"port"] isEqual:owner.source[@"port"]])', browser)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -191,6 +191,34 @@ static inline void HostRefreshAppearanceLayers(UIView *view) {
     for(UIView *child in view.subviews)HostRefreshAppearanceLayers(child);
 }
 
+static inline UIFont *HostRoundedFont(CGFloat size, UIFontWeight weight, UIFontTextStyle textStyle) {
+    UIFont *base = [UIFont systemFontOfSize:size weight:weight];
+    UIFontDescriptor *roundedDesc = [base.fontDescriptor fontDescriptorWithDesign:UIFontDescriptorSystemDesignRounded];
+    UIFont *rounded = roundedDesc ? [UIFont fontWithDescriptor:roundedDesc size:size] : base;
+    return textStyle ? [[UIFontMetrics metricsForTextStyle:textStyle] scaledFontForFont:rounded] : rounded;
+}
+
+static inline UIFont *HostMonospacedDigitFont(CGFloat size, UIFontWeight weight, UIFontTextStyle textStyle) {
+    UIFont *mono = [UIFont monospacedDigitSystemFontOfSize:size weight:weight];
+    return textStyle ? [[UIFontMetrics metricsForTextStyle:textStyle] scaledFontForFont:mono] : mono;
+}
+
+static inline void HostStyleSectionHeaderView(UIView *view) {
+    if (![view isKindOfClass:UITableViewHeaderFooterView.class]) return;
+    UITableViewHeaderFooterView *header = (UITableViewHeaderFooterView *)view;
+    header.textLabel.font = HostRoundedFont(13.0, UIFontWeightSemibold, UIFontTextStyleSubheadline);
+    header.textLabel.textColor = HostSecondaryText();
+    header.textLabel.adjustsFontForContentSizeCategory = YES;
+}
+
+static inline void HostStyleSectionFooterView(UIView *view) {
+    if (![view isKindOfClass:UITableViewHeaderFooterView.class]) return;
+    UITableViewHeaderFooterView *footer = (UITableViewHeaderFooterView *)view;
+    footer.textLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12.0 weight:UIFontWeightRegular]];
+    footer.textLabel.textColor = HostMutedText();
+    footer.textLabel.adjustsFontForContentSizeCategory = YES;
+}
+
 static inline void HostStylePillButton(UIButton *button, BOOL primary) {
     HostInstallPressFeedback(button);
     button.contentEdgeInsets = UIEdgeInsetsMake(10, 16, 10, 16);
@@ -215,9 +243,11 @@ static inline void HostStyleNavigation(UINavigationController *nav) {
     a.backgroundEffect = HostGlassBlur();
     a.backgroundColor = HostGlassTint();
     a.titleTextAttributes = @{NSForegroundColorAttributeName : HostText(),
-                              NSFontAttributeName : [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]};
+                              NSFontAttributeName : HostRoundedFont(17, UIFontWeightSemibold, nil),
+                              NSKernAttributeName : @(-0.15)};
     a.largeTitleTextAttributes = @{NSForegroundColorAttributeName : HostText(),
-                                   NSFontAttributeName : [UIFont systemFontOfSize:32 weight:UIFontWeightBold]};
+                                   NSFontAttributeName : HostRoundedFont(32, UIFontWeightBold, nil),
+                                   NSKernAttributeName : @(-0.35)};
     a.shadowColor = UIColor.clearColor;
     UINavigationBarAppearance *edge = [UINavigationBarAppearance new];
     [edge configureWithTransparentBackground];

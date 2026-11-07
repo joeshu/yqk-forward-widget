@@ -1,10 +1,8 @@
 #import "XMLTVStore.h"
 #import "ProfileStore.h"
-#if __has_include(<UIKit/UIKit.h>)
+#import <TargetConditionals.h>
+#if TARGET_OS_IOS
 #import <UIKit/UIKit.h>
-#define CCTV_XMLTV_HAS_UIKIT 1
-#else
-#define CCTV_XMLTV_HAS_UIKIT 0
 #endif
 #import <zlib.h>
 #import <CommonCrypto/CommonDigest.h>
@@ -45,11 +43,17 @@
 @property(nonatomic,strong) dispatch_queue_t diskQueue;
 @end
 @implementation XMLTVStore
-+ (instancetype)shared {static XMLTVStore *s;static dispatch_once_t once;dispatch_once(&once,^{s=[self new];s.cache=[NSMutableDictionary dictionary];s.tasks=[NSMutableDictionary dictionary];s.callbacks=[NSMutableDictionary dictionary];s.diskQueue=dispatch_queue_create("com.cctvhost.xmltv",DISPATCH_QUEUE_SERIAL);
-#if CCTV_XMLTV_HAS_UIKIT
++ (instancetype)shared {
+    static XMLTVStore *s; static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        s=[self new]; s.cache=[NSMutableDictionary dictionary]; s.tasks=[NSMutableDictionary dictionary];
+        s.callbacks=[NSMutableDictionary dictionary]; s.diskQueue=dispatch_queue_create("com.cctvhost.xmltv",DISPATCH_QUEUE_SERIAL);
+#if TARGET_OS_IOS
         [NSNotificationCenter.defaultCenter addObserver:s selector:@selector(evictMemoryCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
 #endif
-});return s;}
+    });
+    return s;
+}
 + (NSDictionary *)parseData:(NSData *)input error:(NSError **)error {
     NSData *data=input;const unsigned char *b=data.bytes;
     if(data.length>64*1024*1024)goto invalid;

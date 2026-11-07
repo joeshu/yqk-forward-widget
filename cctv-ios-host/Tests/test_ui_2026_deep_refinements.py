@@ -99,5 +99,75 @@ class UI2026DeepRefinementsTests(unittest.TestCase):
         self.assertIn("self.contentView.layer.borderWidth=0.6;HostSetLayerBorderColor(self.contentView,HostBorder());", feed)
 
 
+    def test_ref14_resource_page_squircle_icon_horizontal_badges_and_full_width_detail(self):
+        cc = (SOURCES / "ConfigCenterViewController.m").read_text(encoding="utf-8")
+        self.assertIn("self.iconBadgeContainer=[UIView new];", cc)
+        self.assertIn("[self.profileTitleLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-8]", cc)
+        self.assertIn("[self.latencyBadge.leadingAnchor constraintEqualToAnchor:self.protocolBadge.trailingAnchor constant:6]", cc)
+        self.assertIn("[self.profileDetailLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-8]", cc)
+        self.assertIn('@"共 %lu 项 · 合集 %lu · 订阅启用 %lu · 服务启用 %lu · 运行中 %lu"', cc)
+
+    def test_ref15_media_detail_and_inline_player_dedup_and_unclipped_controls(self):
+        mp = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
+        self.assertIn("qualityScrollHeight.priority=UILayoutPriorityDefaultHigh;", mp)
+        self.assertIn("!MediaPlaybackEpisodeNamesMatch(name,number)", mp)
+        self.assertIn("[self.qualityGroup.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:11]", mp)
+
+        mb = (SOURCES / "MediaBrowserViewController.m").read_text(encoding="utf-8")
+        self.assertIn("self.playButton.hidden=(self.inlinePlaybackController!=nil);", mb)
+        self.assertIn('@"url",@"http",@"https",@"null",@"nil",@"none",@"unknown"', mb)
+        self.assertIn("self.metadataLabel.hidden=(info.count==0);", mb)
+
+
+    def test_ref16_live_player_bottom_scrim_embedded_epg_frame_and_dock_fade(self):
+        root = (SOURCES / "RootViewController.m").read_text(encoding="utf-8")
+        self.assertIn("self.playerBottomScrim=[UIView new];", root)
+        self.assertIn("self.bottomDockFadeGradient=[CAGradientLayer layer];", root)
+        self.assertIn("self.playbackPanel.view.frame=[self.playbackPanel isKindOfClass:CCTVPlaybackListPanelController.class]?frame:CGRectMake(0,contentY,w,MAX(0,contentBottom-contentY));", root)
+        self.assertIn("CGFloat catalogBottomInset=tabContentInset+62;", root)
+
+    def test_ref17_playback_info_icons_settings_chips_and_media_feed_dedup(self):
+        info = (SOURCES / "PlaybackInfoViewController.m").read_text(encoding="utf-8")
+        self.assertIn("@\"tv.fill\"", info)
+        self.assertIn("@\"number.square\"", info)
+        self.assertIn("@\"cpu\"", info)
+        self.assertIn("@\"bolt.fill\"", info)
+        self.assertIn("@\"app.badge.checkmark\"", info)
+
+        feed = (SOURCES / "MediaFeedView.m").read_text(encoding="utf-8")
+        self.assertIn("if([candidateDetail isEqualToString:badgeText])candidateDetail=@\"\";", feed)
+        self.assertIn("@\"精选热播 · 点按查看详情\"", feed)
+
+        mb = (SOURCES / "MediaBrowserViewController.m").read_text(encoding="utf-8")
+        self.assertIn("item[@\"feedSubtitle\"]=srcName.length?[NSString stringWithFormat:@\"继续观看 · %@\",srcName]:@\"继续观看\";", mb)
+        self.assertIn("self.categoryScroll.contentInset=UIEdgeInsetsMake(0,0,0,14);", mb)
+
+        st = (SOURCES / "SettingsViewController.m").read_text(encoding="utf-8")
+        self.assertIn("@\"  🛡️ 纯本地无上传  \"", st)
+        self.assertIn("bottom=MAX(24,self.bottomOverlayInset+22);", st)
+
+    def test_ref18_spatial_typography_rounded_headers_monospaced_digits_and_editorial_accents(self):
+        theme = (SOURCES / "HostTheme.h").read_text(encoding="utf-8")
+        self.assertIn("HostRoundedFont(", theme)
+        self.assertIn("HostMonospacedDigitFont(", theme)
+        self.assertIn("HostStyleSectionHeaderView(", theme)
+        self.assertIn("HostStyleSectionFooterView(", theme)
+        self.assertIn("NSKernAttributeName : @(-0.35)", theme)
+
+        feed = (SOURCES / "MediaFeedView.m").read_text(encoding="utf-8")
+        self.assertIn("self.posterScrim=[CAGradientLayer layer];", feed)
+        self.assertIn("self.accentBar=[UIView new];", feed)
+        self.assertIn("self.nameLabel.layer.shadowOpacity=0.58;", feed)
+
+        mb = (SOURCES / "MediaBrowserViewController.m").read_text(encoding="utf-8")
+        self.assertIn("HostRoundedFont(21,UIFontWeightBold,UIFontTextStyleTitle2)", mb)
+        self.assertIn("HostMonospacedDigitFont(12,UIFontWeightMedium,UIFontTextStyleCaption1)", mb)
+
+        cc = (SOURCES / "ConfigCenterViewController.m").read_text(encoding="utf-8")
+        self.assertIn("HostMonospacedDigitFont(10.5,UIFontWeightBold,UIFontTextStyleCaption2)", cc)
+        self.assertIn("HostStyleSectionHeaderView(view);", cc)
+
+
 if __name__ == "__main__":
+
     unittest.main()

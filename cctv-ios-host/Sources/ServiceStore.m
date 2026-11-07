@@ -63,7 +63,20 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     NSMutableArray *rows =
         [[NSUserDefaults.standardUserDefaults arrayForKey:@"pythonServices"] ?: @[] mutableCopy];
     BOOL pathsChanged=NO;
-    for(NSUInteger index=0;index<rows.count;index++){NSDictionary *row=rows[index];if(![row isKindOfClass:NSDictionary.class])continue;NSDictionary *resolved=[self resolvedService:row];if(![resolved isEqual:row]){rows[index]=resolved;pathsChanged=YES;}}
+    NSMutableSet *usedPorts=[NSMutableSet setWithObjects:@8767,@18770,nil];
+    for(NSUInteger index=0;index<rows.count;index++){
+        NSDictionary *row=rows[index];if(![row isKindOfClass:NSDictionary.class])continue;
+        NSMutableDictionary *resolved=[[self resolvedService:row] mutableCopy];
+        NSInteger port=[resolved[@"port"] integerValue];
+        if(![resolved[@"builtin"] boolValue]){
+            if([self isMediaService:resolved]&&(port<1024||port>65535||[usedPorts containsObject:@(port)])){
+                NSInteger nextPort=18780;while([usedPorts containsObject:@(nextPort)]&&nextPort<65535)nextPort++;
+                resolved[@"port"]=@(nextPort);port=nextPort;
+            }
+            if(port>=1&&port<=65535)[usedPorts addObject:@(port)];
+        }
+        if(![resolved isEqual:row]){rows[index]=resolved.copy;pathsChanged=YES;}
+    }
     if(pathsChanged)[NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];
     BOOL found = NO;
     for (NSDictionary *s in rows)
@@ -350,14 +363,23 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     return nil;
 }
 + (void)save:(NSDictionary *)service {
-    service=[self resolvedService:service];
+    NSMutableDictionary *mutableService=[[self resolvedService:service] mutableCopy];
     NSMutableArray *rows = [[self services] mutableCopy];
     NSIndexSet *matches =
         [rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row, NSUInteger index, BOOL *stop) {
-          return [row[@"id"] isEqualToString:service[@"id"]];
+          return [row[@"id"] isEqualToString:mutableService[@"id"]];
         }];
     [rows removeObjectsAtIndexes:matches];
-    [rows addObject:service];
+    if(![mutableService[@"builtin"] boolValue]&&[self isMediaService:mutableService]){
+        NSMutableSet *usedPorts=[NSMutableSet setWithObjects:@8767,@18770,nil];
+        for(NSDictionary *row in rows)if(row[@"port"])[usedPorts addObject:row[@"port"]];
+        NSInteger port=[mutableService[@"port"] integerValue];
+        if(port<1024||port>65535||[usedPorts containsObject:@(port)]){
+            NSInteger nextPort=18780;while([usedPorts containsObject:@(nextPort)]&&nextPort<65535)nextPort++;
+            mutableService[@"port"]=@(nextPort);
+        }
+    }
+    [rows addObject:mutableService.copy];
     [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];
 }
 + (NSDictionary *)healthSnapshotForServiceIdentifier:(NSString *)identifier {

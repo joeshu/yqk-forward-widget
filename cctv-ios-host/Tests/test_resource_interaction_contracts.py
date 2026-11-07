@@ -1765,6 +1765,19 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[ServiceStore rewrittenLoopbackURL:configured forService:service]', self.root)
 
 
-if __name__ == '__main__':
+    def test_maccms_collection_sites_chunked_response_category_merge_and_m3u8_priority(self):
+        api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text(encoding='utf-8')
+        browser = (ROOT / 'Sources/MediaBrowserViewController.m').read_text(encoding='utf-8')
+        self.assertIn('response.expectedContentLength>0&&response.expectedContentLength>(long long)limit', api_client)
+        self.assertIn('MediaSanitizedJSONObjectWithData', api_client)
+        self.assertIn('forHTTPHeaderField:@"User-Agent"', api_client)
+        self.assertIn('listArgs[@"_maccms_ac"]=@"list"', api_client)
+        self.assertIn('@[@"type_pid",@"pid",@"parent_id"]', api_client)
+        self.assertIn('[flagName containsString:@"m3u8"]', api_client)
+        self.assertIn('if(nativeLines.count&&webLines.count){[nativeLines addObjectsFromArray:webLines];lines=nativeLines;}', api_client)
+        self.assertIn('@"catalog_single_site_auto"', browser)
+        self.assertIn('@"切换采集站"', browser)
 
+
+if __name__ == '__main__':
     unittest.main()

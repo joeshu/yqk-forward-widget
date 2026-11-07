@@ -90,7 +90,7 @@
     NSString *titleText = [(row[@"title"]?:@"") description];
     c.textLabel.text = titleText;
     c.detailTextLabel.text = [(row[@"value"]?:@"") description];
-    NSString *symbol = [titleText containsString:@"带宽"]||[titleText containsString:@"速率"]?@"speedometer":([titleText containsString:@"分辨率"]||[titleText containsString:@"画面"]?@"rectangle.expand.vertical":([titleText containsString:@"节点"]||[titleText containsString:@"线路"]||[titleText containsString:@"地址"]?@"network":@"waveform.path.ecg"));
+    NSString *symbol = ([titleText containsString:@"带宽"]||[titleText containsString:@"速率"])?@"speedometer":(([titleText containsString:@"分辨率"]||[titleText containsString:@"画面"])?@"rectangle.expand.vertical":(([titleText containsString:@"节点"]||[titleText containsString:@"线路"]||[titleText containsString:@"地址"])?@"network":([titleText containsString:@"频道名称"]?@"tv.fill":(([titleText containsString:@"频道 ID"]||[titleText containsString:@"标识"])?@"number.square":(([titleText containsString:@"引擎"]||[titleText containsString:@"解码"])?@"cpu":(([titleText containsString:@"首帧"]||[titleText containsString:@"耗时"])?@"bolt.fill":([titleText containsString:@"版本"]?@"app.badge.checkmark":@"waveform.path.ecg")))))));
     c.imageView.image = [UIImage systemImageNamed:symbol];
     c.imageView.tintColor = HostAccent();
     c.textLabel.textColor = HostText();

@@ -365,6 +365,9 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, strong) UIView *playerBox;
 @property (nonatomic, strong) UIView *playerTopScrim;
 @property (nonatomic, strong) CAGradientLayer *playerTopGradient;
+@property (nonatomic, strong) UIView *playerBottomScrim;
+@property (nonatomic, strong) CAGradientLayer *playerBottomGradient;
+@property (nonatomic, strong) CAGradientLayer *bottomDockFadeGradient;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UILabel *infoLabel;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
@@ -1008,6 +1011,7 @@ configureCatalogNavigation;
     for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.routeBtn, self.epgBtn, self.moreBtn]) {
         [self.controlBar addArrangedSubview:b];
     }
+    self.playerBottomScrim=[UIView new];self.playerBottomScrim.userInteractionEnabled=NO;self.playerBottomGradient=[CAGradientLayer layer];self.playerBottomGradient.colors=@[(id)UIColor.clearColor.CGColor,(id)[UIColor colorWithWhite:0 alpha:.48].CGColor,(id)[UIColor colorWithWhite:0 alpha:.84].CGColor];self.playerBottomGradient.locations=@[@0,@0.45,@1];self.playerBottomGradient.startPoint=CGPointMake(.5,0);self.playerBottomGradient.endPoint=CGPointMake(.5,1);[self.playerBottomScrim.layer addSublayer:self.playerBottomGradient];[self.playerBox addSubview:self.playerBottomScrim];
     [self.playerBox addSubview:self.controlBar];
 
     self.volumeView = [[MPVolumeView alloc] initWithFrame:CGRectMake(-2000, -2000, 10, 10)];
@@ -1042,7 +1046,11 @@ configureCatalogNavigation;
     b.layer.cornerRadius = 12;
     b.layer.cornerCurve = kCACornerCurveContinuous;
     b.layer.borderWidth = 0.65;
-    b.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
+    b.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.22].CGColor;
+    b.titleLabel.layer.shadowColor = UIColor.blackColor.CGColor;
+    b.titleLabel.layer.shadowOpacity = 0.72;
+    b.titleLabel.layer.shadowRadius = 2.0;
+    b.titleLabel.layer.shadowOffset = CGSizeMake(0, 1);
     HostInstallPressFeedback(b);
     [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return b;
@@ -1057,6 +1065,7 @@ configureCatalogNavigation;
         self.infoLabel.hidden = !self.infoLabel.hidden;
     }
     self.controlBar.hidden = !self.controlBar.hidden;
+    self.playerBottomScrim.hidden = self.controlBar.hidden;
 }
 
 #pragma mark - 列表
@@ -1267,6 +1276,7 @@ configureCatalogNavigation;
 
 - (void)buildBottomBar {
     self.bottomBarBackdrop=[UIView new];self.bottomBarBackdrop.backgroundColor=UIColor.clearColor;self.bottomBarBackdrop.opaque=NO;self.bottomBarBackdrop.userInteractionEnabled=NO;self.bottomBarBackdrop.layer.cornerRadius=0;self.bottomBarBackdrop.clipsToBounds=NO;
+    self.bottomDockFadeGradient=[CAGradientLayer layer];self.bottomDockFadeGradient.colors=@[(id)[HostBackground() colorWithAlphaComponent:0.0].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.78].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.96].CGColor];self.bottomDockFadeGradient.locations=@[@0,@0.42,@1];[self.bottomBarBackdrop.layer addSublayer:self.bottomDockFadeGradient];
     self.bottomDockGlass=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomDockGlass.userInteractionEnabled=NO;self.bottomDockGlass.layer.cornerRadius=27;self.bottomDockGlass.layer.cornerCurve=kCACornerCurveContinuous;self.bottomDockGlass.clipsToBounds=YES;self.bottomDockGlass.layer.borderWidth=0.8;HostSetLayerBorderColor(self.bottomDockGlass,HostBorder());
     UIView *dockTint=[[UIView alloc] initWithFrame:self.bottomDockGlass.contentView.bounds];dockTint.backgroundColor=HostGlassTint();dockTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;dockTint.userInteractionEnabled=NO;[self.bottomDockGlass.contentView addSubview:dockTint];
     [self.bottomBarBackdrop addSubview:self.bottomDockGlass];
@@ -1917,6 +1927,9 @@ configureCatalogNavigation;
     if ([self numberOfSectionsInTableView:t] == 2) return s == 0 ? @"最近观看" : @"全部频道";
     return nil;
 }
+- (void)tableView:(UITableView *)t willDisplayHeaderView:(UIView *)view forSection:(NSInteger)s {
+    HostStyleSectionHeaderView(view);
+}
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
     if ([self numberOfSectionsInTableView:t] == 2 && s == 0) return (NSInteger)[self visibleRecents].count;
@@ -2388,7 +2401,7 @@ configureCatalogNavigation;
     [self.watchdog invalidate];
     self.watchdog = nil;
     for (UIView *v in self.playerBox.subviews.copy) {
-        if (v == self.titleLabel || v == self.infoLabel || v == self.spinner || v == self.controlBar || v == self.playerChannelLogo || v == self.playerTopScrim) continue;
+        if (v == self.titleLabel || v == self.infoLabel || v == self.spinner || v == self.controlBar || v == self.playerChannelLogo || v == self.playerTopScrim || v == self.playerBottomScrim) continue;
         [v removeFromSuperview];
     }
     [self updateLiveScreenAwakeState];
@@ -2480,11 +2493,11 @@ configureCatalogNavigation;
         CGFloat segmentHeight=MAX(32,ceil(segmentFont.lineHeight)+14);
         self.groupControl.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.groupControl.hidden=!catalog||expandedLive;self.playerTabs.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.playerTabs.hidden=!catalog||!expandedLive;
         self.versionLabel.hidden=YES;
-        CGFloat tabHeight=58,tabWidth=MIN(w,560),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBar.frame=CGRectMake(MAX(0,(w-tabWidth)/2),tabY,tabWidth,tabHeight);self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomDockGlass.frame=CGRectMake(MAX(10,(w-MIN(w-20,540))/2),2,MIN(w-20,540),tabHeight-4);self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
+        CGFloat tabHeight=58,tabWidth=MIN(w,560),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBar.frame=CGRectMake(MAX(0,(w-tabWidth)/2),tabY,tabWidth,tabHeight);self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomDockFadeGradient.frame=self.bottomBarBackdrop.bounds;self.bottomDockGlass.frame=CGRectMake(MAX(10,(w-MIN(w-20,540))/2),2,MIN(w-20,540),tabHeight-4);self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
         BOOL showMiniBar=self.livePlaybackSuspendedForNavigation&&self.channelID.length&&self.activeTab>=2;self.liveMiniPlayerBar.hidden=!showMiniBar;if(showMiniBar){CGFloat miniW=MIN(w-28,520),miniH=42;self.liveMiniPlayerBar.frame=CGRectMake((w-miniW)/2,MAX(top+8,tabY-miniH-8),miniW,miniH);self.liveMiniPlayerCloseButton.frame=CGRectMake(miniW-38,5,32,32);self.liveMiniPlayerResumeButton.frame=CGRectMake(miniW-130,5,88,32);self.liveMiniPlayerLabel.frame=CGRectMake(14,0,MAX(0,miniW-150),miniH);[self.view bringSubviewToFront:self.liveMiniPlayerBar];}
-        CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=height;
-        CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom));UIEdgeInsets catalogInsets=UIEdgeInsetsMake(contentY,0,tabContentInset,0);CCTVApplyImmersiveScrollGeometry(self.table,frame,catalogInsets);CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets);
-        self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=frame;self.playbackPanel.view.hidden=!catalog;if([self.playbackPanel isKindOfClass:CCTVPlaybackListPanelController.class]){UITableView *panelTable=((CCTVPlaybackListPanelController *)self.playbackPanel).tableView;CCTVApplyImmersiveScrollGeometry(panelTable,panelTable.frame,catalogInsets);}
+        CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=height;CGFloat catalogBottomInset=tabContentInset+62;
+        CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom));UIEdgeInsets catalogInsets=UIEdgeInsetsMake(contentY,0,catalogBottomInset,0);CCTVApplyImmersiveScrollGeometry(self.table,frame,catalogInsets);CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets);
+        self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=[self.playbackPanel isKindOfClass:CCTVPlaybackListPanelController.class]?frame:CGRectMake(0,contentY,w,MAX(0,contentBottom-contentY));self.playbackPanel.view.hidden=!catalog;if([self.playbackPanel isKindOfClass:CCTVPlaybackListPanelController.class]){UITableView *panelTable=((CCTVPlaybackListPanelController *)self.playbackPanel).tableView;CCTVApplyImmersiveScrollGeometry(panelTable,panelTable.frame,catalogInsets);}else if([self.playbackPanel isKindOfClass:EPGViewController.class]){UITableView *epgTable=[self.playbackPanel valueForKey:@"table"];if([epgTable isKindOfClass:UITableView.class])epgTable.contentInset=UIEdgeInsetsMake(0,0,catalogBottomInset,0);}
         // Every tab page owns the full root bounds. Child controls use their
         // safe-area guides, while their backgrounds and scroll views can pass
         // behind the status and navigation bars.
@@ -2502,6 +2515,9 @@ configureCatalogNavigation;
     self.infoLabel.frame = CGRectMake(12 + safe.left, overlayTop + 8 + playerTitleHeight + 2, MAX(0, w - safe.left - safe.right - 24), playerInfoHeight);
     self.playerChannelLogo.frame=CGRectMake(MAX(safe.left+12,w-safe.right-60),overlayTop+8,48,27);
     CGFloat bottom = overlayInsets.bottom;
+    CGFloat bottomScrimH = MIN(CGRectGetHeight(self.playerBox.bounds), bottom + 68);
+    self.playerBottomScrim.frame = CGRectMake(0, MAX(0, CGRectGetHeight(self.playerBox.bounds) - bottomScrimH), w, bottomScrimH);
+    self.playerBottomGradient.frame = self.playerBottomScrim.bounds;
     self.controlBar.frame = CGRectMake(8 + safe.left, CGRectGetHeight(self.playerBox.bounds) - bottom - 52,
                                       MAX(0, w - safe.left - safe.right - 16), 44);
     self.spinner.center=CGPointMake(CGRectGetMidX(self.playerBox.bounds),CGRectGetMidY(self.playerBox.bounds));
@@ -2663,7 +2679,10 @@ configureCatalogNavigation;
     self.view.backgroundColor=HostBackground();
     self.view.tintColor=HostAccent();
     self.bottomBar.tintColor=HostAccent();
-    self.bottomBarBackdrop.backgroundColor=HostGlassTint();
+    self.bottomBarBackdrop.backgroundColor=UIColor.clearColor;
+    self.bottomDockFadeGradient.colors=@[(id)[HostBackground() colorWithAlphaComponent:0.0].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.78].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.96].CGColor];
+    self.bottomDockGlass.effect=HostGlassBlur();
+    HostSetLayerBorderColor(self.bottomDockGlass,HostBorder());
     self.catalogFloatingAirPlayPicker.activeTintColor=HostAccent();
     self.groupControl.tintColor=HostAccent();
     self.groupControl.selectedSegmentTintColor=HostAccent();
@@ -3002,6 +3021,14 @@ configureCatalogNavigation;
     if([PyHost isRunningServiceIdentifier:serviceID])return YES;
     if([PyHost isManagedServiceIdentifier:serviceID]){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:7 userInfo:@{NSLocalizedDescriptionKey:@"该服务仍有启动中或状态待确认的会话，请先停止并确认清理后重试。"}];return NO;}
     NSInteger port=[service[@"port"] integerValue];if(port<1||port>65535){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:5 userInfo:@{NSLocalizedDescriptionKey:@"服务端口必须是 1 到 65535 之间的有效端口。"}];return NO;}
+    if([ServiceStore isMediaService:service]){
+        BOOL portBusy=NO;NSMutableSet *usedPorts=[NSMutableSet setWithObjects:@8767,@18770,nil];
+        for(NSDictionary *other in [ServiceStore services]){if([other[@"id"] isEqual:serviceID])continue;NSInteger otherPort=[other[@"port"] integerValue];if(otherPort>0)[usedPorts addObject:@(otherPort)];if(otherPort==port)portBusy=YES;}
+        if(portBusy||HostLocalPortState((int)port)==1){
+            NSInteger nextPort=18780;while(([usedPorts containsObject:@(nextPort)]||HostLocalPortState((int)nextPort)==1)&&nextPort<65535)nextPort++;
+            NSMutableDictionary *reassigned=[service mutableCopy];reassigned[@"port"]=@(nextPort);[ServiceStore save:reassigned];service=[ServiceStore resolvedService:reassigned];port=nextPort;
+        }
+    }
     for(NSDictionary *other in [ServiceStore services])if(![other[@"id"] isEqual:serviceID]&&[other[@"port"] integerValue]==port&&[PyHost isManagedServiceIdentifier:other[@"id"]]){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:6 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"端口 %ld 正由“%@”使用或待清理，请先停止该服务。",(long)port,other[@"name"]?:other[@"id"]]}];return NO;}
     NSString *dataDir=[ServiceStore dataDirectoryForService:service error:error];if(!dataDir.length)return NO;
     NSString *bind=[service[@"lan"] boolValue]?@"0.0.0.0":@"127.0.0.1";NSMutableArray *args=[NSMutableArray array];

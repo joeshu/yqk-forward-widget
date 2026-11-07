@@ -159,6 +159,14 @@ int main(void) {
             }
         check(matches == 1, @"edit replaces existing service");
         [ServiceStore remove:sid];
+        NSString *dupA = [NSUUID.UUID.UUIDString lowercaseString];
+        NSString *dupB = [NSUUID.UUID.UUIDString lowercaseString];
+        [ServiceStore save:@{@"id":dupA,@"name":@"hongguo-python",@"port":@18781,@"engine":@"python",@"protocol":@"python-spider",@"manifest":@{@"runtime":@"python",@"protocol":@"python-spider",@"entry":@"a.py"}}];
+        [ServiceStore save:@{@"id":dupB,@"name":@"hongguo-node",@"port":@18781,@"engine":@"node",@"protocol":@"cctvhost.media/1",@"manifest":@{@"runtime":@"node",@"protocol":@"cctvhost.media/1",@"entry":@"b.js"}}];
+        NSDictionary *savedA=nil,*savedB=nil;
+        for(NSDictionary *s in [ServiceStore services]){if([s[@"id"] isEqual:dupA])savedA=s;if([s[@"id"] isEqual:dupB])savedB=s;}
+        check(savedA&&savedB&&![savedA[@"port"] isEqual:savedB[@"port"]],@"saving two media services with the same port deduplicates the colliding port");
+        [ServiceStore remove:dupA];[ServiceStore remove:dupB];
         for (NSDictionary *s in [ServiceStore services])
             check(![s[@"id"] isEqual:sid], @"service removed");
         NSString *portableID=NSUUID.UUID.UUIDString;

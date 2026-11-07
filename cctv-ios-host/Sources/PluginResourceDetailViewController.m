@@ -202,6 +202,8 @@
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {if(section==0)return self.resourceRows.count;if(section==1)return self.liveCapable?4:3;if(section==2)return self.liveCapable?7:1;return self.managementRows.count;}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return @[@"资源能力",@"运行状态",@"本机接口",@"管理与诊断"][section];}
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
+- (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionFooterView(view); }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return @"点“打开影视”或“打开直播频道”后才会按需启动服务。运行中、接口健康、列表可读和视频解码是不同状态。";if(section==1)return [[self serviceManifest][@"compatibilityNote"] isKindOfClass:NSString.class]?[self serviceManifest][@"compatibilityNote"]:@"服务可独立启停；停止失败时请查看此资源的日志。";if(section==2)return [NSString stringWithFormat:@"端口识别：%@ · 本机节目单地址会自动对齐至 127.0.0.1:%@",[ServiceStore portRecognitionSummaryForService:self.service],self.service[@"port"]?:@0];return nil;}
 - (NSDictionary *)rowAt:(NSIndexPath *)ip {
     if(ip.section==0)return self.resourceRows[ip.row];

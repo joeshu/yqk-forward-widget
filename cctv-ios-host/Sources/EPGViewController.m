@@ -343,8 +343,8 @@
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cellID];
         cell.backgroundColor = HostCard();
-        cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-        cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+        cell.textLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:[UIFont systemFontOfSize:15.5 weight:UIFontWeightMedium]];
+        cell.detailTextLabel.font = HostMonospacedDigitFont(12.0, UIFontWeightRegular, UIFontTextStyleCaption1);
         cell.textLabel.adjustsFontForContentSizeCategory=YES;
         cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;
         cell.textLabel.numberOfLines=0;

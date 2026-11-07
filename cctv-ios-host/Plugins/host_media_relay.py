@@ -177,6 +177,8 @@ class MediaRelay:
 
         def local(value, manifest=False, resource_kind="media"):
             nonlocal segment_count
+            if isinstance(value, str):
+                value = re.sub(r'(?i)&(?:amp|#0*38|#x0*26);', '&', value.strip())
             target = urllib.parse.urljoin(url, value)
             resolved = urllib.parse.urlsplit(target)
             # Preserve signed query parameters for same-origin HLS children.
@@ -211,7 +213,10 @@ class MediaRelay:
                 tag = line.split(':', 1)[0]
                 uri_manifest = tag in ('#EXT-X-MEDIA', '#EXT-X-I-FRAME-STREAM-INF',
                                        '#EXT-X-IMAGE-STREAM-INF', '#EXT-X-RENDITION-REPORT')
-                line = re.sub(r'\bURI="([^"]+)"', lambda match: 'URI="' + local(match[1], uri_manifest, "key" if tag in ("#EXT-X-KEY", "#EXT-X-SESSION-KEY") else "map" if tag == "#EXT-X-MAP" else "media") + '"', line)
+                res_kind = ("key" if tag in ("#EXT-X-KEY", "#EXT-X-SESSION-KEY")
+                            else "map" if (tag == "#EXT-X-MAP" or (tag == "#EXT-X-PRELOAD-HINT" and "TYPE=MAP" in line))
+                            else "media")
+                line = re.sub(r'\bURI=(?:"([^"]+)"|\x27([^\x27]+)\x27)', lambda match: 'URI="' + local(match[1] or match[2], uri_manifest, res_kind) + '"', line)
                 if tag == '#EXT-X-STREAM-INF':
                     variant_pending = True
             elif line.strip():

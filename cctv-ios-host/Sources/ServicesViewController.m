@@ -181,6 +181,8 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
         return [@[ @"每个服务可独立启停。运行时活跃不代表 HTTP 健康或视频已完成解码；可在服务详情中分别检测接口。", self.service[@"manifest"][@"compatibilityNote"]?:@"" ] componentsJoinedByString:@"\n"];
     return nil;
 }
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
+- (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionFooterView(view); }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     BOOL addressRow=ip.section==2&&(ip.row==7||ip.row==8);NSString *reuse=addressRow?@"service.detail.address":@"service.detail.row";
     UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:reuse];

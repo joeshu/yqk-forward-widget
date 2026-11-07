@@ -188,8 +188,14 @@ def detail(value, identifier):
     # array alongside the original MacCMS fields. Prefer usable normalized
     # lines, then fall back to the source's raw playback declaration.
     if not lines and 'vod_play_url' in item:
-        flags = str(item.get('vod_play_from') or '').split('$$$')
-        groups = str(item.get('vod_play_url') or '').split('$$$')
+        raw_from = item.get('vod_play_from')
+        flags = ([str(f).strip() for f in raw_from]
+                 if isinstance(raw_from, (list, tuple))
+                 else str(raw_from or '').split('$$$'))
+        raw_url = item.get('vod_play_url')
+        groups = ([str(g) for g in raw_url]
+                  if isinstance(raw_url, (list, tuple))
+                  else str(raw_url or '').split('$$$'))
         for line_index, group in enumerate(groups):
             flag = flags[line_index] if line_index < len(flags) else ''
             episodes = []
@@ -279,6 +285,8 @@ def normalize_media_address(value):
     address = re.sub(r'(?i)&(?:amp|#0*38|#x0*26);', '&', value.strip())
     if address.startswith('//'):
         address = 'https:' + address
+    if ' ' in address and address.lower().startswith(('http://', 'https://')):
+        address = address.replace(' ', '%20')
     return address
 
 
@@ -381,7 +389,7 @@ def direct_episode_media_fallback(value, episode_id):
     return playback({'url': address})
 
 
-def playback(value):
+def playback(value, _depth=0):
     value = unwrap_envelope(value, {'url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
                                     'video_url', 'mediaUrl', 'src', 'alternates',
                                     'parse', 'jx', 'headers', 'header', 'proxy', 'error', 'message'})
@@ -501,9 +509,23 @@ def playback(value):
                     if valid_media_url(address):
                         alternates.append({'name': name or f'线路 {index + 1}', 'url': address})
             else:
-                alternates = [{'name': str(url[i]), 'url': str(url[i + 1])}
-                              for i in range(0, len(url) - 1, 2)]
-        url = alternates[0]['url'] if alternates else ''
+                alternates = [
+                    {'name': str(url[i]), 'url': normalize_media_address(str(url[i + 1]))}
+                    for i in range(0, len(url) - 1, 2)
+                    if url[i + 1] not in (None, '')
+                ]
+        url = next(
+            (
+                cand
+                for item in alternates
+                if isinstance(item, dict)
+                for cand in [normalize_media_address(media_choice_address(item))]
+                if (valid_proxy_address(cand)
+                    if (enabled(item.get('proxy')) or proxy_requested)
+                    else valid_media_url(cand))
+            ),
+            alternates[0]['url'] if alternates else '',
+        )
     base_headers = dict(headers)
     headers.update(primary_choice_headers)
     parse = 1 if enabled(value.get('parse')) else 0
@@ -573,12 +595,13 @@ def playback(value):
                 transport.update({key: item[key] for key in transport_keys if key in item})
                 if item_proxy:
                     transport['proxy'] = True
-                transport['url'] = candidate
-                normalized = playback(transport)
-                for key in ('format', 'contentType', 'parse', 'jx', 'requiresWebPlayback',
-                            'directMedia', 'nativePlayable', 'proxy'):
-                    if key in normalized:
-                        choice[key] = normalized[key]
+                if _depth == 0:
+                    transport['url'] = candidate
+                    normalized = playback(transport, _depth=_depth + 1)
+                    for key in ('format', 'contentType', 'parse', 'jx', 'requiresWebPlayback',
+                                'directMedia', 'nativePlayable', 'proxy'):
+                        if key in normalized:
+                            choice[key] = normalized[key]
                 safe_alternates.append(choice)
     try:
         extension = urllib.parse.urlsplit(url).path.rsplit('.', 1)[-1].lower() if '.' in urllib.parse.urlsplit(url).path else ''
@@ -619,6 +642,26 @@ def playback(value):
     for key in ('sessionID', 'expiresAt', 'refreshAfter', 'refreshInterval', 'isLive'):
         if key in value and isinstance(value[key], (str, int, float, bool)):
             result[key] = value[key]
+    raw_subs = value.get('subs') or value.get('subtitles')
+    if isinstance(raw_subs, list):
+        subs = []
+        for sub in raw_subs[:16]:
+            if isinstance(sub, dict):
+                sub_url = normalize_media_address(str(sub.get('url') or sub.get('src') or ''))
+                if valid_media_url(sub_url):
+                    subs.append({
+                        'name': str(sub.get('name') or sub.get('title') or sub.get('lang') or '字幕')[:64],
+                        'url': sub_url,
+                        'lang': str(sub.get('lang') or '')[:32],
+                        'format': str(sub.get('format') or sub.get('mime') or '')[:32],
+                    })
+        if subs:
+            result['subtitles'] = subs
+    danmaku_url = value.get('danmaku') or value.get('danmu')
+    if isinstance(danmaku_url, str):
+        norm_dm = normalize_media_address(danmaku_url)
+        if valid_media_url(norm_dm):
+            result['danmaku'] = norm_dm
     return result
 
 
@@ -895,7 +938,15 @@ class PythonSpider:
                 return spider.categoryContent(str(args.get('categoryId', '')), str(args.get('page', 1)), True, args.get('filters') or {})
             if operation == 'search':
                 fn = spider.searchContent
-                if len(inspect.signature(fn).parameters) >= 3:
+                arity = getattr(self, '_search_arity', None)
+                if arity is None or getattr(self, '_search_fn', None) is not fn:
+                    try:
+                        arity = len(inspect.signature(fn).parameters)
+                    except (TypeError, ValueError):
+                        arity = 2
+                    self._search_fn = fn
+                    self._search_arity = arity
+                if arity >= 3:
                     return fn(str(args.get('keyword', '')), False, str(args.get('page', 1)))
                 return fn(str(args.get('keyword', '')), False)
             if operation == 'detail':

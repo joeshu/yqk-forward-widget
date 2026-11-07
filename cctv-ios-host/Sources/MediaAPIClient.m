@@ -69,6 +69,35 @@ static NSDictionary *MediaCMSXMLObject(NSData *data,NSError **error) {
     if(!list&&!categories.count&&!message.length){if(error)*error=[NSError errorWithDomain:@"CCTVHostMacCMS" code:4 userInfo:@{NSLocalizedDescriptionKey:@"MacCMS XML 中没有可识别的 list 或 class 节点"}];return nil;}
     return result;
 }
+static id MediaSanitizedJSONObjectWithData(NSData *data,NSError **error) {
+    if(!data.length)return nil;
+    NSError *firstError=nil;
+    id object=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:&firstError];
+    if(object)return object;
+    NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if(!text){
+        NSStringEncoding gbk=CFStringConvertEncodingToNSStringEncoding(kCFStringEncodingGB_18030_2000);
+        text=[[NSString alloc] initWithData:data encoding:gbk];
+    }
+    if(!text){if(error)*error=firstError;return nil;}
+    if([text hasPrefix:@"\uFEFF"])text=[text substringFromIndex:1];
+    NSString *trimmed=[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if([trimmed hasPrefix:@"<?xml"]||[trimmed hasPrefix:@"<rss"]){if(error)*error=firstError;return nil;}
+    NSRange firstBrace=[trimmed rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"{["]];
+    if(firstBrace.location!=NSNotFound&&firstBrace.location>0&&firstBrace.location<2048){
+        NSString *prefix=[[trimmed substringToIndex:firstBrace.location] lowercaseString];
+        if(![prefix containsString:@"<html"]&&![prefix containsString:@"<!doctype"])trimmed=[trimmed substringFromIndex:firstBrace.location];
+    }
+    NSMutableString *clean=[NSMutableString stringWithCapacity:trimmed.length];
+    for(NSUInteger i=0;i<trimmed.length;i++){
+        unichar ch=[trimmed characterAtIndex:i];
+        if(ch<0x20&&ch!='\n'&&ch!='\r'&&ch!='\t')continue;
+        [clean appendFormat:@"%C",ch];
+    }
+    NSData *cleanData=[clean dataUsingEncoding:NSUTF8StringEncoding];
+    if(!cleanData.length){if(error)*error=firstError;return nil;}
+    return [NSJSONSerialization JSONObjectWithData:cleanData options:NSJSONReadingFragmentsAllowed error:error];
+}
 
 static NSString *MediaTVBoxString(id value) {
     if([value isKindOfClass:NSString.class])return value;
@@ -161,9 +190,25 @@ static BOOL MediaTVBoxEpisodeAddressIsRelativeURL(NSString *value) {
     return [extensions containsObject:extension];
 }
 static NSArray<NSDictionary *> *MediaTVBoxCategories(NSDictionary *root) {
-    NSArray *raw=MediaTVBoxArray(root[@"class"]?:root[@"categories"]);NSMutableArray *categories=[NSMutableArray array];
-    for(id value in raw){NSDictionary *row=MediaTVBoxObject(value);NSString *identifier=MediaTVBoxFirstString(row,@[@"type_id",@"id",@"tid"]),*name=MediaTVBoxFirstString(row,@[@"type_name",@"name",@"title"]);if(identifier.length&&name.length)[categories addObject:@{@"id":identifier,@"name":name}];}
-    return categories;
+    NSArray *raw=MediaTVBoxArray(root[@"class"]?:root[@"categories"]);
+    NSMutableSet<NSString *> *parentIDs=[NSMutableSet set];
+    for(id value in raw){
+        NSDictionary *row=MediaTVBoxObject(value);
+        NSString *pid=[MediaTVBoxFirstString(row,@[@"type_pid",@"pid",@"parent_id"]) stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if(pid.length&&![pid isEqualToString:@"0"])[parentIDs addObject:pid];
+    }
+    NSMutableArray *categories=[NSMutableArray array];
+    NSMutableArray *allCategories=[NSMutableArray array];
+    for(id value in raw){
+        NSDictionary *row=MediaTVBoxObject(value);
+        NSString *identifier=[MediaTVBoxFirstString(row,@[@"type_id",@"id",@"tid"]) stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        NSString *name=[MediaTVBoxFirstString(row,@[@"type_name",@"name",@"title"]) stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if(!identifier.length||!name.length)continue;
+        NSDictionary *entry=@{@"id":identifier,@"name":name};
+        [allCategories addObject:entry];
+        if(![parentIDs containsObject:identifier])[categories addObject:entry];
+    }
+    return categories.count?categories:allCategories;
 }
 static NSDictionary *MediaTVBoxFilters(NSDictionary *root) {
     id raw=root[@"filters"]?:root[@"filter"];
@@ -182,8 +227,13 @@ static NSDictionary *MediaTVBoxFilters(NSDictionary *root) {
 }
 static NSArray<NSDictionary *> *MediaTVBoxEpisodes(NSString *playList,NSString *flag,NSDictionary *source) {
     NSMutableArray *episodes=[NSMutableArray array];NSUInteger index=0;
-    for(NSString *entry in [playList componentsSeparatedByString:@"#"]){if(!entry.length)continue;NSRange split=[entry rangeOfString:@"$"];NSString *name=nil,*address=nil;if(split.location==NSNotFound||[[entry substringToIndex:split.location] containsString:@"://"]){name=[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1];address=entry;}else{name=[entry substringToIndex:split.location];address=[entry substringFromIndex:split.location+1];}
-        name=[name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];address=[address stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!address.length)continue;NSURLComponents *parts=[NSURLComponents componentsWithString:address];BOOL absoluteURL=[@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]&&parts.host.length;if(!absoluteURL&&MediaTVBoxEpisodeAddressIsRelativeURL(address))address=MediaTVBoxResolvedPoster(address,source);
+    NSCharacterSet *entrySeparators=[NSCharacterSet characterSetWithCharactersInString:@"#\r\n"];
+    for(NSString *entry in [playList componentsSeparatedByCharactersInSet:entrySeparators]){if(!entry.length)continue;NSRange split=[entry rangeOfString:@"$"];NSString *name=nil,*address=nil;if(split.location==NSNotFound||[[entry substringToIndex:split.location] containsString:@"://"]){name=[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1];address=entry;}else{name=[entry substringToIndex:split.location];address=[entry substringFromIndex:split.location+1];}
+        name=[name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];address=[address stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        address=[address stringByReplacingOccurrencesOfString:@"&amp;" withString:@"&"];
+        if([address hasPrefix:@"//"])address=[@"https:" stringByAppendingString:address];
+        if(([address hasPrefix:@"http://"]||[address hasPrefix:@"https://"])&&[address containsString:@" "])address=[address stringByReplacingOccurrencesOfString:@" " withString:@"%20"];
+        if(!address.length)continue;NSURLComponents *parts=[NSURLComponents componentsWithString:address];BOOL absoluteURL=[@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]&&parts.host.length;if(!absoluteURL&&MediaTVBoxEpisodeAddressIsRelativeURL(address))address=MediaTVBoxResolvedPoster(address,source);
         [episodes addObject:@{@"id":address,@"name":name.length?name:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1],@"lineId":flag?:@""}];index++;
     }
     return episodes;
@@ -192,7 +242,19 @@ static NSDictionary *MediaTVBoxDetail(NSDictionary *root,NSDictionary *arguments
     id raw=MediaTVBoxArray(root[@"list"]).firstObject?:root[@"data"];NSDictionary *row=MediaTVBoxObject(raw);NSMutableDictionary *item=[(MediaTVBoxItem(row,source)?:@{@"name":@"影片详情"}) mutableCopy];if(![item[@"id"] length])item[@"id"]=MediaTVBoxString(arguments[@"id"]);
     NSString *playFrom=MediaTVBoxFirstString(row,@[@"vod_play_from",@"play_from"]),*playURL=MediaTVBoxFirstString(row,@[@"vod_play_url",@"play_url"]);
     NSArray *names=playFrom.length?[playFrom componentsSeparatedByString:@"$$$"]:@[];NSArray *groups=playURL.length?[playURL componentsSeparatedByString:@"$$$"]:@[];
-    NSMutableArray *lines=[NSMutableArray array];for(NSUInteger i=0;i<groups.count;i++){NSString *flag=i<names.count?names[i]:[NSString stringWithFormat:@"线路 %lu",(unsigned long)i+1];NSArray *episodes=MediaTVBoxEpisodes(groups[i],flag,source);if(!episodes.count)continue;[lines addObject:@{@"id":flag,@"name":flag,@"episodes":episodes}];}
+    NSMutableArray *lines=[NSMutableArray array];for(NSUInteger i=0;i<groups.count;i++){NSString *flag=i<names.count?[names[i] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";if(!flag.length)flag=[NSString stringWithFormat:@"线路 %lu",(unsigned long)i+1];NSArray *episodes=MediaTVBoxEpisodes(groups[i],flag,source);if(!episodes.count)continue;[lines addObject:@{@"id":flag,@"name":flag,@"episodes":episodes}];}
+    BOOL macCMS=[source[@"protocol"] isEqual:@"maccms-api"];
+    BOOL directType1=[source[@"tvboxType"] integerValue]==1&&!MediaTVBoxString(source[@"playUrl"]).length;
+    if((macCMS||directType1)&&lines.count>1){
+        NSMutableArray *nativeLines=[NSMutableArray array],*webLines=[NSMutableArray array];
+        for(NSDictionary *line in lines){
+            NSString *flagName=[line[@"name"] isKindOfClass:NSString.class]?[line[@"name"] lowercaseString]:@"";
+            NSString *firstEpID=[line[@"episodes"] count]?MediaTVBoxString(line[@"episodes"][0][@"id"]):@"";
+            BOOL isNative=[flagName containsString:@"m3u8"]||[flagName containsString:@"mp4"]||(firstEpID.length&&!MediaTVBoxURLLooksLikeWebPage(firstEpID));
+            if(isNative)[nativeLines addObject:line];else[webLines addObject:line];
+        }
+        if(nativeLines.count&&webLines.count){[nativeLines addObjectsFromArray:webLines];lines=nativeLines;}
+    }
     NSMutableDictionary *detail=[item mutableCopy];detail[@"lines"]=lines;NSString *banner=MediaTVBoxFirstString(row,@[@"vod_pic_slide",@"banner"]);if(banner.length)detail[@"banner"]=banner;return detail;
 }
 static NSString *MediaDoubanFilterValue(NSDictionary *filters,NSString *key,NSString *fallback) {
@@ -506,10 +568,18 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
     NSString *api=MediaTVBoxString(self.tvboxSource[@"api"]);NSURLComponents *parts=[NSURLComponents componentsWithString:api];
     if(!parts||![@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]||!parts.host.length||parts.user.length||parts.password.length||api.length>8192){if(error)*error=[NSError errorWithDomain:@"CCTVHostTVBoxAPI" code:1 userInfo:@{NSLocalizedDescriptionKey:@"TVBox API 地址无效"}];return nil;}
     BOOL macCMS=[self.tvboxSource[@"protocol"] isEqual:@"maccms-api"];
-    NSInteger type=[self.tvboxSource[@"tvboxType"] integerValue];NSMutableDictionary<NSString *,NSString *> *values=[NSMutableDictionary dictionary];
-    if([operation isEqual:@"home"]){if(!macCMS&&type==4)values[@"filter"]=@"true";if(macCMS)values[@"ac"]=@"videolist";}
-    else if([operation isEqual:@"search"]){values[@"wd"]=MediaTVBoxString(arguments[@"keyword"]);if(!macCMS)values[@"quick"]=@"false";values[@"pg"]=[NSString stringWithFormat:@"%ld",(long)MAX(1,[arguments[@"page"] integerValue])];if(macCMS)values[@"ac"]=@"videolist";}
-    else if([operation isEqual:@"category"]){values[@"ac"]=macCMS?@"videolist":@"detail";values[@"t"]=MediaTVBoxString(arguments[@"categoryId"]);values[@"pg"]=[NSString stringWithFormat:@"%ld",(long)MAX(1,[arguments[@"page"] integerValue])];NSDictionary *filters=[arguments[@"filters"] isKindOfClass:NSDictionary.class]?arguments[@"filters"]:@{};for(id key in filters){id value=filters[key];if([key isKindOfClass:NSString.class]&&[key length]<=128&&![MediaTVBoxReservedFilterKeys() containsObject:[key lowercaseString]]&&([value isKindOfClass:NSString.class]||[value isKindOfClass:NSNumber.class])&&[value description].length<=512)values[key]=[value description];}}
+    NSInteger type=[self.tvboxSource[@"tvboxType"] integerValue];
+    BOOL cmsStyle=macCMS||(self.tvboxSource[@"tvboxType"]!=nil&&(type==0||type==1));
+    NSMutableDictionary<NSString *,NSString *> *values=[NSMutableDictionary dictionary];
+    if([operation isEqual:@"home"]){
+        if(!macCMS&&type==4)values[@"filter"]=@"true";
+        if(cmsStyle){
+            NSString *overrideAC=[arguments[@"_maccms_ac"] isKindOfClass:NSString.class]?arguments[@"_maccms_ac"]:@"";
+            values[@"ac"]=overrideAC.length?overrideAC:@"videolist";
+        }
+    }
+    else if([operation isEqual:@"search"]){values[@"wd"]=MediaTVBoxString(arguments[@"keyword"]);if(!macCMS)values[@"quick"]=@"false";values[@"pg"]=[NSString stringWithFormat:@"%ld",(long)MAX(1,[arguments[@"page"] integerValue])];if(cmsStyle)values[@"ac"]=@"videolist";}
+    else if([operation isEqual:@"category"]){values[@"ac"]=cmsStyle?@"videolist":@"detail";values[@"t"]=MediaTVBoxString(arguments[@"categoryId"]);values[@"pg"]=[NSString stringWithFormat:@"%ld",(long)MAX(1,[arguments[@"page"] integerValue])];NSDictionary *filters=[arguments[@"filters"] isKindOfClass:NSDictionary.class]?arguments[@"filters"]:@{};for(id key in filters){id value=filters[key];if([key isKindOfClass:NSString.class]&&[key length]<=128&&![MediaTVBoxReservedFilterKeys() containsObject:[key lowercaseString]]&&([value isKindOfClass:NSString.class]||[value isKindOfClass:NSNumber.class])&&[value description].length<=512)values[key]=[value description];}}
     else if([operation isEqual:@"detail"]){values[@"ac"]=@"detail";values[@"ids"]=MediaTVBoxString(arguments[@"id"]);}
     else if([operation isEqual:@"play"]){values[@"play"]=MediaTVBoxString(arguments[@"id"]);values[@"flag"]=MediaTVBoxString(arguments[@"lineId"]);}
     NSString *extend=MediaTVBoxString(self.tvboxSource[@"options"]);if(extend.length)values[@"extend"]=extend;
@@ -517,7 +587,8 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
     NSURL *url=parts.URL;if(!url||url.absoluteString.length>16384){if(error)*error=[NSError errorWithDomain:@"CCTVHostTVBoxAPI" code:2 userInfo:@{NSLocalizedDescriptionKey:@"TVBox API 请求地址无效或过长"}];return nil;}
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20];request.HTTPMethod=@"GET";
     NSDictionary *headers=[self.tvboxSource[@"header"] isKindOfClass:NSDictionary.class]?self.tvboxSource[@"header"]:@{};NSUInteger count=0;for(id rawKey in headers){if(count++>=24)break;if(![rawKey isKindOfClass:NSString.class]||![headers[rawKey] isKindOfClass:NSString.class])continue;NSString *key=rawKey,*value=headers[key];if(!MediaTVBoxHeaderAllowed(key,value))continue;[request setValue:value forHTTPHeaderField:key];}
-    [request setValue:macCMS?@"application/json, application/xml, text/xml, */*":@"application/json, */*" forHTTPHeaderField:@"Accept"];return request;
+    if(![request valueForHTTPHeaderField:@"User-Agent"])[request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:cmsStyle?@"application/json, application/xml, text/xml, */*":@"application/json, */*" forHTTPHeaderField:@"Accept"];return request;
 }
 - (void)call:(NSString *)operation arguments:(NSDictionary *)arguments completion:(void (^)(id,NSError *))completion {
     [self call:operation arguments:arguments correlationID:nil completion:completion];
@@ -585,8 +656,10 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
             failure=[NSError errorWithDomain:@"CCTVHostMedia" code:4 userInfo:@{NSLocalizedDescriptionKey:@"资源服务返回空响应"}];
             failureStage=@"empty_response";
         } else if(!failure){
-            reply=[NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-            if(jsonError&&tvboxSource&&[tvboxSource[@"protocol"] isEqual:@"maccms-api"]){jsonError=nil;reply=MediaCMSXMLObject(data,&jsonError);if(!reply&&jsonError){failure=jsonError;failureStage=@"invalid_xml";}}
+            reply=MediaSanitizedJSONObjectWithData(data,&jsonError);
+            NSInteger srcType=[tvboxSource[@"tvboxType"] integerValue];
+            BOOL allowXML=tvboxSource&&([tvboxSource[@"protocol"] isEqual:@"maccms-api"]||(tvboxSource[@"tvboxType"]!=nil&&(srcType==0||srcType==1)));
+            if(jsonError&&allowXML){jsonError=nil;reply=MediaCMSXMLObject(data,&jsonError);if(!reply&&jsonError){failure=jsonError;failureStage=@"invalid_xml";}}
             else if(jsonError){failure=jsonError;failureStage=@"invalid_json";}
         }
         NSDictionary *errorPayload=[reply isKindOfClass:NSDictionary.class]&&[reply[@"error"] isKindOfClass:NSDictionary.class]?reply[@"error"]:@{};
@@ -664,6 +737,39 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
             client.activeRequestID=nil;
             client.activeCorrelationID=nil;
             client.activeOperation=nil;
+            NSInteger srcType=[tvboxSource[@"tvboxType"] integerValue];
+            BOOL cmsStyle=tvboxSource&&([tvboxSource[@"protocol"] isEqual:@"maccms-api"]||(tvboxSource[@"tvboxType"]!=nil&&(srcType==0||srcType==1)));
+            BOOL needsCategories=!failure&&cmsStyle&&[operation isEqual:@"home"]&&![arguments[@"_maccms_ac"] length]&&[result isKindOfClass:NSDictionary.class]&&![result[@"categories"] count];
+            if(needsCategories){
+                NSMutableDictionary *listArgs=[arguments mutableCopy]?:[NSMutableDictionary dictionary];
+                listArgs[@"_maccms_ac"]=@"list";
+                NSURLRequest *listReq=[client tvboxRequestForOperation:@"home" arguments:listArgs error:NULL];
+                if(listReq){
+                    MediaAPIRequestContext *listCtx=[MediaAPIRequestContext new];listCtx.data=[NSMutableData data];
+                    listCtx.processor=^(NSData *listData,NSURLResponse *listResp,NSError *listErr){
+                        NSMutableDictionary *merged=[result mutableCopy];
+                        if(!listErr&&listData.length&&listData.length<=[client maximumResponseBytes]){
+                            id listReply=MediaSanitizedJSONObjectWithData(listData,NULL)?:MediaCMSXMLObject(listData,NULL);
+                            if([listReply isKindOfClass:NSDictionary.class]){
+                                NSDictionary *listNorm=MediaTVBoxNormalize(@"home",listArgs,tvboxSource,listReply);
+                                if([listNorm isKindOfClass:NSDictionary.class]&&[listNorm[@"categories"] count]){
+                                    merged[@"categories"]=listNorm[@"categories"];
+                                }
+                            }
+                        }
+                        dispatch_async(dispatch_get_main_queue(),^{
+                            MediaAPIClient *inner=weakSelf;
+                            if(!inner||inner.generation!=generation)return;
+                            inner.task=nil;
+                            [inner completeResult:merged.copy error:nil operation:operation generation:generation correlationID:correlationID completion:completion];
+                        });
+                    };
+                    client.task=[[client sessionForOperation:operation] dataTaskWithRequest:listReq];
+                    [client.contextLock lock];client.requestContexts[@(client.task.taskIdentifier)]=listCtx;[client.contextLock unlock];
+                    [client.task resume];
+                    return;
+                }
+            }
             [client completeResult:result==NSNull.null?nil:result error:failure operation:operation generation:generation correlationID:correlationID completion:completion];
         });
     };
@@ -680,7 +786,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
         if(parts&&[@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]&&parts.host.length&&!parts.user.length&&!parts.password.length){context.parserDirectURL=finalURL.absoluteString;context.parserDirectMIME=response.MIMEType?:@"";completionHandler(NSURLSessionResponseCancel);return;}
     }
     NSUInteger limit=context.parserRequest?1024*1024:[self maximumResponseBytes];
-    if(response.expectedContentLength>limit){context.failure=[NSError errorWithDomain:@"CCTVHostMedia" code:3 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"资源服务响应超过 %lu MiB",(unsigned long)(limit/(1024*1024))]}];completionHandler(NSURLSessionResponseCancel);return;}
+    if(response.expectedContentLength>0&&response.expectedContentLength>(long long)limit){context.failure=[NSError errorWithDomain:@"CCTVHostMedia" code:3 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"资源服务响应超过 %lu MiB",(unsigned long)(limit/(1024*1024))]}];completionHandler(NSURLSessionResponseCancel);return;}
     completionHandler(NSURLSessionResponseAllow);
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data {

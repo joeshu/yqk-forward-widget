@@ -5,8 +5,120 @@
 const http=require('node:http'),https=require('node:https'),net=require('node:net'),nodeCrypto=require('node:crypto'),zlib=require('node:zlib')
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm')
 const {Readable}=require('node:stream')
-const bundledFetch=fs.existsSync(path.join(__dirname,'node-fetch.bundle.cjs'))?path.join(__dirname,'node-fetch.bundle.cjs'):path.join(__dirname,'../GeneratedJS/node-fetch.bundle.cjs')
-const fetchExports=require(bundledFetch),nativeFetch=fetchExports.default||fetchExports
+function createPureJSWebTransport(){
+  class Headers{
+    constructor(init){this._map=new Map();this._raw=new Map();if(init){if(init instanceof Headers){for(const [k,v] of init.entries())this.set(k,v);if(init._raw)for(const [k,arr] of init._raw.entries())this._raw.set(k,[...arr])}else if(Array.isArray(init)){for(const [k,v] of init)this.append(k,v)}else if(typeof init==='object'){for(const [k,v] of Object.entries(init))if(v!==undefined){if(Array.isArray(v))for(const item of v)this.append(k,item);else this.set(k,v)}}}}
+    _key(name){return String(name).toLowerCase()}
+    get(name){const k=this._key(name);return this._map.has(k)?this._map.get(k):null}
+    set(name,value){const k=this._key(name),v=String(value);this._map.set(k,v);this._raw.set(k,[v])}
+    append(name,value){const k=this._key(name),v=String(value);const prev=this._map.get(k);this._map.set(k,prev!==undefined?prev+', '+v:v);const arr=this._raw.get(k)||[];arr.push(v);this._raw.set(k,arr)}
+    has(name){return this._map.has(this._key(name))}
+    delete(name){const k=this._key(name);this._map.delete(k);this._raw.delete(k)}
+    entries(){return this._map.entries()}
+    keys(){return this._map.keys()}
+    values(){return this._map.values()}
+    forEach(cb,thisArg){for(const [k,v] of this._map.entries())cb.call(thisArg,v,k,this)}
+    raw(){return Object.fromEntries(this._raw.entries())}
+    [Symbol.iterator](){return this._map.entries()}
+  }
+  class Blob{
+    constructor(parts=[],options={}){const chunks=[];for(const p of parts){if(Buffer.isBuffer(p))chunks.push(p);else if(p instanceof Blob)chunks.push(p._buffer);else if(ArrayBuffer.isView(p))chunks.push(Buffer.from(p.buffer,p.byteOffset,p.byteLength));else if(p instanceof ArrayBuffer)chunks.push(Buffer.from(p));else chunks.push(Buffer.from(String(p??''),'utf8'))}this._buffer=Buffer.concat(chunks);this.size=this._buffer.length;this.type=String(options.type||'').toLowerCase()}
+    async arrayBuffer(){return this._buffer.buffer.slice(this._buffer.byteOffset,this._buffer.byteOffset+this._buffer.byteLength)}
+    async text(){return this._buffer.toString('utf8')}
+    slice(start=0,end=this.size,type=''){return new Blob([this._buffer.subarray(start,end)],{type})}
+  }
+  class File extends Blob{
+    constructor(parts,name,options={}){super(parts,options);this.name=String(name??'');this.lastModified=Number(options.lastModified??Date.now())}
+  }
+  class FormData{
+    constructor(){this._entries=[]}
+    append(name,value,filename){const k=String(name);if(value instanceof Blob&&!(value instanceof File))value=new File([value],filename||'blob',{type:value.type});else if(!(value instanceof File))value=String(value??'');this._entries.push([k,value])}
+    set(name,value,filename){const k=String(name);this.delete(k);this.append(k,value,filename)}
+    get(name){const k=String(name);const found=this._entries.find(([key])=>key===k);return found?found[1]:null}
+    getAll(name){const k=String(name);return this._entries.filter(([key])=>key===k).map(([,v])=>v)}
+    has(name){const k=String(name);return this._entries.some(([key])=>key===k)}
+    delete(name){const k=String(name);this._entries=this._entries.filter(([key])=>key!==k)}
+    *entries(){yield* this._entries}
+    *keys(){for(const [k] of this._entries)yield k}
+    *values(){for(const [,v] of this._entries)yield v}
+    forEach(cb,thisArg){for(const [k,v] of this._entries)cb.call(thisArg,v,k,this)}
+    [Symbol.iterator](){return this.entries()}
+  }
+  class Request{
+    constructor(input,init={}){if(input instanceof Request){this.url=input.url;this.method=init.method||input.method||'GET';this.headers=new Headers(init.headers||input.headers);this.body=init.body!==undefined?init.body:input.body;this.signal=init.signal||input.signal||null;this.redirect=init.redirect||input.redirect||'follow'}else{this.url=String(input instanceof URL?input.href:input);this.method=String(init.method||'GET').toUpperCase();this.headers=new Headers(init.headers);this.body=init.body!==undefined?init.body:null;this.signal=init.signal||null;this.redirect=init.redirect||'follow'}}
+  }
+  class Response{
+    constructor(body=null,init={}){this.status=init.status!==undefined?Number(init.status):200;this.statusText=String(init.statusText||'');this.ok=this.status>=200&&this.status<300;this.headers=new Headers(init.headers);this.url=String(init.url||'');this.redirected=Boolean(init.redirected);if(body===null||body===undefined)this.body=null;else if(body instanceof Readable)this.body=body;else if(Buffer.isBuffer(body))this.body=Readable.from([body]);else this.body=Readable.from([Buffer.from(String(body),'utf8')])}
+    async _bytes(){if(!this.body)return Buffer.alloc(0);const chunks=[];for await(const chunk of this.body)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk));return Buffer.concat(chunks)}
+    async buffer(){return this._bytes()}
+    async arrayBuffer(){const b=await this._bytes();return b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength)}
+    async text(){return (await this._bytes()).toString('utf8')}
+    async json(){return JSON.parse(await this.text())}
+  }
+  function makeAbortError(msg='The operation was aborted.'){const err=new Error(msg);err.name='AbortError';return err}
+  async function pureFetch(input,init={}){
+    const reqObj=input instanceof Request?new Request(input,init):new Request(input,init)
+    let currentURL=new URL(reqObj.url),method=String(reqObj.method||'GET').toUpperCase(),headers=new Headers(reqObj.headers),body=reqObj.body,redirected=false
+    if(body!=null&&!Buffer.isBuffer(body)){
+      if(typeof body==='string')body=Buffer.from(body,'utf8')
+      else if(body instanceof URLSearchParams){body=Buffer.from(body.toString(),'utf8');if(!headers.has('content-type'))headers.set('content-type','application/x-www-form-urlencoded;charset=UTF-8')}
+      else if(body instanceof Blob)body=body._buffer
+      else if(ArrayBuffer.isView(body))body=Buffer.from(body.buffer,body.byteOffset,body.byteLength)
+      else if(body instanceof ArrayBuffer)body=Buffer.from(body)
+      else body=Buffer.from(String(body),'utf8')
+    }
+    if(['GET','HEAD'].includes(method))body=null
+    for(let redirects=0;redirects<=20;redirects++){
+      if(reqObj.signal?.aborted)throw makeAbortError()
+      const reqHeaders=Object.fromEntries(headers.entries())
+      if(!headers.has('accept-encoding'))reqHeaders['accept-encoding']='gzip, deflate, br'
+      if(body&&!headers.has('content-length'))reqHeaders['content-length']=String(body.length)
+      const transport=currentURL.protocol==='https:'?https:http
+      const incoming=await new Promise((resolve,reject)=>{
+        let settled=false,req
+        const onAbort=()=>{if(settled)return;settled=true;try{req?.destroy()}catch{};reject(makeAbortError())}
+        if(reqObj.signal){if(reqObj.signal.aborted)return onAbort();reqObj.signal.addEventListener('abort',onAbort,{once:true})}
+        const cleanup=()=>{if(reqObj.signal)try{reqObj.signal.removeEventListener('abort',onAbort)}catch{}}
+        req=transport.request(currentURL,{method,headers:reqHeaders},res=>{if(settled)return;settled=true;cleanup();resolve(res)})
+        req.on('error',err=>{if(settled)return;settled=true;cleanup();reject(err)})
+        if(body&&body.length)req.write(body)
+        req.end()
+      })
+      const status=incoming.statusCode||200
+      const respHeaders=new Headers()
+      for(const [k,v] of Object.entries(incoming.headers||{})){if(Array.isArray(v))for(const item of v)respHeaders.append(k,item);else if(v!==undefined)respHeaders.set(k,v)}
+      if([301,302,303,307,308].includes(status)){
+        if(reqObj.redirect==='manual'){incoming.resume();return new Response(null,{status,statusText:incoming.statusMessage||'',headers:respHeaders,url:currentURL.href,redirected})}
+        if(reqObj.redirect==='error'){incoming.resume();throw new TypeError('uri requested responds with a redirect, redirect mode is set to error')}
+        const location=respHeaders.get('location')
+        if(!location)return new Response(incoming,{status,statusText:incoming.statusMessage||'',headers:respHeaders,url:currentURL.href,redirected})
+        incoming.resume()
+        if(redirects===20)throw new TypeError('maximum redirect reached')
+        const nextURL=new URL(location,currentURL)
+        if(nextURL.origin!==currentURL.origin){headers.delete('authorization');headers.delete('cookie');headers.delete('host')}
+        if(status===303||((status===301||status===302)&&method==='POST')){method='GET';body=null;headers.delete('content-length');headers.delete('content-type')}
+        currentURL=nextURL;redirected=true;continue
+      }
+      let stream=incoming
+      const enc=String(respHeaders.get('content-encoding')||'').toLowerCase()
+      if(method!=='HEAD'&&status!==204&&status!==304){
+        if(enc==='gzip'||enc==='x-gzip')stream=incoming.pipe(zlib.createGunzip())
+        else if(enc==='deflate')stream=incoming.pipe(zlib.createInflate())
+        else if(enc==='br')stream=incoming.pipe(zlib.createBrotliDecompress())
+      }
+      if(reqObj.signal){
+        const onStreamAbort=()=>{try{incoming.destroy(makeAbortError());stream.destroy?.(makeAbortError())}catch{}}
+        if(reqObj.signal.aborted)onStreamAbort()
+        else{reqObj.signal.addEventListener('abort',onStreamAbort,{once:true});stream.once('close',()=>{try{reqObj.signal.removeEventListener('abort',onStreamAbort)}catch{}})}
+      }
+      return new Response(stream,{status,statusText:incoming.statusMessage||'',headers:respHeaders,url:currentURL.href,redirected})
+    }
+  }
+  return {default:pureFetch,Headers,Request,Response,FormData,Blob,File}
+}
+const bundledFetchCandidates=[path.join(__dirname,'node-fetch.bundle.cjs'),path.join(__dirname,'../GeneratedJS/node-fetch.bundle.cjs')]
+const bundledFetch=bundledFetchCandidates.find(candidate=>fs.existsSync(candidate))
+const fetchExports=bundledFetch?require(bundledFetch):createPureJSWebTransport(),nativeFetch=fetchExports.default||fetchExports
 // Accessing Node's lazy native FormData/File getters can initialize undici's
 // WASM parser even when fetch itself has been replaced. Install the complete
 // pure JS web transport family without invoking those native getters.
@@ -418,10 +530,23 @@ function installCatvodGlobals(owner){
   global.local={get:function(namespace,key){if(isCatVodProtocol(owner.protocol))return (storage.__catvod||{})[namespace]??(arguments.length>1?key:'');return arguments.length===1?(storage.__catvod||{})[namespace]??'':storage[namespace]?.[key]??''},set:function(namespace,key,value){if(arguments.length===2){storage.__catvod??={};storage.__catvod[namespace]=key}else{storage[namespace]??={};storage[namespace][key]=value}save()},delete:function(namespace,key){if(arguments.length===1){if(storage.__catvod)delete storage.__catvod[namespace]}else if(storage[namespace])delete storage[namespace][key];save()}}
   global.req=async(url,options={})=>{
     let body=options.body??options.data,headers={...(options.headers||{})}
-    if(body && typeof body==='object'){body=JSON.stringify(body);headers['Content-Type']??='application/json'}
-    const response=await fetch(pluginHTTPURL(url),{method:options.method||'GET',headers,body,signal:AbortSignal.timeout(boundedTimeout(options.timeout,12000))})
+    const postType=String(options.postType||'').toLowerCase()
+    if(body && typeof body==='object' && !Buffer.isBuffer(body)){
+      if(postType==='form'||/application\/x-www-form-urlencoded/i.test(String(headers['Content-Type']||headers['content-type']||''))){
+        body=new URLSearchParams(Object.entries(body).map(([k,v])=>[k,v==null?'':String(v)])).toString()
+        headers['Content-Type']??='application/x-www-form-urlencoded'
+      }else{
+        body=JSON.stringify(body)
+        headers['Content-Type']??='application/json'
+      }
+    }
+    const method=String(options.method||'GET').toUpperCase()
+    const redirect=(options.redirect===0||options.redirect===false)?'manual':'follow'
+    const response=await fetch(pluginHTTPURL(url),{method,headers,body:['GET','HEAD'].includes(method)?undefined:body,redirect,signal:AbortSignal.timeout(boundedTimeout(options.timeout,12000))})
     const bytes=await readLimited(response)
-    return {code:response.status,headers:Object.fromEntries(response.headers),content:options.buffer===2?[...bytes]:options.buffer===1?bytes.toString('base64'):bytes.toString('utf8')}
+    const outHeaders=Object.fromEntries(response.headers)
+    if(typeof response.headers.raw==='function'){const setCookie=response.headers.raw()['set-cookie'];if(Array.isArray(setCookie)&&setCookie.length)outHeaders['set-cookie']=setCookie}
+    return {code:response.status,headers:outHeaders,content:options.buffer===2?[...bytes]:options.buffer===1?bytes.toString('base64'):bytes.toString('utf8')}
   }
   global.request=async(...args)=>(await global.req(...args)).content
   global.getProxy=()=>owner.payload.proxyURL||''
@@ -643,7 +768,17 @@ async function invoke(operation,payload){
       }
       else if(operation==='resolve'&&owner.protocol==='iptv-extractor'){const options=owner.payload.options||{};value=await module.resolve(payload.ref||payload.id,{...payload,config:options,account:{userId:options.userId||'',token:options.token||''}})}
       else if(operation==='providers')value=typeof module.providers==='function'?await module.providers():[]
-      else if(operation==='home'){value=typeof module.home==='function'?await module.home(catvod?true:payload):{};if(!value.list?.length && module.homeVod)value={...value,list:(await module.homeVod()).list||[]}}
+      else if(operation==='home'){
+        let rawHome=typeof module.home==='function'?await module.home(catvod?true:payload):{}
+        if(typeof rawHome==='string'){try{rawHome=JSON.parse(rawHome)}catch{rawHome={}}}
+        value=(rawHome&&typeof rawHome==='object'&&!Array.isArray(rawHome))?rawHome:{list:Array.isArray(rawHome)?rawHome:[]}
+        if(!value.list?.length && typeof module.homeVod==='function'){
+          let hv=await module.homeVod()
+          if(typeof hv==='string'){try{hv=JSON.parse(hv)}catch{hv={}}}
+          const hvList=Array.isArray(hv)?hv:(hv?.list||[])
+          value={...value,list:hvList}
+        }
+      }
       else if(typeof module[operation]!=='function')throw Error('Node 模块不支持 '+operation)
       else if(catvod){const args=operation==='category'?[String(payload.categoryId),String(payload.page||1),true,payload.filters||{}]:operation==='search'?[payload.keyword,false,String(payload.page||1)]:operation==='detail'?[owner.modernCatVod?String(payload.id):[payload.id]]:operation==='play'?[payload.lineId||'',payload.id,[]]:[payload];value=await module[operation](...args)}
       else value=await module[operation](payload)

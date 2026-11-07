@@ -12,6 +12,7 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 }
 
 @interface CCTVResourceProfileCell : UITableViewCell
+@property(nonatomic,strong) UIView *iconBadgeContainer;
 @property(nonatomic,strong) UIImageView *profileIconView;
 @property(nonatomic,strong) UILabel *profileTitleLabel;
 @property(nonatomic,strong) UILabel *profileDetailLabel;
@@ -22,30 +23,36 @@ static NSString *CCTVResourceDisplayEndpoint(NSString *value) {
 @implementation CCTVResourceProfileCell
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
     if((self=[super initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuseIdentifier])) {
+        self.iconBadgeContainer=[UIView new];self.iconBadgeContainer.translatesAutoresizingMaskIntoConstraints=NO;self.iconBadgeContainer.backgroundColor=[HostAccent() colorWithAlphaComponent:0.14];self.iconBadgeContainer.layer.cornerRadius=10;self.iconBadgeContainer.layer.cornerCurve=kCACornerCurveContinuous;self.iconBadgeContainer.layer.borderWidth=0.6;HostSetLayerBorderColor(self.iconBadgeContainer,[HostAccent() colorWithAlphaComponent:0.28]);
         self.profileIconView=[UIImageView new];self.profileIconView.translatesAutoresizingMaskIntoConstraints=NO;self.profileIconView.contentMode=UIViewContentModeScaleAspectFit;
+        [self.iconBadgeContainer addSubview:self.profileIconView];
         self.profileTitleLabel=[UILabel new];self.profileTitleLabel.translatesAutoresizingMaskIntoConstraints=NO;self.profileTitleLabel.numberOfLines=2;self.profileTitleLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.profileTitleLabel.adjustsFontForContentSizeCategory=YES;
         self.profileDetailLabel=[UILabel new];self.profileDetailLabel.translatesAutoresizingMaskIntoConstraints=NO;self.profileDetailLabel.numberOfLines=0;self.profileDetailLabel.lineBreakMode=NSLineBreakByCharWrapping;self.profileDetailLabel.adjustsFontForContentSizeCategory=YES;
-        self.protocolBadge=[UILabel new];self.protocolBadge.translatesAutoresizingMaskIntoConstraints=NO;self.protocolBadge.font=[UIFont systemFontOfSize:10 weight:UIFontWeightBold];self.protocolBadge.textAlignment=NSTextAlignmentCenter;self.protocolBadge.layer.cornerRadius=7;self.protocolBadge.clipsToBounds=YES;self.protocolBadge.backgroundColor=HostSelectedSurface();self.protocolBadge.textColor=HostAccent();self.protocolBadge.accessibilityIdentifier=@"resource.protocol.badge";
-        self.latencyBadge=[UILabel new];self.latencyBadge.translatesAutoresizingMaskIntoConstraints=NO;self.latencyBadge.font=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];self.latencyBadge.textAlignment=NSTextAlignmentCenter;self.latencyBadge.layer.cornerRadius=9;self.latencyBadge.clipsToBounds=YES;self.latencyBadge.backgroundColor=HostRaisedSurface();self.latencyBadge.textColor=HostSecondaryText();
-        [self.contentView addSubview:self.profileIconView];[self.contentView addSubview:self.profileTitleLabel];[self.contentView addSubview:self.profileDetailLabel];[self.contentView addSubview:self.protocolBadge];[self.contentView addSubview:self.latencyBadge];
+        self.protocolBadge=[UILabel new];self.protocolBadge.translatesAutoresizingMaskIntoConstraints=NO;self.protocolBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightBold,UIFontTextStyleCaption2);self.protocolBadge.textAlignment=NSTextAlignmentCenter;self.protocolBadge.layer.cornerRadius=6;self.protocolBadge.layer.cornerCurve=kCACornerCurveContinuous;self.protocolBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.protocolBadge,[HostAccent() colorWithAlphaComponent:0.32]);self.protocolBadge.clipsToBounds=YES;self.protocolBadge.backgroundColor=HostSelectedSurface();self.protocolBadge.textColor=HostAccent();self.protocolBadge.accessibilityIdentifier=@"resource.protocol.badge";
+        self.latencyBadge=[UILabel new];self.latencyBadge.translatesAutoresizingMaskIntoConstraints=NO;self.latencyBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightSemibold,UIFontTextStyleCaption2);self.latencyBadge.textAlignment=NSTextAlignmentCenter;self.latencyBadge.layer.cornerRadius=6;self.latencyBadge.layer.cornerCurve=kCACornerCurveContinuous;self.latencyBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.latencyBadge,HostBorder());self.latencyBadge.clipsToBounds=YES;self.latencyBadge.backgroundColor=HostRaisedSurface();self.latencyBadge.textColor=HostSecondaryText();
+        [self.contentView addSubview:self.iconBadgeContainer];[self.contentView addSubview:self.profileTitleLabel];[self.contentView addSubview:self.protocolBadge];[self.contentView addSubview:self.latencyBadge];[self.contentView addSubview:self.profileDetailLabel];
         [NSLayoutConstraint activateConstraints:@[
-            [self.profileIconView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:15],
-            [self.profileIconView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-            [self.profileIconView.widthAnchor constraintEqualToConstant:25],
-            [self.profileIconView.heightAnchor constraintEqualToConstant:25],
-            [self.profileTitleLabel.leadingAnchor constraintEqualToAnchor:self.profileIconView.trailingAnchor constant:13],
-            [self.profileTitleLabel.trailingAnchor constraintEqualToAnchor:self.latencyBadge.leadingAnchor constant:-8],
-            [self.profileTitleLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
-            [self.latencyBadge.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],
-            [self.latencyBadge.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:13],
-            [self.latencyBadge.widthAnchor constraintGreaterThanOrEqualToConstant:48],
-            [self.latencyBadge.heightAnchor constraintEqualToConstant:22],
-            [self.protocolBadge.trailingAnchor constraintEqualToAnchor:self.latencyBadge.trailingAnchor],
-            [self.protocolBadge.topAnchor constraintEqualToAnchor:self.latencyBadge.bottomAnchor constant:4],
-            [self.protocolBadge.heightAnchor constraintEqualToConstant:18],
+            [self.iconBadgeContainer.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
+            [self.iconBadgeContainer.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
+            [self.iconBadgeContainer.widthAnchor constraintEqualToConstant:36],
+            [self.iconBadgeContainer.heightAnchor constraintEqualToConstant:36],
+            [self.profileIconView.centerXAnchor constraintEqualToAnchor:self.iconBadgeContainer.centerXAnchor],
+            [self.profileIconView.centerYAnchor constraintEqualToAnchor:self.iconBadgeContainer.centerYAnchor],
+            [self.profileIconView.widthAnchor constraintEqualToConstant:20],
+            [self.profileIconView.heightAnchor constraintEqualToConstant:20],
+            [self.profileTitleLabel.leadingAnchor constraintEqualToAnchor:self.iconBadgeContainer.trailingAnchor constant:12],
+            [self.profileTitleLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-8],
+            [self.profileTitleLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:13],
+            [self.protocolBadge.leadingAnchor constraintEqualToAnchor:self.profileTitleLabel.leadingAnchor],
+            [self.protocolBadge.topAnchor constraintEqualToAnchor:self.profileTitleLabel.bottomAnchor constant:5],
+            [self.protocolBadge.heightAnchor constraintEqualToConstant:19],
+            [self.latencyBadge.leadingAnchor constraintEqualToAnchor:self.protocolBadge.trailingAnchor constant:6],
+            [self.latencyBadge.centerYAnchor constraintEqualToAnchor:self.protocolBadge.centerYAnchor],
+            [self.latencyBadge.widthAnchor constraintGreaterThanOrEqualToConstant:44],
+            [self.latencyBadge.heightAnchor constraintEqualToConstant:19],
             [self.profileDetailLabel.leadingAnchor constraintEqualToAnchor:self.profileTitleLabel.leadingAnchor],
-            [self.profileDetailLabel.trailingAnchor constraintEqualToAnchor:self.profileTitleLabel.trailingAnchor],
-            [self.profileDetailLabel.topAnchor constraintEqualToAnchor:self.profileTitleLabel.bottomAnchor constant:6],
+            [self.profileDetailLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-8],
+            [self.profileDetailLabel.topAnchor constraintEqualToAnchor:self.protocolBadge.bottomAnchor constant:6],
             [self.profileDetailLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-14]
         ]];
     }
@@ -451,7 +458,9 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     NSString *current=[profile[@"current"] boolValue]?@"当前使用 · ":@"";
     if(plugin){
         NSString *kind=[profile[@"resourceKind"] isEqual:@"live"]?@"直播服务":([profile[@"resourceKind"] isEqual:@"vod"]?@"影视服务":([profile[@"resourceKind"] isEqual:@"both"]?@"影视 / 直播服务":@"待识别能力"));
-        NSMutableArray *lines=[NSMutableArray arrayWithObject:[NSString stringWithFormat:@"%@%@ · %@ · %@",current,kind,profile[@"runtime"]?:@"引擎未知",profile[@"status"]?:@"未启动"]];
+        NSString *rawStatus=[profile[@"status"] isKindOfClass:NSString.class]?profile[@"status"]:@"未启动";
+        if([rawStatus isEqualToString:@"已停止 · HTTP 健康状态未知"])rawStatus=@"已停止 · 按需启动";
+        NSMutableArray *lines=[NSMutableArray arrayWithObject:[NSString stringWithFormat:@"%@%@ · %@ · %@",current,kind,profile[@"runtime"]?:@"引擎未知",rawStatus]];
         NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];if(updated>0){NSDateFormatter *formatter=CCTVResourceListDateFormatter();[lines addObject:[NSString stringWithFormat:@"最近更新 %@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]]];}
         if([profile[@"subscriptionURL"] length]){
             [lines addObject:[NSString stringWithFormat:@"%@ 个缓存频道 · %@",profile[@"channelCount"]?:@0,profile[@"subscriptionStatus"]?:@"尚未读取清单"]];
@@ -468,7 +477,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];NSDateFormatter *savedFormatter=CCTVResourceListDateFormatter();NSString *saved=updated>0?[NSString stringWithFormat:@"最近保存 %@",[savedFormatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]]:@"尚无保存时间";
         return macCMS?[NSString stringWithFormat:@"%@%@ · 选中后浏览 · 仅请求当前接口\n%@",current,catalogTitle,saved]:[NSString stringWithFormat:@"%@%@ · %lu 个站点 · %lu 个已识别 · %lu 个直播列表\n%@",current,catalogTitle,(unsigned long)[profile[@"siteCount"] unsignedIntegerValue],(unsigned long)[profile[@"supportedCount"] unsignedIntegerValue],(unsigned long)[profile[@"liveCount"] unsignedIntegerValue],saved];
     }
-    NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];NSString *refreshInfo=@"尚无成功刷新记录";
+    NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];NSString *refreshInfo=[profile[@"native"] boolValue]?@"内置官方源 · 实时同步":@"尚无成功刷新记录";
     if(updated>0){NSDateFormatter *formatter=CCTVResourceListDateFormatter();refreshInfo=[NSString stringWithFormat:@"最近成功 %@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]];}
     NSString *source=[profile[@"source"] isKindOfClass:NSString.class]?profile[@"source"]:@"";
     NSString *location=[source hasPrefix:@"local-playlist:"]?@"本机文件":(source.length?[NSURL URLWithString:source].host?:@"直播订阅":@"官方频道目录");
@@ -593,7 +602,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     NSMutableParagraphStyle *paragraph=[NSMutableParagraphStyle new];paragraph.lineBreakMode=NSLineBreakByCharWrapping;
     CGRect detailBounds=[[self resourceDetailForProfile:profile] boundingRectWithSize:CGSizeMake(textWidth,CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin|NSStringDrawingUsesFontLeading attributes:@{NSFontAttributeName:detailFont,NSParagraphStyleAttributeName:paragraph} context:nil];
     CGFloat titleHeight=MIN(ceil(titleFont.lineHeight*2),MAX(ceil(titleFont.lineHeight),ceil(titleBounds.size.height)));
-    CGFloat detailHeight=MAX(ceil(detailFont.lineHeight),ceil(detailBounds.size.height));
+    CGFloat detailHeight=MAX(ceil(detailFont.lineHeight),ceil(detailBounds.size.height))+24;
     // Keep extra room beyond the measured text. UIKit can make the cell's
     // content view slightly narrower for grouped insets/accessories than the
     // table width used above, which otherwise clips the final detail line.
@@ -603,7 +612,10 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     NSUInteger enabledSubscriptions=0,enabledServices=0,catalogs=0,runningServices=0;
     for(NSDictionary *p in self.profiles){if([p[@"type"] isEqual:@"plugin"]){if([p[@"enabled"] boolValue])enabledServices++;NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";NSString *identifier=[source hasPrefix:@"plugin:"]?[source substringFromIndex:7]:@"";if(identifier.length&&[PyHost isRunningServiceIdentifier:identifier])runningServices++;}else if([p[@"type"] isEqual:@"tvbox"])catalogs++;else if([p[@"enabled"] boolValue])enabledSubscriptions++;}
     // 这里统计的是“已启用”，不是“正在运行”：已启用 ≠ 进程运行中 ≠ 接口健康 ≠ 能播；运行中单独计数。
-    return [NSString stringWithFormat:@"%lu 项 · %lu 个合集 · %lu 个订阅启用 · %lu 个服务已启用 · %lu 个运行中",(unsigned long)self.profiles.count,(unsigned long)catalogs,(unsigned long)enabledSubscriptions,(unsigned long)enabledServices,(unsigned long)runningServices];
+    return [NSString stringWithFormat:@"共 %lu 项 · 合集 %lu · 订阅启用 %lu · 服务启用 %lu · 运行中 %lu",(unsigned long)self.profiles.count,(unsigned long)catalogs,(unsigned long)enabledSubscriptions,(unsigned long)enabledServices,(unsigned long)runningServices];
+}
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section {
+    HostStyleSectionHeaderView(view);
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     CCTVResourceProfileCell *c = (id)[tableView dequeueReusableCellWithIdentifier:@"profile"];
@@ -642,8 +654,12 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         c.accessibilityHint=plugin?@"轻点查看服务能力与设置，进入详情使用、编辑或管理运行服务":@"轻点查看资源，使用开关启用或停用";
         c.textLabel.text=profileName;
         c.detailTextLabel.text=[self resourceDetailForProfile:p];
-        UIColor *latencyColor=nil;c.latencyBadge.text=[self latencyTextForProfile:p color:&latencyColor];c.latencyBadge.textColor=latencyColor?:HostSecondaryText();c.latencyBadge.backgroundColor=HostRaisedSurface();c.latencyBadge.accessibilityLabel=[NSString stringWithFormat:@"资源测速：%@",c.latencyBadge.text?:@"未测速"];
-        c.protocolBadge.backgroundColor=HostSelectedSurface();c.protocolBadge.textColor=HostAccent();
+        c.iconBadgeContainer.backgroundColor=[HostAccent() colorWithAlphaComponent:0.14];
+        HostSetLayerBorderColor(c.iconBadgeContainer,[HostAccent() colorWithAlphaComponent:0.28]);
+        UIColor *latencyColor=nil;NSString *rawLatency=[self latencyTextForProfile:p color:&latencyColor];
+        if([p[@"native"] boolValue]&&[rawLatency isEqualToString:@"未检测"])rawLatency=@"官方源";
+        c.latencyBadge.text=[NSString stringWithFormat:@"  %@  ",rawLatency];c.latencyBadge.textColor=latencyColor?:HostSecondaryText();c.latencyBadge.backgroundColor=HostRaisedSurface();HostSetLayerBorderColor(c.latencyBadge,HostBorder());c.latencyBadge.accessibilityLabel=[NSString stringWithFormat:@"资源测速：%@",rawLatency?:@"未测速"];
+        c.protocolBadge.backgroundColor=HostSelectedSurface();c.protocolBadge.textColor=HostAccent();HostSetLayerBorderColor(c.protocolBadge,[HostAccent() colorWithAlphaComponent:0.32]);
         NSString *protoTag=plugin?(p[@"runtime"]?:@"插件"):(tvbox?([p[@"catalogKind"] isEqual:@"maccms"]?@"MacCMS":@"合集"):@"M3U");c.protocolBadge.text=[NSString stringWithFormat:@"  %@  ",protoTag];
         c.imageView.image=[UIImage systemImageNamed:plugin?([p[@"resourceKind"] isEqual:@"live"]?@"dot.radiowaves.left.and.right":@"play.rectangle"):(tvbox?([p[@"catalogKind"] isEqual:@"maccms"]?@"film":@"square.stack.3d.up"):@"list.bullet.rectangle")];
         if(!plugin&&!tvbox){

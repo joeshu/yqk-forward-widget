@@ -1,11 +1,29 @@
 import * as cheerio from 'cheerio/lib/slim'
 import {Buffer} from 'buffer'
 
+function selectPart($, selection, rawPart){
+  let part=String(rawPart||'').trim()
+  if(!part)return selection
+  const eqRegex=/:eq\((-?\d+)\)/g
+  let match,lastIndex=0, hasEq=false
+  let current=selection
+  while((match=eqRegex.exec(part))!==null){
+    hasEq=true
+    const subSelector=part.slice(lastIndex,match.index).trim()
+    if(subSelector)current=current.find(subSelector)
+    current=current.eq(Number(match[1]))
+    lastIndex=eqRegex.lastIndex
+  }
+  if(!hasEq)return current.find(part)
+  const tail=part.slice(lastIndex).trim()
+  return tail?current.find(tail):current
+}
+
 function parser(html,expression,array=false){
   const $=cheerio.load(String(html||'')),parts=String(expression||'').replace(/^(?:jsp|jq):/,'').split('&&')
   const attr=array?null:parts.pop()
   let selection=$.root()
-  for(const part of parts)if(part)selection=selection.find(part)
+  for(const part of parts)if(part)selection=selectPart($,selection,part)
   if(array)return selection.toArray().map(node=>$.html(node))
   if(attr==='Text')return selection.first().text().trim()
   if(attr==='Html')return selection.first().html()||''
@@ -22,8 +40,14 @@ export function prepareGlobals(payload){
   g.getProxy=()=>payload.proxyURL||''
   g.req=(url,options={})=>{
     const headers={...(options.headers||{})},request={...options,headers}
+    if(options.redirect===0||options.redirect===false)request.redirect=false
     let body=options.body??options.data
-    if(body && typeof body==='object'){const json=Object.entries(headers).some(([k,v])=>k.toLowerCase()==='content-type'&&String(v).includes('json'));body=json?JSON.stringify(body):new URLSearchParams(body).toString()}
+    const postType=String(options.postType||'').toLowerCase()
+    if(body && typeof body==='object'){
+      const json=postType==='json'||(postType!=='form'&&Object.entries(headers).some(([k,v])=>k.toLowerCase()==='content-type'&&String(v).includes('json')))
+      if(json){body=JSON.stringify(body);headers['Content-Type']??='application/json'}
+      else{body=new URLSearchParams(Object.entries(body).map(([k,v])=>[k,v==null?'':String(v)])).toString();headers['Content-Type']??='application/x-www-form-urlencoded'}
+    }
     if(body!=null)request.body=String(body)
     const reply=g.__hostFetchSync(String(url),JSON.stringify(request))
     if(reply.error)throw new Error(reply.error)

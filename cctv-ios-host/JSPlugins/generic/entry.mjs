@@ -217,7 +217,7 @@ async function invokeSpider(operation,payload={}){
   if(response.statusCode<200||response.statusCode>=400)throw new Error('Spider '+operation+' 返回 HTTP '+response.statusCode)
   let value=result(response.value)
   if(operation==='home'&&(!value?.list||!value.list.length)&&spiderRoutes.has('POST /homeVod')){
-    const recommended=await callSpiderRoute('POST','/homeVod',{body:{filter:true},host:payload.host}),recommendedValue=result(recommended.value);if(recommended.statusCode<400&&recommendedValue&&typeof recommendedValue==='object')value={...value,list:recommendedValue.list||[]}
+    const recommended=await callSpiderRoute('POST','/homeVod',{body:{filter:true},host:payload.host}),recommendedValue=result(recommended.value);if(recommended.statusCode<400&&recommendedValue&&typeof recommendedValue==='object')value={...value,list:Array.isArray(recommendedValue)?recommendedValue:(recommendedValue.list||[])}
   }
   return value
 }
@@ -247,7 +247,27 @@ async function load(payload){
   g.__cctvBuiltins=builtins;g.__cctvRequire=requireFile
   g.Buffer=Buffer;g.CryptoJS=CryptoJS;g.cheerio=cheerio;g.global=g;g.window=g;g.self=g
   g.process={env:{},platform:'ios',nextTick:(fn,...args)=>Promise.resolve().then(()=>fn(...args))}
-  g.req=async(url,options={})=>{const response=await fetch(url,options);return {content:await response.text(),code:response.status,headers:{get:response.headers.get}}}
+  g.req=async(url,options={})=>{
+    const method=String(options.method||'GET').toUpperCase(),headers={...(options.headers||{})}
+    let body=options.body??options.data
+    const postType=String(options.postType||'').toLowerCase()
+    if(body&&typeof body==='object'&&!Buffer.isBuffer(body)&&!(body instanceof ArrayBuffer)&&!(body instanceof Uint8Array)){
+      if(postType==='form'||/application\/x-www-form-urlencoded/i.test(String(headers['Content-Type']||headers['content-type']||''))){
+        body=new URLSearchParams(Object.entries(body).map(([k,v])=>[k,v==null?'':String(v)])).toString()
+        headers['Content-Type']??='application/x-www-form-urlencoded'
+      }else{
+        body=JSON.stringify(body)
+        headers['Content-Type']??='application/json'
+      }
+    }
+    const redirect=(options.redirect===0||options.redirect===false)?'manual':'follow'
+    const response=await fetch(url,{...options,method,headers,body:['GET','HEAD'].includes(method)?undefined:body,redirect})
+    const bytes=Buffer.from(await response.arrayBuffer())
+    const headerMap=Object.fromEntries(response.headers)
+    Object.defineProperty(headerMap,'get',{value:name=>response.headers.get(name),enumerable:false})
+    const content=options.buffer===2?[...bytes]:options.buffer===1?bytes.toString('base64'):bytes.toString(options.encoding||'utf8')
+    return {content,code:response.status,headers:headerMap}
+  }
   g.request=async(...args)=>(await g.req(...args)).content
   const localScope='catvod:'+String(payload.dataDirectory||payload.packageRoot||payload.name||'default')
   g.local=isCatVodProtocol(payload.protocol)?{get:(key,fallback=null)=>g.__hostStorage('get',localScope+':'+String(key||''))??fallback,set:(key,value)=>g.__hostStorage('set',localScope+':'+String(key||''),String(value??'')),delete:key=>g.__hostStorage('remove',localScope+':'+String(key||''))}:{get:(namespace,key)=>g.__hostStorage('get',String(namespace||'')+':'+String(key||''))||'',set:(namespace,key,value)=>g.__hostStorage('set',String(namespace||'')+':'+String(key||''),String(value??'')),delete:(namespace,key)=>g.__hostStorage('remove',String(namespace||'')+':'+String(key||''))}

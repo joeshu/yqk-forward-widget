@@ -29,6 +29,15 @@ class MediaPlaybackRouteFallbackTests(unittest.TestCase):
         self.assertIn("addIndex:candidateLine", body)
         self.assertIn('@"playback_auto_line_fallback"', body)
 
+    def test_auto_alternate_quality_fallback_runs_before_line_switch(self):
+        alt_body = method_body("- (BOOL)tryNextAlternateForAutomaticFallback:(NSString *)reason")
+        self.assertIn("automaticFallbackTriedAlternateIndexes", alt_body)
+        self.assertIn('@"playback_auto_alternate_fallback"', alt_body)
+        line_body = method_body("- (BOOL)tryNextLineForAutomaticFallback:(NSString *)reason")
+        self.assertIn("if([self tryNextAlternateForAutomaticFallback:reason])return YES;", line_body)
+        resolve_body = method_body("- (void)resolveAndPlay")
+        self.assertIn('tryNextLineForAutomaticFallback:@"episode_resolve_failed"', resolve_body)
+
     def test_fallback_preserves_the_same_episode_before_switching_routes(self):
         body = method_body("- (BOOL)tryNextLineForAutomaticFallback:(NSString *)reason")
         self.assertIn('currentEpisode[@"id"]', body)

@@ -1,9 +1,7 @@
 #import "MediaMetadataCache.h"
-#if __has_include(<UIKit/UIKit.h>)
+#import <TargetConditionals.h>
+#if TARGET_OS_IOS
 #import <UIKit/UIKit.h>
-#define CCTV_MEDIA_METADATA_HAS_UIKIT 1
-#else
-#define CCTV_MEDIA_METADATA_HAS_UIKIT 0
 #endif
 #import <CommonCrypto/CommonDigest.h>
 
@@ -95,8 +93,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         NSURL *directory=[support URLByAppendingPathComponent:@"CCTVHost" isDirectory:YES];
         if(directory){[NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL];_persistentPath=[[directory URLByAppendingPathComponent:@"MediaMetadataCache-v1.json"] path];}
         [self loadPersistentRecords];
-
-#if CCTV_MEDIA_METADATA_HAS_UIKIT
+#if TARGET_OS_IOS
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(evictMemoryCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
 #endif
     }

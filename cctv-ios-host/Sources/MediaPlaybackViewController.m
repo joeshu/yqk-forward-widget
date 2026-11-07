@@ -263,6 +263,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 @property(nonatomic) BOOL hasDiagnosticTimeControlStatus;
 @property(nonatomic) NSInteger selectedAlternateIndex;
 @property(nonatomic,strong) NSMutableIndexSet *automaticFallbackTriedLineIndexes;
+@property(nonatomic,strong) NSMutableIndexSet *automaticFallbackTriedAlternateIndexes;
 @property(nonatomic) BOOL awaitingWebPlaybackReturn;
 @property(nonatomic) BOOL episodeWebFallbackAvailable;
 @property(nonatomic,copy) NSString *diagnosticTraceID;
@@ -325,6 +326,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 - (void)updateSkipButtonForCurrentPosition;
 - (void)offerResumeForItem:(AVPlayerItem *)item;
 - (void)resetAutomaticFallbackLines;
+- (BOOL)tryNextAlternateForAutomaticFallback:(NSString *)reason;
 - (BOOL)tryNextLineForAutomaticFallback:(NSString *)reason;
 @end
 
@@ -370,7 +372,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     self.playerController=[AVPlayerViewController new];self.playerController.delegate=self;self.playerController.allowsPictureInPicturePlayback=YES;[self addChildViewController:self.playerController];self.playerController.view.translatesAutoresizingMaskIntoConstraints=NO;[self.videoView addSubview:self.playerController.view];[self.playerController didMoveToParentViewController:self];
     [NSLayoutConstraint activateConstraints:@[[self.playerController.view.leadingAnchor constraintEqualToAnchor:self.videoView.leadingAnchor],[self.playerController.view.trailingAnchor constraintEqualToAnchor:self.videoView.trailingAnchor],[self.playerController.view.topAnchor constraintEqualToAnchor:self.videoView.topAnchor],[self.playerController.view.bottomAnchor constraintEqualToAnchor:self.videoView.bottomAnchor]]];
     self.videoTopScrim=[CAGradientLayer layer];self.videoTopScrim.colors=@[(id)[UIColor colorWithWhite:0 alpha:0.82].CGColor,(id)[UIColor colorWithWhite:0 alpha:0.62].CGColor,(id)[UIColor colorWithWhite:0 alpha:0.0].CGColor];self.videoTopScrim.locations=@[@0.0,@0.66,@1.0];self.videoTopScrim.startPoint=CGPointMake(0.5,0);self.videoTopScrim.endPoint=CGPointMake(0.5,1);self.videoTopScrim.name=@"media-playback-top-scrim";[self.videoView.layer addSublayer:self.videoTopScrim];
-    self.throughputLabel=[UILabel new];self.throughputLabel.translatesAutoresizingMaskIntoConstraints=NO;self.throughputLabel.text=@"测速中";self.throughputLabel.textColor=UIColor.whiteColor;self.throughputLabel.font=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];self.throughputLabel.textAlignment=NSTextAlignmentCenter;self.throughputLabel.backgroundColor=[UIColor colorWithWhite:0 alpha:0.68];self.throughputLabel.layer.cornerRadius=11;self.throughputLabel.clipsToBounds=YES;self.throughputLabel.userInteractionEnabled=NO;self.throughputLabel.accessibilityIdentifier=@"media-playback-throughput";self.throughputLabel.hidden=self.embeddedMode;[self.videoView addSubview:self.throughputLabel];self.throughputPortraitTopConstraint=[self.throughputLabel.topAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.topAnchor constant:8];self.throughputViewportTopConstraint=[self.throughputLabel.topAnchor constraintEqualToAnchor:self.videoView.topAnchor constant:10];self.throughputViewportTopConstraint.active=NO;[NSLayoutConstraint activateConstraints:@[self.throughputPortraitTopConstraint,[self.throughputLabel.trailingAnchor constraintEqualToAnchor:self.videoView.trailingAnchor constant:-10],[self.throughputLabel.heightAnchor constraintGreaterThanOrEqualToConstant:24],[self.throughputLabel.widthAnchor constraintGreaterThanOrEqualToConstant:68]]];
+    self.throughputLabel=[UILabel new];self.throughputLabel.translatesAutoresizingMaskIntoConstraints=NO;self.throughputLabel.text=@"测速中";self.throughputLabel.textColor=UIColor.whiteColor;self.throughputLabel.font=HostMonospacedDigitFont(11,UIFontWeightSemibold,UIFontTextStyleCaption2);self.throughputLabel.textAlignment=NSTextAlignmentCenter;self.throughputLabel.backgroundColor=[UIColor colorWithWhite:0 alpha:0.68];self.throughputLabel.layer.cornerRadius=11;self.throughputLabel.layer.borderWidth=0.5;self.throughputLabel.layer.borderColor=[UIColor colorWithWhite:1 alpha:0.22].CGColor;self.throughputLabel.clipsToBounds=YES;self.throughputLabel.userInteractionEnabled=NO;self.throughputLabel.accessibilityIdentifier=@"media-playback-throughput";self.throughputLabel.hidden=self.embeddedMode;[self.videoView addSubview:self.throughputLabel];self.throughputPortraitTopConstraint=[self.throughputLabel.topAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.topAnchor constant:8];self.throughputViewportTopConstraint=[self.throughputLabel.topAnchor constraintEqualToAnchor:self.videoView.topAnchor constant:10];self.throughputViewportTopConstraint.active=NO;[NSLayoutConstraint activateConstraints:@[self.throughputPortraitTopConstraint,[self.throughputLabel.trailingAnchor constraintEqualToAnchor:self.videoView.trailingAnchor constant:-10],[self.throughputLabel.heightAnchor constraintGreaterThanOrEqualToConstant:24],[self.throughputLabel.widthAnchor constraintGreaterThanOrEqualToConstant:68]]];
     self.gestureFeedbackLabel=[UILabel new];self.gestureFeedbackLabel.translatesAutoresizingMaskIntoConstraints=NO;self.gestureFeedbackLabel.hidden=YES;self.gestureFeedbackLabel.textAlignment=NSTextAlignmentCenter;self.gestureFeedbackLabel.textColor=UIColor.whiteColor;self.gestureFeedbackLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]];self.gestureFeedbackLabel.adjustsFontForContentSizeCategory=YES;self.gestureFeedbackLabel.backgroundColor=[UIColor colorWithWhite:0 alpha:0.72];self.gestureFeedbackLabel.layer.cornerRadius=14;self.gestureFeedbackLabel.clipsToBounds=YES;self.gestureFeedbackLabel.isAccessibilityElement=NO;UIView *gestureSurface=self.videoView;[gestureSurface addSubview:self.gestureFeedbackLabel];self.gestureFeedbackPortraitTopConstraint=[self.gestureFeedbackLabel.topAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.topAnchor constant:8];self.gestureFeedbackViewportTopConstraint=[self.gestureFeedbackLabel.topAnchor constraintEqualToAnchor:gestureSurface.topAnchor constant:16];self.gestureFeedbackViewportTopConstraint.active=NO;[NSLayoutConstraint activateConstraints:@[[self.gestureFeedbackLabel.centerXAnchor constraintEqualToAnchor:gestureSurface.centerXAnchor],self.gestureFeedbackPortraitTopConstraint,[self.gestureFeedbackLabel.heightAnchor constraintEqualToConstant:34],[self.gestureFeedbackLabel.widthAnchor constraintGreaterThanOrEqualToConstant:112]]];
     self.inlineNowPlayingPill=[UIView new];self.inlineNowPlayingPill.translatesAutoresizingMaskIntoConstraints=NO;self.inlineNowPlayingPill.hidden=YES;self.inlineNowPlayingPill.userInteractionEnabled=NO;self.inlineNowPlayingPill.backgroundColor=[UIColor colorWithWhite:0 alpha:.72];self.inlineNowPlayingPill.layer.cornerRadius=9;self.inlineNowPlayingPill.layer.cornerCurve=kCACornerCurveContinuous;self.inlineNowPlayingPill.isAccessibilityElement=YES;self.inlineNowPlayingPill.accessibilityIdentifier=@"media-inline-now-playing";self.inlineNowPlayingPill.accessibilityHint=@"滚动影片详情时仍显示当前播放集数";[self.videoView addSubview:self.inlineNowPlayingPill];
     self.inlineNowPlayingLabel=[UILabel new];self.inlineNowPlayingLabel.translatesAutoresizingMaskIntoConstraints=NO;self.inlineNowPlayingLabel.font=[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];self.inlineNowPlayingLabel.textColor=UIColor.whiteColor;self.inlineNowPlayingLabel.numberOfLines=1;self.inlineNowPlayingLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.inlineNowPlayingLabel.isAccessibilityElement=NO;[self.inlineNowPlayingPill addSubview:self.inlineNowPlayingLabel];[self.inlineNowPlayingLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
@@ -388,7 +390,8 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     self.qualityLabel=[UILabel new];self.qualityLabel.text=@"清晰度";self.qualityLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.qualityLabel.adjustsFontForContentSizeCategory=YES;self.qualityLabel.textColor=HostSecondaryText();[self.qualityGroup addArrangedSubview:self.qualityLabel];
     self.qualityScroll=[UIScrollView new];self.qualityScroll.translatesAutoresizingMaskIntoConstraints=NO;self.qualityScroll.showsHorizontalScrollIndicator=NO;[self.qualityGroup addArrangedSubview:self.qualityScroll];
     self.qualityButtons=[UIStackView new];self.qualityButtons.translatesAutoresizingMaskIntoConstraints=NO;self.qualityButtons.axis=UILayoutConstraintAxisHorizontal;self.qualityButtons.spacing=8;[self.qualityScroll addSubview:self.qualityButtons];
-    [NSLayoutConstraint activateConstraints:@[[self.qualityScroll.heightAnchor constraintEqualToConstant:44],[self.qualityButtons.leadingAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.leadingAnchor],[self.qualityButtons.trailingAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.trailingAnchor],[self.qualityButtons.topAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.topAnchor],[self.qualityButtons.bottomAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.bottomAnchor],[self.qualityButtons.heightAnchor constraintEqualToAnchor:self.qualityScroll.frameLayoutGuide.heightAnchor]]];
+    NSLayoutConstraint *qualityScrollHeight=[self.qualityScroll.heightAnchor constraintEqualToConstant:44];qualityScrollHeight.priority=UILayoutPriorityDefaultHigh;
+    [NSLayoutConstraint activateConstraints:@[qualityScrollHeight,[self.qualityButtons.leadingAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.leadingAnchor],[self.qualityButtons.trailingAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.trailingAnchor],[self.qualityButtons.topAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.topAnchor],[self.qualityButtons.bottomAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.bottomAnchor],[self.qualityButtons.heightAnchor constraintEqualToAnchor:self.qualityScroll.frameLayoutGuide.heightAnchor]]];
     self.episodeTitle=[UILabel new];self.episodeTitle.translatesAutoresizingMaskIntoConstraints=NO;self.episodeTitle.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];self.episodeTitle.adjustsFontForContentSizeCategory=YES;self.episodeTitle.textColor=HostText();self.episodeTitle.numberOfLines=2;self.episodeTitle.accessibilityHint=@"双击画面左侧或右侧可前后跳转 10 秒；按住画面可临时使用 3 倍速";[self.controlPanel addSubview:self.episodeTitle];
     self.status=[UILabel new];self.status.translatesAutoresizingMaskIntoConstraints=NO;self.status.textColor=HostSecondaryText();self.status.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.status.numberOfLines=3;self.status.adjustsFontForContentSizeCategory=YES;[self.controlPanel addSubview:self.status];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.translatesAutoresizingMaskIntoConstraints=NO;[self.controlPanel addSubview:self.spinner];
@@ -497,21 +500,21 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
             [self.controlPanel.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
         ];
         self.embeddedControlConstraints=@[
-            [self.qualityGroup.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:8],
+            [self.qualityGroup.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:11],
             [self.qualityGroup.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:14],
             [self.qualityGroup.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-14],
-            [self.episodeTitle.topAnchor constraintEqualToAnchor:self.qualityGroup.bottomAnchor constant:3],
+            [self.episodeTitle.topAnchor constraintEqualToAnchor:self.qualityGroup.bottomAnchor constant:4],
             [self.episodeTitle.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:14],
             [self.episodeTitle.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-14],
-            [self.status.topAnchor constraintEqualToAnchor:self.episodeTitle.bottomAnchor constant:2],
+            [self.status.topAnchor constraintEqualToAnchor:self.episodeTitle.bottomAnchor constant:4],
             [self.status.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:14],
             [self.status.trailingAnchor constraintEqualToAnchor:self.spinner.leadingAnchor constant:-6],
             [self.spinner.centerYAnchor constraintEqualToAnchor:self.status.centerYAnchor],
             [self.spinner.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-14],
-            [self.playbackActionRow.topAnchor constraintEqualToAnchor:self.status.bottomAnchor constant:6],
-            [self.playbackActionRow.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:10],
-            [self.playbackActionRow.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-10],
-            [self.playbackActionRow.bottomAnchor constraintEqualToAnchor:self.controlPanel.bottomAnchor constant:-8],
+            [self.playbackActionRow.topAnchor constraintEqualToAnchor:self.status.bottomAnchor constant:8],
+            [self.playbackActionRow.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:12],
+            [self.playbackActionRow.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-12],
+            [self.playbackActionRow.bottomAnchor constraintEqualToAnchor:self.controlPanel.bottomAnchor constant:-10],
             [self.playbackActionRow.heightAnchor constraintGreaterThanOrEqualToConstant:44],
             [self.inlineOptionsButton.widthAnchor constraintGreaterThanOrEqualToConstant:54],
             [self.inlineOptionsButton.heightAnchor constraintGreaterThanOrEqualToConstant:44],
@@ -573,7 +576,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     self.screenLockButton.backgroundColor=self.gestureLockActive?HostAccent():[UIColor colorWithWhite:0 alpha:0.58];
     self.controlPanel.userInteractionEnabled=!self.gestureLockActive;
     self.controlPanel.alpha=self.gestureLockActive?0.35:1.0;
-    [UIView animateWithDuration:0.25 delay:0 usingSpringWithDamping:0.65 initialSpringVelocity:0.5 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
+    [UIView animateWithDuration:0.25 usingSpringWithDamping:0.65 initialSpringVelocity:0.5 animations:^{
         self.screenLockButton.transform=CGAffineTransformMakeScale(1.15,1.15);
     } completion:^(BOOL finished){
         [UIView animateWithDuration:0.18 animations:^{self.screenLockButton.transform=CGAffineTransformIdentity;}];
@@ -928,7 +931,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 - (void)buildQualityButtons {
     NSArray *alternates=[self.result[@"alternates"] isKindOfClass:NSArray.class]?self.result[@"alternates"]:@[];
     for(UIView *view in self.qualityButtons.arrangedSubviews.copy){[self.qualityButtons removeArrangedSubview:view];[view removeFromSuperview];}
-    BOOL available=alternates.count>0;self.qualityLabel.hidden=!available;self.qualityScroll.hidden=!available;self.qualityLabel.text=alternates.count==1?@"清晰度（仅此档可用）":@"清晰度";
+    BOOL available=alternates.count>0;self.qualityGroup.spacing=available?3:0;self.qualityLabel.hidden=!available;self.qualityScroll.hidden=!available;self.qualityLabel.text=alternates.count==1?@"清晰度（仅此档可用）":@"清晰度";
     if(!available){self.selectedAlternateIndex=-1;return;}
     NSString *currentURL=[self.result[@"originalURL"] isKindOfClass:NSString.class]?self.result[@"originalURL"]:([self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:@"");
     if(self.selectedAlternateIndex<0||self.selectedAlternateIndex>=alternates.count){self.selectedAlternateIndex=-1;for(NSUInteger index=0;index<alternates.count;index++){NSDictionary *alternate=alternates[index];NSString *original=[alternate[@"originalURL"] isKindOfClass:NSString.class]?alternate[@"originalURL"]:alternate[@"url"];if([original isEqual:currentURL]){self.selectedAlternateIndex=index;break;}}if(self.selectedAlternateIndex<0&&alternates.count==1)self.selectedAlternateIndex=0;}
@@ -1048,7 +1051,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     NSArray *episodes=self.episodes;NSDictionary *episode=self.episodeIndex>=0&&self.episodeIndex<episodes.count?episodes[self.episodeIndex]:nil;
     NSString *name=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:@"";name=[name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *spokenNumber=MediaPlaybackEpisodeNumber(name);NSString *number=spokenNumber.length?[NSString stringWithFormat:@"第 %@ 集",spokenNumber]:(episodes.count?[NSString stringWithFormat:@"第 %ld 集",(long)self.episodeIndex+1]:@"当前分集");
-    NSString *title=name.length&&[name localizedCaseInsensitiveCompare:number]!=NSOrderedSame?[NSString stringWithFormat:@"%@ · %@",number,name]:number;
+    NSString *title=name.length&&!MediaPlaybackEpisodeNamesMatch(name,number)?[NSString stringWithFormat:@"%@ · %@",number,name]:number;
     NSString *visibleTitle=[NSString stringWithFormat:@"正在播放 · %@",title];
     self.episodeTitle.text=visibleTitle;self.episodeTitle.accessibilityLabel=visibleTitle;
     self.inlineNowPlayingLabel.text=visibleTitle;self.inlineNowPlayingPill.accessibilityLabel=visibleTitle;self.inlineNowPlayingPill.hidden=!self.floatingInlineSurfaceInstalled;
@@ -1386,9 +1389,43 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
 }
 - (void)resetAutomaticFallbackLines {
     self.automaticFallbackTriedLineIndexes=[NSMutableIndexSet indexSet];
+    self.automaticFallbackTriedAlternateIndexes=[NSMutableIndexSet indexSet];
     if(self.lineIndex>=0&&self.lineIndex<self.lines.count)[self.automaticFallbackTriedLineIndexes addIndex:(NSUInteger)self.lineIndex];
 }
+- (BOOL)tryNextAlternateForAutomaticFallback:(NSString *)reason {
+    NSArray *alternates=[self.result[@"alternates"] isKindOfClass:NSArray.class]?self.result[@"alternates"]:@[];
+    if(alternates.count<2)return NO;
+    if(!self.automaticFallbackTriedAlternateIndexes)self.automaticFallbackTriedAlternateIndexes=[NSMutableIndexSet indexSet];
+    NSInteger currentAlt=self.selectedAlternateIndex>=0&&self.selectedAlternateIndex<(NSInteger)alternates.count?self.selectedAlternateIndex:0;
+    [self.automaticFallbackTriedAlternateIndexes addIndex:(NSUInteger)currentAlt];
+    NSUInteger limit=MIN(alternates.count,(NSUInteger)5);
+    if(self.automaticFallbackTriedAlternateIndexes.count>=limit)return NO;
+    for(NSUInteger offset=1;offset<alternates.count;offset++){
+        NSUInteger candidateIndex=((NSUInteger)currentAlt+offset)%alternates.count;
+        if([self.automaticFallbackTriedAlternateIndexes containsIndex:candidateIndex])continue;
+        NSDictionary *alternate=[alternates[candidateIndex] isKindOfClass:NSDictionary.class]?alternates[candidateIndex]:nil;
+        NSString *url=[alternate[@"url"] isKindOfClass:NSString.class]?alternate[@"url"]:@"";
+        if(!url.length){[self.automaticFallbackTriedAlternateIndexes addIndex:candidateIndex];continue;}
+        [self.automaticFallbackTriedAlternateIndexes addIndex:candidateIndex];
+        NSString *originalURL=[alternate[@"originalURL"] isKindOfClass:NSString.class]?alternate[@"originalURL"]:url;
+        if(!self.basePlaybackHeaders){NSDictionary *base=[self.result[@"baseHeaders"] isKindOfClass:NSDictionary.class]?self.result[@"baseHeaders"]:MediaPlaybackHeadersFromResult(self.result);self.basePlaybackHeaders=base.copy;}
+        NSDictionary *parentResult=self.result;self.selectedAlternateIndex=(NSInteger)candidateIndex;
+        NSMutableDictionary *selected=[parentResult mutableCopy];selected[@"url"]=url;selected[@"originalURL"]=originalURL;
+        NSMutableDictionary *headers=[self.basePlaybackHeaders mutableCopy]?:[NSMutableDictionary dictionary];
+        [headers addEntriesFromDictionary:MediaPlaybackHeadersFromResult(alternate)];
+        selected[@"headers"]=headers.copy;[selected removeObjectForKey:@"header"];
+        for(NSString *key in @[@"format",@"mediaType",@"playbackType",@"contentType",@"content_type",@"mimeType",@"mime",@"playbackEngine",@"nativePlayable",@"directMedia",@"requiresWebPlayback",@"parse",@"jx"]){[selected removeObjectForKey:key];if(alternate[key]!=nil)selected[key]=alternate[key];}
+        NSString *candidateName=[alternate[@"name"] isKindOfClass:NSString.class]&&[alternate[@"name"] length]?alternate[@"name"]:[NSString stringWithFormat:@"清晰度 %lu",(unsigned long)candidateIndex+1];
+        [RuntimeDiagnostics.shared recordEvent:@"playback_auto_alternate_fallback" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"playback_attempt_id":self.playbackAttemptID?:@"",@"from_alternate_index":@(currentAlt),@"alternate_index":@(candidateIndex),@"alternate_count":@(alternates.count),@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"reason":reason?:@"automatic_compatibility"}];
+        self.status.text=[NSString stringWithFormat:@"当前档位未就绪 · 正在尝试切换至 %@",candidateName];
+        self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];
+        self.attemptedRoutes=0;[self playResult:selected];
+        return YES;
+    }
+    return NO;
+}
 - (BOOL)tryNextLineForAutomaticFallback:(NSString *)reason {
+    if([self tryNextAlternateForAutomaticFallback:reason])return YES;
     NSArray *lines=self.lines;NSUInteger lineCount=lines.count;
     if(lineCount<2||self.lineIndex<0||self.lineIndex>=lines.count)return NO;
     if(!self.automaticFallbackTriedLineIndexes)[self resetAutomaticFallbackLines];
@@ -1455,7 +1492,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
         @"line_count":@(lines.count),@"episode_count":@(episodes.count),
         @"episode_has_id":@([[episode[@"id"] description] length]>0),
         @"line_has_id":@([[line[@"id"] description] length]>0),@"resolve_reason":reason}];
-    self.result=nil;self.basePlaybackHeaders=nil;self.selectedAlternateIndex=-1;
+    self.result=nil;self.basePlaybackHeaders=nil;self.selectedAlternateIndex=-1;self.automaticFallbackTriedAlternateIndexes=[NSMutableIndexSet indexSet];
     [self buildQualityButtons];[self setRetryAvailable:NO];[self clearCurrentPlayerItem];
     [self.spinner startAnimating];self.status.text=[NSString stringWithFormat:@"正在解析 %@…",episode[@"name"]?:@"当前分集"];
     self.status.accessibilityLabel=self.status.text;
@@ -1494,6 +1531,7 @@ static BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
                     @"failure_code":@"NO_MEDIA",@"fallback_kind":@"episode_page",@"source_host":pageURL.host.lowercaseString?:@""}];
             }
             [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_failed" category:@"media_api" fields:fields];
+            if(!owner.episodeWebFallbackAvailable&&[owner tryNextLineForAutomaticFallback:@"episode_resolve_failed"])return;
             owner.status.text=owner.episodeWebFallbackAvailable?@"来源未解析出媒体地址 · 可点右上角“网页尝试”打开分集页":(error.localizedDescription?:@"来源没有返回可播放结果");
             owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];
             return;
