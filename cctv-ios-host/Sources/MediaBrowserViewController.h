@@ -7,6 +7,7 @@
 - (UIViewController *)mediaDisplaySettingsViewController;
 - (void)reloadMediaDisplayConfigurationIfLoaded;
 - (void)openSourceIdentifier:(NSString *)identifier;
+- (void)activate:(NSDictionary *)source keepingHome:(BOOL)keepingHome;
 - (void)invalidateServiceIdentifier:(NSString *)identifier;
 - (void)showConfigurationForSource:(NSDictionary *)source;
 @property(nonatomic, copy) NSArray<NSDictionary *> *(^sourcesProvider)(void);
