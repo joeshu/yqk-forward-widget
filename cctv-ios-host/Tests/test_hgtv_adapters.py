@@ -19,10 +19,6 @@ SPEC = importlib.util.spec_from_file_location(
     'hgtv_public_1_0_5_adapter', ROOT / 'Examples' / 'hgtv-python' / 'hgtv_public_1_0_5.py')
 hgtv = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(hgtv)
-SPEC_104 = importlib.util.spec_from_file_location(
-    'hgtv_public_1_0_4_adapter', ROOT / 'Examples' / 'hgtv-python-1.0.4' / 'hgtv_public_1_0_4.py')
-hgtv104 = importlib.util.module_from_spec(SPEC_104)
-SPEC_104.loader.exec_module(hgtv104)
 
 
 def box(kind, payload):
@@ -84,10 +80,8 @@ class HgtvAdapterTests(unittest.TestCase):
         self.media, self.key, self.plain, self.sample_offset = encrypted_fixture()
         self.encrypted_path = Path(self.tmp.name, 'encrypted.mp4')
         self.decrypted_path = Path(self.tmp.name, 'decrypted.mp4')
-        self.decrypted_104_path = Path(self.tmp.name, 'decrypted-104.mp4')
         self.encrypted_path.write_bytes(self.media)
         hgtv._cenc_decrypt(str(self.encrypted_path), str(self.decrypted_path), self.key)
-        hgtv104._cenc_decrypt(str(self.encrypted_path), str(self.decrypted_104_path), self.key)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -100,33 +94,23 @@ class HgtvAdapterTests(unittest.TestCase):
         self.assertNotIn(b'encv', output)
         self.assertNotIn(b'senc', output)
 
-    def test_python_104_cenc_decrypt_uses_hostcrypto_and_produces_clear_mp4_sample(self):
-        output = self.decrypted_104_path.read_bytes()
-        self.assertTrue(hgtv104._verify_mp4(str(self.decrypted_104_path)))
-        self.assertEqual(output[self.sample_offset:self.sample_offset + len(self.plain)], self.plain)
-        self.assertIn(b'hvc1', output)
-        self.assertNotIn(b'encv', output)
-        self.assertNotIn(b'senc', output)
-
     def test_clear_sample_entry_keeps_box_sizes_and_codec_configuration(self):
-        for module, path in ((hgtv, self.decrypted_path), (hgtv104, self.decrypted_104_path)):
-            output = path.read_bytes()
-            self.assertEqual(output[8:12], self.media[8:12])
-            sinf_type = self.media.index(b'sinf')
-            self.assertEqual(output[sinf_type:sinf_type + 4], b'free')
-            self.assertEqual(output[sinf_type - 4:sinf_type], self.media[sinf_type - 4:sinf_type])
-            hvcc = output.index(b'hvcC')
-            self.assertEqual(output[hvcc + 4 + 12], 186)  # Preserve encoder profile/level.
-            self.assertTrue(module._verify_mp4(str(path)))
+        output = self.decrypted_path.read_bytes()
+        self.assertEqual(output[8:12], self.media[8:12])
+        sinf_type = self.media.index(b'sinf')
+        self.assertEqual(output[sinf_type:sinf_type + 4], b'free')
+        self.assertEqual(output[sinf_type - 4:sinf_type], self.media[sinf_type - 4:sinf_type])
+        hvcc = output.index(b'hvcC')
+        self.assertEqual(output[hvcc + 4 + 12], 186)  # Preserve encoder profile/level.
+        self.assertTrue(hgtv._verify_mp4(str(self.decrypted_path)))
 
     def test_old_malformed_sinf_cache_is_rejected(self):
-        for module, path in ((hgtv, self.decrypted_path), (hgtv104, self.decrypted_104_path)):
-            output = bytearray(path.read_bytes())
-            sinf_type = self.media.index(b'sinf')
-            output[sinf_type - 4:sinf_type] = b'free'
-            output[sinf_type:sinf_type + 4] = bytes(4)
-            path.write_bytes(output)
-            self.assertFalse(module._verify_mp4(str(path)))
+        output = bytearray(self.decrypted_path.read_bytes())
+        sinf_type = self.media.index(b'sinf')
+        output[sinf_type - 4:sinf_type] = b'free'
+        output[sinf_type:sinf_type + 4] = bytes(4)
+        self.decrypted_path.write_bytes(output)
+        self.assertFalse(hgtv._verify_mp4(str(self.decrypted_path)))
 
     def test_oversized_metadata_is_rejected_without_spider_instance(self):
         path = Path(self.tmp.name, 'large-metadata.mp4')
@@ -135,29 +119,25 @@ class HgtvAdapterTests(unittest.TestCase):
         with path.open('wb') as stream:
             stream.write(ftyp + struct.pack('>I4s', metadata_size, b'moov'))
             stream.truncate(len(ftyp) + metadata_size)
-        for module in (hgtv, hgtv104):
+        for module in (hgtv,):
             self.assertFalse(module._verify_mp4(str(path)))
 
     def test_encrypted_avc_codec_is_restored_from_frma(self):
         media, key, plain, offset = encrypted_fixture(b'avc1')
         self.encrypted_path.write_bytes(media)
-        for module, path in ((hgtv, self.decrypted_path), (hgtv104, self.decrypted_104_path)):
-            module._cenc_decrypt(str(self.encrypted_path), str(path), key)
-            output = path.read_bytes()
-            self.assertIn(b'avc1', output)
-            self.assertIn(b'avcC', output)
-            self.assertNotIn(b'hvc1', output)
-            self.assertEqual(output[offset:offset + len(plain)], plain)
-            self.assertTrue(module._verify_mp4(str(path)))
+        hgtv._cenc_decrypt(str(self.encrypted_path), str(self.decrypted_path), key)
+        output = self.decrypted_path.read_bytes()
+        self.assertIn(b'avc1', output)
+        self.assertIn(b'avcC', output)
+        self.assertNotIn(b'hvc1', output)
+        self.assertEqual(output[offset:offset + len(plain)], plain)
+        self.assertTrue(hgtv._verify_mp4(str(self.decrypted_path)))
 
     def test_cenc_decrypt_works_with_hostcrypto_when_pycryptodome_is_absent(self):
-        for module, output_path in ((hgtv, self.decrypted_path),
-                                    (hgtv104, self.decrypted_104_path)):
-            with self.subTest(version=module.VERSION), \
-                 mock.patch.object(module, '_HAS_CRYPTO', False):
-                module._cenc_decrypt(str(self.encrypted_path), str(output_path), self.key)
-                output = output_path.read_bytes()
-                self.assertEqual(output[self.sample_offset:self.sample_offset + len(self.plain)], self.plain)
+        with mock.patch.object(hgtv, '_HAS_CRYPTO', False):
+            hgtv._cenc_decrypt(str(self.encrypted_path), str(self.decrypted_path), self.key)
+            output = self.decrypted_path.read_bytes()
+            self.assertEqual(output[self.sample_offset:self.sample_offset + len(self.plain)], self.plain)
 
     @unittest.skipUnless(shutil.which('node'), 'requires Node to verify the JavaScript CENC path')
     def test_node_cenc_decrypt_and_range_parser_match_python_adapter(self):
@@ -233,7 +213,7 @@ class HgtvAdapterTests(unittest.TestCase):
             '2': {'video_meta': "{'definition': '1080p', 'vwidth': 1080, 'vheight': 1920}",
                   'gear_des_key': '2:h265_hvc1|4:1080p|5:normal'},
         }
-        for module in (hgtv, hgtv104):
+        for module in (hgtv,):
             with self.subTest(version=module.VERSION):
                 picked = module._pick_best({'video_list': items}, None)
                 self.assertEqual(picked[1], '1080p')
@@ -260,10 +240,9 @@ class HgtvAdapterTests(unittest.TestCase):
                 for idx, q in enumerate(qualities)
             }
         }
-        for module in (hgtv, hgtv104):
+        for module in (hgtv,):
             with self.subTest(version=module.VERSION):
-                # 1.0.5-r5 走新协议（multi_video_model + x-medusa + ttEncrypt 注册）；
-                # 保留对照的 1.0.4 仍走旧协议（video_model/v1 + 明文 JSON 注册）。
+                # 当前唯一 Python 适配使用签名 multi_video_model 与 ttEncrypt 注册。
                 is_new = hasattr(module, '_post_bytes')
                 calls = []
                 prev_dir = module._DEC_DIR
@@ -423,7 +402,7 @@ class HgtvAdapterTests(unittest.TestCase):
                     module._DEVICE_SESSION = None
 
     def test_host_file_proxy_returns_reference_and_preserves_head_length(self):
-        for module, path in ((hgtv, self.decrypted_path), (hgtv104, self.decrypted_104_path)):
+        for module, path in ((hgtv, self.decrypted_path),):
             spider = module.Spider()
             spider._cctvhost_file_proxy_supported = True
             with mock.patch.object(module, '_decrypt_to_file', return_value=str(path)):
@@ -436,7 +415,7 @@ class HgtvAdapterTests(unittest.TestCase):
             self.assertEqual(int(headers['Content-Length']), reference['length'])
 
     def test_missing_public_preview_is_not_replaced_with_full_signed_video(self):
-        for module in (hgtv, hgtv104):
+        for module in (hgtv,):
             class HTTP:
                 cache = module.BoundedCache()
                 def page(self, *_args): return {}
@@ -448,30 +427,8 @@ class HgtvAdapterTests(unittest.TestCase):
             self.assertFalse(result['url'])
             signed.assert_not_called()
 
-    def test_python_104_play_uses_host_proxy_and_returns_media_bytes(self):
-        class HTTP:
-            cache = hgtv104.BoundedCache()
-            def page(self, *_args): return {}
-            def compat(self, *_args):
-                raise hgtv104.SourceError('public fallback unavailable', status=403,
-                                          stage='resolve_api', code='public_unavailable')
-
-        spider = hgtv104.Spider(http=HTTP())
-        spider._cctvhost_proxy_url = 'http://127.0.0.1:18782/proxy'
-        with mock.patch.object(hgtv104, 'resolve_signed', return_value=(
-                'cenc://67890?q=4', hgtv104.ORIGIN + '/', None)), \
-             mock.patch.object(hgtv104, '_signed_model', return_value={'video_list': {}}), \
-             mock.patch.object(hgtv104, '_decrypt_to_file', return_value=str(self.decrypted_104_path)):
-            result = spider.playerContent('官网完整播放', '12345~67890')
-            self.assertEqual(result['url'], 'cenc://67890?q=4')
-            self.assertEqual(result['proxy'], 1)
-            response = spider.localProxy({'url': result['url'], 'method': 'GET',
-                                          'range': 'bytes=0-3'})
-        self.assertEqual(response[0], 206)
-        self.assertEqual(response[2], self.decrypted_104_path.read_bytes()[:4])
-
     def test_python_spider_writes_decrypted_cache_under_host_data_directory(self):
-        for module in (hgtv, hgtv104):
+        for module in (hgtv,):
             with self.subTest(version=module.VERSION):
                 previous = module._DEC_DIR
                 try:
@@ -507,7 +464,7 @@ class HgtvAdapterTests(unittest.TestCase):
         qualities = ['360p', '480p', '540p', '720p', '1080p']
         target_episodes = ['7701820244146261016', '7701832903004556312']
 
-        for module in (hgtv, hgtv104):
+        for module in (hgtv,):
             with self.subTest(version=module.VERSION):
                 prev_dir = module._DEC_DIR
                 module._DEC_DIR = os.path.join(self.tmp.name, f'e2e-{module.VERSION}')
@@ -565,7 +522,6 @@ class HgtvAdapterTests(unittest.TestCase):
                     raise AssertionError(f'unexpected URL {request.full_url}')
 
                 def fake_urlopen_all(request, timeout=25):
-                    # 保留对照的 1.0.4 仍走旧传输（urlopen + video_model/v1 + video_id）。
                     u = urlsplit(request.full_url)
                     if u.path.endswith('/device_register/'):
                         return Response(json.dumps({

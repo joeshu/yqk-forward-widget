@@ -1446,8 +1446,13 @@ class ResourceInteractionContracts(unittest.TestCase):
         resources = ROOT / 'Resources/BuiltinMedia'
         lytvs = json.loads((resources / 'lytvs-ios.json').read_text())
         for_adm = json.loads((resources / 'for-adm.json').read_text())
-        for retired in ('haoliang-live.json', 'haoliang-py.json', 'haoliang-tvbox.json'):
+        for retired in ('haoliang-live.json', 'haoliang-py.json', 'haoliang-tvbox.json',
+                        'hongguo-1.0.4.py', 'hongguo-1.0.4.js'):
             self.assertFalse((resources / retired).exists())
+        self.assertEqual({p.name for p in resources.glob('hongguo-*')},
+                         {'hongguo-python.py', 'hongguo-node.js'})
+        self.assertIn("VERSION = '1.0.5-cctvhost-r5'", (resources / 'hongguo-python.py').read_text())
+        self.assertIn("const VERSION = '1.0.5-cctvhost-r5';", (resources / 'hongguo-node.js').read_text())
         self.assertEqual(len(lytvs['sites']), 324)
         self.assertEqual(len(lytvs['lives']), 40)
         self.assertEqual(for_adm['name'], 'For-ADM CCTVHost 影视资源合集')

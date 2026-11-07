@@ -2,9 +2,8 @@
 """Acquire real HGTV fixtures for the macOS AVFoundation compatibility job.
 
 This is an opt-in online check, not a unit test. It downloads only the selected
-episodes, never the complete series. Python adapters run with ffmpeg disabled.
-The Node adapter decrypts the same encrypted CDN bytes as Python 1.0.5, avoiding
-another download while exercising its own MP4 parser and AES-CTR implementation.
+episodes, never the complete series. The Python adapter runs with ffmpeg disabled. The Node adapter decrypts the same
+encrypted CDN bytes while exercising its own MP4 parser and AES-CTR implementation.
 Signed URLs, model payloads, and decryption keys are never written to the report.
 """
 
@@ -39,7 +38,6 @@ EPISODES = {
 DEFAULT_EPISODES = tuple(EPISODES)[:2]
 SOURCES = {
     "py105": ROOT / "Examples/hgtv-python/hgtv_public_1_0_5.py",
-    "py104": ROOT / "Examples/hgtv-python-1.0.4/hgtv_public_1_0_4.py",
 }
 
 
@@ -115,7 +113,7 @@ class NodeAdapter:
         self.results = {}
         self.node = shutil.which("node")
         if not self.node:
-            raise RuntimeError("Node.js is required; use --runtimes py105,py104 to omit Node")
+            raise RuntimeError("Node.js is required; use --runtimes py105 to omit Node")
         source = (ROOT / "Examples/hgtv-node/hgtv.js").read_text()
         marker = "module.exports = site;"
         if source.count(marker) != 1:
@@ -475,7 +473,7 @@ def acquire(args, output, report, temp):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="directory for MP4 fixtures and report.json")
-    parser.add_argument("--runtimes", default="py105,py104,node", help="comma-separated py105,py104,node")
+    parser.add_argument("--runtimes", default="py105,node", help="comma-separated py105,node")
     parser.add_argument("--episodes", default=",".join(DEFAULT_EPISODES), help="comma-separated IDs from the three logged targets")
     parser.add_argument("--qualities", default=",".join(QUALITIES), help="comma-separated exact qualities; unavailable entries are recorded")
     parser.add_argument("--max-total-mb", type=float, default=512, help="maximum media output MiB, including temporary files (default: 512)")
