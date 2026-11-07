@@ -39,8 +39,21 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     if(!ServiceRelativePath(identifier)||identifier.pathComponents.count!=1||[service[@"builtin"] boolValue])return service;
     NSString *base=[[self directory] stringByAppendingPathComponent:identifier];
     NSMutableDictionary *resolved=[service mutableCopy];
-    NSDictionary *manifest=service[@"manifest"];
-    if([manifest isKindOfClass:NSDictionary.class]&&[manifest[@"runtime"] isEqual:@"python"]&&![manifest[@"moduleType"] isEqual:@"script"]){NSMutableDictionary *updated=[manifest mutableCopy];updated[@"moduleType"]=@"script";resolved[@"manifest"]=updated;}
+    NSString *bundledID=[service[@"bundledResourceID"] isKindOfClass:NSString.class]?service[@"bundledResourceID"]:@"";
+    BOOL isBundledHongguo=[bundledID isEqualToString:@"builtin-hongguo-python"]||[bundledID isEqualToString:@"builtin-hongguo-node"];
+    NSDictionary *manifest=[resolved[@"manifest"] isKindOfClass:NSDictionary.class]?resolved[@"manifest"]:nil;
+    if(manifest){
+        NSMutableDictionary *updated=nil;
+        if([manifest[@"runtime"] isEqual:@"python"]&&![manifest[@"moduleType"] isEqual:@"script"]){updated=[manifest mutableCopy];updated[@"moduleType"]=@"script";}
+        if(isBundledHongguo){
+            NSArray *caps=@[@"home",@"category",@"search",@"detail",@"play",@"proxy"];
+            if(![resolved[@"capabilities"] isEqual:caps])resolved[@"capabilities"]=caps;
+            if(![manifest[@"capabilities"] isEqual:caps]){if(!updated)updated=[manifest mutableCopy];updated[@"capabilities"]=caps;}
+            NSDictionary *opts=[manifest[@"options"] isKindOfClass:NSDictionary.class]?manifest[@"options"]:@{};
+            if([opts[@"playTimeoutMs"] integerValue]<120000){if(!updated)updated=[manifest mutableCopy];NSMutableDictionary *newOpts=[opts mutableCopy];newOpts[@"playTimeoutMs"]=@120000;updated[@"options"]=newOpts;}
+        }
+        if(updated)resolved[@"manifest"]=updated;
+    }
     for(NSString *key in @[@"packageRoot",@"archivePath"]){
         NSString *relativeKey=[key isEqual:@"packageRoot"]?@"packageRelativePath":@"archiveRelativePath";
         NSString *relative=service[relativeKey],*stored=service[key];
@@ -108,7 +121,25 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
 }
 + (NSString *)codePath:(NSDictionary *)service {
     service=[self resolvedService:service];
-    if([service[@"manifest"] isKindOfClass:NSDictionary.class]){NSString *entry=service[@"manifest"][@"entry"];if(!ServiceRelativePath(entry))return nil;return [service[@"packageRoot"] stringByAppendingPathComponent:entry];}
+    if([service[@"manifest"] isKindOfClass:NSDictionary.class]){
+        NSString *entry=service[@"manifest"][@"entry"];if(!ServiceRelativePath(entry))return nil;
+        NSString *target=[service[@"packageRoot"] stringByAppendingPathComponent:entry];
+        NSString *bundledID=[service[@"bundledResourceID"] isKindOfClass:NSString.class]?service[@"bundledResourceID"]:@"";
+        NSDictionary *bundleMap=@{@"builtin-hongguo-python":@[@"hongguo-python",@"py"],@"builtin-hongguo-node":@[@"hongguo-node",@"js"],@"zen.keke.rex.stream":@[@"zen-keke-stream",@"js"]};
+        NSArray *bundleSpec=bundleMap[bundledID];
+        if(bundleSpec.count==2&&target.length){
+            NSString *bundlePath=[NSBundle.mainBundle pathForResource:bundleSpec[0] ofType:bundleSpec[1] inDirectory:@"BuiltinMedia"];
+            if(bundlePath.length){
+                NSData *bundleData=[NSData dataWithContentsOfFile:bundlePath options:NSDataReadingMappedIfSafe error:NULL];
+                NSData *installedData=[NSData dataWithContentsOfFile:target options:NSDataReadingMappedIfSafe error:NULL];
+                if(bundleData.length&&(![installedData isEqualToData:bundleData])){
+                    [NSFileManager.defaultManager createDirectoryAtPath:target.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
+                    [bundleData writeToFile:target options:NSDataWritingAtomic error:NULL];
+                }
+            }
+        }
+        return target;
+    }
     if([service[@"id"] isEqual:@"builtin-yangshipin-js"])return [NSBundle.mainBundle pathForResource:@"yangshipin.bundle" ofType:@"js"];
     return [self scriptPath:service];
 }

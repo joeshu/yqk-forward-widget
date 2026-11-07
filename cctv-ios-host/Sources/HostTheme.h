@@ -121,6 +121,12 @@ static inline void HostStyleGlassCard(UIView *view, CGFloat radius) {
         [view insertSubview:glass atIndex:0];
         objc_setAssociatedObject(view,&HostGlassEffectAssociationKey,glass,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
+    [view sendSubviewToBack:glass];
+    if([view isKindOfClass:UIButton.class]){
+        UIButton *btn=(UIButton *)view;
+        if(btn.imageView)[btn bringSubviewToFront:btn.imageView];
+        if(btn.titleLabel)[btn bringSubviewToFront:btn.titleLabel];
+    }
     glass.layer.cornerRadius=radius;
     glass.layer.cornerCurve=kCACornerCurveContinuous;
     CAGradientLayer *specularRim=objc_getAssociatedObject(view,&HostSpecularRimAssociationKey);

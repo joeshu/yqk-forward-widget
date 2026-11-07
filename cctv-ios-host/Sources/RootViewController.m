@@ -707,37 +707,66 @@ configureCatalogNavigation;
 
 - (void)installBundledMediaResourcesIfNeeded {
     NSUserDefaults *preferences=NSUserDefaults.standardUserDefaults;NSString *seedKey=@"cctv.bundledMediaResources.v4";
-    if([preferences boolForKey:seedKey]||self.bundledMediaSeedInProgress)return;self.bundledMediaSeedInProgress=YES;
+    if(self.bundledMediaSeedInProgress)return;
+    BOOL alreadySeeded=[preferences boolForKey:seedKey];
+    self.bundledMediaSeedInProgress=YES;
     NSArray *catalogSpecs=@[
         @{@"file":@"lytvs-ios",@"id":@"builtin-lytvs-ios",@"name":@"Hawk iOS 内部影视与 PY 聚合",@"kind":@"tvbox",@"url":@"https://sub.lytvs.top/get?token=__LYTVS_SUBSCRIPTION_TOKEN__&client=ios"},
         @{@"file":@"for-adm",@"id":@"builtin-for-adm",@"name":@"For-ADM CCTVHost 影视资源合集",@"kind":@"tvbox",@"url":@"https://raw.githubusercontent.com/joeshu/For-ADM/master/CCTVHost/For-ADM.json"}
     ];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
         BOOL complete=YES,changed=NO;
-        for(NSString *retiredID in @[@"builtin-haoliang-live",@"builtin-haoliang-py",@"builtin-haoliang-tvbox"]){if([TVBoxCatalogStore catalogForID:retiredID]){[TVBoxCatalogStore removeCatalog:retiredID];changed=YES;}}
-        for(NSDictionary *spec in catalogSpecs){
-            NSString *identifier=spec[@"id"];if([TVBoxCatalogStore catalogForID:identifier])continue;
-            NSString *catalogURL=[spec[@"url"] isKindOfClass:NSString.class]?spec[@"url"]:@"";BOOL alreadyImported=NO;
-            if(catalogURL.length){NSURLComponents *expected=[NSURLComponents componentsWithString:catalogURL];for(NSDictionary *existing in [TVBoxCatalogStore catalogs]){NSString *existingURL=[existing[@"url"] isKindOfClass:NSString.class]?existing[@"url"]:@"";NSURLComponents *actual=[NSURLComponents componentsWithString:existingURL];BOOL sameLocation=expected.host.length&&[actual.host.lowercaseString isEqual:expected.host.lowercaseString]&&[actual.path isEqual:expected.path];BOOL sameForADM=[identifier isEqual:@"builtin-for-adm"]&&[existing[@"name"] isEqual:spec[@"name"]];if(sameLocation||sameForADM){alreadyImported=YES;break;}}}
-            if(alreadyImported)continue;
-            NSString *path=[NSBundle.mainBundle pathForResource:spec[@"file"] ofType:@"json" inDirectory:@"BuiltinMedia"];NSData *data=path?[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL]:nil;NSError *error=nil;NSDictionary *parsed=data?[TVBoxCatalogStore parseData:data sourceURL:nil error:&error]:nil;
-            if(!parsed){complete=NO;[RuntimeDiagnostics.shared recordEvent:@"bundled_media_catalog_import_failed" category:@"resource_import" fields:@{@"resource_id":identifier?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@"bundle resource missing or invalid"}];continue;}
-            NSMutableDictionary *catalog=[parsed mutableCopy];catalog[@"id"]=identifier;catalog[@"name"]=spec[@"name"];catalog[@"catalogKind"]=spec[@"kind"];catalog[@"bundledResourceID"]=identifier;if(catalogURL.length)catalog[@"url"]=catalogURL;[TVBoxCatalogStore saveCatalog:catalog];changed=YES;
+        if(!alreadySeeded){
+            for(NSString *retiredID in @[@"builtin-haoliang-live",@"builtin-haoliang-py",@"builtin-haoliang-tvbox"]){if([TVBoxCatalogStore catalogForID:retiredID]){[TVBoxCatalogStore removeCatalog:retiredID];changed=YES;}}
+            for(NSDictionary *spec in catalogSpecs){
+                NSString *identifier=spec[@"id"];if([TVBoxCatalogStore catalogForID:identifier])continue;
+                NSString *catalogURL=[spec[@"url"] isKindOfClass:NSString.class]?spec[@"url"]:@"";BOOL alreadyImported=NO;
+                if(catalogURL.length){NSURLComponents *expected=[NSURLComponents componentsWithString:catalogURL];for(NSDictionary *existing in [TVBoxCatalogStore catalogs]){NSString *existingURL=[existing[@"url"] isKindOfClass:NSString.class]?existing[@"url"]:@"";NSURLComponents *actual=[NSURLComponents componentsWithString:existingURL];BOOL sameLocation=expected.host.length&&[actual.host.lowercaseString isEqual:expected.host.lowercaseString]&&[actual.path isEqual:expected.path];BOOL sameForADM=[identifier isEqual:@"builtin-for-adm"]&&[existing[@"name"] isEqual:spec[@"name"]];if(sameLocation||sameForADM){alreadyImported=YES;break;}}}
+                if(alreadyImported)continue;
+                NSString *path=[NSBundle.mainBundle pathForResource:spec[@"file"] ofType:@"json" inDirectory:@"BuiltinMedia"];NSData *data=path?[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL]:nil;NSError *error=nil;NSDictionary *parsed=data?[TVBoxCatalogStore parseData:data sourceURL:nil error:&error]:nil;
+                if(!parsed){complete=NO;[RuntimeDiagnostics.shared recordEvent:@"bundled_media_catalog_import_failed" category:@"resource_import" fields:@{@"resource_id":identifier?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@"bundle resource missing or invalid"}];continue;}
+                NSMutableDictionary *catalog=[parsed mutableCopy];catalog[@"id"]=identifier;catalog[@"name"]=spec[@"name"];catalog[@"catalogKind"]=spec[@"kind"];catalog[@"bundledResourceID"]=identifier;if(catalogURL.length)catalog[@"url"]=catalogURL;[TVBoxCatalogStore saveCatalog:catalog];changed=YES;
+            }
+            NSString *pluginID=@"zen.keke.rex.stream";BOOL pluginFound=NO;for(NSDictionary *service in [ServiceStore services])if([service[@"bundledResourceID"] isEqual:pluginID]){pluginFound=YES;break;}
+            if(!pluginFound){NSString *path=[NSBundle.mainBundle pathForResource:@"zen-keke-stream" ofType:@"js" inDirectory:@"BuiltinMedia"];NSError *error=nil;NSDictionary *imported=path?[MediaPackageImporter importFile:[NSURL fileURLWithPath:path] error:&error]:nil;if(!imported){complete=NO;[RuntimeDiagnostics.shared recordEvent:@"bundled_media_script_import_failed" category:@"resource_import" fields:@{@"resource_id":pluginID,@"error_code":@(error.code),@"error_message":error.localizedDescription?:@"bundle resource missing or invalid"}];}else{NSMutableDictionary *service=[imported mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];service[@"name"]=@"可可影视播放源";service[@"bundledResourceID"]=pluginID;service[@"capabilities"]=@[@"search",@"detail",@"play"];manifest[@"name"]=@"可可影视播放源";manifest[@"capabilities"]=@[@"search",@"detail",@"play"];service[@"manifest"]=manifest;[ServiceStore save:service];changed=YES;}}
         }
-        NSString *pluginID=@"zen.keke.rex.stream";BOOL pluginFound=NO;for(NSDictionary *service in [ServiceStore services])if([service[@"bundledResourceID"] isEqual:pluginID]){pluginFound=YES;break;}
-        if(!pluginFound){NSString *path=[NSBundle.mainBundle pathForResource:@"zen-keke-stream" ofType:@"js" inDirectory:@"BuiltinMedia"];NSError *error=nil;NSDictionary *imported=path?[MediaPackageImporter importFile:[NSURL fileURLWithPath:path] error:&error]:nil;if(!imported){complete=NO;[RuntimeDiagnostics.shared recordEvent:@"bundled_media_script_import_failed" category:@"resource_import" fields:@{@"resource_id":pluginID,@"error_code":@(error.code),@"error_message":error.localizedDescription?:@"bundle resource missing or invalid"}];}else{NSMutableDictionary *service=[imported mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];service[@"name"]=@"可可影视播放源";service[@"bundledResourceID"]=pluginID;service[@"capabilities"]=@[@"search",@"detail",@"play"];manifest[@"name"]=@"可可影视播放源";manifest[@"capabilities"]=@[@"search",@"detail",@"play"];service[@"manifest"]=manifest;[ServiceStore save:service];changed=YES;}}
         NSArray *scriptSpecs=@[
             @{@"file":@"hongguo-python",@"extension":@"py",@"runtime":@"python",@"id":@"builtin-hongguo-python",@"name":@"红果短剧 Python 版"},
             @{@"file":@"hongguo-node",@"extension":@"js",@"runtime":@"node",@"id":@"builtin-hongguo-node",@"name":@"红果短剧 JS 版"}
         ];
+        NSArray *capabilities=@[@"home",@"category",@"search",@"detail",@"play",@"proxy"];
         for(NSDictionary *spec in scriptSpecs){
-            NSString *identifier=spec[@"id"];BOOL found=NO;for(NSDictionary *service in [ServiceStore services])if([service[@"bundledResourceID"] isEqual:identifier]){found=YES;break;}if(found)continue;
-            NSString *path=[NSBundle.mainBundle pathForResource:spec[@"file"] ofType:spec[@"extension"] inDirectory:@"BuiltinMedia"];NSError *error=nil;NSDictionary *imported=path?[MediaPackageImporter importFile:[NSURL fileURLWithPath:path] companionFiles:@{} runtimeHint:spec[@"runtime"] error:&error]:nil;
+            NSString *identifier=spec[@"id"];NSDictionary *existingService=nil;
+            for(NSDictionary *service in [ServiceStore services])if([service[@"bundledResourceID"] isEqual:identifier]){existingService=service;break;}
+            NSString *path=[NSBundle.mainBundle pathForResource:spec[@"file"] ofType:spec[@"extension"] inDirectory:@"BuiltinMedia"];
+            if(existingService){
+                NSString *installedPath=[ServiceStore codePath:existingService];
+                NSData *bundleData=path?[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL]:nil;
+                NSData *installedData=installedPath.length?[NSData dataWithContentsOfFile:installedPath options:NSDataReadingMappedIfSafe error:NULL]:nil;
+                BOOL codeUpdated=NO;
+                if(bundleData.length&&installedPath.length&&![installedData isEqualToData:bundleData]){
+                    [NSFileManager.defaultManager createDirectoryAtPath:installedPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
+                    codeUpdated=[bundleData writeToFile:installedPath options:NSDataWritingAtomic error:NULL];
+                }
+                NSDictionary *manifest=[existingService[@"manifest"] isKindOfClass:NSDictionary.class]?existingService[@"manifest"]:@{};
+                NSDictionary *opts=[manifest[@"options"] isKindOfClass:NSDictionary.class]?manifest[@"options"]:@{};
+                BOOL metaNeedsUpdate=![existingService[@"capabilities"] isEqual:capabilities]||![manifest[@"capabilities"] isEqual:capabilities]||[opts[@"playTimeoutMs"] integerValue]<120000;
+                if(codeUpdated||metaNeedsUpdate){
+                    NSMutableDictionary *service=[existingService mutableCopy],*updatedManifest=[manifest mutableCopy]?:[NSMutableDictionary dictionary];
+                    NSMutableDictionary *options=[opts mutableCopy]?:[NSMutableDictionary dictionary];options[@"playTimeoutMs"]=@120000;
+                    service[@"capabilities"]=capabilities;updatedManifest[@"capabilities"]=capabilities;updatedManifest[@"options"]=options;
+                    if(codeUpdated)service[@"updated"]=@(NSDate.date.timeIntervalSince1970);
+                    service[@"manifest"]=updatedManifest;[ServiceStore save:service];changed=YES;
+                }
+                continue;
+            }
+            if(alreadySeeded)continue;
+            NSError *error=nil;NSDictionary *imported=path?[MediaPackageImporter importFile:[NSURL fileURLWithPath:path] companionFiles:@{} runtimeHint:spec[@"runtime"] error:&error]:nil;
             if(!imported){complete=NO;[RuntimeDiagnostics.shared recordEvent:@"bundled_media_script_import_failed" category:@"resource_import" fields:@{@"resource_id":identifier,@"error_code":@(error.code),@"error_message":error.localizedDescription?:@"bundle resource missing or invalid"}];continue;}
-            NSMutableDictionary *service=[imported mutableCopy],*manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];NSArray *capabilities=@[@"home",@"category",@"search",@"detail",@"play"];NSMutableDictionary *options=[manifest[@"options"] mutableCopy]?:[NSMutableDictionary dictionary];options[@"playTimeoutMs"]=@120000;
+            NSMutableDictionary *service=[imported mutableCopy],*manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];NSMutableDictionary *options=[manifest[@"options"] mutableCopy]?:[NSMutableDictionary dictionary];options[@"playTimeoutMs"]=@120000;
             service[@"name"]=spec[@"name"];service[@"bundledResourceID"]=identifier;service[@"capabilities"]=capabilities;manifest[@"name"]=spec[@"name"];manifest[@"capabilities"]=capabilities;manifest[@"options"]=options;service[@"manifest"]=manifest;[ServiceStore save:service];changed=YES;
         }
-        if(complete)[preferences setBool:YES forKey:seedKey];
+        if(complete&&!alreadySeeded)[preferences setBool:YES forKey:seedKey];
         dispatch_async(dispatch_get_main_queue(),^{self.bundledMediaSeedInProgress=NO;if(changed){[self refreshConfigurationPage];MediaBrowserViewController *browser=[self.tabPages[@2] isKindOfClass:MediaBrowserViewController.class]?self.tabPages[@2]:nil;[browser refreshSources];}if(!complete)[self log:@"内置影视资源注册未完成；下次启动会继续检查缺少的资源"];
         });
     });

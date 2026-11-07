@@ -718,9 +718,8 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     if(indexPath.row<0||indexPath.row>=self.profiles.count)return 96;
     NSDictionary *profile=self.profiles[indexPath.row];BOOL plugin=[profile[@"type"] isEqual:@"plugin"],tvbox=[profile[@"type"] isEqual:@"tvbox"],hasExportMenu=plugin||[profile[@"source"] length]||[profile[@"native"] boolValue];
     CGFloat accessoryWidth=plugin?104:(tvbox?44:(hasExportMenu?104:56)),cardWidth=MAX(1,tableView.bounds.size.width-40);
-    // The latency badge shares the title row, so match its reserved width in
-    // the row-height measurement as well as the actual Auto Layout geometry.
-    CGFloat textWidth=MAX(44,cardWidth-15-25-13-14-accessoryWidth-56);
+    // Match the actual Auto Layout width of profileTitleLabel and profileDetailLabel.
+    CGFloat textWidth=MAX(44,cardWidth-14-36-12-8-accessoryWidth);
     UIFont *titleFont=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline],*detailFont=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     CGRect titleBounds=[[self resourceTitleForProfile:profile] boundingRectWithSize:CGSizeMake(textWidth,ceil(titleFont.lineHeight*2)) options:NSStringDrawingUsesLineFragmentOrigin|NSStringDrawingUsesFontLeading attributes:@{NSFontAttributeName:titleFont} context:nil];
     NSMutableParagraphStyle *paragraph=[NSMutableParagraphStyle new];paragraph.lineBreakMode=NSLineBreakByCharWrapping;
@@ -753,8 +752,8 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     HostSetLayerBorderColor(c, HostBorder());
     c.clipsToBounds = YES;
     c.textLabel.textColor = HostText();
-    c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
-    c.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    c.textLabel.font = HostRoundedFont(16, UIFontWeightBold, UIFontTextStyleHeadline);
+    c.detailTextLabel.font = HostMonospacedDigitFont(12.5, UIFontWeightRegular, UIFontTextStyleFootnote);
     c.textLabel.adjustsFontForContentSizeCategory=YES;
     c.detailTextLabel.adjustsFontForContentSizeCategory=YES;
     c.textLabel.numberOfLines=2;
@@ -993,6 +992,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     label.font=HostMonospacedDigitFont(12.5,UIFontWeightMedium,UIFontTextStyleFootnote);
     label.adjustsFontForContentSizeCategory=YES;
     label.numberOfLines=0;
+    label.lineBreakStrategy=NSLineBreakStrategyPushOut;
     label.accessibilityIdentifier=@"resource-list-summary";
     [container addSubview:label];
     [NSLayoutConstraint activateConstraints:@[[label.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:22],[label.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-16],[label.topAnchor constraintEqualToAnchor:container.topAnchor],[label.bottomAnchor constraintEqualToAnchor:container.bottomAnchor]]];

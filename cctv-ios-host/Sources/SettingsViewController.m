@@ -409,7 +409,18 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     if([self.selectedCategoryKey isEqualToString:nextKey])return;
     self.selectedCategoryKey=nextKey;
     [self applyCategoryFilter];
-    [self setupHeroHeaderView];
+    NSArray<UIView *> *pills=self.categoryFilterStack.arrangedSubviews;
+    for(NSUInteger idx=0; idx<pills.count && idx<categories.count; idx++){
+        if(![pills[idx] isKindOfClass:UIButton.class])continue;
+        UIButton *pill=(UIButton *)pills[idx];
+        BOOL selected=[categories[idx][@"id"] isEqualToString:nextKey];
+        pill.titleLabel.font=[UIFont systemFontOfSize:13 weight:selected?UIFontWeightSemibold:UIFontWeightMedium];
+        pill.tintColor=selected?HostOnAccent():HostSecondaryText();
+        [pill setTitleColor:selected?HostOnAccent():HostText() forState:UIControlStateNormal];
+        pill.backgroundColor=selected?HostAccent():HostCard();
+        HostSetLayerBorderColor(pill,selected?HostAccent():HostBorder());
+    }
+    if(self.categoryFilterScroll)[self.categoryFilterScroll scrollRectToVisible:CGRectInset(sender.frame,-16,0) animated:YES];
     [self.table reloadData];
 }
 
@@ -516,12 +527,12 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     NSString *key=row[@"key"];
     if([row[@"appearance"] boolValue]){
         UISegmentedControl *style=[[UISegmentedControl alloc] initWithItems:@[@"系统",@"浅色",@"深色"]];
-        [style setTitleTextAttributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];
+        UIFont *segFont=HostRoundedFont(12.5,UIFontWeightSemibold,UIFontTextStyleSubheadline);
         NSString *mode=HostThemeMode();
         style.selectedSegmentIndex=[mode isEqual:@"system"]?0:([mode isEqual:@"light"]?1:2);
         style.selectedSegmentTintColor=HostAccent();
-        [style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];
-        [style setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];
+        [style setTitleTextAttributes:@{NSFontAttributeName:segFont,NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];
+        [style setTitleTextAttributes:@{NSFontAttributeName:segFont,NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];
         style.accessibilityIdentifier=HostThemeModePreferenceKey;
         style.accessibilityLabel=row[@"title"];
         [style addTarget:self action:@selector(appearanceChanged:) forControlEvents:UIControlEventValueChanged];
@@ -531,13 +542,13 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     else if([row[@"segmented"] boolValue]){
         NSArray *options=row[@"options"];
         UISegmentedControl *seg=[[UISegmentedControl alloc] initWithItems:options];
-        [seg setTitleTextAttributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];
+        UIFont *segFont=HostRoundedFont(12.5,UIFontWeightSemibold,UIFontTextStyleSubheadline);
         NSInteger saved=[[NSUserDefaults standardUserDefaults] objectForKey:key]?[[NSUserDefaults standardUserDefaults] integerForKey:key]:[row[@"default"] integerValue];
         NSInteger index=[row[@"values"] indexOfObject:@(saved)];
         seg.selectedSegmentIndex=index==NSNotFound?0:index;
         seg.selectedSegmentTintColor=HostAccent();
-        [seg setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];
-        [seg setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];
+        [seg setTitleTextAttributes:@{NSFontAttributeName:segFont,NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];
+        [seg setTitleTextAttributes:@{NSFontAttributeName:segFont,NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];
         seg.accessibilityIdentifier=key;
         seg.accessibilityLabel=row[@"title"];
         [seg addTarget:self action:@selector(segmentedChanged:) forControlEvents:UIControlEventValueChanged];

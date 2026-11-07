@@ -321,6 +321,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(nanoServiceV2){clean[@"name"]=[nanoManifest[@"name"] isKindOfClass:NSString.class]?nanoManifest[@"name"]:clean[@"name"];clean[@"capabilities"]=nanoCapabilities;clean[@"pluginVersion"]=[nanoManifest[@"version"] isKindOfClass:NSString.class]?nanoManifest[@"version"]:@"";clean[@"apiVersion"]=@2;}
     if(verifiedLocalChecksums.count)clean[@"verifiedLocalChecksums"]=verifiedLocalChecksums;
     if([result[@"options"] isKindOfClass:NSDictionary.class] || [result[@"options"] isKindOfClass:NSString.class])clean[@"options"]=result[@"options"];
+    else if(([text containsString:@"fqnovel.com"]||[text containsString:@"snssdk.com"])&&[text containsString:@"localProxy"])clean[@"options"]=@{@"playTimeoutMs":@120000};
     BOOL androidTVBoxIntegration=[text containsString:@"from java import"] || [text containsString:@"jclass("] || [text containsString:@"/sdcard/TV/CustomCsp"];
     if([runtime isEqual:@"python"] && androidTVBoxIntegration)clean[@"compatibilityNote"]=@"此 Python Spider 含 Android/TVBox 本地目录或 Java 界面逻辑。iOS 不提供 /sdcard、Android Activity 或向其他 TVBox 写入配置的能力；其标准影视接口仍可尝试使用。";
     clean[@"packageRoot"]=root;
