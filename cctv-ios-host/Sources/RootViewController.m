@@ -3564,11 +3564,7 @@ configureCatalogNavigation;
     self.shownChannels = sorted;
     [self.table reloadData];
     [self.channelGrid reloadData];
-    NSString *empty=self.query.length?@"没有找到匹配频道":(isRecentsSegment?@"暂无最近观看记录
-点选任意频道即可自动记录上次播放":(self.favoritesOnly?@"还没有收藏频道
-长按或左滑任意频道即可加入收藏":(self.subscriptionCatalog?@"暂无订阅频道
-点击下方按钮或右下角更多 → 添加直播订阅":(!CCTVBoolPreference(@"nativeChannelsEnabled",YES)?@"官方频道已关闭
-点击下方按钮可立即启用央视与卫视频道":@"当前分组下暂无可用频道"))));
+    NSString *empty=self.query.length?@"没有找到匹配频道":(isRecentsSegment?@"暂无最近观看记录\n点选任意频道即可自动记录上次播放":(self.favoritesOnly?@"还没有收藏频道\n长按或左滑任意频道即可加入收藏":(self.subscriptionCatalog?@"暂无订阅频道\n点击下方按钮或右下角更多 → 添加直播订阅":(!CCTVBoolPreference(@"nativeChannelsEnabled",YES)?@"官方频道已关闭\n点击下方按钮可立即启用央视与卫视频道":@"当前分组下暂无可用频道"))));
     self.channelGrid.backgroundView=sorted.count?nil:[self buildCatalogEmptyBackgroundViewWithMessage:empty];
     self.table.backgroundView=sorted.count?nil:[self buildCatalogEmptyBackgroundViewWithMessage:empty];
 }
@@ -4742,8 +4738,7 @@ configureCatalogNavigation;
     NSString *airPlayDevice = [self activeAirPlayDeviceName];
     NSString *castURL = [self castableStreamURLForCurrentChannel];
     NSString *statusSummary = airPlayDevice.length
-        ? [NSString stringWithFormat:@"当前已连接：%@
-支持 AirPlay 无线投屏及智能电视局域网拉流。", airPlayDevice]
+        ? [NSString stringWithFormat:@"当前已连接：%@\n支持 AirPlay 无线投屏及智能电视局域网拉流。", airPlayDevice]
         : @"支持 AirPlay 无线音视频投屏、智能切换明文投屏线路及局域网电视地址复制。";
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:self.channelName.length ? [NSString stringWithFormat:@"%@ · 投屏中心", self.channelName] : @"投屏中心"
                                                                    message:statusSummary

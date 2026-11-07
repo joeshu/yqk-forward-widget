@@ -462,7 +462,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         [children addObject:action];
     }
     UIAction *moreFilter=[UIAction actionWithTitle:@"筛选与诊断摘要…" image:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] identifier:nil handler:^(__unused UIAction *a){[weakSelf showResourceFilters];}];
-    [children addObject:[UIMenu menuWithTitle:@"" options:UIMenuOptionsDisplayInline children:@[moreFilter]]];
+    [children addObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[moreFilter]]];
     self.sortFilterButton.menu=[UIMenu menuWithTitle:@"资源排序方式" children:children];
 }
 - (NSString *)statusBadgeTextForProfile:(NSDictionary *)profile textColor:(UIColor * __autoreleasing *)textColorOut backgroundColor:(UIColor * __autoreleasing *)bgColorOut borderColor:(UIColor * __autoreleasing *)borderColorOut {
