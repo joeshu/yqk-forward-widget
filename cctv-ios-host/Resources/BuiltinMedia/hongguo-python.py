@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, parse_qs, urlencode
 from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedirectHandler
 
-VERSION = '1.0.5-cctvhost-r4'
+VERSION = '1.0.5-cctvhost-r5'
 ORIGIN = 'https://hongguoduanju.com'
 COMPAT_PATH = '/api/video/protected/fallback-play-info'
 UA_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -995,10 +995,14 @@ def _card(item):
 
 
 ########## 签名取流 + CENC 解密 ##########
-# App 的旧 novel/player 模型 POST 对匿名固定设备会返回 200 空包。
-# 使用 video_tab 签名 GET 获取 video_model，再由 spade 派生 CENC 密钥并提供本地 MP4。
+########## 签名取流 + CENC 解密 ##########
+# 通过进程内匿名设备注册（service/2/device_register，ttEncrypt 加密体）
+# 获取 device_id + iid，再用 multi_video_model/v1 + x-medusa 签名获取 5 档 video_model，
+# 由 spade 解密 CDN 地址、派生 CENC 密钥并在本地完成 AES-CTR 解密交付。
+# 设备身份仅在进程内有效，不跨重启复用；空响应时换备用域名重试一次。
 import base64 as _b64
 import binascii as _binascii
+import gzip as _gzip
 import hashlib as _hashlib
 import json as _json
 import os as _os
@@ -1009,13 +1013,22 @@ import subprocess as _subprocess
 import threading as _threading
 import time as _time
 import urllib.request as _ureq
+import uuid as _uuid
 from http.server import BaseHTTPRequestHandler as _BHTTPH, ThreadingHTTPServer as _THS
+from urllib.parse import quote as _quote
 
-_VIDEO_MODEL_MULTI_API = "https://reading.snssdk.com/reading/bookapi/video_tab/multi_video_model/v1/"
-_SIGN_UA = ("com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; "
-            "Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 "
-            "QuicVersion:c67e9834 2025-09-08)")
-_SIGN_DEVICE = {
+_DEVICE_REGISTER_API = ("https://log5-applog-lf.fqnovel.com/service/2/device_register/"
+                        "?tt_data=a&cronet_version=8d40f833_2026-03-03"
+                        "&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1")
+_VIDEO_MODEL_HOST = "api5-normal-sinfonlineb.fqnovel.com"
+_VIDEO_MODEL_ALT_HOST = "api5-normal-hl.fqnovel.com"
+_VIDEO_MODEL_PATH = "/novel/player/multi_video_model/v1/"
+_PLAYBACK_UA = ("com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; "
+                "Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)")
+_REGISTER_UA = ("com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; "
+                "Build/BP2A.250605.031.A3)")
+# 播放请求 query 用的设备画像（与参考 JS 的 DEVICE 一致：7.1.3.32 / 71332）。
+_PLAYBACK_DEVICE = {
     "ac": "wifi", "channel": "update_64", "aid": "8662", "app_name": "novelread",
     "version_code": "71332", "version_name": "7.1.3.32", "device_platform": "android",
     "os": "android", "ssmix": "a", "device_type": "25053RT47C", "device_brand": "Redmi",
@@ -1031,10 +1044,34 @@ _SPADE_CONST = _binascii.unhexlify(
 )
 _SIGN_CACHE = {}
 _SIGN_CACHE_TTL = 300
+_DEVICE_SESSION = None
+_DEVICE_LOCK = _threading.RLock()
+_PROCESS_NONCE = _b64.urlsafe_b64encode(_os.urandom(18)).rstrip(b"=").decode("ascii")
+_PROCESS_STARTED = int(_time.time() * 1000)
 _DEC_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "decrypt_cache")
 _DEC_SRV = None
 _DEC_PORT = int(_os.environ.get("HGTV_DEC_PORT", "8789"))
 _QORDER = ["1080p", "720p", "540p", "480p", "360p"]
+
+
+def _u32(value):
+    return int(value) & 0xFFFFFFFF
+
+
+def _rol32(value, count):
+    n = int(count) & 31
+    x = _u32(value)
+    if n == 0:
+        return x
+    return ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF
+
+
+def _ror32(value, count):
+    n = int(count) & 31
+    x = _u32(value)
+    if n == 0:
+        return x
+    return ((x >> n) | (x << (32 - n))) & 0xFFFFFFFF
 
 
 def _md5_bytes(b):
@@ -1058,19 +1095,21 @@ def _revbits(v):
     return r
 
 
-def _rc4(data, key):
+def _rc4_gorgon(data, key):
+    # 与参考 JS 的 rc4Gorgon 逐行一致：KSA 只做 s[i] = s[j]（不换回），
+    # PRGA 同样不交换，只用 s[(y + y) & 255] 输出。不要换成标准 RC4。
     s = list(range(256))
     j = 0
     for i in range(256):
         j = (j + s[i] + key[i % len(key)]) & 0xFF
-        s[i], s[j] = s[j], s[i]
+        s[i] = s[j]
     out = bytearray()
     i = j = 0
     for v in data:
-        i = (i + 1) & 0xFF
+        i += 1
         x = s[i]
-        j = (j + x) & 0xFF
-        y = s[j]
+        j += x
+        y = s[j & 0xFF]
         s[i] = y
         out.append(v ^ s[(y + y) & 0xFF])
     return bytes(out)
@@ -1081,7 +1120,7 @@ def _x_gorgon(query, body, ts, rnd):
     payload = _md5_bytes(query)[:4] + (_md5_bytes(body)[:4] if body else b"\0" * 4) \
         + b"\0" * 4 + sdk + _be32(ts)
     key = [0x4A, 0x40, 0x16, (rnd >> 8) & 0xFF, 0x47, 0x6C, 0x01, rnd & 0xFF]
-    out = bytearray(_rc4(payload, key))
+    out = bytearray(_rc4_gorgon(payload, key))
     n = len(out)
     for i in range(n):
         v = ((out[i] >> 4) | (out[i] << 4)) & 0xFF
@@ -1099,7 +1138,7 @@ def _ror64(x, n):
 
 
 def _helios(ts):
-    rnd = _random.randint(0, 0xFFFFFFFF)
+    rnd = int(_random.random() * 0x100000000)
     digest = _md5_bytes(_le32(rnd) + b"8662")
     ascii_hex = digest.hex().encode("ascii")
     words = [int.from_bytes(ascii_hex[i:i + 8], "little") for i in (0, 8, 16, 24)]
@@ -1138,6 +1177,20 @@ def _get_iv(iv, data):
     return v
 
 
+def _sum_md5(data):
+    check = 0x20220420
+    for i in range(12):
+        if (i & 1) == 0:
+            temp = ((check >> 3) ^ check) & 0xFFFFFFFF
+            check = (data[i] ^ ((check << 7) & 0xFFFFFFFF)) & 0xFFFFFFFF
+        else:
+            temp = ((check >> 5) ^ check) & 0xFFFFFFFF
+            check = (data[i] | ((check << 11) & 0xFFFFFFFF)) & 0xFFFFFFFF
+            check = (~check) & 0xFFFFFFFF
+        check = (check ^ temp) & 0xFFFFFFFF
+    return ((check | 4) ^ 0x1000000) & 0xFFFFFFFF
+
+
 def _sm3(b):
     if isinstance(b, str):
         b = b.encode()
@@ -1147,7 +1200,8 @@ def _sm3(b):
 
 
 def _branch_of(url, body, ts):
-    q = _sm3(url.split("?", 1)[1].encode())
+    q_part = url.split("?", 1)[1] if "?" in url else ""
+    q = _sm3(q_part.encode())
     bm = _md5_bytes(body) if body else b"\0" * 16
     iv = _get_iv(_get_iv(_get_iv(0x20230928, q), bm), _le32(ts))
     low = iv & 15
@@ -1155,43 +1209,679 @@ def _branch_of(url, body, ts):
 
 
 def _pct(s):
-    return "".join(
-        c if (c.isalnum() or c in "-_.~") else "%%%02X" % ord(c) for c in str(s))
+    # 与参考 JS 的 pythonUrlEncode 一致：encodeURIComponent，之后再把 ! ' ( )
+    # 编成 %XX；* 保持不编码；非 ASCII 按 UTF-8 字节编码。
+    encoded = _quote(str(s), safe="-_.!~*'()")
+    return "".join(("%%%02X" % ord(ch)) if ch in "!\'()" else ch for ch in encoded)
 
 
-def _signed_request(vid):
-    """Build a current video_tab GET request with a fresh, non-persistent device pair."""
-    ts = int(_time.time())
-    vals = dict(_SIGN_DEVICE)
-    vals.update({
-        "iid": str(_random.randrange(10**17, 10**18)),
-        "device_id": str(_random.randrange(10**17, 10**18)),
-        "ts": str(ts),
-        "_rticket": str(int(_time.time() * 1000)),
-        "video_id": str(vid),
-        "need_all_video_definition": "1",
-        "video_platform": "1024",
-    })
-    query = "&".join("%s=%s" % (_pct(k), _pct(v)) for k, v in vals.items())
-    url = _VIDEO_MODEL_MULTI_API + "?" + query
-    rnd = _random.randint(0, 65535)
-    headers = {
-        "User-Agent": _SIGN_UA,
+def _varint(value):
+    n = int(value)
+    out = bytearray()
+    while n > 127:
+        out.append((n & 127) | 128)
+        n >>= 7
+    out.append(n)
+    return bytes(out)
+
+
+def _zigzag(value):
+    n = int(value)
+    return (-n) * 2 - 1 if n < 0 else n * 2
+
+
+def _proto_field(tag, value, typ="string"):
+    if value is None or value == "":
+        return b""
+    if typ in ("bytes", "string", "message"):
+        if typ == "bytes":
+            body = bytes(value)
+        elif typ == "message":
+            body = bytes(value)
+        else:
+            body = str(value).encode("utf-8")
+        return _varint((int(tag) << 3) | 2) + _varint(len(body)) + body
+    if typ == "float":
+        return _varint((int(tag) << 3) | 5) + struct.pack("<f", float(value))
+    return _varint(int(tag) << 3) + _varint(_zigzag(value) if typ == "sint" else value)
+
+
+def _proto(fields):
+    out = []
+    for field in fields:
+        tag, value = field[0], field[1]
+        typ = field[2] if len(field) > 2 else "string"
+        out.append(_proto_field(tag, value, typ))
+    return b"".join(out)
+
+
+_BRANCH2_SV = [0xa7aefe20, 0x7149f1d6, 0x47e4ca07, 0xe9b58f67, 0x93b924de, 0xc614d0f5, 0x38afe0ef, 0xb2bbad73, 0xe24444c3, 0x9d3aec9b, 0xdf7b37e4, 0xd8b16d40, 0xf8ac31b8, 0x76b9a90b, 0x31d833ee, 0x953fce64, 0x353595a4, 0x4609c13b, 0x36925008, 0x8c6d0925, 0x5df5c177, 0x1cfbf52b, 0x8a4fa7f0, 0x114ca35e, 0x8193f984, 0x7a7a8733, 0x316ab4d5, 0x3c20cfc9, 0xa6d84453, 0x3a18500c, 0x798ec47a, 0x97a76b28, 0x66c4ff96, 0x51716443, 0xdd2fc3b, 0xb5696da7, 0xbbeb3ac5, 0x5c53d204, 0xd32608ce, 0x7279b9ec, 0xf4188ecf, 0xf7d793db, 0x332cc491, 0xab76ae15, 0x9bebe727, 0x18a01384, 0x5be9f8a7, 0x5f90a754, 0x39b663c0, 0x36673c83, 0x7c92f514, 0x9d7d94d7, 0xe2e8d9aa, 0x5f7e9ea9, 0x7abd4551, 0x569e05da, 0x40a25632, 0x3df5a9a5, 0xbab37d80, 0x454286dc, 0x3f5d4e78, 0x3d7b75d, 0xb1fe4af7, 0xa5ab26a3]
+_BRANCH2_ORDERS = bytes.fromhex("0f0704000908030a060b050d0e010c020f05080c0009020103070e060b0a0d04060500070c000a04080f010b0d09020e060b02050403080101070a000d0c090e0d070e0f0b0208030c0509010004060a0d0902060f0b0a040807000c0503010e0c090f07060f030e020d0405010b0a000c050a090e0802040407030f01060b000b0f0408020a0700090d06010e03050c0b060a0508020c03070f0e090d0001040906080f050800040a0b030d01020c0e090d0c0604070a03030f00080105020e01000d0f090a0b0e0402080703060c0501080a0c0f0905060b000304020e070d04080f000c0f0e0d0a01060207090503040205080d0b0a0606000e0f070c09030a08040f000b01060d0c0709030e05020a070b050f00020e0108030d0c0609040d070f08050f06040b0a0e0c090002030d0c020704010b0e0e08060f09050003")
+
+
+def _md5_v3_step(kind, a, b, c, d, m, shift, constant):
+    if kind == 0:
+        f = (b & c) | ((~b) & d)
+    elif kind == 1:
+        f = (b & d) | (c & (~d))
+    elif kind == 2:
+        f = b ^ c ^ d
+    else:
+        f = c ^ (b | (~d))
+    f &= 0xFFFFFFFF
+    return (b + _rol32((a + f + m + constant) & 0xFFFFFFFF, shift)) & 0xFFFFFFFF
+
+
+def _md5_sum_v3(message, count_v2, orders, count_v1):
+    sv = [_ror32(v, count_v1) for v in _BRANCH2_SV]
+    start = [_ror32(0x79e0f2fb, count_v2), _ror32(0xc8b52570, count_v2),
+             _ror32(0xebc2f8cd, count_v2), _ror32(0x7c104d93, count_v2)]
+    end_count = (count_v2 + 6) & 0xFF
+    end = [_ror32(0x19be4866, end_count), _ror32(0xe85986b4, end_count),
+           _ror32(0xe19b326e, end_count), _ror32(0x71d1d7d4, end_count)]
+    m = [int.from_bytes(message[i * 4:(i + 1) * 4], "little") for i in range(16)]
+    a, b, c, d = start
+
+    def run(kind, shifts, offset):
+        nonlocal a, b, c, d
+        for i in range(16):
+            phase = i & 3
+            if phase == 0:
+                a = _md5_v3_step(kind, a, b, c, d, m[orders[offset + i]], shifts[i], sv[offset + i])
+            elif phase == 1:
+                d = _md5_v3_step(kind, d, a, b, c, m[orders[offset + i]], shifts[i], sv[offset + i])
+            elif phase == 2:
+                c = _md5_v3_step(kind, c, d, a, b, m[orders[offset + i]], shifts[i], sv[offset + i])
+            else:
+                b = _md5_v3_step(kind, b, c, d, a, m[orders[offset + i]], shifts[i], sv[offset + i])
+
+    run(0, [7, 12, 17, 22] * 4, 0)
+    run(1, [5, 9, 14, 20] * 4, 16)
+    run(2, [4, 11, 16, 23] * 4, 32)
+    run(3, [6, 10, 15, 21] * 4, 48)
+    ret = b"".join((((start[i] + value) & 0xFFFFFFFF) ^ end[i]).to_bytes(4, "little")
+                    for i, value in enumerate([a, b, c, d]))
+    return ret + _le32(_sum_md5(ret))
+
+
+def _branch2_f13(iv, query_sm3, body_md5, ts_bytes, khronos):
+    v = (iv & 13) * 86
+    iv_v0 = ((v >> 15) & 0xFF) + ((v >> 8) & 0xFF)
+    n1 = [0x8980f29b, 0xeb549c7f, 0xb08726db, 0xd40cb5e6, 0xe8f559e4][iv_v0]
+    count_v1 = (n1 + khronos + 1) & 0xFF
+    count_v2 = (n1 + khronos) & 0xFFFFFFFF
+    shift = (count_v2 + 5) & 7
+    seed = [0x84, 0x96, 0x77, 0x9d, 0xd4, 0x15, 0x0b, 0xf8]
+    pad = bytes(((value | (value << 8)) >> shift) & 0xFF for value in seed)
+    data = query_sm3 + body_md5 + ts_bytes + pad + bytes.fromhex("a0010000")
+    return _md5_sum_v3(data, count_v2, _BRANCH2_ORDERS[iv_v0 * 64:(iv_v0 + 1) * 64], count_v1)
+
+
+def _hash_f13(query_sm3, body_md5, ts_bytes, khronos):
+    iv = _get_iv(_get_iv(_get_iv(0x20230928, query_sm3), body_md5), ts_bytes)
+    low = iv & 15
+    iv_v0 = (low * 171) >> 9
+    branch = low - iv_v0 * 3
+    if branch == 2:
+        return _branch2_f13(iv, query_sm3, body_md5, ts_bytes, khronos)
+    if branch != 0:
+        return query_sm3[:16] + body_md5 + _le32(_sum_md5(query_sm3 + body_md5))
+    iv_v1 = [0xc4a78580, 0xb3c0fd39, 0xc58c5686, 0xc9aa3ba7, 0xf5a7adf2, 0x963c2ed1][iv_v0]
+    count_v1 = (iv_v1 + khronos + 1) & 0xFF
+    count_v2 = (iv_v1 + khronos) & 0xFFFFFFFF
+    tt02 = [0xebb64faf, 0x7aadcc2, 0xcf3187bf, 0xe01138ff, 0x6d0bfcff, 0x5a30a3be, 0xb41ad638, 0x34180eb8, 0xf233eb6f, 0xb1a584cc, 0xccc30dc7, 0x47d1db51, 0xd55653de, 0x70a84fa1, 0x57473c12, 0xf76f0288, 0x2c077f0a, 0xda0dcad0, 0xfbb86f6c, 0xfdc4cf00, 0x688a020d, 0xe676c6a6, 0x8cd6338b, 0x1a3c8d0e, 0xcce8b06b, 0x6ad0ed0b, 0xa0522717, 0xdc71ac83, 0x2285db71, 0xd5b4dda6, 0x736f8650, 0x6560306c, 0x617ce2a6, 0xe423417e, 0xa40e143, 0x544e4032, 0x88dffb2a, 0x716c1ae0, 0x4c467a88, 0x5b23bb3, 0xe1d0b866, 0xbaa3dcb8, 0xae3374d3, 0xc3381a50, 0x1702f75b, 0xfe6da368, 0xf0b4cf48, 0x4e0ffbb8, 0x72aad10d, 0x26c53a3d, 0xf2bce0f6, 0xb4557581, 0x4a257fdd, 0x8c3182a2, 0xab0b3b86, 0x3d5dfb14, 0x4f103634, 0xd37b52d7, 0x444eff16, 0xeb0a33d1, 0x6ca86f6e, 0x284ba7, 0x8387cfa, 0x5fb37586]
+    tt = [_ror32(value, count_v1) for value in tt02]
+    n0 = (count_v2 + 2) & 7
+    seed = [0xFA, 0x45, 0x61, 0xD7]
+    pad = bytes(((value | (value << 8)) >> n0) & 0xFF for value in seed)
+    data = query_sm3 + body_md5 + ts_bytes + pad + bytes.fromhex("00000000000001a0")
+    di = [int.from_bytes(data[i:i + 4], "big") for i in range(0, len(data), 4)]
+    di0 = di[0]
+    for i in range(112):
+        di1 = di[i + 1]
+        di14 = di[i + 14]
+        r1 = _rol32(di1, 14) ^ _rol32(di1, 25) ^ (di1 >> 3)
+        r2 = _rol32(di14, 13) ^ _rol32(di14, 15) ^ (di14 >> 10)
+        di.append((di0 + di[i + 9] + r1 + r2) & 0xFFFFFFFF)
+        di0 = di1
+    init = [_ror32(value, count_v2 & 31) for value in
+            [0x7aba4fc8, 0x67166507, 0x6403fa00, 0x340f512f,
+             984304912, 3005047866, 2874125293, 2152413264]]
+    chosen = [[101,5,7,6,3,2,1,0,5,4,3],[96,0,6,7,5,3,2,1,5,4,4],[96,7,6,2,1,4,0,5,4,3,5],[99,3,6,2,4,5,1,0,0,7,6],[96,0,5,6,7,3,1,2,5,4,4],[100,2,0,3,5,4,6,7,2,1,5]][iv_v0]
+    d = list(init)
+    for i in range(chosen[0]):
+        base = iv_v1 + i
+        n0v = di[base & 127]
+        n1 = ((d[chosen[3]] ^ d[chosen[4]]) & d[chosen[1]]) ^ d[chosen[3]]
+        n2 = _rol32(d[chosen[1]], 26) ^ _rol32(d[chosen[1]], 21) ^ _rol32(d[chosen[1]], 7)
+        n4 = (n0v + n1 + n2 + tt[base & 63] + d[chosen[5]]) & 0xFFFFFFFF
+        n5 = _rol32(d[chosen[2]], 30) ^ _rol32(d[chosen[2]], 19) ^ _rol32(d[chosen[2]], 10)
+        n6 = (d[chosen[2]] & d[chosen[6]]) | ((d[chosen[2]] | d[chosen[6]]) & d[chosen[7]])
+        n7 = (n5 + n6) & 0xFFFFFFFF
+        old = d[chosen[9]]
+        d.insert(0, d.pop())
+        d[chosen[10]] = (n7 + n4) & 0xFFFFFFFF
+        d[chosen[8]] = (old + n4) & 0xFFFFFFFF
+    ret = bytearray(32)
+    for i in range(8):
+        ret[i * 4:(i + 1) * 4] = ((d[i] + init[i]) & 0xFFFFFFFF).to_bytes(4, "big")
+    folded = bytes(a ^ b for a, b in zip(ret[:16], ret[16:]))
+    ret[:16] = folded
+    return bytes(ret[:16]) + _le32(_sum_md5(bytes(ret[:16])))
+
+
+_SBOX = _b64.b64decode("+n0Ia5xZs0sEXznQOEqRmQBnpiCf9U2Ccybu3xhmgzOAAxn72f6uqqmwUsYL83klTni0NqxdGieeiNu9PGPsSRXBMB/cuFbUbM3KCUPINaPvHvSW0vwOcnuUhNHqRVpiAj/TEoE0K91+5ijypUYTATsh9mE3KSoN7Yyvv51cuyR2D3XkU4nhmI2xmmVwT1RMWKtub4sjxAcRDLrPoKSO2AU9FLLadMPX577Wf95IFj6FkKFVt3dCIsmGUC4X+WQxLJvxbRxEaOPpqJOXyzJX6+Vxaq3AzMfF/WAdoi1Hp+JRaV56zgpBtpWP97mH4DoGEIq1+FvV8LyS/3wvwugbQOwb2r26mJEMsiuDQTRn+wrYdrVGBVlhI3WQhyrjUBVMrLF5667llUcEaPCGPVGLD8qO5LlO8hKCvA7V9+8oJc9bXelqVQLhM76T5/WtnT45JKji+hdX0HoNCDDWuKON/QeaxB5uImSX0h2wv0VmP2zd2yeApxHcpsVS+MC2yFwAc2B7oBkTqsk1SEvTpM2fmfMQREBUfin0Bh+iq6EvPPavhWI2IX9e3yAas7Tm/3KEj2UmlFp36kN4x0rMLBRrxuh0U/zUHM4xcAMYjJY4MonxOl/X+alpt2M3WMI7w3HLnpIBigtNiJu7T21v4P6lSd5WFgntnMEt7oF92XzRLkJbTcGmXepE/UVOG6E/0YnhfS+q26utWcuxzpooyeD2cDlK1/8w9d28VzsRjbLuALbmGlp8+d7EzS6Au7lMpZ+ECMZvQmzwJ+eLOpxR+2chdUExp8ogQyq3v9l68rX4jCwjg0+PYKAEEzcU4wHFY2ZcdIHfWL1okD3SszT0GZMyKdZJrg1L2AeerB4tC0C4crp2EHGo5FYdSP7lwkeR2ocmnR+Ia8CYviUJlzOjhRZef9xuVOn3qcjow3fQgivsAmKKkg4+sA8F8/GWeDiGNhg8JM8KtFPMYWWkx5TVFX5t73kiNRJqjlIGVXtGZFCV4gzt0xcDopuZ6xz8r9Rzafpf9ywev8jh8592gHFIqpStZPuJxmDDMrNN0uBE3V+oscdoIzTJbRJ/t+sVvqnReJOgDJKk10fjisJwqyZBmnmn2BSFj8BvVtCMEbkuPOKdzw7eA11GPs04Qw8zWtkaZWwiO/wwpojqN6K0jY5RnNZA7vn4hPSul+nKCkVnVwQvg1zVxcSCtqORmB9KrJaBbssbCQivGJVJfVTt+hYxOtq4ZvWl8f4QAQZ0zGPffCgl9s6yT4vlvIdpu4YhBwA25wtQWZsc6GJYGWHyvSdeuh3mmUI9DSq13Fsp8C1MU3tqc04/df9LoTUXVXI5INOw/e8C7Hd+5CvbkMEFnnrUUmskEw==")
+
+
+def _xor_bytes(a, b):
+    return bytes(x ^ b[i % len(b)] for i, x in enumerate(a))
+
+
+def _matrix(value):
+    return [[value[i * 4 + j] for j in range(4)] for i in range(4)]
+
+
+def _flat(rows):
+    return bytes(v for row in rows for v in row)
+
+
+def _aes_mix(rows):
+    for i in range(4):
+        t = rows[0][i] ^ rows[1][i] ^ rows[2][i] ^ rows[3][i]
+        u = rows[0][i]
+
+        def xt(x):
+            return ((x << 1) ^ (0x1B if (x & 128) else 0)) & 0xFF
+
+        rows[0][i] ^= t ^ xt(rows[0][i] ^ rows[1][i])
+        rows[1][i] ^= t ^ xt(rows[1][i] ^ rows[2][i])
+        rows[2][i] ^= t ^ xt(rows[2][i] ^ rows[3][i])
+        rows[3][i] ^= t ^ xt(rows[3][i] ^ u)
+
+
+class _AesV3:
+    # 自定义 AES 变体，与参考 JS 的 AesV3 逐行一致（SBOX 分段、key 扩展、
+    # sub/shift/shiftCon/aesMix 的轮次顺序都不要“修正”为标准 AES）。
+    def __init__(self, key, khronos):
+        self.word_size = khronos & 3
+        self.box = _SBOX[self.word_size * 256:(self.word_size + 1) * 256]
+        self.con = [[1, 0, 2, 3], [1, 3, 0, 2], [0, 1, 3, 2], [1, 0, 2, 3]][self.word_size]
+        self.con2 = [[1, 0, 2, 3], [2, 0, 3, 1], [0, 1, 3, 2], [1, 0, 2, 3]][self.word_size]
+        self.order = [[0, 9, 14, 11, 4, 13, 2, 7, 8, 1, 6, 15, 12, 5, 10, 3],
+                      [0, 9, 14, 15, 4, 13, 2, 7, 8, 1, 6, 3, 12, 5, 10, 11],
+                      [0, 9, 14, 7, 4, 13, 2, 11, 8, 1, 6, 3, 12, 5, 10, 15],
+                      [0, 9, 14, 11, 4, 13, 2, 7, 8, 1, 6, 15, 12, 5, 10, 3]][self.word_size]
+        init = [0xca025ddc, 0x823dc546, 0xc9420583, 0xc298225f][self.word_size]
+        initial = b"".join(init.to_bytes(4, "little") for _ in range(4))
+        mk = _xor_bytes(initial, key)
+        expanded = bytearray(mk + b"\0" * 32)
+        rounds = 8
+        for i in range(4, 12):
+            at = 4 * (i - 1)
+            a, b, c, d = expanded[at], expanded[at + 1], expanded[at + 2], expanded[at + 3]
+            if (i & 3) == 0:
+                init_signed = init - (1 << 32) if init >= (1 << 31) else init
+                t = (((init_signed >> (rounds & 24)) & 0xFFFFFFFF) ^ self.box[b]) & 0xFF
+                b, c, d, a = self.box[c], self.box[d], self.box[a], t
+            rounds += 2
+            expanded[at + 4] = a ^ expanded[at - 12]
+            expanded[at + 5] = b ^ expanded[at - 11]
+            expanded[at + 6] = c ^ expanded[at - 10]
+            expanded[at + 7] = d ^ expanded[at - 9]
+        self.keys = [list(expanded[i * 4:(i + 1) * 4]) for i in range(12)]
+
+    def _add(self, rows, key):
+        for i in range(4):
+            for j in range(4):
+                rows[i][j] ^= key[i][j]
+
+    def _add_con(self, rows, keys):
+        for i in range(4):
+            for j in range(4):
+                rows[i][j] ^= keys[i][self.con2[j]]
+
+    def _sub(self, rows):
+        for i in range(4):
+            for j in range(4):
+                rows[i][j] = self.box[rows[i][j]]
+        old = [row[:] for row in rows]
+        for i in range(4):
+            rows[i] = old[self.con2[i]][:]
+
+    def _shift(self, rows):
+        b = _flat(rows)
+        for i in range(16):
+            rows[i // 4][i % 4] = b[self.order[i]]
+
+    def _shift_con(self, rows):
+        old = [row[:] for row in rows]
+        for i in range(4):
+            rows[i] = [old[i][x] for x in self.con2]
+
+    def _block(self, value):
+        rows = _matrix(value)
+        self._add_con(rows, self.keys[0:4])
+        for i in (1, 2):
+            self._sub(rows)
+            self._shift(rows)
+            if i == 1:
+                self._shift_con(rows)
+                _aes_mix(rows)
+            self._add_con(rows, self.keys[i * 4:])
+        self._add(rows, self.keys[4:])
+        return _flat(rows)
+
+    def encrypt(self, data, iv):
+        source = bytes(data)
+        plaintext = bytearray(32)
+        for i in range(31):
+            at = i * 8
+            n0 = (source[at] >> 4) & 2
+            n1 = n0 | (source[at + 1] & 64)
+            n2 = n1 | ((source[at + 2] >> 2) & 1)
+            n3 = n2 | ((source[at + 3] << 3) & 128)
+            n4 = n3 | ((source[at + 4] >> 1) & 4)
+            n5 = n4 | ((source[at + 5] << 3) & 16)
+            n6 = n5 | ((source[at + 6] << 5) & 32)
+            plaintext[i] = n6 | ((source[at + 7] >> 4) & 8)
+        plaintext[31] = 1
+        blocks = []
+        previous = bytes(iv)
+        for i in range(0, len(plaintext), 16):
+            value = self._block(_xor_bytes(bytes(plaintext[i:i + 16]), previous))
+            blocks.append(value)
+            previous = value
+        key = b"".join(blocks)
+        out = bytearray(source)
+        for i in range(31):
+            at = i * 8
+            k = key[i]
+            out[at] &= 0xDF
+            out[at] |= (k << 4) & 32
+            out[at + 1] &= 0xBF
+            out[at + 1] |= k & 64
+            out[at + 2] &= 0xFB
+            out[at + 2] |= (k << 2) & 4
+            out[at + 3] &= 0xEF
+            out[at + 3] |= (k >> 3) & 16
+            out[at + 4] &= 0xF7
+            out[at + 4] |= (k + k) & 8
+            out[at + 5] &= 0xFD
+            out[at + 5] |= (k >> 3) & 2
+            out[at + 6] &= 0xFE
+            out[at + 6] |= (k >> 5) & 1
+            out[at + 7] &= 0x7F
+            out[at + 7] |= (k << 4) & 128
+        return key[-1:] + bytes(out)
+
+
+def _xmxor(data, key):
+    encoded = bytearray(len(data))
+    for i in range(len(data)):
+        at = (i * 4) & 28
+        d0, d1 = key[at], key[at + 1]
+        d2 = ((((data[i] << 4) | (data[i] >> 4)) & 0xFF) + d0)
+        d2 = (~d2) ^ d1
+        d2 = ((((d2 & 0xFF) << 3) | ((d2 & 0xFF) >> 5)) & 0xFF)
+        d2 = (d2 + d1) & 0xFF
+        d2 = (d2 ^ d0) & 0xFF
+        encoded[len(data) - i - 1] = (~d2) & 0xFF
+    last = encoded[-1] ^ encoded[-2]
+    first = encoded[0]
+    encoded[0] = (~last + first) & 0xFF
+    encoded[1] = ((encoded[0] ^ encoded[-1] ^ 254) + encoded[1]) & 0xFF
+    encoded[2] = (encoded[2] + ((last - first) ^ (((encoded[1] << 3) | (encoded[1] >> 5)) & 0xFF) ^ 2)) & 0xFF
+    for i in range(len(encoded) - 4):
+        temp = (((encoded[i + 2] << 3) | (encoded[i + 2] >> 5)) & 0xFF) ^ encoded[i + 1] ^ (i + 3)
+        encoded[i + 3] = (~temp + encoded[i + 3]) & 0xFF
+    encoded[-1] ^= encoded[-2]
+    total = 0
+    for i in range(len(encoded) - 1):
+        total += encoded[i + 1]
+    encoded[0] = ((encoded[0] ^ encoded[1]) + total) & 0xFF
+    return bytes(encoded)
+
+
+def _key_hash(sign_key, rnd):
+    digest = _sm3(bytes(sign_key) + _le32(rnd) + bytes(sign_key))
+    d1 = (rnd >> 16) & 0xFF
+    d2 = ((d1 << 11) | (rnd >> 24)) ^ (d1 >> 5) ^ d1
+    d2 = (~d2) & 0xFFFFFFFF
+    return digest, _le32(d2)
+
+
+def _device_proto(device_id):
+    started = _PROCESS_STARTED
+    return _proto([
+        (1, 1, "sint"), (2, 2, "sint"), (3, "8662"), (4, str(device_id)),
+        (5, _PROCESS_NONCE), (6, "!noperm!"), (7, -888888, "sint"), (8, -888888, "sint"),
+        (9, 3, "sint"), (10, -888888, "sint"), (11, "!notset!"), (12, "Asia/Shanghai,8"),
+        (13, "zh_CN"), (14, 4, "sint"), (16, 0, "float"), (17, 0, "float"),
+        (18, 0, "float"), (19, 0, "float"), (20, 0, "float"), (21, 0, "float"),
+        (22, "16"), (23, 41, "sint"), (24, 36, "sint"),
+        (25, started, "sint"), (26, started, "sint"), (27, started, "sint"), (28, started, "sint"),
+        (29, -1, "sint"), (30, "25053RT47C"), (31, "Redmi"), (32, "25053RT47C"),
+        (33, "25053RT47C"), (34, "Xiaomi"), (35, "Redmi"), (36, "Redmi"), (38, 31, "sint"),
+    ])
+
+
+def _build_medusa(url, body, khronos, device):
+    body_md5 = _md5_bytes(body) if body else b"\0" * 16
+    query = url.split("?", 1)[1] if "?" in url else ""
+    query_sm3 = _sm3(query.encode("utf-8"))
+    ts = _le32(khronos)
+    query_body_ts = _hash_f13(query_sm3, body_md5, ts, khronos)
+    nested = _proto([(1, 111, "sint"), (2, 10, "sint"), (3, 694367, "sint"), (5, 586952199, "sint")])
+    message_rand = int(_random.random() * 0x100000000)
+    env_launch = int(_random.random() * 21) + 100
+    env_pid = int(_random.random() * 2000) + 10001
+    env = _proto([
+        (1, env_launch, "sint"), (2, 146331399, "sint"), (3, 146331396, "sint"),
+        (5, 7, "sint"), (6, "v04.06.04.03-bugfix"), (7, env_pid, "sint"),
+        (12, _device_proto(device["device_id"]), "message"),
+        (13, _proto([(1, int(_time.time()), "sint"), (2, -2, "sint"), (4, 200, "sint")]), "message"),
+        (14, str(device["version_name"])),
+    ])
+    query_hash = _sm3(query.encode("utf-8") + body_md5 + b"none")
+    message = _proto([
+        (1, bytes.fromhex("f7e85ffad7d7dc3bd62ac87057cf6118"), "bytes"),
+        (2, 3, "sint"), (3, message_rand, "sint"), (4, "8662"),
+        (5, str(device["device_id"])), (6, "1588093228"), (7, str(device["version_name"])),
+        (8, "v04.06.04-ml-android"), (9, 67503104, "sint"),
+        (10, bytes.fromhex("4001000000000000"), "bytes"),
+        (12, khronos, "sint"), (13, query_body_ts, "bytes"),
+        (14, query_sm3[:6], "bytes"), (15, nested, "message"),
+        (16, _PROCESS_NONCE), (17, khronos, "sint"), (19, query_hash, "bytes"),
+        (20, "none"), (21, 312, "sint"), (23, env, "message"),
+        (24, '{"cmr":16777216,"cmr2":16777216,"un_h":1879194040,"vpn":0,"kd":0,"fkd":3672518972,"pd":-1872573247,"dyn":"","do":0,"tk":true}'),
+    ])
+    rnd = int(_random.random() * 0x100000000)
+    sign_key = bytes.fromhex("8ebdfa3806ecc5cee79423e6029ed82540bc2218bb7eaef71cb691f7aa8aa2f5")
+    digest, seed = _key_hash(sign_key, rnd)
+    transformed = _xmxor(message, digest)
+    transformed = bytes.fromhex("4001000000000000") + transformed
+    transformed = transformed[::-1]
+    transformed = bytes(b ^ seed[(~i) & 3] for i, b in enumerate(transformed))
+    check = ((query_sm3[0] & 63) << 14) | 0x18000001 | ((query_body_ts[0] & 63) << 8)
+    xm_rand = int(_random.random() * 0x100000000)
+    packed = b"\x35" + _le32(xm_rand) + _le32(check) + transformed + bytes([(rnd >> 16) & 0xFF, (rnd >> 24) & 0xFF])
+    encrypted = _AesV3(bytes.fromhex("f1593376766ea98d34f31b057a9d5be4"), khronos).encrypt(
+        packed, bytes.fromhex("1fe109a4125283f418de9e051a969e12"))
+    version = bytes.fromhex("03000000f7e85ffad7d7dc3bd62ac87057cf6118")
+    prefix = b"".join(((int.from_bytes(version[i:i + 4], "little") ^ khronos) & 0xFFFFFFFF).to_bytes(4, "little")
+                      for i in range(0, 20, 4))
+    return _b64.b64encode(prefix + bytes([rnd & 0xFF, (rnd >> 8) & 0xFF, 0, 1]) + encrypted).decode("ascii")
+
+
+def _random_uuid():
+    return str(_uuid.uuid4())
+
+
+def _random_openudid():
+    return "%016x" % _random.getrandbits(64)
+
+
+def _valid_device_identity(session):
+    if not isinstance(session, dict):
+        return False
+    did = str(session.get("device_id") or "")
+    iid = str(session.get("iid") or session.get("install_id") or "")
+    return bool(_re.fullmatch(r"[1-9]\d{5,23}", did) and _re.fullmatch(r"[1-9]\d{5,23}", iid))
+
+
+def _new_device_seed():
+    return {
+        "cdid": _random_uuid(),
+        "openudid": _random_openudid(),
+        "clientudid": _random_uuid(),
+        "req_id": _random_uuid(),
+        "key_register_ts": int(_time.time()),
+    }
+
+
+def _select_signed_url(base_url, vals, body, ts):
+    # hash 分支必须严格等于 0（128 次尝试）；分支 2 的签名与服务端期望不一致。
+    base_ms = int(_time.time() * 1000)
+    query = ""
+    url = ""
+    for off in range(128):
+        vals["_rticket"] = str(base_ms + off)
+        query = "&".join("%s=%s" % (_pct(k), _pct(v)) for k, v in vals.items())
+        url = base_url + "?" + query
+        if _branch_of(url, body, ts) == 0:
+            return url, query, vals["_rticket"]
+    raise ValueError("无法生成播放请求签名")
+
+
+def _build_signed_headers(query, body, ts, rticket, url, device):
+    rnd = int(_random.random() * 65536)
+    body_bytes = body.encode("utf-8") if isinstance(body, str) else (body or b"")
+    return {
+        "User-Agent": _PLAYBACK_UA,
         "Accept": "application/json; charset=utf-8,application/x-protobuf",
         "Content-Type": "application/json; charset=UTF-8",
-        "x-ss-req-ticket": vals["_rticket"],
-        "x-tt-request-tag": "t=0;n=0",
+        "x-ss-req-ticket": str(rticket),
         "sdk-version": "2",
-        "passport-sdk-version": "50561",
-        "x-vc-bdturing-sdk-version": "3.7.2.cn",
-        "x-gorgon": _x_gorgon(query, b"", ts, rnd),
+        "x-xs-from-web": "0",
         "x-khronos": str(ts),
+        "x-gorgon": _x_gorgon(query, body_bytes, ts, rnd),
         "x-ladon": _b64.b64encode(_be32(ts)).decode(),
         "x-argus": _b64.b64encode(_le32(ts)).decode(),
         "x-helios": _helios(ts),
+        "x-medusa": _build_medusa(url, body_bytes, ts, device),
         "x-tt-dt": "",
+        "x-tt-store-region": "cn",
+        "x-tt-store-region-src": "did",
     }
-    return url, headers, None
+
+
+def _tt_encrypt(payload):
+    # ttEncrypt：gzip 压缩后 AES-128-CBC 加密；
+    # 体 = 746305100000 + 32 字节随机数 + AES-CBC(SHA512(压缩体) || 压缩体)，PKCS7 填充。
+    compressed = _gzip.compress(payload, compresslevel=6)
+    rnd = _os.urandom(32)
+    derived = _hashlib.sha512(_hashlib.sha512(rnd).digest() + _SPADE_CONST).digest()
+    from Crypto.Cipher import AES
+    cipher = AES.new(derived[:16], AES.MODE_CBC, derived[16:32])
+    plaintext = _hashlib.sha512(compressed).digest() + compressed
+    pad_len = 16 - (len(plaintext) % 16)
+    ciphertext = cipher.encrypt(plaintext + bytes([pad_len]) * pad_len)
+    return bytes.fromhex("746305100000") + rnd + ciphertext
+
+
+def _device_register_request(seed=None):
+    s = seed if isinstance(seed, dict) else _new_device_seed()
+    now_ms = int(_time.time() * 1000)
+    header = {
+        "display_name": "红果免费短剧",
+        "update_version_code": 73932,
+        "manifest_version_code": 73932,
+        "app_version_minor": "7.3.9.32",
+        "aid": 8662,
+        "channel": "update_64",
+        "package": "com.phoenix.read",
+        "app_version": "7.3.9.32",
+        "version_code": 73932,
+        "sdk_version": "3.7.0-rc.34-fanqie-xiaoshuo",
+        "sdk_target_version": 29,
+        "git_hash": "3a88f4e",
+        "os": "Android",
+        "os_version": "16",
+        "os_api": 36,
+        "device_model": "25053RT47C",
+        "device_brand": "Redmi",
+        "device_manufacturer": "Redmi",
+        "cpu_abi": "arm64-v8a",
+        "release_build": "b5e187f",
+        "density_dpi": 520,
+        "display_density": "mdpi",
+        "resolution": "1280x2772",
+        "language": "zh",
+        "timezone": 8,
+        "access": "wifi",
+        "not_request_sender": 0,
+        "carrier": "CHINA MOBILE",
+        "mcc_mnc": "46000",
+        "rom": "eng.root.20231116.160340",
+        "rom_version": "W528JS release-keys",
+        "cdid": s["cdid"],
+        "sig_hash": "56a962410c494bbaf0b58dba20cae56f",
+        "openudid": s["openudid"],
+        "clientudid": s["clientudid"],
+        "ipv6_list": [],
+        "region": "CN",
+        "tz_name": "Asia/Shanghai",
+        "tz_offset": 28800,
+        "sim_region": "cn",
+        "sim_serial_number": [],
+        "oaid_may_support": False,
+        "req_id": s.get("req_id") or _random_uuid(),
+        "device_platform": "android",
+        "custom": {"account_region_src": "fallback", "account_region": "cn",
+                   "host_bit": 64, "dragon_device_type": "phone"},
+        "pre_installed_channel": "",
+        "apk_first_install_time": now_ms,
+        "is_system_app": 0,
+        "sdk_flavor": "china",
+        "guest_mode": 0,
+    }
+    payload = {"magic_tag": "ss_app_log", "header": header, "_gen_time": now_ms}
+    body = _json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    data = _tt_encrypt(body)
+    headers = {
+        "User-Agent": _REGISTER_UA,
+        "Accept": "application/json",
+        "Content-Type": "application/octet-stream;tt-data=a",
+        "log-encode-type": "gzip",
+        "x-ss-dp": "8662",
+        "x-ss-req-ticket": str(now_ms),
+        "x-vc-bdturing-sdk-version": "4.0.3.cn",
+        "lc": "101",
+        "sdk-version": "2",
+        "passport-sdk-version": "5051452",
+        "x-neptune": "-8|50:51:59:30:40:47:49:39",
+        "x-ss-stub": _md5_bytes(data).hex().upper(),
+    }
+    return _DEVICE_REGISTER_API, headers, data, s
+
+
+def _post_bytes(url, body, headers, timeout, max_bytes=8 * 1024 * 1024):
+    """POST and return the (gzip-decoded) response body.
+
+    Prefers requests (keep-alive): urllib forces `Connection: close` on
+    every request, which the overseas CDN path intermittently resets or
+    truncates mid-body (IncompleteRead / RemoteDisconnected). Falls back
+    to urllib when requests is unavailable.
+    """
+    try:
+        import requests as _requests
+    except Exception:
+        _requests = None
+    if _requests is not None:
+        resp = _requests.post(url, data=body, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        if len(resp.content) > max_bytes:
+            raise ValueError("response exceeds size limit")
+        return resp.content
+    req = _ureq.Request(url, data=body, headers=headers, method="POST")
+    with _ureq.urlopen(req, timeout=timeout) as r:
+        raw = r.read(max_bytes + 1)
+        encoding = str(r.headers.get("Content-Encoding", "") or "").strip().lower()
+    if len(raw) > max_bytes:
+        raise ValueError("response exceeds size limit")
+    if encoding == "gzip":
+        return _gzip.decompress(raw)
+    return raw
+
+
+def _register_device():
+    global _DEVICE_SESSION
+    url, headers, body, seed = _device_register_request()
+    headers = dict(headers)
+    # 注册响应只有约 384 字节：用 identity 编码（gzip 响应在该链路上反而更易截断）。
+    headers["Accept-Encoding"] = "identity"
+    last_err = None
+    raw = b""
+    for attempt in range(3):
+        try:
+            raw = _post_bytes(url, body, headers, 20, max_bytes=1024 * 1024)
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                _time.sleep(0.3 * (attempt + 1))
+    else:
+        raise ValueError("device_register request failed: %s" % type(last_err).__name__)
+    if not raw or len(raw) > 1024 * 1024:
+        raise ValueError("empty or oversized device_register response")
+    j = _json.loads(raw.decode("utf-8", "replace"))
+    if not isinstance(j, dict):
+        raise ValueError("invalid device_register JSON")
+    code = j.get("code", j.get("Code", 0))
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        code = -1
+    if code != 0:
+        raise ValueError("device_register rejected the request")
+    data = j.get("data") if isinstance(j.get("data"), dict) else {}
+    did = str(j.get("device_id_str") or j.get("device_id") or data.get("device_id_str") or data.get("device_id") or "")
+    iid = str(j.get("install_id_str") or j.get("install_id") or j.get("iid") or data.get("install_id_str") or data.get("install_id") or data.get("iid") or "")
+    session = {
+        "device_id": did,
+        "iid": iid,
+        "cdid": seed["cdid"],
+        "openudid": seed["openudid"],
+        "clientudid": seed["clientudid"],
+        "key_register_ts": int(_time.time()),
+        "registered_at": _time.time(),
+    }
+    if not _valid_device_identity(session):
+        raise ValueError("device_register returned invalid device identity")
+    _DEVICE_SESSION = session
+    return session
+
+
+def _ensure_device(force_refresh=False):
+    global _DEVICE_SESSION
+    with _DEVICE_LOCK:
+        if not force_refresh and _valid_device_identity(_DEVICE_SESSION):
+            return _DEVICE_SESSION
+        return _register_device()
+
+
+def _signed_request(vid, device=None, host=_VIDEO_MODEL_HOST):
+    """Build a signed POST request to novel/player/multi_video_model/v1/ (JS playbackRequest)."""
+    ts = int(_time.time())
+    dev = device if _valid_device_identity(device) else _ensure_device(False)
+    payload = {
+        "biz_param": {
+            "detail_page_version": 0,
+            "device_level": 3,
+            "disable_digg_stat": False,
+            "need_all_video_definition": True,
+            "need_mp4_align": False,
+            "use_os_player": False,
+            "use_server_dns": False,
+            "video_platform": 1024,
+        },
+        "mixed_video_id_map": {"1004": [str(vid)]},
+    }
+    body = _json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    vals = dict(_PLAYBACK_DEVICE)
+    vals.update({
+        "device_id": str(dev["device_id"]),
+        "iid": str(dev["iid"]),
+        "cdid": str(dev.get("cdid") or _random_uuid()),
+        "ts": str(ts),
+    })
+    base_url = "https://%s%s" % (host, _VIDEO_MODEL_PATH)
+    url, query, rticket = _select_signed_url(base_url, vals, body, ts)
+    headers = _build_signed_headers(query, body, ts, rticket, url, {
+        "device_id": str(dev["device_id"]),
+        "version_name": _PLAYBACK_DEVICE["version_name"],
+    })
+    return url, headers, body
 
 
 def _decrypt_spade(value, seed):
@@ -1215,6 +1905,30 @@ def _decrypt_spade(value, seed):
     except UnicodeDecodeError:
         return None
     return s if s.startswith("http") else None
+
+
+def _resolve_media_url(it, vm):
+    if not isinstance(it, dict):
+        return None
+    seed_s = (vm.get("key_seed") if isinstance(vm, dict) else "") or it.get("key_seed") or ""
+    seed = _b64.b64decode(seed_s + "=" * (-len(seed_s) % 4)) if seed_s else b""
+    for key in ("main_url", "backup_url_1", "backup_url_2", "backup_url"):
+        raw_url = it.get(key)
+        if not isinstance(raw_url, str) or not raw_url:
+            continue
+        if raw_url.startswith(("http://", "https://")):
+            return raw_url
+        if seed:
+            dec = _decrypt_spade(raw_url, seed)
+            if dec:
+                return dec
+        try:
+            plain = _b64.b64decode(raw_url + "=" * (-len(raw_url) % 4)).decode("utf-8").strip()
+            if plain.startswith(("http://", "https://")):
+                return plain
+        except Exception:
+            pass
+    return None
 
 
 def _content_key(spade_a):
@@ -1241,54 +1955,111 @@ def _content_key(spade_a):
         return None
 
 
+def _parse_video_model_response(j, vid):
+    if not isinstance(j, dict):
+        raise ValueError("video model API rejected the request")
+    code = j.get("code", j.get("Code", 0))
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        code = -1
+    if code != 0:
+        raise ValueError("video model API rejected the request")
+    data = j.get("data") if isinstance(j.get("data"), dict) else {}
+    models = data.get("video_model_data") if isinstance(data.get("video_model_data"), dict) else None
+    ent = None
+    if models is not None:
+        ent = models.get(str(vid))
+        if ent is None:
+            ent = next((value for value in models.values() if isinstance(value, dict)), None)
+    if not isinstance(ent, dict) and isinstance(data.get(str(vid)), dict):
+        ent = data.get(str(vid))
+    if not isinstance(ent, dict):
+        ent = data
+    vm = ent.get("video_model") if isinstance(ent, dict) else None
+    if vm is None and isinstance(data, dict):
+        vm = data.get("video_model")
+    if isinstance(vm, str):
+        vm = _json.loads(vm)
+    if not isinstance(vm, dict) and isinstance(data, dict) and (
+            data.get("video_list") or data.get("dynamic_video_list") or data.get("dynamic_video")):
+        vm = dict(data)
+    if not isinstance(vm, dict):
+        raise ValueError("video model API returned no model")
+    if not vm.get("key_seed"):
+        if isinstance(ent, dict) and ent.get("key_seed"):
+            vm["key_seed"] = ent["key_seed"]
+        elif isinstance(data, dict) and data.get("key_seed"):
+            vm["key_seed"] = data["key_seed"]
+    dyn = vm.get("dynamic_video") if isinstance(vm.get("dynamic_video"), dict) else {}
+    lst = vm.get("video_list") or vm.get("dynamic_video_list") or dyn.get("dynamic_video_list") or dyn.get("video_list")
+    if isinstance(lst, list):
+        videos = {}
+        for i, item in enumerate(lst):
+            if isinstance(item, dict):
+                q = _video_quality(item, str(i))
+                videos[q if q and q not in videos else str(i)] = item
+        vm["video_list"] = videos
+    elif isinstance(lst, dict):
+        vm["video_list"] = lst
+    if not isinstance(vm.get("video_list"), dict) or not vm["video_list"]:
+        raise ValueError("video model has no video qualities")
+    return vm
+
+
 def _signed_model(vid):
-    """Fetch a signed video model from the current Red Fruit video_tab API."""
+    """Fetch a signed 5-tier video model using a registered anonymous device session."""
     ent = _SIGN_CACHE.get(str(vid))
     if ent and _time.time() - ent[0] < _SIGN_CACHE_TTL:
         return ent[1]
+    deadline = _time.monotonic() + 15
     last_err = None
+    dev = None
     for attempt in range(3):
+        retryable = False
         try:
-            payload_url, headers, body = _signed_request(vid)
-            req = _ureq.Request(payload_url, data=body, headers=headers, method="GET")
-            with _ureq.urlopen(req, timeout=25) as r:
-                raw = r.read(8 * 1024 * 1024 + 1)
+            if dev is None:
+                dev = _ensure_device(False)
+            host = _VIDEO_MODEL_HOST if attempt % 2 == 0 else _VIDEO_MODEL_ALT_HOST
+            payload_url, headers, body = _signed_request(vid, dev, host=host)
+            if attempt:
+                headers["Connection"] = "close"
+            # gzip 响应体更小，在海外中转链路上不易被截断；服务端支持 gzip。
+            headers["Accept-Encoding"] = "gzip"
+            raw = _post_bytes(payload_url, body, headers, 25)
             if len(raw) > 8 * 1024 * 1024:
                 raise ValueError("video model response exceeds 8 MiB")
             if not raw:
                 raise ValueError("video model API returned an empty response")
-            j = _json.loads(raw.decode("utf-8", "replace"))
-            if not isinstance(j, dict) or j.get("code") not in (0, None):
-                raise ValueError("video model API rejected the request")
-            data = j.get("data") or {}
-            models = data.get("video_model_data") if isinstance(data, dict) else None
-            ent = models.get(str(vid)) if isinstance(models, dict) else None
-            if ent is None and isinstance(models, dict):
-                ent = next((value for value in models.values() if isinstance(value, dict)), None)
-            if not isinstance(ent, dict):
-                ent = data if isinstance(data, dict) else {}
-            vm = ent.get("video_model") if isinstance(ent, dict) else None
-            if vm is None and isinstance(data, dict):
-                vm = data.get("video_model")
-            if isinstance(vm, str):
-                vm = _json.loads(vm)
-            if not isinstance(vm, dict):
-                raise ValueError("video model API returned no model")
-            lst = vm.get("video_list") or vm.get("dynamic_video_list")
-            if isinstance(lst, list):
-                videos = {}
-                for i, item in enumerate(lst):
-                    if isinstance(item, dict):
-                        videos[_video_quality(item, str(i))] = item
-                vm["video_list"] = videos
-            if not isinstance(vm.get("video_list"), dict) or not vm["video_list"]:
-                raise ValueError("video model has no video qualities")
-            _SIGN_CACHE[str(vid)] = (_time.time(), vm)
-            return vm
         except Exception as e:
             last_err = e
-            if attempt < 2:
-                _time.sleep(0.4 * (attempt + 1))
+            retryable = True
+        else:
+            try:
+                j = _json.loads(raw.decode("utf-8", "replace"))
+            except Exception as e:
+                last_err = e
+                retryable = True
+            else:
+                try:
+                    vm = _parse_video_model_response(j, vid)
+                except Exception as e:
+                    last_err = e
+                    retryable = False
+                else:
+                    _SIGN_CACHE[str(vid)] = (_time.time(), vm)
+                    return vm
+        if not retryable or attempt == 2:
+            break
+        # 空响应/截断/损坏：预算充足时重新注册设备，换域名重试。
+        if deadline - _time.monotonic() >= 8:
+            try:
+                dev = _ensure_device(force_refresh=True)
+            except Exception:
+                pass
+        if deadline - _time.monotonic() < 0.5:
+            break
+        _time.sleep(0.3)
     _trace("hgtv_signed_model_error", episode_id=vid,
            err=(type(last_err).__name__ if last_err else "request failed"))
     return None
@@ -1316,7 +2087,8 @@ def _video_metadata(item):
 def _video_quality(item, fallback=""):
     metadata = _video_metadata(item)
     for candidate in (item.get("definition"), metadata.get("definition"),
-                      item.get("quality_name"), metadata.get("quality_name")):
+                      item.get("quality_name"), metadata.get("quality_name"),
+                      item.get("quality"), metadata.get("quality")):
         if candidate is None:
             continue
         quality = str(candidate).strip().lower().replace(" ", "")
@@ -1328,6 +2100,14 @@ def _video_quality(item, fallback=""):
     match = _re.search(r"(?:^|\|)4:(1080p|720p|540p|480p|360p)(?=\||$)", gear, _re.I)
     if match:
         return match.group(1).lower()
+    try:
+        w = int(item.get("vwidth") or metadata.get("vwidth") or 0)
+        h = int(item.get("vheight") or metadata.get("vheight") or 0)
+        short_side = min(w, h) if (w > 0 and h > 0) else 0
+        if short_side in (360, 480, 540, 720, 1080):
+            return "%dp" % short_side
+    except (ValueError, TypeError):
+        pass
     fallback = str(fallback).strip().lower()
     return fallback if fallback in _QORDER else fallback
 
@@ -1341,7 +2121,7 @@ def _pick_best(vm, want):
         gear = str(it.get("gear_des_key") or "")
         metadata = _video_metadata(it)
         bad = 1 if ("bytevc2" in gear or "bvc2" in gear) else 0
-        if str(metadata.get("vtype") or "").lower() in ("bytevc2", "bvc2"):
+        if str(metadata.get("vtype") or it.get("vtype") or "").lower() in ("bytevc2", "bvc2"):
             bad = 1
         order = _QORDER.index(q) if q in _QORDER else 99
         cands.append((bad, order, q, it))
@@ -1833,11 +2613,7 @@ def _decrypt_to_file(vid, want):
         except OSError:
             pass
 
-    seed_s = vm.get("key_seed") or ""
-    seed = _b64.b64decode(seed_s + "=" * (-len(seed_s) % 4)) if seed_s else b""
-    url = it.get("main_url") or ""
-    if url and not url.startswith("http") and seed:
-        url = _decrypt_spade(url, seed)
+    url = _resolve_media_url(it, vm)
     if not url:
         return None
 
@@ -1850,7 +2626,7 @@ def _decrypt_to_file(vid, want):
         return None
 
     tmp = dst + ".tmp.mp4"
-    req = _ureq.Request(url, headers={"User-Agent": _SIGN_UA})
+    req = _ureq.Request(url, headers={"User-Agent": _PLAYBACK_UA})
     with _ureq.urlopen(req, timeout=180) as r, open(tmp, "wb") as f:
         _shutil.copyfileobj(r, f)
 

@@ -4,12 +4,19 @@
  * 为什么用 require()：规范里写明「CommonJS require() 默认走 Node.js Mobile」，
  * 一旦 require 就切到完整 Node（18.20.4），从而拿到原生 AES-CTR、文件和网络接口。
  *
- * 链路：
- *   签名 multi_video_model（x-gorgon/x-ladon/x-argus/x-helios）
- *   → 解 spade URL（AES-128-CBC）
+ * 链路（1.0.5-cctvhost-r5）：
+ *   匿名设备注册（log5-applog-lf device_register，ttEncrypt 加密体，进程内有效，
+ *   不跨重启复用；同一进程内多次播放共享一次注册）
+ *   → 签名请求当前播放接口（novel/player/multi_video_model/v1，
+ *     mixed_video_id_map + x-medusa，哈希分支严格等于 0；空响应时换
+ *     api5-normal-hl.fqnovel.com 备用域名重试一次）
+ *   → 解析 5 档视频模型（1080p/720p/540p/480p/360p）+ 解 spade URL（AES-128-CBC）
  *   → 派生 CENC key
  *   → 下载 + 原生 AES-CTR 逐样本解密 + 改写 moov
  *   → CCTVHost localProxy 按 Range 从资源数据目录交付给播放器
+ *
+ * 兼容路（网页 fallback-play-info）是付费墙：只开放前 3 集，第 4 集起 403，
+ * 仅作次要兜底，不当主路。
  */
 'use strict';
 
@@ -17,15 +24,19 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const zlib = require('node:zlib');
 
 // ---------------- 配置 ----------------
+const VERSION = '1.0.5-cctvhost-r5';
 const SITE = 'https://hongguoduanju.com';
+const DEVICE_REGISTER_API = 'https://log5-applog-lf.fqnovel.com/service/2/device_register/?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
+const VIDEO_MODEL_API = 'https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/';
+const VIDEO_MODEL_ALT_HOST = 'api5-normal-hl.fqnovel.com';
 const VIDEO_MODEL_MULTI_API = 'https://reading.snssdk.com/reading/bookapi/video_tab/multi_video_model/v1/';
 const UA_WEB = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
-const UA_APP = 'com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
+const UA_APP = 'com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)';
 
-// App video_tab API profile. A fresh temporary DID/IID is generated per request;
-// do not ship a shared device identity in a plugin package.
+// App 播放请求公共设备参数（播放签名用 7.1.3.32 / 71332 档；匿名注册另用 7.3.9.32 / 73932 档）
 const DEVICE = {
   ac: 'wifi', channel: 'update_64', aid: '8662', app_name: 'novelread',
   version_code: '71332', version_name: '7.1.3.32', device_platform: 'android', os: 'android',
@@ -40,11 +51,14 @@ const SPADE_CONST = Buffer.from(
   '4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524' +
   'f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
 
-const CACHE_DIR = path.join(process.cwd(), 'hgtv-js-cache');
+let CACHE_DIR = path.join(process.cwd(), 'hgtv-js-cache');
 
 const modelCache = new Map();     // vid -> {t, vm}
 const decryptFlights = new Map(); // vid + quality -> Promise<path|null>
 const MODEL_TTL = 300 * 1000;
+
+let deviceSession = null;
+let deviceRegisterFlight = null;
 
 // ---------------- 工具 ----------------
 function md5(b) {
@@ -91,14 +105,22 @@ function rc4(data, key) {
 function pct(s) {
   return encodeURIComponent(String(s)).replace(/[!'()]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
-
-// ---------------- 签名 ----------------
+function randomUuid() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = crypto.randomBytes(16);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = b.toString('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+// ---------------- 签名与匿名设备注册 ----------------
 function xGorgon(query, body, ts, rnd) {
   const sdk = Buffer.alloc(4);
   sdk.writeUInt32LE(67503104);
+  const bodyBuf = body ? (Buffer.isBuffer(body) ? body : Buffer.from(body)) : null;
   const input = Buffer.concat([
     md5(query).subarray(0, 4),
-    body ? md5(body).subarray(0, 4) : Buffer.alloc(4),
+    bodyBuf && bodyBuf.length ? md5(bodyBuf).subarray(0, 4) : Buffer.alloc(4),
     Buffer.alloc(4),
     sdk,
     be32(ts),
@@ -167,44 +189,317 @@ function getIv(iv, data) {
 }
 
 function branchOf(url, body, ts) {
-  const q = crypto.createHash('sm3').update(url.split('?')[1]).digest();
-  const bm = body ? md5(body) : Buffer.alloc(16);
+  const qPart = String(url).split('?')[1] || '';
+  const q = crypto.createHash('sm3').update(qPart).digest();
+  const bodyBuf = body ? (Buffer.isBuffer(body) ? body : Buffer.from(body)) : null;
+  const bm = bodyBuf && bodyBuf.length ? md5(bodyBuf) : Buffer.alloc(16);
   const iv = getIv(getIv(getIv(0x20230928, q), bm), le32(ts));
   const low = iv & 15;
   return low - ((((low * 171) >>> 9) * 3));
 }
 
-function randomDeviceId() {
-  return (crypto.randomBytes(8).readBigUInt64BE(0) % 900000000000000000n + 100000000000000000n).toString();
+function selectSignedUrl(baseUrl, vals, body, ts) {
+  const baseMs = Date.now();
+  let query = '';
+  let url = '';
+  // F13/medusa 哈希是分支相关的：分支必须严格等于 0，128 次尝试内找不到就报错。
+  for (let off = 0; off < 128; off++) {
+    vals._rticket = String(baseMs + off);
+    query = Object.keys(vals).map(k => `${pct(k)}=${pct(vals[k])}`).join('&');
+    url = baseUrl + '?' + query;
+    if (branchOf(url, body, ts) === 0) return { url, query, rticket: vals._rticket };
+  }
+  throw Error('unable to sign request: no hash branch 0 ticket');
 }
 
-function signedRequest(vid) {
-  const ts = Math.floor(Date.now() / 1000);
+function buildSignedHeaders(query, body, ts, rticket, device, extraHeaders) {
   const rnd = crypto.randomInt(0, 65536);
-  const vals = Object.assign({}, DEVICE, {
-    iid: randomDeviceId(), device_id: randomDeviceId(), ts: String(ts),
-    _rticket: String(Date.now()), video_id: String(vid),
-    need_all_video_definition: '1', video_platform: '1024',
-  });
-  const query = Object.keys(vals).map(k => `${pct(k)}=${pct(vals[k])}`).join('&');
-  const url = VIDEO_MODEL_MULTI_API + '?' + query;
+  const bodyBuf = body ? (Buffer.isBuffer(body) ? body : Buffer.from(body)) : null;
   const headers = {
     'User-Agent': UA_APP,
     'Accept': 'application/json; charset=utf-8,application/x-protobuf',
     'Content-Type': 'application/json; charset=UTF-8',
-    'x-ss-req-ticket': vals._rticket,
-    'x-tt-request-tag': 't=0;n=0',
+    'x-xs-from-web': '0',
+    'x-ss-req-ticket': String(rticket),
     'sdk-version': '2',
-    'passport-sdk-version': '50561',
-    'x-vc-bdturing-sdk-version': '3.7.2.cn',
-    'x-gorgon': xGorgon(query, null, ts, rnd),
+    'x-gorgon': xGorgon(query, bodyBuf, ts, rnd),
     'x-khronos': String(ts),
     'x-ladon': be32(ts).toString('base64'),
     'x-argus': le32(ts).toString('base64'),
     'x-helios': helios(ts),
+    'x-medusa': buildMedusa(query, bodyBuf, ts, device),
     'x-tt-dt': '',
   };
-  return { url, headers };
+  if (extraHeaders && typeof extraHeaders === 'object') {
+    Object.assign(headers, extraHeaders);
+  }
+  return headers;
+}
+
+// ---------------- x-medusa 签名（F13，移植自已验证的参考实现） ----------------
+// SM3 用 Node 原生实现（本地 branchOf 已在用）；其余与参考实现逐字一致，
+// 仅 buildMedusa 改为直接接受 query 字符串（调用方手里只有 query，没有完整 URL）。
+const PROCESS_NONCE = crypto.randomBytes(18).toString('base64url');
+const PROCESS_STARTED = Date.now();
+function sm3(input) {
+  return crypto.createHash('sm3').update(Buffer.isBuffer(input) ? input : Buffer.from(input)).digest();
+}
+function u32(value) { return Number(value) >>> 0; }
+function rol32(value, count) { const n = count & 31; const x = u32(value); return u32((x << n) | (x >>> (32 - n))); }
+function ror32(value, count) { const n = count & 31; const x = u32(value); return u32((x >>> n) | (x << (32 - n))); }
+function zigzag(value) { const n = BigInt(value); return n < 0n ? ((-n) * 2n - 1n) : n * 2n; }
+function varint(value) { let n = BigInt(value); const out = []; while (n > 127n) { out.push(Number((n & 127n) | 128n)); n >>= 7n; } out.push(Number(n)); return Buffer.from(out); }
+function protoField(tag, value, type = 'string') {
+  if (value === undefined || value === null || value === '') return Buffer.alloc(0);
+  if (type === 'bytes' || type === 'string' || type === 'message') {
+    const body = type === 'bytes' ? Buffer.from(value) : type === 'message' ? value : Buffer.from(String(value));
+    return Buffer.concat([varint((BigInt(tag) << 3n) | 2n), varint(body.length), body]);
+  }
+  if (type === 'float') { const body = Buffer.alloc(4); body.writeFloatLE(Number(value)); return Buffer.concat([varint((BigInt(tag) << 3n) | 5n), body]); }
+  return Buffer.concat([varint(BigInt(tag) << 3n), varint(type === 'sint' ? zigzag(value) : value)]);
+}
+function proto(fields) { return Buffer.concat(fields.map(([tag, value, type]) => protoField(tag, value, type))); }
+function sumMd5(data) { let check = 0x20220420; for (let i = 0; i < 12; i += 1) { const temp = (i & 1) === 0 ? (check >>> 3) ^ check : (check >>> 5) ^ check; check = (i & 1) === 0 ? data[i] ^ (check << 7) : data[i] | (check << 11); if ((i & 1) !== 0) check = ~check; check = u32(check ^ temp); } return u32((check | 4) ^ 0x1000000); }
+const BRANCH2_SV = [0xa7aefe20,0x7149f1d6,0x47e4ca07,0xe9b58f67,0x93b924de,0xc614d0f5,0x38afe0ef,0xb2bbad73,0xe24444c3,0x9d3aec9b,0xdf7b37e4,0xd8b16d40,0xf8ac31b8,0x76b9a90b,0x31d833ee,0x953fce64,0x353595a4,0x4609c13b,0x36925008,0x8c6d0925,0x5df5c177,0x1cfbf52b,0x8a4fa7f0,0x114ca35e,0x8193f984,0x7a7a8733,0x316ab4d5,0x3c20cfc9,0xa6d84453,0x3a18500c,0x798ec47a,0x97a76b28,0x66c4ff96,0x51716443,0xdd2fc3b,0xb5696da7,0xbbeb3ac5,0x5c53d204,0xd32608ce,0x7279b9ec,0xf4188ecf,0xf7d793db,0x332cc491,0xab76ae15,0x9bebe727,0x18a01384,0x5be9f8a7,0x5f90a754,0x39b663c0,0x36673c83,0x7c92f514,0x9d7d94d7,0xe2e8d9aa,0x5f7e9ea9,0x7abd4551,0x569e05da,0x40a25632,0x3df5a9a5,0xbab37d80,0x454286dc,0x3f5d4e78,0x3d7b75d,0xb1fe4af7,0xa5ab26a3];
+const BRANCH2_ORDERS = Buffer.from('0f0704000908030a060b050d0e010c020f05080c0009020103070e060b0a0d04060500070c000a04080f010b0d09020e060b02050403080101070a000d0c090e0d070e0f0b0208030c0509010004060a0d0902060f0b0a040807000c0503010e0c090f07060f030e020d0405010b0a000c050a090e0802040407030f01060b000b0f0408020a0700090d06010e03050c0b060a0508020c03070f0e090d0001040906080f050800040a0b030d01020c0e090d0c0604070a03030f00080105020e01000d0f090a0b0e0402080703060c0501080a0c0f0905060b000304020e070d04080f000c0f0e0d0a01060207090503040205080d0b0a0606000e0f070c09030a08040f000b01060d0c0709030e05020a070b050f00020e0108030d0c0609040d070f08050f06040b0a0e0c090002030d0c020704010b0e0e08060f09050003','hex');
+function md5V3Step(kind, a, b, c, d, m, shift, constant) { let f; if (kind === 0) f = (b & c) | ((~b) & d); else if (kind === 1) f = (b & d) | (c & (~d)); else if (kind === 2) f = b ^ c ^ d; else f = c ^ (b | (~d)); return u32(b + rol32(u32(a + f + m + constant), shift)); }
+function md5SumV3(message, countV2, orders, countV1) {
+  const sv = BRANCH2_SV.map((value) => ror32(value, countV1)); const start = [ror32(0x79e0f2fb, countV2), ror32(0xc8b52570, countV2), ror32(0xebc2f8cd, countV2), ror32(0x7c104d93, countV2)]; const endCount = (countV2 + 6) & 255; const end = [ror32(0x19be4866, endCount), ror32(0xe85986b4, endCount), ror32(0xe19b326e, endCount), ror32(0x71d1d7d4, endCount)]; const m = []; for (let i = 0; i < 16; i += 1) m.push(message.readUInt32LE(i * 4)); let [a,b,c,d] = start;
+  const run = (kind, order, shifts, offset) => { for (let i = 0; i < 16; i += 1) { const phase = i & 3; const next = phase === 0 ? md5V3Step(kind,a,b,c,d,m[orders[offset + i]],shifts[i],sv[offset + i]) : phase === 1 ? md5V3Step(kind,d,a,b,c,m[orders[offset + i]],shifts[i],sv[offset + i]) : phase === 2 ? md5V3Step(kind,c,d,a,b,m[orders[offset + i]],shifts[i],sv[offset + i]) : md5V3Step(kind,b,c,d,a,m[orders[offset + i]],shifts[i],sv[offset + i]); if (phase === 0) a = next; else if (phase === 1) d = next; else if (phase === 2) c = next; else b = next; } };
+  run(0, orders, [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22], 0);
+  run(1, orders, [5,9,14,20,5,9,14,20,5,9,14,20,5,9,14,20], 16);
+  run(2, orders, [4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23], 32);
+  run(3, orders, [6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21], 48);
+  const ret = Buffer.alloc(16); ret.writeUInt32LE(u32((start[0] + a) ^ end[0]), 0); ret.writeUInt32LE(u32((start[1] + b) ^ end[1]), 4); ret.writeUInt32LE(u32((start[2] + c) ^ end[2]), 8); ret.writeUInt32LE(u32((start[3] + d) ^ end[3]), 12); return Buffer.concat([ret, le32(sumMd5(ret))]);
+}
+function branch2F13(iv, querySm3, bodyMd5, tsBytes, khronos) { const v = (iv & 13) * 86; const ivV0 = ((v >>> 15) & 255) + ((v >>> 8) & 255); const n1 = [0x8980f29b,0xeb549c7f,0xb08726db,0xd40cb5e6,0xe8f559e4][ivV0]; const countV1 = (n1 + khronos + 1) & 255; const countV2 = u32(n1 + khronos); const shift = (countV2 + 5) & 7; const seed = [0x84,0x96,0x77,0x9d,0xd4,0x15,0x0b,0xf8]; const pad = Buffer.from(seed.map((value) => ((value | (value << 8)) >> shift) & 255)); const input = Buffer.concat([querySm3,bodyMd5,tsBytes,pad,Buffer.from('a0010000','hex')]); return md5SumV3(input,countV2,BRANCH2_ORDERS.subarray(ivV0 << 6,(ivV0 + 1) << 6),countV1); }
+function bxor(a, b) { const out = Buffer.alloc(Math.min(a.length, b.length)); for (let i = 0; i < out.length; i += 1) out[i] = a[i] ^ b[i]; return out; }
+function hashF13(querySm3, bodyMd5, tsBytes, khronos) {
+  const iv = getIv(getIv(getIv(0x20230928, querySm3), bodyMd5), tsBytes); const low = iv & 15; const ivV0 = (low * 171) >> 9; const branch = low - ivV0 * 3;
+  if (branch === 2) return branch2F13(iv, querySm3, bodyMd5, tsBytes, khronos);
+  if (branch !== 0) return Buffer.concat([querySm3.subarray(0, 16), bodyMd5, le32(sumMd5(Buffer.concat([querySm3, bodyMd5]))) ]);
+  const ivV1List = [0xc4a78580, 0xb3c0fd39, 0xc58c5686, 0xc9aa3ba7, 0xf5a7adf2, 0x963c2ed1]; const ivV1 = ivV1List[ivV0]; const countV1 = (ivV1 + khronos + 1) & 255; const countV2 = u32(ivV1 + khronos);
+  const tt02 = [0xebb64faf,0x7aadcc2,0xcf3187bf,0xe01138ff,0x6d0bfcff,0x5a30a3be,0xb41ad638,0x34180eb8,0xf233eb6f,0xb1a584cc,0xccc30dc7,0x47d1db51,0xd55653de,0x70a84fa1,0x57473c12,0xf76f0288,0x2c077f0a,0xda0dcad0,0xfbb86f6c,0xfdc4cf00,0x688a020d,0xe676c6a6,0x8cd6338b,0x1a3c8d0e,0xcce8b06b,0x6ad0ed0b,0xa0522717,0xdc71ac83,0x2285db71,0xd5b4dda6,0x736f8650,0x6560306c,0x617ce2a6,0xe423417e,0xa40e143,0x544e4032,0x88dffb2a,0x716c1ae0,0x4c467a88,0x5b23bb3,0xe1d0b866,0xbaa3dcb8,0xae3374d3,0xc3381a50,0x1702f75b,0xfe6da368,0xf0b4cf48,0x4e0ffbb8,0x72aad10d,0x26c53a3d,0xf2bce0f6,0xb4557581,0x4a257fdd,0x8c3182a2,0xab0b3b86,0x3d5dfb14,0x4f103634,0xd37b52d7,0x444eff16,0xeb0a33d1,0x6ca86f6e,0x284ba7,0x8387cfa,0x5fb37586];
+  const tt = tt02.map((value) => ror32(value, countV1)); const n0 = (countV2 + 2) & 7; const seed = [0xfa,0x45,0x61,0xd7]; const pad = Buffer.from(seed.map((value) => ((value | (value << 8)) >> n0) & 255));
+  const data = Buffer.concat([querySm3, bodyMd5, tsBytes, pad, Buffer.from('00000000000001a0','hex')]); const di = []; for (let i = 0; i < data.length; i += 4) di.push(data.readUInt32BE(i)); let di0 = di[0]; for (let i = 0; i < 112; i += 1) { const di1 = di[i + 1]; const di14 = di[i + 14]; const r1 = rol32(di1, 14) ^ rol32(di1, 25) ^ (di1 >>> 3); const r2 = rol32(di14, 13) ^ rol32(di14, 15) ^ (di14 >>> 10); di.push(u32(di0 + di[i + 9] + r1 + r2)); di0 = di1; }
+  const init = [0x7aba4fc8,0x67166507,0x6403fa00,0x340f512f,984304912,3005047866,2874125293,2152413264].map((v) => ror32(v, countV2 & 31)); const chosen = [[101,5,7,6,3,2,1,0,5,4,3],[96,0,6,7,5,3,2,1,5,4,4],[96,7,6,2,1,4,0,5,4,3,5],[99,3,6,2,4,5,1,0,0,7,6],[96,0,5,6,7,3,1,2,5,4,4],[100,2,0,3,5,4,6,7,2,1,5]][ivV0]; let d = init.slice(); for (let i = 0; i < chosen[0]; i += 1) { const base = ivV1 + i; const n0v = di[base & 127]; const n1 = ((d[chosen[3]] ^ d[chosen[4]]) & d[chosen[1]]) ^ d[chosen[3]]; const n2 = rol32(d[chosen[1]],26)^rol32(d[chosen[1]],21)^rol32(d[chosen[1]],7); const n4 = u32(n0v+n1+n2+tt[base&63]+d[chosen[5]]); const n5=rol32(d[chosen[2]],30)^rol32(d[chosen[2]],19)^rol32(d[chosen[2]],10); const n6=(d[chosen[2]]&d[chosen[6]])|((d[chosen[2]]|d[chosen[6]])&d[chosen[7]]); const n7=u32(n5+n6); const old=d[chosen[9]]; d.unshift(d.pop()); d[chosen[10]]=u32(n7+n4); d[chosen[8]]=u32(old+n4); }
+  const ret = Buffer.alloc(32); for (let i = 0; i < 8; i += 1) ret.writeUInt32BE(u32(d[i]+init[i]), i*4); const folded = bxor(ret.subarray(0,16), ret.subarray(16)); folded.copy(ret,0); return Buffer.concat([ret.subarray(0,16), le32(sumMd5(ret.subarray(0,16)))]);
+}
+function deviceProto(deviceId) { return proto([[1,1,'sint'],[2,2,'sint'],[3,'8662'],[4,deviceId],[5,PROCESS_NONCE],[6,'!noperm!'],[7,-888888,'sint'],[8,-888888,'sint'],[9,3,'sint'],[10,-888888,'sint'],[11,'!notset!'],[12,'Asia/Shanghai,8'],[13,'zh_CN'],[14,4,'sint'],[16,0,'float'],[17,0,'float'],[18,0,'float'],[19,0,'float'],[20,0,'float'],[21,0,'float'],[22,'16'],[23,41,'sint'],[24,36,'sint'],[25,PROCESS_STARTED,'sint'],[26,PROCESS_STARTED,'sint'],[27,PROCESS_STARTED,'sint'],[28,PROCESS_STARTED,'sint'],[29,-1,'sint'],[30,'25053RT47C'],[31,'Redmi'],[32,'25053RT47C'],[33,'25053RT47C'],[34,'Xiaomi'],[35,'Redmi'],[36,'Redmi'],[38,31,'sint']]); }
+const SBOX = Buffer.from('+n0Ia5xZs0sEXznQOEqRmQBnpiCf9U2Ccybu3xhmgzOAAxn72f6uqqmwUsYL83klTni0NqxdGieeiNu9PGPsSRXBMB/cuFbUbM3KCUPINaPvHvSW0vwOcnuUhNHqRVpiAj/TEoE0K91+5ijypUYTATsh9mE3KSoN7Yyvv51cuyR2D3XkU4nhmI2xmmVwT1RMWKtub4sjxAcRDLrPoKSO2AU9FLLadMPX577Wf95IFj6FkKFVt3dCIsmGUC4X+WQxLJvxbRxEaOPpqJOXyzJX6+Vxaq3AzMfF/WAdoi1Hp+JRaV56zgpBtpWP97mH4DoGEIq1+FvV8LyS/3wvwugbQOwb2r26mJEMsiuDQTRn+wrYdrVGBVlhI3WQhyrjUBVMrLF5667llUcEaPCGPVGLD8qO5LlO8hKCvA7V9+8oJc9bXelqVQLhM76T5/WtnT45JKji+hdX0HoNCDDWuKON/QeaxB5uImSX0h2wv0VmP2zd2yeApxHcpsVS+MC2yFwAc2B7oBkTqsk1SEvTpM2fmfMQREBUfin0Bh+iq6EvPPavhWI2IX9e3yAas7Tm/3KEj2UmlFp36kN4x0rMLBRrxuh0U/zUHM4xcAMYjJY4MonxOl/X+alpt2M3WMI7w3HLnpIBigtNiJu7T21v4P6lSd5WFgntnMEt7oF92XzRLkJbTcGmXepE/UVOG6E/0YnhfS+q26utWcuxzpooyeD2cDlK1/8w9d28VzsRjbLuALbmGlp8+d7EzS6Au7lMpZ+ECMZvQmzwJ+eLOpxR+2chdUExp8ogQyq3v9l68rX4jCwjg0+PYKAEEzcU4wHFY2ZcdIHfWL1okD3SszT0GZMyKdZJrg1L2AeerB4tC0C4crp2EHGo5FYdSP7lwkeR2ocmnR+Ia8CYviUJlzOjhRZef9xuVOn3qcjow3fQgivsAmKKkg4+sA8F8/GWeDiGNhg8JM8KtFPMYWWkx5TVFX5t73kiNRJqjlIGVXtGZFCV4gzt0xcDopuZ6xz8r9Rzafpf9ywev8jh8592gHFIqpStZPuJxmDDMrNN0uBE3V+oscdoIzTJbRJ/t+sVvqnReJOgDJKk10fjisJwqyZBmnmn2BSFj8BvVtCMEbkuPOKdzw7eA11GPs04Qw8zWtkaZWwiO/wwpojqN6K0jY5RnNZA7vn4hPSul+nKCkVnVwQvg1zVxcSCtqORmB9KrJaBbssbCQivGJVJfVTt+hYxOtq4ZvWl8f4QAQZ0zGPffCgl9s6yT4vlvIdpu4YhBwA25wtQWZsc6GJYGWHyvSdeuh3mmUI9DSq13Fsp8C1MU3tqc04/df9LoTUXVXI5INOw/e8C7Hd+5CvbkMEFnnrUUmskEw==','base64');
+function xorBytes(a, b) { const out = Buffer.from(a); for (let i = 0; i < out.length; i += 1) out[i] ^= b[i % b.length]; return out; }
+function matrix(bytes) { return Array.from({ length: 4 }, (_v, i) => Array.from(bytes.subarray(i * 4, i * 4 + 4))); }
+function flat(rows) { return Buffer.from(rows.flat()); }
+function aesMix(rows) { for (let i = 0; i < 4; i += 1) { const t=rows[0][i]^rows[1][i]^rows[2][i]^rows[3][i]; const u=rows[0][i]; const xt=(x)=>((x<<1)^((x&128)?0x1b:0))&255; rows[0][i]^=t^xt(rows[0][i]^rows[1][i]); rows[1][i]^=t^xt(rows[1][i]^rows[2][i]); rows[2][i]^=t^xt(rows[2][i]^rows[3][i]); rows[3][i]^=t^xt(rows[3][i]^u); } }
+class AesV3 {
+  constructor(key, khronos) { this.wordSize=khronos&3; this.box=SBOX.subarray(this.wordSize*256,(this.wordSize+1)*256); this.con=[[1,0,2,3],[1,3,0,2],[0,1,3,2],[1,0,2,3]][this.wordSize]; this.con2=[[1,0,2,3],[2,0,3,1],[0,1,3,2],[1,0,2,3]][this.wordSize]; this.order=[[0,9,14,11,4,13,2,7,8,1,6,15,12,5,10,3],[0,9,14,15,4,13,2,7,8,1,6,3,12,5,10,11],[0,9,14,7,4,13,2,11,8,1,6,3,12,5,10,15],[0,9,14,11,4,13,2,7,8,1,6,15,12,5,10,3]][this.wordSize]; const init=[0xca025ddc,0x823dc546,0xc9420583,0xc298225f][this.wordSize]; const initial=Buffer.alloc(16); for(let i=0;i<4;i+=1)initial.writeUInt32LE(init,i*4); const mk=xorBytes(initial,key); const expanded=Buffer.concat([mk,Buffer.alloc(32)]); let rounds=8; for(let i=4;i<12;i+=1){let at=4*(i-1);let a=expanded[at],b=expanded[at+1],c=expanded[at+2],d=expanded[at+3];if((i&3)===0){const t=(u32(init>>((rounds&24)))^this.box[b])&255;b=this.box[c];c=this.box[d];d=this.box[a];a=t;}rounds+=2;expanded[at+4]=a^expanded[at-12];expanded[at+5]=b^expanded[at-11];expanded[at+6]=c^expanded[at-10];expanded[at+7]=d^expanded[at-9];} this.keys=Array.from({length:12},(_v,i)=>Array.from(expanded.subarray(i*4,i*4+4))); }
+  add(rows,key) { for(let i=0;i<4;i+=1) for(let j=0;j<4;j+=1) rows[i][j]^=key[i][j]; }
+  addCon(rows, keys) { for(let i=0;i<4;i+=1) for(let j=0;j<4;j+=1) rows[i][j]^=keys[i][this.con2[j]]; }
+  sub(rows) { for(let i=0;i<4;i+=1) for(let j=0;j<4;j+=1) rows[i][j]=this.box[rows[i][j]]; const old=rows.map((x)=>x.slice()); for(let i=0;i<4;i+=1) rows[i]=old[this.con2[i]]; }
+  shift(rows) { const b=flat(rows); for(let i=0;i<16;i+=1) rows[Math.floor(i/4)][i%4]=b[this.order[i]]; }
+  shiftCon(rows) { const old=rows.map((x)=>x.slice()); for(let i=0;i<4;i+=1) rows[i]=this.con2.map((x)=>old[i][x]); }
+  block(value) { const rows=matrix(value); this.addCon(rows,this.keys.slice(0,4)); for(let i=1;i<3;i+=1){this.sub(rows);this.shift(rows);if(i===1){this.shiftCon(rows);aesMix(rows);}this.addCon(rows,this.keys.slice(i*4));}this.add(rows,this.keys.slice(4));return flat(rows); }
+  encrypt(data, iv) { const source=Buffer.from(data); const plaintext=Buffer.alloc(32); for(let i=0;i<31;i+=1){const at=i*8;const n0=(source[at]>>4)&2;const n1=n0|(source[at+1]&64);const n2=n1|((source[at+2]>>2)&1);const n3=n2|((source[at+3]<<3)&128);const n4=n3|((source[at+4]>>1)&4);const n5=n4|((source[at+5]<<3)&16);const n6=n5|((source[at+6]<<5)&32);plaintext[i]=n6|((source[at+7]>>4)&8);} plaintext[31]=1; const blocks=[]; let previous=Buffer.from(iv); for(let i=0;i<plaintext.length;i+=16){const value=this.block(xorBytes(plaintext.subarray(i,i+16),previous));blocks.push(value);previous=value;} const key=Buffer.concat(blocks); const out=Buffer.from(source); for(let i=0;i<31;i+=1){const at=i*8; const k=key[i]; out[at]&=0xdf;out[at]|=(k<<4)&32;out[at+1]&=0xbf;out[at+1]|=k&64;out[at+2]&=0xfb;out[at+2]|=(k<<2)&4;out[at+3]&=0xef;out[at+3]|=(k>>3)&16;out[at+4]&=0xf7;out[at+4]|=(k+k)&8;out[at+5]&=0xfd;out[at+5]|=(k>>3)&2;out[at+6]&=0xfe;out[at+6]|=(k>>5)&1;out[at+7]&=0x7f;out[at+7]|=(k<<4)&128;} return Buffer.concat([key.subarray(-1),out]); }
+}
+function xmxor(data, key) { const encoded=Buffer.alloc(data.length); for(let i=0;i<data.length;i+=1){const at=(i*4)&28;const d0=key[at],d1=key[at+1];let d2=((((data[i]<<4)|(data[i]>>>4))&255)+d0);d2=(~d2)^d1;d2=((((d2&255)<<3)|((d2&255)>>>5))&255);d2=(d2+d1)&255;d2=(d2^d0)&255;encoded[data.length-i-1]=(~d2)&255;} let last=encoded[encoded.length-1]^encoded[encoded.length-2];const first=encoded[0];encoded[0]=(~last+first)&255;encoded[1]=((encoded[0]^encoded[encoded.length-1]^254)+encoded[1])&255;encoded[2]=(encoded[2]+((last-first)^(((encoded[1]<<3)|(encoded[1]>>>5))&255)^2))&255;for(let i=0;i<encoded.length-4;i+=1){const temp=(((encoded[i+2]<<3)|(encoded[i+2]>>>5))&255)^encoded[i+1]^(i+3);encoded[i+3]=(~temp+encoded[i+3])&255;}encoded[encoded.length-1]^=encoded[encoded.length-2];let sum=0;for(let i=0;i<encoded.length-1;i+=1)sum+=encoded[i+1];encoded[0]=((encoded[0]^encoded[1])+sum)&255;return encoded; }
+function keyHash(signKey, random) { const input=Buffer.concat([signKey,le32(random),signKey]); const hash=sm3(input); const d1=(random>>16)&255; let d2=((d1<<11)|(random>>>24))^(d1>>5)^d1; d2=(~d2)>>>0; return [hash,le32(d2)]; }
+function buildMedusa(query, body, khronos, device) {
+  const bodyMd5=body?crypto.createHash('md5').update(body).digest():Buffer.alloc(16); const querySm3=sm3(query); const ts=le32(khronos); const queryBodyTs=hashF13(querySm3,bodyMd5,ts,khronos); const nested=proto([[1,111,'sint'],[2,10,'sint'],[3,694367,'sint'],[5,586952199,'sint']]); const messageRand=Math.floor(Math.random()*0x100000000); const envLaunch=Math.floor(Math.random()*21)+100; const envPid=Math.floor(Math.random()*2000)+10001; const env=proto([[1,envLaunch,'sint'],[2,146331399,'sint'],[3,146331396,'sint'],[5,7,'sint'],[6,'v04.06.04.03-bugfix'],[7,envPid,'sint'],[12,deviceProto(device.device_id),'message'],[13,proto([[1,Math.floor(Date.now()/1000),'sint'],[2,-2,'sint'],[4,200,'sint']]),'message'],[14,device.version_name]]); const queryHash=sm3(Buffer.concat([Buffer.from(query),bodyMd5,Buffer.from('none')])); const message=proto([[1,Buffer.from('f7e85ffad7d7dc3bd62ac87057cf6118','hex'),'bytes'],[2,3,'sint'],[3,messageRand,'sint'],[4,'8662'],[5,device.device_id],[6,'1588093228'],[7,device.version_name],[8,'v04.06.04-ml-android'],[9,67503104,'sint'],[10,Buffer.from('4001000000000000','hex'),'bytes'],[12,khronos,'sint'],[13,queryBodyTs,'bytes'],[14,querySm3.subarray(0,6),'bytes'],[15,nested,'message'],[16,PROCESS_NONCE],[17,khronos,'sint'],[19,queryHash,'bytes'],[20,'none'],[21,312,'sint'],[23,env,'message'],[24,'{"cmr":16777216,"cmr2":16777216,"un_h":1879194040,"vpn":0,"kd":0,"fkd":3672518972,"pd":-1872573247,"dyn":"","do":0,"tk":true}']]); const random=Math.floor(Math.random()*0x100000000); const [hash,seed]=keyHash(Buffer.from('8ebdfa3806ecc5cee79423e6029ed82540bc2218bb7eae f71cb691f7aa8aa2f5'.replace(/ /g,''),'hex'),random); let transformed=xmxor(message,hash); transformed=Buffer.concat([Buffer.from('4001000000000000','hex'),transformed]).reverse(); for(let i=0;i<transformed.length;i+=1)transformed[i]^=seed[(~i)&3]; const check=((querySm3[0]&63)<<14)|0x18000001|((queryBodyTs[0]&63)<<8); const xmRand=Math.floor(Math.random()*0x100000000); const packed=Buffer.concat([Buffer.from([0x35]),le32(xmRand),le32(check),transformed,Buffer.from([random>>16,random>>24])]); const encrypted=new AesV3(Buffer.from('f1593376766ea98d34f31b057a9d5be4','hex'),khronos).encrypt(packed,Buffer.from('1fe109a4125283f418de9e051a969e12','hex')); const version=Buffer.from('03000000f7e85ffad7d7dc3bd62ac87057cf6118','hex'); const prefix=Buffer.alloc(20); for(let i=0;i<20;i+=4) prefix.writeUInt32LE(u32(version.readUInt32LE(i)^khronos),i); return Buffer.concat([prefix,Buffer.from([random&255,(random>>8)&255,0,1]),encrypted]).toString('base64');
+}
+
+function validDeviceIdentity(session) {
+  if (!session || typeof session !== 'object') return false;
+  const did = String(session.device_id || '');
+  const iid = String(session.iid || session.install_id || '');
+  return /^[1-9]\d{5,23}$/.test(did) && /^[1-9]\d{5,23}$/.test(iid);
+}
+
+function newAnonymousDeviceSeed() {
+  const nowSec = Math.floor(Date.now() / 1000);
+  return {
+    cdid: randomUuid(),
+    openudid: crypto.randomBytes(8).toString('hex'),
+    clientudid: randomUuid(),
+    req_id: randomUuid(),
+    key_register_ts: nowSec,
+  };
+}
+
+// 注册响应里的设备号：优先 *_str 字符串，缺失时接受安全整数。
+function responseId(obj, name) {
+  if (!obj || typeof obj !== 'object') return '';
+  const preferred = obj[name + '_str'];
+  const value = preferred === undefined || preferred === null || preferred === '' ? obj[name] : preferred;
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value > 0 ? String(value) : '';
+  return typeof value === 'string' && /^\d{1,30}$/.test(value) && /[1-9]/.test(value) ? value : '';
+}
+
+// ttEncrypt 注册：请求体 gzip 压缩后 AES-128-CBC 加密。
+// 格式：746305100000 + 32 字节随机数 + AES-CBC(SHA512(压缩体)||压缩体)，
+// 密钥/IV 由 SHA512(SHA512(随机数)||KDF_SALT) 派生（KDF_SALT 即 SPADE_CONST）。
+// 设备身份仅进程内有效，不写盘、不跨重启复用。
+function deviceRegisterRequest(seed) {
+  const s = seed || newAnonymousDeviceSeed();
+  const ts = Math.floor(Date.now() / 1000);
+  const nowMs = Date.now();
+  const header = {
+    display_name: '红果免费短剧',
+    update_version_code: 73932,
+    manifest_version_code: 73932,
+    app_version_minor: '7.3.9.32',
+    aid: 8662,
+    channel: 'update_64',
+    package: 'com.phoenix.read',
+    app_version: '7.3.9.32',
+    version_code: 73932,
+    sdk_version: '3.7.0-rc.34-fanqie-xiaoshuo',
+    sdk_target_version: 29,
+    git_hash: '3a88f4e',
+    os: 'Android',
+    os_version: '16',
+    os_api: 36,
+    device_model: '25053RT47C',
+    device_brand: 'Redmi',
+    device_manufacturer: 'Redmi',
+    cpu_abi: 'arm64-v8a',
+    release_build: 'b5e187f',
+    density_dpi: 520,
+    display_density: 'mdpi',
+    resolution: '1280x2772',
+    language: 'zh',
+    timezone: 8,
+    access: 'wifi',
+    not_request_sender: 0,
+    carrier: 'CHINA MOBILE',
+    mcc_mnc: '46000',
+    rom: 'eng.root.20231116.160340',
+    rom_version: 'W528JS release-keys',
+    cdid: s.cdid,
+    sig_hash: '56a962410c494bbaf0b58dba20cae56f',
+    openudid: s.openudid,
+    clientudid: s.clientudid,
+    ipv6_list: [],
+    region: 'CN',
+    tz_name: 'Asia/Shanghai',
+    tz_offset: 28800,
+    sim_region: 'cn',
+    sim_serial_number: [],
+    oaid_may_support: false,
+    req_id: s.req_id || randomUuid(),
+    device_platform: 'android',
+    custom: {
+      account_region_src: 'fallback',
+      account_region: 'cn',
+      host_bit: 64,
+      dragon_device_type: 'phone',
+    },
+    pre_installed_channel: '',
+    apk_first_install_time: nowMs,
+    is_system_app: 0,
+    sdk_flavor: 'china',
+    guest_mode: 0,
+  };
+  const compressed = zlib.gzipSync(Buffer.from(JSON.stringify({ magic_tag: 'ss_app_log', header, _gen_time: nowMs }), 'utf8'));
+  const random = crypto.randomBytes(32);
+  const derived = sha512(Buffer.concat([sha512(random), SPADE_CONST]));
+  const cipher = crypto.createCipheriv('aes-128-cbc', derived.subarray(0, 16), derived.subarray(16, 32));
+  const plaintext = Buffer.concat([sha512(compressed), compressed]);
+  const body = Buffer.concat([Buffer.from('746305100000', 'hex'), random, cipher.update(plaintext), cipher.final()]);
+  const headers = {
+    'User-Agent': 'com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)',
+    'Accept': 'application/json',
+    'Content-Type': 'application/octet-stream;tt-data=a',
+    'log-encode-type': 'gzip',
+    'x-ss-dp': '8662',
+    'x-ss-req-ticket': String(nowMs),
+    'x-vc-bdturing-sdk-version': '4.0.3.cn',
+    'lc': '101',
+    'sdk-version': '2',
+    'passport-sdk-version': '5051452',
+    'x-neptune': '-8|50:51:59:30:40:47:49:39',
+    'x-ss-stub': md5(body).toString('hex').toUpperCase(),
+  };
+  return { url: DEVICE_REGISTER_API, method: 'POST', headers, body, seed: s, ts };
+}
+
+async function registerDevice() {
+  const req = deviceRegisterRequest();
+  const r = await httpText(req.url, {
+    method: req.method,
+    headers: req.headers,
+    body: req.body,
+    timeout: 20000,
+  });
+  if (r.status < 200 || r.status >= 300 || !r.body.length) {
+    throw Error('empty device_register response');
+  }
+  const j = JSON.parse(r.body.toString('utf8'));
+  if (Number(j.code ?? j.Code ?? 0) !== 0) {
+    throw Error('device_register rejected');
+  }
+  const data = (j && typeof j.data === 'object' && j.data) ? j.data : {};
+  const did = responseId(j, 'device_id') || responseId(data, 'device_id');
+  const iid = responseId(j, 'install_id') || responseId(data, 'install_id');
+  const session = {
+    device_id: did,
+    iid,
+    cdid: req.seed.cdid,
+    openudid: req.seed.openudid,
+    clientudid: req.seed.clientudid,
+    key_register_ts: req.ts,
+    registered_at: Date.now(),
+  };
+  if (!validDeviceIdentity(session)) {
+    throw Error('device_register returned invalid device identity');
+  }
+  deviceSession = session;
+  return session;
+}
+
+async function ensureDeviceSession(forceRefresh = false) {
+  if (!forceRefresh && validDeviceIdentity(deviceSession)) return deviceSession;
+  if (deviceRegisterFlight) return deviceRegisterFlight;
+  deviceRegisterFlight = (async () => {
+    try {
+      return await registerDevice();
+    } finally {
+      deviceRegisterFlight = null;
+    }
+  })();
+  return deviceRegisterFlight;
+}
+
+function signedRequest(vid, device, host, extraHeaders) {
+  const ts = Math.floor(Date.now() / 1000);
+  const dev = validDeviceIdentity(device) ? device : (validDeviceIdentity(deviceSession) ? deviceSession : null);
+  if (!dev) throw Error('registered device identity is required before signing playback request');
+  const payload = {
+    biz_param: {
+      detail_page_version: 0,
+      device_level: 3,
+      disable_digg_stat: false,
+      need_all_video_definition: true,
+      need_mp4_align: false,
+      use_os_player: false,
+      use_server_dns: false,
+      video_platform: 1024,
+    },
+    mixed_video_id_map: { '1004': [String(vid)] },
+  };
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  const merged = Object.assign({}, DEVICE, {
+    iid: String(dev.iid),
+    device_id: String(dev.device_id),
+    cdid: String(dev.cdid || randomUuid()),
+  });
+  const vals = Object.assign({}, merged, { ts: String(ts) });
+  const baseUrl = 'https://' + (host || new URL(VIDEO_MODEL_API).hostname) + '/novel/player/multi_video_model/v1/';
+  const { url, query, rticket } = selectSignedUrl(baseUrl, vals, body, ts);
+  const headers = buildSignedHeaders(query, body, ts, rticket, merged, Object.assign({
+    'x-tt-store-region': 'cn',
+    'x-tt-store-region-src': 'did',
+  }, extraHeaders));
+  return { url, method: 'POST', headers, body, device: dev };
 }
 
 // ---------------- HTTP 客户端 ----------------
@@ -437,39 +732,82 @@ async function parseEpisodes(sid, html) {
 }
 
 // ---------------- 视频模型（签名接口） ----------------
+function parseVideoModelResponse(j, vid) {
+  if (!j || typeof j !== 'object') throw Error('invalid video model JSON');
+  if (j.code !== 0 && j.code != null) throw Error('video model request rejected');
+  const data = (j.data && typeof j.data === 'object') ? j.data : {};
+  const models = (data.video_model_data && typeof data.video_model_data === 'object') ? data.video_model_data : null;
+  let ent = (models && (models[String(vid)] || Object.values(models).find(value => value && typeof value === 'object'))) ||
+            ((data[String(vid)] && typeof data[String(vid)] === 'object') ? data[String(vid)] : null) ||
+            data;
+  let vm = ent && ent.video_model;
+  if (typeof vm === 'string') {
+    try { vm = JSON.parse(vm); } catch (error) { vm = null; }
+  }
+  if (!vm && typeof data.video_model === 'string') {
+    try { vm = JSON.parse(data.video_model); } catch (error) { vm = null; }
+  } else if (!vm && data.video_model && typeof data.video_model === 'object') {
+    vm = data.video_model;
+  }
+  if (!vm && (data.video_list || data.dynamic_video_list || data.dynamic_video)) {
+    vm = data;
+  }
+  if (!vm || typeof vm !== 'object') throw Error('video model missing');
+  if (!vm.key_seed && ent && ent.key_seed) vm.key_seed = ent.key_seed;
+  if (!vm.key_seed && data.key_seed) vm.key_seed = data.key_seed;
+  const dyn = (vm.dynamic_video && typeof vm.dynamic_video === 'object') ? vm.dynamic_video : null;
+  const rows = vm.video_list || vm.dynamic_video_list || (dyn && (dyn.dynamic_video_list || dyn.video_list));
+  if (Array.isArray(rows)) {
+    const normalized = {};
+    rows.forEach((item, index) => {
+      if (item && typeof item === 'object') normalized[String(index)] = item;
+    });
+    vm.video_list = normalized;
+  } else if (rows && typeof rows === 'object') {
+    vm.video_list = rows;
+  }
+  if (!vm.video_list || typeof vm.video_list !== 'object' || !Object.keys(vm.video_list).length) {
+    throw Error('video model contains no qualities');
+  }
+  return vm;
+}
+
 async function fetchModel(vid) {
   const hit = modelCache.get(String(vid));
   if (hit && Date.now() - hit.t < MODEL_TTL) return hit.vm;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let dev = null;
+  // 最多两次：主域名一次；失败（空响应、解析失败或模型缺失）则重新注册设备，
+  // 再到备用域名 api5-normal-hl.fqnovel.com 重试一次。
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const s = signedRequest(vid);
-      const r = await httpText(s.url, { method: 'GET', headers: s.headers, timeout: 25000 });
-      if (r.status < 200 || r.status >= 300 || !r.body.length) throw Error('empty video model response');
+      if (!dev) dev = await ensureDeviceSession(false);
+      const host = attempt === 0 ? new URL(VIDEO_MODEL_API).hostname : VIDEO_MODEL_ALT_HOST;
+      const s = signedRequest(vid, dev, host, attempt === 0 ? null : { 'Connection': 'close' });
+      const r = await httpText(s.url, {
+        method: s.method,
+        headers: s.headers,
+        body: s.body,
+        timeout: 25000,
+      });
+      if (r.status < 200 || r.status >= 300 || !r.body.length) {
+        throw Error('empty video model response');
+      }
       const j = JSON.parse(r.body.toString('utf8'));
-      if (!j || (j.code !== 0 && j.code != null)) throw Error('video model request rejected');
-      const data = j.data || {};
-      const models = data.video_model_data || {};
-      let ent = models[String(vid)] || Object.values(models).find(value => value && typeof value === 'object') || data;
-      let vm = ent && ent.video_model;
-      if (typeof vm === 'string') { try { vm = JSON.parse(vm); } catch (error) { vm = null; } }
-      if (!vm && data.video_model) vm = data.video_model;
-      if (!vm || typeof vm !== 'object') throw Error('video model missing');
-      const rows = vm.video_list || vm.dynamic_video_list;
-      if (Array.isArray(rows)) {
-        const normalized = {};
-        rows.forEach((item, index) => { if (item && typeof item === 'object') normalized[String(index)] = item; });
-        vm.video_list = normalized;
-      }
-      if (!vm.video_list || typeof vm.video_list !== 'object' || !Object.keys(vm.video_list).length) {
-        throw Error('video model contains no qualities');
-      }
+      const vm = parseVideoModelResponse(j, vid);
       modelCache.set(String(vid), { t: Date.now(), vm });
       return vm;
     } catch (error) {
-      if (attempt === 2) break;
-      await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
+      if (attempt === 0) {
+        try { dev = await ensureDeviceSession(true); } catch (e) { dev = null; }
+        await new Promise(resolve => setTimeout(resolve, 400));
+        continue;
+      }
+      break;
     }
   }
+  // 两次都失败：本次用的设备身份可能已被服务端静默丢弃，丢弃缓存，
+  // 让下一次播放重新注册新设备，而不是反复用同一个失效身份请求。
+  deviceSession = null;
   return null;
 }
 
@@ -491,6 +829,25 @@ function decryptSpade(value, seed) {
   while (pt.length && pt[pt.length - 1] === 0) pt = pt.subarray(0, pt.length - 1);
   const s = pt.toString('utf8');
   return s.startsWith('http') ? s : null;
+}
+
+function resolveMediaUrl(it, vm) {
+  const seedS = (vm && vm.key_seed) || (it && it.key_seed) || '';
+  const seed = seedS ? Buffer.from(seedS, 'base64') : Buffer.alloc(0);
+  const candidates = [it && it.main_url, it && it.backup_url_1, it && it.backup_url_2, it && it.backup_url]
+    .filter(u => typeof u === 'string' && u.length > 0);
+  for (const rawUrl of candidates) {
+    if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) return rawUrl;
+    if (seed.length) {
+      const dec = decryptSpade(rawUrl, seed);
+      if (dec) return dec;
+    }
+    try {
+      const plain = Buffer.from(rawUrl, 'base64').toString('utf8').trim();
+      if (plain.startsWith('http://') || plain.startsWith('https://')) return plain;
+    } catch (error) { }
+  }
+  return null;
 }
 
 function deriveContentKey(spadeA) {
@@ -523,7 +880,7 @@ function videoMetadata(item) {
   // Some App responses use Python dictionary syntax. Read only scalar fields;
   // never evaluate the response as JavaScript or Python code.
   const fields = {};
-  const re = /(['"])(definition|quality_name|vtype|vwidth|vheight)\1\s*:\s*(?:(['"])([^'"\\]*)\3|(-?\d+(?:\.\d+)?))(?=\s*[,}])/g;
+  const re = /(['"])(definition|quality_name|quality|vtype|vwidth|vheight)\1\s*:\s*(?:(['"])([^'"\\]*)\3|(-?\d+(?:\.\d+)?))(?=\s*[,}])/g;
   let match;
   while ((match = re.exec(value))) fields[match[2]] = match[4] === undefined ? Number(match[5]) : match[4];
   return fields;
@@ -531,7 +888,7 @@ function videoMetadata(item) {
 
 function videoQuality(item, fallback) {
   const meta = videoMetadata(item);
-  for (const value of [item.definition, meta.definition, item.quality_name, meta.quality_name]) {
+  for (const value of [item.definition, meta.definition, item.quality_name, meta.quality_name, item.quality, meta.quality]) {
     if (value == null) continue;
     let q = String(value).toLowerCase().replace(/\s/g, '');
     if (/^\d+$/.test(q)) q += 'p';
@@ -539,7 +896,12 @@ function videoQuality(item, fallback) {
   }
   const gear = String(item.gear_des_key || '');
   const match = /(?:^|\|)4:(\d{3,4}p)(?=\||$)/i.exec(gear);
-  return match ? match[1].toLowerCase() : String(fallback || '').toLowerCase();
+  if (match) return match[1].toLowerCase();
+  const w = Number(item.vwidth || meta.vwidth || 0);
+  const h = Number(item.vheight || meta.vheight || 0);
+  const shortSide = (w > 0 && h > 0) ? Math.min(w, h) : 0;
+  if ([360, 480, 540, 720, 1080].includes(shortSide)) return `${shortSide}p`;
+  return String(fallback || '').toLowerCase();
 }
 
 function qualityCandidates(vm) {
@@ -551,7 +913,7 @@ function qualityCandidates(vm) {
     if (!/^(?:\d{1,4}|\d{3,4}p)$/.test(q)) continue;
     const gear = String(it.gear_des_key || '').toLowerCase();
     const meta = videoMetadata(it);
-    const bad = (/bytevc2|bvc2/.test(gear + ' ' + String(meta.vtype || '').toLowerCase())) ? 1 : 0;
+    const bad = (/bytevc2|bvc2/.test(gear + ' ' + String(meta.vtype || it.vtype || '').toLowerCase())) ? 1 : 0;
     const order = /^\d{3,4}p$/.test(q) ? -parseInt(q, 10) : 1;
     cands.push({ bad, order, q, it });
   }
@@ -850,10 +1212,7 @@ async function decryptVideo(vid, want) {
   if (fs.existsSync(dst) && verifyMp4(dst)) return dst;
   if (fs.existsSync(dst)) { try { fs.unlinkSync(dst); } catch (e) { } }
 
-  const seedS = vm.key_seed || '';
-  const seed = seedS ? Buffer.from(seedS, 'base64') : Buffer.alloc(0);
-  let url = it.main_url || '';
-  if (url && !url.startsWith('http') && seed.length) url = decryptSpade(url, seed);
+  const url = resolveMediaUrl(it, vm);
   if (!url) return null;
   const encInfo = it.encrypt_info || {};
   const spadeA = it.spade_a || encInfo.spade_a;
@@ -946,7 +1305,12 @@ const CATS = [
 ];
 
 const site = {
-  init(ext) { return null; },
+  init(ext) {
+    if (ext && typeof ext === 'object' && ext.dataDir) {
+      CACHE_DIR = path.join(String(ext.dataDir), 'hgtv-js-cache');
+    }
+    return null;
+  },
 
   async home(filter) {
     try {
@@ -1064,6 +1428,8 @@ const site = {
   destroy() {
     decryptFlights.clear();
     modelCache.clear();
+    deviceSession = null;
+    deviceRegisterFlight = null;
   },
 };
 
