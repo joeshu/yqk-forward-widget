@@ -359,14 +359,6 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
     [self.tableView reloadData];
 }
 
-- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-    if ((scrollView == self.channelGrid || scrollView == self.table) && self.catalogTopImmersiveScrim && !self.catalogTopImmersiveScrim.hidden) {
-        CGFloat topInset = scrollView.contentInset.top;
-        CGFloat progress = MIN(1.0, MAX(0.0, (scrollView.contentOffset.y + topInset) / 96.0));
-        HostUpdateImmersiveTopScrim(self.catalogTopImmersiveScrim, self.catalogTopImmersiveGradient, self.catalogTopImmersiveScrim.frame, progress, NO);
-    }
-}
-
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
     if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])
