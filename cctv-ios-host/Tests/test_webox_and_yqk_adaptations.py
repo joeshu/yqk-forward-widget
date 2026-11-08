@@ -197,5 +197,74 @@ const fn = {fn_code};
         self.assertIn("settingsTopImmersiveScrim", settings)
 
 
+
+    def test_resource_import_workflow_advanced_features_and_closed_loop_activation(self):
+        wf_h = (ROOT / "Sources/ResourceImportWorkflowViewController.h").read_text(encoding="utf-8")
+        wf_m = (ROOT / "Sources/ResourceImportWorkflowViewController.m").read_text(encoding="utf-8")
+        root_m = (ROOT / "Sources/RootViewController.m").read_text(encoding="utf-8")
+
+        self.assertIn("saveAndActivateSelected", wf_h)
+        self.assertIn("promptRenameCandidateAtIndex:", wf_h)
+        self.assertIn("expandSubScriptsForCandidateAtIndex:", wf_h)
+        self.assertIn("ResourceImportSplitConcatenatedURLs", wf_m)
+        self.assertIn("recognizeBatchURLs:", wf_m)
+        self.assertIn("smartClipboardButton", wf_m)
+        self.assertIn("quickPresetsScroll", wf_m)
+        self.assertIn("protocolBadgePrefixForCandidate:", wf_m)
+        self.assertIn("保存并立即启用", wf_m)
+        self.assertIn("activateAfterSave", root_m)
+        self.assertIn("customRenamed", root_m)
+
+
+
+    def test_07_youku_tencent_maccms_rescue_and_disguised_hls_relay(self):
+        import host_media_runtime
+        from unittest import mock
+
+        # Verify _load_csp_adapter is defined and callable in host_media_runtime
+        adapter_mod = host_media_runtime._load_csp_adapter()
+        self.assertTrue(callable(getattr(adapter_mod, "resolve_maccms_stream_by_title", None)))
+        self.assertTrue(callable(getattr(adapter_mod, "extract_title_from_vip_url", None)))
+
+        # Verify MediaRuntime.call("play") rescues Youku & QQ VIP URLs when vodName/detail title is known
+        class DummyYoukuTencentEngine:
+            def capabilities(self):
+                return {"capabilities": ["home", "detail", "play"]}
+            def call(self, op, args):
+                if op == "detail":
+                    return {"list": [{"vod_id": "yk1", "vod_name": "藏海传", "vod_play_from": "youku$$$qq", "vod_play_url": "第1集$https://v.youku.com/v_show/id_XNjU.html$$$第1集$https://v.qq.com/x/cover/mzc00200/v001.html"}]}
+                if op == "play":
+                    return {"parse": 1, "jx": 1, "url": args.get("id")}
+                return {}
+            def close(self):
+                pass
+
+        rt = host_media_runtime.MediaRuntime(DummyYoukuTencentEngine())
+        det = rt.call("detail", {"id": "yk1"})
+        self.assertEqual(det["name"], "藏海传")
+        with mock.patch.object(adapter_mod, "resolve_maccms_stream_by_title", return_value="https://cdn.example/canghai/ep1.m3u8"):
+            play_yk = rt.call("play", {"id": "https://v.youku.com/v_show/id_XNjU.html", "lineId": "youku"})
+            self.assertEqual(play_yk["url"], "https://cdn.example/canghai/ep1.m3u8")
+            self.assertEqual(play_yk["parse"], 0)
+            self.assertTrue(play_yk["directMedia"])
+            self.assertTrue(play_yk["nativePlayable"])
+
+            play_qq = rt.call("play", {"id": "https://v.qq.com/x/cover/mzc00200/v001.html", "lineId": "qq", "vodName": "藏海传"})
+            self.assertEqual(play_qq["url"], "https://cdn.example/canghai/ep1.m3u8")
+            self.assertEqual(play_qq["parse"], 0)
+            self.assertTrue(play_qq["directMedia"])
+        rt.close()
+
+        # Verify WeBox 4kvm, HStream, JSPluginRuntime hostFetch fallback, and universal yqk parseLink
+        js_rt = (ROOT / "Sources/JSPluginRuntime.m").read_text(encoding="utf-8")
+        self.assertIn("retriedHostFetch", js_rt)
+        self.assertIn("X-CCTVHost-Final-URL", js_rt)
+        self.assertIn("__cctv_yqk_norm", js_rt)
+        self.assertIn("weboxBuiltinMap", js_rt)
+
+        plat = (ROOT / "JSPlugins/compat/platform.mjs").read_text(encoding="utf-8")
+        self.assertIn("WA.instantiate = async", plat)
+
+
 if __name__ == "__main__":
     unittest.main()

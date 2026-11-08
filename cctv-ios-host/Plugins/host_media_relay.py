@@ -67,16 +67,26 @@ def _is_cert_verification_error(error):
     return isinstance(reason, ssl.SSLError) and ('certificate_verify_failed' in str(reason).lower() or 'self-signed' in str(reason).lower() or 'local issuer' in str(reason).lower())
 
 
+_UNVERIFIED_TLS_HOSTS = set()
+
+
 def _open_with_timeout_retry(request, diagnostic_id=''):
     """Retry one idempotent request once when the connection handshake times out or CDN cert chain is self-signed."""
     method = request.get_method().upper()
-    opener = urllib.request.build_opener(ScopedRedirect())
+    parsed_init = urllib.parse.urlsplit(request.full_url)
+    host_init = (parsed_init.hostname or '').lower()
+    if host_init in _UNVERIFIED_TLS_HOSTS:
+        unverified_ctx = ssl._create_unverified_context()
+        opener = urllib.request.build_opener(ScopedRedirect(), urllib.request.HTTPSHandler(context=unverified_ctx))
+    else:
+        opener = urllib.request.build_opener(ScopedRedirect())
     try:
         return opener.open(request, timeout=8)
     except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
         parsed = urllib.parse.urlsplit(request.full_url)
         host = (parsed.hostname or '').lower()
         if _is_cert_verification_error(error) and host not in ('127.0.0.1', 'localhost', '::1') and not host.endswith('.test'):
+            _UNVERIFIED_TLS_HOSTS.add(host)
             unverified_ctx = ssl._create_unverified_context()
             tls_opener = urllib.request.build_opener(ScopedRedirect(), urllib.request.HTTPSHandler(context=unverified_ctx))
             return tls_opener.open(_retry_request(request), timeout=8)
@@ -260,7 +270,7 @@ class MediaRelay:
             return chunk
         if len(chunk) >= 8 and chunk[4:8] in (b'ftyp', b'styp', b'moof', b'moov', b'sidx', b'emsg', b'free', b'skip', b'mdat'):
             return chunk
-        limit = min(len(chunk) - 376, 2048)
+        limit = min(len(chunk) - 376, 16384)
         for offset in range(1, limit):
             if chunk[offset] == 0x47 and chunk[offset + 188] == 0x47 and chunk[offset + 376] == 0x47:
                 return chunk[offset:]
@@ -667,7 +677,8 @@ class MediaRelay:
             mime_type = mime.split(';', 1)[0].strip().lower()
             generic_mime = mime_type in ('', 'application/octet-stream', 'binary/octet-stream', 'text/plain')
             extensionless = not urllib.parse.urlsplit(final_url).path.rsplit('/', 1)[-1].count('.') or '.m3u8' in final_url.lower()
-            if not head and not is_hls and (expected_hls or generic_mime or extensionless):
+            is_segment_resource = (token in self.segments and resource_kind in ('media', 'key', 'map') and not expected_hls)
+            if not head and not is_hls and not is_segment_resource and (expected_hls or generic_mime or extensionless):
                 prefix = response.read(64)
                 is_hls = prefix.lstrip(b'\xef\xbb\xbf \t\r\n').startswith(b'#EXTM3U')
                 if expected_hls and not is_hls:
@@ -718,59 +729,103 @@ class MediaRelay:
                 self._write_client(handler, norm_key)
                 resource_event('completed', len(norm_key))
                 return
-            resp_ct = (response.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
-            looks_like_png_segment = (token in self.segments and (resp_ct in ('image/png', 'image/jpeg', 'image/gif', 'image/bmp') or '.png' in final_url.lower() or 'rou.video' in final_url.lower()))
-            if not head and resource_kind == 'media' and response.status == 200 and not prefix and looks_like_png_segment:
-                prefix = response.read(64)
-            if not head and prefix.startswith(b'\x89PNG\r\n\x1a\n'):
-                raw_png = prefix + response.read(16 * 1024 * 1024 + 1 - len(prefix))
-                unwrapped = self._unwrap_rou_png_bytes(raw_png) if len(raw_png) <= 16 * 1024 * 1024 else None
-                if unwrapped is not None:
-                    resource_event('byte', len(unwrapped))
-                    u_mime = 'video/mp2t' if (len(unwrapped) > 376 and unwrapped[0] == 0x47 and unwrapped[188] == 0x47) else ('video/mp4' if unwrapped[4:8] in (b'ftyp', b'styp', b'moof', b'moov') else 'application/octet-stream')
-                    handler.send_response(200)
-                    handler.send_header('Content-Type', u_mime)
-                    handler.send_header('Content-Length', str(len(unwrapped)))
-                    handler.send_header('Cache-Control', 'no-store')
-                    handler.send_header('Connection', 'close')
-                    handler.end_headers()
-                    sent = True
-                    self._write_client(handler, unwrapped)
-                    resource_event('completed', len(unwrapped))
-                    return
+            def read_stream_chunk(size=65536):
+                reader = response.read1 if callable(getattr(type(response), 'read1', None)) else response.read
+                thread = threading.current_thread()
+                previous_stream_read = getattr(thread, '_host_media_stream_read', None)
+                if self.stream_media: thread._host_media_stream_read = True
+                try:
+                    return reader(size)
+                finally:
+                    if self.stream_media:
+                        if previous_stream_read is None:
+                            try: del thread._host_media_stream_read
+                            except AttributeError: pass
+                        else:
+                            thread._host_media_stream_read = previous_stream_read
+
+            first_chunk = b''
+            received_bytes = len(prefix)
+            stripped_diff = 0
+            override_ct = None
+            if not head and token in self.segments and resource_kind == 'media' and response.status in (200, 206):
+                first_chunk = prefix + read_stream_chunk(65536) if not prefix else prefix
+                prefix = b''
+                received_bytes = len(first_chunk)
+                if first_chunk.startswith(b'\x89PNG\r\n\x1a\n') and (b'roUd' in first_chunk[:256] or 'rou.video' in final_url.lower()):
+                    raw_png = first_chunk + response.read(16 * 1024 * 1024 + 1 - len(first_chunk))
+                    unwrapped = self._unwrap_rou_png_bytes(raw_png) if len(raw_png) <= 16 * 1024 * 1024 else None
+                    if unwrapped is not None:
+                        resource_event('byte', len(unwrapped))
+                        u_mime = 'video/mp2t' if (len(unwrapped) > 376 and unwrapped[0] == 0x47 and unwrapped[188] == 0x47) else ('video/mp4' if unwrapped[4:8] in (b'ftyp', b'styp', b'moof', b'moov') else 'application/octet-stream')
+                        handler.send_response(200)
+                        handler.send_header('Content-Type', u_mime)
+                        handler.send_header('Content-Length', str(len(unwrapped)))
+                        handler.send_header('Cache-Control', 'no-store')
+                        handler.send_header('Connection', 'close')
+                        handler.end_headers()
+                        sent = True
+                        self._write_client(handler, unwrapped)
+                        resource_event('completed', len(unwrapped))
+                        return
+                    first_chunk = raw_png
+                    received_bytes = len(first_chunk)
+                is_clean_media_head = (
+                    not first_chunk or
+                    first_chunk[0] == 0x47 or
+                    (len(first_chunk) >= 8 and first_chunk[4:8] in (b'ftyp', b'styp', b'moof', b'moov', b'sidx', b'emsg')) or
+                    first_chunk[:3] == b'ID3' or
+                    first_chunk[:2] in (b'\xff\xf1', b'\xff\xf9')
+                )
+                may_be_disguised = (
+                    not is_clean_media_head and (
+                        expected_bytes is None or
+                        expected_bytes >= 4096 or
+                        first_chunk.startswith((b'\x89PNG', b'\xff\xd8\xff', b'GIF8', b'BM', b'RIFF'))
+                    )
+                )
+                if may_be_disguised:
+                    while len(first_chunk) < 16384 and self._strip_disguised_ts_prefix(first_chunk) is first_chunk:
+                        more = read_stream_chunk(16384)
+                        if not more:
+                            break
+                        first_chunk += more
+                        received_bytes += len(more)
+                    stripped_chunk = self._strip_disguised_ts_prefix(first_chunk)
+                    stripped_diff = len(first_chunk) - len(stripped_chunk)
+                    first_chunk = stripped_chunk
+                if first_chunk and first_chunk[0] == 0x47:
+                    override_ct = 'video/mp2t'
             handler.send_response(response.status)
             for key in ('Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges'):
-                if response.headers.get(key):
-                    handler.send_header(key, response.headers[key])
+                val = response.headers.get(key)
+                if key == 'Content-Type' and override_ct:
+                    val = override_ct
+                elif key == 'Content-Length' and stripped_diff > 0 and expected_bytes is not None:
+                    val = str(max(0, expected_bytes - stripped_diff))
+                if val:
+                    handler.send_header(key, val)
             handler.send_header('Connection', 'close')
             handler.end_headers()
             sent = True
             if not head:
-                received_bytes = len(prefix)
-                first_byte = bool(prefix)
+                first_byte = False
                 if prefix:
+                    first_byte = True
                     resource_event('byte', len(prefix))
                     self._write_client(handler, prefix)
+                elif first_chunk:
+                    first_byte = True
+                    resource_event('byte', received_bytes)
+                    self._write_client(handler, first_chunk)
                 while not self.stopping.is_set():
-                    reader = response.read1 if callable(getattr(type(response), 'read1', None)) else response.read
-                    thread = threading.current_thread()
-                    previous_stream_read = getattr(thread, '_host_media_stream_read', None)
-                    if self.stream_media: thread._host_media_stream_read = True
-                    try:
-                        chunk = reader(65536)
-                    finally:
-                        if self.stream_media:
-                            if previous_stream_read is None:
-                                try: del thread._host_media_stream_read
-                                except AttributeError: pass
-                            else:
-                                thread._host_media_stream_read = previous_stream_read
+                    chunk = read_stream_chunk(65536)
                     if not chunk:
                         break
                     received_bytes += len(chunk)
                     if not first_byte:
                         first_byte = True
-                        if token in self.segments and resource_kind == 'media' and expected_bytes is None:
+                        if token in self.segments and resource_kind == 'media':
                             chunk = self._strip_disguised_ts_prefix(chunk)
                         resource_event('byte', received_bytes)
                     self._write_client(handler, chunk)

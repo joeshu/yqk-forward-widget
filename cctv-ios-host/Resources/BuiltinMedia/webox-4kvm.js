@@ -86,9 +86,7 @@ WeBox.define({
     if (!/^\d{10,16}$/.test(serverTime || "") || !userlink || !modulePath)
       ctx.fail("INVALID_RESPONSE", "网站播放协议已变化，缺少请求参数");
     const moduleUrl = kvmSiteUrl(ctx, modulePath, page.url);
-    // 内置本站公开模块，不在宿主执行下载到的 JS；模块变更只更新二进制。
-    const wasm = moduleUrl === KVM_ORIGIN + KVM_WASM_PATH ? KVM_WASM_BASE64 :
-      (await kvmHttp(ctx, moduleUrl, { responseType: "base64" })).data;
+    const wasm = "";
     ctx.signal.throwIfAborted();
     let resolved;
     try {
@@ -130,7 +128,7 @@ WeBox.define({
       const id = "quality:" + String(row.quality || row.title || "default");
       if (sources.some(s => s.id === id)) continue;
       sources.push({ id, name, url, mime: /\.mp4(?:[?#]|$)/i.test(url) ? "video/mp4" :
-        "application/vnd.apple.mpegurl", headers: { "User-Agent": KVM_UA }, downloadable: false });
+        "application/vnd.apple.mpegurl", headers: { "User-Agent": KVM_UA, Referer: page.url }, downloadable: false });
     }
     if (!sources.length) ctx.fail("UNSUPPORTED", "此清晰度暂无可用地址，请更换优先清晰度；登录/会员资源请在源站访问");
     return { sources };
@@ -190,13 +188,20 @@ async function kvmHttp(ctx, url, options) {
   if (response.status < 200 || response.status >= 300) ctx.fail("NETWORK", "源站请求失败（HTTP " + response.status + "）");
   return response;
 }
+let kvmPageSnapshot = null;
 async function kvmPage(ctx, path, query) {
+  const isPlayDetail = /^\/play\/[a-zA-Z0-9_-]{3,80}$/.test(String(path || "")) && (!query || !Object.keys(query).length);
+  if (isPlayDetail && kvmPageSnapshot && kvmPageSnapshot.path === path && Date.now() - kvmPageSnapshot.loadedAt < 60000) {
+    return kvmPageSnapshot.page;
+  }
   const url = kvmSiteUrl(ctx, path, KVM_ORIGIN + "/");
   const response = await kvmHttp(ctx, url, { query: query || {} });
   const loadedAt = Date.now(), text = String(response.data || "");
   const $ = ctx.html.load(text);
   if (!$('main').length) ctx.fail("INVALID_RESPONSE", "源站返回验证页或页面结构已变化");
-  return { $, url: kvmSiteUrl(ctx, response.url || url, url), loadedAt };
+  const page = { $, url: kvmSiteUrl(ctx, response.url || url, url), loadedAt };
+  if (isPlayDetail) kvmPageSnapshot = { path, loadedAt, page };
+  return page;
 }
 function kvmCatalog(ctx, page, pageNumber, classify) {
   const $ = page.$, items = [], seen = new Set();

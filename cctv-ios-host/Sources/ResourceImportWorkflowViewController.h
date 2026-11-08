@@ -9,5 +9,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,readonly,copy) NSString *taskSummary;
 - (void)refreshExistingResourceMatches;
 - (void)reloadThemeAppearance;
+- (void)saveAndActivateSelected;
+- (void)promptRenameCandidateAtIndex:(NSUInteger)index;
+- (void)expandSubScriptsForCandidateAtIndex:(NSUInteger)index;
 @end
 NS_ASSUME_NONNULL_END

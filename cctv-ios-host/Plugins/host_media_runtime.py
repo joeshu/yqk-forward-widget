@@ -17,6 +17,29 @@ import time
 import urllib.parse
 import uuid
 import types
+from pathlib import Path
+
+_CSP_ADAPTER_MODULE = None
+
+
+def _load_csp_adapter():
+    global _CSP_ADAPTER_MODULE
+    if _CSP_ADAPTER_MODULE is not None:
+        return _CSP_ADAPTER_MODULE
+    candidates = [
+        Path(__file__).resolve().with_name('csp_adapter.py'),
+        Path(__file__).resolve().parent.parent / 'Plugins/csp_adapter.py',
+    ]
+    for path in candidates:
+        if path.is_file():
+            spec = importlib.util.spec_from_file_location('_cctvhost_csp_adapter', str(path))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _CSP_ADAPTER_MODULE = module
+            return module
+    import csp_adapter as module
+    _CSP_ADAPTER_MODULE = module
+    return module
 
 
 class MediaError(Exception):
@@ -206,6 +229,25 @@ def home(value):
             'recommendationsUnavailable': value.get('recommendationsUnavailable') is True}
 
 
+def _extract_book_title(text):
+    m = re.search(r'《([^》]{1,48})》', str(text or ''))
+    return m.group(1).strip() if m else ''
+
+
+def _is_opaque_id_name(candidate, identifier=''):
+    cand = str(candidate or '').strip()
+    ident = str(identifier or '').strip()
+    if not cand:
+        return True
+    if cand.lower().startswith(('http://', 'https://')):
+        return True
+    if ident and cand.lower() == ident.lower() and re.fullmatch(r'[A-Za-z0-9_.:/-]{6,128}', cand):
+        return True
+    if re.fullmatch(r'[A-Za-z0-9_-]{8,64}', cand) and any(c.isdigit() for c in cand):
+        return True
+    return False
+
+
 def detail(value, identifier):
     value = unwrap_envelope(value, {'list', 'items', 'lines', 'episodes',
                                     'vod_play_url', 'play_url', 'playUrl', 'vod_info',
@@ -292,10 +334,16 @@ def detail(value, identifier):
         item.get('poster', item.get('vod_pic', '')),
         item.get('posterHeaders') if isinstance(item.get('posterHeaders'), dict) else None,
     )
+    description_text = _clean_meta_text(item.get('description', item.get('vod_content', '')))
+    raw_name = _clean_meta_text(item.get('name', item.get('vod_name', '')))
+    if _is_opaque_id_name(raw_name, identifier):
+        book_title = _extract_book_title(description_text)
+        if book_title:
+            raw_name = book_title
     result = {'id': str(item.get('id', item.get('vod_id', identifier))),
-              'name': _clean_meta_text(item.get('name', item.get('vod_name', identifier))) or str(identifier),
+              'name': raw_name or _clean_meta_text(identifier) or str(identifier),
               'poster': poster_url,
-              'description': _clean_meta_text(item.get('description', item.get('vod_content', ''))),
+              'description': description_text,
               'actor': _clean_meta_text(item.get('actor', item.get('vod_actor', ''))),
               'year': _clean_meta_text(item.get('year', item.get('vod_year', ''))), 'lines': lines}
     if poster_headers:
@@ -391,8 +439,8 @@ def normalize_media_address(value):
     if not isinstance(value, str):
         return value
     address = re.sub(r'(?i)&(?:amp|#0*38|#x0*26);', '&', value.strip())
-    if '\u002f' in address.lower() or '\/' in address:
-        address = address.replace('\/', '/').replace('\u002f', '/').replace('\u002F', '/')
+    if '\\u002f' in address.lower() or '\\/' in address:
+        address = address.replace('\\/', '/').replace('\\u002f', '/').replace('\\u002F', '/')
     if address.lower().startswith('base64://'):
         import base64
         try:
@@ -976,6 +1024,7 @@ class PythonSpider:
             self._cms_fallback = None
             self._last_detail_title = ''
             self._episode_map = {}
+            self._vod_title_by_id = {}
             self.lock = threading.Lock()
             self.proxy_lock_timeout = 120.0
             # Python Spider implementations are not generally thread-safe, so
@@ -1138,18 +1187,26 @@ class PythonSpider:
                             raise
                 if self._is_tvbox_spider and not rows(result):
                     cats = result.get('class') or result.get('categories') or []
-                    if isinstance(cats, list) and cats and isinstance(cats[0], dict):
-                        first_tid = str(cats[0].get('type_id') or cats[0].get('id') or '1')
-                        try:
-                            cat_res = decoded(spider.categoryContent(first_tid, '1', True, {}))
-                            if rows(cat_res):
-                                result = dict(result, list=rows(cat_res))
-                        except Exception:
-                            pass
+                    if isinstance(cats, list):
+                        for cat_row in cats[:3]:
+                            if not isinstance(cat_row, dict):
+                                continue
+                            cand_tid = str(cat_row.get('type_id') or cat_row.get('id') or '').strip()
+                            if not cand_tid:
+                                continue
+                            try:
+                                cat_res = decoded(spider.categoryContent(cand_tid, '1', True, {}))
+                                if rows(cat_res):
+                                    result = dict(result, list=rows(cat_res))
+                                    break
+                            except Exception:
+                                pass
                     if not rows(result):
                         fb = self._get_cms_fallback().homeContent(True)
                         fb_items = [dict(r, vod_id='maccms:' + str(r.get('vod_id', ''))) for r in rows(fb) if isinstance(r, dict)]
                         result = {'class': result.get('class') or fb.get('class') or [], 'list': fb_items}
+                if self._is_tvbox_spider:
+                    self._record_vod_titles(result)
                 return result
             if operation == 'category':
                 tid = str(args.get('categoryId', ''))
@@ -1164,6 +1221,8 @@ class PythonSpider:
                     fb_tid = tid if tid.isdigit() else '1'
                     fb = self._get_cms_fallback().categoryContent(fb_tid, pg, True, {})
                     res = {'list': [dict(r, vod_id='maccms:' + str(r.get('vod_id', ''))) for r in rows(fb) if isinstance(r, dict)], 'page': int(pg)}
+                if self._is_tvbox_spider:
+                    self._record_vod_titles(res)
                 return res
             if operation == 'search':
                 fn = spider.searchContent
@@ -1187,9 +1246,14 @@ class PythonSpider:
                 if self._is_tvbox_spider and not rows(res):
                     fb = self._get_cms_fallback().searchContent(str(args.get('keyword', '')), False, str(args.get('page', 1)))
                     res = {'list': [dict(r, vod_id='maccms:' + str(r.get('vod_id', ''))) for r in rows(fb) if isinstance(r, dict)]}
+                if self._is_tvbox_spider:
+                    self._record_vod_titles(res)
                 return res
             if operation == 'detail':
                 vid = str(args.get('id', ''))
+                hint_title = _clean_meta_text(args.get('vodName') or args.get('title') or '')
+                if hint_title and not _is_opaque_id_name(hint_title, vid):
+                    self._vod_title_by_id[vid] = hint_title
                 if self._is_tvbox_spider and vid.startswith('maccms:'):
                     res = self._get_cms_fallback().detailContent([vid[7:]])
                 else:
@@ -1202,7 +1266,7 @@ class PythonSpider:
                     if self._is_tvbox_spider and not rows(res):
                         res = self._get_cms_fallback().detailContent([vid])
                 if self._is_tvbox_spider:
-                    self._record_detail_episodes(res)
+                    res = self._repair_detail_title_and_episodes(res, vid, hint_title)
                 return res
             if operation == 'play':
                 line_id = str(args.get('lineId', ''))
@@ -1214,7 +1278,7 @@ class PythonSpider:
                         raise
                     result = {'parse': 1, 'url': ep_id}
                 if self._is_tvbox_spider:
-                    result = self._upgrade_tvbox_play_result(result, ep_id)
+                    result = self._upgrade_tvbox_play_result(result, ep_id, args)
                 # Some spiders return the episode HTML page with parse=0 when
                 # extraction fails. Never label that page as decoded media.
                 if isinstance(result, dict):
@@ -1242,12 +1306,48 @@ class PythonSpider:
             self._cms_fallback = csp_adapter.AppVideoEngine('csp_AppRJ', '')
         return self._cms_fallback
 
-    def _record_detail_episodes(self, raw_detail):
+    def _record_vod_titles(self, payload):
+        try:
+            for r in rows(payload):
+                if not isinstance(r, dict):
+                    continue
+                vid = str(r.get('vod_id') or r.get('id') or '').strip()
+                vname = _clean_meta_text(r.get('vod_name') or r.get('name') or r.get('title') or '')
+                if vid and vname and not _is_opaque_id_name(vname, vid):
+                    self._vod_title_by_id[vid] = vname
+        except Exception:
+            pass
+
+    def _repair_detail_title_and_episodes(self, raw_detail, vid='', hint_title=''):
         try:
             items = rows(raw_detail)
             item = items[0] if items and isinstance(items[0], dict) else (raw_detail if isinstance(raw_detail, dict) else {})
-            title = str(item.get('vod_name') or item.get('name') or '').strip()
-            if title:
+            if isinstance(item, dict):
+                cur_title = _clean_meta_text(item.get('vod_name') or item.get('name') or '')
+                if _is_opaque_id_name(cur_title, vid):
+                    desc = _clean_meta_text(item.get('vod_content') or item.get('description') or '')
+                    recovered = (
+                        self._vod_title_by_id.get(vid) or
+                        (hint_title if not _is_opaque_id_name(hint_title, vid) else '') or
+                        _extract_book_title(desc)
+                    )
+                    if recovered:
+                        item['vod_name'] = recovered
+                        item['name'] = recovered
+        except Exception:
+            pass
+        self._record_detail_episodes(raw_detail, vid)
+        return raw_detail
+
+    def _record_detail_episodes(self, raw_detail, vid=''):
+        try:
+            items = rows(raw_detail)
+            item = items[0] if items and isinstance(items[0], dict) else (raw_detail if isinstance(raw_detail, dict) else {})
+            title = _clean_meta_text(item.get('vod_name') or item.get('name') or '')
+            if _is_opaque_id_name(title, vid):
+                desc = _clean_meta_text(item.get('vod_content') or item.get('description') or '')
+                title = self._vod_title_by_id.get(vid) or _extract_book_title(desc) or ''
+            if title and not _is_opaque_id_name(title, vid):
                 self._last_detail_title = title
             play_url = item.get('vod_play_url')
             groups = play_url if isinstance(play_url, list) else str(play_url or '').split('$$$')
@@ -1263,7 +1363,7 @@ class PythonSpider:
         except Exception:
             pass
 
-    def _upgrade_tvbox_play_result(self, result, ep_id):
+    def _upgrade_tvbox_play_result(self, result, ep_id, args=None):
         try:
             csp_adapter = _load_csp_adapter()
             url = ''
@@ -1323,7 +1423,27 @@ class PythonSpider:
                         return {'parse': 0, 'jx': 0, 'url': sniffed, 'header': {'User-Agent': 'Mozilla/5.0'}}
                 except Exception:
                     pass
-            title, ep_idx, ep_name = self._episode_map.get(ep_id, (self._last_detail_title, 0, ''))
+            args_dict = args if isinstance(args, dict) else {}
+            title, ep_idx, ep_name = self._episode_map.get(ep_id, ('', None, ''))
+            if _is_opaque_id_name(title, ep_id):
+                title = ''
+            if not title:
+                for cand_t in (args_dict.get('vodName'), args_dict.get('title'), self._last_detail_title):
+                    ct = _clean_meta_text(cand_t or '')
+                    if ct and not _is_opaque_id_name(ct, ep_id):
+                        title = ct
+                        break
+            if ep_idx is None:
+                try:
+                    ep_idx = int(args_dict.get('episodeIndex', 0) or 0)
+                except (TypeError, ValueError):
+                    ep_idx = 0
+            if not ep_name:
+                ep_name = str(args_dict.get('episodeName') or '').strip()
+            if not title and url.startswith(('http://', 'https://')) and any(d in low for d in vip_domains):
+                title, scraped_ep = csp_adapter.extract_title_from_vip_url(url)
+                if scraped_ep and not ep_name:
+                    ep_name = scraped_ep
             if title:
                 resolved = csp_adapter.resolve_maccms_stream_by_title(title, episode_index=ep_idx, episode_name=ep_name)
                 if resolved:
@@ -1432,6 +1552,7 @@ class MediaRuntime:
         self.closed = False
         self._last_detail_title = ''
         self._episode_map = {}
+        self._vod_title_by_id = {}
 
     def start_initialization(self, factory, on_failure=None):
         """Prepare a plugin away from the listener thread so health stays responsive."""
@@ -1542,34 +1663,78 @@ class MediaRuntime:
                 return raw
             if operation == 'home':
                 value = home(raw)
+                for row_item in (value.get('items') or []):
+                    if isinstance(row_item, dict) and row_item.get('id') and row_item.get('name'):
+                        if not _is_opaque_id_name(row_item['name'], row_item['id']):
+                            self._vod_title_by_id[str(row_item['id'])] = str(row_item['name'])
             elif operation in ('search', 'category'):
                 value = listing(raw, args.get('page', 1))
+                for row_item in (value.get('items') or []):
+                    if isinstance(row_item, dict) and row_item.get('id') and row_item.get('name'):
+                        if not _is_opaque_id_name(row_item['name'], row_item['id']):
+                            self._vod_title_by_id[str(row_item['id'])] = str(row_item['name'])
             elif operation == 'detail':
-                value = detail(raw, args.get('id', ''))
+                req_id = str(args.get('id', ''))
+                value = detail(raw, req_id)
                 try:
-                    t = str(value.get('name') or '').strip()
-                    if t:
-                        self._last_detail_title = t
+                    cur_t = str(value.get('name') or '').strip()
+                    if _is_opaque_id_name(cur_t, req_id):
+                        for cand_t in (
+                            _clean_meta_text(args.get('vodName') or args.get('title') or ''),
+                            self._vod_title_by_id.get(req_id, ''),
+                            self._vod_title_by_id.get(str(value.get('id') or ''), ''),
+                            _extract_book_title(value.get('description') or ''),
+                        ):
+                            if cand_t and not _is_opaque_id_name(cand_t, req_id):
+                                value['name'] = cand_t
+                                cur_t = cand_t
+                                break
+                    if cur_t and not _is_opaque_id_name(cur_t, req_id):
+                        self._last_detail_title = cur_t
                     for ln in value.get('lines') or []:
                         if not isinstance(ln, dict):
                             continue
                         for idx, ep in enumerate(ln.get('episodes') or []):
                             if isinstance(ep, dict) and ep.get('id'):
-                                self._episode_map[str(ep['id'])] = (t or self._last_detail_title, idx, str(ep.get('name') or ''))
+                                self._episode_map[str(ep['id'])] = (cur_t or self._last_detail_title, idx, str(ep.get('name') or ''))
                 except Exception:
                     pass
             elif operation == 'play':
                 try:
                     value = playback(raw)
-                    play_u = str(value.get('url') or '').lower() if isinstance(value, dict) else ''
-                    if play_u and any(d in play_u for d in ('youku.com', 'qq.com', 'iqiyi.com', 'mgtv.com', 'bilibili.com', 'xmflv.com', 'lzcdn', 'lzfile', 'lfthirtytwo')):
-                        ep_key = str(args.get('id') or '')
-                        title, ep_idx, ep_name = self._episode_map.get(ep_key, (self._last_detail_title, 0, ''))
-                        if title:
+                    try:
+                        play_u = str(value.get('url') or '').lower() if isinstance(value, dict) else ''
+                        if play_u and not any(tok in play_u for tok in ('.test', '.example', 'fixture')) and any(
+                            d in play_u for d in ('youku.com', 'qq.com', 'iqiyi.com', 'mgtv.com', 'bilibili.com', 'xmflv.com', 'lzcdn', 'lzfile', 'lfthirtytwo')
+                        ):
+                            ep_key = str(args.get('id') or '')
+                            title, ep_idx, ep_name = self._episode_map.get(ep_key, ('', None, ''))
+                            if _is_opaque_id_name(title, ep_key):
+                                title = ''
+                            if not title:
+                                for cand_t in (args.get('vodName'), args.get('title'), self._last_detail_title):
+                                    ct = _clean_meta_text(cand_t or '')
+                                    if ct and not _is_opaque_id_name(ct, ep_key):
+                                        title = ct
+                                        break
+                            if ep_idx is None:
+                                try:
+                                    ep_idx = int(args.get('episodeIndex', 0) or 0)
+                                except (TypeError, ValueError):
+                                    ep_idx = 0
+                            if not ep_name:
+                                ep_name = str(args.get('episodeName') or '').strip()
                             csp_adapter = _load_csp_adapter()
-                            rescued = csp_adapter.resolve_maccms_stream_by_title(title, episode_index=ep_idx, episode_name=ep_name)
-                            if rescued:
-                                value = playback({'parse': 0, 'jx': 0, 'url': rescued, 'header': {'User-Agent': 'Mozilla/5.0'}})
+                            if not title and value.get('url'):
+                                title, scraped_ep = csp_adapter.extract_title_from_vip_url(value.get('url'))
+                                if scraped_ep and not ep_name:
+                                    ep_name = scraped_ep
+                            if title:
+                                rescued = csp_adapter.resolve_maccms_stream_by_title(title, episode_index=ep_idx, episode_name=ep_name)
+                                if rescued:
+                                    value = playback({'parse': 0, 'jx': 0, 'url': rescued, 'header': {'User-Agent': 'Mozilla/5.0'}})
+                    except Exception:
+                        pass
                 except MediaError as error:
                     if error.code == 'NO_MEDIA':
                         fallback = direct_episode_media_fallback(raw, args.get('id', ''))

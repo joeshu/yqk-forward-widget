@@ -27,6 +27,8 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, JSPluginRuntime *> *sessionRuntimes;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, void (^)(NSString *)> *sessionLogHandlers;
 @property(nonatomic, copy) NSString *serviceIdentifier;
+@property(nonatomic, copy) NSString *hostFetchURL;
+@property(nonatomic, copy) NSString *hostFetchToken;
 @end
 @implementation JSPluginRuntime
 + (instancetype)shared { static JSPluginRuntime *r; static dispatch_once_t once; dispatch_once(&once, ^{ r=[self routerWithScriptURL:nil configuration:nil]; }); return r; }
@@ -40,7 +42,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     if(NSThread.isMainThread){if(error)*error=[NSError errorWithDomain:@"JSPlugin" code:5 userInfo:@{NSLocalizedDescriptionKey:@"JavaScriptCore 服务停止需要在后台线程执行。"}];return NO;}
     if(!self.router){if(!self.activeSession.length||![self.serviceIdentifier isEqual:identifier])return YES;NSDictionary *payload=@{@"session":self.activeSession,@"serviceID":identifier?:@""};NSData *data=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];NSString *reply=[self callOperation:@"stop" json:[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] timeout:10 error:error];id value=reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:nil;return [value isKindOfClass:NSDictionary.class]&&[value[@"ok"] boolValue];}
     NSArray<NSString *> *sessions=nil;@synchronized(self){NSMutableArray *values=[NSMutableArray array];for(NSString *session in self.sessionRuntimes)if([self.sessionRuntimes[session].serviceIdentifier isEqual:identifier])[values addObject:session];sessions=values.copy;}
-    for(NSString *session in sessions){NSDictionary *payload=@{@"session":session,@"serviceID":identifier?:@""};NSData *data=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];NSString *reply=[self callOperation:@"stop" json:[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] timeout:10 error:error];id value=reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:nil;if(![value isKindOfClass:NSDictionary.class]||![value[@"ok"] boolValue])return NO;}
+    for(NSString *session in sessions){NSDictionary *payload=@{@"session":session,@"serviceID":identifier?:@""};NSData *data=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];NSString *reply=[self callOperation:@"stop" json:[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] timeout:10 error:error];id value=reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];if(![value isKindOfClass:NSDictionary.class]||![value[@"ok"] boolValue])return NO;}
     return YES;
 }
 - (void)log:(NSString *)text { @autoreleasepool { if(text.length>4096)text=[text substringToIndex:4096];if(self.logHandler)self.logHandler(text); } }
@@ -58,7 +60,9 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     JSValue *callback=record[@"callback"];
     if(error){[callback callWithArguments:@[@{@"error":error}]];return;}
     NSHTTPURLResponse *response=record[@"response"];NSData *data=record[@"data"];
-    [callback callWithArguments:@[@{@"status":@(response.statusCode),@"url":response.URL.absoluteString?:@"",@"headers":response.allHeaderFields?:@{},@"base64":[data base64EncodedStringWithOptions:0]?:@""}]];
+    NSDictionary *respHeaders=response.allHeaderFields?:@{};
+    NSString *finalURL=[respHeaders[@"X-CCTVHost-Final-URL"] isKindOfClass:NSString.class]?respHeaders[@"X-CCTVHost-Final-URL"]:([respHeaders[@"x-cctvhost-final-url"] isKindOfClass:NSString.class]?respHeaders[@"x-cctvhost-final-url"]:(response.URL.absoluteString?:(record[@"originalURL"]?:@"")));
+    [callback callWithArguments:@[@{@"status":@(response.statusCode),@"url":finalURL,@"headers":respHeaders,@"base64":[data base64EncodedStringWithOptions:0]?:@""}]];
 }
 - (NSNumber *)fetch:(NSString *)url options:(NSString *)options callback:(JSValue *)callback {
     NSNumber *key=@(++self.sequence);
@@ -91,7 +95,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     if(!self.session){[callback callWithArguments:@[@{@"error":@"JS 服务已停止"}]];return key;}
     NSURLSessionDataTask *task=[self.session dataTaskWithRequest:request];
     if(!task){[callback callWithArguments:@[@{@"error":@"JS 服务已停止"}]];return key;}
-    self.requests[key]=[@{@"callback":callback,@"task":task,@"data":[NSMutableData data]} mutableCopy];
+    self.requests[key]=[@{@"callback":callback,@"task":task,@"data":[NSMutableData data],@"originalURL":url?:@"",@"method":method?:@"GET",@"headers":request.allHTTPHeaderFields?:@{},@"bodyData":request.HTTPBody?:[NSData data],@"timeout":@(timeout)} mutableCopy];
     [task resume];return key;
 }
 - (NSNumber *)keyForTask:(NSURLSessionTask *)task { for(NSNumber *key in self.requests)if(self.requests[key][@"task"]==task)return key;return nil; }
@@ -110,7 +114,39 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     if(body.length+data.length>limit){[task cancel];[self fetchFinished:key error:self.genericMode?@"JS 上游响应超过 4MB":@"JS 上游响应超过 1MB"];return;}[body appendData:data];
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    NSNumber *key=[self keyForTask:task];if(key)[self fetchFinished:key error:error.localizedDescription];
+    NSNumber *key=[self keyForTask:task];if(!key)return;
+    NSMutableDictionary *record=self.requests[key];
+    NSString *origURL=[record[@"originalURL"] isKindOfClass:NSString.class]?record[@"originalURL"]:@"";
+    if(error && self.genericMode && self.session && self.hostFetchURL.length && self.hostFetchToken.length && ![record[@"retriedHostFetch"] boolValue] && ![record[@"aborted"] boolValue] && [origURL.lowercaseString hasPrefix:@"https://"]){
+        NSURL *bridgeURL=[NSURL URLWithString:self.hostFetchURL];
+        if(bridgeURL){
+            record[@"retriedHostFetch"]=@YES;
+            record[@"data"]=[NSMutableData data];
+            [record removeObjectForKey:@"response"];
+            NSTimeInterval timeout=[record[@"timeout"] doubleValue]>0?[record[@"timeout"] doubleValue]:15.0;
+            NSData *bodyData=[record[@"bodyData"] isKindOfClass:NSData.class]?record[@"bodyData"]:nil;
+            NSDictionary *bridgePayload=@{
+                @"url":origURL,
+                @"method":record[@"method"]?:@"GET",
+                @"headers":record[@"headers"]?:@{},
+                @"bodyBase64":bodyData.length?[bodyData base64EncodedStringWithOptions:0]:@"",
+                @"timeoutMs":@((NSInteger)(timeout*1000)),
+                @"followRedirects":@YES
+            };
+            NSMutableURLRequest *bridgeReq=[NSMutableURLRequest requestWithURL:bridgeURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout+2.0];
+            bridgeReq.HTTPMethod=@"POST";
+            [bridgeReq setValue:self.hostFetchToken forHTTPHeaderField:@"X-CCTVHost-Host-Fetch"];
+            [bridgeReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+            bridgeReq.HTTPBody=[NSJSONSerialization dataWithJSONObject:bridgePayload options:0 error:NULL];
+            NSURLSessionDataTask *retryTask=[self.session dataTaskWithRequest:bridgeReq];
+            if(retryTask){
+                record[@"task"]=retryTask;
+                [retryTask resume];
+                return;
+            }
+        }
+    }
+    [self fetchFinished:key error:error.localizedDescription];
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential *))completionHandler {
     if(self.genericMode && [challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust] && challenge.protectionSpace.serverTrust){
@@ -147,7 +183,22 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     };
     self.context[@"__hostReadPackageFile"]=^NSString *(NSString *name){
         NSString *path=[weak packageFile:name];NSString *text=path?[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL]:nil;
-        if(!text){JSContext.currentContext.exception=[JSValue valueWithNewErrorFromMessage:@"JS 包文件不存在、越界或不是 UTF-8 文本" inContext:JSContext.currentContext];return @"";}return text;
+        if(!text){JSContext.currentContext.exception=[JSValue valueWithNewErrorFromMessage:@"JS 包文件不存在、越界或不是 UTF-8 文本" inContext:JSContext.currentContext];return @"";}
+        NSDictionary *weboxBuiltinMap=@{@"user.4kvm":@"webox-4kvm",@"moe.hstream.webox":@"webox-hstream",@"dev.webox.native.guazi":@"webox-guazi",@"video.rou.webox":@"webox-rou"};
+        for(NSString *marker in weboxBuiltinMap){
+            if([text containsString:marker]){
+                NSString *bPath=[NSBundle.mainBundle pathForResource:weboxBuiltinMap[marker] ofType:@"js" inDirectory:@"BuiltinMedia"];
+                NSString *bText=bPath?[NSString stringWithContentsOfFile:bPath encoding:NSUTF8StringEncoding error:NULL]:nil;
+                if(bText.length){text=bText;break;}
+            }
+        }
+        if([text containsString:@"joeshu.yqk"] && [text containsString:@"function parseLink(link) {"] && ![text containsString:@"__cctv_yqk_norm"]){
+            NSString *norm=[text containsString:@"yqk:"]
+                ? @"function parseLink(link) { var __cctv_yqk_norm = 1; if (link && typeof link === 'object') link = link.link || link.id || link.vod_id || ''; link = String(link || '').trim(); var __m = link.match(new RegExp('(?:^|/play/|yqk://vod/)([0-9]+)(?:[?]([^#]*))?$', 'i')); if (__m) link = 'yqk://vod/' + __m[1] + (__m[2] ? ('?' + __m[2]) : '');"
+                : @"function parseLink(link) { var __cctv_yqk_norm = 1; if (link && typeof link === 'object') link = link.link || link.id || link.vod_id || ''; link = String(link || '').trim(); var __yqkSite = (typeof YQK === 'object' && YQK && YQK.site) ? YQK.site : 'https://m.yqk3hxe.com'; var __m = link.match(new RegExp('(?:^|/play/|yqk://vod/)([0-9]+)(?:[?]([^#]*))?$', 'i')); if (__m) link = __yqkSite + '/play/' + __m[1] + (__m[2] ? ('?' + __m[2]) : '');";
+            text=[text stringByReplacingOccurrencesOfString:@"function parseLink(link) {" withString:norm];
+        }
+        return text;
     };
     self.context[@"__hostFetchSync"]=^NSDictionary *(NSString *url,NSString *raw){
         JSPluginRuntime *s=weak;if(!s.genericMode || s.stopRequested || url.length>8192 || raw.length>2*1024*1024)return @{@"error":@"JS 同步请求不可用或参数过大"};
@@ -178,7 +229,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     };
     self.context[@"__hostLog"]=^(NSString *line){[weak log:line];};
     self.context[@"__hostFetch"]=^NSNumber *(NSString *url,NSString *options,JSValue *callback){return [weak fetch:url options:options callback:callback];};
-    self.context[@"__hostAbortFetch"]=^(NSNumber *key){JSPluginRuntime *s=weak;[s.requests[key][@"task"] cancel];[s fetchFinished:key error:@"AbortError"];};
+    self.context[@"__hostAbortFetch"]=^(NSNumber *key){JSPluginRuntime *s=weak;s.requests[key][@"aborted"]=@YES;[s.requests[key][@"task"] cancel];[s fetchFinished:key error:@"AbortError"];};
     self.context[@"__hostSetTimeout"]=^NSNumber *(JSValue *callback,double ms){
         JSPluginRuntime *s=weak;if(!s || s.timers.count>=128)return @0;
         NSNumber *key=@(++s.sequence);NSUInteger generation=s.generation;s.timers[key]=callback;
@@ -208,7 +259,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     // resolve 的结算结果）。在途调用方由下面 finishCall 的 ok:false
     // 统一唤醒，fetch 记录直接丢弃即可。
     [self.requests removeAllObjects];[self.timers removeAllObjects];self.context=nil;self.unresponsive=NO;
-    self.packageRoot=nil;self.genericMode=NO;
+    self.packageRoot=nil;self.genericMode=NO;self.hostFetchURL=nil;self.hostFetchToken=nil;
     for(NSString *key in self.calls.allKeys)[self finishCall:key answer:@"{\"ok\":false,\"error\":\"JS 服务已停止\"}"];
 }
 - (NSString *)callOperation:(NSString *)operation json:(NSString *)json timeout:(NSTimeInterval)timeout error:(NSError **)error {
@@ -259,6 +310,8 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
                 if(!self.scriptURL && ![canonical hasPrefix:allowed]){answer=[self encodedError:@"JS 入口不在已安装资源目录中"];dispatch_semaphore_signal(done);return;}
                 self.packageRoot=canonical;self.genericMode=YES;
             }
+            self.hostFetchURL=[payload[@"hostFetchURL"] isKindOfClass:NSString.class]?payload[@"hostFetchURL"]:nil;
+            self.hostFetchToken=[payload[@"hostFetchToken"] isKindOfClass:NSString.class]?payload[@"hostFetchToken"]:nil;
             NSString *failure=[self initializeContext];if(failure){[self dispose];answer=[self encodedError:failure];dispatch_semaphore_signal(done);return;}self.activeSession=session;
         }
         if(!self.context || ![self.activeSession isEqualToString:session]){answer=[self encodedError:@"JS 会话已停止或不匹配"];dispatch_semaphore_signal(done);return;}

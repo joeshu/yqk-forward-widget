@@ -69,3 +69,16 @@ g.fetch = (input, options = {}) => new Promise((resolve, reject) => {
   })
   if (signal?.aborted && !settled) abort()
 })
+
+if (typeof g.WebAssembly === 'object' && g.WebAssembly) {
+  const WA = g.WebAssembly
+  if (typeof WA.Module === 'function' && typeof WA.Instance === 'function') {
+    WA.compile = async bytes => new WA.Module(bytes)
+    WA.instantiate = async (source, imports = {}) => {
+      if (source instanceof WA.Module) return new WA.Instance(source, imports)
+      const module = new WA.Module(source)
+      const instance = new WA.Instance(module, imports)
+      return { module, instance }
+    }
+  }
+}

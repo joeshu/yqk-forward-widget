@@ -492,19 +492,82 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)):
                 timeout_ms = 15000
             timeout = max(1.0, min(float(timeout_ms) / 1000.0, 120.0))
+            follow_redirects = bool(payload.get('followRedirects'))
             request = urllib.request.Request(url, data=body, headers=headers, method=method)
             opener = urllib.request.build_opener(NoRedirect())
+            response = None
             try:
                 response = opener.open(request, timeout=timeout)
             except urllib.error.HTTPError as error:
                 response = error
+            except Exception as primary_err:
+                import ssl
+                unverified_ctx = ssl._create_unverified_context()
+                try:
+                    unverified_ctx.set_ciphers('DEFAULT:@SECLEVEL=1')
+                except Exception:
+                    pass
+                handlers = [urllib.request.HTTPSHandler(context=unverified_ctx)]
+                if not follow_redirects:
+                    handlers.append(NoRedirect())
+                alt_opener = urllib.request.build_opener(*handlers)
+                try:
+                    response = alt_opener.open(request, timeout=timeout)
+                except urllib.error.HTTPError as error:
+                    response = error
+                except Exception:
+                    host_low = (parts.hostname or '').lower()
+                    if method == 'GET' and not any(t in host_low for t in ('.test', '.example', 'localhost', '127.0.0.1')):
+                        encoded_u = urllib.parse.quote(url, safe='')
+                        proxy_urls = (
+                            f'https://api.codetabs.com/v1/proxy?quest={encoded_u}',
+                            f'https://api.allorigins.win/raw?url={encoded_u}',
+                        )
+                        for p_url in proxy_urls:
+                            try:
+                                p_req = urllib.request.Request(
+                                    p_url,
+                                    headers={'User-Agent': headers.get('User-Agent') or 'Mozilla/5.0', 'Accept': headers.get('Accept') or '*/*'},
+                                    method='GET',
+                                )
+                                p_opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=unverified_ctx))
+                                p_resp = p_opener.open(p_req, timeout=min(timeout, 10.0))
+                                if 200 <= int(p_resp.getcode() or 0) < 300:
+                                    response = p_resp
+                                    break
+                                p_resp.close()
+                            except Exception:
+                                continue
+                    if response is None:
+                        raise primary_err
             try:
+                if follow_redirects:
+                    redirect_hops = 0
+                    while int(response.getcode() or 0) in (301, 302, 303, 307, 308) and redirect_hops < 8:
+                        loc = response.headers.get('Location') if hasattr(response, 'headers') else None
+                        if not loc:
+                            break
+                        next_u = urllib.parse.urljoin(getattr(response, 'url', '') or url, loc)
+                        next_parts = urllib.parse.urlsplit(next_u)
+                        if next_parts.scheme.lower() not in ('http', 'https') or not next_parts.hostname:
+                            break
+                        response.close()
+                        redirect_hops += 1
+                        next_method = 'GET' if (int(response.getcode() or 0) == 303 or (int(response.getcode() or 0) in (301, 302) and method == 'POST')) else method
+                        next_body = None if next_method == 'GET' else body
+                        next_req = urllib.request.Request(next_u, data=next_body, headers=headers, method=next_method)
+                        try:
+                            response = opener.open(next_req, timeout=timeout)
+                        except urllib.error.HTTPError as error:
+                            response = error
+                        url = next_u
                 status = int(response.getcode() or 502)
                 raw_response_headers = response.headers
                 response_body = b'' if method == 'HEAD' or status in (204, 304) else response.read(16 * 1024 * 1024 + 1)
                 if len(response_body) > 16 * 1024 * 1024:
                     raise ValueError('host HTTPS response exceeds 16 MB')
                 response_headers = list(raw_response_headers.raw_items()) if hasattr(raw_response_headers, 'raw_items') else list(raw_response_headers.items())
+                response_headers.append(('X-CCTVHost-Final-URL', url))
                 reason = str(getattr(response, 'reason', '') or '')[:128]
             finally:
                 response.close()
@@ -886,12 +949,11 @@ def main():
             return CSPAdapter(manifest.get('entry') or manifest.get('api') or manifest.get('className'),
                               manifest.get('options') or manifest.get('ext') or '')
         node_manifest = dict(manifest, dataDirectory=args.data_dir,
-                             proxyURL=f'http://127.0.0.1:{server.server_port}/proxy')
+                             proxyURL=f'http://127.0.0.1:{server.server_port}/proxy',
+                             hostFetchURL=f'http://127.0.0.1:{server.server_port}/_cctvhost/host-fetch',
+                             hostFetchToken=server.host_fetch_token)
         if manifest['runtime'] == 'node':
             server.node_proxy_file_root = os.path.realpath(args.data_dir)
-            node_manifest.update(
-                hostFetchURL=f'http://127.0.0.1:{server.server_port}/_cctvhost/host-fetch',
-                hostFetchToken=server.host_fetch_token)
         return NativeJS(args.package, node_manifest, node=manifest['runtime'] == 'node')
     def initialization_failed(error):
         print('[影视] 资源初始化失败：%s: %s' % (type(error).__name__, error))

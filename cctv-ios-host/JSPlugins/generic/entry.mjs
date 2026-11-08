@@ -22,15 +22,25 @@ const directory=p=>p.includes('/')?p.slice(0,p.lastIndexOf('/')):''
 const path={join:(...p)=>normalize(p.join('/')),resolve:(...p)=>normalize(p.join('/')),dirname:directory,basename:p=>String(p).split('/').at(-1),extname:p=>String(p).match(/\.[^/.]+$/)?.[0]||'',sep:'/'}
 function patchLegacyPluginSource(rawText){
   let text=String(rawText??'')
-  if(text.includes('id: "joeshu.yqk"')&&text.includes('function parseLink(link)')){
-    text=text.replace(
-      'var m = String(link || "").match(/^https:\/\/m\.yqk3hxe\.com\/play\/(\d+)(?:\?epId=(\d+))?$/);',
-      'var rawLink = String(link || "").trim(); if (/^\d+(?:\?epId=\d+)?$/.test(rawLink)) rawLink = YQK.site + "/play/" + rawLink; else if (/^\/play\/\d+/.test(rawLink)) rawLink = YQK.site + rawLink; var m = rawLink.match(/^https?:\/\/[^\/]+\/play\/(\d+)(?:\?epId=(\d+))?$/);'
-    )
+  if(text.includes('joeshu.yqk')&&text.includes('function parseLink(link)')&&!text.includes('__cctv_yqk_norm')){
+    const norm=text.includes('yqk:')
+      ? 'function parseLink(link) { var __cctv_yqk_norm = 1; if (link && typeof link === "object") link = link.link || link.id || link.vod_id || ""; link = String(link || "").trim(); var __m = link.match(new RegExp("(?:^|/play/|yqk://vod/)([0-9]+)(?:[?]([^#]*))?$", "i")); if (__m) link = "yqk://vod/" + __m[1] + (__m[2] ? ("?" + __m[2]) : "");'
+      : 'function parseLink(link) { var __cctv_yqk_norm = 1; if (link && typeof link === "object") link = link.link || link.id || link.vod_id || ""; link = String(link || "").trim(); var __yqkSite = (typeof YQK === "object" && YQK && YQK.site) ? YQK.site : "https://m.yqk3hxe.com"; var __m = link.match(new RegExp("(?:^|/play/|yqk://vod/)([0-9]+)(?:[?]([^#]*))?$", "i")); if (__m) link = __yqkSite + "/play/" + __m[1] + (__m[2] ? ("?" + __m[2]) : "");'
+    text=text.replace('function parseLink(link) {',norm)
     text=text.replace(/Math\.min\(20000,/g,'Math.min(5000,')
     text=text.replace(
       'async function yqkProbeHls(url,headers,budget,depth){',
-      'async function yqkProbeHls(url,headers,budget,depth){if(/^https?:\/\//i.test(String(url||""))&&/\.(?:m3u8|mp4)(?:[?#]|$)/i.test(String(url||""))){try{var rFast=await CCTVHttp.get(url,{timeout:3500,headers:headers});var stFast=Number(rFast.statusCode||rFast.status||0),bdFast=String(rFast.data||"");if(stFast===200&&/^\s*#EXTM3U/i.test(bdFast))return url;if(stFast===0||stFast===403||stFast>=500)return url;}catch(_e){return url;}}'
+      'async function yqkProbeHls(url,headers,budget,depth){if(new RegExp("^https?://","i").test(String(url||""))&&new RegExp("[.](?:m3u8|mp4)(?:[?#]|$)","i").test(String(url||""))){try{var rFast=await CCTVHttp.get(url,{timeout:3500,headers:headers});var stFast=Number(rFast.statusCode||rFast.status||0),bdFast=String(rFast.data||"");if(stFast===200&&bdFast.trim().startsWith("#EXTM3U"))return url;if(stFast===0||stFast===403||stFast>=500)return url;}catch(_e){return url;}}'
+    )
+  }
+  if(text.includes('user.4kvm')&&text.includes('KVM_WASM_PATH')){
+    text=text.replace(
+      'const wasm = moduleUrl === KVM_ORIGIN + KVM_WASM_PATH ? KVM_WASM_BASE64 :\n      (await kvmHttp(ctx, moduleUrl, { responseType: "base64" })).data;',
+      'const wasm = "";'
+    )
+    text=text.replace(
+      'headers: { "User-Agent": KVM_UA }',
+      'headers: { "User-Agent": KVM_UA, Referer: page.url }'
     )
   }
   return text
@@ -402,6 +412,7 @@ function createWeBoxContext(spec,payload){
     compute:{
       async run(options={}){
         const {code,input,binaries}=options
+        if(input&&input.dataid!==undefined&&input.playKey!==undefined)return weboxBuild4kvmPlayUrl(input)
         if(typeof g.WebAssembly!=='undefined'&&g.WebAssembly&&typeof g.WebAssembly.instantiate==='function'&&code){
           try{
             const decodedBins={}
@@ -410,7 +421,6 @@ function createWeBoxContext(spec,payload){
             return await fn(input,decodedBins)
           }catch(_e){}
         }
-        if(input&&input.dataid!==undefined&&input.playKey!==undefined)return weboxBuild4kvmPlayUrl(input)
         throw new Error('当前运行环境不支持 WebAssembly 动态计算')
       }
     },

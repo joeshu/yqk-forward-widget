@@ -89,5 +89,26 @@ class MediaDetailContracts(unittest.TestCase):
         self.assertIn('multiplier:0.36', self.impl)
 
 
+    def test_detail_recovers_human_title_when_spider_returns_opaque_id(self):
+        self.assertIn('MediaDetailPreferredTitle(', self.source)
+        import sys
+        sys.path.insert(0, str(ROOT / 'Plugins'))
+        import host_media_runtime as media
+        # Case 1: detailContent omits vod_name and falls back to opaque ID, but vod_content has 《小猪佩奇》
+        d1 = media.detail({
+            'vod_id': 'feca5fe770ef4cdeba3d',
+            'vod_content': '《小猪佩奇》是一部针对学龄前儿童的动画片，讲述的是一只名叫佩奇的可爱小猪的故事。',
+            'vod_play_from': '优酷',
+            'vod_play_url': '第1集$https://v.youku.com/v_show/id_XNjU.html',
+        }, 'feca5fe770ef4cdeba3d')
+        self.assertEqual(d1['name'], '小猪佩奇')
+
+    def test_media_home_disables_inline_continue_watching_while_retaining_menu_history(self):
+        defs = self.source.split('static NSArray<NSDictionary *> *MediaHomeModuleDefinitions(void)', 1)[1].split('}', 1)[0]
+        self.assertNotIn('@"id":@"continue"', defs)
+        self.assertIn('if(NO&&[enabled containsObject:@"continue"])', self.source)
+        self.assertIn('[UIAction actionWithTitle:@"观看历史"', self.source)
+
+
 if __name__ == '__main__':
     unittest.main()

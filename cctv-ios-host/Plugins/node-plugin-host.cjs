@@ -750,6 +750,7 @@ function createNodeWeBoxPlugin(owner,spec){
     compute:{
       async run(options={}){
         const {code,input,binaries}=options
+        if(input&&input.dataid!==undefined&&input.playKey!==undefined)return weboxNodeBuild4kvmPlayUrl(input)
         if(typeof globalThis.WebAssembly!=='undefined'&&globalThis.WebAssembly&&typeof globalThis.WebAssembly.instantiate==='function'&&code){
           try{
             const decodedBins={}
@@ -758,7 +759,6 @@ function createNodeWeBoxPlugin(owner,spec){
             return await fn(input,decodedBins)
           }catch(_e){}
         }
-        if(input&&input.dataid!==undefined&&input.playKey!==undefined)return weboxNodeBuild4kvmPlayUrl(input)
         throw new Error('当前运行环境不支持 WebAssembly 动态计算')
       }
     },

@@ -1310,7 +1310,19 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         [self playResult:fallbackNative.copy];
         return;
     }
-    NSString *seriesTitle=[self.context[@"detail"][@"name"] isKindOfClass:NSString.class]?self.context[@"detail"][@"name"]:([self.context[@"item"][@"name"] isKindOfClass:NSString.class]?self.context[@"item"][@"name"]:@"");
+    NSString *detailTitle=[self.context[@"detail"][@"name"] isKindOfClass:NSString.class]?[self.context[@"detail"][@"name"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";
+    NSString *itemTitle=[self.context[@"item"][@"name"] isKindOfClass:NSString.class]?[self.context[@"item"][@"name"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";
+    NSString *itemID=[self.context[@"item"][@"id"] description]?:([self.context[@"detail"][@"id"] description]?:@"");
+    BOOL detailOpaque=!detailTitle.length||(itemID.length&&[detailTitle caseInsensitiveCompare:itemID]==NSOrderedSame&&[detailTitle rangeOfString:@"^[A-Za-z0-9_.:/-]{6,128}$" options:NSRegularExpressionSearch].location!=NSNotFound)||([detailTitle rangeOfString:@"^[A-Za-z0-9_-]{8,64}$" options:NSRegularExpressionSearch].location!=NSNotFound&&[detailTitle rangeOfString:@"[0-9]" options:NSRegularExpressionSearch].location!=NSNotFound);
+    NSString *seriesTitle=(!detailOpaque&&detailTitle.length)?detailTitle:itemTitle;
+    if(!seriesTitle.length||([seriesTitle rangeOfString:@"^[A-Za-z0-9_-]{8,64}$" options:NSRegularExpressionSearch].location!=NSNotFound&&[seriesTitle rangeOfString:@"[0-9]" options:NSRegularExpressionSearch].location!=NSNotFound)){
+        NSString *synopsis=[self.context[@"detail"][@"description"] isKindOfClass:NSString.class]?self.context[@"detail"][@"description"]:@"";
+        NSRange open=[synopsis rangeOfString:@"《"];
+        if(open.location!=NSNotFound&&NSMaxRange(open)<synopsis.length){
+            NSRange close=[synopsis rangeOfString:@"》" options:0 range:NSMakeRange(NSMaxRange(open),synopsis.length-NSMaxRange(open))];
+            if(close.location!=NSNotFound&&close.location>NSMaxRange(open)&&close.location-NSMaxRange(open)<=48)seriesTitle=[synopsis substringWithRange:NSMakeRange(NSMaxRange(open),close.location-NSMaxRange(open))];
+        }
+    }
     seriesTitle=[seriesTitle stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if(!seriesTitle.length||[seriesTitle isEqualToString:@"影片"]||[seriesTitle isEqualToString:@"影视播放"]){
         NSMutableDictionary *fallbackNative=[result mutableCopy]?:[NSMutableDictionary dictionary];
@@ -1320,15 +1332,17 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         return;
     }
     self.status.text=@"正在匹配高清原生流 (AVPlayer / cc)…";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];
-    NSString *cleanKW=seriesTitle;
-    NSRange bracket=[cleanKW rangeOfString:@"["];if(bracket.location!=NSNotFound&&bracket.location>=2)cleanKW=[cleanKW substringToIndex:bracket.location];
-    NSRange paren=[cleanKW rangeOfString:@"（"];if(paren.location!=NSNotFound&&paren.location>=2)cleanKW=[cleanKW substringToIndex:paren.location];
+    NSString *cleanKW=[seriesTitle stringByReplacingOccurrencesOfString:@"[\\[【（\\(][^\\]】）\\)]*[\\]】）\\)]" withString:@"" options:NSRegularExpressionSearch range:NSMakeRange(0,seriesTitle.length)];
+    cleanKW=[cleanKW stringByReplacingOccurrencesOfString:@"[《》\\s]+" withString:@"" options:NSRegularExpressionSearch range:NSMakeRange(0,cleanKW.length)];
     cleanKW=[cleanKW stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSString *encodedKW=[(cleanKW.length?cleanKW:seriesTitle) stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]?:@"";
+    NSString *encodedKW=[(cleanKW.length>=2?cleanKW:seriesTitle) stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]?:@"";
     NSArray<NSString *> *cmsAPIs=@[
         [NSString stringWithFormat:@"https://caiji.dyttzyapi.com/api.php/provide/vod/?ac=detail&wd=%@",encodedKW],
+        [NSString stringWithFormat:@"https://bfzyapi.com/api.php/provide/vod/?ac=detail&wd=%@",encodedKW],
         [NSString stringWithFormat:@"https://360zy.com/api.php/provide/vod/?ac=detail&wd=%@",encodedKW],
-        [NSString stringWithFormat:@"https://api.ffzyapi.com/api.php/provide/vod/?ac=detail&wd=%@",encodedKW]
+        [NSString stringWithFormat:@"https://api.ffzyapi.com/api.php/provide/vod/?ac=detail&wd=%@",encodedKW],
+        [NSString stringWithFormat:@"https://suoniapi.com/api.php/provide/vod/?ac=detail&wd=%@",encodedKW],
+        [NSString stringWithFormat:@"https://ikunzyapi.com/api.php/provide/vod/?ac=detail&wd=%@",encodedKW]
     ];
     NSString *failedHost=[NSURL URLWithString:rawURL].host.lowercaseString?:@"";
     NSInteger targetEpIndex=MAX(0,self.episodeIndex);
@@ -1895,7 +1909,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     [self buildQualityButtons];[self setRetryAvailable:NO];[self clearCurrentPlayerItem];
     [self.spinner startAnimating];self.status.text=[NSString stringWithFormat:@"正在解析 %@…",episode[@"name"]?:@"当前分集"];
     self.status.accessibilityLabel=self.status.text;
-    NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":MediaPlaybackSelectedParserID(self.context)} mutableCopy];
+    NSString *vodTitle=[self.context[@"detail"][@"name"] isKindOfClass:NSString.class]&&[self.context[@"detail"][@"name"] length]?self.context[@"detail"][@"name"]:([self.context[@"item"][@"name"] isKindOfClass:NSString.class]?self.context[@"item"][@"name"]:@"");NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":MediaPlaybackSelectedParserID(self.context),@"vodName":vodTitle,@"episodeName":[episode[@"name"] description]?:@"",@"episodeIndex":@(self.episodeIndex)} mutableCopy];
     NSString *provider=self.context[@"provider"];if(provider.length)args[@"provider"]=provider;
     __weak typeof(self) weakSelf=self;
     [self.client cancel];

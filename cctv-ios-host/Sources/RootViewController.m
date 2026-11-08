@@ -359,6 +359,14 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
     [self.tableView reloadData];
 }
 
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    if ((scrollView == self.channelGrid || scrollView == self.table) && self.catalogTopImmersiveScrim && !self.catalogTopImmersiveScrim.hidden) {
+        CGFloat topInset = scrollView.contentInset.top;
+        CGFloat progress = MIN(1.0, MAX(0.0, (scrollView.contentOffset.y + topInset) / 96.0));
+        HostUpdateImmersiveTopScrim(self.catalogTopImmersiveScrim, self.catalogTopImmersiveGradient, self.catalogTopImmersiveScrim.frame, progress, NO);
+    }
+}
+
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
     if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])
@@ -3909,27 +3917,54 @@ configureCatalogNavigation;
 }
 - (void)saveImportCandidate:(NSDictionary *)candidate update:(BOOL)update completion:(void (^)(NSError *error))completion {
     NSError *failure=nil;NSString *kind=candidate[@"kind"],*sourceFilename=[candidate[@"localFileName"] isKindOfClass:NSString.class]?candidate[@"localFileName"]:@"";
+    BOOL activateAfterSave=[candidate[@"activateAfterSave"] boolValue];
+    BOOL customRenamed=[candidate[@"customNameAssigned"] boolValue]&&[candidate[@"name"] isKindOfClass:NSString.class]&&[candidate[@"name"] length]>0;
     if([kind isEqual:@"catalog"]){
         NSMutableDictionary *incoming=[candidate[@"catalog"] mutableCopy];if(sourceFilename.length)incoming[@"importSourceFilename"]=sourceFilename;
+        if(customRenamed)incoming[@"name"]=candidate[@"name"];
         NSString *catOrigin=[candidate[@"origin"] isKindOfClass:NSString.class]?candidate[@"origin"]:([incoming[@"url"] isKindOfClass:NSString.class]?incoming[@"url"]:@"");
         if([catOrigin.lowercaseString containsString:@"sub.lytvs.top"]){NSString *tk=CCTVTVBoxTokenFromInput(catOrigin);if(tk.length)CCTVTVBoxSaveSubscriptionToken(tk);}NSDictionary *existing=nil;NSString *targetID=update&&[candidate[@"existingResourceKind"] isEqual:@"catalog"]?candidate[@"existingResourceID"]:@"";
         for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){BOOL target=targetID.length&&[targetID isEqual:catalog[@"id"]];BOOL automatic=!targetID.length&&(([incoming[@"url"] length]&&[incoming[@"url"] isEqual:catalog[@"url"]])||([incoming[@"importFingerprint"] length]&&[incoming[@"importFingerprint"] isEqual:catalog[@"importFingerprint"]]));if(target||automatic){existing=catalog;break;}}
+        NSString *savedCatalogID=nil;
         if(targetID.length&&!existing)failure=[NSError errorWithDomain:@"ResourceImport" code:7 userInfo:@{NSLocalizedDescriptionKey:@"匹配到的旧合集已被移除，请重新识别后再保存"}];
-        else if(existing&&update){NSMutableDictionary *merged=[existing mutableCopy];[merged addEntriesFromDictionary:incoming];merged[@"id"]=existing[@"id"];merged[@"name"]=existing[@"name"]?:incoming[@"name"]?:@"资源合集";[TVBoxCatalogStore saveCatalog:merged];}
-        else if([TVBoxCatalogStore catalogs].count>=50)failure=[NSError errorWithDomain:@"ResourceImport" code:2 userInfo:@{NSLocalizedDescriptionKey:@"已达到 50 个合集上限"}];else [TVBoxCatalogStore saveCatalog:incoming];
+        else if(existing&&update){NSMutableDictionary *merged=[existing mutableCopy];[merged addEntriesFromDictionary:incoming];merged[@"id"]=existing[@"id"];merged[@"name"]=customRenamed?candidate[@"name"]:(existing[@"name"]?:incoming[@"name"]?:@"资源合集");[TVBoxCatalogStore saveCatalog:merged];savedCatalogID=merged[@"id"];}
+        else if([TVBoxCatalogStore catalogs].count>=50)failure=[NSError errorWithDomain:@"ResourceImport" code:2 userInfo:@{NSLocalizedDescriptionKey:@"已达到 50 个合集上限"}];else {[TVBoxCatalogStore saveCatalog:incoming];savedCatalogID=incoming[@"id"];}
+        if(!failure&&activateAfterSave&&savedCatalogID.length){
+            [NSUserDefaults.standardUserDefaults setObject:savedCatalogID forKey:@"selectedMediaCatalogID"];
+            MediaBrowserViewController *browser=(MediaBrowserViewController *)self.tabPages[@2];
+            if(browser)[browser refreshSources];
+        }
     }else if([kind isEqual:@"service"]){
-        NSMutableDictionary *incoming=[candidate[@"service"] mutableCopy];if(sourceFilename.length)incoming[@"importSourceFilename"]=sourceFilename;NSDictionary *existing=nil;NSString *targetID=update&&[candidate[@"existingResourceKind"] isEqual:@"service"]?candidate[@"existingResourceID"]:@"";
+        NSMutableDictionary *incoming=[candidate[@"service"] mutableCopy];if(sourceFilename.length)incoming[@"importSourceFilename"]=sourceFilename;
+        if(customRenamed)incoming[@"name"]=candidate[@"name"];
+        NSDictionary *existing=nil;NSString *targetID=update&&[candidate[@"existingResourceKind"] isEqual:@"service"]?candidate[@"existingResourceID"]:@"";
         for(NSDictionary *service in [ServiceStore services]){if([service[@"builtin"] boolValue])continue;BOOL target=targetID.length&&[service[@"id"] isEqual:targetID];BOOL automatic=!targetID.length&&![service[@"id"] isEqual:incoming[@"id"]]&&(([incoming[@"url"] length]&&[incoming[@"url"] isEqual:service[@"url"]])||([incoming[@"importFingerprint"] length]&&[incoming[@"importFingerprint"] isEqual:service[@"importFingerprint"]]));if(target||automatic){existing=service;break;}}
+        NSDictionary *finalService=nil;
         if(targetID.length&&!existing)failure=[NSError errorWithDomain:@"ResourceImport" code:8 userInfo:@{NSLocalizedDescriptionKey:@"匹配到的旧脚本资源已被移除，请重新识别后再保存"}];
-        else if(existing&&update){if([PyHost isManagedServiceIdentifier:existing[@"id"]])failure=[NSError errorWithDomain:@"ResourceImport" code:3 userInfo:@{NSLocalizedDescriptionKey:@"已有资源正在运行或清理，请先停止该资源，再重试保存"}];else{NSDictionary *saved=[ServiceStore replaceImportedService:existing withService:incoming error:&failure];if(saved){NSMutableDictionary *metadata=[saved mutableCopy];if(incoming[@"importFingerprint"])metadata[@"importFingerprint"]=incoming[@"importFingerprint"];if(sourceFilename.length)metadata[@"importSourceFilename"]=sourceFilename;[ServiceStore save:metadata];}}}
-        else [ServiceStore save:incoming];
+        else if(existing&&update){if([PyHost isManagedServiceIdentifier:existing[@"id"]])failure=[NSError errorWithDomain:@"ResourceImport" code:3 userInfo:@{NSLocalizedDescriptionKey:@"已有资源正在运行或清理，请先停止该资源，再重试保存"}];else{NSDictionary *saved=[ServiceStore replaceImportedService:existing withService:incoming error:&failure];if(saved){NSMutableDictionary *metadata=[saved mutableCopy];if(customRenamed)metadata[@"name"]=candidate[@"name"];if(incoming[@"importFingerprint"])metadata[@"importFingerprint"]=incoming[@"importFingerprint"];if(sourceFilename.length)metadata[@"importSourceFilename"]=sourceFilename;[ServiceStore save:metadata];finalService=metadata;}}}
+        else {[ServiceStore save:incoming];finalService=incoming;}
+        if(!failure&&activateAfterSave&&finalService[@"id"]){
+            [NSUserDefaults.standardUserDefaults setObject:finalService[@"id"] forKey:@"selectedMediaSource"];
+            [self changeService:finalService enabled:YES completion:nil];
+            MediaBrowserViewController *browser=(MediaBrowserViewController *)self.tabPages[@2];
+            if(browser)[browser refreshSources];
+        }
     }else if([kind isEqual:@"playlist"]){
         NSString *origin=[self stableURLKey:candidate[@"origin"]],*text=candidate[@"text"]?:@"";NSString *targetID=update&&[candidate[@"existingResourceKind"] isEqual:@"playlist"]?candidate[@"existingResourceID"]:@"";NSURL *base=origin.length?[NSURL URLWithString:candidate[@"resolvedURL"]?:origin]:nil;NSArray *parsed=[M3UParser parse:text baseURL:base];
+        NSString *savedPlaylistSource=nil;
         if(!parsed.count)failure=[NSError errorWithDomain:@"ResourceImport" code:6 userInfo:@{NSLocalizedDescriptionKey:@"新播放列表没有有效 HTTP/HTTPS 频道，旧资源保持不变"}];
-        else if(targetID.length){if([targetID hasPrefix:@"local-playlist:"]&&[self.subscriptionURLs containsObject:targetID]){NSMutableDictionary *values=[@{@"name":candidate[@"name"]?:@"本地播放列表",@"text":text,@"cachedChannels":CCTVPlaylistSnapshotRows(parsed,targetID)} mutableCopy];if(candidate[@"importFingerprint"])values[@"importFingerprint"]=candidate[@"importFingerprint"];if(sourceFilename.length)values[@"importSourceFilename"]=sourceFilename;[ProfileStore update:targetID values:values];[self installPlaylist:parsed source:targetID];}else if([self.subscriptionURLs containsObject:targetID]){[ProfileStore update:targetID values:@{@"name":candidate[@"name"]?:@"直播订阅",@"text":text,@"cachedChannels":CCTVPlaylistSnapshotRows(parsed,targetID)}];[self installPlaylist:parsed source:targetID];}else failure=[NSError errorWithDomain:@"ResourceImport" code:9 userInfo:@{NSLocalizedDescriptionKey:@"匹配到的旧直播资源已被移除，请重新识别后再保存"}];}
+        else if(targetID.length){if([targetID hasPrefix:@"local-playlist:"]&&[self.subscriptionURLs containsObject:targetID]){NSMutableDictionary *values=[@{@"name":candidate[@"name"]?:@"本地播放列表",@"text":text,@"cachedChannels":CCTVPlaylistSnapshotRows(parsed,targetID)} mutableCopy];if(candidate[@"importFingerprint"])values[@"importFingerprint"]=candidate[@"importFingerprint"];if(sourceFilename.length)values[@"importSourceFilename"]=sourceFilename;[ProfileStore update:targetID values:values];[self installPlaylist:parsed source:targetID];savedPlaylistSource=targetID;}else if([self.subscriptionURLs containsObject:targetID]){[ProfileStore update:targetID values:@{@"name":candidate[@"name"]?:@"直播订阅",@"text":text,@"cachedChannels":CCTVPlaylistSnapshotRows(parsed,targetID)}];[self installPlaylist:parsed source:targetID];savedPlaylistSource=targetID;}else failure=[NSError errorWithDomain:@"ResourceImport" code:9 userInfo:@{NSLocalizedDescriptionKey:@"匹配到的旧直播资源已被移除，请重新识别后再保存"}];}
         else if(origin.length&&[self.subscriptionURLs containsObject:origin]&&!update)failure=[NSError errorWithDomain:@"ResourceImport" code:4 userInfo:@{NSLocalizedDescriptionKey:@"相同在线订阅只能更新；如需独立副本，请导出后作为本地文件导入"}];
-        else if(origin.length){NSMutableDictionary *values=[@{@"name":candidate[@"name"]?:@"直播订阅",@"text":text,@"cachedChannels":CCTVPlaylistSnapshotRows(parsed,origin)} mutableCopy];if(candidate[@"importFingerprint"])values[@"importFingerprint"]=candidate[@"importFingerprint"];if(sourceFilename.length)values[@"importSourceFilename"]=sourceFilename;[ProfileStore update:origin values:values];[self.subscriptionURLs addObject:origin];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];NSString *detected=[M3UParser epgURL:text baseURL:base];if(detected.length)[ProfileStore update:origin values:@{@"detectedEPGURL":detected}];[self installPlaylist:parsed source:origin];}
-        else {NSMutableDictionary *metadata=[NSMutableDictionary dictionary];if(sourceFilename.length)metadata[@"importSourceFilename"]=sourceFilename;if(candidate[@"importFingerprint"])metadata[@"importFingerprint"]=candidate[@"importFingerprint"];[self importPlaylistData:[text dataUsingEncoding:NSUTF8StringEncoding] name:candidate[@"name"]?:@"本地播放列表" metadata:metadata];}
+        else if(origin.length){NSMutableDictionary *values=[@{@"name":candidate[@"name"]?:@"直播订阅",@"text":text,@"cachedChannels":CCTVPlaylistSnapshotRows(parsed,origin)} mutableCopy];if(candidate[@"importFingerprint"])values[@"importFingerprint"]=candidate[@"importFingerprint"];if(sourceFilename.length)values[@"importSourceFilename"]=sourceFilename;[ProfileStore update:origin values:values];[self.subscriptionURLs addObject:origin];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];NSString *detected=[M3UParser epgURL:text baseURL:base];if(detected.length)[ProfileStore update:origin values:@{@"detectedEPGURL":detected}];[self installPlaylist:parsed source:origin];savedPlaylistSource=origin;}
+        else {NSMutableDictionary *metadata=[NSMutableDictionary dictionary];if(sourceFilename.length)metadata[@"importSourceFilename"]=sourceFilename;if(candidate[@"importFingerprint"])metadata[@"importFingerprint"]=candidate[@"importFingerprint"];savedPlaylistSource=[self importPlaylistData:[text dataUsingEncoding:NSUTF8StringEncoding] name:candidate[@"name"]?:@"本地播放列表" metadata:metadata];}
+        if(!failure&&activateAfterSave&&savedPlaylistSource.length){
+            NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];
+            [disabled removeObject:savedPlaylistSource];
+            [NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];
+            self.activeSource=savedPlaylistSource;
+            [self applyFilter];
+            [self updateLiveResourceCapsule];
+        }
     }else failure=[NSError errorWithDomain:@"ResourceImport" code:5 userInfo:@{NSLocalizedDescriptionKey:@"资源类型尚未识别"}];
     [self refreshConfigurationPage];completion(failure);
 }

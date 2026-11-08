@@ -69,14 +69,15 @@ WeBox.define({
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const csrf = extractCsrfToken($);
-          const xsrf = csrf ? "" : extractCookieXsrf(ctx.settings.cookie);
+          const setCookieHdr = page.headers && (page.headers["set-cookie"] || page.headers["Set-Cookie"]);
+          const xsrf = extractCookieXsrf(setCookieHdr) || extractCookieXsrf(ctx.settings.cookie);
           const headers = buildRequestHeaders(ctx, episodeUrl, {
             Accept: "application/json", "Content-Type": "application/json",
             "X-Requested-With": "XMLHttpRequest", Origin: ctx.url.origin(base)
           });
           if (csrf) headers["X-CSRF-TOKEN"] = csrf;
-          else if (xsrf) headers["X-XSRF-TOKEN"] = xsrf;
-          else ctx.fail("AUTH_REQUIRED", "页面没有提供会话令牌，请刷新页面或重新配置登录 Cookie");
+          if (xsrf) headers["X-XSRF-TOKEN"] = xsrf;
+          if (!csrf && !xsrf) ctx.fail("AUTH_REQUIRED", "页面没有提供会话令牌，请刷新页面或重新配置登录 Cookie");
           ctx.signal.throwIfAborted();
           const res = await ctx.http.post(ctx.url.resolve("/player/api", base), {
             headers, json: { episode_id: eId }, responseType: "text", timeoutMs: getTimeoutMs(ctx)
@@ -102,17 +103,20 @@ WeBox.define({
       }
     }
     let sources = [];
-    if (req.purpose !== "download" && payload) {
-      try { sources = await verifiedPlayerSources(ctx, payload, episodeUrl); }
-      catch (error) { rethrowCancellation(ctx, error); apiFailure = error; }
-    }
-    const seen = new Set(sources.map(s => s.url));
-    for (const source of direct) if (!seen.has(source.url)) { seen.add(source.url); sources.push(source); }
-    // Public player explicitly supports a 720p MP4 on Apple/non-DASH clients.
+    const seen = new Set();
+    // Prioritize iOS/AVPlayer-native H.264 MP4 streams first so playback starts immediately without AV1 DASH failures.
     if (payload) {
       for (const source of buildMp4Sources(ctx, payload, episodeUrl)) {
         if (!seen.has(source.url)) { seen.add(source.url); sources.push(source); }
       }
+    }
+    for (const source of direct) if (!seen.has(source.url)) { seen.add(source.url); sources.push(source); }
+    if (req.purpose !== "download" && payload) {
+      try {
+        for (const source of await verifiedPlayerSources(ctx, payload, episodeUrl)) {
+          if (!seen.has(source.url)) { seen.add(source.url); sources.push(source); }
+        }
+      } catch (error) { rethrowCancellation(ctx, error); apiFailure = error; }
     }
     if (sources.length) return { sources };
     if (apiFailure) throw apiFailure;

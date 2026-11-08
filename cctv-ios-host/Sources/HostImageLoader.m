@@ -139,6 +139,12 @@ static NSUInteger const ImageQueueLimit = 96;
         NSString *host=targetURL.host.lowercaseString?:@"";
         if([host hasSuffix:@"doubanio.com"])[request setValue:@"https://movie.douban.com/" forHTTPHeaderField:@"Referer"];
         else if([host hasSuffix:@"hdslb.com"])[request setValue:@"https://www.bilibili.com/" forHTTPHeaderField:@"Referer"];
+        else if([host hasSuffix:@"67c6c7a.com"]||[host containsString:@"4kvm"])[request setValue:@"https://www.4kvm.org/" forHTTPHeaderField:@"Referer"];
+        else if([host hasSuffix:@"ykimg.com"])[request setValue:@"https://v.youku.com/" forHTTPHeaderField:@"Referer"];
+        else if([host hasSuffix:@"gtimg.cn"]||[host hasSuffix:@"qpic.cn"])[request setValue:@"https://v.qq.com/" forHTTPHeaderField:@"Referer"];
+        else if([host hasSuffix:@"iqiyipic.com"]||[host hasSuffix:@"qiyipic.com"])[request setValue:@"https://www.iqiyi.com/" forHTTPHeaderField:@"Referer"];
+        else if([host hasSuffix:@"hitv.com"]||[host hasSuffix:@"mgtv.com"])[request setValue:@"https://www.mgtv.com/" forHTTPHeaderField:@"Referer"];
+        else if(host.length&&![host isEqualToString:@"127.0.0.1"]&&![host isEqualToString:@"localhost"]&&![host hasSuffix:@".test"]&&![host hasSuffix:@".example"])[request setValue:[NSString stringWithFormat:@"%@://%@/",targetURL.scheme.lowercaseString?:@"https",host] forHTTPHeaderField:@"Referer"];
         record.data=[NSMutableData data];record.startedAt=CACurrentMediaTime();record.httpStatus=0;record.expectedContentLength=-1;record.responseContentType=@"";record.responseEncrypted=NO;record.failureStage=nil;record.task=[self.session dataTaskWithRequest:request];
         record.task.priority=NSURLSessionTaskPriorityLow;self.tasks[@(record.task.taskIdentifier)]=record;[record.task resume];
     }
@@ -149,7 +155,8 @@ static NSUInteger const ImageQueueLimit = 96;
     NSMutableData *domain=[self domainStateForURL:record.url];
     if(record.generation==self.generation){
         HostImageDomainState *state=domain.mutableBytes;unsigned previous=state->timeouts;BOOL probe=state->probe;
-        HostImageDomainFinish(state,CACurrentMediaTime(),[error.domain isEqual:NSURLErrorDomain]&&error.code==NSURLErrorTimedOut,error.code==NSURLErrorCancelled&&!record.failureStage.length);
+        BOOL isDomainTimeout=[error.domain isEqual:NSURLErrorDomain]&&(error.code==NSURLErrorTimedOut||error.code==NSURLErrorSecureConnectionFailed||error.code==NSURLErrorCannotFindHost||error.code==NSURLErrorCannotConnectToHost);
+        HostImageDomainFinish(state,CACurrentMediaTime(),isDomainTimeout,error.code==NSURLErrorCancelled&&!record.failureStage.length);
         if((previous<3&&state->timeouts>=3)||probe)[RuntimeDiagnostics.shared recordEvent:probe?@"image_domain_probe_finished":@"image_domain_backoff_started" category:@"media_api" fields:@{@"image_host":[NSURL URLWithString:record.url].host?:@"",@"http_status":@(record.httpStatus),@"error_code":@(error.code),@"remaining_backoff_seconds":@(MAX(0,state->until-CACurrentMediaTime())),@"timeout_streak":@(state->timeouts)}];
     }
     UIImage *image=nil;
@@ -215,6 +222,16 @@ static NSUInteger const ImageQueueLimit = 96;
     HostImageRequest *record=self.tasks[@(task.taskIdentifier)];if(!record)return;
     if(record.data.length+data.length>[self maximumBodyLengthForRequest:record]){record.failureStage=@"response_too_large";[self.failures setObject:[NSDate dateWithTimeIntervalSinceNow:HostImageFailureBackoff(record.httpStatus)] forKey:record.cacheKey];[task cancel];return;}
     [record.data appendData:data];
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential * _Nullable))completionHandler {
+    if([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]&&challenge.protectionSpace.serverTrust){
+        NSString *h=challenge.protectionSpace.host.lowercaseString?:@"";
+        if(h.length&&![h isEqualToString:@"127.0.0.1"]&&![h isEqualToString:@"localhost"]&&![h hasSuffix:@".test"]&&![h hasSuffix:@".example"]){
+            completionHandler(NSURLSessionAuthChallengeUseCredential,[NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust]);
+            return;
+        }
+    }
+    completionHandler(NSURLSessionAuthChallengePerformDefaultHandling,nil);
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error { [self finish:task error:error]; }
 - (void)cancelPending {

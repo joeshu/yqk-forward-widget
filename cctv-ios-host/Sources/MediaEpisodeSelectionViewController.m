@@ -116,8 +116,20 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     NSString *selected=self.parserID.length?self.parserID:([NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"cctv.media.parser.%@",sourceID]]?:@"");for(NSDictionary *parser in [TVBoxCatalogStore playbackParsersForCatalogID:catalogID])if([parser[@"id"] isEqual:selected])return selected;return @"";
 }
 - (NSString *)titleText {
-    NSString *name=[self.detail[@"name"] isKindOfClass:NSString.class]?self.detail[@"name"]:@"";
-    if(!name.length)name=[self.item[@"name"] isKindOfClass:NSString.class]?self.item[@"name"]:@"影视选集";
+    NSString *name=[self.detail[@"name"] isKindOfClass:NSString.class]?[self.detail[@"name"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";
+    NSString *itemName=[self.item[@"name"] isKindOfClass:NSString.class]?[self.item[@"name"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";
+    NSString *itemID=[self.item[@"id"] description]?:([self.detail[@"id"] description]?:@"");
+    BOOL nameOpaque=!name.length||(itemID.length&&[name caseInsensitiveCompare:itemID]==NSOrderedSame&&[name rangeOfString:@"^[A-Za-z0-9_.:/-]{6,128}$" options:NSRegularExpressionSearch].location!=NSNotFound)||([name rangeOfString:@"^[A-Za-z0-9_-]{8,64}$" options:NSRegularExpressionSearch].location!=NSNotFound&&[name rangeOfString:@"[0-9]" options:NSRegularExpressionSearch].location!=NSNotFound);
+    if(nameOpaque&&itemName.length&&![itemName isEqualToString:itemID])name=itemName;
+    if(nameOpaque){
+        NSString *synopsis=[self.detail[@"description"] isKindOfClass:NSString.class]?self.detail[@"description"]:([self.detail[@"vod_content"] isKindOfClass:NSString.class]?self.detail[@"vod_content"]:@"");
+        NSRange open=[synopsis rangeOfString:@"《"];
+        if(open.location!=NSNotFound&&NSMaxRange(open)<synopsis.length){
+            NSRange close=[synopsis rangeOfString:@"》" options:0 range:NSMakeRange(NSMaxRange(open),synopsis.length-NSMaxRange(open))];
+            if(close.location!=NSNotFound&&close.location>NSMaxRange(open)&&close.location-NSMaxRange(open)<=48)name=[synopsis substringWithRange:NSMakeRange(NSMaxRange(open),close.location-NSMaxRange(open))];
+        }
+    }
+    if(!name.length)name=itemName.length?itemName:@"影视选集";
     return name;
 }
 - (NSString *)posterURL {
@@ -389,7 +401,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     episodes=[self episodesForLine:self.selectedLineIndex];if(selectedIndex<0||selectedIndex>=episodes.count)return;episode=episodes[(NSUInteger)selectedIndex];NSDictionary *line=self.selectedLineIndex<self.lines.count?([self.lines[self.selectedLineIndex] isKindOfClass:NSDictionary.class]?self.lines[self.selectedLineIndex]:@{}):@{};
     self.selectedEpisodeIndex=selectedIndex;NSInteger capturedLineIndex=self.selectedLineIndex,capturedEpisodeIndex=selectedIndex;NSInteger episodeGroup=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,episodes.count,self.episodeOrderReversed);self.page=episodeGroup==NSNotFound?0:episodeGroup;self.episodeExpanded=YES;[self rebuildSelection];[self.client cancel];NSUInteger generation=++self.generation;episodeName=[episode[@"name"] description]?:@"当前分集";self.statusLabel.text=[NSString stringWithFormat:@"正在解析 %@…",episodeName];self.statusLabel.hidden=NO;self.continueButton.enabled=NO;self.playSpinner.hidden=NO;[self.playSpinner startAnimating];
     [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_requested" category:@"media_api" fields:@{@"correlation_id":self.correlationID?:@"",@"request_generation":@(generation),@"line_index":@(capturedLineIndex),@"episode_index":@(capturedEpisodeIndex)}];
-    NSString *parserID=[self currentParserID];NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":parserID} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;__weak typeof(self) weakSelf=self;
+    NSString *parserID=[self currentParserID];NSString *vodTitle=[self titleText];NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":parserID,@"vodName":vodTitle,@"episodeName":episodeName?:@"",@"episodeIndex":@(capturedEpisodeIndex)} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;__weak typeof(self) weakSelf=self;
     if(!self.client){[self.playSpinner stopAnimating];self.playSpinner.hidden=YES;self.continueButton.enabled=YES;self.statusLabel.text=@"无法解析 · 播放服务不可用，请返回重试";self.statusLabel.hidden=NO;return;}
     [self.client call:@"play" arguments:args correlationID:self.correlationID completion:^(id result,NSError *error){
         MediaEpisodeSelectionViewController *owner=weakSelf;if(!owner||owner.generation!=generation)return;[owner.playSpinner stopAnimating];owner.playSpinner.hidden=YES;owner.continueButton.enabled=YES;owner.statusLabel.text=@"";owner.statusLabel.hidden=YES;

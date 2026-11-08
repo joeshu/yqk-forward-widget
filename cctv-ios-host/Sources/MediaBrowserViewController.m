@@ -184,6 +184,39 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
 - (void)showInlinePlaybackResult:(NSDictionary *)result context:(NSDictionary *)context;
 - (void)updateInlinePlaybackDockLayout;
 @end
+static BOOL MediaDetailIsOpaqueIdentifierTitle(NSString *candidate, NSString *identifier) {
+    NSString *cand = [candidate isKindOfClass:NSString.class] ? [candidate stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : @"";
+    NSString *ident = [identifier isKindOfClass:NSString.class] ? [identifier stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : @"";
+    if (!cand.length) return YES;
+    NSString *low = cand.lowercaseString;
+    if ([low hasPrefix:@"http://"] || [low hasPrefix:@"https://"]) return YES;
+    if (ident.length && [cand caseInsensitiveCompare:ident] == NSOrderedSame &&
+        [cand rangeOfString:@"^[A-Za-z0-9_.:/-]{6,128}$" options:NSRegularExpressionSearch].location != NSNotFound) {
+        return YES;
+    }
+    if ([cand rangeOfString:@"^[A-Za-z0-9_-]{8,64}$" options:NSRegularExpressionSearch].location != NSNotFound &&
+        [cand rangeOfString:@"[0-9]" options:NSRegularExpressionSearch].location != NSNotFound) {
+        return YES;
+    }
+    return NO;
+}
+static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemName, NSString *itemID, NSString *synopsis) {
+    NSString *dName = [detailName isKindOfClass:NSString.class] ? [detailName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : @"";
+    NSString *iName = [itemName isKindOfClass:NSString.class] ? [itemName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : @"";
+    NSString *ident = [itemID isKindOfClass:NSString.class] ? [itemID stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : @"";
+    if (dName.length && !MediaDetailIsOpaqueIdentifierTitle(dName, ident)) return dName;
+    if (iName.length && !MediaDetailIsOpaqueIdentifierTitle(iName, ident)) return iName;
+    NSString *desc = [synopsis isKindOfClass:NSString.class] ? synopsis : @"";
+    NSRange open = [desc rangeOfString:@"《"];
+    if (open.location != NSNotFound && NSMaxRange(open) < desc.length) {
+        NSRange close = [desc rangeOfString:@"》" options:0 range:NSMakeRange(NSMaxRange(open), desc.length - NSMaxRange(open))];
+        if (close.location != NSNotFound && close.location > NSMaxRange(open) && close.location - NSMaxRange(open) <= 48) {
+            NSString *extracted = [[desc substringWithRange:NSMakeRange(NSMaxRange(open), close.location - NSMaxRange(open))] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if (extracted.length) return extracted;
+        }
+    }
+    return iName.length ? iName : dName;
+}
 @implementation MediaDetailViewController
 - (BOOL)shouldAutorotate {return YES;}
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {return UIInterfaceOrientationMaskPortrait;}
@@ -237,6 +270,8 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
         if([metaKeys containsObject:key]&&([junkTokens containsObject:lowTrimmed]||[lowTrimmed containsString:@"[object "]||[lowTrimmed hasPrefix:@"http://"]||[lowTrimmed hasPrefix:@"https://"]))text=@"";
         if(text.length)clean[key]=text;else [clean removeObjectForKey:key];
     }
+    NSString *preferredTitle=MediaDetailPreferredTitle(clean[@"name"],[self safeDetailString:self.item[@"name"]],[self safeDetailString:self.item[@"id"]?:clean[@"id"]],clean[@"description"]);
+    if(preferredTitle.length)clean[@"name"]=preferredTitle;
     NSMutableArray *lines=[NSMutableArray array];NSUInteger droppedLines=0,droppedEpisodes=0;
     if([raw[@"lines"] isKindOfClass:NSArray.class]){
         for(id rawLine in (NSArray *)raw[@"lines"]){
@@ -412,6 +447,7 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
     self.status.hidden=NO;
     [self.spinner startAnimating];
     NSString *requestedItemID=([self.item[@"id"] isKindOfClass:NSString.class]||[self.item[@"id"] isKindOfClass:NSNumber.class])?[self.item[@"id"] description]:@"";NSMutableDictionary *args=[@{@"id":requestedItemID} mutableCopy];
+    NSString *itemTitleHint=[self safeDetailString:self.item[@"name"]];if(itemTitleHint.length)args[@"vodName"]=itemTitleHint;
     if(self.provider.length)args[@"provider"]=self.provider;
     BOOL hadCachedDetail=[self.detail isKindOfClass:NSDictionary.class];
     CFTimeInterval startedAt=CACurrentMediaTime();
@@ -536,7 +572,7 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
 }
 - (void)refreshDetailHeader {
     NSString *poster=[self posterURL];self.posterView.image=nil;self.posterThumbnailView.image=nil;self.posterView.accessibilityLabel=poster.length?@"影片背景海报":@"暂无海报，显示影片占位图";self.posterThumbnailView.accessibilityLabel=poster.length?@"影片海报":@"暂无海报";self.posterPlaceholder.hidden=poster.length>0;if(poster.length){MediaLoadPosterWithRetry(poster,self.posterView,1);MediaLoadPosterWithRetry(poster,self.posterThumbnailView,1);}else{self.posterView.accessibilityIdentifier=nil;self.posterThumbnailView.accessibilityIdentifier=nil;}
-    NSString *detailName=[self safeDetailString:self.detail[@"name"]];NSString *itemName=[self safeDetailString:self.item[@"name"]];NSString *name=detailName.length?detailName:(itemName.length?itemName:@"影片详情");self.title=name;self.heroTitle.text=name;self.heroMetadata.text=[self metadataSummary];
+    NSString *detailName=[self safeDetailString:self.detail[@"name"]];NSString *itemName=[self safeDetailString:self.item[@"name"]];NSString *preferredName=MediaDetailPreferredTitle(detailName,itemName,[self safeDetailString:self.item[@"id"]],[self safeDetailString:self.detail[@"description"]]);NSString *name=preferredName.length?preferredName:@"影片详情";self.title=name;self.heroTitle.text=name;self.heroMetadata.text=[self metadataSummary];
     NSString *synopsis=[[self safeDetailString:self.detail[@"description"]] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSMutableArray *info=[NSMutableArray array];NSString *metadata=[self metadataSummary];if(metadata.length)[info addObject:metadata];
     NSString *director=[self.detail[@"director"] isKindOfClass:NSString.class]?[[self safeDetailString:self.detail[@"director"]] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";
@@ -641,7 +677,7 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
 - (void)resolveAndPlaySelectedEpisode {
     if(self.selectedLineIndex>=self.lines.count)return;NSArray *episodes=[self.lines[self.selectedLineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[self.selectedLineIndex][@"episodes"]:@[];if(self.selectedEpisodeIndex<0||self.selectedEpisodeIndex>=episodes.count)return;
     NSDictionary *line=self.lines[self.selectedLineIndex],*episode=episodes[self.selectedEpisodeIndex];NSUInteger generation=++self.generation;[self.client cancel];self.status.hidden=NO;self.status.text=[NSString stringWithFormat:@"正在解析 %@…",episode[@"name"]?:@"当前分集"];if(self.inlinePlaybackController){self.inlinePlaybackController.status.text=self.status.text;self.inlinePlaybackController.status.accessibilityLabel=self.status.text;[self.inlinePlaybackController.spinner startAnimating];}[self.spinner startAnimating];[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_requested" category:@"media_api" fields:@{@"correlation_id":self.diagnosticTraceID?:@"", @"service_id":self.source[@"id"]?:@"", @"provider_id":self.provider?:@"", @"request_generation":@(generation), @"line_index":@(self.selectedLineIndex), @"episode_index":@(self.selectedEpisodeIndex), @"line_count":@(self.lines.count), @"episode_count":@(episodes.count), @"episode_has_id":@([episode[@"id"] description].length>0), @"line_has_id":@([line[@"id"] description].length>0)}];
-    NSString *parserID=[self selectedPlaybackParserID];NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":parserID} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;__weak typeof(self) weakSelf=self;
+    NSString *parserID=[self selectedPlaybackParserID];NSString *vodTitle=MediaDetailPreferredTitle([self safeDetailString:self.detail[@"name"]],[self safeDetailString:self.item[@"name"]],[self safeDetailString:self.item[@"id"]],[self safeDetailString:self.detail[@"description"]]);NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":parserID,@"vodName":vodTitle,@"episodeName":[episode[@"name"] description]?:@"",@"episodeIndex":@(self.selectedEpisodeIndex)} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;__weak typeof(self) weakSelf=self;
     [self.client call:@"play" arguments:args correlationID:self.diagnosticTraceID completion:^(id result,NSError *error){MediaDetailViewController *owner=weakSelf;if(!owner)return;if(owner.generation!=generation){[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_response_discarded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"request_generation":@(generation), @"current_generation":@(owner.generation), @"reason":@"superseded_selection"}];return;}[owner.spinner stopAnimating];owner.status.hidden=NO;
         if(error||![result isKindOfClass:NSDictionary.class]){[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_failed" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"", @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"line_index":@(owner.selectedLineIndex), @"episode_index":@(owner.selectedEpisodeIndex), @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@"", @"result_received":@([result isKindOfClass:NSDictionary.class])}];owner.status.text=[NSString stringWithFormat:@"解析失败：%@",error.localizedDescription?:@"来源没有返回可播放结果"];if(owner.inlinePlaybackController){[owner.inlinePlaybackController.spinner stopAnimating];owner.inlinePlaybackController.status.text=owner.status.text;owner.inlinePlaybackController.status.accessibilityLabel=owner.status.text;}[owner.scrollView setContentOffset:CGPointMake(0,-owner.scrollView.adjustedContentInset.top) animated:YES];[owner updateRouteAndEpisodeViews];return;}
         [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"", @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"line_index":@(owner.selectedLineIndex), @"episode_index":@(owner.selectedEpisodeIndex), @"result_has_media_url":@([result[@"url"] isKindOfClass:NSString.class]&&[result[@"url"] length]>0), @"result_parse_mode":@([result[@"parse"] respondsToSelector:@selector(integerValue)]?[result[@"parse"] integerValue]:0), @"result_alternate_count":@([result[@"alternates"] isKindOfClass:NSArray.class]?[result[@"alternates"] count]:0)}];owner.status.hidden=YES;NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"episodeID":[episode[@"id"] description]?:@"",@"episodeName":[episode[@"name"] description]?:@"",@"lineIndex":@(owner.selectedLineIndex),@"episodeIndex":@(owner.selectedEpisodeIndex),@"parserID":parserID,@"correlationID":owner.diagnosticTraceID?:@""};if(owner.onPlay)owner.onPlay(result,context);
@@ -823,7 +859,7 @@ static NSString * const MediaHomePinnedSourcesDefaultsKey = @"cctv.mediaHome.pin
 static NSString * const MediaBrowserGridColumnsDefaultsKey = @"cctv.mediaGridColumns.v1";
 static NSInteger MediaBrowserGridColumns(void) {return [NSUserDefaults.standardUserDefaults integerForKey:MediaBrowserGridColumnsDefaultsKey]==4?4:3;}
 static NSArray<NSDictionary *> *MediaHomeModuleDefinitions(void) {
-    return @[@{@"id":@"recommendations",@"title":@"精选推荐",@"detail":@"展示当前站点的轮播与热门影片"},@{@"id":@"catalog",@"title":@"分类预览",@"detail":@"滚动到分类时读取预览；顶部分类始终可用"},@{@"id":@"continue",@"title":@"继续观看",@"detail":@"显示本机未看完的影片"}];
+    return @[@{@"id":@"recommendations",@"title":@"精选推荐",@"detail":@"展示当前站点的轮播与热门影片"},@{@"id":@"catalog",@"title":@"分类预览",@"detail":@"滚动到分类时读取预览；顶部分类始终可用"}];
 }
 static NSSet<NSString *> *MediaHomeEnabledModules(void) {
     NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;NSArray *saved=[defaults arrayForKey:MediaHomeModulesDefaultsKey];
@@ -1048,7 +1084,7 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     for(NSDictionary *item in raw){NSString *key=MediaBrowserItemIdentity(item);if(key.length&&[seen containsObject:key])continue;if(key.length)[seen addObject:key];[recommendations addObject:item];}
     NSUInteger bannerCount=MIN((NSUInteger)5,recommendations.count);
     if([enabled containsObject:@"recommendations"]&&bannerCount)[sections addObject:@{@"id":@"hero",@"kind":@"hero",@"heroTopInset":@([self stableTopSafeAreaInset]+104),@"items":[recommendations subarrayWithRange:NSMakeRange(0,bannerCount)]}];
-    if([enabled containsObject:@"continue"]){NSMutableArray *resume=[NSMutableArray array];for(NSDictionary *entry in MediaPlaybackStateStore.watchHistory){if([entry[@"completed"] boolValue]||[entry[@"position"] doubleValue]<=0)continue;NSMutableDictionary *item=[entry[@"item"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *epName=[entry[@"episodeName"] isKindOfClass:NSString.class]?entry[@"episodeName"]:@"";NSString *srcName=[entry[@"sourceName"] isKindOfClass:NSString.class]?entry[@"sourceName"]:@"";item[@"remarks"]=epName.length?epName:@"继续观看";item[@"feedSubtitle"]=srcName.length?[NSString stringWithFormat:@"继续观看 · %@",srcName]:@"继续观看";item[@"__historyEntry"]=entry;[resume addObject:item];if(resume.count==10)break;}if(resume.count)[sections addObject:@{@"id":@"continue",@"kind":@"posters",@"title":@"继续观看",@"items":resume,@"actionTitle":@"全部",@"action":@"history"}];}
+    if(NO&&[enabled containsObject:@"continue"]){NSMutableArray *resume=[NSMutableArray array];for(NSDictionary *entry in MediaPlaybackStateStore.watchHistory){if([entry[@"completed"] boolValue]||[entry[@"position"] doubleValue]<=0)continue;NSMutableDictionary *item=[entry[@"item"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *epName=[entry[@"episodeName"] isKindOfClass:NSString.class]?entry[@"episodeName"]:@"";NSString *srcName=[entry[@"sourceName"] isKindOfClass:NSString.class]?entry[@"sourceName"]:@"";item[@"remarks"]=epName.length?epName:@"继续观看";item[@"feedSubtitle"]=srcName.length?[NSString stringWithFormat:@"继续观看 · %@",srcName]:@"继续观看";item[@"__historyEntry"]=entry;[resume addObject:item];if(resume.count==10)break;}if(resume.count)[sections addObject:@{@"id":@"continue",@"kind":@"posters",@"title":@"继续观看",@"items":resume,@"actionTitle":@"全部",@"action":@"history"}];}
     if([enabled containsObject:@"recommendations"]&&recommendations.count>bannerCount){NSUInteger count=MIN((NSUInteger)10,recommendations.count-bannerCount);[sections addObject:@{@"id":@"popular",@"kind":@"posters",@"title":@"热门推荐",@"items":[recommendations subarrayWithRange:NSMakeRange(bannerCount,count)]}];}
     if([enabled containsObject:@"catalog"]){for(NSDictionary *category in [self.homeCategories subarrayWithRange:NSMakeRange(0,MIN((NSUInteger)8,self.homeCategories.count))]){NSString *identifier=category[@"id"];NSDictionary *args=[self arguments:@{@"categoryId":identifier,@"page":@1,@"filters":@{}}];id cached=[MediaMetadataCache.shared resultForSource:self.source operation:@"category" arguments:args maximumAge:DBL_MAX isStale:NULL];NSArray *items=[cached isKindOfClass:NSDictionary.class]?MediaBrowserDictionaryRows(cached[@"items"],NULL):@[];BOOL attempted=[self.homeShelfAttempts containsObject:identifier]&&![self.homeCategoryLoadsInFlight containsObject:identifier];NSString *kind=items.count?@"posters":(attempted?@"status":@"skeleton");[sections addObject:@{@"id":[@"category-" stringByAppendingString:identifier],@"kind":kind,@"title":category[@"name"]?:@"分类",@"items":[items subarrayWithRange:NSMakeRange(0,MIN((NSUInteger)8,items.count))],@"categoryID":identifier,@"actionTitle":@"全部",@"subtitle":@"暂未读取到内容，点按全部浏览此分类"}];}}
     if(self.homeStatusLoading&&!bannerCount)[sections insertObject:@{@"id":@"loading",@"kind":@"skeleton",@"title":@"正在加载当前站点",@"items":@[]} atIndex:0];

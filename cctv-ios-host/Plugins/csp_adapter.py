@@ -227,86 +227,169 @@ def _extract_stream_from_html(html, base_url=''):
     return ''
 
 
+def extract_title_from_vip_url(url):
+    """Best-effort title and episode extraction from a commercial video webpage (Youku/QQ/iQiyi/MGTV/Bili)."""
+    u = str(url or '').strip()
+    if not u.startswith(('http://', 'https://')) or any(tok in u.lower() for tok in ('.test', '.example')):
+        return '', ''
+    try:
+        qs = urllib.parse.parse_qs(urllib.parse.urlsplit(u).query)
+        for qk in ('url', 'v', 'vid', 'src'):
+            cand_u = (qs.get(qk) or [''])[0].strip()
+            if cand_u.startswith(('http://', 'https://')):
+                u = cand_u
+                break
+    except Exception:
+        pass
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+        resp = requests.get(u, headers=headers, timeout=4)
+        html = resp.text or ''
+        raw_title = ''
+        m_og = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html, re.I)
+        if not m_og:
+            m_og = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']', html, re.I)
+        if m_og:
+            raw_title = m_og.group(1).strip()
+        if not raw_title:
+            m_t = re.search(r'<title[^>]*>([^<]+)</title>', html, re.I)
+            if m_t:
+                raw_title = m_t.group(1).strip()
+        if not raw_title:
+            return '', ''
+        raw_title = re.split(r'[-_—|｜]|在线观看|高清完整版|全集|优酷|腾讯视频|爱奇艺|芒果TV|哔哩哔哩', raw_title)[0].strip()
+        raw_title = re.sub(r'^[《【\[]|[》】\]]$', '', raw_title).strip()
+        ep_match = re.search(r'第\s*(\d+)\s*[集期话]|\s+(\d{1,3})$', raw_title)
+        ep_name = ''
+        if ep_match:
+            num = ep_match.group(1) or ep_match.group(2)
+            ep_name = f'第{int(num)}集'
+            raw_title = raw_title[:ep_match.start()].strip()
+        return raw_title, ep_name
+    except Exception:
+        return '', ''
+
+
 def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
     """Resolves a direct .m3u8/.mp4 stream from public MacCMS APIs by VOD title and episode."""
-    clean_title = str(title or '').strip()
-    if not clean_title or clean_title in ('影片', '未知'):
+    clean_title = re.sub(r'<[^>]+>', '', str(title or '')).strip()
+    clean_title = re.sub(r'^[《【\[]|[》】\]]$', '', clean_title).strip()
+    if not clean_title or clean_title in ('影片', '未知', '影视播放'):
         return ''
-    # Strip common season/tag suffixes for broader search match if needed
-    search_keywords = [clean_title]
-    stripped = re.sub(r'[\(\[（【].*?[\)\]）】]', '', clean_title).strip()
-    if stripped and stripped not in search_keywords:
-        search_keywords.append(stripped)
-    short_kw = re.split(r'[\s:：·\-—]+', stripped or clean_title)[0].strip()
-    if len(short_kw) >= 2 and short_kw not in search_keywords:
-        search_keywords.append(short_kw)
+    if re.fullmatch(r'[A-Za-z0-9_-]{8,64}', clean_title) and any(c.isdigit() for c in clean_title):
+        return ''
+    stripped = re.sub(r'[\(\[（【《].*?[\)\]）】》]', '', clean_title).strip()
+    no_space = re.sub(r'\s+', '', stripped or clean_title).strip()
+    no_season = re.sub(r'\s*第[一二三四五六七八九十百零0-9]+[季部期篇章].*$', '', stripped or clean_title).strip()
+    short_kw = re.split(r'[\s:：·\-—_]+', stripped or clean_title)[0].strip()
+    search_keywords = []
+    for cand_kw in (no_space, clean_title, stripped, no_season, short_kw):
+        if len(cand_kw) >= 2 and cand_kw not in search_keywords:
+            search_keywords.append(cand_kw)
 
     cms_hosts = (
         'https://caiji.dyttzyapi.com/api.php/provide/vod/',
+        'https://bfzyapi.com/api.php/provide/vod/',
         'https://360zy.com/api.php/provide/vod/',
         'https://api.ffzyapi.com/api.php/provide/vod/',
+        'https://suoniapi.com/api.php/provide/vod/',
+        'https://ikunzyapi.com/api.php/provide/vod/',
+        'https://jszyapi.com/api.php/provide/vod/',
         'https://cj.lziapi.com/api.php/provide/vod/',
     )
     headers = {
         'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
         'Accept': 'application/json, text/plain, */*',
     }
-    ep_idx = max(0, int(episode_index or 0))
+    try:
+        ep_idx = max(0, int(episode_index or 0))
+    except (TypeError, ValueError):
+        ep_idx = 0
     ep_num_match = re.search(r'(\d+)', str(episode_name or ''))
     target_num = int(ep_num_match.group(1)) if ep_num_match else None
 
-    for host in cms_hosts:
-        for kw in search_keywords[:2]:
-            try:
-                resp = requests.get(host, params={'ac': 'detail', 'wd': kw}, headers=headers, timeout=6)
-                data = json.loads(resp.text)
-            except Exception:
-                continue
-            rows = data.get('list') if isinstance(data, dict) else None
-            if not isinstance(rows, list) or not rows:
-                continue
-            # Sort exact/prefix title matches first
-            def score_item(item):
-                name = str(item.get('vod_name') or '').strip()
-                if name == clean_title:
-                    return 0
-                if clean_title in name or name in clean_title:
-                    return 1
-                return 2
+    norm_clean = re.sub(r'\s+', '', clean_title)
+    norm_stripped = re.sub(r'\s+', '', stripped)
+    def score_item(item):
+        name = str(item.get('vod_name') or '').strip()
+        norm_name = re.sub(r'\s+', '', name)
+        if name == clean_title or name == stripped or (norm_clean and norm_name == norm_clean) or (norm_stripped and norm_name == norm_stripped):
+            return 0
+        if clean_title in name or name in clean_title or (norm_clean and (norm_clean in norm_name or norm_name in norm_clean)):
+            return 1
+        return 2
 
-            for item in sorted((r for r in rows if isinstance(r, dict)), key=score_item):
-                play_url_raw = str(item.get('vod_play_url') or '')
-                if not play_url_raw:
-                    continue
-                for group in play_url_raw.split('$$$'):
-                    m3u8_eps = []
-                    for ep in group.split('#'):
-                        if not ep:
-                            continue
-                        label, sep, u = ep.partition('$')
-                        cand_url = (u if sep else label).strip().replace('\\/', '/')
-                        cand_name = (label if sep else '').strip()
-                        low_cu = cand_url.lower()
-                        if cand_url.startswith(('http://', 'https://')) and any(
-                            tok in low_cu for tok in ('.m3u8', '.mp4')
-                        ) and not any(dead in low_cu for dead in ('lzcdn', 'lzfile', 'lfthirtytwo')):
-                            m3u8_eps.append((cand_name, cand_url))
-                    if not m3u8_eps:
+    def pick_from_rows(rows, allow_dead_cdn=False):
+        if not isinstance(rows, list) or not rows:
+            return ''
+        for item in sorted((r for r in rows if isinstance(r, dict)), key=score_item):
+            play_url_raw = str(item.get('vod_play_url') or '')
+            if not play_url_raw:
+                continue
+            for group in play_url_raw.split('$$$'):
+                m3u8_eps = []
+                for ep in group.split('#'):
+                    if not ep:
                         continue
-                    if episode_name:
-                        for cname, curl in m3u8_eps:
-                            if cname == episode_name:
-                                return curl
-                    if target_num is not None:
-                        for cname, curl in m3u8_eps:
-                            m_num = re.search(r'(\d+)', cname)
-                            if m_num and int(m_num.group(1)) == target_num:
-                                return curl
-                        if 1 <= target_num <= len(m3u8_eps):
-                            return m3u8_eps[target_num - 1][1]
-                    if ep_idx < len(m3u8_eps):
-                        return m3u8_eps[ep_idx][1]
-                    return m3u8_eps[0][1]
+                    label, sep, u = ep.partition('$')
+                    cand_url = (u if sep else label).strip().replace('\\/', '/')
+                    cand_name = (label if sep else '').strip()
+                    low_cu = cand_url.lower()
+                    if cand_url.startswith(('http://', 'https://')) and any(
+                        tok in low_cu for tok in ('.m3u8', '.mp4')
+                    ):
+                        if not allow_dead_cdn and any(dead in low_cu for dead in ('lzcdn', 'lzfile', 'lfthirtytwo')):
+                            continue
+                        m3u8_eps.append((cand_name, cand_url))
+                if not m3u8_eps:
+                    continue
+                if episode_name:
+                    for cname, curl in m3u8_eps:
+                        if cname == episode_name:
+                            return curl
+                if target_num is not None:
+                    for cname, curl in m3u8_eps:
+                        m_num = re.search(r'(\d+)', cname)
+                        if m_num and int(m_num.group(1)) == target_num:
+                            return curl
+                    if 1 <= target_num <= len(m3u8_eps):
+                        return m3u8_eps[target_num - 1][1]
+                if ep_idx < len(m3u8_eps):
+                    return m3u8_eps[ep_idx][1]
+                return m3u8_eps[0][1]
+        return ''
+
+    import concurrent.futures
+    fallback_rows = []
+    for kw in search_keywords[:3]:
+        def fetch_host(host_url):
+            try:
+                resp = requests.get(host_url, params={'ac': 'detail', 'wd': kw}, headers=headers, timeout=4.5)
+                data = json.loads(resp.text)
+                rows = data.get('list') if isinstance(data, dict) else None
+                if isinstance(rows, list) and rows:
+                    return rows
+            except Exception:
+                pass
+            return []
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(fetch_host, h) for h in cms_hosts]
+            for fut in futures:
+                try:
+                    rows = fut.result(timeout=5.0)
+                except Exception:
+                    rows = []
+                if rows:
+                    chosen = pick_from_rows(rows, allow_dead_cdn=False)
+                    if chosen:
+                        return chosen
+                    fallback_rows.extend(rows)
+    if fallback_rows:
+        return pick_from_rows(fallback_rows, allow_dead_cdn=True)
     return ''
 
 
