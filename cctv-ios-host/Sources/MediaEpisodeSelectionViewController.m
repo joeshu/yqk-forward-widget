@@ -183,7 +183,9 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
+    [CATransaction begin];[CATransaction setDisableActions:YES];
     self.backdropGradient.frame=self.backdropTintView.bounds;
+    [CATransaction commit];
 }
 - (void)dealloc { [self.client cancel];[self.refreshClient cancel]; }
 - (void)goBack { [self.navigationController popViewControllerAnimated:YES]; }
@@ -349,6 +351,18 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     if(!self.statusLabel.text.length)self.statusLabel.hidden=YES;
     NSString *episodeName=episodes.count?[episodes[(NSUInteger)self.selectedEpisodeIndex][@"name"] description]:@"暂无可播放分集";if(!episodeName.length)episodeName=[NSString stringWithFormat:@"第 %ld 集",(long)self.selectedEpisodeIndex+1];
     [self.continueButton setTitle:episodes.count?[NSString stringWithFormat:@"继续播放  ·  %@",episodeName]:episodeName forState:UIControlStateNormal];self.continueButton.accessibilityValue=episodes.count?[NSString stringWithFormat:@"当前选择 %@",episodeName]:@"没有可播放分集";self.continueButton.enabled=episodes.count>0;self.continueButton.alpha=episodes.count?1:.56;
+    __weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_main_queue(),^{
+        MediaEpisodeSelectionViewController *owner=weakSelf;if(!owner)return;
+        if(owner.selectedLineIndex>=0&&(NSUInteger)owner.selectedLineIndex<owner.routeButtons.arrangedSubviews.count&&[owner.routeButtons.superview isKindOfClass:UIScrollView.class]){
+            UIView *activeRoute=owner.routeButtons.arrangedSubviews[(NSUInteger)owner.selectedLineIndex];
+            [(UIScrollView *)owner.routeButtons.superview scrollRectToVisible:[activeRoute convertRect:activeRoute.bounds toView:owner.routeButtons.superview] animated:YES];
+        }
+        if(owner.selectedEpisodeIndex>=0&&(NSUInteger)owner.selectedEpisodeIndex<owner.quickEpisodeStack.arrangedSubviews.count&&owner.quickEpisodeScroll){
+            UIView *activeChip=owner.quickEpisodeStack.arrangedSubviews[(NSUInteger)owner.selectedEpisodeIndex];
+            [owner.quickEpisodeScroll scrollRectToVisible:[activeChip convertRect:activeChip.bounds toView:owner.quickEpisodeScroll] animated:YES];
+        }
+    });
 }
 - (void)selectRoute:(UIButton *)sender {
     NSArray *oldEpisodes=[self episodesForLine:self.selectedLineIndex];NSDictionary *oldEpisode=self.selectedEpisodeIndex>=0&&self.selectedEpisodeIndex<oldEpisodes.count?oldEpisodes[(NSUInteger)self.selectedEpisodeIndex]:@{};NSString *episodeID=[oldEpisode[@"id"] description]?:@"",*episodeName=[oldEpisode[@"name"] description]?:@"";NSInteger oldIndex=self.selectedEpisodeIndex;

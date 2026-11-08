@@ -128,13 +128,26 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
         NSDictionary *bundleMap=@{@"builtin-hongguo-python":@[@"hongguo-python",@"py"],@"builtin-hongguo-node":@[@"hongguo-node",@"js"],@"zen.keke.rex.stream":@[@"zen-keke-stream",@"js"],@"builtin-webox-4kvm":@[@"webox-4kvm",@"js"],@"builtin-webox-hstream":@[@"webox-hstream",@"js"],@"builtin-webox-guazi":@[@"webox-guazi",@"js"],@"builtin-webox-rou":@[@"webox-rou",@"js"],@"builtin-webox-one":@[@"webox-one",@"js"]};
         NSArray *bundleSpec=bundleMap[bundledID];
         if(bundleSpec.count==2&&target.length){
-            NSString *bundlePath=[NSBundle.mainBundle pathForResource:bundleSpec[0] ofType:bundleSpec[1] inDirectory:@"BuiltinMedia"];
-            if(bundlePath.length){
-                NSData *bundleData=[NSData dataWithContentsOfFile:bundlePath options:NSDataReadingMappedIfSafe error:NULL];
-                NSData *installedData=[NSData dataWithContentsOfFile:target options:NSDataReadingMappedIfSafe error:NULL];
-                if(bundleData.length&&(![installedData isEqualToData:bundleData])){
-                    [NSFileManager.defaultManager createDirectoryAtPath:target.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
-                    [bundleData writeToFile:target options:NSDataWritingAtomic error:NULL];
+            static NSMutableSet<NSString *> *syncedTargets;
+            static dispatch_once_t onceToken;
+            dispatch_once(&onceToken, ^{ syncedTargets = [NSMutableSet set]; });
+            NSString *syncKey = [NSString stringWithFormat:@"%@|%@", bundledID, target];
+            BOOL alreadySynced = NO;
+            @synchronized(syncedTargets) {
+                alreadySynced = [syncedTargets containsObject:syncKey] && [NSFileManager.defaultManager fileExistsAtPath:target];
+            }
+            if(!alreadySynced){
+                NSString *bundlePath=[NSBundle.mainBundle pathForResource:bundleSpec[0] ofType:bundleSpec[1] inDirectory:@"BuiltinMedia"];
+                if(bundlePath.length){
+                    NSData *bundleData=[NSData dataWithContentsOfFile:bundlePath options:NSDataReadingMappedIfSafe error:NULL];
+                    NSData *installedData=[NSData dataWithContentsOfFile:target options:NSDataReadingMappedIfSafe error:NULL];
+                    if(bundleData.length&&(![installedData isEqualToData:bundleData])){
+                        [NSFileManager.defaultManager createDirectoryAtPath:target.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
+                        [bundleData writeToFile:target options:NSDataWritingAtomic error:NULL];
+                    }
+                    if(bundleData.length){
+                        @synchronized(syncedTargets) { [syncedTargets addObject:syncKey]; }
+                    }
                 }
             }
         }

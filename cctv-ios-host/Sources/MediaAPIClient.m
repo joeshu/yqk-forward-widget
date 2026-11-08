@@ -313,7 +313,7 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
     if([operation isEqual:@"play"]){
         NSDictionary *headers=MediaTVBoxPlaybackHeaders(source,root);
         if(macCMS){NSString *url=MediaTVBoxString(arguments[@"id"]);if(!url.length)return @{@"error":@"MacCMS 分集没有播放地址"};BOOL webPage=MediaTVBoxURLLooksLikeWebPage(url);NSMutableDictionary *result=[@{@"url":url,@"originalURL":url,@"parse":@(webPage),@"jx":@0,@"headers":headers} mutableCopy];for(NSString *key in @[@"format",@"contentType",@"mimeType",@"mediaType"])if([root[key] isKindOfClass:NSString.class])result[key]=root[key];NSString *extension=[NSURL URLWithString:url].pathExtension.lowercaseString?:@"";BOOL explicitWebPage=[@[@"html",@"htm",@"xhtml",@"php",@"asp",@"aspx",@"jsp",@"shtml"] containsObject:extension];BOOL cicada=MediaPlaybackResultSupportsCicada(result);if(!explicitWebPage&&MediaPlaybackResultSupportsNativePlayback(result))webPage=NO;BOOL native=!webPage&&(MediaPlaybackResultSupportsNativePlayback(result)||MediaTVBoxURLHasSignedQuery(url));if(cicada)result[@"playbackEngine"]=@"cicada";else if(native)result[@"playbackEngine"]=@"avplayer";result[@"parse"]=@(webPage);result[@"nativePlayable"]=@(native);result[@"directMedia"]=@(!webPage&&MediaPlaybackResultIsDirectMedia(result));result[@"requiresWebPlayback"]=@(webPage||!native);return result;}
-        if([source[@"tvboxType"] integerValue]==1){NSString *url=MediaTVBoxString(arguments[@"id"]);NSString *prefix=MediaTVBoxString(source[@"playUrl"]);if(!url.length)return @{@"error":@"TVBox type 1 没有返回分集地址"};NSMutableDictionary *result=[@{@"url":[prefix stringByAppendingString:url],@"parse":@(prefix.length>0),@"headers":headers} mutableCopy];BOOL cicada=MediaPlaybackResultSupportsCicada(result),native=MediaPlaybackResultSupportsNativePlayback(result);if(cicada)result[@"playbackEngine"]=@"cicada";else if(native)result[@"playbackEngine"]=@"avplayer";result[@"nativePlayable"]=@(native);result[@"directMedia"]=@(MediaPlaybackResultIsDirectMedia(result));result[@"requiresWebPlayback"]=@(prefix.length>0&&!native);return result;}
+        if([source[@"tvboxType"] integerValue]==1||(source[@"tvboxType"]!=nil&&[source[@"tvboxType"] integerValue]==0)){NSString *url=MediaTVBoxString(arguments[@"id"]);NSString *prefix=MediaTVBoxString(source[@"playUrl"]);if(!url.length)return @{@"error":@"TVBox type 1 没有返回分集地址"};NSMutableDictionary *result=[@{@"url":[prefix stringByAppendingString:url],@"parse":@(prefix.length>0),@"headers":headers} mutableCopy];BOOL cicada=MediaPlaybackResultSupportsCicada(result),native=MediaPlaybackResultSupportsNativePlayback(result);if(cicada)result[@"playbackEngine"]=@"cicada";else if(native)result[@"playbackEngine"]=@"avplayer";result[@"nativePlayable"]=@(native);result[@"directMedia"]=@(MediaPlaybackResultIsDirectMedia(result));result[@"requiresWebPlayback"]=@(prefix.length>0&&!native);return result;}
         id rawURL=root[@"url"];NSString *prefix=MediaTVBoxFirstString(root,@[@"playUrl"]);
         NSMutableArray<NSDictionary *> *alternates=[NSMutableArray array];NSString *url=@"";
         if([rawURL isKindOfClass:NSString.class]){url=[prefix stringByAppendingString:[rawURL stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]];}
@@ -527,7 +527,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
         configuration.timeoutIntervalForRequest=timeout;
         configuration.timeoutIntervalForResource=timeout+5;
         configuration.URLCache=nil;
-        configuration.HTTPMaximumConnectionsPerHost=2;
+        configuration.HTTPMaximumConnectionsPerHost=6;configuration.HTTPShouldUsePipelining=YES;
         _delegateQueue=[NSOperationQueue new];_delegateQueue.name=@"com.cctvhost.media-api";_delegateQueue.maxConcurrentOperationCount=1;
         _contextLock=[NSLock new];_requestContexts=[NSMutableDictionary dictionary];
         _session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:_delegateQueue];
@@ -548,7 +548,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
         configuration.timeoutIntervalForRequest=120;
         configuration.timeoutIntervalForResource=125;
         configuration.URLCache=nil;
-        configuration.HTTPMaximumConnectionsPerHost=2;
+        configuration.HTTPMaximumConnectionsPerHost=6;configuration.HTTPShouldUsePipelining=YES;
         self.playSession=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:self.delegateQueue];
     }
     return self.playSession;
@@ -650,7 +650,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
     if(index>=self.parserAPIEntries.count){[self finishParserWithResult:self.parserWebFallbackResult?:self.parserFallbackResult];return;}
     NSDictionary *parser=self.parserAPIEntries[index];NSString *original=[self.parserFallbackResult[@"url"] isKindOfClass:NSString.class]?self.parserFallbackResult[@"url"]:@"";NSString *target=MediaParserRequestURL(parser,original);NSURL *targetURL=[NSURL URLWithString:target];
     if(!targetURL){[self tryParserAtIndex:index+1];return;}
-    NSTimeInterval maxProbeTimeout=self.selectedParserID.length?8.0:4.5;
+    NSTimeInterval maxProbeTimeout=self.selectedParserID.length?8.0:3.2;
     NSTimeInterval timeout=MIN(maxProbeTimeout,MAX(1.0,self.playTimeoutMilliseconds/1000.0));NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:targetURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout];request.HTTPMethod=@"GET";[request setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
     NSDictionary *requestHeaders=MediaParserCleanHeaders(MediaParserExtractHeaderValue(parser),targetURL,targetURL);for(NSString *name in requestHeaders)[request setValue:requestHeaders[name] forHTTPHeaderField:name];
     self.activeRequestID=NSUUID.UUID.UUIDString.lowercaseString;self.activeCorrelationID=self.parserCorrelationID;self.activeOperation=@"parse_resolver";
@@ -1133,7 +1133,7 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
     NSString *playArgID=MediaTVBoxString(arguments[@"id"]);
     BOOL jarDirectPlay=jarBridge&&([[self.tvboxSource[@"api"] lowercaseString] containsString:@"bili"]||MediaPlaybackResultIsDirectMedia(@{@"url":playArgID})||MediaTVBoxURLHasSignedQuery(playArgID));
     BOOL localBiliDetail=jarBridge&&[operation isEqual:@"detail"]&&[[self.tvboxSource[@"api"] lowercaseString] containsString:@"bili"];
-    BOOL localDirectPlay=[operation isEqual:@"play"]&&(macCMS||doubanIndex||jarDirectPlay||[self.tvboxSource[@"tvboxType"] integerValue]==1);
+    BOOL localDirectPlay=[operation isEqual:@"play"]&&(macCMS||doubanIndex||jarDirectPlay||[self.tvboxSource[@"tvboxType"] integerValue]==1||(self.tvboxSource[@"tvboxType"]!=nil&&[self.tvboxSource[@"tvboxType"] integerValue]==0));
     BOOL localTVBoxOperation=self.tvboxSource&&([operation isEqual:@"capabilities"]||[operation isEqual:@"providers"]||localDirectPlay||localBiliDetail||(doubanIndex&&[operation isEqual:@"detail"]));
     if(localTVBoxOperation){
         id direct=MediaTVBoxNormalize(operation,arguments?:@{},self.tvboxSource,@{});

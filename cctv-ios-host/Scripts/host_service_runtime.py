@@ -366,6 +366,10 @@ def _accept(server):
                 raise OSError('service stopping')
             if request.gettimeout() is None:
                 request.settimeout(10.0)
+            try:
+                request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except (OSError, AttributeError):
+                pass
             server._host_clients.add(request)
     return request, address
 

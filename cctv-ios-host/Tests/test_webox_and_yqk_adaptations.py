@@ -266,5 +266,87 @@ const fn = {fn_code};
         self.assertIn("WA.instantiate = async", plat)
 
 
+    def test_ci_syntax_service_editor_lag_and_playback_startup_optimizations(self):
+        # 1. CI syntax & CCTVPlaybackListPanelController regression guards
+        root_src = (ROOT / "Sources/RootViewController.m").read_text(encoding="utf-8")
+        panel_impl = root_src.split("@implementation CCTVPlaybackListPanelController", 1)[1].split("@end", 1)[0]
+        self.assertNotIn("scrollViewDidScroll:", panel_impl)
+        self.assertNotIn("catalogTopImmersiveScrim", panel_impl)
+
+        js_rt = (ROOT / "Sources/JSPluginRuntime.m").read_text(encoding="utf-8")
+        stop_impl = js_rt.split("- (BOOL)stopSessionsForServiceIdentifier:", 1)[1].split("- (void)log:", 1)[0]
+        self.assertEqual(stop_impl.count("error:NULL]:nil;"), 2)
+
+        # 2. ServiceEditorViewController lag fix (cached footer + non-contiguous layout + view reuse)
+        se_src = (ROOT / "Sources/ServiceEditorViewController.m").read_text(encoding="utf-8")
+        self.assertIn("cachedSection0Footer", se_src)
+        self.assertIn("- (void)refreshSection0FooterCache", se_src)
+        self.assertIn("allowsNonContiguousLayout = YES", se_src)
+        footer_impl = se_src.split("- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:", 1)[1].split("- (UITableViewCell *)", 1)[0]
+        self.assertIn("return self.cachedSection0Footer;", footer_impl)
+        self.assertNotIn("stringWithContentsOfFile:", footer_impl)
+
+        # 3. Playback startup buffer, post-first-frame immediate play, Cicada buffer & cache optimizations
+        mp_src = (ROOT / "Sources/MediaPlaybackViewController.m").read_text(encoding="utf-8")
+        self.assertIn("item.preferredForwardBufferDuration=fastStartup?1.5:3.0;", mp_src)
+        self.assertIn("[self.player playImmediatelyAtRate:targetRate];", mp_src)
+
+        ca_src = (ROOT / "Sources/MediaPlaybackCicadaAdapter.m").read_text(encoding="utf-8")
+        self.assertIn('NSSelectorFromString(@"setStartBufferDuration:"), 200', ca_src)
+        self.assertIn('NSSelectorFromString(@"setHighBufferDuration:"), 1200', ca_src)
+
+        mc_src = (ROOT / "Sources/MediaMetadataCache.m").read_text(encoding="utf-8")
+        self.assertIn('@"cost":@(persistentData.length)', mc_src)
+
+        csp_src = (ROOT / "Plugins/csp_adapter.py").read_text(encoding="utf-8")
+        self.assertIn("_MACCMS_ROWS_CACHE", csp_src)
+        self.assertIn("concurrent.futures.as_completed", csp_src)
+        self.assertIn("pool.shutdown(wait=False", csp_src)
+
+        # 4. Round-10 deep playback & loading speed optimizations
+        readiness_src = (ROOT / "Sources/LocalServiceReadiness.m").read_text(encoding="utf-8")
+        self.assertIn('[self.lastFailureKind isEqualToString:@"network_error"]&&self.attemptCount<=3', readiness_src)
+        self.assertIn("AVURLAssetPreferPreciseDurationAndTimingKey", mp_src)
+        self.assertIn("cmsEpisodeCache", mp_src)
+        self.assertIn("prefetchNextEpisodeIfNeeded", mp_src)
+        self.assertIn("prefetchedEpisodeResult", mp_src)
+        self.assertIn("loaderKeyCache", mp_src)
+
+        api_src = (ROOT / "Sources/MediaAPIClient.m").read_text(encoding="utf-8")
+        self.assertIn("configuration.HTTPMaximumConnectionsPerHost=6;", api_src)
+        self.assertIn("NSTimeInterval maxProbeTimeout=self.selectedParserID.length?8.0:3.2;", api_src)
+
+        relay_src = (ROOT / "Plugins/host_media_relay.py").read_text(encoding="utf-8")
+        self.assertIn("self.remote_key_cache = collections.OrderedDict()", relay_src)
+        self.assertIn("pos = chunk.find(0x47, 1, limit)", relay_src)
+
+        ms_src = (ROOT / "Plugins/media-service.py").read_text(encoding="utf-8")
+        self.assertIn("TCP_NODELAY", ms_src)
+        self.assertIn("SO_SNDBUF", ms_src)
+        self.assertIn("MediaRelay(limit=1024)", ms_src)
+
+        # 5. Round-11 performance, stability, network throughput & Media Browser subpage optimizations
+        img_src = (ROOT / "Sources/HostImageLoader.m").read_text(encoding="utf-8")
+        self.assertIn("ImageConcurrentLimit = 8;", img_src)
+        self.assertIn("_cache.countLimit=360;_cache.totalCostLimit=32*1024*1024;", img_src)
+        self.assertIn("config.HTTPMaximumConnectionsPerHost=8;config.HTTPShouldUsePipelining=YES;", img_src)
+
+        self.assertIn("_tune_response_socket", relay_src)
+        self.assertIn("SO_RCVBUF, 524288", relay_src)
+
+        mb_src = (ROOT / "Sources/MediaBrowserViewController.m").read_text(encoding="utf-8")
+        self.assertIn("[self buildDetailLayout];[self refreshDetailHeader];[self loadDetail];", mb_src)
+        self.assertIn('resultForSource:self.source operation:@"detail" arguments:args maximumAge:1800', mb_src)
+        self.assertIn('storeResult:sanitizedDetail forSource:owner.source operation:@"detail" arguments:args', mb_src)
+        self.assertIn("[CATransaction setDisableActions:YES];", mb_src)
+
+        feed_src = (ROOT / "Sources/MediaFeedView.m").read_text(encoding="utf-8")
+        self.assertIn("[CATransaction setDisableActions:YES];", feed_src)
+        self.assertIn("MAX(360,CGRectGetHeight(scrollView.bounds)*.85)", feed_src)
+
+        ep_src = (ROOT / "Sources/MediaEpisodeSelectionViewController.m").read_text(encoding="utf-8")
+        self.assertIn("scrollRectToVisible:[activeChip convertRect:activeChip.bounds toView:owner.quickEpisodeScroll]", ep_src)
+
+
 if __name__ == "__main__":
     unittest.main()

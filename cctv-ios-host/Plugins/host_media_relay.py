@@ -68,6 +68,22 @@ def _is_cert_verification_error(error):
 
 
 _UNVERIFIED_TLS_HOSTS = set()
+_UNVERIFIED_SSL_CONTEXT = ssl._create_unverified_context()
+_ORIG_BUILD_OPENER = urllib.request.build_opener
+_DEFAULT_OPENER = _ORIG_BUILD_OPENER(ScopedRedirect())
+_UNVERIFIED_OPENER = _ORIG_BUILD_OPENER(ScopedRedirect(), urllib.request.HTTPSHandler(context=_UNVERIFIED_SSL_CONTEXT))
+
+
+def _tune_response_socket(resp):
+    try:
+        raw_fp = getattr(getattr(resp, 'fp', None), 'raw', None)
+        sock = getattr(raw_fp, '_sock', None)
+        if sock is not None:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 524288)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except (OSError, AttributeError):
+        pass
+    return resp
 
 
 def _open_with_timeout_retry(request, diagnostic_id=''):
@@ -75,20 +91,19 @@ def _open_with_timeout_retry(request, diagnostic_id=''):
     method = request.get_method().upper()
     parsed_init = urllib.parse.urlsplit(request.full_url)
     host_init = (parsed_init.hostname or '').lower()
+    use_cached_opener = urllib.request.build_opener is _ORIG_BUILD_OPENER
     if host_init in _UNVERIFIED_TLS_HOSTS:
-        unverified_ctx = ssl._create_unverified_context()
-        opener = urllib.request.build_opener(ScopedRedirect(), urllib.request.HTTPSHandler(context=unverified_ctx))
+        opener = _UNVERIFIED_OPENER if use_cached_opener else urllib.request.build_opener(ScopedRedirect(), urllib.request.HTTPSHandler(context=_UNVERIFIED_SSL_CONTEXT))
     else:
-        opener = urllib.request.build_opener(ScopedRedirect())
+        opener = _DEFAULT_OPENER if use_cached_opener else urllib.request.build_opener(ScopedRedirect())
     try:
-        return opener.open(request, timeout=8)
+        return _tune_response_socket(opener.open(request, timeout=8))
     except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
         parsed = urllib.parse.urlsplit(request.full_url)
         host = (parsed.hostname or '').lower()
         if _is_cert_verification_error(error) and host not in ('127.0.0.1', 'localhost', '::1') and not host.endswith('.test'):
             _UNVERIFIED_TLS_HOSTS.add(host)
-            unverified_ctx = ssl._create_unverified_context()
-            tls_opener = urllib.request.build_opener(ScopedRedirect(), urllib.request.HTTPSHandler(context=unverified_ctx))
+            tls_opener = urllib.request.build_opener(ScopedRedirect(), urllib.request.HTTPSHandler(context=_UNVERIFIED_SSL_CONTEXT))
             return tls_opener.open(_retry_request(request), timeout=8)
         if method not in ('GET', 'HEAD') or not _transient_open_timeout(error):
             raise
@@ -129,6 +144,7 @@ class MediaRelay:
         self.diagnosed_manifests = set()
         self.diagnosed_resources = collections.OrderedDict()
         self.inline_keys = collections.OrderedDict()
+        self.remote_key_cache = collections.OrderedDict()
         self.inline_manifests = collections.OrderedDict()
         self.responses = set()
         self.stopping = threading.Event()
@@ -271,9 +287,11 @@ class MediaRelay:
         if len(chunk) >= 8 and chunk[4:8] in (b'ftyp', b'styp', b'moof', b'moov', b'sidx', b'emsg', b'free', b'skip', b'mdat'):
             return chunk
         limit = min(len(chunk) - 376, 16384)
-        for offset in range(1, limit):
-            if chunk[offset] == 0x47 and chunk[offset + 188] == 0x47 and chunk[offset + 376] == 0x47:
-                return chunk[offset:]
+        pos = chunk.find(0x47, 1, limit)
+        while 0 < pos < limit:
+            if chunk[pos + 188] == 0x47 and chunk[pos + 376] == 0x47:
+                return chunk[pos:]
+            pos = chunk.find(0x47, pos + 1, limit)
         return chunk
 
     def register(self, url, headers, origin=None, diagnostic_id=None, fallback_url=None,
@@ -631,6 +649,24 @@ class MediaRelay:
                 headers = {k: v for k, v in headers.items() if k.lower() != 'range'}
             elif handler.headers.get('Range'):
                 headers['Range'] = handler.headers['Range']
+            if resource_kind == 'key' and not head and not record[3]:
+                with self.lock:
+                    cached_norm_key = self.remote_key_cache.get((url, pairs))
+                    if cached_norm_key is not None:
+                        self.remote_key_cache.move_to_end((url, pairs))
+                if cached_norm_key is not None:
+                    resource_event('headers')
+                    resource_event('byte', len(cached_norm_key))
+                    handler.send_response(200)
+                    handler.send_header('Content-Type', 'application/octet-stream')
+                    handler.send_header('Content-Length', str(len(cached_norm_key)))
+                    handler.send_header('Cache-Control', 'no-store')
+                    handler.send_header('Connection', 'close')
+                    handler.end_headers()
+                    sent = True
+                    self._write_client(handler, cached_norm_key)
+                    resource_event('completed', len(cached_norm_key))
+                    return
             request = urllib.request.Request(url, headers=headers, method='HEAD' if head else 'GET')
             try:
                 response = _open_with_timeout_retry(request, diagnostic_id)
@@ -718,6 +754,12 @@ class MediaRelay:
             if resource_kind == 'key' and not head and response.status == 200:
                 raw_key = prefix + response.read(4096)
                 norm_key = self._normalize_hls_key_bytes(raw_key)
+                if len(norm_key) == 16 and not record[3]:
+                    with self.lock:
+                        self.remote_key_cache[(url, pairs)] = norm_key
+                        self.remote_key_cache.move_to_end((url, pairs))
+                        while len(self.remote_key_cache) > 256:
+                            self.remote_key_cache.popitem(last=False)
                 resource_event('byte', len(norm_key))
                 handler.send_response(200)
                 handler.send_header('Content-Type', 'application/octet-stream')
@@ -785,7 +827,8 @@ class MediaRelay:
                     )
                 )
                 if may_be_disguised:
-                    while len(first_chunk) < 16384 and self._strip_disguised_ts_prefix(first_chunk) is first_chunk:
+                    need_more_probe = first_chunk.startswith((b'\x89PNG', b'\xff\xd8\xff', b'GIF8', b'BM', b'RIFF')) or len(first_chunk) < 512
+                    while need_more_probe and len(first_chunk) < 16384 and self._strip_disguised_ts_prefix(first_chunk) is first_chunk:
                         more = read_stream_chunk(16384)
                         if not more:
                             break
@@ -893,6 +936,7 @@ class MediaRelay:
             self.diagnosed_manifests.clear()
             self.diagnosed_resources.clear()
             self.refreshFailures.clear()
+            self.remote_key_cache.clear()
         for event in flights:
             event['event'].set()
         for response in responses:

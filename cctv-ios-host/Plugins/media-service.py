@@ -104,13 +104,13 @@ class Server(ThreadingHTTPServer):
         # Older embedders/tests set the Node-only name directly.
         self.node_proxy_file_root = None
         self.relay = MediaRelay(stream_media=True)
-        self.artwork_relay = MediaRelay()
+        self.artwork_relay = MediaRelay(limit=1024)
         self.plugin_proxy_lock = threading.Lock()
         self.plugin_proxy_entries = collections.OrderedDict()
         self.cenc_entries = collections.OrderedDict()
         self.cenc_sessions = collections.OrderedDict()
         self.host_fetch_token = uuid.uuid4().hex
-        self.slots = threading.BoundedSemaphore(6)
+        self.slots = threading.BoundedSemaphore(12)
         super().__init__(address, Handler)
 
     def server_close(self):
@@ -198,6 +198,12 @@ class Server(ThreadingHTTPServer):
 
     def process_request(self, request, client_address):
         request.settimeout(10)
+        try:
+            import socket as _socket
+            request.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_NODELAY, 1)
+            request.setsockopt(_socket.SOL_SOCKET, _socket.SO_SNDBUF, 524288)
+        except (OSError, AttributeError):
+            pass
         if not self.slots.acquire(blocking=False):
             try:
                 request.sendall(b'HTTP/1.0 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')

@@ -6,8 +6,8 @@
 
 static NSUInteger const ImageBodyLimit = 2 * 1024 * 1024;
 static NSUInteger const PosterBodyLimit = 4 * 1024 * 1024;
-static NSUInteger const ImageConcurrentLimit = 4;
-static NSUInteger const ImageQueueLimit = 96;
+static NSUInteger const ImageConcurrentLimit = 8;
+static NSUInteger const ImageQueueLimit = 160;
 
 @interface HostImageRequest : NSObject
 @property(nonatomic, strong) NSURLSessionDataTask *task;
@@ -59,12 +59,12 @@ static NSUInteger const ImageQueueLimit = 96;
 - (instancetype)initWithConfiguration:(NSURLSessionConfiguration *)configuration {
     if((self=[super init])) {
         _queue=dispatch_queue_create("cctvhost.images", DISPATCH_QUEUE_SERIAL);
-        _cache=[NSCache new];_cache.countLimit=200;_cache.totalCostLimit=16*1024*1024;
+        _cache=[NSCache new];_cache.countLimit=360;_cache.totalCostLimit=32*1024*1024;
         _failures=[NSCache new];_failures.countLimit=200;
         _domainFailures=[NSCache new];_domainFailures.countLimit=64;
         _requests=[NSMutableDictionary dictionary];_tasks=[NSMutableDictionary dictionary];_pending=[NSMutableArray array];
         NSURLSessionConfiguration *config=configuration.copy;config.URLCache=nil;config.HTTPCookieStorage=nil;
-        config.timeoutIntervalForRequest=6;config.timeoutIntervalForResource=10;config.HTTPMaximumConnectionsPerHost=4;config.waitsForConnectivity=NO;
+        config.timeoutIntervalForRequest=6;config.timeoutIntervalForResource=10;config.HTTPMaximumConnectionsPerHost=8;config.HTTPShouldUsePipelining=YES;config.waitsForConnectivity=NO;
         NSOperationQueue *delegate=[NSOperationQueue new];delegate.maxConcurrentOperationCount=1;delegate.underlyingQueue=_queue;
         _session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:delegate];
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(clearCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
@@ -146,7 +146,7 @@ static NSUInteger const ImageQueueLimit = 96;
         else if([host hasSuffix:@"hitv.com"]||[host hasSuffix:@"mgtv.com"])[request setValue:@"https://www.mgtv.com/" forHTTPHeaderField:@"Referer"];
         else if(host.length&&![host isEqualToString:@"127.0.0.1"]&&![host isEqualToString:@"localhost"]&&![host hasSuffix:@".test"]&&![host hasSuffix:@".example"])[request setValue:[NSString stringWithFormat:@"%@://%@/",targetURL.scheme.lowercaseString?:@"https",host] forHTTPHeaderField:@"Referer"];
         record.data=[NSMutableData data];record.startedAt=CACurrentMediaTime();record.httpStatus=0;record.expectedContentLength=-1;record.responseContentType=@"";record.responseEncrypted=NO;record.failureStage=nil;record.task=[self.session dataTaskWithRequest:request];
-        record.task.priority=NSURLSessionTaskPriorityLow;self.tasks[@(record.task.taskIdentifier)]=record;[record.task resume];
+        record.task.priority=NSURLSessionTaskPriorityDefault;self.tasks[@(record.task.taskIdentifier)]=record;[record.task resume];
     }
 }
 - (void)finish:(NSURLSessionTask *)task error:(NSError *)error {

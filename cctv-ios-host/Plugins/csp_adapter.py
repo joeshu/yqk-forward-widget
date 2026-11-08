@@ -38,6 +38,7 @@ import requests
 
 _EXT_CACHE = {}
 _JAR_CACHE = {}
+_MACCMS_ROWS_CACHE = {}
 
 
 def _pad_pkcs7(data, block_size=16):
@@ -363,11 +364,19 @@ def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
         return ''
 
     import concurrent.futures
+    now_ts = time.time()
+    for kw in search_keywords[:3]:
+        cached_entry = _MACCMS_ROWS_CACHE.get(kw)
+        if cached_entry and now_ts - cached_entry[0] < 600:
+            chosen = pick_from_rows(cached_entry[1], allow_dead_cdn=False)
+            if chosen:
+                return chosen
+
     fallback_rows = []
     for kw in search_keywords[:3]:
         def fetch_host(host_url):
             try:
-                resp = requests.get(host_url, params={'ac': 'detail', 'wd': kw}, headers=headers, timeout=4.5)
+                resp = requests.get(host_url, params={'ac': 'detail', 'wd': kw}, headers=headers, timeout=3.8)
                 data = json.loads(resp.text)
                 rows = data.get('list') if isinstance(data, dict) else None
                 if isinstance(rows, list) and rows:
@@ -376,18 +385,36 @@ def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
                 pass
             return []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+        try:
             futures = [pool.submit(fetch_host, h) for h in cms_hosts]
-            for fut in futures:
-                try:
-                    rows = fut.result(timeout=5.0)
-                except Exception:
-                    rows = []
-                if rows:
-                    chosen = pick_from_rows(rows, allow_dead_cdn=False)
-                    if chosen:
-                        return chosen
-                    fallback_rows.extend(rows)
+            collected_for_kw = []
+            try:
+                for fut in concurrent.futures.as_completed(futures, timeout=4.2):
+                    try:
+                        rows = fut.result(timeout=0.1)
+                    except Exception:
+                        rows = []
+                    if rows:
+                        collected_for_kw.extend(rows)
+                        chosen = pick_from_rows(rows, allow_dead_cdn=False)
+                        if chosen:
+                            if len(_MACCMS_ROWS_CACHE) >= 64:
+                                _MACCMS_ROWS_CACHE.pop(next(iter(_MACCMS_ROWS_CACHE)), None)
+                            _MACCMS_ROWS_CACHE[kw] = (time.time(), collected_for_kw)
+                            return chosen
+                        fallback_rows.extend(rows)
+            except Exception:
+                pass
+            if collected_for_kw:
+                if len(_MACCMS_ROWS_CACHE) >= 64:
+                    _MACCMS_ROWS_CACHE.pop(next(iter(_MACCMS_ROWS_CACHE)), None)
+                _MACCMS_ROWS_CACHE[kw] = (time.time(), collected_for_kw)
+        finally:
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                pool.shutdown(wait=False)
     if fallback_rows:
         return pick_from_rows(fallback_rows, allow_dead_cdn=True)
     return ''

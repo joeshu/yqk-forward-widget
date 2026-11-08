@@ -31,6 +31,8 @@
     _editor.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _editor.smartQuotesType = UITextSmartQuotesTypeNo;
     _editor.smartDashesType = UITextSmartDashesTypeNo;
+    _editor.spellCheckingType = UITextSpellCheckingTypeNo;
+    _editor.layoutManager.allowsNonContiguousLayout = YES;
     _editor.text=@"正在读取代码…";_editor.editable=NO;
     NSString *path=self.path;NSUInteger limit=self.readOnly?64*1024:2*1024*1024;__weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{
@@ -186,6 +188,8 @@
 @property(nonatomic, copy) NSString *optionsText;
 @property(nonatomic, assign) BOOL applyingPortChange;
 @property(nonatomic) NSUInteger applyPortGeneration;
+@property(nonatomic, copy) NSString *cachedSection0Footer;
+- (void)refreshSection0FooterCache;
 @end
 @implementation ServiceEditorViewController
 - (BOOL)managedCode {return [self.service[@"builtin"] boolValue] || [self.service[@"manifest"] isKindOfClass:NSDictionary.class];}
@@ -203,6 +207,7 @@
     f.autocorrectionType = UITextAutocorrectionTypeNo;
     f.autocapitalizationType = UITextAutocapitalizationTypeNone;
     [f addTarget:self action:@selector(draftChanged) forControlEvents:UIControlEventEditingChanged];
+    [f.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
     return f;
 }
 - (void)assignAvailablePort {
@@ -295,6 +300,8 @@
         self.code = [NSString stringWithContentsOfFile:[ServiceStore codePath:self.service]
                                               encoding:NSUTF8StringEncoding
                                                  error:NULL];
+    [self.sourceControl.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+    [self refreshSection0FooterCache];
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave
                                                       target:self
@@ -327,8 +334,10 @@
 }
 - (void)urlChanged {
     self.downloadGeneration++;[self.downloadTask cancel];self.downloadTask=nil;self.downloading=NO;
-    if (![self managedCode])
+    if (![self managedCode]) {
         self.code = nil;
+        [self refreshSection0FooterCache];
+    }
     [self draftChanged];
 }
 - (void)sourceChanged {
@@ -350,24 +359,27 @@
     // Node.js 服务此前被误标为“Python 服务”。
     return @[ ([self.service[@"engine"] isEqual:@"node"]?@"Node.js 服务":([self.service[@"engine"] isEqual:@"javascript"]?@"JavaScript 服务":@"Python 服务")), @"代码来源", @"网络与启动", @"" ][section];
 }
+- (void)refreshSection0FooterCache {
+    NSString *sourceCode = self.code;
+    if (!sourceCode.length && self.service && ![self managedCode]) {
+        NSString *entry = [ServiceStore codePath:self.service];
+        NSDictionary *attrs = entry.length ? [NSFileManager.defaultManager attributesOfItemAtPath:entry error:NULL] : nil;
+        if (entry.length && [attrs[NSFileSize] unsignedLongLongValue] <= 256 * 1024) {
+            sourceCode = [NSString stringWithContentsOfFile:entry encoding:NSUTF8StringEncoding error:NULL];
+        }
+    }
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    NSInteger inferredPort = (sourceCode.length ? [ServiceStore inferredPortInCode:sourceCode] : 0) ?: [self.service[@"inferredPort"] integerValue];
+    if (inferredPort >= 1024 && inferredPort <= 65535) [parts addObject:[NSString stringWithFormat:@"脚本默认端口 %ld",(long)inferredPort]];
+    NSString *playlist = (sourceCode.length ? [ServiceStore inferredPlaylistPathInCode:sourceCode] : nil) ?: [ServiceStore playlistPathForService:self.service];
+    if (playlist.length) [parts addObject:[NSString stringWithFormat:@"直播路由 %@",playlist]];
+    NSString *epg = (sourceCode.length ? [ServiceStore inferredEPGPathInCode:sourceCode] : nil) ?: [ServiceStore epgPathForService:self.service];
+    if (epg.length) [parts addObject:[NSString stringWithFormat:@"节目单路由 %@",epg]];
+    self.cachedSection0Footer = parts.count ? [NSString stringWithFormat:@"已识别：%@ · 宿主会自动将服务与本机节目单端口对齐至上方设置的端口。",[parts componentsJoinedByString:@" · "]] : nil;
+}
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) {
-        NSString *sourceCode = self.code;
-        if (!sourceCode.length && self.service) {
-            NSString *entry = [ServiceStore codePath:self.service];
-            if (entry.length) sourceCode = [NSString stringWithContentsOfFile:entry encoding:NSUTF8StringEncoding error:NULL];
-        }
-        NSMutableArray<NSString *> *parts = [NSMutableArray array];
-        NSInteger inferredPort = [ServiceStore inferredPortInCode:sourceCode] ?: [self.service[@"inferredPort"] integerValue];
-        if (inferredPort >= 1024 && inferredPort <= 65535) [parts addObject:[NSString stringWithFormat:@"脚本默认端口 %ld",(long)inferredPort]];
-        NSString *playlist = [ServiceStore inferredPlaylistPathInCode:sourceCode] ?: [ServiceStore playlistPathForService:self.service];
-        if (playlist.length) [parts addObject:[NSString stringWithFormat:@"直播路由 %@",playlist]];
-        NSString *epg = [ServiceStore inferredEPGPathInCode:sourceCode] ?: [ServiceStore epgPathForService:self.service];
-        if (epg.length) [parts addObject:[NSString stringWithFormat:@"节目单路由 %@",epg]];
-        if (parts.count) {
-            return [NSString stringWithFormat:@"已识别：%@ · 宿主会自动将服务与本机节目单端口对齐至上方设置的端口。",[parts componentsJoinedByString:@" · "]];
-        }
-        return nil;
+        return self.cachedSection0Footer;
     }
     if (section == 1)
         return @"导入后可查看、编辑或导出代码。内置服务代码只读。";
@@ -458,9 +470,12 @@
             [stack addArrangedSubview:title];
             input.accessibilityLabel=rowTitle;
         }
+        if ([input.superview isKindOfClass:UIStackView.class]) {
+            [(UIStackView *)input.superview removeArrangedSubview:input];
+        }
+        [input removeFromSuperview];
         input.translatesAutoresizingMaskIntoConstraints=NO;
         [stack addArrangedSubview:input];
-        [input.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
         [c.contentView addSubview:stack];
         [NSLayoutConstraint activateConstraints:@[
             [stack.leadingAnchor constraintEqualToAnchor:c.contentView.leadingAnchor constant:16],
@@ -536,6 +551,7 @@
             if (!used) self.portField.text = [NSString stringWithFormat:@"%ld", (long)inferredPort];
         }
     }
+    [self refreshSection0FooterCache];
     [self draftChanged];
     [self.tableView reloadData];
 }
@@ -621,12 +637,28 @@
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    NSString *text = [NSString stringWithContentsOfFile:[self draftPath]
-                                               encoding:NSUTF8StringEncoding
-                                                  error:NULL];
-    if (text)
-        self.code = text;
-    self.optionsText=[NSString stringWithContentsOfFile:[self optionsDraftPath] encoding:NSUTF8StringEncoding error:NULL];
+    BOOL codeUpdated = NO;
+    if (![self managedCode]) {
+        NSString *draftFile = [self draftPath];
+        if ([NSFileManager.defaultManager fileExistsAtPath:draftFile]) {
+            NSString *text = [NSString stringWithContentsOfFile:draftFile
+                                                       encoding:NSUTF8StringEncoding
+                                                          error:NULL];
+            if (text && ![text isEqualToString:self.code ?: @""]) {
+                self.code = text;
+                codeUpdated = YES;
+            }
+        }
+    }
+    if ([self.service[@"manifest"] isKindOfClass:NSDictionary.class]) {
+        NSString *optPath = [self optionsDraftPath];
+        if ([NSFileManager.defaultManager fileExistsAtPath:optPath]) {
+            self.optionsText = [NSString stringWithContentsOfFile:optPath encoding:NSUTF8StringEncoding error:NULL];
+        } else {
+            self.optionsText = nil;
+        }
+    }
+    if (codeUpdated) [self refreshSection0FooterCache];
     if(!self.initialDraft)self.initialDraft=[self draftSnapshot];
     UIGestureRecognizer *gesture=self.navigationController.interactivePopGestureRecognizer;
     if(gesture.delegate!=self){self.previousPopDelegate=gesture.delegate;gesture.delegate=self;}

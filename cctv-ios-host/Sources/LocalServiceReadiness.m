@@ -163,6 +163,7 @@
               NSTimeInterval pollInterval = 0.4;
               for(NSUInteger step=1;step<MIN(self.attemptCount,(NSUInteger)6);step++)pollInterval=MIN(2.0,pollInterval*1.6);
               if([self.lastFailureKind isEqualToString:@"runtime_preparing"])pollInterval=MAX(0.75,pollInterval);
+              if([self.lastFailureKind isEqualToString:@"network_error"]&&self.attemptCount<=3)pollInterval=self.attemptCount==1?0.08:(self.attemptCount==2?0.15:0.25);
               dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(pollInterval * NSEC_PER_SEC)),
                              dispatch_get_main_queue(), ^{
                                [weakSelf poll:generation];

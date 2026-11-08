@@ -46,8 +46,8 @@
 NSString * const MediaPlaybackCicadaAdapterErrorDomain = @"MediaPlaybackCicadaAdapterErrorDomain";
 
 static const NSTimeInterval MediaPlaybackCicadaFirstFrameTimeout = 20.0;
-static const NSTimeInterval MediaPlaybackCicadaPositionPollInterval = 1.0;
-static const NSTimeInterval MediaPlaybackCicadaPreparedFallbackDelay = 0.5;
+static const NSTimeInterval MediaPlaybackCicadaPositionPollInterval = 0.4;
+static const NSTimeInterval MediaPlaybackCicadaPreparedFallbackDelay = 0.25;
 static const NSTimeInterval MediaPlaybackCicadaSeekCallbackTimeout = 3.0;
 
 // ---------- 运行时调用小工具（全部先 respondsToSelector，再 @try） ----------
@@ -209,6 +209,9 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     if (config) {
         CicadaCallVoidInt(config, NSSelectorFromString(@"setNetworkTimeout:"), (int)llround(self.networkTimeout * 1000.0));
         CicadaCallVoidInt(config, NSSelectorFromString(@"setNetworkRetryCount:"), 2);
+        CicadaCallVoidInt(config, NSSelectorFromString(@"setStartBufferDuration:"), 200);
+        CicadaCallVoidInt(config, NSSelectorFromString(@"setHighBufferDuration:"), 1200);
+        CicadaCallVoidInt(config, NSSelectorFromString(@"setMaxBufferDuration:"), 25000);
         if (self.headers.count) {
             CicadaCallVoidObject(config, NSSelectorFromString(@"setHttpHeaders:"), self.headers);
             NSString *userAgent = self.headers[@"User-Agent"] ?: self.headers[@"user-agent"];

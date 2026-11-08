@@ -114,7 +114,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         if(![@[@"home",@"category"] containsObject:operation])continue;
         id safeResult=MediaMetadataPersistentSafeValue(result,@"",0);NSData *safeData=safeResult?[NSJSONSerialization dataWithJSONObject:safeResult options:0 error:NULL]:nil;
         if(!safeData.length||safeData.length>MediaMetadataCacheSingleEntryLimit)continue;
-        [valid addObject:@{@"key":key,@"record":@{@"source_id":sourceID,@"stored_at":@(storedAt),@"operation":operation,@"result":safeResult},@"cost":@(safeData.length)}];
+        [valid addObject:@{@"key":key,@"record":@{@"source_id":sourceID,@"stored_at":@(storedAt),@"operation":operation,@"result":safeResult,@"cost":@(safeData.length)},@"cost":@(safeData.length)}];
     }
     [valid sortUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"record"][@"stored_at"] compare:b[@"record"][@"stored_at"]];}];
     for(NSDictionary *entry in [valid reverseObjectEnumerator]){NSUInteger cost=[entry[@"cost"] unsignedIntegerValue];if(self.persistentRecords.count>=MediaMetadataPersistentEntryLimit||total+cost>MediaMetadataPersistentByteLimit)continue;self.persistentRecords[entry[@"key"]]=entry[@"record"];total+=cost;}
@@ -156,7 +156,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
     __block MediaMetadataCacheEntry *entry=nil;
     dispatch_sync(self.queue, ^{
         entry=[self.entries objectForKey:key];
-        if(!entry&&[@[@"home",@"category"] containsObject:operation]){NSDictionary *record=self.persistentRecords[key];if(record){entry=[MediaMetadataCacheEntry new];entry.result=record[@"result"];entry.sourceID=record[@"source_id"];entry.storedAt=[record[@"stored_at"] doubleValue];NSData *encoded=[NSJSONSerialization dataWithJSONObject:entry.result options:0 error:NULL];entry.cost=encoded.length;[self.entries setObject:entry forKey:key cost:entry.cost];}}
+        if(!entry&&[@[@"home",@"category"] containsObject:operation]){NSDictionary *record=self.persistentRecords[key];if(record){entry=[MediaMetadataCacheEntry new];entry.result=record[@"result"];entry.sourceID=record[@"source_id"];entry.storedAt=[record[@"stored_at"] doubleValue];NSUInteger cachedCost=[record[@"cost"] unsignedIntegerValue];if(!cachedCost){NSData *encoded=[NSJSONSerialization dataWithJSONObject:entry.result options:0 error:NULL];cachedCost=encoded.length;}entry.cost=cachedCost;[self.entries setObject:entry forKey:key cost:entry.cost];}}
         if(entry)self.order[key]=@(NSDate.date.timeIntervalSince1970);
     });
     if(!entry)return nil;
@@ -179,7 +179,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
             NSString *oldest=[self.order keysSortedByValueUsingSelector:@selector(compare:)].firstObject;
             if(!oldest)break;[self.entries removeObjectForKey:oldest];[self.order removeObjectForKey:oldest];
         }
-        if(persist){self.persistentRecords[key]=@{@"source_id":entry.sourceID,@"stored_at":@(entry.storedAt),@"operation":operation,@"result":persistentResult};persistenceChanged=YES;NSArray *oldestFirst=[self.persistentRecords keysSortedByValueUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"stored_at"] compare:b[@"stored_at"]];}];NSUInteger total=0;NSUInteger retained=0;for(NSString *candidate in [oldestFirst reverseObjectEnumerator]){NSDictionary *record=self.persistentRecords[candidate];NSData *encoded=[NSJSONSerialization dataWithJSONObject:record[@"result"] options:0 error:NULL];NSUInteger cost=encoded.length;if(retained>=MediaMetadataPersistentEntryLimit||total+cost>MediaMetadataPersistentByteLimit){[self.persistentRecords removeObjectForKey:candidate];[self.entries removeObjectForKey:candidate];[self.order removeObjectForKey:candidate];persistenceChanged=YES;continue;}retained++;total+=cost;}}
+        if(persist){self.persistentRecords[key]=@{@"source_id":entry.sourceID,@"stored_at":@(entry.storedAt),@"operation":operation,@"result":persistentResult,@"cost":@(persistentData.length)};persistenceChanged=YES;NSArray *oldestFirst=[self.persistentRecords keysSortedByValueUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"stored_at"] compare:b[@"stored_at"]];}];NSUInteger total=0;NSUInteger retained=0;for(NSString *candidate in [oldestFirst reverseObjectEnumerator]){NSDictionary *record=self.persistentRecords[candidate];NSUInteger cost=[record[@"cost"] unsignedIntegerValue];if(!cost){NSData *encoded=[NSJSONSerialization dataWithJSONObject:record[@"result"] options:0 error:NULL];cost=encoded.length;}if(retained>=MediaMetadataPersistentEntryLimit||total+cost>MediaMetadataPersistentByteLimit){[self.persistentRecords removeObjectForKey:candidate];[self.entries removeObjectForKey:candidate];[self.order removeObjectForKey:candidate];persistenceChanged=YES;continue;}retained++;total+=cost;}}
         else if(self.persistentRecords[key]){[self.persistentRecords removeObjectForKey:key];persistenceChanged=YES;}
     });
     if(persistenceChanged)[self schedulePersistentWrite];
@@ -192,7 +192,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
 - (NSDictionary<NSString *,NSNumber *> *)summary {
     __block NSUInteger bytes=0,count=0;
     dispatch_sync(self.queue, ^{
-        for(NSString *key in self.persistentRecords){NSDictionary *record=self.persistentRecords[key];NSData *data=[NSJSONSerialization dataWithJSONObject:record[@"result"] options:0 error:NULL];if(data.length){count++;bytes+=data.length;}}
+        for(NSString *key in self.persistentRecords){NSDictionary *record=self.persistentRecords[key];NSUInteger cost=[record[@"cost"] unsignedIntegerValue];if(!cost){NSData *data=[NSJSONSerialization dataWithJSONObject:record[@"result"] options:0 error:NULL];cost=data.length;}if(cost){count++;bytes+=cost;}}
         for(NSString *key in self.order){if(self.persistentRecords[key])continue;MediaMetadataCacheEntry *entry=[self.entries objectForKey:key];if(!entry)continue;count++;bytes+=entry.cost;}
     });
     return @{@"entries":@(count),@"bytes":@(bytes)};

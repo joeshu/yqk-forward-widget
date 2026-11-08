@@ -373,7 +373,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
         [self.quickPresetsStack.trailingAnchor constraintEqualToAnchor:self.quickPresetsScroll.contentLayoutGuide.trailingAnchor],
         [self.quickPresetsStack.topAnchor constraintEqualToAnchor:self.quickPresetsScroll.contentLayoutGuide.topAnchor],
         [self.quickPresetsStack.bottomAnchor constraintEqualToAnchor:self.quickPresetsScroll.contentLayoutGuide.bottomAnchor],
-        [self.quickPresetsStack.heightAnchor constraintEqualToAnchor:self.quickPresetsScroll.frameLayoutGuide.heightAnchor]
+        [self.quickPresetsStack.heightAnchor constraintEqualToAnchor:self.quickPresetsScroll.frameLayoutGuide.heightAnchor],
+        [self.quickPresetsScroll.heightAnchor constraintEqualToConstant:30]
     ]];
 
     self.address=[UITextView new];self.address.delegate=self;self.address.text=self.restoredAddress?:@"";self.address.backgroundColor=HostRaisedSurface();self.address.textColor=HostText();self.address.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.address.autocapitalizationType=UITextAutocapitalizationTypeNone;self.address.autocorrectionType=UITextAutocorrectionTypeNo;self.address.smartQuotesType=UITextSmartQuotesTypeNo;self.address.smartDashesType=UITextSmartDashesTypeNo;self.address.smartInsertDeleteType=UITextSmartInsertDeleteTypeNo;self.address.keyboardType=UIKeyboardTypeURL;self.address.layer.cornerRadius=14;self.address.textContainerInset=UIEdgeInsetsMake(10,6,36,6);self.address.accessibilityLabel=@"资源链接";self.address.accessibilityHint=@"影视、直播或资源合集链接";self.address.accessibilityIdentifier=@"resource-import-url";
@@ -553,7 +554,10 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
                 [self.clearAddressButton.centerYAnchor constraintEqualToAnchor:self.pasteAndRecognizeButton.centerYAnchor],
                 [editorBox.heightAnchor constraintGreaterThanOrEqualToConstant:112]
             ]];
-            [self.quickPresetsScroll.heightAnchor constraintEqualToConstant:30].active=YES;
+            for(UIView *sharedView in @[self.address,self.pasteAndRecognizeButton,self.pasteAddressButton,self.clearAddressButton,self.smartClipboardButton,self.quickPresetsScroll]){
+                if([sharedView.superview isKindOfClass:UIStackView.class])[(UIStackView *)sharedView.superview removeArrangedSubview:sharedView];
+                if(sharedView.superview!=editorBox)[sharedView removeFromSuperview];
+            }
             NSMutableArray<UIView *> *podViews=[NSMutableArray array];
             if(self.smartClipboardButton&&!self.smartClipboardButton.hidden)[podViews addObject:self.smartClipboardButton];
             [podViews addObject:editorBox];
@@ -567,10 +571,12 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
         else if(ip.row==2){cell.textLabel.text=@"选择文件（多选）";cell.textLabel.textColor=HostAccent();cell.imageView.image=[UIImage systemImageNamed:@"doc.badge.plus"];cell.imageView.tintColor=HostAccent();}
         else if(ip.row==3){cell.textLabel.text=@"选择文件夹";cell.textLabel.textColor=HostAccent();cell.imageView.image=[UIImage systemImageNamed:@"folder.badge.plus"];cell.imageView.tintColor=HostAccent();}
         else if(ip.row==4){cell.textLabel.text=self.advancedOptionsExpanded?@"收起高级选项":@"高级选项";cell.detailTextLabel.text=@"指定运行环境 · 分类导入入口";cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;cell.textLabel.textColor=HostAccent();cell.imageView.image=[UIImage systemImageNamed:@"slider.horizontal.3"];cell.imageView.tintColor=HostAccent();}
-        else if(ip.row==5){UILabel *label=[UILabel new];label.text=@"运行环境";label.textColor=HostText();label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];UIStackView *stack=[[UIStackView alloc] initWithArrangedSubviews:@[label,self.runtime]];stack.axis=UILayoutConstraintAxisVertical;stack.spacing=8;control=stack;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
+        else if(ip.row==5){if([self.runtime.superview isKindOfClass:UIStackView.class])[(UIStackView *)self.runtime.superview removeArrangedSubview:self.runtime];[self.runtime removeFromSuperview];UILabel *label=[UILabel new];label.text=@"运行环境";label.textColor=HostText();label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];UIStackView *stack=[[UIStackView alloc] initWithArrangedSubviews:@[label,self.runtime]];stack.axis=UILayoutConstraintAxisVertical;stack.spacing=8;control=stack;cell.selectionStyle=UITableViewCellSelectionStyleNone;}
         else {cell.textLabel.text=@"按类型选择导入方式";cell.detailTextLabel.text=@"TVBox、直播、Python、JS、ZIP 与文件夹";cell.textLabel.textColor=HostAccent();cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;cell.imageView.image=[UIImage systemImageNamed:@"square.grid.2x2"];cell.imageView.tintColor=HostAccent();}
     }
     else if(ip.section==1){if(ip.row==0){
+        if([self.duplicatePolicy.superview isKindOfClass:UIStackView.class])[(UIStackView *)self.duplicatePolicy.superview removeArrangedSubview:self.duplicatePolicy];
+        [self.duplicatePolicy removeFromSuperview];
         if(self.candidates.count>1){
             UIButton *toggleAll=[UIButton buttonWithType:UIButtonTypeSystem];
             [toggleAll setTitle:@"全选 / 反选" forState:UIControlStateNormal];
