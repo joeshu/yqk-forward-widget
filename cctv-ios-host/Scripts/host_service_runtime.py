@@ -221,6 +221,27 @@ def _init(server, *args, **kwargs):
             owner.servers.append(server)
 
 
+def _rebind_server_socket(server):
+    old_sock = getattr(server, 'socket', None)
+    if old_sock is not None:
+        try:
+            old_sock.close()
+        except OSError:
+            pass
+    server.socket = socket.socket(server.address_family, server.socket_type)
+    try:
+        server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    except OSError:
+        pass
+    if isinstance(server, http.server.HTTPServer):
+        socketserver.TCPServer.server_bind(server)
+        server.server_name = server.server_address[0]
+        server.server_port = server.server_address[1]
+    else:
+        server.server_bind()
+    server.server_activate()
+
+
 def _serve(server, poll_interval=.5):
     owner = getattr(server, '_host_owner', None)
     if owner is None:
@@ -232,7 +253,15 @@ def _serve(server, poll_interval=.5):
     _capture_stop_hook(owner)
     _release_startup(owner)
     try:
-        return _serve_forever(server, min(poll_interval, .1))
+        while not owner.stopping.is_set() and not getattr(server, '_host_closed', False):
+            server._host_rebind_needed = False
+            result = _serve_forever(server, min(poll_interval, .1))
+            if not getattr(server, '_host_rebind_needed', False) or owner.stopping.is_set() or getattr(server, '_host_closed', False):
+                return result
+            try:
+                _rebind_server_socket(server)
+            except OSError:
+                time.sleep(0.1)
     finally:
         server._host_serving.clear()
 
@@ -322,8 +351,14 @@ def _error(server, request, address):
 
 
 def _accept(server):
-    request, address = _get_request(server)
     owner = getattr(server, '_host_owner', None)
+    try:
+        request, address = _get_request(server)
+    except OSError:
+        if owner is not None and not owner.stopping.is_set() and not getattr(server, '_host_closed', False):
+            server._host_rebind_needed = True
+            server._BaseServer__shutdown_request = True
+        raise
     if owner is not None:
         with _lock:
             if owner.stopping.is_set():
@@ -724,6 +759,36 @@ def is_idle(identifier=None):
 
 def last_error(identifier=None):
     return _last_errors.get(str(identifier), _last_error) if identifier is not None else _last_error
+
+
+def rebind_active_listeners():
+    """Probes and rebinds active session listeners after iOS background socket defuncting."""
+    with _lock:
+        sessions = list(_sessions.values())
+    rebound = 0
+    for session in sessions:
+        if session.stopping.is_set() or session.done.is_set():
+            continue
+        for server in list(session.servers):
+            if getattr(server, '_host_closed', False) or not server._host_serving.is_set():
+                continue
+            addr = getattr(server, 'server_address', None)
+            if not isinstance(addr, tuple) or len(addr) < 2:
+                continue
+            try:
+                port = int(addr[1] or 0)
+            except (TypeError, ValueError):
+                port = 0
+            if port <= 0:
+                continue
+            try:
+                probe = socket.create_connection(('127.0.0.1', port), timeout=0.15)
+                probe.close()
+            except OSError:
+                server._host_rebind_needed = True
+                server._BaseServer__shutdown_request = True
+                rebound += 1
+    return rebound
 
 
 def session_status(identifier):

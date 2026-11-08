@@ -587,6 +587,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property(nonatomic,assign) NSTimeInterval selectionRequestedAt;
 @property(nonatomic,assign) NSUInteger playbackIntentVersion;
 @property(nonatomic,assign) NSUInteger subscriptionParseGeneration;
+@property(nonatomic,copy) NSDictionary *pendingNativeReplayProgram;
 - (void)loadChannels;
 - (void)
 configureCatalogNavigation;
@@ -938,15 +939,18 @@ configureCatalogNavigation;
 }
 
 - (void)onForeground {
+    [PyHost refreshListenersAfterForeground];
     BOOL playbackPriority=CACurrentMediaTime()<self.playbackPriorityUntil;
     [[XMLTVStore shared] setPaused:playbackPriority];
     [self call:self.currentPlayer sel:@"becomeActive"];
     if(self.epgRefreshDesired&&!playbackPriority){[self restartEPGTimer];[self refreshNowNext];}
     if(self.activeTab<2 && CACurrentMediaTime()>=self.playbackPriorityUntil){[self.channelGrid reloadData];[self.table reloadData];}
+    if(self.activeTab==2)[(MediaBrowserViewController *)self.tabPages[@2] resumeAfterForeground];
     [self log:@"回到前台"];
 }
 - (void)checkVisibleMediaAfterActivation {
-    if(self.activeTab==2&&self.navigationController.topViewController==self)[(MediaBrowserViewController *)self.tabPages[@2] resumeAfterForeground];
+    [PyHost refreshListenersAfterForeground];
+    if(self.activeTab==2)[(MediaBrowserViewController *)self.tabPages[@2] resumeAfterForeground];
 }
 
 #pragma mark - 日志
@@ -1694,7 +1698,11 @@ configureCatalogNavigation;
         page.sourcesProvider=^{
             NSMutableArray *sources=[NSMutableArray array];
             for(NSDictionary *service in [ServiceStore services])if([ServiceStore isVODMediaService:service])[sources addObject:service];
-            NSSet *fallbackSiteKeys=[NSSet setWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:@"cctv.nativeFallbackSiteKeys.v1"]?:@[]];
+            NSArray *storedFallbackKeys=[[NSUserDefaults standardUserDefaults] arrayForKey:@"cctv.nativeFallbackSiteKeys.v1"]?:@[];
+            NSMutableArray *cleanedFallbackKeys=[NSMutableArray array];
+            for(id k in storedFallbackKeys){if([k isKindOfClass:NSString.class]&&![(NSString *)k hasPrefix:@"joeshu."])[cleanedFallbackKeys addObject:k];}
+            if(cleanedFallbackKeys.count!=storedFallbackKeys.count)[[NSUserDefaults standardUserDefaults] setObject:cleanedFallbackKeys.copy forKey:@"cctv.nativeFallbackSiteKeys.v1"];
+            NSSet *fallbackSiteKeys=[NSSet setWithArray:cleanedFallbackKeys];
             for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){
                 NSString *catalogID=catalog[@"id"]?:@"";
                 NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];
@@ -1703,8 +1711,9 @@ configureCatalogNavigation;
                     NSString *siteKey=[site[@"key"] isKindOfClass:NSString.class]?site[@"key"]:@"";
                     NSString *rawAPI=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
                     NSString *lowAPI=rawAPI.lowercaseString;
+                    BOOL isForADM=[siteKey hasPrefix:@"joeshu."]||[lowAPI containsString:@"raw.githubusercontent.com/joeshu/for-adm/"];
                     BOOL isDrpyRunner=[lowAPI containsString:@"drpy2.min.js"]||[lowAPI containsString:@"3e7e0c8a023b624cec6bdcc200f06f02.js"];
-                    BOOL useNativeFallback=([apiKind isEqual:@"script"]&&(isDrpyRunner||[fallbackSiteKeys containsObject:siteKey]));
+                    BOOL useNativeFallback=(!isForADM&&[apiKind isEqual:@"script"]&&(isDrpyRunner||[fallbackSiteKeys containsObject:siteKey]));
                     if(useNativeFallback)apiKind=@"jar-bridge";
                     if(!([apiKind isEqual:@"tvbox-api"]||[apiKind isEqual:@"maccms-api"]||[apiKind isEqual:@"douban-index"]||[apiKind isEqual:@"jar-bridge"])||![site[@"supported"] boolValue])continue;
                     NSString *protocol=apiKind,*siteID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalogID,siteKey];
@@ -3076,7 +3085,7 @@ configureCatalogNavigation;
     self.pendingTVBoxExt=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"";self.pendingTVBoxSiteName=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";
     __weak typeof(self) weakSelf=self;
     NSString *runtimeHint=[[downloadURL pathExtension].lowercaseString isEqual:@"py"]?@"python":nil;
-    [self downloadPackageURL:downloadURL headers:site[@"header"] runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){RootViewController *owner=weakSelf;owner.navigationItem.prompt=nil;if(error){owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;if(error.code!=NSURLErrorCancelled)[owner activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}if(!service){[owner activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}NSMutableDictionary *updated=[service mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"",*name=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";if(ext.length)manifest[@"options"]=ext;if(name.length){manifest[@"name"]=name;updated[@"name"]=name;}updated[@"manifest"]=manifest;updated[@"tvboxSiteKey"]=site[@"key"]?:@"";updated[@"tvboxSiteKeys"]=@[site[@"key"]?:@""];if(site[@"tvboxCatalogID"])updated[@"tvboxCatalogID"]=site[@"tvboxCatalogID"];if(site[@"playUrl"])updated[@"tvboxPlayURL"]=site[@"playUrl"];if(site[@"header"])updated[@"tvboxSiteHeader"]=site[@"header"];owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;[owner acceptImportedMedia:updated error:nil autoBrowse:browseAfterImport];}];
+    [self downloadPackageURL:downloadURL headers:site[@"header"] runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){RootViewController *owner=weakSelf;owner.navigationItem.prompt=nil;if(error){owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;if(browseAfterImport||error.code!=NSURLErrorCancelled)[owner activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}if(!service){[owner activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}NSMutableDictionary *updated=[service mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"",*name=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";if(ext.length)manifest[@"options"]=ext;if(name.length){manifest[@"name"]=name;updated[@"name"]=name;}updated[@"manifest"]=manifest;updated[@"tvboxSiteKey"]=site[@"key"]?:@"";updated[@"tvboxSiteKeys"]=@[site[@"key"]?:@""];if(site[@"tvboxCatalogID"])updated[@"tvboxCatalogID"]=site[@"tvboxCatalogID"];if(site[@"playUrl"])updated[@"tvboxPlayURL"]=site[@"playUrl"];if(site[@"header"])updated[@"tvboxSiteHeader"]=site[@"header"];owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;[owner acceptImportedMedia:updated error:nil autoBrowse:browseAfterImport];}];
 }
 - (void)acceptImportedMedia:(NSDictionary *)service error:(NSError *)error {
     [self acceptImportedMedia:service error:error autoBrowse:NO];
@@ -3359,6 +3368,15 @@ configureCatalogNavigation;
     NSString *serviceID=service[@"id"]?:@"";if(!self.serviceOperations)self.serviceOperations=[NSMutableSet set];
     if([self.serviceOperations containsObject:serviceID]){if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:4 userInfo:@{NSLocalizedDescriptionKey:@"该服务正在启停，请稍候。"}]);return;}
     if(enabled && [PyHost isRunningServiceIdentifier:serviceID]){
+        int port=[service[@"port"] intValue];
+        if(port>0 && HostLocalPortState(port)==0){
+            [PyHost refreshListenersAfterForeground];
+            [NSThread sleepForTimeInterval:0.12];
+            if(HostLocalPortState(port)==0){
+                [self restartMediaService:service completion:completion];
+                return;
+            }
+        }
         [self refreshConfigurationPage];if(completion)completion(nil);return;
     }
     if(enabled){
@@ -4581,6 +4599,13 @@ configureCatalogNavigation;
         [self updateNowPlaying];
         [self refreshNowNext];
         [self restartEPGTimer];
+        if([self.pendingNativeReplayProgram[@"channelID"] isEqualToString:self.channelID]){
+            NSDictionary *pendingReplay=self.pendingNativeReplayProgram;
+            self.pendingNativeReplayProgram=nil;
+            dispatch_async(dispatch_get_main_queue(),^{
+                [self seekNativeStart:[pendingReplay[@"start"] doubleValue] end:[pendingReplay[@"end"] doubleValue]];
+            });
+        }
         NSUInteger generation=self.playbackGeneration;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{[self prepareNextNativeChannelForGeneration:generation];});
     }
@@ -4708,10 +4733,15 @@ configureCatalogNavigation;
     if(![channel[@"remoteURL"] length] && ![ProfileStore isHTTP:cid]){
         __weak typeof(self) weakSelf=self;
         page.onReplay=^(NSDictionary *program){
-            if(![weakSelf.channelID isEqualToString:cid] || !weakSelf.currentPlayer || weakSelf.avPlayer){[weakSelf showServiceError:@"请先播放这个 CCTV 频道，再选择已播节目。"];return;}
-            [weakSelf.navigationController popToViewController:weakSelf animated:YES];
-            weakSelf.playerTabs.selectedSegmentIndex=1;[weakSelf selectPlayerPanel];
-            [weakSelf seekNativeStart:[program[@"start"] doubleValue] end:[program[@"end"] doubleValue]];
+            RootViewController *owner=weakSelf;if(!owner)return;
+            [owner.navigationController popToViewController:owner animated:YES];
+            owner.playerTabs.selectedSegmentIndex=1;[owner selectPlayerPanel];
+            if(![owner.channelID isEqualToString:cid] || !owner.currentPlayer || owner.avPlayer || !owner.firstRender){
+                owner.pendingNativeReplayProgram=@{@"channelID":cid?:@"",@"start":@([program[@"start"] doubleValue]),@"end":@([program[@"end"] doubleValue])};
+                if(![owner.channelID isEqualToString:cid] || !owner.currentPlayer || owner.avPlayer)[owner selectChannel:channel];
+                return;
+            }
+            [owner seekNativeStart:[program[@"start"] doubleValue] end:[program[@"end"] doubleValue]];
         };
     }
     return page;

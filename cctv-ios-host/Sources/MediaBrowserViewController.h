@@ -7,9 +7,10 @@
 - (UIViewController *)mediaDisplaySettingsViewController;
 - (void)reloadMediaDisplayConfigurationIfLoaded;
 - (void)openSourceIdentifier:(NSString *)identifier;
-- (void)activate:(NSDictionary *)source keepingHome:(BOOL)keepingHome;
 - (void)invalidateServiceIdentifier:(NSString *)identifier;
 - (void)showConfigurationForSource:(NSDictionary *)source;
+- (void)activate:(NSDictionary *)source;
+- (void)activate:(NSDictionary *)source keepingHome:(BOOL)keepingHome;
 @property(nonatomic, copy) NSArray<NSDictionary *> *(^sourcesProvider)(void);
 /// Saved TVBox collections are listed alongside resources and opened only when selected.
 @property(nonatomic, copy) NSArray<NSDictionary *> *(^catalogsProvider)(void);

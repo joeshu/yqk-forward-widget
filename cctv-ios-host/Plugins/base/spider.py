@@ -260,26 +260,26 @@ class Spider:
             self._save_persistent_cache()
         return 'ok'
 
-    def fetch(self, url, headers=None, cookies=None, timeout=12, **kwargs):
+    def fetch(self, url, headers=None, cookies=None, timeout=8, **kwargs):
         if urllib.parse.urlsplit(url).scheme.lower() not in ('http', 'https'):
             raise ValueError('Spider 仅支持 HTTP/HTTPS 网络请求')
         try:
             import requests
         except ImportError:
-            with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=min(float(timeout), 30)) as response:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=min(float(timeout or 8), 10)) as response:
                 return _Response(response)
-        return requests.get(url, headers=headers, cookies=cookies, timeout=min(float(timeout), 30), **kwargs)
+        return requests.get(url, headers=headers, cookies=cookies, timeout=min(float(timeout or 8), 10), **kwargs)
 
-    def post(self, url, data=None, headers=None, timeout=12, **kwargs):
+    def post(self, url, data=None, headers=None, timeout=8, **kwargs):
         try:
             import requests
         except ImportError:
             body = urllib.parse.urlencode(data).encode() if isinstance(data, dict) else data
             if isinstance(body, str):
                 body = body.encode()
-            with urllib.request.urlopen(urllib.request.Request(url, data=body or b'', headers=headers or {}, method='POST'), timeout=min(float(timeout), 30)) as response:
+            with urllib.request.urlopen(urllib.request.Request(url, data=body or b'', headers=headers or {}, method='POST'), timeout=min(float(timeout or 8), 10)) as response:
                 return _Response(response)
-        return requests.post(url, data=data, headers=headers, timeout=min(float(timeout), 30), **kwargs)
+        return requests.post(url, data=data, headers=headers, timeout=min(float(timeout or 8), 10), **kwargs)
 
     def destroy(self):
         getattr(self, '_host_cache', {}).clear()

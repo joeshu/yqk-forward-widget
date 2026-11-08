@@ -920,5 +920,20 @@ static void *pyThread(void *rawTask) {
     if (!success && error) *error = first; return success;
 }
 + (void)stop { NSError *error = nil; if (![self stopWithError:&error] && error) emitLog(error.localizedDescription); }
++ (void)refreshListenersAfterForeground {
+#if PYHOST_AVAILABLE
+    pthread_mutex_lock(&gLock);
+    BOOL ready = gInterpreterReady && gServiceRuntime != NULL;
+    pthread_mutex_unlock(&gLock);
+    if (!ready) return;
+    PyGILState_STATE gil = PyGILState_Ensure();
+    if (gServiceRuntime) {
+        PyObject *rebind = PyObject_CallMethod(gServiceRuntime, "rebind_active_listeners", NULL);
+        Py_XDECREF(rebind);
+    }
+    PyErr_Clear();
+    PyGILState_Release(gil);
+#endif
+}
 
 @end

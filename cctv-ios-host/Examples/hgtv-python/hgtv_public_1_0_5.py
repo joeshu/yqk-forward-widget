@@ -542,7 +542,7 @@ def validate_page(router, path):
         payload = data.get('page')
         valid = isinstance(payload, dict) and any(isinstance(payload.get(key), list) for key in ('mBannerList', 'bannerList', 'banner_list', 'homeSections', 'home_sections', 'sections'))
     elif u.path.startswith('/category/'):
-        payload = data.get('category_$')
+        payload = data.get('category_$') or data.get('category_page')
         valid = isinstance(payload, dict) and any(isinstance(payload.get(key), list) for key in ('recommendList', 'video_list', 'videoList', 'list'))
     elif u.path == '/detail':
         payload = data.get('detail_page') or data.get('detail_$')
@@ -828,7 +828,7 @@ class Catalog:
 
     def _route(self, path, kind):
         loader = (self.http.router(path) if callable(getattr(self.http, "router", None)) else parse_router_data(self.http.page(path)))["loaderData"]
-        keys = {"home": ("page",), "category": ("category_$",),
+        keys = {"home": ("page",), "category": ("category_$", "category_page"),
                 "detail": ("detail_page", "detail_$")}[kind]
         for key in keys:
             data = loader.get(key)
@@ -891,10 +891,31 @@ class Catalog:
             raise CatalogError("invalid category topic")
         category_slug = parts[0] + (("/" + topic) if topic else "")
         path = "/category/" + category_slug + "?" + urlencode({"page": page})
-        data = self._route(path, "category")
+        try:
+            data = self._route(path, "category")
+        except Exception:
+            if parts[0] == "comic" and topic is None:
+                path = "/category/comic-drama?" + urlencode({"page": page})
+                data = self._route(path, "category")
+            else:
+                raise
         if not any(isinstance(data.get(key), list) for key in ("recommendList", "video_list", "videoList", "list")):
             raise CatalogError("site category catalogue structure has changed")
         items = _movies(_array(data, "recommendList", "video_list", "videoList", "list"))
+        if parts[0] == "comic" and topic is None and (not items or self.http is _SHARED_HTTP):
+            try:
+                cd_path = "/category/comic-drama?" + urlencode({"page": page})
+                cd_data = self._route(cd_path, "category")
+                cd_items = _movies(_array(cd_data, "recommendList", "video_list", "videoList", "list"))
+                if cd_items:
+                    merged = OrderedDict((it["id"], it) for it in cd_items)
+                    for it in items:
+                        merged.setdefault(it["id"], it)
+                    items = list(merged.values())
+                    if not data.get("pagination") and cd_data.get("pagination"):
+                        data = cd_data
+            except Exception:
+                pass
         pagination = data.get("pagination") or data.get("page_info") or {}
         pagination = pagination if isinstance(pagination, dict) else {}
         total = _natural(_first(pagination, "total", "totalCount", "total_count"), 100_000_000)
@@ -1850,6 +1871,91 @@ def _ensure_device(force_refresh=False):
         return _register_device()
 
 
+def _signed_single_request(vid, content_type=1, device=None, host=_VIDEO_MODEL_HOST):
+    """Build a signed POST request to /novel/player/video_model/v1/ for comic-drama/long series."""
+    ts = int(_time.time())
+    dev = device if _valid_device_identity(device) else _ensure_device(False)
+    payload = {
+        "biz_param": {
+            "detail_page_version": 0,
+            "device_level": 3,
+            "need_all_video_definition": True,
+            "need_mp4_align": False,
+            "use_os_player": False,
+            "video_platform": 1024,
+        },
+        "content_type": int(content_type),
+        "video_id": str(vid),
+    }
+    body = _json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    vals = dict(_PLAYBACK_DEVICE)
+    vals.update({
+        "device_id": str(dev["device_id"]),
+        "iid": str(dev["iid"]),
+        "cdid": str(dev.get("cdid") or _random_uuid()),
+        "ts": str(ts),
+    })
+    base_url = "https://%s/novel/player/video_model/v1/" % host
+    url, query, rticket = _select_signed_url(base_url, vals, body, ts)
+    headers = _build_signed_headers(query, body, ts, rticket, url, {
+        "device_id": str(dev["device_id"]),
+        "version_name": _PLAYBACK_DEVICE["version_name"],
+    })
+    return url, headers, body
+
+
+def _extract_fallback_api_url(vm, ent=None, data=None):
+    for container in (vm, ent, data):
+        if not isinstance(container, dict):
+            continue
+        fb = container.get("fallback_api")
+        if isinstance(fb, str) and fb.strip():
+            s = fb.strip()
+            if s.startswith(("http://", "https://")):
+                return s
+            try:
+                parsed = _json.loads(s)
+                if isinstance(parsed, dict) and isinstance(parsed.get("fallback_api"), str):
+                    return parsed["fallback_api"].strip()
+            except Exception:
+                pass
+        elif isinstance(fb, dict) and isinstance(fb.get("fallback_api"), str):
+            return fb["fallback_api"].strip()
+        elif isinstance(fb, list) and fb and isinstance(fb[0], str):
+            return fb[0].strip()
+    return ""
+
+
+def _fetch_fallback_video_model(fb_url, seed_hint=""):
+    if not isinstance(fb_url, str) or not fb_url.startswith(("http://", "https://")):
+        return None
+    req = _ureq.Request(fb_url, headers={"User-Agent": _PLAYBACK_UA, "Accept": "application/json"})
+    with _ureq.urlopen(req, timeout=15) as r:
+        raw = r.read(4 * 1024 * 1024)
+    j = _json.loads(raw.decode("utf-8", "replace"))
+    if not isinstance(j, dict):
+        return None
+    vi = j.get("video_info") if isinstance(j.get("video_info"), dict) else j
+    vdata = vi.get("data") if isinstance(vi.get("data"), dict) else vi
+    if not isinstance(vdata, dict):
+        return None
+    dyn = vdata.get("dynamic_video") if isinstance(vdata.get("dynamic_video"), dict) else {}
+    lst = vdata.get("video_list") or vdata.get("dynamic_video_list") or dyn.get("dynamic_video_list") or dyn.get("video_list")
+    if isinstance(lst, list):
+        videos = {}
+        for i, item in enumerate(lst):
+            if isinstance(item, dict):
+                q = _video_quality(item, str(i))
+                videos[q if q and q not in videos else str(i)] = item
+        lst = videos
+    if not isinstance(lst, dict) or not lst:
+        return None
+    return {
+        "video_list": lst,
+        "key_seed": str(vdata.get("key_seed") or vi.get("key_seed") or j.get("key_seed") or seed_hint or ""),
+    }
+
+
 def _signed_request(vid, device=None, host=_VIDEO_MODEL_HOST):
     """Build a signed POST request to novel/player/multi_video_model/v1/ (JS playbackRequest)."""
     ts = int(_time.time())
@@ -2034,6 +2140,11 @@ def _parse_video_model_response(j, vid):
     elif isinstance(lst, dict):
         vm["video_list"] = lst
     if not isinstance(vm.get("video_list"), dict) or not vm["video_list"]:
+        fb_url = _extract_fallback_api_url(vm, ent, data)
+        if fb_url:
+            fb_vm = _fetch_fallback_video_model(fb_url, seed_hint=str(vm.get("key_seed") or ""))
+            if isinstance(fb_vm, dict) and fb_vm.get("video_list"):
+                return fb_vm
         raise ValueError("video model has no video qualities")
     return vm
 
@@ -2091,6 +2202,20 @@ def _signed_model(vid):
         if deadline - _time.monotonic() < 0.5:
             break
         _time.sleep(0.3)
+    # Fallback to /novel/player/video_model/v1/ (content_type 1 / 1001) for comic-drama / comic episodes
+    if dev is not None and _valid_device_identity(dev):
+        for ct in (1, 1001):
+            try:
+                s_url, s_headers, s_body = _signed_single_request(vid, content_type=ct, device=dev, host=_VIDEO_MODEL_HOST)
+                s_headers["Accept-Encoding"] = "gzip"
+                raw = _post_bytes(s_url, s_body, s_headers, 15)
+                if raw:
+                    vm = _parse_video_model_response(_json.loads(raw.decode("utf-8", "replace")), vid)
+                    if vm and vm.get("video_list"):
+                        _SIGN_CACHE[str(vid)] = (_time.time(), vm)
+                        return vm
+            except Exception as e:
+                last_err = e
     _trace("hgtv_signed_model_error", episode_id=vid,
            err=(type(last_err).__name__ if last_err else "request failed"))
     return None

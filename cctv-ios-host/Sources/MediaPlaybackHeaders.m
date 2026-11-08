@@ -69,16 +69,17 @@ BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary *result) {
     NSString *engine=MediaPlaybackString(result[@"playbackEngine"]);
     if([engine isEqual:@"cicada"]||MediaPlaybackResultSupportsCicada(result))return NO;
     if([result[@"nativePlayable"] respondsToSelector:@selector(boolValue)]&&[result[@"nativePlayable"] boolValue])return YES;
-    NSSet *formats=[NSSet setWithArray:@[@"hls",@"m3u8",@"m3u",@"mpegurl",@"application/vnd.apple.mpegurl",@"application/x-mpegurl",@"audio/mpegurl",@"mp4",@"m4v",@"mov",@"quicktime",@"mp3",@"m4a",@"aac",@"mpeg-ts",@"mpegts",@"ts"]];
-    NSSet *mimes=[NSSet setWithArray:@[@"application/vnd.apple.mpegurl",@"application/x-mpegurl",@"audio/mpegurl",@"video/mp4",@"application/mp4",@"video/quicktime",@"audio/mp4",@"audio/mpeg",@"audio/aac",@"video/mp2t"]];
+    if([result[@"drmKey"] isKindOfClass:NSString.class]&&[(NSString *)result[@"drmKey"] length])return YES;
+    NSSet *formats=[NSSet setWithArray:@[@"hls",@"m3u8",@"m3u",@"mpegurl",@"application/vnd.apple.mpegurl",@"application/x-mpegurl",@"audio/mpegurl",@"mp4",@"m4v",@"mov",@"quicktime",@"mp3",@"m4a",@"aac",@"mpeg-ts",@"mpegts",@"ts",@"fmp4",@"cmaf",@"m4s",@"f4v",@"wav",@"flac",@"alac",@"ac3",@"eac3"]];
+    NSSet *mimes=[NSSet setWithArray:@[@"application/vnd.apple.mpegurl",@"application/x-mpegurl",@"audio/mpegurl",@"video/mp4",@"application/mp4",@"video/quicktime",@"audio/mp4",@"audio/x-m4a",@"audio/mpeg",@"audio/aac",@"audio/wav",@"audio/flac",@"video/x-m4v",@"video/mp2t"]];
     if([formats containsObject:format]||[mimes containsObject:mime])return YES;
     NSString *raw=[result[@"originalURL"] isKindOfClass:NSString.class]?result[@"originalURL"]:result[@"url"];
     NSURLComponents *components=[NSURLComponents componentsWithString:[raw isKindOfClass:NSString.class]?raw:@""];
     NSString *extension=components.path.pathExtension.lowercaseString?:@"";
-    if([@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"aac",@"ts"] containsObject:extension])return YES;
+    if([@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"aac",@"ts",@"m4s",@"f4v",@"wav",@"flac",@"ac3",@"eac3"] containsObject:extension])return YES;
     if(!extension.length&&[raw isKindOfClass:NSString.class]&&raw.length){
         NSString *lowerRaw=[raw lowercaseString];
-        if([lowerRaw containsString:@".m3u8"]||[lowerRaw containsString:@".mp4"]||[lowerRaw containsString:@"/m3u8/"]||[lowerRaw containsString:@"format=m3u8"]||[lowerRaw containsString:@"type=m3u8"]||[lowerRaw containsString:@"ext=m3u8"]||[lowerRaw containsString:@"ext=mp4"])return YES;
+        if([lowerRaw containsString:@".m3u8"]||[lowerRaw containsString:@".mp4"]||[lowerRaw containsString:@"/m3u8/"]||[lowerRaw containsString:@"/hls/"]||[lowerRaw containsString:@"/cenc/"]||[lowerRaw containsString:@"format=m3u8"]||[lowerRaw containsString:@"type=m3u8"]||[lowerRaw containsString:@"ctype=m3u8"]||[lowerRaw containsString:@"playtype=m3u8"]||[lowerRaw containsString:@"ext=m3u8"]||[lowerRaw containsString:@"ext=mp4"]||[lowerRaw containsString:@"type=mp4"]||[lowerRaw containsString:@"mime=video"])return YES;
     }
     return NO;
 }

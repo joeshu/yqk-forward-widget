@@ -81,14 +81,17 @@ static NSData *PackageAdaptForADMSignedSource(NSData *data,NSURL *sourceURL,NSEr
     }
     NSDictionary *sourceIDs=@{@"/joeshu/for-adm/master/cctvhost/kkapp.js":@"kkapp",@"/joeshu/for-adm/master/cctvhost/ncat.js":@"ncat",@"/joeshu/for-adm/master/cctvhost/happ.js":@"happ",@"/joeshu/for-adm/master/cctvhost/qntv.js":@"qntv",@"/joeshu/for-adm/master/cctvhost/souju.js":@"souju",@"/joeshu/for-adm/master/cctvhost/kanju.js":@"kanju"};
     NSString *sourceID=sourceIDs[sourceURL.path.lowercaseString];if(!sourceID.length)return data;
+    BOOL strictThreeSource=[@[@"kkapp",@"ncat",@"happ"] containsObject:sourceID];
     NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     BOOL matchesSource = [text containsString:[NSString stringWithFormat:@"var Source={\"id\":\"%@\"",sourceID]] ||
-                      [text containsString:[NSString stringWithFormat:@"\"id\":\"%@\"",sourceID]] ||
-                      [text containsString:[NSString stringWithFormat:@"\"id\":\"joeshu.%@\"",sourceID]] ||
-                      [text containsString:[NSString stringWithFormat:@"id:\"%@\"",sourceID]] ||
-                      [text containsString:[NSString stringWithFormat:@"id:\"joeshu.%@\"",sourceID]] ||
-                      [text containsString:@"var Source="];
+                      (!strictThreeSource && (
+                        [text containsString:[NSString stringWithFormat:@"\"id\":\"%@\"",sourceID]] ||
+                        [text containsString:[NSString stringWithFormat:@"\"id\":\"joeshu.%@\"",sourceID]] ||
+                        [text containsString:[NSString stringWithFormat:@"id:\"%@\"",sourceID]] ||
+                        [text containsString:[NSString stringWithFormat:@"id:\"joeshu.%@\"",sourceID]]
+                      ));
     if(!text || !matchesSource){
+        if(!strictThreeSource && text.length)return [text dataUsingEncoding:NSUTF8StringEncoding];
         if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:31 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源脚本与站点地址不匹配，已停止导入。"}];return nil;
     }
     NSArray<NSDictionary<NSString *,NSString *> *> *replacements=@[
@@ -102,7 +105,7 @@ static NSData *PackageAdaptForADMSignedSource(NSData *data,NSURL *sourceURL,NSEr
     for(NSDictionary<NSString *,NSString *> *replacement in replacements){
         NSString *old=replacement[@"old"],*updated=replacement[@"new"];NSUInteger occurrences=[[text componentsSeparatedByString:old] count]-1;
         if(occurrences==1)text=[text stringByReplacingOccurrencesOfString:old withString:updated];
-        else if(![text containsString:updated]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源脚本协议已变化，未导入不兼容版本。"}];return nil;}
+        else if(strictThreeSource&&![text containsString:updated]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源脚本协议已变化，未导入不兼容版本。"}];return nil;}
     }
     NSString *imageHelper=
     @"var siteImageDomains=Object.create(null),siteImageDomainFlights=Object.create(null);\n"
@@ -112,18 +115,18 @@ static NSData *PackageAdaptForADMSignedSource(NSData *data,NSURL *sourceURL,NSEr
     NSString *newImageDomain=@"image=domains.length?String(siteImageDomains[String(row.imageGroup||'')]&&siteImageDomains[String(row.imageGroup||'')].domain||domains[0]).replace(/\\/$/,'')+'/'+path.replace(/^\\//,''):Source.origin+path;";
     NSUInteger imageDomainOccurrences=[[text componentsSeparatedByString:oldImageDomain] count]-1;
     if(imageDomainOccurrences==1)text=[text stringByReplacingOccurrencesOfString:oldImageDomain withString:newImageDomain];
-    else if(![text containsString:newImageDomain]&&![text containsString:@"probe=siteImageDomains[String(row.imageGroup||'')]"]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源封面地址协议已变化，未导入不兼容版本。"}];return nil;}
+    else if(strictThreeSource&&![text containsString:newImageDomain]&&![text containsString:@"probe=siteImageDomains[String(row.imageGroup||'')]"]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源封面地址协议已变化，未导入不兼容版本。"}];return nil;}
     NSString *oldAdapter=@"var adapter=new SiteAdapter();";
     NSUInteger adapterOccurrences=[[text componentsSeparatedByString:oldAdapter] count]-1;
     if(adapterOccurrences==1&&![text containsString:@"async function sitePrepareImageDomains(value)"])text=[text stringByReplacingOccurrencesOfString:oldAdapter withString:[imageHelper stringByAppendingString:oldAdapter]];
-    else if(![text containsString:@"async function sitePrepareImageDomains(value)"]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源封面探测入口已变化，未导入不兼容版本。"}];return nil;}
+    else if(strictThreeSource&&![text containsString:@"async function sitePrepareImageDomains(value)"]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源封面探测入口已变化，未导入不兼容版本。"}];return nil;}
     NSArray<NSDictionary<NSString *,NSString *> *> *imageCallReplacements=@[
         @{@"old":@"async function loadHome(){return siteCards(await adapter.home());}",@"new":@"async function loadHome(){var data=await adapter.home();await sitePrepareImageDomains(data);return siteCards(data);}"},
         @{@"old":@"async function loadCatalog(p){p=p||{};var d=await adapter.category(p);return siteCards(d);}",@"new":@"async function loadCatalog(p){p=p||{};var d=await adapter.category(p);await sitePrepareImageDomains(d);return siteCards(d);}"},
         @{@"old":@"async function search(p){p=p||{};return siteCards(await adapter.search(p));}",@"new":@"async function search(p){p=p||{};var data=await adapter.search(p);await sitePrepareImageDomains(data);return siteCards(data);}"},
         @{@"old":@"var d=siteDetails[id]||await adapter.detail(id),lines=siteArray(d.playSources||d.playerList||d.lines).filter(function(x){return x&&x.needLogin!==true;});",@"new":@"var d=siteDetails[id]||await adapter.detail(id);await sitePrepareImageDomains(d);var lines=siteArray(d.playSources||d.playerList||d.lines).filter(function(x){return x&&x.needLogin!==true;});"}
     ];
-    for(NSDictionary<NSString *,NSString *> *replacement in imageCallReplacements){NSString *old=replacement[@"old"],*updated=replacement[@"new"];NSUInteger occurrences=[[text componentsSeparatedByString:old] count]-1;if(occurrences==1)text=[text stringByReplacingOccurrencesOfString:old withString:updated];else if(![text containsString:updated]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源封面加载流程已变化，未导入不兼容版本。"}];return nil;}}
+    for(NSDictionary<NSString *,NSString *> *replacement in imageCallReplacements){NSString *old=replacement[@"old"],*updated=replacement[@"new"];NSUInteger occurrences=[[text componentsSeparatedByString:old] count]-1;if(occurrences==1)text=[text stringByReplacingOccurrencesOfString:old withString:updated];else if(strictThreeSource&&![text containsString:updated]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源封面加载流程已变化，未导入不兼容版本。"}];return nil;}}
     return [text dataUsingEncoding:NSUTF8StringEncoding];
 }
 static BOOL PackageHeaderIsSensitive(NSString *name) {

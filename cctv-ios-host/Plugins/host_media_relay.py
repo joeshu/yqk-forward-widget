@@ -4,6 +4,7 @@ HLS children and key/map URIs inherit the source's headers. No stream is downloa
 in full, no TS cache is created, and arbitrary client-provided target URLs are not
 accepted: every target must have been registered by a playback/manifest result.
 """
+import base64
 import collections
 import http.client
 import json
@@ -101,8 +102,97 @@ class MediaRelay:
         self.refreshFailures = {}
         self.diagnosed_manifests = set()
         self.diagnosed_resources = collections.OrderedDict()
+        self.inline_keys = collections.OrderedDict()
         self.responses = set()
         self.stopping = threading.Event()
+
+    @staticmethod
+    def _normalize_hls_key_bytes(raw):
+        if not isinstance(raw, (bytes, bytearray)):
+            return b''
+        data = bytes(raw)
+        if len(data) == 16:
+            return data
+        stripped = data.strip()
+        if stripped.startswith(b'{') and stripped.endswith(b'}'):
+            try:
+                obj = json.loads(stripped.decode('utf-8', errors='ignore'))
+                if isinstance(obj, dict):
+                    cand = obj.get('key') or obj.get('data') or obj.get('k') or ''
+                    if isinstance(cand, str) and cand:
+                        stripped = cand.strip().encode('ascii', errors='ignore')
+            except Exception:
+                pass
+        if stripped.lower().startswith(b'0x'):
+            stripped = stripped[2:]
+        if len(stripped) == 32 and re.fullmatch(rb'[0-9a-fA-F]{32}', stripped):
+            try:
+                return bytes.fromhex(stripped.decode('ascii'))
+            except Exception:
+                pass
+        if 20 <= len(stripped) <= 28:
+            try:
+                padded = stripped + b'=' * ((4 - len(stripped) % 4) % 4)
+                dec = base64.urlsafe_b64decode(padded) if (b'-' in stripped or b'_' in stripped) else base64.b64decode(padded)
+                if len(dec) == 16:
+                    return dec
+            except Exception:
+                pass
+        return data
+
+    @classmethod
+    def _decode_inline_hls_key_uri(cls, uri):
+        if not isinstance(uri, str):
+            return None
+        s = uri.strip()
+        low = s.lower()
+        if low.startswith('data:'):
+            _, sep, payload = s.partition(',')
+            if not sep or not payload:
+                return None
+            if ';base64' in low.partition(',')[0]:
+                try:
+                    raw = base64.b64decode( urllib.parse.unquote(payload) )
+                    norm = cls._normalize_hls_key_bytes(raw)
+                    return norm if len(norm) == 16 else None
+                except Exception:
+                    return None
+            norm = cls._normalize_hls_key_bytes(urllib.parse.unquote_to_bytes(payload))
+            return norm if len(norm) == 16 else None
+        if low.startswith('base64:'):
+            norm = cls._normalize_hls_key_bytes(s[7:].strip().encode('ascii', errors='ignore'))
+            return norm if len(norm) == 16 else None
+        if low.startswith('hex:'):
+            norm = cls._normalize_hls_key_bytes(s[4:].strip().encode('ascii', errors='ignore'))
+            return norm if len(norm) == 16 else None
+        return None
+
+    def register_inline_key(self, key_bytes, diagnostic_id=None, resource_scope=None):
+        raw = self._normalize_hls_key_bytes(key_bytes)
+        with self.lock:
+            if self.stopping.is_set():
+                raise RuntimeError('媒体代理正在停止')
+            token = uuid.uuid4().hex
+            self.inline_keys[token] = (raw, str(diagnostic_id or '')[:96], str(resource_scope or '')[:96])
+            while len(self.inline_keys) > 256:
+                self.inline_keys.popitem(last=False)
+            return token
+
+    @staticmethod
+    def _strip_disguised_ts_prefix(chunk):
+        if not chunk or len(chunk) < 380:
+            return chunk
+        if chunk[0] == 0x47:
+            return chunk
+        if chunk[:3] == b'ID3' or chunk[:2] in (b'\xff\xf1', b'\xff\xf9') or chunk[:7] == b'#EXTM3U':
+            return chunk
+        if len(chunk) >= 8 and chunk[4:8] in (b'ftyp', b'styp', b'moof', b'moov', b'sidx', b'emsg', b'free', b'skip', b'mdat'):
+            return chunk
+        limit = min(len(chunk) - 376, 2048)
+        for offset in range(1, limit):
+            if chunk[offset] == 0x47 and chunk[offset + 188] == 0x47 and chunk[offset + 376] == 0x47:
+                return chunk[offset:]
+        return chunk
 
     def register(self, url, headers, origin=None, diagnostic_id=None, fallback_url=None,
                  refresh=None, refresh_after=0, refresh_interval=0, refresh_relative=None,
@@ -179,6 +269,11 @@ class MediaRelay:
             nonlocal segment_count
             if isinstance(value, str):
                 value = re.sub(r'(?i)&(?:amp|#0*38|#x0*26);', '&', value.strip())
+            if resource_kind == "key":
+                inline_key = self._decode_inline_hls_key_uri(value)
+                if inline_key is not None:
+                    token = self.register_inline_key(inline_key, diagnostic_id, resource_scope)
+                    return base + '/media/' + token
             target = urllib.parse.urljoin(url, value)
             resolved = urllib.parse.urlsplit(target)
             # Preserve signed query parameters for same-origin HLS children.
@@ -353,6 +448,21 @@ class MediaRelay:
 
     def serve(self, handler, token, head=False):
         with self.lock:
+            inline_key_entry = self.inline_keys.get(token)
+            if inline_key_entry is not None and not self.stopping.is_set():
+                self.inline_keys.move_to_end(token)
+        if inline_key_entry is not None and not self.stopping.is_set():
+            key_data = inline_key_entry[0]
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'application/octet-stream')
+            handler.send_header('Content-Length', str(len(key_data)))
+            handler.send_header('Cache-Control', 'no-store')
+            handler.send_header('Connection', 'close')
+            handler.end_headers()
+            if not head:
+                self._write_client(handler, key_data)
+            return
+        with self.lock:
             pool = self.targets if token in self.targets else self.segments
             record = pool.get(token)
             stopping = self.stopping.is_set()
@@ -502,6 +612,20 @@ class MediaRelay:
                 sent = True
                 self._write_client(handler, body)
                 return
+            if resource_kind == 'key' and not head and response.status == 200:
+                raw_key = prefix + response.read(4096)
+                norm_key = self._normalize_hls_key_bytes(raw_key)
+                resource_event('byte', len(norm_key))
+                handler.send_response(200)
+                handler.send_header('Content-Type', 'application/octet-stream')
+                handler.send_header('Content-Length', str(len(norm_key)))
+                handler.send_header('Cache-Control', 'no-store')
+                handler.send_header('Connection', 'close')
+                handler.end_headers()
+                sent = True
+                self._write_client(handler, norm_key)
+                resource_event('completed', len(norm_key))
+                return
             handler.send_response(response.status)
             for key in ('Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges'):
                 if response.headers.get(key):
@@ -534,6 +658,8 @@ class MediaRelay:
                     received_bytes += len(chunk)
                     if not first_byte:
                         first_byte = True
+                        if token in self.segments and resource_kind == 'media' and expected_bytes is None:
+                            chunk = self._strip_disguised_ts_prefix(chunk)
                         resource_event('byte', received_bytes)
                     self._write_client(handler, chunk)
                 if not self.stopping.is_set() and expected_bytes is not None and received_bytes < expected_bytes:

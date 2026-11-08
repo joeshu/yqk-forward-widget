@@ -259,7 +259,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     self.title=self.titleText;self.heroTitle.text=self.titleText;self.headerTitle.text=self.titleText;
     if(!badges)return;
     for(UIView *view in badges.arrangedSubviews.copy){[badges removeArrangedSubview:view];[view removeFromSuperview];}
-    NSSet<NSString *> *ignoredTokens=[NSSet setWithArray:@[@"url",@"http",@"https",@"null",@"nil",@"none",@"unknown",@"default",@"undefined",@"n/a",@"0",@"未知",@"其它",@"其他"]];
+    NSSet<NSString *> *ignoredTokens=[NSSet setWithArray:@[@"url",@"http",@"https",@"null",@"nil",@"none",@"unknown",@"default",@"undefined",@"n/a",@"nan",@"0",@"未知",@"其它",@"其他",@"[object object]",@"[object array]",@"{}",@"[]"]];
     NSMutableArray *values=[NSMutableArray array];for(NSString *key in @[@"year",@"type",@"vod_class",@"remarks"]){id rawVal=self.detail[key];if(![rawVal isKindOfClass:NSString.class])continue;NSString *value=[(NSString *)rawVal stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!value.length||value.length>24||[value containsString:@"。"]||[value containsString:@"，"]||[ignoredTokens containsObject:value.lowercaseString])continue;if(![values containsObject:value])[values addObject:value];}
     if(self.seasonCollections.count>1)[values insertObject:[NSString stringWithFormat:@"共 %lu 季",(unsigned long)self.seasonCollections.count] atIndex:0];
     NSUInteger lineCount=self.lines.count;if(lineCount)[values addObject:[NSString stringWithFormat:@"%lu 条线路",(unsigned long)lineCount]];

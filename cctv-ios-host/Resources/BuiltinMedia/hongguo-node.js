@@ -469,6 +469,86 @@ async function ensureDeviceSession(forceRefresh = false) {
   return deviceRegisterFlight;
 }
 
+function signedSingleRequest(vid, contentType, device, host, extraHeaders) {
+  const ts = Math.floor(Date.now() / 1000);
+  const dev = validDeviceIdentity(device) ? device : (validDeviceIdentity(deviceSession) ? deviceSession : null);
+  if (!dev) throw Error('registered device identity is required before signing playback request');
+  const payload = {
+    biz_param: {
+      detail_page_version: 0,
+      device_level: 3,
+      need_all_video_definition: true,
+      need_mp4_align: false,
+      use_os_player: false,
+      video_platform: 1024,
+    },
+    content_type: Number(contentType || 1),
+    video_id: String(vid),
+  };
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  const merged = Object.assign({}, DEVICE, {
+    iid: String(dev.iid),
+    device_id: String(dev.device_id),
+    cdid: String(dev.cdid || randomUuid()),
+  });
+  const vals = Object.assign({}, merged, { ts: String(ts) });
+  const baseUrl = 'https://' + (host || new URL(VIDEO_MODEL_API).hostname) + '/novel/player/video_model/v1/';
+  const { url, query, rticket } = selectSignedUrl(baseUrl, vals, body, ts);
+  const headers = buildSignedHeaders(query, body, ts, rticket, merged, Object.assign({
+    'x-tt-store-region': 'cn',
+    'x-tt-store-region-src': 'did',
+  }, extraHeaders));
+  return { url, method: 'POST', headers, body, device: dev };
+}
+
+function extractFallbackApiUrl(vm, ent, data) {
+  for (const container of [vm, ent, data]) {
+    if (!container || typeof container !== 'object') continue;
+    const fb = container.fallback_api;
+    if (typeof fb === 'string' && fb.trim()) {
+      const s = fb.trim();
+      if (/^https?:\/\//i.test(s)) return s;
+      try {
+        const parsed = JSON.parse(s);
+        if (parsed && typeof parsed.fallback_api === 'string' && /^https?:\/\//i.test(parsed.fallback_api.trim())) {
+          return parsed.fallback_api.trim();
+        }
+      } catch (e) {}
+    } else if (fb && typeof fb === 'object' && typeof fb.fallback_api === 'string' && /^https?:\/\//i.test(fb.fallback_api.trim())) {
+      return fb.fallback_api.trim();
+    } else if (Array.isArray(fb) && typeof fb[0] === 'string' && /^https?:\/\//i.test(fb[0].trim())) {
+      return fb[0].trim();
+    }
+  }
+  return '';
+}
+
+async function fetchFallbackVideoModel(fbUrl, seedHint) {
+  if (!fbUrl || !/^https?:\/\//i.test(fbUrl)) return null;
+  const r = await httpText(fbUrl, { headers: { 'User-Agent': UA_APP, 'Accept': 'application/json' }, timeout: 15000 });
+  if (r.status < 200 || r.status >= 300 || !r.body.length) return null;
+  const j = JSON.parse(r.body.toString('utf8'));
+  const vi = (j && typeof j.video_info === 'object' && j.video_info) ? j.video_info : j;
+  const vdata = (vi && typeof vi.data === 'object' && vi.data) ? vi.data : vi;
+  if (!vdata || typeof vdata !== 'object') return null;
+  const dyn = (vdata.dynamic_video && typeof vdata.dynamic_video === 'object') ? vdata.dynamic_video : null;
+  const rows = vdata.video_list || vdata.dynamic_video_list || (dyn && (dyn.dynamic_video_list || dyn.video_list));
+  let videoList = null;
+  if (Array.isArray(rows)) {
+    videoList = {};
+    rows.forEach((item, index) => {
+      if (item && typeof item === 'object') videoList[String(index)] = item;
+    });
+  } else if (rows && typeof rows === 'object') {
+    videoList = rows;
+  }
+  if (!videoList || !Object.keys(videoList).length) return null;
+  return {
+    video_list: videoList,
+    key_seed: String(vdata.key_seed || (vi && vi.key_seed) || (j && j.key_seed) || seedHint || ''),
+  };
+}
+
 function signedRequest(vid, device, host, extraHeaders) {
   const ts = Math.floor(Date.now() / 1000);
   const dev = validDeviceIdentity(device) ? device : (validDeviceIdentity(deviceSession) ? deviceSession : null);
@@ -776,7 +856,10 @@ function parseVideoModelResponse(j, vid) {
   } else if (rows && typeof rows === 'object') {
     vm.video_list = rows;
   }
+  const fbUrl = extractFallbackApiUrl(vm, ent, data);
+  if (fbUrl) vm._fallback_api = fbUrl;
   if (!vm.video_list || typeof vm.video_list !== 'object' || !Object.keys(vm.video_list).length) {
+    if (vm._fallback_api) return vm;
     throw Error('video model contains no qualities');
   }
   return vm;
@@ -803,7 +886,14 @@ async function fetchModel(vid) {
         throw Error('empty video model response');
       }
       const j = JSON.parse(r.body.toString('utf8'));
-      const vm = parseVideoModelResponse(j, vid);
+      let vm = parseVideoModelResponse(j, vid);
+      if ((!vm.video_list || !Object.keys(vm.video_list).length) && vm._fallback_api) {
+        const fbVm = await fetchFallbackVideoModel(vm._fallback_api, vm.key_seed);
+        if (!fbVm || !fbVm.video_list || !Object.keys(fbVm.video_list).length) {
+          throw Error('video model contains no qualities');
+        }
+        vm = fbVm;
+      }
       modelCache.set(String(vid), { t: Date.now(), vm });
       return vm;
     } catch (error) {
@@ -813,6 +903,24 @@ async function fetchModel(vid) {
         continue;
       }
       break;
+    }
+  }
+  if (validDeviceIdentity(dev)) {
+    for (const ct of [1, 1001]) {
+      try {
+        const s = signedSingleRequest(vid, ct, dev, new URL(VIDEO_MODEL_API).hostname, null);
+        const r = await httpText(s.url, { method: s.method, headers: s.headers, body: s.body, timeout: 15000 });
+        if (r.status >= 200 && r.status < 300 && r.body.length) {
+          let vm = parseVideoModelResponse(JSON.parse(r.body.toString('utf8')), vid);
+          if ((!vm.video_list || !Object.keys(vm.video_list).length) && vm._fallback_api) {
+            vm = await fetchFallbackVideoModel(vm._fallback_api, vm.key_seed);
+          }
+          if (vm && vm.video_list && Object.keys(vm.video_list).length) {
+            modelCache.set(String(vid), { t: Date.now(), vm });
+            return vm;
+          }
+        }
+      } catch (e) {}
     }
   }
   // 两次都失败：本次用的设备身份可能已被服务端静默丢弃，丢弃缓存，
@@ -1342,9 +1450,26 @@ const site = {
 
   async category(tid, pg, filter, extend) {
     const page = Math.max(1, parseInt(pg || '1', 10));
+    const slug = String(tid).replace(/^\/+|\/+$/g, '');
     try {
-      const html = await siteHtml(`/category/${String(tid).replace(/^\/+|\/+$/g, '')}?page=${page}`);
-      return { list: cardsFrom(html), page, pagecount: 99, limit: 24, total: 9999 };
+      let list = [];
+      try {
+        const html = await siteHtml(`/category/${slug}?page=${page}`);
+        list = cardsFrom(html);
+      } catch (err) {
+        if (slug !== 'comic') throw err;
+      }
+      if (slug === 'comic') {
+        try {
+          const cdHtml = await siteHtml(`/category/comic-drama?page=${page}`);
+          const cdList = cardsFrom(cdHtml);
+          if (cdList.length) {
+            const seen = new Set(cdList.map(it => it.vod_id));
+            list = cdList.concat(list.filter(it => !seen.has(it.vod_id)));
+          }
+        } catch (err) {}
+      }
+      return { list, page, pagecount: 99, limit: 24, total: 9999 };
     } catch (e) {
       return { list: [], page, pagecount: page, limit: 24, total: 0 };
     }

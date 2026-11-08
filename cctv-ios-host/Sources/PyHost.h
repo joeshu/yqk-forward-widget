@@ -43,6 +43,7 @@ FOUNDATION_EXPORT NSNotificationName const PyHostRuntimeStateDidChangeNotificati
 + (BOOL)stopServiceIdentifier:(NSString *)identifier error:(NSError **)error;
 + (BOOL)stopWithError:(NSError **)error;
 + (void)stop;
++ (void)refreshListenersAfterForeground;
 
 @end
 

@@ -132,13 +132,36 @@ def _normalize_poster(raw_poster, raw_headers=None):
     return poster, headers
 
 
+def _clean_meta_text(value):
+    if value is None or isinstance(value, bool):
+        return ''
+    if isinstance(value, (list, tuple)):
+        parts = [_clean_meta_text(v) for v in value]
+        return ' / '.join(p for p in parts if p)
+    if isinstance(value, dict):
+        for k in ('name', 'title', 'text', 'label', 'value', 'v', 'n', 'vod_name', 'type_name'):
+            if value.get(k) not in (None, ''):
+                return _clean_meta_text(value[k])
+        return ''
+    text = str(value).strip()
+    if not text:
+        return ''
+    low = text.lower()
+    if '[object ' in low:
+        text = re.sub(r'\[object\s+[^\]]+\]', '', text, flags=re.I).strip(' ·/|-—,\t\r\n')
+        low = text.lower()
+    if low in ('null', 'nil', 'none', 'undefined', 'nan', '[object object]', '[object array]', '{}', '[]'):
+        return ''
+    return text
+
+
 def cards(value):
     result = []
     for row in rows(value):
         if not isinstance(row, dict):
             continue
         identifier = row.get('id', row.get('vod_id'))
-        name = row.get('name', row.get('vod_name'))
+        name = _clean_meta_text(row.get('name', row.get('vod_name')))
         if identifier is None or not name:
             continue
         poster_url, poster_headers = _normalize_poster(
@@ -147,7 +170,7 @@ def cards(value):
         )
         result.append({'id': str(identifier), 'name': str(name),
                        'poster': poster_url,
-                       'remarks': str(row.get('remarks', row.get('vod_remarks', '')) or ''),
+                       'remarks': _clean_meta_text(row.get('remarks', row.get('vod_remarks', ''))),
                        **({'posterHeaders': poster_headers} if poster_headers else {})})
     return result
 
@@ -270,11 +293,11 @@ def detail(value, identifier):
         item.get('posterHeaders') if isinstance(item.get('posterHeaders'), dict) else None,
     )
     result = {'id': str(item.get('id', item.get('vod_id', identifier))),
-              'name': str(item.get('name', item.get('vod_name', identifier))),
+              'name': _clean_meta_text(item.get('name', item.get('vod_name', identifier))) or str(identifier),
               'poster': poster_url,
-              'description': str(item.get('description', item.get('vod_content', '')) or ''),
-              'actor': str(item.get('actor', item.get('vod_actor', '')) or ''),
-              'year': str(item.get('year', item.get('vod_year', '')) or ''), 'lines': lines}
+              'description': _clean_meta_text(item.get('description', item.get('vod_content', ''))),
+              'actor': _clean_meta_text(item.get('actor', item.get('vod_actor', ''))),
+              'year': _clean_meta_text(item.get('year', item.get('vod_year', ''))), 'lines': lines}
     if poster_headers:
         result['posterHeaders'] = poster_headers
     # Preserve optional provider metadata when present so the native detail page
@@ -286,7 +309,9 @@ def detail(value, identifier):
     }.items():
         value = next((item[name] for name in aliases if item.get(name)), None)
         if value is not None:
-            result[key] = str(value)[:4096]
+            cleaned = str(value)[:4096] if key == 'banner' else _clean_meta_text(value)[:4096]
+            if cleaned:
+                result[key] = cleaned
     return result
 
 
@@ -319,10 +344,75 @@ def valid_proxy_address(value):
         return False
 
 
+def _normalize_drm_key(value):
+    if not value:
+        return ''
+    if isinstance(value, dict):
+        keys = value.get('keys')
+        if isinstance(keys, list) and keys and isinstance(keys[0], dict):
+            k_val = str(keys[0].get('k') or '').strip()
+            if k_val:
+                return _normalize_drm_key(k_val)
+        for k in ('drmKey', 'clearKey', 'cencKey', 'decryptionKey', 'key', 'k'):
+            if value.get(k):
+                return _normalize_drm_key(value[k])
+        return ''
+    text = str(value).strip()
+    if not text:
+        return ''
+    if text.startswith('{'):
+        try:
+            return _normalize_drm_key(json.loads(text))
+        except Exception:
+            pass
+    if ':' in text and not text.lower().startswith(('http:', 'https:', 'base64:', 'hex:')):
+        _, _, rhs = text.rpartition(':')
+        if rhs.strip():
+            text = rhs.strip()
+    if text.lower().startswith(('hex:', '0x')):
+        text = re.sub(r'^(?:hex:|0x)', '', text, flags=re.I).strip()
+    elif text.lower().startswith('base64:'):
+        text = text[7:].strip()
+    if re.fullmatch(r'[0-9a-fA-F]{32}', text):
+        return text.lower()
+    if 20 <= len(text) <= 28 and re.fullmatch(r'[A-Za-z0-9+/_=-]+', text):
+        import base64
+        try:
+            padded = text + '=' * ((4 - len(text) % 4) % 4)
+            raw = base64.urlsafe_b64decode(padded) if ('-' in text or '_' in text) else base64.b64decode(padded)
+            if len(raw) == 16:
+                return raw.hex()
+        except Exception:
+            pass
+    return ''
+
+
 def normalize_media_address(value):
     if not isinstance(value, str):
         return value
     address = re.sub(r'(?i)&(?:amp|#0*38|#x0*26);', '&', value.strip())
+    if '\u002f' in address.lower() or '\/' in address:
+        address = address.replace('\/', '/').replace('\u002f', '/').replace('\u002F', '/')
+    if address.lower().startswith('base64://'):
+        import base64
+        try:
+            b64_part = address[9:].strip()
+            b64_part += '=' * ((4 - len(b64_part) % 4) % 4)
+            dec = base64.b64decode(b64_part).decode('utf-8', errors='ignore').strip()
+            if dec.lower().startswith(('http://', 'https://', '//')):
+                address = dec
+        except Exception:
+            pass
+    elif (address.startswith(('aHR0cHM6Ly', 'aHR0cDovL')) and
+          re.fullmatch(r'[A-Za-z0-9+/=_-]{16,4096}', address)):
+        import base64
+        try:
+            padded = address + '=' * ((4 - len(address) % 4) % 4)
+            dec = (base64.urlsafe_b64decode(padded) if ('-' in address or '_' in address) else base64.b64decode(padded)).decode('utf-8', errors='ignore').strip()
+            if dec.lower().startswith(('http://', 'https://')):
+                address = dec
+        except Exception:
+            pass
     if address.startswith('//'):
         address = 'https:' + address
     if ' ' in address and address.lower().startswith(('http://', 'https://')):
@@ -371,7 +461,9 @@ def media_choice_address(value):
         return ''
     return next((value.get(key) for key in
                  ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
-                  'video_url', 'mediaUrl', 'src', 'value', 'v')
+                  'video_url', 'mediaUrl', 'src', 'm3u8', 'mp4', 'flv',
+                  'stream', 'streamUrl', 'stream_url', 'link', 'vurl',
+                  'uri', 'file', 'value', 'v')
                  if value.get(key)), '')
 
 
@@ -432,13 +524,17 @@ def direct_episode_media_fallback(value, episode_id):
 def playback(value, _depth=0):
     value = unwrap_envelope(value, {'url', 'playUrl', 'playurl', 'play_url', 'videoUrl',
                                     'video_url', 'mediaUrl', 'src', 'alternates',
-                                    'parse', 'jx', 'headers', 'header', 'proxy', 'error', 'message'})
+                                    'parse', 'jx', 'headers', 'header', 'customHeaders', 'playerType',
+                                    'proxy', 'error', 'message'})
     if isinstance(value, str):
+        value = {'url': value}
+    elif isinstance(value, list):
         value = {'url': value}
     if not isinstance(value, dict):
         raise MediaError('NO_MEDIA', '来源未返回播放结果')
     if not any(value.get(key) not in (None, '') for key in
-               ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl', 'video_url', 'mediaUrl', 'src')):
+               ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl', 'video_url', 'mediaUrl', 'src',
+                'm3u8', 'mp4', 'flv', 'stream', 'streamUrl', 'stream_url', 'link', 'vurl', 'uri', 'file')):
         nested = next((value[key] for key in ('data', 'result', 'payload', 'response')
                        if key in value and value[key] is not None), None)
         if nested is not None:
@@ -453,23 +549,27 @@ def playback(value, _depth=0):
             if isinstance(nested, list):
                 merged = dict(value, url=nested)
                 return playback(merged)
-    transport_keys = ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
+    transport_keys = ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'content_type',
                       'mimeType', 'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'webPlayback')
     source_transport = {key: value[key] for key in transport_keys if key in value}
     headers = media_headers(value.get('header', {}))
     headers.update(media_headers(value.get('headers', {})))
+    headers.update(media_headers(value.get('customHeaders', {})))
     url = next((value.get(key) for key in
-                ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl', 'video_url', 'mediaUrl', 'src')
+                ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl', 'video_url', 'mediaUrl', 'src',
+                 'm3u8', 'mp4', 'flv', 'stream', 'streamUrl', 'stream_url', 'link', 'vurl', 'uri', 'file')
                 if value.get(key) not in (None, '')), None)
     proxy_requested = enabled(value.get('proxy'))
     alternates = value.get('alternates', [])
     primary_choice_headers = {}
     if isinstance(url, dict):
-        nested_headers = url.get('headers') or url.get('header') or {}
-        headers.update(media_headers(nested_headers))
+        nested_headers = media_headers(url.get('header', {}))
+        nested_headers.update(media_headers(url.get('headers', {})))
+        nested_headers.update(media_headers(url.get('customHeaders', {})))
+        headers.update(nested_headers)
         # Some spiders put transport metadata beside the nested media URL.
         # Keep it before replacing the object with its URL string.
-        for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
+        for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'content_type',
                     'mimeType', 'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'webPlayback'):
             if key not in value and key in url:
                 value[key] = url[key]
@@ -483,7 +583,7 @@ def playback(value, _depth=0):
                         valid_proxy_address(normalize_media_address(media_choice_address(item))))]
             first = choices[0] if choices else None
             if first:
-                for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
+                for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'content_type',
                             'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
                     if key not in value and key in first:
                         value[key] = first[key]
@@ -492,6 +592,7 @@ def playback(value, _depth=0):
                     proxy_requested = enabled(first['proxy'])
                 first_headers = media_headers(first.get('header', {}))
                 first_headers.update(media_headers(first.get('headers', {})))
+                first_headers.update(media_headers(first.get('customHeaders', {})))
                 primary_choice_headers.update(first_headers)
             url = choices
         else:
@@ -509,12 +610,13 @@ def playback(value, _depth=0):
             if 'proxy' not in value and 'proxy' in first:
                 value['proxy'] = first['proxy']
                 proxy_requested = enabled(first['proxy'])
-            for key in ('format', 'mediaType', 'playbackType', 'contentType', 'content_type',
+            for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'content_type',
                         'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
                 if key not in value and key in first:
                     value[key] = first[key]
             first_headers = media_headers(first.get('header', {}))
             first_headers.update(media_headers(first.get('headers', {})))
+            first_headers.update(media_headers(first.get('customHeaders', {})))
             primary_choice_headers.update(first_headers)
             for index, item in enumerate(url):
                 address = media_choice_address(item)
@@ -526,9 +628,10 @@ def playback(value, _depth=0):
                     choice['proxy'] = True
                 choice_headers = media_headers(item.get('header', {}))
                 choice_headers.update(media_headers(item.get('headers', {})))
+                choice_headers.update(media_headers(item.get('customHeaders', {})))
                 if choice_headers:
                     choice['headers'] = choice_headers
-                for key in ('format', 'mediaType', 'playbackType', 'contentType', 'mimeType',
+                for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'mimeType',
                             'mime', 'parse', 'jx', 'requiresWebPlayback'):
                     if item.get(key) is not None:
                         choice[key] = item[key]
@@ -625,9 +728,10 @@ def playback(value, _depth=0):
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}')[:128], 'url': candidate}
                 choice_headers = media_headers(item.get('header', {}))
                 choice_headers.update(media_headers(item.get('headers', {})))
+                choice_headers.update(media_headers(item.get('customHeaders', {})))
                 if choice_headers:
                     choice['headers'] = choice_headers
-                for key in ('format', 'mediaType', 'playbackType', 'contentType', 'mimeType',
+                for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'mimeType',
                             'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback'):
                     if item.get(key) is not None:
                         choice[key] = item[key]
@@ -649,25 +753,34 @@ def playback(value, _depth=0):
         extension = ''
     if not extension and isinstance(url, str) and url:
         lower_url = url.lower()
-        if '.m3u8' in lower_url:
+        if '.m3u8' in lower_url or '/hls/' in lower_url or '/m3u8/' in lower_url or any(k in lower_url for k in ('type=m3u8', 'format=m3u8', 'ctype=m3u8', 'ext=m3u8', 'playtype=m3u8')):
             extension = 'm3u8'
-        elif '.mp4' in lower_url:
+        elif '.mp4' in lower_url or 'ext=mp4' in lower_url or 'type=mp4' in lower_url or 'mime=video' in lower_url:
             extension = 'mp4'
-        elif '.flv' in lower_url:
+        elif '.flv' in lower_url or 'type=flv' in lower_url:
             extension = 'flv'
-        elif '.mpd' in lower_url:
+        elif '.mpd' in lower_url or 'format=mpd' in lower_url:
             extension = 'mpd'
-    native_extensions = {'m3u8', 'm3u', 'mp4', 'm4v', 'mov', 'mp3', 'm4a', 'aac', 'ts'}
+        elif '.mkv' in lower_url:
+            extension = 'mkv'
+        elif '.ts' in lower_url:
+            extension = 'ts'
+    native_extensions = {'m3u8', 'm3u', 'mp4', 'm4v', 'mov', 'mp3', 'm4a', 'aac', 'ts', 'fmp4', 'cmaf', 'm4s', 'f4v', 'wav', 'flac', 'ac3', 'eac3'}
     stream_extensions = native_extensions | {'mpd', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'rmvb'}
     cicada_extensions = {'mpd', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'asf', 'rmvb', 'rm', 'mpg', 'mpeg', 'm2ts', '3gp'}
     cicada_formats = cicada_extensions | {'dash', 'mpeg-dash', 'matroska', 'application/dash+xml'}
     cicada_mimes = {'application/dash+xml', 'application/vnd.ms-sstr+xml', 'video/x-flv',
                     'video/x-matroska', 'video/webm', 'video/x-msvideo', 'video/x-ms-wmv'}
+    declared_player = str(value.get('playerType') or '').strip().lower()
+    app_player_hint = (declared_player in ('app', 'native', 'avplayer', 'cicada', 'system') and
+                       not enabled(value.get('requiresWebPlayback')) and
+                       not enabled(value.get('webPlayback')) and
+                       not parse and not jx)
     cicada_media = (extension in cicada_extensions or declared_format in cicada_formats or
                     declared_mime in cicada_mimes)
     native_media = (extension in native_extensions or declared_format in native_formats or
-                    declared_mime in native_mimes)
-    direct_media = (native_media or cicada_media or extension in stream_extensions or
+                    declared_mime in native_mimes or (app_player_hint and not cicada_media))
+    direct_media = (native_media or cicada_media or app_player_hint or extension in stream_extensions or
                     declared_format in native_formats | {'mpd', 'dash', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'rmvb'} or
                     declared_mime.startswith(('video/', 'audio/')))
     requires_web = bool(enabled(value.get('requiresWebPlayback')) or
@@ -692,6 +805,26 @@ def playback(value, _depth=0):
     for key in ('sessionID', 'expiresAt', 'refreshAfter', 'refreshInterval', 'isLive'):
         if key in value and isinstance(value[key], (str, int, float, bool)):
             result[key] = value[key]
+    raw_drm_key = next((value.get(k) for k in ('drmKey', 'clearKey', 'cencKey', 'decryptionKey', 'key', 'ekey', 'drm')
+                        if value.get(k) not in (None, '', False, True)), None)
+    norm_drm_key = _normalize_drm_key(raw_drm_key)
+    if not norm_drm_key and isinstance(url, str) and '#' in url:
+        frag = urllib.parse.urlsplit(url).fragment
+        for part in frag.split('&'):
+            k_name, sep, k_val = part.partition('=')
+            if sep and k_name.strip().lower() in ('key', 'drmkey', 'clearkey', 'cenckey'):
+                norm_drm_key = _normalize_drm_key(urllib.parse.unquote(k_val))
+                if norm_drm_key:
+                    break
+    if norm_drm_key:
+        result['drmKey'] = norm_drm_key
+        result['directMedia'] = True
+        result['nativePlayable'] = True
+        result['requiresWebPlayback'] = False
+    raw_lic = next((value.get(k) for k in ('licenseUrl', 'drmLicenseUrl', 'keyUrl', 'license_url')
+                    if isinstance(value.get(k), str) and value.get(k).strip()), '')
+    if raw_lic and valid_media_url(normalize_media_address(raw_lic)):
+        result['licenseUrl'] = normalize_media_address(raw_lic)
     raw_subs = value.get('subs') or value.get('subtitles')
     if isinstance(raw_subs, list):
         subs = []
@@ -849,7 +982,7 @@ class PythonSpider:
             # calls stay serialized. Give a request already in progress time to
             # finish instead of turning ordinary home -> detail navigation into
             # an almost immediate HTTP 503 BUSY response.
-            self.lock_timeout = 12.0
+            self.lock_timeout = 25.0
             if callable(getattr(self.spider, 'init', None)):
                 prepare_stage = 'spider_init'
                 init_started_at = time.perf_counter()
@@ -1141,16 +1274,52 @@ class PythonSpider:
             if not url and ep_id.startswith(('http://', 'https://')):
                 url = ep_id
             low = url.lower()
-            is_direct = any(tok in low for tok in ('.m3u8', '.mp4', '.flv', '.mpd')) or '127.0.0.1' in low
-            if is_direct:
-                return result
-            vip_domains = ('mgtv.com', 'qq.com', 'iqiyi.com', 'youku.com', 'bilibili.com', 'sohu.com', 'le.com')
-            if url.startswith(('http://', 'https://')) and not any(d in low for d in vip_domains):
+            parsed = urllib.parse.urlsplit(url) if url else None
+            path_low = parsed.path.lower() if parsed else ''
+            query_low = parsed.query.lower() if parsed else ''
+            is_dead_cdn = any(dead in low for dead in ('lzcdn', 'lzfile', 'lfthirtytwo'))
+            is_wrapper = 'url=http' in query_low or 'v=http' in query_low or 'xmflv.com' in low
+            is_direct = (
+                not is_dead_cdn and not is_wrapper and
+                any(tok in path_low for tok in ('.m3u8', '.mp4', '.flv', '.mpd'))
+            )
+            if ('127.0.0.1' in low or 'localhost' in low) and not is_direct:
                 try:
                     import requests
-                    resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=6)
+                    probe = requests.get(url, timeout=2.5, stream=True)
+                    probe_ok = 200 <= probe.status_code < 400
+                    probe.close()
+                    if probe_ok:
+                        return result
+                except Exception:
+                    pass
+                # Rescue broken loopback HGTV proxy (e.g. 127.0.0.1:9990/?vid=... returning 502)
+                try:
+                    qs = urllib.parse.parse_qs(parsed.query if parsed else '')
+                    hg_vid = (qs.get('vid') or [''])[0] or (re.findall(r'/play/(\d{15,24})', path_low) or [''])[0]
+                    if not hg_vid and re.fullmatch(r'\d{15,24}', str(ep_id).split('~')[-1]):
+                        hg_vid = str(ep_id).split('~')[-1]
+                    if hg_vid and re.fullmatch(r'\d{15,24}', str(hg_vid)):
+                        builtin_hg = Path(__file__).resolve().parent.parent / 'Resources/BuiltinMedia/hongguo-python.py'
+                        if builtin_hg.is_file():
+                            spec = importlib.util.spec_from_file_location('_cctvhost_builtin_hg_rescue', str(builtin_hg))
+                            mod = importlib.util.module_from_spec(spec)
+                            spec.loader.exec_module(mod)
+                            dec_url, ref, _ = mod.resolve_signed('', str(hg_vid), False, host_proxy=False)
+                            if dec_url:
+                                return {'parse': 0, 'jx': 0, 'url': dec_url, 'format': 'mp4', 'contentType': 'video/mp4',
+                                        'header': {'User-Agent': 'Mozilla/5.0', 'Referer': ref or 'https://hongguoduanju.com/'}}
+                except Exception:
+                    pass
+            if is_direct:
+                return result
+            vip_domains = ('mgtv.com', 'qq.com', 'iqiyi.com', 'youku.com', 'bilibili.com', 'sohu.com', 'le.com', 'xmflv.com')
+            if url.startswith(('http://', 'https://')) and not any(d in low for d in vip_domains) and '127.0.0.1' not in low and not is_dead_cdn:
+                try:
+                    import requests
+                    resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
                     sniffed = csp_adapter._extract_stream_from_html(resp.text, base_url=url)
-                    if sniffed:
+                    if sniffed and not any(dead in sniffed.lower() for dead in ('lzcdn', 'lzfile', 'lfthirtytwo')):
                         return {'parse': 0, 'jx': 0, 'url': sniffed, 'header': {'User-Agent': 'Mozilla/5.0'}}
                 except Exception:
                     pass
@@ -1261,6 +1430,8 @@ class MediaRuntime:
         self.cache_bytes = 0
         self.cache_generation = 0
         self.closed = False
+        self._last_detail_title = ''
+        self._episode_map = {}
 
     def start_initialization(self, factory, on_failure=None):
         """Prepare a plugin away from the listener thread so health stays responsive."""
@@ -1375,9 +1546,30 @@ class MediaRuntime:
                 value = listing(raw, args.get('page', 1))
             elif operation == 'detail':
                 value = detail(raw, args.get('id', ''))
+                try:
+                    t = str(value.get('name') or '').strip()
+                    if t:
+                        self._last_detail_title = t
+                    for ln in value.get('lines') or []:
+                        if not isinstance(ln, dict):
+                            continue
+                        for idx, ep in enumerate(ln.get('episodes') or []):
+                            if isinstance(ep, dict) and ep.get('id'):
+                                self._episode_map[str(ep['id'])] = (t or self._last_detail_title, idx, str(ep.get('name') or ''))
+                except Exception:
+                    pass
             elif operation == 'play':
                 try:
                     value = playback(raw)
+                    play_u = str(value.get('url') or '').lower() if isinstance(value, dict) else ''
+                    if play_u and any(d in play_u for d in ('youku.com', 'qq.com', 'iqiyi.com', 'mgtv.com', 'bilibili.com', 'xmflv.com', 'lzcdn', 'lzfile', 'lfthirtytwo')):
+                        ep_key = str(args.get('id') or '')
+                        title, ep_idx, ep_name = self._episode_map.get(ep_key, (self._last_detail_title, 0, ''))
+                        if title:
+                            import csp_adapter
+                            rescued = csp_adapter.resolve_maccms_stream_by_title(title, episode_index=ep_idx, episode_name=ep_name)
+                            if rescued:
+                                value = playback({'parse': 0, 'jx': 0, 'url': rescued, 'header': {'User-Agent': 'Mozilla/5.0'}})
                 except MediaError as error:
                     if error.code == 'NO_MEDIA':
                         fallback = direct_episode_media_fallback(raw, args.get('id', ''))

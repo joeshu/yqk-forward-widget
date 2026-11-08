@@ -251,25 +251,10 @@ static NSDictionary *MediaTVBoxDetail(NSDictionary *root,NSDictionary *arguments
         for(NSDictionary *line in lines){
             NSString *flagName=[line[@"name"] isKindOfClass:NSString.class]?[line[@"name"] lowercaseString]:@"";
             NSString *firstEpID=[line[@"episodes"] count]?MediaTVBoxString(line[@"episodes"][0][@"id"]):@"";
-            BOOL isNative=[flagName containsString:@"m3u8"]||[flagName containsString:@"mp4"]||(firstEpID.length&&!MediaTVBoxURLLooksLikeWebPage(firstEpID));
+            NSString *lowFirstEp=firstEpID.lowercaseString;
+            BOOL isDeadLiangzi=[lowFirstEp containsString:@"lzcdn"]||[lowFirstEp containsString:@"lzfile"]||[lowFirstEp containsString:@"lfthirtytwo"];
+            BOOL isNative=!isDeadLiangzi&&([flagName containsString:@"m3u8"]||[flagName containsString:@"mp4"]||(firstEpID.length&&!MediaTVBoxURLLooksLikeWebPage(firstEpID)));
             if(isNative)[nativeLines addObject:line];else[webLines addObject:line];
-        }
-        if(nativeLines.count&&webLines.count&&[source[@"_jarBridge"] boolValue]){
-            NSArray *primaryEps=nativeLines.firstObject[@"episodes"];
-            NSMutableArray *upgradedWebLines=[NSMutableArray arrayWithCapacity:webLines.count];
-            for(NSDictionary *wLine in webLines){
-                NSArray *wEps=wLine[@"episodes"];
-                NSMutableArray *newEps=[NSMutableArray arrayWithCapacity:wEps.count];
-                for(NSUInteger idx=0;idx<wEps.count;idx++){
-                    NSMutableDictionary *ep=[wEps[idx] mutableCopy];
-                    if(idx<primaryEps.count&&[primaryEps[idx][@"id"] length])ep[@"id"]=primaryEps[idx][@"id"];
-                    [newEps addObject:ep.copy];
-                }
-                NSMutableDictionary *uLine=[wLine mutableCopy];
-                uLine[@"episodes"]=newEps.copy;
-                [upgradedWebLines addObject:uLine.copy];
-            }
-            webLines=upgradedWebLines;
         }
         if(nativeLines.count&&webLines.count){[nativeLines addObjectsFromArray:webLines];lines=nativeLines;}
     }
@@ -366,7 +351,12 @@ static NSString *MediaParserRequestURL(NSDictionary *parser,NSString *mediaURL) 
 static NSDictionary *MediaParserObjectWithURL(id value,NSUInteger depth) {
     if(depth>6)return nil;
     if([value isKindOfClass:NSString.class]){
-        NSString *candidate=[[(NSString *)value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] stringByReplacingOccurrencesOfString:@"\\/" withString:@"/"];
+        NSString *candidate=[[[(NSString *)value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] stringByReplacingOccurrencesOfString:@"\\/" withString:@"/"] stringByReplacingOccurrencesOfString:@"\\u002f" withString:@"/"];
+        if(([candidate hasPrefix:@"aHR0cHM6Ly"]||[candidate hasPrefix:@"aHR0cDovL"])&&candidate.length>=16&&candidate.length<=4096){
+            NSData *b64=[[NSData alloc] initWithBase64EncodedString:candidate options:NSDataBase64DecodingIgnoreUnknownCharacters];
+            NSString *dec=b64?[[NSString alloc] initWithData:b64 encoding:NSUTF8StringEncoding]:nil;
+            if([dec hasPrefix:@"http://"]||[dec hasPrefix:@"https://"])candidate=dec;
+        }
         NSURLComponents *parts=[NSURLComponents componentsWithString:candidate];
         if([@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]&&parts.host.length&&!parts.user.length&&!parts.password.length)return @{ @"url":candidate };
         if([candidate containsString:@"player_aaaa"]){
@@ -715,7 +705,7 @@ static NSString *MediaJARBridgeFallbackCMSURL(NSString *api) {
     if([low containsString:@"drama"]||[low containsString:@"jpys"]||[low containsString:@"gz360"])return @"https://caiji.dyttzyapi.com/api.php/provide/vod/";
     if([low containsString:@"dj"]||[low containsString:@"miaowu"]||[low containsString:@"modu"]||[low containsString:@"appsy"])return @"https://api.ffzyapi.com/api.php/provide/vod/";
     if([low containsString:@"wogg"]||[low containsString:@"pan"]||[low containsString:@"4k"])return @"https://api.wujinapi.me/api.php/provide/vod/";
-    return @"https://cj.lziapi.com/api.php/provide/vod/";
+    return @"https://caiji.dyttzyapi.com/api.php/provide/vod/";
 }
 static NSURLRequest *MediaJARBridgeMacCMSFallbackRequest(NSString *cmsAPI,NSString *operation,NSDictionary *arguments) {
     NSURLComponents *parts=[NSURLComponents componentsWithString:cmsAPI];
@@ -785,6 +775,20 @@ static NSData *MediaJARBridgeTryDecryptData(NSData *data,NSDictionary *source) {
     size_t numBytesDecrypted=0;
     CCCryptorStatus status=CCCrypt(kCCDecrypt,kCCAlgorithmAES128,kCCOptionPKCS7Padding,keyPtr,kCCKeySizeAES128,ivPtr,cipherData.bytes,cipherData.length,buffer,bufferSize,&numBytesDecrypted);
     if(status==kCCSuccess&&numBytesDecrypted>0){
+        const uint8_t *bytes=(const uint8_t *)buffer;
+        if(bytes[0]=='{'||bytes[0]=='['){
+            return [NSData dataWithBytesNoCopy:buffer length:numBytesDecrypted freeWhenDone:YES];
+        }
+    }
+    size_t ecbDecrypted=0;
+    CCCryptorStatus ecbStatus=CCCrypt(kCCDecrypt,kCCAlgorithmAES128,kCCOptionPKCS7Padding|kCCOptionECBMode,keyPtr,kCCKeySizeAES128,NULL,cipherData.bytes,cipherData.length,buffer,bufferSize,&ecbDecrypted);
+    if(ecbStatus==kCCSuccess&&ecbDecrypted>0){
+        const uint8_t *bytes=(const uint8_t *)buffer;
+        if(bytes[0]=='{'||bytes[0]=='['){
+            return [NSData dataWithBytesNoCopy:buffer length:ecbDecrypted freeWhenDone:YES];
+        }
+    }
+    if(status==kCCSuccess&&numBytesDecrypted>0){
         return [NSData dataWithBytesNoCopy:buffer length:numBytesDecrypted freeWhenDone:YES];
     }
     free(buffer);
@@ -795,7 +799,7 @@ static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operat
     NSString *lowAPI=api.lowercaseString;
     if([arguments[@"_jar_fallback"] boolValue]){
         NSString *primary=MediaJARBridgeFallbackCMSURL(api);
-        NSString *secondary=[primary containsString:@"lziapi.com"]?@"https://caiji.dyttzyapi.com/api.php/provide/vod/":@"https://cj.lziapi.com/api.php/provide/vod/";
+        NSString *secondary=[primary containsString:@"dyttzyapi.com"]?@"https://360zy.com/api.php/provide/vod/":@"https://caiji.dyttzyapi.com/api.php/provide/vod/";
         return MediaJARBridgeMacCMSFallbackRequest(secondary,operation,arguments);
     }
     id rawOptions=source[@"options"];

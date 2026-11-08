@@ -55,18 +55,22 @@ def _unpad_pkcs7(data):
     return data
 
 
-def _aes_cbc_decrypt(ciphertext_bytes, key_bytes, iv_bytes):
+def _aes_cbc_decrypt(ciphertext_bytes, key_bytes, iv_bytes=b''):
     if AES is None or not ciphertext_bytes or not key_bytes:
         return b''
     key = key_bytes[:32] if len(key_bytes) >= 32 else (
         key_bytes[:24] if len(key_bytes) >= 24 else key_bytes[:16].ljust(16, b'\0'))
-    if not iv_bytes:
-        cipher = AES.new(key, AES.MODE_ECB)
-    else:
+    if iv_bytes:
         iv = iv_bytes[:16].ljust(16, b'\0')
         cipher = AES.new(key, AES.MODE_CBC, iv)
-    decrypted = cipher.decrypt(ciphertext_bytes)
-    return _unpad_pkcs7(decrypted)
+        dec = _unpad_pkcs7(cipher.decrypt(ciphertext_bytes))
+        if dec and (dec[:1] in (b'{', b'[') or b'http' in dec[:64]):
+            return dec
+    cipher_ecb = AES.new(key, AES.MODE_ECB)
+    dec_ecb = _unpad_pkcs7(cipher_ecb.decrypt(ciphertext_bytes))
+    if dec_ecb and (dec_ecb[:1] in (b'{', b'[') or b'http' in dec_ecb[:64]):
+        return dec_ecb
+    return dec if iv_bytes else dec_ecb
 
 
 def _aes_cbc_encrypt(plaintext_bytes, key_bytes, iv_bytes):
@@ -122,54 +126,91 @@ def _split_rule_array(html, rule):
     return items
 
 
-def _extract_stream_from_html(html, base_url=''):
-    """Extracts a direct .m3u8/.mp4/.flv/.mpd stream URL from HTML or MacCMS player_aaaa."""
-    if not isinstance(html, str) or not html:
+def _decode_obfuscated_url_candidate(raw_u, enc=0, base_url=''):
+    u = str(raw_u or '').strip()
+    if not u:
         return ''
-    # 1. Check MacCMS player_aaaa / player_data JSON block (supports encrypt=0, 1, 2)
-    for pattern in (r'player_aaaa\s*=\s*(\{.*?\})\s*</script>',
-                    r'player_aaaa\s*=\s*(\{[^\n;]+\})',
-                    r'player_data\s*=\s*(\{[^\n;]+\})'):
-        m = re.search(pattern, html, re.I | re.S)
-        if not m:
-            continue
-        raw_json = m.group(1).strip()
+    if enc == 1:
+        u = urllib.parse.unquote(u)
+    elif enc == 2:
         try:
-            cfg = json.loads(raw_json)
+            padded = u + '=' * ((4 - len(u) % 4) % 4)
+            u = urllib.parse.unquote(base64.b64decode(padded).decode('utf-8', errors='ignore'))
         except Exception:
-            continue
-        if not isinstance(cfg, dict):
-            continue
-        raw_u = str(cfg.get('url') or '').strip()
-        if not raw_u:
-            continue
-        enc = cfg.get('encrypt', 0)
-        try:
-            enc = int(enc)
-        except Exception:
-            enc = 0
-        if enc == 1:
-            raw_u = urllib.parse.unquote(raw_u)
-        elif enc == 2:
+            pass
+    elif enc == 3:
+        for candidate in (u, u[::-1]):
             try:
-                raw_u = urllib.parse.unquote(base64.b64decode(raw_u).decode('utf-8', errors='ignore'))
+                padded = candidate + '=' * ((4 - len(candidate) % 4) % 4)
+                step1 = base64.b64decode(padded).decode('utf-8', errors='ignore').strip()
+                if step1.startswith(('aHR0cHM6Ly', 'aHR0cDovL')):
+                    p2 = step1 + '=' * ((4 - len(step1) % 4) % 4)
+                    step1 = base64.b64decode(p2).decode('utf-8', errors='ignore').strip()
+                dec = urllib.parse.unquote(step1)
+                if dec.startswith(('http://', 'https://', '//', '/')):
+                    u = dec
+                    break
             except Exception:
                 pass
-        raw_u = raw_u.replace('\\/', '/').strip()
-        if raw_u.startswith('//'):
-            raw_u = 'https:' + raw_u
-        elif raw_u.startswith('/') and base_url:
-            parts = urllib.parse.urlsplit(base_url)
-            if parts.scheme and parts.netloc:
-                raw_u = f'{parts.scheme}://{parts.netloc}{raw_u}'
-        if raw_u.startswith(('http://', 'https://')) and any(tok in raw_u.lower() for tok in ('.m3u8', '.mp4', '.flv', '.mpd')):
-            return raw_u
+    if u.startswith(('aHR0cHM6Ly', 'aHR0cDovL')) and re.fullmatch(r'[A-Za-z0-9+/=_-]{16,4096}', u):
+        try:
+            padded = u + '=' * ((4 - len(u) % 4) % 4)
+            u = base64.b64decode(padded).decode('utf-8', errors='ignore').strip()
+        except Exception:
+            pass
+    u = re.sub(r'(?i)&(?:amp|#0*38|#x0*26);', '&', u.replace('\\/', '/').replace('\\u002f', '/').replace('\\u002F', '/')).strip()
+    if u.startswith('//'):
+        u = 'https:' + u
+    elif u.startswith('/') and base_url:
+        parts = urllib.parse.urlsplit(base_url)
+        if parts.scheme and parts.netloc:
+            u = f'{parts.scheme}://{parts.netloc}{u}'
+    return u
 
-    # 2. Check unescaped direct stream URLs in HTML/JS
-    unescaped = html.replace('\\/', '/')
-    m_direct = re.search(r'https?://[^\s"\'<>\\]+?\.(?:m3u8|mp4|flv|mpd)(?:[?#][^\s"\'<>\\]*)?', unescaped, re.I)
+
+def _extract_stream_from_html(html, base_url=''):
+    """Extracts a direct .m3u8/.mp4/.flv/.mpd stream URL from HTML or MacCMS/JS player configs."""
+    if not isinstance(html, str) or not html:
+        return ''
+    # 1. Check MacCMS player_aaaa / player_data / MacPlayerConfig / player_xxxx JSON blocks (supports encrypt=0, 1, 2, 3)
+    for pattern in (r'player_aaaa\s*=\s*(\{.*?\})\s*</script>',
+                    r'player_aaaa\s*=\s*(\{[^\n;]+\})',
+                    r'player_data\s*=\s*(\{[^\n;]+\})',
+                    r'MacPlayerConfig\s*=\s*(\{[^\n;]+\})',
+                    r'player_[a-zA-Z0-9_]+\s*=\s*(\{[^\n;]+\})',
+                    r'(?:videoInfo|playInfo|cms_player)\s*=\s*(\{[^\n;]+\})'):
+        for m in re.finditer(pattern, html, re.I | re.S):
+            raw_json = m.group(1).strip()
+            try:
+                cfg = json.loads(raw_json)
+            except Exception:
+                continue
+            if not isinstance(cfg, dict):
+                continue
+            raw_u = str(cfg.get('url') or cfg.get('playUrl') or cfg.get('videoUrl') or '').strip()
+            if not raw_u:
+                continue
+            enc = cfg.get('encrypt', 0)
+            try:
+                enc = int(enc)
+            except Exception:
+                enc = 0
+            u = _decode_obfuscated_url_candidate(raw_u, enc=enc, base_url=base_url)
+            if u.startswith(('http://', 'https://')) and any(tok in u.lower() for tok in ('.m3u8', '.mp4', '.flv', '.mpd', '.m4v', '.mov', '.mkv', '/hls/', 'type=m3u8', 'format=m3u8')):
+                return u
+
+    # 2. Check inline atob("...") / Base64.decode("...") / base64-encoded aHR0c... URLs
+    for m_b64 in re.finditer(r'(?:atob|Base64\.decode)\(\s*["\']([A-Za-z0-9+/=_-]{20,2048})["\']\s*\)|["\']((?:aHR0cHM6Ly|aHR0cDovL)[A-Za-z0-9+/=_-]{16,2048})["\']', html):
+        b64_token = m_b64.group(1) or m_b64.group(2)
+        u = _decode_obfuscated_url_candidate(b64_token, enc=2, base_url=base_url)
+        if u.startswith(('http://', 'https://')) and any(tok in u.lower() for tok in ('.m3u8', '.mp4', '.flv', '.mpd', '.m4v', '.mov')):
+            return u
+
+    # 3. Check unescaped direct stream URLs in HTML/JS
+    unescaped = html.replace('\\/', '/').replace('\\u002f', '/').replace('\\u002F', '/')
+    m_direct = re.search(r'https?://[^\s"\'<>\\]+?\.(?:m3u8|mp4|flv|mpd|m4v|mov|mkv)(?:[?#][^\s"\'<>\\]*)?', unescaped, re.I)
     if m_direct:
-        return m_direct.group(0)
+        return re.sub(r'(?i)&(?:amp|#0*38|#x0*26);', '&', m_direct.group(0))
 
     # 3. Check protocol-relative //domain/path.m3u8
     m_proto = re.search(r'//([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/[^\s"\'<>\\]+?\.(?:m3u8|mp4)(?:[?#][^\s"\'<>\\]*)?)', unescaped, re.I)
@@ -201,9 +242,10 @@ def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
         search_keywords.append(short_kw)
 
     cms_hosts = (
-        'https://cj.lziapi.com/api.php/provide/vod/',
         'https://caiji.dyttzyapi.com/api.php/provide/vod/',
+        'https://360zy.com/api.php/provide/vod/',
         'https://api.ffzyapi.com/api.php/provide/vod/',
+        'https://cj.lziapi.com/api.php/provide/vod/',
     )
     headers = {
         'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
@@ -244,9 +286,10 @@ def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
                         label, sep, u = ep.partition('$')
                         cand_url = (u if sep else label).strip().replace('\\/', '/')
                         cand_name = (label if sep else '').strip()
+                        low_cu = cand_url.lower()
                         if cand_url.startswith(('http://', 'https://')) and any(
-                            tok in cand_url.lower() for tok in ('.m3u8', '.mp4')
-                        ):
+                            tok in low_cu for tok in ('.m3u8', '.mp4')
+                        ) and not any(dead in low_cu for dead in ('lzcdn', 'lzfile', 'lfthirtytwo')):
                             m3u8_eps.append((cand_name, cand_url))
                     if not m3u8_eps:
                         continue
@@ -296,7 +339,7 @@ def _default_cms_host_for_api(api_type):
         return 'https://api.ffzyapi.com'
     if any(k in low for k in ('wogg', 'pan', '4k')):
         return 'https://api.wujinapi.me'
-    return 'https://cj.lziapi.com'
+    return 'https://caiji.dyttzyapi.com'
 
 
 def _first_valid_http_url(candidate):
@@ -575,6 +618,7 @@ class AppVideoEngine:
         else:
             self.config = {}
 
+        self._is_yqk = 'appyqk' in self.api_type.lower() or 'yqk' in str(ext_config or '').lower()
         raw_base = self.config.get('url') or self.config.get('host') or self.config.get('site') or ''
         self.base_url = _first_valid_http_url(raw_base) or _default_cms_host_for_api(self.api_type)
         self.fallback_cms_url = _default_cms_host_for_api(self.api_type)
@@ -652,7 +696,69 @@ class AppVideoEngine:
         except Exception:
             return {}
 
+    def _yqk_post(self, path, params):
+        import uuid as _uuid_mod
+        app_id = 'e6ddefe09e0349739874563459f56c54'
+        sign_key = '6142612b179040c292488e027a12264d'
+        body = dict(params or {})
+        body['appId'] = app_id
+        body['reqDomain'] = 'm.yqk3hxe.com'
+        body['udid'] = str(_uuid_mod.uuid4())
+        parts = [f"{k}={body[k]}" for k in sorted(body.keys()) if body[k] is not None and body[k] != '' and k != 'sign']
+        raw_sign = '&'.join(parts) + ('&' if parts else '') + 'key=' + sign_key
+        body['sign'] = hashlib.md5(raw_sign.encode('utf-8')).hexdigest()
+        hdrs = {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+            'Origin': 'https://m.yqk3hxe.com',
+            'Referer': 'https://m.yqk3hxe.com/',
+            'Content-Type': 'application/json;charset=utf-8',
+            'Accept': 'application/json, text/plain, */*',
+        }
+        for host in ('https://api.yqk3hxe.com', 'https://m.yqk3hxe.com'):
+            try:
+                resp = self.session.post(host + path, json=body, headers=hdrs, timeout=6)
+                j = resp.json()
+                if isinstance(j, dict) and j.get('data') is not None:
+                    return j['data']
+            except Exception:
+                pass
+        return None
+
+    def _yqk_cards(self, rows):
+        out = []
+        for r in (rows if isinstance(rows, list) else []):
+            if not isinstance(r, dict):
+                continue
+            vid = str(r.get('vodId') or r.get('vod_id') or r.get('id') or '').strip()
+            name = str(r.get('vodName') or r.get('vod_name') or r.get('title') or '').strip()
+            if not vid or not name:
+                continue
+            out.append({
+                'vod_id': vid,
+                'vod_name': name,
+                'vod_pic': str(r.get('vodPic') or r.get('coverImg') or r.get('vod_pic') or ''),
+                'vod_remarks': str(r.get('unknowRemarks') or r.get('vodRemarks') or r.get('remarks') or ''),
+            })
+        return out
+
     def homeContent(self, filter=True):
+        if self._is_yqk and not self._is_test_host():
+            data = self._yqk_post('/v2/api/home/body', {})
+            if isinstance(data, dict):
+                items = self._yqk_cards(data.get('hotLists') or [])
+                for block in (data.get('typeLists') or []):
+                    if isinstance(block, dict):
+                        items.extend(self._yqk_cards(block.get('vodList') or []))
+                if items:
+                    return {
+                        'class': [
+                            {'type_id': '1', 'type_name': '电视剧'},
+                            {'type_id': '2', 'type_name': '电影'},
+                            {'type_id': '3', 'type_name': '综艺'},
+                            {'type_id': '4', 'type_name': '动漫'},
+                        ],
+                        'list': items,
+                    }
         for candidate_path in ('api.php/app/nav', 'api.php/app/index_video', 'api.php/v1.vod/types', 'api.php/provide/vod/'):
             data = self._request_json(candidate_path)
             if data and (data.get('list') or data.get('data') or data.get('class')):
@@ -694,6 +800,11 @@ class AppVideoEngine:
         return {'class': classes, 'list': items}
 
     def categoryContent(self, tid, pg, filter, extend):
+        if self._is_yqk and not self._is_test_host():
+            data = self._yqk_post('/v2/api/channel/getVodList', {'typeId': str(tid or '1'), 'page': int(pg or 1), 'pageSize': 24, 'sort': 1})
+            items = self._yqk_cards((data or {}).get('list') or []) if isinstance(data, dict) else []
+            if items:
+                return {'list': items, 'page': int(pg or 1)}
         params = {'tid': str(tid), 'type': str(tid), 't': str(tid), 'pg': str(pg), 'page': str(pg), 'limit': '20', 'ac': 'videolist'}
         for candidate_path in ('api.php/app/video', 'api.php/v1.vod', 'api.php/provide/vod/'):
             data = self._request_json(candidate_path, params=params)
@@ -724,6 +835,35 @@ class AppVideoEngine:
         if not ids:
             return {'list': []}
         vid = str(ids[0])
+        if self._is_yqk and not self._is_test_host() and vid.isdigit():
+            data = self._yqk_post('/v2/api/vodInfo/index', {'vodId': vid})
+            if isinstance(data, dict) and (data.get('vodName') or data.get('playerList')):
+                title = str(data.get('vodName') or '影片')
+                self._last_vod_name = title
+                players = data.get('playerList') or []
+                from_names, url_groups = [], []
+                for p in players:
+                    if not isinstance(p, dict):
+                        continue
+                    p_name = str(p.get('playerName') or p.get('playerCode') or '默认线路')
+                    eps = p.get('epList') or []
+                    entries = []
+                    for ep in eps:
+                        if isinstance(ep, dict) and ep.get('epId'):
+                            ep_name = str(ep.get('epName') or '正片').replace('$', ' ').replace('#', ' ')
+                            entries.append(f"{ep_name}$yqk_ep:{ep['epId']}")
+                    if entries:
+                        from_names.append(p_name)
+                        url_groups.append('#'.join(entries))
+                if url_groups:
+                    return {'list': [{
+                        'vod_id': vid,
+                        'vod_name': title,
+                        'vod_pic': str(data.get('vodPic') or data.get('coverImg') or ''),
+                        'vod_content': str(data.get('vodBlurb') or data.get('vodContent') or ''),
+                        'vod_play_from': '$$$'.join(from_names),
+                        'vod_play_url': '$$$'.join(url_groups),
+                    }]}
         for candidate_path in ('api.php/app/video_detail', 'api.php/v1.vod/detail', 'api.php/provide/vod/'):
             data = self._request_json(candidate_path, params={'id': vid, 'vod_id': vid, 'ids': vid, 'ac': 'detail'})
             if data and (data.get('data') or data.get('list')):
@@ -762,6 +902,11 @@ class AppVideoEngine:
         return {'list': [item]}
 
     def searchContent(self, key, quick, pg='1'):
+        if self._is_yqk and not self._is_test_host():
+            data = self._yqk_post('/v1/api/search/search', {'keyword': str(key), 'page': int(pg or 1), 'pageSize': 24})
+            items = self._yqk_cards((data or {}).get('list') or []) if isinstance(data, dict) else []
+            if items:
+                return {'list': items}
         params = {'text': str(key), 'wd': str(key), 'pg': str(pg), 'page': str(pg), 'ac': 'videolist'}
         for candidate_path in ('api.php/app/video', 'api.php/app/search', 'api.php/v1.vod', 'api.php/provide/vod/'):
             data = self._request_json(candidate_path, params=params)
@@ -788,6 +933,29 @@ class AppVideoEngine:
 
     def playerContent(self, flag, id, vipFlags):
         vid = str(id or '').strip()
+        if vid.startswith('yqk_ep:'):
+            ep_id = vid.split(':', 1)[1]
+            detail = self._yqk_post('/v2/api/vodInfo/epDetail', {'epId': ep_id})
+            items = (detail or {}).get('items') if isinstance(detail, dict) else []
+            for item in (items if isinstance(items, list) else []):
+                if not isinstance(item, dict) or not item.get('vodResolution'):
+                    continue
+                res_data = self._yqk_post('/v2/api/vodInfo/playUrl', {'epId': ep_id, 'vodResolution': item['vodResolution']})
+                play_url = ''
+                if isinstance(res_data, str):
+                    play_url = res_data.strip()
+                elif isinstance(res_data, dict):
+                    play_url = str(res_data.get('playUrl') or res_data.get('url') or '').strip()
+                if play_url.startswith(('http://', 'https://')):
+                    return {
+                        'parse': 0,
+                        'url': play_url,
+                        'header': {
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+                            'Origin': 'https://m.yqk3hxe.com',
+                            'Referer': 'https://m.yqk3hxe.com/',
+                        },
+                    }
         if any(tok in vid.lower() for tok in ('.m3u8', '.mp4', '.flv', '.mpd')) and vid.startswith(('http://', 'https://')):
             return {'parse': 0, 'url': vid, 'header': self.headers}
         data = self._request_json('api.php/app/video_url', params={'url': vid, 'id': vid})

@@ -277,7 +277,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         mb_code = (SOURCES / 'MediaBrowserViewController.m').read_text(encoding='utf-8')
         self.assertIn('multiplier:0.36', mb_code)
         self.assertIn('constraintLessThanOrEqualToConstant:300', mb_code)
-        self.assertIn('self.heroBlurView.alpha=0.72;', mb_code)
+        self.assertIn('self.posterView.alpha=0.88;self.heroBlurView.alpha=0.22;', mb_code)
 
 
     def test_native_playback_and_cicada_soft_decode_eliminate_web_playback(self):
@@ -333,5 +333,117 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('resolveMacCMSStreamByTitleForResult', mp_code)
 
 
+
+    def test_header_declaration_background_recovery_metadata_and_vip_rescue(self):
+        """Verifies header declaration, background listener rebind, [object Object] stripping, dyttzyapi primary CMS, and EPG replay."""
+        mb_h = (SOURCES / 'MediaBrowserViewController.h').read_text(encoding='utf-8')
+        self.assertIn('- (void)activate:(NSDictionary *)source keepingHome:(BOOL)keepingHome;', mb_h)
+
+        svc_py = (ROOT / 'Scripts' / 'host_service_runtime.py').read_text(encoding='utf-8')
+        self.assertIn('def rebind_active_listeners():', svc_py)
+        self.assertIn('def _rebind_server_socket(server):', svc_py)
+
+        import host_media_runtime
+        cleaned = host_media_runtime.detail({
+            'vod_id': '99',
+            'vod_name': '空枪',
+            'vod_class': '[object Object]',
+            'vod_remarks': '[object Object]',
+            'vod_play_from': 'dytt',
+            'vod_play_url': '第1集$https://play.phimgood.com/2026/index.m3u8'
+        }, '99')
+        self.assertEqual(cleaned['name'], '空枪')
+        self.assertNotIn('type', cleaned)
+        self.assertNotIn('remarks', cleaned)
+
+        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        self.assertIn('pendingNativeReplayProgram', root_code)
+        self.assertIn('refreshListenersAfterForeground', root_code)
+
+
+
+    def test_encryption_drm_and_comprehensive_stream_recognition(self):
+        """Verifies HLS key normalization, inline key URI relay, disguised TS header stripping, CENC/ClearKey normalization, base64/encrypt=3 extraction, and AVAssetResourceLoaderDelegate."""
+        import base64
+        import host_media_runtime
+        from host_media_relay import MediaRelay
+        from csp_adapter import _extract_stream_from_html, _aes_cbc_decrypt, _aes_cbc_encrypt
+
+        # 1. HLS key normalization (raw 16B, 32-hex, base64, JSON)
+        expected_key = bytes(range(16))
+        self.assertEqual(MediaRelay._normalize_hls_key_bytes(expected_key), expected_key)
+        self.assertEqual(MediaRelay._normalize_hls_key_bytes(expected_key.hex().encode('ascii')), expected_key)
+        self.assertEqual(MediaRelay._normalize_hls_key_bytes(base64.b64encode(expected_key)), expected_key)
+        self.assertEqual(
+            MediaRelay._normalize_hls_key_bytes(('{"key":"' + expected_key.hex() + '"}').encode('utf-8')),
+            expected_key,
+        )
+
+        # 2. Inline #EXT-X-KEY URI (data:, base64:, hex:) rewrite to local HTTP /media/<token>
+        relay = MediaRelay()
+        b64_key = base64.b64encode(expected_key).decode('ascii')
+        m3u8_in = (
+            '#EXTM3U\n'
+            f'#EXT-X-KEY:METHOD=AES-128,URI="data:application/octet-stream;base64,{b64_key}"\n'
+            '#EXTINF:6.0,\n'
+            'https://cdn.example/seg0.ts\n'
+        )
+        rewritten = relay.rewrite(
+            m3u8_in, 'https://cdn.example/index.m3u8', {}, ('https', 'cdn.example'), 'http://127.0.0.1:18787'
+        )
+        self.assertIn('URI="http://127.0.0.1:18787/media/', rewritten)
+        self.assertEqual(len(relay.inline_keys), 1)
+        self.assertEqual(next(iter(relay.inline_keys.values()))[0], expected_key)
+
+        # 3. Disguised TS image header stripping (fake PNG header before 3x 188B 0x47 sync bytes)
+        fake_png = b'\x89PNG\r\n\x1a\nFAKEHEADER'
+        ts_payload = (b'\x47' + b'\x00' * 187) * 3
+        stripped = MediaRelay._strip_disguised_ts_prefix(fake_png + ts_payload)
+        self.assertEqual(stripped, ts_payload)
+        # Normal fMP4 box header is never stripped
+        fmp4_payload = b'\x00\x00\x00\x18ftypisom' + ts_payload
+        self.assertEqual(MediaRelay._strip_disguised_ts_prefix(fmp4_payload), fmp4_payload)
+
+        # 4. ClearKey / CENC key normalization & base64 URL decoding in host_media_runtime.playback
+        jwk_clear_key = {
+            'keys': [{'kty': 'oct', 'k': base64.urlsafe_b64encode(expected_key).decode('ascii').rstrip('=')}]
+        }
+        b64_mp4_url = base64.b64encode(b'https://cdn.example/cenc_video.mp4').decode('ascii')
+        play_res = host_media_runtime.playback({
+            'vurl': b64_mp4_url,
+            'clearKey': jwk_clear_key,
+            'licenseUrl': 'https://lic.example/ widevine'.replace(' ', ''),
+        })
+        self.assertEqual(play_res['url'], 'https://cdn.example/cenc_video.mp4')
+        self.assertEqual(play_res['drmKey'], expected_key.hex())
+        self.assertEqual(play_res['licenseUrl'], 'https://lic.example/widevine')
+        self.assertTrue(play_res['directMedia'])
+        self.assertTrue(play_res['nativePlayable'])
+
+        # 5. MacPlayerConfig / encrypt=3 / atob() extraction & AES-ECB fallback in csp_adapter
+        rev_b64 = base64.b64encode(b'https://cdn.example/live/stream.m3u8').decode('ascii')[::-1]
+        html_enc3 = f'<script>var MacPlayerConfig = {{"encrypt": 3, "url": "{rev_b64}"}};</script>'
+        self.assertEqual(_extract_stream_from_html(html_enc3), 'https://cdn.example/live/stream.m3u8')
+
+        atob_b64 = base64.b64encode(b'https://cdn.example/atob/index.m3u8').decode('ascii')
+        html_atob = f'<script>const play = atob("{atob_b64}");</script>'
+        self.assertEqual(_extract_stream_from_html(html_atob), 'https://cdn.example/atob/index.m3u8')
+
+        ecb_cipher = _aes_cbc_encrypt(b'{"list":[{"vod_id":"1"}]}', b'1234567887654321', b'')
+        ecb_plain = _aes_cbc_decrypt(ecb_cipher, b'1234567887654321', b'wrong_iv_1234567')
+        self.assertEqual(ecb_plain, b'{"list":[{"vod_id":"1"}]}')
+
+        # 6. Native iOS AVAssetResourceLoaderDelegate & /cenc/ endpoint contracts
+        mp_code = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
+        self.assertIn('AVAssetResourceLoaderDelegate', mp_code)
+        self.assertIn('resourceLoader:(AVAssetResourceLoader *)resourceLoader shouldWaitForLoadingOfRequestedResource:', mp_code)
+        self.assertIn('MediaPlaybackNormalizedAES128KeyData', mp_code)
+        ms_code = (PLUGINS / 'media-service.py').read_text(encoding='utf-8')
+        self.assertIn('register_cenc_stream', ms_code)
+        self.assertIn('serve_cenc_stream', ms_code)
+
+
 if __name__ == '__main__':
+
+
     unittest.main()

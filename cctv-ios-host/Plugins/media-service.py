@@ -85,6 +85,8 @@ class Server(ThreadingHTTPServer):
         self.artwork_relay = MediaRelay()
         self.plugin_proxy_lock = threading.Lock()
         self.plugin_proxy_entries = collections.OrderedDict()
+        self.cenc_entries = collections.OrderedDict()
+        self.cenc_sessions = collections.OrderedDict()
         self.host_fetch_token = uuid.uuid4().hex
         self.slots = threading.BoundedSemaphore(6)
         super().__init__(address, Handler)
@@ -95,6 +97,48 @@ class Server(ThreadingHTTPServer):
         with self.plugin_proxy_lock:
             self.plugin_proxy_entries.clear()
         super().server_close()
+
+    def register_cenc_stream(self, url, drm_key, headers):
+        token = uuid.uuid4().hex
+        now = time.monotonic()
+        with self.plugin_proxy_lock:
+            while len(self.cenc_entries) >= 64:
+                self.cenc_entries.popitem(last=False)
+            self.cenc_entries[token] = {
+                'url': str(url),
+                'key': str(drm_key).lower(),
+                'headers': dict(headers or {}),
+                'created': now,
+            }
+        return f'http://127.0.0.1:{self.server_port}/cenc/{token}.mp4'
+
+    def get_cenc_session(self, token):
+        clean_tok = str(token or '').split('.', 1)[0]
+        if not re.fullmatch(r'[0-9a-f]{32}', clean_tok):
+            return None
+        with self.plugin_proxy_lock:
+            entry = self.cenc_entries.get(clean_tok)
+            if not entry:
+                return None
+            self.cenc_entries.move_to_end(clean_tok)
+            sess_key = (entry['url'], entry['key'], tuple(sorted(entry['headers'].items())))
+            cached = self.cenc_sessions.get(sess_key)
+            if cached is not None:
+                self.cenc_sessions.move_to_end(sess_key)
+                return cached
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            '_cctvhost_cenc_helper',
+            os.path.join(os.path.dirname(os.path.realpath(__file__)), 'example-encrypted-media.py')
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        session = mod.CENCSession(entry['url'], entry['key'], entry['headers'])
+        with self.plugin_proxy_lock:
+            while len(self.cenc_sessions) >= 8:
+                self.cenc_sessions.popitem(last=False)
+            self.cenc_sessions[sess_key] = session
+        return session
 
     def register_plugin_proxy(self, url, headers):
         token = uuid.uuid4().hex
@@ -322,6 +366,44 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, TimeoutError):
                 self.close_connection = True
 
+    def serve_cenc_stream(self, path, head=False):
+        token = path[len('/cenc/'):]
+        session = self.server.get_cenc_session(token)
+        if session is None:
+            self.send(404, {'ok': False, 'error': 'CENC 解密会话不存在或已过期'}, head)
+            return
+        range_header = self.headers.get('Range', '')
+        m = re.fullmatch(r'bytes=(\d*)-(\d*)', str(range_header).strip(), re.I) if range_header else None
+        total = session.size
+        if m:
+            s_txt, e_txt = m.groups()
+            start = int(s_txt) if s_txt else max(0, total - int(e_txt or 0))
+            end = int(e_txt) if e_txt else total - 1
+            partial = True
+        else:
+            start, end, partial = 0, min(total - 1, 2 * 1024 * 1024 - 1), False
+        end = min(end, total - 1, start + 8 * 1024 * 1024 - 1)
+        if start < 0 or start >= total or end < start:
+            self.send_response(416)
+            self.send_header('Content-Range', f'bytes */{total}')
+            self.send_header('Content-Length', '0')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            return
+        body = b'' if head else session.read(start, end)
+        length = end - start + 1
+        self.send_response(206 if partial else 200)
+        self.send_header('Content-Type', 'video/mp4')
+        self.send_header('Accept-Ranges', 'bytes')
+        if partial:
+            self.send_header('Content-Range', f'bytes {start}-{end}/{total}')
+        self.send_header('Content-Length', str(length if head else len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        if not head and body:
+            self.wfile.write(body)
+
     def serve_plugin_proxy(self, method, path, query):
         args = {key: values[-1] for key, values in query.items()}
         if path.startswith('/proxy/'):
@@ -448,6 +530,12 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/artwork/'):
             self.server.artwork_relay.serve(self, path.rsplit('/', 1)[-1], True)
             return
+        if path.startswith('/cenc/'):
+            try:
+                self.serve_cenc_stream(path, True)
+            except Exception as error:
+                self.send(502, {'ok': False, 'error': str(error)}, True)
+            return
         if path.startswith('/media/'):
             self.server.relay.serve(self, path.rsplit('/', 1)[-1], True)
             return
@@ -545,6 +633,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parts.path.startswith('/artwork/'):
                 self.server.artwork_relay.serve(self, parts.path.rsplit('/', 1)[-1])
+                return
+            if parts.path.startswith('/cenc/'):
+                self.serve_cenc_stream(parts.path, False)
                 return
             if parts.path.startswith('/media/'):
                 self.server.relay.serve(self, parts.path.rsplit('/', 1)[-1])
@@ -664,6 +755,13 @@ class Handler(BaseHTTPRequestHandler):
                 if result.get('proxy'):
                     result['originalURL'] = result['url']
                     result['url'] = self.server.register_plugin_proxy(result['url'], headers)
+                    result['headers'] = {}
+                    result['baseHeaders'] = {}
+                    result['directMedia'] = True
+                    result['nativePlayable'] = True
+                elif result.get('drmKey') and not is_declared_hls(result, result.get('url')) and not is_dash_media(result, result.get('url')):
+                    result['originalURL'] = result['url']
+                    result['url'] = self.server.register_cenc_stream(result['url'], result['drmKey'], headers)
                     result['headers'] = {}
                     result['baseHeaders'] = {}
                     result['directMedia'] = True
