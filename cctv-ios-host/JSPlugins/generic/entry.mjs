@@ -20,7 +20,22 @@ function normalize(path) {
 }
 const directory=p=>p.includes('/')?p.slice(0,p.lastIndexOf('/')):''
 const path={join:(...p)=>normalize(p.join('/')),resolve:(...p)=>normalize(p.join('/')),dirname:directory,basename:p=>String(p).split('/').at(-1),extname:p=>String(p).match(/\.[^/.]+$/)?.[0]||'',sep:'/'}
-const read=p=>g.__hostReadPackageFile(normalize(p))
+function patchLegacyPluginSource(rawText){
+  let text=String(rawText??'')
+  if(text.includes('id: "joeshu.yqk"')&&text.includes('function parseLink(link)')){
+    text=text.replace(
+      'var m = String(link || "").match(/^https:\/\/m\.yqk3hxe\.com\/play\/(\d+)(?:\?epId=(\d+))?$/);',
+      'var rawLink = String(link || "").trim(); if (/^\d+(?:\?epId=\d+)?$/.test(rawLink)) rawLink = YQK.site + "/play/" + rawLink; else if (/^\/play\/\d+/.test(rawLink)) rawLink = YQK.site + rawLink; var m = rawLink.match(/^https?:\/\/[^\/]+\/play\/(\d+)(?:\?epId=(\d+))?$/);'
+    )
+    text=text.replace(/Math\.min\(20000,/g,'Math.min(5000,')
+    text=text.replace(
+      'async function yqkProbeHls(url,headers,budget,depth){',
+      'async function yqkProbeHls(url,headers,budget,depth){if(/^https?:\/\//i.test(String(url||""))&&/\.(?:m3u8|mp4)(?:[?#]|$)/i.test(String(url||""))){try{var rFast=await CCTVHttp.get(url,{timeout:3500,headers:headers});var stFast=Number(rFast.statusCode||rFast.status||0),bdFast=String(rFast.data||"");if(stFast===200&&/^\s*#EXTM3U/i.test(bdFast))return url;if(stFast===0||stFast===403||stFast>=500)return url;}catch(_e){return url;}}'
+    )
+  }
+  return text
+}
+const read=p=>patchLegacyPluginSource(g.__hostReadPackageFile(normalize(p)))
 const fs={readFileSync:(p,encoding)=>{const name=normalize(p);if(files.has(name)){const value=read(name);return encoding?value:Buffer.from(value)}const bytes=virtualFiles.get(name);if(!bytes)throw new Error('文件不存在：'+name);return encoding?bytes.toString(typeof encoding==='string'?encoding:encoding.encoding||'utf8'):Buffer.from(bytes)},writeFileSync:(p,value,options={})=>{const name=normalize(p),bytes=Buffer.from(value,typeof options==='string'?options:options.encoding||'utf8');if(bytes.length>1024*1024)throw new Error('JS 临时文件超过 1MB');virtualFiles.set(name,bytes)},appendFileSync:(p,value,options={})=>{const name=normalize(p),bytes=Buffer.from(value,typeof options==='string'?options:options.encoding||'utf8');const current=virtualFiles.get(name)||Buffer.alloc(0);if(current.length+bytes.length>1024*1024)throw new Error('JS 临时文件超过 1MB');virtualFiles.set(name,Buffer.concat([current,bytes]))},unlinkSync:p=>virtualFiles.delete(normalize(p)),existsSync:p=>files.has(normalize(p))||virtualFiles.has(normalize(p)),mkdirSync:()=>{}}
 function urlJoin(base,value){try{return new URL(String(value||''),String(base||'')).toString()}catch{return String(value||'')}}
 async function axiosRequest(input={}){
@@ -223,8 +238,329 @@ async function invokeSpider(operation,payload={}){
 }
 function result(value){if(typeof value==='string'){try{return JSON.parse(value)}catch{}}return value}
 function items(value){value=result(value);return Array.isArray(value)?value:(value?.list||value?.items||[])}
-function videos(value){return items(value).map(row=>({id:String(row.id??row.vod_id??''),name:String(row.name??row.vod_name??''),poster:String(row.poster??row.vod_pic??''),remarks:String(row.remarks??row.vod_remarks??'')})).filter(row=>row.id&&row.name)}
+function videos(value){return items(value).map(row=>({id:String(row.id??row.vod_id??''),name:cleanDisplayString(row.name??row.vod_name??''),poster:cleanDisplayString(row.poster??row.vod_pic??''),remarks:cleanDisplayString(row.remarks??row.vod_remarks??'')})).filter(row=>row.id&&row.name)}
 function media(value){value=result(value);if(typeof value==='string')return {url:value};if(!value||typeof value.url!=='string'||!value.url.trim())throw new Error(value?.message||'插件未返回可播放 URL');if(!/^https?:\/\//i.test(value.url))throw new Error('插件返回的播放地址不是 HTTP/HTTPS');return {...value,parse:Number(value.parse)>0?1:0,headers:value.headers||value.header||{}}}
+
+let weboxDefinedSpec=null
+function cleanDisplayString(val){
+  if(val==null)return ''
+  if(typeof val==='string'){
+    const s=val.replace(/\[object\s+[^\]]+\]/gi,'').trim()
+    return ['null','undefined','nan','[object object]','{}','[]'].includes(s.toLowerCase())?'':s
+  }
+  if(typeof val==='number'||typeof val==='boolean')return String(val)
+  if(Array.isArray(val))return val.map(cleanDisplayString).filter(Boolean).join(' / ')
+  if(typeof val==='object'){
+    for(const k of ['name','title','label','text','value','vod_name','remarks'])if(typeof val[k]==='string'&&val[k].trim())return cleanDisplayString(val[k])
+  }
+  return ''
+}
+function parseAsn1Integers(der){
+  const ints=[]
+  function walk(buf,offset,end){
+    while(offset<end){
+      const tag=buf[offset++];if(offset>=end)break
+      let len=buf[offset++]
+      if(len&0x80){const nBytes=len&0x7f;len=0;for(let i=0;i<nBytes;i++)len=(len<<8)|buf[offset++]}
+      const contentEnd=Math.min(end,offset+len)
+      if(tag===0x02){
+        let slice=buf.subarray(offset,contentEnd)
+        while(slice.length>1&&slice[0]===0x00)slice=slice.subarray(1)
+        ints.push({bytes:slice,value:BigInt('0x'+(Buffer.from(slice).toString('hex')||'0'))})
+      }else if((tag&0x20)||tag===0x04||tag===0x03){
+        walk(buf,tag===0x03?offset+1:offset,contentEnd)
+      }
+      offset=contentEnd
+    }
+  }
+  walk(der,0,der.length)
+  return ints
+}
+function bigIntModPow(base,exp,mod){
+  let result=1n;base=((base%mod)+mod)%mod
+  while(exp>0n){if(exp&1n)result=(result*base)%mod;exp>>=1n;base=(base*base)%mod}
+  return result
+}
+function pemToDerBuffer(pem){
+  return Buffer.from(String(pem||'').replace(/-----[^-]+-----/g,'').replace(/\s+/g,''),'base64')
+}
+function weboxRsaEncrypt(plainText,publicKeyPem){
+  const ints=parseAsn1Integers(pemToDerBuffer(publicKeyPem))
+  const bigInts=ints.filter(x=>x.bytes.length>=32)
+  const nObj=bigInts[0],eObj=ints[ints.indexOf(nObj)+1]
+  const k=nObj.bytes.length,maxChunk=k-11,data=Buffer.from(String(plainText??''),'utf8'),out=[]
+  for(let off=0;off<data.length||(data.length===0&&off===0);off+=maxChunk){
+    const chunk=data.subarray(off,Math.min(data.length,off+maxChunk)),padLen=k-3-chunk.length,block=Buffer.alloc(k)
+    block[0]=0x00;block[1]=0x02
+    for(let i=0;i<padLen;i++){let r=0;while(r===0)r=Math.floor(Math.random()*255)+1;block[2+i]=r}
+    block[2+padLen]=0x00;chunk.copy(block,3+padLen)
+    const c=bigIntModPow(BigInt('0x'+block.toString('hex')),eObj.value,nObj.value)
+    out.push(Buffer.from(c.toString(16).padStart(k*2,'0'),'hex'))
+    if(data.length===0)break
+  }
+  return Buffer.concat(out).toString('base64')
+}
+function weboxRsaDecrypt(base64Cipher,privateKeyPem){
+  const ints=parseAsn1Integers(pemToDerBuffer(privateKeyPem))
+  const bigInts=ints.filter(x=>x.bytes.length>=64)
+  const nObj=bigInts[0],dObj=bigInts[1],k=nObj.bytes.length
+  const raw=Buffer.from(String(base64Cipher||'').replace(/\s+/g,''),'base64'),out=[]
+  for(let off=0;off<raw.length;off+=k){
+    const slice=raw.subarray(off,Math.min(raw.length,off+k))
+    const m=bigIntModPow(BigInt('0x'+slice.toString('hex')),dObj.value,nObj.value)
+    const block=Buffer.from(m.toString(16).padStart(k*2,'0'),'hex')
+    if(block[0]===0x00&&(block[1]===0x02||block[1]===0x01)){
+      let sep=2;while(sep<block.length&&block[sep]!==0x00)sep++
+      if(sep<block.length)out.push(block.subarray(sep+1))
+    }
+  }
+  return Buffer.concat(out).toString('utf8')
+}
+function weboxBuild4kvmPlayUrl(input){
+  const dataid=String(input?.dataid??'').trim(),episodeId=String(input?.episodeId??'').trim(),quality=String(input?.quality??'').trim(),playKey=String(input?.playKey??'').trim()
+  const now=Date.now(),st=Number(input?.serverTime),plt=Number(input?.loadedAt)
+  const t=String(Math.floor((Number.isFinite(st)&&st>0&&Number.isFinite(plt)&&plt>0)?(st+(now-plt)):now))
+  const msg=`${dataid}:${t}:${episodeId}`
+  const s=CryptoJS.HmacSHA256(CryptoJS.enc.Utf8.parse(msg),CryptoJS.enc.Utf8.parse(episodeId)).toString(CryptoJS.enc.Hex).slice(0,32)
+  const secret='nbmovie2024secretkey',pkBytes=Buffer.from(playKey,'utf8'),xored=Buffer.alloc(pkBytes.length)
+  for(let i=0;i<pkBytes.length;i++)xored[i]=pkBytes[i]^secret.charCodeAt(i%secret.length)
+  const k=xored.toString('base64').replace(/\+/g,'-').replace(/\//g,'_')
+  return {url:`/video/play?p=${dataid}&v=${episodeId}&q=${quality}&s=${s}&t=${t}&k=${k}`}
+}
+function createWeBoxContext(spec,payload){
+  const settings={}
+  if(Array.isArray(spec?.settings?.fields)){
+    for(const f of spec.settings.fields)if(f&&f.key)settings[f.key]=f.default??''
+  }
+  if(payload?.options&&typeof payload.options==='object'&&!Array.isArray(payload.options))Object.assign(settings,payload.options)
+  else if(typeof payload?.options==='string'&&payload.options.trim().startsWith('{')){try{Object.assign(settings,JSON.parse(payload.options))}catch{}}
+  const storeNs='webox:'+String(spec?.id||payload?.serviceID||payload?.name||payload?.entry||'default')
+  async function weboxHttp(method,url,options={}){
+    let target=new URL(String(url))
+    if(options.query&&typeof options.query==='object'){
+      for(const [k,v] of Object.entries(options.query))if(v!=null&&v!=='')target.searchParams.set(k,String(v))
+    }
+    const headers={...(options.headers||{})}
+    if(!Object.keys(headers).some(k=>k.toLowerCase()==='cookie')){
+      const c=cookieHeader(target.toString());if(c)headers.Cookie=c
+    }
+    let body=undefined
+    if(!['GET','HEAD'].includes(method)){
+      if(options.json!==undefined){body=JSON.stringify(options.json);if(!Object.keys(headers).some(k=>k.toLowerCase()==='content-type'))headers['Content-Type']='application/json'}
+      else if(options.text!==undefined)body=String(options.text)
+      else if(options.body!==undefined)body=options.body
+    }
+    const timeout=Math.min(Math.max(Number(options.timeoutMs||options.timeout)||15000,1000),30000)
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout)
+    try{
+      const response=await fetch(target.toString(),{method,headers,body,signal:controller.signal,redirect:'follow'})
+      const bytes=Buffer.from(await response.arrayBuffer())
+      const responseHeaders=Object.fromEntries(response.headers)
+      acceptCookies(response.url||target.toString(),responseHeaders)
+      const rType=String(options.responseType||'text').toLowerCase()
+      const data=rType==='base64'?bytes.toString('base64'):rType==='json'?JSON.parse(bytes.toString('utf8')):bytes.toString('utf8')
+      return {status:response.status,url:response.url||target.toString(),headers:responseHeaders,data}
+    }finally{clearTimeout(timer)}
+  }
+  return {
+    settings,
+    fail(code,message,extra){const err=new Error(String(message||code||'WeBox Error'));err.code=String(code||'PLUGIN_ERROR');if(extra&&typeof extra==='object')Object.assign(err,extra);throw err},
+    signal:{aborted:false,throwIfAborted(){}},
+    cache:{generation:1,seconds(def){const n=Number(def);return Number.isFinite(n)&&n>=0?n:60}},
+    url:{
+      resolve(raw,base){return new URL(String(raw??''),String(base??'')).toString()},
+      origin(u){return new URL(String(u??'')).origin}
+    },
+    http:{
+      get:(url,options={})=>weboxHttp('GET',url,options),
+      post:(url,options={})=>weboxHttp('POST',url,options)
+    },
+    html:{load:(html,opts)=>cheerio.load(String(html??''),opts)},
+    store:{
+      async get(key){const raw=g.__hostStorage('get',storeNs+':'+String(key||''));if(!raw)return null;try{return JSON.parse(raw)}catch{return raw}},
+      async set(key,val){g.__hostStorage('set',storeNs+':'+String(key||''),JSON.stringify(val));return val}
+    },
+    crypto:{
+      md5:s=>CryptoJS.MD5(CryptoJS.enc.Utf8.parse(String(s??''))).toString(CryptoJS.enc.Hex),
+      base64Encode:s=>Buffer.from(String(s??''),'utf8').toString('base64'),
+      base64Decode:s=>Buffer.from(String(s??'').replace(/\s+/g,''),'base64').toString('utf8'),
+      aesEncrypt(data,key,iv,options={}){
+        const inEnc=String(options.inputEncoding||'utf8').toLowerCase(),outEnc=String(options.outputEncoding||'base64').toLowerCase()
+        const wordData=inEnc==='hex'?CryptoJS.enc.Hex.parse(String(data??'')):inEnc==='base64'?CryptoJS.enc.Base64.parse(String(data??'')):CryptoJS.enc.Utf8.parse(String(data??''))
+        const encrypted=CryptoJS.AES.encrypt(wordData,CryptoJS.enc.Utf8.parse(String(key??'')),{iv:CryptoJS.enc.Utf8.parse(String(iv??'')),mode:CryptoJS.mode.CBC,padding:CryptoJS.pad.Pkcs7})
+        return outEnc==='hex'?encrypted.ciphertext.toString(CryptoJS.enc.Hex):encrypted.ciphertext.toString(CryptoJS.enc.Base64)
+      },
+      aesDecrypt(data,key,iv,options={}){
+        const inEnc=String(options.inputEncoding||'base64').toLowerCase(),outEnc=String(options.outputEncoding||'utf8').toLowerCase()
+        const cipherParams=CryptoJS.lib.CipherParams.create({ciphertext:inEnc==='hex'?CryptoJS.enc.Hex.parse(String(data??'')):CryptoJS.enc.Base64.parse(String(data??'').replace(/\s+/g,''))})
+        const decrypted=CryptoJS.AES.decrypt(cipherParams,CryptoJS.enc.Utf8.parse(String(key??'')),{iv:CryptoJS.enc.Utf8.parse(String(iv??'')),mode:CryptoJS.mode.CBC,padding:CryptoJS.pad.Pkcs7})
+        return outEnc==='hex'?decrypted.toString(CryptoJS.enc.Hex):outEnc==='base64'?decrypted.toString(CryptoJS.enc.Base64):decrypted.toString(CryptoJS.enc.Utf8)
+      },
+      rsaEncrypt:weboxRsaEncrypt,
+      rsaDecrypt:weboxRsaDecrypt
+    },
+    compute:{
+      async run(options={}){
+        const {code,input,binaries}=options
+        if(typeof g.WebAssembly!=='undefined'&&g.WebAssembly&&typeof g.WebAssembly.instantiate==='function'&&code){
+          try{
+            const decodedBins={}
+            for(const [k,v] of Object.entries(binaries||{}))decodedBins[k]=typeof v==='string'?Uint8Array.from(Buffer.from(v,'base64')):v
+            const fn=new Function('input','binaries',`return (${code})(input, binaries);`)
+            return await fn(input,decodedBins)
+          }catch(_e){}
+        }
+        if(input&&input.dataid!==undefined&&input.playKey!==undefined)return weboxBuild4kvmPlayUrl(input)
+        throw new Error('当前运行环境不支持 WebAssembly 动态计算')
+      }
+    },
+    binary:{
+      size:h=>h?Number(h.byteLength??h.length??0):0,
+      read:(h,offset,length)=>Uint8Array.from(Buffer.from(h).subarray(offset,offset+length)),
+      slice:(h,offset,length)=>Buffer.from(Buffer.from(h).subarray(offset,offset+length)),
+      write:(h,offset,bytes)=>{const copy=Buffer.from(h);Buffer.from(bytes).copy(copy,offset);return copy},
+      concat:list=>Buffer.concat((list||[]).map(x=>Buffer.from(x)))
+    }
+  }
+}
+const weboxEpisodePrefix='webox:'
+function createWeBoxPlugin(spec,payload){
+  const ctx=createWeBoxContext(spec,payload)
+  const cursors=new Map()
+  let cachedFilterFields=null,primaryCategoryKey='category',defaultFilters={}
+  async function ensureFilterFields(){
+    if(cachedFilterFields)return cachedFilterFields
+    cachedFilterFields=typeof spec.filters==='function'?await spec.filters(ctx,{}):[]
+    if(!Array.isArray(cachedFilterFields))cachedFilterFields=[]
+    defaultFilters={}
+    for(const f of cachedFilterFields){
+      if(f&&f.key)defaultFilters[f.key]=f.default!==undefined?String(f.default):String(f.options?.[0]?.value??'')
+    }
+    const catField=cachedFilterFields.find(f=>f&&f.key==='category')||cachedFilterFields[0]
+    primaryCategoryKey=catField?.key||'category'
+    return cachedFilterFields
+  }
+  function mapWeBoxItems(list){
+    return (Array.isArray(list)?list:[]).filter(x=>x&&typeof x==='object'&&x.id!=null).map(x=>({
+      id:String(x.id),
+      name:cleanDisplayString(x.title||x.name||x.id),
+      poster:cleanDisplayString(x.poster||x.pic||''),
+      remarks:cleanDisplayString(x.subtitle||x.rating||x.remarks||'')
+    })).filter(x=>x.id&&x.name)
+  }
+  return {
+    name:spec.name||payload?.name||'WeBox 影视源',
+    meta:{name:spec.name||payload?.name||'WeBox 影视源',key:spec.id||'webox'},
+    async home(args={}){
+      const fields=await ensureFilterFields()
+      const catField=fields.find(f=>f&&f.key===primaryCategoryKey)
+      const categories=Array.isArray(catField?.options)?catField.options.map(o=>({id:String(o.value??''),name:cleanDisplayString(o.label||o.name||o.value||'全部')})):[{id:'all',name:'全部'}]
+      const filters={}
+      for(const cat of categories){
+        const catFilters=[]
+        for(const f of fields){
+          if(!f||!f.key||f.key===primaryCategoryKey||!Array.isArray(f.options))continue
+          if(f.showWhen&&f.showWhen.key===primaryCategoryKey&&String(f.showWhen.equals)!==String(cat.id))continue
+          catFilters.push({key:String(f.key),name:cleanDisplayString(f.label||f.name||f.key),value:f.options.map(o=>({n:cleanDisplayString(o.label??o.name??o.value??'全部'),v:String(o.value??'')}))})
+        }
+        if(catFilters.length)filters[cat.id]=catFilters
+      }
+      const reqFilters={...defaultFilters}
+      const res=await spec.list(ctx,{cursor:null,filters:reqFilters,refresh:Boolean(args?.refresh)})
+      const cursorKey=JSON.stringify(reqFilters)
+      if(res?.nextCursor)cursors.set(cursorKey+'|2',String(res.nextCursor))
+      return {categories,filters,items:mapWeBoxItems(res?.items)}
+    },
+    async category(args={}){
+      await ensureFilterFields()
+      const page=Math.max(1,Number(args?.page)||1)
+      const reqFilters={...defaultFilters,...(args?.filters||{})}
+      if(args?.categoryId!==undefined&&primaryCategoryKey)reqFilters[primaryCategoryKey]=String(args.categoryId)
+      const cursorKey=JSON.stringify(reqFilters)
+      const cursor=page<=1?null:(cursors.get(cursorKey+'|'+page)||String(page))
+      const res=await spec.list(ctx,{cursor,filters:reqFilters,refresh:Boolean(args?.refresh)})
+      if(res?.nextCursor)cursors.set(cursorKey+'|'+(page+1),String(res.nextCursor))
+      return {page,items:mapWeBoxItems(res?.items),hasMore:Boolean(res?.nextCursor)}
+    },
+    async search(args={}){
+      if(typeof spec.search!=='function')return {page:1,items:[],hasMore:false}
+      await ensureFilterFields()
+      const page=Math.max(1,Number(args?.page)||1)
+      const query=String(args?.keyword||args?.wd||args?.query||'').trim()
+      if(!query)return {page:1,items:[],hasMore:false}
+      const cursorKey='search:'+query
+      const cursor=page<=1?null:(cursors.get(cursorKey+'|'+page)||String(page))
+      const res=await spec.search(ctx,{query,cursor,filters:{...defaultFilters,...(args?.filters||{})}})
+      if(res?.nextCursor)cursors.set(cursorKey+'|'+(page+1),String(res.nextCursor))
+      return {page,items:mapWeBoxItems(res?.items),hasMore:Boolean(res?.nextCursor)}
+    },
+    async detail(args={}){
+      const contentId=String(args?.id??args?.itemId??'')
+      const det=await spec.detail(ctx,{id:contentId})
+      const groups=Array.isArray(det?.groups)?det.groups:[]
+      const lines=groups.map((grp,idx)=>({
+        id:String(grp?.id??`line-${idx+1}`),
+        name:cleanDisplayString(grp?.name||`线路 ${idx+1}`),
+        episodes:(Array.isArray(grp?.episodes)?grp.episodes:[]).filter(ep=>ep&&ep.id!=null).map((ep,epIdx)=>({
+          id:weboxEpisodePrefix+encodeURIComponent(JSON.stringify({contentId:String(det?.id??contentId),groupId:String(grp?.id??'main'),episodeId:String(ep.id)})),
+          name:cleanDisplayString(ep.name||ep.title||`第 ${epIdx+1} 集`)
+        }))
+      })).filter(l=>l.episodes.length)
+      return {
+        id:String(det?.id??contentId),
+        name:cleanDisplayString(det?.title||det?.name||contentId),
+        poster:cleanDisplayString(det?.poster||''),
+        description:cleanDisplayString(det?.summary||det?.description||''),
+        remarks:cleanDisplayString(det?.subtitle||det?.rating||''),
+        lines
+      }
+    },
+    async play(args={}){
+      let contentId=String(args?.contentId||args?.id||''),groupId=String(args?.lineId||args?.groupId||'main'),episodeId=String(args?.episodeId||args?.id||'')
+      if(typeof args?.id==='string'&&args.id.startsWith(weboxEpisodePrefix)){
+        try{
+          const parsed=JSON.parse(decodeURIComponent(args.id.slice(weboxEpisodePrefix.length)))
+          contentId=String(parsed.contentId||contentId)
+          groupId=String(args?.lineId||parsed.groupId||groupId)
+          episodeId=String(parsed.episodeId||episodeId)
+        }catch{}
+      }
+      const res=await spec.play(ctx,{contentId,groupId,episodeId,purpose:'playback',refresh:Boolean(args?.refresh)})
+      const sources=Array.isArray(res?.sources)?res.sources:[]
+      if(!sources.length)throw new Error('WeBox 插件未返回可播放线路')
+      const mapped=sources.map((s,idx)=>{
+        const headers=s?.headers&&typeof s.headers==='object'?s.headers:{}
+        if(typeof s?.manifest==='string'&&s.manifest.trim().startsWith('#EXTM3U')){
+          return {
+            name:cleanDisplayString(s.name||`线路 ${idx+1}`),
+            url:String(s.baseUrl||'https://localhost/playlist.m3u8').trim(),
+            manifestText:s.manifest,
+            baseUrl:String(s.baseUrl||'https://localhost/playlist.m3u8').trim(),
+            headers,
+            format:'hls',
+            contentType:'application/vnd.apple.mpegurl',
+            directMedia:true,
+            nativePlayable:true
+          }
+        }
+        const url=String(s?.url||'').trim()
+        const isHls=/mpegurl/i.test(String(s?.mime||''))||/\.m3u8(?:$|[?#])/i.test(url)
+        return {
+          name:cleanDisplayString(s?.name||`线路 ${idx+1}`),
+          url,
+          headers,
+          contentType:String(s?.mime||(isHls?'application/vnd.apple.mpegurl':'video/mp4')),
+          ...(isHls?{format:'hls'}:{}),
+          directMedia:true,
+          nativePlayable:true
+        }
+      }).filter(s=>s.url||s.manifestText)
+      if(!mapped.length)throw new Error('WeBox 插件未返回有效播放地址')
+      return {...mapped[0],alternates:mapped.slice(1)}
+    }
+  }
+}
+
 const hamoEpisodePrefix='hamo-v3:'
 function hamoGlobals(payload){
   g.$http=req
@@ -271,6 +607,7 @@ async function load(payload){
   g.request=async(...args)=>(await g.req(...args)).content
   const localScope='catvod:'+String(payload.dataDirectory||payload.packageRoot||payload.name||'default')
   g.local=isCatVodProtocol(payload.protocol)?{get:(key,fallback=null)=>g.__hostStorage('get',localScope+':'+String(key||''))??fallback,set:(key,value)=>g.__hostStorage('set',localScope+':'+String(key||''),String(value??'')),delete:key=>g.__hostStorage('remove',localScope+':'+String(key||''))}:{get:(namespace,key)=>g.__hostStorage('get',String(namespace||'')+':'+String(key||''))||'',set:(namespace,key,value)=>g.__hostStorage('set',String(namespace||'')+':'+String(key||''),String(value??'')),delete:(namespace,key)=>g.__hostStorage('remove',String(namespace||'')+':'+String(key||''))}
+  weboxDefinedSpec=null;g.WeBox={define(spec){weboxDefinedSpec=spec;return spec}}
   if(payload.protocol==='hamo-source-v3')hamoGlobals(payload)
   g.net=net;g.getProxy=()=>payload.proxyURL||'';g.getProxyUrl=proxyURL
   g.crypto={getRandomValues:array=>{const bytes=new Uint8Array(array.buffer,array.byteOffset,array.byteLength);bytes.set(crypto.randomBytes(bytes.length));return array},randomUUID:crypto.randomUUID}
@@ -281,7 +618,8 @@ async function load(payload){
   else if(type==='commonjs')module=requireFile(entry)
   else if(type==='script')module=new Function(`${read(entry)}\nreturn typeof plugin!=='undefined'?plugin:typeof spider!=='undefined'?spider:(typeof hawk!=='undefined'&&hawk&&hawk.apiVersion===3?hawk:(typeof rule!=='undefined'?rule:{${['init','home','homeContent','homeVideoContent','category','categoryContent','search','searchContent','detail','detailContent','play','playerContent','channels','catalog','resolve','epg','destroy'].map(key=>`${key}:typeof ${key}==='function'?${key}:undefined`).join(',')}}));`)()
   else module=await esm(entry)
-  plugin=module?.default||module
+  plugin=weboxDefinedSpec?createWeBoxPlugin(weboxDefinedSpec,payload):(module?.default||module)
+  if(plugin&&plugin.api==='1.1'&&typeof plugin.list==='function'&&!weboxDefinedSpec)plugin=createWeBoxPlugin(plugin,payload)
   if(payload.protocol==='catvod-spider'){
     if(typeof plugin==='function')plugin=await plugin(payload.name||payload.entry||'本地影视源',payload.options||{})
   }else if(isCatVodProtocol(payload.protocol)&&typeof plugin==='function')plugin=await plugin(tvboxSite(payload))

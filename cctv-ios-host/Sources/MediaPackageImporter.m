@@ -65,11 +65,22 @@ static BOOL PackageContainsNodeCoreImport(NSString *root,NSString *pattern){
 }
 static BOOL MediaAPIMethodDeclaredInSource(NSString *source) {
     // 与 JSPlugins/generic/entry.mjs 的起播校验保持一致：cctvhost.media/1 插件
-    // 至少实现 home/category/search/detail/play/channels/catalog/resolve 之一。
-    // 仅用于默认兜底判定，避免规则配置文件被误认成影视插件；入口转交本地
-    // 模块时不做判断，起播校验兜底。
+    // 至少实现 home/category/search/detail/play/channels/catalog/resolve 之一，
+    // 或声明 WeBox.define(...) 影视源。
+    if([source rangeOfString:@"WeBox\\s*\\.\\s*define\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound)return YES;
     if([source rangeOfString:@"(?:^|[\\s{,;])(?:async\\s+)?(home|category|search|detail|play|channels|catalog|resolve)\\s*(?:\\(|:|=)" options:NSRegularExpressionSearch].location!=NSNotFound)return YES;
     return [source rangeOfString:@"(?:import\\s+(?:[^;]*?\\sfrom\\s+)?['\"]\\.|export\\s+[^;]*?\\sfrom\\s+['\"]\\.|require\\s*\\(\\s*['\"]\\.)" options:NSRegularExpressionSearch].location!=NSNotFound;
+}
+static NSData *PackageAdaptWeBoxScriptIfNeeded(NSData *bytes) {
+    if(!bytes.length || bytes.length>PackageFileLimit)return bytes;
+    NSString *text=[[NSString alloc] initWithData:bytes encoding:NSUTF8StringEncoding];
+    if(!text.length)return bytes;
+    if([text containsString:@"KVM_WASM_BASE64"] && ![text containsString:@"generatePlayUrlPureJS"]){
+        NSString *bundlePath=[NSBundle.mainBundle pathForResource:@"webox-4kvm" ofType:@"js" inDirectory:@"BuiltinMedia"];
+        NSData *bundled=bundlePath.length?[NSData dataWithContentsOfFile:bundlePath options:NSDataReadingMappedIfSafe error:NULL]:nil;
+        if(bundled.length)return bundled;
+    }
+    return bytes;
 }
 static NSString *PackageMD5(NSData *data){
     unsigned char digest[CC_MD5_DIGEST_LENGTH];CC_MD5(data.bytes,(CC_LONG)data.length,digest);
@@ -254,8 +265,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     BOOL hamoSourceType=[text rangeOfString:@"\\btype\\s*:\\s*'source'" options:NSRegularExpressionSearch].location!=NSNotFound || [text rangeOfString:@"\\btype\\s*:\\s*\"source\"" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL hamoSourceV3=[text rangeOfString:@"\\bapiVersion\\s*:\\s*3\\b" options:NSRegularExpressionSearch].location!=NSNotFound && hamoSourceType && [text rangeOfString:@"(?:async\\s+)?function\\s+home\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:async\\s+)?function\\s+resolve\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL widgetExtractor=[text containsString:@"WidgetMetadata"] && [text containsString:@"Widget.http"] && [text rangeOfString:@"(?:async\\s+)?function\\s+loadResource\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
+    BOOL weboxSource=[text rangeOfString:@"WeBox\\s*\\.\\s*define\\s*\\(" options:NSRegularExpressionSearch].location!=NSNotFound;
     BOOL catVodMethods=[text rangeOfString:@"(?:(?:async\\s+)?(?:home|homeContent)\\s*\\(|\\b(?:home|homeContent)\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?category\\s*\\(|\\bcategory\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?detail\\s*\\(|\\bdetail\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound && [text rangeOfString:@"(?:(?:async\\s+)?play\\s*\\(|\\bplay\\s*:\\s*(?:async\\s*)?(?:function\\b|\\())" options:NSRegularExpressionSearch].location!=NSNotFound;
-    BOOL catVodQuickJS=catVodMethods && ([text containsString:@"export default"] || [text containsString:@"module.exports"]);
+    BOOL catVodQuickJS=!weboxSource && catVodMethods && ([text containsString:@"export default"] || [text containsString:@"module.exports"]);
     if(nanoServiceV2){runtime=@"node";protocol=@"nanotv-service-v2";moduleType=@"script";}
     if(!runtime.length && [entry.pathExtension.lowercaseString isEqual:@"py"])runtime=@"python";
     if([protocol isEqual:@"tvbox"] || [protocol isEqual:@"tvbox-js"] || [protocol isEqual:@"catvod-quickjs"] || [protocol isEqual:@"catvod-open-js"])protocol=@"catvod-js";
@@ -264,6 +276,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(!protocol.length){
         if([runtime isEqual:@"python"]){protocol=[text rangeOfString:@"class Spider"].location!=NSNotFound?@"python-spider":@"python-http";}
         else if(hamoSourceV3){runtime=@"javascript";protocol=@"hamo-source-v3";moduleType=@"script";}
+        else if(weboxSource){if(!runtime.length)runtime=@"javascript";protocol=@"cctvhost.media/1";moduleType=@"script";}
         else if(widgetExtractor){runtime=@"node";protocol=@"widget-extractor";}
         else if(catpawOpen){runtime=@"node";protocol=@"catpaw-http";}
         else if([text containsString:@"createService"] && [text containsString:@"/config"] && [text containsString:@"/spider/"]){runtime=@"node";protocol=@"catpaw-http";}
@@ -290,7 +303,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     // Imports can live in a transitive helper under src/ or node_modules, not
     // only in the declared entry file. Scan the bounded package source set.
     BOOL nodeCoreImport=PackageContainsNodeCoreImport(root,nodeCorePattern);
-    if(nodeCoreImport && ![protocol isEqual:@"catvod-spider"] && !hamoSourceV3)runtime=@"node";
+    if(nodeCoreImport && ![protocol isEqual:@"catvod-spider"] && !hamoSourceV3 && !weboxSource)runtime=@"node";
     if(!runtime.length){
         NSDictionary *dependencies=[package[@"dependencies"] isKindOfClass:NSDictionary.class]?package[@"dependencies"]:@{};
         BOOL hasCommonJSRequire=[text rangeOfString:@"\\brequire\\s*\\(\\s*['\\\"]" options:NSRegularExpressionSearch].location!=NSNotFound;
@@ -315,13 +328,29 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"catvod-spider",@"drpy",@"iptv-extractor",@"catpaw-http",@"widget-extractor",@"nanotv-service-v2",@"hamo-source-v3"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}
     if([protocol isEqual:@"catvod-spider"] && ![runtime isEqual:@"javascript"]){PackageError(error,@"CatPaw JS Spider 必须使用 JavaScriptCore 运行时（runtime: javascript）");return nil;}
     // Keep a small, typed manifest: no arbitrary paths or host control fields.
-    NSMutableDictionary *clean=[@{@"schemaVersion":@1,@"entry":entry,@"runtime":runtime,@"protocol":protocol,@"moduleType":moduleType,@"name":([result[@"name"] isKindOfClass:NSString.class]?result[@"name"]:(package[@"name"]?:entry.stringByDeletingPathExtension))} mutableCopy];
-    NSString *pluginVersion=[result[@"pluginVersion"] isKindOfClass:NSString.class]?result[@"pluginVersion"]:([result[@"version"] isKindOfClass:NSString.class]?result[@"version"]:([package[@"version"] isKindOfClass:NSString.class]?package[@"version"]:@""));if(pluginVersion.length)clean[@"pluginVersion"]=pluginVersion;
+    NSString *defaultName=[result[@"name"] isKindOfClass:NSString.class]?result[@"name"]:(package[@"name"]?:entry.stringByDeletingPathExtension);
+    if([defaultName hasSuffix:@".webox"])defaultName=[defaultName substringToIndex:defaultName.length-6];
+    NSMutableDictionary *clean=[@{@"schemaVersion":@1,@"entry":entry,@"runtime":runtime,@"protocol":protocol,@"moduleType":moduleType,@"name":defaultName} mutableCopy];
+    NSString *pluginVersion=[result[@"pluginVersion"] isKindOfClass:NSString.class]?result[@"pluginVersion"]:([result[@"version"] isKindOfClass:NSString.class]?result[@"version"]:([package[@"version"] isKindOfClass:NSString.class]?package[@"version"]:@""));
+    if(weboxSource){
+        NSRange scanRange=NSMakeRange(0,MIN(text.length,(NSUInteger)4096));
+        if(!result[@"name"]&&!package[@"name"]){
+            NSTextCheckingResult *nameMatch=[[NSRegularExpression regularExpressionWithPattern:@"WeBox\\s*\\.\\s*define\\s*\\(\\s*\\{[\\s\\S]{0,1200}?\\bname\\s*:\\s*['\"]([^'\"]{1,128})['\"]" options:0 error:NULL] firstMatchInString:text options:0 range:scanRange];
+            if(nameMatch&&nameMatch.numberOfRanges>1){NSString *weboxName=[[text substringWithRange:[nameMatch rangeAtIndex:1]] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(weboxName.length)clean[@"name"]=weboxName;}
+        }
+        if(!pluginVersion.length){
+            NSTextCheckingResult *verMatch=[[NSRegularExpression regularExpressionWithPattern:@"WeBox\\s*\\.\\s*define\\s*\\(\\s*\\{[\\s\\S]{0,1200}?\\bversion\\s*:\\s*['\"]([^'\"]{1,64})['\"]" options:0 error:NULL] firstMatchInString:text options:0 range:scanRange];
+            if(verMatch&&verMatch.numberOfRanges>1)pluginVersion=[[text substringWithRange:[verMatch rangeAtIndex:1]] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        }
+    }
+    if(pluginVersion.length)clean[@"pluginVersion"]=pluginVersion;
     if(result[@"capabilities"]){if(![result[@"capabilities"] isKindOfClass:NSArray.class]){PackageError(error,@"capabilities 必须是字符串数组");return nil;}for(id value in result[@"capabilities"])if(![value isKindOfClass:NSString.class]){PackageError(error,@"capabilities 包含无效类型");return nil;}clean[@"capabilities"]=result[@"capabilities"];}
+    else if(weboxSource){clean[@"capabilities"]=@[@"home",@"category",@"search",@"detail",@"play"];}
     if(nanoServiceV2){clean[@"name"]=[nanoManifest[@"name"] isKindOfClass:NSString.class]?nanoManifest[@"name"]:clean[@"name"];clean[@"capabilities"]=nanoCapabilities;clean[@"pluginVersion"]=[nanoManifest[@"version"] isKindOfClass:NSString.class]?nanoManifest[@"version"]:@"";clean[@"apiVersion"]=@2;}
     if(verifiedLocalChecksums.count)clean[@"verifiedLocalChecksums"]=verifiedLocalChecksums;
     if([result[@"options"] isKindOfClass:NSDictionary.class] || [result[@"options"] isKindOfClass:NSString.class])clean[@"options"]=result[@"options"];
     else if(([text containsString:@"fqnovel.com"]||[text containsString:@"snssdk.com"])&&[text containsString:@"localProxy"])clean[@"options"]=@{@"playTimeoutMs":@120000};
+    else if(weboxSource)clean[@"options"]=@{@"playTimeoutMs":@45000};
     BOOL androidTVBoxIntegration=[text containsString:@"from java import"] || [text containsString:@"jclass("] || [text containsString:@"/sdcard/TV/CustomCsp"];
     if([runtime isEqual:@"python"] && androidTVBoxIntegration)clean[@"compatibilityNote"]=@"此 Python Spider 含 Android/TVBox 本地目录或 Java 界面逻辑。iOS 不提供 /sdcard、Android Activity 或向其他 TVBox 写入配置的能力；其标准影视接口仍可尝试使用。";
     clean[@"packageRoot"]=root;
@@ -345,6 +374,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         else {
             NSString *name=file.lastPathComponent;
             if(![@[@"js",@"mjs",@"cjs",@"py"] containsObject:file.pathExtension.lowercaseString] || !SafeRelative(name) || bytes.length>PackageFileLimit){PackageError(error,@"请选择 JS、Python 或 ZIP 资源文件");return nil;}
+            bytes=PackageAdaptWeBoxScriptIfNeeded(bytes);
             if(![bytes writeToFile:[package stringByAppendingPathComponent:name] options:NSDataWritingAtomic error:error])return nil;
         }
         if(files.count>8){PackageError(error,@"配套配置文件过多");return nil;}

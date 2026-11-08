@@ -85,6 +85,9 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 @interface SettingsViewController () <UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic,strong) UITableView *table;
 @property(nonatomic,strong) UIView *heroHeaderView;
+@property(nonatomic,strong) UIView *settingsTopImmersiveScrim;
+@property(nonatomic,strong) CAGradientLayer *settingsTopImmersiveGradient;
+@property(nonatomic,strong) UIStackView *heroSummaryChipsStack;
 @property(nonatomic,strong) UIScrollView *categoryFilterScroll;
 @property(nonatomic,strong) UIStackView *categoryFilterStack;
 @property(nonatomic,copy) NSString *selectedCategoryKey;
@@ -222,13 +225,35 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         [self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
     ]];
 
+    self.settingsTopImmersiveScrim=[UIView new];
+    self.settingsTopImmersiveScrim.userInteractionEnabled=NO;
+    self.settingsTopImmersiveScrim.accessibilityIdentifier=@"settings.top.immersive.scrim";
+    self.settingsTopImmersiveGradient=[CAGradientLayer layer];
+    self.settingsTopImmersiveGradient.locations=@[@0.0,@0.68,@1.0];
+    [self.settingsTopImmersiveScrim.layer addSublayer:self.settingsTopImmersiveGradient];
+    [self.view addSubview:self.settingsTopImmersiveScrim];
+
     [self setupHeroHeaderView];
     [self updateImmersiveTableInsets];
 }
 
+- (void)refreshHeroSummaryChips {
+    if(!self.heroSummaryChipsStack)return;
+    NSArray<UIView *> *chips=self.heroSummaryChipsStack.arrangedSubviews;
+    NSArray<NSString *> *texts=@[
+        [NSString stringWithFormat:@"  🎨 %@  ", [HostThemePalette currentPalette].displayName],
+        [NSString stringWithFormat:@"  📺 画质·%@  ", SettingsPreferredQualityText()],
+        @"  🛡️ 纯本地无上传  "
+    ];
+    for(NSUInteger i=0;i<chips.count&&i<texts.count;i++){
+        if([chips[i] isKindOfClass:UILabel.class])((UILabel *)chips[i]).text=texts[i];
+    }
+}
+
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    [self setupHeroHeaderView];
+    if(!self.heroHeaderView)[self setupHeroHeaderView];
+    else [self refreshHeroSummaryChips];
     [self.table reloadData];
 }
 
@@ -294,6 +319,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     chipsStack.spacing=8;
     chipsStack.distribution=UIStackViewDistributionFillProportionally;
     [card addSubview:chipsStack];
+    self.heroSummaryChipsStack=chipsStack;
 
     NSString *qualityLabel=SettingsPreferredQualityText();
     NSArray<NSDictionary *> *chipData=@[
@@ -434,9 +460,22 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     [self updateImmersiveTableInsets];
 }
 
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    if(scrollView==self.table&&self.settingsTopImmersiveScrim){
+        CGFloat top=MAX(0,self.view.safeAreaInsets.top);
+        CGFloat progress=MIN(1.0,MAX(0.0,(scrollView.contentOffset.y+top)/96.0));
+        HostUpdateImmersiveTopScrim(self.settingsTopImmersiveScrim,self.settingsTopImmersiveGradient,CGRectMake(0,0,CGRectGetWidth(self.view.bounds),top+18),progress,NO);
+    }
+}
+
 - (void)updateImmersiveTableInsets {
     if(!self.isViewLoaded||!self.table)return;
     CGFloat top=MAX(0,self.view.safeAreaInsets.top),bottom=MAX(24,self.bottomOverlayInset+22);
+    if(self.settingsTopImmersiveScrim){
+        CGFloat progress=MIN(1.0,MAX(0.0,(self.table.contentOffset.y+top)/96.0));
+        HostUpdateImmersiveTopScrim(self.settingsTopImmersiveScrim,self.settingsTopImmersiveGradient,CGRectMake(0,0,CGRectGetWidth(self.view.bounds),top+18),progress,NO);
+        [self.view bringSubviewToFront:self.settingsTopImmersiveScrim];
+    }
     UIEdgeInsets old=self.table.contentInset,next=UIEdgeInsetsMake(top,0,bottom,0);
     if(fabs(old.top-top)<0.5&&fabs(old.bottom-bottom)<0.5)return;
     BOOL wasAtTop=self.table.contentOffset.y<=-old.top+1;

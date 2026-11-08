@@ -14,6 +14,61 @@ static NSData *ResourceImportReadBounded(NSURL *url,NSUInteger limit) {
     @try{data=[file readDataUpToLength:limit+1 error:NULL];if(data.length>limit)data=nil;}@catch(NSException *exception){data=nil;}@finally{[file closeAndReturnError:NULL];}return data;
 }
 
+static NSURL *ResourceImportNormalizedURL(NSString *raw) {
+    if(![raw isKindOfClass:NSString.class])return nil;
+    NSString *trimmed=[raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(!trimmed.length)return nil;
+    NSURL *direct=[NSURL URLWithString:trimmed];
+    if(direct&&direct.host.length&&[@[@"http",@"https"] containsObject:direct.scheme.lowercaseString])return direct;
+    NSMutableCharacterSet *allowed=[NSCharacterSet.URLQueryAllowedCharacterSet mutableCopy];
+    [allowed addCharactersInString:@"#%/:?@[]!$&'()*+,;="];
+    NSString *encoded=[trimmed stringByAddingPercentEncodingWithAllowedCharacters:allowed];
+    NSURL *fallback=encoded.length?[NSURL URLWithString:encoded]:nil;
+    if(fallback&&fallback.host.length&&[@[@"http",@"https"] containsObject:fallback.scheme.lowercaseString])return fallback;
+    return nil;
+}
+
+static NSArray<NSString *> *ResourceImportExtractURLStrings(NSString *text) {
+    if(![text isKindOfClass:NSString.class]||!text.length)return @[];
+    NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"https?://[^\\s\"'<>\\u3000]+" options:NSRegularExpressionCaseInsensitive error:NULL];
+    NSArray<NSTextCheckingResult *> *matches=[re matchesInString:text options:0 range:NSMakeRange(0,text.length)];
+    NSMutableOrderedSet<NSString *> *results=[NSMutableOrderedSet orderedSet];
+    for(NSTextCheckingResult *match in matches){
+        NSString *candidate=[text substringWithRange:match.range];
+        while(candidate.length>0){
+            unichar last=[candidate characterAtIndex:candidate.length-1];
+            if(last==','||last==';'||last==')'||last==']'||last=='}'||last==0xFF0C||last==0x3002||last==0xFF09||last==0x3011){
+                candidate=[candidate substringToIndex:candidate.length-1];
+            }else break;
+        }
+        if(ResourceImportNormalizedURL(candidate))[results addObject:candidate];
+    }
+    return results.array;
+}
+
+static NSData *ResourceImportBundledFallbackForURL(NSURL *url) {
+    if(!url)return nil;
+    NSString *abs=(url.absoluteString.stringByRemovingPercentEncoding?:url.absoluteString).lowercaseString;
+    if([abs containsString:@"ddgksf2013.top/webox/index.json"]||[abs hasSuffix:@"/webox/index.json"]){
+        NSString *p=[NSBundle.mainBundle pathForResource:@"webox-index" ofType:@"json" inDirectory:@"BuiltinMedia"];
+        return p.length?[NSData dataWithContentsOfFile:p options:NSDataReadingMappedIfSafe error:NULL]:nil;
+    }
+    NSString *last=(url.lastPathComponent.stringByRemovingPercentEncoding?:url.lastPathComponent).lowercaseString;
+    NSDictionary<NSString *,NSString *> *weboxScripts=@{
+        @"4k影视.webox.js":@"webox-4kvm",
+        @"hstream.webox.js":@"webox-hstream",
+        @"瓜子.webox.js":@"webox-guazi",
+        @"肉.webox.js":@"webox-rou",
+        @"one一个.webox.js":@"webox-one",
+    };
+    NSString *res=weboxScripts[last];
+    if(res.length){
+        NSString *p=[NSBundle.mainBundle pathForResource:res ofType:@"js" inDirectory:@"BuiltinMedia"];
+        return p.length?[NSData dataWithContentsOfFile:p options:NSDataReadingMappedIfSafe error:NULL]:nil;
+    }
+    return nil;
+}
+
 static NSURL *ResourceImportSnapshotURL(void) {
     NSString *support=NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject;
     NSString *directory=[support stringByAppendingPathComponent:@"CCTVHost/ImportTasks"];
@@ -51,10 +106,11 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 }
 
 // Metadata probing is bounded independently of package downloads.
-@interface ResourceImportFetcher : NSObject <NSURLSessionDataDelegate>
+@interface ResourceImportFetcher : NSObject <NSURLSessionDataDelegate, NSURLSessionTaskDelegate>
 @property(nonatomic,strong) NSURLSession *session;
 @property(nonatomic,strong) NSMutableData *body;
 @property(nonatomic,strong) NSURLResponse *response;
+@property(nonatomic,strong) NSURL *requestURL;
 @property(nonatomic,copy) void (^completion)(NSData *,NSURLResponse *,NSError *);
 @property(nonatomic,strong) NSError *failure;
 - (void)load:(NSURL *)url;
@@ -62,10 +118,19 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 @end
 @implementation ResourceImportFetcher
 - (void)load:(NSURL *)url {
-    self.body=[NSMutableData data];NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.timeoutIntervalForRequest=15;config.timeoutIntervalForResource=30;
-    self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:nil];[[self.session dataTaskWithURL:url] resume];
+    self.requestURL=url;self.body=[NSMutableData data];NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.timeoutIntervalForRequest=15;config.timeoutIntervalForResource=30;
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
+    [req setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 CCTVHost/1.0" forHTTPHeaderField:@"User-Agent"];
+    self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:nil];[[self.session dataTaskWithRequest:req] resume];
 }
 - (void)cancel {self.completion=nil;[self.session invalidateAndCancel];self.session=nil;}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential * _Nullable))completionHandler {
+    if([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]&&challenge.protectionSpace.serverTrust){
+        completionHandler(NSURLSessionAuthChallengeUseCredential,[NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust]);
+        return;
+    }
+    completionHandler(NSURLSessionAuthChallengePerformDefaultHandling,nil);
+}
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completionHandler {
     self.response=response;NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
     if(status<200||status>=300||response.expectedContentLength>8*1024*1024){self.failure=[NSError errorWithDomain:@"ResourceImport" code:1 userInfo:@{NSLocalizedDescriptionKey:response.expectedContentLength>8*1024*1024?@"索引超过 8 MiB 上限": [NSString stringWithFormat:@"资源返回 HTTP %ld",(long)status]}];completionHandler(NSURLSessionResponseCancel);return;}
@@ -75,7 +140,12 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     if(self.body.length+data.length>8*1024*1024){self.failure=[NSError errorWithDomain:@"ResourceImport" code:2 userInfo:@{NSLocalizedDescriptionKey:@"索引超过 8 MiB 上限"}];[task cancel];return;}[self.body appendData:data];
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    void (^completion)(NSData *,NSURLResponse *,NSError *)=self.completion;self.completion=nil;NSData *data=[self.body copy];self.body=nil;NSURLResponse *response=self.response;NSError *failure=self.failure?:error;[session finishTasksAndInvalidate];self.session=nil;
+    void (^completion)(NSData *,NSURLResponse *,NSError *)=self.completion;self.completion=nil;NSData *data=[self.body copy];self.body=nil;NSURLResponse *response=self.response;NSError *failure=self.failure?:error;
+    if((failure||!data.length)&&self.requestURL){
+        NSData *bundled=ResourceImportBundledFallbackForURL(self.requestURL);
+        if(bundled.length){data=bundled;failure=nil;}
+    }
+    [session finishTasksAndInvalidate];self.session=nil;
     dispatch_async(dispatch_get_main_queue(),^{if(completion)completion(data,response,failure);});
 }
 @end
@@ -84,6 +154,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 @property(nonatomic,strong) UITextView *address;
 @property(nonatomic,strong) UILabel *addressPlaceholder;
 @property(nonatomic,strong) UIButton *pasteAddressButton;
+@property(nonatomic,strong) UIButton *pasteAndRecognizeButton;
 @property(nonatomic,strong) UIButton *clearAddressButton;
 @property(nonatomic,strong) UISegmentedControl *runtime;
 @property(nonatomic,strong) UISegmentedControl *duplicatePolicy;
@@ -111,6 +182,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 - (void)retryCandidateAtIndex:(NSUInteger)index;
 - (void)retrySaveCandidateAtIndex:(NSUInteger)index;
 - (NSUInteger)failedCandidateCount;
+- (NSUInteger)selectedUnsavedCandidateCount;
+- (void)discardUncommittedCandidatesForFreshRecognition;
 - (void)retryFailedCandidates;
 - (void)advanceBatchRetry;
 - (void)saveNext:(NSUInteger)index generation:(NSUInteger)generation;
@@ -124,10 +197,11 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"添加资源";UISheetPresentationController *sheet=self.navigationController.sheetPresentationController?:self.sheetPresentationController;if(sheet){sheet.detents=@[UISheetPresentationControllerDetent.mediumDetent,UISheetPresentationControllerDetent.largeDetent];sheet.prefersGrabberVisible=YES;sheet.preferredCornerRadius=26;}self.tableView.backgroundColor=HostBackground();self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"收起" style:UIBarButtonItemStylePlain target:self action:@selector(minimize)];
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"保存" style:UIBarButtonItemStyleDone target:self action:@selector(saveSelected)];
-    self.address=[UITextView new];self.address.delegate=self;self.address.text=self.restoredAddress?:@"";self.address.backgroundColor=HostRaisedSurface();self.address.textColor=HostText();self.address.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.address.autocapitalizationType=UITextAutocapitalizationTypeNone;self.address.autocorrectionType=UITextAutocorrectionTypeNo;self.address.smartQuotesType=UITextSmartQuotesTypeNo;self.address.smartDashesType=UITextSmartDashesTypeNo;self.address.smartInsertDeleteType=UITextSmartInsertDeleteTypeNo;self.address.keyboardType=UIKeyboardTypeURL;self.address.layer.cornerRadius=14;self.address.textContainerInset=UIEdgeInsetsMake(10,6,34,6);self.address.accessibilityLabel=@"资源链接";self.address.accessibilityHint=@"影视、直播或资源合集链接";self.address.accessibilityIdentifier=@"resource-import-url";
-    self.addressPlaceholder=[UILabel new];self.addressPlaceholder.text=@"粘贴影视、直播或资源合集链接";self.addressPlaceholder.font=self.address.font;self.addressPlaceholder.textColor=HostSecondaryText();self.addressPlaceholder.userInteractionEnabled=NO;self.addressPlaceholder.translatesAutoresizingMaskIntoConstraints=NO;[self.address addSubview:self.addressPlaceholder];[NSLayoutConstraint activateConstraints:@[[self.addressPlaceholder.leadingAnchor constraintEqualToAnchor:self.address.leadingAnchor constant:10],[self.addressPlaceholder.topAnchor constraintEqualToAnchor:self.address.topAnchor constant:10]]];self.addressPlaceholder.hidden=self.address.text.length>0;
+    self.address=[UITextView new];self.address.delegate=self;self.address.text=self.restoredAddress?:@"";self.address.backgroundColor=HostRaisedSurface();self.address.textColor=HostText();self.address.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.address.autocapitalizationType=UITextAutocapitalizationTypeNone;self.address.autocorrectionType=UITextAutocorrectionTypeNo;self.address.smartQuotesType=UITextSmartQuotesTypeNo;self.address.smartDashesType=UITextSmartDashesTypeNo;self.address.smartInsertDeleteType=UITextSmartInsertDeleteTypeNo;self.address.keyboardType=UIKeyboardTypeURL;self.address.layer.cornerRadius=14;self.address.textContainerInset=UIEdgeInsetsMake(10,6,36,6);self.address.accessibilityLabel=@"资源链接";self.address.accessibilityHint=@"影视、直播或资源合集链接";self.address.accessibilityIdentifier=@"resource-import-url";
+    self.addressPlaceholder=[UILabel new];self.addressPlaceholder.text=@"粘贴影视、WeBox/TVBox 合集、直播链接或配置内容";self.addressPlaceholder.font=self.address.font;self.addressPlaceholder.textColor=HostSecondaryText();self.addressPlaceholder.userInteractionEnabled=NO;self.addressPlaceholder.translatesAutoresizingMaskIntoConstraints=NO;[self.address addSubview:self.addressPlaceholder];[NSLayoutConstraint activateConstraints:@[[self.addressPlaceholder.leadingAnchor constraintEqualToAnchor:self.address.leadingAnchor constant:10],[self.addressPlaceholder.topAnchor constraintEqualToAnchor:self.address.topAnchor constant:10]]];self.addressPlaceholder.hidden=self.address.text.length>0;
     self.address.layer.cornerCurve=kCACornerCurveContinuous;self.address.layer.borderWidth=0.65;HostSetLayerBorderColor(self.address,HostBorder());
     self.pasteAddressButton=[UIButton buttonWithType:UIButtonTypeSystem];[self.pasteAddressButton setTitle:@"粘贴剪贴板" forState:UIControlStateNormal];self.pasteAddressButton.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];self.pasteAddressButton.tintColor=HostAccent();self.pasteAddressButton.backgroundColor=HostSelectedSurface();self.pasteAddressButton.layer.cornerRadius=10;self.pasteAddressButton.layer.cornerCurve=kCACornerCurveContinuous;self.pasteAddressButton.contentEdgeInsets=UIEdgeInsetsMake(4,10,4,10);HostInstallPressFeedback(self.pasteAddressButton);self.pasteAddressButton.accessibilityIdentifier=@"resource-import-paste";[self.pasteAddressButton addTarget:self action:@selector(pasteClipboardAddress) forControlEvents:UIControlEventTouchUpInside];
+    self.pasteAndRecognizeButton=[UIButton buttonWithType:UIButtonTypeSystem];[self.pasteAndRecognizeButton setTitle:@"粘贴并识别" forState:UIControlStateNormal];self.pasteAndRecognizeButton.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];self.pasteAndRecognizeButton.tintColor=UIColor.whiteColor;self.pasteAndRecognizeButton.backgroundColor=HostAccent();self.pasteAndRecognizeButton.layer.cornerRadius=10;self.pasteAndRecognizeButton.layer.cornerCurve=kCACornerCurveContinuous;self.pasteAndRecognizeButton.contentEdgeInsets=UIEdgeInsetsMake(4,10,4,10);HostInstallPressFeedback(self.pasteAndRecognizeButton);self.pasteAndRecognizeButton.accessibilityIdentifier=@"resource-import-paste-recognize";[self.pasteAndRecognizeButton addTarget:self action:@selector(pasteAndRecognizeAddress) forControlEvents:UIControlEventTouchUpInside];
     self.clearAddressButton=[UIButton buttonWithType:UIButtonTypeSystem];[self.clearAddressButton setTitle:@"清空" forState:UIControlStateNormal];self.clearAddressButton.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];self.clearAddressButton.tintColor=HostSecondaryText();self.clearAddressButton.backgroundColor=HostNeutralSurface();self.clearAddressButton.layer.cornerRadius=10;self.clearAddressButton.layer.cornerCurve=kCACornerCurveContinuous;self.clearAddressButton.contentEdgeInsets=UIEdgeInsetsMake(4,10,4,10);HostInstallPressFeedback(self.clearAddressButton);self.clearAddressButton.accessibilityIdentifier=@"resource-import-clear";[self.clearAddressButton addTarget:self action:@selector(clearAddressText) forControlEvents:UIControlEventTouchUpInside];
     self.runtime=[[UISegmentedControl alloc] initWithItems:@[@"自动识别",@"Python",@"Node.js"]];self.runtime.selectedSegmentIndex=MIN(2,MAX(0,self.restoredRuntimeSelection));self.runtime.selectedSegmentTintColor=HostAccent();[self.runtime addTarget:self action:@selector(runtimeChanged:) forControlEvents:UIControlEventValueChanged];
     self.duplicatePolicy=[[UISegmentedControl alloc] initWithItems:@[@"更新已有",@"保存副本"]];self.duplicatePolicy.selectedSegmentIndex=MIN(1,MAX(0,self.restoredDuplicatePolicy));self.duplicatePolicy.selectedSegmentTintColor=HostAccent();
@@ -143,22 +217,46 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     self.address.textColor=HostText();
     self.addressPlaceholder.textColor=HostSecondaryText();
     self.pasteAddressButton.tintColor=HostAccent();
+    self.pasteAddressButton.backgroundColor=HostSelectedSurface();
+    self.pasteAndRecognizeButton.backgroundColor=HostAccent();
     self.clearAddressButton.tintColor=HostSecondaryText();
     self.runtime.selectedSegmentTintColor=HostAccent();
     self.duplicatePolicy.selectedSegmentTintColor=HostAccent();
     [self.tableView reloadData];
 }
+- (void)discardUncommittedCandidatesForFreshRecognition {
+    if(!self.candidates.count)return;
+    for(NSDictionary *row in self.candidates){
+        if(row[@"service"]&&![row[@"saved"] boolValue])[ServiceStore remove:row[@"service"][@"id"]];
+    }
+    [self.candidates removeAllObjects];
+    self.finished=NO;
+}
 - (void)pasteClipboardAddress {
-    if(self.busy||self.candidates.count)return;
+    if(self.busy)return;
     NSString *clip=[UIPasteboard.generalPasteboard.string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if(!clip.length)return;
     self.address.text=clip;
     [self textViewDidChange:self.address];
 }
+- (void)pasteAndRecognizeAddress {
+    if(self.busy)return;
+    NSString *clip=[UIPasteboard.generalPasteboard.string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(clip.length){
+        self.address.text=clip;
+        [self textViewDidChange:self.address];
+    }
+    if(self.address.text.length)[self recognizeURL];
+}
 - (void)clearAddressText {
-    if(self.busy||self.candidates.count)return;
+    if(self.busy)return;
     self.address.text=@"";
+    if(self.candidates.count&&[self selectedUnsavedCandidateCount]==0){
+        [self discardUncommittedCandidatesForFreshRecognition];
+        self.stage=@"粘贴地址，或选择本地文件";
+    }
     [self textViewDidChange:self.address];
+    [self updateView];
 }
 - (void)toggleSelectAllCandidates {
     if(self.busy||!self.candidates.count)return;
@@ -173,9 +271,18 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     [self updateView];
 }
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];[self.fetcher cancel];[self.downloader cancel];}
+- (NSUInteger)selectedUnsavedCandidateCount {
+    NSUInteger count=0;
+    for(NSDictionary *row in self.candidates){
+        if([row[@"selected"] boolValue]&&!row[@"error"]&&![row[@"saved"] boolValue])count++;
+    }
+    return count;
+}
 - (void)updateView {
-    self.navigationItem.rightBarButtonItem.enabled=!self.busy&&!self.finished&&[self.candidates filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [row[@"selected"] boolValue]&&!row[@"error"]&&![row[@"saved"] boolValue];}]].count>0;
-    self.address.editable=!self.busy&&!self.candidates.count;self.pasteAddressButton.enabled=self.address.editable;self.clearAddressButton.enabled=self.address.editable;self.clearAddressButton.hidden=self.address.text.length==0;self.runtime.enabled=!self.busy&&!self.candidates.count;self.duplicatePolicy.enabled=!self.busy;[self.tableView reloadData];[self persistSnapshot];if(self.onStateChanged)self.onStateChanged();
+    NSUInteger readyCount=[self selectedUnsavedCandidateCount];
+    self.navigationItem.rightBarButtonItem.enabled=!self.busy&&!self.finished&&readyCount>0;
+    self.navigationItem.rightBarButtonItem.title=readyCount>1?[NSString stringWithFormat:@"保存(%lu)",(unsigned long)readyCount]:@"保存";
+    self.address.editable=!self.busy;self.pasteAddressButton.enabled=!self.busy;self.pasteAndRecognizeButton.enabled=!self.busy;self.clearAddressButton.enabled=!self.busy;self.clearAddressButton.hidden=self.address.text.length==0&&self.candidates.count==0;self.runtime.enabled=!self.busy;self.duplicatePolicy.enabled=!self.busy;[self.tableView reloadData];[self persistSnapshot];if(self.onStateChanged)self.onStateChanged();
 }
 - (void)persistSnapshot {
     NSString *address=self.address.text?:self.restoredAddress?:@"";BOOL blank=!self.busy&&!self.candidates.count&&!address.length&&[self.stage isEqual:@"粘贴地址，或选择本地文件"];
@@ -183,21 +290,26 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     self.persistentSnapshotAvailable=!blank;NSDictionary *immutable=snapshot.copy;UIBackgroundTaskIdentifier task=UIApplication.sharedApplication.applicationState==UIApplicationStateBackground?[UIApplication.sharedApplication beginBackgroundTaskWithExpirationHandler:nil]:UIBackgroundTaskInvalid;dispatch_async(ResourceImportSnapshotQueue(),^{ResourceImportWriteSnapshot(immutable);if(task!=UIBackgroundTaskInvalid)dispatch_async(dispatch_get_main_queue(),^{[UIApplication.sharedApplication endBackgroundTask:task];});});
 }
 - (void)applicationDidEnterBackground:(NSNotification *)notification {[self persistSnapshot];}
-- (void)textViewDidChange:(UITextView *)textView {self.restoredAddress=textView.text?:@"";self.addressPlaceholder.hidden=textView.text.length>0;self.clearAddressButton.hidden=textView.text.length==0;[self persistSnapshot];}
+- (void)textViewDidChange:(UITextView *)textView {self.restoredAddress=textView.text?:@"";self.addressPlaceholder.hidden=textView.text.length>0;self.clearAddressButton.hidden=textView.text.length==0&&self.candidates.count==0;[self persistSnapshot];}
 - (void)runtimeChanged:(UISegmentedControl *)sender {self.restoredRuntimeSelection=sender.selectedSegmentIndex;[self persistSnapshot];}
 - (void)duplicatePolicyChanged:(UISegmentedControl *)sender {self.finished=NO;[self updateView];}
 - (void)minimize {[self.view endEditing:YES];[self.navigationController dismissViewControllerAnimated:YES completion:nil];}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 3;}
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return section==0?(self.advancedOptionsExpanded?7:5):(section==1?1+self.candidates.count:(1+([self failedCandidateCount]>0?1:0)));}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if(section==0)return self.advancedOptionsExpanded?7:5;
+    if(section==1)return 1+self.candidates.count;
+    NSUInteger extra=([self failedCandidateCount]>0?1:0)+([self selectedUnsavedCandidateCount]>0?1:0);
+    return 1+extra;
+}
 - (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
 - (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionFooterView(view); }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return @[@"选择导入方式",self.stage?:@"识别预览",@"任务操作"][section];}
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if(section==0)return @"支持 TVBox JSON、直播列表、PY / JS 和 ZIP。默认自动识别；高级选项可指定运行环境，或按原分类入口选择导入方式。识别阶段不会执行脚本。";
+    if(section==0)return @"支持 TVBox / WeBox JSON、直播列表、PY / JS / .webox.js 和 ZIP，也支持直接粘贴配置或脚本内容识别。默认自动识别；识别阶段不会执行脚本。";
     if(section==1)return @"合集仅保存一份索引，内部站点按需加载。勾选要保存的项目；更新保留原资源身份，运行中的资源须先停止后更新。";
     return @"失败项可逐条重试，或只重试失败项；收起后资源页会保留任务卡。应用进入后台后受系统调度限制，回到前台可继续查看结果。";
 }
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {return indexPath.section==0&&indexPath.row==0?124:UITableViewAutomaticDimension;}
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {return indexPath.section==0&&indexPath.row==0?128:UITableViewAutomaticDimension;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
     UIView *control=nil;
@@ -205,9 +317,11 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
         if(ip.row==0){
             UIView *box=[UIView new];
             [box addSubview:self.address];
+            [box addSubview:self.pasteAndRecognizeButton];
             [box addSubview:self.pasteAddressButton];
             [box addSubview:self.clearAddressButton];
             self.address.translatesAutoresizingMaskIntoConstraints=NO;
+            self.pasteAndRecognizeButton.translatesAutoresizingMaskIntoConstraints=NO;
             self.pasteAddressButton.translatesAutoresizingMaskIntoConstraints=NO;
             self.clearAddressButton.translatesAutoresizingMaskIntoConstraints=NO;
             [NSLayoutConstraint activateConstraints:@[
@@ -215,14 +329,16 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
                 [self.address.bottomAnchor constraintEqualToAnchor:box.bottomAnchor],
                 [self.address.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
                 [self.address.trailingAnchor constraintEqualToAnchor:box.trailingAnchor],
-                [self.pasteAddressButton.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-10],
-                [self.pasteAddressButton.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-4],
-                [self.clearAddressButton.trailingAnchor constraintEqualToAnchor:self.pasteAddressButton.leadingAnchor constant:-12],
-                [self.clearAddressButton.centerYAnchor constraintEqualToAnchor:self.pasteAddressButton.centerYAnchor]
+                [self.pasteAndRecognizeButton.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-8],
+                [self.pasteAndRecognizeButton.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-4],
+                [self.pasteAddressButton.trailingAnchor constraintEqualToAnchor:self.pasteAndRecognizeButton.leadingAnchor constant:-8],
+                [self.pasteAddressButton.centerYAnchor constraintEqualToAnchor:self.pasteAndRecognizeButton.centerYAnchor],
+                [self.clearAddressButton.trailingAnchor constraintEqualToAnchor:self.pasteAddressButton.leadingAnchor constant:-8],
+                [self.clearAddressButton.centerYAnchor constraintEqualToAnchor:self.pasteAndRecognizeButton.centerYAnchor]
             ]];
             control=box;cell.selectionStyle=UITableViewCellSelectionStyleNone;
         }
-        else if(ip.row==1){cell.textLabel.text=[self.taskKind isEqual:@"url"]&&self.restoredAddress.length?@"识别链接 · 可重试上次地址":@"识别链接";cell.textLabel.textColor=HostAccent();cell.imageView.image=[UIImage systemImageNamed:@"link.badge.plus"];cell.imageView.tintColor=HostAccent();}
+        else if(ip.row==1){cell.textLabel.text=[self.taskKind isEqual:@"url"]&&self.restoredAddress.length?@"识别链接 / 文本内容 · 可重试上次地址":@"识别链接 / 文本内容";cell.textLabel.textColor=HostAccent();cell.imageView.image=[UIImage systemImageNamed:@"link.badge.plus"];cell.imageView.tintColor=HostAccent();}
         else if(ip.row==2){cell.textLabel.text=@"选择文件（多选）";cell.textLabel.textColor=HostAccent();cell.imageView.image=[UIImage systemImageNamed:@"doc.badge.plus"];cell.imageView.tintColor=HostAccent();}
         else if(ip.row==3){cell.textLabel.text=@"选择文件夹";cell.textLabel.textColor=HostAccent();cell.imageView.image=[UIImage systemImageNamed:@"folder.badge.plus"];cell.imageView.tintColor=HostAccent();}
         else if(ip.row==4){cell.textLabel.text=self.advancedOptionsExpanded?@"收起高级选项":@"高级选项";cell.detailTextLabel.text=@"指定运行环境 · 分类导入入口";cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;cell.textLabel.textColor=HostAccent();cell.imageView.image=[UIImage systemImageNamed:@"slider.horizontal.3"];cell.imageView.tintColor=HostAccent();}
@@ -245,18 +361,39 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
         }
         cell.selectionStyle=UITableViewCellSelectionStyleNone;
     }else{NSDictionary *row=self.candidates[ip.row-1];cell.textLabel.text=row[@"name"]?:@"资源";NSString *detail=row[@"saved"]?@"已保存":(row[@"saveError"]?:row[@"error"]?:row[@"summary"]);if(!row[@"saved"]&&row[@"updatePreview"]){NSString *preview=self.duplicatePolicy.selectedSegmentIndex==0?row[@"updatePreview"]:@"将另存为独立副本 · 原资源保持不变";detail=[NSString stringWithFormat:@"%@\n%@",detail,preview];}cell.detailTextLabel.text=detail;cell.accessoryType=[row[@"selected"] boolValue]?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryNone;cell.tintColor=HostAccent();if(row[@"error"]||row[@"saveError"]){UIButton *retry=[UIButton buttonWithType:UIButtonTypeSystem];retry.tag=ip.row-1;[retry setTitle:@"重试" forState:UIControlStateNormal];retry.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];retry.tintColor=HostAccent();[retry sizeToFit];retry.frame=CGRectMake(0,0,52,44);[retry addTarget:self action:@selector(retryButtonTapped:) forControlEvents:UIControlEventTouchUpInside];cell.accessoryView=retry;}}}
-    else {NSUInteger failed=[self failedCandidateCount];if(ip.row==0){cell.textLabel.text=self.busy?@"取消当前任务":@"开始新的导入";cell.textLabel.textColor=HostAccent();}else{cell.textLabel.text=[NSString stringWithFormat:@"仅重试失败项（%lu）",(unsigned long)failed];cell.textLabel.textColor=HostAccent();}}
+    else {
+        NSUInteger failed=[self failedCandidateCount];
+        NSUInteger ready=[self selectedUnsavedCandidateCount];
+        if(ip.row==0){
+            cell.textLabel.text=self.busy?@"取消当前任务":@"清空并开始新的导入";
+            cell.textLabel.textColor=HostAccent();
+        }else if(ready>0&&ip.row==1){
+            cell.textLabel.text=[NSString stringWithFormat:@"保存已勾选资源（%lu 项）",(unsigned long)ready];
+            cell.textLabel.textColor=HostAccent();
+            cell.imageView.image=[UIImage systemImageNamed:@"checkmark.circle.fill"];
+            cell.imageView.tintColor=HostAccent();
+        }else{
+            cell.textLabel.text=[NSString stringWithFormat:@"仅重试失败项（%lu）",(unsigned long)failed];
+            cell.textLabel.textColor=HostAccent();
+        }
+    }
     if(control){[cell.contentView addSubview:control];control.translatesAutoresizingMaskIntoConstraints=NO;[NSLayoutConstraint activateConstraints:@[[control.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:8],[control.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-8],[control.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:12],[control.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-12]]];}
     return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    [tableView deselectRowAtIndexPath:ip animated:YES];if(ip.section==2&&ip.row==0){if(self.busy)[self cancelWork];else[self reset];return;}if(self.busy)return;
+    [tableView deselectRowAtIndexPath:ip animated:YES];
+    if(ip.section==2&&ip.row==0){if(self.busy)[self cancelWork];else[self reset];return;}
+    if(self.busy)return;
     if(ip.section==0){if(ip.row==1)[self recognizeURL];else if(ip.row==2||ip.row==3)[self pickFiles:ip.row==3];else if(ip.row==4){self.advancedOptionsExpanded=!self.advancedOptionsExpanded;[tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationAutomatic];}else if(ip.row==6)[self showCategorizedImportOptions];}
     else if(ip.section==1&&ip.row>0){NSMutableDictionary *row=self.candidates[ip.row-1];if(row[@"error"])[self retryCandidateAtIndex:(NSUInteger)(ip.row-1)];else if([row[@"matchTargets"] count]>1&&![row[@"saved"] boolValue])[self chooseExistingResourceForCandidate:row];else if(!row[@"saved"]){row[@"selected"]=@(![row[@"selected"] boolValue]);self.finished=NO;}[self updateView];}
-    else if(ip.section==2&&[self failedCandidateCount]>0&&ip.row==1)[self retryFailedCandidates];
+    else if(ip.section==2){
+        NSUInteger ready=[self selectedUnsavedCandidateCount];
+        if(ready>0&&ip.row==1){[self saveSelected];return;}
+        if([self failedCandidateCount]>0)[self retryFailedCandidates];
+    }
 }
 - (void)showCategorizedImportOptions {
-    if(self.candidates.count){[self showFailure:@"请先保存当前预览，或开始新的导入"];return;}
+    [self discardUncommittedCandidatesForFreshRecognition];
     ResourceImportSheetViewController *chooser=[ResourceImportSheetViewController new];chooser.modalPresentationStyle=UIModalPresentationFullScreen;__weak typeof(self) weakSelf=self;
     chooser.onSelect=^(ResourceImportOption option){ResourceImportWorkflowViewController *owner=weakSelf;if(owner)[owner applyImportCategory:option];};
     [self presentViewController:chooser animated:YES completion:nil];
@@ -287,7 +424,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     self.navigationItem.prompt=category;[self.address becomeFirstResponder];
 }
 - (void)reset {
-    self.generation++;[self.fetcher cancel];[self.downloader cancel];self.batchRetrying=NO;[self.batchRetryIndices removeAllObjects];for(NSDictionary *row in self.candidates)if(row[@"service"]&&![row[@"saved"] boolValue])[ServiceStore remove:row[@"service"][@"id"]];[self.candidates removeAllObjects];self.finished=NO;self.taskKind=@"";self.selectedImportCategory=-1;self.restoredAddress=@"";self.address.text=@"";self.addressPlaceholder.hidden=NO;self.addressPlaceholder.text=@"粘贴影视、直播或资源合集链接";self.stage=@"粘贴地址，或选择本地文件";[self updateView];
+    self.generation++;[self.fetcher cancel];[self.downloader cancel];self.batchRetrying=NO;[self.batchRetryIndices removeAllObjects];for(NSDictionary *row in self.candidates)if(row[@"service"]&&![row[@"saved"] boolValue])[ServiceStore remove:row[@"service"][@"id"]];[self.candidates removeAllObjects];self.finished=NO;self.taskKind=@"";self.selectedImportCategory=-1;self.restoredAddress=@"";self.address.text=@"";self.addressPlaceholder.hidden=NO;self.addressPlaceholder.text=@"粘贴影视、WeBox/TVBox 合集、直播链接或配置内容";self.stage=@"粘贴地址，或选择本地文件";[self updateView];
 }
 - (void)cancelWork {self.generation++;[self.fetcher cancel];[self.downloader cancel];self.batchRetrying=NO;[self.batchRetryIndices removeAllObjects];self.retryCandidateIndex=NSNotFound;self.busy=NO;self.stage=@"任务已取消 · 已保存项目保留，可重试未保存项";[self updateView];}
 - (NSString *)runtimeHint {return self.runtime.selectedSegmentIndex==1?@"python":(self.runtime.selectedSegmentIndex==2?@"node":nil);}
@@ -362,13 +499,40 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     NSMutableDictionary *failed=[@{@"name":file.lastPathComponent?:@"资源",@"error":error.localizedDescription?:@"不支持或无法识别此文件",@"selected":@NO} mutableCopy];if(data.length<=32*1024*1024)failed[@"retryData"]=data;if(file.isFileURL)failed[@"retryFileName"]=file.lastPathComponent?:@"";failed[@"retryOrigin"]=origin?:@"";failed[@"retryCompanions"]=companions?:@{};failed[@"retryHint"]=hint?:@"";[self decorateCandidate:failed file:file origin:origin];return failed;
 }
 - (void)recognizeURL {
-    if(self.candidates.count){[self showFailure:@"请先保存当前预览，或开始新的导入"];return;}
-    NSString *raw=[self.address.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];NSURL *url=[NSURL URLWithString:raw];
-    if(!url.host.length||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||[raw rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].location!=NSNotFound){[self showFailure:@"请输入一个完整的 HTTP / HTTPS 链接"];return;}
-    if([raw rangeOfString:@"\\.jsonhttps?://" options:NSRegularExpressionSearch].location!=NSNotFound){[self showFailure:@"可能粘贴了多个链接，请每次识别一个完整地址"];return;}
+    [self discardUncommittedCandidatesForFreshRecognition];
+    NSString *raw=[self.address.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(!raw.length){[self showFailure:@"请先输入或粘贴资源链接、JSON 配置或脚本内容"];return;}
+    if([raw rangeOfString:@"\\.jsonhttps?://" options:NSRegularExpressionSearch].location!=NSNotFound){[self showFailure:@"可能粘贴了多个紧邻链接，请分行或每次识别一个完整地址"];return;}
+
+    // Support direct paste of raw JSON / M3U / WeBox / JS / Python content
+    BOOL looksLikeRawContent=([raw hasPrefix:@"{"]&&[raw hasSuffix:@"}"])||([raw hasPrefix:@"["]&&[raw hasSuffix:@"]"])||[raw hasPrefix:@"#EXTM3U"]||[raw containsString:@"#EXTINF:"]||[raw containsString:@"WeBox.define("]||[raw containsString:@"class Spider"]||[raw containsString:@"module.exports"]||[raw containsString:@"export default"];
+    if(looksLikeRawContent){
+        [self.view endEditing:YES];self.restoredAddress=raw;self.taskKind=@"url";self.busy=YES;self.stage=@"正在识别粘贴内容…";NSUInteger generation=++self.generation;NSString *hint=[self runtimeHint];[self updateView];
+        NSData *rawData=[raw dataUsingEncoding:NSUTF8StringEncoding];
+        NSString *ext=([raw hasPrefix:@"{"]||[raw hasPrefix:@"["])?@"json":(([raw hasPrefix:@"#EXTM3U"]||[raw containsString:@"#EXTINF:"])?@"m3u":(([raw containsString:@"class Spider"]||[raw containsString:@"def init("])?@"py":@"js"));
+        NSString *tempPath=[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"pasted-resource-%@.%@",NSUUID.UUID.UUIDString,ext]];
+        [rawData writeToFile:tempPath atomically:YES];
+        NSMutableDictionary *row=[self candidateForData:rawData file:[NSURL fileURLWithPath:tempPath] origin:nil companions:@{} hint:hint];
+        [NSFileManager.defaultManager removeItemAtPath:tempPath error:NULL];
+        if(self.generation!=generation){if(row[@"service"])[ServiceStore remove:row[@"service"][@"id"]];return;}
+        [self.candidates addObject:row];self.busy=NO;self.stage=row[@"error"]?(row[@"error"]?:@"识别失败"):@"识别完成 · 请选择要保存的资源";[self updateView];
+        return;
+    }
+
+    NSURL *url=ResourceImportNormalizedURL(raw);
+    if(!url){
+        NSArray<NSString *> *extracted=ResourceImportExtractURLStrings(raw);
+        if(extracted.count==1){
+            raw=extracted.firstObject;
+            url=ResourceImportNormalizedURL(raw);
+            self.address.text=raw;
+        }
+    }
+    if(!url||!url.host.length||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]){[self showFailure:@"请输入一个完整的 HTTP / HTTPS 链接，或直接粘贴 JSON / M3U / 脚本内容"];return;}
+    raw=url.absoluteString;
     [self.view endEditing:YES];self.restoredAddress=raw;self.taskKind=@"url";self.busy=YES;self.stage=@"正在下载与识别…";NSUInteger generation=++self.generation;NSString *hint=[self runtimeHint];[self updateView];__weak typeof(self) weakSelf=self;
     if(self.selectedImportCategory==ResourceImportOptionMacCMS){NSError *error=nil;NSDictionary *catalog=[TVBoxCatalogStore catalogWithMacCMSAPIURL:raw name:nil error:&error];if(!catalog){[self showFailure:error.localizedDescription?:@"MacCMS 接口地址无效"];return;}unsigned char digest[CC_SHA256_DIGEST_LENGTH];NSData *sourceData=[raw dataUsingEncoding:NSUTF8StringEncoding];CC_SHA256(sourceData.bytes,(CC_LONG)sourceData.length,digest);NSMutableString *fingerprint=[NSMutableString string];for(NSUInteger index=0;index<CC_SHA256_DIGEST_LENGTH;index++)[fingerprint appendFormat:@"%02x",digest[index]];NSMutableDictionary *prepared=[catalog mutableCopy];prepared[@"importFingerprint"]=fingerprint;NSMutableDictionary *row=[@{@"kind":@"catalog",@"catalog":prepared,@"name":prepared[@"name"]?:@"MacCMS 影视接口",@"summary":@"MacCMS API · 保存接口索引，选中后请求 JSON / XML",@"selected":@YES} mutableCopy];[self decorateCandidate:row file:nil origin:raw];[self.candidates addObject:row];self.busy=NO;self.stage=@"MacCMS 接口已识别 · 尚未验证网络";[self updateView];return;}
-    if([@[@"py",@"js",@"zip",@"md5"] containsObject:url.pathExtension.lowercaseString]){
+    if([@[@"py",@"js",@"mjs",@"cjs",@"zip",@"md5"] containsObject:url.pathExtension.lowercaseString]){
         self.downloader=[MediaPackageDownloader new];self.downloader.onProgress=^(NSString *stage,int64_t received,int64_t expected){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.generation!=generation)return;owner.stage=expected>0?[NSString stringWithFormat:@"%@ · %.1f / %.1f MiB",stage,received/1048576.0,expected/1048576.0]:[NSString stringWithFormat:@"%@ · %.1f MiB",stage,received/1048576.0];if(owner.onStateChanged)owner.onStateChanged();[owner.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];};
         [self.downloader importURL:url headers:nil runtimeHint:hint completion:^(NSDictionary *service,NSError *error){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.generation!=generation){if(service)[ServiceStore remove:service[@"id"]];return;}if(!service){[owner showFailure:error.localizedDescription];return;}NSMutableDictionary *row=[@{@"kind":@"service",@"service":service,@"name":service[@"name"]?:@"脚本资源",@"summary":[NSString stringWithFormat:@"已识别 · %@ · %@",service[@"engine"]?:@"",service[@"protocol"]?:@""],@"selected":@YES} mutableCopy];[owner decorateCandidate:row file:nil origin:url.absoluteString];[owner.candidates addObject:row];owner.busy=NO;owner.stage=@"识别完成 · 尚未保存";[owner updateView];}];return;
     }
@@ -379,7 +543,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     };[self.fetcher load:url];
 }
 - (void)pickFiles:(BOOL)folder {
-    if(self.candidates.count){[self showFailure:@"请先保存当前预览，或开始新的导入"];return;}self.pickingFolder=folder;UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[folder?UTTypeFolder:UTTypeData] asCopy:!folder];picker.allowsMultipleSelection=!folder;picker.delegate=self;[self presentViewController:picker animated:YES completion:nil];
+    [self discardUncommittedCandidatesForFreshRecognition];
+    self.pickingFolder=folder;UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[folder?UTTypeFolder:UTTypeData] asCopy:!folder];picker.allowsMultipleSelection=!folder;picker.delegate=self;[self presentViewController:picker animated:YES completion:nil];
 }
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {self.retryCandidateIndex=NSNotFound;if(self.batchRetrying){self.busy=NO;self.stage=@"已跳过需要重新选择的失败文件";[self updateView];[self advanceBatchRetry];}}
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {

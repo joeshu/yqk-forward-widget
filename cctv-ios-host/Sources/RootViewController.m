@@ -359,6 +359,14 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
     [self.tableView reloadData];
 }
 
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    if ((scrollView == self.channelGrid || scrollView == self.table) && self.catalogTopImmersiveScrim && !self.catalogTopImmersiveScrim.hidden) {
+        CGFloat topInset = scrollView.contentInset.top;
+        CGFloat progress = MIN(1.0, MAX(0.0, (scrollView.contentOffset.y + topInset) / 96.0));
+        HostUpdateImmersiveTopScrim(self.catalogTopImmersiveScrim, self.catalogTopImmersiveGradient, self.catalogTopImmersiveScrim.frame, progress, NO);
+    }
+}
+
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
     if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])
@@ -502,6 +510,9 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, assign) NSInteger gridColumns;
 @property (nonatomic, assign) BOOL playerExpanded;
 @property (nonatomic, copy) NSString *activeSource;
+@property (nonatomic, strong) UIView *catalogTopImmersiveScrim;
+@property (nonatomic, strong) CAGradientLayer *catalogTopImmersiveGradient;
+@property (nonatomic, strong) UIView *catalogGroupGlassCard;
 @property (nonatomic, strong) UISegmentedControl *groupControl;
 @property (nonatomic, strong) UILabel *versionLabel;
 @property (nonatomic, strong) NSArray<NSDictionary *> *allChannels;
@@ -794,6 +805,44 @@ configureCatalogNavigation;
             service[@"name"]=spec[@"name"];service[@"bundledResourceID"]=identifier;service[@"capabilities"]=capabilities;manifest[@"name"]=spec[@"name"];manifest[@"capabilities"]=capabilities;manifest[@"options"]=options;service[@"manifest"]=manifest;[ServiceStore save:service];changed=YES;
         }
         if(complete&&!alreadySeeded)[preferences setBool:YES forKey:seedKey];
+        NSString *weboxSeedKey=@"cctv.bundledWeBoxResources.v1";
+        BOOL weboxAlreadySeeded=[preferences boolForKey:weboxSeedKey];
+        if(!weboxAlreadySeeded){
+            BOOL weboxComplete=YES;
+            NSString *weboxCatalogID=@"builtin-webox-index";
+            NSString *weboxCatalogURL=@"https://ddgksf2013.top/webox/index.json";
+            if(![TVBoxCatalogStore catalogForID:weboxCatalogID]){
+                NSString *wPath=[NSBundle.mainBundle pathForResource:@"webox-index" ofType:@"json" inDirectory:@"BuiltinMedia"];
+                NSData *wData=wPath?[NSData dataWithContentsOfFile:wPath options:NSDataReadingMappedIfSafe error:NULL]:nil;
+                NSError *wErr=nil;NSDictionary *wParsed=wData?[TVBoxCatalogStore parseData:wData sourceURL:weboxCatalogURL error:&wErr]:nil;
+                if(wParsed){
+                    NSMutableDictionary *wCat=[wParsed mutableCopy];wCat[@"id"]=weboxCatalogID;wCat[@"name"]=@"WeBox 影视源合集";wCat[@"catalogKind"]=@"tvbox";wCat[@"bundledResourceID"]=weboxCatalogID;wCat[@"url"]=weboxCatalogURL;
+                    [TVBoxCatalogStore saveCatalog:wCat];changed=YES;
+                }else weboxComplete=NO;
+            }
+            NSArray *weboxSpecs=@[
+                @{@"file":@"webox-4kvm",@"id":@"builtin-webox-4kvm",@"name":@"4k影视",@"url":@"https://ddgksf2013.top/webox/4k%E5%BD%B1%E8%A7%86.webox.js",@"siteKey":@"webox-4kvm"},
+                @{@"file":@"webox-hstream",@"id":@"builtin-webox-hstream",@"name":@"HStream",@"url":@"https://ddgksf2013.top/webox/HStream.webox.js",@"siteKey":@"webox-hstream"},
+                @{@"file":@"webox-guazi",@"id":@"builtin-webox-guazi",@"name":@"瓜子",@"url":@"https://ddgksf2013.top/webox/%E7%93%9C%E5%AD%90.webox.js",@"siteKey":@"webox-guazi"},
+                @{@"file":@"webox-rou",@"id":@"builtin-webox-rou",@"name":@"肉視頻",@"url":@"https://ddgksf2013.top/webox/%E8%82%89.webox.js",@"siteKey":@"webox-rou"},
+                @{@"file":@"webox-one",@"id":@"builtin-webox-one",@"name":@"ONE · 一个",@"url":@"https://ddgksf2013.top/webox/one%E4%B8%80%E4%B8%AA.webox.js",@"siteKey":@"webox-one"}
+            ];
+            NSArray *weboxCaps=@[@"home",@"category",@"search",@"detail",@"play"];
+            for(NSDictionary *wSpec in weboxSpecs){
+                NSString *wID=wSpec[@"id"];BOOL wFound=NO;
+                for(NSDictionary *svc in [ServiceStore services])if([svc[@"bundledResourceID"] isEqual:wID]||[svc[@"url"] isEqual:wSpec[@"url"]]){wFound=YES;break;}
+                if(wFound)continue;
+                NSString *wScriptPath=[NSBundle.mainBundle pathForResource:wSpec[@"file"] ofType:@"js" inDirectory:@"BuiltinMedia"];
+                NSError *wImportErr=nil;NSDictionary *wImported=wScriptPath?[MediaPackageImporter importFile:[NSURL fileURLWithPath:wScriptPath] error:&wImportErr]:nil;
+                if(!wImported){weboxComplete=NO;continue;}
+                NSMutableDictionary *wService=[wImported mutableCopy],*wManifest=[wService[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];
+                wService[@"name"]=wSpec[@"name"];wService[@"bundledResourceID"]=wID;wService[@"url"]=wSpec[@"url"];wService[@"capabilities"]=weboxCaps;
+                wService[@"tvboxSiteKey"]=wSpec[@"siteKey"];wService[@"tvboxSiteKeys"]=@[wSpec[@"siteKey"]];
+                wManifest[@"name"]=wSpec[@"name"];wManifest[@"capabilities"]=weboxCaps;wManifest[@"options"]=@{@"playTimeoutMs":@45000};
+                wService[@"manifest"]=wManifest;[ServiceStore save:wService];changed=YES;
+            }
+            if(weboxComplete)[preferences setBool:YES forKey:weboxSeedKey];
+        }
         dispatch_async(dispatch_get_main_queue(),^{self.bundledMediaSeedInProgress=NO;if(changed){[self refreshConfigurationPage];MediaBrowserViewController *browser=[self.tabPages[@2] isKindOfClass:MediaBrowserViewController.class]?self.tabPages[@2]:nil;[browser refreshSources];}if(!complete)[self log:@"内置影视资源注册未完成；下次启动会继续检查缺少的资源"];
         });
     });
@@ -857,15 +906,22 @@ configureCatalogNavigation;
 
 - (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)viewController animated:(BOOL)animated {
     if(navigationController!=self.navigationController)return;
+    if(viewController!=self&&navigationController.topViewController==self&&self.activeTab==2){
+        MediaBrowserViewController *mediaPage=[self.tabPages[@2] isKindOfClass:MediaBrowserViewController.class]?self.tabPages[@2]:nil;
+        [mediaPage prepareForNavigationTransition];
+    }
     if(viewController!=self&&navigationController.topViewController==self&&self.activeTab==3){
         ConfigCenterViewController *resourcePage=[self.tabPages[@3] isKindOfClass:ConfigCenterViewController.class]?self.tabPages[@3]:nil;
         [resourcePage prepareForNavigationTransition];
     }
     // A push from a compact home/resource tab must reveal the navigation bar at
     // the beginning of the transition so the destination is never presented
-    // with a hidden back affordance. The completed-transition delegate below
-    // restores the correct hidden state if an interactive pop is cancelled.
+    // with a hidden back affordance. Conversely, popping back to a compact tab
+    // hides the navigation bar alongside the transition so the top safe area
+    // never snaps by 44 pt after didShowViewController.
+    BOOL shouldHide=[self shouldHideNavigationBarForVisibleController:viewController];
     if(viewController!=self&&navigationController.navigationBarHidden)[navigationController setNavigationBarHidden:NO animated:animated];
+    else if(viewController==self&&navigationController.navigationBarHidden!=shouldHide)[navigationController setNavigationBarHidden:shouldHide animated:animated];
     if(viewController==self)return;
     [navigationController setOverrideTraitCollection:[self fontSizeOverrideTraitCollection] forChildViewController:viewController];
     if(self.activeTab<2)[self suspendLivePlaybackForReason:@"left_live_navigation_page"];
@@ -879,6 +935,15 @@ configureCatalogNavigation;
     BOOL shouldHide=[self shouldHideNavigationBarForVisibleController:viewController];
     if(navigationController.navigationBarHidden!=shouldHide)[navigationController setNavigationBarHidden:shouldHide animated:NO];
     if(viewController==self)HostStyleNavigation(navigationController);
+    if(viewController==self&&shouldHide)navigationController.navigationBar.prefersLargeTitles=NO;
+    if(viewController==self&&self.activeTab==2){
+        MediaBrowserViewController *mediaPage=[self.tabPages[@2] isKindOfClass:MediaBrowserViewController.class]?self.tabPages[@2]:nil;
+        if(mediaPage){
+            [self.view setNeedsLayout];
+            [self.view layoutIfNeeded];
+            [mediaPage refreshHeaderAfterNavigationTransition];
+        }
+    }
     if(viewController==self&&self.activeTab==3){
         ConfigCenterViewController *resourcePage=[self.tabPages[@3] isKindOfClass:ConfigCenterViewController.class]?self.tabPages[@3]:nil;
         if(resourcePage){
@@ -1190,6 +1255,17 @@ configureCatalogNavigation;
 
 - (void)buildList {
     CGFloat y = CGRectGetMaxY(self.playerBox.frame);
+    self.catalogTopImmersiveScrim = [UIView new];
+    self.catalogTopImmersiveScrim.userInteractionEnabled = NO;
+    self.catalogTopImmersiveScrim.accessibilityIdentifier = @"catalog.top.immersive.scrim";
+    self.catalogTopImmersiveGradient = [CAGradientLayer layer];
+    self.catalogTopImmersiveGradient.locations = @[@0.0, @0.68, @1.0];
+    [self.catalogTopImmersiveScrim.layer addSublayer:self.catalogTopImmersiveGradient];
+    [self.view addSubview:self.catalogTopImmersiveScrim];
+    self.catalogGroupGlassCard = [UIView new];
+    self.catalogGroupGlassCard.userInteractionEnabled = NO;
+    HostStyleGlassCard(self.catalogGroupGlassCard, 14);
+    [self.view addSubview:self.catalogGroupGlassCard];
     self.groupControl = [[UISegmentedControl alloc] initWithItems:[self currentCatalogGroupTitles]];
     self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 32);
     self.groupControl.selectedSegmentIndex = 0;
@@ -1594,8 +1670,11 @@ configureCatalogNavigation;
     // navigation bar so they remain visible when the top chrome collapses.
     self.navigationItem.leftBarButtonItem=nil;self.navigationItem.rightBarButtonItems=nil;
     BOOL hideNavigation=self.fullscreen||expandedLive;
-    if(self.navigationController.topViewController==self&&self.navigationController.navigationBarHidden!=hideNavigation)
-        [self.navigationController setNavigationBarHidden:hideNavigation animated:NO];
+    if(self.navigationController.topViewController==self){
+        self.navigationController.navigationBar.prefersLargeTitles=!hideNavigation;
+        if(self.navigationController.navigationBarHidden!=hideNavigation)
+            [self.navigationController setNavigationBarHidden:hideNavigation animated:NO];
+    }
     [self setNeedsStatusBarAppearanceUpdate];
     [self updateLiveResourceCapsule];
     if(self.catalogLayoutButton){self.catalogLayoutButton.accessibilityLabel=self.gridMode?@"切换列表布局":@"切换网格布局";UIButtonConfiguration *configuration=self.catalogLayoutButton.configuration;configuration.image=[UIImage systemImageNamed:self.gridMode?@"list.bullet":@"square.grid.2x2"];self.catalogLayoutButton.configuration=configuration;}
@@ -1687,8 +1766,15 @@ configureCatalogNavigation;
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];UIPopoverPresentationController *popover=a.popoverPresentationController;if(popover){if(self.catalogMoreButton){popover.sourceView=self.catalogMoreButton;popover.sourceRect=self.catalogMoreButton.bounds;}else{popover.sourceView=self.view;popover.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);}}[self presentViewController:a animated:YES completion:nil];
 }
 - (void)showTabPage:(UIViewController *)page title:(NSString *)title {
-    BOOL media=[page isKindOfClass:MediaBrowserViewController.class];BOOL resource=[page isKindOfClass:ConfigCenterViewController.class];BOOL hideNavigation=media||resource;self.navigationItem.largeTitleDisplayMode=media?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
-    if(self.navigationController.topViewController==self&&self.navigationController.navigationBarHidden!=hideNavigation)[self.navigationController setNavigationBarHidden:hideNavigation animated:NO];
+    BOOL media=[page isKindOfClass:MediaBrowserViewController.class];BOOL resource=[page isKindOfClass:ConfigCenterViewController.class];BOOL hideNavigation=media||resource;self.navigationItem.largeTitleDisplayMode=hideNavigation?UINavigationItemLargeTitleDisplayModeNever:UINavigationItemLargeTitleDisplayModeAlways;
+    if(self.navigationController.topViewController==self){
+        self.navigationController.navigationBar.prefersLargeTitles=!hideNavigation;
+        if(self.navigationController.navigationBarHidden!=hideNavigation)[self.navigationController setNavigationBarHidden:hideNavigation animated:NO];
+    }
+    CGFloat stableTop=HostStatusBarSafeTop(self.view,self.view.safeAreaInsets.top);
+    if(resource)[(ConfigCenterViewController *)page setTopSafeAreaInset:stableTop];
+    else if(media)[(MediaBrowserViewController *)page setTopSafeAreaInset:stableTop];
+    page.view.frame=self.view.bounds;
     self.tabPage=page;if(page.parentViewController!=self){[self addChildViewController:page];[self.view addSubview:page.view];[page didMoveToParentViewController:self];}else if(page.view.superview!=self.view)[self.view addSubview:page.view];self.title=(media||resource)?@"":title;self.navigationItem.searchController=(media||resource)?nil:page.navigationItem.searchController;self.navigationItem.leftBarButtonItem=nil;
     self.navigationItem.rightBarButtonItems=(media||resource)?nil:page.navigationItem.rightBarButtonItems;self.resourceActionsButton.hidden=YES;[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
 }
@@ -1797,6 +1883,20 @@ configureCatalogNavigation;
         BOOL current=[selectedMediaCatalog isEqual:identifier]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"tvbox-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"maccms-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"jar-bridge:%@:",identifier]];
         BOOL liveEnabled=NO;for(NSString *owner in self.subscriptionURLs){NSDictionary *ownerMetadata=[ProfileStore metadata:owner];if([ownerMetadata[@"tvboxCatalogID"] isEqual:identifier]&&![disabled containsObject:owner]&&[counts[owner] unsignedIntegerValue]){liveEnabled=YES;break;}}
         NSMutableDictionary *profile=[@{@"name":catalogName,@"type":@"tvbox",@"catalogKind":catalogKind,@"resourceKind":kind,@"source":[@"tvbox:" stringByAppendingString:identifier],@"url":catalog[@"url"]?:@"",@"updatedAt":catalog[@"updatedAt"]?:@0,@"siteCount":@(sites.count),@"supportedCount":@(supported),@"liveCount":@(liveCount),@"enabled":@(liveEnabled),@"current":@(current)} mutableCopy];if(catalog[@"importSourceFilename"])profile[@"sourceFilename"]=catalog[@"importSourceFilename"];if(catalog[@"importFingerprint"])profile[@"fingerprint"]=catalog[@"importFingerprint"];[rows addObject:profile];
+    }
+    NSArray *unifiedOrder=[NSUserDefaults.standardUserDefaults arrayForKey:@"resourceUnifiedOrder"];
+    if([unifiedOrder isKindOfClass:NSArray.class]&&unifiedOrder.count){
+        NSMutableDictionary<NSString *,NSNumber *> *orderMap=[NSMutableDictionary dictionaryWithCapacity:unifiedOrder.count];
+        for(NSUInteger idx=0;idx<unifiedOrder.count;idx++){id key=unifiedOrder[idx];if([key isKindOfClass:NSString.class]&&!orderMap[key])orderMap[key]=@(idx);}
+        [rows sortWithOptions:NSSortStable usingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){
+            NSString *ka=[a[@"source"] isKindOfClass:NSString.class]&&[a[@"source"] length]?a[@"source"]:([a[@"native"] boolValue]?@"__native_cctv__":@"");
+            NSString *kb=[b[@"source"] isKindOfClass:NSString.class]&&[b[@"source"] length]?b[@"source"]:([b[@"native"] boolValue]?@"__native_cctv__":@"");
+            NSNumber *ia=orderMap[ka],*ib=orderMap[kb];
+            if(ia&&ib)return [ia compare:ib];
+            if(ia)return NSOrderedAscending;
+            if(ib)return NSOrderedDescending;
+            return NSOrderedSame;
+        }];
     }
     return rows;
 }
@@ -2706,9 +2806,17 @@ configureCatalogNavigation;
         // Every tab page owns the full root bounds. Child controls use their
         // safe-area guides, while their backgrounds and scroll views can pass
         // behind the status and navigation bars.
-        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat pageTop=0;self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,contentBottom-pageTop));if(resourcePage){[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:top];[(ConfigCenterViewController *)self.tabPage setBottomOverlayInset:tabContentInset];}else if([self.tabPage isKindOfClass:MediaBrowserViewController.class])[(MediaBrowserViewController *)self.tabPage setBottomOverlayInset:tabContentInset];else if([self.tabPage isKindOfClass:SettingsViewController.class])[(SettingsViewController *)self.tabPage setBottomOverlayInset:tabContentInset];
+        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat pageTop=0;self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,contentBottom-pageTop));if(resourcePage){[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:top];[(ConfigCenterViewController *)self.tabPage setBottomOverlayInset:tabContentInset];}else if([self.tabPage isKindOfClass:MediaBrowserViewController.class]){[(MediaBrowserViewController *)self.tabPage setTopSafeAreaInset:top];[(MediaBrowserViewController *)self.tabPage setBottomOverlayInset:tabContentInset];}else if([self.tabPage isKindOfClass:SettingsViewController.class])[(SettingsViewController *)self.tabPage setBottomOverlayInset:tabContentInset];
+        self.catalogTopImmersiveScrim.hidden=!catalog||expandedLive;
+        self.catalogGroupGlassCard.hidden=!catalog||expandedLive;
+        if(!self.catalogTopImmersiveScrim.hidden){
+            UIScrollView *activeScroll=self.gridMode?(UIScrollView *)self.channelGrid:(UIScrollView *)self.table;
+            CGFloat scrollProgress=MIN(1.0,MAX(0.0,(activeScroll.contentOffset.y+contentY)/96.0));
+            HostUpdateImmersiveTopScrim(self.catalogTopImmersiveScrim,self.catalogTopImmersiveGradient,CGRectMake(0,0,w,contentY+14),scrollProgress,NO);
+            self.catalogGroupGlassCard.frame=CGRectInset(self.groupControl.frame,-2,-2);
+        }
         self.playerTopScrim.frame=CGRectMake(0,0,w,MIN(CGRectGetHeight(self.playerBox.bounds),expandedLive?48:top+24));self.playerTopGradient.frame=self.playerTopScrim.bounds;
-        [self.view bringSubviewToFront:self.playerBox];[self.view bringSubviewToFront:self.liveResourceCapsule];[self.view bringSubviewToFront:self.groupControl];[self.view bringSubviewToFront:self.playerTabs];[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
+        [self.view bringSubviewToFront:self.catalogTopImmersiveScrim];[self.view bringSubviewToFront:self.catalogGroupGlassCard];[self.view bringSubviewToFront:self.playerBox];[self.view bringSubviewToFront:self.liveResourceCapsule];[self.view bringSubviewToFront:self.groupControl];[self.view bringSubviewToFront:self.playerTabs];[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
         self.resourceActionsButton.hidden=YES;self.resourceActionsButton.frame=CGRectMake(w-safe.right-18-58,CGRectGetMinY(self.bottomBar.frame)-12-58,58,58);
         self.catalogFloatingControls.hidden=!catalog;CGFloat controlsWidth=164,controlsHeight=54;self.catalogFloatingControls.frame=CGRectMake(MAX(12,w-safe.right-controlsWidth-14),MAX(top+8,tabY-controlsHeight-12),controlsWidth,controlsHeight);self.catalogLayoutButton.frame=CGRectMake(4,3,48,48);self.catalogFloatingAirPlayPicker.frame=CGRectMake(58,3,48,48);self.catalogMoreButton.frame=CGRectMake(112,3,48,48);[self.view bringSubviewToFront:self.catalogFloatingControls];
     }
@@ -3046,17 +3154,19 @@ configureCatalogNavigation;
 - (void)importTVBoxSite:(NSDictionary *)site { [self importTVBoxSite:site browseAfterImport:NO]; }
 - (void)importTVBoxSite:(NSDictionary *)site browseAfterImport:(BOOL)browseAfterImport {
     NSString *siteKey=[site[@"key"] isKindOfClass:NSString.class]?site[@"key"]:@"";
-    if(browseAfterImport&&siteKey.length){
+    NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
+    if(browseAfterImport&&(siteKey.length||api.length)){
         for(NSDictionary *existing in [ServiceStore services]){
             if(![ServiceStore isVODMediaService:existing])continue;
             NSArray *keys=[existing[@"tvboxSiteKeys"] isKindOfClass:NSArray.class]?existing[@"tvboxSiteKeys"]:@[];
-            if([existing[@"tvboxSiteKey"] isEqual:siteKey]||[keys containsObject:siteKey]){
+            BOOL matchesKey=siteKey.length&&([existing[@"tvboxSiteKey"] isEqual:siteKey]||[keys containsObject:siteKey]);
+            BOOL matchesURL=api.length&&[existing[@"url"] isKindOfClass:NSString.class]&&[existing[@"url"] isEqual:api];
+            if(matchesKey||matchesURL){
                 [self usePluginService:existing kind:@"vod"];
                 return;
             }
         }
     }
-    NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
     NSString *lowAPI=api.lowercaseString;
     if([lowAPI containsString:@"drpy2.min.js"]||[lowAPI containsString:@"3e7e0c8a023b624cec6bdcc200f06f02.js"]){
         [self activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];
@@ -3380,6 +3490,10 @@ configureCatalogNavigation;
         [self refreshConfigurationPage];if(completion)completion(nil);return;
     }
     if(enabled){
+        if(![PyHost isRunningServiceIdentifier:serviceID] && [PyHost isManagedServiceIdentifier:serviceID]){
+            [self restartMediaService:service completion:completion];
+            return;
+        }
         NSError *error=nil;BOOL started=[self startService:service error:&error];
         [RuntimeDiagnostics.shared recordEvent:started?@"service_start_accepted":@"service_start_failed" category:@"service" fields:@{@"service_id":serviceID, @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"python", @"port":service[@"port"]?:@0, @"start_phase":started?@"request_accepted":@"rejected", @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@""}];
         [self refreshConfigurationPage];if(completion)completion(error);return;

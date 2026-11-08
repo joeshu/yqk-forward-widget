@@ -1,0 +1,94 @@
+{
+  "name": "WeBox 官方影视源合集",
+  "version": "1.1.0",
+  "url": "https://ddgksf2013.top/webox/index.json",
+  "sources": [
+    {
+      "id": "com.4kvm.webox",
+      "name": "4k影视",
+      "version": "1.1.0",
+      "api": "1.1",
+      "url": "https://ddgksf2013.top/webox/4k影视.webox.js",
+      "bundleFile": "webox-4kvm"
+    },
+    {
+      "id": "HStream",
+      "name": "HStream",
+      "version": "1.1.0",
+      "api": "1.1",
+      "url": "https://ddgksf2013.top/webox/HStream.webox.js",
+      "bundleFile": "webox-hstream"
+    },
+    {
+      "id": "dev.webox.native.guazi",
+      "name": "瓜子",
+      "version": "1.0.3",
+      "api": "1.1",
+      "url": "https://ddgksf2013.top/webox/瓜子.webox.js",
+      "bundleFile": "webox-guazi"
+    },
+    {
+      "id": "rou.video.source",
+      "name": "肉視頻",
+      "version": "1.1.0",
+      "api": "1.1",
+      "url": "https://ddgksf2013.top/webox/肉.webox.js",
+      "bundleFile": "webox-rou"
+    },
+    {
+      "id": "com.wufazhuce.one",
+      "name": "ONE · 一个",
+      "version": "1.1.0",
+      "api": "1.1",
+      "url": "https://ddgksf2013.top/webox/one一个.webox.js",
+      "bundleFile": "webox-one"
+    }
+  ],
+  "sites": [
+    {
+      "key": "webox-4kvm",
+      "id": "com.4kvm.webox",
+      "name": "4k影视",
+      "version": "1.1.0",
+      "type": 3,
+      "api": "https://ddgksf2013.top/webox/4k%E5%BD%B1%E8%A7%86.webox.js",
+      "url": "https://ddgksf2013.top/webox/4k影视.webox.js"
+    },
+    {
+      "key": "webox-hstream",
+      "id": "HStream",
+      "name": "HStream",
+      "version": "1.1.0",
+      "type": 3,
+      "api": "https://ddgksf2013.top/webox/HStream.webox.js",
+      "url": "https://ddgksf2013.top/webox/HStream.webox.js"
+    },
+    {
+      "key": "webox-guazi",
+      "id": "dev.webox.native.guazi",
+      "name": "瓜子",
+      "version": "1.0.3",
+      "type": 3,
+      "api": "https://ddgksf2013.top/webox/%E7%93%9C%E5%AD%90.webox.js",
+      "url": "https://ddgksf2013.top/webox/瓜子.webox.js"
+    },
+    {
+      "key": "webox-rou",
+      "id": "rou.video.source",
+      "name": "肉視頻",
+      "version": "1.1.0",
+      "type": 3,
+      "api": "https://ddgksf2013.top/webox/%E8%82%89.webox.js",
+      "url": "https://ddgksf2013.top/webox/肉.webox.js"
+    },
+    {
+      "key": "webox-one",
+      "id": "com.wufazhuce.one",
+      "name": "ONE · 一个",
+      "version": "1.1.0",
+      "type": 3,
+      "api": "https://ddgksf2013.top/webox/one%E4%B8%80%E4%B8%AA.webox.js",
+      "url": "https://ddgksf2013.top/webox/one一个.webox.js"
+    }
+  ]
+}

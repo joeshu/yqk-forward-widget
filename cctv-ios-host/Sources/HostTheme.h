@@ -298,3 +298,46 @@ static inline void HostApplyThemeToWindow(UIWindow *window) {
         HostRefreshAppearanceLayers(w);
     }
 }
+
+// 锁定物理状态栏/灵动岛顶部安全区高度（恒定值），避免在 push/pop 二级页面切换
+// UINavigationBar 显隐时因 view.safeAreaInsets.top 叠加 44pt/96pt 引发顶栏跳动。
+static inline CGFloat HostStatusBarSafeTop(UIView *view, CGFloat fallbackSafeTop) {
+    CGFloat safeTop = isfinite(fallbackSafeTop) ? MAX(0.0, fallbackSafeTop) : 0.0;
+    UIWindow *window = view ? view.window : nil;
+    if (window) {
+        CGFloat winTop = window.safeAreaInsets.top;
+        if (isfinite(winTop) && winTop > 0.0) return winTop;
+    }
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        UIWindowScene *ws = (UIWindowScene *)scene;
+        for (UIWindow *w in ws.windows) {
+            if (w.isKeyWindow && w.safeAreaInsets.top > 0.0) return w.safeAreaInsets.top;
+        }
+        for (UIWindow *w in ws.windows) {
+            if (w.safeAreaInsets.top > 0.0) return w.safeAreaInsets.top;
+        }
+        if (ws.statusBarManager.statusBarFrame.size.height > 0.0) {
+            return ws.statusBarManager.statusBarFrame.size.height;
+        }
+    }
+    return safeTop;
+}
+
+// 2026 Spatial Glass 统一顶部渐进式沉浸遮罩：五个一级导航页与影视详情页共用，
+// 保证顶部状态栏与悬浮胶囊在海报/列表滚动时始终清晰可读且无生硬分割线。
+static inline void HostUpdateImmersiveTopScrim(UIView *scrimView, CAGradientLayer *gradientLayer, CGRect frame, CGFloat scrollProgress, BOOL hasHeroBackdrop) {
+    if (!scrimView || !gradientLayer) return;
+    scrimView.frame = frame;
+    gradientLayer.frame = scrimView.bounds;
+    CGFloat clamped = MIN(1.0, MAX(0.0, scrollProgress));
+    CGFloat topAlpha = hasHeroBackdrop ? (0.40 + clamped * 0.48) : (0.86 + clamped * 0.10);
+    CGFloat midAlpha = topAlpha * 0.72;
+    UIColor *base = HostIsDarkThemeSelected() ? UIColor.blackColor : [HostBackground() resolvedColorWithTraitCollection:scrimView.traitCollection];
+    gradientLayer.locations = @[@0.0, @0.68, @1.0];
+    gradientLayer.colors = @[
+        (id)[base colorWithAlphaComponent:topAlpha].CGColor,
+        (id)[base colorWithAlphaComponent:midAlpha].CGColor,
+        (id)[base colorWithAlphaComponent:0.0].CGColor
+    ];
+}

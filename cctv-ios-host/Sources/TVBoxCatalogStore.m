@@ -122,20 +122,56 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
 }
 + (NSDictionary *)parseData:(NSData *)data sourceURL:(NSString *)sourceURL error:(NSError **)error {
     if (!data.length || data.length > 8*1024*1024) { if(error)*error=TVBoxError(@"TVBox 配置为空或超过 8 MiB"); return nil; }
-    NSError *jsonError=nil;id json=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:&jsonError];
+    NSError *jsonError=nil;id rawJSON=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:&jsonError];
+    NSDictionary *json=[rawJSON isKindOfClass:NSDictionary.class]?rawJSON:nil;
+    if (!json && [rawJSON isKindOfClass:NSArray.class] && [(NSArray *)rawJSON count]) {
+        json=@{@"name":([sourceURL.lowercaseString containsString:@"webox"]?@"WeBox 影视源合集":@"资源合集"),@"sites":rawJSON};
+    }
     if (![json isKindOfClass:NSDictionary.class]) { if(error)*error=jsonError?:TVBoxError(@"TVBox 配置必须是 JSON 对象"); return nil; }
     NSArray *sites=[json[@"sites"] isKindOfClass:NSArray.class]?json[@"sites"]:@[];
+    if (!sites.count) {
+        for (NSString *altKey in @[@"sources",@"plugins",@"items",@"list",@"packages",@"modules",@"scripts",@"data"]) {
+            if ([json[altKey] isKindOfClass:NSArray.class] && [json[altKey] count]) { sites=json[altKey]; break; }
+        }
+    }
     NSArray *lives=[json[@"lives"] isKindOfClass:NSArray.class]?json[@"lives"]:@[];
     if (!sites.count && !lives.count) { if(error)*error=TVBoxError(@"配置中没有可识别的 sites 或 lives"); return nil; }
     if (sites.count>2000 || lives.count>500) { if(error)*error=TVBoxError(@"站点或直播源数量超过 2000 / 500 项限制"); return nil; }
     NSMutableArray *cleanSites=[NSMutableArray array]; NSMutableSet *keys=[NSMutableSet set];NSUInteger siteIndex=0;
-    for(id value in sites) {
+    for(id rawValue in sites) {
         siteIndex++;
+        NSDictionary *value=[rawValue isKindOfClass:NSDictionary.class]?rawValue:nil;
+        if (!value && [rawValue isKindOfClass:NSString.class] && [(NSString *)rawValue length]) {
+            NSString *str=(NSString *)rawValue;
+            NSString *itemName=[[str.lastPathComponent stringByRemovingPercentEncoding]?:str.lastPathComponent stringByDeletingPathExtension];
+            if([itemName.lowercaseString hasSuffix:@".webox"])itemName=[itemName substringToIndex:itemName.length-6];
+            value=@{@"name":itemName.length?itemName:[NSString stringWithFormat:@"站点 %lu",(unsigned long)siteIndex],@"api":str,@"type":@3};
+        }
         if (![value isKindOfClass:NSDictionary.class]) continue;
-        NSString *key=TVBoxString(value[@"key"] ?: value[@"id"],256), *name=TVBoxString(value[@"name"],256), *api=TVBoxString(value[@"api"],8192);
+        NSString *key=TVBoxString(value[@"key"] ?: value[@"id"],256), *name=TVBoxString(value[@"name"] ?: value[@"title"],256);
+        NSString *rawApiField=TVBoxString(value[@"api"],8192);NSString *altUrlField=TVBoxString(value[@"url"] ?: value[@"script"] ?: value[@"file"] ?: value[@"path"] ?: value[@"downloadUrl"] ?: value[@"src"],8192);if(altUrlField.length&&(!rawApiField.length||[rawApiField rangeOfString:@"^\\d+(?:\\.\\d+)*$" options:NSRegularExpressionSearch].location!=NSNotFound))rawApiField=altUrlField;NSString *api=rawApiField;
         if(!key.length)key=[NSString stringWithFormat:@"site-%lu",(unsigned long)siteIndex];
+        if(!name.length && api.length){
+            NSString *inferred=[[api.lastPathComponent stringByRemovingPercentEncoding]?:api.lastPathComponent stringByDeletingPathExtension];
+            if([inferred.lowercaseString hasSuffix:@".webox"])inferred=[inferred substringToIndex:inferred.length-6];
+            if(inferred.length)name=inferred;
+        }
         if(!name.length)name=[NSString stringWithFormat:@"未命名站点 %lu",(unsigned long)siteIndex];
-        if(api.length&&!TVBoxWebURL(api)&&TVBoxWebURL(sourceURL)){NSURL *base=[NSURL URLWithString:sourceURL];NSURL *resolved=[NSURL URLWithString:api relativeToURL:base].absoluteURL;if(TVBoxWebURL(resolved.absoluteString))api=resolved.absoluteString;}
+        if(api.length&&!TVBoxWebURL(api)&&TVBoxWebURL(sourceURL)){
+            NSURL *base=[NSURL URLWithString:sourceURL];
+            NSURL *resolved=[NSURL URLWithString:api relativeToURL:base].absoluteURL;
+            if(!resolved){
+                NSString *encodedApi=[api stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLPathAllowedCharacterSet];
+                if(encodedApi.length)resolved=[NSURL URLWithString:encodedApi relativeToURL:base].absoluteURL;
+            }
+            if(TVBoxWebURL(resolved.absoluteString))api=resolved.absoluteString;
+        }
+        if(api.length&&!TVBoxWebURL(api)&&[api.lowercaseString hasSuffix:@".webox.js"]){
+            NSURL *base=[NSURL URLWithString:@"https://ddgksf2013.top/webox/index.json"];
+            NSString *encodedApi=[api stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLPathAllowedCharacterSet]?:api;
+            NSURL *resolved=[NSURL URLWithString:encodedApi relativeToURL:base].absoluteURL;
+            if(TVBoxWebURL(resolved.absoluteString))api=resolved.absoluteString;
+        }
         if([keys containsObject:key])key=[NSString stringWithFormat:@"%@-%lu",key,(unsigned long)siteIndex];
         [keys addObject:key];
         NSMutableDictionary *safeHeaders=[NSMutableDictionary dictionary];
@@ -184,7 +220,8 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         if(userAgent.length&&[userAgent rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\r\n"]].location==NSNotFound)live[@"ua"]=userAgent;
         [cleanLives addObject:live];
     }
-    NSString *name=TVBoxString(json[@"name"],256) ?: TVBoxString(json[@"title"],256) ?: @"资源合集";
+    NSString *defaultCatalogName=[sourceURL.lowercaseString containsString:@"webox"]?@"WeBox 影视源合集":@"资源合集";
+    NSString *name=TVBoxString(json[@"name"],256) ?: TVBoxString(json[@"title"],256) ?: defaultCatalogName;
     NSMutableDictionary *catalog=[@{@"id":NSUUID.UUID.UUIDString,@"name":name,@"sites":cleanSites.copy,@"lives":cleanLives.copy,@"updatedAt":@(NSDate.date.timeIntervalSince1970)} mutableCopy];
     NSMutableDictionary *tvboxConfig=[NSMutableDictionary dictionary];NSMutableArray *omittedConfigFields=[NSMutableArray array];NSUInteger extraBytes=0;
     for(NSString *field in @[@"notice",@"spider",@"wallpaper",@"logo",@"danmaku",@"parses",@"rules",@"doh",@"flags",@"ijk",@"ads"]){id item=json[field];if(!item)continue;if(![NSJSONSerialization isValidJSONObject:item]&&![item isKindOfClass:NSString.class]&&![item isKindOfClass:NSNumber.class]){[omittedConfigFields addObject:field];continue;}NSData *encoded=[NSJSONSerialization dataWithJSONObject:@{field:item} options:0 error:NULL];if(!encoded.length||encoded.length>1024*1024-extraBytes){[omittedConfigFields addObject:field];continue;}tvboxConfig[field]=item;extraBytes+=encoded.length;}

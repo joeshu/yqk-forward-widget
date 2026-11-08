@@ -25,15 +25,45 @@ static NSDictionary<NSString *,NSString *> *PackageSafeHeaders(id value) {
     for(id rawName in value){if(count++>=24)break;id rawValue=value[rawName];if(![rawName isKindOfClass:NSString.class]||![rawValue isKindOfClass:NSString.class])continue;NSString *name=rawName,*text=rawValue;NSRange range=NSMakeRange(0,name.length);if(!name.length||name.length>128||text.length>4096||[namePattern numberOfMatchesInString:name options:0 range:range]!=1||[blocked containsObject:name.lowercaseString]||[text rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\r\n"]].location!=NSNotFound)continue;result[name]=text;}
     return result.copy;
 }
+static NSData *PackageBundledWeBoxScriptForURL(NSURL *sourceURL) {
+    if(!sourceURL)return nil;
+    NSString *last=[sourceURL.lastPathComponent stringByRemovingPercentEncoding]?:sourceURL.lastPathComponent?:@"";
+    NSString *lower=last.lowercaseString;
+    NSDictionary<NSString *,NSString *> *map=@{
+        @"4k影视.webox.js":@"webox-4kvm",
+        @"hstream.webox.js":@"webox-hstream",
+        @"瓜子.webox.js":@"webox-guazi",
+        @"肉.webox.js":@"webox-rou",
+        @"one一个.webox.js":@"webox-one",
+    };
+    NSString *resource=map[lower]?:map[last];
+    if(!resource.length)return nil;
+    NSString *bundlePath=[NSBundle.mainBundle pathForResource:resource ofType:@"js" inDirectory:@"BuiltinMedia"];
+    return bundlePath.length?[NSData dataWithContentsOfFile:bundlePath options:NSDataReadingMappedIfSafe error:NULL]:nil;
+}
 static BOOL PackageIsForADMYqkSourceURL(NSURL *sourceURL) {
     return [sourceURL.host.lowercaseString isEqual:@"raw.githubusercontent.com"]&&[sourceURL.path.lowercaseString isEqual:@"/joeshu/for-adm/master/cctvhost/yqk.js"];
+}
+static NSString *PackageApplyYqkPlaybackFixes(NSString *text) {
+    if(!text.length)return text;
+    NSString *oldParseLink=@"function parseLink(link) {\n  var m = String(link || \"\").match(/^yqk:\\/\\/vod\\/(\\d+)(?:\\?([^#]*))?/i);\n  if (!m) throw new Error(\"无效的一起看影片标识\");";
+    NSString *newParseLink=@"function parseLink(link) {\n  var rawLink = String(link || \"\").trim();\n  var m = rawLink.match(/^yqk:\\/\\/vod\\/(\\d+)(?:\\?([^#]*))?/i) || rawLink.match(/^(\\d+)(?:\\?([^#]*))?$/);\n  if (!m) throw new Error(\"无效的一起看影片标识\");";
+    if([text containsString:oldParseLink])text=[text stringByReplacingOccurrencesOfString:oldParseLink withString:newParseLink];
+    text=[text stringByReplacingOccurrencesOfString:@"timeout:yqkRequestTimeout(budget,15000)" withString:@"timeout:yqkRequestTimeout(budget,5500)"];
+    text=[text stringByReplacingOccurrencesOfString:@"timeout:budget?Math.min(20000,Math.max(1000,budget.deadline-Date.now())):15000" withString:@"timeout:budget?Math.min(5500,Math.max(1000,budget.deadline-Date.now())):5500"];
+    NSString *oldProbe=@"async function yqkProbeHls(url,headers,budget){\n  if(budget&&Date.now()>=budget.deadline){budget.exhausted=true;throw new Error(\"一起看线路检查超时\");}\n  var r;\n  try{r=await CCTVHttp.get(url,{timeout:yqkRequestTimeout(budget,15000),headers:headers});}\n  catch(error){if(budget&&Date.now()>=budget.deadline)budget.exhausted=true;throw error;}\n  var status=Number(r.statusCode||r.status||0),body=r.data;\n  if(status!==200||typeof body!==\"string\"||body.length>1048576||!/^\\s*#EXTM3U(?:\\s|$)/.test(body))throw new Error(\"一起看 HLS 清单不可用\");\n  if(!/#EXT-X-STREAM-INF:/i.test(body)&&!body.split(/\\r?\\n/).some(function(line){line=line.trim();return line&&line.charAt(0)!==\"#\";}))throw new Error(\"一起看 HLS 清单为空\");\n  return url;\n}";
+    NSString *newProbe=@"async function yqkProbeHls(url,headers,budget){\n  if(!url||!/^https?:\\/\\//i.test(String(url)))throw new Error(\"一起看播放地址无效\");\n  if(budget&&Date.now()>=budget.deadline)return url;\n  var r;\n  try{r=await CCTVHttp.get(url,{timeout:Math.min(3500,yqkRequestTimeout(budget,3500)),headers:headers});}\n  catch(_){return url;}\n  var status=Number(r.statusCode||r.status||0),body=r.data;\n  if(status>=400)throw new Error(\"一起看 HLS 状态异常: \"+status);\n  if(typeof body===\"string\"&&body.length>0&&body.length<=1048576&&/^\\s*<(?:!doctype|html)/i.test(body))throw new Error(\"一起看返回网页而非流媒体\");\n  return url;\n}";
+    if([text containsString:oldProbe])text=[text stringByReplacingOccurrencesOfString:oldProbe withString:newProbe];
+    return text;
 }
 static NSData *PackageAdaptForADMYqkSource(NSData *data,NSError **error) {
     NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if(!text||![text containsString:@"id: \"joeshu.yqk\""]||![text containsString:@"async function apiRequest(path, params, budget)"]){
         if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:31 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 一起看脚本与站点地址不匹配，已停止导入。"}];return nil;
     }
-    if([text containsString:@"function yqkRequestTimeout(budget,fallback)"]&&[text containsString:@"timeout:yqkRequestTimeout(budget,12000)"]&&[text containsString:@"timeout:yqkRequestTimeout(budget,15000)"]&&[text containsString:@"await apiBases(false,budget)"]&&[text containsString:@"await apiBases(true,budget)"]&&[text containsString:@"params.checkBudget==null?30:params.checkBudget"])return data;
+    if([text containsString:@"function yqkRequestTimeout(budget,fallback)"]&&[text containsString:@"timeout:yqkRequestTimeout(budget,12000)"]&&[text containsString:@"timeout:yqkRequestTimeout(budget,15000)"]&&[text containsString:@"await apiBases(false,budget)"]&&[text containsString:@"await apiBases(true,budget)"]&&[text containsString:@"params.checkBudget==null?30:params.checkBudget"]){
+        return [PackageApplyYqkPlaybackFixes(text) dataUsingEncoding:NSUTF8StringEncoding];
+    }
     NSArray<NSDictionary<NSString *,NSString *> *> *replacements=@[
         @{@"old":@"{name:\"checkBudget\",title:\"线路检查预算\",description:\"默认15秒，可选8/15/30秒；到时停止后续检查。当前请求的超时由客户端控制，可能超过此预算。\",type:\"enumeration\",value:\"15\",enumOptions:[{title:\"8秒（较快）\",value:\"8\"},{title:\"15秒（推荐）\",value:\"15\"},{title:\"30秒（更多检查）\",value:\"30\"}]}",@"new":@"{name:\"checkBudget\",title:\"线路检查预算\",description:\"默认30秒，可选8/15/30秒；到时停止后续检查。当前请求超时会受检查预算约束。\",type:\"enumeration\",value:\"30\",enumOptions:[{title:\"8秒（较快）\",value:\"8\"},{title:\"15秒\",value:\"15\"},{title:\"30秒（推荐）\",value:\"30\"}]}"},
         @{@"old":@"var seconds=Number(params.checkBudget==null?15:params.checkBudget)",@"new":@"var seconds=Number(params.checkBudget==null?30:params.checkBudget)"},
@@ -51,9 +81,11 @@ static NSData *PackageAdaptForADMYqkSource(NSData *data,NSError **error) {
         if(occurrences==1)text=[text stringByReplacingOccurrencesOfString:old withString:updated];
         else if(![text containsString:updated]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 一起看的播放预算或网络超时协议已变化，未导入不兼容版本。"}];return nil;}
     }
-    return [text dataUsingEncoding:NSUTF8StringEncoding];
+    return [PackageApplyYqkPlaybackFixes(text) dataUsingEncoding:NSUTF8StringEncoding];
 }
 static NSData *PackageAdaptForADMSignedSource(NSData *data,NSURL *sourceURL,NSError **error) {
+    NSData *bundledWeBox=PackageBundledWeBoxScriptForURL(sourceURL);
+    if(bundledWeBox.length)return bundledWeBox;
     if(![sourceURL.host.lowercaseString isEqual:@"raw.githubusercontent.com"])return data;
     if(PackageIsForADMYqkSourceURL(sourceURL))return PackageAdaptForADMYqkSource(data,error);
     if([sourceURL.path.lowercaseString isEqual:@"/joeshu/for-adm/master/cctvhost/dyls.js"]){
@@ -225,7 +257,13 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     // A redirected checksum describes the script beside the final checksum URL.
     if(self.phase==PackageChecksum&&self.responseStatus==200){NSURLComponents *c=[NSURLComponents componentsWithURL:response.URL resolvingAgainstBaseURL:NO];if([c.path.pathExtension.lowercaseString isEqual:@"md5"]){c.path=c.path.stringByDeletingPathExtension;self.targetURL=c.URL;}}
     completion(valid&&!missing?NSURLSessionResponseAllow:NSURLSessionResponseCancel);
-    if(!valid)[self finish:nil error:[self error:[NSString stringWithFormat:@"%@失败：HTTP %ld，或响应超过大小上限",self.stage,(long)self.responseStatus]]];
+    if(!valid){
+        if(self.phase==PackageScript){
+            NSData *bundledWeBox=PackageBundledWeBoxScriptForURL(self.targetURL?:self.originalURL);
+            if(bundledWeBox.length){self.scriptData=bundledWeBox;[self install:@{}];return;}
+        }
+        [self finish:nil error:[self error:[NSString stringWithFormat:@"%@失败：HTTP %ld，或响应超过大小上限",self.stage,(long)self.responseStatus]]];
+    }
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
     if(self.finished||task!=self.task)return;
@@ -240,7 +278,13 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
     if(self.finished||task!=self.task)return;BOOL missing=(self.phase==PackageConfigChecksum||self.phase==PackageConfig)&&self.responseStatus==404;
-    if(error&&!(missing&&error.code==NSURLErrorCancelled)){[self finish:nil error:error];return;}
+    if(error&&!(missing&&error.code==NSURLErrorCancelled)){
+        if(self.phase==PackageScript&&error.code!=NSURLErrorCancelled){
+            NSData *bundledWeBox=PackageBundledWeBoxScriptForURL(self.targetURL?:self.originalURL);
+            if(bundledWeBox.length){self.scriptData=bundledWeBox;[self install:@{}];return;}
+        }
+        [self finish:nil error:error];return;
+    }
     if(self.phase==PackageChecksum||self.phase==PackageConfigChecksum){
         BOOL config=self.phase==PackageConfigChecksum;NSString *hash=self.responseStatus==404?nil:[self readChecksum];
         if(self.responseStatus!=404&&PackageLooksLikeHTML(self.body)){[self finish:nil error:[self error:config?@"配套配置校验地址返回了 HTML 网页，请检查资源权限或登录状态":@"资源校验地址返回了 HTML 网页，不是 MD5 校验文件"]];return;}
@@ -258,7 +302,11 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
         self.configurationState=self.configChecksum?@"verified":@"downloaded_without_checksum";
         [self install:@{@"index.config.js":[self.body copy]}];return;
     }
-    if(PackageLooksLikeHTML(self.body)){[self finish:nil error:[self error:@"资源地址返回了 HTML 网页而非脚本或 ZIP；请检查直链、访问权限或登录状态"]];return;}
+    if(PackageLooksLikeHTML(self.body)){
+        NSData *bundledWeBox=PackageBundledWeBoxScriptForURL(self.targetURL?:self.originalURL);
+        if(bundledWeBox.length){self.scriptData=bundledWeBox;[self install:@{}];return;}
+        [self finish:nil error:[self error:@"资源地址返回了 HTML 网页而非脚本或 ZIP；请检查直链、访问权限或登录状态"]];return;
+    }
     if(self.checksum&&![PackageMD5(self.body) isEqual:self.checksum]){[self finish:nil error:[self error:@"资源与 MD5 校验值不一致，未安装"]];return;}
     [self progress:self.checksum?@"主资源 MD5 校验通过":@"来源没有 MD5 · 未验证来源完整性"];
     self.scriptData=[self.body copy];NSError *adapterError=nil;NSData *adapted=PackageAdaptForADMSignedSource(self.scriptData,self.effectiveURL?:self.originalURL,&adapterError);if(!adapted){[self finish:nil error:adapterError];return;}self.scriptData=adapted;

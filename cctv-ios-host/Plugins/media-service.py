@@ -6,9 +6,31 @@ import builtins
 import collections
 import hmac
 import json
+import importlib.util
 import os
 import re
 import stat
+import sys
+
+_SERVICE_DIR = os.path.dirname(os.path.realpath(__file__)) if '__file__' in globals() else os.getcwd()
+if _SERVICE_DIR and _SERVICE_DIR not in sys.path:
+    sys.path.insert(0, _SERVICE_DIR)
+
+
+def _load_csp_adapter_module():
+    try:
+        import csp_adapter
+        return csp_adapter
+    except ImportError:
+        for candidate_dir in (_SERVICE_DIR, os.getcwd(), os.path.join(_SERVICE_DIR, 'Plugins')):
+            candidate = os.path.join(candidate_dir, 'csp_adapter.py')
+            if os.path.isfile(candidate):
+                spec = importlib.util.spec_from_file_location('csp_adapter', candidate)
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules['csp_adapter'] = mod
+                spec.loader.exec_module(mod)
+                return mod
+        raise
 import threading
 import time
 import uuid
@@ -752,7 +774,20 @@ class Handler(BaseHTTPRequestHandler):
                     capabilities = self.call_runtime(runtime, 'capabilities', {}, request_id, correlation_id)
                     if not isinstance(capabilities, dict) or 'proxy' not in (capabilities.get('capabilities') or []):
                         raise MediaError('PROXY_UNSUPPORTED', '播放结果要求本机代理，但此来源没有提供 proxy/localProxy 方法')
-                if result.get('proxy'):
+                inline_manifest = result.get('manifestText') or result.get('manifest')
+                if isinstance(inline_manifest, str) and inline_manifest.lstrip('\ufeff').lstrip().startswith('#EXTM3U'):
+                    base_u = str(result.get('baseUrl') or result.get('url') or 'https://localhost/playlist.m3u8')
+                    token = self.server.relay.register_inline_manifest(
+                        inline_manifest, base_u, headers, diagnostic_id=diagnostic_id, resource_scope=request_id)
+                    result['originalURL'] = base_u
+                    result['url'] = f'http://127.0.0.1:{self.server.server_port}/media/{token}'
+                    result['headers'] = {}
+                    result['baseHeaders'] = {}
+                    result['directMedia'] = True
+                    result['nativePlayable'] = True
+                    result.pop('manifestText', None)
+                    result.pop('manifest', None)
+                elif result.get('proxy'):
                     result['originalURL'] = result['url']
                     result['url'] = self.server.register_plugin_proxy(result['url'], headers)
                     result['headers'] = {}
@@ -840,14 +875,14 @@ def main():
     def create_engine():
         if manifest['runtime'] == 'python':
             if str(manifest.get('entry', '')).startswith('csp_') or manifest.get('protocol') == 'jar-bridge':
-                from csp_adapter import CSPAdapter
+                CSPAdapter = _load_csp_adapter_module().CSPAdapter
                 return CSPAdapter(manifest['entry'], manifest.get('options'))
             engine = PythonSpider(args.package, manifest['entry'], manifest.get('options'),
                                   f'http://127.0.0.1:{server.server_port}/proxy', args.data_dir)
             engine.spider._cctvhost_file_proxy_supported = True
             return engine
         if manifest['runtime'] in ('jar-bridge', 'csp'):
-            from csp_adapter import CSPAdapter
+            CSPAdapter = _load_csp_adapter_module().CSPAdapter
             return CSPAdapter(manifest.get('entry') or manifest.get('api') or manifest.get('className'),
                               manifest.get('options') or manifest.get('ext') or '')
         node_manifest = dict(manifest, dataDirectory=args.data_dir,

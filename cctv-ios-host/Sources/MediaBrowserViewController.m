@@ -126,6 +126,8 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
 @property(nonatomic,strong) UIScrollView *scrollView;
 @property(nonatomic,strong) UIStackView *contentStack;
 @property(nonatomic,strong) UIView *inlinePlaybackDock;
+@property(nonatomic,strong) NSLayoutConstraint *inlinePlaybackDockTopConstraint;
+@property(nonatomic) CGFloat activeNavigationSafeTop;
 @property(nonatomic,strong) NSLayoutConstraint *detailScrollTopConstraint;
 @property(nonatomic,strong) NSLayoutConstraint *inlinePlaybackScrollTopConstraint;
 @property(nonatomic,strong) NSLayoutConstraint *inlinePlaybackDockHeightConstraint;
@@ -200,8 +202,14 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
     [super viewWillDisappear:animated];
     if(!self.isMovingFromParentViewController)return;
     UINavigationController *navigation=self.navigationController;id<UIViewControllerTransitionCoordinator> transition=self.transitionCoordinator;
-    if(transition)[transition animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){if(!context.isCancelled)HostStyleNavigation(navigation);}];
-    else HostStyleNavigation(navigation);
+    void (^restoreNav)(void)=^{
+        if(!navigation)return;
+        BOOL targetHidesBar=navigation.navigationBarHidden||[navigation.topViewController isKindOfClass:NSClassFromString(@"MediaBrowserViewController")];
+        HostStyleNavigation(navigation);
+        if(targetHidesBar)navigation.navigationBar.prefersLargeTitles=NO;
+    };
+    if(transition)[transition animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){if(!context.isCancelled)restoreNav();}];
+    else restoreNav();
 }
 - (NSString *)safeDetailString:(id)value {
     if([value isKindOfClass:NSString.class]){
@@ -384,7 +392,7 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
     [self addChildViewController:player];[player loadViewIfNeeded];
     UIView *dock=[UIView new];dock.translatesAutoresizingMaskIntoConstraints=NO;dock.backgroundColor=UIColor.blackColor;dock.layer.cornerRadius=14;dock.layer.cornerCurve=kCACornerCurveContinuous;dock.clipsToBounds=YES;dock.accessibilityIdentifier=@"media-detail-floating-player";dock.accessibilityLabel=@"悬浮播放画面";[self.view addSubview:dock];self.inlinePlaybackDock=dock;
     self.inlinePlaybackDockHeightConstraint=[dock.heightAnchor constraintEqualToConstant:220];
-    [NSLayoutConstraint activateConstraints:@[[dock.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4],[dock.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[dock.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],self.inlinePlaybackDockHeightConstraint]];
+    [NSLayoutConstraint activateConstraints:@[(self.inlinePlaybackDockTopConstraint=[dock.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4]),[dock.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[dock.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],self.inlinePlaybackDockHeightConstraint]];
     self.inlinePlaybackScrollTopConstraint=[self.scrollView.topAnchor constraintEqualToAnchor:dock.bottomAnchor constant:8];self.detailScrollTopConstraint.active=NO;self.inlinePlaybackScrollTopConstraint.active=YES;
     [player installFloatingInlineSurfaceInHost:dock controlsStack:self.contentStack];
     __weak typeof(self) weakOwner=self;player.onVideoAspectRatioChanged=^(CGFloat aspectRatio){MediaDetailViewController *owner=weakOwner;if(owner)[owner updateInlinePlaybackDockLayout];};
@@ -640,7 +648,13 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
     }];
 }
 - (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.metadataLabel.textColor=HostText();self.descriptionLabel.textColor=HostSecondaryText();[self.descriptionToggle setTitleColor:HostAccent() forState:UIControlStateNormal];self.status.textColor=HostSecondaryText();self.episodeTitle.textColor=HostText();self.pageLabel.textColor=HostSecondaryText();HostStylePillButton(self.playButton,YES);MediaBrowserApplyScaledPillFont(self.playButton);[self updateFavoriteButton];[self updateParserSelectionButton];[self updateRouteAndEpisodeViews];if(self.inlinePlaybackController)[self.inlinePlaybackController reloadThemeAppearance];}
-- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews];self.heroGradient.frame=self.heroView.bounds;UIEdgeInsets inset=UIEdgeInsetsMake(0,0,MAX(24,self.view.safeAreaInsets.bottom+20),0);self.scrollView.contentInset=inset;self.scrollView.scrollIndicatorInsets=inset;[self updateInlinePlaybackDockLayout]; }
+- (void)viewSafeAreaInsetsDidChange {
+    [super viewSafeAreaInsetsDidChange];
+    if(self.isMovingFromParentViewController&&self.inlinePlaybackDockTopConstraint&&self.activeNavigationSafeTop>self.view.safeAreaInsets.top+0.5){
+        self.inlinePlaybackDockTopConstraint.constant=4.0+(self.activeNavigationSafeTop-self.view.safeAreaInsets.top);
+    }
+}
+- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews];if(!self.isMovingFromParentViewController&&self.view.safeAreaInsets.top>0)self.activeNavigationSafeTop=self.view.safeAreaInsets.top;self.heroGradient.frame=self.heroView.bounds;UIEdgeInsets inset=UIEdgeInsetsMake(0,0,MAX(24,self.view.safeAreaInsets.bottom+20),0);self.scrollView.contentInset=inset;self.scrollView.scrollIndicatorInsets=inset;[self updateInlinePlaybackDockLayout]; }
 @end
 @interface MediaEntryListCell : UITableViewCell
 @end
@@ -870,7 +884,12 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
 @property(nonatomic, strong) UISearchController *search;
 @property(nonatomic,strong) UIScrollView *homeScroll;
 @property(nonatomic,strong) UIView *homeTopImmersiveScrim;
+@property(nonatomic,strong) UIVisualEffectView *homeTopGlassBlurView;
 @property(nonatomic,strong) CAGradientLayer *homeTopImmersiveGradient;
+@property(nonatomic,strong) NSLayoutConstraint *selectionRowTopConstraint;
+@property(nonatomic) CGFloat statusBarSafeInset;
+@property(nonatomic) CGPoint navigationReturnContentOffset;
+@property(nonatomic) BOOL hasNavigationReturnPosition;
 @property(nonatomic,strong) NSDictionary *homeResult;
 @property(nonatomic,copy) NSString *homeResultSourceID;
 @property(nonatomic,copy) NSString *homeResultProvider;
@@ -1028,7 +1047,7 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     NSSet *enabled=MediaHomeEnabledModules();NSString *provider=@"";NSDictionary *home=[self cachedHomeResultForSelectedProvider:&provider];NSArray *raw=MediaBrowserDictionaryRows(home[@"items"],NULL);NSMutableArray *recommendations=[NSMutableArray array];NSMutableSet *seen=[NSMutableSet set];
     for(NSDictionary *item in raw){NSString *key=MediaBrowserItemIdentity(item);if(key.length&&[seen containsObject:key])continue;if(key.length)[seen addObject:key];[recommendations addObject:item];}
     NSUInteger bannerCount=MIN((NSUInteger)5,recommendations.count);
-    if([enabled containsObject:@"recommendations"]&&bannerCount)[sections addObject:@{@"id":@"hero",@"kind":@"hero",@"heroTopInset":@(self.view.safeAreaInsets.top+104),@"items":[recommendations subarrayWithRange:NSMakeRange(0,bannerCount)]}];
+    if([enabled containsObject:@"recommendations"]&&bannerCount)[sections addObject:@{@"id":@"hero",@"kind":@"hero",@"heroTopInset":@([self stableTopSafeAreaInset]+104),@"items":[recommendations subarrayWithRange:NSMakeRange(0,bannerCount)]}];
     if([enabled containsObject:@"continue"]){NSMutableArray *resume=[NSMutableArray array];for(NSDictionary *entry in MediaPlaybackStateStore.watchHistory){if([entry[@"completed"] boolValue]||[entry[@"position"] doubleValue]<=0)continue;NSMutableDictionary *item=[entry[@"item"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *epName=[entry[@"episodeName"] isKindOfClass:NSString.class]?entry[@"episodeName"]:@"";NSString *srcName=[entry[@"sourceName"] isKindOfClass:NSString.class]?entry[@"sourceName"]:@"";item[@"remarks"]=epName.length?epName:@"继续观看";item[@"feedSubtitle"]=srcName.length?[NSString stringWithFormat:@"继续观看 · %@",srcName]:@"继续观看";item[@"__historyEntry"]=entry;[resume addObject:item];if(resume.count==10)break;}if(resume.count)[sections addObject:@{@"id":@"continue",@"kind":@"posters",@"title":@"继续观看",@"items":resume,@"actionTitle":@"全部",@"action":@"history"}];}
     if([enabled containsObject:@"recommendations"]&&recommendations.count>bannerCount){NSUInteger count=MIN((NSUInteger)10,recommendations.count-bannerCount);[sections addObject:@{@"id":@"popular",@"kind":@"posters",@"title":@"热门推荐",@"items":[recommendations subarrayWithRange:NSMakeRange(bannerCount,count)]}];}
     if([enabled containsObject:@"catalog"]){for(NSDictionary *category in [self.homeCategories subarrayWithRange:NSMakeRange(0,MIN((NSUInteger)8,self.homeCategories.count))]){NSString *identifier=category[@"id"];NSDictionary *args=[self arguments:@{@"categoryId":identifier,@"page":@1,@"filters":@{}}];id cached=[MediaMetadataCache.shared resultForSource:self.source operation:@"category" arguments:args maximumAge:DBL_MAX isStale:NULL];NSArray *items=[cached isKindOfClass:NSDictionary.class]?MediaBrowserDictionaryRows(cached[@"items"],NULL):@[];BOOL attempted=[self.homeShelfAttempts containsObject:identifier]&&![self.homeCategoryLoadsInFlight containsObject:identifier];NSString *kind=items.count?@"posters":(attempted?@"status":@"skeleton");[sections addObject:@{@"id":[@"category-" stringByAppendingString:identifier],@"kind":kind,@"title":category[@"name"]?:@"分类",@"items":[items subarrayWithRange:NSMakeRange(0,MIN((NSUInteger)8,items.count))],@"categoryID":identifier,@"actionTitle":@"全部",@"subtitle":@"暂未读取到内容，点按全部浏览此分类"}];}}
@@ -1037,11 +1056,69 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     if(!sections.count)[sections addObject:@{@"id":@"display-empty",@"kind":@"status",@"title":@"暂无精选内容",@"subtitle":@"可以选择顶部分类浏览，或调整媒体显示模块",@"actionTitle":@"媒体显示",@"action":@"display-settings"}];
     return [self scopeFeedSections:sections];
 }
+- (CGFloat)stableTopSafeAreaInset {
+    CGFloat fallback=self.statusBarSafeInset>0?self.statusBarSafeInset:self.view.safeAreaInsets.top;
+    return HostStatusBarSafeTop(self.view,fallback);
+}
+- (void)syncStableTopHeaderLayout {
+    if(!self.isViewLoaded||!self.selectionRowTopConstraint)return;
+    CGFloat viewSafeTop=self.view.safeAreaInsets.top;
+    CGFloat stableTop=[self stableTopSafeAreaInset];
+    CGFloat navBarInflation=MAX(0.0,viewSafeTop-stableTop);
+    CGFloat desiredConstant=4.0-navBarInflation;
+    if(fabs(self.selectionRowTopConstraint.constant-desiredConstant)>0.05){
+        self.selectionRowTopConstraint.constant=desiredConstant;
+    }
+}
+- (void)setTopSafeAreaInset:(CGFloat)inset {
+    if(!isfinite(inset))inset=0;
+    inset=HostStatusBarSafeTop(self.view,MAX(0,inset));
+    if(fabs(self.statusBarSafeInset-inset)<0.5)return;
+    self.statusBarSafeInset=inset;
+    if(self.isViewLoaded){[self syncStableTopHeaderLayout];[self updateMediaFeedInsets];}
+}
+- (void)prepareForNavigationTransition {
+    if(!self.isViewLoaded||!self.grid||self.hasNavigationReturnPosition)return;
+    self.navigationReturnContentOffset=self.grid.contentOffset;
+    self.hasNavigationReturnPosition=YES;
+    if(self.homeMode)self.pendingHomeOffsetRestore=@(self.navigationReturnContentOffset.y);
+}
+- (void)refreshHeaderAfterNavigationTransition {
+    if(!self.isViewLoaded||!self.grid)return;
+    [self syncStableTopHeaderLayout];
+    [self.view setNeedsLayout];
+    [self.view layoutIfNeeded];
+    [self updateMediaFeedInsets];
+    if(self.hasNavigationReturnPosition){
+        CGFloat minimum=-self.grid.adjustedContentInset.top;
+        CGFloat maximum=MAX(minimum,self.grid.contentSize.height-self.grid.bounds.size.height+self.grid.adjustedContentInset.bottom);
+        CGPoint restored=CGPointMake(self.navigationReturnContentOffset.x,MIN(MAX(self.navigationReturnContentOffset.y,minimum),maximum));
+        if(fabs(self.grid.contentOffset.y-restored.y)>0.5||fabs(self.grid.contentOffset.x-restored.x)>0.5){
+            [self.grid setContentOffset:restored animated:NO];
+        }
+        self.hasNavigationReturnPosition=NO;
+    }
+}
+- (void)viewSafeAreaInsetsDidChange {
+    [super viewSafeAreaInsetsDidChange];
+    [self syncStableTopHeaderLayout];
+    [self updateMediaFeedInsets];
+}
 - (void)updateMediaFeedInsets {
-    if(!self.grid)return;CGFloat overlay=MAX(self.view.safeAreaInsets.top+54,CGRectGetMaxY(self.categoryScroll.frame)+6);BOOL hero=NO;for(NSDictionary *section in [(MediaFeedView *)self.grid sections])if([section[@"kind"] isEqual:@"hero"]){hero=YES;break;}
+    if(!self.grid)return;
+    [self syncStableTopHeaderLayout];
+    CGFloat stableTop=[self stableTopSafeAreaInset];
+    CGFloat navInflation=MAX(0.0,self.view.safeAreaInsets.top-stableTop);
+    CGFloat rawCategoryBottom=CGRectGetMaxY(self.categoryScroll.frame);
+    if(navInflation>0.5&&rawCategoryBottom>stableTop+108.0)rawCategoryBottom-=navInflation;
+    CGFloat deterministicCategoryBottom=self.categoryScroll.hidden?(stableTop+48.0):(stableTop+4.0+44.0+6.0+MAX(44.0,CGRectGetHeight(self.categoryScroll.bounds)));
+    CGFloat effectiveCategoryBottom=rawCategoryBottom>0?MIN(rawCategoryBottom,deterministicCategoryBottom):deterministicCategoryBottom;
+    CGFloat overlay=MAX(self.view.safeAreaInsets.top+54,CGRectGetMaxY(self.categoryScroll.frame)+6);
+    overlay=MAX(stableTop+54,effectiveCategoryBottom+6);
+    BOOL hero=NO;for(NSDictionary *section in [(MediaFeedView *)self.grid sections])if([section[@"kind"] isEqual:@"hero"]){hero=YES;break;}
     UIEdgeInsets next=UIEdgeInsetsMake(self.homeMode&&hero?0:overlay,0,MAX(self.bottomOverlayInset,self.view.safeAreaInsets.bottom)+84,0);
-    if(!UIEdgeInsetsEqualToEdgeInsets(self.grid.contentInset,next)){BOOL atTop=self.grid.contentOffset.y<=-self.grid.contentInset.top+1;self.grid.contentInset=next;if(atTop)[self.grid setContentOffset:CGPointMake(0,-next.top) animated:NO];}self.grid.scrollIndicatorInsets=UIEdgeInsetsMake(overlay,0,self.bottomOverlayInset,0);self.floatingSearchBottomConstraint.constant=-(MAX(self.bottomOverlayInset,self.view.safeAreaInsets.bottom)+12);
-    self.homeTopImmersiveScrim.frame=CGRectMake(0,0,self.view.bounds.size.width,overlay+20);self.homeTopImmersiveGradient.frame=self.homeTopImmersiveScrim.bounds;CGFloat progress=MIN(1,MAX(0,self.grid.contentOffset.y/120));CGFloat alpha=hero?(.38+progress*.5):.94;self.homeTopImmersiveGradient.colors=@[(id)[UIColor colorWithWhite:0 alpha:alpha].CGColor,(id)[UIColor colorWithWhite:0 alpha:alpha*.75].CGColor,(id)UIColor.clearColor.CGColor];
+    if(!UIEdgeInsetsEqualToEdgeInsets(self.grid.contentInset,next)){BOOL atTop=self.grid.contentOffset.y<=-self.grid.contentInset.top+1;self.grid.contentInset=next;if(atTop&&!self.hasNavigationReturnPosition)[self.grid setContentOffset:CGPointMake(0,-next.top) animated:NO];}self.grid.scrollIndicatorInsets=UIEdgeInsetsMake(overlay,0,self.bottomOverlayInset,0);self.floatingSearchBottomConstraint.constant=-(MAX(self.bottomOverlayInset,self.view.safeAreaInsets.bottom)+12);
+    self.homeTopImmersiveScrim.frame=CGRectMake(0,0,self.view.bounds.size.width,overlay+20);self.homeTopGlassBlurView.frame=self.homeTopImmersiveScrim.bounds;self.homeTopImmersiveGradient.frame=self.homeTopImmersiveScrim.bounds;CGFloat progress=MIN(1,MAX(0,(self.grid.contentOffset.y+next.top)/120));CGFloat alpha=hero?(.38+progress*.5):.94;self.homeTopGlassBlurView.alpha=hero?(progress*0.78):0.82;self.homeTopImmersiveGradient.colors=@[(id)[UIColor colorWithWhite:0 alpha:alpha].CGColor,(id)[UIColor colorWithWhite:0 alpha:alpha*.75].CGColor,(id)UIColor.clearColor.CGColor];
 }
 - (void)selectFeedSection:(NSDictionary *)section {
     if(![section[@"sourceID"] isEqual:([self.source[@"id"] description]?:@"")]||![section[@"providerID"] isEqual:self.provider?:@""])return;
@@ -1080,7 +1157,7 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     NSString *sourceID=[source[@"id"] description]?:@"",*provider=self.provider?:[NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"mediaProvider.%@",sourceID]]?:@"";NSString *key=[NSString stringWithFormat:@"cctv.mediaHome.scrollOffset.v3.%lu:%@%lu:%@",(unsigned long)sourceID.length,sourceID,(unsigned long)provider.length,provider];
     if(![NSUserDefaults.standardUserDefaults objectForKey:key]){NSString *legacy=[NSString stringWithFormat:@"cctv.mediaHome.scrollOffset.v2.%lu:%@",(unsigned long)sourceID.length,sourceID];id offset=[NSUserDefaults.standardUserDefaults objectForKey:legacy];if(offset)[NSUserDefaults.standardUserDefaults setObject:offset forKey:key];}return key;
 }
-- (void)saveHomeScrollOffset {if(!self.homeScroll||!self.source)return;[NSUserDefaults.standardUserDefaults setDouble:self.homeScroll.contentOffset.y forKey:[self homeScrollOffsetKeyForSource:self.source]];}
+- (void)saveHomeScrollOffset {if(!self.homeScroll||!self.source)return;CGFloat y=self.homeScroll.contentOffset.y;[NSUserDefaults.standardUserDefaults setDouble:y forKey:[self homeScrollOffsetKeyForSource:self.source]];self.pendingHomeOffsetRestore=@(y);}
 - (void)restoreHomeScrollOffsetIfNeeded {if(!self.homeMode||!self.pendingHomeOffsetRestore||self.homeScroll.bounds.size.height<=0)return;[self.grid layoutIfNeeded];CGFloat minimum=-self.homeScroll.adjustedContentInset.top;CGFloat maximum=MAX(minimum,self.homeScroll.contentSize.height-self.homeScroll.bounds.size.height+self.homeScroll.adjustedContentInset.bottom);self.homeScroll.contentOffset=CGPointMake(self.homeScroll.contentOffset.x,MIN(MAX(self.pendingHomeOffsetRestore.doubleValue,minimum),maximum));self.pendingHomeOffsetRestore=nil;}
 - (void)saveSessionState {if(self.homeMode)[self saveHomeScrollOffset];else[self saveCategorySession];[self saveCurrentBrowseState];}
 - (void)viewWillDisappear:(BOOL)animated {
@@ -1110,9 +1187,11 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
         self.cancelledMediaRequestWasAppend=NO;
         if(self.source)[self activate:self.source keepingHome:YES];return;
     }
+    [self syncStableTopHeaderLayout];
+    [self updateMediaFeedInsets];
     if(self.homeMode)[self refreshHomeModules];
 }
-- (void)viewDidAppear:(BOOL)animated { [super viewDidAppear:animated];HostStyleNavigation(self.navigationController);[self loadVisibleHomeShelves]; }
+- (void)viewDidAppear:(BOOL)animated { [super viewDidAppear:animated];HostStyleNavigation(self.navigationController);if(self.navigationController.navigationBarHidden)self.navigationController.navigationBar.prefersLargeTitles=NO;[self refreshHeaderAfterNavigationTransition];[self loadVisibleHomeShelves]; }
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
     if(previousTraitCollection && [self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]){
@@ -1141,7 +1220,7 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     feed.onNearEnd=^{MediaBrowserViewController *owner=weakSelf;if(owner&&!owner.homeMode)[owner loadMore];};
     feed.onVisibleCategories=^(NSArray *identifiers){MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.visibleCategoryIDs=[NSSet setWithArray:identifiers];[owner loadVisibleHomeShelves];};
     UIRefreshControl *refresh=[UIRefreshControl new];refresh.tintColor=HostAccent();[refresh addTarget:self action:@selector(refreshMediaContent) forControlEvents:UIControlEventValueChanged];feed.refreshControl=refresh;
-    self.homeTopImmersiveScrim=[UIView new];self.homeTopImmersiveScrim.userInteractionEnabled=NO;self.homeTopImmersiveGradient=[CAGradientLayer layer];self.homeTopImmersiveGradient.locations=@[@0,@0.68,@1];[self.homeTopImmersiveScrim.layer addSublayer:self.homeTopImmersiveGradient];[self.view addSubview:self.homeTopImmersiveScrim];
+    self.homeTopImmersiveScrim=[UIView new];self.homeTopImmersiveScrim.userInteractionEnabled=NO;self.homeTopGlassBlurView=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.homeTopGlassBlurView.userInteractionEnabled=NO;self.homeTopGlassBlurView.alpha=0.0;[self.homeTopImmersiveScrim addSubview:self.homeTopGlassBlurView];self.homeTopImmersiveGradient=[CAGradientLayer layer];self.homeTopImmersiveGradient.locations=@[@0,@0.68,@1];[self.homeTopImmersiveScrim.layer addSublayer:self.homeTopImmersiveGradient];[self.view addSubview:self.homeTopImmersiveScrim];
     self.selectionRow=[UIStackView new];self.selectionRow.translatesAutoresizingMaskIntoConstraints=NO;self.selectionRow.axis=UILayoutConstraintAxisHorizontal;self.selectionRow.spacing=8;self.selectionRow.alignment=UIStackViewAlignmentCenter;[self.view addSubview:self.selectionRow];
     self.sourceSelectButton=[self selectionButtonWithSymbol:@"square.stack.3d.up" identifier:@"media-source-selector" action:@selector(chooseResource)];self.providerSelectButton=[self selectionButtonWithSymbol:@"globe" identifier:@"media-provider-selector" action:@selector(chooseProvider)];
     [self.selectionRow addArrangedSubview:self.sourceSelectButton];[self.selectionRow addArrangedSubview:self.providerSelectButton];
@@ -1152,7 +1231,7 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     self.floatingSearchBottomConstraint=[self.floatingHomeSearchButton.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:-100];
     [NSLayoutConstraint activateConstraints:@[
         [feed.topAnchor constraintEqualToAnchor:self.view.topAnchor],[feed.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],[feed.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[feed.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.selectionRow.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4],[self.selectionRow.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:14],[self.selectionRow.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-14],[self.selectionRow.heightAnchor constraintEqualToConstant:44],
+        (self.selectionRowTopConstraint=[self.selectionRow.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4]),[self.selectionRow.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:14],[self.selectionRow.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-14],[self.selectionRow.heightAnchor constraintEqualToConstant:44],
         [self.sourceSelectButton.widthAnchor constraintEqualToAnchor:self.providerSelectButton.widthAnchor multiplier:1.15],[self.sourceSelectButton.heightAnchor constraintEqualToConstant:44],[self.providerSelectButton.heightAnchor constraintEqualToConstant:44],[self.homeMenuButton.widthAnchor constraintEqualToConstant:44],[self.homeMenuButton.heightAnchor constraintEqualToConstant:44],
         [self.categoryScroll.topAnchor constraintEqualToAnchor:self.selectionRow.bottomAnchor constant:6],[self.categoryScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.categoryScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],self.categoryScrollHeightConstraint,
         [self.categories.leadingAnchor constraintEqualToAnchor:self.categoryScroll.contentLayoutGuide.leadingAnchor constant:14],[self.categories.trailingAnchor constraintEqualToAnchor:self.categoryScroll.contentLayoutGuide.trailingAnchor constant:-14],[self.categories.topAnchor constraintEqualToAnchor:self.categoryScroll.contentLayoutGuide.topAnchor],[self.categories.bottomAnchor constraintEqualToAnchor:self.categoryScroll.contentLayoutGuide.bottomAnchor],[self.categories.heightAnchor constraintGreaterThanOrEqualToConstant:44],
@@ -1179,6 +1258,7 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
 }
 - (void)pushMediaPage:(UIViewController *)page {
     if(!page||!self.navigationController)return;
+    [self prepareForNavigationTransition];
     [self.navigationController setNavigationBarHidden:NO animated:YES];
     [self.navigationController pushViewController:page animated:YES];
 }
@@ -1302,11 +1382,28 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     for(NSUInteger index=0;index<MIN((NSUInteger)8,self.homeCategories.count);index++){NSString *identifier=self.homeCategories[index][@"id"];if(![self.visibleCategoryIDs containsObject:identifier]||[self.homeShelfAttempts containsObject:identifier])continue;NSDictionary *args=[self arguments:@{@"categoryId":identifier,@"page":@1,@"filters":@{}}];BOOL stale=NO;id cached=[MediaMetadataCache.shared resultForSource:self.source operation:@"category" arguments:args maximumAge:6*3600 isStale:&stale];if(cached&&!stale&&!self.forceVisibleShelfRefresh)continue;self.homeShelfGeneration=self.generation;self.homeShelfQueueActive=YES;[self loadHomeShelves:self.homeCategories index:index generation:self.generation sourceID:[self.source[@"id"] description]?:@"" provider:self.provider?:@""];return;}
 }
 - (void)refreshHomeModules {
-    if(self.homeRebuildScheduled||!self.isViewLoaded)return;self.homeRebuildScheduled=YES;__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.homeRebuildScheduled=NO;[owner rebuildHomeModulesNow];});
+    if(self.homeRebuildScheduled||!self.isViewLoaded)return;self.homeRebuildScheduled=YES;__weak typeof(self) weakSelf=self;
+    id<UIViewControllerTransitionCoordinator> coordinator=self.navigationController.transitionCoordinator;
+    if(coordinator&&[(MediaFeedView *)self.grid sections].count>0){
+        [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){
+            MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.homeRebuildScheduled=NO;
+            if(!context.isCancelled)[owner rebuildHomeModulesNow];
+        }];
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(),^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.homeRebuildScheduled=NO;[owner rebuildHomeModulesNow];});
 }
 - (void)rebuildHomeModulesNow {
     [RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_home_modules_rebuild_started" fields:@{@"service_id":self.source[@"id"]?:@"",@"content_mode":self.homeMode?@"featured":@"category"}];
+    CGPoint preservedOffset=self.grid.contentOffset;
+    BOOL hadSections=[(MediaFeedView *)self.grid sections].count>0;
     [self.grid reloadData];[self updateMediaFeedInsets];[self restoreHomeScrollOffsetIfNeeded];
+    if(hadSections&&!self.pendingHomeOffsetRestore&&self.grid.bounds.size.height>0){
+        CGFloat minimum=-self.grid.adjustedContentInset.top;
+        CGFloat maximum=MAX(minimum,self.grid.contentSize.height-self.grid.bounds.size.height+self.grid.adjustedContentInset.bottom);
+        CGPoint clamped=CGPointMake(preservedOffset.x,MIN(MAX(preservedOffset.y,minimum),maximum));
+        if(fabs(self.grid.contentOffset.y-clamped.y)>0.5)[self.grid setContentOffset:clamped animated:NO];
+    }
     [RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_home_modules_rebuild_completed" fields:@{@"service_id":self.source[@"id"]?:@"",@"section_count":@([(MediaFeedView *)self.grid sections].count)}];
 }
 - (void)openGlobalSearchFromHome {[self openGlobalSearch];}
@@ -1316,7 +1413,7 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     __weak typeof(self) weakSelf=self;
     __weak MediaDetailViewController *weakDetail=detail;
     detail.onPlay=^(NSDictionary *result,NSDictionary *context){MediaDetailViewController *owner=weakDetail;if(owner)[owner showInlinePlaybackResult:result context:context];};
-    detail.onReturnHome=^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;[owner.navigationController popToViewController:owner animated:YES];};
+    detail.onReturnHome=^{MediaBrowserViewController *owner=weakSelf;if(!owner)return;if([owner.navigationController.viewControllers containsObject:owner])[owner.navigationController popToViewController:owner animated:YES];else if(owner.parentViewController&&[owner.navigationController.viewControllers containsObject:owner.parentViewController])[owner.navigationController popToViewController:owner.parentViewController animated:YES];else[owner.navigationController popToRootViewControllerAnimated:YES];};
     [self pushMediaPage:detail];
 }
 - (void)prepareDetailSource:(NSDictionary *)source completion:(dispatch_block_t)completion {

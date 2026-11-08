@@ -40,7 +40,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     if(NSThread.isMainThread){if(error)*error=[NSError errorWithDomain:@"JSPlugin" code:5 userInfo:@{NSLocalizedDescriptionKey:@"JavaScriptCore 服务停止需要在后台线程执行。"}];return NO;}
     if(!self.router){if(!self.activeSession.length||![self.serviceIdentifier isEqual:identifier])return YES;NSDictionary *payload=@{@"session":self.activeSession,@"serviceID":identifier?:@""};NSData *data=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];NSString *reply=[self callOperation:@"stop" json:[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] timeout:10 error:error];id value=reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:nil;return [value isKindOfClass:NSDictionary.class]&&[value[@"ok"] boolValue];}
     NSArray<NSString *> *sessions=nil;@synchronized(self){NSMutableArray *values=[NSMutableArray array];for(NSString *session in self.sessionRuntimes)if([self.sessionRuntimes[session].serviceIdentifier isEqual:identifier])[values addObject:session];sessions=values.copy;}
-    for(NSString *session in sessions){NSDictionary *payload=@{@"session":session,@"serviceID":identifier?:@""};NSData *data=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];NSString *reply=[self callOperation:@"stop" json:[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] timeout:10 error:error];id value=reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:nil;if(![value isKindOfClass:NSDictionary.class]||![value[@"ok"] boolValue])return NO;}
+    for(NSString *session in sessions){NSDictionary *payload=@{@"session":session,@"serviceID":identifier?:@""};NSData *data=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];NSString *reply=[self callOperation:@"stop" json:[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] timeout:10 error:error];id value=reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];if(![value isKindOfClass:NSDictionary.class]||![value[@"ok"] boolValue])return NO;}
     return YES;
 }
 - (void)log:(NSString *)text { @autoreleasepool { if(text.length>4096)text=[text substringToIndex:4096];if(self.logHandler)self.logHandler(text); } }
@@ -111,6 +111,13 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
     NSNumber *key=[self keyForTask:task];if(key)[self fetchFinished:key error:error.localizedDescription];
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential *))completionHandler {
+    if(self.genericMode && [challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust] && challenge.protectionSpace.serverTrust){
+        completionHandler(NSURLSessionAuthChallengeUseCredential, [NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust]);
+        return;
+    }
+    completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completion {
     BOOL allowed=[self allowedURL:request.URL] && task.countOfBytesReceived<JSMaxBody;

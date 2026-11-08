@@ -1238,7 +1238,7 @@ class PythonSpider:
 
     def _get_cms_fallback(self):
         if self._cms_fallback is None:
-            import csp_adapter
+            csp_adapter = _load_csp_adapter()
             self._cms_fallback = csp_adapter.AppVideoEngine('csp_AppRJ', '')
         return self._cms_fallback
 
@@ -1265,7 +1265,7 @@ class PythonSpider:
 
     def _upgrade_tvbox_play_result(self, result, ep_id):
         try:
-            import csp_adapter
+            csp_adapter = _load_csp_adapter()
             url = ''
             if isinstance(result, dict):
                 url = str(media_choice_address(result) or '').strip()
@@ -1566,7 +1566,7 @@ class MediaRuntime:
                         ep_key = str(args.get('id') or '')
                         title, ep_idx, ep_name = self._episode_map.get(ep_key, (self._last_detail_title, 0, ''))
                         if title:
-                            import csp_adapter
+                            csp_adapter = _load_csp_adapter()
                             rescued = csp_adapter.resolve_maccms_stream_by_title(title, episode_index=ep_idx, episode_name=ep_name)
                             if rescued:
                                 value = playback({'parse': 0, 'jx': 0, 'url': rescued, 'header': {'User-Agent': 'Mozilla/5.0'}})

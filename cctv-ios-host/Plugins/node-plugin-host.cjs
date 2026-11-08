@@ -523,7 +523,344 @@ async function catpawConfig(owner,options){
   owner.authHeaders={Cookie:'web_token='+token}
   return sourceJSON(owner.base+'/config',undefined,owner.authHeaders)
 }
+
+function createLiteCheerio(htmlText){
+  const rawHtml=String(htmlText??'')
+  function decodeEntities(s){
+    return String(s??'').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/&quot;/gi,'"').replace(/&#39;/gi,"'").replace(/&#x([0-9a-f]+);/gi,(_,h)=>String.fromCodePoint(parseInt(h,16))).replace(/&#(\d+);/g,(_,d)=>String.fromCodePoint(parseInt(d,10)))
+  }
+  function parseAttrs(attrStr){
+    const attrs={};const re=/([a-zA-Z0-9_:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;let m
+    while((m=re.exec(attrStr))!==null)attrs[m[1].toLowerCase()]=decodeEntities(m[2]??m[3]??m[4]??'')
+    return attrs
+  }
+  const voidTags=new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'])
+  function parseTree(html){
+    const root={tag:'root',attrs:{},children:[],parent:null,html:''}
+    const stack=[root]
+    const tokenRe=/<!--([\s\S]*?)-->|<script\b([^>]*)>([\s\S]*?)<\/script>|<style\b([^>]*)>([\s\S]*?)<\/style>|<(\/?)([a-zA-Z0-9_:-]+)([^>]*?)(\/?)>|([^<]+)/gi
+    let m
+    while((m=tokenRe.exec(html))!==null){
+      if(m[1]!==undefined)continue
+      const cur=stack[stack.length-1]
+      if(m[2]!==undefined||m[4]!==undefined){
+        const isScript=m[2]!==undefined
+        const node={tag:isScript?'script':'style',attrs:parseAttrs(isScript?m[2]:m[4]),children:[{type:'text',text:isScript?m[3]:m[5]}],parent:cur,innerHtml:isScript?m[3]:m[5]}
+        cur.children.push(node)
+        continue
+      }
+      if(m[9]!==undefined){
+        cur.children.push({type:'text',text:decodeEntities(m[9]),parent:cur})
+        continue
+      }
+      const closing=m[6]==='/',tag=String(m[7]||'').toLowerCase(),attrStr=m[8]||'',selfClose=m[8]?.trim().endsWith('/')||voidTags.has(tag)
+      if(closing){
+        for(let i=stack.length-1;i>0;i--){if(stack[i].tag===tag){stack.length=i;break}}
+      }else{
+        const node={tag,attrs:parseAttrs(attrStr),children:[],parent:cur}
+        cur.children.push(node)
+        if(!selfClose)stack.push(node)
+      }
+    }
+    return root
+  }
+  const root=parseTree(rawHtml)
+  function allDescendants(node,out=[]){
+    if(!node||!Array.isArray(node.children))return out
+    for(const c of node.children){if(c.tag){out.push(c);allDescendants(c,out)}}
+    return out
+  }
+  function nodeText(node){
+    if(!node)return ''
+    if(node.type==='text')return node.text||''
+    return (node.children||[]).map(nodeText).join('')
+  }
+  function nodeHtml(node){
+    if(!node)return ''
+    if(typeof node.innerHtml==='string')return node.innerHtml
+    return (node.children||[]).map(c=>c.type==='text'?c.text:`<${c.tag}>${nodeHtml(c)}</${c.tag}>`).join('')
+  }
+  function matchesSimple(node,part){
+    if(!node||!node.tag)return false
+    let s=part.trim()
+    if(!s)return true
+    let notSel=null
+    const notMatch=s.match(/:not\(([^)]+)\)/)
+    if(notMatch){notSel=notMatch[1];s=s.replace(notMatch[0],'')}
+    if(notSel&&matchesSimple(node,notSel))return false
+    const attrMatches=[...s.matchAll(/\[\s*([a-zA-Z0-9_:-]+)(?:\s*([*^$|~!]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\s*\]/g)]
+    for(const am of attrMatches){
+      const k=am[1].toLowerCase(),op=am[2],val=am[3]??am[4]??am[5]??''
+      const actual=node.attrs?.[k]
+      if(!op){if(actual===undefined)return false}
+      else if(op==='='){if(actual!==val)return false}
+      else if(op==='*='){if(typeof actual!=='string'||!actual.includes(val))return false}
+      else if(op==='^='){if(typeof actual!=='string'||!actual.startsWith(val))return false}
+      else if(op==='$='){if(typeof actual!=='string'||!actual.endsWith(val))return false}
+    }
+    s=s.replace(/\[[^\]]*\]/g,'')
+    const idMatch=s.match(/#([a-zA-Z0-9_-]+)/)
+    if(idMatch&&node.attrs?.id!==idMatch[1])return false
+    s=s.replace(/#[a-zA-Z0-9_-]+/g,'')
+    const classes=[...s.matchAll(/\.([a-zA-Z0-9_-]+)/g)].map(m=>m[1])
+    if(classes.length){
+      const nodeClasses=String(node.attrs?.class||'').split(/\s+/).filter(Boolean)
+      for(const cls of classes)if(!nodeClasses.includes(cls))return false
+    }
+    s=s.replace(/\.[a-zA-Z0-9_-]+/g,'').trim().toLowerCase()
+    if(s&&s!=='*'&&node.tag!==s)return false
+    return true
+  }
+  function queryUnder(bases,selector){
+    const groups=String(selector||'').split(',').map(s=>s.trim()).filter(Boolean)
+    const matched=new Set()
+    for(const grp of groups){
+      const parts=grp.split(/\s+/).filter(Boolean)
+      let current=bases
+      for(const part of parts){
+        const next=[]
+        for(const b of current){
+          for(const d of allDescendants(b))if(matchesSimple(d,part)&&!next.includes(d))next.push(d)
+        }
+        current=next
+      }
+      for(const item of current)matched.add(item)
+    }
+    return [...matched]
+  }
+  function wrap(nodes){
+    const arr=Array.isArray(nodes)?nodes:(nodes?[nodes]:[])
+    const obj={
+      length:arr.length,
+      each(fn){arr.forEach((n,i)=>fn.call(n,i,n));return obj},
+      map(fn){const res=[];arr.forEach((n,i)=>{const v=fn.call(n,i,n);if(v!=null)res.push(v)});return {get:()=>res,toArray:()=>res}},
+      filter(fn){return wrap(arr.filter((n,i)=>typeof fn==='function'?fn.call(n,i,n):matchesSimple(n,String(fn))))},
+      find(sel){return wrap(queryUnder(arr,sel))},
+      first(){return wrap(arr.slice(0,1))},
+      last(){return wrap(arr.slice(-1))},
+      eq(i){return wrap(arr[i]?[arr[i]]:[])},
+      parent(){return wrap(arr[0]?.parent?[arr[0].parent]:[])},
+      children(sel){const c=(arr[0]?.children||[]).filter(x=>x.tag);return wrap(sel?c.filter(x=>matchesSimple(x,sel)):c)},
+      prev(sel){const p=arr[0]?.parent;if(!p)return wrap([]);const siblings=p.children.filter(x=>x.tag);const idx=siblings.indexOf(arr[0]);for(let i=idx-1;i>=0;i--)if(!sel||matchesSimple(siblings[i],sel))return wrap([siblings[i]]);return wrap([])},
+      next(sel){const p=arr[0]?.parent;if(!p)return wrap([]);const siblings=p.children.filter(x=>x.tag);const idx=siblings.indexOf(arr[0]);for(let i=idx+1;i<siblings.length;i++)if(!sel||matchesSimple(siblings[i],sel))return wrap([siblings[i]]);return wrap([])},
+      attr(name){return arr[0]?.attrs?.[String(name||'').toLowerCase()]},
+      text(){return arr.map(nodeText).join('')},
+      html(){return arr[0]?nodeHtml(arr[0]):''},
+      toArray(){return arr.slice()},
+      get(i){return i===undefined?arr.slice():arr[i]}
+    }
+    arr.forEach((n,i)=>{obj[i]=n})
+    return obj
+  }
+  const $=selector=>{
+    if(!selector)return wrap([])
+    if(typeof selector==='object'&&selector.tag)return wrap([selector])
+    return wrap(queryUnder([root],String(selector)))
+  }
+  $.html=()=>rawHtml
+  return $
+}
+function weboxNodeBuild4kvmPlayUrl(input){
+  const dataid=String(input?.dataid??'').trim(),episodeId=String(input?.episodeId??'').trim(),quality=String(input?.quality??'').trim(),playKey=String(input?.playKey??'').trim()
+  const now=Date.now(),st=Number(input?.serverTime),plt=Number(input?.loadedAt)
+  const t=String(Math.floor((Number.isFinite(st)&&st>0&&Number.isFinite(plt)&&plt>0)?(st+(now-plt)):now))
+  const msg=`${dataid}:${t}:${episodeId}`
+  const s=nodeCrypto.createHmac('sha256',Buffer.from(episodeId,'utf8')).update(Buffer.from(msg,'utf8')).digest('hex').slice(0,32)
+  const secret='nbmovie2024secretkey',pkBytes=Buffer.from(playKey,'utf8'),xored=Buffer.alloc(pkBytes.length)
+  for(let i=0;i<pkBytes.length;i++)xored[i]=pkBytes[i]^secret.charCodeAt(i%secret.length)
+  const k=xored.toString('base64').replace(/\+/g,'-').replace(/\//g,'_')
+  return {url:`/video/play?p=${dataid}&v=${episodeId}&q=${quality}&s=${s}&t=${t}&k=${k}`}
+}
+function createNodeWeBoxPlugin(owner,spec){
+  const settings={}
+  if(Array.isArray(spec?.settings?.fields)){
+    for(const f of spec.settings.fields)if(f&&f.key)settings[f.key]=f.default??''
+  }
+  const payload=owner.payload||{}
+  if(payload.options&&typeof payload.options==='object'&&!Array.isArray(payload.options))Object.assign(settings,payload.options)
+  else if(typeof payload.options==='string'&&payload.options.trim().startsWith('{')){try{Object.assign(settings,JSON.parse(payload.options))}catch{}}
+  const storeNs='webox:'+String(spec?.id||payload.serviceID||payload.name||payload.entry||'default')
+  async function weboxHttp(method,url,options={}){
+    let target=new URL(String(url))
+    if(options.query&&typeof options.query==='object'){
+      for(const [k,v] of Object.entries(options.query))if(v!=null&&v!=='')target.searchParams.set(k,String(v))
+    }
+    const headers=widgetHeaders(options.headers||{})
+    let body=undefined
+    if(!['GET','HEAD'].includes(method)){
+      if(options.json!==undefined){body=JSON.stringify(options.json);if(!Object.keys(headers).some(k=>k.toLowerCase()==='content-type'))headers['Content-Type']='application/json'}
+      else if(options.text!==undefined)body=String(options.text)
+      else if(options.body!==undefined)body=options.body
+    }
+    const timeout=boundedTimeout(options.timeoutMs||options.timeout,15000,30000)
+    const response=await fetch(pluginHTTPURL(target.toString()),{method,headers,body,redirect:'follow',signal:AbortSignal.timeout(timeout)})
+    const bytes=await readLimited(response)
+    const outHeaders=Object.fromEntries(response.headers)
+    const rType=String(options.responseType||'text').toLowerCase()
+    const data=rType==='base64'?bytes.toString('base64'):rType==='json'?JSON.parse(bytes.toString('utf8')):bytes.toString('utf8')
+    return {status:response.status,url:response.url||target.toString(),headers:outHeaders,data}
+  }
+  const ctx={
+    settings,
+    fail(code,message,extra){const err=new Error(String(message||code||'WeBox Error'));err.code=String(code||'PLUGIN_ERROR');if(extra&&typeof extra==='object')Object.assign(err,extra);throw err},
+    signal:{aborted:false,throwIfAborted(){}},
+    cache:{generation:1,seconds(def){const n=Number(def);return Number.isFinite(n)&&n>=0?n:60}},
+    url:{
+      resolve(raw,base){return new URL(String(raw??''),String(base??'')).toString()},
+      origin(u){return new URL(String(u??'')).origin}
+    },
+    http:{
+      get:(url,options={})=>weboxHttp('GET',url,options),
+      post:(url,options={})=>weboxHttp('POST',url,options)
+    },
+    html:{load:html=>createLiteCheerio(html)},
+    store:{
+      async get(key){const raw=global.local?.get(storeNs,String(key||''));if(!raw)return null;try{return JSON.parse(raw)}catch{return raw}},
+      async set(key,val){global.local?.set(storeNs,String(key||''),JSON.stringify(val));return val}
+    },
+    crypto:{
+      md5:s=>nodeCrypto.createHash('md5').update(String(s??''),'utf8').digest('hex'),
+      base64Encode:s=>Buffer.from(String(s??''),'utf8').toString('base64'),
+      base64Decode:s=>Buffer.from(String(s??'').replace(/\s+/g,''),'base64').toString('utf8'),
+      aesEncrypt(data,key,iv,options={}){
+        const inEnc=String(options.inputEncoding||'utf8').toLowerCase(),outEnc=String(options.outputEncoding||'base64').toLowerCase()
+        const keyBuf=Buffer.from(String(key??''),'utf8'),ivBuf=Buffer.from(String(iv??''),'utf8')
+        const alg=keyBuf.length===32?'aes-256-cbc':keyBuf.length===24?'aes-192-cbc':'aes-128-cbc'
+        const cipher=nodeCrypto.createCipheriv(alg,keyBuf,ivBuf)
+        const inputBuf=Buffer.from(String(data??''),inEnc==='hex'?'hex':inEnc==='base64'?'base64':'utf8')
+        const outBuf=Buffer.concat([cipher.update(inputBuf),cipher.final()])
+        return outBuf.toString(outEnc==='hex'?'hex':outEnc==='base64'?'base64':'utf8')
+      },
+      aesDecrypt(data,key,iv,options={}){
+        const inEnc=String(options.inputEncoding||'base64').toLowerCase(),outEnc=String(options.outputEncoding||'utf8').toLowerCase()
+        const keyBuf=Buffer.from(String(key??''),'utf8'),ivBuf=Buffer.from(String(iv??''),'utf8')
+        const alg=keyBuf.length===32?'aes-256-cbc':keyBuf.length===24?'aes-192-cbc':'aes-128-cbc'
+        const decipher=nodeCrypto.createDecipheriv(alg,keyBuf,ivBuf)
+        const inputBuf=Buffer.from(String(data??'').replace(/\s+/g,''),inEnc==='hex'?'hex':'base64')
+        const outBuf=Buffer.concat([decipher.update(inputBuf),decipher.final()])
+        return outBuf.toString(outEnc==='hex'?'hex':outEnc==='base64'?'base64':'utf8')
+      },
+      rsaEncrypt(plainText,publicKeyPem){
+        return nodeCrypto.publicEncrypt({key:String(publicKeyPem),padding:nodeCrypto.constants.RSA_PKCS1_PADDING},Buffer.from(String(plainText??''),'utf8')).toString('base64')
+      },
+      rsaDecrypt(base64Cipher,privateKeyPem){
+        return nodeCrypto.privateDecrypt({key:String(privateKeyPem),padding:nodeCrypto.constants.RSA_PKCS1_PADDING},Buffer.from(String(base64Cipher??'').replace(/\s+/g,''),'base64')).toString('utf8')
+      }
+    },
+    compute:{
+      async run(options={}){
+        const {code,input,binaries}=options
+        if(typeof globalThis.WebAssembly!=='undefined'&&globalThis.WebAssembly&&typeof globalThis.WebAssembly.instantiate==='function'&&code){
+          try{
+            const decodedBins={}
+            for(const [k,v] of Object.entries(binaries||{}))decodedBins[k]=typeof v==='string'?Uint8Array.from(Buffer.from(v,'base64')):v
+            const fn=new Function('input','binaries',`return (${code})(input, binaries);`)
+            return await fn(input,decodedBins)
+          }catch(_e){}
+        }
+        if(input&&input.dataid!==undefined&&input.playKey!==undefined)return weboxNodeBuild4kvmPlayUrl(input)
+        throw new Error('当前运行环境不支持 WebAssembly 动态计算')
+      }
+    },
+    binary:{
+      size:h=>h?Number(h.byteLength??h.length??0):0,
+      read:(h,offset,length)=>Uint8Array.from(Buffer.from(h).subarray(offset,offset+length)),
+      slice:(h,offset,length)=>Buffer.from(Buffer.from(h).subarray(offset,offset+length)),
+      write:(h,offset,bytes)=>{const copy=Buffer.from(h);Buffer.from(bytes).copy(copy,offset);return copy},
+      concat:list=>Buffer.concat((list||[]).map(x=>Buffer.from(x)))
+    }
+  }
+  const cursors=new Map()
+  let cachedFilterFields=null,primaryCategoryKey='category',defaultFilters={}
+  async function ensureFilterFields(){
+    if(cachedFilterFields)return cachedFilterFields
+    cachedFilterFields=typeof spec.filters==='function'?await spec.filters(ctx,{}):[]
+    if(!Array.isArray(cachedFilterFields))cachedFilterFields=[]
+    defaultFilters={}
+    for(const f of cachedFilterFields)if(f&&f.key)defaultFilters[f.key]=f.default!==undefined?String(f.default):String(f.options?.[0]?.value??'')
+    const catField=cachedFilterFields.find(f=>f&&f.key==='category')||cachedFilterFields[0]
+    primaryCategoryKey=catField?.key||'category'
+    return cachedFilterFields
+  }
+  const cleanStr=v=>v==null?'':typeof v==='string'?v.replace(/\[object\s+[^\]]+\]/gi,'').trim():String(v)
+  const mapItems=list=>(Array.isArray(list)?list:[]).filter(x=>x&&typeof x==='object'&&x.id!=null).map(x=>({id:String(x.id),name:cleanStr(x.title||x.name||x.id),poster:cleanStr(x.poster||x.pic||''),remarks:cleanStr(x.subtitle||x.rating||x.remarks||'')})).filter(x=>x.id&&x.name)
+  return {
+    name:spec.name||payload.name||'WeBox 影视源',
+    async home(args={}){
+      const fields=await ensureFilterFields()
+      const catField=fields.find(f=>f&&f.key===primaryCategoryKey)
+      const categories=Array.isArray(catField?.options)?catField.options.map(o=>({id:String(o.value??''),name:cleanStr(o.label||o.name||o.value||'全部')})):[{id:'all',name:'全部'}]
+      const filters={}
+      for(const cat of categories){
+        const catFilters=[]
+        for(const f of fields){
+          if(!f||!f.key||f.key===primaryCategoryKey||!Array.isArray(f.options))continue
+          if(f.showWhen&&f.showWhen.key===primaryCategoryKey&&String(f.showWhen.equals)!==String(cat.id))continue
+          catFilters.push({key:String(f.key),name:cleanStr(f.label||f.name||f.key),value:f.options.map(o=>({n:cleanStr(o.label??o.name??o.value??'全部'),v:String(o.value??'')}))})
+        }
+        if(catFilters.length)filters[cat.id]=catFilters
+      }
+      const reqFilters={...defaultFilters}
+      const res=await spec.list(ctx,{cursor:null,filters:reqFilters,refresh:Boolean(args?.refresh)})
+      if(res?.nextCursor)cursors.set(JSON.stringify(reqFilters)+'|2',String(res.nextCursor))
+      return {categories,filters,items:mapItems(res?.items)}
+    },
+    async category(args={}){
+      await ensureFilterFields()
+      const page=Math.max(1,Number(args?.page)||1),reqFilters={...defaultFilters,...(args?.filters||{})}
+      if(args?.categoryId!==undefined&&primaryCategoryKey)reqFilters[primaryCategoryKey]=String(args.categoryId)
+      const key=JSON.stringify(reqFilters),cursor=page<=1?null:(cursors.get(key+'|'+page)||String(page))
+      const res=await spec.list(ctx,{cursor,filters:reqFilters,refresh:Boolean(args?.refresh)})
+      if(res?.nextCursor)cursors.set(key+'|'+(page+1),String(res.nextCursor))
+      return {page,items:mapItems(res?.items),hasMore:Boolean(res?.nextCursor)}
+    },
+    async search(args={}){
+      if(typeof spec.search!=='function')return {page:1,items:[],hasMore:false}
+      await ensureFilterFields()
+      const page=Math.max(1,Number(args?.page)||1),query=String(args?.keyword||args?.wd||args?.query||'').trim()
+      if(!query)return {page:1,items:[],hasMore:false}
+      const key='search:'+query,cursor=page<=1?null:(cursors.get(key+'|'+page)||String(page))
+      const res=await spec.search(ctx,{query,cursor,filters:{...defaultFilters,...(args?.filters||{})}})
+      if(res?.nextCursor)cursors.set(key+'|'+(page+1),String(res.nextCursor))
+      return {page,items:mapItems(res?.items),hasMore:Boolean(res?.nextCursor)}
+    },
+    async detail(args={}){
+      const contentId=String(args?.id??args?.itemId??''),det=await spec.detail(ctx,{id:contentId})
+      const groups=Array.isArray(det?.groups)?det.groups:[]
+      const lines=groups.map((grp,idx)=>({
+        id:String(grp?.id??`line-${idx+1}`),
+        name:cleanStr(grp?.name||`线路 ${idx+1}`),
+        episodes:(Array.isArray(grp?.episodes)?grp.episodes:[]).filter(ep=>ep&&ep.id!=null).map((ep,epIdx)=>({
+          id:'webox:'+encodeURIComponent(JSON.stringify({contentId:String(det?.id??contentId),groupId:String(grp?.id??'main'),episodeId:String(ep.id)})),
+          name:cleanStr(ep.name||ep.title||`第 ${epIdx+1} 集`)
+        }))
+      })).filter(l=>l.episodes.length)
+      return {id:String(det?.id??contentId),name:cleanStr(det?.title||det?.name||contentId),poster:cleanStr(det?.poster||''),description:cleanStr(det?.summary||det?.description||''),remarks:cleanStr(det?.subtitle||det?.rating||''),lines}
+    },
+    async play(args={}){
+      let contentId=String(args?.contentId||args?.id||''),groupId=String(args?.lineId||args?.groupId||'main'),episodeId=String(args?.episodeId||args?.id||'')
+      if(typeof args?.id==='string'&&args.id.startsWith('webox:')){
+        try{const parsed=JSON.parse(decodeURIComponent(args.id.slice(6)));contentId=String(parsed.contentId||contentId);groupId=String(args?.lineId||parsed.groupId||groupId);episodeId=String(parsed.episodeId||episodeId)}catch{}
+      }
+      const res=await spec.play(ctx,{contentId,groupId,episodeId,purpose:'playback',refresh:Boolean(args?.refresh)})
+      const sources=Array.isArray(res?.sources)?res.sources:[]
+      if(!sources.length)throw new Error('WeBox 插件未返回可播放线路')
+      const mapped=sources.map((s,idx)=>{
+        const headers=s?.headers&&typeof s.headers==='object'?s.headers:{}
+        if(typeof s?.manifest==='string'&&s.manifest.trim().startsWith('#EXTM3U')){
+          return {name:cleanStr(s.name||`线路 ${idx+1}`),url:String(s.baseUrl||'https://localhost/playlist.m3u8').trim(),manifestText:s.manifest,baseUrl:String(s.baseUrl||'https://localhost/playlist.m3u8').trim(),headers,format:'hls',contentType:'application/vnd.apple.mpegurl',directMedia:true,nativePlayable:true}
+        }
+        const url=String(s?.url||'').trim(),isHls=/mpegurl/i.test(String(s?.mime||''))||/\.m3u8(?:$|[?#])/i.test(url)
+        return {name:cleanStr(s?.name||`线路 ${idx+1}`),url,headers,contentType:String(s?.mime||(isHls?'application/vnd.apple.mpegurl':'video/mp4')),...(isHls?{format:'hls'}:{}),directMedia:true,nativePlayable:true}
+      }).filter(s=>s.url||s.manifestText)
+      if(!mapped.length)throw new Error('WeBox 插件未返回有效播放地址')
+      return {...mapped[0],alternates:mapped.slice(1)}
+    }
+  }
+}
+
 function installCatvodGlobals(owner){
+  owner.weboxSpec=null;global.WeBox={define(spec){owner.weboxSpec=spec;return spec}};
   const file=path.join(owner.data,'js-storage.json')
   let storage={};try{storage=JSON.parse(fs.readFileSync(file,'utf8'))}catch{}
   const save=()=>{const text=JSON.stringify(storage);if(text.length>1024*1024)throw Error('插件存储超过 1 MB');fs.writeFileSync(file+'.tmp',text);fs.renameSync(file+'.tmp',file)}
@@ -663,7 +1000,8 @@ async function start(payload){
     let module
     if(payload.moduleType==='esm')module=await import(pathToFileURL(entry).href+'?session='+encodeURIComponent(payload.session))
     else{for(const name of Object.keys(require.cache))if(name===entry||name.startsWith(root+path.sep))delete require.cache[name];module=require(entry)}
-    owner.module=module.default||module
+    owner.module=owner.weboxSpec?createNodeWeBoxPlugin(owner,owner.weboxSpec):(module.default||module)
+    if(owner.module&&owner.module.api==='1.1'&&typeof owner.module.list==='function'&&!owner.weboxSpec)owner.module=createNodeWeBoxPlugin(owner,owner.module)
     if(owner.protocol==='catpaw-http'){
       let options=payload.options&&typeof payload.options==='object'&&!Array.isArray(payload.options)?payload.options:{}
       let hasConfiguration=Object.keys(options).some(key=>key!=='password')

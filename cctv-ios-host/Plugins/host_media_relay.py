@@ -17,6 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import zlib
 
 
 class ScopedRedirect(urllib.request.HTTPRedirectHandler):
@@ -57,13 +58,28 @@ def _retry_request(request):
         method=request.get_method())
 
 
+def _is_cert_verification_error(error):
+    if isinstance(error, urllib.error.HTTPError):
+        return False
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return True
+    return isinstance(reason, ssl.SSLError) and ('certificate_verify_failed' in str(reason).lower() or 'self-signed' in str(reason).lower() or 'local issuer' in str(reason).lower())
+
+
 def _open_with_timeout_retry(request, diagnostic_id=''):
-    """Retry one idempotent request once when the connection handshake times out."""
+    """Retry one idempotent request once when the connection handshake times out or CDN cert chain is self-signed."""
     method = request.get_method().upper()
     opener = urllib.request.build_opener(ScopedRedirect())
     try:
         return opener.open(request, timeout=8)
     except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
+        parsed = urllib.parse.urlsplit(request.full_url)
+        host = (parsed.hostname or '').lower()
+        if _is_cert_verification_error(error) and host not in ('127.0.0.1', 'localhost', '::1') and not host.endswith('.test'):
+            unverified_ctx = ssl._create_unverified_context()
+            tls_opener = urllib.request.build_opener(ScopedRedirect(), urllib.request.HTTPSHandler(context=unverified_ctx))
+            return tls_opener.open(_retry_request(request), timeout=8)
         if method not in ('GET', 'HEAD') or not _transient_open_timeout(error):
             raise
         parsed = urllib.parse.urlsplit(request.full_url)
@@ -103,6 +119,7 @@ class MediaRelay:
         self.diagnosed_manifests = set()
         self.diagnosed_resources = collections.OrderedDict()
         self.inline_keys = collections.OrderedDict()
+        self.inline_manifests = collections.OrderedDict()
         self.responses = set()
         self.stopping = threading.Event()
 
@@ -177,6 +194,61 @@ class MediaRelay:
             while len(self.inline_keys) > 256:
                 self.inline_keys.popitem(last=False)
             return token
+
+    def register_inline_manifest(self, manifest_text, base_url, headers=None, diagnostic_id=None, resource_scope=None):
+        text = str(manifest_text or '').lstrip('\ufeff').lstrip()
+        if not text.startswith('#EXTM3U'):
+            raise ValueError('无效的内联 HLS 清单')
+        base_str = str(base_url or 'https://localhost/playlist.m3u8').strip()
+        parsed = urllib.parse.urlsplit(base_str)
+        if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname:
+            base_str = 'https://localhost/playlist.m3u8'
+            parsed = urllib.parse.urlsplit(base_str)
+        origin = (parsed.scheme.lower(), parsed.netloc.lower())
+        safe_headers = self._safe_refresh_headers(headers or {})
+        with self.lock:
+            if self.stopping.is_set():
+                raise RuntimeError('媒体代理正在停止')
+            token = uuid.uuid4().hex
+            self.inline_manifests[token] = (
+                text, base_str, safe_headers, origin,
+                str(diagnostic_id or '')[:96], str(resource_scope or diagnostic_id or '')[:96]
+            )
+            while len(self.inline_manifests) > 64:
+                self.inline_manifests.popitem(last=False)
+            return token
+
+    @staticmethod
+    def _unwrap_rou_png_bytes(data):
+        if not data or len(data) < 20 or data[:8] != b'\x89PNG\r\n\x1a\n':
+            return None
+        offset = 8
+        size = len(data)
+        found = None
+        for _ in range(4096):
+            if offset + 12 > size:
+                break
+            length = int.from_bytes(data[offset:offset + 4], 'big')
+            if length > size - offset - 12:
+                break
+            chunk_type = data[offset + 4:offset + 8]
+            if chunk_type == b'roUd' and length >= 2:
+                flags = data[offset + 8]
+                payload = data[offset + 9:offset + 8 + length]
+                if flags == 0:
+                    found = payload
+                elif flags == 1:
+                    try:
+                        found = zlib.decompress(payload)
+                    except Exception:
+                        try:
+                            found = zlib.decompress(payload[3:]) if len(payload) > 3 else None
+                        except Exception:
+                            return None
+            offset += length + 12
+            if chunk_type == b'IEND':
+                return found
+        return found
 
     @staticmethod
     def _strip_disguised_ts_prefix(chunk):
@@ -463,6 +535,26 @@ class MediaRelay:
                 self._write_client(handler, key_data)
             return
         with self.lock:
+            inline_manifest_entry = self.inline_manifests.get(token)
+            if inline_manifest_entry is not None and not self.stopping.is_set():
+                self.inline_manifests.move_to_end(token)
+        if inline_manifest_entry is not None and not self.stopping.is_set():
+            m_text, m_base_url, m_headers, m_origin, m_diag, m_scope = inline_manifest_entry
+            rewritten = self.rewrite(
+                m_text, m_base_url, dict(m_headers), m_origin,
+                f'http://127.0.0.1:{handler.server.server_port}', m_diag,
+                resource_scope=m_scope
+            ).encode('utf-8')
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'application/vnd.apple.mpegurl')
+            handler.send_header('Content-Length', str(len(rewritten)))
+            handler.send_header('Cache-Control', 'no-store')
+            handler.send_header('Connection', 'close')
+            handler.end_headers()
+            if not head:
+                self._write_client(handler, rewritten)
+            return
+        with self.lock:
             pool = self.targets if token in self.targets else self.segments
             record = pool.get(token)
             stopping = self.stopping.is_set()
@@ -626,6 +718,26 @@ class MediaRelay:
                 self._write_client(handler, norm_key)
                 resource_event('completed', len(norm_key))
                 return
+            resp_ct = (response.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
+            looks_like_png_segment = (token in self.segments and (resp_ct in ('image/png', 'image/jpeg', 'image/gif', 'image/bmp') or '.png' in final_url.lower() or 'rou.video' in final_url.lower()))
+            if not head and resource_kind == 'media' and response.status == 200 and not prefix and looks_like_png_segment:
+                prefix = response.read(64)
+            if not head and prefix.startswith(b'\x89PNG\r\n\x1a\n'):
+                raw_png = prefix + response.read(16 * 1024 * 1024 + 1 - len(prefix))
+                unwrapped = self._unwrap_rou_png_bytes(raw_png) if len(raw_png) <= 16 * 1024 * 1024 else None
+                if unwrapped is not None:
+                    resource_event('byte', len(unwrapped))
+                    u_mime = 'video/mp2t' if (len(unwrapped) > 376 and unwrapped[0] == 0x47 and unwrapped[188] == 0x47) else ('video/mp4' if unwrapped[4:8] in (b'ftyp', b'styp', b'moof', b'moov') else 'application/octet-stream')
+                    handler.send_response(200)
+                    handler.send_header('Content-Type', u_mime)
+                    handler.send_header('Content-Length', str(len(unwrapped)))
+                    handler.send_header('Cache-Control', 'no-store')
+                    handler.send_header('Connection', 'close')
+                    handler.end_headers()
+                    sent = True
+                    self._write_client(handler, unwrapped)
+                    resource_event('completed', len(unwrapped))
+                    return
             handler.send_response(response.status)
             for key in ('Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges'):
                 if response.headers.get(key):
