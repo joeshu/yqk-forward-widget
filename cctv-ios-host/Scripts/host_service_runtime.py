@@ -748,6 +748,11 @@ def run_script(path, identifier='default', data_dir=None, port=None, arguments=N
         # argparse/sys.exit belongs to this service, never the embedding App.
         print('[宿主] Python 脚本已退出，退出码：%s' % error.code)
         return {}
+    except RuntimeError as error:
+        if session.stopping.is_set() or 'service is stopping' in str(error):
+            print('[宿主] Python 脚本在停止流程中取消启动：%s' % error)
+            return {}
+        raise
     finally:
         if session.script_started:
             _capture_stop_hook(session)

@@ -257,7 +257,7 @@ static inline void HostStyleNavigation(UINavigationController *nav) {
     a.shadowColor = UIColor.clearColor;
     UINavigationBarAppearance *edge = [UINavigationBarAppearance new];
     [edge configureWithTransparentBackground];
-    edge.backgroundColor = [HostBackground() colorWithAlphaComponent:0.16];
+    edge.backgroundColor = UIColor.clearColor;
     edge.titleTextAttributes = a.titleTextAttributes;
     edge.largeTitleTextAttributes = a.largeTitleTextAttributes;
     edge.shadowColor = UIColor.clearColor;
@@ -331,9 +331,9 @@ static inline void HostUpdateImmersiveTopScrim(UIView *scrimView, CAGradientLaye
     scrimView.frame = frame;
     gradientLayer.frame = scrimView.bounds;
     CGFloat clamped = MIN(1.0, MAX(0.0, scrollProgress));
-    CGFloat topAlpha = hasHeroBackdrop ? (0.40 + clamped * 0.48) : (0.86 + clamped * 0.10);
-    CGFloat midAlpha = topAlpha * 0.72;
-    UIColor *base = HostIsDarkThemeSelected() ? UIColor.blackColor : [HostBackground() resolvedColorWithTraitCollection:scrimView.traitCollection];
+    CGFloat topAlpha = hasHeroBackdrop ? (clamped * 0.52) : (clamped * 0.76);
+    CGFloat midAlpha = topAlpha * 0.65;
+    UIColor *base = [HostBackground() resolvedColorWithTraitCollection:scrimView.traitCollection];
     gradientLayer.locations = @[@0.0, @0.68, @1.0];
     gradientLayer.colors = @[
         (id)[base colorWithAlphaComponent:topAlpha].CGColor,

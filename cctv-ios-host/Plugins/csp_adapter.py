@@ -500,21 +500,41 @@ def _default_cms_host_for_api(api_type):
     return 'https://caiji.dyttzyapi.com'
 
 
-def _first_valid_http_url(candidate):
-    """Extracts the first valid http/https URL from a string, comma-separated list, or array."""
+def _first_valid_http_url(candidate, allow_txt=True):
+    """Extracts the first valid http/https URL from a string, comma-separated list, dict, or array."""
     if isinstance(candidate, list):
         for item in candidate:
-            u = _first_valid_http_url(item)
+            u = _first_valid_http_url(item, allow_txt=allow_txt)
             if u:
                 return u
         return ''
+    if isinstance(candidate, dict):
+        return _first_valid_http_url([candidate.get('url'), candidate.get('host'), candidate.get('site'), candidate.get('domain'), candidate.get('domains')], allow_txt=allow_txt)
     if not isinstance(candidate, str):
         return ''
-    for part in re.split(r'[,;\s\r\n]+', candidate.strip()):
+    raw = candidate.strip()
+    if not raw:
+        return ''
+    if raw.startswith(('{', '[')):
+        try:
+            return _first_valid_http_url(json.loads(raw), allow_txt=allow_txt)
+        except Exception:
+            pass
+    if 'http://' not in raw.lower() and 'https://' not in raw.lower() and 16 <= len(raw) <= 4096:
+        try:
+            padded = raw + '=' * ((4 - len(raw) % 4) % 4)
+            dec = base64.b64decode(padded).decode('utf-8', errors='ignore').strip()
+            if 'http://' in dec.lower() or 'https://' in dec.lower():
+                raw = dec
+        except Exception:
+            pass
+    for part in re.split(r"""[,;|\s\r\n"'<>\[\]()]+""", raw):
         part = part.strip().rstrip('/')
         if not part.startswith(('http://', 'https://')):
             continue
         low = part.lower()
+        if not allow_txt and low.endswith('.txt'):
+            continue
         for suffix in ('/api.php/app', '/api.php/provide/vod', '/api.php/v1.vod', '/app/bn'):
             if low.endswith(suffix):
                 part = part[:-len(suffix)].rstrip('/')
@@ -800,7 +820,7 @@ class AppVideoEngine:
                 return
             try:
                 resp = self.session.get(self.base_url, headers=self.headers, timeout=6)
-                resolved = _first_valid_http_url(resp.text)
+                resolved = _first_valid_http_url(resp.text, allow_txt=False)
                 if resolved:
                     _EXT_CACHE[self.base_url] = resolved
                     self.base_url = resolved

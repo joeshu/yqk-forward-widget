@@ -42,6 +42,7 @@
     self.table.dataSource = self; self.table.delegate = self;
     self.table.rowHeight = UITableViewAutomaticDimension; self.table.estimatedRowHeight = 86;
     self.table.tintColor = HostAccent();
+    HostInstallGlassBackdrop(self.table);
     [self.view addSubview:self.table];
     [NSLayoutConstraint activateConstraints:@[[self.table.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor], [self.table.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor], [self.table.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor], [self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
 
@@ -69,8 +70,8 @@
         self.eventSearchBar.accessibilityIdentifier = @"diagnostic.event.search";
         self.diagnosticSummaryCard = [[UIView alloc] initWithFrame:CGRectMake(16, 86, 288, 64)];
         self.diagnosticSummaryCard.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-        self.diagnosticSummaryCard.backgroundColor = HostCard();
-        self.diagnosticSummaryCard.layer.cornerRadius = 13;
+        HostStyleGlassCard(self.diagnosticSummaryCard, 15);
+        self.diagnosticSummaryCard.layer.cornerRadius = 15;
         self.diagnosticSummaryCard.layer.cornerCurve = kCACornerCurveContinuous;
         self.diagnosticSummaryCard.layer.borderWidth = 0.6;
         HostSetLayerBorderColor(self.diagnosticSummaryCard, HostBorder());

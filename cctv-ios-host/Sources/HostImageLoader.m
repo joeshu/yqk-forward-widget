@@ -3,6 +3,7 @@
 #import "HostImageFailurePolicy.h"
 #import "RuntimeDiagnostics.h"
 #import <ImageIO/ImageIO.h>
+#import <CommonCrypto/CommonDigest.h>
 
 static NSUInteger const ImageBodyLimit = 2 * 1024 * 1024;
 static NSUInteger const PosterBodyLimit = 4 * 1024 * 1024;
@@ -21,6 +22,7 @@ static NSUInteger const ImageQueueLimit = 160;
 @property(nonatomic) CFTimeInterval startedAt;
 @property(nonatomic) NSInteger httpStatus;
 @property(nonatomic) BOOL responseEncrypted;
+@property(nonatomic) BOOL prefetch;
 @property(nonatomic) double pixelWidth;
 @property(nonatomic) double pixelHeight;
 @property(nonatomic) long long expectedContentLength;
@@ -46,6 +48,8 @@ static NSUInteger const ImageQueueLimit = 160;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, HostImageRequest *> *requests;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, HostImageRequest *> *tasks;
 @property(nonatomic, strong) NSMutableArray<HostImageRequest *> *pending;
+@property(nonatomic, strong) NSMapTable<UIImageView *, NSString *> *viewTargets;
+@property(nonatomic, copy) NSString *diskCacheDirectory;
 @property(atomic) NSUInteger generation;
 - (void)loadURL:(NSString *)url intoImageView:(UIImageView *)imageView maximumPixelSize:(NSUInteger)maximumPixelSize completion:(nullable HostImageLoadCompletion)completion;
 @end
@@ -63,6 +67,10 @@ static NSUInteger const ImageQueueLimit = 160;
         _failures=[NSCache new];_failures.countLimit=200;
         _domainFailures=[NSCache new];_domainFailures.countLimit=64;
         _requests=[NSMutableDictionary dictionary];_tasks=[NSMutableDictionary dictionary];_pending=[NSMutableArray array];
+        _viewTargets=[NSMapTable weakToStrongObjectsMapTable];
+        NSURL *cachesDir=[NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject;
+        NSURL *thumbDir=[cachesDir URLByAppendingPathComponent:@"CCTVHostImageThumbnails" isDirectory:YES];
+        if(thumbDir){[NSFileManager.defaultManager createDirectoryAtURL:thumbDir withIntermediateDirectories:YES attributes:nil error:NULL];_diskCacheDirectory=thumbDir.path;}
         NSURLSessionConfiguration *config=configuration.copy;config.URLCache=nil;config.HTTPCookieStorage=nil;
         config.timeoutIntervalForRequest=6;config.timeoutIntervalForResource=10;config.HTTPMaximumConnectionsPerHost=8;config.HTTPShouldUsePipelining=YES;config.waitsForConnectivity=NO;
         NSOperationQueue *delegate=[NSOperationQueue new];delegate.maxConcurrentOperationCount=1;delegate.underlyingQueue=_queue;
@@ -70,6 +78,19 @@ static NSUInteger const ImageQueueLimit = 160;
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(clearCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
     }
     return self;
+}
+- (NSString *)diskThumbnailPathForCacheKey:(NSString *)cacheKey url:(NSString *)url maximumPixelSize:(NSUInteger)maximumPixelSize {
+    if(!self.diskCacheDirectory.length||maximumPixelSize<512||!cacheKey.length)return nil;
+    NSURL *parsed=[NSURL URLWithString:url?:@""];
+    NSString *host=parsed.host.lowercaseString?:@"";
+    if(!host.length||[@[@"127.0.0.1",@"localhost",@"::1"] containsObject:host]||[host hasSuffix:@".test"]||[host hasSuffix:@".example"])return nil;
+    NSData *keyData=[cacheKey dataUsingEncoding:NSUTF8StringEncoding];
+    if(!keyData.length)return nil;
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(keyData.bytes,(CC_LONG)keyData.length,digest);
+    NSMutableString *hex=[NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH*2];
+    for(NSUInteger i=0;i<CC_SHA256_DIGEST_LENGTH;i++)[hex appendFormat:@"%02x",digest[i]];
+    return [self.diskCacheDirectory stringByAppendingPathComponent:[hex stringByAppendingString:@".jpg"]];
 }
 - (void)loadURL:(NSString *)url intoImageView:(UIImageView *)imageView {
     [self loadURL:url intoImageView:imageView maximumPixelSize:192 completion:nil];
@@ -106,14 +127,88 @@ static NSUInteger const ImageQueueLimit = 160;
     NSUInteger generation=self.generation;__weak UIImageView *view=imageView;
     dispatch_async(self.queue, ^{@autoreleasepool {
         if(generation!=self.generation || !view)return;
+        NSString *previousKey=[self.viewTargets objectForKey:view];
+        if(previousKey.length && ![previousKey isEqualToString:cacheKey]){
+            HostImageRequest *oldReq=self.requests[previousKey];
+            if(oldReq){
+                [oldReq.views removeObject:view];
+                if(!oldReq.task && !oldReq.views.allObjects.count && !oldReq.prefetch){
+                    [self.pending removeObject:oldReq];
+                    [self.requests removeObjectForKey:previousKey];
+                }
+            }
+        }
+        [self.viewTargets setObject:cacheKey forKey:view];
+        UIImage *memCached=[self.cache objectForKey:cacheKey];
+        if(!memCached){
+            NSString *diskPath=[self diskThumbnailPathForCacheKey:cacheKey url:url maximumPixelSize:maximumPixelSize];
+            if(diskPath.length && [NSFileManager.defaultManager fileExistsAtPath:diskPath]){
+                NSData *diskData=[NSData dataWithContentsOfFile:diskPath options:NSDataReadingMappedIfSafe error:NULL];
+                if(diskData.length){
+                    CGImageSourceRef src=CGImageSourceCreateWithData((__bridge CFDataRef)diskData,NULL);
+                    if(src){
+                        CGImageRef cg=CGImageSourceCreateImageAtIndex(src,0,(__bridge CFDictionaryRef)@{(__bridge NSString *)kCGImageSourceShouldCacheImmediately:@YES});
+                        if(cg){memCached=[UIImage imageWithCGImage:cg];[self.cache setObject:memCached forKey:cacheKey cost:CGImageGetBytesPerRow(cg)*CGImageGetHeight(cg)];CGImageRelease(cg);}
+                        CFRelease(src);
+                    }
+                }
+            }
+        }
+        if(memCached){
+            dispatch_async(dispatch_get_main_queue(),^{
+                UIImageView *current=view;
+                if(!current||![current.accessibilityIdentifier isEqualToString:url])return;
+                current.image=memCached;
+                if(maximumPixelSize>512){current.contentMode=UIViewContentModeScaleAspectFill;current.tintColor=nil;}
+                if(completion)completion(YES,0);
+            });
+            return;
+        }
         NSDate *failed=[self.failures objectForKey:cacheKey];if(failed && failed.timeIntervalSinceNow>0){NSTimeInterval retryAfter=MAX(0,failed.timeIntervalSinceNow);dispatch_async(dispatch_get_main_queue(),^{UIImageView *current=view;if(current&&[current.accessibilityIdentifier isEqualToString:url]&&completion)completion(NO,retryAfter);});return;}
         HostImageRequest *request=self.requests[cacheKey];
         if(!request) {
+            if(self.requests.count>=ImageQueueLimit){
+                for(NSInteger i=(NSInteger)self.pending.count-1;i>=0;i--){
+                    HostImageRequest *queued=self.pending[(NSUInteger)i];
+                    if(!queued.views.allObjects.count){[self.requests removeObjectForKey:queued.cacheKey];[self.pending removeObjectAtIndex:(NSUInteger)i];}
+                }
+            }
             if(self.requests.count>=ImageQueueLimit){dispatch_async(dispatch_get_main_queue(),^{UIImageView *current=view;if(current&&[current.accessibilityIdentifier isEqualToString:url]&&completion)completion(NO,30);});return;}
             request=[HostImageRequest new];request.url=url;request.cacheKey=cacheKey;request.maximumPixelSize=maximumPixelSize;request.generation=generation;
             request.views=[NSHashTable weakObjectsHashTable];request.observers=[NSMutableArray array];self.requests[cacheKey]=request;[self.pending addObject:request];
+        } else if(!request.task && self.pending.count>1 && [self.pending containsObject:request]){
+            request.prefetch=NO;
+            [self.pending removeObject:request];
+            [self.pending insertObject:request atIndex:0];
         }
         [request.views addObject:view];if(completion){HostImageObserver *observer=[HostImageObserver new];observer.view=view;observer.completion=completion;[request.observers addObject:observer];}[self startPending];
+    }});
+}
+- (void)prefetchPosterURLs:(NSArray<NSString *> *)urls {
+    if(!urls.count)return;
+    NSArray<NSString *> *snapshot=[urls copy];
+    NSUInteger generation=self.generation;
+    dispatch_async(self.queue, ^{@autoreleasepool {
+        if(generation!=self.generation)return;
+        NSUInteger scheduled=0;
+        for(id raw in snapshot){
+            if(scheduled>=6 || (self.tasks.count+self.pending.count)>=ImageConcurrentLimit)break;
+            if(![raw isKindOfClass:NSString.class])continue;
+            NSString *url=[(NSString *)raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if(!url.length)continue;
+            NSURL *target=[NSURL URLWithString:url];
+            if(!target.host.length || ![@[@"http",@"https"] containsObject:target.scheme.lowercaseString])continue;
+            NSString *cacheKey=[NSString stringWithFormat:@"1024|%@",url];
+            if([self.cache objectForKey:cacheKey] || self.requests[cacheKey] || [self.failures objectForKey:cacheKey])continue;
+            NSString *diskPath=[self diskThumbnailPathForCacheKey:cacheKey url:url maximumPixelSize:1024];
+            if(diskPath.length && [NSFileManager.defaultManager fileExistsAtPath:diskPath])continue;
+            HostImageRequest *request=[HostImageRequest new];
+            request.url=url;request.cacheKey=cacheKey;request.maximumPixelSize=1024;request.generation=generation;request.prefetch=YES;
+            request.views=[NSHashTable weakObjectsHashTable];request.observers=[NSMutableArray array];
+            self.requests[cacheKey]=request;[self.pending addObject:request];
+            scheduled++;
+        }
+        if(scheduled)[self startPending];
     }});
 }
 - (NSUInteger)maximumBodyLengthForRequest:(HostImageRequest *)record {
@@ -129,7 +224,7 @@ static NSUInteger const ImageQueueLimit = 160;
 - (void)startPending {
     while(self.tasks.count<ImageConcurrentLimit && self.pending.count) {
         HostImageRequest *record=self.pending.firstObject;[self.pending removeObjectAtIndex:0];
-        if(record.generation!=self.generation || !record.views.allObjects.count){[self.requests removeObjectForKey:record.cacheKey];continue;}
+        if(record.generation!=self.generation || (!record.views.allObjects.count && !record.prefetch)){[self.requests removeObjectForKey:record.cacheKey];continue;}
         NSMutableData *domain=[self domainStateForURL:record.url];
         if(!HostImageDomainAllows(domain.mutableBytes,CACurrentMediaTime())){[self.requests removeObjectForKey:record.cacheKey];continue;}
         NSURL *targetURL=[NSURL URLWithString:record.url];
@@ -146,7 +241,7 @@ static NSUInteger const ImageQueueLimit = 160;
         else if([host hasSuffix:@"hitv.com"]||[host hasSuffix:@"mgtv.com"])[request setValue:@"https://www.mgtv.com/" forHTTPHeaderField:@"Referer"];
         else if(host.length&&![host isEqualToString:@"127.0.0.1"]&&![host isEqualToString:@"localhost"]&&![host hasSuffix:@".test"]&&![host hasSuffix:@".example"])[request setValue:[NSString stringWithFormat:@"%@://%@/",targetURL.scheme.lowercaseString?:@"https",host] forHTTPHeaderField:@"Referer"];
         record.data=[NSMutableData data];record.startedAt=CACurrentMediaTime();record.httpStatus=0;record.expectedContentLength=-1;record.responseContentType=@"";record.responseEncrypted=NO;record.failureStage=nil;record.task=[self.session dataTaskWithRequest:request];
-        record.task.priority=NSURLSessionTaskPriorityDefault;self.tasks[@(record.task.taskIdentifier)]=record;[record.task resume];
+        record.task.priority=record.prefetch?NSURLSessionTaskPriorityLow:NSURLSessionTaskPriorityDefault;self.tasks[@(record.task.taskIdentifier)]=record;[record.task resume];
     }
 }
 - (void)finish:(NSURLSessionTask *)task error:(NSError *)error {
@@ -194,7 +289,16 @@ static NSUInteger const ImageQueueLimit = 160;
                 (__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@(record.maximumPixelSize),
                 (__bridge NSString *)kCGImageSourceShouldCacheImmediately:@YES};
             CGImageRef thumbnail=record.failureStage.length?NULL:CGImageSourceCreateThumbnailAtIndex(source,0,(__bridge CFDictionaryRef)options);
-            if(thumbnail){image=[UIImage imageWithCGImage:thumbnail];[self.cache setObject:image forKey:record.cacheKey cost:CGImageGetBytesPerRow(thumbnail)*CGImageGetHeight(thumbnail)];CGImageRelease(thumbnail);}
+            if(thumbnail){
+                image=[UIImage imageWithCGImage:thumbnail];
+                [self.cache setObject:image forKey:record.cacheKey cost:CGImageGetBytesPerRow(thumbnail)*CGImageGetHeight(thumbnail)];
+                NSString *diskPath=[self diskThumbnailPathForCacheKey:record.cacheKey url:record.url maximumPixelSize:record.maximumPixelSize];
+                if(diskPath.length){
+                    NSData *jpegData=UIImageJPEGRepresentation(image,0.82);
+                    if(jpegData.length && jpegData.length<=512*1024)[jpegData writeToFile:diskPath options:NSDataWritingAtomic error:NULL];
+                }
+                CGImageRelease(thumbnail);
+            }
             CFRelease(source);
         }
     }
@@ -259,7 +363,7 @@ static NSUInteger const ImageQueueLimit = 160;
     NSAssert(NSThread.isMainThread, @"Cancel on main thread");self.generation++;
     dispatch_async(self.queue, ^{
         for(HostImageRequest *record in self.tasks.allValues){NSMutableData *domain=[self domainStateForURL:record.url];HostImageDomainFinish(domain.mutableBytes,CACurrentMediaTime(),0,1);[record.task cancel];}
-        [self.tasks removeAllObjects];[self.requests removeAllObjects];[self.pending removeAllObjects];
+        [self.tasks removeAllObjects];[self.requests removeAllObjects];[self.pending removeAllObjects];[self.viewTargets removeAllObjects];
     });
 }
 - (void)clearCache { [self.cache removeAllObjects];[self.failures removeAllObjects];[self.domainFailures removeAllObjects]; }

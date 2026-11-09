@@ -379,6 +379,12 @@ function createWeBoxContext(spec,payload){
       if(canRetry&&(err?.name==='AbortError'||/abort|timeout|network/i.test(String(err?.message||err)))){
         return weboxHttp(method,url,{...options,_retried:true,timeoutMs:Math.max(4000,totalTimeout-timeout)})
       }
+      if(err?.name==='AbortError'||String(err?.message||err)==='AbortError'){
+        const host=target.hostname||String(url)
+        const timeoutErr=new Error(`连接站点 ${host} 超时（远端响应过慢或受当前网络环境限制），请稍后重试或切换站点`)
+        timeoutErr.code='TIMEOUT'
+        throw timeoutErr
+      }
       throw err
     }finally{clearTimeout(timer)}
   }
@@ -614,7 +620,7 @@ async function hamoPlay(args){let episode={itemId:String(args.id||''),lineId:Str
 async function load(payload){
   config={...payload,api:payload.api||(isCatVodProtocol(payload.protocol)?'catvod':'standard')};files=new Set(g.__hostListPackageFiles());virtualFiles.clear();cookieJar.clear();netCache.clear();cache.clear();cacheStore.clear();inflight.clear();concurrencyGroups.clear();spiderRoutes=new Map();spiderPrefix='';modernCatVod=false
   if(!builtins['catvod-cat']&&typeof g.__cctvImport==='function')builtins['catvod-cat']=g.__cctvImport('assets://js/lib/cat.js')
-  g.__cctvBuiltins=builtins;g.__cctvRequire=requireFile;g.__cctvActiveOptions=payload.options;g.__cctvActiveModuleType=payload.moduleType||'';g.__cctvActiveProtocol=payload.protocol||''
+  g.__cctvBuiltins=builtins;g.__cctvRequire=requireFile;g.__cctvActiveOptions=payload.options;g.__cctvActiveModuleType=payload.moduleType||'';g.__cctvActiveProtocol=payload.protocol||'';g.__JS_SPIDER__=null
   g.Buffer=Buffer;g.CryptoJS=CryptoJS;g.cheerio=cheerio;g.global=g;g.window=g;g.self=g
   g.process={env:{},platform:'ios',nextTick:(fn,...args)=>Promise.resolve().then(()=>fn(...args))}
   g.req=async(url,options={})=>{
@@ -650,9 +656,9 @@ async function load(payload){
   let module
   if(payload.protocol==='drpy'){const helpers=await import('../drpy/globals.mjs');helpers.prepareGlobals(payload);const engine=await import('../drpy/adapter.mjs');module=engine.load(read(entry),payload.options);config.api='catvod'}
   else if(type==='commonjs')module=requireFile(entry)
-  else if(type==='script')module=new Function(`${read(entry)}\nreturn typeof __jsEvalReturn==='function'?__jsEvalReturn():typeof plugin!=='undefined'?plugin:typeof spider!=='undefined'?spider:(typeof hawk!=='undefined'&&hawk&&(hawk.apiVersion===3||typeof hawk.home==='function')?hawk:(typeof hamo!=='undefined'&&hamo&&(hamo.apiVersion===3||typeof hamo.home==='function')?hamo:(typeof rule!=='undefined'?rule:{${['init','home','homeContent','homeVideoContent','category','categoryContent','search','searchContent','detail','detailContent','play','playerContent','channels','catalog','resolve','epg','destroy'].map(key=>`${key}:typeof ${key}==='function'?${key}:undefined`).join(',')}})));`)()
+  else if(type==='script')module=new Function(`var module={exports:{}},exports=module.exports,__JS_SPIDER__=globalThis.__JS_SPIDER__||null;\n${read(entry)}\nreturn typeof __jsEvalReturn==='function'?__jsEvalReturn():typeof plugin!=='undefined'&&plugin?plugin:typeof spider!=='undefined'&&spider?spider:(typeof __JS_SPIDER__!=='undefined'&&__JS_SPIDER__?__JS_SPIDER__:(globalThis.__JS_SPIDER__?globalThis.__JS_SPIDER__:(typeof hawk!=='undefined'&&hawk?hawk:(typeof hamo!=='undefined'&&hamo?hamo:(typeof source!=='undefined'&&source&&typeof source==='object'?source:(module.exports&&Object.keys(module.exports).length?module.exports:(typeof rule!=='undefined'?rule:{${['init','home','homeContent','homeVideoContent','category','categoryContent','search','searchContent','detail','detailContent','play','playerContent','channels','catalog','resolve','epg','destroy'].map(key=>`${key}:typeof ${key}==='function'?${key}:undefined`).join(',')}})))))));`)()
   else module=await esm(entry)
-  plugin=weboxDefinedSpec?createWeBoxPlugin(weboxDefinedSpec,payload):(hamoDefinedSpec||(module?.default||module))
+  plugin=weboxDefinedSpec?createWeBoxPlugin(weboxDefinedSpec,payload):(hamoDefinedSpec||g.__JS_SPIDER__||(module?.default||module))
   if(plugin&&typeof plugin.__jsEvalReturn==='function'&&!plugin.home&&!plugin.homeContent)plugin=await plugin.__jsEvalReturn()
   if(plugin&&plugin.api==='1.1'&&typeof plugin.list==='function'&&!weboxDefinedSpec)plugin=createWeBoxPlugin(plugin,payload)
   if(payload.protocol==='catvod-spider'){
@@ -668,15 +674,24 @@ async function load(payload){
     if(typeof plugin.check==='function'&&await plugin.check()===false)throw new Error('CatPaw Spider check() 未通过')
     return {engine:'JavaScriptCore',protocol:'catvod-spider',name:plugin.meta?.name||payload.name||'CatPaw Spider',capabilities:['home','category','search','detail','play','proxy']}
   }
-  if(payload.protocol==='hamo-source-v3'&&plugin&&(plugin.homeContent||plugin.playerContent||plugin.detailContent)&&typeof plugin.resolve!=='function'){
+  if(plugin&&(plugin.homeContent||plugin.playerContent||plugin.detailContent)&&typeof plugin.resolve!=='function'&&config.api!=='catvod'){
     config.protocol='catvod-js';config.api='catvod'
+  }
+  for(const [key,alias] of Object.entries({home:'getHome',category:'getCategory',search:'getSearch',detail:'getDetail',play:'getPlay'}))if(typeof plugin[key]!=='function'&&typeof plugin[alias]==='function')plugin[key]=plugin[alias]
+  if(typeof plugin.home!=='function'&&typeof plugin.list==='function'){
+    plugin.home=async(args)=>plugin.list(args||{})
+    if(typeof plugin.category!=='function')plugin.category=async(args)=>plugin.list(args||{})
   }
   if(config.api==='catvod'){
     modernCatVod=typeof plugin.home==='function'&&!plugin.homeContent&&typeof plugin.category==='function'&&typeof plugin.detail==='function'&&typeof plugin.play==='function'
     if(!modernCatVod)for(const [key,alias] of Object.entries({home:'homeContent',homeVod:'homeVideoContent',category:'categoryContent',search:'searchContent',detail:'detailContent',play:'playerContent'}))if(!plugin[key]&&plugin[alias])plugin[key]=plugin[alias]
     if(!plugin.homeVod&&plugin.homeVideoContent)plugin.homeVod=plugin.homeVideoContent
   }
-  if(plugin.rule || !['home','category','search','detail','play','channels','catalog','resolve'].some(key=>plugin[key]))throw new Error('此文件像是规则配置，需要随 ZIP 提供对应规则引擎/适配器；并非独立可运行插件')
+  const hasMediaMethod=['home','category','search','detail','play','channels','catalog','resolve'].some(key=>typeof plugin[key]==='function')
+  if(!hasMediaMethod&&(plugin.rule||plugin.一级||plugin.二级||plugin.分类url||plugin.class_name||(plugin.host&&(plugin.url||plugin.headers||plugin.搜索url)))){
+    const helpers=await import('../drpy/globals.mjs');helpers.prepareGlobals(payload);const engine=await import('../drpy/adapter.mjs');plugin=engine.load(plugin.rule&&typeof plugin.rule==='object'?plugin.rule:plugin,payload.options);config.protocol='drpy';config.api='catvod'
+  }
+  if((plugin.rule&&!hasMediaMethod) || !['home','category','search','detail','play','channels','catalog','resolve'].some(key=>plugin[key]))throw new Error('此文件像是规则配置，需要随 ZIP 提供对应规则引擎/适配器；并非独立可运行插件')
   if(typeof plugin.init==='function')await plugin.init(config.api==='catvod'?tvboxExt(payload,tvboxSite(payload)):(payload.options||{}))
   const capabilities=['home','category','search','detail','play','providers','epg'].filter(key=>typeof plugin[key]==='function');if(payload.protocol==='hamo-source-v3'&&typeof plugin.resolve==='function'&&!capabilities.includes('play'))capabilities.push('play');return {engine:'JavaScriptCore',protocol:payload.protocol||'cctvhost.media/1',capabilities:capabilities.concat((plugin.channels||plugin.catalog)&&plugin.resolve?['live']:[]),name:payload.name||plugin.meta?.name||plugin.name||'JS 插件'}
 }

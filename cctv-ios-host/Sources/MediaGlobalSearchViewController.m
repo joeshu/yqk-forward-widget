@@ -54,7 +54,14 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         [NSLayoutConstraint activateConstraints:@[[self.poster.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],[self.poster.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],[self.poster.widthAnchor constraintEqualToConstant:66],[self.poster.heightAnchor constraintEqualToConstant:96],[self.poster.bottomAnchor constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor constant:-12],[text.leadingAnchor constraintEqualToAnchor:self.poster.trailingAnchor constant:14],[text.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],[text.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],[text.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-12]]];
     }return self;
 }
-- (void)prepareForReuse {[super prepareForReuse];self.poster.image=nil;self.poster.accessibilityIdentifier=nil;self.searchEntry=nil;}
+- (void)prepareForReuse {[super prepareForReuse];self.transform=CGAffineTransformIdentity;self.poster.image=nil;self.poster.accessibilityIdentifier=nil;self.searchEntry=nil;}
+- (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
+    [super setHighlighted:highlighted animated:animated];
+    if(UIAccessibilityIsReduceMotionEnabled())return;
+    [UIView animateWithDuration:highlighted?0.10:0.24 delay:0 usingSpringWithDamping:0.76 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        self.transform=highlighted?CGAffineTransformMakeScale(0.98,0.98):CGAffineTransformIdentity;
+    } completion:nil];
+}
 @end
 
 @interface MediaGlobalSearchViewController () <UISearchBarDelegate>

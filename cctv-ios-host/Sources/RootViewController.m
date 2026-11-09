@@ -404,6 +404,13 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 
 @interface CCTVChannelListCell : UITableViewCell @end
 @implementation CCTVChannelListCell
+- (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
+    [super setHighlighted:highlighted animated:animated];
+    if(UIAccessibilityIsReduceMotionEnabled())return;
+    [UIView animateWithDuration:highlighted?0.10:0.24 delay:0 usingSpringWithDamping:0.76 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        self.transform=highlighted?CGAffineTransformMakeScale(0.982,0.982):CGAffineTransformIdentity;
+    } completion:nil];
+}
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat width=CGRectGetWidth(self.contentView.bounds),height=CGRectGetHeight(self.contentView.bounds);
@@ -1532,7 +1539,7 @@ configureCatalogNavigation;
 - (void)buildBottomBar {
     self.bottomBarBackdrop=[UIView new];self.bottomBarBackdrop.backgroundColor=UIColor.clearColor;self.bottomBarBackdrop.opaque=NO;self.bottomBarBackdrop.userInteractionEnabled=NO;self.bottomBarBackdrop.layer.cornerRadius=0;self.bottomBarBackdrop.clipsToBounds=NO;
     self.bottomDockFadeGradient=[CAGradientLayer layer];self.bottomDockFadeGradient.colors=@[(id)[HostBackground() colorWithAlphaComponent:0.0].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.78].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.96].CGColor];self.bottomDockFadeGradient.locations=@[@0,@0.42,@1];[self.bottomBarBackdrop.layer addSublayer:self.bottomDockFadeGradient];
-    self.bottomDockGlass=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomDockGlass.userInteractionEnabled=NO;self.bottomDockGlass.layer.cornerRadius=27;self.bottomDockGlass.layer.cornerCurve=kCACornerCurveContinuous;self.bottomDockGlass.clipsToBounds=YES;self.bottomDockGlass.layer.borderWidth=0.8;HostSetLayerBorderColor(self.bottomDockGlass,HostBorder());
+    self.bottomDockGlass=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomDockGlass.userInteractionEnabled=NO;self.bottomDockGlass.layer.cornerRadius=27;self.bottomDockGlass.layer.cornerCurve=kCACornerCurveContinuous;self.bottomDockGlass.clipsToBounds=YES;self.bottomDockGlass.layer.borderWidth=0.85;HostSetLayerBorderColor(self.bottomDockGlass,HostBorder());
     UIView *dockTint=[[UIView alloc] initWithFrame:self.bottomDockGlass.contentView.bounds];dockTint.backgroundColor=HostGlassTint();dockTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;dockTint.userInteractionEnabled=NO;[self.bottomDockGlass.contentView addSubview:dockTint];
     [self.bottomBarBackdrop addSubview:self.bottomDockGlass];
     [self.view addSubview:self.bottomBarBackdrop];
@@ -2132,7 +2139,7 @@ configureCatalogNavigation;
     HostStyleGlassCard(cell.contentView,11);
     const NSInteger posterTag=4101,logoTag=4102,brandTag=4103,numberTag=4104,titleTag=4105,subtitleTag=4106,selectedTag=4107;
     UIView *poster=[cell.contentView viewWithTag:posterTag];UIImageView *logo=(UIImageView *)[cell.contentView viewWithTag:logoTag];UILabel *brand=(UILabel *)[cell.contentView viewWithTag:brandTag];UILabel *number=(UILabel *)[cell.contentView viewWithTag:numberTag];UILabel *title=(UILabel *)[cell.contentView viewWithTag:titleTag];UILabel *subtitle=(UILabel *)[cell.contentView viewWithTag:subtitleTag];UIImageView *selectedMark=(UIImageView *)[cell.contentView viewWithTag:selectedTag];
-    if(!poster){poster=[[UIView alloc] initWithFrame:CGRectZero];poster.tag=posterTag;poster.autoresizingMask=UIViewAutoresizingFlexibleWidth;poster.backgroundColor=HostCard();poster.layer.cornerRadius=8;[cell.contentView addSubview:poster];
+    if(!poster){poster=[[UIView alloc] initWithFrame:CGRectZero];poster.tag=posterTag;poster.autoresizingMask=UIViewAutoresizingFlexibleWidth;poster.backgroundColor=HostCard();poster.layer.cornerRadius=11;poster.layer.cornerCurve=kCACornerCurveContinuous;[cell.contentView addSubview:poster];
         logo=[UIImageView new];logo.tag=logoTag;logo.autoresizingMask=UIViewAutoresizingFlexibleWidth;logo.contentMode=UIViewContentModeScaleAspectFit;[poster addSubview:logo];
         brand=[UILabel new];brand.tag=brandTag;brand.textAlignment=NSTextAlignmentCenter;brand.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:[UIFont italicSystemFontOfSize:14]];brand.adjustsFontForContentSizeCategory=YES;brand.textColor=HostText();brand.autoresizingMask=UIViewAutoresizingFlexibleWidth;brand.numberOfLines=2;[poster addSubview:brand];
         number=[UILabel new];number.tag=numberTag;number.font=[UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightMedium];number.textColor=HostSecondaryText();[poster addSubview:number];

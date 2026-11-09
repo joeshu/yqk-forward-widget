@@ -27,6 +27,7 @@
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
     self.emptyLabel.hidden = YES;
     self.tableView.backgroundView = self.emptyLabel;
+    HostInstallGlassBackdrop(self.tableView);
     UIBarButtonItem *copyItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"doc.on.doc"] style:UIBarButtonItemStylePlain target:self action:@selector(copyAllDiagnostics)];
     copyItem.accessibilityIdentifier = @"playback.info.copy";
     copyItem.accessibilityLabel = @"复制播放诊断信息";

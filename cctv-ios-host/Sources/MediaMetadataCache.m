@@ -108,13 +108,17 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
     if(![root isKindOfClass:NSDictionary.class])return;
     NSDictionary *records=[root[@"records"] isKindOfClass:NSDictionary.class]?root[@"records"]:@{};
     NSMutableArray<NSDictionary *> *valid=[NSMutableArray array];NSUInteger total=0;
-    for(id key in records){NSDictionary *record=[records[key] isKindOfClass:NSDictionary.class]?records[key]:nil;id result=record[@"result"];NSString *sourceID=[record[@"source_id"] isKindOfClass:NSString.class]?record[@"source_id"]:@"";NSTimeInterval storedAt=[record[@"stored_at"] doubleValue];NSData *encoded=result?[NSJSONSerialization dataWithJSONObject:result options:0 error:NULL]:nil;
-        if(![key isKindOfClass:NSString.class]||[key length]!=64||!sourceID.length||storedAt<=0||!encoded.length||encoded.length>MediaMetadataCacheSingleEntryLimit)continue;
+    for(id key in records){NSDictionary *record=[records[key] isKindOfClass:NSDictionary.class]?records[key]:nil;id result=record[@"result"];NSString *sourceID=[record[@"source_id"] isKindOfClass:NSString.class]?record[@"source_id"]:@"";NSTimeInterval storedAt=[record[@"stored_at"] doubleValue];
+        if(![key isKindOfClass:NSString.class]||[key length]!=64||!sourceID.length||storedAt<=0||!result)continue;
         NSString *operation=[record[@"operation"] isKindOfClass:NSString.class]?record[@"operation"]:@"";
         if(![@[@"home",@"category"] containsObject:operation])continue;
-        id safeResult=MediaMetadataPersistentSafeValue(result,@"",0);NSData *safeData=safeResult?[NSJSONSerialization dataWithJSONObject:safeResult options:0 error:NULL]:nil;
-        if(!safeData.length||safeData.length>MediaMetadataCacheSingleEntryLimit)continue;
-        [valid addObject:@{@"key":key,@"record":@{@"source_id":sourceID,@"stored_at":@(storedAt),@"operation":operation,@"result":safeResult,@"cost":@(safeData.length)},@"cost":@(safeData.length)}];
+        id safeResult=MediaMetadataPersistentSafeValue(result,@"",0);
+        if(!safeResult)continue;
+        NSUInteger savedCost=[record[@"cost"] isKindOfClass:NSNumber.class]?[record[@"cost"] unsignedIntegerValue]:0;
+        NSData *safeData=(savedCost>0&&savedCost<=MediaMetadataCacheSingleEntryLimit&&[safeResult isEqual:result])?nil:[NSJSONSerialization dataWithJSONObject:safeResult options:0 error:NULL];
+        NSUInteger resolvedCost=safeData?safeData.length:savedCost;
+        if(!resolvedCost||resolvedCost>MediaMetadataCacheSingleEntryLimit)continue;
+        [valid addObject:@{@"key":key,@"record":@{@"source_id":sourceID,@"stored_at":@(storedAt),@"operation":operation,@"result":safeResult,@"cost":@(resolvedCost)},@"cost":@(resolvedCost)}];
     }
     [valid sortUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"record"][@"stored_at"] compare:b[@"record"][@"stored_at"]];}];
     for(NSDictionary *entry in [valid reverseObjectEnumerator]){NSUInteger cost=[entry[@"cost"] unsignedIntegerValue];if(self.persistentRecords.count>=MediaMetadataPersistentEntryLimit||total+cost>MediaMetadataPersistentByteLimit)continue;self.persistentRecords[entry[@"key"]]=entry[@"record"];total+=cost;}
@@ -171,7 +175,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
     if(!data.length||data.length>MediaMetadataCacheSingleEntryLimit)return;
     NSString *key=[self keyForSource:source operation:operation arguments:arguments];if(!key.length)return;
     MediaMetadataCacheEntry *entry=[MediaMetadataCacheEntry new];entry.result=result;entry.sourceID=[source[@"id"] isKindOfClass:NSString.class]?source[@"id"]:@"";entry.storedAt=NSDate.date.timeIntervalSince1970;entry.cost=data.length;
-    BOOL persist=[@[@"home",@"category"] containsObject:operation];id persistentResult=persist?MediaMetadataPersistentSafeValue(result,@"",0):nil;NSData *persistentData=persistentResult?[NSJSONSerialization dataWithJSONObject:persistentResult options:0 error:NULL]:nil;persist=persist&&persistentData.length&&persistentData.length<=MediaMetadataCacheSingleEntryLimit;
+    BOOL persist=[@[@"home",@"category"] containsObject:operation];id persistentResult=persist?MediaMetadataPersistentSafeValue(result,@"",0):nil;NSData *persistentData=persistentResult?([persistentResult isEqual:result]?data:[NSJSONSerialization dataWithJSONObject:persistentResult options:0 error:NULL]):nil;persist=persist&&persistentData.length&&persistentData.length<=MediaMetadataCacheSingleEntryLimit;
     __block BOOL persistenceChanged=NO;
     dispatch_sync(self.queue, ^{
         [self.entries setObject:entry forKey:key cost:entry.cost];self.order[key]=@(entry.storedAt);

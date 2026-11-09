@@ -9,6 +9,7 @@ typedef void (^HostImageLoadCompletion)(BOOL succeeded, NSTimeInterval retryAfte
 - (void)loadURL:(NSString *)url intoImageView:(UIImageView *)imageView;
 - (void)loadPosterURL:(NSString *)url intoImageView:(UIImageView *)imageView;
 - (void)loadPosterURL:(NSString *)url intoImageView:(UIImageView *)imageView completion:(nullable HostImageLoadCompletion)completion;
+- (void)prefetchPosterURLs:(NSArray<NSString *> *)urls;
 - (void)cancelPending;
 - (void)clearCache;
 @end

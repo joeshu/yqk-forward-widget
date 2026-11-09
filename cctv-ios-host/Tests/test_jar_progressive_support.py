@@ -694,6 +694,73 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertGreaterEqual(pyhost_code.count('clearPythonBreadcrumb(task);'), 3)
 
 
+
+    def test_round17_immersive_top_chrome_and_diagnostic_3cde745d_fixes(self):
+        """Verifies Round 17 fixes for screenshots, CI compile patch, and diagnostic 3cde745d:
+        1. MediaAPIClient.h declares cancelWithReason: and RuntimeDiagnosticsViewController.m escapes newline in stringWithFormat.
+        2. MediaBrowserViewController removes the top gray/black shadow scrim (alpha=0.0, hidden=YES) for full top immersion, shows '单站点资源' for single-site plugins, and localizes 'AbortError'.
+        3. MediaAPIClient jar-bridge resolves .txt dynamic mirror URLs (csp_AppDrama '苹果 • APP' / '天堂 • APP'), skips empty host='', iterates candidate site arrays ('木偶 • 4K'), and parses HTML cards for PanWebShare/Wogg.
+        4. JSPluginRuntime, entry.mjs, and drpy/adapter.mjs support minified drpy2.min.js (,rule={} / import{gbkTool}), __JS_SPIDER__ global, and .hjs rule/plugin adaptation ('57吃瓜.hjs' / '海角精选.hjs').
+        5. host_service_runtime.py cleanly catches 'service is stopping' RuntimeError during startup cancellation.
+        """
+        api_h = (SOURCES / 'MediaAPIClient.h').read_text(encoding='utf-8')
+        self.assertIn('- (void)cancelWithReason:(nullable NSString *)reason;', api_h)
+
+        diag_m = (SOURCES / 'RuntimeDiagnosticsViewController.m').read_text(encoding='utf-8')
+        self.assertIn(r'峰值内存 %@\n%@', diag_m)
+
+        mb_m = (SOURCES / 'MediaBrowserViewController.m').read_text(encoding='utf-8')
+        self.assertIn('self.homeTopImmersiveScrim.alpha=0.0;self.homeTopImmersiveScrim.hidden=YES;', mb_m)
+        self.assertIn('BOOL knownSingleSite=capabilities.count>0&&![capabilities containsObject:@"providers"]&&!self.providers.count;', mb_m)
+        self.assertIn('localizedCaseInsensitiveContainsString:@"AbortError"', mb_m)
+
+        api_m = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')
+        self.assertIn('MediaJARBridgeExtractTxtMirrorURL', api_m)
+        self.assertIn('MediaJARBridgeCandidateURLs', api_m)
+        self.assertIn('_jar_txt_resolved', api_m)
+        self.assertIn('_jar_site_index', api_m)
+
+        js_rt = (SOURCES / 'JSPluginRuntime.m').read_text(encoding='utf-8')
+        self.assertIn('__JS_SPIDER__', js_rt)
+        self.assertIn('__cctvAdaptRuleOrHjsPlugin', js_rt)
+
+        hsr_py = (ROOT / 'Scripts/host_service_runtime.py').read_text(encoding='utf-8')
+        self.assertIn("if session.stopping.is_set() or 'service is stopping' in str(error):", hsr_py)
+
+
+    def test_round18_page_cache_image_and_playback_speed_optimizations(self):
+        """Verifies Round 18 page loading, cache loading, image pipeline, and playback speed optimizations:
+        1. MediaMetadataCache avoids redundant double JSON serialization on storeResult and cold-start loadPersistentRecords.
+        2. MediaBrowserViewController checks warm cache before clearing items in loadHome, caches unsigned detail payloads in safeDetailMemCache, reduces shelf pacing to 15ms, and prefetches visible posters.
+        3. HostImageLoader tracks viewTargets to evict zombie requests from reused cells, promotes onscreen pending requests, persists L2 downsampled thumbnails on disk, and exposes prefetchPosterURLs:.
+        4. MediaPlaybackViewController triggers next-episode prefetch at 2s, warms the next episode's stream connection/manifest, and polls WebView DOM sniffer at 0.2s; MediaAPIClient ranks parsers by MediaParserSuccessScoreCache.
+        """
+        mc_m = (SOURCES / 'MediaMetadataCache.m').read_text(encoding='utf-8')
+        self.assertIn('[persistentResult isEqual:result]?data:', mc_m)
+
+        mb_m = (SOURCES / 'MediaBrowserViewController.m').read_text(encoding='utf-8')
+        self.assertIn('safeDetailMemCache', mb_m)
+        self.assertIn('(15*NSEC_PER_MSEC)', mb_m)
+        self.assertIn('[HostImageLoader.shared prefetchPosterURLs:prefetchPosters];', mb_m)
+        self.assertIn('else{self.items=@[];[self.grid reloadData];[self showMessage:@"正在加载推荐与分类…" loading:YES];}', mb_m)
+
+        img_h = (SOURCES / 'HostImageLoader.h').read_text(encoding='utf-8')
+        img_m = (SOURCES / 'HostImageLoader.m').read_text(encoding='utf-8')
+        self.assertIn('- (void)prefetchPosterURLs:(NSArray<NSString *> *)urls;', img_h)
+        self.assertIn('viewTargets', img_m)
+        self.assertIn('CCTVHostImageThumbnails', img_m)
+        self.assertIn('[self.pending insertObject:request atIndex:0];', img_m)
+
+        mp_m = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
+        self.assertIn('observed>=2)[owner prefetchNextEpisodeIfNeeded];', mp_m)
+        self.assertIn('[warmReq setValue:@"bytes=0-1023" forHTTPHeaderField:@"Range"];', mp_m)
+        self.assertIn('@[@0.2,@0.45,@1.1,@2.0,@3.0]', mp_m)
+
+        api_m = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')
+        self.assertIn('MediaParserSuccessScoreCache', api_m)
+        self.assertIn('MediaParserRecordOutcome(parser,resolved!=nil);', api_m)
+
+
 if __name__ == '__main__':
 
 

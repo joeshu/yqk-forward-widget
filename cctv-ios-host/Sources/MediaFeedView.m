@@ -40,7 +40,15 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
         self.isAccessibilityElement=YES;self.accessibilityTraits=UIAccessibilityTraitButton;
     }return self;
 }
-- (void)prepareForReuse {[super prepareForReuse];self.poster.accessibilityIdentifier=nil;self.poster.image=nil;self.nameLabel.text=nil;self.detailLabel.text=nil;self.badgeLabel.text=nil;self.accessibilityLabel=nil;self.accessibilityIdentifier=nil;}
+- (void)prepareForReuse {[super prepareForReuse];self.transform=CGAffineTransformIdentity;self.poster.accessibilityIdentifier=nil;self.poster.image=nil;self.nameLabel.text=nil;self.detailLabel.text=nil;self.badgeLabel.text=nil;self.accessibilityLabel=nil;self.accessibilityIdentifier=nil;}
+- (void)setHighlighted:(BOOL)highlighted {
+    [super setHighlighted:highlighted];
+    if(UIAccessibilityIsReduceMotionEnabled())return;
+    [UIView animateWithDuration:highlighted?0.10:0.26 delay:0 usingSpringWithDamping:0.74 initialSpringVelocity:0.3 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        self.transform=highlighted?CGAffineTransformMakeScale(0.965,0.965):CGAffineTransformIdentity;
+        self.poster.alpha=highlighted?0.92:1.0;
+    } completion:nil];
+}
 - (void)configureItem:(NSDictionary *)item {
     self.poster.backgroundColor=HostNeutralSurface();HostSetLayerBorderColor(self.poster,HostBorder());
     self.nameLabel.textColor=HostText();self.detailLabel.textColor=HostSecondaryText();
@@ -83,7 +91,7 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 @end
 @implementation MediaFeedStatusCell
 - (instancetype)initWithFrame:(CGRect)frame {if((self=[super initWithFrame:frame])){
-    self.contentView.backgroundColor=HostCard();self.contentView.layer.cornerRadius=14;self.contentView.layer.cornerCurve=kCACornerCurveContinuous;self.contentView.layer.borderWidth=0.6;HostSetLayerBorderColor(self.contentView,HostBorder());
+    HostStyleGlassCard(self.contentView,18);self.contentView.layer.borderWidth=0.6;HostSetLayerBorderColor(self.contentView,HostBorder());
     self.titleLabel=[UILabel new];self.titleLabel.textColor=HostText();self.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];self.titleLabel.adjustsFontForContentSizeCategory=YES;self.titleLabel.numberOfLines=0;
     self.subtitleLabel=[UILabel new];self.subtitleLabel.textColor=HostSecondaryText();self.subtitleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.subtitleLabel.adjustsFontForContentSizeCategory=YES;self.subtitleLabel.numberOfLines=0;
     self.actionButton=[UIButton buttonWithType:UIButtonTypeSystem];HostStylePillButton(self.actionButton,NO);self.actionButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.actionButton.titleLabel.adjustsFontForContentSizeCategory=YES;[self.actionButton addTarget:self action:@selector(performAction) forControlEvents:UIControlEventTouchUpInside];HostInstallPressFeedback(self.actionButton);
@@ -91,7 +99,7 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
     [NSLayoutConstraint activateConstraints:@[[stack.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],[stack.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],[stack.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:16],[stack.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-16],[self.actionButton.heightAnchor constraintGreaterThanOrEqualToConstant:44]]];
 }return self;}
 - (void)prepareForReuse {[super prepareForReuse];self.onAction=nil;}
-- (void)configureSection:(NSDictionary *)section {self.contentView.backgroundColor=HostCard();HostSetLayerBorderColor(self.contentView,HostBorder());self.titleLabel.textColor=HostText();self.subtitleLabel.textColor=HostSecondaryText();HostStylePillButton(self.actionButton,NO);self.actionButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.actionButton.titleLabel.adjustsFontForContentSizeCategory=YES;self.titleLabel.text=MediaFeedString(section[@"title"]);self.subtitleLabel.text=MediaFeedString(section[@"subtitle"]);self.subtitleLabel.hidden=!self.subtitleLabel.text.length;NSString *action=MediaFeedString(section[@"actionTitle"]);[self.actionButton setTitle:action forState:UIControlStateNormal];self.actionButton.hidden=!action.length;self.accessibilityIdentifier=MediaFeedString(section[@"id"]);}
+- (void)configureSection:(NSDictionary *)section {HostStyleGlassCard(self.contentView,18);self.titleLabel.textColor=HostText();self.subtitleLabel.textColor=HostSecondaryText();HostStylePillButton(self.actionButton,NO);self.actionButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.actionButton.titleLabel.adjustsFontForContentSizeCategory=YES;self.titleLabel.text=MediaFeedString(section[@"title"]);self.subtitleLabel.text=MediaFeedString(section[@"subtitle"]);self.subtitleLabel.hidden=!self.subtitleLabel.text.length;NSString *action=MediaFeedString(section[@"actionTitle"]);[self.actionButton setTitle:action forState:UIControlStateNormal];self.actionButton.hidden=!action.length;self.accessibilityIdentifier=MediaFeedString(section[@"id"]);}
 - (void)performAction {if(self.onAction)self.onAction();}
 @end
 

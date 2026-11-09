@@ -706,6 +706,12 @@ function createNodeWeBoxPlugin(owner,spec){
       if(canRetry&&(err?.name==='AbortError'||/abort|timeout|network/i.test(String(err?.message||err)))){
         return weboxHttp(method,url,{...options,_retried:true,timeoutMs:Math.max(4000,totalTimeout-timeout)})
       }
+      if(err?.name==='AbortError'||String(err?.message||err)==='AbortError'){
+        const host=target.hostname||String(url)
+        const timeoutErr=new Error(`连接站点 ${host} 超时（远端响应过慢或受当前网络环境限制），请稍后重试或切换站点`)
+        timeoutErr.code='TIMEOUT'
+        throw timeoutErr
+      }
       throw err
     }
   }
