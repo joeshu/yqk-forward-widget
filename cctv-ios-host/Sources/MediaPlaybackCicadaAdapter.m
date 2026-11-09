@@ -542,9 +542,9 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     });
 }
 
-- (void)onCurrentPositionUpdate:(id)player position:(id)position {
-    // position 在二进制中为 int64_t 毫秒，仍走 self.currentPosition 统一走签名安全的读取，
-    // 避免把非对象整数当 id 解引用导致崩溃。
+- (void)onCurrentPositionUpdate:(id)player position:(int64_t)position {
+    // position 在二进制中为 int64_t 毫秒，必须声明为非对象标量 int64_t，
+    // 否则 ARC 会在函数序言/尾声对原始整数调用 objc_retain/objc_release 导致 SIGSEGV 崩溃。
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.destroyed) return;
         NSTimeInterval seconds = self.currentPosition;
@@ -556,19 +556,24 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     });
 }
 
-- (void)onLoadingProgress:(id)player progress:(id)progress {
-    // progress 参数类型未确认，不读它；只上报“正在缓冲”。
+- (void)onBufferedPositionUpdate:(id)player position:(int64_t)position {
+    // position 在二进制中为 int64_t 毫秒（非对象标量）。
+}
+
+- (void)onLoadingProgress:(id)player progress:(float)progress {
+    // progress 在二进制中由浮点寄存器 S0 传入（float），绝不可声明为 id。
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.destroyed) return;
         if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateLoading:progress:)]) {
-            [self.delegate cicadaAdapter:self didUpdateLoading:YES progress:0];
+            float clamped = isfinite(progress) ? MAX(0.0f, MIN(1.0f, progress / 100.0f)) : 0.0f;
+            [self.delegate cicadaAdapter:self didUpdateLoading:YES progress:clamped];
         }
     });
 }
 
-- (void)onPlayerStatusChanged:(id)player oldStatus:(id)oldStatus newStatus:(id)newStatus {
-    // 状态值未确认，不读参数；缓冲提示由 onLoadingStart/End 覆盖，
-    // 播放/暂停由调用方显式控制。这里只作代收点，不产生状态上报。
+- (void)onPlayerStatusChanged:(id)player oldStatus:(NSInteger)oldStatus newStatus:(NSInteger)newStatus {
+    // oldStatus/newStatus 在二进制中由 X3/X4 传入 CicadaStatus 整数（如 1=Initialized），
+    // 声明为 id 会触发 ARC objc_storeStrong(0x1) 导致 SIGSEGV (offset 48888) 崩溃。
 }
 
 - (void)onCurrentDownLoadSpeed:(id)player progress:(float)speed {

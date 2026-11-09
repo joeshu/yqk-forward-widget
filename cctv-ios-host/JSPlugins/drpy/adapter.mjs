@@ -19,7 +19,8 @@ export function load(source,options){
     }
     throw new Error('此 drpy 站点仅提供引擎壳（drpy2.min.js），未在合集 ext 中提供规则地址或内容')
   }
-  const rule=new Function(`${text}\nreturn typeof rule!=='undefined'?rule:(typeof plugin!=='undefined'?plugin:undefined);`)()
+  const cleanText=text.replace(/(^|[\r\n;}]|\*\/)\s*import\b[^;\r\n]*;?/g,'$1').replace(/(^|[\r\n;}]|\*\/)\s*export\s+default(?:\s+|(?=[{[(]))/g,'$1var __drpyDefault=').replace(/(^|[\r\n;}]|\*\/)\s*export\s*\{[^}]*\}\s*;?/g,'$1')
+  const rule=new Function(`${cleanText}\nreturn typeof rule!=='undefined'&&rule&&Object.keys(rule).length?rule:(typeof __drpyDefault!=='undefined'?__drpyDefault:(typeof plugin!=='undefined'?plugin:undefined));`)()
   if(!rule||typeof rule!=='object'){
     if(ext){
       engine.init(ext)

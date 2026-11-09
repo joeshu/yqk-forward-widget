@@ -2783,8 +2783,22 @@ def _decrypt_to_file(vid, want):
 
     tmp = dst + ".tmp.mp4"
     req = _ureq.Request(url, headers={"User-Agent": _PLAYBACK_UA})
-    with _ureq.urlopen(req, timeout=180) as r, open(tmp, "wb") as f:
-        _shutil.copyfileobj(r, f)
+    _cur_th = _threading.current_thread()
+    _prev_stream_flag = getattr(_cur_th, "_host_media_stream_read", False)
+    _cur_th._host_media_stream_read = True
+    try:
+        with _ureq.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+            _total_dl = 0
+            while True:
+                _chunk = r.read(65536)
+                if not _chunk:
+                    break
+                _total_dl += len(_chunk)
+                if _total_dl > 32 * 1024 * 1024:
+                    raise ValueError("CENC MP4 exceeds 32 MB limit")
+                f.write(_chunk)
+    finally:
+        _cur_th._host_media_stream_read = _prev_stream_flag
 
     ff = _ffmpeg_path()
     if key and _is_encrypted(it) and not ff:

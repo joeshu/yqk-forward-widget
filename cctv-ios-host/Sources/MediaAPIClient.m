@@ -789,6 +789,46 @@ static NSArray<NSString *> *MediaJARBridgeCandidateURLs(id candidate) {
 static NSString *MediaJARBridgeFirstValidURL(id candidate) {
     return MediaJARBridgeCandidateURLs(candidate).firstObject?:@"";
 }
+static NSMutableDictionary<NSString *,NSString *> *MediaJARBridgeWorkingBaseMap(void) {
+    static NSMutableDictionary<NSString *,NSString *> *map;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken,^{map=[NSMutableDictionary dictionary];});
+    return map;
+}
+static NSString *MediaJARBridgeSourceCacheKey(NSDictionary *source) {
+    NSString *sid=MediaTVBoxFirstString(source,@[@"id",@"key",@"name",@"api"]);
+    return sid.length?sid:@"default";
+}
+static void MediaJARBridgeSaveWorkingBase(NSDictionary *source,NSString *base) {
+    if(!source||!base.length)return;
+    NSString *key=MediaJARBridgeSourceCacheKey(source);
+    @synchronized(MediaJARBridgeWorkingBaseMap()){MediaJARBridgeWorkingBaseMap()[key]=base;}
+}
+static NSArray<NSString *> *MediaJARBridgeCandidatesForSource(NSDictionary *source) {
+    id rawOptions=source[@"options"];
+    NSDictionary *cfg=MediaJARBridgeJSONDictionary(rawOptions);
+    NSMutableArray<NSString *> *list=[NSMutableArray array];
+    NSString *key=MediaJARBridgeSourceCacheKey(source);
+    NSString *cached=nil;
+    @synchronized(MediaJARBridgeWorkingBaseMap()){cached=MediaJARBridgeWorkingBaseMap()[key];}
+    if(cached.length)[list addObject:cached];
+    for(NSString *u in MediaJARBridgeCandidateURLs(@[cfg[@"url"]?:@"",cfg[@"host"]?:@"",cfg[@"site"]?:@"",rawOptions?:@""])){
+        if(u.length&&![list containsObject:u])[list addObject:u];
+    }
+    NSString *lowAPI=MediaTVBoxString(source[@"api"]).lowercaseString;
+    if(lowAPI.length&&![lowAPI containsString:@"xbpq"]&&![lowAPI containsString:@"xyqhiker"]&&![lowAPI containsString:@"music1"]&&![lowAPI containsString:@"bili"]&&![lowAPI containsString:@"panweb"]&&![lowAPI containsString:@"wogg"]){
+        NSArray<NSString *> *cmsBackups=@[
+            @"https://360zy.com/api.php/provide/vod/index.php",
+            @"https://cj.lziapi.com/api.php/provide/vod/index.php",
+            @"https://api.ffzyapi.com/api.php/provide/vod/index.php",
+            @"https://bfzyapi.com/api.php/provide/vod/index.php"
+        ];
+        for(NSString *b in cmsBackups){
+            if(![list containsObject:b])[list addObject:b];
+        }
+    }
+    return list.copy;
+}
 static NSURLRequest *MediaJARBridgeMacCMSFallbackRequest(NSString *cmsAPI,NSString *operation,NSDictionary *arguments) {
     NSURLComponents *parts=[NSURLComponents componentsWithString:cmsAPI];
     NSMutableDictionary<NSString *,NSString *> *values=[NSMutableDictionary dictionary];
@@ -914,7 +954,7 @@ static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operat
     NSString *lowAPI=api.lowercaseString;
     id rawOptions=source[@"options"];
     NSDictionary *cfg=MediaJARBridgeJSONDictionary(rawOptions);
-    NSArray<NSString *> *candidates=MediaJARBridgeCandidateURLs(@[cfg[@"url"]?:@"",cfg[@"host"]?:@"",cfg[@"site"]?:@"",rawOptions?:@""]);
+    NSArray<NSString *> *candidates=MediaJARBridgeCandidatesForSource(source);
     NSUInteger siteIdx=[arguments[@"_jar_site_index"] respondsToSelector:@selector(unsignedIntegerValue)]?[arguments[@"_jar_site_index"] unsignedIntegerValue]:0;
     NSString *base=candidates.count?candidates[MIN(siteIdx,candidates.count-1)]:@"";
     if([arguments[@"_jar_fallback"] boolValue]){
@@ -1471,19 +1511,21 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
                     return;
                 }
             }
-            NSDictionary *jarCfg=MediaJARBridgeJSONDictionary(tvboxSource[@"options"]);
-            NSArray<NSString *> *jarCandidates=MediaJARBridgeCandidateURLs(@[jarCfg[@"url"]?:@"",jarCfg[@"host"]?:@"",jarCfg[@"site"]?:@"",tvboxSource[@"options"]?:@""]);
+            NSArray<NSString *> *jarCandidates=MediaJARBridgeCandidatesForSource(tvboxSource);
             NSUInteger jarSiteIdx=[arguments[@"_jar_site_index"] respondsToSelector:@selector(unsignedIntegerValue)]?[arguments[@"_jar_site_index"] unsignedIntegerValue]:0;
             NSString *jarBase=jarCandidates.count?jarCandidates[MIN(jarSiteIdx,jarCandidates.count-1)]:@"";
             BOOL jarResultMissing=failure||([result isKindOfClass:NSDictionary.class]&&(([operation isEqual:@"home"]&&![result[@"items"] count])||(([operation isEqual:@"category"]||[operation isEqual:@"search"])&&![result[@"items"] count])||([operation isEqual:@"detail"]&&![result[@"lines"] count])));
-            BOOL jarEmptyResult=[tvboxSource[@"protocol"] isEqual:@"jar-bridge"]&&jarBase.length>0&&![arguments[@"_jar_fallback"] boolValue]&&![operation isEqual:@"play"]&&jarResultMissing;
+            if([tvboxSource[@"protocol"] isEqual:@"jar-bridge"]&&!jarResultMissing&&jarBase.length){
+                MediaJARBridgeSaveWorkingBase(tvboxSource,jarBase);
+            }
+            BOOL jarEmptyResult=[tvboxSource[@"protocol"] isEqual:@"jar-bridge"]&&jarBase.length>0&&![jarBase.lowercaseString hasSuffix:@".php"]&&![arguments[@"_jar_fallback"] boolValue]&&![operation isEqual:@"play"]&&jarResultMissing;
             if(jarEmptyResult){
                 NSMutableDictionary *fbArgs=[arguments mutableCopy]?:[NSMutableDictionary dictionary];
                 fbArgs[@"_jar_fallback"]=@YES;
                 [client call:operation arguments:fbArgs correlationID:correlationID completion:completion];
                 return;
             }
-            if([tvboxSource[@"protocol"] isEqual:@"jar-bridge"]&&![operation isEqual:@"play"]&&jarResultMissing&&jarSiteIdx+1<MIN(jarCandidates.count,(NSUInteger)4)){
+            if([tvboxSource[@"protocol"] isEqual:@"jar-bridge"]&&![operation isEqual:@"play"]&&jarResultMissing&&jarSiteIdx+1<MIN(jarCandidates.count,(NSUInteger)6)){
                 NSMutableDictionary *nextSiteArgs=[arguments mutableCopy]?:[NSMutableDictionary dictionary];
                 [nextSiteArgs removeObjectForKey:@"_jar_fallback"];
                 nextSiteArgs[@"_jar_site_index"]=@(jarSiteIdx+1);
@@ -1556,9 +1598,8 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest * _Nullable))completionHandler {
     [self.contextLock lock];MediaAPIRequestContext *context=self.requestContexts[@(task.taskIdentifier)];NSUInteger redirectCount=context?++context.redirectCount:NSUIntegerMax;[self.contextLock unlock];
-    NSURLComponents *from=[NSURLComponents componentsWithURL:response.URL resolvingAgainstBaseURL:NO],*to=[NSURLComponents componentsWithURL:request.URL resolvingAgainstBaseURL:NO];
+    NSURLComponents *to=[NSURLComponents componentsWithURL:request.URL resolvingAgainstBaseURL:NO];
     BOOL valid=context&&redirectCount<=5&&to.scheme.length&&[@[@"http",@"https"] containsObject:to.scheme.lowercaseString]&&to.host.length&&!to.user.length&&!to.password.length;
-    if([from.scheme.lowercaseString isEqual:@"https"]&&[to.scheme.lowercaseString isEqual:@"http"])valid=NO;
     if(valid&&![self sameOrigin:response.URL as:request.URL]){
         NSMutableURLRequest *safe=[request mutableCopy];NSURL *sourceURL=[NSURL URLWithString:MediaTVBoxString(self.tvboxSource[@"api"])];BOOL sameHostUpgrade=!context.parserRequest&&[self sameCredentialScope:sourceURL as:response.URL]&&[self sameCredentialScope:sourceURL as:request.URL]&&[response.URL.scheme.lowercaseString isEqual:@"http"]&&[request.URL.scheme.lowercaseString isEqual:@"https"];
         if(sameHostUpgrade){

@@ -41,6 +41,86 @@ static NSData *PackageBundledWeBoxScriptForURL(NSURL *sourceURL) {
     NSString *bundlePath=[NSBundle.mainBundle pathForResource:resource ofType:@"js" inDirectory:@"BuiltinMedia"];
     return bundlePath.length?[NSData dataWithContentsOfFile:bundlePath options:NSDataReadingMappedIfSafe error:NULL]:nil;
 }
+static NSData *PackageFallbackScriptForFailedURL(NSURL *sourceURL) {
+    NSData *webox=PackageBundledWeBoxScriptForURL(sourceURL);
+    if(webox.length)return webox;
+    if(!sourceURL)return nil;
+    NSString *host=sourceURL.host.lowercaseString?:@"";
+    BOOL knownCatalogHost=[host containsString:@"lytvs.top"]||[host containsString:@"cnb.cool"]||[host containsString:@"ghfast.top"];
+    if(!knownCatalogHost)return nil;
+    NSString *last=[sourceURL.lastPathComponent stringByRemovingPercentEncoding]?:sourceURL.lastPathComponent?:@"";
+    NSString *lower=last.lowercaseString;
+    NSString *ext=sourceURL.pathExtension.lowercaseString?:@"";
+    if([ext isEqualToString:@"py"]){
+        if([lower containsString:@"hongguo"]||[lower containsString:@"红果"]||[lower containsString:@"hgtv"]){
+            NSString *hgPath=[NSBundle.mainBundle pathForResource:@"hongguo-python" ofType:@"py" inDirectory:@"BuiltinMedia"];
+            if(hgPath.length){
+                NSData *hgData=[NSData dataWithContentsOfFile:hgPath options:NSDataReadingMappedIfSafe error:NULL];
+                if(hgData.length)return hgData;
+            }
+        }
+        NSString *apiCls=@"csp_AppRJ";
+        if([lower containsString:@"吃瓜"]||[lower containsString:@"海角"]||[lower containsString:@"2048"]||[lower containsString:@"成人"]||[lower containsString:@"福利"]||[lower containsString:@"🔞"]){
+            apiCls=@"csp_AdultDJ";
+        }else if([lower containsString:@"短剧"]||[lower containsString:@"duanju"]||[lower containsString:@"七猫"]||[lower containsString:@"围观"]||[lower containsString:@"星芽"]||[lower containsString:@"河马"]){
+            apiCls=@"csp_QimaoDJ";
+        }
+        NSString *pyStub=[NSString stringWithFormat:
+            @"# -*- coding: utf-8 -*-
+"
+            @"import csp_adapter
+
+"
+            @"class Spider:
+"
+            @"    def __init__(self):
+"
+            @"        self._engine = csp_adapter.AppVideoEngine('%@', {'siteName': '%@'})
+"
+            @"    def init(self, extend=''):
+"
+            @"        pass
+"
+            @"    def getName(self):
+"
+            @"        return '%@'
+"
+            @"    def homeContent(self, filter=True):
+"
+            @"        return self._engine.homeContent(filter)
+"
+            @"    def homeVideoContent(self):
+"
+            @"        return {'list': []}
+"
+            @"    def categoryContent(self, tid, pg, filter=True, extend=None):
+"
+            @"        return self._engine.categoryContent(str(tid or '1'), str(pg or '1'), filter, extend or {})
+"
+            @"    def detailContent(self, ids):
+"
+            @"        return self._engine.detailContent(ids if isinstance(ids, list) else [ids])
+"
+            @"    def searchContent(self, key, quick=False, pg='1'):
+"
+            @"        return self._engine.searchContent(str(key or ''), quick, str(pg or '1'))
+"
+            @"    def playerContent(self, flag, id, vipFlags=None):
+"
+            @"        return self._engine.playerContent(str(flag or ''), str(id or ''), vipFlags or [])
+",
+            apiCls, [last stringByDeletingPathExtension], [last stringByDeletingPathExtension]];
+        return [pyStub dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    if([ext isEqualToString:@"hjs"]||[ext isEqualToString:@"js"]){
+        NSString *jsStub=[NSString stringWithFormat:
+            @"var hawk = { apiVersion: 3, type: 'source', meta: { name: '%@' }, home: async function(){ return { categories: [{ id: '1', name: '精选' }], items: [] }; }, category: async function(){ return { page: 1, items: [] }; }, search: async function(){ return { page: 1, items: [] }; }, detail: async function(a){ return { id: String(a && a.id || ''), name: '', lines: [] }; }, resolve: async function(a){ return { url: String(a && a.url || '') }; } };
+",
+            [[last stringByDeletingPathExtension] stringByReplacingOccurrencesOfString:@"'" withString:@""]];
+        return [jsStub dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    return nil;
+}
 static BOOL PackageIsForADMYqkSourceURL(NSURL *sourceURL) {
     return [sourceURL.host.lowercaseString isEqual:@"raw.githubusercontent.com"]&&[sourceURL.path.lowercaseString isEqual:@"/joeshu/for-adm/master/cctvhost/yqk.js"];
 }
@@ -242,7 +322,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
 }
 - (void)begin:(NSURL *)url {
     if(self.finished)return;self.body=[NSMutableData data];self.responseStatus=0;self.redirects=0;self.expectedBytes=-1;self.lastProgressTime=0;self.lastProgressStage=nil;
-    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20];BOOL canSendCredentials=PackageSameCredentialScope(self.credentialOrigin,url);for(NSString *name in self.requestHeaders){if(PackageHeaderIsSensitive(name)&&!canSendCredentials)continue;[request setValue:self.requestHeaders[name] forHTTPHeaderField:name];}
+    NSTimeInterval reqTimeout=[url.host.lowercaseString isEqualToString:@"sub.lytvs.top"]?8:20;NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:reqTimeout];BOOL canSendCredentials=PackageSameCredentialScope(self.credentialOrigin,url);for(NSString *name in self.requestHeaders){if(PackageHeaderIsSensitive(name)&&!canSendCredentials)continue;[request setValue:self.requestHeaders[name] forHTTPHeaderField:name];}
     if(![request valueForHTTPHeaderField:@"User-Agent"])[request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
     self.task=[self.session dataTaskWithRequest:request];[self progress:self.stage];[self.task resume];
 }
@@ -269,7 +349,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     completion(valid&&!missing?NSURLSessionResponseAllow:NSURLSessionResponseCancel);
     if(!valid){
         if(self.phase==PackageScript){
-            NSData *bundledWeBox=PackageBundledWeBoxScriptForURL(self.targetURL?:self.originalURL);
+            NSData *bundledWeBox=PackageFallbackScriptForFailedURL(self.targetURL?:self.originalURL);
             if(bundledWeBox.length){self.scriptData=bundledWeBox;[self install:@{}];return;}
         }
         NSString *statusHint=(self.responseStatus==403||self.responseStatus==401)?@"（源站拒绝访问或订阅鉴权已失效）":(self.responseStatus==404?@"（远端脚本文件不存在）":@"，或响应超过大小上限");[self finish:nil error:[self error:[NSString stringWithFormat:@"%@失败：HTTP %ld%@",self.stage,(long)self.responseStatus,statusHint]]];
@@ -290,7 +370,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     if(self.finished||task!=self.task)return;BOOL missing=(self.phase==PackageConfigChecksum||self.phase==PackageConfig)&&self.responseStatus==404;
     if(error&&!(missing&&error.code==NSURLErrorCancelled)){
         if(self.phase==PackageScript&&error.code!=NSURLErrorCancelled){
-            NSData *bundledWeBox=PackageBundledWeBoxScriptForURL(self.targetURL?:self.originalURL);
+            NSData *bundledWeBox=PackageFallbackScriptForFailedURL(self.targetURL?:self.originalURL);
             if(bundledWeBox.length){self.scriptData=bundledWeBox;[self install:@{}];return;}
             BOOL transientTimeout=[error.domain isEqualToString:NSURLErrorDomain]&&(error.code==NSURLErrorTimedOut||error.code==NSURLErrorNetworkConnectionLost||error.code==NSURLErrorCannotConnectToHost);
             if(transientTimeout&&self.retryCount<1){

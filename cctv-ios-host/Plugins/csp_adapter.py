@@ -973,7 +973,7 @@ class AppVideoEngine:
             classes = [{'type_id': '1', 'type_name': '电影'}, {'type_id': '2', 'type_name': '电视剧'},
                        {'type_id': '3', 'type_name': '综艺'}, {'type_id': '4', 'type_name': '动漫'}]
         meta_low = f"{self.api_type} {self.config.get('siteName', '')} {self.config.get('categoryHint', '')}".lower()
-        is_adult = any(k in meta_low for k in ('adultdj', '2048', '成人', '野果', '橙果', '吃瓜', 'chigua', '伦理', '🔞'))
+        is_adult = any(k in meta_low for k in ('adultdj', '2048', '成人', '野果', '橙果', '吃瓜', 'chigua', '海角', 'haijiao', '黑料', 'heiliao', '51cg', '伦理', '福利', '🔞'))
         is_drama = not is_adult and any(k in meta_low for k in ('dj', '短剧', 'duanju', '七猫', '围观', '好看', '喜番'))
         if (is_adult or is_drama) and len(classes) > 1:
             kw_list = ('福利', '伦理', '写真', '热舞', '短剧', '解说') if is_adult else ('短剧', '爽文', '都市', '女频', '反转', '古装', '脑洞')

@@ -569,9 +569,32 @@ class Handler(BaseHTTPRequestHandler):
                         url = next_u
                 status = int(response.getcode() or 502)
                 raw_response_headers = response.headers
-                response_body = b'' if method == 'HEAD' or status in (204, 304) else response.read(16 * 1024 * 1024 + 1)
-                if len(response_body) > 16 * 1024 * 1024:
-                    raise ValueError('host HTTPS response exceeds 16 MB')
+                if method == 'HEAD' or status in (204, 304):
+                    response_body = b''
+                else:
+                    cur_thread = threading.current_thread()
+                    prev_stream_flag = getattr(cur_thread, '_host_media_stream_read', False)
+                    cur_thread._host_media_stream_read = True
+                    try:
+                        max_fetch_bytes = 32 * 1024 * 1024
+                        if hasattr(response, 'fileno') and hasattr(response, 'fp'):
+                            chunks = []
+                            total_bytes = 0
+                            while True:
+                                chunk = response.read(65536)
+                                if not chunk:
+                                    break
+                                total_bytes += len(chunk)
+                                if total_bytes > max_fetch_bytes:
+                                    raise ValueError('host HTTPS response exceeds 32 MB')
+                                chunks.append(chunk)
+                            response_body = b''.join(chunks)
+                        else:
+                            response_body = response.read(max_fetch_bytes + 1)
+                            if len(response_body) > max_fetch_bytes:
+                                raise ValueError('host HTTPS response exceeds 32 MB')
+                    finally:
+                        cur_thread._host_media_stream_read = prev_stream_flag
                 response_headers = list(raw_response_headers.raw_items()) if hasattr(raw_response_headers, 'raw_items') else list(raw_response_headers.items())
                 response_headers.append(('X-CCTVHost-Final-URL', url))
                 reason = str(getattr(response, 'reason', '') or '')[:128]

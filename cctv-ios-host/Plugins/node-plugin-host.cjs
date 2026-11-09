@@ -202,13 +202,13 @@ function hostFetchResponse(request,incoming,target){
 function fetchHTTPSWithHost(owner,request,details,body=Buffer.alloc(0)){
   return new Promise((resolve,reject)=>{
     const endpoint=hostFetchEndpoint(owner);if(!endpoint)return reject(Error('本机 HTTPS 回退服务不可用'))
-    const payload=Buffer.from(JSON.stringify({url:details.target.href,method:details.method,headers:requestHeadersForHost(request),timeoutMs:Math.max(1000,Math.min(details.timeoutMs,30000)),...(body.length?{bodyBase64:body.toString('base64')}:{})}))
+    const payload=Buffer.from(JSON.stringify({url:details.target.href,method:details.method,headers:requestHeadersForHost(request),timeoutMs:Math.max(1000,Math.min(details.timeoutMs,120000)),...(body.length?{bodyBase64:body.toString('base64')}:{})}))
     if(payload.length>2*1024*1024)return reject(Error('本机 HTTPS 回退请求超过限制'))
     let settled=false,length=0;const chunks=[];let bridge
     const finish=(error,value)=>{if(settled)return;settled=true;original.clearTimeout(timer);if(error)reject(error);else resolve(value)}
-    const timer=original.setTimeout(()=>bridge?.destroy(Error('本机 HTTPS 回退超时')),Math.max(1000,Math.min(details.timeoutMs,30000)))
+    const timer=original.setTimeout(()=>bridge?.destroy(Error('本机 HTTPS 回退超时')),Math.max(1000,Math.min(details.timeoutMs,120000)))
     bridge=nativeHTTPRequest(endpoint,{method:'POST',headers:{'X-CCTVHost-Host-Fetch':owner.payload.hostFetchToken,'Content-Type':'application/json','Content-Length':String(payload.length),'Connection':'close'}},incoming=>{
-      incoming.on('data',chunk=>{length+=chunk.length;if(length>16*1024*1024){incoming.destroy(Error('本机 HTTPS 回退响应超过限制'));return}chunks.push(Buffer.from(chunk))})
+      incoming.on('data',chunk=>{length+=chunk.length;if(length>32*1024*1024){incoming.destroy(Error('本机 HTTPS 回退响应超过限制'));return}chunks.push(Buffer.from(chunk))})
       incoming.on('error',error=>finish(error))
       incoming.on('end',()=>finish(null,{incoming,body:Buffer.concat(chunks)}))
     })

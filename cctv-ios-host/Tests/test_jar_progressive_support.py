@@ -761,6 +761,61 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('MediaParserRecordOutcome(parser,resolved!=nil);', api_m)
 
 
+
+    def test_round19_cicada_sigsegv_cenc_body_limit_drpy_hjs_and_302_fixes(self):
+        """Verifies Round 19 fixes for playback crash (SIGSEGV), diagnostic logs (9cf25667/5a32c261/f5d01c60), and Hawk/Butterfly sites:
+        1. MediaPlaybackCicadaAdapter.m declares scalar ABI types (int64_t, float, NSInteger) on CicadaDelegate callbacks to prevent ARC objc_retain SIGSEGV crash, and MediaPlaybackViewController.m uses 45s timeout for cenc://.
+        2. hongguo-python.py, hgtv_public_1_0_5.py, media-service.py, node-plugin-host.cjs, and hongguo-node.js support 32 MB CENC streams with _host_media_stream_read and <=15 MB quality preference.
+        3. JSPluginRuntime.m, drpy/adapter.mjs, generic/entry.mjs, and host_media_runtime.py prevent drpy 'Unexpected keyword export' and adapt .hjs ('吃瓜网.hjs', '海角精选.hjs') with NativeJS CMS fallback.
+        4. MediaAPIClient.m allows HTTPS->HTTP 302 redirects ('橘汁 · APP') and provides MediaJARBridgeCandidatesForSource; RootViewController.m defaults subscription token to '95f9cbf6'; MediaPackageDownloader.m provides PackageFallbackScriptForFailedURL.
+        """
+        ca_m = (SOURCES / 'MediaPlaybackCicadaAdapter.m').read_text(encoding='utf-8')
+        self.assertIn('- (void)onCurrentPositionUpdate:(id)player position:(int64_t)position', ca_m)
+        self.assertIn('- (void)onBufferedPositionUpdate:(id)player position:(int64_t)position', ca_m)
+        self.assertIn('- (void)onLoadingProgress:(id)player progress:(float)progress', ca_m)
+        self.assertIn('- (void)onPlayerStatusChanged:(id)player oldStatus:(NSInteger)oldStatus newStatus:(NSInteger)newStatus', ca_m)
+
+        mp_m = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
+        self.assertIn('int64_t avFirstFrameTimeoutSec=[sourceURL.scheme.lowercaseString isEqualToString:@"cenc"]?45:20;', mp_m)
+
+        hg_py = (ROOT / 'Resources/BuiltinMedia/hongguo-python.py').read_text(encoding='utf-8')
+        self.assertIn('_cur_th._host_media_stream_read = True', hg_py)
+        self.assertIn('32 * 1024 * 1024', hg_py)
+
+        hg_js = (ROOT / 'Resources/BuiltinMedia/hongguo-node.js').read_text(encoding='utf-8')
+        self.assertIn('15 * 1024 * 1024', hg_js)
+
+        js_rt = (SOURCES / 'JSPluginRuntime.m').read_text(encoding='utf-8')
+        self.assertIn('/*__cctvTransformed__*/', js_rt)
+        self.assertIn(r'moduleType === \"esm\" && protocol !== \"drpy\"', js_rt)
+
+        api_m = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')
+        self.assertIn('MediaJARBridgeCandidatesForSource', api_m)
+        self.assertIn('MediaJARBridgeSaveWorkingBase', api_m)
+        self.assertNotIn('if([from.scheme.lowercaseString isEqual:@"https"]&&[to.scheme.lowercaseString isEqual:@"http"])valid=NO;', api_m)
+
+        root_m = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        self.assertIn('return @"95f9cbf6";', root_m)
+
+        dl_m = (SOURCES / 'MediaPackageDownloader.m').read_text(encoding='utf-8')
+        self.assertIn('PackageFallbackScriptForFailedURL', dl_m)
+
+        import host_media_runtime
+        class DummyFailingHjsBridge:
+            def __call__(self, op, payload_json):
+                if op == 'start':
+                    return '{"ok":false,"error":"此文件像是规则配置"}'
+                return '{"ok":true,"result":{}}'
+
+        nav = host_media_runtime.NativeJS(
+            str(ROOT),
+            {'name': '吃瓜网｜🔞', 'entry': '吃瓜网.hjs', 'protocol': 'hamo-source-v3', 'moduleType': 'script'},
+            bridge=DummyFailingHjsBridge(),
+        )
+        self.assertTrue(nav._use_cms_only)
+        self.assertIn('home', nav.capabilities().get('capabilities', []))
+
+
 if __name__ == '__main__':
 
 

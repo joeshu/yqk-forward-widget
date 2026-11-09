@@ -148,7 +148,7 @@ static NSString *CCTVTVBoxStoredSubscriptionToken(void) {
             }
         }
     }
-    return nil;
+    return @"95f9cbf6";
 }
 static NSString *CCTVTVBoxURLByResolvingToken(NSString *url,NSString *token) {
     if(![url containsString:CCTVTVBoxTokenPlaceholder]){

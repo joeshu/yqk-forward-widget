@@ -592,8 +592,9 @@ const hamoEpisodePrefix='hamo-v3:'
 function hamoGlobals(payload){
   g.$http=req
   hamoDefinedSpec=null
-  g.Hawk={define(spec){hamoDefinedSpec=spec;return spec}}
-  g.Hamo={define(spec){hamoDefinedSpec=spec;return spec}}
+  const regHamo=spec=>{hamoDefinedSpec=spec;g.__cctvHamoSpec=spec;return spec}
+  g.Hawk={define:regHamo,register:regHamo,create:regHamo,source:regHamo}
+  g.Hamo=g.Hawk
   const namespace='hamo-v3:'+String(payload.serviceID||payload.name||payload.entry||'default')
   g.$cache={
     async get(key){const stored=g.local.get(namespace,String(key||''));if(!stored)return undefined;try{const row=JSON.parse(stored);if(row.expires&&row.expires<=Date.now()){g.local.delete(namespace,String(key||''));return undefined}return row.value}catch{return undefined}},
@@ -687,7 +688,11 @@ async function load(payload){
     if(!modernCatVod)for(const [key,alias] of Object.entries({home:'homeContent',homeVod:'homeVideoContent',category:'categoryContent',search:'searchContent',detail:'detailContent',play:'playerContent'}))if(!plugin[key]&&plugin[alias])plugin[key]=plugin[alias]
     if(!plugin.homeVod&&plugin.homeVideoContent)plugin.homeVod=plugin.homeVideoContent
   }
-  const hasMediaMethod=['home','category','search','detail','play','channels','catalog','resolve'].some(key=>typeof plugin[key]==='function')
+  let hasMediaMethod=['home','category','search','detail','play','channels','catalog','resolve'].some(key=>typeof plugin[key]==='function')
+  if(!hasMediaMethod&&typeof g.__cctvAdaptRuleOrHjsPlugin==='function'){
+    plugin=g.__cctvAdaptRuleOrHjsPlugin(plugin,payload.protocol,payload.moduleType)
+    hasMediaMethod=['home','category','search','detail','play','channels','catalog','resolve'].some(key=>typeof plugin?.[key]==='function')
+  }
   if(!hasMediaMethod&&(plugin.rule||plugin.一级||plugin.二级||plugin.分类url||plugin.class_name||(plugin.host&&(plugin.url||plugin.headers||plugin.搜索url)))){
     const helpers=await import('../drpy/globals.mjs');helpers.prepareGlobals(payload);const engine=await import('../drpy/adapter.mjs');plugin=engine.load(plugin.rule&&typeof plugin.rule==='object'?plugin.rule:plugin,payload.options);config.protocol='drpy';config.api='catvod'
   }

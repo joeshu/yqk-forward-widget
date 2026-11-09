@@ -1322,38 +1322,67 @@ async function decryptVideo(vid, want) {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
   const vm = await fetchModel(vid);
   if (!vm) return null;
-  const pick = pickBest(vm, want);
-  if (!pick) throw Error(want ? `requested quality ${want} is unavailable for this episode` : 'no compatible video quality is available');
-  const q = pick.q;
-  const it = pick.it;
-  const dst = path.join(CACHE_DIR, `${vid}_${q}.mp4`);
-  if (fs.existsSync(dst) && verifyMp4(dst)) return dst;
-  if (fs.existsSync(dst)) { try { fs.unlinkSync(dst); } catch (e) { } }
-
-  const url = resolveMediaUrl(it, vm);
-  if (!url) return null;
-  const encInfo = it.encrypt_info || {};
-  const spadeA = it.spade_a || encInfo.spade_a;
-  const key = spadeA ? deriveContentKey(spadeA) : null;
-  const isEnc = !!encInfo.encrypt || /1:encrypt/.test(String(it.gear_des_key || ''));
-  if (isEnc && !key) return null;
-
-  const tmp = dst + '.tmp.mp4';
-  const r = await httpText(url, { headers: { 'User-Agent': UA_APP }, timeout: 180000 });
-  if (r.status !== 200) return null;
-  fs.writeFileSync(tmp, r.body);
-  if (key && isEnc) {
-    const enc = dst + '.enc.mp4';
-    fs.renameSync(tmp, enc);
-    try {
-      decryptCenc(enc, tmp, key);
-    } finally {
-      try { fs.unlinkSync(enc); } catch (e) { }
+  const primary = pickBest(vm, want);
+  if (!primary) throw Error(want ? `requested quality ${want} is unavailable for this episode` : 'no compatible video quality is available');
+  const allCands = qualityCandidates(vm);
+  const ordered = [primary];
+  for (const c of allCands) {
+    if (c.q !== primary.q) ordered.push(c);
+  }
+  const hasExplicitLargeSize = (cand) => {
+    const meta = videoMetadata(cand.it);
+    const sz = Number(cand.it.size || meta.size || meta.vsize || 0);
+    return sz > 15 * 1024 * 1024;
+  };
+  if (ordered.length > 1 && hasExplicitLargeSize(ordered[0])) {
+    const fastIdx = ordered.findIndex(c => {
+      const meta = videoMetadata(c.it);
+      const sz = Number(c.it.size || meta.size || meta.vsize || 0);
+      return sz > 0 && sz <= 15 * 1024 * 1024;
+    });
+    if (fastIdx > 0) {
+      const [fastCand] = ordered.splice(fastIdx, 1);
+      ordered.unshift(fastCand);
     }
   }
-  if (!verifyMp4(tmp)) { try { fs.unlinkSync(tmp); } catch (e) { } return null; }
-  fs.renameSync(tmp, dst);
-  return dst;
+  for (const pick of ordered) {
+    const q = pick.q;
+    const it = pick.it;
+    const dst = path.join(CACHE_DIR, `${vid}_${q}.mp4`);
+    if (fs.existsSync(dst) && verifyMp4(dst)) return dst;
+    if (fs.existsSync(dst)) { try { fs.unlinkSync(dst); } catch (e) { } }
+
+    const url = resolveMediaUrl(it, vm);
+    if (!url) continue;
+    const encInfo = it.encrypt_info || {};
+    const spadeA = it.spade_a || encInfo.spade_a;
+    const key = spadeA ? deriveContentKey(spadeA) : null;
+    const isEnc = !!encInfo.encrypt || /1:encrypt/.test(String(it.gear_des_key || ''));
+    if (isEnc && !key) continue;
+
+    const tmp = dst + '.tmp.mp4';
+    try {
+      const r = await httpText(url, { headers: { 'User-Agent': UA_APP }, timeout: 45000 });
+      if (r.status !== 200 || !r.body || !r.body.length) continue;
+      fs.writeFileSync(tmp, r.body);
+      if (key && isEnc) {
+        const enc = dst + '.enc.mp4';
+        fs.renameSync(tmp, enc);
+        try {
+          decryptCenc(enc, tmp, key);
+        } finally {
+          try { fs.unlinkSync(enc); } catch (e) { }
+        }
+      }
+      if (!verifyMp4(tmp)) { try { fs.unlinkSync(tmp); } catch (e) { } continue; }
+      fs.renameSync(tmp, dst);
+      return dst;
+    } catch (_err) {
+      try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_e) { }
+      continue;
+    }
+  }
+  return null;
 }
 
 function parseByteRange(value, size) {
