@@ -536,11 +536,10 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
             for s in (upstream, server): s.shutdown(); s.server_close()
             for t in threads: t.join(2)
 
-        # 2. Verify RootViewController lytvs.top/py/*.js and *.hjs zero-wait native routing & duplicate activate guard
+        # 2. Verify RootViewController duplicate activate guard & authentic site execution (no silent hijack)
         root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
-        self.assertGreaterEqual(root_code.count('([lowAPI hasPrefix:@"https://lytvs.top/py/"]&&([lowAPI hasSuffix:@".js"]||[lowAPI hasSuffix:@".hjs"]))'), 2)
-        self.assertIn('NSDictionary *activeMediaSource=[mediaPage valueForKey:@"source"]', root_code)
-        self.assertIn('if(![activeMediaSource[@"id"] isEqual:targetID]', root_code)
+        self.assertIn('reportAuthenticTVBoxSiteFailure:site rawAPI:originalAPI url:downloadURL error:error browseAfterImport:browseAfterImport', root_code)
+        self.assertNotIn('([lowAPI hasPrefix:@"https://lytvs.top/py/"]&&([lowAPI hasSuffix:@".js"]||[lowAPI hasSuffix:@".hjs"]))', root_code)
 
         # 3. Verify joeshu.yqk 4500ms timeout cap & 2800ms fast HLS probe in JSPluginRuntime & MediaPackageDownloader
         js_rt = (SOURCES / 'JSPluginRuntime.m').read_text(encoding='utf-8')
@@ -599,9 +598,9 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertGreaterEqual(store_code.count('@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"]'), 2)
         self.assertIn('else if(isScriptURL&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"script"]))', store_code)
 
-        # Verify RootViewController routes short-drama and adult .hjs sites to csp_QimaoDJ / csp_AdultDJ
-        self.assertIn('NSString *fallbackClass=isAdultMeta?@"csp_AdultDJ":(isShortDramaMeta?@"csp_QimaoDJ":@"csp_AppRJ");', root_code)
+        # Verify RootViewController pops modal stack cleanly and routes .hjs sites to authentic download/execution
         self.assertIn('if(self.navigationController.topViewController!=self)[self.navigationController popToViewController:self animated:NO];', root_code)
+        self.assertIn('reportAuthenticTVBoxSiteFailure:site rawAPI:originalAPI url:downloadURL error:error browseAfterImport:browseAfterImport', root_code)
 
         # Verify AppVideoEngine prioritizes short-drama and adult/chigua categories
         drama_engine = AppVideoEngine('csp_QimaoDJ', 'http://cms.test')
@@ -626,6 +625,33 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         }
         adult_home = adult_engine.homeContent()
         self.assertEqual(adult_home['class'][0]['type_name'], '福利短剧')
+
+
+    def test_round15_authentic_site_execution_without_silent_fallback(self):
+        """Verifies Round 15 authentic site execution and error feedback (from diagnostic 81d4f613):
+        1. RootViewController clears persisted 'cctv.nativeFallbackSiteKeys.v1' on launch, does NOT pre-hijack .hjs/.js/.py sites into jar-bridge, and reports real HTTP/parse failures via reportAuthenticTVBoxSiteFailure.
+        2. MediaAPIClient jar-bridge only retries MacCMS on the site's own configured base host (sameHostCMS) and returns an explicit CCTVHostJARBridge NSError when ext has no URL or when the site's own host fails.
+        3. MediaPackageImporter accepts any .hjs script as hamo-source-v3 even when obfuscated, and entry.mjs adapts CatVod exports.
+        4. host_media_runtime.py does not substitute _get_cms_fallback() in PythonSpider or NativeJS when a site returns empty or errors.
+        """
+        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        self.assertIn('[[NSUserDefaults standardUserDefaults] removeObjectForKey:@"cctv.nativeFallbackSiteKeys.v1"];', root_code)
+        self.assertIn('- (void)reportAuthenticTVBoxSiteFailure:(NSDictionary *)site rawAPI:(NSString *)rawAPI url:(NSURL *)downloadURL error:(NSError *)error browseAfterImport:(BOOL)browseAfterImport', root_code)
+        self.assertNotIn('[self activateNativeFallbackForTVBoxSite:site reason:', root_code)
+
+        api_code = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')
+        self.assertIn('属于 Android JAR 封闭爬虫且未在合集 ext 中提供独立接口地址（ext 为空），无法在 iOS 上直连', api_code)
+        self.assertIn('NSString *sameHostCMS=[base.lowercaseString hasSuffix:@".php"]?base:[base stringByAppendingString:@"/api.php/provide/vod/"];', api_code)
+        self.assertNotIn('https://caiji.dyttzyapi.com/api.php/provide/vod/', api_code)
+
+        importer_code = (SOURCES / 'MediaPackageImporter.m').read_text(encoding='utf-8')
+        self.assertIn('BOOL hamoSourceV3=[entry.pathExtension.lowercaseString isEqual:@"hjs"] ||', importer_code)
+
+        dl_code = (SOURCES / 'MediaPackageDownloader.m').read_text(encoding='utf-8')
+        self.assertIn('if(![request valueForHTTPHeaderField:@"User-Agent"])[request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];', dl_code)
+
+        hmr_code = (PLUGINS / 'host_media_runtime.py').read_text(encoding='utf-8')
+        self.assertNotIn('fb = _get_cms_fallback()', hmr_code)
 
 
 if __name__ == '__main__':

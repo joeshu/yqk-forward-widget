@@ -663,6 +663,9 @@ async function load(payload){
     if(typeof plugin.check==='function'&&await plugin.check()===false)throw new Error('CatPaw Spider check() 未通过')
     return {engine:'JavaScriptCore',protocol:'catvod-spider',name:plugin.meta?.name||payload.name||'CatPaw Spider',capabilities:['home','category','search','detail','play','proxy']}
   }
+  if(payload.protocol==='hamo-source-v3'&&plugin&&(plugin.homeContent||plugin.playerContent||plugin.detailContent)&&typeof plugin.resolve!=='function'){
+    config.protocol='catvod-js';config.api='catvod'
+  }
   if(config.api==='catvod'){
     modernCatVod=typeof plugin.home==='function'&&!plugin.homeContent&&typeof plugin.category==='function'&&typeof plugin.detail==='function'&&typeof plugin.play==='function'
     if(!modernCatVod)for(const [key,alias] of Object.entries({home:'homeContent',homeVod:'homeVideoContent',category:'categoryContent',search:'searchContent',detail:'detailContent',play:'playerContent'}))if(!plugin[key]&&plugin[alias])plugin[key]=plugin[alias]

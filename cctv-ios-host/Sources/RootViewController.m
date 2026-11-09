@@ -745,6 +745,7 @@ configureCatalogNavigation;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(checkVisibleMediaAfterActivation) name:UIApplicationDidBecomeActiveNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadThemeAppearance) name:@"HostThemeDidChangeNotification" object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleAudioRouteChange:) name:AVAudioSessionRouteChangeNotification object:nil];
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"cctv.nativeFallbackSiteKeys.v1"];
     [self installBundledMediaResourcesIfNeeded];
 }
 
@@ -1789,37 +1790,19 @@ configureCatalogNavigation;
         page.sourcesProvider=^{
             NSMutableArray *sources=[NSMutableArray array];
             for(NSDictionary *service in [ServiceStore services])if([ServiceStore isVODMediaService:service])[sources addObject:service];
-            NSArray *storedFallbackKeys=[[NSUserDefaults standardUserDefaults] arrayForKey:@"cctv.nativeFallbackSiteKeys.v1"]?:@[];
-            NSMutableArray *cleanedFallbackKeys=[NSMutableArray array];
-            for(id k in storedFallbackKeys){if([k isKindOfClass:NSString.class]&&![(NSString *)k hasPrefix:@"joeshu."])[cleanedFallbackKeys addObject:k];}
-            if(cleanedFallbackKeys.count!=storedFallbackKeys.count)[[NSUserDefaults standardUserDefaults] setObject:cleanedFallbackKeys.copy forKey:@"cctv.nativeFallbackSiteKeys.v1"];
-            NSSet *fallbackSiteKeys=[NSSet setWithArray:cleanedFallbackKeys];
             for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){
                 NSString *catalogID=catalog[@"id"]?:@"";
                 NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];
                 for(NSDictionary *site in sites){
                     NSString *apiKind=[site[@"apiKind"] isKindOfClass:NSString.class]?site[@"apiKind"]:@"";
                     NSString *siteKey=[site[@"key"] isKindOfClass:NSString.class]?site[@"key"]:@"";
-                    NSString *rawAPI=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
-                    NSString *lowAPI=rawAPI.lowercaseString;
-                    BOOL isForADM=[siteKey hasPrefix:@"joeshu."]||[lowAPI containsString:@"raw.githubusercontent.com/joeshu/for-adm/"];
-                    BOOL isDrpyRunner=[lowAPI containsString:@"drpy2.min.js"]||[lowAPI containsString:@"3e7e0c8a023b624cec6bdcc200f06f02.js"]||([lowAPI hasPrefix:@"https://lytvs.top/py/"]&&([lowAPI hasSuffix:@".js"]||[lowAPI hasSuffix:@".hjs"]))||[lowAPI hasSuffix:@".hjs"]||[lowAPI containsString:@".hjs?"];
-                    BOOL useNativeFallback=(!isForADM&&[apiKind isEqual:@"script"]&&(isDrpyRunner||[fallbackSiteKeys containsObject:siteKey]));
-                    if(useNativeFallback)apiKind=@"jar-bridge";
                     if(!([apiKind isEqual:@"tvbox-api"]||[apiKind isEqual:@"maccms-api"]||[apiKind isEqual:@"douban-index"]||[apiKind isEqual:@"jar-bridge"])||![site[@"supported"] boolValue])continue;
                     NSString *protocol=apiKind,*siteID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalogID,siteKey];
                     NSString *type=site[@"type"]?:@"1";
-                    NSString *siteName=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";
-                    NSString *catName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"";
-                    NSString *decodedAPI=[rawAPI stringByRemovingPercentEncoding]?:rawAPI;
-                    NSString *combinedMeta=[[NSString stringWithFormat:@"%@ %@ %@ %@",siteName,catName,siteKey,decodedAPI] lowercaseString];
-                    BOOL isAdultMeta=[combinedMeta containsString:@"2048"]||[combinedMeta containsString:@"成人"]||[combinedMeta containsString:@"野果"]||[combinedMeta containsString:@"橙果"]||[combinedMeta containsString:@"吃瓜"]||[combinedMeta containsString:@"chigua"]||[combinedMeta containsString:@"黑料"]||[combinedMeta containsString:@"伦理"]||[combinedMeta containsString:@"🔞"];
-                    BOOL isShortDramaMeta=!isAdultMeta&&([combinedMeta containsString:@"短剧"]||[combinedMeta containsString:@"duanju"]||[combinedMeta containsString:@"七猫"]||[combinedMeta containsString:@"围观"]||[combinedMeta containsString:@"好看"]||[combinedMeta containsString:@"喜番"]||[combinedMeta containsString:@"河马"]||[combinedMeta containsString:@"星芽"]||[combinedMeta containsString:@"抖音"]||[combinedMeta containsString:@"红果"]);
-                    NSString *fallbackClass=isAdultMeta?@"csp_AdultDJ":(isShortDramaMeta?@"csp_QimaoDJ":@"csp_AppRJ");
-                    NSString *effectiveAPI=useNativeFallback?fallbackClass:(site[@"api"]?:@"");
+                    NSString *effectiveAPI=site[@"api"]?:@"";
                     NSString *engine=[apiKind isEqual:@"maccms-api"]?@"MacCMS JSON/XML API":([apiKind isEqual:@"douban-index"]?@"豆瓣影视索引 · 原生适配":([apiKind isEqual:@"jar-bridge"]?@"Android/JAR 适配引擎 · iOS 原生执行":[NSString stringWithFormat:@"TVBox type %@ JSON API",type]));
                     NSArray *capabilities=[apiKind isEqual:@"douban-index"]?@[@"home",@"category",@"search"]:@[@"home",@"category",@"search",@"detail",@"play"];
-                    NSMutableDictionary *source=[@{@"id":siteID,@"name":site[@"name"]?:@"影视来源",@"engine":engine,@"protocol":protocol,@"tvboxType":@([type integerValue]),@"api":effectiveAPI,@"url":effectiveAPI,@"options":useNativeFallback?@"":(site[@"ext"]?:@""),@"header":site[@"header"]?:@{},@"playUrl":site[@"playUrl"]?:@"",@"status":site[@"status"]?:@"可直接访问",@"catalogID":catalogID,@"catalogName":catalog[@"name"]?:@"资源合集",@"capabilities":capabilities,@"tvboxSiteKey":siteKey,@"tvboxSiteKeys":siteKey.length?@[siteKey]:@[]} mutableCopy];
+                    NSMutableDictionary *source=[@{@"id":siteID,@"name":site[@"name"]?:@"影视来源",@"engine":engine,@"protocol":protocol,@"tvboxType":@([type integerValue]),@"api":effectiveAPI,@"url":effectiveAPI,@"options":site[@"ext"]?:@"",@"header":site[@"header"]?:@{},@"playUrl":site[@"playUrl"]?:@"",@"status":site[@"status"]?:@"可直接访问",@"catalogID":catalogID,@"catalogName":catalog[@"name"]?:@"资源合集",@"capabilities":capabilities,@"tvboxSiteKey":siteKey,@"tvboxSiteKeys":siteKey.length?@[siteKey]:@[]} mutableCopy];
                     [sources addObject:source];
                 }
             }
@@ -3145,38 +3128,57 @@ configureCatalogNavigation;
     if(self.presentedViewController)[self.presentedViewController dismissViewControllerAnimated:YES completion:show];else show();
 }
 - (void)activateNativeFallbackForTVBoxSite:(NSDictionary *)site browseAfterImport:(BOOL)browseAfterImport {
-    NSString *siteKey=[site[@"key"] isKindOfClass:NSString.class]?site[@"key"]:@"";
-    NSString *catalogID=[site[@"tvboxCatalogID"] isKindOfClass:NSString.class]?site[@"tvboxCatalogID"]:@"builtin-lytvs-ios";
-    if(siteKey.length){
-        NSMutableArray *keys=[([[NSUserDefaults standardUserDefaults] arrayForKey:@"cctv.nativeFallbackSiteKeys.v1"]?:@[]) mutableCopy];
-        if(![keys containsObject:siteKey]){[keys addObject:siteKey];[[NSUserDefaults standardUserDefaults] setObject:keys.copy forKey:@"cctv.nativeFallbackSiteKeys.v1"];}
-    }
-    MediaBrowserViewController *mediaPage=[self mediaPageCreatingIfNeeded];
-    [mediaPage refreshSources];
+    // 真实反馈站点打开情况：不再将失败或未下载的脚本站点静默伪装为统一采集源
+    NSString *siteName=[site[@"name"] isKindOfClass:NSString.class]&&[site[@"name"] length]?site[@"name"]:(site[@"key"]?:@"影视站点");
+    NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
+    NSString *msg=[NSString stringWithFormat:@"站点「%@」未能加载真实脚本（%@），已禁用跨站点兜底界面以真实反馈站点状态。",siteName,api];
     if(browseAfterImport){
-        NSString *targetID=[NSString stringWithFormat:@"jar-bridge:%@:%@",catalogID,siteKey];
-        [NSUserDefaults.standardUserDefaults setObject:catalogID forKey:@"selectedMediaCatalogID"];
-        [NSUserDefaults.standardUserDefaults setObject:targetID forKey:@"selectedMediaSource"];
-        if(self.navigationController.topViewController!=self)[self.navigationController popToViewController:self animated:NO];
-        [self selectBottomTab:(id)self.bottomBar.arrangedSubviews[2]];
-        [mediaPage refreshSources];
-        NSDictionary *activeMediaSource=[mediaPage valueForKey:@"source"];
-        BOOL mediaLoading=[[mediaPage valueForKey:@"loading"] boolValue];
-        NSDictionary *mediaHomeResult=[mediaPage valueForKey:@"homeResult"];
-        if(![activeMediaSource[@"id"] isEqual:targetID]||(!mediaLoading&&!mediaHomeResult)){
-            for(NSDictionary *src in (mediaPage.sourcesProvider?mediaPage.sourcesProvider():@[])){
-                if([src[@"id"] isEqual:targetID]){
-                    [mediaPage activate:src keepingHome:YES];
-                    break;
-                }
-            }
-        }
+        MediaBrowserViewController *mediaPage=[self mediaPageCreatingIfNeeded];
+        [mediaPage showMessage:msg loading:NO];
     }
+    [self showServiceError:msg];
+}
+- (void)promptSubscriptionTokenForTVBoxSite:(NSDictionary *)site rawAPI:(NSString *)rawAPI browseAfterImport:(BOOL)browseAfterImport reason:(NSString *)reason {
+    NSString *siteName=[site[@"name"] isKindOfClass:NSString.class]&&[site[@"name"] length]?site[@"name"]:@"此站点";
+    NSString *message=reason.length?[NSString stringWithFormat:@"%@
+
+站点「%@」需要有效的订阅令牌。粘贴 token 或完整订阅链接，令牌将保存到本机钥匙串。",reason,siteName]:[NSString stringWithFormat:@"站点「%@」需要订阅令牌。粘贴 token 或完整订阅链接；令牌会保存到本机钥匙串供后续站点使用。",siteName];
+    UIAlertController *credential=[UIAlertController alertControllerWithTitle:@"Hawk iOS 资源访问令牌" message:message preferredStyle:UIAlertControllerStyleAlert];
+    [credential addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"token 或完整订阅链接";field.secureTextEntry=YES;field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.clearButtonMode=UITextFieldViewModeWhileEditing;}];
+    [credential addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf=self;
+    [credential addAction:[UIAlertAction actionWithTitle:@"保存并重试该站点" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(!owner)return;NSString *entered=CCTVTVBoxTokenFromInput(credential.textFields.firstObject.text?:@"");if(!entered.length){[owner showServiceError:@"请输入有效的订阅令牌或完整订阅链接"];return;}if(!CCTVTVBoxSaveSubscriptionToken(entered)){[owner showServiceError:@"令牌未能保存到本机钥匙串，请检查设备设置后重试"];return;}NSString *resolvedURL=CCTVTVBoxURLByResolvingToken(rawAPI,entered);if(!resolvedURL.length){[owner showServiceError:@"无法将订阅令牌应用到此站点地址"];return;}NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=resolvedURL;dispatch_async(dispatch_get_main_queue(),^{[owner importTVBoxSite:resolvedSite browseAfterImport:browseAfterImport];});}]];
+    [self presentViewController:credential animated:YES completion:nil];
+}
+- (void)reportAuthenticTVBoxSiteFailure:(NSDictionary *)site rawAPI:(NSString *)rawAPI url:(NSURL *)downloadURL error:(NSError *)error browseAfterImport:(BOOL)browseAfterImport {
+    if(error.code==NSURLErrorCancelled)return;
+    NSString *siteName=[site[@"name"] isKindOfClass:NSString.class]&&[site[@"name"] length]?site[@"name"]:(site[@"key"]?:@"影视站点");
+    NSString *host=downloadURL.host?:@"远端站点";
+    NSString *reason=error.localizedDescription?:@"远端未返回有效脚本内容";
+    NSString *statusText=[NSString stringWithFormat:@"站点「%@」打开失败（%@）：%@",siteName,host,reason];
+    if(browseAfterImport){
+        MediaBrowserViewController *mediaPage=[self mediaPageCreatingIfNeeded];
+        [mediaPage showMessage:statusText loading:NO];
+    }
+    NSString *alertMessage=[NSString stringWithFormat:@"%@
+
+请求地址：%@
+（已关闭统一兜底源，真实反馈该站点实际响应）",reason,[HostLogRedactor redactText:downloadURL.absoluteString?:rawAPI?:@""]];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@ · 打开失败",siteName] message:alertMessage preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf=self;
+    if([host.lowercaseString containsString:@"lytvs.top"]&&([reason containsString:@"403"]||[reason containsString:@"401"])){
+        NSString *templateAPI=[rawAPI containsString:CCTVTVBoxTokenPlaceholder]?rawAPI:[NSString stringWithFormat:@"%@?tk=%@",[[downloadURL.absoluteString componentsSeparatedByString:@"?"] firstObject]?:rawAPI,CCTVTVBoxTokenPlaceholder];
+        [alert addAction:[UIAlertAction actionWithTitle:@"更换订阅令牌并重试" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[weakSelf promptSubscriptionTokenForTVBoxSite:site rawAPI:templateAPI browseAfterImport:browseAfterImport reason:statusText];}]];
+    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"重试该站点" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[weakSelf importTVBoxSite:site browseAfterImport:browseAfterImport];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)importTVBoxSite:(NSDictionary *)site { [self importTVBoxSite:site browseAfterImport:NO]; }
 - (void)importTVBoxSite:(NSDictionary *)site browseAfterImport:(BOOL)browseAfterImport {
     NSString *siteKey=[site[@"key"] isKindOfClass:NSString.class]?site[@"key"]:@"";
     NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
+    NSString *originalAPI=api;
     if(browseAfterImport&&(siteKey.length||api.length)){
         for(NSDictionary *existing in [ServiceStore services]){
             if(![ServiceStore isVODMediaService:existing])continue;
@@ -3189,35 +3191,29 @@ configureCatalogNavigation;
             }
         }
     }
-    NSString *lowAPI=api.lowercaseString;
-    if([lowAPI containsString:@"drpy2.min.js"]||[lowAPI containsString:@"3e7e0c8a023b624cec6bdcc200f06f02.js"]||([lowAPI hasPrefix:@"https://lytvs.top/py/"]&&([lowAPI hasSuffix:@".js"]||[lowAPI hasSuffix:@".hjs"]))||[lowAPI hasSuffix:@".hjs"]||[lowAPI containsString:@".hjs?"]){
-        [self activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];
-        return;
-    }
     if([api containsString:CCTVTVBoxTokenPlaceholder]){
         NSString *token=CCTVTVBoxStoredSubscriptionToken();
         if(!token.length){
-            if(browseAfterImport){
-                [self activateNativeFallbackForTVBoxSite:site browseAfterImport:YES];
-                return;
-            }
-            UIAlertController *credential=[UIAlertController alertControllerWithTitle:@"Hawk iOS 资源访问令牌" message:@"此合集的内部站点需要订阅令牌。粘贴 token，或粘贴原始订阅链接；令牌会保存到本机钥匙串供后续站点使用。" preferredStyle:UIAlertControllerStyleAlert];
-            [credential addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"token 或完整订阅链接";field.secureTextEntry=YES;field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.clearButtonMode=UITextFieldViewModeWhileEditing;}];
-            [credential addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-            __weak typeof(self) weakSelf=self;
-            [credential addAction:[UIAlertAction actionWithTitle:@"直接原生加载（免令牌）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(owner)[owner activateNativeFallbackForTVBoxSite:site browseAfterImport:YES];}]];
-            [credential addAction:[UIAlertAction actionWithTitle:@"保存并继续" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(!owner)return;NSString *entered=CCTVTVBoxTokenFromInput(credential.textFields.firstObject.text?:@"");if(!entered.length){[owner showServiceError:@"请输入有效的订阅令牌或完整订阅链接"];return;}if(!CCTVTVBoxSaveSubscriptionToken(entered)){[owner showServiceError:@"令牌未能保存到本机钥匙串，请检查设备设置后重试"];return;}NSString *resolvedURL=CCTVTVBoxURLByResolvingToken(api,entered);if(!resolvedURL.length){[owner showServiceError:@"无法将订阅令牌应用到此站点地址"];return;}NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=resolvedURL;dispatch_async(dispatch_get_main_queue(),^{[owner importTVBoxSite:resolvedSite browseAfterImport:browseAfterImport];});}]];
-            [self presentViewController:credential animated:YES completion:nil];return;
+            [self promptSubscriptionTokenForTVBoxSite:site rawAPI:originalAPI browseAfterImport:browseAfterImport reason:nil];
+            return;
         }
-        api=CCTVTVBoxURLByResolvingToken(api,token);if(!api.length){[self activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=api;site=resolvedSite;
+        api=CCTVTVBoxURLByResolvingToken(api,token);
+        if(!api.length){
+            [self showServiceError:[NSString stringWithFormat:@"站点「%@」无法解析订阅令牌地址",site[@"name"]?:@"未命名站点"]];
+            return;
+        }
+        NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=api;site=resolvedSite;
     }
     if(!api.length){[self showServiceError:@"此 TVBox 站点没有可导入的脚本地址"];return;}
     NSURL *downloadURL=CCTVURLFromPossiblyUnescapedString(api);
-    if(!downloadURL){[self activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}
+    if(!downloadURL){
+        [self showServiceError:[NSString stringWithFormat:@"站点「%@」脚本地址无效：%@",site[@"name"]?:@"未命名站点",api]];
+        return;
+    }
     self.pendingTVBoxExt=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"";self.pendingTVBoxSiteName=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";
     __weak typeof(self) weakSelf=self;
     NSString *runtimeHint=[[downloadURL pathExtension].lowercaseString isEqual:@"py"]?@"python":nil;
-    [self downloadPackageURL:downloadURL headers:site[@"header"] runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){RootViewController *owner=weakSelf;owner.navigationItem.prompt=nil;if(error){owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;if(browseAfterImport||error.code!=NSURLErrorCancelled)[owner activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}if(!service){[owner activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];return;}NSMutableDictionary *updated=[service mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"",*name=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";if(ext.length)manifest[@"options"]=ext;if(name.length){manifest[@"name"]=name;updated[@"name"]=name;}updated[@"manifest"]=manifest;updated[@"tvboxSiteKey"]=site[@"key"]?:@"";updated[@"tvboxSiteKeys"]=@[site[@"key"]?:@""];if(site[@"tvboxCatalogID"])updated[@"tvboxCatalogID"]=site[@"tvboxCatalogID"];if(site[@"playUrl"])updated[@"tvboxPlayURL"]=site[@"playUrl"];if(site[@"header"])updated[@"tvboxSiteHeader"]=site[@"header"];owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;[owner acceptImportedMedia:updated error:nil autoBrowse:browseAfterImport];}];
+    [self downloadPackageURL:downloadURL headers:site[@"header"] runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){RootViewController *owner=weakSelf;owner.navigationItem.prompt=nil;if(error||!service){owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;[owner reportAuthenticTVBoxSiteFailure:site rawAPI:originalAPI url:downloadURL error:error browseAfterImport:browseAfterImport];return;}NSMutableDictionary *updated=[service mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"",*name=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";if(ext.length)manifest[@"options"]=ext;if(name.length){manifest[@"name"]=name;updated[@"name"]=name;}updated[@"manifest"]=manifest;updated[@"tvboxSiteKey"]=site[@"key"]?:@"";updated[@"tvboxSiteKeys"]=@[site[@"key"]?:@""];if(site[@"tvboxCatalogID"])updated[@"tvboxCatalogID"]=site[@"tvboxCatalogID"];if(site[@"playUrl"])updated[@"tvboxPlayURL"]=site[@"playUrl"];if(site[@"header"])updated[@"tvboxSiteHeader"]=site[@"header"];owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;[owner acceptImportedMedia:updated error:nil autoBrowse:browseAfterImport];}];
 }
 - (void)acceptImportedMedia:(NSDictionary *)service error:(NSError *)error {
     [self acceptImportedMedia:service error:error autoBrowse:NO];

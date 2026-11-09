@@ -699,14 +699,6 @@ static NSString *MediaJARBridgeFirstValidURL(id candidate) {
     }
     return @"";
 }
-static NSString *MediaJARBridgeFallbackCMSURL(NSString *api) {
-    NSString *low=(api?:@"").lowercaseString;
-    if([low containsString:@"sp360"])return @"https://360zy.com/api.php/provide/vod/";
-    if([low containsString:@"drama"]||[low containsString:@"jpys"]||[low containsString:@"gz360"])return @"https://caiji.dyttzyapi.com/api.php/provide/vod/";
-    if([low containsString:@"dj"]||[low containsString:@"miaowu"]||[low containsString:@"modu"]||[low containsString:@"appsy"])return @"https://api.ffzyapi.com/api.php/provide/vod/";
-    if([low containsString:@"wogg"]||[low containsString:@"pan"]||[low containsString:@"4k"])return @"https://api.wujinapi.me/api.php/provide/vod/";
-    return @"https://caiji.dyttzyapi.com/api.php/provide/vod/";
-}
 static NSURLRequest *MediaJARBridgeMacCMSFallbackRequest(NSString *cmsAPI,NSString *operation,NSDictionary *arguments) {
     NSURLComponents *parts=[NSURLComponents componentsWithString:cmsAPI];
     NSMutableDictionary<NSString *,NSString *> *values=[NSMutableDictionary dictionary];
@@ -796,19 +788,25 @@ static NSData *MediaJARBridgeTryDecryptData(NSData *data,NSDictionary *source) {
 }
 static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operation,NSDictionary *arguments,NSError **error) {
     NSString *api=MediaTVBoxString(source[@"api"]);
+    NSString *siteName=MediaTVBoxString(source[@"name"]).length?MediaTVBoxString(source[@"name"]):api;
     NSString *lowAPI=api.lowercaseString;
-    if([arguments[@"_jar_fallback"] boolValue]){
-        NSString *primary=MediaJARBridgeFallbackCMSURL(api);
-        NSString *secondary=[primary containsString:@"dyttzyapi.com"]?@"https://360zy.com/api.php/provide/vod/":@"https://caiji.dyttzyapi.com/api.php/provide/vod/";
-        return MediaJARBridgeMacCMSFallbackRequest(secondary,operation,arguments);
-    }
     id rawOptions=source[@"options"];
     NSDictionary *cfg=MediaJARBridgeJSONDictionary(rawOptions);
+    NSString *base=MediaJARBridgeFirstValidURL(cfg[@"url"]?:cfg[@"host"]?:cfg[@"site"]?:rawOptions);
+    if([arguments[@"_jar_fallback"] boolValue]){
+        if(!base.length){
+            if(error)*error=[NSError errorWithDomain:@"CCTVHostJARBridge" code:2 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"站点「%@」（%@）未提供可直连的接口地址（ext 为空），已关闭统一采集兜底以真实反馈站点状态",siteName,api]}];
+            return nil;
+        }
+        NSString *sameHostCMS=[base.lowercaseString hasSuffix:@".php"]?base:[base stringByAppendingString:@"/api.php/provide/vod/"];
+        return MediaJARBridgeMacCMSFallbackRequest(sameHostCMS,operation,arguments);
+    }
     NSString *urlStr=@"";
     if([lowAPI containsString:@"xbpq"]||[lowAPI containsString:@"xyqhiker"]||[lowAPI containsString:@"music1"]){
-        NSString *catTpl=MediaTVBoxString(cfg[@"分类url"]?:cfg[@"url"]);
+        NSString *catTpl=MediaTVBoxString(cfg[@"分类url"]?:cfg[@"首页url"]?:cfg[@"url"]);
         if(!catTpl.length&&![operation isEqual:@"play"]){
-            return MediaJARBridgeMacCMSFallbackRequest(MediaJARBridgeFallbackCMSURL(api),operation,arguments);
+            if(error)*error=[NSError errorWithDomain:@"CCTVHostJARBridge" code:1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"站点「%@」（%@）配置中缺少直接可请求的 分类url/首页url（ext=%@）",siteName,api,[rawOptions description]?:@"空"]}];
+            return nil;
         }
         if([operation isEqual:@"home"]||[operation isEqual:@"category"]){
             NSString *tpl=catTpl;
@@ -819,14 +817,18 @@ static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operat
             if(re&&urlStr.length)urlStr=[re stringByReplacingMatchesInString:urlStr options:0 range:NSMakeRange(0,urlStr.length) withTemplate:@""];
         } else if([operation isEqual:@"search"]){
             NSString *tpl=MediaTVBoxString(cfg[@"搜索url"]?:cfg[@"search_url"]);
-            if(!tpl.length)return MediaJARBridgeMacCMSFallbackRequest(MediaJARBridgeFallbackCMSURL(api),operation,arguments);
+            if(!tpl.length){
+                if(error)*error=[NSError errorWithDomain:@"CCTVHostJARBridge" code:1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"站点「%@」（%@）未配置搜索接口地址（搜索url 为空）",siteName,api]}];
+                return nil;
+            }
             NSString *kw=MediaParserEncodeValue(MediaTVBoxString(arguments[@"keyword"]));
             NSString *pg=[NSString stringWithFormat:@"%ld",(long)MAX(1,[arguments[@"page"] integerValue])];
             urlStr=[[[tpl stringByReplacingOccurrencesOfString:@"{wd}" withString:kw] stringByReplacingOccurrencesOfString:@"**" withString:kw] stringByReplacingOccurrencesOfString:@"{pg}" withString:pg];
         } else if([operation isEqual:@"detail"]||[operation isEqual:@"play"]){
             urlStr=MediaTVBoxString(arguments[@"id"]);
             if(![urlStr hasPrefix:@"http://"]&&![urlStr hasPrefix:@"https://"]){
-                return MediaJARBridgeMacCMSFallbackRequest(MediaJARBridgeFallbackCMSURL(api),operation,arguments);
+                if(error)*error=[NSError errorWithDomain:@"CCTVHostJARBridge" code:1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"站点「%@」详情/播放地址无效：%@",siteName,urlStr]}];
+                return nil;
             }
         }
     } else if([lowAPI containsString:@"bili"]){
@@ -845,10 +847,12 @@ static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operat
             urlStr=[vid hasPrefix:@"http"]?vid:[NSString stringWithFormat:@"https://www.bilibili.com/video/%@",vid];
         }
     } else {
-        NSString *base=MediaJARBridgeFirstValidURL(cfg[@"url"]?:cfg[@"host"]?:cfg[@"site"]?:rawOptions);
-        BOOL preferAppAPI=base.length&&[arguments[@"_jar_direct_api"] boolValue];
-        if(!preferAppAPI){
-            return MediaJARBridgeMacCMSFallbackRequest(MediaJARBridgeFallbackCMSURL(api),operation,arguments);
+        if(!base.length){
+            if(error)*error=[NSError errorWithDomain:@"CCTVHostJARBridge" code:2 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"站点「%@」（%@）属于 Android JAR 封闭爬虫且未在合集 ext 中提供独立接口地址（ext 为空），无法在 iOS 上直连",siteName,api]}];
+            return nil;
+        }
+        if([base.lowercaseString hasSuffix:@".php"]){
+            return MediaJARBridgeMacCMSFallbackRequest(base,operation,arguments);
         }
         if([operation isEqual:@"home"]){
             urlStr=[base stringByAppendingString:@"/api.php/app/nav"];
@@ -868,9 +872,12 @@ static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operat
             urlStr=[vid hasPrefix:@"http"]?vid:[NSString stringWithFormat:@"%@/api.php/app/video_url?url=%@",base,vid];
         }
     }
-    if(!urlStr.length)return MediaJARBridgeMacCMSFallbackRequest(MediaJARBridgeFallbackCMSURL(api),operation,arguments);
-    NSURL *url=[NSURL URLWithString:urlStr];
-    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url?:[NSURL URLWithString:MediaJARBridgeFallbackCMSURL(api)] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
+    NSURL *url=urlStr.length?[NSURL URLWithString:urlStr]:nil;
+    if(!url){
+        if(error)*error=[NSError errorWithDomain:@"CCTVHostJARBridge" code:3 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"站点「%@」（%@）生成的请求地址无效：%@",siteName,api,urlStr]}];
+        return nil;
+    }
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
     req.HTTPMethod=@"GET";
     [req setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
     [req setValue:@"application/json, text/html, */*" forHTTPHeaderField:@"Accept"];
@@ -1302,12 +1309,19 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
                     return;
                 }
             }
-            BOOL jarEmptyResult=[tvboxSource[@"protocol"] isEqual:@"jar-bridge"]&&![arguments[@"_jar_fallback"] boolValue]&&![operation isEqual:@"play"]&&(failure||([result isKindOfClass:NSDictionary.class]&&(([operation isEqual:@"home"]&&![result[@"items"] count])||(([operation isEqual:@"category"]||[operation isEqual:@"search"])&&![result[@"items"] count])||([operation isEqual:@"detail"]&&![result[@"lines"] count]))));
+            NSDictionary *jarCfg=MediaJARBridgeJSONDictionary(tvboxSource[@"options"]);
+            NSString *jarBase=MediaJARBridgeFirstValidURL(jarCfg[@"url"]?:jarCfg[@"host"]?:jarCfg[@"site"]?:tvboxSource[@"options"]);
+            BOOL jarEmptyResult=[tvboxSource[@"protocol"] isEqual:@"jar-bridge"]&&jarBase.length>0&&![arguments[@"_jar_fallback"] boolValue]&&![operation isEqual:@"play"]&&(failure||([result isKindOfClass:NSDictionary.class]&&(([operation isEqual:@"home"]&&![result[@"items"] count])||(([operation isEqual:@"category"]||[operation isEqual:@"search"])&&![result[@"items"] count])||([operation isEqual:@"detail"]&&![result[@"lines"] count]))));
             if(jarEmptyResult){
                 NSMutableDictionary *fbArgs=[arguments mutableCopy]?:[NSMutableDictionary dictionary];
                 fbArgs[@"_jar_fallback"]=@YES;
                 [client call:operation arguments:fbArgs correlationID:correlationID completion:completion];
                 return;
+            }
+            if([tvboxSource[@"protocol"] isEqual:@"jar-bridge"]&&!failure&&![operation isEqual:@"play"]&&[result isKindOfClass:NSDictionary.class]&&(([operation isEqual:@"home"]&&![result[@"items"] count])||([operation isEqual:@"detail"]&&![result[@"lines"] count]))){
+                NSString *sName=MediaTVBoxString(tvboxSource[@"name"]).length?MediaTVBoxString(tvboxSource[@"name"]):MediaTVBoxString(tvboxSource[@"api"]);
+                NSString *sHost=[NSURL URLWithString:jarBase].host?:jarBase;
+                failure=[NSError errorWithDomain:@"CCTVHostJARBridge" code:4 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"站点「%@」（%@）未返回有效影视列表（远端返回了非标准 JSON/加密网页或源已失效）",sName,sHost.length?sHost:MediaTVBoxString(tvboxSource[@"api"])]}];
             }
             NSInteger srcType=[tvboxSource[@"tvboxType"] integerValue];
             BOOL cmsStyle=tvboxSource&&([tvboxSource[@"protocol"] isEqual:@"maccms-api"]||[tvboxSource[@"protocol"] isEqual:@"jar-bridge"]||(tvboxSource[@"tvboxType"]!=nil&&(srcType==0||srcType==1)));

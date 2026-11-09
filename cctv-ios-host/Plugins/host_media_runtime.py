@@ -1201,26 +1201,13 @@ class PythonSpider:
                                     break
                             except Exception:
                                 pass
-                    if not rows(result):
-                        fb = self._get_cms_fallback().homeContent(True)
-                        fb_items = [dict(r, vod_id='maccms:' + str(r.get('vod_id', ''))) for r in rows(fb) if isinstance(r, dict)]
-                        result = {'class': result.get('class') or fb.get('class') or [], 'list': fb_items}
                 if self._is_tvbox_spider:
                     self._record_vod_titles(result)
                 return result
             if operation == 'category':
                 tid = str(args.get('categoryId', ''))
                 pg = str(args.get('page', 1))
-                try:
-                    res = decoded(spider.categoryContent(tid, pg, True, args.get('filters') or {}))
-                except Exception:
-                    if not self._is_tvbox_spider:
-                        raise
-                    res = {}
-                if self._is_tvbox_spider and not rows(res):
-                    fb_tid = tid if tid.isdigit() else '1'
-                    fb = self._get_cms_fallback().categoryContent(fb_tid, pg, True, {})
-                    res = {'list': [dict(r, vod_id='maccms:' + str(r.get('vod_id', ''))) for r in rows(fb) if isinstance(r, dict)], 'page': int(pg)}
+                res = decoded(spider.categoryContent(tid, pg, True, args.get('filters') or {}))
                 if self._is_tvbox_spider:
                     self._record_vod_titles(res)
                 return res
@@ -1234,18 +1221,10 @@ class PythonSpider:
                         arity = 2
                     self._search_fn = fn
                     self._search_arity = arity
-                try:
-                    if arity >= 3:
-                        res = decoded(fn(str(args.get('keyword', '')), False, str(args.get('page', 1))))
-                    else:
-                        res = decoded(fn(str(args.get('keyword', '')), False))
-                except Exception:
-                    if not self._is_tvbox_spider:
-                        raise
-                    res = {}
-                if self._is_tvbox_spider and not rows(res):
-                    fb = self._get_cms_fallback().searchContent(str(args.get('keyword', '')), False, str(args.get('page', 1)))
-                    res = {'list': [dict(r, vod_id='maccms:' + str(r.get('vod_id', ''))) for r in rows(fb) if isinstance(r, dict)]}
+                if arity >= 3:
+                    res = decoded(fn(str(args.get('keyword', '')), False, str(args.get('page', 1))))
+                else:
+                    res = decoded(fn(str(args.get('keyword', '')), False))
                 if self._is_tvbox_spider:
                     self._record_vod_titles(res)
                 return res
@@ -1254,17 +1233,7 @@ class PythonSpider:
                 hint_title = _clean_meta_text(args.get('vodName') or args.get('title') or '')
                 if hint_title and not _is_opaque_id_name(hint_title, vid):
                     self._vod_title_by_id[vid] = hint_title
-                if self._is_tvbox_spider and vid.startswith('maccms:'):
-                    res = self._get_cms_fallback().detailContent([vid[7:]])
-                else:
-                    try:
-                        res = decoded(spider.detailContent([vid]))
-                    except Exception:
-                        if not self._is_tvbox_spider:
-                            raise
-                        res = {}
-                    if self._is_tvbox_spider and not rows(res):
-                        res = self._get_cms_fallback().detailContent([vid])
+                res = decoded(spider.detailContent([vid]))
                 if self._is_tvbox_spider:
                     res = self._repair_detail_title_and_episodes(res, vid, hint_title)
                 return res
@@ -1543,24 +1512,7 @@ class NativeJS:
         return self.metadata
 
     def call(self, operation, args):
-        try:
-            return self._call(operation, **args)
-        except MediaError:
-            if not self._is_hamo_or_hjs():
-                raise
-            fb = self._get_cms_fallback()
-            args = args or {}
-            if operation == 'home':
-                return fb.homeContent(True)
-            if operation == 'category':
-                return fb.categoryContent(str(args.get('categoryId') or '1'), str(args.get('page') or '1'), True, args.get('filters') or {})
-            if operation == 'search':
-                return fb.searchContent(str(args.get('keyword') or ''), False, str(args.get('page') or '1'))
-            if operation == 'detail':
-                return fb.detailContent([str(args.get('id') or '')])
-            if operation == 'play':
-                return fb.playerContent(str(args.get('lineId') or ''), str(args.get('id') or ''), [])
-            raise
+        return self._call(operation, **args)
 
     def close(self):
         return self._call('stop')
