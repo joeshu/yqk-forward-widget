@@ -3132,17 +3132,11 @@ configureCatalogNavigation;
     NSString *siteName=[site[@"name"] isKindOfClass:NSString.class]&&[site[@"name"] length]?site[@"name"]:(site[@"key"]?:@"影视站点");
     NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
     NSString *msg=[NSString stringWithFormat:@"站点「%@」未能加载真实脚本（%@），已禁用跨站点兜底界面以真实反馈站点状态。",siteName,api];
-    if(browseAfterImport){
-        MediaBrowserViewController *mediaPage=[self mediaPageCreatingIfNeeded];
-        [mediaPage showMessage:msg loading:NO];
-    }
     [self showServiceError:msg];
 }
 - (void)promptSubscriptionTokenForTVBoxSite:(NSDictionary *)site rawAPI:(NSString *)rawAPI browseAfterImport:(BOOL)browseAfterImport reason:(NSString *)reason {
     NSString *siteName=[site[@"name"] isKindOfClass:NSString.class]&&[site[@"name"] length]?site[@"name"]:@"此站点";
-    NSString *message=reason.length?[NSString stringWithFormat:@"%@
-
-站点「%@」需要有效的订阅令牌。粘贴 token 或完整订阅链接，令牌将保存到本机钥匙串。",reason,siteName]:[NSString stringWithFormat:@"站点「%@」需要订阅令牌。粘贴 token 或完整订阅链接；令牌会保存到本机钥匙串供后续站点使用。",siteName];
+    NSString *message=reason.length?[NSString stringWithFormat:@"%@\n\n站点「%@」需要有效的订阅令牌。粘贴 token 或完整订阅链接，令牌将保存到本机钥匙串。",reason,siteName]:[NSString stringWithFormat:@"站点「%@」需要订阅令牌。粘贴 token 或完整订阅链接；令牌会保存到本机钥匙串供后续站点使用。",siteName];
     UIAlertController *credential=[UIAlertController alertControllerWithTitle:@"Hawk iOS 资源访问令牌" message:message preferredStyle:UIAlertControllerStyleAlert];
     [credential addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"token 或完整订阅链接";field.secureTextEntry=YES;field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.clearButtonMode=UITextFieldViewModeWhileEditing;}];
     [credential addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
@@ -3156,14 +3150,7 @@ configureCatalogNavigation;
     NSString *host=downloadURL.host?:@"远端站点";
     NSString *reason=error.localizedDescription?:@"远端未返回有效脚本内容";
     NSString *statusText=[NSString stringWithFormat:@"站点「%@」打开失败（%@）：%@",siteName,host,reason];
-    if(browseAfterImport){
-        MediaBrowserViewController *mediaPage=[self mediaPageCreatingIfNeeded];
-        [mediaPage showMessage:statusText loading:NO];
-    }
-    NSString *alertMessage=[NSString stringWithFormat:@"%@
-
-请求地址：%@
-（已关闭统一兜底源，真实反馈该站点实际响应）",reason,[HostLogRedactor redactText:downloadURL.absoluteString?:rawAPI?:@""]];
+    NSString *alertMessage=[NSString stringWithFormat:@"%@\n\n请求地址：%@\n（已关闭统一兜底源，真实反馈该站点实际响应）",reason,[HostLogRedactor redactText:downloadURL.absoluteString?:rawAPI?:@""]];
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@ · 打开失败",siteName] message:alertMessage preferredStyle:UIAlertControllerStyleAlert];
     __weak typeof(self) weakSelf=self;
     if([host.lowercaseString containsString:@"lytvs.top"]&&([reason containsString:@"403"]||[reason containsString:@"401"])){
