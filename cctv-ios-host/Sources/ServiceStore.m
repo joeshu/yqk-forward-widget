@@ -77,6 +77,25 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
         [[NSUserDefaults.standardUserDefaults arrayForKey:@"pythonServices"] ?: @[] mutableCopy];
     BOOL pathsChanged=NO;
     NSMutableSet *usedPorts=[NSMutableSet setWithObjects:@8767,@18770,nil];
+    for(NSInteger index=(NSInteger)rows.count-1;index>=0;index--){
+        NSDictionary *row=rows[(NSUInteger)index];if(![row isKindOfClass:NSDictionary.class])continue;
+        if(![row[@"builtin"] boolValue]){
+            NSString *entryPath=[self codePath:row];
+            NSDictionary *attrs=entryPath.length?[NSFileManager.defaultManager attributesOfItemAtPath:entryPath error:NULL]:nil;
+            if(attrs&&[attrs[NSFileSize] unsignedLongLongValue]>0&&[attrs[NSFileSize] unsignedLongLongValue]<=4096){
+                NSData *entryData=[NSData dataWithContentsOfFile:entryPath options:NSDataReadingMappedIfSafe error:NULL];
+                NSString *entryText=entryData?[[NSString alloc] initWithData:entryData encoding:NSUTF8StringEncoding]:nil;
+                if([entryText containsString:@"self._engine = csp_adapter.AppVideoEngine('"]||[entryText containsString:@"home: async function(){ return { categories: [{ id: '1', name: '精选' }], items: [] }; }"]){
+                    NSString *sid=[row[@"id"] isKindOfClass:NSString.class]?row[@"id"]:@"";
+                    if(ServiceRelativePath(sid)&&sid.pathComponents.count==1){
+                        [NSFileManager.defaultManager removeItemAtPath:[[self directory] stringByAppendingPathComponent:sid] error:NULL];
+                    }
+                    [rows removeObjectAtIndex:(NSUInteger)index];
+                    pathsChanged=YES;
+                }
+            }
+        }
+    }
     for(NSUInteger index=0;index<rows.count;index++){
         NSDictionary *row=rows[index];if(![row isKindOfClass:NSDictionary.class])continue;
         NSMutableDictionary *resolved=[[self resolvedService:row] mutableCopy];

@@ -1017,6 +1017,8 @@ class PythonSpider:
                 self._source_text = Path(path).read_text(encoding='utf-8', errors='ignore')
             except Exception:
                 self._source_text = ''
+            if "self._engine = csp_adapter.AppVideoEngine(" in self._source_text:
+                raise MediaError('INVALID_ENTRY', '该站点此前缓存了旧版离线兜底占位脚本，已清理统一兜底，请返回重新点选或刷新该站点以获取真实响应')
             self._is_tvbox_spider = (
                 ('base.spider' in self._source_text or 'BaseSpider' in self._source_text) and
                 not any(tok in self._source_text for tok in ('.test', '.example', '127.0.0.1'))
@@ -1476,71 +1478,11 @@ class NativeJS:
         try:
             self.metadata = self._call('start', packageRoot=os.path.realpath(root), **manifest)
         except BaseException:
-            if self._is_hamo_or_hjs() or (self.service_identifier and str(self.manifest.get('protocol') or '').lower() in ('drpy', 'catvod-js', 'hamo-source-v3')):
-                try:
-                    self._call('stop')
-                except Exception:
-                    pass
-                self._use_cms_only = True
-                self.metadata = {
-                    'engine': 'JavaScriptCore',
-                    'protocol': str(self.manifest.get('protocol') or 'hamo-source-v3'),
-                    'name': str(self.manifest.get('name') or 'JS 插件'),
-                    'capabilities': ['home', 'category', 'search', 'detail', 'play'],
-                }
-            else:
-                try:
-                    self._call('stop')
-                except Exception:
-                    pass
-                raise
-
-    def _is_hamo_or_hjs(self):
-        proto = str(self.manifest.get('protocol') or '').lower()
-        entry = str(self.manifest.get('entry') or '').lower()
-        return proto == 'hamo-source-v3' or entry.endswith('.hjs')
-
-    def _get_cms_fallback(self):
-        if self._cms_fallback is None:
-            csp_adapter = _load_csp_adapter()
-            meta = f"{self.manifest.get('name', '')} {self.manifest.get('entry', '')}".lower()
-            if any(k in meta for k in ('2048', '成人', '野果', '橙果', '吃瓜', 'chigua', '海角', 'haijiao', '黑料', 'heiliao', '51cg', '福利', '🔞')):
-                api_cls = 'csp_AdultDJ'
-            elif any(k in meta for k in ('短剧', 'duanju', '七猫', '围观', '好看', '喜番', '河马', '星芽', '抖音', '红果')):
-                api_cls = 'csp_QimaoDJ'
-            else:
-                api_cls = 'csp_AppRJ'
-            self._cms_fallback = csp_adapter.AppVideoEngine(api_cls, '')
-        return self._cms_fallback
-
-    def _invoke_cms_fallback(self, operation, args):
-        cms_engine = self._get_cms_fallback()
-        args = args if isinstance(args, dict) else {}
-        if operation == 'home':
-            return cms_engine.homeContent(filter=True)
-        if operation == 'category':
-            return cms_engine.categoryContent(
-                str(args.get('categoryId') or args.get('tid') or '1'),
-                str(args.get('page') or args.get('pg') or '1'),
-                True,
-                args.get('filters') or {},
-            )
-        if operation == 'search':
-            return cms_engine.searchContent(
-                str(args.get('keyword') or args.get('wd') or ''),
-                False,
-                str(args.get('page') or '1'),
-            )
-        if operation == 'detail':
-            vid = str(args.get('id') or args.get('itemId') or '')
-            return cms_engine.detailContent([vid] if vid else [])
-        if operation == 'play':
-            return cms_engine.playerContent(
-                str(args.get('lineId') or ''),
-                str(args.get('id') or args.get('url') or ''),
-                [],
-            )
-        return {}
+            try:
+                self._call('stop')
+            except Exception:
+                pass
+            raise
 
     def _call(self, operation, **args):
         payload = dict(args, session=self.session)
@@ -1556,45 +1498,9 @@ class NativeJS:
 
     def call(self, operation, args):
         args = args if isinstance(args, dict) else {}
-        allow_fallback = self._use_cms_only or self._is_hamo_or_hjs() or bool(self.service_identifier)
-        if self._use_cms_only and operation in ('home', 'category', 'search', 'detail', 'play'):
-            return self._invoke_cms_fallback(operation, args)
-        try:
-            res = self._call(operation, **args)
-        except BaseException:
-            if allow_fallback and operation in ('home', 'category', 'search', 'detail', 'play'):
-                return self._invoke_cms_fallback(operation, args)
-            raise
-        if allow_fallback:
-            if operation in ('home', 'category', 'search') and not rows(res):
-                fb_res = self._invoke_cms_fallback(operation, args)
-                if rows(fb_res):
-                    return fb_res
-            elif operation == 'detail':
-                has_eps = False
-                if isinstance(res, dict):
-                    lines = res.get('lines') or []
-                    if isinstance(lines, list) and any(isinstance(l, dict) and l.get('episodes') for l in lines):
-                        has_eps = True
-                    elif res.get('vod_play_url'):
-                        has_eps = True
-                    elif isinstance(res.get('list'), list) and res['list'] and isinstance(res['list'][0], dict) and res['list'][0].get('vod_play_url'):
-                        has_eps = True
-                if not has_eps:
-                    fb_res = self._invoke_cms_fallback(operation, args)
-                    if fb_res:
-                        return fb_res
-            elif operation == 'play':
-                play_u = str(media_choice_address(res) if isinstance(res, dict) else (res if isinstance(res, str) else '')).strip()
-                if not play_u.startswith(('http://', 'https://')):
-                    fb_res = self._invoke_cms_fallback(operation, args)
-                    if fb_res:
-                        return fb_res
-        return res
+        return self._call(operation, **args)
 
     def close(self):
-        if self._use_cms_only:
-            return True
         return self._call('stop')
 
 

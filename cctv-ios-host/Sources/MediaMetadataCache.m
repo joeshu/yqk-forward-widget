@@ -91,7 +91,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         _persistentRecords=[NSMutableDictionary dictionary];
         NSURL *support=[NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
         NSURL *directory=[support URLByAppendingPathComponent:@"CCTVHost" isDirectory:YES];
-        if(directory){[NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL];_persistentPath=[[directory URLByAppendingPathComponent:@"MediaMetadataCache-v1.json"] path];}
+        if(directory){[NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL];[NSFileManager.defaultManager removeItemAtURL:[directory URLByAppendingPathComponent:@"MediaMetadataCache-v1.json"] error:NULL];_persistentPath=[[directory URLByAppendingPathComponent:@"MediaMetadataCache-v2.json"] path];}
         [self loadPersistentRecords];
 #if TARGET_OS_IOS
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(evictMemoryCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];

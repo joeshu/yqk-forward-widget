@@ -815,18 +815,6 @@ static NSArray<NSString *> *MediaJARBridgeCandidatesForSource(NSDictionary *sour
     for(NSString *u in MediaJARBridgeCandidateURLs(@[cfg[@"url"]?:@"",cfg[@"host"]?:@"",cfg[@"site"]?:@"",rawOptions?:@""])){
         if(u.length&&![list containsObject:u])[list addObject:u];
     }
-    NSString *lowAPI=MediaTVBoxString(source[@"api"]).lowercaseString;
-    if(lowAPI.length&&![lowAPI containsString:@"xbpq"]&&![lowAPI containsString:@"xyqhiker"]&&![lowAPI containsString:@"music1"]&&![lowAPI containsString:@"bili"]&&![lowAPI containsString:@"panweb"]&&![lowAPI containsString:@"wogg"]){
-        NSArray<NSString *> *cmsBackups=@[
-            @"https://360zy.com/api.php/provide/vod/index.php",
-            @"https://cj.lziapi.com/api.php/provide/vod/index.php",
-            @"https://api.ffzyapi.com/api.php/provide/vod/index.php",
-            @"https://bfzyapi.com/api.php/provide/vod/index.php"
-        ];
-        for(NSString *b in cmsBackups){
-            if(![list containsObject:b])[list addObject:b];
-        }
-    }
     return list.copy;
 }
 static NSURLRequest *MediaJARBridgeMacCMSFallbackRequest(NSString *cmsAPI,NSString *operation,NSDictionary *arguments) {

@@ -86,7 +86,16 @@ static void CicadaCallVoidDouble(id target, SEL sel, double arg) {
 
 static void CicadaCallVoidInt(id target, SEL sel, int arg) {
     if (!target || !sel || ![target respondsToSelector:sel]) return;
-    @try { ((void (*)(id, SEL, int))objc_msgSend)(target, sel, arg); } @catch (NSException *e) {}
+    @try {
+        NSMethodSignature *sig = [target methodSignatureForSelector:sel];
+        const char *argType = (sig && sig.numberOfArguments > 2) ? [sig getArgumentTypeAtIndex:2] : NULL;
+        while (argType && (argType[0] == 'r' || argType[0] == 'n' || argType[0] == 'N' || argType[0] == 'o' || argType[0] == 'O' || argType[0] == 'R' || argType[0] == 'V')) argType++;
+        if (argType && (argType[0] == 'q' || argType[0] == 'Q' || argType[0] == 'l' || argType[0] == 'L')) {
+            ((void (*)(id, SEL, int64_t))objc_msgSend)(target, sel, (int64_t)arg);
+            return;
+        }
+        ((void (*)(id, SEL, int))objc_msgSend)(target, sel, arg);
+    } @catch (NSException *e) {}
 }
 
 static void CicadaCallVoidDoubleLong(id target, SEL sel, double first, long second) {
@@ -133,10 +142,21 @@ static NSTimeInterval MediaPlaybackCicadaNormalizeTimeValue(id value) {
 }
 
 static NSString *MediaPlaybackCicadaStringFromModel(id model, NSArray<NSString *> *keys) {
+    if (!model) return nil;
+    if ([model isKindOfClass:NSDictionary.class]) {
+        for (NSString *key in keys) {
+            id value = [(NSDictionary *)model objectForKey:key];
+            if ([value isKindOfClass:NSString.class] && [(NSString *)value length]) return value;
+        }
+    }
     for (NSString *key in keys) {
         SEL sel = NSSelectorFromString(key);
         if (![model respondsToSelector:sel]) continue;
         @try {
+            NSMethodSignature *sig = [model methodSignatureForSelector:sel];
+            const char *retType = sig ? sig.methodReturnType : NULL;
+            while (retType && (retType[0] == 'r' || retType[0] == 'n' || retType[0] == 'N' || retType[0] == 'o' || retType[0] == 'O' || retType[0] == 'R' || retType[0] == 'V')) retType++;
+            if (!retType || retType[0] != '@') continue;
             id value = ((id (*)(id, SEL))objc_msgSend)(model, sel);
             if ([value isKindOfClass:NSString.class] && [(NSString *)value length]) return value;
         } @catch (NSException *e) {}
@@ -145,12 +165,34 @@ static NSString *MediaPlaybackCicadaStringFromModel(id model, NSArray<NSString *
 }
 
 static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
+    if (!model) return -1;
+    if ([model isKindOfClass:NSDictionary.class]) {
+        for (NSString *key in @[@"errorCode", @"code", @"error_code"]) {
+            id value = [(NSDictionary *)model objectForKey:key];
+            if ([value respondsToSelector:@selector(integerValue)]) return [value integerValue];
+        }
+    }
     for (NSString *key in @[@"errorCode", @"code", @"error_code"]) {
         SEL sel = NSSelectorFromString(key);
         if (![model respondsToSelector:sel]) continue;
         @try {
-            id value = ((id (*)(id, SEL))objc_msgSend)(model, sel);
-            if ([value respondsToSelector:@selector(integerValue)]) return [value integerValue];
+            // CicadaErrorModel.code 在二进制中返回标量 Q (uint64_t, 如 0x20050001)，
+            // 绝不可直接强转为 id 返回，否则 ARC 调用 objc_retainAutoreleasedReturnValue
+            // 将错误码当作对象指针解引用，触发 libobjc.A.dylib offset=4724 SIGSEGV 崩溃。
+            NSMethodSignature *sig = [model methodSignatureForSelector:sel];
+            const char *retType = sig ? sig.methodReturnType : NULL;
+            while (retType && (retType[0] == 'r' || retType[0] == 'n' || retType[0] == 'N' || retType[0] == 'o' || retType[0] == 'O' || retType[0] == 'R' || retType[0] == 'V')) retType++;
+            if (!retType) continue;
+            if (retType[0] == 'q' || retType[0] == 'Q' || retType[0] == 'l' || retType[0] == 'L') {
+                return (NSInteger)((int64_t (*)(id, SEL))objc_msgSend)(model, sel);
+            }
+            if (retType[0] == 'i' || retType[0] == 'I' || retType[0] == 's' || retType[0] == 'S' || retType[0] == 'c' || retType[0] == 'C') {
+                return (NSInteger)((int (*)(id, SEL))objc_msgSend)(model, sel);
+            }
+            if (retType[0] == '@') {
+                id value = ((id (*)(id, SEL))objc_msgSend)(model, sel);
+                if ([value respondsToSelector:@selector(integerValue)]) return [value integerValue];
+            }
         } @catch (NSException *e) {}
     }
     return -1;

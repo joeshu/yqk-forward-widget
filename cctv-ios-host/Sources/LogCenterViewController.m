@@ -190,6 +190,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 }
 - (DiagnosticLogCategory)categoryForLine:(NSString *)line {
     NSString *lower=line.lowercaseString;
+    if([lower containsString:@"已启用央视播放器异常缩略图保护"])return DiagnosticLogCategoryPlayback;
     for(NSString *word in @[@"失败",@"错误",@"异常",@"超时",@"拒绝",@"crash",@"fatal"])if([lower containsString:word])return DiagnosticLogCategoryError;
     for(NSString *word in @[@"python",@"javascript",@"插件",@"服务",@"spider",@"node",@"js "])if([lower containsString:word])return DiagnosticLogCategoryPlugin;
     for(NSString *word in @[@"播放",@"起播",@"首帧",@"切台",@"vdn",@"sdk",@"时移",@"回看",@"卡顿",@"线路"])if([lower containsString:word])return DiagnosticLogCategoryPlayback;

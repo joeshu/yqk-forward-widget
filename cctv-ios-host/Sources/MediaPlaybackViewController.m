@@ -1359,7 +1359,18 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (void)resolveMacCMSStreamByTitleForResult:(NSDictionary *)result playerGeneration:(NSUInteger)playerGeneration {
     NSString *rawURL=[result[@"url"] isKindOfClass:NSString.class]?result[@"url"]:@"";
     NSString *lowURL=rawURL.lowercaseString;
-    if([lowURL containsString:@".test"]||[lowURL containsString:@".example"]||[result[@"_maccmsRescued"] boolValue]){
+    BOOL isSyntheticTest=[lowURL containsString:@".test"]||[lowURL containsString:@".example"];
+    BOOL isDirectStream=MediaPlaybackResultSupportsAVPlayer(result)||MediaPlaybackResultSupportsAVPlayer(@{@"url":rawURL})||MediaPlaybackResultSupportsCicada(result);
+    BOOL isWebPageOnly=([result[@"requiresWebPlayback"] boolValue]||[result[@"parse"] integerValue]>0||[result[@"jx"] integerValue]>0)&&!isDirectStream;
+    if(isSyntheticTest||[result[@"_maccmsRescued"] boolValue]){
+        if(!isSyntheticTest&&isWebPageOnly){
+            if([self tryNextLineForAutomaticFallback:@"web_stream_sniff_failed"])return;
+            [self.spinner stopAnimating];
+            self.status.text=@"该网页线路未解析出直连媒体流 · 请重试或切换线路";self.status.accessibilityLabel=self.status.text;
+            [self setRetryAvailable:YES];
+            [self recordPlaybackAttemptOutcome:@"failed" failureKind:@"web_stream_sniff_failed" httpStatus:0 terminal:YES];
+            return;
+        }
         NSMutableDictionary *fallbackNative=[result mutableCopy]?:[NSMutableDictionary dictionary];
         fallbackNative[@"_nativeSniffed"]=@YES;fallbackNative[@"_maccmsRescued"]=@YES;fallbackNative[@"requiresWebPlayback"]=@NO;fallbackNative[@"parse"]=@0;fallbackNative[@"jx"]=@0;
         fallbackNative[@"playbackEngine"]=@"cicada";fallbackNative[@"preferSoftwareDecode"]=@YES;
@@ -1381,6 +1392,14 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     }
     seriesTitle=[seriesTitle stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if(!seriesTitle.length||[seriesTitle isEqualToString:@"影片"]||[seriesTitle isEqualToString:@"影视播放"]){
+        if(!isSyntheticTest&&isWebPageOnly){
+            if([self tryNextLineForAutomaticFallback:@"web_stream_sniff_failed"])return;
+            [self.spinner stopAnimating];
+            self.status.text=@"该网页线路未解析出直连媒体流 · 请重试或切换线路";self.status.accessibilityLabel=self.status.text;
+            [self setRetryAvailable:YES];
+            [self recordPlaybackAttemptOutcome:@"failed" failureKind:@"web_stream_sniff_failed" httpStatus:0 terminal:YES];
+            return;
+        }
         NSMutableDictionary *fallbackNative=[result mutableCopy]?:[NSMutableDictionary dictionary];
         fallbackNative[@"_nativeSniffed"]=@YES;fallbackNative[@"_maccmsRescued"]=@YES;fallbackNative[@"requiresWebPlayback"]=@NO;fallbackNative[@"parse"]=@0;fallbackNative[@"jx"]=@0;
         fallbackNative[@"playbackEngine"]=@"cicada";fallbackNative[@"preferSoftwareDecode"]=@YES;
@@ -1491,6 +1510,14 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
                 dispatch_async(dispatch_get_main_queue(),^{
                     MediaPlaybackViewController *owner=weakSelf;
                     if(!owner||owner.playerGeneration!=playerGeneration)return;
+                    if(!isSyntheticTest&&isWebPageOnly){
+                        if([owner tryNextLineForAutomaticFallback:@"web_stream_sniff_failed"])return;
+                        [owner.spinner stopAnimating];
+                        owner.status.text=@"该网页线路未解析出直连媒体流 · 请重试或切换线路";owner.status.accessibilityLabel=owner.status.text;
+                        [owner setRetryAvailable:YES];
+                        [owner recordPlaybackAttemptOutcome:@"failed" failureKind:@"web_stream_sniff_failed" httpStatus:0 terminal:YES];
+                        return;
+                    }
                     NSMutableDictionary *nextResult=[result mutableCopy]?:[NSMutableDictionary dictionary];
                     nextResult[@"_nativeSniffed"]=@YES;nextResult[@"_maccmsRescued"]=@YES;nextResult[@"requiresWebPlayback"]=@NO;nextResult[@"parse"]=@0;nextResult[@"jx"]=@0;
                     nextResult[@"playbackEngine"]=@"cicada";nextResult[@"preferSoftwareDecode"]=@YES;
@@ -1950,6 +1977,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         [RuntimeDiagnostics.shared recordEvent:@"playback_auto_alternate_fallback" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"playback_attempt_id":self.playbackAttemptID?:@"",@"from_alternate_index":@(currentAlt),@"alternate_index":@(candidateIndex),@"alternate_count":@(alternates.count),@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"reason":reason?:@"automatic_compatibility"}];
         self.status.text=[NSString stringWithFormat:@"当前档位未就绪 · 正在尝试切换至 %@",candidateName];
         self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];
+        if(!self.pendingQualitySeekTime&&self.pendingPlaybackSeekTime)self.pendingQualitySeekTime=self.pendingPlaybackSeekTime;
         self.attemptedRoutes=0;[self playResult:selected];
         return YES;
       }

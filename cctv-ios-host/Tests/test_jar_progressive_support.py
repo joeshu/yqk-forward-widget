@@ -807,13 +807,49 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
                     return '{"ok":false,"error":"此文件像是规则配置"}'
                 return '{"ok":true,"result":{}}'
 
-        nav = host_media_runtime.NativeJS(
-            str(ROOT),
-            {'name': '吃瓜网｜🔞', 'entry': '吃瓜网.hjs', 'protocol': 'hamo-source-v3', 'moduleType': 'script'},
-            bridge=DummyFailingHjsBridge(),
-        )
-        self.assertTrue(nav._use_cms_only)
-        self.assertIn('home', nav.capabilities().get('capabilities', []))
+        with self.assertRaises(host_media_runtime.MediaError) as ctx:
+            host_media_runtime.NativeJS(
+                str(ROOT),
+                {'name': '吃瓜网｜🔞', 'entry': '吃瓜网.hjs', 'protocol': 'hamo-source-v3', 'moduleType': 'script'},
+                bridge=DummyFailingHjsBridge(),
+            )
+        self.assertIn('此文件像是规则配置', str(ctx.exception))
+
+    def test_round20_cicada_error_code_sigsegv_js_bootstrap_kkapp_v3_and_authentic_hawk_sites(self):
+        """Verifies Round 20 fixes for diagnostic logs (d17492e5/22035a74/8567a55d), playback SIGSEGV crash, For-ADM kkapp.js?v=3, and authentic Hawk site feedback:
+        1. MediaPlaybackCicadaAdapter.m checks NSMethodSignature.methodReturnType in MediaPlaybackCicadaCodeFromModel so CicadaErrorModel.code (uint64_t Q16@0:8) is read as a scalar instead of id, preventing objc_retainAutoreleasedReturnValue SIGSEGV at libobjc.A.dylib offset=4724.
+        2. JSPluginRuntime.m compatBootstrap escapes regex backslashes so it never throws SyntaxError: Unexpected keyword const, and drpy/adapter.mjs strips consecutive minified ESM imports without throwing Unexpected string literal.
+        3. LogCenterViewController.m classifies 已启用央视播放器异常缩略图保护 as DiagnosticLogCategoryPlayback rather than DiagnosticLogCategoryError.
+        4. MediaPackageDownloader.m accepts For-ADM kkapp.js?v=3 with pre-integrated sitePrepareImageDomains without throwing code 32, and removes fake csp_AppRJ/hawk stubs in PackageFallbackScriptForFailedURL.
+        5. MediaAPIClient.m, JSPluginRuntime.m, host_media_runtime.py, ServiceStore.m, and MediaMetadataCache.m remove unified cross-site CMS fallbacks and purge poisoned stub services/caches.
+        """
+        ca_m = (SOURCES / 'MediaPlaybackCicadaAdapter.m').read_text(encoding='utf-8')
+        self.assertIn("NSMethodSignature *sig = [model methodSignatureForSelector:sel];", ca_m)
+        self.assertIn("return (NSInteger)((int64_t (*)(id, SEL))objc_msgSend)(model, sel);", ca_m)
+
+        lc_m = (SOURCES / 'LogCenterViewController.m').read_text(encoding='utf-8')
+        self.assertIn('if([lower containsString:@"已启用央视播放器异常缩略图保护"])return DiagnosticLogCategoryPlayback;', lc_m)
+
+        js_rt = (SOURCES / 'JSPluginRuntime.m').read_text(encoding='utf-8')
+        self.assertIn(r'replace(/\\/$/, \"\")', js_rt)
+        self.assertNotIn("fallbackRule", js_rt)
+
+        adapter_mjs = (ROOT / 'JSPlugins/drpy/adapter.mjs').read_text(encoding='utf-8')
+        self.assertIn("function stripDrpyImportsAndExports(raw)", adapter_mjs)
+        self.assertIn("function loadRuleFromExt(ext)", adapter_mjs)
+
+        dl_m = (SOURCES / 'MediaPackageDownloader.m').read_text(encoding='utf-8')
+        self.assertIn('![text containsString:@"sitePrepareImageDomains("]', dl_m)
+        self.assertNotIn("self._engine = csp_adapter.AppVideoEngine(", dl_m)
+
+        api_m = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')
+        self.assertNotIn("cmsBackups", api_m)
+
+        ss_m = (SOURCES / 'ServiceStore.m').read_text(encoding='utf-8')
+        self.assertIn("self._engine = csp_adapter.AppVideoEngine(", ss_m)
+
+        mc_m = (SOURCES / 'MediaMetadataCache.m').read_text(encoding='utf-8')
+        self.assertIn('@"MediaMetadataCache-v2.json"', mc_m)
 
 
 if __name__ == '__main__':

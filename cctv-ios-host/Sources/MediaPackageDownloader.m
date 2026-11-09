@@ -42,61 +42,9 @@ static NSData *PackageBundledWeBoxScriptForURL(NSURL *sourceURL) {
     return bundlePath.length?[NSData dataWithContentsOfFile:bundlePath options:NSDataReadingMappedIfSafe error:NULL]:nil;
 }
 static NSData *PackageFallbackScriptForFailedURL(NSURL *sourceURL) {
-    NSData *webox=PackageBundledWeBoxScriptForURL(sourceURL);
-    if(webox.length)return webox;
-    if(!sourceURL)return nil;
-    NSString *host=sourceURL.host.lowercaseString?:@"";
-    BOOL knownCatalogHost=[host containsString:@"lytvs.top"]||[host containsString:@"cnb.cool"]||[host containsString:@"ghfast.top"];
-    if(!knownCatalogHost)return nil;
-    NSString *last=[sourceURL.lastPathComponent stringByRemovingPercentEncoding]?:sourceURL.lastPathComponent?:@"";
-    NSString *lower=last.lowercaseString;
-    NSString *ext=sourceURL.pathExtension.lowercaseString?:@"";
-    if([ext isEqualToString:@"py"]){
-        if([lower containsString:@"hongguo"]||[lower containsString:@"红果"]||[lower containsString:@"hgtv"]){
-            NSString *hgPath=[NSBundle.mainBundle pathForResource:@"hongguo-python" ofType:@"py" inDirectory:@"BuiltinMedia"];
-            if(hgPath.length){
-                NSData *hgData=[NSData dataWithContentsOfFile:hgPath options:NSDataReadingMappedIfSafe error:NULL];
-                if(hgData.length)return hgData;
-            }
-        }
-        NSString *apiCls=@"csp_AppRJ";
-        if([lower containsString:@"吃瓜"]||[lower containsString:@"海角"]||[lower containsString:@"2048"]||[lower containsString:@"成人"]||[lower containsString:@"福利"]||[lower containsString:@"🔞"]){
-            apiCls=@"csp_AdultDJ";
-        }else if([lower containsString:@"短剧"]||[lower containsString:@"duanju"]||[lower containsString:@"七猫"]||[lower containsString:@"围观"]||[lower containsString:@"星芽"]||[lower containsString:@"河马"]){
-            apiCls=@"csp_QimaoDJ";
-        }
-        NSString *pyStub=[NSString stringWithFormat:
-            @"# -*- coding: utf-8 -*-\n"
-            @"import csp_adapter\n\n"
-            @"class Spider:\n"
-            @"    def __init__(self):\n"
-            @"        self._engine = csp_adapter.AppVideoEngine('%@', {'siteName': '%@'})\n"
-            @"    def init(self, extend=''):\n"
-            @"        pass\n"
-            @"    def getName(self):\n"
-            @"        return '%@'\n"
-            @"    def homeContent(self, filter=True):\n"
-            @"        return self._engine.homeContent(filter)\n"
-            @"    def homeVideoContent(self):\n"
-            @"        return {'list': []}\n"
-            @"    def categoryContent(self, tid, pg, filter=True, extend=None):\n"
-            @"        return self._engine.categoryContent(str(tid or '1'), str(pg or '1'), filter, extend or {})\n"
-            @"    def detailContent(self, ids):\n"
-            @"        return self._engine.detailContent(ids if isinstance(ids, list) else [ids])\n"
-            @"    def searchContent(self, key, quick=False, pg='1'):\n"
-            @"        return self._engine.searchContent(str(key or ''), quick, str(pg or '1'))\n"
-            @"    def playerContent(self, flag, id, vipFlags=None):\n"
-            @"        return self._engine.playerContent(str(flag or ''), str(id or ''), vipFlags or [])\n",
-            apiCls, [last stringByDeletingPathExtension], [last stringByDeletingPathExtension]];
-        return [pyStub dataUsingEncoding:NSUTF8StringEncoding];
-    }
-    if([ext isEqualToString:@"hjs"]||[ext isEqualToString:@"js"]){
-        NSString *jsStub=[NSString stringWithFormat:
-            @"var hawk = { apiVersion: 3, type: 'source', meta: { name: '%@' }, home: async function(){ return { categories: [{ id: '1', name: '精选' }], items: [] }; }, category: async function(){ return { page: 1, items: [] }; }, search: async function(){ return { page: 1, items: [] }; }, detail: async function(a){ return { id: String(a && a.id || ''), name: '', lines: [] }; }, resolve: async function(a){ return { url: String(a && a.url || '') }; } };\n",
-            [[last stringByDeletingPathExtension] stringByReplacingOccurrencesOfString:@"'" withString:@""]];
-        return [jsStub dataUsingEncoding:NSUTF8StringEncoding];
-    }
-    return nil;
+    // 仅对内置打包的 5 个 WeBox 资源提供离线包映射；
+    // 严禁对 lytvs.top / cnb.cool / ghfast.top 等外部站点生成伪造的统一 CMS 兜底脚本，确保真实反馈每个站点的实际响应。
+    return PackageBundledWeBoxScriptForURL(sourceURL);
 }
 static BOOL PackageIsForADMYqkSourceURL(NSURL *sourceURL) {
     return [sourceURL.host.lowercaseString isEqual:@"raw.githubusercontent.com"]&&[sourceURL.path.lowercaseString isEqual:@"/joeshu/for-adm/master/cctvhost/yqk.js"];
@@ -202,7 +150,7 @@ static NSData *PackageAdaptForADMSignedSource(NSData *data,NSURL *sourceURL,NSEr
     for(NSDictionary<NSString *,NSString *> *replacement in replacements){
         NSString *old=replacement[@"old"],*updated=replacement[@"new"];NSUInteger occurrences=[[text componentsSeparatedByString:old] count]-1;
         if(occurrences==1)text=[text stringByReplacingOccurrencesOfString:old withString:updated];
-        else if(strictThreeSource&&![text containsString:updated]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源脚本协议已变化，未导入不兼容版本。"}];return nil;}
+        else if(strictThreeSource&&![text containsString:updated]&&![text containsString:@"async function sitePrepareImageDomains(value)"]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源脚本协议已变化，未导入不兼容版本。"}];return nil;}
     }
     NSString *imageHelper=
     @"var siteImageDomains=Object.create(null),siteImageDomainFlights=Object.create(null);\n"
@@ -212,18 +160,25 @@ static NSData *PackageAdaptForADMSignedSource(NSData *data,NSURL *sourceURL,NSEr
     NSString *newImageDomain=@"image=domains.length?String(siteImageDomains[String(row.imageGroup||'')]&&siteImageDomains[String(row.imageGroup||'')].domain||domains[0]).replace(/\\/$/,'')+'/'+path.replace(/^\\//,''):Source.origin+path;";
     NSUInteger imageDomainOccurrences=[[text componentsSeparatedByString:oldImageDomain] count]-1;
     if(imageDomainOccurrences==1)text=[text stringByReplacingOccurrencesOfString:oldImageDomain withString:newImageDomain];
-    else if(strictThreeSource&&![text containsString:newImageDomain]&&![text containsString:@"probe=siteImageDomains[String(row.imageGroup||'')]"]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源封面地址协议已变化，未导入不兼容版本。"}];return nil;}
+    else if(strictThreeSource&&![text containsString:newImageDomain]&&![text containsString:@"probe=siteImageDomains[String(row.imageGroup||'')]"]&&![text containsString:@"siteImageDomains["]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源封面地址协议已变化，未导入不兼容版本。"}];return nil;}
     NSString *oldAdapter=@"var adapter=new SiteAdapter();";
     NSUInteger adapterOccurrences=[[text componentsSeparatedByString:oldAdapter] count]-1;
     if(adapterOccurrences==1&&![text containsString:@"async function sitePrepareImageDomains(value)"])text=[text stringByReplacingOccurrencesOfString:oldAdapter withString:[imageHelper stringByAppendingString:oldAdapter]];
     else if(strictThreeSource&&![text containsString:@"async function sitePrepareImageDomains(value)"]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源封面探测入口已变化，未导入不兼容版本。"}];return nil;}
+    if([text containsString:@"async function sitePrepareImageDomains(value)"]){
+        text=[text stringByReplacingOccurrencesOfString:@"cacheAge=cached&&cached.domain?1800000:60000" withString:@"cacheAge=cached&&cached.domain?1800000:300000"];
+        text=[text stringByReplacingOccurrencesOfString:@"offset+=3){var probes=await Promise.all(mirrors.slice(offset,offset+3)" withString:@"offset+=6){var probes=await Promise.all(mirrors.slice(offset,offset+6)"];
+        text=[text stringByReplacingOccurrencesOfString:@"timeout:3000,headers:{Referer:Source.origin+'/'" withString:@"timeout:1200,headers:{Referer:Source.origin+'/'"];
+        text=[text stringByReplacingOccurrencesOfString:@"timeout:1500,headers:{Referer:Source.origin+'/'" withString:@"timeout:1200,headers:{Referer:Source.origin+'/'"];
+        text=[text stringByReplacingOccurrencesOfString:@"var d=siteDetails[id]||await adapter.detail(id);await sitePrepareImageDomains(d);var lines=" withString:@"var d=siteDetails[id]||await adapter.detail(id);await Promise.race([sitePrepareImageDomains(d),new Promise(function(r){setTimeout(r,800);})]);var lines="];
+    }
     NSArray<NSDictionary<NSString *,NSString *> *> *imageCallReplacements=@[
         @{@"old":@"async function loadHome(){return siteCards(await adapter.home());}",@"new":@"async function loadHome(){var data=await adapter.home();await sitePrepareImageDomains(data);return siteCards(data);}"},
         @{@"old":@"async function loadCatalog(p){p=p||{};var d=await adapter.category(p);return siteCards(d);}",@"new":@"async function loadCatalog(p){p=p||{};var d=await adapter.category(p);await sitePrepareImageDomains(d);return siteCards(d);}"},
         @{@"old":@"async function search(p){p=p||{};return siteCards(await adapter.search(p));}",@"new":@"async function search(p){p=p||{};var data=await adapter.search(p);await sitePrepareImageDomains(data);return siteCards(data);}"},
         @{@"old":@"var d=siteDetails[id]||await adapter.detail(id),lines=siteArray(d.playSources||d.playerList||d.lines).filter(function(x){return x&&x.needLogin!==true;});",@"new":@"var d=siteDetails[id]||await adapter.detail(id);await Promise.race([sitePrepareImageDomains(d),new Promise(function(r){setTimeout(r,800);})]);var lines=siteArray(d.playSources||d.playerList||d.lines).filter(function(x){return x&&x.needLogin!==true;});"}
     ];
-    for(NSDictionary<NSString *,NSString *> *replacement in imageCallReplacements){NSString *old=replacement[@"old"],*updated=replacement[@"new"];NSUInteger occurrences=[[text componentsSeparatedByString:old] count]-1;if(occurrences==1)text=[text stringByReplacingOccurrencesOfString:old withString:updated];else if(strictThreeSource&&![text containsString:updated]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源封面加载流程已变化，未导入不兼容版本。"}];return nil;}}
+    for(NSDictionary<NSString *,NSString *> *replacement in imageCallReplacements){NSString *old=replacement[@"old"],*updated=replacement[@"new"];NSUInteger occurrences=[[text componentsSeparatedByString:old] count]-1;if(occurrences==1)text=[text stringByReplacingOccurrencesOfString:old withString:updated];else if(strictThreeSource&&![text containsString:updated]&&![text containsString:@"sitePrepareImageDomains("]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 三源封面加载流程已变化，未导入不兼容版本。"}];return nil;}}
     return [text dataUsingEncoding:NSUTF8StringEncoding];
 }
 static BOOL PackageHeaderIsSensitive(NSString *name) {
