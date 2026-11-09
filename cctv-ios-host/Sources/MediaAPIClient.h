@@ -11,4 +11,5 @@ FOUNDATION_EXPORT BOOL MediaSourceUsesNativeCatalogAPI(NSDictionary *source);
 - (void)call:(NSString *)operation arguments:(NSDictionary *)arguments completion:(void (^)(id result,NSError *error))completion;
 - (void)call:(NSString *)operation arguments:(NSDictionary *)arguments correlationID:(nullable NSString *)correlationID completion:(void (^)(id result,NSError *error))completion;
 - (void)cancel;
+- (void)cancelWithReason:(NSString *)reason;
 @end

@@ -165,8 +165,7 @@
         NSString *peakText = peakBytes > 0 ? [NSString stringWithFormat:@"%.0f MB", (double)peakBytes / (1024.0 * 1024.0)] : @"--";
         NSArray *issues = [analysis[@"top_issues"] isKindOfClass:NSArray.class] ? analysis[@"top_issues"] : @[];
         NSString *issueHeadline = issues.count ? issues.firstObject : @"本次运行各项请求与生命周期指标正常";
-        self.diagnosticSummaryLabel.text = [NSString stringWithFormat:@"共 %@ 条 · 异常 %@ · 慢请求 %@ (>=3s) · 峰值内存 %@
-%@", analysis[@"total_count"] ?: @0, analysis[@"error_count"] ?: @0, analysis[@"slow_count"] ?: @0, peakText, issueHeadline];
+        self.diagnosticSummaryLabel.text = [NSString stringWithFormat:@"共 %@ 条 · 异常 %@ · 慢请求 %@ (>=3s) · 峰值内存 %@\n%@", analysis[@"total_count"] ?: @0, analysis[@"error_count"] ?: @0, analysis[@"slow_count"] ?: @0, peakText, issueHeadline];
     }
     NSInteger idx = self.eventCategoryFilter ? self.eventCategoryFilter.selectedSegmentIndex : 0;
     NSString *query = [self.eventSearchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] ?: @"";
