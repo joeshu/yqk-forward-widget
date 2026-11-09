@@ -66,56 +66,33 @@ static NSData *PackageFallbackScriptForFailedURL(NSURL *sourceURL) {
             apiCls=@"csp_QimaoDJ";
         }
         NSString *pyStub=[NSString stringWithFormat:
-            @"# -*- coding: utf-8 -*-
-"
-            @"import csp_adapter
-
-"
-            @"class Spider:
-"
-            @"    def __init__(self):
-"
-            @"        self._engine = csp_adapter.AppVideoEngine('%@', {'siteName': '%@'})
-"
-            @"    def init(self, extend=''):
-"
-            @"        pass
-"
-            @"    def getName(self):
-"
-            @"        return '%@'
-"
-            @"    def homeContent(self, filter=True):
-"
-            @"        return self._engine.homeContent(filter)
-"
-            @"    def homeVideoContent(self):
-"
-            @"        return {'list': []}
-"
-            @"    def categoryContent(self, tid, pg, filter=True, extend=None):
-"
-            @"        return self._engine.categoryContent(str(tid or '1'), str(pg or '1'), filter, extend or {})
-"
-            @"    def detailContent(self, ids):
-"
-            @"        return self._engine.detailContent(ids if isinstance(ids, list) else [ids])
-"
-            @"    def searchContent(self, key, quick=False, pg='1'):
-"
-            @"        return self._engine.searchContent(str(key or ''), quick, str(pg or '1'))
-"
-            @"    def playerContent(self, flag, id, vipFlags=None):
-"
-            @"        return self._engine.playerContent(str(flag or ''), str(id or ''), vipFlags or [])
-",
+            @"# -*- coding: utf-8 -*-\n"
+            @"import csp_adapter\n\n"
+            @"class Spider:\n"
+            @"    def __init__(self):\n"
+            @"        self._engine = csp_adapter.AppVideoEngine('%@', {'siteName': '%@'})\n"
+            @"    def init(self, extend=''):\n"
+            @"        pass\n"
+            @"    def getName(self):\n"
+            @"        return '%@'\n"
+            @"    def homeContent(self, filter=True):\n"
+            @"        return self._engine.homeContent(filter)\n"
+            @"    def homeVideoContent(self):\n"
+            @"        return {'list': []}\n"
+            @"    def categoryContent(self, tid, pg, filter=True, extend=None):\n"
+            @"        return self._engine.categoryContent(str(tid or '1'), str(pg or '1'), filter, extend or {})\n"
+            @"    def detailContent(self, ids):\n"
+            @"        return self._engine.detailContent(ids if isinstance(ids, list) else [ids])\n"
+            @"    def searchContent(self, key, quick=False, pg='1'):\n"
+            @"        return self._engine.searchContent(str(key or ''), quick, str(pg or '1'))\n"
+            @"    def playerContent(self, flag, id, vipFlags=None):\n"
+            @"        return self._engine.playerContent(str(flag or ''), str(id or ''), vipFlags or [])\n",
             apiCls, [last stringByDeletingPathExtension], [last stringByDeletingPathExtension]];
         return [pyStub dataUsingEncoding:NSUTF8StringEncoding];
     }
     if([ext isEqualToString:@"hjs"]||[ext isEqualToString:@"js"]){
         NSString *jsStub=[NSString stringWithFormat:
-            @"var hawk = { apiVersion: 3, type: 'source', meta: { name: '%@' }, home: async function(){ return { categories: [{ id: '1', name: '精选' }], items: [] }; }, category: async function(){ return { page: 1, items: [] }; }, search: async function(){ return { page: 1, items: [] }; }, detail: async function(a){ return { id: String(a && a.id || ''), name: '', lines: [] }; }, resolve: async function(a){ return { url: String(a && a.url || '') }; } };
-",
+            @"var hawk = { apiVersion: 3, type: 'source', meta: { name: '%@' }, home: async function(){ return { categories: [{ id: '1', name: '精选' }], items: [] }; }, category: async function(){ return { page: 1, items: [] }; }, search: async function(){ return { page: 1, items: [] }; }, detail: async function(a){ return { id: String(a && a.id || ''), name: '', lines: [] }; }, resolve: async function(a){ return { url: String(a && a.url || '') }; } };\n",
             [[last stringByDeletingPathExtension] stringByReplacingOccurrencesOfString:@"'" withString:@""]];
         return [jsStub dataUsingEncoding:NSUTF8StringEncoding];
     }
