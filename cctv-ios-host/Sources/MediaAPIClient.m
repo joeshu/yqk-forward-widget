@@ -1190,7 +1190,7 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
     // 改为块前捕获局部值，彻底断开循环引用。
     NSDictionary *tvboxSource=self.tvboxSource;NSInteger port=self.port;
     void (^processor)(NSData *,NSURLResponse *,NSError *)=^(NSData *data,NSURLResponse *response,NSError *networkError){
-        NSError *failure=networkError;
+        __block NSError *failure=networkError;
         id reply=nil;
         NSError *jsonError=nil;
         NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
