@@ -204,9 +204,6 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
             text=[text stringByReplacingOccurrencesOfString:@"timeout:yqkRequestTimeout(budget,5500)" withString:@"timeout:yqkRequestTimeout(budget,4500)"];
             text=[text stringByReplacingOccurrencesOfString:@"Math.min(20000," withString:@"Math.min(4500,"];
             text=[text stringByReplacingOccurrencesOfString:@"Math.min(5500," withString:@"Math.min(4500,"];
-            if([text containsString:@"async function yqkProbeHls(url,headers,budget){"] && ![text containsString:@"__cctv_yqk_fast_probe"]){
-                text=[text stringByReplacingOccurrencesOfString:@"async function yqkProbeHls(url,headers,budget){" withString:@"async function yqkProbeHls(url,headers,budget){var __cctv_yqk_fast_probe=1;if(!url||!/^https?:\/\//i.test(String(url)))throw new Error("一起看播放地址无效");if(budget&&Date.now()>=budget.deadline)return url;try{var __r=await CCTVHttp.get(url,{timeout:Math.min(2800,yqkRequestTimeout(budget,2800)),headers:headers});var __st=Number(__r.statusCode||__r.status||0),__bd=__r.data;if(__st>=400&&__st!==403)throw new Error("一起看 HLS 状态异常: "+__st);if(typeof __bd==="string"&&__bd.length>0&&__bd.length<=1048576&&/^\s*<(?:!doctype|html)/i.test(__bd))throw new Error("一起看返回网页而非流媒体");return url;}catch(__e){if(__e&&/状态异常|返回网页|播放地址无效/.test(String(__e.message||__e)))throw __e;return url;}"];
-            }
         }
         return text;
     };
