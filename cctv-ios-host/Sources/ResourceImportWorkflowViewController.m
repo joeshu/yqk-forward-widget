@@ -37,7 +37,7 @@ static NSString *ResourceImportSplitConcatenatedURLs(NSString *text) {
     if(![text isKindOfClass:NSString.class]||!text.length)return @"";
     NSRegularExpression *concatRe=[NSRegularExpression regularExpressionWithPattern:@"(\\.(?:json|hawk|js|hjs|mjs|cjs|py|m3u8|m3u|txt|zip|php|xml|webox|jar|md5))(https?://)" options:NSRegularExpressionCaseInsensitive error:NULL];
     NSString *step=[concatRe stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0,text.length) withTemplate:@"$1\n$2"];
-    NSRegularExpression *boundaryRe=[NSRegularExpression regularExpressionWithPattern:@"(?<![=?&/])([^\\s="'<>?&])(https?://sub\\.lytvs\\.top/)" options:NSRegularExpressionCaseInsensitive error:NULL];
+    NSRegularExpression *boundaryRe=[NSRegularExpression regularExpressionWithPattern:@"(?<![=?&/])([^\\s=\"'<>?&])(https?://sub\\.lytvs\\.top/)" options:NSRegularExpressionCaseInsensitive error:NULL];
     return [boundaryRe stringByReplacingMatchesInString:step options:0 range:NSMakeRange(0,step.length) withTemplate:@"$1\n$2"];
 }
 
