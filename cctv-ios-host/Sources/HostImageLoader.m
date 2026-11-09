@@ -158,7 +158,8 @@ static NSUInteger const ImageQueueLimit = 160;
     if(record.generation==self.generation){
         HostImageDomainState *state=domain.mutableBytes;unsigned previous=state->timeouts;BOOL probe=state->probe;
         BOOL isDomainTimeout=truncatedBody||([error.domain isEqual:NSURLErrorDomain]&&(error.code==NSURLErrorTimedOut||error.code==NSURLErrorSecureConnectionFailed||error.code==NSURLErrorCannotFindHost||error.code==NSURLErrorCannotConnectToHost));
-        HostImageDomainFinish(state,CACurrentMediaTime(),isDomainTimeout,error.code==NSURLErrorCancelled&&!record.failureStage.length);
+        BOOL ignoreForDomainReset=(error.code==NSURLErrorCancelled)||(!isDomainTimeout&&(error!=nil||record.httpStatus!=200||record.failureStage.length>0));
+        HostImageDomainFinish(state,CACurrentMediaTime(),isDomainTimeout,ignoreForDomainReset);
         if((previous<3&&state->timeouts>=3)||probe){
             NSString *backedOffHost=[NSURL URLWithString:record.url].host.lowercaseString?:@"";
             [RuntimeDiagnostics.shared recordEvent:probe?@"image_domain_probe_finished":@"image_domain_backoff_started" category:@"media_api" fields:@{@"image_host":backedOffHost,@"http_status":@(record.httpStatus),@"error_code":@(error.code),@"remaining_backoff_seconds":@(MAX(0,state->until-CACurrentMediaTime())),@"timeout_streak":@(state->timeouts)}];
@@ -171,7 +172,7 @@ static NSUInteger const ImageQueueLimit = 160;
                     }
                 }
                 for(HostImageRequest *inflight in self.tasks.allValues.copy){
-                    if([([NSURL URLWithString:inflight.url].host.lowercaseString?:@"") isEqualToString:backedOffHost]){
+                    if([([NSURL URLWithString:inflight.url].host.lowercaseString?:@"") isEqualToString:backedOffHost] && inflight.httpStatus!=200){
                         inflight.failureStage=@"domain_backoff_fast_fail";
                         [inflight.task cancel];
                     }
@@ -234,7 +235,7 @@ static NSUInteger const ImageQueueLimit = 160;
     NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;
     NSUInteger bodyLimit=record?[self maximumBodyLengthForRequest:record]:ImageBodyLimit;
     if(record){record.httpStatus=status;record.expectedContentLength=response.expectedContentLength;NSString *contentType=response.MIMEType.lowercaseString?:@"";record.responseContentType=[contentType substringToIndex:MIN((NSUInteger)96,contentType.length)];NSDictionary *headers=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response allHeaderFields]:@{};for(id key in headers)if([[key description].lowercaseString isEqual:@"encrypted"]&&[[headers[key] description] isEqual:@"1"]){record.responseEncrypted=YES;break;}if(status!=200)record.failureStage=@"http_status";else if(response.expectedContentLength>(long long)bodyLimit)record.failureStage=@"response_too_large";else if(record.responseEncrypted)record.failureStage=@"encrypted_image_requires_decryption_or_clear_mirror";}
-    BOOL valid=record && status==200 && response.expectedContentLength<=(long long)bodyLimit;
+    BOOL valid=record && status==200 && response.expectedContentLength<=(long long)bodyLimit && !record.responseEncrypted;
     completion(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);
     if(!valid && record){[self.failures setObject:[NSDate dateWithTimeIntervalSinceNow:HostImageFailureBackoff(record.httpStatus)] forKey:record.cacheKey];}
 }

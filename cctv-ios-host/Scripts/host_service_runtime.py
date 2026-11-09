@@ -264,6 +264,11 @@ def _serve(server, poll_interval=.5):
                 time.sleep(0.1)
     finally:
         server._host_serving.clear()
+        if owner.stopping.is_set() and not getattr(server, "_host_closed", False):
+            try:
+                _close(server)
+            except BaseException:
+                pass
 
 
 def _close(server):
@@ -749,6 +754,10 @@ def run_script(path, identifier='default', data_dir=None, port=None, arguments=N
         _release_startup(session)
         thread._host_session = None
         session.done.set()
+        if session.stopping.is_set() and not session.clean():
+            wait_deadline = time.monotonic() + 0.25
+            while time.monotonic() < wait_deadline and not session.clean():
+                time.sleep(0.01)
         if session.clean():
             _restore(session)
 

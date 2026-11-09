@@ -382,5 +382,23 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         self.assertNotIn('@"source_url"', IMAGE_LOADER)
 
 
+
+    def test_diagnostic_session_analysis_and_search_report_ui(self):
+        diag_h = (ROOT / "Sources/RuntimeDiagnostics.h").read_text()
+        diag_vc = (ROOT / "Sources/RuntimeDiagnosticsViewController.m").read_text()
+        log_vc = (ROOT / "Sources/LogCenterViewController.m").read_text()
+        self.assertIn("analyzeEvents:", diag_h)
+        self.assertIn("formattedDiagnosticReportForSessionID:", diag_h)
+        self.assertIn("analyzeEvents:", DIAGNOSTICS)
+        self.assertIn("domain_backoff_hosts", DIAGNOSTICS)
+        self.assertIn("failed_services", DIAGNOSTICS)
+        self.assertIn('self.eventSearchBar.accessibilityIdentifier = @"diagnostic.event.search"', diag_vc)
+        self.assertIn('self.diagnosticSummaryLabel.accessibilityIdentifier = @"diagnostic.summary.label"', diag_vc)
+        self.assertIn('self.analyzeButton.accessibilityIdentifier = @"diagnostic.report.copy"', diag_vc)
+        self.assertIn("copyDiagnosticReport", diag_vc)
+        self.assertIn("copyErrorLog", log_vc)
+        self.assertIn("仅复制错误日志", log_vc)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -501,7 +501,8 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
                 @"correlation_id":owner.diagnosticTraceID?:@"", @"service_id":owner.source[@"id"]?:@"",
                 @"provider_id":owner.provider?:@"", @"request_generation":@(generation), @"elapsed_ms":@(elapsedMS),
                 @"has_cached_detail":@(hadCachedDetail), @"error_domain":error.domain?:@"",
-                @"error_code":@(error.code), @"error_message":error.localizedDescription?:@"invalid_response_shape"
+                @"error_code":@(error.code), @"error_message":error.localizedDescription?:@"invalid_response_shape",
+                @"plugin_error_code":error.userInfo[@"plugin_error_code"]?:@"", @"failure_stage":error.userInfo[@"failure_stage"]?:@""
             }];
             if(owner.detail){owner.status.text=[NSString stringWithFormat:@"刷新失败 · 保留当前详情：%@",error.localizedDescription?:@"来源未返回详情"];owner.status.hidden=NO;}
             else{owner.status.text=[NSString stringWithFormat:@"影片详情加载失败\n%@",error.localizedDescription?:@"来源没有提供影片详情"];owner.status.hidden=NO;}
@@ -659,6 +660,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 }
 - (void)selectRoute:(UIButton *)sender {
     if(sender.tag<0||sender.tag>=self.lines.count||sender.tag==self.selectedLineIndex)return;
+    HostAnimateSelection(sender);
     NSUInteger previousLine=self.selectedLineIndex;NSInteger previousEpisodeIndex=self.selectedEpisodeIndex;
     NSArray *previousEpisodes=previousLine<self.lines.count&&[self.lines[previousLine][@"episodes"] isKindOfClass:NSArray.class]?self.lines[previousLine][@"episodes"]:@[];NSDictionary *previousEpisode=self.selectedEpisodeIndex<previousEpisodes.count?previousEpisodes[self.selectedEpisodeIndex]:@{};NSString *previousEpisodeID=[previousEpisode[@"id"] description]?:@"",*previousEpisodeName=[previousEpisode[@"name"] description]?:@"";
     NSDictionary *line=self.lines[sender.tag];
@@ -682,6 +684,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 - (void)selectEpisode:(UIButton *)sender {
     NSArray *episodes=self.selectedLineIndex<self.lines.count&&[self.lines[self.selectedLineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[self.selectedLineIndex][@"episodes"]:@[];
     if(sender.tag>=episodes.count)return;
+    HostAnimateSelection(sender);
     self.resumeEntry=nil;
     self.selectedEpisodeIndex=sender.tag;
     [RuntimeDiagnostics.shared recordEvent:@"media_episode_selected" category:@"media_api" fields:@{
@@ -1198,6 +1201,7 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     if(!self.source){[self.grid.refreshControl endRefreshing];[self performHomeStatusAction];return;}
     self.generation++;[self.client cancel];[self.readiness cancel];self.loading=NO;self.homeShelfRequestInFlight=NO;self.homeShelfQueueActive=NO;[self.homeCategoryLoadsInFlight removeAllObjects];self.activeMediaOperation=nil;
     if(!self.client||self.sourceInvalidated||(!MediaSourceUsesNativeCatalogAPI(self.source)&&![PyHost isRunningServiceIdentifier:self.source[@"id"]?:@""])){[self saveCurrentBrowseState];[self activate:self.source keepingHome:self.homeMode];return;}
+    if(self.serviceUnavailable){[self.grid.refreshControl endRefreshing];[self checkCurrentService];return;}
     if(self.homeMode){self.nextHomeLoadTrigger=@"media_pull_refresh";[self loadHome];}else{self.page=1;[self loadListing:NO];}
 }
 - (void)updateCategorySelection {
@@ -1477,6 +1481,15 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
 - (void)browseRecommendations {[self showHome:YES];}
 - (void)pushMediaDetail:(MediaDetailViewController *)detail {
     if(!detail)return;
+    if(self.homeShelfRequestInFlight||[self.activeMediaOperation isEqualToString:@"home_shelf"]){
+        self.homeShelfGeneration=0;
+        self.homeShelfRequestInFlight=NO;
+        self.homeShelfQueueActive=NO;
+        [self.homeShelfAttempts minusSet:self.homeCategoryLoadsInFlight];
+        [self.homeCategoryLoadsInFlight removeAllObjects];
+        if([self.activeMediaOperation isEqualToString:@"home_shelf"])self.activeMediaOperation=nil;
+        [self.client cancelWithReason:@"yield_to_detail_request"];
+    }
     __weak typeof(self) weakSelf=self;
     __weak MediaDetailViewController *weakDetail=detail;
     detail.onPlay=^(NSDictionary *result,NSDictionary *context){MediaDetailViewController *owner=weakDetail;if(owner)[owner showInlinePlaybackResult:result context:context];};
@@ -1916,13 +1929,13 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     BOOL hasProviderDirectory=[self.source[@"capabilities"] containsObject:@"providers"];
     self.readinessStageLabel.text=hasProviderDirectory?@"站点目录已读取 · 正在加载影视内容":@"资源能力已读取 · 正在加载影视内容";
     if(hasProviderDirectory)[RuntimeDiagnostics.shared recordEvent:@"media_provider_list_readable" category:@"media_api" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"service_id":self.source[@"id"]?:@"",@"provider_count":@(self.providers.count)}];
-    self.loading=YES;[self updateSelectionControls];self.keyword=@"";self.category=nil;self.page=1;self.hasMore=NO;self.moreButton.hidden=YES;self.items=@[];[self.grid reloadData];[self showMessage:@"正在加载推荐与分类…" loading:YES];if(self.homeMode)[self refreshHomeModules];
+    self.loading=YES;[self updateSelectionControls];self.keyword=@"";self.category=nil;self.page=1;self.hasMore=NO;self.moreButton.hidden=YES;self.items=@[];[self.grid reloadData];[self showMessage:@"正在加载推荐与分类…" loading:YES];
     NSDictionary *requestArguments=[self arguments:@{}];BOOL cacheStale=NO;id cached=[[MediaMetadataCache shared] resultForSource:self.source operation:@"home" arguments:requestArguments maximumAge:6*3600 isStale:&cacheStale];NSUInteger cachedItemCount=[cached isKindOfClass:NSDictionary.class]&&[cached[@"items"] isKindOfClass:NSArray.class]?[cached[@"items"] count]:0;CFTimeInterval requestStartedAt=CACurrentMediaTime();[RuntimeDiagnostics.shared recordEvent:@"media_home_request_started" category:@"media_api" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"service_id":requestedSourceID,@"provider_id":requestedProvider,@"generation":@(generation),@"trigger":trigger,@"home_mode":@(self.homeMode),@"automatic_load_deferred":@(self.deferAutomaticLoading||self.homeLoadDeferred),@"port":self.source[@"port"]?:@0,@"cache_hit":@([cached isKindOfClass:NSDictionary.class]),@"cache_stale":@(cacheStale),@"cached_item_count":@(cachedItemCount)}];
-    if([cached isKindOfClass:NSDictionary.class]){[self applyHomeResult:cached];if(self.homeMode){[self refreshHomeModules];[self showMessage:cacheStale?@"正在更新 · 暂用缓存推荐":@"正在校验 · 显示上次推荐" loading:YES];}else[self showMessage:cacheStale?@"正在更新 · 暂用缓存推荐":@"正在校验 · 显示上次推荐" loading:YES];}
+    if([cached isKindOfClass:NSDictionary.class]){[self applyHomeResult:cached];[self showMessage:cacheStale?@"正在更新 · 暂用缓存推荐":@"正在校验 · 显示上次推荐" loading:YES];}
     __weak typeof(self) weakSelf=self;
     [self.client call:@"home" arguments:requestArguments correlationID:self.diagnosticTraceID completion:^(id result,NSError *error){
         MediaBrowserViewController *owner=weakSelf;if(!owner)return;BOOL sameSource=[[owner.source[@"id"] description] isEqual:requestedSourceID];BOOL sameProvider=[(owner.provider?:@"") isEqual:requestedProvider];BOOL stillCurrentOperation=[owner.activeMediaOperation isEqualToString:@"home"];if(owner.generation!=generation||!sameSource||!sameProvider||!stillCurrentOperation){NSString *reason=owner.generation!=generation?@"superseded_generation":(!sameSource?@"source_changed":(!sameProvider?@"provider_changed":@"superseded_operation"));[RuntimeDiagnostics.shared recordEvent:@"media_home_response_discarded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":requestedSourceID,@"provider":requestedProvider,@"generation":@(generation),@"current_generation":@(owner.generation),@"current_service_id":[owner.source[@"id"] description]?:@"",@"current_provider":owner.provider?:@"",@"current_operation":owner.activeMediaOperation?:@"",@"reason":reason}];return;}owner.activeMediaOperation=nil;owner.activeHomeRequestSourceID=nil;owner.activeHomeRequestProviderID=nil;owner.loading=NO;[owner updateSelectionControls];NSTimeInterval responseElapsed=MAX(0,CACurrentMediaTime()-requestStartedAt);[MediaSourceHealthStore.shared recordSourceID:requestedSourceID success:error==nil&&[result isKindOfClass:NSDictionary.class] elapsed:responseElapsed];[RuntimeDiagnostics.shared recordEvent:@"media_home_response_received" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":requestedSourceID,@"provider":requestedProvider,@"generation":@(generation),@"elapsed_ms":@((NSInteger)(responseElapsed*1000)),@"item_count":@(([result isKindOfClass:NSDictionary.class]&&[result[@"items"] isKindOfClass:NSArray.class])?[result[@"items"] count]:0),@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];
-        if(error||![result isKindOfClass:NSDictionary.class]){NSString *message=error.localizedDescription?:@"资源返回的首页数据格式无法识别";owner.readinessStageLabel.text=owner.items.count?@"内容接口失败 · 当前仍显示缓存内容":@"内容接口读取失败";[owner showMessage:owner.items.count?[NSString stringWithFormat:@"显示缓存内容 · 更新失败：%@",message]:message loading:NO];[RuntimeDiagnostics.shared recordEvent:@"media_home_failed" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":requestedSourceID,@"provider_id":requestedProvider,@"failure_stage":error?@"request_error":@"invalid_result_shape",@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":message}];return;}
+        if(error||![result isKindOfClass:NSDictionary.class]){if([error.userInfo[@"plugin_error_code"] isEqual:@"STARTUP_FAILED"])owner.serviceUnavailable=YES;NSString *message=error.localizedDescription?:@"资源返回的首页数据格式无法识别";owner.readinessStageLabel.text=owner.items.count?@"内容接口失败 · 当前仍显示缓存内容":@"内容接口读取失败";[owner showMessage:owner.items.count?[NSString stringWithFormat:@"显示缓存内容 · 更新失败：%@",message]:message loading:NO];[RuntimeDiagnostics.shared recordEvent:@"media_home_failed" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":requestedSourceID,@"provider_id":requestedProvider,@"failure_stage":error?@"request_error":@"invalid_result_shape",@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":message}];return;}
         if(owner.keyword.length || owner.category.length){owner.page=1;[owner loadListing:NO];return;}
         [owner applyHomeResult:result];
         if(owner.homeResult)[[MediaMetadataCache shared] storeResult:owner.homeResult forSource:owner.source operation:@"home" arguments:requestArguments];

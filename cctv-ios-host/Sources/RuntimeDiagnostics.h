@@ -22,6 +22,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)deleteSessionID:(NSString *)sessionID completion:(void (^)(NSError * _Nullable error))completion;
 - (void)clearAllSessionsWithCompletion:(void (^)(NSError * _Nullable error))completion;
 - (void)prepareExportWithCompletion:(void (^)(NSURL * _Nullable url, NSError * _Nullable error))completion;
+- (NSDictionary<NSString *, id> *)analyzeEvents:(NSArray<NSDictionary *> *)events;
+- (NSString *)formattedDiagnosticReportForSessionID:(nullable NSString *)sessionID events:(NSArray<NSDictionary *> *)events;
 
 @end
 

@@ -654,6 +654,46 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertNotIn('fb = _get_cms_fallback()', hmr_code)
 
 
+
+    def test_round16_diagnostic_cc85bbf4_fixes_and_smart_diagnostics_ui(self):
+        """Verifies Round 16 fixes for diagnostic session cc85bbf4:
+        1. HostImageLoader preserves domain backoff across sibling task cancellations and fast-cancels encrypted responses.
+        2. JSPluginRuntime & MediaPackageImporter support minified CatVod QuickJS ESM ('assets://js/lib/cat.js' + '__jsEvalReturn'), drpy2.min.js engine shell with ext URL, and bare .hjs object literals / JSON errors.
+        3. MediaBrowserViewController yields in-flight home_shelf requests when pushing detail, and MediaPackageDownloader / JSPluginRuntime cap sitePrepareImageDomains in detail to 800ms.
+        4. host_service_runtime.py and PyHost.m wait for http-service-stop cleanup and clear Python breadcrumbs on stopServiceIdentifier so stopped sessions do not emit false-positive python_session_interrupted events.
+        """
+        img_code = (SOURCES / 'HostImageLoader.m').read_text(encoding='utf-8')
+        self.assertIn('BOOL ignoreForDomainReset=(error.code==NSURLErrorCancelled)||(!isDomainTimeout&&(error!=nil||record.httpStatus!=200||record.failureStage.length>0));', img_code)
+        self.assertIn('HostImageDomainFinish(state,CACurrentMediaTime(),isDomainTimeout,ignoreForDomainReset);', img_code)
+        self.assertIn('&& !record.responseEncrypted;', img_code)
+
+        imp_code = (SOURCES / 'MediaPackageImporter.m').read_text(encoding='utf-8')
+        self.assertIn('else if(hamoSourceV3){runtime=@"javascript";protocol=@"hamo-source-v3";}', imp_code)
+        self.assertIn(r'(?:^|[\\r\\n;}]|\\*/)\\s*(?:import\\s+', imp_code)
+
+        js_rt = (SOURCES / 'JSPluginRuntime.m').read_text(encoding='utf-8')
+        self.assertIn('__cctvImport', js_rt)
+        self.assertIn('__cctvTransformSource', js_rt)
+        self.assertIn('__cctvActiveOptions', js_rt)
+
+        adapter_mjs = (ROOT / 'JSPlugins/drpy/adapter.mjs').read_text(encoding='utf-8')
+        self.assertIn("const isEngineShell=text.includes('assets://js/lib/cheerio.min.js')", adapter_mjs)
+        self.assertIn('engine.init(ext)', adapter_mjs)
+
+        dl_code = (SOURCES / 'MediaPackageDownloader.m').read_text(encoding='utf-8')
+        self.assertIn('Promise.race([sitePrepareImageDomains(d),new Promise(function(r){setTimeout(r,800);})])', dl_code)
+        self.assertIn('offset+=6', dl_code)
+
+        mb_code = (SOURCES / 'MediaBrowserViewController.m').read_text(encoding='utf-8')
+        self.assertIn('[self.client cancelWithReason:@"yield_to_detail_request"];', mb_code)
+        self.assertIn('if(self.serviceUnavailable){[self.grid.refreshControl endRefreshing];[self checkCurrentService];return;}', mb_code)
+
+        hsr_code = (ROOT / 'Scripts/host_service_runtime.py').read_text(encoding='utf-8')
+        self.assertIn('if session.stopping.is_set() and not session.clean():', hsr_code)
+        pyhost_code = (SOURCES / 'PyHost.m').read_text(encoding='utf-8')
+        self.assertGreaterEqual(pyhost_code.count('clearPythonBreadcrumb(task);'), 3)
+
+
 if __name__ == '__main__':
 
 

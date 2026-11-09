@@ -278,7 +278,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     BOOL protocolDefaulted=NO;
     if(!protocol.length){
         if([runtime isEqual:@"python"]){protocol=[text rangeOfString:@"class Spider"].location!=NSNotFound?@"python-spider":@"python-http";}
-        else if(hamoSourceV3){runtime=@"javascript";protocol=@"hamo-source-v3";moduleType=@"script";}
+        else if(hamoSourceV3){runtime=@"javascript";protocol=@"hamo-source-v3";}
         else if(weboxSource){if(!runtime.length)runtime=@"javascript";protocol=@"cctvhost.media/1";moduleType=@"script";}
         else if(widgetExtractor){runtime=@"node";protocol=@"widget-extractor";}
         else if(catpawOpen){runtime=@"node";protocol=@"catpaw-http";}
@@ -295,7 +295,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(!moduleType.length){
         BOOL bundledCommonJS=[text rangeOfString:@"(?:^|[;\\n}])\\s*module\\s*\\.\\s*exports\\s*=" options:NSRegularExpressionSearch].location!=NSNotFound;
         BOOL staleGeneratedType=catpawAppBundle&&bundledCommonJS&&[(NSDictionary *)package count]==1&&[package[@"type"] isEqual:@"module"];
-        BOOL esmSource=[entry.pathExtension.lowercaseString isEqual:@"mjs"] || ([package[@"type"] isEqual:@"module"]&&!staleGeneratedType) || (catpawAppBundle && !bundledCommonJS) || [text rangeOfString:@"(?:^|\\n)\\s*(?:import|export)\\s" options:NSRegularExpressionSearch].location!=NSNotFound;
+        BOOL esmSource=[entry.pathExtension.lowercaseString isEqual:@"mjs"] || ([package[@"type"] isEqual:@"module"]&&!staleGeneratedType) || (catpawAppBundle && !bundledCommonJS) || [text rangeOfString:@"(?:^|[\\r\\n;}]|\\*/)\\s*(?:import\\s+(?:[A-Za-z0-9_$*\\{]|[\x27\\\"])|export\\s+(?:default|function|async|const|let|var|class|\\{|\\*))" options:NSRegularExpressionSearch].location!=NSNotFound;
         BOOL commonJS=[entry.pathExtension.lowercaseString isEqual:@"cjs"] || [text rangeOfString:@"(?:^|[;\\n])\\s*(?:module\\s*\\.\\s*exports|exports\\s*\\.)" options:NSRegularExpressionSearch].location!=NSNotFound;
         moduleType=esmSource?@"esm":((commonJS||bundledCommonJS)?@"commonjs":@"script");
     }

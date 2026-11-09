@@ -75,8 +75,9 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     UIBarButtonItem *export=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"square.and.arrow.up"] style:UIBarButtonItemStylePlain target:self action:@selector(exportLog)];export.accessibilityLabel=@"导出日志";
     UIAction *scrollBottom=[UIAction actionWithTitle:@"跳到最新末尾" image:[UIImage systemImageNamed:@"arrow.down.to.line"] identifier:nil handler:^(__unused UIAction *action){[weakSelf scrollToBottomLog];}];
     UIAction *copy=[UIAction actionWithTitle:@"复制当前结果" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *action){[weakSelf copyVisibleLog];}];
+    UIAction *copyErrors=[UIAction actionWithTitle:@"仅复制错误日志" image:[UIImage systemImageNamed:@"exclamationmark.triangle"] identifier:nil handler:^(__unused UIAction *action){[weakSelf copyErrorLog];}];
     UIAction *clear=[UIAction actionWithTitle:self.clearActionTitle.length?self.clearActionTitle:@"清空日志" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *action){[weakSelf confirmClearLog];}];
-    UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"日志操作" children:@[scrollBottom,copy,clear]]];more.accessibilityLabel=@"更多日志操作";
+    UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"日志操作" children:@[scrollBottom,copy,copyErrors,clear]]];more.accessibilityLabel=@"更多日志操作";
     self.navigationItem.rightBarButtonItems=@[more,export];
 
     self.categories=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"播放",@"插件",@"错误"]];self.categories.translatesAutoresizingMaskIntoConstraints=NO;self.categories.selectedSegmentIndex=0;self.categories.selectedSegmentTintColor=HostAccent();[self.categories setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateNormal];[self.categories setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]} forState:UIControlStateSelected];[self.categories addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
@@ -172,15 +173,19 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 }
 - (void)applyFilterFollowingTail:(BOOL)followsTail {
     NSString *query=self.searchBar.text?:@"";NSInteger selected=self.categories.selectedSegmentIndex;NSMutableArray *filtered=[NSMutableArray array];
+    NSUInteger errorCount=0,pluginCount=0,playbackCount=0;
     for(NSString *line in self.allLines){
         DiagnosticLogCategory category=[self categoryForLine:line];
+        if(category==DiagnosticLogCategoryError)errorCount++;
+        else if(category==DiagnosticLogCategoryPlugin)pluginCount++;
+        else if(category==DiagnosticLogCategoryPlayback)playbackCount++;
         if(selected==1&&category!=DiagnosticLogCategoryPlayback)continue;
         if(selected==2&&category!=DiagnosticLogCategoryPlugin)continue;
         if(selected==3&&category!=DiagnosticLogCategoryError)continue;
         if(query.length&&[line rangeOfString:query options:NSCaseInsensitiveSearch].location==NSNotFound)continue;
         [filtered addObject:line];
     }
-    self.visibleLines=filtered;BOOL filteredByUser=query.length>0||selected!=0;self.summaryLabel.text=[NSString stringWithFormat:@"共 %lu 条%@ · 点按单行可复制",(unsigned long)filtered.count,filteredByUser?@" · 已筛选":@" · 实时刷新"];self.emptyLabel.text=self.allLines.count?@"没有符合筛选的日志":@"暂无日志";self.emptyLabel.hidden=filtered.count>0;self.tableView.hidden=filtered.count==0;[self.tableView reloadData];
+    self.visibleLines=filtered;BOOL filteredByUser=query.length>0||selected!=0;self.summaryLabel.text=[NSString stringWithFormat:@"共 %lu 条%@ · 错误 %lu · 插件 %lu · 播放 %lu · 点按单行可复制",(unsigned long)filtered.count,filteredByUser?@" · 已筛选":@" · 实时刷新",(unsigned long)errorCount,(unsigned long)pluginCount,(unsigned long)playbackCount];self.emptyLabel.text=self.allLines.count?@"没有符合筛选的日志":@"暂无日志";self.emptyLabel.hidden=filtered.count>0;self.tableView.hidden=filtered.count==0;[self.tableView reloadData];
     if(followsTail&&filtered.count&&query.length==0&&selected==0)[self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:filtered.count-1 inSection:0] atScrollPosition:UITableViewScrollPositionBottom animated:NO];
 }
 - (DiagnosticLogCategory)categoryForLine:(NSString *)line {
@@ -198,7 +203,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return self.visibleLines.count;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    DiagnosticLogLineCell *cell=[tableView dequeueReusableCellWithIdentifier:@"diagnostic.line" forIndexPath:indexPath];if(indexPath.row<0||indexPath.row>=self.visibleLines.count)return cell;NSString *line=self.visibleLines[indexPath.row];UIColor *color=[self colorForLine:line];cell.cardView.backgroundColor=HostCard();HostSetLayerBorderColor(cell.cardView,HostBorder());cell.messageLabel.text=line;cell.messageLabel.textColor=color;cell.categoryDot.backgroundColor=color;cell.accessibilityHint=@"点按复制这行日志";return cell;
+    DiagnosticLogLineCell *cell=[tableView dequeueReusableCellWithIdentifier:@"diagnostic.line" forIndexPath:indexPath];if(indexPath.row<0||indexPath.row>=self.visibleLines.count)return cell;NSString *line=self.visibleLines[indexPath.row];DiagnosticLogCategory cat=[self categoryForLine:line];UIColor *color=[self colorForLine:line];cell.cardView.backgroundColor=HostCard();cell.cardView.layer.borderWidth=cat==DiagnosticLogCategoryError?0.9:0.6;HostSetLayerBorderColor(cell.cardView,cat==DiagnosticLogCategoryError?[UIColor.systemRedColor colorWithAlphaComponent:0.45]:HostBorder());cell.messageLabel.attributedText=nil;cell.messageLabel.text=line;cell.messageLabel.textColor=color;NSString *q=self.searchBar.text?:@"";if(q.length){NSRange match=[line rangeOfString:q options:NSCaseInsensitiveSearch];if(match.location!=NSNotFound){NSMutableAttributedString *attr=[[NSMutableAttributedString alloc] initWithString:line attributes:@{NSForegroundColorAttributeName:color,NSFontAttributeName:cell.messageLabel.font}];[attr addAttributes:@{NSBackgroundColorAttributeName:[HostAccent() colorWithAlphaComponent:0.25],NSForegroundColorAttributeName:HostText()} range:match];cell.messageLabel.attributedText=attr;}}cell.categoryDot.backgroundColor=color;cell.accessibilityHint=@"点按复制这行日志";return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {if(indexPath.row<self.visibleLines.count){UIPasteboard.generalPasteboard.string=self.visibleLines[indexPath.row];[self showTransientPrompt:@"日志内容已复制"];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"日志内容已复制");}[tableView deselectRowAtIndexPath:indexPath animated:YES];}
 - (void)filterChanged {[self applyFilter];}
@@ -206,6 +211,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 - (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar {[searchBar resignFirstResponder];}
 - (void)exportLog {if(self.onExportLog)self.onExportLog();}
 - (void)copyVisibleLog {UIPasteboard.generalPasteboard.string=[self.visibleLines componentsJoinedByString:@"\n"]?:@"";[self showTransientPrompt:@"当前筛选的日志已复制"];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"当前筛选的日志已复制");}
+- (void)copyErrorLog {NSMutableArray *errs=[NSMutableArray array];for(NSString *line in self.allLines)if([self categoryForLine:line]==DiagnosticLogCategoryError)[errs addObject:line];UIPasteboard.generalPasteboard.string=[errs componentsJoinedByString:@"\n"]?:@"";[self showTransientPrompt:errs.count?@"错误日志已复制":@"当前暂无错误日志"];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"错误日志已复制");}
 - (void)confirmClearLog {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:self.clearActionTitle.length?self.clearActionTitle:@"清空日志" message:self.clearConfirmationMessage.length?self.clearConfirmationMessage:@"将清除当前日志文件和内存中的日志记录。此操作无法撤销。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];

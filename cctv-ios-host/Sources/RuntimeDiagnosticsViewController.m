@@ -2,16 +2,20 @@
 #import "RuntimeDiagnostics.h"
 #import "HostTheme.h"
 
-@interface RuntimeDiagnosticsViewController () <UITableViewDataSource, UITableViewDelegate>
+@interface RuntimeDiagnosticsViewController () <UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate>
 @property(nonatomic, copy, nullable) NSString *sessionID;
 @property(nonatomic, strong) UITableView *table;
 @property(nonatomic, copy) NSArray<NSDictionary *> *sessions;
 @property(nonatomic, copy) NSArray<NSDictionary *> *events;
 @property(nonatomic, copy) NSArray<NSDictionary *> *allEvents;
 @property(nonatomic, strong) UISegmentedControl *eventCategoryFilter;
+@property(nonatomic, strong) UISearchBar *eventSearchBar;
+@property(nonatomic, strong) UIView *diagnosticSummaryCard;
+@property(nonatomic, strong) UILabel *diagnosticSummaryLabel;
 @property(nonatomic, strong) UIBarButtonItem *clearButton;
 @property(nonatomic, strong) UIBarButtonItem *exportButton;
 @property(nonatomic, strong) UIBarButtonItem *deleteButton;
+@property(nonatomic, strong) UIBarButtonItem *analyzeButton;
 // 异步加载的代次：viewWillAppear 与删除/清空后的 reload 可能重叠，
 // 先发出的旧加载后完成时会把已删会话写回列表；代次不符直接丢弃。
 @property(nonatomic) NSUInteger reloadGeneration;
@@ -45,7 +49,10 @@
         self.exportButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"square.and.arrow.up"] style:UIBarButtonItemStylePlain target:self action:@selector(exportSession)];
         self.deleteButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"trash"] style:UIBarButtonItemStylePlain target:self action:@selector(confirmDeleteCurrentSession)];
         self.deleteButton.tintColor = UIColor.systemRedColor;
-        self.navigationItem.rightBarButtonItems = @[self.deleteButton, self.exportButton];
+        self.analyzeButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"doc.text.magnifyingglass"] style:UIBarButtonItemStylePlain target:self action:@selector(copyDiagnosticReport)];
+        self.analyzeButton.accessibilityLabel = @"复制诊断分析报告";
+        self.analyzeButton.accessibilityIdentifier = @"diagnostic.report.copy";
+        self.navigationItem.rightBarButtonItems = @[self.deleteButton, self.exportButton, self.analyzeButton];
         self.eventCategoryFilter = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"播放", @"接口", @"服务", @"异常"]];
         self.eventCategoryFilter.selectedSegmentIndex = 0;
         self.eventCategoryFilter.selectedSegmentTintColor = HostAccent();
@@ -53,10 +60,35 @@
         [self.eventCategoryFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateSelected];
         self.eventCategoryFilter.accessibilityIdentifier = @"diagnostic.event.filter";
         [self.eventCategoryFilter addTarget:self action:@selector(applyEventCategoryFilter) forControlEvents:UIControlEventValueChanged];
-        UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 48)];
+        self.eventSearchBar = [[UISearchBar alloc] initWithFrame:CGRectMake(8, 44, 304, 38)];
+        self.eventSearchBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        self.eventSearchBar.delegate = self;
+        self.eventSearchBar.placeholder = @"搜索事件名、服务 ID、错误码或域名";
+        self.eventSearchBar.searchBarStyle = UISearchBarStyleMinimal;
+        self.eventSearchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        self.eventSearchBar.accessibilityIdentifier = @"diagnostic.event.search";
+        self.diagnosticSummaryCard = [[UIView alloc] initWithFrame:CGRectMake(16, 86, 288, 64)];
+        self.diagnosticSummaryCard.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        self.diagnosticSummaryCard.backgroundColor = HostCard();
+        self.diagnosticSummaryCard.layer.cornerRadius = 13;
+        self.diagnosticSummaryCard.layer.cornerCurve = kCACornerCurveContinuous;
+        self.diagnosticSummaryCard.layer.borderWidth = 0.6;
+        HostSetLayerBorderColor(self.diagnosticSummaryCard, HostBorder());
+        self.diagnosticSummaryLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 8, 264, 48)];
+        self.diagnosticSummaryLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        self.diagnosticSummaryLabel.numberOfLines = 3;
+        self.diagnosticSummaryLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+        self.diagnosticSummaryLabel.adjustsFontForContentSizeCategory = YES;
+        self.diagnosticSummaryLabel.textColor = HostSecondaryText();
+        self.diagnosticSummaryLabel.text = @"正在汇总本次运行诊断指标…";
+        self.diagnosticSummaryLabel.accessibilityIdentifier = @"diagnostic.summary.label";
+        [self.diagnosticSummaryCard addSubview:self.diagnosticSummaryLabel];
+        UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 156)];
         self.eventCategoryFilter.frame = CGRectMake(16, 6, 288, 36);
         self.eventCategoryFilter.autoresizingMask = UIViewAutoresizingFlexibleWidth;
         [header addSubview:self.eventCategoryFilter];
+        [header addSubview:self.eventSearchBar];
+        [header addSubview:self.diagnosticSummaryCard];
         self.table.tableHeaderView = header;
     } else {
         self.clearButton = [[UIBarButtonItem alloc] initWithTitle:@"清空" style:UIBarButtonItemStylePlain target:self action:@selector(confirmClearAll)];
@@ -78,6 +110,11 @@
         self.eventCategoryFilter.selectedSegmentTintColor = HostAccent();
         [self.eventCategoryFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateNormal];
         [self.eventCategoryFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateSelected];
+    }
+    if (self.diagnosticSummaryCard) {
+        self.diagnosticSummaryCard.backgroundColor = HostCard();
+        HostSetLayerBorderColor(self.diagnosticSummaryCard, HostBorder());
+        self.diagnosticSummaryLabel.textColor = HostSecondaryText();
     }
     [self.table reloadData];
 }
@@ -122,22 +159,53 @@
 
 - (void)applyEventCategoryFilter {
     NSArray<NSDictionary *> *source = self.allEvents ?: @[];
+    if (self.diagnosticSummaryLabel) {
+        NSDictionary *analysis = [[RuntimeDiagnostics shared] analyzeEvents:source];
+        unsigned long long peakBytes = [analysis[@"peak_footprint_bytes"] unsignedLongLongValue];
+        NSString *peakText = peakBytes > 0 ? [NSString stringWithFormat:@"%.0f MB", (double)peakBytes / (1024.0 * 1024.0)] : @"--";
+        NSArray *issues = [analysis[@"top_issues"] isKindOfClass:NSArray.class] ? analysis[@"top_issues"] : @[];
+        NSString *issueHeadline = issues.count ? issues.firstObject : @"本次运行各项请求与生命周期指标正常";
+        self.diagnosticSummaryLabel.text = [NSString stringWithFormat:@"共 %@ 条 · 异常 %@ · 慢请求 %@ (>=3s) · 峰值内存 %@
+%@", analysis[@"total_count"] ?: @0, analysis[@"error_count"] ?: @0, analysis[@"slow_count"] ?: @0, peakText, issueHeadline];
+    }
     NSInteger idx = self.eventCategoryFilter ? self.eventCategoryFilter.selectedSegmentIndex : 0;
-    if (idx <= 0) {
+    NSString *query = [self.eventSearchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] ?: @"";
+    if (idx <= 0 && !query.length) {
         self.events = source;
     } else {
         self.events = [source filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *event, NSDictionary *bindings) {
             if (![event isKindOfClass:NSDictionary.class]) return NO;
             NSString *cat = [event[@"category"] isKindOfClass:NSString.class] ? event[@"category"] : @"";
             NSString *name = [event[@"event"] isKindOfClass:NSString.class] ? event[@"event"] : @"";
-            if (idx == 1) return [cat isEqualToString:@"playback"];
-            if (idx == 2) return [cat isEqualToString:@"media_api"];
-            if (idx == 3) return [cat isEqualToString:@"service"];
-            return [name localizedCaseInsensitiveContainsString:@"fail"] || [name localizedCaseInsensitiveContainsString:@"error"] || [name localizedCaseInsensitiveContainsString:@"timeout"] || [name localizedCaseInsensitiveContainsString:@"reject"];
+            BOOL catMatch = YES;
+            if (idx == 1) catMatch = [cat isEqualToString:@"playback"];
+            else if (idx == 2) catMatch = [cat isEqualToString:@"media_api"];
+            else if (idx == 3) catMatch = [cat isEqualToString:@"service"] || [cat isEqualToString:@"plugin"];
+            else if (idx >= 4) catMatch = [name localizedCaseInsensitiveContainsString:@"fail"] || [name localizedCaseInsensitiveContainsString:@"error"] || [name localizedCaseInsensitiveContainsString:@"timeout"] || [name localizedCaseInsensitiveContainsString:@"reject"] || [name localizedCaseInsensitiveContainsString:@"exception"];
+            if (!catMatch) return NO;
+            if (!query.length) return YES;
+            if ([name localizedCaseInsensitiveContainsString:query] || [cat localizedCaseInsensitiveContainsString:query]) return YES;
+            NSDictionary *fields = [event[@"fields"] isKindOfClass:NSDictionary.class] ? event[@"fields"] : nil;
+            return fields.count && [[fields description] localizedCaseInsensitiveContainsString:query];
         }]];
     }
     self.table.backgroundView = self.events.count ? nil : [self emptyViewWithText:@"当前筛选分类下没有诊断事件。"];
     [self.table reloadData];
+}
+
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
+    [self applyEventCategoryFilter];
+}
+
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar {
+    [searchBar resignFirstResponder];
+}
+
+- (void)copyDiagnosticReport {
+    NSString *report = [[RuntimeDiagnostics shared] formattedDiagnosticReportForSessionID:self.sessionID events:self.allEvents ?: @[]];
+    UIPasteboard.generalPasteboard.string = report ?: @"";
+    [self showTransientPrompt:@"诊断分析报告已复制"];
+    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, @"诊断分析报告已复制");
 }
 
 - (UIView *)emptyViewWithText:(NSString *)text {
@@ -176,7 +244,12 @@
         }
         // 长列表里单个事件的完整 JSON 会把行撑成巨型卡片：列表只给前 500 字预览，完整内容见导出。
         if(payload.length>500){NSRange prefix=[payload rangeOfComposedCharacterSequencesForRange:NSMakeRange(0,500)];payload=[[payload substringWithRange:prefix] stringByAppendingString:@"…（完整内容见导出）"];}
-        cell.textLabel.text = [NSString stringWithFormat:@"%@ · %@", eventName, category];
+        NSNumber *elapsedNum = [fields[@"elapsed_ms"] isKindOfClass:NSNumber.class] ? fields[@"elapsed_ms"] : nil;
+        NSString *elapsedBadge = elapsedNum ? [NSString stringWithFormat:@" · %ldms", (long)elapsedNum.integerValue] : @"";
+        BOOL isErrEvent = [eventName localizedCaseInsensitiveContainsString:@"fail"] || [eventName localizedCaseInsensitiveContainsString:@"error"] || [eventName localizedCaseInsensitiveContainsString:@"timeout"] || [eventName localizedCaseInsensitiveContainsString:@"reject"] || [eventName localizedCaseInsensitiveContainsString:@"exception"];
+        if (isErrEvent) { cell.layer.borderWidth = 1.0; HostSetLayerBorderColor(cell, [UIColor.systemRedColor colorWithAlphaComponent:0.65]); }
+        else if (elapsedNum && elapsedNum.integerValue >= 3000) { cell.layer.borderWidth = 0.9; HostSetLayerBorderColor(cell, [UIColor.systemOrangeColor colorWithAlphaComponent:0.65]); }
+        cell.textLabel.text = [NSString stringWithFormat:@"%@ · %@%@", eventName, category, elapsedBadge];
         cell.detailTextLabel.text = payload.length ? [NSString stringWithFormat:@"%@\n%@", time, payload] : time;
         cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote].pointSize weight:UIFontWeightRegular];
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
@@ -193,7 +266,9 @@
         NSString *size = [NSByteCountFormatter stringFromByteCount:(long long)bytes countStyle:NSByteCountFormatterCountStyleMemory];
         cell.textLabel.text = [NSString stringWithFormat:@"%@  ·  %@", date, state];
         unsigned long eventCount=[session[@"event_count"] isKindOfClass:NSNumber.class]?[session[@"event_count"] unsignedIntegerValue]:0;NSString *lastEvent=[session[@"last_event"] isKindOfClass:NSString.class]?session[@"last_event"]:@"未知";
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@\n%lu 条事件 · %@ · 最后事件：%@", version, eventCount, size, lastEvent];
+        unsigned long errorCount=[session[@"error_count"] isKindOfClass:NSNumber.class]?[session[@"error_count"] unsignedIntegerValue]:0;
+        NSString *errBadge = errorCount > 0 ? [NSString stringWithFormat:@" · 异常 %lu", errorCount] : @"";
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@\n%lu 条事件%@ · %@ · 最后事件：%@", version, eventCount, errBadge, size, lastEvent];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator; cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     }
     return cell;

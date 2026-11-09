@@ -29,6 +29,9 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
 @property(nonatomic, copy) NSString *serviceIdentifier;
 @property(nonatomic, copy) NSString *hostFetchURL;
 @property(nonatomic, copy) NSString *hostFetchToken;
+@property(nonatomic, copy) NSString *activeModuleType;
+@property(nonatomic, copy) NSString *activeProtocol;
+@property(nonatomic, strong) id activeOptions;
 @end
 @implementation JSPluginRuntime
 + (instancetype)shared { static JSPluginRuntime *r; static dispatch_once_t once; dispatch_once(&once, ^{ r=[self routerWithScriptURL:nil configuration:nil]; }); return r; }
@@ -206,6 +209,12 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
             text=[text stringByReplacingOccurrencesOfString:@"Math.min(20000," withString:@"Math.min(4500,"];
             text=[text stringByReplacingOccurrencesOfString:@"Math.min(5500," withString:@"Math.min(4500,"];
         }
+        JSPluginRuntime *s=weak;
+        if(s && s.genericMode && s.context && !s.context[@"__cctvTransformSource"].isUndefined){
+            JSValue *transformed=[s.context[@"__cctvTransformSource"] callWithArguments:@[text, s.activeModuleType?:@"", s.activeProtocol?:@"", name?:@""]];
+            if(transformed.isString && !s.context.exception)text=transformed.toString;
+            s.context.exception=nil;
+        }
         return text;
     };
     self.context[@"__hostFetchSync"]=^NSDictionary *(NSString *url,NSString *raw){
@@ -255,6 +264,214 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     if(!source.length)return @"未找到对应的本机 JavaScript 引擎";
     [self.context evaluateScript:source withSourceURL:[NSURL fileURLWithPath:path]];
     if(self.context.exception)return self.context.exception.toString;
+    if(self.genericMode){
+        NSString *compatBootstrap =
+        @"(function(g){\n"
+        @"  const makeCatLib = function(){\n"
+        @"    const C = g.CryptoJS || {};\n"
+        @"    const ch = g.cheerio || {};\n"
+        @"    const isObj = function(v){ return v !== null && typeof v === 'object'; };\n"
+        @"    const _ = function(v){ return v; };\n"
+        @"    Object.assign(_, {\n"
+        @"      Crypto: C, CryptoJS: C, cheerio: ch, load: ch.load ? ch.load.bind(ch) : undefined,\n"
+        @"      isEmpty: function(v){ if (v == null) return true; if (Array.isArray(v) || typeof v === 'string') return v.length === 0; if (isObj(v)) return Object.keys(v).length === 0; return false; },\n"
+        @"      isArray: Array.isArray, isObject: isObj, isPlainObject: isObj,\n"
+        @"      isString: function(v){ return typeof v === 'string'; },\n"
+        @"      isFunction: function(v){ return typeof v === 'function'; },\n"
+        @"      isNumber: function(v){ return typeof v === 'number' && !Number.isNaN(v); },\n"
+        @"      isBoolean: function(v){ return typeof v === 'boolean'; },\n"
+        @"      isUndefined: function(v){ return v === undefined; },\n"
+        @"      isNull: function(v){ return v === null; },\n"
+        @"      isNil: function(v){ return v == null; },\n"
+        @"      isEqual: function(a, b){ try { return JSON.stringify(a) === JSON.stringify(b); } catch(_e) { return a === b; } },\n"
+        @"      each: function(col, fn){ if (Array.isArray(col)) col.forEach(function(v, i){ fn(v, i, col); }); else if (isObj(col)) Object.keys(col).forEach(function(k){ fn(col[k], k, col); }); return col; },\n"
+        @"      forEach: function(col, fn){ return _.each(col, fn); },\n"
+        @"      map: function(col, fn){ if (Array.isArray(col)) return col.map(function(v, i){ return typeof fn === 'function' ? fn(v, i, col) : (v && v[fn]); }); if (isObj(col)) return Object.keys(col).map(function(k){ return typeof fn === 'function' ? fn(col[k], k, col) : (col[k] && col[k][fn]); }); return []; },\n"
+        @"      filter: function(col, fn){ const arr = Array.isArray(col) ? col : (isObj(col) ? Object.values(col) : []); return arr.filter(function(v, i){ return typeof fn === 'function' ? fn(v, i) : Boolean(v && v[fn]); }); },\n"
+        @"      find: function(col, fn){ const arr = Array.isArray(col) ? col : (isObj(col) ? Object.values(col) : []); return arr.find(function(v, i){ return typeof fn === 'function' ? fn(v, i) : Boolean(v && v[fn]); }); },\n"
+        @"      some: function(col, fn){ const arr = Array.isArray(col) ? col : (isObj(col) ? Object.values(col) : []); return arr.some(function(v, i){ return typeof fn === 'function' ? fn(v, i) : Boolean(v); }); },\n"
+        @"      every: function(col, fn){ const arr = Array.isArray(col) ? col : (isObj(col) ? Object.values(col) : []); return arr.every(function(v, i){ return typeof fn === 'function' ? fn(v, i) : Boolean(v); }); },\n"
+        @"      includes: function(col, val){ if (Array.isArray(col) || typeof col === 'string') return col.includes(val); if (isObj(col)) return Object.values(col).includes(val); return false; },\n"
+        @"      contains: function(col, val){ return _.includes(col, val); },\n"
+        @"      pluck: function(col, key){ return (Array.isArray(col) ? col : []).map(function(v){ return v && v[key]; }); },\n"
+        @"      uniq: function(arr, fn){ if (!Array.isArray(arr)) return []; if (typeof fn !== 'function') return Array.from(new Set(arr)); const seen = new Set(); return arr.filter(function(v, i){ const k = fn(v, i); if (seen.has(k)) return false; seen.add(k); return true; }); },\n"
+        @"      unique: function(arr, fn){ return _.uniq(arr, fn); },\n"
+        @"      flatten: function(arr){ return Array.isArray(arr) ? arr.flat(Infinity) : []; },\n"
+        @"      compact: function(arr){ return Array.isArray(arr) ? arr.filter(Boolean) : []; },\n"
+        @"      without: function(arr){ const vals = Array.prototype.slice.call(arguments, 1); return Array.isArray(arr) ? arr.filter(function(v){ return !vals.includes(v); }) : []; },\n"
+        @"      range: function(start, stop, step){ if (stop === undefined) { stop = start; start = 0; } step = step || 1; const out = []; for (let i = start; step > 0 ? i < stop : i > stop; i += step) out.push(i); return out; },\n"
+        @"      extend: Object.assign, assign: Object.assign,\n"
+        @"      defaults: function(target){ target = Object(target); for (let i = 1; i < arguments.length; i++) { const src = arguments[i]; if (isObj(src)) for (const k of Object.keys(src)) if (target[k] === undefined) target[k] = src[k]; } return target; },\n"
+        @"      clone: function(v){ if (Array.isArray(v)) return v.slice(); if (isObj(v)) return Object.assign({}, v); return v; },\n"
+        @"      cloneDeep: function(v){ try { return JSON.parse(JSON.stringify(v)); } catch(_e) { return _.clone(v); } },\n"
+        @"      keys: function(v){ return isObj(v) ? Object.keys(v) : []; },\n"
+        @"      values: function(v){ return isObj(v) ? Object.values(v) : []; },\n"
+        @"      entries: function(v){ return isObj(v) ? Object.entries(v) : []; },\n"
+        @"      pairs: function(v){ return isObj(v) ? Object.entries(v) : []; },\n"
+        @"      fromPairs: function(arr){ return Array.isArray(arr) ? Object.fromEntries(arr) : {}; },\n"
+        @"      pick: function(obj){ const flat = Array.prototype.slice.call(arguments, 1).flat(); const out = {}; if (isObj(obj)) for (const k of flat) if (k in obj) out[k] = obj[k]; return out; },\n"
+        @"      omit: function(obj){ const flat = new Set(Array.prototype.slice.call(arguments, 1).flat()); const out = {}; if (isObj(obj)) for (const k of Object.keys(obj)) if (!flat.has(k)) out[k] = obj[k]; return out; },\n"
+        @"      has: function(obj, k){ return isObj(obj) && Object.prototype.hasOwnProperty.call(obj, k); },\n"
+        @"      get: function(obj, path, def){ const parts = Array.isArray(path) ? path : String(path || '').split('.').filter(Boolean); let cur = obj; for (const p of parts) { if (cur == null) return def; cur = cur[p]; } return cur === undefined ? def : cur; },\n"
+        @"      trim: function(s){ return String(s == null ? '' : s).trim(); },\n"
+        @"      random: function(min, max){ if (min === undefined) min = 0; if (max === undefined) { max = min; min = 0; } return Math.floor(Math.random() * (max - min + 1)) + min; },\n"
+        @"      now: function(){ return Date.now(); },\n"
+        @"      noop: function(){},\n"
+        @"      identity: function(v){ return v; },\n"
+        @"      jinja2: function(tpl, data){ return String(tpl == null ? '' : tpl).replace(/\\{\\{\\s*([^}]+?)\\s*\\}\\}/g, function(_m, expr){ try { return _.get(data, expr.trim(), ''); } catch(_e) { return ''; } }); }\n"
+        @"    });\n"
+        @"    _.default = _;\n"
+        @"    return _;\n"
+        @"  };\n"
+        @"  g.__cctvImport = function(spec){\n"
+        @"    const id = String(spec || '').trim();\n"
+        @"    const lower = id.toLowerCase();\n"
+        @"    if (lower.includes('cat.js') || lower === 'underscore' || lower === 'lodash') return makeCatLib();\n"
+        @"    if (lower.includes('crypto-js') || lower === 'crypto') {\n"
+        @"      const c = g.CryptoJS || (g.__cctvBuiltins && g.__cctvBuiltins['crypto-js']) || {};\n"
+        @"      if (c && typeof c === 'object' && !c.default) { try { c.default = c; c.Crypto = c; } catch(_e){} }\n"
+        @"      return c;\n"
+        @"    }\n"
+        @"    if (lower.includes('cheerio')) {\n"
+        @"      const ch = g.cheerio || (g.__cctvBuiltins && g.__cctvBuiltins.cheerio) || {};\n"
+        @"      const loadFn = ch.load ? ch.load.bind(ch) : function(){ return function(){ return { text: function(){ return ''; }, attr: function(){ return ''; } }; }; };\n"
+        @"      if (!loadFn.load) loadFn.load = loadFn;\n"
+        @"      if (!loadFn.default) loadFn.default = ch;\n"
+        @"      if (!loadFn.jinja2) loadFn.jinja2 = function(tpl, obj){ return String(tpl == null ? '' : tpl).replace(/\\{\\{\\s*([^}]+?)\\s*\\}\\}/g, function(_m, k){ const parts = k.trim().split('.'); let cur = obj; for (const p of parts) cur = cur && cur[p]; return cur == null ? '' : cur; }); };\n"
+        @"      return Object.assign(loadFn, ch);\n"
+        @"    }\n"
+        @"    if (lower.includes('jsencrypt')) {\n"
+        @"      function JSEncrypt(){ this.pub = ''; this.priv = ''; }\n"
+        @"      JSEncrypt.prototype.setPublicKey = function(k){ this.pub = k; };\n"
+        @"      JSEncrypt.prototype.setPrivateKey = function(k){ this.priv = k; };\n"
+        @"      JSEncrypt.prototype.encrypt = function(v){ return (g.RSA && g.RSA.encode) ? g.RSA.encode(v, this.pub) : String(v || ''); };\n"
+        @"      JSEncrypt.prototype.decrypt = function(v){ return (g.RSA && g.RSA.decode) ? g.RSA.decode(v, this.priv) : String(v || ''); };\n"
+        @"      JSEncrypt.default = JSEncrypt;\n"
+        @"      return JSEncrypt;\n"
+        @"    }\n"
+        @"    if (lower.includes('template.js') || lower.includes('模板.js')) {\n"
+        @"      const m = g['模板'] || { getMubans: function(){ return {}; } };\n"
+        @"      m.default = m;\n"
+        @"      return m;\n"
+        @"    }\n"
+        @"    if (lower.includes('gbk.js') || lower === 'gbk') {\n"
+        @"      const iconv = g.__cctvBuiltins && g.__cctvBuiltins['iconv-lite'];\n"
+        @"      const tool = function(){ return { encode: function(s){ return iconv ? Array.from(iconv.encode(String(s || ''), 'gbk')) : []; }, decode: function(b){ return iconv ? iconv.decode(g.Buffer.from(b || []), 'gbk') : ''; } }; };\n"
+        @"      tool.default = tool;\n"
+        @"      return tool;\n"
+        @"    }\n"
+        @"    const clean = id.replace(/^node:/, '');\n"
+        @"    if (g.__cctvBuiltins && g.__cctvBuiltins[clean]) {\n"
+        @"      const b = g.__cctvBuiltins[clean];\n"
+        @"      return b && typeof b === 'object' && !('default' in b) ? Object.assign({}, b, { default: b }) : b;\n"
+        @"    }\n"
+        @"    if (typeof g.__cctvRequire === 'function') {\n"
+        @"      try {\n"
+        @"        const r = g.__cctvRequire(id);\n"
+        @"        return r && typeof r === 'object' && !('default' in r) ? Object.assign({}, r, { default: r }) : r;\n"
+        @"      } catch(_e){}\n"
+        @"    }\n"
+        @"    return makeCatLib();\n"
+        @"  };\n"
+        @"  g.__cctvTransformSource = function(rawText, moduleType, protocol){\n"
+        @"    let text = String(rawText == null ? '' : rawText);\n"
+        @"    if (!text) return text;\n"
+        @"    if (text.includes('async function sitePrepareImageDomains(value)')) {\n"
+        @"      text = text.replace('cacheAge=cached&&cached.domain?1800000:60000', 'cacheAge=cached&&cached.domain?1800000:300000');\n"
+        @"      text = text.replace('offset+=3){var probes=await Promise.all(mirrors.slice(offset,offset+3)', 'offset+=6){var probes=await Promise.all(mirrors.slice(offset,offset+6)');\n"
+        @"      text = text.replace(\"timeout:3000,headers:{Referer:Source.origin+'/',Accept:'image/*'\", \"timeout:1200,headers:{Referer:Source.origin+'/',Accept:'image/*'\");\n"
+        @"      text = text.replace('var d=siteDetails[id]||await adapter.detail(id);await sitePrepareImageDomains(d);var lines=', 'var d=siteDetails[id]||await adapter.detail(id);await Promise.race([sitePrepareImageDomains(d),new Promise(function(r){setTimeout(r,800);})]);var lines=');\n"
+        @"    }\n"
+        @"    if (text.includes('assets://js/lib/cheerio.min.js') && (/\\b(?:let|var)\\s+rule\\s*=\\s*\\{\\s*\\}/.test(text) || text.includes('DRPY'))) {\n"
+        @"      return \"var rule = (function(){\\n\" +\n"
+        @"        \"  var opt = globalThis.__cctvActiveOptions;\\n\" +\n"
+        @"        \"  var ext = typeof opt === 'string' ? opt.trim() : (opt && typeof opt === 'object' ? String(opt.ext || opt.extend || opt.rule || '').trim() : '');\\n\" +\n"
+        @"        \"  if (!ext && opt && typeof opt === 'object' && (opt.host || opt.title || opt['一级'] || opt['二级'])) return opt;\\n\" +\n"
+        @"        \"  if (!ext) throw new Error('此 drpy 站点仅提供引擎壳（drpy2.min.js），未在合集 ext 中提供规则地址或内容');\\n\" +\n"
+        @"        \"  var code = /^https?:\\\\/\\\\//i.test(ext) ? (typeof request === 'function' ? request(ext, {method: 'GET'}) : '') : ext;\\n\" +\n"
+        @"        \"  if (!code || typeof code !== 'string' || !code.trim()) throw new Error('无法加载 drpy 远端规则：' + ext);\\n\" +\n"
+        @"        \"  var rule;\\n\" +\n"
+        @"        \"  eval(code.replace(/^\\\\s*export\\\\s+default\\\\s+/, 'rule = ').replace(/\\\\b(?:var|let|const)\\\\s+rule\\\\s*=/, 'rule ='));\\n\" +\n"
+        @"        \"  return rule;\\n\" +\n"
+        @"        \"})();\\n\";\n"
+        @"    }\n"
+        @"    const mapSpecList = function(specList){\n"
+        @"      return specList.split(',').map(function(s){ return s.trim(); }).filter(Boolean).map(function(s){\n"
+        @"        const m = s.match(/^([A-Za-z0-9_$]+)\\s+as\\s+([A-Za-z0-9_$]+)$/);\n"
+        @"        return m ? (m[1] + ': ' + m[2]) : s;\n"
+        @"      }).join(', ');\n"
+        @"    };\n"
+        @"    const replaceImportClause = function(clause, modExpr){\n"
+        @"      clause = clause.trim();\n"
+        @"      if (clause.startsWith('*')) {\n"
+        @"        const m = clause.match(/^\\*\\s+as\\s+([A-Za-z0-9_$]+)$/);\n"
+        @"        if (m) return 'var ' + m[1] + ' = ' + modExpr + ';';\n"
+        @"      }\n"
+        @"      if (clause.startsWith('{') && clause.endsWith('}')) {\n"
+        @"        return 'var {' + mapSpecList(clause.slice(1, -1)) + '} = ' + modExpr + ';';\n"
+        @"      }\n"
+        @"      if (clause.includes(',')) {\n"
+        @"        const braceIdx = clause.indexOf('{');\n"
+        @"        if (braceIdx > 0 && clause.endsWith('}')) {\n"
+        @"          const defName = clause.slice(0, braceIdx).replace(/,/g, '').trim();\n"
+        @"          const named = mapSpecList(clause.slice(braceIdx + 1, -1));\n"
+        @"          return 'var ' + defName + ' = (' + modExpr + ' && ' + modExpr + '.default) || ' + modExpr + ', {' + named + '} = ' + modExpr + ';';\n"
+        @"        }\n"
+        @"      }\n"
+        @"      return 'var ' + clause + ' = (' + modExpr + ' && ' + modExpr + '.default) || ' + modExpr + ';';\n"
+        @"    };\n"
+        @"    text = text.replace(/(^|[\\r\\n;}]|\\*\\/)\\s*import\\s+([^;\\r\\n]+?)\\s+from\\s*(['\"])(assets:\\/\\/[^'\"]+)\\3\\s*;?/g, function(_m, pre, clause, _q, spec){\n"
+        @"      return pre + replaceImportClause(clause, 'globalThis.__cctvImport(' + JSON.stringify(spec) + ')');\n"
+        @"    });\n"
+        @"    const isScriptLike = moduleType !== 'esm' || protocol === 'drpy' || text.includes('__jsEvalReturn');\n"
+        @"    if (isScriptLike) {\n"
+        @"      text = text.replace(/(^|[\\r\\n;}]|\\*\\/)\\s*import\\s+([^;\\r\\n]+?)\\s+from\\s*(['\"])([^'\"]+)\\3\\s*;?/g, function(_m, pre, clause, _q, spec){\n"
+        @"        return pre + replaceImportClause(clause, 'globalThis.__cctvImport(' + JSON.stringify(spec) + ')');\n"
+        @"      });\n"
+        @"      text = text.replace(/(^|[\\r\\n;}]|\\*\\/)\\s*import\\s*(['\"])([^'\"]+)\\2\\s*;?/g, function(_m, pre, _q, spec){\n"
+        @"        return pre + 'globalThis.__cctvImport(' + JSON.stringify(spec) + ');';\n"
+        @"      });\n"
+        @"      let hadDefaultExport = false;\n"
+        @"      text = text.replace(/(^|[\\r\\n;}]|\\*\\/)\\s*export\\s+default\\s+/g, function(_m, pre){\n"
+        @"        hadDefaultExport = true;\n"
+        @"        return pre + 'var __cctvDefaultExport = ';\n"
+        @"      });\n"
+        @"      text = text.replace(/(^|[\\r\\n;}]|\\*\\/)\\s*export\\s+(async\\s+function|function|class|const|let|var)\\b/g, function(_m, pre, kw){\n"
+        @"        return pre + (kw === 'const' || kw === 'let' ? 'var' : kw);\n"
+        @"      });\n"
+        @"      text = text.replace(/(^|[\\r\\n;}]|\\*\\/)\\s*export\\s*\\{([^}]*)\\}\\s*;?/g, function(_m, pre, list){\n"
+        @"        const pairs = list.split(',').map(function(s){ return s.trim(); }).filter(Boolean).map(function(s){\n"
+        @"          const m = s.match(/^([A-Za-z0-9_$]+)\\s+as\\s+([A-Za-z0-9_$]+)$/);\n"
+        @"          return m ? (JSON.stringify(m[2]) + ': ' + m[1]) : (JSON.stringify(s) + ': ' + s);\n"
+        @"        }).join(', ');\n"
+        @"        return pre + 'var __cctvNamedExports = {' + pairs + '}; if (typeof plugin === \"undefined\") var plugin = __cctvNamedExports.default || (typeof __cctvNamedExports.__jsEvalReturn === \"function\" ? __cctvNamedExports.__jsEvalReturn() : __cctvNamedExports);';\n"
+        @"      });\n"
+        @"      if (hadDefaultExport) {\n"
+        @"        text += '\\nif (typeof __cctvDefaultExport !== \"undefined\" && typeof plugin === \"undefined\") { var plugin = __cctvDefaultExport; }\\n';\n"
+        @"      }\n"
+        @"      if (text.includes('__jsEvalReturn')) {\n"
+        @"        text += '\\nif (typeof __jsEvalReturn === \"function\" && typeof plugin === \"undefined\") { var plugin = __jsEvalReturn(); }\\n';\n"
+        @"        if (moduleType === 'esm') text += '\\nexport default plugin;\\n';\n"
+        @"      }\n"
+        @"    }\n"
+        @"    const leadMatch = text.match(/^(?:\\uFEFF)?(?:\\s|\\/\\/[^\\r\\n]*|\\/\\*[\\s\\S]*?\\*\\/)*/);\n"
+        @"    const leadLen = leadMatch ? leadMatch[0].length : 0;\n"
+        @"    const body = text.slice(leadLen).trim();\n"
+        @"    if (/^\\{\\s*(?:['\"][^'\"]+['\"]|[A-Za-z_$][\\w$]*)\\s*:/.test(body) && /\\}\\s*;?\\s*$/.test(body)) {\n"
+        @"      const cleanBody = body.replace(/;\\s*$/, '');\n"
+        @"      text = text.slice(0, leadLen) +\n"
+        @"        'var plugin = (\\n' + cleanBody + '\\n);\\n' +\n"
+        @"        'if (plugin && typeof plugin === \"object\" && !plugin.home && !plugin.homeContent && !plugin.detail && !plugin.detailContent && !plugin.play && !plugin.playerContent && !plugin.resolve && (plugin.msg || plugin.message || plugin.error || (plugin.code && Number(plugin.code) >= 400))) {\\n' +\n"
+        @"        '  throw new Error(\"源站返回异常：\" + String(plugin.msg || plugin.message || plugin.error || (\"HTTP \" + plugin.code)));\\n' +\n"
+        @"        '}\\n' +\n"
+        @"        (moduleType === 'esm' ? 'export default plugin;\\n' : '');\n"
+        @"    }\n"
+        @"    return text;\n"
+        @"  };\n"
+        @"})(globalThis);";
+        [self.context evaluateScript:compatBootstrap];
+        self.context.exception = nil;
+    }
     if(self.context[@"__cctvInvoke"].isUndefined)return @"JS 插件入口无效";
     return nil;
 }
@@ -267,7 +484,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     // resolve 的结算结果）。在途调用方由下面 finishCall 的 ok:false
     // 统一唤醒，fetch 记录直接丢弃即可。
     [self.requests removeAllObjects];[self.timers removeAllObjects];self.context=nil;self.unresponsive=NO;
-    self.packageRoot=nil;self.genericMode=NO;self.hostFetchURL=nil;self.hostFetchToken=nil;
+    self.packageRoot=nil;self.genericMode=NO;self.hostFetchURL=nil;self.hostFetchToken=nil;self.activeModuleType=nil;self.activeProtocol=nil;self.activeOptions=nil;
     for(NSString *key in self.calls.allKeys)[self finishCall:key answer:@"{\"ok\":false,\"error\":\"JS 服务已停止\"}"];
 }
 - (NSString *)callOperation:(NSString *)operation json:(NSString *)json timeout:(NSTimeInterval)timeout error:(NSError **)error {
@@ -320,7 +537,18 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
             }
             self.hostFetchURL=[payload[@"hostFetchURL"] isKindOfClass:NSString.class]?payload[@"hostFetchURL"]:nil;
             self.hostFetchToken=[payload[@"hostFetchToken"] isKindOfClass:NSString.class]?payload[@"hostFetchToken"]:nil;
+            self.activeModuleType=[payload[@"moduleType"] isKindOfClass:NSString.class]?payload[@"moduleType"]:@"";
+            self.activeProtocol=[payload[@"protocol"] isKindOfClass:NSString.class]?payload[@"protocol"]:@"";
+            self.activeOptions=payload[@"options"];
             NSString *failure=[self initializeContext];if(failure){[self dispose];answer=[self encodedError:failure];dispatch_semaphore_signal(done);return;}self.activeSession=session;
+        }
+        if([operation isEqualToString:@"start"] && self.context){
+            self.activeModuleType=[payload[@"moduleType"] isKindOfClass:NSString.class]?payload[@"moduleType"]:(self.activeModuleType?:@"");
+            self.activeProtocol=[payload[@"protocol"] isKindOfClass:NSString.class]?payload[@"protocol"]:(self.activeProtocol?:@"");
+            self.activeOptions=payload[@"options"];
+            self.context[@"__cctvActiveOptions"]=self.activeOptions?:@{};
+            self.context[@"__cctvActiveModuleType"]=self.activeModuleType?:@"";
+            self.context[@"__cctvActiveProtocol"]=self.activeProtocol?:@"";
         }
         if(!self.context || ![self.activeSession isEqualToString:session]){answer=[self encodedError:@"JS 会话已停止或不匹配"];dispatch_semaphore_signal(done);return;}
         if(self.calls.count>=16){answer=[self encodedError:@"JS 调用并发已满"];dispatch_semaphore_signal(done);return;}

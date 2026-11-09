@@ -486,7 +486,8 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
 - (NSDictionary *)summaryForSessionID:(NSString *)sessionID path:(NSString *)path marker:(NSDictionary *)marker {
     NSFileHandle *reader = [NSFileHandle fileHandleForReadingAtPath:path];
     if (!reader) return nil;
-    __block NSUInteger eventCount = 0;
+    __block NSUInteger eventCount = 0, errorCount = 0, slowCount = 0;
+    __block unsigned long long peakFootprintBytes = 0;
     __block NSString *firstTime = nil, *lastTime = nil, *lastEvent = nil, *version = nil, *build = nil;
     __block BOOL cleanlyEnded = NO;
     void (^consumeLine)(NSData *) = ^(NSData *lineData) {
@@ -501,6 +502,13 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
         NSDictionary *fields = [event[@"fields"] isKindOfClass:NSDictionary.class] ? event[@"fields"] : nil;
         if ([fields[@"app_version"] isKindOfClass:NSString.class]) version = fields[@"app_version"];
         if ([fields[@"app_build"] isKindOfClass:NSString.class]) build = fields[@"app_build"];
+        if ([fields[@"process_phys_footprint_bytes"] isKindOfClass:NSNumber.class]) {
+            unsigned long long fp = [fields[@"process_phys_footprint_bytes"] unsignedLongLongValue];
+            if (fp > peakFootprintBytes) peakFootprintBytes = fp;
+        }
+        if ([fields[@"elapsed_ms"] isKindOfClass:NSNumber.class] && [fields[@"elapsed_ms"] integerValue] >= 3000) slowCount++;
+        NSString *evLower = [lastEvent lowercaseString] ?: @"";
+        if ([evLower containsString:@"fail"] || [evLower containsString:@"error"] || [evLower containsString:@"timeout"] || [evLower containsString:@"reject"] || [evLower containsString:@"exception"]) errorCount++;
         if ([event[@"event"] isEqualToString:@"app_session_closed"] || [event[@"event"] isEqualToString:@"diagnostics_disabled"]) cleanlyEnded = YES;
     };
     NSMutableData *pending = [NSMutableData data];
@@ -529,7 +537,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
     [reader closeFile];
     if (!eventCount) return nil;
     NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL];
-    return @{@"session_id":sessionID, @"event_count":@(eventCount), @"bytes":@([attributes fileSize]), @"started_at":firstTime ?: @"", @"ended_at":lastTime ?: firstTime ?: @"", @"last_event":lastEvent ?: @"", @"is_current":@([sessionID isEqualToString:self.sessionID]), @"is_open":@([marker[@"open"] boolValue] && [marker[@"session_id"] isEqualToString:sessionID]), @"cleanly_ended":@(cleanlyEnded), @"app_version":version ?: @"", @"app_build":build ?: @""};
+    return @{@"session_id":sessionID, @"event_count":@(eventCount), @"error_count":@(errorCount), @"slow_count":@(slowCount), @"peak_footprint_bytes":@(peakFootprintBytes), @"bytes":@([attributes fileSize]), @"started_at":firstTime ?: @"", @"ended_at":lastTime ?: firstTime ?: @"", @"last_event":lastEvent ?: @"", @"is_current":@([sessionID isEqualToString:self.sessionID]), @"is_open":@([marker[@"open"] boolValue] && [marker[@"session_id"] isEqualToString:sessionID]), @"cleanly_ended":@(cleanlyEnded), @"app_version":version ?: @"", @"app_build":build ?: @""};
 }
 
 - (void)loadSessionsWithCompletion:(void (^)(NSArray<NSDictionary *> *, NSError *))completion {
@@ -665,6 +673,99 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
 
 - (void)prepareExportWithCompletion:(void (^)(NSURL *, NSError *))completion {
     [self prepareExportForSessionID:self.sessionID completion:completion];
+}
+
+- (NSDictionary<NSString *, id> *)analyzeEvents:(NSArray<NSDictionary *> *)events {
+    NSUInteger totalCount = 0, errorCount = 0, slowCount = 0;
+    NSInteger maxElapsedMS = 0;
+    NSString *slowestEvent = @"", *slowestServiceID = @"";
+    unsigned long long peakFootprintBytes = 0;
+    NSMutableOrderedSet<NSString *> *failedServices = [NSMutableOrderedSet orderedSet];
+    NSMutableOrderedSet<NSString *> *backoffHosts = [NSMutableOrderedSet orderedSet];
+    NSMutableOrderedSet<NSString *> *topIssues = [NSMutableOrderedSet orderedSet];
+    NSMutableDictionary<NSString *, NSNumber *> *categoryCounts = [NSMutableDictionary dictionary];
+
+    for (NSDictionary *event in events ?: @[]) {
+        if (![event isKindOfClass:NSDictionary.class]) continue;
+        totalCount++;
+        NSString *name = [event[@"event"] isKindOfClass:NSString.class] ? event[@"event"] : @"";
+        NSString *category = [event[@"category"] isKindOfClass:NSString.class] ? event[@"category"] : @"unknown";
+        categoryCounts[category] = @([categoryCounts[category] unsignedIntegerValue] + 1);
+        NSDictionary *fields = [event[@"fields"] isKindOfClass:NSDictionary.class] ? event[@"fields"] : @{};
+        NSString *serviceID = [fields[@"service_id"] isKindOfClass:NSString.class] ? fields[@"service_id"] : @"";
+        if ([fields[@"process_phys_footprint_bytes"] isKindOfClass:NSNumber.class]) {
+            unsigned long long fp = [fields[@"process_phys_footprint_bytes"] unsignedLongLongValue];
+            if (fp > peakFootprintBytes) peakFootprintBytes = fp;
+        }
+        if ([fields[@"elapsed_ms"] isKindOfClass:NSNumber.class]) {
+            NSInteger elapsed = [fields[@"elapsed_ms"] integerValue];
+            if (elapsed >= 3000) {
+                slowCount++;
+                if (elapsed > maxElapsedMS) {
+                    maxElapsedMS = elapsed;
+                    slowestEvent = name;
+                    slowestServiceID = serviceID;
+                }
+            }
+        }
+        NSString *lower = name.lowercaseString;
+        BOOL isError = [lower containsString:@"fail"] || [lower containsString:@"error"] || [lower containsString:@"timeout"] || [lower containsString:@"reject"] || [lower containsString:@"exception"];
+        if (isError) {
+            errorCount++;
+            if (serviceID.length && ![serviceID isEqualToString:@"unknown"]) [failedServices addObject:serviceID];
+        }
+        if ([name isEqualToString:@"image_domain_backoff_entered"]) {
+            NSString *host = [fields[@"host"] isKindOfClass:NSString.class] ? fields[@"host"] : @"";
+            if (host.length) [backoffHosts addObject:host];
+        }
+        if ([name isEqualToString:@"plugin_bridge_failed"] || [name isEqualToString:@"media_api_request_failed"] || [name isEqualToString:@"media_detail_failed"] || [name isEqualToString:@"media_home_failed"]) {
+            NSString *msg = [fields[@"error_message"] isKindOfClass:NSString.class] ? fields[@"error_message"] : ([fields[@"plugin_error_message"] isKindOfClass:NSString.class] ? fields[@"plugin_error_message"] : @"");
+            if (msg.length > 96) msg = [[msg substringToIndex:96] stringByAppendingString:@"…"];
+            if (msg.length && topIssues.count < 6) {
+                [topIssues addObject:serviceID.length ? [NSString stringWithFormat:@"[%@] %@：%@", serviceID, name, msg] : [NSString stringWithFormat:@"%@：%@", name, msg]];
+            }
+        }
+    }
+    if (maxElapsedMS >= 3000 && topIssues.count < 6) {
+        [topIssues addObject:[NSString stringWithFormat:@"最慢耗时：%@%@ (%ld ms)", slowestEvent, slowestServiceID.length ? [NSString stringWithFormat:@" [%@]", slowestServiceID] : @"", (long)maxElapsedMS]];
+    }
+    if (backoffHosts.count && topIssues.count < 6) {
+        [topIssues addObject:[NSString stringWithFormat:@"海报域名退避保护：%@", [[backoffHosts array] componentsJoinedByString:@", "]]];
+    }
+    return @{
+        @"total_count": @(totalCount),
+        @"error_count": @(errorCount),
+        @"slow_count": @(slowCount),
+        @"max_elapsed_ms": @(maxElapsedMS),
+        @"slowest_event": slowestEvent ?: @"",
+        @"slowest_service_id": slowestServiceID ?: @"",
+        @"peak_footprint_bytes": @(peakFootprintBytes),
+        @"failed_services": [failedServices array] ?: @[],
+        @"domain_backoff_hosts": [backoffHosts array] ?: @[],
+        @"top_issues": [topIssues array] ?: @[],
+        @"category_counts": [categoryCounts copy] ?: @{}
+    };
+}
+
+- (NSString *)formattedDiagnosticReportForSessionID:(NSString *)sessionID events:(NSArray<NSDictionary *> *)events {
+    NSDictionary *analysis = [self analyzeEvents:events];
+    unsigned long long peakBytes = [analysis[@"peak_footprint_bytes"] unsignedLongLongValue];
+    NSString *peakText = peakBytes > 0 ? [NSString stringWithFormat:@"%.1f MB", (double)peakBytes / (1024.0 * 1024.0)] : @"未采样";
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    [lines addObject:[NSString stringWithFormat:@"# CCTVHost 运行诊断分析 (%@)", sessionID.length ? sessionID : (self.sessionID ?: @"当前会话")]];
+    [lines addObject:[NSString stringWithFormat:@"- 事件总数：%@ 条 · 异常/失败：%@ 条 · 慢操作(>=3s)：%@ 条 · 峰值内存：%@", analysis[@"total_count"] ?: @0, analysis[@"error_count"] ?: @0, analysis[@"slow_count"] ?: @0, peakText]];
+    NSArray *failedServices = [analysis[@"failed_services"] isKindOfClass:NSArray.class] ? analysis[@"failed_services"] : @[];
+    if (failedServices.count) [lines addObject:[NSString stringWithFormat:@"- 涉及异常的服务 ID：%@", [failedServices componentsJoinedByString:@", "]]];
+    NSArray *backoffHosts = [analysis[@"domain_backoff_hosts"] isKindOfClass:NSArray.class] ? analysis[@"domain_backoff_hosts"] : @[];
+    if (backoffHosts.count) [lines addObject:[NSString stringWithFormat:@"- 触发退避的海报域名：%@", [backoffHosts componentsJoinedByString:@", "]]];
+    NSArray *issues = [analysis[@"top_issues"] isKindOfClass:NSArray.class] ? analysis[@"top_issues"] : @[];
+    if (issues.count) {
+        [lines addObject:@"- 关键诊断摘要："];
+        for (NSString *issue in issues) [lines addObject:[NSString stringWithFormat:@"  • %@", issue]];
+    } else {
+        [lines addObject:@"- 关键诊断摘要：本次运行未检测到明显错误或超时阻塞。"];
+    }
+    return [lines componentsJoinedByString:@"\n"];
 }
 
 @end

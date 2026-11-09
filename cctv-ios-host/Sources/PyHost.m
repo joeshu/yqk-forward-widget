@@ -308,7 +308,17 @@ static NSString *CCTVPluginBridgeServiceID(NSString *json) {
     if(!serviceID.length)serviceID=[payload[@"session"] isKindOfClass:NSString.class]?payload[@"session"]:nil;
     return serviceID.length?serviceID:@"unknown";
 }
-static void CCTVRecordPluginBridgeResult(NSString *engine, NSString *operation, NSString *serviceID, NSString *requestID, NSTimeInterval startedAt, NSString *reply, NSError *bridgeError) {
+static NSDictionary *CCTVPluginBridgeRequestMeta(NSString *json) {
+    NSData *data=[json dataUsingEncoding:NSUTF8StringEncoding];
+    id payload=data?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+    if(![payload isKindOfClass:NSDictionary.class])return @{};
+    NSMutableDictionary *meta=[NSMutableDictionary dictionary];
+    if([payload[@"protocol"] isKindOfClass:NSString.class]&&[payload[@"protocol"] length])meta[@"protocol"]=payload[@"protocol"];
+    if([payload[@"moduleType"] isKindOfClass:NSString.class]&&[payload[@"moduleType"] length])meta[@"module_type"]=payload[@"moduleType"];
+    if([payload[@"entry"] isKindOfClass:NSString.class]&&[payload[@"entry"] length])meta[@"entry"]=[payload[@"entry"] lastPathComponent];
+    return meta;
+}
+static void CCTVRecordPluginBridgeResult(NSString *engine, NSString *operation, NSString *serviceID, NSString *requestID, NSTimeInterval startedAt, NSString *reply, NSError *bridgeError, NSString *requestJSON) {
     if(!RuntimeDiagnostics.shared.enabled)return;
     id result=nil;
     if(reply.length)result=[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingFragmentsAllowed error:NULL];
@@ -329,6 +339,7 @@ static void CCTVRecordPluginBridgeResult(NSString *engine, NSString *operation, 
     NSString *message=[pluginError isKindOfClass:NSString.class]?pluginError:([pluginError isKindOfClass:NSDictionary.class]&&[pluginError[@"message"] isKindOfClass:NSString.class]?pluginError[@"message"]:nil);
     if(!message.length)message=bridgeError.localizedDescription;
     if(message.length)fields[@"error_message"]=message;
+    if(requestJSON.length)[fields addEntriesFromDictionary:CCTVPluginBridgeRequestMeta(requestJSON)];
     [RuntimeDiagnostics.shared recordEvent:operationOK?@"plugin_bridge_succeeded":@"plugin_bridge_failed" category:@"plugin" fields:fields];
 }
 static PyObject *pyHostWrite(PyObject *self, PyObject *args) {
@@ -446,7 +457,7 @@ static PyObject *pyHostJSCall(PyObject *self, PyObject *args) {
         Py_BEGIN_ALLOW_THREADS
         reply = [[JSPluginRuntime shared] callOperation:operationName json:requestJSON timeout:40 error:&error];
         Py_END_ALLOW_THREADS
-        if(diagnosticsEnabled)CCTVRecordPluginBridgeResult(@"javascriptcore",operationName,serviceID,requestID,startedAt,reply,error);
+        if(diagnosticsEnabled)CCTVRecordPluginBridgeResult(@"javascriptcore",operationName,serviceID,requestID,startedAt,reply,error,requestJSON);
         if (!reply) { PyErr_SetString(PyExc_RuntimeError, error.localizedDescription.UTF8String ?: "JS bridge failed"); return NULL; }
         return PyUnicode_FromString(reply.UTF8String);
     }
@@ -466,7 +477,7 @@ static PyObject *pyHostNodeCall(PyObject *self, PyObject *args) {
         Py_BEGIN_ALLOW_THREADS
         reply = [NodePluginRuntime.shared callOperation:operationName json:requestJSON error:&error];
         Py_END_ALLOW_THREADS
-        if(diagnosticsEnabled)CCTVRecordPluginBridgeResult(@"node",operationName,serviceID,requestID,startedAt,reply,error);
+        if(diagnosticsEnabled)CCTVRecordPluginBridgeResult(@"node",operationName,serviceID,requestID,startedAt,reply,error,requestJSON);
         if (!reply) { PyErr_SetString(PyExc_RuntimeError, error.localizedDescription.UTF8String ?: "Node bridge failed"); return NULL; }
         return PyUnicode_FromString(reply.UTF8String);
     }
@@ -898,7 +909,7 @@ static void *pyThread(void *rawTask) {
     task.stopping = YES;
     for (NSUInteger wait = 0; !task.sessionReady && !task.threadExited && wait < 500; wait++) { struct timespec deadline; clock_gettime(CLOCK_REALTIME, &deadline); deadline.tv_nsec += 10000000; if (deadline.tv_nsec >= 1000000000) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000; } pthread_cond_timedwait(&gCondition, &gLock, &deadline); }
     BOOL exited = task.threadExited, ready = task.sessionReady; pthread_mutex_unlock(&gLock);
-    if (exited && !task.running) { NSError *failure=nil;if(![JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]||![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]){if(error)*error=failure;return NO;}pthread_mutex_lock(&gLock);[gTaskFailures removeObjectForKey:identifier];pthread_mutex_unlock(&gLock);notifyRuntimeStateChanged();return YES; }
+    if (exited && !task.running) { clearPythonBreadcrumb(task); NSError *failure=nil;if(![JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]||![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]){if(error)*error=failure;return NO;}pthread_mutex_lock(&gLock);[gTaskFailures removeObjectForKey:identifier];pthread_mutex_unlock(&gLock);notifyRuntimeStateChanged();return YES; }
     if (!ready) { if (error) *error = task.error ?: [NSError errorWithDomain:@"PyHost" code:7 userInfo:@{NSLocalizedDescriptionKey:@"Python 初始化尚未完成，请稍后停止。"}]; return NO; }
     PyGILState_STATE gil = PyGILState_Ensure();
     PyObject *result = gServiceRuntime ? PyObject_CallMethod(gServiceRuntime, "stop_session", "sd", identifier.UTF8String, 5.0) : NULL;
@@ -907,7 +918,7 @@ static void *pyThread(void *rawTask) {
     if (!stopped && gServiceRuntime) { PyObject *detail = PyObject_CallMethod(gServiceRuntime, "last_error", "s", identifier.UTF8String); const char *utf8 = detail && PyUnicode_Check(detail) ? PyUnicode_AsUTF8(detail) : NULL; if (utf8 && *utf8) message = [NSString stringWithUTF8String:utf8]; Py_XDECREF(detail); }
     PyErr_Clear(); PyGILState_Release(gil);
     if (!stopped) { if (error) *error = [NSError errorWithDomain:@"PyHost" code:6 userInfo:@{NSLocalizedDescriptionKey:message}]; pthread_mutex_lock(&gLock); task.stopping = NO; pthread_mutex_unlock(&gLock); return NO; }
-    for (NSUInteger attempt = 0; attempt < 500; attempt++) { pthread_mutex_lock(&gLock); exited = task.threadExited; if (exited) { task.running = NO; task.stopping = NO; [gTasks removeObjectForKey:identifier]; } pthread_mutex_unlock(&gLock); if (exited) { NSError *failure=nil;if(![JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]||![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]){if(error)*error=failure;return NO;}notifyRuntimeStateChanged(); return YES; } [NSThread sleepForTimeInterval:.01]; }
+    for (NSUInteger attempt = 0; attempt < 500; attempt++) { pthread_mutex_lock(&gLock); exited = task.threadExited; if (exited) { task.running = NO; task.stopping = NO; [gTasks removeObjectForKey:identifier]; } pthread_mutex_unlock(&gLock); if (exited) { clearPythonBreadcrumb(task); NSError *failure=nil;if(![JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]||![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]){if(error)*error=failure;return NO;}notifyRuntimeStateChanged(); return YES; } [NSThread sleepForTimeInterval:.01]; }
     if (error) *error = [NSError errorWithDomain:@"PyHost" code:9 userInfo:@{NSLocalizedDescriptionKey:@"服务线程正在结束，请稍后重试。"}]; return NO;
 #endif
 }

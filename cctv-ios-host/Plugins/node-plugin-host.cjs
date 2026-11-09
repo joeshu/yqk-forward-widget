@@ -1008,8 +1008,16 @@ async function start(payload){
     }
     let module
     if(payload.moduleType==='esm')module=await import(pathToFileURL(entry).href+'?session='+encodeURIComponent(payload.session))
-    else{for(const name of Object.keys(require.cache))if(name===entry||name.startsWith(root+path.sep))delete require.cache[name];module=require(entry)}
+    else{
+      for(const name of Object.keys(require.cache))if(name===entry||name.startsWith(root+path.sep))delete require.cache[name]
+      try{module=require(entry)}catch(reqErr){
+        if(reqErr?.code==='ERR_REQUIRE_ESM'||/Cannot use import statement|Unexpected token 'export'|Unexpected identifier/i.test(String(reqErr?.message||''))){
+          module=await import(pathToFileURL(entry).href+'?session='+encodeURIComponent(payload.session))
+        }else throw reqErr
+      }
+    }
     owner.module=owner.weboxSpec?createNodeWeBoxPlugin(owner,owner.weboxSpec):(module.default||module)
+    if(owner.module&&typeof owner.module.__jsEvalReturn==='function'&&!owner.module.home&&!owner.module.homeContent)owner.module=await owner.module.__jsEvalReturn()
     if(owner.module&&owner.module.api==='1.1'&&typeof owner.module.list==='function'&&!owner.weboxSpec)owner.module=createNodeWeBoxPlugin(owner,owner.module)
     if(owner.protocol==='catpaw-http'){
       let options=payload.options&&typeof payload.options==='object'&&!Array.isArray(payload.options)?payload.options:{}
