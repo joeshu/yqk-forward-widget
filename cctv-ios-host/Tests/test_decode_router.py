@@ -159,6 +159,21 @@ class DecodeRouterContracts(unittest.TestCase):
         self.assertIn('destroy', destroy)
         self.assertIn('invalidate', destroy)
 
+    def test_adapter_matches_cicada_binary_instance_and_abi_contracts(self):
+        # CicadaUrlSource.urlWithString: 在真机二进制中是实例方法（-），而非类方法（+）
+        self.assertIn('id instance = [[sourceClass alloc] init];', self.adapter_m)
+        self.assertIn('[instance respondsToSelector:NSSelectorFromString(@"urlWithString:")]', self.adapter_m)
+        self.assertIn('MediaPlaybackCicadaClass(@"CicadaPlayerView")', self.adapter_m)
+        self.assertIn('[NSString stringWithFormat:@"%@: %@", key, value]', self.adapter_m)
+        self.assertIn('- (void)onPlayerEvent:(id)player eventType:(NSUInteger)eventType', self.adapter_m)
+        self.assertIn('methodSignatureForSelector:', self.adapter_m)
+        binary = ROOT / 'Frameworks' / 'CicadaPlayerSDK.framework' / 'CicadaPlayerSDK'
+        if binary.exists():
+            raw = binary.read_bytes()
+            self.assertIn(b'-[CicadaUrlSource urlWithString:]', raw)
+            self.assertNotIn(b'+[CicadaUrlSource urlWithString:]', raw)
+            self.assertIn(b'onPlayerEvent:eventType:', raw)
+
     def test_adapter_passes_source_headers_to_cicada_config(self):
         # 猫源常需 Referer / UA 才能出流：适配器必须把请求头带进 CicadaConfig。
         self.assertIn('setHttpHeaders:', self.adapter_m)

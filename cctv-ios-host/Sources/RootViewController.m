@@ -118,7 +118,19 @@ static BOOL CCTVTVBoxSaveSubscriptionToken(NSString *token) {
 }
 static NSString *CCTVTVBoxTokenFromInput(NSString *input) {
     NSString *value=[input stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";NSURL *u=CCTVURLFromPossiblyUnescapedString(value);NSURLComponents *parts=u?[NSURLComponents componentsWithURL:u resolvingAgainstBaseURL:NO]:[NSURLComponents componentsWithString:value];
-    if([parts.host.lowercaseString isEqual:@"sub.lytvs.top"]){for(NSURLQueryItem *item in parts.queryItems)if([@[@"token",@"tk"] containsObject:item.name.lowercaseString]&&item.value.length&&![item.value isEqualToString:CCTVTVBoxTokenPlaceholder])return item.value;return nil;}
+    if([parts.host.lowercaseString isEqual:@"sub.lytvs.top"]){
+        for(NSURLQueryItem *item in parts.queryItems)if([@[@"token",@"tk"] containsObject:item.name.lowercaseString]&&item.value.length&&![item.value isEqualToString:CCTVTVBoxTokenPlaceholder])return item.value;
+        NSString *path=parts.path?:@"";
+        if(path.length){
+            NSRegularExpression *pathRe=[NSRegularExpression regularExpressionWithPattern:@"(?:^|[_/-])tk_([A-Za-z0-9]{6,64})(?:\\.[A-Za-z0-9]+|$)" options:NSRegularExpressionCaseInsensitive error:NULL];
+            NSTextCheckingResult *match=[pathRe firstMatchInString:path options:0 range:NSMakeRange(0,path.length)];
+            if(match&&match.numberOfRanges>1){
+                NSString *tk=[path substringWithRange:[match rangeAtIndex:1]];
+                if(tk.length&&![tk isEqualToString:CCTVTVBoxTokenPlaceholder])return tk;
+            }
+        }
+        return nil;
+    }
     if(value.length>512||[value rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound)return nil;return value;
 }
 static NSString *CCTVTVBoxStoredSubscriptionToken(void) {
@@ -576,6 +588,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property(nonatomic,strong) UIAlertController *tvboxCatalogExportProgressAlert;
 @property(nonatomic,copy) NSString *pendingTVBoxExt;
 @property(nonatomic,copy) NSString *pendingTVBoxSiteName;
+@property(nonatomic,strong) NSMutableArray<NSString *> *recentVODServiceIDs;
 @property(nonatomic,strong) NSMutableDictionary *catalogStates;
 @property(nonatomic) NSUInteger remoteRetryCount;
 @property(nonatomic) BOOL remoteFailureRecoveryPending;
@@ -1364,7 +1377,7 @@ configureCatalogNavigation;
 }
 - (void)exportCatalogPackage:(NSString *)identifier token:(NSString *)token {
     if(self.tvboxCatalogPackageExporter){[self showServiceError:@"另一个资源 ZIP 正在生成，请稍后再试"];return;}NSDictionary *catalog=[TVBoxCatalogStore catalogForID:identifier];if(!catalog){[self showServiceError:@"找不到此资源合集"];return;}
-    TVBoxCatalogPackageExporter *exporter=[[TVBoxCatalogPackageExporter alloc] initWithCatalogID:identifier token:token];self.tvboxCatalogPackageExporter=exporter;NSUInteger total=0;for(NSDictionary *site in [catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[]){NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";NSString *path=[NSURL URLWithString:api].path.lowercaseString?:@"";if([path hasSuffix:@".md5"])path=[path stringByDeletingPathExtension];NSString *ext=path.pathExtension;if([@[@"py",@"js",@"mjs",@"cjs"] containsObject:ext])total++;}
+    TVBoxCatalogPackageExporter *exporter=[[TVBoxCatalogPackageExporter alloc] initWithCatalogID:identifier token:token];self.tvboxCatalogPackageExporter=exporter;NSUInteger total=0;for(NSDictionary *site in [catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[]){NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";NSURL *apiURL=CCTVURLFromPossiblyUnescapedString(api);NSString *path=apiURL.path.lowercaseString?:@"";if([path hasSuffix:@".md5"])path=[path stringByDeletingPathExtension];NSString *ext=path.pathExtension;if([@[@"py",@"js",@"hjs",@"mjs",@"cjs"] containsObject:ext])total++;}
     UIAlertController *progress=[UIAlertController alertControllerWithTitle:@"正在收集合集内部 PY / JS" message:[NSString stringWithFormat:@"准备 0 / %lu",(unsigned long)total] preferredStyle:UIAlertControllerStyleAlert];self.tvboxCatalogExportProgressAlert=progress;__weak typeof(self) weakSelf=self;[progress addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){[weakSelf.tvboxCatalogPackageExporter cancel];}]];[self presentViewController:progress animated:YES completion:nil];
     exporter.progressHandler=^(NSUInteger completed,NSUInteger count,NSString *currentName){RootViewController *owner=weakSelf;UIAlertController *active=owner.tvboxCatalogExportProgressAlert;if(active)active.message=[NSString stringWithFormat:@"已处理 %lu / %lu · %@",(unsigned long)completed,(unsigned long)total,currentName.length?currentName:@"准备打包"] ;};
     [exporter startWithCompletion:^(NSURL *url,NSUInteger failedCount,NSError *error){RootViewController *owner=weakSelf;owner.tvboxCatalogPackageExporter=nil;UIAlertController *active=owner.tvboxCatalogExportProgressAlert;owner.tvboxCatalogExportProgressAlert=nil;if(error.code==NSURLErrorCancelled)return;if(!url){if(active.presentingViewController)[active dismissViewControllerAnimated:YES completion:^{[owner showServiceError:error.localizedDescription?:@"资源 ZIP 生成失败"];}];else[owner showServiceError:error.localizedDescription?:@"资源 ZIP 生成失败"];return;}void(^share)(void)=^{if(failedCount)owner.navigationItem.prompt=[NSString stringWithFormat:@"ZIP 已生成 · %lu 个脚本未能获取，详见 source-manifest.json",(unsigned long)failedCount];[owner shareDiagnosticLogAtURL:url];};if(active.presentingViewController){[active dismissViewControllerAnimated:YES completion:^{if(failedCount){UIAlertController *notice=[UIAlertController alertControllerWithTitle:@"资源 ZIP 已生成" message:[NSString stringWithFormat:@"可下载脚本已打包。%lu 项未能获取，具体原因列在 ZIP 内的 source-manifest.json。",(unsigned long)failedCount] preferredStyle:UIAlertControllerStyleAlert];[notice addAction:[UIAlertAction actionWithTitle:@"分享 ZIP" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){share();}]];[notice addAction:[UIAlertAction actionWithTitle:@"完成" style:UIAlertActionStyleCancel handler:nil]];[owner presentViewController:notice animated:YES completion:nil];}else share();}];}else share();}];
@@ -1790,13 +1803,20 @@ configureCatalogNavigation;
                     NSString *rawAPI=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
                     NSString *lowAPI=rawAPI.lowercaseString;
                     BOOL isForADM=[siteKey hasPrefix:@"joeshu."]||[lowAPI containsString:@"raw.githubusercontent.com/joeshu/for-adm/"];
-                    BOOL isDrpyRunner=[lowAPI containsString:@"drpy2.min.js"]||[lowAPI containsString:@"3e7e0c8a023b624cec6bdcc200f06f02.js"];
+                    BOOL isDrpyRunner=[lowAPI containsString:@"drpy2.min.js"]||[lowAPI containsString:@"3e7e0c8a023b624cec6bdcc200f06f02.js"]||([lowAPI hasPrefix:@"https://lytvs.top/py/"]&&([lowAPI hasSuffix:@".js"]||[lowAPI hasSuffix:@".hjs"]))||[lowAPI hasSuffix:@".hjs"]||[lowAPI containsString:@".hjs?"];
                     BOOL useNativeFallback=(!isForADM&&[apiKind isEqual:@"script"]&&(isDrpyRunner||[fallbackSiteKeys containsObject:siteKey]));
                     if(useNativeFallback)apiKind=@"jar-bridge";
                     if(!([apiKind isEqual:@"tvbox-api"]||[apiKind isEqual:@"maccms-api"]||[apiKind isEqual:@"douban-index"]||[apiKind isEqual:@"jar-bridge"])||![site[@"supported"] boolValue])continue;
                     NSString *protocol=apiKind,*siteID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalogID,siteKey];
                     NSString *type=site[@"type"]?:@"1";
-                    NSString *effectiveAPI=useNativeFallback?@"csp_AppRJ":(site[@"api"]?:@"");
+                    NSString *siteName=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";
+                    NSString *catName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"";
+                    NSString *decodedAPI=[rawAPI stringByRemovingPercentEncoding]?:rawAPI;
+                    NSString *combinedMeta=[[NSString stringWithFormat:@"%@ %@ %@ %@",siteName,catName,siteKey,decodedAPI] lowercaseString];
+                    BOOL isAdultMeta=[combinedMeta containsString:@"2048"]||[combinedMeta containsString:@"成人"]||[combinedMeta containsString:@"野果"]||[combinedMeta containsString:@"橙果"]||[combinedMeta containsString:@"吃瓜"]||[combinedMeta containsString:@"chigua"]||[combinedMeta containsString:@"黑料"]||[combinedMeta containsString:@"伦理"]||[combinedMeta containsString:@"🔞"];
+                    BOOL isShortDramaMeta=!isAdultMeta&&([combinedMeta containsString:@"短剧"]||[combinedMeta containsString:@"duanju"]||[combinedMeta containsString:@"七猫"]||[combinedMeta containsString:@"围观"]||[combinedMeta containsString:@"好看"]||[combinedMeta containsString:@"喜番"]||[combinedMeta containsString:@"河马"]||[combinedMeta containsString:@"星芽"]||[combinedMeta containsString:@"抖音"]||[combinedMeta containsString:@"红果"]);
+                    NSString *fallbackClass=isAdultMeta?@"csp_AdultDJ":(isShortDramaMeta?@"csp_QimaoDJ":@"csp_AppRJ");
+                    NSString *effectiveAPI=useNativeFallback?fallbackClass:(site[@"api"]?:@"");
                     NSString *engine=[apiKind isEqual:@"maccms-api"]?@"MacCMS JSON/XML API":([apiKind isEqual:@"douban-index"]?@"豆瓣影视索引 · 原生适配":([apiKind isEqual:@"jar-bridge"]?@"Android/JAR 适配引擎 · iOS 原生执行":[NSString stringWithFormat:@"TVBox type %@ JSON API",type]));
                     NSArray *capabilities=[apiKind isEqual:@"douban-index"]?@[@"home",@"category",@"search"]:@[@"home",@"category",@"search",@"detail",@"play"];
                     NSMutableDictionary *source=[@{@"id":siteID,@"name":site[@"name"]?:@"影视来源",@"engine":engine,@"protocol":protocol,@"tvboxType":@([type integerValue]),@"api":effectiveAPI,@"url":effectiveAPI,@"options":useNativeFallback?@"":(site[@"ext"]?:@""),@"header":site[@"header"]?:@{},@"playUrl":site[@"playUrl"]?:@"",@"status":site[@"status"]?:@"可直接访问",@"catalogID":catalogID,@"catalogName":catalog[@"name"]?:@"资源合集",@"capabilities":capabilities,@"tvboxSiteKey":siteKey,@"tvboxSiteKeys":siteKey.length?@[siteKey]:@[]} mutableCopy];
@@ -3106,6 +3126,10 @@ configureCatalogNavigation;
         [RuntimeDiagnostics.shared recordEvent:service?@"resource_import_succeeded":@"resource_import_failed" category:@"import" fields:@{@"correlation_id":traceID, @"service_id":service[@"id"]?:@"", @"stage":lastStage?:@"download", @"configuration_state":service[@"configurationState"]?:@"", @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@""}];
         dispatch_block_t done=^{
             if(error&&error.code!=NSURLErrorCancelled){
+                if(owner.pendingTVBoxSiteName.length){
+                    if(completion)completion(nil,error);
+                    return;
+                }
                 UIAlertController *failure=[UIAlertController alertControllerWithTitle:@"资源导入失败" message:[NSString stringWithFormat:@"%@\n%@",lastStage?:@"下载阶段",error.localizedDescription?:@"请检查网络后重试"] preferredStyle:UIAlertControllerStyleAlert];
                 [failure addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){if(completion)completion(nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);}]];
                 [failure addAction:[UIAlertAction actionWithTitle:@"重新下载并校验" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[owner downloadPackageURL:url headers:headers runtimeHint:runtimeHint completion:completion];}]];
@@ -3133,12 +3157,15 @@ configureCatalogNavigation;
         NSString *targetID=[NSString stringWithFormat:@"jar-bridge:%@:%@",catalogID,siteKey];
         [NSUserDefaults.standardUserDefaults setObject:catalogID forKey:@"selectedMediaCatalogID"];
         [NSUserDefaults.standardUserDefaults setObject:targetID forKey:@"selectedMediaSource"];
+        if(self.navigationController.topViewController!=self)[self.navigationController popToViewController:self animated:NO];
         [self selectBottomTab:(id)self.bottomBar.arrangedSubviews[2]];
         [mediaPage refreshSources];
-        for(NSDictionary *src in (mediaPage.sourcesProvider?mediaPage.sourcesProvider():@[])){
-            if([src[@"id"] isEqual:targetID]){
-                [mediaPage activate:src keepingHome:YES];
-                break;
+        if(![mediaPage.source[@"id"] isEqual:targetID]||(!mediaPage.loading&&!mediaPage.homeResult)){
+            for(NSDictionary *src in (mediaPage.sourcesProvider?mediaPage.sourcesProvider():@[])){
+                if([src[@"id"] isEqual:targetID]){
+                    [mediaPage activate:src keepingHome:YES];
+                    break;
+                }
             }
         }
     }
@@ -3160,7 +3187,7 @@ configureCatalogNavigation;
         }
     }
     NSString *lowAPI=api.lowercaseString;
-    if([lowAPI containsString:@"drpy2.min.js"]||[lowAPI containsString:@"3e7e0c8a023b624cec6bdcc200f06f02.js"]){
+    if([lowAPI containsString:@"drpy2.min.js"]||[lowAPI containsString:@"3e7e0c8a023b624cec6bdcc200f06f02.js"]||([lowAPI hasPrefix:@"https://lytvs.top/py/"]&&([lowAPI hasSuffix:@".js"]||[lowAPI hasSuffix:@".hjs"]))||[lowAPI hasSuffix:@".hjs"]||[lowAPI containsString:@".hjs?"]){
         [self activateNativeFallbackForTVBoxSite:site browseAfterImport:browseAfterImport];
         return;
     }
@@ -3488,6 +3515,9 @@ configureCatalogNavigation;
         }
         NSError *error=nil;BOOL started=[self startService:service error:&error];
         [RuntimeDiagnostics.shared recordEvent:started?@"service_start_accepted":@"service_start_failed" category:@"service" fields:@{@"service_id":serviceID, @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"python", @"port":service[@"port"]?:@0, @"start_phase":started?@"request_accepted":@"rejected", @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@""}];
+        if(started && ![service[@"builtin"] boolValue] && [ServiceStore isVODMediaService:service] && ![ServiceStore isLiveMediaService:service]){
+            [self hibernateExcessBackgroundVODServicesKeepingID:serviceID];
+        }
         [self refreshConfigurationPage];if(completion)completion(error);return;
     }
     [self.serviceOperations addObject:serviceID];
@@ -3503,6 +3533,26 @@ configureCatalogNavigation;
             [owner completeServiceStopForIdentifier:serviceID];[owner refreshConfigurationPage];if(completion)completion(nil);
         });
     });
+}
+- (void)hibernateExcessBackgroundVODServicesKeepingID:(NSString *)activeServiceID {
+    if(!activeServiceID.length)return;
+    if(!self.recentVODServiceIDs)self.recentVODServiceIDs=[NSMutableArray array];
+    [self.recentVODServiceIDs removeObject:activeServiceID];
+    [self.recentVODServiceIDs addObject:activeServiceID];
+    NSUInteger maxConcurrentVODServices=2;
+    if(self.recentVODServiceIDs.count<=maxConcurrentVODServices)return;
+    NSArray<NSDictionary *> *allServices=[ServiceStore services];
+    while(self.recentVODServiceIDs.count>maxConcurrentVODServices){
+        NSString *evictID=self.recentVODServiceIDs.firstObject;
+        [self.recentVODServiceIDs removeObjectAtIndex:0];
+        if([evictID isEqualToString:activeServiceID]||[self.serviceOperations containsObject:evictID])continue;
+        NSDictionary *candidate=nil;
+        for(NSDictionary *svc in allServices)if([svc[@"id"] isEqualToString:evictID]){candidate=svc;break;}
+        if(!candidate||[candidate[@"builtin"] boolValue]||![ServiceStore isVODMediaService:candidate]||[ServiceStore isLiveMediaService:candidate]||[ServiceStore subscriptionURLForService:candidate].length)continue;
+        if([PyHost isRunningServiceIdentifier:evictID]){
+            [self changeService:candidate enabled:NO completion:nil];
+        }
+    }
 }
 - (void)completeServiceStopForIdentifier:(NSString *)serviceID {
     [(MediaBrowserViewController *)self.tabPages[@2] invalidateServiceIdentifier:serviceID];

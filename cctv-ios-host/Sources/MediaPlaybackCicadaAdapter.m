@@ -13,29 +13,29 @@
 //      currentPosition / setAutoPlay: / setScalingMode: / setVolume: /
 //      CicadaConfig 的 setNetworkTimeout: / setNetworkRetryCount: /
 //      setHttpHeaders: / setUserAgent: / setReferer: /
-//      CicadaUrlSource 的 +urlWithString:。
-//   3) Delegate 回调：以下 5 个 selector 在二进制中以字符串形式确认：
-//      onError:errorModel:、onCurrentPositionUpdate:position:、
-//      onLoadingProgress:progress:、onPlayerStatusChanged:oldStatus:newStatus:、
+//      CicadaUrlSource 的 -init / -urlWithString: / -setPlayerUrl:。
+//   3) Delegate 回调：以下 6 个 selector 在二进制中以字符串形式确认：
+//      onPlayerEvent:eventType:、onError:errorModel:、
+//      onCurrentPositionUpdate:position:、onLoadingProgress:progress:、
+//      onPlayerStatusChanged:oldStatus:newStatus:、
 //      onVideoSizeChanged:width:height:rotation:。
 //      其余 6 个（onPrepared:、onFirstFrameShow:、onCompletion:、
 //      onLoadingStart:、onLoadingEnd:、onSeekEnd:）只在 C++ 层
 //      （CicadaOCHelper）中确认，ObjC selector 拼写未在二进制中直接确认，
-//      故实现为 best-effort，并用 1 秒位置轮询兜底：位置推进即视为首帧已出，
+//      故实现为 best-effort，并用位置轮询兜底：位置推进即视为首帧已出，
 //      位置到达时长末尾即视为播放完成。回调缺失时绝不静默黑屏。
 //      onCurrentDownLoadSpeed:progress: 按 CicadaSDK.h 的声明实现
 //      （float speed，单位 bit/s），二进制中未直接确认，属 best-effort；
 //      onVideoSizeChanged 的宽高/旋转按头文件声明的 int 读取。
-//   4) 时长/位置单位：CicadaPlayer 的 duration / currentPosition 按秒计；
-//      为防个别构建返回毫秒，>360000 的值按毫秒折算（见归一化函数）。
+//   4) 时长/位置单位：CicadaPlayerSDK 二进制属性编码为 Tq（int64_t 毫秒），
+//      读取时通过 methodSignatureForSelector 自动识别整型返回值并折算为秒；
 //      网络超时单位：CicadaConfig.networkTimeout 按毫秒计（仓库内证据：
 //      直连路径传 15000，Tests/native_buffer_tests.m 里 networkTimeout=
 //      15000 与 500/3000/20000 毫秒级缓冲时长并列）。公开 API 的
 //      networkTimeout 参数仍按秒收，prepare 里 ×1000 再传给 SDK。
 //   5) seekMode 传 CICADA_SEEKMODE_ACCURATE（0x01，见 CicadaSDK.h）、
 //      scalingMode 按 CicadaScalingMode 枚举（0=SCALETOFILL、
-//      1=SCALEASPECTFIT、2=SCALEASPECTFILL，见 CicadaSDK.h）；
-//      二进制中未直接确认，需真机验证。
+//      1=SCALEASPECTFIT、2=SCALEASPECTFILL，见 CicadaSDK.h）。
 //   6) CNPlayer 的 startPlayerSDK 已在 App 启动时调用（RootViewController
 //      1617 行附近），Cicada 内核随之初始化；本适配器不再重复初始化。
 #import "MediaPlaybackCicadaAdapter.h"
@@ -73,7 +73,15 @@ static void CicadaCallVoidBool(id target, SEL sel, BOOL arg) {
 
 static void CicadaCallVoidDouble(id target, SEL sel, double arg) {
     if (!target || !sel || ![target respondsToSelector:sel]) return;
-    @try { ((void (*)(id, SEL, double))objc_msgSend)(target, sel, arg); } @catch (NSException *e) {}
+    @try {
+        NSMethodSignature *sig = [target methodSignatureForSelector:sel];
+        const char *argType = (sig && sig.numberOfArguments > 2) ? [sig getArgumentTypeAtIndex:2] : NULL;
+        if (argType && argType[0] == 'f') {
+            ((void (*)(id, SEL, float))objc_msgSend)(target, sel, (float)arg);
+            return;
+        }
+        ((void (*)(id, SEL, double))objc_msgSend)(target, sel, arg);
+    } @catch (NSException *e) {}
 }
 
 static void CicadaCallVoidInt(id target, SEL sel, int arg) {
@@ -83,12 +91,36 @@ static void CicadaCallVoidInt(id target, SEL sel, int arg) {
 
 static void CicadaCallVoidDoubleLong(id target, SEL sel, double first, long second) {
     if (!target || !sel || ![target respondsToSelector:sel]) return;
-    @try { ((void (*)(id, SEL, double, long))objc_msgSend)(target, sel, first, second); } @catch (NSException *e) {}
+    @try {
+        NSMethodSignature *sig = [target methodSignatureForSelector:sel];
+        const char *argType = (sig && sig.numberOfArguments > 2) ? [sig getArgumentTypeAtIndex:2] : NULL;
+        if (argType && (argType[0] == 'q' || argType[0] == 'Q' || argType[0] == 'l' || argType[0] == 'L')) {
+            int64_t timeMs = (int64_t)llround(MAX(0.0, first) * 1000.0);
+            ((void (*)(id, SEL, int64_t, NSUInteger))objc_msgSend)(target, sel, timeMs, (NSUInteger)second);
+            return;
+        }
+        ((void (*)(id, SEL, double, long))objc_msgSend)(target, sel, first, second);
+    } @catch (NSException *e) {}
 }
 
 static double CicadaCallDouble(id target, SEL sel) {
     if (!target || !sel || ![target respondsToSelector:sel]) return 0;
-    @try { return ((double (*)(id, SEL))objc_msgSend)(target, sel); } @catch (NSException *e) { return 0; }
+    @try {
+        NSMethodSignature *sig = [target methodSignatureForSelector:sel];
+        const char *retType = sig ? sig.methodReturnType : NULL;
+        if (retType && (retType[0] == 'q' || retType[0] == 'Q' || retType[0] == 'l' || retType[0] == 'L')) {
+            int64_t raw = ((int64_t (*)(id, SEL))objc_msgSend)(target, sel);
+            return raw > 0 ? ((double)raw / 1000.0) : 0;
+        }
+        if (retType && (retType[0] == 'i' || retType[0] == 'I')) {
+            int raw = ((int (*)(id, SEL))objc_msgSend)(target, sel);
+            return raw > 0 ? ((double)raw / 1000.0) : 0;
+        }
+        if (retType && retType[0] == 'f') {
+            return (double)((float (*)(id, SEL))objc_msgSend)(target, sel);
+        }
+        return ((double (*)(id, SEL))objc_msgSend)(target, sel);
+    } @catch (NSException *e) { return 0; }
 }
 
 static NSTimeInterval MediaPlaybackCicadaNormalizeTimeValue(id value) {
@@ -161,7 +193,8 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
         _url = url;
         _headers = [headers copy];
         _networkTimeout = MIN(40, MAX(5, timeoutSeconds > 0 ? timeoutSeconds : 20));
-        _playerView = [UIView new];
+        Class viewClass = MediaPlaybackCicadaClass(@"CicadaPlayerView") ?: UIView.class;
+        _playerView = [[viewClass alloc] initWithFrame:CGRectZero];
         _playerView.backgroundColor = UIColor.blackColor;
         _playerView.clipsToBounds = YES;
         _state = MediaPlaybackCicadaAdapterStateIdle;
@@ -213,7 +246,14 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
         CicadaCallVoidInt(config, NSSelectorFromString(@"setHighBufferDuration:"), 1200);
         CicadaCallVoidInt(config, NSSelectorFromString(@"setMaxBufferDuration:"), 25000);
         if (self.headers.count) {
-            CicadaCallVoidObject(config, NSSelectorFromString(@"setHttpHeaders:"), self.headers);
+            NSMutableArray<NSString *> *headerLines = [NSMutableArray arrayWithCapacity:self.headers.count];
+            for (NSString *key in self.headers) {
+                NSString *value = [self.headers[key] description];
+                if (key.length && value.length) {
+                    [headerLines addObject:[NSString stringWithFormat:@"%@: %@", key, value]];
+                }
+            }
+            CicadaCallVoidObject(config, NSSelectorFromString(@"setHttpHeaders:"), headerLines);
             NSString *userAgent = self.headers[@"User-Agent"] ?: self.headers[@"user-agent"];
             NSString *referer = self.headers[@"Referer"] ?: self.headers[@"referer"];
             if (userAgent.length) CicadaCallVoidObject(config, NSSelectorFromString(@"setUserAgent:"), userAgent);
@@ -225,8 +265,18 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     CicadaCallVoidBool(player, NSSelectorFromString(@"setAutoPlay:"), NO);
     id source = nil;
     @try {
-        if ([sourceClass respondsToSelector:NSSelectorFromString(@"urlWithString:")]) {
-            source = ((id (*)(id, SEL, id))objc_msgSend)(sourceClass, NSSelectorFromString(@"urlWithString:"), self.url.absoluteString);
+        NSString *urlString = self.url.absoluteString;
+        if (urlString.length) {
+            id instance = [[sourceClass alloc] init];
+            if (instance && [instance respondsToSelector:NSSelectorFromString(@"urlWithString:")]) {
+                source = ((id (*)(id, SEL, id))objc_msgSend)(instance, NSSelectorFromString(@"urlWithString:"), urlString);
+                if (!source) source = instance;
+            } else if ([sourceClass respondsToSelector:NSSelectorFromString(@"urlWithString:")]) {
+                source = ((id (*)(id, SEL, id))objc_msgSend)(sourceClass, NSSelectorFromString(@"urlWithString:"), urlString);
+            } else if (instance && [instance respondsToSelector:NSSelectorFromString(@"setPlayerUrl:")]) {
+                CicadaCallVoidObject(instance, NSSelectorFromString(@"setPlayerUrl:"), self.url);
+                source = instance;
+            }
         }
     } @catch (NSException *e) { source = nil; }
     if (!source) {
@@ -247,7 +297,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
         if (owner.firstFrameReported || owner.state == MediaPlaybackCicadaAdapterStateFailed || owner.state == MediaPlaybackCicadaAdapterStateCompleted) return;
         [owner reportErrorWithCode:-1001 message:@"CicadaPlayer 20 秒内未显示首帧"];
     }];
-    // onPrepared 回调的 selector 拼写未在二进制中直接确认：0.5 秒后无论是否收到
+    // onPrepared 回调的 selector 拼写未在二进制中直接确认：0.25 秒后无论是否收到
     // 回调都按已准备处理，保证起播不会因回调缺失而卡住。
     self.preparedFallbackTimer = [NSTimer scheduledTimerWithTimeInterval:MediaPlaybackCicadaPreparedFallbackDelay repeats:NO block:^(NSTimer *timer) {
         MediaPlaybackCicadaAdapter *owner = weakSelf;
@@ -445,9 +495,43 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 
 // ---------- SDK Delegate 回调 ----------
 //
-// 以下 5 个 selector 在 CicadaPlayerSDK 二进制中以字符串形式确认；
+// 以下 6 个 selector 在 CicadaPlayerSDK 二进制中以字符串形式确认；
 // 其余 6 个只在 C++ 层（CicadaOCHelper）确认，拼写为 best-effort。
 // SDK 可能在非主线程回调，一律先切主线程、再按 generation 过滤。
+
+- (void)onPlayerEvent:(id)player eventType:(NSUInteger)eventType {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.destroyed) return;
+        switch (eventType) {
+            case 0: // CicadaEventPrepareDone
+                [self handlePrepared];
+                break;
+            case 2: // CicadaEventFirstRenderedStart
+                [self handleFirstFrame];
+                break;
+            case 3: // CicadaEventCompletion
+                [self handleCompletion];
+                break;
+            case 4: // CicadaEventLoadingStart
+                self.loading = YES;
+                if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateLoading:progress:)]) {
+                    [self.delegate cicadaAdapter:self didUpdateLoading:YES progress:0];
+                }
+                break;
+            case 5: // CicadaEventLoadingEnd
+                self.loading = NO;
+                if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateLoading:progress:)]) {
+                    [self.delegate cicadaAdapter:self didUpdateLoading:NO progress:1.0f];
+                }
+                break;
+            case 6: // CicadaEventSeekEnd
+                [self finishPendingSeekWithFinished:YES];
+                break;
+            default:
+                break;
+        }
+    });
+}
 
 - (void)onError:(id)player errorModel:(id)errorModel {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -459,8 +543,8 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 }
 
 - (void)onCurrentPositionUpdate:(id)player position:(id)position {
-    // 注意：position 参数的类型（NSNumber 还是原始 double）无法从二进制确认；
-    // 这里不读它，改走轮询读到的 currentPosition，避免类型猜错导致崩溃。
+    // position 在二进制中为 int64_t 毫秒，仍走 self.currentPosition 统一走签名安全的读取，
+    // 避免把非对象整数当 id 解引用导致崩溃。
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.destroyed) return;
         NSTimeInterval seconds = self.currentPosition;

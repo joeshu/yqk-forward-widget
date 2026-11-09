@@ -68,7 +68,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     NSNumber *key=@(++self.sequence);
     if(url.length>8192 || options.length>2*1024*1024){[callback callWithArguments:@[@{@"error":@"JS 请求参数超过限制"}]];return key;}
     NSURL *target=[NSURL URLWithString:url];
-    if(![self allowedURL:target] || self.requests.count>=8){[callback callWithArguments:@[@{@"error":@"JS 网络地址不受支持或并发已满"}]];return key;}
+    if(![self allowedURL:target] || self.requests.count>=24){[callback callWithArguments:@[@{@"error":@"JS 网络地址不受支持或并发已满"}]];return key;}
     NSData *bytes=[options dataUsingEncoding:NSUTF8StringEncoding];NSDictionary *opts=bytes?[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL]:nil;
     if(![opts isKindOfClass:NSDictionary.class])opts=@{};
     NSString *method=[opts[@"method"] isKindOfClass:NSString.class]?[opts[@"method"] uppercaseString]:@"GET";
@@ -192,11 +192,21 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
                 if(bText.length){text=bText;break;}
             }
         }
-        if([text containsString:@"joeshu.yqk"] && [text containsString:@"function parseLink(link) {"] && ![text containsString:@"__cctv_yqk_norm"]){
-            NSString *norm=[text containsString:@"yqk:"]
-                ? @"function parseLink(link) { var __cctv_yqk_norm = 1; if (link && typeof link === 'object') link = link.link || link.id || link.vod_id || ''; link = String(link || '').trim(); var __m = link.match(new RegExp('(?:^|/play/|yqk://vod/)([0-9]+)(?:[?]([^#]*))?$', 'i')); if (__m) link = 'yqk://vod/' + __m[1] + (__m[2] ? ('?' + __m[2]) : '');"
-                : @"function parseLink(link) { var __cctv_yqk_norm = 1; if (link && typeof link === 'object') link = link.link || link.id || link.vod_id || ''; link = String(link || '').trim(); var __yqkSite = (typeof YQK === 'object' && YQK && YQK.site) ? YQK.site : 'https://m.yqk3hxe.com'; var __m = link.match(new RegExp('(?:^|/play/|yqk://vod/)([0-9]+)(?:[?]([^#]*))?$', 'i')); if (__m) link = __yqkSite + '/play/' + __m[1] + (__m[2] ? ('?' + __m[2]) : '');";
-            text=[text stringByReplacingOccurrencesOfString:@"function parseLink(link) {" withString:norm];
+        if([text containsString:@"joeshu.yqk"]){
+            if([text containsString:@"function parseLink(link) {"] && ![text containsString:@"__cctv_yqk_norm"]){
+                NSString *norm=[text containsString:@"yqk:"]
+                    ? @"function parseLink(link) { var __cctv_yqk_norm = 1; if (link && typeof link === 'object') link = link.link || link.id || link.vod_id || ''; link = String(link || '').trim(); var __m = link.match(new RegExp('(?:^|/play/|yqk://vod/)([0-9]+)(?:[?]([^#]*))?$', 'i')); if (__m) link = 'yqk://vod/' + __m[1] + (__m[2] ? ('?' + __m[2]) : '');"
+                    : @"function parseLink(link) { var __cctv_yqk_norm = 1; if (link && typeof link === 'object') link = link.link || link.id || link.vod_id || ''; link = String(link || '').trim(); var __yqkSite = (typeof YQK === 'object' && YQK && YQK.site) ? YQK.site : 'https://m.yqk3hxe.com'; var __m = link.match(new RegExp('(?:^|/play/|yqk://vod/)([0-9]+)(?:[?]([^#]*))?$', 'i')); if (__m) link = __yqkSite + '/play/' + __m[1] + (__m[2] ? ('?' + __m[2]) : '');";
+                text=[text stringByReplacingOccurrencesOfString:@"function parseLink(link) {" withString:norm];
+            }
+            text=[text stringByReplacingOccurrencesOfString:@"timeout:yqkRequestTimeout(budget,15000)" withString:@"timeout:yqkRequestTimeout(budget,4500)"];
+            text=[text stringByReplacingOccurrencesOfString:@"timeout:yqkRequestTimeout(budget,12000)" withString:@"timeout:yqkRequestTimeout(budget,4500)"];
+            text=[text stringByReplacingOccurrencesOfString:@"timeout:yqkRequestTimeout(budget,5500)" withString:@"timeout:yqkRequestTimeout(budget,4500)"];
+            text=[text stringByReplacingOccurrencesOfString:@"Math.min(20000," withString:@"Math.min(4500,"];
+            text=[text stringByReplacingOccurrencesOfString:@"Math.min(5500," withString:@"Math.min(4500,"];
+            if([text containsString:@"async function yqkProbeHls(url,headers,budget){"] && ![text containsString:@"__cctv_yqk_fast_probe"]){
+                text=[text stringByReplacingOccurrencesOfString:@"async function yqkProbeHls(url,headers,budget){" withString:@"async function yqkProbeHls(url,headers,budget){var __cctv_yqk_fast_probe=1;if(!url||!/^https?:\/\//i.test(String(url)))throw new Error("一起看播放地址无效");if(budget&&Date.now()>=budget.deadline)return url;try{var __r=await CCTVHttp.get(url,{timeout:Math.min(2800,yqkRequestTimeout(budget,2800)),headers:headers});var __st=Number(__r.statusCode||__r.status||0),__bd=__r.data;if(__st>=400&&__st!==403)throw new Error("一起看 HLS 状态异常: "+__st);if(typeof __bd==="string"&&__bd.length>0&&__bd.length<=1048576&&/^\s*<(?:!doctype|html)/i.test(__bd))throw new Error("一起看返回网页而非流媒体");return url;}catch(__e){if(__e&&/状态异常|返回网页|播放地址无效/.test(String(__e.message||__e)))throw __e;return url;}"];
+            }
         }
         return text;
     };
@@ -326,7 +336,18 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
         self.unresponsive=YES;
         // 超时调用仍占着串行队列：把复位排在队列尾，等它执行完再恢复，
         // 调用方此后可重新使用本会话；若 JS 死循环占住队列则永不复位，语义正确。
-        dispatch_async(self.queue,^{[self.calls removeObjectForKey:identifier];self.unresponsive=NO;});
+        dispatch_async(self.queue,^{
+            [self.calls removeObjectForKey:identifier];
+            if(![operation isEqualToString:@"start"] && self.calls.count==0 && self.requests.count>0){
+                for(NSNumber *reqKey in self.requests.allKeys.copy){
+                    NSMutableDictionary *rec=self.requests[reqKey];
+                    rec[@"aborted"]=@YES;
+                    [rec[@"task"] cancel];
+                    [self fetchFinished:reqKey error:@"AbortError"];
+                }
+            }
+            self.unresponsive=NO;
+        });
         if(error)*error=[NSError errorWithDomain:@"JSPlugin" code:2 userInfo:@{NSLocalizedDescriptionKey:@"JS 插件调用超时"}];return nil;
     }
     return answer;

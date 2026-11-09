@@ -59,6 +59,7 @@
     for(id value in sites){
         if(![value isKindOfClass:NSDictionary.class]||![value[@"supported"] boolValue]||![value[@"apiKind"] isEqual:@"script"])continue;
         NSString *api=[value[@"api"] isKindOfClass:NSString.class]?value[@"api"]:@"";NSURLComponents *parts=[NSURLComponents componentsWithString:api];
+        if(!parts){NSMutableCharacterSet *allowed=[NSCharacterSet.URLQueryAllowedCharacterSet mutableCopy];[allowed addCharactersInString:@"#%/:?@[]!$&'()*+,;="];NSString *encoded=[api stringByAddingPercentEncodingWithAllowedCharacters:allowed];if(encoded.length)parts=[NSURLComponents componentsWithString:encoded];}
         if(!parts||![@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]||!parts.host.length)continue;
         NSString *identity=[self identityForSite:value];NSMutableDictionary *job=byIdentity[identity];
         if(!job){job=[@{@"site":value,@"siteKeys":[NSMutableArray array]} mutableCopy];byIdentity[identity]=job;[jobs addObject:job];}
@@ -84,7 +85,9 @@
             if(delta>[owner maximumDownloadBytes]||owner.totalReceivedBytes>[owner maximumDownloadBytes]-delta){owner.downloadLimitReached=YES;[owner cancel];return;}
             owner.totalReceivedBytes+=delta;
         };
-        [downloader importURL:[NSURL URLWithString:api] headers:site[@"header"] runtimeHint:nil completion:^(NSDictionary *service,NSError *error){
+        NSURL *targetURL=[NSURL URLWithString:api];
+        if(!targetURL){NSMutableCharacterSet *allowed=[NSCharacterSet.URLQueryAllowedCharacterSet mutableCopy];[allowed addCharactersInString:@"#%/:?@[]!$&'()*+,;="];NSString *encoded=[api stringByAddingPercentEncodingWithAllowedCharacters:allowed];if(encoded.length)targetURL=[NSURL URLWithString:encoded];}
+        [downloader importURL:targetURL headers:site[@"header"] runtimeHint:nil completion:^(NSDictionary *service,NSError *error){
             TVBoxCatalogBulkImporter *owner=weakSelf;if(!owner)return;[owner.active removeObjectForKey:jobID];owner.completedCount++;
             if(owner.cancelled){if(service)[ServiceStore remove:service[@"id"]];}
             else if(error||!service){owner.failedCount++;[owner.failures addObject:@{@"name":name,@"message":error.localizedDescription?:@"站点脚本无法识别"}];}

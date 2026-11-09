@@ -153,11 +153,31 @@ static NSUInteger const ImageQueueLimit = 160;
     HostImageRequest *record=self.tasks[@(task.taskIdentifier)];if(!record)return;
     [self.tasks removeObjectForKey:@(task.taskIdentifier)];[self.requests removeObjectForKey:record.cacheKey];
     NSMutableData *domain=[self domainStateForURL:record.url];
+    BOOL truncatedBody=(!error && record.expectedContentLength>0 && (long long)record.data.length<record.expectedContentLength);
+    if(truncatedBody && !record.failureStage.length)record.failureStage=@"response_truncated";
     if(record.generation==self.generation){
         HostImageDomainState *state=domain.mutableBytes;unsigned previous=state->timeouts;BOOL probe=state->probe;
-        BOOL isDomainTimeout=[error.domain isEqual:NSURLErrorDomain]&&(error.code==NSURLErrorTimedOut||error.code==NSURLErrorSecureConnectionFailed||error.code==NSURLErrorCannotFindHost||error.code==NSURLErrorCannotConnectToHost);
+        BOOL isDomainTimeout=truncatedBody||([error.domain isEqual:NSURLErrorDomain]&&(error.code==NSURLErrorTimedOut||error.code==NSURLErrorSecureConnectionFailed||error.code==NSURLErrorCannotFindHost||error.code==NSURLErrorCannotConnectToHost));
         HostImageDomainFinish(state,CACurrentMediaTime(),isDomainTimeout,error.code==NSURLErrorCancelled&&!record.failureStage.length);
-        if((previous<3&&state->timeouts>=3)||probe)[RuntimeDiagnostics.shared recordEvent:probe?@"image_domain_probe_finished":@"image_domain_backoff_started" category:@"media_api" fields:@{@"image_host":[NSURL URLWithString:record.url].host?:@"",@"http_status":@(record.httpStatus),@"error_code":@(error.code),@"remaining_backoff_seconds":@(MAX(0,state->until-CACurrentMediaTime())),@"timeout_streak":@(state->timeouts)}];
+        if((previous<3&&state->timeouts>=3)||probe){
+            NSString *backedOffHost=[NSURL URLWithString:record.url].host.lowercaseString?:@"";
+            [RuntimeDiagnostics.shared recordEvent:probe?@"image_domain_probe_finished":@"image_domain_backoff_started" category:@"media_api" fields:@{@"image_host":backedOffHost,@"http_status":@(record.httpStatus),@"error_code":@(error.code),@"remaining_backoff_seconds":@(MAX(0,state->until-CACurrentMediaTime())),@"timeout_streak":@(state->timeouts)}];
+            if(state->timeouts>=3 && backedOffHost.length){
+                for(NSInteger i=(NSInteger)self.pending.count-1;i>=0;i--){
+                    HostImageRequest *queued=self.pending[(NSUInteger)i];
+                    if([([NSURL URLWithString:queued.url].host.lowercaseString?:@"") isEqualToString:backedOffHost]){
+                        [self.requests removeObjectForKey:queued.cacheKey];
+                        [self.pending removeObjectAtIndex:(NSUInteger)i];
+                    }
+                }
+                for(HostImageRequest *inflight in self.tasks.allValues.copy){
+                    if([([NSURL URLWithString:inflight.url].host.lowercaseString?:@"") isEqualToString:backedOffHost]){
+                        inflight.failureStage=@"domain_backoff_fast_fail";
+                        [inflight.task cancel];
+                    }
+                }
+            }
+        }
     }
     UIImage *image=nil;
     if(!error && record.generation==self.generation && record.data.length && !record.responseEncrypted) {

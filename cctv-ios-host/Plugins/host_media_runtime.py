@@ -1499,6 +1499,8 @@ class NativeJS:
         if not self.bridge:
             raise MediaError('RUNTIME_MISSING', '此版本未包含所需的本机 JS 运行时')
         self.session = uuid.uuid4().hex
+        self.manifest = dict(manifest or {})
+        self._cms_fallback = None
         owner = getattr(threading.current_thread(), '_host_session', None)
         self.service_identifier = getattr(owner, 'identifier', '')
         try:
@@ -1509,6 +1511,24 @@ class NativeJS:
             except Exception:
                 pass
             raise
+
+    def _is_hamo_or_hjs(self):
+        proto = str(self.manifest.get('protocol') or '').lower()
+        entry = str(self.manifest.get('entry') or '').lower()
+        return proto == 'hamo-source-v3' or entry.endswith('.hjs')
+
+    def _get_cms_fallback(self):
+        if self._cms_fallback is None:
+            csp_adapter = _load_csp_adapter()
+            meta = f"{self.manifest.get('name', '')} {self.manifest.get('entry', '')}".lower()
+            if any(k in meta for k in ('2048', '成人', '野果', '橙果', '吃瓜', 'chigua', '🔞')):
+                api_cls = 'csp_AdultDJ'
+            elif any(k in meta for k in ('短剧', 'duanju', '七猫', '围观', '好看', '喜番', '河马', '星芽', '抖音', '红果')):
+                api_cls = 'csp_QimaoDJ'
+            else:
+                api_cls = 'csp_AppRJ'
+            self._cms_fallback = csp_adapter.AppVideoEngine(api_cls, '')
+        return self._cms_fallback
 
     def _call(self, operation, **args):
         payload = dict(args, session=self.session)
@@ -1523,7 +1543,24 @@ class NativeJS:
         return self.metadata
 
     def call(self, operation, args):
-        return self._call(operation, **args)
+        try:
+            return self._call(operation, **args)
+        except MediaError:
+            if not self._is_hamo_or_hjs():
+                raise
+            fb = self._get_cms_fallback()
+            args = args or {}
+            if operation == 'home':
+                return fb.homeContent(True)
+            if operation == 'category':
+                return fb.categoryContent(str(args.get('categoryId') or '1'), str(args.get('page') or '1'), True, args.get('filters') or {})
+            if operation == 'search':
+                return fb.searchContent(str(args.get('keyword') or ''), False, str(args.get('page') or '1'))
+            if operation == 'detail':
+                return fb.detailContent([str(args.get('id') or '')])
+            if operation == 'play':
+                return fb.playerContent(str(args.get('lineId') or ''), str(args.get('id') or ''), [])
+            raise
 
     def close(self):
         return self._call('stop')

@@ -34,7 +34,55 @@ try:
 except ImportError:
     AES = None
 
-import requests
+try:
+    import requests
+except ImportError:
+    import urllib.request as _ureq
+    class _FallbackResp:
+        def __init__(self, r):
+            self.content = r.read(4 * 1024 * 1024)
+            self.status_code = getattr(r, 'status', 200)
+            self.headers = dict(r.headers)
+            self.url = r.geturl()
+            self.encoding = 'utf-8'
+        @property
+        def text(self):
+            return self.content.decode(self.encoding or 'utf-8', errors='replace')
+        def json(self):
+            return json.loads(self.text)
+    class _FallbackSession:
+        def __init__(self):
+            self.headers = {}
+        def request(self, method, url, params=None, data=None, json=None, headers=None, timeout=8, **kw):
+            u = str(url)
+            if params:
+                q = urllib.parse.urlencode(params, doseq=True)
+                u = u + ('&' if '?' in u else '?') + q
+            hdrs = dict(self.headers)
+            if headers: hdrs.update(headers)
+            body = None
+            if json is not None:
+                import json as _j
+                body = _j.dumps(json).encode('utf-8')
+                hdrs.setdefault('Content-Type', 'application/json')
+            elif isinstance(data, dict):
+                body = urllib.parse.urlencode(data).encode('utf-8')
+            elif isinstance(data, str):
+                body = data.encode('utf-8')
+            elif isinstance(data, (bytes, bytearray)):
+                body = bytes(data)
+            req = _ureq.Request(u, data=body, headers=hdrs, method=str(method or 'GET').upper())
+            with _ureq.urlopen(req, timeout=float(timeout or 8)) as resp:
+                return _FallbackResp(resp)
+        def get(self, url, **kw): return self.request('GET', url, **kw)
+        def post(self, url, data=None, json=None, **kw): return self.request('POST', url, data=data, json=json, **kw)
+    class _FallbackRequestsModule:
+        Session = _FallbackSession
+        @staticmethod
+        def get(url, **kw): return _FallbackSession().get(url, **kw)
+        @staticmethod
+        def post(url, data=None, json=None, **kw): return _FallbackSession().post(url, data=data, json=json, **kw)
+    requests = _FallbackRequestsModule()
 
 _EXT_CACHE = {}
 _JAR_CACHE = {}
@@ -904,6 +952,19 @@ class AppVideoEngine:
         if not classes:
             classes = [{'type_id': '1', 'type_name': '电影'}, {'type_id': '2', 'type_name': '电视剧'},
                        {'type_id': '3', 'type_name': '综艺'}, {'type_id': '4', 'type_name': '动漫'}]
+        meta_low = f"{self.api_type} {self.config.get('siteName', '')} {self.config.get('categoryHint', '')}".lower()
+        is_adult = any(k in meta_low for k in ('adultdj', '2048', '成人', '野果', '橙果', '吃瓜', 'chigua', '伦理', '🔞'))
+        is_drama = not is_adult and any(k in meta_low for k in ('dj', '短剧', 'duanju', '七猫', '围观', '好看', '喜番'))
+        if (is_adult or is_drama) and len(classes) > 1:
+            kw_list = ('福利', '伦理', '写真', '热舞', '短剧', '解说') if is_adult else ('短剧', '爽文', '都市', '女频', '反转', '古装', '脑洞')
+            preferred = [c for c in classes if any(kw in str(c.get('type_name', '')) for kw in kw_list)]
+            others = [c for c in classes if c not in preferred]
+            if preferred:
+                classes = preferred + others
+                if not self._is_test_host():
+                    pref_items = self.categoryContent(classes[0]['type_id'], '1', filter, {}).get('list', [])
+                    if pref_items:
+                        items = pref_items
         if not items and not self._is_test_host():
             first_tid = classes[0]['type_id'] if classes else '1'
             items = self.categoryContent(first_tid, '1', filter, {}).get('list', [])

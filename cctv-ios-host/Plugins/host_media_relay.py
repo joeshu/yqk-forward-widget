@@ -58,19 +58,43 @@ def _retry_request(request):
         method=request.get_method())
 
 
+def _configure_tolerant_ssl_context(ctx):
+    for flag_name in ('OP_IGNORE_UNEXPECTED_EOF', 'OP_LEGACY_SERVER_CONNECT'):
+        flag = getattr(ssl, flag_name, 0)
+        if flag:
+            try:
+                ctx.options |= flag
+            except Exception:
+                pass
+    return ctx
+
+
 def _is_cert_verification_error(error):
     if isinstance(error, urllib.error.HTTPError):
         return False
     reason = error.reason if isinstance(error, urllib.error.URLError) else error
-    if isinstance(reason, ssl.SSLCertVerificationError):
-        return True
-    return isinstance(reason, ssl.SSLError) and ('certificate_verify_failed' in str(reason).lower() or 'self-signed' in str(reason).lower() or 'local issuer' in str(reason).lower())
+    if isinstance(reason, (ssl.SSLCertVerificationError, getattr(ssl, 'SSLEOFError', ssl.SSLError))):
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            return True
+    msg = str(reason).lower()
+    return isinstance(reason, ssl.SSLError) and any(
+        token in msg for token in (
+            'certificate_verify_failed', 'self-signed', 'local issuer',
+            'unexpected_eof_while_reading', 'eof occurred in violation of protocol',
+            'tlsv1 alert', 'wrong version number', 'handshake failure', ' dh key too small'
+        )
+    )
 
 
 _UNVERIFIED_TLS_HOSTS = set()
-_UNVERIFIED_SSL_CONTEXT = ssl._create_unverified_context()
+_DEFAULT_SSL_CONTEXT = _configure_tolerant_ssl_context(ssl.create_default_context())
+_UNVERIFIED_SSL_CONTEXT = _configure_tolerant_ssl_context(ssl._create_unverified_context())
+try:
+    _UNVERIFIED_SSL_CONTEXT.set_ciphers('DEFAULT:@SECLEVEL=1')
+except Exception:
+    pass
 _ORIG_BUILD_OPENER = urllib.request.build_opener
-_DEFAULT_OPENER = _ORIG_BUILD_OPENER(ScopedRedirect())
+_DEFAULT_OPENER = _ORIG_BUILD_OPENER(ScopedRedirect(), urllib.request.HTTPSHandler(context=_DEFAULT_SSL_CONTEXT))
 _UNVERIFIED_OPENER = _ORIG_BUILD_OPENER(ScopedRedirect(), urllib.request.HTTPSHandler(context=_UNVERIFIED_SSL_CONTEXT))
 
 
@@ -693,6 +717,11 @@ class MediaRelay:
                     elif handler.headers.get('Range'):headers['Range']=handler.headers['Range']
                     refreshed_request=urllib.request.Request(url,headers=headers,method='HEAD' if head else 'GET')
                     response=_open_with_timeout_retry(refreshed_request, diagnostic_id)
+                elif upstream_error.code == 403 and any(k.lower() in ('referer', 'origin') for k in headers):
+                    upstream_error.close()
+                    stripped_headers = {k: v for k, v in headers.items() if k.lower() not in ('referer', 'origin')}
+                    stripped_request = urllib.request.Request(url, headers=stripped_headers, method='HEAD' if head else 'GET')
+                    response = _open_with_timeout_retry(stripped_request, diagnostic_id)
                 else:
                     raise
             with self.lock:

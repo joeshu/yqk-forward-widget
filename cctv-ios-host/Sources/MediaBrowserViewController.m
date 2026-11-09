@@ -1600,6 +1600,10 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
     NSString *catalogID=[target[@"catalogID"] isKindOfClass:NSString.class]?target[@"catalogID"]:([target[@"tvboxCatalogID"] isKindOfClass:NSString.class]?target[@"tvboxCatalogID"]:@"");
     if(catalogID.length){self.selectedCatalogID=catalogID;[NSUserDefaults.standardUserDefaults setObject:catalogID forKey:@"selectedMediaCatalogID"];}else{self.selectedCatalogID=@"";[NSUserDefaults.standardUserDefaults removeObjectForKey:@"selectedMediaCatalogID"];}
     [NSUserDefaults.standardUserDefaults setObject:targetID forKey:@"selectedMediaSource"];
+    if([self.source[@"id"] isEqual:targetID] && (self.readiness!=nil || (self.loading && [self.activeMediaOperation isEqualToString:@"capabilities"]) || (self.loading && [self.activeMediaOperation isEqualToString:@"home"]))){
+        [self updateSelectionControls];
+        return;
+    }
     self.nextHomeLoadTrigger=@"resource_list_open";
     [self activate:target];
 }
@@ -1952,9 +1956,12 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
 }
 - (void)selectCategory:(UIButton *)button {[self selectMediaCategory:[button.accessibilityIdentifier isEqual:@"__featured__"]?nil:button.accessibilityIdentifier];}
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
-    NSString *keyword=[searchController.searchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];self.keyword=keyword;if(keyword.length)self.homeMode=NO;
+    NSString *keyword=[searchController.searchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *previousKeyword=self.keyword?:@"";
+    if(!keyword.length && !previousKeyword.length && (!searchController.isActive || self.homeMode))return;
+    self.keyword=keyword;if(keyword.length)self.homeMode=NO;
     NSUInteger generation=++self.searchGeneration;__weak typeof(self) weakSelf=self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{MediaBrowserViewController *owner=weakSelf;if(!owner || owner.searchGeneration!=generation || !owner.source || owner.loading)return;owner.page=1;if(keyword.length)[owner loadListing:NO];else if(!owner.category.length){owner.nextHomeLoadTrigger=@"search_reset";[owner loadHome];}});
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{MediaBrowserViewController *owner=weakSelf;if(!owner || owner.searchGeneration!=generation || !owner.source || owner.loading)return;owner.page=1;if(keyword.length)[owner loadListing:NO];else if(!owner.category.length && (!owner.homeMode || previousKeyword.length)){owner.nextHomeLoadTrigger=@"search_reset";[owner loadHome];}});
 }
 - (void)loadMore {if(!self.loading && self.hasMore){self.page++;[self loadListing:YES];}}
 - (void)loadListing:(BOOL)append {

@@ -1557,7 +1557,14 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     [self.spinner startAnimating];[self setRetryAvailable:NO];
     NSTimeInterval timeout=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.networkTimeout.v1"]?[[NSUserDefaults standardUserDefaults] doubleForKey:@"cctv.networkTimeout.v1"]:20;
     NSDictionary *requestHeaders=self.basePlaybackHeaders?:MediaPlaybackHeadersFromResult(result);
-    MediaPlaybackCicadaAdapter *adapter=[[MediaPlaybackCicadaAdapter alloc] initWithURL:url headers:requestHeaders networkTimeout:timeout];
+    NSURL *effectiveURL=url;
+    NSString *urlHost=url.host.lowercaseString?:@"";
+    BOOL isLoopbackRelay=[@[@"127.0.0.1",@"localhost",@"::1"] containsObject:urlHost]&&sourceURL&&[@[@"http",@"https"] containsObject:sourceURL.scheme.lowercaseString]&&![sourceURL.absoluteString isEqualToString:url.absoluteString];
+    BOOL sourceIsDASH=[sourceURL.pathExtension.lowercaseString isEqualToString:@"mpd"]||[url.pathExtension.lowercaseString isEqualToString:@"mpd"];
+    if(isLoopbackRelay&&((self.attemptedRoutes&MediaPlaybackDecodeRouteAttemptedAVPlayer)!=0||sourceIsDASH)){
+        effectiveURL=sourceURL;
+    }
+    MediaPlaybackCicadaAdapter *adapter=[[MediaPlaybackCicadaAdapter alloc] initWithURL:effectiveURL headers:requestHeaders networkTimeout:timeout];
     adapter.delegate=self;self.cicadaAdapter=adapter;self.cicadaPosition=0;self.cicadaDuration=0;
     UIView *playerView=adapter.playerView;playerView.translatesAutoresizingMaskIntoConstraints=NO;
     [self.videoView addSubview:playerView];
@@ -1642,6 +1649,12 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         return;
     }
     MediaPlaybackDecodeRoute nextRoute=MediaPlaybackDecodeRouteNextForResult(self.result,self.attemptedRoutes);
+    NSString *failedSourceExt=MediaPlaybackOriginalSourceURL(self.result).pathExtension.lowercaseString?:@"";
+    BOOL avIncompatibleContainer=[@[@"mpd",@"flv",@"mkv",@"webm"] containsObject:failedSourceExt];
+    if(nextRoute==MediaPlaybackDecodeRouteAVPlayer&&avIncompatibleContainer){
+        self.attemptedRoutes|=MediaPlaybackDecodeRouteAttemptedAVPlayer;
+        nextRoute=MediaPlaybackDecodeRouteNextForResult(self.result,self.attemptedRoutes);
+    }
     if(nextRoute==MediaPlaybackDecodeRouteAVPlayer){
         NSMutableDictionary *avCandidate=[self.result mutableCopy]?:[NSMutableDictionary dictionary];
         avCandidate[@"playbackEngine"]=@"avplayer";avCandidate[@"requiresWebPlayback"]=@NO;avCandidate[@"parse"]=@0;avCandidate[@"jx"]=@0;
@@ -1865,9 +1878,19 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     [self.automaticFallbackTriedAlternateIndexes addIndex:(NSUInteger)currentAlt];
     NSUInteger limit=MIN(alternates.count,(NSUInteger)5);
     if(self.automaticFallbackTriedAlternateIndexes.count>=limit)return NO;
-    for(NSUInteger offset=1;offset<alternates.count;offset++){
+    NSURL *failedOrigURL=MediaPlaybackOriginalSourceURL(self.result);
+    NSString *failedAltHost=failedOrigURL.host.lowercaseString?:@"";
+    NSString *failedAltExt=failedOrigURL.pathExtension.lowercaseString?:@"";
+    for(NSUInteger pass=0;pass<2;pass++){
+      for(NSUInteger offset=1;offset<alternates.count;offset++){
         NSUInteger candidateIndex=((NSUInteger)currentAlt+offset)%alternates.count;
         if([self.automaticFallbackTriedAlternateIndexes containsIndex:candidateIndex])continue;
+        if(pass==0&&failedAltHost.length){
+            NSDictionary *peekAlt=[alternates[candidateIndex] isKindOfClass:NSDictionary.class]?alternates[candidateIndex]:nil;
+            NSString *peekRaw=[peekAlt[@"originalURL"] isKindOfClass:NSString.class]?peekAlt[@"originalURL"]:([peekAlt[@"url"] isKindOfClass:NSString.class]?peekAlt[@"url"]:@"");
+            NSURL *peekURL=[NSURL URLWithString:peekRaw];
+            if([peekURL.host.lowercaseString isEqualToString:failedAltHost]&&[(peekURL.pathExtension.lowercaseString?:@"") isEqualToString:failedAltExt])continue;
+        }
         NSDictionary *alternate=[alternates[candidateIndex] isKindOfClass:NSDictionary.class]?alternates[candidateIndex]:nil;
         NSString *url=[alternate[@"url"] isKindOfClass:NSString.class]?alternate[@"url"]:@"";
         if(!url.length){[self.automaticFallbackTriedAlternateIndexes addIndex:candidateIndex];continue;}
@@ -1886,6 +1909,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];
         self.attemptedRoutes=0;[self playResult:selected];
         return YES;
+      }
     }
     return NO;
 }

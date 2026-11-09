@@ -134,7 +134,7 @@ function resolve(id, from='') {
   return find(base)
 }
 function find(base){
-  for(const candidate of [base,`${base}.js`,`${base}.mjs`,`${base}.cjs`,`${base}.json`])if(files.has(candidate))return candidate
+  for(const candidate of [base,`${base}.js`,`${base}.hjs`,`${base}.mjs`,`${base}.cjs`,`${base}.json`])if(files.has(candidate))return candidate
   if(files.has(`${base}/package.json`)){
     const meta=JSON.parse(read(`${base}/package.json`))
     const main=meta.module||meta.main
@@ -360,7 +360,9 @@ function createWeBoxContext(spec,payload){
       else if(options.text!==undefined)body=String(options.text)
       else if(options.body!==undefined)body=options.body
     }
-    const timeout=Math.min(Math.max(Number(options.timeoutMs||options.timeout)||15000,1000),30000)
+    const totalTimeout=Math.min(Math.max(Number(options.timeoutMs||options.timeout)||15000,1000),30000)
+    const canRetry=['GET','HEAD'].includes(method)&&!options._retried&&totalTimeout>=8000
+    const timeout=canRetry?Math.min(totalTimeout,6500):totalTimeout
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout)
     try{
       const response=await fetch(target.toString(),{method,headers,body,signal:controller.signal,redirect:'follow'})
@@ -370,6 +372,11 @@ function createWeBoxContext(spec,payload){
       const rType=String(options.responseType||'text').toLowerCase()
       const data=rType==='base64'?bytes.toString('base64'):rType==='json'?JSON.parse(bytes.toString('utf8')):bytes.toString('utf8')
       return {status:response.status,url:response.url||target.toString(),headers:responseHeaders,data}
+    }catch(err){
+      if(canRetry&&(err?.name==='AbortError'||/abort|timeout|network/i.test(String(err?.message||err)))){
+        return weboxHttp(method,url,{...options,_retried:true,timeoutMs:Math.max(4000,totalTimeout-timeout)})
+      }
+      throw err
     }finally{clearTimeout(timer)}
   }
   return {
@@ -571,23 +578,36 @@ function createWeBoxPlugin(spec,payload){
   }
 }
 
+let hamoDefinedSpec=null
 const hamoEpisodePrefix='hamo-v3:'
 function hamoGlobals(payload){
   g.$http=req
+  hamoDefinedSpec=null
+  g.Hawk={define(spec){hamoDefinedSpec=spec;return spec}}
+  g.Hamo={define(spec){hamoDefinedSpec=spec;return spec}}
   const namespace='hamo-v3:'+String(payload.serviceID||payload.name||payload.entry||'default')
   g.$cache={
     async get(key){const stored=g.local.get(namespace,String(key||''));if(!stored)return undefined;try{const row=JSON.parse(stored);if(row.expires&&row.expires<=Date.now()){g.local.delete(namespace,String(key||''));return undefined}return row.value}catch{return undefined}},
     async set(key,value,options={}){key=String(key||'');if(!key||key.length>1024)return value;const seconds=Math.max(0,Math.min(Number(options?.ttl)||0,30*86400)),row={value,expires:seconds?Date.now()+seconds*1000:0};g.local.set(namespace,key,JSON.stringify(row));return value},
     async delete(key){return g.local.delete(namespace,String(key||''))},
   }
-  g.$crypto={encode(value,options={}){const input=String(options.input||'utf8').toLowerCase(),output=String(options.output||'base64').toLowerCase();let bytes;if(input==='base64')bytes=Buffer.from(String(value||''),'base64');else if(input==='hex')bytes=Buffer.from(String(value||''),'hex');else bytes=Buffer.from(String(value??''),'utf8');if(output==='utf8'||output==='utf-8')return bytes.toString('utf8');if(output==='base64')return bytes.toString('base64');if(output==='hex')return bytes.toString('hex');throw new Error('Hamo crypto 不支持此输出编码')}}
+  g.$crypto={
+    encode(value,options={}){const input=String(options.input||'utf8').toLowerCase(),output=String(options.output||'base64').toLowerCase();let bytes;if(input==='base64')bytes=Buffer.from(String(value||''),'base64');else if(input==='hex')bytes=Buffer.from(String(value||''),'hex');else bytes=Buffer.from(String(value??''),'utf8');if(output==='utf8'||output==='utf-8')return bytes.toString('utf8');if(output==='base64')return bytes.toString('base64');if(output==='hex')return bytes.toString('hex');throw new Error('Hamo crypto 不支持此输出编码')},
+    decode(value,options={}){return g.$crypto.encode(value,{input:options.input||'base64',output:options.output||'utf8'})},
+    md5:s=>crypto.createHash('md5').update(String(s??'')).digest('hex'),
+    sha1:s=>crypto.createHash('sha1').update(String(s??'')).digest('hex'),
+    sha256:s=>crypto.createHash('sha256').update(String(s??'')).digest('hex'),
+    hmacSha256:(s,k)=>crypto.createHmac('sha256',String(k??'')).update(String(s??'')).digest('hex'),
+    base64Encode:s=>Buffer.from(String(s??''),'utf8').toString('base64'),
+    base64Decode:s=>Buffer.from(String(s??''),'base64').toString('utf8'),
+  }
 }
-function hamoRows(value){return items(value).filter(row=>row&&typeof row==='object').map((row,index)=>{const id=String(row.id??row.itemId??row.vod_id??'');return {...row,id,name:String(row.name||row.title||row.vod_name||id||`影视内容 ${index+1}`),poster:String(row.poster??row.vod_pic??''),remarks:String(row.remarks??row.status??row.year??row.summary??row.vod_remarks??'')}})}
-function hamoHome(value){value=result(value)||{};const categories=Array.isArray(value.categories)?value.categories:(Array.isArray(value.class)?value.class:[]),filters={};for(const category of categories){const id=String(category?.id??category?.type_id??'');if(!id||!Array.isArray(category?.filters))continue;filters[id]=category.filters.filter(group=>group&&typeof group==='object').map(group=>({key:String(group.key||''),name:String(group.name||group.key||''),value:(Array.isArray(group.options)?group.options:[]).filter(option=>option&&typeof option==='object').map(option=>({n:String(option.name??option.value??''),v:option.value??''}))})).filter(group=>group.key)}return {...value,categories:categories.map((category,index)=>({id:String(category?.id??category?.type_id??index),name:String(category?.name??category?.type_name??`分类 ${index+1}`)})),filters,items:hamoRows(value)}}
+function hamoRows(value){return items(value).filter(row=>row&&typeof row==='object').map((row,index)=>{const id=String(row.id??row.itemId??row.vod_id??row.url??'');return {...row,id,name:cleanDisplayString(row.name||row.title||row.vod_name||id||`影视内容 ${index+1}`),poster:cleanDisplayString(row.poster??row.cover??row.pic??row.vod_pic??''),remarks:cleanDisplayString(row.remarks??row.subtitle??row.status??row.year??row.summary??row.vod_remarks??'')}})}
+function hamoHome(value){value=result(value)||{};const categories=Array.isArray(value.categories)?value.categories:(Array.isArray(value.class)?value.class:(Array.isArray(value.tabs)?value.tabs:[])),filters={};for(const category of categories){const id=String(category?.id??category?.type_id??category?.value??'');if(!id||!Array.isArray(category?.filters))continue;filters[id]=category.filters.filter(group=>group&&typeof group==='object').map(group=>({key:String(group.key||''),name:String(group.name||group.key||''),value:(Array.isArray(group.options)?group.options:[]).filter(option=>option&&typeof option==='object').map(option=>({n:String(option.name??option.label??option.value??''),v:option.value??''}))})).filter(group=>group.key)}return {...value,categories:categories.map((category,index)=>({id:String(category?.id??category?.type_id??category?.value??index),name:String(category?.name??category?.title??category?.type_name??`分类 ${index+1}`)})),filters,items:hamoRows(value)}}
 function hamoListing(value){value=result(value)||{};return {...value,items:hamoRows(value)}}
-function hamoEpisodeID(itemId,line,episode){const ref=episode?.ref&&typeof episode.ref==='object'?episode.ref:(episode?.ref?{playPath:String(episode.ref)}:{});return hamoEpisodePrefix+encodeURIComponent(JSON.stringify({itemId:String(itemId||''),lineId:String(line?.id||''),episodeId:String(episode?.id||''),ref}))}
-function hamoDetail(value,args){value=result(value)||{};const itemId=String(value.id??args.id??args.itemId??''),sources=Array.isArray(value.sources)?value.sources:[];const lines=sources.map((line,lineIndex)=>({id:String(line?.id??lineIndex),name:String(line?.name??`线路 ${lineIndex+1}`),episodes:(Array.isArray(line?.episodes)?line.episodes:[]).filter(episode=>episode&&typeof episode==='object').map(episode=>({id:hamoEpisodeID(itemId,line,episode),name:String(episode.name??episode.title??episode.id??'正片')}))})).filter(line=>line.episodes.length);const actors=Array.isArray(value.actors)?value.actors.join(' / '):String(value.actors??'');const genres=Array.isArray(value.genres)?value.genres.join(' / '):String(value.genres??'');return {...value,id:itemId,name:String(value.name||value.title||itemId),poster:String(value.poster??value.cover??''),description:String(value.description??value.summary??value.content??''),actor:actors,type:genres,lines}}
-async function hamoPlay(args){let episode={itemId:String(args.id||''),lineId:String(args.lineId||''),episodeId:String(args.id||''),ref:{playPath:String(args.id||'')}};if(typeof args.id==='string'&&args.id.startsWith(hamoEpisodePrefix)){try{episode=JSON.parse(decodeURIComponent(args.id.slice(hamoEpisodePrefix.length)))}catch{throw new Error('Hamo 分集引用格式无效')}}const resolved=result(await plugin.resolve({itemId:String(episode.itemId||''),lineId:String(args.lineId||episode.lineId||''),episodeId:String(episode.episodeId||''),ref:episode.ref&&typeof episode.ref==='object'?episode.ref:{}},{lineId:String(args.lineId||episode.lineId||'')}));if(typeof resolved==='string')return {url:resolved};if(!resolved||typeof resolved!=='object')throw new Error('Hamo 来源未返回播放结果');return {...resolved,requiresWebPlayback:resolved.requiresWebPlayback??resolved.webPlayback??String(resolved.type||'').toLowerCase()==='web'}}
+function hamoEpisodeID(itemId,line,episode){const rawRef=episode?.ref??episode?.url??episode?.playUrl??episode?.id;const ref=rawRef&&typeof rawRef==='object'?rawRef:(rawRef?{playPath:String(rawRef),url:String(rawRef)}:{});return hamoEpisodePrefix+encodeURIComponent(JSON.stringify({itemId:String(itemId||''),lineId:String(line?.id||''),episodeId:String(episode?.id??episode?.url??''),ref}))}
+function hamoDetail(value,args){value=result(value)||{};if(Array.isArray(value.list)&&value.list.length&&typeof value.list[0]==='object')value=value.list[0];const itemId=String(value.id??value.vod_id??args.id??args.itemId??'');let rawSources=Array.isArray(value.sources)?value.sources:(Array.isArray(value.lines)?value.lines:(Array.isArray(value.groups)?value.groups:[]));if(!rawSources.length&&Array.isArray(value.episodes)&&value.episodes.length)rawSources=[{id:'default',name:'默认线路',episodes:value.episodes}];if(!rawSources.length&&(value.url||value.playUrl))rawSources=[{id:'default',name:'默认线路',episodes:[{id:String(value.url||value.playUrl),name:'正片',url:String(value.url||value.playUrl)}]}];const lines=rawSources.map((line,lineIndex)=>({id:String(line?.id??lineIndex),name:String(line?.name??`线路 ${lineIndex+1}`),episodes:(Array.isArray(line?.episodes)?line.episodes:[]).filter(episode=>episode&&typeof episode==='object').map((episode,epIndex)=>({id:hamoEpisodeID(itemId,line,episode),name:String(episode.name??episode.title??episode.id??`第 ${epIndex+1} 集`)}))})).filter(line=>line.episodes.length);const actors=Array.isArray(value.actors)?value.actors.join(' / '):String(value.actors??value.vod_actor??'');const genres=Array.isArray(value.genres)?value.genres.join(' / '):String(value.genres??value.vod_class??'');return {...value,id:itemId,name:String(value.name||value.title||value.vod_name||itemId),poster:String(value.poster??value.cover??value.vod_pic??''),description:String(value.description??value.summary??value.content??value.vod_content??''),actor:actors,type:genres,lines}}
+async function hamoPlay(args){let episode={itemId:String(args.id||''),lineId:String(args.lineId||''),episodeId:String(args.id||''),ref:{playPath:String(args.id||''),url:String(args.id||'')}};if(typeof args.id==='string'&&args.id.startsWith(hamoEpisodePrefix)){try{episode=JSON.parse(decodeURIComponent(args.id.slice(hamoEpisodePrefix.length)))}catch{throw new Error('Hamo 分集引用格式无效')}}const resolveFn=typeof plugin.resolve==='function'?plugin.resolve:plugin.play;if(typeof resolveFn!=='function'){const fallbackUrl=episode.ref?.url||episode.ref?.playPath||episode.episodeId;if(typeof fallbackUrl==='string'&&/^https?:\/\//i.test(fallbackUrl))return {url:fallbackUrl};throw new Error('Hamo 来源未定义 resolve/play 方法')}const resolved=result(await resolveFn.call(plugin,{id:String(episode.episodeId||''),itemId:String(episode.itemId||''),lineId:String(args.lineId||episode.lineId||''),episodeId:String(episode.episodeId||''),url:String(episode.ref?.url||episode.ref?.playPath||episode.episodeId||''),ref:episode.ref&&typeof episode.ref==='object'?episode.ref:{}},{lineId:String(args.lineId||episode.lineId||'')}));if(typeof resolved==='string')return {url:resolved};if(!resolved||typeof resolved!=='object')throw new Error('Hamo 来源未返回播放结果');const finalUrl=resolved.url||resolved.playUrl||(Array.isArray(resolved.sources)&&resolved.sources[0]?.url)||'';return {...resolved,...(finalUrl?{url:finalUrl}:{}),requiresWebPlayback:resolved.requiresWebPlayback??resolved.webPlayback??String(resolved.type||'').toLowerCase()==='web'}}
 async function load(payload){
   config={...payload,api:payload.api||(isCatVodProtocol(payload.protocol)?'catvod':'standard')};files=new Set(g.__hostListPackageFiles());virtualFiles.clear();cookieJar.clear();netCache.clear();cache.clear();cacheStore.clear();inflight.clear();concurrencyGroups.clear();spiderRoutes=new Map();spiderPrefix='';modernCatVod=false
   g.__cctvBuiltins=builtins;g.__cctvRequire=requireFile
@@ -626,9 +646,9 @@ async function load(payload){
   let module
   if(payload.protocol==='drpy'){const helpers=await import('../drpy/globals.mjs');helpers.prepareGlobals(payload);const engine=await import('../drpy/adapter.mjs');module=engine.load(read(entry),payload.options);config.api='catvod'}
   else if(type==='commonjs')module=requireFile(entry)
-  else if(type==='script')module=new Function(`${read(entry)}\nreturn typeof plugin!=='undefined'?plugin:typeof spider!=='undefined'?spider:(typeof hawk!=='undefined'&&hawk&&hawk.apiVersion===3?hawk:(typeof rule!=='undefined'?rule:{${['init','home','homeContent','homeVideoContent','category','categoryContent','search','searchContent','detail','detailContent','play','playerContent','channels','catalog','resolve','epg','destroy'].map(key=>`${key}:typeof ${key}==='function'?${key}:undefined`).join(',')}}));`)()
+  else if(type==='script')module=new Function(`${read(entry)}\nreturn typeof __jsEvalReturn==='function'?__jsEvalReturn():typeof plugin!=='undefined'?plugin:typeof spider!=='undefined'?spider:(typeof hawk!=='undefined'&&hawk&&(hawk.apiVersion===3||typeof hawk.home==='function')?hawk:(typeof hamo!=='undefined'&&hamo&&(hamo.apiVersion===3||typeof hamo.home==='function')?hamo:(typeof rule!=='undefined'?rule:{${['init','home','homeContent','homeVideoContent','category','categoryContent','search','searchContent','detail','detailContent','play','playerContent','channels','catalog','resolve','epg','destroy'].map(key=>`${key}:typeof ${key}==='function'?${key}:undefined`).join(',')}})));`)()
   else module=await esm(entry)
-  plugin=weboxDefinedSpec?createWeBoxPlugin(weboxDefinedSpec,payload):(module?.default||module)
+  plugin=weboxDefinedSpec?createWeBoxPlugin(weboxDefinedSpec,payload):(hamoDefinedSpec||(module?.default||module))
   if(plugin&&plugin.api==='1.1'&&typeof plugin.list==='function'&&!weboxDefinedSpec)plugin=createWeBoxPlugin(plugin,payload)
   if(payload.protocol==='catvod-spider'){
     if(typeof plugin==='function')plugin=await plugin(payload.name||payload.entry||'本地影视源',payload.options||{})

@@ -1074,7 +1074,32 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
     NSMutableDictionary *delegatedSource=[source mutableCopy]?:[NSMutableDictionary dictionary];
     delegatedSource[@"protocol"]=@"tvbox-api";
     delegatedSource[@"_jarBridge"]=@YES;
-    return MediaTVBoxNormalize(operation,arguments,delegatedSource,raw);
+    id normalized=MediaTVBoxNormalize(operation,arguments,delegatedSource,raw);
+    if([operation isEqual:@"home"]&&[normalized isKindOfClass:NSDictionary.class]){
+        NSString *combined=[[NSString stringWithFormat:@"%@ %@ %@",api,source[@"name"]?:@"",source[@"catalogName"]?:@""] lowercaseString];
+        BOOL isAdult=[combined containsString:@"adultdj"]||[combined containsString:@"2048"]||[combined containsString:@"成人"]||[combined containsString:@"野果"]||[combined containsString:@"橙果"]||[combined containsString:@"吃瓜"]||[combined containsString:@"chigua"]||[combined containsString:@"伦理"]||[combined containsString:@"🔞"];
+        BOOL isDrama=!isAdult&&([combined containsString:@"dj"]||[combined containsString:@"短剧"]||[combined containsString:@"duanju"]||[combined containsString:@"七猫"]||[combined containsString:@"围观"]||[combined containsString:@"好看"]||[combined containsString:@"喜番"]);
+        if(isAdult||isDrama){
+            NSArray *cats=[normalized[@"categories"] isKindOfClass:NSArray.class]?normalized[@"categories"]:@[];
+            if(cats.count>1){
+                NSMutableArray *preferred=[NSMutableArray array],*others=[NSMutableArray array];
+                NSArray *keywords=isAdult?@[@"福利",@"伦理",@"写真",@"热舞",@"短剧",@"解说"]:@[@"短剧",@"爽文",@"都市",@"女频",@"反转",@"古装",@"脑洞",@"年代"];
+                for(NSDictionary *cat in cats){
+                    NSString *cname=[cat[@"name"] isKindOfClass:NSString.class]?cat[@"name"]:@"";
+                    BOOL match=NO;
+                    for(NSString *kw in keywords){if([cname containsString:kw]){match=YES;break;}}
+                    if(match)[preferred addObject:cat];else[others addObject:cat];
+                }
+                if(preferred.count){
+                    [preferred addObjectsFromArray:others];
+                    NSMutableDictionary *mNorm=[normalized mutableCopy];
+                    mNorm[@"categories"]=preferred.copy;
+                    normalized=mNorm.copy;
+                }
+            }
+        }
+    }
+    return normalized;
 }
 - (NSURLRequest *)tvboxRequestForOperation:(NSString *)operation arguments:(NSDictionary *)arguments error:(NSError **)error {
     if([self.tvboxSource[@"protocol"] isEqual:@"douban-index"])return MediaDoubanRequest(operation,arguments?:@{},error);

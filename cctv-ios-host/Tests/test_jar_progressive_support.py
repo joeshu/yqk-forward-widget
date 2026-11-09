@@ -443,6 +443,189 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('serve_cenc_stream', ms_code)
 
 
+
+    def test_four_stage_diagnostic_and_architecture_optimizations(self):
+        """Verifies Stage 1-4 fixes: TLS EOF retry, Cicada direct URL, search_reset guard, importer JS support, LRU hibernation, and image domain fast-fail."""
+        import ssl
+        import urllib.error
+        import host_media_relay
+
+        eof_err = urllib.error.URLError(
+            ssl.SSLError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1032)')
+        )
+        self.assertTrue(host_media_relay._is_cert_verification_error(eof_err))
+
+        mp_code = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
+        self.assertIn('BOOL sourceIsDASH=[sourceURL.pathExtension.lowercaseString isEqualToString:@"mpd"]', mp_code)
+        self.assertIn('BOOL avIncompatibleContainer=[@[@"mpd",@"flv",@"mkv",@"webm"] containsObject:failedSourceExt];', mp_code)
+        self.assertIn('for(NSUInteger pass=0;pass<2;pass++)', mp_code)
+
+        mb_code = (SOURCES / 'MediaBrowserViewController.m').read_text(encoding='utf-8')
+        self.assertIn('if(!keyword.length && !previousKeyword.length && (!searchController.isActive || self.homeMode))return;', mb_code)
+        self.assertIn('if([self.source[@"id"] isEqual:targetID] && (self.readiness!=nil', mb_code)
+
+        imp_code = (SOURCES / 'MediaPackageImporter.m').read_text(encoding='utf-8')
+        self.assertIn('categoryContent', imp_code)
+        self.assertIn('detailContent', imp_code)
+        self.assertIn('playerContent', imp_code)
+        self.assertIn('__jsEvalReturn', imp_code)
+
+        dl_code = (SOURCES / 'MediaPackageDownloader.m').read_text(encoding='utf-8')
+        self.assertIn('连接超时 · 正在自动重试下载', dl_code)
+
+        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        self.assertIn('hibernateExcessBackgroundVODServicesKeepingID:', root_code)
+        self.assertIn('if(owner.pendingTVBoxSiteName.length){', root_code)
+
+        img_code = (SOURCES / 'HostImageLoader.m').read_text(encoding='utf-8')
+        self.assertIn('domain_backoff_fast_fail', img_code)
+        self.assertIn('response_truncated', img_code)
+
+
+    def test_round_13_deep_playback_relay_and_cache_optimizations(self):
+        """Verifies Round 13 optimizations: HTTP 403 Referer-strip retry, lytvs.top/py/*.js zero-wait native routing, joeshu.yqk 4500ms timeout cap, weboxHttp fast retry, and MediaMetadataCache detail support."""
+        import http.client
+        import http.server
+        import threading
+        import host_media_relay
+        import importlib.util
+
+        # 1. Verify MediaRelay retries HTTP 403 once with Referer/Origin stripped (e.g. v9-default.douyinvod.com)
+        spec = importlib.util.spec_from_file_location('media_service_r13', PLUGINS / 'media-service.py')
+        transport = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(transport)
+
+        seen_referers = []
+        class AntiHotlinkUpstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                ref = self.headers.get('Referer')
+                seen_referers.append(ref)
+                if ref:
+                    self.send_response(403)
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
+                    return
+                body = b'#EXTM3U\n#EXTINF:6,\nseg0.ts\n#EXT-X-ENDLIST\n'
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        class DummyRuntime:
+            def capabilities(self): return {'capabilities': ['play']}
+            def close(self): pass
+
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), AntiHotlinkUpstream)
+        server = transport.Server(('127.0.0.1', 0), DummyRuntime())
+        threads = [threading.Thread(target=s.serve_forever, daemon=True) for s in (upstream, server)]
+        for t in threads: t.start()
+        conn = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=4)
+        try:
+            target = f'http://127.0.0.1:{upstream.server_port}/stream.m3u8'
+            token = server.relay.register(target, {'Referer': 'https://www.4kvm.org/'}, diagnostic_id='r13-douyinvod')
+            conn.request('GET', '/media/' + token)
+            resp = conn.getresponse()
+            body = resp.read()
+            self.assertEqual(resp.status, 200)
+            self.assertIn(b'#EXTM3U', body)
+            self.assertEqual(seen_referers, ['https://www.4kvm.org/', None])
+        finally:
+            conn.close()
+            for s in (upstream, server): s.shutdown(); s.server_close()
+            for t in threads: t.join(2)
+
+        # 2. Verify RootViewController lytvs.top/py/*.js and *.hjs zero-wait native routing & duplicate activate guard
+        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        self.assertGreaterEqual(root_code.count('([lowAPI hasPrefix:@"https://lytvs.top/py/"]&&([lowAPI hasSuffix:@".js"]||[lowAPI hasSuffix:@".hjs"]))'), 2)
+        self.assertIn('if(![mediaPage.source[@"id"] isEqual:targetID]||(!mediaPage.loading&&!mediaPage.homeResult)){', root_code)
+
+        # 3. Verify joeshu.yqk 4500ms timeout cap & 2800ms fast HLS probe in JSPluginRuntime & MediaPackageDownloader
+        js_rt = (SOURCES / 'JSPluginRuntime.m').read_text(encoding='utf-8')
+        self.assertIn('timeout:yqkRequestTimeout(budget,4500)', js_rt)
+        self.assertIn('__cctv_yqk_fast_probe', js_rt)
+        dl_code = (SOURCES / 'MediaPackageDownloader.m').read_text(encoding='utf-8')
+        self.assertIn('timeout:yqkRequestTimeout(budget,4500)', dl_code)
+
+        # 4. Verify weboxHttp fast retry on AbortError in entry.mjs & node-plugin-host.cjs
+        entry_mjs = (ROOT / 'JSPlugins/generic/entry.mjs').read_text(encoding='utf-8')
+        nph_cjs = (PLUGINS / 'node-plugin-host.cjs').read_text(encoding='utf-8')
+        self.assertIn("const canRetry=['GET','HEAD'].includes(method)&&!options._retried&&totalTimeout>=8000", entry_mjs)
+        self.assertIn("const canRetry=['GET','HEAD'].includes(method)&&!options._retried&&totalTimeout>=8000", nph_cjs)
+
+        # 5. Verify csp_adapter requests fallback resilience
+        csp_code = (PLUGINS / 'csp_adapter.py').read_text(encoding='utf-8')
+        self.assertIn('_FallbackSession', csp_code)
+
+
+
+    def test_round14_hawk_hjs_subscriptions_and_short_drama_support(self):
+        """Verifies Round 14 .hawk / .hjs support:
+        1. Concatenated .hawk URLs ('Https://sub.lytvs.top/hamo/tk_95f9cbf6.hawkhttps://sub.lytvs.top/hamo/chigua_tk_95f9cbf6.hawkhttps://sub.lytvs.top/hamo/duanju_tk_95f9cbf6.hawk') split cleanly.
+        2. Token '95f9cbf6' is extracted from /hamo/*tk_<token>.hawk paths in RootViewController.m.
+        3. TVBoxCatalogStore recognizes .hjs script files as supported and auto-upgrades saved .hjs sites in +catalogs.
+        4. RootViewController routes .hjs sites to zero-wait native jar-bridge classes (csp_QimaoDJ for short dramas, csp_AdultDJ for 🔞/chigua).
+        5. AppVideoEngine prioritizes short-drama and welfare/chigua categories in homeContent.
+        """
+        import re
+        workflow_code = (SOURCES / 'ResourceImportWorkflowViewController.m').read_text(encoding='utf-8')
+        self.assertIn('json|hawk|js|hjs|mjs|cjs|py', workflow_code)
+        self.assertIn('https://sub.lytvs.top/hamo/tk_95f9cbf6.hawk', workflow_code)
+        self.assertIn('https://sub.lytvs.top/hamo/duanju_tk_95f9cbf6.hawk', workflow_code)
+        self.assertIn('https://sub.lytvs.top/hamo/chigua_tk_95f9cbf6.hawk', workflow_code)
+
+        # Verify the regex splits the exact user-pasted concatenated string into 3 URLs
+        raw_input = 'Https://sub.lytvs.top/hamo/tk_95f9cbf6.hawkhttps://sub.lytvs.top/hamo/chigua_tk_95f9cbf6.hawkhttps://sub.lytvs.top/hamo/duanju_tk_95f9cbf6.hawk'
+        split_step = re.sub(r'(\.(?:json|hawk|js|hjs|mjs|cjs|py|m3u8|m3u|txt|zip|php|xml|webox|jar|md5))(https?://)', r'\1\n\2', raw_input, flags=re.I)
+        extracted = re.findall(r"https?://[^\s\"'<>]+", split_step, flags=re.I)
+        self.assertEqual(len(extracted), 3)
+        self.assertEqual(extracted[0].lower(), 'https://sub.lytvs.top/hamo/tk_95f9cbf6.hawk')
+        self.assertEqual(extracted[1].lower(), 'https://sub.lytvs.top/hamo/chigua_tk_95f9cbf6.hawk')
+        self.assertEqual(extracted[2].lower(), 'https://sub.lytvs.top/hamo/duanju_tk_95f9cbf6.hawk')
+
+        # Verify token extraction regex from /hamo/*tk_<token>.hawk paths
+        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        self.assertIn('tk_([A-Za-z0-9]{6,64})', root_code)
+        for hawk_url in extracted:
+            m = re.search(r'(?:^|[_/-])tk_([A-Za-z0-9]{6,64})(?:\.[A-Za-z0-9]+|$)', hawk_url, flags=re.I)
+            self.assertIsNotNone(m)
+            self.assertEqual(m.group(1), '95f9cbf6')
+
+        # Verify TVBoxCatalogStore .hjs recognition and +catalogs auto-migration
+        store_code = (SOURCES / 'TVBoxCatalogStore.m').read_text(encoding='utf-8')
+        self.assertGreaterEqual(store_code.count('@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"]'), 2)
+        self.assertIn('else if(isScriptURL&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"script"]))', store_code)
+
+        # Verify RootViewController routes short-drama and adult .hjs sites to csp_QimaoDJ / csp_AdultDJ
+        self.assertIn('NSString *fallbackClass=isAdultMeta?@"csp_AdultDJ":(isShortDramaMeta?@"csp_QimaoDJ":@"csp_AppRJ");', root_code)
+        self.assertIn('if(self.navigationController.topViewController!=self)[self.navigationController popToViewController:self animated:NO];', root_code)
+
+        # Verify AppVideoEngine prioritizes short-drama and adult/chigua categories
+        drama_engine = AppVideoEngine('csp_QimaoDJ', 'http://cms.test')
+        drama_engine._request_json = lambda path, params=None, base_override=None: {
+            'class': [
+                {'type_id': '1', 'type_name': '电影'},
+                {'type_id': '36', 'type_name': '爽文短剧'},
+                {'type_id': '2', 'type_name': '电视剧'},
+            ],
+            'list': [{'vod_id': '101', 'vod_name': '七猫短剧测试'}],
+        }
+        drama_home = drama_engine.homeContent()
+        self.assertEqual(drama_home['class'][0]['type_name'], '爽文短剧')
+
+        adult_engine = AppVideoEngine('csp_AdultDJ', 'http://cms.test')
+        adult_engine._request_json = lambda path, params=None, base_override=None: {
+            'class': [
+                {'type_id': '1', 'type_name': '电影'},
+                {'type_id': '20', 'type_name': '福利短剧'},
+            ],
+            'list': [{'vod_id': '202', 'vod_name': '2048成人短剧测试'}],
+        }
+        adult_home = adult_engine.homeContent()
+        self.assertEqual(adult_home['class'][0]['type_name'], '福利短剧')
+
+
 if __name__ == '__main__':
 
 

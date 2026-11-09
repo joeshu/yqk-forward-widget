@@ -692,13 +692,22 @@ function createNodeWeBoxPlugin(owner,spec){
       else if(options.text!==undefined)body=String(options.text)
       else if(options.body!==undefined)body=options.body
     }
-    const timeout=boundedTimeout(options.timeoutMs||options.timeout,15000,30000)
-    const response=await fetch(pluginHTTPURL(target.toString()),{method,headers,body,redirect:'follow',signal:AbortSignal.timeout(timeout)})
-    const bytes=await readLimited(response)
-    const outHeaders=Object.fromEntries(response.headers)
-    const rType=String(options.responseType||'text').toLowerCase()
-    const data=rType==='base64'?bytes.toString('base64'):rType==='json'?JSON.parse(bytes.toString('utf8')):bytes.toString('utf8')
-    return {status:response.status,url:response.url||target.toString(),headers:outHeaders,data}
+    const totalTimeout=boundedTimeout(options.timeoutMs||options.timeout,15000,30000)
+    const canRetry=['GET','HEAD'].includes(method)&&!options._retried&&totalTimeout>=8000
+    const timeout=canRetry?Math.min(totalTimeout,6500):totalTimeout
+    try{
+      const response=await fetch(pluginHTTPURL(target.toString()),{method,headers,body,redirect:'follow',signal:AbortSignal.timeout(timeout)})
+      const bytes=await readLimited(response)
+      const outHeaders=Object.fromEntries(response.headers)
+      const rType=String(options.responseType||'text').toLowerCase()
+      const data=rType==='base64'?bytes.toString('base64'):rType==='json'?JSON.parse(bytes.toString('utf8')):bytes.toString('utf8')
+      return {status:response.status,url:response.url||target.toString(),headers:outHeaders,data}
+    }catch(err){
+      if(canRetry&&(err?.name==='AbortError'||/abort|timeout|network/i.test(String(err?.message||err)))){
+        return weboxHttp(method,url,{...options,_retried:true,timeoutMs:Math.max(4000,totalTimeout-timeout)})
+      }
+      throw err
+    }
   }
   const ctx={
     settings,

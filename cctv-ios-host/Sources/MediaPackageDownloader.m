@@ -55,8 +55,10 @@ static NSString *PackageApplyYqkPlaybackFixes(NSString *text) {
             : @"function parseLink(link) { var __cctv_yqk_norm = 1; if (link && typeof link === 'object') link = link.link || link.id || link.vod_id || ''; link = String(link || '').trim(); var __yqkSite = (typeof YQK === 'object' && YQK && YQK.site) ? YQK.site : 'https://m.yqk3hxe.com'; var __m = link.match(new RegExp('(?:^|/play/|yqk://vod/)([0-9]+)(?:[?]([^#]*))?$', 'i')); if (__m) link = __yqkSite + '/play/' + __m[1] + (__m[2] ? ('?' + __m[2]) : '');";
         text=[text stringByReplacingOccurrencesOfString:@"function parseLink(link) {" withString:norm];
     }
-    text=[text stringByReplacingOccurrencesOfString:@"timeout:yqkRequestTimeout(budget,15000)" withString:@"timeout:yqkRequestTimeout(budget,5500)"];
-    text=[text stringByReplacingOccurrencesOfString:@"timeout:budget?Math.min(20000,Math.max(1000,budget.deadline-Date.now())):15000" withString:@"timeout:budget?Math.min(5500,Math.max(1000,budget.deadline-Date.now())):5500"];
+    text=[text stringByReplacingOccurrencesOfString:@"timeout:yqkRequestTimeout(budget,15000)" withString:@"timeout:yqkRequestTimeout(budget,4500)"];
+    text=[text stringByReplacingOccurrencesOfString:@"timeout:yqkRequestTimeout(budget,12000)" withString:@"timeout:yqkRequestTimeout(budget,4500)"];
+    text=[text stringByReplacingOccurrencesOfString:@"timeout:budget?Math.min(20000,Math.max(1000,budget.deadline-Date.now())):15000" withString:@"timeout:budget?Math.min(4500,Math.max(1000,budget.deadline-Date.now())):4500"];
+    text=[text stringByReplacingOccurrencesOfString:@"timeout:budget?Math.min(20000,Math.max(1000,budget.deadline-Date.now())):12000" withString:@"timeout:budget?Math.min(4500,Math.max(1000,budget.deadline-Date.now())):4500"];
     NSString *oldProbe=@"async function yqkProbeHls(url,headers,budget){\n  if(budget&&Date.now()>=budget.deadline){budget.exhausted=true;throw new Error(\"一起看线路检查超时\");}\n  var r;\n  try{r=await CCTVHttp.get(url,{timeout:yqkRequestTimeout(budget,15000),headers:headers});}\n  catch(error){if(budget&&Date.now()>=budget.deadline)budget.exhausted=true;throw error;}\n  var status=Number(r.statusCode||r.status||0),body=r.data;\n  if(status!==200||typeof body!==\"string\"||body.length>1048576||!/^\\s*#EXTM3U(?:\\s|$)/.test(body))throw new Error(\"一起看 HLS 清单不可用\");\n  if(!/#EXT-X-STREAM-INF:/i.test(body)&&!body.split(/\\r?\\n/).some(function(line){line=line.trim();return line&&line.charAt(0)!==\"#\";}))throw new Error(\"一起看 HLS 清单为空\");\n  return url;\n}";
     NSString *newProbe=@"async function yqkProbeHls(url,headers,budget){\n  if(!url||!/^https?:\\/\\//i.test(String(url)))throw new Error(\"一起看播放地址无效\");\n  if(budget&&Date.now()>=budget.deadline)return url;\n  var r;\n  try{r=await CCTVHttp.get(url,{timeout:Math.min(3500,yqkRequestTimeout(budget,3500)),headers:headers});}\n  catch(_){return url;}\n  var status=Number(r.statusCode||r.status||0),body=r.data;\n  if(status>=400)throw new Error(\"一起看 HLS 状态异常: \"+status);\n  if(typeof body===\"string\"&&body.length>0&&body.length<=1048576&&/^\\s*<(?:!doctype|html)/i.test(body))throw new Error(\"一起看返回网页而非流媒体\");\n  return url;\n}";
     if([text containsString:oldProbe])text=[text stringByReplacingOccurrencesOfString:oldProbe withString:newProbe];
@@ -202,6 +204,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
 @property(nonatomic) PackageDownloadPhase phase;
 @property(nonatomic) NSInteger responseStatus;
 @property(nonatomic) NSInteger redirects;
+@property(nonatomic) NSInteger retryCount;
 @property(nonatomic) int64_t expectedBytes;
 @property(nonatomic) NSTimeInterval lastProgressTime;
 @property(nonatomic,copy) NSString *lastProgressStage;
@@ -232,7 +235,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     if(self.phase==PackageChecksum){NSURLComponents *c=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];c.path=c.path.stringByDeletingPathExtension;self.targetURL=c.URL;}
     // A short checksum URL may redirect to the conventional index.js.md5 form;
     // validate the resolved script extension after reading the final checksum.
-    if(self.phase!=PackageChecksum && ![@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"链接须指向 JS、Python、ZIP 或对应的 .md5 校验文件"]];return;}
+    if(self.phase!=PackageChecksum && ![@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"链接须指向 JS、Python、ZIP 或对应的 .md5 校验文件"]];return;}
     NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.ephemeralSessionConfiguration;configuration.URLCache=nil;configuration.HTTPCookieStorage=nil;configuration.timeoutIntervalForRequest=20;configuration.timeoutIntervalForResource=60;
     NSOperationQueue *queue=[NSOperationQueue new];queue.maxConcurrentOperationCount=1;
     self.session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:queue];[self begin:url];
@@ -288,6 +291,13 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
         if(self.phase==PackageScript&&error.code!=NSURLErrorCancelled){
             NSData *bundledWeBox=PackageBundledWeBoxScriptForURL(self.targetURL?:self.originalURL);
             if(bundledWeBox.length){self.scriptData=bundledWeBox;[self install:@{}];return;}
+            BOOL transientTimeout=[error.domain isEqualToString:NSURLErrorDomain]&&(error.code==NSURLErrorTimedOut||error.code==NSURLErrorNetworkConnectionLost||error.code==NSURLErrorCannotConnectToHost);
+            if(transientTimeout&&self.retryCount<1){
+                self.retryCount++;
+                [self progress:@"连接超时 · 正在自动重试下载"];
+                [self begin:self.targetURL?:self.originalURL];
+                return;
+            }
         }
         [self finish:nil error:error];return;
     }
@@ -296,7 +306,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
         if(self.responseStatus!=404&&PackageLooksLikeHTML(self.body)){[self finish:nil error:[self error:config?@"配套配置校验地址返回了 HTML 网页，请检查资源权限或登录状态":@"资源校验地址返回了 HTML 网页，不是 MD5 校验文件"]];return;}
         if(self.responseStatus!=404&&!hash){[self finish:nil error:[self error:config?@"配套配置 MD5 格式无效":@"资源 MD5 校验文件格式无效"]];return;}
         if(config){self.configChecksum=hash;if(hash)[self progress:@"配套配置 MD5 校验值已读取"];self.phase=PackageConfig;[self begin:[self configURL:NO]];}
-        else{self.checksum=hash;if(![@[@"js",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"MD5 地址最终没有指向受支持的 JS、Python 或 ZIP 文件"]];return;}if(hash)[self progress:@"资源 MD5 校验值已读取"];self.phase=PackageScript;[self begin:self.targetURL];}return;
+        else{self.checksum=hash;if(![@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"MD5 地址最终没有指向受支持的 JS、Python 或 ZIP 文件"]];return;}if(hash)[self progress:@"资源 MD5 校验值已读取"];self.phase=PackageScript;[self begin:self.targetURL];}return;
     }
     if(self.phase==PackageConfig){
         if(self.responseStatus==404){if(self.configChecksum){[self finish:nil error:[self error:@"配置校验文件存在，但对应配置文件缺失，未安装"]];return;}self.configurationState=@"missing_using_defaults";[self install:@{}];return;}
@@ -316,7 +326,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     if(self.checksum&&![PackageMD5(self.body) isEqual:self.checksum]){[self finish:nil error:[self error:@"资源与 MD5 校验值不一致，未安装"]];return;}
     [self progress:self.checksum?@"主资源 MD5 校验通过":@"来源没有 MD5 · 未验证来源完整性"];
     self.scriptData=[self.body copy];NSError *adapterError=nil;NSData *adapted=PackageAdaptForADMSignedSource(self.scriptData,self.effectiveURL?:self.originalURL,&adapterError);if(!adapted){[self finish:nil error:adapterError];return;}self.scriptData=adapted;
-    NSString *text=[@[@"js",@"mjs",@"cjs"] containsObject:self.targetURL.pathExtension.lowercaseString]?[[NSString alloc] initWithData:self.scriptData encoding:NSUTF8StringEncoding]:nil;
+    NSString *text=[@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:self.targetURL.pathExtension.lowercaseString]?[[NSString alloc] initWithData:self.scriptData encoding:NSUTF8StringEncoding]:nil;
     BOOL catpaw=[text containsString:@"/config"]&&[text containsString:@"/spider"]&&([text containsString:@"catServerFactory"]||[text containsString:@"createService"]||[text containsString:@"serverFactory"]);
     if(catpaw){self.phase=PackageConfigChecksum;[self begin:[self configURL:YES]];return;}
     [self install:@{}];
