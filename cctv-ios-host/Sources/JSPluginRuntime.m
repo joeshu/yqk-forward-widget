@@ -199,6 +199,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
                     : @"function parseLink(link) { var __cctv_yqk_norm = 1; if (link && typeof link === 'object') link = link.link || link.id || link.vod_id || ''; link = String(link || '').trim(); var __yqkSite = (typeof YQK === 'object' && YQK && YQK.site) ? YQK.site : 'https://m.yqk3hxe.com'; var __m = link.match(new RegExp('(?:^|/play/|yqk://vod/)([0-9]+)(?:[?]([^#]*))?$', 'i')); if (__m) link = __yqkSite + '/play/' + __m[1] + (__m[2] ? ('?' + __m[2]) : '');";
                 text=[text stringByReplacingOccurrencesOfString:@"function parseLink(link) {" withString:norm];
             }
+            // __cctv_yqk_fast_probe is injected by JSPlugins/generic/entry.mjs; keep this runtime patch focused on timeout caps.
             text=[text stringByReplacingOccurrencesOfString:@"timeout:yqkRequestTimeout(budget,15000)" withString:@"timeout:yqkRequestTimeout(budget,4500)"];
             text=[text stringByReplacingOccurrencesOfString:@"timeout:yqkRequestTimeout(budget,12000)" withString:@"timeout:yqkRequestTimeout(budget,4500)"];
             text=[text stringByReplacingOccurrencesOfString:@"timeout:yqkRequestTimeout(budget,5500)" withString:@"timeout:yqkRequestTimeout(budget,4500)"];

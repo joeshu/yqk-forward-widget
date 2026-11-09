@@ -3160,7 +3160,10 @@ configureCatalogNavigation;
         if(self.navigationController.topViewController!=self)[self.navigationController popToViewController:self animated:NO];
         [self selectBottomTab:(id)self.bottomBar.arrangedSubviews[2]];
         [mediaPage refreshSources];
-        if(![mediaPage.source[@"id"] isEqual:targetID]||(!mediaPage.loading&&!mediaPage.homeResult)){
+        NSDictionary *activeMediaSource=[mediaPage valueForKey:@"source"];
+        BOOL mediaLoading=[[mediaPage valueForKey:@"loading"] boolValue];
+        NSDictionary *mediaHomeResult=[mediaPage valueForKey:@"homeResult"];
+        if(![activeMediaSource[@"id"] isEqual:targetID]||(!mediaLoading&&!mediaHomeResult)){
             for(NSDictionary *src in (mediaPage.sourcesProvider?mediaPage.sourcesProvider():@[])){
                 if([src[@"id"] isEqual:targetID]){
                     [mediaPage activate:src keepingHome:YES];

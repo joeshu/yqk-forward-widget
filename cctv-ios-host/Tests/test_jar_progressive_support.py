@@ -539,12 +539,14 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         # 2. Verify RootViewController lytvs.top/py/*.js and *.hjs zero-wait native routing & duplicate activate guard
         root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
         self.assertGreaterEqual(root_code.count('([lowAPI hasPrefix:@"https://lytvs.top/py/"]&&([lowAPI hasSuffix:@".js"]||[lowAPI hasSuffix:@".hjs"]))'), 2)
-        self.assertIn('if(![mediaPage.source[@"id"] isEqual:targetID]||(!mediaPage.loading&&!mediaPage.homeResult)){', root_code)
+        self.assertIn('NSDictionary *activeMediaSource=[mediaPage valueForKey:@"source"]', root_code)
+        self.assertIn('if(![activeMediaSource[@"id"] isEqual:targetID]', root_code)
 
         # 3. Verify joeshu.yqk 4500ms timeout cap & 2800ms fast HLS probe in JSPluginRuntime & MediaPackageDownloader
         js_rt = (SOURCES / 'JSPluginRuntime.m').read_text(encoding='utf-8')
         self.assertIn('timeout:yqkRequestTimeout(budget,4500)', js_rt)
-        self.assertIn('__cctv_yqk_fast_probe', js_rt)
+        self.assertIn('injected by JSPlugins/generic/entry.mjs', js_rt)
+        self.assertNotIn('withString:@"async function yqkProbeHls', js_rt)
         dl_code = (SOURCES / 'MediaPackageDownloader.m').read_text(encoding='utf-8')
         self.assertIn('timeout:yqkRequestTimeout(budget,4500)', dl_code)
 
