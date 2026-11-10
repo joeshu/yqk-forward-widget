@@ -57,6 +57,9 @@ minimum OS is iOS 17 because this runtime is built for iOS 17+.
 - Video size and audio position do not prove a rendered frame. Only SDK render
   callbacks/events signal the first frame. Per-frame callbacks stop dispatching
   UI work once that frame is known. Progress callbacks and polling are coalesced.
+- Cicada gets one bounded, position-preserving recovery after a sustained stall,
+  matching AVPlayer. Logs include buffered seconds, the preferred buffer and
+  stall counts so device measurements can distinguish network waits from decoding.
 - DASH bridge ready/unavailable categories now reach the exported diagnostics,
   without raw URLs, subscription tokens or ext values.
 

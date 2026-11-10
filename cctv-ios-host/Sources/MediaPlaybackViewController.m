@@ -111,6 +111,11 @@ static NSDictionary *MediaPlaybackDiagnosticSourceFields(NSURL *url) {
 }
 static void MediaPlaybackAddAccessLogFields(NSMutableDictionary *fields, AVPlayerItem *item) {
     if (!fields || !item || !RuntimeDiagnostics.shared.enabled) return;
+    fields[@"preferred_forward_buffer_seconds"]=@(MAX(0,item.preferredForwardBufferDuration));
+    fields[@"playback_likely_to_keep_up"]=@(item.isPlaybackLikelyToKeepUp);
+    double position=CMTimeGetSeconds(item.currentTime),buffered=0;
+    if(isfinite(position))for(NSValue *value in item.loadedTimeRanges){CMTimeRange range=value.CMTimeRangeValue;double start=CMTimeGetSeconds(range.start),end=CMTimeGetSeconds(CMTimeRangeGetEnd(range));if(isfinite(start)&&isfinite(end)&&start<=position+0.1&&end>position)buffered=MAX(buffered,end-position);}
+    fields[@"media_buffered_ahead_seconds"]=@(buffered);
     AVPlayerItemAccessLog *accessLog = item.accessLog;
     NSArray<AVPlayerItemAccessLogEvent *> *events = accessLog.events ?: @[];
     fields[@"access_log_event_count"] = @(events.count);
@@ -347,6 +352,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic) CFTimeInterval prefetchLastAttemptAt;
 @property(nonatomic) BOOL startupBufferKickUsed;
 @property(nonatomic) BOOL playbackMemoryConstrained;
+@property(nonatomic) BOOL cicadaWasLoading;
 @property(nonatomic,copy,nullable) NSDictionary *prefetchedEpisodeResult;
 @property(nonatomic) NSInteger prefetchedLineIndex;
 @property(nonatomic) NSInteger prefetchedEpisodeIndex;
@@ -1598,7 +1604,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     BOOL forceSoftDecode=[decodeModePref isEqualToString:@"cicada_soft"]||[result[@"preferSoftwareDecode"] boolValue];
     [self teardownHiddenStreamSniffer];
     self.cicadaAdapterSoftwareDecodeFallbackAttempted=forceSoftDecode;self.resolving=NO;self.awaitingWebPlaybackReturn=NO;NSUInteger playerGeneration=++self.playerGeneration;[self.player pause];self.playerController.player=nil;[self stopObservingCurrentPlayback];[self teardownCicadaAdapter];self.hasVideoTrack=NO;self.videoTrackInspectionStarted=NO;self.videoFrameReady=NO;self.lastPersistedPosition=0;if(!self.embeddedMode)self.throughputLabel.text=@"  测速中  ";
-    self.progressEvidence=(HostPlaybackProgress){0};self.progressMilestone=0;self.progressSummaryRecorded=NO;self.diagnosticStallCount=0;self.playbackAttemptID=NSUUID.UUID.UUIDString.lowercaseString;self.terminalPlaybackOutcomeRecorded=NO;self.playbackFailureRecorded=NO;self.result=result;
+    self.progressEvidence=(HostPlaybackProgress){0};self.progressMilestone=0;self.progressSummaryRecorded=NO;self.diagnosticStallCount=0;self.cicadaWasLoading=NO;self.playbackAttemptID=NSUUID.UUID.UUIDString.lowercaseString;self.terminalPlaybackOutcomeRecorded=NO;self.playbackFailureRecorded=NO;self.result=result;
     NSString *raw=[result[@"url"] isKindOfClass:NSString.class]?result[@"url"]:@"";NSURL *url=[NSURL URLWithString:raw];NSURL *sourceURL=MediaPlaybackOriginalSourceURL(result);NSString *serviceID=[self.context[@"source"][@"id"] isKindOfClass:NSString.class]?self.context[@"source"][@"id"]:@"";
     NSMutableDictionary *attemptFields=[@{@"playback_attempt_id":self.playbackAttemptID, @"active_playback_attempt_id":self.playbackAttemptID, @"active_playback_service_id":serviceID, @"active_playback_source_host":sourceURL.host.lowercaseString?:@"", @"active_playback_outcome":@"in_progress", @"last_playback_attempt_id":self.playbackAttemptID, @"last_playback_outcome":@"in_progress", @"last_playback_source_host":sourceURL.host.lowercaseString?:@"", @"last_playback_failure_kind":@"", @"last_playback_http_status":@0, @"last_playback_line_index":@(self.lineIndex), @"last_playback_episode_index":@(self.episodeIndex)} mutableCopy];
     [RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"playback_attempt_started" fields:attemptFields];
@@ -1938,6 +1944,22 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)cicadaAdapter:(id)adapter didUpdateLoading:(BOOL)loading progress:(float)progress {
     if(adapter!=self.cicadaAdapter)return;
+    BOOL began=loading&&!self.cicadaWasLoading;self.cicadaWasLoading=loading;
+    if(began&&self.videoFrameReady){
+        self.diagnosticStallCount++;
+        double stalledAt=[self activeEngineCurrentPosition];if(!isfinite(stalledAt)||stalledAt<0)stalledAt=0;
+        NSUInteger generation=self.playerGeneration;
+        [RuntimeDiagnostics.shared recordEvent:@"playback_stalled" category:@"playback" fields:@{@"player":@"cicada",@"playback_attempt_id":self.playbackAttemptID?:@"",@"correlation_id":self.diagnosticTraceID?:@"",@"media_stall_count":@(self.diagnosticStallCount),@"media_buffered_ahead_seconds":@(MAX(0,self.cicadaAdapter.bufferedPosition-stalledAt))}];
+        __weak typeof(self) weakSelf=self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+            MediaPlaybackViewController *owner=weakSelf;
+            if(!owner||generation!=owner.playerGeneration||owner.cicadaAdapter!=adapter||!owner.cicadaAdapter.loading||owner.cicadaAdapter.state!=MediaPlaybackCicadaAdapterStatePlaying||owner.resolving||owner.stallRecoveryAttempts>=1)return;
+            double position=[owner activeEngineCurrentPosition];if(!isfinite(position)||fabs(position-stalledAt)>0.5)return;
+            owner.stallRecoveryAttempts++;owner.pendingQualitySeekTime=@(stalledAt);owner.pendingQualityWasPlaying=YES;owner.pendingQualityRestorePlaybackState=YES;owner.pendingResolutionReason=@"stall_recovery";
+            [RuntimeDiagnostics.shared recordEvent:@"playback_stall_recovery_started" category:@"playback" fields:@{@"player":@"cicada",@"playback_attempt_id":owner.playbackAttemptID?:@"",@"correlation_id":owner.diagnosticTraceID?:@"",@"attempt":@(owner.stallRecoveryAttempts),@"stalled_position_seconds":@(stalledAt)}];
+            [owner resolveAndPlay];
+        });
+    }
     if(loading){self.status.text=@"正在缓冲 · 等待 CicadaPlayer";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];}
     else if(self.videoFrameReady){self.status.text=@"视频首帧已就绪 · CicadaPlayer 正在播放";self.status.accessibilityLabel=self.status.text;[self.spinner stopAnimating];}
 }
@@ -2185,13 +2207,13 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (void)prefetchNextEpisodeIfNeeded {
     if(self.resolving||self.prefetchInFlight||!self.videoFrameReady||self.pendingPlaybackSeekTime||self.resumePromptPending)return;
     double buffered=self.cicadaAdapter?MAX(0,self.cicadaAdapter.bufferedPosition-self.cicadaAdapter.currentPosition):[self bufferedAheadForItem:self.observedItem];
-    BOOL waiting=self.cicadaAdapter?self.cicadaAdapter.loading:self.player.timeControlStatus!=AVPlayerTimeControlStatusPlaying;
+    BOOL waiting=self.cicadaAdapter?(self.cicadaAdapter.loading||self.cicadaAdapter.state!=MediaPlaybackCicadaAdapterStatePlaying):self.player.timeControlStatus!=AVPlayerTimeControlStatusPlaying;
     if(!MediaPlaybackShouldPrefetch([self activeEngineCurrentPosition],[self activeEngineDuration],buffered,waiting,[self playbackBufferConstrained]))return;
     if(self.prefetchLastAttemptAt>0&&CACurrentMediaTime()-self.prefetchLastAttemptAt<30)return;
     NSArray *lines=self.lines,*episodes=self.episodes;
     NSInteger nextEpIndex=self.episodeIndex+1;
     if(self.lineIndex<0||self.lineIndex>=(NSInteger)lines.count||nextEpIndex<0||nextEpIndex>=(NSInteger)episodes.count)return;
-    if(self.prefetchedEpisodeResult&&self.prefetchedLineIndex==self.lineIndex&&self.prefetchedEpisodeIndex==nextEpIndex&&(CACurrentMediaTime()-self.prefetchedAt)<180.0)return;
+    if(self.prefetchedEpisodeResult&&self.prefetchedLineIndex==self.lineIndex&&self.prefetchedEpisodeIndex==nextEpIndex&&[self.prefetchedEpisodeIdentity isEqual:[self prefetchIdentityForEpisode:episodes[(NSUInteger)nextEpIndex]]]&&(CACurrentMediaTime()-self.prefetchedAt)<120.0)return;
     NSDictionary *source=[self.context[@"source"] isKindOfClass:NSDictionary.class]?self.context[@"source"]:nil;
     if(!source.count)return;
     NSDictionary *line=lines[(NSUInteger)self.lineIndex],*episode=episodes[(NSUInteger)nextEpIndex];

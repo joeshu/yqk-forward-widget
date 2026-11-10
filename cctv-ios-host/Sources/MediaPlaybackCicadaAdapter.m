@@ -620,7 +620,8 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
         if (self.destroyed || player!=self.player) return;
         if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateLoading:progress:)]) {
             float clamped = isfinite(progress) ? MAX(0.0f, MIN(1.0f, progress / 100.0f)) : 0.0f;
-            [self.delegate cicadaAdapter:self didUpdateLoading:YES progress:clamped];
+            self.loading=clamped<1.0f;
+            [self.delegate cicadaAdapter:self didUpdateLoading:self.loading progress:clamped];
         }
     });
 }
