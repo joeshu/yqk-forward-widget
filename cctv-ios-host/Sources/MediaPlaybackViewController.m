@@ -765,7 +765,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     [super viewDidAppear:animated];self.pendingScreenExit=NO;NSDictionary *pending=self.pendingEpisodeResult;NSUInteger pendingGeneration=self.pendingEpisodeGeneration;self.pendingEpisodeResult=nil;self.pendingEpisodeGeneration=0;
     if(!self.idleTimerOverrideActive){self.previousIdleTimerDisabled=UIApplication.sharedApplication.idleTimerDisabled;self.idleTimerOverrideActive=YES;}
     BOOL keepAwake=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaKeepScreenAwake"]?[NSUserDefaults.standardUserDefaults boolForKey:@"cctv.mediaKeepScreenAwake"]:YES;UIApplication.sharedApplication.idleTimerDisabled=keepAwake;
-    if(pending&&pendingGeneration==self.generation){[self playResult:pending];return;}
+    if(pending&&pendingGeneration==self.generation){self.playbackSuspendedForVisibility=NO;[self playResult:pending];return;}
     if(self.awaitingWebPlaybackReturn){[self.spinner stopAnimating];self.status.text=@"网页播放已关闭 · 可尝试原生播放，或重新选择线路和分集";self.status.accessibilityLabel=self.status.text;[self setRetryAvailable:YES];[self recordPlaybackAttemptOutcome:@"webview_returned" failureKind:nil httpStatus:0 terminal:YES];}
 }
 - (void)viewWillDisappear:(BOOL)animated {
@@ -2003,6 +2003,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)selectLine:(UIButton *)sender {
     if(sender.tag<0||sender.tag>=self.lines.count||sender.tag==self.lineIndex)return;
+    self.playbackSuspendedForVisibility=NO;
     NSInteger previousLine=self.lineIndex;NSArray *oldEpisodes=self.episodes;NSDictionary *oldEpisode=self.episodeIndex>=0&&self.episodeIndex<oldEpisodes.count?oldEpisodes[self.episodeIndex]:nil;NSString *oldID=[oldEpisode[@"id"] description]?:@"",*oldName=[[oldEpisode[@"name"] description] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";NSInteger oldIndex=self.episodeIndex;
     [self persistPlaybackProgress];self.lineIndex=sender.tag;NSArray *newEpisodes=self.episodes;NSInteger matched=-1;
     for(NSUInteger index=0;index<newEpisodes.count;index++){NSDictionary *candidate=newEpisodes[index];if(oldID.length&&[[candidate[@"id"] description] isEqual:oldID]){matched=index;break;}}
