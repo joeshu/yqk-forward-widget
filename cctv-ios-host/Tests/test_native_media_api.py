@@ -1,4 +1,5 @@
 import json
+import hashlib
 import pathlib
 import platform
 import subprocess
@@ -38,6 +39,23 @@ class NativeMediaAPITests(unittest.TestCase):
             def do_GET(self):
                 parsed = urlsplit(self.path)
                 query = parse_qs(parsed.query)
+                if parsed.path.startswith('/api.php/app/'):
+                    stamp, nonce = self.headers.get('x-time', ''), self.headers.get('x-nonc', '')
+                    expected = hashlib.sha256(f'finger=f&id=p&nonce={nonce}&sk=s&time={stamp}&v=6'.encode()).hexdigest().upper()
+                    signature_ok = self.headers.get('x-sign') == expected and self.headers.get('x-aid') == 'p'
+                    if not signature_ok:
+                        payload = {'code': 401, 'msg': 'fixture signature rejected'}
+                    elif parsed.path.endswith('/index/home'):
+                        payload = {'code': 200, 'data': {'categories': [{'type_name': '电影'}, {'type_name': '电视剧'}], 'recommend': [{'vod_id': '3q-1', 'vod_name': '三秋测试'}]}}
+                    elif parsed.path.endswith('/vod/get_detail'):
+                        payload = {'code': 200, 'data': [{'vod_id': '3q-1', 'vod_name': '三秋详情', 'vod_play_from': 'native', 'vod_play_url': '第一集$opaque-source-id'}]}
+                    elif parsed.path.endswith('/decode/url/'):
+                        payload = {'code': 1, 'data': 'https://cdn.example/app3q/episode.mp4'}
+                    else:
+                        payload = {'code': 200, 'data': [{'vod_id': '3q-2', 'vod_name': '三秋分类搜索'}]}
+                    data = json.dumps(payload).encode()
+                    self.send_response(200); self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
+                    return
                 if parsed.path == "/parse":
                     parser_requests.append((query, self.headers.get("X-Parser")))
                     if query.get("url") == ["https://resolver.example/watch?id=mpd"]:

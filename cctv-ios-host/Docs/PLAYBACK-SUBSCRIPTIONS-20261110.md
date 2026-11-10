@@ -12,7 +12,8 @@
 | 5 次资源导入 HTTP 403 | 日志不能证明 token 失效 | 区分 HTTP 401 与 403 的提示，不把拒绝访问当作确证的凭据过期 |
 | `spider_init` 发生 IndexError | 日志缺少对应脚本的行号，不能归因到某个站点 | 失败健康响应带脚本文件名、函数、阶段和行号，不含异常变量/源码/凭据；原失败保持失败 |
 | `csp_SP360` ext 为空 | 旧代码没有该站点协议，只能报缺少 URL | 增加 360 独立 JSON 目录、分类、搜索、详情、分集适配；分集官方网页仍走解析流程 |
-| 三秋 404、面包 403、部分海报 `encrypted: 1` | 独立源站协议/可达性与图片解密问题 | 保留失败；没有声称所有 JAR、受保护图片或站点都已打通 |
+| 三秋 404 | 实际路径为 `/api.php/app/index/home` 等专用接口，且需要配置指定的 SHA-256 签名请求头；原通用 nav 路径错误 | 增加 App3Q 原生请求签名、首页、分类、搜索、详情和地址解析；接口签名头不带入媒体 CDN |
+| 面包 403、部分海报 `encrypted: 1` | 独立源站可达性与图片解密问题 | 保留失败；没有声称所有 JAR、受保护图片或站点都已打通 |
 
 ## DASH 范围
 
@@ -38,13 +39,14 @@
 | 爱奇艺 Python 入口 | HTTP 200；原脚本初始化成功，首页 7 类 / 24 项 | 脚本可导入、目录可读；播放按真实结果区分网页与直连媒体 |
 | 优酷 Python 入口 | HTTP 200；在对应 Python 依赖和 Crypto 兼容层下初始化成功 | 仍依赖上游 token/cookie 和影片授权，未验证所有影片播放 |
 | 360 目录接口 | 当前环境返回 HTTP 200 的 Site Unavailable HTML | 协议适配有本地原生功能测试；在线目录与播放尚未验收 |
+| 三秋 App3Q | 正确签名后首页 HTTP 200（4 类 / 6 个推荐），详情 HTTP 200（样本 2 线路，首线 12 集），解析返回 MP4，媒体 Range 请求 HTTP 206 且有 ftyp 头 | 原生协议已适配；没有破解额外 challenge，仍需真机首帧验证 |
 
-360 适配的协议依据：`pcbean/CatVod-Src` 的 `js/sp360.js`（commit `5ffdf70d8592f17db5c17fce6711828fdf261f9b`，上游 jadehh/TVSpider）。Cicada 错误分类依据：alibaba/CicadaPlayer 的 `platform/Apple/source/CicadaErrorCode.h`。没有把整包 Android JAR 标记为已执行。
+360 适配的协议依据：`pcbean/CatVod-Src` 的 `js/sp360.js`（commit `5ffdf70d8592f17db5c17fce6711828fdf261f9b`，上游 jadehh/TVSpider）。Cicada 错误分类依据：alibaba/CicadaPlayer 的 `platform/Apple/source/CicadaErrorCode.h`。另实际检查了提供方 spider.jar（2,043,690 bytes，3,985 个 DEX 类，包含 Android API 依赖），据 App3Q 类核实其协议；协议签名只使用订阅 ext 中已有配置，不写入固定凭据。没有把整包 Android JAR 标记为已执行。
 
 ## 验证
 
 - 本地全套回归：815 项，58 项因需要 macOS/iOS 跳过，其余通过；runtime 专项为 80 项通过。
-- DASH 专项：9 项通过，包含真正的音视频 HTTP 解码；native 专项在 macOS 上执行。
+- DASH 专项：9 项通过，包含真正的音视频 HTTP 解码；native 专项在 macOS 上执行，包含 App3Q 的独立 SHA-256 签名向量及完整有签名 HTTP 交互。
 - 打包脚本复制新增 DASH/URL 模块；IPA 校验强制检查两个模块存在。
 - 分支推送会启动原有 macOS 构建、原生协议检查、IPA 校验和模拟器 smoke。分支构建不会发布正式 Release。
 

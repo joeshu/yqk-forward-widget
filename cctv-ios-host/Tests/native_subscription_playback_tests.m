@@ -1,9 +1,18 @@
 #import <Foundation/Foundation.h>
 #import "MediaSP360Adapter.h"
+#import "MediaApp3QAdapter.h"
 #import "MediaPlaybackDecodeRouter.h"
 #import "MediaPlaybackHeaders.h"
 static void check(BOOL ok, NSString *message){if(!ok){NSLog(@"FAILED: %@",message);exit(1);}}
 int main(void){@autoreleasepool{
+    NSDictionary *appConfig=@{@"host":@"https://app.example",@"finger":@"f",@"pkg":@"p",@"sk":@"s",@"ver":@"6"};
+    NSDictionary *appHeaders=MediaApp3QHeaders(appConfig,@"1700000000",@"123");
+    check([appHeaders[@"x-sign"] isEqual:@"6E2317F31FCEF18A3BECC578C58A5A12E84083A8E19725FA035E69D68FA6FBFE"],@"App3Q request matches independent SHA256 wire-format vector");
+    NSURLRequest *appHome=MediaApp3QRequest(appConfig,@"home",@{},NULL);
+    check([appHome.URL.path isEqual:@"/api.php/app/index/home"]&&[appHome valueForHTTPHeaderField:@"x-sign"].length==64,@"App3Q uses signed dedicated endpoint");
+    check(!MediaApp3QRequest(@{@"host":@"https://app.example"},@"home",@{},NULL),@"missing signing configuration does not fall back to an unrelated service");
+    NSMutableDictionary *badHeaders=[appConfig mutableCopy];badHeaders[@"pkg"]=@"p\r\nx-test: unsafe";
+    check(!MediaApp3QRequest(badHeaders,@"home",@{},NULL),@"reject header control characters before constructing request");
     NSURLRequest *home=MediaSP360Request(@"home",@{},NULL);
     check([home.URL.host isEqual:@"api.web.360kan.com"]&&[home.URL.path isEqual:@"/v1/rank"],@"360 uses its own protocol with no ext URL");
     NSURLRequest *search=MediaSP360Request(@"search",@{@"keyword":@"中文 & 测试",@"page":@2},NULL);
