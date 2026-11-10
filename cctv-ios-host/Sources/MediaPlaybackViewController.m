@@ -948,6 +948,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     [self persistPlaybackProgress];
     if(!self.pictureInPictureActive){
         self.playbackSuspendedForVisibility=YES;
+        [self setRetryAvailable:YES];
         [self pauseActiveEngine];
         [RuntimeDiagnostics.shared recordEvent:@"playback_paused_when_app_backgrounded" category:@"playback" fields:@{@"playback_attempt_id":self.playbackAttemptID?:@"",@"correlation_id":self.diagnosticTraceID?:@"",@"engine":self.cicadaAdapter?@"cicada":@"avplayer"}];
         return;
@@ -960,6 +961,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self pauseForBackground];});return;}
     if(!self.embeddedMode||self.pictureInPictureActive)return;
     self.playbackSuspendedForVisibility=YES;
+    [self setRetryAvailable:YES];
     [self persistPlaybackProgress];
     [self pauseActiveEngine];
     [RuntimeDiagnostics.shared recordEvent:@"inline_playback_paused_when_hidden" category:@"playback" fields:@{@"playback_attempt_id":self.playbackAttemptID?:@"",@"correlation_id":self.diagnosticTraceID?:@"",@"reason":@"detail_page_hidden_or_app_background"}];
@@ -1065,6 +1067,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     item.preferredForwardBufferDuration=MediaPlaybackForwardBuffer(self.videoFrameReady,fast,self.player.defaultRate,self.diagnosticStallCount,[self playbackBufferConstrained]);
 }
 - (void)startAVPlayerFromReadyBufferIfNeeded:(AVPlayerItem *)item {
+    if(self.playbackSuspendedForVisibility)return;
     if(self.startupBufferKickUsed||!item||item!=self.observedItem||self.player.timeControlStatus!=AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate||self.resumePromptPending||self.pendingPlaybackSeekTime||!self.videoFrameReady||[self bufferedAheadForItem:item]<1.0)return;
     self.startupBufferKickUsed=YES;
     [self.player playImmediatelyAtRate:self.player.defaultRate>0?self.player.defaultRate:1.0f];
@@ -1670,6 +1673,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(!self.resumePromptPending&&!self.pendingPlaybackSeekTime){if(!self.playbackSuspendedForVisibility)[self.player play];}int64_t avFirstFrameTimeoutSec=[sourceURL.scheme.lowercaseString isEqualToString:@"cenc"]?45:20;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,avFirstFrameTimeoutSec*NSEC_PER_SEC),dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||playerGeneration!=owner.playerGeneration||item!=owner.player.currentItem||owner.playbackSuspendedForVisibility||owner.resumePromptPending||owner.pendingPlaybackSeekTime||owner.videoFrameReady||item.status==AVPlayerItemStatusFailed||(UIApplication.sharedApplication.applicationState!=UIApplicationStateActive&&(owner.player.timeControlStatus==AVPlayerTimeControlStatusPlaying||item.status==AVPlayerItemStatusReadyToPlay)))return;NSTimeInterval position=CMTimeGetSeconds(owner.player.currentTime);NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":owner.playbackAttemptID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-owner.playbackStartedAt)*1000))), @"line_index":@(owner.lineIndex), @"episode_index":@(owner.episodeIndex), @"correlation_id":owner.diagnosticTraceID?:@"", @"time_control_status":@(owner.player.timeControlStatus), @"playback_position_seconds":@(isfinite(position)&&position>0?position:0), @"video_track_state":owner.hasVideoTrack?@"confirmed_video":@"unknown", @"video_layer_ready_for_display":@(owner.videoLayer.readyForDisplay), @"video_layer_width":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.width))), @"video_layer_height":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.height)))} mutableCopy];fields[@"controller_ready_for_display"]=@(owner.playerController.readyForDisplay);fields[@"controller_player_attached"]=@(owner.playerController.player==owner.player);fields[@"controller_view_in_window"]=@(owner.playerController.isViewLoaded&&owner.playerController.view.window!=nil);fields[@"controller_view_width"]=@(CGRectGetWidth(owner.playerController.view.bounds));fields[@"controller_view_height"]=@(CGRectGetHeight(owner.playerController.view.bounds));fields[@"controller_video_width"]=@(CGRectGetWidth(owner.playerController.videoBounds));fields[@"controller_video_height"]=@(CGRectGetHeight(owner.playerController.videoBounds));fields[@"embedded_mode"]=@(owner.embeddedMode);fields[@"wait_reason"]=owner.player.reasonForWaitingToPlay?:@"";[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(owner.result))];MediaPlaybackAddAccessLogFields(fields,item);[RuntimeDiagnostics.shared recordEvent:@"playback_video_frame_timeout" category:@"playback" fields:fields];[owner recordPlaybackAttemptOutcome:@"first_frame_timeout" failureKind:@"first_frame_timeout" httpStatus:0 terminal:NO];if(!(owner.attemptedRoutes&MediaPlaybackDecodeRouteAttemptedCicadaPlayer)){[owner clearCurrentPlayerItem];owner.playbackFailureRecorded=NO;owner.terminalPlaybackOutcomeRecorded=NO;[owner startCicadaPlaybackWithResult:owner.result url:url sourceURL:sourceURL playerGeneration:owner.playerGeneration];return;}if([owner tryNextLineForAutomaticFallback:@"first_frame_timeout"])return;[owner.spinner stopAnimating];owner.status.text=@"播放器尚未显示画面 · 可重试或手动切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];});
 }
 - (void)startCicadaPlaybackWithResult:(NSDictionary *)result url:(NSURL *)url sourceURL:(NSURL *)sourceURL playerGeneration:(NSUInteger)playerGeneration {
+    if(self.playbackSuspendedForVisibility)return;
     self.attemptedRoutes|=MediaPlaybackDecodeRouteAttemptedCicadaPlayer;
     NSMutableDictionary *handoffFields=[@{@"player":@"cicada", @"playback_attempt_id":self.playbackAttemptID?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
     [handoffFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(MediaPlaybackHeadersFromResult(result))];
