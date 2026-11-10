@@ -32,7 +32,7 @@ jobs:
 
   jar-runtime:
     name: JAR runtime (${{ matrix.target }})
-    runs-on: macos-15-arm64
+    runs-on: macos-15
     timeout-minutes: 150
     strategy:
       fail-fast: false
