@@ -54,6 +54,8 @@ def timeline(node, timescale, total, offset=0):
     stamps, current = [], 0
     rows = children(node, 'S')
     for index, row in enumerate(rows):
+        if stamps and 't' in row.attrib and int(row.get('t')) != current:
+            raise DashError('dash_timeline_discontinuity_unsupported')
         current = int(row.get('t', current))
         length, repeat = int(row.get('d', 0)), int(row.get('r', 0))
         if length <= 0 or repeat < -1 or current < 0:
@@ -88,7 +90,7 @@ def parse_mpd(data, url):
     period = periods[0]
     live = root.get('type') == 'dynamic'
     total = duration(period.get('duration')) or max(0, duration(root.get('mediaPresentationDuration')) - duration(period.get('start')))
-    tracks = []
+    tracks, required_kinds = [], set()
     for a_index, adaptation in enumerate(children(period, 'AdaptationSet')):
         for r_index, rep in enumerate(children(adaptation, 'Representation')):
             nodes = (root, period, adaptation, rep)
@@ -114,6 +116,7 @@ def parse_mpd(data, url):
                 kind = 'video' if codecs.startswith(('avc', 'hvc', 'hev')) else 'audio' if codecs.startswith('mp4a') else ''
             if kind not in ('video', 'audio'):
                 continue
+            required_kinds.add(kind)
             if 'webm' in mime or (codecs and not codecs.startswith(('avc1', 'avc3', 'hvc1', 'hev1', 'mp4a', 'ac-3', 'ec-3'))):
                 continue
             segments, init, init_range = [], '', ''
@@ -175,7 +178,7 @@ def parse_mpd(data, url):
                            'init': init, 'init_range': init_range, 'segments': segments})
             if len(tracks) > 32:
                 raise DashError('dash_tracks_exceeded')
-    if not tracks:
+    if not tracks or not required_kinds.issubset({t['kind'] for t in tracks}):
         raise DashError('dash_codec_unsupported')
     return {'tracks': tracks, 'live': live, 'ttl': max(1, min(duration(root.get('minimumUpdatePeriod')) or 3, 30)) if live else 3600}
 

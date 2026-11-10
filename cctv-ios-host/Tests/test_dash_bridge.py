@@ -79,6 +79,26 @@ class DashManifestTests(unittest.TestCase):
             with self.subTest(message=message), self.assertRaisesRegex(DashError, message):
                 parse_mpd(data, 'https://cdn.example/a.mpd')
 
+    def test_missing_video_decoder_never_succeeds_as_audio_only(self):
+        data = b'''<MPD mediaPresentationDuration="PT6S"><Period>
+        <AdaptationSet mimeType="video/mp4" codecs="av01.0.00M.08"><Representation id="v"><SegmentTemplate duration="2" initialization="v.mp4" media="v-$Number$.m4s"/></Representation></AdaptationSet>
+        <AdaptationSet mimeType="audio/mp4" codecs="mp4a.40.2"><Representation id="a"><SegmentTemplate duration="2" initialization="a.mp4" media="a-$Number$.m4s"/></Representation></AdaptationSet>
+        </Period></MPD>'''
+        with self.assertRaisesRegex(DashError, 'codec_unsupported'):
+            parse_mpd(data, 'https://cdn.example/a.mpd')
+
+    def test_timeline_gaps_need_original_engine(self):
+        data = mpd('<SegmentTemplate initialization="i.mp4" media="$Time$.m4s"><SegmentTimeline><S t="0" d="2"/><S t="5" d="2"/></SegmentTimeline></SegmentTemplate>')
+        with self.assertRaisesRegex(DashError, 'discontinuity_unsupported'):
+            parse_mpd(data, 'https://cdn.example/a.mpd')
+
+    def test_stopped_relay_cannot_recreate_dash_entries(self):
+        relay = MediaRelay()
+        relay.close()
+        with self.assertRaisesRegex(ValueError, 'dash_service_stopping'):
+            relay.register_dash('https://cdn.example/a.mpd', {}, validate=False)
+        self.assertFalse(relay.dash_playlists)
+
 
 @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg is used only to generate/decode test media')
 class DashPlaybackTests(unittest.TestCase):

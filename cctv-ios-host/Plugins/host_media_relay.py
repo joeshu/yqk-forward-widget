@@ -389,6 +389,8 @@ class MediaRelay:
             session.load()
         token = uuid.uuid4().hex
         with self.lock:
+            if self.stopping.is_set():
+                raise ValueError('dash_service_stopping')
             self.dash_playlists[token] = (session, None)
             while len(self.dash_playlists) > 256:
                 self.dash_playlists.popitem(last=False)
@@ -396,6 +398,8 @@ class MediaRelay:
 
     def dash_track_url(self, session, track_id, base):
         with self.lock:
+            if self.stopping.is_set():
+                raise ValueError('dash_service_stopping')
             token = session.tokens.get(track_id)
             if token not in self.dash_playlists:
                 token = uuid.uuid4().hex

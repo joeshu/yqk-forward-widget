@@ -20,7 +20,7 @@
 - 继承的 SegmentTemplate、Number/Time/RepresentationID/Bandwidth 模板、SegmentTimeline、有限的负重复、SegmentList 与字节范围。
 - 明确时间线且固定分片时长的 Time 模板直播；缓存按 minimumUpdatePeriod 更新。
 - master HLS 包含独立音轨和视频变体；初始化片段和媒体片段均经现有有界代理，继承来源请求头与同源签名参数。
-- 主清单验证后交给 AVPlayer；备用清晰度按选择加载，不逐个预下载。回退 Cicada 时使用原 MPD 和原请求头。
+- JS/Python 资源宿主返回的主清单验证后交给 AVPlayer；备用清晰度按选择加载，不逐个预下载。回退 Cicada 时使用原 MPD 和原请求头。
 - DRM、WebM/未知编码、SegmentBase、多 Period、无法确定边界的直播保留原 DASH 引擎。没有添加授权绕过或转码器。
 
 本地用 FFmpeg **仅生成测试素材并验收解码**，App 内不会调用 FFmpeg 可执行文件。HTTP -> DASH -> HLS -> 初始化片段/音频/视频分片的端到端测试已实际解码出音视频；这不能代替 iPhone AVPlayer 首帧、音画同步和 seek 验收。
@@ -43,8 +43,8 @@
 
 ## 验证
 
-- 本地全套回归：812 项，58 项因需要 macOS/iOS 跳过，其余通过；runtime 专项为 80 项通过。
-- DASH 专项：6 项通过，包含真正的音视频 HTTP 解码；native 专项在 macOS 上执行。
+- 本地全套回归：815 项，58 项因需要 macOS/iOS 跳过，其余通过；runtime 专项为 80 项通过。
+- DASH 专项：9 项通过，包含真正的音视频 HTTP 解码；native 专项在 macOS 上执行。
 - 打包脚本复制新增 DASH/URL 模块；IPA 校验强制检查两个模块存在。
 - 分支推送会启动原有 macOS 构建、原生协议检查、IPA 校验和模拟器 smoke。分支构建不会发布正式 Release。
 
