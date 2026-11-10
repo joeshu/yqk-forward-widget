@@ -33,7 +33,7 @@ void RunCicadaAdapterProbe(void (^completion)(BOOL,NSString *));
     self.request=[MediaJARRuntime requestSource:self.source operation:ops[(NSUInteger)step] arguments:args[(NSUInteger)step] completion:^(id raw,NSError *error){
         if(error){[self save:NO message:[NSString stringWithFormat:@"%@ (%ld)",error.domain,(long)error.code]];return;}
         BOOL valid=[raw isKindOfClass:NSDictionary.class];
-        if(step==0)valid=valid&&[raw[@"class"] count]==1&&[raw[@"list"] count]==1;
+        if(step==0){valid=valid&&[raw[@"class"] count]==1&&[raw[@"list"] count]==1&&[raw[@"runtime_checks"] count]==7;if(valid)[self.results addObject:@{@"operation":@"JDK/crypto/reflective dependencies/plugin assets",@"checks":raw[@"runtime_checks"],@"passed":@YES}];}
         if(step==1)valid=valid&&[raw[@"list"][0][@"vod_name"] isEqual:@"测试地区"];
         if(step==2)valid=valid&&[raw[@"list"][0][@"vod_name"] isEqual:@"中文😀+&"];
         if(step==3)valid=valid&&[raw[@"list"][0][@"vod_play_url"] hasSuffix:@"opaque+id%26signed"];

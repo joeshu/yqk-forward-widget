@@ -12,9 +12,18 @@ SHA=$(python3 -c 'import json; print(json.load(open("Runtime/JAR/upstream.json")
 SOURCE="$CACHE/source-$REV"
 OUT="$CACHE/$PLATFORM"
 # A packaged runtime is reusable only for this source revision and SDK.
-STAMP="$REV-$(xcrun --sdk "$PLATFORM" --show-sdk-version)-2"
-if [ -f "$OUT/complete" ] && [ "$(cat "$OUT/complete")" = "$STAMP" ] && [ -s "$OUT/lib/libTVAppleRuntime.a" ]; then
+PROFILE=$(cat "$ROOT/Scripts/prepare_jar_runtime.sh" "$ROOT/Scripts/optimize_jar_runtime.py" | shasum -a 256 | cut -d' ' -f1)
+NATIVE_STAMP="$REV-$(xcrun --sdk "$PLATFORM" --show-sdk-version)-2"
+STAMP="$NATIVE_STAMP-$PROFILE"
+if [ -f "$OUT/complete" ] && [ "$(cat "$OUT/complete")" = "$STAMP" ] && [ -s "$OUT/lib/libTVAppleRuntime.a" ] && [ -s "$OUT/packaging-report.json" ]; then
   echo "Using verified JAR runtime: $PLATFORM"; exit 0
+fi
+# A prefix cache restore may come from another SDK. Do not reuse that native build.
+if [ -f "$OUT/complete" ]; then
+  case "$(cat "$OUT/complete")" in
+    "$NATIVE_STAMP"|"$NATIVE_STAMP"-*) ;;
+    *) rm -rf "$SOURCE/build/apple-runtime" ;;
+  esac
 fi
 mkdir -p "$CACHE"
 if [ ! -f "$SOURCE/.verified" ]; then
@@ -29,11 +38,15 @@ cd "$SOURCE"
 export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 17)}"
 # JavaHost's bytecode targets Java 17; the native Zero build downloads its own pinned boot JDK.
 Scripts/build-java-host.sh
+python3 "$ROOT/Scripts/optimize_jar_runtime.py" configure Scripts/package-apple-runtime.sh
 Scripts/package-apple-runtime.sh "$TARGET"
 rm -rf "$OUT"
 cp -R "build/AppleRuntime/$PLATFORM" "$OUT"
 cp Runtime/AppleRuntime/Native/AppleRuntime.m "$OUT/AppleRuntime.m"
 cp "$ROOT/Runtime/JAR/upstream.json" "$OUT/Resources/jar-runtime.json"
 cp -R "$ROOT/Runtime/JAR" "$OUT/Resources/JARLicenses"
+python3 "$ROOT/Scripts/optimize_jar_runtime.py" resources "$OUT" \
+  --baseline-modules "$SOURCE/build/apple-runtime/jlink-$TARGET/image-baseline/lib/modules" \
+  --jimage "$SOURCE/build/apple-runtime/openjdk-mobile/build/macosx-host/images/jdk/bin/jimage"
 printf '%s\n' "$STAMP" > "$OUT/complete"
 echo "Prepared JAR runtime: $OUT"
