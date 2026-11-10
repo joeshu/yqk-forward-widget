@@ -7,7 +7,7 @@ mkdir -p "$OUT"
 rm -f "$OUT/compile-failures.txt" "$OUT"/*.plist "$OUT"/*.skipped
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 PYTHON_INCLUDE=/tmp/pyroot/Python.xcframework/ios-arm64/include/python3.13
-EXTRA=()
+EXTRA=(-DCCTV_JAR_ENABLED=1)
 [ ! -d "$PYTHON_INCLUDE" ] || EXTRA+=(-I "$PYTHON_INCLUDE" -F build/CCTVHost.app/Frameworks)
 SOURCES=(Sources/*.m)
 if [ "${CCTV_AUDIT_ONLY:-}" = PyHost ]; then SOURCES=(Sources/PyHost.m); fi
@@ -18,7 +18,7 @@ for source in "${SOURCES[@]}"; do
     continue
   fi
   xcrun --sdk iphoneos clang --analyze -fobjc-arc -arch arm64 -isysroot "$SDK" -miphoneos-version-min=17.0 \
-    -I Sources -I Sources/Include -F Frameworks "${EXTRA[@]}" -DCCTV_JAR_ENABLED=1 \
+    -I Sources -I Sources/Include -F Frameworks "${EXTRA[@]}" \
     -Xanalyzer -analyzer-output=plist "$source" -o "$OUT/$name.plist" > "$OUT/$name.log" 2>&1 || echo "$source" >> "$OUT/compile-failures.txt"
 done
 python3 - "$OUT" <<'PY'
@@ -35,5 +35,11 @@ failures=(root/'compile-failures.txt').read_text().splitlines() if (root/'compil
 report={'analyzed':len(files),'skipped':[p.name for p in root.glob('*.skipped')],'diagnostics':sum(len(f['diagnostics']) for f in files),'compile_failures':failures,'files':files}
 (root/'summary.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
 print(json.dumps({k:v for k,v in report.items() if k!='files'},indent=2))
+for file in files:
+ for item in file['diagnostics']:print(json.dumps(item,ensure_ascii=False))
+for source in failures:
+ log=root/(Path(source).stem+'.log')
+ for line in log.read_text(errors='replace').splitlines():
+  if 'error:' in line:print(line)
 if failures:raise SystemExit(1)
 PY
