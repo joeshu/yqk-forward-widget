@@ -45,7 +45,7 @@ public final class CCTVFixture extends Spider {
         require(new javax.naming.CompositeName("source/fixture").size()==2,"Naming");
         require(javax.security.sasl.Sasl.getSaslClientFactories()!=null,"SASL");
         runtimeChecks.put("Management logging naming SASL");
-        for(String name:new String[]{"okhttp3.OkHttpClient","com.google.common.collect.ImmutableList","com.hierynomus.smbj.SMBClient","com.google.zxing.MultiFormatWriter","com.github.unidbg.AndroidEmulator","android.app.Activity"})Class.forName(name,false,getClass().getClassLoader());
+        for(String name:new String[]{"okhttp3.OkHttpClient","okio.Buffer","kotlin.Unit","com.google.common.collect.ImmutableList","com.google.common.util.concurrent.ListenableFuture","com.hierynomus.smbj.SMBClient","com.google.zxing.MultiFormatWriter","com.github.unidbg.AndroidEmulator","android.app.Activity"})Class.forName(name,false,getClass().getClassLoader());
         runtimeChecks.put("Reflective dependency loading");
         try(java.io.InputStream asset=context.getAssets().open("compatibility.txt")) {
             java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();byte[] buffer=new byte[128];int count;

@@ -105,8 +105,10 @@ def validate(path):
             # A JavaHost resource alone is insufficient: require the statically linked JNI bridge too.
             executable = z.read(root + binary)
             assert b'TVAppleRuntimeRequest' in executable and b'JNI_CreateJavaVM' in executable, 'missing linked JVM/bridge'
-            for member in ('JavaHost/host.jar', 'JavaHost/apple-bindings.jar', 'JavaHost/lib/android-4.1.1.4.jar', 'lib/lib/modules', 'lib/lib/security/cacerts', 'jar-runtime.json', 'JARLicenses/COPYING'):
+            for member in ('JavaHost/host.jar', 'JavaHost/apple-bindings.jar', 'JavaHost/lib/android-4.1.1.4.jar', 'JavaHost/lib/okio-jvm-3.6.0.jar', 'JavaHost/lib/kotlin-stdlib-1.8.21.jar', 'JavaHost/lib/guava-27.1-android.jar', 'JavaHost/lib/bcprov-jdk18on-1.78.1.jar', 'lib/lib/modules', 'lib/lib/security/cacerts', 'jar-runtime.json', 'JARLicenses/COPYING'):
                 assert root + member in z.namelist(), 'missing JAR runtime resource: ' + member
+            for metadata in ('kotlin-stdlib-common-1.9.10.jar', 'okio-3.6.0.jar', 'listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar'):
+                assert root + 'JavaHost/lib/' + metadata not in z.namelist(), 'compile-only metadata JAR was bundled: ' + metadata
             assert int(info.get('MinimumOSVersion', '0').split('.')[0]) >= 17, 'JAR runtime requires iOS 17+'
             result['jar_runtime'] = json.loads(z.read(root + 'jar-runtime.json'))
             for name in z.namelist():
