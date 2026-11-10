@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/jo32/tvbox-silicon",
+  "revision": "47e563274414c61123db3e8603b7d97ea29f5cee",
+  "archive_sha256": "9c1ffc6969cf9cc50d064674ac7ea5f9881006232b7b89a7507adc1777cef341",
+  "license": "GPL-3.0-only",
+  "runtime": "OpenJDK Zero + dex2jar + Android compatibility + Unicorn TCI",
+  "minimum_ios": "17.0"
+}

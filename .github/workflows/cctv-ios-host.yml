@@ -30,7 +30,43 @@ jobs:
     permissions:
       contents: read
 
+  jar-runtime:
+    name: JAR runtime (${{ matrix.target }})
+    runs-on: macos-15-arm64
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ios, ios-simulator]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: cctv-ios-host/Runtime/JAR/upstream.json
+      - uses: actions/cache@v4
+        with:
+          path: cctv-ios-host/.jar-runtime
+          key: jar-zero-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ hashFiles('cctv-ios-host/Runtime/JAR/upstream.json', 'cctv-ios-host/Scripts/prepare_jar_runtime.sh') }}
+      - name: Build interpreter-only JAR runtime
+        working-directory: cctv-ios-host
+        run: bash Scripts/prepare_jar_runtime.sh '${{ matrix.target }}'
+      - name: Package runtime artifact
+        working-directory: cctv-ios-host
+        run: |
+          platform=iphoneos
+          if [ '${{ matrix.target }}' = ios-simulator ]; then platform=iphonesimulator; fi
+          tar -czf jar-runtime-${{ matrix.target }}.tgz -C .jar-runtime "$platform"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jar-runtime-${{ matrix.target }}
+          path: cctv-ios-host/jar-runtime-${{ matrix.target }}.tgz
+          retention-days: 14
+
   build:
+    needs: jar-runtime
     strategy:
       fail-fast: false
       matrix:
@@ -39,9 +75,17 @@ jobs:
       PY_DISABLE: ${{ matrix.variant != 'full' && '1' || '' }}
       CCTV_BASELINE: ${{ matrix.variant == 'baseline09' && '1' || '' }}
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: jar-runtime-ios
+          path: cctv-ios-host
+      - name: Unpack JAR runtime
+        working-directory: cctv-ios-host
+        run: mkdir -p .jar-runtime && tar -xzf jar-runtime-ios.tgz -C .jar-runtime
 
       - name: Cache Python-Apple-support
         uses: actions/cache@v4
