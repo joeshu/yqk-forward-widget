@@ -337,11 +337,14 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 - (void)armFirstFrameWatchdog {
     if(self.firstFrameWatchdog||self.firstFrameReported||self.destroyed)return;
     __weak typeof(self) weakSelf=self;NSUInteger generation=self.generation;
-    self.firstFrameWatchdog=[NSTimer scheduledTimerWithTimeInterval:MediaPlaybackCicadaFirstFrameTimeout repeats:NO block:^(NSTimer *timer){
+    self.firstFrameWatchdog=[NSTimer scheduledTimerWithTimeInterval:self.firstFrameTimeout repeats:NO block:^(NSTimer *timer){
         MediaPlaybackCicadaAdapter *owner=weakSelf;if(!owner||generation!=owner.generation||owner.destroyed)return;
         owner.firstFrameWatchdog=nil;
-        if(owner.playbackRequested&&!owner.firstFrameReported&&owner.state!=MediaPlaybackCicadaAdapterStateFailed&&owner.state!=MediaPlaybackCicadaAdapterStateCompleted)[owner reportErrorWithCode:-1001 message:@"CicadaPlayer 20 秒内未显示首帧"];
+        if(owner.playbackRequested&&!owner.firstFrameReported&&owner.state!=MediaPlaybackCicadaAdapterStateFailed&&owner.state!=MediaPlaybackCicadaAdapterStateCompleted)[owner reportErrorWithCode:-1001 message:[NSString stringWithFormat:@"CicadaPlayer %.0f 秒内未显示首帧",owner.firstFrameTimeout]];
     }];
+}
+- (NSTimeInterval)firstFrameTimeout {
+    return MAX(MediaPlaybackCicadaFirstFrameTimeout, self.networkTimeout + 10.0);
 }
 - (void)updateBufferConfiguration {
     if(!self.config||!self.player)return;
